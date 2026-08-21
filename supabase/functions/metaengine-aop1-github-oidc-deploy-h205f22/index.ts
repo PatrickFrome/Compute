@@ -9,7 +9,7 @@ const EXPECTED = {
   repository_id: "1341371143",
   repository_owner_id: "20597814",
   ref: "refs/heads/work/aop1-autonomous-orchestration",
-  sub: "repo:PatrickFrome/Compute:ref:refs/heads/work/aop1-autonomous-orchestration",
+  sub: "repo:PatrickFrome@20597814/Compute@1341371143:ref:refs/heads/work/aop1-autonomous-orchestration",
   workflow_ref: "PatrickFrome/Compute/.github/workflows/aop1-live-deploy.yml@refs/heads/work/aop1-autonomous-orchestration",
 };
 
