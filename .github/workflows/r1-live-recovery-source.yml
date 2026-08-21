@@ -30,6 +30,7 @@ permissions: {}
 env:
   R1_PROJECT_REF: xpeibufgzjknrhbhpffp
   R1_SOURCE_PREDICATE_TYPE: https://github.com/PatrickFrome/Compute/attestations/r1-recovery-source/v1
+  POSTGRES_CLIENT_IMAGE: postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
 
 jobs:
   contract-tests:
@@ -68,6 +69,12 @@ jobs:
           assert 'id-token: write' not in source and 'attestations: write' not in source
           assert 'supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520' in source
           assert 'version: 2.111.0' in source
+          assert 'postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3' in p
+          assert '--format=custom --schema=destruktion_meta' in source
+          assert 'pg_restore --schema-only' in source and 'pg_restore --data-only' in source
+          assert 'SINGLE_PG_DUMP_CUSTOM_ARCHIVE' in source
+          assert 'supabase db dump --db-url "$SUPABASE_DB_URL" --role-only' in source
+          assert 'supabase db dump --db-url "$SUPABASE_DB_URL" --schema destruktion_meta' not in source
           assert 'bdc69c09cbdd6cf8b1f333d372a1f58247b3a33146406333e30c0f26e8f51377' in source
           assert '91331dc8ed9b5a0f4317ef6e7c261e49dfc2f11249a1775120a81361349d4c92' in source
           assert 'actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6' in attest
@@ -79,7 +86,7 @@ jobs:
           assert '--deny-self-hosted-runners' in verify
           assert p.count('id-token: write') == 1
           assert 'archive: false' in p and 'digest-mismatch: error' in p
-          for forbidden in ('roles.sql\n          archive:', 'schema.sql\n          archive:', 'data.sql\n          archive:', 'recovery-bundle.tar\n          archive:'):
+          for forbidden in ('roles.sql\n          archive:', 'schema.sql\n          archive:', 'data.sql\n          archive:', 'recovery-bundle.tar\n          archive:', 'project.dump\n          archive:'):
               assert forbidden not in p
           PY
 
@@ -149,14 +156,18 @@ jobs:
         with:
           version: 2.111.0
 
+      - name: Pull exact PostgreSQL 17.6 client image
+        run: |
+          set -euo pipefail
+          docker pull "$POSTGRES_CLIENT_IMAGE"
+          docker image inspect "$POSTGRES_CLIENT_IMAGE" --format '{{json .RepoDigests}}' | grep -F 'sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3' >/dev/null
+
       - name: Fetch and verify exact official age v1.3.1
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --location \
-            --output /tmp/age-v1.3.1-linux-amd64.tar.gz \
+          curl --fail --silent --show-error --location --output /tmp/age-v1.3.1-linux-amd64.tar.gz \
             https://github.com/FiloSottile/age/releases/download/v1.3.1/age-v1.3.1-linux-amd64.tar.gz
-          curl --fail --silent --show-error --location \
-            --output /tmp/age-v1.3.1-linux-amd64.tar.gz.proof \
+          curl --fail --silent --show-error --location --output /tmp/age-v1.3.1-linux-amd64.tar.gz.proof \
             https://github.com/FiloSottile/age/releases/download/v1.3.1/age-v1.3.1-linux-amd64.tar.gz.proof
           echo 'bdc69c09cbdd6cf8b1f333d372a1f58247b3a33146406333e30c0f26e8f51377  /tmp/age-v1.3.1-linux-amd64.tar.gz' | sha256sum -c -
           echo '91331dc8ed9b5a0f4317ef6e7c261e49dfc2f11249a1775120a81361349d4c92  /tmp/age-v1.3.1-linux-amd64.tar.gz.proof' | sha256sum -c -
@@ -184,8 +195,9 @@ jobs:
           printf '%s\n' "$RECIPIENTS" > "$RUNNER_TEMP/r1-recovery-recipients.txt"
           python3 - <<'PY'
           from pathlib import Path
+          import os
           from controller.r1.recovery_encryption_envelope import load_recipients,PROFILE_PRODUCTION_PQ
-          r=load_recipients(Path(__import__('os').environ['RUNNER_TEMP'])/'r1-recovery-recipients.txt',PROFILE_PRODUCTION_PQ)
+          r=load_recipients(Path(os.environ['RUNNER_TEMP'])/'r1-recovery-recipients.txt',PROFILE_PRODUCTION_PQ)
           assert len(r) >= 2
           PY
 
@@ -196,7 +208,6 @@ jobs:
           set -euo pipefail
           umask 077
           test -n "$SUPABASE_DB_URL"
-          command -v psql >/dev/null
           supabase --version | grep -Fx '2.111.0' >/dev/null
           PRIVATE="$RUNNER_TEMP/r1-source-private"
           EVIDENCE="$GITHUB_WORKSPACE/evidence"
@@ -208,15 +219,16 @@ jobs:
           }
           trap cleanup EXIT
 
+          pg_query() {
+            local sql="$1"
+            docker run --rm -e DATABASE_URL="$SUPABASE_DB_URL" "$POSTGRES_CLIENT_IMAGE" \
+              bash -ceu 'psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -qAtc "$1"' -- "$sql"
+          }
           capture_control() {
             local label="$1"
-            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -Atc \
-              'select destruktion_meta.compute_fabric_roadmap_status_h205f22()::text' > "$PRIVATE/roadmap-${label}.json"
-            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -Atc \
-              'select destruktion_meta.compute_fabric_roadmap_alignment_status_h205f22()::text' > "$PRIVATE/alignment-${label}.json"
-            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -Atc \
-              "select coalesce(jsonb_agg(jsonb_build_object('version',version,'name',name,'statements',statements,'created_by',created_by,'idempotency_key',idempotency_key,'rollback',rollback) order by version),'[]'::jsonb)::text from supabase_migrations.schema_migrations" \
-              > "$PRIVATE/migrations-${label}.json"
+            pg_query 'select destruktion_meta.compute_fabric_roadmap_status_h205f22()::text' > "$PRIVATE/roadmap-${label}.json"
+            pg_query 'select destruktion_meta.compute_fabric_roadmap_alignment_status_h205f22()::text' > "$PRIVATE/alignment-${label}.json"
+            pg_query "select coalesce(jsonb_agg(jsonb_build_object('version',version,'name',name,'statements',statements,'created_by',created_by,'idempotency_key',idempotency_key,'rollback',rollback) order by version),'[]'::jsonb)::text from supabase_migrations.schema_migrations" > "$PRIVATE/migrations-${label}.json"
             LABEL="$label" PRIVATE="$PRIVATE" python3 - <<'PY'
           import hashlib,json,os
           from datetime import datetime,timezone
@@ -227,13 +239,11 @@ jobs:
           if not isinstance(rows,list) or not rows:
               raise SystemExit('migration ledger empty')
           body=json.dumps(rows,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()
-          head=((status.get('semantic_head') or {}).get('checkpoint_id'))
-          digest=alignment.get('canonical_digest')
           versions=[str(r.get('version','')) for r in rows]
           value={
             'schema':'metaengine.compute.r1-source-control-fence.h205f22.v1',
-            'semantic_head':head,
-            'canonical_digest':digest,
+            'semantic_head':((status.get('semantic_head') or {}).get('checkpoint_id')),
+            'canonical_digest':alignment.get('canonical_digest'),
             'migration_ledger_sha256':hashlib.sha256(body).hexdigest(),
             'migration_rows':len(rows),
             'max_migration_version':max(versions),
@@ -246,19 +256,36 @@ jobs:
           capture_control before
           SNAPSHOT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           supabase db dump --db-url "$SUPABASE_DB_URL" --role-only -f "$PRIVATE/roles.sql"
-          supabase db dump --db-url "$SUPABASE_DB_URL" --schema destruktion_meta -f "$PRIVATE/schema.sql"
-          supabase db dump --db-url "$SUPABASE_DB_URL" --schema destruktion_meta --data-only --use-copy -f "$PRIVATE/data.sql"
+
+          docker run --rm -e DATABASE_URL="$SUPABASE_DB_URL" -v "$PRIVATE:/work" "$POSTGRES_CLIENT_IMAGE" \
+            bash -ceu '
+              pg_dump "$DATABASE_URL" --format=custom --schema=destruktion_meta --no-owner --file=/work/project.dump
+              pg_restore --schema-only --no-owner --file=/work/schema.sql /work/project.dump
+              pg_restore --data-only --no-owner --file=/work/data.sql /work/project.dump
+            '
+          test -s "$PRIVATE/project.dump"
+          test -s "$PRIVATE/schema.sql"
+          test -s "$PRIVATE/data.sql"
           capture_control after
 
           python3 controller/r1/live_recovery_source_attestation.py build-export-metadata \
             --before "$PRIVATE/fence-before.json" --after "$PRIVATE/fence-after.json" \
             --output "$PRIVATE/export-metadata.json"
-          PRIVATE="$PRIVATE" python3 - <<'PY'
+          PRIVATE="$PRIVATE" POSTGRES_CLIENT_IMAGE="$POSTGRES_CLIENT_IMAGE" python3 - <<'PY'
           import json,os
           root=os.environ['PRIVATE']
           rows=json.load(open(f'{root}/migrations-before.json'))
-          value={'schema':'metaengine.compute.migration-ledger.v1','row_count':len(rows),'rows':rows}
-          json.dump(value,open(f'{root}/migration-ledger.json','w'),sort_keys=True,separators=(',',':'))
+          ledger={'schema':'metaengine.compute.migration-ledger.v1','row_count':len(rows),'rows':rows}
+          json.dump(ledger,open(f'{root}/migration-ledger.json','w'),sort_keys=True,separators=(',',':'))
+          meta=json.load(open(f'{root}/export-metadata.json'))
+          meta.update({
+            'export_mode':'SUPABASE_ROLES_PLUS_POSTGRES_SINGLE_SNAPSHOT_SCHEMA_DATA',
+            'schema_data_snapshot':'SINGLE_PG_DUMP_CUSTOM_ARCHIVE',
+            'schema_data_tool':'postgresql-pg_dump-pg_restore',
+            'schema_data_tool_version':'17.6',
+            'schema_data_client_image':os.environ['POSTGRES_CLIENT_IMAGE'],
+          })
+          json.dump(meta,open(f'{root}/export-metadata.json','w'),sort_keys=True,separators=(',',':'))
           PY
           SEMANTIC_HEAD="$(python3 -c "import json;print(json.load(open('$PRIVATE/export-metadata.json'))['semantic_head'])")"
 
