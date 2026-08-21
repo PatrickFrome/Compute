@@ -6,6 +6,7 @@ OIDC_MIGRATION = ROOT / "supabase/migrations/20260821071452_aop1_one_time_github
 DENY_MIGRATION = ROOT / "supabase/migrations/20260821072003_aop1_bootstrap_capability_explicit_deny_policy.sql"
 REARM_MIGRATION = ROOT / "supabase/migrations/20260821080306_aop1_supervisor_rearm_exhausted_analyst.sql"
 SIGNAL_MIGRATION = ROOT / "supabase/migrations/20260821082219_aop1_signal_resume_payload_v2.sql"
+STALE_RUN_MIGRATION = ROOT / "supabase/migrations/20260821102500_aop1_stale_run_fencing_v1.sql"
 CF = ROOT / "orchestration/cloudflare/src"
 LIVE_DEPLOY = ROOT / ".github/workflows/aop1-live-deploy.yml"
 
@@ -14,6 +15,7 @@ oidc_sql = OIDC_MIGRATION.read_text(encoding="utf-8")
 deny_sql = DENY_MIGRATION.read_text(encoding="utf-8")
 rearm_sql = REARM_MIGRATION.read_text(encoding="utf-8")
 signal_sql = SIGNAL_MIGRATION.read_text(encoding="utf-8")
+stale_sql = STALE_RUN_MIGRATION.read_text(encoding="utf-8")
 index_ts = (CF / "index.ts").read_text(encoding="utf-8")
 executor_ts = (CF / "executor.ts").read_text(encoding="utf-8")
 github_ts = (CF / "github.ts").read_text(encoding="utf-8")
@@ -87,6 +89,22 @@ assert 'BEGIN RSA PRIVATE KEY' in github_ts and 'BEGIN PRIVATE KEY' in github_ts
 assert 'wrapPkcs1AsPkcs8' in github_ts
 assert 'body.token' in github_ts and 'body.expires_at' in github_ts
 assert 'return body.token' in github_ts
+
+# Stale execution objects are terminally fenced before any wake can re-enable them.
+assert "compute_fabric_aop_run_wake_status_h205f22" in stale_sql
+assert "STALE_SEMANTIC_HEAD" in stale_sql
+assert "ORPHANED_OR_EXPIRED_CLAIM" in stale_sql
+assert "ROADMAP_NOT_IN_PROGRESS" in stale_sql
+assert "ROADMAP_NOT_EVIDENCE_READY" in stale_sql
+assert "RUN_FENCED" in stale_sql
+assert "base_checkpoint_id is distinct from v_head" in stale_sql
+assert "c.claim_id=r.claim_id" in stale_sql
+assert "c.base_checkpoint_id=v_head" in stale_sql
+assert "perform destruktion_meta.compute_fabric_aop_reconcile_h205f22()" in stale_sql
+assert stale_sql.count("stale_or_orphan_runs_fail_closed") >= 4
+assert "resume_payload_attached',false" in stale_sql
+assert "state='FENCED'" in stale_sql
+assert "revoke all on function destruktion_meta.compute_fabric_aop_run_wake_status_h205f22" in stale_sql
 
 # Responses tool loop must remain stateless when store=false. Cloudflare GPT-OSS rejects
 # previous_response_id for non-stored responses; carry the full transcript explicitly.
