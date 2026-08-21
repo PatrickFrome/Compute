@@ -40,7 +40,7 @@ jobs:
           python3 federation/f1/live_provider_verifier.py generate --output federation/f1/provider-evidence.json
       - name: Produce keyless Sigstore attestation
         id: attest
-        uses: actions/attest-build-provenance@v4.1.1
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1 immutable release
         with:
           subject-path: federation/f1/provider-evidence.json
 
@@ -123,6 +123,23 @@ jobs:
             exit 1
           fi
           echo 'TAMPER=REJECTED'
+      - name: Verify full live Sigstore TUF chain through trusted_root target
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint='https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/metaengine-sigstore-tuf-chain-verifier-h205f22'
+          curl --silent --show-error --fail --max-time 60 "$endpoint" -o federation/f1/tuf-chain-verification.json
+          jq -e '
+            .verification_status == "FULL_TUF_CHAIN_CRYPTO_VERIFIED"
+            and .evidence.chain.targets_to_trusted_root == true
+            and .evidence.guarantees.target_length_and_sha256_bound_to_verified_targets_metadata == true
+            and .evidence.authority_effect == false
+          ' federation/f1/tuf-chain-verification.json >/dev/null
+          for mode in content-hash-only target-tamper semantic-tamper; do
+            curl --silent --show-error --fail --max-time 60 "$endpoint?test=$mode" -o "/tmp/f1-$mode.json"
+            jq -e '.verification_status == "NEGATIVE_TEST_REJECTED"' "/tmp/f1-$mode.json" >/dev/null
+          done
+          echo 'FULL_TUF_CHAIN=PASS'
       - name: Emit evidence receipt
         env:
           EVIDENCE_SHA256: ${{ needs.producer.outputs.evidence_sha256 }}
@@ -140,8 +157,9 @@ jobs:
           from pathlib import Path
           negative=json.loads(Path('federation/f1/policy-negative-tests.json').read_text())
           crypto=Path('federation/f1/cryptographic-verification.json').read_bytes()
+          tuf_chain=Path('federation/f1/tuf-chain-verification.json').read_bytes()
           receipt={
-            'schema':'metaengine.compute.f1-live-verification-receipt.h205f22.v1',
+            'schema':'metaengine.compute.f1-live-verification-receipt.h205f22.v2',
             'provider_id':'github-actions-f1-live',
             'provider_kind':'GITHUB_HOSTED_ACTIONS',
             'external_execution_id':os.environ['EXTERNAL_EXECUTION_ID'],
@@ -161,7 +179,9 @@ jobs:
             'expires_at':os.environ['EXPIRES_AT'],
             'verifier':{'implementation':subprocess.check_output(['gh','--version'],text=True).splitlines()[0],'id_token_permission':False},
             'cryptographic_verification_sha256':hashlib.sha256(crypto).hexdigest(),
-            'tests':{'signature_and_identity':'PASS','tamper':'REJECTED',**negative['negative_tests']},
+            'tuf_chain_verification_sha256':hashlib.sha256(tuf_chain).hexdigest(),
+            'tuf_chain_status':'FULL_TUF_CHAIN_CRYPTO_VERIFIED',
+            'tests':{'signature_and_identity':'PASS','full_tuf_chain':'PASS','trusted_root_target_tamper':'REJECTED','trusted_root_semantic_tamper':'REJECTED','tamper':'REJECTED',**negative['negative_tests']},
             'verification_status':'CRYPTO_VERIFIED_EVIDENCE_READY',
             'canonical':False,
             'authority_effect':False}
