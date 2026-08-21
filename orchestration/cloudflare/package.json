@@ -3,11 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "tsc -p tsconfig.json --noEmit",
+    "types": "wrangler types",
+    "check": "wrangler types && tsc -p tsconfig.json --noEmit",
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260821.0",
     "typescript": "^5.8.3",
     "wrangler": "^4.30.0"
   }
