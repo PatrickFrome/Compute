@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metaengine.local/schemas/a1/workspace-envelope.schema.json",
+  "title": "METAENGINE Compute Fabric A1 Workspace Envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "mode",
+    "workspace_id",
+    "repository",
+    "authority",
+    "isolation",
+    "filesystem",
+    "network",
+    "resources",
+    "lineage"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "metaengine.compute.a1.workspace-envelope.v1"
+    },
+    "mode": {
+      "enum": ["PREPARE_ONLY", "ACTIVE"]
+    },
+    "workspace_id": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 256,
+      "pattern": "^[a-zA-Z0-9._:-]+$"
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canonical_locator", "commit_sha", "source_digest_sha256", "materialization_strategy"],
+      "properties": {
+        "canonical_locator": {"type": "string", "minLength": 1},
+        "commit_sha": {"type": "string", "pattern": "^[0-9a-fA-F]{40,64}$"},
+        "tree_sha": {"type": ["string", "null"], "pattern": "^[0-9a-fA-F]{40,64}$"},
+        "source_digest_sha256": {"$ref": "#/$defs/sha256"},
+        "materialization_strategy": {
+          "enum": ["ISOLATED_CLONE", "IMMUTABLE_SNAPSHOT", "BUNDLE_IMPORT"]
+        },
+        "host_git_metadata_writable": {"const": false}
+      }
+    },
+    "toolchain": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "contract_key": {"type": "string"},
+        "identity_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "w1_status",
+        "w1_verified_checkpoint_id",
+        "supervisor_directive_id",
+        "coordination_epoch",
+        "adapter_policy_sha256",
+        "execution_authority"
+      ],
+      "properties": {
+        "w1_status": {
+          "enum": ["UNVERIFIED", "IN_PROGRESS", "BLOCKED", "EVIDENCE_READY", "VERIFIED"]
+        },
+        "w1_verified_checkpoint_id": {"type": ["string", "null"]},
+        "supervisor_directive_id": {"type": ["integer", "null"], "minimum": 1},
+        "coordination_epoch": {"type": ["string", "null"]},
+        "adapter_policy_sha256": {"$ref": "#/$defs/sha256"},
+        "execution_authority": {"type": "boolean"},
+        "evaluated_at": {"type": ["string", "null"], "format": "date-time"}
+      }
+    },
+    "isolation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend", "backend_identity", "security_boundary"],
+      "properties": {
+        "backend": {
+          "enum": [
+            "FIRECRACKER",
+            "GVISOR",
+            "KATA",
+            "ROOTLESS_CONTAINER",
+            "VERCEL_SANDBOX",
+            "CLOUDFLARE_SANDBOX",
+            "OTHER"
+          ]
+        },
+        "backend_identity": {"type": "string", "minLength": 1},
+        "security_boundary": {
+          "enum": ["MICROVM", "VM", "USERSPACE_KERNEL", "HOST_KERNEL_CONTAINER"]
+        },
+        "image_or_snapshot_digest_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "filesystem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_read_only", "host_repository_mounted", "writable_layer", "output_allowlist"],
+      "properties": {
+        "source_read_only": {"const": true},
+        "host_repository_mounted": {"const": false},
+        "writable_layer": {
+          "enum": ["PRIVATE_DIRECTORY", "OVERLAYFS_UPPER", "SNAPSHOT_LAYER"]
+        },
+        "output_allowlist": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "allow_special_files": {"const": false}
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deny_by_default", "inbound_exposure", "allowed_hosts", "credential_brokering"],
+      "properties": {
+        "deny_by_default": {"const": true},
+        "inbound_exposure": {"const": false},
+        "allowed_hosts": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "allowed_cidrs": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "credential_brokering": {"type": "boolean"},
+        "policy_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wall_time_seconds", "memory_bytes", "pids", "disk_bytes", "output_bytes"],
+      "properties": {
+        "cpu_millis": {"type": ["integer", "null"], "minimum": 1},
+        "wall_time_seconds": {"type": "integer", "minimum": 1},
+        "memory_bytes": {"type": "integer", "minimum": 1048576},
+        "pids": {"type": "integer", "minimum": 1},
+        "disk_bytes": {"type": "integer", "minimum": 1048576},
+        "output_bytes": {"type": "integer", "minimum": 1},
+        "open_files": {"type": ["integer", "null"], "minimum": 1}
+      }
+    },
+    "lifecycle": {
+      "enum": [
+        "PROPOSED",
+        "INPUT_RESOLVED",
+        "POLICY_BOUND",
+        "READY_FOR_GATE",
+        "MATERIALIZING",
+        "INPUT_SEALED",
+        "EDITING",
+        "BUILDING",
+        "TESTING",
+        "OUTPUT_STAGED",
+        "OUTPUT_MATERIALIZED",
+        "DESTROYING",
+        "DESTROYED",
+        "REJECTED",
+        "ISOLATION_FAILED",
+        "POLICY_VIOLATION",
+        "TIMEOUT",
+        "RESOURCE_EXHAUSTED",
+        "OUTPUT_REJECTED",
+        "DESTROY_FAILED"
+      ]
+    },
+    "lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input_root_sha256", "policy_root_sha256"],
+      "properties": {
+        "input_root_sha256": {"$ref": "#/$defs/sha256"},
+        "policy_root_sha256": {"$ref": "#/$defs/sha256"},
+        "command_receipts_root_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "output_manifest_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "parent_workspace_id": {"type": ["string", "null"]}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"mode": {"const": "PREPARE_ONLY"}},
+        "required": ["mode"]
+      },
+      "then": {
+        "properties": {
+          "authority": {
+            "properties": {
+              "execution_authority": {"const": false}
+            }
+          },
+          "lifecycle": {
+            "enum": ["PROPOSED", "INPUT_RESOLVED", "POLICY_BOUND", "READY_FOR_GATE", "REJECTED"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "authority": {
+            "properties": {"execution_authority": {"const": true}},
+            "required": ["execution_authority"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "mode": {"const": "ACTIVE"},
+          "authority": {
+            "properties": {
+              "w1_status": {"const": "VERIFIED"},
+              "w1_verified_checkpoint_id": {"type": "string", "minLength": 1},
+              "supervisor_directive_id": {"type": "integer", "minimum": 1},
+              "coordination_epoch": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}
