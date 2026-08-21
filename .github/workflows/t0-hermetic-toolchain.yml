@@ -1,0 +1,145 @@
+name: T0 hermetic toolchain
+
+on:
+  push:
+    branches: [work/t0-hermetic-toolchain]
+    paths:
+      - "sql/t0_hermetic_toolchain_contract_v2.sql"
+      - "sql/t0_hermetic_toolchain_contract_v3.sql"
+      - "supabase/migrations/20260821090100_t0_hermetic_toolchain_contract_v2.sql"
+      - "supabase/migrations/20260821090200_t0_hermetic_toolchain_contract_v3.sql"
+      - "tests/test_toolchain_identity_v3.py"
+      - ".github/workflows/t0-hermetic-toolchain.yml"
+  pull_request:
+    paths:
+      - "sql/t0_hermetic_toolchain_contract_v2.sql"
+      - "sql/t0_hermetic_toolchain_contract_v3.sql"
+      - "supabase/migrations/20260821090100_t0_hermetic_toolchain_contract_v2.sql"
+      - "supabase/migrations/20260821090200_t0_hermetic_toolchain_contract_v3.sql"
+      - "tests/test_toolchain_identity_v3.py"
+      - ".github/workflows/t0-hermetic-toolchain.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  replay-and-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: t0_replay
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d t0_replay"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: t0_replay
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify byte-identical migration lineage
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmp -s sql/t0_hermetic_toolchain_contract_v2.sql supabase/migrations/20260821090100_t0_hermetic_toolchain_contract_v2.sql
+          cmp -s sql/t0_hermetic_toolchain_contract_v3.sql supabase/migrations/20260821090200_t0_hermetic_toolchain_contract_v3.sql
+          test "$(git hash-object sql/t0_hermetic_toolchain_contract_v2.sql)" = "88a5443ea56e65033a1cdc25aed2ccd4f5a1bbfb"
+          test "$(git hash-object sql/t0_hermetic_toolchain_contract_v3.sql)" = "3538d1b42349d3bf5e1e28cb19deba7c2235a8f0"
+
+      - name: Run independent Python parity and negative canaries
+        run: python -m unittest discover -s tests -p 'test_toolchain_identity_v3.py' -v
+
+      - name: Create exact baseline prerequisite surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          create schema if not exists extensions;
+          create extension if not exists pgcrypto with schema extensions;
+          create schema if not exists destruktion_meta;
+
+          do $$ begin create role anon nologin; exception when duplicate_object then null; end $$;
+          do $$ begin create role authenticated nologin; exception when duplicate_object then null; end $$;
+          do $$ begin create role service_role nologin; exception when duplicate_object then null; end $$;
+
+          create table destruktion_meta.compute_fabric_toolchain_contract_h205f22(
+            contract_key text primary key,
+            schema_version integer not null check (schema_version > 0),
+            hash_algorithm text not null check (hash_algorithm = 'SHA256'),
+            environment_mode text not null check (environment_mode = 'DECLARED_COMPLETE'),
+            required_environment_keys text[] not null check (cardinality(required_environment_keys) > 0),
+            contract jsonb not null check (jsonb_typeof(contract) = 'object'),
+            contract_sha256 text not null unique check (contract_sha256 ~ '^[0-9a-f]{64}$'),
+            enabled boolean not null default true,
+            canonical boolean not null default false check (not canonical),
+            authority_effect boolean not null default false check (not authority_effect),
+            created_at timestamptz not null default clock_timestamp()
+          );
+          SQL
+
+      - name: Clean replay v2 then v3
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20260821090100_t0_hermetic_toolchain_contract_v2.sql
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20260821090200_t0_hermetic_toolchain_contract_v3.sql
+          test "$(psql -v ON_ERROR_STOP=1 -Atc \"select compute_fabric_toolchain_v3_evidence_h205f22()->>'status' from destruktion_meta.compute_fabric_toolchain_v3_evidence_h205f22();\")" = "PASS"
+
+      - name: Reapply migrations idempotently
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20260821090100_t0_hermetic_toolchain_contract_v2.sql >/tmp/t0-v2-reapply.log
+          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20260821090200_t0_hermetic_toolchain_contract_v3.sql >/tmp/t0-v3-reapply.log
+          test "$(psql -v ON_ERROR_STOP=1 -Atc \"select compute_fabric_toolchain_v3_evidence_h205f22()->>'status' from destruktion_meta.compute_fabric_toolchain_v3_evidence_h205f22();\")" = "PASS"
+
+      - name: Verify frozen contract and non-authority boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 -Atc "
+            select case when
+              contract_key='hermetic-v3'
+              and contract_sha256='05f3f28e1e57250c77d37338150ee1e3f4efcb0d0772444e9865ee9e9f4a203e'
+              and canonical=false
+              and authority_effect=false
+            then 'PASS' else 'FAIL' end
+            from destruktion_meta.compute_fabric_toolchain_contract_h205f22
+            where contract_key='hermetic-v3';
+          " | grep -qx PASS
+          psql -v ON_ERROR_STOP=1 -Atc "
+            select case when
+              (destruktion_meta.compute_fabric_toolchain_v3_evidence_h205f22()->>'shared_cache_reuse')::boolean=false
+              and (destruktion_meta.compute_fabric_toolchain_v3_evidence_h205f22()->>'parity_claimed')::boolean=false
+              and (destruktion_meta.compute_fabric_toolchain_v3_evidence_h205f22()->>'authority_effect')::boolean=false
+            then 'PASS' else 'FAIL' end;
+          " | grep -qx PASS
+
+      - name: Verify execution ACL boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 -Atc "
+            select case when
+              not has_function_privilege('anon','destruktion_meta.compute_fabric_toolchain_v3_evidence_h205f22()','EXECUTE')
+              and not has_function_privilege('authenticated','destruktion_meta.compute_fabric_toolchain_v3_evidence_h205f22()','EXECUTE')
+              and has_function_privilege('service_role','destruktion_meta.compute_fabric_toolchain_v3_evidence_h205f22()','EXECUTE')
+            then 'PASS' else 'FAIL' end;
+          " | grep -qx PASS
