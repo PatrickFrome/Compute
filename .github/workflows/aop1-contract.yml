@@ -1,0 +1,50 @@
+name: AOP1 contract
+
+on:
+  pull_request:
+    paths:
+      - "orchestration/cloudflare/**"
+      - "supabase/migrations/*aop1*"
+      - "tests/test_aop1_contract.py"
+      - ".github/workflows/aop1-contract.yml"
+  push:
+    branches:
+      - "work/aop1-autonomous-orchestration"
+    paths:
+      - "orchestration/cloudflare/**"
+      - "supabase/migrations/*aop1*"
+      - "tests/test_aop1_contract.py"
+      - ".github/workflows/aop1-contract.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  static-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify AOP1 authority and idempotency invariants
+        run: python tests/test_aop1_contract.py
+
+  cloudflare-runtime:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: orchestration/cloudflare
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install runtime toolchain
+        run: npm install --no-audit --no-fund
+      - name: Validate Wrangler config and generate bindings
+        run: npx wrangler types --env-interface Env
+      - name: Typecheck
+        run: npm run check
+      - name: Dry-run Worker build
+        run: npx wrangler deploy --dry-run --outdir .wrangler-dist
