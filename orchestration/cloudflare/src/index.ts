@@ -1,5 +1,5 @@
 import { DurableObject, WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
-import type { AopWake, Env, JsonObject, MessageBatch, WorkflowParams } from "./types";
+import type { AopLease, AopWake, Env, JsonObject, MessageBatch, ModelOutcome, WorkflowParams } from "./types";
 import { completeRun, deferRun, leaseRun, rpc, supervisorReturnAuthority } from "./supabase";
 import { executeRole, executorReady } from "./executor";
 
@@ -40,21 +40,32 @@ export class ComputeFabricSupervisor extends DurableObject<Env> {
 export class AopRunWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> {
   async run(event: WorkflowEvent<WorkflowParams>, step: WorkflowStep): Promise<unknown> {
     const { workerId } = event.payload;
-    const lease = await step.do("lease-aop-run", { retries: { limit: 5, delay: "5 seconds", backoff: "exponential" } }, () => leaseRun(this.env, workerId));
+    // Persist only strings at durable step boundaries. This avoids type/runtime ambiguity
+    // and makes replay state explicitly JSON-encoded.
+    const leaseJson = await step.do("lease-aop-run", { retries: { limit: 5, delay: "5 seconds", backoff: "exponential" } }, async () => JSON.stringify(await leaseRun(this.env, workerId)));
+    const lease = JSON.parse(leaseJson) as AopLease;
     if (!lease.leased) return { status: "IDLE" };
+
     const readiness = executorReady(this.env, lease);
     if (!readiness.ready) {
-      return step.do("defer-unavailable-executor", () => deferRun(this.env, lease, workerId, "EXECUTOR_AVAILABLE", { reason: readiness.reason ?? "UNKNOWN", role_key: lease.role_key ?? null }));
+      const deferredJson = await step.do("defer-unavailable-executor", async () => JSON.stringify(await deferRun(this.env, lease, workerId, "EXECUTOR_AVAILABLE", { reason: readiness.reason ?? "UNKNOWN", role_key: lease.role_key ?? null })));
+      return JSON.parse(deferredJson) as JsonObject;
     }
 
-    const outcome = await step.do("execute-role", { retries: { limit: 2, delay: "15 seconds", backoff: "exponential" }, timeout: "15 minutes" }, () => executeRole(this.env, lease, workerId));
+    const outcomeJson = await step.do("execute-role", { retries: { limit: 2, delay: "15 seconds", backoff: "exponential" }, timeout: "15 minutes" }, async () => JSON.stringify(await executeRole(this.env, lease, workerId)));
+    const outcome = JSON.parse(outcomeJson) as ModelOutcome;
+
     if (lease.role_kind === "SUPERVISOR" && outcome.result_code === "RETURN") {
       const status = lease.roadmap_status as { milestones?: Array<{ milestone_key?: string; effective_status?: string }> } | undefined;
       const current = status?.milestones?.find((m) => m.milestone_key === lease.milestone_key)?.effective_status;
-      if (current === "EVIDENCE_READY") await step.do("apply-supervisor-return-authority", () => supervisorReturnAuthority(this.env, lease, workerId, outcome.output));
+      if (current === "EVIDENCE_READY") {
+        await step.do("apply-supervisor-return-authority", async () => JSON.stringify(await supervisorReturnAuthority(this.env, lease, workerId, outcome.output)));
+      }
     }
-    const completed = await step.do("complete-aop-run", { retries: { limit: 4, delay: "5 seconds", backoff: "exponential" } }, () => completeRun(this.env, lease, workerId, outcome.result_code, outcome.output, outcome.github_sha, outcome.wake_condition));
-    await step.do("wake-next-run", () => this.env.AOP_WAKE_QUEUE.send({ id: crypto.randomUUID(), reason: "RUN_COMPLETED", source: "workflow", payload: { run_id: lease.run_id ?? null, result_code: outcome.result_code } }));
+
+    const completedJson = await step.do("complete-aop-run", { retries: { limit: 4, delay: "5 seconds", backoff: "exponential" } }, async () => JSON.stringify(await completeRun(this.env, lease, workerId, outcome.result_code, outcome.output, outcome.github_sha, outcome.wake_condition)));
+    const completed = JSON.parse(completedJson) as JsonObject;
+    await step.do("wake-next-run", async () => { await this.env.AOP_WAKE_QUEUE.send({ id: crypto.randomUUID(), reason: "RUN_COMPLETED", source: "workflow", payload: { run_id: lease.run_id ?? null, result_code: outcome.result_code } }); });
     return { status: "COMPLETED", run_id: lease.run_id, result_code: outcome.result_code, completed };
   }
 }
