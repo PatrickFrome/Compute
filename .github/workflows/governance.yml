@@ -1,0 +1,87 @@
+name: Compute Fabric Governance
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  governance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate registered workstream and canonical binding
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+
+          case "$HEAD_REF" in
+            work/w1-linux-worker-safety)
+              EXPECTED_L1='C1'
+              ;;
+            work/t0-hermetic-toolchain)
+              EXPECTED_L1='C2'
+              ;;
+            work/f1-live-federation)
+              EXPECTED_L1='F1+'
+              ;;
+            work/r1-continuity-plane)
+              EXPECTED_L1='R1'
+              ;;
+            work/a1-agent-workspace)
+              EXPECTED_L1='C2'
+              ;;
+            analysis/integration)
+              EXPECTED_L1='CROSS-CUTTING'
+              ;;
+            *)
+              echo "Unregistered Compute Fabric workstream branch: $HEAD_REF" >&2
+              exit 1
+              ;;
+          esac
+
+          if ! grep -Fq "Canonical Level-1 milestone: $EXPECTED_L1" <<<"${PR_BODY:-}"; then
+            echo "PR must bind branch $HEAD_REF to canonical Level-1 milestone $EXPECTED_L1" >&2
+            exit 1
+          fi
+
+          if ! grep -Fq "Level-2 milestone:" <<<"${PR_BODY:-}"; then
+            echo "PR must state its Level-2 milestone (or N/A for analysis-only work)" >&2
+            exit 1
+          fi
+
+      - name: Validate canonical architecture files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f README.md
+          test -f docs/CANONICAL_ROADMAP.md
+          test -f docs/CHAT_TOPOLOGY.md
+          test -f docs/ROADMAP_EXECUTION_PROTOCOL.md
+          test -f .github/pull_request_template.md
+
+          grep -Fq 'R1' docs/CANONICAL_ROADMAP.md
+          grep -Fq 'C1' docs/CANONICAL_ROADMAP.md
+          grep -Fq 'C17' docs/CANONICAL_ROADMAP.md
+          grep -Fq 'F1+' docs/CANONICAL_ROADMAP.md
+          grep -Fq 'Level-2 execution DAG mapping' docs/CANONICAL_ROADMAP.md
+
+      - name: Prevent silent canonical-roadmap mutation
+        if: ${{ github.head_ref != 'analysis/integration' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --name-only "${{ github.event.pull_request.base.sha }}"...HEAD | grep -Fxq 'docs/CANONICAL_ROADMAP.md'; then
+            echo 'Implementation workstreams may not silently mutate the canonical Level-1 roadmap.' >&2
+            echo 'Route roadmap amendments through analysis/integration and explicit Supervisor architecture review.' >&2
+            exit 1
+          fi
