@@ -9,6 +9,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from persistence_witness import refresh_persistence_witness
+
 
 def required_env(name: str) -> str:
     value = os.getenv(name, "").strip()
@@ -42,11 +44,11 @@ def read_text(path: str) -> str:
         return ""
 
 
-def health_payload(worker_id: str, started_monotonic: float) -> dict:
+def health_payload(worker_id: str, started_monotonic: float, persistence: dict) -> dict:
     boot = read_text("/proc/sys/kernel/random/boot_id")
     cg = read_text("/proc/self/cgroup")
     return {
-        "schema": "metaengine.compute.native-linux-worker-health.h205f22.v1",
+        "schema": "metaengine.compute.native-linux-worker-health.h205f22.v2",
         "worker_id": worker_id,
         "status": "ACTIVE",
         "os": platform.system().lower(),
@@ -56,6 +58,7 @@ def health_payload(worker_id: str, started_monotonic: float) -> dict:
         "uptime_seconds": round(time.monotonic() - started_monotonic, 3),
         "boot_id_sha256": hashlib.sha256(boot.encode()).hexdigest() if boot else None,
         "cgroup_sha256": hashlib.sha256(cg.encode()).hexdigest() if cg else None,
+        "persistence_witness": persistence,
     }
 
 
@@ -72,7 +75,7 @@ def post_heartbeat(url: str, token: str, worker_id: str, health: dict) -> dict:
         headers={
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
-            "User-Agent": "metaengine-native-linux-worker-h205f22/1",
+            "User-Agent": "metaengine-native-linux-worker-h205f22/2",
         },
     )
     try:
@@ -99,8 +102,11 @@ def main() -> int:
     url = required_env("METAENGINE_GATEWAY_URL")
     worker_id = required_env("METAENGINE_WORKER_ID")
     interval = int(os.getenv("METAENGINE_HEARTBEAT_INTERVAL_SECONDS", "30"))
+    persistence_min_seconds = int(os.getenv("METAENGINE_PERSISTENCE_MIN_SECONDS", "600"))
     if interval < 10 or interval > 90:
         raise RuntimeError("heartbeat_interval_out_of_bounds")
+    if persistence_min_seconds < 60 or persistence_min_seconds > 86400:
+        raise RuntimeError("persistence_window_out_of_bounds")
     if os.geteuid() == 0:
         raise RuntimeError("root_execution_forbidden")
 
@@ -108,8 +114,9 @@ def main() -> int:
     consecutive_failures = 0
     while True:
         try:
+            persistence = refresh_persistence_witness(min_window_seconds=persistence_min_seconds)
             token = read_token()  # re-read on every cycle for atomic credential rotation
-            receipt = post_heartbeat(url, token, worker_id, health_payload(worker_id, started))
+            receipt = post_heartbeat(url, token, worker_id, health_payload(worker_id, started, persistence))
             consecutive_failures = 0
             print(json.dumps({
                 "event": "heartbeat_accepted",
@@ -117,6 +124,9 @@ def main() -> int:
                 "pool_id": receipt.get("pool_id"),
                 "generation": receipt.get("generation"),
                 "last_seen_at": receipt.get("last_seen_at"),
+                "persistence_classification": persistence.get("classification"),
+                "persistence_age_seconds": persistence.get("witness_age_seconds"),
+                "reboot_observed": persistence.get("reboot_observed"),
             }, separators=(",", ":")), flush=True)
         except PermissionError as exc:
             print(json.dumps({"event": "heartbeat_auth_fenced", "error": str(exc)}), file=sys.stderr, flush=True)
