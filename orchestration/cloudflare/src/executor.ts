@@ -90,7 +90,13 @@ function responseItems(response: Record<string, unknown>): Array<Record<string, 
 }
 
 function toolCalls(response: Record<string, unknown>): ToolCall[] {
-  return responseItems(response).filter((x): x is ToolCall => x.type === "function_call" && typeof x.call_id === "string" && typeof x.name === "string" && typeof x.arguments === "string");
+  const calls: ToolCall[] = [];
+  for (const x of responseItems(response)) {
+    if (x.type === "function_call" && typeof x.call_id === "string" && typeof x.name === "string" && typeof x.arguments === "string") {
+      calls.push({ type: "function_call", call_id: x.call_id, name: x.name, arguments: x.arguments });
+    }
+  }
+  return calls;
 }
 
 function outputText(response: Record<string, unknown>): string {
