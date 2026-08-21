@@ -1,0 +1,74 @@
+name: R1 Recovery Artifact Packager
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/r1/recovery_artifact_packager.py'
+      - 'tests/test_r1_recovery_artifact_packager.py'
+      - 'research/R1_STEP03_SUPABASE_LOGICAL_RECOVERY_BUNDLE.md'
+      - '.github/workflows/r1-recovery-artifact-packager.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-packager:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile and run deterministic bundle tests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/r1/recovery_artifact_packager.py
+          python3 -m unittest tests.test_r1_recovery_artifact_packager -v
+
+      - name: Enforce local-only plaintext boundary
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+
+          path=Path('controller/r1/recovery_artifact_packager.py')
+          text=path.read_text()
+          tree=ast.parse(text)
+          imports=set()
+          for node in ast.walk(tree):
+              if isinstance(node,ast.Import):
+                  imports.update(alias.name.split('.')[0] for alias in node.names)
+              elif isinstance(node,ast.ImportFrom) and node.module:
+                  imports.add(node.module.split('.')[0])
+
+          forbidden={'boto3','botocore','requests','httpx','urllib','socket','subprocess','supabase','cryptography','nacl'}
+          assert not (imports & forbidden), imports & forbidden
+
+          forbidden_tokens=[
+              'AWS_'+'ACCESS_KEY_ID',
+              'AWS_'+'SECRET_ACCESS_KEY',
+              'SUPABASE_'+'SERVICE_ROLE',
+              'CLOUDFLARE_'+'API_TOKEN',
+              'B2_'+'APPLICATION_KEY',
+          ]
+          assert all(token not in text for token in forbidden_tokens), forbidden_tokens
+
+          required=[
+              'SENSITIVE_RECOVERY_BUNDLE_PLAINTEXT_LOCAL_ONLY',
+              'external_storage_ready',
+              'ENCRYPT_ONCE_TO_RECOVERY_RECIPIENTS_THEN_REPLICATE_IDENTICAL_CIPHERTEXT',
+              'SUPABASE_DATABASE_BACKUP_DOES_NOT_INCLUDE_STORAGE_API_OBJECT_BYTES',
+              'persisted_seal_allowed',
+          ]
+          assert all(token in text for token in required)
+          assert '"external_storage_ready": False' in text
+          assert '"r2_proven": False' in text
+          assert '"r3_proven": False' in text
+          assert '"persisted_seal_allowed": False' in text
+          assert '"authority_effect": False' in text
+          PY
