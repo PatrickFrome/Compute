@@ -6,10 +6,15 @@ on:
     paths:
       - 'controller/r1/live_two_domain_orchestration_guard.py'
       - 'controller/r1/provider_configuration_readiness.py'
+      - 'controller/r1/verified_source_handoff.py'
+      - 'controller/r1/source_bound_quorum_candidate.py'
       - 'tests/test_r1_live_two_domain_orchestration_guard.py'
       - 'tests/test_r1_provider_configuration_readiness.py'
+      - 'tests/test_r1_verified_source_handoff.py'
+      - 'tests/test_r1_source_bound_quorum_candidate.py'
       - 'research/R1_STEP06_ISOLATED_LIVE_TWO_DOMAIN_ORCHESTRATION.md'
       - 'research/R1_STEP06A_PROVIDER_CONFIGURATION_READINESS.md'
+      - 'research/R1_STEP07A_VERIFIED_SOURCE_HANDOFF.md'
       - '.github/workflows/r1-live-two-domain-orchestration.yml'
   workflow_dispatch:
     inputs:
@@ -25,12 +30,16 @@ on:
         description: 'Immutable direct artifact ID for r1-recovery-envelope-receipt.json'
         required: true
         type: string
+      source_verification_artifact_id:
+        description: 'Immutable direct artifact ID for r1-recovery-source-verification.json from the same source run'
+        required: true
+        type: string
       retain_until:
         description: 'RFC3339 COMPLIANCE retain-until time, more than 24h in the future'
         required: true
         type: string
       execute_replication:
-        description: 'Execute provider replication after protected-environment approvals and readiness gates'
+        description: 'Execute provider replication after verified-source, protected-environment, and readiness gates'
         required: true
         default: false
         type: boolean
@@ -49,7 +58,7 @@ permissions: {}
 jobs:
   contract-tests:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 12
     permissions:
       contents: read
     steps:
@@ -58,33 +67,44 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Compile and run orchestration/readiness adversarial tests
+      - name: Compile and run orchestration readiness and handoff adversarial tests
         run: |
           set -euo pipefail
           python3 -m py_compile controller/r1/live_two_domain_orchestration_guard.py
           python3 -m py_compile controller/r1/provider_configuration_readiness.py
+          python3 -m py_compile controller/r1/verified_source_handoff.py
+          python3 -m py_compile controller/r1/source_bound_quorum_candidate.py
           python3 -m unittest tests.test_r1_live_two_domain_orchestration_guard -v
           python3 -m unittest tests.test_r1_provider_configuration_readiness -v
+          python3 -m unittest tests.test_r1_verified_source_handoff -v
+          python3 -m unittest tests.test_r1_source_bound_quorum_candidate -v
 
       - name: Re-run STEP05A retry-safety tests
         run: |
           set -euo pipefail
           python3 -m unittest tests.test_r1_idempotent_exact_ciphertext_replication -v
 
-      - name: Validate workflow trust-zone and readiness contract
+      - name: Validate workflow trust-zone readiness and verified-source contract
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           raw=Path('.github/workflows/r1-live-two-domain-orchestration.yml').read_text()
-          before, remainder = raw.split('      - name: Validate workflow trust-zone and readiness contract', 1)
-          _checker, after = remainder.split('\n  preflight-live:', 1)
-          p = before + '\n  preflight-live:' + after
+          before,remainder=raw.split('      - name: Validate workflow trust-zone readiness and verified-source contract',1)
+          _checker,after=remainder.split('\n  preflight-live:',1)
+          p=before+'\n  preflight-live:'+after
           g=Path('controller/r1/live_two_domain_orchestration_guard.py').read_text()
           r=Path('controller/r1/provider_configuration_readiness.py').read_text()
+          h=Path('controller/r1/verified_source_handoff.py').read_text()
+          b=Path('controller/r1/source_bound_quorum_candidate.py').read_text()
+          assert 'source_verification_artifact_id:' in p
+          assert 'r1-recovery-source-verification.json' in h
+          assert 'verified_source_handoff.py' in p
+          assert 'source_bound_quorum_candidate.py' in p
+          assert p.index('verified_source_handoff.py') < p.index("echo 'aws_environment=r1-aws-durability-proof'")
+          assert p.index('verified_source_handoff.py') < p.index('\n  aws-provider:')
+          assert 'needs: preflight-live' in p
           assert 'queue: max' in p
-          assert 'r1-aws-durability-proof' in g and 'r1-b2-durability-proof' in g
-          assert '.github/workflows/r1-live-recovery-source.yml' in g
           assert p.count('id-token: write') == 1
           assert 'output-env-credentials: false' in p
           assert 'output-credentials: true' in p
@@ -102,6 +122,8 @@ jobs:
           assert 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c' in p
           assert 'archive: false' in p and 'digest-mismatch: error' in p
           assert 's3:DeleteObject' in r and 'DenyDestructiveRecoveryMutations' in r
+          assert 'provider_credentials_eligible_after_environment_and_readiness_gates' in h
+          assert 'final_r2_evidence_binding_required' in b
           assert 'r2_proven' in r and 'persisted_seal_allowed' in r
           assert 'supabase' not in p.lower()
           PY
@@ -110,18 +132,20 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     needs: contract-tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 8
+    timeout-minutes: 12
     permissions:
       actions: read
       contents: read
     outputs:
       aws_environment: ${{ steps.outputs.outputs.aws_environment }}
       b2_environment: ${{ steps.outputs.outputs.b2_environment }}
-      preflight_artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      preflight_artifact_id: ${{ steps.upload-preflight.outputs.artifact-id }}
+      source_handoff_artifact_id: ${{ steps.upload-handoff.outputs.artifact-id }}
     env:
       SOURCE_RUN_ID: ${{ inputs.source_run_id }}
       CIPHERTEXT_ARTIFACT_ID: ${{ inputs.ciphertext_artifact_id }}
       ENVELOPE_ARTIFACT_ID: ${{ inputs.envelope_artifact_id }}
+      SOURCE_VERIFICATION_ARTIFACT_ID: ${{ inputs.source_verification_artifact_id }}
       EXECUTE_REPLICATION: ${{ inputs.execute_replication }}
       CONFIRMATION: ${{ inputs.confirmation }}
     steps:
@@ -137,6 +161,7 @@ jobs:
           [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$CIPHERTEXT_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$ENVELOPE_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SOURCE_VERIFICATION_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
           if [[ "$EXECUTE_REPLICATION" == 'true' && "$CONFIRMATION" != 'REPLICATE_R1_CIPHERTEXT_TO_TWO_COMPLIANCE_DOMAINS' ]]; then
             echo 'live replication requires exact confirmation token' >&2
             exit 1
@@ -147,7 +172,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir -p evidence
+          mkdir -p evidence source
           api_get() {
             curl --fail-with-body --silent --show-error --location \
               -H 'Accept: application/vnd.github+json' \
@@ -173,6 +198,57 @@ jobs:
             --envelope-artifact-id "$ENVELOPE_ARTIFACT_ID" \
             --output evidence/r1-live-preflight.json
 
+      - name: Download immutable source ciphertext for credential-free handoff
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ inputs.ciphertext_artifact_id }}
+          path: source
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+          digest-mismatch: error
+
+      - name: Download immutable source envelope for credential-free handoff
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ inputs.envelope_artifact_id }}
+          path: source
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+          digest-mismatch: error
+
+      - name: Download immutable cryptographic source-verification receipt
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ inputs.source_verification_artifact_id }}
+          path: source
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+          digest-mismatch: error
+
+      - name: Require verified STEP07 source before exposing provider environments
+        run: |
+          set -euo pipefail
+          python3 controller/r1/verified_source_handoff.py \
+            --preflight evidence/r1-live-preflight.json \
+            --artifacts evidence/source-artifacts.json \
+            --source-verification-artifact-id "$SOURCE_VERIFICATION_ARTIFACT_ID" \
+            --source-verification source/r1-recovery-source-verification.json \
+            --ciphertext source/r1-recovery-ciphertext.age \
+            --envelope-receipt source/r1-recovery-envelope-receipt.json \
+            --output evidence/r1-verified-source-handoff.json
+          python3 - <<'PY'
+          import json
+          h=json.load(open('evidence/r1-verified-source-handoff.json'))
+          assert h['source_attestation_verified'] is True
+          assert h['provider_credentials_eligible_after_environment_and_readiness_gates'] is True
+          assert h['provider_execution_authorized'] is False
+          assert h['r2_proven'] is False
+          assert h['persisted_seal_allowed'] is False
+          PY
+
       - name: Publish verified environment names to dependent jobs
         id: outputs
         run: |
@@ -181,10 +257,20 @@ jobs:
           echo 'b2_environment=r1-b2-durability-proof' >> "$GITHUB_OUTPUT"
 
       - name: Upload non-authoritative preflight receipt
-        id: upload
+        id: upload-preflight
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           path: evidence/r1-live-preflight.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+
+      - name: Upload verified-source handoff receipt
+        id: upload-handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/r1-verified-source-handoff.json
           archive: false
           if-no-files-found: error
           overwrite: false
@@ -538,6 +624,13 @@ jobs:
           path: evidence
           digest-mismatch: error
 
+      - name: Download verified-source handoff by immutable artifact ID
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ needs.preflight-live.outputs.source_handoff_artifact_id }}
+          path: evidence
+          digest-mismatch: error
+
       - name: Download AWS result by immutable artifact ID
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
@@ -552,13 +645,17 @@ jobs:
           path: evidence
           digest-mismatch: error
 
-      - name: Build credential-free two-domain quorum candidate
+      - name: Build credential-free source-bound two-domain quorum candidate
         run: |
           set -euo pipefail
           python3 controller/r1/live_two_domain_orchestration_guard.py evaluate-results \
             --aws-result evidence/r1-aws-provider-result.json \
             --b2-result evidence/r1-b2-provider-result.json \
             --preflight evidence/r1-live-preflight.json \
+            --output evidence/r1-two-domain-quorum-base.json
+          python3 controller/r1/source_bound_quorum_candidate.py \
+            --base evidence/r1-two-domain-quorum-base.json \
+            --handoff evidence/r1-verified-source-handoff.json \
             --output evidence/r1-two-domain-quorum-candidate.json
           python3 - <<'PY'
           import json
@@ -566,13 +663,13 @@ jobs:
           assert q['quorum']['candidate_ready'] is True
           assert q['quorum']['distinct_operator_classes'] == 2
           assert q['quorum']['strong_immutability_domains'] == 2
-          assert q['source_attestation_verified'] is False
-          assert q['source_attestation_required_before_authority'] is True
+          assert q['source_attestation_verified'] is True
+          assert q['final_r2_evidence_binding_required'] is True
           assert q['r2_proven'] is False
           assert q['persisted_seal_allowed'] is False
           PY
 
-      - name: Upload non-authoritative quorum candidate
+      - name: Upload non-authoritative source-bound quorum candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           path: evidence/r1-two-domain-quorum-candidate.json
