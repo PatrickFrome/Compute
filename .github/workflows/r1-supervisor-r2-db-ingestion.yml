@@ -53,10 +53,11 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           wf=Path('.github/workflows/r1-supervisor-r2-db-ingestion.yml').read_text()
+          before,_=wf.split('      - name: Validate DB-only trust zone and migration authority boundary',1)
           runner=Path('controller/r1/supervisor_r2_db_ingestion.py').read_text()
           migration=Path('supabase/migrations/20260821234739_r1_step09b_supervisor_db_ingestion_v1.sql').read_text().lower()
-          assert 'workflow_'+'dispatch' not in wf
-          assert 'id-token: write' not in wf
+          assert 'workflow_'+'dispatch' not in before
+          assert 'id-'+'token: write' not in before
           assert 'security invoker' in migration
           assert 'security definer' not in migration
           assert 'pg_advisory_xact_lock' in migration
