@@ -33,6 +33,12 @@ export function githubWriteConfigured(env: Env): boolean {
   return Boolean(env.GITHUB_TOKEN || githubAppConfigured(env));
 }
 
+export function githubAuthMode(env: Env): "app" | "token" | "none" {
+  if (githubAppConfigured(env)) return "app";
+  if (env.GITHUB_TOKEN) return "token";
+  return "none";
+}
+
 function bytesToBase64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const b of bytes) binary += String.fromCharCode(b);
@@ -68,7 +74,6 @@ function concatBytes(...parts: Uint8Array[]): Uint8Array {
 }
 
 function wrapPkcs1AsPkcs8(pkcs1: Uint8Array): Uint8Array {
-  // PrivateKeyInfo ::= SEQUENCE { version=0, rsaEncryption AlgorithmIdentifier, privateKey OCTET STRING }
   const version = new Uint8Array([0x02, 0x01, 0x00]);
   const rsaAlgorithm = new Uint8Array([0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00]);
   const octet = concatBytes(new Uint8Array([0x04]), derLength(pkcs1.length), pkcs1);
@@ -104,13 +109,9 @@ async function githubAppJwt(env: Env): Promise<string> {
 }
 
 async function installationToken(env: Env): Promise<string> {
-  if (!githubAppConfigured(env)) {
-    if (anyAppCredential(env)) throw new Error("github_app_configuration_incomplete");
-    throw new Error("github_app_not_configured");
-  }
-  const installationId = String(env.GITHUB_APP_INSTALLATION_ID);
-  if (!/^\d{1,30}$/.test(installationId)) throw new Error("github_app_installation_id_invalid");
+  if (!githubAppConfigured(env)) throw new Error("github_app_configuration_incomplete");
   const jwt = await githubAppJwt(env);
+  const installationId = env.GITHUB_APP_INSTALLATION_ID;
   const res = await fetch(`${API}/app/installations/${installationId}/access_tokens`, {
     method: "POST",
     headers: {
@@ -120,32 +121,30 @@ async function installationToken(env: Env): Promise<string> {
       "x-github-api-version": API_VERSION,
       "user-agent": "metaengine-aop1",
     },
-    body: JSON.stringify({ repositories: [REPO_NAME] }),
+    body: JSON.stringify({ repositories: [REPO_NAME], permissions: { contents: "write", pull_requests: "read", actions: "read", metadata: "read" } }),
   });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`github_app_installation_token_failed:${res.status}:${text.slice(0, 800)}`);
-  const body = JSON.parse(text) as { token?: string; expires_at?: string };
-  if (!body.token || !body.expires_at) throw new Error("github_app_installation_token_shape_invalid");
+  if (!res.ok) throw new Error(`github_app_token_failed:${res.status}:${(await res.text()).slice(0, 500)}`);
+  const body = (await res.json()) as { token?: string; expires_at?: string };
+  if (!body.token || !body.expires_at) throw new Error("github_app_token_response_invalid");
   return body.token;
 }
 
 async function mutationToken(env: Env): Promise<string> {
-  if (env.GITHUB_TOKEN) return env.GITHUB_TOKEN;
   if (githubAppConfigured(env)) return installationToken(env);
   if (anyAppCredential(env)) throw new Error("github_app_configuration_incomplete");
+  if (env.GITHUB_TOKEN) return env.GITHUB_TOKEN;
   throw new Error("github_mutation_credential_missing");
 }
 
-async function gh(env: Env, path: string, init: RequestInit = {}, token?: string): Promise<Response> {
+async function gh(env: Env, path: string, init: RequestInit = {}): Promise<Response> {
   const method = String(init.method ?? "GET").toUpperCase();
   const mutation = method !== "GET" && method !== "HEAD";
-  const auth = token ?? env.GITHUB_TOKEN;
-  if (mutation && !auth) throw new Error("github_mutation_credential_missing");
+  const token = mutation ? await mutationToken(env) : env.GITHUB_TOKEN;
   return fetch(`${API}${path}`, {
     ...init,
     headers: {
       accept: "application/vnd.github+json",
-      ...(auth ? { authorization: `Bearer ${auth}` } : {}),
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
       "x-github-api-version": API_VERSION,
       "user-agent": "metaengine-aop1",
       ...(init.headers ?? {}),
@@ -171,11 +170,11 @@ export async function readFileAtRef(env: Env, path: string, ref: string): Promis
 }
 
 export async function writeFile(env: Env, lease: AopLease, path: string, contentUtf8: string, message: string): Promise<Record<string, unknown>> {
-  const auth = await mutationToken(env);
+  if (!githubWriteConfigured(env)) throw new Error("github_mutation_credential_missing");
   const branch = branchFor(lease);
   const encodedPath = safeRepoPath(path);
   let sha: string | undefined;
-  const existing = await gh(env, `/repos/${REPO}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`, {}, auth);
+  const existing = await gh(env, `/repos/${REPO}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`);
   if (existing.ok) {
     const body = (await existing.json()) as Record<string, unknown>;
     if (body.type !== "file") throw new Error("github_path_not_file");
@@ -191,7 +190,7 @@ export async function writeFile(env: Env, lease: AopLease, path: string, content
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ message, content: encoded, branch, ...(sha ? { sha } : {}) }),
-  }, auth);
+  });
   if (!res.ok) throw new Error(`github_write_failed:${res.status}:${await res.text()}`);
   const body = (await res.json()) as { commit?: { sha?: string }; content?: { sha?: string } };
   return { path, branch, commit_sha: body.commit?.sha ?? null, blob_sha: body.content?.sha ?? null };
