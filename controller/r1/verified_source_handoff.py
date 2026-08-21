@@ -28,6 +28,7 @@ SOURCE_VERIFICATION_ARTIFACT_NAME = "r1-recovery-source-verification.json"
 SOURCE_VERIFICATION_SCHEMA = "metaengine.compute.r1-recovery-source-attestation-verification.h205f22.v1"
 SOURCE_VERIFICATION_CLASSIFICATION = "CRYPTOGRAPHICALLY_VERIFIED_RECOVERY_SOURCE_NONAUTHORITATIVE"
 SOURCE_ENVIRONMENT_READINESS_ARTIFACT_NAME = "r1-source-environment-readiness.json"
+SOURCE_ENVIRONMENT_APPROVAL_ARTIFACT_NAME = "r1-source-environment-approval.json"
 SOURCE_ENVIRONMENT = "r1-recovery-source"
 PREFLIGHT_SCHEMA = "metaengine.compute.r1-live-two-domain-preflight.h205f22.v1"
 HANDOFF_SCHEMA = "metaengine.compute.r1-verified-source-handoff.h205f22.v1"
@@ -208,16 +209,23 @@ def _validated_source_verification(value: Any, *, run_id: int, head_sha: str, ci
         _require_sha(value.get(field), field)
 
     env_evidence = value.get("source_environment_evidence")
-    if not isinstance(env_evidence, dict):
-        raise HandoffError("source_environment_evidence_missing")
-    readiness_artifact_id = _require_int(env_evidence.get("artifact_id"), "source_environment_readiness_artifact_id")
-    if env_evidence.get("artifact_name") != SOURCE_ENVIRONMENT_READINESS_ARTIFACT_NAME:
-        raise HandoffError("source_environment_readiness_artifact_name_invalid")
-    readiness_sha = _require_sha(env_evidence.get("readiness_sha256"), "source_environment_readiness_sha256")
-    if env_evidence.get("environment") != SOURCE_ENVIRONMENT:
-        raise HandoffError("source_environment_evidence_environment_invalid")
+    if not isinstance(env_evidence, dict) or env_evidence.get("environment") != SOURCE_ENVIRONMENT:
+        raise HandoffError("source_environment_evidence_missing_or_invalid")
     if env_evidence.get("source_environment_binding_verified") is not True:
         raise HandoffError("source_environment_binding_not_verified")
+    configuration = env_evidence.get("configuration")
+    approval = env_evidence.get("approval")
+    if not isinstance(configuration, dict) or not isinstance(approval, dict):
+        raise HandoffError("source_environment_evidence_components_missing")
+    readiness_artifact_id = _require_int(configuration.get("artifact_id"), "source_environment_readiness_artifact_id")
+    if configuration.get("artifact_name") != SOURCE_ENVIRONMENT_READINESS_ARTIFACT_NAME:
+        raise HandoffError("source_environment_readiness_artifact_name_invalid")
+    readiness_sha = _require_sha(configuration.get("readiness_sha256"), "source_environment_readiness_sha256")
+    approval_artifact_id = _require_int(approval.get("artifact_id"), "source_environment_approval_artifact_id")
+    if approval.get("artifact_name") != SOURCE_ENVIRONMENT_APPROVAL_ARTIFACT_NAME:
+        raise HandoffError("source_environment_approval_artifact_name_invalid")
+    approval_sha = _require_sha(approval.get("approval_receipt_sha256"), "source_environment_approval_sha256")
+    approved_review_count = _require_int(approval.get("approved_review_count"), "source_environment_approved_review_count")
 
     return {
         "verification_receipt_sha256": receipt_sha,
@@ -227,6 +235,9 @@ def _validated_source_verification(value: Any, *, run_id: int, head_sha: str, ci
         "migration_ledger_sha256": value["migration_ledger_sha256"],
         "source_environment_readiness_artifact_id": readiness_artifact_id,
         "source_environment_readiness_sha256": readiness_sha,
+        "source_environment_approval_artifact_id": approval_artifact_id,
+        "source_environment_approval_sha256": approval_sha,
+        "source_environment_approved_review_count": approved_review_count,
     }
 
 
@@ -277,9 +288,13 @@ def validate_handoff(*, preflight: Any, artifacts: Any, source_verification_arti
             "migration_ledger_sha256": sv["migration_ledger_sha256"],
             "source_environment_readiness_artifact_id": sv["source_environment_readiness_artifact_id"],
             "source_environment_readiness_sha256": sv["source_environment_readiness_sha256"],
+            "source_environment_approval_artifact_id": sv["source_environment_approval_artifact_id"],
+            "source_environment_approval_sha256": sv["source_environment_approval_sha256"],
+            "source_environment_approved_review_count": sv["source_environment_approved_review_count"],
         },
         "source_attestation_verified": True,
         "source_environment_binding_verified": True,
+        "source_environment_approval_verified": True,
         "provider_credentials_eligible_after_environment_and_readiness_gates": True,
         "provider_execution_authorized": False,
         "final_r2_evidence_binding_required": True,
