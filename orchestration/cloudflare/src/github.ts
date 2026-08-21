@@ -10,6 +10,11 @@ function branchFor(lease: AopLease): string {
   return branch;
 }
 
+function safeRepoPath(path: string): string {
+  if (!path || path.startsWith("/") || path.includes("..")) throw new Error("invalid_repo_path");
+  return encodeURIComponent(path).replaceAll("%2F", "/");
+}
+
 async function gh(env: Env, path: string, init: RequestInit = {}): Promise<Response> {
   if (!env.GITHUB_TOKEN) throw new Error("github_token_unavailable");
   return fetch(`${API}${path}`, {
@@ -24,19 +29,28 @@ async function gh(env: Env, path: string, init: RequestInit = {}): Promise<Respo
   });
 }
 
-export async function readFile(env: Env, lease: AopLease, path: string): Promise<Record<string, unknown>> {
-  const branch = branchFor(lease);
-  const res = await gh(env, `/repos/${REPO}/contents/${encodeURIComponent(path).replaceAll("%2F", "/")}?ref=${encodeURIComponent(branch)}`);
+async function readAt(env: Env, path: string, ref: string): Promise<Record<string, unknown>> {
+  if (!ref || ref.length > 200) throw new Error("invalid_git_ref");
+  const res = await gh(env, `/repos/${REPO}/contents/${safeRepoPath(path)}?ref=${encodeURIComponent(ref)}`);
   if (!res.ok) throw new Error(`github_read_failed:${res.status}:${await res.text()}`);
   const body = (await res.json()) as Record<string, unknown>;
   if (body.type !== "file") throw new Error("github_path_not_file");
-  return { path, branch, sha: body.sha, content: body.content, encoding: body.encoding };
+  return { path, ref, sha: body.sha, content: body.content, encoding: body.encoding };
+}
+
+export async function readFile(env: Env, lease: AopLease, path: string): Promise<Record<string, unknown>> {
+  return readAt(env, path, branchFor(lease));
+}
+
+export async function readFileAtRef(env: Env, path: string, ref: string): Promise<Record<string, unknown>> {
+  return readAt(env, path, ref);
 }
 
 export async function writeFile(env: Env, lease: AopLease, path: string, contentUtf8: string, message: string): Promise<Record<string, unknown>> {
   const branch = branchFor(lease);
+  const encodedPath = safeRepoPath(path);
   let sha: string | undefined;
-  const existing = await gh(env, `/repos/${REPO}/contents/${encodeURIComponent(path).replaceAll("%2F", "/")}?ref=${encodeURIComponent(branch)}`);
+  const existing = await gh(env, `/repos/${REPO}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`);
   if (existing.ok) {
     const body = (await existing.json()) as Record<string, unknown>;
     if (body.type !== "file") throw new Error("github_path_not_file");
@@ -44,12 +58,11 @@ export async function writeFile(env: Env, lease: AopLease, path: string, content
   } else if (existing.status !== 404) {
     throw new Error(`github_lookup_failed:${existing.status}:${await existing.text()}`);
   }
-
   const bytes = new TextEncoder().encode(contentUtf8);
   let binary = "";
   for (const b of bytes) binary += String.fromCharCode(b);
   const encoded = btoa(binary);
-  const res = await gh(env, `/repos/${REPO}/contents/${encodeURIComponent(path).replaceAll("%2F", "/")}`, {
+  const res = await gh(env, `/repos/${REPO}/contents/${encodedPath}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ message, content: encoded, branch, ...(sha ? { sha } : {}) }),
@@ -60,6 +73,7 @@ export async function writeFile(env: Env, lease: AopLease, path: string, content
 }
 
 export async function pullRequest(env: Env, number: number): Promise<Record<string, unknown>> {
+  if (!Number.isSafeInteger(number) || number <= 0) throw new Error("invalid_pr_number");
   const res = await gh(env, `/repos/${REPO}/pulls/${number}`);
   if (!res.ok) throw new Error(`github_pr_failed:${res.status}:${await res.text()}`);
   const b = (await res.json()) as Record<string, unknown>;
@@ -68,7 +82,21 @@ export async function pullRequest(env: Env, number: number): Promise<Record<stri
     head: (b.head as Record<string, unknown> | undefined)?.sha,
     head_ref: (b.head as Record<string, unknown> | undefined)?.ref,
     base: (b.base as Record<string, unknown> | undefined)?.sha,
+    base_ref: (b.base as Record<string, unknown> | undefined)?.ref,
   };
+}
+
+export async function pullRequestFiles(env: Env, number: number): Promise<Record<string, unknown>> {
+  if (!Number.isSafeInteger(number) || number <= 0) throw new Error("invalid_pr_number");
+  const files: Array<Record<string, unknown>> = [];
+  for (let page = 1; page <= 10; page++) {
+    const res = await gh(env, `/repos/${REPO}/pulls/${number}/files?per_page=100&page=${page}`);
+    if (!res.ok) throw new Error(`github_pr_files_failed:${res.status}:${await res.text()}`);
+    const batch = (await res.json()) as Array<Record<string, unknown>>;
+    for (const f of batch) files.push({ filename: f.filename, status: f.status, additions: f.additions, deletions: f.deletions, changes: f.changes, sha: f.sha, patch: typeof f.patch === "string" ? f.patch : null });
+    if (batch.length < 100) break;
+  }
+  return { number, files, truncated: files.length >= 1000 };
 }
 
 export async function workflowRuns(env: Env, lease: AopLease): Promise<Record<string, unknown>> {
@@ -78,9 +106,6 @@ export async function workflowRuns(env: Env, lease: AopLease): Promise<Record<st
   const body = (await res.json()) as { workflow_runs?: Array<Record<string, unknown>> };
   return {
     branch,
-    runs: (body.workflow_runs ?? []).map((r) => ({
-      id: r.id, name: r.name, event: r.event, status: r.status, conclusion: r.conclusion,
-      head_sha: r.head_sha, created_at: r.created_at, updated_at: r.updated_at,
-    })),
+    runs: (body.workflow_runs ?? []).map((r) => ({ id: r.id, name: r.name, event: r.event, status: r.status, conclusion: r.conclusion, head_sha: r.head_sha, created_at: r.created_at, updated_at: r.updated_at })),
   };
 }
