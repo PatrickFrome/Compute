@@ -2,10 +2,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "supabase/migrations/20260821060500_aop1_clean_replay.sql"
+OIDC_MIGRATION = ROOT / "supabase/migrations/20260821071452_aop1_one_time_github_oidc_bootstrap_capability.sql"
+DENY_MIGRATION = ROOT / "supabase/migrations/20260821072003_aop1_bootstrap_capability_explicit_deny_policy.sql"
 CF = ROOT / "orchestration/cloudflare/src"
 LIVE_DEPLOY = ROOT / ".github/workflows/aop1-live-deploy.yml"
 
 sql = MIGRATION.read_text(encoding="utf-8")
+oidc_sql = OIDC_MIGRATION.read_text(encoding="utf-8")
+deny_sql = DENY_MIGRATION.read_text(encoding="utf-8")
 index_ts = (CF / "index.ts").read_text(encoding="utf-8")
 executor_ts = (CF / "executor.ts").read_text(encoding="utf-8")
 github_ts = (CF / "github.ts").read_text(encoding="utf-8")
@@ -37,6 +41,7 @@ assert "to anon,authenticated using(false) with check(false)" in sql
 assert "EXECUTOR_AVAILABLE" in index_ts
 assert "AOP_SUPERVISOR_TOKEN_MISSING" in executor_ts
 assert "AI_EXECUTOR_NOT_CONFIGURED" in executor_ts
+assert "GITHUB_TOKEN_MISSING" in executor_ts
 assert "main_branch_write_forbidden" in github_ts
 assert "invalid_repo_path" in github_ts
 assert "github_pull_request_files" in executor_ts
@@ -53,27 +58,33 @@ assert "h205f22_aop1_supervisor_adopt_active_claim_v1" in supabase_ts
 assert "h205f22_aop1_supervisor_return_authority_v1" in supabase_ts
 assert "query" not in supabase_ts.lower() or "sql" not in supabase_ts.lower()
 
-# Live deploy must be capability-gated, fail closed, health-gated, then activate.
-required_deploy_secrets = (
-    "CLOUDFLARE_API_TOKEN",
-    "CLOUDFLARE_ACCOUNT_ID",
-    "AOP1_SUPABASE_SERVICE_ROLE_KEY",
-    "AOP1_SUPERVISOR_TOKEN",
-    "AOP1_GITHUB_TOKEN",
-    "AOP1_CF_AI_TOKEN",
-    "AOP1_WAKE_SECRET",
-)
-for secret in required_deploy_secrets:
-    assert secret in deploy_yml
-assert "configured=false" in deploy_yml
-assert "steps.capability.outputs.configured == 'true'" in deploy_yml
+# One-time bootstrap is hashed, expiring, atomically consumed, and client-denied.
+assert "compute_fabric_aop_bootstrap_capability_h205f22" in oidc_sql
+assert "capability_sha256" in oidc_sql and "extensions.digest" in oidc_sql
+assert "for update" in oidc_sql.lower()
+assert "bootstrap_capability_consumed" in oidc_sql
+assert "set used_at=clock_timestamp()" in oidc_sql
+assert "revoke all on function public.h205f22_aop1_consume_bootstrap_bundle_v1" in oidc_sql
+assert "to anon, authenticated" in deny_sql and "using (false)" in deny_sql and "with check (false)" in deny_sql
+
+# Live bootstrap must use GitHub OIDC, not repository secrets, then health-gate activation.
+assert "id-token: write" in deploy_yml
+assert "ACTIONS_ID_TOKEN_REQUEST_TOKEN" in deploy_yml
+assert "ACTIONS_ID_TOKEN_REQUEST_URL" in deploy_yml
+assert "audience=metaengine-h205f22-aop1" in deploy_yml
+assert "metaengine-aop1-github-oidc-bootstrap-h205f22" in deploy_yml
+assert "::add-mask::" in deploy_yml
 assert "wrangler queues info" in deploy_yml and "wrangler queues create" in deploy_yml
 assert "cloudflare/wrangler-action@v3" in deploy_yml
 assert 'wranglerVersion: "4.125.0"' in deploy_yml
 assert '/health' in deploy_yml
 assert '.snapshot.invariant == "NO_MANUAL_HANDOFF_V1"' in deploy_yml
+assert '.github_configured == false' in deploy_yml
+assert "BLOCKED_MISSING_DEDICATED_RUNTIME_CREDENTIAL" in deploy_yml
 assert "LIVE_DEPLOY_ACTIVATION" in deploy_yml
 assert deploy_yml.index('/health') < deploy_yml.index('LIVE_DEPLOY_ACTIVATION')
-assert "NOT_LIVE_DEPLOYED" in deploy_yml
+# No long-lived GitHub runtime credential is smuggled through the bootstrap job.
+assert "AOP1_GITHUB_TOKEN" not in deploy_yml
+assert "GITHUB_TOKEN\n" not in deploy_yml
 
 print("AOP1 static contract guards: PASS")
