@@ -1,0 +1,211 @@
+name: F1 Live External Federation Evidence
+
+on:
+  push:
+    branches:
+      - work/f1-live-federation
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  producer:
+    name: Real external provider producer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      evidence_b64: ${{ steps.generate.outputs.evidence_b64 }}
+      evidence_sha256: ${{ steps.generate.outputs.evidence_sha256 }}
+      expires_at: ${{ steps.generate.outputs.expires_at }}
+      external_execution_id: ${{ steps.generate.outputs.external_execution_id }}
+      signer_workflow: ${{ steps.generate.outputs.signer_workflow }}
+      signer_identity: ${{ steps.generate.outputs.signer_identity }}
+      attestation_id: ${{ steps.attest.outputs.attestation-id }}
+      attestation_url: ${{ steps.attest.outputs.attestation-url }}
+    steps:
+      - name: Fetch exact repository commit without credential persistence
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --depth=1 origin "${GITHUB_SHA}"
+          git checkout --detach FETCH_HEAD
+
+      - name: Generate live provider evidence
+        id: generate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 federation/f1/live_provider_verifier.py generate \
+            --output federation/f1/provider-evidence.json
+          sha256sum federation/f1/provider-evidence.json
+
+      - name: Sign evidence subject with GitHub OIDC and Sigstore
+        id: attest
+        uses: actions/attest-build-provenance@v4.1.1
+        with:
+          subject-path: federation/f1/provider-evidence.json
+
+  verifier:
+    name: Dedicated cryptographic verifier
+    needs: producer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - name: Fetch verifier source at exact provider commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --depth=1 origin "${GITHUB_SHA}"
+          git checkout --detach FETCH_HEAD
+
+      - name: Rehydrate attested evidence
+        env:
+          EVIDENCE_B64: ${{ needs.producer.outputs.evidence_b64 }}
+          EXPECTED_SHA256: ${{ needs.producer.outputs.evidence_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, hashlib, os
+          payload = base64.b64decode(os.environ['EVIDENCE_B64'])
+          actual = hashlib.sha256(payload).hexdigest()
+          if actual != os.environ['EXPECTED_SHA256']:
+              raise SystemExit('transport/content digest mismatch')
+          open('federation/f1/provider-evidence.json', 'wb').write(payload)
+          print('content_digest_match=PASS')
+          print('CONTENT_HASH_ONLY=NOT_VERIFIED')
+          PY
+
+      - name: Verify signed attestation and independent workload identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh attestation verify federation/f1/provider-evidence.json \
+            --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/f1-live-provider.yml" \
+            --source-ref "${GITHUB_REF}" \
+            --source-digest "${GITHUB_SHA}" \
+            --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
+            --deny-self-hosted-runners \
+            --format json > federation/f1/cryptographic-verification.json
+          test -s federation/f1/cryptographic-verification.json
+          echo 'cryptographic_verification=PASS'
+
+      - name: Enforce live provider semantic policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 federation/f1/live_provider_verifier.py verify-policy \
+            --input federation/f1/provider-evidence.json \
+            --repository "${GITHUB_REPOSITORY}" \
+            --source-digest "${GITHUB_SHA}" \
+            --source-ref "${GITHUB_REF}" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --run-attempt "${GITHUB_RUN_ATTEMPT}" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/f1-live-provider.yml" \
+            --trust-generation 1
+
+      - name: Replay expiry revocation rotation and hash-only negative tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 federation/f1/live_provider_verifier.py self-test \
+            --input federation/f1/provider-evidence.json \
+            | tee federation/f1/policy-negative-tests.json
+
+      - name: Cryptographic tamper negative test
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp federation/f1/provider-evidence.json federation/f1/provider-evidence-tampered.json
+          printf '\n' >> federation/f1/provider-evidence-tampered.json
+          if gh attestation verify federation/f1/provider-evidence-tampered.json \
+            --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/f1-live-provider.yml" \
+            --source-ref "${GITHUB_REF}" \
+            --source-digest "${GITHUB_SHA}" \
+            --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
+            --deny-self-hosted-runners >/dev/null 2>&1; then
+            echo 'tampered subject unexpectedly verified' >&2
+            exit 1
+          fi
+          echo 'cryptographic_tamper_rejection=PASS'
+
+      - name: Emit immutable-evidence candidate receipt
+        env:
+          EVIDENCE_SHA256: ${{ needs.producer.outputs.evidence_sha256 }}
+          EXPIRES_AT: ${{ needs.producer.outputs.expires_at }}
+          EXTERNAL_EXECUTION_ID: ${{ needs.producer.outputs.external_execution_id }}
+          SIGNER_WORKFLOW: ${{ needs.producer.outputs.signer_workflow }}
+          SIGNER_IDENTITY: ${{ needs.producer.outputs.signer_identity }}
+          ATTESTATION_ID: ${{ needs.producer.outputs.attestation_id }}
+          ATTESTATION_URL: ${{ needs.producer.outputs.attestation_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+
+          crypto = Path('federation/f1/cryptographic-verification.json').read_bytes()
+          negative = json.loads(Path('federation/f1/policy-negative-tests.json').read_text())
+          gh_version = subprocess.check_output(['gh', '--version'], text=True).splitlines()[0]
+          receipt = {
+              'schema': 'metaengine.compute.f1-live-verification-receipt.h205f22.v1',
+              'provider_id': 'github-actions-f1-live',
+              'provider_kind': 'GITHUB_HOSTED_ACTIONS',
+              'external_execution_id': os.environ['EXTERNAL_EXECUTION_ID'],
+              'repository': os.environ['GITHUB_REPOSITORY'],
+              'source_digest': os.environ['GITHUB_SHA'],
+              'source_ref': os.environ['GITHUB_REF'],
+              'run_id': int(os.environ['GITHUB_RUN_ID']),
+              'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
+              'evidence_sha256': os.environ['EVIDENCE_SHA256'],
+              'attestation_id': os.environ['ATTESTATION_ID'],
+              'attestation_url': os.environ['ATTESTATION_URL'],
+              'signer_workflow': os.environ['SIGNER_WORKFLOW'],
+              'signer_identity': os.environ['SIGNER_IDENTITY'],
+              'oidc_issuer': 'https://token.actions.githubusercontent.com',
+              'sigstore_instance': 'public-good',
+              'trust_generation': 1,
+              'expires_at': os.environ['EXPIRES_AT'],
+              'cryptographic_verifier': {
+                  'implementation': gh_version,
+                  'mode': 'gh attestation verify + Sigstore trusted roots',
+                  'id_token_permission': False,
+                  'deny_self_hosted_runners': True,
+              },
+              'cryptographic_verification_sha256': hashlib.sha256(crypto).hexdigest(),
+              'tests': {
+                  'signature_and_identity': 'PASS',
+                  'tamper': 'REJECTED',
+                  'replay': negative['negative_tests']['replay'],
+                  'expiry': negative['negative_tests']['expiry'],
+                  'revocation': negative['negative_tests']['revocation'],
+                  'rotation_generation': negative['negative_tests']['rotation_generation'],
+                  'content_hash_only': negative['negative_tests']['content_hash_only'],
+              },
+              'verification_status': 'CRYPTO_VERIFIED_EVIDENCE_READY',
+              'canonical': False,
+              'authority_effect': False,
+          }
+          encoded = json.dumps(receipt, sort_keys=True, separators=(',', ':'))
+          digest = hashlib.sha256(encoded.encode()).hexdigest()
+          print('F1_VERIFICATION_RECEIPT_BEGIN')
+          print(encoded)
+          print('F1_VERIFICATION_RECEIPT_END')
+          print(f'receipt_sha256={digest}')
+          PY
