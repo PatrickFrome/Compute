@@ -1,0 +1,306 @@
+name: W1 AWS Provider Reboot Proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/w1-aws-provider-reboot-proof.yml'
+      - 'controller/w1/aws_provider_reboot_controller.py'
+      - 'tests/test_w1_aws_provider_reboot_controller.py'
+      - 'research/W1_STEP06_GITHUB_OIDC_PROVIDER_REBOOT_CONTROLLER.md'
+  workflow_dispatch:
+    inputs:
+      instance_id:
+        description: 'Existing W1 EC2 instance ID'
+        required: true
+        type: string
+      worker_id:
+        description: 'Expected METAENGINE W1 worker_id tag'
+        required: true
+        type: string
+      execute_reboot:
+        description: 'Actually call EC2 RebootInstances after preflight'
+        required: true
+        default: false
+        type: boolean
+      confirmation:
+        description: 'For a real reboot type REBOOT_W1_PERSISTENT_HOST'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate-controller:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Validate controller and negative tests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/w1/aws_provider_reboot_controller.py
+          python3 -m unittest tests.test_w1_aws_provider_reboot_controller -v
+
+      - name: Validate OIDC-only AWS credential contract
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/w1-aws-provider-reboot-proof.yml').read_text()
+          assert 'id-token: write' in p
+          assert 'aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c' in p
+          assert 'W1_AWS_ROLE_ARN' in p and 'W1_AWS_ACCOUNT_ID' in p and 'W1_AWS_REGION' in p
+          forbidden = [
+              'AWS_' + 'ACCESS_KEY_ID',
+              'AWS_' + 'SECRET_ACCESS_KEY',
+              'secrets.' + 'AWS',
+          ]
+          assert all(token not in p for token in forbidden), forbidden
+          assert 'REBOOT_W1_PERSISTENT_HOST' in p
+          assert 'LIVE_PROVIDER_CONTROLLER_RECEIPT_UNINGESTED' in Path('controller/w1/aws_provider_reboot_controller.py').read_text()
+          PY
+
+  provider-controller:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: w1-persistent-host-proof
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      INSTANCE_ID: ${{ inputs.instance_id }}
+      WORKER_ID: ${{ inputs.worker_id }}
+      EXECUTE_REBOOT: ${{ inputs.execute_reboot }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+      AWS_ROLE_ARN: ${{ vars.W1_AWS_ROLE_ARN }}
+      AWS_ACCOUNT_ID: ${{ vars.W1_AWS_ACCOUNT_ID }}
+      AWS_REGION: ${{ vars.W1_AWS_REGION }}
+      ROLE_SESSION: w1-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Checkout controller from main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Validate immutable AWS configuration
+        run: |
+          set -euo pipefail
+          [[ "$INSTANCE_ID" =~ ^i-[0-9a-f]+$ ]]
+          [[ "$WORKER_ID" =~ ^[A-Za-z0-9._:-]{3,160}$ ]]
+          [[ "$AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]
+          [[ "$AWS_REGION" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]]
+          [[ "$AWS_ROLE_ARN" =~ ^arn:aws(-[a-z]+)?:iam::${AWS_ACCOUNT_ID}:role/.+ ]]
+          if [[ "$EXECUTE_REBOOT" == "true" && "$CONFIRMATION" != "REBOOT_W1_PERSISTENT_HOST" ]]; then
+            echo 'real reboot requires exact confirmation token' >&2
+            exit 1
+          fi
+
+      - name: Configure short-lived AWS credentials via GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
+        with:
+          role-to-assume: ${{ vars.W1_AWS_ROLE_ARN }}
+          aws-region: ${{ vars.W1_AWS_REGION }}
+          allowed-account-ids: ${{ vars.W1_AWS_ACCOUNT_ID }}
+          role-session-name: w1-${{ github.run_id }}-${{ github.run_attempt }}
+          role-duration-seconds: 900
+          mask-aws-account-id: true
+
+      - name: Resolve exact W1 implementation head
+        run: |
+          set -euo pipefail
+          W1_SHA="$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}.git" refs/heads/work/w1-linux-worker-safety | awk '{print $1}')"
+          [[ "$W1_SHA" =~ ^[0-9a-f]{40}$ ]]
+          echo "W1_SHA=$W1_SHA" >> "$GITHUB_ENV"
+
+      - name: Capture and validate persistent-host preflight
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          aws --version
+          aws sts get-caller-identity --output json > evidence/caller-identity.json
+          aws ec2 describe-instances \
+            --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0]' \
+            --output json > evidence/instance.json
+
+          ROOT_VOLUME_ID="$(python3 - <<'PY'
+          import json
+          i=json.load(open('evidence/instance.json'))
+          root=i.get('RootDeviceName')
+          for m in i.get('BlockDeviceMappings') or []:
+              if m.get('DeviceName') == root and (m.get('Ebs') or {}).get('VolumeId'):
+                  print(m['Ebs']['VolumeId'])
+                  break
+          PY
+          )"
+          [[ "$ROOT_VOLUME_ID" =~ ^vol-[0-9a-f]+$ ]]
+          aws ec2 describe-volumes \
+            --volume-ids "$ROOT_VOLUME_ID" \
+            --query 'Volumes[0]' \
+            --output json > evidence/root-volume.json
+
+          mapfile -t SG_IDS < <(python3 - <<'PY'
+          import json
+          i=json.load(open('evidence/instance.json'))
+          for g in i.get('SecurityGroups') or []:
+              print(g['GroupId'])
+          PY
+          )
+          (( ${#SG_IDS[@]} > 0 ))
+          aws ec2 describe-security-groups \
+            --group-ids "${SG_IDS[@]}" \
+            --query 'SecurityGroups' \
+            --output json > evidence/security-groups.json
+
+          python3 - <<'PY'
+          import json
+          out={
+            'instance':json.load(open('evidence/instance.json')),
+            'security_groups':json.load(open('evidence/security-groups.json')),
+            'root_volume':json.load(open('evidence/root-volume.json')),
+          }
+          json.dump(out,open('evidence/preflight-bundle.json','w'),sort_keys=True,separators=(',',':'))
+          PY
+
+          python3 controller/w1/aws_provider_reboot_controller.py validate-preflight \
+            --input evidence/preflight-bundle.json \
+            --output evidence/preflight-summary.json \
+            --instance-id "$INSTANCE_ID" \
+            --worker-id "$WORKER_ID" \
+            --expected-worker-sha "$W1_SHA"
+
+      - name: Prove controller has RebootInstances permission without rebooting
+        run: |
+          set -euo pipefail
+          set +e
+          DRY_RUN_OUTPUT="$(aws ec2 reboot-instances --instance-ids "$INSTANCE_ID" --dry-run 2>&1)"
+          RC=$?
+          set -e
+          if [[ $RC -eq 0 || "$DRY_RUN_OUTPUT" != *"DryRunOperation"* ]]; then
+            echo 'EC2 RebootInstances DryRun permission check failed' >&2
+            printf '%s\n' "$DRY_RUN_OUTPUT" >&2
+            exit 1
+          fi
+
+      - name: Emit preflight-only nonclaim
+        if: inputs.execute_reboot != true
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os
+          p=json.load(open('evidence/preflight-summary.json'))
+          body={
+            'schema':'metaengine.compute.w1-aws-provider-preflight-run.h205f22.v1',
+            'classification':'LIVE_AWS_OIDC_PREFLIGHT_ONLY',
+            'github_run_id':os.environ['GITHUB_RUN_ID'],
+            'github_run_attempt':os.environ['GITHUB_RUN_ATTEMPT'],
+            'role_session':os.environ['ROLE_SESSION'],
+            'preflight':p,
+            'persistent_worker_proof':False,
+            'w1_verified':False,
+            'canonical':False,
+            'authority_effect':False,
+          }
+          body['artifact_sha256']=hashlib.sha256(json.dumps(body,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+          json.dump(body,open('evidence/preflight-run.json','w'),sort_keys=True,separators=(',',':'))
+          PY
+          sha256sum evidence/preflight-run.json > evidence/preflight-run.sha256
+          {
+            echo '## W1 AWS provider preflight'
+            echo 'OIDC authentication and RebootInstances DryRun passed.'
+            echo '**NONCLAIM:** no reboot executed; persistent_worker_proof=false; w1_verified=false.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Execute independent provider reboot
+        if: inputs.execute_reboot == true
+        run: |
+          set -euo pipefail
+          REQUESTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"
+          echo "REQUESTED_AT=$REQUESTED_AT" >> "$GITHUB_ENV"
+          aws ec2 reboot-instances --instance-ids "$INSTANCE_ID"
+          API_RETURNED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"
+          echo "API_RETURNED_AT=$API_RETURNED_AT" >> "$GITHUB_ENV"
+
+      - name: Correlate exact CloudTrail RebootInstances event
+        if: inputs.execute_reboot == true
+        run: |
+          set -euo pipefail
+          START_TIME="$(python3 - <<'PY'
+          import os
+          from datetime import datetime,timedelta,timezone
+          t=datetime.fromisoformat(os.environ['REQUESTED_AT'].replace('Z','+00:00')).astimezone(timezone.utc)-timedelta(minutes=5)
+          print(t.isoformat())
+          PY
+          )"
+          FOUND=false
+          for _ in $(seq 1 60); do
+            END_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            aws cloudtrail lookup-events \
+              --lookup-attributes AttributeKey=EventName,AttributeValue=RebootInstances \
+              --start-time "$START_TIME" \
+              --end-time "$END_TIME" \
+              --max-results 50 \
+              --output json > evidence/cloudtrail-lookup.json
+            set +e
+            python3 controller/w1/aws_provider_reboot_controller.py select-event \
+              --input evidence/cloudtrail-lookup.json \
+              --output evidence/cloudtrail-match.json \
+              --instance-id "$INSTANCE_ID" \
+              --role-session "$ROLE_SESSION" \
+              --requested-at "$REQUESTED_AT"
+            RC=$?
+            set -e
+            if [[ $RC -eq 0 ]]; then
+              FOUND=true
+              break
+            fi
+            if [[ $RC -ne 2 ]]; then
+              exit "$RC"
+            fi
+            sleep 10
+          done
+          [[ "$FOUND" == "true" ]] || { echo 'matching CloudTrail reboot event not observed within bounded window' >&2; exit 1; }
+
+      - name: Build live provider receipt candidate
+        if: inputs.execute_reboot == true
+        run: |
+          set -euo pipefail
+          python3 controller/w1/aws_provider_reboot_controller.py build-receipt \
+            --preflight evidence/preflight-summary.json \
+            --event evidence/cloudtrail-match.json \
+            --caller-identity evidence/caller-identity.json \
+            --requested-at "$REQUESTED_AT" \
+            --api-returned-at "$API_RETURNED_AT" \
+            --github-run-id "$GITHUB_RUN_ID" \
+            --github-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --role-session "$ROLE_SESSION" \
+            --output evidence/provider-reboot-receipt-candidate.json
+          sha256sum evidence/provider-reboot-receipt-candidate.json > evidence/provider-reboot-receipt-candidate.sha256
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          r=json.load(open('evidence/provider-reboot-receipt-candidate.json'))
+          print('## W1 AWS provider reboot receipt candidate')
+          print(f"- classification: `{r['classification']}`")
+          print(f"- provider_instance_id: `{r['provider_instance_id']}`")
+          print(f"- action_id: `{r['action_id']}`")
+          print(f"- evidence_artifact_sha256: `{r['evidence_artifact_sha256']}`")
+          print('- **NONCLAIM:** receipt is not yet ingested/correlated with post-reboot heartbeat; persistent_worker_proof=false; w1_verified=false.')
+          PY
+
+      - name: Upload bounded provider evidence artifact
+        if: always()
+        uses: actions/upload-artifact@615b319bd27bb32c3d64dca6b6ed6974d5fbe653
+        with:
+          name: w1-aws-provider-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 90
