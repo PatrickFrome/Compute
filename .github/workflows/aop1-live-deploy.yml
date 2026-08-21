@@ -7,7 +7,6 @@ on:
     paths:
       - "orchestration/cloudflare/**"
       - ".github/workflows/aop1-live-deploy.yml"
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,42 +23,44 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Exchange GitHub OIDC for one-time AOP1 bootstrap bundle
+      - name: Exchange GitHub OIDC for deploy-only Cloudflare capability
         shell: bash
         env:
-          BROKER_URL: https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/metaengine-aop1-github-oidc-bootstrap-h205f22
+          BROKER_URL: https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/metaengine-aop1-github-oidc-deploy-h205f22
         run: |
           set -euo pipefail
           oidc="$(curl --silent --show-error --fail \
             -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=metaengine-h205f22-aop1" | jq -r '.value')"
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=metaengine-h205f22-aop1-deploy" | jq -r '.value')"
           test -n "$oidc" && test "$oidc" != "null"
           code="$(curl --silent --show-error \
             -X POST "$BROKER_URL" \
             -H "Authorization: Bearer $oidc" \
             -H 'Content-Type: application/json' \
-            -o /tmp/aop1-bootstrap.json \
+            -o /tmp/aop1-deploy-bundle.json \
             -w '%{http_code}')"
           if [ "$code" != "200" ]; then
-            reason="$(jq -r '.error // "bootstrap_denied"' /tmp/aop1-bootstrap.json 2>/dev/null || printf '%s' bootstrap_denied)"
-            echo "AOP1 bootstrap denied: $reason" >&2
-            rm -f /tmp/aop1-bootstrap.json
+            reason="$(jq -r '.error // "deploy_exchange_denied"' /tmp/aop1-deploy-bundle.json 2>/dev/null || printf '%s' deploy_exchange_denied)"
+            echo "AOP1 deploy exchange denied: $reason" >&2
+            rm -f /tmp/aop1-deploy-bundle.json
             exit 1
           fi
-          jq -e '.schema == "metaengine.compute.aop1-bootstrap-bundle.h205f22.v1" and .one_time == true' /tmp/aop1-bootstrap.json >/dev/null
-          while IFS='=' read -r name value; do
-            echo "::add-mask::$value"
-            printf '%s=%s\n' "$name" "$value" >> "$GITHUB_ENV"
-          done < <(jq -r '
-            [
-              "CLOUDFLARE_API_TOKEN=" + .bundle.cloudflare_api_token,
-              "CLOUDFLARE_ACCOUNT_ID=" + .bundle.cloudflare_account_id,
-              "SUPABASE_SERVICE_ROLE_KEY=" + .bundle.supabase_service_role,
-              "AOP_SUPERVISOR_TOKEN=" + .bundle.supervisor_token,
-              "CF_AI_TOKEN=" + .bundle.cloudflare_ai_token,
-              "AOP_WAKE_SECRET=" + .bundle.wake_secret
-            ] | .[]' /tmp/aop1-bootstrap.json)
-          rm -f /tmp/aop1-bootstrap.json
+          jq -e --arg sha "$GITHUB_SHA" '
+            .schema == "metaengine.compute.aop1-deploy-bundle.h205f22.v1"
+            and .oidc_exchange_one_time == true
+            and .github_sha == $sha
+            and .authority_effect == false
+          ' /tmp/aop1-deploy-bundle.json >/dev/null
+          cf_token="$(jq -r '.bundle.cloudflare_api_token' /tmp/aop1-deploy-bundle.json)"
+          cf_account="$(jq -r '.bundle.cloudflare_account_id' /tmp/aop1-deploy-bundle.json)"
+          test -n "$cf_token" && test "$cf_token" != "null"
+          test "$cf_account" != "null"
+          echo "::add-mask::$cf_token"
+          echo "::add-mask::$cf_account"
+          printf 'CLOUDFLARE_API_TOKEN=%s\n' "$cf_token" >> "$GITHUB_ENV"
+          printf 'CLOUDFLARE_ACCOUNT_ID=%s\n' "$cf_account" >> "$GITHUB_ENV"
+          rm -f /tmp/aop1-deploy-bundle.json
+          unset oidc cf_token cf_account
 
       - uses: actions/setup-node@v4
         with:
@@ -83,7 +84,7 @@ jobs:
             fi
           done
 
-      - name: Deploy Worker and upload runtime secrets
+      - name: Deploy Worker without exporting runtime secrets
         id: deploy
         uses: cloudflare/wrangler-action@v3
         with:
@@ -92,18 +93,11 @@ jobs:
           workingDirectory: orchestration/cloudflare
           wranglerVersion: "4.125.0"
           command: deploy
-          secrets: |
-            SUPABASE_SERVICE_ROLE_KEY
-            AOP_WAKE_SECRET
-            AOP_SUPERVISOR_TOKEN
-            CF_ACCOUNT_ID
-            CF_AI_TOKEN
-        env:
-          SUPABASE_SERVICE_ROLE_KEY: ${{ env.SUPABASE_SERVICE_ROLE_KEY }}
-          AOP_WAKE_SECRET: ${{ env.AOP_WAKE_SECRET }}
-          AOP_SUPERVISOR_TOKEN: ${{ env.AOP_SUPERVISOR_TOKEN }}
-          CF_ACCOUNT_ID: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
-          CF_AI_TOKEN: ${{ env.CF_AI_TOKEN }}
+
+      - name: Drop deploy capability from subsequent step environments
+        shell: bash
+        run: |
+          printf 'CLOUDFLARE_API_TOKEN=\nCLOUDFLARE_ACCOUNT_ID=\n' >> "$GITHUB_ENV"
 
       - name: Resolve deployment URL and verify orchestration health
         id: health
@@ -129,21 +123,11 @@ jobs:
             and .executor_configured == true
             and .supervisor_capability_configured == true
             and .github_configured == false
+            and .github_auth_mode == "none"
             and .snapshot.invariant == "NO_MANUAL_HANDOFF_V1"
           ' /tmp/aop1-health.json >/dev/null
-          echo "AOP1 live orchestration health: PASS; GitHub mutation executor intentionally blocked until a dedicated runtime credential is provisioned."
+          echo "AOP1 live orchestration health: PASS; deploy used OIDC deploy-only exchange and preserved existing Worker runtime secrets."
 
-      - name: Send authenticated autonomous activation wake
-        shell: bash
-        env:
-          AOP1_URL: ${{ steps.health.outputs.url }}
+      - name: Record delivery boundary
         run: |
-          set -euo pipefail
-          code="$(curl --silent --show-error --output /tmp/aop1-wake.json --write-out '%{http_code}' \
-            -X POST "$AOP1_URL/wake" \
-            -H "Authorization: Bearer $AOP_WAKE_SECRET" \
-            -H 'Content-Type: application/json' \
-            --data '{"reason":"LIVE_DEPLOY_ACTIVATION","source":"github-actions-oidc","payload":{"invariant":"NO_MANUAL_HANDOFF_V1","github_executor":"BLOCKED_MISSING_DEDICATED_RUNTIME_CREDENTIAL"}}')"
-          test "$code" = "202"
-          jq -e '.accepted == true and .wake.reason == "LIVE_DEPLOY_ACTIVATION"' /tmp/aop1-wake.json >/dev/null
-          echo "AOP1 live wake canary: ACCEPTED"
+          echo "AOP1 code deploy complete. Runtime reconciliation continues through the existing cron/queue/webhook control plane."
