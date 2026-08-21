@@ -34,11 +34,18 @@ jobs:
             -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=metaengine-h205f22-aop1" | jq -r '.value')"
           test -n "$oidc" && test "$oidc" != "null"
-          curl --silent --show-error --fail \
+          code="$(curl --silent --show-error \
             -X POST "$BROKER_URL" \
             -H "Authorization: Bearer $oidc" \
             -H 'Content-Type: application/json' \
-            -o /tmp/aop1-bootstrap.json
+            -o /tmp/aop1-bootstrap.json \
+            -w '%{http_code}')"
+          if [ "$code" != "200" ]; then
+            reason="$(jq -r '.error // "bootstrap_denied"' /tmp/aop1-bootstrap.json 2>/dev/null || printf '%s' bootstrap_denied)"
+            echo "AOP1 bootstrap denied: $reason" >&2
+            rm -f /tmp/aop1-bootstrap.json
+            exit 1
+          fi
           jq -e '.schema == "metaengine.compute.aop1-bootstrap-bundle.h205f22.v1" and .one_time == true' /tmp/aop1-bootstrap.json >/dev/null
           while IFS='=' read -r name value; do
             echo "::add-mask::$value"
@@ -124,7 +131,7 @@ jobs:
             and .github_configured == false
             and .snapshot.invariant == "NO_MANUAL_HANDOFF_V1"
           ' /tmp/aop1-health.json >/dev/null
-          echo "AOP1 live orchestration health: PASS; GitHub executor intentionally blocked until a dedicated runtime credential is provisioned."
+          echo "AOP1 live orchestration health: PASS; GitHub mutation executor intentionally blocked until a dedicated runtime credential is provisioned."
 
       - name: Send authenticated autonomous activation wake
         shell: bash
