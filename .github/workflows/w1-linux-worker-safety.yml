@@ -43,7 +43,6 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import os
           import pathlib
           import sys
           import tempfile
@@ -124,6 +123,8 @@ jobs:
           set -euo pipefail
           mkdir -p evidence
           unit_sha=$(sha256sum worker/native-linux/metaengine-worker.service | awk '{print $1}')
+          sudo install -d -o root -g root -m 0755 /opt/metaengine-w1-ci
+          sudo install -o root -g root -m 0555 worker/native-linux/w1_safety_probe.py /opt/metaengine-w1-ci/w1_safety_probe.py
           sudo systemd-run \
             --unit="metaengine-w1-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
             --quiet --wait --collect --pipe \
@@ -156,7 +157,7 @@ jobs:
             -p LimitFSIZE=16777216 \
             -p LimitAS=1073741824 \
             -p LimitCPU=60 \
-            /usr/bin/python3 "$GITHUB_WORKSPACE/worker/native-linux/w1_safety_probe.py" --mode full \
+            /usr/bin/python3 /opt/metaengine-w1-ci/w1_safety_probe.py --mode full \
             > evidence/host-probe.json
           python3 - <<'PY'
           import json
