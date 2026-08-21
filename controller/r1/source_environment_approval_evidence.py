@@ -161,6 +161,8 @@ def validate_approval_receipt(evidence: Any) -> dict[str, Any]:
             "environment_ids": normalized_ids,
             "comment_sha256": comment_sha,
         })
+    if normalized != approvals:
+        raise ApprovalEvidenceError("approval_receipt_normalization_invalid")
     if normalized != sorted(normalized, key=lambda x: (x["reviewer_user_id"], x["environment_ids"], x["comment_sha256"])):
         raise ApprovalEvidenceError("approval_receipt_order_invalid")
     if evidence.get("self_review_absent") is not True or evidence.get("approval_event_observed") is not True:
@@ -179,12 +181,20 @@ def validate_approval_receipt(evidence: Any) -> dict[str, Any]:
     return evidence
 
 
+def _approval_key(item: dict[str, Any]) -> tuple[int, tuple[int, ...], str]:
+    return (item["reviewer_user_id"], tuple(item["environment_ids"]), item["comment_sha256"])
+
+
 def validate_approval_evidence(evidence: Any, history: Any, initiator_actor_id: int) -> dict[str, Any]:
-    validate_approval_receipt(evidence)
-    expected = build_approval_evidence(history, initiator_actor_id)
-    if evidence != expected:
-        raise ApprovalEvidenceError("source_environment_approval_evidence_mismatch")
-    return expected
+    validated = validate_approval_receipt(evidence)
+    fresh = build_approval_evidence(history, initiator_actor_id)
+    if validated.get("initiator_actor_id") != fresh.get("initiator_actor_id"):
+        raise ApprovalEvidenceError("source_environment_approval_initiator_mismatch")
+    fresh_keys = {_approval_key(item) for item in fresh["approvals"]}
+    recorded_keys = {_approval_key(item) for item in validated["approvals"]}
+    if not recorded_keys.issubset(fresh_keys):
+        raise ApprovalEvidenceError("source_environment_approval_evidence_not_present_in_fresh_history")
+    return validated
 
 
 def main(argv: list[str] | None = None) -> int:
