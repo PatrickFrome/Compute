@@ -2,6 +2,7 @@ import { DurableObject, WorkflowEntrypoint, type WorkflowEvent, type WorkflowSte
 import type { AopLease, AopWake, Env, JsonObject, MessageBatch, ModelOutcome, WorkflowParams } from "./types";
 import { completeRun, deferRun, leaseRun, rpc, supervisorReturnAuthority } from "./supabase";
 import { executeRole, executorReady } from "./executor";
+import { githubWriteConfigured } from "./github";
 
 function json(value: unknown, status = 200): Response { return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json; charset=utf-8" } }); }
 async function safeEqual(a: string, b: string): Promise<boolean> {
@@ -40,8 +41,6 @@ export class ComputeFabricSupervisor extends DurableObject<Env> {
 export class AopRunWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> {
   async run(event: WorkflowEvent<WorkflowParams>, step: WorkflowStep): Promise<unknown> {
     const { workerId } = event.payload;
-    // Persist only strings at durable step boundaries. This avoids type/runtime ambiguity
-    // and makes replay state explicitly JSON-encoded.
     const leaseJson = await step.do("lease-aop-run", { retries: { limit: 5, delay: "5 seconds", backoff: "exponential" } }, async () => JSON.stringify(await leaseRun(this.env, workerId)));
     const lease = JSON.parse(leaseJson) as AopLease;
     if (!lease.leased) return { status: "IDLE" };
@@ -80,7 +79,7 @@ export default {
     try {
       if (request.method === "GET" && url.pathname === "/health") {
         const snapshot = await rpc<JsonObject>(env, "h205f22_aop1_snapshot_v1", {});
-        return json({ status: "ok", invariant: "NO_MANUAL_HANDOFF_V1", executor_configured: Boolean(env.CF_ACCOUNT_ID && env.CF_AI_TOKEN && env.AOP_MODEL), github_configured: Boolean(env.GITHUB_TOKEN), supervisor_capability_configured: Boolean(env.AOP_SUPERVISOR_TOKEN), snapshot });
+        return json({ status: "ok", invariant: "NO_MANUAL_HANDOFF_V1", executor_configured: Boolean(env.CF_ACCOUNT_ID && env.CF_AI_TOKEN && env.AOP_MODEL), github_configured: githubWriteConfigured(env), supervisor_capability_configured: Boolean(env.AOP_SUPERVISOR_TOKEN), snapshot });
       }
       if (request.method === "POST" && url.pathname === "/wake") {
         await requireBearer(request, env.AOP_WAKE_SECRET);
