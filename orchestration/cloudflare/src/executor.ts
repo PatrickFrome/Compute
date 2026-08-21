@@ -17,8 +17,7 @@ export function executorReady(env: Env, lease: AopLease): { ready: boolean; reas
 }
 
 function responseUrl(env: Env): string {
-  const base = `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/ai/v1/responses`;
-  return env.AOP_AI_GATEWAY_ID ? `${base}?gateway=${encodeURIComponent(env.AOP_AI_GATEWAY_ID)}` : base;
+  return `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/ai/v1/responses`;
 }
 
 function fn(name: string, description: string, parameters: Record<string, unknown>): Record<string, unknown> {
@@ -64,7 +63,13 @@ function systemInstructions(lease: AopLease): string {
 }
 
 async function callAi(env: Env, body: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const res = await fetch(responseUrl(env), { method: "POST", headers: { authorization: `Bearer ${env.CF_AI_TOKEN}`, "content-type": "application/json" }, body: JSON.stringify(body) });
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${env.CF_AI_TOKEN}`,
+    "content-type": "application/json",
+  };
+  const gatewayId = env.AOP_AI_GATEWAY_ID || (env.AOP_MODEL?.startsWith("@cf/") ? "default" : "");
+  if (gatewayId) headers["cf-aig-gateway-id"] = gatewayId;
+  const res = await fetch(responseUrl(env), { method: "POST", headers, body: JSON.stringify(body) });
   const text = await res.text();
   if (!res.ok) throw new Error(`ai_gateway_failed:${res.status}:${text.slice(0, 1600)}`);
   return JSON.parse(text) as Record<string, unknown>;
