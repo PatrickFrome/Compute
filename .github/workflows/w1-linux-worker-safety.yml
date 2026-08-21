@@ -125,6 +125,9 @@ jobs:
           unit_sha=$(sha256sum worker/native-linux/metaengine-worker.service | awk '{print $1}')
           sudo install -d -o root -g root -m 0755 /opt/metaengine-w1-ci
           sudo install -o root -g root -m 0555 worker/native-linux/w1_safety_probe.py /opt/metaengine-w1-ci/w1_safety_probe.py
+          if ! id metaengine-w1-ci >/dev/null 2>&1; then
+            sudo useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin metaengine-w1-ci
+          fi
           set +e
           sudo systemd-run \
             --unit="metaengine-w1-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
@@ -132,20 +135,23 @@ jobs:
             --setenv=METAENGINE_EVIDENCE_CLASSIFICATION=LIVE_EPHEMERAL_GITHUB_HOSTED \
             --setenv=METAENGINE_PERSISTENT_WORKER_PROOF=false \
             --setenv=METAENGINE_SECCOMP_POLICY_SHA256="$unit_sha" \
-            -p DynamicUser=yes \
+            -p User=metaengine-w1-ci \
+            -p Group=metaengine-w1-ci \
             -p NoNewPrivileges=yes \
+            -p CapabilityBoundingSet= \
+            -p AmbientCapabilities= \
             -p PrivateTmp=yes \
             -p PrivateDevices=yes \
             -p PrivateMounts=yes \
             -p ProtectSystem=strict \
-            -p ProtectHome=read-only \
+            -p ProtectHome=yes \
             -p ProtectKernelTunables=yes \
             -p ProtectKernelModules=yes \
             -p ProtectKernelLogs=yes \
             -p ProtectControlGroups=yes \
-            -p RestrictSUIDSGID=no \
             -p LockPersonality=yes \
             -p RestrictRealtime=yes \
+            -p RestrictNamespaces=yes \
             -p SystemCallArchitectures=native \
             -p 'SystemCallFilter=~@clock @cpu-emulation @debug @module @mount @obsolete @privileged @raw-io @reboot @swap' \
             -p SystemCallErrorNumber=EPERM \
