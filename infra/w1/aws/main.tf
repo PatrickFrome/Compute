@@ -1,9 +1,9 @@
 terraform {
-  required_version = ">= 1.7.0, < 2.0.0"
+  required_version = "= 1.15.8"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "= 6.57.1"
+      version = "= 6.60.0"
     }
   }
 }
@@ -95,11 +95,11 @@ resource "aws_security_group" "w1" {
 
 locals {
   tags = merge(var.tags, {
-    "metaengine:project"       = "H205F22"
-    "metaengine:milestone"     = "W1_PERSISTENT_LINUX_WORKER_SAFETY"
-    "metaengine:worker_id"     = var.worker_id
-    "metaengine:github_sha"    = var.worker_bundle_github_sha
-    "metaengine:authority"     = "noncanonical-worker"
+    "metaengine:project"        = "H205F22"
+    "metaengine:milestone"      = "W1_PERSISTENT_LINUX_WORKER_SAFETY"
+    "metaengine:worker_id"      = var.worker_id
+    "metaengine:github_sha"     = var.worker_bundle_github_sha
+    "metaengine:authority"      = "noncanonical-worker"
     "metaengine:execution_tier" = "persistent-host"
   })
 
