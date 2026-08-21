@@ -45,7 +45,9 @@ assert "to anon,authenticated using(false) with check(false)" in sql
 assert "EXECUTOR_AVAILABLE" in index_ts
 assert "AOP_SUPERVISOR_TOKEN_MISSING" in executor_ts
 assert "AI_EXECUTOR_NOT_CONFIGURED" in executor_ts
-assert "GITHUB_TOKEN_MISSING" in executor_ts
+assert "GITHUB_WRITE_EXECUTOR_AVAILABLE" in executor_ts
+assert "waiting_event_requires_mutation_plan" in executor_ts
+assert "waiting_event_requires_wake_condition" in executor_ts
 assert "main_branch_write_forbidden" in github_ts
 assert "invalid_repo_path" in github_ts
 assert "github_pull_request_files" in executor_ts
@@ -55,11 +57,15 @@ assert "Checkpoint seal and main merge are intentionally not exposed" in executo
 assert "JSON.stringify(await leaseRun" in index_ts
 assert "JSON.stringify(await executeRole" in index_ts
 
-# Public GitHub reads are tokenless, but every mutation and every write tool remain fenced.
+# Public GitHub reads are tokenless. Missing mutation credentials must not prevent
+# implementers from doing read-only analysis and staging a deterministic mutation plan.
 assert 'const mutation = method !== "GET" && method !== "HEAD"' in github_ts
 assert "github_token_required_for_mutation" in github_ts
-assert 'lease.role_kind === "IMPLEMENTER" && !env.GITHUB_TOKEN' in executor_ts
-assert 'if (lease.role_kind === "IMPLEMENTER")' in executor_ts
+assert 'lease.role_kind === "IMPLEMENTER" && !env.GITHUB_TOKEN' not in executor_ts
+assert 'lease.role_kind === "IMPLEMENTER" && env.GITHUB_TOKEN' in executor_ts
+assert '"WAITING_EVENT"' in executor_ts
+assert "output.mutation_plan" in executor_ts
+assert 'wake_condition=GITHUB_WRITE_EXECUTOR_AVAILABLE' in executor_ts
 assert "github_write_tool_forbidden_for_role" in executor_ts
 assert "Analyst is strictly read-only in GitHub tools" in executor_ts
 
