@@ -138,14 +138,103 @@ Tests must prove:
 
 ## Mandatory research after implementation before merge
 
-After the first independent CI run, re-check and record:
+### Independent CI result before research-after
 
-1. whether `trusted_root.jsonl` freshness/revocation semantics require a package-generation timestamp or stronger freshness claim;
-2. whether omitting ciphertext still leaves enough information to perform future offline attestation verification after materializing exact provider bytes;
-3. whether the DB projection matches all current table columns/insert guards without smuggling authority into `evidence` JSON;
-4. whether the projected seven-day window is correctly conservative for two independently timed readbacks;
-5. whether USTAR normalization and raw-evidence preservation create any reproducibility or pathname/size issue;
-6. whether provider readiness receipts need to remain in the final package after provider results exist;
-7. whether STEP08 should remain a pure compiler or gain a separate future Supervisor ingestion step.
+The first STEP08 run failed before entering STEP08 semantics because its synthetic STEP05B HEAD response omitted the user metadata that the already-merged STEP05B validator requires. The fixture was corrected to model the real `metaengine-sha256` and `metaengine-contract` metadata written by STEP05. No production compiler behavior changed.
 
-Merge is forbidden until research-after is appended here and STEP08 CI + relevant regressions + Compute Fabric Governance succeed again on the exact final head.
+The next independent run on `4cb9e7a7a38a8385a97f3c8549b043634067a900` succeeded, as did Compute Fabric Governance. Those runs are pre-research-after signals only and are not the merge gate.
+
+### 1. Trusted-root freshness must not be inferred from deterministic package metadata
+
+Post-step GitHub documentation re-check confirms:
+
+- `trusted_root.jsonl` has no built-in expiration;
+- a root snapshot cannot tell an offline verifier whether key material was revoked after the snapshot was generated;
+- GitHub recommends generating a new root when importing new signed material into an offline environment.
+
+Therefore STEP08 must not invent a freshness claim from filesystem mtime, package mtime, or a package-generation timestamp. The compiler remains deterministic and treats the included root as portable verification material, not proof of current revocation status.
+
+The existing manifest already states that the compiler does not perform cryptographic re-verification and that offline re-verification is required before authority. No additional timestamp is added because an unsigned compiler timestamp would not solve revocation freshness.
+
+Operational rule for the future Supervisor verifier: if online access is available at import/ingestion time, obtain a fresh trusted root before the authority decision; if fully offline, the verifier must explicitly accept the revocation-knowledge limitation.
+
+Source:
+- https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/verify-attestations-offline
+
+### 2. Ciphertext omission is compatible with future offline verification
+
+GitHub's offline command takes an artifact path plus `--bundle` and `--custom-trusted-root`. It does not require that the artifact bytes live in the same archive as the bundle/root.
+
+STEP08 therefore has enough information to re-establish the artifact input later:
+
+1. choose one recorded version-pinned provider locator;
+2. materialize that exact version;
+3. recompute SHA-256 and byte count and require equality with the package ciphertext identity;
+4. run `gh attestation verify` against the preserved bundle/root (or a refreshed root, if online).
+
+Keeping the large ciphertext out of the evidence tar remains correct and prevents the evidence package from being mistaken for a third continuity domain.
+
+Source:
+- https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/verify-attestations-offline
+
+### 3. DB projection matches the live insert shape without owning generated IDs
+
+Post-step production-schema inspection confirms:
+
+- `compute_continuity_object_h205f22.object_id` defaults to `gen_random_uuid()`;
+- `compute_continuity_observation_h205f22.observation_id` is `GENERATED ALWAYS` identity backed by its sequence;
+- observations require a resolved `object_id` foreign key;
+- domain/object/observation rows remain append-only through immutable triggers;
+- the observation insert guard independently normalizes/checks VERIFIED status against persisted/readback timestamps, expected SHA-256 and expected bytes.
+
+The STEP08 projection therefore correctly emits an object identity selector and does not manufacture database IDs. A later Supervisor ingestion step must insert or exact-match the object, resolve its DB-generated UUID, then use that UUID for observation inserts.
+
+The provider result is carried inside proposed observation `evidence` only as supporting audit material. `evidence` JSON cannot create R2 because readiness ignores its claim fields and derives state from the immutable structured columns.
+
+### 4. Seven-day projection is conservative
+
+For two independently timed readbacks, both remain simultaneously current only until the earlier readback reaches the DB's seven-day age boundary. STEP08 therefore computes:
+
+`min(readback_at_A + 7 days, readback_at_B + 7 days)`
+
+and preserves both original timestamps unchanged.
+
+At ingestion, the Supervisor must compare the actual effective time to this boundary. The package never substitutes build/import time into either observation.
+
+### 5. USTAR normalization is safe for the current package envelope
+
+Current Python documentation states USTAR supports pathnames up to roughly 256 characters and individual files up to 8 GiB.
+
+All STEP08 paths are static and far below the pathname limit. The compiler additionally caps ordinary JSON inputs at 4 MiB and JSONL attestation/root inputs at 16 MiB, far below the USTAR file-size ceiling. Normalized mtime/uid/gid/mode plus sorted entry order therefore preserves deterministic bytes without requiring PAX/GNU extensions.
+
+Source:
+- https://docs.python.org/3/library/tarfile.html
+
+### 6. Provider readiness receipts remain in the package
+
+They are not required by the DB R2 arithmetic, but they preserve a different evidence class from provider results:
+
+- provider results prove the exact object version, COMPLIANCE retention and materialized readback;
+- readiness receipts capture surrounding versioning/Object Lock/lifecycle/session-scope or B2 bucket/key-scope configuration at execution time.
+
+Dropping readiness receipts would make later audit depend on re-querying mutable provider configuration. They therefore remain supporting, non-authoritative package entries.
+
+### 7. Supervisor ingestion must remain a separate step
+
+STEP08 remains a pure compiler. Combining package construction with database mutation would collapse three independent checks into one trust zone:
+
+- offline/portable source attestation re-verification;
+- provider evidence and current readback freshness validation;
+- append-only DB insertion and subsequent DB-derived R2 evaluation.
+
+The next authority-bearing work should therefore be a separate Supervisor ingestion/verifier step. It must fail closed if the package is stale, if Sigstore re-verification fails, if existing domain/object identities differ, or if any DB insert guard normalizes an observation away from VERIFIED.
+
+## Final merge gate
+
+After this research-after commit, all earlier CI results are stale for merge purposes. The exact final head must again pass:
+
+- R1 Final R2 Evidence Package;
+- STEP05B/STEP06/STEP07 regressions contained in that workflow;
+- Compute Fabric Governance.
+
+Strict nonclaims remain unchanged: no live provider call, no ciphertext packaging, no Supabase continuity write, no R2/R3 transition and no persisted seal.
