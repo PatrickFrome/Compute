@@ -1,0 +1,78 @@
+name: R1 Materialized Readback Verifier
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/r1/materialized_readback_verifier.py'
+      - 'tests/test_r1_materialized_readback_verifier.py'
+      - 'research/R1_STEP02_TWO_DOMAIN_MATERIALIZED_READBACK.md'
+      - '.github/workflows/r1-materialized-readback-verifier.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-readback-verifier:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile and run adversarial verifier tests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/r1/materialized_readback_verifier.py
+          python3 -m unittest tests.test_r1_materialized_readback_verifier -v
+
+      - name: Enforce offline non-authoritative verifier contract
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+
+          path = Path('controller/r1/materialized_readback_verifier.py')
+          text = path.read_text()
+          tree = ast.parse(text)
+          imports = set()
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Import):
+                  imports.update(alias.name.split('.')[0] for alias in node.names)
+              elif isinstance(node, ast.ImportFrom) and node.module:
+                  imports.add(node.module.split('.')[0])
+
+          forbidden_imports = {'boto3', 'botocore', 'requests', 'httpx', 'urllib', 'socket', 'subprocess', 'supabase'}
+          assert not (imports & forbidden_imports), imports & forbidden_imports
+
+          forbidden_tokens = [
+              'AWS_' + 'ACCESS_KEY_ID',
+              'AWS_' + 'SECRET_ACCESS_KEY',
+              'SUPABASE_' + 'SERVICE_ROLE',
+              'CLOUDFLARE_' + 'API_TOKEN',
+              'B2_' + 'APPLICATION_KEY',
+          ]
+          assert all(token not in text for token in forbidden_tokens), forbidden_tokens
+
+          required = [
+              'LOCALLY_COMPUTED_SHA256_OVER_MATERIALIZED_BYTES',
+              'etag_used_as_content_proof',
+              'COMPLIANCE_NON_SHORTENABLE',
+              'ADMIN_REVOCABLE_BUCKET_RULE',
+              'MATERIALIZED_READBACK_RECEIPT_CANDIDATE',
+              'TWO_DOMAIN_READBACK_QUORUM_CANDIDATE',
+              'persisted_seal_allowed',
+          ]
+          assert all(token in text for token in required)
+
+          # Fail if the implementation ever flips its explicit non-authority flags.
+          assert '"r2_proven": False' in text
+          assert '"r3_proven": False' in text
+          assert '"persisted_seal_allowed": False' in text
+          assert '"authority_effect": False' in text
+          assert '"etag_used_as_content_proof": False' in text
+          PY
