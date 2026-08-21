@@ -1,5 +1,5 @@
 import type { AopLease, Env, JsonObject, ModelOutcome } from "./types";
-import { pullRequest, pullRequestFiles, readFile, readFileAtRef, workflowRuns, writeFile } from "./github";
+import { githubWriteConfigured, pullRequest, pullRequestFiles, readFile, readFileAtRef, workflowRuns, writeFile } from "./github";
 import { rpc, supervisorAdoptClaim, supervisorReturnAuthority } from "./supabase";
 
 const MAX_TOOL_ROUNDS = 18;
@@ -41,7 +41,7 @@ function toolsFor(env: Env, lease: AopLease): Array<Record<string, unknown>> {
     fn("github_workflow_runs", "Read recent workflow runs for the role-owned branch.", { type: "object", properties: {}, additionalProperties: false }),
     fn("aop_snapshot", "Read the current AOP snapshot. Read-only.", { type: "object", properties: {}, additionalProperties: false }),
   ];
-  if (lease.role_kind === "IMPLEMENTER" && env.GITHUB_TOKEN) {
+  if (lease.role_kind === "IMPLEMENTER" && githubWriteConfigured(env)) {
     tools.push(fn("github_write_file", "Create or replace a UTF-8 file on the role-owned branch. Requires a dedicated GitHub runtime credential; main is forbidden.", { type: "object", properties: { path: { type: "string" }, content: { type: "string" }, message: { type: "string" } }, required: ["path", "content", "message"], additionalProperties: false }));
   }
   if (lease.role_kind === "SUPERVISOR") {
@@ -56,8 +56,8 @@ function toolsFor(env: Env, lease: AopLease): Array<Record<string, unknown>> {
 function systemInstructions(env: Env, lease: AopLease): string {
   const valid = lease.role_kind === "IMPLEMENTER" ? ["CONTINUE", "EVIDENCE_READY", "WAITING_EVENT", "FAILED"] : lease.role_kind === "ANALYST" ? ["ACCEPT", "ACCEPT_WITH_REBASE", "REQUEST_CHANGES", "HOLD", "REJECT"] : ["ACCEPT", "RETURN", "WAIT", "VERIFIED", "REJECT"];
   const writeCapability = lease.role_kind === "IMPLEMENTER"
-    ? (env.GITHUB_TOKEN
-      ? "GitHub write capability is available. Use github_write_file only on the role-owned branch and only for the required milestone changes."
+    ? (githubWriteConfigured(env)
+      ? "GitHub write capability is available through a dedicated runtime credential. Use github_write_file only on the role-owned branch and only for the required milestone changes."
       : "GitHub write capability is unavailable. Do not fail solely for that. Complete read-only analysis and return WAITING_EVENT with wake_condition=GITHUB_WRITE_EXECUTOR_AVAILABLE. output.mutation_plan MUST be an object with a changes array; each change must contain path, full UTF-8 content, and commit message. Include verification steps and research evidence. Do not claim proposed files were written or post-mutation tests ran.")
     : "";
   return [
@@ -131,7 +131,7 @@ async function runTool(env: Env, lease: AopLease, workerId: string, call: ToolCa
     case "github_read_file_ref": return readFileAtRef(env, String(args.path), String(args.ref));
     case "github_write_file":
       if (lease.role_kind !== "IMPLEMENTER") throw new Error("github_write_tool_forbidden_for_role");
-      if (!env.GITHUB_TOKEN) throw new Error("github_token_required_for_mutation");
+      if (!githubWriteConfigured(env)) throw new Error("github_mutation_credential_missing");
       return writeFile(env, lease, String(args.path), String(args.content), String(args.message));
     case "github_pull_request": return pullRequest(env, Number(args.number));
     case "github_pull_request_files": return pullRequestFiles(env, Number(args.number));
