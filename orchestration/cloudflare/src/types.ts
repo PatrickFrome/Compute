@@ -23,7 +23,13 @@ export interface ModelOutcome {
 export interface WorkflowParams { wake: AopWake; workerId: string; }
 export interface Env {
   SUPABASE_URL: string; SUPABASE_SERVICE_ROLE_KEY: string; AOP_WAKE_SECRET: string;
-  AOP_SUPERVISOR_TOKEN?: string; GITHUB_TOKEN?: string; GITHUB_WEBHOOK_SECRET?: string;
+  AOP_SUPERVISOR_TOKEN?: string;
+  GITHUB_TOKEN?: string;
+  GITHUB_APP_CLIENT_ID?: string;
+  GITHUB_APP_ID?: string;
+  GITHUB_APP_INSTALLATION_ID?: string;
+  GITHUB_APP_PRIVATE_KEY?: string;
+  GITHUB_WEBHOOK_SECRET?: string;
   CF_ACCOUNT_ID?: string; CF_AI_TOKEN?: string; AOP_MODEL?: string; AOP_AI_GATEWAY_ID?: string;
   AOP_SUPERVISOR: DurableObjectNamespace; AOP_RUN_WORKFLOW: WorkflowBinding; AOP_WAKE_QUEUE: QueueBinding<AopWake>;
 }
