@@ -1,4 +1,4 @@
-import type { AopLease, Env, ModelOutcome } from "./types";
+import type { AopLease, Env, JsonObject, ModelOutcome } from "./types";
 import { pullRequest, pullRequestFiles, readFile, readFileAtRef, workflowRuns, writeFile } from "./github";
 import { rpc, supervisorAdoptClaim, supervisorReturnAuthority } from "./supabase";
 
@@ -99,15 +99,15 @@ async function runTool(env: Env, lease: AopLease, workerId: string, call: ToolCa
     case "github_pull_request": return pullRequest(env, Number(args.number));
     case "github_pull_request_files": return pullRequestFiles(env, Number(args.number));
     case "github_workflow_runs": return workflowRuns(env, lease);
-    case "aop_snapshot": return rpc(env, "h205f22_aop1_snapshot_v1", {});
+    case "aop_snapshot": return rpc<JsonObject>(env, "h205f22_aop1_snapshot_v1", {});
     case "supervisor_adopt_active_claim": if (lease.role_kind !== "SUPERVISOR") throw new Error("supervisor_tool_forbidden"); return supervisorAdoptClaim(env, lease, workerId);
-    case "supervisor_return_authority": if (lease.role_kind !== "SUPERVISOR") throw new Error("supervisor_tool_forbidden"); return supervisorReturnAuthority(env, lease, workerId, (args.instructions ?? {}) as Record<string, unknown>);
+    case "supervisor_return_authority": if (lease.role_kind !== "SUPERVISOR") throw new Error("supervisor_tool_forbidden"); return supervisorReturnAuthority(env, lease, workerId, (args.instructions ?? {}) as JsonObject);
     default: throw new Error(`unknown_tool:${call.name}`);
   }
 }
 
 function validateOutcome(lease: AopLease, value: unknown): ModelOutcome {
-  if (!value || typeof value !== "object") throw new Error("model_outcome_not_object");
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("model_outcome_not_object");
   const o = value as Record<string, unknown>;
   if (typeof o.result_code !== "string" || !o.output || typeof o.output !== "object" || Array.isArray(o.output)) throw new Error("model_outcome_shape_invalid");
   const allowed = lease.role_kind === "IMPLEMENTER" ? new Set(["CONTINUE", "EVIDENCE_READY", "FAILED"]) : lease.role_kind === "ANALYST" ? new Set(["ACCEPT", "ACCEPT_WITH_REBASE", "REQUEST_CHANGES", "HOLD", "REJECT"]) : new Set(["ACCEPT", "RETURN", "WAIT", "VERIFIED", "REJECT"]);
@@ -116,13 +116,13 @@ function validateOutcome(lease: AopLease, value: unknown): ModelOutcome {
     const out = o.output as Record<string, unknown>;
     for (const k of ["summary", "evidence", "research"]) if (!out[k] || typeof out[k] !== "object" || Array.isArray(out[k])) throw new Error(`evidence_ready_missing_${k}`);
   }
-  return { result_code: o.result_code as ModelOutcome["result_code"], output: o.output as Record<string, unknown>, github_sha: typeof o.github_sha === "string" ? o.github_sha : null, wake_condition: typeof o.wake_condition === "string" ? o.wake_condition : null };
+  return { result_code: o.result_code as ModelOutcome["result_code"], output: o.output as JsonObject, github_sha: typeof o.github_sha === "string" ? o.github_sha : null, wake_condition: typeof o.wake_condition === "string" ? o.wake_condition : null };
 }
 
 export async function executeRole(env: Env, lease: AopLease, workerId: string): Promise<ModelOutcome> {
   if (lease.role_kind === "SUPERVISOR" && lease.input?.reason === "AUTHORITY_REBIND_REQUIRED") {
     const adoption = await supervisorAdoptClaim(env, lease, workerId);
-    return { result_code: "RETURN", output: { automation: "AUTHORITY_REBIND_APPLIED", adoption, requested_by: lease.input }, github_sha: lease.expected_github_sha ?? null, wake_condition: null };
+    return { result_code: "RETURN", output: { automation: "AUTHORITY_REBIND_APPLIED", adoption, requested_by: lease.input ?? {} }, github_sha: lease.expected_github_sha ?? null, wake_condition: null };
   }
 
   let response = await callAi(env, { model: env.AOP_MODEL, instructions: systemInstructions(lease), input: [{ role: "user", content: [{ type: "input_text", text: JSON.stringify({ lease }) }] }], tools: toolsFor(lease), parallel_tool_calls: false, store: false });
