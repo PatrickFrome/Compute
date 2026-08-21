@@ -143,7 +143,7 @@ jobs:
             -p ProtectKernelModules=yes \
             -p ProtectKernelLogs=yes \
             -p ProtectControlGroups=yes \
-            -p RestrictSUIDSGID=yes \
+            -p RestrictSUIDSGID=no \
             -p LockPersonality=yes \
             -p RestrictRealtime=yes \
             -p SystemCallArchitectures=native \
