@@ -181,7 +181,9 @@ class LiveRecoverySourceAttestationTests(unittest.TestCase):
             self.assertFalse(result["r2_proven"])
             self.assertTrue(result["final_r2_evidence_binding_required"])
 
-            verification[0]["verificationResult"]["statement"]["predicate"]["source"]["run_id"] = 124
+            forged = verification[0]["verificationResult"]["statement"]["predicate"]
+            forged["source"]["run_id"] = 124
+            self_hash(forged, "predicate_sha256")
             with self.assertRaisesRegex(mod.SourceAttestationError, "source_binding_mismatch:run_id"):
                 mod.validate_verification_result(verification=verification, ciphertext=ciphertext, envelope_receipt_path=envelope, expected_source_head_sha="1" * 40, expected_source_run_id=123)
 
