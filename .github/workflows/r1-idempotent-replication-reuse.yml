@@ -1,0 +1,75 @@
+name: R1 Idempotent Provider Version Reuse
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/r1/idempotent_exact_ciphertext_replication.py'
+      - 'tests/test_r1_idempotent_exact_ciphertext_replication.py'
+      - 'research/R1_STEP05A_IDEMPOTENT_PROVIDER_VERSION_REUSE.md'
+      - '.github/workflows/r1-idempotent-replication-reuse.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-idempotent-reuse:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout exact workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile and run idempotency adversarial tests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/r1/idempotent_exact_ciphertext_replication.py
+          python3 -m unittest tests.test_r1_idempotent_exact_ciphertext_replication -v
+
+      - name: Re-run STEP05 regression suite
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_r1_exact_ciphertext_replication_controller -v
+
+      - name: Enforce fail-closed authority and credential boundary
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('controller/r1/idempotent_exact_ciphertext_replication.py').read_text()
+          assert 'REUSED_EXISTING_VERSION' in p
+          assert 'CREATED_NEW_VERSION' in p
+          assert 'validate_envelope_receipt' in p
+          assert 'get-object-retention' not in p or 'build_retention_command' in p
+          assert 'verify_materialized_readback' in p
+          assert 'r2_proven": False' in p
+          assert 'persisted_seal_allowed": False' in p
+          forbidden = [
+              'AWS_' + 'ACCESS_KEY_ID',
+              'AWS_' + 'SECRET_ACCESS_KEY',
+              'B2_' + 'APPLICATION_KEY',
+              'secrets' + '.',
+              'supabase',
+              'boto3',
+              'botocore',
+              'requests',
+          ]
+          assert all(token not in p for token in forbidden), forbidden
+          PY
+
+      - name: Prove PR CI cannot execute provider APIs
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          wf = Path('.github/workflows/r1-idempotent-replication-reuse.yml').read_text()
+          forbidden = [
+              'workflow_' + 'dispatch',
+              'secrets' + '.',
+              'aws' + ' s3',
+              'id-token' + ': write',
+          ]
+          assert all(token not in wf for token in forbidden), forbidden
+          PY
