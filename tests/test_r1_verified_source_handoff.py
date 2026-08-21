@@ -24,6 +24,8 @@ HEAD = "1" * 40
 VERIFICATION_ARTIFACT_ID = 3003
 READINESS_ARTIFACT_ID = 4004
 READINESS_SHA = "9" * 64
+APPROVAL_ARTIFACT_ID = 4005
+APPROVAL_SHA = "8" * 64
 
 
 def canon(value):
@@ -78,13 +80,7 @@ def build_fixture(root: Path):
     ciphertext.write_bytes(b"exact encrypted source bytes")
     cipher_sha = hashlib.sha256(ciphertext.read_bytes()).hexdigest()
 
-    bundle = {
-        "bundle_sha256": "b" * 64,
-        "bundle_bytes": 321,
-        "manifest_sha256": "c" * 64,
-        "bundle_receipt_sha256": "d" * 64,
-        "storage_api_objects_included": False,
-    }
+    bundle = {"bundle_sha256": "b" * 64, "bundle_bytes": 321, "manifest_sha256": "c" * 64, "bundle_receipt_sha256": "d" * 64, "storage_api_objects_included": False}
     envelope = {
         "schema": "metaengine.compute.r1-recovery-encryption-envelope.h205f22.v1",
         "classification": "ENCRYPTED_RECOVERY_ARTIFACT_CANDIDATE_NONAUTHORITATIVE",
@@ -100,13 +96,11 @@ def build_fixture(root: Path):
     envelope_path = root / "envelope.json"
     envelope_path.write_text(json.dumps(envelope))
 
-    artifacts = {
-        "artifacts": [
-            artifact(1001, "r1-recovery-ciphertext.age", len(ciphertext.read_bytes()), "2" * 64),
-            artifact(1002, "r1-recovery-envelope-receipt.json", len(envelope_path.read_bytes()), "3" * 64),
-            artifact(VERIFICATION_ARTIFACT_ID, "r1-recovery-source-verification.json", 900, "4" * 64),
-        ]
-    }
+    artifacts = {"artifacts": [
+        artifact(1001, "r1-recovery-ciphertext.age", len(ciphertext.read_bytes()), "2" * 64),
+        artifact(1002, "r1-recovery-envelope-receipt.json", len(envelope_path.read_bytes()), "3" * 64),
+        artifact(VERIFICATION_ARTIFACT_ID, "r1-recovery-source-verification.json", 900, "4" * 64),
+    ]}
     preflight = g.validate_preflight(
         source_run=run(), artifacts=artifacts,
         aws_environment=env("r1-aws-durability-proof"), b2_environment=env("r1-b2-durability-proof"),
@@ -127,10 +121,18 @@ def build_fixture(root: Path):
         "verified_timestamp_count": 1,
         "source_attestation_verified": True,
         "source_environment_evidence": {
-            "artifact_id": READINESS_ARTIFACT_ID,
-            "artifact_name": h.SOURCE_ENVIRONMENT_READINESS_ARTIFACT_NAME,
-            "readiness_sha256": READINESS_SHA,
             "environment": h.SOURCE_ENVIRONMENT,
+            "configuration": {
+                "artifact_id": READINESS_ARTIFACT_ID,
+                "artifact_name": h.SOURCE_ENVIRONMENT_READINESS_ARTIFACT_NAME,
+                "readiness_sha256": READINESS_SHA,
+            },
+            "approval": {
+                "artifact_id": APPROVAL_ARTIFACT_ID,
+                "artifact_name": h.SOURCE_ENVIRONMENT_APPROVAL_ARTIFACT_NAME,
+                "approval_receipt_sha256": APPROVAL_SHA,
+                "approved_review_count": 1,
+            },
             "source_environment_binding_verified": True,
         },
         "authority_effect": False,
@@ -150,8 +152,10 @@ class VerifiedSourceHandoffTests(unittest.TestCase):
             out=h.validate_handoff(preflight=preflight,artifacts=artifacts,source_verification_artifact_id=VERIFICATION_ARTIFACT_ID,source_verification=verification,ciphertext=ciphertext,envelope_receipt=envelope)
             self.assertTrue(out["source_attestation_verified"])
             self.assertTrue(out["source_environment_binding_verified"])
+            self.assertTrue(out["source_environment_approval_verified"])
             self.assertEqual(out["source"]["source_environment_readiness_artifact_id"], READINESS_ARTIFACT_ID)
-            self.assertEqual(out["source"]["source_environment_readiness_sha256"], READINESS_SHA)
+            self.assertEqual(out["source"]["source_environment_approval_artifact_id"], APPROVAL_ARTIFACT_ID)
+            self.assertEqual(out["source"]["source_environment_approval_sha256"], APPROVAL_SHA)
             self.assertTrue(out["provider_credentials_eligible_after_environment_and_readiness_gates"])
             self.assertFalse(out["provider_execution_authorized"])
             self.assertFalse(out["r2_proven"])
@@ -162,13 +166,27 @@ class VerifiedSourceHandoffTests(unittest.TestCase):
             ciphertext,envelope,artifacts,preflight,verification=build_fixture(Path(td))
             verification.pop("source_environment_evidence")
             self_hash(verification,"verification_receipt_sha256")
-            with self.assertRaisesRegex(h.HandoffError,"source_environment_evidence_missing"):
+            with self.assertRaisesRegex(h.HandoffError,"source_environment_evidence_missing_or_invalid"):
                 h.validate_handoff(preflight=preflight,artifacts=artifacts,source_verification_artifact_id=VERIFICATION_ARTIFACT_ID,source_verification=verification,ciphertext=ciphertext,envelope_receipt=envelope)
 
             ciphertext,envelope,artifacts,preflight,verification=build_fixture(Path(td))
             verification["source_environment_evidence"]["source_environment_binding_verified"] = False
             self_hash(verification,"verification_receipt_sha256")
             with self.assertRaisesRegex(h.HandoffError,"source_environment_binding_not_verified"):
+                h.validate_handoff(preflight=preflight,artifacts=artifacts,source_verification_artifact_id=VERIFICATION_ARTIFACT_ID,source_verification=verification,ciphertext=ciphertext,envelope_receipt=envelope)
+
+    def test_missing_or_invalid_approval_evidence_is_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            ciphertext,envelope,artifacts,preflight,verification=build_fixture(Path(td))
+            verification["source_environment_evidence"].pop("approval")
+            self_hash(verification,"verification_receipt_sha256")
+            with self.assertRaisesRegex(h.HandoffError,"components_missing"):
+                h.validate_handoff(preflight=preflight,artifacts=artifacts,source_verification_artifact_id=VERIFICATION_ARTIFACT_ID,source_verification=verification,ciphertext=ciphertext,envelope_receipt=envelope)
+
+            ciphertext,envelope,artifacts,preflight,verification=build_fixture(Path(td))
+            verification["source_environment_evidence"]["approval"]["approved_review_count"] = 0
+            self_hash(verification,"verification_receipt_sha256")
+            with self.assertRaisesRegex(h.HandoffError,"approved_review_count"):
                 h.validate_handoff(preflight=preflight,artifacts=artifacts,source_verification_artifact_id=VERIFICATION_ARTIFACT_ID,source_verification=verification,ciphertext=ciphertext,envelope_receipt=envelope)
 
     def test_wrong_or_expired_verification_artifact_is_rejected(self):
