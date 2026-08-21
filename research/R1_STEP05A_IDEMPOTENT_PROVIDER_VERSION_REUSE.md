@@ -111,6 +111,63 @@ Adversarial cases include:
 - corrupt materialized GET bytes are rejected;
 - a create race can recover only through a fully verified existing version.
 
+## Post-step research after implementation
+
+### Delete markers are an explicit “missing current object” state
+
+AWS documents that when the current version is a delete marker, unversioned `HeadObject`/`GetObject` behaves as if the object were deleted. HEAD identifies the delete-marker state and normal reads return a not-found response. A protected retained data version still exists underneath the marker. AWS also documents that a simple `DeleteObject` in a versioned bucket inserts a new delete marker rather than permanently deleting a retained version.
+
+Sources:
+- https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html
+- https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeleteMarker.html
+- https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObject.html
+
+Backblaze B2 has the same relevant S3-compatible model: deleting by key without a `versionId` creates a delete marker that becomes current. Its native model calls this a hide marker; a download by name then returns 404 while historical versions remain addressable by version/file ID.
+
+Sources:
+- https://www.backblaze.com/apidocs/s3-delete-object
+- https://www.backblaze.com/docs/cloud-storage-file-versions
+
+Adopted result: STEP05A treats a current delete/hide marker as “no reusable current data object.” A later conditional/new upload may create a new current version. The controller must never guess which hidden historical version to resurrect; historical reuse is allowed only when an explicit version identity is already part of trusted evidence.
+
+### Recovery credentials should not be able to create delete/hide state
+
+Object Lock protects retained versions against permanent deletion, but AWS explicitly notes that an unversioned delete request can still add a delete marker above a protected version. AWS recommends explicit denial of `s3:DeleteObject`, `s3:DeleteObjectVersion`, and lifecycle-configuration mutation where deletion must be prevented.
+
+Sources:
+- https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeletingObjects.html
+- https://docs.aws.amazon.com/AmazonS3/latest/userguide/troubleshooting-versioning.html
+
+Adopted live-plane requirement: the dedicated recovery writer role/key must not have delete, delete-version, lifecycle-mutation, or Object-Lock-bypass authority. STEP06 environment preflight must treat provider policy configuration as a separate prerequisite rather than assuming COMPLIANCE retention alone prevents a current delete marker.
+
+### B2 lifecycle policy is part of the continuity configuration
+
+Backblaze lifecycle rules can automatically hide current files and delete older versions. B2's S3-compatible lifecycle representation maps hide to S3 `Expiration` and prior-version deletion to `NoncurrentVersionExpiration`.
+
+Sources:
+- https://www.backblaze.com/docs/cloud-storage-lifecycle-rules
+- https://www.backblaze.com/apidocs/s3-get-lifecycle-configuration
+
+Adopted live-plane requirement: the recovery prefix must have lifecycle settings reviewed so it cannot be automatically hidden or have retained evidence versions removed before the intended continuity horizon. A short-lived object application key must not have bucket-management capability to change those rules.
+
+### Serialize live attempts instead of relying on idempotency alone
+
+GitHub Actions concurrency guarantees at most one running workflow/job per concurrency group. Current GitHub Actions also supports `queue: max`, allowing up to 100 pending runs rather than replacing an older pending run. `cancel-in-progress` is not needed for durable writes and should remain false/omitted for this path.
+
+Source:
+- https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency
+
+Adopted STEP06 requirement: live two-domain orchestration will use a concurrency key bound to the source recovery artifact identity and `queue: max`, so attempts are serialized rather than canceled while a provider write/readback is active.
+
+### Provider-side policy hardening remains additive
+
+AWS can enforce `If-None-Match` on writes with bucket policy conditions. This is a useful independent provider-side guard in addition to the client controller.
+
+Source:
+- https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes-enforce.html
+
+Adopted future infrastructure requirement: AWS recovery-bucket policy should require conditional first writes for the recovery prefix and separately deny destructive actions to the recovery execution role. B2 receives equivalent least-privilege enforcement through the scoped application-key capabilities plus reviewed lifecycle configuration.
+
 ## Strict nonclaims
 
 - no production S3/B2 object is created by this PR;
@@ -119,11 +176,8 @@ Adversarial cases include:
 - no continuity observation is inserted into Supabase;
 - no R2/R3 proof or H47C seal is created.
 
-## Required post-step research
+## Required next semantic step
 
-After implementation and CI, re-check:
+`R1 STEP06 — isolated live two-domain orchestration preparation`
 
-- delete-marker/current-version semantics for AWS versioned buckets;
-- whether B2 “hide”/latest-version behavior introduces a retry ambiguity;
-- whether provider bucket policies should deny delete/hide/version creation outside the dedicated recovery controller;
-- whether orchestration should serialize attempts per ciphertext digest in addition to idempotent reuse.
+STEP06 must consume STEP05A rather than raw STEP05, preflight existing protected GitHub environments before referencing them, isolate AWS OIDC and B2 credentials into separate jobs, serialize attempts by source artifact identity, and assemble a credential-free two-domain quorum candidate that remains non-authoritative until the separate source-attestation gate is verified.
