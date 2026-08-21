@@ -66,6 +66,38 @@ class RecoveryEnvelopeTests(unittest.TestCase):
         path.write_text("\n".join(values) + "\n")
         return path
 
+    def _fake_build(self, profile=PROFILE_PRODUCTION_PQ):
+        recipients = self.recipients(
+            [fake_pq("a"), fake_pq("b")]
+            if profile == PROFILE_PRODUCTION_PQ
+            else [fake_classic("a"), fake_classic("b")]
+        )
+        out = self.root / f"{profile}.age"
+        receipt_path = self.root / f"{profile}.json"
+
+        def fake_encrypt(_age, _recips, source, output):
+            output.write_bytes(b"AGE-CIPHERTEXT:" + source.read_bytes())
+
+        with mock.patch("controller.r1.recovery_encryption_envelope._age_version", return_value=AGE_REQUIRED_VERSION), \
+             mock.patch("controller.r1.recovery_encryption_envelope._run_age_encrypt", side_effect=fake_encrypt):
+            receipt = build_envelope(
+                bundle=self.bundle,
+                bundle_receipt_path=self.bundle_receipt,
+                recipients_file=recipients,
+                profile=profile,
+                age_bin=Path("/fake/age"),
+                output_ciphertext=out,
+                output_receipt=receipt_path,
+            )
+        return out, receipt_path, receipt
+
+    def _rewrite_self_hashed_receipt(self, path: Path, value: dict):
+        core = dict(value)
+        core.pop("receipt_sha256", None)
+        value = dict(core)
+        value["receipt_sha256"] = _sha256_bytes(_canonical_bytes(core))
+        path.write_bytes(_canonical_bytes(value) + b"\n")
+
     def test_production_requires_two_unique_pq_recipients(self):
         with self.assertRaisesRegex(EnvelopeError, "minimum_two"):
             load_recipients(self.recipients([fake_pq("a")]), PROFILE_PRODUCTION_PQ)
@@ -79,25 +111,10 @@ class RecoveryEnvelopeTests(unittest.TestCase):
             load_recipients(self.recipients([fake_pq("a"), fake_classic("b")]), PROFILE_PRODUCTION_PQ)
 
     def test_compatibility_profile_accepts_classic_but_is_not_production_ready(self):
-        recipients = self.recipients([fake_classic("a"), fake_classic("b")])
-        out = self.root / "compat.age"
-        receipt_path = self.root / "compat.json"
-
-        def fake_encrypt(_age, _recips, source, output):
-            output.write_bytes(b"AGE-CIPHERTEXT:" + source.read_bytes())
-
-        with mock.patch("controller.r1.recovery_encryption_envelope._age_version", return_value=AGE_REQUIRED_VERSION), \
-             mock.patch("controller.r1.recovery_encryption_envelope._run_age_encrypt", side_effect=fake_encrypt):
-            receipt = build_envelope(
-                bundle=self.bundle,
-                bundle_receipt_path=self.bundle_receipt,
-                recipients_file=recipients,
-                profile=PROFILE_COMPAT_TEST,
-                age_bin=Path("/fake/age"),
-                output_ciphertext=out,
-                output_receipt=receipt_path,
-            )
+        out, receipt_path, receipt = self._fake_build(PROFILE_COMPAT_TEST)
         self.assertFalse(receipt["security"]["external_storage_ready"])
+        self.assertFalse(receipt["provenance"]["sender_authenticity_proven"])
+        self.assertTrue(receipt["provenance"]["source_attestation_required_before_authority"])
         with self.assertRaisesRegex(EnvelopeError, "not_production_storage_ready"):
             validate_envelope_receipt(out, receipt_path)
         validate_envelope_receipt(out, receipt_path, require_production_ready=False)
@@ -121,24 +138,7 @@ class RecoveryEnvelopeTests(unittest.TestCase):
             validate_bundle_receipt(self.bundle, self.bundle_receipt)
 
     def test_envelope_receipt_tamper_rejected(self):
-        recipients = self.recipients([fake_pq("a"), fake_pq("b")])
-        out = self.root / "prod.age"
-        receipt_path = self.root / "prod.json"
-
-        def fake_encrypt(_age, _recips, source, output):
-            output.write_bytes(b"AGE-CIPHERTEXT:" + source.read_bytes())
-
-        with mock.patch("controller.r1.recovery_encryption_envelope._age_version", return_value=AGE_REQUIRED_VERSION), \
-             mock.patch("controller.r1.recovery_encryption_envelope._run_age_encrypt", side_effect=fake_encrypt):
-            build_envelope(
-                bundle=self.bundle,
-                bundle_receipt_path=self.bundle_receipt,
-                recipients_file=recipients,
-                profile=PROFILE_PRODUCTION_PQ,
-                age_bin=Path("/fake/age"),
-                output_ciphertext=out,
-                output_receipt=receipt_path,
-            )
+        out, receipt_path, _receipt = self._fake_build()
         value = json.loads(receipt_path.read_text())
         value["ciphertext"]["bytes"] += 1
         receipt_path.write_text(json.dumps(value))
@@ -146,26 +146,27 @@ class RecoveryEnvelopeTests(unittest.TestCase):
             validate_envelope_receipt(out, receipt_path)
 
     def test_ciphertext_tamper_rejected(self):
-        recipients = self.recipients([fake_pq("a"), fake_pq("b")])
-        out = self.root / "prod.age"
-        receipt_path = self.root / "prod.json"
-
-        def fake_encrypt(_age, _recips, source, output):
-            output.write_bytes(b"AGE-CIPHERTEXT:" + source.read_bytes())
-
-        with mock.patch("controller.r1.recovery_encryption_envelope._age_version", return_value=AGE_REQUIRED_VERSION), \
-             mock.patch("controller.r1.recovery_encryption_envelope._run_age_encrypt", side_effect=fake_encrypt):
-            build_envelope(
-                bundle=self.bundle,
-                bundle_receipt_path=self.bundle_receipt,
-                recipients_file=recipients,
-                profile=PROFILE_PRODUCTION_PQ,
-                age_bin=Path("/fake/age"),
-                output_ciphertext=out,
-                output_receipt=receipt_path,
-            )
+        out, receipt_path, _receipt = self._fake_build()
         out.write_bytes(out.read_bytes() + b"tamper")
         with self.assertRaisesRegex(EnvelopeError, "ciphertext_receipt_mismatch"):
+            validate_envelope_receipt(out, receipt_path)
+
+    def test_false_sender_authenticity_claim_rejected_even_with_valid_self_hash(self):
+        out, receipt_path, _receipt = self._fake_build()
+        value = json.loads(receipt_path.read_text())
+        value["provenance"]["sender_authenticity_proven"] = True
+        value["provenance"]["source_attestation_verified"] = True
+        value["authority"]["source_attestation_verified"] = True
+        self._rewrite_self_hashed_receipt(receipt_path, value)
+        with self.assertRaisesRegex(EnvelopeError, "authority_boundary|provenance_boundary"):
+            validate_envelope_receipt(out, receipt_path)
+
+    def test_missing_source_attestation_requirement_rejected_even_with_valid_self_hash(self):
+        out, receipt_path, _receipt = self._fake_build()
+        value = json.loads(receipt_path.read_text())
+        value["provenance"]["source_attestation_required_before_authority"] = False
+        self._rewrite_self_hashed_receipt(receipt_path, value)
+        with self.assertRaisesRegex(EnvelopeError, "provenance_boundary"):
             validate_envelope_receipt(out, receipt_path)
 
     @unittest.skipUnless(os.environ.get("AGE_BIN") and os.environ.get("AGE_KEYGEN_BIN"), "official age binaries not supplied")
@@ -196,6 +197,8 @@ class RecoveryEnvelopeTests(unittest.TestCase):
         validate_envelope_receipt(out1, rec1)
         self.assertTrue(receipt1["security"]["external_storage_ready"])
         self.assertEqual(receipt1["encryption"]["recipient_count"], 2)
+        self.assertFalse(receipt1["provenance"]["sender_authenticity_proven"])
+        self.assertTrue(receipt1["provenance"]["source_attestation_required_before_authority"])
 
         decrypted = self.root / "decrypted.tar"
         subprocess.run([str(age), "--decrypt", "--identity", str(identities[0]), "--output", str(decrypted), str(out1)], check=True, capture_output=True)
