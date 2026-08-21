@@ -3,6 +3,15 @@ import { pullRequest, pullRequestFiles, readFile, readFileAtRef, workflowRuns, w
 import { rpc, supervisorAdoptClaim, supervisorReturnAuthority } from "./supabase";
 
 const MAX_TOOL_ROUNDS = 18;
+const MAX_TRANSCRIPT_BYTES = 400_000;
+const READ_ONLY_TOOL_NAMES = new Set([
+  "github_read_file",
+  "github_read_file_ref",
+  "github_pull_request",
+  "github_pull_request_files",
+  "github_workflow_runs",
+  "aop_snapshot",
+]);
 interface ToolCall { type: "function_call"; call_id: string; name: string; arguments: string; }
 
 function aiConfigured(env: Env): boolean { return Boolean(env.CF_ACCOUNT_ID && env.CF_AI_TOKEN && env.AOP_MODEL); }
@@ -75,31 +84,38 @@ async function callAi(env: Env, body: Record<string, unknown>): Promise<Record<s
   return JSON.parse(text) as Record<string, unknown>;
 }
 
-function toolCalls(response: Record<string, unknown>): ToolCall[] {
+function responseItems(response: Record<string, unknown>): Array<Record<string, unknown>> {
   const output = Array.isArray(response.output) ? response.output : [];
-  return output.filter((x): x is ToolCall => {
-    if (!x || typeof x !== "object") return false;
-    const r = x as Record<string, unknown>;
-    return r.type === "function_call" && typeof r.call_id === "string" && typeof r.name === "string" && typeof r.arguments === "string";
-  });
+  return output.filter((x): x is Record<string, unknown> => Boolean(x) && typeof x === "object" && !Array.isArray(x));
+}
+
+function toolCalls(response: Record<string, unknown>): ToolCall[] {
+  return responseItems(response).filter((x): x is ToolCall => x.type === "function_call" && typeof x.call_id === "string" && typeof x.name === "string" && typeof x.arguments === "string");
 }
 
 function outputText(response: Record<string, unknown>): string {
   if (typeof response.output_text === "string") return response.output_text;
-  const output = Array.isArray(response.output) ? response.output : [];
   const texts: string[] = [];
-  for (const item of output) {
-    if (!item || typeof item !== "object") continue;
-    const r = item as Record<string, unknown>;
+  for (const r of responseItems(response)) {
     if (r.type !== "message" || !Array.isArray(r.content)) continue;
     for (const c of r.content as Array<Record<string, unknown>>) if (typeof c.text === "string") texts.push(c.text);
   }
   return texts.join("\n");
 }
 
+function canonicalReadOnlyToolName(lease: AopLease, name: string): string {
+  if (READ_ONLY_TOOL_NAMES.has(name)) return name;
+  if (lease.role_kind !== "ANALYST") return name;
+  const match = /^([A-Za-z0-9_]+)<\|channel\|>(analysis|commentary|final)$/.exec(name);
+  if (match && READ_ONLY_TOOL_NAMES.has(match[1])) return match[1];
+  return name;
+}
+
 async function runTool(env: Env, lease: AopLease, workerId: string, call: ToolCall): Promise<unknown> {
-  const args = JSON.parse(call.arguments || "{}") as Record<string, unknown>;
-  switch (call.name) {
+  const parsed = JSON.parse(call.arguments || "{}");
+  const args = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  const toolName = canonicalReadOnlyToolName(lease, call.name);
+  switch (toolName) {
     case "github_read_file": return readFile(env, lease, String(args.path));
     case "github_read_file_ref": return readFileAtRef(env, String(args.path), String(args.ref));
     case "github_write_file":
@@ -134,7 +150,13 @@ export async function executeRole(env: Env, lease: AopLease, workerId: string): 
     return { result_code: "RETURN", output: { automation: "AUTHORITY_REBIND_APPLIED", adoption, requested_by: lease.input ?? {} }, github_sha: lease.expected_github_sha ?? null, wake_condition: null };
   }
 
-  let response = await callAi(env, { model: env.AOP_MODEL, instructions: systemInstructions(lease), input: [{ role: "user", content: [{ type: "input_text", text: JSON.stringify({ lease }) }] }], tools: toolsFor(lease), parallel_tool_calls: false, store: false });
+  const instructions = systemInstructions(lease);
+  const tools = toolsFor(lease);
+  const transcript: Array<Record<string, unknown>> = [
+    { role: "user", content: [{ type: "input_text", text: JSON.stringify({ lease }) }] },
+  ];
+  let response = await callAi(env, { model: env.AOP_MODEL, instructions, input: transcript, tools, parallel_tool_calls: false, store: false });
+
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const calls = toolCalls(response);
     if (!calls.length) {
@@ -142,12 +164,20 @@ export async function executeRole(env: Env, lease: AopLease, workerId: string): 
       if (!text) throw new Error("model_no_final_output");
       return validateOutcome(lease, JSON.parse(text));
     }
-    const outputs = [];
+
+    const outputs: Array<Record<string, unknown>> = [];
     for (const call of calls) {
-      try { const result = await runTool(env, lease, workerId, call); outputs.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify({ ok: true, result }) }); }
-      catch (error) { outputs.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify({ ok: false, error: String(error) }) }); }
+      try {
+        const result = await runTool(env, lease, workerId, call);
+        outputs.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify({ ok: true, result }) });
+      } catch (error) {
+        outputs.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify({ ok: false, error: String(error) }) });
+      }
     }
-    response = await callAi(env, { model: env.AOP_MODEL, previous_response_id: response.id, input: outputs, tools: toolsFor(lease), parallel_tool_calls: false, store: false });
+
+    transcript.push(...responseItems(response), ...outputs);
+    if (JSON.stringify(transcript).length > MAX_TRANSCRIPT_BYTES) throw new Error("model_transcript_limit_exceeded");
+    response = await callAi(env, { model: env.AOP_MODEL, instructions, input: transcript, tools, parallel_tool_calls: false, store: false });
   }
   throw new Error("tool_round_limit_exceeded");
 }
