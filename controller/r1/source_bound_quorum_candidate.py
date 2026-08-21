@@ -3,7 +3,7 @@
 
 This is deliberately not an R2 authority transition. It only replaces the historical
 "source attestation not yet verified" condition on the provider candidate with an
-explicitly validated STEP07A handoff, preserving all provider/readback nonclaims.
+explicitly validated STEP07A/07B handoff, preserving all provider/readback nonclaims.
 """
 
 from __future__ import annotations
@@ -51,6 +51,24 @@ def _self_hash(value: dict[str,Any], field: str, label: str) -> str:
     return claimed
 
 
+def _require_sha(value: Any, field: str) -> str:
+    if not isinstance(value,str) or not SHA256.fullmatch(value):
+        raise SourceBoundQuorumError(f"{field}_invalid")
+    return value
+
+
+def _require_positive_int(value: Any, field: str) -> int:
+    if isinstance(value,bool):
+        raise SourceBoundQuorumError(f"{field}_invalid")
+    try:
+        out=int(value)
+    except (TypeError,ValueError) as exc:
+        raise SourceBoundQuorumError(f"{field}_invalid") from exc
+    if out<1:
+        raise SourceBoundQuorumError(f"{field}_invalid")
+    return out
+
+
 def bind_candidate(base: Any, handoff: Any) -> dict[str,Any]:
     if not isinstance(base,dict) or base.get("schema")!=BASE_SCHEMA:
         raise SourceBoundQuorumError("base_schema_invalid")
@@ -72,6 +90,8 @@ def bind_candidate(base: Any, handoff: Any) -> dict[str,Any]:
     handoff_sha=_self_hash(handoff,"handoff_sha256","handoff")
     if handoff.get("source_attestation_verified") is not True:
         raise SourceBoundQuorumError("handoff_source_attestation_not_verified")
+    if handoff.get("source_environment_binding_verified") is not True or handoff.get("source_environment_approval_verified") is not True:
+        raise SourceBoundQuorumError("handoff_source_environment_evidence_not_verified")
     if handoff.get("provider_credentials_eligible_after_environment_and_readiness_gates") is not True:
         raise SourceBoundQuorumError("handoff_provider_eligibility_missing")
     if handoff.get("provider_execution_authorized") is not False:
@@ -90,6 +110,12 @@ def bind_candidate(base: Any, handoff: Any) -> dict[str,Any]:
     if bc.get("sha256")!=hs.get("ciphertext_sha256") or bc.get("bytes")!=hs.get("ciphertext_bytes"):
         raise SourceBoundQuorumError("ciphertext_identity_mismatch")
 
+    readiness_id=_require_positive_int(hs.get("source_environment_readiness_artifact_id"),"source_environment_readiness_artifact_id")
+    readiness_sha=_require_sha(hs.get("source_environment_readiness_sha256"),"source_environment_readiness_sha256")
+    approval_id=_require_positive_int(hs.get("source_environment_approval_artifact_id"),"source_environment_approval_artifact_id")
+    approval_sha=_require_sha(hs.get("source_environment_approval_sha256"),"source_environment_approval_sha256")
+    approval_count=_require_positive_int(hs.get("source_environment_approved_review_count"),"source_environment_approved_review_count")
+
     core={
         "schema":OUT_SCHEMA,
         "classification":"VERIFIED_SOURCE_TWO_DOMAIN_PROVIDER_READBACK_CANDIDATE_NONAUTHORITATIVE",
@@ -99,6 +125,8 @@ def bind_candidate(base: Any, handoff: Any) -> dict[str,Any]:
         "quorum":quorum,
         "source_provenance":{
             "source_attestation_verified":True,
+            "source_environment_binding_verified":True,
+            "source_environment_approval_verified":True,
             "handoff_sha256":handoff_sha,
             "source_verification_artifact":hs.get("source_verification_artifact"),
             "source_verification_receipt_sha256":hs.get("source_verification_receipt_sha256"),
@@ -106,16 +134,23 @@ def bind_candidate(base: Any, handoff: Any) -> dict[str,Any]:
             "canonical_digest_at_source":hs.get("canonical_digest_at_source"),
             "semantic_head_at_source":hs.get("semantic_head_at_source"),
             "migration_ledger_sha256":hs.get("migration_ledger_sha256"),
+            "source_environment_readiness_artifact_id":readiness_id,
+            "source_environment_readiness_sha256":readiness_sha,
+            "source_environment_approval_artifact_id":approval_id,
+            "source_environment_approval_sha256":approval_sha,
+            "source_environment_approved_review_count":approval_count,
         },
         "base_orchestration_result_sha256":base_sha,
         "source_attestation_verified":True,
+        "source_environment_binding_verified":True,
+        "source_environment_approval_verified":True,
         "final_r2_evidence_binding_required":True,
         "canonical":False,
         "authority_effect":False,
         "r2_proven":False,
         "r3_proven":False,
         "persisted_seal_allowed":False,
-        "required_next":"BIND_SOURCE_HANDOFF_READINESS_AND_PROVIDER_RESULT_HASHES_IN_FINAL_R2_EVIDENCE_THEN_SUPERVISOR_INGEST_AND_REEVALUATE_R2",
+        "required_next":"BIND_SOURCE_ENVIRONMENT_ATTESTATION_HANDOFF_READINESS_AND_PROVIDER_RESULT_HASHES_IN_FINAL_R2_EVIDENCE_THEN_SUPERVISOR_INGEST_AND_REEVALUATE_R2",
     }
     out=dict(core); out["candidate_sha256"]=_sha(core)
     return out

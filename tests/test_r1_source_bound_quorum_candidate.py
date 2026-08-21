@@ -45,8 +45,15 @@ def handoff():
             'source_verification_receipt_sha256':'8'*64,'predicate_sha256':'9'*64,
             'semantic_head_at_source':'metaengine-h205f22-recovery-dev-20260821-cp072',
             'canonical_digest_at_source':'a'*64,'migration_ledger_sha256':'b'*64,
+            'source_environment_readiness_artifact_id':4004,
+            'source_environment_readiness_sha256':'c'*64,
+            'source_environment_approval_artifact_id':4005,
+            'source_environment_approval_sha256':'d'*64,
+            'source_environment_approved_review_count':1,
         },
         'source_attestation_verified':True,
+        'source_environment_binding_verified':True,
+        'source_environment_approval_verified':True,
         'provider_credentials_eligible_after_environment_and_readiness_gates':True,
         'provider_execution_authorized':False,
         'final_r2_evidence_binding_required':True,
@@ -56,13 +63,18 @@ def handoff():
 
 
 class SourceBoundQuorumTests(unittest.TestCase):
-    def test_valid_binding_keeps_r2_false(self):
+    def test_valid_binding_keeps_r2_false_and_propagates_environment_evidence(self):
         out=mod.bind_candidate(base(),handoff())
         self.assertTrue(out['source_attestation_verified'])
+        self.assertTrue(out['source_environment_binding_verified'])
+        self.assertTrue(out['source_environment_approval_verified'])
         self.assertTrue(out['final_r2_evidence_binding_required'])
         self.assertFalse(out['r2_proven'])
         self.assertFalse(out['persisted_seal_allowed'])
         self.assertEqual(out['source_provenance']['source_verification_receipt_sha256'],'8'*64)
+        self.assertEqual(out['source_provenance']['source_environment_readiness_sha256'],'c'*64)
+        self.assertEqual(out['source_provenance']['source_environment_approval_sha256'],'d'*64)
+        self.assertEqual(out['source_provenance']['source_environment_approved_review_count'],1)
 
     def test_source_run_or_ciphertext_mismatch_rejected(self):
         h=handoff(); h['source']['run_id']=9002; seal(h,'handoff_sha256')
@@ -70,6 +82,14 @@ class SourceBoundQuorumTests(unittest.TestCase):
             mod.bind_candidate(base(),h)
         h=handoff(); h['source']['ciphertext_sha256']='f'*64; seal(h,'handoff_sha256')
         with self.assertRaisesRegex(mod.SourceBoundQuorumError,'ciphertext_identity_mismatch'):
+            mod.bind_candidate(base(),h)
+
+    def test_missing_environment_approval_rejected(self):
+        h=handoff(); h['source_environment_approval_verified']=False; seal(h,'handoff_sha256')
+        with self.assertRaisesRegex(mod.SourceBoundQuorumError,'source_environment_evidence_not_verified'):
+            mod.bind_candidate(base(),h)
+        h=handoff(); h['source']['source_environment_approved_review_count']=0; seal(h,'handoff_sha256')
+        with self.assertRaisesRegex(mod.SourceBoundQuorumError,'approved_review_count'):
             mod.bind_candidate(base(),h)
 
     def test_handoff_authority_escalation_rejected_even_after_rehash(self):
