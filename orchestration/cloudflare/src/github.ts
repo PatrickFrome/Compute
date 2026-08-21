@@ -16,12 +16,14 @@ function safeRepoPath(path: string): string {
 }
 
 async function gh(env: Env, path: string, init: RequestInit = {}): Promise<Response> {
-  if (!env.GITHUB_TOKEN) throw new Error("github_token_unavailable");
+  const method = String(init.method ?? "GET").toUpperCase();
+  const mutation = method !== "GET" && method !== "HEAD";
+  if (mutation && !env.GITHUB_TOKEN) throw new Error("github_token_required_for_mutation");
   return fetch(`${API}${path}`, {
     ...init,
     headers: {
       accept: "application/vnd.github+json",
-      authorization: `Bearer ${env.GITHUB_TOKEN}`,
+      ...(env.GITHUB_TOKEN ? { authorization: `Bearer ${env.GITHUB_TOKEN}` } : {}),
       "x-github-api-version": "2022-11-28",
       "user-agent": "metaengine-aop1",
       ...(init.headers ?? {}),
@@ -47,6 +49,7 @@ export async function readFileAtRef(env: Env, path: string, ref: string): Promis
 }
 
 export async function writeFile(env: Env, lease: AopLease, path: string, contentUtf8: string, message: string): Promise<Record<string, unknown>> {
+  if (!env.GITHUB_TOKEN) throw new Error("github_token_required_for_mutation");
   const branch = branchFor(lease);
   const encodedPath = safeRepoPath(path);
   let sha: string | undefined;
