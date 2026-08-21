@@ -57,9 +57,12 @@ jobs:
           assert 'id-token: write' in p
           assert 'aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c' in p
           assert 'W1_AWS_ROLE_ARN' in p and 'W1_AWS_ACCOUNT_ID' in p and 'W1_AWS_REGION' in p
-          assert 'AWS_ACCESS_KEY_ID' not in p
-          assert 'AWS_SECRET_ACCESS_KEY' not in p
-          assert 'secrets.AWS' not in p
+          forbidden = [
+              'AWS_' + 'ACCESS_KEY_ID',
+              'AWS_' + 'SECRET_ACCESS_KEY',
+              'secrets.' + 'AWS',
+          ]
+          assert all(token not in p for token in forbidden), forbidden
           assert 'REBOOT_W1_PERSISTENT_HOST' in p
           assert 'LIVE_PROVIDER_CONTROLLER_RECEIPT_UNINGESTED' in Path('controller/w1/aws_provider_reboot_controller.py').read_text()
           PY
