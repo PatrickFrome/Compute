@@ -156,3 +156,4 @@ At capsule creation: real production persisted readbacks = 0; R2 = NOT_PROVEN; R
 - Backblaze B2 Object Lock: `https://www.backblaze.com/docs/cloud-storage-object-lock`
 - Wasabi Object Lock: `https://docs.wasabi.com/docs/object-lock-overview`
 - restic: `https://restic.readthedocs.io/`
+- WAL-G storage backends: `https://github.com/wal-g/wal-g/blob/master/docs/STORAGES.md`
