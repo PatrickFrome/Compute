@@ -4,12 +4,16 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "supabase/migrations/20260821060500_aop1_clean_replay.sql"
 OIDC_MIGRATION = ROOT / "supabase/migrations/20260821071452_aop1_one_time_github_oidc_bootstrap_capability.sql"
 DENY_MIGRATION = ROOT / "supabase/migrations/20260821072003_aop1_bootstrap_capability_explicit_deny_policy.sql"
+REARM_MIGRATION = ROOT / "supabase/migrations/20260821080306_aop1_supervisor_rearm_exhausted_analyst.sql"
+SIGNAL_MIGRATION = ROOT / "supabase/migrations/20260821082219_aop1_signal_resume_payload_v2.sql"
 CF = ROOT / "orchestration/cloudflare/src"
 LIVE_DEPLOY = ROOT / ".github/workflows/aop1-live-deploy.yml"
 
 sql = MIGRATION.read_text(encoding="utf-8")
 oidc_sql = OIDC_MIGRATION.read_text(encoding="utf-8")
 deny_sql = DENY_MIGRATION.read_text(encoding="utf-8")
+rearm_sql = REARM_MIGRATION.read_text(encoding="utf-8")
+signal_sql = SIGNAL_MIGRATION.read_text(encoding="utf-8")
 index_ts = (CF / "index.ts").read_text(encoding="utf-8")
 executor_ts = (CF / "executor.ts").read_text(encoding="utf-8")
 github_ts = (CF / "github.ts").read_text(encoding="utf-8")
@@ -74,6 +78,28 @@ assert 'lease.role_kind !== "ANALYST"' in executor_ts
 assert "READ_ONLY_TOOL_NAMES" in executor_ts
 assert '"github_write_file"' not in executor_ts.split("const READ_ONLY_TOOL_NAMES", 1)[1].split("]);", 1)[0]
 assert '"supervisor_return_authority"' not in executor_ts.split("const READ_ONLY_TOOL_NAMES", 1)[1].split("]);", 1)[0]
+
+# Resume semantics: waking a WAITING_EVENT run must attach the evidence payload to
+# the next lease input, not merely emit an event the executor cannot see.
+assert "resume_signal" in signal_sql
+assert "input=coalesce(input,'{}'::jsonb) || jsonb_build_object" in signal_sql
+assert "resume_payload_attached" in signal_sql
+assert "signal_payload_must_be_object" in signal_sql
+assert "signal_payload_too_large" in signal_sql
+assert "65536" in signal_sql
+assert "authority_effect',false" in signal_sql
+assert "revoke all on function public.h205f22_aop1_signal_v1" in signal_sql
+
+# Exhausted-run recovery is deliberately narrower than general retry: only an
+# expired, nonterminal ANALYST lease with an active supervisor capability may rearm.
+assert "analyst_role_required" in rearm_sql
+assert "exhausted_expired_lease_required" in rearm_sql
+assert "active_supervisor_capability_required" in rearm_sql
+assert "p_extra_attempts > 3" in rearm_sql
+assert "SUPERVISOR_RUN_REARMED" in rearm_sql
+assert "EXECUTOR_REPAIR_RETRY" in rearm_sql
+assert "authority_effect',false" in rearm_sql
+assert "revoke all on function public.h205f22_aop1_supervisor_rearm_exhausted_analyst_v1" in rearm_sql
 
 # Supabase adapter is RPC allowlist-based, not arbitrary SQL.
 assert "h205f22_aop1_lease_run_v1" in supabase_ts
