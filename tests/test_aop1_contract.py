@@ -59,6 +59,22 @@ assert 'if (lease.role_kind === "IMPLEMENTER")' in executor_ts
 assert "github_write_tool_forbidden_for_role" in executor_ts
 assert "Analyst is strictly read-only in GitHub tools" in executor_ts
 
+# Responses tool loop must remain stateless when store=false. Cloudflare GPT-OSS rejects
+# previous_response_id for non-stored responses; carry the full transcript explicitly.
+assert "previous_response_id" not in executor_ts
+assert "const transcript: Array<Record<string, unknown>>" in executor_ts
+assert "transcript.push(...responseItems(response), ...outputs)" in executor_ts
+assert "instructions, input: transcript" in executor_ts
+assert "model_transcript_limit_exceeded" in executor_ts
+assert "MAX_TRANSCRIPT_BYTES" in executor_ts
+# GPT-OSS may decorate read-only tool names with a channel sentinel. Only ANALYST
+# read-only names may be normalized; write/supervisor tools must never be normalized.
+assert "canonicalReadOnlyToolName" in executor_ts
+assert 'lease.role_kind !== "ANALYST"' in executor_ts
+assert "READ_ONLY_TOOL_NAMES" in executor_ts
+assert '"github_write_file"' not in executor_ts.split("const READ_ONLY_TOOL_NAMES", 1)[1].split("]);", 1)[0]
+assert '"supervisor_return_authority"' not in executor_ts.split("const READ_ONLY_TOOL_NAMES", 1)[1].split("]);", 1)[0]
+
 # Supabase adapter is RPC allowlist-based, not arbitrary SQL.
 assert "h205f22_aop1_lease_run_v1" in supabase_ts
 assert "h205f22_aop1_complete_run_v1" in supabase_ts
