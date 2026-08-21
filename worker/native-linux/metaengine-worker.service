@@ -37,7 +37,10 @@ ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
 ProtectControlGroups=yes
-RestrictSUIDSGID=yes
+# Do not set RestrictSUIDSGID=yes: current systemd seccomp implementation blocks
+# openat2(2) under that setting. H1-H13 explicitly requires openat2 workspace
+# containment. NoNewPrivileges=yes plus an empty capability set prevents execve
+# from gaining privilege via setuid/setgid bits or file capabilities.
 LockPersonality=yes
 RestrictRealtime=yes
 RestrictNamespaces=yes
