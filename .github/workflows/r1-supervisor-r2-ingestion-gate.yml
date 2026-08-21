@@ -1,0 +1,66 @@
+name: R1 Supervisor R2 Ingestion Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/r1/supervisor_r2_ingestion_gate.py'
+      - 'tests/test_r1_supervisor_r2_ingestion_gate.py'
+      - 'controller/r1/final_r2_evidence_package.py'
+      - 'controller/r1/live_recovery_source_attestation.py'
+      - 'controller/r1/source_environment_evidence_binding.py'
+      - 'research/R1_STEP09A_SUPERVISOR_R2_INGESTION_GATE.md'
+      - '.github/workflows/r1-supervisor-r2-ingestion-gate.yml'
+
+permissions: {}
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile STEP09A gate
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/r1/supervisor_r2_ingestion_gate.py
+
+      - name: Run STEP09A adversarial suite
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_r1_supervisor_r2_ingestion_gate -v
+
+      - name: Re-run source and package regressions
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_r1_live_recovery_source_attestation -v
+          python3 -m unittest tests.test_r1_source_environment_evidence_binding -v
+          python3 -m unittest tests.test_r1_final_r2_evidence_package -v
+
+      - name: Validate STEP09A credential and authority separation
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          raw=Path('.github/workflows/r1-supervisor-r2-ingestion-gate.yml').read_text()
+          before,_=raw.split('      - name: Validate STEP09A credential and authority separation',1)
+          module=Path('controller/r1/supervisor_r2_ingestion_gate.py').read_text()
+          assert ('workflow_'+'dispatch') not in before
+          assert 'id-token: write' not in before
+          for token in ('AWS_'+'ACCESS_KEY_ID','AWS_'+'SECRET_ACCESS_KEY','B2_'+'APPLICATION_KEY','SUPABASE_'+'DB_URL','SERVICE_'+'ROLE'):
+              assert token not in before
+          assert 'ROOT_CONTEXT_MAX_AGE = timedelta(minutes=15)' in module
+          assert 'deny_self_hosted_runners' in module
+          assert 'validate_verification_result' in module
+          assert 'bind_verification' in module
+          assert 'ingestion_eligible' in module
+          assert 'database_credential_present' in module
+          assert 'database_write_performed' in module
+          assert 'r2_proven' in module and 'persisted_seal_allowed' in module
+          PY
