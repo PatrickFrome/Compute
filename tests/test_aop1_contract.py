@@ -51,6 +51,14 @@ assert "Checkpoint seal and main merge are intentionally not exposed" in executo
 assert "JSON.stringify(await leaseRun" in index_ts
 assert "JSON.stringify(await executeRole" in index_ts
 
+# Public GitHub reads are tokenless, but every mutation and every write tool remain fenced.
+assert 'const mutation = method !== "GET" && method !== "HEAD"' in github_ts
+assert "github_token_required_for_mutation" in github_ts
+assert 'lease.role_kind === "IMPLEMENTER" && !env.GITHUB_TOKEN' in executor_ts
+assert 'if (lease.role_kind === "IMPLEMENTER")' in executor_ts
+assert "github_write_tool_forbidden_for_role" in executor_ts
+assert "Analyst is strictly read-only in GitHub tools" in executor_ts
+
 # Supabase adapter is RPC allowlist-based, not arbitrary SQL.
 assert "h205f22_aop1_lease_run_v1" in supabase_ts
 assert "h205f22_aop1_complete_run_v1" in supabase_ts
