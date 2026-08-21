@@ -5,8 +5,13 @@ on:
     branches: [main]
     paths:
       - 'controller/r1/live_recovery_source_attestation.py'
+      - 'controller/r1/source_environment_evidence_binding.py'
+      - 'controller/r1/verified_source_handoff.py'
       - 'tests/test_r1_live_recovery_source_attestation.py'
+      - 'tests/test_r1_source_environment_evidence_binding.py'
+      - 'tests/test_r1_verified_source_handoff.py'
       - 'research/R1_STEP07_TRUSTED_LIVE_RECOVERY_SOURCE.md'
+      - 'research/R1_STEP07B_SOURCE_ENVIRONMENT_EVIDENCE_BINDING.md'
       - '.github/workflows/r1-live-recovery-source.yml'
   workflow_dispatch:
     inputs:
@@ -44,11 +49,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Compile and run STEP07 adversarial tests
+      - name: Compile and run STEP07 and STEP07B adversarial tests
         run: |
           set -euo pipefail
           python3 -m py_compile controller/r1/live_recovery_source_attestation.py
+          python3 -m py_compile controller/r1/source_environment_evidence_binding.py
+          python3 -m py_compile controller/r1/verified_source_handoff.py
           python3 -m unittest tests.test_r1_live_recovery_source_attestation -v
+          python3 -m unittest tests.test_r1_source_environment_evidence_binding -v
+          python3 -m unittest tests.test_r1_verified_source_handoff -v
           python3 -m unittest tests.test_r1_recovery_artifact_packager -v
           python3 -m unittest tests.test_r1_recovery_encryption_envelope -v
 
@@ -65,6 +74,13 @@ jobs:
           attest=p.split('\n  attest-source:',1)[1].split('\n  verify-source:',1)[0]
           verify=p.split('\n  verify-source:',1)[1]
           assert 'environment: ${{ needs.preflight-source.outputs.source_environment }}' in source
+          assert 'readiness_artifact_id: ${{ steps.upload-readiness.outputs.artifact-id }}' in p
+          assert 'r1-source-environment-readiness.json' in p
+          assert 'source_environment_evidence_binding.py bind-predicate' in source
+          assert 'source_environment_evidence_binding.py validate-predicate' in attest
+          assert 'source_environment_evidence_binding.py bind-verification' in verify
+          assert 'needs: [source-build, preflight-source]' in attest
+          assert 'needs: [source-build, attest-source, preflight-source]' in verify
           assert 'SUPABASE_DB_URL' in source
           assert 'id-token: write' not in source and 'attestations: write' not in source
           assert 'supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520' in source
@@ -86,6 +102,7 @@ jobs:
           assert '--deny-self-hosted-runners' in verify
           assert p.count('id-token: write') == 1
           assert 'archive: false' in p and 'digest-mismatch: error' in p
+          assert attest.index('source_environment_evidence_binding.py validate-predicate') < attest.index('actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6')
           for forbidden in ('roles.sql\n          archive:', 'schema.sql\n          archive:', 'data.sql\n          archive:', 'recovery-bundle.tar\n          archive:', 'project.dump\n          archive:'):
               assert forbidden not in p
           PY
@@ -100,6 +117,7 @@ jobs:
       contents: read
     outputs:
       source_environment: ${{ steps.outputs.outputs.source_environment }}
+      readiness_artifact_id: ${{ steps.upload-readiness.outputs.artifact-id }}
     steps:
       - name: Checkout exact main revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -128,6 +146,25 @@ jobs:
           python3 controller/r1/live_recovery_source_attestation.py validate-environment \
             --input evidence/source-environment.json \
             --output evidence/r1-source-environment-readiness.json
+          python3 - <<'PY'
+          import json
+          r=json.load(open('evidence/r1-source-environment-readiness.json'))
+          assert r['ready_for_source_generation'] is True
+          assert r['prevent_self_review'] is True
+          assert r['authority_effect'] is False
+          assert r['r2_proven'] is False
+          PY
+
+      - name: Upload immutable source environment readiness
+        id: upload-readiness
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: r1-source-environment-readiness.json
+          path: evidence/r1-source-environment-readiness.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
 
       - name: Publish verified source environment
         id: outputs
@@ -140,6 +177,7 @@ jobs:
     timeout-minutes: 45
     environment: ${{ needs.preflight-source.outputs.source_environment }}
     permissions:
+      actions: read
       contents: read
     outputs:
       ciphertext_artifact_id: ${{ steps.upload-ciphertext.outputs.artifact-id }}
@@ -150,6 +188,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+
+      - name: Download immutable source environment readiness
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ needs.preflight-source.outputs.readiness_artifact_id }}
+          path: source-control
+          digest-mismatch: error
 
       - name: Install exact Supabase CLI
         uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520
@@ -311,7 +356,12 @@ jobs:
             --bundle-receipt "$PRIVATE/bundle-receipt.json" \
             --export-metadata "$PRIVATE/export-metadata.json" \
             --source-head-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --output "$EVIDENCE/r1-recovery-source-predicate.unbound.json"
+          python3 controller/r1/source_environment_evidence_binding.py bind-predicate \
+            --predicate "$EVIDENCE/r1-recovery-source-predicate.unbound.json" \
+            --readiness source-control/r1-source-environment-readiness.json \
             --output "$EVIDENCE/r1-recovery-source-predicate.json"
+          rm -f "$EVIDENCE/r1-recovery-source-predicate.unbound.json"
 
           cleanup
           trap - EXIT
@@ -342,7 +392,7 @@ jobs:
           overwrite: false
           retention-days: 7
 
-      - name: Upload source predicate candidate
+      - name: Upload environment-bound source predicate candidate
         id: upload-predicate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
@@ -355,7 +405,7 @@ jobs:
 
   attest-source:
     if: github.event_name == 'workflow_dispatch' && inputs.execute_source == true
-    needs: source-build
+    needs: [source-build, preflight-source]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -366,19 +416,25 @@ jobs:
     outputs:
       attestation_artifact_id: ${{ steps.upload.outputs.artifact-id }}
     steps:
-      - name: Download ciphertext by immutable artifact ID
+      - name: Checkout exact source-attester revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Download ciphertext predicate and original readiness by immutable IDs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          artifact-ids: ${{ needs.source-build.outputs.ciphertext_artifact_id }}
+          artifact-ids: ${{ needs.source-build.outputs.ciphertext_artifact_id }},${{ needs.source-build.outputs.predicate_artifact_id }},${{ needs.preflight-source.outputs.readiness_artifact_id }}
           path: source
           digest-mismatch: error
 
-      - name: Download source predicate by immutable artifact ID
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          artifact-ids: ${{ needs.source-build.outputs.predicate_artifact_id }}
-          path: source
-          digest-mismatch: error
+      - name: Independently validate predicate to source-environment binding before signing
+        run: |
+          set -euo pipefail
+          python3 controller/r1/source_environment_evidence_binding.py validate-predicate \
+            --predicate source/r1-recovery-source-predicate.json \
+            --readiness source/r1-source-environment-readiness.json \
+            --output evidence/r1-source-environment-predicate-binding.json
 
       - name: Generate custom Sigstore in-toto source attestation
         id: attest
@@ -409,7 +465,7 @@ jobs:
 
   verify-source:
     if: github.event_name == 'workflow_dispatch' && inputs.execute_source == true
-    needs: [source-build, attest-source]
+    needs: [source-build, attest-source, preflight-source]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -423,14 +479,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Download ciphertext envelope and portable attestation by immutable IDs
+      - name: Download ciphertext envelope attestation and original readiness by immutable IDs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          artifact-ids: ${{ needs.source-build.outputs.ciphertext_artifact_id }},${{ needs.source-build.outputs.envelope_artifact_id }},${{ needs.attest-source.outputs.attestation_artifact_id }}
+          artifact-ids: ${{ needs.source-build.outputs.ciphertext_artifact_id }},${{ needs.source-build.outputs.envelope_artifact_id }},${{ needs.attest-source.outputs.attestation_artifact_id }},${{ needs.preflight-source.outputs.readiness_artifact_id }}
           path: source
           digest-mismatch: error
 
-      - name: Cryptographically verify exact source attestation policy
+      - name: Cryptographically verify exact source attestation policy and environment binding
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -454,11 +510,20 @@ jobs:
             --ciphertext source/r1-recovery-ciphertext.age \
             --envelope-receipt source/r1-recovery-envelope-receipt.json \
             --source-head-sha "$GITHUB_SHA" --source-run-id "$GITHUB_RUN_ID" \
+            --output evidence/r1-recovery-source-verification.base.json
+          python3 controller/r1/source_environment_evidence_binding.py bind-verification \
+            --source-verification evidence/r1-recovery-source-verification.base.json \
+            --verification evidence/gh-attestation-verification.json \
+            --readiness source/r1-source-environment-readiness.json \
+            --readiness-artifact-id '${{ needs.preflight-source.outputs.readiness_artifact_id }}' \
             --output evidence/r1-recovery-source-verification.json
+          rm -f evidence/r1-recovery-source-verification.base.json
           python3 - <<'PY'
           import json
           v=json.load(open('evidence/r1-recovery-source-verification.json'))
           assert v['source_attestation_verified'] is True
+          assert v['source_environment_evidence']['source_environment_binding_verified'] is True
+          assert v['source_environment_evidence']['artifact_name'] == 'r1-source-environment-readiness.json'
           assert v['authority_effect'] is False
           assert v['r2_proven'] is False
           assert v['persisted_seal_allowed'] is False
