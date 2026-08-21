@@ -5,7 +5,9 @@ on:
     branches: [main]
     paths:
       - 'controller/r1/supervisor_r2_ingestion_gate.py'
+      - 'controller/r1/supervisor_r2_ingestion_authority_gate.py'
       - 'tests/test_r1_supervisor_r2_ingestion_gate.py'
+      - 'tests/test_r1_supervisor_r2_ingestion_authority_gate.py'
       - 'controller/r1/final_r2_evidence_package.py'
       - 'controller/r1/live_recovery_source_attestation.py'
       - 'controller/r1/source_environment_evidence_binding.py'
@@ -26,15 +28,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Compile STEP09A gate
+      - name: Compile STEP09A core and authority wrapper
         run: |
           set -euo pipefail
           python3 -m py_compile controller/r1/supervisor_r2_ingestion_gate.py
+          python3 -m py_compile controller/r1/supervisor_r2_ingestion_authority_gate.py
 
-      - name: Run STEP09A adversarial suite
+      - name: Run STEP09A adversarial suites
         run: |
           set -euo pipefail
           python3 -m unittest tests.test_r1_supervisor_r2_ingestion_gate -v
+          python3 -m unittest tests.test_r1_supervisor_r2_ingestion_authority_gate -v
 
       - name: Re-run source and package regressions
         run: |
@@ -50,17 +54,29 @@ jobs:
           from pathlib import Path
           raw=Path('.github/workflows/r1-supervisor-r2-ingestion-gate.yml').read_text()
           before,_=raw.split('      - name: Validate STEP09A credential and authority separation',1)
-          module=Path('controller/r1/supervisor_r2_ingestion_gate.py').read_text()
+          core=Path('controller/r1/supervisor_r2_ingestion_gate.py').read_text()
+          authority=Path('controller/r1/supervisor_r2_ingestion_authority_gate.py').read_text()
           assert ('workflow_'+'dispatch') not in before
           assert 'id-token: write' not in before
           for token in ('AWS_'+'ACCESS_KEY_ID','AWS_'+'SECRET_ACCESS_KEY','B2_'+'APPLICATION_KEY','SUPABASE_'+'DB_URL','SERVICE_'+'ROLE'):
               assert token not in before
-          assert 'ROOT_CONTEXT_MAX_AGE = timedelta(minutes=15)' in module
-          assert 'deny_self_hosted_runners' in module
-          assert 'validate_verification_result' in module
-          assert 'bind_verification' in module
-          assert 'ingestion_eligible' in module
-          assert 'database_credential_present' in module
-          assert 'database_write_performed' in module
-          assert 'r2_proven' in module and 'persisted_seal_allowed' in module
+          assert 'ROOT_CONTEXT_MAX_AGE = timedelta(minutes=15)' in core
+          assert 'deny_self_hosted_runners' in core
+          assert 'validate_verification_result' in core
+          assert 'bind_verification' in core
+          assert 'database_credential_present' in core
+          assert 'database_write_performed' in core
+          assert 'gh attestation verify' in authority
+          assert '--signer-workflow' in authority
+          assert '--signer-digest' in authority
+          assert '--source-ref' in authority
+          assert '--source-digest' in authority
+          assert '--cert-oidc-issuer' in authority
+          assert '--predicate-type' in authority
+          assert '--deny-self-hosted-runners' in authority
+          assert '--custom-trusted-root' in authority
+          assert 'step09b_ingestion_eligible' in authority
+          assert 'database_credential_present' in authority
+          assert 'database_write_performed' in authority
+          assert 'r2_proven' in authority and 'persisted_seal_allowed' in authority
           PY
