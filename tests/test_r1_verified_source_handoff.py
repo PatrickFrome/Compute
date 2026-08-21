@@ -22,6 +22,8 @@ gspec.loader.exec_module(g)
 RUN_ID = 9001
 HEAD = "1" * 40
 VERIFICATION_ARTIFACT_ID = 3003
+READINESS_ARTIFACT_ID = 4004
+READINESS_SHA = "9" * 64
 
 
 def canon(value):
@@ -124,6 +126,13 @@ def build_fixture(root: Path):
         "migration_ledger_sha256": "7" * 64,
         "verified_timestamp_count": 1,
         "source_attestation_verified": True,
+        "source_environment_evidence": {
+            "artifact_id": READINESS_ARTIFACT_ID,
+            "artifact_name": h.SOURCE_ENVIRONMENT_READINESS_ARTIFACT_NAME,
+            "readiness_sha256": READINESS_SHA,
+            "environment": h.SOURCE_ENVIRONMENT,
+            "source_environment_binding_verified": True,
+        },
         "authority_effect": False,
         "r2_proven": False,
         "r3_proven": False,
@@ -140,10 +149,27 @@ class VerifiedSourceHandoffTests(unittest.TestCase):
             ciphertext,envelope,artifacts,preflight,verification=build_fixture(Path(td))
             out=h.validate_handoff(preflight=preflight,artifacts=artifacts,source_verification_artifact_id=VERIFICATION_ARTIFACT_ID,source_verification=verification,ciphertext=ciphertext,envelope_receipt=envelope)
             self.assertTrue(out["source_attestation_verified"])
+            self.assertTrue(out["source_environment_binding_verified"])
+            self.assertEqual(out["source"]["source_environment_readiness_artifact_id"], READINESS_ARTIFACT_ID)
+            self.assertEqual(out["source"]["source_environment_readiness_sha256"], READINESS_SHA)
             self.assertTrue(out["provider_credentials_eligible_after_environment_and_readiness_gates"])
             self.assertFalse(out["provider_execution_authorized"])
             self.assertFalse(out["r2_proven"])
             self.assertFalse(out["persisted_seal_allowed"])
+
+    def test_missing_or_false_environment_binding_is_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            ciphertext,envelope,artifacts,preflight,verification=build_fixture(Path(td))
+            verification.pop("source_environment_evidence")
+            self_hash(verification,"verification_receipt_sha256")
+            with self.assertRaisesRegex(h.HandoffError,"source_environment_evidence_missing"):
+                h.validate_handoff(preflight=preflight,artifacts=artifacts,source_verification_artifact_id=VERIFICATION_ARTIFACT_ID,source_verification=verification,ciphertext=ciphertext,envelope_receipt=envelope)
+
+            ciphertext,envelope,artifacts,preflight,verification=build_fixture(Path(td))
+            verification["source_environment_evidence"]["source_environment_binding_verified"] = False
+            self_hash(verification,"verification_receipt_sha256")
+            with self.assertRaisesRegex(h.HandoffError,"source_environment_binding_not_verified"):
+                h.validate_handoff(preflight=preflight,artifacts=artifacts,source_verification_artifact_id=VERIFICATION_ARTIFACT_ID,source_verification=verification,ciphertext=ciphertext,envelope_receipt=envelope)
 
     def test_wrong_or_expired_verification_artifact_is_rejected(self):
         with tempfile.TemporaryDirectory() as td:
