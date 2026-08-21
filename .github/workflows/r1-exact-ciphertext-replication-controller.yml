@@ -53,7 +53,10 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           wf = Path('.github/workflows/r1-exact-ciphertext-replication-controller.yml').read_text()
-          assert 'workflow_dispatch' not in wf
-          assert 'secrets.' not in wf
-          assert 'aws s3' not in wf
+          forbidden = [
+              'workflow_' + 'dispatch',
+              'secrets' + '.',
+              'aws' + ' s3',
+          ]
+          assert all(token not in wf for token in forbidden), forbidden
           PY
