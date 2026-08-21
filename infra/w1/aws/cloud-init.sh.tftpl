@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+WORK_ROOT=/opt/metaengine-source
+BOOT_ROOT=/var/lib/metaengine-bootstrap
+install -d -o root -g root -m 0755 "$WORK_ROOT" "$BOOT_ROOT"
+
+# Download only an exact Git commit archive. Extract only worker/native-linux,
+# reject links/devices, and never follow a branch name or mutable latest alias.
+python3 - '${github_sha}' "$WORK_ROOT" "$BOOT_ROOT/github-archive.sha256" <<'PY'
+import hashlib
+import io
+import os
+import pathlib
+import sys
+import tarfile
+import urllib.request
+
+sha, dest_raw, digest_out = sys.argv[1:]
+if len(sha) != 40 or any(c not in '0123456789abcdef' for c in sha):
+    raise SystemExit('invalid exact github sha')
+url = f'https://codeload.github.com/PatrickFrome/Compute/tar.gz/{sha}'
+with urllib.request.urlopen(url, timeout=30) as resp:
+    archive = resp.read(32 * 1024 * 1024)
+pathlib.Path(digest_out).write_text(hashlib.sha256(archive).hexdigest() + '\n', encoding='utf-8')
+
+dest = pathlib.Path(dest_raw)
+with tarfile.open(fileobj=io.BytesIO(archive), mode='r:gz') as tf:
+    members = tf.getmembers()
+    if not members:
+        raise SystemExit('empty github archive')
+    root = members[0].name.split('/', 1)[0]
+    prefix = root + '/worker/native-linux/'
+    extracted = 0
+    for member in members:
+        if not member.name.startswith(prefix):
+            continue
+        rel = member.name[len(root) + 1:]
+        parts = pathlib.PurePosixPath(rel).parts
+        if not parts or any(p in ('', '.', '..') for p in parts):
+            raise SystemExit('unsafe archive path')
+        target = dest.joinpath(*parts)
+        if member.isdir():
+            target.mkdir(parents=True, exist_ok=True)
+            target.chmod(0o755)
+            continue
+        if not member.isfile():
+            raise SystemExit(f'non-regular bootstrap archive member forbidden: {rel}')
+        target.parent.mkdir(parents=True, exist_ok=True)
+        src = tf.extractfile(member)
+        if src is None:
+            raise SystemExit(f'archive extraction failed: {rel}')
+        data = src.read()
+        target.write_bytes(data)
+        target.chmod(0o755 if member.mode & 0o111 else 0o644)
+        extracted += 1
+    if extracted < 6:
+        raise SystemExit('incomplete worker/native-linux bundle')
+PY
+
+NATIVE="$WORK_ROOT/worker/native-linux"
+for f in bootstrap_persistent_host.sh install.sh execution_substrate_probe.py prepare_gvisor.sh providers/aws/fetch_bootstrap_secret.py; do
+  test -f "$NATIVE/$f"
+done
+chmod 0755 \
+  "$NATIVE/bootstrap_persistent_host.sh" \
+  "$NATIVE/install.sh" \
+  "$NATIVE/execution_substrate_probe.py" \
+  "$NATIVE/prepare_gvisor.sh" \
+  "$NATIVE/providers/aws/fetch_bootstrap_secret.py"
+
+# The secret value is never in user-data. The instance role may read exactly the
+# supplied Secrets Manager ARN. The helper requires IMDSv2 and never logs the value.
+TOKEN_FILE=/run/metaengine-w1-bootstrap-token
+AWS_RECEIPT="$BOOT_ROOT/aws-secret-receipt.json"
+python3 "$NATIVE/providers/aws/fetch_bootstrap_secret.py" \
+  --region '${region}' \
+  --secret-id '${bootstrap_secret_arn}' \
+  --output "$TOKEN_FILE" \
+  --receipt "$AWS_RECEIPT"
+
+INSTANCE_ID=$(python3 - "$AWS_RECEIPT" <<'PY'
+import json, sys
+p=json.load(open(sys.argv[1], encoding='utf-8'))
+v=p.get('instance_id','')
+if not v.startswith('i-'):
+    raise SystemExit('invalid instance id receipt')
+print(v)
+PY
+)
+
+args=(
+  --worker-id '${worker_id}'
+  --gateway-url '${gateway_url}'
+  --bearer-token-file "$TOKEN_FILE"
+  --bundle-github-sha '${github_sha}'
+  --provider-kind AWS_EC2
+  --provider-instance-id "$INSTANCE_ID"
+)
+if [ '${prepare_gvisor}' = 'true' ]; then
+  args+=(--prepare-gvisor)
+fi
+
+"$NATIVE/bootstrap_persistent_host.sh" "${args[@]}" > "$BOOT_ROOT/bootstrap.stdout.json"
+rm -f "$TOKEN_FILE"
+
+systemctl is-enabled --quiet metaengine-worker.service
+systemctl is-active --quiet metaengine-worker.service
+
+# Never self-reboot here. The first proof reboot must be requested through the
+# EC2 API/controller plane so an independent provider action/CloudTrail record exists.
+printf '%s\n' 'W1_HOST_BOOTSTRAP_COMPLETE_PROVIDER_REBOOT_REQUIRED' > "$BOOT_ROOT/NEXT_ACTION"
