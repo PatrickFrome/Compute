@@ -1,4 +1,4 @@
-import { DurableObject, WorkflowEntrypoint } from "cloudflare:workers";
+import { DurableObject, WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import type { AopWake, Env, MessageBatch, WorkflowParams } from "./types";
 import { completeRun, deferRun, leaseRun, rpc, supervisorReturnAuthority } from "./supabase";
 import { executeRole, executorReady } from "./executor";
