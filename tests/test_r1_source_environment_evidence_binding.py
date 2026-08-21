@@ -7,10 +7,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 MODULE_PATH = ROOT / "controller" / "r1" / "source_environment_evidence_binding.py"
+APPROVAL_PATH = ROOT / "controller" / "r1" / "source_environment_approval_evidence.py"
+
 spec = importlib.util.spec_from_file_location("r1_source_environment_evidence_binding", MODULE_PATH)
 mod = importlib.util.module_from_spec(spec)
 assert spec and spec.loader
 spec.loader.exec_module(mod)
+
+aspec = importlib.util.spec_from_file_location("r1_source_environment_approval_evidence_for_binding", APPROVAL_PATH)
+a = importlib.util.module_from_spec(aspec)
+assert aspec and aspec.loader
+aspec.loader.exec_module(a)
+
+READINESS_ID = 456
+APPROVAL_ID = 457
 
 
 def canon(v):
@@ -36,6 +46,19 @@ def readiness():
         "r2_proven": False,
         "persisted_seal_allowed": False,
     }
+
+
+def approval_history(reviewer_id=22, comment="ship"):
+    return [{
+        "state": "approved",
+        "comment": comment,
+        "environments": [{"id": 991, "name": mod.SOURCE_ENVIRONMENT}],
+        "user": {"id": reviewer_id, "login": "reviewer-user"},
+    }]
+
+
+def approval():
+    return a.build_approval_evidence(approval_history(), 11)
 
 
 def predicate():
@@ -114,67 +137,75 @@ def gh_verification(bound_predicate):
 
 
 class SourceEnvironmentEvidenceBindingTests(unittest.TestCase):
-    def test_readiness_requires_real_protection_shape_and_nonauthority(self):
-        result = mod.validate_readiness(readiness())
-        self.assertEqual(result["environment"], mod.SOURCE_ENVIRONMENT)
-        self.assertEqual(result["required_reviewer_count"], 2)
-        self.assertRegex(result["readiness_sha256"], r"^[0-9a-f]{64}$")
+    def test_readiness_and_approval_are_both_required_and_nonauthoritative(self):
+        r = mod.validate_readiness(readiness())
+        ap = mod.validate_approval(approval())
+        self.assertEqual(r["environment"], mod.SOURCE_ENVIRONMENT)
+        self.assertEqual(ap["approved_review_count"], 1)
+        self.assertTrue(ap["self_review_absent"])
 
         bad = readiness()
         bad["prevent_self_review"] = False
         with self.assertRaisesRegex(mod.EnvironmentBindingError, "prevent_self_review"):
             mod.validate_readiness(bad)
 
-        bad = readiness()
-        bad["authority_effect"] = True
+        forged = approval()
+        forged["r2_proven"] = True
+        core = dict(forged); core.pop("approval_receipt_sha256", None)
+        forged["approval_receipt_sha256"] = hashlib.sha256(canon(core)).hexdigest()
         with self.assertRaisesRegex(mod.EnvironmentBindingError, "authority_boundary"):
-            mod.validate_readiness(bad)
+            mod.validate_approval(forged)
 
-    def test_bind_predicate_adds_exact_readiness_hash_and_rehashes(self):
+    def test_bind_predicate_adds_exact_artifact_ids_and_hashes(self):
         original = predicate()
         old_sha = original["predicate_sha256"]
-        bound = mod.bind_predicate(original, readiness())
+        bound = mod.bind_predicate(original, readiness(), approval(), READINESS_ID, APPROVAL_ID)
         self.assertNotEqual(old_sha, bound["predicate_sha256"])
-        self.assertEqual(
-            bound["source_environment_evidence"]["readiness_sha256"],
-            hashlib.sha256(canon(readiness())).hexdigest(),
-        )
-        checked = mod.validate_bound_predicate(bound, readiness())
+        ev = bound["source_environment_evidence"]
+        self.assertEqual(ev["configuration"]["artifact_id"], READINESS_ID)
+        self.assertEqual(ev["approval"]["artifact_id"], APPROVAL_ID)
+        self.assertEqual(ev["approval"]["approved_review_count"], 1)
+        checked = mod.validate_bound_predicate(bound, readiness(), approval(), READINESS_ID, APPROVAL_ID)
         self.assertTrue(checked["source_environment_binding_verified"])
 
-    def test_signer_side_validation_rejects_source_build_forgery(self):
-        bound = mod.bind_predicate(predicate(), readiness())
+    def test_signer_side_validation_rejects_readiness_or_approval_forgery(self):
+        bound = mod.bind_predicate(predicate(), readiness(), approval(), READINESS_ID, APPROVAL_ID)
         forged_readiness = readiness()
         forged_readiness["required_reviewer_count"] = 9
         with self.assertRaisesRegex(mod.EnvironmentBindingError, "environment_evidence_mismatch"):
-            mod.validate_bound_predicate(bound, forged_readiness)
+            mod.validate_bound_predicate(bound, forged_readiness, approval(), READINESS_ID, APPROVAL_ID)
+
+        forged_approval = a.build_approval_evidence(approval_history(reviewer_id=33), 11)
+        with self.assertRaisesRegex(mod.EnvironmentBindingError, "environment_evidence_mismatch"):
+            mod.validate_bound_predicate(bound, readiness(), forged_approval, READINESS_ID, APPROVAL_ID)
 
         forged = copy.deepcopy(bound)
-        forged["source_environment_evidence"]["required_reviewer_count"] = 99
+        forged["source_environment_evidence"]["approval"]["approved_review_count"] = 99
         self_hash(forged, "predicate_sha256")
         with self.assertRaisesRegex(mod.EnvironmentBindingError, "environment_evidence_mismatch"):
-            mod.validate_bound_predicate(forged, readiness())
+            mod.validate_bound_predicate(forged, readiness(), approval(), READINESS_ID, APPROVAL_ID)
 
-    def test_bind_verification_requires_signed_predicate_and_original_readiness(self):
-        bound = mod.bind_predicate(predicate(), readiness())
+    def test_bind_verification_requires_signed_predicate_and_original_evidence(self):
+        bound = mod.bind_predicate(predicate(), readiness(), approval(), READINESS_ID, APPROVAL_ID)
         receipt = source_verification(bound)
         result = mod.bind_verification(
             source_verification=receipt,
             verification=gh_verification(bound),
             readiness=readiness(),
-            readiness_artifact_id=456,
+            approval=approval(),
+            readiness_artifact_id=READINESS_ID,
+            approval_artifact_id=APPROVAL_ID,
         )
         env = result["source_environment_evidence"]
-        self.assertEqual(env["artifact_id"], 456)
-        self.assertEqual(env["artifact_name"], mod.READINESS_ARTIFACT_NAME)
+        self.assertEqual(env["configuration"]["artifact_id"], READINESS_ID)
+        self.assertEqual(env["approval"]["artifact_id"], APPROVAL_ID)
+        self.assertEqual(env["approval"]["approved_review_count"], 1)
         self.assertTrue(env["source_environment_binding_verified"])
-        self.assertRegex(result["verification_receipt_sha256"], r"^[0-9a-f]{64}$")
-        core = dict(result)
-        claimed = core.pop("verification_receipt_sha256")
+        core = dict(result); claimed = core.pop("verification_receipt_sha256")
         self.assertEqual(claimed, hashlib.sha256(canon(core)).hexdigest())
 
     def test_bind_verification_rejects_mismatched_signed_predicate(self):
-        bound = mod.bind_predicate(predicate(), readiness())
+        bound = mod.bind_predicate(predicate(), readiness(), approval(), READINESS_ID, APPROVAL_ID)
         other = copy.deepcopy(bound)
         other["source"]["run_id"] = 124
         self_hash(other, "predicate_sha256")
@@ -184,26 +215,20 @@ class SourceEnvironmentEvidenceBindingTests(unittest.TestCase):
                 source_verification=receipt,
                 verification=gh_verification(other),
                 readiness=readiness(),
-                readiness_artifact_id=456,
+                approval=approval(),
+                readiness_artifact_id=READINESS_ID,
+                approval_artifact_id=APPROVAL_ID,
             )
 
-    def test_bind_verification_rejects_authority_escalation(self):
-        bound = mod.bind_predicate(predicate(), readiness())
-        receipt = source_verification(bound)
-        receipt["r2_proven"] = True
-        self_hash(receipt, "verification_receipt_sha256")
-        with self.assertRaisesRegex(mod.EnvironmentBindingError, "authority_boundary"):
-            mod.bind_verification(
-                source_verification=receipt,
-                verification=gh_verification(bound),
-                readiness=readiness(),
-                readiness_artifact_id=456,
-            )
+    def test_artifact_id_tamper_is_rejected(self):
+        bound = mod.bind_predicate(predicate(), readiness(), approval(), READINESS_ID, APPROVAL_ID)
+        with self.assertRaisesRegex(mod.EnvironmentBindingError, "environment_evidence_mismatch"):
+            mod.validate_bound_predicate(bound, readiness(), approval(), READINESS_ID + 1, APPROVAL_ID)
 
     def test_bound_predicate_rejects_double_binding(self):
-        bound = mod.bind_predicate(predicate(), readiness())
+        bound = mod.bind_predicate(predicate(), readiness(), approval(), READINESS_ID, APPROVAL_ID)
         with self.assertRaisesRegex(mod.EnvironmentBindingError, "already_present"):
-            mod.bind_predicate(bound, readiness())
+            mod.bind_predicate(bound, readiness(), approval(), READINESS_ID, APPROVAL_ID)
 
 
 if __name__ == "__main__":
