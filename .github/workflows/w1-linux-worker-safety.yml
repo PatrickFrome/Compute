@@ -125,6 +125,7 @@ jobs:
           unit_sha=$(sha256sum worker/native-linux/metaengine-worker.service | awk '{print $1}')
           sudo install -d -o root -g root -m 0755 /opt/metaengine-w1-ci
           sudo install -o root -g root -m 0555 worker/native-linux/w1_safety_probe.py /opt/metaengine-w1-ci/w1_safety_probe.py
+          set +e
           sudo systemd-run \
             --unit="metaengine-w1-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
             --quiet --wait --collect --pipe \
@@ -159,6 +160,9 @@ jobs:
             -p LimitCPU=60 \
             /usr/bin/python3 /opt/metaengine-w1-ci/w1_safety_probe.py --mode full \
             > evidence/host-probe.json
+          probe_rc=$?
+          set -e
+          cat evidence/host-probe.json
           python3 - <<'PY'
           import json
           p=json.load(open('evidence/host-probe.json'))
@@ -166,6 +170,7 @@ jobs:
           assert p['persistent_worker_proof'] is False
           assert p['pass'] is True, p['checks']
           PY
+          test "$probe_rc" -eq 0
 
       - name: Run filesystem network and cgroup failure canaries
         run: |
