@@ -100,7 +100,8 @@ jobs:
           set -euo pipefail
           psql -v ON_ERROR_STOP=1 -f supabase/migrations/20260821090100_t0_hermetic_toolchain_contract_v2.sql
           psql -v ON_ERROR_STOP=1 -f supabase/migrations/20260821090200_t0_hermetic_toolchain_contract_v3.sql
-          test "$(psql -v ON_ERROR_STOP=1 -Atc \"select compute_fabric_toolchain_v3_evidence_h205f22()->>'status' from destruktion_meta.compute_fabric_toolchain_v3_evidence_h205f22();\")" = "PASS"
+          status="$(psql -v ON_ERROR_STOP=1 -Atc "select destruktion_meta.compute_fabric_toolchain_v3_evidence_h205f22()->>'status';")"
+          test "$status" = "PASS"
 
       - name: Reapply migrations idempotently
         shell: bash
@@ -108,7 +109,8 @@ jobs:
           set -euo pipefail
           psql -v ON_ERROR_STOP=1 -f supabase/migrations/20260821090100_t0_hermetic_toolchain_contract_v2.sql >/tmp/t0-v2-reapply.log
           psql -v ON_ERROR_STOP=1 -f supabase/migrations/20260821090200_t0_hermetic_toolchain_contract_v3.sql >/tmp/t0-v3-reapply.log
-          test "$(psql -v ON_ERROR_STOP=1 -Atc \"select compute_fabric_toolchain_v3_evidence_h205f22()->>'status' from destruktion_meta.compute_fabric_toolchain_v3_evidence_h205f22();\")" = "PASS"
+          status="$(psql -v ON_ERROR_STOP=1 -Atc "select destruktion_meta.compute_fabric_toolchain_v3_evidence_h205f22()->>'status';")"
+          test "$status" = "PASS"
 
       - name: Verify frozen contract and non-authority boundary
         shell: bash
