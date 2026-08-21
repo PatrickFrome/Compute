@@ -1,0 +1,70 @@
+name: R1 Final R2 Evidence Package
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/r1/final_r2_evidence_package.py'
+      - 'tests/test_r1_final_r2_evidence_package.py'
+      - 'controller/r1/idempotent_exact_ciphertext_replication.py'
+      - 'controller/r1/live_two_domain_orchestration_guard.py'
+      - 'controller/r1/source_bound_quorum_candidate.py'
+      - 'controller/r1/source_environment_evidence_binding.py'
+      - 'research/R1_STEP08_FINAL_R2_EVIDENCE_PACKAGE.md'
+      - '.github/workflows/r1-final-r2-evidence-package.yml'
+
+permissions: {}
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile STEP08 compiler
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/r1/final_r2_evidence_package.py
+
+      - name: Run STEP08 adversarial suite
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_r1_final_r2_evidence_package -v
+
+      - name: Re-run evidence-chain regressions
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_r1_idempotent_exact_ciphertext_replication -v
+          python3 -m unittest tests.test_r1_live_two_domain_orchestration_guard -v
+          python3 -m unittest tests.test_r1_source_environment_evidence_binding -v
+          python3 -m unittest tests.test_r1_source_bound_quorum_candidate -v
+
+      - name: Validate STEP08 nonauthority and credential-free contract
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          raw=Path('.github/workflows/r1-final-r2-evidence-package.yml').read_text()
+          before,_=raw.split('      - name: Validate STEP08 nonauthority and credential-free contract',1)
+          module=Path('controller/r1/final_r2_evidence_package.py').read_text()
+          forbidden_trigger='workflow_'+'dispatch'
+          assert forbidden_trigger not in before
+          assert 'id-token: write' not in before
+          for token in ('AWS_'+'ACCESS_KEY_ID','AWS_'+'SECRET_ACCESS_KEY','B2_'+'APPLICATION_KEY','SUPABASE_'+'DB_URL'):
+              assert token not in before
+          assert 'database_write_performed' in module
+          assert 'provider_call_performed' in module
+          assert 'offline_reverification_required' in module
+          assert 'ciphertext_included' in module
+          assert 'r2_proven' in module and 'persisted_seal_allowed' in module
+          assert 'READBACK_MAX_AGE = timedelta(days=7)' in module
+          assert 'validate_persisted_provider_controller_evidence' in module
+          assert 'evaluate_results' in module
+          assert 'bind_candidate' in module
+          PY
