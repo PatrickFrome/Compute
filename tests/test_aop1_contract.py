@@ -83,6 +83,7 @@ assert 'wake_condition=GITHUB_WRITE_EXECUTOR_AVAILABLE' in executor_ts
 assert "github_write_tool_forbidden_for_role" in executor_ts
 assert "Analyst is strictly read-only in GitHub tools" in executor_ts
 assert "github_configured: githubWriteConfigured(env)" in index_ts
+assert "github_auth_mode: githubAuthMode(env)" in index_ts
 
 # GitHub App authentication mints short-lived installation tokens instead of
 # persisting a generated installation token. Repository scope is explicit.
@@ -190,14 +191,14 @@ for forbidden in ("aop1_supabase_service_role", "aop1_supervisor_token", "aop1_w
 assert "to service_role" in deploy_exchange_sql
 assert "aop_deploy_exchange_receipt_is_append_only" in deploy_exchange_sql
 
-# OIDC broker is reusable across push SHAs but tightly bound to repository identity,
-# branch, workflow, subject and GitHub-hosted push events. No hardcoded capability.
+# GitHub switched newly-created repositories to immutable default OIDC subjects on
+# 2026-07-15. Trust both immutable numeric identity and explicit repository claims.
 for marker in (
     'AUDIENCE = "metaengine-h205f22-aop1-deploy"',
     'repository_id: "1341371143"',
     'repository_owner_id: "20597814"',
     'ref: "refs/heads/work/aop1-autonomous-orchestration"',
-    'sub: "repo:PatrickFrome/Compute:ref:refs/heads/work/aop1-autonomous-orchestration"',
+    'sub: "repo:PatrickFrome@20597814/Compute@1341371143:ref:refs/heads/work/aop1-autonomous-orchestration"',
     'payload.event_name !== "push"',
     'payload.runner_environment !== "github-hosted"',
     'payload.repository_visibility !== "public"',
