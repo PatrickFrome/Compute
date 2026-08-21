@@ -44,7 +44,8 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          workflow=Path('.github/workflows/r1-provider-controller-evidence-persistence.yml').read_text()
+          raw=Path('.github/workflows/r1-provider-controller-evidence-persistence.yml').read_text()
+          workflow=raw.split('      - name: Validate PR-only evidence boundary',1)[0]
           module=Path('controller/r1/idempotent_exact_ciphertext_replication.py').read_text()
           assert 'workflow_dispatch' not in workflow
           assert 'id-token: write' not in workflow
@@ -53,6 +54,9 @@ jobs:
           assert 'provider_controller_evidence' in module
           assert 'provider_controller_evidence_sha256' in module
           assert 'credentials_embedded' in module
+          assert 'MAX_PERSISTED_EVIDENCE_BYTES' in module
+          assert 'FORBIDDEN_EVIDENCE_KEYS' in module
+          assert 'EXPECTED_OBJECT_METADATA_KEYS' in module
           assert 'CREATED_NEW_VERSION' in module
           assert 'REUSED_EXISTING_VERSION' in module
           assert 'r2_proven' in module and 'persisted_seal_allowed' in module
