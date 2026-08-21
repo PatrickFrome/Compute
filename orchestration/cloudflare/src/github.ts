@@ -1,7 +1,9 @@
 import type { AopLease, Env } from "./types";
 
 const REPO = "PatrickFrome/Compute";
+const REPO_NAME = "Compute";
 const API = "https://api.github.com";
+const API_VERSION = "2026-03-10";
 
 function branchFor(lease: AopLease): string {
   const branch = lease.role_config?.branch;
@@ -15,16 +17,136 @@ function safeRepoPath(path: string): string {
   return encodeURIComponent(path).replaceAll("%2F", "/");
 }
 
-async function gh(env: Env, path: string, init: RequestInit = {}): Promise<Response> {
+function appIssuer(env: Env): string | undefined {
+  return env.GITHUB_APP_CLIENT_ID || env.GITHUB_APP_ID;
+}
+
+function anyAppCredential(env: Env): boolean {
+  return Boolean(appIssuer(env) || env.GITHUB_APP_INSTALLATION_ID || env.GITHUB_APP_PRIVATE_KEY);
+}
+
+export function githubAppConfigured(env: Env): boolean {
+  return Boolean(appIssuer(env) && env.GITHUB_APP_INSTALLATION_ID && env.GITHUB_APP_PRIVATE_KEY);
+}
+
+export function githubWriteConfigured(env: Env): boolean {
+  return Boolean(env.GITHUB_TOKEN || githubAppConfigured(env));
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/g, "");
+}
+
+function jsonToBase64Url(value: unknown): string {
+  return bytesToBase64Url(new TextEncoder().encode(JSON.stringify(value)));
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value.replace(/\s+/g, ""));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function derLength(length: number): Uint8Array {
+  if (!Number.isSafeInteger(length) || length < 0) throw new Error("invalid_der_length");
+  if (length < 0x80) return new Uint8Array([length]);
+  const out: number[] = [];
+  let n = length;
+  while (n > 0) { out.unshift(n & 0xff); n >>>= 8; }
+  return new Uint8Array([0x80 | out.length, ...out]);
+}
+
+function concatBytes(...parts: Uint8Array[]): Uint8Array {
+  const length = parts.reduce((sum, p) => sum + p.length, 0);
+  const out = new Uint8Array(length);
+  let offset = 0;
+  for (const p of parts) { out.set(p, offset); offset += p.length; }
+  return out;
+}
+
+function wrapPkcs1AsPkcs8(pkcs1: Uint8Array): Uint8Array {
+  // PrivateKeyInfo ::= SEQUENCE { version=0, rsaEncryption AlgorithmIdentifier, privateKey OCTET STRING }
+  const version = new Uint8Array([0x02, 0x01, 0x00]);
+  const rsaAlgorithm = new Uint8Array([0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00]);
+  const octet = concatBytes(new Uint8Array([0x04]), derLength(pkcs1.length), pkcs1);
+  const body = concatBytes(version, rsaAlgorithm, octet);
+  return concatBytes(new Uint8Array([0x30]), derLength(body.length), body);
+}
+
+function privateKeyDer(pem: string): Uint8Array {
+  const normalized = pem.trim();
+  const pkcs8 = /^-----BEGIN PRIVATE KEY-----([\s\S]+)-----END PRIVATE KEY-----$/.exec(normalized);
+  if (pkcs8) return base64ToBytes(pkcs8[1]);
+  const pkcs1 = /^-----BEGIN RSA PRIVATE KEY-----([\s\S]+)-----END RSA PRIVATE KEY-----$/.exec(normalized);
+  if (pkcs1) return wrapPkcs1AsPkcs8(base64ToBytes(pkcs1[1]));
+  throw new Error("github_app_private_key_pem_invalid");
+}
+
+async function githubAppJwt(env: Env): Promise<string> {
+  const issuer = appIssuer(env);
+  if (!issuer || !env.GITHUB_APP_PRIVATE_KEY) throw new Error("github_app_configuration_incomplete");
+  const now = Math.floor(Date.now() / 1000);
+  const header = jsonToBase64Url({ alg: "RS256", typ: "JWT" });
+  const payload = jsonToBase64Url({ iat: now - 60, exp: now + 540, iss: issuer });
+  const signingInput = `${header}.${payload}`;
+  const key = await crypto.subtle.importKey(
+    "pkcs8",
+    privateKeyDer(env.GITHUB_APP_PRIVATE_KEY),
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(signingInput)));
+  return `${signingInput}.${bytesToBase64Url(signature)}`;
+}
+
+async function installationToken(env: Env): Promise<string> {
+  if (!githubAppConfigured(env)) {
+    if (anyAppCredential(env)) throw new Error("github_app_configuration_incomplete");
+    throw new Error("github_app_not_configured");
+  }
+  const installationId = String(env.GITHUB_APP_INSTALLATION_ID);
+  if (!/^\d{1,30}$/.test(installationId)) throw new Error("github_app_installation_id_invalid");
+  const jwt = await githubAppJwt(env);
+  const res = await fetch(`${API}/app/installations/${installationId}/access_tokens`, {
+    method: "POST",
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `Bearer ${jwt}`,
+      "content-type": "application/json",
+      "x-github-api-version": API_VERSION,
+      "user-agent": "metaengine-aop1",
+    },
+    body: JSON.stringify({ repositories: [REPO_NAME] }),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`github_app_installation_token_failed:${res.status}:${text.slice(0, 800)}`);
+  const body = JSON.parse(text) as { token?: string; expires_at?: string };
+  if (!body.token || !body.expires_at) throw new Error("github_app_installation_token_shape_invalid");
+  return body.token;
+}
+
+async function mutationToken(env: Env): Promise<string> {
+  if (env.GITHUB_TOKEN) return env.GITHUB_TOKEN;
+  if (githubAppConfigured(env)) return installationToken(env);
+  if (anyAppCredential(env)) throw new Error("github_app_configuration_incomplete");
+  throw new Error("github_mutation_credential_missing");
+}
+
+async function gh(env: Env, path: string, init: RequestInit = {}, token?: string): Promise<Response> {
   const method = String(init.method ?? "GET").toUpperCase();
   const mutation = method !== "GET" && method !== "HEAD";
-  if (mutation && !env.GITHUB_TOKEN) throw new Error("github_token_required_for_mutation");
+  const auth = token ?? env.GITHUB_TOKEN;
+  if (mutation && !auth) throw new Error("github_mutation_credential_missing");
   return fetch(`${API}${path}`, {
     ...init,
     headers: {
       accept: "application/vnd.github+json",
-      ...(env.GITHUB_TOKEN ? { authorization: `Bearer ${env.GITHUB_TOKEN}` } : {}),
-      "x-github-api-version": "2022-11-28",
+      ...(auth ? { authorization: `Bearer ${auth}` } : {}),
+      "x-github-api-version": API_VERSION,
       "user-agent": "metaengine-aop1",
       ...(init.headers ?? {}),
     },
@@ -49,11 +171,11 @@ export async function readFileAtRef(env: Env, path: string, ref: string): Promis
 }
 
 export async function writeFile(env: Env, lease: AopLease, path: string, contentUtf8: string, message: string): Promise<Record<string, unknown>> {
-  if (!env.GITHUB_TOKEN) throw new Error("github_token_required_for_mutation");
+  const auth = await mutationToken(env);
   const branch = branchFor(lease);
   const encodedPath = safeRepoPath(path);
   let sha: string | undefined;
-  const existing = await gh(env, `/repos/${REPO}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`);
+  const existing = await gh(env, `/repos/${REPO}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`, {}, auth);
   if (existing.ok) {
     const body = (await existing.json()) as Record<string, unknown>;
     if (body.type !== "file") throw new Error("github_path_not_file");
@@ -69,7 +191,7 @@ export async function writeFile(env: Env, lease: AopLease, path: string, content
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ message, content: encoded, branch, ...(sha ? { sha } : {}) }),
-  });
+  }, auth);
   if (!res.ok) throw new Error(`github_write_failed:${res.status}:${await res.text()}`);
   const body = (await res.json()) as { commit?: { sha?: string }; content?: { sha?: string } };
   return { path, branch, commit_sha: body.commit?.sha ?? null, blob_sha: body.content?.sha ?? null };
