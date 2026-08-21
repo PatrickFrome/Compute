@@ -1,0 +1,59 @@
+name: R1 Exact Ciphertext Replication Controller
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/r1/exact_ciphertext_replication_controller.py'
+      - 'tests/test_r1_exact_ciphertext_replication_controller.py'
+      - 'research/R1_STEP05_AWS_B2_EXACT_CIPHERTEXT_REPLICATION.md'
+      - '.github/workflows/r1-exact-ciphertext-replication-controller.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-replication-controller:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout exact workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile and run provider-adapter adversarial tests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/r1/exact_ciphertext_replication_controller.py
+          python3 -m unittest tests.test_r1_exact_ciphertext_replication_controller -v
+
+      - name: Enforce non-authoritative credential boundary
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('controller/r1/exact_ciphertext_replication_controller.py').read_text()
+          assert 'COPY_EXACT_CIPHERTEXT_BYTES_DO_NOT_REENCRYPT_PER_PROVIDER' not in p or 'validate_envelope_receipt' in p
+          assert '--if-none-match' in p
+          assert 'BACKBLAZE_B2' in p and 'AWS_S3' in p
+          assert 'get-object-retention' in p and 'head-object' in p and 'get-object' in p
+          assert 'source_attestation_verified": False' in p
+          assert 'r2_proven": False' in p and 'persisted_seal_allowed": False' in p
+          for forbidden in (
+              'AWS_SECRET_ACCESS_KEY', 'AWS_ACCESS_KEY_ID', 'B2_APPLICATION_KEY',
+              'boto3', 'botocore', 'supabase', 'requests', 'urllib.request'
+          ):
+              assert forbidden not in p, forbidden
+          PY
+
+      - name: Prove PR CI has no provider execution path
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          wf = Path('.github/workflows/r1-exact-ciphertext-replication-controller.yml').read_text()
+          assert 'workflow_dispatch' not in wf
+          assert 'secrets.' not in wf
+          assert 'aws s3' not in wf
+          PY
