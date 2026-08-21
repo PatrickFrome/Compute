@@ -13,9 +13,12 @@
       { "name": "AOP_SUPERVISOR", "class_name": "ComputeFabricSupervisor" }
     ]
   },
-  "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["ComputeFabricSupervisor"] }
-  ],
+  "exports": {
+    "ComputeFabricSupervisor": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  },
   "workflows": [
     { "name": "metaengine-h205f22-aop-run", "binding": "AOP_RUN_WORKFLOW", "class_name": "AopRunWorkflow" }
   ],
