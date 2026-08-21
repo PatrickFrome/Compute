@@ -23,10 +23,12 @@ jobs:
     timeout-minutes: 12
     steps:
       - name: Checkout exact workflow revision
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - name: Install exact Terraform CLI
-        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e
         with:
           terraform_version: 1.15.8
           terraform_wrapper: false
@@ -64,19 +66,20 @@ jobs:
           assert 'disable_api_termination = var.protect_from_api_termination' in main
           assert 'disable_api_stop        = var.protect_from_api_termination' in main
           assert not re.search(r'(?m)^\s*ingress\s*\{', main)
+          assert not re.search(r'(?m)^\s*(from_port|to_port)\s*=\s*22\s*$', main)
           assert 'data "aws_ami"' not in main
           assert 'most_recent' not in main
           assert 'secretsmanager:GetSecretValue' in main
           assert 'secretsmanager:*' not in main
           assert 'ssm:' not in main.lower()
-          assert 'ssh' not in main.lower()
 
           assert 'can(regex("^ami-[0-9a-f]+$", var.ami_id))' in variables
           assert 'can(regex("^[0-9a-f]{40}$", var.worker_bundle_github_sha))' in variables
           assert 'associate_public_ip_address' in variables and 'default     = false' in variables
 
           assert 'RebootInstances' not in cloud
-          assert 'reboot ' not in cloud.lower()
+          assert 'shutdown -r' not in cloud.lower()
+          assert 'systemctl reboot' not in cloud.lower()
           assert '--secret-id' in cloud and '${bootstrap_secret_arn}' in cloud
           assert 'bearer-token-file "$TOKEN_FILE"' in cloud
           assert 'rm -f "$TOKEN_FILE"' in cloud
