@@ -6,6 +6,11 @@ on:
     paths:
       - 'worker/native-linux/**'
       - '.github/workflows/w1-linux-worker-safety.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'worker/native-linux/**'
+      - '.github/workflows/w1-linux-worker-safety.yml'
   workflow_dispatch:
 
 permissions:
