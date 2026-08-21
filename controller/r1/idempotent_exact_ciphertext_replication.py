@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -44,6 +45,24 @@ from controller.r1.recovery_encryption_envelope import EnvelopeError, validate_e
 
 
 EVIDENCE_SCHEMA = "metaengine.compute.r1-provider-controller-evidence.h205f22.v1"
+MAX_PERSISTED_EVIDENCE_BYTES = 256 * 1024
+EXPECTED_OBJECT_METADATA_KEYS = {"metaengine-sha256", "metaengine-contract"}
+FORBIDDEN_EVIDENCE_KEYS = {
+    "authorization",
+    "authorizationtoken",
+    "accesskeyid",
+    "awsaccesskeyid",
+    "secretaccesskey",
+    "awssecretaccesskey",
+    "sessiontoken",
+    "awssessiontoken",
+    "securitytoken",
+    "xamzsecuritytoken",
+    "credential",
+    "xamzcredential",
+    "applicationkey",
+    "secretkey",
+}
 
 
 class IdempotentReplicationError(RuntimeError):
@@ -89,6 +108,44 @@ def _response_version(response: dict[str, Any], field: str) -> str | None:
     return value.strip()
 
 
+def _normalized_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", value.lower())
+
+
+def _validate_evidence_safety(value: Any) -> None:
+    encoded = _canonical_bytes(value)
+    if len(encoded) > MAX_PERSISTED_EVIDENCE_BYTES:
+        raise IdempotentReplicationError("provider_controller_evidence_too_large")
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for key, nested in node.items():
+                if not isinstance(key, str):
+                    raise IdempotentReplicationError("provider_controller_evidence_non_text_key")
+                if _normalized_key(key) in FORBIDDEN_EVIDENCE_KEYS:
+                    raise IdempotentReplicationError("provider_controller_evidence_forbidden_sensitive_key")
+                walk(nested)
+        elif isinstance(node, list):
+            for nested in node:
+                walk(nested)
+
+    walk(value)
+
+
+def _validate_expected_metadata(response: dict[str, Any], ciphertext_sha256: str, *, required: bool) -> None:
+    metadata = response.get("Metadata")
+    if metadata is None and not required:
+        return
+    if not isinstance(metadata, dict):
+        raise IdempotentReplicationError("provider_object_metadata_missing")
+    if set(metadata) != EXPECTED_OBJECT_METADATA_KEYS:
+        raise IdempotentReplicationError("provider_object_metadata_unexpected_keys")
+    if metadata.get("metaengine-sha256") != ciphertext_sha256:
+        raise IdempotentReplicationError("provider_object_metadata_sha256_mismatch")
+    if metadata.get("metaengine-contract") != "h205f22-r1-v1":
+        raise IdempotentReplicationError("provider_object_contract_metadata_mismatch")
+
+
 def validate_persisted_provider_controller_evidence(result: Any) -> dict[str, Any]:
     """Fail closed on a persisted STEP05B normalized provider-evidence result."""
     if not isinstance(result, dict) or result.get("schema") != RESULT_SCHEMA:
@@ -113,11 +170,13 @@ def validate_persisted_provider_controller_evidence(result: Any) -> dict[str, An
         raise IdempotentReplicationError("provider_controller_evidence_sha256_mismatch")
     if evidence.get("credentials_embedded") is not False:
         raise IdempotentReplicationError("provider_controller_evidence_credentials_boundary_invalid")
+    _validate_evidence_safety(evidence)
 
     provider_kind = _require_text(target.get("provider_kind"), "provider_kind")
     domain_key = _require_text(target.get("domain_key"), "domain_key")
     version_id = _require_text(cipher.get("version_id"), "ciphertext_version_id")
     key = _require_text(cipher.get("key"), "ciphertext_key")
+    ciphertext_sha256 = _require_text(cipher.get("sha256"), "ciphertext_sha256")
     cipher_bytes = cipher.get("bytes")
     if not isinstance(cipher_bytes, int) or isinstance(cipher_bytes, bool) or cipher_bytes < 0:
         raise IdempotentReplicationError("ciphertext_bytes_invalid")
@@ -136,6 +195,7 @@ def validate_persisted_provider_controller_evidence(result: Any) -> dict[str, An
     get_version = _response_version(get_response, "provider_get_response")
     if get_version is not None and get_version != version_id:
         raise IdempotentReplicationError("provider_controller_evidence_get_version_mismatch")
+    _validate_expected_metadata(get_response, ciphertext_sha256, required=False)
 
     mode = replication.get("mode")
     if mode == "CREATED_NEW_VERSION":
@@ -150,6 +210,7 @@ def validate_persisted_provider_controller_evidence(result: Any) -> dict[str, An
             raise IdempotentReplicationError("provider_controller_evidence_head_version_mismatch")
         if head_response.get("ContentLength") != cipher_bytes:
             raise IdempotentReplicationError("provider_controller_evidence_head_size_mismatch")
+        _validate_expected_metadata(head_response, ciphertext_sha256, required=True)
         if evidence.get("aws_if_none_match_used") is not (provider_kind == "AWS_S3"):
             raise IdempotentReplicationError("provider_controller_evidence_conditional_create_mismatch")
         if evidence.get("b2_conditional_create_claimed") is not False:
@@ -164,6 +225,7 @@ def validate_persisted_provider_controller_evidence(result: Any) -> dict[str, An
             raise IdempotentReplicationError("provider_controller_evidence_reuse_version_mismatch")
         if head_response.get("ContentLength") != cipher_bytes:
             raise IdempotentReplicationError("provider_controller_evidence_reuse_size_mismatch")
+        _validate_expected_metadata(head_response, ciphertext_sha256, required=True)
         if evidence.get("aws_if_none_match_used_for_original_create_contract") is not (provider_kind == "AWS_S3"):
             raise IdempotentReplicationError("provider_controller_evidence_reuse_create_contract_mismatch")
     else:
@@ -218,13 +280,7 @@ def _subprocess_json_optional(cmd: list[str]) -> dict[str, Any] | None:
 
 
 def _metadata_matches(head: dict[str, Any], ciphertext_sha256: str) -> None:
-    metadata = head.get("Metadata")
-    if not isinstance(metadata, dict):
-        raise IdempotentReplicationError("existing_object_metadata_missing")
-    if metadata.get("metaengine-sha256") != ciphertext_sha256:
-        raise IdempotentReplicationError("existing_object_metadata_sha256_mismatch")
-    if metadata.get("metaengine-contract") != "h205f22-r1-v1":
-        raise IdempotentReplicationError("existing_object_contract_metadata_mismatch")
+    _validate_expected_metadata(head, ciphertext_sha256, required=True)
 
 
 def _reuse_existing(
