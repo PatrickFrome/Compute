@@ -1,5 +1,5 @@
 import { DurableObject, WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
-import type { AopWake, Env, MessageBatch, WorkflowParams } from "./types";
+import type { AopWake, Env, JsonObject, MessageBatch, WorkflowParams } from "./types";
 import { completeRun, deferRun, leaseRun, rpc, supervisorReturnAuthority } from "./supabase";
 import { executeRole, executorReady } from "./executor";
 
@@ -43,7 +43,9 @@ export class AopRunWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> {
     const lease = await step.do("lease-aop-run", { retries: { limit: 5, delay: "5 seconds", backoff: "exponential" } }, () => leaseRun(this.env, workerId));
     if (!lease.leased) return { status: "IDLE" };
     const readiness = executorReady(this.env, lease);
-    if (!readiness.ready) return step.do("defer-unavailable-executor", () => deferRun(this.env, lease, workerId, "EXECUTOR_AVAILABLE", { reason: readiness.reason, role_key: lease.role_key }));
+    if (!readiness.ready) {
+      return step.do("defer-unavailable-executor", () => deferRun(this.env, lease, workerId, "EXECUTOR_AVAILABLE", { reason: readiness.reason ?? "UNKNOWN", role_key: lease.role_key ?? null }));
+    }
 
     const outcome = await step.do("execute-role", { retries: { limit: 2, delay: "15 seconds", backoff: "exponential" }, timeout: "15 minutes" }, () => executeRole(this.env, lease, workerId));
     if (lease.role_kind === "SUPERVISOR" && outcome.result_code === "RETURN") {
@@ -52,12 +54,12 @@ export class AopRunWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> {
       if (current === "EVIDENCE_READY") await step.do("apply-supervisor-return-authority", () => supervisorReturnAuthority(this.env, lease, workerId, outcome.output));
     }
     const completed = await step.do("complete-aop-run", { retries: { limit: 4, delay: "5 seconds", backoff: "exponential" } }, () => completeRun(this.env, lease, workerId, outcome.result_code, outcome.output, outcome.github_sha, outcome.wake_condition));
-    await step.do("wake-next-run", () => this.env.AOP_WAKE_QUEUE.send({ id: crypto.randomUUID(), reason: "RUN_COMPLETED", source: "workflow", payload: { run_id: lease.run_id, result_code: outcome.result_code } }));
+    await step.do("wake-next-run", () => this.env.AOP_WAKE_QUEUE.send({ id: crypto.randomUUID(), reason: "RUN_COMPLETED", source: "workflow", payload: { run_id: lease.run_id ?? null, result_code: outcome.result_code } }));
     return { status: "COMPLETED", run_id: lease.run_id, result_code: outcome.result_code, completed };
   }
 }
 
-async function enqueueWake(env: Env, reason: string, source: string, payload: Record<string, unknown> = {}): Promise<AopWake> {
+async function enqueueWake(env: Env, reason: string, source: string, payload: JsonObject = {}): Promise<AopWake> {
   const message: AopWake = { id: crypto.randomUUID(), reason, source, payload }; await env.AOP_WAKE_QUEUE.send(message); return message;
 }
 
@@ -66,7 +68,7 @@ export default {
     const url = new URL(request.url);
     try {
       if (request.method === "GET" && url.pathname === "/health") {
-        const snapshot = await rpc(env, "h205f22_aop1_snapshot_v1", {});
+        const snapshot = await rpc<JsonObject>(env, "h205f22_aop1_snapshot_v1", {});
         return json({ status: "ok", invariant: "NO_MANUAL_HANDOFF_V1", executor_configured: Boolean(env.CF_ACCOUNT_ID && env.CF_AI_TOKEN && env.AOP_MODEL), github_configured: Boolean(env.GITHUB_TOKEN), supervisor_capability_configured: Boolean(env.AOP_SUPERVISOR_TOKEN), snapshot });
       }
       if (request.method === "POST" && url.pathname === "/wake") {
@@ -77,9 +79,9 @@ export default {
       }
       if (request.method === "POST" && url.pathname === "/signal") {
         await requireBearer(request, env.AOP_WAKE_SECRET);
-        const input = (await request.json()) as { condition?: string; payload?: Record<string, unknown> };
+        const input = (await request.json()) as { condition?: string; payload?: JsonObject };
         if (!input.condition) return json({ error: "condition_required" }, 400);
-        const signal = await rpc(env, "h205f22_aop1_signal_v1", { p_condition: input.condition, p_payload: input.payload ?? {} });
+        const signal = await rpc<JsonObject>(env, "h205f22_aop1_signal_v1", { p_condition: input.condition, p_payload: input.payload ?? {} });
         const wake = await enqueueWake(env, "CONDITION_SIGNAL", "http", { condition: input.condition });
         return json({ signal, wake }, 202);
       }
@@ -89,7 +91,7 @@ export default {
         if (!(await verifyGithub(request, env.GITHUB_WEBHOOK_SECRET, body))) return json({ error: "invalid_signature" }, 401);
         const event = request.headers.get("x-github-event") ?? "unknown";
         const delivery = request.headers.get("x-github-delivery") ?? crypto.randomUUID();
-        const payload = JSON.parse(new TextDecoder().decode(body)) as Record<string, unknown>;
+        const payload = JSON.parse(new TextDecoder().decode(body)) as JsonObject;
         await env.AOP_WAKE_QUEUE.send({ id: `github:${delivery}`, reason: `GITHUB_${event.toUpperCase()}`, source: "github", payload: { action: payload.action ?? null } });
         return json({ accepted: true }, 202);
       }
