@@ -15,7 +15,7 @@ permissions:
 jobs:
   validate-envelope:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout exact workflow revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -44,15 +44,31 @@ jobs:
           for forbidden in ('boto3', 'supabase', 'requests', 'urllib.request', 'cryptography.', 'nacl.', 'AESGCM', 'ChaCha20Poly1305'):
               assert forbidden not in p, forbidden
           assert 'bdc69c09cbdd6cf8b1f333d372a1f58247b3a33146406333e30c0f26e8f51377' in wf
+          assert '91331dc8ed9b5a0f4317ef6e7c261e49dfc2f11249a1775120a81361349d4c92' in wf
+          assert 'sigsum-verify@v0.13.1' in wf
           PY
 
-      - name: Fetch exact official age v1.3.1 binary
+      - name: Fetch and verify exact official age v1.3.1 release
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --location \
             --output /tmp/age-v1.3.1-linux-amd64.tar.gz \
             https://github.com/FiloSottile/age/releases/download/v1.3.1/age-v1.3.1-linux-amd64.tar.gz
+          curl --fail --silent --show-error --location \
+            --output /tmp/age-v1.3.1-linux-amd64.tar.gz.proof \
+            https://github.com/FiloSottile/age/releases/download/v1.3.1/age-v1.3.1-linux-amd64.tar.gz.proof
           echo 'bdc69c09cbdd6cf8b1f333d372a1f58247b3a33146406333e30c0f26e8f51377  /tmp/age-v1.3.1-linux-amd64.tar.gz' | sha256sum -c -
+          echo '91331dc8ed9b5a0f4317ef6e7c261e49dfc2f11249a1775120a81361349d4c92  /tmp/age-v1.3.1-linux-amd64.tar.gz.proof' | sha256sum -c -
+          cat > /tmp/age-sigsum-key.pub <<'EOF'
+          ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM1WpnEswJLPzvXJDiswowy48U+G+G1kmgwUE2eaRHZG
+          ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAz2WM5CyPLqiNjk7CLl4roDXwKhQ0QExXLebukZEZFS
+          EOF
+          go install sigsum.org/sigsum-go/cmd/sigsum-verify@v0.13.1
+          "$(go env GOPATH)/bin/sigsum-verify" \
+            -k /tmp/age-sigsum-key.pub \
+            -P sigsum-generic-2025-1 \
+            /tmp/age-v1.3.1-linux-amd64.tar.gz.proof \
+            < /tmp/age-v1.3.1-linux-amd64.tar.gz
           mkdir -p /tmp/age-v1.3.1
           tar -xzf /tmp/age-v1.3.1-linux-amd64.tar.gz -C /tmp/age-v1.3.1
           AGE_BIN="$(find /tmp/age-v1.3.1 -type f -name age -perm -u+x | head -n1)"
