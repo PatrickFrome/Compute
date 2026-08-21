@@ -102,7 +102,7 @@ if [ '${prepare_gvisor}' = 'true' ]; then
   args+=(--prepare-gvisor)
 fi
 
-"$NATIVE/bootstrap_persistent_host.sh" "${args[@]}" > "$BOOT_ROOT/bootstrap.stdout.json"
+"$NATIVE/bootstrap_persistent_host.sh" "$${args[@]}" > "$BOOT_ROOT/bootstrap.stdout.json"
 rm -f "$TOKEN_FILE"
 
 systemctl is-enabled --quiet metaengine-worker.service
