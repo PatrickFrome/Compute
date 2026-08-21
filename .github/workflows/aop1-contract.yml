@@ -5,6 +5,7 @@ on:
     paths:
       - "orchestration/cloudflare/**"
       - "supabase/migrations/*aop1*"
+      - "supabase/functions/metaengine-aop1-*/**"
       - "supabase/tests/aop1_autonomous_orchestration.sql"
       - "tests/test_aop1_contract.py"
       - ".github/workflows/aop1-contract.yml"
@@ -14,6 +15,7 @@ on:
     paths:
       - "orchestration/cloudflare/**"
       - "supabase/migrations/*aop1*"
+      - "supabase/functions/metaengine-aop1-*/**"
       - "supabase/tests/aop1_autonomous_orchestration.sql"
       - "tests/test_aop1_contract.py"
       - ".github/workflows/aop1-contract.yml"
