@@ -101,6 +101,10 @@ class FinalR2EvidencePackageTests(unittest.TestCase):
                     "LastModified": NOW.isoformat(),
                     "ETag": '"etag"',
                     "VersionId": version,
+                    "Metadata": {
+                        "metaengine-sha256": self.cipher_sha,
+                        "metaengine-contract": "h205f22-r1-v1",
+                    },
                 }
             if op == "get-object":
                 out = Path(cmd[-1])
