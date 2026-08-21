@@ -114,13 +114,87 @@ Tests must prove:
 
 ## Mandatory research after implementation before merge
 
-After independent CI, re-check and record:
+### 1. Credential and metadata leakage boundary
 
-1. whether any persisted response field can contain credentials, signed request headers, tokens or sensitive user-controlled material;
-2. whether create/reuse evidence objects preserve enough information for later STEP08 audit without relying on the original GitHub run;
-3. whether normalized response evidence must remain embedded in the provider result or become a separate artifact;
-4. whether `GetObject`/`HeadObject` response `VersionId` semantics differ materially between AWS and B2 and require looser/tighter validation;
-5. whether the future DB observation `evidence` JSON should carry the complete provider result/evidence package while readiness itself continues to depend only on immutable object/domain/observation rows;
-6. whether STEP08 still requires any provider-side re-query after STEP05B.
+The first independent STEP05B CI passed all functional tests and failed only because its static checker inspected its own assertion text. That checker was corrected by removing its own block from the string under inspection.
 
-Merge is forbidden until these findings are appended here and CI/Governance succeed again on the exact resulting head.
+Current AWS `PutObject`, `HeadObject`, `GetObject` and `GetObjectRetention` outputs expose service/object metadata rather than request credentials. Backblaze documents the corresponding S3-compatible object-version and retention responses. Nevertheless, persisting arbitrary future provider response JSON without a bound would be unnecessarily permissive.
+
+Post-research hardening therefore added:
+
+- a 256 KiB maximum canonical evidence size;
+- recursive rejection of credential/token-like response keys such as Authorization, access-key, secret-key, session-token, application-key and credential fields;
+- strict object user-metadata allowlist containing only `metaengine-sha256` and `metaengine-contract`;
+- exact expected metadata values bound to the ciphertext digest and H205F22 contract.
+
+No value-based secret detector is claimed; the trust boundary is structural and the CLI is not executed with debug output capture.
+
+Sources:
+- https://docs.aws.amazon.com/cli/latest/reference/s3api/put-object.html
+- https://docs.aws.amazon.com/cli/latest/reference/s3api/head-object.html
+- https://www.backblaze.com/apidocs/s3-put-object
+- https://www.backblaze.com/apidocs/s3-get-object-retention
+
+### 2. Create/reuse evidence is sufficient after GitHub run deletion
+
+For both production modes the provider result now carries the normalized evidence object itself, not only its digest:
+
+- create: PUT + version-pinned HEAD + retention + GET responses;
+- reuse: current HEAD identifying the reused version + version-pinned retention + GET responses.
+
+The existing STEP02 readback receipt still contains the independently recomputed materialized SHA-256/size and retention grade. The nested controller evidence supplies the provider response context needed to audit which version and retention were observed.
+
+Therefore deletion of the originating Actions run no longer destroys the only copy of provider controller evidence, provided STEP08 preserves the complete provider-result bytes.
+
+### 3. Evidence remains embedded, not split into another artifact
+
+A separate provider-controller-evidence artifact would add another mutable handoff/index relationship without improving the proof. Embedding the evidence in the provider result is stronger for packaging because:
+
+- `provider_controller_evidence_sha256` binds the nested evidence independently;
+- the complete `result_sha256` binds controller evidence and readback receipt atomically;
+- the existing immutable direct provider-result artifact already transports that result.
+
+STEP08 should therefore persist the complete provider-result bytes and reference the two internal hashes in its deterministic manifest.
+
+### 4. AWS/B2 version semantics
+
+AWS documents `VersionId` on PutObject and version-addressable Head/Get operations. Backblaze S3-compatible PutObject returns `x-amz-version-id`, and its Object Lock APIs accept a specific `versionId` for retention inspection.
+
+STEP05B allows a response to omit `VersionId` only where the lower-level API can legitimately omit it, but when PUT/current HEAD/GET return a version it must agree with the result's pinned version. Create PUT and reuse current HEAD remain mandatory version sources.
+
+No ETag equivalence-to-content claim is introduced.
+
+Sources:
+- https://docs.aws.amazon.com/cli/latest/reference/s3api/put-object.html
+- https://docs.aws.amazon.com/cli/latest/reference/s3api/head-object.html
+- https://www.backblaze.com/apidocs/s3-put-object
+- https://www.backblaze.com/apidocs/s3-get-object-retention
+
+### 5. Future DB observation evidence shape
+
+The production DB state machine remains the authority boundary. `compute_continuity_readiness_h205f22()` evaluates immutable object/domain/latest-observation rows and freshness; it does not trust a JSON claim that says R2 is true.
+
+The future STEP08 ingestion projection may carry the complete provider result inside `compute_continuity_observation_h205f22.evidence`, but that JSON is supporting audit material only. The observation row must still independently provide the expected object identity, domain key, VERIFIED status, observed SHA-256/bytes, persisted_at and readback_at required by the existing insert guard/readiness function.
+
+### 6. Provider re-query after STEP05B
+
+STEP08 does not need a second provider query merely to package or audit a still-current STEP05B result: the required provider responses and materialized readback receipt are now preserved.
+
+This does **not** extend evidence freshness. Production R2 readiness currently uses a seven-day maximum readback age. If Supervisor ingestion or sealing occurs after the stored readback becomes stale, the evidence package cannot make it fresh; the provider must be materialized/read back again and a new immutable observation produced.
+
+This distinction is intentional:
+
+`evidence persistence != evidence freshness`.
+
+## Post-research implementation amendments
+
+Before merge the implementation was hardened to enforce:
+
+- `MAX_PERSISTED_EVIDENCE_BYTES = 256 KiB`;
+- recursive forbidden-sensitive-key rejection;
+- exact expected user-metadata keys/values;
+- evidence/result semantic validation after hashes are recomputed;
+- adversarial tests for sensitive-key smuggling, unexpected user metadata and oversized evidence;
+- a non-self-referential PR-only static checker.
+
+Merge remains forbidden until STEP05B CI, the historical STEP05A workflow and Compute Fabric Governance all succeed again on the exact final head.
