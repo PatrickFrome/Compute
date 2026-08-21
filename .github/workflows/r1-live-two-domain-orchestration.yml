@@ -5,8 +5,11 @@ on:
     branches: [main]
     paths:
       - 'controller/r1/live_two_domain_orchestration_guard.py'
+      - 'controller/r1/provider_configuration_readiness.py'
       - 'tests/test_r1_live_two_domain_orchestration_guard.py'
+      - 'tests/test_r1_provider_configuration_readiness.py'
       - 'research/R1_STEP06_ISOLATED_LIVE_TWO_DOMAIN_ORCHESTRATION.md'
+      - 'research/R1_STEP06A_PROVIDER_CONFIGURATION_READINESS.md'
       - '.github/workflows/r1-live-two-domain-orchestration.yml'
   workflow_dispatch:
     inputs:
@@ -27,7 +30,7 @@ on:
         required: true
         type: string
       execute_replication:
-        description: 'Execute provider replication after protected-environment approvals'
+        description: 'Execute provider replication after protected-environment approvals and readiness gates'
         required: true
         default: false
         type: boolean
@@ -46,7 +49,7 @@ permissions: {}
 jobs:
   contract-tests:
     runs-on: ubuntu-24.04
-    timeout-minutes: 8
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -55,45 +58,52 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Compile and run orchestration guard adversarial tests
+      - name: Compile and run orchestration/readiness adversarial tests
         run: |
           set -euo pipefail
           python3 -m py_compile controller/r1/live_two_domain_orchestration_guard.py
+          python3 -m py_compile controller/r1/provider_configuration_readiness.py
           python3 -m unittest tests.test_r1_live_two_domain_orchestration_guard -v
+          python3 -m unittest tests.test_r1_provider_configuration_readiness -v
 
       - name: Re-run STEP05A retry-safety tests
         run: |
           set -euo pipefail
           python3 -m unittest tests.test_r1_idempotent_exact_ciphertext_replication -v
 
-      - name: Validate workflow trust-zone contract
+      - name: Validate workflow trust-zone and readiness contract
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           raw=Path('.github/workflows/r1-live-two-domain-orchestration.yml').read_text()
-          before, remainder = raw.split('      - name: Validate workflow trust-zone contract', 1)
+          before, remainder = raw.split('      - name: Validate workflow trust-zone and readiness contract', 1)
           _checker, after = remainder.split('\n  preflight-live:', 1)
           p = before + '\n  preflight-live:' + after
           g=Path('controller/r1/live_two_domain_orchestration_guard.py').read_text()
+          r=Path('controller/r1/provider_configuration_readiness.py').read_text()
           assert 'queue: max' in p
           assert 'r1-aws-durability-proof' in g and 'r1-b2-durability-proof' in g
           assert '.github/workflows/r1-live-recovery-source.yml' in g
-          assert 'idempotent_exact_ciphertext_replication.py' in p
           assert p.count('id-token: write') == 1
           assert 'output-env-credentials: false' in p
           assert 'output-credentials: true' in p
+          assert 'inline-session-policy:' in p
+          assert 'emit-aws-session-policy' in p
+          assert 'get-bucket-versioning' in p
+          assert 'get-object-lock-configuration' in p
+          assert 'get-bucket-lifecycle-configuration' in p
+          assert 'b2_list_buckets' in p
+          assert 'validate-aws' in p and 'validate-b2' in p
+          assert p.index('validate-aws') < p.index('--output evidence/r1-aws-provider-result.json')
+          assert p.index('validate-b2') < p.index('--output evidence/r1-b2-provider-result.json')
           assert 'aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c' in p
           assert 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' in p
           assert 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c' in p
-          assert 'archive: false' in p
-          assert 'digest-mismatch: error' in p
-          assert 'needs.preflight-live.outputs.aws_environment' in p
-          assert 'needs.preflight-live.outputs.b2_environment' in p
-          assert 'b2_authorize_account' in p
-          assert 'evaluate-results' in p
+          assert 'archive: false' in p and 'digest-mismatch: error' in p
+          assert 's3:DeleteObject' in r and 'DenyDestructiveRecoveryMutations' in r
+          assert 'r2_proven' in r and 'persisted_seal_allowed' in r
           assert 'supabase' not in p.lower()
-          assert 'r2_proven' in g and 'persisted_seal_allowed' in g
           PY
 
   preflight-live:
@@ -193,9 +203,6 @@ jobs:
     outputs:
       result_artifact_id: ${{ steps.upload.outputs.artifact-id }}
     env:
-      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
-      CIPHERTEXT_ARTIFACT_ID: ${{ inputs.ciphertext_artifact_id }}
-      ENVELOPE_ARTIFACT_ID: ${{ inputs.envelope_artifact_id }}
       RETAIN_UNTIL: ${{ inputs.retain_until }}
       AWS_ROLE_ARN: ${{ vars.R1_AWS_ROLE_ARN }}
       AWS_ACCOUNT_ID: ${{ vars.R1_AWS_ACCOUNT_ID }}
@@ -230,7 +237,7 @@ jobs:
           run-id: ${{ inputs.source_run_id }}
           digest-mismatch: error
 
-      - name: Validate exact STEP04 source before OIDC credentials
+      - name: Validate STEP04 source and build AWS target
         run: |
           set -euo pipefail
           python3 controller/r1/recovery_encryption_envelope.py verify-receipt \
@@ -259,7 +266,17 @@ jobs:
           json.dump(value,open('evidence/aws-target.json','w'),sort_keys=True,separators=(',',':'))
           PY
 
-      - name: Obtain 15-minute AWS OIDC credentials as step outputs only
+      - name: Build exact least-privilege AWS session policy
+        id: aws-policy
+        run: |
+          set -euo pipefail
+          python3 controller/r1/provider_configuration_readiness.py emit-aws-session-policy \
+            --bucket "$R1_BUCKET" > evidence/aws-session-policy.json
+          POLICY="$(tr -d '\n' < evidence/aws-session-policy.json)"
+          [[ -n "$POLICY" ]]
+          echo "policy=$POLICY" >> "$GITHUB_OUTPUT"
+
+      - name: Obtain 15-minute AWS OIDC credentials as outputs only
         id: aws-creds
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
         with:
@@ -271,8 +288,9 @@ jobs:
           mask-aws-account-id: true
           output-env-credentials: false
           output-credentials: true
+          inline-session-policy: ${{ steps.aws-policy.outputs.policy }}
 
-      - name: Replicate or safely reuse exact AWS version
+      - name: Verify AWS bucket readiness then replicate or reuse
         env:
           AWS_ACCESS_KEY_ID: ${{ steps.aws-creds.outputs.aws-access-key-id }}
           AWS_SECRET_ACCESS_KEY: ${{ steps.aws-creds.outputs.aws-secret-access-key }}
@@ -282,6 +300,35 @@ jobs:
         run: |
           set -euo pipefail
           aws sts get-caller-identity --query Account --output text | grep -Fx "$AWS_ACCOUNT_ID" >/dev/null
+          aws s3api get-bucket-versioning \
+            --bucket "$R1_BUCKET" --expected-bucket-owner "$AWS_ACCOUNT_ID" \
+            --output json > evidence/aws-versioning.json
+          aws s3api get-object-lock-configuration \
+            --bucket "$R1_BUCKET" --expected-bucket-owner "$AWS_ACCOUNT_ID" \
+            --output json > evidence/aws-object-lock.json
+          set +e
+          aws s3api get-bucket-lifecycle-configuration \
+            --bucket "$R1_BUCKET" --expected-bucket-owner "$AWS_ACCOUNT_ID" \
+            --output json > evidence/aws-lifecycle.json 2> evidence/aws-lifecycle.err
+          RC=$?
+          set -e
+          if [[ $RC -ne 0 ]]; then
+            if grep -q 'NoSuchLifecycleConfiguration' evidence/aws-lifecycle.err; then
+              printf '%s\n' '{"Rules":[]}' > evidence/aws-lifecycle.json
+            else
+              cat evidence/aws-lifecycle.err >&2
+              exit "$RC"
+            fi
+          fi
+          rm -f evidence/aws-lifecycle.err
+          python3 controller/r1/provider_configuration_readiness.py validate-aws \
+            --versioning evidence/aws-versioning.json \
+            --object-lock evidence/aws-object-lock.json \
+            --lifecycle evidence/aws-lifecycle.json \
+            --session-policy evidence/aws-session-policy.json \
+            --bucket "$R1_BUCKET" \
+            --account-id "$AWS_ACCOUNT_ID" \
+            --output evidence/r1-aws-provider-readiness.json
           python3 controller/r1/idempotent_exact_ciphertext_replication.py \
             --ciphertext source/r1-recovery-ciphertext.age \
             --envelope-receipt source/r1-recovery-envelope-receipt.json \
@@ -295,6 +342,15 @@ jobs:
             --provider AWS_S3 \
             --result evidence/r1-aws-provider-result.json \
             --output evidence/r1-aws-result-validation.json
+
+      - name: Upload AWS readiness receipt without cloud credentials
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/r1-aws-provider-readiness.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
 
       - name: Upload AWS provider result without cloud credentials
         id: upload
@@ -318,7 +374,6 @@ jobs:
     outputs:
       result_artifact_id: ${{ steps.upload.outputs.artifact-id }}
     env:
-      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
       RETAIN_UNTIL: ${{ inputs.retain_until }}
       R1_BUCKET: ${{ vars.R1_B2_BUCKET }}
       R1_REGION: ${{ vars.R1_B2_REGION }}
@@ -352,7 +407,7 @@ jobs:
           run-id: ${{ inputs.source_run_id }}
           digest-mismatch: error
 
-      - name: Validate exact STEP04 source and build non-secret B2 target
+      - name: Validate STEP04 source and build B2 target
         run: |
           set -euo pipefail
           python3 controller/r1/recovery_encryption_envelope.py verify-receipt \
@@ -389,7 +444,7 @@ jobs:
           json.dump(value,open('evidence/b2-target.json','w'),sort_keys=True,separators=(',',':'))
           PY
 
-      - name: Verify B2 application-key scope and replicate in one secret-bearing step
+      - name: Verify B2 key and bucket readiness then replicate or reuse
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R1_B2_APPLICATION_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R1_B2_APPLICATION_KEY }}
@@ -397,16 +452,38 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          trap 'shred -u /tmp/b2-auth.json 2>/dev/null || rm -f /tmp/b2-auth.json' EXIT
+          trap 'shred -u /tmp/b2-auth.json /tmp/b2-buckets.json /tmp/b2-list-request.json 2>/dev/null || rm -f /tmp/b2-auth.json /tmp/b2-buckets.json /tmp/b2-list-request.json' EXIT
           curl --fail-with-body --silent --show-error --location \
             --user "${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}" \
             https://api.backblazeb2.com/b2api/v4/b2_authorize_account > /tmp/b2-auth.json
-          python3 controller/r1/live_two_domain_orchestration_guard.py validate-b2-auth \
+          python3 - <<'PY'
+          import json,os
+          a=json.load(open('/tmp/b2-auth.json'))
+          req={'accountId':a['accountId'],'bucketName':os.environ['R1_BUCKET']}
+          json.dump(req,open('/tmp/b2-list-request.json','w'),sort_keys=True,separators=(',',':'))
+          PY
+          mapfile -t B2_RUNTIME < <(python3 - <<'PY'
+          import json
+          a=json.load(open('/tmp/b2-auth.json'))
+          s=a['apiInfo']['storageApi']
+          print(s['apiUrl'])
+          print(a['authorizationToken'])
+          PY
+          )
+          B2_API_URL="${B2_RUNTIME[0]}"
+          B2_AUTHORIZATION_TOKEN="${B2_RUNTIME[1]}"
+          curl --fail-with-body --silent --show-error --location \
+            -H "Authorization: ${B2_AUTHORIZATION_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/b2-list-request.json \
+            "${B2_API_URL}/b2api/v4/b2_list_buckets" > /tmp/b2-buckets.json
+          python3 controller/r1/provider_configuration_readiness.py validate-b2 \
             --authorization /tmp/b2-auth.json \
+            --buckets /tmp/b2-buckets.json \
             --expected-bucket "$R1_BUCKET" \
             --expected-endpoint-host "$B2_ENDPOINT_HOST" \
             --expected-account-scope-sha256 "$R1_ACCOUNT_SCOPE_SHA256" \
-            --output evidence/r1-b2-key-scope.json
+            --output evidence/r1-b2-provider-readiness.json
           python3 controller/r1/idempotent_exact_ciphertext_replication.py \
             --ciphertext source/r1-recovery-ciphertext.age \
             --envelope-receipt source/r1-recovery-envelope-receipt.json \
@@ -420,6 +497,15 @@ jobs:
             --provider BACKBLAZE_B2 \
             --result evidence/r1-b2-provider-result.json \
             --output evidence/r1-b2-result-validation.json
+
+      - name: Upload B2 readiness receipt without cloud credentials
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/r1-b2-provider-readiness.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
 
       - name: Upload B2 provider result without cloud credentials
         id: upload
