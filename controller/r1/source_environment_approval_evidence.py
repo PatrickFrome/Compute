@@ -128,9 +128,61 @@ def build_approval_evidence(history: Any, initiator_actor_id: int) -> dict[str, 
     return out
 
 
+def validate_approval_receipt(evidence: Any) -> dict[str, Any]:
+    if not isinstance(evidence, dict) or evidence.get("schema") != SCHEMA:
+        raise ApprovalEvidenceError("approval_receipt_schema_invalid")
+    if evidence.get("classification") != CLASSIFICATION or evidence.get("artifact_name") != ARTIFACT_NAME:
+        raise ApprovalEvidenceError("approval_receipt_identity_invalid")
+    if evidence.get("environment") != ENVIRONMENT:
+        raise ApprovalEvidenceError("approval_receipt_environment_invalid")
+    actor_id = _positive_int(evidence.get("initiator_actor_id"), "approval_receipt_initiator_actor_id")
+    approvals = evidence.get("approvals")
+    count = _positive_int(evidence.get("approved_review_count"), "approval_receipt_count")
+    if not isinstance(approvals, list) or len(approvals) != count:
+        raise ApprovalEvidenceError("approval_receipt_approvals_invalid")
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(approvals):
+        if not isinstance(item, dict):
+            raise ApprovalEvidenceError(f"approval_receipt_entry_invalid:{index}")
+        reviewer_id = _positive_int(item.get("reviewer_user_id"), f"approval_receipt_reviewer_id:{index}")
+        if reviewer_id == actor_id:
+            raise ApprovalEvidenceError("source_environment_self_approval_detected")
+        login = _text(item.get("reviewer_login"), f"approval_receipt_reviewer_login:{index}")
+        env_ids = item.get("environment_ids")
+        if not isinstance(env_ids, list) or not env_ids:
+            raise ApprovalEvidenceError(f"approval_receipt_environment_ids_invalid:{index}")
+        normalized_ids = sorted({_positive_int(x, f"approval_receipt_environment_id:{index}") for x in env_ids})
+        comment_sha = item.get("comment_sha256")
+        if not isinstance(comment_sha, str) or not SHA256.fullmatch(comment_sha):
+            raise ApprovalEvidenceError(f"approval_receipt_comment_sha_invalid:{index}")
+        normalized.append({
+            "reviewer_user_id": reviewer_id,
+            "reviewer_login": login,
+            "environment_ids": normalized_ids,
+            "comment_sha256": comment_sha,
+        })
+    if normalized != sorted(normalized, key=lambda x: (x["reviewer_user_id"], x["environment_ids"], x["comment_sha256"])):
+        raise ApprovalEvidenceError("approval_receipt_order_invalid")
+    if evidence.get("self_review_absent") is not True or evidence.get("approval_event_observed") is not True:
+        raise ApprovalEvidenceError("approval_receipt_state_invalid")
+    if evidence.get("approval_timestamp_claimed") is not False:
+        raise ApprovalEvidenceError("approval_receipt_timestamp_claim_invalid")
+    if any(evidence.get(k) is not False for k in ("authority_effect", "r2_proven", "r3_proven", "persisted_seal_allowed")):
+        raise ApprovalEvidenceError("approval_receipt_authority_boundary_invalid")
+    claimed = evidence.get("approval_receipt_sha256")
+    if not isinstance(claimed, str) or not SHA256.fullmatch(claimed):
+        raise ApprovalEvidenceError("approval_receipt_sha256_invalid")
+    core = dict(evidence)
+    core.pop("approval_receipt_sha256", None)
+    if _sha(core) != claimed:
+        raise ApprovalEvidenceError("approval_receipt_sha256_mismatch")
+    return evidence
+
+
 def validate_approval_evidence(evidence: Any, history: Any, initiator_actor_id: int) -> dict[str, Any]:
+    validate_approval_receipt(evidence)
     expected = build_approval_evidence(history, initiator_actor_id)
-    if not isinstance(evidence, dict) or evidence != expected:
+    if evidence != expected:
         raise ApprovalEvidenceError("source_environment_approval_evidence_mismatch")
     return expected
 
