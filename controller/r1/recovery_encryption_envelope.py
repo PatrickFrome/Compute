@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import subprocess
 import sys
@@ -105,10 +104,15 @@ def validate_bundle_receipt(bundle: Path, receipt_path: Path) -> dict[str, Any]:
 def _recipient_kind(recipient: str) -> str:
     if PQ_RECIPIENT.fullmatch(recipient):
         return "MLKEM768_X25519_HYBRID"
-    if CLASSIC_RECIPIENT.fullmatch(recipient):
-        return "X25519_CLASSIC"
     if recipient.startswith("AGE-SECRET-KEY"):
         raise EnvelopeError("identity_material_forbidden_in_recipients")
+    # Native classic X25519 is one Bech32 value with HRP `age`. Bech32 data
+    # does not use the separator character `1`; another `1` after `age1`
+    # therefore denotes a plugin/tagged recipient shape, not native X25519.
+    if recipient.startswith("age1") and "1" in recipient[4:]:
+        raise EnvelopeError("unsupported_age_recipient_type")
+    if CLASSIC_RECIPIENT.fullmatch(recipient):
+        return "X25519_CLASSIC"
     if recipient.startswith("age1"):
         raise EnvelopeError("unsupported_age_recipient_type")
     raise EnvelopeError("recipient_invalid")
