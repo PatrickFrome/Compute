@@ -13,12 +13,12 @@ assert spec and spec.loader
 spec.loader.exec_module(mod)
 
 
-def history(reviewer_id=22, state="approved", env="r1-recovery-source", comment="approved"):
+def history(reviewer_id=22, state="approved", env="r1-recovery-source", comment="approved", login="reviewer-user"):
     return [{
         "state": state,
         "comment": comment,
         "environments": [{"id": 991, "name": env}],
-        "user": {"id": reviewer_id, "login": "reviewer-user"},
+        "user": {"id": reviewer_id, "login": login},
     }]
 
 
@@ -45,7 +45,7 @@ class SourceEnvironmentApprovalEvidenceTests(unittest.TestCase):
             mod.build_approval_evidence(history(env="other"), 11)
 
     def test_multiple_approvals_are_sorted_and_deduplicated(self):
-        h = history(reviewer_id=33, comment="b") + history(reviewer_id=22, comment="a") + history(reviewer_id=22, comment="a")
+        h = history(reviewer_id=33, comment="b", login="r33") + history(reviewer_id=22, comment="a", login="r22") + history(reviewer_id=22, comment="a", login="r22")
         out = mod.build_approval_evidence(h, 11)
         self.assertEqual(out["approved_review_count"], 2)
         self.assertEqual([x["reviewer_user_id"] for x in out["approvals"]], [22, 33])
@@ -57,13 +57,26 @@ class SourceEnvironmentApprovalEvidenceTests(unittest.TestCase):
         core = dict(forged)
         core.pop("approval_receipt_sha256", None)
         forged["approval_receipt_sha256"] = hashlib.sha256(json.dumps(core, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
-        with self.assertRaisesRegex(mod.ApprovalEvidenceError, "evidence_mismatch"):
+        with self.assertRaisesRegex(mod.ApprovalEvidenceError, "not_present_in_fresh_history"):
             mod.validate_approval_evidence(forged, history(), 11)
 
-    def test_validation_is_exact_against_fresh_review_history(self):
+    def test_validation_rejects_recorded_review_missing_from_fresh_history(self):
         evidence = mod.build_approval_evidence(history(comment="one"), 11)
-        with self.assertRaisesRegex(mod.ApprovalEvidenceError, "evidence_mismatch"):
+        with self.assertRaisesRegex(mod.ApprovalEvidenceError, "not_present_in_fresh_history"):
             mod.validate_approval_evidence(evidence, history(comment="two"), 11)
+
+    def test_validation_allows_additional_non_self_approvals_in_fresh_history(self):
+        evidence = mod.build_approval_evidence(history(reviewer_id=22, comment="first", login="r22"), 11)
+        fresh = history(reviewer_id=22, comment="first", login="r22") + history(reviewer_id=33, comment="later", login="r33")
+        validated = mod.validate_approval_evidence(evidence, fresh, 11)
+        self.assertEqual(validated["approved_review_count"], 1)
+        self.assertEqual(validated["approvals"][0]["reviewer_user_id"], 22)
+
+    def test_validation_still_rejects_self_approval_added_later(self):
+        evidence = mod.build_approval_evidence(history(reviewer_id=22), 11)
+        fresh = history(reviewer_id=22) + history(reviewer_id=11, login="initiator")
+        with self.assertRaisesRegex(mod.ApprovalEvidenceError, "self_approval"):
+            mod.validate_approval_evidence(evidence, fresh, 11)
 
     def test_malformed_actor_or_user_ids_fail_closed(self):
         with self.assertRaisesRegex(mod.ApprovalEvidenceError, "initiator_actor_id"):
