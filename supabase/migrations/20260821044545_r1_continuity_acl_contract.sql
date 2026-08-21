@@ -1,0 +1,37 @@
+alter table destruktion_meta.compute_continuity_domain_h205f22 enable row level security;
+alter table destruktion_meta.compute_continuity_object_h205f22 enable row level security;
+alter table destruktion_meta.compute_continuity_observation_h205f22 enable row level security;
+alter table destruktion_meta.compute_continuity_repair_h205f22 enable row level security;
+alter table destruktion_meta.compute_continuity_retention_event_h205f22 enable row level security;
+alter table destruktion_meta.compute_continuity_restore_drill_h205f22 enable row level security;
+alter table destruktion_meta.compute_continuity_recovery_graph_node_h205f22 enable row level security;
+alter table destruktion_meta.compute_continuity_recovery_graph_snapshot_h205f22 enable row level security;
+alter table destruktion_meta.compute_continuity_checkpoint_ledger_h205f22 enable row level security;
+alter table destruktion_meta.compute_continuity_persisted_seal_h205f22 enable row level security;
+do $$ declare t text; begin
+ foreach t in array array['compute_continuity_domain_h205f22','compute_continuity_object_h205f22','compute_continuity_observation_h205f22','compute_continuity_repair_h205f22','compute_continuity_retention_event_h205f22','compute_continuity_restore_drill_h205f22','compute_continuity_recovery_graph_node_h205f22','compute_continuity_recovery_graph_snapshot_h205f22','compute_continuity_checkpoint_ledger_h205f22','compute_continuity_persisted_seal_h205f22'] loop
+  execute format('drop policy if exists continuity_internal_deny_h205f22 on destruktion_meta.%I',t);
+  execute format('create policy continuity_internal_deny_h205f22 on destruktion_meta.%I for all to anon, authenticated using (false) with check (false)',t);
+ end loop;
+end $$;
+revoke all on table destruktion_meta.compute_continuity_domain_h205f22,destruktion_meta.compute_continuity_object_h205f22,destruktion_meta.compute_continuity_observation_h205f22,destruktion_meta.compute_continuity_repair_h205f22,destruktion_meta.compute_continuity_retention_event_h205f22,destruktion_meta.compute_continuity_restore_drill_h205f22,destruktion_meta.compute_continuity_recovery_graph_node_h205f22,destruktion_meta.compute_continuity_recovery_graph_snapshot_h205f22,destruktion_meta.compute_continuity_checkpoint_ledger_h205f22,destruktion_meta.compute_continuity_persisted_seal_h205f22 from anon,authenticated;
+revoke execute on function destruktion_meta.compute_continuity_immutable_h205f22() from public,anon,authenticated;
+revoke execute on function destruktion_meta.compute_continuity_graph_node_insert_guard_h205f22() from public,anon,authenticated;
+revoke execute on function destruktion_meta.compute_continuity_observation_insert_guard_h205f22() from public,anon,authenticated;
+revoke execute on function destruktion_meta.compute_continuity_repair_insert_guard_h205f22() from public,anon,authenticated;
+revoke execute on function destruktion_meta.compute_continuity_retention_insert_guard_h205f22() from public,anon,authenticated;
+revoke execute on function destruktion_meta.compute_continuity_restore_insert_guard_h205f22() from public,anon,authenticated;
+revoke execute on function destruktion_meta.compute_continuity_persisted_seal_insert_guard_h205f22() from public,anon,authenticated;
+revoke execute on function destruktion_meta.compute_record_continuity_observation_h205f22(uuid,text,text,text,bigint,timestamptz,timestamptz,jsonb) from public,anon,authenticated;
+revoke execute on function destruktion_meta.compute_continuity_readiness_h205f22(uuid,timestamptz,interval) from public,anon,authenticated;
+revoke execute on function destruktion_meta.compute_continuity_audit_status_h205f22(uuid,timestamptz,interval) from public,anon,authenticated;
+revoke execute on function destruktion_meta.compute_record_continuity_repair_h205f22(bigint,bigint,text,jsonb) from public,anon,authenticated;
+revoke execute on function destruktion_meta.compute_continuity_retention_status_h205f22(text,text,timestamptz) from public,anon,authenticated;
+revoke execute on function destruktion_meta.compute_continuity_gc_admission_h205f22(text,text,timestamptz) from public,anon,authenticated;
+revoke execute on function destruktion_meta.compute_restore_quorum_status_h205f22(uuid,timestamptz,interval) from public,anon,authenticated;
+revoke execute on function destruktion_meta.compute_finalize_recovery_graph_h205f22(text,uuid) from public,anon,authenticated;
+comment on table destruktion_meta.compute_continuity_observation_h205f22 is 'H205F22 append-only persisted readback observations. VERIFIED is normalized fail-closed against expected hash/bytes; R2 is not implied by schema presence.';
+comment on table destruktion_meta.compute_continuity_repair_h205f22 is 'H205F22 immutable repair linkage. Bad observation remains preserved; repair is a separate verified replacement receipt.';
+comment on table destruktion_meta.compute_continuity_checkpoint_ledger_h205f22 is 'H205F22 R1 append-only continuity step ledger. This is not the supervisor mainline checkpoint seal.';
+comment on table destruktion_meta.compute_continuity_persisted_seal_h205f22 is 'H47C-derived persisted-readback-first continuity seal. It cannot be inserted until two current independent verified readbacks exist; it does not reserve or seal a supervisor mainline checkpoint.';
+comment on function destruktion_meta.compute_continuity_gc_admission_h205f22(text,text,timestamptz) is 'H205F22 H45 GC admission guard. Fail-closed for unknown subjects, active retention leases, and references from sealed recovery graphs. It does not execute deletion.';
