@@ -1,0 +1,59 @@
+name: R1 Provider Controller Evidence Persistence
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/r1/idempotent_exact_ciphertext_replication.py'
+      - 'tests/test_r1_idempotent_exact_ciphertext_replication.py'
+      - 'research/R1_STEP05B_PROVIDER_CONTROLLER_EVIDENCE_PERSISTENCE.md'
+      - '.github/workflows/r1-provider-controller-evidence-persistence.yml'
+
+permissions: {}
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile STEP05B production wrapper
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/r1/idempotent_exact_ciphertext_replication.py
+
+      - name: Run STEP05B and STEP05 regression suites
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_r1_idempotent_exact_ciphertext_replication -v
+          python3 -m unittest tests.test_r1_exact_ciphertext_replication_controller -v
+
+      - name: Re-run orchestration result regression
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_r1_live_two_domain_orchestration_guard -v
+
+      - name: Validate PR-only evidence boundary
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          workflow=Path('.github/workflows/r1-provider-controller-evidence-persistence.yml').read_text()
+          module=Path('controller/r1/idempotent_exact_ciphertext_replication.py').read_text()
+          assert 'workflow_dispatch' not in workflow
+          assert 'id-token: write' not in workflow
+          for token in ('AWS_'+'ACCESS_KEY_ID','AWS_'+'SECRET_ACCESS_KEY','B2_'+'APPLICATION_KEY'):
+              assert token not in workflow
+          assert 'provider_controller_evidence' in module
+          assert 'provider_controller_evidence_sha256' in module
+          assert 'credentials_embedded' in module
+          assert 'CREATED_NEW_VERSION' in module
+          assert 'REUSED_EXISTING_VERSION' in module
+          assert 'r2_proven' in module and 'persisted_seal_allowed' in module
+          PY
