@@ -1,5 +1,5 @@
 import type { AopLease, Env, ModelOutcome } from "./types";
-import { pullRequest, readFile, workflowRuns, writeFile } from "./github";
+import { pullRequest, pullRequestFiles, readFile, readFileAtRef, workflowRuns, writeFile } from "./github";
 import { rpc, supervisorAdoptClaim, supervisorReturnAuthority } from "./supabase";
 
 const MAX_TOOL_ROUNDS = 18;
@@ -28,8 +28,10 @@ function fn(name: string, description: string, parameters: Record<string, unknow
 function toolsFor(lease: AopLease): Array<Record<string, unknown>> {
   const tools: Array<Record<string, unknown>> = [
     fn("github_read_file", "Read a file from the role-owned GitHub branch.", { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false }),
+    fn("github_read_file_ref", "Read a file from any explicit Git ref. Read-only; useful for independent PR audit.", { type: "object", properties: { path: { type: "string" }, ref: { type: "string" } }, required: ["path", "ref"], additionalProperties: false }),
     fn("github_write_file", "Create or replace a UTF-8 file on the role-owned branch. main is forbidden.", { type: "object", properties: { path: { type: "string" }, content: { type: "string" }, message: { type: "string" } }, required: ["path", "content", "message"], additionalProperties: false }),
-    fn("github_pull_request", "Read a pull request by number.", { type: "object", properties: { number: { type: "integer" } }, required: ["number"], additionalProperties: false }),
+    fn("github_pull_request", "Read pull-request metadata including head/base refs and SHAs.", { type: "object", properties: { number: { type: "integer" } }, required: ["number"], additionalProperties: false }),
+    fn("github_pull_request_files", "Read changed files and patches for a pull request. Read-only; paginate up to 1000 files.", { type: "object", properties: { number: { type: "integer" } }, required: ["number"], additionalProperties: false }),
     fn("github_workflow_runs", "Read recent workflow runs for the role-owned branch.", { type: "object", properties: {}, additionalProperties: false }),
     fn("aop_snapshot", "Read the current AOP snapshot. Read-only.", { type: "object", properties: {}, additionalProperties: false }),
   ];
@@ -52,7 +54,7 @@ function systemInstructions(lease: AopLease): string {
     `Owned branch: ${lease.role_config?.branch ?? "none"}. Never write main.`,
     `Valid result_code values: ${valid.join(", ")}.`,
     "Implementer EVIDENCE_READY output MUST include object fields summary, evidence, research and must represent tests, negative tests, advisors where applicable, and deep research.",
-    "Analyst audits independently. REQUEST_CHANGES/HOLD/REJECT route through Supervisor and never grant authority directly.",
+    "Analyst audits independently. For PR audit, inspect PR metadata, changed-file patches and exact head-ref files; REQUEST_CHANGES/HOLD/REJECT route through Supervisor and never grant authority directly.",
     "Supervisor must not claim VERIFIED until authoritative roadmap already says VERIFIED. Checkpoint seal and main merge are intentionally not exposed as tools in AOP1 v1.",
     "Distinguish LIVE, SYNTHETIC, CONTROL_PLANE_ONLY, SCHEMA_ONLY, EVIDENCE_READY, VERIFIED.",
     "Use tools as needed. Final answer MUST be JSON only with keys result_code, output, github_sha, wake_condition. output must be an object.",
@@ -92,8 +94,10 @@ async function runTool(env: Env, lease: AopLease, workerId: string, call: ToolCa
   const args = JSON.parse(call.arguments || "{}") as Record<string, unknown>;
   switch (call.name) {
     case "github_read_file": return readFile(env, lease, String(args.path));
+    case "github_read_file_ref": return readFileAtRef(env, String(args.path), String(args.ref));
     case "github_write_file": return writeFile(env, lease, String(args.path), String(args.content), String(args.message));
     case "github_pull_request": return pullRequest(env, Number(args.number));
+    case "github_pull_request_files": return pullRequestFiles(env, Number(args.number));
     case "github_workflow_runs": return workflowRuns(env, lease);
     case "aop_snapshot": return rpc(env, "h205f22_aop1_snapshot_v1", {});
     case "supervisor_adopt_active_claim": if (lease.role_kind !== "SUPERVISOR") throw new Error("supervisor_tool_forbidden"); return supervisorAdoptClaim(env, lease, workerId);
