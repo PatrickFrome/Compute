@@ -6,7 +6,7 @@
   "observability": { "enabled": true },
   "vars": {
     "SUPABASE_URL": "https://xpeibufgzjknrhbhpffp.supabase.co",
-    "AOP_MODEL": "openai/gpt-5.5"
+    "AOP_MODEL": "@cf/openai/gpt-oss-20b"
   },
   "durable_objects": {
     "bindings": [
