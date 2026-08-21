@@ -57,17 +57,36 @@ assert "Checkpoint seal and main merge are intentionally not exposed" in executo
 assert "JSON.stringify(await leaseRun" in index_ts
 assert "JSON.stringify(await executeRole" in index_ts
 
-# Public GitHub reads are tokenless. Missing mutation credentials must not prevent
-# implementers from doing read-only analysis and staging a deterministic mutation plan.
+# Public GitHub reads stay tokenless. Mutations accept either a legacy dedicated
+# token or a complete GitHub App tuple, with the App path preferred when PAT is absent.
 assert 'const mutation = method !== "GET" && method !== "HEAD"' in github_ts
-assert "github_token_required_for_mutation" in github_ts
-assert 'lease.role_kind === "IMPLEMENTER" && !env.GITHUB_TOKEN' not in executor_ts
-assert 'lease.role_kind === "IMPLEMENTER" && env.GITHUB_TOKEN' in executor_ts
+assert "github_mutation_credential_missing" in github_ts
+assert "github_app_configuration_incomplete" in github_ts
+assert "githubAppConfigured" in github_ts
+assert "githubWriteConfigured" in github_ts
+assert 'lease.role_kind === "IMPLEMENTER" && githubWriteConfigured(env)' in executor_ts
+assert "if (!githubWriteConfigured(env))" in executor_ts
 assert '"WAITING_EVENT"' in executor_ts
 assert "output.mutation_plan" in executor_ts
 assert 'wake_condition=GITHUB_WRITE_EXECUTOR_AVAILABLE' in executor_ts
 assert "github_write_tool_forbidden_for_role" in executor_ts
 assert "Analyst is strictly read-only in GitHub tools" in executor_ts
+assert "github_configured: githubWriteConfigured(env)" in index_ts
+
+# GitHub App authentication must mint short-lived installation tokens instead of
+# persisting a generated token. GitHub requires RS256 JWT; repository scope is explicit.
+assert 'GITHUB_APP_CLIENT_ID' in (CF / "types.ts").read_text(encoding="utf-8")
+assert 'GITHUB_APP_INSTALLATION_ID' in (CF / "types.ts").read_text(encoding="utf-8")
+assert 'GITHUB_APP_PRIVATE_KEY' in (CF / "types.ts").read_text(encoding="utf-8")
+assert 'RSASSA-PKCS1-v1_5' in github_ts
+assert 'iat: now - 60' in github_ts
+assert 'exp: now + 540' in github_ts
+assert '/app/installations/${installationId}/access_tokens' in github_ts
+assert 'repositories: [REPO_NAME]' in github_ts
+assert 'BEGIN RSA PRIVATE KEY' in github_ts and 'BEGIN PRIVATE KEY' in github_ts
+assert 'wrapPkcs1AsPkcs8' in github_ts
+assert 'body.token' in github_ts and 'body.expires_at' in github_ts
+assert 'return body.token' in github_ts
 
 # Responses tool loop must remain stateless when store=false. Cloudflare GPT-OSS rejects
 # previous_response_id for non-stored responses; carry the full transcript explicitly.
@@ -123,7 +142,10 @@ assert "set used_at=clock_timestamp()" in oidc_sql
 assert "revoke all on function public.h205f22_aop1_consume_bootstrap_bundle_v1" in oidc_sql
 assert "to anon, authenticated" in deny_sql and "using (false)" in deny_sql and "with check (false)" in deny_sql
 
-# Live bootstrap must use GitHub OIDC, not repository secrets, then health-gate activation.
+# Live bootstrap still uses GitHub OIDC, not repository secrets, then health-gates activation.
+# App auth is CODE_READY only in this change: the existing one-time bootstrap bundle does not
+# contain GitHub App private material, so the current live deployment must continue to report
+# github_configured=false until an explicit dedicated runtime credential is provisioned.
 assert "id-token: write" in deploy_yml
 assert "ACTIONS_ID_TOKEN_REQUEST_TOKEN" in deploy_yml
 assert "ACTIONS_ID_TOKEN_REQUEST_URL" in deploy_yml
@@ -139,8 +161,11 @@ assert '.github_configured == false' in deploy_yml
 assert "BLOCKED_MISSING_DEDICATED_RUNTIME_CREDENTIAL" in deploy_yml
 assert "LIVE_DEPLOY_ACTIVATION" in deploy_yml
 assert deploy_yml.index('/health') < deploy_yml.index('LIVE_DEPLOY_ACTIVATION')
-# No long-lived GitHub runtime credential is smuggled through the bootstrap job.
+# No long-lived GitHub runtime credential or App private key is smuggled through the
+# already-consumed bootstrap job. Provisioning App credentials is a separate future gate.
 assert "AOP1_GITHUB_TOKEN" not in deploy_yml
 assert "GITHUB_TOKEN\n" not in deploy_yml
+assert "GITHUB_APP_PRIVATE_KEY" not in deploy_yml
+assert "GITHUB_APP_INSTALLATION_ID" not in deploy_yml
 
 print("AOP1 static contract guards: PASS")
