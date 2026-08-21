@@ -240,6 +240,8 @@ def build_reboot_receipt(
 
     evidence = {
         "schema": "metaengine.compute.w1-aws-provider-evidence.h205f22.v1",
+        "provider_action_semantics": "ASYNC_REBOOT_REQUEST_ACCEPTED",
+        "schema_completed_at_semantics": "CLOUDTRAIL_PROVIDER_REQUEST_EVENT_TIME",
         "github": {
             "run_id": str(github_run_id),
             "run_attempt": str(github_run_attempt),
@@ -261,11 +263,12 @@ def build_reboot_receipt(
         "action_kind": "REBOOT",
         "action_id": event_id,
         "requested_at": requested_at,
-        # EC2 RebootInstances is a synchronous control-plane request without an
-        # asynchronous action object. The CloudTrail event time is therefore
-        # the provider-observed action point; the DB still requires a later
-        # worker heartbeat with a distinct boot ID before proof can succeed.
+        # AWS documents RebootInstances as asynchronous: this timestamp is not
+        # reboot completion. It is the provider-observed request event used as
+        # a correlation point. Only a later accepted worker heartbeat with the
+        # same machine/witness and a distinct boot ID can prove the reboot.
         "completed_at": raw.get("eventTime"),
+        "completed_at_semantics": "PROVIDER_REQUEST_ACCEPTED_AT_NOT_REBOOT_COMPLETION",
         "identity_attestation_kind": "PROVIDER_METADATA",
         "identity_attestation_verified": False,
         "evidence": evidence,
