@@ -7,6 +7,10 @@ The ciphertext is created once and MUST then be copied byte-for-byte to independ
 storage domains; re-encrypting separately for each provider would create different
 ciphertext and break the cross-provider identity contract.
 
+age encryption authenticates ciphertext integrity with respect to its file key but
+does not prove sender identity. Any later authority transition MUST therefore bind
+the ciphertext digest to a separately verified source attestation.
+
 This module has no provider, network, Supabase, or secret-management client.
 """
 
@@ -238,9 +242,16 @@ def build_envelope(
             "external_storage_ready": production_ready,
             "identity_material_embedded": False,
         },
+        "provenance": {
+            "sender_authenticity_proven": False,
+            "source_attestation_verified": False,
+            "source_attestation_required_before_authority": True,
+            "self_hash_is_not_sender_authentication": True,
+        },
         "authority": {
             "canonical": False,
             "authority_effect": False,
+            "source_attestation_verified": False,
             "r2_proven": False,
             "r3_proven": False,
             "persisted_seal_allowed": False,
@@ -265,11 +276,16 @@ def validate_envelope_receipt(ciphertext: Path, receipt_path: Path, *, require_p
     _verify_self_hash(receipt, "receipt_sha256", "envelope_receipt")
     authority = receipt.get("authority")
     security = receipt.get("security")
+    provenance = receipt.get("provenance")
     encryption = receipt.get("encryption")
-    if not isinstance(authority, dict) or any(authority.get(k) is not False for k in ("canonical", "authority_effect", "r2_proven", "r3_proven", "persisted_seal_allowed")):
+    if not isinstance(authority, dict) or any(authority.get(k) is not False for k in ("canonical", "authority_effect", "source_attestation_verified", "r2_proven", "r3_proven", "persisted_seal_allowed")):
         raise EnvelopeError("envelope_authority_boundary_invalid")
     if not isinstance(security, dict) or security.get("plaintext_upload_allowed") is not False or security.get("identity_material_embedded") is not False:
         raise EnvelopeError("envelope_security_boundary_invalid")
+    if not isinstance(provenance, dict):
+        raise EnvelopeError("envelope_provenance_boundary_invalid")
+    if provenance.get("sender_authenticity_proven") is not False or provenance.get("source_attestation_verified") is not False or provenance.get("source_attestation_required_before_authority") is not True or provenance.get("self_hash_is_not_sender_authentication") is not True:
+        raise EnvelopeError("envelope_provenance_boundary_invalid")
     if not isinstance(encryption, dict) or encryption.get("replication_contract") != "COPY_EXACT_CIPHERTEXT_BYTES_DO_NOT_REENCRYPT_PER_PROVIDER":
         raise EnvelopeError("envelope_replication_contract_invalid")
     if require_production_ready and security.get("external_storage_ready") is not True:
