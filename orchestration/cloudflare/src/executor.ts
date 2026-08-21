@@ -21,7 +21,6 @@ export function executorReady(env: Env, lease: AopLease): { ready: boolean; reas
     return env.AOP_SUPERVISOR_TOKEN ? { ready: true } : { ready: false, reason: "AOP_SUPERVISOR_TOKEN_MISSING" };
   }
   if (!aiConfigured(env)) return { ready: false, reason: "AI_EXECUTOR_NOT_CONFIGURED" };
-  if (lease.role_kind === "IMPLEMENTER" && !env.GITHUB_TOKEN) return { ready: false, reason: "GITHUB_TOKEN_MISSING" };
   return { ready: true };
 }
 
@@ -33,7 +32,7 @@ function fn(name: string, description: string, parameters: Record<string, unknow
   return { type: "function", name, description, strict: true, parameters };
 }
 
-function toolsFor(lease: AopLease): Array<Record<string, unknown>> {
+function toolsFor(env: Env, lease: AopLease): Array<Record<string, unknown>> {
   const tools: Array<Record<string, unknown>> = [
     fn("github_read_file", "Read a file from the role-owned GitHub branch. Public-repository reads do not require a GitHub token.", { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false }),
     fn("github_read_file_ref", "Read a file from any explicit Git ref. Read-only; useful for independent PR audit.", { type: "object", properties: { path: { type: "string" }, ref: { type: "string" } }, required: ["path", "ref"], additionalProperties: false }),
@@ -42,7 +41,7 @@ function toolsFor(lease: AopLease): Array<Record<string, unknown>> {
     fn("github_workflow_runs", "Read recent workflow runs for the role-owned branch.", { type: "object", properties: {}, additionalProperties: false }),
     fn("aop_snapshot", "Read the current AOP snapshot. Read-only.", { type: "object", properties: {}, additionalProperties: false }),
   ];
-  if (lease.role_kind === "IMPLEMENTER") {
+  if (lease.role_kind === "IMPLEMENTER" && env.GITHUB_TOKEN) {
     tools.push(fn("github_write_file", "Create or replace a UTF-8 file on the role-owned branch. Requires a dedicated GitHub runtime credential; main is forbidden.", { type: "object", properties: { path: { type: "string" }, content: { type: "string" }, message: { type: "string" } }, required: ["path", "content", "message"], additionalProperties: false }));
   }
   if (lease.role_kind === "SUPERVISOR") {
@@ -54,8 +53,13 @@ function toolsFor(lease: AopLease): Array<Record<string, unknown>> {
   return tools;
 }
 
-function systemInstructions(lease: AopLease): string {
-  const valid = lease.role_kind === "IMPLEMENTER" ? ["CONTINUE", "EVIDENCE_READY", "FAILED"] : lease.role_kind === "ANALYST" ? ["ACCEPT", "ACCEPT_WITH_REBASE", "REQUEST_CHANGES", "HOLD", "REJECT"] : ["ACCEPT", "RETURN", "WAIT", "VERIFIED", "REJECT"];
+function systemInstructions(env: Env, lease: AopLease): string {
+  const valid = lease.role_kind === "IMPLEMENTER" ? ["CONTINUE", "EVIDENCE_READY", "WAITING_EVENT", "FAILED"] : lease.role_kind === "ANALYST" ? ["ACCEPT", "ACCEPT_WITH_REBASE", "REQUEST_CHANGES", "HOLD", "REJECT"] : ["ACCEPT", "RETURN", "WAIT", "VERIFIED", "REJECT"];
+  const writeCapability = lease.role_kind === "IMPLEMENTER"
+    ? (env.GITHUB_TOKEN
+      ? "GitHub write capability is available. Use github_write_file only on the role-owned branch and only for the required milestone changes."
+      : "GitHub write capability is unavailable. Do not fail solely for that. Complete read-only analysis and return WAITING_EVENT with wake_condition=GITHUB_WRITE_EXECUTOR_AVAILABLE. output.mutation_plan MUST be an object with a changes array; each change must contain path, full UTF-8 content, and commit message. Include verification steps and research evidence. Do not claim proposed files were written or post-mutation tests ran.")
+    : "";
   return [
     "You are an execution slot in METAENGINE H205F22 AOP1. The conversation is not state; the supplied lease is state.",
     "Supabase roadmap/claims/directives/checkpoints are authoritative. Never infer authority from GitHub or an auxiliary ledger.",
@@ -63,12 +67,13 @@ function systemInstructions(lease: AopLease): string {
     `Owned mutation domains: ${(lease.mutation_domains ?? []).join(", ") || "none"}.`,
     `Owned branch: ${lease.role_config?.branch ?? "none"}. Never write main.`,
     `Valid result_code values: ${valid.join(", ")}.`,
+    writeCapability,
     "Implementer EVIDENCE_READY output MUST include object fields summary, evidence, research and must represent tests, negative tests, advisors where applicable, and deep research.",
     "Analyst is strictly read-only in GitHub tools and audits independently. For PR audit, inspect PR metadata, changed-file patches and exact head-ref files; REQUEST_CHANGES/HOLD/REJECT route through Supervisor and never grant authority directly.",
     "Supervisor must not claim VERIFIED until authoritative roadmap already says VERIFIED. Checkpoint seal and main merge are intentionally not exposed as tools in AOP1 v1.",
     "Distinguish LIVE, SYNTHETIC, CONTROL_PLANE_ONLY, SCHEMA_ONLY, EVIDENCE_READY, VERIFIED.",
     "Use tools as needed. Final answer MUST be JSON only with keys result_code, output, github_sha, wake_condition. output must be an object.",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 async function callAi(env: Env, body: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -126,6 +131,7 @@ async function runTool(env: Env, lease: AopLease, workerId: string, call: ToolCa
     case "github_read_file_ref": return readFileAtRef(env, String(args.path), String(args.ref));
     case "github_write_file":
       if (lease.role_kind !== "IMPLEMENTER") throw new Error("github_write_tool_forbidden_for_role");
+      if (!env.GITHUB_TOKEN) throw new Error("github_token_required_for_mutation");
       return writeFile(env, lease, String(args.path), String(args.content), String(args.message));
     case "github_pull_request": return pullRequest(env, Number(args.number));
     case "github_pull_request_files": return pullRequestFiles(env, Number(args.number));
@@ -141,11 +147,16 @@ function validateOutcome(lease: AopLease, value: unknown): ModelOutcome {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("model_outcome_not_object");
   const o = value as Record<string, unknown>;
   if (typeof o.result_code !== "string" || !o.output || typeof o.output !== "object" || Array.isArray(o.output)) throw new Error("model_outcome_shape_invalid");
-  const allowed = lease.role_kind === "IMPLEMENTER" ? new Set(["CONTINUE", "EVIDENCE_READY", "FAILED"]) : lease.role_kind === "ANALYST" ? new Set(["ACCEPT", "ACCEPT_WITH_REBASE", "REQUEST_CHANGES", "HOLD", "REJECT"]) : new Set(["ACCEPT", "RETURN", "WAIT", "VERIFIED", "REJECT"]);
+  const allowed = lease.role_kind === "IMPLEMENTER" ? new Set(["CONTINUE", "EVIDENCE_READY", "WAITING_EVENT", "FAILED"]) : lease.role_kind === "ANALYST" ? new Set(["ACCEPT", "ACCEPT_WITH_REBASE", "REQUEST_CHANGES", "HOLD", "REJECT"]) : new Set(["ACCEPT", "RETURN", "WAIT", "VERIFIED", "REJECT"]);
   if (!allowed.has(o.result_code)) throw new Error(`model_result_not_allowed:${o.result_code}`);
   if (o.result_code === "EVIDENCE_READY") {
     const out = o.output as Record<string, unknown>;
     for (const k of ["summary", "evidence", "research"]) if (!out[k] || typeof out[k] !== "object" || Array.isArray(out[k])) throw new Error(`evidence_ready_missing_${k}`);
+  }
+  if (lease.role_kind === "IMPLEMENTER" && o.result_code === "WAITING_EVENT") {
+    const out = o.output as Record<string, unknown>;
+    if (!out.mutation_plan || typeof out.mutation_plan !== "object" || Array.isArray(out.mutation_plan)) throw new Error("waiting_event_requires_mutation_plan");
+    if (typeof o.wake_condition !== "string" || !o.wake_condition) throw new Error("waiting_event_requires_wake_condition");
   }
   return { result_code: o.result_code as ModelOutcome["result_code"], output: o.output as JsonObject, github_sha: typeof o.github_sha === "string" ? o.github_sha : null, wake_condition: typeof o.wake_condition === "string" ? o.wake_condition : null };
 }
@@ -156,8 +167,8 @@ export async function executeRole(env: Env, lease: AopLease, workerId: string): 
     return { result_code: "RETURN", output: { automation: "AUTHORITY_REBIND_APPLIED", adoption, requested_by: lease.input ?? {} }, github_sha: lease.expected_github_sha ?? null, wake_condition: null };
   }
 
-  const instructions = systemInstructions(lease);
-  const tools = toolsFor(lease);
+  const instructions = systemInstructions(env, lease);
+  const tools = toolsFor(env, lease);
   const transcript: Array<Record<string, unknown>> = [
     { role: "user", content: [{ type: "input_text", text: JSON.stringify({ lease }) }] },
   ];
