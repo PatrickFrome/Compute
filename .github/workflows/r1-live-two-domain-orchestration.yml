@@ -71,7 +71,10 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('.github/workflows/r1-live-two-domain-orchestration.yml').read_text()
+          raw=Path('.github/workflows/r1-live-two-domain-orchestration.yml').read_text()
+          before, remainder = raw.split('      - name: Validate workflow trust-zone contract', 1)
+          _checker, after = remainder.split('\n  preflight-live:', 1)
+          p = before + '\n  preflight-live:' + after
           g=Path('controller/r1/live_two_domain_orchestration_guard.py').read_text()
           assert 'queue: max' in p
           assert 'r1-aws-durability-proof' in g and 'r1-b2-durability-proof' in g
