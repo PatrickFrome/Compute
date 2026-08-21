@@ -1,0 +1,36 @@
+name: Compute Fabric Governance
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  governance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate workstream branch
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          case "$HEAD_REF" in
+            work/w1-linux-worker-safety|work/t0-hermetic-toolchain|work/f1-live-federation|work/r1-continuity-plane|work/a1-agent-workspace|analysis/integration)
+              ;;
+            *)
+              echo "Unregistered Compute Fabric workstream branch: $HEAD_REF" >&2
+              exit 1
+              ;;
+          esac
+      - name: Validate governance files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f README.md
+          test -f docs/CHAT_TOPOLOGY.md
+          test -f docs/ROADMAP_EXECUTION_PROTOCOL.md
+          test -f .github/pull_request_template.md
