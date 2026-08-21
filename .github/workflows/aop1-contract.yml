@@ -5,6 +5,7 @@ on:
     paths:
       - "orchestration/cloudflare/**"
       - "supabase/migrations/*aop1*"
+      - "supabase/tests/aop1_autonomous_orchestration.sql"
       - "tests/test_aop1_contract.py"
       - ".github/workflows/aop1-contract.yml"
   push:
@@ -13,6 +14,7 @@ on:
     paths:
       - "orchestration/cloudflare/**"
       - "supabase/migrations/*aop1*"
+      - "supabase/tests/aop1_autonomous_orchestration.sql"
       - "tests/test_aop1_contract.py"
       - ".github/workflows/aop1-contract.yml"
 
@@ -40,7 +42,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Install runtime toolchain
+      - name: Install pinned runtime toolchain
         run: npm install --no-audit --no-fund
       - name: Validate Wrangler config and generate bindings
         run: npx wrangler types --env-interface Env
