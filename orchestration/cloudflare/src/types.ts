@@ -1,20 +1,24 @@
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+export type JsonObject = { [key: string]: JsonValue };
+
 export type RoleKind = "IMPLEMENTER" | "ANALYST" | "SUPERVISOR";
 
-export interface AopWake { id: string; reason: string; source?: string; payload?: Record<string, unknown>; }
+export interface AopWake { id: string; reason: string; source?: string; payload?: JsonObject; }
 export interface RoleConfig { branch?: string; issue?: number; authority?: string; }
 
 export interface AopLease {
   schema: string; leased: boolean; run_id?: string; role_key?: string; role_kind?: RoleKind;
   role_config?: RoleConfig; milestone_key?: string | null; mutation_domains?: string[];
   executor_profile?: string; lease_generation?: number; lease_expires_at?: string;
-  input?: Record<string, unknown>; expected_github_sha?: string | null; base_checkpoint_id?: string | null;
-  base_head_drift?: boolean; roadmap_status?: Record<string, unknown>; supervisor_snapshot?: Record<string, unknown>;
-  claim?: Record<string, unknown> | null; directive?: Record<string, unknown> | null;
+  input?: JsonObject; expected_github_sha?: string | null; base_checkpoint_id?: string | null;
+  base_head_drift?: boolean; roadmap_status?: JsonObject; supervisor_snapshot?: JsonObject;
+  claim?: JsonObject | null; directive?: JsonObject | null;
 }
 
 export interface ModelOutcome {
   result_code: "CONTINUE"|"EVIDENCE_READY"|"FAILED"|"ACCEPT"|"ACCEPT_WITH_REBASE"|"REQUEST_CHANGES"|"HOLD"|"REJECT"|"RETURN"|"WAIT"|"VERIFIED";
-  output: Record<string, unknown>; github_sha?: string | null; wake_condition?: string | null;
+  output: JsonObject; github_sha?: string | null; wake_condition?: string | null;
 }
 export interface WorkflowParams { wake: AopWake; workerId: string; }
 export interface Env {
