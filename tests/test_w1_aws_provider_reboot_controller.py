@@ -120,7 +120,7 @@ class ControllerTests(unittest.TestCase):
                 requested_at=REQUESTED,
             )
 
-    def test_receipt_is_non_authoritative(self):
+    def test_receipt_is_non_authoritative_and_async_semantics_are_explicit(self):
         preflight = mod.validate_preflight_bundle(
             valid_bundle(), instance_id=INSTANCE_ID, worker_id=WORKER_ID, expected_worker_sha=SHA
         )
@@ -139,6 +139,8 @@ class ControllerTests(unittest.TestCase):
         )
         self.assertEqual(receipt["classification"], "LIVE_PROVIDER_CONTROLLER_RECEIPT_UNINGESTED")
         self.assertEqual(receipt["provider_instance_id"], INSTANCE_ID)
+        self.assertEqual(receipt["completed_at_semantics"], "PROVIDER_REQUEST_ACCEPTED_AT_NOT_REBOOT_COMPLETION")
+        self.assertEqual(receipt["evidence"]["provider_action_semantics"], "ASYNC_REBOOT_REQUEST_ACCEPTED")
         self.assertFalse(receipt["persistent_worker_proof"])
         self.assertFalse(receipt["w1_verified"])
         self.assertRegex(receipt["evidence_artifact_sha256"], r"^[0-9a-f]{64}$")
