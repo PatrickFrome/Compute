@@ -1,0 +1,106 @@
+name: W1 AWS Reference Host
+
+on:
+  push:
+    branches: [work/w1-linux-worker-safety]
+    paths:
+      - 'infra/w1/aws/**'
+      - 'worker/native-linux/providers/aws/**'
+      - '.github/workflows/w1-aws-reference-host.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'infra/w1/aws/**'
+      - 'worker/native-linux/providers/aws/**'
+      - '.github/workflows/w1-aws-reference-host.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-reference-host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact workflow revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Install exact Terraform CLI
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+
+      - name: Verify provider bootstrap helper
+        run: |
+          set -euo pipefail
+          python3 -m py_compile worker/native-linux/providers/aws/fetch_bootstrap_secret.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('worker/native-linux/providers/aws/fetch_bootstrap_secret.py').read_text()
+          assert 'X-aws-ec2-metadata-token' in p
+          assert 'AWS4-HMAC-SHA256' in p
+          assert 'secretsmanager.GetSecretValue' in p
+          assert 'print(secret)' not in p
+          assert 'persistent_worker_proof": False' in p
+          PY
+
+      - name: Verify AWS safety and immutability contract
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          main=Path('infra/w1/aws/main.tf').read_text()
+          variables=Path('infra/w1/aws/variables.tf').read_text()
+          cloud=Path('infra/w1/aws/cloud-init.sh.tftpl').read_text()
+          readme=Path('infra/w1/aws/README.md').read_text()
+
+          assert 'required_version = "= 1.15.8"' in main
+          assert 'version = "= 6.60.0"' in main
+          assert 'http_tokens                 = "required"' in main
+          assert 'http_put_response_hop_limit = 1' in main
+          assert 'encrypted             = true' in main
+          assert 'disable_api_termination = var.protect_from_api_termination' in main
+          assert 'disable_api_stop        = var.protect_from_api_termination' in main
+          assert not re.search(r'(?m)^\s*ingress\s*\{', main)
+          assert 'data "aws_ami"' not in main
+          assert 'most_recent' not in main
+          assert 'secretsmanager:GetSecretValue' in main
+          assert 'secretsmanager:*' not in main
+          assert 'ssm:' not in main.lower()
+          assert 'ssh' not in main.lower()
+
+          assert 'can(regex("^ami-[0-9a-f]+$", var.ami_id))' in variables
+          assert 'can(regex("^[0-9a-f]{40}$", var.worker_bundle_github_sha))' in variables
+          assert 'associate_public_ip_address' in variables and 'default     = false' in variables
+
+          assert 'RebootInstances' not in cloud
+          assert 'reboot ' not in cloud.lower()
+          assert '--secret-id' in cloud and '${bootstrap_secret_arn}' in cloud
+          assert 'bearer-token-file "$TOKEN_FILE"' in cloud
+          assert 'rm -f "$TOKEN_FILE"' in cloud
+          assert 'codeload.github.com/PatrickFrome/Compute/tar.gz/' in cloud
+          assert "non-regular bootstrap archive member forbidden" in cloud
+          assert '$${args[@]}' in cloud
+
+          # Terraform template interpolation may only consume this explicit allowlist.
+          scrubbed=cloud.replace('$${args[@]}','')
+          refs=set(re.findall(r'\$\{([^}]+)\}', scrubbed))
+          assert refs == {
+              'github_sha','region','bootstrap_secret_arn','worker_id','gateway_url','prepare_gvisor'
+          }, refs
+
+          assert 'persistent_worker_proof=false' in readme
+          assert 'w1_verified=false' in readme
+          assert 'a1_runtime_authority=false' in readme
+          PY
+
+      - name: Terraform format
+        run: terraform fmt -check -recursive infra/w1/aws
+
+      - name: Terraform init without backend or AWS credentials
+        run: terraform -chdir=infra/w1/aws init -backend=false -input=false
+
+      - name: Terraform validate
+        run: terraform -chdir=infra/w1/aws validate
