@@ -1,0 +1,496 @@
+name: R1 Live Two-Domain Readback Orchestration
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/r1/live_two_domain_orchestration_guard.py'
+      - 'tests/test_r1_live_two_domain_orchestration_guard.py'
+      - 'research/R1_STEP06_ISOLATED_LIVE_TWO_DOMAIN_ORCHESTRATION.md'
+      - '.github/workflows/r1-live-two-domain-orchestration.yml'
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Successful main-branch R1 recovery-source workflow run ID'
+        required: true
+        type: string
+      ciphertext_artifact_id:
+        description: 'Immutable direct artifact ID for r1-recovery-ciphertext.age'
+        required: true
+        type: string
+      envelope_artifact_id:
+        description: 'Immutable direct artifact ID for r1-recovery-envelope-receipt.json'
+        required: true
+        type: string
+      retain_until:
+        description: 'RFC3339 COMPLIANCE retain-until time, more than 24h in the future'
+        required: true
+        type: string
+      execute_replication:
+        description: 'Execute provider replication after protected-environment approvals'
+        required: true
+        default: false
+        type: boolean
+      confirmation:
+        description: 'For live writes type REPLICATE_R1_CIPHERTEXT_TO_TWO_COMPLIANCE_DOMAINS'
+        required: false
+        default: ''
+        type: string
+
+concurrency:
+  group: r1-live-${{ inputs.source_run_id || github.run_id }}-${{ inputs.ciphertext_artifact_id || github.run_id }}
+  queue: max
+
+permissions: {}
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile and run orchestration guard adversarial tests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/r1/live_two_domain_orchestration_guard.py
+          python3 -m unittest tests.test_r1_live_two_domain_orchestration_guard -v
+
+      - name: Re-run STEP05A retry-safety tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_r1_idempotent_exact_ciphertext_replication -v
+
+      - name: Validate workflow trust-zone contract
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          raw=Path('.github/workflows/r1-live-two-domain-orchestration.yml').read_text()
+          before, remainder = raw.split('      - name: Validate workflow trust-zone contract', 1)
+          _checker, after = remainder.split('\n  preflight-live:', 1)
+          p = before + '\n  preflight-live:' + after
+          g=Path('controller/r1/live_two_domain_orchestration_guard.py').read_text()
+          assert 'queue: max' in p
+          assert 'r1-aws-durability-proof' in g and 'r1-b2-durability-proof' in g
+          assert '.github/workflows/r1-live-recovery-source.yml' in g
+          assert 'idempotent_exact_ciphertext_replication.py' in p
+          assert p.count('id-token: write') == 1
+          assert 'output-env-credentials: false' in p
+          assert 'output-credentials: true' in p
+          assert 'aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c' in p
+          assert 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' in p
+          assert 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c' in p
+          assert 'archive: false' in p
+          assert 'digest-mismatch: error' in p
+          assert 'needs.preflight-live.outputs.aws_environment' in p
+          assert 'needs.preflight-live.outputs.b2_environment' in p
+          assert 'b2_authorize_account' in p
+          assert 'evaluate-results' in p
+          assert 'supabase' not in p.lower()
+          assert 'r2_proven' in g and 'persisted_seal_allowed' in g
+          PY
+
+  preflight-live:
+    if: github.event_name == 'workflow_dispatch'
+    needs: contract-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      aws_environment: ${{ steps.outputs.outputs.aws_environment }}
+      b2_environment: ${{ steps.outputs.outputs.b2_environment }}
+      preflight_artifact_id: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      CIPHERTEXT_ARTIFACT_ID: ${{ inputs.ciphertext_artifact_id }}
+      ENVELOPE_ARTIFACT_ID: ${{ inputs.envelope_artifact_id }}
+      EXECUTE_REPLICATION: ${{ inputs.execute_replication }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+    steps:
+      - name: Checkout orchestrator from exact main revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch boundary
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CIPHERTEXT_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ENVELOPE_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          if [[ "$EXECUTE_REPLICATION" == 'true' && "$CONFIRMATION" != 'REPLICATE_R1_CIPHERTEXT_TO_TWO_COMPLIANCE_DOMAINS' ]]; then
+            echo 'live replication requires exact confirmation token' >&2
+            exit 1
+          fi
+
+      - name: Fetch trusted source and pre-existing environment metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          api_get() {
+            curl --fail-with-body --silent --show-error --location \
+              -H 'Accept: application/vnd.github+json' \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "$1"
+          }
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}" > evidence/source-run.json
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts?per_page=100" > evidence/source-artifacts.json
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/environments/r1-aws-durability-proof" > evidence/aws-environment.json
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/environments/r1-b2-durability-proof" > evidence/b2-environment.json
+
+      - name: Fail closed on source or environment mismatch
+        run: |
+          set -euo pipefail
+          python3 controller/r1/live_two_domain_orchestration_guard.py validate-preflight \
+            --source-run evidence/source-run.json \
+            --artifacts evidence/source-artifacts.json \
+            --aws-environment evidence/aws-environment.json \
+            --b2-environment evidence/b2-environment.json \
+            --source-run-id "$SOURCE_RUN_ID" \
+            --ciphertext-artifact-id "$CIPHERTEXT_ARTIFACT_ID" \
+            --envelope-artifact-id "$ENVELOPE_ARTIFACT_ID" \
+            --output evidence/r1-live-preflight.json
+
+      - name: Publish verified environment names to dependent jobs
+        id: outputs
+        run: |
+          set -euo pipefail
+          echo 'aws_environment=r1-aws-durability-proof' >> "$GITHUB_OUTPUT"
+          echo 'b2_environment=r1-b2-durability-proof' >> "$GITHUB_OUTPUT"
+
+      - name: Upload non-authoritative preflight receipt
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/r1-live-preflight.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+
+  aws-provider:
+    if: github.event_name == 'workflow_dispatch' && inputs.execute_replication == true
+    needs: preflight-live
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: ${{ needs.preflight-live.outputs.aws_environment }}
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    outputs:
+      result_artifact_id: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      CIPHERTEXT_ARTIFACT_ID: ${{ inputs.ciphertext_artifact_id }}
+      ENVELOPE_ARTIFACT_ID: ${{ inputs.envelope_artifact_id }}
+      RETAIN_UNTIL: ${{ inputs.retain_until }}
+      AWS_ROLE_ARN: ${{ vars.R1_AWS_ROLE_ARN }}
+      AWS_ACCOUNT_ID: ${{ vars.R1_AWS_ACCOUNT_ID }}
+      AWS_REGION: ${{ vars.R1_AWS_REGION }}
+      R1_BUCKET: ${{ vars.R1_AWS_BUCKET }}
+      R1_DOMAIN_KEY: ${{ vars.R1_AWS_DOMAIN_KEY }}
+      R1_FAILURE_DOMAIN: ${{ vars.R1_AWS_FAILURE_DOMAIN }}
+      R1_ACCOUNT_SCOPE_SHA256: ${{ vars.R1_AWS_ACCOUNT_SCOPE_SHA256 }}
+    steps:
+      - name: Checkout exact orchestration revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Download immutable source ciphertext
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ inputs.ciphertext_artifact_id }}
+          path: source
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+          digest-mismatch: error
+
+      - name: Download immutable envelope receipt
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ inputs.envelope_artifact_id }}
+          path: source
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+          digest-mismatch: error
+
+      - name: Validate exact STEP04 source before OIDC credentials
+        run: |
+          set -euo pipefail
+          python3 controller/r1/recovery_encryption_envelope.py verify-receipt \
+            --ciphertext source/r1-recovery-ciphertext.age \
+            --receipt source/r1-recovery-envelope-receipt.json
+          [[ "$AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]
+          [[ "$AWS_REGION" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]]
+          [[ "$AWS_ROLE_ARN" =~ ^arn:aws(-[a-z]+)?:iam::${AWS_ACCOUNT_ID}:role/.+ ]]
+          [[ "$R1_ACCOUNT_SCOPE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          mkdir -p evidence
+          python3 - <<'PY'
+          import json,os
+          value={
+            'schema':'metaengine.compute.r1-s3-replication-target.h205f22.v1',
+            'domain_key':os.environ['R1_DOMAIN_KEY'],
+            'provider_kind':'AWS_S3',
+            'operator_class':'AMAZON_AWS',
+            'failure_domain':os.environ['R1_FAILURE_DOMAIN'],
+            'independence_basis':'Independent Amazon AWS account, protected GitHub environment, and provider control plane',
+            'account_scope_sha256':os.environ['R1_ACCOUNT_SCOPE_SHA256'],
+            'bucket':os.environ['R1_BUCKET'],
+            'region':os.environ['AWS_REGION'],
+            'endpoint_url':None,
+            'retain_until':os.environ['RETAIN_UNTIL'],
+          }
+          json.dump(value,open('evidence/aws-target.json','w'),sort_keys=True,separators=(',',':'))
+          PY
+
+      - name: Obtain 15-minute AWS OIDC credentials as step outputs only
+        id: aws-creds
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
+        with:
+          role-to-assume: ${{ vars.R1_AWS_ROLE_ARN }}
+          aws-region: ${{ vars.R1_AWS_REGION }}
+          allowed-account-ids: ${{ vars.R1_AWS_ACCOUNT_ID }}
+          role-session-name: r1-${{ github.run_id }}-${{ github.run_attempt }}
+          role-duration-seconds: 900
+          mask-aws-account-id: true
+          output-env-credentials: false
+          output-credentials: true
+
+      - name: Replicate or safely reuse exact AWS version
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws-creds.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws-creds.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws-creds.outputs.aws-session-token }}
+          AWS_REGION: ${{ vars.R1_AWS_REGION }}
+          AWS_EC2_METADATA_DISABLED: 'true'
+        run: |
+          set -euo pipefail
+          aws sts get-caller-identity --query Account --output text | grep -Fx "$AWS_ACCOUNT_ID" >/dev/null
+          python3 controller/r1/idempotent_exact_ciphertext_replication.py \
+            --ciphertext source/r1-recovery-ciphertext.age \
+            --envelope-receipt source/r1-recovery-envelope-receipt.json \
+            --target evidence/aws-target.json \
+            --output evidence/r1-aws-provider-result.json
+
+      - name: Validate AWS result after provider credentials leave scope
+        run: |
+          set -euo pipefail
+          python3 controller/r1/live_two_domain_orchestration_guard.py validate-provider-result \
+            --provider AWS_S3 \
+            --result evidence/r1-aws-provider-result.json \
+            --output evidence/r1-aws-result-validation.json
+
+      - name: Upload AWS provider result without cloud credentials
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/r1-aws-provider-result.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+
+  b2-provider:
+    if: github.event_name == 'workflow_dispatch' && inputs.execute_replication == true
+    needs: preflight-live
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: ${{ needs.preflight-live.outputs.b2_environment }}
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      result_artifact_id: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      RETAIN_UNTIL: ${{ inputs.retain_until }}
+      R1_BUCKET: ${{ vars.R1_B2_BUCKET }}
+      R1_REGION: ${{ vars.R1_B2_REGION }}
+      R1_ENDPOINT_URL: ${{ vars.R1_B2_ENDPOINT_URL }}
+      R1_DOMAIN_KEY: ${{ vars.R1_B2_DOMAIN_KEY }}
+      R1_FAILURE_DOMAIN: ${{ vars.R1_B2_FAILURE_DOMAIN }}
+      R1_ACCOUNT_SCOPE_SHA256: ${{ vars.R1_B2_ACCOUNT_SCOPE_SHA256 }}
+    steps:
+      - name: Checkout exact orchestration revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Download immutable source ciphertext
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ inputs.ciphertext_artifact_id }}
+          path: source
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+          digest-mismatch: error
+
+      - name: Download immutable envelope receipt
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ inputs.envelope_artifact_id }}
+          path: source
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+          digest-mismatch: error
+
+      - name: Validate exact STEP04 source and build non-secret B2 target
+        run: |
+          set -euo pipefail
+          python3 controller/r1/recovery_encryption_envelope.py verify-receipt \
+            --ciphertext source/r1-recovery-ciphertext.age \
+            --receipt source/r1-recovery-envelope-receipt.json
+          [[ "$R1_ACCOUNT_SCOPE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          mkdir -p evidence
+          B2_ENDPOINT_HOST="$(python3 - <<'PY'
+          import os
+          from urllib.parse import urlparse
+          u=urlparse(os.environ['R1_ENDPOINT_URL'])
+          if u.scheme != 'https' or not u.hostname or u.path not in ('','/') or u.query or u.fragment:
+              raise SystemExit(1)
+          print(u.hostname)
+          PY
+          )"
+          [[ "$B2_ENDPOINT_HOST" == *.backblazeb2.com ]]
+          echo "B2_ENDPOINT_HOST=$B2_ENDPOINT_HOST" >> "$GITHUB_ENV"
+          python3 - <<'PY'
+          import json,os
+          value={
+            'schema':'metaengine.compute.r1-s3-replication-target.h205f22.v1',
+            'domain_key':os.environ['R1_DOMAIN_KEY'],
+            'provider_kind':'BACKBLAZE_B2',
+            'operator_class':'BACKBLAZE',
+            'failure_domain':os.environ['R1_FAILURE_DOMAIN'],
+            'independence_basis':'Independent Backblaze account, protected GitHub environment, and provider control plane',
+            'account_scope_sha256':os.environ['R1_ACCOUNT_SCOPE_SHA256'],
+            'bucket':os.environ['R1_BUCKET'],
+            'region':os.environ['R1_REGION'],
+            'endpoint_url':os.environ['R1_ENDPOINT_URL'],
+            'retain_until':os.environ['RETAIN_UNTIL'],
+          }
+          json.dump(value,open('evidence/b2-target.json','w'),sort_keys=True,separators=(',',':'))
+          PY
+
+      - name: Verify B2 application-key scope and replicate in one secret-bearing step
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R1_B2_APPLICATION_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R1_B2_APPLICATION_KEY }}
+          AWS_EC2_METADATA_DISABLED: 'true'
+        run: |
+          set -euo pipefail
+          umask 077
+          trap 'shred -u /tmp/b2-auth.json 2>/dev/null || rm -f /tmp/b2-auth.json' EXIT
+          curl --fail-with-body --silent --show-error --location \
+            --user "${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}" \
+            https://api.backblazeb2.com/b2api/v4/b2_authorize_account > /tmp/b2-auth.json
+          python3 controller/r1/live_two_domain_orchestration_guard.py validate-b2-auth \
+            --authorization /tmp/b2-auth.json \
+            --expected-bucket "$R1_BUCKET" \
+            --expected-endpoint-host "$B2_ENDPOINT_HOST" \
+            --expected-account-scope-sha256 "$R1_ACCOUNT_SCOPE_SHA256" \
+            --output evidence/r1-b2-key-scope.json
+          python3 controller/r1/idempotent_exact_ciphertext_replication.py \
+            --ciphertext source/r1-recovery-ciphertext.age \
+            --envelope-receipt source/r1-recovery-envelope-receipt.json \
+            --target evidence/b2-target.json \
+            --output evidence/r1-b2-provider-result.json
+
+      - name: Validate B2 result after provider secrets leave scope
+        run: |
+          set -euo pipefail
+          python3 controller/r1/live_two_domain_orchestration_guard.py validate-provider-result \
+            --provider BACKBLAZE_B2 \
+            --result evidence/r1-b2-provider-result.json \
+            --output evidence/r1-b2-result-validation.json
+
+      - name: Upload B2 provider result without cloud credentials
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/r1-b2-provider-result.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+
+  quorum-candidate:
+    if: github.event_name == 'workflow_dispatch' && inputs.execute_replication == true
+    needs: [preflight-live, aws-provider, b2-provider]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout exact orchestration revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Download preflight receipt by immutable artifact ID
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ needs.preflight-live.outputs.preflight_artifact_id }}
+          path: evidence
+          digest-mismatch: error
+
+      - name: Download AWS result by immutable artifact ID
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ needs.aws-provider.outputs.result_artifact_id }}
+          path: evidence
+          digest-mismatch: error
+
+      - name: Download B2 result by immutable artifact ID
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ needs.b2-provider.outputs.result_artifact_id }}
+          path: evidence
+          digest-mismatch: error
+
+      - name: Build credential-free two-domain quorum candidate
+        run: |
+          set -euo pipefail
+          python3 controller/r1/live_two_domain_orchestration_guard.py evaluate-results \
+            --aws-result evidence/r1-aws-provider-result.json \
+            --b2-result evidence/r1-b2-provider-result.json \
+            --preflight evidence/r1-live-preflight.json \
+            --output evidence/r1-two-domain-quorum-candidate.json
+          python3 - <<'PY'
+          import json
+          q=json.load(open('evidence/r1-two-domain-quorum-candidate.json'))
+          assert q['quorum']['candidate_ready'] is True
+          assert q['quorum']['distinct_operator_classes'] == 2
+          assert q['quorum']['strong_immutability_domains'] == 2
+          assert q['source_attestation_verified'] is False
+          assert q['source_attestation_required_before_authority'] is True
+          assert q['r2_proven'] is False
+          assert q['persisted_seal_allowed'] is False
+          PY
+
+      - name: Upload non-authoritative quorum candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/r1-two-domain-quorum-candidate.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
