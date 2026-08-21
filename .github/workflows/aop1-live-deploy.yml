@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: aop1-live-deploy
@@ -23,49 +24,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Detect one-time Cloudflare capability
-        id: capability
+      - name: Exchange GitHub OIDC for one-time AOP1 bootstrap bundle
         shell: bash
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.AOP1_SUPABASE_SERVICE_ROLE_KEY }}
-          AOP_SUPERVISOR_TOKEN: ${{ secrets.AOP1_SUPERVISOR_TOKEN }}
-          AOP_GITHUB_TOKEN: ${{ secrets.AOP1_GITHUB_TOKEN }}
-          CF_AI_TOKEN: ${{ secrets.AOP1_CF_AI_TOKEN }}
-          AOP_WAKE_SECRET: ${{ secrets.AOP1_WAKE_SECRET }}
+          BROKER_URL: https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/metaengine-aop1-github-oidc-bootstrap-h205f22
         run: |
           set -euo pipefail
-          missing=0
-          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID SUPABASE_SERVICE_ROLE_KEY AOP_SUPERVISOR_TOKEN AOP_GITHUB_TOKEN CF_AI_TOKEN AOP_WAKE_SECRET; do
-            if [ -z "${!name:-}" ]; then
-              echo "::notice::AOP1 live deployment capability is incomplete: ${name} is not configured."
-              missing=1
-            fi
-          done
-          if [ "$missing" -eq 1 ]; then
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "AOP1 remains NOT_LIVE_DEPLOYED; code/CI validation continues independently."
-          else
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          fi
+          oidc="$(curl --silent --show-error --fail \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=metaengine-h205f22-aop1" | jq -r '.value')"
+          test -n "$oidc" && test "$oidc" != "null"
+          curl --silent --show-error --fail \
+            -X POST "$BROKER_URL" \
+            -H "Authorization: Bearer $oidc" \
+            -H 'Content-Type: application/json' \
+            -o /tmp/aop1-bootstrap.json
+          jq -e '.schema == "metaengine.compute.aop1-bootstrap-bundle.h205f22.v1" and .one_time == true' /tmp/aop1-bootstrap.json >/dev/null
+          while IFS='=' read -r name value; do
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$name" "$value" >> "$GITHUB_ENV"
+          done < <(jq -r '
+            [
+              "CLOUDFLARE_API_TOKEN=" + .bundle.cloudflare_api_token,
+              "CLOUDFLARE_ACCOUNT_ID=" + .bundle.cloudflare_account_id,
+              "SUPABASE_SERVICE_ROLE_KEY=" + .bundle.supabase_service_role,
+              "AOP_SUPERVISOR_TOKEN=" + .bundle.supervisor_token,
+              "CF_AI_TOKEN=" + .bundle.cloudflare_ai_token,
+              "AOP_WAKE_SECRET=" + .bundle.wake_secret
+            ] | .[]' /tmp/aop1-bootstrap.json)
+          rm -f /tmp/aop1-bootstrap.json
 
       - uses: actions/setup-node@v4
-        if: steps.capability.outputs.configured == 'true'
         with:
           node-version: "22"
 
       - name: Install pinned Wrangler toolchain
-        if: steps.capability.outputs.configured == 'true'
         working-directory: orchestration/cloudflare
         run: npm install --no-audit --no-fund
 
       - name: Provision required Queues idempotently
-        if: steps.capability.outputs.configured == 'true'
         working-directory: orchestration/cloudflare
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         shell: bash
         run: |
           set -euo pipefail
@@ -79,12 +77,11 @@ jobs:
           done
 
       - name: Deploy Worker and upload runtime secrets
-        if: steps.capability.outputs.configured == 'true'
         id: deploy
         uses: cloudflare/wrangler-action@v3
         with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          apiToken: ${{ env.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: orchestration/cloudflare
           wranglerVersion: "4.125.0"
           command: deploy
@@ -92,19 +89,16 @@ jobs:
             SUPABASE_SERVICE_ROLE_KEY
             AOP_WAKE_SECRET
             AOP_SUPERVISOR_TOKEN
-            GITHUB_TOKEN
             CF_ACCOUNT_ID
             CF_AI_TOKEN
         env:
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.AOP1_SUPABASE_SERVICE_ROLE_KEY }}
-          AOP_WAKE_SECRET: ${{ secrets.AOP1_WAKE_SECRET }}
-          AOP_SUPERVISOR_TOKEN: ${{ secrets.AOP1_SUPERVISOR_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.AOP1_GITHUB_TOKEN }}
-          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CF_AI_TOKEN: ${{ secrets.AOP1_CF_AI_TOKEN }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ env.SUPABASE_SERVICE_ROLE_KEY }}
+          AOP_WAKE_SECRET: ${{ env.AOP_WAKE_SECRET }}
+          AOP_SUPERVISOR_TOKEN: ${{ env.AOP_SUPERVISOR_TOKEN }}
+          CF_ACCOUNT_ID: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
+          CF_AI_TOKEN: ${{ env.CF_AI_TOKEN }}
 
-      - name: Resolve deployment URL and verify health
-        if: steps.capability.outputs.configured == 'true'
+      - name: Resolve deployment URL and verify orchestration health
         id: health
         shell: bash
         env:
@@ -116,48 +110,33 @@ jobs:
             echo "Deployment URL missing from wrangler-action output" >&2
             exit 1
           fi
-          case "$url" in
-            http://*|https://*) ;;
-            *) url="https://$url" ;;
-          esac
+          case "$url" in http://*|https://*) ;; *) url="https://$url" ;; esac
           echo "url=$url" >> "$GITHUB_OUTPUT"
           for attempt in $(seq 1 12); do
-            if curl --silent --show-error --fail --max-time 20 "$url/health" -o /tmp/aop1-health.json; then
-              break
-            fi
-            if [ "$attempt" -eq 12 ]; then
-              echo "AOP1 health endpoint did not become ready" >&2
-              exit 1
-            fi
+            if curl --silent --show-error --fail --max-time 20 "$url/health" -o /tmp/aop1-health.json; then break; fi
+            if [ "$attempt" -eq 12 ]; then echo "AOP1 health endpoint did not become ready" >&2; exit 1; fi
             sleep 5
           done
           jq -e '
             .status == "ok"
             and .executor_configured == true
-            and .github_configured == true
             and .supervisor_capability_configured == true
+            and .github_configured == false
             and .snapshot.invariant == "NO_MANUAL_HANDOFF_V1"
           ' /tmp/aop1-health.json >/dev/null
-          echo "AOP1 live health canary: PASS"
+          echo "AOP1 live orchestration health: PASS; GitHub executor intentionally blocked until a dedicated runtime credential is provisioned."
 
-      - name: Send authenticated autonomous wake
-        if: steps.capability.outputs.configured == 'true'
+      - name: Send authenticated autonomous activation wake
         shell: bash
         env:
           AOP1_URL: ${{ steps.health.outputs.url }}
-          AOP_WAKE_SECRET: ${{ secrets.AOP1_WAKE_SECRET }}
         run: |
           set -euo pipefail
           code="$(curl --silent --show-error --output /tmp/aop1-wake.json --write-out '%{http_code}' \
             -X POST "$AOP1_URL/wake" \
             -H "Authorization: Bearer $AOP_WAKE_SECRET" \
             -H 'Content-Type: application/json' \
-            --data '{"reason":"LIVE_DEPLOY_ACTIVATION","source":"github-actions","payload":{"invariant":"NO_MANUAL_HANDOFF_V1"}}')"
+            --data '{"reason":"LIVE_DEPLOY_ACTIVATION","source":"github-actions-oidc","payload":{"invariant":"NO_MANUAL_HANDOFF_V1","github_executor":"BLOCKED_MISSING_DEDICATED_RUNTIME_CREDENTIAL"}}')"
           test "$code" = "202"
           jq -e '.accepted == true and .wake.reason == "LIVE_DEPLOY_ACTIVATION"' /tmp/aop1-wake.json >/dev/null
           echo "AOP1 live wake canary: ACCEPTED"
-
-      - name: Truth boundary when capability is absent
-        if: steps.capability.outputs.configured != 'true'
-        run: |
-          echo "CONTROL_PLANE_IMPLEMENTED / CLOUDFLARE_RUNTIME_CODE_READY / NOT_LIVE_DEPLOYED"
