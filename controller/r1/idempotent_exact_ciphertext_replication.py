@@ -6,8 +6,10 @@ This wrapper never weakens the original create-if-absent path. It first probes t
 current object version and reuses it only after version-pinned COMPLIANCE retention,
 provider metadata, full GET, and local SHA-256 all match the STEP04 ciphertext.
 
-If no current object exists, it delegates creation to STEP05. If creation loses a
-race, it probes once more and accepts only a fully verified existing version.
+STEP05B additionally persists the normalized provider CLI response evidence used by
+the controller so later evidence packaging can re-audit version/retention/readback
+semantics even after the originating GitHub Actions run is gone. These are normalized
+AWS-CLI/S3-compatible response structures, not raw HTTP transcripts or credentials.
 """
 
 from __future__ import annotations
@@ -41,6 +43,9 @@ from controller.r1.materialized_readback_verifier import verify_materialized_rea
 from controller.r1.recovery_encryption_envelope import EnvelopeError, validate_envelope_receipt
 
 
+EVIDENCE_SCHEMA = "metaengine.compute.r1-provider-controller-evidence.h205f22.v1"
+
+
 class IdempotentReplicationError(RuntimeError):
     pass
 
@@ -61,6 +66,112 @@ def _read_json(path: Path, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise IdempotentReplicationError(f"{label}_must_be_object")
     return value
+
+
+def _require_dict(value: Any, field: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise IdempotentReplicationError(f"{field}_invalid")
+    return value
+
+
+def _require_text(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise IdempotentReplicationError(f"{field}_invalid")
+    return value.strip()
+
+
+def _response_version(response: dict[str, Any], field: str) -> str | None:
+    value = response.get("VersionId")
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip() or value == "null":
+        raise IdempotentReplicationError(f"{field}_version_id_invalid")
+    return value.strip()
+
+
+def validate_persisted_provider_controller_evidence(result: Any) -> dict[str, Any]:
+    """Fail closed on a persisted STEP05B normalized provider-evidence result."""
+    if not isinstance(result, dict) or result.get("schema") != RESULT_SCHEMA:
+        raise IdempotentReplicationError("provider_result_schema_invalid")
+    if result.get("classification") != RESULT_CLASSIFICATION:
+        raise IdempotentReplicationError("provider_result_classification_invalid")
+
+    result_sha = _require_text(result.get("result_sha256"), "result_sha256")
+    result_core = dict(result)
+    result_core.pop("result_sha256", None)
+    if _sha256_json(result_core) != result_sha:
+        raise IdempotentReplicationError("provider_result_sha256_mismatch")
+
+    target = _require_dict(result.get("target"), "provider_result_target")
+    cipher = _require_dict(result.get("ciphertext"), "provider_result_ciphertext")
+    replication = _require_dict(result.get("replication"), "provider_result_replication")
+    evidence = _require_dict(result.get("provider_controller_evidence"), "provider_controller_evidence")
+    if evidence.get("schema") != EVIDENCE_SCHEMA:
+        raise IdempotentReplicationError("provider_controller_evidence_schema_invalid")
+    evidence_sha = _require_text(result.get("provider_controller_evidence_sha256"), "provider_controller_evidence_sha256")
+    if _sha256_json(evidence) != evidence_sha:
+        raise IdempotentReplicationError("provider_controller_evidence_sha256_mismatch")
+    if evidence.get("credentials_embedded") is not False:
+        raise IdempotentReplicationError("provider_controller_evidence_credentials_boundary_invalid")
+
+    provider_kind = _require_text(target.get("provider_kind"), "provider_kind")
+    domain_key = _require_text(target.get("domain_key"), "domain_key")
+    version_id = _require_text(cipher.get("version_id"), "ciphertext_version_id")
+    key = _require_text(cipher.get("key"), "ciphertext_key")
+    cipher_bytes = cipher.get("bytes")
+    if not isinstance(cipher_bytes, int) or isinstance(cipher_bytes, bool) or cipher_bytes < 0:
+        raise IdempotentReplicationError("ciphertext_bytes_invalid")
+    if evidence.get("provider_kind") != provider_kind or evidence.get("domain_key") != domain_key:
+        raise IdempotentReplicationError("provider_controller_evidence_identity_mismatch")
+    if evidence.get("version_id") != version_id or evidence.get("key") != key:
+        raise IdempotentReplicationError("provider_controller_evidence_object_identity_mismatch")
+
+    retention_response = _require_dict(evidence.get("retention_response"), "provider_retention_response")
+    retention = _require_dict(retention_response.get("Retention"), "provider_retention")
+    if str(retention.get("Mode") or "").upper() != "COMPLIANCE":
+        raise IdempotentReplicationError("provider_controller_evidence_retention_not_compliance")
+    _parse_time(retention.get("RetainUntilDate"), "provider_controller_evidence_retain_until")
+
+    get_response = _require_dict(evidence.get("get_response"), "provider_get_response")
+    get_version = _response_version(get_response, "provider_get_response")
+    if get_version is not None and get_version != version_id:
+        raise IdempotentReplicationError("provider_controller_evidence_get_version_mismatch")
+
+    mode = replication.get("mode")
+    if mode == "CREATED_NEW_VERSION":
+        if replication.get("new_provider_write") is not True:
+            raise IdempotentReplicationError("provider_create_mode_write_flag_invalid")
+        put_response = _require_dict(evidence.get("put_response"), "provider_put_response")
+        head_response = _require_dict(evidence.get("head_response"), "provider_head_response")
+        if _response_version(put_response, "provider_put_response") != version_id:
+            raise IdempotentReplicationError("provider_controller_evidence_put_version_mismatch")
+        head_version = _response_version(head_response, "provider_head_response")
+        if head_version is not None and head_version != version_id:
+            raise IdempotentReplicationError("provider_controller_evidence_head_version_mismatch")
+        if head_response.get("ContentLength") != cipher_bytes:
+            raise IdempotentReplicationError("provider_controller_evidence_head_size_mismatch")
+        if evidence.get("aws_if_none_match_used") is not (provider_kind == "AWS_S3"):
+            raise IdempotentReplicationError("provider_controller_evidence_conditional_create_mismatch")
+        if evidence.get("b2_conditional_create_claimed") is not False:
+            raise IdempotentReplicationError("provider_controller_evidence_b2_conditional_claim_invalid")
+    elif mode == "REUSED_EXISTING_VERSION":
+        if replication.get("new_provider_write") is not False:
+            raise IdempotentReplicationError("provider_reuse_mode_write_flag_invalid")
+        if evidence.get("mode") != "REUSED_EXISTING_VERSION" or evidence.get("new_provider_write") is not False:
+            raise IdempotentReplicationError("provider_controller_evidence_reuse_mode_invalid")
+        head_response = _require_dict(evidence.get("head_current_response"), "provider_head_current_response")
+        if _response_version(head_response, "provider_head_current_response") != version_id:
+            raise IdempotentReplicationError("provider_controller_evidence_reuse_version_mismatch")
+        if head_response.get("ContentLength") != cipher_bytes:
+            raise IdempotentReplicationError("provider_controller_evidence_reuse_size_mismatch")
+        if evidence.get("aws_if_none_match_used_for_original_create_contract") is not (provider_kind == "AWS_S3"):
+            raise IdempotentReplicationError("provider_controller_evidence_reuse_create_contract_mismatch")
+    else:
+        raise IdempotentReplicationError("provider_replication_mode_invalid")
+
+    if any(result.get(field) is not False for field in ("canonical", "authority_effect", "r2_proven", "r3_proven", "persisted_seal_allowed")):
+        raise IdempotentReplicationError("provider_result_authority_boundary_invalid")
+    return result
 
 
 def build_head_current_command(aws_bin: str, target: dict[str, Any], key: str) -> list[str]:
@@ -153,7 +264,7 @@ def _reuse_existing(
     )
 
     evidence_core: dict[str, Any] = {
-        "schema": "metaengine.compute.r1-provider-controller-evidence.h205f22.v1",
+        "schema": EVIDENCE_SCHEMA,
         "provider_kind": target["provider_kind"],
         "domain_key": target["domain_key"],
         "bucket": target["bucket"],
@@ -233,6 +344,7 @@ def _reuse_existing(
             "mode": "REUSED_EXISTING_VERSION",
             "new_provider_write": False,
         },
+        "provider_controller_evidence": evidence_core,
         "provider_controller_evidence_sha256": evidence_sha256,
         "readback_receipt": readback_receipt,
         "provenance": {
@@ -248,7 +360,48 @@ def _reuse_existing(
     }
     result = dict(core)
     result["result_sha256"] = _sha256_json(core)
-    return result
+    return validate_persisted_provider_controller_evidence(result)
+
+
+def _persist_created_evidence(
+    *,
+    created: dict[str, Any],
+    target_raw: dict[str, Any],
+    observed_start: datetime,
+    responses: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    required = {"put-object", "get-object-retention", "head-object", "get-object"}
+    if not required.issubset(responses):
+        raise IdempotentReplicationError("created_provider_controller_evidence_incomplete")
+    target = validate_target(target_raw, observed_start)
+    cipher = _require_dict(created.get("ciphertext"), "created_ciphertext")
+    version_id = _require_text(cipher.get("version_id"), "created_version_id")
+    key = _require_text(cipher.get("key"), "created_key")
+    evidence_core = {
+        "schema": EVIDENCE_SCHEMA,
+        "provider_kind": target["provider_kind"],
+        "domain_key": target["domain_key"],
+        "bucket": target["bucket"],
+        "key": key,
+        "version_id": version_id,
+        "put_response": responses["put-object"],
+        "head_response": responses["head-object"],
+        "retention_response": responses["get-object-retention"],
+        "aws_if_none_match_used": target["provider_kind"] == "AWS_S3",
+        "b2_conditional_create_claimed": False,
+        "credentials_embedded": False,
+        "get_response": responses["get-object"],
+    }
+    evidence_sha = _sha256_json(evidence_core)
+    if created.get("provider_controller_evidence_sha256") != evidence_sha:
+        raise IdempotentReplicationError("created_provider_controller_evidence_sha256_mismatch")
+    core = dict(created)
+    core.pop("result_sha256", None)
+    core["replication"] = {"mode": "CREATED_NEW_VERSION", "new_provider_write": True}
+    core["provider_controller_evidence"] = evidence_core
+    result = dict(core)
+    result["result_sha256"] = _sha256_json(core)
+    return validate_persisted_provider_controller_evidence(result)
 
 
 def replicate_or_reuse(
@@ -274,6 +427,14 @@ def replicate_or_reuse(
     if reused is not None:
         return reused
 
+    responses: dict[str, dict[str, Any]] = {}
+
+    def recording_runner(cmd: list[str]) -> dict[str, Any]:
+        value = runner(cmd)
+        if len(cmd) >= 3 and cmd[1] == "s3api" and cmd[2] in {"put-object", "get-object-retention", "head-object", "get-object"}:
+            responses[cmd[2]] = value
+        return value
+
     try:
         created = replicate_and_readback(
             ciphertext=ciphertext,
@@ -281,7 +442,7 @@ def replicate_or_reuse(
             target_raw=target_raw,
             aws_bin=aws_bin,
             now=observed_start,
-            runner=runner,
+            runner=recording_runner,
         )
     except ReplicationError as original:
         raced = _reuse_existing(
@@ -297,15 +458,12 @@ def replicate_or_reuse(
             return raced
         raise original
 
-    core = dict(created)
-    core.pop("result_sha256", None)
-    core["replication"] = {
-        "mode": "CREATED_NEW_VERSION",
-        "new_provider_write": True,
-    }
-    result = dict(core)
-    result["result_sha256"] = _sha256_json(core)
-    return result
+    return _persist_created_evidence(
+        created=created,
+        target_raw=target_raw,
+        observed_start=observed_start,
+        responses=responses,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -323,6 +481,7 @@ def main(argv: list[str] | None = None) -> int:
             target_raw=_read_json(Path(args.target), "target"),
             aws_bin=args.aws_bin,
         )
+        validate_persisted_provider_controller_evidence(result)
         Path(args.output).write_bytes(_canonical_bytes(result) + b"\n")
         return 0
     except (IdempotentReplicationError, ReplicationError, EnvelopeError) as exc:
