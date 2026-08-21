@@ -90,6 +90,28 @@ The real integration test generates two ephemeral PQ identities, encrypts to bot
 
 All generated identities are ephemeral CI fixtures only. No project recovery private key is created or stored by this PR.
 
+## Research after implementation — binary provenance amplifier
+
+Post-implementation research found that age v1.2.0+ prebuilt binaries publish **Sigsum transparency proofs**, not only release-page SHA-256 values. The upstream `SIGSUM.md` describes these proofs as cryptographically verifiable evidence that the released artifact was recorded in a public append-only transparency log, and publishes the two SSH Ed25519 verification keys plus the exact verification command.
+
+For v1.3.1 Linux amd64 the published proof asset SHA-256 is:
+
+`91331dc8ed9b5a0f4317ef6e7c261e49dfc2f11249a1775120a81361349d4c92`
+
+Adopted amplifier:
+
+1. pin the archive SHA-256;
+2. pin the `.proof` SHA-256;
+3. pin `sigsum-verify@v0.13.1` as shown by upstream;
+4. verify the proof with the upstream-published age signing keys and `sigsum-generic-2025-1` policy;
+5. only then extract and execute the age binary.
+
+This is stronger than checksum-only validation: a checksum copied from the same compromised release page would not independently establish transparency-log inclusion. The Sigsum proof adds an append-only public accountability plane for the binary used by the real CI round-trip.
+
+Sources:
+- https://github.com/FiloSottile/age/blob/main/SIGSUM.md
+- https://github.com/FiloSottile/age/releases/tag/v1.3.1
+
 ## Strict nonclaims
 
 - no production recovery recipient keys created;
