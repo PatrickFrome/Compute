@@ -1,4 +1,6 @@
+import copy
 import hashlib
+import json
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -6,9 +8,11 @@ from pathlib import Path
 
 from controller.r1.exact_ciphertext_replication_controller import ReplicationError, TARGET_SCHEMA
 from controller.r1.idempotent_exact_ciphertext_replication import (
+    EVIDENCE_SCHEMA,
     IdempotentReplicationError,
     build_head_current_command,
     replicate_or_reuse,
+    validate_persisted_provider_controller_evidence,
 )
 from controller.r1.recovery_encryption_envelope import (
     AGE_REQUIRED_VERSION,
@@ -21,6 +25,13 @@ from controller.r1.recovery_encryption_envelope import (
 
 
 NOW = datetime(2026, 8, 21, 18, 30, tzinfo=timezone.utc)
+
+
+def _rehash(value, field):
+    core = dict(value)
+    core.pop(field, None)
+    value[field] = hashlib.sha256(json.dumps(core, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+    return value
 
 
 class IdempotentExactCiphertextReplicationTests(unittest.TestCase):
@@ -130,16 +141,18 @@ class IdempotentExactCiphertextReplicationTests(unittest.TestCase):
             if operation == "get-object-retention":
                 return {"Retention": {"Mode": "COMPLIANCE", "RetainUntilDate": retain_until}}
             if operation == "head-object":
+                version = cmd[cmd.index("--version-id") + 1] if "--version-id" in cmd else "created-v1"
                 return {
                     "ContentLength": len(ciphertext),
                     "LastModified": NOW.isoformat(),
                     "ETag": '"etag-only"',
-                    "VersionId": "created-v1",
+                    "VersionId": version,
                 }
             if operation == "get-object":
                 output = Path(cmd[-1])
                 output.write_bytes(ciphertext + (b"tamper" if corrupt_get else b""))
-                return {"VersionId": "existing-v1"}
+                version = cmd[cmd.index("--version-id") + 1]
+                return {"VersionId": version}
             raise AssertionError(cmd)
 
         return run
@@ -156,7 +169,7 @@ class IdempotentExactCiphertextReplicationTests(unittest.TestCase):
         self.assertNotIn("--endpoint-url", aws_cmd)
         self.assertIn("--endpoint-url", b2_cmd)
 
-    def test_existing_valid_version_is_reused_without_put(self):
+    def test_existing_valid_version_is_reused_without_put_and_persists_evidence(self):
         calls = []
         base_runner = self.runner()
 
@@ -177,9 +190,16 @@ class IdempotentExactCiphertextReplicationTests(unittest.TestCase):
         self.assertFalse(result["replication"]["new_provider_write"])
         self.assertEqual(result["ciphertext"]["version_id"], "existing-v1")
         self.assertEqual(result["readback_receipt"]["readback"]["status"], "VERIFIED")
+        evidence = result["provider_controller_evidence"]
+        self.assertEqual(evidence["schema"], EVIDENCE_SCHEMA)
+        self.assertEqual(evidence["mode"], "REUSED_EXISTING_VERSION")
+        self.assertEqual(evidence["head_current_response"]["VersionId"], "existing-v1")
+        self.assertEqual(evidence["get_response"]["VersionId"], "existing-v1")
+        self.assertFalse(evidence["credentials_embedded"])
+        self.assertEqual(result["provider_controller_evidence_sha256"], hashlib.sha256(json.dumps(evidence, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest())
         self.assertFalse(result["r2_proven"])
 
-    def test_missing_current_object_uses_original_conditional_create_path(self):
+    def test_missing_current_object_uses_original_conditional_create_path_and_persists_evidence(self):
         result = replicate_or_reuse(
             ciphertext=self.ciphertext,
             envelope_receipt_path=self.envelope_receipt,
@@ -191,6 +211,13 @@ class IdempotentExactCiphertextReplicationTests(unittest.TestCase):
         self.assertEqual(result["replication"]["mode"], "CREATED_NEW_VERSION")
         self.assertTrue(result["replication"]["new_provider_write"])
         self.assertEqual(result["ciphertext"]["version_id"], "created-v1")
+        evidence = result["provider_controller_evidence"]
+        self.assertEqual(evidence["put_response"]["VersionId"], "created-v1")
+        self.assertEqual(evidence["head_response"]["VersionId"], "created-v1")
+        self.assertEqual(evidence["get_response"]["VersionId"], "created-v1")
+        self.assertTrue(evidence["aws_if_none_match_used"])
+        self.assertFalse(evidence["b2_conditional_create_claimed"])
+        validate_persisted_provider_controller_evidence(result)
 
     def test_existing_wrong_metadata_or_corrupt_bytes_fail_closed(self):
         with self.assertRaisesRegex(IdempotentReplicationError, "metadata_sha256_mismatch"):
@@ -212,7 +239,7 @@ class IdempotentExactCiphertextReplicationTests(unittest.TestCase):
                 runner=self.runner(corrupt_get=True),
             )
 
-    def test_create_race_falls_back_to_verified_existing_version(self):
+    def test_create_race_falls_back_to_verified_existing_version_with_evidence(self):
         probes = [None, self.current_head(version="race-winner-v1")]
 
         def probe(_cmd):
@@ -228,6 +255,7 @@ class IdempotentExactCiphertextReplicationTests(unittest.TestCase):
         )
         self.assertEqual(result["replication"]["mode"], "REUSED_EXISTING_VERSION")
         self.assertEqual(result["ciphertext"]["version_id"], "race-winner-v1")
+        self.assertEqual(result["provider_controller_evidence"]["head_current_response"]["VersionId"], "race-winner-v1")
         self.assertFalse(result["r2_proven"])
 
     def test_b2_existing_version_reuse_remains_version_pinned(self):
@@ -242,6 +270,55 @@ class IdempotentExactCiphertextReplicationTests(unittest.TestCase):
         self.assertEqual(result["target"]["provider_kind"], "BACKBLAZE_B2")
         self.assertEqual(result["ciphertext"]["version_id"], "4_z-existing")
         self.assertEqual(result["readback_receipt"]["provider_object"]["version_id"], "4_z-existing")
+        self.assertFalse(result["provider_controller_evidence"]["aws_if_none_match_used_for_original_create_contract"])
+
+    def test_recomputed_hash_forgery_cannot_change_version_identity(self):
+        result = replicate_or_reuse(
+            ciphertext=self.ciphertext,
+            envelope_receipt_path=self.envelope_receipt,
+            target_raw=self.target("AWS_S3"),
+            now=NOW,
+            probe_runner=lambda _cmd: self.current_head(),
+            runner=self.runner(),
+        )
+        forged = copy.deepcopy(result)
+        forged["provider_controller_evidence"]["version_id"] = "forged-v9"
+        forged["provider_controller_evidence_sha256"] = hashlib.sha256(json.dumps(forged["provider_controller_evidence"], sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        _rehash(forged, "result_sha256")
+        with self.assertRaisesRegex(IdempotentReplicationError, "object_identity_mismatch"):
+            validate_persisted_provider_controller_evidence(forged)
+
+    def test_recomputed_hash_cannot_hide_credentials_boundary_escalation(self):
+        result = replicate_or_reuse(
+            ciphertext=self.ciphertext,
+            envelope_receipt_path=self.envelope_receipt,
+            target_raw=self.target("AWS_S3"),
+            now=NOW,
+            probe_runner=lambda _cmd: self.current_head(),
+            runner=self.runner(),
+        )
+        forged = copy.deepcopy(result)
+        forged["provider_controller_evidence"]["credentials_embedded"] = True
+        forged["provider_controller_evidence_sha256"] = hashlib.sha256(json.dumps(forged["provider_controller_evidence"], sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        _rehash(forged, "result_sha256")
+        with self.assertRaisesRegex(IdempotentReplicationError, "credentials_boundary"):
+            validate_persisted_provider_controller_evidence(forged)
+
+    def test_recomputed_hash_cannot_downgrade_retention(self):
+        result = replicate_or_reuse(
+            ciphertext=self.ciphertext,
+            envelope_receipt_path=self.envelope_receipt,
+            target_raw=self.target("AWS_S3"),
+            now=NOW,
+            probe_runner=lambda _cmd: self.current_head(),
+            runner=self.runner(),
+        )
+        forged = copy.deepcopy(result)
+        forged["provider_controller_evidence"]["retention_response"]["Retention"]["Mode"] = "GOVERNANCE"
+        forged["provider_controller_evidence_sha256"] = hashlib.sha256(json.dumps(forged["provider_controller_evidence"], sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        _rehash(forged, "result_sha256")
+        with self.assertRaisesRegex(IdempotentReplicationError, "retention_not_compliance"):
+            validate_persisted_provider_controller_evidence(forged)
 
 
 if __name__ == "__main__":
