@@ -1,0 +1,85 @@
+name: R1 Recovery Encryption Envelope
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/r1/recovery_encryption_envelope.py'
+      - 'tests/test_r1_recovery_encryption_envelope.py'
+      - 'research/R1_STEP04_AGE_PQ_RECOVERY_ENVELOPE.md'
+      - '.github/workflows/r1-recovery-encryption-envelope.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-envelope:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile and run offline adversarial tests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/r1/recovery_encryption_envelope.py
+          python3 -m unittest tests.test_r1_recovery_encryption_envelope -v
+
+      - name: Enforce crypto and authority boundary
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('controller/r1/recovery_encryption_envelope.py').read_text()
+          wf = Path('.github/workflows/r1-recovery-encryption-envelope.yml').read_text()
+          assert 'AGE_REQUIRED_VERSION = "1.3.1"' in p
+          assert 'PRODUCTION_PQ_TWO_RECIPIENT_MIN' in p
+          assert 'age1pq1' in p
+          assert 'COPY_EXACT_CIPHERTEXT_BYTES_DO_NOT_REENCRYPT_PER_PROVIDER' in p
+          assert 'r2_proven": False' in p and 'r3_proven": False' in p
+          assert 'persisted_seal_allowed": False' in p
+          for forbidden in ('boto3', 'supabase', 'requests', 'urllib.request', 'cryptography.', 'nacl.', 'AESGCM', 'ChaCha20Poly1305'):
+              assert forbidden not in p, forbidden
+          assert 'bdc69c09cbdd6cf8b1f333d372a1f58247b3a33146406333e30c0f26e8f51377' in wf
+          assert '91331dc8ed9b5a0f4317ef6e7c261e49dfc2f11249a1775120a81361349d4c92' in wf
+          assert 'sigsum-verify@v0.13.1' in wf
+          PY
+
+      - name: Fetch and verify exact official age v1.3.1 release
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            --output /tmp/age-v1.3.1-linux-amd64.tar.gz \
+            https://github.com/FiloSottile/age/releases/download/v1.3.1/age-v1.3.1-linux-amd64.tar.gz
+          curl --fail --silent --show-error --location \
+            --output /tmp/age-v1.3.1-linux-amd64.tar.gz.proof \
+            https://github.com/FiloSottile/age/releases/download/v1.3.1/age-v1.3.1-linux-amd64.tar.gz.proof
+          echo 'bdc69c09cbdd6cf8b1f333d372a1f58247b3a33146406333e30c0f26e8f51377  /tmp/age-v1.3.1-linux-amd64.tar.gz' | sha256sum -c -
+          echo '91331dc8ed9b5a0f4317ef6e7c261e49dfc2f11249a1775120a81361349d4c92  /tmp/age-v1.3.1-linux-amd64.tar.gz.proof' | sha256sum -c -
+          cat > /tmp/age-sigsum-key.pub <<'EOF'
+          ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM1WpnEswJLPzvXJDiswowy48U+G+G1kmgwUE2eaRHZG
+          ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAz2WM5CyPLqiNjk7CLl4roDXwKhQ0QExXLebukZEZFS
+          EOF
+          go install sigsum.org/sigsum-go/cmd/sigsum-verify@v0.13.1
+          "$(go env GOPATH)/bin/sigsum-verify" \
+            -k /tmp/age-sigsum-key.pub \
+            -P sigsum-generic-2025-1 \
+            /tmp/age-v1.3.1-linux-amd64.tar.gz.proof \
+            < /tmp/age-v1.3.1-linux-amd64.tar.gz
+          mkdir -p /tmp/age-v1.3.1
+          tar -xzf /tmp/age-v1.3.1-linux-amd64.tar.gz -C /tmp/age-v1.3.1
+          AGE_BIN="$(find /tmp/age-v1.3.1 -type f -name age -perm -u+x | head -n1)"
+          AGE_KEYGEN_BIN="$(find /tmp/age-v1.3.1 -type f -name age-keygen -perm -u+x | head -n1)"
+          test -x "$AGE_BIN"
+          test -x "$AGE_KEYGEN_BIN"
+          "$AGE_BIN" --version
+          echo "AGE_BIN=$AGE_BIN" >> "$GITHUB_ENV"
+          echo "AGE_KEYGEN_BIN=$AGE_KEYGEN_BIN" >> "$GITHUB_ENV"
+
+      - name: Run official age PQ roundtrip and randomness proof
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_r1_recovery_encryption_envelope.RecoveryEnvelopeTests.test_official_age_pq_roundtrip_and_reencrypt_changes_ciphertext -v
