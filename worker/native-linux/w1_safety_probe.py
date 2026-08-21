@@ -29,6 +29,13 @@ def read_text(path: str, default: str = "") -> str:
         return default
 
 
+def readlink_observation(path: str) -> dict:
+    try:
+        return {"accessible": True, "target": os.readlink(path), "errno": None}
+    except OSError as exc:
+        return {"accessible": False, "target": "", "errno": exc.errno}
+
+
 def memory_bytes() -> int:
     for line in read_text("/proc/meminfo").splitlines():
         if line.startswith("MemTotal:"):
@@ -263,8 +270,20 @@ def gather(mode: str) -> dict:
     status = proc_status()
     cg = current_cgroup_path()
     controllers = set(read_text("/sys/fs/cgroup/cgroup.controllers").split())
-    mnt_self = os.readlink("/proc/self/ns/mnt") if Path("/proc/self/ns/mnt").exists() else ""
-    mnt_init = os.readlink("/proc/1/ns/mnt") if Path("/proc/1/ns/mnt").exists() else ""
+    mnt_self = readlink_observation("/proc/self/ns/mnt")
+    mnt_init = readlink_observation("/proc/1/ns/mnt")
+    init_hidden_by_hardening = (
+        mnt_self["accessible"]
+        and not mnt_init["accessible"]
+        and mnt_init["errno"] in (errno.EACCES, errno.EPERM)
+    )
+    isolated_from_init = (
+        mnt_self["accessible"]
+        and (
+            init_hidden_by_hardening
+            or (mnt_init["accessible"] and mnt_self["target"] != mnt_init["target"])
+        )
+    )
     machine_id = read_text("/etc/machine-id")
     boot_id = read_text("/proc/sys/kernel/random/boot_id")
     base = {
@@ -298,7 +317,14 @@ def gather(mode: str) -> dict:
             "kill_supported": (cg / "cgroup.kill").exists(),
         },
         "mount_namespace": {
-            "self": mnt_self, "init": mnt_init, "isolated_from_init": bool(mnt_self and mnt_init and mnt_self != mnt_init),
+            "self": mnt_self["target"],
+            "self_accessible": mnt_self["accessible"],
+            "self_errno": mnt_self["errno"],
+            "init": mnt_init["target"],
+            "init_accessible": mnt_init["accessible"],
+            "init_errno": mnt_init["errno"],
+            "init_hidden_by_hardening": init_hidden_by_hardening,
+            "isolated_from_init": isolated_from_init,
         },
     }
     base["workspace_openat2_runtime"] = openat2_runtime_canary()
