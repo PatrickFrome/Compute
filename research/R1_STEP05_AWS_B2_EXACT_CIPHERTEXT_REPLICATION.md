@@ -104,20 +104,69 @@ Even two perfect provider readbacks do not establish sender/source authenticity.
 
 Future DB authority must separately verify the DSSE/in-toto/Sigstore source attestation described by STEP04 post-research.
 
+## Post-implementation research
+
+### V1 single-PUT size scope
+
+AWS documents a maximum of 5 GB for one `PutObject` operation; larger objects must use multipart upload. Backblaze likewise distinguishes normal/single uploads from its large-file/multipart path and supports multipart parts up to 5 GiB.
+
+Sources:
+- https://docs.aws.amazon.com/AmazonS3/latest/userguide/upload-objects.html
+- https://www.backblaze.com/docs/cloud-storage-files
+- https://www.backblaze.com/apidocs/s3-create-multipart-upload
+
+Adopted scope:
+
+- STEP05 v1 is the **single-PUT provider adapter**;
+- it is intended for encrypted recovery artifacts at or below the common 5 GB single-upload envelope;
+- an over-limit provider request fails before any successful materialized-readback receipt can exist;
+- large recovery artifacts require a distinct reviewed multipart step with part-level failure/retry/abort semantics and the same final full-object local SHA-256 readback requirement.
+
+No multipart completion ETag may become content authority.
+
+### Credential custody amplifier
+
+AWS side: retain the earlier GitHub OIDC -> narrowly scoped AWS role pattern so long-lived AWS access keys are not needed.
+
+Backblaze side: current B2 application keys can be limited by bucket, filename prefix, capabilities and `validDurationInSeconds`. For the S3-Compatible API, B2 `keyID` maps to `AWS_ACCESS_KEY_ID` and `applicationKey` maps to `AWS_SECRET_ACCESS_KEY`.
+
+Sources:
+- https://www.backblaze.com/apidocs/b2-create-key
+- https://www.backblaze.com/docs/cloud-storage-application-keys
+- https://www.backblaze.com/docs/cloud-storage-get-started-with-a-backblaze-integration
+
+Adopted live-orchestration policy:
+
+1. AWS live replication runs in its own protected job/environment using OIDC short-lived credentials.
+2. B2 live replication runs in a different protected job/environment using a short-lived, bucket/prefix-scoped app key.
+3. No job receives both provider credential sets.
+4. Provider jobs emit only non-secret candidate artifacts.
+5. A third credential-free job evaluates the two readback receipts and source-attestation status.
+6. DB ingestion remains a later separately authorized step.
+
+This separation preserves H44 independent-operator evidence at the execution boundary rather than merely recording two provider names after one credential-rich process handled both.
+
+### Large-object next amplifier
+
+For future artifacts above the single-PUT scope, implement an explicit multipart controller rather than silently switching behavior inside v1. That controller must preserve:
+
+- immutable target version identity;
+- COMPLIANCE retention on the completed object version;
+- abort/cleanup of failed multipart uploads;
+- bounded and deterministic part sizing;
+- final full-object materialized GET and local SHA-256;
+- the same external source-attestation gate before authority.
+
 ## Strict nonclaims
 
 - no production provider credential is included;
 - no production S3/B2 object is created by PR CI;
-- no provider readback is claimed until live `workflow_dispatch`/external execution exists;
+- no provider readback is claimed until live external execution exists;
 - no Supabase observation is inserted;
 - no R2/R3 proof or H47C seal is created.
 
-## Required post-step research
+## Required next semantic step
 
-After implementation/CI, re-check:
+`R1 STEP06 — isolated live provider orchestration preparation`
 
-- AWS CLI behavior and output for versioned Object Lock PUT/GET;
-- B2 S3-compatible version/retention response parity;
-- checksum/streaming edge cases for large artifacts;
-- options for short-lived B2 credentials or isolated secret custody;
-- whether a two-provider workflow should use separate protected GitHub environments/jobs rather than a single process holding both credentials.
+Create two separate protected execution jobs (AWS OIDC and expiring B2 app key), plus a third credential-free quorum/attestation-validation job. PR context must continue to skip all live provider calls.
