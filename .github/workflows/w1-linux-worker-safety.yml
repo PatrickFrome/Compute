@@ -1,0 +1,252 @@
+name: W1 Linux Worker Safety
+
+on:
+  push:
+    branches: [work/w1-linux-worker-safety]
+    paths:
+      - 'worker/native-linux/**'
+      - 'supabase/migrations/*w1*'
+      - 'research/W1_*'
+      - '.github/workflows/w1-linux-worker-safety.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'worker/native-linux/**'
+      - 'supabase/migrations/*w1*'
+      - 'research/W1_*'
+      - '.github/workflows/w1-linux-worker-safety.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-ephemeral-linux-safety:
+    name: LIVE_EPHEMERAL Linux safety canaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify static service contract
+        run: |
+          set -euo pipefail
+          systemd-analyze verify worker/native-linux/metaengine-worker.service
+          python3 -m py_compile \
+            worker/native-linux/w1_safety_probe.py \
+            worker/native-linux/persistence_witness.py \
+            worker/native-linux/worker_agent.py
+          bash -n worker/native-linux/install.sh worker/native-linux/w1_live_canaries.sh
+
+      - name: Verify persistent witness progression and fail-closed identity
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib
+          import sys
+          import tempfile
+
+          sys.path.insert(0, str(pathlib.Path('worker/native-linux').resolve()))
+          from persistence_witness import refresh_persistence_witness
+
+          with tempfile.TemporaryDirectory(prefix='w1-persistence-witness-') as td:
+              root=pathlib.Path(td)
+              state=root/'state.json'
+              machine=root/'machine-id'
+              boot=root/'boot-id'
+              machine.write_text('machine-alpha\n')
+              boot.write_text('boot-one\n')
+              t0=1_800_000_000_000_000_000
+
+              first=refresh_persistence_witness(
+                  state_path=state,machine_id_path=machine,boot_id_path=boot,
+                  min_window_seconds=60,now_unix_ns=t0)
+              assert first['classification']=='PERSISTENCE_WINDOW_PENDING'
+              assert first['local_persistence_window_satisfied'] is False
+              assert first['observations']==1
+              assert first['reboot_observed'] is False
+
+              second=refresh_persistence_witness(
+                  state_path=state,machine_id_path=machine,boot_id_path=boot,
+                  min_window_seconds=60,now_unix_ns=t0+30_000_000_000)
+              assert second['observations']==2
+              assert second['local_persistence_window_satisfied'] is False
+
+              third=refresh_persistence_witness(
+                  state_path=state,machine_id_path=machine,boot_id_path=boot,
+                  min_window_seconds=60,now_unix_ns=t0+60_000_000_000)
+              assert third['classification']=='PERSISTENT_HOST_WINDOW_OBSERVED'
+              assert third['local_persistence_window_satisfied'] is True
+              assert third['observations']==3
+              assert third['distinct_boot_ids']==1
+              witness_hash=third['witness_id_sha256']
+
+              boot.write_text('boot-two\n')
+              rebooted=refresh_persistence_witness(
+                  state_path=state,machine_id_path=machine,boot_id_path=boot,
+                  min_window_seconds=60,now_unix_ns=t0+90_000_000_000)
+              assert rebooted['witness_id_sha256']==witness_hash
+              assert rebooted['reboot_observed'] is True
+              assert rebooted['distinct_boot_ids']==2
+
+              machine.write_text('machine-beta\n')
+              try:
+                  refresh_persistence_witness(
+                      state_path=state,machine_id_path=machine,boot_id_path=boot,
+                      min_window_seconds=60,now_unix_ns=t0+120_000_000_000)
+              except RuntimeError as exc:
+                  assert str(exc)=='persistence_witness_machine_mismatch'
+              else:
+                  raise AssertionError('machine identity substitution was accepted')
+
+          with tempfile.TemporaryDirectory(prefix='w1-persistence-symlink-') as td:
+              root=pathlib.Path(td)
+              machine=root/'machine-id'; machine.write_text('machine-alpha\n')
+              boot=root/'boot-id'; boot.write_text('boot-one\n')
+              target=root/'target.json'; target.write_text('{}\n')
+              state=root/'state.json'; state.symlink_to(target)
+              try:
+                  refresh_persistence_witness(
+                      state_path=state,machine_id_path=machine,boot_id_path=boot,
+                      min_window_seconds=60,now_unix_ns=1_800_000_000_000_000_000)
+              except RuntimeError as exc:
+                  assert str(exc)=='persistence_witness_symlink_forbidden'
+              else:
+                  raise AssertionError('symlink state was accepted')
+
+          print('PERSISTENCE_WITNESS_CANARIES_PASS')
+          PY
+
+      - name: Run host probe inside hardened transient systemd service
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          unit_sha=$(sha256sum worker/native-linux/metaengine-worker.service | awk '{print $1}')
+          sudo install -d -o root -g root -m 0755 /opt/metaengine-w1-ci
+          sudo install -o root -g root -m 0555 worker/native-linux/w1_safety_probe.py /opt/metaengine-w1-ci/w1_safety_probe.py
+          if ! id metaengine-w1-ci >/dev/null 2>&1; then
+            sudo useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin metaengine-w1-ci
+          fi
+          set +e
+          sudo systemd-run \
+            --unit="metaengine-w1-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --quiet --wait --collect --pipe \
+            --setenv=METAENGINE_EVIDENCE_CLASSIFICATION=LIVE_EPHEMERAL_GITHUB_HOSTED \
+            --setenv=METAENGINE_PERSISTENT_WORKER_PROOF=false \
+            --setenv=METAENGINE_SECCOMP_POLICY_SHA256="$unit_sha" \
+            -p User=metaengine-w1-ci \
+            -p Group=metaengine-w1-ci \
+            -p NoNewPrivileges=yes \
+            -p CapabilityBoundingSet= \
+            -p AmbientCapabilities= \
+            -p PrivateTmp=yes \
+            -p PrivateDevices=yes \
+            -p PrivateMounts=yes \
+            -p ProtectSystem=strict \
+            -p ProtectHome=yes \
+            -p ProtectKernelTunables=yes \
+            -p ProtectKernelModules=yes \
+            -p ProtectKernelLogs=yes \
+            -p ProtectControlGroups=yes \
+            -p LockPersonality=yes \
+            -p RestrictRealtime=yes \
+            -p RestrictNamespaces=yes \
+            -p SystemCallArchitectures=native \
+            -p 'SystemCallFilter=~@clock @cpu-emulation @debug @module @mount @obsolete @privileged @raw-io @reboot @swap' \
+            -p SystemCallErrorNumber=EPERM \
+            -p CPUQuota=100% \
+            -p MemoryMax=512M \
+            -p MemorySwapMax=0 \
+            -p TasksMax=64 \
+            -p LimitNOFILE=128 \
+            -p LimitNPROC=64 \
+            -p LimitFSIZE=16777216 \
+            -p LimitAS=1073741824 \
+            -p LimitCPU=60 \
+            /usr/bin/python3 /opt/metaengine-w1-ci/w1_safety_probe.py --mode full \
+            > evidence/host-probe.json
+          probe_rc=$?
+          set -e
+          cat evidence/host-probe.json
+          python3 - <<'PY'
+          import json
+          p=json.load(open('evidence/host-probe.json'))
+          assert p['classification']=='LIVE_EPHEMERAL_GITHUB_HOSTED'
+          assert p['persistent_worker_proof'] is False
+          assert p['pass'] is True, p['checks']
+          PY
+          test "$probe_rc" -eq 0
+
+      - name: Run filesystem network and cgroup failure canaries
+        run: |
+          set -euo pipefail
+          sudo env METAENGINE_EVIDENCE_CLASSIFICATION=LIVE_EPHEMERAL_GITHUB_HOSTED \
+            bash worker/native-linux/w1_live_canaries.sh "$GITHUB_WORKSPACE/evidence/live-canaries.json"
+          sudo chown "$USER":"$USER" evidence/live-canaries.json
+          python3 - <<'PY'
+          import json
+          p=json.load(open('evidence/live-canaries.json'))
+          assert p['persistent_worker_proof'] is False
+          assert p['pass'] is True, p['canaries']
+          PY
+
+      - name: Fail-closed agent startup canary
+        run: |
+          set -euo pipefail
+          set +e
+          python3 worker/native-linux/worker_agent.py >evidence/agent-negative.stdout 2>evidence/agent-negative.stderr
+          rc=$?
+          set -e
+          test "$rc" -eq 78
+          grep -q '"fallback": false' evidence/agent-negative.stderr
+          printf '%s\n' "$rc" > evidence/agent-negative.exitcode
+
+      - name: Assemble evidence bundle
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, time
+          def raw_sha(p): return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
+          host=json.load(open('evidence/host-probe.json'))
+          can=json.load(open('evidence/live-canaries.json'))
+          doc={
+            'schema':'metaengine.compute.w1-live-ephemeral-evidence.h205f22.v2',
+            'classification':'LIVE_EPHEMERAL_GITHUB_HOSTED',
+            'execution_observed':True,
+            'persistent_worker_proof':False,
+            'provider':'GitHub Actions hosted runner',
+            'run_id':os.environ['GITHUB_RUN_ID'],
+            'run_attempt':os.environ['GITHUB_RUN_ATTEMPT'],
+            'commit_sha':os.environ['GITHUB_SHA'],
+            'ref':os.environ['GITHUB_REF'],
+            'observed_at_unix_ns':time.time_ns(),
+            'host_probe_sha256':raw_sha('evidence/host-probe.json'),
+            'live_canaries_sha256':raw_sha('evidence/live-canaries.json'),
+            'service_unit_sha256':raw_sha('worker/native-linux/metaengine-worker.service'),
+            'probe_source_sha256':raw_sha('worker/native-linux/w1_safety_probe.py'),
+            'persistence_witness_source_sha256':raw_sha('worker/native-linux/persistence_witness.py'),
+            'agent_source_sha256':raw_sha('worker/native-linux/worker_agent.py'),
+            'host_summary':host['host'],
+            'host_checks':host['checks'],
+            'negative_canaries':can['canaries'] | {
+              'agent_missing_config_fails_closed':True,
+              'persistence_witness_logic_tested':True,
+              'hosted_runner_never_promoted_to_persistent':True,
+            },
+            'unresolved':['runner is ephemeral and cannot satisfy W1 persistent-host proof; proof requires same machine/witness across a real reboot'],
+          }
+          canonical=json.dumps(doc,sort_keys=True,separators=(',',':')).encode()
+          doc['evidence_sha256']=hashlib.sha256(canonical).hexdigest()
+          pathlib.Path('evidence/w1-live-ephemeral-evidence.json').write_text(json.dumps(doc,sort_keys=True,separators=(',',':'))+'\n')
+          PY
+          find evidence worker/native-linux -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > evidence/SHA256SUMS.txt
+          cat evidence/w1-live-ephemeral-evidence.json
+
+      - name: Upload immutable-ish evidence artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: w1-live-ephemeral-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14

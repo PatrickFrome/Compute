@@ -1,0 +1,75 @@
+name: W1 Execution Substrate Prepare
+
+on:
+  push:
+    branches: [work/w1-linux-worker-safety]
+    paths:
+      - 'worker/native-linux/bootstrap_persistent_host.sh'
+      - 'worker/native-linux/execution_substrate_probe.py'
+      - 'worker/native-linux/prepare_gvisor.sh'
+      - '.github/workflows/w1-execution-substrate-prepare.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'worker/native-linux/bootstrap_persistent_host.sh'
+      - 'worker/native-linux/execution_substrate_probe.py'
+      - 'worker/native-linux/prepare_gvisor.sh'
+      - '.github/workflows/w1-execution-substrate-prepare.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  prepare-only-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify syntax and exact-release boundary
+        run: |
+          set -euo pipefail
+          bash -n \
+            worker/native-linux/bootstrap_persistent_host.sh \
+            worker/native-linux/prepare_gvisor.sh
+          python3 -m py_compile worker/native-linux/execution_substrate_probe.py
+          grep -q 'RELEASE="20260810.0"' worker/native-linux/prepare_gvisor.sh
+          ! grep -q '/release/latest/' worker/native-linux/prepare_gvisor.sh
+          ! grep -q 'runsc install' worker/native-linux/prepare_gvisor.sh
+          ! grep -q 'docker run' worker/native-linux/prepare_gvisor.sh
+          grep -q 'NO_USER_CODE_EXECUTION' worker/native-linux/prepare_gvisor.sh
+          grep -q 'NO_A1_ENABLEMENT' worker/native-linux/prepare_gvisor.sh
+
+      - name: Verify capability probe is non-authoritative
+        run: |
+          set -euo pipefail
+          set +e
+          sudo python3 worker/native-linux/execution_substrate_probe.py > substrate-probe.json
+          rc=$?
+          set -e
+          test "$rc" -eq 0 -o "$rc" -eq 2
+          cat substrate-probe.json
+          python3 - <<'PY'
+          import json
+          p=json.load(open('substrate-probe.json'))
+          assert p['schema']=='metaengine.compute.execution-substrate-probe.h205f22.v1'
+          assert p['classification']=='PREPARE_ONLY'
+          assert p['canonical'] is False
+          assert p['authority_effect'] is False
+          assert p['persistent_worker_proof'] is False
+          assert p['w1_verified'] is False
+          assert p['a1_runtime_authority'] is False
+          assert 'NO_USER_CODE_EXECUTION' in p['nonclaims']
+          assert p['recommended_first_sandbox'] in {
+              'GVISOR_RUNSC','FIRECRACKER_KVM','PREPARE_GVISOR_AFTER_W1_VERIFIED'
+          }
+          PY
+
+      - name: Verify bootstrap preserves external proof gates
+        run: |
+          set -euo pipefail
+          grep -q 'PROVIDER_CONTROLLER_REBOOT_RECEIPT' worker/native-linux/bootstrap_persistent_host.sh
+          grep -q 'SAME_MACHINE_AND_WITNESS_AFTER_NEW_BOOT_ID' worker/native-linux/bootstrap_persistent_host.sh
+          grep -q 'INDEPENDENT_H1_H13_VERIFICATION' worker/native-linux/bootstrap_persistent_host.sh
+          grep -q 'persistent_worker_proof.*False' worker/native-linux/bootstrap_persistent_host.sh
+          grep -q 'a1_runtime_authority.*False' worker/native-linux/bootstrap_persistent_host.sh
