@@ -1,6 +1,6 @@
 # R1 STEP10 — live R2 execution orchestration
 
-Status: IMPLEMENTED / PREPARE_ONLY pending mandatory research-after and final exact-head CI  
+Status: IMPLEMENTED / PREPARE_ONLY; mandatory research-after complete, pending final exact-head CI  
 Authority: a future explicitly approved live run may execute STEP09B and derive continuity-table R2; this workflow does **not** promote canonical roadmap R2, seal R1, prove R3, or create a persisted seal.
 
 ## Goal
@@ -271,5 +271,125 @@ After the first independent PR CI run, merge remains forbidden until the followi
 9. re-check STEP09B production ACL/function boundary remains postgres-only `SECURITY INVOKER`;
 10. document the inability or ability to verify actual protected environment configuration without running the live preflight; do not invent secrets or environment state;
 11. re-run STEP10 + STEP08/09A/09B regressions and Compute Fabric Governance on the exact final head after all research-after fixes.
+
+## Research-after results
+
+### A. First independent CI failure was a static self-check defect only
+
+PR #33 first run `32542191643` executed the STEP10 adversarial suite and STEP08/STEP09A/STEP09B regressions successfully. All live jobs were skipped because the event was `pull_request`. The sole failure was the static workflow contract assertion looking for a literal `aws_version_id_control_character`, while the guard intentionally emits the field-specific code through `f"{field}_control_character"`.
+
+The runtime adversarial test for control-character `VersionId` already passed. The static test was corrected to assert the structural `_safe_cli_text` + `control_character` implementation rather than a nonexistent literal. No authority logic was weakened.
+
+### B. AWS optional checksum mode was removed after permission re-audit
+
+AWS documents that exact-version retrieval is authorized by `s3:GetObjectVersion`, and that SSE-KMS retrieval can additionally require KMS permissions. The pre-existing provider controller performs its version-pinned GET without `--checksum-mode ENABLED` and uses a full locally computed SHA-256 as content proof.
+
+STEP10 initially added `--checksum-mode ENABLED`. Research-after concluded that this optional response-checksum request adds no authority property because STEP10 already recomputes the complete local SHA-256 and byte count, while it can create extra KMS permission coupling. It was removed. The materialization path remains:
+
+- exact bucket/key/version;
+- expected bucket owner;
+- `s3:GetObjectVersion` + `s3:GetObjectRetention` only;
+- explicit mutation denies;
+- exact metadata + content length validation;
+- local SHA-256 + bytes verification;
+- retention non-shortening check.
+
+No unbound `kms:Decrypt` permission was added.
+
+Sources:
+- https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html
+- https://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html
+
+### C. `GetCallerIdentity` remains valid under the narrow session policy
+
+AWS explicitly documents that `sts:GetCallerIdentity` requires no permission. Therefore the runtime account-ID check remains compatible with the exact-object S3 session policy and does not require adding a broad STS allow statement.
+
+### D. Fresh-root STEP09A verification is locally bundled but trusted-root fetch is online
+
+Current GitHub CLI documentation confirms:
+
+- `gh attestation verify --bundle <path>` performs verification using an on-disk attestation bundle rather than fetching attestations from the GitHub API;
+- `--custom-trusted-root <path>` supplies a trusted root for offline verification;
+- `gh attestation trusted-root` fetches the current trusted-root material used for that offline verification.
+
+Accordingly the authority job needs GitHub CLI/network access for the trusted-root fetch, but the actual attestation verification is bound to the local bundle + freshly fetched root. `GH_TOKEN` is scoped only to the authority job; no provider or DB credential is present there. The DB job has no `gh attestation` invocation or GitHub token environment binding.
+
+Sources:
+- https://cli.github.com/manual/gh_attestation_verify
+- https://cli.github.com/manual/gh_attestation_trusted-root
+
+### E. Current action pins remain consistent with the latest stable direct-artifact generation used by the repo
+
+Research-after reconfirmed:
+
+- `actions/upload-artifact` latest stable is v7.0.1, exact pin `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a`; its direct-upload contract states `archive:false` uploads one unarchived file and uses the filename as artifact name;
+- `actions/download-artifact` v8.0.1 is pinned at `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` and supports cross-run download using `run-id` + `github-token`.
+
+Sources:
+- https://github.com/actions/upload-artifact/releases
+- https://github.com/actions/upload-artifact/blob/main/action.yml
+- https://github.com/actions/download-artifact
+
+### F. One fresh AWS rematerialization is sufficient for the current STEP09A trust question
+
+The two-domain durability claim is still built from two independent provider readback receipts and STEP09B still requires exactly two domains/observations within the seven-day freshness boundary. STEP10 does not replace either receipt or refresh its `readback_at`.
+
+The fresh materialization has a different purpose: provide concrete provider-originated ciphertext bytes for STEP09A to cryptographically reverify against the source attestation immediately before database authority. Repeating that rematerialization through B2 would expose a second provider credential in the final authority chain without creating a new two-domain observation or extending the seven-day freshness window. For the present contract this is redundant complexity rather than additional authority. A future design that explicitly re-materializes and re-observes both domains would be a separate evidence-refresh step, not STEP10.
+
+### G. DB trust zone remains narrow and TLS mode matches current Supabase guidance
+
+The DB job downloads exactly three current-run artifacts:
+
+1. STEP08 package;
+2. STEP08 package receipt;
+3. STEP09A authority-gate receipt.
+
+It does not download the provider-materialized ciphertext and has no OIDC/provider/GitHub-attestation credential path. It uses `PGSSLMODE=verify-full` and a protected root CA secret. Current Supabase documentation describes `verify-full` as the strongest Postgres mode and recommends it with the downloaded project CA certificate.
+
+Sources:
+- https://supabase.com/docs/guides/platform/ssl-enforcement
+- https://supabase.com/docs/guides/database/psql
+
+### H. Production continuity state and STEP09B ACL remain untouched by implementation/PR CI
+
+A read-only production inspection after the implementation and CI found:
+
+- `compute_continuity_domain_h205f22`: 0 rows;
+- `compute_continuity_object_h205f22`: 0 rows;
+- `compute_continuity_observation_h205f22`: 0 rows;
+- `compute_continuity_persisted_seal_h205f22`: 0 rows;
+- production function `destruktion_meta.compute_ingest_r2_projection_h205f22` exists;
+- function ACL is `{postgres=X/postgres}`;
+- `prosecdef=false`, i.e. the function remains `SECURITY INVOKER`.
+
+The first inspection query used stale pluralized relation names and failed with `relation does not exist`; it performed no mutation. The schema was then enumerated read-only and the checks were repeated against the actual singular names. No STEP10 live dispatch or STEP09B ingestion occurred.
+
+### I. Protected-environment existence remains a runtime fact, not a merge-time claim
+
+The connected GitHub integration still does not expose the repository environment-settings endpoint used by the live preflight. Therefore this research-after does not claim that `r1-supervisor-r2-db-ingestion` currently exists or contains the required secrets. The workflow's runtime REST preflight remains authoritative for that fact and fails closed if the environment is absent or insufficiently protected.
+
+### J. Pre-final-head CI signal
+
+After the implementation fixes above, head `1f0f7a4d6f0b8a8d73dda7c0a9617b4461bb81f9` passed:
+
+- `R1 Live R2 Execution Orchestration` run `32542628338` — SUCCESS;
+- `Compute Fabric Governance` run `32542628388` — SUCCESS.
+
+This is not the merge signal because adding this research-after record changes the head. A new exact-final-head STEP10 + governance CI run is mandatory before merge.
+
+## Strict nonclaims after research-after
+
+- STEP10 has still not been manually dispatched;
+- no STEP10 AWS provider read has occurred;
+- no STEP10 provider mutation has occurred;
+- no live STEP09A authority receipt has been produced by STEP10;
+- no live STEP09B database ingestion has occurred;
+- production continuity domain/object/observation/persisted-seal rows remain zero at the recorded inspection point;
+- continuity-table R2 is not claimed from live evidence;
+- canonical roadmap R2 is not promoted;
+- R1 is not sealed;
+- R3 is not proven;
+- no persisted seal has been created;
+- actual protected-environment/secret readiness remains unverified until a runtime preflight.
 
 Only an exact-final-head green result may be used as the merge signal. Merge of STEP10 still means **PREPARE_ONLY**; a later explicitly approved live dispatch is what could create real continuity evidence.
