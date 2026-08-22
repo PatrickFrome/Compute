@@ -6,8 +6,11 @@ on:
     paths:
       - '.github/workflows/w1-aws-provider-reboot-proof.yml'
       - 'controller/w1/aws_provider_reboot_controller.py'
+      - 'controller/w1/aws_provider_reboot_live_guard.py'
       - 'tests/test_w1_aws_provider_reboot_controller.py'
+      - 'tests/test_w1_aws_provider_reboot_live_guard.py'
       - 'research/W1_STEP06_GITHUB_OIDC_PROVIDER_REBOOT_CONTROLLER.md'
+      - 'research/W1_STEP07_LIVE_PREFLIGHT_HARDENING.md'
   workflow_dispatch:
     inputs:
       instance_id:
@@ -29,49 +32,124 @@ on:
         default: ''
         type: string
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   validate-controller:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 6
+    permissions:
+      contents: read
     steps:
       - name: Checkout exact workflow revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
 
-      - name: Validate controller and negative tests
+      - name: Validate controller boundary guard and negative tests
         run: |
           set -euo pipefail
           python3 -m py_compile controller/w1/aws_provider_reboot_controller.py
+          python3 -m py_compile controller/w1/aws_provider_reboot_live_guard.py
           python3 -m unittest tests.test_w1_aws_provider_reboot_controller -v
+          python3 -m unittest tests.test_w1_aws_provider_reboot_live_guard -v
 
-      - name: Validate OIDC-only AWS credential contract
+      - name: Validate live W1 credential and trust-zone contract
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('.github/workflows/w1-aws-provider-reboot-proof.yml').read_text()
-          assert 'id-token: write' in p
-          assert 'aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c' in p
-          assert 'W1_AWS_ROLE_ARN' in p and 'W1_AWS_ACCOUNT_ID' in p and 'W1_AWS_REGION' in p
-          forbidden = [
-              'AWS_' + 'ACCESS_KEY_ID',
-              'AWS_' + 'SECRET_ACCESS_KEY',
-              'secrets.' + 'AWS',
-          ]
-          assert all(token not in p for token in forbidden), forbidden
-          assert 'REBOOT_W1_PERSISTENT_HOST' in p
+          raw=Path('.github/workflows/w1-aws-provider-reboot-proof.yml').read_text()
+          before,remainder=raw.split('      - name: Validate live W1 credential and trust-zone contract',1)
+          _checker,after=remainder.split('\n  preflight-environment:',1)
+          p=before+'\n  preflight-environment:'+after
+          guard=Path('controller/w1/aws_provider_reboot_live_guard.py').read_text()
+          assert p.count('id-token: write') == 1
+          assert p.count('aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c') == 1
+          assert 'output-env-credentials: false' in p
+          assert 'output-credentials: true' in p
+          assert 'unset-current-credentials: true' in p
+          assert 'inline-session-policy: ${{ steps.session-policy.outputs.policy }}' in p
+          assert 'environment: ${{ needs.preflight-environment.outputs.environment_name }}' in p
+          assert '/environments/w1-persistent-host-proof' in p
+          assert '[[ "$GITHUB_REF" == \'refs/heads/main\' ]]' in p
+          assert 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' in p
+          assert 'secrets.'+'AWS' not in p
+          assert 'vars.'+'AWS_ACCESS_KEY_ID' not in p
+          assert p.count('steps.aws-creds.outputs.aws-access-key-id') == 4
+          assert p.count('steps.aws-creds.outputs.aws-secret-access-key') == 4
+          assert p.count('steps.aws-creds.outputs.aws-session-token') == 4
+          assert 'ec2:RebootInstances' in guard
+          assert 'cloudtrail:LookupEvents' in guard
+          assert 'RunInstances' not in guard
+          assert 'TerminateInstances' not in guard
+          assert 'credential_export_mode' in guard and 'STEP_OUTPUTS_ONLY' in guard
+          post_aws=p.split('      - name: Build live provider receipt candidate',1)[1]
+          assert 'steps.aws-creds.outputs' not in post_aws
           assert 'LIVE_PROVIDER_CONTROLLER_RECEIPT_UNINGESTED' in Path('controller/w1/aws_provider_reboot_controller.py').read_text()
           PY
 
+  preflight-environment:
+    if: github.event_name == 'workflow_dispatch'
+    needs: validate-controller
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      environment_name: ${{ steps.outputs.outputs.environment_name }}
+    steps:
+      - name: Checkout exact workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Require main-branch dispatch before environment lookup
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+
+      - name: Fetch protected W1 environment metadata without cloud credentials
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          curl --fail-with-body --silent --show-error --location \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/environments/w1-persistent-host-proof" \
+            > evidence/w1-environment.json
+
+      - name: Fail closed unless environment requires independent review and branch protection
+        run: |
+          set -euo pipefail
+          python3 controller/w1/aws_provider_reboot_live_guard.py validate-environment \
+            --input evidence/w1-environment.json \
+            --output evidence/w1-environment-preflight.json
+          rm -f evidence/w1-environment.json
+
+      - name: Publish validated environment name
+        id: outputs
+        run: echo 'environment_name=w1-persistent-host-proof' >> "$GITHUB_OUTPUT"
+
+      - name: Upload credential-free environment preflight
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/w1-environment-preflight.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
+
   provider-controller:
     if: github.event_name == 'workflow_dispatch'
+    needs: [validate-controller, preflight-environment]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    environment: w1-persistent-host-proof
+    environment: ${{ needs.preflight-environment.outputs.environment_name }}
     permissions:
       contents: read
       id-token: write
@@ -86,14 +164,16 @@ jobs:
       ROLE_SESSION: w1-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
-      - name: Checkout controller from main
+      - name: Checkout exact main execution revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
 
-      - name: Validate immutable AWS configuration
+      - name: Validate immutable AWS configuration and build exact session policy
+        id: session-policy
         run: |
           set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
           [[ "$INSTANCE_ID" =~ ^i-[0-9a-f]+$ ]]
           [[ "$WORKER_ID" =~ ^[A-Za-z0-9._:-]{3,160}$ ]]
           [[ "$AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]
@@ -103,8 +183,18 @@ jobs:
             echo 'real reboot requires exact confirmation token' >&2
             exit 1
           fi
+          mkdir -p evidence
+          python3 controller/w1/aws_provider_reboot_live_guard.py build-session-policy \
+            --instance-id "$INSTANCE_ID" \
+            --account-id "$AWS_ACCOUNT_ID" \
+            --region "$AWS_REGION" \
+            --output evidence/w1-aws-session-boundary.json
+          POLICY="$(python3 -c "import json;print(json.dumps(json.load(open('evidence/w1-aws-session-boundary.json'))['session_policy'],separators=(',',':')))" )"
+          test -n "$POLICY"
+          echo "policy=$POLICY" >> "$GITHUB_OUTPUT"
 
-      - name: Configure short-lived AWS credentials via GitHub OIDC
+      - name: Configure 15-minute AWS OIDC credentials as step outputs only
+        id: aws-creds
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
         with:
           role-to-assume: ${{ vars.W1_AWS_ROLE_ARN }}
@@ -113,8 +203,12 @@ jobs:
           role-session-name: w1-${{ github.run_id }}-${{ github.run_attempt }}
           role-duration-seconds: 900
           mask-aws-account-id: true
+          output-env-credentials: false
+          output-credentials: true
+          unset-current-credentials: true
+          inline-session-policy: ${{ steps.session-policy.outputs.policy }}
 
-      - name: Resolve exact W1 implementation head
+      - name: Resolve exact W1 implementation head without AWS credentials
         run: |
           set -euo pipefail
           W1_SHA="$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}.git" refs/heads/work/w1-linux-worker-safety | awk '{print $1}')"
@@ -122,11 +216,23 @@ jobs:
           echo "W1_SHA=$W1_SHA" >> "$GITHUB_ENV"
 
       - name: Capture and validate persistent-host preflight
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws-creds.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws-creds.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws-creds.outputs.aws-session-token }}
+          AWS_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_DEFAULT_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_EC2_METADATA_DISABLED: 'true'
         run: |
           set -euo pipefail
-          mkdir -p evidence
           aws --version
           aws sts get-caller-identity --output json > evidence/caller-identity.json
+          python3 - <<'PY'
+          import json,os
+          c=json.load(open('evidence/caller-identity.json'))
+          if c.get('Account') != os.environ['AWS_ACCOUNT_ID']:
+              raise SystemExit('caller account mismatch')
+          PY
           aws ec2 describe-instances \
             --instance-ids "$INSTANCE_ID" \
             --query 'Reservations[0].Instances[0]' \
@@ -178,7 +284,14 @@ jobs:
             --worker-id "$WORKER_ID" \
             --expected-worker-sha "$W1_SHA"
 
-      - name: Prove controller has RebootInstances permission without rebooting
+      - name: Prove exact session has RebootInstances permission without rebooting
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws-creds.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws-creds.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws-creds.outputs.aws-session-token }}
+          AWS_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_DEFAULT_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_EC2_METADATA_DISABLED: 'true'
         run: |
           set -euo pipefail
           set +e
@@ -198,13 +311,16 @@ jobs:
           python3 - <<'PY'
           import hashlib,json,os
           p=json.load(open('evidence/preflight-summary.json'))
+          boundary=json.load(open('evidence/w1-aws-session-boundary.json'))
           body={
-            'schema':'metaengine.compute.w1-aws-provider-preflight-run.h205f22.v1',
+            'schema':'metaengine.compute.w1-aws-provider-preflight-run.h205f22.v2',
             'classification':'LIVE_AWS_OIDC_PREFLIGHT_ONLY',
             'github_run_id':os.environ['GITHUB_RUN_ID'],
             'github_run_attempt':os.environ['GITHUB_RUN_ATTEMPT'],
             'role_session':os.environ['ROLE_SESSION'],
             'preflight':p,
+            'session_boundary_receipt_sha256':boundary['receipt_sha256'],
+            'credential_export_mode':boundary['credential_export_mode'],
             'persistent_worker_proof':False,
             'w1_verified':False,
             'canonical':False,
@@ -216,12 +332,19 @@ jobs:
           sha256sum evidence/preflight-run.json > evidence/preflight-run.sha256
           {
             echo '## W1 AWS provider preflight'
-            echo 'OIDC authentication and RebootInstances DryRun passed.'
+            echo 'Protected environment, OIDC authentication, exact session policy, host checks, and RebootInstances DryRun passed.'
             echo '**NONCLAIM:** no reboot executed; persistent_worker_proof=false; w1_verified=false.'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Execute independent provider reboot
         if: inputs.execute_reboot == true
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws-creds.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws-creds.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws-creds.outputs.aws-session-token }}
+          AWS_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_DEFAULT_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_EC2_METADATA_DISABLED: 'true'
         run: |
           set -euo pipefail
           REQUESTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"
@@ -232,6 +355,13 @@ jobs:
 
       - name: Correlate exact CloudTrail RebootInstances event
         if: inputs.execute_reboot == true
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws-creds.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws-creds.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws-creds.outputs.aws-session-token }}
+          AWS_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_DEFAULT_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_EC2_METADATA_DISABLED: 'true'
         run: |
           set -euo pipefail
           START_TIME="$(python3 - <<'PY'
@@ -270,7 +400,7 @@ jobs:
           done
           [[ "$FOUND" == "true" ]] || { echo 'matching CloudTrail reboot event not observed within bounded window' >&2; exit 1; }
 
-      - name: Build live provider receipt candidate
+      - name: Build live provider receipt candidate without AWS credentials
         if: inputs.execute_reboot == true
         run: |
           set -euo pipefail
@@ -296,11 +426,12 @@ jobs:
           print('- **NONCLAIM:** receipt is not yet ingested/correlated with post-reboot heartbeat; persistent_worker_proof=false; w1_verified=false.')
           PY
 
-      - name: Upload bounded provider evidence artifact
+      - name: Upload bounded provider evidence without AWS credentials
         if: always()
-        uses: actions/upload-artifact@615b319bd27bb32c3d64dca6b6ed6974d5fbe653
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: w1-aws-provider-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: evidence/
           if-no-files-found: error
+          overwrite: false
           retention-days: 90
