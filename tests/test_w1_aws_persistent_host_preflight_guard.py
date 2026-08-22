@@ -7,6 +7,7 @@ from controller.w1.aws_persistent_host_preflight_guard import (
     BINDING_CLASSIFICATION,
     BINDING_SCHEMA,
     BOUNDARY_SCHEMA,
+    DEPLOYMENT_SCHEMA,
     ENVIRONMENT,
     ENV_RECEIPT_CLASSIFICATION,
     ENV_RECEIPT_SCHEMA,
@@ -14,6 +15,7 @@ from controller.w1.aws_persistent_host_preflight_guard import (
     build_session_boundary,
     finalize_preflight_binding,
     validate_boundary,
+    validate_deployment_compatibility,
 )
 
 INSTANCE_ID = "i-0123456789abcdef0"
@@ -21,6 +23,7 @@ WORKER_ID = "w1-linux-persistent-001"
 W1_SHA = "a" * 40
 ACCOUNT_ID = "123456789012"
 REGION = "us-east-2"
+MAIN_SHA = "b" * 40
 
 
 def canonical_sha(value):
@@ -52,6 +55,28 @@ def environment_receipt():
     result = dict(core)
     result["receipt_sha256"] = canonical_sha(core)
     return result
+
+
+def environment_raw(*, protected=True, custom=False):
+    return {
+        "name": ENVIRONMENT,
+        "deployment_branch_policy": {
+            "protected_branches": protected,
+            "custom_branch_policies": custom,
+        },
+    }
+
+
+def branch_raw(*, protected=True):
+    return {"name": "main", "protected": protected, "commit": {"sha": MAIN_SHA}}
+
+
+def deployment_receipt():
+    return validate_deployment_compatibility(
+        environment=environment_raw(protected=True, custom=False),
+        branch=branch_raw(protected=True),
+        custom_policies={"total_count": 0, "branch_policies": []},
+    )
 
 
 def preflight_summary(worker_id=WORKER_ID, sha=W1_SHA, instance_id=INSTANCE_ID):
@@ -86,6 +111,41 @@ class ProtectedHostPreflightGuardTests(unittest.TestCase):
             account_id=ACCOUNT_ID,
             region=REGION,
         )
+
+    def test_protected_branches_mode_requires_main_to_be_actually_protected(self):
+        receipt = validate_deployment_compatibility(
+            environment=environment_raw(protected=True, custom=False),
+            branch=branch_raw(protected=True),
+            custom_policies={"total_count": 0, "branch_policies": []},
+        )
+        self.assertEqual(receipt["schema"], DEPLOYMENT_SCHEMA)
+        self.assertEqual(receipt["deployment_policy_mode"], "PROTECTED_MAIN_BRANCH")
+        self.assertTrue(receipt["main_branch_protected"])
+        self.assertTrue(receipt["environment_job_routable_from_main"])
+        self.assertFalse(receipt["authority_effect"])
+
+        with self.assertRaisesRegex(ProtectedHostPreflightError, "requires_protected_main"):
+            validate_deployment_compatibility(
+                environment=environment_raw(protected=True, custom=False),
+                branch=branch_raw(protected=False),
+                custom_policies={"total_count": 0, "branch_policies": []},
+            )
+
+    def test_custom_policy_requires_one_exact_main_rule_not_only_wildcard(self):
+        receipt = validate_deployment_compatibility(
+            environment=environment_raw(protected=False, custom=True),
+            branch=branch_raw(protected=False),
+            custom_policies={"total_count": 1, "branch_policies": [{"id": 7, "name": "main"}]},
+        )
+        self.assertEqual(receipt["deployment_policy_mode"], "EXACT_CUSTOM_MAIN_BRANCH")
+        self.assertTrue(receipt["exact_custom_main_policy_present"])
+
+        with self.assertRaisesRegex(ProtectedHostPreflightError, "exact_custom_main"):
+            validate_deployment_compatibility(
+                environment=environment_raw(protected=False, custom=True),
+                branch=branch_raw(protected=False),
+                custom_policies={"total_count": 1, "branch_policies": [{"id": 8, "name": "*"}]},
+            )
 
     def test_session_boundary_binds_exact_host_worker_sha_and_tags(self):
         self.assertEqual(self.boundary["schema"], BOUNDARY_SCHEMA)
@@ -141,6 +201,7 @@ class ProtectedHostPreflightGuardTests(unittest.TestCase):
         with self.assertRaisesRegex(ProtectedHostPreflightError, "self_review_boundary_invalid"):
             finalize_preflight_binding(
                 environment_receipt=env,
+                deployment_receipt=deployment_receipt(),
                 session_boundary=self.boundary,
                 preflight_summary=preflight_summary(),
                 dry_run_result="DryRunOperation",
@@ -150,6 +211,7 @@ class ProtectedHostPreflightGuardTests(unittest.TestCase):
         with self.assertRaisesRegex(ProtectedHostPreflightError, "preflight_worker_identity_mismatch"):
             finalize_preflight_binding(
                 environment_receipt=environment_receipt(),
+                deployment_receipt=deployment_receipt(),
                 session_boundary=self.boundary,
                 preflight_summary=preflight_summary(worker_id="other-worker"),
                 dry_run_result="DryRunOperation",
@@ -157,6 +219,7 @@ class ProtectedHostPreflightGuardTests(unittest.TestCase):
         with self.assertRaisesRegex(ProtectedHostPreflightError, "preflight_w1_sha_mismatch"):
             finalize_preflight_binding(
                 environment_receipt=environment_receipt(),
+                deployment_receipt=deployment_receipt(),
                 session_boundary=self.boundary,
                 preflight_summary=preflight_summary(sha="b" * 40),
                 dry_run_result="DryRunOperation",
@@ -166,6 +229,7 @@ class ProtectedHostPreflightGuardTests(unittest.TestCase):
         with self.assertRaisesRegex(ProtectedHostPreflightError, "dry_run_not_proven"):
             finalize_preflight_binding(
                 environment_receipt=environment_receipt(),
+                deployment_receipt=deployment_receipt(),
                 session_boundary=self.boundary,
                 preflight_summary=preflight_summary(),
                 dry_run_result="UnauthorizedOperation",
@@ -173,6 +237,7 @@ class ProtectedHostPreflightGuardTests(unittest.TestCase):
 
         result = finalize_preflight_binding(
             environment_receipt=environment_receipt(),
+            deployment_receipt=deployment_receipt(),
             session_boundary=self.boundary,
             preflight_summary=preflight_summary(),
             dry_run_result="DryRunOperation",
@@ -180,6 +245,8 @@ class ProtectedHostPreflightGuardTests(unittest.TestCase):
         self.assertEqual(result["schema"], BINDING_SCHEMA)
         self.assertEqual(result["classification"], BINDING_CLASSIFICATION)
         self.assertEqual(result["reboot_permission_dry_run"], "DryRunOperation")
+        self.assertTrue(result["main_environment_route_validated"])
+        self.assertRegex(result["deployment_compatibility_receipt_sha256"], r"^[0-9a-f]{64}$")
         self.assertFalse(result["real_reboot_requested"])
         self.assertFalse(result["real_reboot_performed"])
         self.assertFalse(result["backend_binding_created"])
