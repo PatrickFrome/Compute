@@ -14,6 +14,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -31,6 +32,7 @@ DB_RESULT_CLASSIFICATION = "DATABASE_DERIVED_TWO_DOMAIN_READBACK_QUORUM"
 PROJECTION_PATH = "meta/r1-final-r2-db-ingestion-projection.json"
 ROOT_CONTEXT_MAX_AGE = timedelta(minutes=15)
 PSQL_TIMEOUT_SECONDS = 120
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 FORBIDDEN_CREDENTIAL_ENV = (
     "GH_TOKEN",
@@ -88,7 +90,7 @@ def _verify_authority_gate(value: Any, *, package_sha: str, projection_sha: str,
     if not isinstance(value, dict) or value.get("schema") != AUTHORITY_GATE_SCHEMA or value.get("classification") != AUTHORITY_GATE_CLASSIFICATION:
         raise DBIngestionError("authority_gate_identity_invalid")
     claimed = value.get("authority_gate_receipt_sha256")
-    if not isinstance(claimed, str) or len(claimed) != 64:
+    if not isinstance(claimed, str) or SHA256.fullmatch(claimed) is None:
         raise DBIngestionError("authority_gate_receipt_sha256_invalid")
     core = dict(value)
     core.pop("authority_gate_receipt_sha256", None)
@@ -163,7 +165,11 @@ def _validate_db_result(value: Any, *, projection_sha: str, gate_sha: str) -> di
         raise DBIngestionError("db_result_identity_invalid")
     if value.get("projection_sha256") != projection_sha or value.get("authority_gate_receipt_sha256") != gate_sha:
         raise DBIngestionError("db_result_input_binding_mismatch")
-    if value.get("database_write_performed") is not True or value.get("continuity_readiness_r2_proven") is not True:
+    if value.get("database_transaction_validated") is not True:
+        raise DBIngestionError("db_result_transaction_not_validated")
+    if not isinstance(value.get("database_write_performed"), bool):
+        raise DBIngestionError("db_result_write_flag_invalid")
+    if value.get("continuity_readiness_r2_proven") is not True:
         raise DBIngestionError("db_result_r2_not_derived")
     readiness = value.get("continuity_readiness")
     audit = value.get("continuity_audit")
