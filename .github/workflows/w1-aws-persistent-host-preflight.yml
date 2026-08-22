@@ -66,11 +66,17 @@ jobs:
           assert 'inline-session-policy: ${{ steps.session-policy.outputs.policy }}' in p
           assert 'environment: ${{ needs.preflight-environment.outputs.environment_name }}' in p
           assert '/environments/w1-persistent-host-proof' in p
+          assert '/branches/main' in p
+          assert '/deployment-branch-policies?per_page=100' in p
+          assert 'validate-deployment' in p
+          assert 'w1-deployment-compatibility.json' in p
           commands=[line.strip() for line in p.splitlines() if 'aws ec2 reboot-instances' in line]
           assert len(commands) == 1 and '--dry-run' in commands[0]
           assert 'cloudtrail:LookupEvents' not in guard
           assert 'ec2:RebootInstances' in guard
           assert 'metaengine:worker_id' in guard and 'metaengine:github_sha' in guard
+          assert 'protected_branches_mode_requires_protected_main' in guard
+          assert 'exact_custom_main_deployment_policy_required' in guard
           assert 'real_reboot_performed' in guard
           assert 'persistent_worker_proof' in guard and 'w1_verified' in guard
           host=p.split('\n  host-preflight:',1)[1]
@@ -104,31 +110,58 @@ jobs:
           [[ "$GITHUB_REF" == 'refs/heads/main' ]]
           [[ "$CONFIRMATION" == 'PREFLIGHT_W1_PERSISTENT_HOST_ONLY' ]]
 
-      - name: Fetch protected W1 environment metadata without AWS credentials
+      - name: Fetch protected environment and actual main deployment metadata without AWS credentials
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p evidence
-          curl --fail-with-body --silent --show-error --location \
-            -H 'Accept: application/vnd.github+json' \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H 'X-GitHub-Api-Version: 2026-03-10' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/environments/w1-persistent-host-proof" \
-            > evidence/w1-environment.json
+          api_get() {
+            curl --fail-with-body --silent --show-error --location \
+              -H 'Accept: application/vnd.github+json' \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "$1"
+          }
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/environments/w1-persistent-host-proof" > evidence/w1-environment.json
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/main" > evidence/w1-main-branch.json
+          if python3 - <<'PY'
+          import json
+          value=json.load(open('evidence/w1-environment.json'))
+          raise SystemExit(0 if (value.get('deployment_branch_policy') or {}).get('custom_branch_policies') is True else 1)
+          PY
+          then
+            api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/environments/w1-persistent-host-proof/deployment-branch-policies?per_page=100" > evidence/w1-deployment-branch-policies.json
+          else
+            printf '%s\n' '{"total_count":0,"branch_policies":[]}' > evidence/w1-deployment-branch-policies.json
+          fi
 
-      - name: Validate independent review and branch protection
+      - name: Validate independent review and main deployment compatibility
         run: |
           set -euo pipefail
           python3 controller/w1/aws_provider_reboot_live_guard.py validate-environment \
             --input evidence/w1-environment.json \
             --output evidence/w1-environment-preflight.json
-          rm -f evidence/w1-environment.json
+          python3 controller/w1/aws_persistent_host_preflight_guard.py validate-deployment \
+            --environment evidence/w1-environment.json \
+            --branch evidence/w1-main-branch.json \
+            --custom-policies evidence/w1-deployment-branch-policies.json \
+            --output evidence/w1-deployment-compatibility.json
+          rm -f evidence/w1-environment.json evidence/w1-main-branch.json evidence/w1-deployment-branch-policies.json
 
       - name: Upload credential-free environment preflight
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           path: evidence/w1-environment-preflight.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
+
+      - name: Upload credential-free deployment compatibility
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/w1-deployment-compatibility.json
           archive: false
           if-no-files-found: error
           overwrite: false
@@ -165,6 +198,13 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: w1-environment-preflight.json
+          path: evidence
+          digest-mismatch: error
+
+      - name: Download exact current-run deployment compatibility
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: w1-deployment-compatibility.json
           path: evidence
           digest-mismatch: error
 
@@ -301,6 +341,7 @@ jobs:
           DRY_RUN_RESULT="$(cat evidence/w1-reboot-dry-run-result.txt)"
           python3 controller/w1/aws_persistent_host_preflight_guard.py finalize \
             --environment-receipt evidence/w1-environment-preflight.json \
+            --deployment-receipt evidence/w1-deployment-compatibility.json \
             --session-boundary evidence/w1-protected-host-session-boundary.json \
             --preflight-summary evidence/w1-protected-host-preflight-summary.json \
             --dry-run-result "$DRY_RUN_RESULT" \
@@ -309,6 +350,7 @@ jobs:
           python3 - <<'PY'
           import json
           value=json.load(open('evidence/w1-protected-host-preflight-binding.json'))
+          assert value['main_environment_route_validated'] is True
           assert value['real_reboot_requested'] is False
           assert value['real_reboot_performed'] is False
           assert value['backend_binding_created'] is False
@@ -349,6 +391,6 @@ jobs:
         run: |
           {
             echo '## W1 protected persistent-host preflight'
-            echo 'Environment identity, exact W1 SHA, EC2 host surface, tag-bound session policy, and RebootInstances DryRun were validated.'
+            echo 'Environment identity/route, exact W1 SHA, EC2 host surface, tag-bound session policy, and RebootInstances DryRun were validated.'
             echo '**NONCLAIM:** no real reboot; no backend binding; persistent_worker_proof=false; w1_verified=false; canonical C1 not promoted.'
           } >> "$GITHUB_STEP_SUMMARY"
