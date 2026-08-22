@@ -170,7 +170,7 @@ function validateOutcome(lease: AopLease, value: unknown): ModelOutcome {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("model_outcome_not_object");
   const o = value as Record<string, unknown>;
   if (typeof o.result_code !== "string" || !o.output || typeof o.output !== "object" || Array.isArray(o.output)) throw new Error("model_outcome_shape_invalid");
-  const allowed = lease.role_kind === "IMPLEMENTER" ? new Set(["CONTINUE", "EVIDENCE_READY", "WAITING_EVENT", "FAILED"]) : lease.role_kind === "ANALYST" ? new Set(["ACCEPT", "ACCEPT_WITH_REBASE", "REQUEST_CHANGES", "HOLD", "REJECT"] : new Set(["ACCEPT", "RETURN", "WAIT", "VERIFIED", "REJECT"]);
+  const allowed = lease.role_kind === "IMPLEMENTER" ? new Set(["CONTINUE", "EVIDENCE_READY", "WAITING_EVENT", "FAILED"]) : lease.role_kind === "ANALYST" ? new Set(["ACCEPT", "ACCEPT_WITH_REBASE", "REQUEST_CHANGES", "HOLD", "REJECT"]) : new Set(["ACCEPT", "RETURN", "WAIT", "VERIFIED", "REJECT"]);
   if (!allowed.has(o.result_code)) throw new Error(`model_result_not_allowed:${o.result_code}`);
   if (o.result_code === "EVIDENCE_READY") {
     const out = o.output as Record<string, unknown>;
