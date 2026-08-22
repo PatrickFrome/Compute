@@ -13,6 +13,7 @@ on:
       - 'tests/test_r1_supervisor_r2_ingestion_gate.py'
       - 'tests/test_r1_final_r2_evidence_package.py'
       - 'supabase/migrations/20260821234739_r1_step09b_supervisor_db_ingestion_v1.sql'
+      - 'supabase/migrations/20260821235859_r1_step09b_idempotency_truthfulness_v2.sql'
       - 'research/R1_STEP09B_APPEND_ONLY_DB_TRANSACTION.md'
       - '.github/workflows/r1-supervisor-r2-db-ingestion.yml'
 
@@ -55,15 +56,18 @@ jobs:
           wf=Path('.github/workflows/r1-supervisor-r2-db-ingestion.yml').read_text()
           before,_=wf.split('      - name: Validate DB-only trust zone and migration authority boundary',1)
           runner=Path('controller/r1/supervisor_r2_db_ingestion.py').read_text()
-          migration=Path('supabase/migrations/20260821234739_r1_step09b_supervisor_db_ingestion_v1.sql').read_text().lower()
+          migration=Path('supabase/migrations/20260821235859_r1_step09b_idempotency_truthfulness_v2.sql').read_text().lower()
           assert 'workflow_'+'dispatch' not in before
           assert 'id-'+'token: write' not in before
           assert 'security invoker' in migration
           assert 'security definer' not in migration
+          assert "current_setting('transaction_isolation') <> 'read committed'" in migration
           assert 'pg_advisory_xact_lock' in migration
           assert 'clock_timestamp()' in migration
           assert 'do update' not in migration
           assert 'compute_continuity_persisted_seal_h205f22' not in migration.split("comment on function",1)[0]
+          assert "registration_contract','step09b_stable_domain_identity_v1'" in migration
+          assert "database_transaction_validated',true" in migration
           assert 'FORBIDDEN_CREDENTIAL_ENV' in runner
           assert 'DB_ENV_ALLOWLIST' in runner
           assert 'decode(' in runner and 'base64' in runner
