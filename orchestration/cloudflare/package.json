@@ -1,0 +1,14 @@
+{
+  "name": "@metaengine/aop1-cloudflare",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "types": "wrangler types",
+    "check": "wrangler types && tsc -p tsconfig.json --noEmit",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "typescript": "5.8.3",
+    "wrangler": "4.125.0"
+  }
+}

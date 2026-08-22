@@ -1,0 +1,43 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "metaengine-h205f22-aop1",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-21",
+  "observability": { "enabled": true },
+  "vars": {
+    "SUPABASE_URL": "https://xpeibufgzjknrhbhpffp.supabase.co",
+    "AOP_MODEL": "@cf/openai/gpt-oss-20b"
+  },
+  "secrets": {
+    "required": [
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "AOP_WAKE_SECRET",
+      "AOP_SUPERVISOR_TOKEN",
+      "CF_ACCOUNT_ID",
+      "CF_AI_TOKEN"
+    ]
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "AOP_SUPERVISOR", "class_name": "ComputeFabricSupervisor" }
+    ]
+  },
+  "exports": {
+    "ComputeFabricSupervisor": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  },
+  "workflows": [
+    { "name": "metaengine-h205f22-aop-run", "binding": "AOP_RUN_WORKFLOW", "class_name": "AopRunWorkflow" }
+  ],
+  "queues": {
+    "producers": [
+      { "binding": "AOP_WAKE_QUEUE", "queue": "metaengine-h205f22-aop-wake" }
+    ],
+    "consumers": [
+      { "queue": "metaengine-h205f22-aop-wake", "max_batch_size": 10, "max_batch_timeout": 2, "max_retries": 5, "dead_letter_queue": "metaengine-h205f22-aop-dlq" }
+    ]
+  },
+  "triggers": { "crons": ["*/5 * * * *"] }
+}
