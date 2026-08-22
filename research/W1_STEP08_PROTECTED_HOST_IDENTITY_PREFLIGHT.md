@@ -1,6 +1,6 @@
 # W1 STEP08 — protected host identity preflight
 
-Status: IMPLEMENTED / PREPARE_ONLY pending independent CI, mandatory research-after and exact-final-head gate  
+Status: RESEARCH_AFTER_COMPLETE / PREPARE_ONLY pending exact-final-head CI  
 Canonical target: C1 — First Real Linux Worker  
 Level-2 milestone: `W1_PERSISTENT_LINUX_WORKER_SAFETY`
 
@@ -8,7 +8,7 @@ Level-2 milestone: `W1_PERSISTENT_LINUX_WORKER_SAFETY`
 
 Eliminate the last operator-substitutable identity inputs from the W1 live AWS preflight before any real reboot is considered.
 
-The existing W1 reboot workflow already has a strong protected-environment/OIDC boundary, but its manual dispatch still accepts `instance_id` and `worker_id`. Production continuity/control state currently contains no Linux backend binding and no accepted reboot receipt that could independently resolve those values. Therefore a human-supplied instance/worker pair must not become the next authority boundary.
+The existing W1 reboot workflow already has a strong protected-environment/OIDC boundary, but its manual dispatch still accepts `instance_id` and `worker_id`. Production control state currently contains no Linux backend binding and no accepted reboot receipt that could independently resolve those values. Therefore a human-supplied instance/worker pair must not become the next authority boundary.
 
 STEP08 adds a **separate preflight-only workflow** whose host identity comes only from protected environment variables and whose code contains no real reboot path.
 
@@ -39,7 +39,7 @@ Therefore STEP08 does **not** derive `instance_id` or `worker_id` from Supabase 
 
 ### 3. Protected environment variables are a better host-identity source than dispatch inputs
 
-GitHub Actions environments support protection rules, required reviewers, Prevent self-review and deployment branch restrictions. Environment variables are available through the `vars` context to jobs that reference that environment. The environment is already independently validated before its name is supplied to the credential-bearing job.
+GitHub Actions environments support protection rules, required reviewers, Prevent self-review and deployment branch restrictions. Environment variables are available through the `vars` context to jobs that reference that environment.
 
 STEP08 therefore expects the non-secret identity values to be maintained as environment variables in `w1-persistent-host-proof`:
 
@@ -54,7 +54,7 @@ The connected GitHub tool cannot read environment variable values or invoke `wor
 Sources:
 - https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments
 - https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments
-- https://docs.github.com/en/actions/learn-github-actions/contexts#vars-context
+- https://docs.github.com/en/actions/reference/workflows-and-actions/variables
 
 ### 4. EC2 resource-tag conditions can bind reboot permission to worker/code identity
 
@@ -97,7 +97,7 @@ STEP08 compensates by requiring all of the following simultaneously:
 1. pre-existing protected environment;
 2. required independent reviewer(s);
 3. Prevent self-review;
-4. branch protection;
+4. deployment-branch compatibility with `main`;
 5. exact main-branch workflow dispatch;
 6. exact environment-provided instance identity;
 7. exact environment-provided worker identity;
@@ -107,7 +107,7 @@ STEP08 compensates by requiring all of the following simultaneously:
 11. six resource-tag conditions;
 12. 15-minute OIDC credentials;
 13. credentials exported as action step outputs only;
-14. only two AWS-calling steps receive those credentials;
+14. only host-surface capture and DryRun steps receive AWS credentials;
 15. the workflow contains no non-DryRun reboot command.
 
 This step does **not** claim that these controls make a future reviewed code modification impossible. It establishes a narrowly scoped and auditable permission-check boundary; branch/environment review remains part of the trust model.
@@ -131,7 +131,18 @@ STEP08 only adds protected identity/session binding around that existing verifie
 
 ### `controller/w1/aws_persistent_host_preflight_guard.py`
 
-Pure, credential-free guard with two contracts.
+Pure, credential-free guard with three related contracts.
+
+#### Deployment compatibility
+
+`validate_deployment_compatibility(...)` prevents a protected environment from looking valid in metadata while being unroutable from the actual `main` branch.
+
+It permits exactly two modes:
+
+- environment `protected_branches=true` **and** GitHub reports `main.protected=true`;
+- environment `custom_branch_policies=true` and the custom deployment policy list contains exactly one explicit `main` rule.
+
+A wildcard-only custom rule is intentionally insufficient for the STEP08 receipt. The output is self-hashed and non-authoritative.
 
 #### Protected session boundary
 
@@ -163,6 +174,7 @@ The receipt explicitly records:
 `finalize_preflight_binding(...)` independently validates:
 
 - the existing GitHub environment preflight receipt + self-hash;
+- the deployment-compatibility receipt + self-hash;
 - the session-boundary self-hash and exact policy reconstruction;
 - the existing AWS host preflight summary;
 - exact instance / worker / W1 SHA equality across those planes;
@@ -190,7 +202,7 @@ It does **not** accept instance id or worker id as inputs.
 Jobs:
 
 1. `contract-tests`: PR/dispatch tests only.
-2. `preflight-environment`: main-ref + confirmation gate, read-only GitHub environment metadata validation, no AWS credentials.
+2. `preflight-environment`: main-ref + confirmation gate, read-only GitHub environment metadata, actual `main` branch metadata and, when needed, custom deployment-policy validation; no AWS credentials.
 3. `host-preflight`: protected environment, W1 SHA resolution, exact session-boundary construction, 15-minute output-only OIDC, read-only host surface capture, existing W1 host validation, one `RebootInstances --dry-run`, credential-free final binding, direct evidence upload.
 
 The workflow contains no CloudTrail lookup and no provider-reboot receipt creation because no reboot occurs.
@@ -199,6 +211,8 @@ The workflow contains no CloudTrail lookup and no provider-reboot receipt creati
 
 Adversarial tests cover:
 
+- protected-branches mode with protected and unprotected `main`;
+- custom deployment mode requiring an exact `main` rule rather than wildcard only;
 - exact instance/worker/SHA tag-bound session policy;
 - invalid/control-character identities;
 - recomputed self-hash policy forgery;
@@ -214,17 +228,113 @@ Workflow static checks additionally require:
 - no real reboot confirmation token;
 - no `inputs.instance_id` / `inputs.worker_id`;
 - environment vars for host identity;
+- actual `main` branch + deployment policy REST checks before publishing the environment name;
 - exactly one `reboot-instances` command and it contains `--dry-run`;
 - one OIDC credential configuration;
 - no AWS credential outputs after the DryRun step.
 
-## Strict nonclaims before research-after
+## First independent CI
 
-At implementation time:
+Initial PR head `c27f1fcf6453dc1743f22c088c501d34d82a398e` ran:
+
+- `W1 AWS Persistent Host Preflight Only` run #1 — SUCCESS;
+- contract/adversarial tests — SUCCESS;
+- `preflight-environment` — SKIPPED on PR;
+- `host-preflight` — SKIPPED on PR.
+
+That green result was **not** used as a merge signal. Mandatory research-after followed.
+
+## Mandatory research after implementation
+
+### A. GitHub deployment-policy compatibility exposed a real operational edge
+
+Fresh GitHub API inspection during research-after reports the repository `main` branch with `protected=false` and branch-protection enforcement off.
+
+GitHub documentation states that when an environment has `deployment_branch_policy.protected_branches=true`, only branches with branch-protection rules can deploy to that environment. Custom deployment branch policies are a separate mode and can explicitly permit patterns such as `main`.
+
+Therefore the original environment-shape check was insufficient: a configuration could satisfy the environment JSON validator but still be unable to route the `main` workflow into the protected job.
+
+STEP08 was hardened before merge:
+
+- fetch actual `/branches/main` metadata;
+- when environment mode is `protected_branches`, require `main.protected=true`;
+- when environment mode is `custom_branch_policies`, fetch the read-only deployment-policy list and require one explicit `main` policy;
+- bind that result into the final preflight receipt.
+
+Current nonclaim: because `main` is presently reported unprotected, a future live run **cannot** rely on `protected_branches=true` mode unless branch protection is actually enabled first. The alternative is an environment custom branch policy that explicitly permits `main`. The connected tool cannot read the current environment settings, so neither configuration is claimed to exist.
+
+Sources:
+- https://docs.github.com/en/rest/deployments/environments
+- https://docs.github.com/en/rest/deployments/branch-policies
+- https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments
+
+### B. Environment variables remain an appropriate non-secret identity channel
+
+Fresh GitHub docs reconfirmed:
+
+- protection rules pass before an environment job is sent to a runner;
+- environment secrets become accessible only after protection rules pass;
+- environment variables are scoped to jobs referencing the environment and accessed through `vars`;
+- variables are not secret/masked, so STEP08 uses them only for non-sensitive instance/worker/account/region/role identifiers.
+
+No protected environment variable value was observable through the connected tool, so readiness is not inferred from documentation alone.
+
+### C. DryRun semantics remain exactly the required boundary
+
+Fresh AWS API docs reconfirmed that `RebootInstances` with DryRun checks permissions without making the reboot request and returns `DryRunOperation` when the permission check succeeds, otherwise `UnauthorizedOperation`.
+
+The final workflow still contains one and only one `aws ec2 reboot-instances` command, and that command includes `--dry-run`.
+
+The residual capability remains explicit: the short-lived session has real `RebootInstances` permission for the exact tagged host during its lifetime because otherwise DryRun cannot validate it. The mitigation is defense-in-depth rather than pretending the permission does not exist: exact instance, six resource tags, protected review, exact code SHA tag, 15-minute OIDC credentials, output-only credential handling and no non-DryRun call in the workflow.
+
+Source:
+- https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_RebootInstances.html
+
+### D. Credential exposure remains confined to two AWS-calling steps
+
+Implementation review and static CI confirm:
+
+- the environment and deployment-policy jobs have no OIDC or AWS credentials;
+- host identity/session policy is built before credentials;
+- AWS credentials are output-only from the pinned `configure-aws-credentials` action;
+- only host-surface capture and RebootInstances DryRun steps receive the three AWS credential values;
+- final binding and artifact upload occur after those step-scoped credential environments disappear;
+- no DB credential exists anywhere in STEP08.
+
+Receipts persist identities, tag requirements, policy hashes and non-authority flags, not AWS access keys/session tokens.
+
+### E. Production W1 state remains unchanged
+
+Read-only production DB inspection after the implementation/amendment CI reports:
+
+- Linux backend bindings: 0;
+- worker reboot receipts: 0;
+- Linux safety observations: 0;
+- Linux safety verifications: 0;
+- admitted `cpu-local` workers: 0.
+
+Therefore no PR action leaked synthetic/live W1 facts into production.
+
+### F. Amendment CI after deployment-compatibility hardening
+
+Head `e90539325ed9f5d059214204127b33943ec71da2` ran:
+
+- `W1 AWS Persistent Host Preflight Only` run #4 — SUCCESS;
+- `Compute Fabric Governance` run #90 — SUCCESS;
+- `contract-tests` — SUCCESS;
+- `preflight-environment` — SKIPPED on PR;
+- `host-preflight` — SKIPPED on PR.
+
+These signals validate the implementation before this research-after record, but they are intentionally invalidated as final merge signals by this documentation commit. A new exact-head CI/Governance run is mandatory.
+
+## Strict nonclaims after research-after
+
+At research-after completion:
 
 - the new workflow has not been manually dispatched;
 - the connected GitHub tool cannot dispatch it;
-- existence/values of `W1_AWS_INSTANCE_ID` and `W1_WORKER_ID` are not claimed;
+- existence/values of `W1_AWS_INSTANCE_ID`, `W1_WORKER_ID`, AWS role/account/region environment variables are not claimed;
+- current protected-environment deployment mode is unknown;
 - existence of a real W1 EC2 host is not claimed;
 - no AWS API call or DryRun has occurred from STEP08;
 - no EC2 reboot has occurred;
@@ -235,21 +345,16 @@ At implementation time:
 - `w1_verified=false`;
 - canonical C1 is not promoted.
 
-## Mandatory research after implementation before merge
+## Final merge gate
 
-After the first independent PR CI signal, merge remains forbidden until all are rechecked:
+Only an exact-final-head rerun after this research-after commit may authorize merge. It must show:
 
-1. inspect every failing CI step and distinguish static-test defects from contract defects;
-2. verify the final workflow contains no non-DryRun reboot path;
-3. recheck current GitHub environment-variable/protection semantics;
-4. recheck EC2 DryRun and `aws:ResourceTag` support for `RebootInstances`;
-5. audit the exact inline session policy and prove the worker/SHA tags cannot be removed by a recomputed receipt hash;
-6. review the residual capability inherent in granting Reboot permission for DryRun and confirm credential scope/lifetime/job isolation remain minimal;
-7. verify provider credentials appear only in host-surface and DryRun steps;
-8. verify environment/identity receipts contain no secret material;
-9. recheck production DB backend-binding, reboot-receipt, safety-observation and safety-verification counts remain unchanged;
-10. confirm all live jobs are skipped on PR CI;
-11. do not claim protected environment variable readiness because the connected tool cannot read their values;
-12. rerun W1 STEP08 + existing W1 controller/guard regressions and Compute Fabric Governance on the exact final head after recording research-after.
+1. STEP08 guard/adversarial tests SUCCESS;
+2. existing W1 reboot-controller/live-boundary regressions SUCCESS;
+3. static proof of one DryRun-only reboot command and no real-reboot path SUCCESS;
+4. deployment-compatibility tests SUCCESS;
+5. `preflight-environment` SKIPPED on PR;
+6. `host-preflight` SKIPPED on PR;
+7. Compute Fabric Governance SUCCESS.
 
-Only exact-final-head green CI after research-after may be used as a merge signal. Merge remains PREPARE_ONLY; the next live action is an externally initiated **preflight-only** dispatch and Supervisor review of its artifacts, not a reboot.
+Even after merge, STEP08 remains PREPARE_ONLY. The next live action is an **externally initiated preflight-only dispatch** after the protected environment has real identity variables and a deployment policy compatible with `main`. Its evidence must be reviewed by the Supervisor before any separate real reboot workflow is allowed to run.
