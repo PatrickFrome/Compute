@@ -85,26 +85,29 @@ jobs:
           assert 's3:GetObjectVersion' in guard and 's3:GetObjectRetention' in guard
           assert 's3:PutObject' in guard and 'DenyRecoveryMutation' in guard
           assert 'aws_object_key_not_content_addressed' in guard
-          assert 'aws_version_id_control_character' in guard
+          assert '_safe_cli_text' in guard and 'control_character' in guard
           assert 'fresh_provider_materialization_required' in guard
           assert 'fresh_trusted_root_required' in guard
           evidence=p.split('\n  evidence-assembly:',1)[1].split('\n  aws-materialize:',1)[0]
           aws=p.split('\n  aws-materialize:',1)[1].split('\n  authority-gate:',1)[0]
           authority=p.split('\n  authority-gate:',1)[1].split('\n  db-ingestion:',1)[0]
           db=p.split('\n  db-ingestion:',1)[1]
-          for zone in (evidence, authority):
-              assert 'id-token: write' not in zone
-              assert 'R1_PGPASSWORD' not in zone
-              assert 'R1_B2_APPLICATION_KEY' not in zone
+          assert 'id-token: write' not in evidence
+          assert 'R1_PGPASSWORD' not in evidence and 'R1_B2_APPLICATION_KEY' not in evidence
           assert 'id-token: write' in aws
           assert 'R1_PGPASSWORD' not in aws
           assert 'configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c' in aws
           assert 'get-object-retention' in aws and 'get-object' in aws
           assert 'put-object' not in aws.lower()
+          assert '--checksum-mode' not in aws
+          assert 'id-token: write' not in authority
+          assert 'GH_TOKEN: ${{ github.token }}' in authority
+          assert 'R1_PGPASSWORD' not in authority and 'R1_B2_APPLICATION_KEY' not in authority
           assert 'id-token: write' not in db
           assert 'configure-aws-credentials@' not in db
           assert 'steps.aws-creds.outputs' not in db
           assert 'gh attestation' not in db
+          assert 'GH_TOKEN:' not in db and 'GITHUB_TOKEN:' not in db
           assert 'PGSSLMODE: verify-full' in db
           assert 'R1_PGSSLROOTCERT_PEM' in db
           assert "name: r1-final-r2-evidence-package.tar" in db
@@ -233,6 +236,8 @@ jobs:
           digest-mismatch: error
 
       - name: Reconstruct provider orchestration and build STEP08 package
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p evidence
@@ -380,7 +385,7 @@ jobs:
             > evidence/r1-aws-authority-retention.json
           aws s3api get-object \
             --bucket "$BUCKET" --key "$KEY" --version-id "$VERSION_ID" \
-            --expected-bucket-owner "$OWNER" --region "$REGION" --checksum-mode ENABLED \
+            --expected-bucket-owner "$OWNER" --region "$REGION" \
             evidence/r1-provider-materialized-ciphertext.age \
             > evidence/r1-aws-authority-get-response.json
 
@@ -436,6 +441,8 @@ jobs:
           digest-mismatch: error
 
       - name: Fetch fresh trusted root and execute production STEP09A authority gate
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh attestation trusted-root --help >/dev/null
