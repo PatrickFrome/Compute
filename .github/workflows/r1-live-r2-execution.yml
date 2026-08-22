@@ -1,0 +1,544 @@
+name: R1 Live R2 Execution Orchestration
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/r1/live_r2_execution_guard.py'
+      - 'controller/r1/final_r2_evidence_package.py'
+      - 'controller/r1/supervisor_r2_ingestion_gate.py'
+      - 'controller/r1/supervisor_r2_ingestion_authority_gate.py'
+      - 'controller/r1/supervisor_r2_db_ingestion.py'
+      - 'tests/test_r1_live_r2_execution_guard.py'
+      - 'research/R1_STEP10_LIVE_R2_EXECUTION_ORCHESTRATION.md'
+      - '.github/workflows/r1-live-r2-execution.yml'
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Successful main-branch R1 Trusted Live Recovery Source run ID'
+        required: true
+        type: string
+      provider_run_id:
+        description: 'Successful main-branch R1 Live Two-Domain Readback Orchestration run ID'
+        required: true
+        type: string
+      execute_ingestion:
+        description: 'After all gates, permit STEP09B continuity DB ingestion'
+        required: true
+        default: false
+        type: boolean
+      confirmation:
+        description: 'For DB ingestion type INGEST_R1_TWO_DOMAIN_EVIDENCE_TO_CONTINUITY_DB'
+        required: false
+        default: ''
+        type: string
+
+concurrency:
+  group: r1-live-r2-${{ inputs.source_run_id || github.run_id }}-${{ inputs.provider_run_id || github.run_id }}
+  queue: max
+
+permissions: {}
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile and run STEP10 adversarial tests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/r1/live_r2_execution_guard.py
+          python3 -m unittest tests.test_r1_live_r2_execution_guard -v
+
+      - name: Re-run STEP08 STEP09A STEP09B regressions
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_r1_final_r2_evidence_package -v
+          python3 -m unittest tests.test_r1_supervisor_r2_ingestion_gate -v
+          python3 -m unittest tests.test_r1_supervisor_r2_ingestion_authority_gate -v
+          python3 -m unittest tests.test_r1_supervisor_r2_db_ingestion -v
+
+      - name: Validate live R2 trust-zone contract
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          raw=Path('.github/workflows/r1-live-r2-execution.yml').read_text()
+          before,remainder=raw.split('      - name: Validate live R2 trust-zone contract',1)
+          _checker,after=remainder.split('\n  preflight-live:',1)
+          p=before+'\n  preflight-live:'+after
+          guard=Path('controller/r1/live_r2_execution_guard.py').read_text()
+          assert 'workflow_dispatch:' in p
+          assert 'INGEST_R1_TWO_DOMAIN_EVIDENCE_TO_CONTINUITY_DB' in p
+          assert 'r1-supervisor-r2-db-ingestion' in p
+          assert p.count('id-token: write') == 1
+          assert 'gh attestation trusted-root' in p
+          assert 'supervisor_r2_ingestion_authority_gate.py' in p
+          assert 'supervisor_r2_db_ingestion.py' in p
+          assert 's3:GetObjectVersion' in guard and 's3:GetObjectRetention' in guard
+          assert 's3:PutObject' in guard and 'DenyRecoveryMutation' in guard
+          assert 'fresh_provider_materialization_required' in guard
+          assert 'fresh_trusted_root_required' in guard
+          evidence=p.split('\n  evidence-assembly:',1)[1].split('\n  aws-materialize:',1)[0]
+          aws=p.split('\n  aws-materialize:',1)[1].split('\n  authority-gate:',1)[0]
+          authority=p.split('\n  authority-gate:',1)[1].split('\n  db-ingestion:',1)[0]
+          db=p.split('\n  db-ingestion:',1)[1]
+          for zone in (evidence, authority):
+              assert 'id-token: write' not in zone
+              assert 'R1_PGPASSWORD' not in zone
+              assert 'R1_B2_APPLICATION_KEY' not in zone
+          assert 'id-token: write' in aws
+          assert 'R1_PGPASSWORD' not in aws
+          assert 'configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c' in aws
+          assert 'get-object-retention' in aws and 'get-object' in aws
+          assert 'put-object' not in aws.lower()
+          assert 'id-token: write' not in db
+          assert 'AWS_ACCESS_KEY_ID' not in db
+          assert 'gh attestation' not in db
+          assert 'PGSSLMODE: verify-full' in db
+          assert 'R1_PGSSLROOTCERT_PEM' in db
+          assert 'database_transaction_validated' in Path('controller/r1/supervisor_r2_db_ingestion.py').read_text()
+          PY
+
+  preflight-live:
+    if: github.event_name == 'workflow_dispatch'
+    needs: contract-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      aws_environment: ${{ steps.outputs.outputs.aws_environment }}
+      db_environment: ${{ steps.outputs.outputs.db_environment }}
+    env:
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      PROVIDER_RUN_ID: ${{ inputs.provider_run_id }}
+      EXECUTE_INGESTION: ${{ inputs.execute_ingestion }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+    steps:
+      - name: Checkout exact main revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Validate dispatch boundary
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$PROVIDER_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          if [[ "$EXECUTE_INGESTION" == 'true' && "$CONFIRMATION" != 'INGEST_R1_TWO_DOMAIN_EVIDENCE_TO_CONTINUITY_DB' ]]; then
+            echo 'live DB ingestion requires exact confirmation token' >&2
+            exit 1
+          fi
+
+      - name: Fetch upstream run artifact and protected-environment metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          api_get() {
+            curl --fail-with-body --silent --show-error --location \
+              -H 'Accept: application/vnd.github+json' \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "$1"
+          }
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}" > evidence/source-run.json
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts?per_page=100" > evidence/source-artifacts.json
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${PROVIDER_RUN_ID}" > evidence/provider-run.json
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${PROVIDER_RUN_ID}/artifacts?per_page=100" > evidence/provider-artifacts.json
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/environments/r1-aws-durability-proof" > evidence/aws-environment.json
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/environments/r1-supervisor-r2-db-ingestion" > evidence/db-environment.json
+
+      - name: Validate upstream runs artifacts and protected environments
+        run: |
+          set -euo pipefail
+          python3 controller/r1/live_r2_execution_guard.py preflight \
+            --source-run evidence/source-run.json \
+            --source-artifacts evidence/source-artifacts.json \
+            --provider-run evidence/provider-run.json \
+            --provider-artifacts evidence/provider-artifacts.json \
+            --aws-environment evidence/aws-environment.json \
+            --db-environment evidence/db-environment.json \
+            --source-run-id "$SOURCE_RUN_ID" \
+            --provider-run-id "$PROVIDER_RUN_ID" \
+            --output evidence/r1-live-r2-execution-preflight.json
+
+      - name: Upload non-authoritative execution preflight
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/r1-live-r2-execution-preflight.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+
+      - name: Publish validated environment names
+        id: outputs
+        run: |
+          echo 'aws_environment=r1-aws-durability-proof' >> "$GITHUB_OUTPUT"
+          echo 'db_environment=r1-supervisor-r2-db-ingestion' >> "$GITHUB_OUTPUT"
+
+  evidence-assembly:
+    if: github.event_name == 'workflow_dispatch'
+    needs: preflight-live
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout exact execution revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Download all R1 source artifacts from exact source run
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: r1-*
+          merge-multiple: true
+          path: source
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+          digest-mismatch: error
+
+      - name: Download all R1 provider artifacts from exact provider run
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: r1-*
+          merge-multiple: true
+          path: provider
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.provider_run_id }}
+          digest-mismatch: error
+
+      - name: Reconstruct provider orchestration and build STEP08 package
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          python3 controller/r1/live_two_domain_orchestration_guard.py evaluate-results \
+            --aws-result provider/r1-aws-provider-result.json \
+            --b2-result provider/r1-b2-provider-result.json \
+            --preflight provider/r1-live-preflight.json \
+            --output evidence/r1-live-two-domain-orchestration-result.json
+          gh attestation trusted-root > evidence/r1-step08-packaged-trusted-root.jsonl
+          test -s evidence/r1-step08-packaged-trusted-root.jsonl
+          python3 controller/r1/final_r2_evidence_package.py \
+            --readiness source/r1-source-environment-readiness.json \
+            --approval source/r1-source-environment-approval.json \
+            --predicate source/r1-recovery-source-predicate.json \
+            --attestation-bundle source/r1-recovery-source-attestation.sigstore.jsonl \
+            --trusted-root evidence/r1-step08-packaged-trusted-root.jsonl \
+            --source-verification source/r1-recovery-source-verification.json \
+            --handoff provider/r1-verified-source-handoff.json \
+            --preflight provider/r1-live-preflight.json \
+            --aws-readiness provider/r1-aws-provider-readiness.json \
+            --b2-readiness provider/r1-b2-provider-readiness.json \
+            --aws-result provider/r1-aws-provider-result.json \
+            --b2-result provider/r1-b2-provider-result.json \
+            --orchestration evidence/r1-live-two-domain-orchestration-result.json \
+            --source-bound provider/r1-two-domain-quorum-candidate.json \
+            --envelope source/r1-recovery-envelope-receipt.json \
+            --output-tar evidence/r1-final-r2-evidence-package.tar \
+            --output-receipt evidence/r1-final-r2-evidence-package-receipt.json \
+            --output-projection evidence/r1-final-r2-db-ingestion-projection.json
+
+      - name: Upload STEP08 package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/r1-final-r2-evidence-package.tar
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+
+      - name: Upload STEP08 package receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/r1-final-r2-evidence-package-receipt.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+
+      - name: Upload STEP08 DB projection for audit only
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/r1-final-r2-db-ingestion-projection.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+
+  aws-materialize:
+    if: github.event_name == 'workflow_dispatch' && inputs.execute_ingestion == true
+    needs: [preflight-live, evidence-assembly]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: ${{ needs.preflight-live.outputs.aws_environment }}
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    env:
+      AWS_ROLE_ARN: ${{ vars.R1_AWS_ROLE_ARN }}
+      AWS_ACCOUNT_ID: ${{ vars.R1_AWS_ACCOUNT_ID }}
+      AWS_REGION: ${{ vars.R1_AWS_REGION }}
+      R1_BUCKET: ${{ vars.R1_AWS_BUCKET }}
+      R1_DOMAIN_KEY: ${{ vars.R1_AWS_DOMAIN_KEY }}
+      R1_ACCOUNT_SCOPE_SHA256: ${{ vars.R1_AWS_ACCOUNT_SCOPE_SHA256 }}
+    steps:
+      - name: Checkout exact execution revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Download exact AWS provider result from provider run
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: r1-aws-provider-result.json
+          path: provider
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.provider_run_id }}
+          digest-mismatch: error
+
+      - name: Build read-only version-pinned AWS materialization plan before credentials
+        id: plan
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          python3 controller/r1/live_r2_execution_guard.py build-aws-plan \
+            --provider-result provider/r1-aws-provider-result.json \
+            --expected-bucket "$R1_BUCKET" \
+            --expected-domain-key "$R1_DOMAIN_KEY" \
+            --expected-account-scope-sha256 "$R1_ACCOUNT_SCOPE_SHA256" \
+            --expected-account-id "$AWS_ACCOUNT_ID" \
+            --expected-region "$AWS_REGION" \
+            --output evidence/r1-aws-authority-materialization-plan.json
+          POLICY="$(python3 -c "import json;print(json.dumps(json.load(open('evidence/r1-aws-authority-materialization-plan.json'))['session_policy'],separators=(',',':')))" )"
+          test -n "$POLICY"
+          echo "policy=$POLICY" >> "$GITHUB_OUTPUT"
+
+      - name: Obtain 15-minute AWS OIDC read credentials as outputs only
+        id: aws-creds
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
+        with:
+          role-to-assume: ${{ vars.R1_AWS_ROLE_ARN }}
+          aws-region: ${{ vars.R1_AWS_REGION }}
+          allowed-account-ids: ${{ vars.R1_AWS_ACCOUNT_ID }}
+          role-session-name: r1-read-${{ github.run_id }}-${{ github.run_attempt }}
+          role-duration-seconds: 900
+          mask-aws-account-id: true
+          output-env-credentials: false
+          output-credentials: true
+          inline-session-policy: ${{ steps.plan.outputs.policy }}
+
+      - name: Materialize exact AWS version and recheck COMPLIANCE retention
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws-creds.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws-creds.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws-creds.outputs.aws-session-token }}
+          AWS_REGION: ${{ vars.R1_AWS_REGION }}
+          AWS_EC2_METADATA_DISABLED: 'true'
+        run: |
+          set -euo pipefail
+          mapfile -t LOCATOR < <(python3 - <<'PY'
+          import json
+          p=json.load(open('evidence/r1-aws-authority-materialization-plan.json'))
+          for k in ('bucket','key','version_id','expected_bucket_owner','region'):
+              print(p[k])
+          PY
+          )
+          BUCKET="${LOCATOR[0]}"; KEY="${LOCATOR[1]}"; VERSION_ID="${LOCATOR[2]}"; OWNER="${LOCATOR[3]}"; REGION="${LOCATOR[4]}"
+          aws sts get-caller-identity --query Account --output text | grep -Fx "$OWNER" >/dev/null
+          aws s3api get-object-retention \
+            --bucket "$BUCKET" --key "$KEY" --version-id "$VERSION_ID" \
+            --expected-bucket-owner "$OWNER" --region "$REGION" --output json \
+            > evidence/r1-aws-authority-retention.json
+          aws s3api get-object \
+            --bucket "$BUCKET" --key "$KEY" --version-id "$VERSION_ID" \
+            --expected-bucket-owner "$OWNER" --region "$REGION" --checksum-mode ENABLED \
+            evidence/r1-provider-materialized-ciphertext.age \
+            > evidence/r1-aws-authority-get-response.json
+
+      - name: Validate materialized bytes after AWS credentials leave scope
+        run: |
+          set -euo pipefail
+          python3 controller/r1/live_r2_execution_guard.py validate-aws-materialized \
+            --provider-result provider/r1-aws-provider-result.json \
+            --plan evidence/r1-aws-authority-materialization-plan.json \
+            --get-response evidence/r1-aws-authority-get-response.json \
+            --retention-response evidence/r1-aws-authority-retention.json \
+            --ciphertext evidence/r1-provider-materialized-ciphertext.age \
+            --output evidence/r1-aws-authority-materialization-receipt.json
+
+      - name: Upload version-pinned provider ciphertext
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/r1-provider-materialized-ciphertext.age
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 1
+
+      - name: Upload non-authoritative AWS materialization receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/r1-aws-authority-materialization-receipt.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+
+  authority-gate:
+    if: github.event_name == 'workflow_dispatch' && inputs.execute_ingestion == true
+    needs: [preflight-live, evidence-assembly, aws-materialize]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout exact execution revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Download current-run execution inputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: r1-*
+          merge-multiple: true
+          path: evidence
+          digest-mismatch: error
+
+      - name: Fetch fresh trusted root and execute production STEP09A authority gate
+        run: |
+          set -euo pipefail
+          gh attestation trusted-root --help >/dev/null
+          gh attestation verify --help | grep -F -- '--custom-trusted-root' >/dev/null
+          gh attestation trusted-root > evidence/r1-step09a-fresh-trusted-root.jsonl
+          test -s evidence/r1-step09a-fresh-trusted-root.jsonl
+          ACQUIRED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          SOURCE_HEAD_SHA="$(python3 -c "import json;print(json.load(open('evidence/r1-live-r2-execution-preflight.json'))['source']['head_sha'])")"
+          python3 controller/r1/supervisor_r2_ingestion_gate.py build-root-context \
+            --trusted-root evidence/r1-step09a-fresh-trusted-root.jsonl \
+            --acquired-at "$ACQUIRED_AT" \
+            --source-head-sha "$SOURCE_HEAD_SHA" \
+            --output evidence/r1-step09a-trusted-root-context.json
+          EFFECTIVE_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          python3 controller/r1/supervisor_r2_ingestion_authority_gate.py \
+            --package evidence/r1-final-r2-evidence-package.tar \
+            --package-receipt evidence/r1-final-r2-evidence-package-receipt.json \
+            --ciphertext evidence/r1-provider-materialized-ciphertext.age \
+            --fresh-trusted-root evidence/r1-step09a-fresh-trusted-root.jsonl \
+            --root-context evidence/r1-step09a-trusted-root-context.json \
+            --effective-at "$EFFECTIVE_AT" \
+            --output evidence/r1-step09a-authority-gate.json
+
+      - name: Upload STEP09A authority gate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/r1-step09a-authority-gate.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+
+      - name: Upload fresh-root execution context
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/r1-step09a-trusted-root-context.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+
+  db-ingestion:
+    if: github.event_name == 'workflow_dispatch' && inputs.execute_ingestion == true
+    needs: [preflight-live, evidence-assembly, authority-gate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: ${{ needs.preflight-live.outputs.db_environment }}
+    permissions:
+      actions: read
+      contents: read
+    env:
+      PGHOST: ${{ vars.R1_PGHOST }}
+      PGPORT: ${{ vars.R1_PGPORT }}
+      PGDATABASE: ${{ vars.R1_PGDATABASE }}
+      PGUSER: ${{ vars.R1_PGUSER }}
+      PGSSLMODE: verify-full
+      R1_PGPASSWORD: ${{ secrets.R1_PGPASSWORD }}
+      R1_PGSSLROOTCERT_PEM: ${{ secrets.R1_PGSSLROOTCERT_PEM }}
+    steps:
+      - name: Checkout exact DB runner revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Download STEP08 package receipt and STEP09A authority gate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: r1-*
+          merge-multiple: true
+          path: evidence
+          digest-mismatch: error
+
+      - name: Execute DB-only STEP09B transaction
+        run: |
+          set -euo pipefail
+          for forbidden in GH_TOKEN GITHUB_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_WEB_IDENTITY_TOKEN_FILE; do
+            test -z "${!forbidden-}"
+          done
+          test -n "$PGHOST"
+          test -n "$PGDATABASE"
+          test -n "$PGUSER"
+          test -n "$R1_PGPASSWORD"
+          test -n "$R1_PGSSLROOTCERT_PEM"
+          CERT="$RUNNER_TEMP/r1-db-root.crt"
+          umask 077
+          printf '%s\n' "$R1_PGSSLROOTCERT_PEM" > "$CERT"
+          chmod 600 "$CERT"
+          cleanup() { shred -u "$CERT" 2>/dev/null || rm -f "$CERT"; }
+          trap cleanup EXIT
+          PGPASSWORD="$R1_PGPASSWORD" PGSSLROOTCERT="$CERT" \
+            python3 controller/r1/supervisor_r2_db_ingestion.py \
+              --package evidence/r1-final-r2-evidence-package.tar \
+              --package-receipt evidence/r1-final-r2-evidence-package-receipt.json \
+              --authority-gate evidence/r1-step09a-authority-gate.json \
+              --output evidence/r1-step09b-db-ingestion-result.json
+          cleanup
+          trap - EXIT
+          python3 - <<'PY'
+          import json
+          r=json.load(open('evidence/r1-step09b-db-ingestion-result.json'))
+          assert r['database_transaction_validated'] is True
+          assert r['continuity_readiness_r2_proven'] is True
+          assert r['canonical_roadmap_r2_promoted'] is False
+          assert r['r3_proven'] is False
+          assert r['persisted_seal_created'] is False
+          PY
+
+      - name: Upload DB-derived continuity result
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/r1-step09b-db-ingestion-result.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
