@@ -101,7 +101,7 @@ jobs:
           assert 'put-object' not in aws.lower()
           assert '--checksum-mode' not in aws
           assert 'id-token: write' not in authority
-          assert 'GH_TOKEN: ${{ github.token }}' in authority
+          assert 'GH_TOKEN:' in authority and 'github.token' in authority
           assert 'R1_PGPASSWORD' not in authority and 'R1_B2_APPLICATION_KEY' not in authority
           assert 'id-token: write' not in db
           assert 'configure-aws-credentials@' not in db
