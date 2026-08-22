@@ -264,7 +264,7 @@ export async function w1PreflightRuns(env: Env): Promise<Record<string, unknown>
 }
 
 export async function dispatchW1Preflight(env: Env): Promise<Record<string, unknown>> {
-  if (!githubWriteConfigured(env)) throw new Error("github_mutation_credential_missing");
+  if (!githubAppConfigured(env)) throw new Error("w1_preflight_github_app_required");
   const recent = await w1PreflightRunsRaw(env);
   const active = recent.find((r) => ["queued", "in_progress", "waiting", "pending", "requested"].includes(String(r.status)));
   if (active) {
