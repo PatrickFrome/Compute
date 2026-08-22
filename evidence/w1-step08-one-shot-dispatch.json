@@ -1,0 +1,15 @@
+{
+  "authority_effect": false,
+  "c1_promoted": false,
+  "dispatcher_ref": "refs/heads/ops/w1-step08-one-shot-20260822",
+  "dispatcher_sha": "fffc07d105bf33ffc41053be79280a10421b993b",
+  "html_url": "https://github.com/PatrickFrome/Compute/actions/runs/32596677443",
+  "persistent_worker_proof": false,
+  "real_reboot_requested": false,
+  "run_url": "https://api.github.com/repos/PatrickFrome/Compute/actions/runs/32596677443",
+  "schema": "metaengine.compute.w1-step08-one-shot-dispatch.h205f22.v1",
+  "target_ref": "main",
+  "target_workflow": "w1-aws-persistent-host-preflight.yml",
+  "w1_verified": false,
+  "workflow_run_id": 32596677443
+}
