@@ -1,5 +1,5 @@
 import type { AopLease, Env, JsonObject, ModelOutcome } from "./types";
-import { dispatchW1Preflight, githubWriteConfigured, pullRequest, pullRequestFiles, readFile, readFileAtRef, w1PreflightRuns, workflowRuns, writeFile } from "./github";
+import { dispatchW1Preflight, githubAuthMode, githubWriteConfigured, pullRequest, pullRequestFiles, readFile, readFileAtRef, w1PreflightRuns, workflowRuns, writeFile } from "./github";
 import { rpc, supervisorAdoptClaim, supervisorReturnAuthority } from "./supabase";
 
 const MAX_TOOL_ROUNDS = 18;
@@ -47,8 +47,8 @@ function toolsFor(env: Env, lease: AopLease): Array<Record<string, unknown>> {
   ];
   if (isW1Implementer(lease)) {
     tools.push(fn("github_w1_preflight_runs", "Read workflow_dispatch runs for the fixed W1 preflight-only workflow on main. Read-only; this does not imply live host evidence.", { type: "object", properties: {}, additionalProperties: false }));
-    if (githubWriteConfigured(env)) {
-      tools.push(fn("github_w1_preflight_dispatch", "Dispatch only the fixed W1 AWS Persistent Host Preflight Only workflow on main with its fixed PREPARE_ONLY confirmation. This cannot request a real reboot and refuses overlapping active preflight runs.", { type: "object", properties: {}, additionalProperties: false }));
+    if (githubAuthMode(env) === "app") {
+      tools.push(fn("github_w1_preflight_dispatch", "Dispatch only the fixed W1 AWS Persistent Host Preflight Only workflow on main with its fixed PREPARE_ONLY confirmation. Requires GitHub App authentication, cannot request a real reboot, and refuses overlapping active preflight runs.", { type: "object", properties: {}, additionalProperties: false }));
     }
   }
   if (lease.role_kind === "IMPLEMENTER" && githubWriteConfigured(env)) {
@@ -71,9 +71,9 @@ function systemInstructions(env: Env, lease: AopLease): string {
       : "GitHub write capability is unavailable. Do not fail solely for that. Complete read-only analysis and return WAITING_EVENT with wake_condition=GITHUB_WRITE_EXECUTOR_AVAILABLE. output.mutation_plan MUST be an object with a changes array; each change must contain path, full UTF-8 content, and commit message. Include verification steps and research evidence. Do not claim proposed files were written or post-mutation tests ran.")
     : "";
   const w1PreflightCapability = isW1Implementer(lease)
-    ? (githubWriteConfigured(env)
-      ? "W1 external execution gate is available as github_w1_preflight_dispatch. First inspect github_w1_preflight_runs. Dispatch is fixed to w1-aws-persistent-host-preflight.yml on main with PREPARE_ONLY confirmation and cannot request a real reboot. A successful dispatch is only external preflight evidence: never claim backend binding, reboot receipt, persistent-worker proof, W1 VERIFIED, or C1 promotion from it."
-      : "W1 preflight dispatch remains unavailable until a dedicated GitHub runtime credential is configured. Do not create another PREPARE_ONLY W1 abstraction to compensate; preserve the external execution gate as the required next step.")
+    ? (githubAuthMode(env) === "app"
+      ? "W1 external execution gate is available as github_w1_preflight_dispatch through a repository-scoped GitHub App installation token. First inspect github_w1_preflight_runs. Dispatch is fixed to w1-aws-persistent-host-preflight.yml on main with PREPARE_ONLY confirmation and cannot request a real reboot. A successful dispatch is only external preflight evidence: never claim backend binding, reboot receipt, persistent-worker proof, W1 VERIFIED, or C1 promotion from it."
+      : "W1 preflight dispatch requires GitHub App authentication with approved Actions:write permission. A generic GitHub token is intentionally insufficient for this privileged bridge. Do not create another PREPARE_ONLY W1 abstraction to compensate; preserve the external execution gate as the required next step.")
     : "";
   return [
     "You are an execution slot in METAENGINE H205F22 AOP1. The conversation is not state; the supplied lease is state.",
@@ -157,7 +157,7 @@ async function runTool(env: Env, lease: AopLease, workerId: string, call: ToolCa
       return w1PreflightRuns(env);
     case "github_w1_preflight_dispatch":
       if (!isW1Implementer(lease)) throw new Error("w1_preflight_tool_forbidden_for_role");
-      if (!githubWriteConfigured(env)) throw new Error("github_mutation_credential_missing");
+      if (githubAuthMode(env) !== "app") throw new Error("w1_preflight_github_app_required");
       return dispatchW1Preflight(env);
     case "aop_snapshot": return rpc<JsonObject>(env, "h205f22_aop1_snapshot_v1", {});
     case "supervisor_adopt_active_claim": if (lease.role_kind !== "SUPERVISOR") throw new Error("supervisor_tool_forbidden"); return supervisorAdoptClaim(env, lease, workerId);
@@ -170,7 +170,7 @@ function validateOutcome(lease: AopLease, value: unknown): ModelOutcome {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("model_outcome_not_object");
   const o = value as Record<string, unknown>;
   if (typeof o.result_code !== "string" || !o.output || typeof o.output !== "object" || Array.isArray(o.output)) throw new Error("model_outcome_shape_invalid");
-  const allowed = lease.role_kind === "IMPLEMENTER" ? new Set(["CONTINUE", "EVIDENCE_READY", "WAITING_EVENT", "FAILED"]) : lease.role_kind === "ANALYST" ? new Set(["ACCEPT", "ACCEPT_WITH_REBASE", "REQUEST_CHANGES", "HOLD", "REJECT"]) : new Set(["ACCEPT", "RETURN", "WAIT", "VERIFIED", "REJECT"]);
+  const allowed = lease.role_kind === "IMPLEMENTER" ? new Set(["CONTINUE", "EVIDENCE_READY", "WAITING_EVENT", "FAILED"]) : lease.role_kind === "ANALYST" ? new Set(["ACCEPT", "ACCEPT_WITH_REBASE", "REQUEST_CHANGES", "HOLD", "REJECT"] : new Set(["ACCEPT", "RETURN", "WAIT", "VERIFIED", "REJECT"]);
   if (!allowed.has(o.result_code)) throw new Error(`model_result_not_allowed:${o.result_code}`);
   if (o.result_code === "EVIDENCE_READY") {
     const out = o.output as Record<string, unknown>;
