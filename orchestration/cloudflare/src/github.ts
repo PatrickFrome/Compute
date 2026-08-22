@@ -4,6 +4,9 @@ const REPO = "PatrickFrome/Compute";
 const REPO_NAME = "Compute";
 const API = "https://api.github.com";
 const API_VERSION = "2026-03-10";
+const W1_PREFLIGHT_WORKFLOW = "w1-aws-persistent-host-preflight.yml";
+const W1_PREFLIGHT_REF = "main";
+const W1_PREFLIGHT_CONFIRMATION = "PREFLIGHT_W1_PERSISTENT_HOST_ONLY";
 
 function branchFor(lease: AopLease): string {
   const branch = lease.role_config?.branch;
@@ -121,7 +124,7 @@ async function installationToken(env: Env): Promise<string> {
       "x-github-api-version": API_VERSION,
       "user-agent": "metaengine-aop1",
     },
-    body: JSON.stringify({ repositories: [REPO_NAME], permissions: { contents: "write", pull_requests: "read", actions: "read", metadata: "read" } }),
+    body: JSON.stringify({ repositories: [REPO_NAME], permissions: { contents: "write", pull_requests: "read", actions: "write", metadata: "read" } }),
   });
   if (!res.ok) throw new Error(`github_app_token_failed:${res.status}:${(await res.text()).slice(0, 500)}`);
   const body = (await res.json()) as { token?: string; expires_at?: string };
@@ -231,5 +234,66 @@ export async function workflowRuns(env: Env, lease: AopLease): Promise<Record<st
   return {
     branch,
     runs: (body.workflow_runs ?? []).map((r) => ({ id: r.id, name: r.name, event: r.event, status: r.status, conclusion: r.conclusion, head_sha: r.head_sha, created_at: r.created_at, updated_at: r.updated_at })),
+  };
+}
+
+async function w1PreflightRunsRaw(env: Env): Promise<Array<Record<string, unknown>>> {
+  const res = await gh(env, `/repos/${REPO}/actions/workflows/${W1_PREFLIGHT_WORKFLOW}/runs?branch=${W1_PREFLIGHT_REF}&event=workflow_dispatch&per_page=20`);
+  if (!res.ok) throw new Error(`github_w1_preflight_runs_failed:${res.status}:${await res.text()}`);
+  const body = (await res.json()) as { workflow_runs?: Array<Record<string, unknown>> };
+  return body.workflow_runs ?? [];
+}
+
+export async function w1PreflightRuns(env: Env): Promise<Record<string, unknown>> {
+  const runs = await w1PreflightRunsRaw(env);
+  return {
+    workflow: W1_PREFLIGHT_WORKFLOW,
+    ref: W1_PREFLIGHT_REF,
+    runs: runs.map((r) => ({
+      id: r.id,
+      name: r.name,
+      event: r.event,
+      status: r.status,
+      conclusion: r.conclusion,
+      head_sha: r.head_sha,
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+      html_url: r.html_url,
+    })),
+  };
+}
+
+export async function dispatchW1Preflight(env: Env): Promise<Record<string, unknown>> {
+  if (!githubWriteConfigured(env)) throw new Error("github_mutation_credential_missing");
+  const recent = await w1PreflightRunsRaw(env);
+  const active = recent.find((r) => ["queued", "in_progress", "waiting", "pending", "requested"].includes(String(r.status)));
+  if (active) {
+    return {
+      dispatched: false,
+      reason: "W1_PREFLIGHT_ALREADY_ACTIVE",
+      workflow: W1_PREFLIGHT_WORKFLOW,
+      ref: W1_PREFLIGHT_REF,
+      existing_run_id: active.id ?? null,
+      existing_run_url: active.html_url ?? null,
+    };
+  }
+  const res = await gh(env, `/repos/${REPO}/actions/workflows/${W1_PREFLIGHT_WORKFLOW}/dispatches`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ref: W1_PREFLIGHT_REF, inputs: { confirmation: W1_PREFLIGHT_CONFIRMATION } }),
+  });
+  if (!res.ok) throw new Error(`github_w1_preflight_dispatch_failed:${res.status}:${(await res.text()).slice(0, 1000)}`);
+  const body = (await res.json()) as { workflow_run_id?: number; run_url?: string; html_url?: string };
+  return {
+    dispatched: true,
+    workflow: W1_PREFLIGHT_WORKFLOW,
+    ref: W1_PREFLIGHT_REF,
+    workflow_run_id: body.workflow_run_id ?? null,
+    run_url: body.run_url ?? null,
+    html_url: body.html_url ?? null,
+    authority_effect: false,
+    real_reboot_requested: false,
+    persistent_worker_proof: false,
+    w1_verified: false,
   };
 }
