@@ -1,0 +1,123 @@
+name: W1 STEP08 One-Shot Dispatcher
+
+on:
+  push:
+    branches:
+      - "ops/w1-step08-one-shot-20260822"
+    paths:
+      - ".github/workflows/w1-step08-one-shot-dispatch.yml"
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  dispatch:
+    if: ${{ github.actor_id == '20597814' && github.ref == 'refs/heads/ops/w1-step08-one-shot-20260822' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      TARGET_WORKFLOW: w1-aws-persistent-host-preflight.yml
+      TARGET_REF: main
+      TARGET_CONFIRMATION: PREFLIGHT_W1_PERSISTENT_HOST_ONLY
+      RECEIPT_PATH: evidence/w1-step08-one-shot-dispatch.json
+      ONE_SHOT_BRANCH: ops/w1-step08-one-shot-20260822
+    steps:
+      - name: Require unused one-shot receipt slot
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          API_URL: ${{ github.api_url }}
+        run: |
+          set -euo pipefail
+          code="$(curl --silent --show-error --location \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            -o /tmp/existing-receipt.json -w '%{http_code}' \
+            "${API_URL}/repos/${REPOSITORY}/contents/${RECEIPT_PATH}?ref=${ONE_SHOT_BRANCH}")"
+          if [[ "$code" == "200" ]]; then
+            echo 'One-shot receipt already exists; refusing a second dispatch.' >&2
+            exit 1
+          fi
+          [[ "$code" == "404" ]]
+          rm -f /tmp/existing-receipt.json
+
+      - name: Dispatch exact W1 STEP08 preflight only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          API_URL: ${{ github.api_url }}
+        run: |
+          set -euo pipefail
+          response="$(mktemp)"
+          trap 'rm -f "$response" /tmp/w1-receipt-put.json /tmp/w1-receipt-response.json' EXIT
+          code="$(curl --silent --show-error --location \
+            -X POST \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            -H 'Content-Type: application/json' \
+            -o "$response" -w '%{http_code}' \
+            "${API_URL}/repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/dispatches" \
+            -d '{"ref":"main","inputs":{"confirmation":"PREFLIGHT_W1_PERSISTENT_HOST_ONLY"},"return_run_details":true}')"
+          [[ "$code" == "200" ]]
+
+          python3 - "$response" <<'PY'
+          import base64
+          import json
+          import os
+          import sys
+
+          value = json.load(open(sys.argv[1], encoding="utf-8"))
+          run_id = value.get("workflow_run_id")
+          run_url = value.get("run_url")
+          html_url = value.get("html_url")
+          assert isinstance(run_id, int) and run_id > 0
+          assert isinstance(run_url, str) and run_url.startswith("https://api.github.com/repos/PatrickFrome/Compute/actions/runs/")
+          assert isinstance(html_url, str) and html_url.startswith("https://github.com/PatrickFrome/Compute/actions/runs/")
+
+          receipt = {
+              "schema": "metaengine.compute.w1-step08-one-shot-dispatch.h205f22.v1",
+              "dispatcher_sha": os.environ["GITHUB_SHA"],
+              "dispatcher_ref": os.environ["GITHUB_REF"],
+              "target_workflow": os.environ["TARGET_WORKFLOW"],
+              "target_ref": os.environ["TARGET_REF"],
+              "workflow_run_id": run_id,
+              "run_url": run_url,
+              "html_url": html_url,
+              "authority_effect": False,
+              "real_reboot_requested": False,
+              "persistent_worker_proof": False,
+              "w1_verified": False,
+              "c1_promoted": False,
+          }
+          raw = (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode("utf-8")
+          request = {
+              "message": "evidence(w1): persist STEP08 one-shot dispatch receipt",
+              "content": base64.b64encode(raw).decode("ascii"),
+              "branch": os.environ["ONE_SHOT_BRANCH"],
+          }
+          with open("/tmp/w1-receipt-put.json", "w", encoding="utf-8") as out:
+              json.dump(request, out, separators=(",", ":"))
+          print(f"W1_STEP08_RUN_ID={run_id}")
+          print(f"W1_STEP08_RUN_URL={html_url}")
+          PY
+
+          receipt_code="$(curl --silent --show-error --location \
+            -X PUT \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/w1-receipt-put.json \
+            -o /tmp/w1-receipt-response.json -w '%{http_code}' \
+            "${API_URL}/repos/${REPOSITORY}/contents/${RECEIPT_PATH}")"
+          [[ "$receipt_code" == "201" ]]
+          python3 - <<'PY'
+          import json
+          value=json.load(open('/tmp/w1-receipt-response.json', encoding='utf-8'))
+          sha=((value.get('commit') or {}).get('sha'))
+          assert isinstance(sha,str) and len(sha)==40
+          print(f"W1_DISPATCH_RECEIPT_COMMIT={sha}")
+          PY
