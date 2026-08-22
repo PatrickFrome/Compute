@@ -93,7 +93,7 @@ class SupervisorR2DBIngestionTests(unittest.TestCase):
     def _write_authority(self, value):
         self.authority_path.write_bytes(_canonical(value) + b"\n")
 
-    def _db_result(self, authority=None):
+    def _db_result(self, authority=None, *, wrote=True):
         gate = authority or self.authority
         return {
             "schema": DB_RESULT_SCHEMA,
@@ -101,14 +101,17 @@ class SupervisorR2DBIngestionTests(unittest.TestCase):
             "projection_sha256": self.projection["projection_sha256"],
             "authority_gate_receipt_sha256": gate["authority_gate_receipt_sha256"],
             "object_id": "00000000-0000-0000-0000-000000000001",
-            "domains_inserted": 2,
-            "domains_reused": 0,
-            "observations_inserted": 2,
-            "observations_reused": 0,
+            "domains_inserted": 2 if wrote else 0,
+            "domains_reused": 0 if wrote else 2,
+            "object_inserted": 1 if wrote else 0,
+            "object_reused": 0 if wrote else 1,
+            "observations_inserted": 2 if wrote else 0,
+            "observations_reused": 0 if wrote else 2,
             "effective_at": NOW.isoformat(),
             "continuity_readiness": {"r2_proven": True, "status": "R2_PROVEN"},
             "continuity_audit": {"status": "PASS"},
-            "database_write_performed": True,
+            "database_transaction_validated": True,
+            "database_write_performed": wrote,
             "continuity_readiness_r2_proven": True,
             "canonical_roadmap_r2_promoted": False,
             "r3_proven": False,
@@ -136,6 +139,8 @@ class SupervisorR2DBIngestionTests(unittest.TestCase):
 
     def test_valid_runner_binds_inputs_and_keeps_canonical_promotion_separate(self):
         value, seen = self._invoke()
+        self.assertTrue(value["database_transaction_validated"])
+        self.assertTrue(value["database_write_performed"])
         self.assertTrue(value["continuity_readiness_r2_proven"])
         self.assertFalse(value["canonical_roadmap_r2_promoted"])
         self.assertFalse(value["persisted_seal_created"])
@@ -145,11 +150,27 @@ class SupervisorR2DBIngestionTests(unittest.TestCase):
         self.assertNotIn("HOME", seen["env"])
         self.assertNotIn("GITHUB_TOKEN", seen["env"])
 
+    def test_fully_reused_transaction_is_valid_without_false_write_claim(self):
+        value, _seen = self._invoke(result=self._db_result(wrote=False))
+        self.assertTrue(value["database_transaction_validated"])
+        self.assertFalse(value["database_write_performed"])
+        self.assertEqual(value["domains_reused"], 2)
+        self.assertEqual(value["object_reused"], 1)
+        self.assertEqual(value["observations_reused"], 2)
+        self.assertTrue(value["continuity_readiness_r2_proven"])
+
     def test_authority_self_hash_tamper_rejected(self):
         bad = copy.deepcopy(self.authority)
         bad["source_head_sha"] = "9" * 40
         self._write_authority(bad)
         with self.assertRaisesRegex(DBIngestionError, "receipt_sha256_mismatch"):
+            self._invoke()
+
+    def test_authority_receipt_sha_must_be_hex(self):
+        bad = copy.deepcopy(self.authority)
+        bad["authority_gate_receipt_sha256"] = "z" * 64
+        self._write_authority(bad)
+        with self.assertRaisesRegex(DBIngestionError, "receipt_sha256_invalid"):
             self._invoke()
 
     def test_rehashed_projection_binding_mismatch_rejected(self):
@@ -188,6 +209,12 @@ class SupervisorR2DBIngestionTests(unittest.TestCase):
         with self.assertRaisesRegex(DBIngestionError, "trusted_root_stale"):
             self._invoke()
 
+    def test_db_result_requires_transaction_validation(self):
+        bad = self._db_result()
+        bad["database_transaction_validated"] = False
+        with self.assertRaisesRegex(DBIngestionError, "transaction_not_validated"):
+            self._invoke(result=bad)
+
     def test_db_result_cannot_smuggle_roadmap_or_seal_authority(self):
         bad = self._db_result()
         bad["canonical_roadmap_r2_promoted"] = True
@@ -198,8 +225,8 @@ class SupervisorR2DBIngestionTests(unittest.TestCase):
         with self.assertRaisesRegex(DBIngestionError, "authority_scope_invalid"):
             self._invoke(result=bad)
 
-    def test_migration_is_invoker_postgres_only_and_append_only(self):
-        migration = Path("supabase/migrations/20260821234739_r1_step09b_supervisor_db_ingestion_v1.sql").read_text()
+    def test_latest_migration_is_invoker_postgres_only_append_only_and_stable_domain_safe(self):
+        migration = Path("supabase/migrations/20260821235859_r1_step09b_idempotency_truthfulness_v2.sql").read_text()
         lower = migration.lower()
         self.assertIn("security invoker", lower)
         self.assertNotIn("security definer", lower)
@@ -208,12 +235,20 @@ class SupervisorR2DBIngestionTests(unittest.TestCase):
         self.assertIn("public,anon,authenticated,service_role", lower)
         self.assertIn("grant execute on function", lower)
         self.assertIn("to postgres", lower)
+        self.assertIn("current_setting('transaction_isolation') <> 'read committed'", lower)
         self.assertIn("pg_advisory_xact_lock", lower)
         self.assertIn("clock_timestamp()", lower)
         self.assertIn("on conflict (domain_key) do nothing", lower)
         self.assertIn("on conflict (subject_kind,subject_id,expected_sha256) do nothing", lower)
         self.assertNotIn("do update", lower)
         self.assertNotIn("insert into destruktion_meta.compute_continuity_persisted_seal", lower)
+        self.assertIn("registration_contract','step09b_stable_domain_identity_v1'", lower)
+        self.assertIn("v_provider_result_sha := v_domain#>>'{metadata,provider_result_sha256}'", lower)
+        stable_assignment = lower.split("v_domain_metadata :=", 1)[1].split(";", 1)[0]
+        self.assertNotIn("provider_result_sha256", stable_assignment)
+        self.assertIn("(evidence-'step09b') is not distinct from v_base_evidence", lower)
+        self.assertIn("database_transaction_validated',true", lower)
+        self.assertIn("v_database_write_performed :=", lower)
 
 
 if __name__ == "__main__":
