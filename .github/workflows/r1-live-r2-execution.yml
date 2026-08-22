@@ -84,6 +84,8 @@ jobs:
           assert 'supervisor_r2_db_ingestion.py' in p
           assert 's3:GetObjectVersion' in guard and 's3:GetObjectRetention' in guard
           assert 's3:PutObject' in guard and 'DenyRecoveryMutation' in guard
+          assert 'aws_object_key_not_content_addressed' in guard
+          assert 'aws_version_id_control_character' in guard
           assert 'fresh_provider_materialization_required' in guard
           assert 'fresh_trusted_root_required' in guard
           evidence=p.split('\n  evidence-assembly:',1)[1].split('\n  aws-materialize:',1)[0]
@@ -100,10 +102,15 @@ jobs:
           assert 'get-object-retention' in aws and 'get-object' in aws
           assert 'put-object' not in aws.lower()
           assert 'id-token: write' not in db
-          assert 'AWS_ACCESS_KEY_ID' not in db
+          assert 'configure-aws-credentials@' not in db
+          assert 'steps.aws-creds.outputs' not in db
           assert 'gh attestation' not in db
           assert 'PGSSLMODE: verify-full' in db
           assert 'R1_PGSSLROOTCERT_PEM' in db
+          assert "name: r1-final-r2-evidence-package.tar" in db
+          assert "name: r1-final-r2-evidence-package-receipt.json" in db
+          assert "name: r1-step09a-authority-gate.json" in db
+          assert 'r1-provider-materialized-ciphertext.age' not in db
           assert 'database_transaction_validated' in Path('controller/r1/supervisor_r2_db_ingestion.py').read_text()
           PY
 
@@ -363,7 +370,9 @@ jobs:
               print(p[k])
           PY
           )
+          [[ "${#LOCATOR[@]}" -eq 5 ]]
           BUCKET="${LOCATOR[0]}"; KEY="${LOCATOR[1]}"; VERSION_ID="${LOCATOR[2]}"; OWNER="${LOCATOR[3]}"; REGION="${LOCATOR[4]}"
+          [[ "$KEY" =~ ^h205f22/r1/sha256/[0-9a-f]{64}\.age$ ]]
           aws sts get-caller-identity --query Account --output text | grep -Fx "$OWNER" >/dev/null
           aws s3api get-object-retention \
             --bucket "$BUCKET" --key "$KEY" --version-id "$VERSION_ID" \
@@ -491,11 +500,24 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Download STEP08 package receipt and STEP09A authority gate
+      - name: Download exact STEP08 package
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          pattern: r1-*
-          merge-multiple: true
+          name: r1-final-r2-evidence-package.tar
+          path: evidence
+          digest-mismatch: error
+
+      - name: Download exact STEP08 package receipt
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: r1-final-r2-evidence-package-receipt.json
+          path: evidence
+          digest-mismatch: error
+
+      - name: Download exact STEP09A authority gate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: r1-step09a-authority-gate.json
           path: evidence
           digest-mismatch: error
 
@@ -506,6 +528,7 @@ jobs:
             test -z "${!forbidden-}"
           done
           test -n "$PGHOST"
+          test -n "$PGPORT"
           test -n "$PGDATABASE"
           test -n "$PGUSER"
           test -n "$R1_PGPASSWORD"
