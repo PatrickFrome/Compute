@@ -1,5 +1,5 @@
 import type { AopLease, Env, JsonObject, ModelOutcome } from "./types";
-import { githubWriteConfigured, pullRequest, pullRequestFiles, readFile, readFileAtRef, workflowRuns, writeFile } from "./github";
+import { dispatchW1Preflight, githubAuthMode, githubWriteConfigured, pullRequest, pullRequestFiles, readFile, readFileAtRef, w1PreflightRuns, workflowRuns, writeFile } from "./github";
 import { rpc, supervisorAdoptClaim, supervisorReturnAuthority } from "./supabase";
 
 const MAX_TOOL_ROUNDS = 18;
@@ -10,11 +10,15 @@ const READ_ONLY_TOOL_NAMES = new Set([
   "github_pull_request",
   "github_pull_request_files",
   "github_workflow_runs",
+  "github_w1_preflight_runs",
   "aop_snapshot",
 ]);
 interface ToolCall { type: "function_call"; call_id: string; name: string; arguments: string; }
 
 function aiConfigured(env: Env): boolean { return Boolean(env.CF_ACCOUNT_ID && env.CF_AI_TOKEN && env.AOP_MODEL); }
+function isW1Implementer(lease: AopLease): boolean {
+  return lease.role_kind === "IMPLEMENTER" && lease.role_key === "W1_IMPLEMENTER" && lease.milestone_key === "W1_PERSISTENT_LINUX_WORKER_SAFETY";
+}
 
 export function executorReady(env: Env, lease: AopLease): { ready: boolean; reason?: string } {
   if (lease.role_kind === "SUPERVISOR" && lease.input?.reason === "AUTHORITY_REBIND_REQUIRED") {
@@ -41,6 +45,12 @@ function toolsFor(env: Env, lease: AopLease): Array<Record<string, unknown>> {
     fn("github_workflow_runs", "Read recent workflow runs for the role-owned branch.", { type: "object", properties: {}, additionalProperties: false }),
     fn("aop_snapshot", "Read the current AOP snapshot. Read-only.", { type: "object", properties: {}, additionalProperties: false }),
   ];
+  if (isW1Implementer(lease)) {
+    tools.push(fn("github_w1_preflight_runs", "Read workflow_dispatch runs for the fixed W1 preflight-only workflow on main. Read-only; this does not imply live host evidence.", { type: "object", properties: {}, additionalProperties: false }));
+    if (githubAuthMode(env) === "app") {
+      tools.push(fn("github_w1_preflight_dispatch", "Dispatch only the fixed W1 AWS Persistent Host Preflight Only workflow on main with its fixed PREPARE_ONLY confirmation. Requires GitHub App authentication, cannot request a real reboot, and refuses overlapping active preflight runs.", { type: "object", properties: {}, additionalProperties: false }));
+    }
+  }
   if (lease.role_kind === "IMPLEMENTER" && githubWriteConfigured(env)) {
     tools.push(fn("github_write_file", "Create or replace a UTF-8 file on the role-owned branch. Requires a dedicated GitHub runtime credential; main is forbidden.", { type: "object", properties: { path: { type: "string" }, content: { type: "string" }, message: { type: "string" } }, required: ["path", "content", "message"], additionalProperties: false }));
   }
@@ -60,6 +70,11 @@ function systemInstructions(env: Env, lease: AopLease): string {
       ? "GitHub write capability is available through a dedicated runtime credential. Use github_write_file only on the role-owned branch and only for the required milestone changes."
       : "GitHub write capability is unavailable. Do not fail solely for that. Complete read-only analysis and return WAITING_EVENT with wake_condition=GITHUB_WRITE_EXECUTOR_AVAILABLE. output.mutation_plan MUST be an object with a changes array; each change must contain path, full UTF-8 content, and commit message. Include verification steps and research evidence. Do not claim proposed files were written or post-mutation tests ran.")
     : "";
+  const w1PreflightCapability = isW1Implementer(lease)
+    ? (githubAuthMode(env) === "app"
+      ? "W1 external execution gate is available as github_w1_preflight_dispatch through a repository-scoped GitHub App installation token. First inspect github_w1_preflight_runs. Dispatch is fixed to w1-aws-persistent-host-preflight.yml on main with PREPARE_ONLY confirmation and cannot request a real reboot. A successful dispatch is only external preflight evidence: never claim backend binding, reboot receipt, persistent-worker proof, W1 VERIFIED, or C1 promotion from it."
+      : "W1 preflight dispatch requires GitHub App authentication with approved Actions:write permission. A generic GitHub token is intentionally insufficient for this privileged bridge. Do not create another PREPARE_ONLY W1 abstraction to compensate; preserve the external execution gate as the required next step.")
+    : "";
   return [
     "You are an execution slot in METAENGINE H205F22 AOP1. The conversation is not state; the supplied lease is state.",
     "Supabase roadmap/claims/directives/checkpoints are authoritative. Never infer authority from GitHub or an auxiliary ledger.",
@@ -68,6 +83,7 @@ function systemInstructions(env: Env, lease: AopLease): string {
     `Owned branch: ${lease.role_config?.branch ?? "none"}. Never write main.`,
     `Valid result_code values: ${valid.join(", ")}.`,
     writeCapability,
+    w1PreflightCapability,
     "Implementer EVIDENCE_READY output MUST include object fields summary, evidence, research and must represent tests, negative tests, advisors where applicable, and deep research.",
     "Analyst is strictly read-only in GitHub tools and audits independently. For PR audit, inspect PR metadata, changed-file patches and exact head-ref files; REQUEST_CHANGES/HOLD/REJECT route through Supervisor and never grant authority directly.",
     "Supervisor must not claim VERIFIED until authoritative roadmap already says VERIFIED. Checkpoint seal and main merge are intentionally not exposed as tools in AOP1 v1.",
@@ -136,6 +152,13 @@ async function runTool(env: Env, lease: AopLease, workerId: string, call: ToolCa
     case "github_pull_request": return pullRequest(env, Number(args.number));
     case "github_pull_request_files": return pullRequestFiles(env, Number(args.number));
     case "github_workflow_runs": return workflowRuns(env, lease);
+    case "github_w1_preflight_runs":
+      if (!isW1Implementer(lease)) throw new Error("w1_preflight_tool_forbidden_for_role");
+      return w1PreflightRuns(env);
+    case "github_w1_preflight_dispatch":
+      if (!isW1Implementer(lease)) throw new Error("w1_preflight_tool_forbidden_for_role");
+      if (githubAuthMode(env) !== "app") throw new Error("w1_preflight_github_app_required");
+      return dispatchW1Preflight(env);
     case "aop_snapshot": return rpc<JsonObject>(env, "h205f22_aop1_snapshot_v1", {});
     case "supervisor_adopt_active_claim": if (lease.role_kind !== "SUPERVISOR") throw new Error("supervisor_tool_forbidden"); return supervisorAdoptClaim(env, lease, workerId);
     case "supervisor_return_authority": if (lease.role_kind !== "SUPERVISOR") throw new Error("supervisor_tool_forbidden"); return supervisorReturnAuthority(env, lease, workerId, (args.instructions ?? {}) as JsonObject);
