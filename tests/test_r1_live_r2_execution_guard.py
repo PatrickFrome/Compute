@@ -19,6 +19,7 @@ from controller.r1.live_r2_execution_guard import (
 from tests.test_r1_idempotent_exact_ciphertext_replication import (
     IdempotentExactCiphertextReplicationTests,
     NOW,
+    _rehash_evidence_and_result,
 )
 
 
@@ -216,6 +217,43 @@ class LiveR2ExecutionGuardTests(unittest.TestCase):
                 provider_result=self.provider_result,
                 expected_bucket=target["bucket"],
                 expected_domain_key="wrong-domain",
+                expected_account_scope_sha256=target["account_scope_sha256"],
+                expected_account_id="123456789012",
+                expected_region=target["region"],
+            )
+
+    def test_plan_rejects_non_content_addressed_key_even_when_provider_evidence_is_rehashed(self):
+        bad = copy.deepcopy(self.provider_result)
+        bad["ciphertext"]["key"] = "h205f22/r1/sha256/not-the-ciphertext.age"
+        bad["provider_controller_evidence"]["key"] = bad["ciphertext"]["key"]
+        _rehash_evidence_and_result(bad)
+        target = self.provider_fixture.target("AWS_S3")
+        with self.assertRaisesRegex(LiveR2ExecutionError, "aws_object_key_not_content_addressed"):
+            build_aws_materialization_plan(
+                provider_result=bad,
+                expected_bucket=target["bucket"],
+                expected_domain_key=target["domain_key"],
+                expected_account_scope_sha256=target["account_scope_sha256"],
+                expected_account_id="123456789012",
+                expected_region=target["region"],
+            )
+
+    def test_plan_rejects_control_character_in_version_id_before_shell_transport(self):
+        bad = copy.deepcopy(self.provider_result)
+        version = "created-v1\nsecond-line"
+        bad["ciphertext"]["version_id"] = version
+        evidence = bad["provider_controller_evidence"]
+        evidence["version_id"] = version
+        evidence["put_response"]["VersionId"] = version
+        evidence["head_response"]["VersionId"] = version
+        evidence["get_response"]["VersionId"] = version
+        _rehash_evidence_and_result(bad)
+        target = self.provider_fixture.target("AWS_S3")
+        with self.assertRaisesRegex(LiveR2ExecutionError, "aws_version_id_control_character"):
+            build_aws_materialization_plan(
+                provider_result=bad,
+                expected_bucket=target["bucket"],
+                expected_domain_key=target["domain_key"],
                 expected_account_scope_sha256=target["account_scope_sha256"],
                 expected_account_id="123456789012",
                 expected_region=target["region"],
