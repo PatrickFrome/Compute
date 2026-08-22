@@ -59,6 +59,7 @@ SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 ARTIFACT_DIGEST = re.compile(r"^sha256:([0-9a-f]{64})$")
 AWS_ACCOUNT = re.compile(r"^[0-9]{12}$")
+AWS_REGION = re.compile(r"^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$")
 
 
 class LiveR2ExecutionError(RuntimeError):
@@ -89,6 +90,13 @@ def _require_text(value: Any, field: str, maximum: int = 2048) -> str:
     if not isinstance(value, str) or not value.strip() or len(value.strip()) > maximum:
         raise LiveR2ExecutionError(f"{field}_invalid")
     return value.strip()
+
+
+def _safe_cli_text(value: Any, field: str, maximum: int = 2048) -> str:
+    text = _require_text(value, field, maximum=maximum)
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in text):
+        raise LiveR2ExecutionError(f"{field}_control_character")
+    return text
 
 
 def _require_int(value: Any, field: str) -> int:
@@ -251,7 +259,7 @@ def build_preflight(*, source_run: Any, source_artifacts: Any, provider_run: Any
 def _object_arn(bucket: str, key: str) -> str:
     if any(ch in bucket for ch in ('"', "'", " ", "\n", "\r", "\t")):
         raise LiveR2ExecutionError("aws_bucket_invalid")
-    if not key or any(ch in key for ch in ("\n", "\r")):
+    if not key or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in key):
         raise LiveR2ExecutionError("aws_object_key_invalid")
     return f"arn:aws:s3:::{bucket}/{key}"
 
@@ -261,13 +269,15 @@ def build_aws_materialization_plan(*, provider_result: Any, expected_bucket: str
                                    expected_region: str) -> dict[str, Any]:
     result = validate_persisted_provider_controller_evidence(provider_result)
     validate_provider_result(result, "AWS_S3")
-    bucket = _require_text(expected_bucket, "expected_bucket", maximum=255)
-    domain_key = _require_text(expected_domain_key, "expected_domain_key", maximum=160)
+    bucket = _safe_cli_text(expected_bucket, "expected_bucket", maximum=255)
+    domain_key = _safe_cli_text(expected_domain_key, "expected_domain_key", maximum=160)
     account_scope = _require_sha256(expected_account_scope_sha256, "expected_account_scope_sha256")
-    account_id = _require_text(expected_account_id, "expected_account_id", maximum=12)
+    account_id = _safe_cli_text(expected_account_id, "expected_account_id", maximum=12)
     if AWS_ACCOUNT.fullmatch(account_id) is None:
         raise LiveR2ExecutionError("expected_account_id_invalid")
-    region = _require_text(expected_region, "expected_region", maximum=64)
+    region = _safe_cli_text(expected_region, "expected_region", maximum=64)
+    if AWS_REGION.fullmatch(region) is None:
+        raise LiveR2ExecutionError("expected_region_invalid")
     target = result["target"]
     evidence = result["provider_controller_evidence"]
     if target.get("domain_key") != domain_key:
@@ -276,8 +286,12 @@ def build_aws_materialization_plan(*, provider_result: Any, expected_bucket: str
         raise LiveR2ExecutionError("aws_account_scope_mismatch")
     if evidence.get("bucket") != bucket:
         raise LiveR2ExecutionError("aws_bucket_mismatch")
-    key = _require_text(evidence.get("key"), "aws_key", maximum=2048)
-    version_id = _require_text(evidence.get("version_id"), "aws_version_id", maximum=1024)
+    cipher_sha = _require_sha256(result.get("ciphertext", {}).get("sha256"), "aws_ciphertext_sha256")
+    key = _safe_cli_text(evidence.get("key"), "aws_key", maximum=2048)
+    expected_key = f"h205f22/r1/sha256/{cipher_sha}.age"
+    if key != expected_key:
+        raise LiveR2ExecutionError("aws_object_key_not_content_addressed")
+    version_id = _safe_cli_text(evidence.get("version_id"), "aws_version_id", maximum=1024)
     if result.get("ciphertext", {}).get("key") != key or result.get("ciphertext", {}).get("version_id") != version_id:
         raise LiveR2ExecutionError("aws_provider_result_locator_mismatch")
     resource = _object_arn(bucket, key)
@@ -300,7 +314,7 @@ def build_aws_materialization_plan(*, provider_result: Any, expected_bucket: str
         "version_id": version_id,
         "region": region,
         "expected_bucket_owner": account_id,
-        "ciphertext_sha256": result["ciphertext"]["sha256"],
+        "ciphertext_sha256": cipher_sha,
         "ciphertext_bytes": result["ciphertext"]["bytes"],
         "session_policy": policy,
         "provider_write_allowed": False,
