@@ -24,6 +24,7 @@ from typing import Any
 
 ENVIRONMENT = "w1-persistent-host-proof"
 BOUNDARY_SCHEMA = "metaengine.compute.w1-protected-host-session-boundary.h205f22.v1"
+DEPLOYMENT_SCHEMA = "metaengine.compute.w1-environment-deployment-compatibility.h205f22.v1"
 BINDING_SCHEMA = "metaengine.compute.w1-protected-host-preflight-binding.h205f22.v1"
 BINDING_CLASSIFICATION = "LIVE_AWS_OIDC_PROTECTED_HOST_PREFLIGHT_ONLY"
 ENV_RECEIPT_SCHEMA = "metaengine.compute.w1-github-environment-preflight.h205f22.v1"
@@ -90,6 +91,60 @@ def _partition(region: str) -> str:
     if region.startswith("cn-"):
         return "aws-cn"
     return "aws"
+
+
+def validate_deployment_compatibility(*, environment: Any, branch: Any, custom_policies: Any) -> dict[str, Any]:
+    if not isinstance(environment, dict) or environment.get("name") != ENVIRONMENT:
+        raise ProtectedHostPreflightError("deployment_environment_identity_mismatch")
+    policy = environment.get("deployment_branch_policy")
+    if not isinstance(policy, dict):
+        raise ProtectedHostPreflightError("deployment_branch_policy_missing")
+    protected = policy.get("protected_branches") is True
+    custom = policy.get("custom_branch_policies") is True
+    if protected == custom:
+        raise ProtectedHostPreflightError("deployment_branch_policy_invalid")
+
+    if not isinstance(branch, dict) or branch.get("name") != "main":
+        raise ProtectedHostPreflightError("main_branch_metadata_invalid")
+    commit = branch.get("commit")
+    head_sha = commit.get("sha") if isinstance(commit, dict) else None
+    if not isinstance(head_sha, str) or SHA40.fullmatch(head_sha) is None:
+        raise ProtectedHostPreflightError("main_branch_head_sha_invalid")
+
+    if protected:
+        if branch.get("protected") is not True:
+            raise ProtectedHostPreflightError("protected_branches_mode_requires_protected_main")
+        mode = "PROTECTED_MAIN_BRANCH"
+    else:
+        if not isinstance(custom_policies, dict) or not isinstance(custom_policies.get("branch_policies"), list):
+            raise ProtectedHostPreflightError("custom_deployment_branch_policies_invalid")
+        exact_main = [
+            item for item in custom_policies["branch_policies"]
+            if isinstance(item, dict) and item.get("name") == "main"
+        ]
+        if len(exact_main) != 1:
+            raise ProtectedHostPreflightError("exact_custom_main_deployment_policy_required")
+        mode = "EXACT_CUSTOM_MAIN_BRANCH"
+
+    core = {
+        "schema": DEPLOYMENT_SCHEMA,
+        "classification": "W1_ENVIRONMENT_DEPLOYMENT_BRANCH_COMPATIBILITY_NONAUTHORITATIVE",
+        "environment": ENVIRONMENT,
+        "branch": "main",
+        "branch_head_sha": head_sha,
+        "deployment_policy_mode": mode,
+        "main_branch_protected": branch.get("protected") is True,
+        "exact_custom_main_policy_present": mode == "EXACT_CUSTOM_MAIN_BRANCH",
+        "environment_job_routable_from_main": True,
+        "provider_execution_authorized": False,
+        "persistent_worker_proof": False,
+        "w1_verified": False,
+        "canonical": False,
+        "authority_effect": False,
+    }
+    result = dict(core)
+    result["receipt_sha256"] = _sha_json(core)
+    return result
 
 
 def build_session_boundary(
@@ -191,6 +246,23 @@ def validate_environment_receipt(value: Any) -> dict[str, Any]:
     return receipt
 
 
+def validate_deployment_receipt(value: Any) -> dict[str, Any]:
+    receipt = _require_self_hash(
+        value, schema=DEPLOYMENT_SCHEMA, hash_field="receipt_sha256", label="deployment_receipt"
+    )
+    if receipt.get("environment") != ENVIRONMENT or receipt.get("branch") != "main":
+        raise ProtectedHostPreflightError("deployment_receipt_identity_mismatch")
+    if receipt.get("environment_job_routable_from_main") is not True:
+        raise ProtectedHostPreflightError("deployment_receipt_main_not_routable")
+    if receipt.get("deployment_policy_mode") not in {"PROTECTED_MAIN_BRANCH", "EXACT_CUSTOM_MAIN_BRANCH"}:
+        raise ProtectedHostPreflightError("deployment_receipt_mode_invalid")
+    if any(receipt.get(field) is not False for field in (
+        "provider_execution_authorized", "persistent_worker_proof", "w1_verified", "canonical", "authority_effect"
+    )):
+        raise ProtectedHostPreflightError("deployment_receipt_authority_boundary_invalid")
+    return receipt
+
+
 def validate_boundary(value: Any) -> dict[str, Any]:
     boundary = _require_self_hash(value, schema=BOUNDARY_SCHEMA, hash_field="receipt_sha256", label="session_boundary")
     expected = build_session_boundary(
@@ -206,9 +278,11 @@ def validate_boundary(value: Any) -> dict[str, Any]:
 
 
 def finalize_preflight_binding(
-    *, environment_receipt: Any, session_boundary: Any, preflight_summary: Any, dry_run_result: str
+    *, environment_receipt: Any, deployment_receipt: Any, session_boundary: Any,
+    preflight_summary: Any, dry_run_result: str
 ) -> dict[str, Any]:
     environment = validate_environment_receipt(environment_receipt)
+    deployment = validate_deployment_receipt(deployment_receipt)
     boundary = validate_boundary(session_boundary)
     if not isinstance(preflight_summary, dict) or preflight_summary.get("schema") != PREFLIGHT_SCHEMA:
         raise ProtectedHostPreflightError("preflight_summary_schema_invalid")
@@ -227,6 +301,7 @@ def finalize_preflight_binding(
         "schema": BINDING_SCHEMA,
         "classification": BINDING_CLASSIFICATION,
         "environment_receipt_sha256": environment["receipt_sha256"],
+        "deployment_compatibility_receipt_sha256": deployment["receipt_sha256"],
         "session_boundary_receipt_sha256": boundary["receipt_sha256"],
         "instance_id": boundary["instance_id"],
         "worker_id": boundary["worker_id"],
@@ -235,6 +310,7 @@ def finalize_preflight_binding(
         "region": boundary["region"],
         "preflight_summary_sha256": _sha_json(preflight_summary),
         "host_surface_validated": True,
+        "main_environment_route_validated": True,
         "reboot_permission_dry_run": "DryRunOperation",
         "real_reboot_requested": False,
         "real_reboot_performed": False,
@@ -255,6 +331,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
 
+    deployment = sub.add_parser("validate-deployment")
+    deployment.add_argument("--environment", required=True)
+    deployment.add_argument("--branch", required=True)
+    deployment.add_argument("--custom-policies", required=True)
+    deployment.add_argument("--output", required=True)
+
     build = sub.add_parser("build-session-boundary")
     build.add_argument("--instance-id", required=True)
     build.add_argument("--worker-id", required=True)
@@ -265,6 +347,7 @@ def main(argv: list[str] | None = None) -> int:
 
     final = sub.add_parser("finalize")
     final.add_argument("--environment-receipt", required=True)
+    final.add_argument("--deployment-receipt", required=True)
     final.add_argument("--session-boundary", required=True)
     final.add_argument("--preflight-summary", required=True)
     final.add_argument("--dry-run-result", required=True)
@@ -272,7 +355,13 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     try:
-        if args.command == "build-session-boundary":
+        if args.command == "validate-deployment":
+            result = validate_deployment_compatibility(
+                environment=_read_json(Path(args.environment), "environment"),
+                branch=_read_json(Path(args.branch), "branch"),
+                custom_policies=_read_json(Path(args.custom_policies), "custom_policies"),
+            )
+        elif args.command == "build-session-boundary":
             result = build_session_boundary(
                 instance_id=args.instance_id,
                 worker_id=args.worker_id,
@@ -283,6 +372,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             result = finalize_preflight_binding(
                 environment_receipt=_read_json(Path(args.environment_receipt), "environment_receipt"),
+                deployment_receipt=_read_json(Path(args.deployment_receipt), "deployment_receipt"),
                 session_boundary=_read_json(Path(args.session_boundary), "session_boundary"),
                 preflight_summary=_read_json(Path(args.preflight_summary), "preflight_summary"),
                 dry_run_result=args.dry_run_result,
