@@ -1,0 +1,354 @@
+name: W1 AWS Persistent Host Preflight Only
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/w1-aws-persistent-host-preflight.yml'
+      - 'controller/w1/aws_persistent_host_preflight_guard.py'
+      - 'controller/w1/aws_provider_reboot_live_guard.py'
+      - 'controller/w1/aws_provider_reboot_controller.py'
+      - 'tests/test_w1_aws_persistent_host_preflight_guard.py'
+      - 'tests/test_w1_aws_provider_reboot_live_guard.py'
+      - 'tests/test_w1_aws_provider_reboot_controller.py'
+      - 'research/W1_STEP08_PROTECTED_HOST_IDENTITY_PREFLIGHT.md'
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type PREFLIGHT_W1_PERSISTENT_HOST_ONLY'
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile and run W1 protected-host preflight tests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/w1/aws_persistent_host_preflight_guard.py
+          python3 -m unittest tests.test_w1_aws_persistent_host_preflight_guard -v
+          python3 -m unittest tests.test_w1_aws_provider_reboot_live_guard -v
+          python3 -m unittest tests.test_w1_aws_provider_reboot_controller -v
+
+      - name: Validate preflight-only trust-zone contract
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          raw=Path('.github/workflows/w1-aws-persistent-host-preflight.yml').read_text()
+          before,remainder=raw.split('      - name: Validate preflight-only trust-zone contract',1)
+          _checker,after=remainder.split('\n  preflight-environment:',1)
+          p=before+'\n  preflight-environment:'+after
+          guard=Path('controller/w1/aws_persistent_host_preflight_guard.py').read_text()
+          assert 'workflow_dispatch:' in p
+          assert 'PREFLIGHT_W1_PERSISTENT_HOST_ONLY' in p
+          assert 'execute_reboot' not in p.lower()
+          assert 'REBOOT_W1_PERSISTENT_HOST' not in p
+          assert 'inputs.instance_id' not in p and 'inputs.worker_id' not in p
+          assert 'vars.W1_AWS_INSTANCE_ID' in p
+          assert 'vars.W1_WORKER_ID' in p
+          assert p.count('id-token: write') == 1
+          assert p.count('aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c') == 1
+          assert 'output-env-credentials: false' in p
+          assert 'output-credentials: true' in p
+          assert 'unset-current-credentials: true' in p
+          assert 'inline-session-policy: ${{ steps.session-policy.outputs.policy }}' in p
+          assert 'environment: ${{ needs.preflight-environment.outputs.environment_name }}' in p
+          assert '/environments/w1-persistent-host-proof' in p
+          commands=[line.strip() for line in p.splitlines() if 'aws ec2 reboot-instances' in line]
+          assert len(commands) == 1 and '--dry-run' in commands[0]
+          assert 'cloudtrail:LookupEvents' not in guard
+          assert 'ec2:RebootInstances' in guard
+          assert 'metaengine:worker_id' in guard and 'metaengine:github_sha' in guard
+          assert 'real_reboot_performed' in guard
+          assert 'persistent_worker_proof' in guard and 'w1_verified' in guard
+          host=p.split('\n  host-preflight:',1)[1]
+          assert 'R1_PGPASSWORD' not in host
+          assert 'AWS_ACCESS_KEY_ID: ${{ steps.aws-creds.outputs.aws-access-key-id }}' in host
+          post_dry=host.split('      - name: Finalize protected-host preflight binding after credentials leave scope',1)[1]
+          assert 'steps.aws-creds.outputs' not in post_dry
+          PY
+
+  preflight-environment:
+    if: github.event_name == 'workflow_dispatch'
+    needs: contract-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      environment_name: ${{ steps.outputs.outputs.environment_name }}
+    env:
+      CONFIRMATION: ${{ inputs.confirmation }}
+    steps:
+      - name: Checkout exact main revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Require explicit main-branch preflight-only dispatch
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$CONFIRMATION" == 'PREFLIGHT_W1_PERSISTENT_HOST_ONLY' ]]
+
+      - name: Fetch protected W1 environment metadata without AWS credentials
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          curl --fail-with-body --silent --show-error --location \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/environments/w1-persistent-host-proof" \
+            > evidence/w1-environment.json
+
+      - name: Validate independent review and branch protection
+        run: |
+          set -euo pipefail
+          python3 controller/w1/aws_provider_reboot_live_guard.py validate-environment \
+            --input evidence/w1-environment.json \
+            --output evidence/w1-environment-preflight.json
+          rm -f evidence/w1-environment.json
+
+      - name: Upload credential-free environment preflight
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/w1-environment-preflight.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
+
+      - name: Publish validated environment name
+        id: outputs
+        run: echo 'environment_name=w1-persistent-host-proof' >> "$GITHUB_OUTPUT"
+
+  host-preflight:
+    if: github.event_name == 'workflow_dispatch'
+    needs: [contract-tests, preflight-environment]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: ${{ needs.preflight-environment.outputs.environment_name }}
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    env:
+      INSTANCE_ID: ${{ vars.W1_AWS_INSTANCE_ID }}
+      WORKER_ID: ${{ vars.W1_WORKER_ID }}
+      AWS_ROLE_ARN: ${{ vars.W1_AWS_ROLE_ARN }}
+      AWS_ACCOUNT_ID: ${{ vars.W1_AWS_ACCOUNT_ID }}
+      AWS_REGION: ${{ vars.W1_AWS_REGION }}
+      ROLE_SESSION: w1-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Checkout exact main execution revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Download exact current-run environment preflight
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: w1-environment-preflight.json
+          path: evidence
+          digest-mismatch: error
+
+      - name: Resolve exact W1 implementation SHA before AWS credentials
+        run: |
+          set -euo pipefail
+          W1_SHA="$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}.git" refs/heads/work/w1-linux-worker-safety | awk '{print $1}')"
+          [[ "$W1_SHA" =~ ^[0-9a-f]{40}$ ]]
+          echo "W1_SHA=$W1_SHA" >> "$GITHUB_ENV"
+
+      - name: Validate protected identity variables and build exact dry-run session policy
+        id: session-policy
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$INSTANCE_ID" =~ ^i-[0-9a-f]+$ ]]
+          [[ "$WORKER_ID" =~ ^[A-Za-z0-9._:-]{3,160}$ ]]
+          [[ "$AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]
+          [[ "$AWS_REGION" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]]
+          [[ "$AWS_ROLE_ARN" =~ ^arn:aws(-[a-z]+)?:iam::${AWS_ACCOUNT_ID}:role/[A-Za-z0-9+=,.@_/-]+$ ]]
+          mkdir -p evidence
+          python3 controller/w1/aws_persistent_host_preflight_guard.py build-session-boundary \
+            --instance-id "$INSTANCE_ID" \
+            --worker-id "$WORKER_ID" \
+            --w1-sha "$W1_SHA" \
+            --account-id "$AWS_ACCOUNT_ID" \
+            --region "$AWS_REGION" \
+            --output evidence/w1-protected-host-session-boundary.json
+          POLICY="$(python3 -c "import json;print(json.dumps(json.load(open('evidence/w1-protected-host-session-boundary.json'))['session_policy'],separators=(',',':')))" )"
+          test -n "$POLICY"
+          echo "policy=$POLICY" >> "$GITHUB_OUTPUT"
+
+      - name: Configure 15-minute AWS OIDC credentials as step outputs only
+        id: aws-creds
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
+        with:
+          role-to-assume: ${{ vars.W1_AWS_ROLE_ARN }}
+          aws-region: ${{ vars.W1_AWS_REGION }}
+          allowed-account-ids: ${{ vars.W1_AWS_ACCOUNT_ID }}
+          role-session-name: w1-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+          role-duration-seconds: 900
+          mask-aws-account-id: true
+          output-env-credentials: false
+          output-credentials: true
+          unset-current-credentials: true
+          inline-session-policy: ${{ steps.session-policy.outputs.policy }}
+
+      - name: Capture exact protected host surface
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws-creds.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws-creds.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws-creds.outputs.aws-session-token }}
+          AWS_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_DEFAULT_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_EC2_METADATA_DISABLED: 'true'
+        run: |
+          set -euo pipefail
+          aws sts get-caller-identity --output json > evidence/caller-identity.json
+          python3 - <<'PY'
+          import json,os
+          value=json.load(open('evidence/caller-identity.json'))
+          if value.get('Account') != os.environ['AWS_ACCOUNT_ID']:
+              raise SystemExit('caller account mismatch')
+          PY
+          aws ec2 describe-instances \
+            --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0]' \
+            --output json > evidence/instance.json
+          ROOT_VOLUME_ID="$(python3 - <<'PY'
+          import json
+          i=json.load(open('evidence/instance.json'))
+          root=i.get('RootDeviceName')
+          for mapping in i.get('BlockDeviceMappings') or []:
+              if mapping.get('DeviceName') == root and (mapping.get('Ebs') or {}).get('VolumeId'):
+                  print(mapping['Ebs']['VolumeId'])
+                  break
+          PY
+          )"
+          [[ "$ROOT_VOLUME_ID" =~ ^vol-[0-9a-f]+$ ]]
+          aws ec2 describe-volumes --volume-ids "$ROOT_VOLUME_ID" --query 'Volumes[0]' --output json > evidence/root-volume.json
+          mapfile -t SG_IDS < <(python3 - <<'PY'
+          import json
+          i=json.load(open('evidence/instance.json'))
+          for group in i.get('SecurityGroups') or []:
+              print(group['GroupId'])
+          PY
+          )
+          (( ${#SG_IDS[@]} > 0 ))
+          aws ec2 describe-security-groups --group-ids "${SG_IDS[@]}" --query 'SecurityGroups' --output json > evidence/security-groups.json
+
+      - name: Validate host surface after provider reads
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          bundle={
+            'instance':json.load(open('evidence/instance.json')),
+            'security_groups':json.load(open('evidence/security-groups.json')),
+            'root_volume':json.load(open('evidence/root-volume.json')),
+          }
+          json.dump(bundle,open('evidence/preflight-bundle.json','w'),sort_keys=True,separators=(',',':'))
+          PY
+          python3 controller/w1/aws_provider_reboot_controller.py validate-preflight \
+            --input evidence/preflight-bundle.json \
+            --output evidence/w1-protected-host-preflight-summary.json \
+            --instance-id "$INSTANCE_ID" \
+            --worker-id "$WORKER_ID" \
+            --expected-worker-sha "$W1_SHA"
+          rm -f evidence/preflight-bundle.json evidence/instance.json evidence/security-groups.json evidence/root-volume.json evidence/caller-identity.json
+
+      - name: Prove exact reviewed session has reboot permission without rebooting
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws-creds.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws-creds.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws-creds.outputs.aws-session-token }}
+          AWS_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_DEFAULT_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_EC2_METADATA_DISABLED: 'true'
+        run: |
+          set -euo pipefail
+          set +e
+          DRY_RUN_OUTPUT="$(aws ec2 reboot-instances --instance-ids "$INSTANCE_ID" --dry-run 2>&1)"
+          RC=$?
+          set -e
+          if [[ $RC -eq 0 || "$DRY_RUN_OUTPUT" != *"DryRunOperation"* ]]; then
+            echo 'EC2 RebootInstances DryRun permission check failed' >&2
+            exit 1
+          fi
+          printf '%s\n' 'DryRunOperation' > evidence/w1-reboot-dry-run-result.txt
+
+      - name: Finalize protected-host preflight binding after credentials leave scope
+        run: |
+          set -euo pipefail
+          DRY_RUN_RESULT="$(cat evidence/w1-reboot-dry-run-result.txt)"
+          python3 controller/w1/aws_persistent_host_preflight_guard.py finalize \
+            --environment-receipt evidence/w1-environment-preflight.json \
+            --session-boundary evidence/w1-protected-host-session-boundary.json \
+            --preflight-summary evidence/w1-protected-host-preflight-summary.json \
+            --dry-run-result "$DRY_RUN_RESULT" \
+            --output evidence/w1-protected-host-preflight-binding.json
+          rm -f evidence/w1-reboot-dry-run-result.txt
+          python3 - <<'PY'
+          import json
+          value=json.load(open('evidence/w1-protected-host-preflight-binding.json'))
+          assert value['real_reboot_requested'] is False
+          assert value['real_reboot_performed'] is False
+          assert value['backend_binding_created'] is False
+          assert value['persistent_worker_proof'] is False
+          assert value['w1_verified'] is False
+          assert value['canonical_c1_promoted'] is False
+          assert value['authority_effect'] is False
+          PY
+
+      - name: Upload protected host session boundary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/w1-protected-host-session-boundary.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
+
+      - name: Upload validated host preflight summary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/w1-protected-host-preflight-summary.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
+
+      - name: Upload protected host identity binding
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          path: evidence/w1-protected-host-preflight-binding.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
+
+      - name: Record strict nonclaim
+        run: |
+          {
+            echo '## W1 protected persistent-host preflight'
+            echo 'Environment identity, exact W1 SHA, EC2 host surface, tag-bound session policy, and RebootInstances DryRun were validated.'
+            echo '**NONCLAIM:** no real reboot; no backend binding; persistent_worker_proof=false; w1_verified=false; canonical C1 not promoted.'
+          } >> "$GITHUB_STEP_SUMMARY"
