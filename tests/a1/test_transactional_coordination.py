@@ -124,8 +124,41 @@ class TransactionalCoordinationTests(unittest.TestCase):
         state = mod.validate_event_chain([e1, e2, e3])
         self.assertEqual(state["last_event_type"], "PEER_REVIEW_PENDING")
         self.assertEqual(state["event_count"], 3)
+        self.assertEqual(state["active_execution_subject_sha256"], SUBJECT)
         with self.assertRaises(ValueError):
             mod.validate_event_chain([e1, e3, e2])
+
+    def test_subject_swap_without_reexecution_is_rejected(self):
+        e1 = mod.build_event(event_id="evt-1", task_id="SYNC-L4.7-002", event_type="TASK_CREATED",
+                             sequence=1, sync_epoch_sha256=EPOCH, epoch_generation=7,
+                             execution_subject_sha256=None, previous_event_sha256=None, payload_sha256=PAYLOAD)
+        e2 = mod.build_event(event_id="evt-2", task_id="SYNC-L4.7-002", event_type="EXECUTION_VERIFIED",
+                             sequence=2, sync_epoch_sha256=EPOCH, epoch_generation=7,
+                             execution_subject_sha256=SUBJECT, previous_event_sha256=e1["event_sha256"], payload_sha256=PAYLOAD)
+        e3 = mod.build_event(event_id="evt-3", task_id="SYNC-L4.7-002", event_type="PEER_REVIEW_PENDING",
+                             sequence=3, sync_epoch_sha256=EPOCH, epoch_generation=7,
+                             execution_subject_sha256="d" * 64, previous_event_sha256=e2["event_sha256"], payload_sha256=PAYLOAD)
+        with self.assertRaisesRegex(ValueError, "execution subject changed"):
+            mod.validate_event_chain([e1, e2, e3])
+
+    def test_new_subject_allowed_only_after_fix_and_reexecution(self):
+        events = []
+        def add(event_id, event_type, subject):
+            event = mod.build_event(event_id=event_id, task_id="SYNC-L4.7-002", event_type=event_type,
+                                    sequence=len(events)+1, sync_epoch_sha256=EPOCH, epoch_generation=7,
+                                    execution_subject_sha256=subject,
+                                    previous_event_sha256=None if not events else events[-1]["event_sha256"],
+                                    payload_sha256=PAYLOAD)
+            events.append(event)
+        add("evt-1", "TASK_CREATED", None)
+        add("evt-2", "EXECUTION_VERIFIED", SUBJECT)
+        add("evt-3", "PEER_REVIEW_PENDING", SUBJECT)
+        add("evt-4", "FIX_REQUIRED", SUBJECT)
+        add("evt-5", "FIX_APPLIED", SUBJECT)
+        new_subject = "d" * 64
+        add("evt-6", "EXECUTION_VERIFIED", new_subject)
+        state = mod.validate_event_chain(events)
+        self.assertEqual(state["active_execution_subject_sha256"], new_subject)
 
     def test_invalid_transition_rejected(self):
         e1 = mod.build_event(event_id="evt-1", task_id="SYNC-L4.7-002",
