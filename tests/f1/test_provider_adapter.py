@@ -18,6 +18,7 @@ import unittest
 from federation.f1.provider_adapter import (
     APPVEYOR_F1_CANDIDATE,
     GITHUB_ACTIONS_F1,
+    VerificationProof,
     AdapterRegistrationError,
     ProviderAdapter,
     expected_context,
@@ -25,6 +26,23 @@ from federation.f1.provider_adapter import (
     get,
     registered,
 )
+import hashlib
+
+
+def _real_proof(provider_id, channel, tg=1, run=999, status="VERIFIED", declared=None):
+    neutral = {
+        "receipt_schema": "metaengine.compute.f1-verification-proof.h205f22.v1",
+        "provider_id": provider_id,
+        "crypto_channel": channel,
+        "trust_generation": tg,
+        "verifier_run_id": run,
+        "verifier_run_attempt": 1,
+        "verification_status": status,
+    }
+    d = hashlib.sha256(json.dumps(neutral, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return VerificationProof(**neutral, receipt_sha256=declared or d)
+
+import json
 
 
 def _github_like(**over):
@@ -37,9 +55,13 @@ def _github_like(**over):
         crypto_channel="gh-attestation+sigstore",
         max_lifetime_seconds=600,
         external_execution_format="x:{run_id}:{run_attempt}",
-        verification_proof_sha256="c" * 64,
     )
     base.update(over)
+    # proof по умолчанию честно биндится к финальному provider_id
+    if "verification_proof" not in base and base.get("verification_proof_sha256") is None:
+        base["verification_proof"] = _real_proof(
+            base["provider_id"], base["crypto_channel"], tg=base["trust_generation"])
+    base.pop("verification_proof_sha256", None) if base.get("verification_proof_sha256") == "not-hex" else None
     return ProviderAdapter(**base)
 
 
@@ -85,13 +107,45 @@ class F1GPT001CandidateSeparationTests(unittest.TestCase):
         self.assertIn("DECLARED CANDIDATE", str(ctx.exception))
         self.assertNotIn(APPVEYOR_F1_CANDIDATE.provider_id, registered())
 
-    def test_unproven_adapter_without_proof_digest_rejected(self):
+    def test_unproven_adapter_without_proof_rejected(self):
         with self.assertRaises(AdapterRegistrationError):
-            register(_github_like(provider_id="unproven-a", verification_proof_sha256=None))
+            register(_github_like(provider_id="unproven-a", verification_proof=None))
 
     def test_malformed_proof_digest_rejected(self):
+        # VerificationProof сам пересчитывает digest: несогласованный объект невозможен;
+        # регистрация с НЕ-VerificationProof объектом отклоняется
         with self.assertRaises(AdapterRegistrationError):
-            register(_github_like(provider_id="unproven-b", verification_proof_sha256="not-hex"))
+            register(_github_like(provider_id="unproven-b", verification_proof={"fake": "object"}))
+
+    def test_tampered_proof_digest_rejected(self):
+        # internally inconsistent proof: declared digest != recomputed
+        with self.assertRaises(AdapterRegistrationError):
+            _real_proof("x", "gh-attestation+sigstore", declared="a" * 64)
+
+    def test_unverified_status_proof_rejected(self):
+        with self.assertRaises(AdapterRegistrationError):
+            _real_proof("x", "gh-attestation+sigstore", status="PENDING")
+
+    def test_proof_provider_binding_mismatch_rejected(self):
+        # proof for provider A cannot register provider B (F1-GPT-001 binding)
+        a = _github_like(provider_id="prov-a")
+        b = ProviderAdapter(
+            provider_id="prov-b", provider_kind=a.provider_kind,
+            oidc_issuer=a.oidc_issuer, sigstore_instance="public-good",
+            trust_generation=1, crypto_channel=a.crypto_channel,
+            max_lifetime_seconds=600,
+            external_execution_format="b:{run_id}:{run_attempt}",
+            verification_proof=_real_proof("prov-a", a.crypto_channel),  # чужой!
+        )
+        with self.assertRaises(AdapterRegistrationError):
+            register(b)
+
+    def test_proof_channel_binding_mismatch_rejected(self):
+        with self.assertRaises(AdapterRegistrationError):
+            register(_github_like(
+                provider_id="chan-mismatch",
+                verification_proof=_real_proof("chan-mismatch", "manual-cosign+sigstore"),
+            ))
 
     def test_proven_adapter_registers(self):
         register(_github_like(provider_id="proven-ok"))

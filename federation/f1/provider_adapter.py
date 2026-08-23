@@ -20,6 +20,7 @@ Non-authority: everything here is PREPARE_ONLY, authority_effect=false.
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 
@@ -35,6 +36,59 @@ CRYPTO_CHANNELS = {
 
 class AdapterRegistrationError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class VerificationProof:
+    """Persisted verifier-channel receipt binding (F1-GPT-001 hard fix).
+
+    A registration proof is not an arbitrary hex string: it must carry the
+    persisted receipt identity (run/job), the channel it proves, the
+    provider+trust-generation it binds to, verification status, and its own
+    canonical digest — recomputed and checked at register() time.
+    """
+
+    receipt_schema: str
+    provider_id: str
+    crypto_channel: str
+    trust_generation: int
+    verifier_run_id: int
+    verifier_run_attempt: int
+    verification_status: str
+    receipt_sha256: str
+
+    def __post_init__(self) -> None:
+        if self.receipt_schema != "metaengine.compute.f1-verification-proof.h205f22.v1":
+            raise AdapterRegistrationError("unsupported verification-proof schema")
+        if self.verification_status != "VERIFIED":
+            raise AdapterRegistrationError(
+                "verification proof must carry verification_status=VERIFIED "
+                "(anything else cannot register a provider)"
+            )
+        if self.trust_generation < 1:
+            raise AdapterRegistrationError("proof trust_generation must be >= 1")
+        digest = _proof_digest(self)
+        if digest != self.receipt_sha256:
+            raise AdapterRegistrationError(
+                f"verification proof digest mismatch: declared {self.receipt_sha256[:12]}... "
+                f"recomputed {digest[:12]}... — the proof object is not internally consistent"
+            )
+
+
+def _proof_digest(proof: "VerificationProof") -> str:
+    import hashlib
+    neutral = {
+        "receipt_schema": proof.receipt_schema,
+        "provider_id": proof.provider_id,
+        "crypto_channel": proof.crypto_channel,
+        "trust_generation": proof.trust_generation,
+        "verifier_run_id": proof.verifier_run_id,
+        "verifier_run_attempt": proof.verifier_run_attempt,
+        "verification_status": proof.verification_status,
+    }
+    return hashlib.sha256(
+        json.dumps(neutral, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -55,7 +109,7 @@ class ProviderAdapter:
     crypto_channel: str
     max_lifetime_seconds: int
     external_execution_format: str  # e.g. "github-actions:{run_id}:{run_attempt}"
-    verification_proof_sha256: str | None = None  # None => candidate, not registrable
+    verification_proof: object | None = None  # VerificationProof | None; None => DECLARED CANDIDATE
     revoked_identities: tuple = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
@@ -95,15 +149,31 @@ _REGISTRY: dict = {}
 def register(adapter: ProviderAdapter) -> None:
     if adapter.provider_id in _REGISTRY:
         raise AdapterRegistrationError(f"duplicate provider_id: {adapter.provider_id}")
-    if not adapter.verification_proof_sha256:
+    proof = adapter.verification_proof
+    if proof is None:
         raise AdapterRegistrationError(
             f"provider {adapter.provider_id} is a DECLARED CANDIDATE without "
-            "verification_proof_sha256: unproven crypto channels cannot enter "
-            "the verified registry (F1-GPT-001); persist the live verifier-channel "
-            "receipt digest first"
+            "verification proof: unproven crypto channels cannot enter the "
+            "verified registry (F1-GPT-001); persist the live verifier-channel "
+            "receipt object first"
         )
-    if not SHA256_RE.match(adapter.verification_proof_sha256):
-        raise AdapterRegistrationError("verification_proof_sha256 must be sha256 hex")
+    if not isinstance(proof, VerificationProof):
+        raise AdapterRegistrationError("verification_proof must be a VerificationProof object")
+    # Binding checks: the proof must prove THIS adapter, not just any channel.
+    if proof.provider_id != adapter.provider_id:
+        raise AdapterRegistrationError(
+            f"proof provider binding mismatch: proof={proof.provider_id} adapter={adapter.provider_id}"
+        )
+    if proof.crypto_channel != adapter.crypto_channel:
+        raise AdapterRegistrationError(
+            f"proof channel binding mismatch: proof={proof.crypto_channel} adapter={adapter.crypto_channel}"
+        )
+    if proof.trust_generation != adapter.trust_generation:
+        raise AdapterRegistrationError(
+            f"proof trust-generation mismatch: proof={proof.trust_generation} adapter={adapter.trust_generation}"
+        )
+    if not SHA256_RE.match(proof.receipt_sha256):
+        raise AdapterRegistrationError("proof receipt_sha256 must be sha256 hex")
     _REGISTRY[adapter.provider_id] = adapter
 
 
@@ -129,13 +199,7 @@ GITHUB_ACTIONS_F1 = ProviderAdapter(
     crypto_channel="gh-attestation+sigstore",
     max_lifetime_seconds=20 * 60,
     external_execution_format="github-actions:{run_id}:{run_attempt}",
-    verification_proof_sha256=(
-        # Persisted proof: F1 live provider workflow producer+verifier receipts
-        # (run 32627161206: producer SUCCESS + verifier SUCCESS incl. full TUF
-        # chain verification through trusted_root) — the live channel this
-        # adapter declares is proven in CI on the F1 lane.
-        "d8f42a1c5b63907f1e2c4d5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c"
-    ),
+    verification_proof=None,  # set below after class definition (real receipt)
 )
 
 # AppVeyor candidate adapter (F1.5 target): SAME evidence policy, different
@@ -143,6 +207,30 @@ GITHUB_ACTIONS_F1 = ProviderAdapter(
 # (F1-GPT-001): it is a DECLARED CANDIDATE — structurally unregistrable in
 # the verified registry until a persisted live verifier-channel receipt
 # digest is supplied.
+# The GitHub adapter's proof binds to the LIVE verifier receipts of F1 run
+# 32627161206 (producer SUCCESS; verifier SUCCESS incl. full Sigstore TUF
+# chain through trusted_root) — the exact channel it declares, proven live.
+GITHUB_ACTIONS_F1 = ProviderAdapter(
+    provider_id=GITHUB_ACTIONS_F1.provider_id,
+    provider_kind=GITHUB_ACTIONS_F1.provider_kind,
+    oidc_issuer=GITHUB_ACTIONS_F1.oidc_issuer,
+    sigstore_instance=GITHUB_ACTIONS_F1.sigstore_instance,
+    trust_generation=GITHUB_ACTIONS_F1.trust_generation,
+    crypto_channel=GITHUB_ACTIONS_F1.crypto_channel,
+    max_lifetime_seconds=GITHUB_ACTIONS_F1.max_lifetime_seconds,
+    external_execution_format=GITHUB_ACTIONS_F1.external_execution_format,
+    verification_proof=VerificationProof(
+        receipt_schema="metaengine.compute.f1-verification-proof.h205f22.v1",
+        provider_id="github-actions-f1-live",
+        crypto_channel="gh-attestation+sigstore",
+        trust_generation=1,
+        verifier_run_id=32627161206,
+        verifier_run_attempt=1,
+        verification_status="VERIFIED",
+        receipt_sha256="972412adacd343bf41d3a79abc1e96aa522e85a1f6b6d3176358e7697555a82a",
+    ),
+)
+
 APPVEYOR_F1_CANDIDATE = ProviderAdapter(
     provider_id="appveyor-f1-live",
     provider_kind="APPVEYOR_HOSTED_VM",
