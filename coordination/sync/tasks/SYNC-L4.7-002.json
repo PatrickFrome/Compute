@@ -1,0 +1,27 @@
+{
+  "schema": "metaengine.compute.sync-task.h205f22.v1",
+  "task_id": "SYNC-L4.7-002",
+  "mode": "PREPARE_ONLY",
+  "task_kind": "REGRESSION_PACK",
+  "read_only": true,
+  "authority_effect": false,
+  "canonical": false,
+  "sync_epoch": {
+    "schema": "metaengine.compute.sync-epoch.h205f22.v1",
+    "semantic_head": "metaengine-h205f22-recovery-dev-20260821-cp072",
+    "payload_root_sha256": "14ef848e935dd12a6b3ada23f7fed6016788fcbaf2856c1490fd4e45caeed140",
+    "roadmap_definition_sha256": "96068a842c7dcb37d216aad6defc7b51e291394e916f76beed447be630024925",
+    "main_sha": "00afd65a5da73cbf5741dee9d37d0501eb1278f4",
+    "effective_live_claim_ids": []
+  },
+  "sync_epoch_sha256": "5c0a35c4123190251059b0c092becd33d44efa9d7ed2466add650c3569938e4c",
+  "mutation_domains": [],
+  "required_checks": [
+    "AUTHORITY_PLANE_GUARDS",
+    "A1_SANDBOX_GUARDS",
+    "CROSS_PROVIDER_GUARDS"
+  ],
+  "peer_review_required": true,
+  "lesson_refs": ["L-0001", "L-0010", "L-0011"],
+  "success_disposition": "EVIDENCE_READY_NON_AUTHORITY"
+}

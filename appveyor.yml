@@ -1,0 +1,42 @@
+version: 1.0.{build}
+
+image: Ubuntu2404
+skip_tags: true
+skip_branch_with_pr: true
+clone_depth: 50
+
+build: off
+deploy: off
+
+test_script:
+  - sh: |
+      set -euo pipefail
+      python3 --version
+      node --version
+      git --version
+
+      if [ -n "${APPVEYOR_PULL_REQUEST_HEAD_COMMIT:-}" ]; then
+        export H205F22_EXPECTED_GIT_SHA="$APPVEYOR_PULL_REQUEST_HEAD_COMMIT"
+        if ! git cat-file -e "${H205F22_EXPECTED_GIT_SHA}^{commit}" 2>/dev/null; then
+          git fetch --no-tags origin "$H205F22_EXPECTED_GIT_SHA"
+        fi
+        git checkout --detach "$H205F22_EXPECTED_GIT_SHA"
+      else
+        export H205F22_EXPECTED_GIT_SHA="$APPVEYOR_REPO_COMMIT"
+      fi
+
+      test "$(git rev-parse HEAD)" = "$H205F22_EXPECTED_GIT_SHA"
+      python3 -m unittest \
+        tests.a1.test_zero_spend_runner \
+        tests.a1.test_cross_provider_verify \
+        tests.a1.test_execution_subject \
+        tests.a1.test_peer_review_barrier \
+        tests.a1.test_sync_task_runner -v
+      python3 coordination/execution/zero_spend_runner.py --provider appveyor --output evidence/appveyor-zero-spend.json
+      python3 -c "import json,pathlib; d=json.loads(pathlib.Path('evidence/appveyor-zero-spend.json').read_text()); assert d['provider']['kind']=='appveyor'; assert d['source']['git_sha']==d['source']['expected_git_sha']; assert d['source']['expected_git_sha_source']=='H205F22_EXPECTED_GIT_SHA'; assert d['sync_task']['task_id']=='SYNC-L4.7-002'; assert d['sync_task']['sync_epoch_sha256']=='5c0a35c4123190251059b0c092becd33d44efa9d7ed2466add650c3569938e4c'; assert d['authority']['authority_effect'] is False; assert d['authority']['execution_authority'] is False; assert d['authority']['persistent_worker_proof'] is False; assert d['authority']['w1_verified'] is False; assert all(x['passed'] for x in d['checks']); print(d['contract']['provider_neutral_result_sha256'])"
+
+artifacts:
+  - path: evidence/appveyor-zero-spend.json
+    name: a1-appveyor-zero-spend-evidence
+  - path: evidence/sync-task-result.json
+    name: a1-sync-task-result

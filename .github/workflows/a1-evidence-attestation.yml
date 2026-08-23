@@ -1,0 +1,236 @@
+name: A1 Evidence Bundle Attestation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'coordination/evidence/**'
+      - 'coordination/sync/schema_version_policy.py'
+      - 'tests/a1/test_evidence_bundle.py'
+      - 'tests/a1/test_schema_version_policy.py'
+      - 'tests/a1/test_evidence_attestation_workflow_contract.py'
+      - 'spec/a1/SYNC_EVIDENCE_BUNDLE_V1.md'
+      - '.github/workflows/a1-evidence-attestation.yml'
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Historical GitHub run containing a1-cross-provider-readback'
+        required: true
+        type: string
+      pr_number:
+        description: 'PR containing the persisted ChatGPT review'
+        required: true
+        type: string
+      execution_subject_sha256:
+        description: 'Exact completed execution-subject digest to bundle'
+        required: true
+        type: string
+      after_seq:
+        description: 'Read GLM PAP messages strictly after this sequence'
+        required: false
+        default: '22'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Compile evidence modules
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            coordination/evidence/evidence_bundle.py \
+            coordination/sync/schema_version_policy.py
+      - name: Run deterministic evidence guards
+        run: |
+          set -euo pipefail
+          python3 -m unittest \
+            tests.a1.test_schema_version_policy \
+            tests.a1.test_evidence_bundle \
+            tests.a1.test_evidence_attestation_workflow_contract -v
+
+  live-attest:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: deterministic-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: a1-peer-review-ingest
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PAP_BASE_URL: https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/pap-transport
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      PR_NUMBER: ${{ inputs.pr_number }}
+      EXPECTED_SUBJECT_SHA256: ${{ inputs.execution_subject_sha256 }}
+      AFTER_SEQ: ${{ inputs.after_seq }}
+    steps:
+      - name: Checkout trusted main implementation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Validate dispatch parameters
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]
+          [[ "$AFTER_SEQ" =~ ^[0-9]+$ ]]
+          [[ "$EXPECTED_SUBJECT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+
+      - name: Persisted-read completed cross-provider subject
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/source
+          gh run download "$SOURCE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name a1-cross-provider-readback \
+            --dir /tmp/source
+          test -s /tmp/source/execution-subject.json
+          test -s /tmp/source/cross-provider-readback.json
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          s=json.loads(Path('/tmp/source/execution-subject.json').read_text())
+          assert s['schema']=='metaengine.compute.sync-execution-subject.h205f22.v1'
+          assert s['execution_subject_sha256']==os.environ['EXPECTED_SUBJECT_SHA256']
+          assert s['cross_provider_evidence_class']=='CROSS_PROVIDER_REPRODUCED_VERIFIED'
+          assert s['identity_source']=='PERSISTED_APPVEYOR_ARTIFACT_BYTES'
+          assert s['authority']['authority_effect'] is False
+          PY
+
+      - name: Persisted-read ChatGPT review from GitHub
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100" > /tmp/github-reviews.json
+          python3 coordination/sync/github_review_ingest.py \
+            --github-reviews /tmp/github-reviews.json \
+            --execution-subject /tmp/source/execution-subject.json \
+            --output /tmp/chatgpt-ingest.json
+
+      - name: Persisted-read GLM review from PAP
+        env:
+          PAP_CHATGPT_TOKEN: ${{ secrets.PAP_CHATGPT_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$PAP_CHATGPT_TOKEN"
+          umask 077
+          printf 'header = "Authorization: Bearer %s"\n' "$PAP_CHATGPT_TOKEN" > /tmp/pap-curl.conf
+          curl --config /tmp/pap-curl.conf \
+            --proto '=https' --tlsv1.2 --fail --silent --show-error \
+            --connect-timeout 10 --max-time 30 \
+            "$PAP_BASE_URL/pap/read?peer=glm&after_seq=$AFTER_SEQ" \
+            -o /tmp/pap-read.json
+          rm -f /tmp/pap-curl.conf
+          python3 coordination/sync/pap_review_ingest.py \
+            --pap-read /tmp/pap-read.json \
+            --execution-subject /tmp/source/execution-subject.json \
+            --output /tmp/glm-ingest.json
+
+      - name: Re-evaluate exact persisted peer-review barrier
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/reviews
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          for src, dst in [
+              ('/tmp/chatgpt-ingest.json','/tmp/reviews/chatgpt-review.json'),
+              ('/tmp/glm-ingest.json','/tmp/reviews/glm-review.json'),
+          ]:
+              d=json.loads(Path(src).read_text())
+              Path(dst).write_text(json.dumps(d['review'], sort_keys=True, indent=2)+'\n')
+          PY
+          python3 coordination/sync/peer_review_barrier.py \
+            --execution-subject /tmp/source/execution-subject.json \
+            --review /tmp/reviews/chatgpt-review.json \
+            --review /tmp/reviews/glm-review.json \
+            --output /tmp/barrier.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          b=json.loads(Path('/tmp/barrier.json').read_text())
+          assert b['outcome']=='PEER_REVIEW_COMPLETE'
+          assert b['blocking_finding_ids']==[]
+          assert b['authority']['authority_effect'] is False
+          PY
+
+      - name: Build deterministic EVIDENCE_READY bundle
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/l4.8
+          python3 -m coordination.evidence.evidence_bundle \
+            --execution-subject /tmp/source/execution-subject.json \
+            --cross-provider-readback /tmp/source/cross-provider-readback.json \
+            --chatgpt-ingest /tmp/chatgpt-ingest.json \
+            --glm-ingest /tmp/glm-ingest.json \
+            --barrier /tmp/barrier.json \
+            --output-dir evidence/l4.8
+          test -s evidence/l4.8/h205f22-sync-l47-002-evidence.tar
+          test -s evidence/l4.8/bundle-receipt.json
+
+      - name: Attest deterministic evidence tar with GitHub OIDC
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: evidence/l4.8/h205f22-sync-l47-002-evidence.tar
+
+      - name: Persist Sigstore bundle output
+        run: |
+          set -euo pipefail
+          test -n '${{ steps.attest.outputs.bundle-path }}'
+          cp '${{ steps.attest.outputs.bundle-path }}' evidence/l4.8/sigstore-bundle.json
+          test -s evidence/l4.8/sigstore-bundle.json
+
+      - name: Independently verify GitHub artifact attestation
+        run: |
+          set -euo pipefail
+          gh attestation verify \
+            evidence/l4.8/h205f22-sync-l47-002-evidence.tar \
+            -R "$GITHUB_REPOSITORY" \
+            --format json > evidence/l4.8/attestation-verification.json
+          test -s evidence/l4.8/attestation-verification.json
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          receipt=json.loads(Path('evidence/l4.8/bundle-receipt.json').read_text())
+          digest=hashlib.sha256(Path('evidence/l4.8/h205f22-sync-l47-002-evidence.tar').read_bytes()).hexdigest()
+          assert digest==receipt['bundle_sha256']
+          assert receipt['evidence_class']=='EVIDENCE_READY_NON_AUTHORITY'
+          assert receipt['authority_effect'] is False
+          assert receipt['canonical'] is False
+          assert receipt['w1_verified'] is False
+          PY
+
+      - name: Remove raw provider responses
+        if: always()
+        run: rm -f /tmp/github-reviews.json /tmp/pap-read.json /tmp/pap-curl.conf
+
+      - name: Upload credential-free attested evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: a1-attested-evidence-ready-non-authority
+          path: |
+            evidence/l4.8/h205f22-sync-l47-002-evidence.tar
+            evidence/l4.8/bundle-receipt.json
+            evidence/l4.8/manifest.json
+            evidence/l4.8/evidence-statement.json
+            evidence/l4.8/schema-version-policy.json
+            evidence/l4.8/sigstore-bundle.json
+            evidence/l4.8/attestation-verification.json
+          if-no-files-found: error
+          retention-days: 30

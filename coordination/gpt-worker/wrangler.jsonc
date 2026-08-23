@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "metaengine-h205f22-gpt-coordinator",
+  "main": "src/index.mjs",
+  "compatibility_date": "2026-08-23",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "GPT_COORDINATOR",
+        "class_name": "GptCoordinationAgent"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["GptCoordinationAgent"]
+    }
+  ],
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+  "vars": {
+    "PAP_BASE_URL": "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/pap-transport",
+    "OPENAI_MODEL": "gpt-5.4",
+    "POLL_INTERVAL_SECONDS": "60"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}
