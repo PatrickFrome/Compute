@@ -1,0 +1,118 @@
+name: A1 E2B PREPARED Sandbox Smoke
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'coordination/e2b/**'
+      - 'tests/a1/test_e2b_prepared_smoke.py'
+      - 'docs/A1_E2B_PREPARED_SANDBOX.md'
+      - '.github/workflows/a1-e2b-prepared-smoke.yml'
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type RUN_E2B_PREPARED_SMOKE'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Parse adapter and run deterministic guards
+        run: |
+          set -euo pipefail
+          python3 -m py_compile coordination/e2b/prepared_smoke.py
+          python3 -m unittest tests.a1.test_e2b_prepared_smoke -v
+
+      - name: Validate PREPARED-only contract
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          raw=Path('coordination/e2b/prepared_smoke.py').read_text()
+          workflow=Path('.github/workflows/a1-e2b-prepared-smoke.yml').read_text()
+          assert 'allow_internet_access=False' in raw
+          assert 'execution_authority": False' in raw
+          assert 'persistent_worker_proof": False' in raw
+          assert 'w1_verified": False' in raw
+          assert 'E2B_API_KEY' in raw
+          assert 'RUN_E2B_PREPARED_SMOKE' in workflow
+          assert 'pull_request' in workflow
+          assert "github.ref == 'refs/heads/main'" in workflow
+          assert 'secrets.E2B_API_KEY' in workflow
+          PY
+
+  live-smoke:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.confirmation == 'RUN_E2B_PREPARED_SMOKE'
+    needs: deterministic-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+      E2B_EXPECTED_GIT_SHA: ${{ github.sha }}
+      E2B_SOURCE_ARCHIVE: /tmp/e2b-source.tar.gz
+      E2B_EVIDENCE_OUTPUT: evidence/e2b-prepared-smoke.json
+      E2B_SANDBOX_TIMEOUT_SECONDS: '300'
+    steps:
+      - name: Checkout exact main revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Require E2B secret without printing it
+        run: |
+          set -euo pipefail
+          test -n "$E2B_API_KEY"
+
+      - name: Build credential-free source archive
+        run: |
+          set -euo pipefail
+          tar --exclude=.git --exclude=evidence -czf "$E2B_SOURCE_ARCHIVE" .
+          sha256sum "$E2B_SOURCE_ARCHIVE"
+
+      - name: Install pinned E2B Python SDK
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check --no-input 'e2b==2.38.0'
+
+      - name: Run E2B PREPARED smoke
+        run: |
+          set -euo pipefail
+          python3 coordination/e2b/prepared_smoke.py
+
+      - name: Verify credential-free evidence artifact
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,re
+          from pathlib import Path
+          p=Path('evidence/e2b-prepared-smoke.json')
+          data=json.loads(p.read_text())
+          assert data['mode']=='PREPARE_ONLY'
+          assert data['authority']['authority_effect'] is False
+          assert data['authority']['w1_verified'] is False
+          assert data['lifecycle']['destroy_confirmed'] is True
+          text=p.read_text()
+          assert not re.search(r'\be2b_[A-Za-z0-9_-]{16,}\b', text)
+          PY
+
+      - name: Upload non-authority E2B smoke evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: a1-e2b-prepared-smoke
+          path: evidence/e2b-prepared-smoke.json
+          if-no-files-found: error
+          retention-days: 30
