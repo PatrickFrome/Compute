@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Provider-neutral PREPARED execution contract for H205F22.
+"""Provider-neutral PREPARE_ONLY execution contract for H205F22.
 
-Runs the same deterministic checks on GitHub Actions and AppVeyor, binds the
-result to the exact checked-out Git SHA, and emits a credential-free evidence
-manifest. This lane is ephemeral CI execution only: it never satisfies W1,
-never grants project authority, and never canonicalizes state.
+Runs the same deterministic checks and typed sync task on GitHub Actions and
+AppVeyor, binds the result to the exact checked-out Git SHA, and emits a
+credential-free evidence manifest. This lane is ephemeral CI execution only:
+it never satisfies W1, never grants project authority, and never canonicalizes
+state.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SECRET_KEY_RE = re.compile(r"(secret|token|password|credential|api[_-]?key|private[_-]?key)", re.I)
 SECRET_VALUE_PATTERNS = [
     re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
@@ -29,6 +31,7 @@ SECRET_VALUE_PATTERNS = [
     re.compile(r"\be2b_[A-Za-z0-9_-]{16,}\b"),
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
 ]
+SYNC_TASK_RESULT = Path("evidence/sync-task-result.json")
 
 PROVIDERS = {
     "github-actions": {
@@ -53,6 +56,11 @@ CHECKS = [
     ["node", "--check", "coordination/gpt-worker/src/guards.mjs"],
     ["node", "--check", "coordination/gpt-worker/src/index.mjs"],
     ["node", "--test", "coordination/gpt-worker/test/guards.test.mjs"],
+    [
+        "python3", "coordination/sync/sync_task_runner.py",
+        "--task", "coordination/sync/tasks/SYNC-L4.7-001.json",
+        "--output", "evidence/sync-task-result.json",
+    ],
 ]
 
 
@@ -111,17 +119,37 @@ def run_checks() -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for argv in CHECKS:
         p = run_capture(argv)
-        item = {
-            "command": argv,
-            "passed": p.returncode == 0,
-            "returncode": p.returncode,
-        }
+        item = {"command": argv, "passed": p.returncode == 0, "returncode": p.returncode}
         results.append(item)
         if p.returncode != 0:
             sys.stderr.write(p.stdout[-3000:])
             sys.stderr.write(p.stderr[-3000:])
             raise RuntimeError(f"check failed: {' '.join(argv)}")
     return results
+
+
+def load_sync_task_result() -> dict[str, str]:
+    if not SYNC_TASK_RESULT.is_file():
+        raise RuntimeError("typed sync task result missing")
+    data = json.loads(SYNC_TASK_RESULT.read_text(encoding="utf-8"))
+    if data.get("schema") != "metaengine.compute.sync-task-result.h205f22.v1":
+        raise ValueError("unexpected sync task result schema")
+    authority = data.get("authority") or {}
+    for key in ("execution_authority", "canonical", "authority_effect", "project_claim_authority"):
+        if authority.get(key) is not False:
+            raise ValueError(f"sync task result authority.{key} must be false")
+    neutral = {
+        "task_id": str(data.get("task_id") or ""),
+        "task_sha256": str(data.get("task_sha256") or ""),
+        "sync_epoch_sha256": str(data.get("sync_epoch_sha256") or ""),
+        "task_result_sha256": str(data.get("task_result_sha256") or ""),
+    }
+    for key in ("task_sha256", "sync_epoch_sha256", "task_result_sha256"):
+        if not SHA256_RE.fullmatch(neutral[key]):
+            raise ValueError(f"invalid sync task {key}")
+    if not neutral["task_id"]:
+        raise ValueError("sync task id missing")
+    return neutral
 
 
 def expected_sha_for(provider_cfg: dict[str, str]) -> tuple[str, str]:
@@ -153,11 +181,13 @@ def main() -> int:
         raise RuntimeError("tracked working tree must be clean before execution")
 
     checks = run_checks()
+    sync_task = load_sync_task_result()
 
     contract = {
         "schema": "metaengine.compute.a1.zero-spend-execution-contract.h205f22.v1",
         "check_commands": CHECKS,
         "source_binding": "EXACT_GIT_SHA_AND_TREE",
+        "sync_task_binding": "TYPED_TASK_AND_EPOCH_HASH",
         "authority_effect": False,
     }
     provider_neutral_result = {
@@ -165,6 +195,7 @@ def main() -> int:
         "git_sha": current_sha,
         "tree_sha": tree_sha,
         "checks": [{"command": x["command"], "passed": x["passed"]} for x in checks],
+        "sync_task": sync_task,
     }
 
     manifest = {
@@ -189,6 +220,7 @@ def main() -> int:
             "sha256": sha256_json(contract),
             "provider_neutral_result_sha256": sha256_json(provider_neutral_result),
         },
+        "sync_task": sync_task,
         "runtime": {
             "os": platform.system().lower(),
             "arch": platform.machine(),
@@ -218,6 +250,9 @@ def main() -> int:
         "status": "PASS",
         "provider": args.provider,
         "git_sha": current_sha,
+        "task_id": sync_task["task_id"],
+        "sync_epoch_sha256": sync_task["sync_epoch_sha256"],
+        "task_result_sha256": sync_task["task_result_sha256"],
         "provider_neutral_result_sha256": manifest["contract"]["provider_neutral_result_sha256"],
         "authority_effect": False,
     }, sort_keys=True))
