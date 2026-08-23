@@ -1,6 +1,14 @@
 name: W1 Linux Admission Contract
 
 on:
+  push:
+    branches:
+      - work/w1-linux-worker-safety
+    paths:
+      - 'worker/native_linux/admission_contract.py'
+      - 'tests/test_w1_admission_contract.py'
+      - '.github/workflows/w1-admission-contract.yml'
+      - 'research/W1_DEV_CYCLE_001_ADMISSION_CONTRACT.md'
   pull_request:
     branches: [main]
     paths:
@@ -22,6 +30,11 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+
+      - name: Verify exact source head
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 
       - name: Compile contract
         run: |
