@@ -105,11 +105,12 @@ CONFIGURED / NOT LIVE
 2. Authorize public-repository access only if that is sufficient for the account.
 3. Add `PatrickFrome/Compute` as a project.
 4. Leave repository configuration sourced from root `appveyor.yml`.
-5. Trigger one build of the current A1 branch or `main` after merge.
-6. Download/read `a1-appveyor-zero-spend-evidence`.
-7. Compare its `provider_neutral_result_sha256` with the GitHub Actions artifact for the exact same Git SHA.
+5. Register the AppVeyor webhook in the GitHub repository. As of 2026-08-23 this step is reported complete; the endpoint value is intentionally not stored in the repository.
+6. Trigger one build of the current A1 branch or `main` after merge.
+7. Download/read `a1-appveyor-zero-spend-evidence`.
+8. Compare its `provider_neutral_result_sha256` with the GitHub Actions artifact for the exact same Git SHA.
 
-Do not store GitHub PATs, Supabase service-role keys, OpenAI keys or other project secrets in `appveyor.yml`.
+Do not store GitHub PATs, Supabase service-role keys, OpenAI keys, webhook ingress URLs, or other project secrets/sensitive endpoints in `appveyor.yml` or evidence artifacts.
 
 ## Cross-provider acceptance
 
