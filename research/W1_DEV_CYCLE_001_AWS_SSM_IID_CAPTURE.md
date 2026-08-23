@@ -1,0 +1,142 @@
+# W1 DEV-CYCLE-001 — AWS SSM IID capture transport contract
+
+Status: CONTRACT IMPLEMENTED / LIVE SSM EXECUTION NOT YET PERFORMED / NON-AUTHORITY
+
+Canonical Level-1 milestone: **C1 — First Real Linux Worker**  
+Level-2 milestone: `W1_PERSISTENT_LINUX_WORKER_SAFETY`
+
+## Same-World precondition
+
+Before this slice:
+
+- semantic head remained CP072;
+- roadmap definition integrity remained true;
+- W1 claim #19 remained active with Supervisor directive #22 `CONTINUE`;
+- exact W1 head `cbce8d143a839b459193ecde2d9ed9c9968a510f` had 4/4 exact-head workflows green;
+- live W1 evidence remained: reboot receipts `0`, backend bindings `0`, dedicated safety verifications `0`, safety observations `18`;
+- no canonical advancement and no synthetic live evidence were created.
+
+## Why Systems Manager rather than SSH
+
+The existing W1 AWS workflows validate provider-side EC2 state and can request a reboot, but there is no host execution transport capable of collecting the newly implemented IMDSv2 IID courier envelope from the persistent EC2 instance.
+
+Current AWS documentation was rechecked on 2026-08-23. Systems Manager Session Manager and Run Command are designed to manage EC2 managed nodes without opening inbound ports, maintaining bastion hosts, or managing SSH keys. Run Command can be restricted by IAM and managed-node tags. `DescribeInstanceInformation` exposes the managed-node connection state and Linux/EC2 platform identity. `GetCommandInvocation` returns up to 24,000 stdout characters and 8,000 stderr characters. Run Command command parameters are auditable and must not contain secrets.
+
+For W1, Session Manager interactive access is unnecessary and is therefore not granted. The selected transport primitive is only `ssm:SendCommand` + result readback.
+
+## Adopted trust model
+
+SSM is an execution/transport channel, not provider-identity authority.
+
+A successful SSM command may prove only that an exact reviewed command was reported successful on the exact managed-node target. The returned host envelope remains `HOST_UNTRUSTED_TRANSPORT` and must still pass the independent pinned AWS IID cryptographic verifier before `SIGNED_PROVIDER_IDENTITY` can exist.
+
+The contract therefore hard-fails any attempt to use SSM success as reboot, persistence, admission, W1, canonical, or provider-identity proof.
+
+## Least-privilege session boundary
+
+`controller/w1/aws_ssm_iid_capture_guard.py` builds a session policy containing only:
+
+- `ssm:DescribeInstanceInformation`;
+- `ssm:DescribeDocument`;
+- `ssm:GetDocument`;
+- `ssm:SendCommand`;
+- `ssm:GetCommandInvocation`.
+
+It does **not** grant:
+
+- `ssm:StartSession`;
+- SSH/port forwarding;
+- EC2 write operations;
+- S3 output;
+- CloudWatch output;
+- Secrets Manager;
+- KMS decryption.
+
+`SendCommand` authorization is split between the exact AWS document ARN and exact EC2 instance ARN. The instance-resource permission is additionally conditioned on the same six W1 tags already used by the protected-host preflight contract: project, milestone, worker ID, W1 Git SHA, noncanonical authority and persistent-host execution tier.
+
+## Pinned SSM document
+
+The only allowed command document is `AWS-RunShellScript` version `1`.
+
+The live workflow is not allowed to trust the name alone. Before any SendCommand, it must read the AWS document description and require:
+
+- `Owner=Amazon`;
+- `DocumentType=Command`;
+- `Status=Active`;
+- default version exactly `1`;
+- Linux support;
+- SHA-256 equal to an independently reviewed protected configuration value.
+
+`SendCommand` itself must also carry that exact document version, document hash and `Sha256` hash type. AWS documents support specifying the document hash so execution fails if document content does not match the expected hash.
+
+This slice intentionally does not invent the live document hash. It must be captured from the real protected AWS environment and independently reviewed before execution.
+
+## Exact courier source execution
+
+The command plan embeds the exact reviewed `worker/native_linux/aws_iid_courier.py` source bytes as base64. On the host it:
+
+1. creates a private temporary directory;
+2. reconstructs the source bytes;
+3. verifies their SHA-256 locally before execution;
+4. runs the courier;
+5. emits only the resulting courier JSON to stdout;
+6. removes the temporary directory on exit.
+
+No GitHub/raw URL fetch occurs on the EC2 host. No secret is included in the command parameters. The courier itself contacts only fixed IMDSv2 link-local `169.254.169.254` and still cannot assert identity authority.
+
+## Result validation
+
+Before command execution, the managed-node response must resolve to exactly one target with:
+
+- exact instance ID;
+- `PingStatus=Online`;
+- `PlatformType=Linux`;
+- `ResourceType=EC2Instance`;
+- structurally valid SSM Agent version.
+
+The SendCommand response must echo the exact instance, document/version and exact command parameters generated by the plan.
+
+The invocation result is accepted only when:
+
+- command ID and instance ID are exact;
+- document/version are exact;
+- status is `Success`;
+- response code is zero;
+- stderr is empty;
+- stdout is within the AWS 24,000-character direct-output boundary;
+- stdout parses as exactly one courier JSON object;
+- the existing off-host courier decoder accepts its exact schema, nonclaims and transport hashes.
+
+The output classification remains:
+
+`W1_AWS_SSM_IID_CAPTURE_UNTRUSTED_TRANSPORT_RECEIPT`
+
+and requires next:
+
+`OFFHOST_PINNED_AWS_IID_CRYPTOGRAPHIC_VERIFICATION`.
+
+## Research sources / implications
+
+AWS current documentation supports these design choices:
+
+- Systems Manager/Session Manager avoids inbound ports and SSH keys;
+- Run Command is the non-interactive remote-command primitive;
+- IAM can restrict SendCommand using managed-node tags;
+- managed-node status exposes `Online`, Linux and EC2 resource type;
+- GetCommandInvocation direct stdout is capped at 24,000 characters;
+- Run Command API activity is auditable and plaintext command parameters must not contain secrets;
+- SendCommand supports document version and SHA-256 document hash pinning.
+
+The direct stdout cap is sufficient for the small IID document/signature envelope, but the live workflow must fail closed if output reaches the cap rather than silently switching to S3.
+
+## Next live gate
+
+This code is only the contract. A live capture still requires the protected AWS environment to prove:
+
+1. the exact EC2 instance is already an SSM managed node and `Online`;
+2. the protected OIDC role can read SSM managed-node/document state and execute the narrow SendCommand boundary;
+3. the real `AWS-RunShellScript` v1 SHA-256 is independently reviewed and configured;
+4. the command result contains the actual host courier envelope;
+5. the off-host pinned AWS IID verifier accepts the real IID/signature bytes.
+
+No real reboot should occur until this capture path is verified and the pre-reboot persisted probe/backend-binding chain is ready.

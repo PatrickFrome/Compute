@@ -1,0 +1,64 @@
+name: W1 AWS SSM IID Capture Contract
+
+on:
+  push:
+    branches:
+      - work/w1-linux-worker-safety
+    paths:
+      - 'controller/w1/aws_ssm_iid_capture_guard.py'
+      - 'tests/test_w1_aws_ssm_iid_capture_guard.py'
+      - '.github/workflows/w1-aws-ssm-iid-capture-contract.yml'
+      - 'research/W1_DEV_CYCLE_001_AWS_SSM_IID_CAPTURE.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/w1/aws_ssm_iid_capture_guard.py'
+      - 'tests/test_w1_aws_ssm_iid_capture_guard.py'
+      - '.github/workflows/w1-aws-ssm-iid-capture-contract.yml'
+      - 'research/W1_DEV_CYCLE_001_AWS_SSM_IID_CAPTURE.md'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile SSM capture guard
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/w1/aws_ssm_iid_capture_guard.py
+
+      - name: Run SSM capture adversarial tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_w1_aws_ssm_iid_capture_guard -v
+
+      - name: Assert SSM least-privilege and nonauthority boundary
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('controller/w1/aws_ssm_iid_capture_guard.py').read_text()
+          assert 'AWS-RunShellScript' in p
+          assert 'ssm:SendCommand' in p
+          assert 'ssm:GetCommandInvocation' in p
+          assert 'ssm:DescribeInstanceInformation' in p
+          assert 'ssm:StartSession' not in p
+          assert 'ec2:RebootInstances' not in p
+          assert 'secretsmanager:' not in p
+          assert 'kms:Decrypt' not in p
+          assert 's3:' not in p
+          assert 'HOST_UNTRUSTED_TRANSPORT' not in p  # imported decoder owns courier source classification
+          assert 'OFFHOST_PINNED_AWS_IID_CRYPTOGRAPHIC_VERIFICATION' in p
+          assert 'provider_identity_verified": False' in p
+          assert 'persistent_worker_proof": False' in p
+          PY
