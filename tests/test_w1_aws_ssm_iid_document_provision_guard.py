@@ -20,8 +20,8 @@ def source_b64() -> str:
     return base64.b64encode(source()).decode("ascii")
 
 
-def plan() -> dict:
-    return p.build_provision_plan(account_id=ACCOUNT, region=REGION, local_document_source=source())
+def plan(region: str = REGION) -> dict:
+    return p.build_provision_plan(account_id=ACCOUNT, region=region, local_document_source=source())
 
 
 def readback():
@@ -51,14 +51,14 @@ def readback():
 
 
 class ProvisionPlanTests(unittest.TestCase):
-    def test_plan_is_create_once_and_nonauthority(self):
+    def test_plan_is_create_once_template_and_nonauthority(self):
         value = plan()
         self.assertEqual(value["required_document_version"], "1")
-        self.assertTrue(value["create_once"])
-        self.assertFalse(value["document_update_allowed"])
-        self.assertFalse(value["document_delete_allowed"])
-        self.assertFalse(value["document_share_allowed"])
-        self.assertFalse(value["send_command_allowed"])
+        self.assertFalse(value["policy_template_update_allow"])
+        self.assertFalse(value["policy_template_delete_allow"])
+        self.assertFalse(value["policy_template_share_allow"])
+        self.assertFalse(value["policy_template_send_command_allow"])
+        self.assertFalse(value["effective_principal_permissions_verified"])
         self.assertFalse(value["authority_effect"])
         self.assertFalse(value["w1_verified"])
 
@@ -73,12 +73,23 @@ class ProvisionPlanTests(unittest.TestCase):
         self.assertEqual(content["parameters"], {})
         self.assertEqual(len(content["mainSteps"]), 1)
 
-    def test_provisioning_role_cannot_execute_or_mutate(self):
+    def test_policy_template_allows_only_create_and_readback(self):
         statements = plan()["provisioning_policy"]["Statement"]
         actions = {a for s in statements for a in ([s["Action"]] if isinstance(s["Action"], str) else s["Action"])}
         self.assertEqual(actions, {"ssm:CreateDocument", "ssm:DescribeDocument", "ssm:GetDocument"})
         for forbidden in ("ssm:SendCommand", "ssm:UpdateDocument", "ssm:DeleteDocument", "ssm:ModifyDocumentPermission", "ssm:StartSession"):
             self.assertNotIn(forbidden, actions)
+
+    def test_policy_template_does_not_claim_effective_principal_permissions(self):
+        value = plan()
+        self.assertFalse(value["effective_principal_permissions_verified"])
+        for stale in (
+            "document_update_allowed",
+            "document_delete_allowed",
+            "document_share_allowed",
+            "send_command_allowed",
+        ):
+            self.assertNotIn(stale, value)
 
     def test_create_is_restricted_to_account_owned_exact_arn_and_tags(self):
         statement = plan()["provisioning_policy"]["Statement"][0]
@@ -88,6 +99,15 @@ class ProvisionPlanTests(unittest.TestCase):
         self.assertEqual(cond["StringEquals"]["aws:RequestTag/metaengine:project"], "H205F22")
         self.assertEqual(cond["StringEquals"]["aws:RequestTag/metaengine:milestone"], "W1_PERSISTENT_LINUX_WORKER_SAFETY")
         self.assertEqual(set(cond["ForAllValues:StringEquals"]["aws:TagKeys"]), set(p._tags()))
+
+    def test_china_partition_uses_aws_cn(self):
+        value = plan("cn-north-1")
+        self.assertEqual(
+            value["document_arn"],
+            f"arn:aws-cn:ssm:cn-north-1:{ACCOUNT}:document/{p.capture.DOCUMENT_NAME}",
+        )
+        for statement in value["provisioning_policy"]["Statement"]:
+            self.assertEqual(statement["Resource"], value["document_arn"])
 
     def test_bad_account_or_region_rejected(self):
         with self.assertRaises(p.ProvisionError):
@@ -99,18 +119,41 @@ class ProvisionPlanTests(unittest.TestCase):
 
 
 class ProvisionReadbackTests(unittest.TestCase):
-    def test_version_one_exact_readback_forms_nonauthority_receipt(self):
+    def _receipt(self):
         create, describe, get_doc = readback()
-        receipt = p.validate_provisioned_document(
+        return p.validate_provisioned_document(
             plan=plan(), create_response=create, describe_response=describe,
             get_document_response=get_doc, local_document_source=source(),
         )
+
+    def test_version_one_transport_forms_nonauthority_observation(self):
+        receipt = self._receipt()
         self.assertEqual(receipt["classification"], "W1_AWS_SSM_IID_DOCUMENT_PROVISIONED_NON_AUTHORITY")
-        self.assertTrue(receipt["document_provisioned"])
+        self.assertTrue(receipt["document_provisioning_observation_validated"])
+        self.assertFalse(receipt["document_provisioned"])
+        self.assertFalse(receipt["document_provisioned_authoritatively_verified"])
         self.assertFalse(receipt["runtime_execution_authority"])
         self.assertFalse(receipt["provider_identity_verified"])
         self.assertFalse(receipt["persistent_worker_proof"])
         self.assertFalse(receipt["authority_effect"])
+
+    def test_receipt_marks_caller_supplied_aws_transport(self):
+        receipt = self._receipt()
+        evidence = receipt["evidence"]
+        self.assertEqual(evidence["aws_api_response_provenance"], p.AWS_RESPONSE_PROVENANCE)
+        self.assertFalse(evidence["live_aws_api_provenance_verified"])
+        self.assertFalse(evidence["effective_principal_permissions_verified"])
+        self.assertFalse(evidence["policy_template_update_allow"])
+        self.assertFalse(evidence["policy_template_delete_allow"])
+        self.assertFalse(evidence["policy_template_share_allow"])
+        self.assertFalse(evidence["policy_template_send_command_allow"])
+        for stale in (
+            "provisioning_role_can_update",
+            "provisioning_role_can_delete",
+            "provisioning_role_can_share",
+            "provisioning_role_can_send_command",
+        ):
+            self.assertNotIn(stale, evidence)
 
     def test_any_second_version_fails_closed(self):
         create, describe, get_doc = readback()
@@ -172,7 +215,7 @@ class StdioBoundaryTests(unittest.TestCase):
         })
         self.assertEqual(result, plan())
 
-    def test_verify_request_forms_same_nonauthority_receipt(self):
+    def test_verify_request_forms_same_nonauthority_observation(self):
         create, describe, get_doc = readback()
         result = p.handle_request({
             "command": "verify",
@@ -183,6 +226,8 @@ class StdioBoundaryTests(unittest.TestCase):
             "document_source_base64": source_b64(),
         })
         self.assertEqual(result["classification"], "W1_AWS_SSM_IID_DOCUMENT_PROVISIONED_NON_AUTHORITY")
+        self.assertTrue(result["document_provisioning_observation_validated"])
+        self.assertFalse(result["document_provisioned"])
         self.assertFalse(result["authority_effect"])
 
     def test_unknown_request_field_rejected(self):
