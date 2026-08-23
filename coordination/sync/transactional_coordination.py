@@ -193,13 +193,15 @@ def build_event(*, event_id: str, task_id: str, event_type: str, sequence: int,
 def validate_event_chain(events: list[dict[str, Any]]) -> dict[str, Any]:
     if not events:
         return {"last_event_type": None, "last_event_sha256": None,
-                "event_count": 0, "authority_effect": False}
+                "event_count": 0, "active_execution_subject_sha256": None,
+                "authority_effect": False}
 
     seen_event_ids: set[str] = set()
     previous: dict[str, Any] | None = None
     task_id: str | None = None
     epoch_generation: int | None = None
     sync_epoch_sha256: str | None = None
+    active_subject_sha256: str | None = None
 
     for index, event in enumerate(events, start=1):
         if set(event) != EVENT_KEYS:
@@ -230,6 +232,20 @@ def validate_event_chain(events: list[dict[str, Any]]) -> dict[str, Any]:
         if event["event_type"] not in TRANSITIONS[previous_type]:
             raise ValueError(f"invalid event transition: {previous_type} -> {event['event_type']}")
 
+        event_subject = event["execution_subject_sha256"]
+        if event["event_type"] == "TASK_CREATED":
+            if event_subject is not None:
+                raise ValueError("TASK_CREATED must not bind an execution subject")
+        elif event["event_type"] == "EXECUTION_VERIFIED":
+            if event_subject is None:
+                raise ValueError("EXECUTION_VERIFIED requires an execution subject")
+            active_subject_sha256 = event_subject
+        else:
+            if active_subject_sha256 is None:
+                raise ValueError("active execution subject missing")
+            if event_subject != active_subject_sha256:
+                raise ValueError("execution subject changed without new EXECUTION_VERIFIED")
+
         if task_id is None:
             task_id = str(event["task_id"])
             epoch_generation = event["epoch_generation"]
@@ -245,4 +261,6 @@ def validate_event_chain(events: list[dict[str, Any]]) -> dict[str, Any]:
 
     return {"last_event_type": previous["event_type"],
             "last_event_sha256": previous["event_sha256"],
-            "event_count": len(events), "authority_effect": False}
+            "event_count": len(events),
+            "active_execution_subject_sha256": active_subject_sha256,
+            "authority_effect": False}
