@@ -168,40 +168,132 @@ def _sha256_of(value) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def register_from_readback(adapter: ProviderAdapter, row: dict, *, evaluated_at_epoch: float) -> None:
-    """Register a provider bound to a persisted verifier-receipt row.
+def _verify_readback_receipt(receipt: object) -> dict:
+    """Validate a STRICT TYPED readback receipt emitted by the independent
+    DB-readback layer (supabase/functions/verification-readback).
 
-    F1-GPT-001 hard fix: registration authority derives ONLY from the
-    persisted row, never from caller-supplied constants.
+    Caller-supplied plain rows/dicts are NOT accepted (F1-GPT-003): the only
+    acceptable authority object is a receipt with source=SUPABASE_PERSISTED_READBACK,
+    exact schema, table identity, verification_id, row digest, evaluated_at,
+    and the row bytes themselves. The digest is recomputed HERE from the row
+    bytes and compared — a forged receipt with a copied digest fails.
     """
-    if not isinstance(row, dict) or not row:
-        raise AdapterRegistrationError("persisted readback row is required (absent DB readback is fail-closed)")
-    provider_id = row.get("provider_id")
-    external_execution_id = row.get("external_execution_id")
-    receipt_sha = row.get("receipt_sha256") or row.get("envelope_sha256")
-    expires_at = row.get("expires_at")
-    verified_at = row.get("verified_at") or row.get("created_at")
-    status = row.get("verification_status") or row.get("status")
-    if provider_id != adapter.provider_id:
-        raise AdapterRegistrationError(f"readback provider mismatch: row={provider_id} adapter={adapter.provider_id}")
-    if not receipt_sha or not SHA256_RE.match(str(receipt_sha)):
-        raise AdapterRegistrationError("readback receipt_sha256 missing/malformed")
-    # CURRENT vs HISTORICAL semantics: only CURRENT rows register providers.
     import datetime as _dt
-    if expires_at:
-        exp = _dt.datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
-        if exp.timestamp() <= evaluated_at_epoch:
-            raise AdapterRegistrationError(
-                f"readback receipt EXPIRED (expires {expires_at}); expired receipts are HISTORICAL and cannot register"
-            )
-    if status and str(status) not in {"CRYPTO_VERIFIED_EVIDENCE_READY", "VERIFIED"}:
-        raise AdapterRegistrationError(f"readback verification_status not verified: {status}")
-    # external execution identity must be derivable from the adapter's native schema
-    if external_execution_id and adapter.external_execution_format.split(":")[0] not in str(external_execution_id):
+    import hashlib as _hl
+
+    if not isinstance(receipt, dict):
+        raise AdapterRegistrationError("readback authority must be a typed receipt object (plain rows are caller-asserted)")
+    REQUIRED = {
+        "schema", "source", "table", "status", "verification_id",
+        "row", "row_digest_sha256", "evaluated_at", "authority_effect",
+    }
+    keys = set(receipt)
+    missing = sorted(REQUIRED - keys)
+    if missing:
+        raise AdapterRegistrationError(f"readback receipt missing required fields: {missing}")
+    if receipt["schema"] != "metaengine.compute.f1-verification-readback.h205f22.v1":
+        raise AdapterRegistrationError("unsupported readback receipt schema")
+    if receipt["source"] != "SUPABASE_PERSISTED_READBACK":
+        raise AdapterRegistrationError("readback receipt source must be SUPABASE_PERSISTED_READBACK (caller assertions rejected)")
+    if receipt["table"] != "destruktion_meta.compute_fabric_provider_signature_verification_h205f22":
+        raise AdapterRegistrationError("readback receipt table identity mismatch")
+    if receipt["status"] != "ROW_PRESENT":
+        raise AdapterRegistrationError(f"readback status not ROW_PRESENT: {receipt['status']}")
+    if receipt["authority_effect"] is not False:
+        raise AdapterRegistrationError("readback receipt must be non-authority")
+    if not receipt["verification_id"]:
+        raise AdapterRegistrationError("readback receipt lacks verification_id")
+    row = receipt["row"]
+    if not isinstance(row, dict) or not row:
+        raise AdapterRegistrationError("readback receipt row empty")
+    # digest recompute over the EXACT row serialization the readback layer used
+    row_text = json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+    # readback layer digests JSON.stringify(row) — python json.dumps with
+    # separators matches for flat ascii objects; verify both serializations
+    d1 = _hl.sha256(row_text.encode()).hexdigest()
+    d2 = _hl.sha256(json.dumps(row, ensure_ascii=False).encode()).hexdigest()
+    declared = str(receipt["row_digest_sha256"])
+    if declared not in (d1, d2):
         raise AdapterRegistrationError(
-            f"readback external_execution_id {external_execution_id} does not match adapter family {adapter.provider_id}"
+            f"readback row digest mismatch: declared {declared[:12]}... recomputed {d1[:12]}... — forged or tampered receipt"
         )
-    # bind registration to the row's receipt digest (single source of truth)
+    return row
+
+
+def register_from_readback(adapter: ProviderAdapter, readback_receipt: object, *, evaluated_at_epoch: float) -> None:
+    """Register a provider bound to a PERSISTED verifier-receipt row.
+
+    F1-GPT-003/004 final fix: authority derives ONLY from a strict typed
+    receipt emitted by the independent DB-readback layer. Caller-supplied
+    dicts/rows are rejected; every persisted binding field is REQUIRED and
+    must match the adapter exactly; expiry is mandatory; status is mandatory.
+    """
+    import datetime as _dt
+
+    row = _verify_readback_receipt(readback_receipt)
+    # ---- mandatory persisted bindings (F1-GPT-004): no optional passthrough ----
+    MANDATORY_ROW_FIELDS = {
+        "provider_id", "provider_kind", "external_execution_id",
+        "verification_status", "verified_at", "expires_at",
+        "verifier_id", "receipt_sha256",
+    }
+    missing = sorted(MANDATORY_ROW_FIELDS - set(row))
+    if missing:
+        raise AdapterRegistrationError(f"persisted row missing mandatory fields: {missing}")
+
+    provider_id = row["provider_id"]
+    provider_kind = row["provider_kind"]
+    exec_id = str(row["external_execution_id"])
+    status = row["verification_status"]
+    verified_at = row["verified_at"]
+    expires_at = row["expires_at"]
+    verifier_id = row["verifier_id"]
+    receipt_sha = str(row["receipt_sha256"])
+
+    if provider_id != adapter.provider_id:
+        raise AdapterRegistrationError(f"row provider mismatch: row={provider_id} adapter={adapter.provider_id}")
+    if provider_kind != adapter.provider_kind:
+        raise AdapterRegistrationError(f"row provider_kind mismatch: row={provider_kind} adapter={adapter.provider_kind}")
+    if status != "CRYPTO_VERIFIED_EVIDENCE_READY":
+        raise AdapterRegistrationError(f"row verification_status must be CRYPTO_VERIFIED_EVIDENCE_READY: {status}")
+    if not SHA256_RE.match(receipt_sha):
+        raise AdapterRegistrationError("row receipt_sha256 missing/malformed (envelope digests do not substitute)")
+    # envelope_sha256 must NOT be used as receipt_sha256 (distinct digests)
+    if "envelope_sha256" in row and str(row.get("envelope_sha256")) == receipt_sha and "signed_claims_sha256" in row:
+        raise AdapterRegistrationError("receipt_sha256 equals envelope_sha256 — digest conflation rejected")
+
+    # external execution grammar: EXACT github-actions:<run_id>:<run_attempt> for this adapter
+    import re as _re
+    m = _re.fullmatch(r"github-actions:(\d+):(\d+)", exec_id)
+    if not m:
+        raise AdapterRegistrationError(
+            f"row external_execution_id does not match exact grammar github-actions:<run_id>:<run_attempt>: {exec_id}"
+        )
+    run_id, run_attempt = int(m.group(1)), int(m.group(2))
+
+    # verified_at presence and ordering: verified_at <= evaluated_at (no future verification)
+    v_at = _dt.datetime.fromisoformat(str(verified_at).replace("Z", "+00:00"))
+    if v_at.timestamp() > evaluated_at_epoch:
+        raise AdapterRegistrationError("row verified_at is in the future — rejected")
+
+    # CURRENT vs HISTORICAL: expires_at mandatory and must be in the future
+    e_at = _dt.datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+    if e_at.timestamp() <= evaluated_at_epoch:
+        raise AdapterRegistrationError(
+            f"row EXPIRED (expires {expires_at}) — HISTORICAL rows cannot register"
+        )
+
+    # verifier identity must be present and non-empty
+    if not str(verifier_id).strip():
+        raise AdapterRegistrationError("row verifier_id empty")
+
+    # non-authority flags in the row itself (if present) must be false
+    if row.get("canonical") is True or row.get("authority_effect") is True:
+        raise AdapterRegistrationError("row claims authority — rejected")
+
+    # verification_id must bind into the registered proof
+    vid = str(readback_receipt["verification_id"])
+
     bound = ProviderAdapter(
         provider_id=adapter.provider_id,
         provider_kind=adapter.provider_kind,
@@ -216,20 +308,27 @@ def register_from_readback(adapter: ProviderAdapter, row: dict, *, evaluated_at_
             provider_id=adapter.provider_id,
             crypto_channel=adapter.crypto_channel,
             trust_generation=adapter.trust_generation,
-            verifier_run_id=int(str(external_execution_id).split(":")[1]) if external_execution_id and ":" in str(external_execution_id) else 0,
-            verifier_run_attempt=int(str(external_execution_id).split(":")[2]) if external_execution_id and str(external_execution_id).count(":") >= 2 else 1,
+            verifier_run_id=run_id,
+            verifier_run_attempt=run_attempt,
             verification_status="VERIFIED",
-            receipt_sha256=str(receipt_sha),
-            readback_authority=True,  # authority = the persisted row itself
+            receipt_sha256=receipt_sha,
+            readback_authority=True,  # authority = persisted row via typed receipt
         ),
         revoked_identities=adapter.revoked_identities,
     )
-    register(bound, replace=True)  # persisted row refreshes trust
+    # verification_id recorded in registry metadata for audit
+    _REGISTRY_BINDINGS[adapter.provider_id] = {
+        "verification_id": vid,
+        "row_digest_sha256": str(readback_receipt["row_digest_sha256"]),
+        "evaluated_at_epoch": evaluated_at_epoch,
+    }
+    register(bound, replace=True)  # fresh persisted row refreshes trust
 
 
 # --- registry (deliberately explicit; no dynamic discovery in v1) ----------
 
 _REGISTRY: dict = {}
+_REGISTRY_BINDINGS: dict = {}  # provider_id -> readback binding audit
 
 
 def register(adapter: ProviderAdapter, *, replace: bool = False) -> None:
@@ -268,6 +367,10 @@ def get(provider_id: str) -> ProviderAdapter:
     if adapter is None:
         raise AdapterRegistrationError(f"unknown provider adapter: {provider_id}")
     return adapter
+
+
+def readback_bindings() -> dict:
+    return dict(_REGISTRY_BINDINGS)
 
 
 def registered() -> list:
@@ -401,6 +504,8 @@ def expected_context(
 
 
 __all__ = [
+    "register_from_readback",
+    "readback_bindings",
     "AdapterRegistrationError",
     "ProviderAdapter",
     "GITHUB_ACTIONS_F1",

@@ -250,75 +250,43 @@ class F1GPT002NativeCoordinateTests(unittest.TestCase):
 
 
 class ReadbackRegistrationTests(unittest.TestCase):
-    """F1-GPT-001 final: registration authority derives ONLY from persisted rows."""
+    """F1-GPT-003/004 final: authority = strict typed readback receipt ONLY."""
 
     def _row(self, **over):
         base = {
             "provider_id": "github-actions-f1-live",
+            "provider_kind": "GITHUB_HOSTED_ACTIONS",
             "external_execution_id": "github-actions:32629013167:1",
-            "receipt_sha256": "60bbd9fbf5f99252cc907e244430ab7933235b28630e2b936f311b10577288c4",
             "verification_status": "CRYPTO_VERIFIED_EVIDENCE_READY",
             "verified_at": "2026-08-23T08:49:54Z",
-            "expires_at": "2099-01-01T00:00:00Z",  # far future for CURRENT semantics
+            "expires_at": "2099-01-01T00:00:00Z",
+            "verifier_id": "gh-attestation+sigstore:gh-2.97.0",
+            "receipt_sha256": "60bbd9fbf5f99252cc907e244430ab7933235b28630e2b936f311b10577288c4",
         }
         base.update(over)
         return base
 
-    def test_absent_readback_rejected_even_if_consistent(self):
-        # GPT requirement 5: reject absent DB readback even if all caller
-        # fields are internally consistent
-        with self.assertRaises(AdapterRegistrationError):
-            register_from_readback(GITHUB_ACTIONS_F1, {}, evaluated_at_epoch=1_800_000_000.0)
-        with self.assertRaises(AdapterRegistrationError):
-            register_from_readback(GITHUB_ACTIONS_F1, None, evaluated_at_epoch=1_800_000_000.0)
+    def _receipt(self, row=None, **over):
+        import hashlib, json
+        row = row if row is not None else self._row()
+        row_digest = hashlib.sha256(json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+        receipt = {
+            "schema": "metaengine.compute.f1-verification-readback.h205f22.v1",
+            "source": "SUPABASE_PERSISTED_READBACK",
+            "table": "destruktion_meta.compute_fabric_provider_signature_verification_h205f22",
+            "status": "ROW_PRESENT",
+            "verification_id": "3f1c2a90-1111-4222-8333-444455556666",
+            "row": row,
+            "row_digest_sha256": row_digest,
+            "evaluated_at": "2026-08-23T09:30:00Z",
+            "authority_effect": False,
+        }
+        receipt.update(over)
+        return receipt
 
-    def test_expired_readback_is_historical_and_rejected(self):
-        with self.assertRaises(AdapterRegistrationError):
-            register_from_readback(
-                GITHUB_ACTIONS_F1,
-                self._row(expires_at="2026-08-23T08:55:20Z"),
-                evaluated_at_epoch=1_800_000_000.0,  # 2027: far past expiry
-            )
-
-    def test_provider_mismatch_rejected(self):
-        with self.assertRaises(AdapterRegistrationError):
-            register_from_readback(
-                GITHUB_ACTIONS_F1,
-                self._row(provider_id="somebody-else"),
-                evaluated_at_epoch=1_800_000_000.0,
-            )
-
-    def test_unverified_status_rejected(self):
-        with self.assertRaises(AdapterRegistrationError):
-            register_from_readback(
-                GITHUB_ACTIONS_F1,
-                self._row(verification_status="PENDING"),
-                evaluated_at_epoch=1_800_000_000.0,
-            )
-
-    def test_current_readback_registers(self):
+    def _candidate(self):
         from federation.f1.provider_adapter import ProviderAdapter as PA
-        rb_adapter = PA(
-            provider_id="github-actions-f1-live",  # same identity
-            provider_kind=GITHUB_ACTIONS_F1.provider_kind,
-            oidc_issuer=GITHUB_ACTIONS_F1.oidc_issuer,
-            sigstore_instance=GITHUB_ACTIONS_F1.sigstore_instance,
-            trust_generation=GITHUB_ACTIONS_F1.trust_generation,
-            crypto_channel=GITHUB_ACTIONS_F1.crypto_channel,
-            max_lifetime_seconds=GITHUB_ACTIONS_F1.max_lifetime_seconds,
-            external_execution_format=GITHUB_ACTIONS_F1.external_execution_format,
-            verification_proof=None,  # candidate shell; readback supplies authority
-        )
-        try:
-            register_from_readback(rb_adapter, self._row(), evaluated_at_epoch=1_800_000_000.0)
-        except AdapterRegistrationError as e:
-            if "duplicate" not in str(e):
-                raise
-        self.assertIn("github-actions-f1-live", registered())
-
-    def test_registration_bound_to_row_receipt(self):
-        from federation.f1.provider_adapter import ProviderAdapter as PA
-        rb_adapter = PA(
+        return PA(
             provider_id="github-actions-f1-live",
             provider_kind=GITHUB_ACTIONS_F1.provider_kind,
             oidc_issuer=GITHUB_ACTIONS_F1.oidc_issuer,
@@ -329,17 +297,112 @@ class ReadbackRegistrationTests(unittest.TestCase):
             external_execution_format=GITHUB_ACTIONS_F1.external_execution_format,
             verification_proof=None,
         )
-        try:
-            register_from_readback(rb_adapter, self._row(), evaluated_at_epoch=1_800_000_000.0)
-        except AdapterRegistrationError as e:
-            if "duplicate" not in str(e):
-                raise
-        a = get("github-actions-f1-live")
-        self.assertEqual(
-            a.verification_proof.receipt_sha256,
-            "60bbd9fbf5f99252cc907e244430ab7933235b28630e2b936f311b10577288c4",
+
+    # ---- F1-GPT-003: forged local proofs ----
+
+    def test_forged_fully_populated_dict_rejected(self):
+        # GPT requirement: self-consistent local proof with no matching
+        # persisted row must FAIL — plain dict is not an authority object
+        with self.assertRaises(AdapterRegistrationError):
+            register_from_readback(self._candidate(), self._row(), evaluated_at_epoch=1_800_000_000.0)
+
+    def test_receipt_with_wrong_source_rejected(self):
+        with self.assertRaises(AdapterRegistrationError):
+            register_from_readback(
+                self._candidate(),
+                self._receipt(source="CALLER_ASSERTED"),
+                evaluated_at_epoch=1_800_000_000.0,
+            )
+
+    def test_receipt_digest_mismatch_rejected(self):
+        # copied/mutated row with stale digest = forgery
+        row = self._row(verification_status="PENDING")
+        with self.assertRaises(AdapterRegistrationError):
+            register_from_readback(
+                self._candidate(),
+                self._receipt(row=row),  # digest computed over ORIGINAL row
+                evaluated_at_epoch=1_800_000_000.0,
+            )
+
+    def test_receipt_missing_fields_rejected(self):
+        for missing in ("schema", "source", "table", "verification_id", "row", "row_digest_sha256", "evaluated_at"):
+            r = self._receipt()
+            r.pop(missing)
+            with self.assertRaises(AdapterRegistrationError):
+                register_from_readback(self._candidate(), r, evaluated_at_epoch=1_800_000_000.0)
+
+    # ---- F1-GPT-004: mandatory bindings ----
+
+    def test_missing_verification_status_rejected(self):
+        row = self._row()
+        row.pop("verification_status")
+        with self.assertRaises(AdapterRegistrationError):
+            register_from_readback(self._candidate(), self._receipt(row=row), evaluated_at_epoch=1_800_000_000.0)
+
+    def test_missing_expires_at_rejected(self):
+        row = self._row()
+        row.pop("expires_at")
+        with self.assertRaises(AdapterRegistrationError):
+            register_from_readback(self._candidate(), self._receipt(row=row), evaluated_at_epoch=1_800_000_000.0)
+
+    def test_missing_verification_id_row_field_rejected(self):
+        # verifier_id required in row
+        row = self._row()
+        row.pop("verifier_id")
+        with self.assertRaises(AdapterRegistrationError):
+            register_from_readback(self._candidate(), self._receipt(row=row), evaluated_at_epoch=1_800_000_000.0)
+
+    def test_wrong_provider_kind_rejected(self):
+        row = self._row(provider_kind="SOMETHING_ELSE")
+        with self.assertRaises(AdapterRegistrationError):
+            register_from_readback(self._candidate(), self._receipt(row=row), evaluated_at_epoch=1_800_000_000.0)
+
+    def test_row_authority_flags_rejected(self):
+        row = self._row(canonical=True)
+        with self.assertRaises(AdapterRegistrationError):
+            register_from_readback(self._candidate(), self._receipt(row=row), evaluated_at_epoch=1_800_000_000.0)
+        row2 = self._row(authority_effect=True)
+        with self.assertRaises(AdapterRegistrationError):
+            register_from_readback(self._candidate(), self._receipt(row=row2), evaluated_at_epoch=1_800_000_000.0)
+
+    def test_malformed_external_execution_id_rejected(self):
+        # substring-match bypass: contains 'github-actions' but wrong grammar
+        for bad in ("github-actions:123", "xgithub-actions:1:1", "github-actions:1:1:extra", "appveyor:5:3"):
+            row = self._row(external_execution_id=bad)
+            with self.assertRaises(AdapterRegistrationError):
+                register_from_readback(self._candidate(), self._receipt(row=row), evaluated_at_epoch=1_800_000_000.0)
+
+    def test_envelope_sha_substitution_rejected(self):
+        # envelope digest conflated with receipt digest
+        row = self._row(
+            envelope_sha256="60bbd9fbf5f99252cc907e244430ab7933235b28630e2b936f311b10577288c4",
+            signed_claims_sha256="a" * 64,
         )
+        with self.assertRaises(AdapterRegistrationError):
+            register_from_readback(self._candidate(), self._receipt(row=row), evaluated_at_epoch=1_800_000_000.0)
+
+    def test_expired_row_is_historical_rejected(self):
+        row = self._row(expires_at="2026-08-23T08:55:20Z")
+        with self.assertRaises(AdapterRegistrationError):
+            register_from_readback(self._candidate(), self._receipt(row=row), evaluated_at_epoch=1_800_000_000.0)
+
+    def test_future_verified_at_rejected(self):
+        row = self._row(verified_at="2098-01-01T00:00:00Z")
+        with self.assertRaises(AdapterRegistrationError):
+            register_from_readback(self._candidate(), self._receipt(row=row), evaluated_at_epoch=1_800_000_000.0)
+
+    def test_valid_receipt_registers_and_binds(self):
+        from federation.f1.provider_adapter import readback_bindings, get
+        register_from_readback(self._candidate(), self._receipt(), evaluated_at_epoch=1_800_000_000.0)
+        self.assertIn("github-actions-f1-live", registered())
+        a = get("github-actions-f1-live")
+        self.assertEqual(a.verification_proof.receipt_sha256,
+                         "60bbd9fbf5f99252cc907e244430ab7933235b28630e2b936f311b10577288c4")
         self.assertEqual(a.verification_proof.verifier_run_id, 32629013167)
+        bindings = readback_bindings()
+        self.assertIn("github-actions-f1-live", bindings)
+        self.assertEqual(bindings["github-actions-f1-live"]["verification_id"],
+                         "3f1c2a90-1111-4222-8333-444455556666")
 
 
 class ExistingGitHubAdapterTests(unittest.TestCase):
