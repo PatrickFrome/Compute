@@ -9,79 +9,25 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe host capabilities v3 (decisive)
+      - name: Probe host capabilities v4 decisive
         run: |
           set -euo pipefail
           mkdir -p /tmp/probe
-
           sudo -n unshare -m true 2>/dev/null && echo "YES" > /tmp/probe/sudo_unshare_mnt.txt || echo "NO" > /tmp/probe/sudo_unshare_mnt.txt
-
-          python3 -c "
-import ctypes, os, errno
-libc = ctypes.CDLL(None, use_errno=True)
-# openat2 with proper struct: struct open_how { __u64 flags; __u64 mode; __u64 resolve; }
-class OpenHow(ctypes.Structure):
-    _fields_ = [('flags', ctypes.c_uint64), ('mode', ctypes.c_uint64), ('resolve', ctypes.c_uint64)]
-how = OpenHow(0, 0, 0x8)  # RESOLVE_BENEATH
-r = libc.syscall(437, -100, b'.', ctypes.byref(how), ctypes.sizeof(how))
-e = ctypes.get_errno()
-print('openat2_resolve_beneath: ' + ('OK fd='+str(r) if r >= 0 else 'FAIL errno='+errno.errorcode.get(e,str(e))))
-if r >= 0: os.close(r)
-# pidfd on child
-r = os.fork()
-if r == 0:
-    import time; time.sleep(30); os._exit(0)
-import time; time.sleep(0.2)
-fd = libc.syscall(434, r, 0)
-e2 = ctypes.get_errno()
-print('pidfd_open(child): ' + ('OK fd='+str(fd) if fd >= 0 else 'FAIL errno='+errno.errorcode.get(e2,str(e2))))
-if fd >= 0:
-    sig = libc.syscall(424, fd, 0, 19)  # pidfd_send_signal SIGSTOP=19... use 0 first
-    print('pidfd_send_signal(SIG=0): ' + ('OK' if sig == 0 else 'FAIL errno='+str(ctypes.get_errno())))
-    libc.syscall(424, fd, 9, 0)  # SIGKILL child to clean up
-    os.close(fd)
-os.waitpid(r, 0)
-" > /tmp/probe/syscalls.txt 2>&1 || true
-
-          python3 -c "
-import ctypes, os
-libc = ctypes.CDLL(None, use_errno=True)
-# Install REAL seccomp filter: allow read/write/exit/exit_group/rt_sigreturn, kill everything else (BPF)
-BPF = bytes.fromhex('2000000015000000000000001500000003000000' '15000000000000ff060000003500000000000000')
-# Encode classic BPF: RET KILL for all except allowed syscalls
-import struct
-prog = b''
-# load syscall nr
-prog += struct.pack('<HBBI', 0x20, 0, 0, 4)      # ld [4] (seccomp_data.arch+nr at offset 4? nr at offset 0 after nr field...)
-# simplify: strict filter = all syscalls except whitelist
-prog  = struct.pack('<HBBI', 0x20, 0, 0, 0)      # ld [0] = nr
-for allowed in (0, 1, 3, 60, 231, 15):           # read write close exit exit_group rt_sigreturn
-    prog += struct.pack('<HBBI', 0x15, 0, 1, allowed)  # jeq allowed, +1
-prog += struct.pack('<HBBI', 0x06, 0, 0, 0x00030000)  # ret SECCOMP_RET_KILL_PROCESS... use ERR
-# NOTE: this filter would kill our own process if applied now; just verify INSTALL path works in a child
-prog = prog[:8]
-prog = struct.pack('<HBBI', 0x06, 0, 0, 0x7ffc0000)  # ret ALLOW (harmless filter)
-r = libc.prctl(38, 1, 0, 0, 0)  # no_new_privs
-print('no_new_privs: ' + ('OK' if r == 0 else 'FAIL'))
-FILT = 1
-r2 = libc.prctl(22, FILT, len(prog)//8, prog, 0)  # PR_SET_SECCOMP=22, MODE_FILTER=2? PR_SET_SECCOMP + SECCOMP_MODE_FILTER=2
-print('seccomp_install_probe: ' + ('OK' if r2 == 0 else 'FAIL errno='+str(ctypes.get_errno())))
-print('seccomp_after: ' + open('/proc/self/status').read().split('Seccomp:')[1].split()[0] + ' filters=' + open('/proc/self/status').read().split('Seccomp_filters:')[1].split()[0])
-" > /tmp/probe/seccomp.txt 2>&1 || true
-
-          sudo -n bash -c 'mkdir -p /sys/fs/cgroup/w1probe && echo "+cpu +memory +pids" > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null; echo "max 100000" > /sys/fs/cgroup/w1probe/cpu.max; echo "536870912" > /sys/fs/cgroup/w1probe/memory.max; echo "64" > /sys/fs/cgroup/w1probe/pids.max; echo YES > /tmp/probe/cgroup_setup.txt' 2>/dev/null || echo "NO" > /tmp/probe/cgroup_setup.txt
+          echo "" | base64 -d > /tmp/probe/decisive.py
+          python3 /tmp/probe/decisive.py > /tmp/probe/decisive.txt 2>&1 || echo "probe error" >> /tmp/probe/decisive.txt
+          sudo -n bash -c 'mkdir -p /sys/fs/cgroup/w1probe; echo "+cpu +memory +pids" > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null; echo "max 100000" > /sys/fs/cgroup/w1probe/cpu.max; echo 536870912 > /sys/fs/cgroup/w1probe/memory.max; echo 64 > /sys/fs/cgroup/w1probe/pids.max; echo YES > /tmp/probe/cgroup_setup.txt' 2>/dev/null || echo "NO" > /tmp/probe/cgroup_setup.txt
           sudo -n rmdir /sys/fs/cgroup/w1probe 2>/dev/null || true
-
           {
-            echo "## W1 Capability Report v3 DECISIVE (ubuntu-latest)"
+            echo "## W1 Capability Report v4 DECISIVE (ubuntu-latest)"
             echo "- kernel: $(uname -r)"
             echo "- cgroup_v2: mounted=YES controllers=$(cat /sys/fs/cgroup/cgroup.controllers | tr ' ' ',')"
-            echo "- cgroup_subtree_setup(cpu+mem+pids): $(cat /tmp/probe/cgroup_setup.txt 2>/dev/null || echo NO)"
+            echo "- cgroup_subtree_setup(cpu+mem+pids): $(cat /tmp/probe/cgroup_setup.txt)"
             echo "- sudo_unshare_mount_ns: $(cat /tmp/probe/sudo_unshare_mnt.txt)"
-            echo "- uid: $(id -u) (runner nonroot) + sudo"
-            echo "- syscalls (correct API):"
-            sed 's/^/    - /' /tmp/probe/syscalls.txt
-            echo "- seccomp install:"
-            sed 's/^/    - /' /tmp/probe/seccomp.txt
+            echo "- uid: $(id -u) runner + sudo"
+            echo "- decisive probes:"
+            sed 's/^/    - /' /tmp/probe/decisive.txt
             echo "- ram_mb: $(free -m | awk '/^Mem:/{print $2}') | cpus: $(nproc)"
           } | tee "$GITHUB_STEP_SUMMARY"
+        env:
+          PROBE_B64: aW1wb3J0IGN0eXBlcywgb3MsIGVycm5vLCBzdHJ1Y3QsIHRpbWUKbGliYyA9IGN0eXBlcy5DRExMKE5vbmUsIHVzZV9lcnJubz1UcnVlKQpjbGFzcyBPcGVuSG93KGN0eXBlcy5TdHJ1Y3R1cmUpOgogICAgX2ZpZWxkc18gPSBbKCdmbGFncycsIGN0eXBlcy5jX3VpbnQ2NCksICgnbW9kZScsIGN0eXBlcy5jX3VpbnQ2NCksICgncmVzb2x2ZScsIGN0eXBlcy5jX3VpbnQ2NCldCmhvdyA9IE9wZW5Ib3coMCwgMCwgMHg4KQpyID0gbGliYy5zeXNjYWxsKDQzNywgLTEwMCwgYicuJywgY3R5cGVzLmJ5cmVmKGhvdyksIGN0eXBlcy5zaXplb2YoaG93KSkKZSA9IGN0eXBlcy5nZXRfZXJybm8oKQpwcmludCgnb3BlbmF0Ml9yZXNvbHZlX2JlbmVhdGg6ICcgKyAoJ09LIGZkPScrc3RyKHIpIGlmIHIgPj0gMCBlbHNlICdGQUlMIGVycm5vPScrZXJybm8uZXJyb3Jjb2RlLmdldChlLHN0cihlKSkpKQppZiByID49IDA6IG9zLmNsb3NlKHIpCnBpZCA9IG9zLmZvcmsoKQppZiBwaWQgPT0gMDoKICAgIHRpbWUuc2xlZXAoNjApOyBvcy5fZXhpdCgwKQp0aW1lLnNsZWVwKDAuMikKZmQgPSBsaWJjLnN5c2NhbGwoNDM0LCBwaWQsIDApCmUyID0gY3R5cGVzLmdldF9lcnJubygpCnByaW50KCdwaWRmZF9vcGVuKGNoaWxkKTogJyArICgnT0sgZmQ9JytzdHIoZmQpIGlmIGZkID49IDAgZWxzZSAnRkFJTCBlcnJubz0nK2Vycm5vLmVycm9yY29kZS5nZXQoZTIsc3RyKGUyKSkpKQppZiBmZCA+PSAwOgogICAgc2lnID0gbGliYy5zeXNjYWxsKDQyNCwgZmQsIDAsIDApCiAgICBwcmludCgncGlkZmRfc2VuZF9zaWduYWwoMCk6ICcgKyAoJ09LJyBpZiBzaWcgPT0gMCBlbHNlICdGQUlMJykpCiAgICBsaWJjLnN5c2NhbGwoNDI0LCBmZCwgOSwgMCkKICAgIG9zLmNsb3NlKGZkKQpvcy53YWl0cGlkKHBpZCwgMCkKcHJpbnQoJ25vX25ld19wcml2czogJyArICgnT0snIGlmIGxpYmMucHJjdGwoMzgsMSwwLDAsMCk9PTAgZWxzZSAnRkFJTCcpKQpwcm9nID0gc3RydWN0LnBhY2soJzxIQkJJJywgMHgwNiwgMCwgMCwgMHg3ZmZjMDAwMCkgICMgcmV0IEFMTE9XIChoYXJtbGVzcykKcjIgPSBsaWJjLnByY3RsKDM4LCAxLCAwLCAwLCAwKQpyMyA9IGxpYmMuc3lzY2FsbCgzMTcsIDEsIGN0eXBlcy5jX2NoYXJfcChwcm9nKSwgY3R5cGVzLnNpemVvZihwcm9nKSwgMCkgICMgc2VjY29tcCBTRUNDT01QX1NFVF9NT0RFX0ZJTFRFUj0xCmUzID0gY3R5cGVzLmdldF9lcnJubygpCnByaW50KCdzZWNjb21wX2luc3RhbGwocmVhbCBzeXNjYWxsIDMxNyk6ICcgKyAoJ09LJyBpZiByMyA9PSAwIGVsc2UgJ0ZBSUwgZXJybm89JytlcnJuby5lcnJvcmNvZGUuZ2V0KGUzLHN0cihlMykpKSkKc3QgPSBvcGVuKCcvcHJvYy9zZWxmL3N0YXR1cycpLnJlYWQoKQpwcmludCgnc2VjY29tcF9hZnRlcjogJyArIHN0LnNwbGl0KCdTZWNjb21wOicpWzFdLnNwbGl0KClbMF0gKyAnIGZpbHRlcnM9JyArIHN0LnNwbGl0KCdTZWNjb21wX2ZpbHRlcnM6JylbMV0uc3BsaXQoKVswXSkK
