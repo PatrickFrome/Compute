@@ -9,6 +9,7 @@ on:
       - 'coordination/sync/peer_review_barrier.py'
       - 'tests/a1/test_pap_review_ingest.py'
       - 'tests/a1/test_github_review_ingest.py'
+      - 'tests/a1/test_live_peer_review_workflow_contract.py'
       - 'tests/a1/test_peer_review_barrier.py'
       - '.github/workflows/a1-live-peer-review-ingest.yml'
   workflow_dispatch:
@@ -56,6 +57,7 @@ jobs:
           python3 -m unittest \
             tests.a1.test_pap_review_ingest \
             tests.a1.test_github_review_ingest \
+            tests.a1.test_live_peer_review_workflow_contract \
             tests.a1.test_peer_review_barrier -v
 
   live-ingest:
@@ -124,11 +126,16 @@ jobs:
       - name: Persisted-read GLM reviews from PAP
         run: |
           set -euo pipefail
-          curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
+          umask 077
+          cat > /tmp/pap-curl.conf <<EOF
+          header = "Authorization: Bearer $PAP_CHATGPT_TOKEN"
+          EOF
+          curl --config /tmp/pap-curl.conf \
+            --proto '=https' --tlsv1.2 --fail --silent --show-error \
             --connect-timeout 10 --max-time 30 \
-            -H "Authorization: Bearer $PAP_CHATGPT_TOKEN" \
             "$PAP_BASE_URL/pap/read?peer=glm&after_seq=$AFTER_SEQ" \
             -o /tmp/pap-read.json
+          rm -f /tmp/pap-curl.conf
           python3 coordination/sync/pap_review_ingest.py \
             --pap-read /tmp/pap-read.json \
             --execution-subject /tmp/source/execution-subject.json \
@@ -184,7 +191,7 @@ jobs:
 
       - name: Remove raw provider responses before artifact upload
         if: always()
-        run: rm -f /tmp/github-reviews.json /tmp/pap-read.json
+        run: rm -f /tmp/github-reviews.json /tmp/pap-read.json /tmp/pap-curl.conf
 
       - name: Upload credential-free peer-review evidence
         if: always() && steps.barrier.outputs.rc != ''
