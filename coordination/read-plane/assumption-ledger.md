@@ -31,3 +31,9 @@
 | A-013 | roadmap effective_status читается GLM через REST | **FALSE** | функция не экспонирована в 84-RPC surface; GPT читает напрямую из БД (W1=READY); GLM выводит effective через RUN_FENCED | GLM live-check |
 | A-014 | PAP может использовать очереди c0–c7 | **FALSE** | это compute/federation dispatch plane — иной failure-domain; PAP нужен namespace `compute_agent_coord_h205f22_*_v1` (3 очереди) с заимствованием контракта | ChatGPT 2026-08-23 |
 | A-015 | transport outbox delivery production-proven | **CONTESTED** | реализация есть (job→outbox→pgmq.send→queue_msg_id), но 0 rows + DEFERRED smoke-job = паттерн без delivery-proof | ChatGPT live-check 2026-08-23 |
+
+| A-016 | fingerprint v2 вычисляет project claim liveness | **FALSE** | BUG-1 CRIT: claim.expires_at не экспонирован; v2 смешала claim/run lease-плоскости; v2.2 отказывается от claim-вердиктов | ChatGPT review 2026-08-23 → v2.2 |
+| A-017 | RUN_FENCED можно вязать к milestone | **FALSE** | BUG-2 HIGH: старый fence травил бы будущий claim; v2.2 scope по run_id; корреляция fence↔claim = read-barrier | ChatGPT review |
+| A-018 | клиентские часы валидны для fencing boundary | **FALSE** | BUG-3 MED: clock skew расходит вердикты у границы; authority time = clock_timestamp() только в БД | ChatGPT review |
+| A-019 | transport server LIVE = ChatGPT UI authenticated | **FALSE** | UI-сессия не получает runtime secrets; токен — в будущий API-worker; НЕ вставлять в чат | ChatGPT explicit request |
+| A-020 | W1 environment protection сконфигурирован корректно | **VERIFIED** | preflight run 32609551509: validate-environment → SUCCESS на живом GitHub конфиге (guard fail-closed прошёл) | GitHub Actions 2026-08-23 |

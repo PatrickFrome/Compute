@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
-"""fingerprint.py v2 — H205F22 shared read-plane (post STALE_ACTIVE_CLAIM defect).
+"""fingerprint.py v2.2 — H205F22 shared read-plane.
 
-v2 changes (defect found by ChatGPT 2026-08-23, confirmed live by GLM):
-  ONE fingerprint -> THREE components:
-    SEMANTIC  (slow truth: checkpoint, threads, ledger revision)
-    AUTHORITY (fast truth: claims + EFFECTIVE liveness + observed_at)
-    FRONTIER  (what each agent has seen)
-  SAME_WORLD = equal semantic + equal authority(view, not wall clock) +
-               compatible frontier. Authority equality compares the COMPUTED
-               effective state, not stored state.
+v2.2 (ChatGPT implementation review, 2026-08-23 — three bugs fixed):
+  BUG-1 CRIT: v2 conflated PROJECT CLAIM lease with AOP RUN lease.
+       aop1_snapshot does NOT expose claim.expires_at / claim rows at all.
+       => v2.2 computes EXECUTION-plane liveness ONLY, and explicitly refuses
+          to make project-claim-authority statements. authority_view is
+          renamed execution_view; any claim statement is
+          NOT_CLAIM_AUTHORITY_SAFE until coordination_read_barrier exists.
+  BUG-2 HIGH: RUN_FENCED was scoped by milestone only — a stale fence could
+       poison a future legitimate claim. v2.2 scopes fences by run_id
+       (available on events) and NEVER derives claim state from a fence;
+       fences are execution-plane confirmations only.
+  BUG-3 MED: client wall clock for fencing boundaries. v2.2 records the
+       clock source and marks boundary-proximal results as CLOCK_SENSITIVE
+       (±60s) instead of pretending DB clock_timestamp() was used.
 
-Temporal-consistency rules (the defect fix):
-  effective_claim_live = stored ACTIVE
-                         AND no RUN_FENCED/ORPHANED_OR_EXPIRED_CLAIM event
-                             for that milestone AFTER claim creation
-                         AND every related lease_expires_at > observed_at
-  A stored ACTIVE row whose lease expired is EXPIRED, not ACTIVE.
-  observed_at = client wall clock, recorded in the output (the read-barrier
-  RPC `coordination_read_barrier_h205f22()` remains PR-first future work —
-  see CONTRACT.md; v2 derives authority from ONE aop1_snapshot RPC, which
-  is itself a single server-side statement, minimizing torn reads).
+Honest evidence class of this tool (until read-barrier RPC lands):
+  FINGERPRINT_V2.2 = PREPARED / FAIL-SAFER / EXECUTION_PLANE_ONLY
+  NOT AUTHORITY-SAFE — machine-verified SAME_WORLD requires:
+  same code SHA + read-barrier output + normalization.
 
 Usage:
   python3 fingerprint.py                  # compute + print
-  python3 fingerprint.py --verify <hex>   # semantic+authority+frontier composite
+  python3 fingerprint.py --verify <hex>   # composite check
 """
 import argparse
 import hashlib
@@ -37,6 +37,7 @@ from datetime import datetime, timezone
 SB_URL = "https://xpeibufgzjknrhbhpffp.supabase.co"
 SB_KEY = os.environ.get("SB_KEY", "")
 BUCKET = "computefabric-parallel-glm"
+CLOCK_SENSITIVITY_S = 60
 
 
 def rpc(fn):
@@ -93,54 +94,62 @@ def main():
     observed_at = datetime.now(timezone.utc)
     observed_iso = observed_at.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # --- AUTHORITY domain: ONE RPC (aop1_snapshot is a single server-side call) ---
+    # --- single RPC for the DB-derived domain (aop1_snapshot is one statement) ---
     aop = rpc("h205f22_aop1_snapshot_v1")
     events = aop.get("recent_events", [])
     runs = aop.get("active_runs", [])
     stored_alignment = aop["canonical_alignment"]["active_claim_alignment"]
 
-    # fencing events (the fabric's own reaper) — most recent first
-    fenced = {}
+    # EXECUTION plane: fences scoped by RUN (never by milestone alone — BUG-2 fix)
+    fences_by_run = {}
     for e in sorted(events, key=lambda x: x.get("created_at", ""), reverse=True):
         if e.get("event_type") == "RUN_FENCED":
-            mk = e.get("milestone_key")
-            if mk and mk not in fenced:
-                fenced[mk] = e.get("created_at")
+            rid = e.get("run_id")
+            if rid and rid not in fences_by_run:
+                fences_by_run[rid] = e.get("created_at")
 
-    effective_claims = []
-    for c in stored_alignment:
-        mk = c["milestone_key"]
-        stored_active = True  # presence in active_claim_alignment = stored active
-        fence_ts = fenced.get(mk)
-        # leases for this milestone's runs
-        lease_dead = []
-        for r in runs:
-            if r.get("milestone_key") == mk and r.get("lease_expires_at"):
-                lease_dead.append(parse_ts(r["lease_expires_at"]))
-        max_lease = max(lease_dead) if lease_dead else None
-        lease_live = bool(max_lease and max_lease > observed_at)
-        fenced_after = bool(fence_ts)  # latest event trail shows a fence for mk
-        effective_state = "ACTIVE" if (stored_active and lease_live and not fenced_after) else (
-            "FENCED" if fenced_after else ("EXPIRED" if max_lease else "UNKNOWN"))
-        effective_claims.append({
-            "claim_id": c["claim_id"], "milestone": mk,
-            "canonical_l1": c["canonical_milestone_key"],
-            "stored_state": "ACTIVE",
-            "effective_state": effective_state,
-            "last_fence_at": fence_ts,
-            "max_lease_expires_at": max_lease.isoformat() if max_lease else None,
+    execution_runs = []
+    for r in runs:
+        rid = r.get("run_id")
+        lease_exp = parse_ts(r.get("lease_expires_at"))
+        fenced = rid in fences_by_run
+        lease_live = bool(lease_exp and lease_exp > observed_at)
+        boundary = bool(lease_exp and abs((lease_exp - observed_at).total_seconds())
+                        <= CLOCK_SENSITIVITY_S)  # BUG-3: flag clock-sensitive verdicts
+        state = r.get("state")
+        execution_runs.append({
+            "run_id": rid,
+            "milestone": r.get("milestone_key"),
+            "state": state,
+            "fenced": fenced,
+            "fence_ts": fences_by_run.get(rid),
+            "lease_expires_at": r.get("lease_expires_at"),
+            "lease_live_client_clock": lease_live,
+            "clock_sensitive": boundary,
         })
 
-    authority_view = {
+    # PROJECT CLAIM authority: NOT computable from this surface (BUG-1 honesty).
+    # We report stored alignment verbatim as UNVERIFIED_STORED_VIEW and refuse
+    # to derive effective claim liveness. Read-barrier RPC is the completion.
+    claim_authority = {
+        "stored_alignment": stored_alignment,
+        "claim_authority_verdict": "NOT_COMPUTABLE_FROM_THIS_SURFACE",
+        "reason": "claim.expires_at / claim rows are not exposed by aop1_snapshot_v1; "
+                  "v2 conflated them with run leases (BUG-1). Requires "
+                  "coordination_read_barrier_h205f22() — PR-first, see "
+                  "shared/read-plane/read-barrier-migration.sql",
+    }
+
+    execution_view = {
         "observed_at": observed_iso,
-        "claims": effective_claims,
-        "runs": [{"state": r.get("state"), "milestone": r.get("milestone_key"),
-                  "lease_expires_at": r.get("lease_expires_at")} for r in runs],
+        "clock_source": "CLIENT_WALL_CLOCK (DB clock_timestamp() unavailable pre-read-barrier; boundary-proximal verdicts flagged clock_sensitive)",
+        "classification": "EXECUTION_PLANE_ONLY__NOT_CLAIM_AUTHORITY_SAFE",
+        "runs": execution_runs,
         "newest_event": events[0].get("created_at") if events else None,
         "newest_event_type": events[0].get("event_type") if events else None,
     }
-    authority_fingerprint = sha({k: v for k, v in authority_view.items()
-                                 if k != "observed_at"})  # view equality, not clock
+    execution_fingerprint = sha({k: v for k, v in execution_view.items()
+                                 if k != "observed_at"})
 
     # --- SEMANTIC domain (slow truth) ---
     fs = rpc("h205f22_fabric_status_v2")
@@ -182,21 +191,22 @@ def main():
     frontier_fingerprint = sha(frontier)
 
     composite = sha({"semantic": semantic_fingerprint,
-                     "authority": authority_fingerprint,
+                     "execution": execution_fingerprint,
                      "frontier": frontier_fingerprint})
 
     result = {
-        "schema": "metaengine.pap.read-plane-fingerprint.v2",
+        "schema": "metaengine.pap.read-plane-fingerprint.v2.2",
         "composite_fingerprint": composite,
         "semantic_fingerprint": semantic_fingerprint,
-        "authority_fingerprint": authority_fingerprint,
+        "execution_fingerprint": execution_fingerprint,
         "transport_frontier": frontier,
         "frontier_fingerprint": frontier_fingerprint,
-        "authority_view": authority_view,
+        "execution_view": execution_view,
+        "claim_authority": claim_authority,
         "semantic_view": semantic_view,
-        "same_world_rule": "equal semantic AND equal authority view AND compatible frontier",
-        "temporal_rule": "stored ACTIVE + expired lease => EXPIRED (never effective authority)",
-        "note": "read-barrier single-RPC is PR-first future work; authority derived from one aop1_snapshot call",
+        "same_world_rule": "equal semantic AND equal execution view AND compatible frontier — UNTIL read-barrier: no claim-authority claim is made",
+        "plane_separation": "PROJECT CLAIM LEASE != AOP RUN LEASE != PAP TRANSPORT LEASE (v2.2 enforces by refusing to conflate)",
+        "evidence_class": "PREPARED / FAIL-SAFER / EXECUTION_PLANE_ONLY — NOT AUTHORITY-SAFE",
     }
 
     if args.verify:
