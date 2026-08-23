@@ -20,6 +20,7 @@ class EvidenceAttestationWorkflowContractTests(unittest.TestCase):
     def test_oidc_and_attestation_permissions_are_explicit(self):
         self.assertIn('id-token: write', self.text)
         self.assertIn('attestations: write', self.text)
+        self.assertIn('artifact-metadata: write', self.text)
         # Top-level permission remains read-only; elevated permissions live on live-attest.
         self.assertRegex(self.text, r"permissions:\n  contents: read\n\njobs:")
 
