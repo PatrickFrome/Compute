@@ -1,5 +1,4 @@
 name: A1 Zero-Spend Execution Fabric
-# Cross-provider webhook verification marker: 2026-08-23
 
 on:
   pull_request:
@@ -33,7 +32,7 @@ jobs:
       - name: Run contract unit tests
         run: |
           set -euo pipefail
-          python3 -m unittest tests.a1.test_zero_spend_runner -v
+          python3 -m unittest tests.a1.test_zero_spend_runner tests.a1.test_cross_provider_verify -v
 
       - name: Run provider-neutral execution contract
         run: |
@@ -65,5 +64,61 @@ jobs:
         with:
           name: a1-github-zero-spend-evidence
           path: evidence/github-actions-zero-spend.json
+          if-no-files-found: error
+          retention-days: 30
+
+  cross-provider-readback:
+    needs: github-primary-executor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      H205F22_EXPECTED_GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      H205F22_APPVEYOR_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
+    steps:
+      - name: Checkout exact comparable revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Reproduce GitHub provider-neutral baseline
+        run: |
+          set -euo pipefail
+          python3 coordination/execution/zero_spend_runner.py \
+            --provider github-actions \
+            --output evidence/github-readback-baseline.json
+
+      - name: Persisted readback and compare AppVeyor artifact
+        run: |
+          set -euo pipefail
+          python3 coordination/execution/cross_provider_verify.py \
+            --github-evidence evidence/github-readback-baseline.json \
+            --branch "$H205F22_APPVEYOR_BRANCH" \
+            --attempts 60 \
+            --interval-seconds 10 \
+            --output evidence/cross-provider-readback.json
+
+      - name: Enforce non-authority verification scope
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('evidence/cross-provider-readback.json')
+          d=json.loads(p.read_text())
+          assert d['evidence_class']=='CROSS_PROVIDER_REPRODUCED_VERIFIED'
+          assert d['verification_scope']=='EPHEMERAL_CI_EXECUTION_ONLY'
+          assert d['providers']==['github-actions','appveyor']
+          assert d['authority']['authority_effect'] is False
+          assert d['authority']['execution_authority'] is False
+          assert d['authority']['persistent_worker_proof'] is False
+          assert d['authority']['w1_verified'] is False
+          PY
+
+      - name: Upload cross-provider persisted-readback receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: a1-cross-provider-readback
+          path: evidence/cross-provider-readback.json
           if-no-files-found: error
           retention-days: 30
