@@ -1,37 +1,39 @@
 #!/usr/bin/env python3
-"""F1 provider-neutral federation adapter layer.
+"""Provider-neutral F1 adapter registry with DB-backed admission.
 
-F1.3 of the DEV-CYCLE-001 engineering sequence.
+Security boundary:
+- ProviderAdapter is only a declaration/candidate.
+- A candidate cannot be inserted into the verified registry directly.
+- The production admission API accepts only a verification UUID, fetches the
+  exact projection from the fixed Supabase persisted-readback RPC, validates
+  its bindings/freshness, and only then populates the local non-authority cache.
+- No caller-supplied ``dict`` can grant registration.
 
-Purpose: decouple provider-specific facts from the evidence policy so the
-verifier core stays stable while external providers multiply. The existing
-live_provider_verifier is GitHub-Actions-specific; this module introduces the
-neutral seam WITHOUT mutating its verified logic (domain: federation/provider).
-
-Design laws (inherited from F1 invariants):
-- FETCHED != VERIFIED; CONTENT_HASH_ONLY != CRYPTO_VERIFIED.
-- Adapter produces EXPECTATIONS, never verdicts. Verdicts stay in
-  live_provider_verifier.validate_evidence + the cryptographic verifier job.
-- Every adapter must declare its cryptographic verification channel; evidence
-  without a declared verifier channel is rejected at registration time.
-- Trust generation is per-provider and must rotate independently.
-
-Non-authority: everything here is PREPARE_ONLY, authority_effect=false.
+The database remains the source of authority. The in-process registry is only
+a cache of CURRENT persisted verification receipts.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
+import os
 import re
+import urllib.error
+import urllib.request
+import uuid
 from dataclasses import dataclass, field
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 OIDC_RE = re.compile(r"^https://[a-z0-9.-]+[a-z]$")
-
-CRYPTO_CHANNELS = {
-    "gh-attestation+sigstore",
-    "appveyor-attestation+sigstore",
-    "manual-cosign+sigstore",
+EXECUTION_ID_RE = {
+    "github-actions-f1-live": re.compile(r"^github-actions:([1-9][0-9]*):([1-9][0-9]*)$"),
+    "appveyor-f1-live": re.compile(r"^appveyor:([1-9][0-9]*):([1-9][0-9]*)$"),
 }
+CRYPTO_CHANNELS = {"gh-attestation+sigstore", "appveyor-attestation+sigstore", "manual-cosign+sigstore"}
+SUPABASE_URL = "https://xpeibufgzjknrhbhpffp.supabase.co"
+READBACK_RPC = "h205f22_read_signature_verification_v1"
+READBACK_SCHEMA = "metaengine.compute.provider-signature-readback.h205f22.v1"
+READBACK_SOURCE = "SUPABASE_PERSISTED_READBACK"
 
 
 class AdapterRegistrationError(ValueError):
@@ -39,79 +41,8 @@ class AdapterRegistrationError(ValueError):
 
 
 @dataclass(frozen=True)
-class VerificationProof:
-    """Persisted verifier-channel receipt binding (F1-GPT-001 hard fix).
-
-    A registration proof is not an arbitrary hex string: it must carry the
-    persisted receipt identity (run/job), the channel it proves, the
-    provider+trust-generation it binds to, verification status, and its own
-    canonical digest — recomputed and checked at register() time.
-    """
-
-    receipt_schema: str
-    provider_id: str
-    crypto_channel: str
-    trust_generation: int
-    verifier_run_id: int
-    verifier_run_attempt: int
-    verification_status: str
-    receipt_sha256: str
-    # readback_authority=True: receipt_sha256 comes from a PERSISTED DB row
-    # (external authority); the digest is NOT self-recomputed. False (default):
-    # self-consistent proof; digest recomputed and compared locally.
-    readback_authority: bool = False
-
-    def __post_init__(self) -> None:
-        if self.readback_authority:
-            # authority = persisted row; only shape checks apply
-            if not SHA256_RE.match(self.receipt_sha256 or ""):
-                raise AdapterRegistrationError("readback receipt_sha256 malformed")
-            if self.verification_status != "VERIFIED":
-                raise AdapterRegistrationError("readback proof must be VERIFIED")
-            return
-        if self.receipt_schema != "metaengine.compute.f1-verification-proof.h205f22.v1":
-            raise AdapterRegistrationError("unsupported verification-proof schema")
-        if self.verification_status != "VERIFIED":
-            raise AdapterRegistrationError(
-                "verification proof must carry verification_status=VERIFIED "
-                "(anything else cannot register a provider)"
-            )
-        if self.trust_generation < 1:
-            raise AdapterRegistrationError("proof trust_generation must be >= 1")
-        digest = _proof_digest(self)
-        if digest != self.receipt_sha256:
-            raise AdapterRegistrationError(
-                f"verification proof digest mismatch: declared {self.receipt_sha256[:12]}... "
-                f"recomputed {digest[:12]}... — the proof object is not internally consistent"
-            )
-
-
-def _proof_digest(proof: "VerificationProof") -> str:
-    import hashlib
-    neutral = {
-        "receipt_schema": proof.receipt_schema,
-        "provider_id": proof.provider_id,
-        "crypto_channel": proof.crypto_channel,
-        "trust_generation": proof.trust_generation,
-        "verifier_run_id": proof.verifier_run_id,
-        "verifier_run_attempt": proof.verifier_run_attempt,
-        "verification_status": proof.verification_status,
-    }
-    return hashlib.sha256(
-        json.dumps(neutral, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-
-
-@dataclass(frozen=True)
 class ProviderAdapter:
-    """Neutral description of ONE external federation provider.
-
-    A provider WITHOUT verification_proof_sha256 is a DECLARED CANDIDATE:
-    structurally unregistrable in the verified registry (F1-GPT-001 fix).
-    The proof digest binds the registration to persisted verifier-channel
-    evidence (e.g. a successful live attestation verification receipt).
-    """
-
+    """Declaration of one provider; never an admission proof."""
     provider_id: str
     provider_kind: str
     oidc_issuer: str
@@ -119,400 +50,167 @@ class ProviderAdapter:
     trust_generation: int
     crypto_channel: str
     max_lifetime_seconds: int
-    external_execution_format: str  # e.g. "github-actions:{run_id}:{run_attempt}"
-    verification_proof: object | None = None  # VerificationProof | None; None => DECLARED CANDIDATE
+    external_execution_format: str
+    repository: str
+    signer_workflow: str
     revoked_identities: tuple = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
-        if not self.provider_id or len(self.provider_id) > 96:
-            raise AdapterRegistrationError("provider_id must be 1..96 chars")
-        if not self.provider_kind or len(self.provider_kind) > 64:
-            raise AdapterRegistrationError("provider_kind must be 1..64 chars")
-        if not OIDC_RE.match(self.oidc_issuer):
-            raise AdapterRegistrationError("oidc_issuer must be an https URL")
-        if self.sigstore_instance not in {"public-good", "staging"}:
-            raise AdapterRegistrationError("unsupported sigstore instance")
-        if self.trust_generation < 1:
-            raise AdapterRegistrationError("trust_generation must be >= 1")
-        if self.crypto_channel not in CRYPTO_CHANNELS:
-            raise AdapterRegistrationError(
-                f"crypto_channel must be one of {sorted(CRYPTO_CHANNELS)}; "
-                "evidence without a declared cryptographic verifier channel is rejected"
-            )
-        if not (60 <= self.max_lifetime_seconds <= 24 * 3600):
-            raise AdapterRegistrationError("max_lifetime_seconds out of policy range")
-        import re as _re
-        tmpl = set(_re.findall(r"\{([a-z_]+)\}", self.external_execution_format))
-        if len(tmpl) < 2:
-            raise AdapterRegistrationError(
-                "external_execution_format must template at least two distinct execution identity variables"
-            )
-        if self.external_execution_format.format(run_id=1, run_attempt=1, build_id=1, build_number=1) == self.external_execution_format:
-            raise AdapterRegistrationError("external_execution_format templates did not substitute")
+        if not re.fullmatch(r"[A-Za-z0-9._:-]{1,96}", self.provider_id or ""): raise AdapterRegistrationError("provider_id invalid")
+        if not re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", self.provider_kind or ""): raise AdapterRegistrationError("provider_kind invalid")
+        if not OIDC_RE.fullmatch(self.oidc_issuer or ""): raise AdapterRegistrationError("oidc_issuer must be an https URL")
+        if self.sigstore_instance not in {"public-good", "staging"}: raise AdapterRegistrationError("unsupported sigstore instance")
+        if type(self.trust_generation) is not int or self.trust_generation < 1: raise AdapterRegistrationError("trust_generation must be a positive integer")
+        if self.crypto_channel not in CRYPTO_CHANNELS: raise AdapterRegistrationError("unsupported cryptographic verification channel")
+        if type(self.max_lifetime_seconds) is not int or not (60 <= self.max_lifetime_seconds <= 24*3600): raise AdapterRegistrationError("max_lifetime_seconds out of policy range")
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", self.repository or ""): raise AdapterRegistrationError("repository must be owner/name")
+        if self.provider_id == "github-actions-f1-live" and not self.signer_workflow.startswith(f"{self.repository}/.github/workflows/"): raise AdapterRegistrationError("GitHub signer_workflow is outside bound repository")
+        tmpl=set(re.findall(r"\{([a-z_]+)\}",self.external_execution_format))
+        expected={"run_id","run_attempt"} if self.provider_id=="github-actions-f1-live" else {"build_id","build_number"} if self.provider_id=="appveyor-f1-live" else tmpl
+        if tmpl != expected or len(tmpl)<2: raise AdapterRegistrationError("external_execution_format must use the exact provider-native coordinates")
 
 
-
-# --- persisted-readback registration (F1-GPT-001 final fix) -----------------
-# register_from_readback consumes a REAL row of the canonical
-# destruktion_meta.compute_fabric_provider_signature_verification_h205f22
-# table (delivered as a dict). No adapter may enter the verified registry
-# through code constants alone: the row must exist, be current, match the
-# adapter on every binding field, and its receipt digest must equal the
-# persisted receipt_sha256.
-
-
-def _sha256_of(value) -> str:
-    import hashlib
-    import json as _json
-    raw = _json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-    return hashlib.sha256(raw).hexdigest()
+@dataclass(frozen=True)
+class RegisteredProvider:
+    adapter: ProviderAdapter
+    verification_id: str
+    verifier_id: str
+    external_execution_id: str
+    receipt_sha256: str
+    expires_at: str
+    signed_claims_sha256: str
+    envelope_sha256: str
+    payload_type: str
 
 
-def _verify_readback_receipt(receipt: object) -> dict:
-    """Validate a STRICT TYPED readback receipt emitted by the independent
-    DB-readback layer (supabase/functions/verification-readback).
-
-    Caller-supplied plain rows/dicts are NOT accepted (F1-GPT-003): the only
-    acceptable authority object is a receipt with source=SUPABASE_PERSISTED_READBACK,
-    exact schema, table identity, verification_id, row digest, evaluated_at,
-    and the row bytes themselves. The digest is recomputed HERE from the row
-    bytes and compared — a forged receipt with a copied digest fails.
-    """
-    import datetime as _dt
-    import hashlib as _hl
-
-    if not isinstance(receipt, dict):
-        raise AdapterRegistrationError("readback authority must be a typed receipt object (plain rows are caller-asserted)")
-    REQUIRED = {
-        "schema", "source", "table", "status", "verification_id",
-        "row", "row_digest_sha256", "evaluated_at", "authority_effect",
-    }
-    keys = set(receipt)
-    missing = sorted(REQUIRED - keys)
-    if missing:
-        raise AdapterRegistrationError(f"readback receipt missing required fields: {missing}")
-    if receipt["schema"] != "metaengine.compute.f1-verification-readback.h205f22.v1":
-        raise AdapterRegistrationError("unsupported readback receipt schema")
-    if receipt["source"] != "SUPABASE_PERSISTED_READBACK":
-        raise AdapterRegistrationError("readback receipt source must be SUPABASE_PERSISTED_READBACK (caller assertions rejected)")
-    if receipt["table"] != "destruktion_meta.compute_fabric_provider_signature_verification_h205f22":
-        raise AdapterRegistrationError("readback receipt table identity mismatch")
-    if receipt["status"] != "ROW_PRESENT":
-        raise AdapterRegistrationError(f"readback status not ROW_PRESENT: {receipt['status']}")
-    if receipt["authority_effect"] is not False:
-        raise AdapterRegistrationError("readback receipt must be non-authority")
-    if not receipt["verification_id"]:
-        raise AdapterRegistrationError("readback receipt lacks verification_id")
-    row = receipt["row"]
-    if not isinstance(row, dict) or not row:
-        raise AdapterRegistrationError("readback receipt row empty")
-    # digest recompute over the EXACT row serialization the readback layer used
-    row_text = json.dumps(row, ensure_ascii=False, separators=(",", ":"))
-    # readback layer digests JSON.stringify(row) — python json.dumps with
-    # separators matches for flat ascii objects; verify both serializations
-    d1 = _hl.sha256(row_text.encode()).hexdigest()
-    d2 = _hl.sha256(json.dumps(row, ensure_ascii=False).encode()).hexdigest()
-    declared = str(receipt["row_digest_sha256"])
-    if declared not in (d1, d2):
-        raise AdapterRegistrationError(
-            f"readback row digest mismatch: declared {declared[:12]}... recomputed {d1[:12]}... — forged or tampered receipt"
-        )
-    return row
+_REGISTRY: dict[str, RegisteredProvider] = {}
 
 
-def register_from_readback(adapter: ProviderAdapter, readback_receipt: object, *, evaluated_at_epoch: float) -> None:
-    """Register a provider bound to a PERSISTED verifier-receipt row.
-
-    F1-GPT-003/004 final fix: authority derives ONLY from a strict typed
-    receipt emitted by the independent DB-readback layer. Caller-supplied
-    dicts/rows are rejected; every persisted binding field is REQUIRED and
-    must match the adapter exactly; expiry is mandatory; status is mandatory.
-    """
-    import datetime as _dt
-
-    row = _verify_readback_receipt(readback_receipt)
-    # ---- mandatory persisted bindings (F1-GPT-004): no optional passthrough ----
-    MANDATORY_ROW_FIELDS = {
-        "provider_id", "provider_kind", "external_execution_id",
-        "verification_status", "verified_at", "expires_at",
-        "verifier_id", "receipt_sha256",
-    }
-    missing = sorted(MANDATORY_ROW_FIELDS - set(row))
-    if missing:
-        raise AdapterRegistrationError(f"persisted row missing mandatory fields: {missing}")
-
-    provider_id = row["provider_id"]
-    provider_kind = row["provider_kind"]
-    exec_id = str(row["external_execution_id"])
-    status = row["verification_status"]
-    verified_at = row["verified_at"]
-    expires_at = row["expires_at"]
-    verifier_id = row["verifier_id"]
-    receipt_sha = str(row["receipt_sha256"])
-
-    if provider_id != adapter.provider_id:
-        raise AdapterRegistrationError(f"row provider mismatch: row={provider_id} adapter={adapter.provider_id}")
-    if provider_kind != adapter.provider_kind:
-        raise AdapterRegistrationError(f"row provider_kind mismatch: row={provider_kind} adapter={adapter.provider_kind}")
-    if status != "CRYPTO_VERIFIED_EVIDENCE_READY":
-        raise AdapterRegistrationError(f"row verification_status must be CRYPTO_VERIFIED_EVIDENCE_READY: {status}")
-    if not SHA256_RE.match(receipt_sha):
-        raise AdapterRegistrationError("row receipt_sha256 missing/malformed (envelope digests do not substitute)")
-    # envelope_sha256 must NOT be used as receipt_sha256 (distinct digests)
-    if "envelope_sha256" in row and str(row.get("envelope_sha256")) == receipt_sha and "signed_claims_sha256" in row:
-        raise AdapterRegistrationError("receipt_sha256 equals envelope_sha256 — digest conflation rejected")
-
-    # external execution grammar: EXACT github-actions:<run_id>:<run_attempt> for this adapter
-    import re as _re
-    m = _re.fullmatch(r"github-actions:(\d+):(\d+)", exec_id)
-    if not m:
-        raise AdapterRegistrationError(
-            f"row external_execution_id does not match exact grammar github-actions:<run_id>:<run_attempt>: {exec_id}"
-        )
-    run_id, run_attempt = int(m.group(1)), int(m.group(2))
-
-    # verified_at presence and ordering: verified_at <= evaluated_at (no future verification)
-    v_at = _dt.datetime.fromisoformat(str(verified_at).replace("Z", "+00:00"))
-    if v_at.timestamp() > evaluated_at_epoch:
-        raise AdapterRegistrationError("row verified_at is in the future — rejected")
-
-    # CURRENT vs HISTORICAL: expires_at mandatory and must be in the future
-    e_at = _dt.datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
-    if e_at.timestamp() <= evaluated_at_epoch:
-        raise AdapterRegistrationError(
-            f"row EXPIRED (expires {expires_at}) — HISTORICAL rows cannot register"
-        )
-
-    # verifier identity must be present and non-empty
-    if not str(verifier_id).strip():
-        raise AdapterRegistrationError("row verifier_id empty")
-
-    # non-authority flags in the row itself (if present) must be false
-    if row.get("canonical") is True or row.get("authority_effect") is True:
-        raise AdapterRegistrationError("row claims authority — rejected")
-
-    # verification_id must bind into the registered proof
-    vid = str(readback_receipt["verification_id"])
-
-    bound = ProviderAdapter(
-        provider_id=adapter.provider_id,
-        provider_kind=adapter.provider_kind,
-        oidc_issuer=adapter.oidc_issuer,
-        sigstore_instance=adapter.sigstore_instance,
-        trust_generation=adapter.trust_generation,
-        crypto_channel=adapter.crypto_channel,
-        max_lifetime_seconds=adapter.max_lifetime_seconds,
-        external_execution_format=adapter.external_execution_format,
-        verification_proof=VerificationProof(
-            receipt_schema="metaengine.compute.f1-verification-proof.h205f22.v1",
-            provider_id=adapter.provider_id,
-            crypto_channel=adapter.crypto_channel,
-            trust_generation=adapter.trust_generation,
-            verifier_run_id=run_id,
-            verifier_run_attempt=run_attempt,
-            verification_status="VERIFIED",
-            receipt_sha256=receipt_sha,
-            readback_authority=True,  # authority = persisted row via typed receipt
-        ),
-        revoked_identities=adapter.revoked_identities,
-    )
-    # verification_id recorded in registry metadata for audit
-    _REGISTRY_BINDINGS[adapter.provider_id] = {
-        "verification_id": vid,
-        "row_digest_sha256": str(readback_receipt["row_digest_sha256"]),
-        "evaluated_at_epoch": evaluated_at_epoch,
-    }
-    register(bound, replace=True)  # fresh persisted row refreshes trust
-
-
-# --- registry (deliberately explicit; no dynamic discovery in v1) ----------
-
-_REGISTRY: dict = {}
-_REGISTRY_BINDINGS: dict = {}  # provider_id -> readback binding audit
-
-
-def register(adapter: ProviderAdapter, *, replace: bool = False) -> None:
-    if adapter.provider_id in _REGISTRY and not replace:
-        raise AdapterRegistrationError(f"duplicate provider_id: {adapter.provider_id}")
-    proof = adapter.verification_proof
-    if proof is None:
-        raise AdapterRegistrationError(
-            f"provider {adapter.provider_id} is a DECLARED CANDIDATE without "
-            "verification proof: unproven crypto channels cannot enter the "
-            "verified registry (F1-GPT-001); persist the live verifier-channel "
-            "receipt object first"
-        )
-    if not isinstance(proof, VerificationProof):
-        raise AdapterRegistrationError("verification_proof must be a VerificationProof object")
-    # Binding checks: the proof must prove THIS adapter, not just any channel.
-    if proof.provider_id != adapter.provider_id:
-        raise AdapterRegistrationError(
-            f"proof provider binding mismatch: proof={proof.provider_id} adapter={adapter.provider_id}"
-        )
-    if proof.crypto_channel != adapter.crypto_channel:
-        raise AdapterRegistrationError(
-            f"proof channel binding mismatch: proof={proof.crypto_channel} adapter={adapter.crypto_channel}"
-        )
-    if proof.trust_generation != adapter.trust_generation:
-        raise AdapterRegistrationError(
-            f"proof trust-generation mismatch: proof={proof.trust_generation} adapter={adapter.trust_generation}"
-        )
-    if not SHA256_RE.match(proof.receipt_sha256):
-        raise AdapterRegistrationError("proof receipt_sha256 must be sha256 hex")
-    _REGISTRY[adapter.provider_id] = adapter
+def register(_adapter: ProviderAdapter, *, replace: bool=False) -> None:
+    del replace
+    raise AdapterRegistrationError("direct provider registration is forbidden; use register_from_supabase(verification_id)")
 
 
 def get(provider_id: str) -> ProviderAdapter:
-    adapter = _REGISTRY.get(provider_id)
-    if adapter is None:
-        raise AdapterRegistrationError(f"unknown provider adapter: {provider_id}")
-    return adapter
+    entry=_REGISTRY.get(provider_id)
+    if entry is None: raise AdapterRegistrationError(f"provider is not registered from CURRENT persisted readback: {provider_id}")
+    return entry.adapter
 
 
-def readback_bindings() -> dict:
-    return dict(_REGISTRY_BINDINGS)
+def get_registration(provider_id: str) -> RegisteredProvider:
+    entry=_REGISTRY.get(provider_id)
+    if entry is None: raise AdapterRegistrationError(f"provider is not registered: {provider_id}")
+    return entry
 
 
-def registered() -> list:
-    return sorted(_REGISTRY)
+def registered() -> list[str]: return sorted(_REGISTRY)
+def clear_registry_for_tests() -> None: _REGISTRY.clear()
 
 
-# --- the existing GitHub provider, expressed through the neutral seam ------
-
-GITHUB_ACTIONS_F1 = ProviderAdapter(
-    provider_id="github-actions-f1-live",
-    provider_kind="GITHUB_HOSTED_ACTIONS",
-    oidc_issuer="https://token.actions.githubusercontent.com",
-    sigstore_instance="public-good",
-    trust_generation=1,
-    crypto_channel="gh-attestation+sigstore",
-    max_lifetime_seconds=20 * 60,
-    external_execution_format="github-actions:{run_id}:{run_attempt}",
-    verification_proof=None,  # set below after class definition (real receipt)
-)
-
-# AppVeyor candidate adapter (F1.5 target): SAME evidence policy, different
-# execution identity and channel. DELIBERATELY carries NO verification_proof
-# (F1-GPT-001): it is a DECLARED CANDIDATE — structurally unregistrable in
-# the verified registry until a persisted live verifier-channel receipt
-# digest is supplied.
-# The GitHub adapter's proof binds to the LIVE verifier receipts of F1 run
-# 32627161206 (producer SUCCESS; verifier SUCCESS incl. full Sigstore TUF
-# chain through trusted_root) — the exact channel it declares, proven live.
-GITHUB_ACTIONS_F1 = ProviderAdapter(
-    provider_id=GITHUB_ACTIONS_F1.provider_id,
-    provider_kind=GITHUB_ACTIONS_F1.provider_kind,
-    oidc_issuer=GITHUB_ACTIONS_F1.oidc_issuer,
-    sigstore_instance=GITHUB_ACTIONS_F1.sigstore_instance,
-    trust_generation=GITHUB_ACTIONS_F1.trust_generation,
-    crypto_channel=GITHUB_ACTIONS_F1.crypto_channel,
-    max_lifetime_seconds=GITHUB_ACTIONS_F1.max_lifetime_seconds,
-    external_execution_format=GITHUB_ACTIONS_F1.external_execution_format,
-    verification_proof=VerificationProof(
-        receipt_schema="metaengine.compute.f1-verification-proof.h205f22.v1",
-        provider_id="github-actions-f1-live",
-        crypto_channel="gh-attestation+sigstore",
-        trust_generation=1,
-        verifier_run_id=32627161206,
-        verifier_run_attempt=1,
-        verification_status="VERIFIED",
-        receipt_sha256="972412adacd343bf41d3a79abc1e96aa522e85a1f6b6d3176358e7697555a82a",
-    ),
-)
-
-APPVEYOR_F1_CANDIDATE = ProviderAdapter(
-    provider_id="appveyor-f1-live",
-    provider_kind="APPVEYOR_HOSTED_VM",
-    oidc_issuer="https://ci.appveyor.com",
-    sigstore_instance="public-good",
-    trust_generation=1,
-    crypto_channel="appveyor-attestation+sigstore",
-    max_lifetime_seconds=30 * 60,
-    external_execution_format="appveyor:{build_id}:{build_number}",
-)
+def _require_sha(value: object,label: str)->str:
+    if not isinstance(value,str) or SHA256_RE.fullmatch(value) is None: raise AdapterRegistrationError(f"{label} must be lowercase sha256 hex")
+    return value
 
 
-# --- native execution coordinates (F1-GPT-002 fix) --------------------------
-# Each provider consumes ONLY its own native coordinate schema; foreign
-# coordinates are rejected instead of aliased.
-
-GITHUB_COORD_KEYS = {"run_id", "run_attempt"}
-APPVEYOR_COORD_KEYS = {"build_id", "build_number"}
-
-
-def _require_coords(provider_id: str, coords: dict) -> None:
-    if provider_id == "github-actions-f1-live":
-        expected = GITHUB_COORD_KEYS
-    elif provider_id == "appveyor-f1-live":
-        expected = APPVEYOR_COORD_KEYS
-    else:
-        raise AdapterRegistrationError(f"no native coordinate schema for {provider_id}")
-    keys = set(coords or {})
-    if keys != expected:
-        raise AdapterRegistrationError(
-            f"provider {provider_id} requires native coordinates {sorted(expected)}; "
-            f"got {sorted(keys)} — cross-provider coordinate aliasing is rejected"
-        )
+def _parse_iso(value: object,label: str)->_dt.datetime:
+    if not isinstance(value,str): raise AdapterRegistrationError(f"{label} must be ISO-8601")
+    try: parsed=_dt.datetime.fromisoformat(value.replace("Z","+00:00"))
+    except ValueError as exc: raise AdapterRegistrationError(f"{label} must be ISO-8601") from exc
+    if parsed.tzinfo is None: raise AdapterRegistrationError(f"{label} must include timezone")
+    return parsed
 
 
-# --- expectation bridge: adapter -> verifier ExpectedContext ---------------
+def _validate_projection(adapter: ProviderAdapter,projection: object,*,verification_id: str,evaluated_at_epoch: float)->RegisteredProvider:
+    """Validate DB projection only. This helper never registers anything."""
+    if not isinstance(projection,dict): raise AdapterRegistrationError("readback projection must be an object")
+    if projection.get("schema")!=READBACK_SCHEMA: raise AdapterRegistrationError("unsupported persisted-readback schema")
+    if projection.get("source_kind")!=READBACK_SOURCE: raise AdapterRegistrationError("readback provenance is not Supabase persisted readback")
+    if projection.get("readback_state")!="CURRENT": raise AdapterRegistrationError("only CURRENT persisted receipts may register")
+    if projection.get("canonical") is not False or projection.get("authority_effect") is not False: raise AdapterRegistrationError("readback authority flags invalid")
+    if projection.get("receipt_digest_valid") is not True: raise AdapterRegistrationError("database receipt digest was not revalidated")
+    row,provider,verifier=projection.get("verification"),projection.get("provider_binding"),projection.get("verifier_binding")
+    if not all(isinstance(x,dict) for x in (row,provider,verifier)): raise AdapterRegistrationError("readback projection missing bound rows")
+    try: expected_uuid=str(uuid.UUID(str(verification_id))); actual_uuid=str(uuid.UUID(str(row.get("verification_id"))))
+    except (ValueError,AttributeError) as exc: raise AdapterRegistrationError("verification_id invalid") from exc
+    if actual_uuid!=expected_uuid: raise AdapterRegistrationError("verification_id readback mismatch")
+    if row.get("provider_id")!=adapter.provider_id or provider.get("provider_id")!=adapter.provider_id: raise AdapterRegistrationError("provider_id binding mismatch")
+    if provider.get("provider_kind")!=adapter.provider_kind: raise AdapterRegistrationError("provider_kind binding mismatch")
+    if provider.get("lifecycle_state") not in {"READY_FOR_PILOT","ACTIVE"}: raise AdapterRegistrationError("provider binding is not live enough")
+    if provider.get("scheduler_eligible") is not False: raise AdapterRegistrationError("F1 provider must not gain scheduler authority")
+    if provider.get("authority_effect") is not False: raise AdapterRegistrationError("provider binding authority_effect must be false")
+    if verifier.get("verifier_id")!=row.get("verifier_id"): raise AdapterRegistrationError("verifier_id binding mismatch")
+    if verifier.get("verifier_kind")!="SIGSTORE_BUNDLE": raise AdapterRegistrationError("wrong verifier kind")
+    if verifier.get("enabled") is not True or verifier.get("lifecycle_state") not in {"READY_FOR_PILOT","ACTIVE"}: raise AdapterRegistrationError("signature verifier is not active")
+    if verifier.get("authority_effect") is not False: raise AdapterRegistrationError("verifier authority_effect must be false")
+    if verifier.get("crypto_channel")!=adapter.crypto_channel: raise AdapterRegistrationError("crypto channel binding mismatch")
+    if verifier.get("trust_generation")!=adapter.trust_generation: raise AdapterRegistrationError("trust generation binding mismatch")
+    if row.get("verification_status")!="VERIFIED": raise AdapterRegistrationError("persisted verification status is not VERIFIED")
+    if row.get("canonical") is not False or row.get("authority_effect") is not False: raise AdapterRegistrationError("verification row authority flags invalid")
+    if row.get("receipt_sha256")!=projection.get("receipt_recomputed_sha256"): raise AdapterRegistrationError("receipt digest/object mismatch")
+    receipt_sha=_require_sha(row.get("receipt_sha256"),"receipt_sha256"); signed_sha=_require_sha(row.get("signed_claims_sha256"),"signed_claims_sha256"); envelope_sha=_require_sha(row.get("envelope_sha256"),"envelope_sha256")
+    payload_type=row.get("payload_type")
+    if not isinstance(payload_type,str) or not payload_type.startswith("application/vnd.in-toto"): raise AdapterRegistrationError("unsupported payload type")
+    exec_id=row.get("external_execution_id"); matcher=EXECUTION_ID_RE.get(adapter.provider_id)
+    if matcher is None or not isinstance(exec_id,str): raise AdapterRegistrationError("provider execution identity schema unavailable")
+    match=matcher.fullmatch(exec_id)
+    if match is None: raise AdapterRegistrationError("external execution identity mismatch")
+    run_id,run_attempt=int(match.group(1)),int(match.group(2))
+    evidence,signer=row.get("evidence"),row.get("signer_identity")
+    if not isinstance(evidence,dict) or not isinstance(signer,dict): raise AdapterRegistrationError("persisted evidence/signer identity invalid")
+    checks=(("provider_kind",adapter.provider_kind),("crypto_channel",adapter.crypto_channel),("trust_generation",adapter.trust_generation),("repository",adapter.repository),("signer_workflow",adapter.signer_workflow),("oidc_issuer",adapter.oidc_issuer),("sigstore_instance",adapter.sigstore_instance),("run_id",run_id),("run_attempt",run_attempt))
+    for key,expected in checks:
+        if evidence.get(key)!=expected: raise AdapterRegistrationError(f"evidence {key} mismatch")
+    for key in ("external_receipt_sha256","cryptographic_verification_sha256","sigstore_bundle_sha256","tuf_chain_verification_sha256","verifier_source_blob_sha256","verifier_workflow_blob_sha256"): _require_sha(evidence.get(key),f"evidence.{key}")
+    if evidence.get("tuf_chain_status")!="FULL_TUF_CHAIN_CRYPTO_VERIFIED": raise AdapterRegistrationError("full TUF chain evidence missing")
+    if not isinstance(evidence.get("verifier_implementation"),str) or not evidence["verifier_implementation"]: raise AdapterRegistrationError("verifier implementation identity missing")
+    if signer.get("issuer")!=adapter.oidc_issuer or signer.get("workflow")!=adapter.signer_workflow: raise AdapterRegistrationError("signer identity mismatch")
+    verified_at=_parse_iso(row.get("verified_at"),"verified_at"); expires_at=_parse_iso(row.get("expires_at"),"expires_at"); evaluated_at=_dt.datetime.fromtimestamp(float(evaluated_at_epoch),tz=_dt.timezone.utc)
+    if expires_at<=verified_at: raise AdapterRegistrationError("receipt expiry ordering invalid")
+    if expires_at<=evaluated_at: raise AdapterRegistrationError("persisted receipt is HISTORICAL/expired")
+    if (expires_at-verified_at).total_seconds()>adapter.max_lifetime_seconds+30: raise AdapterRegistrationError("persisted receipt exceeds provider lifetime policy")
+    return RegisteredProvider(adapter,actual_uuid,str(row["verifier_id"]),exec_id,receipt_sha,row["expires_at"],signed_sha,envelope_sha,payload_type)
 
-def expected_context(
-    provider_id: str,
-    *,
-    repository: str,
-    source_digest: str,
-    source_ref: str,
-    coords: dict,
-    signer_workflow: str,
-    now_epoch: float,
-) -> dict:
-    """Build the neutral expectation payload consumed by the verifier.
 
-    The verifier keeps its own strict checks; this only supplies the
-    provider-specific constants so its hardcoded GitHub assumptions become
-    parameterized. NOTE: live_provider_verifier.ExpectedContext remains the
-    authority for the GitHub adapter; this bridge is how NON-GitHub providers
-    reach the same policy without forking the verifier.
-    """
-    adapter = get(provider_id)
-    if not SHA256_RE.match(source_digest or ""):
-        raise AdapterRegistrationError("source_digest must be sha256 hex")
-    _require_coords(provider_id, coords)
-    native_values = {k: int(v) for k, v in coords.items()}
-    # external_execution_id is derived EXCLUSIVELY from the provider's own
-    # native coordinate schema — no aliasing (F1-GPT-002).
-    id_value = adapter.external_execution_format.format(**native_values)
-    return {
-        "provider_id": adapter.provider_id,
-        "provider_kind": adapter.provider_kind,
-        "oidc_issuer": adapter.oidc_issuer,
-        "sigstore_instance": adapter.sigstore_instance,
-        "trust_generation": adapter.trust_generation,
-        "crypto_channel": adapter.crypto_channel,
-        "max_lifetime_seconds": adapter.max_lifetime_seconds,
-        "external_execution_id": id_value,
-        "repository": repository,
-        "source_digest": source_digest,
-        "source_ref": source_ref,
-        "native_execution_coordinates": dict(native_values),
-        "signer_workflow": signer_workflow,
-        "revoked_identities": list(adapter.revoked_identities),
-        "now_epoch": now_epoch,
-        "authority_effect": False,
-    }
+def _readback_rpc(verification_id: str,evaluated_at: _dt.datetime)->dict:
+    key=os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    if not key: raise AdapterRegistrationError("SUPABASE_SERVICE_ROLE_KEY is required for persisted readback")
+    payload=json.dumps({"p_verification_id":verification_id,"p_evaluated_at":evaluated_at.isoformat()},separators=(",",":")).encode()
+    request=urllib.request.Request(f"{SUPABASE_URL}/rest/v1/rpc/{READBACK_RPC}",data=payload,method="POST",headers={"apikey":key,"authorization":f"Bearer {key}","content-type":"application/json","accept":"application/json"})
+    try:
+        with urllib.request.urlopen(request,timeout=15) as response:
+            if response.status!=200: raise AdapterRegistrationError(f"persisted readback RPC returned HTTP {response.status}")
+            result=json.loads(response.read())
+    except (urllib.error.URLError,TimeoutError,json.JSONDecodeError) as exc: raise AdapterRegistrationError("persisted readback RPC failed") from exc
+    if not isinstance(result,dict): raise AdapterRegistrationError("persisted readback RPC returned non-object")
+    return result
 
 
-__all__ = [
-    "register_from_readback",
-    "readback_bindings",
-    "AdapterRegistrationError",
-    "ProviderAdapter",
-    "GITHUB_ACTIONS_F1",
-    "APPVEYOR_F1_CANDIDATE",
-    "register",
-    "get",
-    "registered",
-    "expected_context",
-    "CRYPTO_CHANNELS",
-]
+def register_from_supabase(adapter: ProviderAdapter,verification_id: str,*,evaluated_at_epoch: float|None=None)->RegisteredProvider:
+    try: normalized=str(uuid.UUID(str(verification_id)))
+    except (ValueError,AttributeError) as exc: raise AdapterRegistrationError("verification_id must be UUID") from exc
+    evaluated_at=_dt.datetime.now(tz=_dt.timezone.utc) if evaluated_at_epoch is None else _dt.datetime.fromtimestamp(float(evaluated_at_epoch),tz=_dt.timezone.utc)
+    projection=_readback_rpc(normalized,evaluated_at); entry=_validate_projection(adapter,projection,verification_id=normalized,evaluated_at_epoch=evaluated_at.timestamp()); _REGISTRY[adapter.provider_id]=entry; return entry
+
+
+GITHUB_ACTIONS_F1=ProviderAdapter("github-actions-f1-live","GITHUB_HOSTED_ACTIONS","https://token.actions.githubusercontent.com","public-good",1,"gh-attestation+sigstore",20*60,"github-actions:{run_id}:{run_attempt}","PatrickFrome/Compute","PatrickFrome/Compute/.github/workflows/f1-live-provider-pr.yml")
+APPVEYOR_F1_CANDIDATE=ProviderAdapter("appveyor-f1-live","APPVEYOR_HOSTED_VM","https://ci.appveyor.com","public-good",1,"appveyor-attestation+sigstore",30*60,"appveyor:{build_id}:{build_number}","PatrickFrome/Compute","PatrickFrome/Compute/.github/workflows/appveyor-f1.yml")
+GITHUB_COORD_KEYS={"run_id","run_attempt"}; APPVEYOR_COORD_KEYS={"build_id","build_number"}
+
+
+def _require_coords(provider_id: str,coords: dict)->None:
+    expected=GITHUB_COORD_KEYS if provider_id==GITHUB_ACTIONS_F1.provider_id else APPVEYOR_COORD_KEYS if provider_id==APPVEYOR_F1_CANDIDATE.provider_id else None
+    if expected is None or set(coords or {})!=expected: raise AdapterRegistrationError(f"provider {provider_id} requires provider-native coordinates {sorted(expected or [])}")
+    for key,value in coords.items():
+        if type(value) is not int or value<1: raise AdapterRegistrationError(f"coordinate {key} must be positive integer")
+
+
+def expected_context(provider_id: str,*,repository: str,source_digest: str,source_ref: str,coords: dict,signer_workflow: str,now_epoch: float)->dict:
+    adapter=get(provider_id)
+    if repository!=adapter.repository: raise AdapterRegistrationError("repository differs from persisted provider binding")
+    if signer_workflow!=adapter.signer_workflow: raise AdapterRegistrationError("signer workflow differs from persisted provider binding")
+    if not SHA256_RE.fullmatch(source_digest or ""): raise AdapterRegistrationError("source_digest must be sha256 hex")
+    _require_coords(provider_id,coords); native=dict(coords); exec_id=adapter.external_execution_format.format(**native)
+    return {"provider_id":adapter.provider_id,"provider_kind":adapter.provider_kind,"oidc_issuer":adapter.oidc_issuer,"sigstore_instance":adapter.sigstore_instance,"trust_generation":adapter.trust_generation,"crypto_channel":adapter.crypto_channel,"max_lifetime_seconds":adapter.max_lifetime_seconds,"external_execution_id":exec_id,"repository":repository,"source_digest":source_digest,"source_ref":source_ref,"native_execution_coordinates":native,"signer_workflow":signer_workflow,"revoked_identities":list(adapter.revoked_identities),"now_epoch":now_epoch,"authority_effect":False}
+
+
+__all__=["AdapterRegistrationError","ProviderAdapter","RegisteredProvider","GITHUB_ACTIONS_F1","APPVEYOR_F1_CANDIDATE","register","register_from_supabase","get","get_registration","registered","expected_context","CRYPTO_CHANNELS"]
