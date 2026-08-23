@@ -1,104 +1,101 @@
 # W1 DEV-CYCLE-001 — create-once SSM IID document provisioning
 
-Status: **IMPLEMENTED CONTRACT / NOT DEPLOYED / NON-AUTHORITY**
+Status: **IMPLEMENTED OFFLINE CONTRACT / NOT DEPLOYED / NON-AUTHORITY**
 
 Canonical Level-1 milestone: **C1 — First Real Linux Worker**  
 Level-2 milestone: `W1_PERSISTENT_LINUX_WORKER_SAFETY`
 
 ## Same-World boundary
 
-The provisioning slice started from CP072 and remains bound to Supervisor directive #22 `CONTINUE`. The original implementation was produced on W1 claim #19. During the security recheck after that lease expired, GPT reacquired a fresh W1 lease before changing source; no F1 federation/provider/signature source is modified by this step.
+This slice remains on CP072 under Supervisor directive #22. The current security recheck is performed under W1 claim #23. No F1 federation/provider/signature source is modified.
 
-## Problem
+## Purpose
 
-The hardened SSM transport deliberately requires an account-owned, parameterless document named `Metaengine-W1-IID-Capture-H205F22` at immutable execution version `1`. The W1 execution role is not allowed to create or mutate that document. Without a separately reviewed provisioning boundary, a future operator could accidentally provision it with a broad administrative role or silently update the command content.
+The runtime SSM transport requires an account-owned, parameterless document named `Metaengine-W1-IID-Capture-H205F22` and is pinned to execution version `1`. The provisioning controller therefore builds a narrowly scoped create/read IAM **policy template** and a deterministic `CreateDocument` request from the reviewed repository JSON.
 
-A second problem was found during adversarial review of the first provisioning implementation: its CLI accepted caller-selected `--document`, `--plan`, readback-response and `--output` filesystem paths. The core AWS contract was fail-closed, but the controller process itself unnecessarily inherited filesystem read/write authority from untrusted CLI path strings.
+The controller itself never calls AWS. Its CLI is JSON stdin -> JSON stdout only; repository document bytes are bounded strict base64, so callers cannot select filesystem paths.
 
-## Research
+## Research and corrected trust boundary
 
-AWS Systems Manager stores custom SSM documents in the account and Region where they are created. Schema 2.2 documents support versioning: changing document content creates a new document version. AWS APIs allow callers to address a specific version, and the default version can be changed independently.
+AWS Systems Manager supports custom document versioning and lets callers address a specific version; the default version can change independently. `CreateDocument` supports the SSM `document` resource type together with request-tag / tag-key and document-type condition keys, so the generated statement can be scoped to the exact account/Region document ARN and exact H205F22 tags.
 
-AWS Service Authorization documentation lists `CreateDocument` as a write action supporting the SSM `document` resource type and request-tag / document-type condition keys. This allows the provisioning policy to be scoped to the exact account-owned document ARN plus H205F22 tags.
+A second adversarial pass found an important IAM semantics issue in the earlier wording. An identity-based policy that contains only narrow `Allow` statements does **not** prove the effective permissions of the principal to which it is attached: effective authorization can also depend on other identity/resource policies, permissions boundaries, session policies, service control policies, and explicit denies. Therefore this offline module must not claim that a real provisioning role "cannot" update/delete/share/execute merely because this generated template omits those allows.
 
-The controller I/O hardening follows a separate security principle. OWASP ASVS V5.3.2 recommends internally generated/trusted file paths instead of user-submitted filenames where possible; the OWASP Path Traversal guidance likewise recommends avoiding user input in filesystem calls. Because this controller does not need filesystem selection at all, the stronger design is to remove path arguments rather than try to sanitize them. The Python subprocess security guidance was also rechecked: W1's separate OpenSSL verifier continues to use an argv sequence with the shell disabled; this provisioning module launches no subprocesses.
+The contract now states only what it can prove:
+
+- the generated template allows `ssm:CreateDocument` on the exact document ARN with `DocumentType=Command` and exact request tags;
+- the generated template allows only `ssm:DescribeDocument` and `ssm:GetDocument` for readback;
+- this template contains no allow for update/delete/share/send-command/session surfaces;
+- `effective_principal_permissions_verified=false` until an independent live IAM/effective-permission check exists.
+
+The partition logic is also aligned with the runtime guard: commercial=`aws`, GovCloud=`aws-us-gov`, China=`aws-cn`.
 
 References:
 
 - https://docs.aws.amazon.com/systems-manager/latest/userguide/documents.html
 - https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_CreateDocument.html
-- https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_UpdateDocument.html
 - https://docs.aws.amazon.com/service-authorization/latest/reference/list_ssm.html
-- https://owasp.org/www-community/attacks/Path_Traversal
-- https://cornucopia.owasp.org/taxonomy/asvs-5.0/05-file-handling/03-file-storage
-- https://docs.python.org/3/library/subprocess.html#security-considerations
+- https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic.html
+- https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html
+- https://docs.aws.amazon.com/IAM/latest/UserGuide/reference-arns.html
 
-## Adopted provisioning boundary
+## Deterministic provisioning plan
 
-`controller/w1/aws_ssm_iid_document_provision_guard.py` builds a credential-free plan for an independent provisioning principal.
+`controller/w1/aws_ssm_iid_document_provision_guard.py` builds:
 
-The role can only:
+- exact account/Region/partition document ARN;
+- exact parameterless `Command` document content derived from repository bytes;
+- exact H205F22 request tags;
+- create/read policy template;
+- repository source digest;
+- hard non-authority flags.
 
-- `ssm:CreateDocument` on the exact account/Region document ARN, constrained to `DocumentType=Command` and the exact H205F22 request-tag set;
-- `ssm:DescribeDocument` and `ssm:GetDocument` on that exact ARN.
+Verify mode treats the supplied plan as untrusted and rebuilds the only acceptable plan from account, Region and raw repository document bytes. Any ARN, policy, tag, digest or flag substitution fails structural equality.
 
-It cannot:
+## AWS response transport validation
 
-- `ssm:SendCommand`;
-- `ssm:UpdateDocument`;
-- `ssm:DeleteDocument`;
-- `ssm:ModifyDocumentPermission`;
-- `ssm:StartSession`.
+The `create_response`, `describe_response` and `get_document_response` objects supplied to offline verify mode are **caller-supplied transport**, not authenticated AWS provenance. Their successful validation proves only internal consistency with the contract:
 
-The CreateDocument request is derived directly from the reviewed repository JSON and contains no caller command parameters. If the document already exists, the intended create-only operation fails rather than mutating the existing resource.
-
-The CLI boundary is now JSON stdin -> JSON stdout only. Raw repository-document bytes are transported as bounded validated base64. There are no caller-controlled input/output path arguments in this provisioning controller.
-
-Verify mode also treats the supplied plan as untrusted: it deterministically rebuilds the only acceptable plan from the exact account, Region and raw repository document bytes, and requires full structural equality. A caller cannot substitute the document ARN, IAM statements, tags, digest or non-authority flags while preserving a superficially valid schema.
-
-## Persisted-readback validation
-
-A provisioning receipt is possible only after AWS readback proves:
-
-- owner equals the expected AWS account;
-- type is `Command`;
+- expected account owner;
+- type `Command`;
 - `DocumentVersion=1`;
 - `LatestVersion=1`;
 - `DefaultVersion=1`;
-- active document state on DescribeDocument;
-- AWS SHA-256 metadata is present;
-- exact remote version-1 content canonically equals repository content;
-- the complete provisioning plan exactly equals the deterministic locally rebuilt plan.
+- active DescribeDocument state;
+- SHA-256 metadata shape;
+- exact remote-content equality to repository source.
 
-Even a successful receipt is only:
+The receipt now explicitly records:
 
-`W1_AWS_SSM_IID_DOCUMENT_PROVISIONED_NON_AUTHORITY`
+- `aws_api_response_provenance=CALLER_SUPPLIED_AWS_RESPONSE_TRANSPORT_NON_AUTHORITY`;
+- `live_aws_api_provenance_verified=false`;
+- `effective_principal_permissions_verified=false`;
+- `document_provisioning_observation_validated=true`;
+- `document_provisioned=false`;
+- `document_provisioned_authoritatively_verified=false`.
 
-and keeps these false:
+The historical classification string remains `W1_AWS_SSM_IID_DOCUMENT_PROVISIONED_NON_AUTHORITY` for schema compatibility, but it must not be interpreted as live AWS evidence.
 
-- runtime execution authority;
-- provider identity verification;
-- reboot completion;
-- persistent worker proof;
-- W1 verification;
-- canonical/authority effect.
+Hard nonclaims remain false: runtime execution authority, provider identity verification, reboot completion, persistent worker proof, W1 verification, canonical, authority effect.
 
 ## Negative tests
 
-The suite rejects:
+The suite covers:
 
 - invalid account/Region and type confusion;
-- arbitrary/unknown stdin request fields, including path-like fields;
-- malformed or oversized base64 document transport;
-- any provisioning policy with runtime/mutation actions by exact-action assertion;
-- any second/latest/default document version other than 1;
-- wrong AWS account owner;
-- remote document content drift;
-- local repository digest substitution;
-- arbitrary plan-field substitution, including ARN/policy/tag/flag drift.
+- commercial/GovCloud/China partition mapping, including `aws-cn`;
+- arbitrary/unknown stdin fields and path-like fields;
+- malformed/oversized base64;
+- exact policy-template action set;
+- no claim of effective principal permissions;
+- second/latest/default version drift;
+- wrong owner;
+- remote content drift;
+- local digest and arbitrary plan substitution;
+- explicit caller-supplied AWS response provenance and non-authority outcome.
 
-## Next boundary
+## Next live boundary
 
-This contract does **not** provision AWS resources. The next live action still requires an independently authorized AWS provisioning channel to create exactly version 1. After that, the existing SSM capture guard must read the remote document back, prove content equality, capture IID bytes, and pass them to the pinned off-host cryptographic verifier.
+This contract does **not** provision AWS resources. A future live step requires an independently authorized AWS channel and independent provenance/readback of the actual account state. Only then may the runtime SSM capture path verify the exact version-1 document, prove the target is an Online Linux SSM managed EC2 node, capture real IID bytes, and pass them to the pinned off-host cryptographic verifier.
 
 No worker admission, W1 verification, canonical checkpoint advancement or synthetic live evidence is performed here.
