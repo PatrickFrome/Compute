@@ -1,0 +1,170 @@
+name: W1 GCP Persistent Host Preflight Only
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/w1-gcp-persistent-host-preflight.yml'
+      - 'controller/w1/gcp_persistent_host_preflight_guard.py'
+      - 'tests/test_w1_gcp_persistent_host_preflight_guard.py'
+      - 'research/W1_GCP_PERSISTENT_HOST_PREFLIGHT.md'
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type PREFLIGHT_W1_GCP_PERSISTENT_HOST_ONLY'
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile and run GCP preflight guard tests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/w1/gcp_persistent_host_preflight_guard.py
+          python3 -m unittest tests.test_w1_gcp_persistent_host_preflight_guard -v
+
+      - name: Validate keyless preflight-only contract
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          raw=Path('.github/workflows/w1-gcp-persistent-host-preflight.yml').read_text()
+          assert 'PREFLIGHT_W1_GCP_PERSISTENT_HOST_ONLY' in raw
+          assert raw.count('id-token: write') == 1
+          assert 'google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093' in raw
+          assert 'credentials_json' not in raw
+          assert 'access_token_lifetime: 900s' in raw
+          assert 'create_credentials_file: false' in raw
+          assert 'export_environment_variables: false' in raw
+          assert 'compute.instances.reset' in raw
+          assert '/testIamPermissions' in raw
+          assert '/reset' not in raw
+          assert 'gcloud compute instances reset' not in raw
+          assert 'authority_effect' not in raw.lower() or 'authority_effect=false' not in raw.lower()
+          PY
+
+  host-preflight:
+    if: github.event_name == 'workflow_dispatch'
+    needs: contract-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: w1-persistent-host-proof
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CONFIRMATION: ${{ inputs.confirmation }}
+      GCP_PROJECT_ID: ${{ vars.W1_GCP_PROJECT_ID }}
+      GCP_ZONE: ${{ vars.W1_GCP_ZONE }}
+      GCP_INSTANCE_NAME: ${{ vars.W1_GCP_INSTANCE_NAME }}
+      GCP_WIF_PROVIDER: ${{ vars.W1_GCP_WIF_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ vars.W1_GCP_SERVICE_ACCOUNT }}
+      WORKER_ID: ${{ vars.W1_WORKER_ID }}
+    steps:
+      - name: Checkout exact main execution revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Require explicit protected main dispatch and validate variables
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$CONFIRMATION" == 'PREFLIGHT_W1_GCP_PERSISTENT_HOST_ONLY' ]]
+          [[ "$GCP_PROJECT_ID" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]]
+          [[ "$GCP_ZONE" =~ ^[a-z]+-[a-z0-9]+[0-9]-[a-z]$ ]]
+          [[ "$GCP_INSTANCE_NAME" =~ ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$ ]]
+          [[ "$GCP_WIF_PROVIDER" =~ ^projects/[0-9]+/locations/global/workloadIdentityPools/[A-Za-z0-9._-]+/providers/[A-Za-z0-9._-]+$ ]]
+          [[ "$GCP_SERVICE_ACCOUNT" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\.iam\.gserviceaccount\.com$ ]]
+          [[ "$WORKER_ID" =~ ^[A-Za-z0-9._:-]{3,160}$ ]]
+          W1_SHA="$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}.git" refs/heads/work/w1-linux-worker-safety | awk '{print $1}')"
+          [[ "$W1_SHA" =~ ^[0-9a-f]{40}$ ]]
+          echo "W1_SHA=$W1_SHA" >> "$GITHUB_ENV"
+          mkdir -p evidence
+
+      - name: Authenticate to Google Cloud via GitHub OIDC Workload Identity Federation
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          project_id: ${{ vars.W1_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.W1_GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.W1_GCP_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_lifetime: 900s
+          create_credentials_file: false
+          export_environment_variables: false
+          cleanup_credentials: true
+
+      - name: Read exact Compute Engine instance and boot disk
+        env:
+          GCP_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          test -n "$GCP_ACCESS_TOKEN"
+          API="https://compute.googleapis.com/compute/v1/projects/${GCP_PROJECT_ID}/zones/${GCP_ZONE}"
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${GCP_ACCESS_TOKEN}" \
+            "${API}/instances/${GCP_INSTANCE_NAME}" > evidence/gcp-instance.json
+          BOOT_DISK="$(python3 - <<'PY'
+          import json
+          value=json.load(open('evidence/gcp-instance.json'))
+          disks=[d for d in value.get('disks',[]) if d.get('boot') is True]
+          if len(disks) != 1 or not disks[0].get('source'):
+              raise SystemExit('exactly one boot disk is required')
+          print(disks[0]['source'].rstrip('/').split('/')[-1])
+          PY
+          )"
+          [[ "$BOOT_DISK" =~ ^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$ ]]
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${GCP_ACCESS_TOKEN}" \
+            "${API}/disks/${BOOT_DISK}" > evidence/gcp-boot-disk.json
+
+      - name: Prove reset permission without resetting the VM
+        env:
+          GCP_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          API="https://compute.googleapis.com/compute/v1/projects/${GCP_PROJECT_ID}/zones/${GCP_ZONE}"
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${GCP_ACCESS_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data '{"permissions":["compute.instances.reset"]}' \
+            "${API}/instances/${GCP_INSTANCE_NAME}/testIamPermissions" > evidence/gcp-reset-permission.json
+
+      - name: Validate free-tier host shape and W1 identity binding
+        run: |
+          set -euo pipefail
+          python3 controller/w1/gcp_persistent_host_preflight_guard.py \
+            --instance evidence/gcp-instance.json \
+            --disk evidence/gcp-boot-disk.json \
+            --permissions evidence/gcp-reset-permission.json \
+            --project-id "$GCP_PROJECT_ID" \
+            --zone "$GCP_ZONE" \
+            --instance-name "$GCP_INSTANCE_NAME" \
+            --worker-id "$WORKER_ID" \
+            --expected-w1-sha "$W1_SHA" \
+            --output evidence/w1-gcp-persistent-host-preflight.json
+          rm -f evidence/gcp-instance.json evidence/gcp-boot-disk.json evidence/gcp-reset-permission.json
+
+      - name: Upload credential-free GCP preflight evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: w1-gcp-persistent-host-preflight
+          path: evidence/w1-gcp-persistent-host-preflight.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
