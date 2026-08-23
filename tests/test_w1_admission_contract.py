@@ -50,6 +50,15 @@ class W1AdmissionContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "observation keys mismatch"):
             a.evaluate(observation)
 
+    def test_rejected_host_never_enters_persistence_composition(self):
+        observation = golden()
+        observation["host"]["cgroup"]["version"] = 1
+        decision = a.evaluate(observation)
+        self.assertEqual(decision["outcome"], "REJECTED_CAPABILITY")
+        self.assertFalse(decision["safety_eligible"])
+        self.assertFalse(decision["requires_independent_persistence_receipts"])
+        self.assertFalse(decision["admission_candidate"])
+
     def test_hybrid_or_v1_cgroup_fails_closed(self):
         observation = golden()
         observation["host"]["cgroup"]["version"] = 1
