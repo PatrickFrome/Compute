@@ -13,10 +13,7 @@ SPEC.loader.exec_module(runner)
 
 class ZeroSpendRunnerTests(unittest.TestCase):
     def test_hash_is_key_order_invariant(self):
-        self.assertEqual(
-            runner.sha256_json({"b": 2, "a": 1}),
-            runner.sha256_json({"a": 1, "b": 2}),
-        )
+        self.assertEqual(runner.sha256_json({"b": 2, "a": 1}), runner.sha256_json({"a": 1, "b": 2}))
 
     def test_secret_like_key_is_rejected(self):
         with self.assertRaises(ValueError):
@@ -39,7 +36,8 @@ class ZeroSpendRunnerTests(unittest.TestCase):
         commands = [" ".join(command) for command in runner.CHECKS]
         matches = [x for x in commands if "coordination/sync/sync_task_runner.py" in x]
         self.assertEqual(len(matches), 1)
-        self.assertIn("SYNC-L4.7-001.json", matches[0])
+        self.assertIn("coordination/sync/tasks/SYNC-L4.7-002.json", matches[0])
+        self.assertNotIn("SYNC-L4.7-001.json", matches[0])
 
     def test_provider_neutral_contract_has_no_authority(self):
         contract = {
