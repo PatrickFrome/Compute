@@ -17,6 +17,14 @@ from typing import Any
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 TASK_KINDS = {"DOCS", "TEST", "IMPLEMENTATION", "SCHEMA", "SECURITY", "AUTHORITY"}
+MIN_RISK_BY_KIND = {
+    "DOCS": 0,
+    "TEST": 1,
+    "IMPLEMENTATION": 2,
+    "SCHEMA": 3,
+    "SECURITY": 3,
+    "AUTHORITY": 4,
+}
 AGENTS = ("chatgpt", "glm")
 KNOWN_DOMAINS = {
     "worker", "enrollment", "execution_safety", "scheduler",
@@ -61,7 +69,8 @@ def validate_task(task: dict[str, Any], expected_epoch: str) -> None:
         raise ValueError("mixed or stale sync epoch")
     if not isinstance(task["risk_level"], int) or task["risk_level"] not in range(5):
         raise ValueError("risk_level must be an integer in [0,4]")
-    if task["task_kind"] not in TASK_KINDS:
+    kind = task["task_kind"]
+    if kind not in TASK_KINDS:
         raise ValueError("unsupported task_kind")
     for key in ("read_domains", "write_domains"):
         domains = task[key]
@@ -72,9 +81,18 @@ def validate_task(task: dict[str, Any], expected_epoch: str) -> None:
             raise ValueError(f"unknown mutation domains: {unknown}")
     if set(task["read_domains"]) & set(task["write_domains"]):
         raise ValueError("a domain cannot be both read and write in one task")
-    if task["task_kind"] == "AUTHORITY" and task["risk_level"] != 4:
+
+    risk = task["risk_level"]
+    minimum = MIN_RISK_BY_KIND[kind]
+    if risk < minimum:
+        raise ValueError(f"risk downgrade: {kind} requires risk >= {minimum}")
+    if task["write_domains"] and risk < 2:
+        raise ValueError("risk downgrade: domain writes require risk >= 2")
+    if "roadmap" in task["write_domains"] and not (kind == "AUTHORITY" and risk == 4):
+        raise ValueError("roadmap writes require AUTHORITY/risk 4")
+    if kind == "AUTHORITY" and risk != 4:
         raise ValueError("AUTHORITY tasks must be risk 4")
-    if task["risk_level"] == 4 and task["task_kind"] != "AUTHORITY":
+    if risk == 4 and kind != "AUTHORITY":
         raise ValueError("risk 4 is reserved for AUTHORITY tasks")
 
 
@@ -82,7 +100,7 @@ def conflict(a: dict[str, Any], b: dict[str, Any]) -> bool:
     a_r, a_w = set(a["read_domains"]), set(a["write_domains"])
     b_r, b_w = set(b["read_domains"]), set(b["write_domains"])
     if (a_w | b_w) & GLOBAL_WRITE_DOMAINS:
-        return bool(a_w or b_w)
+        return bool(a_w or b_w or a_r or b_r)
     return bool((a_w & (b_r | b_w)) or (b_w & (a_r | a_w)))
 
 
