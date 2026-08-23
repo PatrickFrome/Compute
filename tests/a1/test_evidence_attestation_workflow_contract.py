@@ -40,6 +40,15 @@ class EvidenceAttestationWorkflowContractTests(unittest.TestCase):
         self.assertIn('/tmp/pap-curl.conf', self.text)
         self.assertIn("umask 077", self.text)
 
+    def test_pap_secret_is_scoped_only_to_persisted_read_step(self):
+        live = self.text.split('  live-attest:\n', 1)[1]
+        live_header = live.split('    steps:\n', 1)[0]
+        self.assertNotIn('PAP_CHATGPT_TOKEN', live_header)
+        pap_step = live.split('      - name: Persisted-read GLM review from PAP\n', 1)[1].split('\n      - name:', 1)[0]
+        self.assertIn('PAP_CHATGPT_TOKEN: ${{ secrets.PAP_CHATGPT_TOKEN }}', pap_step)
+        self.assertIn('test -n "$PAP_CHATGPT_TOKEN"', pap_step)
+        self.assertEqual(self.text.count('${{ secrets.PAP_CHATGPT_TOKEN }}'), 1)
+
     def test_raw_provider_payloads_are_not_uploaded(self):
         upload_block = self.text.split('name: Upload credential-free attested evidence', 1)[1]
         self.assertNotIn('/tmp/github-reviews.json', upload_block)
