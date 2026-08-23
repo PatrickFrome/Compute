@@ -31,6 +31,8 @@ SECRET_VALUE_PATTERNS = [
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
 ]
 SYNC_TASK_RESULT = Path("evidence/sync-task-result.json")
+SYNC_TASK_PATH = Path("coordination/sync/tasks/SYNC-L4.8-001.json")
+EXPECTED_SYNC_TASK_ID = "SYNC-L4.8-001"
 
 PROVIDERS = {
     "github-actions": {"expected_sha_env": "GITHUB_SHA", "run_id_env": "GITHUB_RUN_ID", "run_number_env": "GITHUB_RUN_NUMBER", "job_env": "GITHUB_JOB"},
@@ -43,7 +45,7 @@ CHECKS = [
     ["node", "--check", "coordination/gpt-worker/src/guards.mjs"],
     ["node", "--check", "coordination/gpt-worker/src/index.mjs"],
     ["node", "--test", "coordination/gpt-worker/test/guards.test.mjs"],
-    ["python3", "coordination/sync/sync_task_runner.py", "--task", "coordination/sync/tasks/SYNC-L4.7-002.json", "--output", "evidence/sync-task-result.json"],
+    ["python3", "coordination/sync/sync_task_runner.py", "--task", str(SYNC_TASK_PATH), "--output", "evidence/sync-task-result.json"],
 ]
 
 
@@ -130,7 +132,7 @@ def load_sync_task_result() -> dict[str, str]:
     for key in ("task_sha256", "sync_epoch_sha256", "task_result_sha256"):
         if not SHA256_RE.fullmatch(neutral[key]):
             raise ValueError(f"invalid sync task {key}")
-    if neutral["task_id"] != "SYNC-L4.7-002":
+    if neutral["task_id"] != EXPECTED_SYNC_TASK_ID:
         raise ValueError("unexpected sync task id")
     return neutral
 
