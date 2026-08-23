@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'coordination/execution/**'
+      - 'coordination/evidence/**'
       - 'coordination/sync/**'
       - 'coordination/gpt-worker/**'
       - 'coordination/e2b/**'
@@ -38,7 +39,9 @@ jobs:
             tests.a1.test_cross_provider_verify \
             tests.a1.test_execution_subject \
             tests.a1.test_peer_review_barrier \
-            tests.a1.test_sync_task_runner -v
+            tests.a1.test_sync_task_runner \
+            tests.a1.test_schema_version_policy \
+            tests.a1.test_evidence_bundle -v
 
       - name: Run provider-neutral execution contract
         run: |
@@ -57,7 +60,7 @@ jobs:
           assert d['provider']['kind']=='github-actions'
           assert d['source']['git_sha']==d['source']['expected_git_sha']
           assert d['source']['expected_git_sha_source']=='H205F22_EXPECTED_GIT_SHA'
-          assert d['sync_task']['task_id']=='SYNC-L4.7-002'
+          assert d['sync_task']['task_id']=='SYNC-L4.8-001'
           assert d['sync_task']['sync_epoch_sha256']=='5c0a35c4123190251059b0c092becd33d44efa9d7ed2466add650c3569938e4c'
           assert d['authority']['authority_effect'] is False
           assert d['authority']['execution_authority'] is False
@@ -129,7 +132,7 @@ jobs:
           assert r['identity_source']=='PERSISTED_APPVEYOR_ARTIFACT_BYTES'
           assert r['providers']==['github-actions','appveyor']
           assert s['schema']=='metaengine.compute.sync-execution-subject.h205f22.v1'
-          assert s['task_id']=='SYNC-L4.7-002'
+          assert s['task_id']=='SYNC-L4.8-001'
           assert s['cross_provider_evidence_class']=='CROSS_PROVIDER_REPRODUCED_VERIFIED'
           assert s['identity_source']=='PERSISTED_APPVEYOR_ARTIFACT_BYTES'
           assert s['authority']['authority_effect'] is False
