@@ -1,4 +1,5 @@
 name: A1 Zero-Spend Execution Fabric
+# Cross-provider webhook verification marker: 2026-08-23
 
 on:
   pull_request:
