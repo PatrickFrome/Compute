@@ -4,15 +4,17 @@
 This module never calls AWS and grants no Run Command/runtime authority. It builds the
 narrow create/read boundary used by an independent provisioning principal, then
 validates persisted AWS readback of version 1 against the reviewed repository bytes.
-Any update/delete/share/send-command capability is deliberately outside this role.
+
+CLI I/O is deliberately stdin -> stdout only. Callers cannot select filesystem paths;
+raw repository document bytes travel as bounded base64 inside the request object.
 """
 from __future__ import annotations
 
-import argparse
+import base64
 import hashlib
 import json
 import re
-from pathlib import Path
+import sys
 from typing import Any
 
 from controller.w1 import aws_ssm_iid_capture_guard as capture
@@ -23,6 +25,8 @@ ACCOUNT_ID = re.compile(r"^[0-9]{12}$")
 REGION = re.compile(r"^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 TARGET_TYPE = "/AWS::EC2::Instance"
+MAX_STDIN_CHARS = 512_000
+MAX_DOCUMENT_SOURCE_BYTES = 65_536
 
 
 class ProvisionError(RuntimeError):
@@ -51,9 +55,9 @@ def _tags() -> dict[str, str]:
 
 
 def build_provision_plan(*, account_id: str, region: str, local_document_source: bytes) -> dict[str, Any]:
-    if not ACCOUNT_ID.fullmatch(account_id):
+    if not isinstance(account_id, str) or not ACCOUNT_ID.fullmatch(account_id):
         raise ProvisionError("account_id_invalid")
-    if not REGION.fullmatch(region):
+    if not isinstance(region, str) or not REGION.fullmatch(region):
         raise ProvisionError("region_invalid")
     local = capture.parse_local_document(local_document_source)
     partition = _partition(region)
@@ -155,16 +159,23 @@ def validate_provisioned_document(
 ) -> dict[str, Any]:
     if not isinstance(plan, dict) or plan.get("schema") != PLAN_SCHEMA:
         raise ProvisionError("plan_schema_invalid")
-    if plan.get("canonical") is not False or plan.get("authority_effect") is not False:
-        raise ProvisionError("plan_authority_invalid")
-    if plan.get("create_once") is not True or plan.get("required_document_version") != "1":
-        raise ProvisionError("plan_create_once_boundary_invalid")
-    if plan.get("repository_document_source_sha256") != _sha_bytes(local_document_source):
-        raise ProvisionError("local_document_digest_mismatch")
-
-    account_id = str(plan.get("account_id") or "")
-    if not ACCOUNT_ID.fullmatch(account_id):
+    account_id = plan.get("account_id")
+    region = plan.get("region")
+    if not isinstance(account_id, str) or not ACCOUNT_ID.fullmatch(account_id):
         raise ProvisionError("plan_account_id_invalid")
+    if not isinstance(region, str) or not REGION.fullmatch(region):
+        raise ProvisionError("plan_region_invalid")
+
+    # The plan is caller-supplied in verify mode, so never trust its ARN, IAM
+    # statements, tags, digests, or non-authority flags independently. Rebuild
+    # the only acceptable plan from the raw reviewed document and exact identity.
+    expected_plan = build_provision_plan(
+        account_id=account_id,
+        region=region,
+        local_document_source=local_document_source,
+    )
+    if plan != expected_plan:
+        raise ProvisionError("plan_content_mismatch")
 
     created = _description(create_response, "create_response")
     if created.get("Owner") != account_id:
@@ -187,14 +198,14 @@ def validate_provisioned_document(
 
     evidence = {
         "account_id": account_id,
-        "region": plan["region"],
+        "region": region,
         "document_name": capture.DOCUMENT_NAME,
-        "document_arn": plan["document_arn"],
+        "document_arn": expected_plan["document_arn"],
         "document_version": "1",
         "latest_version": "1",
         "default_version": "1",
         "aws_document_sha256": described["Hash"],
-        "repository_document_source_sha256": plan["repository_document_source_sha256"],
+        "repository_document_source_sha256": expected_plan["repository_document_source_sha256"],
         "remote_content_matches_repository": True,
         "create_once": True,
         "provisioning_role_can_update": False,
@@ -218,41 +229,77 @@ def validate_provisioned_document(
     }
 
 
-def _read(path: str) -> Any:
-    return json.loads(Path(path).read_text(encoding="utf-8"))
-
-
-def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser()
-    sub = p.add_subparsers(dest="command", required=True)
-    make = sub.add_parser("plan")
-    make.add_argument("--account-id", required=True)
-    make.add_argument("--region", required=True)
-    make.add_argument("--document", required=True)
-    make.add_argument("--output", required=True)
-    verify = sub.add_parser("verify")
-    verify.add_argument("--plan", required=True)
-    verify.add_argument("--create-response", required=True)
-    verify.add_argument("--describe-response", required=True)
-    verify.add_argument("--get-document-response", required=True)
-    verify.add_argument("--document", required=True)
-    verify.add_argument("--output", required=True)
-    args = p.parse_args(argv)
+def _decode_document_source(value: Any) -> bytes:
+    if not isinstance(value, str) or not value:
+        raise ProvisionError("document_source_base64_missing")
     try:
-        if args.command == "plan":
-            source = Path(args.document).read_bytes()
-            result = build_provision_plan(account_id=args.account_id, region=args.region, local_document_source=source)
-        else:
-            source = Path(args.document).read_bytes()
-            result = validate_provisioned_document(
-                plan=_read(args.plan), create_response=_read(args.create_response),
-                describe_response=_read(args.describe_response), get_document_response=_read(args.get_document_response),
-                local_document_source=source,
-            )
-        Path(args.output).write_text(json.dumps(result, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+        raw = base64.b64decode(value, validate=True)
+    except Exception as exc:
+        raise ProvisionError("document_source_base64_invalid") from exc
+    if not raw or len(raw) > MAX_DOCUMENT_SOURCE_BYTES:
+        raise ProvisionError("document_source_size_invalid")
+    capture.parse_local_document(raw)
+    return raw
+
+
+def _require_request_keys(value: Any, expected: set[str]) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ProvisionError("request_not_object")
+    if set(value) != expected:
+        raise ProvisionError("request_shape_invalid")
+    return value
+
+
+def handle_request(request: Any) -> dict[str, Any]:
+    if not isinstance(request, dict):
+        raise ProvisionError("request_not_object")
+    command = request.get("command")
+    if command == "plan":
+        req = _require_request_keys(
+            request,
+            {"command", "account_id", "region", "document_source_base64"},
+        )
+        source = _decode_document_source(req["document_source_base64"])
+        return build_provision_plan(
+            account_id=req["account_id"],
+            region=req["region"],
+            local_document_source=source,
+        )
+    if command == "verify":
+        req = _require_request_keys(
+            request,
+            {
+                "command",
+                "plan",
+                "create_response",
+                "describe_response",
+                "get_document_response",
+                "document_source_base64",
+            },
+        )
+        source = _decode_document_source(req["document_source_base64"])
+        return validate_provisioned_document(
+            plan=req["plan"],
+            create_response=req["create_response"],
+            describe_response=req["describe_response"],
+            get_document_response=req["get_document_response"],
+            local_document_source=source,
+        )
+    raise ProvisionError("command_invalid")
+
+
+def main() -> int:
+    try:
+        raw = sys.stdin.read(MAX_STDIN_CHARS + 1)
+        if len(raw) > MAX_STDIN_CHARS:
+            raise ProvisionError("stdin_too_large")
+        request = json.loads(raw)
+        result = handle_request(request)
+        json.dump(result, sys.stdout, sort_keys=True, separators=(",", ":"))
+        sys.stdout.write("\n")
         return 0
-    except (ProvisionError, capture.SSMCaptureError, OSError, json.JSONDecodeError) as exc:
-        print(f"W1_SSM_DOCUMENT_PROVISION_REJECTED:{exc}")
+    except (ProvisionError, capture.SSMCaptureError, json.JSONDecodeError) as exc:
+        print(f"W1_SSM_DOCUMENT_PROVISION_REJECTED:{exc}", file=sys.stderr)
         return 1
 
 

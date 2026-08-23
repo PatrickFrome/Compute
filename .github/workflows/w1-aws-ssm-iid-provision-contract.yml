@@ -41,7 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m unittest tests.test_w1_aws_ssm_iid_document_provision_guard -v
-      - name: Assert create-only authority split
+      - name: Assert create-only authority and stdin/stdout boundary
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -54,4 +54,10 @@ jobs:
           assert 'required_document_version' in p
           assert 'create_once' in p
           assert 'W1_AWS_SSM_IID_DOCUMENT_PROVISIONED_NON_AUTHORITY' in p
+          assert 'sys.stdin' in p and 'sys.stdout' in p
+          assert 'base64.b64decode' in p
+          assert 'argparse' not in p
+          assert 'Path(' not in p
+          assert '--document' not in p and '--output' not in p
+          assert 'expected_plan = build_provision_plan' in p
           PY

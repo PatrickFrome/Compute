@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import copy
+import base64
 import json
 import unittest
 from pathlib import Path
@@ -14,6 +14,10 @@ DOC_PATH = Path(__file__).parents[1] / "infra" / "w1" / "ssm" / "Metaengine-W1-I
 
 def source() -> bytes:
     return DOC_PATH.read_bytes()
+
+
+def source_b64() -> str:
+    return base64.b64encode(source()).decode("ascii")
 
 
 def plan() -> dict:
@@ -90,6 +94,8 @@ class ProvisionPlanTests(unittest.TestCase):
             p.build_provision_plan(account_id="123", region=REGION, local_document_source=source())
         with self.assertRaises(p.ProvisionError):
             p.build_provision_plan(account_id=ACCOUNT, region="invalid", local_document_source=source())
+        with self.assertRaises(p.ProvisionError):
+            p.build_provision_plan(account_id=123456789012, region=REGION, local_document_source=source())
 
 
 class ProvisionReadbackTests(unittest.TestCase):
@@ -135,15 +141,70 @@ class ProvisionReadbackTests(unittest.TestCase):
                 get_document_response=get_doc, local_document_source=source(),
             )
 
-    def test_local_digest_substitution_fails_closed(self):
+    def test_any_plan_field_substitution_fails_closed(self):
         value = plan()
-        value["repository_document_source_sha256"] = "b" * 64
+        value["document_arn"] = "arn:aws:ssm:us-east-2:123456789012:document/attacker"
         create, describe, get_doc = readback()
-        with self.assertRaisesRegex(p.ProvisionError, "local_document_digest_mismatch"):
+        with self.assertRaisesRegex(p.ProvisionError, "plan_content_mismatch"):
             p.validate_provisioned_document(
                 plan=value, create_response=create, describe_response=describe,
                 get_document_response=get_doc, local_document_source=source(),
             )
+
+    def test_local_digest_substitution_fails_closed(self):
+        value = plan()
+        value["repository_document_source_sha256"] = "b" * 64
+        create, describe, get_doc = readback()
+        with self.assertRaisesRegex(p.ProvisionError, "plan_content_mismatch"):
+            p.validate_provisioned_document(
+                plan=value, create_response=create, describe_response=describe,
+                get_document_response=get_doc, local_document_source=source(),
+            )
+
+
+class StdioBoundaryTests(unittest.TestCase):
+    def test_plan_request_preserves_exact_raw_document_digest(self):
+        result = p.handle_request({
+            "command": "plan",
+            "account_id": ACCOUNT,
+            "region": REGION,
+            "document_source_base64": source_b64(),
+        })
+        self.assertEqual(result, plan())
+
+    def test_verify_request_forms_same_nonauthority_receipt(self):
+        create, describe, get_doc = readback()
+        result = p.handle_request({
+            "command": "verify",
+            "plan": plan(),
+            "create_response": create,
+            "describe_response": describe,
+            "get_document_response": get_doc,
+            "document_source_base64": source_b64(),
+        })
+        self.assertEqual(result["classification"], "W1_AWS_SSM_IID_DOCUMENT_PROVISIONED_NON_AUTHORITY")
+        self.assertFalse(result["authority_effect"])
+
+    def test_unknown_request_field_rejected(self):
+        with self.assertRaisesRegex(p.ProvisionError, "request_shape_invalid"):
+            p.handle_request({
+                "command": "plan",
+                "account_id": ACCOUNT,
+                "region": REGION,
+                "document_source_base64": source_b64(),
+                "path": "/etc/passwd",
+            })
+
+    def test_invalid_or_oversized_document_transport_rejected(self):
+        with self.assertRaisesRegex(p.ProvisionError, "document_source_base64_invalid"):
+            p.handle_request({
+                "command": "plan",
+                "account_id": ACCOUNT,
+                "region": REGION,
+                "document_source_base64": "not-base64!",
+            })
+        with self.assertRaisesRegex(p.ProvisionError, "document_source_size_invalid"):
+            p._decode_document_source(base64.b64encode(b"x" * (p.MAX_DOCUMENT_SOURCE_BYTES + 1)).decode("ascii"))
 
 
 if __name__ == "__main__":
