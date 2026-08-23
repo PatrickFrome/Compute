@@ -126,6 +126,22 @@ class W1AdmissionContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "observation keys mismatch"):
             a.evaluate(o)
 
+    def test_digest_type_confusion_rejected(self):
+        o = golden()
+        o["source"]["git_sha"] = int("1" * 40)
+        with self.assertRaisesRegex(ValueError, "git_sha must be a string"):
+            a.evaluate(o)
+
+    def test_bool_numeric_type_confusion_rejected(self):
+        o = golden()
+        o["host"]["euid"] = True
+        with self.assertRaisesRegex(ValueError, "invalid euid"):
+            a.evaluate(o)
+        o = golden()
+        o["host"]["cgroup"]["version"] = True
+        with self.assertRaisesRegex(ValueError, "invalid cgroup version"):
+            a.evaluate(o)
+
     def test_decision_hash_is_deterministic(self):
         o = golden()
         self.assertEqual(a.evaluate(copy.deepcopy(o))["decision_sha256"], a.evaluate(copy.deepcopy(o))["decision_sha256"])

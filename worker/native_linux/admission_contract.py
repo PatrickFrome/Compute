@@ -9,13 +9,15 @@ It turns persisted host observations into one of three non-authoritative states:
 - ADMISSION_CANDIDATE
 
 Actual worker admission/canonical W1 verification is a separate authority-bearing step.
+
+CLI input is stdin-only and output is stdout-only. This deliberately avoids
+turning untrusted observation fields or CLI path arguments into filesystem I/O.
 """
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
-from pathlib import Path
+import sys
 from typing import Any
 
 OBSERVATION_SCHEMA = "metaengine.compute.w1-host-observation.h205f22.v1"
@@ -41,10 +43,7 @@ POLICY = {
 
 TOP_KEYS = {"schema", "policy_sha256", "source", "host", "persistence"}
 SOURCE_KEYS = {"git_sha", "tree_sha"}
-HOST_KEYS = {
-    "os", "euid", "no_new_privs", "seccomp_mode", "mount_namespace_isolated",
-    "cgroup", "pidfd_pass", "openat2_beneath_pass",
-}
+HOST_KEYS = {"os", "euid", "no_new_privs", "seccomp_mode", "mount_namespace_isolated", "cgroup", "pidfd_pass", "openat2_beneath_pass"}
 CGROUP_KEYS = {"version", "unified", "controllers", "kill_supported"}
 PERSISTENCE_KEYS = {
     "persistent_worker_proof", "provider_reboot_proof", "identity_binding_proof",
@@ -75,10 +74,18 @@ def _require_exact_keys(value: Any, expected: set[str], label: str) -> dict[str,
 
 
 def _sha(value: Any, label: str, length: int = 64) -> str:
-    text = str(value or "").lower()
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a string")
+    text = value.lower()
     if len(text) != length or any(c not in "0123456789abcdef" for c in text):
         raise ValueError(f"invalid {label}")
     return text
+
+
+def _plain_int(value: Any, label: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(f"invalid {label}")
+    return value
 
 
 def validate_observation(observation: dict[str, Any]) -> None:
@@ -93,16 +100,17 @@ def validate_observation(observation: dict[str, Any]) -> None:
     _sha(source["tree_sha"], "tree_sha", 40)
 
     host = _require_exact_keys(observation["host"], HOST_KEYS, "host")
-    if not isinstance(host["euid"], int) or host["euid"] < 0:
-        raise ValueError("invalid euid")
-    if not isinstance(host["seccomp_mode"], int) or host["seccomp_mode"] < 0:
-        raise ValueError("invalid seccomp_mode")
+    if not isinstance(host["os"], str):
+        raise ValueError("os must be a string")
+    _plain_int(host["euid"], "euid")
+    _plain_int(host["seccomp_mode"], "seccomp_mode")
     for key in ("no_new_privs", "mount_namespace_isolated", "pidfd_pass", "openat2_beneath_pass"):
         if not isinstance(host[key], bool):
             raise ValueError(f"{key} must be boolean")
 
     cgroup = _require_exact_keys(host["cgroup"], CGROUP_KEYS, "cgroup")
-    if cgroup["version"] not in (1, 2):
+    version = _plain_int(cgroup["version"], "cgroup version")
+    if version not in (1, 2):
         raise ValueError("unsupported cgroup version")
     if not isinstance(cgroup["unified"], bool) or not isinstance(cgroup["kill_supported"], bool):
         raise ValueError("invalid cgroup booleans")
@@ -153,9 +161,9 @@ def _persistence_checks(observation: dict[str, Any]) -> dict[str, bool]:
         "provider_reboot_proof": p["provider_reboot_proof"] is True,
         "identity_binding_proof": p["identity_binding_proof"] is True,
         "same_worker_before_after_reboot": p["same_worker_before_after_reboot"] is True,
-        "boot_id_changed": bool(before and after and before != after),
-        "provider_event_bound": bool(p["provider_event_sha256"] and p["provider_event_identity_source"] == ALLOWED_PROVIDER_IDENTITY_SOURCE),
-        "host_identity_bound": bool(p["host_identity_sha256"] and p["host_identity_source"] == ALLOWED_HOST_IDENTITY_SOURCE),
+        "boot_id_changed": isinstance(before, str) and isinstance(after, str) and before != after,
+        "provider_event_bound": isinstance(p["provider_event_sha256"], str) and p["provider_event_identity_source"] == ALLOWED_PROVIDER_IDENTITY_SOURCE,
+        "host_identity_bound": isinstance(p["host_identity_sha256"], str) and p["host_identity_source"] == ALLOWED_HOST_IDENTITY_SOURCE,
     }
 
 
@@ -187,32 +195,17 @@ def evaluate(observation: dict[str, Any]) -> dict[str, Any]:
         "schema": DECISION_SCHEMA,
         **neutral,
         "decision_sha256": canonical_hash(neutral),
-        "authority": {
-            "authority_effect": False,
-            "canonical": False,
-            "project_claim_authority": False,
-            "worker_admitted": False,
-            "w1_verified": False,
-        },
+        "authority": {"authority_effect": False, "canonical": False, "project_claim_authority": False, "worker_admitted": False, "w1_verified": False},
     }
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--observation", required=True)
-    parser.add_argument("--output")
-    args = parser.parse_args()
-    observation = json.loads(Path(args.observation).read_text(encoding="utf-8"))
+    observation = json.load(sys.stdin)
     if not isinstance(observation, dict):
         raise ValueError("observation must be an object")
     decision = evaluate(observation)
-    encoded = json.dumps(decision, sort_keys=True, indent=2) + "\n"
-    if args.output:
-        out = Path(args.output)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(encoded, encoding="utf-8")
-    else:
-        print(encoded, end="")
+    json.dump(decision, sys.stdout, sort_keys=True, indent=2)
+    sys.stdout.write("\n")
     return 0 if decision["outcome"] != "REJECTED_CAPABILITY" else 2
 
 
