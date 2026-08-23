@@ -77,6 +77,8 @@ def build_manifest(
         raise ValueError("E2B PREPARED smoke requires a blocked outbound-network canary")
     if not schema_check_passed or not compile_smoke_passed:
         raise ValueError("sandbox smoke checks did not pass")
+    if not destroy_confirmed:
+        raise ValueError("E2B sandbox destruction must be confirmed before smoke can PASS")
 
     manifest = {
         "schema": "metaengine.compute.a1.e2b-sandbox-smoke.h205f22.v1",
@@ -198,7 +200,7 @@ def main() -> int:
         network_result = _run_checked(
             sandbox,
             "python3 - <<'PY'\n"
-            "import socket, sys\n"
+            "import socket\n"
             "try:\n"
             "    s=socket.create_connection(('1.1.1.1',443), timeout=2)\n"
             "    s.close()\n"
@@ -237,7 +239,7 @@ def main() -> int:
                 try:
                     destroyed = not bool(sandbox.is_running())
                 except Exception:
-                    # kill() success is the strongest available SDK signal if follow-up status is unavailable.
+                    # A successful kill() remains evidence, but build_manifest still requires this flag.
                     destroyed = True
             except Exception:
                 destroyed = False
