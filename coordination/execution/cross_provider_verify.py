@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Cross-provider persisted readback verifier for H205F22 A1.
 
-Finds the exact AppVeyor build for the Git commit tested by GitHub, reads its
-evidence artifact back over the provider API, compares provider-neutral roots,
-and emits a non-authority cross-provider receipt.
+AppVeyor PR metadata may identify a merge/base commit rather than the source
+head. Therefore exact cross-provider identity is taken from the persisted
+AppVeyor evidence artifact itself, not from ambiguous build metadata.
 
-The lookup is commit-centric rather than branch-centric so the same verifier
-works for AppVeyor PR builds (which may report the PR base branch) and normal
-branch builds after merge.
+The verifier scans recent successful AppVeyor builds, reads their evidence
+artifacts, selects the artifact whose embedded source.git_sha equals the GitHub
+exact head, compares all provider-neutral roots, and emits a non-authority
+cross-provider receipt.
 
 This verifier never grants project authority and never satisfies W1.
 """
@@ -31,7 +32,7 @@ API_ROOT = "https://ci.appveyor.com/api"
 
 
 def _headers() -> dict[str, str]:
-    headers = {"Accept": "application/json", "User-Agent": "h205f22-cross-provider-readback/2"}
+    headers = {"Accept": "application/json", "User-Agent": "h205f22-cross-provider-readback/3"}
     token = os.environ.get("APPVEYOR_API_TOKEN", "").strip()
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -46,6 +47,18 @@ def fetch_bytes(url: str, *, timeout: int = 20) -> bytes:
 
 def fetch_json(url: str, *, timeout: int = 20) -> Any:
     return json.loads(fetch_bytes(url, timeout=timeout).decode("utf-8"))
+
+
+def _fetch_with_auth_failure_message(url: str) -> Any:
+    try:
+        return fetch_json(url)
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            raise RuntimeError(
+                "AppVeyor readback denied; fail closed. If account policy requires auth, "
+                "configure APPVEYOR_API_TOKEN only in a secret store."
+            ) from exc
+        raise
 
 
 def load_manifest(path: Path) -> dict[str, Any]:
@@ -116,7 +129,7 @@ def _project_prefix(account: str, project: str) -> str:
     return f"{API_ROOT}/projects/{account_q}/{project_q}"
 
 
-def history_url(account: str, project: str, *, records: int = 100) -> str:
+def history_url(account: str, project: str, *, records: int = 30) -> str:
     return f"{_project_prefix(account, project)}/history?recordsNumber={records}"
 
 
@@ -132,78 +145,6 @@ def artifact_url(job_id: str, file_name: str) -> str:
     job_q = urllib.parse.quote(job_id, safe="")
     file_q = urllib.parse.quote(file_name, safe="/")
     return f"{API_ROOT}/buildjobs/{job_q}/artifacts/{file_q}"
-
-
-def _fetch_with_auth_failure_message(url: str) -> Any:
-    try:
-        return fetch_json(url)
-    except urllib.error.HTTPError as exc:
-        if exc.code in (401, 403):
-            raise RuntimeError(
-                "AppVeyor readback denied; fail closed. If account policy requires auth, "
-                "configure APPVEYOR_API_TOKEN only in a secret store."
-            ) from exc
-        raise
-
-
-def wait_for_exact_success(
-    *,
-    account: str,
-    project: str,
-    expected_git_sha: str,
-    attempts: int,
-    interval_seconds: int,
-) -> dict[str, Any]:
-    url = history_url(account, project)
-    last_summary: dict[str, Any] = {}
-
-    for attempt in range(1, attempts + 1):
-        payload = _fetch_with_auth_failure_message(url)
-        builds = payload.get("builds") or []
-        exact = [
-            b for b in builds
-            if isinstance(b, dict) and str(b.get("commitId") or "").lower() == expected_git_sha
-        ]
-        terminal_failures = []
-        pending = []
-        for build in exact:
-            status = str(build.get("status") or "").lower()
-            if status == "success":
-                version = str(build.get("version") or "")
-                if not version:
-                    raise RuntimeError("AppVeyor successful history row has no version")
-                details = _fetch_with_auth_failure_message(build_version_url(account, project, version))
-                full_build = details.get("build") or {}
-                if str(full_build.get("commitId") or "").lower() != expected_git_sha:
-                    raise RuntimeError("AppVeyor build-detail commit changed during readback")
-                if str(full_build.get("status") or "").lower() != "success":
-                    pending.append({"version": version, "status": full_build.get("status")})
-                    continue
-                if not (full_build.get("jobs") or []):
-                    raise RuntimeError("AppVeyor exact-success build has no jobs")
-                return full_build
-            if status in {"failed", "cancelled"}:
-                terminal_failures.append({"build_id": build.get("buildId"), "version": build.get("version"), "status": status})
-            else:
-                pending.append({"build_id": build.get("buildId"), "version": build.get("version"), "status": status})
-
-        last_summary = {
-            "attempt": attempt,
-            "exact_builds": len(exact),
-            "pending": pending,
-            "terminal_failures": terminal_failures,
-        }
-
-        # If at least one exact build is still queued/running, allow it to finish.
-        # If all exact builds are terminal failures, fail immediately instead of
-        # waiting for an impossible promotion.
-        if exact and not pending and terminal_failures:
-            raise RuntimeError(f"all AppVeyor exact builds failed: {json.dumps(terminal_failures, sort_keys=True)}")
-
-        if attempt < attempts:
-            time.sleep(interval_seconds)
-
-    raise TimeoutError(f"AppVeyor exact-success build not observed: {json.dumps(last_summary, sort_keys=True)}")
 
 
 def fetch_appveyor_manifest(build: dict[str, Any], expected_suffix: str) -> tuple[dict[str, Any], str, str]:
@@ -233,6 +174,59 @@ def fetch_appveyor_manifest(build: dict[str, Any], expected_suffix: str) -> tupl
     return data, job_id, file_name
 
 
+def wait_for_exact_artifact(
+    *,
+    account: str,
+    project: str,
+    expected_git_sha: str,
+    attempts: int,
+    interval_seconds: int,
+) -> tuple[dict[str, Any], dict[str, Any], str, str]:
+    """Return (build, manifest, job_id, file_name) for exact persisted source SHA."""
+    seen_versions: set[str] = set()
+    last_summary: dict[str, Any] = {}
+
+    for attempt in range(1, attempts + 1):
+        payload = _fetch_with_auth_failure_message(history_url(account, project))
+        builds = payload.get("builds") or []
+        successful = [
+            b for b in builds
+            if isinstance(b, dict) and str(b.get("status") or "").lower() == "success"
+        ]
+        scanned = 0
+        artifact_sha_candidates: list[str] = []
+
+        for row in successful:
+            version = str(row.get("version") or "")
+            if not version or version in seen_versions:
+                continue
+            seen_versions.add(version)
+            scanned += 1
+            details = _fetch_with_auth_failure_message(build_version_url(account, project, version))
+            build = details.get("build") or {}
+            if str(build.get("status") or "").lower() != "success":
+                continue
+            try:
+                manifest, job_id, file_name = fetch_appveyor_manifest(build, "appveyor-zero-spend.json")
+                artifact_sha = comparable_roots(manifest)["git_sha"]
+            except (RuntimeError, ValueError, json.JSONDecodeError, urllib.error.HTTPError):
+                continue
+            artifact_sha_candidates.append(artifact_sha)
+            if artifact_sha == expected_git_sha:
+                return build, manifest, job_id, file_name
+
+        last_summary = {
+            "attempt": attempt,
+            "successful_history_rows": len(successful),
+            "new_builds_scanned": scanned,
+            "artifact_git_sha_candidates": artifact_sha_candidates[-10:],
+        }
+        if attempt < attempts:
+            time.sleep(interval_seconds)
+
+    raise TimeoutError(f"exact AppVeyor evidence artifact not observed: {json.dumps(last_summary, sort_keys=True)}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--github-evidence", required=True)
@@ -251,20 +245,20 @@ def main() -> int:
 
     github = load_manifest(Path(args.github_evidence))
     expected_git_sha = comparable_roots(github)["git_sha"]
-    build = wait_for_exact_success(
+    build, appveyor, job_id, file_name = wait_for_exact_artifact(
         account=args.account,
         project=args.project,
         expected_git_sha=expected_git_sha,
         attempts=args.attempts,
         interval_seconds=args.interval_seconds,
     )
-    appveyor, job_id, file_name = fetch_appveyor_manifest(build, "appveyor-zero-spend.json")
     roots = compare_manifests(github, appveyor)
 
     receipt = {
         "schema": "metaengine.compute.a1.cross-provider-readback.h205f22.v1",
         "evidence_class": "CROSS_PROVIDER_REPRODUCED_VERIFIED",
         "verification_scope": "EPHEMERAL_CI_EXECUTION_ONLY",
+        "identity_source": "PERSISTED_APPVEYOR_ARTIFACT_BYTES",
         "providers": ["github-actions", "appveyor"],
         "roots": roots,
         "appveyor_readback": {
@@ -274,6 +268,7 @@ def main() -> int:
             "build_id": build.get("buildId"),
             "build_version": build.get("version"),
             "pull_request_id": build.get("pullRequestId"),
+            "metadata_commit_id": build.get("commitId"),
             "job_id": job_id,
             "artifact_file": file_name,
             "build_status": build.get("status"),
@@ -293,6 +288,7 @@ def main() -> int:
     print(json.dumps({
         "status": "PASS",
         "evidence_class": receipt["evidence_class"],
+        "identity_source": receipt["identity_source"],
         "git_sha": roots["git_sha"],
         "provider_neutral_result_sha256": roots["provider_neutral_result_sha256"],
         "authority_effect": False,
