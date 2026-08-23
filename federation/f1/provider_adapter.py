@@ -39,7 +39,13 @@ class AdapterRegistrationError(ValueError):
 
 @dataclass(frozen=True)
 class ProviderAdapter:
-    """Neutral description of ONE external federation provider."""
+    """Neutral description of ONE external federation provider.
+
+    A provider WITHOUT verification_proof_sha256 is a DECLARED CANDIDATE:
+    structurally unregistrable in the verified registry (F1-GPT-001 fix).
+    The proof digest binds the registration to persisted verifier-channel
+    evidence (e.g. a successful live attestation verification receipt).
+    """
 
     provider_id: str
     provider_kind: str
@@ -49,6 +55,7 @@ class ProviderAdapter:
     crypto_channel: str
     max_lifetime_seconds: int
     external_execution_format: str  # e.g. "github-actions:{run_id}:{run_attempt}"
+    verification_proof_sha256: str | None = None  # None => candidate, not registrable
     revoked_identities: tuple = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
@@ -88,6 +95,15 @@ _REGISTRY: dict = {}
 def register(adapter: ProviderAdapter) -> None:
     if adapter.provider_id in _REGISTRY:
         raise AdapterRegistrationError(f"duplicate provider_id: {adapter.provider_id}")
+    if not adapter.verification_proof_sha256:
+        raise AdapterRegistrationError(
+            f"provider {adapter.provider_id} is a DECLARED CANDIDATE without "
+            "verification_proof_sha256: unproven crypto channels cannot enter "
+            "the verified registry (F1-GPT-001); persist the live verifier-channel "
+            "receipt digest first"
+        )
+    if not SHA256_RE.match(adapter.verification_proof_sha256):
+        raise AdapterRegistrationError("verification_proof_sha256 must be sha256 hex")
     _REGISTRY[adapter.provider_id] = adapter
 
 
@@ -113,11 +129,20 @@ GITHUB_ACTIONS_F1 = ProviderAdapter(
     crypto_channel="gh-attestation+sigstore",
     max_lifetime_seconds=20 * 60,
     external_execution_format="github-actions:{run_id}:{run_attempt}",
+    verification_proof_sha256=(
+        # Persisted proof: F1 live provider workflow producer+verifier receipts
+        # (run 32627161206: producer SUCCESS + verifier SUCCESS incl. full TUF
+        # chain verification through trusted_root) — the live channel this
+        # adapter declares is proven in CI on the F1 lane.
+        "d8f42a1c5b63907f1e2c4d5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c"
+    ),
 )
 
 # AppVeyor candidate adapter (F1.5 target): SAME evidence policy, different
-# execution identity and channel. Registered when its live attestation path
-# is proven; kept as a declaration here so the neutral seam is testable.
+# execution identity and channel. DELIBERATELY carries NO verification_proof
+# (F1-GPT-001): it is a DECLARED CANDIDATE — structurally unregistrable in
+# the verified registry until a persisted live verifier-channel receipt
+# digest is supplied.
 APPVEYOR_F1_CANDIDATE = ProviderAdapter(
     provider_id="appveyor-f1-live",
     provider_kind="APPVEYOR_HOSTED_VM",
@@ -130,6 +155,29 @@ APPVEYOR_F1_CANDIDATE = ProviderAdapter(
 )
 
 
+# --- native execution coordinates (F1-GPT-002 fix) --------------------------
+# Each provider consumes ONLY its own native coordinate schema; foreign
+# coordinates are rejected instead of aliased.
+
+GITHUB_COORD_KEYS = {"run_id", "run_attempt"}
+APPVEYOR_COORD_KEYS = {"build_id", "build_number"}
+
+
+def _require_coords(provider_id: str, coords: dict) -> None:
+    if provider_id == "github-actions-f1-live":
+        expected = GITHUB_COORD_KEYS
+    elif provider_id == "appveyor-f1-live":
+        expected = APPVEYOR_COORD_KEYS
+    else:
+        raise AdapterRegistrationError(f"no native coordinate schema for {provider_id}")
+    keys = set(coords or {})
+    if keys != expected:
+        raise AdapterRegistrationError(
+            f"provider {provider_id} requires native coordinates {sorted(expected)}; "
+            f"got {sorted(keys)} — cross-provider coordinate aliasing is rejected"
+        )
+
+
 # --- expectation bridge: adapter -> verifier ExpectedContext ---------------
 
 def expected_context(
@@ -138,8 +186,7 @@ def expected_context(
     repository: str,
     source_digest: str,
     source_ref: str,
-    run_id: int,
-    run_attempt: int,
+    coords: dict,
     signer_workflow: str,
     now_epoch: float,
 ) -> dict:
@@ -154,6 +201,11 @@ def expected_context(
     adapter = get(provider_id)
     if not SHA256_RE.match(source_digest or ""):
         raise AdapterRegistrationError("source_digest must be sha256 hex")
+    _require_coords(provider_id, coords)
+    native_values = {k: int(v) for k, v in coords.items()}
+    # external_execution_id is derived EXCLUSIVELY from the provider's own
+    # native coordinate schema — no aliasing (F1-GPT-002).
+    id_value = adapter.external_execution_format.format(**native_values)
     return {
         "provider_id": adapter.provider_id,
         "provider_kind": adapter.provider_kind,
@@ -162,15 +214,11 @@ def expected_context(
         "trust_generation": adapter.trust_generation,
         "crypto_channel": adapter.crypto_channel,
         "max_lifetime_seconds": adapter.max_lifetime_seconds,
-        "external_execution_id": adapter.external_execution_format.format(
-            run_id=run_id, run_attempt=run_attempt,
-            build_id=run_id, build_number=run_attempt,  # provider-agnostic bridge vars
-        ),
+        "external_execution_id": id_value,
         "repository": repository,
         "source_digest": source_digest,
         "source_ref": source_ref,
-        "run_id": run_id,
-        "run_attempt": run_attempt,
+        "native_execution_coordinates": dict(native_values),
         "signer_workflow": signer_workflow,
         "revoked_identities": list(adapter.revoked_identities),
         "now_epoch": now_epoch,
