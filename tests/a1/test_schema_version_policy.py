@@ -1,4 +1,6 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 from coordination.sync import schema_version_policy as p
 
@@ -68,6 +70,26 @@ class SchemaVersionPolicyTests(unittest.TestCase):
                 barrier_sha256="0" * 64,
                 outcome=binding["outcome"],
             )
+
+    def test_current_validator_bytes_match_frozen_blob_ids(self):
+        verified = p.verify_validator_files("SYNC-L4.7-002")
+        expected = p.HISTORICAL_BINDINGS["SYNC-L4.7-002"]["validators"]
+        self.assertEqual(verified, expected)
+
+    def test_validator_byte_drift_fails_closed(self):
+        binding = p.HISTORICAL_BINDINGS["SYNC-L4.7-002"]
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            for item in binding["validators"]:
+                src = Path(item["path"])
+                dst = root / item["path"]
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                dst.write_bytes(src.read_bytes())
+            self.assertEqual(p.verify_validator_files("SYNC-L4.7-002", root), binding["validators"])
+            victim = root / binding["validators"][0]["path"]
+            victim.write_bytes(victim.read_bytes() + b"\n# tampered\n")
+            with self.assertRaisesRegex(ValueError, "HISTORICAL_VALIDATOR_BLOB_MISMATCH"):
+                p.verify_validator_files("SYNC-L4.7-002", root)
 
 
 if __name__ == "__main__":
