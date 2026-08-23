@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 POLICY_SCHEMA = "metaengine.compute.sync-schema-version-policy.h205f22.v1"
@@ -44,6 +45,12 @@ HISTORICAL_BINDINGS: dict[str, dict[str, Any]] = {
 def canonical_hash(value: Any) -> str:
     raw = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
+
+
+def git_blob_sha(data: bytes) -> str:
+    """Return Git's SHA-1 object identity for exact file bytes."""
+    header = f"blob {len(data)}\0".encode("ascii")
+    return hashlib.sha1(header + data, usedforsecurity=False).hexdigest()
 
 
 def policy_record() -> dict[str, Any]:
@@ -91,6 +98,26 @@ def validate_historical_binding(task_id: str, *, execution_subject_sha256: str,
     if outcome != binding["outcome"]:
         raise ValueError("historical barrier outcome mismatch")
     return binding
+
+
+def verify_validator_files(task_id: str, repo_root: str | Path = ".") -> list[dict[str, str]]:
+    """Fail closed unless local validator bytes equal the frozen Git blob IDs."""
+    binding = HISTORICAL_BINDINGS.get(task_id)
+    if binding is None:
+        raise ValueError("unknown historical task binding")
+    root = Path(repo_root)
+    verified: list[dict[str, str]] = []
+    for item in binding["validators"]:
+        rel = str(item["path"])
+        path = root / rel
+        if not path.is_file():
+            raise ValueError(f"historical validator missing: {rel}")
+        observed = git_blob_sha(path.read_bytes())
+        expected = str(item["git_blob_sha"])
+        if observed != expected:
+            raise ValueError(f"HISTORICAL_VALIDATOR_BLOB_MISMATCH: {rel}")
+        verified.append({"path": rel, "git_blob_sha": observed})
+    return verified
 
 
 def main() -> int:
