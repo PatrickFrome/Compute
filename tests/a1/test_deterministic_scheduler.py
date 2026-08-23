@@ -133,6 +133,23 @@ class DeterministicSchedulerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "risk 4 is reserved"):
             mod.build_schedule([task("T-A", risk=4)], sync_epoch_sha256=EPOCH, epoch_generation=7)
 
+    def test_implementation_cannot_downgrade_to_risk1(self):
+        with self.assertRaisesRegex(ValueError, "risk downgrade"):
+            mod.build_schedule([task("T-A", risk=1, kind="IMPLEMENTATION")], sync_epoch_sha256=EPOCH, epoch_generation=7)
+
+    def test_schema_and_security_require_risk3(self):
+        for kind in ("SCHEMA", "SECURITY"):
+            with self.assertRaisesRegex(ValueError, "risk downgrade"):
+                mod.build_schedule([task(f"T-{kind}", risk=2, kind=kind)], sync_epoch_sha256=EPOCH, epoch_generation=7)
+
+    def test_low_risk_domain_write_rejected(self):
+        with self.assertRaisesRegex(ValueError, "domain writes require risk >= 2"):
+            mod.build_schedule([task("T-DOC", risk=0, kind="DOCS", writes=("evidence",))], sync_epoch_sha256=EPOCH, epoch_generation=7)
+
+    def test_roadmap_write_cannot_hide_in_non_authority_kind(self):
+        with self.assertRaisesRegex(ValueError, "roadmap writes require AUTHORITY/risk 4"):
+            mod.build_schedule([task("T-ROADMAP", risk=3, kind="SECURITY", writes=("roadmap",))], sync_epoch_sha256=EPOCH, epoch_generation=7)
+
 
 if __name__ == "__main__":
     unittest.main()
