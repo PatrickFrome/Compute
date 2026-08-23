@@ -32,6 +32,10 @@ CHECKS: dict[str, list[list[str]]] = {
         ["python3", "-m", "unittest", "tests.a1.test_github_review_ingest", "-v"],
         ["python3", "-m", "unittest", "tests.a1.test_live_peer_review_workflow_contract", "-v"],
     ],
+    "EVIDENCE_BUNDLE_GUARDS": [
+        ["python3", "-m", "unittest", "tests.a1.test_schema_version_policy", "-v"],
+        ["python3", "-m", "unittest", "tests.a1.test_evidence_bundle", "-v"],
+    ],
 }
 
 ALLOWED_TOP_LEVEL = {
@@ -63,7 +67,7 @@ def validate_task(task: dict[str, Any]) -> None:
     if task["read_only"] is not True or task["authority_effect"] is not False or task["canonical"] is not False:
         raise ValueError("sync task must be read-only and non-authority")
     if task["mutation_domains"] != []:
-        raise ValueError("SYNC-L4.7 bootstrap task must not mutate project domains")
+        raise ValueError("bootstrap sync task must not mutate project domains")
     if task["peer_review_required"] is not True:
         raise ValueError("peer review must be required")
     if task["success_disposition"] != "EVIDENCE_READY_NON_AUTHORITY":
