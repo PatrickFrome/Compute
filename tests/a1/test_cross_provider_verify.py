@@ -51,9 +51,9 @@ class CrossProviderVerifyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "provider.kind mismatch"):
             mod.compare_manifests(manifest("github-actions"), manifest("github-actions"))
 
-    def test_history_url_is_commit_search_surface(self):
+    def test_history_url_is_recent_build_catalog(self):
         url = mod.history_url("PatrickFrome", "compute")
-        self.assertTrue(url.endswith("/projects/PatrickFrome/compute/history?recordsNumber=100"), url)
+        self.assertTrue(url.endswith("/projects/PatrickFrome/compute/history?recordsNumber=30"), url)
 
     def test_build_version_url_encodes_version(self):
         url = mod.build_version_url("PatrickFrome", "compute", "1.0.17/test")
@@ -62,6 +62,12 @@ class CrossProviderVerifyTests(unittest.TestCase):
     def test_artifact_url_preserves_nested_path(self):
         url = mod.artifact_url("job-1", "evidence/appveyor-zero-spend.json")
         self.assertTrue(url.endswith("/evidence/appveyor-zero-spend.json"), url)
+
+    def test_artifact_identity_beats_metadata_identity(self):
+        github = manifest("github-actions", git_sha="1" * 40)
+        appveyor = manifest("appveyor", git_sha="1" * 40)
+        roots = mod.compare_manifests(github, appveyor)
+        self.assertEqual(roots["git_sha"], "1" * 40)
 
 
 if __name__ == "__main__":
