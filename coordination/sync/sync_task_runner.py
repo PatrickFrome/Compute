@@ -35,6 +35,7 @@ CHECKS: dict[str, list[list[str]]] = {
     "EVIDENCE_BUNDLE_GUARDS": [
         ["python3", "-m", "unittest", "tests.a1.test_schema_version_policy", "-v"],
         ["python3", "-m", "unittest", "tests.a1.test_evidence_bundle", "-v"],
+        ["python3", "-m", "unittest", "tests.a1.test_evidence_attestation_workflow_contract", "-v"],
     ],
 }
 
