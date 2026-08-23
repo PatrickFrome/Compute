@@ -1,0 +1,57 @@
+name: W1 AWS SSM IID Document Provision Contract
+
+on:
+  push:
+    branches: [work/w1-linux-worker-safety]
+    paths:
+      - 'controller/w1/aws_ssm_iid_document_provision_guard.py'
+      - 'controller/w1/aws_ssm_iid_capture_guard.py'
+      - 'infra/w1/ssm/Metaengine-W1-IID-Capture-H205F22.json'
+      - 'tests/test_w1_aws_ssm_iid_document_provision_guard.py'
+      - '.github/workflows/w1-aws-ssm-iid-provision-contract.yml'
+      - 'research/W1_DEV_CYCLE_001_AWS_SSM_IID_DOCUMENT_PROVISIONING.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/w1/aws_ssm_iid_document_provision_guard.py'
+      - 'controller/w1/aws_ssm_iid_capture_guard.py'
+      - 'infra/w1/ssm/Metaengine-W1-IID-Capture-H205F22.json'
+      - 'tests/test_w1_aws_ssm_iid_document_provision_guard.py'
+      - '.github/workflows/w1-aws-ssm-iid-provision-contract.yml'
+      - 'research/W1_DEV_CYCLE_001_AWS_SSM_IID_DOCUMENT_PROVISIONING.md'
+
+permissions: {}
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Compile provisioning contract
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/w1/aws_ssm_iid_document_provision_guard.py
+      - name: Run adversarial provisioning tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_w1_aws_ssm_iid_document_provision_guard -v
+      - name: Assert create-only authority split
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('controller/w1/aws_ssm_iid_document_provision_guard.py').read_text()
+          assert 'ssm:CreateDocument' in p
+          assert 'ssm:DescribeDocument' in p and 'ssm:GetDocument' in p
+          for forbidden in ('ssm:SendCommand','ssm:UpdateDocument','ssm:DeleteDocument','ssm:ModifyDocumentPermission','ssm:StartSession'):
+              assert forbidden not in p, forbidden
+          assert 'required_document_version' in p
+          assert 'create_once' in p
+          assert 'W1_AWS_SSM_IID_DOCUMENT_PROVISIONED_NON_AUTHORITY' in p
+          PY
