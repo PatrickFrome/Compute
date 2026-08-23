@@ -142,7 +142,12 @@ def validate_inputs(execution_subject: dict[str, Any], cross: dict[str, Any],
         barrier_sha256=barrier["barrier_sha256"],
         outcome=barrier["outcome"],
     )
-    return binding
+    verified_validators = schema_version_policy.verify_validator_files(execution_subject["task_id"])
+    return {
+        **binding,
+        "validator_bytes_verified": True,
+        "verified_validators": verified_validators,
+    }
 
 
 def _member_record(name: str, data: bytes) -> dict[str, Any]:
