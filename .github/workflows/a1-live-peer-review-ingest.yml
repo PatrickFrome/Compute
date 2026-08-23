@@ -1,0 +1,211 @@
+name: A1 Live GPT-GLM Peer Review Ingest
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'coordination/sync/pap_review_ingest.py'
+      - 'coordination/sync/github_review_ingest.py'
+      - 'coordination/sync/peer_review_barrier.py'
+      - 'tests/a1/test_pap_review_ingest.py'
+      - 'tests/a1/test_github_review_ingest.py'
+      - 'tests/a1/test_peer_review_barrier.py'
+      - '.github/workflows/a1-live-peer-review-ingest.yml'
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'GitHub Zero-Spend run containing a1-cross-provider-readback'
+        required: true
+        type: string
+      pr_number:
+        description: 'PR whose persisted GPT reviews are read'
+        required: true
+        type: string
+      execution_subject_sha256:
+        description: 'Expected exact composite execution-subject digest'
+        required: true
+        type: string
+      after_seq:
+        description: 'Read GLM PAP messages strictly after this sequence'
+        required: false
+        default: '0'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Compile review ingestion modules
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            coordination/sync/pap_review_ingest.py \
+            coordination/sync/github_review_ingest.py \
+            coordination/sync/peer_review_barrier.py
+      - name: Run adversarial ingestion and barrier tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest \
+            tests.a1.test_pap_review_ingest \
+            tests.a1.test_github_review_ingest \
+            tests.a1.test_peer_review_barrier -v
+
+  live-ingest:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: deterministic-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: a1-peer-review-ingest
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PAP_CHATGPT_TOKEN: ${{ secrets.PAP_CHATGPT_TOKEN }}
+      PAP_BASE_URL: https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/pap-transport
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      PR_NUMBER: ${{ inputs.pr_number }}
+      EXPECTED_SUBJECT_SHA256: ${{ inputs.execution_subject_sha256 }}
+      AFTER_SEQ: ${{ inputs.after_seq }}
+    steps:
+      - name: Checkout trusted main implementation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Validate dispatch parameters and secret presence
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]
+          [[ "$AFTER_SEQ" =~ ^[0-9]+$ ]]
+          [[ "$EXPECTED_SUBJECT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test -n "$PAP_CHATGPT_TOKEN"
+
+      - name: Persisted-read exact cross-provider execution subject
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/source
+          gh run download "$SOURCE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name a1-cross-provider-readback \
+            --dir /tmp/source
+          test -s /tmp/source/execution-subject.json
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          s=json.loads(Path('/tmp/source/execution-subject.json').read_text())
+          assert s['schema']=='metaengine.compute.sync-execution-subject.h205f22.v1'
+          assert s['execution_subject_sha256']==os.environ['EXPECTED_SUBJECT_SHA256']
+          assert s['cross_provider_evidence_class']=='CROSS_PROVIDER_REPRODUCED_VERIFIED'
+          assert s['identity_source']=='PERSISTED_APPVEYOR_ARTIFACT_BYTES'
+          assert s['authority']['authority_effect'] is False
+          PY
+
+      - name: Persisted-read GPT reviews from GitHub
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100" > /tmp/github-reviews.json
+          python3 coordination/sync/github_review_ingest.py \
+            --github-reviews /tmp/github-reviews.json \
+            --execution-subject /tmp/source/execution-subject.json \
+            --output /tmp/chatgpt-review-ingest.json
+
+      - name: Persisted-read GLM reviews from PAP
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
+            --connect-timeout 10 --max-time 30 \
+            -H "Authorization: Bearer $PAP_CHATGPT_TOKEN" \
+            "$PAP_BASE_URL/pap/read?peer=glm&after_seq=$AFTER_SEQ" \
+            -o /tmp/pap-read.json
+          python3 coordination/sync/pap_review_ingest.py \
+            --pap-read /tmp/pap-read.json \
+            --execution-subject /tmp/source/execution-subject.json \
+            --output /tmp/glm-review-ingest.json
+          rm -f /tmp/pap-read.json
+
+      - name: Materialize only validated review receipts
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/live-peer-review
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          pairs=[
+            ('/tmp/chatgpt-review-ingest.json','evidence/live-peer-review/chatgpt-review.json'),
+            ('/tmp/glm-review-ingest.json','evidence/live-peer-review/glm-review.json'),
+          ]
+          for source, target in pairs:
+              d=json.loads(Path(source).read_text())
+              Path(target).write_text(json.dumps(d['review'], sort_keys=True, indent=2)+'\n')
+          PY
+          cp /tmp/chatgpt-review-ingest.json evidence/live-peer-review/chatgpt-ingest.json
+          cp /tmp/glm-review-ingest.json evidence/live-peer-review/glm-ingest.json
+          cp /tmp/source/execution-subject.json evidence/live-peer-review/execution-subject.json
+
+      - name: Evaluate exact GPT-GLM peer-review barrier
+        id: barrier
+        run: |
+          set -euo pipefail
+          set +e
+          python3 coordination/sync/peer_review_barrier.py \
+            --execution-subject evidence/live-peer-review/execution-subject.json \
+            --review evidence/live-peer-review/chatgpt-review.json \
+            --review evidence/live-peer-review/glm-review.json \
+            --output evidence/live-peer-review/barrier.json
+          rc=$?
+          set -e
+          test -s evidence/live-peer-review/barrier.json
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce non-authority barrier scope
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          d=json.loads(Path('evidence/live-peer-review/barrier.json').read_text())
+          assert d['schema']=='metaengine.compute.sync-peer-review-barrier.h205f22.v2'
+          assert d['authority']['authority_effect'] is False
+          assert d['authority']['canonical'] is False
+          assert d['authority']['project_claim_authority'] is False
+          PY
+
+      - name: Remove raw provider responses before artifact upload
+        if: always()
+        run: rm -f /tmp/github-reviews.json /tmp/pap-read.json
+
+      - name: Upload credential-free peer-review evidence
+        if: always() && steps.barrier.outputs.rc != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: a1-live-gpt-glm-peer-review
+          path: |
+            evidence/live-peer-review/execution-subject.json
+            evidence/live-peer-review/chatgpt-ingest.json
+            evidence/live-peer-review/glm-ingest.json
+            evidence/live-peer-review/barrier.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Require complete peer-review barrier
+        run: |
+          set -euo pipefail
+          test "${{ steps.barrier.outputs.rc }}" = "0"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          d=json.loads(Path('evidence/live-peer-review/barrier.json').read_text())
+          assert d['outcome']=='PEER_REVIEW_COMPLETE'
+          PY
