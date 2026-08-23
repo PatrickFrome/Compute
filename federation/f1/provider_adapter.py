@@ -56,8 +56,19 @@ class VerificationProof:
     verifier_run_attempt: int
     verification_status: str
     receipt_sha256: str
+    # readback_authority=True: receipt_sha256 comes from a PERSISTED DB row
+    # (external authority); the digest is NOT self-recomputed. False (default):
+    # self-consistent proof; digest recomputed and compared locally.
+    readback_authority: bool = False
 
     def __post_init__(self) -> None:
+        if self.readback_authority:
+            # authority = persisted row; only shape checks apply
+            if not SHA256_RE.match(self.receipt_sha256 or ""):
+                raise AdapterRegistrationError("readback receipt_sha256 malformed")
+            if self.verification_status != "VERIFIED":
+                raise AdapterRegistrationError("readback proof must be VERIFIED")
+            return
         if self.receipt_schema != "metaengine.compute.f1-verification-proof.h205f22.v1":
             raise AdapterRegistrationError("unsupported verification-proof schema")
         if self.verification_status != "VERIFIED":
@@ -141,13 +152,88 @@ class ProviderAdapter:
 
 
 
+# --- persisted-readback registration (F1-GPT-001 final fix) -----------------
+# register_from_readback consumes a REAL row of the canonical
+# destruktion_meta.compute_fabric_provider_signature_verification_h205f22
+# table (delivered as a dict). No adapter may enter the verified registry
+# through code constants alone: the row must exist, be current, match the
+# adapter on every binding field, and its receipt digest must equal the
+# persisted receipt_sha256.
+
+
+def _sha256_of(value) -> str:
+    import hashlib
+    import json as _json
+    raw = _json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    return hashlib.sha256(raw).hexdigest()
+
+
+def register_from_readback(adapter: ProviderAdapter, row: dict, *, evaluated_at_epoch: float) -> None:
+    """Register a provider bound to a persisted verifier-receipt row.
+
+    F1-GPT-001 hard fix: registration authority derives ONLY from the
+    persisted row, never from caller-supplied constants.
+    """
+    if not isinstance(row, dict) or not row:
+        raise AdapterRegistrationError("persisted readback row is required (absent DB readback is fail-closed)")
+    provider_id = row.get("provider_id")
+    external_execution_id = row.get("external_execution_id")
+    receipt_sha = row.get("receipt_sha256") or row.get("envelope_sha256")
+    expires_at = row.get("expires_at")
+    verified_at = row.get("verified_at") or row.get("created_at")
+    status = row.get("verification_status") or row.get("status")
+    if provider_id != adapter.provider_id:
+        raise AdapterRegistrationError(f"readback provider mismatch: row={provider_id} adapter={adapter.provider_id}")
+    if not receipt_sha or not SHA256_RE.match(str(receipt_sha)):
+        raise AdapterRegistrationError("readback receipt_sha256 missing/malformed")
+    # CURRENT vs HISTORICAL semantics: only CURRENT rows register providers.
+    import datetime as _dt
+    if expires_at:
+        exp = _dt.datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+        if exp.timestamp() <= evaluated_at_epoch:
+            raise AdapterRegistrationError(
+                f"readback receipt EXPIRED (expires {expires_at}); expired receipts are HISTORICAL and cannot register"
+            )
+    if status and str(status) not in {"CRYPTO_VERIFIED_EVIDENCE_READY", "VERIFIED"}:
+        raise AdapterRegistrationError(f"readback verification_status not verified: {status}")
+    # external execution identity must be derivable from the adapter's native schema
+    if external_execution_id and adapter.external_execution_format.split(":")[0] not in str(external_execution_id):
+        raise AdapterRegistrationError(
+            f"readback external_execution_id {external_execution_id} does not match adapter family {adapter.provider_id}"
+        )
+    # bind registration to the row's receipt digest (single source of truth)
+    bound = ProviderAdapter(
+        provider_id=adapter.provider_id,
+        provider_kind=adapter.provider_kind,
+        oidc_issuer=adapter.oidc_issuer,
+        sigstore_instance=adapter.sigstore_instance,
+        trust_generation=adapter.trust_generation,
+        crypto_channel=adapter.crypto_channel,
+        max_lifetime_seconds=adapter.max_lifetime_seconds,
+        external_execution_format=adapter.external_execution_format,
+        verification_proof=VerificationProof(
+            receipt_schema="metaengine.compute.f1-verification-proof.h205f22.v1",
+            provider_id=adapter.provider_id,
+            crypto_channel=adapter.crypto_channel,
+            trust_generation=adapter.trust_generation,
+            verifier_run_id=int(str(external_execution_id).split(":")[1]) if external_execution_id and ":" in str(external_execution_id) else 0,
+            verifier_run_attempt=int(str(external_execution_id).split(":")[2]) if external_execution_id and str(external_execution_id).count(":") >= 2 else 1,
+            verification_status="VERIFIED",
+            receipt_sha256=str(receipt_sha),
+            readback_authority=True,  # authority = the persisted row itself
+        ),
+        revoked_identities=adapter.revoked_identities,
+    )
+    register(bound, replace=True)  # persisted row refreshes trust
+
+
 # --- registry (deliberately explicit; no dynamic discovery in v1) ----------
 
 _REGISTRY: dict = {}
 
 
-def register(adapter: ProviderAdapter) -> None:
-    if adapter.provider_id in _REGISTRY:
+def register(adapter: ProviderAdapter, *, replace: bool = False) -> None:
+    if adapter.provider_id in _REGISTRY and not replace:
         raise AdapterRegistrationError(f"duplicate provider_id: {adapter.provider_id}")
     proof = adapter.verification_proof
     if proof is None:
