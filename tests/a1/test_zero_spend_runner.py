@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 import unittest
 from pathlib import Path
 
@@ -36,11 +35,18 @@ class ZeroSpendRunnerTests(unittest.TestCase):
             self.assertGreaterEqual(len(command), 2)
             self.assertNotIn("sh -c", " ".join(command))
 
+    def test_typed_sync_task_is_part_of_common_checks(self):
+        commands = [" ".join(command) for command in runner.CHECKS]
+        matches = [x for x in commands if "coordination/sync/sync_task_runner.py" in x]
+        self.assertEqual(len(matches), 1)
+        self.assertIn("SYNC-L4.7-001.json", matches[0])
+
     def test_provider_neutral_contract_has_no_authority(self):
         contract = {
             "schema": "metaengine.compute.a1.zero-spend-execution-contract.h205f22.v1",
             "check_commands": runner.CHECKS,
             "source_binding": "EXACT_GIT_SHA_AND_TREE",
+            "sync_task_binding": "TYPED_TASK_AND_EPOCH_HASH",
             "authority_effect": False,
         }
         self.assertFalse(contract["authority_effect"])
