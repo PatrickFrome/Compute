@@ -27,6 +27,7 @@ CHECKS: dict[str, list[list[str]]] = {
         ["python3", "-m", "unittest", "tests.a1.test_execution_subject", "-v"],
         ["python3", "-m", "unittest", "tests.a1.test_peer_review_barrier", "-v"],
         ["python3", "-m", "unittest", "tests.a1.test_transactional_coordination", "-v"],
+        ["python3", "-m", "unittest", "tests.a1.test_deterministic_scheduler", "-v"],
     ],
 }
 
