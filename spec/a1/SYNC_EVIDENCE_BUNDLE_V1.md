@@ -21,6 +21,8 @@ For `SYNC-L4.7-002`, the frozen completion is bound to:
 - peer barrier `f1b6532b6f80c3cbb721f286dbb61b1954d960a501c81e9b5b7a86723f1c4164`;
 - exact Git blob identities of the v2 barrier and both persisted-review ingestors.
 
+The bundle builder recomputes Git blob identity from the **actual local validator file bytes** before it accepts historical evidence. Merely carrying the expected blob SHA as metadata is insufficient. Any validator-byte drift fails closed and requires a new receipt/migration path.
+
 A future incompatible schema major version must create a new receipt. It must not reinterpret or overwrite the old completed barrier.
 
 ## Bundle inputs
@@ -43,6 +45,7 @@ The builder fails closed unless:
 - blocking HIGH/CRIT findings are zero;
 - all subject/task/epoch/source/tree/contract/result roots match;
 - the historical barrier matches its frozen validator binding;
+- the currently executed validator bytes reproduce every frozen Git blob SHA;
 - all authority fields remain false.
 
 ## Deterministic archive
@@ -73,13 +76,13 @@ The bundle contains an in-toto Statement-v1-shaped document:
 - predicate type = Metaengine sync-evidence v1
 - predicate records review roots, identity sources, validator binding, schema policy and non-authority scope.
 
-The internal statement is descriptive evidence included in the tar. The GitHub attestation step signs the **tar artifact** using GitHub's standard build-provenance attestation rather than treating the internal predicate as project authority.
+The internal statement is descriptive evidence included in the tar. The GitHub attestation step signs the **tar artifact** using GitHub's standard SLSA build-provenance mode rather than treating the internal predicate as project authority.
 
 ## Attest then verify
 
 Trusted-main workflow performs two separate steps:
 
-1. `actions/attest` attests the deterministic tar with GitHub OIDC / Sigstore-backed artifact attestation.
+1. pinned `actions/attest` attests the deterministic tar with GitHub OIDC / Sigstore-backed SLSA build provenance;
 2. `gh attestation verify <tar> -R PatrickFrome/Compute` independently verifies the resulting attestation against the repository identity.
 
 A successful attest call without a successful downstream verification is not sufficient for `ATTESTED_EVIDENCE_READY_NON_AUTHORITY`.
@@ -90,9 +93,10 @@ Live evidence collection / attestation:
 
 - is `workflow_dispatch` only on `refs/heads/main`;
 - uses a protected GitHub environment;
-- requires `id-token: write` and `attestations: write` only in the live job;
+- keeps top-level workflow permissions read-only;
+- grants `id-token: write`, `attestations: write`, and `artifact-metadata: write` only to the live job;
 - reads GLM PAP data without ACK/publish mutations;
-- keeps the PAP bearer out of process arguments;
+- keeps the PAP bearer out of curl header arguments/process argv;
 - removes raw provider responses before artifact upload;
 - uploads only credential-free derived evidence.
 
