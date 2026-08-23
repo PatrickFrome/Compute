@@ -1,0 +1,38 @@
+name: W1 Worker Host Capability Check
+
+on:
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe host capabilities (cgroup v2, pidfd, openat2, seccomp)
+        run: |
+          set -euo pipefail
+          {
+            echo "## W1 Worker Host Capability Report"
+            echo "- kernel: $(uname -r)"
+            echo "- cgroup v2 mounted: $([ -f /sys/fs/cgroup/cgroup.controllers ] && echo YES || echo NO)"
+            echo "- cgroup controllers: $(cat /sys/fs/cgroup/cgroup.controllers 2>/dev/null | tr ' ' ',' || echo none)"
+            echo "- seccomp: $(grep Seccomp /proc/self/status | tr '\n' ' ')"
+            echo "- uid: $(id -u)"
+            echo "- pidfd_open: $(python3 -c "
+import ctypes,os
+libc=ctypes.CDLL(None)
+r=libc.syscall(534,os.getpid(),0)
+print('OK' if r>=0 else 'FAIL')
+if r>=0: os.close(r)
+" 2>/dev/null || echo FAIL)"
+            echo "- openat2 RESOLVE_BENEATH: $(python3 -c "
+import ctypes,os
+libc=ctypes.CDLL(None,use_errno=True)
+r=libc.syscall(437,-100,os.getcwd().encode(),b'.',0,0x8)
+print('OK' if r>=0 else 'FAIL')
+if r>=0: os.close(r)
+" 2>/dev/null || echo FAIL)"
+            echo "- mount ns: $(readlink /proc/self/ns/mnt)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$GITHUB_STEP_SUMMARY" || true
