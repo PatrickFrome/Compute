@@ -29,6 +29,8 @@ EXPECTED_KEYS = {
     "canonical",
     "authority_effect",
 }
+VERIFIER_ID = "metaengine-w1-aws-iid-pinned-openssl-v1"
+VERIFIER_CONTRACT = "AWS_EC2_IID_RSA2048_PINNED_CERT_NOINTERN"
 
 
 class CourierVerificationError(RuntimeError):
@@ -103,6 +105,11 @@ def verify_envelope(
     evidence = out.get("evidence")
     if not isinstance(evidence, dict):
         raise CourierVerificationError("core_verifier_evidence_missing")
+
+    # These identifiers are asserted only by the off-host verification channel.
+    # The host courier has no field capable of selecting or upgrading them.
+    evidence["verifier_id"] = VERIFIER_ID
+    evidence["verifier_contract"] = VERIFIER_CONTRACT
     evidence["courier_transport"] = {
         "schema": courier.SCHEMA,
         "source": "HOST_UNTRUSTED_TRANSPORT",

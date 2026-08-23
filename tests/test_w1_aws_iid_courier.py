@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import unittest
 from unittest.mock import patch
 
@@ -129,7 +128,7 @@ class CourierTests(unittest.TestCase):
             with self.assertRaisesRegex(offhost.CourierVerificationError, "courier_nonclaim_violation"):
                 offhost.decode_untrusted_envelope(tampered)
 
-    def test_offhost_verifier_passes_only_decoded_bytes_to_core_crypto(self):
+    def test_offhost_verifier_binds_implementation_identity_and_decoded_bytes(self):
         envelope, _ = golden_envelope()
         core_result = {
             "schema": "metaengine.compute.w1-aws-signed-instance-identity.h205f22.v1",
@@ -156,6 +155,8 @@ class CourierTests(unittest.TestCase):
         self.assertEqual(kwargs["document_raw"], DOCUMENT)
         self.assertEqual(kwargs["rsa2048_signature_raw"], RSA)
         self.assertEqual(kwargs["certificate_pem"], b"CERT")
+        self.assertEqual(result["evidence"]["verifier_id"], offhost.VERIFIER_ID)
+        self.assertEqual(result["evidence"]["verifier_contract"], offhost.VERIFIER_CONTRACT)
         self.assertIn("courier_transport", result["evidence"])
         self.assertRegex(result["verification_receipt_sha256"], r"^[0-9a-f]{64}$")
         self.assertFalse(result["persistent_worker_proof"])

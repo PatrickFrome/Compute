@@ -8,16 +8,20 @@ on:
       - 'worker/native_linux/aws_iid_courier.py'
       - 'controller/w1/aws_iid_courier_verifier.py'
       - 'tests/test_w1_aws_iid_courier.py'
+      - 'supabase/migrations/20260823085243_w1_signed_reboot_identity_ingest_guard_v1.sql'
       - '.github/workflows/w1-aws-iid-courier.yml'
       - 'research/W1_DEV_CYCLE_001_AWS_IID_COURIER.md'
+      - 'research/W1_DEV_CYCLE_001_SIGNED_REBOOT_INGEST_GUARD.md'
   pull_request:
     branches: [main]
     paths:
       - 'worker/native_linux/aws_iid_courier.py'
       - 'controller/w1/aws_iid_courier_verifier.py'
       - 'tests/test_w1_aws_iid_courier.py'
+      - 'supabase/migrations/20260823085243_w1_signed_reboot_identity_ingest_guard_v1.sql'
       - '.github/workflows/w1-aws-iid-courier.yml'
       - 'research/W1_DEV_CYCLE_001_AWS_IID_COURIER.md'
+      - 'research/W1_DEV_CYCLE_001_SIGNED_REBOOT_INGEST_GUARD.md'
   workflow_dispatch:
 
 permissions: {}
@@ -51,19 +55,24 @@ jobs:
           set -euo pipefail
           python3 -m unittest tests.test_w1_aws_iid_courier -v
 
-      - name: Assert fail-closed transport boundary
+      - name: Assert fail-closed transport and DB ingest boundaries
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           p=Path('worker/native_linux/aws_iid_courier.py').read_text()
           q=Path('controller/w1/aws_iid_courier_verifier.py').read_text()
+          m=Path('supabase/migrations/20260823085243_w1_signed_reboot_identity_ingest_guard_v1.sql').read_text()
           assert '169.254.169.254' in p
           assert 'X-aws-ec2-metadata-token-ttl-seconds' in p
           assert 'HOST_UNTRUSTED_TRANSPORT' in p and 'HOST_UNTRUSTED_TRANSPORT' in q
           assert 'provider_identity_verified": False' in p
           assert 'persistent_worker_proof": False' in p
           assert 'http.client.HTTPConnection' in p
+          assert 'metaengine-w1-aws-iid-pinned-openssl-v1' in q and 'metaengine-w1-aws-iid-pinned-openssl-v1' in m
+          assert 'AWS_EC2_IID_RSA2048_PINNED_CERT_NOINTERN' in q and 'AWS_EC2_IID_RSA2048_PINNED_CERT_NOINTERN' in m
+          assert 'signed_reboot_identity_verification_digest_mismatch' in m
+          assert 'revoke insert on table destruktion_meta.compute_fabric_worker_reboot_receipt_h205f22 from service_role' in m.lower()
           for forbidden in ('https://', 'requests.', 'urllib.', 'boto3', 'subprocess'):
               assert forbidden not in p, forbidden
           PY
