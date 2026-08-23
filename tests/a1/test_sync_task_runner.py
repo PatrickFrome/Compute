@@ -1,11 +1,10 @@
 import importlib.util
 import json
 import unittest
-from copy import deepcopy
 from pathlib import Path
 
 MODULE_PATH = Path(__file__).parents[2] / "coordination" / "sync" / "sync_task_runner.py"
-TASK_PATH = Path(__file__).parents[2] / "coordination" / "sync" / "tasks" / "SYNC-L4.7-001.json"
+TASK_PATH = Path(__file__).parents[2] / "coordination" / "sync" / "tasks" / "SYNC-L4.8-001.json"
 spec = importlib.util.spec_from_file_location("sync_task_runner", MODULE_PATH)
 mod = importlib.util.module_from_spec(spec)
 assert spec and spec.loader
@@ -18,7 +17,10 @@ def task():
 
 class SyncTaskRunnerTests(unittest.TestCase):
     def test_bootstrap_task_validates(self):
-        mod.validate_task(task())
+        value = task()
+        mod.validate_task(value)
+        self.assertEqual(value["task_id"], "SYNC-L4.8-001")
+        self.assertIn("EVIDENCE_BUNDLE_GUARDS", value["required_checks"])
 
     def test_epoch_hash_mismatch_fails(self):
         value = task()
