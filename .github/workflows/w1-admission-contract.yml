@@ -6,16 +6,22 @@ on:
       - work/w1-linux-worker-safety
     paths:
       - 'worker/native_linux/admission_contract.py'
+      - 'worker/native_linux/admission_candidate.py'
       - 'tests/test_w1_admission_contract.py'
+      - 'tests/test_w1_admission_candidate.py'
       - '.github/workflows/w1-admission-contract.yml'
       - 'research/W1_DEV_CYCLE_001_ADMISSION_CONTRACT.md'
+      - 'research/W1_DEV_CYCLE_001_PERSISTENCE_COMPOSITOR.md'
   pull_request:
     branches: [main]
     paths:
       - 'worker/native_linux/admission_contract.py'
+      - 'worker/native_linux/admission_candidate.py'
       - 'tests/test_w1_admission_contract.py'
+      - 'tests/test_w1_admission_candidate.py'
       - '.github/workflows/w1-admission-contract.yml'
       - 'research/W1_DEV_CYCLE_001_ADMISSION_CONTRACT.md'
+      - 'research/W1_DEV_CYCLE_001_PERSISTENCE_COMPOSITOR.md'
   workflow_dispatch:
 
 permissions:
@@ -36,12 +42,16 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 
-      - name: Compile contract
+      - name: Compile contracts
         run: |
           set -euo pipefail
-          python3 -m py_compile worker/native_linux/admission_contract.py
+          python3 -m py_compile \
+            worker/native_linux/admission_contract.py \
+            worker/native_linux/admission_candidate.py
 
-      - name: Run fail-closed admission tests
+      - name: Run fail-closed W1 tests
         run: |
           set -euo pipefail
-          python3 -m unittest tests.test_w1_admission_contract -v
+          python3 -m unittest \
+            tests.test_w1_admission_contract \
+            tests.test_w1_admission_candidate -v
