@@ -36,8 +36,9 @@ class ZeroSpendRunnerTests(unittest.TestCase):
         commands = [" ".join(command) for command in runner.CHECKS]
         matches = [x for x in commands if "coordination/sync/sync_task_runner.py" in x]
         self.assertEqual(len(matches), 1)
-        self.assertIn("coordination/sync/tasks/SYNC-L4.7-002.json", matches[0])
-        self.assertNotIn("SYNC-L4.7-001.json", matches[0])
+        self.assertIn("coordination/sync/tasks/SYNC-L4.8-001.json", matches[0])
+        self.assertEqual(runner.EXPECTED_SYNC_TASK_ID, "SYNC-L4.8-001")
+        self.assertNotIn("SYNC-L4.7-002.json", matches[0])
 
     def test_provider_neutral_contract_has_no_authority(self):
         contract = {
