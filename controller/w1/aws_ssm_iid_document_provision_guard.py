@@ -2,8 +2,12 @@
 """Create-once provisioning contract for the W1 account-owned SSM IID document.
 
 This module never calls AWS and grants no Run Command/runtime authority. It builds the
-narrow create/read boundary used by an independent provisioning principal, then
-validates persisted AWS readback of version 1 against the reviewed repository bytes.
+narrow create/read policy template used by an independent provisioning principal, then
+validates caller-supplied AWS response transport for version 1 against reviewed bytes.
+
+Important truth boundary: validating this policy template does NOT prove the effective
+IAM permissions of any real principal. Other identity/resource policies, permissions
+boundaries, SCPs, and session policies are outside this offline contract.
 
 CLI I/O is deliberately stdin -> stdout only. Callers cannot select filesystem paths;
 raw repository document bytes travel as bounded base64 inside the request object.
@@ -27,6 +31,7 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 TARGET_TYPE = "/AWS::EC2::Instance"
 MAX_STDIN_CHARS = 512_000
 MAX_DOCUMENT_SOURCE_BYTES = 65_536
+AWS_RESPONSE_PROVENANCE = "CALLER_SUPPLIED_AWS_RESPONSE_TRANSPORT_NON_AUTHORITY"
 
 
 class ProvisionError(RuntimeError):
@@ -34,7 +39,11 @@ class ProvisionError(RuntimeError):
 
 
 def _partition(region: str) -> str:
-    return "aws-us-gov" if region.startswith("us-gov-") else "aws"
+    if region.startswith("us-gov-"):
+        return "aws-us-gov"
+    if region.startswith("cn-"):
+        return "aws-cn"
+    return "aws"
 
 
 def _canonical(value: Any) -> str:
@@ -106,10 +115,11 @@ def build_provision_plan(*, account_id: str, region: str, local_document_source:
         "create_request": request,
         "provisioning_policy": policy,
         "create_once": True,
-        "document_update_allowed": False,
-        "document_delete_allowed": False,
-        "document_share_allowed": False,
-        "send_command_allowed": False,
+        "policy_template_update_allow": False,
+        "policy_template_delete_allow": False,
+        "policy_template_share_allow": False,
+        "policy_template_send_command_allow": False,
+        "effective_principal_permissions_verified": False,
     }
     return {
         "schema": PLAN_SCHEMA,
@@ -177,6 +187,8 @@ def validate_provisioned_document(
     if plan != expected_plan:
         raise ProvisionError("plan_content_mismatch")
 
+    # AWS response objects are transport supplied by the caller. These checks
+    # validate shape/consistency only; they do not authenticate AWS provenance.
     created = _description(create_response, "create_response")
     if created.get("Owner") != account_id:
         raise ProvisionError("create_response_owner_mismatch")
@@ -207,18 +219,23 @@ def validate_provisioned_document(
         "aws_document_sha256": described["Hash"],
         "repository_document_source_sha256": expected_plan["repository_document_source_sha256"],
         "remote_content_matches_repository": True,
-        "create_once": True,
-        "provisioning_role_can_update": False,
-        "provisioning_role_can_delete": False,
-        "provisioning_role_can_share": False,
-        "provisioning_role_can_send_command": False,
+        "create_once_policy_template": True,
+        "policy_template_update_allow": False,
+        "policy_template_delete_allow": False,
+        "policy_template_share_allow": False,
+        "policy_template_send_command_allow": False,
+        "effective_principal_permissions_verified": False,
+        "aws_api_response_provenance": AWS_RESPONSE_PROVENANCE,
+        "live_aws_api_provenance_verified": False,
     }
     return {
         "schema": RECEIPT_SCHEMA,
         "classification": "W1_AWS_SSM_IID_DOCUMENT_PROVISIONED_NON_AUTHORITY",
         "evidence": evidence,
         "evidence_sha256": hashlib.sha256(_canonical(evidence).encode()).hexdigest(),
-        "document_provisioned": True,
+        "document_provisioning_observation_validated": True,
+        "document_provisioned": False,
+        "document_provisioned_authoritatively_verified": False,
         "runtime_execution_authority": False,
         "provider_identity_verified": False,
         "reboot_completion_proven": False,
