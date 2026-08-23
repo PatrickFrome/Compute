@@ -6,7 +6,6 @@ accept shell commands from task envelopes. Task, sync-epoch and result hashes
 are canonical JSON SHA-256 values so independent execution providers can
 compare exactly the same work request and result.
 """
-
 from __future__ import annotations
 
 import argparse
@@ -21,14 +20,11 @@ SHA256_RE = __import__('re').compile(r"^[0-9a-f]{64}$")
 SHA40_RE = __import__('re').compile(r"^[0-9a-f]{40}$")
 
 CHECKS: dict[str, list[list[str]]] = {
-    "AUTHORITY_PLANE_GUARDS": [
-        ["node", "--test", "coordination/gpt-worker/test/guards.test.mjs"],
-    ],
-    "A1_SANDBOX_GUARDS": [
-        ["python3", "-m", "unittest", "tests.a1.test_e2b_prepared_smoke", "-v"],
-    ],
+    "AUTHORITY_PLANE_GUARDS": [["node", "--test", "coordination/gpt-worker/test/guards.test.mjs"]],
+    "A1_SANDBOX_GUARDS": [["python3", "-m", "unittest", "tests.a1.test_e2b_prepared_smoke", "-v"]],
     "CROSS_PROVIDER_GUARDS": [
         ["python3", "-m", "unittest", "tests.a1.test_cross_provider_verify", "-v"],
+        ["python3", "-m", "unittest", "tests.a1.test_execution_subject", "-v"],
         ["python3", "-m", "unittest", "tests.a1.test_peer_review_barrier", "-v"],
     ],
 }
@@ -124,12 +120,7 @@ def execute(task: dict[str, Any]) -> dict[str, Any]:
         **neutral,
         "task_result_sha256": sha256_json(neutral),
         "checks": results,
-        "authority": {
-            "execution_authority": False,
-            "canonical": False,
-            "authority_effect": False,
-            "project_claim_authority": False,
-        },
+        "authority": {"execution_authority": False, "canonical": False, "authority_effect": False, "project_claim_authority": False},
     }
 
 
@@ -138,21 +129,14 @@ def main() -> int:
     parser.add_argument("--task", required=True)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
-    task_path = Path(args.task)
-    task = json.loads(task_path.read_text(encoding="utf-8"))
+    task = json.loads(Path(args.task).read_text(encoding="utf-8"))
     if not isinstance(task, dict):
         raise ValueError("task envelope must be a JSON object")
     result = execute(task)
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, sort_keys=True, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({
-        "status": "PASS",
-        "task_id": result["task_id"],
-        "sync_epoch_sha256": result["sync_epoch_sha256"],
-        "task_result_sha256": result["task_result_sha256"],
-        "authority_effect": False,
-    }, sort_keys=True))
+    print(json.dumps({"status": "PASS", "task_id": result["task_id"], "sync_epoch_sha256": result["sync_epoch_sha256"], "task_result_sha256": result["task_result_sha256"], "authority_effect": False}, sort_keys=True))
     return 0
 
 
