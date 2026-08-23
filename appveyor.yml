@@ -13,20 +13,7 @@ test_script:
   - sh: set -euo pipefail; python3 coordination/execution/zero_spend_runner.py --provider appveyor --output evidence/appveyor-zero-spend.json
   - sh: >-
       set -euo pipefail;
-      python3 - <<'PY'
-      import json
-      from pathlib import Path
-      p=Path('evidence/appveyor-zero-spend.json')
-      d=json.loads(p.read_text())
-      assert d['provider']['kind']=='appveyor'
-      assert d['source']['git_sha']==d['source']['expected_git_sha']
-      assert d['authority']['authority_effect'] is False
-      assert d['authority']['execution_authority'] is False
-      assert d['authority']['persistent_worker_proof'] is False
-      assert d['authority']['w1_verified'] is False
-      assert all(x['passed'] for x in d['checks'])
-      print(d['contract']['provider_neutral_result_sha256'])
-      PY
+      python3 -c "import json,pathlib; d=json.loads(pathlib.Path('evidence/appveyor-zero-spend.json').read_text()); assert d['provider']['kind']=='appveyor'; assert d['source']['git_sha']==d['source']['expected_git_sha']; assert d['authority']['authority_effect'] is False; assert d['authority']['execution_authority'] is False; assert d['authority']['persistent_worker_proof'] is False; assert d['authority']['w1_verified'] is False; assert all(x['passed'] for x in d['checks']); print(d['contract']['provider_neutral_result_sha256'])"
 
 artifacts:
   - path: evidence/appveyor-zero-spend.json
