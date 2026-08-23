@@ -1,0 +1,69 @@
+name: W1 AWS IID Courier Contract
+
+on:
+  push:
+    branches:
+      - work/w1-linux-worker-safety
+    paths:
+      - 'worker/native_linux/aws_iid_courier.py'
+      - 'controller/w1/aws_iid_courier_verifier.py'
+      - 'tests/test_w1_aws_iid_courier.py'
+      - '.github/workflows/w1-aws-iid-courier.yml'
+      - 'research/W1_DEV_CYCLE_001_AWS_IID_COURIER.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'worker/native_linux/aws_iid_courier.py'
+      - 'controller/w1/aws_iid_courier_verifier.py'
+      - 'tests/test_w1_aws_iid_courier.py'
+      - '.github/workflows/w1-aws-iid-courier.yml'
+      - 'research/W1_DEV_CYCLE_001_AWS_IID_COURIER.md'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  courier-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Assert exact checkout
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Compile courier boundary
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            worker/native_linux/aws_iid_courier.py \
+            controller/w1/aws_iid_courier_verifier.py
+
+      - name: Run courier adversarial tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_w1_aws_iid_courier -v
+
+      - name: Assert fail-closed transport boundary
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('worker/native_linux/aws_iid_courier.py').read_text()
+          q=Path('controller/w1/aws_iid_courier_verifier.py').read_text()
+          assert '169.254.169.254' in p
+          assert 'X-aws-ec2-metadata-token-ttl-seconds' in p
+          assert 'HOST_UNTRUSTED_TRANSPORT' in p and 'HOST_UNTRUSTED_TRANSPORT' in q
+          assert 'provider_identity_verified": False' in p
+          assert 'persistent_worker_proof": False' in p
+          assert 'http.client.HTTPConnection' in p
+          for forbidden in ('https://', 'requests.', 'urllib.', 'boto3', 'subprocess'):
+              assert forbidden not in p, forbidden
+          PY
