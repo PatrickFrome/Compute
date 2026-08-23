@@ -45,9 +45,11 @@ PROVIDERS = {
     },
 }
 
+# Keep command identities symbolic and provider-neutral. Do not use
+# sys.executable or absolute binary paths here: those differ across providers.
 CHECKS = [
-    [sys.executable, "-m", "py_compile", "coordination/e2b/prepared_smoke.py"],
-    [sys.executable, "-m", "unittest", "tests.a1.test_e2b_prepared_smoke", "-v"],
+    ["python3", "-m", "py_compile", "coordination/e2b/prepared_smoke.py"],
+    ["python3", "-m", "unittest", "tests.a1.test_e2b_prepared_smoke", "-v"],
     ["node", "--check", "coordination/gpt-worker/src/guards.mjs"],
     ["node", "--check", "coordination/gpt-worker/src/index.mjs"],
     ["node", "--test", "coordination/gpt-worker/test/guards.test.mjs"],
@@ -122,6 +124,14 @@ def run_checks() -> list[dict[str, Any]]:
     return results
 
 
+def expected_sha_for(provider_cfg: dict[str, str]) -> tuple[str, str]:
+    override = os.environ.get("H205F22_EXPECTED_GIT_SHA", "").strip().lower()
+    if override:
+        return override, "H205F22_EXPECTED_GIT_SHA"
+    env_name = provider_cfg["expected_sha_env"]
+    return os.environ.get(env_name, "").strip().lower(), env_name
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--provider", choices=sorted(PROVIDERS), required=True)
@@ -129,9 +139,9 @@ def main() -> int:
     args = parser.parse_args()
 
     provider_cfg = PROVIDERS[args.provider]
-    expected_sha = os.environ.get(provider_cfg["expected_sha_env"], "").strip().lower()
+    expected_sha, expected_sha_source = expected_sha_for(provider_cfg)
     if not SHA40_RE.fullmatch(expected_sha):
-        raise ValueError(f"{provider_cfg['expected_sha_env']} must be an exact 40-hex commit SHA")
+        raise ValueError(f"{expected_sha_source} must be an exact 40-hex commit SHA")
 
     current_sha = git("rev-parse", "HEAD").lower()
     if current_sha != expected_sha:
@@ -172,6 +182,7 @@ def main() -> int:
             "git_sha": current_sha,
             "tree_sha": tree_sha,
             "expected_git_sha": expected_sha,
+            "expected_git_sha_source": expected_sha_source,
             "tracked_tree_clean_before_execution": True,
         },
         "contract": {
