@@ -14,7 +14,7 @@ jobs:
           set -euo pipefail
           mkdir -p /tmp/probe
           sudo -n unshare -m true 2>/dev/null && echo "YES" > /tmp/probe/sudo_unshare_mnt.txt || echo "NO" > /tmp/probe/sudo_unshare_mnt.txt
-          echo "" | base64 -d > /tmp/probe/decisive.py
+          echo "$PROBE_B64" | base64 -d > /tmp/probe/decisive.py
           python3 /tmp/probe/decisive.py > /tmp/probe/decisive.txt 2>&1 || echo "probe error" >> /tmp/probe/decisive.txt
           sudo -n bash -c 'mkdir -p /sys/fs/cgroup/w1probe; echo "+cpu +memory +pids" > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null; echo "max 100000" > /sys/fs/cgroup/w1probe/cpu.max; echo 536870912 > /sys/fs/cgroup/w1probe/memory.max; echo 64 > /sys/fs/cgroup/w1probe/pids.max; echo YES > /tmp/probe/cgroup_setup.txt' 2>/dev/null || echo "NO" > /tmp/probe/cgroup_setup.txt
           sudo -n rmdir /sys/fs/cgroup/w1probe 2>/dev/null || true
