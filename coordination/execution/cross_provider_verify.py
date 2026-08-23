@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Cross-provider persisted readback verifier for H205F22 A1.
 
-Fetches the AppVeyor build that corresponds to the exact GitHub-tested branch,
-reads the AppVeyor evidence artifact back over the provider API, compares the
-provider-neutral roots against a local GitHub evidence manifest, and emits a
-non-authority cross-provider receipt.
+Finds the exact AppVeyor build for the Git commit tested by GitHub, reads its
+evidence artifact back over the provider API, compares provider-neutral roots,
+and emits a non-authority cross-provider receipt.
+
+The lookup is commit-centric rather than branch-centric so the same verifier
+works for AppVeyor PR builds (which may report the PR base branch) and normal
+branch builds after merge.
 
 This verifier never grants project authority and never satisfies W1.
 """
@@ -28,10 +31,7 @@ API_ROOT = "https://ci.appveyor.com/api"
 
 
 def _headers() -> dict[str, str]:
-    # Public AppVeyor projects can expose build/artifact reads without a token.
-    # If a future account policy requires auth, the token may be supplied only
-    # through a secret store. It is never written to output or logs here.
-    headers = {"Accept": "application/json", "User-Agent": "h205f22-cross-provider-readback/1"}
+    headers = {"Accept": "application/json", "User-Agent": "h205f22-cross-provider-readback/2"}
     token = os.environ.get("APPVEYOR_API_TOKEN", "").strip()
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -45,8 +45,7 @@ def fetch_bytes(url: str, *, timeout: int = 20) -> bytes:
 
 
 def fetch_json(url: str, *, timeout: int = 20) -> Any:
-    raw = fetch_bytes(url, timeout=timeout)
-    return json.loads(raw.decode("utf-8"))
+    return json.loads(fetch_bytes(url, timeout=timeout).decode("utf-8"))
 
 
 def load_manifest(path: Path) -> dict[str, Any]:
@@ -60,14 +59,13 @@ def validate_non_authority(manifest: dict[str, Any], *, label: str) -> None:
     authority = manifest.get("authority")
     if not isinstance(authority, dict):
         raise ValueError(f"{label}: authority object missing")
-    expected_false = [
+    for key in (
         "execution_authority",
         "canonical",
         "authority_effect",
         "persistent_worker_proof",
         "w1_verified",
-    ]
-    for key in expected_false:
+    ):
         if authority.get(key) is not False:
             raise ValueError(f"{label}: authority.{key} must be false")
 
@@ -95,7 +93,6 @@ def comparable_roots(manifest: dict[str, Any]) -> dict[str, str]:
 def compare_manifests(github: dict[str, Any], appveyor: dict[str, Any]) -> dict[str, str]:
     validate_non_authority(github, label="github")
     validate_non_authority(appveyor, label="appveyor")
-
     if github.get("provider", {}).get("kind") != "github-actions":
         raise ValueError("github manifest provider.kind mismatch")
     if appveyor.get("provider", {}).get("kind") != "appveyor":
@@ -113,11 +110,18 @@ def compare_manifests(github: dict[str, Any], appveyor: dict[str, Any]) -> dict[
     return github_roots
 
 
-def branch_build_url(account: str, project: str, branch: str) -> str:
+def _project_prefix(account: str, project: str) -> str:
     account_q = urllib.parse.quote(account, safe="")
     project_q = urllib.parse.quote(project, safe="")
-    branch_q = urllib.parse.quote(branch, safe="")
-    return f"{API_ROOT}/projects/{account_q}/{project_q}/branch/{branch_q}"
+    return f"{API_ROOT}/projects/{account_q}/{project_q}"
+
+
+def history_url(account: str, project: str, *, records: int = 100) -> str:
+    return f"{_project_prefix(account, project)}/history?recordsNumber={records}"
+
+
+def build_version_url(account: str, project: str, version: str) -> str:
+    return f"{_project_prefix(account, project)}/build/{urllib.parse.quote(version, safe='')}"
 
 
 def artifact_list_url(job_id: str) -> str:
@@ -130,47 +134,71 @@ def artifact_url(job_id: str, file_name: str) -> str:
     return f"{API_ROOT}/buildjobs/{job_q}/artifacts/{file_q}"
 
 
+def _fetch_with_auth_failure_message(url: str) -> Any:
+    try:
+        return fetch_json(url)
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            raise RuntimeError(
+                "AppVeyor readback denied; fail closed. If account policy requires auth, "
+                "configure APPVEYOR_API_TOKEN only in a secret store."
+            ) from exc
+        raise
+
+
 def wait_for_exact_success(
     *,
     account: str,
     project: str,
-    branch: str,
     expected_git_sha: str,
     attempts: int,
     interval_seconds: int,
 ) -> dict[str, Any]:
-    url = branch_build_url(account, project, branch)
+    url = history_url(account, project)
     last_summary: dict[str, Any] = {}
-    for attempt in range(1, attempts + 1):
-        try:
-            payload = fetch_json(url)
-        except urllib.error.HTTPError as exc:
-            if exc.code in (401, 403):
-                raise RuntimeError(
-                    "AppVeyor public readback denied; fail closed. "
-                    "If account policy requires it, configure APPVEYOR_API_TOKEN only in a secret store."
-                ) from exc
-            raise
 
-        build = payload.get("build") or {}
-        commit_id = str(build.get("commitId") or "").lower()
-        status = str(build.get("status") or "").lower()
-        build_id = build.get("buildId")
-        jobs = build.get("jobs") or []
+    for attempt in range(1, attempts + 1):
+        payload = _fetch_with_auth_failure_message(url)
+        builds = payload.get("builds") or []
+        exact = [
+            b for b in builds
+            if isinstance(b, dict) and str(b.get("commitId") or "").lower() == expected_git_sha
+        ]
+        terminal_failures = []
+        pending = []
+        for build in exact:
+            status = str(build.get("status") or "").lower()
+            if status == "success":
+                version = str(build.get("version") or "")
+                if not version:
+                    raise RuntimeError("AppVeyor successful history row has no version")
+                details = _fetch_with_auth_failure_message(build_version_url(account, project, version))
+                full_build = details.get("build") or {}
+                if str(full_build.get("commitId") or "").lower() != expected_git_sha:
+                    raise RuntimeError("AppVeyor build-detail commit changed during readback")
+                if str(full_build.get("status") or "").lower() != "success":
+                    pending.append({"version": version, "status": full_build.get("status")})
+                    continue
+                if not (full_build.get("jobs") or []):
+                    raise RuntimeError("AppVeyor exact-success build has no jobs")
+                return full_build
+            if status in {"failed", "cancelled"}:
+                terminal_failures.append({"build_id": build.get("buildId"), "version": build.get("version"), "status": status})
+            else:
+                pending.append({"build_id": build.get("buildId"), "version": build.get("version"), "status": status})
+
         last_summary = {
             "attempt": attempt,
-            "build_id": build_id,
-            "commit_id": commit_id,
-            "status": status,
+            "exact_builds": len(exact),
+            "pending": pending,
+            "terminal_failures": terminal_failures,
         }
 
-        if commit_id == expected_git_sha:
-            if status == "success":
-                if not jobs:
-                    raise RuntimeError("AppVeyor exact-success build has no jobs")
-                return build
-            if status in {"failed", "cancelled"}:
-                raise RuntimeError(f"AppVeyor exact build ended with status={status}")
+        # If at least one exact build is still queued/running, allow it to finish.
+        # If all exact builds are terminal failures, fail immediately instead of
+        # waiting for an impossible promotion.
+        if exact and not pending and terminal_failures:
+            raise RuntimeError(f"all AppVeyor exact builds failed: {json.dumps(terminal_failures, sort_keys=True)}")
 
         if attempt < attempts:
             time.sleep(interval_seconds)
@@ -186,7 +214,7 @@ def fetch_appveyor_manifest(build: dict[str, Any], expected_suffix: str) -> tupl
     if not job_id:
         raise RuntimeError("AppVeyor jobId missing")
 
-    artifacts = fetch_json(artifact_list_url(job_id))
+    artifacts = _fetch_with_auth_failure_message(artifact_list_url(job_id))
     if not isinstance(artifacts, list):
         raise RuntimeError("AppVeyor artifact list is not an array")
     candidates = [
@@ -211,7 +239,7 @@ def main() -> int:
     parser.add_argument("--output", default="evidence/cross-provider-readback.json")
     parser.add_argument("--account", default="PatrickFrome")
     parser.add_argument("--project", default="compute")
-    parser.add_argument("--branch", required=True)
+    parser.add_argument("--branch", required=True, help="source branch recorded for provenance only")
     parser.add_argument("--attempts", type=int, default=36)
     parser.add_argument("--interval-seconds", type=int, default=10)
     args = parser.parse_args()
@@ -221,15 +249,11 @@ def main() -> int:
     if args.interval_seconds < 1 or args.interval_seconds > 60:
         raise ValueError("interval-seconds must be in [1,60]")
 
-    github_path = Path(args.github_evidence)
-    github = load_manifest(github_path)
-    github_roots = comparable_roots(github)
-    expected_git_sha = github_roots["git_sha"]
-
+    github = load_manifest(Path(args.github_evidence))
+    expected_git_sha = comparable_roots(github)["git_sha"]
     build = wait_for_exact_success(
         account=args.account,
         project=args.project,
-        branch=args.branch,
         expected_git_sha=expected_git_sha,
         attempts=args.attempts,
         interval_seconds=args.interval_seconds,
@@ -246,9 +270,10 @@ def main() -> int:
         "appveyor_readback": {
             "account": args.account,
             "project": args.project,
-            "branch": args.branch,
+            "source_branch": args.branch,
             "build_id": build.get("buildId"),
             "build_version": build.get("version"),
+            "pull_request_id": build.get("pullRequestId"),
             "job_id": job_id,
             "artifact_file": file_name,
             "build_status": build.get("status"),
