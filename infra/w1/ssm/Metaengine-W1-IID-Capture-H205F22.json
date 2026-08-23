@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "2.2",
+  "description": "H205F22 W1 parameterless untrusted transport capture of EC2 IID document+rsa2048 via IMDSv2. No identity, reboot, persistence or canonical authority.",
+  "parameters": {},
+  "mainSteps": [
+    {
+      "action": "aws:runShellScript",
+      "name": "captureSignedIID",
+      "inputs": {
+        "timeoutSeconds": "30",
+        "runCommand": [
+          "set -eu\numask 077\nTMPDIR_W1=\"$(mktemp -d /tmp/metaengine-w1-iid.XXXXXX)\"\ntrap 'rm -rf \"$TMPDIR_W1\"' EXIT HUP INT TERM\npython3 - \"$TMPDIR_W1/envelope.json\" <<'PY'\nimport base64,hashlib,http.client,json,sys\nHOST='169.254.169.254'\nPORT=80\nTIMEOUT=2.0\ndef fetch(method,path,headers,limit):\n    c=http.client.HTTPConnection(HOST,PORT,timeout=TIMEOUT)\n    try:\n        c.request(method,path,body=None,headers=headers)\n        r=c.getresponse()\n        if r.status != 200:\n            raise RuntimeError('imds_http_status:%s' % r.status)\n        b=r.read(limit+1)\n        if not b or len(b)>limit:\n            raise RuntimeError('imds_payload_size_invalid')\n        return b\n    finally:\n        c.close()\ntoken=fetch('PUT','/latest/api/token',{'X-aws-ec2-metadata-token-ttl-seconds':'60'},4096)\ntry:\n    token_text=token.decode('ascii')\nexcept UnicodeDecodeError as exc:\n    raise RuntimeError('imds_token_not_ascii') from exc\nif token_text.strip()!=token_text or any(ord(ch)<33 or ord(ch)>126 for ch in token_text):\n    raise RuntimeError('imds_token_invalid')\nheaders={'X-aws-ec2-metadata-token':token_text}\ndocument=fetch('GET','/latest/dynamic/instance-identity/document',headers,16384)\nrsa2048=fetch('GET','/latest/dynamic/instance-identity/rsa2048',headers,32768)\nout={'schema':'metaengine.compute.w1-aws-iid-courier.h205f22.v1','source':'HOST_UNTRUSTED_TRANSPORT','transport':'AWS_IMDSV2_LINK_LOCAL_IPV4','document_base64':base64.b64encode(document).decode('ascii'),'document_sha256':hashlib.sha256(document).hexdigest(),'rsa2048_base64':base64.b64encode(rsa2048).decode('ascii'),'rsa2048_transport_sha256':hashlib.sha256(rsa2048).hexdigest(),\"provider_identity_verified\":False,\"reboot_completion_proven\":False,\"persistent_worker_proof\":False,\"w1_verified\":False,\"canonical\":False,\"authority_effect\":False}\nwith open(sys.argv[1],'w',encoding='utf-8') as h:\n    h.write(json.dumps(out,sort_keys=True,separators=(',',':'))+'\\n')\nPY\ncat \"$TMPDIR_W1/envelope.json\""
+        ]
+      }
+    }
+  ]
+}

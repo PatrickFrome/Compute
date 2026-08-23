@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """Fail-closed AWS SSM transport contract for W1 signed IID capture.
 
-This module does not call AWS, obtain credentials, execute commands, or persist evidence.
-It builds and validates the narrow Systems Manager Run Command boundary needed to move
-raw IID bytes off the exact W1 EC2 host without opening SSH or granting host identity
-authority.
+The execution role may send only an account-owned, parameterless, immutable version-1
+SSM Command document to the exact tagged W1 EC2 instance. The role cannot create,
+update, delete, or start an interactive SSM session. Returned IID bytes remain
+untrusted transport until the independent pinned AWS IID verifier accepts them.
 """
 from __future__ import annotations
 
 import argparse
-import base64
 import copy
 import hashlib
 import json
@@ -20,10 +19,10 @@ from typing import Any
 
 from controller.w1 import aws_iid_courier_verifier as offhost
 
-BOUNDARY_SCHEMA = "metaengine.compute.w1-aws-ssm-iid-session-boundary.h205f22.v1"
-PLAN_SCHEMA = "metaengine.compute.w1-aws-ssm-iid-command-plan.h205f22.v1"
-CAPTURE_SCHEMA = "metaengine.compute.w1-aws-ssm-iid-capture.h205f22.v1"
-DOCUMENT_NAME = "AWS-RunShellScript"
+BOUNDARY_SCHEMA = "metaengine.compute.w1-aws-ssm-iid-session-boundary.h205f22.v2"
+PLAN_SCHEMA = "metaengine.compute.w1-aws-ssm-iid-command-plan.h205f22.v2"
+CAPTURE_SCHEMA = "metaengine.compute.w1-aws-ssm-iid-capture.h205f22.v2"
+DOCUMENT_NAME = "Metaengine-W1-IID-Capture-H205F22"
 DOCUMENT_VERSION = "1"
 DOCUMENT_HASH_TYPE = "Sha256"
 MAX_STDOUT_CHARS = 24000
@@ -79,6 +78,65 @@ def required_instance_tags(worker_id: str, w1_sha: str) -> dict[str, str]:
     }
 
 
+def validate_local_document(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise SSMCaptureError("local_document_invalid")
+    if set(value) != {"schemaVersion", "description", "parameters", "mainSteps"}:
+        raise SSMCaptureError("local_document_shape_invalid")
+    if value.get("schemaVersion") != "2.2":
+        raise SSMCaptureError("local_document_schema_version_invalid")
+    if value.get("parameters") != {}:
+        raise SSMCaptureError("local_document_parameters_forbidden")
+    steps = value.get("mainSteps")
+    if not isinstance(steps, list) or len(steps) != 1 or not isinstance(steps[0], dict):
+        raise SSMCaptureError("local_document_single_step_required")
+    step = steps[0]
+    if set(step) != {"action", "name", "inputs"}:
+        raise SSMCaptureError("local_document_step_shape_invalid")
+    if step.get("action") != "aws:runShellScript" or step.get("name") != "captureSignedIID":
+        raise SSMCaptureError("local_document_step_identity_invalid")
+    inputs = step.get("inputs")
+    if not isinstance(inputs, dict) or set(inputs) != {"timeoutSeconds", "runCommand"}:
+        raise SSMCaptureError("local_document_inputs_invalid")
+    if inputs.get("timeoutSeconds") != "30":
+        raise SSMCaptureError("local_document_timeout_invalid")
+    commands = inputs.get("runCommand")
+    if not isinstance(commands, list) or len(commands) != 1 or not isinstance(commands[0], str):
+        raise SSMCaptureError("local_document_run_command_invalid")
+    command = commands[0]
+    required_literals = (
+        "169.254.169.254",
+        "/latest/api/token",
+        "/latest/dynamic/instance-identity/document",
+        "/latest/dynamic/instance-identity/rsa2048",
+        "HOST_UNTRUSTED_TRANSPORT",
+        "AWS_IMDSV2_LINK_LOCAL_IPV4",
+        '"provider_identity_verified":False',
+        '"reboot_completion_proven":False',
+        '"persistent_worker_proof":False',
+        '"w1_verified":False',
+        '"canonical":False',
+        '"authority_effect":False',
+    )
+    for literal in required_literals:
+        if literal not in command:
+            raise SSMCaptureError(f"local_document_required_literal_missing:{literal}")
+    for forbidden in ("{{", "https://", "curl ", "wget ", "git ", "ssh ", "sudo ", "aws "):
+        if forbidden in command:
+            raise SSMCaptureError(f"local_document_forbidden_surface:{forbidden}")
+    return value
+
+
+def parse_local_document(source: bytes) -> dict[str, Any]:
+    if not isinstance(source, bytes) or not source or len(source) > 65536:
+        raise SSMCaptureError("local_document_source_size_invalid")
+    try:
+        value = json.loads(source)
+    except json.JSONDecodeError as exc:
+        raise SSMCaptureError("local_document_json_invalid") from exc
+    return validate_local_document(value)
+
+
 def build_session_boundary(
     *,
     instance_id: str,
@@ -86,23 +144,21 @@ def build_session_boundary(
     w1_sha: str,
     account_id: str,
     region: str,
-    document_sha256: str,
+    local_document_source: bytes,
 ) -> dict[str, Any]:
     _require(instance_id, INSTANCE_ID, "instance_id")
     _require(worker_id, WORKER_ID, "worker_id")
     _require(w1_sha, SHA40, "w1_sha")
     _require(account_id, ACCOUNT_ID, "account_id")
     _require(region, REGION, "region")
-    _require(document_sha256, SHA256, "document_sha256")
+    parse_local_document(local_document_source)
 
     partition = _partition(region)
     instance_arn = f"arn:{partition}:ec2:{region}:{account_id}:instance/{instance_id}"
-    document_arn = f"arn:{partition}:ssm:{region}::document/{DOCUMENT_NAME}"
+    document_arn = f"arn:{partition}:ssm:{region}:{account_id}:document/{DOCUMENT_NAME}"
     tags = required_instance_tags(worker_id, w1_sha)
     tag_condition = {f"ssm:resourceTag/{key}": value for key, value in tags.items()}
 
-    # SendCommand is intentionally split across document and instance resources.
-    # The tag condition belongs only to the instance-resource statement.
     policy = {
         "Version": "2012-10-17",
         "Statement": [
@@ -113,13 +169,13 @@ def build_session_boundary(
                 "Resource": "*",
             },
             {
-                "Sid": "ReadPinnedRunShellScriptDocument",
+                "Sid": "ReadExactImmutableCaptureDocument",
                 "Effect": "Allow",
                 "Action": ["ssm:DescribeDocument", "ssm:GetDocument"],
                 "Resource": document_arn,
             },
             {
-                "Sid": "SendOnlyPinnedRunShellScriptDocument",
+                "Sid": "SendOnlyExactImmutableCaptureDocument",
                 "Effect": "Allow",
                 "Action": "ssm:SendCommand",
                 "Resource": document_arn,
@@ -150,10 +206,12 @@ def build_session_boundary(
         "instance_arn": instance_arn,
         "document_name": DOCUMENT_NAME,
         "document_version": DOCUMENT_VERSION,
-        "document_sha256": document_sha256,
         "document_arn": document_arn,
+        "repository_document_source_sha256": _sha_bytes(local_document_source),
         "required_instance_tags": tags,
         "session_policy": policy,
+        "document_mutation_allowed": False,
+        "arbitrary_command_parameters_allowed": False,
         "ssh_allowed": False,
         "start_session_allowed": False,
         "port_forwarding_allowed": False,
@@ -200,64 +258,85 @@ def validate_managed_node(value: Any, *, expected_instance_id: str) -> dict[str,
     }
 
 
-def validate_document_description(value: Any, *, expected_sha256: str) -> dict[str, Any]:
-    _require(expected_sha256, SHA256, "expected_document_sha256")
-    if not isinstance(value, dict):
+def validate_remote_document(
+    *,
+    description: Any,
+    get_document: Any,
+    account_id: str,
+    local_document_source: bytes,
+) -> dict[str, Any]:
+    _require(account_id, ACCOUNT_ID, "account_id")
+    local = parse_local_document(local_document_source)
+    if not isinstance(description, dict):
         raise SSMCaptureError("document_description_invalid")
-    doc = value.get("Document") if isinstance(value.get("Document"), dict) else value
+    doc = description.get("Document") if isinstance(description.get("Document"), dict) else description
     if doc.get("Name") != DOCUMENT_NAME:
         raise SSMCaptureError("document_name_mismatch")
-    if doc.get("Owner") != "Amazon":
-        raise SSMCaptureError("document_owner_not_amazon")
+    if doc.get("Owner") != account_id:
+        raise SSMCaptureError("document_owner_account_mismatch")
     if doc.get("DocumentType") != "Command" or doc.get("Status") != "Active":
         raise SSMCaptureError("document_state_invalid")
-    if str(doc.get("DefaultVersion")) != DOCUMENT_VERSION:
-        raise SSMCaptureError("document_default_version_mismatch")
-    if doc.get("HashType") != DOCUMENT_HASH_TYPE or doc.get("Hash") != expected_sha256:
-        raise SSMCaptureError("document_hash_mismatch")
+    if str(doc.get("DocumentVersion")) != DOCUMENT_VERSION:
+        raise SSMCaptureError("document_version_mismatch")
+    aws_sha = doc.get("Hash")
+    if doc.get("HashType") != DOCUMENT_HASH_TYPE or not isinstance(aws_sha, str) or SHA256.fullmatch(aws_sha) is None:
+        raise SSMCaptureError("document_hash_invalid")
     platforms = doc.get("PlatformTypes")
     if not isinstance(platforms, list) or "Linux" not in platforms:
         raise SSMCaptureError("document_linux_platform_missing")
+
+    if not isinstance(get_document, dict):
+        raise SSMCaptureError("get_document_response_invalid")
+    if get_document.get("Name") != DOCUMENT_NAME or str(get_document.get("DocumentVersion")) != DOCUMENT_VERSION:
+        raise SSMCaptureError("get_document_identity_mismatch")
+    if get_document.get("DocumentType") != "Command" or get_document.get("Status") != "Active":
+        raise SSMCaptureError("get_document_state_invalid")
+    content = get_document.get("Content")
+    if not isinstance(content, str):
+        raise SSMCaptureError("get_document_content_missing")
+    try:
+        remote = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise SSMCaptureError("get_document_content_invalid_json") from exc
+    validate_local_document(remote)
+    if _canonical(remote) != _canonical(local):
+        raise SSMCaptureError("remote_document_content_mismatch")
+
     return {
         "name": DOCUMENT_NAME,
-        "owner": "Amazon",
+        "owner_account_id": account_id,
         "document_type": "Command",
         "document_version": DOCUMENT_VERSION,
         "hash_type": DOCUMENT_HASH_TYPE,
-        "sha256": expected_sha256,
+        "aws_document_sha256": aws_sha,
+        "repository_document_source_sha256": _sha_bytes(local_document_source),
+        "remote_content_matches_repository": True,
         "linux_supported": True,
+        "document_parameters": {},
     }
 
 
-def build_command_plan(*, instance_id: str, document_sha256: str, courier_source: bytes) -> dict[str, Any]:
+def build_command_plan(
+    *,
+    instance_id: str,
+    aws_document_sha256: str,
+    repository_document_source_sha256: str,
+) -> dict[str, Any]:
     _require(instance_id, INSTANCE_ID, "instance_id")
-    _require(document_sha256, SHA256, "document_sha256")
-    if not isinstance(courier_source, bytes) or not courier_source or len(courier_source) > 32768:
-        raise SSMCaptureError("courier_source_size_invalid")
-    source_sha = _sha_bytes(courier_source)
-    source_b64 = base64.b64encode(courier_source).decode("ascii")
-    command = "\n".join([
-        "set -euo pipefail",
-        "umask 077",
-        "TMPDIR_W1=\"$(mktemp -d /tmp/metaengine-w1-iid.XXXXXX)\"",
-        "trap 'rm -rf \"$TMPDIR_W1\"' EXIT HUP INT TERM",
-        f"printf '%s' '{source_b64}' | base64 -d > \"$TMPDIR_W1/courier.py\"",
-        f"printf '%s  %s\\n' '{source_sha}' \"$TMPDIR_W1/courier.py\" | sha256sum -c - >/dev/null",
-        "python3 \"$TMPDIR_W1/courier.py\" --output \"$TMPDIR_W1/envelope.json\"",
-        "cat \"$TMPDIR_W1/envelope.json\"",
-    ])
+    _require(aws_document_sha256, SHA256, "aws_document_sha256")
+    _require(repository_document_source_sha256, SHA256, "repository_document_source_sha256")
     core = {
         "schema": PLAN_SCHEMA,
         "classification": "W1_AWS_SSM_IID_CAPTURE_COMMAND_PLAN_NONAUTHORITY",
         "instance_ids": [instance_id],
         "document_name": DOCUMENT_NAME,
         "document_version": DOCUMENT_VERSION,
-        "document_hash": document_sha256,
+        "document_hash": aws_document_sha256,
         "document_hash_type": DOCUMENT_HASH_TYPE,
+        "repository_document_source_sha256": repository_document_source_sha256,
         "timeout_seconds": 60,
-        "parameters": {"commands": [command], "executionTimeout": ["30"]},
-        "courier_source_sha256": source_sha,
-        "courier_source_size": len(courier_source),
+        "parameters": {},
+        "arbitrary_command_parameters_allowed": False,
         "command_output_contract": "STDOUT_EXACTLY_ONE_IID_COURIER_JSON_OBJECT",
         "contains_secrets": False,
         "s3_output": False,
@@ -287,8 +366,9 @@ def validate_send_command_response(value: Any, *, plan: dict[str, Any]) -> str:
         raise SSMCaptureError("send_command_document_version_mismatch")
     if command.get("InstanceIds") != plan.get("instance_ids"):
         raise SSMCaptureError("send_command_instance_mismatch")
-    if command.get("Parameters") != plan.get("parameters"):
-        raise SSMCaptureError("send_command_parameters_mismatch")
+    parameters = command.get("Parameters", {})
+    if parameters != {}:
+        raise SSMCaptureError("send_command_parameters_forbidden")
     return command_id
 
 
@@ -297,8 +377,8 @@ def validate_invocation(
     *,
     command_id: str,
     instance_id: str,
-    document_sha256: str,
-    courier_source_sha256: str,
+    aws_document_sha256: str,
+    repository_document_source_sha256: str,
 ) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise SSMCaptureError("command_invocation_invalid")
@@ -330,8 +410,8 @@ def validate_invocation(
         "instance_id": instance_id,
         "document_name": DOCUMENT_NAME,
         "document_version": DOCUMENT_VERSION,
-        "document_sha256": document_sha256,
-        "courier_source_sha256": courier_source_sha256,
+        "aws_document_sha256": aws_document_sha256,
+        "repository_document_source_sha256": repository_document_source_sha256,
         "ssm_status": "Success",
         "response_code": 0,
         "courier_envelope": envelope,
@@ -349,13 +429,6 @@ def validate_invocation(
     return result
 
 
-def _load_json(path: str) -> Any:
-    try:
-        return json.loads(Path(path).read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        raise SSMCaptureError(f"invalid_json:{path}") from exc
-
-
 def _write_json(path: str, value: Any) -> None:
     Path(path).write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n")
 
@@ -370,32 +443,20 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--w1-sha", required=True)
     p.add_argument("--account-id", required=True)
     p.add_argument("--region", required=True)
-    p.add_argument("--document-sha256", required=True)
-    p.add_argument("--output", required=True)
-
-    p = sub.add_parser("build-plan")
-    p.add_argument("--instance-id", required=True)
-    p.add_argument("--document-sha256", required=True)
-    p.add_argument("--courier-source", required=True)
+    p.add_argument("--document-source", required=True)
     p.add_argument("--output", required=True)
 
     args = parser.parse_args(argv)
     try:
-        if args.command == "build-boundary":
-            result = build_session_boundary(
-                instance_id=args.instance_id,
-                worker_id=args.worker_id,
-                w1_sha=args.w1_sha,
-                account_id=args.account_id,
-                region=args.region,
-                document_sha256=args.document_sha256,
-            )
-        else:
-            result = build_command_plan(
-                instance_id=args.instance_id,
-                document_sha256=args.document_sha256,
-                courier_source=Path(args.courier_source).read_bytes(),
-            )
+        source = Path(args.document_source).read_bytes()
+        result = build_session_boundary(
+            instance_id=args.instance_id,
+            worker_id=args.worker_id,
+            w1_sha=args.w1_sha,
+            account_id=args.account_id,
+            region=args.region,
+            local_document_source=source,
+        )
         _write_json(args.output, result)
         return 0
     except (OSError, SSMCaptureError) as exc:

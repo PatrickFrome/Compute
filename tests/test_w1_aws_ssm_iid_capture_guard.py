@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import unittest
+from pathlib import Path
 
 from controller.w1 import aws_ssm_iid_capture_guard as g
 from worker.native_linux import aws_iid_courier as courier
@@ -12,9 +13,11 @@ WORKER_ID = "glm-sandbox-worker-01"
 W1_SHA = "a" * 40
 ACCOUNT_ID = "123456789012"
 REGION = "us-east-2"
-DOC_SHA = "b" * 64
+AWS_DOC_SHA = "b" * 64
 COMMAND_ID = "11111111-2222-3333-4444-555555555555"
-SOURCE = b"#!/usr/bin/env python3\nprint('courier fixture')\n"
+DOC_PATH = Path("infra/w1/ssm/Metaengine-W1-IID-Capture-H205F22.json")
+DOC_SOURCE = DOC_PATH.read_bytes()
+REPO_DOC_SHA = g._sha_bytes(DOC_SOURCE)
 
 
 def boundary():
@@ -24,15 +27,15 @@ def boundary():
         w1_sha=W1_SHA,
         account_id=ACCOUNT_ID,
         region=REGION,
-        document_sha256=DOC_SHA,
+        local_document_source=DOC_SOURCE,
     )
 
 
 def plan():
     return g.build_command_plan(
         instance_id=INSTANCE_ID,
-        document_sha256=DOC_SHA,
-        courier_source=SOURCE,
+        aws_document_sha256=AWS_DOC_SHA,
+        repository_document_source_sha256=REPO_DOC_SHA,
     )
 
 
@@ -58,9 +61,20 @@ def envelope():
 
 
 class SSMCaptureGuardTests(unittest.TestCase):
-    def test_boundary_is_exact_least_privilege_nonauthority(self):
+    def test_static_document_is_parameterless_fixed_transport(self):
+        value = g.parse_local_document(DOC_SOURCE)
+        self.assertEqual(value["parameters"], {})
+        script = value["mainSteps"][0]["inputs"]["runCommand"][0]
+        self.assertIn("169.254.169.254", script)
+        self.assertNotIn("{{", script)
+        self.assertNotIn("https://", script)
+        self.assertIn('"provider_identity_verified":False', script)
+        self.assertIn('"authority_effect":False', script)
+
+    def test_boundary_is_exact_least_privilege_parameterless_nonauthority(self):
         value = boundary()
-        self.assertFalse(value["ssh_allowed"])
+        self.assertFalse(value["document_mutation_allowed"])
+        self.assertFalse(value["arbitrary_command_parameters_allowed"])
         self.assertFalse(value["start_session_allowed"])
         self.assertFalse(value["port_forwarding_allowed"])
         self.assertFalse(value["provider_identity_verified"])
@@ -78,18 +92,23 @@ class SSMCaptureGuardTests(unittest.TestCase):
                 "ssm:GetCommandInvocation",
             },
         )
-        self.assertNotIn("ssm:StartSession", actions)
-        send_instance = next(x for x in value["session_policy"]["Statement"] if x["Sid"] == "SendOnlyExactTaggedW1Instance")
-        self.assertEqual(send_instance["Resource"], value["instance_arn"])
-        self.assertEqual(len(send_instance["Condition"]["StringEquals"]), 6)
-        self.assertEqual(value["document_arn"], "arn:aws:ssm:us-east-2::document/AWS-RunShellScript")
+        for forbidden in ("ssm:StartSession", "ssm:CreateDocument", "ssm:UpdateDocument", "ssm:DeleteDocument"):
+            self.assertNotIn(forbidden, actions)
+        self.assertEqual(
+            value["document_arn"],
+            "arn:aws:ssm:us-east-2:123456789012:document/Metaengine-W1-IID-Capture-H205F22",
+        )
+        self.assertEqual(value["repository_document_source_sha256"], REPO_DOC_SHA)
 
-    def test_boundary_rejects_unpinned_document_hash_shape(self):
-        with self.assertRaisesRegex(g.SSMCaptureError, "document_sha256_invalid"):
-            g.build_session_boundary(
-                instance_id=INSTANCE_ID, worker_id=WORKER_ID, w1_sha=W1_SHA,
-                account_id=ACCOUNT_ID, region=REGION, document_sha256="not-a-hash"
-            )
+    def test_parameterized_or_interpolated_document_is_rejected(self):
+        raw = json.loads(DOC_SOURCE)
+        raw["parameters"] = {"commands": {"type": "StringList"}}
+        with self.assertRaisesRegex(g.SSMCaptureError, "parameters_forbidden"):
+            g.validate_local_document(raw)
+        raw = json.loads(DOC_SOURCE)
+        raw["mainSteps"][0]["inputs"]["runCommand"][0] += "\necho {{ commands }}"
+        with self.assertRaisesRegex(g.SSMCaptureError, "forbidden_surface"):
+            g.validate_local_document(raw)
 
     def test_managed_node_requires_exact_online_linux_ec2(self):
         raw = {"InstanceInformationList": [{
@@ -108,45 +127,61 @@ class SSMCaptureGuardTests(unittest.TestCase):
             with self.assertRaises(g.SSMCaptureError):
                 g.validate_managed_node(tampered, expected_instance_id=INSTANCE_ID)
 
-    def test_document_must_be_amazon_active_version1_and_exact_hash(self):
-        raw = {"Document": {
+    def test_remote_version1_document_must_match_repository_content_exactly(self):
+        content = DOC_SOURCE.decode()
+        description = {"Document": {
             "Name": g.DOCUMENT_NAME,
-            "Owner": "Amazon",
+            "Owner": ACCOUNT_ID,
             "DocumentType": "Command",
             "Status": "Active",
-            "DefaultVersion": "1",
+            "DocumentVersion": "1",
             "HashType": "Sha256",
-            "Hash": DOC_SHA,
+            "Hash": AWS_DOC_SHA,
             "PlatformTypes": ["Linux"],
         }}
-        self.assertEqual(g.validate_document_description(raw, expected_sha256=DOC_SHA)["owner"], "Amazon")
-        for field, bad in (("Owner", ACCOUNT_ID), ("DefaultVersion", "2"), ("Hash", "c" * 64)):
-            tampered = copy.deepcopy(raw)
-            tampered["Document"][field] = bad
-            with self.assertRaises(g.SSMCaptureError):
-                g.validate_document_description(tampered, expected_sha256=DOC_SHA)
+        get_document = {
+            "Name": g.DOCUMENT_NAME,
+            "DocumentVersion": "1",
+            "DocumentType": "Command",
+            "Status": "Active",
+            "Content": content,
+        }
+        result = g.validate_remote_document(
+            description=description, get_document=get_document,
+            account_id=ACCOUNT_ID, local_document_source=DOC_SOURCE
+        )
+        self.assertTrue(result["remote_content_matches_repository"])
+        self.assertEqual(result["aws_document_sha256"], AWS_DOC_SHA)
 
-    def test_plan_embeds_exact_courier_bytes_and_no_secret_output_channel(self):
+        bad = copy.deepcopy(description)
+        bad["Document"]["Owner"] = "Amazon"
+        with self.assertRaisesRegex(g.SSMCaptureError, "owner_account_mismatch"):
+            g.validate_remote_document(description=bad, get_document=get_document, account_id=ACCOUNT_ID, local_document_source=DOC_SOURCE)
+
+        remote = json.loads(content)
+        remote["description"] += " tampered"
+        bad_get = copy.deepcopy(get_document)
+        bad_get["Content"] = json.dumps(remote)
+        with self.assertRaisesRegex(g.SSMCaptureError, "remote_document_content_mismatch"):
+            g.validate_remote_document(description=description, get_document=bad_get, account_id=ACCOUNT_ID, local_document_source=DOC_SOURCE)
+
+    def test_plan_has_zero_parameters_and_binds_both_document_hashes(self):
         value = plan()
-        self.assertEqual(value["courier_source_sha256"], g._sha_bytes(SOURCE))
-        self.assertFalse(value["contains_secrets"])
+        self.assertEqual(value["parameters"], {})
+        self.assertFalse(value["arbitrary_command_parameters_allowed"])
+        self.assertEqual(value["document_hash"], AWS_DOC_SHA)
+        self.assertEqual(value["repository_document_source_sha256"], REPO_DOC_SHA)
         self.assertFalse(value["s3_output"])
         self.assertFalse(value["cloudwatch_output"])
-        command = value["parameters"]["commands"][0]
-        encoded = command.split("printf '%s' '", 1)[1].split("' | base64", 1)[0]
-        import base64
-        self.assertEqual(base64.b64decode(encoded), SOURCE)
-        self.assertIn("sha256sum -c - >/dev/null", command)
-        self.assertIn("cat \"$TMPDIR_W1/envelope.json\"", command)
 
-    def test_send_response_must_echo_exact_plan_identity_and_parameters(self):
+    def test_send_response_rejects_any_parameter_or_foreign_instance(self):
         p = plan()
         raw = {"Command": {
             "CommandId": COMMAND_ID,
             "DocumentName": g.DOCUMENT_NAME,
             "DocumentVersion": g.DOCUMENT_VERSION,
             "InstanceIds": [INSTANCE_ID],
-            "Parameters": p["parameters"],
+            "Parameters": {},
         }}
         self.assertEqual(g.validate_send_command_response(raw, plan=p), COMMAND_ID)
         tampered = copy.deepcopy(raw)
@@ -154,12 +189,11 @@ class SSMCaptureGuardTests(unittest.TestCase):
         with self.assertRaisesRegex(g.SSMCaptureError, "send_command_instance_mismatch"):
             g.validate_send_command_response(tampered, plan=p)
         tampered = copy.deepcopy(raw)
-        tampered["Command"]["Parameters"]["commands"] = ["id"]
-        with self.assertRaisesRegex(g.SSMCaptureError, "send_command_parameters_mismatch"):
+        tampered["Command"]["Parameters"] = {"commands": ["id"]}
+        with self.assertRaisesRegex(g.SSMCaptureError, "parameters_forbidden"):
             g.validate_send_command_response(tampered, plan=p)
 
     def test_invocation_success_yields_only_untrusted_transport_receipt(self):
-        p = plan()
         raw = {
             "CommandId": COMMAND_ID,
             "InstanceId": INSTANCE_ID,
@@ -172,7 +206,7 @@ class SSMCaptureGuardTests(unittest.TestCase):
         }
         result = g.validate_invocation(
             raw, command_id=COMMAND_ID, instance_id=INSTANCE_ID,
-            document_sha256=DOC_SHA, courier_source_sha256=p["courier_source_sha256"]
+            aws_document_sha256=AWS_DOC_SHA, repository_document_source_sha256=REPO_DOC_SHA
         )
         self.assertEqual(result["classification"], "W1_AWS_SSM_IID_CAPTURE_UNTRUSTED_TRANSPORT_RECEIPT")
         self.assertFalse(result["provider_identity_verified"])
@@ -182,14 +216,14 @@ class SSMCaptureGuardTests(unittest.TestCase):
         bad = copy.deepcopy(raw)
         bad["StandardErrorContent"] = "warning"
         with self.assertRaisesRegex(g.SSMCaptureError, "stderr_not_empty"):
-            g.validate_invocation(bad, command_id=COMMAND_ID, instance_id=INSTANCE_ID, document_sha256=DOC_SHA, courier_source_sha256=p["courier_source_sha256"])
+            g.validate_invocation(bad, command_id=COMMAND_ID, instance_id=INSTANCE_ID, aws_document_sha256=AWS_DOC_SHA, repository_document_source_sha256=REPO_DOC_SHA)
 
         bad = copy.deepcopy(raw)
         hostile = envelope()
         hostile["provider_identity_verified"] = True
         bad["StandardOutputContent"] = json.dumps(hostile)
         with self.assertRaisesRegex(g.SSMCaptureError, "courier_rejected"):
-            g.validate_invocation(bad, command_id=COMMAND_ID, instance_id=INSTANCE_ID, document_sha256=DOC_SHA, courier_source_sha256=p["courier_source_sha256"])
+            g.validate_invocation(bad, command_id=COMMAND_ID, instance_id=INSTANCE_ID, aws_document_sha256=AWS_DOC_SHA, repository_document_source_sha256=REPO_DOC_SHA)
 
 
 if __name__ == "__main__":
