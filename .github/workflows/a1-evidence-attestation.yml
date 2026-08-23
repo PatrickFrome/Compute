@@ -72,7 +72,6 @@ jobs:
       artifact-metadata: write
     env:
       GH_TOKEN: ${{ github.token }}
-      PAP_CHATGPT_TOKEN: ${{ secrets.PAP_CHATGPT_TOKEN }}
       PAP_BASE_URL: https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/pap-transport
       SOURCE_RUN_ID: ${{ inputs.source_run_id }}
       PR_NUMBER: ${{ inputs.pr_number }}
@@ -85,14 +84,13 @@ jobs:
           ref: main
           persist-credentials: false
 
-      - name: Validate dispatch parameters and secret presence
+      - name: Validate dispatch parameters
         run: |
           set -euo pipefail
           [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]
           [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]
           [[ "$AFTER_SEQ" =~ ^[0-9]+$ ]]
           [[ "$EXPECTED_SUBJECT_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          test -n "$PAP_CHATGPT_TOKEN"
 
       - name: Persisted-read completed cross-provider subject
         run: |
@@ -125,8 +123,11 @@ jobs:
             --output /tmp/chatgpt-ingest.json
 
       - name: Persisted-read GLM review from PAP
+        env:
+          PAP_CHATGPT_TOKEN: ${{ secrets.PAP_CHATGPT_TOKEN }}
         run: |
           set -euo pipefail
+          test -n "$PAP_CHATGPT_TOKEN"
           umask 077
           printf 'header = "Authorization: Bearer %s"\n' "$PAP_CHATGPT_TOKEN" > /tmp/pap-curl.conf
           curl --config /tmp/pap-curl.conf \
