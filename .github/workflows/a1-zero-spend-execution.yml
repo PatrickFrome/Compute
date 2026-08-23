@@ -1,0 +1,64 @@
+name: A1 Zero-Spend Execution Fabric
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'coordination/execution/**'
+      - 'coordination/gpt-worker/**'
+      - 'coordination/e2b/**'
+      - 'tests/a1/**'
+      - 'spec/a1/**'
+      - 'appveyor.yml'
+      - '.github/workflows/a1-zero-spend-execution.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  github-primary-executor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Run contract unit tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.a1.test_zero_spend_runner -v
+
+      - name: Run provider-neutral execution contract
+        run: |
+          set -euo pipefail
+          python3 coordination/execution/zero_spend_runner.py \
+            --provider github-actions \
+            --output evidence/github-actions-zero-spend.json
+
+      - name: Verify evidence is non-authority
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('evidence/github-actions-zero-spend.json')
+          d=json.loads(p.read_text())
+          assert d['provider']['kind']=='github-actions'
+          assert d['source']['git_sha']==d['source']['expected_git_sha']
+          assert d['authority']['authority_effect'] is False
+          assert d['authority']['execution_authority'] is False
+          assert d['authority']['persistent_worker_proof'] is False
+          assert d['authority']['w1_verified'] is False
+          assert all(x['passed'] for x in d['checks'])
+          PY
+
+      - name: Upload execution evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: a1-github-zero-spend-evidence
+          path: evidence/github-actions-zero-spend.json
+          if-no-files-found: error
+          retention-days: 30
