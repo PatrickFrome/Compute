@@ -9,30 +9,26 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe host capabilities (cgroup v2, pidfd, openat2, seccomp)
+      - name: Probe host capabilities
         run: |
           set -euo pipefail
+          mkdir -p /tmp/probe
+          uname -r > /tmp/probe/kernel.txt
+          if [ -f /sys/fs/cgroup/cgroup.controllers ]; then echo "YES" > /tmp/probe/cgroup2.txt; cat /sys/fs/cgroup/cgroup.controllers | tr ' ' ',' > /tmp/probe/controllers.txt; else echo "NO" > /tmp/probe/cgroup2.txt; echo "none" > /tmp/probe/controllers.txt; fi
+          grep Seccomp /proc/self/status > /tmp/probe/seccomp.txt || true
+          id -u > /tmp/probe/uid.txt
+          readlink /proc/self/ns/mnt > /tmp/probe/mntns.txt
+          python3 -c "import ctypes,os; libc=ctypes.CDLL(None,use_errno=True); r=libc.syscall(534,os.getpid(),0); print('pidfd_open: '+('OK' if r>=0 else 'FAIL')); r2=libc.syscall(437,-100,os.getcwd().encode(),b'.',0,0x8); print('openat2_resolve_beneath: '+('OK' if r2>=0 else 'FAIL')); print('no_new_privs: '+('OK' if libc.prctl(38,1,0,0,0)==0 else 'FAIL'))" > /tmp/probe/syscalls.txt 2>&1 || echo "syscall probe error" > /tmp/probe/syscalls.txt
           {
-            echo "## W1 Worker Host Capability Report"
-            echo "- kernel: $(uname -r)"
-            echo "- cgroup v2 mounted: $([ -f /sys/fs/cgroup/cgroup.controllers ] && echo YES || echo NO)"
-            echo "- cgroup controllers: $(cat /sys/fs/cgroup/cgroup.controllers 2>/dev/null | tr ' ' ',' || echo none)"
-            echo "- seccomp: $(grep Seccomp /proc/self/status | tr '\n' ' ')"
-            echo "- uid: $(id -u)"
-            echo "- pidfd_open: $(python3 -c "
-import ctypes,os
-libc=ctypes.CDLL(None)
-r=libc.syscall(534,os.getpid(),0)
-print('OK' if r>=0 else 'FAIL')
-if r>=0: os.close(r)
-" 2>/dev/null || echo FAIL)"
-            echo "- openat2 RESOLVE_BENEATH: $(python3 -c "
-import ctypes,os
-libc=ctypes.CDLL(None,use_errno=True)
-r=libc.syscall(437,-100,os.getcwd().encode(),b'.',0,0x8)
-print('OK' if r>=0 else 'FAIL')
-if r>=0: os.close(r)
-" 2>/dev/null || echo FAIL)"
-            echo "- mount ns: $(readlink /proc/self/ns/mnt)"
-          } >> "$GITHUB_STEP_SUMMARY"
-          cat "$GITHUB_STEP_SUMMARY" || true
+            echo "## W1 Worker Host Capability Report (ubuntu-latest)"
+            echo "- kernel: $(cat /tmp/probe/kernel.txt)"
+            echo "- cgroup_v2_mounted: $(cat /tmp/probe/cgroup2.txt)"
+            echo "- cgroup_controllers: $(cat /tmp/probe/controllers.txt)"
+            echo "- seccomp: $(tr '\n' ' ' < /tmp/probe/seccomp.txt)"
+            echo "- uid: $(cat /tmp/probe/uid.txt)"
+            echo "- mount_ns: $(cat /tmp/probe/mntns.txt)"
+            echo "- syscalls:"
+            sed 's/^/    - /' /tmp/probe/syscalls.txt
+            echo "- free_ram_mb: $(free -m | awk '/^Mem:/{print $2}')"
+            echo "- cpus: $(nproc)"
+          } | tee "$GITHUB_STEP_SUMMARY"
