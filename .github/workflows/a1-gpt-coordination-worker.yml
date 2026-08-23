@@ -22,6 +22,9 @@ jobs:
           node --check coordination/gpt-worker/src/index.mjs
       - name: Run lesson-guard regression tests
         run: node --test coordination/gpt-worker/test/guards.test.mjs
+      - name: Validate Cloudflare bundle and Durable Object config
+        working-directory: coordination/gpt-worker
+        run: npx --yes wrangler@4.125.0 deploy --dry-run --outdir /tmp/gpt-worker-dist --config wrangler.jsonc
 
   deploy:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
