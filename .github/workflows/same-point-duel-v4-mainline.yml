@@ -5,20 +5,13 @@ on:
     branches: [main]
     paths:
       - "orchestration/sovereign/**"
-      - "supabase/migrations/20260824044849_aop1_microstep_lockstep_duel_v2.sql"
-      - "supabase/migrations/20260824061721_duel_submit_pair_idempotent_v3.sql"
-      - "supabase/migrations/20260824070409_duel_sovereign_inference_v1.sql"
-      - "supabase/migrations/20260824073410_same_point_duel_v4.sql"
-      - "supabase/migrations/20260824073803_same_point_duel_v4_executor_fencing.sql"
-      - "supabase/migrations/20260824074927_same_point_duel_v4_recovery_readback.sql"
-      - "tests/test_sovereign_inference_contract.py"
-      - "tests/test_same_point_duel_v4_contract.py"
-      - "tests/test_sovereign_endpoint_contract.py"
-      - "tests/test_same_point_duel_v4_lineage.py"
+      - "supabase/migrations/*duel*.sql"
+      - "tests/test_sovereign_*"
+      - "tests/test_same_point_duel_v4_*"
       - ".github/workflows/same-point-duel-v4-mainline.yml"
   push:
     branches:
-      - "work/same-point-duel-v4-mainline"
+      - "work/same-point-duel-v4-*"
       - main
     paths:
       - "orchestration/sovereign/**"
@@ -48,6 +41,8 @@ jobs:
         run: python tests/test_sovereign_endpoint_contract.py
       - name: Verify recovered migration lineage
         run: python tests/test_same_point_duel_v4_lineage.py
+      - name: Verify independent peer relay semantics
+        run: python tests/test_same_point_duel_v4_peer_relay.py
 
   typescript:
     runs-on: ubuntu-24.04
