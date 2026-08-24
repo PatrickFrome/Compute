@@ -208,14 +208,17 @@ for marker in (
     assert marker in deploy_broker_ts
 assert "ONE_TIME_CAPABILITY" not in deploy_broker_ts
 
-# Wrangler declares required existing Worker runtime secrets. Deploy must fail if
-# one is absent, but normal code deploys do not export their values to GitHub.
+# Wrangler declares required Worker runtime secrets. The Vercel inference rail is
+# provisioned as a Cloudflare secret before deploy so required-secret validation
+# fails closed instead of silently deploying a one-rail runtime.
 assert '"secrets"' in wrangler_json and '"required"' in wrangler_json
-for secret_name in ("SUPABASE_SERVICE_ROLE_KEY", "AOP_WAKE_SECRET", "AOP_SUPERVISOR_TOKEN", "CF_ACCOUNT_ID", "CF_AI_TOKEN"):
+for secret_name in ("SUPABASE_SERVICE_ROLE_KEY", "AOP_WAKE_SECRET", "AOP_SUPERVISOR_TOKEN", "CF_ACCOUNT_ID", "CF_AI_TOKEN", "VERCEL_AI_GATEWAY_API_KEY"):
     assert secret_name in wrangler_json
 
-# Live deploy uses GitHub OIDC -> deploy-only broker. Runtime secrets are preserved
-# in Cloudflare and are not re-exported through the GitHub runner.
+# Live deploy uses GitHub OIDC -> deploy-only broker. The Vercel AI Gateway key is
+# transiently masked in the deploy job, installed into the Worker secret store, and
+# erased from subsequent step environments. Higher-privilege runtime/supervisor
+# secrets are never exported through the GitHub runner.
 assert "id-token: write" in deploy_yml
 assert "ACTIONS_ID_TOKEN_REQUEST_TOKEN" in deploy_yml
 assert "ACTIONS_ID_TOKEN_REQUEST_URL" in deploy_yml
@@ -227,9 +230,14 @@ assert "::add-mask::" in deploy_yml
 assert "wrangler queues info" in deploy_yml and "wrangler queues create" in deploy_yml
 assert "cloudflare/wrangler-action@v3" in deploy_yml
 assert 'wranglerVersion: "4.125.0"' in deploy_yml
-assert "Deploy Worker without exporting runtime secrets" in deploy_yml
-assert "Drop deploy capability from subsequent step environments" in deploy_yml
+assert "Install Vercel AI Gateway key as Worker secret" in deploy_yml
+assert "wrangler secret put VERCEL_AI_GATEWAY_API_KEY" in deploy_yml
+assert "Deploy Worker with Vercel duel rail configured" in deploy_yml
+assert deploy_yml.index("Install Vercel AI Gateway key as Worker secret") < deploy_yml.index("Deploy Worker with Vercel duel rail configured")
+assert "Drop deploy and gateway capabilities from subsequent step environments" in deploy_yml
+assert "VERCEL_AI_GATEWAY_API_KEY=\\n" in deploy_yml
 assert '/health' in deploy_yml
+assert '.duel_vercel_rail_configured == true' in deploy_yml
 assert '.snapshot.invariant == "NO_MANUAL_HANDOFF_V1"' in deploy_yml
 assert '.github_configured == false' in deploy_yml
 assert '.github_auth_mode == "none"' in deploy_yml
