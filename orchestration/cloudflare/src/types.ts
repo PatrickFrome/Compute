@@ -37,7 +37,10 @@ export interface Env {
   AOP_SUPERVISOR: DurableObjectNamespace; AOP_RUN_WORKFLOW: WorkflowBinding; AOP_WAKE_QUEUE: QueueBinding<AopWake>;
 }
 export interface DurableObjectNamespace { idFromName(name: string): unknown; get(id: unknown): { wake(message: AopWake): Promise<{ accepted: boolean }> }; }
-export interface WorkflowBinding { create(options: { id?: string; params: WorkflowParams }): Promise<unknown>; }
+export interface WorkflowBinding {
+  create(options: { id?: string; params: WorkflowParams }): Promise<unknown>;
+  createBatch(options: Array<{ id: string; params: WorkflowParams }>): Promise<unknown[]>;
+}
 export interface QueueBinding<T> { send(message: T): Promise<void>; }
 export interface QueueMessage<T> { body: T; ack(): void; retry(options?: { delaySeconds?: number }): void; }
 export interface MessageBatch<T> { messages: Array<QueueMessage<T>>; }
