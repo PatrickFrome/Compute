@@ -3,6 +3,7 @@ import type { AopLease, AopWake, Env, JsonObject, MessageBatch, ModelOutcome, Wo
 import { completeRun, deferRun, leaseRun, rpc, supervisorReturnAuthority } from "./supabase";
 import { executeRole, executorReady } from "./executor";
 import { githubAuthMode, githubWriteConfigured } from "./github";
+import { runDuelWorkflow } from "./duel";
 
 function json(value: unknown, status = 200): Response { return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json; charset=utf-8" } }); }
 async function safeEqual(a: string, b: string): Promise<boolean> {
@@ -40,7 +41,11 @@ export class ComputeFabricSupervisor extends DurableObject<Env> {
 
 export class AopRunWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> {
   async run(event: WorkflowEvent<WorkflowParams>, step: WorkflowStep): Promise<unknown> {
-    const { workerId } = event.payload;
+    const { workerId, wake } = event.payload;
+    if (wake.reason === "DUEL_RECONCILE" || wake.reason === "DUEL_START") {
+      return runDuelWorkflow(this.env, step, workerId);
+    }
+
     const leaseJson = await step.do("lease-aop-run", { retries: { limit: 5, delay: "5 seconds", backoff: "exponential" } }, async () => JSON.stringify(await leaseRun(this.env, workerId)));
     const lease = JSON.parse(leaseJson) as AopLease;
     if (!lease.leased) return { status: "IDLE" };
@@ -78,16 +83,25 @@ export default {
     const url = new URL(request.url);
     try {
       if (request.method === "GET" && url.pathname === "/health") {
-        const snapshot = await rpc<JsonObject>(env, "h205f22_aop1_snapshot_v1", {});
+        const [snapshot, duel] = await Promise.all([
+          rpc<JsonObject>(env, "h205f22_aop1_snapshot_v1", {}),
+          rpc<JsonObject>(env, "h205f22_duel_snapshot_v1", {}),
+        ]);
         return json({
           status: "ok",
-          invariant: "NO_MANUAL_HANDOFF_V1",
+          invariant: "NO_MANUAL_HANDOFF_V1+ACTIVE_DUEL_V1",
           executor_configured: Boolean(env.CF_ACCOUNT_ID && env.CF_AI_TOKEN && env.AOP_MODEL),
+          duel_executor_configured: Boolean(env.CF_ACCOUNT_ID && env.CF_AI_TOKEN),
+          duel_models: { gpt: "openai/gpt-5.6-sol", glm: "@cf/zai-org/glm-5.2" },
           github_configured: githubWriteConfigured(env),
           github_auth_mode: githubAuthMode(env),
           supervisor_capability_configured: Boolean(env.AOP_SUPERVISOR_TOKEN),
           snapshot,
+          duel,
         });
+      }
+      if (request.method === "GET" && url.pathname === "/duel") {
+        return json(await rpc<JsonObject>(env, "h205f22_duel_snapshot_v1", {}));
       }
       if (request.method === "POST" && url.pathname === "/wake") {
         await requireBearer(request, env.AOP_WAKE_SECRET);
@@ -123,5 +137,10 @@ export default {
     const id = env.AOP_SUPERVISOR.idFromName("compute-fabric-roadmap-v1"), stub = env.AOP_SUPERVISOR.get(id);
     for (const message of batch.messages) { try { await stub.wake(message.body); message.ack(); } catch { message.retry({ delaySeconds: 15 }); } }
   },
-  async scheduled(_controller: ScheduledController, env: Env): Promise<void> { await enqueueWake(env, "PERIODIC_RECONCILE", "cron"); },
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    await Promise.all([
+      enqueueWake(env, "PERIODIC_RECONCILE", "cron"),
+      enqueueWake(env, "DUEL_RECONCILE", "cron"),
+    ]);
+  },
 };
