@@ -25,14 +25,6 @@ async function verifyGithub(request: Request, secret: string, body: ArrayBuffer)
   const hex = [...mac].map((b) => b.toString(16).padStart(2, "0")).join("");
   return safeEqual(sig, `sha256=${hex}`);
 }
-async function verifyGithub(request: Request, secret: string, body: ArrayBuffer): Promise<boolean> {
-  const sig = request.headers.get("x-hub-signature-256") ?? "";
-  if (!sig.startsWith("sha256=")) return false;
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, body));
-  const hex = [...mac].map((b) => b.toString(16).padStart(2, "0")).join("");
-  return safeEqual(sig, `sha256=${hex}`);
-}
 function supervisorStub(env: Env) {
   const id = env.AOP_SUPERVISOR.idFromName("compute-fabric-roadmap-v1");
   return env.AOP_SUPERVISOR.get(id);
