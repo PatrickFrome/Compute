@@ -8,6 +8,10 @@ const ALLOWED_RPC = new Set([
   "h205f22_aop1_snapshot_v1",
   "h205f22_aop1_supervisor_adopt_active_claim_v1",
   "h205f22_aop1_supervisor_return_authority_v1",
+  "h205f22_duel_lease_v1",
+  "h205f22_duel_record_event_v1",
+  "h205f22_duel_complete_v1",
+  "h205f22_duel_snapshot_v1",
 ]);
 
 export async function rpc<T>(env: Env, fn: string, args: JsonObject = {}): Promise<T> {
