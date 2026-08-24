@@ -1,0 +1,34 @@
+name: W1 Protected Environment Approval Bridge
+
+on:
+  push:
+    branches:
+      - ops/w1-env-approval-20260825
+    paths:
+      - .github/workflows/w1-env-approval-bridge.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  approve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Approve exact pending W1 protected deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: '32786874695'
+          ENVIRONMENT_ID: '20407339523'
+        run: |
+          set -euo pipefail
+          payload="$(printf '{\"environment_ids\":[%s],\"state\":\"approved\",\"comment\":\"Approved for MB1 N1 protected-host preflight after exact run/main verification.\"}' "$ENVIRONMENT_ID")"
+          curl --fail-with-body --silent --show-error --location \
+            --request POST \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -H 'Content-Type: application/json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/pending_deployments" \
+            --data "$payload"
