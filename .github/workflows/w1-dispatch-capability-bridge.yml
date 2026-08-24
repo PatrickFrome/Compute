@@ -1,0 +1,48 @@
+name: W1 Dispatch Capability Bridge
+
+on:
+  push:
+    branches:
+      - "ops/w1-dispatch-bridge-20260825"
+    paths:
+      - ".github/workflows/w1-dispatch-capability-bridge.yml"
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch-current-main-preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      EXPECTED_MAIN_SHA: 0d6bfd3fc54d2d0ebdcd8194f98c9becd067a4df
+      TARGET_WORKFLOW: w1-aws-persistent-host-preflight.yml
+      CONFIRMATION: PREFLIGHT_W1_PERSISTENT_HOST_ONLY
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Fail closed unless main is the sealed MB1 authority revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_main_sha="$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" \
+            --jq '.object.sha')"
+          [[ "$current_main_sha" == "$EXPECTED_MAIN_SHA" ]]
+
+      - name: Dispatch protected W1 preflight on exact main
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg ref main \
+            --arg confirmation "$CONFIRMATION" \
+            '{ref:$ref,inputs:{confirmation:$confirmation}}' \
+            | gh api \
+                --method POST \
+                -H 'Accept: application/vnd.github+json' \
+                -H 'X-GitHub-Api-Version: 2026-03-10' \
+                "repos/${GITHUB_REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/dispatches" \
+                --input -
