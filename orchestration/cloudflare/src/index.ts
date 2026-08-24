@@ -99,7 +99,7 @@ export default {
         const vercelRail = Boolean(env.VERCEL_AI_GATEWAY_API_KEY);
         return json({
           status: "ok",
-          invariant: "NO_MANUAL_HANDOFF_V1+MICROSTEP_LOCKSTEP_V2+DUAL_RAIL_RACE_V1",
+          invariant: "NO_MANUAL_HANDOFF_V1+MICROSTEP_LOCKSTEP_V2+DUAL_RAIL_RACE_V1+ONE_DURABLE_TICK_V3",
           executor_configured: Boolean(env.CF_ACCOUNT_ID && env.CF_AI_TOKEN && env.AOP_MODEL),
           duel_executor_configured: cloudflareRail || vercelRail,
           duel_vercel_rail_configured: vercelRail,
@@ -108,8 +108,14 @@ export default {
           duel_latency_policy: "FIRST_VALID_EXACT_MODEL_RESPONSE_WINS",
           duel_start_path: "DIRECT_WORKFLOW_CREATE_BATCH_NO_QUEUE_NO_DO",
           duel_hot_path_readback: "LEASE_THEN_DB_SELECTED_PAIR_RECEIPT",
+          duel_tick_durability: "ONE_DURABLE_TICK_V3",
+          duel_context_mode: "FULL_HASHED_HISTORY_COMPACT_PROJECTION",
+          duel_reasoning_policy: "ADAPTIVE_LOW_MEDIUM_HIGH_V1",
+          duel_lens_policy: "ROTATING_BUILD_BREAK_V1",
+          duel_vercel_provider_sort: "ttft",
           duel_critical_shadow_ms: Number(env.DUEL_CRITICAL_SHADOW_MS || 0),
           duel_model_timeout_ms: Number(env.DUEL_MODEL_TIMEOUT_MS || 90000),
+          duel_max_output_tokens: Number(env.DUEL_MAX_OUTPUT_TOKENS || 1200),
           duel_rails: { vercel_ai_gateway: vercelRail, cloudflare_ai: cloudflareRail },
           duel_models: { gpt: "openai/gpt-5.6-sol", glm: { vercel: "zai/glm-5.2", cloudflare: "@cf/zai-org/glm-5.2" } },
           github_configured: githubWriteConfigured(env),
