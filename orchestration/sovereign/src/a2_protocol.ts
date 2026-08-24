@@ -62,12 +62,15 @@ export function deriveFrontierHash(workspaceId:string, events:A2Event[]):string 
   return sha256Hex(canonicalJson({workspace_id:workspaceId,head_commit_seq:head,gpt_seq:gpt?.agent_seq??0,glm_seq:glm?.agent_seq??0,gpt_hash:gpt?.event_hash??null,glm_hash:glm?.event_hash??null}));
 }
 export function mandatoryPeerHashes(agent:Agent, events:A2Event[], afterSeq:number):string[] {
-  return events.filter(e=>e.agent!==agent && e.commit_seq>afterSeq && e.priority<=1).map(e=>e.event_hash).sort();
+  return events
+    .filter(e=>e.agent!==agent && e.commit_seq>afterSeq && e.priority<=1)
+    .map(e=>e.event_hash)
+    .sort((a,b)=>a.localeCompare(b));
 }
 export function causalParents(agent:Agent, events:A2Event[], referenced:string[]=[]):string[] {
   const own=[...events].reverse().find(e=>e.agent===agent)?.event_hash;
   const peer=[...events].reverse().find(e=>e.agent!==agent)?.event_hash;
-  return [...new Set([own,peer,...referenced].filter((x):x is string=>Boolean(x)))].sort();
+  return [...new Set([own,peer,...referenced].filter((x):x is string=>Boolean(x)))].sort((a,b)=>a.localeCompare(b));
 }
 export function isActionConflict(a:A2Event,b:A2Event):boolean {
   if(a.agent===b.agent || a.semantic_point!==b.semantic_point) return false;
