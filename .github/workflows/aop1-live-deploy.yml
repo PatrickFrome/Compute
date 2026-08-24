@@ -50,17 +50,24 @@ jobs:
             and .oidc_exchange_one_time == true
             and .github_sha == $sha
             and .authority_effect == false
+            and (.bundle.vercel_ai_gateway_api_key_sha256 | test("^[0-9a-f]{64}$"))
           ' /tmp/aop1-deploy-bundle.json >/dev/null
           cf_token="$(jq -r '.bundle.cloudflare_api_token' /tmp/aop1-deploy-bundle.json)"
           cf_account="$(jq -r '.bundle.cloudflare_account_id' /tmp/aop1-deploy-bundle.json)"
+          vercel_gateway_key="$(jq -r '.bundle.vercel_ai_gateway_api_key' /tmp/aop1-deploy-bundle.json)"
+          vercel_gateway_sha="$(jq -r '.bundle.vercel_ai_gateway_api_key_sha256' /tmp/aop1-deploy-bundle.json)"
           test -n "$cf_token" && test "$cf_token" != "null"
           test "$cf_account" != "null"
+          test -n "$vercel_gateway_key" && test "$vercel_gateway_key" != "null"
           echo "::add-mask::$cf_token"
           echo "::add-mask::$cf_account"
+          echo "::add-mask::$vercel_gateway_key"
           printf 'CLOUDFLARE_API_TOKEN=%s\n' "$cf_token" >> "$GITHUB_ENV"
           printf 'CLOUDFLARE_ACCOUNT_ID=%s\n' "$cf_account" >> "$GITHUB_ENV"
+          printf 'VERCEL_AI_GATEWAY_API_KEY=%s\n' "$vercel_gateway_key" >> "$GITHUB_ENV"
+          printf 'VERCEL_AI_GATEWAY_API_KEY_SHA256=%s\n' "$vercel_gateway_sha" >> "$GITHUB_ENV"
           rm -f /tmp/aop1-deploy-bundle.json
-          unset oidc cf_token cf_account
+          unset oidc cf_token cf_account vercel_gateway_key vercel_gateway_sha
 
       - uses: actions/setup-node@v4
         with:
@@ -94,10 +101,19 @@ jobs:
           wranglerVersion: "4.125.0"
           command: deploy
 
-      - name: Drop deploy capability from subsequent step environments
+      - name: Install Vercel AI Gateway key as Worker secret
+        working-directory: orchestration/cloudflare
         shell: bash
         run: |
-          printf 'CLOUDFLARE_API_TOKEN=\nCLOUDFLARE_ACCOUNT_ID=\n' >> "$GITHUB_ENV"
+          set -euo pipefail
+          test -n "$VERCEL_AI_GATEWAY_API_KEY"
+          printf '%s' "$VERCEL_AI_GATEWAY_API_KEY" | npx wrangler secret put VERCEL_AI_GATEWAY_API_KEY
+          echo "Vercel AI Gateway Worker secret installed; expected sha256=$VERCEL_AI_GATEWAY_API_KEY_SHA256"
+
+      - name: Drop deploy and gateway capabilities from subsequent step environments
+        shell: bash
+        run: |
+          printf 'CLOUDFLARE_API_TOKEN=\nCLOUDFLARE_ACCOUNT_ID=\nVERCEL_AI_GATEWAY_API_KEY=\n' >> "$GITHUB_ENV"
 
       - name: Resolve deployment URL and verify orchestration health
         id: health
@@ -123,6 +139,7 @@ jobs:
             .status == "ok"
             and .executor_configured == true
             and .duel_executor_configured == true
+            and .duel_vercel_rail_configured == true
             and .duel_protocol == "MICROSTEP_LOCKSTEP_V2"
             and .duel_transport == "DB_WEBHOOK+DIRECT_IDEMPOTENT_WORKFLOW+ATOMIC_DB_PAIR+DUAL_RAIL_RACE"
             and .duel_start_path == "DIRECT_WORKFLOW_CREATE_BATCH_NO_QUEUE_NO_DO"
@@ -134,7 +151,7 @@ jobs:
             and .github_auth_mode == "none"
             and .snapshot.invariant == "NO_MANUAL_HANDOFF_V1"
           ' /tmp/aop1-health.json >/dev/null
-          echo "AOP1 live health: PASS; direct idempotent Workflow start + atomic pair readback + zero-wait dual-rail race are live."
+          echo "AOP1 live health: PASS; Vercel+Cloudflare zero-wait dual-rail race is configured."
 
       - name: Register exact live Worker endpoint for database-triggered duel wake
         shell: bash
@@ -174,4 +191,4 @@ jobs:
 
       - name: Record delivery boundary
         run: |
-          echo "AOP1 deploy complete. Normal duel start: DB event -> pg_net -> signed Worker endpoint -> idempotent Workflow binding; Queue/DO are recovery/general-AOP only."
+          echo "AOP1 deploy complete. Normal duel start: DB event -> pg_net -> signed Worker endpoint -> idempotent Workflow binding; inference: Vercel and Cloudflare race per exact model slot, first valid response wins."
