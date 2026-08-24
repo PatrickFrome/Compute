@@ -7,6 +7,7 @@
     "check": "tsc --noEmit",
     "test:a2": "node --import tsx --test src/a2_protocol.test.ts",
     "test:a2:coverage": "node --experimental-test-coverage --import tsx --test src/a2_protocol.test.ts",
+    "test:a2:ingress-canary": "tsx src/a2_ingress_canary.ts",
     "start": "bash scripts/start-all.sh",
     "start:all": "bash scripts/start-all.sh",
     "start:v4": "tsx src/same_point_v4.ts",
@@ -15,6 +16,7 @@
     "start:a2:ingress": "tsx src/a2_ingress.ts",
     "start:a2:peer": "tsx src/a2_runtime.ts",
     "start:a2:coordinator": "tsx src/a2_coordinator.ts",
+    "start:a2:lease": "tsx src/a2_lease_keeper.ts",
     "start:a2": "bash scripts/start-a2.sh",
     "start:legacy": "tsx src/index.ts"
   },
