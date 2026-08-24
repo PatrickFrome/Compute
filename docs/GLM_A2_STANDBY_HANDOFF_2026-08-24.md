@@ -67,9 +67,21 @@ Then output exactly one concise readiness line:
 
 `A2_STANDBY_READY | GLM=zai/glm-5.3 | base=<CURRENT_HEAD_SHA> | waiting=A2_LAUNCH`
 
-After this line, wait. Do not repeatedly poll, probe, emit, mutate, or create events until an explicit `A2 LAUNCH`, `A2 RECHECK`, `A2 PAUSE`, or `A2 STOP` command arrives.
+After this line, wait. Do not repeatedly poll, probe, emit, mutate, or create events until an explicit control command arrives.
 
-## 5. Forbidden actions while waiting
+## 5. Command vocabulary
+
+Only these operator commands change standby state:
+
+- `A2 LAUNCH` — begin launch immediately, without another confirmation;
+- `ЗАПУСКАЙ A2` — Russian equivalent of `A2 LAUNCH`;
+- `A2 RECHECK` — read-only revalidation, then return to standby;
+- `A2 PAUSE` — stop new cognition/mutation admission and stay safely paused;
+- `A2 STOP` — terminate runtime ownership cleanly and do not auto-restart.
+
+Any other conversational message does not authorize launch unless it is unambiguously equivalent to `A2 LAUNCH`.
+
+## 6. Forbidden actions while waiting
 
 While mode is `A2_STANDBY`, DO NOT:
 
@@ -85,16 +97,6 @@ While mode is `A2_STANDBY`, DO NOT:
 - expose model/API tokens, DB URLs, service-role keys, OIDC capabilities, Ed25519 private keys, or Vault secrets;
 - infer provider readiness from `/v1/models` alone;
 - treat `CUSTOMER_VERIFICATION_REQUIRED` as a code defect or retry it in a tight loop.
-
-## 6. Launch trigger
-
-Only switch from `A2_STANDBY` to `A2_LAUNCHING` after an explicit command containing:
-
-`A2 LAUNCH`
-
-Equivalent explicit Russian command such as `ЗАПУСКАЙ A2` is acceptable only if it unambiguously orders launch.
-
-On launch, do not ask for another confirmation. Execute the launch protocol immediately subject to the fail-closed gates below.
 
 ## 7. A2_LAUNCHING protocol
 
@@ -195,21 +197,13 @@ Once mode is `A2_ACTIVE`:
 - on disagreement, use the existing A2 conflict/V4 path rather than unilateral mutation;
 - on provider/session/lease/frontier failure, fail closed and preserve durable replayability.
 
-## 9. Stop / pause commands
-
-Treat these explicit commands as control-plane instructions:
-
-- `A2 PAUSE` → stop new cognition/mutation admission and return to a safe paused state;
-- `A2 STOP` → terminate the GLM peer/runtime ownership cleanly and do not auto-restart;
-- `A2 RECHECK` → perform read-only source/head/provider readiness revalidation, then return to standby unless separately told `A2 LAUNCH`.
-
-## 10. Current known external gate at handoff creation
+## 9. Current known external gate at handoff creation
 
 At the time this handoff was written, the configured Vercel AI Gateway exposed both exact model IDs in inventory, but real generation returned `CUSTOMER_VERIFICATION_REQUIRED`. Therefore the correct behavior is to remain in `A2_STANDBY` until launch is explicitly requested; on launch, re-probe live state instead of assuming the old blocker still exists.
 
 This condition is external provider state, not permission to weaken exact-model identity, bypass readiness, fabricate a model response, or open sessions/rounds before a successful probe.
 
-## 11. Standby response template
+## 10. Standby response template
 
 After reading this handoff and the current source of truth, GLM should respond only with:
 
