@@ -34,6 +34,7 @@ export interface Env {
   VERCEL_AI_GATEWAY_API_KEY?: string;
   DUEL_MODEL_TIMEOUT_MS?: string;
   DUEL_CRITICAL_SHADOW_MS?: string;
+  DUEL_MAX_OUTPUT_TOKENS?: string;
   AOP_SUPERVISOR: DurableObjectNamespace; AOP_RUN_WORKFLOW: WorkflowBinding; AOP_WAKE_QUEUE: QueueBinding<AopWake>;
 }
 export interface DurableObjectNamespace { idFromName(name: string): unknown; get(id: unknown): { wake(message: AopWake): Promise<{ accepted: boolean }> }; }
