@@ -3,6 +3,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MICROSTEP = (ROOT / "orchestration/cloudflare/src/duel_microstep.ts").read_text(encoding="utf-8")
 INDEX = (ROOT / "orchestration/cloudflare/src/index.ts").read_text(encoding="utf-8")
+SUPABASE = (ROOT / "orchestration/cloudflare/src/supabase.ts").read_text(encoding="utf-8")
 TYPES = (ROOT / "orchestration/cloudflare/src/types.ts").read_text(encoding="utf-8")
 WRANGLER = (ROOT / "orchestration/cloudflare/wrangler.jsonc").read_text(encoding="utf-8")
 PAIR_V2 = (ROOT / "supabase/migrations/20260824052833_aop1_duel_persisted_pair_readback_v3.sql").read_text(encoding="utf-8")
@@ -111,6 +112,7 @@ assert 'microstep-persist-${tick}' not in MICROSTEP
 assert 'ctx.attempt > 1' in MICROSTEP
 assert 'replayReceiptIfCommitted' in MICROSTEP
 assert 'h205f22_duel_submit_pair_v3' in MICROSTEP
+assert 'h205f22_duel_submit_pair_v3' in SUPABASE
 assert 'ONE_DURABLE_TICK_V3' in MICROSTEP
 assert 'duel_tick_durability: "ONE_DURABLE_TICK_V3"' in INDEX
 assert 'p_tick_no=d.current_tick' in PAIR_V3
