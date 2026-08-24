@@ -98,7 +98,7 @@ export default {
           duel_protocol: "MICROSTEP_LOCKSTEP_V2",
           duel_transport: "ATOMIC_DB_PAIR+DUAL_RAIL_RACE+IMMEDIATE_WORKFLOW_LOOP",
           duel_latency_policy: "FIRST_VALID_EXACT_MODEL_RESPONSE_WINS",
-          duel_critical_shadow_ms: Number(env.DUEL_CRITICAL_SHADOW_MS || 1500),
+          duel_critical_shadow_ms: Number(env.DUEL_CRITICAL_SHADOW_MS || 0),
           duel_model_timeout_ms: Number(env.DUEL_MODEL_TIMEOUT_MS || 90000),
           duel_rails: { vercel_ai_gateway: vercelRail, cloudflare_ai: cloudflareRail },
           duel_models: { gpt: "openai/gpt-5.6-sol", glm: { vercel: "zai/glm-5.2", cloudflare: "@cf/zai-org/glm-5.2" } },
