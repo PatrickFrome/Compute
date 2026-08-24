@@ -304,22 +304,6 @@ async function callModel(
   throw new Error(`exact_peer_model_unavailable:${actor}:${errors.join(" || ").slice(0, 1600)}`);
 }
 
-async function currentMainSha(lease: PeerLease): Promise<string> {
-  const subject = lease.subject && typeof lease.subject === "object" && !Array.isArray(lease.subject) ? lease.subject as Obj : {};
-  const repository = typeof subject.repository === "string" ? subject.repository : "PatrickFrome/Compute";
-  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) throw new Error("peer_repository_invalid");
-  const [owner, repo] = repository.split("/");
-  const response = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/main`, {
-    headers: { "user-agent": "metaengine-h205f22-peer-relay-v4" },
-  });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`peer_github_main_read_failed:${response.status}:${text.slice(0, 500)}`);
-  const body = asObj(JSON.parse(text), "github_main");
-  const sha = reqString(body.sha, "github_main_sha").toLowerCase();
-  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error("github_main_sha_invalid");
-  return sha;
-}
-
 async function readRelay(env: Env, duelId: string): Promise<Obj> {
   return asObj(await rpc<JsonObject>(env, "h205f22_duel_read_peer_relay_v4", { p_duel_id: duelId }), "relay_readback");
 }
@@ -358,19 +342,10 @@ export async function completeAutonomousPeerRelaysV4(env: Env, workerId: string)
     const exactRailConfigured = Boolean((env.CF_ACCOUNT_ID && env.CF_AI_TOKEN) || env.VERCEL_AI_GATEWAY_API_KEY);
     if (!exactRailConfigured) throw new Error("exact_peer_model_rail_unconfigured");
 
-    const liveMain = await currentMainSha(lease);
-    const expectedMain = reqString(lease.base_github_sha, "base_github_sha").toLowerCase();
-    if (liveMain !== expectedMain) {
-      lastError = `authority_drift_main_sha:${expectedMain}:${liveMain}`;
-      return {
-        status: "PEER_RELAY_AUTHORITY_DRIFT",
-        duel_id: lease.duel_id,
-        expected_main_sha: expectedMain,
-        live_main_sha: liveMain,
-        canonical: false,
-        authority_effect: false,
-      };
-    }
+    // Peer debate is deliberately non-authority. The DB lease already fences the
+    // current semantic head/root. Git main is revalidated by the separate executor
+    // before any resulting_action can mutate project state; keeping public GitHub
+    // reads off this hot path also avoids unauthenticated rate-limit failures.
 
     const authority = await rpc<JsonObject>(env, "h205f22_aop1_snapshot_v1", {});
     let relay = lease.relay && typeof lease.relay === "object" && !Array.isArray(lease.relay)
