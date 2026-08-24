@@ -1,0 +1,50 @@
+name: W1 Environment Metadata Probe
+
+on:
+  push:
+    branches: [ops/w1-env-metadata-probe-20260825]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: List W1 variable and secret metadata only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          probe() {
+            label="$1"; url="$2"
+            body="$(mktemp)"
+            code="$(curl --silent --show-error --location --output "$body" --write-out '%{http_code}' \
+              -H 'Accept: application/vnd.github+json' \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "$url")"
+            echo "=== ${label} HTTP ${code} ==="
+            python3 - "$body" <<'PY'
+          import json,sys
+          p=sys.argv[1]
+          raw=open(p).read()
+          try:
+              x=json.loads(raw)
+          except Exception:
+              print(raw[:1000]); raise SystemExit(0)
+          # GitHub variable/secret list APIs expose names/metadata, never secret values.
+          if isinstance(x,dict):
+              out={k:v for k,v in x.items() if k in ('total_count','variables','secrets','message','status')}
+              print(json.dumps(out,sort_keys=True))
+          else:
+              print(json.dumps(x,sort_keys=True))
+          PY
+            rm -f "$body"
+          }
+          probe repo_variables "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/variables?per_page=100"
+          probe environment_variables "https://api.github.com/repos/${GITHUB_REPOSITORY}/environments/w1-persistent-host-proof/variables?per_page=100"
+          probe repo_secrets "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/secrets?per_page=100"
+          probe environment_secrets "https://api.github.com/repos/${GITHUB_REPOSITORY}/environments/w1-persistent-host-proof/secrets?per_page=100"
