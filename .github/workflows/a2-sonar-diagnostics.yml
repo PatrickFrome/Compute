@@ -1,0 +1,40 @@
+name: A2 Sonar diagnostics
+
+on:
+  push:
+    branches:
+      - "work/same-point-duel-v4-a2-cognitive-bus"
+    paths:
+      - ".github/workflows/a2-sonar-diagnostics.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Fetch unresolved SonarCloud PR issues
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --silent --show-error --fail --get \
+            'https://sonarcloud.io/api/issues/search' \
+            --data-urlencode 'componentKeys=PatrickFrome_Compute' \
+            --data-urlencode 'pullRequest=49' \
+            --data-urlencode 'resolved=false' \
+            --data-urlencode 'ps=500' \
+            -o /tmp/sonar-issues.json
+          jq -c '{total,issues:[.issues[]|{key,rule,severity,type,message,component,line,textRange,impacts}]}' /tmp/sonar-issues.json
+      - name: Fetch SonarCloud PR measures
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --silent --show-error --fail --get \
+            'https://sonarcloud.io/api/measures/component' \
+            --data-urlencode 'component=PatrickFrome_Compute' \
+            --data-urlencode 'pullRequest=49' \
+            --data-urlencode 'metricKeys=new_duplicated_lines_density,new_bugs,new_vulnerabilities,new_code_smells,new_reliability_rating,new_security_rating' \
+            -o /tmp/sonar-measures.json
+          jq -c '.component.measures' /tmp/sonar-measures.json
