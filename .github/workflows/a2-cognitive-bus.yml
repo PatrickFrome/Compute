@@ -44,21 +44,29 @@ jobs:
             20260824122043_a2_duel_state_machine_bridge.sql
             20260824122743_a2_ingress_single_preimage_contract.sql
             20260824124953_a2_duel_mode_cognition_fence.sql
-            20260824131019_a2_lockstep_sync_rounds_v1.sql
-            20260824133207_a2_sync_round_fk_indexes_v1.sql
+            20260824133018_a2_lockstep_sync_rounds_v1.sql
+            20260824133130_a2_sync_round_fk_indexes_v1.sql
+            20260824142553_a2_peer_session_lease_and_crash_recovery_v1.sql
+            20260824142732_a2_peer_session_heartbeat_guard_fix_v1.sql
+            20260824143159_a2_session_lease_fenced_renewal_v2.sql
           )
           for migration in "${migrations[@]}"; do
             test -s "supabase/migrations/$migration" || { echo "missing A2 migration: $migration"; exit 1; }
           done
+          test ! -e supabase/migrations/20260824131019_a2_lockstep_sync_rounds_v1.sql
+          test ! -e supabase/migrations/20260824133207_a2_sync_round_fk_indexes_v1.sql
           replay="supabase/migrations/20260824114241_a2_replayable_consolidated_contract_v1.sql"
           grep -q "create table if not exists destruktion_meta.compute_fabric_a2_workspace_h205f22" "$replay"
           grep -q "create or replace function public.h205f22_a2_emit_agent_event_v1" "$replay"
           grep -q "create or replace function public.h205f22_a2_read_frontier_v1" "$replay"
           grep -q "create trigger trg_a2_guard_event" "$replay"
-          lockstep="supabase/migrations/20260824131019_a2_lockstep_sync_rounds_v1.sql"
+          lockstep="supabase/migrations/20260824133018_a2_lockstep_sync_rounds_v1.sql"
           grep -q "compute_fabric_a2_sync_round_h205f22" "$lockstep"
           grep -q "a2_sync_round_visibility_frontier_mismatch" "$lockstep"
           grep -q "a2_model_event_stale_frontier" "$lockstep"
+          lease="supabase/migrations/20260824143159_a2_session_lease_fenced_renewal_v2.sql"
+          grep -q "pg_advisory_xact_lock" "$lease"
+          grep -q "a2_session_lease_lost" "$lease"
           if grep -q "HISTORY MARKER ONLY" "$replay"; then
             echo "consolidated A2 replay contract must not be a history marker"
             exit 1
