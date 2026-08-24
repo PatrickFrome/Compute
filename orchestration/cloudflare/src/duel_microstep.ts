@@ -34,7 +34,7 @@ Never claim canonical authority, merge authority, VERIFIED, or live evidence abs
 Return exactly one JSON object and no markdown.`;
 
 function timeoutMs(env:Env):number{const n=Number(env.DUEL_MODEL_TIMEOUT_MS||90000);return Number.isFinite(n)?Math.max(5000,Math.min(n,300000)):90000;}
-function criticalShadowMs(env:Env):number{const n=Number(env.DUEL_CRITICAL_SHADOW_MS||1500);return Number.isFinite(n)?Math.max(0,Math.min(n,15000)):1500;}
+function criticalShadowMs(env:Env):number{const n=Number(env.DUEL_CRITICAL_SHADOW_MS||0);return Number.isFinite(n)?Math.max(0,Math.min(n,15000)):0;}
 function sleep(ms:number):Promise<void>{return new Promise((resolve)=>setTimeout(resolve,ms));}
 function classifyError(error:unknown):string{const s=String(error);return s.includes("AbortError")||s.includes("duel_model_timeout")||s.includes("rail_loser")?"TIMEOUT_OR_ABORT":"PROVIDER_ERROR";}
 
@@ -75,8 +75,8 @@ async function raceActor(env:Env,actor:Actor,lease:Lease,prompt:string):Promise<
   const rails=availableRails(env);if(!rails.length)throw new Error("duel_no_inference_rail_configured");const failures:RailFailure[]=[];const tasks=rails.map((rail)=>startRail(env,actor,lease,prompt,rail,failures));
   let winner:RailSuccess;
   try{winner=await Promise.any(tasks.map((t)=>t.promise));}catch(error){for(const t of tasks)t.controller.abort("all_rails_failed");const details=error instanceof AggregateError?error.errors:failures;throw new Error(`duel_all_rails_failed:${actor}:${JSON.stringify(details).slice(0,2200)}`);}
-  const critical=criticalStep(winner.payload);let shadow:JsonObject|null=null;const alternate=tasks.find((t)=>t.rail!==winner.rail);
-  if(critical&&alternate&&criticalShadowMs(env)>0){const shadowResult=await Promise.race([alternate.promise.then((s)=>({kind:"SUCCESS",success:s} as const)).catch((e)=>({kind:"ERROR",error:e} as const)),sleep(criticalShadowMs(env)).then(()=>({kind:"TIMEOUT"} as const))]);if(shadowResult.kind==="SUCCESS")shadow={status:"SUCCESS",...successJson(shadowResult.success)};else if(shadowResult.kind==="ERROR")shadow={status:"ERROR",error:String(shadowResult.error).slice(0,1200)};else shadow={status:"TIMEOUT",wait_ms:criticalShadowMs(env)};}
+  const critical=criticalStep(winner.payload);let shadow:JsonObject|null=null;const alternate=tasks.find((t)=>t.rail!==winner.rail);const shadowBudget=criticalShadowMs(env);
+  if(critical&&alternate&&shadowBudget>0){const shadowResult=await Promise.race([alternate.promise.then((s)=>({kind:"SUCCESS",success:s} as const)).catch((e)=>({kind:"ERROR",error:e} as const)),sleep(shadowBudget).then(()=>({kind:"TIMEOUT"} as const))]);if(shadowResult.kind==="SUCCESS")shadow={status:"SUCCESS",...successJson(shadowResult.success)};else if(shadowResult.kind==="ERROR")shadow={status:"ERROR",error:String(shadowResult.error).slice(0,1200)};else shadow={status:"TIMEOUT",wait_ms:shadowBudget};}
   for(const t of tasks)if(t.rail!==winner.rail)t.controller.abort("rail_loser");
   const executor:JsonObject={mode:"DUAL_RAIL_RACE",winner_rail:winner.rail,winner_model:winner.model,winner_latency_ms:winner.latencyMs,rails_started:rails,failures_before_winner:failures.map(failureJson),critical_step:critical,critical_shadow:shadow};
   return{...winner.payload,_executor:executor};
