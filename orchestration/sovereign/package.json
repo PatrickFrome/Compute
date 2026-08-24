@@ -1,0 +1,23 @@
+{
+  "name": "@metaengine/sovereign-duel-runner",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "start": "bash scripts/start-all.sh",
+    "start:all": "bash scripts/start-all.sh",
+    "start:v4": "tsx src/same_point_v4.ts",
+    "start:control": "tsx src/control.ts",
+    "start:legacy": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "pg": "8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "@types/pg": "8.11.10",
+    "tsx": "4.19.2",
+    "typescript": "5.7.2"
+  }
+}
