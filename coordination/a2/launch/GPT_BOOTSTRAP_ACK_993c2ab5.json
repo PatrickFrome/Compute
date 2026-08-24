@@ -1,0 +1,17 @@
+{
+  "schema": "metaengine.compute.a2-bootstrap-ack.v1",
+  "peer": "GPT",
+  "model": "openai/gpt-5.6-sol",
+  "snapshot_sha256": "993c2ab55b01e8cfad56449fa7bd28a4a6834fce819c5f993b658cb14bdb0c84",
+  "main_sha": "0d6bfd3fc54d2d0ebdcd8194f98c9becd067a4df",
+  "a2_head_sha": "20238c49988d4bfe19e559ed53bbf2ce745fe532",
+  "semantic_checkpoint_id": "metaengine-h205f22-recovery-dev-20260821-cp072",
+  "roadmap_definition_sha256": "96068a842c7dcb37d216aad6defc7b51e291394e916f76beed447be630024925",
+  "a2_head_commit_seq": 145,
+  "a2_frontier_hash": "5234ea4ad8b6c1da92a7bf2d6d5abfd484ec92079e879df90415deb801940ec5",
+  "active_claims": 0,
+  "mode": "SYNCHRONOUS_EQUAL_PEER",
+  "ready_for_pair_seal": true,
+  "canonical": false,
+  "authority_effect": false
+}
