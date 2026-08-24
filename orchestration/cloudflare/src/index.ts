@@ -102,6 +102,7 @@ export default {
           invariant: "NO_MANUAL_HANDOFF_V1+MICROSTEP_LOCKSTEP_V2+DUAL_RAIL_RACE_V1",
           executor_configured: Boolean(env.CF_ACCOUNT_ID && env.CF_AI_TOKEN && env.AOP_MODEL),
           duel_executor_configured: cloudflareRail || vercelRail,
+          duel_vercel_rail_configured: vercelRail,
           duel_protocol: "MICROSTEP_LOCKSTEP_V2",
           duel_transport: "DB_WEBHOOK+DIRECT_IDEMPOTENT_WORKFLOW+ATOMIC_DB_PAIR+DUAL_RAIL_RACE",
           duel_latency_policy: "FIRST_VALID_EXACT_MODEL_RESPONSE_WINS",
