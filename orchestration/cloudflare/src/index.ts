@@ -32,6 +32,10 @@ function supervisorStub(env: Env) {
 function workflowInstanceId(wake: AopWake): string {
   return `duel-${wake.id}`.replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 100);
 }
+function v4Path(pathname: string): { duelId?: string; tail?: string } | null {
+  const match = pathname.match(/^\/v4\/duels\/([0-9a-f-]{36})(?:\/(decision))?$/i);
+  return match ? { duelId: match[1], tail: match[2] } : null;
+}
 
 export class ComputeFabricSupervisor extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -91,6 +95,34 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     try {
+      if (request.method === "GET" && url.pathname === "/v4/health") {
+        return json({ status: "ok", protocol: "SAME_POINT_DUEL_V4", mode: "CONTROL_ONLY", executor: "FENCED", critical_path: false });
+      }
+      if (request.method === "POST" && url.pathname === "/v4/duels") {
+        await requireBearer(request, env.AOP_WAKE_SECRET);
+        const input = (await request.json()) as JsonObject;
+        const duelKey = typeof input.duel_key === "string" ? input.duel_key : "";
+        const milestone = typeof input.milestone_key === "string" ? input.milestone_key : "";
+        const baseSha = typeof input.base_github_sha === "string" ? input.base_github_sha : "";
+        const subject = input.subject && typeof input.subject === "object" && !Array.isArray(input.subject) ? input.subject as JsonObject : {};
+        const policy = typeof input.execution_policy === "string" ? input.execution_policy : "SOVEREIGN_ONLY";
+        const gptModel = typeof input.gpt_model === "string" ? input.gpt_model : "openai/gpt-oss-20b";
+        const glmModel = typeof input.glm_model === "string" ? input.glm_model : "zai-org/GLM-4.7-Flash";
+        if (policy === "HOSTED_ONLY") return json({ error: "hosted_v4_executor_not_implemented" }, 409);
+        if (!duelKey || !milestone || !/^[0-9a-f]{40}$/i.test(baseSha)) return json({ error: "invalid_v4_duel_request" }, 400);
+        const created = await rpc<JsonObject>(env, "h205f22_duel_create_same_point_v4", {
+          p_duel_key: duelKey, p_milestone_key: milestone, p_base_github_sha: baseSha,
+          p_subject: subject, p_execution_policy: policy, p_gpt_model: gptModel, p_glm_model: glmModel,
+        });
+        return json({ control_plane: "CLOUDFLARE_OPTIONAL", critical_path: false, duel: created }, 201);
+      }
+      const v4 = v4Path(url.pathname);
+      if (request.method === "GET" && v4?.duelId) {
+        await requireBearer(request, env.AOP_WAKE_SECRET);
+        const full = await rpc<JsonObject>(env, "h205f22_duel_read_same_point_v4", { p_duel_id: v4.duelId });
+        if (v4.tail === "decision") return json({ duel_id: v4.duelId, decision: full.decision ?? null, status: full.status ?? null });
+        return json(full);
+      }
       if (request.method === "GET" && url.pathname === "/health") {
         const [snapshot, duel] = await Promise.all([
           rpc<JsonObject>(env, "h205f22_aop1_snapshot_v1", {}),
@@ -100,11 +132,14 @@ export default {
         const vercelRail = Boolean(env.VERCEL_AI_GATEWAY_API_KEY);
         return json({
           status: "ok",
-          invariant: "NO_MANUAL_HANDOFF_V1+MICROSTEP_LOCKSTEP_V2+DUAL_RAIL_RACE_V1+ONE_DURABLE_TICK_V3+TARGETED_LEASE_READ_V3",
+          invariant: "NO_MANUAL_HANDOFF_V1+MICROSTEP_LOCKSTEP_V2+DUAL_RAIL_RACE_V1+ONE_DURABLE_TICK_V3+TARGETED_LEASE_READ_V3+SAME_POINT_DUEL_V4_CONTROL",
           executor_configured: Boolean(env.CF_ACCOUNT_ID && env.CF_AI_TOKEN && env.AOP_MODEL),
           duel_executor_configured: cloudflareRail || vercelRail,
           duel_vercel_rail_configured: vercelRail,
           duel_protocol: "MICROSTEP_LOCKSTEP_V2",
+          same_point_v4_control_api: true,
+          same_point_v4_executor: false,
+          same_point_v4_executor_policy: "FENCED_CONTROL_ONLY",
           duel_transport: "DB_WEBHOOK+DIRECT_IDEMPOTENT_WORKFLOW+ATOMIC_DB_PAIR+DUAL_RAIL_RACE",
           duel_latency_policy: "FIRST_VALID_EXACT_MODEL_RESPONSE_WINS",
           duel_start_path: "DIRECT_WORKFLOW_CREATE_BATCH_NO_QUEUE_NO_DO",
