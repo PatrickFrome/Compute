@@ -1,11 +1,11 @@
 import { createHash, createPrivateKey, createPublicKey, type KeyObject } from "node:crypto";
-import { exactModel, type Agent } from "./a2_protocol.js";
+import { exactModel, INGRESS_VERIFIER_ID, type Agent } from "./a2_protocol.js";
 
 const WORKSPACE_ID = req("A2_WORKSPACE_ID");
 const AGENT = req("A2_AGENT").toUpperCase() as Agent;
 if (!(["GPT", "GLM"] as string[]).includes(AGENT)) throw new Error("A2_AGENT_invalid");
 const RUNTIME_ID = req("A2_RUNTIME_ID");
-const EPOCH = integer(req("A2_CAPABILITY_EPOCH"), 1, Number.MAX_SAFE_INTEGER);
+const EPOCH = integer(req("A2_CAPABILITY_EPOCH"), 1, 1_000_000);
 const PROVIDER = process.env.A2_PROVIDER || (AGENT === "GPT" ? "openai" : "z.ai");
 const MODEL = process.env.A2_MODEL || exactModel(AGENT);
 if (MODEL !== exactModel(AGENT)) throw new Error(`exact_model_required:${exactModel(AGENT)}`);
@@ -13,6 +13,7 @@ const INGRESS_URL = req("A2_INGRESS_URL").replace(/\/$/, "");
 const INGRESS_TOKEN = process.env.A2_INGRESS_TOKEN || "";
 const PRIVATE_PEM_B64 = req("A2_ED25519_PRIVATE_KEY_PEM_B64");
 const RENEW_MS = integer(process.env.A2_LEASE_RENEW_MS || "25000", 5000, 60000);
+const MICROSTEP_TIMEOUT = integer(process.env.A2_MICROSTEP_TIMEOUT_MS || "15000", 1000, 120000);
 let stopped = false;
 
 function req(name: string): string {
@@ -51,9 +52,13 @@ const publicRaw = rawPublic(publicKey);
 const publicBase64 = publicRaw.toString("base64");
 const fingerprint = createHash("sha256").update(publicRaw).digest("hex");
 const capabilities = {
-  lease_keeper: true,
-  exact_model: MODEL,
-  runtime_id: RUNTIME_ID,
+  reasoning_summary_stream: AGENT === "GPT",
+  tool_calls: true,
+  max_emit_rate_hz: 4,
+  inbound_queue_depth: 200,
+  resume_from_commit_seq: true,
+  max_opaque_ms: MICROSTEP_TIMEOUT,
+  trusted_ingress: INGRESS_VERIFIER_ID,
   direct_database_access: false,
 };
 
