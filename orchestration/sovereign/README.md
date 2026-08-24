@@ -1,6 +1,6 @@
 # METAENGINE H205F22 Sovereign SAME_POINT_DUEL_V4 Runner
 
-The default sovereign runner implements a two-wave, same-semantic-point adversarial development protocol without managed inference billing gates.
+The default sovereign runtime implements a two-wave, same-semantic-point adversarial development protocol without managed inference billing gates.
 
 ## Core invariant
 
@@ -59,10 +59,12 @@ For physical concurrency, two independent devices/workers are preferred. Logical
 
 ## Inference servers
 
-The V4 runner expects OpenAI-compatible `/v1/chat/completions` endpoints and defaults to:
+The V4 runner expects OpenAI-compatible endpoints and defaults to:
 
 - GPT: `http://127.0.0.1:8001`
 - GLM: `http://127.0.0.1:8002`
+
+Each model server must implement `GET /v1/models` and `POST /v1/chat/completions`.
 
 Example:
 
@@ -76,9 +78,37 @@ vllm serve zai-org/GLM-4.7-Flash \
   --host 127.0.0.1 --port 8002
 ```
 
-Keep model servers on loopback/private LAN. Do not expose raw inference endpoints directly to the public Internet.
+Keep model servers on loopback/private LAN. **Do not expose raw vLLM to the public Internet.** If a model lives on another machine or Colab runtime, put an authenticated private tunnel/reverse proxy in front of it and set `SOVEREIGN_GPT_URL` or `SOVEREIGN_GLM_URL` to that private endpoint.
 
-## Start the V4 runner
+## Sovereign HTTP gateway
+
+`npm start` now starts both the V4 coordinator and the local endpoint gateway. The gateway binds to `127.0.0.1:8090` by default.
+
+Operational endpoints:
+
+- `GET /healthz` — process liveness.
+- `GET /readyz` — fail-closed readiness: PostgreSQL + both exact model inventories must be reachable.
+- `GET /status` — detailed DB/GPT/GLM readiness and latency.
+- `GET /metrics` — Prometheus-style process counters.
+- `GET /v1/models` — logical GPT/GLM model inventory.
+- `GET /gpt/v1/models` and `GET /glm/v1/models` — role-specific upstream model inventory.
+- `POST /gpt/v1/chat/completions` and `POST /glm/v1/chat/completions` — streaming role proxies. The gateway overwrites the client-supplied `model` with the configured exact model identity.
+- `POST /v4/duels` — create one `SAME_POINT_DUEL_V4` session.
+- `GET /v4/duels/:duel_id` — full observable debate, hashes, ticks and decision.
+- `GET /v4/duels/:duel_id/decision` — final immutable V4 decision only.
+- `POST /v4/duels/:duel_id/wake` — re-signal an existing READY/RUNNING V4 session without mutating its checkpoint.
+
+`/healthz` and `/readyz` are probe endpoints. All control/model-proxy endpoints require `Authorization: Bearer $SOVEREIGN_CONTROL_TOKEN` when a token is configured. A non-loopback bind is refused at startup unless `SOVEREIGN_CONTROL_TOKEN` is present.
+
+Example:
+
+```bash
+export SOVEREIGN_CONTROL_TOKEN='replace-with-a-random-secret'
+curl -fsS http://127.0.0.1:8090/readyz
+curl -fsS -H "Authorization: Bearer $SOVEREIGN_CONTROL_TOKEN" http://127.0.0.1:8090/status
+```
+
+## Start the complete runtime
 
 ```bash
 cd orchestration/sovereign
@@ -89,21 +119,47 @@ export DATABASE_URL='postgresql://...'
 export DUEL_RUNNER_ID='linux-worker-01'
 export SOVEREIGN_GPT_URL='http://127.0.0.1:8001'
 export SOVEREIGN_GLM_URL='http://127.0.0.1:8002'
+export SOVEREIGN_CONTROL_TOKEN='replace-with-a-random-secret'
 npm start
 ```
 
-`npm start` and `npm run start:v4` run `same_point_v4.ts`. The previous multi-tick runner remains available only as `npm run start:legacy`.
+Commands:
+
+- `npm start` / `npm run start:all` — V4 coordinator + HTTP gateway under one process supervisor.
+- `npm run start:v4` — coordinator only.
+- `npm run start:control` — HTTP gateway only.
+- `npm run start:legacy` — previous multi-tick runner only.
 
 Optional variables:
 
 - `SOVEREIGN_GPT_MODEL`
 - `SOVEREIGN_GLM_MODEL`
 - `SOVEREIGN_INFERENCE_TOKEN`, or per-model `SOVEREIGN_GPT_TOKEN` / `SOVEREIGN_GLM_TOKEN`
+- `SOVEREIGN_HTTP_HOST` / `SOVEREIGN_HTTP_PORT`
+- `SOVEREIGN_CONTROL_TOKEN`
+- `SOVEREIGN_UPSTREAM_TIMEOUT_MS`
+- `SOVEREIGN_HTTP_MAX_BODY_BYTES`
 - `DUEL_MODEL_TIMEOUT_MS`
 - `DUEL_MAX_OUTPUT_TOKENS`
 - `DUEL_RECOVERY_MS` (recovery only; not the normal hot path)
 
-## Create one same-point duel
+## Create one same-point duel through HTTP
+
+```bash
+curl -fsS \
+  -H "Authorization: Bearer $SOVEREIGN_CONTROL_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "duel_key":"MY-SAME-POINT-DUEL",
+    "milestone_key":"F1_LIVE_EXTERNAL_FEDERATION",
+    "base_github_sha":"<40-char-git-sha>",
+    "subject":{"semantic_point":"exact engineering decision to develop"},
+    "execution_policy":"SOVEREIGN_ONLY"
+  }' \
+  http://127.0.0.1:8090/v4/duels
+```
+
+The equivalent SQL API remains:
 
 ```sql
 select public.h205f22_duel_create_same_point_v4(
@@ -117,7 +173,16 @@ select public.h205f22_duel_create_same_point_v4(
 );
 ```
 
-The runner wakes from PostgreSQL, executes both simultaneous waves, and terminates the session with exactly one decision object.
+## Cloudflare optional control endpoint
+
+Cloudflare remains outside the V4 execution path. It exposes authenticated, optional control-only routes:
+
+- `GET /v4/health`
+- `POST /v4/duels`
+- `GET /v4/duels/:duel_id`
+- `GET /v4/duels/:duel_id/decision`
+
+These use the existing AOP bearer secret. Cloudflare has only V4 create/read RPCs in its allowlist; V4 lease, submit and finalize RPCs are deliberately absent, so it cannot become an accidental executor.
 
 ## Read the complete observable debate
 
@@ -129,6 +194,6 @@ The readback contains the persisted low-level event/tick ledger and the immutabl
 
 ## Tariff independence
 
-`SOVEREIGN_ONLY` V4 sessions never use Cloudflare/Vercel managed inference. Cloudflare/Vercel/OpenAI/Z.ai hosted APIs may later be implemented as optional native V4 accelerators, but a legacy hosted executor is explicitly fenced today.
+`SOVEREIGN_ONLY` V4 sessions never use Cloudflare/Vercel managed inference. Cloudflare/Vercel/OpenAI/Z.ai hosted APIs may be optional accelerators or control surfaces, but the local V4 executor is independent of them.
 
 This removes managed inference tariff gates. It does not remove the physical cost of GPU/CPU, RAM, storage, electricity, or network capacity.
