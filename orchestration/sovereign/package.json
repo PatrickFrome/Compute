@@ -1,12 +1,14 @@
 {
   "name": "@metaengine/sovereign-duel-runner",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
     "check": "tsc --noEmit",
-    "start": "tsx src/same_point_v4.ts",
+    "start": "bash scripts/start-all.sh",
+    "start:all": "bash scripts/start-all.sh",
     "start:v4": "tsx src/same_point_v4.ts",
+    "start:control": "tsx src/control.ts",
     "start:legacy": "tsx src/index.ts"
   },
   "dependencies": {
