@@ -91,16 +91,6 @@ jobs:
             fi
           done
 
-      - name: Deploy Worker without exporting runtime secrets
-        id: deploy
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ env.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: orchestration/cloudflare
-          wranglerVersion: "4.125.0"
-          command: deploy
-
       - name: Install Vercel AI Gateway key as Worker secret
         working-directory: orchestration/cloudflare
         shell: bash
@@ -109,6 +99,16 @@ jobs:
           test -n "$VERCEL_AI_GATEWAY_API_KEY"
           printf '%s' "$VERCEL_AI_GATEWAY_API_KEY" | npx wrangler secret put VERCEL_AI_GATEWAY_API_KEY
           echo "Vercel AI Gateway Worker secret installed; expected sha256=$VERCEL_AI_GATEWAY_API_KEY_SHA256"
+
+      - name: Deploy Worker with Vercel duel rail configured
+        id: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ env.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: orchestration/cloudflare
+          wranglerVersion: "4.125.0"
+          command: deploy
 
       - name: Drop deploy and gateway capabilities from subsequent step environments
         shell: bash
