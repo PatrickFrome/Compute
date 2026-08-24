@@ -1,7 +1,9 @@
 # A2 lockstep deliberation, full action visibility, and autonomous roadmap development
 
-Date: 2026-08-24  
-Scope: draft PR #49, noncanonical A2 collaboration plane  
+Date: 2026-08-24
+
+Scope: draft PR #49, noncanonical A2 collaboration plane
+
 Operator constraint: no 30-minute canary
 
 ## Decision
