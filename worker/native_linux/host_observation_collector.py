@@ -63,15 +63,21 @@ def _require_exact_object(value: Any, expected: set[str], label: str) -> dict[st
     return value
 
 
+def _canonical_sha(value: Any, label: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a string")
+    if len(value) != 40 or value != value.lower() or any(c not in "0123456789abcdef" for c in value):
+        raise ValueError(f"invalid {label}")
+    return value
+
+
 def _validate_input(payload: Any) -> dict[str, str]:
     root = _require_exact_object(payload, INPUT_KEYS, "input")
     source = _require_exact_object(root["source"], SOURCE_KEYS, "source")
-    # Reuse the admission contract as the canonical digest validator by
-    # constructing only the source fragment later and validating the final
-    # observation before output.
-    if not all(isinstance(source[key], str) for key in SOURCE_KEYS):
-        raise ValueError("source digests must be strings")
-    return {"git_sha": source["git_sha"], "tree_sha": source["tree_sha"]}
+    return {
+        "git_sha": _canonical_sha(source["git_sha"], "git_sha"),
+        "tree_sha": _canonical_sha(source["tree_sha"], "tree_sha"),
+    }
 
 
 def _read_proc_status() -> tuple[bool, int]:
@@ -129,14 +135,16 @@ def _collect_cgroup() -> dict[str, Any]:
 
 
 def _pidfd_canary() -> bool:
-    if not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
+    pidfd_open = getattr(os, "pidfd_open", None)
+    pidfd_send_signal = getattr(signal, "pidfd_send_signal", None)
+    if not callable(pidfd_open) or not callable(pidfd_send_signal):
         return False
     fd = -1
     try:
-        fd = os.pidfd_open(os.getpid(), 0)  # type: ignore[attr-defined]
-        signal.pidfd_send_signal(fd, 0, None, 0)  # type: ignore[attr-defined]
+        fd = pidfd_open(os.getpid(), 0)
+        pidfd_send_signal(fd, 0, None, 0)
         return True
-    except (OSError, AttributeError, NotImplementedError):
+    except (OSError, AttributeError, NotImplementedError, TypeError):
         return False
     finally:
         if fd >= 0:
@@ -194,11 +202,15 @@ def _openat2_beneath_canary() -> bool:
 
 
 def collect_observation(source: dict[str, str]) -> dict[str, Any]:
+    source = {
+        "git_sha": _canonical_sha(source.get("git_sha"), "git_sha"),
+        "tree_sha": _canonical_sha(source.get("tree_sha"), "tree_sha"),
+    }
     no_new_privs, seccomp_mode = _read_proc_status()
     observation = {
         "schema": admission_contract.OBSERVATION_SCHEMA,
         "policy_sha256": admission_contract.POLICY_SHA256,
-        "source": dict(source),
+        "source": source,
         "host": {
             "os": "linux" if sys.platform.startswith("linux") else sys.platform,
             "euid": os.geteuid(),
