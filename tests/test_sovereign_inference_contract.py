@@ -1,7 +1,7 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-MIGRATION = (ROOT / "supabase/migrations/20260824070306_duel_sovereign_inference_v1.sql").read_text(encoding="utf-8")
+MIGRATION = (ROOT / "supabase/migrations/20260824070409_duel_sovereign_inference_v1.sql").read_text(encoding="utf-8")
 RUNNER = (ROOT / "orchestration/sovereign/src/index.ts").read_text(encoding="utf-8")
 README = (ROOT / "orchestration/sovereign/README.md").read_text(encoding="utf-8")
 
