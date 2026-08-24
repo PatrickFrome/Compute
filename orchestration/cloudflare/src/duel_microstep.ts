@@ -22,6 +22,8 @@ type Lease = {
   current_checkpoint_sha256?: string;
   max_ticks?: number;
   lease_generation?: number;
+  readback?: Readback;
+  targeted?: boolean;
 };
 type Readback = JsonObject & {
   status?: string;
@@ -486,11 +488,14 @@ async function replayReceiptIfCommitted(env: Env, duelId: string, workerId: stri
   });
 }
 
-export async function runMicrostepDuel(env: Env, step: WorkflowStep, workerId: string): Promise<unknown> {
+export async function runMicrostepDuel(env: Env, step: WorkflowStep, workerId: string, targetDuelId?: string): Promise<unknown> {
+  const targeted = typeof targetDuelId === "string" && /^[0-9a-f-]{36}$/.test(targetDuelId);
   const leaseText = await step.do(
-    "microstep-lease",
+    targeted ? "microstep-target-lease-read" : "microstep-lease",
     { retries: { limit: 4, delay: "1 second", backoff: "exponential" } },
-    async () => JSON.stringify(await rpc<Lease>(env, "h205f22_duel_lease_lockstep_v2", { p_worker: workerId, p_lease_seconds: 3600 })),
+    async () => JSON.stringify(await (targeted
+      ? rpc<Lease>(env, "h205f22_duel_lease_target_lockstep_v3", { p_duel_id: targetDuelId!, p_worker: workerId, p_lease_seconds: 3600, p_after_tick: 0 })
+      : rpc<Lease>(env, "h205f22_duel_lease_lockstep_v2", { p_worker: workerId, p_lease_seconds: 3600 }))),
   );
   const lease = JSON.parse(leaseText) as Lease;
   if (!lease.leased) return { status: "MICROSTEP_IDLE" };
@@ -501,11 +506,16 @@ export async function runMicrostepDuel(env: Env, step: WorkflowStep, workerId: s
   let checkpoint = String(lease.current_checkpoint_sha256 || "");
   let lastTick = Number(lease.current_tick || 0);
   const max = Math.min(Number(lease.max_ticks || 32), 64);
-  const initialText = await step.do(
-    "microstep-read-initial",
-    async () => JSON.stringify(await rpc<Readback>(env, "h205f22_duel_read_lockstep_v2", { p_duel_id: duelId, p_after_tick: 0 })),
-  );
-  let read = JSON.parse(initialText) as Readback;
+  let read: Readback;
+  if (lease.readback && typeof lease.readback === "object" && !Array.isArray(lease.readback)) {
+    read = lease.readback as Readback;
+  } else {
+    const initialText = await step.do(
+      "microstep-read-initial",
+      async () => JSON.stringify(await rpc<Readback>(env, "h205f22_duel_read_lockstep_v2", { p_duel_id: duelId, p_after_tick: 0 })),
+    );
+    read = JSON.parse(initialText) as Readback;
+  }
   if (read.status !== "RUNNING") return { status: "MICROSTEP_TERMINAL", terminal_status: read.status };
 
   try {
@@ -543,6 +553,7 @@ export async function runMicrostepDuel(env: Env, step: WorkflowStep, workerId: s
             reasoning_effort: effort,
             pair_inference_ms: pairInferenceMs,
             context_mode: "FULL_HASHED_HISTORY_COMPACT_PROJECTION",
+            lease_policy: targeted ? "TARGETED_WAKE_BOUND_LEASE_READ_V3" : "RECOVERY_GLOBAL_LEASE_V2",
           };
           l.payload._lockstep = {
             tick_no: tick,
@@ -550,6 +561,7 @@ export async function runMicrostepDuel(env: Env, step: WorkflowStep, workerId: s
             reasoning_effort: effort,
             pair_inference_ms: pairInferenceMs,
             context_mode: "FULL_HASHED_HISTORY_COMPACT_PROJECTION",
+            lease_policy: targeted ? "TARGETED_WAKE_BOUND_LEASE_READ_V3" : "RECOVERY_GLOBAL_LEASE_V2",
           };
 
           return JSON.stringify(await rpc<PairReceipt>(env, "h205f22_duel_submit_pair_v3", {
