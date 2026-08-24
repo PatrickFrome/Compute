@@ -47,16 +47,20 @@ for marker in (
 ):
     assert marker in MICROSTEP
 
-# DB-origin duel wakes bypass Queue entirely: HMAC verification is followed by a
-# direct Durable Object binding call, which starts the Workflow immediately. Queue
-# remains available for recovery/other AOP wake sources only.
-assert 'const direct = await supervisorStub(env).wake(wake)' in INDEX
-assert 'transport: "DIRECT_DURABLE_OBJECT"' in INDEX
-assert 'duel_start_path: "DIRECT_DO_NO_QUEUE"' in INDEX
+# DB-origin duel wakes bypass both Queue and Durable Object. HMAC verification is
+# followed by an idempotent Workflow createBatch() with a deterministic instance ID.
+# Cloudflare documents createBatch as idempotent for an already-used instance ID.
+assert 'AOP_RUN_WORKFLOW.createBatch' in INDEX
+assert 'workflowInstanceId(wake)' in INDEX
+assert 'transport: "DIRECT_IDEMPOTENT_WORKFLOW"' in INDEX
+assert 'duel_start_path: "DIRECT_WORKFLOW_CREATE_BATCH_NO_QUEUE_NO_DO"' in INDEX
+assert 'createBatch(options:' in TYPES
 db_wake_block = INDEX.split('url.pathname === "/duel/db-wake"', 1)[1].split('url.pathname === "/wake"', 1)[0]
 assert 'AOP_WAKE_QUEUE.send' not in db_wake_block
+assert 'supervisorStub(env).wake' not in db_wake_block
 
-# Any remaining Queue delivery is configured for immediate single-message dispatch.
+# Any remaining Queue delivery is recovery/general-AOP only and is configured for
+# immediate single-message dispatch rather than batching.
 assert '"max_batch_size": 1' in WRANGLER
 assert '"max_batch_timeout": 0' in WRANGLER
 
@@ -76,7 +80,7 @@ assert 'microstep-read-${tick}' not in MICROSTEP
 # Health exposes routing and hot-path choices without exposing credential values.
 assert 'DUAL_RAIL_RACE_V1' in INDEX
 assert 'FIRST_VALID_EXACT_MODEL_RESPONSE_WINS' in INDEX
-assert 'DB_WEBHOOK+DIRECT_DURABLE_OBJECT+WORKFLOW+ATOMIC_DB_PAIR+DUAL_RAIL_RACE' in INDEX
+assert 'DB_WEBHOOK+DIRECT_IDEMPOTENT_WORKFLOW+ATOMIC_DB_PAIR+DUAL_RAIL_RACE' in INDEX
 assert 'vercel_ai_gateway: vercelRail' in INDEX
 assert 'cloudflare_ai: cloudflareRail' in INDEX
 assert 'VERCEL_AI_GATEWAY_API_KEY?: string' in TYPES
