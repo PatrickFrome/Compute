@@ -6,7 +6,8 @@
   "observability": { "enabled": true },
   "vars": {
     "SUPABASE_URL": "https://xpeibufgzjknrhbhpffp.supabase.co",
-    "AOP_MODEL": "@cf/openai/gpt-oss-20b"
+    "AOP_MODEL": "@cf/openai/gpt-oss-20b",
+    "DUEL_MAX_OUTPUT_TOKENS": "1200"
   },
   "secrets": {
     "required": [
