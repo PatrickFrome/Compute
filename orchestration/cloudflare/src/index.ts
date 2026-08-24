@@ -88,14 +88,20 @@ export default {
           rpc<JsonObject>(env, "h205f22_aop1_snapshot_v1", {}),
           rpc<JsonObject>(env, "h205f22_duel_snapshot_v1", {}),
         ]);
+        const cloudflareRail = Boolean(env.CF_ACCOUNT_ID && env.CF_AI_TOKEN);
+        const vercelRail = Boolean(env.VERCEL_AI_GATEWAY_API_KEY);
         return json({
           status: "ok",
-          invariant: "NO_MANUAL_HANDOFF_V1+MICROSTEP_LOCKSTEP_V2",
+          invariant: "NO_MANUAL_HANDOFF_V1+MICROSTEP_LOCKSTEP_V2+DUAL_RAIL_RACE_V1",
           executor_configured: Boolean(env.CF_ACCOUNT_ID && env.CF_AI_TOKEN && env.AOP_MODEL),
-          duel_executor_configured: Boolean(env.CF_ACCOUNT_ID && env.CF_AI_TOKEN),
+          duel_executor_configured: cloudflareRail || vercelRail,
           duel_protocol: "MICROSTEP_LOCKSTEP_V2",
-          duel_transport: "ATOMIC_DB_PAIR+IMMEDIATE_WORKFLOW_LOOP",
-          duel_models: { gpt: "openai/gpt-5.6-sol", glm: "@cf/zai-org/glm-5.2" },
+          duel_transport: "ATOMIC_DB_PAIR+DUAL_RAIL_RACE+IMMEDIATE_WORKFLOW_LOOP",
+          duel_latency_policy: "FIRST_VALID_EXACT_MODEL_RESPONSE_WINS",
+          duel_critical_shadow_ms: Number(env.DUEL_CRITICAL_SHADOW_MS || 1500),
+          duel_model_timeout_ms: Number(env.DUEL_MODEL_TIMEOUT_MS || 90000),
+          duel_rails: { vercel_ai_gateway: vercelRail, cloudflare_ai: cloudflareRail },
+          duel_models: { gpt: "openai/gpt-5.6-sol", glm: { vercel: "zai/glm-5.2", cloudflare: "@cf/zai-org/glm-5.2" } },
           github_configured: githubWriteConfigured(env),
           github_auth_mode: githubAuthMode(env),
           supervisor_capability_configured: Boolean(env.AOP_SUPERVISOR_TOKEN),
