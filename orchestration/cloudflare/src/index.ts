@@ -4,6 +4,7 @@ import { completeRun, deferRun, leaseRun, rpc, supervisorReturnAuthority } from 
 import { executeRole, executorReady } from "./executor";
 import { githubAuthMode, githubWriteConfigured } from "./github";
 import { runMicrostepDuel } from "./duel_microstep";
+import { completeAutonomousPeerRelaysV4 } from "./peer_relay_v4";
 import { verifyDbDuelWake } from "./duel_db_wake";
 
 function json(value: unknown, status = 200): Response { return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json; charset=utf-8" } }); }
@@ -56,6 +57,11 @@ export class AopRunWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> {
     const { workerId, wake } = event.payload;
     if (wake.reason === "DUEL_RECONCILE" || wake.reason === "DUEL_START" || wake.reason === "DUEL_DB_INSERT") {
       const targetDuelId = typeof wake.payload?.duel_id === "string" ? String(wake.payload.duel_id) : undefined;
+      if (wake.reason === "DUEL_RECONCILE" && !targetDuelId) {
+        const peerJson = await step.do("autonomous-peer-relay-v4", { retries: { limit: 1, delay: "15 seconds", backoff: "exponential" }, timeout: "10 minutes" }, async () => JSON.stringify(await completeAutonomousPeerRelaysV4(this.env, workerId)));
+        const legacy = await runMicrostepDuel(this.env, step, workerId, targetDuelId);
+        return { status: "DUEL_RECONCILE_COMPLETE", peer_relay_v4: JSON.parse(peerJson) as JsonObject, legacy };
+      }
       return runMicrostepDuel(this.env, step, workerId, targetDuelId);
     }
 
@@ -96,7 +102,15 @@ export default {
     const url = new URL(request.url);
     try {
       if (request.method === "GET" && url.pathname === "/v4/health") {
-        return json({ status: "ok", protocol: "SAME_POINT_DUEL_V4", mode: "CONTROL_ONLY", executor: "FENCED", critical_path: false });
+        return json({
+          status: "ok",
+          protocol: "SAME_POINT_DUEL_V4",
+          mode: "CONTROL_ONLY",
+          executor: "FENCED",
+          peer_completion: env.VERCEL_AI_GATEWAY_API_KEY ? "REGISTERED_RELAY_AUTONOMOUS" : "UNAVAILABLE",
+          peer_models: { GPT: "openai/gpt-5.6-sol", GLM: "zai/glm-5.3" },
+          critical_path: false,
+        });
       }
       if (request.method === "POST" && url.pathname === "/v4/duels") {
         await requireBearer(request, env.AOP_WAKE_SECRET);
@@ -132,7 +146,7 @@ export default {
         const vercelRail = Boolean(env.VERCEL_AI_GATEWAY_API_KEY);
         return json({
           status: "ok",
-          invariant: "NO_MANUAL_HANDOFF_V1+MICROSTEP_LOCKSTEP_V2+DUAL_RAIL_RACE_V1+ONE_DURABLE_TICK_V3+TARGETED_LEASE_READ_V3+SAME_POINT_DUEL_V4_CONTROL",
+          invariant: "NO_MANUAL_HANDOFF_V1+MICROSTEP_LOCKSTEP_V2+DUAL_RAIL_RACE_V1+ONE_DURABLE_TICK_V3+TARGETED_LEASE_READ_V3+SAME_POINT_DUEL_V4_CONTROL+AUTONOMOUS_PEER_RELAY_V4",
           executor_configured: Boolean(env.CF_ACCOUNT_ID && env.CF_AI_TOKEN && env.AOP_MODEL),
           duel_executor_configured: cloudflareRail || vercelRail,
           duel_vercel_rail_configured: vercelRail,
@@ -140,6 +154,9 @@ export default {
           same_point_v4_control_api: true,
           same_point_v4_executor: false,
           same_point_v4_executor_policy: "FENCED_CONTROL_ONLY",
+          same_point_v4_peer_completion: vercelRail,
+          same_point_v4_peer_completion_policy: "REGISTERED_RELAY_ONLY+CURRENT_SEMANTIC_HEAD+GITHUB_BASE_SHA_MATCH+DB_LEASE_GENERATION",
+          same_point_v4_peer_models: { GPT: "openai/gpt-5.6-sol", GLM: "zai/glm-5.3" },
           duel_transport: "DB_WEBHOOK+DIRECT_IDEMPOTENT_WORKFLOW+ATOMIC_DB_PAIR+DUAL_RAIL_RACE",
           duel_latency_policy: "FIRST_VALID_EXACT_MODEL_RESPONSE_WINS",
           duel_start_path: "DIRECT_WORKFLOW_CREATE_BATCH_NO_QUEUE_NO_DO",
