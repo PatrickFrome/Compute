@@ -1,14 +1,17 @@
 {
   "name": "@metaengine/sovereign-duel-runner",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "scripts": {
     "check": "tsc --noEmit",
+    "test:a2": "tsx --test src/a2_protocol.test.ts",
     "start": "bash scripts/start-all.sh",
     "start:all": "bash scripts/start-all.sh",
     "start:v4": "tsx src/same_point_v4.ts",
     "start:control": "tsx src/control.ts",
+    "start:a2:observer": "tsx src/a2_server.ts",
+    "start:a2:peer": "tsx src/a2_runtime.ts",
     "start:legacy": "tsx src/index.ts"
   },
   "dependencies": {
