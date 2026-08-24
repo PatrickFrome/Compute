@@ -143,6 +143,12 @@ jobs:
                 and .duel_start_path == "DIRECT_WORKFLOW_CREATE_BATCH_NO_QUEUE_NO_DO"
                 and .duel_hot_path_readback == "LEASE_THEN_DB_SELECTED_PAIR_RECEIPT"
                 and .duel_latency_policy == "FIRST_VALID_EXACT_MODEL_RESPONSE_WINS"
+                and .duel_tick_durability == "ONE_DURABLE_TICK_V3"
+                and .duel_context_mode == "FULL_HASHED_HISTORY_COMPACT_PROJECTION"
+                and .duel_reasoning_policy == "ADAPTIVE_LOW_MEDIUM_HIGH_V1"
+                and .duel_lens_policy == "ROTATING_BUILD_BREAK_V1"
+                and .duel_vercel_provider_sort == "ttft"
+                and .duel_max_output_tokens == 1200
                 and .duel_critical_shadow_ms == 0
                 and .supervisor_capability_configured == true
                 and .github_configured == false
@@ -159,7 +165,7 @@ jobs:
             cat /tmp/aop1-health.json >&2 || true
             exit 1
           fi
-          echo "AOP1 live health: PASS; Vercel+Cloudflare zero-wait dual-rail race is configured."
+          echo "AOP1 live health: PASS; one-durable-tick adaptive Vercel+Cloudflare duel is configured."
 
       - name: Register exact live Worker endpoint for database-triggered duel wake
         shell: bash
@@ -199,4 +205,4 @@ jobs:
 
       - name: Record delivery boundary
         run: |
-          echo "AOP1 deploy complete. Normal duel start: DB event -> pg_net -> signed Worker endpoint -> idempotent Workflow binding; inference: Vercel and Cloudflare race per exact model slot, first valid response wins."
+          echo "AOP1 deploy complete. Normal duel start: DB event -> pg_net -> signed Worker endpoint -> idempotent Workflow binding; each tick: simultaneous GPT/GLM dual-rail race -> replay-safe atomic pair commit in one durable step."
