@@ -36,7 +36,7 @@
       { "binding": "AOP_WAKE_QUEUE", "queue": "metaengine-h205f22-aop-wake" }
     ],
     "consumers": [
-      { "queue": "metaengine-h205f22-aop-wake", "max_batch_size": 10, "max_batch_timeout": 2, "max_retries": 5, "dead_letter_queue": "metaengine-h205f22-aop-dlq" }
+      { "queue": "metaengine-h205f22-aop-wake", "max_batch_size": 1, "max_batch_timeout": 0, "max_retries": 5, "dead_letter_queue": "metaengine-h205f22-aop-dlq" }
     ]
   },
   "triggers": { "crons": ["* * * * *"] }
