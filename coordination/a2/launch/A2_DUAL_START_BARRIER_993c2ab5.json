@@ -1,0 +1,38 @@
+{
+  "schema": "metaengine.compute.a2-dual-start-barrier.v1",
+  "snapshot_sha256": "993c2ab55b01e8cfad56449fa7bd28a4a6834fce819c5f993b658cb14bdb0c84",
+  "snapshot": {
+    "schema": "metaengine.compute.a2-dual-start-snapshot.v1",
+    "main_sha": "0d6bfd3fc54d2d0ebdcd8194f98c9becd067a4df",
+    "a2_head_sha": "20238c49988d4bfe19e559ed53bbf2ce745fe532",
+    "semantic_checkpoint_id": "metaengine-h205f22-recovery-dev-20260821-cp072",
+    "payload_root_sha256": "14ef848e935dd12a6b3ada23f7fed6016788fcbaf2856c1490fd4e45caeed140",
+    "roadmap_definition_sha256": "96068a842c7dcb37d216aad6defc7b51e291394e916f76beed447be630024925",
+    "definition_integrity": true,
+    "next_mainline": "W1_PERSISTENT_LINUX_WORKER_SAFETY",
+    "next_mainline_status": "READY",
+    "active_claims": 0,
+    "a2_workspace_id": "063e3923-ef85-4226-9843-861ad4ec5a21",
+    "a2_workspace_mode": "COLLABORATE",
+    "a2_workspace_semantic_point": "A2_VISIBILITY_CANARY",
+    "a2_head_commit_seq": 145,
+    "a2_frontier_hash": "5234ea4ad8b6c1da92a7bf2d6d5abfd484ec92079e879df90415deb801940ec5",
+    "active_peer_sessions": 0
+  },
+  "policy": {
+    "mode": "SYNCHRONOUS_EQUAL_PEER",
+    "gpt": "openai/gpt-5.6-sol",
+    "glm": "zai/glm-5.3",
+    "roadmap_claim_before_pair_seal": false,
+    "direct_peer_mutation_authority": false,
+    "joint_executor_required": true,
+    "first_semantic_point_after_pair_seal": "W1_PERSISTENT_LINUX_WORKER_SAFETY",
+    "canonical": false,
+    "authority_effect": false
+  },
+  "required_ack": {
+    "event": "BOOTSTRAP_ACK",
+    "exact_snapshot_sha256": "993c2ab55b01e8cfad56449fa7bd28a4a6834fce819c5f993b658cb14bdb0c84",
+    "both_peers_required": true
+  }
+}
