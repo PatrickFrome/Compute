@@ -3,94 +3,41 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>METAENGINE A2 Cognitive Bus</title>
+  <meta name="color-scheme" content="dark" />
+  <title>A2 Synchronous Observer</title>
   <link rel="stylesheet" href="/a2/assets/styles.css" />
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">
-      <div class="brand-mark">A2</div>
-      <div><strong>Realtime Multi-Agent Cognitive Bus</strong><span id="workspaceLabel">workspace</span></div>
-    </div>
-    <div class="status-strip">
-      <span class="pill" id="liveHealth">LIVE — connecting</span>
-      <span class="pill" id="causalHealth">CAUSAL — unknown</span>
-      <span class="pill" id="authorityHealth">AUTHORITY — unknown</span>
-      <span class="pill mono" id="frontierBadge">seq —</span>
+    <a class="brand" href="#main"><span class="brand-mark">A2</span><span><strong>Synchronous Observer</strong><small id="workspaceLabel">workspace</small></span></a>
+    <div class="health" aria-label="System health">
+      <span class="pill" id="liveHealth">LIVE · connecting</span><span class="pill" id="causalHealth">CAUSAL · unknown</span><span class="pill" id="authorityHealth">AUTHORITY · unknown</span><span class="pill mono" id="frontierBadge">commit —</span>
     </div>
   </header>
 
-  <section class="semantic-rail">
-    <div><span class="label">Semantic point</span><strong id="semanticPoint">—</strong></div>
-    <div><span class="label">Mode</span><strong id="mode">COLLABORATE</strong></div>
-    <div><span class="label">Conflict</span><strong id="conflictState">none</strong></div>
-    <div><span class="label">Duel</span><strong id="duelState">idle</strong></div>
-  </section>
-
-  <main class="workspace-grid">
-    <section class="agent-pane" data-agent="GPT">
-      <div class="pane-head">
-        <div><span class="agent-dot"></span><strong>GPT 5.6 Sol</strong><small id="gptModel">exact model pending</small></div>
-        <div class="agent-stats"><span id="gptSeen">seen —</span><span id="gptLag">lag —</span></div>
-      </div>
-      <div class="microstep-card">
-        <span class="label">Current microstep</span>
-        <strong id="gptCurrent">waiting</strong>
-        <div class="gap-line"><span>opaque gap</span><span id="gptGap">0 ms</span></div>
-      </div>
-      <div class="stream-head"><span>Observable reasoning</span><span class="mono" id="gptFrontier">frontier —</span></div>
-      <div class="agent-stream" id="gptStream"></div>
+  <main id="main">
+    <section class="round-shell" aria-labelledby="roundTitle">
+      <div class="round-copy"><span class="eyebrow">DB-enforced two-peer deliberation</span><h1 id="roundTitle">Round <span id="roundNumber">—</span> · <span id="roundPhase">WAITING</span></h1><p id="roundSummary">Waiting for both exact-model peers to claim one immutable frontier.</p></div>
+      <div class="round-kpis"><div><span>state</span><strong id="roundStatus">—</strong></div><div><span>base</span><strong class="mono" id="roundBase">#—</strong></div><div><span>deadline</span><strong id="roundDeadline">—</strong></div><div><span>autonomy</span><strong>DUAL KEY</strong></div></div>
+      <div class="lockstep" aria-label="Round participants"><div class="participant gpt"><span>GPT 5.6 Sol</span><strong id="gptSlot">joining</strong><small id="gptResult">result pending</small></div><div class="barrier" aria-hidden="true"><span></span><b>LOCKSTEP</b><span></span></div><div class="participant glm"><span>GLM 5.3</span><strong id="glmSlot">joining</strong><small id="glmResult">result pending</small></div></div>
     </section>
 
-    <section class="causal-pane">
-      <div class="pane-head">
-        <div><strong>Shared causal timeline</strong><small>commit order + causal parents</small></div>
-        <div class="filters">
-          <button data-filter="ALL" class="active">All</button>
-          <button data-filter="COGNITION">Cognition</button>
-          <button data-filter="TOOLS">Tools</button>
-          <button data-filter="EVIDENCE">Evidence</button>
-        </div>
-      </div>
-      <div class="timeline" id="timeline"></div>
+    <section class="context-rail" aria-label="Workspace context"><div><span>semantic point</span><strong id="semanticPoint">—</strong></div><div><span>mode</span><strong id="mode">—</strong></div><div><span>interaction</span><strong id="interactionState">propose → challenge → decide</strong></div><div><span>duel</span><strong id="duelState">idle</strong></div></section>
+
+    <section class="agent-grid" aria-label="Exact model peers">
+      <article class="agent-card gpt"><div class="agent-head"><div><span class="agent-dot"></span><span class="eyebrow">peer A</span><h2>GPT 5.6 Sol</h2></div><span class="state-dot" id="gptHealth">offline</span></div><p class="model mono" id="gptModel">exact model pending</p><div class="cursor-grid"><div><span>received</span><strong id="gptReceived">0</strong></div><div><span>applied</span><strong id="gptApplied">0</strong></div><div><span>lag</span><strong id="gptLag">0</strong></div></div><div class="current"><span>current action</span><strong id="gptCurrent">waiting</strong><small id="gptGap">opaque gap 0 ms</small></div></article>
+      <article class="agent-card glm"><div class="agent-head"><div><span class="agent-dot"></span><span class="eyebrow">peer B</span><h2>GLM 5.3</h2></div><span class="state-dot" id="glmHealth">offline</span></div><p class="model mono" id="glmModel">exact model pending</p><div class="cursor-grid"><div><span>received</span><strong id="glmReceived">0</strong></div><div><span>applied</span><strong id="glmApplied">0</strong></div><div><span>lag</span><strong id="glmLag">0</strong></div></div><div class="current"><span>current action</span><strong id="glmCurrent">waiting</strong><small id="glmGap">opaque gap 0 ms</small></div></article>
     </section>
 
-    <section class="agent-pane" data-agent="GLM">
-      <div class="pane-head">
-        <div><span class="agent-dot"></span><strong>GLM 5.3</strong><small id="glmModel">exact model pending</small></div>
-        <div class="agent-stats"><span id="glmSeen">seen —</span><span id="glmLag">lag —</span></div>
-      </div>
-      <div class="microstep-card">
-        <span class="label">Current microstep</span>
-        <strong id="glmCurrent">waiting</strong>
-        <div class="gap-line"><span>opaque gap</span><span id="glmGap">0 ms</span></div>
-      </div>
-      <div class="stream-head"><span>Observable reasoning</span><span class="mono" id="glmFrontier">frontier —</span></div>
-      <div class="agent-stream" id="glmStream"></div>
-    </section>
+    <section class="panel visibility-panel" aria-labelledby="visibilityTitle"><div class="panel-head"><div><span class="eyebrow">cross-model proof</span><h2 id="visibilityTitle">Every action, seen by both peers</h2></div><p><span class="legend origin">origin</span><span class="legend seen">applied</span><span class="legend pending">pending</span></p></div><div class="table-wrap"><table><thead><tr><th>Commit</th><th>Action</th><th>Trace</th><th>GPT</th><th>GLM</th></tr></thead><tbody id="visibilityRows"><tr><td colspan="5" class="empty">Loading visibility ledger…</td></tr></tbody></table></div></section>
+
+    <section class="panel ledger-panel" aria-labelledby="ledgerTitle"><div class="panel-head"><div><span class="eyebrow">durable causal truth</span><h2 id="ledgerTitle">Unified action ledger</h2></div><div class="filters" role="group" aria-label="Ledger filter"><button class="active" data-filter="ALL">All</button><button data-filter="COGNITION">Reasoning</button><button data-filter="TOOLS">Tools</button><button data-filter="RUNTIME">Runtime</button><button data-filter="AUTHORITY">Authority</button></div></div><div id="actionLedger" class="action-ledger"><p class="empty">Waiting for committed events…</p></div></section>
+
+    <section class="panel authority-panel" aria-labelledby="authorityTitle"><div><span class="eyebrow">freshness fence</span><h2 id="authorityTitle">Authority remains explicit</h2><p>No model consensus silently becomes canonical.</p></div><dl><div><dt>checkpoint</dt><dd class="mono" id="authorityCheckpoint">—</dd></div><div><dt>payload root</dt><dd class="mono" id="authorityRoot">—</dd></div><div><dt>next mainline</dt><dd id="authorityNext">—</dd></div><div><dt>integrity</dt><dd id="authorityIntegrity">—</dd></div></dl></section>
   </main>
 
-  <section class="authority-rail">
-    <div><span class="label">Semantic head</span><strong class="mono" id="authorityCheckpoint">—</strong></div>
-    <div><span class="label">Git main</span><strong class="mono" id="authorityGit">—</strong></div>
-    <div><span class="label">Claim / directive</span><strong id="authorityClaim">—</strong></div>
-    <div><span class="label">Execution candidate</span><strong id="executionCandidate">none</strong></div>
-    <div><span class="label">Executor</span><strong id="executorState">idle</strong></div>
-  </section>
-
-  <aside class="inspector" id="inspector" aria-hidden="true">
-    <div class="inspector-head"><div><span class="label">Event inspector</span><strong id="inspectTitle">WHY?</strong></div><button id="closeInspector">Close</button></div>
-    <div class="inspect-tabs">
-      <button class="active" data-tab="why">WHY?</button>
-      <button data-tab="seen">WHAT DID IT SEE?</button>
-      <button data-tab="evidence">EVIDENCE</button>
-      <button data-tab="tool">TOOL I/O</button>
-      <button data-tab="hashes">HASHES</button>
-    </div>
-    <div id="inspectBody" class="inspect-body"></div>
-  </aside>
-
-  <div class="toast" id="toast"></div>
+  <aside class="inspector" id="inspector" role="dialog" aria-modal="true" aria-labelledby="inspectTitle" aria-hidden="true"><div class="inspector-head"><div><span class="eyebrow">event inspector</span><h2 id="inspectTitle">Action</h2></div><button id="closeInspector" aria-label="Close inspector">Close</button></div><div class="inspect-tabs" role="tablist"><button class="active" data-tab="reason">Reason</button><button data-tab="visibility">Visibility</button><button data-tab="action">Action</button><button data-tab="integrity">Integrity</button></div><div id="inspectBody" class="inspect-body"></div></aside>
+  <div class="scrim" id="scrim" hidden></div><div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script type="module" src="/a2/assets/app.js"></script>
 </body>
 </html>

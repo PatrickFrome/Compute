@@ -1,14 +1,14 @@
 import pg from "pg";
 import { exactModel } from "./a2_protocol.js";
 
-const { Pool } = pg;
+const { Client, Pool } = pg;
 
 type Row=Record<string,any>;
 const DATABASE_URL=req("DATABASE_URL");
 const WORKSPACE_ID=req("A2_WORKSPACE_ID");
-const POLL_MS=int(process.env.A2_COORDINATOR_POLL_MS,750,100,10_000);
+const POLL_MS=int(process.env.A2_COORDINATOR_POLL_MS,2000,100,10_000);
 const pool=new Pool({connectionString:DATABASE_URL,max:6});
-let stopped=false;
+let stopped=false,wakeResolver:(()=>void)|null=null,listener:InstanceType<typeof Client>|null=null;
 const ACTION_EVENT_TYPES="('ACTION_PROPOSAL','CLAIM','COUNTERCLAIM')";
 const RPC_SQL={
   h205f22_a2_open_conflict_v1:"select public.h205f22_a2_open_conflict_v1($1,$2,$3,$4,$5,$6) as v",
@@ -22,6 +22,9 @@ const RPC_SQL={
 function req(n:string){const v=process.env[n];if(!v)throw new Error(`${n}_required`);return v;}
 function int(v:string|undefined,f:number,min:number,max:number){const n=Number(v??f);return Number.isFinite(n)?Math.max(min,Math.min(max,Math.trunc(n))):f;}
 function sleep(ms:number){return new Promise(r=>setTimeout(r,ms));}
+function wake(){const resolve=wakeResolver;wakeResolver=null;resolve?.();}
+function waitForWake(ms:number){return new Promise<void>(resolve=>{const timer=setTimeout(()=>{if(wakeResolver===done)wakeResolver=null;resolve();},ms);const done=()=>{clearTimeout(timer);resolve();};wakeResolver=done;});}
+async function listenLoop(){while(!stopped){const client=new Client({connectionString:DATABASE_URL});listener=client;try{await client.connect();await client.query("listen h205f22_a2_event");client.on("notification",wake);await new Promise<void>(resolve=>{client.once("error",()=>resolve());client.once("end",()=>resolve());});}catch(e){if(!stopped)console.error("a2_coordinator_listen_reconnect",String(e));}finally{await client.end().catch(()=>undefined);if(listener===client)listener=null;}if(!stopped)await sleep(250);}}
 async function rpc<T=any>(fn:keyof typeof RPC_SQL,args:any[]):Promise<T>{const r=await pool.query<{v:T}>(RPC_SQL[fn],args);return r.rows[0]!.v;}
 function actionKind(e:Row){const p=e?.payload?.proposed_action;return p&&typeof p.kind==="string"&&p.kind.trim()?p.kind.trim():null;}
 async function workspace(){const r=await pool.query<Row>("select * from destruktion_meta.compute_fabric_a2_workspace_h205f22 where workspace_id=$1",[WORKSPACE_ID]);if(!r.rows[0])throw new Error("a2_workspace_not_found");return r.rows[0];}
@@ -29,6 +32,6 @@ async function latestActionRows(){const r=await pool.query<Row>(`select distinct
 async function detectConflicts(){const rows=await latestActionRows();const byPoint=new Map<string,Map<string,Row>>();for(const row of rows){let agents=byPoint.get(row.semantic_point);if(!agents){agents=new Map();byPoint.set(row.semantic_point,agents);}agents.set(row.agent,row);}for(const [semanticPoint,agents] of byPoint){const gpt=agents.get('GPT'),glm=agents.get('GLM');if(!gpt||!glm)continue;const gptKind=actionKind(gpt),glmKind=actionKind(glm);if(!gptKind||!glmKind||gptKind===glmKind)continue;await rpc("h205f22_a2_open_conflict_v1",[WORKSPACE_ID,semanticPoint,gpt.event_hash,glm.event_hash,`latest_action_kind_mismatch:${gptKind}!=${glmKind}`,"HIGH"]);}}
 async function latestPeerActions(c:Row){const minSeq=Math.min(Number(c.left_seq),Number(c.right_seq));const r=await pool.query<Row>("select distinct on(agent) agent,event_hash,commit_seq,event_type,payload from destruktion_meta.compute_fabric_a2_agent_event_h205f22 where workspace_id=$1 and semantic_point=$2 and commit_seq>=$3 and event_type in ('ACTION_PROPOSAL','CLAIM','COUNTERCLAIM') and nullif(btrim(coalesce(payload->'proposed_action'->>'kind','')),'') is not null order by agent,commit_seq desc",[WORKSPACE_ID,c.semantic_point,minSeq]);return r.rows;}
 async function reconcileConflicts(){const r=await pool.query<Row>("select c.*,le.commit_seq left_seq,re.commit_seq right_seq from destruktion_meta.compute_fabric_a2_semantic_conflict_h205f22 c join destruktion_meta.compute_fabric_a2_agent_event_h205f22 le on le.event_hash=c.left_event_hash join destruktion_meta.compute_fabric_a2_agent_event_h205f22 re on re.event_hash=c.right_event_hash where c.workspace_id=$1 and c.status in ('OPEN','DIRECT_RESOLUTION','DUEL') order by c.created_at",[WORKSPACE_ID]);for(const c of r.rows){if(c.status==='DUEL'){const d=await rpc<any>("h205f22_duel_read_same_point_v4",[c.duel_id]);if(d?.status==='DECIDED')await rpc("h205f22_a2_resolve_conflict_from_duel_v1",[c.conflict_id]);continue;}const actions=await latestPeerActions(c);if(actions.length===2){const a=actionKind(actions[0]),b=actionKind(actions[1]);if(a&&a===b){const resolution=actions.sort((x,y)=>Number(y.commit_seq)-Number(x.commit_seq))[0];await rpc("h205f22_a2_resolve_conflict_v1",[c.conflict_id,resolution.event_hash]);continue;}}const minSeq=Math.min(Number(c.left_seq),Number(c.right_seq));const x=await pool.query<Row>("select count(*)::int n,bool_or(event_type='REQUEST_DUEL') requested from destruktion_meta.compute_fabric_a2_agent_event_h205f22 where workspace_id=$1 and semantic_point=$2 and commit_seq>=$3 and event_type in ('CLAIM','COUNTERCLAIM','CRITIQUE','SYNTHESIS','ACTION_PROPOSAL','REQUEST_DUEL')",[WORKSPACE_ID,c.semantic_point,minSeq]);const n=Number(x.rows[0]?.n||0),requested=x.rows[0]?.requested===true;if(!requested&&n<6)continue;const w=await workspace();const f=await rpc<any>("h205f22_a2_read_frontier_v1",[WORKSPACE_ID]);const duelKey=`a2-v4::${WORKSPACE_ID}::${c.conflict_id}::${f.frontier_hash}`;const subject={mode:"A2_CAUSAL_CONFLICT_V1",semantic_point:c.semantic_point,conflict_id:c.conflict_id,causal_frontier_hash:f.frontier_hash,left_event_hash:c.left_event_hash,right_event_hash:c.right_event_hash,debate_protocol:"SAME_POINT_DUEL_V4",authority_rule:"DUEL_DECISION_NONAUTHORITY_UNTIL_EXECUTOR_REVALIDATES"};const duel=await rpc<any>("h205f22_duel_create_same_point_v4",[duelKey,"A2_REALTIME_MULTI_AGENT_COGNITIVE_BUS",w.base_github_sha,subject,"SOVEREIGN_ONLY",exactModel("GPT"),exactModel("GLM")]);const duelId=String(duel.duel_id);await rpc("h205f22_a2_attach_duel_v1",[c.conflict_id,duelId]);await pool.query("select pg_notify($1,$2)",["h205f22_same_point_v4_ready",JSON.stringify({duel_id:duelId,source:"a2-coordinator",conflict_id:c.conflict_id})]);}}
-async function main(){await workspace();while(!stopped){try{await detectConflicts();await reconcileConflicts();}catch(e){console.error("a2_coordinator_cycle_failed",e);}await sleep(POLL_MS);}}
-process.on("SIGTERM",()=>{stopped=true;});process.on("SIGINT",()=>{stopped=true;});
+async function main(){await workspace();void listenLoop();while(!stopped){try{await detectConflicts();await reconcileConflicts();}catch(e){console.error("a2_coordinator_cycle_failed",e);}await waitForWake(POLL_MS);}}
+process.on("SIGTERM",()=>{stopped=true;wake();void listener?.end();});process.on("SIGINT",()=>{stopped=true;wake();void listener?.end();});
 void main().finally(()=>pool.end());

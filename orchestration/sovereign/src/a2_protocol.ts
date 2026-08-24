@@ -17,6 +17,14 @@ export interface VisibilityProof {
   context_manifest_sha256:string; mandatory_peer_event_hashes:string[]; accepted_event_id?:string|null;
 }
 export interface Frontier { head_commit_seq:number; gpt_seq:number; glm_seq:number; gpt_hash?:string|null; glm_hash?:string|null; frontier_hash:string; }
+export interface SyncRound {
+  schema:string; round_id:string; round_seq:number; deliberation_phase:"PROPOSE"|"CHALLENGE"|"DECIDE"; workspace_id:string; semantic_point:string;
+  status:"OPEN"|"SEALED"|"ABANDONED"; base_commit_seq:number; base_gpt_seq:number; base_glm_seq:number;
+  base_frontier_hash:string; gpt_session_id?:string|null; glm_session_id?:string|null;
+  gpt_event_id?:string|null; glm_event_id?:string|null; gpt_event_hash?:string|null; glm_event_hash?:string|null;
+  participants_ready:boolean; mandatory_peer_event_hashes:string[]; started_at?:string|null; expires_at?:string|null;
+  abandon_reason?:string|null; canonical:false; authority_effect:false;
+}
 export interface PeerCapabilities { reasoning_summary_stream?:boolean; max_emit_rate_hz?:number; inbound_queue_depth?:number; tool_calls?:boolean; resume_from_commit_seq?:boolean; max_opaque_ms?:number; }
 export interface IngressReceiptInput {
   eventHash:string; sessionId:string; fingerprint:string; verifierId:string;
@@ -30,6 +38,13 @@ export interface VerifiedIngressReceipt {
 export function exactModel(agent:Agent):string { return agent === "GPT" ? "openai/gpt-5.6-sol" : "zai/glm-5.3"; }
 export function peerOf(agent:Agent):Agent { return agent === "GPT" ? "GLM" : "GPT"; }
 export function sha256Hex(data:Buffer|string):string { return createHash("sha256").update(data).digest("hex"); }
+export function traceIdForRound(roundId:string):string { return sha256Hex(`A2_SYNC_ROUND_V1\n${roundId}`).slice(0,32); }
+export function spanIdForAction(actionId:string):string { return sha256Hex(`A2_ACTION_SPAN_V1\n${actionId}`).slice(0,16); }
+export function traceparent(traceId:string,spanId:string,sampled=true):string {
+  if(!/^[0-9a-f]{32}$/.test(traceId)||/^0{32}$/.test(traceId)) throw new Error("a2_trace_id_invalid");
+  if(!/^[0-9a-f]{16}$/.test(spanId)||/^0{16}$/.test(spanId)) throw new Error("a2_span_id_invalid");
+  return `00-${traceId}-${spanId}-${sampled?"01":"00"}`;
+}
 export function canonicalJson(value:unknown):string { return JSON.stringify(sortValue(value)); }
 function sortValue(value:unknown):unknown {
   if (Array.isArray(value)) return value.map(sortValue);
@@ -113,4 +128,12 @@ export function boundedContext(events:A2Event[], maxEvents=80):A2Event[] {
   const recent=events.slice(-maxEvents);
   const byHash=new Map<string,A2Event>(); for(const e of [...mandatory,...recent]) byHash.set(e.event_hash,e);
   return [...byHash.values()].sort((a,b)=>a.commit_seq-b.commit_seq);
+}
+
+export function peerReceiptBatches(agent:Agent,events:A2Event[],maxBatch=64):A2Event[][] {
+  if(!Number.isSafeInteger(maxBatch)||maxBatch<1||maxBatch>64) throw new Error("a2_receipt_batch_size_invalid");
+  const visible=events.filter(e=>e.agent!==agent&&e.event_type!=="PEER_EVENT_APPLIED").sort((a,b)=>a.commit_seq-b.commit_seq);
+  const batches:A2Event[][]=[];
+  for(let offset=0;offset<visible.length;offset+=maxBatch)batches.push(visible.slice(offset,offset+maxBatch));
+  return batches;
 }

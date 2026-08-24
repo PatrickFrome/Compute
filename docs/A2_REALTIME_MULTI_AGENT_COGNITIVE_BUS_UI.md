@@ -158,7 +158,7 @@ This is the mechanism by which GPT and GLM actually see one another's published 
 
 ## Acceptance criteria
 
-A2 is not complete until two independent exact-model runtimes can run one engineering task for 30 minutes with no manual relay and demonstrate:
+A2 is not complete until two independent exact-model runtimes pass a deterministic no-manual-relay scenario suite and demonstrate:
 
 - every accepted model-authored step has a valid visibility proof;
 - P0/P1 peer events are applied before the next accepted peer reasoning step;
@@ -168,6 +168,8 @@ A2 is not complete until two independent exact-model runtimes can run one engine
 - no A2 event or V4 decision has project authority;
 - project mutation occurs only after fresh executor authority revalidation;
 - browser console can replay the session and prove what each peer saw at each accepted step.
+
+Duration is not an acceptance proxy. A 30-minute canary is explicitly excluded; the paired scenario suite must instead assert every transition and persisted outcome.
 
 ## Initial implementation split
 

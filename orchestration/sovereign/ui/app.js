@@ -1,215 +1,34 @@
-const qs = new URLSearchParams(location.search);
-const workspace = qs.get("workspace_id") || "063e3923-ef85-4226-9843-861ad4ec5a21";
-const state = { events: [], byId: /* @__PURE__ */ new Map(), frontier: 0, filter: "ALL", selected: null, agents: { GPT: { startedAt: 0, lastSeen: 0, model: "", gap: 0 }, GLM: { startedAt: 0, lastSeen: 0, model: "", gap: 0 } }, authority: {}, semanticPoint: "—", mode: "COLLABORATE", conflict: "none", duel: "idle" };
-const $ = (id) => document.getElementById(id);
-$("workspaceLabel").textContent = workspace;
-function text(v, f = "—") {
-  return v === void 0 || v === null || v === "" ? f : String(v);
-}
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-}
-function short(v, n = 12) {
-  const s = text(v, "");
-  return s.length > n ? s.slice(0, n) + "…" : s;
-}
-function payload(e) {
-  return e && e.payload && typeof e.payload === "object" ? e.payload : {};
-}
-function summary(e) {
-  const p = payload(e);
-  for (const k of ["claim", "summary", "reasoning_summary", "message", "result", "question", "hypothesis", "plan"]) {
-    const v = p[k];
-    if (Array.isArray(v) && v.length) return v.map(String).join(" · ");
-    if (typeof v === "string" && v.trim()) return v.trim();
-  }
-  if (e.event_type === "TOOL_CALL") return text(p.tool || p.name, "tool call");
-  if (e.event_type === "TOOL_RESULT") return text(p.summary || p.result_code, "tool result");
-  return text(p.kind || p.status || e.event_type, "event");
-}
-function cls(e) {
-  if (e.stale_frontier) return " stale";
-  return "";
-}
-function category(e) {
-  const t = text(e.event_type);
-  if (/TOOL|FILE|PATCH|TEST/.test(t)) return "TOOLS";
-  if (/EVIDENCE|ASSUMPTION|FALSIFIER|AUTHORITY/.test(t)) return "EVIDENCE";
-  return "COGNITION";
-}
-function visible(e) {
-  return state.filter === "ALL" || category(e) === state.filter;
-}
-function eventCard(e) {
-  return `<article class="event-card${cls(e)}" data-event-id="${esc(e.event_id)}" data-agent="${esc(e.agent_id || e.agent || "SYSTEM")}"><div class="meta"><span class="etype">${esc(e.event_type)}</span><span>#${esc(e.commit_seq)}</span></div><div class="body">${esc(summary(e))}</div></article>`;
-}
-function renderAgents() {
-  for (const agent of ["GPT", "GLM"]) {
-    const events = state.events.filter((e) => (e.agent_id || e.agent) === agent && visible(e)).slice(-80).reverse();
-    $(agent.toLowerCase() + "Stream").innerHTML = events.map(eventCard).join("") || '<div class="label">no committed events</div>';
-    const a = state.agents[agent];
-    $(agent.toLowerCase() + "Seen").textContent = `seen ${a.lastSeen || 0}`;
-    $(agent.toLowerCase() + "Lag").textContent = `lag ${Math.max(0, state.frontier - (a.lastSeen || 0))}`;
-    $(agent.toLowerCase() + "Frontier").textContent = `frontier ${a.lastSeen || 0}`;
-    $(agent.toLowerCase() + "Model").textContent = a.model || "exact model pending";
-  }
-}
-function renderTimeline() {
-  const list = state.events.filter(visible).slice(-240);
-  $("timeline").innerHTML = list.map((e) => {
-    const agent = (e.agent_id || e.agent) === "GLM" ? "glm" : "gpt";
-    const special = e.event_type === "SEMANTIC_CONFLICT" ? " conflict" : /DUEL/.test(text(e.event_type)) ? " duel" : "";
-    return `<div class="timeline-row ${agent}${special}"><div class="timeline-card" data-event-id="${esc(e.event_id)}"><div class="tmeta">${esc(text(e.agent_id || e.agent))} · ${esc(short(e.event_hash, 10))}</div><div class="ttype">${esc(e.event_type)}</div><div class="ttext">${esc(summary(e))}</div></div><div class="seq"><span>${esc(e.commit_seq)}</span></div></div>`;
-  }).join("") || '<div class="label">waiting for causal events</div>';
-}
-function renderHeader() {
-  $("frontierBadge").textContent = `seq ${state.frontier || 0}`;
-  $("semanticPoint").textContent = state.semanticPoint;
-  $("mode").textContent = state.mode;
-  $("conflictState").textContent = state.conflict;
-  $("duelState").textContent = state.duel;
-  const a = state.authority || {};
-  $("authorityCheckpoint").textContent = short(a.checkpoint_id || a.semantic_checkpoint_id, 22);
-  $("authorityGit").textContent = short(a.git_main_sha || a.github_sha, 16);
-  $("authorityClaim").textContent = text(a.claim || a.claim_id) + " / " + text(a.directive || a.directive_id);
-  $("executionCandidate").textContent = text(a.execution_candidate, "none");
-  $("executorState").textContent = text(a.executor_state, "idle");
-}
-function render() {
-  renderHeader();
-  renderAgents();
-  renderTimeline();
-  bindCards();
-}
-function bindCards() {
-  document.querySelectorAll("[data-event-id]").forEach((el) => el.onclick = () => openInspector(state.byId.get(el.dataset.eventId)));
-}
-function ingest(raw) {
-  if (!raw || typeof raw !== "object" || !raw.event_id) return;
-  if (state.byId.has(raw.event_id)) return;
-  const seq = Number(raw.commit_seq || 0);
-  state.frontier = Math.max(state.frontier, seq);
-  state.events.push(raw);
-  state.events.sort((a, b) => Number(a.commit_seq || 0) - Number(b.commit_seq || 0));
-  state.byId.set(raw.event_id, raw);
-  const agent = raw.agent_id || raw.agent;
-  if (agent === "GPT" || agent === "GLM") {
-    state.agents[agent].lastSeen = Math.max(state.agents[agent].lastSeen, Number(raw.seen_commit_seq || raw.commit_seq || 0));
-    if (raw.model_provenance?.requested_model) state.agents[agent].model = raw.model_provenance.requested_model;
-    if (raw.event_type === "MODEL_STARTED") state.agents[agent].startedAt = Date.parse(raw.created_at || (/* @__PURE__ */ new Date()).toISOString());
-    if (raw.event_type === "MODEL_COMPLETED" || raw.event_type === "MODEL_INTERRUPTED") state.agents[agent].startedAt = 0;
-  }
-  if (raw.semantic_point) state.semanticPoint = raw.semantic_point;
-  if (raw.event_type === "SEMANTIC_CONFLICT") state.conflict = text(payload(raw).state, "open");
-  if (/DUEL/.test(text(raw.event_type))) state.duel = text(payload(raw).state, raw.event_type);
-  render();
-}
-async function snapshot() {
-  try {
-    const r = await fetch(`/a2/api/snapshot?workspace_id=${encodeURIComponent(workspace)}`, { credentials: "same-origin" });
-    if (!r.ok) throw new Error(`snapshot ${r.status}`);
-    const body = await r.json();
-    for (const e of Array.isArray(body.events) ? body.events : []) ingest(e);
-    state.authority = body.authority || {};
-    state.semanticPoint = body.semantic_point || state.semanticPoint;
-    state.mode = body.mode || state.mode;
-    if (body.peers) {
-      for (const a of ["GPT", "GLM"]) if (body.peers[a]) Object.assign(state.agents[a], body.peers[a]);
-    }
-    paintHealth("causalHealth", "CAUSAL — synced", "good");
-    paintHealth("authorityHealth", body.authority?.fresh === false ? "AUTHORITY — stale" : "AUTHORITY — fresh", body.authority?.fresh === false ? "bad" : "good");
-    render();
-  } catch (e) {
-    paintHealth("causalHealth", "CAUSAL — unavailable", "bad");
-    toast(String(e));
-  }
-}
-function connect() {
-  const after = state.frontier || 0;
-  const es = new EventSource(`/a2/api/events?workspace_id=${encodeURIComponent(workspace)}&after=${after}`);
-  es.onopen = () => paintHealth("liveHealth", "LIVE — connected", "good");
-  es.onmessage = (m) => {
-    try {
-      const e = JSON.parse(m.data);
-      if (e.type === "heartbeat") return;
-      ingest(e);
-    } catch {
-    }
-  };
-  es.onerror = () => {
-    paintHealth("liveHealth", "LIVE — reconnecting", "warn");
-    es.close();
-    setTimeout(connect, 1200);
-  };
-}
-function paintHealth(id, label, kind) {
-  const el = $(id);
-  el.textContent = label;
-  el.classList.remove("good", "warn", "bad");
-  el.classList.add(kind);
-}
-function toast(msg) {
-  const el = $("toast");
-  el.textContent = msg;
-  el.classList.add("show");
-  setTimeout(() => el.classList.remove("show"), 2600);
-}
-async function openInspector(e) {
-  if (!e) return;
-  state.selected = e;
-  $("inspector").classList.add("open");
-  $("inspector").setAttribute("aria-hidden", "false");
-  $("inspectTitle").textContent = `${e.event_type} · #${e.commit_seq}`;
-  await renderInspector("why");
-}
-async function renderInspector(tab) {
-  const e = state.selected;
-  if (!e) return;
-  document.querySelectorAll(".inspect-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
-  const p = payload(e), vp = e.visibility_proof || p.visibility_proof || {}, mp = e.model_provenance || p.model_provenance || {};
-  let html = "";
-  if (tab === "why") {
-    html = `<div class="inspect-section"><h4>Public reasoning</h4><pre>${esc(summary(e))}</pre></div><div class="inspect-section"><h4>Causal parents</h4><pre>${esc(JSON.stringify(e.parent_hashes || [], null, 2))}</pre></div>`;
-    try {
-      const r = await fetch(`/a2/api/events/${encodeURIComponent(e.event_id)}/ancestry`);
-      if (r.ok) {
-        const a = await r.json();
-        html += `<div class="inspect-section"><h4>Ancestry</h4><pre>${esc(JSON.stringify(a, null, 2))}</pre></div>`;
-      }
-    } catch {
-    }
-  } else if (tab === "seen") {
-    html = `<div class="inspect-section"><h4>Visibility proof</h4><div class="kv"><span>input frontier</span><span class="mono">${esc(text(vp.input_frontier_hash))}</span><span>seen commit seq</span><span>${esc(text(vp.seen_commit_seq))}</span><span>seen GPT seq</span><span>${esc(text(vp.seen_gpt_seq))}</span><span>seen GLM seq</span><span>${esc(text(vp.seen_glm_seq))}</span><span>context manifest</span><span class="mono">${esc(text(vp.context_manifest_sha256))}</span><span>stale frontier</span><span>${esc(text(e.stale_frontier, false))}</span></div></div><div class="inspect-section"><h4>Mandatory peer events included</h4><pre>${esc(JSON.stringify(vp.mandatory_peer_event_hashes || [], null, 2))}</pre></div>`;
-  } else if (tab === "evidence") {
-    html = `<div class="inspect-section"><h4>Evidence / assumptions / falsifiers</h4><pre>${esc(JSON.stringify({ evidence: p.evidence_used || p.evidence, assumptions: p.assumptions, falsifier: p.falsifier, tests: p.tests_required }, null, 2))}</pre></div>`;
-  } else if (tab === "tool") {
-    html = `<div class="inspect-section"><h4>Tool I/O</h4><pre>${esc(JSON.stringify({ tool: p.tool, arguments: p.arguments, input: p.input, result: p.result, error: p.error }, null, 2))}</pre></div>`;
-  } else {
-    html = `<div class="inspect-section"><h4>Hashes</h4><div class="kv"><span>event</span><span class="mono">${esc(text(e.event_hash))}</span><span>payload</span><span class="mono">${esc(text(e.payload_sha256))}</span><span>parents</span><span class="mono">${esc((e.parent_hashes || []).join("\n"))}</span></div></div><div class="inspect-section"><h4>Trusted ingress receipt</h4><pre>${esc(JSON.stringify(e.ingress_receipt || { status: "legacy_or_unverified" }, null, 2))}</pre></div><div class="inspect-section"><h4>Model provenance</h4><pre>${esc(JSON.stringify(mp, null, 2))}</pre></div>`;
-  }
-  $("inspectBody").innerHTML = html;
-}
-document.querySelectorAll(".filters button").forEach((b) => b.onclick = () => {
-  state.filter = b.dataset.filter;
-  document.querySelectorAll(".filters button").forEach((x) => x.classList.toggle("active", x === b));
-  render();
-});
-document.querySelectorAll(".inspect-tabs button").forEach((b) => b.onclick = () => renderInspector(b.dataset.tab));
-$("closeInspector").onclick = () => {
-  $("inspector").classList.remove("open");
-  $("inspector").setAttribute("aria-hidden", "true");
-};
-setInterval(() => {
-  const now = Date.now();
-  for (const agent of ["GPT", "GLM"]) {
-    const a = state.agents[agent];
-    const gap = a.startedAt ? Math.max(0, now - a.startedAt) : 0;
-    a.gap = gap;
-    const el = $(agent.toLowerCase() + "Gap");
-    el.textContent = `${gap} ms`;
-    el.parentElement.classList.toggle("warn", gap >= 5e3 && gap < 15e3);
-    el.parentElement.classList.toggle("bad", gap >= 15e3);
-  }
-}, 250);
-await snapshot();
-connect();
+const params=new URLSearchParams(location.search);
+const workspace=params.get("workspace_id")||"063e3923-ef85-4226-9843-861ad4ec5a21";
+const state={events:[],byId:new Map(),filter:"ALL",frontier:0,semanticPoint:"—",mode:"—",peers:{GPT:{},GLM:{}},sync:{},authority:{},selected:null,started:{GPT:0,GLM:0},lastFocus:null};
+const $=id=>document.getElementById(id);
+$("workspaceLabel").textContent=workspace;
+const esc=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[char]);
+const text=(value,fallback="—")=>value===null||value===undefined||value===""?fallback:String(value);
+const short=(value,length=12)=>{const output=text(value,"");return output.length>length?`${output.slice(0,length)}…`:output;};
+const payload=event=>event?.payload&&typeof event.payload==="object"?event.payload:{};
+const action=event=>payload(event).a2_action&&typeof payload(event).a2_action==="object"?payload(event).a2_action:{};
+function summary(event){const p=payload(event);for(const key of ["claim","summary","reasoning_summary","message","result","question","hypothesis","plan","error"]){const value=p[key];if(Array.isArray(value)&&value.length)return value.map(String).join(" · ");if(typeof value==="string"&&value.trim())return value.trim();}return text(p.tool||p.state||event.event_type,"event");}
+function category(event){const type=text(event.event_type);if(/TOOL|FILE|PATCH|TEST/.test(type))return"TOOLS";if(/AUTHORITY/.test(type))return"AUTHORITY";if(/MODEL|CATCH_UP|CHECKPOINT|BACKPRESSURE|ERROR|PEER_EVENT/.test(type))return"RUNTIME";return"COGNITION";}
+function phaseColor(phase){return phase==="PROPOSE"?"":phase==="CHALLENGE"?"warn":phase==="DECIDE"?"good":"";}
+function paint(id,label,kind=""){const element=$(id);element.textContent=label;element.classList.remove("good","warn","bad");if(kind)element.classList.add(kind);}
+function ingest(event){if(!event||typeof event!=="object"||!event.event_id)return;const existing=state.byId.get(event.event_id);if(existing)Object.assign(existing,event);else{state.byId.set(event.event_id,event);state.events.push(event);}state.events.sort((a,b)=>Number(a.commit_seq||0)-Number(b.commit_seq||0));state.frontier=Math.max(state.frontier,Number(event.commit_seq||0));if(event.semantic_point)state.semanticPoint=event.semantic_point;const agent=event.agent||event.agent_id;if((agent==="GPT"||agent==="GLM")&&event.model_provenance?.requested_model)state.peers[agent].model=event.model_provenance.requested_model;if(agent==="GPT"||agent==="GLM"){if(event.event_type==="MODEL_STARTED")state.started[agent]=Date.parse(event.created_at||new Date().toISOString());if(["MODEL_COMPLETED","MODEL_INTERRUPTED","ERROR"].includes(event.event_type))state.started[agent]=0;}}
+function acknowledgementMap(){const map=new Map();for(const event of state.events){for(const agent of Array.isArray(event.applied_by)?event.applied_by:[]){const set=map.get(event.event_hash)||new Set();set.add(agent);map.set(event.event_hash,set);}if(event.event_type!=="PEER_EVENT_APPLIED")continue;for(const hash of Array.isArray(payload(event).peer_event_hashes)?payload(event).peer_event_hashes:[]){const set=map.get(hash)||new Set();set.add(event.agent||event.agent_id);map.set(hash,set);}}return map;}
+function renderRound(){const round=state.sync?.current_round||{};const status=text(round.status,"WAITING");$("roundNumber").textContent=text(round.round_seq,"—");$("roundPhase").textContent=text(round.deliberation_phase,"WAITING");$("roundPhase").className=phaseColor(round.deliberation_phase);$("roundStatus").textContent=status;$("roundBase").textContent=`#${text(round.base_commit_seq,"—")}`;$("gptSlot").textContent=round.gpt_session_id?"ready":"joining";$("glmSlot").textContent=round.glm_session_id?"ready":"joining";$("gptResult").textContent=round.gpt_event_hash?`result ${short(round.gpt_event_hash,10)}`:"result pending";$("glmResult").textContent=round.glm_event_hash?`result ${short(round.glm_event_hash,10)}`:"result pending";const copy={PROPOSE:"Both peers reason independently from the same immutable frontier.",CHALLENGE:"Each peer must bind its critique to the other model's committed event.",DECIDE:"Matching actions unlock autonomous execution; disagreement opens a formal duel."};$("roundSummary").textContent=copy[round.deliberation_phase]||"Waiting for both exact-model peers to claim one immutable frontier.";$("interactionState").textContent=round.deliberation_phase?`${round.deliberation_phase.toLowerCase()} · DB fenced`:"propose → challenge → decide";const remaining=round.expires_at?Math.max(0,Date.parse(round.expires_at)-Date.now()):null;$("roundDeadline").textContent=remaining===null?"awaiting peer":status==="OPEN"?`${(remaining/1000).toFixed(1)}s`:status.toLowerCase();}
+function renderAgents(){for(const agent of ["GPT","GLM"]){const key=agent.toLowerCase(),peer=state.peers[agent]||{},received=Number(peer.received||0),applied=Number(peer.applied??peer.lastSeen??0),latest=[...state.events].reverse().find(event=>(event.agent||event.agent_id)===agent&&event.event_type!=="PEER_EVENT_APPLIED");$(key+"Model").textContent=text(peer.model,agent==="GPT"?"openai/gpt-5.6-sol":"zai/glm-5.3");$(key+"Received").textContent=received;$(key+"Applied").textContent=applied;$(key+"Lag").textContent=Math.max(0,state.frontier-applied);$(key+"Current").textContent=latest?`${latest.event_type} · ${short(summary(latest),74)}`:"waiting";const online=peer.status==="ACTIVE";paint(key+"Health",online?"active":"offline",online?"good":"");}}
+function renderVisibility(){const acks=acknowledgementMap();const rows=state.events.filter(event=>event.event_type!=="PEER_EVENT_APPLIED").slice(-60).reverse();$("visibilityRows").innerHTML=rows.length?rows.map(event=>{const origin=event.agent||event.agent_id,trace=action(event).trace_id,seen=acks.get(event.event_hash)||new Set();const status=agent=>origin===agent?'<span class="cell-status origin">origin</span>':seen.has(agent)?'<span class="cell-status seen">applied</span>':'<span class="cell-status pending">pending</span>';return`<tr data-event-id="${esc(event.event_id)}"><td class="mono">#${esc(event.commit_seq)}</td><td><strong>${esc(event.event_type)}</strong><br><span class="mono">${esc(short(event.event_hash,10))}</span></td><td class="mono">${esc(short(trace,12))}</td><td>${status("GPT")}</td><td>${status("GLM")}</td></tr>`;}).join(""):'<tr><td colspan="5" class="empty">No committed actions yet.</td></tr>';}
+function renderLedger(){const visible=state.events.filter(event=>state.filter==="ALL"||category(event)===state.filter).slice(-240).reverse();$("actionLedger").innerHTML=visible.length?visible.map(event=>`<article class="action-row" data-event-id="${esc(event.event_id)}" data-agent="${esc(event.agent||event.agent_id||"SYSTEM")}"><span class="seq mono">#${esc(event.commit_seq)}</span><span class="actor">${esc(event.agent||event.agent_id||"SYSTEM")}</span><span class="kind">${esc(event.event_type)}</span><span class="summary">${esc(summary(event))}</span><span class="trace mono">${esc(short(action(event).traceparent||event.event_hash,18))}</span></article>`).join(""):'<p class="empty">No events in this filter.</p>';}
+function renderAuthority(){const value=state.authority||{};$("authorityCheckpoint").textContent=short(value.checkpoint_id,24);$("authorityRoot").textContent=short(value.payload_root_sha256,20);$("authorityNext").textContent=text(value.next_mainline);$("authorityIntegrity").textContent=value.fresh===true?"fresh / no drift":"stale or drifted";paint("authorityHealth",value.fresh===true?"AUTHORITY · fresh":"AUTHORITY · fenced",value.fresh===true?"good":"bad");}
+function render(){$("frontierBadge").textContent=`commit ${state.frontier}`;$("semanticPoint").textContent=state.semanticPoint;$("mode").textContent=state.mode;$("duelState").textContent=state.mode==="DUEL"?"active":"idle";renderRound();renderAgents();renderVisibility();renderLedger();renderAuthority();document.querySelectorAll("[data-event-id]").forEach(element=>element.onclick=()=>openInspector(state.byId.get(element.dataset.eventId),element));}
+async function loadSnapshot(silent=false){try{const response=await fetch(`/a2/api/snapshot?workspace_id=${encodeURIComponent(workspace)}`,{credentials:"same-origin",cache:"no-store"});if(!response.ok)throw new Error(`snapshot ${response.status}`);const body=await response.json();for(const event of Array.isArray(body.events)?body.events:[])ingest(event);state.frontier=Math.max(state.frontier,Number(body.frontier?.head_commit_seq||0));state.semanticPoint=body.semantic_point||state.semanticPoint;state.mode=body.mode||state.mode;state.peers={...state.peers,...(body.peers||{})};state.sync=body.sync||{};state.authority=body.authority||{};paint("causalHealth","CAUSAL · synchronized","good");render();}catch(error){paint("causalHealth","CAUSAL · unavailable","bad");if(!silent)toast(String(error));}}
+function connect(){const source=new EventSource(`/a2/api/events?workspace_id=${encodeURIComponent(workspace)}&after=${state.frontier}`);source.onopen=()=>paint("liveHealth","LIVE · connected","good");source.onmessage=message=>{try{const event=JSON.parse(message.data);if(event.type!=="heartbeat"){ingest(event);render();}}catch{}};source.onerror=()=>paint("liveHealth","LIVE · reconnecting","warn");}
+function toast(message){const element=$("toast");element.textContent=message;element.classList.add("show");setTimeout(()=>element.classList.remove("show"),2800);}
+function openInspector(event,trigger){if(!event)return;state.selected=event;state.lastFocus=trigger||document.activeElement;$("inspector").classList.add("open");$("inspector").setAttribute("aria-hidden","false");$("scrim").hidden=false;$("inspectTitle").textContent=`${event.event_type} · #${event.commit_seq}`;renderInspector("reason");$("closeInspector").focus();}
+function closeInspector(){$("inspector").classList.remove("open");$("inspector").setAttribute("aria-hidden","true");$("scrim").hidden=true;state.lastFocus?.focus?.();}
+async function renderInspector(tab){const event=state.selected;if(!event)return;document.querySelectorAll(".inspect-tabs button").forEach(button=>button.classList.toggle("active",button.dataset.tab===tab));const p=payload(event),vp=event.visibility_proof||{},a=action(event),acks=[...(acknowledgementMap().get(event.event_hash)||new Set())];let html="";if(tab==="reason")html=`<section class="inspect-section"><h3>Public engineering rationale</h3><pre>${esc(summary(event))}</pre></section><section class="inspect-section"><h3>Evidence · assumptions · falsifier</h3><pre>${esc(JSON.stringify({evidence:p.evidence_used||p.evidence||[],assumptions:p.assumptions||[],counterexample:p.counterexample||null,falsifier:p.falsifier||null,tests:p.tests_required||[]},null,2))}</pre></section>`;else if(tab==="visibility")html=`<section class="inspect-section"><h3>Cross-peer acknowledgement</h3><div class="kv"><span>origin</span><span>${esc(event.agent||event.agent_id)}</span><span>applied by</span><span>${esc(acks.join(", ")||"pending")}</span><span>seen commit</span><span>${esc(text(vp.seen_commit_seq))}</span><span>input frontier</span><span class="mono">${esc(text(vp.input_frontier_hash))}</span></div></section><section class="inspect-section"><h3>Mandatory peer hashes</h3><pre>${esc(JSON.stringify(vp.mandatory_peer_event_hashes||[],null,2))}</pre></section>`;else if(tab==="action")html=`<section class="inspect-section"><h3>Action envelope</h3><pre>${esc(JSON.stringify(a,null,2))}</pre></section><section class="inspect-section"><h3>Tool / proposed action</h3><pre>${esc(JSON.stringify({proposed_action:p.proposed_action,resulting_action:p.resulting_action,tool:p.tool,arguments:p.arguments,result:p.result,error:p.error},null,2))}</pre></section>`;else html=`<section class="inspect-section"><h3>Hashes and causal parents</h3><div class="kv"><span>event</span><span class="mono">${esc(text(event.event_hash))}</span><span>payload</span><span class="mono">${esc(text(event.payload_sha256))}</span><span>parents</span><span class="mono">${esc((event.parent_hashes||[]).join("\n"))}</span></div></section><section class="inspect-section"><h3>Trusted ingress</h3><pre>${esc(JSON.stringify(event.ingress_receipt||{status:"not available"},null,2))}</pre></section>`;$("inspectBody").innerHTML=html;}
+document.querySelectorAll(".filters button").forEach(button=>button.onclick=()=>{state.filter=button.dataset.filter;document.querySelectorAll(".filters button").forEach(candidate=>candidate.classList.toggle("active",candidate===button));render();});
+document.querySelectorAll(".inspect-tabs button").forEach(button=>button.onclick=()=>renderInspector(button.dataset.tab));
+$("closeInspector").onclick=closeInspector;$("scrim").onclick=closeInspector;document.addEventListener("keydown",event=>{if(event.key==="Escape"&&$("inspector").classList.contains("open"))closeInspector();});
+setInterval(()=>{renderRound();const now=Date.now();for(const agent of ["GPT","GLM"]){const gap=state.started[agent]?Math.max(0,now-state.started[agent]):0;$(agent.toLowerCase()+"Gap").textContent=`opaque gap ${gap} ms`;$(agent.toLowerCase()+"Gap").style.color=gap>=15000?"var(--red)":gap>=5000?"var(--amber)":"";}},250);
+setInterval(()=>void loadSnapshot(true),5000);
+await loadSnapshot();connect();

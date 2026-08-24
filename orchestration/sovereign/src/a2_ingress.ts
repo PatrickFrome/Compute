@@ -68,6 +68,12 @@ const PEER_SQL: Record<string, string> = {
     "select public.h205f22_a2_read_visibility_proof_v1($1) as v",
   h205f22_a2_read_event_ancestry_v1:
     "select public.h205f22_a2_read_event_ancestry_v1($1,$2) as v",
+  h205f22_a2_join_sync_round_v1:
+    "select public.h205f22_a2_join_sync_round_v1($1,$2) as v",
+  h205f22_a2_abandon_sync_round_v1:
+    "select public.h205f22_a2_abandon_sync_round_v1($1,$2,$3) as v",
+  h205f22_a2_read_sync_state_v1:
+    "select public.h205f22_a2_read_sync_state_v1($1) as v",
 };
 const PEER_RPC = new Set(Object.keys(PEER_SQL));
 

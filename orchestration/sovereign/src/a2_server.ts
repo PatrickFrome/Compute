@@ -25,6 +25,7 @@ const RPC_SQL = {
   readSnapshot: "select public.h205f22_a2_read_snapshot_v1($1,$2) as value",
   readEvents: "select public.h205f22_a2_read_events_v1($1,$2,$3) as value",
   readAncestry: "select public.h205f22_a2_read_event_ancestry_v1($1,$2) as value",
+  readSync: "select public.h205f22_a2_read_sync_state_v1($1) as value",
 } as const;
 
 function required(name: string): string {
@@ -123,6 +124,7 @@ function peerMap(peers: Json[], cursors: Json[]): Record<string, Json> {
       runtime_id: peer.runtime_id,
       status: peer.status,
       lastSeen: Number(cursor.last_applied_commit_seq || 0),
+      applied: Number(cursor.last_applied_commit_seq || 0),
       received: Number(cursor.last_received_commit_seq || 0),
       frontier: cursor.causal_frontier_hash,
       capabilities: peer.capabilities,
@@ -143,11 +145,34 @@ async function ingressReceipts(eventHashes: string[]): Promise<Map<string, Json>
 async function decorateEvents(events: Json[]): Promise<Json[]> {
   const hashes = events.map((event) => event.event_hash).filter((hash): hash is string => typeof hash === "string");
   const receipts = await ingressReceipts(hashes);
-  return events.map((event) => ({ ...event, ingress_receipt: receipts.get(String(event.event_hash)) || null }));
+  const appliedBy = new Map<string, Set<string>>();
+  for (const event of events) {
+    if (event.event_type !== "PEER_EVENT_APPLIED") continue;
+    const payload = event.payload && typeof event.payload === "object" ? event.payload as Json : {};
+    const eventHashes = Array.isArray(payload.peer_event_hashes) ? payload.peer_event_hashes : [];
+    for (const hash of eventHashes) {
+      if (typeof hash !== "string") continue;
+      const agents = appliedBy.get(hash) || new Set<string>();
+      agents.add(String(event.agent || event.agent_id || ""));
+      appliedBy.set(hash, agents);
+    }
+  }
+  return events.map((event) => {
+    const agent = String(event.agent || event.agent_id || "");
+    const acknowledgers = [...(appliedBy.get(String(event.event_hash)) || new Set())].filter(Boolean).sort();
+    const expectedPeer = agent === "GPT" ? "GLM" : agent === "GLM" ? "GPT" : null;
+    return {
+      ...event,
+      ingress_receipt: receipts.get(String(event.event_hash)) || null,
+      applied_by: acknowledgers,
+      expected_peer: expectedPeer,
+      peer_applied: expectedPeer ? acknowledgers.includes(expectedPeer) : null,
+    };
+  });
 }
 
 async function snapshot(workspaceId: string): Promise<Json> {
-  const raw = await rpc<Json>("readSnapshot", [workspaceId, 250]);
+  const [raw, sync] = await Promise.all([rpc<Json>("readSnapshot", [workspaceId, 250]), rpc<Json>("readSync", [workspaceId])]);
   const workspace = (raw.workspace || {}) as Json;
   const events = Array.isArray(raw.events) ? (raw.events as Json[]) : [];
   const peers = Array.isArray(raw.peers) ? (raw.peers as Json[]) : [];
@@ -159,6 +184,7 @@ async function snapshot(workspaceId: string): Promise<Json> {
     events: await decorateEvents(events),
     peers: peerMap(peers, cursors),
     authority: await authority(),
+    sync,
   };
 }
 

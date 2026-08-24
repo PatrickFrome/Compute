@@ -9,6 +9,7 @@ on:
       - "orchestration/sovereign/scripts/start-a2.sh"
       - "orchestration/sovereign/package.json"
       - "supabase/migrations/*a2*"
+      - "supabase/tests/a2_*"
       - ".github/workflows/a2-cognitive-bus.yml"
   push:
     branches:
@@ -43,6 +44,8 @@ jobs:
             20260824122043_a2_duel_state_machine_bridge.sql
             20260824122743_a2_ingress_single_preimage_contract.sql
             20260824124953_a2_duel_mode_cognition_fence.sql
+            20260824131019_a2_lockstep_sync_rounds_v1.sql
+            20260824133207_a2_sync_round_fk_indexes_v1.sql
           )
           for migration in "${migrations[@]}"; do
             test -s "supabase/migrations/$migration" || { echo "missing A2 migration: $migration"; exit 1; }
@@ -52,6 +55,10 @@ jobs:
           grep -q "create or replace function public.h205f22_a2_emit_agent_event_v1" "$replay"
           grep -q "create or replace function public.h205f22_a2_read_frontier_v1" "$replay"
           grep -q "create trigger trg_a2_guard_event" "$replay"
+          lockstep="supabase/migrations/20260824131019_a2_lockstep_sync_rounds_v1.sql"
+          grep -q "compute_fabric_a2_sync_round_h205f22" "$lockstep"
+          grep -q "a2_sync_round_visibility_frontier_mismatch" "$lockstep"
+          grep -q "a2_model_event_stale_frontier" "$lockstep"
           if grep -q "HISTORY MARKER ONLY" "$replay"; then
             echo "consolidated A2 replay contract must not be a history marker"
             exit 1
