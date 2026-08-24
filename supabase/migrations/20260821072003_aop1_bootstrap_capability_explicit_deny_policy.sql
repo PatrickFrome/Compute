@@ -1,0 +1,8 @@
+drop policy if exists compute_fabric_aop_bootstrap_capability_deny_clients
+on destruktion_meta.compute_fabric_aop_bootstrap_capability_h205f22;
+
+create policy compute_fabric_aop_bootstrap_capability_deny_clients
+on destruktion_meta.compute_fabric_aop_bootstrap_capability_h205f22
+for all to anon, authenticated
+using (false)
+with check (false);

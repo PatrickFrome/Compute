@@ -1,0 +1,64 @@
+name: Sovereign inference contract
+
+on:
+  pull_request:
+    paths:
+      - "orchestration/sovereign/**"
+      - "orchestration/cloudflare/src/index.ts"
+      - "orchestration/cloudflare/src/supabase.ts"
+      - "supabase/migrations/20260824070306_duel_sovereign_inference_v1.sql"
+      - "supabase/migrations/20260824073410_same_point_duel_v4.sql"
+      - "supabase/migrations/20260824073803_same_point_duel_v4_executor_fencing.sql"
+      - "supabase/migrations/20260824074927_same_point_duel_v4_recovery_readback.sql"
+      - "tests/test_sovereign_inference_contract.py"
+      - "tests/test_same_point_duel_v4_contract.py"
+      - "tests/test_sovereign_endpoint_contract.py"
+      - ".github/workflows/sovereign-inference-contract.yml"
+  push:
+    branches:
+      - "work/aop1-autonomous-orchestration"
+    paths:
+      - "orchestration/sovereign/**"
+      - "orchestration/cloudflare/src/index.ts"
+      - "orchestration/cloudflare/src/supabase.ts"
+      - "supabase/migrations/20260824070306_duel_sovereign_inference_v1.sql"
+      - "supabase/migrations/20260824073410_same_point_duel_v4.sql"
+      - "supabase/migrations/20260824073803_same_point_duel_v4_executor_fencing.sql"
+      - "supabase/migrations/20260824074927_same_point_duel_v4_recovery_readback.sql"
+      - "tests/test_sovereign_inference_contract.py"
+      - "tests/test_same_point_duel_v4_contract.py"
+      - "tests/test_sovereign_endpoint_contract.py"
+      - ".github/workflows/sovereign-inference-contract.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify tariff-independent invariants
+        run: python tests/test_sovereign_inference_contract.py
+      - name: Verify same-point V4 debate invariants
+        run: python tests/test_same_point_duel_v4_contract.py
+      - name: Verify complete endpoint surface
+        run: python tests/test_sovereign_endpoint_contract.py
+
+  runner:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: orchestration/sovereign
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install runner dependencies
+        run: npm install --no-audit --no-fund
+      - name: Typecheck persistent runners and gateway
+        run: npm run check
