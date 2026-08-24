@@ -1,0 +1,86 @@
+name: W1 Codespaces Readonly Probe
+
+on:
+  push:
+    branches: [ops/w1-codespaces-probe-20260825]
+    paths:
+      - '.github/workflows/w1-codespaces-readonly-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Probe Codespaces capability without mutation
+        env:
+          USER_PAT: ${{ secrets.PAP_CHATGPT_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$USER_PAT"
+          mkdir -p evidence
+          api_get() {
+            local url="$1" out="$2"
+            curl --silent --show-error --location \
+              -H 'Accept: application/vnd.github+json' \
+              -H "Authorization: Bearer ${USER_PAT}" \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              -o "$out.body" -w '%{http_code}' "$url" > "$out.status"
+          }
+          api_get 'https://api.github.com/user' evidence/user
+          api_get 'https://api.github.com/user/codespaces?per_page=100' evidence/codespaces
+          api_get 'https://api.github.com/repos/PatrickFrome/Compute/codespaces/machines' evidence/machines
+          api_get 'https://api.github.com/users/PatrickFrome/settings/billing/usage/summary?product=codespaces' evidence/billing
+          python3 - <<'PY'
+          import json, pathlib
+          root=pathlib.Path('evidence')
+          def load(name):
+              status=(root/f'{name}.status').read_text().strip()
+              try: body=json.loads((root/f'{name}.body').read_text())
+              except Exception: body={}
+              return status,body
+          us,ub=load('user'); cs,cb=load('codespaces'); ms,mb=load('machines'); bs,bb=load('billing')
+          out={
+            'schema':'metaengine.compute.w1-codespaces-readonly-probe.v1',
+            'user_http':us,
+            'user_login':ub.get('login') if us=='200' else None,
+            'codespaces_http':cs,
+            'codespaces':[],
+            'machines_http':ms,
+            'machines':[],
+            'billing_http':bs,
+            'codespaces_usage':[],
+            'mutation_performed':False,
+          }
+          if cs=='200':
+              for c in cb.get('codespaces',[]):
+                  out['codespaces'].append({
+                    'name':c.get('name'),'state':c.get('state'),
+                    'repository':(c.get('repository') or {}).get('full_name'),
+                    'billable_owner':(c.get('billable_owner') or {}).get('login'),
+                    'machine':(c.get('machine') or {}).get('name'),
+                    'cpus':(c.get('machine') or {}).get('cpus'),
+                    'location':c.get('location'),'last_used_at':c.get('last_used_at'),
+                    'git_ref':(c.get('git_status') or {}).get('ref'),
+                    'retention_expires_at':c.get('retention_expires_at'),
+                  })
+          if ms=='200':
+              for m in mb.get('machines',[]):
+                  out['machines'].append({'name':m.get('name'),'display_name':m.get('display_name'),'cpus':m.get('cpus'),'memory_in_bytes':m.get('memory_in_bytes'),'storage_in_bytes':m.get('storage_in_bytes')})
+          if bs=='200':
+              for u in bb.get('usageItems',[]):
+                  if str(u.get('product','')).lower()=='codespaces':
+                      out['codespaces_usage'].append({k:u.get(k) for k in ('product','sku','unitType','grossQuantity','grossAmount','discountQuantity','discountAmount','netQuantity','netAmount')})
+          pathlib.Path('evidence/w1-codespaces-readonly-probe.json').write_text(json.dumps(out,sort_keys=True,separators=(',',':'))+'\n')
+          print(json.dumps(out,sort_keys=True))
+          PY
+
+      - name: Upload probe evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: w1-codespaces-readonly-probe
+          path: evidence/w1-codespaces-readonly-probe.json
+          if-no-files-found: error
+          retention-days: 7
