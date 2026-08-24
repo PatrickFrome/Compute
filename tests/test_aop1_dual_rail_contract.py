@@ -47,7 +47,16 @@ for marker in (
 ):
     assert marker in MICROSTEP
 
-# Queue delivery is configured for immediate dispatch rather than batching.
+# DB-origin duel wakes bypass Queue entirely: HMAC verification is followed by a
+# direct Durable Object binding call, which starts the Workflow immediately. Queue
+# remains available for recovery/other AOP wake sources only.
+assert 'const direct = await supervisorStub(env).wake(wake)' in INDEX
+assert 'transport: "DIRECT_DURABLE_OBJECT"' in INDEX
+assert 'duel_start_path: "DIRECT_DO_NO_QUEUE"' in INDEX
+db_wake_block = INDEX.split('url.pathname === "/duel/db-wake"', 1)[1].split('url.pathname === "/wake"', 1)[0]
+assert 'AOP_WAKE_QUEUE.send' not in db_wake_block
+
+# Any remaining Queue delivery is configured for immediate single-message dispatch.
 assert '"max_batch_size": 1' in WRANGLER
 assert '"max_batch_timeout": 0' in WRANGLER
 
@@ -64,9 +73,10 @@ assert 'duel_pair_persisted_readback_required' in MICROSTEP
 assert 'hot_path_readback:"DB_SELECTED_PAIR_RECEIPT"' in MICROSTEP
 assert 'microstep-read-${tick}' not in MICROSTEP
 
-# Health exposes routing availability without exposing any credential value.
+# Health exposes routing and hot-path choices without exposing credential values.
 assert 'DUAL_RAIL_RACE_V1' in INDEX
 assert 'FIRST_VALID_EXACT_MODEL_RESPONSE_WINS' in INDEX
+assert 'DB_WEBHOOK+DIRECT_DURABLE_OBJECT+WORKFLOW+ATOMIC_DB_PAIR+DUAL_RAIL_RACE' in INDEX
 assert 'vercel_ai_gateway: vercelRail' in INDEX
 assert 'cloudflare_ai: cloudflareRail' in INDEX
 assert 'VERCEL_AI_GATEWAY_API_KEY?: string' in TYPES
