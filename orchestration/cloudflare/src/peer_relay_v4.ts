@@ -68,8 +68,12 @@ function parseJson(text: string): Obj {
 
 function responseText(body: Obj): string {
   if (typeof body.output_text === "string") return body.output_text;
+  const result = body.result && typeof body.result === "object" && !Array.isArray(body.result)
+    ? body.result as Obj
+    : body;
+  if (typeof result.output_text === "string") return result.output_text;
   const chunks: string[] = [];
-  for (const item of Array.isArray(body.output) ? body.output : []) {
+  for (const item of Array.isArray(result.output) ? result.output : []) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
     const content = (item as Obj).content;
     if (!Array.isArray(content)) continue;
@@ -137,29 +141,19 @@ function sanitizedPayload(raw: Obj, wave: Wave, expectedPeerHash: string | null)
   if (raw.phase !== wave) throw new Error(`phase_mismatch:${String(raw.phase)}:${wave}`);
   const stepType = reqString(raw.step_type, "step_type");
   if (!/^[A-Z][A-Z0-9_]{1,47}$/.test(stepType)) throw new Error("step_type_invalid");
-  const claim = reqString(raw.claim, "claim");
-  const reasoning = reqArray(raw.reasoning_summary, "reasoning_summary");
-  const evidence = reqArray(raw.evidence_used, "evidence_used");
-  const assumptions = reqArray(raw.assumptions, "assumptions");
-  const addressed = reqArray(raw.peer_claims_addressed, "peer_claims_addressed");
-  const tests = reqArray(raw.tests_required, "tests_required");
-  const falsifier = reqString(raw.falsifier, "falsifier");
-  const counterexample = raw.counterexample == null ? null : reqString(raw.counterexample, "counterexample");
-  const needCanary = raw.need_canary === true;
-
   const payload: Obj = {
     phase: wave,
     step_type: stepType,
-    claim,
-    reasoning_summary: reasoning,
-    evidence_used: evidence,
-    assumptions,
-    peer_claims_addressed: addressed,
-    counterexample,
-    falsifier,
-    tests_required: tests,
+    claim: reqString(raw.claim, "claim"),
+    reasoning_summary: reqArray(raw.reasoning_summary, "reasoning_summary"),
+    evidence_used: reqArray(raw.evidence_used, "evidence_used"),
+    assumptions: reqArray(raw.assumptions, "assumptions"),
+    peer_claims_addressed: reqArray(raw.peer_claims_addressed, "peer_claims_addressed"),
+    counterexample: raw.counterexample == null ? null : reqString(raw.counterexample, "counterexample"),
+    falsifier: reqString(raw.falsifier, "falsifier"),
+    tests_required: reqArray(raw.tests_required, "tests_required"),
     peer_event_hash_addressed: wave === "PROPOSE" ? null : expectedPeerHash,
-    need_canary: needCanary,
+    need_canary: raw.need_canary === true,
     terminal_vote: null,
     canonical: false,
     authority_effect: false,
@@ -202,36 +196,112 @@ function prompt(actor: Actor, wave: Wave, lease: PeerLease, relay: Obj, authorit
   return [`ACTOR=${actor}`, `WAVE=${wave}`, independence, required, `CONTEXT=${JSON.stringify(context)}`].join("\n");
 }
 
-async function callModel(env: Env, actor: Actor, wave: Wave, lease: PeerLease, relay: Obj, authority: JsonObject, expectedPeerHash: string | null): Promise<JsonObject> {
-  if (!env.VERCEL_AI_GATEWAY_API_KEY) throw new Error("vercel_ai_gateway_key_missing");
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort("peer_model_timeout"), modelTimeoutMs(env));
-  try {
-    const response = await fetch("https://ai-gateway.vercel.sh/v1/responses", {
+async function cloudflareExact(
+  env: Env,
+  actor: Actor,
+  promptText: string,
+  signal: AbortSignal,
+): Promise<Obj> {
+  if (!env.CF_ACCOUNT_ID || !env.CF_AI_TOKEN) throw new Error("cloudflare_exact_unconfigured");
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/ai/v1/responses`,
+    {
       method: "POST",
-      signal: controller.signal,
+      signal,
       headers: {
-        authorization: `Bearer ${env.VERCEL_AI_GATEWAY_API_KEY}`,
+        authorization: `Bearer ${env.CF_AI_TOKEN}`,
         "content-type": "application/json",
+        "cf-aig-gateway-id": env.AOP_AI_GATEWAY_ID || "default",
       },
       body: JSON.stringify({
         model: model(actor),
         instructions: SYSTEM,
-        input: prompt(actor, wave, lease, relay, authority, expectedPeerHash),
+        input: promptText,
         reasoning: { effort: "high" },
         max_output_tokens: maxOutputTokens(env),
         store: false,
       }),
-    });
-    const text = await response.text();
-    if (!response.ok) throw new Error(`peer_model_${actor.toLowerCase()}_${response.status}:${text.slice(0, 800)}`);
-    const body = asObj(JSON.parse(text), "gateway_response");
-    const output = responseText(body);
-    if (!output) throw new Error(`peer_model_${actor.toLowerCase()}_empty`);
-    return sanitizedPayload(parseJson(output), wave, expectedPeerHash);
-  } finally {
-    clearTimeout(timer);
+    },
+  );
+  const text = await response.text();
+  if (!response.ok) throw new Error(`cloudflare_exact_${actor.toLowerCase()}_${response.status}:${text.slice(0, 700)}`);
+  const body = asObj(JSON.parse(text), "cloudflare_gateway_response");
+  const output = responseText(body);
+  if (!output) throw new Error(`cloudflare_exact_${actor.toLowerCase()}_empty`);
+  return parseJson(output);
+}
+
+async function vercelExact(
+  env: Env,
+  actor: Actor,
+  promptText: string,
+  signal: AbortSignal,
+): Promise<Obj> {
+  if (!env.VERCEL_AI_GATEWAY_API_KEY) throw new Error("vercel_exact_unconfigured");
+  const response = await fetch("https://ai-gateway.vercel.sh/v1/responses", {
+    method: "POST",
+    signal,
+    headers: {
+      authorization: `Bearer ${env.VERCEL_AI_GATEWAY_API_KEY}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: model(actor),
+      instructions: SYSTEM,
+      input: promptText,
+      reasoning: { effort: "high" },
+      max_output_tokens: maxOutputTokens(env),
+      store: false,
+    }),
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`vercel_exact_${actor.toLowerCase()}_${response.status}:${text.slice(0, 700)}`);
+  const body = asObj(JSON.parse(text), "vercel_gateway_response");
+  const output = responseText(body);
+  if (!output) throw new Error(`vercel_exact_${actor.toLowerCase()}_empty`);
+  return parseJson(output);
+}
+
+async function callModel(
+  env: Env,
+  actor: Actor,
+  wave: Wave,
+  lease: PeerLease,
+  relay: Obj,
+  authority: JsonObject,
+  expectedPeerHash: string | null,
+): Promise<JsonObject> {
+  const promptText = prompt(actor, wave, lease, relay, authority, expectedPeerHash);
+  const errors: string[] = [];
+
+  if (env.CF_ACCOUNT_ID && env.CF_AI_TOKEN) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort("peer_model_timeout"), modelTimeoutMs(env));
+    try {
+      const raw = await cloudflareExact(env, actor, promptText, controller.signal);
+      return sanitizedPayload(raw, wave, expectedPeerHash);
+    } catch (error) {
+      errors.push(String(error).slice(0, 800));
+    } finally {
+      clearTimeout(timer);
+    }
   }
+
+  if (env.VERCEL_AI_GATEWAY_API_KEY) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort("peer_model_timeout"), modelTimeoutMs(env));
+    try {
+      const raw = await vercelExact(env, actor, promptText, controller.signal);
+      return sanitizedPayload(raw, wave, expectedPeerHash);
+    } catch (error) {
+      errors.push(String(error).slice(0, 800));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  if (!errors.length) throw new Error("no_exact_peer_model_rail_configured");
+  throw new Error(`exact_peer_model_unavailable:${actor}:${errors.join(" || ").slice(0, 1600)}`);
 }
 
 async function currentMainSha(lease: PeerLease): Promise<string> {
@@ -285,7 +355,8 @@ export async function completeAutonomousPeerRelaysV4(env: Env, workerId: string)
       return { status: "PEER_RELAY_IDLE", leased: false, canonical: false, authority_effect: false };
     }
     if (!lease.duel_id || lease.lease_generation == null) throw new Error("peer_lease_identity_missing");
-    if (!env.VERCEL_AI_GATEWAY_API_KEY) throw new Error("vercel_ai_gateway_key_missing");
+    const exactRailConfigured = Boolean((env.CF_ACCOUNT_ID && env.CF_AI_TOKEN) || env.VERCEL_AI_GATEWAY_API_KEY);
+    if (!exactRailConfigured) throw new Error("exact_peer_model_rail_unconfigured");
 
     const liveMain = await currentMainSha(lease);
     const expectedMain = reqString(lease.base_github_sha, "base_github_sha").toLowerCase();
