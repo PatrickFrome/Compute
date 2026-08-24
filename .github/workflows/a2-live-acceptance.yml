@@ -147,6 +147,12 @@ jobs:
         run: |
           set -euo pipefail
           epoch="$((GITHUB_RUN_NUMBER * 100 + 2))"
+          gpt_runtime_id="a2-live-gpt-$GITHUB_RUN_ID"
+          glm_runtime_id="a2-live-glm-$GITHUB_RUN_ID"
+          gpt_key="$(npx tsx src/a2_keygen.ts)"
+          glm_key="$(npx tsx src/a2_keygen.ts)"
+          echo "::add-mask::$gpt_key"
+          echo "::add-mask::$glm_key"
           common=(
             A2_WORKSPACE_ID="$A2_WORKSPACE_ID"
             A2_INGRESS_URL="$A2_INGRESS_URL"
@@ -158,32 +164,49 @@ jobs:
             A2_WORKSPACE_MODE_POLL_MS="500"
             A2_MICROSTEP_TIMEOUT_MS="30000"
             A2_SYNC_ROUND_TTL_SECONDS="75"
+            A2_LEASE_RENEW_MS="20000"
           )
-          env "${common[@]}" A2_AGENT=GPT A2_PROVIDER=vercel-ai-gateway A2_MODEL=openai/gpt-5.6-sol A2_RUNTIME_ID="a2-live-gpt-$GITHUB_RUN_ID" \
+          env "${common[@]}" A2_AGENT=GPT A2_PROVIDER=vercel-ai-gateway A2_MODEL=openai/gpt-5.6-sol \
+            A2_RUNTIME_ID="$gpt_runtime_id" A2_ED25519_PRIVATE_KEY_PEM_B64="$gpt_key" \
             npx tsx src/a2_runtime.ts > /tmp/a2-gpt.log 2>&1 &
           gpt_pid=$!
-          env "${common[@]}" A2_AGENT=GLM A2_PROVIDER=vercel-ai-gateway A2_MODEL=zai/glm-5.3 A2_RUNTIME_ID="a2-live-glm-$GITHUB_RUN_ID" \
+          env "${common[@]}" A2_AGENT=GPT A2_PROVIDER=vercel-ai-gateway A2_MODEL=openai/gpt-5.6-sol \
+            A2_RUNTIME_ID="$gpt_runtime_id" A2_ED25519_PRIVATE_KEY_PEM_B64="$gpt_key" \
+            npx tsx src/a2_lease_keeper.ts > /tmp/a2-gpt-lease.log 2>&1 &
+          gpt_lease_pid=$!
+          env "${common[@]}" A2_AGENT=GLM A2_PROVIDER=vercel-ai-gateway A2_MODEL=zai/glm-5.3 \
+            A2_RUNTIME_ID="$glm_runtime_id" A2_ED25519_PRIVATE_KEY_PEM_B64="$glm_key" \
             npx tsx src/a2_runtime.ts > /tmp/a2-glm.log 2>&1 &
           glm_pid=$!
+          env "${common[@]}" A2_AGENT=GLM A2_PROVIDER=vercel-ai-gateway A2_MODEL=zai/glm-5.3 \
+            A2_RUNTIME_ID="$glm_runtime_id" A2_ED25519_PRIVATE_KEY_PEM_B64="$glm_key" \
+            npx tsx src/a2_lease_keeper.ts > /tmp/a2-glm-lease.log 2>&1 &
+          glm_lease_pid=$!
           cleanup() {
-            kill -TERM "$gpt_pid" "$glm_pid" 2>/dev/null || true
+            kill -TERM "$gpt_pid" "$gpt_lease_pid" "$glm_pid" "$glm_lease_pid" 2>/dev/null || true
             for _ in $(seq 1 20); do
-              if ! kill -0 "$gpt_pid" 2>/dev/null && ! kill -0 "$glm_pid" 2>/dev/null; then break; fi
+              if ! kill -0 "$gpt_pid" 2>/dev/null && ! kill -0 "$gpt_lease_pid" 2>/dev/null \
+                 && ! kill -0 "$glm_pid" 2>/dev/null && ! kill -0 "$glm_lease_pid" 2>/dev/null; then break; fi
               sleep 0.25
             done
-            kill -KILL "$gpt_pid" "$glm_pid" 2>/dev/null || true
+            kill -KILL "$gpt_pid" "$gpt_lease_pid" "$glm_pid" "$glm_lease_pid" 2>/dev/null || true
             wait "$gpt_pid" 2>/dev/null || true
+            wait "$gpt_lease_pid" 2>/dev/null || true
             wait "$glm_pid" 2>/dev/null || true
+            wait "$glm_lease_pid" 2>/dev/null || true
           }
           trap cleanup EXIT
           before_round="$(cat /tmp/a2-before-round)"
           rpc() { curl --silent --show-error --fail --max-time 20 -X POST "$A2_INGRESS_URL/v1/a2/rpc" -H "Authorization: Bearer $A2_INGRESS_TOKEN" -H 'Content-Type: application/json' --data "$1"; }
           converged=false
           for _ in $(seq 1 100); do
-            if ! kill -0 "$gpt_pid" 2>/dev/null || ! kill -0 "$glm_pid" 2>/dev/null; then
-              echo "exact peer exited before convergence" >&2
+            if ! kill -0 "$gpt_pid" 2>/dev/null || ! kill -0 "$gpt_lease_pid" 2>/dev/null \
+               || ! kill -0 "$glm_pid" 2>/dev/null || ! kill -0 "$glm_lease_pid" 2>/dev/null; then
+              echo "exact peer or lease keeper exited before convergence" >&2
               cat /tmp/a2-gpt.log >&2 || true
+              cat /tmp/a2-gpt-lease.log >&2 || true
               cat /tmp/a2-glm.log >&2 || true
+              cat /tmp/a2-glm-lease.log >&2 || true
               exit 1
             fi
             rpc "$(jq -nc --arg w "$A2_WORKSPACE_ID" '{fn:"h205f22_a2_read_sync_state_v1",args:[$w]}')" > /tmp/a2-sync-live.json
@@ -200,12 +223,15 @@ jobs:
             echo "exact lockstep did not converge" >&2
             cat /tmp/a2-sync-live.json >&2 || true
             cat /tmp/a2-gpt.log >&2 || true
+            cat /tmp/a2-gpt-lease.log >&2 || true
             cat /tmp/a2-glm.log >&2 || true
+            cat /tmp/a2-glm-lease.log >&2 || true
             exit 1
           fi
           sleep 2
           cleanup
           trap - EXIT
+          unset gpt_key glm_key
 
       - name: Verify exact persisted lockstep, peer visibility, and replay
         shell: bash
