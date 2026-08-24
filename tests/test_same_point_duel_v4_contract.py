@@ -70,9 +70,11 @@ assert "'readback',v_readback" in RECOVERY
 assert "SAME_POINT_DUEL_V4" in RECOVERY
 assert "lease.readback" in RUNNER
 
-# V4 is now the default sovereign entrypoint; legacy remains available only explicitly.
-assert '"start": "tsx src/same_point_v4.ts"' in PACKAGE
+# V4 remains the active coordinator; default startup now supervises coordinator + endpoint gateway.
+assert '"start": "bash scripts/start-all.sh"' in PACKAGE
+assert '"start:all": "bash scripts/start-all.sh"' in PACKAGE
 assert '"start:v4": "tsx src/same_point_v4.ts"' in PACKAGE
+assert '"start:control": "tsx src/control.ts"' in PACKAGE
 assert '"start:legacy": "tsx src/index.ts"' in PACKAGE
 
 # The runner itself contains no managed-inference endpoint dependency.
