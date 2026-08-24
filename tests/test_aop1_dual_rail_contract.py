@@ -4,6 +4,8 @@ ROOT = Path(__file__).resolve().parents[1]
 MICROSTEP = (ROOT / "orchestration/cloudflare/src/duel_microstep.ts").read_text(encoding="utf-8")
 INDEX = (ROOT / "orchestration/cloudflare/src/index.ts").read_text(encoding="utf-8")
 TYPES = (ROOT / "orchestration/cloudflare/src/types.ts").read_text(encoding="utf-8")
+WRANGLER = (ROOT / "orchestration/cloudflare/wrangler.jsonc").read_text(encoding="utf-8")
+PAIR_V3 = (ROOT / "supabase/migrations/20260824052833_aop1_duel_persisted_pair_readback_v3.sql").read_text(encoding="utf-8")
 
 # Minimum-latency invariant: all configured inference rails start together and the
 # first valid exact-model response wins. There is no provider-first sequential fallback.
@@ -18,13 +20,14 @@ assert 'openai/gpt-5.6-sol' in MICROSTEP
 assert '@cf/zai-org/glm-5.2' in MICROSTEP
 assert 'zai/glm-5.2' in MICROSTEP
 
-# Normal microsteps never wait for the losing rail. Only critical trust/arbitration
-# steps get a bounded confirmation window, after which the loser is aborted.
+# Zero-wait is the default. Cross-provider confirmation remains opt-in for critical
+# steps, with a bounded window and immediate loser abort afterwards.
+assert 'DUEL_CRITICAL_SHADOW_MS||0' in MICROSTEP
 assert 'criticalStep(winner.payload)' in MICROSTEP
-assert 'criticalShadowMs(env)' in MICROSTEP
 assert 'Promise.race([alternate.promise' in MICROSTEP
 assert 'DUEL_CRITICAL_SHADOW_MS' in TYPES
 assert 'DUEL_MODEL_TIMEOUT_MS' in TYPES
+assert 'duel_critical_shadow_ms: Number(env.DUEL_CRITICAL_SHADOW_MS || 0)' in INDEX
 
 # A failing provider cannot mask a healthy provider. Executor failure is emitted only
 # when Promise.any has no successful exact-model result.
@@ -43,6 +46,23 @@ for marker in (
     '_executor',
 ):
     assert marker in MICROSTEP
+
+# Queue delivery is configured for immediate dispatch rather than batching.
+assert '"max_batch_size": 1' in WRANGLER
+assert '"max_batch_timeout": 0' in WRANGLER
+
+# Post-first ticks use the DB-selected rows returned by the atomic pair transaction,
+# eliminating an extra HTTP read without trusting caller-local state.
+assert 'persisted_readback' in PAIR_V3
+assert 'duel_persisted_pair_readback_missing' in PAIR_V3
+assert "'gpt_event',g_readback" in PAIR_V3
+assert "'glm_event',l_readback" in PAIR_V3
+assert "'tick',tick_readback" in PAIR_V3
+assert 'microstep-read-initial' in MICROSTEP
+assert 'appendPersisted(read,receipt' in MICROSTEP
+assert 'duel_pair_persisted_readback_required' in MICROSTEP
+assert 'hot_path_readback:"DB_SELECTED_PAIR_RECEIPT"' in MICROSTEP
+assert 'microstep-read-${tick}' not in MICROSTEP
 
 # Health exposes routing availability without exposing any credential value.
 assert 'DUAL_RAIL_RACE_V1' in INDEX
