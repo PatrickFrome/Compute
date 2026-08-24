@@ -14,7 +14,8 @@
       "AOP_WAKE_SECRET",
       "AOP_SUPERVISOR_TOKEN",
       "CF_ACCOUNT_ID",
-      "CF_AI_TOKEN"
+      "CF_AI_TOKEN",
+      "VERCEL_AI_GATEWAY_API_KEY"
     ]
   },
   "durable_objects": {
