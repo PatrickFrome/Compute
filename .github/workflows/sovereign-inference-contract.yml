@@ -1,0 +1,46 @@
+name: Sovereign inference contract
+
+on:
+  pull_request:
+    paths:
+      - "orchestration/sovereign/**"
+      - "supabase/migrations/20260824070306_duel_sovereign_inference_v1.sql"
+      - "tests/test_sovereign_inference_contract.py"
+      - ".github/workflows/sovereign-inference-contract.yml"
+  push:
+    branches:
+      - "work/aop1-autonomous-orchestration"
+    paths:
+      - "orchestration/sovereign/**"
+      - "supabase/migrations/20260824070306_duel_sovereign_inference_v1.sql"
+      - "tests/test_sovereign_inference_contract.py"
+      - ".github/workflows/sovereign-inference-contract.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify tariff-independent invariants
+        run: python tests/test_sovereign_inference_contract.py
+
+  runner:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: orchestration/sovereign
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install runner dependencies
+        run: npm install --no-audit --no-fund
+      - name: Typecheck persistent runner
+        run: npm run check
