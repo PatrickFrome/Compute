@@ -11,6 +11,7 @@
     "start:v4": "tsx src/same_point_v4.ts",
     "start:control": "tsx src/control.ts",
     "start:a2:observer": "tsx src/a2_server.ts",
+    "start:a2:ingress": "tsx src/a2_ingress.ts",
     "start:a2:peer": "tsx src/a2_runtime.ts",
     "start:legacy": "tsx src/index.ts"
   },
