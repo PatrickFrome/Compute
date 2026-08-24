@@ -8,6 +8,7 @@ on:
       - "supabase/functions/metaengine-aop1-*/**"
       - "supabase/tests/aop1_autonomous_orchestration.sql"
       - "tests/test_aop1_contract.py"
+      - "tests/test_aop1_dual_rail_contract.py"
       - ".github/workflows/aop1-contract.yml"
   push:
     branches:
@@ -18,6 +19,7 @@ on:
       - "supabase/functions/metaengine-aop1-*/**"
       - "supabase/tests/aop1_autonomous_orchestration.sql"
       - "tests/test_aop1_contract.py"
+      - "tests/test_aop1_dual_rail_contract.py"
       - ".github/workflows/aop1-contract.yml"
 
 permissions:
@@ -33,6 +35,8 @@ jobs:
           python-version: "3.12"
       - name: Verify AOP1 authority and idempotency invariants
         run: python tests/test_aop1_contract.py
+      - name: Verify AOP1 dual-rail minimum-latency invariants
+        run: python tests/test_aop1_dual_rail_contract.py
 
   cloudflare-runtime:
     runs-on: ubuntu-latest
