@@ -4,6 +4,7 @@ import { completeRun, deferRun, leaseRun, rpc, supervisorReturnAuthority } from 
 import { executeRole, executorReady } from "./executor";
 import { githubAuthMode, githubWriteConfigured } from "./github";
 import { runMicrostepDuel } from "./duel_microstep";
+import { verifyDbDuelWake } from "./duel_db_wake";
 
 function json(value: unknown, status = 200): Response { return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json; charset=utf-8" } }); }
 async function safeEqual(a: string, b: string): Promise<boolean> {
@@ -105,6 +106,11 @@ export default {
       if (request.method === "GET" && url.pathname === "/duel") {
         return json(await rpc<JsonObject>(env, "h205f22_duel_snapshot_v1", {}));
       }
+      if (request.method === "POST" && url.pathname === "/duel/db-wake") {
+        const wake = await verifyDbDuelWake(request, env.AOP_WAKE_SECRET);
+        await env.AOP_WAKE_QUEUE.send(wake);
+        return json({ accepted: true, wake_id: wake.id, reason: wake.reason }, 202);
+      }
       if (request.method === "POST" && url.pathname === "/wake") {
         await requireBearer(request, env.AOP_WAKE_SECRET);
         const input = (await request.json()) as Partial<AopWake>;
@@ -131,7 +137,7 @@ export default {
       }
       return json({ error: "not_found" }, 404);
     } catch (error) {
-      if (String(error).includes("unauthorized")) return json({ error: "unauthorized" }, 401);
+      if (String(error).includes("unauthorized") || String(error).includes("duel_db_wake_signature")) return json({ error: "unauthorized" }, 401);
       return json({ error: "internal_error", detail: String(error).slice(0, 1000) }, 500);
     }
   },
