@@ -221,14 +221,14 @@ async function listenLoop(): Promise<void> {
       await client.query("listen h205f22_a2_event");
       listenReady = true;
       client.on("notification", (message) => {
-        void broadcastNotification(message.payload).catch((error) => console.error("a2_observer_notification_failed", String(error)));
+        void broadcastNotification(message.payload).catch((error) => console.error("a2_observer_notification_failed", error));
       });
       await new Promise<void>((resolve) => {
         client.once("error", () => resolve());
         client.once("end", () => resolve());
       });
     } catch (error) {
-      if (!stopped) console.error("a2_observer_listen_reconnect", String(error));
+      if (!stopped) console.error("a2_observer_listen_reconnect", error);
     } finally {
       listenReady = false;
       await client.end().catch(() => undefined);
@@ -322,7 +322,8 @@ const server = createServer(async (request, response) => {
     }
     sendJson(response, 404, { error: "not_found" });
   } catch (error) {
-    sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) });
+    console.error("a2_observer_request_failed", error);
+    sendJson(response, 500, { error: "internal_error" });
   }
 });
 
