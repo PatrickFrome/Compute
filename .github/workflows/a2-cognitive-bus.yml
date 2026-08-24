@@ -1,0 +1,34 @@
+name: A2 cognitive bus
+
+on:
+  pull_request:
+    paths:
+      - "orchestration/sovereign/src/a2_*.ts"
+      - "orchestration/sovereign/ui/**"
+      - "orchestration/sovereign/package.json"
+      - "supabase/migrations/*a2*"
+      - ".github/workflows/a2-cognitive-bus.yml"
+  push:
+    branches:
+      - "work/same-point-duel-v4-a2-cognitive-bus"
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: orchestration/sovereign
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install sovereign dependencies
+        run: npm install --no-audit --no-fund
+      - name: TypeScript contract
+        run: npm run check
+      - name: A2 protocol tests
+        run: npm run test:a2
