@@ -1,0 +1,67 @@
+name: SAME_POINT_DUEL_V4 mainline
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "orchestration/sovereign/**"
+      - "supabase/migrations/20260824044849_aop1_microstep_lockstep_duel_v2.sql"
+      - "supabase/migrations/20260824061721_duel_submit_pair_idempotent_v3.sql"
+      - "supabase/migrations/20260824070409_duel_sovereign_inference_v1.sql"
+      - "supabase/migrations/20260824073410_same_point_duel_v4.sql"
+      - "supabase/migrations/20260824073803_same_point_duel_v4_executor_fencing.sql"
+      - "supabase/migrations/20260824074927_same_point_duel_v4_recovery_readback.sql"
+      - "tests/test_sovereign_inference_contract.py"
+      - "tests/test_same_point_duel_v4_contract.py"
+      - "tests/test_sovereign_endpoint_contract.py"
+      - "tests/test_same_point_duel_v4_lineage.py"
+      - ".github/workflows/same-point-duel-v4-mainline.yml"
+  push:
+    branches:
+      - "work/same-point-duel-v4-mainline"
+      - main
+    paths:
+      - "orchestration/sovereign/**"
+      - "supabase/migrations/*duel*.sql"
+      - "tests/test_sovereign_*"
+      - "tests/test_same_point_duel_v4_*"
+      - ".github/workflows/same-point-duel-v4-mainline.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  static-contract:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - name: Verify V4 observable-reasoning and arbitration invariants
+        run: python tests/test_same_point_duel_v4_contract.py
+      - name: Verify sovereign inference invariants
+        run: python tests/test_sovereign_inference_contract.py
+      - name: Verify endpoint surface
+        run: python tests/test_sovereign_endpoint_contract.py
+      - name: Verify recovered migration lineage
+        run: python tests/test_same_point_duel_v4_lineage.py
+
+  typescript:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: orchestration/sovereign
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: "22"
+      - name: Install pinned runner dependencies
+        run: npm install --no-audit --no-fund
+      - name: Typecheck coordinator and gateway
+        run: npm run check
