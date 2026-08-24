@@ -29,6 +29,9 @@ function supervisorStub(env: Env) {
   const id = env.AOP_SUPERVISOR.idFromName("compute-fabric-roadmap-v1");
   return env.AOP_SUPERVISOR.get(id);
 }
+function workflowInstanceId(wake: AopWake): string {
+  return `duel-${wake.id}`.replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 100);
+}
 
 export class ComputeFabricSupervisor extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -100,9 +103,9 @@ export default {
           executor_configured: Boolean(env.CF_ACCOUNT_ID && env.CF_AI_TOKEN && env.AOP_MODEL),
           duel_executor_configured: cloudflareRail || vercelRail,
           duel_protocol: "MICROSTEP_LOCKSTEP_V2",
-          duel_transport: "DB_WEBHOOK+DIRECT_DURABLE_OBJECT+WORKFLOW+ATOMIC_DB_PAIR+DUAL_RAIL_RACE",
+          duel_transport: "DB_WEBHOOK+DIRECT_IDEMPOTENT_WORKFLOW+ATOMIC_DB_PAIR+DUAL_RAIL_RACE",
           duel_latency_policy: "FIRST_VALID_EXACT_MODEL_RESPONSE_WINS",
-          duel_start_path: "DIRECT_DO_NO_QUEUE",
+          duel_start_path: "DIRECT_WORKFLOW_CREATE_BATCH_NO_QUEUE_NO_DO",
           duel_hot_path_readback: "LEASE_THEN_DB_SELECTED_PAIR_RECEIPT",
           duel_critical_shadow_ms: Number(env.DUEL_CRITICAL_SHADOW_MS || 0),
           duel_model_timeout_ms: Number(env.DUEL_MODEL_TIMEOUT_MS || 90000),
@@ -120,8 +123,8 @@ export default {
       }
       if (request.method === "POST" && url.pathname === "/duel/db-wake") {
         const wake = await verifyDbDuelWake(request, env.AOP_WAKE_SECRET);
-        const direct = await supervisorStub(env).wake(wake);
-        return json({ accepted: direct.accepted, wake_id: wake.id, reason: wake.reason, transport: "DIRECT_DURABLE_OBJECT" }, 202);
+        const created = await env.AOP_RUN_WORKFLOW.createBatch([{ id: workflowInstanceId(wake), params: { wake, workerId: `cf-workflow:${wake.id}` } }]);
+        return json({ accepted: created.length > 0, duplicate: created.length === 0, wake_id: wake.id, reason: wake.reason, transport: "DIRECT_IDEMPOTENT_WORKFLOW" }, 202);
       }
       if (request.method === "POST" && url.pathname === "/wake") {
         await requireBearer(request, env.AOP_WAKE_SECRET);
@@ -158,7 +161,7 @@ export default {
     for (const message of batch.messages) { try { await stub.wake(message.body); message.ack(); } catch { message.retry({ delaySeconds: 15 }); } }
   },
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
-    // Recovery-only. Normal duel start is DB webhook -> direct Durable Object wake.
+    // Recovery-only. Normal duel start is DB webhook -> direct idempotent Workflow binding.
     await Promise.all([
       enqueueWake(env, "PERIODIC_RECONCILE", "cron"),
       enqueueWake(env, "DUEL_RECONCILE", "cron-recovery"),
