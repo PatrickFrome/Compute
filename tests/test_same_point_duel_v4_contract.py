@@ -3,6 +3,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = (ROOT / "supabase/migrations/20260824073410_same_point_duel_v4.sql").read_text(encoding="utf-8")
 FENCING = (ROOT / "supabase/migrations/20260824073803_same_point_duel_v4_executor_fencing.sql").read_text(encoding="utf-8")
+RECOVERY = (ROOT / "supabase/migrations/20260824074927_same_point_duel_v4_recovery_readback.sql").read_text(encoding="utf-8")
 RUNNER = (ROOT / "orchestration/sovereign/src/same_point_v4.ts").read_text(encoding="utf-8")
 PACKAGE = (ROOT / "orchestration/sovereign/package.json").read_text(encoding="utf-8")
 
@@ -62,6 +63,12 @@ assert "h205f22_same_point_v4_ready" in FENCING
 assert "SAME_POINT_V4_WAKE_NOTIFIED" in FENCING
 assert 'const RUNNER_ID = `sovereign:v4:' in RUNNER
 assert 'const CHANNEL = "h205f22_same_point_v4_ready"' in RUNNER
+
+# Crash recovery after PROPOSE must restore the persisted causal view before REBUT.
+assert "v_readback := public.h205f22_duel_read_lockstep_v2(d.duel_id,0)" in RECOVERY
+assert "'readback',v_readback" in RECOVERY
+assert "SAME_POINT_DUEL_V4" in RECOVERY
+assert "lease.readback" in RUNNER
 
 # V4 is now the default sovereign entrypoint; legacy remains available only explicitly.
 assert '"start": "tsx src/same_point_v4.ts"' in PACKAGE
