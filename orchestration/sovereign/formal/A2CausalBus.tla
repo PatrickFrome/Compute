@@ -40,15 +40,16 @@ Receive ==
 Apply ==
   /\ applied < received
   /\ applied' = received
-  /\ mandatory' = {sequence \in mandatory : sequence > received}
-  /\ UNCHANGED <<head, received, proofSeen, acceptedFresh, authorityEffect, mode>>
+  /\ UNCHANGED <<head, received, mandatory, proofSeen, acceptedFresh, authorityEffect, mode>>
 
 SealVisibility ==
   /\ applied = received
   /\ proofSeen' = applied
-  /\ UNCHANGED <<head, received, applied, mandatory, acceptedFresh, authorityEffect, mode>>
+  /\ mandatory' = {sequence \in mandatory : sequence > applied}
+  /\ UNCHANGED <<head, received, applied, acceptedFresh, authorityEffect, mode>>
 
 AcceptModelStep ==
+  /\ mode = "COLLABORATE"
   /\ mandatory = {}
   /\ proofSeen <= applied
   /\ acceptedFresh' = TRUE
@@ -57,7 +58,8 @@ AcceptModelStep ==
 OpenDuel ==
   /\ mode = "COLLABORATE"
   /\ mode' = "DUEL"
-  /\ UNCHANGED <<head, received, applied, mandatory, proofSeen, acceptedFresh, authorityEffect>>
+  /\ acceptedFresh' = FALSE
+  /\ UNCHANGED <<head, received, applied, mandatory, proofSeen, authorityEffect>>
 
 ResolveDuel ==
   /\ mode = "DUEL"
@@ -72,6 +74,7 @@ Next == CommitP0P1 \/ CommitP2P3 \/ Receive \/ Apply \/
 CursorOrder == proofSeen <= applied /\ applied <= received /\ received <= head
 MandatoryBounded == mandatory \subseteq (1..head)
 AcceptanceFresh == acceptedFresh => mandatory = {}
+AcceptanceModeSafe == acceptedFresh => mode = "COLLABORATE"
 AuthorityIsolation == authorityEffect = FALSE
 ModeValid == mode \in {"COLLABORATE", "DUEL"}
 
