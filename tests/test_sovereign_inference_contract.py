@@ -50,6 +50,6 @@ for forbidden in ("ai-gateway.vercel.sh", "api.cloudflare.com/client/v4", "api.o
 assert 'http://127.0.0.1:8001' in RUNNER
 assert 'http://127.0.0.1:8002' in RUNNER
 assert '/v1/chat/completions' in RUNNER
-assert "Do not expose raw vLLM to the public Internet" in README
+assert "Do not expose raw inference endpoints directly to the public Internet" in README
 
 print("Sovereign inference contract guards: PASS")
