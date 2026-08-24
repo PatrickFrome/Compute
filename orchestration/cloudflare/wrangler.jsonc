@@ -39,5 +39,5 @@
       { "queue": "metaengine-h205f22-aop-wake", "max_batch_size": 10, "max_batch_timeout": 2, "max_retries": 5, "dead_letter_queue": "metaengine-h205f22-aop-dlq" }
     ]
   },
-  "triggers": { "crons": ["*/5 * * * *"] }
+  "triggers": { "crons": ["* * * * *"] }
 }
