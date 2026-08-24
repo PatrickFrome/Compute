@@ -1,4 +1,5 @@
 from pathlib import Path
+import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,19 +23,18 @@ def _assert_service_role_only(sql: str) -> None:
     assert f"to authenticated, service_role" not in sql
 
 
-def test_function_definition_revokes_default_and_client_execution() -> None:
-    _assert_service_role_only(_normalized(FUNCTION_DDL))
+class ReadBarrierAclContractTests(unittest.TestCase):
+    def test_function_definition_revokes_default_and_client_execution(self) -> None:
+        _assert_service_role_only(_normalized(FUNCTION_DDL))
+
+    def test_live_acl_migration_is_idempotent_and_service_role_only(self) -> None:
+        _assert_service_role_only(_normalized(ACL_MIGRATION))
+
+    def test_acl_migration_is_narrowly_scoped(self) -> None:
+        sql = _normalized(ACL_MIGRATION)
+        for forbidden in ("create ", "drop ", "alter ", "insert ", "update ", "delete "):
+            self.assertNotIn(forbidden, sql)
 
 
-def test_live_acl_migration_is_idempotent_and_service_role_only() -> None:
-    _assert_service_role_only(_normalized(ACL_MIGRATION))
-
-
-def test_acl_migration_is_narrowly_scoped() -> None:
-    sql = _normalized(ACL_MIGRATION)
-    assert "create " not in sql
-    assert "drop " not in sql
-    assert "alter " not in sql
-    assert "insert " not in sql
-    assert "update " not in sql
-    assert "delete " not in sql
+if __name__ == "__main__":
+    unittest.main()
