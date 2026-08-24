@@ -21,7 +21,9 @@ jobs:
   contract:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
       - name: Git whitespace integrity
         run: git diff --check HEAD^ HEAD
       - name: A2 migration topology
@@ -40,6 +42,7 @@ jobs:
             20260824121943_a2_trusted_ingress_signature_binding_v3.sql
             20260824122043_a2_duel_state_machine_bridge.sql
             20260824122743_a2_ingress_single_preimage_contract.sql
+            20260824124953_a2_duel_mode_cognition_fence.sql
           )
           for migration in "${migrations[@]}"; do
             test -s "supabase/migrations/$migration" || { echo "missing A2 migration: $migration"; exit 1; }
@@ -53,7 +56,7 @@ jobs:
             echo "consolidated A2 replay contract must not be a history marker"
             exit 1
           fi
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
       - name: Install sovereign dependencies
@@ -65,7 +68,7 @@ jobs:
       - name: A2 protocol tests
         working-directory: orchestration/sovereign
         run: npm run test:a2:coverage
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
