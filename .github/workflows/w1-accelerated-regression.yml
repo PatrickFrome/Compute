@@ -1,0 +1,82 @@
+name: W1 Accelerated Regression
+
+on:
+  push:
+    branches: [work/w1-linux-worker-safety]
+    paths:
+      - 'worker/native_linux/**'
+      - 'controller/w1/**'
+      - 'tests/**'
+      - 'tooling/accelerated_tests.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/w1-accelerated-regression.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'worker/native_linux/**'
+      - 'controller/w1/**'
+      - 'tests/**'
+      - 'tooling/accelerated_tests.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/w1-accelerated-regression.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: w1-accelerated-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  full-python-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Install pinned uv with safe automatic cache policy
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: '0.11.33'
+          cache-dependency-glob: uv.lock
+
+      - name: Sync exact development lock
+        run: uv sync --locked --group dev
+
+      - name: Run CPU-budgeted work-stealing regression
+        run: >-
+          uv run --locked python tooling/accelerated_tests.py
+          --report evidence/w1-accelerated-regression.json
+
+      - name: Verify non-authority evidence boundary
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path('evidence/w1-accelerated-regression.json').read_text())
+          assert report['schema']=='metaengine.compute.accelerated-test-report.h205f22.v1'
+          assert report['execution']['outcome']=='PASS'
+          assert report['execution']['shell'] is False
+          assert report['authority']=={
+              'canonical': False,
+              'authority_effect': False,
+              'worker_admitted': False,
+              'w1_verified': False,
+              'acc1_verified': False,
+              'shared_cache_reuse': False,
+          }
+          PY
+
+      - name: Upload credential-free regression evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: w1-accelerated-regression
+          path: evidence/w1-accelerated-regression.json
+          if-no-files-found: error
+          retention-days: 14

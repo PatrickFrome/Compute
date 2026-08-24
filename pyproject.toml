@@ -1,0 +1,25 @@
+[project]
+name = "metaengine-h205f22-compute"
+version = "0.0.0"
+description = "Non-authority development and verification tooling for METAENGINE H205F22"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "pytest==9.1.1",
+  "pytest-xdist==3.8.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+minversion = "9.1"
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = [
+  "--strict-config",
+  "--strict-markers",
+  "-ra",
+]
