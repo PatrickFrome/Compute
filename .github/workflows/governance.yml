@@ -40,6 +40,9 @@ jobs:
             work/a1-agent-workspace)
               EXPECTED_L1='C2'
               ;;
+            work/aop1-autonomous-orchestration|work/same-point-duel-v4-mainline)
+              EXPECTED_L1='CROSS-CUTTING'
+              ;;
             analysis/integration)
               EXPECTED_L1='CROSS-CUTTING'
               ;;
