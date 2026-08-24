@@ -67,7 +67,7 @@ Then output exactly one concise readiness line:
 
 `A2_STANDBY_READY | GLM=zai/glm-5.3 | base=<CURRENT_HEAD_SHA> | waiting=A2_LAUNCH`
 
-After this line, wait. Do not repeatedly poll or create events unless explicitly asked to re-check readiness.
+After this line, wait. Do not repeatedly poll, probe, emit, mutate, or create events until an explicit `A2 LAUNCH`, `A2 RECHECK`, `A2 PAUSE`, or `A2 STOP` command arrives.
 
 ## 5. Forbidden actions while waiting
 
