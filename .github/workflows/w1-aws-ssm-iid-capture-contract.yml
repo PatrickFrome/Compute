@@ -1,0 +1,70 @@
+name: W1 AWS SSM IID Capture Contract
+
+on:
+  push:
+    branches:
+      - work/w1-linux-worker-safety
+    paths:
+      - 'controller/w1/aws_ssm_iid_capture_guard.py'
+      - 'infra/w1/ssm/Metaengine-W1-IID-Capture-H205F22.json'
+      - 'tests/test_w1_aws_ssm_iid_capture_guard.py'
+      - '.github/workflows/w1-aws-ssm-iid-capture-contract.yml'
+      - 'research/W1_DEV_CYCLE_001_AWS_SSM_IID_CAPTURE.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/w1/aws_ssm_iid_capture_guard.py'
+      - 'infra/w1/ssm/Metaengine-W1-IID-Capture-H205F22.json'
+      - 'tests/test_w1_aws_ssm_iid_capture_guard.py'
+      - '.github/workflows/w1-aws-ssm-iid-capture-contract.yml'
+      - 'research/W1_DEV_CYCLE_001_AWS_SSM_IID_CAPTURE.md'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile SSM capture guard
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/w1/aws_ssm_iid_capture_guard.py
+
+      - name: Run SSM capture adversarial tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_w1_aws_ssm_iid_capture_guard -v
+
+      - name: Assert parameterless immutable-document boundary
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('controller/w1/aws_ssm_iid_capture_guard.py').read_text()
+          d=json.loads(Path('infra/w1/ssm/Metaengine-W1-IID-Capture-H205F22.json').read_text())
+          assert 'Metaengine-W1-IID-Capture-H205F22' in p
+          assert 'AWS-RunShellScript' not in p
+          assert d['parameters'] == {}
+          assert '{{' not in d['mainSteps'][0]['inputs']['runCommand'][0]
+          assert '169.254.169.254' in d['mainSteps'][0]['inputs']['runCommand'][0]
+          assert 'ssm:SendCommand' in p
+          assert 'ssm:GetCommandInvocation' in p
+          assert 'ssm:DescribeInstanceInformation' in p
+          for forbidden in ('ssm:StartSession','ssm:CreateDocument','ssm:UpdateDocument','ssm:DeleteDocument','ec2:RebootInstances','secretsmanager:','kms:Decrypt','s3:'):
+              assert forbidden not in p, forbidden
+          assert 'parameters": {}' in p
+          assert 'arbitrary_command_parameters_allowed": False' in p
+          assert 'OFFHOST_PINNED_AWS_IID_CRYPTOGRAPHIC_VERIFICATION' in p
+          assert 'provider_identity_verified": False' in p
+          assert 'persistent_worker_proof": False' in p
+          PY

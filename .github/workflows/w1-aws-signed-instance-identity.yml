@@ -1,0 +1,70 @@
+name: W1 AWS Signed Instance Identity
+
+on:
+  push:
+    branches:
+      - work/w1-linux-worker-safety
+    paths:
+      - 'controller/w1/aws_instance_identity_verifier.py'
+      - 'tests/test_w1_aws_instance_identity_verifier.py'
+      - '.github/workflows/w1-aws-signed-instance-identity.yml'
+      - 'research/W1_DEV_CYCLE_001_AWS_SIGNED_INSTANCE_IDENTITY.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/w1/aws_instance_identity_verifier.py'
+      - 'tests/test_w1_aws_instance_identity_verifier.py'
+      - '.github/workflows/w1-aws-signed-instance-identity.yml'
+      - 'research/W1_DEV_CYCLE_001_AWS_SIGNED_INSTANCE_IDENTITY.md'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  verify-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Assert exact checkout
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Validate runtime prerequisites
+        run: |
+          set -euo pipefail
+          python3 --version
+          openssl version
+
+      - name: Compile verifier
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/w1/aws_instance_identity_verifier.py
+
+      - name: Run signed identity adversarial tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_w1_aws_instance_identity_verifier -v
+
+      - name: Validate fail-closed source boundary
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('controller/w1/aws_instance_identity_verifier.py').read_text()
+          assert '-nointern' in p
+          assert 'AWS_RSA2048_CERT_DER_SHA256_BY_REGION' in p
+          assert 'aa6f3e8afcd5e477501fbaf9d19f0945c7d94548f5a2de6375d8bfbab744cae0' in p
+          assert 'SIGNED_PROVIDER_IDENTITY_VERIFIED_NONAUTHORITY' in p
+          assert 'PROVIDER_REQUEST_ACCEPTED_AT_NOT_REBOOT_COMPLETION' in p
+          assert 'persistent_worker_proof' in p and 'w1_verified' in p
+          for forbidden in ('requests.', 'urllib.', 'boto3', 'curl ', 'wget '):
+              assert forbidden not in p, forbidden
+          PY

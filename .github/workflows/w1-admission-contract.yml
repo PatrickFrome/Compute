@@ -1,0 +1,61 @@
+name: W1 Linux Admission Contract
+
+on:
+  push:
+    branches:
+      - work/w1-linux-worker-safety
+    paths:
+      - 'worker/native_linux/admission_contract.py'
+      - 'worker/native_linux/admission_candidate.py'
+      - 'tests/test_w1_admission_contract.py'
+      - 'tests/test_w1_admission_candidate.py'
+      - 'supabase/migrations/*w1_persisted_admission_candidate_readback_v1.sql'
+      - 'supabase/migrations/*w1_admission_candidate_readback_volatility_fix.sql'
+      - '.github/workflows/w1-admission-contract.yml'
+      - 'research/W1_DEV_CYCLE_001_ADMISSION_CONTRACT.md'
+      - 'research/W1_DEV_CYCLE_001_PERSISTENCE_COMPOSITOR.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'worker/native_linux/admission_contract.py'
+      - 'worker/native_linux/admission_candidate.py'
+      - 'tests/test_w1_admission_contract.py'
+      - 'tests/test_w1_admission_candidate.py'
+      - 'supabase/migrations/*w1_persisted_admission_candidate_readback_v1.sql'
+      - 'supabase/migrations/*w1_admission_candidate_readback_volatility_fix.sql'
+      - '.github/workflows/w1-admission-contract.yml'
+      - 'research/W1_DEV_CYCLE_001_ADMISSION_CONTRACT.md'
+      - 'research/W1_DEV_CYCLE_001_PERSISTENCE_COMPOSITOR.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  admission-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Verify exact source head
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Compile contracts
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            worker/native_linux/admission_contract.py \
+            worker/native_linux/admission_candidate.py
+
+      - name: Run fail-closed W1 tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest \
+            tests.test_w1_admission_contract \
+            tests.test_w1_admission_candidate -v
