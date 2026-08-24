@@ -28,6 +28,8 @@ type EmitBody = {
   signature_key_fingerprint_sha256: string;
 };
 
+type PublicFault = { status: number; code: string };
+
 const DATABASE_URL = required("DATABASE_URL");
 const HOST = process.env.A2_INGRESS_HOST || "127.0.0.1";
 const PORT = integer(process.env.A2_INGRESS_PORT, 8092, 1, 65_535);
@@ -132,6 +134,23 @@ function json(response: ServerResponse, status: number, body: unknown): void {
 function sendSse(response: ServerResponse, data: unknown, id?: number): void {
   if (id !== undefined) response.write(`id: ${id}\n`);
   response.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+
+function publicFault(error: unknown): PublicFault {
+  const message = error instanceof Error ? error.message : "";
+  switch (message) {
+    case "body_too_large":
+      return { status: 413, code: "body_too_large" };
+    case "emit_body_invalid":
+    case "a2_peer_rpc_not_allowed":
+    case "a2_ingress_session_not_active":
+    case "a2_ingress_key_fingerprint_mismatch":
+    case "a2_ingress_event_hash_mismatch":
+    case "a2_ingress_ed25519_invalid":
+      return { status: 400, code: message };
+    default:
+      return { status: 500, code: "internal_error" };
+  }
 }
 
 async function bodyJson(request: IncomingMessage, max = 1_000_000): Promise<any> {
@@ -447,7 +466,9 @@ const server = createServer(async (request, response) => {
     }
     json(response, 404, { error: "not_found" });
   } catch (error) {
-    json(response, 400, { error: error instanceof Error ? error.message : String(error) });
+    console.error("a2_ingress_request_failed", error);
+    const fault = publicFault(error);
+    json(response, fault.status, { error: fault.code });
   }
 });
 
