@@ -9,8 +9,10 @@ on:
       - "orchestration/sovereign/scripts/start-a2.sh"
       - "orchestration/sovereign/package.json"
       - "supabase/migrations/*a2*"
+      - "supabase/functions/metaengine-a2-*/**"
       - "supabase/tests/a2_*"
       - ".github/workflows/a2-cognitive-bus.yml"
+      - ".github/workflows/a2-live-acceptance.yml"
   push:
     branches:
       - "work/same-point-duel-v4-a2-cognitive-bus"
@@ -49,6 +51,10 @@ jobs:
             20260824142553_a2_peer_session_lease_and_crash_recovery_v1.sql
             20260824142732_a2_peer_session_heartbeat_guard_fix_v1.sql
             20260824143159_a2_session_lease_fenced_renewal_v2.sql
+            20260824160100_a2_acceptance_oidc_replay_fence_v1.sql
+            20260824160209_a2_edge_ingress_verified_emit_v1.sql
+            20260824160318_a2_ephemeral_runtime_access_capability_v1.sql
+            20260824160910_a2_edge_conflict_reconciliation_v1.sql
           )
           for migration in "${migrations[@]}"; do
             test -s "supabase/migrations/$migration" || { echo "missing A2 migration: $migration"; exit 1; }
@@ -67,6 +73,18 @@ jobs:
           lease="supabase/migrations/20260824143159_a2_session_lease_fenced_renewal_v2.sql"
           grep -q "pg_advisory_xact_lock" "$lease"
           grep -q "a2_session_lease_lost" "$lease"
+          capability="supabase/migrations/20260824160318_a2_ephemeral_runtime_access_capability_v1.sql"
+          grep -q "h205f22_a2_validate_runtime_access_token_v1" "$capability"
+          grep -q "raw tokens are never persisted" "$capability"
+          reconcile="supabase/migrations/20260824160910_a2_edge_conflict_reconciliation_v1.sql"
+          grep -q "openai/gpt-5.6-sol" "$reconcile"
+          grep -q "zai/glm-5.3" "$reconcile"
+          grep -q "h205f22_a2_reconcile_workspace_conflicts_v2" "$reconcile"
+          test -s supabase/functions/metaengine-a2-ingress-h205f22/index.ts
+          test -s supabase/functions/metaengine-a2-github-oidc-acceptance-h205f22/index.ts
+          grep -q "A2_EDGE_WEBCRYPTO_ED25519_V1" supabase/functions/metaengine-a2-ingress-h205f22/index.ts
+          grep -q "EPHEMERAL_SCOPED_BEARER_CAPABILITY_SHA256_DB_FENCED" supabase/functions/metaengine-a2-ingress-h205f22/index.ts
+          grep -q "metaengine-h205f22-a2-acceptance" supabase/functions/metaengine-a2-github-oidc-acceptance-h205f22/index.ts
           if grep -q "HISTORY MARKER ONLY" "$replay"; then
             echo "consolidated A2 replay contract must not be a history marker"
             exit 1
