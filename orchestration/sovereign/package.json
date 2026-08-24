@@ -13,6 +13,7 @@
     "start:a2:observer": "tsx src/a2_server.ts",
     "start:a2:ingress": "tsx src/a2_ingress.ts",
     "start:a2:peer": "tsx src/a2_runtime.ts",
+    "start:a2:coordinator": "tsx src/a2_coordinator.ts",
     "start:legacy": "tsx src/index.ts"
   },
   "dependencies": {
