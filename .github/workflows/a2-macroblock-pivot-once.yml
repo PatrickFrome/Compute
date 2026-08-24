@@ -1,0 +1,28 @@
+name: A2 Macroblock Pivot Once
+on:
+  push:
+    branches: [ops/w1-codespaces-probe-20260825]
+    paths: ['.github/workflows/a2-macroblock-pivot-once.yml']
+permissions:
+  contents: read
+jobs:
+  pivot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Invoke exact nonce-bound pivot executor
+        env:
+          NONCE: ac7ce8480577256aa76debd7f310f7dd1970fc20e244077fcebe70e4bbc26d97
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error -X POST \
+            -H "x-metaengine-nonce: ${NONCE}" \
+            -H 'content-type: application/json' \
+            'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/metaengine-a2-macroblock-pivot-executor-h205f22' \
+            | tee result.json
+          python3 - <<'PY'
+          import json
+          x=json.load(open('result.json'))
+          assert x.get('state') == 'ABANDONED', x
+          assert x.get('preserved_hard_gate_sha256') == '994df3423fddf3cd21cd01a0f99a4ad75691f3eb04bff9c0f88d15115058596f'
+          PY
