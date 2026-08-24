@@ -14,6 +14,7 @@ const ALLOWED_RPC = new Set([
   "h205f22_duel_snapshot_v1",
   "h205f22_duel_lease_lockstep_v2",
   "h205f22_duel_submit_pair_v2",
+  "h205f22_duel_submit_pair_v3",
   "h205f22_duel_read_lockstep_v2",
   "h205f22_duel_complete_lockstep_v2",
 ]);
