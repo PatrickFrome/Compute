@@ -5,6 +5,8 @@ on:
     paths:
       - "orchestration/sovereign/src/a2_*.ts"
       - "orchestration/sovereign/ui/**"
+      - "orchestration/sovereign/formal/**"
+      - "orchestration/sovereign/scripts/start-a2.sh"
       - "orchestration/sovereign/package.json"
       - "supabase/migrations/*a2*"
       - ".github/workflows/a2-cognitive-bus.yml"
@@ -62,4 +64,14 @@ jobs:
         run: npm run check
       - name: A2 protocol tests
         working-directory: orchestration/sovereign
-        run: npm run test:a2
+        run: npm run test:a2:coverage
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: A2 causal invariants
+        working-directory: orchestration/sovereign/formal
+        run: |
+          curl -L --fail --silent --show-error -o /tmp/tla2tools.jar https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
+          echo "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88  /tmp/tla2tools.jar" | sha256sum -c -
+          java -XX:+UseParallelGC -cp /tmp/tla2tools.jar tlc2.TLC -config A2CausalBus.cfg A2CausalBus.tla

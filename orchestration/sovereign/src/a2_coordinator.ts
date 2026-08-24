@@ -1,5 +1,7 @@
-import { Pool } from "pg";
+import pg from "pg";
 import { exactModel } from "./a2_protocol.js";
+
+const { Pool } = pg;
 
 type Row=Record<string,any>;
 const DATABASE_URL=req("DATABASE_URL");
@@ -7,10 +9,19 @@ const WORKSPACE_ID=req("A2_WORKSPACE_ID");
 const POLL_MS=int(process.env.A2_COORDINATOR_POLL_MS,750,100,10_000);
 const pool=new Pool({connectionString:DATABASE_URL,max:6});
 let stopped=false;
+const RPC_SQL={
+  h205f22_a2_open_conflict_v1:"select public.h205f22_a2_open_conflict_v1($1,$2,$3,$4,$5,$6) as v",
+  h205f22_duel_read_same_point_v4:"select public.h205f22_duel_read_same_point_v4($1) as v",
+  h205f22_a2_resolve_conflict_from_duel_v1:"select public.h205f22_a2_resolve_conflict_from_duel_v1($1) as v",
+  h205f22_a2_resolve_conflict_v1:"select public.h205f22_a2_resolve_conflict_v1($1,$2) as v",
+  h205f22_a2_read_frontier_v1:"select public.h205f22_a2_read_frontier_v1($1) as v",
+  h205f22_duel_create_same_point_v4:"select public.h205f22_duel_create_same_point_v4($1,$2,$3,$4,$5,$6,$7) as v",
+  h205f22_a2_attach_duel_v1:"select public.h205f22_a2_attach_duel_v1($1,$2) as v"
+} as const;
 function req(n:string){const v=process.env[n];if(!v)throw new Error(`${n}_required`);return v;}
 function int(v:string|undefined,f:number,min:number,max:number){const n=Number(v??f);return Number.isFinite(n)?Math.max(min,Math.min(max,Math.trunc(n))):f;}
 function sleep(ms:number){return new Promise(r=>setTimeout(r,ms));}
-async function rpc<T=any>(fn:string,args:any[]):Promise<T>{const slots=args.map((_,i)=>`$${i+1}`).join(",");const r=await pool.query<{v:T}>(`select public.${fn}(${slots}) as v`,args);return r.rows[0]!.v;}
+async function rpc<T=any>(fn:keyof typeof RPC_SQL,args:any[]):Promise<T>{const r=await pool.query<{v:T}>(RPC_SQL[fn],args);return r.rows[0]!.v;}
 function actionKind(e:Row){const p=e?.payload?.proposed_action;return p&&typeof p.kind==="string"&&p.kind.trim()?p.kind.trim():null;}
 async function workspace(){const r=await pool.query<Row>("select * from destruktion_meta.compute_fabric_a2_workspace_h205f22 where workspace_id=$1",[WORKSPACE_ID]);if(!r.rows[0])throw new Error("a2_workspace_not_found");return r.rows[0];}
 async function detectConflicts(){const r=await pool.query<Row>("select event_hash,agent,event_type,payload,commit_seq,semantic_point from destruktion_meta.compute_fabric_a2_agent_event_h205f22 where workspace_id=$1 and event_type in ('ACTION_PROPOSAL','CLAIM','COUNTERCLAIM') order by commit_seq desc limit 120",[WORKSPACE_ID]);const rows=r.rows;for(let i=0;i<rows.length;i++){const a=rows[i],ak=actionKind(a);if(!ak)continue;for(let j=i+1;j<rows.length;j++){const b=rows[j],bk=actionKind(b);if(!bk||a.agent===b.agent||a.semantic_point!==b.semantic_point)continue;if(ak===bk)break;await rpc("h205f22_a2_open_conflict_v1",[WORKSPACE_ID,a.semantic_point,a.event_hash,b.event_hash,`action_kind_mismatch:${ak}!=${bk}`,"HIGH"]);break;}}}

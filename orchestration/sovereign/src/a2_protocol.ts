@@ -1,9 +1,10 @@
-import { createHash, verify as verifySignature, createPublicKey, type KeyObject } from "node:crypto";
+import { createHash, createHmac, verify as verifySignature, createPublicKey, type KeyObject } from "node:crypto";
 
 export type Agent = "GPT" | "GLM";
 export type Priority = 0 | 1 | 2 | 3;
 export const MODEL_AUTHORED = new Set(["PLAN","HYPOTHESIS","CLAIM","COUNTERCLAIM","QUESTION","EVIDENCE","ASSUMPTION","FALSIFIER","CRITIQUE","AGREEMENT","SYNTHESIS","ACTION_PROPOSAL","REQUEST_DUEL"]);
 export const RUNTIME_EVENTS = new Set(["MODEL_STARTED","MODEL_COMPLETED","MODEL_INTERRUPTED","PEER_EVENT_APPLIED","TOOL_CALL","TOOL_RESULT","TOOL_ERROR","FILE_READ","PATCH_CREATED","TEST_STARTED","TEST_RESULT","AUTHORITY_READ","AUTHORITY_DRIFT","BACKPRESSURE","CATCH_UP_STARTED","CATCH_UP_COMPLETED","CHECKPOINT","ERROR","DUEL_OPENED","DUEL_DECIDED"]);
+export const INGRESS_VERIFIER_ID = "A2_TRUSTED_ED25519_INGRESS_V2";
 
 export interface A2Event {
   event_id:string; commit_seq:number; workspace_id:string; session_id:string; agent:Agent; agent_seq:number;
@@ -17,6 +18,14 @@ export interface VisibilityProof {
 }
 export interface Frontier { head_commit_seq:number; gpt_seq:number; glm_seq:number; gpt_hash?:string|null; glm_hash?:string|null; frontier_hash:string; }
 export interface PeerCapabilities { reasoning_summary_stream?:boolean; max_emit_rate_hz?:number; inbound_queue_depth?:number; tool_calls?:boolean; resume_from_commit_seq?:boolean; max_opaque_ms?:number; }
+export interface IngressReceiptInput {
+  eventHash:string; sessionId:string; fingerprint:string; verifierId:string;
+  issuedAt:Date; expiresAt:Date; nonce:string; signatureBase64:string;
+}
+export interface VerifiedIngressReceipt {
+  verifierId:string; issuedAt:Date; expiresAt:Date; nonce:string;
+  signatureSha256:string; hmacSha256:string;
+}
 
 export function exactModel(agent:Agent):string { return agent === "GPT" ? "openai/gpt-5.6-sol" : "zai/glm-5.3"; }
 export function peerOf(agent:Agent):Agent { return agent === "GPT" ? "GLM" : "GPT"; }
@@ -61,6 +70,7 @@ export class PriorityInbox {
     if(event.priority===3){ const idx=this.q.findIndex(e=>e.priority===3 && e.event_type===event.event_type && e.agent===event.agent); if(idx>=0){this.q[idx]=event;return;} }
     const evict=this.q.findIndex(e=>e.priority===3 || (event.priority===2 && e.priority===2));
     if(evict>=0){this.q.splice(evict,1);this.q.push(event);return;}
+    if(event.priority===2) throw new Error("a2_p2_backpressure_fail_closed");
   }
   drain():A2Event[]{const out=this.q.sort((a,b)=>a.commit_seq-b.commit_seq);this.q=[];return out;}
   get size(){return this.q.length;}
@@ -68,11 +78,34 @@ export class PriorityInbox {
 
 export function verifyEd25519RawPublicKey(rawBase64:string, eventHashHex:string, signatureBase64:string):boolean {
   try {
-    const raw=Buffer.from(rawBase64,"base64"); if(raw.length!==32) return false;
+    if(!/^[0-9a-f]{64}$/.test(eventHashHex)) return false;
+    const raw=Buffer.from(rawBase64,"base64"),signature=Buffer.from(signatureBase64,"base64");
+    if(raw.length!==32||signature.length!==64) return false;
     const spkiPrefix=Buffer.from("302a300506032b6570032100","hex");
     const key:KeyObject=createPublicKey({key:Buffer.concat([spkiPrefix,raw]),format:"der",type:"spki"});
-    return verifySignature(null,Buffer.from(eventHashHex,"hex"),key,Buffer.from(signatureBase64,"base64"));
+    return verifySignature(null,Buffer.from(eventHashHex,"hex"),key,signature);
   } catch { return false; }
+}
+
+function postgresEpoch(value:Date):string {
+  if(!Number.isFinite(value.getTime())) throw new Error("a2_ingress_timestamp_invalid");
+  return (value.getTime()/1000).toFixed(6);
+}
+
+export function ingressReceiptMessage(input:IngressReceiptInput):string {
+  if(input.verifierId!==INGRESS_VERIFIER_ID) throw new Error("a2_ingress_verifier_invalid");
+  if(!/^[0-9a-f]{64}$/.test(input.eventHash)||!/^[0-9a-f]{64}$/.test(input.fingerprint)) throw new Error("a2_ingress_hash_invalid");
+  if(!/^[0-9a-f]{32,128}$/.test(input.nonce)) throw new Error("a2_ingress_nonce_invalid");
+  return ingressReceiptMessageV2({eventHash:input.eventHash,sessionId:input.sessionId,keyFingerprint:input.fingerprint,issuedEpoch:postgresEpoch(input.issuedAt),expiresEpoch:postgresEpoch(input.expiresAt),nonce:input.nonce,signatureSha256:ingressSignatureSha256(input.signatureBase64)});
+}
+
+export function createVerifiedIngressReceipt(input:IngressReceiptInput&{rawPublicKeyBase64:string;hmacSecret:string}):VerifiedIngressReceipt {
+  if(input.verifierId!==INGRESS_VERIFIER_ID) throw new Error("a2_ingress_verifier_invalid");
+  if(input.hmacSecret.length<32) throw new Error("a2_ingress_secret_too_short");
+  if(input.expiresAt<=input.issuedAt||input.expiresAt.getTime()-input.issuedAt.getTime()>120_000) throw new Error("a2_ingress_expiry_invalid");
+  if(!verifyEd25519RawPublicKey(input.rawPublicKeyBase64,input.eventHash,input.signatureBase64)) throw new Error("a2_local_signature_verify_failed");
+  const signatureSha256=ingressSignatureSha256(input.signatureBase64);
+  return {verifierId:input.verifierId,issuedAt:input.issuedAt,expiresAt:input.expiresAt,nonce:input.nonce,signatureSha256,hmacSha256:createHmac("sha256",input.hmacSecret).update(ingressReceiptMessage(input)).digest("hex")};
 }
 
 export function boundedContext(events:A2Event[], maxEvents=80):A2Event[] {

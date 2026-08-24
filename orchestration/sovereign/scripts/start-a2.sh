@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${DATABASE_URL:?DATABASE_URL is required for trusted A2 control services}"
+: "${A2_WORKSPACE_ID:?A2_WORKSPACE_ID is required}"
+: "${A2_GPT_MODEL_URL:?A2_GPT_MODEL_URL is required}"
+: "${A2_GLM_MODEL_URL:?A2_GLM_MODEL_URL is required}"
+
+export A2_INGRESS_URL="${A2_INGRESS_URL:-http://127.0.0.1:${A2_INGRESS_PORT:-8092}}"
+pids=()
+
+cleanup() {
+  for pid in "${pids[@]}"; do
+    if kill -0 "${pid}" 2>/dev/null; then kill "${pid}" 2>/dev/null || true; fi
+  done
+  for pid in "${pids[@]}"; do wait "${pid}" 2>/dev/null || true; done
+}
+trap cleanup EXIT INT TERM
+
+tsx src/a2_ingress.ts &
+pids+=("$!")
+
+for _ in {1..40}; do
+  if curl -fsS "${A2_INGRESS_URL}/healthz" >/dev/null; then break; fi
+  sleep 0.25
+done
+curl -fsS "${A2_INGRESS_URL}/healthz" >/dev/null
+
+tsx src/a2_coordinator.ts &
+pids+=("$!")
+tsx src/a2_server.ts &
+pids+=("$!")
+
+env -u DATABASE_URL \
+  A2_AGENT=GPT \
+  A2_PROVIDER=openai \
+  A2_MODEL=openai/gpt-5.6-sol \
+  A2_MODEL_URL="${A2_GPT_MODEL_URL}" \
+  A2_MODEL_TOKEN="${A2_GPT_MODEL_TOKEN:-}" \
+  A2_RUNTIME_ID="${A2_GPT_RUNTIME_ID:-a2-gpt-runtime}" \
+  A2_ED25519_PRIVATE_KEY_PEM_B64="${A2_GPT_ED25519_PRIVATE_KEY_PEM_B64:-}" \
+  tsx src/a2_runtime.ts &
+pids+=("$!")
+
+env -u DATABASE_URL \
+  A2_AGENT=GLM \
+  A2_PROVIDER=z.ai \
+  A2_MODEL=zai/glm-5.3 \
+  A2_MODEL_URL="${A2_GLM_MODEL_URL}" \
+  A2_MODEL_TOKEN="${A2_GLM_MODEL_TOKEN:-}" \
+  A2_RUNTIME_ID="${A2_GLM_RUNTIME_ID:-a2-glm-runtime}" \
+  A2_ED25519_PRIVATE_KEY_PEM_B64="${A2_GLM_ED25519_PRIVATE_KEY_PEM_B64:-}" \
+  tsx src/a2_runtime.ts &
+pids+=("$!")
+
+wait -n "${pids[@]}"
