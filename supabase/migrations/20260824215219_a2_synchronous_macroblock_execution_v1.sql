@@ -1,0 +1,5 @@
+-- Production history marker for A2_SYNCHRONOUS_MACROBLOCK_MODE_V1.
+-- The original live migration was applied directly to Supabase before source parity.
+-- Clean replay is intentionally re-materialized by the immediately following
+-- a2_macroblock_replay_* migrations, which create the same end-state contract
+-- idempotently. Do not treat this marker alone as the macroblock schema.
