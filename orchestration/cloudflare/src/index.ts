@@ -25,6 +25,14 @@ async function verifyGithub(request: Request, secret: string, body: ArrayBuffer)
   const hex = [...mac].map((b) => b.toString(16).padStart(2, "0")).join("");
   return safeEqual(sig, `sha256=${hex}`);
 }
+async function verifyGithub(request: Request, secret: string, body: ArrayBuffer): Promise<boolean> {
+  const sig = request.headers.get("x-hub-signature-256") ?? "";
+  if (!sig.startsWith("sha256=")) return false;
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, body));
+  const hex = [...mac].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return safeEqual(sig, `sha256=${hex}`);
+}
 function supervisorStub(env: Env) {
   const id = env.AOP_SUPERVISOR.idFromName("compute-fabric-roadmap-v1");
   return env.AOP_SUPERVISOR.get(id);
@@ -51,7 +59,8 @@ export class AopRunWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> {
   async run(event: WorkflowEvent<WorkflowParams>, step: WorkflowStep): Promise<unknown> {
     const { workerId, wake } = event.payload;
     if (wake.reason === "DUEL_RECONCILE" || wake.reason === "DUEL_START" || wake.reason === "DUEL_DB_INSERT") {
-      return runMicrostepDuel(this.env, step, workerId);
+      const targetDuelId = typeof wake.payload?.duel_id === "string" ? String(wake.payload.duel_id) : undefined;
+      return runMicrostepDuel(this.env, step, workerId, targetDuelId);
     }
 
     const leaseJson = await step.do("lease-aop-run", { retries: { limit: 5, delay: "5 seconds", backoff: "exponential" } }, async () => JSON.stringify(await leaseRun(this.env, workerId)));
@@ -99,7 +108,7 @@ export default {
         const vercelRail = Boolean(env.VERCEL_AI_GATEWAY_API_KEY);
         return json({
           status: "ok",
-          invariant: "NO_MANUAL_HANDOFF_V1+MICROSTEP_LOCKSTEP_V2+DUAL_RAIL_RACE_V1+ONE_DURABLE_TICK_V3",
+          invariant: "NO_MANUAL_HANDOFF_V1+MICROSTEP_LOCKSTEP_V2+DUAL_RAIL_RACE_V1+ONE_DURABLE_TICK_V3+TARGETED_LEASE_READ_V3",
           executor_configured: Boolean(env.CF_ACCOUNT_ID && env.CF_AI_TOKEN && env.AOP_MODEL),
           duel_executor_configured: cloudflareRail || vercelRail,
           duel_vercel_rail_configured: vercelRail,
@@ -107,7 +116,8 @@ export default {
           duel_transport: "DB_WEBHOOK+DIRECT_IDEMPOTENT_WORKFLOW+ATOMIC_DB_PAIR+DUAL_RAIL_RACE",
           duel_latency_policy: "FIRST_VALID_EXACT_MODEL_RESPONSE_WINS",
           duel_start_path: "DIRECT_WORKFLOW_CREATE_BATCH_NO_QUEUE_NO_DO",
-          duel_hot_path_readback: "LEASE_THEN_DB_SELECTED_PAIR_RECEIPT",
+          duel_hot_path_readback: "TARGETED_LEASE_READ_THEN_DB_SELECTED_PAIR_RECEIPT",
+          duel_lease_policy: "TARGETED_WAKE_BOUND_LEASE_READ_V3",
           duel_tick_durability: "ONE_DURABLE_TICK_V3",
           duel_context_mode: "FULL_HASHED_HISTORY_COMPACT_PROJECTION",
           duel_reasoning_policy: "ADAPTIVE_LOW_MEDIUM_HIGH_V1",
