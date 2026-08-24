@@ -18,6 +18,8 @@ const ALLOWED_RPC = new Set([
   "h205f22_duel_submit_pair_v3",
   "h205f22_duel_read_lockstep_v2",
   "h205f22_duel_complete_lockstep_v2",
+  "h205f22_duel_create_same_point_v4",
+  "h205f22_duel_read_same_point_v4",
 ]);
 
 export async function rpc<T>(env: Env, fn: string, args: JsonObject = {}): Promise<T> {
