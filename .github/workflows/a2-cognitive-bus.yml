@@ -55,6 +55,8 @@ jobs:
             20260824160209_a2_edge_ingress_verified_emit_v1.sql
             20260824160318_a2_ephemeral_runtime_access_capability_v1.sql
             20260824160910_a2_edge_conflict_reconciliation_v1.sql
+            20260824170822_a2_acceptance_oidc_digest_namespace_fix_v1.sql
+            20260824171926_a2_permanent_provider_failure_fence_v1.sql
           )
           for migration in "${migrations[@]}"; do
             test -s "supabase/migrations/$migration" || { echo "missing A2 migration: $migration"; exit 1; }
@@ -80,11 +82,20 @@ jobs:
           grep -q "openai/gpt-5.6-sol" "$reconcile"
           grep -q "zai/glm-5.3" "$reconcile"
           grep -q "h205f22_a2_reconcile_workspace_conflicts_v2" "$reconcile"
+          digest_fix="supabase/migrations/20260824170822_a2_acceptance_oidc_digest_namespace_fix_v1.sql"
+          grep -q "extensions.digest" "$digest_fix"
+          provider_fence="supabase/migrations/20260824171926_a2_permanent_provider_failure_fence_v1.sql"
+          grep -q "compute_fabric_a2_provider_block_h205f22" "$provider_fence"
+          grep -q "CUSTOMER_VERIFICATION_REQUIRED" "$provider_fence"
+          grep -q "h205f22_a2_clear_provider_block_v1" "$provider_fence"
           test -s supabase/functions/metaengine-a2-ingress-h205f22/index.ts
           test -s supabase/functions/metaengine-a2-github-oidc-acceptance-h205f22/index.ts
           grep -q "A2_EDGE_WEBCRYPTO_ED25519_V1" supabase/functions/metaengine-a2-ingress-h205f22/index.ts
           grep -q "EPHEMERAL_SCOPED_BEARER_CAPABILITY_SHA256_DB_FENCED" supabase/functions/metaengine-a2-ingress-h205f22/index.ts
           grep -q "metaengine-h205f22-a2-acceptance" supabase/functions/metaengine-a2-github-oidc-acceptance-h205f22/index.ts
+          test -s orchestration/sovereign/src/a2_model_probe.ts
+          grep -q "CUSTOMER_VERIFICATION_REQUIRED" orchestration/sovereign/src/a2_model_probe.ts
+          grep -q "peers were not registered and no sync round was opened" orchestration/sovereign/scripts/start-a2.sh
           if grep -q "HISTORY MARKER ONLY" "$replay"; then
             echo "consolidated A2 replay contract must not be a history marker"
             exit 1
