@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   diagnose:
@@ -38,3 +39,18 @@ jobs:
             --data-urlencode 'metricKeys=new_duplicated_lines_density,new_bugs,new_vulnerabilities,new_code_smells,new_reliability_rating,new_security_rating' \
             -o /tmp/sonar-measures.json
           jq -c '.component.measures' /tmp/sonar-measures.json
+      - name: Publish compact diagnostics to PR
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo '<!-- a2-sonar-diagnostics -->'
+            echo '### A2 Sonar diagnostics'
+            echo '```json'
+            jq -c '{total,issues:[.issues[]|{rule,severity,type,message,component,line,textRange,impacts}]}' /tmp/sonar-issues.json
+            jq -c '{measures:.component.measures}' /tmp/sonar-measures.json
+            echo '```'
+          } > /tmp/a2-sonar-comment.md
+          gh pr comment 49 --repo PatrickFrome/Compute --body-file /tmp/a2-sonar-comment.md
