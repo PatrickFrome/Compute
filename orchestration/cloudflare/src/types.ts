@@ -31,6 +31,8 @@ export interface Env {
   GITHUB_APP_PRIVATE_KEY?: string;
   GITHUB_WEBHOOK_SECRET?: string;
   CF_ACCOUNT_ID?: string; CF_AI_TOKEN?: string; AOP_MODEL?: string; AOP_AI_GATEWAY_ID?: string;
+  VERCEL_AI_GATEWAY_API_KEY?: string;
+  DUEL_MODEL_TIMEOUT_MS?: string;
   AOP_SUPERVISOR: DurableObjectNamespace; AOP_RUN_WORKFLOW: WorkflowBinding; AOP_WAKE_QUEUE: QueueBinding<AopWake>;
 }
 export interface DurableObjectNamespace { idFromName(name: string): unknown; get(id: unknown): { wake(message: AopWake): Promise<{ accepted: boolean }> }; }
