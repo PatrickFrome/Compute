@@ -51,6 +51,16 @@ function isLoopback(host: string): boolean {
   return ["127.0.0.1", "localhost", "::1", "[::1]"].includes(host.toLowerCase());
 }
 
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function expectedPeerFor(agent: string): "GPT" | "GLM" | null {
+  if (agent === "GPT") return "GLM";
+  if (agent === "GLM") return "GPT";
+  return null;
+}
+
 if (!TOKEN && !isLoopback(HOST)) throw new Error("A2_OBSERVER_TOKEN_required_for_non_loopback");
 
 function constantTimeEqual(left: string, right: string): boolean {
@@ -119,7 +129,9 @@ function peerMap(peers: Json[], cursors: Json[]): Record<string, Json> {
   const mapped: Record<string, Json> = {};
   for (const peer of peers || []) {
     const cursor = (cursors || []).find((candidate) => candidate.session_id === peer.session_id) || {};
-    mapped[String(peer.agent)] = {
+    const agent = stringValue(peer.agent);
+    if (!agent) continue;
+    mapped[agent] = {
       model: peer.requested_model,
       runtime_id: peer.runtime_id,
       status: peer.status,
@@ -139,7 +151,7 @@ async function ingressReceipts(eventHashes: string[]): Promise<Map<string, Json>
     "select receipt_id,event_hash,verifier_id,issued_at,expires_at,consumed_event_id,signature_sha256,canonical,authority_effect from destruktion_meta.compute_fabric_a2_ingress_receipt_h205f22 where event_hash=any($1::text[])",
     [eventHashes],
   );
-  return new Map(result.rows.map((receipt) => [String(receipt.event_hash), receipt]));
+  return new Map(result.rows.map((receipt) => [stringValue(receipt.event_hash), receipt]));
 }
 
 async function decorateEvents(events: Json[]): Promise<Json[]> {
@@ -150,20 +162,25 @@ async function decorateEvents(events: Json[]): Promise<Json[]> {
     if (event.event_type !== "PEER_EVENT_APPLIED") continue;
     const payload = event.payload && typeof event.payload === "object" ? event.payload as Json : {};
     const eventHashes = Array.isArray(payload.peer_event_hashes) ? payload.peer_event_hashes : [];
+    const receiptAgent = stringValue(event.agent) || stringValue(event.agent_id);
+    if (!receiptAgent) continue;
     for (const hash of eventHashes) {
       if (typeof hash !== "string") continue;
       const agents = appliedBy.get(hash) || new Set<string>();
-      agents.add(String(event.agent || event.agent_id || ""));
+      agents.add(receiptAgent);
       appliedBy.set(hash, agents);
     }
   }
   return events.map((event) => {
-    const agent = String(event.agent || event.agent_id || "");
-    const acknowledgers = [...(appliedBy.get(String(event.event_hash)) || new Set())].filter(Boolean).sort();
-    const expectedPeer = agent === "GPT" ? "GLM" : agent === "GLM" ? "GPT" : null;
+    const agent = stringValue(event.agent) || stringValue(event.agent_id);
+    const eventHash = stringValue(event.event_hash);
+    const acknowledgers = [...(appliedBy.get(eventHash) || new Set<string>())]
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right));
+    const expectedPeer = expectedPeerFor(agent);
     return {
       ...event,
-      ingress_receipt: receipts.get(String(event.event_hash)) || null,
+      ingress_receipt: receipts.get(eventHash) || null,
       applied_by: acknowledgers,
       expected_peer: expectedPeer,
       peer_applied: expectedPeer ? acknowledgers.includes(expectedPeer) : null,
@@ -172,7 +189,10 @@ async function decorateEvents(events: Json[]): Promise<Json[]> {
 }
 
 async function snapshot(workspaceId: string): Promise<Json> {
-  const [raw, sync] = await Promise.all([rpc<Json>("readSnapshot", [workspaceId, 250]), rpc<Json>("readSync", [workspaceId])]);
+  const [raw, sync] = await Promise.all([
+    rpc<Json>("readSnapshot", [workspaceId, 250]),
+    rpc<Json>("readSync", [workspaceId]),
+  ]);
   const workspace = (raw.workspace || {}) as Json;
   const events = Array.isArray(raw.events) ? (raw.events as Json[]) : [];
   const peers = Array.isArray(raw.peers) ? (raw.peers as Json[]) : [];
@@ -201,7 +221,7 @@ function sendSse(response: ServerResponse, data: unknown, id?: number): void {
 
 async function broadcastNotification(messagePayload: string | undefined): Promise<void> {
   const payload = JSON.parse(messagePayload || "{}") as Json;
-  const workspaceId = String(payload.workspace_id || "");
+  const workspaceId = stringValue(payload.workspace_id);
   const commitSequence = Number(payload.commit_seq || 0);
   if (!isUuid(workspaceId) || !Number.isSafeInteger(commitSequence) || commitSequence < 1) return;
   const clients = sseClients.get(workspaceId);
@@ -221,14 +241,14 @@ async function listenLoop(): Promise<void> {
       await client.query("listen h205f22_a2_event");
       listenReady = true;
       client.on("notification", (message) => {
-        void broadcastNotification(message.payload).catch((error) => console.error("a2_observer_notification_failed", error));
+        void broadcastNotification(message.payload).catch(() => console.error("a2_observer_notification_failed"));
       });
       await new Promise<void>((resolve) => {
         client.once("error", () => resolve());
         client.once("end", () => resolve());
       });
-    } catch (error) {
-      if (!stopped) console.error("a2_observer_listen_reconnect", error);
+    } catch {
+      if (!stopped) console.error("a2_observer_listen_reconnect");
     } finally {
       listenReady = false;
       await client.end().catch(() => undefined);
@@ -247,7 +267,7 @@ setInterval(() => {
 }, 15_000).unref();
 
 const server = createServer(async (request, response) => {
-  const url = new URL(request.url || "/", "http://observer.invalid");
+  const url = new URL(request.url || "/", "https://observer.invalid");
   try {
     if (url.pathname === "/healthz") {
       sendJson(response, 200, { status: "ok", service: "a2-observer", listen_ready: listenReady });
@@ -290,7 +310,11 @@ const server = createServer(async (request, response) => {
       }
       const queryAfter = Number(url.searchParams.get("after") || 0);
       const headerAfter = Number(request.headers["last-event-id"] || 0);
-      const after = Math.max(0, Number.isSafeInteger(queryAfter) ? queryAfter : 0, Number.isSafeInteger(headerAfter) ? headerAfter : 0);
+      const after = Math.max(
+        0,
+        Number.isSafeInteger(queryAfter) ? queryAfter : 0,
+        Number.isSafeInteger(headerAfter) ? headerAfter : 0,
+      );
       response.writeHead(200, {
         "content-type": "text/event-stream",
         "cache-control": "no-cache, no-transform",
@@ -298,7 +322,9 @@ const server = createServer(async (request, response) => {
         "x-accel-buffering": "no",
         "x-content-type-options": "nosniff",
       });
-      for (const event of await eventsAfter(workspaceId, after, 250)) sendSse(response, event, Number(event.commit_seq));
+      for (const event of await eventsAfter(workspaceId, after, 250)) {
+        sendSse(response, event, Number(event.commit_seq));
+      }
       let clients = sseClients.get(workspaceId);
       if (!clients) {
         clients = new Set();
@@ -311,7 +337,8 @@ const server = createServer(async (request, response) => {
       });
       return;
     }
-    const ancestryMatch = url.pathname.match(/^\/a2\/api\/events\/([0-9a-f-]+)\/ancestry$/i);
+    const ancestryExpression = /^\/a2\/api\/events\/([0-9a-f-]+)\/ancestry$/i;
+    const ancestryMatch = ancestryExpression.exec(url.pathname);
     if (request.method === "GET" && ancestryMatch) {
       if (!isUuid(ancestryMatch[1]!)) {
         sendJson(response, 400, { error: "event_id_invalid" });
@@ -321,8 +348,8 @@ const server = createServer(async (request, response) => {
       return;
     }
     sendJson(response, 404, { error: "not_found" });
-  } catch (error) {
-    console.error("a2_observer_request_failed", error);
+  } catch {
+    console.error("a2_observer_request_failed");
     sendJson(response, 500, { error: "internal_error" });
   }
 });
