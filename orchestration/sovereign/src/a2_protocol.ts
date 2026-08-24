@@ -27,6 +27,10 @@ function sortValue(value:unknown):unknown {
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string,unknown>).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>[k,sortValue(v)]));
   return value;
 }
+export function ingressSignatureSha256(signatureBase64:string):string { const b=Buffer.from(signatureBase64,"base64"); if(b.length!==64)throw new Error("a2_ed25519_signature_length_invalid"); return sha256Hex(b); }
+export function ingressReceiptMessageV2(input:{eventHash:string;sessionId:string;keyFingerprint:string;issuedEpoch:string;expiresEpoch:string;nonce:string;signatureSha256:string}):string {
+  return ["A2_INGRESS_RECEIPT_V2",input.eventHash,input.sessionId,input.keyFingerprint,"A2_TRUSTED_ED25519_INGRESS_V2",input.issuedEpoch,input.expiresEpoch,input.nonce,input.signatureSha256].join("\n");
+}
 export function deriveFrontierHash(workspaceId:string, events:A2Event[]):string {
   let gpt:A2Event|undefined, glm:A2Event|undefined;
   for (const e of events) { if(e.agent==="GPT" && (!gpt || e.agent_seq>gpt.agent_seq)) gpt=e; if(e.agent==="GLM" && (!glm || e.agent_seq>glm.agent_seq)) glm=e; }
