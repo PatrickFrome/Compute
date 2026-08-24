@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "check": "tsc --noEmit",
-    "test:a2": "node --import tsx --test src/a2_protocol.test.ts",
-    "test:a2:coverage": "node --experimental-test-coverage --import tsx --test src/a2_protocol.test.ts",
+    "test:a2": "node --import tsx --test src/a2_protocol.test.ts src/a2_workflow_contract.test.ts src/a2_model_probe.test.ts",
+    "test:a2:coverage": "node --experimental-test-coverage --import tsx --test src/a2_protocol.test.ts src/a2_workflow_contract.test.ts src/a2_model_probe.test.ts",
     "test:a2:ingress-canary": "tsx src/a2_ingress_canary.ts",
     "start": "bash scripts/start-all.sh",
     "start:all": "bash scripts/start-all.sh",
