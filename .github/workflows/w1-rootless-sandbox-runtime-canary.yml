@@ -1,0 +1,60 @@
+name: W1 Rootless Sandbox Runtime Canary
+
+on:
+  push:
+    branches: [work/w1-sandbox-launcher-prep]
+    paths:
+      - 'worker/native_linux/rootless_sandbox_launcher.py'
+      - '.github/workflows/w1-rootless-sandbox-runtime-canary.yml'
+
+permissions: {}
+
+jobs:
+  canary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Run non-authority kernel isolation canary
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          python3 worker/native_linux/rootless_sandbox_launcher.py python3 - <<'PY' > /tmp/w1-sandbox-canary.txt 2>&1
+          from pathlib import Path
+          status = Path('/proc/self/status').read_text()
+          fields = {}
+          for line in status.splitlines():
+              if ':' in line:
+                  k, v = line.split(':', 1)
+                  fields[k] = v.strip()
+          self_mnt = Path('/proc/self/ns/mnt').stat().st_ino
+          init_mnt = Path('/proc/1/ns/mnt').stat().st_ino
+          print('EUID=' + str(__import__('os').geteuid()))
+          print('NO_NEW_PRIVS=' + fields.get('NoNewPrivs', '?'))
+          print('SECCOMP=' + fields.get('Seccomp', '?'))
+          print('MOUNT_NAMESPACE_ISOLATED=' + str(self_mnt != init_mnt).lower())
+          print('CANONICAL=false')
+          print('AUTHORITY_EFFECT=false')
+          print('W1_VERIFIED=false')
+          PY
+          rc=$?
+          set -e
+          cat /tmp/w1-sandbox-canary.txt
+          echo "LAUNCHER_RC=$rc"
+          if [ "$rc" -eq 78 ]; then
+            echo 'RUNTIME_CANARY=UNAVAILABLE_FAIL_CLOSED'
+            exit 0
+          fi
+          test "$rc" -eq 0
+          grep -q '^NO_NEW_PRIVS=1$' /tmp/w1-sandbox-canary.txt
+          grep -q '^SECCOMP=2$' /tmp/w1-sandbox-canary.txt
+          grep -q '^MOUNT_NAMESPACE_ISOLATED=true$' /tmp/w1-sandbox-canary.txt
+          grep -q '^W1_VERIFIED=false$' /tmp/w1-sandbox-canary.txt
+          echo 'RUNTIME_CANARY=PASS_NONAUTHORITY'
