@@ -34,7 +34,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
 
     def test_manifest_and_entrypoints(self):
         self.assertEqual(self.manifest["manifest_version"], 3)
-        self.assertEqual(self.manifest["version"], "0.5.5")
+        self.assertEqual(self.manifest["version"], "0.5.6")
         self.assertEqual(self.manifest["background"]["service_worker"], "background-entry.js")
         self.assertNotIn("type", self.manifest["background"])
         self.assertIn("debugger", self.manifest["permissions"])
@@ -117,8 +117,9 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("send_click_not_observed_in_dom", self.content)
         self.assertNotIn("press Enter", self.content)
 
-    def test_chatgpt_trusted_cdp_transport_is_narrow_and_fail_closed(self):
-        self.assertIn('message?.type !== "A2_CHATGPT_TRUSTED_SEND"', self.trusted)
+    def test_chatgpt_trusted_cdp_transport_is_two_phase_narrow_and_fail_closed(self):
+        self.assertIn('"A2_CHATGPT_TRUSTED_PRIME"', self.trusted)
+        self.assertIn('"A2_CHATGPT_TRUSTED_CLICK"', self.trusted)
         self.assertIn('chrome.debugger.attach', self.trusted)
         self.assertIn('chrome.debugger.detach', self.trusted)
         self.assertIn('"Input.insertText"', self.trusted)
@@ -131,17 +132,32 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn('url.pathname.startsWith("/c/")', self.trusted)
         self.assertIn('inFlightTabs.has(tabId)', self.trusted)
         self.assertIn('if (attached)', self.trusted)
+        self.assertIn('chrome.storage.local.get("armed")', self.trusted)
+        self.assertIn('chatgpt_cdp_not_armed', self.trusted)
+        self.assertIn('prompt_not_bridge_owned', self.trusted)
         self.assertNotIn("chat.z.ai", self.trusted)
 
+    def test_chatgpt_editor_is_trusted_primed_before_send_resolution(self):
+        self.assertIn('A2_CHATGPT_TRUSTED_PRIME', self.compat)
+        self.assertIn('maybePrimeChatgptComposer()', self.compat)
+        self.assertIn('isBridgeOwnedGptPrompt', self.compat)
+        self.assertIn('bridge_job_target=GPT', self.compat)
+        self.assertIn('transport=WEB_CHAT_INTERACTIVE_REMOTE', self.compat)
+        chatgpt_block = self.compat.split('if (host === "chatgpt.com" || host === "chat.openai.com")', 1)[1]
+        self.assertLess(chatgpt_block.index('maybePrimeChatgptComposer();'), chatgpt_block.index('installChatgptTrustedSendBridge();'))
+
     def test_chatgpt_synthetic_click_is_upgraded_without_duplicating_user_clicks(self):
-        self.assertIn('A2_CHATGPT_TRUSTED_SEND', self.compat)
+        self.assertIn('A2_CHATGPT_TRUSTED_CLICK', self.compat)
         self.assertIn('if (event.isTrusted) return;', self.compat)
+        self.assertIn('event.preventDefault();', self.compat)
+        self.assertIn('event.stopImmediatePropagation();', self.compat)
         self.assertIn('composer.closest("form")', self.compat)
         self.assertIn('form.contains(button)', self.compat)
         self.assertIn('button.disabled', self.compat)
         self.assertNotIn('requestSubmit', self.compat)
         zai_block = self.compat.split('if (host === "chat.z.ai")', 1)[1].split('return;', 1)[0]
-        self.assertNotIn("A2_CHATGPT_TRUSTED_SEND", zai_block)
+        self.assertNotIn("A2_CHATGPT_TRUSTED_PRIME", zai_block)
+        self.assertNotIn("A2_CHATGPT_TRUSTED_CLICK", zai_block)
 
     def test_idle_composer_presence_does_not_require_send_button(self):
         self.assertIn("function resolveComposer()", self.content)
