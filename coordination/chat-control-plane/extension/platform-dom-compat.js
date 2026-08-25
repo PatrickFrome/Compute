@@ -2,6 +2,9 @@
   "use strict";
 
   const CHATGPT_TRUSTED_SEND_MARK = "data-a2-chatgpt-trusted-send";
+  let primeInFlight = "";
+  let lastPrimedPrompt = "";
+  let primeRetryTimer = null;
 
   function composerText(element) {
     if (!element) return "";
@@ -9,6 +12,50 @@
       return String(element.value || "").replace(/\r\n/g, "\n").trim();
     }
     return String(element.innerText || element.textContent || "").replace(/\r\n/g, "\n").trim();
+  }
+
+  function isBridgeOwnedGptPrompt(prompt) {
+    return prompt.startsWith("A2 CHAT BRIDGE — AUTONOMOUS CONTINUE")
+      && prompt.includes("bridge_job_target=GPT")
+      && prompt.includes("transport=WEB_CHAT_INTERACTIVE_REMOTE");
+  }
+
+  function schedulePrimeRetry() {
+    if (primeRetryTimer) return;
+    primeRetryTimer = setTimeout(() => {
+      primeRetryTimer = null;
+      reconcile();
+    }, 450);
+  }
+
+  function maybePrimeChatgptComposer() {
+    const composers = [...document.querySelectorAll("#prompt-textarea")];
+    if (composers.length !== 1) return false;
+    const prompt = composerText(composers[0]);
+    if (!isBridgeOwnedGptPrompt(prompt)) {
+      if (!prompt) lastPrimedPrompt = "";
+      return false;
+    }
+    if (prompt === lastPrimedPrompt || prompt === primeInFlight) return true;
+
+    primeInFlight = prompt;
+    chrome.runtime.sendMessage({ type: "A2_CHATGPT_TRUSTED_PRIME", prompt })
+      .then((response) => {
+        if (response?.ok === true) {
+          lastPrimedPrompt = prompt;
+        } else {
+          lastPrimedPrompt = "";
+          schedulePrimeRetry();
+        }
+      })
+      .catch(() => {
+        lastPrimedPrompt = "";
+        schedulePrimeRetry();
+      })
+      .finally(() => {
+        if (primeInFlight === prompt) primeInFlight = "";
+      });
+    return true;
   }
 
   function installChatgptTrustedSendBridge() {
@@ -32,14 +79,17 @@
     button.setAttribute(CHATGPT_TRUSTED_SEND_MARK, "1");
 
     button.addEventListener("click", (event) => {
-      // User clicks are already trusted and must never be duplicated. Only the
-      // bridge's synthetic click is upgraded through the service worker/CDP.
+      // Human clicks are already trusted and must pass through unchanged. The
+      // bridge's synthetic click is stopped before ChatGPT sees it, then upgraded
+      // to a scoped CDP mouse click by the service worker.
       if (event.isTrusted) return;
       const prompt = composerText(composer);
-      if (!prompt) return;
+      if (!isBridgeOwnedGptPrompt(prompt)) return;
       if (button.disabled || button.getAttribute("aria-disabled") === "true") return;
-      chrome.runtime.sendMessage({ type: "A2_CHATGPT_TRUSTED_SEND", prompt }).catch(() => {});
-    });
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      chrome.runtime.sendMessage({ type: "A2_CHATGPT_TRUSTED_CLICK", prompt }).catch(() => {});
+    }, true);
     return true;
   }
 
@@ -78,6 +128,7 @@
       return;
     }
     if (host === "chatgpt.com" || host === "chat.openai.com") {
+      maybePrimeChatgptComposer();
       if (!markExactSendButton("#composer-submit-button")) {
         markBoundSubmitFallback("#prompt-textarea");
       }
@@ -87,5 +138,11 @@
 
   reconcile();
   const observer = new MutationObserver(() => reconcile());
-  observer.observe(document.documentElement, { subtree: true, childList: true });
+  observer.observe(document.documentElement, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ["disabled", "aria-disabled", "data-testid"]
+  });
 })();
