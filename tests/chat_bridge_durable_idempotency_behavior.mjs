@@ -24,7 +24,7 @@ let failFirstVerifiedAck = true;
 globalThis.fetch = async (input, init = {}) => {
   const url = typeof input === 'string' ? input : input?.url || String(input);
   const method = String(init.method || 'GET').toUpperCase();
-  if (method === 'GET' && url.endsWith('/v1/commands/next')) {
+  if (method === 'POST' && url.endsWith('/v1/commands/next')) {
     const body = nextResponses.shift() || { command: null };
     return new Response(JSON.stringify(body), {
       status: 200,
@@ -48,7 +48,9 @@ globalThis.fetch = async (input, init = {}) => {
 
 await import('../coordination/chat-control-plane/extension/durable-fetch.js?behavior-test=1');
 
-const NEXT_URL = 'http://127.0.0.1:8765/v1/commands/next';
+const BRIDGE_BASE = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-chat-bridge-remote';
+const NEXT_URL = `${BRIDGE_BASE}/v1/commands/next`;
+const next = () => ({ method: 'POST', body: JSON.stringify({ snapshots: [] }) });
 function command(commandId, idem) {
   return {
     command_id: commandId,
@@ -58,14 +60,14 @@ function command(commandId, idem) {
   };
 }
 
-// 1) Lease a command and then lose the daemon ACK after exact DOM verification.
+// 1) Lease a command and then lose the remote ACK after exact DOM verification.
 nextResponses.push({ command: command('cmd-1', 'idem-A') });
-let response = await fetch(NEXT_URL, { method: 'GET' });
+let response = await fetch(NEXT_URL, next());
 let body = await response.json();
 assert.equal(body.command.command_id, 'cmd-1');
 
 await assert.rejects(
-  fetch('http://127.0.0.1:8765/v1/commands/cmd-1/result', {
+  fetch(`${BRIDGE_BASE}/v1/commands/cmd-1/result`, {
     method: 'POST',
     body: JSON.stringify({
       status: 'SENT_AND_DOM_VERIFIED',
@@ -78,28 +80,29 @@ await assert.rejects(
 );
 
 const completed = storage.get('a2BridgeCompletedCommandsV1');
-assert.equal(completed.length, 1, 'verified Send must persist before daemon ACK');
+assert.equal(completed.length, 1, 'verified Send must persist before remote ACK');
 assert.equal(completed[0].idempotency_key, 'idem-A');
 assert.equal(completed[0].dom_send_verified, true);
 
-// 2) A restarted daemon uses a new command ID but deterministic same idempotency key.
+// 2) A restarted scheduler uses a new command ID but deterministic same idempotency key.
 // The wrapper must ACK it as durable and hide it from background.js, preventing a second Send.
 nextResponses.push({ command: command('cmd-2', 'idem-A') });
-response = await fetch(NEXT_URL, { method: 'GET' });
+response = await fetch(NEXT_URL, next());
 body = await response.json();
 assert.equal(body.command, null);
 assert.equal(body.durable_duplicate_command_id, 'cmd-2');
 assert.equal(body.durable_duplicate_idempotency_key, 'idem-A');
 assert.equal(resultCalls.at(-1).body.status, 'SENT_ALREADY_DURABLE');
 assert.equal(resultCalls.at(-1).body.verification.verified, true);
+assert.equal(resultCalls.at(-1).url, `${BRIDGE_BASE}/v1/commands/cmd-2/result`, 'remote Edge Function base path must be preserved');
 
 // 3) A mere click/SENT status without exact DOM verification must NOT poison the durable ledger.
 nextResponses.push({ command: command('cmd-3', 'idem-B') });
-response = await fetch(NEXT_URL, { method: 'GET' });
+response = await fetch(NEXT_URL, next());
 body = await response.json();
 assert.equal(body.command.command_id, 'cmd-3');
 
-response = await fetch('http://127.0.0.1:8765/v1/commands/cmd-3/result', {
+response = await fetch(`${BRIDGE_BASE}/v1/commands/cmd-3/result`, {
   method: 'POST',
   body: JSON.stringify({
     status: 'SENT',
@@ -111,7 +114,7 @@ assert.equal(response.status, 200);
 assert.equal(storage.get('a2BridgeCompletedCommandsV1').length, 1);
 
 nextResponses.push({ command: command('cmd-4', 'idem-B') });
-response = await fetch(NEXT_URL, { method: 'GET' });
+response = await fetch(NEXT_URL, next());
 body = await response.json();
 assert.equal(body.command.command_id, 'cmd-4', 'unverified prior result must not suppress a retry');
 
