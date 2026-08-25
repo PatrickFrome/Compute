@@ -1,0 +1,27 @@
+name: W1 H1-H13 Prereq UID Map Regression
+
+on:
+  push:
+    branches:
+      - work/w1-sandbox-launcher-prep
+    paths:
+      - worker/native_linux/h1_h13_prereq_probe.py
+      - tests/test_w1_h1_h13_prereq_uidmap_order.py
+      - .github/workflows/w1-h1-h13-prereq-uidmap-regression.yml
+  pull_request:
+    paths:
+      - worker/native_linux/h1_h13_prereq_probe.py
+      - tests/test_w1_h1_h13_prereq_uidmap_order.py
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Compile prereq probe
+        run: python3 -m py_compile worker/native_linux/h1_h13_prereq_probe.py
+      - name: Assert parent identity captured before CLONE_NEWUSER
+        run: python3 -m unittest tests.test_w1_h1_h13_prereq_uidmap_order -v
