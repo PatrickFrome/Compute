@@ -109,23 +109,25 @@ export class BridgeReceiptRecorder {
       const platform = String(command.target_platform || '');
       const target = this.latestTarget.get(platform);
       if (!target) throw new Error(`receipt_target_snapshot_required:${platform}`);
+      const expectedAgent = targetAgent(platform);
+      const explicitAgent = String(command.target_agent || '');
+      if (!explicitAgent) throw new Error('receipt_target_agent_required');
+      if (explicitAgent !== expectedAgent) throw new Error('receipt_target_pair_invalid');
+      const frontier = Number(command.a2_head_message_seq);
+      if (!Number.isInteger(frontier) || frontier < 0) throw new Error('receipt_a2_frontier_invalid');
       const idempotency = assertHex64(command.idempotency_key, 'idempotency_key');
       const promptSha = assertHex64(command.prompt_sha256, 'prompt_sha256');
       const lease = {
         command_id: String(command.command_id),
-        target_agent: String(command.target_agent || targetAgent(platform)),
+        target_agent: explicitAgent,
         target_platform: platform,
         target_url_sha256: target.target_url_sha256,
-        a2_head_message_seq: Number(command.a2_head_message_seq || 0),
+        a2_head_message_seq: frontier,
         duel_id: command.duel_id || null,
         pending_payloads_exposed: command.a2_peer_payloads_exposed === true,
         idempotency_key_sha256: idempotency,
         prompt_sha256: promptSha,
       };
-      if (lease.target_agent !== targetAgent(platform)) throw new Error('receipt_target_pair_invalid');
-      if (!Number.isInteger(lease.a2_head_message_seq) || lease.a2_head_message_seq < 0) {
-        throw new Error('receipt_a2_frontier_invalid');
-      }
 
       const receipt = await this.ingest({
         p_workspace_id: this.workspaceId,
