@@ -46,7 +46,7 @@
   <section class="card">
     <label for="daemonUrl">Local bridge daemon</label>
     <input id="daemonUrl" type="url" value="http://127.0.0.1:8765" autocomplete="off" />
-    <label for="bridgeSecret">Local pairing secret (must match A2_BRIDGE_SHARED_SECRET)</label>
+    <label for="bridgeSecret">Local pairing secret (must match the daemon pairing secret)</label>
     <input id="bridgeSecret" type="password" minlength="32" autocomplete="new-password" placeholder="32+ character local-only secret" />
     <p class="mono">Stored only in chrome.storage.local. Never put this secret in Git, A2 mailbox or Supabase.</p>
     <label for="pollMs">Command poll interval, ms</label>
