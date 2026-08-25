@@ -9,6 +9,11 @@ const DEFAULTS = Object.freeze({
   zaiUrl: "https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db"
 });
 
+const CONTENT_SEND_STATUSES = new Set([
+  "SENT_AND_DOM_VERIFIED",
+  "SENT_WEAK_DOM_VERIFIED",
+  "DUPLICATE_IGNORED"
+]);
 const inFlightCommands = new Set();
 let lastPollAt = 0;
 let pollPromise = null;
@@ -213,8 +218,13 @@ async function executeCommand(command) {
     });
     if (!response?.ok) throw new Error(response?.error || "content_send_failed");
 
+    const resultStatus = String(response.result?.status || "");
+    if (!CONTENT_SEND_STATUSES.has(resultStatus)) {
+      throw new Error(`unexpected_send_result_status:${resultStatus || "missing"}`);
+    }
+
     await postCommandResult(commandId, {
-      status: response.result?.status || "SENT",
+      status: resultStatus,
       target_platform: command.target_platform,
       target_url: normalizeUrl(before.url),
       tab_id: tab.id,
