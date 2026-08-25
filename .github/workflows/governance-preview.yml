@@ -1,0 +1,91 @@
+name: Compute Fabric Governance Preview
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head in unprivileged preview
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate target-only governance shape
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          python3 - <<'PY'
+          from pathlib import Path
+          target = Path('.github/workflows/governance.yml').read_text()
+          preview = Path('.github/workflows/governance-preview.yml').read_text()
+          pin = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
+          assert 'pull_request_target:' in target
+          assert '\n  pull_request:\n' not in target
+          assert 'jobs:\n  governance:' in target
+          assert 'github.event_name' not in target
+          assert 'Fetch PR head object without checkout' in target
+          assert 'git diff --no-ext-diff --name-only "$BASE_SHA" "$HEAD_SHA"' in target
+          assert 'work/chat-control-plane-browser-bridge' in target
+          assert pin in target
+          assert 'pull_request_target:' not in preview
+          assert '\n  pull_request:\n' in preview
+          assert 'jobs:\n  preview:' in preview
+          assert pin in preview
+          PY
+
+          git cat-file -e "$BASE_SHA^{commit}"
+          git cat-file -e "$HEAD_SHA^{commit}"
+          git checkout --detach "$BASE_SHA"
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
+
+          case "$HEAD_REF" in
+            work/w1-linux-worker-safety) EXPECTED_L1='C1' ;;
+            work/t0-hermetic-toolchain) EXPECTED_L1='C2' ;;
+            work/f1-live-federation) EXPECTED_L1='F1+' ;;
+            work/r1-continuity-plane) EXPECTED_L1='R1' ;;
+            work/a1-agent-workspace) EXPECTED_L1='C2' ;;
+            work/aop1-autonomous-orchestration|work/same-point-duel-v4-*|work/chat-control-plane-browser-bridge) EXPECTED_L1='CROSS-CUTTING' ;;
+            analysis/integration) EXPECTED_L1='CROSS-CUTTING' ;;
+            *) exit 1 ;;
+          esac
+          grep -Fq "Canonical Level-1 milestone: $EXPECTED_L1" <<<"${PR_BODY:-}"
+          grep -Fq "Level-2 milestone:" <<<"${PR_BODY:-}"
+
+          if git diff --no-ext-diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Fxq '.github/workflows/governance.yml'; then
+            case "$HEAD_REF" in
+              analysis/integration|work/same-point-duel-v4-*) ;;
+              *) exit 1 ;;
+            esac
+          fi
+
+          for path in README.md docs/CANONICAL_ROADMAP.md docs/CHAT_TOPOLOGY.md docs/ROADMAP_EXECUTION_PROTOCOL.md .github/pull_request_template.md; do
+            git cat-file -e "$HEAD_SHA:$path"
+          done
+          for marker in R1 C1 C17 'F1+' 'Level-2 execution DAG mapping'; do
+            git show "$HEAD_SHA:docs/CANONICAL_ROADMAP.md" | grep -Fq "$marker"
+          done
+          if [ "$HEAD_REF" != 'analysis/integration' ]; then
+            ! git diff --no-ext-diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Fxq 'docs/CANONICAL_ROADMAP.md'
+          fi
+
+      - name: Assert preview cannot masquerade as authoritative governance
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'This workflow intentionally exposes only the distinct preview check name.'
+          test "$GITHUB_WORKFLOW" = 'Compute Fabric Governance Preview'
