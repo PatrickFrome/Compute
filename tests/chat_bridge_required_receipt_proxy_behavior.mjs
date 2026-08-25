@@ -152,10 +152,6 @@ try {
   });
   assert.equal(wake.response.status, 202);
 
-  // If COMMAND_LEASED persistence fails, the scheduler may already hold the
-  // internal lease, but the browser must not receive the command. The secure
-  // proxy caches only this never-delivered command in RAM and retries the
-  // idempotent receipt on the next poll from the same client.
   failReceipt = true;
   const blockedNext = await requestJson(`${base}/v1/commands/next`);
   assert.equal(blockedNext.response.status, 503);
@@ -167,6 +163,12 @@ try {
   const internallyLeased = status.queue.find((item) => item.status === 'LEASED');
   assert.ok(internallyLeased?.command_id);
   assert.equal(status.results.length, 0);
+
+  // The blocked command is scoped to the client that acquired the internal
+  // lease. A second extension identity sees no command and cannot steal it.
+  const otherClient = await requestJson(`${base}/v1/commands/next`, { client: 'ci-required-other' });
+  assert.equal(otherClient.response.status, 200);
+  assert.equal(otherClient.body?.command, null);
 
   failReceipt = false;
   const next = await requestJson(`${base}/v1/commands/next`);
@@ -181,8 +183,6 @@ try {
   assert.equal(JSON.stringify(receiptCalls[1]).includes(command.prompt), false);
   assert.equal(JSON.stringify(receiptCalls[1]).includes('must=not-persist'), false);
 
-  // Failure at the result receipt store must prevent forwarding completion to
-  // the internal scheduler. The command remains LEASED and results stays empty.
   failReceipt = true;
   const strongResult = {
     status: 'SENT_AND_DOM_VERIFIED',
@@ -204,8 +204,6 @@ try {
   assert.equal(queued?.status, 'LEASED');
   assert.equal(status.results.some((item) => item.command_id === command.command_id), false);
 
-  // Retry with receipt store healthy: persistence happens first, then daemon
-  // completion is accepted. The same browser Send need not execute again.
   failReceipt = false;
   const acceptedAck = await requestJson(`${base}/v1/commands/${command.command_id}/result`, {
     method: 'POST', body: strongResult
@@ -224,7 +222,7 @@ try {
   assert.equal(JSON.stringify(resultReceipts.at(-1)).includes('must=not-persist'), false);
 
   assert.match(childLogs, /receipt persistence mode=REQUIRED/);
-  console.log('chat bridge REQUIRED receipt proxy ordering + transient lease retry: PASS');
+  console.log('chat bridge REQUIRED receipt proxy ordering + client-scoped lease retry: PASS');
 } finally {
   child.kill('SIGTERM');
   await new Promise((resolve) => {
