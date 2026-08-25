@@ -105,6 +105,7 @@ const snapshot = {
   assert.equal(calls[0].p_event_kind, 'COMMAND_LEASED');
   assert.equal(calls[0].p_target_agent, 'GLM');
   assert.equal(calls[0].p_target_platform, 'GLM_ZAI');
+  assert.equal(calls[0].p_a2_head_message_seq, 108);
   assert.equal(calls[0].p_prompt_sha256, cmd.prompt_sha256);
   assert.equal(calls[0].p_idempotency_key_sha256, cmd.idempotency_key);
   assert.equal(calls[0].p_target_url_sha256, sha256('https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db'));
@@ -136,7 +137,7 @@ const snapshot = {
   assert.equal(calls[3].p_dom_send_verified, true);
 }
 
-// Binding rejects malformed hashes and target-agent/platform mismatch.
+// Binding rejects malformed hashes, synthesized lineage, and target mismatch.
 {
   const recorder = new BridgeReceiptRecorder({
     mode: 'REQUIRED',
@@ -149,6 +150,9 @@ const snapshot = {
   recorder.noteSnapshot('GLM_ZAI', snapshot);
   await assert.rejects(recorder.recordLease(command({ idempotency_key: 'not-a-hash' })), /receipt_invalid_idempotency_key/);
   await assert.rejects(recorder.recordLease(command({ target_agent: 'GPT' })), /receipt_target_pair_invalid/);
+  await assert.rejects(recorder.recordLease(command({ target_agent: undefined })), /receipt_target_agent_required/);
+  await assert.rejects(recorder.recordLease(command({ a2_head_message_seq: undefined })), /receipt_a2_frontier_invalid/);
+  await assert.rejects(recorder.recordLease(command({ a2_head_message_seq: '108.5' })), /receipt_a2_frontier_invalid/);
 }
 
 console.log('chat bridge receipt recorder behavioral contract: PASS');
