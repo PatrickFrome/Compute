@@ -16,7 +16,7 @@ jobs:
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
@@ -34,8 +34,10 @@ jobs:
           text = Path('.github/workflows/governance.yml').read_text()
           target_gate = "if: $" + "{{ github.event_name == 'pull_request_target' }}"
           unsafe_head_ref = "ref: $" + "{{ github.event.pull_request.head.sha }}"
+          pinned_checkout = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
           assert 'pull_request_target:' in text
           assert target_gate in text
+          assert text.count(pinned_checkout) == 2
           # Only the unprivileged preview may checkout the PR head. The
           # authoritative pull_request_target job must keep a trusted base tree.
           assert text.count(unsafe_head_ref) == 1
@@ -112,7 +114,7 @@ jobs:
           fi
 
       - name: Checkout trusted base only
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 1
