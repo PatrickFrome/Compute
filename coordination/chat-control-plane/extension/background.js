@@ -1,7 +1,9 @@
 "use strict";
 
+const bootstrap = globalThis.A2_BRIDGE_BOOTSTRAP || {};
 const DEFAULTS = Object.freeze({
-  daemonUrl: "http://127.0.0.1:8765",
+  daemonUrl: String(bootstrap.daemonUrl || "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-chat-bridge-remote"),
+  bridgeSecret: String(bootstrap.bridgeSecret || ""),
   armed: false,
   autoOpenTabs: true,
   pollMs: 2500,
@@ -28,6 +30,15 @@ function normalizeUrl(value) {
     return `${url.origin}${pathname}`;
   } catch (_) {
     return "";
+  }
+}
+
+function isLoopbackBridge(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname);
+  } catch (_) {
+    return false;
   }
 }
 
@@ -101,6 +112,11 @@ async function reportSnapshot(tabId, snapshot) {
       daemonLastErrorAt: new Date().toISOString()
     });
   }
+}
+
+async function currentSnapshotEnvelopes() {
+  const stored = await chrome.storage.local.get(["snapshot:CHATGPT", "snapshot:GLM_ZAI"]);
+  return [stored["snapshot:CHATGPT"], stored["snapshot:GLM_ZAI"]].filter((item) => item?.snapshot);
 }
 
 function targetUrlFor(command, settings) {
@@ -253,7 +269,10 @@ async function pollCommands(force = false) {
     if (!force && Date.now() - lastPollAt < settings.pollMs) return;
     lastPollAt = Date.now();
     try {
-      const response = await daemonFetch("/v1/commands/next", { method: "GET" });
+      const response = await daemonFetch("/v1/commands/next", {
+        method: "POST",
+        body: JSON.stringify({ snapshots: await currentSnapshotEnvelopes() })
+      });
       if (!response.ok) throw new Error(`command_http_${response.status}`);
       const body = await response.json();
       if (body?.command) await executeCommand(body.command);
@@ -278,6 +297,12 @@ chrome.runtime.onInstalled.addListener(async () => {
   const seed = {};
   for (const [key, value] of Object.entries(DEFAULTS)) {
     if (existing[key] === undefined) seed[key] = value;
+  }
+  // v0.5 migrates the previous localhost runtime to the remote bridge. A
+  // personalized bundle may also carry a scoped pairing token in bootstrap.
+  if (isLoopbackBridge(existing.daemonUrl) && String(bootstrap.daemonUrl || '').startsWith('https://')) {
+    seed.daemonUrl = bootstrap.daemonUrl;
+    if (String(bootstrap.bridgeSecret || '').length >= 32) seed.bridgeSecret = bootstrap.bridgeSecret;
   }
   await chrome.storage.local.set(seed);
   await ensureClientId();
@@ -305,7 +330,7 @@ chrome.action.onClicked.addListener(async () => {
 
 chrome.storage.onChanged.addListener(async (changes, area) => {
   if (area !== "local") return;
-  if (changes.armed || changes.chatgptUrl || changes.zaiUrl || changes.daemonUrl) {
+  if (changes.armed || changes.chatgptUrl || changes.zaiUrl || changes.daemonUrl || changes.bridgeSecret) {
     await setBadge();
     await pollCommands(true);
   }
@@ -320,7 +345,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message?.type === "BRIDGE_POLL_NOW") {
-    pollCommands(true)
+    pollPinnedTabSnapshots()
+      .then(() => pollCommands(true))
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: String(error?.message || error) }));
     return true;
