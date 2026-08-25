@@ -1,3 +1,4 @@
+(() => {
 "use strict";
 
 const COMPLETED_KEY = "a2BridgeCompletedCommandsV1";
@@ -157,3 +158,5 @@ globalThis.fetch = async (input, init = {}) => {
     return response;
   }
 };
+
+})();
