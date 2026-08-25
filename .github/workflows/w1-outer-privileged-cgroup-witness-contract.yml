@@ -34,30 +34,41 @@ jobs:
           python3 worker/native_linux/outer_privileged_cgroup_witness.py > /tmp/plan.json
           python3 - <<'PY'
           import importlib.util
+          import inspect
           import json
           from pathlib import Path
 
           p=json.loads(Path('/tmp/plan.json').read_text())
           assert p['mode']=='DRY_RUN'
+          assert p['privilege_boundary']['sudo_before_exact_binding'] is False
           assert p['privilege_boundary']['worker_launch_via_sudo'] is False
           assert p['privilege_boundary']['worker_exec_via_sudo'] is False
           assert p['privilege_boundary']['worker_configuration_modified_by_sudo'] is False
           assert p['canonical'] is False and p['authority_effect'] is False
           assert p['worker_admitted'] is False and p['w1_verified'] is False
+          assert p['sequencing'].index('derive State.Pid and canonical exact-CID cgroup path without sudo') < p['sequencing'].index('only then probe sudo root principal')
           text=' '.join(p['worker_run_argv'])
           for forbidden in ('--privileged','--pid=host','--network=host','seccomp=unconfined','--cap-add'):
               assert forbidden not in text, forbidden
-          assert '--user 1000:1000' in text
-          assert '--network=none' in text
-          assert '--cap-drop=ALL' in text
+          for required in ('--user 1000:1000','--network=none','--cap-drop=ALL','no-new-privileges=true','seccomp=builtin','--cgroupns=private'):
+              assert required in text, required
 
           spec=importlib.util.spec_from_file_location('wit','worker/native_linux/outer_privileged_cgroup_witness.py')
           m=importlib.util.module_from_spec(spec); assert spec.loader; spec.loader.exec_module(m)
           cid='a'*64
-          ok,err=m._safe_exact_kill_target(cid, Path('/definitely/not/a/cgroup'), f'/docker/{cid}')
-          assert ok is False and err.startswith('resolve_failed')
+          ok,err,target=m._safe_exact_kill_target(cid, Path('/definitely/not/a/cgroup'), f'/docker/{cid}')
+          assert ok is False and err.startswith('resolve_failed') and target is None
+          inner={'pid_ns':11,'mnt_ns':12,'net_ns':13,'euid':1000,'no_new_privs':'1','seccomp':'2','cap_eff':'0000000000000000','network_egress_blocked':True}
+          assert all(m._two_plane_checks({'pid_ns':1,'mnt_ns':2,'net_ns':3},inner).values())
+
           src=Path('worker/native_linux/outer_privileged_cgroup_witness.py').read_text()
+          execute_src=inspect.getsource(m.execute)
           assert '["sudo", "-n", "tee", "--", str(kill_file)]' in src
+          assert 'prebound_ready' in execute_src
+          assert execute_src.index('prebound_ready') < execute_src.index('_sudo_root_probe()')
+          assert 'pre_processes_gone' in execute_src
+          assert 'two_plane_checks' in execute_src
+          assert 'sudo_before_exact_binding": False' in src
           assert 'worker_launch_via_sudo": False' in src
           assert 'worker_exec_via_sudo": False' in src
           assert '["docker", "kill"' not in src
