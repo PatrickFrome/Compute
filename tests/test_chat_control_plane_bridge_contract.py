@@ -32,7 +32,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
 
     def test_manifest_and_entrypoints(self):
         self.assertEqual(self.manifest["manifest_version"], 3)
-        self.assertEqual(self.manifest["version"], "0.5.1")
+        self.assertEqual(self.manifest["version"], "0.5.2")
         self.assertEqual(self.manifest["background"]["service_worker"], "background-entry.js")
         self.assertNotIn("type", self.manifest["background"])
         for path in [
@@ -50,6 +50,9 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("importScripts('./background.js')", self.background_entry)
         self.assertNotIn("import(", self.background_entry)
         self.assertNotIn("await import", self.background_entry)
+        for script in [self.auth_fetch, self.durable, self.background]:
+            self.assertTrue(script.lstrip().startswith("(() => {"))
+            self.assertTrue(script.rstrip().endswith("})();"))
 
     def test_remote_bootstrap_has_no_repository_pairing_secret(self):
         self.assertIn(REMOTE_BRIDGE, self.bootstrap)
