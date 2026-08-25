@@ -1,14 +1,16 @@
 "use strict";
 
+const bootstrap = globalThis.A2_BRIDGE_BOOTSTRAP || {};
 const PROJECT_ZAI_URL = "https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db";
+const REMOTE_BRIDGE_URL = String(bootstrap.daemonUrl || "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-chat-bridge-remote");
 const DEFAULTS = {
-  daemonUrl: "http://127.0.0.1:8765",
+  daemonUrl: REMOTE_BRIDGE_URL,
   armed: false,
   autoOpenTabs: true,
   pollMs: 2500,
   chatgptUrl: "",
   zaiUrl: PROJECT_ZAI_URL,
-  bridgeSecret: ""
+  bridgeSecret: String(bootstrap.bridgeSecret || "")
 };
 
 const $ = (id) => document.getElementById(id);
@@ -31,6 +33,25 @@ function normalizedChatUrl(value, expectedPlatform) {
   return `${url.origin}${url.pathname}`;
 }
 
+function normalizedBridgeUrl(value) {
+  const url = new URL(String(value || "").trim());
+  url.hash = "";
+  url.search = "";
+  url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+  return url;
+}
+
+function validateBridgeUrl(value) {
+  const daemon = normalizedBridgeUrl(value);
+  const loopback = daemon.protocol === "http:" && ["127.0.0.1", "localhost"].includes(daemon.hostname);
+  const remote = normalizedBridgeUrl(REMOTE_BRIDGE_URL);
+  const exactRemote = daemon.protocol === "https:" && daemon.origin === remote.origin && daemon.pathname === remote.pathname;
+  if (!loopback && !exactRemote) {
+    throw new Error("Bridge must be localhost HTTP or the exact METAENGINE remote HTTPS endpoint");
+  }
+  return `${daemon.origin}${daemon.pathname}`;
+}
+
 function setStatus(text, error = false) {
   const el = $("status");
   el.textContent = text;
@@ -43,7 +64,7 @@ async function load() {
   $("chatgptUrl").value = settings.chatgptUrl || "";
   $("zaiUrl").value = settings.zaiUrl || PROJECT_ZAI_URL;
   $("daemonUrl").value = settings.daemonUrl || DEFAULTS.daemonUrl;
-  $("bridgeSecret").value = settings.bridgeSecret || "";
+  $("bridgeSecret").value = settings.bridgeSecret || DEFAULTS.bridgeSecret || "";
   $("pollMs").value = settings.pollMs || DEFAULTS.pollMs;
   $("autoOpenTabs").checked = settings.autoOpenTabs !== false;
   $("armed").checked = settings.armed === true;
@@ -54,9 +75,7 @@ async function save() {
     const chatgptRaw = $("chatgptUrl").value.trim();
     const chatgptUrl = chatgptRaw ? normalizedChatUrl(chatgptRaw, "CHATGPT") : "";
     const zaiUrl = normalizedChatUrl($("zaiUrl").value.trim(), "GLM_ZAI");
-    const daemon = new URL($("daemonUrl").value.trim());
-    if (daemon.protocol !== 'http:') throw new Error("Local daemon must use HTTP on loopback");
-    if (!['127.0.0.1', 'localhost'].includes(daemon.hostname)) throw new Error("Daemon must be loopback-only");
+    const daemonUrl = validateBridgeUrl($("daemonUrl").value.trim());
     const bridgeSecret = $("bridgeSecret").value.trim();
     if (bridgeSecret.length < 32) throw new Error("Pairing secret must be at least 32 characters");
     const pollMs = Math.max(1000, Math.min(30000, Number($("pollMs").value) || DEFAULTS.pollMs));
@@ -64,13 +83,13 @@ async function save() {
     await chrome.storage.local.set({
       chatgptUrl,
       zaiUrl,
-      daemonUrl: daemon.href.replace(/\/+$/, ""),
+      daemonUrl,
       bridgeSecret,
       pollMs,
       autoOpenTabs: $("autoOpenTabs").checked,
       armed: $("armed").checked
     });
-    setStatus("Saved. Exact peer bindings and localhost pairing are active.");
+    setStatus("Saved. Exact peer bindings and authenticated bridge are active.");
     await chrome.runtime.sendMessage({ type: "BRIDGE_POLL_NOW" });
   } catch (error) {
     setStatus(String(error?.message || error), true);
@@ -103,7 +122,7 @@ $("pollNow").addEventListener("click", async () => {
   try {
     const response = await chrome.runtime.sendMessage({ type: "BRIDGE_POLL_NOW" });
     if (!response?.ok) throw new Error(response?.error || "poll failed");
-    setStatus("Authenticated daemon poll requested.");
+    setStatus("Authenticated bridge poll requested.");
   } catch (error) {
     setStatus(String(error?.message || error), true);
   }
