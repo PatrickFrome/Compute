@@ -27,11 +27,13 @@
     dd { margin: 0; }
     button { border: 0; border-radius: 9px; padding: 9px 12px; font-weight: 750; cursor: pointer; background: #edf2f7; color: #0c0f13; }
     button.secondary { background: #252c35; color: #edf2f7; }
+    button:disabled { cursor: not-allowed; opacity: .45; }
+    input { min-width: 280px; flex: 1 1 340px; border: 1px solid #303945; border-radius: 9px; padding: 9px 11px; background: #0b0f14; color: #eef2f6; font: inherit; }
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
     th, td { text-align: left; border-bottom: 1px solid #232a32; padding: 8px 6px; vertical-align: top; }
     th { color: #99a5b2; }
     #error { min-height: 1.4em; color: #ff9b9b; }
-    @media (max-width: 780px) { .grid { grid-template-columns: 1fr; } .span2 { grid-column: auto; } header { flex-direction: column; } dl { grid-template-columns: 120px 1fr; } }
+    @media (max-width: 780px) { .grid { grid-template-columns: 1fr; } .span2 { grid-column: auto; } header { flex-direction: column; } dl { grid-template-columns: 120px 1fr; } input { min-width: 100%; } }
   </style>
 </head>
 <body>
@@ -42,9 +44,20 @@
       <p>Live DOM transport for two pinned peer chats. A2 controls visibility; the browser extension performs the actual composer write and Send click.</p>
     </div>
     <div class="row">
-      <button id="refreshA2" class="secondary">Refresh A2</button>
+      <button id="refreshA2" class="secondary control">Refresh A2</button>
     </div>
   </header>
+
+  <section class="card" style="margin-bottom:14px">
+    <div class="row"><h2 style="margin:0">Local pairing</h2><span id="pairingState" class="pill warn">not paired</span></div>
+    <p>The Windows launcher copies the same local pairing secret used by the extension. Paste it here once per dashboard tab. It is kept only in <span class="mono">sessionStorage</span>, never in localStorage, the URL, or Supabase.</p>
+    <div class="row" style="margin-top:10px">
+      <input id="pairingSecret" type="password" autocomplete="off" spellcheck="false" placeholder="Paste 32+ character pairing secret" />
+      <button id="usePairing">Use pairing secret</button>
+      <button id="pastePairing" class="secondary">Paste clipboard</button>
+      <button id="clearPairing" class="secondary">Clear</button>
+    </div>
+  </section>
 
   <div id="error"></div>
 
@@ -58,7 +71,7 @@
         <dt>Last progress</dt><dd id="gptProgress">—</dd>
         <dt>Assistant hash</dt><dd id="gptHash" class="mono">—</dd>
       </dl>
-      <div class="row" style="margin-top:14px"><button id="wakeGpt">Queue GPT wake</button></div>
+      <div class="row" style="margin-top:14px"><button id="wakeGpt" class="control">Queue GPT wake</button></div>
     </article>
 
     <article class="card" id="glmCard">
@@ -70,7 +83,7 @@
         <dt>Last progress</dt><dd id="glmProgress">—</dd>
         <dt>Assistant hash</dt><dd id="glmHash" class="mono">—</dd>
       </dl>
-      <div class="row" style="margin-top:14px"><button id="wakeGlm">Queue GLM wake</button></div>
+      <div class="row" style="margin-top:14px"><button id="wakeGlm" class="control">Queue GLM wake</button></div>
     </article>
 
     <article class="card span2">
@@ -94,9 +107,36 @@
   </section>
 </main>
 <script>
+  const PAIRING_KEY = 'a2-chat-bridge:dashboard-pairing-v1';
   const $ = (id) => document.getElementById(id);
   const text = (id, value) => { $(id).textContent = value ?? '—'; };
   const short = (value, n = 18) => value ? (String(value).length > n ? String(value).slice(0, n) + '…' : String(value)) : '—';
+
+  function currentPairingSecret() {
+    return String(sessionStorage.getItem(PAIRING_KEY) || '');
+  }
+
+  function paintPairing() {
+    const paired = currentPairingSecret().length >= 32;
+    const badge = $('pairingState');
+    badge.textContent = paired ? 'paired for this tab' : 'not paired';
+    badge.className = 'pill ' + (paired ? 'ok' : 'warn');
+    for (const button of document.querySelectorAll('button.control')) button.disabled = !paired;
+  }
+
+  function storePairing(value) {
+    const secret = String(value || '').trim();
+    if (secret.length < 32) throw new Error('Pairing secret must be at least 32 characters.');
+    sessionStorage.setItem(PAIRING_KEY, secret);
+    $('pairingSecret').value = '';
+    paintPairing();
+  }
+
+  function clearPairing() {
+    sessionStorage.removeItem(PAIRING_KEY);
+    $('pairingSecret').value = '';
+    paintPairing();
+  }
 
   function paintPeer(prefix, peer) {
     const online = Boolean(peer?.online);
@@ -154,15 +194,63 @@
   }
 
   async function post(path, body = {}) {
-    const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-    if (!response.ok) throw new Error(`${path} HTTP ${response.status}: ${await response.text()}`);
+    const secret = currentPairingSecret();
+    if (secret.length < 32) throw new Error('Local pairing required. Paste the launcher pairing secret above first.');
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-a2-chat-bridge-secret': secret
+      },
+      body: JSON.stringify(body),
+      cache: 'no-store'
+    });
+    if (!response.ok) {
+      const detail = await response.text();
+      if (response.status === 401) throw new Error('Pairing rejected. Re-copy the pairing secret from the Windows launcher and pair this tab again.');
+      throw new Error(`${path} HTTP ${response.status}: ${detail}`);
+    }
     return response.json();
   }
 
-  $('wakeGpt').addEventListener('click', async () => { await post('/v1/control/wake', { target_platform: 'CHATGPT' }); await getStatus(); });
-  $('wakeGlm').addEventListener('click', async () => { await post('/v1/control/wake', { target_platform: 'GLM_ZAI' }); await getStatus(); });
-  $('refreshA2').addEventListener('click', async () => { await post('/v1/control/refresh-a2'); await getStatus(); });
+  async function control(path, body = {}) {
+    try {
+      text('error', '');
+      await post(path, body);
+      await getStatus();
+    } catch (error) {
+      text('error', String(error?.message || error));
+    }
+  }
 
+  $('usePairing').addEventListener('click', () => {
+    try {
+      storePairing($('pairingSecret').value);
+      text('error', 'Pairing active for this dashboard tab.');
+    } catch (error) {
+      text('error', String(error?.message || error));
+    }
+  });
+
+  $('pastePairing').addEventListener('click', async () => {
+    try {
+      if (!navigator.clipboard?.readText) throw new Error('Clipboard read is unavailable here. Paste the secret manually.');
+      storePairing(await navigator.clipboard.readText());
+      text('error', 'Pairing secret read from clipboard and activated for this tab.');
+    } catch (error) {
+      text('error', String(error?.message || error));
+    }
+  });
+
+  $('clearPairing').addEventListener('click', () => {
+    clearPairing();
+    text('error', 'Dashboard pairing cleared for this tab.');
+  });
+  $('wakeGpt').addEventListener('click', () => control('/v1/control/wake', { target_platform: 'CHATGPT' }));
+  $('wakeGlm').addEventListener('click', () => control('/v1/control/wake', { target_platform: 'GLM_ZAI' }));
+  $('refreshA2').addEventListener('click', () => control('/v1/control/refresh-a2'));
+
+  paintPairing();
   getStatus();
   setInterval(getStatus, 2500);
 </script>
