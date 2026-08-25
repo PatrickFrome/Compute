@@ -13,16 +13,15 @@ if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
 const originalFetch = globalThis.fetch.bind(globalThis);
 let currentMainSha = process.env.A2_BRIDGE_CURRENT_MAIN_SHA || null;
 
-function findShaInPayload(value, depth = 0) {
-  if (!value || depth > 6) return null;
-  if (typeof value !== 'object') return null;
-  for (const key of ['main_sha', 'base_github_sha']) {
+function findExplicitMainSha(value, depth = 0) {
+  if (!value || depth > 6 || typeof value !== 'object') return null;
+  for (const key of ['current_main_sha', 'main_sha']) {
     const candidate = value[key];
     if (typeof candidate === 'string' && /^[0-9a-f]{40}$/i.test(candidate)) return candidate.toLowerCase();
   }
   for (const child of Object.values(value)) {
     if (child && typeof child === 'object') {
-      const found = findShaInPayload(child, depth + 1);
+      const found = findExplicitMainSha(child, depth + 1);
       if (found) return found;
     }
   }
@@ -42,7 +41,7 @@ function learnCurrentMain(value) {
     .filter((message) => Number.isFinite(Number(message?.message_seq)))
     .sort((a, b) => Number(a.message_seq) - Number(b.message_seq));
   for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const found = findShaInPayload(messages[i]?.payload);
+    const found = findExplicitMainSha(messages[i]?.payload);
     if (found) {
       currentMainSha = found;
       return;
