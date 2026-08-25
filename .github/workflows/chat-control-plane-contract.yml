@@ -10,6 +10,7 @@ on:
       - 'supabase/migrations/20260825050000_a2_chat_bridge_receipts_v1.sql'
       - 'tests/test_chat_control_plane_bridge_contract.py'
       - 'tests/test_a2_chat_bridge_receipt_contract.py'
+      - 'tests/chat_bridge_blind_phase_behavior.mjs'
       - '.github/workflows/chat-control-plane-contract.yml'
   workflow_dispatch:
 
@@ -37,6 +38,7 @@ jobs:
           node --check coordination/chat-control-plane/daemon/server.mjs
           node --check coordination/chat-control-plane/daemon/run.mjs
           node --check coordination/chat-control-plane/daemon/secure-entry.mjs
+          node --check tests/chat_bridge_blind_phase_behavior.mjs
 
       - name: Manifest parse
         run: python3 -m json.tool coordination/chat-control-plane/extension/manifest.json >/dev/null
@@ -96,6 +98,9 @@ jobs:
 
           code=$(curl -sS -o /tmp/auth.json -w '%{http_code}' -X POST http://127.0.0.1:8876/v1/control/refresh-a2 -H "x-a2-chat-bridge-secret: $SECRET")
           test "$code" = 200
+
+      - name: Blind-phase scheduler behavioral test
+        run: node tests/chat_bridge_blind_phase_behavior.mjs
 
       - name: Build bridge bundles
         shell: bash
