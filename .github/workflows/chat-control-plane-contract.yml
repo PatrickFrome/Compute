@@ -13,6 +13,7 @@ on:
       - 'tests/chat_bridge_blind_phase_behavior.mjs'
       - 'tests/chat_bridge_durable_idempotency_behavior.mjs'
       - 'tests/chat_bridge_receipt_recorder_behavior.mjs'
+      - 'tests/chat_bridge_required_receipt_proxy_behavior.mjs'
       - 'tests/adversarial_chat_bridge_dom_f7.mjs'
       - '.github/workflows/chat-control-plane-contract.yml'
   workflow_dispatch:
@@ -45,6 +46,7 @@ jobs:
           node --check tests/chat_bridge_blind_phase_behavior.mjs
           node --check tests/chat_bridge_durable_idempotency_behavior.mjs
           node --check tests/chat_bridge_receipt_recorder_behavior.mjs
+          node --check tests/chat_bridge_required_receipt_proxy_behavior.mjs
           node --check tests/adversarial_chat_bridge_dom_f7.mjs
 
       - name: Manifest parse
@@ -114,6 +116,9 @@ jobs:
 
       - name: Receipt recorder modes and hash-only boundary
         run: node tests/chat_bridge_receipt_recorder_behavior.mjs
+
+      - name: REQUIRED receipt persistence precedes completion ACK
+        run: node tests/chat_bridge_required_receipt_proxy_behavior.mjs
 
       - name: Adversarial DOM selector F7 behavior
         run: node tests/adversarial_chat_bridge_dom_f7.mjs
