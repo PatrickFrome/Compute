@@ -50,18 +50,20 @@ async function findCompleted(command) {
 
 async function rememberCompleted(commandId, result) {
   const lease = await leaseForCommand(commandId);
+  if (!lease?.idempotency_key) throw new Error("durable_completion_without_lease_binding");
   const rows = await loadCompleted();
-  const idem = String(lease?.idempotency_key || "");
+  const idem = String(lease.idempotency_key);
   const next = rows.filter((row) =>
-    row?.command_id !== commandId && (!idem || row?.idempotency_key !== idem)
+    row?.command_id !== commandId && row?.idempotency_key !== idem
   );
   next.push({
     command_id: commandId,
-    idempotency_key: idem || null,
+    idempotency_key: idem,
     target_platform: lease?.target_platform || result?.target_platform || null,
     completed_at: new Date().toISOString(),
-    status: result?.status || "SENT_AND_DOM_VERIFIED",
-    clicked_send_button: result?.clicked_send_button === true,
+    status: "SENT_AND_DOM_VERIFIED",
+    clicked_send_button: true,
+    dom_send_verified: true,
     target_url: result?.target_url || null
   });
   await chrome.storage.local.set({ [COMPLETED_KEY]: next.slice(-MAX_COMPLETED) });
@@ -98,7 +100,8 @@ async function acknowledgeDurableDuplicate(url, init, command, row) {
         status: "SENT_ALREADY_DURABLE",
         target_platform: command.target_platform,
         target_url: row?.target_url || null,
-        clicked_send_button: row?.clicked_send_button === true,
+        clicked_send_button: true,
+        verification: { verified: true, durable_replay: true },
         authority_effect: false,
         captured_at: new Date().toISOString()
       }),
@@ -118,13 +121,14 @@ globalThis.fetch = async (input, init = {}) => {
     const body = parseBody(init);
     const match = url.match(/\/v1\/commands\/([^/]+)\/result$/);
     const commandId = match ? decodeURIComponent(match[1]) : "";
-    if (
+    const exactVerifiedSend =
       commandId &&
+      body?.status === "SENT_AND_DOM_VERIFIED" &&
       body?.clicked_send_button === true &&
-      ["SENT_AND_DOM_VERIFIED", "SENT"].includes(String(body?.status || ""))
-    ) {
-      // Persist before network ACK. If the daemon disappears after the real Send,
-      // command-id or idempotency-key retries are acknowledged without another click.
+      body?.verification?.verified === true;
+    if (exactVerifiedSend) {
+      // Persist before network ACK only after the content script has observed
+      // the real Send and verified the resulting DOM transition.
       await rememberCompleted(commandId, body);
     }
     return originalFetch(input, init);
