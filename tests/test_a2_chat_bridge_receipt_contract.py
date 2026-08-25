@@ -70,6 +70,33 @@ class A2ChatBridgeReceiptContract(unittest.TestCase):
         self.assertIn("command_id", self.sql)
         self.assertIn("dom_send_verified", self.sql)
         self.assertIn("clicked_send_button", self.sql)
+        self.assertIn("compute_fabric_a2_chat_bridge_receipt_event_command_uq", self.sql)
+
+    def test_command_replay_is_idempotent_but_conflicting_replay_fails(self):
+        self.assertIn("on conflict do nothing", self.lower)
+        self.assertIn("get diagnostics v_inserted = row_count", self.lower)
+        self.assertIn("'replayed',true", self.lower)
+        self.assertIn("'replayed',false", self.lower)
+        self.assertIn("bridge_receipt_conflict", self.sql)
+        self.assertIn("is distinct from p_target_agent", self.lower)
+        self.assertIn("is distinct from p_prompt_sha256", self.lower)
+        self.assertIn("is distinct from p_dom_send_verified", self.lower)
+
+    def test_send_result_strength_is_cross_field_consistent(self):
+        self.assertIn("bridge_strong_send_verification_invalid", self.sql)
+        self.assertIn("bridge_weak_send_verification_invalid", self.sql)
+        self.assertIn("bridge_dom_verification_status_invalid", self.sql)
+        self.assertIn("result_status <> 'SENT_AND_DOM_VERIFIED'", self.sql)
+        self.assertIn("result_status <> 'SENT_WEAK_DOM_VERIFIED'", self.sql)
+        self.assertIn("result_status in ('SENT_AND_DOM_VERIFIED','SENT_ALREADY_DURABLE')", self.sql)
+
+    def test_replay_returns_original_immutable_receipt_identity(self):
+        self.assertIn("'receipt_id',v_existing.receipt_id", self.lower)
+        self.assertIn("'receipt_sha256',v_existing.receipt_sha256", self.lower)
+        self.assertIn("where workspace_id = p_workspace_id", self.lower)
+        self.assertIn("and bridge_instance_id = p_bridge_instance_id", self.lower)
+        self.assertIn("and event_kind = p_event_kind", self.lower)
+        self.assertIn("and command_id = p_command_id", self.lower)
 
 
 if __name__ == "__main__":
