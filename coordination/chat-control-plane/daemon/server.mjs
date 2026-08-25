@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { supabaseBackendHeaders } from './supabase-auth.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOST = process.env.A2_BRIDGE_HOST || '127.0.0.1';
@@ -147,8 +148,7 @@ async function supabaseRpc(name, args) {
   const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${encodeURIComponent(name)}`, {
     method: 'POST',
     headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      ...supabaseBackendHeaders(SUPABASE_SERVICE_ROLE_KEY),
       'content-type': 'application/json'
     },
     body: JSON.stringify(args),

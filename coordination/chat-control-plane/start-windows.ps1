@@ -69,7 +69,7 @@ if (Test-Path -LiteralPath $serviceRolePath) {
   $serviceRoleKey = Read-DpapiSecret $serviceRolePath
 }
 else {
-  Write-Host "Paste the Supabase service_role key. Input is masked and saved with Windows DPAPI for this Windows user only." -ForegroundColor Cyan
+  Write-Host "Paste a Supabase sb_secret_ key (preferred) or the legacy service_role key. Input is masked and saved with Windows DPAPI for this Windows user only." -ForegroundColor Cyan
   $serviceRoleKey = Reveal-SecureString (Read-Host "SUPABASE_SERVICE_ROLE_KEY" -AsSecureString)
   if ([string]::IsNullOrWhiteSpace($serviceRoleKey)) {
     throw "SUPABASE_SERVICE_ROLE_KEY is empty."

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { BridgeReceiptRecorder, sha256 } from '../coordination/chat-control-plane/daemon/receipt-recorder.mjs';
+import { supabaseBackendHeaders } from '../coordination/chat-control-plane/daemon/supabase-auth.mjs';
 
 function response(status, body) {
   return {
@@ -32,6 +33,13 @@ const snapshot = {
   generating: false
 };
 const normalizedTarget = 'https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db';
+
+assert.deepEqual(supabaseBackendHeaders('sb_secret_example'), { apikey: 'sb_secret_example' });
+assert.deepEqual(supabaseBackendHeaders('legacy-service-role-jwt'), {
+  apikey: 'legacy-service-role-jwt',
+  authorization: 'Bearer legacy-service-role-jwt'
+});
+assert.throws(() => supabaseBackendHeaders('sb_publishable_example'), /supabase_backend_secret_required/);
 
 {
   let calls = 0;

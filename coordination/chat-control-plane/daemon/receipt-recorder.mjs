@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { supabaseBackendHeaders } from './supabase-auth.mjs';
 
 const MODES = new Set(['OFF', 'BEST_EFFORT', 'REQUIRED']);
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -80,8 +81,7 @@ export class BridgeReceiptRecorder {
       {
         method: 'POST',
         headers: {
-          apikey: this.serviceRoleKey,
-          authorization: `Bearer ${this.serviceRoleKey}`,
+          ...supabaseBackendHeaders(this.serviceRoleKey),
           'content-type': 'application/json',
         },
         body: JSON.stringify(args),

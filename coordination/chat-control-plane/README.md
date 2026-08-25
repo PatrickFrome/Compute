@@ -81,7 +81,7 @@ http://127.0.0.1:8765/
 
 ### Windows one-click launcher
 
-The complete bridge bundle includes `START_A2_BRIDGE_WINDOWS.cmd`. Double-click it after installing Node.js 20 or newer. On the first start it asks for the Supabase `service_role` key with masked input, creates a random local pairing secret, stores both encrypted with Windows DPAPI for the current Windows user, copies the pairing secret to the clipboard, starts the secure daemon and opens the dashboard after `/v1/status` is healthy.
+The complete bridge bundle includes `START_A2_BRIDGE_WINDOWS.cmd`. Double-click it after installing Node.js 20 or newer. On the first start it asks for a Supabase backend key (`sb_secret_...` preferred; legacy `service_role` JWT also supported) with masked input, creates a random local pairing secret, stores both encrypted with Windows DPAPI for the current Windows user, copies the pairing secret to the clipboard, starts the secure daemon and opens the dashboard after `/v1/status` is healthy. Publishable/anonymous keys are not accepted for this trusted local backend.
 
 Paste the copied pairing secret into the extension options. To replace the locally encrypted credentials later, run:
 

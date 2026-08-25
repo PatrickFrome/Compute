@@ -24,6 +24,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         cls.server = (DAEMON / "server.mjs").read_text()
         cls.launcher = (DAEMON / "run.mjs").read_text()
         cls.secure_entry = (DAEMON / "secure-entry.mjs").read_text()
+        cls.supabase_auth = (DAEMON / "supabase-auth.mjs").read_text()
         cls.manifest = json.loads((EXT / "manifest.json").read_text())
 
     def test_manifest_entrypoints_exist(self):
@@ -40,6 +41,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
             EXT / "options.js",
             EXT / "content.js",
             DAEMON / "secure-entry.mjs",
+            DAEMON / "supabase-auth.mjs",
             BASE / "start-windows.ps1",
             BASE / "START_A2_BRIDGE_WINDOWS.cmd",
         ]:
@@ -53,6 +55,12 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn('"daemon\\secure-entry.mjs"', self.windows_launcher)
         self.assertIn("ExecutionPolicy Bypass", self.windows_cmd)
         self.assertNotIn("service_role.dpapi", self.windows_cmd)
+
+    def test_supabase_backend_key_headers_support_current_and_legacy_keys(self):
+        self.assertIn("sb_secret_", self.supabase_auth)
+        self.assertIn("sb_publishable_", self.supabase_auth)
+        self.assertIn("headers.authorization", self.supabase_auth)
+        self.assertIn("supabaseBackendHeaders", self.server)
 
     def test_exact_project_zai_chat_is_pinned(self):
         self.assertIn(PROJECT_ZAI, self.background)
