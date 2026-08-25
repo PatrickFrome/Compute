@@ -102,7 +102,7 @@ begin
   if p_event_kind not in ('SNAPSHOT_META','COMMAND_QUEUED','COMMAND_LEASED','SEND_RESULT') then raise exception 'bridge_event_kind_invalid'; end if;
   if not ((p_target_agent = 'GPT' and p_target_platform = 'CHATGPT') or (p_target_agent = 'GLM' and p_target_platform = 'GLM_ZAI')) then raise exception 'bridge_target_pair_invalid'; end if;
   if p_target_url_sha256 !~ '^[0-9a-f]{64}$' then raise exception 'bridge_target_url_hash_invalid'; end if;
-  if pg_catalog.coalesce(p_a2_head_message_seq, -1) < 0 then raise exception 'bridge_a2_frontier_invalid'; end if;
+  if coalesce(p_a2_head_message_seq, -1) < 0 then raise exception 'bridge_a2_frontier_invalid'; end if;
   if p_snapshot_sha256 is not null and p_snapshot_sha256 !~ '^[0-9a-f]{64}$' then raise exception 'bridge_snapshot_hash_invalid'; end if;
   if p_idempotency_key_sha256 is not null and p_idempotency_key_sha256 !~ '^[0-9a-f]{64}$' then raise exception 'bridge_idempotency_hash_invalid'; end if;
   if p_prompt_sha256 is not null and p_prompt_sha256 !~ '^[0-9a-f]{64}$' then raise exception 'bridge_prompt_hash_invalid'; end if;
@@ -229,7 +229,7 @@ as $$
     'workspace_id',p_workspace_id,
     'canonical',false,
     'authority_effect',false,
-    'receipts',pg_catalog.coalesce(pg_catalog.jsonb_agg(pg_catalog.to_jsonb(x) order by x.created_at desc),'[]'::jsonb)
+    'receipts',coalesce(pg_catalog.jsonb_agg(pg_catalog.to_jsonb(x) order by x.created_at desc),'[]'::jsonb)
   )
   from (
     select receipt_id, bridge_instance_id, event_kind, target_agent, target_platform,
@@ -240,7 +240,7 @@ as $$
     from destruktion_meta.compute_fabric_a2_chat_bridge_receipt_h205f22
     where workspace_id = p_workspace_id
     order by created_at desc
-    limit pg_catalog.greatest(1, pg_catalog.least(pg_catalog.coalesce(p_limit,100),500))
+    limit greatest(1, least(coalesce(p_limit,100),500))
   ) x;
 $$;
 
