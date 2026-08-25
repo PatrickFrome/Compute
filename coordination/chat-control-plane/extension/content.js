@@ -29,10 +29,9 @@
   function rememberCommand(commandId) {
     seenCommands.add(commandId);
     try {
-      // Keep the journal bounded; only recent ids matter for re-lease dedupe.
       sessionStorage.setItem(SEEN_COMMANDS_STORAGE_KEY, JSON.stringify([...seenCommands].slice(-200)));
     } catch (_) {
-      // Storage may be unavailable (private mode); in-memory set still applies.
+      // Storage may be unavailable; in-memory dedupe still applies.
     }
   }
 
@@ -52,7 +51,7 @@
   }
 
   function hashText(text) {
-    // FNV-1a is used only for local change detection, never as cryptographic evidence.
+    // FNV-1a is local change detection only; never cryptographic evidence.
     let h = 0x811c9dc5;
     for (let i = 0; i < text.length; i += 1) {
       h ^= text.charCodeAt(i);
@@ -150,10 +149,6 @@
   }
 
   function sharedContainer(el, button) {
-    // True when the composer and the send button live in the same enclosing
-    // container (form / composer bar). This is the main Z.AI robustness guard:
-    // bare `textarea` matches unrelated inputs (search, feedback widgets), so we
-    // prefer candidates that co-locate with the actual send control.
     if (!(el instanceof HTMLElement) || !(button instanceof HTMLElement)) return false;
     let node = el.parentElement;
     for (let depth = 0; depth < 8 && node; depth += 1) {
@@ -163,14 +158,66 @@
     return false;
   }
 
+  function semanticFields(button) {
+    return [
+      button.getAttribute("aria-label"),
+      button.getAttribute("title"),
+      button.textContent
+    ].map((value) => normalize(value).toLowerCase()).filter(Boolean);
+  }
+
+  function matchesButtonSemantics(button, kind) {
+    const patterns = kind === "send"
+      ? [
+          /^(send|send message|send prompt|submit)$/i,
+          /^(отправить|отправить сообщение)$/iu,
+          /^(发送|发送消息)$/u
+        ]
+      : [
+          /^(stop|stop generating|stop generation)$/i,
+          /^(остановить|остановить генерацию)$/iu,
+          /^(停止|停止生成)$/u
+        ];
+    return semanticFields(button).some((field) => patterns.some((pattern) => pattern.test(field)));
+  }
+
+  function semanticButtonCandidates(kind) {
+    const isSend = kind === "send";
+    const testids = isSend
+      ? ["send-button", "composer-submit-button"]
+      : ["stop-button", "composer-stop-button"];
+    const strong = [];
+    for (const id of testids) {
+      for (const el of document.querySelectorAll(`button[data-testid='${id}']`)) {
+        if (visible(el) && !strong.includes(el)) strong.push(el);
+      }
+    }
+    if (strong.length) return strong;
+
+    return [...document.querySelectorAll("button")]
+      .filter(visible)
+      .filter((button) => matchesButtonSemantics(button, kind));
+  }
+
+  function resolveComposerSendPair() {
+    const composers = composerCandidates();
+    const sendButtons = semanticButtonCandidates("send");
+    const pairs = [];
+    for (const composer of composers) {
+      for (const send of sendButtons) {
+        if (sharedContainer(composer, send)) pairs.push({ composer, send });
+      }
+    }
+
+    if (pairs.length === 1) return { ...pairs[0], error: null };
+    if (pairs.length > 1) return { composer: null, send: null, error: "composer_send_pair_ambiguous" };
+    if (!sendButtons.length) return { composer: null, send: null, error: "send_button_not_found" };
+    if (!composers.length) return { composer: null, send: null, error: "composer_not_found" };
+    return { composer: null, send: null, error: "composer_send_pair_not_found" };
+  }
+
   function getComposer() {
-    const candidates = composerCandidates();
-    if (!candidates.length) return null;
-    const send = buttonBySemantics("send");
-    const adjacent = send ? candidates.filter((el) => sharedContainer(el, send)) : [];
-    const pool = adjacent.length ? adjacent : candidates;
-    // Prefer the lowest visible composer in the viewport.
-    return pool.sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top)[0];
+    return resolveComposerSendPair().composer;
   }
 
   function composerText(el) {
@@ -180,38 +227,20 @@
   }
 
   function buttonBySemantics(kind) {
-    const isSend = kind === "send";
-    const testids = isSend
-      ? ["send-button", "composer-submit-button"]
-      : ["stop-button", "composer-stop-button"];
-    for (const id of testids) {
-      const el = document.querySelector(`button[data-testid='${id}']`);
-      if (visible(el)) return el;
-    }
-
-    const terms = isSend
-      ? ["send", "отправ", "submit", "发送", "发送消息"]
-      : ["stop", "останов", "停止", "停止生成"];
-    // Word-boundary matching avoids false hits like "Resend" or "Send feedback"
-    // on unrelated controls; adjacency to the composer is enforced separately.
-    const patterns = isSend
-      ? [/\bsend\b/, /\bотправ/, /\bsubmit\b/, /发送/]
-      : [/\bstop\b/, /\bостанов/, /停止/];
-    for (const button of document.querySelectorAll("button")) {
-      if (!visible(button)) continue;
-      const semantic = `${button.getAttribute("aria-label") || ""} ${button.getAttribute("title") || ""} ${button.textContent || ""}`.toLowerCase();
-      if (patterns.some((pattern) => pattern.test(semantic)) || terms.some((term) => semantic.includes(term))) return button;
-    }
-    return null;
+    if (kind === "send") return resolveComposerSendPair().send;
+    const candidates = semanticButtonCandidates(kind);
+    return candidates.length === 1 ? candidates[0] : null;
   }
 
   function generating() {
-    const stop = buttonBySemantics("stop");
-    return Boolean(stop && !stop.disabled);
+    // Any exact stop-control candidate means generation is in progress. Multiple
+    // stop controls are treated conservatively as generating rather than idle.
+    return semanticButtonCandidates("stop").length > 0;
   }
 
   function pageState() {
-    const composer = getComposer();
+    const pair = resolveComposerSendPair();
+    const composer = pair.composer;
     const messages = extractMessages();
     return {
       schema: "metaengine.chat-dom-snapshot.v1",
@@ -222,6 +251,7 @@
       generating: generating(),
       composer_present: Boolean(composer),
       composer_text: composerText(composer),
+      dom_pair_error: pair.error,
       message_count: messages.length,
       messages,
       last_mutation_at_ms: lastMutationAt,
@@ -266,8 +296,9 @@
   }
 
   async function writeComposerExact(text) {
-    const composer = getComposer();
-    if (!composer) throw new Error("composer_not_found");
+    const pair = resolveComposerSendPair();
+    if (pair.error) throw new Error(pair.error);
+    const composer = pair.composer;
     composer.focus();
     if (composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement) {
       nativeSetValue(composer, text);
@@ -284,14 +315,23 @@
     return composer;
   }
 
-  async function waitForEnabledSend() {
+  async function waitForEnabledSend(expectedText) {
     const deadline = Date.now() + SEND_BUTTON_WAIT_MS;
+    const expected = normalize(expectedText);
     while (Date.now() < deadline) {
-      const button = buttonBySemantics("send");
-      if (button && !button.disabled && button.getAttribute("aria-disabled") !== "true") return button;
+      const pair = resolveComposerSendPair();
+      if (pair.error === "composer_send_pair_ambiguous") throw new Error(pair.error);
+      if (
+        !pair.error &&
+        composerText(pair.composer) === expected &&
+        !pair.send.disabled &&
+        pair.send.getAttribute("aria-disabled") !== "true"
+      ) {
+        return pair.send;
+      }
       await sleep(100);
     }
-    throw new Error("send_button_not_enabled");
+    throw new Error("send_button_not_enabled_or_pair_unresolved");
   }
 
   async function verifySend(before, expectedText) {
@@ -307,9 +347,6 @@
       if (exactUserTurn || (cleared && countAdvanced)) {
         return {
           verified: true,
-          // Strong verification requires the exact user turn text in the DOM;
-          // cleared+count-advanced alone can race with unrelated streaming and
-          // is reported as a weaker outcome so the daemon record stays honest.
           exact_user_turn_seen: exactUserTurn,
           verification_strength: exactUserTurn ? "EXACT_USER_TURN" : "CLEARED_AND_COUNT_ADVANCED",
           composer_cleared: cleared,
@@ -336,7 +373,7 @@
 
     const before = pageState();
     await writeComposerExact(text);
-    const sendButton = await waitForEnabledSend();
+    const sendButton = await waitForEnabledSend(text);
     // Requirement: invoke the actual visible Send button, not Enter-key synthesis.
     sendButton.click();
     const verification = await verifySend(before, text);
@@ -359,6 +396,7 @@
       generating: snapshot.generating,
       composer_present: snapshot.composer_present,
       composer_text: snapshot.composer_text,
+      dom_pair_error: snapshot.dom_pair_error,
       messages: snapshot.messages.map((m) => [m.role, m.text_hash_local])
     }));
     if (!force && signature === lastSnapshotHash) return;
