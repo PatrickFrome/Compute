@@ -1,5 +1,9 @@
 import process from 'node:process';
 
+if (process.env.A2_BRIDGE_INTERNAL !== '1') {
+  console.error('Refusing direct daemon start. Use secure-entry.mjs so localhost pairing is enforced.');
+  process.exit(2);
+}
 if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
   console.error('Refusing to start A2 Chat Bridge without SUPABASE_SERVICE_ROLE_KEY.');
   console.error('The key stays only in the local daemon environment and is never sent to the extension.');
