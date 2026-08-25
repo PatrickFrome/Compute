@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>METAENGINE Chat Control Plane</title>
+  <title>METAENGINE A2 Chat Bridge</title>
   <style>
     :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
     body { margin: 0; background: #0b0d10; color: #edf1f5; }
@@ -12,7 +12,7 @@
     p { color: #aeb7c2; line-height: 1.55; }
     .card { background: #12161b; border: 1px solid #252b33; border-radius: 14px; padding: 18px; margin: 18px 0; }
     label { display: block; font-weight: 650; margin: 14px 0 7px; }
-    input[type="url"], input[type="number"] { width: 100%; box-sizing: border-box; background: #090b0e; color: #edf1f5; border: 1px solid #303844; border-radius: 9px; padding: 11px 12px; font: inherit; }
+    input[type="url"], input[type="number"], input[type="password"] { width: 100%; box-sizing: border-box; background: #090b0e; color: #edf1f5; border: 1px solid #303844; border-radius: 9px; padding: 11px 12px; font: inherit; }
     input:focus { outline: 2px solid #6ba7ff; outline-offset: 1px; }
     .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
     button { background: #edf1f5; color: #0b0d10; border: 0; border-radius: 9px; padding: 10px 14px; font-weight: 700; cursor: pointer; }
@@ -25,8 +25,8 @@
 </head>
 <body>
 <main>
-  <h1>METAENGINE Chat Control Plane</h1>
-  <p>Pin one ChatGPT conversation and one Z.AI conversation. The bridge will only send commands to the exact configured URLs. Click the extension icon to toggle the global ARMED / DISARMED kill switch.</p>
+  <h1>METAENGINE A2 Chat Bridge</h1>
+  <p>Pin one ChatGPT conversation and one Z.AI conversation. The bridge only controls the exact configured URLs. Click the extension icon to toggle the global ARMED / DISARMED kill switch.</p>
 
   <section class="card">
     <div class="row"><span class="pill">GPT peer</span><span class="pill">exact URL binding</span></div>
@@ -46,11 +46,14 @@
   <section class="card">
     <label for="daemonUrl">Local bridge daemon</label>
     <input id="daemonUrl" type="url" value="http://127.0.0.1:8765" autocomplete="off" />
+    <label for="bridgeSecret">Local pairing secret (must match A2_BRIDGE_SHARED_SECRET)</label>
+    <input id="bridgeSecret" type="password" minlength="32" autocomplete="new-password" placeholder="32+ character local-only secret" />
+    <p class="mono">Stored only in chrome.storage.local. Never put this secret in Git, A2 mailbox or Supabase.</p>
     <label for="pollMs">Command poll interval, ms</label>
     <input id="pollMs" type="number" min="1000" max="30000" step="250" />
     <div style="margin-top:14px"><label><input id="autoOpenTabs" type="checkbox" /> Automatically reopen a pinned peer tab if it is closed</label></div>
     <div><label><input id="armed" type="checkbox" /> ARMED — allow real composer writes and real Send clicks</label></div>
-    <p class="warn">When ARMED, a command accepted from the localhost daemon can be inserted into the exact pinned conversation and the visible Send button will be clicked.</p>
+    <p class="warn">When ARMED, a command authenticated by the localhost daemon can be inserted into the exact pinned conversation and the visible Send button will be clicked.</p>
   </section>
 
   <div class="row">
