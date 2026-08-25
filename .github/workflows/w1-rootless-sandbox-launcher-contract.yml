@@ -45,7 +45,17 @@ jobs:
           )
           for token in required:
               assert token in p, token
-          forbidden = ('seccomp=unconfined', '--privileged', 'w1_verified = True', 'worker_admitted = True')
-          for token in forbidden:
+          # Documentation may name forbidden shortcuts while rejecting them.
+          # Reject executable patterns / authority escalation, not prose mentions.
+          forbidden_exec = (
+              'os.system("docker run --privileged',
+              "os.system('docker run --privileged",
+              'subprocess.run(["docker", "run", "--privileged"',
+              'w1_verified = True',
+              'worker_admitted = True',
+          )
+          for token in forbidden_exec:
               assert token not in p, token
+          assert 'SCMP_ACT_ALLOW' in p
+          assert len(__import__('worker.native_linux.rootless_sandbox_launcher', fromlist=['DENIED_SYSCALLS']).DENIED_SYSCALLS) >= 20
           PY
