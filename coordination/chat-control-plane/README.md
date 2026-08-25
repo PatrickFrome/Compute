@@ -25,6 +25,25 @@ The browser transport is never project authority. All generated commands are mar
 - A command is leased to one extension client. Successful Sends are durably fenced in `chrome.storage.local` by both `command_id` and the deterministic `idempotency_key`, preventing a second Send after extension or daemon restart.
 - Raw browser chat text is held in daemon memory for scheduling. The prepared Supabase bridge-receipt contract stores hashes/metadata only and is **not applied to production yet**.
 
+## Receipt persistence modes
+
+Receipt persistence is optional PREP functionality and defaults to `OFF`. The prepared migration `supabase/migrations/20260825050000_a2_chat_bridge_receipts_v1.sql` must exist in the target database before enabling `BEST_EFFORT` or `REQUIRED`.
+
+```text
+A2_BRIDGE_RECEIPTS_MODE=OFF|BEST_EFFORT|REQUIRED
+A2_BRIDGE_INSTANCE_ID=<stable local bridge instance id>
+```
+
+- `OFF`: no bridge-receipt RPC calls. Current default and safe before the prepared migration is installed.
+- `BEST_EFFORT`: attempts hash-only receipt persistence, logs failures, and keeps the bridge operating. This is observability, not authority.
+- `REQUIRED`: fail-closed receipt ordering. A `COMMAND_LEASED` receipt must persist before the command is returned to that extension client, and a `SEND_RESULT` receipt must persist before the internal scheduler acknowledges command completion. A transient failed lease receipt is held process-locally for the same client and retried without waiting for the internal lease timeout; another client cannot receive that blocked command.
+
+The receipt RPC receives only lineage and hashes/flags such as `command_id`, target platform/agent, normalized target-URL SHA-256, A2 frontier, idempotency SHA-256, prompt SHA-256 and Send-verification metadata. URL query/fragment data, raw prompts, raw chat text, cookies, credentials and browser tokens are not receipt fields.
+
+`REQUIRED` does **not** claim active-lease survival across a full bridge process restart. `secure-entry.mjs` and the internal scheduler currently share one Node process; their active in-memory queue/blocked-lease cache restarts together. The independent extension-side durable Send journal still prevents a second real Send after a completed strong DOM-verified send, but active lease recovery is a separate future persistence/split-process concern.
+
+The receipt table and RPC remain permanently non-authority (`canonical=false`, `authority_effect=false`). Enabling receipt persistence never admits a worker, resolves an A2 gate, or creates project authority.
+
 ## Start the daemon
 
 Requires Node.js 20+.
@@ -112,9 +131,11 @@ The repository contract currently verifies:
 - exact Z.AI project-chat pin;
 - A2 blind visibility fencing;
 - current-main stale relay rejection;
-- restart-safe idempotency;
+- restart-safe duplicate-Send fencing;
 - authenticated loopback transport;
 - fail-closed direct-daemon bypass;
+- hash-only bridge-receipt recorder modes;
+- REQUIRED lease/result receipt ordering and same-client blocked-lease retry;
 - buildable Chrome-extension and complete bridge ZIP artifacts.
 
-A real browser acceptance run still requires loading the extension in the user's already-authenticated Chrome profile and arming it. Repository CI cannot truthfully substitute for that final live-tab observation.
+A real browser acceptance run still requires loading the extension in the user's already-authenticated Chrome profile and arming it. Repository CI cannot truthfully substitute for that final live-tab observation. Production receipt DDL is also still deliberately unapplied.
