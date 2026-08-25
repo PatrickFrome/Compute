@@ -15,10 +15,13 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         cls.content = (EXT / "content.js").read_text()
         cls.background = (EXT / "background.js").read_text()
         cls.background_entry = (EXT / "background-entry.js").read_text()
+        cls.auth_fetch = (EXT / "auth-fetch.js").read_text()
         cls.durable = (EXT / "durable-fetch.js").read_text()
         cls.options = (EXT / "options.js").read_text()
+        cls.options_html = (EXT / "options.html").read_text()
         cls.server = (DAEMON / "server.mjs").read_text()
         cls.launcher = (DAEMON / "run.mjs").read_text()
+        cls.secure_entry = (DAEMON / "secure-entry.mjs").read_text()
         cls.manifest = json.loads((EXT / "manifest.json").read_text())
 
     def test_manifest_entrypoints_exist(self):
@@ -27,11 +30,13 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertEqual(self.manifest["options_page"], "options.html")
         for path in [
             EXT / "background-entry.js",
+            EXT / "auth-fetch.js",
             EXT / "durable-fetch.js",
             EXT / "background.js",
             EXT / "options.html",
             EXT / "options.js",
             EXT / "content.js",
+            DAEMON / "secure-entry.mjs",
         ]:
             self.assertTrue(path.is_file(), path)
 
@@ -60,13 +65,33 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("BLOCKED_NOT_ARMED", self.background)
         self.assertIn("chrome.action.onClicked", self.background)
 
-    def test_durable_send_idempotency_survives_background_reload(self):
+    def test_durable_send_idempotency_survives_background_and_daemon_restart(self):
+        self.assertIn("import './auth-fetch.js'", self.background_entry)
         self.assertIn("import './durable-fetch.js'", self.background_entry)
         self.assertIn("a2BridgeCompletedCommandsV1", self.durable)
+        self.assertIn("a2BridgeLeasedCommandsV1", self.durable)
+        self.assertIn("idempotency_key", self.durable)
         self.assertIn("SENT_ALREADY_DURABLE", self.durable)
         self.assertIn("clicked_send_button === true", self.durable)
         self.assertIn("Persist before network ACK", self.durable)
         self.assertIn("MAX_COMPLETED = 256", self.durable)
+
+    def test_localhost_pairing_is_required_for_extension_transport(self):
+        self.assertIn("x-a2-chat-bridge-secret", self.auth_fetch)
+        self.assertIn("bridge_pairing_secret_missing_or_short", self.auth_fetch)
+        self.assertIn("bridgeSecret", self.options)
+        self.assertIn("Pairing secret must be at least 32 characters", self.options)
+        self.assertIn('id="bridgeSecret"', self.options_html)
+        self.assertIn("Daemon must be loopback-only", self.options)
+
+    def test_secure_daemon_gate_is_fail_closed(self):
+        self.assertIn("A2_BRIDGE_SHARED_SECRET", self.secure_entry)
+        self.assertIn("timingSafeEqual", self.secure_entry)
+        self.assertIn("bridge_pairing_required", self.secure_entry)
+        self.assertIn("delete headers['x-a2-chat-bridge-secret']", self.secure_entry)
+        self.assertIn("process.env.A2_BRIDGE_INTERNAL = '1'", self.secure_entry)
+        self.assertIn("Refusing direct daemon start", self.launcher)
+        self.assertIn("A2_BRIDGE_INTERNAL !== '1'", self.launcher)
 
     def test_daemon_reads_existing_a2_contracts(self):
         for rpc in [
@@ -86,17 +111,19 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("currentMainSha", self.launcher)
         self.assertIn("base_github_sha", self.launcher)
 
-    def test_service_role_is_not_in_extension(self):
+    def test_service_role_and_pairing_env_secret_are_not_in_extension(self):
         combined = "\n".join([
             self.content,
             self.background_entry,
+            self.auth_fetch,
             self.durable,
             self.background,
             self.options,
-            (EXT / "options.html").read_text(),
+            self.options_html,
         ])
         self.assertNotIn("SUPABASE_SERVICE_ROLE_KEY", combined)
         self.assertNotIn("service_role", combined.lower())
+        self.assertNotIn("A2_BRIDGE_SHARED_SECRET", combined)
 
     def test_no_browser_authority_promotion(self):
         self.assertIn("authority_effect: false", self.background)
