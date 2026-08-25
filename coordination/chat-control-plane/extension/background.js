@@ -113,6 +113,32 @@ async function findPinnedTab(targetUrl, platform) {
   }) || null;
 }
 
+// Hidden tabs are timer-throttled by Chrome (intensive throttling after ~5 min
+// limits page timers to ~1/min), which starves the content-script heartbeat and
+// would stall the daemon watchdog for any auto-opened (active:false) pinned tab.
+// Extension message events are NOT throttled, so the service worker pulls
+// snapshots from pinned tabs on every alarm tick instead of relying on the
+// page-side heartbeat alone.
+async function pollPinnedTabSnapshots() {
+  const settings = await getSettings();
+  const targets = [];
+  if (settings.chatgptUrl) targets.push({ url: settings.chatgptUrl, platform: "CHATGPT" });
+  if (settings.zaiUrl) targets.push({ url: settings.zaiUrl, platform: "GLM_ZAI" });
+  await Promise.all(targets.map(async (target) => {
+    try {
+      const tab = await findPinnedTab(target.url, target.platform);
+      if (!tab?.id) return;
+      const response = await chrome.tabs.sendMessage(tab.id, { type: "GET_CHAT_SNAPSHOT" });
+      if (response?.ok && response?.snapshot) {
+        await reportSnapshot(tab.id, response.snapshot);
+      }
+    } catch (_) {
+      // Tab may be reloading or the content script not yet injected; the next
+      // alarm tick retries. Never block the other platform on this failure.
+    }
+  }));
+}
+
 async function waitForContentScript(tabId, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -262,7 +288,8 @@ chrome.runtime.onStartup.addListener(async () => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "a2-chat-bridge-poll") pollCommands(true);
+  if (alarm.name !== "a2-chat-bridge-poll") return;
+  pollPinnedTabSnapshots().finally(() => pollCommands(true));
 });
 
 chrome.action.onClicked.addListener(async () => {

@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -14,10 +14,27 @@ const A2_MACROBLOCK_ID = process.env.A2_MACROBLOCK_ID || 'dce58a3b-2f67-47e0-ae0
 const IDLE_MS = Math.max(5000, Number(process.env.A2_BRIDGE_IDLE_MS || 18000));
 const WAKE_COOLDOWN_MS = Math.max(15000, Number(process.env.A2_BRIDGE_WAKE_COOLDOWN_MS || 60000));
 const A2_REFRESH_MS = Math.max(1500, Number(process.env.A2_BRIDGE_A2_REFRESH_MS || 5000));
+// Snapshots may now arrive via the extension alarm puller (~30s period) because
+// hidden tabs are timer-throttled; the staleness window must cover that period.
+const SNAPSHOT_FRESH_MS = Math.max(20000, Number(process.env.A2_BRIDGE_SNAPSHOT_FRESH_MS || 45000));
+// A command execution spans content-script readiness + send + DOM verification
+// and can legitimately take tens of seconds; re-leasing before that risks a
+// duplicate real send when the extension service worker restarts mid-flight.
+const LEASE_TIMEOUT_MS = Math.max(60000, Number(process.env.A2_BRIDGE_LEASE_TIMEOUT_MS || 120000));
+// Idempotency fence window: a wake key cannot re-queue within this window (it
+// duplicates the cooldown fence and survives daemon restarts via the journal),
+// but after it elapses the watchdog MAY retry an unchanged stuck state — a
+// permanent block would silently disable retry semantics.
+const IDEMPOTENCY_WINDOW_MS = Math.max(60000, Number(process.env.A2_BRIDGE_IDEMPOTENCY_WINDOW_MS || 300000));
 const MAX_BODY_BYTES = 3 * 1024 * 1024;
 const MAX_PROMPT_CHARS = 42000;
 const MAX_CHAT_CONTEXT_CHARS = 10500;
 const MAX_A2_MESSAGE_CHARS = 5200;
+// Append-only non-authority journal of command lifecycle keyed by
+// idempotency_key/command_id so a daemon restart cannot lose the duplicate-send
+// fence. Purely a dedupe record: no chat text or authority state is persisted.
+const STATE_DIR = process.env.A2_BRIDGE_STATE_DIR || join(HERE, 'state');
+const COMMAND_JOURNAL = join(STATE_DIR, 'command-journal.jsonl');
 
 const snapshots = new Map();
 const progress = new Map();
@@ -25,6 +42,56 @@ const commands = [];
 const commandResults = new Map();
 const wakeKeys = new Map();
 const clients = new Map();
+// idempotency keys of queued commands -> queued-at ms — rebuilt from the
+// journal on boot so restarts preserve the duplicate-send fence.
+const knownIdempotencyKeys = new Map();
+// command ids that already produced a result — a lease must never be re-issued
+// for them, otherwise a slow duplicate execution could double-send in the chat.
+const completedCommandIds = new Set();
+
+function idempotencyBlocked(idempotencyKey) {
+  const queuedAt = knownIdempotencyKeys.get(idempotencyKey);
+  if (!Number.isFinite(queuedAt)) return false;
+  return Date.now() - queuedAt < IDEMPOTENCY_WINDOW_MS;
+}
+
+async function journal(entry) {
+  try {
+    await appendFile(COMMAND_JOURNAL, `${JSON.stringify(entry)}\n`, 'utf8');
+  } catch (_) {
+    // Journal is a hardening record only; the bridge stays non-authority and
+    // must keep serving even when the state directory is unwritable.
+  }
+}
+
+async function loadJournal() {
+  try {
+    const raw = await readFile(COMMAND_JOURNAL, 'utf8');
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const entry = JSON.parse(line);
+        if (typeof entry?.idempotency_key === 'string' && entry.idempotency_key) {
+          const queuedAt = Date.parse(entry?.created_at || '');
+          knownIdempotencyKeys.set(entry.idempotency_key, Number.isFinite(queuedAt) ? queuedAt : Date.now());
+        }
+        if (entry?.kind === 'result' && typeof entry?.command_id === 'string') {
+          // completed command ids survive as results for re-lease protection
+          completedCommandIds.add(entry.command_id);
+        }
+      } catch (_) {
+        // Skip malformed lines; the journal is best-effort.
+      }
+    }
+    while (knownIdempotencyKeys.size > 1000) {
+      // Evict the oldest inserted entry; keys older than the window are inert.
+      const oldest = knownIdempotencyKeys.keys().next().value;
+      knownIdempotencyKeys.delete(oldest);
+    }
+  } catch (_) {
+    // No journal yet — first boot.
+  }
+}
 
 let a2 = {
   online: false,
@@ -263,7 +330,11 @@ function buildWakePrompt(targetPlatform) {
   const otherPlatform = peerPlatform(targetPlatform);
   const peerSnapshot = snapshots.get(otherPlatform)?.snapshot || null;
   const agent = agentForPlatform(targetPlatform);
-  const blind = a2.peerPayloadsExposed !== true && Boolean(a2.pendingRelay?.relay);
+  // STRICT visibility fence per the work package requirement: never relay peer
+  // DOM text while pending_payloads_exposed is false. When no relay is pending
+  // the flag is false/undefined, so peer chat text stays redacted in that case
+  // too — only an explicitly exposed A2 relay phase may carry peer context.
+  const blind = a2.peerPayloadsExposed !== true;
   const pendingRelay = a2.pendingRelay?.relay || null;
 
   const lines = [
@@ -308,7 +379,7 @@ function buildWakePrompt(targetPlatform) {
   }
 
   if (!blind && peerSnapshot) {
-    lines.push('', 'OTHER PEER CHAT — RECENT VISIBLE TURNS (A2 visibility currently permits cross-peer context):');
+    lines.push('', 'OTHER PEER CHAT — RECENT VISIBLE TURNS (A2 relay reports pending_payloads_exposed=true):');
     lines.push(clip(JSON.stringify(recentMessages(peerSnapshot, 5)), MAX_CHAT_CONTEXT_CHARS));
   } else {
     lines.push('', 'OTHER PEER CHAT: REDACTED BY A2 VISIBILITY FENCE. Do not infer or request hidden peer payloads.');
@@ -326,7 +397,7 @@ function shouldWake(platform) {
   const envelope = snapshots.get(platform);
   const state = progress.get(platform);
   if (!envelope || !state) return false;
-  if (Date.now() - state.observedAt > 12000) return false;
+  if (Date.now() - state.observedAt > SNAPSHOT_FRESH_MS) return false;
   if (state.generating || !state.composerPresent || !state.composerEmpty) return false;
   if (Date.now() - state.changedAt < IDLE_MS) return false;
   if (pendingCommandFor(platform)) return false;
@@ -341,11 +412,18 @@ function shouldWake(platform) {
 }
 
 function queueWake(platform, wakeKey) {
+  const idempotencyKey = sha256(wakeKey);
+  // Idempotency fence: never enqueue a second command for a wake key already
+  // queued inside the idempotency window (in-memory or restored from journal).
+  // After the window elapses, an unchanged stuck state MAY be retried — the
+  // fence prevents duplicates, not legitimate watchdog retries.
+  if (idempotencyBlocked(idempotencyKey)) return;
+  knownIdempotencyKeys.set(idempotencyKey, Date.now());
   const prompt = buildWakePrompt(platform);
   const command = {
     schema: 'metaengine.chat-bridge.command.v1',
     command_id: randomUUID(),
-    idempotency_key: sha256(wakeKey),
+    idempotency_key: idempotencyKey,
     target_platform: platform,
     target_agent: agentForPlatform(platform),
     created_at: new Date().toISOString(),
@@ -360,6 +438,7 @@ function queueWake(platform, wakeKey) {
   commands.push(command);
   while (commands.length > 100) commands.shift();
   wakeKeys.set(wakeKey, Date.now());
+  journal({ kind: 'command', command_id: command.command_id, idempotency_key: idempotencyKey, target_platform: platform, created_at: command.created_at }).catch(() => {});
 }
 
 async function schedulerTick() {
@@ -375,14 +454,16 @@ function nextCommand(clientId) {
   for (const command of commands) {
     if (command.status === 'LEASED') {
       const leasedAt = Date.parse(command.leased_at || '');
-      if (!Number.isFinite(leasedAt) || now - leasedAt > 45000) {
+      if (!Number.isFinite(leasedAt) || now - leasedAt > LEASE_TIMEOUT_MS) {
         command.status = 'PENDING';
         command.leased_to = null;
         command.leased_at = null;
       }
     }
   }
-  const command = commands.find((item) => item.status === 'PENDING');
+  // Never re-lease a command that already produced a result: the send may have
+  // really happened even if the result arrived after the lease lapsed.
+  const command = commands.find((item) => item.status === 'PENDING' && !commandResults.has(item.command_id));
   if (!command) return null;
   command.status = 'LEASED';
   command.leased_to = clientId;
@@ -396,7 +477,7 @@ function publicStatus() {
     const envelope = snapshots.get(platform);
     const state = progress.get(platform);
     snapshotSummary[platform] = envelope ? {
-      online: Date.now() - (state?.observedAt || 0) < 12000,
+      online: Date.now() - (state?.observedAt || 0) < SNAPSHOT_FRESH_MS,
       url: envelope.snapshot?.url || null,
       generating: envelope.snapshot?.generating === true,
       message_count: envelope.snapshot?.message_count || 0,
@@ -484,6 +565,8 @@ const server = http.createServer(async (req, res) => {
         captured_at: body?.captured_at || new Date().toISOString()
       };
       commandResults.set(commandId, safeResult);
+      completedCommandIds.add(commandId);
+      journal({ kind: 'result', command_id: commandId, status: safeResult.status, idempotency_key: command.idempotency_key || null, completed_at: command.completed_at }).catch(() => {});
       return json(res, 200, { accepted: true });
     }
 
@@ -512,6 +595,13 @@ server.listen(PORT, HOST, async () => {
   console.log(`METAENGINE A2 Chat Bridge listening on http://${HOST}:${PORT}`);
   console.log(`workspace=${A2_WORKSPACE_ID} macroblock=${A2_MACROBLOCK_ID}`);
   console.log(`A2=${SUPABASE_SERVICE_ROLE_KEY ? 'configured' : 'offline: SUPABASE_SERVICE_ROLE_KEY missing'}`);
+  try {
+    await mkdir(STATE_DIR, { recursive: true });
+    await loadJournal();
+    console.log(`command-journal restored: ${knownIdempotencyKeys.size} idempotency keys, ${completedCommandIds.size} completed commands`);
+  } catch (error) {
+    console.error('command-journal restore failed (dedupe across restarts degraded):', error?.message || error);
+  }
   await refreshA2(true);
 });
 

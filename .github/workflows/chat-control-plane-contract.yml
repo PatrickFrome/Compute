@@ -107,6 +107,61 @@ jobs:
       - name: Restart-safe Send idempotency behavioral test
         run: node tests/chat_bridge_durable_idempotency_behavior.mjs
 
+      - name: Command journal and duplicate-send fences survive restart
+        shell: bash
+        run: |
+          export SUPABASE_SERVICE_ROLE_KEY=test-only
+          export SUPABASE_URL=http://127.0.0.1:9
+          export A2_BRIDGE_PORT=8878
+          export A2_BRIDGE_INTERNAL_PORT=8879
+          export A2_BRIDGE_SHARED_SECRET=abcdefghijklmnopqrstuvwxyz123456
+          export A2_BRIDGE_STATE_DIR=/tmp/a2-bridge-journal-state
+          rm -rf "$A2_BRIDGE_STATE_DIR"
+          node coordination/chat-control-plane/daemon/secure-entry.mjs >/tmp/bridge2.log 2>&1 &
+          pid=$!
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8878/v1/status >/dev/null; then break; fi
+            sleep 0.2
+          done
+          curl -fsS -X POST http://127.0.0.1:8878/v1/control/wake \
+            -H 'content-type: application/json' \
+            -H 'x-a2-chat-bridge-client: ci' \
+            -H "x-a2-chat-bridge-secret: $A2_BRIDGE_SHARED_SECRET" \
+            -d '{"target_platform":"GLM_ZAI"}' >/dev/null
+          curl -fsS -H 'x-a2-chat-bridge-client: ci' \
+            -H "x-a2-chat-bridge-secret: $A2_BRIDGE_SHARED_SECRET" \
+            http://127.0.0.1:8878/v1/commands/next >/tmp/cmd.json
+          python3 - <<'PY'
+          import json
+          command = json.load(open('/tmp/cmd.json'))['command']
+          assert command and command['status'] == 'LEASED' and command['leased_to'] == 'ci'
+          open('/tmp/cmd_id', 'w').write(command['command_id'])
+          PY
+          curl -fsS -X POST "http://127.0.0.1:8878/v1/commands/$(cat /tmp/cmd_id)/result" \
+            -H 'content-type: application/json' \
+            -H 'x-a2-chat-bridge-client: ci' \
+            -H "x-a2-chat-bridge-secret: $A2_BRIDGE_SHARED_SECRET" \
+            -d '{"status":"SENT_AND_DOM_VERIFIED","clicked_send_button":true}' >/dev/null
+          curl -fsS -H 'x-a2-chat-bridge-client: ci' \
+            -H "x-a2-chat-bridge-secret: $A2_BRIDGE_SHARED_SECRET" \
+            http://127.0.0.1:8878/v1/commands/next >/tmp/cmd2.json
+          python3 - <<'PY'
+          import json
+          assert json.load(open('/tmp/cmd2.json'))['command'] is None, 'completed command must never be re-leased'
+          PY
+          kill "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+          node coordination/chat-control-plane/daemon/secure-entry.mjs >/tmp/bridge3.log 2>&1 &
+          pid2=$!
+          trap 'kill "$pid2" 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8878/v1/status >/dev/null; then break; fi
+            sleep 0.2
+          done
+          sleep 0.5
+          grep -q 'command-journal restored: 1 idempotency keys' /tmp/bridge3.log
+          grep -q 'completed commands' /tmp/bridge3.log
+
       - name: Build bridge bundles
         shell: bash
         run: |

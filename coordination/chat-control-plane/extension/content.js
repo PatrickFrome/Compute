@@ -5,13 +5,36 @@
   const SEND_VERIFY_TIMEOUT_MS = 12000;
   const SEND_BUTTON_WAIT_MS = 6000;
   const MAX_MESSAGE_CHARS = 120000;
-  const seenCommands = new Set();
+  const SEEN_COMMANDS_STORAGE_KEY = "a2-chat-bridge:seen-commands";
+  // Duplicate-send defense: remember executed command ids in sessionStorage so a
+  // re-leased command (daemon lease expiry or MV3 service-worker restart) cannot
+  // double-send after a chat page reload within the same tab.
+  const seenCommands = new Set(loadSeenCommands());
   let snapshotTimer = null;
   let lastSnapshotHash = "";
   let lastMutationAt = Date.now();
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const normalize = (value) => String(value ?? "").replace(/\r\n/g, "\n").trim();
+
+  function loadSeenCommands() {
+    try {
+      const raw = JSON.parse(sessionStorage.getItem(SEEN_COMMANDS_STORAGE_KEY) || "[]");
+      return Array.isArray(raw) ? raw.filter((id) => typeof id === "string") : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function rememberCommand(commandId) {
+    seenCommands.add(commandId);
+    try {
+      // Keep the journal bounded; only recent ids matter for re-lease dedupe.
+      sessionStorage.setItem(SEEN_COMMANDS_STORAGE_KEY, JSON.stringify([...seenCommands].slice(-200)));
+    } catch (_) {
+      // Storage may be unavailable (private mode); in-memory set still applies.
+    }
+  }
 
   function platform() {
     const host = location.hostname.toLowerCase();
@@ -126,11 +149,28 @@
     return found;
   }
 
+  function sharedContainer(el, button) {
+    // True when the composer and the send button live in the same enclosing
+    // container (form / composer bar). This is the main Z.AI robustness guard:
+    // bare `textarea` matches unrelated inputs (search, feedback widgets), so we
+    // prefer candidates that co-locate with the actual send control.
+    if (!(el instanceof HTMLElement) || !(button instanceof HTMLElement)) return false;
+    let node = el.parentElement;
+    for (let depth = 0; depth < 8 && node; depth += 1) {
+      if (node.contains(button)) return true;
+      node = node.parentElement;
+    }
+    return false;
+  }
+
   function getComposer() {
     const candidates = composerCandidates();
     if (!candidates.length) return null;
+    const send = buttonBySemantics("send");
+    const adjacent = send ? candidates.filter((el) => sharedContainer(el, send)) : [];
+    const pool = adjacent.length ? adjacent : candidates;
     // Prefer the lowest visible composer in the viewport.
-    return candidates.sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top)[0];
+    return pool.sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top)[0];
   }
 
   function composerText(el) {
@@ -152,10 +192,15 @@
     const terms = isSend
       ? ["send", "отправ", "submit", "发送", "发送消息"]
       : ["stop", "останов", "停止", "停止生成"];
+    // Word-boundary matching avoids false hits like "Resend" or "Send feedback"
+    // on unrelated controls; adjacency to the composer is enforced separately.
+    const patterns = isSend
+      ? [/\bsend\b/, /\bотправ/, /\bsubmit\b/, /发送/]
+      : [/\bstop\b/, /\bостанов/, /停止/];
     for (const button of document.querySelectorAll("button")) {
       if (!visible(button)) continue;
       const semantic = `${button.getAttribute("aria-label") || ""} ${button.getAttribute("title") || ""} ${button.textContent || ""}`.toLowerCase();
-      if (terms.some((term) => semantic.includes(term))) return button;
+      if (patterns.some((pattern) => pattern.test(semantic)) || terms.some((term) => semantic.includes(term))) return button;
     }
     return null;
   }
@@ -262,7 +307,11 @@
       if (exactUserTurn || (cleared && countAdvanced)) {
         return {
           verified: true,
+          // Strong verification requires the exact user turn text in the DOM;
+          // cleared+count-advanced alone can race with unrelated streaming and
+          // is reported as a weaker outcome so the daemon record stays honest.
           exact_user_turn_seen: exactUserTurn,
+          verification_strength: exactUserTurn ? "EXACT_USER_TURN" : "CLEARED_AND_COUNT_ADVANCED",
           composer_cleared: cleared,
           message_count_before: before.message_count,
           message_count_after: current.message_count,
@@ -291,9 +340,11 @@
     // Requirement: invoke the actual visible Send button, not Enter-key synthesis.
     sendButton.click();
     const verification = await verifySend(before, text);
-    seenCommands.add(commandId);
+    rememberCommand(commandId);
     return {
-      status: "SENT_AND_DOM_VERIFIED",
+      status: verification.exact_user_turn_seen === true
+        ? "SENT_AND_DOM_VERIFIED"
+        : "SENT_WEAK_DOM_VERIFIED",
       command_id: commandId,
       clicked_send_button: true,
       prompt_hash_local: hashText(normalize(text)),
