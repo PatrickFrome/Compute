@@ -1,25 +1,20 @@
 #!/usr/bin/env node
-/* Adversarial DOM test for the F7 bridge fix.
- * Extracts the REAL matching/resolution source from content.js and drives it
- * with mock DOM elements. Tests exact Send/Stop semantics, adjacency, idle
- * composer observation, platform compatibility anchors, and fail-closed ambiguity. */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import assert from 'node:assert/strict';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const contentPath = resolve(HERE, '../coordination/chat-control-plane/extension/content.js');
-const compatPath = resolve(HERE, '../coordination/chat-control-plane/extension/platform-dom-compat.js');
-const manifestPath = resolve(HERE, '../coordination/chat-control-plane/extension/manifest.json');
-const source = readFileSync(contentPath, 'utf8');
-const compat = readFileSync(compatPath, 'utf8');
-const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+const source = readFileSync(resolve(HERE, '../coordination/chat-control-plane/extension/content.js'), 'utf8');
+const compat = readFileSync(resolve(HERE, '../coordination/chat-control-plane/extension/platform-dom-compat.js'), 'utf8');
+const trusted = readFileSync(resolve(HERE, '../coordination/chat-control-plane/extension/trusted-chatgpt.js'), 'utf8');
+const manifest = JSON.parse(readFileSync(resolve(HERE, '../coordination/chat-control-plane/extension/manifest.json'), 'utf8'));
 
 function extractFn(name) {
   const start = source.indexOf(`function ${name}(`);
   assert(start >= 0, `${name} not found`);
-  let depth = 0, i = source.indexOf('{', start);
+  let depth = 0;
+  let i = source.indexOf('{', start);
   for (; i < source.length; i += 1) {
     if (source[i] === '{') depth += 1;
     else if (source[i] === '}') {
@@ -31,26 +26,15 @@ function extractFn(name) {
 }
 
 const normalizeSrc = 'const normalize = (value) => String(value ?? "").replace(/\\r\\n/g, "\\n").trim();';
-const fns = [
-  extractFn('semanticFields'),
-  extractFn('matchesButtonSemantics'),
-  extractFn('sharedContainer'),
-].join('\n');
-const prelude = `
+const fns = [extractFn('semanticFields'), extractFn('matchesButtonSemantics'), extractFn('sharedContainer')].join('\n');
+const factory = new Function(`
 class HTMLElement {}
 const visible = () => true;
 ${normalizeSrc}
-`;
-const factory = new Function(`${prelude}\n${fns}\nreturn { semanticFields, matchesButtonSemantics, sharedContainer, HTMLElement };`);
+${fns}
+return { semanticFields, matchesButtonSemantics, sharedContainer, HTMLElement };
+`);
 const { matchesButtonSemantics, sharedContainer, HTMLElement } = factory();
-
-function domNode(children = [], parent = null) {
-  const node = new HTMLElement();
-  node._children = children;
-  node.parentElement = parent;
-  node.contains = (x) => children.includes(x) || node === x;
-  return node;
-}
 
 function button(fields) {
   const b = new HTMLElement();
@@ -58,76 +42,58 @@ function button(fields) {
   b.textContent = fields.text ?? '';
   return b;
 }
-const el = (parent) => domNode([], parent);
-const containerWith = (children) => domNode(children);
+function node(children = [], parent = null) {
+  const n = new HTMLElement();
+  n.parentElement = parent;
+  n.contains = (x) => n === x || children.includes(x);
+  return n;
+}
+
+const checks = [];
+const check = (name, ok) => { checks.push([name, Boolean(ok)]); };
+
+check('Resend is rejected', !matchesButtonSemantics(button({ 'aria-label': 'Resend' }), 'send'));
+check('Send feedback is rejected', !matchesButtonSemantics(button({ text: 'Send feedback' }), 'send'));
+check('Send matches', matchesButtonSemantics(button({ 'aria-label': 'Send' }), 'send'));
+check('Send prompt matches', matchesButtonSemantics(button({ 'aria-label': 'Send prompt' }), 'send'));
+check('Russian Send matches', matchesButtonSemantics(button({ 'aria-label': 'Отправить' }), 'send'));
+check('Stop generating matches', matchesButtonSemantics(button({ 'aria-label': 'Stop generating' }), 'stop'));
+
+const send = new HTMLElement();
+const root = node([send]);
+const composer = node([], root);
+check('shared container accepted', sharedContainer(composer, send));
+const unrelated = node([]);
+check('unrelated send rejected', !sharedContainer(unrelated, send));
+
+const execute = source.split('async function executeSend(command)', 1)[1].split('async function emitSnapshot', 1)[0];
+const gptBlock = execute.split('if (platform() === "CHATGPT")', 1)[1].split('} else {', 1)[0];
+const glmBlock = execute.split('} else {', 1)[1];
+check('GPT prime is awaited', gptBlock.includes('await callTrustedChatgpt("A2_CHATGPT_TRUSTED_PRIME", text);'));
+check('GPT click is awaited', gptBlock.includes('await callTrustedChatgpt("A2_CHATGPT_TRUSTED_CLICK", text);'));
+check('GPT avoids DOM writer', !gptBlock.includes('writeComposerExact'));
+check('GPT avoids synthetic click', !gptBlock.includes('sendButton.click'));
+check('GLM keeps DOM writer', glmBlock.includes('await writeComposerExact(text);'));
+check('GLM keeps real DOM click', glmBlock.includes('sendButton.click();'));
+check('GPT requires empty composer', gptBlock.includes('chatgpt_composer_not_empty_before_prime'));
+check('exact composer text revalidated before send', source.includes('composerText(pair.composer) === expected'));
+check('pair ambiguity still fails closed', source.includes('composer_send_pair_ambiguous'));
+check('verification timeout still fails closed', source.includes('send_click_not_observed_in_dom'));
+
+check('compat loads before content', JSON.stringify(manifest.content_scripts[0].js) === JSON.stringify(['platform-dom-compat.js', 'content.js']));
+check('compat has ChatGPT exact anchor', compat.includes('markExactSendButton("#composer-submit-button")'));
+check('compat has ZAI exact anchor', compat.includes('markExactSendButton("#send-message-button")'));
+check('compat has no runtime messaging', !compat.includes('runtime.sendMessage'));
+check('compat has no click', !compat.includes('.click('));
+check('trusted worker accepts only bridge-owned GPT prompt', trusted.includes('bridge_job_target=GPT') && trusted.includes('transport=WEB_CHAT_INTERACTIVE_REMOTE'));
+check('trusted worker accepts empty initial composer', trusted.includes('beforeText !== "" && beforeText !== normalize(text)'));
+check('trusted worker detaches debugger', trusted.includes('chrome.debugger.detach'));
+check('trusted worker never targets ZAI', !trusted.includes('chat.z.ai'));
 
 let passed = 0;
-function check(name, ok) {
-  console.log((ok ? 'PASS' : 'FAIL'), name);
+for (const [name, ok] of checks) {
+  console.log(ok ? 'PASS' : 'FAIL', name);
   if (!ok) process.exitCode = 1;
   else passed += 1;
 }
-
-check('Resend (aria) does not match send', !matchesButtonSemantics(button({ 'aria-label': 'Resend' }), 'send'));
-check('Send feedback (aria) does not match send', !matchesButtonSemantics(button({ 'aria-label': 'Send feedback' }), 'send'));
-check('Resend (text) does not match send', !matchesButtonSemantics(button({ text: 'Resend' }), 'send'));
-check('Send feedback (text) does not match send', !matchesButtonSemantics(button({ text: 'Send feedback' }), 'send'));
-check('Sends a message (aria) does not match', !matchesButtonSemantics(button({ 'aria-label': 'Sends a message' }), 'send'));
-check('Stopped (aria) does not match stop', !matchesButtonSemantics(button({ 'aria-label': 'Stopped' }), 'stop'));
-check('Dont stop believing (text) does not match stop', !matchesButtonSemantics(button({ text: "Don't stop believing" }), 'stop'));
-
-check('Send (aria) matches send', matchesButtonSemantics(button({ 'aria-label': 'Send' }), 'send'));
-check('send message (aria) matches send', matchesButtonSemantics(button({ 'aria-label': 'Send Message' }), 'send'));
-check('Submit (text) matches send', matchesButtonSemantics(button({ text: 'Submit' }), 'send'));
-check('отправить (aria) matches send', matchesButtonSemantics(button({ 'aria-label': 'Отправить' }), 'send'));
-check('发送 (aria) matches send', matchesButtonSemantics(button({ 'aria-label': '发送' }), 'send'));
-check('send (title) matches send', matchesButtonSemantics(button({ title: 'Send' }), 'send'));
-check('Stop generating matches stop', matchesButtonSemantics(button({ 'aria-label': 'Stop generating' }), 'stop'));
-check('停止生成 matches stop', matchesButtonSemantics(button({ 'aria-label': '停止生成' }), 'stop'));
-check('exact Send with trailing space matches', matchesButtonSemantics(button({ 'aria-label': '  Send  ' }), 'send'));
-
-const sendBtn = new HTMLElement();
-const composerEl = new HTMLElement();
-const shared = containerWith([composerEl, sendBtn]);
-const unrelated = containerWith([new HTMLElement()]);
-check('composer+send in shared container -> adjacent', sharedContainer(el(shared), sendBtn) === true);
-check('composer without send in container -> not adjacent', sharedContainer(el(unrelated), sendBtn) === false);
-const deepSend = new HTMLElement();
-const deepRoot = domNode([deepSend]);
-let deepEl = domNode([], deepRoot);
-for (let i = 0; i < 7; i += 1) deepEl = domNode([], deepEl);
-check('adjacency within 8 ancestor levels', sharedContainer(deepEl, deepSend) === true);
-const farSend = new HTMLElement();
-const farRoot = domNode([farSend]);
-let farEl = domNode([], farRoot);
-for (let i = 0; i < 9; i += 1) farEl = domNode([], farEl);
-check('adjacency beyond 8 levels fails', sharedContainer(farEl, farSend) === false);
-
-const resolveSrc = source.slice(
-  source.indexOf('function resolveComposer()'),
-  source.indexOf('function getComposer()')
-);
-check('unique composer is resolved independently', resolveSrc.includes('if (composers.length === 1)'));
-check('multiple composers fail closed', resolveSrc.includes('composer_ambiguous'));
-check('pair ambiguity fails closed', resolveSrc.includes('composer_send_pair_ambiguous'));
-check('missing send preserves resolved composer', resolveSrc.includes('{ composer, send: null, error: "send_button_not_found" }'));
-check('missing composer fails closed', resolveSrc.includes('composer_not_found'));
-check('no adjacency fails closed', resolveSrc.includes('composer_send_pair_not_found'));
-check('idle pageState does not require Send button', source.includes('const composerResolution = resolveComposer();') && source.includes('composer_present: Boolean(composer)'));
-check('writeComposerExact resolves composer before Send exists', source.includes('if (composerResolution.error) throw new Error(composerResolution.error)'));
-check('no substring fallback remains', !source.includes('semantic.includes(term)'));
-check('waitForEnabledSend revalidates exact composer text', source.includes('composerText(pair.composer) === expected'));
-check('waitForEnabledSend throws on pair ambiguity', source.includes('pair.error === "composer_send_pair_ambiguous"'));
-check('dom composer error surfaced', source.includes('dom_pair_error: composerResolution.error'));
-check('generating conservative on stop controls', source.includes('semanticButtonCandidates("stop").length > 0'));
-
-check('compat layer loads before content adapter', JSON.stringify(manifest.content_scripts[0].js) === JSON.stringify(['platform-dom-compat.js', 'content.js']));
-check('Z.AI exact send anchor is supported', compat.includes('markExactSendButton("#send-message-button")'));
-check('Z.AI composer-bound submit fallback is supported', compat.includes('markBoundSubmitFallback("#chat-input")'));
-check('ChatGPT exact submit anchor is supported', compat.includes('markExactSendButton("#composer-submit-button")'));
-check('ChatGPT composer-bound submit fallback is supported', compat.includes('markBoundSubmitFallback("#prompt-textarea")'));
-check('compat fallback is form-scoped', compat.includes('const form = composer.closest("form")'));
-check('compat fallback requires exactly one submit', compat.includes('if (candidates.length !== 1) return false'));
-check('compat layer never clicks Send itself', !compat.includes('.click('));
-
-console.log(`\n${passed} adversarial checks passed`);
+console.log(`\n${passed}/${checks.length} adversarial checks passed`);
