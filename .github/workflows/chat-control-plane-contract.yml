@@ -27,6 +27,8 @@ jobs:
       - name: JavaScript syntax checks
         run: |
           node --check coordination/chat-control-plane/extension/content.js
+          node --check coordination/chat-control-plane/extension/durable-fetch.js
+          node --check coordination/chat-control-plane/extension/background-entry.js
           node --check coordination/chat-control-plane/extension/background.js
           node --check coordination/chat-control-plane/extension/options.js
           node --check coordination/chat-control-plane/daemon/server.mjs
