@@ -1,3 +1,4 @@
+(() => {
 "use strict";
 
 const originalFetch = globalThis.fetch.bind(globalThis);
@@ -28,3 +29,5 @@ globalThis.fetch = async (input, init = {}) => {
   headers.set("x-a2-chat-bridge-secret", await pairingSecret());
   return originalFetch(input, { ...init, headers });
 };
+
+})();
