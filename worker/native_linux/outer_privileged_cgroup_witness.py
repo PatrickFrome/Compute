@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """PREP-only privileged OUTER cgroup witness for W1.
 
-This is intentionally separate from the normal uid1000 canary. It exists to
-make the privilege boundary explicit and auditable. The disposable worker is
-created with the exact hardened arguments from outer_enforced_docker_canary;
-only the final write to the already-resolved exact container `cgroup.kill`
-uses passwordless sudo.
+The disposable worker is created and fully identified with the same hardened,
+non-sudo Docker argv as the unprivileged S1 baseline. No sudo command executes
+until State.Pid -> unified cgroup path -> exact container-id binding has been
+established. After that boundary, sudo is used only to prove the outer root
+principal and to write `1` to that exact `cgroup.kill` file.
 
-Default mode is DRY_RUN. `--execute` must not be used while the macroblock hard
-gate is closed. This script never admits a worker or asserts W1.
+Default mode is DRY_RUN. This script never admits a worker or asserts W1.
 """
 from __future__ import annotations
 
@@ -21,15 +20,12 @@ import sys
 import time
 from typing import Any
 
-# Direct execution (`python3 worker/native_linux/this_file.py`) sets sys.path[0]
-# to this directory, not the repository root. Import the sibling module without
-# requiring package installation or mutating global repo packaging.
 _THIS_DIR = Path(__file__).resolve().parent
 if str(_THIS_DIR) not in sys.path:
     sys.path.insert(0, str(_THIS_DIR))
 import outer_enforced_docker_canary as base  # noqa: E402
 
-SCHEMA = "metaengine.compute.w1-outer-privileged-cgroup-witness.h205f22.v1"
+SCHEMA = "metaengine.compute.w1-outer-privileged-cgroup-witness.h205f22.v2"
 
 
 def _sudo_root_probe() -> dict[str, Any]:
@@ -42,30 +38,32 @@ def _sudo_root_probe() -> dict[str, Any]:
     }
 
 
-def _safe_exact_kill_target(cid: str, cgroup_dir: Path, relative: str) -> tuple[bool, str | None]:
+def _safe_exact_kill_target(cid: str, cgroup_dir: Path, relative: str) -> tuple[bool, str | None, Path | None]:
     try:
         root = base.CGROUP_ROOT.resolve(strict=True)
         directory = cgroup_dir.resolve(strict=True)
         kill_file = (directory / "cgroup.kill").resolve(strict=True)
     except OSError as exc:
-        return False, f"resolve_failed:{type(exc).__name__}"
+        return False, f"resolve_failed:{type(exc).__name__}", None
     try:
         directory.relative_to(root)
         kill_file.relative_to(root)
     except ValueError:
-        return False, "target_outside_cgroup_root"
+        return False, "target_outside_cgroup_root", None
+    if directory == root:
+        return False, "root_cgroup_forbidden", None
     if kill_file.parent != directory or kill_file.name != "cgroup.kill":
-        return False, "kill_file_path_mismatch"
+        return False, "kill_file_path_mismatch", None
     if cid not in relative or cid not in str(directory):
-        return False, "exact_container_id_not_in_cgroup_path"
+        return False, "exact_container_id_not_in_cgroup_path", None
     if not kill_file.is_file():
-        return False, "cgroup_kill_missing"
-    return True, None
+        return False, "cgroup_kill_missing", None
+    return True, None, kill_file
 
 
 def _sudo_write_one(kill_file: Path) -> dict[str, Any]:
-    # No shell, no wildcard, no caller-supplied command. The path has already
-    # been resolved and constrained beneath /sys/fs/cgroup for the exact CID.
+    # No shell, glob or caller-supplied command. The path was canonicalized and
+    # exact-CID-bound before any sudo operation occurred.
     cp = subprocess.run(
         ["sudo", "-n", "tee", "--", str(kill_file)],
         input="1\n",
@@ -108,19 +106,47 @@ def _security_facts(inspect: dict[str, Any], inner: Any) -> tuple[dict[str, bool
     return outer, base._inner_checks(inner)
 
 
+def _outer_namespaces() -> dict[str, int]:
+    return {
+        "pid_ns": Path("/proc/self/ns/pid").stat().st_ino,
+        "mnt_ns": Path("/proc/self/ns/mnt").stat().st_ino,
+        "net_ns": Path("/proc/self/ns/net").stat().st_ino,
+    }
+
+
+def _two_plane_checks(outer: dict[str, int], inner: Any) -> dict[str, bool]:
+    if not isinstance(inner, dict) or inner.get("probe_failed"):
+        return {"pid_ns_distinct": False, "mnt_ns_distinct": False, "net_ns_distinct": False}
+    return {
+        "pid_ns_distinct": int(inner.get("pid_ns", -1)) != outer["pid_ns"],
+        "mnt_ns_distinct": int(inner.get("mnt_ns", -1)) != outer["mnt_ns"],
+        "net_ns_distinct": int(inner.get("net_ns", -1)) != outer["net_ns"],
+    }
+
+
 def dry_plan(image: str) -> dict[str, Any]:
     return {
         "schema": SCHEMA,
         "mode": "DRY_RUN",
         "image": image,
         "worker_run_argv": base.build_run_args(image, "w1-outer-privileged-DRYRUN"),
+        "sequencing": [
+            "launch hardened worker without sudo",
+            "capture inner/outer worker predicates without sudo",
+            "derive State.Pid and canonical exact-CID cgroup path without sudo",
+            "validate limits/populated/process tree without sudo",
+            "only then probe sudo root principal",
+            "single sudo tee write of 1 to exact cgroup.kill",
+            "observe populated=0, pre-PIDs gone and Docker Running=false without docker-kill evidence",
+        ],
         "privilege_boundary": {
+            "sudo_before_exact_binding": False,
             "worker_launch_via_sudo": False,
             "worker_exec_via_sudo": False,
             "worker_configuration_modified_by_sudo": False,
-            "sudo_operation": "tee 1 to already-resolved exact-container cgroup.kill only",
+            "sudo_operation": "root identity probe then tee 1 to prebound exact-container cgroup.kill only",
         },
-        "required_pair_decision": "PRIVILEGED_OUTER_WITNESS_ACCEPTED",
+        "required_pair_decision": "PRIVILEGED_OUTER_WITNESS_CANARY_REQUIRED",
         "canonical": False,
         "authority_effect": False,
         "worker_admitted": False,
@@ -129,19 +155,12 @@ def dry_plan(image: str) -> dict[str, Any]:
 
 
 def execute(image: str) -> dict[str, Any]:
-    sudo = _sudo_root_probe()
-    if not sudo["available"]:
-        return {
-            "schema": SCHEMA, "mode": "EXECUTE", "outcome": "REJECTED_NONAUTHORITY",
-            "error": "passwordless_sudo_root_unavailable", "sudo": sudo,
-            "canonical": False, "authority_effect": False, "worker_admitted": False, "w1_verified": False,
-        }
-
+    # IMPORTANT: no sudo call above or before exact target binding below.
     image_inspect = base._run(["docker", "image", "inspect", image], check=False)
     if image_inspect.returncode != 0:
         return {
             "schema": SCHEMA, "mode": "EXECUTE", "outcome": "REJECTED_NONAUTHORITY",
-            "error": "required_image_absent_no_pull", "sudo": sudo,
+            "error": "required_image_absent_no_pull", "sudo": {"not_attempted": True},
             "canonical": False, "authority_effect": False, "worker_admitted": False, "w1_verified": False,
         }
     image_data = json.loads(image_inspect.stdout)[0]
@@ -158,7 +177,8 @@ def execute(image: str) -> dict[str, Any]:
         if cp.returncode != 0:
             return {
                 "schema": SCHEMA, "mode": "EXECUTE", "outcome": "REJECTED_NONAUTHORITY",
-                "error": "docker_run_failed", "stderr_sha256": base._sha256_text(cp.stderr), "sudo": sudo,
+                "error": "docker_run_failed", "stderr_sha256": base._sha256_text(cp.stderr),
+                "sudo": {"not_attempted": True},
                 "canonical": False, "authority_effect": False, "worker_admitted": False, "w1_verified": False,
             }
         created = True
@@ -169,15 +189,18 @@ def execute(image: str) -> dict[str, Any]:
         if state_pid <= 0:
             raise RuntimeError("container init pid unavailable")
 
+        outer_ns = _outer_namespaces()
         probe_cp = base._run(["docker", "exec", cid, "python3", "-c", base.inner_probe_script()], check=False)
         inner: Any = (
             json.loads(probe_cp.stdout.strip()) if probe_cp.returncode == 0
             else {"probe_failed": True, "stderr_sha256": base._sha256_text(probe_cp.stderr)}
         )
         security, inner_checks = _security_facts(inspect, inner)
+        two_plane = _two_plane_checks(outer_ns, inner)
 
+        # Exact identity and cgroup target are derived entirely BEFORE sudo.
         relative, directory = base._cgroup_dir_for_pid(state_pid)
-        target_ok, target_error = _safe_exact_kill_target(cid, directory, relative)
+        target_ok, target_error, kill_file = _safe_exact_kill_target(cid, directory, relative)
         limits = {
             "cpu.max": base._read_text(directory / "cpu.max"),
             "memory.max": base._read_text(directory / "memory.max"),
@@ -191,35 +214,57 @@ def execute(image: str) -> dict[str, Any]:
             "pids_max_finite": limits["pids.max"] not in (None, "", "max"),
         }
         pre_tree_ok = pre_events.get("populated") == 1 and len(pre_pids) >= 2
+        prebound_ready = bool(
+            target_ok and kill_file is not None and pre_tree_ok
+            and all(security.values()) and all(inner_checks.values())
+            and all(two_plane.values()) and all(limit_checks.values())
+        )
 
+        # First and only privilege boundary begins HERE, after prebinding.
+        sudo: dict[str, Any] = {"not_attempted": True}
         kill_result: dict[str, Any] = {"succeeded": False, "not_attempted": True}
-        if target_ok and pre_tree_ok and all(security.values()) and all(inner_checks.values()) and all(limit_checks.values()):
-            kill_result = _sudo_write_one(directory / "cgroup.kill")
+        if prebound_ready:
+            sudo = _sudo_root_probe()
+            if sudo["available"]:
+                kill_result = _sudo_write_one(kill_file)
 
         post_unpopulated = False
         post_events: dict[str, int] = {}
         if kill_result.get("succeeded"):
             post_unpopulated, post_events = base._wait_for_unpopulated(directory)
+        pre_processes_gone = bool(pre_pids) and all(not Path(f"/proc/{pid}").exists() for pid in pre_pids)
+
         inspect_after = base._run(["docker", "inspect", cid], check=False, timeout=10)
         docker_running_after: bool | None = None
         if inspect_after.returncode == 0:
             docker_running_after = bool((json.loads(inspect_after.stdout)[0].get("State") or {}).get("Running"))
 
-        tree_kill = bool(target_ok and pre_tree_ok and kill_result.get("succeeded") and post_unpopulated and docker_running_after is False)
-        eligible = bool(all(security.values()) and all(inner_checks.values()) and all(limit_checks.values()) and tree_kill)
+        tree_kill = bool(
+            prebound_ready and sudo.get("available") is True
+            and kill_result.get("succeeded") and post_unpopulated
+            and pre_processes_gone and docker_running_after is False
+        )
+        eligible = bool(
+            all(security.values()) and all(inner_checks.values()) and all(two_plane.values())
+            and all(limit_checks.values()) and tree_kill
+        )
         return {
             "schema": SCHEMA,
             "mode": "EXECUTE",
             "outcome": "ELIGIBLE_NONAUTHORITY" if eligible else "REJECTED_NONAUTHORITY",
             "image_id": image_id,
             "container_id_sha256": base._sha256_text(cid),
-            "sudo": sudo,
-            "privilege_scope": "EXACT_CGROUP_KILL_WRITE_ONLY",
-            "worker_launch_via_sudo": False,
-            "worker_exec_via_sudo": False,
-            "security_requests_verified": security,
+            "outer_namespaces": outer_ns,
             "inner": inner,
             "inner_checks": inner_checks,
+            "two_plane_checks": two_plane,
+            "security_requests_verified": security,
+            "prebound_before_sudo": prebound_ready,
+            "sudo": sudo,
+            "privilege_scope": "PREBOUND_EXACT_CGROUP_KILL_WRITE_ONLY",
+            "sudo_before_exact_binding": False,
+            "worker_launch_via_sudo": False,
+            "worker_exec_via_sudo": False,
             "cgroup": {
                 "path": relative,
                 "path_sha256": base._sha256_text(relative),
@@ -233,6 +278,7 @@ def execute(image: str) -> dict[str, Any]:
                 "sudo_kill_write": kill_result,
                 "post_events": post_events,
                 "post_unpopulated": post_unpopulated,
+                "pre_processes_gone": pre_processes_gone,
                 "docker_running_after": docker_running_after,
                 "tree_kill_proven": tree_kill,
             },
