@@ -36,9 +36,8 @@ jobs:
           unsafe_head_ref = "ref: $" + "{{ github.event.pull_request.head.sha }}"
           assert 'pull_request_target:' in text
           assert target_gate in text
-          # The preview job checks out the PR head under the unprivileged pull_request
-          # event, so exactly one head-ref checkout is expected. The authoritative
-          # pull_request_target job must inspect HEAD_SHA only as a Git object.
+          # Only the unprivileged preview may checkout the PR head. The
+          # authoritative pull_request_target job must keep a trusted base tree.
           assert text.count(unsafe_head_ref) == 1
           for needle in [
               'Fetch PR head object without checkout',
@@ -51,6 +50,50 @@ jobs:
           ]:
               assert needle in text, needle
           PY
+
+      - name: Shadow authoritative object-only checks
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          git cat-file -e "$BASE_SHA^{commit}"
+          git cat-file -e "$HEAD_SHA^{commit}"
+          git checkout --detach "$BASE_SHA"
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
+
+          case "$HEAD_REF" in
+            work/w1-linux-worker-safety) EXPECTED_L1='C1' ;;
+            work/t0-hermetic-toolchain) EXPECTED_L1='C2' ;;
+            work/f1-live-federation) EXPECTED_L1='F1+' ;;
+            work/r1-continuity-plane) EXPECTED_L1='R1' ;;
+            work/a1-agent-workspace) EXPECTED_L1='C2' ;;
+            work/aop1-autonomous-orchestration|work/same-point-duel-v4-*|work/chat-control-plane-browser-bridge) EXPECTED_L1='CROSS-CUTTING' ;;
+            analysis/integration) EXPECTED_L1='CROSS-CUTTING' ;;
+            *) exit 1 ;;
+          esac
+          grep -Fq "Canonical Level-1 milestone: $EXPECTED_L1" <<<"${PR_BODY:-}"
+          grep -Fq "Level-2 milestone:" <<<"${PR_BODY:-}"
+
+          if git diff --no-ext-diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Fxq '.github/workflows/governance.yml'; then
+            case "$HEAD_REF" in
+              analysis/integration|work/same-point-duel-v4-*) ;;
+              *) exit 1 ;;
+            esac
+          fi
+
+          for path in README.md docs/CANONICAL_ROADMAP.md docs/CHAT_TOPOLOGY.md docs/ROADMAP_EXECUTION_PROTOCOL.md .github/pull_request_template.md; do
+            git cat-file -e "$HEAD_SHA:$path"
+          done
+          for marker in R1 C1 C17 'F1+' 'Level-2 execution DAG mapping'; do
+            git show "$HEAD_SHA:docs/CANONICAL_ROADMAP.md" | grep -Fq "$marker"
+          done
+          if [ "$HEAD_REF" != 'analysis/integration' ]; then
+            ! git diff --no-ext-diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Fxq 'docs/CANONICAL_ROADMAP.md'
+          fi
 
   governance:
     if: ${{ github.event_name == 'pull_request_target' }}
@@ -79,12 +122,14 @@ jobs:
         shell: bash
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          test "$HEAD_SHA" != "$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
+          test "$HEAD_SHA" != "$BASE_SHA"
           git fetch --no-tags --depth=1 "https://github.com/${GITHUB_REPOSITORY}.git" "$HEAD_SHA"
           git cat-file -e "$HEAD_SHA^{commit}"
-          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.base.sha }}"
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
 
       - name: Validate registered workstream and canonical binding
         shell: bash
