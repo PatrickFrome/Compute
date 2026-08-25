@@ -1,0 +1,49 @@
+name: W1 Outer-Enforced Docker Canary Contract
+
+on:
+  push:
+    branches: [work/w1-sandbox-launcher-prep]
+    paths:
+      - 'worker/native_linux/outer_enforced_docker_canary.py'
+      - '.github/workflows/w1-outer-enforced-docker-canary-contract.yml'
+
+permissions: {}
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile
+        run: python3 -m py_compile worker/native_linux/outer_enforced_docker_canary.py
+
+      - name: Validate dry-run safety contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 worker/native_linux/outer_enforced_docker_canary.py > /tmp/plan.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=json.loads(Path('/tmp/plan.json').read_text())
+          assert p['mode']=='DRY_RUN'
+          assert p['authority']['canonical'] is False
+          assert p['authority']['authority_effect'] is False
+          assert p['authority']['worker_admitted'] is False
+          assert p['authority']['w1_verified'] is False
+          argv=p['run_argv']
+          text=' '.join(argv)
+          for forbidden in ('--privileged','--pid=host','--network=host','seccomp=unconfined'):
+              assert forbidden not in text, forbidden
+          for required in ('--network=none','--cap-drop=ALL','no-new-privileges=true','seccomp=builtin','--cgroupns=private','--pids-limit','--memory','--cpus','--read-only'):
+              assert required in text, required
+          assert '--pull=never' in argv
+          print('PASS_OUTER_ENFORCEMENT_DRYRUN_CONTRACT')
+          PY
