@@ -33,8 +33,9 @@ jobs:
           from pathlib import Path
           target = Path('.github/workflows/governance.yml').read_text()
           preview = Path('.github/workflows/governance-preview.yml').read_text()
+          target_event = 'pull_request' + '_target:'
           pin = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
-          assert 'pull_request_target:' in target
+          assert target_event in target
           assert '\n  pull_request:\n' not in target
           assert 'jobs:\n  governance:' in target
           assert 'github.event_name' not in target
@@ -42,7 +43,7 @@ jobs:
           assert 'git diff --no-ext-diff --name-only "$BASE_SHA" "$HEAD_SHA"' in target
           assert 'work/chat-control-plane-browser-bridge' in target
           assert pin in target
-          assert 'pull_request_target:' not in preview
+          assert target_event not in preview
           assert '\n  pull_request:\n' in preview
           assert 'jobs:\n  preview:' in preview
           assert pin in preview
