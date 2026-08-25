@@ -79,6 +79,18 @@ Open the dashboard at:
 http://127.0.0.1:8765/
 ```
 
+### Windows one-click launcher
+
+The complete bridge bundle includes `START_A2_BRIDGE_WINDOWS.cmd`. Double-click it after installing Node.js 20 or newer. On the first start it asks for the Supabase `service_role` key with masked input, creates a random local pairing secret, stores both encrypted with Windows DPAPI for the current Windows user, copies the pairing secret to the clipboard, starts the secure daemon and opens the dashboard after `/v1/status` is healthy.
+
+Paste the copied pairing secret into the extension options. To replace the locally encrypted credentials later, run:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\start-windows.ps1 -ResetCredentials
+```
+
+The launcher explicitly keeps bridge receipt persistence `OFF`; it does not apply production DDL or run a timed canary.
+
 ## Load the extension
 
 1. Check out branch `work/chat-control-plane-browser-bridge` locally, or download and unzip the Chrome-ready `a2-chat-bridge-extension` artifact produced by the **Chat Control Plane Contract** workflow.

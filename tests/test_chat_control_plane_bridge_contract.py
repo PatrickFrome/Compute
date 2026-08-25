@@ -19,6 +19,8 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         cls.durable = (EXT / "durable-fetch.js").read_text()
         cls.options = (EXT / "options.js").read_text()
         cls.options_html = (EXT / "options.html").read_text()
+        cls.windows_launcher = (BASE / "start-windows.ps1").read_text()
+        cls.windows_cmd = (BASE / "START_A2_BRIDGE_WINDOWS.cmd").read_text()
         cls.server = (DAEMON / "server.mjs").read_text()
         cls.launcher = (DAEMON / "run.mjs").read_text()
         cls.secure_entry = (DAEMON / "secure-entry.mjs").read_text()
@@ -38,8 +40,19 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
             EXT / "options.js",
             EXT / "content.js",
             DAEMON / "secure-entry.mjs",
+            BASE / "start-windows.ps1",
+            BASE / "START_A2_BRIDGE_WINDOWS.cmd",
         ]:
             self.assertTrue(path.is_file(), path)
+
+    def test_windows_launcher_keeps_secrets_local_and_starts_secure_entry(self):
+        self.assertIn("ConvertFrom-SecureString", self.windows_launcher)
+        self.assertIn("LOCALAPPDATA", self.windows_launcher)
+        self.assertIn("Set-Clipboard", self.windows_launcher)
+        self.assertIn('A2_BRIDGE_RECEIPTS_MODE = "OFF"', self.windows_launcher)
+        self.assertIn('"daemon\\secure-entry.mjs"', self.windows_launcher)
+        self.assertIn("ExecutionPolicy Bypass", self.windows_cmd)
+        self.assertNotIn("service_role.dpapi", self.windows_cmd)
 
     def test_exact_project_zai_chat_is_pinned(self):
         self.assertIn(PROJECT_ZAI, self.background)
