@@ -33,6 +33,7 @@
     if (candidates.length !== 1) return false;
     const button = candidates[0];
     if (!(button instanceof HTMLButtonElement)) return false;
+    if (!form.contains(button)) return false;
     if (button.getAttribute(CHATGPT_SUBMIT_FALLBACK_MARK) === "1") return true;
     button.setAttribute(CHATGPT_SUBMIT_FALLBACK_MARK, "1");
 
