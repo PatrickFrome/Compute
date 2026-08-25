@@ -1,6 +1,9 @@
 name: Compute Fabric Governance
 
 on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited]
   pull_request_target:
     branches: [main]
     types: [opened, synchronize, reopened, edited]
@@ -9,7 +12,31 @@ permissions:
   contents: read
 
 jobs:
+  governance-preview:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Preview governance transition shape
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git diff --name-only "$BASE_SHA"...HEAD | wc -l | tr -d ' ')" -ge 1
+          grep -Fq 'pull_request_target:' .github/workflows/governance.yml
+          grep -Fq "if: \${{ github.event_name == 'pull_request_target' }}" .github/workflows/governance.yml
+          grep -Fq 'persist-credentials: false' .github/workflows/governance.yml
+          grep -Fq 'Prevent governance self-authorization' .github/workflows/governance.yml
+          grep -Fq 'work/chat-control-plane-browser-bridge' .github/workflows/governance.yml
+
   governance:
+    if: ${{ github.event_name == 'pull_request_target' }}
     runs-on: ubuntu-latest
     steps:
       - name: Reject external-fork governance execution
