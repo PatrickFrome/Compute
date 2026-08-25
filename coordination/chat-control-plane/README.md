@@ -14,11 +14,11 @@ The browser transport is never project authority. All generated commands are mar
 
 ## Security boundary
 
-- The Supabase service-role key belongs **only in the local daemon process environment**. It is never stored in extension source, Chrome storage, prompts, DOM snapshots, Git or the dashboard.
-- The browser and daemon also share a separate 32+ character **local pairing secret**. The extension stores its copy only in `chrome.storage.local`; the daemon receives its copy only through the process environment.
+- The Supabase backend secret (`sb_secret_...` preferred; legacy `service_role` JWT supported) belongs **only in the local daemon process environment**. It is never stored in extension source, Chrome storage, prompts, DOM snapshots, Git or the dashboard. Browser-safe `sb_publishable_...` keys are rejected at daemon startup.
+- The browser and daemon also share a separate 32+ character **local pairing secret**. The extension stores its copy only in trusted `chrome.storage.local`; the daemon receives its copy only through the process environment. The dashboard keeps its copy only in `sessionStorage` for the current dashboard tab.
 - The extension restricts `chrome.storage.local` to trusted extension contexts, so page content scripts cannot read the pairing secret or durable Send journal.
 - Start through `daemon/secure-entry.mjs`. Direct `daemon/run.mjs` execution is intentionally rejected unless invoked behind the authenticated internal loopback gate.
-- The public local endpoint binds `127.0.0.1`; all mutating/command endpoints require `x-a2-chat-bridge-secret`. The read-only dashboard and `/v1/status` remain viewable on loopback without the secret.
+- The public local endpoint binds `127.0.0.1`; all mutating/command endpoints require `x-a2-chat-bridge-secret`. The read-only dashboard shell and `/v1/status` remain viewable on loopback without the secret; dashboard control POSTs use the tab-scoped pairing secret.
 - The internal scheduler runs on a second loopback-only port and never receives the pairing header.
 - The extension sends only to the exact configured conversation URLs.
 - Chrome host access is limited to ChatGPT, the exact `chat.z.ai` host and the loopback daemon; incognito execution is disabled.
@@ -54,12 +54,12 @@ Generate a local-only pairing secret, then start the authenticated entrypoint:
 
 ```bash
 cd coordination/chat-control-plane
-export SUPABASE_SERVICE_ROLE_KEY='...local secret...'
+export SUPABASE_SERVICE_ROLE_KEY='...sb_secret_... or legacy service_role JWT...'
 export A2_BRIDGE_SHARED_SECRET="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
 node daemon/secure-entry.mjs
 ```
 
-Copy the value of your locally generated pairing secret into **Extension options → Local pairing secret**. Do not put it in Git, the A2 mailbox, Supabase, screenshots, or chat messages.
+The environment variable keeps its legacy name for compatibility, but the preferred value is a current `sb_secret_...` backend key. Copy the local pairing secret into **Extension options → Local pairing secret** and, for manual dashboard controls, pair the dashboard tab with the same value. Do not put either backend or pairing secrets in Git, the A2 mailbox, Supabase rows, screenshots, or chat messages.
 
 Defaults are already bound to the current project:
 
@@ -81,9 +81,14 @@ http://127.0.0.1:8765/
 
 ### Windows one-click launcher
 
-The complete bridge bundle includes `START_A2_BRIDGE_WINDOWS.cmd`. Double-click it after installing Node.js 20 or newer. On the first start it asks for a Supabase backend key (`sb_secret_...` preferred; legacy `service_role` JWT also supported) with masked input, creates a random local pairing secret, stores both encrypted with Windows DPAPI for the current Windows user, copies the pairing secret to the clipboard, starts the secure daemon and opens the dashboard after `/v1/status` is healthy. Publishable/anonymous keys are not accepted for this trusted local backend.
+The complete bridge bundle includes `START_A2_BRIDGE_WINDOWS.cmd`. Double-click it after installing Node.js 20 or newer. On the first start it asks for a Supabase backend key (`sb_secret_...` preferred; legacy `service_role` JWT also supported) with masked input, creates a random local pairing secret, stores both encrypted with Windows DPAPI for the current Windows user, copies the pairing secret to the clipboard, starts the secure daemon and opens the dashboard after `/v1/status` is healthy. `sb_publishable_...` keys fail closed and do not produce a healthy bridge runtime.
 
-Paste the copied pairing secret into the extension options. To replace the locally encrypted credentials later, run:
+Use the copied pairing secret in two places:
+
+1. **Dashboard → Local pairing**: press **Paste clipboard** (or paste manually), then **Use pairing secret**. Dashboard control buttons become enabled for that tab only.
+2. **Extension options → Local pairing secret**: paste the same value, bind the ChatGPT conversation, and save.
+
+To replace the locally encrypted credentials later, run:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\start-windows.ps1 -ResetCredentials
@@ -97,12 +102,12 @@ The launcher explicitly keeps bridge receipt persistence `OFF`; it does not appl
 2. Open `chrome://extensions`.
 3. Enable **Developer mode**.
 4. Choose **Load unpacked** and select `coordination/chat-control-plane/extension`, or the directory created by unzipping the extension artifact. Its root must contain `manifest.json`.
-5. Open the extension details → **Extension options**.
-6. Paste the local pairing secret generated for the daemon.
-7. Keep the preset Z.AI URL or restore it with **Restore project Z.AI chat**.
-8. Open the dedicated ChatGPT project conversation, press **Use open ChatGPT tab**, then **Save settings**.
-9. Start the daemon and verify both peers are `online` in the dashboard.
-10. Click the extension toolbar icon until its badge is `ON` to arm real Send clicks.
+5. Start `START_A2_BRIDGE_WINDOWS.cmd`; on first start provide a valid Supabase backend secret. The launcher copies the local pairing secret to the clipboard and opens the dashboard.
+6. Pair the dashboard tab with **Paste clipboard → Use pairing secret**.
+7. Open the extension details → **Extension options** and paste the same local pairing secret.
+8. Keep the preset Z.AI URL or restore it with **Restore project Z.AI chat**.
+9. Open the dedicated ChatGPT project conversation, press **Use open ChatGPT tab**, then **Save settings**.
+10. Verify both peers become `online` in the dashboard, then click the extension toolbar icon until its badge is `ON` to arm real Send clicks.
 
 ## Runtime behavior
 
@@ -134,7 +139,7 @@ No browser message is promoted to canonical evidence merely because the bridge o
 
 ## Manual controls
 
-The dashboard can queue a GPT or GLM wake explicitly. This still goes through the same pairing, exact-URL and extension arming checks. The dashboard also shows recent command leases/results and whether the content script observed a real Send click.
+The dashboard can queue a GPT or GLM wake explicitly after the current dashboard tab is paired. The secret remains only in that tab's `sessionStorage`. Manual wakes still go through the exact-URL and extension arming checks. The dashboard also shows recent command leases/results and whether the content script observed a real Send click.
 
 ## Acceptance status
 
@@ -147,7 +152,8 @@ The repository contract currently verifies:
 - current-main stale relay rejection;
 - restart-safe duplicate-Send fencing;
 - authenticated loopback transport;
-- fail-closed direct-daemon bypass;
+- tab-scoped authenticated dashboard control POSTs;
+- fail-closed direct-daemon bypass and publishable-key rejection;
 - hash-only bridge-receipt recorder modes;
 - REQUIRED lease/result receipt ordering and same-client blocked-lease retry;
 - buildable Chrome-extension and complete bridge ZIP artifacts.
