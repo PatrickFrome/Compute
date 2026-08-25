@@ -57,6 +57,10 @@ export class BridgeReceiptRecorder {
     }
   }
 
+  hasLease(commandId) {
+    return this.leases.has(String(commandId || ''));
+  }
+
   noteSnapshot(platform, snapshot) {
     if (!snapshot?.url) return;
     const canonical = normalizedUrl(snapshot.url);
