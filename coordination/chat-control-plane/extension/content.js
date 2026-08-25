@@ -6,9 +6,6 @@
   const SEND_BUTTON_WAIT_MS = 6000;
   const MAX_MESSAGE_CHARS = 120000;
   const SEEN_COMMANDS_STORAGE_KEY = "a2-chat-bridge:seen-commands";
-  // Duplicate-send defense: remember executed command ids in sessionStorage so a
-  // re-leased command (daemon lease expiry or MV3 service-worker restart) cannot
-  // double-send after a chat page reload within the same tab.
   const seenCommands = new Set(loadSeenCommands());
   let snapshotTimer = null;
   let lastSnapshotHash = "";
@@ -30,9 +27,7 @@
     seenCommands.add(commandId);
     try {
       sessionStorage.setItem(SEEN_COMMANDS_STORAGE_KEY, JSON.stringify([...seenCommands].slice(-200)));
-    } catch (_) {
-      // Storage may be unavailable; in-memory dedupe still applies.
-    }
+    } catch (_) {}
   }
 
   function platform() {
@@ -51,7 +46,6 @@
   }
 
   function hashText(text) {
-    // FNV-1a is local change detection only; never cryptographic evidence.
     let h = 0x811c9dc5;
     for (let i = 0; i < text.length; i += 1) {
       h ^= text.charCodeAt(i);
@@ -71,7 +65,6 @@
       if (role.includes("assistant")) return "assistant";
       if (role.includes("system")) return "system";
     }
-
     const label = `${node.getAttribute?.("aria-label") || ""} ${node.className || ""}`.toLowerCase();
     if (/\buser\b|\byou\b/.test(label)) return "user";
     if (/assistant|chatgpt|glm|model/.test(label)) return "assistant";
@@ -80,32 +73,19 @@
 
   function structuredMessageNodes() {
     const selectors = platform() === "CHATGPT"
-      ? [
-          "[data-testid^='conversation-turn-']",
-          "article[data-testid^='conversation-turn-']",
-          "article"
-        ]
-      : [
-          "[data-message-author-role]",
-          "[data-role='user']",
-          "[data-role='assistant']",
-          "[class*='message']",
-          "article"
-        ];
-
+      ? ["[data-testid^='conversation-turn-']", "article[data-testid^='conversation-turn-']", "article"]
+      : ["[data-message-author-role]", "[data-role='user']", "[data-role='assistant']", "[class*='message']", "article"];
     for (const selector of selectors) {
       const nodes = [...document.querySelectorAll(selector)].filter(visible);
-      if (nodes.length >= 1) return nodes;
+      if (nodes.length) return nodes;
     }
     return [];
   }
 
   function extractMessages() {
-    const nodes = structuredMessageNodes();
     const output = [];
     const seen = new Set();
-    for (let i = 0; i < nodes.length; i += 1) {
-      const node = nodes[i];
+    for (const node of structuredMessageNodes()) {
       const text = normalize(node.innerText || node.textContent || "");
       if (!text) continue;
       const role = inferRole(node);
@@ -126,19 +106,8 @@
 
   function composerCandidates() {
     const selectors = platform() === "CHATGPT"
-      ? [
-          "#prompt-textarea",
-          "textarea#prompt-textarea",
-          "[data-testid='composer-text-input'] textarea",
-          "[contenteditable='true'][data-lexical-editor='true']",
-          "form textarea",
-          "[role='textbox'][contenteditable='true']"
-        ]
-      : [
-          "textarea",
-          "[contenteditable='true'][data-lexical-editor='true']",
-          "[role='textbox'][contenteditable='true']"
-        ];
+      ? ["#prompt-textarea", "textarea#prompt-textarea", "[data-testid='composer-text-input'] textarea", "[contenteditable='true'][data-lexical-editor='true']", "form textarea", "[role='textbox'][contenteditable='true']"]
+      : ["textarea", "[contenteditable='true'][data-lexical-editor='true']", "[role='textbox'][contenteditable='true']"];
     const found = [];
     for (const selector of selectors) {
       for (const el of document.querySelectorAll(selector)) {
@@ -159,31 +128,19 @@
   }
 
   function semanticFields(button) {
-    return [
-      button.getAttribute("aria-label"),
-      button.getAttribute("title"),
-      button.textContent
-    ].map((value) => normalize(value).toLowerCase()).filter(Boolean);
+    return [button.getAttribute("aria-label"), button.getAttribute("title"), button.textContent]
+      .map((value) => normalize(value).toLowerCase()).filter(Boolean);
   }
 
   function matchesButtonSemantics(button, kind) {
     const patterns = kind === "send"
-      ? [
-          /^(send|send message|send prompt|submit)$/i,
-          /^(отправить|отправить сообщение)$/iu,
-          /^(发送|发送消息)$/u
-        ]
-      : [
-          /^(stop|stop generating|stop generation)$/i,
-          /^(остановить|остановить генерацию)$/iu,
-          /^(停止|停止生成)$/u
-        ];
+      ? [/^(send|send message|send prompt|submit)$/i, /^(отправить|отправить сообщение)$/iu, /^(发送|发送消息)$/u]
+      : [/^(stop|stop generating|stop generation)$/i, /^(остановить|остановить генерацию)$/iu, /^(停止|停止生成)$/u];
     return semanticFields(button).some((field) => patterns.some((pattern) => pattern.test(field)));
   }
 
   function semanticButtonCandidates(kind) {
-    const isSend = kind === "send";
-    const testids = isSend
+    const testids = kind === "send"
       ? ["send-button", "composer-submit-button"]
       : ["stop-button", "composer-stop-button"];
     const strong = [];
@@ -193,10 +150,7 @@
       }
     }
     if (strong.length) return strong;
-
-    return [...document.querySelectorAll("button")]
-      .filter(visible)
-      .filter((button) => matchesButtonSemantics(button, kind));
+    return [...document.querySelectorAll("button")].filter(visible).filter((button) => matchesButtonSemantics(button, kind));
   }
 
   function resolveComposer() {
@@ -208,22 +162,17 @@
 
   function resolveComposerSendPair() {
     const composerResolution = resolveComposer();
-    if (composerResolution.error) {
-      return { composer: null, send: null, error: composerResolution.error };
-    }
+    if (composerResolution.error) return { composer: null, send: null, error: composerResolution.error };
     const composer = composerResolution.composer;
     const sendButtons = semanticButtonCandidates("send");
     const matching = sendButtons.filter((send) => sharedContainer(composer, send));
-
     if (matching.length === 1) return { composer, send: matching[0], error: null };
     if (matching.length > 1) return { composer: null, send: null, error: "composer_send_pair_ambiguous" };
     if (!sendButtons.length) return { composer, send: null, error: "send_button_not_found" };
     return { composer, send: null, error: "composer_send_pair_not_found" };
   }
 
-  function getComposer() {
-    return resolveComposer().composer;
-  }
+  function getComposer() { return resolveComposer().composer; }
 
   function composerText(el) {
     if (!el) return "";
@@ -231,17 +180,7 @@
     return normalize(el.innerText || el.textContent || "");
   }
 
-  function buttonBySemantics(kind) {
-    if (kind === "send") return resolveComposerSendPair().send;
-    const candidates = semanticButtonCandidates(kind);
-    return candidates.length === 1 ? candidates[0] : null;
-  }
-
-  function generating() {
-    // Any exact stop-control candidate means generation is in progress. Multiple
-    // stop controls are treated conservatively as generating rather than idle.
-    return semanticButtonCandidates("stop").length > 0;
-  }
+  function generating() { return semanticButtonCandidates("stop").length > 0; }
 
   function pageState() {
     const composerResolution = resolveComposer();
@@ -265,13 +204,10 @@
   }
 
   function nativeSetValue(element, value) {
-    const proto = element instanceof HTMLTextAreaElement
-      ? HTMLTextAreaElement.prototype
-      : element instanceof HTMLInputElement
-        ? HTMLInputElement.prototype
-        : null;
+    const proto = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype
+      : element instanceof HTMLInputElement ? HTMLInputElement.prototype : null;
     const descriptor = proto && Object.getOwnPropertyDescriptor(proto, "value");
-    if (!descriptor?.set) throw new Error("native value setter unavailable");
+    if (!descriptor?.set) throw new Error("native_value_setter_unavailable");
     descriptor.set.call(element, value);
     element.dispatchEvent(new Event("input", { bubbles: true }));
     element.dispatchEvent(new Event("change", { bubbles: true }));
@@ -285,39 +221,32 @@
     selection.removeAllRanges();
     selection.addRange(range);
     let inserted = false;
-    try {
-      inserted = document.execCommand("insertText", false, value);
-    } catch (_) {
-      inserted = false;
-    }
+    try { inserted = document.execCommand("insertText", false, value); } catch (_) { inserted = false; }
     if (!inserted) {
       element.textContent = value;
-      element.dispatchEvent(new InputEvent("input", {
-        bubbles: true,
-        inputType: "insertText",
-        data: value
-      }));
+      element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
     }
   }
 
   async function writeComposerExact(text) {
-    const composerResolution = resolveComposer();
-    if (composerResolution.error) throw new Error(composerResolution.error);
-    const composer = composerResolution.composer;
+    const resolution = resolveComposer();
+    if (resolution.error) throw new Error(resolution.error);
+    const composer = resolution.composer;
     composer.focus();
-    if (composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement) {
-      nativeSetValue(composer, text);
-    } else if (composer.isContentEditable || composer.getAttribute("contenteditable") === "true") {
-      setContentEditable(composer, text);
-    } else {
-      throw new Error("composer_not_editable");
-    }
+    if (composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement) nativeSetValue(composer, text);
+    else if (composer.isContentEditable || composer.getAttribute("contenteditable") === "true") setContentEditable(composer, text);
+    else throw new Error("composer_not_editable");
     await sleep(80);
-    const readback = composerText(composer);
-    if (readback !== normalize(text)) {
-      throw new Error(`composer_readback_mismatch:${hashText(readback)}:${hashText(normalize(text))}`);
-    }
+    if (composerText(composer) !== normalize(text)) throw new Error("composer_readback_mismatch");
     return composer;
+  }
+
+  async function callTrustedChatgpt(type, text) {
+    const response = await chrome.runtime.sendMessage({ type, prompt: text });
+    if (response?.ok === true) return response;
+    const safe = String(response?.error || "unknown").replace(/[^a-z0-9_:-]/gi, "_").slice(0, 120);
+    if (type === "A2_CHATGPT_TRUSTED_PRIME") throw new Error(`chatgpt_trusted_prime_failed:${safe}`);
+    throw new Error(`chatgpt_trusted_click_failed:${safe}`);
   }
 
   async function waitForEnabledSend(expectedText) {
@@ -326,14 +255,7 @@
     while (Date.now() < deadline) {
       const pair = resolveComposerSendPair();
       if (pair.error === "composer_send_pair_ambiguous") throw new Error(pair.error);
-      if (
-        !pair.error &&
-        composerText(pair.composer) === expected &&
-        !pair.send.disabled &&
-        pair.send.getAttribute("aria-disabled") !== "true"
-      ) {
-        return pair.send;
-      }
+      if (!pair.error && composerText(pair.composer) === expected && !pair.send.disabled && pair.send.getAttribute("aria-disabled") !== "true") return pair.send;
       await sleep(100);
     }
     throw new Error("send_button_not_enabled_or_pair_unresolved");
@@ -346,8 +268,7 @@
       const current = pageState();
       const composer = getComposer();
       const cleared = composer ? composerText(composer) === "" : false;
-      const userMessages = current.messages.filter((m) => m.role === "user");
-      const exactUserTurn = userMessages.some((m) => normalize(m.text) === expected);
+      const exactUserTurn = current.messages.filter((m) => m.role === "user").some((m) => normalize(m.text) === expected);
       const countAdvanced = current.message_count > before.message_count;
       if (exactUserTurn || (cleared && countAdvanced)) {
         return {
@@ -369,24 +290,29 @@
     const commandId = String(command.command_id || "");
     const text = String(command.prompt || "");
     if (!commandId || !text.trim()) throw new Error("invalid_send_command");
-    if (seenCommands.has(commandId)) {
-      return { status: "DUPLICATE_IGNORED", command_id: commandId };
-    }
-    if (generating() && command.allow_while_generating !== true) {
-      throw new Error("chat_is_generating");
-    }
+    if (seenCommands.has(commandId)) return { status: "DUPLICATE_IGNORED", command_id: commandId };
+    if (generating() && command.allow_while_generating !== true) throw new Error("chat_is_generating");
 
     const before = pageState();
-    await writeComposerExact(text);
-    const sendButton = await waitForEnabledSend(text);
-    // Requirement: invoke the actual visible Send button, not Enter-key synthesis.
-    sendButton.click();
+    const composer = getComposer();
+    if (!composer) throw new Error("composer_not_found");
+
+    if (platform() === "CHATGPT") {
+      if (composerText(composer) !== "") throw new Error("chatgpt_composer_not_empty_before_prime");
+      await callTrustedChatgpt("A2_CHATGPT_TRUSTED_PRIME", text);
+      const sendButton = await waitForEnabledSend(text);
+      if (!sendButton) throw new Error("send_button_not_found");
+      await callTrustedChatgpt("A2_CHATGPT_TRUSTED_CLICK", text);
+    } else {
+      await writeComposerExact(text);
+      const sendButton = await waitForEnabledSend(text);
+      sendButton.click();
+    }
+
     const verification = await verifySend(before, text);
     rememberCommand(commandId);
     return {
-      status: verification.exact_user_turn_seen === true
-        ? "SENT_AND_DOM_VERIFIED"
-        : "SENT_WEAK_DOM_VERIFIED",
+      status: verification.exact_user_turn_seen === true ? "SENT_AND_DOM_VERIFIED" : "SENT_WEAK_DOM_VERIFIED",
       command_id: commandId,
       clicked_send_button: true,
       prompt_hash_local: hashText(normalize(text)),
@@ -406,19 +332,12 @@
     }));
     if (!force && signature === lastSnapshotHash) return;
     lastSnapshotHash = signature;
-    try {
-      await chrome.runtime.sendMessage({ type: "CHAT_SNAPSHOT", snapshot });
-    } catch (_) {
-      // Background may be restarting; next heartbeat retries.
-    }
+    try { await chrome.runtime.sendMessage({ type: "CHAT_SNAPSHOT", snapshot }); } catch (_) {}
   }
 
   function scheduleSnapshot() {
     if (snapshotTimer) return;
-    snapshotTimer = setTimeout(() => {
-      snapshotTimer = null;
-      emitSnapshot(false);
-    }, 180);
+    snapshotTimer = setTimeout(() => { snapshotTimer = null; emitSnapshot(false); }, 180);
   }
 
   const observer = new MutationObserver(() => {
