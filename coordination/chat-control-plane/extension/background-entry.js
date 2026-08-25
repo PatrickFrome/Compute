@@ -1,9 +1,9 @@
 "use strict";
 
-// Chrome extension service workers support static imports for module workers
-// and importScripts() for classic workers, but they do not support dynamic
-// import(). Keep this entrypoint classic so startup can synchronously load the
-// packaged bridge runtime without a dynamic-import registration failure.
+// Chrome extension service workers support static module imports or
+// importScripts() for classic workers, but not dynamic module loading. Keep
+// this entrypoint classic so startup synchronously loads the packaged bridge
+// runtime without a service-worker registration failure.
 importScripts('./bootstrap-config.js');
 importScripts('./auth-fetch.js');
 importScripts('./durable-fetch.js');
