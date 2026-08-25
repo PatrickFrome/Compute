@@ -64,12 +64,14 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn('method: "POST"', self.background)
         self.assertIn("snapshots: await currentSnapshotEnvelopes()", self.background)
         self.assertIn("pollPinnedTabSnapshots()", self.background)
+        self.assertIn("singleOpenChatgptConversation", self.background)
+        self.assertIn("if (!existing.chatgptUrl)", self.background)
 
     def test_remote_durable_idempotency_preserves_function_base_path(self):
         self.assertIn("bridgeBaseFromNextUrl", self.durable)
         self.assertIn("SENT_ALREADY_DURABLE", self.durable)
         self.assertIn('method === "POST"', self.durable)
-        self.assertIn("/v1/commands/next", self.durable)
+        self.assertIn("commands\\/next", self.durable)
         self.assertIn("idempotency_key", self.durable)
         self.assertIn("Persist before network ACK", self.durable)
 
@@ -107,6 +109,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("function rememberCommand(", self.content)
         self.assertIn("a2BridgeCompletedCommandsV1", self.durable)
         self.assertIn("a2BridgeLeasedCommandsV1", self.durable)
+        self.assertIn("armed: false", self.background)
 
     def test_visibility_and_non_authority_invariants_remain(self):
         self.assertIn("authority_effect: false", self.background)
