@@ -30,8 +30,17 @@ jobs:
           set -euo pipefail
           python3 worker/native_linux/outer_enforced_docker_canary.py > /tmp/plan.json
           python3 - <<'PY'
+          import importlib.util
+          import inspect
           import json
           from pathlib import Path
+
+          path=Path('worker/native_linux/outer_enforced_docker_canary.py')
+          spec=importlib.util.spec_from_file_location('canary', path)
+          mod=importlib.util.module_from_spec(spec)
+          assert spec.loader is not None
+          spec.loader.exec_module(mod)
+
           p=json.loads(Path('/tmp/plan.json').read_text())
           assert p['mode']=='DRY_RUN'
           assert p['authority']['canonical'] is False
@@ -40,10 +49,26 @@ jobs:
           assert p['authority']['w1_verified'] is False
           argv=p['run_argv']
           text=' '.join(argv)
-          for forbidden in ('--privileged','--pid=host','--network=host','seccomp=unconfined'):
+          for forbidden in ('--privileged','--pid=host','--network=host','seccomp=unconfined','--cap-add'):
               assert forbidden not in text, forbidden
           for required in ('--network=none','--cap-drop=ALL','no-new-privileges=true','seccomp=builtin','--cgroupns=private','--pids-limit','--memory','--cpus','--read-only'):
               assert required in text, required
           assert '--pull=never' in argv
+          reads='\n'.join(p['required_outer_reads'])
+          assert 'exact container init PID -> /proc/<pid>/cgroup' in reads
+          assert 'direct write 1 to exact cgroup.kill' in reads
+          assert 'populated=0' in reads
+          assert 'docker kill as proof of cgroup tree-kill' in p['forbidden_substitutions']
+
+          # Pure contract helpers: no Docker or cgroup mutation occurs in CI.
+          cid='a'*64
+          cg=f'/system.slice/docker-{cid}.scope'
+          assert mod._parse_unified_cgroup(f'0::{cg}\n') == cg
+          assert mod._parse_cgroup_events('populated 1\nfrozen 0\n') == {'populated':1,'frozen':0}
+          checks=mod._inner_checks({'euid':1000,'no_new_privs':'1','seccomp':'2','cap_eff':'0000000000000000','network_egress_blocked':True})
+          assert all(checks.values()), checks
+          source=inspect.getsource(mod._cgroup_tree_kill)
+          assert 'cgroup.kill' in source
+          assert '["docker", "kill"' not in source
           print('PASS_OUTER_ENFORCEMENT_DRYRUN_CONTRACT')
           PY
