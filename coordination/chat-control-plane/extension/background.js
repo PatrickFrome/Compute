@@ -1,3 +1,4 @@
+(() => {
 "use strict";
 
 const bootstrap = globalThis.A2_BRIDGE_BOOTSTRAP || {};
@@ -374,3 +375,5 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 setBadge();
 pollCommands(true);
+
+})();
