@@ -65,8 +65,6 @@ class A2ChatBridgeReceiptContract(unittest.TestCase):
         self.assertIn("extensions.digest", self.lower)
         self.assertIn("pg_catalog.gen_random_uuid", self.lower)
         self.assertIn("pg_catalog.jsonb_build_object", self.lower)
-        # COALESCE/GREATEST/LEAST are PostgreSQL conditional expressions, not
-        # ordinary schema-qualified functions.
         self.assertNotIn("pg_catalog.coalesce(", self.lower)
         self.assertNotIn("pg_catalog.greatest(", self.lower)
         self.assertNotIn("pg_catalog.least(", self.lower)
@@ -97,13 +95,39 @@ class A2ChatBridgeReceiptContract(unittest.TestCase):
         self.assertIn("is distinct from p_prompt_sha256", self.lower)
         self.assertIn("is distinct from p_dom_send_verified", self.lower)
 
-    def test_send_result_strength_is_cross_field_consistent(self):
+    def test_send_result_status_vocabulary_and_strength_are_closed(self):
+        for status in [
+            "SENT_AND_DOM_VERIFIED",
+            "SENT_WEAK_DOM_VERIFIED",
+            "SENT_ALREADY_DURABLE",
+            "DUPLICATE_IGNORED",
+            "BLOCKED_NOT_ARMED",
+            "FAILED_CLOSED",
+        ]:
+            self.assertIn(status, self.sql)
+        self.assertIn("bridge_result_status_invalid", self.sql)
         self.assertIn("bridge_strong_send_verification_invalid", self.sql)
         self.assertIn("bridge_weak_send_verification_invalid", self.sql)
-        self.assertIn("bridge_dom_verification_status_invalid", self.sql)
-        self.assertIn("result_status <> 'SENT_AND_DOM_VERIFIED'", self.sql)
-        self.assertIn("result_status <> 'SENT_WEAK_DOM_VERIFIED'", self.sql)
-        self.assertIn("result_status in ('SENT_AND_DOM_VERIFIED','SENT_ALREADY_DURABLE')", self.sql)
+        self.assertIn("bridge_durable_send_verification_invalid", self.sql)
+        self.assertIn("bridge_nonsend_result_verification_invalid", self.sql)
+        self.assertNotIn("result_status is null or length(result_status)", self.lower)
+
+    def test_send_result_requires_matching_persisted_lease(self):
+        self.assertIn("v_lease destruktion_meta.compute_fabric_a2_chat_bridge_receipt_h205f22%rowtype", self.lower)
+        self.assertIn("and event_kind = 'COMMAND_LEASED'", self.sql)
+        self.assertIn("bridge_send_result_lease_missing", self.sql)
+        self.assertIn("bridge_send_result_lease_mismatch", self.sql)
+        for binding in [
+            "v_lease.target_agent is distinct from p_target_agent",
+            "v_lease.target_platform is distinct from p_target_platform",
+            "v_lease.target_url_sha256 is distinct from p_target_url_sha256",
+            "v_lease.a2_head_message_seq is distinct from p_a2_head_message_seq",
+            "v_lease.duel_id is distinct from p_duel_id",
+            "v_lease.pending_payloads_exposed is distinct from p_pending_payloads_exposed",
+            "v_lease.idempotency_key_sha256 is distinct from p_idempotency_key_sha256",
+            "v_lease.prompt_sha256 is distinct from p_prompt_sha256",
+        ]:
+            self.assertIn(binding.lower(), self.lower)
 
     def test_replay_returns_original_immutable_receipt_identity(self):
         self.assertIn("'receipt_id',v_existing.receipt_id", self.lower)
