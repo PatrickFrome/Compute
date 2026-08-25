@@ -1,0 +1,68 @@
+name: Chat Control Plane Contract
+
+on:
+  push:
+    branches:
+      - work/chat-control-plane-browser-bridge
+  pull_request:
+    paths:
+      - 'coordination/chat-control-plane/**'
+      - 'tests/test_chat_control_plane_bridge_contract.py'
+      - '.github/workflows/chat-control-plane-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python contract tests
+        run: python3 -m unittest -v tests.test_chat_control_plane_bridge_contract
+
+      - name: JavaScript syntax checks
+        run: |
+          node --check coordination/chat-control-plane/extension/content.js
+          node --check coordination/chat-control-plane/extension/background.js
+          node --check coordination/chat-control-plane/extension/options.js
+          node --check coordination/chat-control-plane/daemon/server.mjs
+          node --check coordination/chat-control-plane/daemon/run.mjs
+
+      - name: Manifest parse
+        run: python3 -m json.tool coordination/chat-control-plane/extension/manifest.json >/dev/null
+
+      - name: Launcher fails closed without A2 credentials
+        shell: bash
+        run: |
+          set +e
+          env -u SUPABASE_SERVICE_ROLE_KEY node coordination/chat-control-plane/daemon/run.mjs >/tmp/bridge-no-key.log 2>&1
+          rc=$?
+          set -e
+          test "$rc" -eq 2
+          grep -q 'Refusing to start A2 Chat Bridge' /tmp/bridge-no-key.log
+
+      - name: Loopback dashboard smoke test
+        shell: bash
+        run: |
+          SUPABASE_SERVICE_ROLE_KEY=test-only \
+          SUPABASE_URL=http://127.0.0.1:9 \
+          A2_BRIDGE_PORT=8876 \
+          node coordination/chat-control-plane/daemon/run.mjs >/tmp/bridge.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8876/v1/status >/tmp/status.json; then break; fi
+            sleep 0.2
+          done
+          python3 - <<'PY'
+          import json
+          with open('/tmp/status.json') as f:
+              status = json.load(f)
+          assert status['schema'] == 'metaengine.chat-bridge.status.v1'
+          assert status['a2']['peer_payloads_exposed'] is False
+          assert 'CHATGPT' in status['peers'] and 'GLM_ZAI' in status['peers']
+          PY
