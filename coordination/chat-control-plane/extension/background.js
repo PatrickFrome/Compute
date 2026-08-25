@@ -67,6 +67,18 @@ async function ensureClientId() {
   return next;
 }
 
+async function singleOpenChatgptConversation() {
+  const tabs = await chrome.tabs.query({});
+  const candidates = tabs
+    .filter((tab) => tab?.id && tab?.url && platformForUrl(tab.url) === "CHATGPT")
+    .map((tab) => normalizeUrl(tab.url))
+    .filter((url) => {
+      try { return new URL(url).pathname.startsWith("/c/"); } catch (_) { return false; }
+    });
+  const unique = [...new Set(candidates)];
+  return unique.length === 1 ? unique[0] : "";
+}
+
 async function setBadge() {
   const settings = await getSettings();
   await chrome.action.setBadgeText({ text: settings.armed ? "ON" : "OFF" });
@@ -304,10 +316,16 @@ chrome.runtime.onInstalled.addListener(async () => {
     seed.daemonUrl = bootstrap.daemonUrl;
     if (String(bootstrap.bridgeSecret || '').length >= 32) seed.bridgeSecret = bootstrap.bridgeSecret;
   }
+  if (!existing.chatgptUrl) {
+    const detected = await singleOpenChatgptConversation();
+    if (detected) seed.chatgptUrl = detected;
+  }
   await chrome.storage.local.set(seed);
   await ensureClientId();
   await chrome.alarms.create("a2-chat-bridge-poll", { periodInMinutes: 0.5 });
   await setBadge();
+  await pollPinnedTabSnapshots();
+  await pollCommands(true);
 });
 
 chrome.runtime.onStartup.addListener(async () => {
