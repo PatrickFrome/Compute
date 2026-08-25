@@ -7,6 +7,7 @@ const PUBLIC_PORT = Number(process.env.A2_BRIDGE_PORT || 8765);
 const INTERNAL_PORT = Number(process.env.A2_BRIDGE_INTERNAL_PORT || (PUBLIC_PORT + 1));
 const SECRET = String(process.env.A2_BRIDGE_SHARED_SECRET || '');
 const MAX_BODY_BYTES = 3 * 1024 * 1024;
+const BLOCKED_LEASE_RETRY_TTL_MS = Math.max(1000, Number(process.env.A2_BRIDGE_RECEIPT_RETRY_TTL_MS || 30000));
 
 if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
   console.error('Refusing to start A2 Chat Bridge without SUPABASE_SERVICE_ROLE_KEY.');
@@ -26,6 +27,11 @@ if (!Number.isInteger(INTERNAL_PORT) || INTERNAL_PORT < 1024 || INTERNAL_PORT > 
 }
 
 const receiptRecorder = createReceiptRecorderFromEnv(process.env);
+// Only commands that the internal scheduler has leased but the proxy has NOT
+// returned to the browser because REQUIRED receipt persistence failed belong
+// here. This cache is intentionally process-local and short-lived: it removes
+// transient receipt-store delay without claiming active-lease restart survival.
+const blockedLeaseByClient = new Map();
 
 function secretMatches(candidate) {
   const supplied = Buffer.from(String(candidate || ''), 'utf8');
@@ -137,6 +143,36 @@ function proxy(req, res) {
   req.pipe(upstream);
 }
 
+function requestClientId(req) {
+  return String(req.headers['x-a2-chat-bridge-client'] || 'dashboard').slice(0, 160);
+}
+
+function blockedLeaseFor(clientId) {
+  const row = blockedLeaseByClient.get(clientId);
+  if (!row) return null;
+  if (Date.now() - row.blocked_at_ms > BLOCKED_LEASE_RETRY_TTL_MS) {
+    blockedLeaseByClient.delete(clientId);
+    return null;
+  }
+  return row.command;
+}
+
+async function persistLeaseOrBlock(clientId, command) {
+  try {
+    const receipt = await receiptRecorder.recordLease(command);
+    if (receiptRecorder.required && receipt?.persisted !== true) {
+      throw new Error('receipt_lease_not_persisted');
+    }
+    blockedLeaseByClient.delete(clientId);
+    return receipt;
+  } catch (error) {
+    if (receiptRecorder.required) {
+      blockedLeaseByClient.set(clientId, { command, blocked_at_ms: Date.now() });
+    }
+    throw error;
+  }
+}
+
 async function recoverReceiptLease(commandId) {
   const statusResponse = await requestInternal({ method: 'GET', path: '/v1/status' });
   if (statusResponse.status !== 200) throw new Error(`receipt_status_recovery_http_${statusResponse.status}`);
@@ -170,14 +206,23 @@ async function interceptSnapshot(req, res) {
 }
 
 async function interceptNextCommand(req, res) {
+  const clientId = requestClientId(req);
+  if (receiptRecorder.required) {
+    const blocked = blockedLeaseFor(clientId);
+    if (blocked) {
+      await persistLeaseOrBlock(clientId, blocked);
+      // The browser has never seen this command yet. After idempotent receipt
+      // persistence succeeds, return the exact already-leased command directly
+      // instead of waiting for the internal lease timeout.
+      return json(res, 200, { command: blocked, receipt_retry: true });
+    }
+  }
+
   const upstream = await requestInternal({ method: req.method, path: req.url, headers: req.headers });
   if (upstream.status >= 200 && upstream.status < 300 && receiptRecorder.enabled) {
     const parsed = parseJsonBuffer(upstream.body);
     if (parsed?.command) {
-      const receipt = await receiptRecorder.recordLease(parsed.command);
-      if (receiptRecorder.required && receipt?.persisted !== true) {
-        throw new Error('receipt_lease_not_persisted');
-      }
+      await persistLeaseOrBlock(clientId, parsed.command);
     }
   }
   return relayBuffered(res, upstream);
