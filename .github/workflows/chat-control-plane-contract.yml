@@ -66,3 +66,17 @@ jobs:
           assert status['a2']['peer_payloads_exposed'] is False
           assert 'CHATGPT' in status['peers'] and 'GLM_ZAI' in status['peers']
           PY
+
+      - name: Build unpacked-extension bundle
+        shell: bash
+        run: |
+          cd coordination/chat-control-plane
+          zip -qr "$GITHUB_WORKSPACE/a2-chat-bridge-extension.zip" extension
+
+      - name: Upload extension bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: a2-chat-bridge-extension
+          path: a2-chat-bridge-extension.zip
+          if-no-files-found: error
+          retention-days: 14
