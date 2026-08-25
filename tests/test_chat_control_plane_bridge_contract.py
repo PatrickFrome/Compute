@@ -32,8 +32,9 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
 
     def test_manifest_and_entrypoints(self):
         self.assertEqual(self.manifest["manifest_version"], 3)
-        self.assertEqual(self.manifest["version"], "0.5.0")
+        self.assertEqual(self.manifest["version"], "0.5.1")
         self.assertEqual(self.manifest["background"]["service_worker"], "background-entry.js")
+        self.assertNotIn("type", self.manifest["background"])
         for path in [
             EXT / "bootstrap-config.js", EXT / "background-entry.js", EXT / "auth-fetch.js",
             EXT / "durable-fetch.js", EXT / "background.js", EXT / "options.html",
@@ -42,10 +43,18 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         ]:
             self.assertTrue(path.is_file(), path)
 
+    def test_service_worker_uses_chrome_supported_classic_imports(self):
+        self.assertIn("importScripts('./bootstrap-config.js')", self.background_entry)
+        self.assertIn("importScripts('./auth-fetch.js')", self.background_entry)
+        self.assertIn("importScripts('./durable-fetch.js')", self.background_entry)
+        self.assertIn("importScripts('./background.js')", self.background_entry)
+        self.assertNotIn("import(", self.background_entry)
+        self.assertNotIn("await import", self.background_entry)
+
     def test_remote_bootstrap_has_no_repository_pairing_secret(self):
         self.assertIn(REMOTE_BRIDGE, self.bootstrap)
         self.assertIn('bridgeSecret: ""', self.bootstrap)
-        self.assertIn("import './bootstrap-config.js'", self.background_entry)
+        self.assertIn("bootstrap-config.js", self.background_entry)
         self.assertIn('src="bootstrap-config.js"', self.options_html)
 
     def test_remote_endpoint_is_exactly_scoped(self):
