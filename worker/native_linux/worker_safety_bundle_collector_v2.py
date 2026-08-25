@@ -120,8 +120,9 @@ def collect(source: dict[str, str]) -> dict[str, Any]:
         "rlimits": rlimits,
         "docker_socket_present": Path("/var/run/docker.sock").exists(),
     }
+    legacy_decision = legacy.admission_contract.evaluate(observation)
     checks = {
-        "legacy_safety_eligible": __import__("admission_contract").evaluate(observation)["outcome"] == "SAFETY_ELIGIBLE_NON_PERSISTENT",
+        "legacy_safety_eligible": legacy_decision["outcome"] == "SAFETY_ELIGIBLE_NON_PERSISTENT",
         "cap_eff_zero": raw["cap_eff_zero"],
         "network_default_deny": raw["network_default_deny"],
         "pidfd_waitid": raw["pidfd_waitid"],
@@ -129,7 +130,7 @@ def collect(source: dict[str, str]) -> dict[str, Any]:
         "docker_socket_absent": not raw["docker_socket_present"],
     }
     failures = sorted(key for key, value in checks.items() if not value)
-    evidence = {"raw": raw, "checks": checks, "failures": failures}
+    evidence = {"raw": raw, "legacy_decision": legacy_decision, "checks": checks, "failures": failures}
     return {
         "schema": SCHEMA,
         "outcome": "WORKER_SAFETY_BUNDLE_ELIGIBLE_NONAUTHORITY" if not failures else "REJECTED_WORKER_SAFETY_BUNDLE",
