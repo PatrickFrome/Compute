@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { createReceiptRecorderFromEnv } from './receipt-recorder.mjs';
+import { supabaseBackendHeaders } from './supabase-auth.mjs';
 
 const HOST = '127.0.0.1';
 const PUBLIC_PORT = Number(process.env.A2_BRIDGE_PORT || 8765);
@@ -11,6 +12,15 @@ const BLOCKED_LEASE_RETRY_TTL_MS = Math.max(1000, Number(process.env.A2_BRIDGE_R
 
 if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
   console.error('Refusing to start A2 Chat Bridge without SUPABASE_SERVICE_ROLE_KEY.');
+  process.exit(2);
+}
+try {
+  // Validate the backend-key class before opening a healthy-looking loopback
+  // endpoint. In particular, a browser-safe sb_publishable_ key must fail
+  // closed instead of starting with A2 permanently offline.
+  supabaseBackendHeaders(process.env.SUPABASE_SERVICE_ROLE_KEY);
+} catch (error) {
+  console.error(`Refusing to start A2 Chat Bridge with invalid Supabase backend key: ${String(error?.message || error)}`);
   process.exit(2);
 }
 if (SECRET.length < 32) {
