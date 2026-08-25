@@ -1,3 +1,4 @@
+import './bootstrap-config.js';
 import './auth-fetch.js';
 import './durable-fetch.js';
 // The pairing secret and durable Send journal belong to trusted extension
