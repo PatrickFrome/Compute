@@ -1,0 +1,65 @@
+name: W1 Outer Privileged Cgroup Witness Contract
+
+on:
+  push:
+    branches: [work/w1-sandbox-launcher-prep]
+    paths:
+      - 'worker/native_linux/outer_privileged_cgroup_witness.py'
+      - 'worker/native_linux/outer_enforced_docker_canary.py'
+      - '.github/workflows/w1-outer-privileged-cgroup-witness-contract.yml'
+
+permissions: {}
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile
+        run: |
+          python3 -m py_compile worker/native_linux/outer_enforced_docker_canary.py
+          python3 -m py_compile worker/native_linux/outer_privileged_cgroup_witness.py
+
+      - name: Validate explicit privilege boundary without live sudo
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 worker/native_linux/outer_privileged_cgroup_witness.py > /tmp/plan.json
+          python3 - <<'PY'
+          import importlib.util
+          import json
+          from pathlib import Path
+
+          p=json.loads(Path('/tmp/plan.json').read_text())
+          assert p['mode']=='DRY_RUN'
+          assert p['privilege_boundary']['worker_launch_via_sudo'] is False
+          assert p['privilege_boundary']['worker_exec_via_sudo'] is False
+          assert p['privilege_boundary']['worker_configuration_modified_by_sudo'] is False
+          assert p['canonical'] is False and p['authority_effect'] is False
+          assert p['worker_admitted'] is False and p['w1_verified'] is False
+          text=' '.join(p['worker_run_argv'])
+          for forbidden in ('--privileged','--pid=host','--network=host','seccomp=unconfined','--cap-add'):
+              assert forbidden not in text, forbidden
+          assert '--user 1000:1000' in text
+          assert '--network=none' in text
+          assert '--cap-drop=ALL' in text
+
+          spec=importlib.util.spec_from_file_location('wit','worker/native_linux/outer_privileged_cgroup_witness.py')
+          m=importlib.util.module_from_spec(spec); assert spec.loader; spec.loader.exec_module(m)
+          cid='a'*64
+          ok,err=m._safe_exact_kill_target(cid, Path('/definitely/not/a/cgroup'), f'/docker/{cid}')
+          assert ok is False and err.startswith('resolve_failed')
+          src=Path('worker/native_linux/outer_privileged_cgroup_witness.py').read_text()
+          assert '["sudo", "-n", "tee", "--", str(kill_file)]' in src
+          assert 'worker_launch_via_sudo": False' in src
+          assert 'worker_exec_via_sudo": False' in src
+          assert '["docker", "kill"' not in src
+          print('PASS_PRIVILEGED_OUTER_BOUNDARY_CONTRACT')
+          PY
