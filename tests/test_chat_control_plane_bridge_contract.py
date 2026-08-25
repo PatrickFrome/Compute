@@ -25,6 +25,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         cls.launcher = (DAEMON / "run.mjs").read_text()
         cls.secure_entry = (DAEMON / "secure-entry.mjs").read_text()
         cls.supabase_auth = (DAEMON / "supabase-auth.mjs").read_text()
+        cls.dashboard = (DAEMON / "dashboard.html").read_text()
         cls.manifest = json.loads((EXT / "manifest.json").read_text())
 
     def test_manifest_entrypoints_exist(self):
@@ -42,6 +43,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
             EXT / "content.js",
             DAEMON / "secure-entry.mjs",
             DAEMON / "supabase-auth.mjs",
+            DAEMON / "dashboard.html",
             BASE / "start-windows.ps1",
             BASE / "START_A2_BRIDGE_WINDOWS.cmd",
         ]:
@@ -61,6 +63,15 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("sb_publishable_", self.supabase_auth)
         self.assertIn("headers.authorization", self.supabase_auth)
         self.assertIn("supabaseBackendHeaders", self.server)
+
+    def test_dashboard_control_posts_use_tab_scoped_pairing(self):
+        self.assertIn("sessionStorage.setItem(PAIRING_KEY, secret)", self.dashboard)
+        self.assertIn("sessionStorage.getItem(PAIRING_KEY)", self.dashboard)
+        self.assertIn("sessionStorage.removeItem(PAIRING_KEY)", self.dashboard)
+        self.assertIn("'x-a2-chat-bridge-secret': secret", self.dashboard)
+        self.assertIn("Pairing secret must be at least 32 characters", self.dashboard)
+        self.assertNotIn("localStorage", self.dashboard.replace("never in localStorage", ""))
+        self.assertNotIn("?secret=", self.dashboard)
 
     def test_exact_project_zai_chat_is_pinned(self):
         self.assertIn(PROJECT_ZAI, self.background)
