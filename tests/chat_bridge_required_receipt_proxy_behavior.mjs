@@ -114,7 +114,8 @@ const child = spawn(process.execPath, ['coordination/chat-control-plane/daemon/s
     A2_BRIDGE_INSTANCE_ID: 'ci-required-proxy',
     A2_BRIDGE_STATE_DIR: stateDir,
     A2_BRIDGE_IDLE_MS: '9999999',
-    A2_BRIDGE_WAKE_COOLDOWN_MS: '9999999'
+    A2_BRIDGE_WAKE_COOLDOWN_MS: '9999999',
+    A2_BRIDGE_RECEIPT_RETRY_TTL_MS: '30000'
   },
   stdio: ['ignore', 'pipe', 'pipe']
 });
@@ -151,17 +152,37 @@ try {
   });
   assert.equal(wake.response.status, 202);
 
-  const next = await requestJson(`${base}/v1/commands/next`);
-  assert.equal(next.response.status, 200);
-  const command = next.body?.command;
-  assert.ok(command?.command_id);
+  // If COMMAND_LEASED persistence fails, the scheduler may already hold the
+  // internal lease, but the browser must not receive the command. The secure
+  // proxy caches only this never-delivered command in RAM and retries the
+  // idempotent receipt on the next poll from the same client.
+  failReceipt = true;
+  const blockedNext = await requestJson(`${base}/v1/commands/next`);
+  assert.equal(blockedNext.response.status, 503);
+  assert.equal(blockedNext.body?.error, 'receipt_persistence_required');
   assert.equal(receiptCalls.length, 1);
   assert.equal(receiptCalls[0].p_event_kind, 'COMMAND_LEASED');
-  assert.equal(JSON.stringify(receiptCalls[0]).includes(command.prompt), false);
-  assert.equal(JSON.stringify(receiptCalls[0]).includes('must=not-persist'), false);
 
-  // Failure at the receipt store must prevent forwarding completion to the
-  // internal scheduler. The command remains LEASED and results stays empty.
+  let status = (await requestJson(`${base}/v1/status`, { auth: false })).body;
+  const internallyLeased = status.queue.find((item) => item.status === 'LEASED');
+  assert.ok(internallyLeased?.command_id);
+  assert.equal(status.results.length, 0);
+
+  failReceipt = false;
+  const next = await requestJson(`${base}/v1/commands/next`);
+  assert.equal(next.response.status, 200);
+  assert.equal(next.body?.receipt_retry, true);
+  const command = next.body?.command;
+  assert.ok(command?.command_id);
+  assert.equal(command.command_id, internallyLeased.command_id);
+  assert.equal(receiptCalls.length, 2, 'failed lease persistence plus immediate retry expected');
+  assert.equal(receiptCalls[1].p_event_kind, 'COMMAND_LEASED');
+  assert.equal(receiptCalls[1].p_command_id, command.command_id);
+  assert.equal(JSON.stringify(receiptCalls[1]).includes(command.prompt), false);
+  assert.equal(JSON.stringify(receiptCalls[1]).includes('must=not-persist'), false);
+
+  // Failure at the result receipt store must prevent forwarding completion to
+  // the internal scheduler. The command remains LEASED and results stays empty.
   failReceipt = true;
   const strongResult = {
     status: 'SENT_AND_DOM_VERIFIED',
@@ -178,7 +199,7 @@ try {
   assert.equal(failedAck.response.status, 503);
   assert.equal(failedAck.body?.error, 'receipt_persistence_required');
 
-  let status = (await requestJson(`${base}/v1/status`, { auth: false })).body;
+  status = (await requestJson(`${base}/v1/status`, { auth: false })).body;
   const queued = status.queue.find((item) => item.command_id === command.command_id);
   assert.equal(queued?.status, 'LEASED');
   assert.equal(status.results.some((item) => item.command_id === command.command_id), false);
@@ -203,7 +224,7 @@ try {
   assert.equal(JSON.stringify(resultReceipts.at(-1)).includes('must=not-persist'), false);
 
   assert.match(childLogs, /receipt persistence mode=REQUIRED/);
-  console.log('chat bridge REQUIRED receipt proxy ordering: PASS');
+  console.log('chat bridge REQUIRED receipt proxy ordering + transient lease retry: PASS');
 } finally {
   child.kill('SIGTERM');
   await new Promise((resolve) => {
