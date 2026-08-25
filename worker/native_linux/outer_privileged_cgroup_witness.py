@@ -21,7 +21,13 @@ import sys
 import time
 from typing import Any
 
-from worker.native_linux import outer_enforced_docker_canary as base
+# Direct execution (`python3 worker/native_linux/this_file.py`) sets sys.path[0]
+# to this directory, not the repository root. Import the sibling module without
+# requiring package installation or mutating global repo packaging.
+_THIS_DIR = Path(__file__).resolve().parent
+if str(_THIS_DIR) not in sys.path:
+    sys.path.insert(0, str(_THIS_DIR))
+import outer_enforced_docker_canary as base  # noqa: E402
 
 SCHEMA = "metaengine.compute.w1-outer-privileged-cgroup-witness.h205f22.v1"
 
