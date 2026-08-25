@@ -1,0 +1,63 @@
+name: W1 Codespace Selfreport Contract
+
+on:
+  push:
+    branches: [ops/w1-codespace-selfreport-20260825]
+    paths:
+      - '.devcontainer/devcontainer.json'
+      - '.devcontainer/w1-selfreport.sh'
+      - '.github/workflows/w1-codespace-selfreport-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Shell syntax
+        run: bash -n .devcontainer/w1-selfreport.sh
+
+      - name: Fail-closed contract assertions
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          cfg = json.loads(Path('.devcontainer/devcontainer.json').read_text())
+          script = Path('.devcontainer/w1-selfreport.sh').read_text()
+
+          assert cfg['remoteUser'] == 'vscode'
+          assert cfg['postStartCommand'] == 'bash .devcontainer/w1-selfreport.sh'
+          assert '/workspaces/.metaengine-w1/' in script
+          assert '/proc/sys/kernel/random/boot_id' in script
+          assert 'worker/native_linux/host_observation_collector.py' in script
+          assert 'CODESPACE_SELF_REPORT_UNTRUSTED_HOST' in script
+          assert 'WORKSPACES_PERSISTENT_MOUNT' in script
+          assert 'sentinel_bytes_disclosed' in script
+          assert 'git add -- "$receipt_file"' in script
+          assert 'git commit -m "evidence(w1): codespace boot ${boot_id}" -- "$receipt_file"' in script
+          assert 'git push origin HEAD' in script
+          assert 'BASE_MAIN_SHA="0d6bfd3fc54d2d0ebdcd8194f98c9becd067a4df"' in script
+          for token in (
+              'provider_identity_verified', 'provider_action_verified',
+              'persistent_worker_proof', 'worker_admitted', 'w1_verified',
+              'canonical', 'authority_effect',
+          ):
+              assert f'"{token}": False' in script, token
+
+          # Prevent credential exfiltration or shell tracing.
+          forbidden = (
+              'set -x', 'set -o xtrace', 'echo "$GITHUB_TOKEN"',
+              'printf "$GITHUB_TOKEN"', 'receipt["GITHUB_TOKEN"]',
+              'os.environ', 'env |', 'printenv',
+          )
+          for item in forbidden:
+              assert item not in script, item
+          print('self-reporting Codespace contract: PASS')
+          PY
