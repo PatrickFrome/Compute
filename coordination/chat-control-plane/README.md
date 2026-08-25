@@ -15,6 +15,7 @@ The browser transport is never project authority. All generated commands are mar
 ## Security boundary
 
 - The Supabase service-role key belongs **only in the local daemon process environment**. It is never stored in extension source, Chrome storage, prompts, DOM snapshots, Git or the dashboard.
+- Start through `daemon/run.mjs`. It refuses to launch without A2 credentials and filters stale peer-relay objects against the current Git main SHA learned from the fresh A2 mailbox.
 - The daemon listens on `127.0.0.1` by default and rejects non-loopback sockets.
 - The extension sends only to the exact configured conversation URLs.
 - The global extension badge is a kill switch: `OFF` means no composer write or Send click can execute.
@@ -28,7 +29,7 @@ Requires Node.js 20+.
 ```bash
 cd coordination/chat-control-plane
 export SUPABASE_SERVICE_ROLE_KEY='...local secret...'
-node daemon/server.mjs
+node daemon/run.mjs
 ```
 
 Defaults are already bound to the current project:
@@ -71,7 +72,7 @@ Each content script emits a DOM snapshot about every 2.5 seconds and on meaningf
 - there is no pending command for that peer;
 - A2 visibility/gate state permits the intended prompt.
 
-During a blind SAME_POINT proposal, the daemon uses the A2 peer-relay state to identify the missing peer and omits the other chat's DOM text until atomic pair visibility opens.
+During a blind SAME_POINT proposal, the daemon uses the A2 peer-relay state to identify the missing peer and omits the other chat's DOM text until atomic pair visibility opens. The safe launcher filters old blocked relays whose `base_github_sha` no longer matches the current SHA found in the live mailbox.
 
 ## Wake prompt contents
 
