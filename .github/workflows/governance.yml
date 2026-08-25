@@ -1,7 +1,7 @@
 name: Compute Fabric Governance
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
     types: [opened, synchronize, reopened, edited]
 
@@ -12,14 +12,28 @@ jobs:
   governance:
     runs-on: ubuntu-latest
     steps:
+      - name: Reject external-fork governance execution
+        shell: bash
+        env:
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$HEAD_REPO" != "$BASE_REPO" ]; then
+            echo "Compute Fabric governance accepts repository-local workstreams only." >&2
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Validate registered workstream and canonical binding
         shell: bash
         env:
-          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           set -euo pipefail
@@ -40,7 +54,7 @@ jobs:
             work/a1-agent-workspace)
               EXPECTED_L1='C2'
               ;;
-            work/aop1-autonomous-orchestration|work/same-point-duel-v4-*)
+            work/aop1-autonomous-orchestration|work/same-point-duel-v4-*|work/chat-control-plane-browser-bridge)
               EXPECTED_L1='CROSS-CUTTING'
               ;;
             analysis/integration)
@@ -62,6 +76,24 @@ jobs:
             exit 1
           fi
 
+      - name: Prevent governance self-authorization
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if git diff --name-only "$BASE_SHA"...HEAD | grep -Fxq '.github/workflows/governance.yml'; then
+            case "$HEAD_REF" in
+              analysis/integration|work/same-point-duel-v4-*)
+                ;;
+              *)
+                echo "Only pre-authorized governance paths may modify governance.yml." >&2
+                exit 1
+                ;;
+            esac
+          fi
+
       - name: Validate canonical architecture files
         shell: bash
         run: |
@@ -79,11 +111,13 @@ jobs:
           grep -Fq 'Level-2 execution DAG mapping' docs/CANONICAL_ROADMAP.md
 
       - name: Prevent silent canonical-roadmap mutation
-        if: ${{ github.head_ref != 'analysis/integration' }}
+        if: ${{ github.event.pull_request.head.ref != 'analysis/integration' }}
         shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          if git diff --name-only "${{ github.event.pull_request.base.sha }}"...HEAD | grep -Fxq 'docs/CANONICAL_ROADMAP.md'; then
+          if git diff --name-only "$BASE_SHA"...HEAD | grep -Fxq 'docs/CANONICAL_ROADMAP.md'; then
             echo 'Implementation workstreams may not silently mutate the canonical Level-1 roadmap.' >&2
             echo 'Route roadmap amendments through analysis/integration and explicit Supervisor architecture review.' >&2
             exit 1
