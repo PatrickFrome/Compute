@@ -11,6 +11,7 @@ on:
       - 'tests/test_chat_control_plane_bridge_contract.py'
       - 'tests/test_a2_chat_bridge_receipt_contract.py'
       - 'tests/chat_bridge_blind_phase_behavior.mjs'
+      - 'tests/chat_bridge_durable_idempotency_behavior.mjs'
       - '.github/workflows/chat-control-plane-contract.yml'
   workflow_dispatch:
 
@@ -39,6 +40,7 @@ jobs:
           node --check coordination/chat-control-plane/daemon/run.mjs
           node --check coordination/chat-control-plane/daemon/secure-entry.mjs
           node --check tests/chat_bridge_blind_phase_behavior.mjs
+          node --check tests/chat_bridge_durable_idempotency_behavior.mjs
 
       - name: Manifest parse
         run: python3 -m json.tool coordination/chat-control-plane/extension/manifest.json >/dev/null
@@ -101,6 +103,9 @@ jobs:
 
       - name: Blind-phase scheduler behavioral test
         run: node tests/chat_bridge_blind_phase_behavior.mjs
+
+      - name: Restart-safe Send idempotency behavioral test
+        run: node tests/chat_bridge_durable_idempotency_behavior.mjs
 
       - name: Build bridge bundles
         shell: bash
