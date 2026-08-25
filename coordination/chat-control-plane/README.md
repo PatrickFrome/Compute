@@ -1,161 +1,125 @@
-# METAENGINE A2 Chat Bridge
+# METAENGINE A2 Chat Bridge v0.5
 
-Local browser bridge for two long-lived project chats:
+Browser bridge for two long-lived project chats:
 
-- GPT: one exact `https://chatgpt.com/c/...` conversation selected in extension options.
+- GPT: one exact `https://chatgpt.com/c/...` conversation.
 - GLM: `https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db` by default.
 
-The bridge has two cooperating processes:
+## Default architecture: remote-first
 
-1. **Chrome extension** (`extension/`) reads the live conversation DOM, reports `generating/idle` state, writes exact prompts into the composer, and invokes the real visible **Send** button.
-2. **Local daemon/dashboard** (`daemon/`) receives both DOM streams, reads the current A2 mailbox/macroblock/peer-relay state, enforces commit/reveal visibility, detects a stalled peer, and queues a bounded continuation prompt.
+v0.5 no longer requires a local Node.js daemon or `START_A2_BRIDGE_WINDOWS.cmd` for normal operation.
 
-The browser transport is never project authority. All generated commands are marked `WEB_CHAT_INTERACTIVE`; A2 hard gates, claims, directives, pair-seal visibility and persisted verification remain authoritative.
+1. **Chrome extension** (`extension/`) reads live DOM state, keeps a local restart-safe Send journal, writes an exact continuation prompt into the exact pinned composer, and invokes the real visible **Send** button.
+2. **Supabase Edge Function** (`supabase/functions/a2-chat-bridge-remote/index.ts`) is the always-on scheduler/API at:
 
-## Security boundary
+   `https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-chat-bridge-remote`
 
-- The Supabase backend secret (`sb_secret_...` preferred; legacy `service_role` JWT supported) belongs **only in the local daemon process environment**. It is never stored in extension source, Chrome storage, prompts, DOM snapshots, Git or the dashboard. Browser-safe `sb_publishable_...` keys are rejected at daemon startup.
-- The browser and daemon also share a separate 32+ character **local pairing secret**. The extension stores its copy only in trusted `chrome.storage.local`; the daemon receives its copy only through the process environment. The dashboard keeps its copy only in `sessionStorage` for the current dashboard tab.
-- The extension restricts `chrome.storage.local` to trusted extension contexts, so page content scripts cannot read the pairing secret or durable Send journal.
-- Start through `daemon/secure-entry.mjs`. Direct `daemon/run.mjs` execution is intentionally rejected unless invoked behind the authenticated internal loopback gate.
-- The public local endpoint binds `127.0.0.1`; all mutating/command endpoints require `x-a2-chat-bridge-secret`. The read-only dashboard shell and `/v1/status` remain viewable on loopback without the secret; dashboard control POSTs use the tab-scoped pairing secret.
-- The internal scheduler runs on a second loopback-only port and never receives the pairing header.
-- The extension sends only to the exact configured conversation URLs.
-- Chrome host access is limited to ChatGPT, the exact `chat.z.ai` host and the loopback daemon; incognito execution is disabled.
-- The global extension badge is a kill switch: `OFF` means no composer write or Send click can execute.
-- If A2 peer visibility is closed, the daemon redacts the other browser chat from the wake prompt.
-- A command is leased to one extension client. Successful Sends are durably fenced in `chrome.storage.local` by both `command_id` and the deterministic `idempotency_key`, preventing a second Send after extension or daemon restart.
-- Raw browser chat text is held in daemon memory for scheduling. The prepared Supabase bridge-receipt contract stores hashes/metadata only and is **not applied to production yet**.
+3. The Edge Function reads the current A2 mailbox, macroblock and peer-relay contracts using the existing project RPCs. It applies the SAME_POINT visibility fence, identifies an eligible stalled peer and returns a bounded command.
+4. Full browser snapshots are supplied transiently in the request that calculates the command. Persistent remote runtime state contains only hashes, counts, booleans and command/result metadata. Raw DOM/chat text and raw prompts are not columns in the remote runtime tables.
 
-## Receipt persistence modes
+The browser transport is never project authority. All remote commands use `WEB_CHAT_INTERACTIVE_REMOTE` and `authority_effect=false`. A2 hard gates, claims, directives, pair-seal visibility and persisted project verification remain authoritative.
 
-Receipt persistence is optional PREP functionality and defaults to `OFF`. The prepared migration `supabase/migrations/20260825050000_a2_chat_bridge_receipts_v1.sql` must exist in the target database before enabling `BEST_EFFORT` or `REQUIRED`.
+## Remote security boundary
 
-```text
-A2_BRIDGE_RECEIPTS_MODE=OFF|BEST_EFFORT|REQUIRED
-A2_BRIDGE_INSTANCE_ID=<stable local bridge instance id>
-```
+- The Supabase backend credential exists only inside the Supabase Edge Function runtime. It never enters Chrome, Git, prompts or browser storage.
+- The extension authenticates with a separate high-entropy **scoped pairing token**. Production stores only its SHA-256 in `compute_fabric_a2_chat_bridge_remote_pairing_h205f22`.
+- The repository version of `extension/bootstrap-config.js` deliberately contains an empty pairing token. Personalized release ZIPs may inject a scoped token only during packaging; that token is not committed to Git.
+- Extension storage is restricted to `TRUSTED_CONTEXTS`, so page content scripts cannot read the pairing token or durable Send journal.
+- Incognito execution is disabled.
+- Host permission is limited to ChatGPT, `chat.z.ai`, the exact METAENGINE Supabase project origin and loopback fallback origins. The auth wrapper signs only loopback requests or the exact remote bridge path.
+- Remote runtime tables have RLS enabled, direct grants revoked from `public`, `anon` and `authenticated`, plus explicit deny policies for browser roles. Only the server-side `service_role` principal can operate them.
+- The global extension badge remains a manual kill switch. `OFF` means no real composer write or Send click can execute. v0.5 never auto-arms itself.
+- If A2 reports `pending_payloads_exposed != true`, other-peer DOM text is redacted from the generated prompt.
+- Current-main filtering learns only explicit `current_main_sha` / `main_sha` evidence. Historical `base_github_sha` is used only as relay ancestry to compare against the learned current main; it is never accepted as the current-main source.
 
-- `OFF`: no bridge-receipt RPC calls. Current default and safe before the prepared migration is installed.
-- `BEST_EFFORT`: attempts hash-only receipt persistence, logs failures, and keeps the bridge operating. This is observability, not authority.
-- `REQUIRED`: fail-closed receipt ordering. A `COMMAND_LEASED` receipt must persist before the command is returned to that extension client, and a `SEND_RESULT` receipt must persist before the internal scheduler acknowledges command completion. A transient failed lease receipt is held process-locally for the same client and retried without waiting for the internal lease timeout; another client cannot receive that blocked command.
+## Remote persistent state
 
-The receipt RPC receives only lineage and hashes/flags such as `command_id`, target platform/agent, normalized target-URL SHA-256, A2 frontier, idempotency SHA-256, prompt SHA-256 and Send-verification metadata. URL query/fragment data, raw prompts, raw chat text, cookies, credentials and browser tokens are not receipt fields.
+Applied migrations:
 
-`REQUIRED` does **not** claim active-lease survival across a full bridge process restart. `secure-entry.mjs` and the internal scheduler currently share one Node process; their active in-memory queue/blocked-lease cache restarts together. The independent extension-side durable Send journal still prevents a second real Send after a completed strong DOM-verified send, but active lease recovery is a separate future persistence/split-process concern.
+- `20260825213000_a2_chat_bridge_remote_runtime_v1.sql`
+- `20260825215000_a2_chat_bridge_remote_runtime_rls_deny_v1.sql`
 
-The receipt table and RPC remain permanently non-authority (`canonical=false`, `authority_effect=false`). Enabling receipt persistence never admits a worker, resolves an A2 gate, or creates project authority.
+Tables:
 
-## Start the daemon
+- `compute_fabric_a2_chat_bridge_remote_pairing_h205f22` — pairing-token hashes and lifecycle timestamps.
+- `compute_fabric_a2_chat_bridge_remote_peer_h205f22` — assistant/target URL hashes, message count and generating/composer metadata.
+- `compute_fabric_a2_chat_bridge_remote_command_h205f22` — command/idempotency/prompt hashes, target/A2 lineage and result metadata.
 
-Requires Node.js 20+.
+The command table enforces `authority_effect=false` with a database check constraint. Raw prompts, raw chat text, cookies, browser tokens and Supabase backend credentials are not persisted there.
 
-Generate a local-only pairing secret, then start the authenticated entrypoint:
+## Install / upgrade the extension
 
-```bash
-cd coordination/chat-control-plane
-export SUPABASE_SERVICE_ROLE_KEY='...sb_secret_... or legacy service_role JWT...'
-export A2_BRIDGE_SHARED_SECRET="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
-node daemon/secure-entry.mjs
-```
+A repository CI artifact is generic and has an empty pairing token. A personalized release bundle can carry a scoped remote pairing token in `bootstrap-config.js` so the user does not have to enter backend credentials or run any local process.
 
-The environment variable keeps its legacy name for compatibility, but the preferred value is a current `sb_secret_...` backend key. Copy the local pairing secret into **Extension options → Local pairing secret** and, for manual dashboard controls, pair the dashboard tab with the same value. Do not put either backend or pairing secrets in Git, the A2 mailbox, Supabase rows, screenshots, or chat messages.
+For a personalized v0.5 bundle:
 
-Defaults are already bound to the current project:
+1. Keep the intended ChatGPT conversation and the pinned Z.AI conversation open.
+2. Open `chrome://extensions` and enable **Developer mode**.
+3. Replace/reload the unpacked extension from the v0.5 directory whose root contains `manifest.json`.
+4. On install/update, if exactly one ChatGPT `/c/...` conversation is open, v0.5 binds it automatically. If zero or multiple ChatGPT conversations are open, it stays fail-closed until an exact chat is selected in **Extension options**.
+5. The Z.AI project conversation is preconfigured.
+6. Click the extension toolbar icon only when ready for real sends. Badge `ON` arms the Send path; badge `OFF` keeps observation/polling non-mutating.
 
-```text
-SUPABASE_URL=https://xpeibufgzjknrhbhpffp.supabase.co
-A2_WORKSPACE_ID=2de9f84b-7c0a-4091-911c-894ff1d6eaf4
-A2_MACROBLOCK_ID=dce58a3b-2f67-47e0-ae0d-9b3825ff53cd
-A2_BRIDGE_PORT=8765
-A2_BRIDGE_INTERNAL_PORT=8766
-A2_BRIDGE_IDLE_MS=18000
-A2_BRIDGE_WAKE_COOLDOWN_MS=60000
-```
-
-Open the dashboard at:
-
-```text
-http://127.0.0.1:8765/
-```
-
-### Windows one-click launcher
-
-The complete bridge bundle includes `START_A2_BRIDGE_WINDOWS.cmd`. Double-click it after installing Node.js 20 or newer. On the first start it asks for a Supabase backend key (`sb_secret_...` preferred; legacy `service_role` JWT also supported) with masked input, creates a random local pairing secret, stores both encrypted with Windows DPAPI for the current Windows user, copies the pairing secret to the clipboard, starts the secure daemon and opens the dashboard after `/v1/status` is healthy. `sb_publishable_...` keys fail closed and do not produce a healthy bridge runtime.
-
-Use the copied pairing secret in two places:
-
-1. **Dashboard → Local pairing**: press **Paste clipboard** (or paste manually), then **Use pairing secret**. Dashboard control buttons become enabled for that tab only.
-2. **Extension options → Local pairing secret**: paste the same value, bind the ChatGPT conversation, and save.
-
-To replace the locally encrypted credentials later, run:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\start-windows.ps1 -ResetCredentials
-```
-
-The launcher explicitly keeps bridge receipt persistence `OFF`; it does not apply production DDL or run a timed canary.
-
-## Load the extension
-
-1. Check out branch `work/chat-control-plane-browser-bridge` locally, or download and unzip the Chrome-ready `a2-chat-bridge-extension` artifact produced by the **Chat Control Plane Contract** workflow.
-2. Open `chrome://extensions`.
-3. Enable **Developer mode**.
-4. Choose **Load unpacked** and select `coordination/chat-control-plane/extension`, or the directory created by unzipping the extension artifact. Its root must contain `manifest.json`.
-5. Start `START_A2_BRIDGE_WINDOWS.cmd`; on first start provide a valid Supabase backend secret. The launcher copies the local pairing secret to the clipboard and opens the dashboard.
-6. Pair the dashboard tab with **Paste clipboard → Use pairing secret**.
-7. Open the extension details → **Extension options** and paste the same local pairing secret.
-8. Keep the preset Z.AI URL or restore it with **Restore project Z.AI chat**.
-9. Open the dedicated ChatGPT project conversation, press **Use open ChatGPT tab**, then **Save settings**.
-10. Verify both peers become `online` in the dashboard, then click the extension toolbar icon until its badge is `ON` to arm real Send clicks.
+No local daemon, Node.js, PowerShell, Windows DPAPI, localhost dashboard or Supabase backend key is required for the normal v0.5 remote path.
 
 ## Runtime behavior
 
-Each content script emits a DOM snapshot about every 2.5 seconds and on meaningful mutations. The daemon tracks the latest assistant-output hash and message count. A peer is eligible for automatic wake only when:
+The extension obtains fresh DOM snapshots on meaningful mutations and periodic pulls. It also sends the latest two snapshot envelopes transiently with `POST /v1/commands/next`.
 
-- its snapshot is fresh;
-- it is not currently generating;
-- the composer exists and is empty;
-- visible progress has stopped for the configured idle threshold;
-- there is no pending command for that peer;
-- A2 visibility/gate state permits the intended prompt.
+The remote scheduler can issue a command only when the target peer:
 
-During a blind SAME_POINT proposal, the daemon uses the A2 peer-relay state to identify the missing peer and omits the other chat's DOM text until atomic pair visibility opens. The safe launcher filters old blocked relays whose `base_github_sha` no longer matches the current SHA found in the live mailbox.
+- has a fresh snapshot;
+- is not generating;
+- has a visible composer;
+- has an empty composer;
+- has stopped making visible progress for the idle threshold;
+- has no active unexpired command lease;
+- is permitted by the current blind/reveal A2 relay state.
 
-The executable CI behavioral test uses a mock A2 blind duel with a unique GPT DOM marker and proves that only GLM is queued and the GPT marker is absent from the GLM wake prompt.
+Before returning a command, the Edge Function builds a deterministic idempotency key from the target platform, last assistant hash, message count, A2 head and pending duel. Only `prompt_sha256` and command metadata are persisted; the returned prompt itself exists only in request/response memory.
 
-## Wake prompt contents
+The extension validates the exact target URL again before sending. The content script resolves a composer/Send pair fail-closed, writes the prompt, invokes `sendButton.click()`, and reports verification strength. Strong `SENT_AND_DOM_VERIFIED` results are written into the trusted extension-side durable journal **before** the network acknowledgement, so an Edge Function retry/restart cannot cause a second real Send for the same idempotency key.
 
-A wake prompt contains bounded context only:
+## Live acceptance evidence
 
-- workspace/macroblock identifiers;
-- latest A2 mailbox frontier and recent messages;
-- current peer-relay visibility state;
-- the target chat's recent visible turns;
-- the other peer's recent visible turns **only when A2 visibility permits**;
-- an instruction to continue autonomously until the next real hard gate/dependency and to persist significant evidence through A2.
+The deployed Edge Function is version 2. Server-to-server canaries from the project database verified:
 
-No browser message is promoted to canonical evidence merely because the bridge observed it.
+- authenticated `/v1/status` → HTTP 200;
+- missing pairing token → HTTP 401 `bridge_pairing_required`;
+- A2 readback online;
+- `current_main_sha=acc7d60e09bc110f9cf1301532497d680e4510d1`, matching the actual GitHub `main` at the acceptance point;
+- transient `POST /v1/commands/next` with both peers marked `generating=true` → HTTP 200 with `command=null`;
+- peer-state persistence contains only hashes/counts/booleans;
+- canary peer rows and canary pairing tokens were removed after the test.
 
-## Manual controls
+## Receipt persistence remains separate and OFF
 
-The dashboard can queue a GPT or GLM wake explicitly after the current dashboard tab is paired. The secret remains only in that tab's `sessionStorage`. Manual wakes still go through the exact-URL and extension arming checks. The dashboard also shows recent command leases/results and whether the content script observed a real Send click.
+The older prepared bridge-receipt migration `20260825050000_a2_chat_bridge_receipts_v1.sql` is **not** applied to production by the remote runtime work. Remote scheduler metadata is not a substitute for the prepared receipt contract.
 
-## Acceptance status
+The local fallback still supports `A2_BRIDGE_RECEIPTS_MODE=OFF|BEST_EFFORT|REQUIRED`, but normal v0.5 remote operation does not enable receipt persistence and never promotes browser transport into project authority.
 
-The repository contract currently verifies:
+## Local fallback only
 
-- full DOM readback retained;
-- actual visible Send `.click()` path retained;
-- exact Z.AI project-chat pin;
-- A2 blind visibility fencing;
-- current-main stale relay rejection;
-- restart-safe duplicate-Send fencing;
-- authenticated loopback transport;
-- tab-scoped authenticated dashboard control POSTs;
-- fail-closed direct-daemon bypass and publishable-key rejection;
-- hash-only bridge-receipt recorder modes;
-- REQUIRED lease/result receipt ordering and same-client blocked-lease retry;
-- buildable Chrome-extension and complete bridge ZIP artifacts.
+`daemon/secure-entry.mjs`, the localhost dashboard, `START_A2_BRIDGE_WINDOWS.cmd` and `start-windows.ps1` remain in the repository as an optional fallback/test surface. Direct `daemon/run.mjs` execution still fails closed unless `A2_BRIDGE_INTERNAL=1`; normal users should not set that flag.
 
-A real browser acceptance run still requires loading the extension in the user's already-authenticated Chrome profile and arming it. Repository CI cannot truthfully substitute for that final live-tab observation. Production receipt DDL is also still deliberately unapplied.
+If the remote bridge is unavailable and an operator deliberately chooses loopback mode, use `secure-entry.mjs` so localhost pairing is enforced. The Windows launcher keeps receipt persistence forced to `OFF`.
+
+## CI / contract gates
+
+The `Chat Control Plane Contract` workflow verifies:
+
+- Chrome MV3 v0.5 manifest and bundle root layout;
+- repository bootstrap has no pairing secret;
+- exact remote endpoint scoping;
+- trusted-only pairing storage;
+- transient remote snapshot POST path;
+- remote Edge Function non-authority/static persistence contract;
+- explicit browser-role RLS deny policies;
+- current-main learning excludes historical `base_github_sha`;
+- full DOM readback and exact Z.AI pin;
+- real visible Send `.click()` path and ambiguity fail-closed behavior;
+- restart-safe command/idempotency fences, including remote Edge Function base-path preservation;
+- A2 blind visibility behavior;
+- prepared receipt contract tests remain green without applying its DDL.
+
+A final real-browser acceptance still requires Chrome itself to load/reload the unpacked extension and, before any real send is allowed, a user gesture to change the badge from `OFF` to `ON`. CI or a cloud backend cannot truthfully replace Chrome's local extension installation/security boundary.
