@@ -5,6 +5,7 @@ on:
     branches: [work/w1-sandbox-launcher-prep]
     paths:
       - 'worker/native_linux/h1_h13_prereq_probe.py'
+      - 'tests/test_w1_h1_h13_prereq_probe.py'
       - '.github/workflows/w1-h1-h13-prereq-probe-contract.yml'
 
 permissions: {}
@@ -23,6 +24,9 @@ jobs:
 
       - name: Compile probe
         run: python3 -m py_compile worker/native_linux/h1_h13_prereq_probe.py
+
+      - name: Run uid/gid capture regression tests
+        run: python3 -m unittest tests.test_w1_h1_h13_prereq_probe -v
 
       - name: Run passive non-authority probe
         shell: bash

@@ -173,6 +173,11 @@ def _namespace_canary() -> tuple[bool, dict[str, Any]]:
         try:
             if os.geteuid() == 0:
                 raise RuntimeError("root_caller_not_rootless")
+            # Capture the parent-namespace identity BEFORE unshare(CLONE_NEWUSER):
+            # afterwards getuid()/getgid() return the unmapped overflow identity
+            # (typically 65534) and an unprivileged uid_map/gid_map write of that
+            # identity is rejected with EPERM by the kernel.
+            uid, gid = os.getuid(), os.getgid()
             libc = ctypes.CDLL(None, use_errno=True)
             if libc.unshare(ctypes.c_int(CLONE_NEWUSER)) != 0:
                 err = ctypes.get_errno()
@@ -184,7 +189,6 @@ def _namespace_canary() -> tuple[bool, dict[str, Any]]:
                     _write_map(str(setgroups), "deny\n")
                 elif current != "deny":
                     raise RuntimeError(f"unexpected_setgroups:{current}")
-            uid, gid = os.getuid(), os.getgid()
             _write_map("/proc/self/uid_map", f"{uid} {uid} 1\n")
             _write_map("/proc/self/gid_map", f"{gid} {gid} 1\n")
             if libc.unshare(ctypes.c_int(CLONE_NEWNS | CLONE_NEWNET)) != 0:
