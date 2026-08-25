@@ -113,12 +113,6 @@ async function findPinnedTab(targetUrl, platform) {
   }) || null;
 }
 
-// Hidden tabs are timer-throttled by Chrome (intensive throttling after ~5 min
-// limits page timers to ~1/min), which starves the content-script heartbeat and
-// would stall the daemon watchdog for any auto-opened (active:false) pinned tab.
-// Extension message events are NOT throttled, so the service worker pulls
-// snapshots from pinned tabs on every alarm tick instead of relying on the
-// page-side heartbeat alone.
 async function pollPinnedTabSnapshots() {
   const settings = await getSettings();
   const targets = [];
@@ -132,10 +126,7 @@ async function pollPinnedTabSnapshots() {
       if (response?.ok && response?.snapshot) {
         await reportSnapshot(tab.id, response.snapshot);
       }
-    } catch (_) {
-      // Tab may be reloading or the content script not yet injected; the next
-      // alarm tick retries. Never block the other platform on this failure.
-    }
+    } catch (_) {}
   }));
 }
 
@@ -172,15 +163,18 @@ async function resolveTargetTab(command, settings) {
 
 async function postCommandResult(commandId, result) {
   try {
-    await daemonFetch(`/v1/commands/${encodeURIComponent(commandId)}/result`, {
+    const response = await daemonFetch(`/v1/commands/${encodeURIComponent(commandId)}/result`, {
       method: "POST",
       body: JSON.stringify(result)
     });
+    if (!response.ok) throw new Error(`result_http_${response.status}`);
+    return true;
   } catch (error) {
     await chrome.storage.local.set({
       daemonLastError: `result:${String(error?.message || error)}`,
       daemonLastErrorAt: new Date().toISOString()
     });
+    return false;
   }
 }
 
