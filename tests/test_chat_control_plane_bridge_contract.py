@@ -75,6 +75,9 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("clicked_send_button === true", self.durable)
         self.assertIn("Persist before network ACK", self.durable)
         self.assertIn("MAX_COMPLETED = 256", self.durable)
+        self.assertIn('body?.status === "SENT_AND_DOM_VERIFIED"', self.durable)
+        self.assertIn("body?.verification?.verified === true", self.durable)
+        self.assertNotIn('["SENT_AND_DOM_VERIFIED", "SENT"]', self.durable)
 
     def test_localhost_pairing_is_required_for_extension_transport(self):
         self.assertIn("x-a2-chat-bridge-secret", self.auth_fetch)
@@ -132,26 +135,19 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertNotIn("w1_verified=true", self.server.lower())
 
     def test_peer_dom_relay_is_fenced_strictly_on_payloads_exposed(self):
-        # Requirement: never relay peer DOM text while pending_payloads_exposed is
-        # false — including when no relay is pending at all.
         self.assertIn("const blind = a2.peerPayloadsExposed !== true;", self.server)
         self.assertNotIn("peerPayloadsExposed !== true && Boolean(", self.server)
         self.assertIn("pending_payloads_exposed=true", self.server)
 
     def test_hidden_tab_snapshot_starvation_is_fixed(self):
-        # Chrome throttles timers in hidden tabs; the service worker must pull
-        # snapshots from pinned tabs itself on each alarm tick.
         self.assertIn("async function pollPinnedTabSnapshots()", self.background)
         self.assertIn("pollPinnedTabSnapshots().finally(() => pollCommands(true))", self.background)
         self.assertIn("SNAPSHOT_FRESH_MS", self.server)
         self.assertNotIn("> 12000) return false", self.server)
 
     def test_duplicate_send_defense_layers(self):
-        # Content script: command dedupe survives page reload via sessionStorage.
         self.assertIn("a2-chat-bridge:seen-commands", self.content)
         self.assertIn("function rememberCommand(", self.content)
-        # Daemon: no re-lease after a result, lease timeout is configurable and
-        # generous, and queued idempotency keys are enforced.
         self.assertIn("!commandResults.has(item.command_id)", self.server)
         self.assertIn("LEASE_TIMEOUT_MS", self.server)
         self.assertIn("idempotencyBlocked(idempotencyKey)", self.server)
@@ -169,19 +165,24 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("state/", gitignore.read_text())
 
     def test_send_verification_is_strength_honest(self):
-        # Exact user-turn match is the strong outcome; cleared+count-advanced is
-        # reported as a distinct weaker status instead of the strong one.
         self.assertIn("SENT_WEAK_DOM_VERIFIED", self.content)
         self.assertIn("exact_user_turn_seen: exactUserTurn", self.content)
         self.assertIn("verification_strength", self.content)
 
-    def test_zai_composer_and_send_button_are_adjacency_scoped(self):
-        # Z.AI robustness: bare `textarea` must not win over the composer that
-        # shares a container with the real send button; send button matching
-        # uses word boundaries to avoid "Resend"/"Send feedback" controls.
+    def test_zai_composer_and_send_button_fail_closed_on_ambiguity(self):
         self.assertIn("function sharedContainer(", self.content)
-        self.assertIn("candidates.filter((el) => sharedContainer(el, send))", self.content)
-        self.assertIn("patterns.some((pattern) => pattern.test(semantic))", self.content)
+        self.assertIn("function resolveComposerSendPair()", self.content)
+        self.assertIn('error: "composer_send_pair_ambiguous"', self.content)
+        self.assertIn('error: "composer_send_pair_not_found"', self.content)
+        self.assertIn("semanticFields(button)", self.content)
+        self.assertIn("matchesButtonSemantics", self.content)
+        self.assertNotIn("semantic.includes(term)", self.content)
+        self.assertNotIn("adjacent.length ? adjacent : candidates", self.content)
+        self.assertIn("if (pair.error) throw new Error(pair.error)", self.content)
+        self.assertIn("dom_pair_error: pair.error", self.content)
+        # Reject substring-shaped controls such as Resend / Send feedback by
+        # requiring anchored semantic fields rather than generic includes().
+        self.assertIn("/^(send|send message|send prompt|submit)$/i", self.content)
 
 
 if __name__ == "__main__":
