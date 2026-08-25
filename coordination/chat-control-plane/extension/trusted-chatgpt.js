@@ -25,6 +25,25 @@
     return result?.result?.value;
   }
 
+  function validateBridgePrompt(prompt) {
+    const text = String(prompt || "");
+    if (!text.trim() || text.length > MAX_PROMPT_CHARS) {
+      throw new Error("chatgpt_cdp_prompt_invalid");
+    }
+    if (!text.startsWith("A2 CHAT BRIDGE — AUTONOMOUS CONTINUE")) {
+      throw new Error("chatgpt_cdp_prompt_not_bridge_owned");
+    }
+    if (!text.includes("bridge_job_target=GPT") || !text.includes("transport=WEB_CHAT_INTERACTIVE_REMOTE")) {
+      throw new Error("chatgpt_cdp_prompt_scope_mismatch");
+    }
+    return text;
+  }
+
+  async function ensureArmed() {
+    const { armed } = await chrome.storage.local.get("armed");
+    if (armed !== true) throw new Error("chatgpt_cdp_not_armed");
+  }
+
   async function ensurePinnedChatgptTab(tabId) {
     const tab = await chrome.tabs.get(tabId);
     const url = new URL(String(tab?.url || ""));
@@ -115,17 +134,27 @@
     })()`);
   }
 
-  async function trustedSend(tabId, prompt) {
-    const text = String(prompt || "");
-    if (!text.trim() || text.length > MAX_PROMPT_CHARS) throw new Error("chatgpt_cdp_prompt_invalid");
+  async function withDebugger(tabId, operation) {
     if (inFlightTabs.has(tabId)) throw new Error("chatgpt_cdp_tab_busy");
     inFlightTabs.add(tabId);
     let attached = false;
     try {
+      await ensureArmed();
       await ensurePinnedChatgptTab(tabId);
       await chrome.debugger.attach(target(tabId), CDP_VERSION);
       attached = true;
+      return await operation();
+    } finally {
+      if (attached) {
+        try { await chrome.debugger.detach(target(tabId)); } catch (_) {}
+      }
+      inFlightTabs.delete(tabId);
+    }
+  }
 
+  async function trustedPrime(tabId, prompt) {
+    const text = validateBridgePrompt(prompt);
+    return withDebugger(tabId, async () => {
       const before = await inspectComposer(tabId);
       if (!before?.ok) throw new Error(`chatgpt_cdp_${before?.error || "composer_inspect_failed"}`);
       if (normalize(before.text) !== normalize(text)) throw new Error("chatgpt_cdp_visible_prompt_mismatch");
@@ -136,28 +165,35 @@
       await send(tabId, "Input.insertText", { text });
       await sleep(220);
 
+      const after = await inspectComposer(tabId);
+      if (!after?.ok || normalize(after.text) !== normalize(text)) {
+        throw new Error("chatgpt_cdp_prime_readback_mismatch");
+      }
+      return { ok: true, phase: "PRIMED" };
+    });
+  }
+
+  async function trustedClick(tabId, prompt) {
+    const text = validateBridgePrompt(prompt);
+    return withDebugger(tabId, async () => {
       const sendState = await inspectSend(tabId, text);
       if (!sendState?.ok) throw new Error(`chatgpt_cdp_${sendState?.error || "send_inspect_failed"}`);
       await send(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x: sendState.x, y: sendState.y });
       await send(tabId, "Input.dispatchMouseEvent", { type: "mousePressed", x: sendState.x, y: sendState.y, button: "left", clickCount: 1 });
       await send(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x: sendState.x, y: sendState.y, button: "left", clickCount: 1 });
-      return { ok: true };
-    } finally {
-      if (attached) {
-        try { await chrome.debugger.detach(target(tabId)); } catch (_) {}
-      }
-      inFlightTabs.delete(tabId);
-    }
+      return { ok: true, phase: "CLICKED" };
+    });
   }
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message?.type !== "A2_CHATGPT_TRUSTED_SEND") return false;
+    if (!["A2_CHATGPT_TRUSTED_PRIME", "A2_CHATGPT_TRUSTED_CLICK"].includes(message?.type)) return false;
     const tabId = sender.tab?.id;
     if (!Number.isInteger(tabId)) {
       sendResponse({ ok: false, error: "chatgpt_cdp_sender_tab_missing" });
       return false;
     }
-    trustedSend(tabId, message.prompt)
+    const action = message.type === "A2_CHATGPT_TRUSTED_PRIME" ? trustedPrime : trustedClick;
+    action(tabId, message.prompt)
       .then((result) => sendResponse(result))
       .catch((error) => sendResponse({ ok: false, error: String(error?.message || error) }));
     return true;
