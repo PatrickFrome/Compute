@@ -30,7 +30,12 @@ jobs:
           set -euo pipefail
           test "$(git diff --name-only "$BASE_SHA"...HEAD | wc -l | tr -d ' ')" -ge 1
           grep -Fq 'pull_request_target:' .github/workflows/governance.yml
-          grep -Fq "if: \${{ github.event_name == 'pull_request_target' }}" .github/workflows/governance.yml
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('.github/workflows/governance.yml').read_text()
+          needle = "if: $" + "{{ github.event_name == 'pull_request_target' }}"
+          assert needle in text, needle
+          PY
           grep -Fq 'persist-credentials: false' .github/workflows/governance.yml
           grep -Fq 'Prevent governance self-authorization' .github/workflows/governance.yml
           grep -Fq 'work/chat-control-plane-browser-bridge' .github/workflows/governance.yml
