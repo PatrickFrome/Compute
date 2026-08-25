@@ -7,6 +7,7 @@
 importScripts('./bootstrap-config.js');
 importScripts('./auth-fetch.js');
 importScripts('./durable-fetch.js');
+importScripts('./trusted-chatgpt.js');
 
 // Restrict chrome.storage.local to trusted extension contexts as early as
 // possible on every worker start. The call is intentionally kicked off before
