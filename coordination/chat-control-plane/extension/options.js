@@ -58,6 +58,18 @@ function setStatus(text, error = false) {
   el.style.color = error ? "#ff9e9e" : "#8fe3a7";
 }
 
+async function requestPoll(successText = "Authenticated bridge poll requested.") {
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "BRIDGE_POLL_NOW" });
+    if (!response?.ok) throw new Error(response?.error || "poll failed");
+    setStatus(successText);
+    return true;
+  } catch (error) {
+    setStatus(`Background worker unavailable: ${String(error?.message || error)}`, true);
+    return false;
+  }
+}
+
 async function load() {
   const stored = await chrome.storage.local.get(Object.keys(DEFAULTS));
   const settings = { ...DEFAULTS, ...stored };
@@ -68,6 +80,7 @@ async function load() {
   $("pollMs").value = settings.pollMs || DEFAULTS.pollMs;
   $("autoOpenTabs").checked = settings.autoOpenTabs !== false;
   $("armed").checked = settings.armed === true;
+  await requestPoll("Background worker is running; authenticated bridge poll requested automatically.");
 }
 
 async function save() {
@@ -89,8 +102,8 @@ async function save() {
       autoOpenTabs: $("autoOpenTabs").checked,
       armed: $("armed").checked
     });
-    setStatus("Saved. Exact peer bindings and authenticated bridge are active.");
-    await chrome.runtime.sendMessage({ type: "BRIDGE_POLL_NOW" });
+    const ok = await requestPoll("Saved. Exact peer bindings and authenticated bridge are active.");
+    if (!ok) return;
   } catch (error) {
     setStatus(String(error?.message || error), true);
   }
@@ -118,15 +131,7 @@ async function detectChatgpt() {
 }
 
 $("save").addEventListener("click", save);
-$("pollNow").addEventListener("click", async () => {
-  try {
-    const response = await chrome.runtime.sendMessage({ type: "BRIDGE_POLL_NOW" });
-    if (!response?.ok) throw new Error(response?.error || "poll failed");
-    setStatus("Authenticated bridge poll requested.");
-  } catch (error) {
-    setStatus(String(error?.message || error), true);
-  }
-});
+$("pollNow").addEventListener("click", () => requestPoll());
 $("detectChatgpt").addEventListener("click", detectChatgpt);
 $("restoreZai").addEventListener("click", () => {
   $("zaiUrl").value = PROJECT_ZAI_URL;
