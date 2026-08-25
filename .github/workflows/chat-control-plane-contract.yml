@@ -67,16 +67,26 @@ jobs:
           assert 'CHATGPT' in status['peers'] and 'GLM_ZAI' in status['peers']
           PY
 
-      - name: Build unpacked-extension bundle
+      - name: Build bridge bundles
         shell: bash
         run: |
           cd coordination/chat-control-plane
           zip -qr "$GITHUB_WORKSPACE/a2-chat-bridge-extension.zip" extension
+          cd "$GITHUB_WORKSPACE/coordination"
+          zip -qr "$GITHUB_WORKSPACE/a2-chat-bridge-complete.zip" chat-control-plane
 
       - name: Upload extension bundle
         uses: actions/upload-artifact@v4
         with:
           name: a2-chat-bridge-extension
           path: a2-chat-bridge-extension.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload complete bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: a2-chat-bridge-complete
+          path: a2-chat-bridge-complete.zip
           if-no-files-found: error
           retention-days: 14
