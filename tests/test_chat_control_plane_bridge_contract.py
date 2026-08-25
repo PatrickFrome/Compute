@@ -54,7 +54,8 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("message_count", self.content)
 
     def test_real_send_button_click_is_required(self):
-        self.assertIn('buttonBySemantics("send")', self.content)
+        self.assertIn("function resolveComposerSendPair()", self.content)
+        self.assertIn('semanticButtonCandidates("send")', self.content)
         self.assertIn("sendButton.click();", self.content)
         self.assertIn("SENT_AND_DOM_VERIFIED", self.content)
         self.assertIn("send_click_not_observed_in_dom", self.content)
@@ -180,8 +181,6 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertNotIn("adjacent.length ? adjacent : candidates", self.content)
         self.assertIn("if (pair.error) throw new Error(pair.error)", self.content)
         self.assertIn("dom_pair_error: pair.error", self.content)
-        # Reject substring-shaped controls such as Resend / Send feedback by
-        # requiring anchored semantic fields rather than generic includes().
         self.assertIn("/^(send|send message|send prompt|submit)$/i", self.content)
 
 
