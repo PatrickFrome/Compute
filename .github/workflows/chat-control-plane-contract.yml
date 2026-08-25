@@ -14,6 +14,7 @@ on:
       - 'tests/test_chat_control_plane_bridge_contract.py'
       - 'tests/test_a2_chat_bridge_receipt_contract.py'
       - 'tests/test_a2_chat_bridge_remote_contract.py'
+      - 'tests/chat_bridge_worker_combined_load_behavior.mjs'
       - 'tests/chat_bridge_blind_phase_behavior.mjs'
       - 'tests/chat_bridge_durable_idempotency_behavior.mjs'
       - 'tests/chat_bridge_receipt_recorder_behavior.mjs'
@@ -51,11 +52,15 @@ jobs:
           node --check coordination/chat-control-plane/daemon/run.mjs
           node --check coordination/chat-control-plane/daemon/secure-entry.mjs
           node --check coordination/chat-control-plane/daemon/receipt-recorder.mjs
+          node --check tests/chat_bridge_worker_combined_load_behavior.mjs
           node --check tests/chat_bridge_blind_phase_behavior.mjs
           node --check tests/chat_bridge_durable_idempotency_behavior.mjs
           node --check tests/chat_bridge_receipt_recorder_behavior.mjs
           node --check tests/chat_bridge_required_receipt_proxy_behavior.mjs
           node --check tests/adversarial_chat_bridge_dom_f7.mjs
+
+      - name: Classic service-worker combined-load regression
+        run: node tests/chat_bridge_worker_combined_load_behavior.mjs
 
       - name: Manifest parse
         run: python3 -m json.tool coordination/chat-control-plane/extension/manifest.json >/dev/null
