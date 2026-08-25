@@ -2,7 +2,7 @@
 /* Adversarial DOM test for the F7 bridge fix.
  * Extracts the REAL matching/resolution source from content.js and drives it
  * with mock DOM elements. Tests exact Send/Stop semantics, adjacency, idle
- * composer observation, and fail-closed ambiguity. */
+ * composer observation, platform compatibility anchors, and fail-closed ambiguity. */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -10,7 +10,11 @@ import assert from 'node:assert/strict';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const contentPath = resolve(HERE, '../coordination/chat-control-plane/extension/content.js');
+const compatPath = resolve(HERE, '../coordination/chat-control-plane/extension/platform-dom-compat.js');
+const manifestPath = resolve(HERE, '../coordination/chat-control-plane/extension/manifest.json');
 const source = readFileSync(contentPath, 'utf8');
+const compat = readFileSync(compatPath, 'utf8');
+const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 
 function extractFn(name) {
   const start = source.indexOf(`function ${name}(`);
@@ -116,5 +120,14 @@ check('waitForEnabledSend revalidates exact composer text', source.includes('com
 check('waitForEnabledSend throws on pair ambiguity', source.includes('pair.error === "composer_send_pair_ambiguous"'));
 check('dom composer error surfaced', source.includes('dom_pair_error: composerResolution.error'));
 check('generating conservative on stop controls', source.includes('semanticButtonCandidates("stop").length > 0'));
+
+check('compat layer loads before content adapter', JSON.stringify(manifest.content_scripts[0].js) === JSON.stringify(['platform-dom-compat.js', 'content.js']));
+check('Z.AI exact send anchor is supported', compat.includes('markExactSendButton("#send-message-button")'));
+check('Z.AI composer-bound submit fallback is supported', compat.includes('markBoundSubmitFallback("#chat-input")'));
+check('ChatGPT exact submit anchor is supported', compat.includes('markExactSendButton("#composer-submit-button")'));
+check('ChatGPT composer-bound submit fallback is supported', compat.includes('markBoundSubmitFallback("#prompt-textarea")'));
+check('compat fallback is form-scoped', compat.includes('const form = composer.closest("form")'));
+check('compat fallback requires exactly one submit', compat.includes('if (candidates.length !== 1) return false'));
+check('compat layer never clicks Send itself', !compat.includes('.click('));
 
 console.log(`\n${passed} adversarial checks passed`);
