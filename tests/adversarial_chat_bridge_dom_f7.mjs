@@ -66,9 +66,9 @@ check('shared container accepted', sharedContainer(composer, send));
 const unrelated = node([]);
 check('unrelated send rejected', !sharedContainer(unrelated, send));
 
-const execute = source.split('async function executeSend(command)', 1)[1].split('async function emitSnapshot', 1)[0];
-const gptBlock = execute.split('if (platform() === "CHATGPT")', 1)[1].split('} else {', 1)[0];
-const glmBlock = execute.split('} else {', 1)[1];
+const execute = source.split('async function executeSend(command)')[1].split('async function emitSnapshot')[0];
+const gptBlock = execute.split('if (platform() === "CHATGPT")')[1].split('} else {')[0];
+const glmBlock = execute.split('} else {')[1];
 check('GPT prime is awaited', gptBlock.includes('await callTrustedChatgpt("A2_CHATGPT_TRUSTED_PRIME", text);'));
 check('GPT click is awaited', gptBlock.includes('await callTrustedChatgpt("A2_CHATGPT_TRUSTED_CLICK", text);'));
 check('GPT avoids DOM writer', !gptBlock.includes('writeComposerExact'));
