@@ -15,6 +15,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
     def setUpClass(cls):
         cls.content = (EXT / "content.js").read_text()
         cls.compat = (EXT / "platform-dom-compat.js").read_text()
+        cls.trusted = (EXT / "trusted-chatgpt.js").read_text()
         cls.bootstrap = (EXT / "bootstrap-config.js").read_text()
         cls.background = (EXT / "background.js").read_text()
         cls.background_entry = (EXT / "background-entry.js").read_text()
@@ -33,12 +34,13 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
 
     def test_manifest_and_entrypoints(self):
         self.assertEqual(self.manifest["manifest_version"], 3)
-        self.assertEqual(self.manifest["version"], "0.5.4")
+        self.assertEqual(self.manifest["version"], "0.5.5")
         self.assertEqual(self.manifest["background"]["service_worker"], "background-entry.js")
         self.assertNotIn("type", self.manifest["background"])
+        self.assertIn("debugger", self.manifest["permissions"])
         for path in [
             EXT / "bootstrap-config.js", EXT / "background-entry.js", EXT / "auth-fetch.js",
-            EXT / "durable-fetch.js", EXT / "background.js", EXT / "options.html",
+            EXT / "durable-fetch.js", EXT / "trusted-chatgpt.js", EXT / "background.js", EXT / "options.html",
             EXT / "options.js", EXT / "content.js", EXT / "platform-dom-compat.js",
             DAEMON / "secure-entry.mjs", DAEMON / "supabase-auth.mjs", DAEMON / "dashboard.html",
         ]:
@@ -48,10 +50,11 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("importScripts('./bootstrap-config.js')", self.background_entry)
         self.assertIn("importScripts('./auth-fetch.js')", self.background_entry)
         self.assertIn("importScripts('./durable-fetch.js')", self.background_entry)
+        self.assertIn("importScripts('./trusted-chatgpt.js')", self.background_entry)
         self.assertIn("importScripts('./background.js')", self.background_entry)
         self.assertNotIn("import(", self.background_entry)
         self.assertNotIn("await import", self.background_entry)
-        for script in [self.auth_fetch, self.durable, self.background]:
+        for script in [self.auth_fetch, self.durable, self.trusted, self.background]:
             self.assertTrue(script.lstrip().startswith("(() => {"))
             self.assertTrue(script.rstrip().endswith("})();"))
 
@@ -93,7 +96,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("TRUSTED_CONTEXTS", self.background_entry)
         self.assertEqual(self.manifest["incognito"], "not_allowed")
         combined = "\n".join([
-            self.content, self.compat, self.bootstrap, self.background_entry, self.auth_fetch,
+            self.content, self.compat, self.trusted, self.bootstrap, self.background_entry, self.auth_fetch,
             self.durable, self.background, self.options, self.options_html,
         ])
         self.assertNotIn("SUPABASE_SERVICE_ROLE_KEY", combined)
@@ -114,18 +117,31 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("send_click_not_observed_in_dom", self.content)
         self.assertNotIn("press Enter", self.content)
 
-    def test_chatgpt_native_form_submit_fallback_is_narrow_and_fail_closed(self):
-        self.assertIn('document.querySelectorAll("#prompt-textarea")', self.compat)
+    def test_chatgpt_trusted_cdp_transport_is_narrow_and_fail_closed(self):
+        self.assertIn('message?.type !== "A2_CHATGPT_TRUSTED_SEND"', self.trusted)
+        self.assertIn('chrome.debugger.attach', self.trusted)
+        self.assertIn('chrome.debugger.detach', self.trusted)
+        self.assertIn('"Input.insertText"', self.trusted)
+        self.assertIn('"Input.dispatchMouseEvent"', self.trusted)
+        self.assertIn('document.querySelectorAll(\'#prompt-textarea\')', self.trusted)
+        self.assertIn("composer.closest('form')", self.trusted)
+        self.assertIn("form.querySelectorAll('#composer-submit-button')", self.trusted)
+        self.assertIn("chatgpt_cdp_visible_prompt_mismatch", self.trusted)
+        self.assertIn("chatgpt_cdp_target_host_mismatch", self.trusted)
+        self.assertIn('url.pathname.startsWith("/c/")', self.trusted)
+        self.assertIn('inFlightTabs.has(tabId)', self.trusted)
+        self.assertIn('if (attached)', self.trusted)
+        self.assertNotIn("chat.z.ai", self.trusted)
+
+    def test_chatgpt_synthetic_click_is_upgraded_without_duplicating_user_clicks(self):
+        self.assertIn('A2_CHATGPT_TRUSTED_SEND', self.compat)
+        self.assertIn('if (event.isTrusted) return;', self.compat)
         self.assertIn('composer.closest("form")', self.compat)
         self.assertIn('form.contains(button)', self.compat)
-        self.assertIn('composerText(composer) !== before', self.compat)
-        self.assertIn('chatgptGenerating()', self.compat)
         self.assertIn('button.disabled', self.compat)
-        self.assertIn('form.requestSubmit(button)', self.compat)
-        self.assertIn('else form.requestSubmit()', self.compat)
-        self.assertIn('host === "chatgpt.com" || host === "chat.openai.com"', self.compat)
+        self.assertNotIn('requestSubmit', self.compat)
         zai_block = self.compat.split('if (host === "chat.z.ai")', 1)[1].split('return;', 1)[0]
-        self.assertNotIn("requestSubmit", zai_block)
+        self.assertNotIn("A2_CHATGPT_TRUSTED_SEND", zai_block)
 
     def test_idle_composer_presence_does_not_require_send_button(self):
         self.assertIn("function resolveComposer()", self.content)
