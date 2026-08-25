@@ -22,8 +22,8 @@ function normalizedChatUrl(value, expectedPlatform) {
   if (expectedPlatform === "CHATGPT" && host !== "chatgpt.com" && host !== "chat.openai.com") {
     throw new Error("ChatGPT URL must be on chatgpt.com or chat.openai.com");
   }
-  if (expectedPlatform === "GLM_ZAI" && host !== "chat.z.ai" && !host.endsWith(".z.ai")) {
-    throw new Error("Z.AI URL must be on chat.z.ai / z.ai");
+  if (expectedPlatform === "GLM_ZAI" && host !== "chat.z.ai") {
+    throw new Error("Z.AI URL must be on chat.z.ai");
   }
   if (!url.pathname.startsWith("/c/")) {
     throw new Error("Use a specific conversation URL containing /c/<conversation-id>");

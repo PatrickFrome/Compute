@@ -431,6 +431,13 @@ function queueWake(platform, wakeKey) {
     prompt_sha256: sha256(prompt),
     a2_head_message_seq: a2.cursor,
     a2_peer_payloads_exposed: a2.peerPayloadsExposed,
+    // Receipt lineage is part of the command at creation time.  The secure
+    // proxy must never infer it later from a potentially newer A2 frontier.
+    duel_id: a2.pendingRelay?.relay?.duel_id || null,
+    // Browser/DOM transport is permanently non-authoritative.  Keep the
+    // explicit false value in the leased object so REQUIRED persistence can
+    // fail closed on missing or mutated authority semantics.
+    authority_effect: false,
     status: 'PENDING',
     leased_to: null,
     leased_at: null

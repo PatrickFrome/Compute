@@ -16,10 +16,12 @@ The browser transport is never project authority. All generated commands are mar
 
 - The Supabase service-role key belongs **only in the local daemon process environment**. It is never stored in extension source, Chrome storage, prompts, DOM snapshots, Git or the dashboard.
 - The browser and daemon also share a separate 32+ character **local pairing secret**. The extension stores its copy only in `chrome.storage.local`; the daemon receives its copy only through the process environment.
+- The extension restricts `chrome.storage.local` to trusted extension contexts, so page content scripts cannot read the pairing secret or durable Send journal.
 - Start through `daemon/secure-entry.mjs`. Direct `daemon/run.mjs` execution is intentionally rejected unless invoked behind the authenticated internal loopback gate.
 - The public local endpoint binds `127.0.0.1`; all mutating/command endpoints require `x-a2-chat-bridge-secret`. The read-only dashboard and `/v1/status` remain viewable on loopback without the secret.
 - The internal scheduler runs on a second loopback-only port and never receives the pairing header.
 - The extension sends only to the exact configured conversation URLs.
+- Chrome host access is limited to ChatGPT, the exact `chat.z.ai` host and the loopback daemon; incognito execution is disabled.
 - The global extension badge is a kill switch: `OFF` means no composer write or Send click can execute.
 - If A2 peer visibility is closed, the daemon redacts the other browser chat from the wake prompt.
 - A command is leased to one extension client. Successful Sends are durably fenced in `chrome.storage.local` by both `command_id` and the deterministic `idempotency_key`, preventing a second Send after extension or daemon restart.
@@ -79,10 +81,10 @@ http://127.0.0.1:8765/
 
 ## Load the extension
 
-1. Check out branch `work/chat-control-plane-browser-bridge` locally, or use the `a2-chat-bridge-extension` artifact produced by the **Chat Control Plane Contract** workflow.
+1. Check out branch `work/chat-control-plane-browser-bridge` locally, or download and unzip the Chrome-ready `a2-chat-bridge-extension` artifact produced by the **Chat Control Plane Contract** workflow.
 2. Open `chrome://extensions`.
 3. Enable **Developer mode**.
-4. Choose **Load unpacked** and select `coordination/chat-control-plane/extension`.
+4. Choose **Load unpacked** and select `coordination/chat-control-plane/extension`, or the directory created by unzipping the extension artifact. Its root must contain `manifest.json`.
 5. Open the extension details → **Extension options**.
 6. Paste the local pairing secret generated for the daemon.
 7. Keep the preset Z.AI URL or restore it with **Restore project Z.AI chat**.

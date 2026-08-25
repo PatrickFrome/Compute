@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "METAENGINE A2 Chat Bridge",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "minimum_chrome_version": "120",
   "description": "Coordinates pinned ChatGPT and Z.AI peer chats with A2, reads their live DOM state, writes continuation prompts, and clicks the real Send button.",
   "permissions": ["storage", "tabs", "alarms"],
@@ -9,10 +9,10 @@
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
     "https://chat.z.ai/*",
-    "https://*.z.ai/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
   ],
+  "incognito": "not_allowed",
   "background": {
     "service_worker": "background-entry.js",
     "type": "module"
@@ -22,8 +22,7 @@
       "matches": [
         "https://chatgpt.com/*",
         "https://chat.openai.com/*",
-        "https://chat.z.ai/*",
-        "https://*.z.ai/*"
+        "https://chat.z.ai/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"

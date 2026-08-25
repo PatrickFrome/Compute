@@ -158,6 +158,8 @@ try {
   assert.equal(blockedNext.body?.error, 'receipt_persistence_required');
   assert.equal(receiptCalls.length, 1);
   assert.equal(receiptCalls[0].p_event_kind, 'COMMAND_LEASED');
+  assert.equal(receiptCalls[0].p_duel_id, null);
+  assert.equal(receiptCalls[0].p_pending_payloads_exposed, false);
 
   let status = (await requestJson(`${base}/v1/status`, { auth: false })).body;
   const internallyLeased = status.queue.find((item) => item.status === 'LEASED');

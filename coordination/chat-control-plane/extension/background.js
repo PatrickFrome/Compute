@@ -35,7 +35,7 @@ function platformForUrl(value) {
   try {
     const host = new URL(value).hostname.toLowerCase();
     if (host === "chatgpt.com" || host === "chat.openai.com") return "CHATGPT";
-    if (host === "chat.z.ai" || host.endsWith(".z.ai")) return "GLM_ZAI";
+    if (host === "chat.z.ai") return "GLM_ZAI";
   } catch (_) {}
   return "UNKNOWN";
 }

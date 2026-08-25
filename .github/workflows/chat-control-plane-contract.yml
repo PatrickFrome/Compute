@@ -26,7 +26,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout exact workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Python contract tests
         run: python3 -m unittest -v tests.test_chat_control_plane_bridge_contract tests.test_a2_chat_bridge_receipt_contract
@@ -181,13 +184,26 @@ jobs:
       - name: Build bridge bundles
         shell: bash
         run: |
-          cd coordination/chat-control-plane
-          zip -qr "$GITHUB_WORKSPACE/a2-chat-bridge-extension.zip" extension
+          cd coordination/chat-control-plane/extension
+          zip -qr "$GITHUB_WORKSPACE/a2-chat-bridge-extension.zip" .
           cd "$GITHUB_WORKSPACE/coordination"
           zip -qr "$GITHUB_WORKSPACE/a2-chat-bridge-complete.zip" chat-control-plane
 
+      - name: Verify Chrome extension bundle layout
+        run: |
+          python3 - <<'PY'
+          from zipfile import ZipFile
+
+          with ZipFile("a2-chat-bridge-extension.zip") as bundle:
+              names = set(bundle.namelist())
+          assert "manifest.json" in names
+          assert "background-entry.js" in names
+          assert "content.js" in names
+          assert not any(name.startswith("extension/") for name in names)
+          PY
+
       - name: Upload extension bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: a2-chat-bridge-extension
           path: a2-chat-bridge-extension.zip
@@ -195,7 +211,7 @@ jobs:
           retention-days: 14
 
       - name: Upload complete bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: a2-chat-bridge-complete
           path: a2-chat-bridge-complete.zip

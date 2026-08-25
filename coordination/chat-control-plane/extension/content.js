@@ -38,7 +38,7 @@
   function platform() {
     const host = location.hostname.toLowerCase();
     if (host === "chatgpt.com" || host === "chat.openai.com") return "CHATGPT";
-    if (host === "chat.z.ai" || host.endsWith(".z.ai")) return "GLM_ZAI";
+    if (host === "chat.z.ai") return "GLM_ZAI";
     return "UNKNOWN";
   }
 

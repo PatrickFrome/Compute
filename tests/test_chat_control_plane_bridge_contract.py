@@ -26,6 +26,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
 
     def test_manifest_entrypoints_exist(self):
         self.assertEqual(self.manifest["manifest_version"], 3)
+        self.assertEqual(self.manifest["version"], "0.4.0")
         self.assertEqual(self.manifest["background"]["service_worker"], "background-entry.js")
         self.assertEqual(self.manifest["options_page"], "options.html")
         for path in [
@@ -88,6 +89,19 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn('id="bridgeSecret"', self.options_html)
         self.assertIn("Daemon must be loopback-only", self.options)
 
+    def test_pairing_secret_storage_is_not_exposed_to_content_scripts(self):
+        self.assertIn("setAccessLevel", self.background_entry)
+        self.assertIn("TRUSTED_CONTEXTS", self.background_entry)
+        self.assertEqual(self.manifest["incognito"], "not_allowed")
+
+    def test_manifest_uses_least_privilege_host_scope(self):
+        hosts = set(self.manifest["host_permissions"])
+        matches = set(self.manifest["content_scripts"][0]["matches"])
+        self.assertIn("https://chat.z.ai/*", hosts)
+        self.assertIn("https://chat.z.ai/*", matches)
+        self.assertNotIn("https://*.z.ai/*", hosts)
+        self.assertNotIn("https://*.z.ai/*", matches)
+
     def test_secure_daemon_gate_is_fail_closed(self):
         self.assertIn("A2_BRIDGE_SHARED_SECRET", self.secure_entry)
         self.assertIn("timingSafeEqual", self.secure_entry)
@@ -107,6 +121,8 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("pending_payloads_exposed", self.server)
         self.assertIn("OTHER PEER CHAT: REDACTED BY A2 VISIBILITY FENCE", self.server)
         self.assertIn("WEB_CHAT_INTERACTIVE", self.server)
+        self.assertIn("duel_id: a2.pendingRelay?.relay?.duel_id || null", self.server)
+        self.assertIn("authority_effect: false", self.server)
 
     def test_launcher_filters_stale_relays_by_current_main(self):
         self.assertIn("if (!process.env.SUPABASE_SERVICE_ROLE_KEY)", self.launcher)
