@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>METAENGINE A2 Chat Bridge</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #080a0d; color: #eef2f6; }
+    main { max-width: 1180px; margin: 0 auto; padding: 28px 18px 60px; }
+    header { display: flex; justify-content: space-between; align-items: start; gap: 16px; margin-bottom: 18px; }
+    h1 { margin: 0; font-size: 28px; }
+    h2 { margin: 0 0 10px; font-size: 17px; }
+    p { margin: 7px 0; color: #aeb8c4; line-height: 1.5; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .card { border: 1px solid #252c35; border-radius: 14px; background: #11151a; padding: 16px; }
+    .span2 { grid-column: 1 / -1; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .pill { display: inline-flex; border: 1px solid #303945; border-radius: 999px; padding: 5px 8px; font-size: 12px; color: #c7d0da; }
+    .ok { color: #8ce4a4; }
+    .bad { color: #ff9b9b; }
+    .warn { color: #f4c66d; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; }
+    dl { display: grid; grid-template-columns: 150px 1fr; gap: 7px 10px; margin: 10px 0 0; }
+    dt { color: #8f9aa7; }
+    dd { margin: 0; }
+    button { border: 0; border-radius: 9px; padding: 9px 12px; font-weight: 750; cursor: pointer; background: #edf2f7; color: #0c0f13; }
+    button.secondary { background: #252c35; color: #edf2f7; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { text-align: left; border-bottom: 1px solid #232a32; padding: 8px 6px; vertical-align: top; }
+    th { color: #99a5b2; }
+    #error { min-height: 1.4em; color: #ff9b9b; }
+    @media (max-width: 780px) { .grid { grid-template-columns: 1fr; } .span2 { grid-column: auto; } header { flex-direction: column; } dl { grid-template-columns: 120px 1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>METAENGINE A2 Chat Bridge</h1>
+      <p>Live DOM transport for two pinned peer chats. A2 controls visibility; the browser extension performs the actual composer write and Send click.</p>
+    </div>
+    <div class="row">
+      <button id="refreshA2" class="secondary">Refresh A2</button>
+    </div>
+  </header>
+
+  <div id="error"></div>
+
+  <section class="grid">
+    <article class="card" id="gptCard">
+      <div class="row"><h2>GPT chat</h2><span id="gptOnline" class="pill">offline</span></div>
+      <dl>
+        <dt>URL</dt><dd id="gptUrl" class="mono">—</dd>
+        <dt>Generating</dt><dd id="gptGenerating">—</dd>
+        <dt>Messages</dt><dd id="gptMessages">—</dd>
+        <dt>Last progress</dt><dd id="gptProgress">—</dd>
+        <dt>Assistant hash</dt><dd id="gptHash" class="mono">—</dd>
+      </dl>
+      <div class="row" style="margin-top:14px"><button id="wakeGpt">Queue GPT wake</button></div>
+    </article>
+
+    <article class="card" id="glmCard">
+      <div class="row"><h2>GLM / Z.AI chat</h2><span id="glmOnline" class="pill">offline</span></div>
+      <dl>
+        <dt>URL</dt><dd id="glmUrl" class="mono">—</dd>
+        <dt>Generating</dt><dd id="glmGenerating">—</dd>
+        <dt>Messages</dt><dd id="glmMessages">—</dd>
+        <dt>Last progress</dt><dd id="glmProgress">—</dd>
+        <dt>Assistant hash</dt><dd id="glmHash" class="mono">—</dd>
+      </dl>
+      <div class="row" style="margin-top:14px"><button id="wakeGlm">Queue GLM wake</button></div>
+    </article>
+
+    <article class="card span2">
+      <div class="row"><h2>A2 control plane</h2><span id="a2Online" class="pill">offline</span><span id="visibility" class="pill">peer payloads hidden</span></div>
+      <dl>
+        <dt>Workspace</dt><dd id="workspace" class="mono">—</dd>
+        <dt>Macroblock</dt><dd id="macroblock" class="mono">—</dd>
+        <dt>Mailbox head</dt><dd id="head">—</dd>
+        <dt>Pending duel</dt><dd id="duel" class="mono">—</dd>
+        <dt>Relay state</dt><dd id="relay">—</dd>
+        <dt>Pending actors</dt><dd id="actors">—</dd>
+        <dt>Last refresh</dt><dd id="a2Refresh">—</dd>
+      </dl>
+      <p id="a2Error" class="bad"></p>
+    </article>
+
+    <article class="card span2">
+      <h2>Command queue</h2>
+      <div style="overflow:auto"><table><thead><tr><th>time</th><th>target</th><th>status</th><th>prompt hash</th><th>Send</th></tr></thead><tbody id="queue"></tbody></table></div>
+    </article>
+  </section>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const text = (id, value) => { $(id).textContent = value ?? '—'; };
+  const short = (value, n = 18) => value ? (String(value).length > n ? String(value).slice(0, n) + '…' : String(value)) : '—';
+
+  function paintPeer(prefix, peer) {
+    const online = Boolean(peer?.online);
+    const badge = $(prefix + 'Online');
+    badge.textContent = online ? 'online' : 'offline';
+    badge.className = 'pill ' + (online ? 'ok' : 'bad');
+    text(prefix + 'Url', peer?.url);
+    text(prefix + 'Generating', peer?.generating == null ? '—' : String(peer.generating));
+    text(prefix + 'Messages', peer?.message_count);
+    text(prefix + 'Progress', peer?.last_progress_at);
+    text(prefix + 'Hash', short(peer?.last_assistant_sha256, 24));
+  }
+
+  function paint(status) {
+    paintPeer('gpt', status.peers?.CHATGPT);
+    paintPeer('glm', status.peers?.GLM_ZAI);
+    const a2Badge = $('a2Online');
+    a2Badge.textContent = status.a2?.online ? 'online' : 'offline';
+    a2Badge.className = 'pill ' + (status.a2?.online ? 'ok' : 'bad');
+    const visibility = $('visibility');
+    visibility.textContent = status.a2?.peer_payloads_exposed ? 'peer payloads visible' : 'peer payloads hidden';
+    visibility.className = 'pill ' + (status.a2?.peer_payloads_exposed ? 'ok' : 'warn');
+    text('workspace', status.workspace_id);
+    text('macroblock', status.macroblock_id);
+    text('head', status.a2?.head_message_seq);
+    text('duel', status.a2?.pending_duel_id ? `${status.a2.pending_duel_key || ''} (${status.a2.pending_duel_id})` : 'none');
+    text('relay', status.a2?.pending_relay_state);
+    text('actors', (status.a2?.pending_actors || []).join(', ') || '—');
+    text('a2Refresh', status.a2?.last_refresh_at);
+    text('a2Error', status.a2?.error || '');
+
+    const tbody = $('queue');
+    tbody.textContent = '';
+    for (const item of [...(status.queue || [])].reverse()) {
+      const tr = document.createElement('tr');
+      const result = (status.results || []).find((r) => r.command_id === item.command_id);
+      for (const value of [item.created_at, item.target_platform, item.status, short(item.prompt_sha256, 20), result?.clicked_send_button === true ? 'clicked' : '—']) {
+        const td = document.createElement('td');
+        td.textContent = value ?? '—';
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+  }
+
+  async function getStatus() {
+    try {
+      const response = await fetch('/v1/status', { cache: 'no-store' });
+      if (!response.ok) throw new Error(`status HTTP ${response.status}`);
+      paint(await response.json());
+      text('error', '');
+    } catch (error) {
+      text('error', String(error?.message || error));
+    }
+  }
+
+  async function post(path, body = {}) {
+    const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    if (!response.ok) throw new Error(`${path} HTTP ${response.status}: ${await response.text()}`);
+    return response.json();
+  }
+
+  $('wakeGpt').addEventListener('click', async () => { await post('/v1/control/wake', { target_platform: 'CHATGPT' }); await getStatus(); });
+  $('wakeGlm').addEventListener('click', async () => { await post('/v1/control/wake', { target_platform: 'GLM_ZAI' }); await getStatus(); });
+  $('refreshA2').addEventListener('click', async () => { await post('/v1/control/refresh-a2'); await getStatus(); });
+
+  getStatus();
+  setInterval(getStatus, 2500);
+</script>
+</body>
+</html>
