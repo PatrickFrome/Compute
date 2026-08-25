@@ -24,7 +24,7 @@
         "https://chat.openai.com/*",
         "https://chat.z.ai/*"
       ],
-      "js": ["content.js"],
+      "js": ["platform-dom-compat.js", "content.js"],
       "run_at": "document_idle"
     }
   ],
