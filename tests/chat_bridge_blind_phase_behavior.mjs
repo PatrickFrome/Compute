@@ -4,6 +4,8 @@ import { once } from 'node:events';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const MOCK_PORT = 8890;
@@ -14,6 +16,9 @@ const MAIN_SHA = '3df3eb84b39e32ef4f922a8e7f0067acb7469ed2';
 const DUEL_ID = 'fbf48fd3-256a-456b-b3fc-34b6a3241660';
 const GPT_DOM_MARKER = 'GPT_PRIVATE_DOM_DO_NOT_LEAK_8f71';
 const GLM_DOM_MARKER = 'GLM_OWN_CONTEXT_42aa';
+// Isolated per-run state dir: the daemon journal persists idempotency keys and
+// would otherwise suppress the deterministic wake key on repeated test runs.
+const STATE_DIR = mkdtempSync(join(tmpdir(), 'a2-blind-phase-'));
 
 function json(res, value) {
   const body = JSON.stringify(value);
@@ -89,7 +94,11 @@ const child = spawn(process.execPath, [join(ROOT, 'coordination/chat-control-pla
     A2_BRIDGE_INTERNAL_PORT: String(INTERNAL_PORT),
     A2_BRIDGE_IDLE_MS: '5000',
     A2_BRIDGE_WAKE_COOLDOWN_MS: '15000',
-    A2_BRIDGE_A2_REFRESH_MS: '1500'
+    A2_BRIDGE_A2_REFRESH_MS: '1500',
+    // The daemon persists the command idempotency journal in the state dir;
+    // a fixed directory would make the deterministic wake key collide across
+    // repeated test runs and silently suppress the expected wake command.
+    A2_BRIDGE_STATE_DIR: STATE_DIR
   },
   stdio: ['ignore', 'pipe', 'pipe']
 });
@@ -179,4 +188,7 @@ try {
   child.kill('SIGTERM');
   await Promise.race([once(child, 'exit'), new Promise((r) => setTimeout(r, 1000))]);
   mock.close();
+  try {
+    rmSync(STATE_DIR, { recursive: true, force: true });
+  } catch (_) {}
 }
