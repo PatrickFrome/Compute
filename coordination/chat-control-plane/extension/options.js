@@ -7,7 +7,8 @@ const DEFAULTS = {
   autoOpenTabs: true,
   pollMs: 2500,
   chatgptUrl: "",
-  zaiUrl: PROJECT_ZAI_URL
+  zaiUrl: PROJECT_ZAI_URL,
+  bridgeSecret: ""
 };
 
 const $ = (id) => document.getElementById(id);
@@ -42,6 +43,7 @@ async function load() {
   $("chatgptUrl").value = settings.chatgptUrl || "";
   $("zaiUrl").value = settings.zaiUrl || PROJECT_ZAI_URL;
   $("daemonUrl").value = settings.daemonUrl || DEFAULTS.daemonUrl;
+  $("bridgeSecret").value = settings.bridgeSecret || "";
   $("pollMs").value = settings.pollMs || DEFAULTS.pollMs;
   $("autoOpenTabs").checked = settings.autoOpenTabs !== false;
   $("armed").checked = settings.armed === true;
@@ -53,18 +55,22 @@ async function save() {
     const chatgptUrl = chatgptRaw ? normalizedChatUrl(chatgptRaw, "CHATGPT") : "";
     const zaiUrl = normalizedChatUrl($("zaiUrl").value.trim(), "GLM_ZAI");
     const daemon = new URL($("daemonUrl").value.trim());
-    if (!['http:', 'https:'].includes(daemon.protocol)) throw new Error("Daemon URL must use HTTP(S)");
+    if (daemon.protocol !== 'http:') throw new Error("Local daemon must use HTTP on loopback");
+    if (!['127.0.0.1', 'localhost'].includes(daemon.hostname)) throw new Error("Daemon must be loopback-only");
+    const bridgeSecret = $("bridgeSecret").value.trim();
+    if (bridgeSecret.length < 32) throw new Error("Pairing secret must be at least 32 characters");
     const pollMs = Math.max(1000, Math.min(30000, Number($("pollMs").value) || DEFAULTS.pollMs));
 
     await chrome.storage.local.set({
       chatgptUrl,
       zaiUrl,
       daemonUrl: daemon.href.replace(/\/+$/, ""),
+      bridgeSecret,
       pollMs,
       autoOpenTabs: $("autoOpenTabs").checked,
       armed: $("armed").checked
     });
-    setStatus("Saved. Exact peer bindings are active.");
+    setStatus("Saved. Exact peer bindings and localhost pairing are active.");
     await chrome.runtime.sendMessage({ type: "BRIDGE_POLL_NOW" });
   } catch (error) {
     setStatus(String(error?.message || error), true);
@@ -97,7 +103,7 @@ $("pollNow").addEventListener("click", async () => {
   try {
     const response = await chrome.runtime.sendMessage({ type: "BRIDGE_POLL_NOW" });
     if (!response?.ok) throw new Error(response?.error || "poll failed");
-    setStatus("Daemon poll requested.");
+    setStatus("Authenticated daemon poll requested.");
   } catch (error) {
     setStatus(String(error?.message || error), true);
   }
