@@ -8,12 +8,12 @@ verified or that a worker is admitted.
 
 The launcher:
 1. requires Linux and a non-root caller;
-2. creates a new user + mount namespace without privileged mode;
-3. maps only the caller UID/GID into the new user namespace;
-4. makes mount propagation private;
+2. creates a new user namespace without privileged mode;
+3. maps only the caller UID/GID into that user namespace;
+4. creates a separate mount namespace and makes mount propagation private;
 5. sets PR_SET_NO_NEW_PRIVS;
 6. installs a non-empty libseccomp deny policy;
-7. drops all Linux capabilities available in the new user namespace;
+7. drops the capability bounding set available in the new user namespace;
 8. execs the requested worker command.
 
 No fallback to privileged execution, seccomp=unconfined, or an allow-all
@@ -88,6 +88,21 @@ def _write_text(path: str, value: str) -> None:
         raise SandboxUnavailable(f"cannot write {path}: {exc}") from exc
 
 
+def _disable_setgroups_if_needed() -> None:
+    path = Path("/proc/self/setgroups")
+    try:
+        current = path.read_text(encoding="ascii").strip()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise SandboxUnavailable(f"cannot read {path}: {exc}") from exc
+    if current == "deny":
+        return
+    if current != "allow":
+        raise SandboxUnavailable(f"unexpected setgroups state: {current!r}")
+    _write_text(str(path), "deny\n")
+
+
 def enter_rootless_namespaces() -> None:
     if not sys.platform.startswith("linux"):
         raise SandboxUnavailable("linux required")
@@ -96,18 +111,19 @@ def enter_rootless_namespaces() -> None:
         raise SandboxUnavailable("root caller forbidden")
 
     libc = _libc()
-    if libc.unshare(ctypes.c_int(CLONE_NEWUSER | CLONE_NEWNS)) != 0:
-        _raise_errno("unshare user+mount namespace failed")
 
-    # Single-ID mapping is intentionally narrow and does not need subordinate
-    # UID/GID ranges. setgroups must be disabled before gid_map on modern Linux.
-    try:
-        _write_text("/proc/self/setgroups", "deny\n")
-    except SandboxUnavailable as exc:
-        if "No such file" not in str(exc):
-            raise
+    # Two-phase bootstrap mirrors the normal rootless-container sequence:
+    # create the user namespace first, establish a narrow single-ID mapping,
+    # then create the mount namespace using capabilities scoped only to userns.
+    if libc.unshare(ctypes.c_int(CLONE_NEWUSER)) != 0:
+        _raise_errno("unshare user namespace failed")
+
+    _disable_setgroups_if_needed()
     _write_text("/proc/self/uid_map", f"{uid} {uid} 1\n")
     _write_text("/proc/self/gid_map", f"{gid} {gid} 1\n")
+
+    if libc.unshare(ctypes.c_int(CLONE_NEWNS)) != 0:
+        _raise_errno("unshare mount namespace failed")
 
     # Prevent mount propagation back to the parent namespace.
     if libc.mount(None, ctypes.c_char_p(b"/"), None, ctypes.c_ulong(MS_REC | MS_PRIVATE), None) != 0:
@@ -154,7 +170,7 @@ def install_seccomp_deny_policy(syscalls: Iterable[str] = DENIED_SYSCALLS) -> No
         for syscall in selected:
             nr = sec.seccomp_syscall_resolve_name(syscall.encode("ascii"))
             if nr < 0:
-                continue  # architecture may not implement every syscall
+                continue
             rc = sec.seccomp_rule_add(ctx, action, nr, 0)
             if rc != 0:
                 raise SandboxUnavailable(f"seccomp_rule_add failed for {syscall}: {rc}")
@@ -170,8 +186,6 @@ def install_seccomp_deny_policy(syscalls: Iterable[str] = DENIED_SYSCALLS) -> No
 
 def drop_capability_bounding_set() -> None:
     libc = _libc()
-    # Linux currently defines capabilities far below 64. Dropping nonexistent
-    # numbers returns EINVAL and is ignored; any other error fails closed.
     for cap in range(0, 64):
         ctypes.set_errno(0)
         rc = libc.prctl(ctypes.c_int(PR_CAPBSET_DROP), ctypes.c_ulong(cap), 0, 0, 0)
