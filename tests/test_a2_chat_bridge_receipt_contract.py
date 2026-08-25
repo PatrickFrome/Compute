@@ -58,6 +58,21 @@ class A2ChatBridgeReceiptContract(unittest.TestCase):
                 rf"grant execute on function public\.{fn}[^;]+to service_role;",
             )
 
+    def test_security_definer_search_path_is_empty_and_references_are_safe(self):
+        self.assertGreaterEqual(self.lower.count("set search_path = ''"), 2)
+        self.assertNotIn("set search_path = pg_catalog", self.lower)
+        self.assertIn("destruktion_meta.compute_fabric_a2_chat_bridge_receipt_h205f22", self.lower)
+        self.assertIn("extensions.digest", self.lower)
+        self.assertIn("pg_catalog.gen_random_uuid", self.lower)
+        self.assertIn("pg_catalog.jsonb_build_object", self.lower)
+        # COALESCE/GREATEST/LEAST are PostgreSQL conditional expressions, not
+        # ordinary schema-qualified functions.
+        self.assertNotIn("pg_catalog.coalesce(", self.lower)
+        self.assertNotIn("pg_catalog.greatest(", self.lower)
+        self.assertNotIn("pg_catalog.least(", self.lower)
+        self.assertIn("coalesce(p_a2_head_message_seq, -1)", self.lower)
+        self.assertIn("limit greatest(1, least(coalesce(p_limit,100),500))", self.lower)
+
     def test_hashes_and_target_pair_are_fail_closed(self):
         self.assertGreaterEqual(self.sql.count("^[0-9a-f]{64}$"), 5)
         self.assertIn("bridge_target_pair_invalid", self.sql)
