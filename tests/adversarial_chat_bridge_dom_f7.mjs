@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 /* Adversarial DOM test for the F7 bridge fix.
  * Extracts the REAL matching/resolution source from content.js and drives it
- * with mock DOM elements. Tests: Resend, Send feedback, multiple textareas,
- * multiple send buttons, missing adjacency, normal Z.AI/ChatGPT shapes,
- * multiple adjacent pairs. */
+ * with mock DOM elements. Tests exact Send/Stop semantics, adjacency, idle
+ * composer observation, and fail-closed ambiguity. */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -101,18 +100,21 @@ for (let i = 0; i < 9; i += 1) farEl = domNode([], farEl);
 check('adjacency beyond 8 levels fails', sharedContainer(farEl, farSend) === false);
 
 const resolveSrc = source.slice(
-  source.indexOf('function resolveComposerSendPair()'),
+  source.indexOf('function resolveComposer()'),
   source.indexOf('function getComposer()')
 );
-check('exactly-one-pair contract present', resolveSrc.includes('if (pairs.length === 1)'));
-check('ambiguity fails closed', resolveSrc.includes('composer_send_pair_ambiguous'));
-check('missing send fails closed', resolveSrc.includes('send_button_not_found'));
+check('unique composer is resolved independently', resolveSrc.includes('if (composers.length === 1)'));
+check('multiple composers fail closed', resolveSrc.includes('composer_ambiguous'));
+check('pair ambiguity fails closed', resolveSrc.includes('composer_send_pair_ambiguous'));
+check('missing send preserves resolved composer', resolveSrc.includes('{ composer, send: null, error: "send_button_not_found" }'));
 check('missing composer fails closed', resolveSrc.includes('composer_not_found'));
 check('no adjacency fails closed', resolveSrc.includes('composer_send_pair_not_found'));
+check('idle pageState does not require Send button', source.includes('const composerResolution = resolveComposer();') && source.includes('composer_present: Boolean(composer)'));
+check('writeComposerExact resolves composer before Send exists', source.includes('if (composerResolution.error) throw new Error(composerResolution.error)'));
 check('no substring fallback remains', !source.includes('semantic.includes(term)'));
 check('waitForEnabledSend revalidates exact composer text', source.includes('composerText(pair.composer) === expected'));
-check('waitForEnabledSend throws on ambiguity', source.includes('pair.error === "composer_send_pair_ambiguous"'));
-check('dom_pair_error surfaced', source.includes('dom_pair_error: pair.error'));
+check('waitForEnabledSend throws on pair ambiguity', source.includes('pair.error === "composer_send_pair_ambiguous"'));
+check('dom composer error surfaced', source.includes('dom_pair_error: composerResolution.error'));
 check('generating conservative on stop controls', source.includes('semanticButtonCandidates("stop").length > 0'));
 
 console.log(`\n${passed} adversarial checks passed`);
