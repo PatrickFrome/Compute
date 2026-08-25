@@ -1,0 +1,37 @@
+name: W1 Two-Plane Namespace Witness Contract
+
+on:
+  push:
+    branches: [work/w1-sandbox-launcher-prep]
+    paths:
+      - 'worker/native_linux/two_plane_namespace_witness.py'
+      - 'tests/test_w1_two_plane_namespace_witness.py'
+      - '.github/workflows/w1-two-plane-namespace-contract.yml'
+
+permissions: {}
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Compile witness
+        run: python3 -m py_compile worker/native_linux/two_plane_namespace_witness.py
+      - name: Run adversarial witness tests
+        run: python3 -m unittest tests.test_w1_two_plane_namespace_witness -v
+      - name: Assert forbidden isolation shortcuts are explicit fail conditions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('worker/native_linux/two_plane_namespace_witness.py').read_text()
+          for token in ('runtime_rootless','no_host_pid_sharing','no_host_network_sharing','not_privileged','requires_authenticated_outer_collector','requires_persisted_readback'):
+              assert token in p, token
+          assert 'w1_verified": False' in p
+          assert 'worker_admitted": False' in p
+          PY
