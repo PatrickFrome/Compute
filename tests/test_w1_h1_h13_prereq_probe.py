@@ -18,14 +18,39 @@ import h1_h13_prereq_probe as probe  # noqa: E402
 CLONE_NEWUSER = 0x10000000
 
 
-def _can_fork_unprivileged_userns() -> bool:
+def _can_map_parent_identity_in_unprivileged_userns() -> bool:
+    """Return true only when this CI/runtime can exercise uid/gid mapping.
+
+    Some hosted runners allow CLONE_NEWUSER but fence /proc/self/setgroups or
+    uid_map/gid_map. That is an environment limitation, not a regression in the
+    probe's source ordering, so the live kernel test must skip there rather than
+    report a false code failure.
+    """
     if not sys.platform.startswith("linux") or os.geteuid() == 0:
         return False
     libc = ctypes.CDLL(None, use_errno=True)
+    parent_uid, parent_gid = os.getuid(), os.getgid()
     pid = os.fork()
     if pid == 0:
-        code = 0 if libc.unshare(ctypes.c_int(CLONE_NEWUSER)) == 0 else 1
-        os._exit(code)
+        try:
+            if libc.unshare(ctypes.c_int(CLONE_NEWUSER)) != 0:
+                os._exit(1)
+            setgroups = Path("/proc/self/setgroups")
+            if setgroups.exists():
+                current = setgroups.read_text(encoding="ascii").strip()
+                if current == "allow":
+                    setgroups.write_text("deny\n", encoding="ascii")
+                elif current != "deny":
+                    os._exit(1)
+            Path("/proc/self/uid_map").write_text(
+                f"{parent_uid} {parent_uid} 1\n", encoding="ascii"
+            )
+            Path("/proc/self/gid_map").write_text(
+                f"{parent_gid} {parent_gid} 1\n", encoding="ascii"
+            )
+            os._exit(0)
+        except (OSError, PermissionError):
+            os._exit(1)
     _, status = os.waitpid(pid, 0)
     return os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0
 
@@ -55,13 +80,13 @@ class PrereqProbeUidMapIdentityTests(unittest.TestCase):
         self.assertEqual(post_capture, -1, "post-unshare identity capture found")
 
     @unittest.skipUnless(
-        _can_fork_unprivileged_userns(),
-        "requires linux + non-root + unprivileged user namespaces",
+        _can_map_parent_identity_in_unprivileged_userns(),
+        "requires a runtime that permits unprivileged userns uid/gid mapping",
     )
     def test_overflow_identity_cannot_be_mapped_but_pre_unshare_identity_can(self):
         libc = ctypes.CDLL(None, use_errno=True)
         read_fd, write_fd = os.pipe()
-        parent_uid = os.getuid()
+        parent_uid, parent_gid = os.getuid(), os.getgid()
         pid = os.fork()
         if pid == 0:
             os.close(read_fd)
@@ -73,8 +98,12 @@ class PrereqProbeUidMapIdentityTests(unittest.TestCase):
                 result["overflow_uid"] = overflow_uid
                 result["overflow_differs_from_parent"] = overflow_uid != parent_uid
                 setgroups = Path("/proc/self/setgroups")
-                if setgroups.read_text(encoding="ascii").strip() == "allow":
-                    setgroups.write_text("deny\n", encoding="ascii")
+                if setgroups.exists():
+                    current = setgroups.read_text(encoding="ascii").strip()
+                    if current == "allow":
+                        setgroups.write_text("deny\n", encoding="ascii")
+                    elif current != "deny":
+                        raise RuntimeError(f"unexpected_setgroups:{current}")
                 try:
                     Path("/proc/self/uid_map").write_text(
                         f"{overflow_uid} {overflow_uid} 1\n", encoding="ascii"
@@ -82,13 +111,13 @@ class PrereqProbeUidMapIdentityTests(unittest.TestCase):
                     result["overflow_map_accepted"] = True
                 except PermissionError:
                     result["overflow_map_accepted"] = False
-                try:
-                    Path("/proc/self/uid_map").write_text(
-                        f"{parent_uid} {parent_uid} 1\n", encoding="ascii"
-                    )
-                    result["parent_map_accepted"] = True
-                except PermissionError:
-                    result["parent_map_accepted"] = False
+                Path("/proc/self/uid_map").write_text(
+                    f"{parent_uid} {parent_uid} 1\n", encoding="ascii"
+                )
+                Path("/proc/self/gid_map").write_text(
+                    f"{parent_gid} {parent_gid} 1\n", encoding="ascii"
+                )
+                result["parent_map_accepted"] = True
             except Exception as exc:  # child-only diagnostic
                 result["error"] = f"{type(exc).__name__}:{exc}"
             os.write(write_fd, json.dumps(result).encode("utf-8"))
