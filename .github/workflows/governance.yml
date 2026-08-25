@@ -1,7 +1,7 @@
 name: Compute Fabric Governance
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
     types: [opened, synchronize, reopened, edited]
 
@@ -12,14 +12,42 @@ jobs:
   governance:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Reject external-fork governance execution
+        shell: bash
+        env:
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$HEAD_REPO" != "$BASE_REPO" ]; then
+            echo "Compute Fabric governance accepts repository-local workstreams only." >&2
+            exit 1
+          fi
+
+      - name: Checkout trusted base only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Fetch PR head object without checkout
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
+          test "$HEAD_SHA" != "$BASE_SHA"
+          git fetch --no-tags --depth=1 "https://github.com/${GITHUB_REPOSITORY}.git" "$HEAD_SHA"
+          git cat-file -e "$HEAD_SHA^{commit}"
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
 
       - name: Validate registered workstream and canonical binding
         shell: bash
         env:
-          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           set -euo pipefail
@@ -40,7 +68,7 @@ jobs:
             work/a1-agent-workspace)
               EXPECTED_L1='C2'
               ;;
-            work/aop1-autonomous-orchestration|work/same-point-duel-v4-*)
+            work/aop1-autonomous-orchestration|work/same-point-duel-v4-*|work/chat-control-plane-browser-bridge)
               EXPECTED_L1='CROSS-CUTTING'
               ;;
             analysis/integration)
@@ -62,28 +90,56 @@ jobs:
             exit 1
           fi
 
-      - name: Validate canonical architecture files
+      - name: Prevent governance self-authorization
         shell: bash
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          test -f README.md
-          test -f docs/CANONICAL_ROADMAP.md
-          test -f docs/CHAT_TOPOLOGY.md
-          test -f docs/ROADMAP_EXECUTION_PROTOCOL.md
-          test -f .github/pull_request_template.md
+          if git diff --no-ext-diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Fxq '.github/workflows/governance.yml'; then
+            case "$HEAD_REF" in
+              analysis/integration|work/same-point-duel-v4-*)
+                ;;
+              *)
+                echo "Only pre-authorized governance paths may modify governance.yml." >&2
+                exit 1
+                ;;
+            esac
+          fi
 
-          grep -Fq 'R1' docs/CANONICAL_ROADMAP.md
-          grep -Fq 'C1' docs/CANONICAL_ROADMAP.md
-          grep -Fq 'C17' docs/CANONICAL_ROADMAP.md
-          grep -Fq 'F1+' docs/CANONICAL_ROADMAP.md
-          grep -Fq 'Level-2 execution DAG mapping' docs/CANONICAL_ROADMAP.md
+      - name: Validate canonical architecture files from PR tree
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          for path in \
+            README.md \
+            docs/CANONICAL_ROADMAP.md \
+            docs/CHAT_TOPOLOGY.md \
+            docs/ROADMAP_EXECUTION_PROTOCOL.md \
+            .github/pull_request_template.md
+          do
+            git cat-file -e "$HEAD_SHA:$path"
+          done
+
+          git show "$HEAD_SHA:docs/CANONICAL_ROADMAP.md" | grep -Fq 'R1'
+          git show "$HEAD_SHA:docs/CANONICAL_ROADMAP.md" | grep -Fq 'C1'
+          git show "$HEAD_SHA:docs/CANONICAL_ROADMAP.md" | grep -Fq 'C17'
+          git show "$HEAD_SHA:docs/CANONICAL_ROADMAP.md" | grep -Fq 'F1+'
+          git show "$HEAD_SHA:docs/CANONICAL_ROADMAP.md" | grep -Fq 'Level-2 execution DAG mapping'
 
       - name: Prevent silent canonical-roadmap mutation
-        if: ${{ github.head_ref != 'analysis/integration' }}
+        if: ${{ github.event.pull_request.head.ref != 'analysis/integration' }}
         shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          if git diff --name-only "${{ github.event.pull_request.base.sha }}"...HEAD | grep -Fxq 'docs/CANONICAL_ROADMAP.md'; then
+          if git diff --no-ext-diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Fxq 'docs/CANONICAL_ROADMAP.md'; then
             echo 'Implementation workstreams may not silently mutate the canonical Level-1 roadmap.' >&2
             echo 'Route roadmap amendments through analysis/integration and explicit Supervisor architecture review.' >&2
             exit 1
