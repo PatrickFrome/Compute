@@ -7,32 +7,19 @@
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const normalize = (value) => String(value ?? "").replace(/\r\n/g, "\n").trim();
 
-  function target(tabId) {
-    return { tabId };
-  }
-
-  async function send(tabId, method, params = {}) {
-    return chrome.debugger.sendCommand(target(tabId), method, params);
-  }
+  function target(tabId) { return { tabId }; }
+  async function send(tabId, method, params = {}) { return chrome.debugger.sendCommand(target(tabId), method, params); }
 
   async function evaluate(tabId, expression) {
-    const result = await send(tabId, "Runtime.evaluate", {
-      expression,
-      returnByValue: true,
-      awaitPromise: true
-    });
+    const result = await send(tabId, "Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
     if (result?.exceptionDetails) throw new Error("chatgpt_cdp_evaluate_failed");
     return result?.result?.value;
   }
 
   function validateBridgePrompt(prompt) {
     const text = String(prompt || "");
-    if (!text.trim() || text.length > MAX_PROMPT_CHARS) {
-      throw new Error("chatgpt_cdp_prompt_invalid");
-    }
-    if (!text.startsWith("A2 CHAT BRIDGE — AUTONOMOUS CONTINUE")) {
-      throw new Error("chatgpt_cdp_prompt_not_bridge_owned");
-    }
+    if (!text.trim() || text.length > MAX_PROMPT_CHARS) throw new Error("chatgpt_cdp_prompt_invalid");
+    if (!text.startsWith("A2 CHAT BRIDGE — AUTONOMOUS CONTINUE")) throw new Error("chatgpt_cdp_prompt_not_bridge_owned");
     if (!text.includes("bridge_job_target=GPT") || !text.includes("transport=WEB_CHAT_INTERACTIVE_REMOTE")) {
       throw new Error("chatgpt_cdp_prompt_scope_mismatch");
     }
@@ -47,12 +34,8 @@
   async function ensurePinnedChatgptTab(tabId) {
     const tab = await chrome.tabs.get(tabId);
     const url = new URL(String(tab?.url || ""));
-    if (!["chatgpt.com", "chat.openai.com"].includes(url.hostname.toLowerCase())) {
-      throw new Error("chatgpt_cdp_target_host_mismatch");
-    }
-    if (!url.pathname.startsWith("/c/")) {
-      throw new Error("chatgpt_cdp_target_not_conversation");
-    }
+    if (!["chatgpt.com", "chat.openai.com"].includes(url.hostname.toLowerCase())) throw new Error("chatgpt_cdp_target_host_mismatch");
+    if (!url.pathname.startsWith("/c/")) throw new Error("chatgpt_cdp_target_not_conversation");
   }
 
   async function inspectComposer(tabId) {
@@ -84,22 +67,10 @@
   }
 
   async function clearComposerTrusted(tabId) {
-    await send(tabId, "Input.dispatchKeyEvent", {
-      type: "rawKeyDown", key: "a", code: "KeyA", modifiers: 2,
-      windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65
-    });
-    await send(tabId, "Input.dispatchKeyEvent", {
-      type: "keyUp", key: "a", code: "KeyA", modifiers: 2,
-      windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65
-    });
-    await send(tabId, "Input.dispatchKeyEvent", {
-      type: "rawKeyDown", key: "Backspace", code: "Backspace",
-      windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8
-    });
-    await send(tabId, "Input.dispatchKeyEvent", {
-      type: "keyUp", key: "Backspace", code: "Backspace",
-      windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8
-    });
+    await send(tabId, "Input.dispatchKeyEvent", { type: "rawKeyDown", key: "a", code: "KeyA", modifiers: 2, windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 });
+    await send(tabId, "Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", modifiers: 2, windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 });
+    await send(tabId, "Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 });
+    await send(tabId, "Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 });
   }
 
   async function inspectSend(tabId, expectedText) {
@@ -145,9 +116,7 @@
       attached = true;
       return await operation();
     } finally {
-      if (attached) {
-        try { await chrome.debugger.detach(target(tabId)); } catch (_) {}
-      }
+      if (attached) { try { await chrome.debugger.detach(target(tabId)); } catch (_) {} }
       inFlightTabs.delete(tabId);
     }
   }
@@ -157,7 +126,8 @@
     return withDebugger(tabId, async () => {
       const before = await inspectComposer(tabId);
       if (!before?.ok) throw new Error(`chatgpt_cdp_${before?.error || "composer_inspect_failed"}`);
-      if (normalize(before.text) !== normalize(text)) throw new Error("chatgpt_cdp_visible_prompt_mismatch");
+      const beforeText = normalize(before.text);
+      if (beforeText !== "" && beforeText !== normalize(text)) throw new Error("chatgpt_cdp_composer_not_empty");
 
       await focusComposer(tabId);
       await clearComposerTrusted(tabId);
@@ -166,9 +136,7 @@
       await sleep(220);
 
       const after = await inspectComposer(tabId);
-      if (!after?.ok || normalize(after.text) !== normalize(text)) {
-        throw new Error("chatgpt_cdp_prime_readback_mismatch");
-      }
+      if (!after?.ok || normalize(after.text) !== normalize(text)) throw new Error("chatgpt_cdp_prime_readback_mismatch");
       return { ok: true, phase: "PRIMED" };
     });
   }
