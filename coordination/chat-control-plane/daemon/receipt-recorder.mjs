@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 const MODES = new Set(['OFF', 'BEST_EFFORT', 'REQUIRED']);
 const HEX64 = /^[0-9a-f]{64}$/;
+const SEND_LIKE_STATUSES = new Set(['SENT_AND_DOM_VERIFIED', 'SENT_WEAK_DOM_VERIFIED', 'SENT_ALREADY_DURABLE']);
 
 export const sha256 = (value) => createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
 
@@ -115,6 +116,9 @@ export class BridgeReceiptRecorder {
       if (explicitAgent !== expectedAgent) throw new Error('receipt_target_pair_invalid');
       const frontier = Number(command.a2_head_message_seq);
       if (!Number.isInteger(frontier) || frontier < 0) throw new Error('receipt_a2_frontier_invalid');
+      if (typeof command.a2_peer_payloads_exposed !== 'boolean') throw new Error('receipt_visibility_flag_required');
+      if (command.authority_effect !== false) throw new Error('receipt_command_nonauthority_required');
+      if (!Object.hasOwn(command, 'duel_id')) throw new Error('receipt_duel_lineage_required');
       const idempotency = assertHex64(command.idempotency_key, 'idempotency_key');
       const promptSha = assertHex64(command.prompt_sha256, 'prompt_sha256');
       const lease = {
@@ -124,7 +128,7 @@ export class BridgeReceiptRecorder {
         target_url_sha256: target.target_url_sha256,
         a2_head_message_seq: frontier,
         duel_id: command.duel_id || null,
-        pending_payloads_exposed: command.a2_peer_payloads_exposed === true,
+        pending_payloads_exposed: command.a2_peer_payloads_exposed,
         idempotency_key_sha256: idempotency,
         prompt_sha256: promptSha,
       };
@@ -160,6 +164,7 @@ export class BridgeReceiptRecorder {
       if (!lease) throw new Error(`receipt_lease_binding_missing:${commandId}`);
       const status = String(result?.status || '');
       if (!status) throw new Error('receipt_result_status_required');
+      if (result?.authority_effect === true) throw new Error('receipt_result_authority_forbidden');
       const clicked = result?.clicked_send_button === true;
       const strong = status === 'SENT_AND_DOM_VERIFIED'
         && result?.verification?.verified === true
@@ -168,6 +173,19 @@ export class BridgeReceiptRecorder {
         && result?.verification?.verified === true
         && result?.verification?.durable_replay === true;
       const domVerified = strong || durableReplay;
+
+      if (SEND_LIKE_STATUSES.has(status)) {
+        if (String(result?.target_platform || '') !== lease.target_platform) {
+          throw new Error('receipt_result_platform_mismatch');
+        }
+        let resultUrlHash;
+        try {
+          resultUrlHash = sha256(normalizedUrl(result?.target_url));
+        } catch (_) {
+          throw new Error('receipt_result_target_url_invalid');
+        }
+        if (resultUrlHash !== lease.target_url_sha256) throw new Error('receipt_result_target_url_mismatch');
+      }
 
       const receipt = await this.ingest({
         p_workspace_id: this.workspaceId,
