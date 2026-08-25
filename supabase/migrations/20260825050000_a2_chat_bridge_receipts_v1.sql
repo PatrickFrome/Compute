@@ -32,6 +32,21 @@ create table if not exists destruktion_meta.compute_fabric_a2_chat_bridge_receip
     (event_kind in ('COMMAND_QUEUED','COMMAND_LEASED') and command_id is not null and idempotency_key_sha256 is not null and prompt_sha256 is not null)
     or
     (event_kind = 'SEND_RESULT' and command_id is not null and idempotency_key_sha256 is not null and prompt_sha256 is not null and result_status is not null and clicked_send_button is not null and dom_send_verified is not null)
+  ),
+  check (
+    event_kind <> 'SEND_RESULT'
+    or result_status <> 'SENT_AND_DOM_VERIFIED'
+    or (clicked_send_button = true and dom_send_verified = true)
+  ),
+  check (
+    event_kind <> 'SEND_RESULT'
+    or result_status <> 'SENT_WEAK_DOM_VERIFIED'
+    or (clicked_send_button = true and dom_send_verified = false)
+  ),
+  check (
+    event_kind <> 'SEND_RESULT'
+    or dom_send_verified = false
+    or (clicked_send_button = true and result_status in ('SENT_AND_DOM_VERIFIED','SENT_ALREADY_DURABLE'))
   )
 );
 
@@ -79,6 +94,8 @@ declare
   v_hash text;
   v_created_at timestamptz := clock_timestamp();
   v_payload jsonb;
+  v_inserted integer := 0;
+  v_existing destruktion_meta.compute_fabric_a2_chat_bridge_receipt_h205f22%rowtype;
 begin
   if p_workspace_id is null then raise exception 'bridge_workspace_required'; end if;
   if p_bridge_instance_id is null or length(p_bridge_instance_id) not between 1 and 128 then raise exception 'bridge_instance_invalid'; end if;
@@ -96,6 +113,9 @@ begin
     if p_command_id is null or p_idempotency_key_sha256 is null or p_prompt_sha256 is null then raise exception 'bridge_command_fields_required'; end if;
   elsif p_event_kind = 'SEND_RESULT' then
     if p_command_id is null or p_idempotency_key_sha256 is null or p_prompt_sha256 is null or p_result_status is null or p_clicked_send_button is null or p_dom_send_verified is null then raise exception 'bridge_send_result_fields_required'; end if;
+    if p_result_status = 'SENT_AND_DOM_VERIFIED' and not (p_clicked_send_button and p_dom_send_verified) then raise exception 'bridge_strong_send_verification_invalid'; end if;
+    if p_result_status = 'SENT_WEAK_DOM_VERIFIED' and not (p_clicked_send_button and not p_dom_send_verified) then raise exception 'bridge_weak_send_verification_invalid'; end if;
+    if p_dom_send_verified and (not p_clicked_send_button or p_result_status not in ('SENT_AND_DOM_VERIFIED','SENT_ALREADY_DURABLE')) then raise exception 'bridge_dom_verification_status_invalid'; end if;
   end if;
 
   v_payload := jsonb_build_object(
@@ -136,12 +156,57 @@ begin
     p_message_count, p_generating, p_snapshot_sha256, p_command_id, p_idempotency_key_sha256,
     p_prompt_sha256, p_result_status, p_clicked_send_button, p_dom_send_verified,
     v_hash, false, false, v_created_at
-  );
+  ) on conflict do nothing;
+
+  get diagnostics v_inserted = row_count;
+  if v_inserted = 0 then
+    if p_command_id is null then
+      raise exception 'bridge_receipt_insert_conflict';
+    end if;
+
+    select * into v_existing
+    from destruktion_meta.compute_fabric_a2_chat_bridge_receipt_h205f22
+    where workspace_id = p_workspace_id
+      and bridge_instance_id = p_bridge_instance_id
+      and event_kind = p_event_kind
+      and command_id = p_command_id;
+
+    if not found then
+      raise exception 'bridge_receipt_insert_conflict';
+    end if;
+
+    if v_existing.target_agent is distinct from p_target_agent
+       or v_existing.target_platform is distinct from p_target_platform
+       or v_existing.target_url_sha256 is distinct from p_target_url_sha256
+       or v_existing.a2_head_message_seq is distinct from p_a2_head_message_seq
+       or v_existing.duel_id is distinct from p_duel_id
+       or v_existing.pending_payloads_exposed is distinct from p_pending_payloads_exposed
+       or v_existing.message_count is distinct from p_message_count
+       or v_existing.generating is distinct from p_generating
+       or v_existing.snapshot_sha256 is distinct from p_snapshot_sha256
+       or v_existing.idempotency_key_sha256 is distinct from p_idempotency_key_sha256
+       or v_existing.prompt_sha256 is distinct from p_prompt_sha256
+       or v_existing.result_status is distinct from p_result_status
+       or v_existing.clicked_send_button is distinct from p_clicked_send_button
+       or v_existing.dom_send_verified is distinct from p_dom_send_verified then
+      raise exception 'bridge_receipt_conflict';
+    end if;
+
+    return jsonb_build_object(
+      'schema','metaengine.compute.a2-chat-bridge-receipt.h205f22.v1',
+      'receipt_id',v_existing.receipt_id,
+      'receipt_sha256',v_existing.receipt_sha256,
+      'replayed',true,
+      'canonical',false,
+      'authority_effect',false
+    );
+  end if;
 
   return jsonb_build_object(
     'schema','metaengine.compute.a2-chat-bridge-receipt.h205f22.v1',
     'receipt_id',v_receipt_id,
     'receipt_sha256',v_hash,
+    'replayed',false,
     'canonical',false,
     'authority_effect',false
   );
