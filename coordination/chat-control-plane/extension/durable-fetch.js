@@ -87,9 +87,12 @@ function responseWith(response, body) {
   });
 }
 
+function bridgeBaseFromNextUrl(url) {
+  return String(url).replace(/\/v1\/commands\/next(?:\?.*)?$/, "").replace(/\/+$/, "");
+}
+
 async function acknowledgeDurableDuplicate(url, init, command, row) {
-  const base = new URL(url);
-  const resultUrl = `${base.origin}/v1/commands/${encodeURIComponent(command.command_id)}/result`;
+  const resultUrl = `${bridgeBaseFromNextUrl(url)}/v1/commands/${encodeURIComponent(command.command_id)}/result`;
   const headers = new Headers(init?.headers || {});
   headers.set("content-type", "application/json");
   try {
@@ -109,7 +112,7 @@ async function acknowledgeDurableDuplicate(url, init, command, row) {
     });
   } catch (_) {
     // Next poll retries acknowledgement, but the deterministic idempotency key
-    // prevents a second Send even if the daemon restarted with a new command ID.
+    // prevents a second Send even if the remote scheduler issued a new command ID.
   }
 }
 
@@ -135,7 +138,7 @@ globalThis.fetch = async (input, init = {}) => {
   }
 
   const response = await originalFetch(input, init);
-  if (!response.ok || method !== "GET" || !url.endsWith("/v1/commands/next")) return response;
+  if (!response.ok || method !== "POST" || !/\/v1\/commands\/next(?:\?.*)?$/.test(url)) return response;
 
   try {
     const body = await response.clone().json();
