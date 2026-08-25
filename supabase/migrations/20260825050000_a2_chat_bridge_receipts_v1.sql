@@ -18,7 +18,12 @@ create table if not exists destruktion_meta.compute_fabric_a2_chat_bridge_receip
   command_id uuid,
   idempotency_key_sha256 text check (idempotency_key_sha256 is null or idempotency_key_sha256 ~ '^[0-9a-f]{64}$'),
   prompt_sha256 text check (prompt_sha256 is null or prompt_sha256 ~ '^[0-9a-f]{64}$'),
-  result_status text check (result_status is null or length(result_status) between 1 and 96),
+  result_status text check (
+    result_status is null or result_status in (
+      'SENT_AND_DOM_VERIFIED','SENT_WEAK_DOM_VERIFIED','SENT_ALREADY_DURABLE',
+      'DUPLICATE_IGNORED','BLOCKED_NOT_ARMED','FAILED_CLOSED'
+    )
+  ),
   clicked_send_button boolean,
   dom_send_verified boolean,
   receipt_sha256 text not null unique check (receipt_sha256 ~ '^[0-9a-f]{64}$'),
@@ -45,8 +50,13 @@ create table if not exists destruktion_meta.compute_fabric_a2_chat_bridge_receip
   ),
   check (
     event_kind <> 'SEND_RESULT'
-    or dom_send_verified = false
-    or (clicked_send_button = true and result_status in ('SENT_AND_DOM_VERIFIED','SENT_ALREADY_DURABLE'))
+    or result_status <> 'SENT_ALREADY_DURABLE'
+    or (clicked_send_button = true and dom_send_verified = true)
+  ),
+  check (
+    event_kind <> 'SEND_RESULT'
+    or result_status not in ('DUPLICATE_IGNORED','BLOCKED_NOT_ARMED','FAILED_CLOSED')
+    or (clicked_send_button = false and dom_send_verified = false)
   )
 );
 
@@ -96,6 +106,7 @@ declare
   v_payload jsonb;
   v_inserted integer := 0;
   v_existing destruktion_meta.compute_fabric_a2_chat_bridge_receipt_h205f22%rowtype;
+  v_lease destruktion_meta.compute_fabric_a2_chat_bridge_receipt_h205f22%rowtype;
 begin
   if p_workspace_id is null then raise exception 'bridge_workspace_required'; end if;
   if p_bridge_instance_id is null or pg_catalog.length(p_bridge_instance_id) not between 1 and 128 then raise exception 'bridge_instance_invalid'; end if;
@@ -113,9 +124,30 @@ begin
     if p_command_id is null or p_idempotency_key_sha256 is null or p_prompt_sha256 is null then raise exception 'bridge_command_fields_required'; end if;
   elsif p_event_kind = 'SEND_RESULT' then
     if p_command_id is null or p_idempotency_key_sha256 is null or p_prompt_sha256 is null or p_result_status is null or p_clicked_send_button is null or p_dom_send_verified is null then raise exception 'bridge_send_result_fields_required'; end if;
+    if p_result_status not in ('SENT_AND_DOM_VERIFIED','SENT_WEAK_DOM_VERIFIED','SENT_ALREADY_DURABLE','DUPLICATE_IGNORED','BLOCKED_NOT_ARMED','FAILED_CLOSED') then raise exception 'bridge_result_status_invalid'; end if;
     if p_result_status = 'SENT_AND_DOM_VERIFIED' and not (p_clicked_send_button and p_dom_send_verified) then raise exception 'bridge_strong_send_verification_invalid'; end if;
     if p_result_status = 'SENT_WEAK_DOM_VERIFIED' and not (p_clicked_send_button and not p_dom_send_verified) then raise exception 'bridge_weak_send_verification_invalid'; end if;
-    if p_dom_send_verified and (not p_clicked_send_button or p_result_status not in ('SENT_AND_DOM_VERIFIED','SENT_ALREADY_DURABLE')) then raise exception 'bridge_dom_verification_status_invalid'; end if;
+    if p_result_status = 'SENT_ALREADY_DURABLE' and not (p_clicked_send_button and p_dom_send_verified) then raise exception 'bridge_durable_send_verification_invalid'; end if;
+    if p_result_status in ('DUPLICATE_IGNORED','BLOCKED_NOT_ARMED','FAILED_CLOSED') and (p_clicked_send_button or p_dom_send_verified) then raise exception 'bridge_nonsend_result_verification_invalid'; end if;
+
+    select * into v_lease
+    from destruktion_meta.compute_fabric_a2_chat_bridge_receipt_h205f22
+    where workspace_id = p_workspace_id
+      and bridge_instance_id = p_bridge_instance_id
+      and event_kind = 'COMMAND_LEASED'
+      and command_id = p_command_id;
+
+    if not found then raise exception 'bridge_send_result_lease_missing'; end if;
+    if v_lease.target_agent is distinct from p_target_agent
+       or v_lease.target_platform is distinct from p_target_platform
+       or v_lease.target_url_sha256 is distinct from p_target_url_sha256
+       or v_lease.a2_head_message_seq is distinct from p_a2_head_message_seq
+       or v_lease.duel_id is distinct from p_duel_id
+       or v_lease.pending_payloads_exposed is distinct from p_pending_payloads_exposed
+       or v_lease.idempotency_key_sha256 is distinct from p_idempotency_key_sha256
+       or v_lease.prompt_sha256 is distinct from p_prompt_sha256 then
+      raise exception 'bridge_send_result_lease_mismatch';
+    end if;
   end if;
 
   v_payload := pg_catalog.jsonb_build_object(
@@ -160,9 +192,7 @@ begin
 
   get diagnostics v_inserted = row_count;
   if v_inserted = 0 then
-    if p_command_id is null then
-      raise exception 'bridge_receipt_insert_conflict';
-    end if;
+    if p_command_id is null then raise exception 'bridge_receipt_insert_conflict'; end if;
 
     select * into v_existing
     from destruktion_meta.compute_fabric_a2_chat_bridge_receipt_h205f22
@@ -171,9 +201,7 @@ begin
       and event_kind = p_event_kind
       and command_id = p_command_id;
 
-    if not found then
-      raise exception 'bridge_receipt_insert_conflict';
-    end if;
+    if not found then raise exception 'bridge_receipt_insert_conflict'; end if;
 
     if v_existing.target_agent is distinct from p_target_agent
        or v_existing.target_platform is distinct from p_target_platform
