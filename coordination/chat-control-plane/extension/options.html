@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>METAENGINE Chat Control Plane</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    body { margin: 0; background: #0b0d10; color: #edf1f5; }
+    main { max-width: 880px; margin: 0 auto; padding: 32px 20px 56px; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    p { color: #aeb7c2; line-height: 1.55; }
+    .card { background: #12161b; border: 1px solid #252b33; border-radius: 14px; padding: 18px; margin: 18px 0; }
+    label { display: block; font-weight: 650; margin: 14px 0 7px; }
+    input[type="url"], input[type="number"] { width: 100%; box-sizing: border-box; background: #090b0e; color: #edf1f5; border: 1px solid #303844; border-radius: 9px; padding: 11px 12px; font: inherit; }
+    input:focus { outline: 2px solid #6ba7ff; outline-offset: 1px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    button { background: #edf1f5; color: #0b0d10; border: 0; border-radius: 9px; padding: 10px 14px; font-weight: 700; cursor: pointer; }
+    button.secondary { background: #242a31; color: #edf1f5; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+    .status { min-height: 1.4em; margin-top: 12px; color: #8fe3a7; }
+    .warn { color: #f0c26b; }
+    .pill { border: 1px solid #303844; border-radius: 999px; padding: 6px 9px; color: #c8d0d9; font-size: 13px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>METAENGINE Chat Control Plane</h1>
+  <p>Pin one ChatGPT conversation and one Z.AI conversation. The bridge will only send commands to the exact configured URLs. Click the extension icon to toggle the global ARMED / DISARMED kill switch.</p>
+
+  <section class="card">
+    <div class="row"><span class="pill">GPT peer</span><span class="pill">exact URL binding</span></div>
+    <label for="chatgptUrl">ChatGPT conversation URL</label>
+    <input id="chatgptUrl" type="url" placeholder="https://chatgpt.com/c/..." autocomplete="off" />
+    <div class="row" style="margin-top:10px"><button id="detectChatgpt" class="secondary" type="button">Use open ChatGPT tab</button></div>
+  </section>
+
+  <section class="card">
+    <div class="row"><span class="pill">GLM peer</span><span class="pill">pinned project chat</span></div>
+    <label for="zaiUrl">Z.AI conversation URL</label>
+    <input id="zaiUrl" type="url" autocomplete="off" />
+    <p class="mono">Default: https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db</p>
+    <div class="row"><button id="restoreZai" class="secondary" type="button">Restore project Z.AI chat</button></div>
+  </section>
+
+  <section class="card">
+    <label for="daemonUrl">Local bridge daemon</label>
+    <input id="daemonUrl" type="url" value="http://127.0.0.1:8765" autocomplete="off" />
+    <label for="pollMs">Command poll interval, ms</label>
+    <input id="pollMs" type="number" min="1000" max="30000" step="250" />
+    <div style="margin-top:14px"><label><input id="autoOpenTabs" type="checkbox" /> Automatically reopen a pinned peer tab if it is closed</label></div>
+    <div><label><input id="armed" type="checkbox" /> ARMED — allow real composer writes and real Send clicks</label></div>
+    <p class="warn">When ARMED, a command accepted from the localhost daemon can be inserted into the exact pinned conversation and the visible Send button will be clicked.</p>
+  </section>
+
+  <div class="row">
+    <button id="save" type="button">Save settings</button>
+    <button id="pollNow" class="secondary" type="button">Poll daemon now</button>
+  </div>
+  <div id="status" class="status" role="status"></div>
+</main>
+<script src="options.js"></script>
+</body>
+</html>
