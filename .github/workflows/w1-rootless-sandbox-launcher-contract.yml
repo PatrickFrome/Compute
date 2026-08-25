@@ -1,0 +1,51 @@
+name: W1 Rootless Sandbox Launcher Contract
+
+on:
+  push:
+    branches: [work/w1-sandbox-launcher-prep]
+    paths:
+      - 'worker/native_linux/rootless_sandbox_launcher.py'
+      - 'tests/test_w1_rootless_sandbox_launcher.py'
+      - '.github/workflows/w1-rootless-sandbox-launcher-contract.yml'
+
+permissions: {}
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile launcher
+        run: |
+          set -euo pipefail
+          python3 -m py_compile worker/native_linux/rootless_sandbox_launcher.py
+
+      - name: Run launcher policy tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_w1_rootless_sandbox_launcher -v
+
+      - name: Assert fail-closed source boundaries
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('worker/native_linux/rootless_sandbox_launcher.py').read_text()
+          required = (
+              'CLONE_NEWUSER', 'CLONE_NEWNS', 'PR_SET_NO_NEW_PRIVS',
+              'seccomp_load', 'PR_CAPBSET_DROP', 'mount', 'unshare',
+              'W1_SANDBOX_UNAVAILABLE', 'root caller forbidden',
+          )
+          for token in required:
+              assert token in p, token
+          forbidden = ('seccomp=unconfined', '--privileged', 'w1_verified = True', 'worker_admitted = True')
+          for token in forbidden:
+              assert token not in p, token
+          PY
