@@ -199,25 +199,30 @@
       .filter((button) => matchesButtonSemantics(button, kind));
   }
 
-  function resolveComposerSendPair() {
+  function resolveComposer() {
     const composers = composerCandidates();
-    const sendButtons = semanticButtonCandidates("send");
-    const pairs = [];
-    for (const composer of composers) {
-      for (const send of sendButtons) {
-        if (sharedContainer(composer, send)) pairs.push({ composer, send });
-      }
-    }
+    if (composers.length === 1) return { composer: composers[0], error: null };
+    if (composers.length > 1) return { composer: null, error: "composer_ambiguous" };
+    return { composer: null, error: "composer_not_found" };
+  }
 
-    if (pairs.length === 1) return { ...pairs[0], error: null };
-    if (pairs.length > 1) return { composer: null, send: null, error: "composer_send_pair_ambiguous" };
-    if (!sendButtons.length) return { composer: null, send: null, error: "send_button_not_found" };
-    if (!composers.length) return { composer: null, send: null, error: "composer_not_found" };
-    return { composer: null, send: null, error: "composer_send_pair_not_found" };
+  function resolveComposerSendPair() {
+    const composerResolution = resolveComposer();
+    if (composerResolution.error) {
+      return { composer: null, send: null, error: composerResolution.error };
+    }
+    const composer = composerResolution.composer;
+    const sendButtons = semanticButtonCandidates("send");
+    const matching = sendButtons.filter((send) => sharedContainer(composer, send));
+
+    if (matching.length === 1) return { composer, send: matching[0], error: null };
+    if (matching.length > 1) return { composer: null, send: null, error: "composer_send_pair_ambiguous" };
+    if (!sendButtons.length) return { composer, send: null, error: "send_button_not_found" };
+    return { composer, send: null, error: "composer_send_pair_not_found" };
   }
 
   function getComposer() {
-    return resolveComposerSendPair().composer;
+    return resolveComposer().composer;
   }
 
   function composerText(el) {
@@ -239,8 +244,8 @@
   }
 
   function pageState() {
-    const pair = resolveComposerSendPair();
-    const composer = pair.composer;
+    const composerResolution = resolveComposer();
+    const composer = composerResolution.composer;
     const messages = extractMessages();
     return {
       schema: "metaengine.chat-dom-snapshot.v1",
@@ -251,7 +256,7 @@
       generating: generating(),
       composer_present: Boolean(composer),
       composer_text: composerText(composer),
-      dom_pair_error: pair.error,
+      dom_pair_error: composerResolution.error,
       message_count: messages.length,
       messages,
       last_mutation_at_ms: lastMutationAt,
@@ -296,9 +301,9 @@
   }
 
   async function writeComposerExact(text) {
-    const pair = resolveComposerSendPair();
-    if (pair.error) throw new Error(pair.error);
-    const composer = pair.composer;
+    const composerResolution = resolveComposer();
+    if (composerResolution.error) throw new Error(composerResolution.error);
+    const composer = composerResolution.composer;
     composer.focus();
     if (composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement) {
       nativeSetValue(composer, text);
@@ -434,13 +439,9 @@
       return false;
     }
     if (message?.type === "EXECUTE_CHAT_SEND") {
-      executeSend(message.command)
+      executeSend(message.command || {})
         .then((result) => sendResponse({ ok: true, result }))
-        .catch((error) => sendResponse({
-          ok: false,
-          error: String(error?.message || error),
-          snapshot: pageState()
-        }));
+        .catch((error) => sendResponse({ ok: false, error: String(error?.message || error) }));
       return true;
     }
     return false;
