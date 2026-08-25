@@ -15,17 +15,23 @@ jobs:
           python3 -m py_compile \
             worker/native_linux/rootless_worker_launcher_v2.py \
             worker/native_linux/two_plane_safety_witness_v2.py \
-            worker/native_linux/worker_safety_bundle_collector_v2.py
+            worker/native_linux/worker_safety_bundle_collector_v2.py \
+            worker/native_linux/same_worker_two_plane_canary_v2.py
       - name: Run adversarial v2 tests
         run: |
           python3 -m unittest -v \
             tests.test_w1_two_plane_safety_v2 \
-            tests.test_w1_worker_safety_bundle_v2
+            tests.test_w1_worker_safety_bundle_v2 \
+            tests.test_w1_same_worker_two_plane_canary_v2
       - name: Assert non-authority outputs remain explicit
         run: |
+          for f in \
+            worker/native_linux/two_plane_safety_witness_v2.py \
+            worker/native_linux/worker_safety_bundle_collector_v2.py \
+            worker/native_linux/same_worker_two_plane_canary_v2.py; do
+            grep -q '"worker_admitted": False' "$f"
+            grep -q '"w1_verified": False' "$f"
+          done
           grep -q '"safety_verified": False' worker/native_linux/two_plane_safety_witness_v2.py
-          grep -q '"worker_admitted": False' worker/native_linux/two_plane_safety_witness_v2.py
-          grep -q '"w1_verified": False' worker/native_linux/two_plane_safety_witness_v2.py
           grep -q '"safety_verified": False' worker/native_linux/worker_safety_bundle_collector_v2.py
-          grep -q '"worker_admitted": False' worker/native_linux/worker_safety_bundle_collector_v2.py
-          grep -q '"w1_verified": False' worker/native_linux/worker_safety_bundle_collector_v2.py
+          grep -q '"safety_verified": False' worker/native_linux/same_worker_two_plane_canary_v2.py
