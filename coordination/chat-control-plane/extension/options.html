@@ -44,24 +44,26 @@
   </section>
 
   <section class="card">
-    <label for="daemonUrl">Local bridge daemon</label>
-    <input id="daemonUrl" type="url" value="http://127.0.0.1:8765" autocomplete="off" />
-    <label for="bridgeSecret">Local pairing secret (must match the daemon pairing secret)</label>
-    <input id="bridgeSecret" type="password" minlength="32" autocomplete="new-password" placeholder="32+ character local-only secret" />
-    <p class="mono">Stored only in chrome.storage.local. Never put this secret in Git, A2 mailbox or Supabase.</p>
+    <div class="row"><span class="pill">REMOTE</span><span class="pill">no local daemon</span></div>
+    <label for="daemonUrl">Bridge endpoint</label>
+    <input id="daemonUrl" type="url" autocomplete="off" />
+    <label for="bridgeSecret">Scoped bridge pairing token</label>
+    <input id="bridgeSecret" type="password" minlength="32" autocomplete="new-password" placeholder="32+ character bridge pairing token" />
+    <p class="mono">The personalized v0.5 package can bootstrap this token automatically. Supabase service-role credentials never enter Chrome.</p>
     <label for="pollMs">Command poll interval, ms</label>
     <input id="pollMs" type="number" min="1000" max="30000" step="250" />
     <div style="margin-top:14px"><label><input id="autoOpenTabs" type="checkbox" /> Automatically reopen a pinned peer tab if it is closed</label></div>
     <div><label><input id="armed" type="checkbox" /> ARMED — allow real composer writes and real Send clicks</label></div>
-    <p class="warn">When ARMED, a command authenticated by the localhost daemon can be inserted into the exact pinned conversation and the visible Send button will be clicked.</p>
+    <p class="warn">When ARMED, a command authenticated by the remote METAENGINE bridge can be inserted into the exact pinned conversation and the visible Send button will be clicked.</p>
   </section>
 
   <div class="row">
     <button id="save" type="button">Save settings</button>
-    <button id="pollNow" class="secondary" type="button">Poll daemon now</button>
+    <button id="pollNow" class="secondary" type="button">Poll bridge now</button>
   </div>
   <div id="status" class="status" role="status"></div>
 </main>
+<script src="bootstrap-config.js"></script>
 <script src="options.js"></script>
 </body>
 </html>
