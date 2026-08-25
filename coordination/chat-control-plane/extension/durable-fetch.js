@@ -1,25 +1,64 @@
 "use strict";
 
 const COMPLETED_KEY = "a2BridgeCompletedCommandsV1";
+const LEASED_KEY = "a2BridgeLeasedCommandsV1";
 const MAX_COMPLETED = 256;
+const MAX_LEASED = 256;
 const originalFetch = globalThis.fetch.bind(globalThis);
 
-async function loadCompleted() {
-  const stored = await chrome.storage.local.get(COMPLETED_KEY);
-  const value = stored[COMPLETED_KEY];
+async function loadArray(key) {
+  const stored = await chrome.storage.local.get(key);
+  const value = stored[key];
   return Array.isArray(value) ? value : [];
 }
 
-async function findCompleted(commandId) {
-  const rows = await loadCompleted();
+async function loadCompleted() {
+  return loadArray(COMPLETED_KEY);
+}
+
+async function loadLeased() {
+  return loadArray(LEASED_KEY);
+}
+
+async function rememberLease(command) {
+  if (!command?.command_id) return;
+  const rows = await loadLeased();
+  const next = rows.filter((row) => row?.command_id !== command.command_id);
+  next.push({
+    command_id: String(command.command_id),
+    idempotency_key: String(command.idempotency_key || ""),
+    target_platform: command.target_platform || null,
+    leased_at: new Date().toISOString()
+  });
+  await chrome.storage.local.set({ [LEASED_KEY]: next.slice(-MAX_LEASED) });
+}
+
+async function leaseForCommand(commandId) {
+  const rows = await loadLeased();
   return rows.find((row) => row?.command_id === commandId) || null;
 }
 
-async function rememberCompleted(commandId, result) {
+async function findCompleted(command) {
   const rows = await loadCompleted();
-  const next = rows.filter((row) => row?.command_id !== commandId);
+  const commandId = String(command?.command_id || "");
+  const idem = String(command?.idempotency_key || "");
+  return rows.find((row) =>
+    (commandId && row?.command_id === commandId) ||
+    (idem && row?.idempotency_key === idem)
+  ) || null;
+}
+
+async function rememberCompleted(commandId, result) {
+  const lease = await leaseForCommand(commandId);
+  const rows = await loadCompleted();
+  const idem = String(lease?.idempotency_key || "");
+  const next = rows.filter((row) =>
+    row?.command_id !== commandId && (!idem || row?.idempotency_key !== idem)
+  );
   next.push({
     command_id: commandId,
+    idempotency_key: idem || null,
+    target_platform: lease?.target_platform || result?.target_platform || null,
     completed_at: new Date().toISOString(),
     status: result?.status || "SENT_AND_DOM_VERIFIED",
     clicked_send_button: result?.clicked_send_button === true,
@@ -66,7 +105,8 @@ async function acknowledgeDurableDuplicate(url, init, command, row) {
       cache: "no-store"
     });
   } catch (_) {
-    // Next poll will retry the acknowledgement, but never the Send click.
+    // Next poll retries acknowledgement, but the deterministic idempotency key
+    // prevents a second Send even if the daemon restarted with a new command ID.
   }
 }
 
@@ -84,7 +124,7 @@ globalThis.fetch = async (input, init = {}) => {
       ["SENT_AND_DOM_VERIFIED", "SENT"].includes(String(body?.status || ""))
     ) {
       // Persist before network ACK. If the daemon disappears after the real Send,
-      // a later lease retry is acknowledged without clicking Send a second time.
+      // command-id or idempotency-key retries are acknowledged without another click.
       await rememberCompleted(commandId, body);
     }
     return originalFetch(input, init);
@@ -97,12 +137,14 @@ globalThis.fetch = async (input, init = {}) => {
     const body = await response.clone().json();
     const command = body?.command;
     if (!command?.command_id) return response;
-    const row = await findCompleted(String(command.command_id));
+    await rememberLease(command);
+    const row = await findCompleted(command);
     if (!row) return response;
     await acknowledgeDurableDuplicate(url, init, command, row);
     return responseWith(response, {
       command: null,
-      durable_duplicate_command_id: command.command_id
+      durable_duplicate_command_id: command.command_id,
+      durable_duplicate_idempotency_key: command.idempotency_key || null
     });
   } catch (_) {
     return response;
