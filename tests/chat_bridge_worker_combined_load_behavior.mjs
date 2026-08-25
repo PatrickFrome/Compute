@@ -57,6 +57,11 @@ const chrome = {
     async create() { throw new Error('unexpected tab create'); },
     async get() { throw new Error('unexpected tab get'); },
   },
+  debugger: {
+    async attach() { throw new Error('unexpected debugger attach'); },
+    async detach() {},
+    async sendCommand() { throw new Error('unexpected debugger command'); },
+  },
   runtime: {
     onInstalled: { addListener(fn) { listeners.installed.push(fn); } },
     onStartup: { addListener(fn) { listeners.startup.push(fn); } },
@@ -100,10 +105,10 @@ vm.runInContext(
 );
 await new Promise((resolve) => setTimeout(resolve, 80));
 
-assert.equal(listeners.runtimeMessage.length, 1, 'runtime message listener not registered');
+assert.equal(listeners.runtimeMessage.length, 2, 'trusted transport + background message listeners not registered');
 assert.equal(listeners.installed.length, 1, 'install listener not registered');
 assert.equal(listeners.alarm.length, 1, 'alarm listener not registered');
 assert.ok(fetchCalls >= 1, 'initial remote poll did not reach wrapped fetch chain');
 assert.ok(lastFetch?.input.endsWith('/v1/commands/next'), 'initial poll did not reach commands/next');
 assert.equal(lastFetch?.headers.get('x-a2-chat-bridge-secret'), 'x'.repeat(64), 'pairing header was not chained through wrappers');
-console.log('classic-worker-combined-load: PASS', { fetchCalls });
+console.log('classic-worker-combined-load: PASS', { fetchCalls, runtimeMessageListeners: listeners.runtimeMessage.length });
