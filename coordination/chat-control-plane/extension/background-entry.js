@@ -1,8 +1,18 @@
-import './bootstrap-config.js';
-import './auth-fetch.js';
-import './durable-fetch.js';
-// The pairing secret and durable Send journal belong to trusted extension
-// contexts only. Content scripts communicate through runtime messages and do
-// not need direct access to chrome.storage.local.
-await chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
-await import('./background.js');
+"use strict";
+
+// Chrome extension service workers support static imports for module workers
+// and importScripts() for classic workers, but they do not support dynamic
+// import(). Keep this entrypoint classic so startup can synchronously load the
+// packaged bridge runtime without a dynamic-import registration failure.
+importScripts('./bootstrap-config.js');
+importScripts('./auth-fetch.js');
+importScripts('./durable-fetch.js');
+
+// Restrict chrome.storage.local to trusted extension contexts as early as
+// possible on every worker start. The call is intentionally kicked off before
+// background.js is evaluated; listeners are still registered synchronously.
+chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch((error) => {
+  console.error('storage_access_level_failed', error);
+});
+
+importScripts('./background.js');
