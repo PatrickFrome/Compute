@@ -20,6 +20,8 @@ function command(overrides = {}) {
     target_agent: 'GLM',
     a2_head_message_seq: 108,
     a2_peer_payloads_exposed: false,
+    duel_id: null,
+    authority_effect: false,
     ...overrides
   };
 }
@@ -29,8 +31,8 @@ const snapshot = {
   message_count: 42,
   generating: false
 };
+const normalizedTarget = 'https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db';
 
-// OFF: no RPC, no configuration burden beyond constructor data.
 {
   let calls = 0;
   const recorder = new BridgeReceiptRecorder({
@@ -44,7 +46,6 @@ const snapshot = {
   assert.equal(calls, 0);
 }
 
-// BEST_EFFORT: storage failure degrades observability without throwing.
 {
   const recorder = new BridgeReceiptRecorder({
     mode: 'BEST_EFFORT',
@@ -61,7 +62,6 @@ const snapshot = {
   assert.match(result.error, /receipt_rpc_503/);
 }
 
-// REQUIRED: identical storage failure is a hard error.
 {
   const recorder = new BridgeReceiptRecorder({
     mode: 'REQUIRED',
@@ -77,7 +77,6 @@ const snapshot = {
   assert.equal(recorder.hasLease(command().command_id), false);
 }
 
-// REQUIRED happy path: only hashes/metadata cross the RPC boundary.
 {
   const calls = [];
   const recorder = new BridgeReceiptRecorder({
@@ -106,17 +105,22 @@ const snapshot = {
   assert.equal(calls[0].p_target_agent, 'GLM');
   assert.equal(calls[0].p_target_platform, 'GLM_ZAI');
   assert.equal(calls[0].p_a2_head_message_seq, 108);
+  assert.equal(calls[0].p_pending_payloads_exposed, false);
+  assert.equal(calls[0].p_duel_id, null);
   assert.equal(calls[0].p_prompt_sha256, cmd.prompt_sha256);
   assert.equal(calls[0].p_idempotency_key_sha256, cmd.idempotency_key);
-  assert.equal(calls[0].p_target_url_sha256, sha256('https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db'));
+  assert.equal(calls[0].p_target_url_sha256, sha256(normalizedTarget));
   const serializedLease = JSON.stringify(calls[0]);
   assert.equal(serializedLease.includes(cmd.prompt), false);
   assert.equal(serializedLease.includes('secret=query'), false);
 
   await recorder.recordResult(cmd.command_id, {
     status: 'SENT_AND_DOM_VERIFIED',
+    target_platform: 'GLM_ZAI',
+    target_url: `${normalizedTarget}?ignored=query#fragment`,
     clicked_send_button: true,
-    verification: { verified: true, exact_user_turn_seen: true }
+    verification: { verified: true, exact_user_turn_seen: true },
+    authority_effect: false
   });
   assert.equal(calls[1].p_event_kind, 'SEND_RESULT');
   assert.equal(calls[1].p_dom_send_verified, true);
@@ -124,20 +128,52 @@ const snapshot = {
 
   await recorder.recordResult(cmd.command_id, {
     status: 'SENT_WEAK_DOM_VERIFIED',
+    target_platform: 'GLM_ZAI',
+    target_url: normalizedTarget,
     clicked_send_button: true,
-    verification: { verified: true, exact_user_turn_seen: false }
+    verification: { verified: true, exact_user_turn_seen: false },
+    authority_effect: false
   });
   assert.equal(calls[2].p_dom_send_verified, false);
 
   await recorder.recordResult(cmd.command_id, {
     status: 'SENT_ALREADY_DURABLE',
+    target_platform: 'GLM_ZAI',
+    target_url: normalizedTarget,
     clicked_send_button: true,
-    verification: { verified: true, durable_replay: true }
+    verification: { verified: true, durable_replay: true },
+    authority_effect: false
   });
   assert.equal(calls[3].p_dom_send_verified, true);
+
+  await assert.rejects(recorder.recordResult(cmd.command_id, {
+    status: 'SENT_AND_DOM_VERIFIED',
+    target_platform: 'CHATGPT',
+    target_url: normalizedTarget,
+    clicked_send_button: true,
+    verification: { verified: true, exact_user_turn_seen: true },
+    authority_effect: false
+  }), /receipt_result_platform_mismatch/);
+
+  await assert.rejects(recorder.recordResult(cmd.command_id, {
+    status: 'SENT_AND_DOM_VERIFIED',
+    target_platform: 'GLM_ZAI',
+    target_url: 'https://chat.z.ai/c/different-chat',
+    clicked_send_button: true,
+    verification: { verified: true, exact_user_turn_seen: true },
+    authority_effect: false
+  }), /receipt_result_target_url_mismatch/);
+
+  await assert.rejects(recorder.recordResult(cmd.command_id, {
+    status: 'SENT_AND_DOM_VERIFIED',
+    target_platform: 'GLM_ZAI',
+    target_url: normalizedTarget,
+    clicked_send_button: true,
+    verification: { verified: true, exact_user_turn_seen: true },
+    authority_effect: true
+  }), /receipt_result_authority_forbidden/);
 }
 
-// Binding rejects malformed hashes, synthesized lineage, and target mismatch.
 {
   const recorder = new BridgeReceiptRecorder({
     mode: 'REQUIRED',
@@ -153,6 +189,11 @@ const snapshot = {
   await assert.rejects(recorder.recordLease(command({ target_agent: undefined })), /receipt_target_agent_required/);
   await assert.rejects(recorder.recordLease(command({ a2_head_message_seq: undefined })), /receipt_a2_frontier_invalid/);
   await assert.rejects(recorder.recordLease(command({ a2_head_message_seq: '108.5' })), /receipt_a2_frontier_invalid/);
+  await assert.rejects(recorder.recordLease(command({ a2_peer_payloads_exposed: undefined })), /receipt_visibility_flag_required/);
+  await assert.rejects(recorder.recordLease(command({ authority_effect: undefined })), /receipt_command_nonauthority_required/);
+  const missingDuel = command();
+  delete missingDuel.duel_id;
+  await assert.rejects(recorder.recordLease(missingDuel), /receipt_duel_lineage_required/);
 }
 
 console.log('chat bridge receipt recorder behavioral contract: PASS');
