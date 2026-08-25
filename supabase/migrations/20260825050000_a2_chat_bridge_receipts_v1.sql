@@ -87,22 +87,22 @@ create or replace function public.h205f22_a2_chat_bridge_receipt_ingest_v1(
 ) returns jsonb
 language plpgsql
 security definer
-set search_path = pg_catalog, public, destruktion_meta, extensions
+set search_path = ''
 as $$
 declare
-  v_receipt_id uuid := gen_random_uuid();
+  v_receipt_id uuid := pg_catalog.gen_random_uuid();
   v_hash text;
-  v_created_at timestamptz := clock_timestamp();
+  v_created_at timestamptz := pg_catalog.clock_timestamp();
   v_payload jsonb;
   v_inserted integer := 0;
   v_existing destruktion_meta.compute_fabric_a2_chat_bridge_receipt_h205f22%rowtype;
 begin
   if p_workspace_id is null then raise exception 'bridge_workspace_required'; end if;
-  if p_bridge_instance_id is null or length(p_bridge_instance_id) not between 1 and 128 then raise exception 'bridge_instance_invalid'; end if;
+  if p_bridge_instance_id is null or pg_catalog.length(p_bridge_instance_id) not between 1 and 128 then raise exception 'bridge_instance_invalid'; end if;
   if p_event_kind not in ('SNAPSHOT_META','COMMAND_QUEUED','COMMAND_LEASED','SEND_RESULT') then raise exception 'bridge_event_kind_invalid'; end if;
   if not ((p_target_agent = 'GPT' and p_target_platform = 'CHATGPT') or (p_target_agent = 'GLM' and p_target_platform = 'GLM_ZAI')) then raise exception 'bridge_target_pair_invalid'; end if;
   if p_target_url_sha256 !~ '^[0-9a-f]{64}$' then raise exception 'bridge_target_url_hash_invalid'; end if;
-  if coalesce(p_a2_head_message_seq, -1) < 0 then raise exception 'bridge_a2_frontier_invalid'; end if;
+  if pg_catalog.coalesce(p_a2_head_message_seq, -1) < 0 then raise exception 'bridge_a2_frontier_invalid'; end if;
   if p_snapshot_sha256 is not null and p_snapshot_sha256 !~ '^[0-9a-f]{64}$' then raise exception 'bridge_snapshot_hash_invalid'; end if;
   if p_idempotency_key_sha256 is not null and p_idempotency_key_sha256 !~ '^[0-9a-f]{64}$' then raise exception 'bridge_idempotency_hash_invalid'; end if;
   if p_prompt_sha256 is not null and p_prompt_sha256 !~ '^[0-9a-f]{64}$' then raise exception 'bridge_prompt_hash_invalid'; end if;
@@ -118,7 +118,7 @@ begin
     if p_dom_send_verified and (not p_clicked_send_button or p_result_status not in ('SENT_AND_DOM_VERIFIED','SENT_ALREADY_DURABLE')) then raise exception 'bridge_dom_verification_status_invalid'; end if;
   end if;
 
-  v_payload := jsonb_build_object(
+  v_payload := pg_catalog.jsonb_build_object(
     'receipt_id', v_receipt_id,
     'workspace_id', p_workspace_id,
     'bridge_instance_id', p_bridge_instance_id,
@@ -142,7 +142,7 @@ begin
     'authority_effect', false,
     'created_at', v_created_at
   );
-  v_hash := encode(extensions.digest(convert_to(v_payload::text, 'UTF8'), 'sha256'), 'hex');
+  v_hash := pg_catalog.encode(extensions.digest(pg_catalog.convert_to(v_payload::text, 'UTF8'), 'sha256'), 'hex');
 
   insert into destruktion_meta.compute_fabric_a2_chat_bridge_receipt_h205f22 (
     receipt_id, workspace_id, bridge_instance_id, event_kind, target_agent, target_platform,
@@ -192,7 +192,7 @@ begin
       raise exception 'bridge_receipt_conflict';
     end if;
 
-    return jsonb_build_object(
+    return pg_catalog.jsonb_build_object(
       'schema','metaengine.compute.a2-chat-bridge-receipt.h205f22.v1',
       'receipt_id',v_existing.receipt_id,
       'receipt_sha256',v_existing.receipt_sha256,
@@ -202,7 +202,7 @@ begin
     );
   end if;
 
-  return jsonb_build_object(
+  return pg_catalog.jsonb_build_object(
     'schema','metaengine.compute.a2-chat-bridge-receipt.h205f22.v1',
     'receipt_id',v_receipt_id,
     'receipt_sha256',v_hash,
@@ -222,14 +222,14 @@ create or replace function public.h205f22_a2_chat_bridge_receipt_read_v1(
 ) returns jsonb
 language sql
 security definer
-set search_path = pg_catalog, public, destruktion_meta
+set search_path = ''
 as $$
-  select jsonb_build_object(
+  select pg_catalog.jsonb_build_object(
     'schema','metaengine.compute.a2-chat-bridge-receipt-read.h205f22.v1',
     'workspace_id',p_workspace_id,
     'canonical',false,
     'authority_effect',false,
-    'receipts',coalesce(jsonb_agg(to_jsonb(x) order by x.created_at desc),'[]'::jsonb)
+    'receipts',pg_catalog.coalesce(pg_catalog.jsonb_agg(pg_catalog.to_jsonb(x) order by x.created_at desc),'[]'::jsonb)
   )
   from (
     select receipt_id, bridge_instance_id, event_kind, target_agent, target_platform,
@@ -240,7 +240,7 @@ as $$
     from destruktion_meta.compute_fabric_a2_chat_bridge_receipt_h205f22
     where workspace_id = p_workspace_id
     order by created_at desc
-    limit greatest(1, least(coalesce(p_limit,100),500))
+    limit pg_catalog.greatest(1, pg_catalog.least(pg_catalog.coalesce(p_limit,100),500))
   ) x;
 $$;
 
