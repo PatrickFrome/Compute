@@ -32,7 +32,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
 
     def test_manifest_and_entrypoints(self):
         self.assertEqual(self.manifest["manifest_version"], 3)
-        self.assertEqual(self.manifest["version"], "0.5.2")
+        self.assertEqual(self.manifest["version"], "0.5.3")
         self.assertEqual(self.manifest["background"]["service_worker"], "background-entry.js")
         self.assertNotIn("type", self.manifest["background"])
         for path in [
@@ -113,6 +113,15 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("send_click_not_observed_in_dom", self.content)
         self.assertNotIn("press Enter", self.content)
 
+    def test_idle_composer_presence_does_not_require_send_button(self):
+        self.assertIn("function resolveComposer()", self.content)
+        self.assertIn("const composerResolution = resolveComposer();", self.content)
+        self.assertIn("composer_present: Boolean(composer)", self.content)
+        self.assertIn("dom_pair_error: composerResolution.error", self.content)
+        self.assertIn("async function writeComposerExact(text)", self.content)
+        self.assertIn("if (composerResolution.error) throw new Error(composerResolution.error)", self.content)
+        self.assertIn('if (!sendButtons.length) return { composer, send: null, error: "send_button_not_found" }', self.content)
+
     def test_arming_and_duplicate_send_fences_remain(self):
         self.assertIn("if (!settings.armed)", self.background)
         self.assertIn("BLOCKED_NOT_ARMED", self.background)
@@ -149,9 +158,9 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
 
     def test_zai_selector_fails_closed_on_ambiguity(self):
         self.assertIn("function sharedContainer(", self.content)
+        self.assertIn('error: "composer_ambiguous"', self.content)
         self.assertIn('error: "composer_send_pair_ambiguous"', self.content)
         self.assertIn('error: "composer_send_pair_not_found"', self.content)
-        self.assertIn("if (pair.error) throw new Error(pair.error)", self.content)
         self.assertIn("/^(send|send message|send prompt|submit)$/i", self.content)
 
 
