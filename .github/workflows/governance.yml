@@ -40,7 +40,7 @@ jobs:
             work/a1-agent-workspace)
               EXPECTED_L1='C2'
               ;;
-            work/aop1-autonomous-orchestration|work/same-point-duel-v4-*|work/chat-control-plane-browser-bridge)
+            work/aop1-autonomous-orchestration|work/same-point-duel-v4-*)
               EXPECTED_L1='CROSS-CUTTING'
               ;;
             analysis/integration)
