@@ -7,6 +7,9 @@
   const SEND_READY_POLL_MS = 40;
   const LEDGER_KEY = "a2ChatgptDispatchedV0523";
   const MAX_LEDGER = 512;
+  const SAFE = "SAFE_RETRY_PRE_ACTUATION";
+  const AMBIGUOUS = "AMBIGUOUS_NO_RETRY";
+  const ACTUATED = "ACTUATED";
   const inFlightTabs = new Set();
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const canonicalVisible = (value) => String(value ?? "")
@@ -16,6 +19,11 @@
     .replace(/\s+/gu, " ")
     .trim();
 
+  function typedError(error, executionClass) {
+    const e = error instanceof Error ? error : new Error(String(error || "chatgpt_cdp_failure"));
+    e.a2ExecutionClass = executionClass;
+    return e;
+  }
   function target(tabId) { return { tabId }; }
   async function send(tabId, method, params = {}) { return chrome.debugger.sendCommand(target(tabId), method, params); }
 
@@ -137,11 +145,14 @@
 
   async function dispatchTrustedEnter(tabId, commandId, idempotencyKey) {
     await focusComposer(tabId);
-    // Persist before the key-down that may actuate Send. A crash after this point is fail-closed: never retry ambiguously.
     await rememberDispatch(commandId, idempotencyKey, "PRE_ENTER_DURABLE");
-    await send(tabId, "Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
-    await send(tabId, "Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
-    await rememberDispatch(commandId, idempotencyKey, "ACTUATED");
+    try {
+      await send(tabId, "Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+      await send(tabId, "Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+      await rememberDispatch(commandId, idempotencyKey, "ACTUATED");
+    } catch (error) {
+      throw typedError(new Error(`chatgpt_enter_ambiguous_no_retry:${String(error?.message || error)}`), AMBIGUOUS);
+    }
   }
 
   async function withDebugger(tabId, operation) {
@@ -165,21 +176,26 @@
     const { commandId, idempotencyKey, prompt } = validateBridgeCommand(command);
     const prior = await priorDispatch(commandId, idempotencyKey);
     if (prior) {
-      if (prior.phase === "ACTUATED") return { ok: true, status: "SENT_ALREADY_DURABLE", durable_dispatch_replay: true, phase: prior.phase };
-      return { ok: false, status: "FAILED_DURABLE_AMBIGUOUS_NO_RETRY", durable_dispatch_replay: true, phase: prior.phase || null, error: "chatgpt_durable_pre_enter_ambiguous" };
+      if (prior.phase === "ACTUATED") return { ok: true, status: "SENT_ALREADY_DURABLE", execution_class: ACTUATED, durable_dispatch_replay: true, phase: prior.phase };
+      return { ok: false, status: "FAILED_DURABLE_AMBIGUOUS_NO_RETRY", execution_class: AMBIGUOUS, durable_dispatch_replay: true, phase: prior.phase || null, error: "chatgpt_durable_pre_enter_ambiguous" };
     }
 
-    return withDebugger(tabId, async (scope) => {
-      if (scope?.mode === "CONVERSATION" && await conversationExhausted(tabId)) throw new Error("chatgpt_cdp_conversation_exhausted");
-      const before = await inspectComposer(tabId);
-      if (!before?.ok) throw new Error(`chatgpt_cdp_${before?.error || "composer_inspect_failed"}`);
-      if (canonicalVisible(before.text) !== "") throw new Error("chatgpt_cdp_composer_not_empty");
-      await focusComposer(tabId);
-      await send(tabId, "Input.insertText", { text: prompt });
-      await waitForReadySend(tabId);
-      await dispatchTrustedEnter(tabId, commandId, idempotencyKey);
-      return { ok: true, status: "SENT_DISPATCHED_UNCONFIRMED_NO_RETRY", phase: scope?.mode === "ROLLOVER_ROOT" ? "TRUSTED_ENTER_ROLLOVER_ACTUATED" : "TRUSTED_ENTER_ACTUATED" };
-    });
+    try {
+      return await withDebugger(tabId, async (scope) => {
+        if (scope?.mode === "CONVERSATION" && await conversationExhausted(tabId)) throw new Error("chatgpt_cdp_conversation_exhausted");
+        const before = await inspectComposer(tabId);
+        if (!before?.ok) throw new Error(`chatgpt_cdp_${before?.error || "composer_inspect_failed"}`);
+        if (canonicalVisible(before.text) !== "") throw new Error("chatgpt_cdp_composer_not_empty");
+        await focusComposer(tabId);
+        await send(tabId, "Input.insertText", { text: prompt });
+        await waitForReadySend(tabId);
+        await dispatchTrustedEnter(tabId, commandId, idempotencyKey);
+        return { ok: true, status: "SENT_DISPATCHED_UNCONFIRMED_NO_RETRY", execution_class: ACTUATED, phase: scope?.mode === "ROLLOVER_ROOT" ? "TRUSTED_ENTER_ROLLOVER_ACTUATED" : "TRUSTED_ENTER_ACTUATED" };
+      });
+    } catch (error) {
+      if (error?.a2ExecutionClass) throw error;
+      throw typedError(error, SAFE);
+    }
   }
 
   globalThis.A2_CHATGPT_TRUSTED_SEND = trustedSend;
