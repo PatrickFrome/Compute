@@ -50,6 +50,36 @@ def _validate_nonclaims(value: Any, label: str) -> None:
         raise ValueError(f"{label} nonclaims mismatch")
 
 
+def _validate_provider_oracle(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict) or value.get("schema") != github_codespaces_snapshot_guard.OUTPUT_SCHEMA:
+        raise ValueError("invalid Codespaces provider oracle")
+    if value.get("outcome") != "CODESPACES_SNAPSHOTS_STRUCTURALLY_ELIGIBLE_NONAUTHORITY":
+        raise ValueError("Codespaces provider oracle is not eligible")
+    evidence = value.get("evidence")
+    if not isinstance(evidence, dict) or not evidence:
+        raise ValueError("Codespaces provider oracle evidence missing")
+    oracle_sha = value.get("oracle_sha256")
+    if not isinstance(oracle_sha, str) or not SHA256_RE.fullmatch(oracle_sha):
+        raise ValueError("invalid Codespaces provider oracle hash")
+    if github_codespaces_snapshot_guard.canonical_hash(evidence) != oracle_sha:
+        raise ValueError("Codespaces provider oracle hash mismatch")
+    checks = evidence.get("checks")
+    if not isinstance(checks, dict) or not checks or any(v is not True for v in checks.values()):
+        raise ValueError("Codespaces provider oracle checks must all pass")
+    for key in ("provider_object_id", "provider_object_name", "stopped_snapshot_sha256"):
+        if not evidence.get(key):
+            raise ValueError(f"Codespaces provider oracle missing {key}")
+    if not SHA256_RE.fullmatch(str(evidence["stopped_snapshot_sha256"])):
+        raise ValueError("invalid Codespaces stopped snapshot hash")
+    for key in (
+        "provider_identity_verified", "provider_action_verified", "persisted_readback_verified",
+        "persistent_worker_proof", "worker_admitted", "w1_verified", "canonical", "authority_effect",
+    ):
+        if value.get(key) is not False:
+            raise ValueError(f"provider oracle {key} must be false")
+    return value
+
+
 def capture(*, phase: str, lifecycle_capture: dict[str, Any], sentinel: Path) -> dict[str, Any]:
     if phase not in {"PRE", "POST"}:
         raise ValueError("phase must be PRE or POST")
@@ -117,16 +147,7 @@ def validate_capture(value: Any, *, expected_phase: str) -> dict[str, Any]:
 def compose(*, pre_storage: dict[str, Any], post_storage: dict[str, Any], provider_oracle: dict[str, Any]) -> dict[str, Any]:
     pre = validate_capture(pre_storage, expected_phase="PRE")
     post = validate_capture(post_storage, expected_phase="POST")
-    if not isinstance(provider_oracle, dict) or provider_oracle.get("schema") != github_codespaces_snapshot_guard.OUTPUT_SCHEMA:
-        raise ValueError("invalid Codespaces provider oracle")
-    if provider_oracle.get("outcome") != "CODESPACES_SNAPSHOTS_STRUCTURALLY_ELIGIBLE_NONAUTHORITY":
-        raise ValueError("Codespaces provider oracle is not eligible")
-    for key in (
-        "provider_identity_verified", "provider_action_verified", "persisted_readback_verified",
-        "persistent_worker_proof", "worker_admitted", "w1_verified", "canonical", "authority_effect",
-    ):
-        if provider_oracle.get(key) is not False:
-            raise ValueError(f"provider oracle {key} must be false")
+    provider = _validate_provider_oracle(provider_oracle)
 
     checks = {
         "persistent_root_is_workspaces": pre["persistent_root"] == post["persistent_root"] == "/workspaces",
@@ -135,7 +156,7 @@ def compose(*, pre_storage: dict[str, Any], post_storage: dict[str, Any], provid
         "sentinel_content_stable": pre["sentinel_sha256"] == post["sentinel_sha256"],
         "source_identity_stable": pre["source"] == post["source"],
         "kernel_boot_id_changed": pre["boot_id"] != post["boot_id"],
-        "provider_sequence_eligible": provider_oracle["outcome"] == "CODESPACES_SNAPSHOTS_STRUCTURALLY_ELIGIBLE_NONAUTHORITY",
+        "provider_sequence_eligible": provider["outcome"] == "CODESPACES_SNAPSHOTS_STRUCTURALLY_ELIGIBLE_NONAUTHORITY",
     }
     failures = sorted(k for k, passed in checks.items() if not passed)
     if failures:
@@ -143,8 +164,8 @@ def compose(*, pre_storage: dict[str, Any], post_storage: dict[str, Any], provid
 
     evidence = {
         "provider_kind": "GITHUB_CODESPACES",
-        "provider_object_id": provider_oracle["evidence"]["provider_object_id"],
-        "provider_object_name": provider_oracle["evidence"]["provider_object_name"],
+        "provider_object_id": provider["evidence"]["provider_object_id"],
+        "provider_object_name": provider["evidence"]["provider_object_name"],
         "persistent_root": "/workspaces",
         "sentinel_path": pre["sentinel_path"],
         "sentinel_path_sha256": pre["sentinel_path_sha256"],
@@ -154,7 +175,8 @@ def compose(*, pre_storage: dict[str, Any], post_storage: dict[str, Any], provid
         "post_boot_id": post["boot_id"],
         "pre_storage_capture_sha256": canonical_hash(pre),
         "post_storage_capture_sha256": canonical_hash(post),
-        "provider_oracle_sha256": provider_oracle["oracle_sha256"],
+        "provider_oracle_sha256": provider["oracle_sha256"],
+        "stopped_snapshot_sha256": provider["evidence"]["stopped_snapshot_sha256"],
         "checks": checks,
     }
     return {
