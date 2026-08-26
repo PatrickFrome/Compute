@@ -76,7 +76,8 @@ check('GPT avoids synthetic click', !gptBlock.includes('sendButton.click'));
 check('GLM keeps DOM writer', glmBlock.includes('await writeComposerExact(text);'));
 check('GLM keeps real DOM click', glmBlock.includes('sendButton.click();'));
 check('GPT requires empty composer', gptBlock.includes('chatgpt_composer_not_empty_before_prime'));
-check('exact composer text revalidated before send', source.includes('composerText(pair.composer) === expected'));
+check('canonical composer text revalidated before send', source.includes('textMatchesExpected(composerText(pair.composer), expectedText)'));
+check('canonical comparison remains fail closed', source.includes('canonicalVisible(actual) === canonicalVisible(expected)'));
 check('pair ambiguity still fails closed', source.includes('composer_send_pair_ambiguous'));
 check('verification timeout still fails closed', source.includes('send_click_not_observed_in_dom'));
 
@@ -86,7 +87,9 @@ check('compat has ZAI exact anchor', compat.includes('markExactSendButton("#send
 check('compat has no runtime messaging', !compat.includes('runtime.sendMessage'));
 check('compat has no click', !compat.includes('.click('));
 check('trusted worker accepts only bridge-owned GPT prompt', trusted.includes('bridge_job_target=GPT') && trusted.includes('transport=WEB_CHAT_INTERACTIVE_REMOTE'));
-check('trusted worker accepts empty initial composer', trusted.includes('beforeText !== "" && beforeText !== normalize(text)'));
+check('trusted worker accepts empty initial composer', trusted.includes('beforeText !== "" && canonicalVisible(before.text) !== canonicalVisible(text)'));
+check('trusted worker canonicalizes ProseMirror readback', trusted.includes('canonicalVisible(state.text) === canonicalVisible(text)'));
+check('trusted worker still fails closed on readback mismatch', trusted.includes('chatgpt_cdp_prime_readback_mismatch'));
 check('trusted worker detaches debugger', trusted.includes('chrome.debugger.detach'));
 check('trusted worker never targets ZAI', !trusted.includes('chat.z.ai'));
 
