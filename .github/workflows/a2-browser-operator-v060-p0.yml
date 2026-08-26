@@ -23,7 +23,9 @@ jobs:
           for f in tests/a2_v060_*.mjs; do node --check "$f"; done
 
       - name: Browser Operator v0.6 P0 contracts
-        run: python3 -m unittest -v tests.test_a2_browser_operator_v060_p0
+        run: |
+          python3 -m unittest -v tests.test_a2_browser_operator_v060_p0
+          python3 -m unittest -v tests.test_a2_browser_operator_v060_debugger_integration
 
       - name: Trusted operator runtime behavioral labs
         run: |
@@ -98,6 +100,9 @@ jobs:
             'debugger_broker_shared_root':True,
             'debugger_broker_long_lived_holds':True,
             'debugger_broker_generation_invalidation':True,
+            'trusted_transports_broker_only':True,
+            'glm_trusted_input_insert_text':True,
+            'glm_safe_failure_draft_scrub':True,
             'oopif_flat_child_sessions_chrome125':True,
             'oopif_accessibility_bounded_disable':True,
             'point_actions_frame_sha256_bound':True,
