@@ -8,6 +8,8 @@ on:
       - 'tests/test_w1_lifecycle_evidence_harness.py'
       - 'controller/w1/github_codespaces_snapshot_guard.py'
       - 'controller/w1/provider_neutral_lifecycle_guard.py'
+      - 'controller/w1/s2_runtime_canary_receipt.py'
+      - 'tests/test_w1_s2_runtime_canary_receipt.py'
       - 'worker/native_linux/h1_h13_prereq_probe.py'
       - '.github/workflows/w1-lifecycle-evidence-harness-contract.yml'
 
@@ -25,15 +27,19 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Compile evidence harness
+      - name: Compile evidence harness and S2 receipt validator
         run: |
           set -euo pipefail
-          python3 -m py_compile worker/native_linux/w1_lifecycle_evidence_harness.py
+          python3 -m py_compile \
+            worker/native_linux/w1_lifecycle_evidence_harness.py \
+            controller/w1/s2_runtime_canary_receipt.py
 
       - name: Run fail-closed harness tests
         run: |
           set -euo pipefail
-          python3 -m unittest tests.test_w1_lifecycle_evidence_harness -v
+          python3 -m unittest \
+            tests.test_w1_s2_runtime_canary_receipt \
+            tests.test_w1_lifecycle_evidence_harness -v
 
       - name: Assert non-provider and non-authority boundaries
         run: |
@@ -51,9 +57,12 @@ jobs:
           required = (
               'github_codespaces_snapshot_guard.evaluate',
               'provider_neutral_lifecycle_guard.evaluate',
+              's2_runtime_canary_receipt.validate',
+              'require_pass=True', 'EXPECTED_S2_SOURCE_SHA256',
               'kernel_boot_id_changed', 'persistent_sentinel_stable',
-              'machine_identity_stable', 'persisted_readback_verified',
-              'prebound_outer_cgroup_witness', 'live_s2_runtime_canaries',
+              'machine_identity_stable', 's2_runtime_receipt_pass',
+              'persisted_readback_verified', 'prebound_outer_cgroup_witness',
+              'authenticated_s2_runtime_receipt_provenance',
           )
           for token in required:
               assert token in text, token
