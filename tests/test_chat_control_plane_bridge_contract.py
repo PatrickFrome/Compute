@@ -27,7 +27,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
 
     def test_manifest_and_worker_entrypoints(self):
         self.assertEqual(self.manifest["manifest_version"], 3)
-        self.assertEqual(self.manifest["version"], "0.5.10")
+        self.assertEqual(self.manifest["version"], "0.5.11")
         self.assertEqual(self.manifest["background"]["service_worker"], "background-entry.js")
         self.assertIn("debugger", self.manifest["permissions"])
         self.assertEqual(self.manifest["content_scripts"][0]["js"], ["platform-dom-compat.js", "content.js"])
@@ -57,8 +57,6 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         chatgpt_block = execute.split('if (platform() === "CHATGPT")', 1)[1].split("} else {", 1)[0]
         glm_block = execute.split("} else {", 1)[1]
         self.assertIn("await callTrustedChatgpt(text);", chatgpt_block)
-        self.assertNotIn("A2_CHATGPT_TRUSTED_PRIME", self.content)
-        self.assertNotIn("A2_CHATGPT_TRUSTED_CLICK", self.content)
         self.assertNotIn("waitForEnabledSend", chatgpt_block)
         self.assertNotIn("writeComposerExact", chatgpt_block)
         self.assertNotIn("sendButton.click", chatgpt_block)
@@ -66,21 +64,26 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("await writeComposerExact(text);", glm_block)
         self.assertIn("sendButton.click();", glm_block)
 
-    def test_trusted_send_is_one_debugger_session(self):
+    def test_trusted_send_uses_enter_in_one_debugger_session(self):
         self.assertIn('message?.type !== "A2_CHATGPT_TRUSTED_SEND"', self.trusted)
         self.assertNotIn("A2_CHATGPT_TRUSTED_PRIME", self.trusted)
         self.assertNotIn("A2_CHATGPT_TRUSTED_CLICK", self.trusted)
         self.assertNotIn("chrome.storage.session", self.trusted)
         self.assertIn("async function trustedSend", self.trusted)
         self.assertIn('await send(tabId, "Input.insertText", { text });', self.trusted)
-        self.assertIn("const sendState = await waitForReadySend(tabId, text);", self.trusted)
-        self.assertIn('"Input.dispatchMouseEvent"', self.trusted)
+        self.assertIn("await waitForReadySend(tabId);", self.trusted)
+        self.assertIn("async function dispatchTrustedEnter", self.trusted)
+        self.assertIn('"Input.dispatchKeyEvent"', self.trusted)
+        self.assertIn('key: "Enter"', self.trusted)
+        self.assertIn('code: "Enter"', self.trusted)
+        self.assertIn("windowsVirtualKeyCode: 13", self.trusted)
+        self.assertNotIn('"Input.dispatchMouseEvent"', self.trusted)
         self.assertIn("chrome.debugger.attach", self.trusted)
         self.assertIn("chrome.debugger.detach", self.trusted)
         self.assertLess(self.trusted.index("chrome.debugger.attach"), self.trusted.index('await send(tabId, "Input.insertText", { text });'))
-        self.assertLess(self.trusted.index('await send(tabId, "Input.insertText", { text });'), self.trusted.index('"Input.dispatchMouseEvent"'))
+        self.assertLess(self.trusted.index('await send(tabId, "Input.insertText", { text });'), self.trusted.index("await dispatchTrustedEnter(tabId);"))
 
-    def test_critical_chatgpt_fences_remain(self):
+    def test_critical_chatgpt_fences_remain_without_full_prompt_readback(self):
         self.assertIn("const MAX_PROMPT_CHARS = 120000;", self.trusted)
         self.assertIn("bridge_job_target=GPT", self.trusted)
         self.assertIn("transport=WEB_CHAT_INTERACTIVE_REMOTE", self.trusted)
@@ -88,20 +91,21 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("chatgpt_cdp_not_armed", self.trusted)
         self.assertIn('url.pathname.startsWith("/c/")', self.trusted)
         self.assertIn("composer_count", self.trusted)
+        self.assertIn("composer_form_missing", self.trusted)
+        self.assertIn("composer_empty", self.trusted)
         self.assertIn("send_ambiguous", self.trusted)
-        self.assertIn("send_obscured", self.trusted)
-        self.assertIn("document.elementFromPoint(x, y)", self.trusted)
+        self.assertIn("send_not_button", self.trusted)
         self.assertIn("canonicalVisible", self.trusted)
-        self.assertIn("composer_readback_pending", self.trusted)
+        self.assertNotIn("composer_readback_pending", self.trusted)
+        self.assertNotIn("expectedText", self.trusted)
+        self.assertNotIn("elementFromPoint", self.trusted)
         self.assertNotIn("chat.z.ai", self.trusted)
 
     def test_fast_failure_budgets(self):
-        self.assertIn("const SEND_READY_TIMEOUT_MS = 3000;", self.trusted)
-        self.assertIn("const SEND_READY_POLL_MS = 50;", self.trusted)
+        self.assertIn("const SEND_READY_TIMEOUT_MS = 1800;", self.trusted)
+        self.assertIn("const SEND_READY_POLL_MS = 40;", self.trusted)
         self.assertIn("const SEND_VERIFY_TIMEOUT_MS = 6000;", self.content)
         self.assertIn("const SEND_BUTTON_WAIT_MS = 3000;", self.content)
-        self.assertNotIn("const SEND_VERIFY_TIMEOUT_MS = 12000;", self.content)
-        self.assertNotIn("const SEND_BUTTON_WAIT_MS = 6000;", self.content)
 
     def test_compat_is_selector_only_no_async_transport(self):
         self.assertIn('markExactSendButton("#composer-submit-button")', self.compat)
