@@ -189,6 +189,7 @@
         heldIntentId = null;
         intentPending = false;
         allowOnce = null;
+        bridgeBypass = null;
       }
       sendResponse({ ok: true, mode });
       return false;
@@ -206,6 +207,12 @@
         expiresAt: Date.now() + ttl
       };
       sendResponse({ ok: true, command_id: bridgeBypass.commandId, expires_in_ms: ttl });
+      return false;
+    }
+    if (message?.type === "A2_PROMPT_GATE_BRIDGE_BYPASS_CLEAR") {
+      const commandId = String(message.command_id || "");
+      if (!bridgeBypass || !commandId || bridgeBypass.commandId === commandId) bridgeBypass = null;
+      sendResponse({ ok: true, cleared: bridgeBypass === null });
       return false;
     }
     if (message?.type !== "A2_PROMPT_GATE_RESOLUTION") return false;
