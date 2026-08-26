@@ -1,0 +1,147 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import vm from 'node:vm';
+import { webcrypto } from 'node:crypto';
+
+const source = fs.readFileSync(path.resolve('coordination/chat-control-plane/extension/operator-perception.js'), 'utf8');
+const local = new Map([
+  ['chatgptUrl', 'https://chatgpt.com/c/mock'],
+  ['zaiUrl', 'https://chat.z.ai/c/mock']
+]);
+const session = new Map();
+const listeners = [];
+const tabs = [
+  { id: 1, url: 'https://chatgpt.com/c/mock' },
+  { id: 2, url: 'https://chat.z.ai/c/mock' }
+];
+let debuggerAttached = false;
+let busyTab = null;
+
+function assert(condition, message) { if (!condition) throw new Error(message); }
+function storage(map) {
+  return {
+    async get(keys) {
+      const list = Array.isArray(keys) ? keys : [keys];
+      return Object.fromEntries(list.filter((k) => map.has(k)).map((k) => [k, map.get(k)]));
+    },
+    async set(values) { for (const [k, v] of Object.entries(values || {})) map.set(k, structuredClone(v)); },
+    async remove(keys) { for (const k of (Array.isArray(keys) ? keys : [keys])) map.delete(k); }
+  };
+}
+
+const strings = ['', 'DIV', 'BUTTON', 'hello visible', 'id', 'send', 'data-testid', 'send-button'];
+const domSnapshot = {
+  strings,
+  documents: [{
+    nodes: {
+      nodeName: [1, 2],
+      nodeValue: [3, 0],
+      attributes: [[4, 5], [6, 7]],
+      backendNodeId: [10, 11],
+      parentIndex: [-1, 0]
+    },
+    layout: {
+      nodeIndex: [0, 1],
+      bounds: [[0, 0, 800, 600], [700, 540, 80, 40]]
+    }
+  }]
+};
+const axTree = {
+  nodes: [
+    { nodeId: '1', backendDOMNodeId: 10, role: { value: 'document' }, name: { value: 'Mock' }, childIds: ['2'] },
+    { nodeId: '2', backendDOMNodeId: 11, role: { value: 'button' }, name: { value: 'Send' }, properties: [{ name: 'focusable', value: { value: true } }] }
+  ]
+};
+const pageReadback = {
+  url: 'https://chatgpt.com/c/mock', title: 'Mock Chat', visibility_state: 'visible', has_focus: true,
+  body_text: 'hello visible\nSend', body_text_length: 18, body_text_truncated: false,
+  selection_text: '', scroll: { x: 0, y: 0 }, viewport: { width: 800, height: 600, device_pixel_ratio: 1 },
+  active_element: { tag: 'DIV', id: 'prompt-textarea', role: 'textbox', bounds: [0, 500, 650, 100] }
+};
+const tinyJpegBase64 = Buffer.from([0xff, 0xd8, 0xff, 0xd9]).toString('base64');
+
+const chrome = {
+  runtime: {
+    id: 'extid',
+    getURL: (p = '') => `chrome-extension://extid/${p}`,
+    onMessage: { addListener(fn) { listeners.push(fn); } }
+  },
+  storage: { local: storage(local), session: storage(session) },
+  tabs: { async query() { return tabs.map((t) => ({ ...t })); } },
+  debugger: {
+    async getTargets() { return tabs.map((tab) => ({ tabId: tab.id, attached: Number(tab.id) === Number(busyTab) })); },
+    async attach({ tabId }) { if (Number(tabId) === Number(busyTab)) throw new Error('busy'); debuggerAttached = true; },
+    async detach() { debuggerAttached = false; },
+    async sendCommand({ tabId }, method) {
+      assert(debuggerAttached, `CDP command ${method} without attach`);
+      if (method === 'Runtime.enable' || method === 'Page.enable' || method === 'Accessibility.enable') return {};
+      if (method === 'Runtime.evaluate') return { result: { value: { ...pageReadback, url: tabs.find((t) => t.id === tabId)?.url || pageReadback.url } } };
+      if (method === 'Accessibility.getFullAXTree') return axTree;
+      if (method === 'DOMSnapshot.captureSnapshot') return domSnapshot;
+      if (method === 'Page.getLayoutMetrics') return { cssLayoutViewport: { clientWidth: 800, clientHeight: 600 }, cssVisualViewport: { clientWidth: 800, clientHeight: 600 }, contentSize: { width: 800, height: 1200 } };
+      if (method === 'Page.captureScreenshot') return { data: tinyJpegBase64 };
+      throw new Error(`unexpected CDP method ${method}`);
+    }
+  }
+};
+
+const context = vm.createContext({
+  chrome, globalThis: null, console, URL, Date, TextEncoder, Uint8Array, Map, Set, Promise,
+  structuredClone, atob, crypto: webcrypto
+});
+context.globalThis = context;
+vm.runInContext(source, context, { filename: 'operator-perception.js' });
+
+async function dispatch(message, sender) {
+  for (const listener of listeners) {
+    let resolveResponse;
+    const responsePromise = new Promise((resolve) => { resolveResponse = resolve; });
+    let immediate = false, immediateValue;
+    const ret = listener(message, sender, (value) => { immediate = true; immediateValue = value; resolveResponse(value); });
+    if (immediate) return immediateValue;
+    if (ret === true) return await Promise.race([responsePromise, new Promise((_, reject) => setTimeout(() => reject(new Error('response timeout')), 1000))]);
+  }
+  return null;
+}
+
+const sidePanel = { id: 'extid', url: 'chrome-extension://extid/sidepanel.html' };
+const options = { id: 'extid', url: 'chrome-extension://extid/options.html' };
+
+let response = await dispatch({ type: 'A2_OPERATOR_CAPTURE_PERCEPTION', platform: 'CHATGPT', options: { body_limit: 5, ax_limit: 1, dom_limit: 1, include_screenshot: true } }, options);
+assert(response?.ok === false && response.error === 'operator_sender_not_trusted', 'untrusted extension page captured screen');
+
+response = await dispatch({ type: 'A2_OPERATOR_CAPTURE_PERCEPTION', platform: 'CHATGPT', options: { body_limit: 5, ax_limit: 1, dom_limit: 1, include_screenshot: true } }, sidePanel);
+assert(response?.ok === true, 'trusted capture failed');
+assert(response.perception.schema.endsWith('perception-preview.v1'), 'capture did not return bounded preview');
+assert(response.perception.page.body_text_excerpt.length < pageReadback.body_text.length, 'body preview was not bounded');
+assert(response.perception.accessibility.length === 1 && response.perception.accessibility_total === 2, 'AX preview limit failed');
+assert(response.perception.dom_snapshot.records.length === 1 && response.perception.dom_snapshot.visible_record_count === 2, 'DOM preview limit failed');
+assert(response.perception.screenshot.base64 === tinyJpegBase64, 'screenshot preview missing');
+
+const meta = session.get('a2OperatorPerceptionMeta:CHATGPT');
+assert(meta?.body_text_sha256?.length === 64 && meta?.screenshot_sha256?.length === 64, 'perception hashes not persisted');
+assert(!JSON.stringify(Object.fromEntries(session)).includes(tinyJpegBase64), 'screenshot persisted in session storage');
+assert(!JSON.stringify(Object.fromEntries(session)).includes('hello visible\nSend'), 'full visible body text persisted in session storage');
+
+response = await dispatch({ type: 'A2_OPERATOR_PERCEPTION_PREVIEW', platform: 'CHATGPT', options: { include_screenshot: false, body_limit: 8, ax_limit: 2, dom_limit: 2 } }, sidePanel);
+assert(response?.ok === true && response.perception.screenshot.omitted === true && !response.perception.screenshot.base64, 'cached screenshot omission failed');
+
+// Duplicate exact target must fail closed.
+tabs.push({ id: 3, url: 'https://chatgpt.com/c/mock' });
+response = await dispatch({ type: 'A2_OPERATOR_CAPTURE_PERCEPTION', platform: 'CHATGPT' }, sidePanel);
+assert(response?.ok === false && String(response.error).includes('perception_duplicate_target_tabs'), 'duplicate target did not fail closed');
+tabs.pop();
+
+// Busy debugger must fail closed rather than inheriting another session.
+busyTab = 1;
+response = await dispatch({ type: 'A2_OPERATOR_CAPTURE_PERCEPTION', platform: 'CHATGPT' }, sidePanel);
+assert(response?.ok === false && response.error === 'perception_debugger_target_busy', 'busy debugger session was inherited');
+busyTab = null;
+
+console.log('A2 v0.6 Perception Lab: PASS', JSON.stringify({
+  body_hash: meta.body_text_sha256,
+  screenshot_hash: meta.screenshot_sha256,
+  ax_nodes: meta.ax_node_count,
+  dom_records: meta.dom_visible_record_count,
+  session_keys: [...session.keys()].sort()
+}));
