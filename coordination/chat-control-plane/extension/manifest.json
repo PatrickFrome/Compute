@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "METAENGINE A2 Chat Bridge",
-  "version": "0.5.12",
+  "version": "0.5.13",
   "minimum_chrome_version": "120",
   "description": "Coordinates pinned ChatGPT and Z.AI peer chats with A2 through an authenticated remote or loopback bridge, reads live DOM state, writes continuation prompts, and sends through trusted browser input.",
   "permissions": ["storage", "tabs", "alarms", "debugger"],
