@@ -6,10 +6,10 @@ prove that every repository-local consumer agrees on the same launcher source
 identity. This audit supplies that missing semantic consistency check.
 
 It recomputes the exact launcher SHA-256, validates a closed inventory of known
-binding consumers, rejects stale/missing/duplicate bindings, and scans the
-repository for newly introduced undeclared consumers. Historical research is
-excluded from the consumer scan because it is evidence, not executable/current
-source identity policy.
+binding consumers, rejects stale/missing/duplicate bindings, and scans every
+small UTF-8 repository file for newly introduced undeclared consumers.
+Historical research is excluded from the consumer scan because it is evidence,
+not executable/current source identity policy.
 
 PREP / non-authority only. It never mutates a provider or admits/verifies W1.
 """
@@ -22,14 +22,34 @@ from pathlib import Path
 import re
 from typing import Any
 
-SCHEMA = "metaengine.compute.w1-s2-source-identity-audit.h205f22.v1"
+SCHEMA = "metaengine.compute.w1-s2-source-identity-audit.h205f22.v2"
 SOURCE_PATH = "worker/native_linux/rootless_sandbox_launcher_v2.py"
+SOURCE_HINTS = (
+    SOURCE_PATH,
+    Path(SOURCE_PATH).name,
+    Path(SOURCE_PATH).stem,
+    "launcher_v2",
+)
 SHA256_RE = re.compile(r"(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])")
-TEXT_SUFFIXES = {".py", ".yml", ".yaml", ".sql", ".md", ".json", ".toml"}
-IGNORED_PARTS = {".git", "__pycache__", ".pytest_cache", ".mypy_cache", "node_modules", "out"}
+IGNORED_PARTS = {
+    ".git",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".tox",
+    ".venv",
+    "venv",
+    "node_modules",
+    ".next",
+    "build",
+    "dist",
+    "coverage",
+    "out",
+}
+MAX_TEXT_BYTES = 2 * 1024 * 1024
 
-# Every current source-identity consumer must be listed here.  Counts are exact
-# occurrences of the *current* launcher SHA in the file.  The docs intentionally
+# Every current source-identity consumer must be listed here. Counts are exact
+# occurrences of the *current* launcher SHA in the file. The docs intentionally
 # carry the identity twice: once in the source section and once in the execution
 # review checklist.
 DECLARED_BINDINGS: dict[str, int] = {
@@ -67,7 +87,7 @@ def _read_text(path: Path) -> str | None:
         raw = path.read_bytes()
     except OSError:
         return None
-    if b"\x00" in raw or len(raw) > 2 * 1024 * 1024:
+    if b"\x00" in raw or len(raw) > MAX_TEXT_BYTES:
         return None
     try:
         return raw.decode("utf-8")
@@ -76,13 +96,28 @@ def _read_text(path: Path) -> str | None:
 
 
 def _repo_text_files(root: Path):
+    """Yield every small UTF-8 file, independent of filename suffix.
+
+    A suffix allowlist previously allowed shell wrappers, Dockerfiles/Makefiles,
+    .cfg/.txt files and other extensionless policy consumers to evade discovery.
+    Binary/large content is rejected by _read_text instead.
+    """
     for path in root.rglob("*"):
-        if path.is_symlink() or not path.is_file() or path.suffix.lower() not in TEXT_SUFFIXES:
+        if path.is_symlink() or not path.is_file():
             continue
         rel = path.relative_to(root)
         if any(part in IGNORED_PARTS for part in rel.parts):
             continue
+        if _read_text(path) is None:
+            continue
         yield rel, path
+
+
+def _source_hint(text: str) -> str | None:
+    for hint in SOURCE_HINTS:
+        if hint in text:
+            return hint
+    return None
 
 
 def evaluate(root: Path) -> dict[str, Any]:
@@ -108,6 +143,7 @@ def evaluate(root: Path) -> dict[str, Any]:
 
     undeclared: list[dict[str, Any]] = []
     declared_paths = set(DECLARED_BINDINGS)
+    scanned_text_files = 0
     for rel_path, path in _repo_text_files(root):
         rel = rel_path.as_posix()
         if rel in declared_paths or rel.startswith("research/"):
@@ -115,19 +151,20 @@ def evaluate(root: Path) -> dict[str, Any]:
         text = _read_text(path)
         if text is None:
             continue
+        scanned_text_files += 1
         literals = SHA256_RE.findall(text)
         if not literals:
             continue
+        hint = _source_hint(text)
         # Exact current SHA anywhere is necessarily a source-identity reference
-        # unless explicitly inventoried.  A file that names the exact launcher
-        # and carries any SHA-256 literal is also treated as a potential stale
-        # binding consumer even when the literal no longer matches current.
-        if current in literals or SOURCE_PATH in text:
+        # unless inventoried. Any SHA-256 literal combined with an exact or
+        # partial launcher hint is also a potential stale/orphan binding.
+        if current in literals or hint is not None:
             undeclared.append({
                 "path": rel,
                 "contains_current_sha": current in literals,
                 "sha256_literals": sorted(set(literals)),
-                "mentions_s2_source_path": SOURCE_PATH in text,
+                "source_hint": hint,
             })
 
     evidence = {
@@ -135,6 +172,7 @@ def evaluate(root: Path) -> dict[str, Any]:
         "source_sha256": current,
         "declared_binding_count": len(DECLARED_BINDINGS),
         "declared_bindings": declared_results,
+        "scanned_text_file_count": scanned_text_files,
         "undeclared_binding_consumers": undeclared,
         "checks": {
             "all_declared_bindings_exact": declared_ok,
