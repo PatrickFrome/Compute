@@ -27,7 +27,9 @@ select { width: 100%; padding: 7px 8px; border-radius: 7px; border: 1px solid #3
 textarea { width: 100%; min-height: 90px; resize: vertical; padding: 8px; border-radius: 7px; border: 1px solid #3d444d; background: #0d1117; color: #e6edf3; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 textarea:focus, select:focus { outline: 1px solid #388bfd; border-color: #388bfd; }
 .perception-meta { margin-top: 10px; }
-#perceptionScreenshot { display: block; width: 100%; max-height: 420px; object-fit: contain; margin-top: 10px; border-radius: 8px; border: 1px solid #30363d; background: #010409; }
+#perceptionScreenshot { display: block; width: 100%; max-height: 420px; object-fit: contain; margin-top: 10px; border-radius: 8px; border: 1px solid #30363d; background: #010409; cursor: crosshair; user-select: none; }
+#perceptionScreenshot:hover { border-color: #388bfd; }
+#perceptionScreenshot.busy { cursor: wait; opacity: .6; pointer-events: none; }
 #perceptionBody { min-height: 150px; }
 details { margin-top: 10px; }
 summary { cursor: pointer; color: #aeb8c4; font-size: 12px; }
