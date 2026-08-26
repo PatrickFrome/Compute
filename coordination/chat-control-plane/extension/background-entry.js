@@ -9,5 +9,6 @@ importScripts("./secret-vault.js");
 importScripts("./bridge-client.js");
 importScripts("./trusted-chatgpt.js");
 importScripts("./trusted-glm.js");
+importScripts("./operator-gate-bindings.js");
 importScripts("./background.js");
 importScripts("./operator-control.js");
