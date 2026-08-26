@@ -20,9 +20,14 @@ jobs:
       - name: JavaScript syntax
         run: |
           for f in coordination/chat-control-plane/extension/*.js; do node --check "$f"; done
+          node --check tests/a2_v060_operator_control_lab.mjs
+          node --check tests/a2_v060_prompt_gate_browser_lab.mjs
 
       - name: Browser Operator v0.6 P0 contracts
         run: python3 -m unittest -v tests.test_a2_browser_operator_v060_p0
+
+      - name: Trusted operator-control behavioral lab
+        run: node tests/a2_v060_operator_control_lab.mjs
 
       - name: Legacy v0.5.23 regression contracts
         run: python3 -m unittest -v tests.test_a2_chat_bridge_v0523_final || true
@@ -52,12 +57,13 @@ jobs:
           "$CHROME" --no-sandbox --disable-gpu --pack-extension="$GITHUB_WORKSPACE/coordination/chat-control-plane/extension"
           test -s coordination/chat-control-plane/extension.crx
 
-      - name: Playwright 1.62.1 MV3 service-worker gate
+      - name: Playwright 1.62.1 MV3 + Prompt Gate browser labs
         run: |
           npm init -y >/dev/null 2>&1
           npm install --no-save playwright@1.62.1
           npx playwright install --with-deps chromium
           node tests/a2_v060_playwright_smoke.mjs
+          node tests/a2_v060_prompt_gate_browser_lab.mjs
 
       - name: Release metadata
         run: |
@@ -75,6 +81,12 @@ jobs:
             'predecessor_consumed_after_actuation_only':True,
             'strong_turn_identity':'SHA-256',
             'duplicate_target_tabs_fail_closed':True,
+            'prompt_gate_fail_closed':True,
+            'prompt_gate_text_spoof_bypass_removed':True,
+            'prompt_gate_bridge_capability_bound':True,
+            'operator_control_trusted_sender_only':True,
+            'held_draft_session_only':True,
+            'behavioral_browser_lab':True,
             'authority_effect':False
           }
           Path('METAENGINE_A2_Browser_Operator_v0.6.0_P0_DEV.json').write_text(json.dumps(r,indent=2)+'\n')
