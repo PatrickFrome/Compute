@@ -44,9 +44,14 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
         self.assertIn("current_main_sha", learner)
         self.assertIn("main_sha", learner)
         self.assertNotIn("base_github_sha", learner)
-        # base_github_sha remains valid only as the candidate relay's ancestry
-        # field to compare against the independently learned current main.
         self.assertIn("item?.relay?.base_github_sha", self.edge)
+
+    def test_wake_idempotency_tracks_stable_peer_generation(self):
+        self.assertIn("const IDLE_MS = 5_000;", self.edge)
+        self.assertIn("state.changed_at || 'no-change'", self.edge)
+        self.assertIn("const wakeKey =", self.edge)
+        self.assertNotIn("${state.message_count}:${a2.cursor}:${a2.pendingRelay?.relay?.duel_id", self.edge)
+        self.assertIn("same.status === 'COMPLETED'", self.edge)
 
     def test_a2_visibility_and_non_authority_are_preserved(self):
         for rpc in [
