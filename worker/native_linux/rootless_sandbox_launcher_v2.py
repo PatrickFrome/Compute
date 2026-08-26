@@ -28,6 +28,7 @@ import shutil
 import signal
 import stat
 import sys
+import threading
 import time
 from typing import Sequence
 
@@ -366,6 +367,54 @@ def _set_parent_death_signal() -> None:
         raise SandboxUnavailable("launcher parent died during PID1 setup")
 
 
+def _require_pidfd_supervision() -> None:
+    if not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
+        raise SandboxUnavailable("pidfd supervision APIs unavailable")
+    if threading.current_thread() is not threading.main_thread() or threading.active_count() != 1:
+        raise SandboxUnavailable("launcher requires a single main thread for fork and child reaping")
+    if signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL:
+        raise SandboxUnavailable("default SIGCHLD disposition required for pidfd supervision")
+    # Reinstall SIG_DFL to clear any hidden SA_NOCLDWAIT inherited from a
+    # non-Python caller before fork()+pidfd_open().
+    signal.signal(signal.SIGCHLD, signal.SIG_DFL)
+
+
+def _open_pidfd(pid: int) -> int:
+    try:
+        return os.pidfd_open(pid, 0)
+    except OSError as exc:
+        raise SandboxUnavailable(f"pidfd_open failed for namespace PID1: {exc}") from exc
+
+
+def _forward_pidfd_signal(pidfd: int, signum: int) -> None:
+    try:
+        signal.pidfd_send_signal(pidfd, signum, None, 0)
+    except ProcessLookupError:
+        return
+
+
+def _reap_exact_child(pid: int) -> None:
+    while True:
+        try:
+            waited, _ = os.waitpid(pid, 0)
+        except InterruptedError:
+            continue
+        except ChildProcessError:
+            return
+        if waited == pid:
+            return
+
+
+def _abort_child_without_pidfd(pid: int) -> None:
+    # The exact child is still owned and unreaped here, so its numeric PID
+    # cannot have been recycled. This path exists only when pidfd_open fails.
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    _reap_exact_child(pid)
+
+
 def _validated_command(argv: Sequence[str]) -> tuple[str, ...]:
     if not argv:
         raise ValueError("worker command required")
@@ -431,17 +480,10 @@ def _decode_wait_status(status: int) -> int:
     return 125
 
 
-def _forward_signal(pid: int, signum: int) -> None:
-    try:
-        os.kill(pid, signum)
-    except ProcessLookupError:
-        return
-
-
-def _outer_wait(pid1: int, original_mask: set[signal.Signals]) -> int:
+def _outer_wait(pid1: int, pidfd: int, original_mask: set[signal.Signals]) -> int:
     previous = {}
     def handler(signum: int, _frame: object) -> None:
-        _forward_signal(pid1, signum)
+        _forward_pidfd_signal(pidfd, signum)
     for sig in HANDLED_SIGNALS:
         previous[sig] = signal.signal(sig, handler)
     signal.pthread_sigmask(signal.SIG_SETMASK, original_mask)
@@ -549,6 +591,7 @@ def launch(argv: Sequence[str], *, workspace: Path, sandbox_root: Path, extra_bi
     workspace, sandbox_root = _validate_layout(workspace, sandbox_root)
     if sandbox_root.exists() or sandbox_root.is_symlink():
         raise SandboxUnavailable("sandbox root must not exist before launch")
+    _require_pidfd_supervision()
     enter_user_namespace()
     prepare_pid_namespace()
     original_mask = signal.pthread_sigmask(signal.SIG_BLOCK, HANDLED_SIGNALS)
@@ -559,8 +602,24 @@ def launch(argv: Sequence[str], *, workspace: Path, sandbox_root: Path, extra_bi
         raise
     if pid1 != 0:
         try:
-            return _outer_wait(pid1, original_mask)
+            pidfd = _open_pidfd(pid1)
+        except BaseException:
+            _abort_child_without_pidfd(pid1)
+            signal.pthread_sigmask(signal.SIG_SETMASK, original_mask)
+            try:
+                sandbox_root.rmdir()
+            except FileNotFoundError:
+                pass
+            raise
+        try:
+            try:
+                return _outer_wait(pid1, pidfd, original_mask)
+            except BaseException:
+                _forward_pidfd_signal(pidfd, signal.SIGKILL)
+                _reap_exact_child(pid1)
+                raise
         finally:
+            os.close(pidfd)
             try:
                 sandbox_root.rmdir()
             except FileNotFoundError:

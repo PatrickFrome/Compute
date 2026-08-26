@@ -8,6 +8,7 @@ on:
       - 'tests/test_w1_rootless_sandbox_launcher_v2.py'
       - 'docs/W1_S2_ROOTLESS_SANDBOX_LAUNCHER_V2.md'
       - 'research/W1_ROOTLESS_SANDBOX_V2_HARDENING_2026-08-26.md'
+      - 'research/W1_PIDFD_OUTER_SUPERVISION_2026-08-26.md'
       - '.github/workflows/w1-rootless-sandbox-launcher-v2-contract.yml'
 
 permissions: {}
@@ -27,7 +28,7 @@ jobs:
       - name: Verify exact hardened source SHA-256
         run: |
           set -euo pipefail
-          expected='da03e661f9ddfaeb2ffa53b625c19ad06a48f51802e4b27201becfaf40c8d0b5'
+          expected='8c5570faaabb3b44056fc2954224036ae0d342c57d79053fceffb8ebefe1ecca'
           actual="$(sha256sum worker/native_linux/rootless_sandbox_launcher_v2.py | awk '{print $1}')"
           echo "S2_V2_SHA256=$actual"
           test "$actual" = "$expected"
@@ -59,6 +60,7 @@ jobs:
               'repo_root = Path(__file__).resolve().parents[2]',
               'mount_setattr', 'AT_RECURSIVE', 'PR_SET_PDEATHSIG',
               'close_range', 'CLOSE_RANGE_UNSHARE', 'os.execve',
+              'pidfd_open', 'pidfd_send_signal',
               '_worker_environment', 'sandbox_root.rmdir()',
           )
           for token in required:

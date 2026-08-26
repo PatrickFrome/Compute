@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import inspect
+import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -12,7 +14,7 @@ from unittest import mock
 
 from worker.native_linux import rootless_sandbox_launcher_v2 as launcher
 
-EXPECTED_SOURCE_SHA256 = "da03e661f9ddfaeb2ffa53b625c19ad06a48f51802e4b27201becfaf40c8d0b5"
+EXPECTED_SOURCE_SHA256 = "8c5570faaabb3b44056fc2954224036ae0d342c57d79053fceffb8ebefe1ecca"
 
 
 class RootlessSandboxLauncherV2ContractTests(unittest.TestCase):
@@ -179,12 +181,48 @@ class RootlessSandboxLauncherV2ContractTests(unittest.TestCase):
         self.assertIn("PR_SET_PDEATHSIG", pdeath)
         self.assertGreaterEqual(pdeath.count("os.getppid()"), 2)
 
+    def test_pidfd_preconditions_are_checked_before_namespace_mutation(self):
+        source = inspect.getsource(launcher.launch)
+        self.assertLess(source.index("_require_pidfd_supervision()"), source.index("enter_user_namespace()"))
+        with mock.patch.object(launcher.threading, "active_count", return_value=2):
+            with self.assertRaisesRegex(launcher.SandboxUnavailable, "single main thread"):
+                launcher._require_pidfd_supervision()
+        with mock.patch.object(launcher.threading, "active_count", return_value=1), \
+             mock.patch.object(launcher.threading, "current_thread", return_value=launcher.threading.main_thread()), \
+             mock.patch.object(launcher.signal, "getsignal", return_value=launcher.signal.SIG_IGN):
+            with self.assertRaisesRegex(launcher.SandboxUnavailable, "default SIGCHLD"):
+                launcher._require_pidfd_supervision()
+
+    def test_pidfd_signal_forwarding_uses_stable_process_reference(self):
+        with mock.patch.object(launcher.signal, "pidfd_send_signal") as send:
+            launcher._forward_pidfd_signal(17, launcher.signal.SIGTERM)
+        send.assert_called_once_with(17, launcher.signal.SIGTERM, None, 0)
+
+    def test_pidfd_open_failure_is_terminal(self):
+        with mock.patch.object(launcher.os, "pidfd_open", side_effect=OSError("blocked")):
+            with self.assertRaisesRegex(launcher.SandboxUnavailable, "pidfd_open failed"):
+                launcher._open_pidfd(123)
+
+    @unittest.skipUnless(hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"), "pidfd APIs required")
+    def test_real_kernel_pidfd_signal_targets_exact_child(self):
+        process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        pidfd = os.pidfd_open(process.pid, 0)
+        try:
+            signal.pidfd_send_signal(pidfd, signal.SIGTERM, None, 0)
+            self.assertEqual(process.wait(timeout=5), -signal.SIGTERM)
+        finally:
+            os.close(pidfd)
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+
     def test_source_contains_pid1_reaper_pivot_and_no_unsafe_shortcuts(self):
         source = Path(launcher.__file__).read_text()
         for token in (
             "CLONE_NEWPID", "CLONE_NEWNET", "MS_REC | MS_PRIVATE", "pivot_root", "MNT_DETACH",
             "os.waitpid(-1", "os.killpg", "os.pipe2", "pending_signals", 'os.getpid() != 1', '_mount("proc"',
             "mount_setattr", "AT_RECURSIVE", "PR_SET_PDEATHSIG", "close_range", "os.execve",
+            "pidfd_open", "pidfd_send_signal",
         ):
             self.assertIn(token, source)
         for token in (
