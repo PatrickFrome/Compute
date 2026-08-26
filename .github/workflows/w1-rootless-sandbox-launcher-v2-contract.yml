@@ -23,10 +23,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Verify exact source SHA-256
+      - name: Verify exact hardened source SHA-256
         run: |
           set -euo pipefail
-          echo '231afd6a58b1be50549ee4cdfa99c914bff474ae3950c7af2396d3b2519413b9  worker/native_linux/rootless_sandbox_launcher_v2.py' | sha256sum -c -
+          echo '46b688914dda5c93c46b4dec8784a02c2825a4fd5145ac6a98512ee7b6b2c1af  worker/native_linux/rootless_sandbox_launcher_v2.py' | sha256sum -c -
 
       - name: Compile exact launcher
         run: |
@@ -49,8 +49,9 @@ jobs:
           required = (
               'CLONE_NEWUSER', 'CLONE_NEWPID', 'CLONE_NEWNS', 'CLONE_NEWNET',
               'MS_REC | MS_PRIVATE', 'pivot_root', 'MNT_DETACH',
-              'os.getpid() != 1', 'os.waitpid(-1', 'os.killpg',
-              '_mount("proc"', 'PR_SET_NO_NEW_PRIVS',
+              'os.getpid() != 1', 'os.waitpid(-1', 'os.killpg', 'os.pipe2',
+              'pending_signals', '_mount("proc"', 'PR_SET_NO_NEW_PRIVS',
+              'extra host binds must be read-only', '_SENSITIVE_BIND_ROOTS',
           )
           for token in required:
               assert token in combined, token
@@ -61,4 +62,6 @@ jobs:
           )
           for token in forbidden_exec:
               assert token not in text, token
+          assert 'for path in ("/usr", "/usr/local")' in text
+          assert 'for path in ("/usr", "/usr/local", "/opt", "/etc")' not in text
           PY
