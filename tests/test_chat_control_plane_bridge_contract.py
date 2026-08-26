@@ -134,12 +134,28 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertNotIn("while (true)", self.background)
 
     def test_glm_primary_verification_accepts_thinking(self):
-        self.assertIn('platform() === "GLM_ZAI" && before.generating !== true && current.generating === true', self.content)
+        self.assertIn('platform() === "GLM_ZAI" && !glmProcessingAccepted && before.generating !== true && current.generating === true', self.content)
         self.assertIn('"GLM_THINKING_ACCEPTED"', self.content)
         self.assertIn("generating_after_send: current.generating === true", self.content)
         verify = self.content.split("async function verifySend(before, expectedText)", 1)[1].split("async function executeSend", 1)[0]
         self.assertIn("glmThinkingAccepted", verify)
-        self.assertIn("exactUserTurn || (cleared && countAdvanced) || glmThinkingAccepted", verify)
+        self.assertIn("glmProcessingAccepted", verify)
+        self.assertIn("glmProcessingAccepted || glmThinkingAccepted", verify)
+
+    def test_glm_processing_fallback_uses_stable_zai_signals(self):
+        self.assertIn("const GLM_PROCESSING_MUTATION_WINDOW_MS = 1800;", self.content)
+        self.assertIn('document.querySelectorAll("#chat-input")', self.content)
+        self.assertIn('"button.sendMessageButton"', self.content)
+        self.assertIn("function glmProcessingActive()", self.content)
+        self.assertIn("lastGlmAppMutationAt", self.content)
+        self.assertIn("lastGlmStreamMutationAt", self.content)
+        self.assertIn("section[aria-live='polite'], [role='region'][aria-live='polite']", self.content)
+        self.assertIn('element.closest("#app")', self.content)
+        self.assertIn("processing_active: processingActive", self.content)
+        self.assertIn('"GLM_DOM_MUTATION"', self.content)
+        self.assertIn('"GLM_PROCESSING_ACTIVE_ACCEPTED"', self.content)
+        self.assertIn("processing_active_after_send", self.content)
+        self.assertNotIn("svelte-", self.content)
 
     def test_critical_chatgpt_fences_remain_without_full_prompt_readback(self):
         self.assertIn("const MAX_PROMPT_CHARS = 120000;", self.trusted)
@@ -169,7 +185,9 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn('markExactSendButton("#composer-submit-button")', self.compat)
         self.assertIn('markBoundSubmitFallback("#prompt-textarea")', self.compat)
         self.assertIn('markExactSendButton("#send-message-button")', self.compat)
+        self.assertIn('markExactSendButton("button.sendMessageButton")', self.compat)
         self.assertIn('markBoundSubmitFallback("#chat-input")', self.compat)
+        self.assertIn('[data-autothink], [data-active]', self.compat)
         self.assertNotIn("A2_CHATGPT_TRUSTED_SEND", self.compat)
         self.assertNotIn("runtime.sendMessage", self.compat)
         self.assertNotIn(".click(", self.compat)
