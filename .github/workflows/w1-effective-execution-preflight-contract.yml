@@ -27,7 +27,9 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m py_compile controller/w1/effective_execution_preflight.py
-          python3 -m unittest tests.test_w1_effective_execution_preflight -v
+          python3 -m unittest \
+            tests.test_w1_effective_execution_preflight \
+            tests.test_w1_effective_execution_preflight_sql_contract -v
       - name: Prove current stale-authority shape blocks fail-closed
         run: |
           set -euo pipefail
