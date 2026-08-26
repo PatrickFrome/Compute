@@ -208,6 +208,8 @@
     });
   }
 
+  globalThis.A2_CHATGPT_TRUSTED_SEND = trustedSend;
+
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type !== "A2_CHATGPT_TRUSTED_SEND") return false;
     const tabId = sender.tab?.id;
