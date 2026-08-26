@@ -21,6 +21,7 @@ let mouseReleases = 0;
 let insertTextCalls = 0;
 let screenshotBytes = Buffer.from('stable-frame');
 let hitMode = 'safe';
+let backendNodeId = 42;
 
 function assert(condition, message) { if (!condition) throw new Error(message); }
 function storage(map) {
@@ -51,15 +52,19 @@ const chrome = {
 };
 
 async function sessionSend(method, params = {}) {
-  if (method === 'Runtime.enable' || method === 'Page.enable') return {};
+  if (method === 'Runtime.enable' || method === 'Page.enable' || method === 'DOM.enable') return {};
   if (method === 'Page.captureScreenshot') return { data: screenshotBytes.toString('base64') };
+  if (method === 'DOM.getNodeForLocation') return { backendNodeId, frameId: 'main-frame', nodeId: 5 };
+  if (method === 'DOM.describeNode') {
+    return { node: { backendNodeId, nodeName: 'BUTTON', localName: 'button', attributes: ['id', backendNodeId === 42 ? 'safe' : 'replacement', 'role', 'button'] } };
+  }
   if (method === 'Runtime.evaluate') {
     const expression = String(params.expression || '');
     if (expression.includes('anchor_download') && expression.includes('elementFromPoint')) {
       if (hitMode === 'external') return { result: { value: { ok: true, tag: 'A', disabled: false, input_type: null, anchor_download: false, anchor_href: 'https://evil.example/' } } };
       if (hitMode === 'download') return { result: { value: { ok: true, tag: 'A', disabled: false, input_type: null, anchor_download: true, anchor_href: 'https://chatgpt.com/file' } } };
       if (hitMode === 'file') return { result: { value: { ok: true, tag: 'INPUT', disabled: false, input_type: 'file', anchor_download: false, anchor_href: null } } };
-      return { result: { value: { ok: true, tag: 'BUTTON', id: 'safe', disabled: false, input_type: null, anchor_download: false, anchor_href: null, bounds: [10, 10, 100, 40] } } };
+      return { result: { value: { ok: true, tag: 'BUTTON', id: 'safe', disabled: false, input_type: null, anchor_download: false, anchor_href: null, bounds: [100, 120, 80, 60] } } };
     }
     if (expression.includes('stop_not_found') || expression.includes('stop_ambiguous')) return { result: { value: { ok: true, x: 400, y: 300 } } };
     if (expression.includes('scrollX') && expression.includes('innerWidth')) return { result: { value: { x: 0, y: scrollY, w: 800, h: 600 } } };
@@ -83,7 +88,10 @@ const perceptionCache = new Map([
     captured_at: new Date().toISOString(),
     tab_id: 1,
     url: 'https://chatgpt.com/c/mock',
-    page: { viewport: { width: 800, height: 600 } },
+    page: { viewport: { width: 800, height: 600 }, scroll: { x: 0, y: 0 } },
+    dom_snapshot: { visible_records: [
+      { backend_node_id: 42, node_name: 'BUTTON', attributes: { id: 'safe', role: 'button' }, bounds: [100, 120, 80, 60] }
+    ] },
     hashes: { screenshot_sha256: sha256(screenshotBytes) }
   }]
 ]);
@@ -141,17 +149,35 @@ response = await dispatch({ type: 'A2_OPERATOR_ACTION', platform: 'CHATGPT', act
 assert(response?.ok === true && response.result.clicked_stop === true, 'stop action failed');
 assert(response.result.generating_before === true && response.result.generating_after === false, 'stop generation verification failed');
 
+// Node-bound click succeeds even if unrelated pixels changed, provided the exact
+// backend DOM node under the point is still the same node from the perception frame.
 const pressesBeforeClick = mousePresses;
+screenshotBytes = Buffer.from('unrelated-animation-changed-frame');
 response = await dispatch({ type: 'A2_OPERATOR_ACTION', platform: 'CHATGPT', action: 'CLICK_POINT', frame_token: frameToken, x: 120, y: 140 }, sidePanel);
-assert(response?.ok === true && response.result.action === 'CLICK_POINT', 'frame-bound point click failed');
-assert(response.result.verification === 'FRAME_SHA256_MATCHED_BEFORE_ACTUATION', 'point click lacked frame verification');
+assert(response?.ok === true && response.result.action === 'CLICK_POINT', 'node-bound point click failed');
+assert(response.result.verification === 'BACKEND_NODE_BINDING_MATCHED_BEFORE_ACTUATION', 'point click did not use backend-node freshness');
+assert(response.result.freshness.backend_node_id === 42, 'wrong backend node was bound');
 assert(mousePresses === pressesBeforeClick + 1, 'point click did not actuate exactly one press');
 
-const pressesBeforeStale = mousePresses;
-screenshotBytes = Buffer.from('changed-frame');
+// Replacement/overlay node at the same coordinate blocks before mousePressed.
+const pressesBeforeReplacement = mousePresses;
+backendNodeId = 99;
 response = await dispatch({ type: 'A2_OPERATOR_ACTION', platform: 'CHATGPT', action: 'CLICK_POINT', frame_token: frameToken, x: 120, y: 140 }, sidePanel);
-assert(response?.ok === false && String(response.error).includes('frame_stale_recapture_required'), 'stale frame was accepted');
-assert(mousePresses === pressesBeforeStale, 'stale frame actuated input');
+assert(response?.ok === false && String(response.error).includes('target_node_changed_recapture_required'), 'replacement node was accepted');
+assert(mousePresses === pressesBeforeReplacement, 'replacement node actuated input');
+backendNodeId = 42;
+
+// A point that had no reliable DOMSnapshot record keeps the strict legacy
+// screenshot fence instead of silently weakening freshness.
+screenshotBytes = Buffer.from('stable-frame');
+perceptionCache.get('CHATGPT').hashes.screenshot_sha256 = sha256(screenshotBytes);
+response = await dispatch({ type: 'A2_OPERATOR_ACTION', platform: 'CHATGPT', action: 'CLICK_POINT', frame_token: frameToken, x: 400, y: 400 }, sidePanel);
+assert(response?.ok === true && response.result.verification === 'FRAME_SHA256_MATCHED_BEFORE_ACTUATION', 'screenshot fallback did not verify');
+const pressesBeforeStaleFallback = mousePresses;
+screenshotBytes = Buffer.from('changed-fallback-frame');
+response = await dispatch({ type: 'A2_OPERATOR_ACTION', platform: 'CHATGPT', action: 'CLICK_POINT', frame_token: frameToken, x: 400, y: 400 }, sidePanel);
+assert(response?.ok === false && String(response.error).includes('frame_stale_recapture_required'), 'stale fallback frame was accepted');
+assert(mousePresses === pressesBeforeStaleFallback, 'stale fallback frame actuated input');
 screenshotBytes = Buffer.from('stable-frame');
 
 for (const mode of ['external', 'download', 'file']) {
@@ -164,7 +190,7 @@ for (const mode of ['external', 'download', 'file']) {
 hitMode = 'safe';
 
 const beforeDouble = mousePresses;
-response = await dispatch({ type: 'A2_OPERATOR_ACTION', platform: 'CHATGPT', action: 'DOUBLE_CLICK_POINT', frame_token: frameToken, x: 220, y: 240 }, sidePanel);
+response = await dispatch({ type: 'A2_OPERATOR_ACTION', platform: 'CHATGPT', action: 'DOUBLE_CLICK_POINT', frame_token: frameToken, x: 120, y: 140 }, sidePanel);
 assert(response?.ok === true && mousePresses === beforeDouble + 2, 'double click did not use two press sequences');
 
 tabs.push({ id: 3, url: 'https://chatgpt.com/c/mock' });
@@ -182,5 +208,7 @@ console.log('A2 v0.6 Operator Actions Lab: PASS', JSON.stringify({
   insert_text_calls: insertTextCalls,
   mouse_presses: mousePresses,
   mouse_releases: mouseReleases,
-  scroll_y: scrollY
+  scroll_y: scrollY,
+  backend_node_binding: true,
+  screenshot_fallback: true
 }));
