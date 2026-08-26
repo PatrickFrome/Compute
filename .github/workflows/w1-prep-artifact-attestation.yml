@@ -70,7 +70,7 @@ jobs:
         with:
           subject-path: out/w1-prep-attestation-manifest.json
 
-      - name: Verify attestation with strict identity policy
+      - name: Verify attestation online with strict identity policy
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -102,13 +102,66 @@ jobs:
           assert result['worker_admitted'] is False
           assert result['w1_verified'] is False
           assert result['authority_effect'] is False
-          print('W1 Sigstore attestation receipt: VERIFIED_NONAUTHORITY')
+          print('W1 Sigstore online receipt: VERIFIED_NONAUTHORITY')
           print('receipt_sha256=' + result['receipt_sha256'])
           print('manifest_subject_sha256=' + result['evidence']['manifest_subject_sha256'])
           print('rekor_timestamp=' + result['evidence']['rekor_timestamp'])
           PY
 
-      - name: Upload manifest and verification evidence
+      - name: Capture bundle and trusted root for offline continuity
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p out/offline
+          (
+            cd out/offline
+            gh attestation download ../w1-prep-attestation-manifest.json --repo "$GITHUB_REPOSITORY"
+            gh attestation trusted-root > trusted_root.jsonl
+          )
+          bundle_count="$(find out/offline -maxdepth 1 -type f -name 'sha256:*.jsonl' | wc -l)"
+          test "$bundle_count" -eq 1
+          test -s out/offline/trusted_root.jsonl
+          sha256sum out/offline/*.jsonl | sort > out/offline/offline-inputs.sha256
+
+      - name: Verify attestation offline with no usable network or token
+        run: |
+          set -euo pipefail
+          bundle="$(find out/offline -maxdepth 1 -type f -name 'sha256:*.jsonl' -print -quit)"
+          test -n "$bundle"
+          env -u GH_TOKEN -u GITHUB_TOKEN \
+            HTTPS_PROXY=http://127.0.0.1:9 \
+            HTTP_PROXY=http://127.0.0.1:9 \
+            ALL_PROXY=http://127.0.0.1:9 \
+            NO_PROXY= \
+            gh attestation verify out/w1-prep-attestation-manifest.json \
+              --repo "$GITHUB_REPOSITORY" \
+              --bundle "$bundle" \
+              --custom-trusted-root out/offline/trusted_root.jsonl \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/w1-prep-artifact-attestation.yml" \
+              --source-digest "$GITHUB_SHA" \
+              --source-ref "$GITHUB_REF" \
+              --deny-self-hosted-runners \
+              --format json > out/offline/w1-prep-attestation-offline-verification.json
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from controller.w1 import w1_attestation_verification_receipt as receipt
+
+          manifest = json.loads(Path('out/w1-prep-attestation-manifest.json').read_text())
+          online = json.loads(Path('out/w1-prep-attestation-receipt.json').read_text())
+          offline_verification = json.loads(Path('out/offline/w1-prep-attestation-offline-verification.json').read_text())
+          offline = receipt.compose(manifest=manifest, verification=offline_verification)
+          Path('out/offline/w1-prep-attestation-offline-receipt.json').write_text(
+              json.dumps(offline, sort_keys=True, indent=2) + '\n', encoding='utf-8'
+          )
+          assert offline == online, 'offline and online cryptographic receipts diverged'
+          print('W1 Sigstore offline verification: MATCH_ONLINE_RECEIPT')
+          print('receipt_sha256=' + offline['receipt_sha256'])
+          PY
+
+      - name: Upload manifest and online/offline verification evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: w1-prep-attestation-${{ github.run_id }}-${{ github.run_attempt }}
@@ -117,6 +170,9 @@ jobs:
             out/w1-prep-attestation-manifest.sha256
             out/w1-prep-attestation-verification.json
             out/w1-prep-attestation-receipt.json
+            out/offline/*.jsonl
+            out/offline/*.json
+            out/offline/offline-inputs.sha256
           if-no-files-found: error
           retention-days: 14
 
@@ -124,4 +180,5 @@ jobs:
         run: |
           set -euo pipefail
           echo 'Attestation proves workflow/source provenance only.'
-          echo 'It does NOT prove runtime safety, provider lifecycle, persistent worker status, admission, or W1 verification.'
+          echo 'Offline verification proves the captured bundle/root can be rechecked without GitHub API access.'
+          echo 'Neither proves runtime safety, provider lifecycle, persistent worker status, admission, or W1 verification.'
