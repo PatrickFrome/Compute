@@ -7,6 +7,7 @@ chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }).catch
 importScripts("./bootstrap-config.js");
 importScripts("./secret-vault.js");
 importScripts("./bridge-client.js");
+importScripts("./update-manager.js");
 importScripts("./debugger-broker.js");
 importScripts("./trusted-chatgpt.js");
 importScripts("./trusted-glm.js");
