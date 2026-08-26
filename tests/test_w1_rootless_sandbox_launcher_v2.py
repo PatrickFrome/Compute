@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import inspect
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 import unittest
@@ -10,12 +12,27 @@ from unittest import mock
 
 from worker.native_linux import rootless_sandbox_launcher_v2 as launcher
 
-EXPECTED_SOURCE_SHA256 = "46b688914dda5c93c46b4dec8784a02c2825a4fd5145ac6a98512ee7b6b2c1af"
+EXPECTED_SOURCE_SHA256 = "f262cd5468b5eb51754cf397cdb1879c2e90d0670b74f479d3b28af8cd20f521"
 
 
 class RootlessSandboxLauncherV2ContractTests(unittest.TestCase):
     def test_source_is_sha_bound(self):
         self.assertEqual(hashlib.sha256(Path(launcher.__file__).read_bytes()).hexdigest(), EXPECTED_SOURCE_SHA256)
+
+    def test_direct_file_cli_bootstraps_package_imports(self):
+        launcher_path = Path(launcher.__file__).resolve()
+        with tempfile.TemporaryDirectory() as td:
+            result = subprocess.run(
+                [sys.executable, str(launcher_path), "--help"],
+                cwd=td,
+                env={"PATH": "/usr/bin:/bin"},
+                text=True,
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("W1 S2 rootless sandbox launcher v2", result.stdout)
 
     def test_namespace_composition_is_explicit(self):
         self.assertEqual(launcher.NETWORK_ISOLATION_OWNER, "LAUNCHER_CLONE_NEWNET")
