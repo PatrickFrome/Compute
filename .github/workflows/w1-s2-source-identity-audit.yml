@@ -3,19 +3,6 @@ name: W1 S2 Source Identity Audit
 on:
   push:
     branches: [work/w1-sandbox-launcher-prep]
-    paths:
-      - 'controller/w1/s2_source_identity_audit.py'
-      - 'tests/test_w1_s2_source_identity_audit.py'
-      - 'worker/native_linux/rootless_sandbox_launcher_v2.py'
-      - '.github/workflows/w1-rootless-sandbox-launcher-v2-contract.yml'
-      - '.github/workflows/w1-rootless-sandbox-runtime-canary.yml'
-      - '.github/workflows/w1-s2-pid1-resource-shadow-canary.yml'
-      - 'docs/W1_S2_ROOTLESS_SANDBOX_LAUNCHER_V2.md'
-      - 'worker/native_linux/w1_lifecycle_evidence_harness.py'
-      - 'tests/test_w1_pre_persistence_db_contract.py'
-      - 'tests/test_w1_rootless_sandbox_launcher_v2.py'
-      - 'supabase/migrations/20260826060000_w1_pre_persistence_evidence_manifest_v1.sql'
-      - '.github/workflows/w1-s2-source-identity-audit.yml'
   workflow_dispatch:
 
 permissions:
