@@ -50,11 +50,13 @@
     <dl class="perception-meta">
       <dt>Target</dt><dd id="perceptionTarget">none</dd>
       <dt>Captured</dt><dd id="perceptionCaptured">—</dd>
+      <dt>Frame</dt><dd id="perceptionFrame">—</dd>
       <dt>Text</dt><dd id="perceptionTextMeta">—</dd>
       <dt>AX / DOM</dt><dd id="perceptionStructure">—</dd>
       <dt>Hashes</dt><dd id="perceptionHashes">—</dd>
     </dl>
-    <img id="perceptionScreenshot" alt="Captured browser viewport" hidden>
+    <img id="perceptionScreenshot" alt="Captured browser viewport; click to actuate this exact frame" hidden>
+    <p class="hint">Click the captured viewport for a trusted point click. Shift+click performs a double click. The action is rejected if the current viewport no longer matches this frame SHA-256.</p>
     <label for="perceptionBody">Visible page text excerpt</label>
     <textarea id="perceptionBody" readonly placeholder="Capture a configured GPT or GLM tab…"></textarea>
     <details>
@@ -75,7 +77,7 @@
       <button id="scrollUp">Scroll up</button>
       <button id="scrollDown">Scroll down</button>
     </div>
-    <p class="hint">Actions use trusted CDP mouse/keyboard primitives on the exact configured tab. If the target is duplicated or another debugger owns it, the action fails closed.</p>
+    <p class="hint">Actions use trusted CDP mouse/keyboard primitives on the exact configured tab. Point clicks are frame-bound; duplicate targets and unsafe external navigation links fail closed.</p>
     <div id="lastAction" class="meta">No operator action yet.</div>
   </section>
 
@@ -100,7 +102,7 @@
       <button id="allowOriginal">Allow original once</button>
       <button id="rewriteAllow" class="primary">Rewrite + allow once</button>
     </div>
-    <p class="hint">Rewrite is now performed by trusted CDP with exact readback; allow-once then opens an 8-second window for your next physical Enter/Send.</p>
+    <p class="hint">Rewrite is performed by trusted CDP with exact readback; allow-once then opens an 8-second window for your next physical Enter/Send.</p>
   </section>
 
   <section class="card">
