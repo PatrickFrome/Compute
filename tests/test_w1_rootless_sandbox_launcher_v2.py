@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import inspect
 from pathlib import Path, PurePosixPath
 import unittest
@@ -8,8 +9,14 @@ from unittest import mock
 
 from worker.native_linux import rootless_sandbox_launcher_v2 as launcher
 
+EXPECTED_SOURCE_SHA256 = "231afd6a58b1be50549ee4cdfa99c914bff474ae3950c7af2396d3b2519413b9"
+
 
 class RootlessSandboxLauncherV2ContractTests(unittest.TestCase):
+    def test_source_is_sha_bound(self):
+        path = Path(launcher.__file__)
+        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), EXPECTED_SOURCE_SHA256)
+
     def test_namespace_composition_is_explicit(self):
         self.assertEqual(launcher.NETWORK_ISOLATION_OWNER, "LAUNCHER_CLONE_NEWNET")
         self.assertEqual(launcher.PID1_ROLE, "DEDICATED_INIT_REAPER")
