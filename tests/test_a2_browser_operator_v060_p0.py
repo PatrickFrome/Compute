@@ -18,6 +18,7 @@ class BrowserOperatorV060P0(unittest.TestCase):
         cls.gate = (EXT / "prompt-gate.js").read_text()
         cls.control = (EXT / "operator-control.js").read_text()
         cls.bindings = (EXT / "operator-gate-bindings.js").read_text()
+        cls.perception = (EXT / "operator-perception.js").read_text()
         cls.panel = (EXT / "sidepanel.js").read_text()
 
     def test_01_version_and_identity(self):
@@ -45,13 +46,7 @@ class BrowserOperatorV060P0(unittest.TestCase):
         self.assertNotIn("await postResult(id,envelope); await clearPendingIf(id)", self.bg)
 
     def test_05_typed_execution_classes(self):
-        for token in [
-            "SAFE_RETRY_PRE_ACTUATION",
-            "AMBIGUOUS_NO_RETRY",
-            "ACTUATED",
-            "VERIFIED",
-            "BLOCKED",
-        ]:
+        for token in ["SAFE_RETRY_PRE_ACTUATION", "AMBIGUOUS_NO_RETRY", "ACTUATED", "VERIFIED", "BLOCKED"]:
             self.assertIn(token, self.bg)
         self.assertIn("execution_class", self.gpt)
         self.assertIn("execution_class", self.glm)
@@ -117,11 +112,13 @@ class BrowserOperatorV060P0(unittest.TestCase):
         self.assertNotIn("bridgeSecret", self.control)
         self.assertIn("A2_OPERATOR_RESOLVE_PROMPT", self.control)
 
-    def test_15_sidepanel_controls_arm_and_gate(self):
+    def test_15_sidepanel_controls_arm_gate_and_perception(self):
         self.assertIn("A2_OPERATOR_SET_ARM", self.panel)
         self.assertIn("A2_OPERATOR_SET_MODE", self.panel)
         self.assertIn("REWRITE_ALLOW_ONCE", self.panel)
         self.assertIn("CANCEL", self.panel)
+        self.assertIn("A2_OPERATOR_CAPTURE_PERCEPTION", self.panel)
+        self.assertIn("capturePerception", self.panel)
 
     def test_16_glm_gate_capability_is_cleared_in_finally(self):
         self.assertIn("const originalGlm", self.bindings)
@@ -129,9 +126,27 @@ class BrowserOperatorV060P0(unittest.TestCase):
         self.assertIn("A2_PROMPT_GATE_BRIDGE_BYPASS_CLEAR", self.bindings)
         self.assertIn("finally", self.bindings)
 
-    def test_17_behavioral_labs_are_present(self):
-        self.assertTrue((ROOT / "tests" / "a2_v060_prompt_gate_browser_lab.mjs").exists())
-        self.assertTrue((ROOT / "tests" / "a2_v060_operator_control_lab.mjs").exists())
+    def test_17_perception_uses_hybrid_cdp_sensors(self):
+        self.assertIn("Accessibility.getFullAXTree", self.perception)
+        self.assertIn("DOMSnapshot.captureSnapshot", self.perception)
+        self.assertIn("Page.captureScreenshot", self.perception)
+        self.assertIn("Page.getLayoutMetrics", self.perception)
+        self.assertIn("document.body?.innerText", self.perception)
+        self.assertIn("operator-perception.js", self.entry)
+
+    def test_18_perception_is_tainted_bounded_and_session_metadata_only(self):
+        self.assertIn("tainted_page_data: true", self.perception)
+        self.assertIn("boundedPreview", self.perception)
+        self.assertIn("A2_OPERATOR_PERCEPTION_PREVIEW", self.perception)
+        self.assertIn("chrome.storage.session.set", self.perception)
+        self.assertIn("screenshot_sha256", self.perception)
+        self.assertNotIn("chrome.storage.local.set", self.perception)
+        self.assertIn("perception_debugger_target_busy", self.perception)
+        self.assertIn("perception_duplicate_target_tabs", self.perception)
+
+    def test_19_behavioral_labs_are_present(self):
+        for name in ["a2_v060_prompt_gate_browser_lab.mjs", "a2_v060_operator_control_lab.mjs", "a2_v060_perception_lab.mjs"]:
+            self.assertTrue((ROOT / "tests" / name).exists())
 
 
 if __name__ == "__main__":
