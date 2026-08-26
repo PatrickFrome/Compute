@@ -2,8 +2,8 @@
   "use strict";
 
   const HEARTBEAT_MS = 2500;
-  const SEND_VERIFY_TIMEOUT_MS = 12000;
-  const SEND_BUTTON_WAIT_MS = 6000;
+  const SEND_VERIFY_TIMEOUT_MS = 6000;
+  const SEND_BUTTON_WAIT_MS = 3000;
   const MAX_MESSAGE_CHARS = 120000;
   const SEEN_COMMANDS_STORAGE_KEY = "a2-chat-bridge:seen-commands";
   const seenCommands = new Set(loadSeenCommands());
@@ -252,12 +252,11 @@
     return composer;
   }
 
-  async function callTrustedChatgpt(type, text) {
-    const response = await chrome.runtime.sendMessage({ type, prompt: text });
+  async function callTrustedChatgpt(text) {
+    const response = await chrome.runtime.sendMessage({ type: "A2_CHATGPT_TRUSTED_SEND", prompt: text });
     if (response?.ok === true) return response;
     const safe = String(response?.error || "unknown").replace(/[^a-z0-9_:-]/gi, "_").slice(0, 120);
-    if (type === "A2_CHATGPT_TRUSTED_PRIME") throw new Error(`chatgpt_trusted_prime_failed:${safe}`);
-    throw new Error(`chatgpt_trusted_click_failed:${safe}`);
+    throw new Error(`chatgpt_trusted_send_failed:${safe}`);
   }
 
   async function waitForEnabledSend(expectedText) {
@@ -266,7 +265,7 @@
       const pair = resolveComposerSendPair();
       if (pair.error === "composer_send_pair_ambiguous") throw new Error(pair.error);
       if (!pair.error && textMatchesExpected(composerText(pair.composer), expectedText) && !pair.send.disabled && pair.send.getAttribute("aria-disabled") !== "true") return pair.send;
-      await sleep(100);
+      await sleep(75);
     }
     throw new Error("send_button_not_enabled_or_pair_unresolved");
   }
@@ -290,7 +289,7 @@
           after_snapshot: current
         };
       }
-      await sleep(120);
+      await sleep(100);
     }
     throw new Error("send_click_not_observed_in_dom");
   }
@@ -307,11 +306,8 @@
     if (!composer) throw new Error("composer_not_found");
 
     if (platform() === "CHATGPT") {
-      if (composerText(composer) !== "") throw new Error("chatgpt_composer_not_empty_before_prime");
-      await callTrustedChatgpt("A2_CHATGPT_TRUSTED_PRIME", text);
-      const sendButton = await waitForEnabledSend(text);
-      if (!sendButton) throw new Error("send_button_not_found");
-      await callTrustedChatgpt("A2_CHATGPT_TRUSTED_CLICK", text);
+      if (composerText(composer) !== "") throw new Error("chatgpt_composer_not_empty_before_send");
+      await callTrustedChatgpt(text);
     } else {
       await writeComposerExact(text);
       const sendButton = await waitForEnabledSend(text);
@@ -346,7 +342,7 @@
 
   function scheduleSnapshot() {
     if (snapshotTimer) return;
-    snapshotTimer = setTimeout(() => { snapshotTimer = null; emitSnapshot(false); }, 180);
+    snapshotTimer = setTimeout(() => { snapshotTimer = null; emitSnapshot(false); }, 150);
   }
 
   const observer = new MutationObserver(() => {
