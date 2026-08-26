@@ -12,14 +12,29 @@ const DEFAULTS = Object.freeze({
   zaiUrl: "https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db"
 });
 
-const CONTENT_SEND_STATUSES = new Set([
-  "SENT_AND_DOM_VERIFIED",
-  "SENT_WEAK_DOM_VERIFIED",
-  "DUPLICATE_IGNORED"
-]);
+const CONTENT_SEND_STATUSES = new Set(["SENT_AND_DOM_VERIFIED", "SENT_WEAK_DOM_VERIFIED", "DUPLICATE_IGNORED"]);
+const CHATGPT_ROOT_URL = "https://chatgpt.com/";
+const CHATGPT_ROLLOVER_TIMEOUT_MS = 12000;
+const GLM_RETRYABLE_ERRORS = [
+  "send_click_not_observed_in_dom",
+  "send_button_not_enabled_or_pair_unresolved",
+  "composer_send_pair_not_found",
+  "send_button_not_found",
+  "composer_not_found"
+];
 const inFlightCommands = new Set();
+const rolloverTabs = new Set();
 let lastPollAt = 0;
 let pollPromise = null;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const normalize = (value) => String(value ?? "").replace(/\r\n/g, "\n").trim();
+const canonicalVisible = (value) => String(value ?? "")
+  .replace(/\r\n?/g, "\n")
+  .replace(/\u00a0/g, " ")
+  .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
+  .replace(/\s+/gu, " ")
+  .trim();
 
 function normalizeUrl(value) {
   try {
@@ -52,6 +67,57 @@ function platformForUrl(value) {
   return "UNKNOWN";
 }
 
+function isChatgptConversationUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return ["chatgpt.com", "chat.openai.com"].includes(url.hostname.toLowerCase()) && url.pathname.startsWith("/c/");
+  } catch (_) {
+    return false;
+  }
+}
+
+function isConversationExhaustedError(value) {
+  return String(value || "").includes("chatgpt_cdp_conversation_exhausted");
+}
+
+function isRetryableGlmError(value) {
+  const text = String(value || "");
+  return GLM_RETRYABLE_ERRORS.some((needle) => text.includes(needle));
+}
+
+function snapshotEvidence(before, after, prompt, platform) {
+  const messages = Array.isArray(after?.messages) ? after.messages : [];
+  const expected = platform === "CHATGPT" ? canonicalVisible(prompt) : normalize(prompt);
+  const exactUserTurn = messages.some((message) => {
+    if (message?.role !== "user") return false;
+    const actual = platform === "CHATGPT" ? canonicalVisible(message?.text) : normalize(message?.text);
+    return actual === expected;
+  });
+  const beforeCount = Number(before?.message_count || 0);
+  const afterCount = Number(after?.message_count || 0);
+  const composerEmpty = normalize(after?.composer_text || "") === "";
+  const countAdvanced = afterCount > beforeCount;
+  return {
+    verified: exactUserTurn || (composerEmpty && countAdvanced),
+    exact_user_turn_seen: exactUserTurn,
+    verification_strength: exactUserTurn ? "EXACT_USER_TURN" : (composerEmpty && countAdvanced ? "CLEARED_AND_COUNT_ADVANCED" : "NONE"),
+    composer_cleared: composerEmpty,
+    message_count_before: beforeCount,
+    message_count_after: afterCount,
+    after_snapshot: after || null
+  };
+}
+
+function resultFromEvidence(commandId, evidence, extra = {}) {
+  return {
+    status: evidence.exact_user_turn_seen ? "SENT_AND_DOM_VERIFIED" : "SENT_WEAK_DOM_VERIFIED",
+    command_id: commandId,
+    clicked_send_button: true,
+    verification: evidence,
+    ...extra
+  };
+}
+
 async function getSettings() {
   const stored = await chrome.storage.local.get(Object.keys(DEFAULTS));
   const settings = { ...DEFAULTS, ...stored };
@@ -73,9 +139,7 @@ async function singleOpenChatgptConversation() {
   const candidates = tabs
     .filter((tab) => tab?.id && tab?.url && platformForUrl(tab.url) === "CHATGPT")
     .map((tab) => normalizeUrl(tab.url))
-    .filter((url) => {
-      try { return new URL(url).pathname.startsWith("/c/"); } catch (_) { return false; }
-    });
+    .filter((url) => isChatgptConversationUrl(url));
   const unique = [...new Set(candidates)];
   return unique.length === 1 ? unique[0] : "";
 }
@@ -85,9 +149,7 @@ async function setBadge() {
   await chrome.action.setBadgeText({ text: settings.armed ? "ON" : "OFF" });
   await chrome.action.setBadgeBackgroundColor({ color: settings.armed ? "#16803a" : "#5d6470" });
   await chrome.action.setTitle({
-    title: settings.armed
-      ? "METAENGINE Chat Control Plane — ARMED"
-      : "METAENGINE Chat Control Plane — DISARMED"
+    title: settings.armed ? "METAENGINE Chat Control Plane — ARMED" : "METAENGINE Chat Control Plane — DISARMED"
   });
 }
 
@@ -97,11 +159,7 @@ async function daemonFetch(path, init = {}) {
   const headers = new Headers(init.headers || {});
   headers.set("content-type", "application/json");
   headers.set("x-a2-chat-bridge-client", clientId);
-  return fetch(`${settings.daemonUrl}${path}`, {
-    ...init,
-    headers,
-    cache: "no-store"
-  });
+  return fetch(`${settings.daemonUrl}${path}`, { ...init, headers, cache: "no-store" });
 }
 
 async function reportSnapshot(tabId, snapshot) {
@@ -114,16 +172,10 @@ async function reportSnapshot(tabId, snapshot) {
   };
   await chrome.storage.local.set({ [`snapshot:${payload.platform}`]: payload });
   try {
-    const response = await daemonFetch("/v1/snapshots", {
-      method: "POST",
-      body: JSON.stringify(payload)
-    });
+    const response = await daemonFetch("/v1/snapshots", { method: "POST", body: JSON.stringify(payload) });
     if (!response.ok) throw new Error(`snapshot_http_${response.status}`);
   } catch (error) {
-    await chrome.storage.local.set({
-      daemonLastError: String(error?.message || error),
-      daemonLastErrorAt: new Date().toISOString()
-    });
+    await chrome.storage.local.set({ daemonLastError: String(error?.message || error), daemonLastErrorAt: new Date().toISOString() });
   }
 }
 
@@ -156,10 +208,7 @@ function targetUrlFor(command, settings) {
 async function findPinnedTab(targetUrl, platform) {
   const tabs = await chrome.tabs.query({});
   const normalized = normalizeUrl(targetUrl);
-  return tabs.find((tab) => {
-    if (!tab.id || !tab.url) return false;
-    return platformForUrl(tab.url) === platform && normalizeUrl(tab.url) === normalized;
-  }) || null;
+  return tabs.find((tab) => tab?.id && tab?.url && platformForUrl(tab.url) === platform && normalizeUrl(tab.url) === normalized) || null;
 }
 
 async function pollPinnedTabSnapshots() {
@@ -172,9 +221,7 @@ async function pollPinnedTabSnapshots() {
       const tab = await findPinnedTab(target.url, target.platform);
       if (!tab?.id) return;
       const response = await chrome.tabs.sendMessage(tab.id, { type: "GET_CHAT_SNAPSHOT" });
-      if (response?.ok && response?.snapshot) {
-        await reportSnapshot(tab.id, response.snapshot);
-      }
+      if (response?.ok && response?.snapshot) await reportSnapshot(tab.id, response.snapshot);
     } catch (_) {}
   }));
 }
@@ -186,7 +233,7 @@ async function waitForContentScript(tabId, timeoutMs = 15000) {
       const response = await chrome.tabs.sendMessage(tabId, { type: "GET_CHAT_SNAPSHOT" });
       if (response?.ok && response.snapshot) return response.snapshot;
     } catch (_) {}
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await sleep(200);
   }
   throw new Error("content_script_not_ready");
 }
@@ -194,37 +241,117 @@ async function waitForContentScript(tabId, timeoutMs = 15000) {
 async function resolveTargetTab(command, settings) {
   const targetUrl = targetUrlFor(command, settings);
   if (!targetUrl) throw new Error(`target_url_not_configured:${command.target_platform}`);
-
   let tab = await findPinnedTab(targetUrl, command.target_platform);
   if (!tab && settings.autoOpenTabs) {
     tab = await chrome.tabs.create({ url: targetUrl, active: false });
     await waitForContentScript(tab.id);
   }
   if (!tab?.id) throw new Error(`target_tab_not_found:${command.target_platform}`);
-
   const live = await chrome.tabs.get(tab.id);
   const actual = normalizeUrl(live.url || "");
-  if (actual !== targetUrl) {
-    throw new Error(`target_url_mismatch:${actual}:${targetUrl}`);
-  }
+  if (actual !== targetUrl) throw new Error(`target_url_mismatch:${actual}:${targetUrl}`);
   return live;
+}
+
+async function sendViaContent(tab, command, settings) {
+  const before = await waitForContentScript(tab.id, 8000);
+  if (before.platform !== command.target_platform) throw new Error(`platform_mismatch:${before.platform}:${command.target_platform}`);
+  if (normalizeUrl(before.url) !== targetUrlFor(command, settings)) throw new Error("snapshot_url_not_pinned_target");
+  const response = await chrome.tabs.sendMessage(tab.id, {
+    type: "EXECUTE_CHAT_SEND",
+    command: { command_id: String(command.command_id || ""), prompt: String(command.prompt || ""), allow_while_generating: false }
+  });
+  if (!response?.ok) throw Object.assign(new Error(response?.error || "content_send_failed"), { before });
+  const resultStatus = String(response.result?.status || "");
+  if (!CONTENT_SEND_STATUSES.has(resultStatus)) throw Object.assign(new Error(`unexpected_send_result_status:${resultStatus || "missing"}`), { before });
+  return { before, result: response.result };
+}
+
+async function reloadAndRetryGlm(command, tab, before) {
+  let latest = null;
+  try { latest = await waitForContentScript(tab.id, 1200); } catch (_) {}
+  if (latest) {
+    const evidence = snapshotEvidence(before, latest, command.prompt, "GLM_ZAI");
+    if (evidence.verified) return resultFromEvidence(command.command_id, evidence, { recovery: "GLM_PRE_RELOAD_OBSERVED" });
+  }
+
+  await chrome.tabs.reload(tab.id);
+  const fresh = await waitForContentScript(tab.id, 15000);
+  if (fresh.platform !== "GLM_ZAI") throw new Error("glm_retry_platform_mismatch");
+  if (normalizeUrl(fresh.url) !== normalizeUrl((await getSettings()).zaiUrl)) throw new Error("glm_retry_url_mismatch");
+  if (fresh.generating) throw new Error("glm_retry_still_generating");
+  const draft = normalize(fresh.composer_text || "");
+  if (draft && draft !== normalize(command.prompt)) throw new Error("glm_retry_composer_not_bridge_owned");
+  const afterReloadEvidence = snapshotEvidence(before, fresh, command.prompt, "GLM_ZAI");
+  if (afterReloadEvidence.verified) return resultFromEvidence(command.command_id, afterReloadEvidence, { recovery: "GLM_POST_RELOAD_OBSERVED" });
+
+  const response = await chrome.tabs.sendMessage(tab.id, {
+    type: "EXECUTE_CHAT_SEND",
+    command: { command_id: String(command.command_id || ""), prompt: String(command.prompt || ""), allow_while_generating: false }
+  });
+  if (!response?.ok) throw new Error(`glm_retry_failed:${response?.error || "content_send_failed"}`);
+  const resultStatus = String(response.result?.status || "");
+  if (!CONTENT_SEND_STATUSES.has(resultStatus)) throw new Error(`glm_retry_status:${resultStatus || "missing"}`);
+  return { ...response.result, recovery: "GLM_RELOAD_RETRY_ONCE" };
+}
+
+async function waitForNewChatgptConversation(tabId, prompt) {
+  const deadline = Date.now() + CHATGPT_ROLLOVER_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const tab = await chrome.tabs.get(tabId);
+    if (isChatgptConversationUrl(tab?.url || "")) {
+      try {
+        const snapshot = await waitForContentScript(tabId, 1800);
+        const evidence = snapshotEvidence({ message_count: 0 }, snapshot, prompt, "CHATGPT");
+        if (evidence.verified) return { tab, snapshot, evidence };
+      } catch (_) {}
+    }
+    await sleep(150);
+  }
+  throw new Error("chatgpt_rollover_verification_timeout");
+}
+
+async function rolloverChatgptAndRetry(command, tab) {
+  if (rolloverTabs.has(tab.id)) throw new Error("chatgpt_rollover_already_in_flight");
+  rolloverTabs.add(tab.id);
+  await chrome.storage.local.set({ chatgptRolloverPending: true, chatgptRolloverPendingTabId: tab.id });
+  try {
+    await chrome.tabs.update(tab.id, { url: CHATGPT_ROOT_URL, active: false });
+    const root = await waitForContentScript(tab.id, 15000);
+    if (root.platform !== "CHATGPT") throw new Error("chatgpt_rollover_root_platform_mismatch");
+    if (normalizeUrl(root.url) !== normalizeUrl(CHATGPT_ROOT_URL)) throw new Error("chatgpt_rollover_root_url_mismatch");
+    if (root.generating) throw new Error("chatgpt_rollover_root_generating");
+    if (canonicalVisible(root.composer_text || "") !== "") throw new Error("chatgpt_rollover_root_composer_not_empty");
+    if (typeof globalThis.A2_CHATGPT_TRUSTED_SEND !== "function") throw new Error("chatgpt_rollover_trusted_send_unavailable");
+
+    const sent = await globalThis.A2_CHATGPT_TRUSTED_SEND(tab.id, String(command.prompt || ""));
+    if (sent?.ok !== true) throw new Error(`chatgpt_rollover_send_failed:${sent?.error || "unknown"}`);
+    const completed = await waitForNewChatgptConversation(tab.id, String(command.prompt || ""));
+    const newUrl = normalizeUrl(completed.tab.url || "");
+    await chrome.storage.local.set({ chatgptUrl: newUrl, chatgptRolloverPending: false, chatgptRolloverPendingTabId: null });
+    await reportSnapshot(tab.id, completed.snapshot);
+    return resultFromEvidence(command.command_id, completed.evidence, { recovery: "CHATGPT_NEW_CHAT_ROLLOVER", rolled_over_to: newUrl });
+  } finally {
+    await chrome.storage.local.set({ chatgptRolloverPending: false, chatgptRolloverPendingTabId: null });
+    rolloverTabs.delete(tab.id);
+  }
 }
 
 async function postCommandResult(commandId, result) {
   try {
-    const response = await daemonFetch(`/v1/commands/${encodeURIComponent(commandId)}/result`, {
-      method: "POST",
-      body: JSON.stringify(result)
-    });
+    const response = await daemonFetch(`/v1/commands/${encodeURIComponent(commandId)}/result`, { method: "POST", body: JSON.stringify(result) });
     if (!response.ok) throw new Error(`result_http_${response.status}`);
     return true;
   } catch (error) {
-    await chrome.storage.local.set({
-      daemonLastError: `result:${String(error?.message || error)}`,
-      daemonLastErrorAt: new Date().toISOString()
-    });
+    await chrome.storage.local.set({ daemonLastError: `result:${String(error?.message || error)}`, daemonLastErrorAt: new Date().toISOString() });
     return false;
   }
+}
+
+function scheduleReciprocalPoll() {
+  setTimeout(() => {
+    pollPinnedTabSnapshots().finally(() => pollCommands(true));
+  }, 5200);
 }
 
 async function executeCommand(command) {
@@ -232,11 +359,7 @@ async function executeCommand(command) {
   const commandId = String(command?.command_id || "");
   if (!commandId) throw new Error("missing_command_id");
   if (!settings.armed) {
-    await postCommandResult(commandId, {
-      status: "BLOCKED_NOT_ARMED",
-      authority_effect: false,
-      captured_at: new Date().toISOString()
-    });
+    await postCommandResult(commandId, { status: "BLOCKED_NOT_ARMED", authority_effect: false, captured_at: new Date().toISOString() });
     return;
   }
   if (inFlightCommands.has(commandId)) return;
@@ -244,47 +367,40 @@ async function executeCommand(command) {
 
   try {
     const tab = await resolveTargetTab(command, settings);
-    const before = await waitForContentScript(tab.id, 8000);
-    if (before.platform !== command.target_platform) {
-      throw new Error(`platform_mismatch:${before.platform}:${command.target_platform}`);
-    }
-    if (normalizeUrl(before.url) !== targetUrlFor(command, settings)) {
-      throw new Error("snapshot_url_not_pinned_target");
-    }
-
-    const response = await chrome.tabs.sendMessage(tab.id, {
-      type: "EXECUTE_CHAT_SEND",
-      command: {
-        command_id: commandId,
-        prompt: String(command.prompt || ""),
-        allow_while_generating: false
+    let result;
+    let before = null;
+    try {
+      const sent = await sendViaContent(tab, command, settings);
+      before = sent.before;
+      result = sent.result;
+    } catch (error) {
+      before = error?.before || before || await waitForContentScript(tab.id, 1200).catch(() => null);
+      if (command.target_platform === "CHATGPT" && isConversationExhaustedError(error?.message || error)) {
+        result = await rolloverChatgptAndRetry(command, tab);
+      } else if (command.target_platform === "GLM_ZAI" && before && isRetryableGlmError(error?.message || error)) {
+        result = await reloadAndRetryGlm(command, tab, before);
+      } else {
+        throw error;
       }
-    });
-    if (!response?.ok) throw new Error(response?.error || "content_send_failed");
-
-    const resultStatus = String(response.result?.status || "");
-    if (!CONTENT_SEND_STATUSES.has(resultStatus)) {
-      throw new Error(`unexpected_send_result_status:${resultStatus || "missing"}`);
     }
 
+    const currentSettings = await getSettings();
+    const targetUrl = targetUrlFor(command, currentSettings) || normalizeUrl((await chrome.tabs.get(tab.id)).url || "");
     await postCommandResult(commandId, {
-      status: resultStatus,
+      status: String(result?.status || "FAILED_CLOSED"),
       target_platform: command.target_platform,
-      target_url: normalizeUrl(before.url),
+      target_url: targetUrl,
       tab_id: tab.id,
-      clicked_send_button: response.result?.clicked_send_button === true,
-      prompt_hash_local: response.result?.prompt_hash_local || null,
-      verification: response.result?.verification || null,
+      clicked_send_button: result?.clicked_send_button === true,
+      prompt_hash_local: result?.prompt_hash_local || null,
+      verification: result?.verification || null,
+      recovery: result?.recovery || null,
       authority_effect: false,
       captured_at: new Date().toISOString()
     });
+    scheduleReciprocalPoll();
   } catch (error) {
-    await postCommandResult(commandId, {
-      status: "FAILED_CLOSED",
-      error: String(error?.message || error),
-      authority_effect: false,
-      captured_at: new Date().toISOString()
-    });
+    await postCommandResult(commandId, { status: "FAILED_CLOSED", error: String(error?.message || error), authority_effect: false, captured_at: new Date().toISOString() });
   } finally {
     inFlightCommands.delete(commandId);
   }
@@ -298,35 +414,22 @@ async function pollCommands(force = false) {
     lastPollAt = Date.now();
     try {
       const snapshots = await refreshSnapshotEnvelopesIfStale(settings);
-      const response = await daemonFetch("/v1/commands/next", {
-        method: "POST",
-        body: JSON.stringify({ snapshots })
-      });
+      const response = await daemonFetch("/v1/commands/next", { method: "POST", body: JSON.stringify({ snapshots }) });
       if (!response.ok) throw new Error(`command_http_${response.status}`);
       const body = await response.json();
       if (body?.command) await executeCommand(body.command);
-      await chrome.storage.local.set({
-        daemonOnlineAt: new Date().toISOString(),
-        daemonLastError: null
-      });
+      await chrome.storage.local.set({ daemonOnlineAt: new Date().toISOString(), daemonLastError: null });
     } catch (error) {
-      await chrome.storage.local.set({
-        daemonLastError: String(error?.message || error),
-        daemonLastErrorAt: new Date().toISOString()
-      });
+      await chrome.storage.local.set({ daemonLastError: String(error?.message || error), daemonLastErrorAt: new Date().toISOString() });
     }
-  })().finally(() => {
-    pollPromise = null;
-  });
+  })().finally(() => { pollPromise = null; });
   return pollPromise;
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
   const existing = await chrome.storage.local.get(Object.keys(DEFAULTS));
   const seed = {};
-  for (const [key, value] of Object.entries(DEFAULTS)) {
-    if (existing[key] === undefined) seed[key] = value;
-  }
+  for (const [key, value] of Object.entries(DEFAULTS)) if (existing[key] === undefined) seed[key] = value;
   if (isLoopbackBridge(existing.daemonUrl) && String(bootstrap.daemonUrl || '').startsWith('https://')) {
     seed.daemonUrl = bootstrap.daemonUrl;
     if (String(bootstrap.bridgeSecret || '').length >= 32) seed.bridgeSecret = bootstrap.bridgeSecret;
@@ -346,6 +449,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 chrome.runtime.onStartup.addListener(async () => {
   await chrome.alarms.create("a2-chat-bridge-poll", { periodInMinutes: 0.5 });
   await setBadge();
+  await pollPinnedTabSnapshots();
   await pollCommands(true);
 });
 
