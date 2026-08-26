@@ -1,0 +1,66 @@
+name: W1 S2 Source Identity Audit
+
+on:
+  push:
+    branches: [work/w1-sandbox-launcher-prep]
+    paths:
+      - 'controller/w1/s2_source_identity_audit.py'
+      - 'tests/test_w1_s2_source_identity_audit.py'
+      - 'worker/native_linux/rootless_sandbox_launcher_v2.py'
+      - '.github/workflows/w1-rootless-sandbox-launcher-v2-contract.yml'
+      - '.github/workflows/w1-rootless-sandbox-runtime-canary.yml'
+      - '.github/workflows/w1-s2-pid1-resource-shadow-canary.yml'
+      - 'docs/W1_S2_ROOTLESS_SANDBOX_LAUNCHER_V2.md'
+      - 'worker/native_linux/w1_lifecycle_evidence_harness.py'
+      - 'tests/test_w1_pre_persistence_db_contract.py'
+      - 'tests/test_w1_rootless_sandbox_launcher_v2.py'
+      - 'supabase/migrations/20260826060000_w1_pre_persistence_evidence_manifest_v1.sql'
+      - '.github/workflows/w1-s2-source-identity-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-identity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Compile and negative-test identity auditor
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/w1/s2_source_identity_audit.py
+          python3 -m unittest tests.test_w1_s2_source_identity_audit -v
+      - name: Audit every declared S2 source binding
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python3 controller/w1/s2_source_identity_audit.py \
+            --root . \
+            --output out/w1-s2-source-identity-audit.json
+          cat out/w1-s2-source-identity-audit.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r = json.loads(Path('out/w1-s2-source-identity-audit.json').read_text())
+          assert r['outcome'] == 'PASS_EXACT_SOURCE_IDENTITY_AUDIT_NONAUTHORITY'
+          assert all(r['evidence']['checks'].values())
+          assert r['evidence']['undeclared_binding_consumers'] == []
+          assert r['runtime_isolation_verified'] is False
+          assert r['w1_verified'] is False
+          assert r['authority_effect'] is False
+          print('S2 source identity audit: PASS_NONAUTHORITY')
+          print('source_sha256=' + r['evidence']['source_sha256'])
+          print('evidence_sha256=' + r['evidence_sha256'])
+          PY
+      - name: Upload non-authority identity receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: w1-s2-source-identity-${{ github.run_id }}-${{ github.run_attempt }}
+          path: out/w1-s2-source-identity-audit.json
+          if-no-files-found: error
+          retention-days: 14
