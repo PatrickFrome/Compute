@@ -55,6 +55,7 @@ jobs:
             --workspace "$workspace" \
             --sandbox-root "$sandbox_root" \
             -- python3 - <<'PY' > "$output_file" 2>&1
+          import errno
           import os
           from pathlib import Path
           import resource
@@ -94,6 +95,14 @@ jobs:
           workspace_rw = probe.read_text(encoding='utf-8') == 'ok'
           probe.unlink()
 
+          pid1_environ_denied = False
+          try:
+              Path('/proc/1/environ').read_bytes()
+          except PermissionError:
+              pid1_environ_denied = True
+          except OSError as exc:
+              pid1_environ_denied = exc.errno in (errno.EACCES, errno.EPERM)
+
           print('EUID=' + str(os.geteuid()))
           print('PID=' + str(os.getpid()))
           print('PPID=' + str(os.getppid()))
@@ -106,6 +115,7 @@ jobs:
           print('WORKSPACE_RW=' + str(workspace_rw).lower())
           print('NETWORK_DEFAULT_DENY=' + str(network_default_deny).lower())
           print('RLIMIT_CORE_ZERO=' + str(resource.getrlimit(resource.RLIMIT_CORE) == (0, 0)).lower())
+          print('PID1_ENVIRON_DENIED=' + str(pid1_environ_denied).lower())
           print('CANONICAL=false')
           print('AUTHORITY_EFFECT=false')
           print('WORKER_ADMITTED=false')
