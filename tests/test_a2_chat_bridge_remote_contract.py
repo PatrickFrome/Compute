@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import pathlib
 import unittest
@@ -9,6 +10,15 @@ RLS_MIGRATION = ROOT / "supabase" / "migrations" / "20260825215000_a2_chat_bridg
 BOOTSTRAP = ROOT / "coordination" / "chat-control-plane" / "extension" / "bootstrap-config.js"
 AMPLIFIER_POLICY = ROOT / "coordination" / "amplifier-loop" / "AMPLIFIER_LOOP_V1.md"
 AMPLIFIER_SEEDS = ROOT / "coordination" / "amplifier-loop" / "seed-amplifiers.json"
+AMPLIFIER_LEARNER = ROOT / "coordination" / "amplifier-loop" / "learner.py"
+
+
+def load_learner():
+    spec = importlib.util.spec_from_file_location("metaengine_amplifier_learner", AMPLIFIER_LEARNER)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
 
 
 class A2ChatBridgeRemoteContract(unittest.TestCase):
@@ -20,6 +30,7 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
         cls.bootstrap = BOOTSTRAP.read_text()
         cls.amplifier_policy = AMPLIFIER_POLICY.read_text()
         cls.amplifier_seeds = json.loads(AMPLIFIER_SEEDS.read_text())
+        cls.learner = load_learner()
 
     def test_edge_requires_scoped_pairing_hash(self):
         self.assertIn("x-a2-chat-bridge-secret", self.edge)
@@ -59,11 +70,7 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
         self.assertIn("same.status === 'COMPLETED'", self.edge)
 
     def test_a2_visibility_and_non_authority_are_preserved(self):
-        for rpc in [
-            "h205f22_a2_interactive_read_v1",
-            "h205f22_a2_macroblock_read_v1",
-            "h205f22_duel_list_peer_relay_pending_v4",
-        ]:
+        for rpc in ["h205f22_a2_interactive_read_v1", "h205f22_a2_macroblock_read_v1", "h205f22_duel_list_peer_relay_pending_v4"]:
             self.assertIn(rpc, self.edge)
         self.assertIn("pending_payloads_exposed", self.edge)
         self.assertIn("OTHER PEER CHAT: REDACTED BY A2 VISIBILITY FENCE", self.edge)
@@ -74,17 +81,10 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
 
     def test_amplifier_loop_is_in_every_remote_autonomous_wake(self):
         for needle in [
-            "AMPLIFIER_LOOP_V1",
-            "meaningful checkpoint, new bottleneck, repeated failure",
-            "bounded deep research",
-            "reversible bounded PREP/SHADOW/CANARY scope",
-            "zero monetary cost",
-            "real project or representative CI workload",
-            "ACCEPT, KEEP_SHADOW, or ROLLBACK",
-            "non-authority learning data",
-            "Before C5",
-            "C6 governs verified duration/scheduler learning",
-            "Do not self-train foundation-model weights",
+            "AMPLIFIER_LOOP_V1", "meaningful checkpoint, new bottleneck, repeated failure", "bounded deep research",
+            "reversible bounded PREP/SHADOW/CANARY scope", "zero monetary cost", "real project or representative CI workload",
+            "ACCEPT, KEEP_SHADOW, or ROLLBACK", "non-authority learning data", "Before C5",
+            "C6 governs verified duration/scheduler learning", "Do not self-train foundation-model weights",
             "run AMPLIFIER_LOOP_V1 when its trigger conditions apply",
         ]:
             self.assertIn(needle, self.edge)
@@ -94,13 +94,9 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
 
     def test_amplifier_policy_preserves_authority_and_requires_measurement(self):
         for needle in [
-            "does not change milestone authority",
-            "PAID_RESOURCE_OR_BUDGET_REQUIRED",
+            "does not change milestone authority", "PAID_RESOURCE_OR_BUDGET_REQUIRED",
             "Before dependent production milestones are satisfied, implementation is PREP/SHADOW/CANARY only",
-            "candidate_median <= 0.95 * baseline_median",
-            "automatic rollback",
-            "context_fingerprint",
-            "speedup_ratio",
+            "candidate_median <= 0.95 * baseline_median", "automatic rollback", "context_fingerprint", "speedup_ratio",
             "MUST NOT autonomously retrain or replace foundation-model weights",
         ]:
             self.assertIn(needle, self.amplifier_policy)
@@ -109,6 +105,33 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
         self.assertTrue(required.issubset(candidates))
         self.assertIn("FSL", candidates["nativelink"]["license"])
         self.assertIn("license/compliance review", candidates["nativelink"]["notes"])
+
+    def test_learner_selects_measured_candidate_and_honors_rollback(self):
+        def record(amplifier, version, speedup, reliability=0.0, verdict="ACCEPT", correctness=True):
+            return {
+                "amplifier_id": amplifier,
+                "candidate_version": version,
+                "task_class": "bridge-contract",
+                "context_fingerprint": "linux-py311-ci",
+                "baseline_metrics": {"median_wall_clock": 10.0},
+                "candidate_metrics": {"median_wall_clock": 10.0 / speedup},
+                "correctness_pass": correctness,
+                "security_pass": True,
+                "zero_cost_pass": True,
+                "sample_count": 5,
+                "verdict": verdict,
+                "reliability_delta": reliability,
+                "evidence_refs": ["ci:test"],
+            }
+        records = [record("fast-a", "1", 1.40), record("steady-b", "1", 1.15, reliability=0.2), record("unsafe-c", "1", 5.0, correctness=False)]
+        hint = self.learner.recommend(records, "bridge-contract", "linux-py311-ci")
+        self.assertFalse(hint["authority_effect"])
+        self.assertTrue(hint["strategy_hint_only"])
+        self.assertEqual(hint["selected"]["amplifier_id"], "fast-a")
+        records.append(record("fast-a", "1", 1.40, verdict="ROLLBACK"))
+        hint = self.learner.recommend(records, "bridge-contract", "linux-py311-ci")
+        self.assertEqual(hint["selected"]["amplifier_id"], "steady-b")
+        self.assertEqual(hint["rollback_blocked_candidate_count"], 1)
 
     def test_public_browser_roles_are_explicitly_denied(self):
         for table in [
