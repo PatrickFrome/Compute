@@ -1,0 +1,110 @@
+name: W1 Prep Artifact Attestation
+
+on:
+  push:
+    branches: [work/w1-sandbox-launcher-prep]
+    paths:
+      - 'controller/w1/**'
+      - 'worker/native_linux/**'
+      - 'supabase/migrations/*w1*.sql'
+      - 'tests/test_w1_*.py'
+      - '.github/workflows/w1-*.yml'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  attest-w1-prep-manifest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Test deterministic manifest builder
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/w1/build_w1_prep_attestation_manifest.py
+          python3 -m unittest tests.test_w1_prep_attestation_manifest -v
+
+      - name: Build exact W1 prep manifest
+        id: manifest
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          tree_sha="$(git rev-parse "${GITHUB_SHA}^{tree}")"
+          python3 controller/w1/build_w1_prep_attestation_manifest.py \
+            --root . \
+            --git-sha "$GITHUB_SHA" \
+            --tree-sha "$tree_sha" \
+            --source-ref "$GITHUB_REF" \
+            --output out/w1-prep-attestation-manifest.json
+          sha256sum out/w1-prep-attestation-manifest.json | tee out/w1-prep-attestation-manifest.sha256
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = json.loads(Path('out/w1-prep-attestation-manifest.json').read_text())
+          assert p['artifact_attestation_verified'] is False
+          assert p['persistent_worker_proof'] is False
+          assert p['worker_admitted'] is False
+          assert p['w1_verified'] is False
+          assert p['canonical'] is False
+          assert p['authority_effect'] is False
+          print('W1 prep manifest remains non-authority before attestation')
+          PY
+
+      - name: Generate keyless GitHub/Sigstore provenance attestation
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: out/w1-prep-attestation-manifest.json
+
+      - name: Verify attestation with strict identity policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh attestation verify out/w1-prep-attestation-manifest.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/w1-prep-artifact-attestation.yml" \
+            --source-digest "$GITHUB_SHA" \
+            --source-ref "$GITHUB_REF" \
+            --deny-self-hosted-runners \
+            --format json > out/w1-prep-attestation-verification.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          v = json.loads(Path('out/w1-prep-attestation-verification.json').read_text())
+          assert isinstance(v, list) and v, 'no verified attestations'
+          for item in v:
+              result = item.get('verificationResult') or {}
+              statement = result.get('statement') or {}
+              assert statement.get('predicateType') == 'https://slsa.dev/provenance/v1'
+              timestamps = result.get('verifiedTimestamps') or []
+              assert timestamps, 'no verified transparency/timestamp evidence'
+          print(f'cryptographically verified attestations={len(v)}')
+          PY
+
+      - name: Upload manifest and verification evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: w1-prep-attestation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            out/w1-prep-attestation-manifest.json
+            out/w1-prep-attestation-manifest.sha256
+            out/w1-prep-attestation-verification.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Preserve non-authority semantics
+        run: |
+          set -euo pipefail
+          echo 'Attestation proves workflow/source provenance only.'
+          echo 'It does NOT prove runtime safety, provider lifecycle, persistent worker status, admission, or W1 verification.'
