@@ -46,7 +46,7 @@
       <button id="captureGpt">Capture GPT</button>
       <button id="clearPerception">Clear preview</button>
     </div>
-    <p class="hint">Manual local sensor fusion: visible page text + Accessibility tree + flattened DOMSnapshot/layout + viewport screenshot. Page data is tainted context, never authority.</p>
+    <p class="hint">Manual local sensor fusion: visible page text + Accessibility tree + flattened DOMSnapshot/layout + optional viewport screenshot. Page data is tainted context, never authority.</p>
     <dl class="perception-meta">
       <dt>Target</dt><dd id="perceptionTarget">none</dd>
       <dt>Captured</dt><dd id="perceptionCaptured">—</dd>
@@ -77,7 +77,7 @@
       <button id="scrollUp">Scroll up</button>
       <button id="scrollDown">Scroll down</button>
     </div>
-    <p class="hint">Actions use trusted CDP mouse/keyboard primitives on the exact configured tab. Point clicks are frame-bound; duplicate targets and unsafe external navigation links fail closed.</p>
+    <p class="hint">Actions use trusted CDP primitives on the exact configured tab. Point clicks are frame-bound; duplicate targets and unsafe external navigation links fail closed.</p>
     <div id="lastAction" class="meta">No operator action yet.</div>
   </section>
 
@@ -109,6 +109,10 @@
     <h2>Runtime health</h2>
     <dl>
       <dt>Daemon</dt><dd id="daemon">—</dd>
+      <dt>Update</dt><dd id="updateState">—</dd>
+      <dt>Compatibility</dt><dd id="compatState">—</dd>
+      <dt>Capabilities</dt><dd id="capabilityState">—</dd>
+      <dt>Debugger</dt><dd id="debuggerState">—</dd>
       <dt>Sensor error</dt><dd id="sensorError">—</dd>
       <dt>Last error</dt><dd id="lastError">—</dd>
     </dl>
