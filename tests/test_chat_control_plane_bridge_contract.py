@@ -133,7 +133,8 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
     def test_legacy_synthetic_glm_send_is_not_reachable_from_active_worker(self):
         self.assertIn("sendButton.click();", self.content)
         self.assertNotIn('type: "EXECUTE_CHAT_SEND"', self.trusted_glm)
-        glm_branch = self.background.split('if (command.target_platform === "GLM_ZAI")', 1)[1].split('} else if (command.target_platform === "CHATGPT")', 1)[0]
+        execute = self.background.split("async function executeCommand(command)", 1)[1].split("async function pollCommands", 1)[0]
+        glm_branch = execute.split('if (command.target_platform === "GLM_ZAI")', 1)[1].split('} else if (command.target_platform === "CHATGPT")', 1)[0]
         self.assertIn("A2_GLM_TRUSTED_SEND", glm_branch)
         self.assertNotIn("EXECUTE_CHAT_SEND", glm_branch)
         self.assertNotIn("sendChatgptViaContent", glm_branch)
