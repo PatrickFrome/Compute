@@ -7,6 +7,7 @@ on:
     paths:
       - 'controller/w1/s2_seccomp_amplifier_shadow_canary.py'
       - 'worker/native_linux/rootless_sandbox_launcher.py'
+      - 'worker/native_linux/rootless_sandbox_launcher_v2.py'
       - '.github/workflows/w1-s2-seccomp-amplifier-shadow-canary.yml'
   workflow_dispatch:
 
@@ -22,13 +23,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - name: Compile canary and production seccomp launcher
+      - name: Compile canary and exact S2 sources
         run: |
           set -euo pipefail
           python3 -m py_compile \
             controller/w1/s2_seccomp_amplifier_shadow_canary.py \
-            worker/native_linux/rootless_sandbox_launcher.py
-      - name: Measure candidate worker-only seccomp policy
+            worker/native_linux/rootless_sandbox_launcher.py \
+            worker/native_linux/rootless_sandbox_launcher_v2.py
+      - name: Verify adopted worker-only seccomp policy and composite identity
         run: |
           set -euo pipefail
           mkdir -p out
@@ -39,14 +41,17 @@ jobs:
           import json
           from pathlib import Path
           r = json.loads(Path('out/w1-s2-seccomp-amplifier-shadow-canary.json').read_text())
-          assert r['outcome'] == 'ACCEPT_CANARY_SECCOMP_AMPLIFIER'
+          assert r['outcome'] == 'ACCEPT_ADOPTED_SECCOMP_REGRESSION'
           assert all(r['evidence']['checks'].values())
+          assert len(r['evidence']['source_identity']['v1_policy_sha256']) == 64
+          assert len(r['evidence']['source_identity']['v2_launcher_sha256']) == 64
+          assert len(r['evidence']['s2_runtime_identity_sha256']) == 64
           assert r['runtime_isolation_verified'] is False
           assert r['w1_verified'] is False
           assert r['authority_effect'] is False
-          print('seccomp amplifier candidate: ACCEPT_CANARY')
+          print('seccomp amplifier: ADOPTED_REGRESSION_GREEN')
           PY
-      - name: Upload non-authority canary receipt
+      - name: Upload non-authority regression receipt
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: w1-s2-seccomp-amplifier-${{ github.run_id }}-${{ github.run_attempt }}
