@@ -24,6 +24,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path, PurePosixPath
 import platform
+import resource
 import shutil
 import signal
 import stat
@@ -64,6 +65,9 @@ MOUNT_ATTR_NOSUID = 0x00000002
 MOUNT_ATTR_NODEV = 0x00000004
 MOUNT_ATTR_NOEXEC = 0x00000008
 PR_SET_PDEATHSIG = 1
+PR_GET_DUMPABLE = 3
+PR_SET_DUMPABLE = 4
+SUID_DUMP_DISABLE = 0
 TMPFS_SIZE = "size=256M,mode=0755"
 NETWORK_ISOLATION_OWNER = "LAUNCHER_CLONE_NEWNET"
 PID1_ROLE = "DEDICATED_INIT_REAPER"
@@ -461,6 +465,26 @@ def _worker_environment(workspace: Path, source: dict[str, str] | None = None) -
     return result
 
 
+def _harden_pid1_runtime(workspace: Path) -> None:
+    """Protect inherited launcher state before PID1 forks the worker."""
+    libc = _libc()
+    if libc.prctl(ctypes.c_int(PR_SET_DUMPABLE), ctypes.c_ulong(SUID_DUMP_DISABLE), 0, 0, 0) != 0:
+        _raise_errno("PR_SET_DUMPABLE failed")
+    if libc.prctl(ctypes.c_int(PR_GET_DUMPABLE), 0, 0, 0, 0) != SUID_DUMP_DISABLE:
+        raise SandboxUnavailable("PID1 dumpability fence did not persist")
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    if resource.getrlimit(resource.RLIMIT_CORE) != (0, 0):
+        raise SandboxUnavailable("PID1 core-dump limit did not persist")
+
+    # /proc/<pid>/environ exposes the initial exec environment, so live Python
+    # environment mutation alone is not the secrecy boundary. The dumpability
+    # fence above controls ptrace-governed access; this scrub additionally
+    # prevents future child inheritance and accidental logging of launch env.
+    sanitized = _worker_environment(workspace)
+    os.environ.clear()
+    os.environ.update(sanitized)
+
+
 def _close_inherited_fds() -> None:
     rc = _libc().syscall(
         ctypes.c_long(_syscall_number("close_range")),
@@ -629,6 +653,7 @@ def launch(argv: Sequence[str], *, workspace: Path, sandbox_root: Path, extra_bi
     _set_parent_death_signal()
     enter_pid1_isolation_namespaces()
     setup_sandbox_root(sandbox_root, workspace, extra_binds)
+    _harden_pid1_runtime(workspace)
     return _pid1_reaper(argv, workspace, original_mask)
 
 
