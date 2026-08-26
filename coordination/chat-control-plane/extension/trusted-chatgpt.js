@@ -7,6 +7,12 @@
   const inFlightTabs = new Set();
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const normalize = (value) => String(value ?? "").replace(/\r\n/g, "\n").trim();
+  const canonicalVisible = (value) => String(value ?? "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\u00a0/g, " ")
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
+    .replace(/\s+/gu, " ")
+    .trim();
 
   function target(tabId) { return { tabId }; }
   async function send(tabId, method, params = {}) { return chrome.debugger.sendCommand(target(tabId), method, params); }
@@ -94,19 +100,20 @@
     if (!result?.ok) throw new Error(`chatgpt_cdp_atomic_insert_${result?.error || "failed"}`);
   }
 
-  async function insertComposerTrusted(tabId, text) {
-    if (text.length > ATOMIC_LONG_PROMPT_THRESHOLD) {
-      await insertComposerAtomic(tabId, text);
-      return "ATOMIC_EXEC_COMMAND";
+  async function waitForCanonicalReadback(tabId, text, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await sleep(120);
+      const state = await inspectComposer(tabId);
+      if (state?.ok && canonicalVisible(state.text) === canonicalVisible(text)) return true;
     }
-    await send(tabId, "Input.insertText", { text });
-    return "CDP_INPUT_INSERT_TEXT";
+    return false;
   }
 
   async function inspectSend(tabId, expectedText) {
     return evaluate(tabId, `(() => {
       const expected = ${JSON.stringify(expectedText)};
-      const norm = (v) => String(v ?? '').replace(/\\r\\n/g, '\\n').trim();
+      const canon = (v) => String(v ?? '').replace(/\\r\\n?/g, '\\n').replace(/\u00a0/g, ' ').replace(/[\u200B-\u200D\u2060\uFEFF]/g, '').replace(/\s+/gu, ' ').trim();
       const visible = (el) => {
         if (!(el instanceof HTMLElement)) return false;
         const style = getComputedStyle(el);
@@ -118,8 +125,8 @@
       const composer = composers[0];
       const form = composer.closest('form');
       if (!form) return { ok:false, error:'composer_form_missing' };
-      const text = norm(composer.innerText || composer.textContent || '');
-      if (text !== norm(expected)) return { ok:false, error:'composer_readback_mismatch' };
+      const text = composer.innerText || composer.textContent || '';
+      if (canon(text) !== canon(expected)) return { ok:false, error:'composer_readback_mismatch' };
       const raw = [
         ...form.querySelectorAll('#composer-submit-button'),
         ...form.querySelectorAll("button[data-testid='send-button']"),
@@ -157,16 +164,26 @@
       const before = await inspectComposer(tabId);
       if (!before?.ok) throw new Error(`chatgpt_cdp_${before?.error || "composer_inspect_failed"}`);
       const beforeText = normalize(before.text);
-      if (beforeText !== "" && beforeText !== normalize(text)) throw new Error("chatgpt_cdp_composer_not_empty");
+      if (beforeText !== "" && canonicalVisible(before.text) !== canonicalVisible(text)) throw new Error("chatgpt_cdp_composer_not_empty");
 
       await focusComposer(tabId);
       await clearComposerTrusted(tabId);
       await sleep(80);
-      const insertionMode = await insertComposerTrusted(tabId, text);
-      await sleep(text.length > ATOMIC_LONG_PROMPT_THRESHOLD ? 500 : 220);
 
-      const after = await inspectComposer(tabId);
-      if (!after?.ok || normalize(after.text) !== normalize(text)) throw new Error("chatgpt_cdp_prime_readback_mismatch");
+      await send(tabId, "Input.insertText", { text });
+      let insertionMode = "CDP_INPUT_INSERT_TEXT";
+      let readbackMatched = await waitForCanonicalReadback(tabId, text, 1800);
+
+      if (!readbackMatched && text.length > ATOMIC_LONG_PROMPT_THRESHOLD) {
+        await focusComposer(tabId);
+        await clearComposerTrusted(tabId);
+        await sleep(80);
+        await insertComposerAtomic(tabId, text);
+        insertionMode = "ATOMIC_EXEC_COMMAND_FALLBACK";
+        readbackMatched = await waitForCanonicalReadback(tabId, text, 3000);
+      }
+
+      if (!readbackMatched) throw new Error("chatgpt_cdp_prime_readback_mismatch");
       return { ok: true, phase: "PRIMED", insertion_mode: insertionMode };
     });
   }
