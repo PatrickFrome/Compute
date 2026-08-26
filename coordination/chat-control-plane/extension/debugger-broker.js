@@ -56,10 +56,7 @@
   }
 
   function canDetach(state, generation = state.generation) {
-    return state.pending === 0
-      && !state.activeOwner
-      && state.holds.size === 0
-      && generation === state.generation;
+    return state.pending === 0 && !state.activeOwner && state.holds.size === 0 && generation === state.generation;
   }
 
   function scheduleDetach(state) {
@@ -73,9 +70,7 @@
   }
 
   function assertLeaseFresh(state, generation) {
-    if (!state.attached || Number(generation) !== Number(state.generation)) {
-      throw new Error("debugger_broker_lease_stale");
-    }
+    if (!state.attached || Number(generation) !== Number(state.generation)) throw new Error("debugger_broker_lease_stale");
   }
 
   async function send(state, generation, method, params = {}, sessionId = null) {
@@ -101,6 +96,24 @@
     return childList(state);
   }
 
+  async function disableChildTargets(state, generation) {
+    assertLeaseFresh(state, generation);
+    if (!state.childAutoAttach) {
+      state.childSessions.clear();
+      return;
+    }
+    try {
+      await send(state, generation, "Target.setAutoAttach", {
+        autoAttach: false,
+        waitForDebuggerOnStart: false,
+        flatten: true
+      });
+    } finally {
+      state.childAutoAttach = false;
+      state.childSessions.clear();
+    }
+  }
+
   function sessionFor(state, ownerName, generation) {
     return Object.freeze({
       tabId: state.tabId,
@@ -109,7 +122,8 @@
       send: (method, params = {}) => send(state, generation, method, params),
       sendChild: (sessionId, method, params = {}) => send(state, generation, method, params, sessionId),
       childSessions: () => childList(state),
-      enableChildTargets: () => enableChildTargets(state, generation)
+      enableChildTargets: () => enableChildTargets(state, generation),
+      disableChildTargets: () => disableChildTargets(state, generation)
     });
   }
 
@@ -158,6 +172,7 @@
         sendChild: (sessionId, method, params = {}) => send(state, generation, method, params, sessionId),
         childSessions: () => childList(state),
         enableChildTargets: () => enableChildTargets(state, generation),
+        disableChildTargets: () => disableChildTargets(state, generation),
         release: async () => {
           if (released) return;
           released = true;
@@ -221,9 +236,7 @@
       return;
     }
 
-    if (method === "Target.detachedFromTarget" && params?.sessionId) {
-      state.childSessions.delete(String(params.sessionId));
-    }
+    if (method === "Target.detachedFromTarget" && params?.sessionId) state.childSessions.delete(String(params.sessionId));
   });
 
   chrome.debugger.onDetach.addListener((source, reason) => {
