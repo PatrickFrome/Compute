@@ -27,6 +27,8 @@ PASS_OUTPUT = "\n".join(
         "OLDROOT_DETACHED=true",
         "WORKSPACE_RW=true",
         "NETWORK_DEFAULT_DENY=true",
+        "RLIMIT_CORE_ZERO=true",
+        "PID1_ENVIRON_DENIED=true",
         "CANONICAL=false",
         "AUTHORITY_EFFECT=false",
         "WORKER_ADMITTED=false",
@@ -49,6 +51,18 @@ class S2RuntimeCanaryReceiptTests(unittest.TestCase):
         result = receipt.compose(launcher_rc=0, output="W1_VERIFIED=false\n", source_sha256=SOURCE_SHA, runner=RUNNER)
         self.assertEqual(result["status"], "FAILED")
         self.assertIn("NO_NEW_PRIVS", result["evidence"]["missing_or_bad_pass_markers"])
+
+    def test_rc_zero_without_pid1_boundary_is_failed(self):
+        output = PASS_OUTPUT.replace("PID1_ENVIRON_DENIED=true\n", "")
+        result = receipt.compose(launcher_rc=0, output=output, source_sha256=SOURCE_SHA, runner=RUNNER)
+        self.assertEqual(result["status"], "FAILED")
+        self.assertIn("PID1_ENVIRON_DENIED", result["evidence"]["missing_or_bad_pass_markers"])
+
+    def test_rc_zero_without_core_boundary_is_failed(self):
+        output = PASS_OUTPUT.replace("RLIMIT_CORE_ZERO=true\n", "")
+        result = receipt.compose(launcher_rc=0, output=output, source_sha256=SOURCE_SHA, runner=RUNNER)
+        self.assertEqual(result["status"], "FAILED")
+        self.assertIn("RLIMIT_CORE_ZERO", result["evidence"]["missing_or_bad_pass_markers"])
 
     def test_setgroups_denial_is_explicit_unavailable(self):
         output = "W1_S2_SANDBOX_UNAVAILABLE: cannot write /proc/self/setgroups: [Errno 13] Permission denied\n"
