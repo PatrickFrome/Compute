@@ -64,9 +64,7 @@
     return intent;
   }
 
-  async function clearIntent() {
-    await chrome.storage.session.remove(INTENT_KEY);
-  }
+  async function clearIntent() { await chrome.storage.session.remove(INTENT_KEY); }
 
   async function broadcastMode(mode) {
     const tabs = await chrome.tabs.query({});
@@ -113,9 +111,7 @@
     const draftSha256 = await sha256(normalize(draft));
     const existing = await heldIntent();
     if (existing) {
-      if (Number(existing.tab_id) === Number(sender.tab.id) && existing.draft_sha256 === draftSha256) {
-        return existing;
-      }
+      if (Number(existing.tab_id) === Number(sender.tab.id) && existing.draft_sha256 === draftSha256) return existing;
       throw new Error("prompt_gate_intent_already_held");
     }
     const intent = {
@@ -150,20 +146,26 @@
     }
 
     let draft = intent.original_draft;
+    let pageAction = action;
+    let trustedRewrite = null;
     if (action === "REWRITE_ALLOW_ONCE") {
       draft = String(message?.draft || "").slice(0, MAX_DRAFT_CHARS);
       if (!normalize(draft)) throw new Error("prompt_gate_rewrite_empty");
+      if (typeof globalThis.A2_OPERATOR_TRUSTED_REPLACE_DRAFT !== "function") throw new Error("operator_trusted_rewrite_unavailable");
+      trustedRewrite = await globalThis.A2_OPERATOR_TRUSTED_REPLACE_DRAFT(intent.tab_id, intent.platform, draft);
+      if (trustedRewrite?.ok !== true || trustedRewrite?.exact_readback !== true) throw new Error("operator_trusted_rewrite_not_verified");
+      pageAction = "ALLOW_ONCE";
     }
 
     const response = await chrome.tabs.sendMessage(intent.tab_id, {
       type: "A2_PROMPT_GATE_RESOLUTION",
       intent_id: intent.intent_id,
-      action,
+      action: pageAction,
       draft
     }).catch((error) => ({ ok: false, error: String(error?.message || error) }));
     if (!response?.ok) throw new Error(response?.error || "prompt_gate_page_resolution_failed");
     await clearIntent();
-    return { action, response };
+    return { action, page_action: pageAction, trusted_rewrite: trustedRewrite, response };
   }
 
   async function operatorStatus() {
