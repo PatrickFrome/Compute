@@ -30,6 +30,7 @@ jobs:
           node tests/a2_v060_debugger_broker_lab.mjs
           node tests/a2_v060_operator_control_lab.mjs
           node tests/a2_v060_perception_lab.mjs
+          node tests/a2_v060_oopif_perception_lab.mjs
           node tests/a2_v060_operator_actions_lab.mjs
           node tests/a2_v060_update_manager_lab.mjs
           node tests/a2_v060_compat_config_lab.mjs
@@ -94,7 +95,11 @@ jobs:
             'hybrid_perception_ax_domsnapshot_screenshot':True,
             'full_perception_memory_only':True,
             'perception_persistent_metadata_only':True,
-            'debugger_broker_serialized_short_sessions':True,
+            'debugger_broker_shared_root':True,
+            'debugger_broker_long_lived_holds':True,
+            'debugger_broker_generation_invalidation':True,
+            'oopif_flat_child_sessions_chrome125':True,
+            'oopif_accessibility_bounded_disable':True,
             'point_actions_frame_sha256_bound':True,
             'external_navigation_download_file_input_fenced':True,
             'safe_chrome_update_transaction_drain':True,
