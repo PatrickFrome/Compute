@@ -116,10 +116,14 @@ jobs:
           mkdir -p out/offline
           (
             cd out/offline
+            subject_sha="$(sha256sum ../w1-prep-attestation-manifest.json | awk '{print $1}')"
             gh attestation download ../w1-prep-attestation-manifest.json --repo "$GITHUB_REPOSITORY"
+            raw_bundle="sha256:${subject_sha}.jsonl"
+            test -s "$raw_bundle"
+            mv "$raw_bundle" "attestation-bundle-${subject_sha}.jsonl"
             gh attestation trusted-root > trusted_root.jsonl
           )
-          bundle_count="$(find out/offline -maxdepth 1 -type f -name 'sha256:*.jsonl' | wc -l)"
+          bundle_count="$(find out/offline -maxdepth 1 -type f -name 'attestation-bundle-*.jsonl' | wc -l)"
           test "$bundle_count" -eq 1
           test -s out/offline/trusted_root.jsonl
           sha256sum out/offline/*.jsonl | sort > out/offline/offline-inputs.sha256
@@ -127,7 +131,7 @@ jobs:
       - name: Verify attestation offline with no usable network or token
         run: |
           set -euo pipefail
-          bundle="$(find out/offline -maxdepth 1 -type f -name 'sha256:*.jsonl' -print -quit)"
+          bundle="$(find out/offline -maxdepth 1 -type f -name 'attestation-bundle-*.jsonl' -print -quit)"
           test -n "$bundle"
           env -u GH_TOKEN -u GITHUB_TOKEN \
             HTTPS_PROXY=http://127.0.0.1:9 \
