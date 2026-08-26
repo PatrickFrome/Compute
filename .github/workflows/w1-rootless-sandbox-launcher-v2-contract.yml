@@ -23,17 +23,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Compute exact source SHA-256
+      - name: Verify exact source SHA-256
         run: |
           set -euo pipefail
-          sha256sum worker/native_linux/rootless_sandbox_launcher_v2.py
+          echo '231afd6a58b1be50549ee4cdfa99c914bff474ae3950c7af2396d3b2519413b9  worker/native_linux/rootless_sandbox_launcher_v2.py' | sha256sum -c -
 
       - name: Compile exact launcher
         run: |
           set -euo pipefail
           python3 -m py_compile worker/native_linux/rootless_sandbox_launcher_v2.py
 
-      - name: Run S2 composition tests
+      - name: Run SHA-bound S2 composition tests
         run: |
           set -euo pipefail
           python3 -m unittest tests.test_w1_rootless_sandbox_launcher_v2 -v
