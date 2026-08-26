@@ -1,7 +1,6 @@
 (() => {
   "use strict";
 
-  const DEBUGGER_VERSION = "1.3";
   const TRACE_RE = /^[0-9a-f]{32}$/;
   const HASH_RE = /^[0-9a-f]{64}$/;
   const TRACK_TYPES = new Set(["Fetch", "XHR", "EventSource"]);
@@ -11,6 +10,8 @@
   const AMBIGUOUS = "AMBIGUOUS_NO_RETRY";
   const ACTUATED = "ACTUATED";
   const VERIFIED = "VERIFIED";
+  const MONITOR_INTERVAL_MS = 5000;
+  const MONITOR_MAX_ATTEMPTS = 120;
   const trackers = new Map();
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const normalize = (value) => String(value ?? "").replace(/\r\n?/g, "\n").trim();
@@ -20,10 +21,12 @@
     e.a2ExecutionClass = executionClass;
     return e;
   }
+
   async function sha256Text(text) {
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(text ?? "")));
     return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
   }
+
   function traceId() {
     const bytes = new Uint8Array(16);
     crypto.getRandomValues(bytes);
@@ -43,29 +46,52 @@
     return body;
   }
 
-  async function debuggerCommand(tabId, method, params = {}) {
-    return chrome.debugger.sendCommand({ tabId }, method, params);
+  async function operatorGateEnabled() {
+    const { operatorMode } = await chrome.storage.local.get("operatorMode");
+    return operatorMode === "GATE_SEND";
   }
 
-  async function attachExclusive(tabId) {
-    const targets = await chrome.debugger.getTargets();
-    const target = targets.find((item) => Number(item?.tabId) === tabId);
-    if (target?.attached) throw new Error("glm_debugger_target_already_attached");
-    await chrome.debugger.attach({ tabId }, DEBUGGER_VERSION);
-    try {
-      await debuggerCommand(tabId, "Network.enable", { maxTotalBufferSize: 0, maxResourceBufferSize: 0, maxPostDataSize: 0 });
-      await debuggerCommand(tabId, "Runtime.enable");
-    } catch (error) {
-      await chrome.debugger.detach({ tabId }).catch(() => {});
-      throw error;
-    }
+  async function armPromptGateBypass(tabId, commandId, prompt) {
+    if (!(await operatorGateEnabled())) return false;
+    const response = await chrome.tabs.sendMessage(tabId, {
+      type: "A2_PROMPT_GATE_BRIDGE_BYPASS",
+      command_id: commandId,
+      draft: prompt,
+      expires_in_ms: 3000
+    }).catch((error) => ({ ok: false, error: String(error?.message || error) }));
+    if (!response?.ok) throw new Error(`glm_prompt_gate_bypass_unavailable:${response?.error || "unknown"}`);
+    return true;
   }
 
-  async function detach(tabId) { await chrome.debugger.detach({ tabId }).catch(() => {}); }
+  async function clearPromptGateBypass(tabId, commandId) {
+    await chrome.tabs.sendMessage(tabId, {
+      type: "A2_PROMPT_GATE_BRIDGE_BYPASS_CLEAR",
+      command_id: commandId
+    }).catch(() => null);
+  }
 
-  function preparationExpression(prompt) {
+  function composerInspectExpression() {
+    return `(() => {
+      const visible = (el) => {
+        if (!(el instanceof HTMLElement)) return false;
+        const style = getComputedStyle(el), rect = el.getBoundingClientRect();
+        return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0 && rect.width > 0 && rect.height > 0;
+      };
+      const normalize = (value) => String(value ?? '').replace(/\\r\\n?/g, '\\n').trim();
+      const composers = [...document.querySelectorAll('#chat-input, textarea.input-scroll, .messageInputContainer textarea, textarea')].filter(visible);
+      const composer = composers.find((el) => el.id === 'chat-input') || (composers.length === 1 ? composers[0] : null);
+      if (!composer) return { ok:false, error:composers.length > 1 ? 'composer_ambiguous' : 'composer_not_found', count:composers.length };
+      if (!('value' in composer)) return { ok:false, error:'glm_composer_not_text_control' };
+      const text = normalize(composer.value ?? '');
+      composer.focus();
+      if (document.activeElement !== composer && !composer.contains?.(document.activeElement)) return { ok:false, error:'composer_focus_failed' };
+      return { ok:true, text };
+    })()`;
+  }
+
+  function sendPointExpression(prompt) {
     const encoded = JSON.stringify(String(prompt || ""));
-    return `(() => new Promise(async (resolve) => {
+    return `(() => {
       const prompt = ${encoded};
       const visible = (el) => {
         if (!(el instanceof HTMLElement)) return false;
@@ -75,49 +101,66 @@
       const normalize = (value) => String(value ?? '').replace(/\\r\\n?/g, '\\n').trim();
       const composers = [...document.querySelectorAll('#chat-input, textarea.input-scroll, .messageInputContainer textarea, textarea')].filter(visible);
       const composer = composers.find((el) => el.id === 'chat-input') || (composers.length === 1 ? composers[0] : null);
-      if (!composer) return resolve({ ok:false, error:composers.length > 1 ? 'composer_ambiguous' : 'composer_not_found' });
-      const beforeText = normalize(composer.value ?? composer.innerText ?? composer.textContent ?? '');
-      if (beforeText && beforeText !== normalize(prompt)) return resolve({ ok:false, error:'glm_composer_not_empty_before_trusted_send' });
-      if (!('value' in composer)) return resolve({ ok:false, error:'glm_composer_not_text_control' });
-      const proto = composer instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-      const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
-      if (!descriptor?.set) return resolve({ ok:false, error:'native_value_setter_unavailable' });
-      descriptor.set.call(composer, prompt);
-      composer.dispatchEvent(new Event('input', { bubbles:true }));
-      composer.dispatchEvent(new Event('change', { bubbles:true }));
-      const deadline = Date.now() + 3500;
-      while (Date.now() < deadline) {
-        const exact = [...document.querySelectorAll('button.sendMessageButton, #send-message-button')].filter(visible);
-        const semantic = [...document.querySelectorAll('button')].filter(visible).filter((button) => {
-          const fields = [button.getAttribute('aria-label'), button.getAttribute('title'), button.textContent].map((v) => normalize(v).toLowerCase());
-          return fields.some((v) => /^(send|send message|send prompt|submit|отправить|отправить сообщение|发送|发送消息)$/iu.test(v));
-        });
-        const candidates = exact.length ? exact : semantic;
-        if (candidates.length === 1) {
-          const send = candidates[0];
-          if (!send.disabled && send.getAttribute('aria-disabled') !== 'true' && getComputedStyle(send).pointerEvents !== 'none') {
-            const readback = normalize(composer.value ?? '');
-            if (readback !== normalize(prompt)) return resolve({ ok:false, error:'composer_readback_mismatch' });
-            const rect = send.getBoundingClientRect(), x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
-            const hit = document.elementFromPoint(x, y);
-            const actionable = x >= 0 && y >= 0 && x <= innerWidth && y <= innerHeight && !!hit && (hit === send || send.contains(hit));
-            if (actionable) return resolve({ ok:true, x, y, width:rect.width, height:rect.height });
-          }
-        } else if (candidates.length > 1) return resolve({ ok:false, error:'send_button_ambiguous' });
-        await new Promise((r) => setTimeout(r, 75));
-      }
-      resolve({ ok:false, error:'send_button_not_actionable' });
-    }))()`;
+      if (!composer) return { ok:false, error:composers.length > 1 ? 'composer_ambiguous' : 'composer_not_found' };
+      const readback = normalize(composer.value ?? '');
+      if (readback !== normalize(prompt)) return { ok:false, error:'composer_readback_mismatch' };
+      const exact = [...document.querySelectorAll('button.sendMessageButton, #send-message-button')].filter(visible);
+      const semantic = [...document.querySelectorAll('button')].filter(visible).filter((button) => {
+        const fields = [button.getAttribute('aria-label'), button.getAttribute('title'), button.textContent].map((v) => normalize(v).toLowerCase());
+        return fields.some((v) => /^(send|send message|send prompt|submit|отправить|отправить сообщение|发送|发送消息)$/iu.test(v));
+      });
+      const candidates = exact.length ? exact : semantic;
+      if (candidates.length === 0) return { ok:false, error:'send_button_pending' };
+      if (candidates.length !== 1) return { ok:false, error:'send_button_ambiguous', count:candidates.length };
+      const send = candidates[0];
+      if (send.disabled || send.getAttribute('aria-disabled') === 'true' || getComputedStyle(send).pointerEvents === 'none') return { ok:false, error:'send_button_pending' };
+      const rect = send.getBoundingClientRect(), x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      const actionable = x >= 0 && y >= 0 && x <= innerWidth && y <= innerHeight && !!hit && (hit === send || send.contains(hit));
+      return actionable ? { ok:true, x, y, width:rect.width, height:rect.height } : { ok:false, error:'send_button_not_actionable' };
+    })()`;
   }
 
-  async function prepare(tabId, prompt) {
-    const response = await debuggerCommand(tabId, "Runtime.evaluate", { expression: preparationExpression(prompt), awaitPromise: true, returnByValue: true, userGesture: false });
-    if (response?.exceptionDetails) throw new Error("glm_prepare_runtime_exception");
-    const value = response?.result?.value;
-    if (value?.ok !== true) throw new Error(String(value?.error || "glm_prepare_failed"));
-    const x = Number(value.x), y = Number(value.y);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("glm_actionability_point_invalid");
-    return { x, y };
+  async function evaluate(session, expression) {
+    const response = await session.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, userGesture: false });
+    if (response?.exceptionDetails) throw new Error("glm_runtime_exception");
+    return response?.result?.value;
+  }
+
+  async function prepare(session, prompt) {
+    const before = await evaluate(session, composerInspectExpression());
+    if (before?.ok !== true) throw new Error(String(before?.error || "glm_prepare_failed"));
+    if (normalize(before.text || "") !== "") throw new Error("glm_composer_not_empty_before_trusted_send");
+    await session.send("Input.insertText", { text: prompt });
+    const deadline = Date.now() + 3500;
+    let lastError = "send_button_not_actionable";
+    while (Date.now() < deadline) {
+      const point = await evaluate(session, sendPointExpression(prompt));
+      if (point?.ok === true) {
+        const x = Number(point.x), y = Number(point.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("glm_actionability_point_invalid");
+        return { x, y };
+      }
+      lastError = String(point?.error || lastError);
+      if (["composer_ambiguous", "composer_not_found", "composer_readback_mismatch", "send_button_ambiguous"].includes(lastError)) throw new Error(lastError);
+      await sleep(75);
+    }
+    throw new Error(lastError);
+  }
+
+  async function clearComposerBeforeActuation(session) {
+    try {
+      const inspect = await evaluate(session, composerInspectExpression());
+      if (inspect?.ok !== true) return false;
+      await session.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "a", code: "KeyA", modifiers: 2, windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 });
+      await session.send("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", modifiers: 2, windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 });
+      await session.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 });
+      await session.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 });
+      const after = await evaluate(session, composerInspectExpression());
+      return after?.ok === true && normalize(after.text || "") === "";
+    } catch (_) {
+      return false;
+    }
   }
 
   async function getSnapshot(tabId) {
@@ -205,6 +248,11 @@
     try { globalThis.A2_ON_GLM_ACTUATED?.(tracker.commandId); } catch (_) {}
   }
 
+  async function releaseMonitor(tabId, tracker) {
+    trackers.delete(tabId);
+    await tracker.debuggerLease?.release?.().catch?.(() => {});
+  }
+
   async function maybeRelease(tabId, tracker, attempt = 0) {
     if (trackers.get(tabId) !== tracker) return;
     const snapshot = await getSnapshot(tabId);
@@ -214,11 +262,16 @@
       await tracker.progressChain.catch(() => {});
       await postProgress(tracker.commandId, tracker.traceId, "RELEASED").catch(() => {});
       await updateTransport(tracker.command, tracker.traceId, { state: "RELEASED", released_at: new Date().toISOString() }).catch(() => {});
-      trackers.delete(tabId);
-      await detach(tabId);
+      await releaseMonitor(tabId, tracker);
       return;
     }
-    if (attempt < 8) setTimeout(() => maybeRelease(tabId, tracker, attempt + 1), 5000);
+    if (attempt < MONITOR_MAX_ATTEMPTS) {
+      setTimeout(() => maybeRelease(tabId, tracker, attempt + 1), MONITOR_INTERVAL_MS);
+      return;
+    }
+    await postProgress(tracker.commandId, tracker.traceId, "NETWORK_ERROR_HOLD").catch(() => {});
+    await updateTransport(tracker.command, tracker.traceId, { monitor_timeout_at: new Date().toISOString() }).catch(() => {});
+    await releaseMonitor(tabId, tracker);
   }
 
   chrome.debugger.onEvent.addListener((source, method, params) => {
@@ -242,18 +295,24 @@
     if (method === "Network.loadingFinished" && !tracker.networkTerminal) {
       tracker.networkTerminal = "COMPLETED";
       bufferNetworkProgress(tracker, "NETWORK_COMPLETED");
-      setTimeout(() => maybeRelease(tabId, tracker, 0), 2500);
       return;
     }
     if (method === "Network.loadingFailed" && !tracker.networkTerminal) {
       tracker.networkTerminal = "ERROR_HOLD";
       bufferNetworkProgress(tracker, "NETWORK_ERROR_HOLD");
-      setTimeout(() => maybeRelease(tabId, tracker, 0), 30000);
     }
   });
 
   chrome.debugger.onDetach.addListener((source) => {
-    if (Number.isInteger(source?.tabId)) trackers.delete(source.tabId);
+    const tabId = Number(source?.tabId);
+    if (!Number.isInteger(tabId)) return;
+    const tracker = trackers.get(tabId);
+    if (!tracker) return;
+    trackers.delete(tabId);
+    if (tracker.actuatedAt) {
+      postProgress(tracker.commandId, tracker.traceId, "NETWORK_ERROR_HOLD").catch(() => {});
+      updateTransport(tracker.command, tracker.traceId, { debugger_detached_at: new Date().toISOString() }).catch(() => {});
+    }
   });
 
   async function trustedSend(tabId, command) {
@@ -272,6 +331,10 @@
       };
     }
 
+    if (typeof globalThis.A2_DEBUGGER_HOLD !== "function" || typeof globalThis.A2_DEBUGGER_RUN !== "function") {
+      throw typedError(new Error("glm_debugger_broker_unavailable"), SAFE);
+    }
+
     const before = await getSnapshot(tabId);
     if (!before) throw typedError(new Error("glm_snapshot_unavailable_before_trusted_send"), SAFE);
     if (before.generating === true) throw typedError(new Error("chat_is_generating"), SAFE);
@@ -279,84 +342,105 @@
 
     const promptSha256 = await sha256Text(normalize(prompt));
     const transportTraceId = traceId();
-    let attached = false, pressed = false, released = false;
+    let monitorLease = null;
+    let tracker = null;
+    let promptInserted = false;
+    let pressed = false;
+    let released = false;
+    let bypassArmed = false;
     let point = null;
-    const tracker = {
-      tabId, commandId, command, prompt, traceId: transportTraceId, before,
-      requestId: null, responseStarted: false, networkTerminal: null,
-      releaseInitiatedAt: 0, actuatedAt: 0, pendingProgress: [], progressChain: Promise.resolve()
-    };
 
     try {
-      await attachExclusive(tabId);
-      attached = true;
-      point = await prepare(tabId, prompt);
-      trackers.set(tabId, tracker);
+      monitorLease = await globalThis.A2_DEBUGGER_HOLD(tabId, `glm-monitor:${commandId}`);
+      await monitorLease.send("Network.enable", { maxTotalBufferSize: 0, maxResourceBufferSize: 0, maxPostDataSize: 0 });
+      await monitorLease.send("Runtime.enable");
 
-      await debuggerCommand(tabId, "Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: "left", buttons: 1, clickCount: 1 });
-      pressed = true;
+      tracker = {
+        tabId, commandId, command, prompt, traceId: transportTraceId, before, debuggerLease: monitorLease,
+        requestId: null, responseStarted: false, networkTerminal: null,
+        releaseInitiatedAt: 0, actuatedAt: 0, pendingProgress: [], progressChain: Promise.resolve()
+      };
 
-      await postProgress(commandId, transportTraceId, "DISPATCHED");
-      try {
-        await updateTransport({ ...command, tab_id: tabId }, transportTraceId, {
-          state: "DISPATCHED",
-          dispatched_at: new Date().toISOString(),
-          before_message_count: Number(before?.message_count || 0),
-          prompt_sha256_local: promptSha256
-        });
-      } catch (error) {
-        const cancelled = await debuggerCommand(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x: 0, y: 0, button: "left", buttons: 0, clickCount: 1 }).then(() => true).catch(() => false);
-        pressed = false;
-        await postProgress(commandId, transportTraceId, "ABORTED_BEFORE_ACTUATION").catch(() => {});
-        throw typedError(error, cancelled ? SAFE : AMBIGUOUS);
-      }
+      const result = await globalThis.A2_DEBUGGER_RUN(tabId, `glm-actuate:${commandId}`, async (session) => {
+        point = await prepare(session, prompt);
+        promptInserted = true;
+        trackers.set(tabId, tracker);
 
-      tracker.releaseInitiatedAt = Date.now();
-      try {
-        await debuggerCommand(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: "left", buttons: 0, clickCount: 1 });
-        pressed = false;
-        released = true;
-        await markActuated(tabId, tracker, command);
-      } catch (releaseError) {
-        const evidence = await observeAcceptance(tabId, before, prompt, 700);
-        if (tracker.requestId || evidence.verified || tracker.actuatedAt) {
+        await session.send("Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: "left", buttons: 1, clickCount: 1 });
+        pressed = true;
+
+        await postProgress(commandId, transportTraceId, "DISPATCHED");
+        try {
+          await updateTransport({ ...command, tab_id: tabId }, transportTraceId, {
+            state: "DISPATCHED",
+            dispatched_at: new Date().toISOString(),
+            before_message_count: Number(before?.message_count || 0),
+            prompt_sha256_local: promptSha256
+          });
+        } catch (error) {
+          const cancelled = await session.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: 0, y: 0, button: "left", buttons: 0, clickCount: 1 }).then(() => true).catch(() => false);
+          pressed = false;
+          await postProgress(commandId, transportTraceId, "ABORTED_BEFORE_ACTUATION").catch(() => {});
+          throw typedError(error, cancelled ? SAFE : AMBIGUOUS);
+        }
+
+        try {
+          bypassArmed = await armPromptGateBypass(tabId, commandId, prompt);
+        } catch (error) {
+          const cancelled = await session.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: 0, y: 0, button: "left", buttons: 0, clickCount: 1 }).then(() => true).catch(() => false);
+          pressed = false;
+          await postProgress(commandId, transportTraceId, "ABORTED_BEFORE_ACTUATION").catch(() => {});
+          throw typedError(error, cancelled ? SAFE : AMBIGUOUS);
+        }
+
+        tracker.releaseInitiatedAt = Date.now();
+        try {
+          await session.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: "left", buttons: 0, clickCount: 1 });
           pressed = false;
           released = true;
-          await markActuated(tabId, tracker, command).catch(() => {});
-        } else {
-          if (pressed) {
-            await debuggerCommand(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x: 0, y: 0, button: "left", buttons: 0, clickCount: 1 }).catch(() => {});
+          await markActuated(tabId, tracker, command);
+        } catch (releaseError) {
+          const evidence = await observeAcceptance(tabId, before, prompt, 700);
+          if (tracker.requestId || evidence.verified || tracker.actuatedAt) {
             pressed = false;
+            released = true;
+            await markActuated(tabId, tracker, command).catch(() => {});
+          } else {
+            if (pressed) {
+              await session.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: 0, y: 0, button: "left", buttons: 0, clickCount: 1 }).catch(() => {});
+              pressed = false;
+            }
+            throw typedError(new Error(`glm_release_ambiguous_no_retry:${String(releaseError?.message || releaseError)}`), AMBIGUOUS);
           }
-          throw typedError(new Error(`glm_release_ambiguous_no_retry:${String(releaseError?.message || releaseError)}`), AMBIGUOUS);
+        } finally {
+          if (bypassArmed) await clearPromptGateBypass(tabId, commandId);
         }
-      }
 
-      const verification = await observeAcceptance(tabId, before, prompt, 2500);
-      const status = verification.exact_user_turn_seen === true
-        ? "SENT_AND_DOM_VERIFIED"
-        : (verification.verified === true ? "SENT_WEAK_DOM_VERIFIED" : (tracker.requestId ? "SENT_NETWORK_DISPATCH_CONFIRMED" : "SENT_DISPATCHED_UNCONFIRMED_NO_RETRY"));
-      if (tracker.networkTerminal) setTimeout(() => maybeRelease(tabId, tracker, 0), 1000);
-      return {
-        status,
-        execution_class: verification.verified === true ? VERIFIED : ACTUATED,
-        command_id: commandId,
-        clicked_send_button: released,
-        transport_trace_id: transportTraceId,
-        verification,
-        recovery: "GLM_TRUSTED_CDP_BROWSER_OPERATOR_V060"
-      };
+        const verification = await observeAcceptance(tabId, before, prompt, 2500);
+        const status = verification.exact_user_turn_seen === true
+          ? "SENT_AND_DOM_VERIFIED"
+          : (verification.verified === true ? "SENT_WEAK_DOM_VERIFIED" : (tracker.requestId ? "SENT_NETWORK_DISPATCH_CONFIRMED" : "SENT_DISPATCHED_UNCONFIRMED_NO_RETRY"));
+        return {
+          status,
+          execution_class: verification.verified === true ? VERIFIED : ACTUATED,
+          command_id: commandId,
+          clicked_send_button: released,
+          transport_trace_id: transportTraceId,
+          verification,
+          recovery: "GLM_TRUSTED_CDP_BROWSER_OPERATOR_V060_BROKERED"
+        };
+      });
+
+      setTimeout(() => maybeRelease(tabId, tracker, 0), 2500);
+      return result;
     } catch (error) {
-      if (pressed && point) {
-        const cancelled = await debuggerCommand(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x: 0, y: 0, button: "left", buttons: 0, clickCount: 1 }).then(() => true).catch(() => false);
-        pressed = false;
-        if (!cancelled && !error?.a2ExecutionClass) error = typedError(error, AMBIGUOUS);
+      if (bypassArmed) await clearPromptGateBypass(tabId, commandId);
+      if (!released && tracker) trackers.delete(tabId);
+      if (!released && promptInserted && !error?.a2ExecutionClass && monitorLease) {
+        await globalThis.A2_DEBUGGER_RUN(tabId, `glm-cleanup:${commandId}`, (session) => clearComposerBeforeActuation(session)).catch(() => false);
       }
-      if (!released) {
-        trackers.delete(tabId);
-        if (attached) await detach(tabId);
-      }
-      if (!error?.a2ExecutionClass) error = typedError(error, released || tracker.actuatedAt ? AMBIGUOUS : SAFE);
+      if (!released && monitorLease) await monitorLease.release().catch(() => {});
+      if (!error?.a2ExecutionClass) error = typedError(error, released || tracker?.actuatedAt ? AMBIGUOUS : SAFE);
       throw error;
     }
   }
