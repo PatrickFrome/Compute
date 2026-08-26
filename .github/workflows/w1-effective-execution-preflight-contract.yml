@@ -1,0 +1,97 @@
+name: W1 Effective Execution Preflight Contract
+
+on:
+  push:
+    branches: [work/w1-sandbox-launcher-prep]
+    paths:
+      - 'controller/w1/effective_execution_preflight.py'
+      - 'tests/test_w1_effective_execution_preflight.py'
+      - '.github/workflows/w1-effective-execution-preflight-contract.yml'
+      - 'supabase/prep/w1_effective_execution_preflight_v1.sql'
+      - 'tests/test_w1_effective_execution_preflight_sql_contract.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Compile and run adversarial preflight tests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/w1/effective_execution_preflight.py
+          python3 -m unittest tests.test_w1_effective_execution_preflight -v
+      - name: Prove current stale-authority shape blocks fail-closed
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cat > out/stale-authority-snapshot.json <<'JSON'
+          {
+            "db_now": "2026-08-26T18:00:00Z",
+            "semantic_head": {
+              "checkpoint_id": "metaengine-h205f22-recovery-dev-20260821-cp072",
+              "payload_root_sha256": "14ef848e935dd12a6b3ada23f7fed6016788fcbaf2856c1490fd4e45caeed140"
+            },
+            "roadmap": {
+              "definition_integrity": true,
+              "canonical_integrity": true,
+              "w1_effective_status": "READY"
+            },
+            "claim": {
+              "claim_id": 32,
+              "roadmap_id": "compute-fabric-roadmap-v1",
+              "milestone_key": "W1_PERSISTENT_LINUX_WORKER_SAFETY",
+              "holder_id": "aop1:W1_IMPLEMENTER",
+              "state": "ACTIVE",
+              "expires_at": "2026-08-25T23:00:00.637797Z",
+              "base_checkpoint_id": "metaengine-h205f22-recovery-dev-20260821-cp072",
+              "base_payload_root_sha256": "14ef848e935dd12a6b3ada23f7fed6016788fcbaf2856c1490fd4e45caeed140"
+            },
+            "directive": {
+              "directive_id": 29,
+              "roadmap_id": "compute-fabric-roadmap-v1",
+              "milestone_key": "W1_PERSISTENT_LINUX_WORKER_SAFETY",
+              "directive_kind": "REASSIGN",
+              "target_holder_id": "aop1:W1_IMPLEMENTER",
+              "status": "ACTIVE",
+              "expires_at": "2026-08-25T22:59:47.410995Z",
+              "superseded_at": null,
+              "base_checkpoint_id": "metaengine-h205f22-recovery-dev-20260821-cp072"
+            }
+          }
+          JSON
+          set +e
+          python3 controller/w1/effective_execution_preflight.py \
+            --snapshot out/stale-authority-snapshot.json \
+            --output out/w1-effective-execution-preflight.json
+          rc=$?
+          set -e
+          test "$rc" -eq 3
+          cat out/w1-effective-execution-preflight.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r = json.loads(Path('out/w1-effective-execution-preflight.json').read_text())
+          assert r['outcome'] == 'BLOCK_EFFECTIVE_EXECUTION_NONAUTHORITY'
+          assert r['effective_execution_preflight_passed'] is False
+          assert r['provider_mutation_authorized'] is False
+          assert set(r['evidence']['failed_checks']) == {'claim_not_expired', 'directive_not_expired'}
+          assert r['authority_effect'] is False
+          assert r['w1_verified'] is False
+          print('effective execution preflight: STALE_AUTHORITY_BLOCKED')
+          print('evidence_sha256=' + r['evidence_sha256'])
+          PY
+      - name: Upload non-authority preflight receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: w1-effective-execution-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+          path: out/w1-effective-execution-preflight.json
+          if-no-files-found: error
+          retention-days: 14
