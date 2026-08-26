@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
   "name": "METAENGINE A2 Chat Bridge",
-  "version": "0.5.22",
+  "version": "0.5.23",
   "minimum_chrome_version": "120",
-  "description": "Coordinates pinned ChatGPT and Z.AI peer chats with A2 using trusted browser input, durable transport fences, live DOM readback, and privacy-safe network progress evidence.",
+  "description": "Strict GLM-first A2 bridge: durable GLM actuation barrier, trusted CDP input, restart-safe at-most-once transport, and live DOM readback.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyhqRE5U0FGkdVCvNgrhYuDGlBxEOxiwGyt1qBtUZYNWsJHt8xntkqCvR6YDq6k/0BhtStFsO/vIn2/JQA4RIMl15GRq4el7gF/Pw3uCouV2ExhJfnyqPmXUsNrAW0USL0r84usQgYb1RGAfiJte+ifq7rTxppIwkXuKmcF52O1MqhjV6YJlf6kiegN5ZjLsFwGWEiEpsBggRcAifG89W5Xy/850sZEJ1AvhRCIHZ1IRr760sgIu43SjugvSz3pJNe40KIVmng/YFBscZ+uzC4Tn9Wpk+TRxWepxOQ4/0/fbzPs09g/aucXjDlf+r2tFM2FcZ0Wj2yTYhk07DDNHJoQIDAQAB",
   "permissions": ["storage", "tabs", "alarms", "debugger"],
   "host_permissions": [
     "https://chatgpt.com/*",
@@ -23,5 +24,5 @@
     }
   ],
   "options_page": "options.html",
-  "action": { "default_title": "METAENGINE A2 Chat Bridge" }
+  "action": { "default_title": "METAENGINE A2 Chat Bridge — GLM first" }
 }
