@@ -1,7 +1,6 @@
 (() => {
   "use strict";
 
-  const CDP_VERSION = "1.3";
   const MAX_PROMPT_CHARS = 120000;
   const SEND_READY_TIMEOUT_MS = 2200;
   const SEND_READY_POLL_MS = 40;
@@ -24,11 +23,9 @@
     e.a2ExecutionClass = executionClass;
     return e;
   }
-  function target(tabId) { return { tabId }; }
-  async function send(tabId, method, params = {}) { return chrome.debugger.sendCommand(target(tabId), method, params); }
 
-  async function evaluate(tabId, expression) {
-    const result = await send(tabId, "Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
+  async function evaluate(session, expression) {
+    const result = await session.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
     if (result?.exceptionDetails) throw new Error("chatgpt_cdp_evaluate_failed");
     return result?.result?.value;
   }
@@ -51,7 +48,7 @@
 
   async function armPromptGateBypass(tabId, commandId, prompt) {
     const { operatorMode } = await chrome.storage.local.get("operatorMode");
-    if (operatorMode !== "GATE_SEND") return;
+    if (operatorMode !== "GATE_SEND") return false;
     const response = await chrome.tabs.sendMessage(tabId, {
       type: "A2_PROMPT_GATE_BRIDGE_BYPASS",
       command_id: commandId,
@@ -59,6 +56,14 @@
       expires_in_ms: 3000
     }).catch((error) => ({ ok: false, error: String(error?.message || error) }));
     if (!response?.ok) throw new Error(`chatgpt_prompt_gate_bypass_unavailable:${response?.error || "unknown"}`);
+    return true;
+  }
+
+  async function clearPromptGateBypass(tabId, commandId) {
+    await chrome.tabs.sendMessage(tabId, {
+      type: "A2_PROMPT_GATE_BRIDGE_BYPASS_CLEAR",
+      command_id: commandId
+    }).catch(() => null);
   }
 
   async function ensurePinnedChatgptTab(tabId) {
@@ -71,14 +76,8 @@
     throw new Error("chatgpt_cdp_target_not_conversation");
   }
 
-  async function ensureDebuggerExclusive(tabId) {
-    const targets = await chrome.debugger.getTargets();
-    const current = targets.find((item) => Number(item?.tabId) === tabId);
-    if (current?.attached) throw new Error("chatgpt_cdp_target_already_attached");
-  }
-
-  async function conversationExhausted(tabId) {
-    return evaluate(tabId, `(() => {
+  async function conversationExhausted(session) {
+    return evaluate(session, `(() => {
       const visible = (el) => {
         if (!(el instanceof HTMLElement)) return false;
         const style = getComputedStyle(el); const rect = el.getBoundingClientRect();
@@ -95,8 +94,8 @@
     })()`);
   }
 
-  async function inspectComposer(tabId) {
-    return evaluate(tabId, `(() => {
+  async function inspectComposer(session) {
+    return evaluate(session, `(() => {
       const visible = (el) => { if (!(el instanceof HTMLElement)) return false; const style=getComputedStyle(el); const r=el.getBoundingClientRect(); return style.display!=='none' && style.visibility!=='hidden' && Number(style.opacity)!==0 && r.width>0 && r.height>0; };
       const composers=[...document.querySelectorAll('#prompt-textarea')].filter(visible);
       if (composers.length !== 1) return {ok:false,error:'composer_count',count:composers.length};
@@ -106,13 +105,13 @@
     })()`);
   }
 
-  async function focusComposer(tabId) {
-    const result = await evaluate(tabId, `(() => { const e=[...document.querySelectorAll('#prompt-textarea')]; if(e.length!==1) return false; const el=e[0]; if(!(el instanceof HTMLElement)) return false; el.focus(); return document.activeElement===el || el.contains(document.activeElement); })()`);
+  async function focusComposer(session) {
+    const result = await evaluate(session, `(() => { const e=[...document.querySelectorAll('#prompt-textarea')]; if(e.length!==1) return false; const el=e[0]; if(!(el instanceof HTMLElement)) return false; el.focus(); return document.activeElement===el || el.contains(document.activeElement); })()`);
     if (result !== true) throw new Error("chatgpt_cdp_focus_failed");
   }
 
-  async function inspectReadySend(tabId) {
-    return evaluate(tabId, `(() => {
+  async function inspectReadySend(session) {
+    return evaluate(session, `(() => {
       const visible=(el)=>{ if(!(el instanceof HTMLElement))return false; const s=getComputedStyle(el),r=el.getBoundingClientRect(); return s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity)!==0&&r.width>0&&r.height>0; };
       const composers=[...document.querySelectorAll('#prompt-textarea')].filter(visible);
       if(composers.length!==1)return{ok:false,error:'composer_count',count:composers.length};
@@ -125,17 +124,31 @@
     })()`);
   }
 
-  async function waitForReadySend(tabId) {
+  async function waitForReadySend(session) {
     const deadline = Date.now() + SEND_READY_TIMEOUT_MS;
     let lastError = "send_not_ready";
     while (Date.now() < deadline) {
-      const state = await inspectReadySend(tabId);
+      const state = await inspectReadySend(session);
       if (state?.ok) return;
       lastError = String(state?.error || lastError);
       if (["composer_count", "composer_form_missing", "send_ambiguous", "send_not_button"].includes(lastError)) throw new Error(`chatgpt_cdp_${lastError}`);
       await sleep(SEND_READY_POLL_MS);
     }
     throw new Error(`chatgpt_cdp_${lastError}`);
+  }
+
+  async function clearComposerBeforeActuation(session) {
+    try {
+      await focusComposer(session);
+      await session.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "a", code: "KeyA", modifiers: 2, windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 });
+      await session.send("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", modifiers: 2, windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 });
+      await session.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 });
+      await session.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 });
+      const after = await inspectComposer(session);
+      return after?.ok === true && canonicalVisible(after.text) === "";
+    } catch (_) {
+      return false;
+    }
   }
 
   async function loadLedger() {
@@ -155,12 +168,12 @@
     await chrome.storage.local.set({ [LEDGER_KEY]: next.slice(-MAX_LEDGER) });
   }
 
-  async function dispatchTrustedEnter(tabId, commandId, idempotencyKey) {
-    await focusComposer(tabId);
+  async function dispatchTrustedEnter(session, commandId, idempotencyKey) {
+    await focusComposer(session);
     await rememberDispatch(commandId, idempotencyKey, "PRE_ENTER_DURABLE");
     try {
-      await send(tabId, "Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
-      await send(tabId, "Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+      await session.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+      await session.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
       await rememberDispatch(commandId, idempotencyKey, "ACTUATED");
     } catch (error) {
       throw typedError(new Error(`chatgpt_enter_ambiguous_no_retry:${String(error?.message || error)}`), AMBIGUOUS);
@@ -169,17 +182,13 @@
 
   async function withDebugger(tabId, operation) {
     if (inFlightTabs.has(tabId)) throw new Error("chatgpt_cdp_tab_busy");
+    if (typeof globalThis.A2_DEBUGGER_RUN !== "function") throw new Error("chatgpt_debugger_broker_unavailable");
     inFlightTabs.add(tabId);
-    let attached = false;
     try {
       await ensureArmed();
       const scope = await ensurePinnedChatgptTab(tabId);
-      await ensureDebuggerExclusive(tabId);
-      await chrome.debugger.attach(target(tabId), CDP_VERSION);
-      attached = true;
-      return await operation(scope);
+      return await globalThis.A2_DEBUGGER_RUN(tabId, "chatgpt-trusted-send", (session) => operation(scope, session));
     } finally {
-      if (attached) try { await chrome.debugger.detach(target(tabId)); } catch (_) {}
       inFlightTabs.delete(tabId);
     }
   }
@@ -193,17 +202,28 @@
     }
 
     try {
-      return await withDebugger(tabId, async (scope) => {
-        if (scope?.mode === "CONVERSATION" && await conversationExhausted(tabId)) throw new Error("chatgpt_cdp_conversation_exhausted");
-        const before = await inspectComposer(tabId);
-        if (!before?.ok) throw new Error(`chatgpt_cdp_${before?.error || "composer_inspect_failed"}`);
-        if (canonicalVisible(before.text) !== "") throw new Error("chatgpt_cdp_composer_not_empty");
-        await focusComposer(tabId);
-        await send(tabId, "Input.insertText", { text: prompt });
-        await waitForReadySend(tabId);
-        await armPromptGateBypass(tabId, commandId, prompt);
-        await dispatchTrustedEnter(tabId, commandId, idempotencyKey);
-        return { ok: true, status: "SENT_DISPATCHED_UNCONFIRMED_NO_RETRY", execution_class: ACTUATED, phase: scope?.mode === "ROLLOVER_ROOT" ? "TRUSTED_ENTER_ROLLOVER_ACTUATED" : "TRUSTED_ENTER_ACTUATED" };
+      return await withDebugger(tabId, async (scope, session) => {
+        let promptInserted = false;
+        let bypassArmed = false;
+        try {
+          if (scope?.mode === "CONVERSATION" && await conversationExhausted(session)) throw new Error("chatgpt_cdp_conversation_exhausted");
+          const before = await inspectComposer(session);
+          if (!before?.ok) throw new Error(`chatgpt_cdp_${before?.error || "composer_inspect_failed"}`);
+          if (canonicalVisible(before.text) !== "") throw new Error("chatgpt_cdp_composer_not_empty");
+          await focusComposer(session);
+          await session.send("Input.insertText", { text: prompt });
+          promptInserted = true;
+          await waitForReadySend(session);
+          bypassArmed = await armPromptGateBypass(tabId, commandId, prompt);
+          await dispatchTrustedEnter(session, commandId, idempotencyKey);
+          return { ok: true, status: "SENT_DISPATCHED_UNCONFIRMED_NO_RETRY", execution_class: ACTUATED, phase: scope?.mode === "ROLLOVER_ROOT" ? "TRUSTED_ENTER_ROLLOVER_ACTUATED" : "TRUSTED_ENTER_ACTUATED" };
+        } catch (error) {
+          if (!error?.a2ExecutionClass && promptInserted) {
+            await clearComposerBeforeActuation(session);
+            if (bypassArmed) await clearPromptGateBypass(tabId, commandId);
+          }
+          throw error;
+        }
       });
     } catch (error) {
       if (error?.a2ExecutionClass) throw error;
