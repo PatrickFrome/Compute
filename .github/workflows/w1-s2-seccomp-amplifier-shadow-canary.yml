@@ -1,0 +1,55 @@
+name: W1 S2 Seccomp Amplifier Shadow Canary
+
+on:
+  push:
+    branches:
+      - work/w1-sandbox-launcher-prep
+    paths:
+      - 'controller/w1/s2_seccomp_amplifier_shadow_canary.py'
+      - 'worker/native_linux/rootless_sandbox_launcher.py'
+      - '.github/workflows/w1-s2-seccomp-amplifier-shadow-canary.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shadow-canary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Compile canary and production seccomp launcher
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            controller/w1/s2_seccomp_amplifier_shadow_canary.py \
+            worker/native_linux/rootless_sandbox_launcher.py
+      - name: Measure candidate worker-only seccomp policy
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python3 controller/w1/s2_seccomp_amplifier_shadow_canary.py \
+            --output out/w1-s2-seccomp-amplifier-shadow-canary.json
+          cat out/w1-s2-seccomp-amplifier-shadow-canary.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r = json.loads(Path('out/w1-s2-seccomp-amplifier-shadow-canary.json').read_text())
+          assert r['outcome'] == 'ACCEPT_CANARY_SECCOMP_AMPLIFIER'
+          assert all(r['evidence']['checks'].values())
+          assert r['runtime_isolation_verified'] is False
+          assert r['w1_verified'] is False
+          assert r['authority_effect'] is False
+          print('seccomp amplifier candidate: ACCEPT_CANARY')
+          PY
+      - name: Upload non-authority canary receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: w1-s2-seccomp-amplifier-${{ github.run_id }}-${{ github.run_attempt }}
+          path: out/w1-s2-seccomp-amplifier-shadow-canary.json
+          if-no-files-found: error
+          retention-days: 14
