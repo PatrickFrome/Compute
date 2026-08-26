@@ -9,6 +9,14 @@
     return error;
   }
 
+  function autonomousDisabled() {
+    return globalThis.A2_COMPAT_GET?.("kill_switches.autonomous_send_disabled", false) === true;
+  }
+
+  function assertAutonomousAllowed() {
+    if (autonomousDisabled()) throw typedError("compat_kill_switch_autonomous_send_disabled");
+  }
+
   async function operatorGateEnabled() {
     const { operatorMode } = await chrome.storage.local.get("operatorMode");
     return operatorMode === "GATE_SEND";
@@ -36,12 +44,21 @@
   const originalGlm = globalThis.A2_GLM_TRUSTED_SEND;
   if (typeof originalGlm === "function") {
     globalThis.A2_GLM_TRUSTED_SEND = async (tabId, command) => {
+      assertAutonomousAllowed();
       const armed = await arm(tabId, command, 15000);
       try {
         return await originalGlm(tabId, command);
       } finally {
         if (armed) await clear(tabId, command);
       }
+    };
+  }
+
+  const originalChatgpt = globalThis.A2_CHATGPT_TRUSTED_SEND;
+  if (typeof originalChatgpt === "function") {
+    globalThis.A2_CHATGPT_TRUSTED_SEND = async (tabId, command) => {
+      assertAutonomousAllowed();
+      return originalChatgpt(tabId, command);
     };
   }
 })();
