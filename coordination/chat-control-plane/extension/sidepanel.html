@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>A2 Browser Operator</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>A2 Browser Operator</h1>
+      <p id="runtime">loading…</p>
+    </div>
+    <span id="armedBadge" class="badge off">DISARMED</span>
+  </header>
+
+  <section class="card">
+    <h2>Operator mode</h2>
+    <div class="mode-row">
+      <button id="modeObserve" class="mode active">OBSERVE</button>
+      <button id="modeGate" class="mode">GATE SEND</button>
+    </div>
+    <p class="hint">GATE SEND holds physical user Enter/Send before the website receives it. A2 bridge-owned prompts keep their strict GLM-first transport path.</p>
+  </section>
+
+  <section class="grid">
+    <article class="card"><h2>GLM</h2><div id="glmState">—</div></article>
+    <article class="card"><h2>GPT</h2><div id="gptState">—</div></article>
+  </section>
+
+  <section class="card">
+    <h2>Strict ordering</h2>
+    <dl>
+      <dt>Policy</dt><dd id="ordering">—</dd>
+      <dt>GLM predecessor</dt><dd id="predecessor">—</dd>
+      <dt>Pending command</dt><dd id="pendingCommand">—</dd>
+    </dl>
+  </section>
+
+  <section class="card intent" id="intentCard" hidden>
+    <h2>Prompt held</h2>
+    <div class="meta" id="intentMeta"></div>
+    <label for="draftOriginal">Original</label>
+    <textarea id="draftOriginal" readonly></textarea>
+    <label for="draftRewrite">Rewrite</label>
+    <textarea id="draftRewrite" placeholder="Edit the prompt here…"></textarea>
+    <div class="actions">
+      <button id="cancelIntent" class="danger">Cancel send</button>
+      <button id="allowOriginal">Allow original once</button>
+      <button id="rewriteAllow" class="primary">Rewrite + allow once</button>
+    </div>
+    <p class="hint">Allow-once opens an 8-second window for your next physical Enter/Send. It does not synthesize a click.</p>
+  </section>
+
+  <section class="card">
+    <h2>Runtime</h2>
+    <dl>
+      <dt>Daemon</dt><dd id="daemon">—</dd>
+      <dt>Sensor error</dt><dd id="sensorError">—</dd>
+      <dt>Last error</dt><dd id="lastError">—</dd>
+    </dl>
+    <div class="actions">
+      <button id="pollNow">Poll now</button>
+      <button id="openOptions">Options</button>
+    </div>
+  </section>
+
+  <p id="status" role="status"></p>
+  <script src="sidepanel.js"></script>
+</body>
+</html>
