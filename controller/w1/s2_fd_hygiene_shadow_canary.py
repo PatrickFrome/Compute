@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Shadow canary for inherited-FD leakage across the exact S2 worker exec path.
 
-This canary does not enter namespaces and does not claim runtime isolation.  It
+This canary does not enter namespaces and does not claim runtime isolation. It
 reuses rootless_sandbox_launcher_v2._pid1_reaper() while replacing only the
-privilege/security setup calls that cannot run in hosted CI.  The purpose is to
+privilege/security setup calls that cannot run in hosted CI. The purpose is to
 answer one narrow question: can a deliberately inheritable parent FD survive
 through S2's current fork -> worker exec path?
 
-The candidate close_range path is implemented only inside this canary.  S2 is
+The candidate close_range path is implemented only inside this canary. S2 is
 modified only after a real baseline leak and candidate closure are both proven.
 """
 from __future__ import annotations
@@ -18,10 +18,14 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 import tempfile
 from typing import Any
+
+# Support direct-file execution from controller/w1 without relying on PYTHONPATH.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from worker.native_linux import rootless_sandbox_launcher_v2 as s2
 
@@ -90,9 +94,8 @@ def run_exec_probe(*, apply_candidate: bool) -> dict[str, Any]:
         def exec_probe(_file: str, _argv: list[str]) -> None:
             if apply_candidate:
                 close_inherited_fds()
-                # candidate closes out_w too, so reopen stdout to the reporting
-                # pipe *after* hygiene. This reporting FD is canary-only and does
-                # not model a worker-visible inherited capability.
+                # Candidate closes out_w too. Reopen only the canary report pipe
+                # from the still-running parent after the hygiene boundary.
                 report_fd = os.open(f"/proc/{os.getppid()}/fd/{out_w}", os.O_WRONLY)
                 os.dup2(report_fd, 1)
                 if report_fd != 1:
@@ -106,7 +109,6 @@ def run_exec_probe(*, apply_candidate: bool) -> dict[str, Any]:
         s2.v1.drop_capability_bounding_set = noop
         os.execvp = exec_probe
         try:
-            os.close(out_r) if False else None
             status = s2._pid1_reaper([sys.executable, "-c", _probe_script()])
         finally:
             s2.v1.set_no_new_privs, s2.v1.install_seccomp_deny_policy, s2.v1.drop_capability_bounding_set, os.execvp = original
