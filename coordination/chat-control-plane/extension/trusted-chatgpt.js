@@ -3,61 +3,28 @@
 
   const CDP_VERSION = "1.3";
   const MAX_PROMPT_CHARS = 120000;
-  const ATOMIC_LONG_PROMPT_THRESHOLD = 32000;
-  const PRIME_LEASE_MS = 15000;
-  const PRIME_LEASE_PREFIX = "a2-chatgpt-prime-lease:";
+  const SEND_READY_TIMEOUT_MS = 3000;
+  const SEND_READY_POLL_MS = 50;
   const inFlightTabs = new Set();
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  const normalize = (value) => String(value ?? "").replace(/\r\n/g, "\n").trim();
   const canonicalVisible = (value) => String(value ?? "")
     .replace(/\r\n?/g, "\n")
     .replace(/\u00a0/g, " ")
     .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
     .replace(/\s+/gu, " ")
     .trim();
-  const semanticVisible = (value) => canonicalVisible(value).replace(/\s+/gu, "");
 
   function target(tabId) { return { tabId }; }
-  async function send(tabId, method, params = {}) { return chrome.debugger.sendCommand(target(tabId), method, params); }
-
-  async function sha256Hex(value) {
-    const bytes = new TextEncoder().encode(String(value ?? ""));
-    const digest = await crypto.subtle.digest("SHA-256", bytes);
-    return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-  }
-
-  async function promptFingerprint(text) {
-    return sha256Hex(semanticVisible(text));
-  }
-
-  function leaseKey(tabId) { return `${PRIME_LEASE_PREFIX}${tabId}`; }
-
-  async function savePrimeLease(tabId, text) {
-    await chrome.storage.session.set({
-      [leaseKey(tabId)]: {
-        prompt_sha256: await promptFingerprint(text),
-        expires_at: Date.now() + PRIME_LEASE_MS
-      }
-    });
-  }
-
-  async function requirePrimeLease(tabId, text) {
-    const key = leaseKey(tabId);
-    const stored = await chrome.storage.session.get(key);
-    const lease = stored[key];
-    const expected = await promptFingerprint(text);
-    if (!lease || Number(lease.expires_at || 0) < Date.now() || lease.prompt_sha256 !== expected) {
-      await chrome.storage.session.remove(key);
-      throw new Error("chatgpt_cdp_prime_lease_mismatch");
-    }
-  }
-
-  async function clearPrimeLease(tabId) {
-    try { await chrome.storage.session.remove(leaseKey(tabId)); } catch (_) {}
+  async function send(tabId, method, params = {}) {
+    return chrome.debugger.sendCommand(target(tabId), method, params);
   }
 
   async function evaluate(tabId, expression) {
-    const result = await send(tabId, "Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
+    const result = await send(tabId, "Runtime.evaluate", {
+      expression,
+      returnByValue: true,
+      awaitPromise: true
+    });
     if (result?.exceptionDetails) throw new Error("chatgpt_cdp_evaluate_failed");
     return result?.result?.value;
   }
@@ -80,7 +47,9 @@
   async function ensurePinnedChatgptTab(tabId) {
     const tab = await chrome.tabs.get(tabId);
     const url = new URL(String(tab?.url || ""));
-    if (!["chatgpt.com", "chat.openai.com"].includes(url.hostname.toLowerCase())) throw new Error("chatgpt_cdp_target_host_mismatch");
+    if (!["chatgpt.com", "chat.openai.com"].includes(url.hostname.toLowerCase())) {
+      throw new Error("chatgpt_cdp_target_host_mismatch");
+    }
     if (!url.pathname.startsWith("/c/")) throw new Error("chatgpt_cdp_target_not_conversation");
   }
 
@@ -97,14 +66,15 @@
       const composer = composers[0];
       const form = composer.closest('form');
       if (!form) return { ok:false, error:'composer_form_missing' };
-      const text = String(composer.innerText || composer.textContent || '').replace(/\\r\\n/g, '\\n').trim();
-      return { ok:true, text };
+      return { ok:true, text:String(composer.innerText || composer.textContent || '') };
     })()`);
   }
 
   async function focusComposer(tabId) {
     const result = await evaluate(tabId, `(() => {
-      const el = document.querySelector('#prompt-textarea');
+      const composers = [...document.querySelectorAll('#prompt-textarea')];
+      if (composers.length !== 1) return false;
+      const el = composers[0];
       if (!(el instanceof HTMLElement)) return false;
       el.focus();
       return document.activeElement === el || el.contains(document.activeElement);
@@ -112,48 +82,15 @@
     if (result !== true) throw new Error("chatgpt_cdp_focus_failed");
   }
 
-  async function clearComposerTrusted(tabId) {
-    await send(tabId, "Input.dispatchKeyEvent", { type: "rawKeyDown", key: "a", code: "KeyA", modifiers: 2, windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 });
-    await send(tabId, "Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", modifiers: 2, windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 });
-    await send(tabId, "Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 });
-    await send(tabId, "Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 });
-  }
-
-  async function insertComposerAtomic(tabId, text) {
-    const result = await evaluate(tabId, `(() => {
-      const text = ${JSON.stringify(text)};
-      const visible = (el) => {
-        if (!(el instanceof HTMLElement)) return false;
-        const style = getComputedStyle(el);
-        const rect = el.getBoundingClientRect();
-        return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0 && rect.width > 0 && rect.height > 0;
-      };
-      const composers = [...document.querySelectorAll('#prompt-textarea')].filter(visible);
-      if (composers.length !== 1) return { ok:false, error:'composer_count' };
-      const composer = composers[0];
-      composer.focus();
-      if (!(document.activeElement === composer || composer.contains(document.activeElement))) return { ok:false, error:'focus_failed' };
-      const inserted = document.execCommand('insertText', false, text);
-      return { ok: inserted === true };
-    })()`);
-    if (!result?.ok) throw new Error(`chatgpt_cdp_atomic_insert_${result?.error || "failed"}`);
-  }
-
-  async function waitForCanonicalReadback(tabId, text, timeoutMs) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      await sleep(120);
-      const state = await inspectComposer(tabId);
-      if (state?.ok && canonicalVisible(state.text) === canonicalVisible(text)) return true;
-    }
-    return false;
-  }
-
-  async function inspectSend(tabId, expectedText) {
+  async function inspectReadySend(tabId, expectedText) {
     return evaluate(tabId, `(() => {
       const expected = ${JSON.stringify(expectedText)};
-      const canon = (v) => String(v ?? '').replace(/\\r\\n?/g, '\\n').replace(/\u00a0/g, ' ').replace(/[\u200B-\u200D\u2060\uFEFF]/g, '').replace(/\s+/gu, ' ').trim();
-      const semantic = (v) => canon(v).replace(/\s+/gu, '');
+      const canon = (v) => String(v ?? '')
+        .replace(/\\r\\n?/g, '\\n')
+        .replace(/\u00a0/g, ' ')
+        .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
+        .replace(/\s+/gu, ' ')
+        .trim();
       const visible = (el) => {
         if (!(el instanceof HTMLElement)) return false;
         const style = getComputedStyle(el);
@@ -166,21 +103,18 @@
       const form = composer.closest('form');
       if (!form) return { ok:false, error:'composer_form_missing' };
       const text = composer.innerText || composer.textContent || '';
-      if (semantic(text) !== semantic(expected)) return { ok:false, error:'composer_semantic_mismatch' };
-      const scoped = canon(text);
-      if (!scoped.startsWith(canon('A2 CHAT BRIDGE — AUTONOMOUS CONTINUE')) || !scoped.includes('bridge_job_target=GPT') || !scoped.includes('transport=WEB_CHAT_INTERACTIVE_REMOTE')) {
-        return { ok:false, error:'composer_scope_mismatch' };
-      }
+      if (canon(text) !== canon(expected)) return { ok:false, error:'composer_readback_pending' };
       const raw = [
         ...form.querySelectorAll('#composer-submit-button'),
         ...form.querySelectorAll("button[data-testid='send-button']"),
         ...form.querySelectorAll("button[data-testid='composer-submit-button']")
       ];
       const buttons = [...new Set(raw)].filter(visible);
-      if (buttons.length !== 1) return { ok:false, error:'send_count', count:buttons.length };
+      if (buttons.length === 0) return { ok:false, error:'send_pending', count:0 };
+      if (buttons.length !== 1) return { ok:false, error:'send_ambiguous', count:buttons.length };
       const button = buttons[0];
       if (!(button instanceof HTMLButtonElement)) return { ok:false, error:'send_not_button' };
-      if (button.disabled || button.getAttribute('aria-disabled') === 'true') return { ok:false, error:'send_disabled' };
+      if (button.disabled || button.getAttribute('aria-disabled') === 'true') return { ok:false, error:'send_pending', count:1 };
       const rect = button.getBoundingClientRect();
       const x = rect.left + rect.width / 2;
       const y = rect.top + rect.height / 2;
@@ -188,6 +122,21 @@
       if (!hit || !(hit === button || button.contains(hit))) return { ok:false, error:'send_obscured' };
       return { ok:true, x, y };
     })()`);
+  }
+
+  async function waitForReadySend(tabId, text) {
+    const deadline = Date.now() + SEND_READY_TIMEOUT_MS;
+    let lastError = "send_not_ready";
+    while (Date.now() < deadline) {
+      const state = await inspectReadySend(tabId, text);
+      if (state?.ok) return state;
+      lastError = String(state?.error || lastError);
+      if (["composer_count", "composer_form_missing", "send_ambiguous", "send_not_button", "send_obscured"].includes(lastError)) {
+        throw new Error(`chatgpt_cdp_${lastError}`);
+      }
+      await sleep(SEND_READY_POLL_MS);
+    }
+    throw new Error(`chatgpt_cdp_${lastError}`);
   }
 
   async function withDebugger(tabId, operation) {
@@ -201,69 +150,47 @@
       attached = true;
       return await operation();
     } finally {
-      if (attached) { try { await chrome.debugger.detach(target(tabId)); } catch (_) {} }
+      if (attached) {
+        try { await chrome.debugger.detach(target(tabId)); } catch (_) {}
+      }
       inFlightTabs.delete(tabId);
     }
   }
 
-  async function trustedPrime(tabId, prompt) {
+  async function trustedSend(tabId, prompt) {
     const text = validateBridgePrompt(prompt);
-    await clearPrimeLease(tabId);
     return withDebugger(tabId, async () => {
       const before = await inspectComposer(tabId);
       if (!before?.ok) throw new Error(`chatgpt_cdp_${before?.error || "composer_inspect_failed"}`);
-      const beforeText = normalize(before.text);
-      if (beforeText !== "" && canonicalVisible(before.text) !== canonicalVisible(text)) throw new Error("chatgpt_cdp_composer_not_empty");
+      if (canonicalVisible(before.text) !== "") throw new Error("chatgpt_cdp_composer_not_empty");
 
       await focusComposer(tabId);
-      await clearComposerTrusted(tabId);
-      await sleep(80);
-
       await send(tabId, "Input.insertText", { text });
-      let insertionMode = "CDP_INPUT_INSERT_TEXT";
-      let readbackMatched = await waitForCanonicalReadback(tabId, text, 1800);
+      const sendState = await waitForReadySend(tabId, text);
 
-      if (!readbackMatched && text.length > ATOMIC_LONG_PROMPT_THRESHOLD) {
-        await focusComposer(tabId);
-        await clearComposerTrusted(tabId);
-        await sleep(80);
-        await insertComposerAtomic(tabId, text);
-        insertionMode = "ATOMIC_EXEC_COMMAND_FALLBACK";
-        readbackMatched = await waitForCanonicalReadback(tabId, text, 3000);
-      }
-
-      if (!readbackMatched) throw new Error("chatgpt_cdp_prime_readback_mismatch");
-      await savePrimeLease(tabId, text);
-      return { ok: true, phase: "PRIMED", insertion_mode: insertionMode, lease_ms: PRIME_LEASE_MS };
+      await send(tabId, "Input.dispatchMouseEvent", {
+        type: "mouseMoved", x: sendState.x, y: sendState.y, pointerType: "mouse"
+      });
+      await send(tabId, "Input.dispatchMouseEvent", {
+        type: "mousePressed", x: sendState.x, y: sendState.y,
+        button: "left", buttons: 1, clickCount: 1, pointerType: "mouse"
+      });
+      await send(tabId, "Input.dispatchMouseEvent", {
+        type: "mouseReleased", x: sendState.x, y: sendState.y,
+        button: "left", buttons: 0, clickCount: 1, pointerType: "mouse"
+      });
+      return { ok: true, phase: "TRUSTED_SEND_DISPATCHED" };
     });
   }
 
-  async function trustedClick(tabId, prompt) {
-    const text = validateBridgePrompt(prompt);
-    await requirePrimeLease(tabId, text);
-    try {
-      return await withDebugger(tabId, async () => {
-        const sendState = await inspectSend(tabId, text);
-        if (!sendState?.ok) throw new Error(`chatgpt_cdp_${sendState?.error || "send_inspect_failed"}`);
-        await send(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x: sendState.x, y: sendState.y });
-        await send(tabId, "Input.dispatchMouseEvent", { type: "mousePressed", x: sendState.x, y: sendState.y, button: "left", clickCount: 1 });
-        await send(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x: sendState.x, y: sendState.y, button: "left", clickCount: 1 });
-        return { ok: true, phase: "CLICKED" };
-      });
-    } finally {
-      await clearPrimeLease(tabId);
-    }
-  }
-
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (!["A2_CHATGPT_TRUSTED_PRIME", "A2_CHATGPT_TRUSTED_CLICK"].includes(message?.type)) return false;
+    if (message?.type !== "A2_CHATGPT_TRUSTED_SEND") return false;
     const tabId = sender.tab?.id;
     if (!Number.isInteger(tabId)) {
       sendResponse({ ok: false, error: "chatgpt_cdp_sender_tab_missing" });
       return false;
     }
-    const action = message.type === "A2_CHATGPT_TRUSTED_PRIME" ? trustedPrime : trustedClick;
-    action(tabId, message.prompt)
+    trustedSend(tabId, message.prompt)
       .then((result) => sendResponse(result))
       .catch((error) => sendResponse({ ok: false, error: String(error?.message || error) }));
     return true;
