@@ -1,0 +1,230 @@
+name: Chat Control Plane Contract
+
+on:
+  push:
+    branches:
+      - work/chat-control-plane-browser-bridge
+  pull_request:
+    paths:
+      - 'coordination/chat-control-plane/**'
+      - 'supabase/functions/a2-chat-bridge-remote/**'
+      - 'supabase/migrations/20260825050000_a2_chat_bridge_receipts_v1.sql'
+      - 'supabase/migrations/20260825213000_a2_chat_bridge_remote_runtime_v1.sql'
+      - 'supabase/migrations/20260825215000_a2_chat_bridge_remote_runtime_rls_deny_v1.sql'
+      - 'tests/test_chat_control_plane_bridge_contract.py'
+      - 'tests/test_a2_chat_bridge_receipt_contract.py'
+      - 'tests/test_a2_chat_bridge_remote_contract.py'
+      - 'tests/chat_bridge_worker_combined_load_behavior.mjs'
+      - 'tests/chat_bridge_blind_phase_behavior.mjs'
+      - 'tests/chat_bridge_durable_idempotency_behavior.mjs'
+      - 'tests/chat_bridge_receipt_recorder_behavior.mjs'
+      - 'tests/chat_bridge_required_receipt_proxy_behavior.mjs'
+      - 'tests/adversarial_chat_bridge_dom_f7.mjs'
+      - '.github/workflows/chat-control-plane-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Python contract tests
+        run: python3 -m unittest -v tests.test_chat_control_plane_bridge_contract tests.test_a2_chat_bridge_receipt_contract tests.test_a2_chat_bridge_remote_contract
+
+      - name: JavaScript syntax checks
+        run: |
+          node --check coordination/chat-control-plane/extension/bootstrap-config.js
+          node --check coordination/chat-control-plane/extension/content.js
+          node --check coordination/chat-control-plane/extension/auth-fetch.js
+          node --check coordination/chat-control-plane/extension/durable-fetch.js
+          node --check coordination/chat-control-plane/extension/background-entry.js
+          node --check coordination/chat-control-plane/extension/background.js
+          node --check coordination/chat-control-plane/extension/options.js
+          node --check coordination/chat-control-plane/daemon/server.mjs
+          node --check coordination/chat-control-plane/daemon/run.mjs
+          node --check coordination/chat-control-plane/daemon/secure-entry.mjs
+          node --check coordination/chat-control-plane/daemon/receipt-recorder.mjs
+          node --check tests/chat_bridge_worker_combined_load_behavior.mjs
+          node --check tests/chat_bridge_blind_phase_behavior.mjs
+          node --check tests/chat_bridge_durable_idempotency_behavior.mjs
+          node --check tests/chat_bridge_receipt_recorder_behavior.mjs
+          node --check tests/chat_bridge_required_receipt_proxy_behavior.mjs
+          node --check tests/adversarial_chat_bridge_dom_f7.mjs
+
+      - name: Classic service-worker combined-load regression
+        run: node tests/chat_bridge_worker_combined_load_behavior.mjs
+
+      - name: Manifest parse
+        run: python3 -m json.tool coordination/chat-control-plane/extension/manifest.json >/dev/null
+
+      - name: Secure launcher fails closed without local secrets
+        shell: bash
+        run: |
+          set +e
+          env -u SUPABASE_SERVICE_ROLE_KEY -u A2_BRIDGE_SHARED_SECRET node coordination/chat-control-plane/daemon/secure-entry.mjs >/tmp/bridge-no-key.log 2>&1
+          rc=$?
+          set -e
+          test "$rc" -eq 2
+          grep -q 'SUPABASE_SERVICE_ROLE_KEY' /tmp/bridge-no-key.log
+
+          set +e
+          SUPABASE_SERVICE_ROLE_KEY=test-only env -u A2_BRIDGE_SHARED_SECRET node coordination/chat-control-plane/daemon/secure-entry.mjs >/tmp/bridge-no-pair.log 2>&1
+          rc=$?
+          set -e
+          test "$rc" -eq 2
+          grep -q 'A2_BRIDGE_SHARED_SECRET' /tmp/bridge-no-pair.log
+
+          set +e
+          SUPABASE_SERVICE_ROLE_KEY=test-only A2_BRIDGE_SHARED_SECRET=abcdefghijklmnopqrstuvwxyz123456 node coordination/chat-control-plane/daemon/run.mjs >/tmp/bridge-direct.log 2>&1
+          rc=$?
+          set -e
+          test "$rc" -eq 2
+          grep -q 'Refusing direct daemon start' /tmp/bridge-direct.log
+
+      - name: Authenticated loopback dashboard smoke test
+        shell: bash
+        run: |
+          SECRET=abcdefghijklmnopqrstuvwxyz123456
+          SUPABASE_SERVICE_ROLE_KEY=test-only \
+          SUPABASE_URL=http://127.0.0.1:9 \
+          A2_BRIDGE_SHARED_SECRET="$SECRET" \
+          A2_BRIDGE_PORT=8876 \
+          A2_BRIDGE_INTERNAL_PORT=8877 \
+          node coordination/chat-control-plane/daemon/secure-entry.mjs >/tmp/bridge.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8876/v1/status >/tmp/status.json; then break; fi
+            sleep 0.2
+          done
+          python3 - <<'PY'
+          import json
+          with open('/tmp/status.json') as f:
+              status = json.load(f)
+          assert status['schema'] == 'metaengine.chat-bridge.status.v1'
+          assert status['a2']['peer_payloads_exposed'] is False
+          assert 'CHATGPT' in status['peers'] and 'GLM_ZAI' in status['peers']
+          PY
+
+          code=$(curl -sS -o /tmp/unauth.json -w '%{http_code}' -X POST http://127.0.0.1:8876/v1/control/refresh-a2)
+          test "$code" = 401
+          grep -q 'bridge_pairing_required' /tmp/unauth.json
+
+          code=$(curl -sS -o /tmp/auth.json -w '%{http_code}' -X POST http://127.0.0.1:8876/v1/control/refresh-a2 -H "x-a2-chat-bridge-secret: $SECRET")
+          test "$code" = 200
+
+      - name: Blind-phase scheduler behavioral test
+        run: node tests/chat_bridge_blind_phase_behavior.mjs
+
+      - name: Restart-safe Send idempotency behavioral test
+        run: node tests/chat_bridge_durable_idempotency_behavior.mjs
+
+      - name: Receipt recorder modes and hash-only boundary
+        run: node tests/chat_bridge_receipt_recorder_behavior.mjs
+
+      - name: REQUIRED receipt persistence precedes completion ACK
+        run: node tests/chat_bridge_required_receipt_proxy_behavior.mjs
+
+      - name: Adversarial DOM selector F7 behavior
+        run: node tests/adversarial_chat_bridge_dom_f7.mjs
+
+      - name: Command journal and duplicate-send fences survive restart
+        shell: bash
+        run: |
+          export SUPABASE_SERVICE_ROLE_KEY=test-only
+          export SUPABASE_URL=http://127.0.0.1:9
+          export A2_BRIDGE_PORT=8878
+          export A2_BRIDGE_INTERNAL_PORT=8879
+          export A2_BRIDGE_SHARED_SECRET=abcdefghijklmnopqrstuvwxyz123456
+          export A2_BRIDGE_STATE_DIR=/tmp/a2-bridge-journal-state
+          rm -rf "$A2_BRIDGE_STATE_DIR"
+          node coordination/chat-control-plane/daemon/secure-entry.mjs >/tmp/bridge2.log 2>&1 &
+          pid=$!
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8878/v1/status >/dev/null; then break; fi
+            sleep 0.2
+          done
+          curl -fsS -X POST http://127.0.0.1:8878/v1/control/wake \
+            -H 'content-type: application/json' \
+            -H 'x-a2-chat-bridge-client: ci' \
+            -H "x-a2-chat-bridge-secret: $A2_BRIDGE_SHARED_SECRET" \
+            -d '{"target_platform":"GLM_ZAI"}' >/dev/null
+          curl -fsS -H 'x-a2-chat-bridge-client: ci' \
+            -H "x-a2-chat-bridge-secret: $A2_BRIDGE_SHARED_SECRET" \
+            http://127.0.0.1:8878/v1/commands/next >/tmp/cmd.json
+          python3 - <<'PY'
+          import json
+          command = json.load(open('/tmp/cmd.json'))['command']
+          assert command and command['status'] == 'LEASED' and command['leased_to'] == 'ci'
+          open('/tmp/cmd_id', 'w').write(command['command_id'])
+          PY
+          curl -fsS -X POST "http://127.0.0.1:8878/v1/commands/$(cat /tmp/cmd_id)/result" \
+            -H 'content-type: application/json' \
+            -H 'x-a2-chat-bridge-client: ci' \
+            -H "x-a2-chat-bridge-secret: $A2_BRIDGE_SHARED_SECRET" \
+            -d '{"status":"SENT_AND_DOM_VERIFIED","clicked_send_button":true}' >/dev/null
+          curl -fsS -H 'x-a2-chat-bridge-client: ci' \
+            -H "x-a2-chat-bridge-secret: $A2_BRIDGE_SHARED_SECRET" \
+            http://127.0.0.1:8878/v1/commands/next >/tmp/cmd2.json
+          python3 - <<'PY'
+          import json
+          assert json.load(open('/tmp/cmd2.json'))['command'] is None, 'completed command must never be re-leased'
+          PY
+          kill "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+          node coordination/chat-control-plane/daemon/secure-entry.mjs >/tmp/bridge3.log 2>&1 &
+          pid2=$!
+          trap 'kill "$pid2" 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8878/v1/status >/dev/null; then break; fi
+            sleep 0.2
+          done
+          sleep 0.5
+          grep -q 'command-journal restored: 1 idempotency keys' /tmp/bridge3.log
+          grep -q 'completed commands' /tmp/bridge3.log
+
+      - name: Build bridge bundles
+        shell: bash
+        run: |
+          cd coordination/chat-control-plane/extension
+          zip -qr "$GITHUB_WORKSPACE/a2-chat-bridge-extension.zip" .
+          cd "$GITHUB_WORKSPACE/coordination"
+          zip -qr "$GITHUB_WORKSPACE/a2-chat-bridge-complete.zip" chat-control-plane
+
+      - name: Verify Chrome extension bundle layout
+        run: |
+          python3 - <<'PY'
+          from zipfile import ZipFile
+
+          with ZipFile("a2-chat-bridge-extension.zip") as bundle:
+              names = set(bundle.namelist())
+          assert "manifest.json" in names
+          assert "bootstrap-config.js" in names
+          assert "background-entry.js" in names
+          assert "content.js" in names
+          assert not any(name.startswith("extension/") for name in names)
+          PY
+
+      - name: Upload extension bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: a2-chat-bridge-extension
+          path: a2-chat-bridge-extension.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload complete bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: a2-chat-bridge-complete
+          path: a2-chat-bridge-complete.zip
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,161 @@
+name: A2 Chat Bridge v0.5.22 Final
+
+on:
+  push:
+    branches:
+      - work/chat-control-plane-browser-bridge
+    paths:
+      - 'coordination/chat-control-plane/extension/**'
+      - 'tests/test_chat_control_plane_bridge_contract.py'
+      - 'tests/chat_bridge_worker_combined_load_behavior.mjs'
+      - '.github/workflows/a2-chat-bridge-v0522-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  final-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Active JavaScript syntax
+        run: |
+          node --check coordination/chat-control-plane/extension/bootstrap-config.js
+          node --check coordination/chat-control-plane/extension/auth-fetch.js
+          node --check coordination/chat-control-plane/extension/durable-fetch.js
+          node --check coordination/chat-control-plane/extension/trusted-chatgpt.js
+          node --check coordination/chat-control-plane/extension/trusted-glm.js
+          node --check coordination/chat-control-plane/extension/background-v0522.js
+          node --check coordination/chat-control-plane/extension/background.js
+          node --check coordination/chat-control-plane/extension/background-entry.js
+          node --check coordination/chat-control-plane/extension/content.js
+          node --check coordination/chat-control-plane/extension/options.js
+
+      - name: Contract suite
+        run: |
+          python3 -m unittest -v \
+            tests.test_chat_control_plane_bridge_contract \
+            tests.test_a2_chat_bridge_receipt_contract \
+            tests.test_a2_chat_bridge_remote_contract
+          node tests/chat_bridge_worker_combined_load_behavior.mjs
+
+      - name: v0.5.22 final dual-fence assertions
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          ext = Path('coordination/chat-control-plane/extension')
+          manifest = json.loads((ext / 'manifest.json').read_text())
+          assert manifest['manifest_version'] == 3
+          assert manifest['version'] == '0.5.22'
+          assert manifest['incognito'] == 'not_allowed'
+          assert 'debugger' in manifest['permissions']
+
+          entry = (ext / 'background-entry.js').read_text()
+          wrapper = (ext / 'background.js').read_text()
+          runtime = (ext / 'background-v0522.js').read_text()
+          glm = (ext / 'trusted-glm.js').read_text()
+          gpt = (ext / 'trusted-chatgpt.js').read_text()
+
+          assert "importScripts('./trusted-glm.js')" in entry
+          assert 'background-v0522.js' in wrapper
+          assert 'chrome.tabs.reload' not in wrapper
+          assert 'chrome.tabs.reload' not in runtime
+          assert 'chrome.tabs.reload' not in glm
+          assert 'A2_GLM_TRUSTED_SEND' in runtime
+          assert 'sendButton.click' not in runtime
+
+          press = glm.index('type: "mousePressed"')
+          durable = glm.index('await postProgress(commandId, transportTraceId, "DISPATCHED")')
+          release = glm.index('type: "mouseReleased"', durable)
+          assert press < durable < release
+          for status in ['DISPATCHED','REQUEST_OBSERVED','RESPONSE_STARTED','NETWORK_COMPLETED','NETWORK_ERROR_HOLD','RELEASED']:
+              assert f'"{status}"' in glm
+          assert 'const TRACE_RE = /^[0-9a-f]{32}$/;' in glm
+          assert 'crypto.getRandomValues(bytes)' in glm
+          assert 'Network.getResponseBody' not in glm
+          assert 'Fetch.enable' not in glm
+          assert 'transport_trace_id' in runtime
+          assert 'authority_effect: false' in runtime
+
+          assert 'Input.dispatchKeyEvent' in gpt
+          assert 'key: "Enter"' in gpt
+          assert 'Input.dispatchMouseEvent' not in gpt
+          print('v0.5.22 final dual-fence assertions: PASS')
+          PY
+
+      - name: Deterministic extension ZIP
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
+
+          src = Path('coordination/chat-control-plane/extension')
+          out = Path('METAENGINE_A2_Chat_Bridge_v0.5.22_FINAL_DUAL_FENCE.zip')
+          with ZipFile(out, 'w', compression=ZIP_DEFLATED, compresslevel=9) as zf:
+              for path in sorted(p for p in src.rglob('*') if p.is_file()):
+                  rel = path.relative_to(src).as_posix()
+                  info = ZipInfo(rel, date_time=(1980, 1, 1, 0, 0, 0))
+                  info.compress_type = ZIP_DEFLATED
+                  info.external_attr = 0o100644 << 16
+                  info.create_system = 3
+                  zf.writestr(info, path.read_bytes(), compress_type=ZIP_DEFLATED, compresslevel=9)
+          PY
+          unzip -t METAENGINE_A2_Chat_Bridge_v0.5.22_FINAL_DUAL_FENCE.zip
+          python3 - <<'PY'
+          from zipfile import ZipFile
+          with ZipFile('METAENGINE_A2_Chat_Bridge_v0.5.22_FINAL_DUAL_FENCE.zip') as z:
+              names = set(z.namelist())
+          for required in ['manifest.json','background-entry.js','background.js','background-v0522.js','trusted-chatgpt.js','trusted-glm.js','content.js']:
+              assert required in names, required
+          assert not any(name.startswith('extension/') for name in names)
+          PY
+          sha256sum METAENGINE_A2_Chat_Bridge_v0.5.22_FINAL_DUAL_FENCE.zip | tee METAENGINE_A2_Chat_Bridge_v0.5.22_FINAL_DUAL_FENCE.zip.sha256
+
+      - name: Chromium pack-extension smoke
+        shell: bash
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          "$CHROME" --no-sandbox --disable-gpu --pack-extension="$GITHUB_WORKSPACE/coordination/chat-control-plane/extension"
+          test -s "$GITHUB_WORKSPACE/coordination/chat-control-plane/extension.crx"
+          echo "Chromium pack-extension: PASS"
+
+      - name: Release metadata
+        run: |
+          python3 - <<'PY'
+          import json, os, hashlib
+          from pathlib import Path
+          bundle = Path('METAENGINE_A2_Chat_Bridge_v0.5.22_FINAL_DUAL_FENCE.zip')
+          report = {
+              'release': '0.5.22',
+              'git_sha': os.environ['GITHUB_SHA'],
+              'zip_sha256': hashlib.sha256(bundle.read_bytes()).hexdigest(),
+              'authority_effect': False,
+              'trusted_chatgpt_enter': True,
+              'trusted_glm_cdp_mouse': True,
+              'glm_reload_retry': False,
+              'transport_progress': ['DISPATCHED','REQUEST_OBSERVED','RESPONSE_STARTED','NETWORK_COMPLETED','NETWORK_ERROR_HOLD','RELEASED']
+          }
+          Path('METAENGINE_A2_Chat_Bridge_v0.5.22_RELEASE.json').write_text(json.dumps(report, indent=2) + '\n')
+          print(json.dumps(report, indent=2))
+          PY
+
+      - name: Upload final extension
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: METAENGINE-A2-Chat-Bridge-v0.5.22-FINAL-DUAL-FENCE
+          path: |
+            METAENGINE_A2_Chat_Bridge_v0.5.22_FINAL_DUAL_FENCE.zip
+            METAENGINE_A2_Chat_Bridge_v0.5.22_FINAL_DUAL_FENCE.zip.sha256
+            METAENGINE_A2_Chat_Bridge_v0.5.22_RELEASE.json
+            coordination/chat-control-plane/extension.crx
+          if-no-files-found: error
+          retention-days: 30
