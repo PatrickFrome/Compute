@@ -2,7 +2,7 @@
   "use strict";
 
   const CDP_VERSION = "1.3";
-  const MAX_PROMPT_CHARS = 42000;
+  const MAX_PROMPT_CHARS = 120000;
   const inFlightTabs = new Set();
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const normalize = (value) => String(value ?? "").replace(/\r\n/g, "\n").trim();
