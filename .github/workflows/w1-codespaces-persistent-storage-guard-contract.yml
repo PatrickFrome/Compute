@@ -1,0 +1,65 @@
+name: W1 Codespaces Persistent Storage Guard Contract
+
+on:
+  push:
+    branches: [work/w1-sandbox-launcher-prep]
+    paths:
+      - 'controller/w1/codespaces_persistent_storage_guard.py'
+      - 'controller/w1/github_codespaces_snapshot_guard.py'
+      - 'worker/native_linux/w1_lifecycle_evidence_harness.py'
+      - 'tests/test_w1_codespaces_persistent_storage_guard.py'
+      - '.github/workflows/w1-codespaces-persistent-storage-guard-contract.yml'
+
+permissions: {}
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile guard
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/w1/codespaces_persistent_storage_guard.py
+
+      - name: Run adversarial storage tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_w1_codespaces_persistent_storage_guard -v
+
+      - name: Assert persistent-root and non-authority boundaries
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('controller/w1/codespaces_persistent_storage_guard.py').read_text()
+          required = (
+              'PERSISTENT_ROOT = PurePosixPath("/workspaces")',
+              'strictly below /workspaces',
+              'sentinel_path_sha256',
+              'stopped_snapshot_sha256',
+              'kernel_boot_id_changed',
+              'provider_oracle_sha256',
+              'provider_storage_contract_verified": False',
+              'persistent_worker_proof": False',
+              'w1_verified": False',
+              'requires_authenticated_github_provenance',
+              'requires_persisted_db_composition',
+          )
+          for token in required:
+              assert token in text, token
+          forbidden = (
+              '/start', '/stop', 'requests.post(', 'requests.patch(',
+              'provider_storage_contract_verified": True',
+              'persistent_worker_proof": True', 'w1_verified": True',
+          )
+          for token in forbidden:
+              assert token not in text, token
+          PY
