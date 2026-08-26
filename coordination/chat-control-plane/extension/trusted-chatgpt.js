@@ -3,6 +3,7 @@
 
   const CDP_VERSION = "1.3";
   const MAX_PROMPT_CHARS = 120000;
+  const ATOMIC_LONG_PROMPT_THRESHOLD = 32000;
   const inFlightTabs = new Set();
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const normalize = (value) => String(value ?? "").replace(/\r\n/g, "\n").trim();
@@ -73,6 +74,35 @@
     await send(tabId, "Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 });
   }
 
+  async function insertComposerAtomic(tabId, text) {
+    const result = await evaluate(tabId, `(() => {
+      const text = ${JSON.stringify(text)};
+      const visible = (el) => {
+        if (!(el instanceof HTMLElement)) return false;
+        const style = getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0 && rect.width > 0 && rect.height > 0;
+      };
+      const composers = [...document.querySelectorAll('#prompt-textarea')].filter(visible);
+      if (composers.length !== 1) return { ok:false, error:'composer_count' };
+      const composer = composers[0];
+      composer.focus();
+      if (!(document.activeElement === composer || composer.contains(document.activeElement))) return { ok:false, error:'focus_failed' };
+      const inserted = document.execCommand('insertText', false, text);
+      return { ok: inserted === true };
+    })()`);
+    if (!result?.ok) throw new Error(`chatgpt_cdp_atomic_insert_${result?.error || "failed"}`);
+  }
+
+  async function insertComposerTrusted(tabId, text) {
+    if (text.length > ATOMIC_LONG_PROMPT_THRESHOLD) {
+      await insertComposerAtomic(tabId, text);
+      return "ATOMIC_EXEC_COMMAND";
+    }
+    await send(tabId, "Input.insertText", { text });
+    return "CDP_INPUT_INSERT_TEXT";
+  }
+
   async function inspectSend(tabId, expectedText) {
     return evaluate(tabId, `(() => {
       const expected = ${JSON.stringify(expectedText)};
@@ -132,12 +162,12 @@
       await focusComposer(tabId);
       await clearComposerTrusted(tabId);
       await sleep(80);
-      await send(tabId, "Input.insertText", { text });
-      await sleep(220);
+      const insertionMode = await insertComposerTrusted(tabId, text);
+      await sleep(text.length > ATOMIC_LONG_PROMPT_THRESHOLD ? 500 : 220);
 
       const after = await inspectComposer(tabId);
       if (!after?.ok || normalize(after.text) !== normalize(text)) throw new Error("chatgpt_cdp_prime_readback_mismatch");
-      return { ok: true, phase: "PRIMED" };
+      return { ok: true, phase: "PRIMED", insertion_mode: insertionMode };
     });
   }
 
