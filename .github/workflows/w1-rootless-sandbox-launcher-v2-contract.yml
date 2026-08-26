@@ -1,0 +1,64 @@
+name: W1 Rootless Sandbox Launcher V2 Contract
+
+on:
+  push:
+    branches: [work/w1-sandbox-launcher-prep]
+    paths:
+      - 'worker/native_linux/rootless_sandbox_launcher_v2.py'
+      - 'tests/test_w1_rootless_sandbox_launcher_v2.py'
+      - 'docs/W1_S2_ROOTLESS_SANDBOX_LAUNCHER_V2.md'
+      - '.github/workflows/w1-rootless-sandbox-launcher-v2-contract.yml'
+
+permissions: {}
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compute exact source SHA-256
+        run: |
+          set -euo pipefail
+          sha256sum worker/native_linux/rootless_sandbox_launcher_v2.py
+
+      - name: Compile exact launcher
+        run: |
+          set -euo pipefail
+          python3 -m py_compile worker/native_linux/rootless_sandbox_launcher_v2.py
+
+      - name: Run S2 composition tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_w1_rootless_sandbox_launcher_v2 -v
+
+      - name: Assert fail-closed boundaries
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('worker/native_linux/rootless_sandbox_launcher_v2.py')
+          text = p.read_text()
+          combined = text + Path('worker/native_linux/rootless_sandbox_launcher.py').read_text()
+          required = (
+              'CLONE_NEWUSER', 'CLONE_NEWPID', 'CLONE_NEWNS', 'CLONE_NEWNET',
+              'MS_REC | MS_PRIVATE', 'pivot_root', 'MNT_DETACH',
+              'os.getpid() != 1', 'os.waitpid(-1', 'os.killpg',
+              '_mount("proc"', 'PR_SET_NO_NEW_PRIVS',
+          )
+          for token in required:
+              assert token in combined, token
+          forbidden_exec = (
+              'subprocess.run(["sudo"', 'os.system("sudo', '--privileged',
+              '--network=host', '--pid=host', 'seccomp=unconfined',
+              'w1_verified = True', 'worker_admitted = True',
+          )
+          for token in forbidden_exec:
+              assert token not in text, token
+          PY
