@@ -6,6 +6,7 @@ on:
       - work/w1-sandbox-launcher-prep
     paths:
       - 'controller/w1/s2_pid1_resource_hardening_shadow_canary.py'
+      - 'tests/test_w1_s2_pid1_resource_hardening_shadow_canary.py'
       - 'worker/native_linux/rootless_sandbox_launcher_v2.py'
       - '.github/workflows/w1-s2-pid1-resource-shadow-canary.yml'
   workflow_dispatch:
@@ -22,10 +23,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - name: Compile exact canary
+      - name: Compile and test exact canary
         run: |
           set -euo pipefail
           python3 -m py_compile controller/w1/s2_pid1_resource_hardening_shadow_canary.py
+          python3 -m unittest tests.test_w1_s2_pid1_resource_hardening_shadow_canary -v
       - name: Verify adopted PID1 dumpability and core limits
         run: |
           set -euo pipefail
@@ -37,13 +39,25 @@ jobs:
           import json
           from pathlib import Path
           r = json.loads(Path('out/w1-s2-pid1-resource-shadow-canary.json').read_text())
+          assert r['schema'] == 'metaengine.compute.w1-s2-pid1-resource-regression.h205f22.v3'
           assert r['outcome'] == 'ACCEPT_ADOPTED_PID1_DUMPABLE_CORE'
           assert all(r['evidence']['checks'].values())
           assert r['evidence']['source_sha256'] == '25586bd8e0e97a78988f93d9c68c358b7eea6924015d06721afc135412d386df'
+          assert r['evidence']['determinism_scope'] == 'evidence_sha256 excludes host-dependent environment shadow observations'
+          assert sorted(r['evidence']['excluded_host_dependent_fields']) == sorted([
+              'rlimit_nofile_before',
+              'rlimit_nofile_shadow_target',
+              'rlimit_nofile_shadow_probe_applied',
+              'rlimit_nofile_after',
+          ])
+          assert r['environment']['classification'] == 'HOST_DEPENDENT_SHADOW_OBSERVATION_NONAUTHORITY'
+          assert len(r['environment_sha256']) == 64
           assert r['runtime_isolation_verified'] is False
           assert r['w1_verified'] is False
           assert r['authority_effect'] is False
-          print('PID1 dumpable/core: ADOPTED_REGRESSION_GREEN')
+          print('PID1 dumpable/core: ADOPTED_REGRESSION_GREEN_HOST_INDEPENDENT_EVIDENCE')
+          print('evidence_sha256=' + r['evidence_sha256'])
+          print('environment_sha256=' + r['environment_sha256'])
           PY
       - name: Upload non-authority regression receipt
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
