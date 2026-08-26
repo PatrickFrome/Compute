@@ -2,7 +2,7 @@
 """W1 provider-neutral lifecycle evidence harness (PREP / non-authority).
 
 The harness deliberately separates local evidence capture from provider mutation.
-It NEVER starts/stops/reboots a provider and NEVER admits a worker. Its two jobs:
+It NEVER starts, stops, or reboots a provider and NEVER admits a worker. Its two jobs:
 
 1. ``capture`` records fixed Linux/kernel facts plus a persistent sentinel hash.
 2. ``compose-codespaces`` combines PRE/POST captures, raw GitHub Codespaces
