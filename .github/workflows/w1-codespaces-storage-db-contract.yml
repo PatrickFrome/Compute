@@ -1,0 +1,50 @@
+name: W1 Codespaces Storage DB Contract
+
+on:
+  push:
+    branches: [work/w1-sandbox-launcher-prep]
+    paths:
+      - 'supabase/migrations/20260826061000_w1_codespaces_persistent_storage_receipt_v1.sql'
+      - 'tests/test_w1_codespaces_storage_db_contract.py'
+      - '.github/workflows/w1-codespaces-storage-db-contract.yml'
+
+permissions: {}
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Run adversarial storage DB contract
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_w1_codespaces_storage_db_contract -v
+
+      - name: Assert non-mutation and fixed persistent path
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('supabase/migrations/20260826061000_w1_codespaces_persistent_storage_receipt_v1.sql').read_text().lower()
+          assert "/workspaces/.metaengine-w1/persistent-sentinel.bin" in p
+          assert "pending_storage_provenance_readback" in p
+          assert "expires_at>clock_timestamp()" in p
+          assert "stopped_provider_snapshot_sha256" in p
+          assert "before update or delete" in p
+          forbidden = (
+              'provider mutation', 'apply migration',
+              'grant execute on function public.h205f22_w1_codespaces_storage_receipt_ingest_v1(uuid,jsonb) to authenticated',
+              'grant execute on function public.h205f22_w1_codespaces_storage_receipt_ingest_v1(uuid,jsonb) to anon',
+              'w1_verified=true', 'worker_admitted=true', 'authority_effect=true',
+          )
+          for token in forbidden:
+              assert token not in p, token
+          print('W1 Codespaces storage DB receipt contract: PASS')
+          PY
