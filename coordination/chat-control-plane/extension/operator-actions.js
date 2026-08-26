@@ -192,6 +192,88 @@
     return sha256Bytes(binary);
   }
 
+  function frameRecordAtPoint(frame, x, y) {
+    const records = Array.isArray(frame?.dom_snapshot?.visible_records) ? frame.dom_snapshot.visible_records : [];
+    const scrollX = Number(frame?.page?.scroll?.x || 0), scrollY = Number(frame?.page?.scroll?.y || 0);
+    const pageX = Number(x) + scrollX, pageY = Number(y) + scrollY;
+    const matches = records.filter((record) => {
+      const b = Array.isArray(record?.bounds) ? record.bounds : null;
+      if (!b || b.length < 4) return false;
+      const [rx, ry, rw, rh] = b.map(Number);
+      return Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rw) && Number.isFinite(rh)
+        && rw > 0 && rh > 0 && pageX >= rx && pageY >= ry && pageX <= rx + rw && pageY <= ry + rh;
+    });
+    matches.sort((a, b) => Number(a.bounds?.[2] || 0) * Number(a.bounds?.[3] || 0) - Number(b.bounds?.[2] || 0) * Number(b.bounds?.[3] || 0));
+    return matches.find((record) => Number(record?.backend_node_id || 0) > 0) || null;
+  }
+
+  function attributesFromNode(node) {
+    const flat = Array.isArray(node?.attributes) ? node.attributes : [];
+    const out = {};
+    for (let i = 0; i + 1 < flat.length; i += 2) out[String(flat[i])] = String(flat[i + 1]);
+    return out;
+  }
+
+  function semanticAttributes(attributes) {
+    const keys = ["id", "role", "aria-label", "data-testid", "href", "type", "name"];
+    const out = {};
+    for (const key of keys) if (attributes?.[key] != null) out[key] = String(attributes[key]);
+    return out;
+  }
+
+  async function liveNodeAtPoint(session, x, y) {
+    await session.send("DOM.enable");
+    const located = await session.send("DOM.getNodeForLocation", {
+      x: Math.round(Number(x)),
+      y: Math.round(Number(y)),
+      includeUserAgentShadowDOM: true,
+      ignorePointerEventsNone: false
+    });
+    const backendNodeId = Number(located?.backendNodeId || 0);
+    if (!backendNodeId) throw new Error("operator_action_point_backend_node_missing");
+    const described = await session.send("DOM.describeNode", { backendNodeId, depth: 0, pierce: true });
+    const node = described?.node || {};
+    return {
+      backend_node_id: backendNodeId,
+      frame_id: located?.frameId || node.frameId || null,
+      node_name: String(node.nodeName || ""),
+      local_name: String(node.localName || ""),
+      attributes: semanticAttributes(attributesFromNode(node))
+    };
+  }
+
+  function nodeBindingMatches(frameRecord, liveNode) {
+    if (!frameRecord || !liveNode) return false;
+    if (Number(frameRecord.backend_node_id || 0) !== Number(liveNode.backend_node_id || 0)) return false;
+    if (frameRecord.node_name && String(frameRecord.node_name) !== String(liveNode.node_name || "")) return false;
+    const prior = semanticAttributes(frameRecord.attributes || {}), current = liveNode.attributes || {};
+    for (const [key, value] of Object.entries(prior)) {
+      if (current[key] != null && String(current[key]) !== String(value)) return false;
+    }
+    return true;
+  }
+
+  async function verifyPointFreshness(session, frame, x, y) {
+    const frameRecord = frameRecordAtPoint(frame, x, y);
+    if (frameRecord) {
+      const liveNode = await liveNodeAtPoint(session, x, y);
+      if (!nodeBindingMatches(frameRecord, liveNode)) throw new Error("operator_action_target_node_changed_recapture_required");
+      return {
+        strategy: "BACKEND_NODE_BINDING",
+        backend_node_id: liveNode.backend_node_id,
+        frame_id: liveNode.frame_id,
+        node_name: liveNode.node_name,
+        attributes: liveNode.attributes
+      };
+    }
+
+    // If the original DOMSnapshot had no reliable record for this point, keep
+    // the previous strict full-frame equality fence rather than weakening safety.
+    const currentHash = await currentScreenshotHash(session);
+    if (currentHash !== frame.hashes?.screenshot_sha256) throw new Error("operator_action_frame_stale_recapture_required");
+    return { strategy: "FULL_SCREENSHOT_SHA256", screenshot_sha256: currentHash };
+  }
+
   function hitInspectionExpression(x, y) {
     return `(() => {
       const x=${Number(x)},y=${Number(y)};
@@ -225,8 +307,7 @@
 
     return withTab(platform, frame.tab_id, `${doubleClick ? "double-click" : "click"}:${platform}`, async (tab, session) => {
       if (normUrl(tab.url || "") !== frame.url) throw new Error("operator_action_frame_url_changed");
-      const currentHash = await currentScreenshotHash(session);
-      if (currentHash !== frame.hashes?.screenshot_sha256) throw new Error("operator_action_frame_stale_recapture_required");
+      const freshness = await verifyPointFreshness(session, frame, x, y);
       const hit = await evaluate(session, hitInspectionExpression(x, y));
       assertHitAllowed(platform, hit);
 
@@ -253,8 +334,9 @@
         x,
         y,
         hit,
+        freshness,
         post_url: normUrl(live?.url || ""),
-        verification: "FRAME_SHA256_MATCHED_BEFORE_ACTUATION",
+        verification: freshness.strategy === "BACKEND_NODE_BINDING" ? "BACKEND_NODE_BINDING_MATCHED_BEFORE_ACTUATION" : "FRAME_SHA256_MATCHED_BEFORE_ACTUATION",
         authority_effect: false
       };
     });
