@@ -50,7 +50,7 @@ function node(children = [], parent = null) {
 }
 
 const checks = [];
-const check = (name, ok) => { checks.push([name, Boolean(ok)]); };
+const check = (name, ok) => checks.push([name, Boolean(ok)]);
 
 check('Resend is rejected', !matchesButtonSemantics(button({ 'aria-label': 'Resend' }), 'send'));
 check('Send feedback is rejected', !matchesButtonSemantics(button({ text: 'Send feedback' }), 'send'));
@@ -63,22 +63,20 @@ const send = new HTMLElement();
 const root = node([send]);
 const composer = node([], root);
 check('shared container accepted', sharedContainer(composer, send));
-const unrelated = node([]);
-check('unrelated send rejected', !sharedContainer(unrelated, send));
+check('unrelated send rejected', !sharedContainer(node([]), send));
 
 const execute = source.split('async function executeSend(command)')[1].split('async function emitSnapshot')[0];
 const gptBlock = execute.split('if (platform() === "CHATGPT")')[1].split('} else {')[0];
 const glmBlock = execute.split('} else {')[1];
-check('GPT prime is awaited', gptBlock.includes('await callTrustedChatgpt("A2_CHATGPT_TRUSTED_PRIME", text);'));
-check('GPT click is awaited', gptBlock.includes('await callTrustedChatgpt("A2_CHATGPT_TRUSTED_CLICK", text);'));
+check('GPT uses one trusted send', gptBlock.includes('await callTrustedChatgpt(text);'));
+check('GPT has no PRIME phase', !source.includes('A2_CHATGPT_TRUSTED_PRIME'));
+check('GPT has no CLICK phase', !source.includes('A2_CHATGPT_TRUSTED_CLICK'));
 check('GPT avoids DOM writer', !gptBlock.includes('writeComposerExact'));
 check('GPT avoids synthetic click', !gptBlock.includes('sendButton.click'));
+check('GPT avoids duplicate Send wait', !gptBlock.includes('waitForEnabledSend'));
 check('GLM keeps DOM writer', glmBlock.includes('await writeComposerExact(text);'));
 check('GLM keeps real DOM click', glmBlock.includes('sendButton.click();'));
-check('GPT requires empty composer', gptBlock.includes('chatgpt_composer_not_empty_before_prime'));
-check('canonical composer text revalidated before send', source.includes('textMatchesExpected(composerText(pair.composer), expectedText)'));
-check('canonical comparison remains fail closed', source.includes('canonicalVisible(actual) === canonicalVisible(expected)'));
-check('pair ambiguity still fails closed', source.includes('composer_send_pair_ambiguous'));
+check('GPT requires empty composer', gptBlock.includes('chatgpt_composer_not_empty_before_send'));
 check('verification timeout still fails closed', source.includes('send_click_not_observed_in_dom'));
 
 check('compat loads before content', JSON.stringify(manifest.content_scripts[0].js) === JSON.stringify(['platform-dom-compat.js', 'content.js']));
@@ -86,12 +84,20 @@ check('compat has ChatGPT exact anchor', compat.includes('markExactSendButton("#
 check('compat has ZAI exact anchor', compat.includes('markExactSendButton("#send-message-button")'));
 check('compat has no runtime messaging', !compat.includes('runtime.sendMessage'));
 check('compat has no click', !compat.includes('.click('));
+
 check('trusted worker accepts only bridge-owned GPT prompt', trusted.includes('bridge_job_target=GPT') && trusted.includes('transport=WEB_CHAT_INTERACTIVE_REMOTE'));
-check('trusted worker accepts empty initial composer', trusted.includes('beforeText !== "" && canonicalVisible(before.text) !== canonicalVisible(text)'));
-check('trusted worker canonicalizes ProseMirror readback', trusted.includes('canonicalVisible(state.text) === canonicalVisible(text)'));
-check('trusted worker still fails closed on readback mismatch', trusted.includes('chatgpt_cdp_prime_readback_mismatch'));
+check('trusted worker has one message type', trusted.includes('A2_CHATGPT_TRUSTED_SEND') && !trusted.includes('A2_CHATGPT_TRUSTED_PRIME') && !trusted.includes('A2_CHATGPT_TRUSTED_CLICK'));
+check('trusted worker uses CDP input', trusted.includes('"Input.insertText"'));
+check('trusted worker waits for enabled Send in same session', trusted.includes('waitForReadySend(tabId, text)'));
+check('trusted worker uses CDP mouse', trusted.includes('"Input.dispatchMouseEvent"'));
+check('trusted worker rejects ambiguous Send', trusted.includes('send_ambiguous'));
+check('trusted worker rejects obscured Send', trusted.includes('send_obscured') && trusted.includes('document.elementFromPoint(x, y)'));
+check('trusted worker canonicalizes ProseMirror readback', trusted.includes('canon(text) !== canon(expected)'));
 check('trusted worker detaches debugger', trusted.includes('chrome.debugger.detach'));
+check('trusted worker has no session lease', !trusted.includes('chrome.storage.session'));
 check('trusted worker never targets ZAI', !trusted.includes('chat.z.ai'));
+check('fast send ready budget', trusted.includes('const SEND_READY_TIMEOUT_MS = 3000;'));
+check('fast verification budget', source.includes('const SEND_VERIFY_TIMEOUT_MS = 6000;'));
 
 let passed = 0;
 for (const [name, ok] of checks) {
