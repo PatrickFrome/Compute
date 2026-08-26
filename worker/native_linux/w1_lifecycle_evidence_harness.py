@@ -6,12 +6,12 @@ It NEVER starts, stops, or reboots a provider and NEVER admits a worker. Its two
 
 1. ``capture`` records fixed Linux/kernel facts plus a persistent sentinel hash.
 2. ``compose-codespaces`` combines PRE/POST captures, raw GitHub Codespaces
-   snapshots, an externally recorded lifecycle action window, and post-resume
-   H1-H13 prerequisite evidence through the existing fail-closed W1 oracles.
+   snapshots, an externally recorded lifecycle action window, a structurally
+   valid S2 runtime PASS receipt, and post-resume H1-H13 prerequisite evidence.
 
-Every output remains non-authority until authenticated provider provenance,
-live S2/outer-cgroup canaries, persisted Supabase readback, and supervisor
-verification are completed under a fresh aligned W1 claim/directive.
+Every output remains non-authority until authenticated provider/S2 provenance,
+outer-cgroup evidence, persisted Supabase readback, and supervisor verification
+are completed under a fresh aligned W1 claim/directive.
 """
 from __future__ import annotations
 
@@ -29,11 +29,13 @@ from typing import Any
 
 from controller.w1 import github_codespaces_snapshot_guard
 from controller.w1 import provider_neutral_lifecycle_guard
+from controller.w1 import s2_runtime_canary_receipt
 from worker.native_linux import h1_h13_prereq_probe
 
 CAPTURE_SCHEMA = "metaengine.compute.w1-lifecycle-local-capture.h205f22.v1"
 ACTION_SCHEMA = "metaengine.compute.w1-lifecycle-action-window.h205f22.v1"
 COMPOSE_SCHEMA = "metaengine.compute.w1-lifecycle-evidence-harness.h205f22.v1"
+EXPECTED_S2_SOURCE_SHA256 = "f262cd5468b5eb51754cf397cdb1879c2e90d0670b74f479d3b28af8cd20f521"
 SENTINEL_BYTES = 32
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -268,11 +270,17 @@ def compose_codespaces(
     post_provider: dict[str, Any],
     action: dict[str, Any],
     h1_post: dict[str, Any],
+    s2_runtime: dict[str, Any],
 ) -> dict[str, Any]:
     pre = validate_capture(pre_local, expected_phase="PRE")
     post = validate_capture(post_local, expected_phase="POST")
     action_obj = validate_action(action)
     h1 = validate_h1(h1_post)
+    s2 = s2_runtime_canary_receipt.validate(
+        s2_runtime,
+        require_pass=True,
+        expected_source_sha256=EXPECTED_S2_SOURCE_SHA256,
+    )
     if pre["source"] != post["source"]:
         raise ValueError("PRE/POST source identity changed")
 
@@ -339,6 +347,7 @@ def compose_codespaces(
         "machine_identity_stable": pre["machine_id_sha256"] == post["machine_id_sha256"],
         "kernel_boot_id_changed": pre["boot_id"] != post["boot_id"],
         "persistent_sentinel_stable": pre["sentinel_sha256"] == post["sentinel_sha256"],
+        "s2_runtime_receipt_pass": s2["status"] == "PASS_NONAUTHORITY",
         "post_h1_h13_prerequisites_pass": h1["ready_for_production_evidence"] is True,
     }
     failures = sorted(key for key, passed in local_checks.items() if not passed)
@@ -347,6 +356,7 @@ def compose_codespaces(
 
     evidence = {
         "source": pre["source"],
+        "s2_runtime": s2,
         "provider": codespaces,
         "lifecycle": lifecycle,
         "local_checks": local_checks,
@@ -370,7 +380,7 @@ def compose_codespaces(
         "authority_effect": False,
         "next_required": [
             "authenticated_provider_provenance",
-            "live_s2_runtime_canaries",
+            "authenticated_s2_runtime_receipt_provenance",
             "prebound_outer_cgroup_witness",
             "persisted_supabase_readback",
             "supervisor_verification",
@@ -402,7 +412,7 @@ def main() -> int:
     cap.add_argument("--output", type=Path)
 
     comp = sub.add_parser("compose-codespaces")
-    for name in ("pre-local", "post-local", "pre-provider", "stopped-provider", "post-provider", "action", "h1-post"):
+    for name in ("pre-local", "post-local", "pre-provider", "stopped-provider", "post-provider", "action", "h1-post", "s2-runtime"):
         comp.add_argument(f"--{name}", type=Path, required=True)
     comp.add_argument("--output", type=Path)
     ns = parser.parse_args()
@@ -425,6 +435,7 @@ def main() -> int:
         post_provider=_load(ns.post_provider),
         action=_load(ns.action),
         h1_post=_load(ns.h1_post),
+        s2_runtime=_load(ns.s2_runtime),
     )
     _dump(result, ns.output)
     return 0
