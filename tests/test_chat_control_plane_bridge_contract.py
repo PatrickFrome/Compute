@@ -29,7 +29,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
 
     def test_manifest_and_worker_entrypoints(self):
         self.assertEqual(self.manifest["manifest_version"], 3)
-        self.assertEqual(self.manifest["version"], "0.5.7")
+        self.assertEqual(self.manifest["version"], "0.5.8")
         self.assertEqual(self.manifest["background"]["service_worker"], "background-entry.js")
         self.assertIn("debugger", self.manifest["permissions"])
         self.assertEqual(self.manifest["content_scripts"][0]["js"], ["platform-dom-compat.js", "content.js"])
@@ -69,7 +69,9 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("await writeComposerExact(text);", glm_block)
         self.assertIn("sendButton.click();", glm_block)
 
-    def test_chatgpt_trusted_prime_accepts_empty_composer_and_verifies_readback(self):
+    def test_chatgpt_trusted_prime_accepts_full_bridge_prompt_and_verifies_readback(self):
+        self.assertIn("const MAX_PROMPT_CHARS = 120000;", self.trusted)
+        self.assertNotIn("const MAX_PROMPT_CHARS = 42000;", self.trusted)
         self.assertIn('"A2_CHATGPT_TRUSTED_PRIME"', self.trusted)
         self.assertIn('"A2_CHATGPT_TRUSTED_CLICK"', self.trusted)
         self.assertIn('beforeText !== "" && beforeText !== normalize(text)', self.trusted)
