@@ -51,12 +51,18 @@ def canonical_hash(value: Any) -> str:
 
 def source_sha256(root: Path) -> str:
     source = root / SOURCE_PATH
-    if not source.is_file():
+    if source.is_symlink() or not source.is_file():
         raise RuntimeError(f"S2 source missing: {SOURCE_PATH}")
+    try:
+        source.resolve(strict=True).relative_to(root)
+    except ValueError as exc:
+        raise RuntimeError(f"S2 source escapes audit root: {SOURCE_PATH}") from exc
     return hashlib.sha256(source.read_bytes()).hexdigest()
 
 
 def _read_text(path: Path) -> str | None:
+    if path.is_symlink():
+        return None
     try:
         raw = path.read_bytes()
     except OSError:
@@ -71,7 +77,7 @@ def _read_text(path: Path) -> str | None:
 
 def _repo_text_files(root: Path):
     for path in root.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in TEXT_SUFFIXES:
+        if path.is_symlink() or not path.is_file() or path.suffix.lower() not in TEXT_SUFFIXES:
             continue
         rel = path.relative_to(root)
         if any(part in IGNORED_PARTS for part in rel.parts):

@@ -33,10 +33,36 @@ jobs:
           set -euo pipefail
           python3 -m py_compile \
             controller/w1/build_w1_prep_attestation_manifest.py \
+            controller/w1/s2_source_identity_audit.py \
             controller/w1/w1_attestation_verification_receipt.py
           python3 -m unittest \
             tests.test_w1_prep_attestation_manifest \
+            tests.test_w1_s2_source_identity_audit \
             tests.test_w1_attestation_verification_receipt -v
+
+      - name: Enforce exact launcher source-identity bindings
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python3 controller/w1/s2_source_identity_audit.py \
+            --root . \
+            --output out/w1-s2-source-identity-audit.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          result = json.loads(Path('out/w1-s2-source-identity-audit.json').read_text())
+          assert result['outcome'] == 'PASS_EXACT_SOURCE_IDENTITY_AUDIT_NONAUTHORITY'
+          assert all(result['evidence']['checks'].values())
+          assert result['evidence']['undeclared_binding_consumers'] == []
+          assert result['runtime_isolation_verified'] is False
+          assert result['worker_admitted'] is False
+          assert result['w1_verified'] is False
+          assert result['authority_effect'] is False
+          print('W1 S2 source identity: EXACT_BINDINGS_PASS')
+          print('source_sha256=' + result['evidence']['source_sha256'])
+          print('evidence_sha256=' + result['evidence_sha256'])
+          PY
 
       - name: Build exact W1 prep manifest
         id: manifest
@@ -174,6 +200,7 @@ jobs:
             out/w1-prep-attestation-manifest.sha256
             out/w1-prep-attestation-verification.json
             out/w1-prep-attestation-receipt.json
+            out/w1-s2-source-identity-audit.json
             out/offline/*.jsonl
             out/offline/*.json
             out/offline/offline-inputs.sha256

@@ -55,6 +55,38 @@ class S2SourceIdentityAuditTests(unittest.TestCase):
         self.assertEqual(result["outcome"], "FAIL_SOURCE_IDENTITY_DRIFT")
         self.assertFalse(result["evidence"]["declared_bindings"][rel]["ok"])
 
+    def test_symlinked_declared_binding_fails(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._tree(root)
+            rel = next(iter(audit.DECLARED_BINDINGS))
+            path = root / rel
+            target = root / "outside-binding.txt"
+            target.write_bytes(path.read_bytes())
+            path.unlink()
+            try:
+                path.symlink_to(target)
+            except OSError:
+                self.skipTest("symlink unsupported")
+            result = audit.evaluate(root)
+        self.assertEqual(result["outcome"], "FAIL_SOURCE_IDENTITY_DRIFT")
+        self.assertFalse(result["evidence"]["declared_bindings"][rel]["ok"])
+
+    def test_symlinked_source_fails_closed(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._tree(root)
+            source = root / audit.SOURCE_PATH
+            target = root / "outside-launcher.py"
+            target.write_bytes(source.read_bytes())
+            source.unlink()
+            try:
+                source.symlink_to(target)
+            except OSError:
+                self.skipTest("symlink unsupported")
+            with self.assertRaisesRegex(RuntimeError, "S2 source missing"):
+                audit.evaluate(root)
+
     def test_duplicate_declared_binding_fails(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

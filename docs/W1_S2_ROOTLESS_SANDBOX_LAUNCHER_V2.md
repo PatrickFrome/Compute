@@ -9,6 +9,12 @@ This document binds the reviewable S2 launcher composition required before any p
 - Expected exact SHA-256: `25586bd8e0e97a78988f93d9c68c358b7eea6924015d06721afc135412d386df`
 - Status: PREP / non-authority. This source does **not** admit a worker or prove W1.
 
+`controller/w1/s2_source_identity_audit.py` is the fail-closed binding gate.
+It recomputes these launcher bytes, requires the closed inventory of eight
+consumers and nine bindings to agree, and rejects a newly discovered binding
+until its fan-out is explicitly reviewed. The focused source-identity workflow
+and the prep-attestation workflow both execute the same audit.
+
 The initial reviewable v2 (`231afd6a...`) was deliberately rejected for provider execution after exact-source review found that arbitrary writable/sensitive host binds, `workspace=/`, broad `/etc`/`/opt` binds, and a pre-`setsid` signal-forwarding race could weaken isolation. The first hardened source closed those findings. Runtime-canary execution then found a separate direct-file packaging defect: `python3 worker/native_linux/rootless_sandbox_launcher_v2.py` could not resolve the package import from script mode. Commit `bb2aaaf...` adds a narrow repository-root bootstrap only when the missing module is exactly `worker`; the source remains fail-closed for all other import failures.
 
 ## Composition contract
