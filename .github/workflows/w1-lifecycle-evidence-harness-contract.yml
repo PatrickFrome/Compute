@@ -51,6 +51,7 @@ jobs:
               '/start', '/stop', 'requests.post(', 'requests.patch(', 'urllib.request.urlopen(',
               'gh codespace', 'w1_verified = True', 'worker_admitted = True',
               'authority_effect = True', 'persistent_worker_proof = True',
+              'mkdir(parents=True', '_sha256_file(', 'Path.open(',
           )
           for token in forbidden:
               assert token not in text, token
@@ -59,6 +60,9 @@ jobs:
               'provider_neutral_lifecycle_guard.evaluate',
               's2_runtime_canary_receipt.validate',
               'require_pass=True', 'EXPECTED_S2_SOURCE_SHA256',
+              '_openat2(', '_RESOLVE_BENEATH', '_RESOLVE_NO_SYMLINKS',
+              '_RESOLVE_NO_MAGICLINKS', 'os.fstat(', 'os.fsync(parent_fd)',
+              'st.st_nlink != 1', 'st.st_uid != os.geteuid()',
               'kernel_boot_id_changed', 'persistent_sentinel_stable',
               'machine_identity_stable', 's2_runtime_receipt_pass',
               'persisted_readback_verified', 'prebound_outer_cgroup_witness',
