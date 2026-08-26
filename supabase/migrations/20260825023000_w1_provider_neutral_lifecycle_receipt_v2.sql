@@ -3,6 +3,54 @@
 -- This contract stores raw provider lifecycle evidence but cannot verify a worker,
 -- admit a worker, or assert persistence by itself.
 
+-- Identity canonical JSON intentionally forbids numbers. Provider API evidence,
+-- however, contains legitimate integer identifiers (for example Codespaces.id).
+-- Keep identity semantics untouched and use a separate evidence canonicalizer that
+-- accepts only integral JSON numbers, rejecting decimals/exponents to avoid
+-- cross-runtime numeric ambiguity.
+create or replace function destruktion_meta.compute_fabric_canonical_evidence_json_h205f22(p_value jsonb)
+returns text
+language plpgsql
+immutable
+set search_path = pg_catalog, destruktion_meta
+as $$
+declare
+  v_type text;
+  v_number text;
+  v_result text;
+begin
+  v_type := jsonb_typeof(p_value);
+  if v_type is null or v_type = 'null' then return 'null'; end if;
+  if v_type = 'string' then return to_jsonb(p_value #>> '{}')::text; end if;
+  if v_type = 'boolean' then return p_value::text; end if;
+  if v_type = 'number' then
+    v_number := p_value::text;
+    if v_number !~ '^-?(0|[1-9][0-9]*)$' then
+      raise exception 'non-integral numbers are forbidden in canonical evidence JSON; encode decimals as strings';
+    end if;
+    return v_number;
+  end if;
+  if v_type = 'array' then
+    select '[' || coalesce(string_agg(destruktion_meta.compute_fabric_canonical_evidence_json_h205f22(value), ',' order by ordinality), '') || ']'
+      into v_result
+      from jsonb_array_elements(p_value) with ordinality;
+    return v_result;
+  end if;
+  if v_type = 'object' then
+    if exists (select 1 from jsonb_object_keys(p_value) k where k !~ '^[ -~]+$') then
+      raise exception 'canonical evidence object keys must be printable ASCII';
+    end if;
+    select '{' || coalesce(string_agg(to_jsonb(key)::text || ':' || destruktion_meta.compute_fabric_canonical_evidence_json_h205f22(value), ',' order by key collate "C"), '') || '}'
+      into v_result
+      from jsonb_each(p_value);
+    return v_result;
+  end if;
+  raise exception 'unsupported JSON type: %', v_type;
+end
+$$;
+
+revoke all on function destruktion_meta.compute_fabric_canonical_evidence_json_h205f22(jsonb) from public, anon, authenticated;
+
 create table destruktion_meta.compute_fabric_worker_lifecycle_receipt_v2_h205f22 (
   lifecycle_receipt_id uuid primary key default extensions.gen_random_uuid(),
   worker_id text not null references destruktion_meta.compute_fabric_worker_enrollment_h205f22(worker_id) on update cascade on delete restrict,
@@ -112,9 +160,9 @@ begin
     end if;
   end if;
 
-  v_pre_sha := encode(extensions.digest(convert_to(destruktion_meta.compute_fabric_canonical_json_h205f22(p_pre_provider_snapshot),'UTF8'),'sha256'),'hex');
-  v_post_sha := encode(extensions.digest(convert_to(destruktion_meta.compute_fabric_canonical_json_h205f22(p_post_provider_snapshot),'UTF8'),'sha256'),'hex');
-  v_evidence_sha := encode(extensions.digest(convert_to(destruktion_meta.compute_fabric_canonical_json_h205f22(jsonb_build_object(
+  v_pre_sha := encode(extensions.digest(convert_to(destruktion_meta.compute_fabric_canonical_evidence_json_h205f22(p_pre_provider_snapshot),'UTF8'),'sha256'),'hex');
+  v_post_sha := encode(extensions.digest(convert_to(destruktion_meta.compute_fabric_canonical_evidence_json_h205f22(p_post_provider_snapshot),'UTF8'),'sha256'),'hex');
+  v_evidence_sha := encode(extensions.digest(convert_to(destruktion_meta.compute_fabric_canonical_evidence_json_h205f22(jsonb_build_object(
     'worker_id',p_worker_id,
     'provider_kind',p_provider_kind,
     'provider_object_id',p_provider_object_id,
