@@ -5,6 +5,7 @@
   const MAX_AX_NODES = 1600;
   const MAX_DOM_NODES = 2400;
   const MAX_NODE_TEXT = 1800;
+  const DEFAULT_FRAME_MAX_AGE_MS = 30000;
   const cache = new Map();
 
   const normalize = (value) => String(value ?? "").replace(/\r\n?/g, "\n").trim();
@@ -12,6 +13,15 @@
     const text = String(value ?? "");
     return text.length <= max ? text : `${text.slice(0, max)}\n…[truncated ${text.length - max} chars]`;
   };
+  function compat(path, fallback) {
+    try { return globalThis.A2_COMPAT_GET?.(path, fallback) ?? fallback; }
+    catch (_) { return fallback; }
+  }
+  function screenshotAllowed() { return compat("features.screenshot_sensor_enabled", true) === true; }
+  function frameMaxAgeMs() {
+    const value = Number(compat("timeouts.frame_max_age_ms", DEFAULT_FRAME_MAX_AGE_MS));
+    return Number.isInteger(value) && value >= 5000 && value <= 120000 ? value : DEFAULT_FRAME_MAX_AGE_MS;
+  }
 
   function trustedOperatorSender(sender) {
     const expected = chrome.runtime.getURL("sidepanel.html");
@@ -142,7 +152,7 @@
     const bodyLimit = Math.max(0, Math.min(40000, Number(options.body_limit) || 12000));
     const axLimit = Math.max(0, Math.min(240, Number(options.ax_limit) || 60));
     const domLimit = Math.max(0, Math.min(360, Number(options.dom_limit) || 80));
-    const includeScreenshot = options.include_screenshot !== false;
+    const includeScreenshot = options.include_screenshot !== false && perception.screenshot?.available === true;
     return {
       schema: "metaengine.a2-browser-operator.perception-preview.v2",
       platform: perception.platform,
@@ -150,7 +160,7 @@
       url: perception.url,
       captured_at: perception.captured_at,
       frame_token: perception.frame_token,
-      frame_max_age_ms: 30000,
+      frame_max_age_ms: perception.frame_max_age_ms,
       tainted_page_data: true,
       authority_effect: false,
       page: {
@@ -175,7 +185,7 @@
       },
       layout: perception.layout,
       hashes: perception.hashes,
-      screenshot: includeScreenshot ? perception.screenshot : { mime: perception.screenshot.mime, bytes: perception.screenshot.bytes, omitted: true }
+      screenshot: includeScreenshot ? perception.screenshot : { mime: "image/jpeg", bytes: perception.screenshot?.bytes || 0, omitted: true, available: perception.screenshot?.available === true }
     };
   }
 
@@ -183,10 +193,11 @@
     await chrome.storage.session.set({
       [`a2OperatorPerceptionMeta:${result.platform}`]: {
         schema: result.schema, platform: result.platform, tab_id: result.tab_id, url: result.url,
-        captured_at: result.captured_at, frame_token: result.frame_token,
+        captured_at: result.captured_at, frame_token: result.frame_token, frame_max_age_ms: result.frame_max_age_ms,
         body_text_length: result.page?.body_text_length || 0,
         body_text_truncated: result.page?.body_text_truncated === true, ax_node_count: result.accessibility.length,
         dom_visible_record_count: result.dom_snapshot.visible_record_count, screenshot_bytes: result.screenshot.bytes,
+        screenshot_available: result.screenshot.available === true,
         body_text_sha256: result.hashes.body_text_sha256, screenshot_sha256: result.hashes.screenshot_sha256,
         authority_effect: false
       }
@@ -197,34 +208,41 @@
     const tab = await resolvePinned(platform);
     if (typeof globalThis.A2_DEBUGGER_RUN !== "function") throw new Error("perception_debugger_broker_unavailable");
     return globalThis.A2_DEBUGGER_RUN(tab.id, `perception:${platform}`, async (session) => {
+      const withScreenshot = screenshotAllowed();
       await Promise.all([session.send("Runtime.enable"), session.send("Page.enable"), session.send("Accessibility.enable")]);
-      const [readback, axRaw, domRaw, layout, screenshot] = await Promise.all([
+      const jobs = [
         pageReadback(session),
         session.send("Accessibility.getFullAXTree", { depth: 40 }),
         session.send("DOMSnapshot.captureSnapshot", { computedStyles: [], includePaintOrder: true, includeDOMRects: true }),
-        session.send("Page.getLayoutMetrics"),
-        session.send("Page.captureScreenshot", { format: "jpeg", quality: 72, fromSurface: true, captureBeyondViewport: false, optimizeForSpeed: true })
-      ]);
-      const screenshotBase64 = String(screenshot?.data || "");
+        session.send("Page.getLayoutMetrics")
+      ];
+      if (withScreenshot) jobs.push(session.send("Page.captureScreenshot", { format: "jpeg", quality: 72, fromSurface: true, captureBeyondViewport: false, optimizeForSpeed: true }));
+      const results = await Promise.all(jobs);
+      const [readback, axRaw, domRaw, layout] = results;
+      const screenshot = withScreenshot ? results[4] : null;
+      const screenshotBase64 = withScreenshot ? String(screenshot?.data || "") : "";
       const binary = screenshotBase64 ? Uint8Array.from(atob(screenshotBase64), (c) => c.charCodeAt(0)) : new Uint8Array();
       const bodyText = String(readback?.body_text || "");
       const capturedAt = new Date().toISOString();
       const bodyHash = await sha256Text(bodyText);
-      const screenshotHash = await sha256Bytes(binary);
-      const frameMaterial = JSON.stringify({
+      const screenshotHash = withScreenshot ? await sha256Bytes(binary) : null;
+      const maxAge = frameMaxAgeMs();
+      const frameMaterial = withScreenshot ? JSON.stringify({
         schema: "metaengine.a2-browser-operator.frame.v1", platform, tab_id: tab.id,
         url: normUrl(tab.url || ""), captured_at: capturedAt,
         body_text_sha256: bodyHash, screenshot_sha256: screenshotHash,
         scroll: readback?.scroll || null, viewport: readback?.viewport || null
-      });
+      }) : null;
       const result = {
         schema: "metaengine.a2-browser-operator.perception.v2", platform, tab_id: tab.id,
-        url: normUrl(tab.url || ""), captured_at: capturedAt, frame_token: await sha256Text(frameMaterial),
+        url: normUrl(tab.url || ""), captured_at: capturedAt,
+        frame_token: frameMaterial ? await sha256Text(frameMaterial) : null,
+        frame_max_age_ms: maxAge,
         tainted_page_data: true, authority_effect: false,
         page: readback, accessibility: compactAx(axRaw), dom_snapshot: compactDom(domRaw),
         layout: { css_layout_viewport: layout?.cssLayoutViewport || null, css_visual_viewport: layout?.cssVisualViewport || null, content_size: layout?.contentSize || null },
         hashes: { body_text_sha256: bodyHash, screenshot_sha256: screenshotHash },
-        screenshot: { mime: "image/jpeg", base64: screenshotBase64, bytes: binary.byteLength }
+        screenshot: { mime: "image/jpeg", base64: screenshotBase64, bytes: binary.byteLength, available: withScreenshot && Boolean(screenshotBase64) }
       };
       cache.set(platform, result);
       await persistMeta(result);
