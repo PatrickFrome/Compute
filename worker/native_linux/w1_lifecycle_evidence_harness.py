@@ -16,6 +16,8 @@ are completed under a fresh aligned W1 claim/directive.
 from __future__ import annotations
 
 import argparse
+import ctypes
+import errno
 import hashlib
 import json
 import os
@@ -23,6 +25,7 @@ from pathlib import Path
 import platform
 import re
 import secrets
+import stat
 import sys
 from datetime import datetime, timezone
 from typing import Any
@@ -40,6 +43,27 @@ SENTINEL_BYTES = 32
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 BOOT_RE = provider_neutral_lifecycle_guard.BOOT_RE
+
+_OPENAT2_NR = {
+    "x86_64": 437,
+    "amd64": 437,
+    "aarch64": 437,
+    "arm64": 437,
+    "riscv64": 437,
+}
+_RESOLVE_NO_MAGICLINKS = 0x02
+_RESOLVE_NO_SYMLINKS = 0x04
+_RESOLVE_BENEATH = 0x08
+_SENTINEL_RESOLVE = _RESOLVE_BENEATH | _RESOLVE_NO_MAGICLINKS | _RESOLVE_NO_SYMLINKS
+
+
+class _OpenHow(ctypes.Structure):
+    _fields_ = [
+        ("flags", ctypes.c_uint64),
+        ("mode", ctypes.c_uint64),
+        ("resolve", ctypes.c_uint64),
+    ]
+
 
 CAPTURE_KEYS = {
     "schema", "phase", "captured_at", "source", "linux", "uname",
@@ -59,14 +83,14 @@ def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _sha256_file(path: Path) -> str:
+def _hash_fd(fd: int) -> str:
+    os.lseek(fd, 0, os.SEEK_SET)
     h = hashlib.sha256()
-    with path.open("rb") as fh:
-        while True:
-            chunk = fh.read(1024 * 1024)
-            if not chunk:
-                break
-            h.update(chunk)
+    while True:
+        chunk = os.read(fd, 1024 * 1024)
+        if not chunk:
+            break
+        h.update(chunk)
     return h.hexdigest()
 
 
@@ -138,36 +162,116 @@ def _namespace_inodes() -> dict[str, int]:
     return result
 
 
-def ensure_persistent_sentinel(path: Path, *, initialize: bool) -> str:
-    raw_path = Path(path)
-    try:
-        if raw_path.is_symlink():
-            raise RuntimeError("persistent sentinel must be an existing regular non-symlink file")
-    except OSError as exc:
-        raise RuntimeError(f"unable to inspect persistent sentinel: {exc}") from exc
+def _openat2(dirfd: int, path: str, *, flags: int, mode: int = 0, resolve: int = _SENTINEL_RESOLVE) -> int:
+    nr = _OPENAT2_NR.get(os.uname().machine.lower())
+    if nr is None:
+        raise RuntimeError(f"openat2 unsupported architecture: {os.uname().machine}")
+    libc = ctypes.CDLL(None, use_errno=True)
+    how = _OpenHow(flags=flags, mode=mode, resolve=resolve)
+    fd = libc.syscall(
+        ctypes.c_long(nr),
+        ctypes.c_int(dirfd),
+        ctypes.c_char_p(path.encode("utf-8")),
+        ctypes.byref(how),
+        ctypes.sizeof(how),
+    )
+    if fd < 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err), path)
+    return int(fd)
 
-    if initialize:
-        raw_path.parent.mkdir(parents=True, exist_ok=True)
-        if not raw_path.exists():
-            fd = os.open(raw_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
-            try:
-                os.write(fd, secrets.token_bytes(SENTINEL_BYTES))
-                os.fsync(fd)
-            finally:
-                os.close(fd)
 
-    try:
-        if raw_path.is_symlink() or not raw_path.is_file():
-            raise RuntimeError("persistent sentinel must be an existing regular non-symlink file")
-        resolved = raw_path.resolve(strict=True)
-    except OSError as exc:
-        raise RuntimeError(f"unable to resolve persistent sentinel: {exc}") from exc
+def _sentinel_relative_parts(path: Path) -> tuple[str, str]:
+    raw = Path(path)
+    if not raw.is_absolute():
+        raise RuntimeError("persistent sentinel path must be absolute")
+    if ".." in raw.parts:
+        raise RuntimeError("persistent sentinel path may not contain '..'")
+    if raw == Path("/") or not raw.name:
+        raise RuntimeError("persistent sentinel path must name a file below /")
+    parent_rel = str(raw.parent).lstrip("/") or "."
+    return parent_rel, raw.name
 
-    if resolved != raw_path.absolute():
-        raise RuntimeError("persistent sentinel path must not traverse symlinks")
-    if resolved.stat().st_size < SENTINEL_BYTES:
+
+def _validate_sentinel_fd(fd: int) -> os.stat_result:
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode):
+        raise RuntimeError("persistent sentinel must be a regular file")
+    if st.st_uid != os.geteuid():
+        raise RuntimeError("persistent sentinel must be owned by the current user")
+    if st.st_nlink != 1:
+        raise RuntimeError("persistent sentinel must have exactly one hard link")
+    if st.st_mode & 0o022:
+        raise RuntimeError("persistent sentinel must not be group/world writable")
+    if st.st_size < SENTINEL_BYTES:
         raise RuntimeError("persistent sentinel is unexpectedly short")
-    return _sha256_file(resolved)
+    return st
+
+
+def ensure_persistent_sentinel(path: Path, *, initialize: bool) -> str:
+    """Open/create the sentinel without pathname fallback or symlink traversal.
+
+    The durable parent directory must already exist. Both the parent walk and the
+    final component are resolved by openat2 with BENEATH + NO_SYMLINKS +
+    NO_MAGICLINKS. Creation is exclusive; a concurrent creator is rejected.
+    Hashing is performed from the already-validated file descriptor.
+    """
+    if not sys.platform.startswith("linux"):
+        raise RuntimeError("Linux openat2 sentinel capture required")
+    parent_rel, name = _sentinel_relative_parts(Path(path))
+    root_fd = -1
+    parent_fd = -1
+    sentinel_fd = -1
+    created = False
+    try:
+        root_fd = os.open("/", os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0))
+        try:
+            parent_fd = _openat2(
+                root_fd,
+                parent_rel,
+                flags=os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
+            )
+        except OSError as exc:
+            raise RuntimeError(f"unable to open sentinel parent safely: {exc}") from exc
+
+        try:
+            sentinel_fd = _openat2(
+                parent_fd,
+                name,
+                flags=os.O_RDONLY | getattr(os, "O_CLOEXEC", 0),
+            )
+        except OSError as exc:
+            if exc.errno != errno.ENOENT or not initialize:
+                raise RuntimeError(f"unable to open persistent sentinel safely: {exc}") from exc
+            try:
+                sentinel_fd = _openat2(
+                    parent_fd,
+                    name,
+                    flags=(
+                        os.O_RDWR
+                        | os.O_CREAT
+                        | os.O_EXCL
+                        | getattr(os, "O_CLOEXEC", 0)
+                    ),
+                    mode=0o600,
+                )
+            except OSError as create_exc:
+                if create_exc.errno == errno.EEXIST:
+                    raise RuntimeError("persistent sentinel creation raced with another creator") from create_exc
+                raise RuntimeError(f"unable to create persistent sentinel safely: {create_exc}") from create_exc
+            os.write(sentinel_fd, secrets.token_bytes(SENTINEL_BYTES))
+            os.fsync(sentinel_fd)
+            os.fsync(parent_fd)
+            created = True
+
+        _validate_sentinel_fd(sentinel_fd)
+        if created:
+            os.lseek(sentinel_fd, 0, os.SEEK_SET)
+        return _hash_fd(sentinel_fd)
+    finally:
+        for fd in (sentinel_fd, parent_fd, root_fd):
+            if fd >= 0:
+                os.close(fd)
 
 
 def capture_local(*, phase: str, source: dict[str, str], sentinel: Path, initialize_sentinel: bool) -> dict[str, Any]:
