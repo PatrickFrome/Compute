@@ -10,6 +10,11 @@
   const ORDERING_POLICY = "STRICT_GLM_FIRST_ACTUATED_V1";
 
   const normalize = (value) => String(value ?? "").replace(/\r\n?/g, "\n").trim();
+  function compat(path, fallback) {
+    try { return globalThis.A2_COMPAT_GET?.(path, fallback) ?? fallback; }
+    catch (_) { return fallback; }
+  }
+  function promptGateAllowed() { return compat("features.prompt_gate_enabled", true) === true; }
 
   function normUrl(value) {
     try {
@@ -49,7 +54,8 @@
 
   async function getMode() {
     const stored = await chrome.storage.local.get(MODE_KEY);
-    return MODES.has(String(stored[MODE_KEY] || "")) ? String(stored[MODE_KEY]) : "OBSERVE";
+    const mode = MODES.has(String(stored[MODE_KEY] || "")) ? String(stored[MODE_KEY]) : "OBSERVE";
+    return mode === "GATE_SEND" && !promptGateAllowed() ? "OBSERVE" : mode;
   }
 
   async function heldIntent() {
@@ -75,6 +81,7 @@
   async function setMode(mode) {
     const next = MODES.has(String(mode || "")) ? String(mode) : null;
     if (!next) throw new Error("operator_mode_invalid");
+    if (next === "GATE_SEND" && !promptGateAllowed()) throw new Error("compat_feature_prompt_gate_disabled");
     if (next === "OBSERVE") {
       const intent = await heldIntent();
       if (intent?.tab_id) {
@@ -173,7 +180,9 @@
       chrome.storage.local.get([
         MODE_KEY, "armed", "daemonOnlineAt", "daemonLastError", "operatorSensorLastError",
         "lastOrderingPolicy", "snapshot:CHATGPT", "snapshot:GLM_ZAI",
-        "a2BridgePendingCommandV0523", "a2BridgeGlmActuatedPredecessorV0523"
+        "a2BridgePendingCommandV0523", "a2BridgeGlmActuatedPredecessorV0523",
+        "a2OperatorUpdateStateV060", "a2OperatorCompatStatusV1",
+        "operatorDebuggerLastDetach", "operatorDebuggerLastDetachAt"
       ]),
       heldIntent()
     ]);
@@ -181,7 +190,11 @@
       operator_runtime: globalThis.A2_OPERATOR_RUNTIME || "0.6.0-dev",
       extension_version: chrome.runtime.getManifest().version,
       armed: local.armed === true,
-      operator_mode: MODES.has(String(local[MODE_KEY] || "")) ? local[MODE_KEY] : "OBSERVE",
+      operator_mode: await getMode(),
+      prompt_gate_allowed: promptGateAllowed(),
+      operator_actions_allowed: compat("kill_switches.operator_actions_disabled", false) !== true,
+      point_click_allowed: compat("features.point_click_enabled", true) === true && compat("features.screenshot_sensor_enabled", true) === true,
+      screenshot_sensor_allowed: compat("features.screenshot_sensor_enabled", true) === true,
       ordering_policy: local.lastOrderingPolicy || ORDERING_POLICY,
       glm_predecessor_command_id: local.a2BridgeGlmActuatedPredecessorV0523 || null,
       pending_command: local.a2BridgePendingCommandV0523 || null,
@@ -192,7 +205,12 @@
       daemon_online_at: local.daemonOnlineAt || null,
       daemon_error: local.daemonLastError || null,
       sensor_error: local.operatorSensorLastError || null,
-      prompt_intent: sessionIntent || null
+      prompt_intent: sessionIntent || null,
+      update: local.a2OperatorUpdateStateV060 || null,
+      compatibility: local.a2OperatorCompatStatusV1 || { status: "UNPROVISIONED" },
+      debugger_broker: typeof globalThis.A2_DEBUGGER_STATUS === "function" ? globalThis.A2_DEBUGGER_STATUS() : [],
+      debugger_last_detach: local.operatorDebuggerLastDetach || null,
+      debugger_last_detach_at: local.operatorDebuggerLastDetachAt || null
     };
   }
 
