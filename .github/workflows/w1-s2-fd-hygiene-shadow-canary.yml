@@ -1,0 +1,58 @@
+name: W1 S2 FD Hygiene Shadow Canary
+
+on:
+  push:
+    branches: [work/w1-sandbox-launcher-prep]
+    paths:
+      - 'controller/w1/s2_fd_hygiene_shadow_canary.py'
+      - 'worker/native_linux/rootless_sandbox_launcher_v2.py'
+      - '.github/workflows/w1-s2-fd-hygiene-shadow-canary.yml'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  shadow-canary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile exact S2 and shadow canary
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            worker/native_linux/rootless_sandbox_launcher_v2.py \
+            controller/w1/s2_fd_hygiene_shadow_canary.py
+
+      - name: Measure inherited FD leakage and candidate closure
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python3 controller/w1/s2_fd_hygiene_shadow_canary.py --output out/w1-s2-fd-hygiene-shadow-canary.json
+          cat out/w1-s2-fd-hygiene-shadow-canary.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('out/w1-s2-fd-hygiene-shadow-canary.json').read_text())
+          assert r['outcome'] == 'ACCEPT_CANARY_CLOSE_RANGE_FD_HYGIENE'
+          assert r['evidence']['checks']['baseline_deliberate_inherited_fd_reaches_worker_exec'] is True
+          assert r['evidence']['checks']['close_range_unshare_blocks_deliberate_inherited_fd'] is True
+          assert r['runtime_isolation_verified'] is False
+          assert r['w1_verified'] is False
+          assert r['authority_effect'] is False
+          print('close_range FD hygiene candidate: ACCEPT_CANARY')
+          PY
+
+      - name: Upload non-authority canary receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: w1-s2-fd-hygiene-${{ github.run_id }}-${{ github.run_attempt }}
+          path: out/w1-s2-fd-hygiene-shadow-canary.json
+          if-no-files-found: error
+          retention-days: 14
