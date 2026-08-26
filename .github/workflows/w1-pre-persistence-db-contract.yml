@@ -5,8 +5,10 @@ on:
     branches: [work/w1-sandbox-launcher-prep]
     paths:
       - 'supabase/migrations/20260825023000_w1_provider_neutral_lifecycle_receipt_v2.sql'
+      - 'supabase/migrations/20260825023500_w1_lifecycle_stopped_snapshot_guard_v1.sql'
       - 'supabase/migrations/20260826060000_w1_pre_persistence_evidence_manifest_v1.sql'
       - 'supabase/migrations/20260826060500_w1_pre_persistence_source_binding_guard_v1.sql'
+      - 'supabase/migrations/20260826060600_w1_pre_persistence_stopped_snapshot_bridge_guard_v1.sql'
       - 'tests/test_w1_pre_persistence_db_contract.py'
       - '.github/workflows/w1-pre-persistence-db-contract.yml'
 
@@ -36,14 +38,19 @@ jobs:
           from pathlib import Path
           names = [
               '20260825023000_w1_provider_neutral_lifecycle_receipt_v2.sql',
+              '20260825023500_w1_lifecycle_stopped_snapshot_guard_v1.sql',
               '20260826060000_w1_pre_persistence_evidence_manifest_v1.sql',
               '20260826060500_w1_pre_persistence_source_binding_guard_v1.sql',
+              '20260826060600_w1_pre_persistence_stopped_snapshot_bridge_guard_v1.sql',
           ]
           assert names == sorted(names)
           root = Path('supabase/migrations')
           combined = '\n'.join((root / n).read_text() for n in names).lower()
           assert 'apply migration' not in combined
           assert 'provider mutation' not in combined
+          assert 'w1_lifecycle_receipt_v2_is_append_only' in combined
+          assert 'stopped_provider_snapshot_sha256' in combined
+          assert "{evidence,provider,evidence,stopped_snapshot_sha256}" in combined
           assert 'grant execute on function public.h205f22_w1_pre_persistence_manifest_ingest_v1(text,uuid,bigint,bigint,jsonb,jsonb,jsonb) to authenticated' not in combined
           assert 'grant execute on function public.h205f22_w1_pre_persistence_manifest_ingest_v1(text,uuid,bigint,bigint,jsonb,jsonb,jsonb) to anon' not in combined
           print('W1 pre-persistence DB migration chain: PASS')
