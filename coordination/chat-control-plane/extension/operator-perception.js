@@ -1,7 +1,6 @@
 (() => {
   "use strict";
 
-  const CDP_VERSION = "1.3";
   const MAX_BODY_TEXT = 500000;
   const MAX_AX_NODES = 1600;
   const MAX_DOM_NODES = 2400;
@@ -53,15 +52,6 @@
     if (matches.length !== 1) throw new Error(matches.length ? `perception_duplicate_target_tabs:${platform}:${matches.length}` : `perception_target_tab_not_found:${platform}`);
     return matches[0];
   }
-
-  async function send(tabId, method, params = {}) { return chrome.debugger.sendCommand({ tabId }, method, params); }
-  async function attachExclusive(tabId) {
-    const targets = await chrome.debugger.getTargets();
-    const target = targets.find((item) => Number(item?.tabId) === Number(tabId));
-    if (target?.attached) throw new Error("perception_debugger_target_busy");
-    await chrome.debugger.attach({ tabId }, CDP_VERSION);
-  }
-  async function detach(tabId) { await chrome.debugger.detach({ tabId }).catch(() => {}); }
 
   function axValue(value) {
     if (value == null) return null;
@@ -124,7 +114,7 @@
     return { document_count: documents.length, string_count: strings.length, visible_records: records, visible_record_count: records.length, truncated: records.length >= MAX_DOM_NODES };
   }
 
-  async function pageReadback(tabId) {
+  async function pageReadback(session) {
     const expression = `(() => {
       const active = document.activeElement;
       const rect = active instanceof Element ? active.getBoundingClientRect() : null;
@@ -143,7 +133,7 @@
         } : null
       };
     })()`;
-    const result = await send(tabId, "Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
+    const result = await session.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
     if (result?.exceptionDetails) throw new Error("perception_runtime_readback_failed");
     return result?.result?.value || null;
   }
@@ -154,11 +144,13 @@
     const domLimit = Math.max(0, Math.min(360, Number(options.dom_limit) || 80));
     const includeScreenshot = options.include_screenshot !== false;
     return {
-      schema: "metaengine.a2-browser-operator.perception-preview.v1",
+      schema: "metaengine.a2-browser-operator.perception-preview.v2",
       platform: perception.platform,
       tab_id: perception.tab_id,
       url: perception.url,
       captured_at: perception.captured_at,
+      frame_token: perception.frame_token,
+      frame_max_age_ms: 30000,
       tainted_page_data: true,
       authority_effect: false,
       page: {
@@ -191,7 +183,8 @@
     await chrome.storage.session.set({
       [`a2OperatorPerceptionMeta:${result.platform}`]: {
         schema: result.schema, platform: result.platform, tab_id: result.tab_id, url: result.url,
-        captured_at: result.captured_at, body_text_length: result.page?.body_text_length || 0,
+        captured_at: result.captured_at, frame_token: result.frame_token,
+        body_text_length: result.page?.body_text_length || 0,
         body_text_truncated: result.page?.body_text_truncated === true, ax_node_count: result.accessibility.length,
         dom_visible_record_count: result.dom_snapshot.visible_record_count, screenshot_bytes: result.screenshot.bytes,
         body_text_sha256: result.hashes.body_text_sha256, screenshot_sha256: result.hashes.screenshot_sha256,
@@ -202,35 +195,41 @@
 
   async function capture(platform) {
     const tab = await resolvePinned(platform);
-    let attached = false;
-    try {
-      await attachExclusive(tab.id);
-      attached = true;
-      await Promise.all([send(tab.id, "Runtime.enable"), send(tab.id, "Page.enable"), send(tab.id, "Accessibility.enable")]);
+    if (typeof globalThis.A2_DEBUGGER_RUN !== "function") throw new Error("perception_debugger_broker_unavailable");
+    return globalThis.A2_DEBUGGER_RUN(tab.id, `perception:${platform}`, async (session) => {
+      await Promise.all([session.send("Runtime.enable"), session.send("Page.enable"), session.send("Accessibility.enable")]);
       const [readback, axRaw, domRaw, layout, screenshot] = await Promise.all([
-        pageReadback(tab.id),
-        send(tab.id, "Accessibility.getFullAXTree", { depth: 40 }),
-        send(tab.id, "DOMSnapshot.captureSnapshot", { computedStyles: [], includePaintOrder: true, includeDOMRects: true }),
-        send(tab.id, "Page.getLayoutMetrics"),
-        send(tab.id, "Page.captureScreenshot", { format: "jpeg", quality: 72, fromSurface: true, captureBeyondViewport: false, optimizeForSpeed: true })
+        pageReadback(session),
+        session.send("Accessibility.getFullAXTree", { depth: 40 }),
+        session.send("DOMSnapshot.captureSnapshot", { computedStyles: [], includePaintOrder: true, includeDOMRects: true }),
+        session.send("Page.getLayoutMetrics"),
+        session.send("Page.captureScreenshot", { format: "jpeg", quality: 72, fromSurface: true, captureBeyondViewport: false, optimizeForSpeed: true })
       ]);
       const screenshotBase64 = String(screenshot?.data || "");
       const binary = screenshotBase64 ? Uint8Array.from(atob(screenshotBase64), (c) => c.charCodeAt(0)) : new Uint8Array();
       const bodyText = String(readback?.body_text || "");
+      const capturedAt = new Date().toISOString();
+      const bodyHash = await sha256Text(bodyText);
+      const screenshotHash = await sha256Bytes(binary);
+      const frameMaterial = JSON.stringify({
+        schema: "metaengine.a2-browser-operator.frame.v1", platform, tab_id: tab.id,
+        url: normUrl(tab.url || ""), captured_at: capturedAt,
+        body_text_sha256: bodyHash, screenshot_sha256: screenshotHash,
+        scroll: readback?.scroll || null, viewport: readback?.viewport || null
+      });
       const result = {
-        schema: "metaengine.a2-browser-operator.perception.v1", platform, tab_id: tab.id,
-        url: normUrl(tab.url || ""), captured_at: new Date().toISOString(), tainted_page_data: true, authority_effect: false,
+        schema: "metaengine.a2-browser-operator.perception.v2", platform, tab_id: tab.id,
+        url: normUrl(tab.url || ""), captured_at: capturedAt, frame_token: await sha256Text(frameMaterial),
+        tainted_page_data: true, authority_effect: false,
         page: readback, accessibility: compactAx(axRaw), dom_snapshot: compactDom(domRaw),
         layout: { css_layout_viewport: layout?.cssLayoutViewport || null, css_visual_viewport: layout?.cssVisualViewport || null, content_size: layout?.contentSize || null },
-        hashes: { body_text_sha256: await sha256Text(bodyText), screenshot_sha256: await sha256Bytes(binary) },
+        hashes: { body_text_sha256: bodyHash, screenshot_sha256: screenshotHash },
         screenshot: { mime: "image/jpeg", base64: screenshotBase64, bytes: binary.byteLength }
       };
       cache.set(platform, result);
       await persistMeta(result);
       return result;
-    } finally {
-      if (attached) await detach(tab.id);
-    }
+    });
   }
 
   async function perceptionMeta() {
