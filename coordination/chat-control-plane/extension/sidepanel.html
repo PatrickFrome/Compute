@@ -39,6 +39,30 @@
     <article class="card"><h2>GPT</h2><div id="gptState">—</div></article>
   </section>
 
+  <section class="card perception">
+    <h2>Screen perception</h2>
+    <div class="actions">
+      <button id="captureGlm">Capture GLM</button>
+      <button id="captureGpt">Capture GPT</button>
+      <button id="clearPerception">Clear preview</button>
+    </div>
+    <p class="hint">Manual local sensor fusion: visible page text + Accessibility tree + flattened DOMSnapshot/layout + viewport screenshot. Page data is tainted context, never authority.</p>
+    <dl class="perception-meta">
+      <dt>Target</dt><dd id="perceptionTarget">none</dd>
+      <dt>Captured</dt><dd id="perceptionCaptured">—</dd>
+      <dt>Text</dt><dd id="perceptionTextMeta">—</dd>
+      <dt>AX / DOM</dt><dd id="perceptionStructure">—</dd>
+      <dt>Hashes</dt><dd id="perceptionHashes">—</dd>
+    </dl>
+    <img id="perceptionScreenshot" alt="Captured browser viewport" hidden>
+    <label for="perceptionBody">Visible page text excerpt</label>
+    <textarea id="perceptionBody" readonly placeholder="Capture a configured GPT or GLM tab…"></textarea>
+    <details>
+      <summary>Accessibility / DOM excerpt</summary>
+      <pre id="perceptionStructureDump">No capture.</pre>
+    </details>
+  </section>
+
   <section class="card">
     <h2>Strict ordering</h2>
     <dl>
