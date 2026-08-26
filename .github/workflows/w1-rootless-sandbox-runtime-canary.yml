@@ -6,6 +6,8 @@ on:
     paths:
       - 'worker/native_linux/rootless_sandbox_launcher_v2.py'
       - 'worker/native_linux/rootless_sandbox_launcher.py'
+      - 'controller/w1/s2_runtime_canary_receipt.py'
+      - 'tests/test_w1_s2_runtime_canary_receipt.py'
       - '.github/workflows/w1-rootless-sandbox-runtime-canary.yml'
 
 permissions: {}
@@ -31,18 +33,28 @@ jobs:
           echo "S2_V2_SHA256=$actual"
           test "$actual" = "$expected"
 
-      - name: Run non-authority S2 v2 kernel isolation canary
+      - name: Verify runtime receipt contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/w1/s2_runtime_canary_receipt.py
+          python3 -m unittest tests.test_w1_s2_runtime_canary_receipt -v
+
+      - name: Run S2 v2 and compose non-authority receipt
         shell: bash
         run: |
           set -euo pipefail
           workspace="$GITHUB_WORKSPACE"
           sandbox_root="/tmp/metaengine-w1-s2-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          output_file="/tmp/w1-s2-v2-canary.txt"
+          receipt_file="$GITHUB_WORKSPACE/w1-s2-v2-runtime-canary-receipt.json"
+          source_sha="$(sha256sum worker/native_linux/rootless_sandbox_launcher_v2.py | awk '{print $1}')"
           rm -rf "$sandbox_root"
           set +e
           python3 worker/native_linux/rootless_sandbox_launcher_v2.py \
             --workspace "$workspace" \
             --sandbox-root "$sandbox_root" \
-            -- python3 - <<'PY' > /tmp/w1-s2-v2-canary.txt 2>&1
+            -- python3 - <<'PY' > "$output_file" 2>&1
           import os
           from pathlib import Path
           import socket
@@ -97,24 +109,32 @@ jobs:
           print('WORKER_ADMITTED=false')
           print('W1_VERIFIED=false')
           PY
-          rc=$?
+          launcher_rc=$?
           set -e
-          cat /tmp/w1-s2-v2-canary.txt
-          echo "LAUNCHER_RC=$rc"
+          cat "$output_file"
+          echo "LAUNCHER_RC=$launcher_rc"
           rm -rf "$sandbox_root" || true
-          if [ "$rc" -eq 78 ]; then
-            echo 'S2_V2_RUNTIME_CANARY=UNAVAILABLE_FAIL_CLOSED'
-            exit 0
-          fi
-          test "$rc" -eq 0
-          grep -q '^WORKER_IS_NOT_PID1=true$' /tmp/w1-s2-v2-canary.txt
-          grep -q '^PARENT_IS_NAMESPACE_PID1=true$' /tmp/w1-s2-v2-canary.txt
-          grep -q '^NO_NEW_PRIVS=1$' /tmp/w1-s2-v2-canary.txt
-          grep -q '^SECCOMP=2$' /tmp/w1-s2-v2-canary.txt
-          grep -q '^ROOT_FS=tmpfs$' /tmp/w1-s2-v2-canary.txt
-          grep -q '^OLDROOT_DETACHED=true$' /tmp/w1-s2-v2-canary.txt
-          grep -q '^WORKSPACE_RW=true$' /tmp/w1-s2-v2-canary.txt
-          grep -q '^NETWORK_DEFAULT_DENY=true$' /tmp/w1-s2-v2-canary.txt
-          grep -q '^WORKER_ADMITTED=false$' /tmp/w1-s2-v2-canary.txt
-          grep -q '^W1_VERIFIED=false$' /tmp/w1-s2-v2-canary.txt
-          echo 'S2_V2_RUNTIME_CANARY=PASS_NONAUTHORITY'
+
+          python3 controller/w1/s2_runtime_canary_receipt.py \
+            --launcher-rc "$launcher_rc" \
+            --output "$output_file" \
+            --source-sha256 "$source_sha" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --runner-os "$RUNNER_OS" \
+            --runner-arch "$RUNNER_ARCH" \
+            --head-sha "$GITHUB_SHA" \
+            --receipt "$receipt_file"
+          cat "$receipt_file"
+
+      - name: Persist S2 runtime canary receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: w1-s2-v2-runtime-canary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: w1-s2-v2-runtime-canary-receipt.json
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+          overwrite: false
+          include-hidden-files: false
