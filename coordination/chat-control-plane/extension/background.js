@@ -132,6 +132,21 @@ async function currentSnapshotEnvelopes() {
   return [stored["snapshot:CHATGPT"], stored["snapshot:GLM_ZAI"]].filter((item) => item?.snapshot);
 }
 
+async function refreshSnapshotEnvelopesIfStale(settings) {
+  let envelopes = await currentSnapshotEnvelopes();
+  const maxAgeMs = Math.max(5000, settings.pollMs * 2);
+  const now = Date.now();
+  const stale = envelopes.length < 2 || envelopes.some((envelope) => {
+    const observed = Date.parse(envelope?.observed_at || "");
+    return !Number.isFinite(observed) || now - observed > maxAgeMs;
+  });
+  if (stale) {
+    await pollPinnedTabSnapshots();
+    envelopes = await currentSnapshotEnvelopes();
+  }
+  return envelopes;
+}
+
 function targetUrlFor(command, settings) {
   if (command.target_platform === "CHATGPT") return normalizeUrl(settings.chatgptUrl);
   if (command.target_platform === "GLM_ZAI") return normalizeUrl(settings.zaiUrl);
@@ -282,9 +297,10 @@ async function pollCommands(force = false) {
     if (!force && Date.now() - lastPollAt < settings.pollMs) return;
     lastPollAt = Date.now();
     try {
+      const snapshots = await refreshSnapshotEnvelopesIfStale(settings);
       const response = await daemonFetch("/v1/commands/next", {
         method: "POST",
-        body: JSON.stringify({ snapshots: await currentSnapshotEnvelopes() })
+        body: JSON.stringify({ snapshots })
       });
       if (!response.ok) throw new Error(`command_http_${response.status}`);
       const body = await response.json();
@@ -311,8 +327,6 @@ chrome.runtime.onInstalled.addListener(async () => {
   for (const [key, value] of Object.entries(DEFAULTS)) {
     if (existing[key] === undefined) seed[key] = value;
   }
-  // v0.5 migrates the previous localhost runtime to the remote bridge. A
-  // personalized bundle may also carry a scoped pairing token in bootstrap.
   if (isLoopbackBridge(existing.daemonUrl) && String(bootstrap.daemonUrl || '').startsWith('https://')) {
     seed.daemonUrl = bootstrap.daemonUrl;
     if (String(bootstrap.bridgeSecret || '').length >= 32) seed.bridgeSecret = bootstrap.bridgeSecret;
