@@ -15,7 +15,9 @@ try {
   if (!sw) sw = await context.waitForEvent('serviceworker', { timeout: 20000 });
   const facts = await sw.evaluate(async () => {
     await globalThis.A2_SECRET_VAULT_READY;
-    const dbs = typeof indexedDB.databases === 'function' ? await indexedDB.databases() : [];
+    const testSecret = 'a2-v0523-ci-vault-' + 'x'.repeat(48);
+    await globalThis.A2_SET_PAIRING_SECRET(testSecret);
+    const vaultRoundtrip = await globalThis.A2_GET_PAIRING_SECRET();
     const local = await chrome.storage.local.get(null);
     return {
       version: chrome.runtime.getManifest().version,
@@ -23,15 +25,18 @@ try {
       gpt: typeof globalThis.A2_CHATGPT_TRUSTED_SEND,
       request: typeof globalThis.A2_BRIDGE_REQUEST,
       vault: typeof globalThis.A2_SET_PAIRING_SECRET,
-      vaultDb: dbs.some((x) => x.name === 'metaengine-a2-bridge-vault'),
-      storageLeaksSecret: Object.prototype.hasOwnProperty.call(local, 'bridgeSecret')
+      vaultRead: typeof globalThis.A2_GET_PAIRING_SECRET,
+      vaultRoundtripOk: vaultRoundtrip === testSecret,
+      hasPairing: await globalThis.A2_HAS_PAIRING_SECRET(),
+      storageLeaksSecret: Object.prototype.hasOwnProperty.call(local, 'bridgeSecret'),
+      storageContainsTestSecret: Object.values(local).some((value) => String(value) === testSecret)
     };
   });
   if (facts.version !== '0.5.23') throw new Error(`manifest version ${facts.version}`);
-  for (const k of ['glm','gpt','request','vault']) if (facts[k] !== 'function') throw new Error(`${k} not loaded`);
-  if (!facts.vaultDb) throw new Error('vault IndexedDB missing');
-  if (facts.storageLeaksSecret) throw new Error('pairing secret leaked to chrome.storage.local');
-  console.log('MV3 service-worker load: PASS', JSON.stringify(facts));
+  for (const k of ['glm','gpt','request','vault','vaultRead']) if (facts[k] !== 'function') throw new Error(`${k} not loaded`);
+  if (!facts.vaultRoundtripOk || !facts.hasPairing) throw new Error('pairing vault behavioral roundtrip failed');
+  if (facts.storageLeaksSecret || facts.storageContainsTestSecret) throw new Error('pairing secret leaked to chrome.storage.local');
+  console.log('MV3 service-worker + pairing-vault behavior: PASS', JSON.stringify(facts));
 } finally {
   await context.close();
   fs.rmSync(profile, { recursive: true, force: true });
