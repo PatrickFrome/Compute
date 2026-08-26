@@ -10,6 +10,7 @@ importScripts("./bridge-client.js");
 importScripts("./trusted-chatgpt.js");
 importScripts("./trusted-glm.js");
 importScripts("./operator-gate-bindings.js");
+importScripts("./operator-actions.js");
 importScripts("./background.js");
 importScripts("./operator-control.js");
 importScripts("./operator-perception.js");
