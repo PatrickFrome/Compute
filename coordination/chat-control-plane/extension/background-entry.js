@@ -12,3 +12,4 @@ importScripts("./trusted-glm.js");
 importScripts("./operator-gate-bindings.js");
 importScripts("./background.js");
 importScripts("./operator-control.js");
+importScripts("./operator-perception.js");
