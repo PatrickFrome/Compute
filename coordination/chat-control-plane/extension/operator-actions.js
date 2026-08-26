@@ -2,10 +2,25 @@
   "use strict";
 
   const MAX_REWRITE_CHARS = 120000;
-  const FRAME_MAX_AGE_MS = 30000;
+  const DEFAULT_FRAME_MAX_AGE_MS = 30000;
   const ACTIONS = new Set(["STOP_GENERATION", "SCROLL", "CLICK_POINT", "DOUBLE_CLICK_POINT"]);
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const normalize = (value) => String(value ?? "").replace(/\r\n?/g, "\n").trim();
+
+  function compat(path, fallback) {
+    try { return globalThis.A2_COMPAT_GET?.(path, fallback) ?? fallback; }
+    catch (_) { return fallback; }
+  }
+  function assertActionsEnabled(action = null) {
+    if (compat("kill_switches.operator_actions_disabled", false) === true) throw new Error("compat_kill_switch_operator_actions_disabled");
+    if (["CLICK_POINT", "DOUBLE_CLICK_POINT"].includes(String(action || "")) && compat("features.point_click_enabled", true) !== true) {
+      throw new Error("compat_feature_point_click_disabled");
+    }
+  }
+  function frameMaxAgeMs() {
+    const value = Number(compat("timeouts.frame_max_age_ms", DEFAULT_FRAME_MAX_AGE_MS));
+    return Number.isInteger(value) && value >= 5000 && value <= 120000 ? value : DEFAULT_FRAME_MAX_AGE_MS;
+  }
 
   function trustedOperatorSender(sender) {
     const expected = chrome.runtime.getURL("sidepanel.html");
@@ -79,6 +94,7 @@
   }
 
   async function trustedReplaceDraft(tabId, platform, draft) {
+    assertActionsEnabled("REPLACE_DRAFT");
     const value = String(draft ?? "").slice(0, MAX_REWRITE_CHARS);
     if (!normalize(value)) throw new Error("operator_rewrite_empty");
     return withTab(platform, tabId, `rewrite:${platform}`, async (tab, session) => {
@@ -115,6 +131,7 @@
   }
 
   async function stopGeneration(platform) {
+    assertActionsEnabled("STOP_GENERATION");
     return withTab(platform, null, `stop:${platform}`, async (tab, session) => {
       const before = await snapshot(tab.id);
       const point = await evaluate(session, stopInspectionExpression());
@@ -143,6 +160,7 @@
   }
 
   async function scroll(platform, deltaY) {
+    assertActionsEnabled("SCROLL");
     const bounded = Math.max(-1600, Math.min(1600, Number(deltaY) || 0));
     if (!bounded) throw new Error("operator_scroll_delta_invalid");
     return withTab(platform, null, `scroll:${platform}`, async (tab, session) => {
@@ -161,7 +179,8 @@
     if (!frame) throw new Error("operator_action_perception_frame_missing");
     if (!frameToken || String(frame.frame_token || "") !== String(frameToken)) throw new Error("operator_action_frame_token_mismatch");
     const age = Date.now() - Date.parse(frame.captured_at || "");
-    if (!Number.isFinite(age) || age < 0 || age > FRAME_MAX_AGE_MS) throw new Error("operator_action_frame_expired");
+    const maxAge = frameMaxAgeMs();
+    if (!Number.isFinite(age) || age < 0 || age > maxAge) throw new Error("operator_action_frame_expired");
     return frame;
   }
 
@@ -197,6 +216,7 @@
   }
 
   async function pointClick(platform, frameToken, xRaw, yRaw, doubleClick = false) {
+    assertActionsEnabled(doubleClick ? "DOUBLE_CLICK_POINT" : "CLICK_POINT");
     const frame = frameFor(platform, frameToken);
     const x = Number(xRaw), y = Number(yRaw);
     if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("operator_action_point_coordinates_invalid");
@@ -229,6 +249,7 @@
         platform,
         tab_id: tab.id,
         frame_token: frame.frame_token,
+        frame_max_age_ms: frameMaxAgeMs(),
         x,
         y,
         hit,
@@ -244,6 +265,7 @@
     if (!["CHATGPT", "GLM_ZAI"].includes(platform)) throw new Error("operator_action_platform_invalid");
     const action = String(message?.action || "");
     if (!ACTIONS.has(action)) throw new Error("operator_action_invalid");
+    assertActionsEnabled(action);
     if (action === "STOP_GENERATION") return stopGeneration(platform);
     if (action === "SCROLL") return scroll(platform, message?.delta_y);
     if (action === "CLICK_POINT") return pointClick(platform, message?.frame_token, message?.x, message?.y, false);
