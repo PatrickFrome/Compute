@@ -16,11 +16,15 @@ const CONTENT_SEND_STATUSES = new Set(["SENT_AND_DOM_VERIFIED", "SENT_WEAK_DOM_V
 const CHATGPT_ROOT_URL = "https://chatgpt.com/";
 const CHATGPT_ROLLOVER_TIMEOUT_MS = 12000;
 const GLM_RETRYABLE_ERRORS = [
-  "send_click_not_observed_in_dom",
   "send_button_not_enabled_or_pair_unresolved",
   "composer_send_pair_not_found",
   "send_button_not_found",
   "composer_not_found"
+];
+const GLM_POST_DISPATCH_AMBIGUOUS_ERRORS = [
+  "send_click_not_observed_in_dom",
+  "message channel closed before a response was received",
+  "message port closed before a response was received"
 ];
 const GLM_SETTLE_WINDOW_MS = 12000;
 const GLM_SETTLE_POLL_MS = 400;
@@ -87,6 +91,11 @@ function isRetryableGlmError(value) {
   return GLM_RETRYABLE_ERRORS.some((needle) => text.includes(needle));
 }
 
+function isPostDispatchAmbiguousGlmError(value) {
+  const text = String(value || "").toLowerCase();
+  return GLM_POST_DISPATCH_AMBIGUOUS_ERRORS.some((needle) => text.includes(needle.toLowerCase()));
+}
+
 function snapshotEvidence(before, after, prompt, platform) {
   const messages = Array.isArray(after?.messages) ? after.messages : [];
   const expected = platform === "CHATGPT" ? canonicalVisible(prompt) : normalize(prompt);
@@ -117,6 +126,32 @@ function resultFromEvidence(commandId, evidence, extra = {}) {
     clicked_send_button: true,
     verification: evidence,
     ...extra
+  };
+}
+
+function glmUnconfirmedNoRetryResult(command, before, latest) {
+  const evidence = latest
+    ? snapshotEvidence(before, latest, command.prompt, "GLM_ZAI")
+    : {
+        verified: false,
+        exact_user_turn_seen: false,
+        verification_strength: "NONE",
+        composer_cleared: false,
+        message_count_before: Number(before?.message_count || 0),
+        message_count_after: Number(before?.message_count || 0),
+        after_snapshot: null
+      };
+  return {
+    status: "SENT_DISPATCHED_UNCONFIRMED_NO_RETRY",
+    command_id: String(command.command_id || ""),
+    clicked_send_button: true,
+    verification: {
+      ...evidence,
+      verified: false,
+      verification_strength: "GLM_POST_CLICK_AMBIGUOUS_NO_RETRY",
+      post_dispatch_ambiguity: true
+    },
+    recovery: "GLM_AT_MOST_ONCE_NO_RELOAD"
   };
 }
 
@@ -269,7 +304,7 @@ async function sendViaContent(tab, command, settings) {
   return { before, result: response.result };
 }
 
-async function observeGlmAcceptance(command, tab, before) {
+async function observeGlmAcceptance(command, tab, before, { postDispatch = false } = {}) {
   const deadline = Date.now() + GLM_SETTLE_WINDOW_MS;
   while (Date.now() < deadline) {
     let latest = null;
@@ -286,15 +321,32 @@ async function observeGlmAcceptance(command, tab, before) {
         };
         return resultFromEvidence(command.command_id, thinkingEvidence, { recovery: "GLM_THINKING_ACCEPTED" });
       }
+      if (postDispatch && normalize(latest.composer_text || "") === "") {
+        const clearedEvidence = {
+          ...evidence,
+          verified: true,
+          verification_strength: "GLM_COMPOSER_CLEARED_AFTER_CLICK",
+          composer_cleared: true,
+          generating_after_send: latest.generating === true
+        };
+        return resultFromEvidence(command.command_id, clearedEvidence, { recovery: "GLM_POST_CLICK_COMPOSER_CLEARED" });
+      }
     }
     await sleep(GLM_SETTLE_POLL_MS);
   }
   return null;
 }
 
-async function reloadAndRetryGlm(command, tab, before) {
-  const accepted = await observeGlmAcceptance(command, tab, before);
+async function reloadAndRetryGlm(command, tab, before, errorText = "") {
+  const postDispatch = isPostDispatchAmbiguousGlmError(errorText);
+  const accepted = await observeGlmAcceptance(command, tab, before, { postDispatch });
   if (accepted) return accepted;
+
+  if (postDispatch) {
+    let latest = null;
+    try { latest = await waitForContentScript(tab.id, 1200); } catch (_) {}
+    return glmUnconfirmedNoRetryResult(command, before, latest);
+  }
 
   await chrome.tabs.reload(tab.id);
   const fresh = await waitForContentScript(tab.id, 15000);
@@ -396,10 +448,11 @@ async function executeCommand(command) {
       result = sent.result;
     } catch (error) {
       before = error?.before || before || await waitForContentScript(tab.id, 1200).catch(() => null);
-      if (command.target_platform === "CHATGPT" && isConversationExhaustedError(error?.message || error)) {
+      const errorText = String(error?.message || error);
+      if (command.target_platform === "CHATGPT" && isConversationExhaustedError(errorText)) {
         result = await rolloverChatgptAndRetry(command, tab);
-      } else if (command.target_platform === "GLM_ZAI" && before && isRetryableGlmError(error?.message || error)) {
-        result = await reloadAndRetryGlm(command, tab, before);
+      } else if (command.target_platform === "GLM_ZAI" && before && (isRetryableGlmError(errorText) || isPostDispatchAmbiguousGlmError(errorText))) {
+        result = await reloadAndRetryGlm(command, tab, before, errorText);
       } else {
         throw error;
       }
