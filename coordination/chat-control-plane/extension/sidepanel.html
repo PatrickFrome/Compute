@@ -64,6 +64,22 @@
   </section>
 
   <section class="card">
+    <h2>Operator actions</h2>
+    <label for="actionTarget">Target</label>
+    <select id="actionTarget">
+      <option value="GLM_ZAI">GLM / Z.AI</option>
+      <option value="CHATGPT">GPT / ChatGPT</option>
+    </select>
+    <div class="actions action-row">
+      <button id="stopGeneration" class="danger">Stop generation</button>
+      <button id="scrollUp">Scroll up</button>
+      <button id="scrollDown">Scroll down</button>
+    </div>
+    <p class="hint">Actions use trusted CDP mouse/keyboard primitives on the exact configured tab. If the target is duplicated or another debugger owns it, the action fails closed.</p>
+    <div id="lastAction" class="meta">No operator action yet.</div>
+  </section>
+
+  <section class="card">
     <h2>Strict ordering</h2>
     <dl>
       <dt>Policy</dt><dd id="ordering">—</dd>
@@ -84,7 +100,7 @@
       <button id="allowOriginal">Allow original once</button>
       <button id="rewriteAllow" class="primary">Rewrite + allow once</button>
     </div>
-    <p class="hint">Allow-once opens an 8-second window for your next physical Enter/Send. It does not synthesize a click.</p>
+    <p class="hint">Rewrite is now performed by trusted CDP with exact readback; allow-once then opens an 8-second window for your next physical Enter/Send.</p>
   </section>
 
   <section class="card">
