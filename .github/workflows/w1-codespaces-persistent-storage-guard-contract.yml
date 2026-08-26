@@ -40,6 +40,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           text = Path('controller/w1/codespaces_persistent_storage_guard.py').read_text()
+          low = text.lower()
           required = (
               'PERSISTENT_ROOT = PurePosixPath("/workspaces")',
               'strictly below /workspaces',
@@ -56,10 +57,13 @@ jobs:
           for token in required:
               assert token in text, token
           forbidden = (
-              '/start', '/stop', 'requests.post(', 'requests.patch(',
+              'requests.post(', 'requests.patch(', 'requests.put(', 'requests.delete(',
+              'urllib.request.urlopen(', 'http.client.httpconnection(',
+              'gh codespace stop', 'gh codespace start',
+              'subprocess.run(["gh"', "subprocess.run(['gh'",
               'provider_storage_contract_verified": True',
               'persistent_worker_proof": True', 'w1_verified": True',
           )
           for token in forbidden:
-              assert token not in text, token
+              assert token not in low, token
           PY
