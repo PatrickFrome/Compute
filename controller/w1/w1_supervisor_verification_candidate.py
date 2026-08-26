@@ -4,11 +4,12 @@
 Inputs must already have passed:
 - pre-persistence manifest persisted readback,
 - Codespaces /workspaces storage persisted readback,
-- authenticated GitHub lifecycle provenance persisted readback.
+- authenticated GitHub lifecycle provenance persisted readback,
+- keyless GitHub/Sigstore source-provenance attestation verification.
 
 A successful composition is still NOT W1 verification. It merely proves that the
-offline/persisted evidence graph is internally cross-bound and ready for a fresh
-supervisor decision under current authority.
+offline/persisted evidence graph and cryptographic source provenance are internally
+cross-bound and ready for a fresh supervisor decision under current authority.
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ import re
 from typing import Any
 
 from controller.w1 import github_codespaces_lifecycle_provenance
+from controller.w1 import w1_attestation_verification_receipt
 from controller.w1 import w1_verification_candidate
 
 SCHEMA = "metaengine.compute.w1-supervisor-verification-candidate.h205f22.v1"
@@ -50,7 +52,13 @@ def _false(value: dict[str, Any], keys: tuple[str, ...], label: str) -> None:
             raise ValueError(f"{label}.{key} must be false")
 
 
-def compose(*, verification_candidate: dict[str, Any], provenance_receipt: dict[str, Any], provenance_readback: dict[str, Any]) -> dict[str, Any]:
+def compose(
+    *,
+    verification_candidate: dict[str, Any],
+    provenance_receipt: dict[str, Any],
+    provenance_readback: dict[str, Any],
+    attestation_receipt: dict[str, Any],
+) -> dict[str, Any]:
     if not isinstance(verification_candidate, dict) or verification_candidate.get("schema") != w1_verification_candidate.SCHEMA:
         raise ValueError("invalid W1 verification candidate")
     if verification_candidate.get("status") != w1_verification_candidate.STATUS:
@@ -68,6 +76,48 @@ def compose(*, verification_candidate: dict[str, Any], provenance_receipt: dict[
         "provider_storage_contract_verified", "supervisor_verified", "persistent_worker_proof",
         "worker_admitted", "w1_verified", "canonical", "authority_effect",
     ), "verification candidate")
+
+    if not isinstance(attestation_receipt, dict) or attestation_receipt.get("schema") != w1_attestation_verification_receipt.SCHEMA:
+        raise ValueError("invalid W1 attestation verification receipt")
+    if attestation_receipt.get("status") != w1_attestation_verification_receipt.STATUS:
+        raise ValueError("W1 attestation receipt status mismatch")
+    a_evidence = attestation_receipt.get("evidence")
+    if not isinstance(a_evidence, dict) or not a_evidence:
+        raise ValueError("W1 attestation receipt evidence missing")
+    attestation_sha = _sha(attestation_receipt.get("receipt_sha256"), "attestation receipt_sha256")
+    if w1_attestation_verification_receipt.canonical_hash(a_evidence) != attestation_sha:
+        raise ValueError("W1 attestation receipt hash mismatch")
+    if attestation_receipt.get("artifact_attestation_verified") is not True:
+        raise ValueError("artifact attestation must be cryptographically verified")
+    if attestation_receipt.get("cryptographic_source_provenance_verified") is not True:
+        raise ValueError("cryptographic source provenance must be verified")
+    _false(attestation_receipt, (
+        "runtime_safety_verified", "provider_lifecycle_verified", "persistent_worker_proof",
+        "worker_admitted", "w1_verified", "canonical", "authority_effect",
+    ), "attestation receipt")
+    source = evidence.get("source")
+    if not isinstance(source, dict) or set(source) != {"git_sha", "tree_sha"}:
+        raise ValueError("verification candidate source missing")
+    if a_evidence.get("source_git_sha") != source.get("git_sha"):
+        raise ValueError("attestation source git SHA does not match verification candidate")
+    if a_evidence.get("source_tree_sha") != source.get("tree_sha"):
+        raise ValueError("attestation source tree SHA does not match verification candidate")
+    if a_evidence.get("repository") != w1_attestation_verification_receipt.EXPECTED_REPOSITORY:
+        raise ValueError("attestation repository mismatch")
+    if a_evidence.get("workflow_path") != w1_attestation_verification_receipt.EXPECTED_WORKFLOW_PATH:
+        raise ValueError("attestation signer workflow mismatch")
+    if a_evidence.get("predicate_type") != w1_attestation_verification_receipt.PREDICATE:
+        raise ValueError("attestation predicate mismatch")
+    if a_evidence.get("oidc_issuer") != w1_attestation_verification_receipt.OIDC_ISSUER:
+        raise ValueError("attestation OIDC issuer mismatch")
+    if a_evidence.get("runner_environment") != "github-hosted":
+        raise ValueError("attestation runner must be github-hosted")
+    if a_evidence.get("rekor_uri") != w1_attestation_verification_receipt.REKOR_URI:
+        raise ValueError("attestation Rekor URI mismatch")
+    _sha(a_evidence.get("manifest_subject_sha256"), "attestation manifest subject sha256")
+    _sha(a_evidence.get("manifest_evidence_sha256"), "attestation manifest evidence sha256")
+    if not isinstance(a_evidence.get("verified_timestamp_count"), int) or isinstance(a_evidence.get("verified_timestamp_count"), bool) or a_evidence["verified_timestamp_count"] < 1:
+        raise ValueError("attestation verified timestamp required")
 
     if not isinstance(provenance_receipt, dict) or provenance_receipt.get("schema") != github_codespaces_lifecycle_provenance.SCHEMA:
         raise ValueError("invalid GitHub provenance receipt")
@@ -130,6 +180,9 @@ def compose(*, verification_candidate: dict[str, Any], provenance_receipt: dict[
         "worker_id": evidence["worker_id"],
         "base_checkpoint_id": evidence["base_checkpoint_id"],
         "verification_candidate_sha256": candidate_sha,
+        "attestation_receipt_sha256": attestation_sha,
+        "attested_manifest_subject_sha256": a_evidence["manifest_subject_sha256"],
+        "attestation_rekor_timestamp": a_evidence["rekor_timestamp"],
         "provider_provenance_receipt_sha256": provenance_sha,
         "provider_oracle_sha256": evidence["provider_oracle_sha256"],
         "stopped_snapshot_sha256": evidence["stopped_snapshot_sha256"],
@@ -138,6 +191,9 @@ def compose(*, verification_candidate: dict[str, Any], provenance_receipt: dict[
         "source": evidence["source"],
         "checks": {
             "offline_candidate_integrity": True,
+            "cryptographic_source_provenance_cross_bound": True,
+            "github_oidc_signer_identity_verified": True,
+            "sigstore_rekor_timestamp_verified": True,
             "provider_provenance_receipt_integrity": True,
             "provider_provenance_persisted_readback_match": True,
             "provider_oracle_cross_bound": True,
@@ -152,6 +208,7 @@ def compose(*, verification_candidate: dict[str, Any], provenance_receipt: dict[
         "evidence": final_evidence,
         "candidate_sha256": canonical_hash(final_evidence),
         "ready_for_fresh_supervisor_verification": True,
+        "cryptographic_source_provenance_verified": True,
         "authenticated_provider_provenance_verified": False,
         "provider_action_verified": False,
         "provider_storage_contract_verified": False,
