@@ -33,20 +33,24 @@ function shortHash(value) {
 
 function renderPerception(perception) {
   currentPerception = perception || null;
+  const image = $("perceptionScreenshot");
   if (!perception) {
     $("perceptionTarget").textContent = "none";
     $("perceptionCaptured").textContent = "—";
+    $("perceptionFrame").textContent = "—";
     $("perceptionTextMeta").textContent = "—";
     $("perceptionStructure").textContent = "—";
     $("perceptionHashes").textContent = "—";
     $("perceptionBody").value = "";
     $("perceptionStructureDump").textContent = "No capture.";
-    $("perceptionScreenshot").hidden = true;
-    $("perceptionScreenshot").removeAttribute("src");
+    image.hidden = true;
+    image.removeAttribute("src");
+    image.removeAttribute("data-frame-token");
     return;
   }
   $("perceptionTarget").textContent = `${compact(perception.platform)} · ${compact(perception.url)}`;
   $("perceptionCaptured").textContent = compact(perception.captured_at);
+  $("perceptionFrame").textContent = `${shortHash(perception.frame_token)} · ${Number(perception.frame_max_age_ms || 30000)} ms max`;
   $("perceptionTextMeta").textContent = `${Number(perception.page?.body_text_length || 0)} chars${perception.page?.body_text_truncated ? " · source clipped" : ""}`;
   $("perceptionStructure").textContent = `${Number(perception.accessibility_total || perception.accessibility?.length || 0)} AX · ${Number(perception.dom_snapshot?.visible_record_count || 0)} visible DOM/layout`;
   $("perceptionHashes").textContent = `text ${shortHash(perception.hashes?.body_text_sha256)} · pixels ${shortHash(perception.hashes?.screenshot_sha256)}`;
@@ -60,11 +64,13 @@ function renderPerception(perception) {
   }, null, 2);
   const screenshot = perception.screenshot || {};
   if (screenshot.base64) {
-    $("perceptionScreenshot").src = `data:${screenshot.mime || "image/jpeg"};base64,${screenshot.base64}`;
-    $("perceptionScreenshot").hidden = false;
+    image.src = `data:${screenshot.mime || "image/jpeg"};base64,${screenshot.base64}`;
+    image.dataset.frameToken = String(perception.frame_token || "");
+    image.hidden = false;
   } else {
-    $("perceptionScreenshot").hidden = true;
-    $("perceptionScreenshot").removeAttribute("src");
+    image.hidden = true;
+    image.removeAttribute("src");
+    image.removeAttribute("data-frame-token");
   }
 }
 
@@ -166,19 +172,25 @@ async function capturePerception(platform) {
   }
 }
 
+function setActionControlsDisabled(disabled) {
+  for (const id of ["stopGeneration", "scrollUp", "scrollDown"]) $(id).disabled = disabled;
+  $("perceptionScreenshot").classList.toggle("busy", disabled);
+}
+
 async function runOperatorAction(action, extra = {}) {
   if (actionBusy) return;
   actionBusy = true;
-  const platform = $("actionTarget").value;
-  for (const id of ["stopGeneration", "scrollUp", "scrollDown"]) $(id).disabled = true;
+  const { platform: platformOverride, ...payload } = extra;
+  const platform = String(platformOverride || $("actionTarget").value);
+  setActionControlsDisabled(true);
   try {
     setStatus(`Running ${action} on ${platform}…`);
-    const response = await request("A2_OPERATOR_ACTION", { platform, action, ...extra });
+    const response = await request("A2_OPERATOR_ACTION", { platform, action, ...payload });
     const result = response.result || {};
     $("lastAction").textContent = JSON.stringify(result);
     if (result.ok === false) throw new Error(result.status || `${action} was not available`);
     setStatus(`${action} completed on ${platform}.`);
-    if (action === "SCROLL" || action === "STOP_GENERATION") {
+    if (["SCROLL", "STOP_GENERATION", "CLICK_POINT", "DOUBLE_CLICK_POINT"].includes(action)) {
       try {
         const preview = await request("A2_OPERATOR_CAPTURE_PERCEPTION", {
           platform,
@@ -189,12 +201,28 @@ async function runOperatorAction(action, extra = {}) {
     }
     await refresh();
   } catch (error) {
-    $("lastAction").textContent = String(error?.message || error);
-    setStatus(String(error?.message || error), true);
+    const message = String(error?.message || error);
+    $("lastAction").textContent = message;
+    setStatus(message, true);
+    if (message.includes("frame_stale") || message.includes("frame_expired") || message.includes("frame_token")) {
+      try { await capturePerception(platform); } catch (_) {}
+    }
   } finally {
     actionBusy = false;
-    for (const id of ["stopGeneration", "scrollUp", "scrollDown"]) $(id).disabled = false;
+    setActionControlsDisabled(false);
   }
+}
+
+function screenshotCoordinates(event) {
+  if (!currentPerception?.frame_token) throw new Error("Capture a fresh frame first.");
+  const viewport = currentPerception.page?.viewport || {};
+  const width = Number(viewport.width || 0), height = Number(viewport.height || 0);
+  if (!(width > 0 && height > 0)) throw new Error("Captured viewport dimensions are unavailable.");
+  const rect = $("perceptionScreenshot").getBoundingClientRect();
+  if (!(rect.width > 0 && rect.height > 0)) throw new Error("Captured screenshot is not visible.");
+  const nx = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+  const ny = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+  return { x: nx * width, y: ny * height };
 }
 
 $("toggleArmed").addEventListener("click", () => setArmed(!lastArmed));
@@ -210,6 +238,21 @@ $("rewriteAllow").addEventListener("click", () => {
 $("captureGlm").addEventListener("click", () => capturePerception("GLM_ZAI"));
 $("captureGpt").addEventListener("click", () => capturePerception("CHATGPT"));
 $("clearPerception").addEventListener("click", () => { renderPerception(null); setStatus("Local perception preview cleared."); });
+$("perceptionScreenshot").addEventListener("click", (event) => {
+  try {
+    if (actionBusy || captureBusy) return;
+    const point = screenshotCoordinates(event);
+    const platform = String(currentPerception?.platform || "");
+    if (!platform) throw new Error("Captured frame has no target platform.");
+    $("actionTarget").value = platform;
+    runOperatorAction(event.shiftKey ? "DOUBLE_CLICK_POINT" : "CLICK_POINT", {
+      platform,
+      frame_token: currentPerception.frame_token,
+      x: point.x,
+      y: point.y
+    });
+  } catch (error) { setStatus(String(error?.message || error), true); }
+});
 $("stopGeneration").addEventListener("click", () => runOperatorAction("STOP_GENERATION"));
 $("scrollUp").addEventListener("click", () => runOperatorAction("SCROLL", { delta_y: -700 }));
 $("scrollDown").addEventListener("click", () => runOperatorAction("SCROLL", { delta_y: 700 }));
