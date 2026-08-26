@@ -13,6 +13,7 @@ p { margin: 5px 0; }
 .badge.on { background: #15351f; color: #7ee787; border-color: #238636; }
 .badge.off { background: #2d1f22; color: #ff7b72; border-color: #6e3030; }
 .mode-row, .actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.action-row { margin-top: 9px; }
 button { border: 1px solid #3d444d; border-radius: 7px; padding: 7px 9px; background: #21262d; color: #e6edf3; cursor: pointer; font-weight: 600; }
 button:hover { border-color: #6e7681; }
 button:disabled { cursor: wait; opacity: .55; }
@@ -22,8 +23,9 @@ dl { display: grid; grid-template-columns: minmax(92px, auto) 1fr; gap: 6px 10px
 dt { color: #8b949e; }
 dd { margin: 0; overflow-wrap: anywhere; }
 label { display: block; margin: 9px 0 5px; font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: .04em; }
+select { width: 100%; padding: 7px 8px; border-radius: 7px; border: 1px solid #3d444d; background: #0d1117; color: #e6edf3; }
 textarea { width: 100%; min-height: 90px; resize: vertical; padding: 8px; border-radius: 7px; border: 1px solid #3d444d; background: #0d1117; color: #e6edf3; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
-textarea:focus { outline: 1px solid #388bfd; border-color: #388bfd; }
+textarea:focus, select:focus { outline: 1px solid #388bfd; border-color: #388bfd; }
 .perception-meta { margin-top: 10px; }
 #perceptionScreenshot { display: block; width: 100%; max-height: 420px; object-fit: contain; margin-top: 10px; border-radius: 8px; border: 1px solid #30363d; background: #010409; }
 #perceptionBody { min-height: 150px; }
@@ -31,5 +33,6 @@ details { margin-top: 10px; }
 summary { cursor: pointer; color: #aeb8c4; font-size: 12px; }
 pre { max-height: 340px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px; border-radius: 7px; border: 1px solid #30363d; background: #0d1117; color: #c9d1d9; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .hint, .meta, #status { font-size: 11px; color: #8b949e; line-height: 1.45; }
+#lastAction { margin-top: 8px; overflow-wrap: anywhere; }
 #status.error { color: #ff7b72; }
 #status.ok { color: #7ee787; }
