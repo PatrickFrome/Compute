@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import copy
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -207,23 +207,65 @@ class W1LifecycleEvidenceHarnessTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "action chronology invalid"):
             harness.compose_codespaces(**values)
 
-    def test_sentinel_creation_is_exclusive_and_persistent(self):
+    def test_sentinel_creation_is_exclusive_descriptor_bound_and_persistent(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "sentinel.bin"
             first = harness.ensure_persistent_sentinel(path, initialize=True)
             second = harness.ensure_persistent_sentinel(path, initialize=True)
             self.assertEqual(first, second)
             self.assertEqual(path.stat().st_size, harness.SENTINEL_BYTES)
+            self.assertEqual(path.stat().st_nlink, 1)
+            self.assertEqual(path.stat().st_uid, os.geteuid())
 
-    def test_symlink_sentinel_is_rejected(self):
+    def test_final_symlink_sentinel_is_rejected(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             real = root / "real"
             real.write_bytes(b"x" * harness.SENTINEL_BYTES)
             link = root / "link"
             link.symlink_to(real)
-            with self.assertRaisesRegex(RuntimeError, "non-symlink"):
+            with self.assertRaisesRegex(RuntimeError, "open persistent sentinel safely"):
                 harness.ensure_persistent_sentinel(link, initialize=False)
+
+    def test_parent_symlink_is_rejected_without_creating_target_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            real_parent = root / "real-parent"
+            real_parent.mkdir()
+            linked_parent = root / "linked-parent"
+            linked_parent.symlink_to(real_parent, target_is_directory=True)
+            target = real_parent / "sentinel.bin"
+            with self.assertRaisesRegex(RuntimeError, "open sentinel parent safely"):
+                harness.ensure_persistent_sentinel(linked_parent / "sentinel.bin", initialize=True)
+            self.assertFalse(target.exists(), "symlink-parent rejection must happen before creation")
+
+    def test_missing_parent_is_rejected_and_not_created(self):
+        with tempfile.TemporaryDirectory() as td:
+            missing_parent = Path(td) / "missing"
+            with self.assertRaisesRegex(RuntimeError, "open sentinel parent safely"):
+                harness.ensure_persistent_sentinel(missing_parent / "sentinel.bin", initialize=True)
+            self.assertFalse(missing_parent.exists())
+
+    def test_directory_sentinel_is_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            directory = Path(td) / "sentinel-dir"
+            directory.mkdir()
+            with self.assertRaisesRegex(RuntimeError, "regular file"):
+                harness.ensure_persistent_sentinel(directory, initialize=False)
+
+    def test_hardlinked_sentinel_is_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            first = root / "sentinel.bin"
+            first.write_bytes(b"x" * harness.SENTINEL_BYTES)
+            second = root / "alias.bin"
+            os.link(first, second)
+            with self.assertRaisesRegex(RuntimeError, "exactly one hard link"):
+                harness.ensure_persistent_sentinel(first, initialize=False)
+
+    def test_relative_sentinel_path_is_rejected(self):
+        with self.assertRaisesRegex(RuntimeError, "must be absolute"):
+            harness.ensure_persistent_sentinel(Path("relative/sentinel.bin"), initialize=True)
 
 
 if __name__ == "__main__":
