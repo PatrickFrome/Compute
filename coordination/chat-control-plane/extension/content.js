@@ -4,11 +4,13 @@
   const HEARTBEAT_MS = 2500;
   const MAX_MESSAGE_CHARS = 120000;
   const GLM_PROCESSING_MUTATION_WINDOW_MS = 1800;
+  const MAX_HASH_CACHE = 256;
   let snapshotTimer = null;
   let lastSnapshotHash = "";
   let lastMutationAt = Date.now();
   let lastGlmAppMutationAt = 0;
   let lastGlmStreamMutationAt = 0;
+  const strongHashCache = new Map();
 
   const normalize = (value) => String(value ?? "").replace(/\r\n?/g, "\n").trim();
 
@@ -36,6 +38,16 @@
     return (h >>> 0).toString(16).padStart(8, "0");
   }
 
+  async function sha256Text(text) {
+    const key = String(text ?? "");
+    if (strongHashCache.has(key)) return strongHashCache.get(key);
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key));
+    const hex = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    strongHashCache.set(key, hex);
+    if (strongHashCache.size > MAX_HASH_CACHE) strongHashCache.delete(strongHashCache.keys().next().value);
+    return hex;
+  }
+
   function inferRole(node) {
     const explicit = node.querySelector?.("[data-message-author-role]")?.getAttribute("data-message-author-role")
       || node.getAttribute?.("data-message-author-role")
@@ -53,32 +65,47 @@
     return "unknown";
   }
 
+  function pruneNestedDuplicates(nodes) {
+    return nodes.filter((node, index) => {
+      const text = normalize(node.innerText || node.textContent || "");
+      if (!text) return false;
+      return !nodes.some((other, otherIndex) => {
+        if (index === otherIndex || !node.contains(other)) return false;
+        return normalize(other.innerText || other.textContent || "") === text;
+      });
+    });
+  }
+
   function structuredMessageNodes() {
     const selectors = platform() === "CHATGPT"
       ? ["[data-testid^='conversation-turn-']", "article[data-testid^='conversation-turn-']", "article"]
-      : ["[data-message-author-role]", "[data-role='user']", "[data-role='assistant']", "[class*='message']", "article"];
+      : ["[data-message-author-role]", "[data-role='user'], [data-role='assistant']", "[class*='message']", "article"];
     for (const selector of selectors) {
-      const nodes = [...document.querySelectorAll(selector)].filter(visible);
+      const nodes = pruneNestedDuplicates([...document.querySelectorAll(selector)].filter(visible));
       if (nodes.length) return nodes;
     }
     return [];
   }
 
+  function nodeKey(node, index) {
+    return node.getAttribute?.("data-message-id")
+      || node.getAttribute?.("data-testid")
+      || node.getAttribute?.("id")
+      || `${platform()}:turn:${index}`;
+  }
+
   function extractMessages() {
     const output = [];
-    const seen = new Set();
     for (const node of structuredMessageNodes()) {
       const text = normalize(node.innerText || node.textContent || "");
       if (!text) continue;
       const role = inferRole(node);
-      const key = `${role}:${text}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
       output.push({
         index: output.length,
         role,
         text: text.slice(0, MAX_MESSAGE_CHARS),
         text_hash_local: hashText(text),
+        dom_node_key: nodeKey(node, output.length),
         dom_testid: node.getAttribute?.("data-testid") || null,
         author_role_attr: node.querySelector?.("[data-message-author-role]")?.getAttribute("data-message-author-role") || null
       });
@@ -161,7 +188,7 @@
     const stopDetected = semanticButtons("stop").length > 0;
     const processing = glmProcessingActive();
     return {
-      schema: "metaengine.chat-dom-snapshot.v2",
+      schema: "metaengine.chat-dom-snapshot.v3",
       platform: platform(),
       url: location.href,
       title: document.title,
@@ -181,20 +208,25 @@
     };
   }
 
+  async function withStrongHashes(snapshot) {
+    const messages = await Promise.all(snapshot.messages.map(async (message) => ({ ...message, text_sha256: await sha256Text(message.text) })));
+    return { ...snapshot, composer_sha256: await sha256Text(snapshot.composer_text || ""), messages };
+  }
+
   async function emitSnapshot(force = false) {
-    const snapshot = pageState();
+    const raw = pageState();
     const signature = hashText(JSON.stringify({
-      url: snapshot.url,
-      generating: snapshot.generating,
-      processing_active: snapshot.processing_active,
-      composer_present: snapshot.composer_present,
-      composer_text: snapshot.composer_text,
-      dom_pair_error: snapshot.dom_pair_error,
-      messages: snapshot.messages.map((message) => [message.role, message.text_hash_local])
+      url: raw.url,
+      generating: raw.generating,
+      processing_active: raw.processing_active,
+      composer_present: raw.composer_present,
+      composer_text: raw.composer_text,
+      dom_pair_error: raw.dom_pair_error,
+      messages: raw.messages.map((message) => [message.dom_node_key, message.role, message.text_hash_local])
     }));
     if (!force && signature === lastSnapshotHash) return;
     lastSnapshotHash = signature;
-    try { await chrome.runtime.sendMessage({ type: "CHAT_SNAPSHOT", snapshot }); } catch (_) {}
+    try { await chrome.runtime.sendMessage({ type: "CHAT_SNAPSHOT", snapshot: await withStrongHashes(raw) }); } catch (_) {}
   }
 
   function scheduleSnapshot() {
@@ -229,8 +261,10 @@
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type !== "GET_CHAT_SNAPSHOT") return false;
-    sendResponse({ ok: true, snapshot: pageState() });
-    return false;
+    withStrongHashes(pageState())
+      .then((snapshot) => sendResponse({ ok: true, snapshot }))
+      .catch((error) => sendResponse({ ok: false, error: String(error?.message || error) }));
+    return true;
   });
 
   setInterval(() => emitSnapshot(true), HEARTBEAT_MS);
