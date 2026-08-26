@@ -6,8 +6,10 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 V2 = ROOT / "supabase/migrations/20260825023000_w1_provider_neutral_lifecycle_receipt_v2.sql"
+STOPPED = ROOT / "supabase/migrations/20260825023500_w1_lifecycle_stopped_snapshot_guard_v1.sql"
 V3 = ROOT / "supabase/migrations/20260826060000_w1_pre_persistence_evidence_manifest_v1.sql"
 SOURCE_GUARD = ROOT / "supabase/migrations/20260826060500_w1_pre_persistence_source_binding_guard_v1.sql"
+STOPPED_BRIDGE = ROOT / "supabase/migrations/20260826060600_w1_pre_persistence_stopped_snapshot_bridge_guard_v1.sql"
 EXPECTED_S2 = "f262cd5468b5eb51754cf397cdb1879c2e90d0670b74f479d3b28af8cd20f521"
 
 
@@ -19,18 +21,25 @@ class W1PrePersistenceDbContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.v2 = text(V2)
+        cls.stopped = text(STOPPED)
         cls.v3 = text(V3)
         cls.guard = text(SOURCE_GUARD)
+        cls.stopped_bridge = text(STOPPED_BRIDGE)
         cls.v2l = cls.v2.lower()
+        cls.stoppedl = cls.stopped.lower()
         cls.v3l = cls.v3.lower()
         cls.guardl = cls.guard.lower()
+        cls.stopped_bridgel = cls.stopped_bridge.lower()
 
     def test_dependency_chain_is_explicit(self):
         self.assertIn("compute_fabric_worker_lifecycle_receipt_v2_h205f22", self.v3)
         self.assertIn("compute_fabric_canonical_evidence_json_h205f22", self.v3)
         self.assertIn("w1_pre_persistence_requires_lifecycle_receipt_v2", self.v3)
         self.assertIn("w1_pre_persistence_requires_evidence_canonicalizer", self.v3)
+        self.assertIn("w1_stopped_snapshot_requires_lifecycle_receipt_v2", self.stopped)
         self.assertIn("w1_source_binding_requires_pre_persistence_manifest_v1", self.guard)
+        self.assertIn("w1_stopped_bridge_requires_pre_persistence_manifest_v1", self.stopped_bridge)
+        self.assertIn("w1_stopped_bridge_requires_persisted_stopped_snapshot", self.stopped_bridge)
 
     def test_evidence_canonicalizer_allows_only_integral_numbers(self):
         self.assertIn("compute_fabric_canonical_evidence_json_h205f22", self.v2)
@@ -38,6 +47,24 @@ class W1PrePersistenceDbContractTests(unittest.TestCase):
         self.assertIn("^-?(0|[1-9][0-9]*)$", self.v2)
         self.assertIn("non-integral numbers are forbidden", self.v2l)
         self.assertNotIn("create or replace function destruktion_meta.compute_fabric_canonical_json_h205f22", self.v2l)
+
+    def test_raw_shutdown_snapshot_is_persisted_and_hashed(self):
+        for token in (
+            "stopped_provider_snapshot jsonb",
+            "stopped_provider_snapshot_sha256 text",
+            "evidence->'stopped_provider_snapshot'",
+            "state' <> 'shutdown'",
+            "w1_codespaces_raw_stopped_snapshot_required",
+            "w1_codespaces_raw_stopped_snapshot_id_mismatch",
+            "w1_codespaces_raw_stopped_snapshot_time_not_between",
+            "compute_fabric_canonical_evidence_json_h205f22(v_stopped)",
+            "v_pre_at < v_stop_at and v_stop_at < v_post_at",
+        ):
+            self.assertIn(token, self.stoppedl, token)
+
+    def test_lifecycle_v2_becomes_append_only(self):
+        self.assertIn("before update or delete", self.stoppedl)
+        self.assertIn("w1_lifecycle_receipt_v2_is_append_only", self.stoppedl)
 
     def test_manifest_is_append_only_and_non_authority(self):
         required = (
@@ -93,7 +120,7 @@ class W1PrePersistenceDbContractTests(unittest.TestCase):
         ):
             self.assertIn(token, self.v3l, token)
 
-    def test_provider_persisted_bridge_is_required(self):
+    def test_provider_pre_post_persisted_bridge_is_required(self):
         for token in (
             "w1_pre_persistence_provider_persisted_bridge_mismatch",
             "pre_provider_snapshot_sha256",
@@ -103,6 +130,15 @@ class W1PrePersistenceDbContractTests(unittest.TestCase):
             "stop_resume",
         ):
             self.assertIn(token, self.v3l, token)
+
+    def test_provider_shutdown_persisted_bridge_is_required(self):
+        for token in (
+            "stopped_provider_snapshot_sha256",
+            "{evidence,provider,evidence,stopped_snapshot_sha256}",
+            "w1_stopped_bridge_hash_mismatch",
+            "w1_stopped_bridge_persisted_snapshot_missing",
+        ):
+            self.assertIn(token, self.stopped_bridgel, token)
 
     def test_outer_cgroup_witness_is_exact_and_prebound(self):
         for token in (
@@ -148,7 +184,7 @@ class W1PrePersistenceDbContractTests(unittest.TestCase):
             "grant execute on function public.h205f22_w1_pre_persistence_manifest_ingest_v1(text,uuid,bigint,bigint,jsonb,jsonb,jsonb) to authenticated",
             "grant execute on function public.h205f22_w1_pre_persistence_manifest_ingest_v1(text,uuid,bigint,bigint,jsonb,jsonb,jsonb) to anon",
         )
-        combined = self.v3l + "\n" + self.guardl
+        combined = "\n".join((self.v3l, self.guardl, self.stoppedl, self.stopped_bridgel))
         for token in forbidden:
             self.assertNotIn(token, combined, token)
 
