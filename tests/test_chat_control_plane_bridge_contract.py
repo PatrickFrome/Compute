@@ -27,7 +27,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
 
     def test_manifest_and_worker_entrypoints(self):
         self.assertEqual(self.manifest["manifest_version"], 3)
-        self.assertEqual(self.manifest["version"], "0.5.13")
+        self.assertEqual(self.manifest["version"], "0.5.14")
         self.assertEqual(self.manifest["background"]["service_worker"], "background-entry.js")
         self.assertIn("debugger", self.manifest["permissions"])
         self.assertEqual(self.manifest["content_scripts"][0]["js"], ["platform-dom-compat.js", "content.js"])
@@ -105,8 +105,14 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("globalThis.A2_CHATGPT_TRUSTED_SEND", self.background)
         self.assertIn("String(command.prompt || \"\")", self.background)
 
-    def test_glm_recovery_waits_for_thinking_before_reload(self):
+    def test_glm_recovery_is_at_most_once_after_dispatch(self):
         self.assertIn("GLM_RETRYABLE_ERRORS", self.background)
+        self.assertIn("GLM_POST_DISPATCH_AMBIGUOUS_ERRORS", self.background)
+        retryable_block = self.background.split("const GLM_RETRYABLE_ERRORS = [", 1)[1].split("];", 1)[0]
+        post_dispatch_block = self.background.split("const GLM_POST_DISPATCH_AMBIGUOUS_ERRORS = [", 1)[1].split("];", 1)[0]
+        self.assertNotIn("send_click_not_observed_in_dom", retryable_block)
+        self.assertIn("send_click_not_observed_in_dom", post_dispatch_block)
+        self.assertIn("message channel closed before a response was received", post_dispatch_block)
         self.assertIn("const GLM_SETTLE_WINDOW_MS = 12000;", self.background)
         self.assertIn("const GLM_SETTLE_POLL_MS = 400;", self.background)
         self.assertIn("observeGlmAcceptance", self.background)
@@ -115,10 +121,16 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn('snapshotEvidence(before, latest, command.prompt, "GLM_ZAI")', self.background)
         self.assertIn("before.generating !== true && latest.generating === true", self.background)
         self.assertIn("GLM_THINKING_ACCEPTED", self.background)
+        self.assertIn("GLM_COMPOSER_CLEARED_AFTER_CLICK", self.background)
+        self.assertIn("SENT_DISPATCHED_UNCONFIRMED_NO_RETRY", self.background)
+        self.assertIn("GLM_POST_CLICK_AMBIGUOUS_NO_RETRY", self.background)
+        self.assertIn("GLM_AT_MOST_ONCE_NO_RELOAD", self.background)
         self.assertIn("GLM_SETTLE_OBSERVED", self.background)
         self.assertIn("GLM_POST_RELOAD_OBSERVED", self.background)
         self.assertIn("GLM_RELOAD_RETRY_ONCE", self.background)
-        self.assertLess(self.background.index("const accepted = await observeGlmAcceptance"), self.background.index("await chrome.tabs.reload(tab.id);"))
+        recovery = self.background.split("async function reloadAndRetryGlm", 1)[1].split("async function waitForNewChatgptConversation", 1)[0]
+        self.assertLess(recovery.index("if (postDispatch)"), recovery.index("await chrome.tabs.reload(tab.id);"))
+        self.assertIn("return glmUnconfirmedNoRetryResult(command, before, latest);", recovery)
         self.assertNotIn("while (true)", self.background)
 
     def test_glm_primary_verification_accepts_thinking(self):
