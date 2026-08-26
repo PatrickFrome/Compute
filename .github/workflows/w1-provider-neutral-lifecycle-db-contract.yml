@@ -2,7 +2,7 @@ name: W1 Provider-Neutral Lifecycle DB Contract
 
 on:
   push:
-    branches: [work/w1-provider-neutral-lifecycle-v2]
+    branches: [work/w1-provider-neutral-lifecycle-v2, work/w1-sandbox-launcher-prep]
     paths:
       - 'supabase/migrations/20260825023000_w1_provider_neutral_lifecycle_receipt_v2.sql'
       - '.github/workflows/w1-provider-neutral-lifecycle-db-contract.yml'
@@ -34,6 +34,10 @@ jobs:
           p = Path('supabase/migrations/20260825023000_w1_provider_neutral_lifecycle_receipt_v2.sql').read_text()
           low = p.lower()
           required = (
+              'compute_fabric_canonical_evidence_json_h205f22',
+              "if v_type = 'number' then",
+              "^-?(0|[1-9][0-9]*)$",
+              'non-integral numbers are forbidden in canonical evidence json',
               'compute_fabric_worker_lifecycle_receipt_v2_h205f22',
               'h205f22_w1_lifecycle_receipt_ingest_v2',
               'github_codespaces', 'vercel_sandbox', 'aws_ec2',
@@ -50,7 +54,14 @@ jobs:
           for token in required:
               assert token in low, token
 
-          # V2 must be additive: the legacy AWS reboot receipt is read nowhere and altered nowhere.
+          # Provider hashes must use the evidence canonicalizer, not the identity
+          # canonicalizer (which intentionally rejects all JSON numbers).
+          assert low.count('compute_fabric_canonical_evidence_json_h205f22(') >= 6
+          assert 'compute_fabric_canonical_json_h205f22(p_pre_provider_snapshot)' not in low
+          assert 'compute_fabric_canonical_json_h205f22(p_post_provider_snapshot)' not in low
+          assert 'create or replace function destruktion_meta.compute_fabric_canonical_json_h205f22' not in low
+
+          # V2 must be additive: the legacy AWS reboot receipt is altered nowhere.
           forbidden = (
               'alter table destruktion_meta.compute_fabric_worker_reboot_receipt_h205f22',
               'drop table destruktion_meta.compute_fabric_worker_reboot_receipt_h205f22',
