@@ -74,9 +74,10 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertNotIn("const MAX_PROMPT_CHARS = 42000;", self.trusted)
         self.assertIn('"A2_CHATGPT_TRUSTED_PRIME"', self.trusted)
         self.assertIn('"A2_CHATGPT_TRUSTED_CLICK"', self.trusted)
-        self.assertIn('beforeText !== "" && beforeText !== normalize(text)', self.trusted)
+        self.assertIn("canonicalVisible(before.text) !== canonicalVisible(text)", self.trusted)
         self.assertIn("chatgpt_cdp_composer_not_empty", self.trusted)
         self.assertIn('"Input.insertText"', self.trusted)
+        self.assertIn("waitForCanonicalReadback", self.trusted)
         self.assertIn("chatgpt_cdp_prime_readback_mismatch", self.trusted)
         self.assertIn('"Input.dispatchMouseEvent"', self.trusted)
         self.assertIn("chrome.debugger.attach", self.trusted)
@@ -86,17 +87,33 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn('url.pathname.startsWith("/c/")', self.trusted)
         self.assertNotIn("chat.z.ai", self.trusted)
 
-    def test_chatgpt_long_prompt_uses_single_atomic_editor_insertion(self):
+    def test_chatgpt_long_prompt_prefers_cdp_then_atomic_fallback(self):
         self.assertIn("const ATOMIC_LONG_PROMPT_THRESHOLD = 32000;", self.trusted)
         self.assertIn("async function insertComposerAtomic", self.trusted)
         self.assertIn("document.execCommand('insertText', false, text)", self.trusted)
-        self.assertIn("if (text.length > ATOMIC_LONG_PROMPT_THRESHOLD)", self.trusted)
-        self.assertIn('return "ATOMIC_EXEC_COMMAND";', self.trusted)
-        self.assertIn('return "CDP_INPUT_INSERT_TEXT";', self.trusted)
+        self.assertIn("if (!readbackMatched && text.length > ATOMIC_LONG_PROMPT_THRESHOLD)", self.trusted)
+        self.assertIn('let insertionMode = "CDP_INPUT_INSERT_TEXT";', self.trusted)
+        self.assertIn('insertionMode = "ATOMIC_EXEC_COMMAND_FALLBACK";', self.trusted)
         self.assertNotIn("for (const chunk", self.trusted)
         self.assertNotIn("slice(offset", self.trusted)
         self.assertIn("insertion_mode: insertionMode", self.trusted)
+        cdp = self.trusted.index('await send(tabId, "Input.insertText", { text });')
+        fallback = self.trusted.index("if (!readbackMatched && text.length > ATOMIC_LONG_PROMPT_THRESHOLD)")
+        self.assertLess(cdp, fallback)
+
+    def test_chatgpt_prosemirror_comparisons_are_canonical_but_fail_closed(self):
+        for source in [self.content, self.trusted]:
+            self.assertIn("canonicalVisible", source)
+            self.assertIn("\\u00a0", source)
+            self.assertIn("\\u200B", source)
+            self.assertIn("\\s+", source)
+        self.assertIn("textMatchesExpected", self.content)
+        self.assertIn("canonicalVisible(state.text) === canonicalVisible(text)", self.trusted)
+        self.assertIn("canon(text) !== canon(expected)", self.trusted)
+        self.assertIn("textMatchesExpected(composerText(pair.composer), expectedText)", self.content)
+        self.assertIn("textMatchesExpected(m.text, expectedText)", self.content)
         self.assertIn("chatgpt_cdp_prime_readback_mismatch", self.trusted)
+        self.assertIn("composer_readback_mismatch", self.trusted)
 
     def test_compat_is_selector_only_no_async_transport(self):
         self.assertIn('markExactSendButton("#composer-submit-button")', self.compat)
@@ -116,7 +133,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
             "SENT_AND_DOM_VERIFIED", "SENT_WEAK_DOM_VERIFIED"
         ]:
             self.assertIn(needle, self.content)
-        self.assertIn("composerText(pair.composer) === expected", self.content)
+        self.assertIn("textMatchesExpected(composerText(pair.composer), expectedText)", self.content)
         self.assertIn('semanticButtonCandidates("stop").length > 0', self.content)
 
     def test_arming_idempotency_visibility_and_non_authority_remain(self):
