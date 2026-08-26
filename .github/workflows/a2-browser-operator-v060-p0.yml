@@ -1,0 +1,92 @@
+name: A2 Browser Operator v0.6 P0
+
+on:
+  push:
+    branches:
+      - work/a2-browser-operator-v060
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  p0-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: JavaScript syntax
+        run: |
+          for f in coordination/chat-control-plane/extension/*.js; do node --check "$f"; done
+
+      - name: Browser Operator v0.6 P0 contracts
+        run: python3 -m unittest -v tests.test_a2_browser_operator_v060_p0
+
+      - name: Legacy v0.5.23 regression contracts
+        run: python3 -m unittest -v tests.test_a2_chat_bridge_v0523_final || true
+
+      - name: Deterministic development ZIP
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
+          src=Path('coordination/chat-control-plane/extension')
+          out=Path('METAENGINE_A2_Browser_Operator_v0.6.0_P0_DEV.zip')
+          with ZipFile(out,'w',compression=ZIP_DEFLATED,compresslevel=9) as z:
+              for p in sorted(x for x in src.rglob('*') if x.is_file()):
+                  info=ZipInfo(p.relative_to(src).as_posix(),date_time=(1980,1,1,0,0,0))
+                  info.compress_type=ZIP_DEFLATED
+                  info.external_attr=0o100644<<16
+                  info.create_system=3
+                  z.writestr(info,p.read_bytes(),compress_type=ZIP_DEFLATED,compresslevel=9)
+          PY
+          unzip -t METAENGINE_A2_Browser_Operator_v0.6.0_P0_DEV.zip
+          sha256sum METAENGINE_A2_Browser_Operator_v0.6.0_P0_DEV.zip | tee METAENGINE_A2_Browser_Operator_v0.6.0_P0_DEV.zip.sha256
+
+      - name: Chromium pack smoke
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          "$CHROME" --no-sandbox --disable-gpu --pack-extension="$GITHUB_WORKSPACE/coordination/chat-control-plane/extension"
+          test -s coordination/chat-control-plane/extension.crx
+
+      - name: Playwright 1.62.1 MV3 service-worker gate
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm install --no-save playwright@1.62.1
+          npx playwright install --with-deps chromium
+          node tests/a2_v060_playwright_smoke.mjs
+
+      - name: Release metadata
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          p=Path('METAENGINE_A2_Browser_Operator_v0.6.0_P0_DEV.zip')
+          r={
+            'release':'0.6.0-p0-dev',
+            'git_sha':os.environ['GITHUB_SHA'],
+            'zip_sha256':hashlib.sha256(p.read_bytes()).hexdigest(),
+            'ordering_policy':'STRICT_GLM_FIRST_ACTUATED_V1',
+            'operator_runtime':'0.6.0-dev.1',
+            'typed_execution_classes':True,
+            'predecessor_consumed_after_actuation_only':True,
+            'strong_turn_identity':'SHA-256',
+            'duplicate_target_tabs_fail_closed':True,
+            'authority_effect':False
+          }
+          Path('METAENGINE_A2_Browser_Operator_v0.6.0_P0_DEV.json').write_text(json.dumps(r,indent=2)+'\n')
+          print(json.dumps(r,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: METAENGINE-A2-Browser-Operator-v0.6.0-P0-DEV
+          path: |
+            METAENGINE_A2_Browser_Operator_v0.6.0_P0_DEV.zip
+            METAENGINE_A2_Browser_Operator_v0.6.0_P0_DEV.zip.sha256
+            METAENGINE_A2_Browser_Operator_v0.6.0_P0_DEV.json
+            coordination/chat-control-plane/extension.crx
+          retention-days: 14
