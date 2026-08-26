@@ -4,6 +4,8 @@
   const CDP_VERSION = "1.3";
   const MAX_PROMPT_CHARS = 120000;
   const ATOMIC_LONG_PROMPT_THRESHOLD = 32000;
+  const PRIME_LEASE_MS = 15000;
+  const PRIME_LEASE_PREFIX = "a2-chatgpt-prime-lease:";
   const inFlightTabs = new Set();
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const normalize = (value) => String(value ?? "").replace(/\r\n/g, "\n").trim();
@@ -13,9 +15,46 @@
     .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
     .replace(/\s+/gu, " ")
     .trim();
+  const semanticVisible = (value) => canonicalVisible(value).replace(/\s+/gu, "");
 
   function target(tabId) { return { tabId }; }
   async function send(tabId, method, params = {}) { return chrome.debugger.sendCommand(target(tabId), method, params); }
+
+  async function sha256Hex(value) {
+    const bytes = new TextEncoder().encode(String(value ?? ""));
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  async function promptFingerprint(text) {
+    return sha256Hex(semanticVisible(text));
+  }
+
+  function leaseKey(tabId) { return `${PRIME_LEASE_PREFIX}${tabId}`; }
+
+  async function savePrimeLease(tabId, text) {
+    await chrome.storage.session.set({
+      [leaseKey(tabId)]: {
+        prompt_sha256: await promptFingerprint(text),
+        expires_at: Date.now() + PRIME_LEASE_MS
+      }
+    });
+  }
+
+  async function requirePrimeLease(tabId, text) {
+    const key = leaseKey(tabId);
+    const stored = await chrome.storage.session.get(key);
+    const lease = stored[key];
+    const expected = await promptFingerprint(text);
+    if (!lease || Number(lease.expires_at || 0) < Date.now() || lease.prompt_sha256 !== expected) {
+      await chrome.storage.session.remove(key);
+      throw new Error("chatgpt_cdp_prime_lease_mismatch");
+    }
+  }
+
+  async function clearPrimeLease(tabId) {
+    try { await chrome.storage.session.remove(leaseKey(tabId)); } catch (_) {}
+  }
 
   async function evaluate(tabId, expression) {
     const result = await send(tabId, "Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
@@ -114,6 +153,7 @@
     return evaluate(tabId, `(() => {
       const expected = ${JSON.stringify(expectedText)};
       const canon = (v) => String(v ?? '').replace(/\\r\\n?/g, '\\n').replace(/\u00a0/g, ' ').replace(/[\u200B-\u200D\u2060\uFEFF]/g, '').replace(/\s+/gu, ' ').trim();
+      const semantic = (v) => canon(v).replace(/\s+/gu, '');
       const visible = (el) => {
         if (!(el instanceof HTMLElement)) return false;
         const style = getComputedStyle(el);
@@ -126,7 +166,11 @@
       const form = composer.closest('form');
       if (!form) return { ok:false, error:'composer_form_missing' };
       const text = composer.innerText || composer.textContent || '';
-      if (canon(text) !== canon(expected)) return { ok:false, error:'composer_readback_mismatch' };
+      if (semantic(text) !== semantic(expected)) return { ok:false, error:'composer_semantic_mismatch' };
+      const scoped = canon(text);
+      if (!scoped.startsWith(canon('A2 CHAT BRIDGE — AUTONOMOUS CONTINUE')) || !scoped.includes('bridge_job_target=GPT') || !scoped.includes('transport=WEB_CHAT_INTERACTIVE_REMOTE')) {
+        return { ok:false, error:'composer_scope_mismatch' };
+      }
       const raw = [
         ...form.querySelectorAll('#composer-submit-button'),
         ...form.querySelectorAll("button[data-testid='send-button']"),
@@ -138,7 +182,11 @@
       if (!(button instanceof HTMLButtonElement)) return { ok:false, error:'send_not_button' };
       if (button.disabled || button.getAttribute('aria-disabled') === 'true') return { ok:false, error:'send_disabled' };
       const rect = button.getBoundingClientRect();
-      return { ok:true, x:rect.left + rect.width / 2, y:rect.top + rect.height / 2 };
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      if (!hit || !(hit === button || button.contains(hit))) return { ok:false, error:'send_obscured' };
+      return { ok:true, x, y };
     })()`);
   }
 
@@ -160,6 +208,7 @@
 
   async function trustedPrime(tabId, prompt) {
     const text = validateBridgePrompt(prompt);
+    await clearPrimeLease(tabId);
     return withDebugger(tabId, async () => {
       const before = await inspectComposer(tabId);
       if (!before?.ok) throw new Error(`chatgpt_cdp_${before?.error || "composer_inspect_failed"}`);
@@ -184,20 +233,26 @@
       }
 
       if (!readbackMatched) throw new Error("chatgpt_cdp_prime_readback_mismatch");
-      return { ok: true, phase: "PRIMED", insertion_mode: insertionMode };
+      await savePrimeLease(tabId, text);
+      return { ok: true, phase: "PRIMED", insertion_mode: insertionMode, lease_ms: PRIME_LEASE_MS };
     });
   }
 
   async function trustedClick(tabId, prompt) {
     const text = validateBridgePrompt(prompt);
-    return withDebugger(tabId, async () => {
-      const sendState = await inspectSend(tabId, text);
-      if (!sendState?.ok) throw new Error(`chatgpt_cdp_${sendState?.error || "send_inspect_failed"}`);
-      await send(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x: sendState.x, y: sendState.y });
-      await send(tabId, "Input.dispatchMouseEvent", { type: "mousePressed", x: sendState.x, y: sendState.y, button: "left", clickCount: 1 });
-      await send(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x: sendState.x, y: sendState.y, button: "left", clickCount: 1 });
-      return { ok: true, phase: "CLICKED" };
-    });
+    await requirePrimeLease(tabId, text);
+    try {
+      return await withDebugger(tabId, async () => {
+        const sendState = await inspectSend(tabId, text);
+        if (!sendState?.ok) throw new Error(`chatgpt_cdp_${sendState?.error || "send_inspect_failed"}`);
+        await send(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x: sendState.x, y: sendState.y });
+        await send(tabId, "Input.dispatchMouseEvent", { type: "mousePressed", x: sendState.x, y: sendState.y, button: "left", clickCount: 1 });
+        await send(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x: sendState.x, y: sendState.y, button: "left", clickCount: 1 });
+        return { ok: true, phase: "CLICKED" };
+      });
+    } finally {
+      await clearPrimeLease(tabId);
+    }
   }
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
