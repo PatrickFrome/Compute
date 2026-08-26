@@ -5,7 +5,9 @@
   const MAX_DRAFT_CHARS = 120000;
   let mode = "OBSERVE";
   let heldIntentId = null;
+  let intentPending = false;
   let allowOnce = null;
+  let bridgeBypass = null;
 
   const normalize = (value) => String(value ?? "").replace(/\r\n?/g, "\n").trim();
 
@@ -26,7 +28,7 @@
   function composerCandidates() {
     const selectors = platform() === "CHATGPT"
       ? ["#prompt-textarea", "[data-testid='composer-text-input'] textarea", "[contenteditable='true'][data-lexical-editor='true']", "[role='textbox'][contenteditable='true']"]
-      : ["#chat-input", "textarea.input-scroll", ".messageInputContainer textarea", "textarea"];
+      : ["#chat-input", "textarea.input-scroll", ".messageInputContainer textarea", "textarea", "[role='textbox'][contenteditable='true']"];
     const found = [];
     for (const selector of selectors) {
       for (const element of document.querySelectorAll(selector)) {
@@ -48,8 +50,8 @@
     return normalize(composer.innerText || composer.textContent || "");
   }
 
-  function isBridgeOwnedDraft(draft) {
-    return draft.startsWith("A2 CHAT BRIDGE — AUTONOMOUS CONTINUE") && draft.includes("transport=WEB_CHAT_INTERACTIVE_REMOTE");
+  function isEditableTarget(target) {
+    return target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement || (target instanceof HTMLElement && (target.isContentEditable || target.getAttribute("role") === "textbox"));
   }
 
   function isStrongSendButton(button) {
@@ -74,35 +76,80 @@
     return true;
   }
 
-  async function sendIntent(eventType, composer, draft) {
-    const response = await chrome.runtime.sendMessage({
-      type: "A2_PROMPT_GATE_INTENT",
+  function consumeBridgeBypass(draft) {
+    if (!bridgeBypass) return false;
+    if (Date.now() > bridgeBypass.expiresAt) {
+      bridgeBypass = null;
+      return false;
+    }
+    if (normalize(draft) !== normalize(bridgeBypass.draft)) return false;
+    bridgeBypass = null;
+    return true;
+  }
+
+  function stopEvent(event) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+  }
+
+  function reportSensorError(eventType, error) {
+    chrome.runtime.sendMessage({
+      type: "A2_PROMPT_GATE_SENSOR_ERROR",
       event_type: eventType,
       platform: platform(),
       page_url: location.href,
-      draft: draft.slice(0, MAX_DRAFT_CHARS)
+      error: String(error || "prompt_gate_sensor_error").slice(0, 240)
     }).catch(() => null);
-    if (response?.ok && response.intent_id) heldIntentId = String(response.intent_id);
+  }
+
+  async function sendIntent(eventType, draft) {
+    if (intentPending || heldIntentId) return;
+    intentPending = true;
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "A2_PROMPT_GATE_INTENT",
+        event_type: eventType,
+        platform: platform(),
+        page_url: location.href,
+        draft: draft.slice(0, MAX_DRAFT_CHARS)
+      }).catch(() => null);
+      if (response?.ok && response.intent_id) heldIntentId = String(response.intent_id);
+      else if (response?.error) reportSensorError(eventType, response.error);
+    } finally {
+      intentPending = false;
+    }
   }
 
   function intercept(event, eventType) {
     if (mode !== "GATE_SEND" || event.isTrusted !== true) return false;
     const composer = resolveComposer();
-    if (!composer) return false;
+    if (!composer) {
+      stopEvent(event);
+      reportSensorError(eventType, "prompt_gate_composer_unavailable_or_ambiguous");
+      return true;
+    }
     const draft = composerText(composer);
-    if (!draft || isBridgeOwnedDraft(draft) || consumeAllowOnce(draft)) return false;
+    if (!draft) {
+      stopEvent(event);
+      reportSensorError(eventType, "prompt_gate_draft_empty_or_unreadable");
+      return true;
+    }
+    if (consumeBridgeBypass(draft) || consumeAllowOnce(draft)) return false;
 
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    event.stopPropagation();
-    sendIntent(eventType, composer, draft);
+    stopEvent(event);
+    sendIntent(eventType, draft);
     return true;
   }
 
   window.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return;
     const composer = resolveComposer();
-    if (!composer || !(event.target === composer || composer.contains?.(event.target))) return;
+    if (composer) {
+      if (!(event.target === composer || composer.contains?.(event.target))) return;
+    } else if (!isEditableTarget(event.target)) {
+      return;
+    }
     intercept(event, "TRUSTED_ENTER");
   }, true);
 
@@ -138,7 +185,27 @@
     if (message?.type === "A2_PROMPT_GATE_CONFIG") {
       const next = String(message.mode || "OBSERVE");
       mode = MODES.has(next) ? next : "OBSERVE";
+      if (mode === "OBSERVE") {
+        heldIntentId = null;
+        intentPending = false;
+        allowOnce = null;
+      }
       sendResponse({ ok: true, mode });
+      return false;
+    }
+    if (message?.type === "A2_PROMPT_GATE_BRIDGE_BYPASS") {
+      const draft = String(message.draft || "").slice(0, MAX_DRAFT_CHARS);
+      const ttl = Math.max(1000, Math.min(20000, Number(message.expires_in_ms) || 12000));
+      if (!normalize(draft)) {
+        sendResponse({ ok: false, error: "prompt_gate_bridge_bypass_empty" });
+        return false;
+      }
+      bridgeBypass = {
+        draft,
+        commandId: String(message.command_id || ""),
+        expiresAt: Date.now() + ttl
+      };
+      sendResponse({ ok: true, command_id: bridgeBypass.commandId, expires_in_ms: ttl });
       return false;
     }
     if (message?.type !== "A2_PROMPT_GATE_RESOLUTION") return false;
@@ -147,6 +214,7 @@
       const action = String(message.action || "CANCEL");
       if (action === "CANCEL") {
         heldIntentId = null;
+        intentPending = false;
         sendResponse({ ok: true, action });
         return false;
       }
@@ -155,6 +223,7 @@
         if (!draft) throw new Error("prompt_gate_allow_empty");
         allowOnce = { draft, expiresAt: Date.now() + 8000 };
         heldIntentId = null;
+        intentPending = false;
         sendResponse({ ok: true, action, expires_in_ms: 8000 });
         return false;
       }
@@ -162,6 +231,7 @@
         const rewritten = setDraft(String(message.draft || ""));
         allowOnce = { draft: rewritten, expiresAt: Date.now() + 8000 };
         heldIntentId = null;
+        intentPending = false;
         sendResponse({ ok: true, action, rewritten_length: rewritten.length, expires_in_ms: 8000 });
         return false;
       }
