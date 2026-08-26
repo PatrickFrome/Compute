@@ -27,7 +27,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
 
     def test_manifest_and_worker_entrypoints(self):
         self.assertEqual(self.manifest["manifest_version"], 3)
-        self.assertEqual(self.manifest["version"], "0.5.11")
+        self.assertEqual(self.manifest["version"], "0.5.12")
         self.assertEqual(self.manifest["background"]["service_worker"], "background-entry.js")
         self.assertIn("debugger", self.manifest["permissions"])
         self.assertEqual(self.manifest["content_scripts"][0]["js"], ["platform-dom-compat.js", "content.js"])
@@ -51,6 +51,10 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("singleOpenChatgptConversation", self.background)
         self.assertIn(PROJECT_ZAI, self.background)
         self.assertIn("target_url_mismatch", self.background)
+        self.assertIn("async function refreshSnapshotEnvelopesIfStale", self.background)
+        self.assertIn("Math.max(5000, settings.pollMs * 2)", self.background)
+        self.assertIn("const snapshots = await refreshSnapshotEnvelopesIfStale(settings);", self.background)
+        self.assertIn("body: JSON.stringify({ snapshots })", self.background)
 
     def test_chatgpt_path_is_single_trusted_send(self):
         execute = self.content.split("async function executeSend(command)", 1)[1].split("async function emitSnapshot", 1)[0]
