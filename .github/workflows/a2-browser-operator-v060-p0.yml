@@ -20,17 +20,17 @@ jobs:
       - name: JavaScript syntax
         run: |
           for f in coordination/chat-control-plane/extension/*.js; do node --check "$f"; done
-          node --check tests/a2_v060_operator_control_lab.mjs
-          node --check tests/a2_v060_prompt_gate_browser_lab.mjs
-          node --check tests/a2_v060_perception_lab.mjs
+          for f in tests/a2_v060_*.mjs; do node --check "$f"; done
 
       - name: Browser Operator v0.6 P0 contracts
         run: python3 -m unittest -v tests.test_a2_browser_operator_v060_p0
 
-      - name: Trusted operator-control and perception labs
+      - name: Trusted operator runtime behavioral labs
         run: |
+          node tests/a2_v060_debugger_broker_lab.mjs
           node tests/a2_v060_operator_control_lab.mjs
           node tests/a2_v060_perception_lab.mjs
+          node tests/a2_v060_operator_actions_lab.mjs
 
       - name: Legacy v0.5.23 regression contracts
         run: python3 -m unittest -v tests.test_a2_chat_bridge_v0523_final || true
@@ -92,6 +92,9 @@ jobs:
             'hybrid_perception_ax_domsnapshot_screenshot':True,
             'full_perception_memory_only':True,
             'perception_persistent_metadata_only':True,
+            'debugger_broker_serialized_short_sessions':True,
+            'point_actions_frame_sha256_bound':True,
+            'external_navigation_download_file_input_fenced':True,
             'behavioral_browser_lab':True,
             'authority_effect':False
           }
