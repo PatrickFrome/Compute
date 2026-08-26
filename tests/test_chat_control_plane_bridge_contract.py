@@ -55,6 +55,8 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("Math.max(5000, settings.pollMs * 2)", self.background)
         self.assertIn("const snapshots = await refreshSnapshotEnvelopesIfStale(settings);", self.background)
         self.assertIn("body: JSON.stringify({ snapshots })", self.background)
+        self.assertIn("scheduleReciprocalPoll", self.background)
+        self.assertIn("5200", self.background)
 
     def test_chatgpt_path_is_single_trusted_send(self):
         execute = self.content.split("async function executeSend(command)", 1)[1].split("async function emitSnapshot", 1)[0]
@@ -84,8 +86,34 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertNotIn('"Input.dispatchMouseEvent"', self.trusted)
         self.assertIn("chrome.debugger.attach", self.trusted)
         self.assertIn("chrome.debugger.detach", self.trusted)
+        self.assertIn("globalThis.A2_CHATGPT_TRUSTED_SEND = trustedSend", self.trusted)
         self.assertLess(self.trusted.index("chrome.debugger.attach"), self.trusted.index('await send(tabId, "Input.insertText", { text });'))
         self.assertLess(self.trusted.index('await send(tabId, "Input.insertText", { text });'), self.trusted.index("await dispatchTrustedEnter(tabId);"))
+
+    def test_chatgpt_rollover_is_scoped_to_confirmed_exhaustion(self):
+        self.assertIn("conversationExhausted", self.trusted)
+        self.assertIn("maximum length for this conversation", self.trusted)
+        self.assertIn("chatgpt_cdp_conversation_exhausted", self.trusted)
+        self.assertIn('url.pathname === "/"', self.trusted)
+        self.assertIn("chatgptRolloverPending", self.trusted)
+        self.assertIn("chatgptRolloverPendingTabId", self.trusted)
+        self.assertIn("rolloverChatgptAndRetry", self.background)
+        self.assertIn("CHATGPT_ROOT_URL", self.background)
+        self.assertIn("waitForNewChatgptConversation", self.background)
+        self.assertIn("CHATGPT_NEW_CHAT_ROLLOVER", self.background)
+        self.assertIn("chatgptUrl: newUrl", self.background)
+        self.assertIn("globalThis.A2_CHATGPT_TRUSTED_SEND", self.background)
+        self.assertIn("String(command.prompt || \"\")", self.background)
+
+    def test_glm_recovery_is_one_reload_and_one_retry_only(self):
+        self.assertIn("GLM_RETRYABLE_ERRORS", self.background)
+        self.assertIn("reloadAndRetryGlm", self.background)
+        self.assertEqual(self.background.count("await chrome.tabs.reload(tab.id);"), 1)
+        self.assertIn('snapshotEvidence(before, latest, command.prompt, "GLM_ZAI")', self.background)
+        self.assertIn("GLM_PRE_RELOAD_OBSERVED", self.background)
+        self.assertIn("GLM_POST_RELOAD_OBSERVED", self.background)
+        self.assertIn("GLM_RELOAD_RETRY_ONCE", self.background)
+        self.assertNotIn("while (true)", self.background)
 
     def test_critical_chatgpt_fences_remain_without_full_prompt_readback(self):
         self.assertIn("const MAX_PROMPT_CHARS = 120000;", self.trusted)
