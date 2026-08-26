@@ -10,16 +10,23 @@ class BrowserOperatorV060P0(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.manifest = json.loads((EXT / "manifest.json").read_text())
+        cls.entry = (EXT / "background-entry.js").read_text()
         cls.bg = (EXT / "background.js").read_text()
         cls.gpt = (EXT / "trusted-chatgpt.js").read_text()
         cls.glm = (EXT / "trusted-glm.js").read_text()
         cls.content = (EXT / "content.js").read_text()
+        cls.gate = (EXT / "prompt-gate.js").read_text()
+        cls.control = (EXT / "operator-control.js").read_text()
+        cls.bindings = (EXT / "operator-gate-bindings.js").read_text()
+        cls.panel = (EXT / "sidepanel.js").read_text()
 
     def test_01_version_and_identity(self):
         self.assertEqual(self.manifest["manifest_version"], 3)
         self.assertEqual(self.manifest["version"], "0.6.0")
         self.assertEqual(self.manifest["name"], "METAENGINE A2 Browser Operator")
         self.assertIn("key", self.manifest)
+        self.assertIn("sidePanel", self.manifest["permissions"])
+        self.assertEqual(self.manifest["side_panel"]["default_path"], "sidepanel.html")
 
     def test_02_exact_tab_duplicate_fails_closed(self):
         self.assertIn("duplicate_target_tabs", self.bg)
@@ -85,6 +92,46 @@ class BrowserOperatorV060P0(unittest.TestCase):
     def test_11_operator_runtime_marker(self):
         self.assertIn('const OPERATOR_RUNTIME = "0.6.0-dev.1"', self.bg)
         self.assertIn("globalThis.A2_OPERATOR_RUNTIME=OPERATOR_RUNTIME", self.bg)
+
+    def test_12_prompt_gate_runs_at_document_start(self):
+        first = self.manifest["content_scripts"][0]
+        self.assertEqual(first["js"], ["prompt-gate.js"])
+        self.assertEqual(first["run_at"], "document_start")
+        self.assertIn("GATE_SEND", self.gate)
+        self.assertIn("stopImmediatePropagation", self.gate)
+        self.assertIn("prompt_gate_composer_unavailable_or_ambiguous", self.gate)
+
+    def test_13_textual_bridge_spoof_is_not_a_bypass(self):
+        self.assertNotIn("isBridgeOwnedDraft", self.gate)
+        self.assertNotIn('startsWith("A2 CHAT BRIDGE', self.gate)
+        self.assertIn("A2_PROMPT_GATE_BRIDGE_BYPASS", self.gate)
+        self.assertIn("A2_PROMPT_GATE_BRIDGE_BYPASS_CLEAR", self.gate)
+        self.assertIn("armPromptGateBypass", self.gpt)
+        self.assertIn("operator-gate-bindings.js", self.entry)
+
+    def test_14_operator_control_is_trusted_and_session_scoped(self):
+        self.assertIn('chrome.runtime.getURL("sidepanel.html")', self.control)
+        self.assertIn("operator_sender_not_trusted", self.control)
+        self.assertIn("chrome.storage.session.set", self.control)
+        self.assertIn("a2OperatorHeldPromptIntentV060", self.control)
+        self.assertNotIn("bridgeSecret", self.control)
+        self.assertIn("A2_OPERATOR_RESOLVE_PROMPT", self.control)
+
+    def test_15_sidepanel_controls_arm_and_gate(self):
+        self.assertIn("A2_OPERATOR_SET_ARM", self.panel)
+        self.assertIn("A2_OPERATOR_SET_MODE", self.panel)
+        self.assertIn("REWRITE_ALLOW_ONCE", self.panel)
+        self.assertIn("CANCEL", self.panel)
+
+    def test_16_glm_gate_capability_is_cleared_in_finally(self):
+        self.assertIn("const originalGlm", self.bindings)
+        self.assertIn("A2_PROMPT_GATE_BRIDGE_BYPASS", self.bindings)
+        self.assertIn("A2_PROMPT_GATE_BRIDGE_BYPASS_CLEAR", self.bindings)
+        self.assertIn("finally", self.bindings)
+
+    def test_17_behavioral_labs_are_present(self):
+        self.assertTrue((ROOT / "tests" / "a2_v060_prompt_gate_browser_lab.mjs").exists())
+        self.assertTrue((ROOT / "tests" / "a2_v060_operator_control_lab.mjs").exists())
 
 
 if __name__ == "__main__":
