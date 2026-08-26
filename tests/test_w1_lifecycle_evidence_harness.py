@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
+from controller.w1 import s2_runtime_canary_receipt
 from worker.native_linux import h1_h13_prereq_probe
 from worker.native_linux import w1_lifecycle_evidence_harness as harness
 
@@ -75,6 +76,55 @@ def h1_pass() -> dict:
     }
 
 
+def s2_pass() -> dict:
+    output = "\n".join(
+        [
+            "EUID=1001",
+            "PID=2",
+            "PPID=1",
+            "WORKER_IS_NOT_PID1=true",
+            "PARENT_IS_NAMESPACE_PID1=true",
+            "NO_NEW_PRIVS=1",
+            "SECCOMP=2",
+            "ROOT_FS=tmpfs",
+            "OLDROOT_DETACHED=true",
+            "WORKSPACE_RW=true",
+            "NETWORK_DEFAULT_DENY=true",
+            "CANONICAL=false",
+            "AUTHORITY_EFFECT=false",
+            "WORKER_ADMITTED=false",
+            "W1_VERIFIED=false",
+        ]
+    ) + "\n"
+    return s2_runtime_canary_receipt.compose(
+        launcher_rc=0,
+        output=output,
+        source_sha256=harness.EXPECTED_S2_SOURCE_SHA256,
+        runner={
+            "run_id": "999",
+            "run_attempt": "1",
+            "runner_os": "Linux",
+            "runner_arch": "X64",
+            "head_sha": GIT_SHA,
+        },
+    )
+
+
+def s2_unavailable() -> dict:
+    return s2_runtime_canary_receipt.compose(
+        launcher_rc=78,
+        output="W1_S2_SANDBOX_UNAVAILABLE: cannot write /proc/self/setgroups: Permission denied\n",
+        source_sha256=harness.EXPECTED_S2_SOURCE_SHA256,
+        runner={
+            "run_id": "999",
+            "run_attempt": "1",
+            "runner_os": "Linux",
+            "runner_arch": "X64",
+            "head_sha": GIT_SHA,
+        },
+    )
+
+
 class W1LifecycleEvidenceHarnessTests(unittest.TestCase):
     def inputs(self) -> dict:
         return {
@@ -85,20 +135,39 @@ class W1LifecycleEvidenceHarnessTests(unittest.TestCase):
             "post_provider": provider_snapshot(state="Available", updated_at="2026-08-26T05:00:04Z", environment_id="env-post"),
             "action": action(),
             "h1_post": h1_pass(),
+            "s2_runtime": s2_pass(),
         }
 
     def test_composes_structurally_eligible_evidence_without_authority_claims(self):
         result = harness.compose_codespaces(**self.inputs())
         self.assertEqual(result["outcome"], "W1_LIFECYCLE_EVIDENCE_COMPOSED_NONAUTHORITY")
         self.assertRegex(result["evidence_sha256"], r"^[0-9a-f]{64}$")
+        self.assertTrue(result["evidence"]["local_checks"]["s2_runtime_receipt_pass"])
         for key in (
             "provider_identity_verified", "provider_action_verified", "s2_runtime_verified",
             "outer_cgroup_witness_verified", "persisted_readback_verified",
             "persistent_worker_proof", "worker_admitted", "w1_verified", "canonical", "authority_effect",
         ):
             self.assertFalse(result[key], key)
-        self.assertIn("live_s2_runtime_canaries", result["next_required"])
+        self.assertIn("authenticated_s2_runtime_receipt_provenance", result["next_required"])
         self.assertIn("prebound_outer_cgroup_witness", result["next_required"])
+
+    def test_unavailable_s2_runtime_is_rejected(self):
+        values = self.inputs()
+        values["s2_runtime"] = s2_unavailable()
+        with self.assertRaisesRegex(ValueError, "PASS required"):
+            harness.compose_codespaces(**values)
+
+    def test_s2_source_rebind_is_rejected(self):
+        values = self.inputs()
+        values["s2_runtime"] = s2_runtime_canary_receipt.compose(
+            launcher_rc=0,
+            output="\n".join(f"{k}={v}" for k, v in s2_runtime_canary_receipt.PASS_MARKERS.items()) + "\n",
+            source_sha256="9" * 64,
+            runner={"run_id": "1", "run_attempt": "1", "runner_os": "Linux", "runner_arch": "X64", "head_sha": GIT_SHA},
+        )
+        with self.assertRaisesRegex(ValueError, "source SHA mismatch"):
+            harness.compose_codespaces(**values)
 
     def test_same_boot_id_is_rejected(self):
         values = self.inputs()
