@@ -1,9 +1,10 @@
-name: W1 Rootless Sandbox Runtime Canary
+name: W1 S2 Rootless Sandbox V2 Runtime Canary
 
 on:
   push:
     branches: [work/w1-sandbox-launcher-prep]
     paths:
+      - 'worker/native_linux/rootless_sandbox_launcher_v2.py'
       - 'worker/native_linux/rootless_sandbox_launcher.py'
       - '.github/workflows/w1-rootless-sandbox-runtime-canary.yml'
 
@@ -21,40 +22,99 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run non-authority kernel isolation canary
+      - name: Assert audited S2 v2 source identity
         shell: bash
         run: |
           set -euo pipefail
+          expected='46b688914dda5c93c46b4dec8784a02c2825a4fd5145ac6a98512ee7b6b2c1af'
+          actual="$(sha256sum worker/native_linux/rootless_sandbox_launcher_v2.py | awk '{print $1}')"
+          echo "S2_V2_SHA256=$actual"
+          test "$actual" = "$expected"
+
+      - name: Run non-authority S2 v2 kernel isolation canary
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$GITHUB_WORKSPACE"
+          sandbox_root="/tmp/metaengine-w1-s2-v2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf "$sandbox_root"
           set +e
-          python3 worker/native_linux/rootless_sandbox_launcher.py python3 - <<'PY' > /tmp/w1-sandbox-canary.txt 2>&1
+          python3 worker/native_linux/rootless_sandbox_launcher_v2.py \
+            --workspace "$workspace" \
+            --sandbox-root "$sandbox_root" \
+            -- python3 - <<'PY' > /tmp/w1-s2-v2-canary.txt 2>&1
+          import os
           from pathlib import Path
+          import socket
+
           status = Path('/proc/self/status').read_text()
           fields = {}
           for line in status.splitlines():
               if ':' in line:
-                  k, v = line.split(':', 1)
-                  fields[k] = v.strip()
-          self_mnt = Path('/proc/self/ns/mnt').stat().st_ino
-          init_mnt = Path('/proc/1/ns/mnt').stat().st_ino
-          print('EUID=' + str(__import__('os').geteuid()))
+                  key, value = line.split(':', 1)
+                  fields[key] = value.strip()
+
+          root_fs = 'UNKNOWN'
+          for line in Path('/proc/self/mountinfo').read_text().splitlines():
+              left, sep, right = line.partition(' - ')
+              if not sep:
+                  continue
+              left_fields = left.split()
+              right_fields = right.split()
+              if len(left_fields) >= 5 and right_fields and left_fields[4] == '/':
+                  root_fs = right_fields[0]
+                  break
+
+          network_default_deny = False
+          sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+          sock.settimeout(0.25)
+          try:
+              sock.connect(('1.1.1.1', 53))
+          except OSError:
+              network_default_deny = True
+          finally:
+              sock.close()
+
+          workspace = Path(os.environ['GITHUB_WORKSPACE'])
+          probe = workspace / '.w1-s2-v2-runtime-canary'
+          probe.write_text('ok', encoding='utf-8')
+          workspace_rw = probe.read_text(encoding='utf-8') == 'ok'
+          probe.unlink()
+
+          print('EUID=' + str(os.geteuid()))
+          print('PID=' + str(os.getpid()))
+          print('PPID=' + str(os.getppid()))
+          print('WORKER_IS_NOT_PID1=' + str(os.getpid() != 1).lower())
+          print('PARENT_IS_NAMESPACE_PID1=' + str(os.getppid() == 1).lower())
           print('NO_NEW_PRIVS=' + fields.get('NoNewPrivs', '?'))
           print('SECCOMP=' + fields.get('Seccomp', '?'))
-          print('MOUNT_NAMESPACE_ISOLATED=' + str(self_mnt != init_mnt).lower())
+          print('ROOT_FS=' + root_fs)
+          print('OLDROOT_DETACHED=' + str(not Path('/.oldroot').exists()).lower())
+          print('WORKSPACE_RW=' + str(workspace_rw).lower())
+          print('NETWORK_DEFAULT_DENY=' + str(network_default_deny).lower())
           print('CANONICAL=false')
           print('AUTHORITY_EFFECT=false')
+          print('WORKER_ADMITTED=false')
           print('W1_VERIFIED=false')
           PY
           rc=$?
           set -e
-          cat /tmp/w1-sandbox-canary.txt
+          cat /tmp/w1-s2-v2-canary.txt
           echo "LAUNCHER_RC=$rc"
+          rm -rf "$sandbox_root" || true
           if [ "$rc" -eq 78 ]; then
-            echo 'RUNTIME_CANARY=UNAVAILABLE_FAIL_CLOSED'
+            echo 'S2_V2_RUNTIME_CANARY=UNAVAILABLE_FAIL_CLOSED'
             exit 0
           fi
           test "$rc" -eq 0
-          grep -q '^NO_NEW_PRIVS=1$' /tmp/w1-sandbox-canary.txt
-          grep -q '^SECCOMP=2$' /tmp/w1-sandbox-canary.txt
-          grep -q '^MOUNT_NAMESPACE_ISOLATED=true$' /tmp/w1-sandbox-canary.txt
-          grep -q '^W1_VERIFIED=false$' /tmp/w1-sandbox-canary.txt
-          echo 'RUNTIME_CANARY=PASS_NONAUTHORITY'
+          grep -q '^WORKER_IS_NOT_PID1=true$' /tmp/w1-s2-v2-canary.txt
+          grep -q '^PARENT_IS_NAMESPACE_PID1=true$' /tmp/w1-s2-v2-canary.txt
+          grep -q '^NO_NEW_PRIVS=1$' /tmp/w1-s2-v2-canary.txt
+          grep -q '^SECCOMP=2$' /tmp/w1-s2-v2-canary.txt
+          grep -q '^ROOT_FS=tmpfs$' /tmp/w1-s2-v2-canary.txt
+          grep -q '^OLDROOT_DETACHED=true$' /tmp/w1-s2-v2-canary.txt
+          grep -q '^WORKSPACE_RW=true$' /tmp/w1-s2-v2-canary.txt
+          grep -q '^NETWORK_DEFAULT_DENY=true$' /tmp/w1-s2-v2-canary.txt
+          grep -q '^WORKER_ADMITTED=false$' /tmp/w1-s2-v2-canary.txt
+          grep -q '^W1_VERIFIED=false$' /tmp/w1-s2-v2-canary.txt
+          echo 'S2_V2_RUNTIME_CANARY=PASS_NONAUTHORITY'
