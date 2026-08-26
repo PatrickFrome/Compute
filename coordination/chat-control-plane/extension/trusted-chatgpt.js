@@ -50,7 +50,34 @@
     if (!["chatgpt.com", "chat.openai.com"].includes(url.hostname.toLowerCase())) {
       throw new Error("chatgpt_cdp_target_host_mismatch");
     }
-    if (!url.pathname.startsWith("/c/")) throw new Error("chatgpt_cdp_target_not_conversation");
+    if (url.pathname.startsWith("/c/")) return { mode: "CONVERSATION", url: url.toString() };
+    const stored = await chrome.storage.local.get(["chatgptRolloverPendingTabId", "chatgptRolloverPending"]);
+    if (url.pathname === "/" && stored.chatgptRolloverPending === true && Number(stored.chatgptRolloverPendingTabId) === tabId) {
+      return { mode: "ROLLOVER_ROOT", url: url.toString() };
+    }
+    throw new Error("chatgpt_cdp_target_not_conversation");
+  }
+
+  async function conversationExhausted(tabId) {
+    return evaluate(tabId, `(() => {
+      const visible = (el) => {
+        if (!(el instanceof HTMLElement)) return false;
+        const style = getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0 && rect.width > 0 && rect.height > 0;
+      };
+      const turnSelector = "[data-testid^='conversation-turn-'], article[data-testid^='conversation-turn-']";
+      const candidates = [...new Set([
+        ...document.querySelectorAll("[role='alert']"),
+        ...document.querySelectorAll("[role='status']"),
+        ...document.querySelectorAll("[data-testid*='error']"),
+        ...document.querySelectorAll("[data-testid*='notice']"),
+        ...document.querySelectorAll("main [class*='error']"),
+        ...document.querySelectorAll("main [class*='notice']")
+      ])].filter(visible).filter((el) => !el.closest(turnSelector));
+      const pattern = /you['’]?ve reached the maximum length for this conversation|maximum length for this conversation/i;
+      return candidates.some((el) => pattern.test(String(el.innerText || el.textContent || '').slice(0, 1200)));
+    })()`);
   }
 
   async function inspectComposer(tabId) {
@@ -151,10 +178,10 @@
     let attached = false;
     try {
       await ensureArmed();
-      await ensurePinnedChatgptTab(tabId);
+      const scope = await ensurePinnedChatgptTab(tabId);
       await chrome.debugger.attach(target(tabId), CDP_VERSION);
       attached = true;
-      return await operation();
+      return await operation(scope);
     } finally {
       if (attached) {
         try { await chrome.debugger.detach(target(tabId)); } catch (_) {}
@@ -165,7 +192,10 @@
 
   async function trustedSend(tabId, prompt) {
     const text = validateBridgePrompt(prompt);
-    return withDebugger(tabId, async () => {
+    return withDebugger(tabId, async (scope) => {
+      if (scope?.mode === "CONVERSATION" && await conversationExhausted(tabId)) {
+        throw new Error("chatgpt_cdp_conversation_exhausted");
+      }
       const before = await inspectComposer(tabId);
       if (!before?.ok) throw new Error(`chatgpt_cdp_${before?.error || "composer_inspect_failed"}`);
       if (canonicalVisible(before.text) !== "") throw new Error("chatgpt_cdp_composer_not_empty");
@@ -174,7 +204,7 @@
       await send(tabId, "Input.insertText", { text });
       await waitForReadySend(tabId);
       await dispatchTrustedEnter(tabId);
-      return { ok: true, phase: "TRUSTED_ENTER_DISPATCHED" };
+      return { ok: true, phase: scope?.mode === "ROLLOVER_ROOT" ? "TRUSTED_ENTER_ROLLOVER_DISPATCHED" : "TRUSTED_ENTER_DISPATCHED" };
     });
   }
 
