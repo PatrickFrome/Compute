@@ -6,6 +6,7 @@ on:
     paths:
       - 'controller/w1/w1_supervisor_verification_candidate.py'
       - 'controller/w1/w1_verification_candidate.py'
+      - 'controller/w1/w1_attestation_verification_receipt.py'
       - 'controller/w1/github_codespaces_lifecycle_provenance.py'
       - 'tests/test_w1_supervisor_verification_candidate.py'
       - '.github/workflows/w1-supervisor-verification-candidate-contract.yml'
@@ -27,14 +28,16 @@ jobs:
       - name: Compile supervisor candidate
         run: |
           set -euo pipefail
-          python3 -m py_compile controller/w1/w1_supervisor_verification_candidate.py
+          python3 -m py_compile \
+            controller/w1/w1_supervisor_verification_candidate.py \
+            controller/w1/w1_attestation_verification_receipt.py
 
       - name: Run adversarial supervisor candidate tests
         run: |
           set -euo pipefail
           python3 -m unittest tests.test_w1_supervisor_verification_candidate -v
 
-      - name: Assert terminal non-authority boundary
+      - name: Assert cryptographic provenance and terminal non-authority boundary
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -44,6 +47,12 @@ jobs:
               'READY_FOR_FRESH_SUPERVISOR_VERIFICATION_NONAUTHORITY',
               'ready_for_fresh_supervisor_verification',
               'fresh_supervisor_w1_verification_under_current_authority',
+              'attestation_receipt_sha256',
+              'attested_manifest_subject_sha256',
+              'cryptographic_source_provenance_cross_bound',
+              'github_oidc_signer_identity_verified',
+              'sigstore_rekor_timestamp_verified',
+              'cryptographic_source_provenance_verified',
               'authenticated_provider_provenance_verified',
               'provider_action_verified',
               'provider_storage_contract_verified',
@@ -65,5 +74,5 @@ jobs:
           )
           for token in forbidden:
               assert token not in text, token
-          print('W1 supervisor verification candidate: PASS_NONAUTHORITY')
+          print('W1 supervisor candidate requires verified Sigstore provenance and remains PASS_NONAUTHORITY')
           PY
