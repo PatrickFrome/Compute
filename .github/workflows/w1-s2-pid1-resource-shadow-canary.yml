@@ -26,7 +26,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m py_compile controller/w1/s2_pid1_resource_hardening_shadow_canary.py
-      - name: Measure PID1 dumpability and resource candidates
+      - name: Verify adopted PID1 dumpability and core limits
         run: |
           set -euo pipefail
           mkdir -p out
@@ -37,16 +37,15 @@ jobs:
           import json
           from pathlib import Path
           r = json.loads(Path('out/w1-s2-pid1-resource-shadow-canary.json').read_text())
-          assert r['outcome'] == 'ACCEPT_CANARY_PID1_DUMPABLE_CORE'
-          assert r['evidence']['checks']['pr_set_dumpable_zero_verified'] is True
-          assert r['evidence']['checks']['rlimit_core_zero_verified'] is True
-          assert r['evidence']['checks']['nofile_shadow_probe_safe_on_runner'] is True
+          assert r['outcome'] == 'ACCEPT_ADOPTED_PID1_DUMPABLE_CORE'
+          assert all(r['evidence']['checks'].values())
+          assert r['evidence']['source_sha256'] == 'e4204c217bbcf290469e8ffcf8b98357a8e11026620d0bb086cd4f272f867298'
           assert r['runtime_isolation_verified'] is False
           assert r['w1_verified'] is False
           assert r['authority_effect'] is False
-          print('PID1 dumpable/core candidate: ACCEPT_CANARY')
+          print('PID1 dumpable/core: ADOPTED_REGRESSION_GREEN')
           PY
-      - name: Upload non-authority canary receipt
+      - name: Upload non-authority regression receipt
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: w1-s2-pid1-resource-${{ github.run_id }}-${{ github.run_attempt }}
