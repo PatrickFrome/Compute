@@ -1,3 +1,4 @@
+import json
 import pathlib
 import unittest
 
@@ -6,6 +7,8 @@ EDGE = ROOT / "supabase" / "functions" / "a2-chat-bridge-remote" / "index.ts"
 MIGRATION = ROOT / "supabase" / "migrations" / "20260825213000_a2_chat_bridge_remote_runtime_v1.sql"
 RLS_MIGRATION = ROOT / "supabase" / "migrations" / "20260825215000_a2_chat_bridge_remote_runtime_rls_deny_v1.sql"
 BOOTSTRAP = ROOT / "coordination" / "chat-control-plane" / "extension" / "bootstrap-config.js"
+AMPLIFIER_POLICY = ROOT / "coordination" / "amplifier-loop" / "AMPLIFIER_LOOP_V1.md"
+AMPLIFIER_SEEDS = ROOT / "coordination" / "amplifier-loop" / "seed-amplifiers.json"
 
 
 class A2ChatBridgeRemoteContract(unittest.TestCase):
@@ -15,6 +18,8 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
         cls.migration = MIGRATION.read_text()
         cls.rls = RLS_MIGRATION.read_text()
         cls.bootstrap = BOOTSTRAP.read_text()
+        cls.amplifier_policy = AMPLIFIER_POLICY.read_text()
+        cls.amplifier_seeds = json.loads(AMPLIFIER_SEEDS.read_text())
 
     def test_edge_requires_scoped_pairing_hash(self):
         self.assertIn("x-a2-chat-bridge-secret", self.edge)
@@ -66,6 +71,44 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
         self.assertIn("WEB_CHAT_INTERACTIVE_REMOTE", self.edge)
         self.assertNotIn("worker_admitted=true", self.edge.lower())
         self.assertNotIn("w1_verified=true", self.edge.lower())
+
+    def test_amplifier_loop_is_in_every_remote_autonomous_wake(self):
+        for needle in [
+            "AMPLIFIER_LOOP_V1",
+            "meaningful checkpoint, new bottleneck, repeated failure",
+            "bounded deep research",
+            "reversible bounded PREP/SHADOW/CANARY scope",
+            "zero monetary cost",
+            "real project or representative CI workload",
+            "ACCEPT, KEEP_SHADOW, or ROLLBACK",
+            "non-authority learning data",
+            "Before C5",
+            "C6 governs verified duration/scheduler learning",
+            "Do not self-train foundation-model weights",
+            "run AMPLIFIER_LOOP_V1 when its trigger conditions apply",
+        ]:
+            self.assertIn(needle, self.edge)
+        self.assertIn("function agentForPlatform", self.edge)
+        self.assertIn("CHATGPT", self.edge)
+        self.assertIn("GLM_ZAI", self.edge)
+
+    def test_amplifier_policy_preserves_authority_and_requires_measurement(self):
+        for needle in [
+            "does not change milestone authority",
+            "PAID_RESOURCE_OR_BUDGET_REQUIRED",
+            "Before dependent production milestones are satisfied, implementation is PREP/SHADOW/CANARY only",
+            "candidate_median <= 0.95 * baseline_median",
+            "automatic rollback",
+            "context_fingerprint",
+            "speedup_ratio",
+            "MUST NOT autonomously retrain or replace foundation-model weights",
+        ]:
+            self.assertIn(needle, self.amplifier_policy)
+        candidates = {item["amplifier_id"]: item for item in self.amplifier_seeds["candidates"]}
+        required = {"hyperfine", "pytest-xdist", "sccache", "buildkit-cache", "bazel-remote-cache-reapi", "nativelink", "opentelemetry"}
+        self.assertTrue(required.issubset(candidates))
+        self.assertIn("FSL", candidates["nativelink"]["license"])
+        self.assertIn("license/compliance review", candidates["nativelink"]["notes"])
 
     def test_public_browser_roles_are_explicitly_denied(self):
         for table in [
