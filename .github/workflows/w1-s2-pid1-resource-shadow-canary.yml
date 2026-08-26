@@ -39,7 +39,7 @@ jobs:
           r = json.loads(Path('out/w1-s2-pid1-resource-shadow-canary.json').read_text())
           assert r['outcome'] == 'ACCEPT_ADOPTED_PID1_DUMPABLE_CORE'
           assert all(r['evidence']['checks'].values())
-          assert r['evidence']['source_sha256'] == 'e4204c217bbcf290469e8ffcf8b98357a8e11026620d0bb086cd4f272f867298'
+          assert r['evidence']['source_sha256'] == '25586bd8e0e97a78988f93d9c68c358b7eea6924015d06721afc135412d386df'
           assert r['runtime_isolation_verified'] is False
           assert r['w1_verified'] is False
           assert r['authority_effect'] is False
