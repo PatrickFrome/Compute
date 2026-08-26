@@ -22,6 +22,8 @@ const GLM_RETRYABLE_ERRORS = [
   "send_button_not_found",
   "composer_not_found"
 ];
+const GLM_SETTLE_WINDOW_MS = 12000;
+const GLM_SETTLE_POLL_MS = 400;
 const inFlightCommands = new Set();
 const rolloverTabs = new Set();
 let lastPollAt = 0;
@@ -267,13 +269,32 @@ async function sendViaContent(tab, command, settings) {
   return { before, result: response.result };
 }
 
-async function reloadAndRetryGlm(command, tab, before) {
-  let latest = null;
-  try { latest = await waitForContentScript(tab.id, 1200); } catch (_) {}
-  if (latest) {
-    const evidence = snapshotEvidence(before, latest, command.prompt, "GLM_ZAI");
-    if (evidence.verified) return resultFromEvidence(command.command_id, evidence, { recovery: "GLM_PRE_RELOAD_OBSERVED" });
+async function observeGlmAcceptance(command, tab, before) {
+  const deadline = Date.now() + GLM_SETTLE_WINDOW_MS;
+  while (Date.now() < deadline) {
+    let latest = null;
+    try { latest = await waitForContentScript(tab.id, 1200); } catch (_) {}
+    if (latest) {
+      const evidence = snapshotEvidence(before, latest, command.prompt, "GLM_ZAI");
+      if (evidence.verified) return resultFromEvidence(command.command_id, evidence, { recovery: "GLM_SETTLE_OBSERVED" });
+      if (before.generating !== true && latest.generating === true) {
+        const thinkingEvidence = {
+          ...evidence,
+          verified: true,
+          verification_strength: "GLM_THINKING_ACCEPTED",
+          generating_after_send: true
+        };
+        return resultFromEvidence(command.command_id, thinkingEvidence, { recovery: "GLM_THINKING_ACCEPTED" });
+      }
+    }
+    await sleep(GLM_SETTLE_POLL_MS);
   }
+  return null;
+}
+
+async function reloadAndRetryGlm(command, tab, before) {
+  const accepted = await observeGlmAcceptance(command, tab, before);
+  if (accepted) return accepted;
 
   await chrome.tabs.reload(tab.id);
   const fresh = await waitForContentScript(tab.id, 15000);
