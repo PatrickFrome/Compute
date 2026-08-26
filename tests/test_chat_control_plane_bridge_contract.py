@@ -29,7 +29,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
 
     def test_manifest_and_worker_entrypoints(self):
         self.assertEqual(self.manifest["manifest_version"], 3)
-        self.assertEqual(self.manifest["version"], "0.5.9")
+        self.assertEqual(self.manifest["version"], "0.5.10")
         self.assertEqual(self.manifest["background"]["service_worker"], "background-entry.js")
         self.assertIn("debugger", self.manifest["permissions"])
         self.assertEqual(self.manifest["content_scripts"][0]["js"], ["platform-dom-compat.js", "content.js"])
@@ -109,11 +109,27 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
             self.assertIn("\\s+", source)
         self.assertIn("textMatchesExpected", self.content)
         self.assertIn("canonicalVisible(state.text) === canonicalVisible(text)", self.trusted)
-        self.assertIn("canon(text) !== canon(expected)", self.trusted)
+        self.assertIn("semanticVisible", self.trusted)
+        self.assertIn("semantic(text) !== semantic(expected)", self.trusted)
         self.assertIn("textMatchesExpected(composerText(pair.composer), expectedText)", self.content)
         self.assertIn("textMatchesExpected(m.text, expectedText)", self.content)
         self.assertIn("chatgpt_cdp_prime_readback_mismatch", self.trusted)
-        self.assertIn("composer_readback_mismatch", self.trusted)
+        self.assertIn("composer_semantic_mismatch", self.trusted)
+
+    def test_chatgpt_click_is_bound_to_short_lived_prime_lease(self):
+        self.assertIn("const PRIME_LEASE_MS = 15000;", self.trusted)
+        self.assertIn("chrome.storage.session.set", self.trusted)
+        self.assertIn("chrome.storage.session.get", self.trusted)
+        self.assertIn("chrome.storage.session.remove", self.trusted)
+        self.assertIn("promptFingerprint", self.trusted)
+        self.assertIn("crypto.subtle.digest", self.trusted)
+        self.assertIn("await savePrimeLease(tabId, text);", self.trusted)
+        self.assertIn("await requirePrimeLease(tabId, text);", self.trusted)
+        self.assertIn("chatgpt_cdp_prime_lease_mismatch", self.trusted)
+        self.assertIn("await clearPrimeLease(tabId);", self.trusted)
+        self.assertIn("document.elementFromPoint(x, y)", self.trusted)
+        self.assertIn("send_obscured", self.trusted)
+        self.assertIn("composer_scope_mismatch", self.trusted)
 
     def test_compat_is_selector_only_no_async_transport(self):
         self.assertIn('markExactSendButton("#composer-submit-button")', self.compat)
