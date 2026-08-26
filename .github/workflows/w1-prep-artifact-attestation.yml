@@ -28,11 +28,15 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Test deterministic manifest builder
+      - name: Test deterministic manifest and receipt parsers
         run: |
           set -euo pipefail
-          python3 -m py_compile controller/w1/build_w1_prep_attestation_manifest.py
-          python3 -m unittest tests.test_w1_prep_attestation_manifest -v
+          python3 -m py_compile \
+            controller/w1/build_w1_prep_attestation_manifest.py \
+            controller/w1/w1_attestation_verification_receipt.py
+          python3 -m unittest \
+            tests.test_w1_prep_attestation_manifest \
+            tests.test_w1_attestation_verification_receipt -v
 
       - name: Build exact W1 prep manifest
         id: manifest
@@ -57,7 +61,7 @@ jobs:
           assert p['w1_verified'] is False
           assert p['canonical'] is False
           assert p['authority_effect'] is False
-          print('W1 prep manifest remains non-authority before attestation')
+          print(f"W1 prep manifest files={p['evidence']['file_count']} remains non-authority before attestation")
           PY
 
       - name: Generate keyless GitHub/Sigstore provenance attestation
@@ -78,18 +82,30 @@ jobs:
             --source-ref "$GITHUB_REF" \
             --deny-self-hosted-runners \
             --format json > out/w1-prep-attestation-verification.json
+
           python3 - <<'PY'
           import json
           from pathlib import Path
-          v = json.loads(Path('out/w1-prep-attestation-verification.json').read_text())
-          assert isinstance(v, list) and v, 'no verified attestations'
-          for item in v:
-              result = item.get('verificationResult') or {}
-              statement = result.get('statement') or {}
-              assert statement.get('predicateType') == 'https://slsa.dev/provenance/v1'
-              timestamps = result.get('verifiedTimestamps') or []
-              assert timestamps, 'no verified transparency/timestamp evidence'
-          print(f'cryptographically verified attestations={len(v)}')
+          from controller.w1 import w1_attestation_verification_receipt as receipt
+
+          manifest = json.loads(Path('out/w1-prep-attestation-manifest.json').read_text())
+          verification = json.loads(Path('out/w1-prep-attestation-verification.json').read_text())
+          result = receipt.compose(manifest=manifest, verification=verification)
+          Path('out/w1-prep-attestation-receipt.json').write_text(
+              json.dumps(result, sort_keys=True, indent=2) + '\n', encoding='utf-8'
+          )
+          assert result['artifact_attestation_verified'] is True
+          assert result['cryptographic_source_provenance_verified'] is True
+          assert result['runtime_safety_verified'] is False
+          assert result['provider_lifecycle_verified'] is False
+          assert result['persistent_worker_proof'] is False
+          assert result['worker_admitted'] is False
+          assert result['w1_verified'] is False
+          assert result['authority_effect'] is False
+          print('W1 Sigstore attestation receipt: VERIFIED_NONAUTHORITY')
+          print('receipt_sha256=' + result['receipt_sha256'])
+          print('manifest_subject_sha256=' + result['evidence']['manifest_subject_sha256'])
+          print('rekor_timestamp=' + result['evidence']['rekor_timestamp'])
           PY
 
       - name: Upload manifest and verification evidence
@@ -100,6 +116,7 @@ jobs:
             out/w1-prep-attestation-manifest.json
             out/w1-prep-attestation-manifest.sha256
             out/w1-prep-attestation-verification.json
+            out/w1-prep-attestation-receipt.json
           if-no-files-found: error
           retention-days: 14
 
