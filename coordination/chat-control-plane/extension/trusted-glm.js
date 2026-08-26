@@ -3,18 +3,27 @@
 
   const DEBUGGER_VERSION = "1.3";
   const TRACE_RE = /^[0-9a-f]{32}$/;
+  const HASH_RE = /^[0-9a-f]{64}$/;
   const TRACK_TYPES = new Set(["Fetch", "XHR", "EventSource"]);
   const LEDGER_KEY = "a2GlmTransportV0523";
   const MAX_LEDGER = 512;
+  const SAFE = "SAFE_RETRY_PRE_ACTUATION";
+  const AMBIGUOUS = "AMBIGUOUS_NO_RETRY";
+  const ACTUATED = "ACTUATED";
+  const VERIFIED = "VERIFIED";
   const trackers = new Map();
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const normalize = (value) => String(value ?? "").replace(/\r\n?/g, "\n").trim();
-  function hashText(text) {
-    let h = 0x811c9dc5;
-    for (let i = 0; i < text.length; i += 1) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193); }
-    return (h >>> 0).toString(16).padStart(8, "0");
-  }
 
+  function typedError(error, executionClass) {
+    const e = error instanceof Error ? error : new Error(String(error || "glm_trusted_failure"));
+    e.a2ExecutionClass = executionClass;
+    return e;
+  }
+  async function sha256Text(text) {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(text ?? "")));
+    return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
   function traceId() {
     const bytes = new Uint8Array(16);
     crypto.getRandomValues(bytes);
@@ -183,11 +192,8 @@
   }
 
   function bufferNetworkProgress(tracker, status) {
-    if (tracker.actuatedAt) {
-      tracker.progressChain = tracker.progressChain.then(() => postProgress(tracker.commandId, tracker.traceId, status)).catch(() => {});
-    } else {
-      tracker.pendingProgress.push(status);
-    }
+    if (tracker.actuatedAt) tracker.progressChain = tracker.progressChain.then(() => postProgress(tracker.commandId, tracker.traceId, status)).catch(() => {});
+    else tracker.pendingProgress.push(status);
   }
 
   async function markActuated(tabId, tracker, command) {
@@ -219,7 +225,6 @@
     const tabId = source?.tabId;
     const tracker = Number.isInteger(tabId) ? trackers.get(tabId) : null;
     if (!tracker || !tracker.releaseInitiatedAt) return;
-
     if (method === "Network.requestWillBeSent" && !tracker.requestId) {
       const requestMethod = String(params?.request?.method || "").toUpperCase();
       if (!TRACK_TYPES.has(String(params?.type || "")) || requestMethod !== "POST") return;
@@ -258,6 +263,7 @@
       const actuated = ["ACTUATED", "RELEASED"].includes(prior.state);
       return {
         status: actuated ? "SENT_ALREADY_DURABLE" : "FAILED_DURABLE_AMBIGUOUS_NO_RETRY",
+        execution_class: actuated ? ACTUATED : AMBIGUOUS,
         command_id: commandId,
         clicked_send_button: actuated,
         transport_trace_id: prior.transport_trace_id || null,
@@ -267,10 +273,11 @@
     }
 
     const before = await getSnapshot(tabId);
-    if (!before) throw new Error("glm_snapshot_unavailable_before_trusted_send");
-    if (before.generating === true) throw new Error("chat_is_generating");
-    if (normalize(before.composer_text || "") !== "") throw new Error("glm_composer_not_empty_before_trusted_send");
+    if (!before) throw typedError(new Error("glm_snapshot_unavailable_before_trusted_send"), SAFE);
+    if (before.generating === true) throw typedError(new Error("chat_is_generating"), SAFE);
+    if (normalize(before.composer_text || "") !== "") throw typedError(new Error("glm_composer_not_empty_before_trusted_send"), SAFE);
 
+    const promptSha256 = await sha256Text(normalize(prompt));
     const transportTraceId = traceId();
     let attached = false, pressed = false, released = false;
     let point = null;
@@ -289,20 +296,19 @@
       await debuggerCommand(tabId, "Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: "left", buttons: 1, clickCount: 1 });
       pressed = true;
 
-      // Server fence first, local durable ambiguity fence second, actual mouse release last.
       await postProgress(commandId, transportTraceId, "DISPATCHED");
       try {
         await updateTransport({ ...command, tab_id: tabId }, transportTraceId, {
           state: "DISPATCHED",
           dispatched_at: new Date().toISOString(),
           before_message_count: Number(before?.message_count || 0),
-          prompt_hash_local: hashText(normalize(prompt))
+          prompt_sha256_local: promptSha256
         });
       } catch (error) {
-        await debuggerCommand(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x: 0, y: 0, button: "left", buttons: 0, clickCount: 1 }).catch(() => {});
+        const cancelled = await debuggerCommand(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x: 0, y: 0, button: "left", buttons: 0, clickCount: 1 }).then(() => true).catch(() => false);
         pressed = false;
         await postProgress(commandId, transportTraceId, "ABORTED_BEFORE_ACTUATION").catch(() => {});
-        throw error;
+        throw typedError(error, cancelled ? SAFE : AMBIGUOUS);
       }
 
       tracker.releaseInitiatedAt = Date.now();
@@ -313,19 +319,16 @@
         await markActuated(tabId, tracker, command);
       } catch (releaseError) {
         const evidence = await observeAcceptance(tabId, before, prompt, 700);
-        if (tracker.requestId || evidence.verified) {
+        if (tracker.requestId || evidence.verified || tracker.actuatedAt) {
           pressed = false;
           released = true;
-          await markActuated(tabId, tracker, command);
+          await markActuated(tabId, tracker, command).catch(() => {});
         } else {
-          // A failed target release is ambiguous. Never retry on target. Best-effort
-          // release away from the actionable button so a still-held press cannot
-          // leave the page in a stuck pointer state. This cannot actuate Send.
           if (pressed) {
             await debuggerCommand(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x: 0, y: 0, button: "left", buttons: 0, clickCount: 1 }).catch(() => {});
             pressed = false;
           }
-          throw new Error(`glm_release_ambiguous_no_retry:${String(releaseError?.message || releaseError)}`);
+          throw typedError(new Error(`glm_release_ambiguous_no_retry:${String(releaseError?.message || releaseError)}`), AMBIGUOUS);
         }
       }
 
@@ -336,21 +339,24 @@
       if (tracker.networkTerminal) setTimeout(() => maybeRelease(tabId, tracker, 0), 1000);
       return {
         status,
+        execution_class: verification.verified === true ? VERIFIED : ACTUATED,
         command_id: commandId,
         clicked_send_button: released,
         transport_trace_id: transportTraceId,
         verification,
-        recovery: "GLM_TRUSTED_CDP_STRICT_GLM_FIRST_V0523"
+        recovery: "GLM_TRUSTED_CDP_BROWSER_OPERATOR_V060"
       };
     } catch (error) {
       if (pressed && point) {
-        await debuggerCommand(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x: 0, y: 0, button: "left", buttons: 0, clickCount: 1 }).catch(() => {});
+        const cancelled = await debuggerCommand(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x: 0, y: 0, button: "left", buttons: 0, clickCount: 1 }).then(() => true).catch(() => false);
         pressed = false;
+        if (!cancelled && !error?.a2ExecutionClass) error = typedError(error, AMBIGUOUS);
       }
       if (!released) {
         trackers.delete(tabId);
         if (attached) await detach(tabId);
       }
+      if (!error?.a2ExecutionClass) error = typedError(error, released || tracker.actuatedAt ? AMBIGUOUS : SAFE);
       throw error;
     }
   }
@@ -366,17 +372,20 @@
     if (!TRACE_RE.test(trace)) return { reconciled: false, reason: "TRACE_INVALID" };
     const beforeCount = Number(row.before_message_count || 0);
     const afterCount = Number(snapshot.message_count || 0);
-    const exactUserTurn = Array.isArray(snapshot.messages) && snapshot.messages.some((m) => m?.role === "user" && String(m?.text_hash_local || "") === String(row.prompt_hash_local || ""));
+    const strongPromptHash = String(row.prompt_sha256_local || "");
+    const exactUserTurn = HASH_RE.test(strongPromptHash) && Array.isArray(snapshot.messages)
+      && snapshot.messages.some((m) => m?.role === "user" && String(m?.text_sha256 || "") === strongPromptHash);
     const countAdvanced = afterCount > beforeCount;
     const composerCleared = normalize(snapshot.composer_text || "") === "";
     const actuationEvidence = exactUserTurn || (countAdvanced && composerCleared);
-    const evidence = { verified: actuationEvidence, exact_user_turn_seen: exactUserTurn, count_advanced: countAdvanced, composer_cleared: composerCleared, message_count_before: beforeCount, message_count_after: afterCount };
+    const evidence = { verified: actuationEvidence, exact_user_turn_seen: exactUserTurn, strong_sha256_identity: HASH_RE.test(strongPromptHash), count_advanced: countAdvanced, composer_cleared: composerCleared, message_count_before: beforeCount, message_count_after: afterCount };
 
     let state = row.state;
     if (state === "DISPATCHED" && actuationEvidence) {
       state = "ACTUATED";
       await updateTransport(row, trace, { state, actuated_at: row.actuated_at || new Date().toISOString() });
       await postProgress(row.command_id, trace, "ACTUATED").catch(() => {});
+      try { globalThis.A2_ON_GLM_ACTUATED?.(row.command_id); } catch (_) {}
     }
     if (state === "ACTUATED" && actuationEvidence && snapshot.generating !== true && composerCleared) {
       await postProgress(row.command_id, trace, "RELEASED").catch(() => {});
