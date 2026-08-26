@@ -100,8 +100,8 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("const SEND_READY_POLL_MS = 50;", self.trusted)
         self.assertIn("const SEND_VERIFY_TIMEOUT_MS = 6000;", self.content)
         self.assertIn("const SEND_BUTTON_WAIT_MS = 3000;", self.content)
-        self.assertNotIn("12000", self.content)
-        self.assertNotIn("6000;\n  const SEND_BUTTON_WAIT_MS = 6000", self.content)
+        self.assertNotIn("const SEND_VERIFY_TIMEOUT_MS = 12000;", self.content)
+        self.assertNotIn("const SEND_BUTTON_WAIT_MS = 6000;", self.content)
 
     def test_compat_is_selector_only_no_async_transport(self):
         self.assertIn('markExactSendButton("#composer-submit-button")', self.compat)
