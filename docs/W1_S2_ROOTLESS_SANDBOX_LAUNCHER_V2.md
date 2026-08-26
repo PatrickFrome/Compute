@@ -6,7 +6,8 @@ This document binds the reviewable S2 launcher composition required before any p
 
 - Path: `worker/native_linux/rootless_sandbox_launcher_v2.py`
 - Rail commit at initial publication: `e6a462df5ad1febfc125d9dc74dca78375401b30`
-- SHA-256: **PENDING EXACT CI READBACK**
+- Exact SHA-256: `231afd6a58b1be50549ee4cdfa99c914bff474ae3950c7af2396d3b2519413b9`
+- SHA evidence: GitHub Actions run `32929521210`, exact checkout `b80ecb8f3efbe1407a32a8d8cde695039fdd7004`.
 - Status: PREP / non-authority. This source does **not** admit a worker or prove W1.
 
 ## Composition contract
@@ -28,7 +29,7 @@ No executable `sudo` path in the launcher; no privileged mode; no host PID/netwo
 ## Required rail review before execution
 
 - Exact source/test/docs are fetched from one immutable Git commit.
-- Recompute SHA-256 and bind it here and in the contract test.
+- Recompute SHA-256 and match `231afd6a58b1be50549ee4cdfa99c914bff474ae3950c7af2396d3b2519413b9`.
 - Contract tests must pass.
 - Review must verify PID1 reaping/signal semantics, pivot-root mount tree, old-root non-exposure, and network-plane ownership.
 - A fresh aligned W1 claim/directive is still required after source approval and before any Codespace/provider mutation.
