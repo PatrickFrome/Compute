@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import inspect
 import os
+import resource
 import signal
 import subprocess
 import sys
@@ -14,7 +15,7 @@ from unittest import mock
 
 from worker.native_linux import rootless_sandbox_launcher_v2 as launcher
 
-EXPECTED_SOURCE_SHA256 = "8c5570faaabb3b44056fc2954224036ae0d342c57d79053fceffb8ebefe1ecca"
+EXPECTED_SOURCE_SHA256 = "e4204c217bbcf290469e8ffcf8b98357a8e11026620d0bb086cd4f272f867298"
 
 
 class RootlessSandboxLauncherV2ContractTests(unittest.TestCase):
@@ -71,8 +72,14 @@ class RootlessSandboxLauncherV2ContractTests(unittest.TestCase):
 
     def test_inherited_seccomp_policy_remains_substantive(self):
         denied = set(launcher.DENIED_SYSCALLS)
-        self.assertGreaterEqual(len(denied), 20)
-        for syscall in ("mount", "umount2", "unshare", "setns", "ptrace", "bpf"):
+        self.assertGreaterEqual(len(denied), 37)
+        for syscall in (
+            "mount", "umount2", "unshare", "setns", "ptrace", "bpf",
+            "process_vm_readv", "process_vm_writev", "kcmp",
+            "io_uring_setup", "io_uring_enter", "io_uring_register",
+            "open_tree", "move_mount", "fsopen", "fsmount", "fspick",
+            "mount_setattr", "pivot_root",
+        ):
             self.assertIn(syscall, denied)
 
     def test_runtime_binds_are_minimal(self):
@@ -150,6 +157,32 @@ class RootlessSandboxLauncherV2ContractTests(unittest.TestCase):
         for key in ("GITHUB_TOKEN", "SUPABASE_SERVICE_ROLE_KEY", "HTTPS_PROXY"):
             self.assertNotIn(key, value)
 
+    def test_pid1_runtime_hardening_is_fail_closed_and_pre_worker(self):
+        source = inspect.getsource(launcher._harden_pid1_runtime)
+        self.assertIn("PR_SET_DUMPABLE", source)
+        self.assertIn("PR_GET_DUMPABLE", source)
+        self.assertIn("resource.RLIMIT_CORE", source)
+        self.assertIn("os.environ.clear()", source)
+        launch_source = inspect.getsource(launcher.launch)
+        self.assertLess(launch_source.index("_harden_pid1_runtime(workspace)"), launch_source.index("_pid1_reaper"))
+
+        calls = []
+        class FakeLibc:
+            def prctl(self, option, *_args):
+                calls.append(option.value)
+                if option.value == launcher.PR_GET_DUMPABLE:
+                    return launcher.SUID_DUMP_DISABLE
+                return 0
+        with mock.patch.object(launcher, "_libc", return_value=FakeLibc()), \
+             mock.patch.object(launcher.resource, "setrlimit") as setrlimit, \
+             mock.patch.object(launcher.resource, "getrlimit", return_value=(0, 0)), \
+             mock.patch.object(launcher, "_worker_environment", return_value={"PATH": "/usr/bin:/bin"}), \
+             mock.patch.dict(launcher.os.environ, {"SECRET": "x"}, clear=True):
+            launcher._harden_pid1_runtime(Path("/workspace"))
+            self.assertEqual(launcher.os.environ, {"PATH": "/usr/bin:/bin"})
+        self.assertEqual(calls[:2], [launcher.PR_SET_DUMPABLE, launcher.PR_GET_DUMPABLE])
+        setrlimit.assert_called_once_with(resource.RLIMIT_CORE, (0, 0))
+
     def test_inherited_fd_cleanup_uses_atomic_close_range(self):
         calls: list[tuple[object, ...]] = []
 
@@ -222,7 +255,7 @@ class RootlessSandboxLauncherV2ContractTests(unittest.TestCase):
             "CLONE_NEWPID", "CLONE_NEWNET", "MS_REC | MS_PRIVATE", "pivot_root", "MNT_DETACH",
             "os.waitpid(-1", "os.killpg", "os.pipe2", "pending_signals", 'os.getpid() != 1', '_mount("proc"',
             "mount_setattr", "AT_RECURSIVE", "PR_SET_PDEATHSIG", "close_range", "os.execve",
-            "pidfd_open", "pidfd_send_signal",
+            "pidfd_open", "pidfd_send_signal", "PR_SET_DUMPABLE", "PR_GET_DUMPABLE", "RLIMIT_CORE",
         ):
             self.assertIn(token, source)
         for token in (
