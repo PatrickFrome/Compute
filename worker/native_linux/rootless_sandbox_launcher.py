@@ -39,7 +39,9 @@ SCMP_ACT_ALLOW = 0x7FFF0000
 SCMP_ACT_ERRNO_BASE = 0x00050000
 
 # Deliberately substantive denylist. The filter is loaded only after namespace
-# setup, so mount/unshare are denied to the worker after the sandbox boundary.
+# setup, so namespace/mount controls and cross-process inspection interfaces are
+# denied to the worker after the sandbox boundary.  The second group was
+# measured in the W1 seccomp amplifier shadow canary before adoption.
 DENIED_SYSCALLS = (
     "acct",
     "add_key",
@@ -65,6 +67,25 @@ DENIED_SYSCALLS = (
     "umount2",
     "unshare",
     "userfaultfd",
+    # Cross-process memory/resource inspection. Denying ptrace alone does not
+    # remove these separate ptrace-gated syscalls on permissive hosts.
+    "process_vm_readv",
+    "process_vm_writev",
+    "kcmp",
+    # Unneeded asynchronous I/O submission plane for the W1 worker contract.
+    "io_uring_setup",
+    "io_uring_enter",
+    "io_uring_register",
+    # New mount API / root-changing operations are launcher-only capabilities;
+    # the worker receives the already-constructed filesystem and must not alter
+    # its mount topology.
+    "open_tree",
+    "move_mount",
+    "fsopen",
+    "fsmount",
+    "fspick",
+    "mount_setattr",
+    "pivot_root",
 )
 
 
