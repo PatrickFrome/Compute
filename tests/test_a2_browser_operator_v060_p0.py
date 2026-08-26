@@ -19,6 +19,11 @@ class BrowserOperatorV060P0(unittest.TestCase):
         cls.control = (EXT / "operator-control.js").read_text()
         cls.bindings = (EXT / "operator-gate-bindings.js").read_text()
         cls.perception = (EXT / "operator-perception.js").read_text()
+        cls.actions = (EXT / "operator-actions.js").read_text()
+        cls.broker = (EXT / "debugger-broker.js").read_text()
+        cls.updater = (EXT / "update-manager.js").read_text()
+        cls.compat = (EXT / "compat-config.js").read_text()
+        cls.compat_root = (EXT / "compat-root-key.js").read_text()
         cls.panel = (EXT / "sidepanel.js").read_text()
 
     def test_01_version_and_identity(self):
@@ -104,48 +109,94 @@ class BrowserOperatorV060P0(unittest.TestCase):
         self.assertIn("armPromptGateBypass", self.gpt)
         self.assertIn("operator-gate-bindings.js", self.entry)
 
-    def test_14_operator_control_is_trusted_and_session_scoped(self):
+    def test_14_operator_control_is_trusted_session_scoped_and_compat_fenced(self):
         self.assertIn('chrome.runtime.getURL("sidepanel.html")', self.control)
         self.assertIn("operator_sender_not_trusted", self.control)
         self.assertIn("chrome.storage.session.set", self.control)
         self.assertIn("a2OperatorHeldPromptIntentV060", self.control)
         self.assertNotIn("bridgeSecret", self.control)
         self.assertIn("A2_OPERATOR_RESOLVE_PROMPT", self.control)
+        self.assertIn("compat_feature_prompt_gate_disabled", self.control)
 
-    def test_15_sidepanel_controls_arm_gate_and_perception(self):
-        self.assertIn("A2_OPERATOR_SET_ARM", self.panel)
-        self.assertIn("A2_OPERATOR_SET_MODE", self.panel)
-        self.assertIn("REWRITE_ALLOW_ONCE", self.panel)
-        self.assertIn("CANCEL", self.panel)
-        self.assertIn("A2_OPERATOR_CAPTURE_PERCEPTION", self.panel)
-        self.assertIn("capturePerception", self.panel)
+    def test_15_sidepanel_controls_operator_and_reports_hardening_state(self):
+        for token in ["A2_OPERATOR_SET_ARM", "A2_OPERATOR_SET_MODE", "REWRITE_ALLOW_ONCE", "CANCEL", "A2_OPERATOR_CAPTURE_PERCEPTION", "CLICK_POINT"]:
+            self.assertIn(token, self.panel)
+        for token in ["updateState", "compatState", "debuggerState", "capabilityState"]:
+            self.assertIn(token, self.panel)
 
-    def test_16_glm_gate_capability_is_cleared_in_finally(self):
+    def test_16_glm_gate_capability_and_autonomous_kill_switch(self):
         self.assertIn("const originalGlm", self.bindings)
+        self.assertIn("const originalChatgpt", self.bindings)
         self.assertIn("A2_PROMPT_GATE_BRIDGE_BYPASS", self.bindings)
         self.assertIn("A2_PROMPT_GATE_BRIDGE_BYPASS_CLEAR", self.bindings)
         self.assertIn("finally", self.bindings)
+        self.assertIn("compat_kill_switch_autonomous_send_disabled", self.bindings)
 
-    def test_17_perception_uses_hybrid_cdp_sensors(self):
-        self.assertIn("Accessibility.getFullAXTree", self.perception)
-        self.assertIn("DOMSnapshot.captureSnapshot", self.perception)
-        self.assertIn("Page.captureScreenshot", self.perception)
-        self.assertIn("Page.getLayoutMetrics", self.perception)
-        self.assertIn("document.body?.innerText", self.perception)
+    def test_17_perception_uses_hybrid_cdp_sensors_through_broker(self):
+        for token in ["Accessibility.getFullAXTree", "DOMSnapshot.captureSnapshot", "Page.captureScreenshot", "Page.getLayoutMetrics", "document.body?.innerText"]:
+            self.assertIn(token, self.perception)
+        self.assertIn("A2_DEBUGGER_RUN", self.perception)
+        self.assertNotIn("chrome.debugger.attach", self.perception)
+        self.assertNotIn("chrome.debugger.getTargets", self.perception)
         self.assertIn("operator-perception.js", self.entry)
 
-    def test_18_perception_is_tainted_bounded_and_session_metadata_only(self):
+    def test_18_perception_is_tainted_bounded_session_metadata_only_and_optional_pixels(self):
         self.assertIn("tainted_page_data: true", self.perception)
         self.assertIn("boundedPreview", self.perception)
         self.assertIn("A2_OPERATOR_PERCEPTION_PREVIEW", self.perception)
         self.assertIn("chrome.storage.session.set", self.perception)
         self.assertIn("screenshot_sha256", self.perception)
         self.assertNotIn("chrome.storage.local.set", self.perception)
-        self.assertIn("perception_debugger_target_busy", self.perception)
         self.assertIn("perception_duplicate_target_tabs", self.perception)
+        self.assertIn("features.screenshot_sensor_enabled", self.perception)
+        self.assertIn("frame_token", self.perception)
 
-    def test_19_behavioral_labs_are_present(self):
-        for name in ["a2_v060_prompt_gate_browser_lab.mjs", "a2_v060_operator_control_lab.mjs", "a2_v060_perception_lab.mjs"]:
+    def test_19_debugger_broker_serializes_short_extension_sessions(self):
+        self.assertIn("A2_DEBUGGER_RUN", self.broker)
+        self.assertIn("state.queue.then", self.broker)
+        self.assertIn("debugger_broker_attach_failed", self.broker)
+        self.assertIn("chrome.debugger.onDetach", self.broker)
+        self.assertLess(self.entry.index('importScripts("./debugger-broker.js")'), self.entry.index('importScripts("./operator-actions.js")'))
+        self.assertLess(self.entry.index('importScripts("./debugger-broker.js")'), self.entry.index('importScripts("./operator-perception.js")'))
+
+    def test_20_point_actions_are_frame_sha_bound_and_remote_action_surface_is_closed(self):
+        for token in ["CLICK_POINT", "DOUBLE_CLICK_POINT", "frame_token", "frame_stale_recapture_required", "Page.captureScreenshot", "FRAME_SHA256_MATCHED_BEFORE_ACTUATION"]:
+            self.assertIn(token, self.actions)
+        for token in ["operator_action_external_navigation_blocked", "operator_action_download_blocked", "operator_action_file_input_blocked"]:
+            self.assertIn(token, self.actions)
+        self.assertNotIn("EXECUTE_JS", self.actions)
+        self.assertIn("kill_switches.operator_actions_disabled", self.actions)
+        self.assertIn("features.point_click_enabled", self.actions)
+        self.assertIn("timeouts.frame_max_age_ms", self.actions)
+
+    def test_21_safe_update_manager_drains_without_blocking_results(self):
+        self.assertIn("chrome.runtime.onUpdateAvailable", self.updater)
+        self.assertIn('String(path || "") === "/v1/commands/next"', self.updater)
+        self.assertIn("WAITING_SAFE_BOUNDARY", self.updater)
+        self.assertIn("gpt_pre_enter_ambiguous", self.updater)
+        self.assertIn("chrome.runtime.reload()", self.updater)
+        self.assertIn("update-manager.js", self.entry)
+
+    def test_22_signed_compatibility_pack_is_declarative_fail_closed(self):
+        for token in ["ECDSA", "P-256", "crypto.subtle.verify", "compat_epoch_not_monotonic", "KEEP_LAST_KNOWN_GOOD", "compat_root_unprovisioned"]:
+            self.assertIn(token, self.compat)
+        self.assertIn("globalThis.A2_COMPAT_ROOT_JWK", self.compat_root)
+        self.assertIn("|| null", self.compat_root)
+        self.assertNotIn("eval(", self.compat)
+        self.assertNotIn("new Function", self.compat)
+        self.assertIn("compat-root-key.js", self.entry)
+        self.assertIn("compat-config.js", self.entry)
+
+    def test_23_behavioral_labs_are_present(self):
+        for name in [
+            "a2_v060_prompt_gate_browser_lab.mjs",
+            "a2_v060_operator_control_lab.mjs",
+            "a2_v060_perception_lab.mjs",
+            "a2_v060_operator_actions_lab.mjs",
+            "a2_v060_debugger_broker_lab.mjs",
+            "a2_v060_update_manager_lab.mjs",
+            "a2_v060_compat_config_lab.mjs",
+        ]:
             self.assertTrue((ROOT / "tests" / name).exists())
 
 
