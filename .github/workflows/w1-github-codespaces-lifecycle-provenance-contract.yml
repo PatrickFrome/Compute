@@ -1,0 +1,70 @@
+name: W1 GitHub Codespaces Lifecycle Provenance Contract
+
+on:
+  push:
+    branches: [work/w1-sandbox-launcher-prep]
+    paths:
+      - 'controller/w1/github_codespaces_lifecycle_provenance.py'
+      - 'controller/w1/github_codespaces_snapshot_guard.py'
+      - 'tests/test_w1_github_codespaces_lifecycle_provenance.py'
+      - '.github/workflows/w1-github-codespaces-lifecycle-provenance-contract.yml'
+
+permissions: {}
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile collector
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/w1/github_codespaces_lifecycle_provenance.py
+
+      - name: Run adversarial collector tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_w1_github_codespaces_lifecycle_provenance -v
+
+      - name: Assert mutation and secret boundaries
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('controller/w1/github_codespaces_lifecycle_provenance.py').read_text()
+          low = text.lower()
+          required = (
+              'API_BASE = "https://api.github.com"',
+              'API_VERSION = "2026-03-10"',
+              'ACCEPT = "application/vnd.github+json"',
+              'METAENGINE_W1_PROVIDER_MUTATION_AUTHORIZED',
+              'ssl.create_default_context()',
+              'suffix not in {"", "/stop", "/start"}',
+              'token_material_persisted": False',
+              'provider_action_verified": False',
+              'authenticated_provider_provenance_verified": False',
+              'persistent_worker_proof": False',
+              'w1_verified": False',
+              'requires_supabase_persisted_readback',
+              'requires_supervisor_verification',
+          )
+          for token in required:
+              assert token in text, token
+          forbidden = (
+              'method="delete"', 'method="patch"', 'method="put"',
+              '/delete', '/rebuild',
+              'print(token', 'json.dump(token', 'json.dumps(token',
+              'provider_action_verified": True',
+              'authenticated_provider_provenance_verified": True',
+              'persistent_worker_proof": True', 'w1_verified": True',
+          )
+          for token in forbidden:
+              assert token not in low, token
+          PY
