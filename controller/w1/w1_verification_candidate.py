@@ -113,15 +113,8 @@ def _storage(value: Any, manifest: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("storage persistent root mismatch")
     if evidence.get("sentinel_path") != "/workspaces/.metaengine-w1/persistent-sentinel.bin":
         raise ValueError("storage sentinel path mismatch")
-    source = evidence.get("source")
-    if source != manifest["bindings"].get("source"):
+    if evidence.get("source") != manifest["bindings"].get("source"):
         raise ValueError("storage source does not match manifest source")
-    provider = ((manifest.get("bindings") or {}))
-    if evidence.get("provider_oracle_sha256") != (((manifest.get("_lifecycle_hint") or {}).get("provider_oracle_sha256"))):
-        # The local manifest intentionally stores only hashes required by its schema,
-        # not the complete provider oracle. Cross-binding to provider/stopped hashes
-        # is completed below using values supplied by the caller from lifecycle_bundle.
-        pass
     return value
 
 
