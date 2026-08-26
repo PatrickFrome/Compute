@@ -2,6 +2,7 @@
 
 const $ = (id) => document.getElementById(id);
 let lastIntentId = null;
+let lastArmed = false;
 
 function setStatus(text, error = false) {
   const el = $("status");
@@ -25,8 +26,10 @@ function renderPeer(snapshot) {
 function render(state) {
   $("runtime").textContent = `${compact(state.operator_runtime)} · ${compact(state.extension_version)}`;
   const armed = state.armed === true;
+  lastArmed = armed;
   $("armedBadge").textContent = armed ? "ARMED" : "DISARMED";
   $("armedBadge").className = `badge ${armed ? "on" : "off"}`;
+  $("toggleArmed").textContent = armed ? "Disarm bridge" : "Arm bridge";
 
   const mode = state.operator_mode === "GATE_SEND" ? "GATE_SEND" : "OBSERVE";
   $("modeObserve").classList.toggle("active", mode === "OBSERVE");
@@ -80,6 +83,16 @@ async function setMode(mode) {
   }
 }
 
+async function setArmed(armed) {
+  try {
+    await request("A2_OPERATOR_SET_ARM", { armed });
+    setStatus(armed ? "Autonomous A2 bridge armed." : "Autonomous A2 bridge disarmed.");
+    await refresh();
+  } catch (error) {
+    setStatus(String(error?.message || error), true);
+  }
+}
+
 async function resolve(action, draft = null) {
   try {
     const state = (await request("A2_OPERATOR_STATUS")).state || {};
@@ -97,6 +110,7 @@ async function resolve(action, draft = null) {
   }
 }
 
+$("toggleArmed").addEventListener("click", () => setArmed(!lastArmed));
 $("modeObserve").addEventListener("click", () => setMode("OBSERVE"));
 $("modeGate").addEventListener("click", () => setMode("GATE_SEND"));
 $("cancelIntent").addEventListener("click", () => resolve("CANCEL"));
