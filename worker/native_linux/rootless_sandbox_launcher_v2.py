@@ -29,7 +29,15 @@ import sys
 import time
 from typing import Sequence
 
-from worker.native_linux import rootless_sandbox_launcher as v1
+try:
+    from worker.native_linux import rootless_sandbox_launcher as v1
+except ModuleNotFoundError as exc:
+    if exc.name != "worker":
+        raise
+    repo_root = Path(__file__).resolve().parents[2]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from worker.native_linux import rootless_sandbox_launcher as v1
 
 CLONE_NEWNS = 0x00020000
 CLONE_NEWPID = 0x20000000
