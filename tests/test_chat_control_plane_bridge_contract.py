@@ -27,7 +27,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
 
     def test_manifest_and_worker_entrypoints(self):
         self.assertEqual(self.manifest["manifest_version"], 3)
-        self.assertEqual(self.manifest["version"], "0.5.12")
+        self.assertEqual(self.manifest["version"], "0.5.13")
         self.assertEqual(self.manifest["background"]["service_worker"], "background-entry.js")
         self.assertIn("debugger", self.manifest["permissions"])
         self.assertEqual(self.manifest["content_scripts"][0]["js"], ["platform-dom-compat.js", "content.js"])
@@ -105,15 +105,29 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("globalThis.A2_CHATGPT_TRUSTED_SEND", self.background)
         self.assertIn("String(command.prompt || \"\")", self.background)
 
-    def test_glm_recovery_is_one_reload_and_one_retry_only(self):
+    def test_glm_recovery_waits_for_thinking_before_reload(self):
         self.assertIn("GLM_RETRYABLE_ERRORS", self.background)
+        self.assertIn("const GLM_SETTLE_WINDOW_MS = 12000;", self.background)
+        self.assertIn("const GLM_SETTLE_POLL_MS = 400;", self.background)
+        self.assertIn("observeGlmAcceptance", self.background)
         self.assertIn("reloadAndRetryGlm", self.background)
         self.assertEqual(self.background.count("await chrome.tabs.reload(tab.id);"), 1)
         self.assertIn('snapshotEvidence(before, latest, command.prompt, "GLM_ZAI")', self.background)
-        self.assertIn("GLM_PRE_RELOAD_OBSERVED", self.background)
+        self.assertIn("before.generating !== true && latest.generating === true", self.background)
+        self.assertIn("GLM_THINKING_ACCEPTED", self.background)
+        self.assertIn("GLM_SETTLE_OBSERVED", self.background)
         self.assertIn("GLM_POST_RELOAD_OBSERVED", self.background)
         self.assertIn("GLM_RELOAD_RETRY_ONCE", self.background)
+        self.assertLess(self.background.index("const accepted = await observeGlmAcceptance"), self.background.index("await chrome.tabs.reload(tab.id);"))
         self.assertNotIn("while (true)", self.background)
+
+    def test_glm_primary_verification_accepts_thinking(self):
+        self.assertIn('platform() === "GLM_ZAI" && before.generating !== true && current.generating === true', self.content)
+        self.assertIn('"GLM_THINKING_ACCEPTED"', self.content)
+        self.assertIn("generating_after_send: current.generating === true", self.content)
+        verify = self.content.split("async function verifySend(before, expectedText)", 1)[1].split("async function executeSend", 1)[0]
+        self.assertIn("glmThinkingAccepted", verify)
+        self.assertIn("exactUserTurn || (cleared && countAdvanced) || glmThinkingAccepted", verify)
 
     def test_critical_chatgpt_fences_remain_without_full_prompt_readback(self):
         self.assertIn("const MAX_PROMPT_CHARS = 120000;", self.trusted)
