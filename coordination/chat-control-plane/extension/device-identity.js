@@ -43,29 +43,25 @@
 
   async function ensureKeypair() {
     let row = await loadKeypair();
-    if (row?.privateKey instanceof CryptoKey && row?.publicKey instanceof CryptoKey) return row;
-    const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
-    // generateKey(extractable=false) also makes the public key non-exportable, so import an
-    // exportable public clone while keeping the private key non-exportable.
-    const publicRaw = await crypto.subtle.exportKey("raw", await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]).then((temp) => temp.publicKey)).catch(() => null);
-    if (publicRaw) {
-      // The temporary key above is intentionally discarded; it is not the device key.
+    if (row?.privateKey instanceof CryptoKey && row?.publicKey instanceof CryptoKey) {
+      if (row.privateKey.extractable === true) throw new Error("device_private_key_extractable_rejected");
+      return row;
     }
-    // Chrome follows WebCrypto extractability at pair level. Generate once more with an
-    // exportable pair, then re-import the private key as non-extractable so public JWK can
-    // be registered while private key material is immediately discarded after import.
-    const exportable = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
-    const privatePkcs8 = await crypto.subtle.exportKey("pkcs8", exportable.privateKey);
-    const privateKey = await crypto.subtle.importKey("pkcs8", privatePkcs8, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
-    const publicKey = exportable.publicKey;
-    row = { privateKey, publicKey, created_at: new Date().toISOString(), profile: PROFILE };
+    // For asymmetric WebCrypto key generation, extractable=false keeps the private
+    // signing key non-exportable while the public verification key remains exportable.
+    // No private PKCS#8/JWK bytes ever enter JavaScript memory.
+    const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
+    if (pair.privateKey.extractable === true || pair.publicKey.extractable !== true) throw new Error("device_key_extractability_contract_failed");
+    row = { privateKey: pair.privateKey, publicKey: pair.publicKey, created_at: new Date().toISOString(), profile: PROFILE };
     await withStore("readwrite", (store) => store.put(row, KEYPAIR_ID));
     return row;
   }
 
   async function publicJwk() {
     const row = await ensureKeypair();
-    return crypto.subtle.exportKey("jwk", row.publicKey);
+    const jwk = await crypto.subtle.exportKey("jwk", row.publicKey);
+    if (jwk?.kty !== "EC" || jwk?.crv !== "P-256" || typeof jwk?.x !== "string" || typeof jwk?.y !== "string") throw new Error("device_public_jwk_invalid");
+    return { kty: "EC", crv: "P-256", x: jwk.x, y: jwk.y, key_ops: ["verify"], ext: true };
   }
 
   async function sha256Hex(value) {
@@ -162,6 +158,7 @@
       profile: PROFILE,
       key_present: keypair?.privateKey instanceof CryptoKey && keypair?.publicKey instanceof CryptoKey,
       private_extractable: keypair?.privateKey?.extractable === true,
+      public_extractable: keypair?.publicKey?.extractable === true,
       enrolled: enrollment?.status === "ACTIVE" && Boolean(enrollment?.device_id),
       device_id: enrollment?.device_id || null,
       enrolled_at: enrollment?.enrolled_at || null,
