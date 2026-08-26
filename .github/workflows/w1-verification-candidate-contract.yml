@@ -1,0 +1,68 @@
+name: W1 Verification Candidate Contract
+
+on:
+  push:
+    branches: [work/w1-sandbox-launcher-prep]
+    paths:
+      - 'controller/w1/w1_verification_candidate.py'
+      - 'controller/w1/pre_persistence_evidence_manifest.py'
+      - 'controller/w1/codespaces_persistent_storage_guard.py'
+      - 'tests/test_w1_verification_candidate.py'
+      - '.github/workflows/w1-verification-candidate-contract.yml'
+
+permissions: {}
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile candidate oracle
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/w1/w1_verification_candidate.py
+
+      - name: Run fail-closed candidate tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_w1_verification_candidate -v
+
+      - name: Assert terminal offline boundary
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('controller/w1/w1_verification_candidate.py').read_text()
+          low = text.lower()
+          required = (
+              'WAITING_AUTHENTICATED_PROVIDER_PROVENANCE',
+              'ready_for_authenticated_provider_provenance',
+              'authenticated_provider_provenance_verified": False',
+              'provider_action_verified": False',
+              'provider_storage_contract_verified": False',
+              'supervisor_verified": False',
+              'persistent_worker_proof": False',
+              'worker_admitted": False',
+              'w1_verified": False',
+              'authenticated_github_stop_action_receipt',
+              'authenticated_github_start_action_receipt',
+              'persisted_provider_provenance_readback',
+              'fresh_supervisor_w1_verification',
+          )
+          for token in required:
+              assert token in text, token
+          forbidden = (
+              'requests.post(', 'requests.patch(', 'requests.put(', 'requests.delete(',
+              'subprocess.run(', 'w1_verified": True', 'worker_admitted": True',
+              'persistent_worker_proof": True', 'supervisor_verified": True',
+          )
+          for token in forbidden:
+              assert token not in low, token
+          PY
