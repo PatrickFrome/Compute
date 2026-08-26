@@ -13,6 +13,17 @@
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const normalize = (value) => String(value ?? "").replace(/\r\n/g, "\n").trim();
+  const canonicalVisible = (value) => String(value ?? "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\u00a0/g, " ")
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+
+  function textMatchesExpected(actual, expected) {
+    if (platform() === "CHATGPT") return canonicalVisible(actual) === canonicalVisible(expected);
+    return normalize(actual) === normalize(expected);
+  }
 
   function loadSeenCommands() {
     try {
@@ -251,11 +262,10 @@
 
   async function waitForEnabledSend(expectedText) {
     const deadline = Date.now() + SEND_BUTTON_WAIT_MS;
-    const expected = normalize(expectedText);
     while (Date.now() < deadline) {
       const pair = resolveComposerSendPair();
       if (pair.error === "composer_send_pair_ambiguous") throw new Error(pair.error);
-      if (!pair.error && composerText(pair.composer) === expected && !pair.send.disabled && pair.send.getAttribute("aria-disabled") !== "true") return pair.send;
+      if (!pair.error && textMatchesExpected(composerText(pair.composer), expectedText) && !pair.send.disabled && pair.send.getAttribute("aria-disabled") !== "true") return pair.send;
       await sleep(100);
     }
     throw new Error("send_button_not_enabled_or_pair_unresolved");
@@ -263,12 +273,11 @@
 
   async function verifySend(before, expectedText) {
     const deadline = Date.now() + SEND_VERIFY_TIMEOUT_MS;
-    const expected = normalize(expectedText);
     while (Date.now() < deadline) {
       const current = pageState();
       const composer = getComposer();
       const cleared = composer ? composerText(composer) === "" : false;
-      const exactUserTurn = current.messages.filter((m) => m.role === "user").some((m) => normalize(m.text) === expected);
+      const exactUserTurn = current.messages.filter((m) => m.role === "user").some((m) => textMatchesExpected(m.text, expectedText));
       const countAdvanced = current.message_count > before.message_count;
       if (exactUserTurn || (cleared && countAdvanced)) {
         return {
