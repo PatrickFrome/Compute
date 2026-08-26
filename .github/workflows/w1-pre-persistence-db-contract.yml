@@ -1,0 +1,50 @@
+name: W1 Pre-Persistence DB Contract
+
+on:
+  push:
+    branches: [work/w1-sandbox-launcher-prep]
+    paths:
+      - 'supabase/migrations/20260825023000_w1_provider_neutral_lifecycle_receipt_v2.sql'
+      - 'supabase/migrations/20260826060000_w1_pre_persistence_evidence_manifest_v1.sql'
+      - 'supabase/migrations/20260826060500_w1_pre_persistence_source_binding_guard_v1.sql'
+      - 'tests/test_w1_pre_persistence_db_contract.py'
+      - '.github/workflows/w1-pre-persistence-db-contract.yml'
+
+permissions: {}
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Run adversarial DB contract tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_w1_pre_persistence_db_contract -v
+
+      - name: Assert migration ordering and no live-authority shortcut
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          names = [
+              '20260825023000_w1_provider_neutral_lifecycle_receipt_v2.sql',
+              '20260826060000_w1_pre_persistence_evidence_manifest_v1.sql',
+              '20260826060500_w1_pre_persistence_source_binding_guard_v1.sql',
+          ]
+          assert names == sorted(names)
+          root = Path('supabase/migrations')
+          combined = '\n'.join((root / n).read_text() for n in names).lower()
+          assert 'apply migration' not in combined
+          assert 'provider mutation' not in combined
+          assert 'grant execute on function public.h205f22_w1_pre_persistence_manifest_ingest_v1(text,uuid,bigint,bigint,jsonb,jsonb,jsonb) to authenticated' not in combined
+          assert 'grant execute on function public.h205f22_w1_pre_persistence_manifest_ingest_v1(text,uuid,bigint,bigint,jsonb,jsonb,jsonb) to anon' not in combined
+          print('W1 pre-persistence DB migration chain: PASS')
+          PY
