@@ -70,7 +70,11 @@ class GitHubCodespacesLifecycleProvenanceTests(unittest.TestCase):
         self.assertFalse(plan["provider_mutation_performed"])
         self.assertFalse(plan["authority_effect"])
         self.assertFalse(plan["w1_verified"])
-        self.assertNotIn("token", " ".join(str(v) for v in plan.values()).lower().replace("token_source", ""))
+        self.assertEqual(plan["token_source"]["kind"], "ENVIRONMENT_VARIABLE")
+        self.assertEqual(plan["token_source"]["name"], "GITHUB_TOKEN")
+        self.assertFalse(plan["token_source"]["material_persisted"])
+        self.assertNotIn("value", plan["token_source"])
+        self.assertNotIn("material", plan["token_source"])
 
     def test_valid_observations_compose_nonauthority_receipt(self):
         obs = valid_observations()
