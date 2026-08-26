@@ -4,20 +4,22 @@
 This canary does not enter namespaces and does not claim runtime isolation. It
 reuses rootless_sandbox_launcher_v2._pid1_reaper() while replacing only the
 privilege/security setup calls that cannot run in hosted CI. The purpose is to
-answer one narrow question: can a deliberately inheritable parent FD survive
-through S2's current fork -> worker exec path?
+answer one narrow question: does S2's integrated close_range barrier prevent a
+deliberately inheritable parent FD from reaching the worker exec path?
 
-The candidate close_range path is implemented only inside this canary. S2 is
-modified only after a real baseline leak and candidate closure are both proven.
+The baseline disables only S2's exact FD barrier. The candidate executes the
+current launcher implementation without duplicating the security primitive in
+the canary, so drift between the canary and production path fails visibly.
 """
 from __future__ import annotations
 
 import argparse
-import ctypes
+import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
+import signal
 import sys
 import tempfile
 from typing import Any
@@ -29,9 +31,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from worker.native_linux import rootless_sandbox_launcher_v2 as s2
 
-SCHEMA = "metaengine.compute.w1-s2-fd-hygiene-shadow-canary.h205f22.v1"
-CLOSE_RANGE_UNSHARE = 1 << 1
-UINT_MAX = (1 << 32) - 1
+SCHEMA = "metaengine.compute.w1-s2-fd-hygiene-shadow-canary.h205f22.v2"
 
 
 def canonical_hash(value: Any) -> str:
@@ -39,23 +39,10 @@ def canonical_hash(value: Any) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def close_inherited_fds() -> None:
-    """Candidate primitive: unshare FD table and close every descriptor >= 3."""
-    libc = ctypes.CDLL(None, use_errno=True)
-    fn = getattr(libc, "close_range", None)
-    if fn is None:
-        raise RuntimeError("libc close_range unavailable")
-    fn.argtypes = [ctypes.c_uint, ctypes.c_uint, ctypes.c_int]
-    fn.restype = ctypes.c_int
-    if fn(ctypes.c_uint(3), ctypes.c_uint(UINT_MAX), ctypes.c_int(CLOSE_RANGE_UNSHARE)) != 0:
-        err = ctypes.get_errno()
-        raise OSError(err, os.strerror(err))
-
-
-def _probe_script() -> str:
+def _probe_script(leak_fd: int) -> str:
     return (
         "import json, os\n"
-        "fd=int(os.environ['W1_FD_PROBE'])\n"
+        f"fd={leak_fd}\n"
         "try:\n"
         " os.fstat(fd); open_=True\n"
         "except OSError:\n"
@@ -68,50 +55,53 @@ def run_exec_probe(*, apply_candidate: bool) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="w1-s2-fd-canary-") as td:
         leak_path = Path(td) / "leak.txt"
         leak_path.write_text("S2_FD_LEAK_CANARY\n", encoding="utf-8")
-        leak_fd = os.open(leak_path, os.O_RDONLY)
+        base_fd = os.open(leak_path, os.O_RDONLY)
+        leak_fd = fcntl.fcntl(base_fd, fcntl.F_DUPFD, 200)
+        os.close(base_fd)
         os.set_inheritable(leak_fd, True)
         if not os.get_inheritable(leak_fd):
             raise RuntimeError("failed to create deliberately inheritable FD")
 
         out_r, out_w = os.pipe()
         os.set_inheritable(out_w, True)
-        env_before = os.environ.copy()
-        env_before["W1_FD_PROBE"] = str(leak_fd)
 
         # The exact S2 worker branch invokes these names through the imported v1
         # module. Replace only privilege-dependent setup; the S2 fork/setsid/
         # readiness-pipe/exec path remains exact.
-        original = (
+        original_security = (
             s2.v1.set_no_new_privs,
             s2.v1.install_seccomp_deny_policy,
             s2.v1.drop_capability_bounding_set,
-            os.execvp,
         )
+        original_close_inherited_fds = s2._close_inherited_fds
+        original_handlers = {sig: signal.getsignal(sig) for sig in s2.HANDLED_SIGNALS}
 
         def noop(*_args, **_kwargs):
             return None
 
-        def exec_probe(_file: str, _argv: list[str]) -> None:
-            if apply_candidate:
-                close_inherited_fds()
-                # Candidate closes out_w too. Reopen only the canary report pipe
-                # from the still-running parent after the hygiene boundary.
-                report_fd = os.open(f"/proc/{os.getppid()}/fd/{out_w}", os.O_WRONLY)
-                os.dup2(report_fd, 1)
-                if report_fd != 1:
-                    os.close(report_fd)
-            else:
-                os.dup2(out_w, 1)
-            os.execve(sys.executable, [sys.executable, "-c", _probe_script()], env_before)
-
         s2.v1.set_no_new_privs = noop
         s2.v1.install_seccomp_deny_policy = noop
         s2.v1.drop_capability_bounding_set = noop
-        os.execvp = exec_probe
+        if not apply_candidate:
+            s2._close_inherited_fds = noop
+        original_mask = signal.pthread_sigmask(signal.SIG_BLOCK, s2.HANDLED_SIGNALS)
+        saved_stdout = os.dup(1)
+        os.dup2(out_w, 1)
         try:
-            status = s2._pid1_reaper([sys.executable, "-c", _probe_script()])
+            status = s2._pid1_reaper(
+                [sys.executable, "-c", _probe_script(leak_fd)],
+                Path(td),
+                original_mask,
+            )
         finally:
-            s2.v1.set_no_new_privs, s2.v1.install_seccomp_deny_policy, s2.v1.drop_capability_bounding_set, os.execvp = original
+            signal.pthread_sigmask(signal.SIG_BLOCK, s2.HANDLED_SIGNALS)
+            for sig, handler in original_handlers.items():
+                signal.signal(sig, handler)
+            signal.pthread_sigmask(signal.SIG_SETMASK, original_mask)
+            s2.v1.set_no_new_privs, s2.v1.install_seccomp_deny_policy, s2.v1.drop_capability_bounding_set = original_security
+            s2._close_inherited_fds = original_close_inherited_fds
+            os.dup2(saved_stdout, 1)
+            os.close(saved_stdout)
             try:
                 os.close(leak_fd)
             except OSError:
@@ -147,7 +137,8 @@ def evaluate() -> dict[str, Any]:
     outcome = "ACCEPT_CANARY_CLOSE_RANGE_FD_HYGIENE" if all(checks.values()) else "REJECT_OR_RESEARCH_MORE"
     evidence = {
         "exact_exec_path": "worker.native_linux.rootless_sandbox_launcher_v2._pid1_reaper",
-        "candidate_primitive": "close_range(3, UINT_MAX, CLOSE_RANGE_UNSHARE)",
+        "candidate_primitive": "rootless_sandbox_launcher_v2._close_inherited_fds",
+        "baseline_mutation": "only _close_inherited_fds replaced with noop",
         "baseline": baseline,
         "candidate": candidate,
         "checks": checks,
