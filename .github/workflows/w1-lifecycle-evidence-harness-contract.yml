@@ -1,0 +1,60 @@
+name: W1 Lifecycle Evidence Harness Contract
+
+on:
+  push:
+    branches: [work/w1-sandbox-launcher-prep]
+    paths:
+      - 'worker/native_linux/w1_lifecycle_evidence_harness.py'
+      - 'tests/test_w1_lifecycle_evidence_harness.py'
+      - 'controller/w1/github_codespaces_snapshot_guard.py'
+      - 'controller/w1/provider_neutral_lifecycle_guard.py'
+      - 'worker/native_linux/h1_h13_prereq_probe.py'
+      - '.github/workflows/w1-lifecycle-evidence-harness-contract.yml'
+
+permissions: {}
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile evidence harness
+        run: |
+          set -euo pipefail
+          python3 -m py_compile worker/native_linux/w1_lifecycle_evidence_harness.py
+
+      - name: Run fail-closed harness tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_w1_lifecycle_evidence_harness -v
+
+      - name: Assert non-provider and non-authority boundaries
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('worker/native_linux/w1_lifecycle_evidence_harness.py').read_text()
+          forbidden = (
+              '/start', '/stop', 'requests.post(', 'requests.patch(', 'urllib.request.urlopen(',
+              'gh codespace', 'w1_verified = True', 'worker_admitted = True',
+              'authority_effect = True', 'persistent_worker_proof = True',
+          )
+          for token in forbidden:
+              assert token not in text, token
+          required = (
+              'github_codespaces_snapshot_guard.evaluate',
+              'provider_neutral_lifecycle_guard.evaluate',
+              'kernel_boot_id_changed', 'persistent_sentinel_stable',
+              'machine_identity_stable', 'persisted_readback_verified',
+              'prebound_outer_cgroup_witness', 'live_s2_runtime_canaries',
+          )
+          for token in required:
+              assert token in text, token
+          PY
