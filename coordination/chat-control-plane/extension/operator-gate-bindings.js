@@ -17,40 +17,15 @@
     if (autonomousDisabled()) throw typedError("compat_kill_switch_autonomous_send_disabled");
   }
 
-  async function operatorGateEnabled() {
-    const { operatorMode } = await chrome.storage.local.get("operatorMode");
-    return operatorMode === "GATE_SEND";
-  }
-
-  async function arm(tabId, command, ttl = 15000) {
-    if (!(await operatorGateEnabled())) return false;
-    const response = await chrome.tabs.sendMessage(tabId, {
-      type: "A2_PROMPT_GATE_BRIDGE_BYPASS",
-      command_id: String(command?.command_id || ""),
-      draft: String(command?.prompt || ""),
-      expires_in_ms: ttl
-    }).catch((error) => ({ ok: false, error: String(error?.message || error) }));
-    if (!response?.ok) throw typedError(`operator_gate_bypass_unavailable:${response?.error || "unknown"}`);
-    return true;
-  }
-
-  async function clear(tabId, command) {
-    await chrome.tabs.sendMessage(tabId, {
-      type: "A2_PROMPT_GATE_BRIDGE_BYPASS_CLEAR",
-      command_id: String(command?.command_id || "")
-    }).catch(() => null);
-  }
-
+  // Prompt-gate bypass is intentionally armed inside each trusted transport at
+  // the last reversible boundary. GLM arms only after durable DISPATCHED and
+  // immediately before mouseReleased; ChatGPT arms immediately before the
+  // durable Enter sequence. This wrapper enforces only the global kill switch.
   const originalGlm = globalThis.A2_GLM_TRUSTED_SEND;
   if (typeof originalGlm === "function") {
     globalThis.A2_GLM_TRUSTED_SEND = async (tabId, command) => {
       assertAutonomousAllowed();
-      const armed = await arm(tabId, command, 15000);
-      try {
-        return await originalGlm(tabId, command);
-      } finally {
-        if (armed) await clear(tabId, command);
-      }
+      return originalGlm(tabId, command);
     };
   }
 
