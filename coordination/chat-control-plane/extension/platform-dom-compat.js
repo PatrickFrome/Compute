@@ -16,7 +16,8 @@
     const composer = composers[0];
     const form = composer.closest("form");
     if (!form) return false;
-    const candidates = [...form.querySelectorAll("button[type='submit']")];
+    const candidates = [...form.querySelectorAll("button[type='submit']")]
+      .filter((button) => !button.matches("[data-autothink], [data-active]"));
     if (candidates.length !== 1) return false;
     const button = candidates[0];
     if (!button.getAttribute("data-testid")) button.setAttribute("data-testid", "send-button");
@@ -26,7 +27,9 @@
   function reconcile() {
     const host = location.hostname.toLowerCase();
     if (host === "chat.z.ai") {
-      if (!markExactSendButton("#send-message-button")) markBoundSubmitFallback("#chat-input");
+      if (!markExactSendButton("#send-message-button") && !markExactSendButton("button.sendMessageButton")) {
+        markBoundSubmitFallback("#chat-input");
+      }
       return;
     }
     if (host === "chatgpt.com" || host === "chat.openai.com") {
