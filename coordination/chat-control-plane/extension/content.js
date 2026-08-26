@@ -5,11 +5,14 @@
   const SEND_VERIFY_TIMEOUT_MS = 6000;
   const SEND_BUTTON_WAIT_MS = 3000;
   const MAX_MESSAGE_CHARS = 120000;
+  const GLM_PROCESSING_MUTATION_WINDOW_MS = 1800;
   const SEEN_COMMANDS_STORAGE_KEY = "a2-chat-bridge:seen-commands";
   const seenCommands = new Set(loadSeenCommands());
   let snapshotTimer = null;
   let lastSnapshotHash = "";
   let lastMutationAt = Date.now();
+  let lastGlmAppMutationAt = 0;
+  let lastGlmStreamMutationAt = 0;
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const normalize = (value) => String(value ?? "").replace(/\r\n/g, "\n").trim();
@@ -116,9 +119,13 @@
   }
 
   function composerCandidates() {
+    if (platform() === "GLM_ZAI") {
+      const exact = [...document.querySelectorAll("#chat-input")].filter(visible);
+      if (exact.length) return exact;
+    }
     const selectors = platform() === "CHATGPT"
       ? ["#prompt-textarea", "textarea#prompt-textarea", "[data-testid='composer-text-input'] textarea", "[contenteditable='true'][data-lexical-editor='true']", "form textarea", "[role='textbox'][contenteditable='true']"]
-      : ["textarea", "[contenteditable='true'][data-lexical-editor='true']", "[role='textbox'][contenteditable='true']"];
+      : ["textarea.input-scroll", ".messageInputContainer textarea", "textarea", "[contenteditable='true'][data-lexical-editor='true']", "[role='textbox'][contenteditable='true']"];
     const found = [];
     for (const selector of selectors) {
       for (const el of document.querySelectorAll(selector)) {
@@ -151,10 +158,18 @@
   }
 
   function semanticButtonCandidates(kind) {
+    const strong = [];
+    if (platform() === "GLM_ZAI" && kind === "send") {
+      for (const selector of ["button.sendMessageButton", "#send-message-button"]) {
+        for (const el of document.querySelectorAll(selector)) {
+          if (visible(el) && !strong.includes(el)) strong.push(el);
+        }
+      }
+      if (strong.length) return strong;
+    }
     const testids = kind === "send"
       ? ["send-button", "composer-submit-button"]
       : ["stop-button", "composer-stop-button"];
-    const strong = [];
     for (const id of testids) {
       for (const el of document.querySelectorAll(`button[data-testid='${id}']`)) {
         if (visible(el) && !strong.includes(el)) strong.push(el);
@@ -191,25 +206,44 @@
     return normalize(el.innerText || el.textContent || "");
   }
 
-  function generating() { return semanticButtonCandidates("stop").length > 0; }
+  function glmProcessingActive() {
+    if (platform() !== "GLM_ZAI") return false;
+    const composer = getComposer();
+    if (composer && composerText(composer) !== "") return false;
+    const sendButtons = semanticButtonCandidates("send");
+    const sendBlocked = sendButtons.length === 0 || sendButtons.every((button) => button.disabled || button.getAttribute("aria-disabled") === "true");
+    if (!sendBlocked) return false;
+    const latestProcessingMutation = Math.max(lastGlmStreamMutationAt, lastGlmAppMutationAt);
+    return latestProcessingMutation > 0 && Date.now() - latestProcessingMutation <= GLM_PROCESSING_MUTATION_WINDOW_MS;
+  }
+
+  function generating() {
+    return semanticButtonCandidates("stop").length > 0 || glmProcessingActive();
+  }
 
   function pageState() {
     const composerResolution = resolveComposer();
     const composer = composerResolution.composer;
     const messages = extractMessages();
+    const stopControlDetected = semanticButtonCandidates("stop").length > 0;
+    const processingActive = glmProcessingActive();
     return {
       schema: "metaengine.chat-dom-snapshot.v1",
       platform: platform(),
       url: location.href,
       title: document.title,
       captured_at: new Date().toISOString(),
-      generating: generating(),
+      generating: stopControlDetected || processingActive,
+      processing_active: processingActive,
+      generation_signal: stopControlDetected ? "STOP_CONTROL" : (processingActive ? "GLM_DOM_MUTATION" : "NONE"),
       composer_present: Boolean(composer),
       composer_text: composerText(composer),
       dom_pair_error: composerResolution.error,
       message_count: messages.length,
       messages,
       last_mutation_at_ms: lastMutationAt,
+      last_glm_app_mutation_at_ms: lastGlmAppMutationAt,
+      last_glm_stream_mutation_at_ms: lastGlmStreamMutationAt,
       visibility_state: document.visibilityState
     };
   }
@@ -278,16 +312,26 @@
       const cleared = composer ? composerText(composer) === "" : false;
       const exactUserTurn = current.messages.filter((m) => m.role === "user").some((m) => textMatchesExpected(m.text, expectedText));
       const countAdvanced = current.message_count > before.message_count;
-      const glmThinkingAccepted = platform() === "GLM_ZAI" && before.generating !== true && current.generating === true;
-      if (exactUserTurn || (cleared && countAdvanced) || glmThinkingAccepted) {
+      const glmProcessingAccepted = platform() === "GLM_ZAI" && current.processing_active === true;
+      const glmThinkingAccepted = platform() === "GLM_ZAI" && !glmProcessingAccepted && before.generating !== true && current.generating === true;
+      if (exactUserTurn || (cleared && countAdvanced) || glmProcessingAccepted || glmThinkingAccepted) {
+        const verificationStrength = exactUserTurn
+          ? "EXACT_USER_TURN"
+          : (cleared && countAdvanced)
+            ? "CLEARED_AND_COUNT_ADVANCED"
+            : glmProcessingAccepted
+              ? "GLM_PROCESSING_ACTIVE_ACCEPTED"
+              : "GLM_THINKING_ACCEPTED";
         return {
           verified: true,
           exact_user_turn_seen: exactUserTurn,
-          verification_strength: exactUserTurn ? "EXACT_USER_TURN" : (glmThinkingAccepted ? "GLM_THINKING_ACCEPTED" : "CLEARED_AND_COUNT_ADVANCED"),
+          verification_strength: verificationStrength,
           composer_cleared: cleared,
           message_count_before: before.message_count,
           message_count_after: current.message_count,
           generating_after_send: current.generating === true,
+          processing_active_after_send: current.processing_active === true,
+          generation_signal: current.generation_signal,
           after_snapshot: current
         };
       }
@@ -332,6 +376,8 @@
     const signature = hashText(JSON.stringify({
       url: snapshot.url,
       generating: snapshot.generating,
+      processing_active: snapshot.processing_active,
+      generation_signal: snapshot.generation_signal,
       composer_present: snapshot.composer_present,
       composer_text: snapshot.composer_text,
       dom_pair_error: snapshot.dom_pair_error,
@@ -347,8 +393,17 @@
     snapshotTimer = setTimeout(() => { snapshotTimer = null; emitSnapshot(false); }, 150);
   }
 
-  const observer = new MutationObserver(() => {
-    lastMutationAt = Date.now();
+  const observer = new MutationObserver((mutations) => {
+    const now = Date.now();
+    lastMutationAt = now;
+    if (platform() === "GLM_ZAI") {
+      for (const mutation of mutations) {
+        const element = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
+        if (!(element instanceof Element)) continue;
+        if (element.closest("section[aria-live='polite'], [role='region'][aria-live='polite']")) lastGlmStreamMutationAt = now;
+        if (element.closest("#app")) lastGlmAppMutationAt = now;
+      }
+    }
     scheduleSnapshot();
   });
   observer.observe(document.documentElement, {
