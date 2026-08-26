@@ -137,21 +137,35 @@ def _namespace_inodes() -> dict[str, int]:
 
 
 def ensure_persistent_sentinel(path: Path, *, initialize: bool) -> str:
-    path = path.resolve()
+    raw_path = Path(path)
+    try:
+        if raw_path.is_symlink():
+            raise RuntimeError("persistent sentinel must be an existing regular non-symlink file")
+    except OSError as exc:
+        raise RuntimeError(f"unable to inspect persistent sentinel: {exc}") from exc
+
     if initialize:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if not path.exists():
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        if not raw_path.exists():
+            fd = os.open(raw_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
             try:
                 os.write(fd, secrets.token_bytes(SENTINEL_BYTES))
                 os.fsync(fd)
             finally:
                 os.close(fd)
-    if not path.is_file() or path.is_symlink():
-        raise RuntimeError("persistent sentinel must be an existing regular non-symlink file")
-    if path.stat().st_size < SENTINEL_BYTES:
+
+    try:
+        if raw_path.is_symlink() or not raw_path.is_file():
+            raise RuntimeError("persistent sentinel must be an existing regular non-symlink file")
+        resolved = raw_path.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError(f"unable to resolve persistent sentinel: {exc}") from exc
+
+    if resolved != raw_path.absolute():
+        raise RuntimeError("persistent sentinel path must not traverse symlinks")
+    if resolved.stat().st_size < SENTINEL_BYTES:
         raise RuntimeError("persistent sentinel is unexpectedly short")
-    return _sha256_file(path)
+    return _sha256_file(resolved)
 
 
 def capture_local(*, phase: str, source: dict[str, str], sentinel: Path, initialize_sentinel: bool) -> dict[str, Any]:
