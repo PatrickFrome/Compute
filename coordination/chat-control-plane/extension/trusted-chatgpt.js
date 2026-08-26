@@ -49,6 +49,18 @@
     if (armed !== true) throw new Error("chatgpt_cdp_not_armed");
   }
 
+  async function armPromptGateBypass(tabId, commandId, prompt) {
+    const { operatorMode } = await chrome.storage.local.get("operatorMode");
+    if (operatorMode !== "GATE_SEND") return;
+    const response = await chrome.tabs.sendMessage(tabId, {
+      type: "A2_PROMPT_GATE_BRIDGE_BYPASS",
+      command_id: commandId,
+      draft: prompt,
+      expires_in_ms: 3000
+    }).catch((error) => ({ ok: false, error: String(error?.message || error) }));
+    if (!response?.ok) throw new Error(`chatgpt_prompt_gate_bypass_unavailable:${response?.error || "unknown"}`);
+  }
+
   async function ensurePinnedChatgptTab(tabId) {
     const tab = await chrome.tabs.get(tabId);
     const url = new URL(String(tab?.url || ""));
@@ -189,6 +201,7 @@
         await focusComposer(tabId);
         await send(tabId, "Input.insertText", { text: prompt });
         await waitForReadySend(tabId);
+        await armPromptGateBypass(tabId, commandId, prompt);
         await dispatchTrustedEnter(tabId, commandId, idempotencyKey);
         return { ok: true, status: "SENT_DISPATCHED_UNCONFIRMED_NO_RETRY", execution_class: ACTUATED, phase: scope?.mode === "ROLLOVER_ROOT" ? "TRUSTED_ENTER_ROLLOVER_ACTUATED" : "TRUSTED_ENTER_ACTUATED" };
       });
