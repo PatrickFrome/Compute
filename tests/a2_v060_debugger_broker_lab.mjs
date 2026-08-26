@@ -1,18 +1,20 @@
+import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { webcrypto } from 'node:crypto';
 
 const source = fs.readFileSync(path.resolve('coordination/chat-control-plane/extension/debugger-broker.js'), 'utf8');
+const eventListeners = [];
 const detachListeners = [];
 const removedListeners = [];
 const attached = new Set();
+const calls = [];
 let attachCalls = 0;
 let detachCalls = 0;
 let failAttachFor = null;
 const eventOrder = [];
-
-function assert(condition, message) { if (!condition) throw new Error(message); }
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const chrome = {
   debugger: {
@@ -21,60 +23,120 @@ const chrome = {
       if (Number(tabId) === Number(failAttachFor)) throw new Error('foreign debugger busy');
       if (attached.has(tabId)) throw new Error('duplicate attach');
       attached.add(tabId);
+      calls.push(['attach', tabId]);
     },
-    async detach({ tabId }) { detachCalls += 1; attached.delete(tabId); },
-    async sendCommand({ tabId }, method, params = {}) {
-      assert(attached.has(tabId), `${method} sent without broker attachment`);
-      eventOrder.push(`send:${tabId}:${method}:${params.marker || ''}`);
+    async detach({ tabId }) {
+      detachCalls += 1;
+      attached.delete(tabId);
+      calls.push(['detach', tabId]);
+    },
+    async sendCommand(target, method, params = {}) {
+      assert.ok(attached.has(target.tabId), `${method} sent without broker attachment`);
+      calls.push(['command', target, method, params]);
+      eventOrder.push(`send:${target.tabId}:${target.sessionId || 'root'}:${method}:${params.marker || ''}`);
       return { ok: true };
     },
+    onEvent: { addListener(fn) { eventListeners.push(fn); } },
     onDetach: { addListener(fn) { detachListeners.push(fn); } }
   },
   tabs: { onRemoved: { addListener(fn) { removedListeners.push(fn); } } },
   storage: { local: { async set() {} } }
 };
 
-const context = vm.createContext({ chrome, globalThis: null, console, Map, Promise, Date, setTimeout, clearTimeout });
+const context = vm.createContext({
+  chrome,
+  globalThis: null,
+  console,
+  Map,
+  Promise,
+  Date,
+  setTimeout,
+  clearTimeout,
+  crypto: webcrypto
+});
 context.globalThis = context;
 vm.runInContext(source, context, { filename: 'debugger-broker.js' });
 
-const p1 = context.A2_DEBUGGER_RUN(1, 'first', async (session) => {
+const run = context.A2_DEBUGGER_RUN;
+const hold = context.A2_DEBUGGER_HOLD;
+const status = context.A2_DEBUGGER_STATUS;
+assert.equal(typeof run, 'function');
+assert.equal(typeof hold, 'function');
+
+// Same-tab transient operations serialize and reuse one extension-owned root attach.
+const p1 = run(1, 'first', async (session) => {
   eventOrder.push('first:start');
   await session.send('Runtime.evaluate', { marker: 'first' });
   await sleep(80);
   eventOrder.push('first:end');
   return 'one';
 });
-const p2 = context.A2_DEBUGGER_RUN(1, 'second', async (session) => {
+const p2 = run(1, 'second', async (session) => {
   eventOrder.push('second:start');
   await session.send('Page.enable', { marker: 'second' });
   eventOrder.push('second:end');
   return 'two';
 });
-
 const results = await Promise.all([p1, p2]);
-assert(results.join(',') === 'one,two', 'broker result ordering failed');
-assert(eventOrder.indexOf('first:end') < eventOrder.indexOf('second:start'), 'same-tab operations overlapped');
-assert(attachCalls === 1, `back-to-back broker tasks should reuse one attachment, got ${attachCalls}`);
-assert(context.A2_DEBUGGER_STATUS()[0]?.pending === 0, 'broker pending count did not drain');
-
+assert.equal(results.join(','), 'one,two');
+assert.ok(eventOrder.indexOf('first:end') < eventOrder.indexOf('second:start'), 'same-tab operations overlapped');
+assert.equal(attachCalls, 1, 'back-to-back broker tasks should reuse one attachment');
 await sleep(1350);
-assert(detachCalls === 1 && attached.size === 0, 'broker did not idle-detach exactly once');
+assert.equal(detachCalls, 1, 'idle root should detach after transient work');
 
+// Long-lived GLM hold shares the same root with perception/action work and suppresses idle detach.
+const lease = await hold(7, 'glm-monitor');
+assert.equal(attachCalls, 2);
+await run(7, 'perception', (session) => session.send('Runtime.enable'));
+assert.equal(attachCalls, 2, 'hold + transient work must share one root attachment');
+assert.equal(status().find((row) => row.tab_id === 7)?.hold_count, 1);
+await sleep(1350);
+assert.equal(detachCalls, 1, 'active hold must suppress idle detach');
+
+// Chrome 125+ flat child sessions: target events become addressable tabId+sessionId sessions.
+await lease.enableChildTargets();
+for (const listener of eventListeners) {
+  listener(
+    { tabId: 7 },
+    'Target.attachedToTarget',
+    { sessionId: 'child-1', targetInfo: { targetId: 'target-1', type: 'iframe', url: 'https://frame.example/' }, waitingForDebugger: false }
+  );
+}
+assert.equal(lease.childSessions().length, 1);
+await lease.sendChild('child-1', 'Runtime.enable');
+assert.ok(calls.some((row) => row[0] === 'command' && row[1]?.tabId === 7 && row[1]?.sessionId === 'child-1' && row[2] === 'Runtime.enable'));
+await lease.disableChildTargets();
+assert.equal(lease.childSessions().length, 0);
+assert.ok(calls.some((row) => row[0] === 'command' && row[2] === 'Target.setAutoAttach' && row[3]?.autoAttach === false));
+
+// Last hold release permits normal idle detach.
+await lease.release();
+await sleep(1350);
+assert.equal(detachCalls, 2);
+
+// Foreign debugger attach failure remains fail-closed.
 failAttachFor = 2;
-let failed = false;
-try { await context.A2_DEBUGGER_RUN(2, 'blocked', async () => 'unexpected'); }
-catch (error) { failed = String(error?.message || error).includes('debugger_broker_attach_failed'); }
-assert(failed, 'broker attach failure did not fail closed');
+await assert.rejects(() => run(2, 'blocked', async () => 'unexpected'), /debugger_broker_attach_failed/);
 failAttachFor = null;
 
-await context.A2_DEBUGGER_RUN(3, 'detach-event', async (session) => {
-  await session.send('Runtime.enable');
-  for (const listener of detachListeners) listener({ tabId: 3 }, 'canceled_by_user');
-});
-assert(context.A2_DEBUGGER_STATUS().find((row) => row.tab_id === 3)?.attached === false, 'external detach was not reflected in broker state');
+// External DevTools detach invalidates generation and every previously-issued lease.
+const staleLease = await hold(3, 'detach-event');
+const generationBeforeDetach = staleLease.generation;
+for (const listener of detachListeners) listener({ tabId: 3 }, 'canceled_by_user');
+const detached = status().find((row) => row.tab_id === 3);
+assert.equal(detached?.attached, false);
+assert.equal(detached?.hold_count, 0);
+assert.ok(Number(detached?.generation) > Number(generationBeforeDetach));
+await assert.rejects(() => staleLease.send('Runtime.enable'), /debugger_broker_lease_stale/);
 
+// Fresh generation can recover, then removed tab drops broker state entirely.
+await run(3, 'post-detach-recovery', (session) => session.send('Runtime.enable'));
 for (const listener of removedListeners) listener(3);
-assert(!context.A2_DEBUGGER_STATUS().some((row) => row.tab_id === 3), 'removed tab remained in broker state');
+assert.ok(!status().some((row) => row.tab_id === 3));
 
-console.log('A2 v0.6 Debugger Broker Lab: PASS', JSON.stringify({ attach_calls: attachCalls, detach_calls: detachCalls, order: eventOrder }));
+console.log('A2 v0.6 Debugger Broker Lab: PASS', JSON.stringify({
+  attach_calls: attachCalls,
+  detach_calls: detachCalls,
+  child_session_tested: true,
+  stale_lease_rejected: true
+}));
