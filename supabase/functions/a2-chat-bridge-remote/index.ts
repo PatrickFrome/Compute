@@ -5,7 +5,7 @@ const MACROBLOCK_ID = 'dce58a3b-2f67-47e0-ae0d-9b3825ff53cd';
 const PAIRING_TABLE = 'compute_fabric_a2_chat_bridge_remote_pairing_h205f22';
 const PEER_TABLE = 'compute_fabric_a2_chat_bridge_remote_peer_h205f22';
 const COMMAND_TABLE = 'compute_fabric_a2_chat_bridge_remote_command_h205f22';
-const IDLE_MS = 18_000;
+const IDLE_MS = 5_000;
 const SNAPSHOT_FRESH_MS = 45_000;
 const LEASE_TIMEOUT_MS = 120_000;
 const FAILED_RETRY_MS = 60_000;
@@ -305,7 +305,7 @@ async function nextCommand(req: Request, body: any) {
     for (const stale of rows.filter((r: any) => r.status === 'LEASED' && now - Date.parse(r.leased_at || r.created_at || '') >= LEASE_TIMEOUT_MS)) {
       await rest(`${COMMAND_TABLE}?command_id=eq.${stale.command_id}`, { method: 'PATCH', headers: { prefer: 'return=minimal' }, body: JSON.stringify({ status: 'FAILED', completed_at: new Date().toISOString(), result_status: 'LEASE_TIMEOUT_REMOTE' }) });
     }
-    const wakeKey = `${platform}:${state.last_assistant_sha256 || 'none'}:${state.message_count}:${a2.cursor}:${a2.pendingRelay?.relay?.duel_id || 'no-duel'}`;
+    const wakeKey = `${platform}:${state.last_assistant_sha256 || 'none'}:${state.message_count}:${state.changed_at || 'no-change'}:${a2.cursor}:${a2.pendingRelay?.relay?.duel_id || 'no-duel'}`;
     const idempotencyKey = await sha256(wakeKey);
     const same = rows.find((r: any) => r.idempotency_key === idempotencyKey);
     if (same) {
