@@ -50,7 +50,9 @@ function renderPerception(perception) {
   }
   $("perceptionTarget").textContent = `${compact(perception.platform)} · ${compact(perception.url)}`;
   $("perceptionCaptured").textContent = compact(perception.captured_at);
-  $("perceptionFrame").textContent = `${shortHash(perception.frame_token)} · ${Number(perception.frame_max_age_ms || 30000)} ms max`;
+  $("perceptionFrame").textContent = perception.frame_token
+    ? `${shortHash(perception.frame_token)} · ${Number(perception.frame_max_age_ms || 30000)} ms max`
+    : "no pixel-bound frame";
   $("perceptionTextMeta").textContent = `${Number(perception.page?.body_text_length || 0)} chars${perception.page?.body_text_truncated ? " · source clipped" : ""}`;
   $("perceptionStructure").textContent = `${Number(perception.accessibility_total || perception.accessibility?.length || 0)} AX · ${Number(perception.dom_snapshot?.visible_record_count || 0)} visible DOM/layout`;
   $("perceptionHashes").textContent = `text ${shortHash(perception.hashes?.body_text_sha256)} · pixels ${shortHash(perception.hashes?.screenshot_sha256)}`;
@@ -74,6 +76,27 @@ function renderPerception(perception) {
   }
 }
 
+function renderRuntimeHardening(state) {
+  const update = state.update || {};
+  const blocked = Array.isArray(update.blocked_by) && update.blocked_by.length ? ` · ${update.blocked_by.join(", ")}` : "";
+  $("updateState").textContent = `${compact(update.status, "CURRENT")}${update.target_version ? ` → ${update.target_version}` : ""}${blocked}`;
+
+  const compatibility = state.compatibility || {};
+  $("compatState").textContent = `${compact(compatibility.status, "UNPROVISIONED")}${compatibility.epoch != null ? ` · epoch ${compatibility.epoch}` : ""}${compatibility.last_error ? ` · ${compatibility.last_error}` : ""}`;
+  $("capabilityState").textContent = [
+    state.prompt_gate_allowed === false ? "gate OFF" : "gate on",
+    state.operator_actions_allowed === false ? "actions OFF" : "actions on",
+    state.screenshot_sensor_allowed === false ? "pixels OFF" : "pixels on",
+    state.point_click_allowed === false ? "point-click OFF" : "point-click on"
+  ].join(" · ");
+
+  const broker = Array.isArray(state.debugger_broker) ? state.debugger_broker : [];
+  const active = broker.filter((row) => row?.active_owner || Number(row?.pending || 0) > 0);
+  $("debuggerState").textContent = active.length
+    ? active.map((row) => `tab ${row.tab_id}: ${row.active_owner || `${row.pending} queued`}`).join(" · ")
+    : (state.debugger_last_detach ? `idle · last detach ${state.debugger_last_detach}` : "idle");
+}
+
 function render(state) {
   $("runtime").textContent = `${compact(state.operator_runtime)} · ${compact(state.extension_version)}`;
   const armed = state.armed === true;
@@ -85,6 +108,7 @@ function render(state) {
   const mode = state.operator_mode === "GATE_SEND" ? "GATE_SEND" : "OBSERVE";
   $("modeObserve").classList.toggle("active", mode === "OBSERVE");
   $("modeGate").classList.toggle("active", mode === "GATE_SEND");
+  $("modeGate").disabled = state.prompt_gate_allowed === false;
   $("ordering").textContent = compact(state.ordering_policy);
   $("predecessor").textContent = compact(state.glm_predecessor_command_id);
   $("pendingCommand").textContent = state.pending_command
@@ -95,6 +119,7 @@ function render(state) {
   $("daemon").textContent = state.daemon_online_at ? `seen ${state.daemon_online_at}` : "not confirmed";
   $("sensorError").textContent = compact(state.sensor_error);
   $("lastError").textContent = compact(state.daemon_error);
+  renderRuntimeHardening(state);
 
   const intent = state.prompt_intent || null;
   $("intentCard").hidden = !intent;
@@ -214,7 +239,7 @@ async function runOperatorAction(action, extra = {}) {
 }
 
 function screenshotCoordinates(event) {
-  if (!currentPerception?.frame_token) throw new Error("Capture a fresh frame first.");
+  if (!currentPerception?.frame_token) throw new Error("Capture a fresh pixel frame first.");
   const viewport = currentPerception.page?.viewport || {};
   const width = Number(viewport.width || 0), height = Number(viewport.height || 0);
   if (!(width > 0 && height > 0)) throw new Error("Captured viewport dimensions are unavailable.");
