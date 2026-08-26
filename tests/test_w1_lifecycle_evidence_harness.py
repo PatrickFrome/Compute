@@ -90,6 +90,8 @@ def s2_pass() -> dict:
             "OLDROOT_DETACHED=true",
             "WORKSPACE_RW=true",
             "NETWORK_DEFAULT_DENY=true",
+            "RLIMIT_CORE_ZERO=true",
+            "PID1_ENVIRON_DENIED=true",
             "CANONICAL=false",
             "AUTHORITY_EFFECT=false",
             "WORKER_ADMITTED=false",

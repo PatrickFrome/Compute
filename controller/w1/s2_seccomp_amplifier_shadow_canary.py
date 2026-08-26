@@ -38,6 +38,7 @@ CANDIDATE_SYSCALLS = (
     "open_tree",
     "move_mount",
     "fsopen",
+    "fsconfig",
     "fsmount",
     "fspick",
     "mount_setattr",

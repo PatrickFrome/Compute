@@ -28,7 +28,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected='e4204c217bbcf290469e8ffcf8b98357a8e11026620d0bb086cd4f272f867298'
+          expected='25586bd8e0e97a78988f93d9c68c358b7eea6924015d06721afc135412d386df'
           actual="$(sha256sum worker/native_linux/rootless_sandbox_launcher_v2.py | awk '{print $1}')"
           echo "S2_V2_SHA256=$actual"
           test "$actual" = "$expected"

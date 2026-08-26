@@ -9,13 +9,13 @@ import signal
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import unittest
 from unittest import mock
 
 from worker.native_linux import rootless_sandbox_launcher_v2 as launcher
 
-EXPECTED_SOURCE_SHA256 = "e4204c217bbcf290469e8ffcf8b98357a8e11026620d0bb086cd4f272f867298"
+EXPECTED_SOURCE_SHA256 = "25586bd8e0e97a78988f93d9c68c358b7eea6924015d06721afc135412d386df"
 
 
 class RootlessSandboxLauncherV2ContractTests(unittest.TestCase):
@@ -77,10 +77,11 @@ class RootlessSandboxLauncherV2ContractTests(unittest.TestCase):
             "mount", "umount2", "unshare", "setns", "ptrace", "bpf",
             "process_vm_readv", "process_vm_writev", "kcmp",
             "io_uring_setup", "io_uring_enter", "io_uring_register",
-            "open_tree", "move_mount", "fsopen", "fsmount", "fspick",
+            "open_tree", "move_mount", "fsopen", "fsconfig", "fsmount", "fspick",
             "mount_setattr", "pivot_root",
         ):
             self.assertIn(syscall, denied)
+        self.assertNotIn("clone3", denied)
 
     def test_runtime_binds_are_minimal(self):
         specs = launcher._runtime_bind_specs()
@@ -92,6 +93,14 @@ class RootlessSandboxLauncherV2ContractTests(unittest.TestCase):
         for spec in specs:
             if str(spec.target).startswith(("/usr", "/etc/", "/bin", "/lib", "/sbin")):
                 self.assertTrue(spec.read_only, spec)
+
+    def test_device_exception_is_restricted_to_exact_runtime_bindings(self):
+        exact = launcher.BindSpec(Path("/dev/null"), PurePosixPath("/dev/null"), False)
+        redirected = launcher.BindSpec(Path("/dev/null"), PurePosixPath("/device"), False)
+        read_only = launcher.BindSpec(Path("/dev/null"), PurePosixPath("/dev/null"), True)
+        self.assertTrue(launcher._is_exact_runtime_device_bind(exact, Path("/dev/null").resolve()))
+        self.assertFalse(launcher._is_exact_runtime_device_bind(redirected, Path("/dev/null").resolve()))
+        self.assertFalse(launcher._is_exact_runtime_device_bind(read_only, Path("/dev/null").resolve()))
 
     def test_extra_bind_is_fail_closed_and_read_only(self):
         with tempfile.TemporaryDirectory() as td:

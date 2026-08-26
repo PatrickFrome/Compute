@@ -103,6 +103,9 @@ _MINIMAL_ETC_BINDS = (
     "/etc/ssl/certs",
     "/etc/ca-certificates",
 )
+_RUNTIME_DEVICE_TARGETS = frozenset(
+    PurePosixPath(path) for path in ("/dev/null", "/dev/zero", "/dev/random", "/dev/urandom")
+)
 FIXED_WORKER_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 PASSTHROUGH_ENV_KEYS = (
     "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM", "COLORTERM",
@@ -283,12 +286,19 @@ def _create_mount_target(source: Path, target: Path) -> None:
             target.touch(mode=0o600)
 
 
+def _is_exact_runtime_device_bind(spec: BindSpec, source: Path) -> bool:
+    if spec.read_only or spec.target not in _RUNTIME_DEVICE_TARGETS:
+        return False
+    expected_source = Path(str(spec.target)).resolve(strict=True)
+    return source == expected_source and stat.S_ISCHR(source.stat().st_mode)
+
+
 def _bind_mount(spec: BindSpec, root: Path) -> None:
     source = spec.source.resolve(strict=True)
     target = _sandbox_target(root, spec.target)
     _create_mount_target(source, target)
     _mount(source, target, None, MS_BIND | (MS_REC if source.is_dir() else 0))
-    allow_device = stat.S_ISCHR(source.stat().st_mode)
+    allow_device = _is_exact_runtime_device_bind(spec, source)
     if spec.read_only:
         _mount(None, target, None, MS_BIND | MS_REMOUNT | MS_RDONLY | MS_NOSUID | MS_NODEV)
     _recursive_mount_attributes(
@@ -313,7 +323,8 @@ def _runtime_bind_specs() -> tuple[BindSpec, ...]:
         p = Path(path)
         if p.exists():
             specs.append(BindSpec(p, PurePosixPath(path), True))
-    for path in ("/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"):
+    for target in sorted(_RUNTIME_DEVICE_TARGETS, key=str):
+        path = str(target)
         p = Path(path)
         if p.exists() and stat.S_ISCHR(p.stat().st_mode):
             specs.append(BindSpec(p, PurePosixPath(path), False))

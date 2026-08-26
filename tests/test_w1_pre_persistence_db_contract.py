@@ -10,7 +10,7 @@ STOPPED = ROOT / "supabase/migrations/20260825023500_w1_lifecycle_stopped_snapsh
 V3 = ROOT / "supabase/migrations/20260826060000_w1_pre_persistence_evidence_manifest_v1.sql"
 SOURCE_GUARD = ROOT / "supabase/migrations/20260826060500_w1_pre_persistence_source_binding_guard_v1.sql"
 STOPPED_BRIDGE = ROOT / "supabase/migrations/20260826060600_w1_pre_persistence_stopped_snapshot_bridge_guard_v1.sql"
-EXPECTED_S2 = "8c5570faaabb3b44056fc2954224036ae0d342c57d79053fceffb8ebefe1ecca"
+EXPECTED_S2 = "25586bd8e0e97a78988f93d9c68c358b7eea6924015d06721afc135412d386df"
 
 
 def text(path: Path) -> str:
