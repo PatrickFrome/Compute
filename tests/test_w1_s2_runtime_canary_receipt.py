@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import unittest
 
 from controller.w1 import s2_runtime_canary_receipt as receipt
@@ -42,6 +43,7 @@ class S2RuntimeCanaryReceiptTests(unittest.TestCase):
         self.assertFalse(result["authority_effect"])
         self.assertFalse(result["worker_admitted"])
         self.assertFalse(result["w1_verified"])
+        self.assertIs(receipt.validate(result, require_pass=True, expected_source_sha256=SOURCE_SHA), result)
 
     def test_rc_zero_without_all_markers_is_failed(self):
         result = receipt.compose(launcher_rc=0, output="W1_VERIFIED=false\n", source_sha256=SOURCE_SHA, runner=RUNNER)
@@ -54,6 +56,9 @@ class S2RuntimeCanaryReceiptTests(unittest.TestCase):
         self.assertEqual(result["status"], "UNAVAILABLE_FAIL_CLOSED")
         self.assertEqual(result["evidence"]["reason_class"], "USER_NAMESPACE_SETGROUPS_DENIED")
         self.assertFalse(result["persistent_worker_proof"])
+        receipt.validate(result, expected_source_sha256=SOURCE_SHA)
+        with self.assertRaisesRegex(ValueError, "PASS required"):
+            receipt.validate(result, require_pass=True, expected_source_sha256=SOURCE_SHA)
 
     def test_rc_78_without_launcher_diagnostic_is_failed(self):
         result = receipt.compose(launcher_rc=78, output="permission denied\n", source_sha256=SOURCE_SHA, runner=RUNNER)
@@ -69,6 +74,18 @@ class S2RuntimeCanaryReceiptTests(unittest.TestCase):
         a = receipt.compose(launcher_rc=0, output=PASS_OUTPUT, source_sha256=SOURCE_SHA, runner=RUNNER)
         b = receipt.compose(launcher_rc=0, output=PASS_OUTPUT, source_sha256=SOURCE_SHA, runner=RUNNER)
         self.assertEqual(a["receipt_sha256"], b["receipt_sha256"])
+
+    def test_tampered_evidence_hash_is_rejected(self):
+        result = receipt.compose(launcher_rc=0, output=PASS_OUTPUT, source_sha256=SOURCE_SHA, runner=RUNNER)
+        tampered = copy.deepcopy(result)
+        tampered["evidence"]["markers"]["ROOT_FS"] = "overlay"
+        with self.assertRaisesRegex(ValueError, "hash mismatch"):
+            receipt.validate(tampered)
+
+    def test_source_rebind_is_rejected(self):
+        result = receipt.compose(launcher_rc=0, output=PASS_OUTPUT, source_sha256=SOURCE_SHA, runner=RUNNER)
+        with self.assertRaisesRegex(ValueError, "source SHA mismatch"):
+            receipt.validate(result, expected_source_sha256="c" * 64)
 
 
 if __name__ == "__main__":
