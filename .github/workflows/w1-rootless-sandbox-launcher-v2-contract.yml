@@ -28,7 +28,7 @@ jobs:
       - name: Verify exact hardened source SHA-256
         run: |
           set -euo pipefail
-          expected='8c5570faaabb3b44056fc2954224036ae0d342c57d79053fceffb8ebefe1ecca'
+          expected='e4204c217bbcf290469e8ffcf8b98357a8e11026620d0bb086cd4f272f867298'
           actual="$(sha256sum worker/native_linux/rootless_sandbox_launcher_v2.py | awk '{print $1}')"
           echo "S2_V2_SHA256=$actual"
           test "$actual" = "$expected"
@@ -61,6 +61,8 @@ jobs:
               'mount_setattr', 'AT_RECURSIVE', 'PR_SET_PDEATHSIG',
               'close_range', 'CLOSE_RANGE_UNSHARE', 'os.execve',
               'pidfd_open', 'pidfd_send_signal',
+              'PR_SET_DUMPABLE', 'PR_GET_DUMPABLE', 'RLIMIT_CORE',
+              '_harden_pid1_runtime',
               '_worker_environment', 'sandbox_root.rmdir()',
           )
           for token in required:
