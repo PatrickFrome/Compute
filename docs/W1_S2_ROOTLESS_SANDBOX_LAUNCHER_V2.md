@@ -5,11 +5,11 @@ This document binds the reviewable S2 launcher composition required before any p
 ## Exact hardened source
 
 - Path: `worker/native_linux/rootless_sandbox_launcher_v2.py`
-- Hardened source commit: `0abbb1cc0463ce5f82471924ec6d0105bf02f390`
-- Expected exact SHA-256: `46b688914dda5c93c46b4dec8784a02c2825a4fd5145ac6a98512ee7b6b2c1af`
+- Current direct-entry hardened source commit: `bb2aaaf89595ddc80257aae340f173191d209642`
+- Expected exact SHA-256: `f262cd5468b5eb51754cf397cdb1879c2e90d0670b74f479d3b28af8cd20f521`
 - Status: PREP / non-authority. This source does **not** admit a worker or prove W1.
 
-The initial reviewable v2 (`231afd6a...`) was deliberately rejected for provider execution after exact-source review found that arbitrary writable/sensitive host binds, `workspace=/`, broad `/etc`/`/opt` binds, and a pre-`setsid` signal-forwarding race could weaken isolation. The hardened source closes those findings.
+The initial reviewable v2 (`231afd6a...`) was deliberately rejected for provider execution after exact-source review found that arbitrary writable/sensitive host binds, `workspace=/`, broad `/etc`/`/opt` binds, and a pre-`setsid` signal-forwarding race could weaken isolation. The first hardened source closed those findings. Runtime-canary execution then found a separate direct-file packaging defect: `python3 worker/native_linux/rootless_sandbox_launcher_v2.py` could not resolve the package import from script mode. Commit `bb2aaaf...` adds a narrow repository-root bootstrap only when the missing module is exactly `worker`; the source remains fail-closed for all other import failures.
 
 ## Composition contract
 
@@ -24,17 +24,18 @@ The initial reviewable v2 (`231afd6a...`) was deliberately rejected for provider
 9. PID1 forks worker PID2+. A readiness pipe closes the signal race: the worker performs `setsid()` and explicitly marks its process group ready before queued TERM/INT/HUP signals may be forwarded.
 10. The worker applies `PR_SET_NO_NEW_PRIVS`, the existing substantive seccomp deny policy, and capability bounding-set drops before `execvp`.
 11. PID1 forwards signals to the worker process group, reaps adopted orphans, and propagates the main worker exit status. PID1 exit is the final namespace cleanup boundary.
+12. Both package import and direct-file CLI invocation are contract-tested; direct-file invocation may bootstrap only the repository root and may not weaken sandbox policy.
 
 ## Forbidden shortcuts
 
-No executable `sudo` path in the launcher; no privileged mode; no host PID/network sharing; no `seccomp=unconfined`; no capability-add fallback; no writable arbitrary host binds; no synthetic provider or W1 identity; no provider start/restart from this PREP artifact.
+No executable `sudo` path in the launcher; no privileged mode; no host PID/network sharing; no `seccomp=unconfined`; no capability-add fallback; no writable arbitrary host binds; no synthetic provider or W1 identity; no provider lifecycle mutation from this PREP artifact.
 
 ## Required rail review before execution
 
 - Exact source/test/docs are fetched from one immutable Git commit.
-- Recompute SHA-256 and match `46b688914dda5c93c46b4dec8784a02c2825a4fd5145ac6a98512ee7b6b2c1af`.
-- SHA-bound composition tests must pass.
-- Review must verify PID1 reaping/signal semantics, pivot-root mount tree, old-root non-exposure, bind/layout fences, and network-plane ownership.
+- Recompute SHA-256 and match `f262cd5468b5eb51754cf397cdb1879c2e90d0670b74f479d3b28af8cd20f521`.
+- SHA-bound composition tests and the direct-entry CLI regression must pass.
+- Review must verify PID1 reaping/signal semantics, pivot-root mount tree, old-root non-exposure, bind/layout fences, network-plane ownership, and package/direct-file entry equivalence.
 - A fresh aligned W1 claim/directive is still required after source approval and before any Codespace/provider mutation.
 
 ## Live canaries after authority is refreshed
