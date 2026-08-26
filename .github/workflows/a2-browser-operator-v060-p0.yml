@@ -22,12 +22,15 @@ jobs:
           for f in coordination/chat-control-plane/extension/*.js; do node --check "$f"; done
           node --check tests/a2_v060_operator_control_lab.mjs
           node --check tests/a2_v060_prompt_gate_browser_lab.mjs
+          node --check tests/a2_v060_perception_lab.mjs
 
       - name: Browser Operator v0.6 P0 contracts
         run: python3 -m unittest -v tests.test_a2_browser_operator_v060_p0
 
-      - name: Trusted operator-control behavioral lab
-        run: node tests/a2_v060_operator_control_lab.mjs
+      - name: Trusted operator-control and perception labs
+        run: |
+          node tests/a2_v060_operator_control_lab.mjs
+          node tests/a2_v060_perception_lab.mjs
 
       - name: Legacy v0.5.23 regression contracts
         run: python3 -m unittest -v tests.test_a2_chat_bridge_v0523_final || true
@@ -86,6 +89,9 @@ jobs:
             'prompt_gate_bridge_capability_bound':True,
             'operator_control_trusted_sender_only':True,
             'held_draft_session_only':True,
+            'hybrid_perception_ax_domsnapshot_screenshot':True,
+            'full_perception_memory_only':True,
+            'perception_persistent_metadata_only':True,
             'behavioral_browser_lab':True,
             'authority_effect':False
           }
