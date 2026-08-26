@@ -278,14 +278,16 @@
       const cleared = composer ? composerText(composer) === "" : false;
       const exactUserTurn = current.messages.filter((m) => m.role === "user").some((m) => textMatchesExpected(m.text, expectedText));
       const countAdvanced = current.message_count > before.message_count;
-      if (exactUserTurn || (cleared && countAdvanced)) {
+      const glmThinkingAccepted = platform() === "GLM_ZAI" && before.generating !== true && current.generating === true;
+      if (exactUserTurn || (cleared && countAdvanced) || glmThinkingAccepted) {
         return {
           verified: true,
           exact_user_turn_seen: exactUserTurn,
-          verification_strength: exactUserTurn ? "EXACT_USER_TURN" : "CLEARED_AND_COUNT_ADVANCED",
+          verification_strength: exactUserTurn ? "EXACT_USER_TURN" : (glmThinkingAccepted ? "GLM_THINKING_ACCEPTED" : "CLEARED_AND_COUNT_ADVANCED"),
           composer_cleared: cleared,
           message_count_before: before.message_count,
           message_count_after: current.message_count,
+          generating_after_send: current.generating === true,
           after_snapshot: current
         };
       }
