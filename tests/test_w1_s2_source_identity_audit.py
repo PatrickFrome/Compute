@@ -115,6 +115,54 @@ class S2SourceIdentityAuditTests(unittest.TestCase):
             ".github/workflows/unregistered-s2-consumer.yml",
         )
 
+    def test_shell_consumer_with_stale_sha_is_not_suffix_blind(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._tree(root)
+            consumer = root / "scripts/ghost_pin.sh"
+            consumer.parent.mkdir(parents=True, exist_ok=True)
+            consumer.write_text(
+                f"# source={audit.SOURCE_PATH}\nEXPECTED={'f' * 64}\n",
+                encoding="utf-8",
+            )
+            result = audit.evaluate(root)
+        self.assertEqual(result["outcome"], "FAIL_SOURCE_IDENTITY_DRIFT")
+        self.assertEqual(result["evidence"]["undeclared_binding_consumers"][0]["path"], "scripts/ghost_pin.sh")
+
+    def test_extensionless_partial_launcher_hint_with_stale_sha_fails(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._tree(root)
+            consumer = root / "Dockerfile"
+            consumer.write_text(
+                f"# launcher_v2 expected {'e' * 64}\nFROM scratch\n",
+                encoding="utf-8",
+            )
+            result = audit.evaluate(root)
+        self.assertEqual(result["outcome"], "FAIL_SOURCE_IDENTITY_DRIFT")
+        hit = result["evidence"]["undeclared_binding_consumers"][0]
+        self.assertEqual(hit["path"], "Dockerfile")
+        self.assertEqual(hit["source_hint"], "launcher_v2")
+
+    def test_binary_file_with_nul_is_ignored(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._tree(root)
+            binary = root / "scripts/blob.bin"
+            binary.parent.mkdir(parents=True, exist_ok=True)
+            binary.write_bytes((audit.SOURCE_PATH + " " + "d" * 64).encode() + b"\x00tail")
+            result = audit.evaluate(root)
+        self.assertEqual(result["outcome"], "PASS_EXACT_SOURCE_IDENTITY_AUDIT_NONAUTHORITY")
+
+    def test_unrelated_sha_without_source_hint_is_not_consumer(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._tree(root)
+            note = root / "Makefile"
+            note.write_text("OTHER_COMPONENT_SHA=" + "c" * 64 + "\n", encoding="utf-8")
+            result = audit.evaluate(root)
+        self.assertEqual(result["outcome"], "PASS_EXACT_SOURCE_IDENTITY_AUDIT_NONAUTHORITY")
+
     def test_historical_research_reference_is_not_current_policy_consumer(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
