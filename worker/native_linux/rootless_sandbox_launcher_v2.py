@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
 """S2 rootless sandbox launcher v2 for W1 PREP/review.
 
-This is a non-authority execution primitive. It never admits a worker and never
+Non-authority execution primitive only. It never admits a worker and never
 claims W1. Provider execution remains gated by a fresh aligned W1 claim and the
 MB1V2 authority rules.
 
 Composition:
-  user namespace + single-ID maps
-  -> CLONE_NEWPID
-  -> fork dedicated namespace PID 1
-  -> PID1 creates private mount namespace + isolated network namespace
-  -> fresh tmpfs root + explicit read-only runtime binds + read/write workspace
-  -> pivot_root + detach old root + mount fresh /proc
-  -> fork worker as PID 2+, set no_new_privs/seccomp/capability bounds
-  -> PID1 forwards signals, reaps orphans, and propagates worker exit status.
+  user namespace + single-ID maps -> CLONE_NEWPID -> fork dedicated namespace
+  PID1 -> private mount namespace + isolated network namespace -> fresh tmpfs
+  root + minimal read-only runtime binds + one read/write workspace ->
+  pivot_root + detach old root + fresh /proc -> worker PID2+ with
+  no_new_privs/seccomp/capability bounding-set drop -> PID1 signal forwarding,
+  orphan reaping, cleanup, and worker exit propagation.
 
-There is no sudo, privileged, host PID/network, seccomp-unconfined, capability-
-add, or synthetic isolation fallback.
+No sudo, privileged, host PID/network, seccomp-unconfined, capability-add, or
+synthetic isolation fallback exists.
 """
 from __future__ import annotations
 
@@ -37,7 +35,6 @@ CLONE_NEWNS = 0x00020000
 CLONE_NEWPID = 0x20000000
 CLONE_NEWUSER = 0x10000000
 CLONE_NEWNET = 0x40000000
-
 MS_RDONLY = 1
 MS_NOSUID = 2
 MS_NODEV = 4
@@ -47,21 +44,25 @@ MS_BIND = 4096
 MS_REC = 16384
 MS_PRIVATE = 1 << 18
 MNT_DETACH = 2
-
 TMPFS_SIZE = "size=256M,mode=0755"
 NETWORK_ISOLATION_OWNER = "LAUNCHER_CLONE_NEWNET"
 PID1_ROLE = "DEDICATED_INIT_REAPER"
 OLDROOT_NAME = ".oldroot"
-
 DENIED_SYSCALLS = v1.DENIED_SYSCALLS
 SandboxUnavailable = v1.SandboxUnavailable
 
-_PIVOT_ROOT_NR = {
-    "x86_64": 155,
-    "amd64": 155,
-    "aarch64": 41,
-    "arm64": 41,
-}
+_PIVOT_ROOT_NR = {"x86_64": 155, "amd64": 155, "aarch64": 41, "arm64": 41}
+_SENSITIVE_BIND_ROOTS = tuple(Path(p) for p in ("/proc", "/sys", "/dev", "/run", "/var/run"))
+_SENSITIVE_WORKSPACE_ROOTS = tuple(Path(p) for p in ("/proc", "/sys", "/dev", "/run", "/var/run", "/etc", "/usr", "/opt"))
+_MINIMAL_ETC_BINDS = (
+    "/etc/ld.so.cache",
+    "/etc/passwd",
+    "/etc/group",
+    "/etc/nsswitch.conf",
+    "/etc/localtime",
+    "/etc/ssl/certs",
+    "/etc/ca-certificates",
+)
 
 
 @dataclass(frozen=True)
@@ -86,13 +87,7 @@ def _cpath(value: str | os.PathLike[str] | None) -> ctypes.c_char_p | None:
     return ctypes.c_char_p(os.fsencode(os.fspath(value)))
 
 
-def _mount(
-    source: str | os.PathLike[str] | None,
-    target: str | os.PathLike[str],
-    fs_type: str | None,
-    flags: int,
-    data: str | None = None,
-) -> None:
+def _mount(source, target, fs_type, flags: int, data: str | None = None) -> None:
     libc = _libc()
     libc.mount.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_ulong, ctypes.c_void_p]
     libc.mount.restype = ctypes.c_int
@@ -128,12 +123,41 @@ def _pivot_root(new_root: Path, put_old: Path) -> None:
         _raise_errno("pivot_root failed")
 
 
+def _is_at_or_below(path: Path, root: Path) -> bool:
+    return path == root or root in path.parents
+
+
 def _validate_linux_nonroot() -> tuple[int, int]:
     if not sys.platform.startswith("linux"):
         raise SandboxUnavailable("linux required")
     if os.geteuid() == 0:
         raise SandboxUnavailable("root caller forbidden")
     return os.getuid(), os.getgid()
+
+
+def _validate_extra_bind(spec: BindSpec) -> BindSpec:
+    if not spec.read_only:
+        raise SandboxUnavailable("extra host binds must be read-only; workspace is the only read/write host bind")
+    source = spec.source.resolve(strict=True)
+    if source == Path("/") or any(_is_at_or_below(source, root.resolve()) for root in _SENSITIVE_BIND_ROOTS):
+        raise SandboxUnavailable(f"sensitive bind source forbidden: {source}")
+    if spec.target == PurePosixPath("/") or ".." in spec.target.parts or not spec.target.is_absolute():
+        raise SandboxUnavailable("extra bind target must be absolute, below /, and contain no '..'")
+    return BindSpec(source, spec.target, True)
+
+
+def _validate_layout(workspace: Path, sandbox_root: Path) -> tuple[Path, Path]:
+    workspace = workspace.resolve(strict=True)
+    root = sandbox_root.resolve()
+    if not workspace.is_dir():
+        raise SandboxUnavailable("workspace must be a directory")
+    if workspace == Path("/") or any(_is_at_or_below(workspace, sensitive.resolve()) for sensitive in _SENSITIVE_WORKSPACE_ROOTS):
+        raise SandboxUnavailable(f"workspace path forbidden: {workspace}")
+    if root == Path("/"):
+        raise SandboxUnavailable("sandbox root may not be /")
+    if _is_at_or_below(root, workspace) or _is_at_or_below(workspace, root):
+        raise SandboxUnavailable("sandbox root and workspace must be disjoint")
+    return workspace, root
 
 
 def enter_user_namespace() -> None:
@@ -145,57 +169,52 @@ def enter_user_namespace() -> None:
 
 
 def prepare_pid_namespace() -> None:
-    # CLONE_NEWPID affects only subsequently created children. The first child
-    # becomes namespace PID 1, which is why launch() must fork immediately next.
     _unshare(CLONE_NEWPID, "unshare pid namespace failed")
 
 
 def enter_pid1_isolation_namespaces() -> None:
-    # Only namespace PID1 and its descendants enter these namespaces. The outer
-    # launcher process remains outside, avoiding pivot/mount side effects there.
     _unshare(CLONE_NEWNS, "unshare mount namespace failed")
     _mount(None, "/", None, MS_REC | MS_PRIVATE)
     _unshare(CLONE_NEWNET, "unshare network namespace failed")
 
 
 def _sandbox_target(root: Path, target: PurePosixPath) -> Path:
-    if not target.is_absolute():
-        raise ValueError("bind target must be absolute")
-    if ".." in target.parts:
-        raise ValueError("bind target may not contain '..'")
-    if target == PurePosixPath("/"):
-        raise ValueError("bind target may not be /")
+    if not target.is_absolute() or ".." in target.parts or target == PurePosixPath("/"):
+        raise ValueError("bind target must be absolute, below /, and contain no '..'")
     return root.joinpath(*target.parts[1:])
 
 
 def _create_mount_target(source: Path, target: Path) -> None:
     if source.is_dir():
         target.mkdir(parents=True, exist_ok=True)
-        return
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if not target.exists():
-        target.touch(mode=0o600)
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            target.touch(mode=0o600)
 
 
 def _bind_mount(spec: BindSpec, root: Path) -> None:
     source = spec.source.resolve(strict=True)
     target = _sandbox_target(root, spec.target)
     _create_mount_target(source, target)
-    bind_flags = MS_BIND | (MS_REC if source.is_dir() else 0)
-    _mount(source, target, None, bind_flags)
+    _mount(source, target, None, MS_BIND | (MS_REC if source.is_dir() else 0))
     if spec.read_only:
         _mount(None, target, None, MS_BIND | MS_REMOUNT | MS_RDONLY | MS_NOSUID | MS_NODEV)
 
 
 def _runtime_bind_specs() -> tuple[BindSpec, ...]:
     specs: list[BindSpec] = []
-    for path in ("/usr", "/usr/local", "/opt", "/etc"):
+    for path in ("/usr", "/usr/local"):
         p = Path(path)
         if p.exists():
             specs.append(BindSpec(p, PurePosixPath(path), True))
     for path in ("/bin", "/sbin", "/lib", "/lib64"):
         p = Path(path)
         if p.exists() and not p.is_symlink():
+            specs.append(BindSpec(p, PurePosixPath(path), True))
+    for path in _MINIMAL_ETC_BINDS:
+        p = Path(path)
+        if p.exists():
             specs.append(BindSpec(p, PurePosixPath(path), True))
     for path in ("/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"):
         p = Path(path)
@@ -217,22 +236,16 @@ def _mirror_host_symlinks(root: Path) -> None:
 
 
 def setup_sandbox_root(sandbox_root: Path, workspace: Path, extra_binds: Sequence[BindSpec]) -> None:
-    root = sandbox_root.resolve()
-    workspace = workspace.resolve(strict=True)
-    if not workspace.is_dir():
-        raise SandboxUnavailable("workspace must be a directory")
-    if root == Path("/"):
-        raise SandboxUnavailable("sandbox root may not be /")
+    workspace, root = _validate_layout(workspace, sandbox_root)
+    validated_extra = tuple(_validate_extra_bind(spec) for spec in extra_binds)
     root.mkdir(parents=True, exist_ok=True)
-
     _mount("tmpfs", root, "tmpfs", MS_NOSUID | MS_NODEV, TMPFS_SIZE)
     for path, mode in (("proc", 0o555), ("tmp", 0o1777), ("dev", 0o755)):
         target = root / path
         target.mkdir(parents=True, exist_ok=True)
         target.chmod(mode)
 
-    binds = list(_runtime_bind_specs())
-    binds.extend(extra_binds)
+    binds = list(_runtime_bind_specs()) + list(validated_extra)
     binds.append(BindSpec(workspace, PurePosixPath(str(workspace)), False))
     for spec in binds:
         _bind_mount(spec, root)
@@ -244,8 +257,6 @@ def setup_sandbox_root(sandbox_root: Path, workspace: Path, extra_binds: Sequenc
     os.chdir("/")
     _umount2(f"/{OLDROOT_NAME}", MNT_DETACH)
     os.rmdir(f"/{OLDROOT_NAME}")
-
-    # Mount proc only after entering the new PID namespace and pivoting.
     _mount("proc", "/proc", "proc", MS_NOSUID | MS_NODEV | MS_NOEXEC)
     os.chdir(str(workspace))
 
@@ -267,10 +278,8 @@ def _forward_signal(pid: int, signum: int) -> None:
 
 def _outer_wait(pid1: int) -> int:
     previous = {}
-
     def handler(signum: int, _frame: object) -> None:
         _forward_signal(pid1, signum)
-
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         previous[sig] = signal.signal(sig, handler)
     try:
@@ -300,14 +309,16 @@ def _terminate_worker_group(worker_pid: int, grace_seconds: float = 1.0) -> None
                 return
             if got == 0:
                 time.sleep(0.02)
-                continue
 
 
 def _pid1_reaper(argv: Sequence[str]) -> int:
     worker_pid: int | None = None
+    group_ready = False
+    pending_signals: list[int] = []
 
     def handler(signum: int, _frame: object) -> None:
-        if worker_pid is None:
+        if worker_pid is None or not group_ready:
+            pending_signals.append(signum)
             return
         try:
             os.killpg(worker_pid, signum)
@@ -317,14 +328,32 @@ def _pid1_reaper(argv: Sequence[str]) -> int:
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(sig, handler)
 
+    ready_r, ready_w = os.pipe2(os.O_CLOEXEC)
     worker_pid = os.fork()
     if worker_pid == 0:
+        os.close(ready_r)
         os.setsid()
+        os.write(ready_w, b"1")
+        os.close(ready_w)
         v1.set_no_new_privs()
         v1.install_seccomp_deny_policy(DENIED_SYSCALLS)
         v1.drop_capability_bounding_set()
         os.execvp(argv[0], list(argv))
         raise AssertionError("execvp returned")
+
+    os.close(ready_w)
+    try:
+        ready = os.read(ready_r, 1)
+    finally:
+        os.close(ready_r)
+    if ready != b"1":
+        raise SandboxUnavailable("worker process group failed to initialize")
+    group_ready = True
+    for signum in pending_signals:
+        try:
+            os.killpg(worker_pid, signum)
+        except ProcessLookupError:
+            break
 
     main_status: int | None = None
     while main_status is None:
@@ -348,22 +377,14 @@ def _pid1_reaper(argv: Sequence[str]) -> int:
     return _decode_wait_status(main_status)
 
 
-def launch(
-    argv: Sequence[str],
-    *,
-    workspace: Path,
-    sandbox_root: Path,
-    extra_binds: Sequence[BindSpec] = (),
-) -> int:
+def launch(argv: Sequence[str], *, workspace: Path, sandbox_root: Path, extra_binds: Sequence[BindSpec] = ()) -> int:
     if not argv:
         raise ValueError("worker command required")
     enter_user_namespace()
     prepare_pid_namespace()
-
     pid1 = os.fork()
     if pid1 != 0:
         return _outer_wait(pid1)
-
     if os.getpid() != 1:
         raise SandboxUnavailable(f"namespace init expected pid 1, got {os.getpid()}")
     enter_pid1_isolation_namespaces()
@@ -374,16 +395,19 @@ def launch(
 def _parse_bind(raw: str) -> BindSpec:
     parts = raw.rsplit(":", 2)
     if len(parts) not in (2, 3):
-        raise argparse.ArgumentTypeError("bind must be SOURCE:TARGET[:ro|rw]")
+        raise argparse.ArgumentTypeError("bind must be SOURCE:TARGET[:ro]")
     source_raw, target_raw = parts[0], parts[1]
     mode = parts[2] if len(parts) == 3 else "ro"
-    if mode not in ("ro", "rw"):
-        raise argparse.ArgumentTypeError("bind mode must be ro or rw")
+    if mode != "ro":
+        raise argparse.ArgumentTypeError("extra binds are read-only; workspace is the only read/write host bind")
     source = Path(source_raw)
     target = PurePosixPath(target_raw)
     if not source.is_absolute() or not target.is_absolute() or ".." in target.parts or target == PurePosixPath("/"):
         raise argparse.ArgumentTypeError("bind source/target must be absolute and target must be below /")
-    return BindSpec(source, target, mode == "ro")
+    try:
+        return _validate_extra_bind(BindSpec(source, target, True))
+    except (SandboxUnavailable, OSError) as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _parser() -> argparse.ArgumentParser:
