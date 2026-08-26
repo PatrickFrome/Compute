@@ -16,12 +16,22 @@
   </header>
 
   <section class="card">
+    <h2>Runtime control</h2>
+    <div class="actions">
+      <button id="toggleArmed" class="primary">Arm bridge</button>
+      <button id="pollNow">Poll now</button>
+      <button id="openOptions">Options</button>
+    </div>
+    <p class="hint">ARM controls autonomous A2 transport. Operator prompt gating can remain in OBSERVE while the bridge is armed.</p>
+  </section>
+
+  <section class="card">
     <h2>Operator mode</h2>
     <div class="mode-row">
       <button id="modeObserve" class="mode active">OBSERVE</button>
       <button id="modeGate" class="mode">GATE SEND</button>
     </div>
-    <p class="hint">GATE SEND holds physical user Enter/Send before the website receives it. A2 bridge-owned prompts keep their strict GLM-first transport path.</p>
+    <p class="hint">GATE SEND holds physical user Enter/Send before the website receives it. A2 bridge-owned prompts use a short-lived trusted capability and retain strict GLM-first ordering.</p>
   </section>
 
   <section class="grid">
@@ -54,16 +64,12 @@
   </section>
 
   <section class="card">
-    <h2>Runtime</h2>
+    <h2>Runtime health</h2>
     <dl>
       <dt>Daemon</dt><dd id="daemon">—</dd>
       <dt>Sensor error</dt><dd id="sensorError">—</dd>
       <dt>Last error</dt><dd id="lastError">—</dd>
     </dl>
-    <div class="actions">
-      <button id="pollNow">Poll now</button>
-      <button id="openOptions">Options</button>
-    </div>
   </section>
 
   <p id="status" role="status"></p>
