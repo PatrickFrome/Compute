@@ -4,6 +4,7 @@ const $ = (id) => document.getElementById(id);
 let lastIntentId = null;
 let lastArmed = false;
 let captureBusy = false;
+let actionBusy = false;
 let currentPerception = null;
 
 function setStatus(text, error = false) {
@@ -112,9 +113,7 @@ async function refresh() {
   try {
     const response = await request("A2_OPERATOR_STATUS");
     render(response.state || {});
-  } catch (error) {
-    setStatus(String(error?.message || error), true);
-  }
+  } catch (error) { setStatus(String(error?.message || error), true); }
 }
 
 async function setMode(mode) {
@@ -138,8 +137,9 @@ async function resolve(action, draft = null) {
     const state = (await request("A2_OPERATOR_STATUS")).state || {};
     const intent = state.prompt_intent;
     if (!intent?.intent_id) throw new Error("No held prompt intent");
-    await request("A2_OPERATOR_RESOLVE_PROMPT", { intent_id: intent.intent_id, action, draft });
-    setStatus(action === "CANCEL" ? "Send cancelled; draft kept on page." : "Allowed once for the next physical Send/Enter.");
+    const response = await request("A2_OPERATOR_RESOLVE_PROMPT", { intent_id: intent.intent_id, action, draft });
+    if (action === "REWRITE_ALLOW_ONCE" && response.trusted_rewrite?.exact_readback !== true) throw new Error("Trusted rewrite did not return exact readback");
+    setStatus(action === "CANCEL" ? "Send cancelled; draft kept on page." : (action === "REWRITE_ALLOW_ONCE" ? "Draft replaced by trusted CDP and allowed once." : "Allowed once for the next physical Send/Enter."));
     await refresh();
   } catch (error) { setStatus(String(error?.message || error), true); }
 }
@@ -156,13 +156,44 @@ async function capturePerception(platform) {
       options: { include_screenshot: true, body_limit: 16000, ax_limit: 70, dom_limit: 100 }
     });
     renderPerception(response.perception || null);
+    $("actionTarget").value = platform;
     setStatus(`${platform} screen captured locally. Full capture remains in service-worker memory only.`);
-  } catch (error) {
-    setStatus(String(error?.message || error), true);
-  } finally {
+  } catch (error) { setStatus(String(error?.message || error), true); }
+  finally {
     captureBusy = false;
     $("captureGlm").disabled = false;
     $("captureGpt").disabled = false;
+  }
+}
+
+async function runOperatorAction(action, extra = {}) {
+  if (actionBusy) return;
+  actionBusy = true;
+  const platform = $("actionTarget").value;
+  for (const id of ["stopGeneration", "scrollUp", "scrollDown"]) $(id).disabled = true;
+  try {
+    setStatus(`Running ${action} on ${platform}…`);
+    const response = await request("A2_OPERATOR_ACTION", { platform, action, ...extra });
+    const result = response.result || {};
+    $("lastAction").textContent = JSON.stringify(result);
+    if (result.ok === false) throw new Error(result.status || `${action} was not available`);
+    setStatus(`${action} completed on ${platform}.`);
+    if (action === "SCROLL" || action === "STOP_GENERATION") {
+      try {
+        const preview = await request("A2_OPERATOR_CAPTURE_PERCEPTION", {
+          platform,
+          options: { include_screenshot: true, body_limit: 12000, ax_limit: 50, dom_limit: 70 }
+        });
+        renderPerception(preview.perception || null);
+      } catch (_) {}
+    }
+    await refresh();
+  } catch (error) {
+    $("lastAction").textContent = String(error?.message || error);
+    setStatus(String(error?.message || error), true);
+  } finally {
+    actionBusy = false;
+    for (const id of ["stopGeneration", "scrollUp", "scrollDown"]) $(id).disabled = false;
   }
 }
 
@@ -179,6 +210,9 @@ $("rewriteAllow").addEventListener("click", () => {
 $("captureGlm").addEventListener("click", () => capturePerception("GLM_ZAI"));
 $("captureGpt").addEventListener("click", () => capturePerception("CHATGPT"));
 $("clearPerception").addEventListener("click", () => { renderPerception(null); setStatus("Local perception preview cleared."); });
+$("stopGeneration").addEventListener("click", () => runOperatorAction("STOP_GENERATION"));
+$("scrollUp").addEventListener("click", () => runOperatorAction("SCROLL", { delta_y: -700 }));
+$("scrollDown").addEventListener("click", () => runOperatorAction("SCROLL", { delta_y: 700 }));
 $("pollNow").addEventListener("click", async () => {
   try { await request("BRIDGE_POLL_NOW"); setStatus("Bridge poll requested."); await refresh(); }
   catch (error) { setStatus(String(error?.message || error), true); }
