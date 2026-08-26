@@ -29,7 +29,7 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
 
     def test_manifest_and_worker_entrypoints(self):
         self.assertEqual(self.manifest["manifest_version"], 3)
-        self.assertEqual(self.manifest["version"], "0.5.8")
+        self.assertEqual(self.manifest["version"], "0.5.9")
         self.assertEqual(self.manifest["background"]["service_worker"], "background-entry.js")
         self.assertIn("debugger", self.manifest["permissions"])
         self.assertEqual(self.manifest["content_scripts"][0]["js"], ["platform-dom-compat.js", "content.js"])
@@ -85,6 +85,18 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("chatgpt_cdp_not_armed", self.trusted)
         self.assertIn('url.pathname.startsWith("/c/")', self.trusted)
         self.assertNotIn("chat.z.ai", self.trusted)
+
+    def test_chatgpt_long_prompt_uses_single_atomic_editor_insertion(self):
+        self.assertIn("const ATOMIC_LONG_PROMPT_THRESHOLD = 32000;", self.trusted)
+        self.assertIn("async function insertComposerAtomic", self.trusted)
+        self.assertIn("document.execCommand('insertText', false, text)", self.trusted)
+        self.assertIn("if (text.length > ATOMIC_LONG_PROMPT_THRESHOLD)", self.trusted)
+        self.assertIn('return "ATOMIC_EXEC_COMMAND";', self.trusted)
+        self.assertIn('return "CDP_INPUT_INSERT_TEXT";', self.trusted)
+        self.assertNotIn("for (const chunk", self.trusted)
+        self.assertNotIn("slice(offset", self.trusted)
+        self.assertIn("insertion_mode: insertionMode", self.trusted)
+        self.assertIn("chatgpt_cdp_prime_readback_mismatch", self.trusted)
 
     def test_compat_is_selector_only_no_async_transport(self):
         self.assertIn('markExactSendButton("#composer-submit-button")', self.compat)
