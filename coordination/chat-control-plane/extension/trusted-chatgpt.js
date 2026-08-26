@@ -3,8 +3,8 @@
 
   const CDP_VERSION = "1.3";
   const MAX_PROMPT_CHARS = 120000;
-  const SEND_READY_TIMEOUT_MS = 3000;
-  const SEND_READY_POLL_MS = 50;
+  const SEND_READY_TIMEOUT_MS = 1800;
+  const SEND_READY_POLL_MS = 40;
   const inFlightTabs = new Set();
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const canonicalVisible = (value) => String(value ?? "")
@@ -82,15 +82,8 @@
     if (result !== true) throw new Error("chatgpt_cdp_focus_failed");
   }
 
-  async function inspectReadySend(tabId, expectedText) {
+  async function inspectReadySend(tabId) {
     return evaluate(tabId, `(() => {
-      const expected = ${JSON.stringify(expectedText)};
-      const canon = (v) => String(v ?? '')
-        .replace(/\\r\\n?/g, '\\n')
-        .replace(/\u00a0/g, ' ')
-        .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
-        .replace(/\s+/gu, ' ')
-        .trim();
       const visible = (el) => {
         if (!(el instanceof HTMLElement)) return false;
         const style = getComputedStyle(el);
@@ -102,8 +95,8 @@
       const composer = composers[0];
       const form = composer.closest('form');
       if (!form) return { ok:false, error:'composer_form_missing' };
-      const text = composer.innerText || composer.textContent || '';
-      if (canon(text) !== canon(expected)) return { ok:false, error:'composer_readback_pending' };
+      const text = String(composer.innerText || composer.textContent || '').trim();
+      if (!text) return { ok:false, error:'composer_empty' };
       const raw = [
         ...form.querySelectorAll('#composer-submit-button'),
         ...form.querySelectorAll("button[data-testid='send-button']"),
@@ -115,28 +108,41 @@
       const button = buttons[0];
       if (!(button instanceof HTMLButtonElement)) return { ok:false, error:'send_not_button' };
       if (button.disabled || button.getAttribute('aria-disabled') === 'true') return { ok:false, error:'send_pending', count:1 };
-      const rect = button.getBoundingClientRect();
-      const x = rect.left + rect.width / 2;
-      const y = rect.top + rect.height / 2;
-      const hit = document.elementFromPoint(x, y);
-      if (!hit || !(hit === button || button.contains(hit))) return { ok:false, error:'send_obscured' };
-      return { ok:true, x, y };
+      return { ok:true };
     })()`);
   }
 
-  async function waitForReadySend(tabId, text) {
+  async function waitForReadySend(tabId) {
     const deadline = Date.now() + SEND_READY_TIMEOUT_MS;
     let lastError = "send_not_ready";
     while (Date.now() < deadline) {
-      const state = await inspectReadySend(tabId, text);
-      if (state?.ok) return state;
+      const state = await inspectReadySend(tabId);
+      if (state?.ok) return true;
       lastError = String(state?.error || lastError);
-      if (["composer_count", "composer_form_missing", "send_ambiguous", "send_not_button", "send_obscured"].includes(lastError)) {
+      if (["composer_count", "composer_form_missing", "send_ambiguous", "send_not_button"].includes(lastError)) {
         throw new Error(`chatgpt_cdp_${lastError}`);
       }
       await sleep(SEND_READY_POLL_MS);
     }
     throw new Error(`chatgpt_cdp_${lastError}`);
+  }
+
+  async function dispatchTrustedEnter(tabId) {
+    await focusComposer(tabId);
+    await send(tabId, "Input.dispatchKeyEvent", {
+      type: "rawKeyDown",
+      key: "Enter",
+      code: "Enter",
+      windowsVirtualKeyCode: 13,
+      nativeVirtualKeyCode: 13
+    });
+    await send(tabId, "Input.dispatchKeyEvent", {
+      type: "keyUp",
+      key: "Enter",
+      code: "Enter",
+      windowsVirtualKeyCode: 13,
+      nativeVirtualKeyCode: 13
+    });
   }
 
   async function withDebugger(tabId, operation) {
@@ -166,20 +172,9 @@
 
       await focusComposer(tabId);
       await send(tabId, "Input.insertText", { text });
-      const sendState = await waitForReadySend(tabId, text);
-
-      await send(tabId, "Input.dispatchMouseEvent", {
-        type: "mouseMoved", x: sendState.x, y: sendState.y, pointerType: "mouse"
-      });
-      await send(tabId, "Input.dispatchMouseEvent", {
-        type: "mousePressed", x: sendState.x, y: sendState.y,
-        button: "left", buttons: 1, clickCount: 1, pointerType: "mouse"
-      });
-      await send(tabId, "Input.dispatchMouseEvent", {
-        type: "mouseReleased", x: sendState.x, y: sendState.y,
-        button: "left", buttons: 0, clickCount: 1, pointerType: "mouse"
-      });
-      return { ok: true, phase: "TRUSTED_SEND_DISPATCHED" };
+      await waitForReadySend(tabId);
+      await dispatchTrustedEnter(tabId);
+      return { ok: true, phase: "TRUSTED_ENTER_DISPATCHED" };
     });
   }
 
