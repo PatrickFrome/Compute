@@ -7,6 +7,7 @@ on:
       - 'worker/native_linux/rootless_sandbox_launcher_v2.py'
       - 'tests/test_w1_rootless_sandbox_launcher_v2.py'
       - 'docs/W1_S2_ROOTLESS_SANDBOX_LAUNCHER_V2.md'
+      - 'research/W1_ROOTLESS_SANDBOX_V2_HARDENING_2026-08-26.md'
       - '.github/workflows/w1-rootless-sandbox-launcher-v2-contract.yml'
 
 permissions: {}
@@ -26,7 +27,7 @@ jobs:
       - name: Verify exact hardened source SHA-256
         run: |
           set -euo pipefail
-          expected='f262cd5468b5eb51754cf397cdb1879c2e90d0670b74f479d3b28af8cd20f521'
+          expected='da03e661f9ddfaeb2ffa53b625c19ad06a48f51802e4b27201becfaf40c8d0b5'
           actual="$(sha256sum worker/native_linux/rootless_sandbox_launcher_v2.py | awk '{print $1}')"
           echo "S2_V2_SHA256=$actual"
           test "$actual" = "$expected"
@@ -56,6 +57,9 @@ jobs:
               'pending_signals', '_mount("proc"', 'PR_SET_NO_NEW_PRIVS',
               'extra host binds must be read-only', '_SENSITIVE_BIND_ROOTS',
               'repo_root = Path(__file__).resolve().parents[2]',
+              'mount_setattr', 'AT_RECURSIVE', 'PR_SET_PDEATHSIG',
+              'close_range', 'CLOSE_RANGE_UNSHARE', 'os.execve',
+              '_worker_environment', 'sandbox_root.rmdir()',
           )
           for token in required:
               assert token in combined, token

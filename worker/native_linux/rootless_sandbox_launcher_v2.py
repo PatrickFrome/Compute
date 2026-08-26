@@ -24,7 +24,9 @@ from dataclasses import dataclass
 import os
 from pathlib import Path, PurePosixPath
 import platform
+import shutil
 import signal
+import stat
 import sys
 import time
 from typing import Sequence
@@ -52,6 +54,15 @@ MS_BIND = 4096
 MS_REC = 16384
 MS_PRIVATE = 1 << 18
 MNT_DETACH = 2
+CLOSE_RANGE_UNSHARE = 1 << 1
+UINT_MAX = (1 << 32) - 1
+AT_FDCWD = -100
+AT_RECURSIVE = 0x8000
+MOUNT_ATTR_RDONLY = 0x00000001
+MOUNT_ATTR_NOSUID = 0x00000002
+MOUNT_ATTR_NODEV = 0x00000004
+MOUNT_ATTR_NOEXEC = 0x00000008
+PR_SET_PDEATHSIG = 1
 TMPFS_SIZE = "size=256M,mode=0755"
 NETWORK_ISOLATION_OWNER = "LAUNCHER_CLONE_NEWNET"
 PID1_ROLE = "DEDICATED_INIT_REAPER"
@@ -59,7 +70,23 @@ OLDROOT_NAME = ".oldroot"
 DENIED_SYSCALLS = v1.DENIED_SYSCALLS
 SandboxUnavailable = v1.SandboxUnavailable
 
-_PIVOT_ROOT_NR = {"x86_64": 155, "amd64": 155, "aarch64": 41, "arm64": 41}
+_SYSCALL_NR = {
+    "pivot_root": {
+        "x86_64": 155,
+        "amd64": 155,
+        "aarch64": 41,
+        "arm64": 41,
+        "riscv64": 41,
+        "ppc64le": 203,
+        "s390x": 217,
+    },
+    "close_range": {
+        arch: 436 for arch in ("x86_64", "amd64", "aarch64", "arm64", "riscv64", "ppc64le", "s390x")
+    },
+    "mount_setattr": {
+        arch: 442 for arch in ("x86_64", "amd64", "aarch64", "arm64", "riscv64", "ppc64le", "s390x")
+    },
+}
 _SENSITIVE_BIND_ROOTS = tuple(Path(p) for p in ("/proc", "/sys", "/dev", "/run", "/var/run"))
 _SENSITIVE_WORKSPACE_ROOTS = tuple(Path(p) for p in ("/proc", "/sys", "/dev", "/run", "/var/run", "/etc", "/usr", "/opt"))
 _MINIMAL_ETC_BINDS = (
@@ -71,6 +98,15 @@ _MINIMAL_ETC_BINDS = (
     "/etc/ssl/certs",
     "/etc/ca-certificates",
 )
+FIXED_WORKER_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+PASSTHROUGH_ENV_KEYS = (
+    "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM", "COLORTERM",
+    "NO_COLOR", "FORCE_COLOR", "PYTHONUTF8", "PYTHONIOENCODING",
+)
+MAX_COMMAND_ARGS = 256
+MAX_COMMAND_ARG_BYTES = 16 * 1024
+MAX_COMMAND_BYTES = 128 * 1024
+HANDLED_SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGQUIT)
 
 
 @dataclass(frozen=True)
@@ -78,6 +114,15 @@ class BindSpec:
     source: Path
     target: PurePosixPath
     read_only: bool = True
+
+
+class MountAttr(ctypes.Structure):
+    _fields_ = (
+        ("attr_set", ctypes.c_uint64),
+        ("attr_clr", ctypes.c_uint64),
+        ("propagation", ctypes.c_uint64),
+        ("userns_fd", ctypes.c_uint64),
+    )
 
 
 def _libc() -> ctypes.CDLL:
@@ -120,15 +165,47 @@ def _unshare(flags: int, label: str) -> None:
         _raise_errno(label)
 
 
-def _pivot_root(new_root: Path, put_old: Path) -> None:
+def _syscall_number(name: str) -> int:
     machine = platform.machine().lower()
-    nr = _PIVOT_ROOT_NR.get(machine)
-    if nr is None:
-        raise SandboxUnavailable(f"pivot_root unsupported architecture: {machine}")
+    try:
+        return _SYSCALL_NR[name][machine]
+    except KeyError as exc:
+        raise SandboxUnavailable(f"{name} unsupported architecture: {machine}") from exc
+
+
+def _pivot_root(new_root: Path, put_old: Path) -> None:
+    nr = _syscall_number("pivot_root")
     libc = _libc()
     libc.syscall.restype = ctypes.c_long
     if libc.syscall(ctypes.c_long(nr), _cpath(new_root), _cpath(put_old)) != 0:
         _raise_errno("pivot_root failed")
+
+
+def _recursive_mount_attributes(
+    target: Path,
+    *,
+    read_only: bool,
+    no_exec: bool,
+    allow_device: bool = False,
+) -> None:
+    attributes = MOUNT_ATTR_NOSUID
+    if read_only:
+        attributes |= MOUNT_ATTR_RDONLY
+    if no_exec:
+        attributes |= MOUNT_ATTR_NOEXEC
+    if not allow_device:
+        attributes |= MOUNT_ATTR_NODEV
+    value = MountAttr(attr_set=attributes, attr_clr=0, propagation=0, userns_fd=0)
+    rc = _libc().syscall(
+        ctypes.c_long(_syscall_number("mount_setattr")),
+        ctypes.c_int(AT_FDCWD),
+        _cpath(target),
+        ctypes.c_uint(AT_RECURSIVE),
+        ctypes.byref(value),
+        ctypes.sizeof(value),
+    )
+    if rc != 0:
+        _raise_errno(f"recursive mount hardening failed: {target}")
 
 
 def _is_at_or_below(path: Path, root: Path) -> bool:
@@ -206,8 +283,15 @@ def _bind_mount(spec: BindSpec, root: Path) -> None:
     target = _sandbox_target(root, spec.target)
     _create_mount_target(source, target)
     _mount(source, target, None, MS_BIND | (MS_REC if source.is_dir() else 0))
+    allow_device = stat.S_ISCHR(source.stat().st_mode)
     if spec.read_only:
         _mount(None, target, None, MS_BIND | MS_REMOUNT | MS_RDONLY | MS_NOSUID | MS_NODEV)
+    _recursive_mount_attributes(
+        target,
+        read_only=spec.read_only,
+        no_exec=allow_device or str(spec.target).startswith("/etc/"),
+        allow_device=allow_device,
+    )
 
 
 def _runtime_bind_specs() -> tuple[BindSpec, ...]:
@@ -226,7 +310,7 @@ def _runtime_bind_specs() -> tuple[BindSpec, ...]:
             specs.append(BindSpec(p, PurePosixPath(path), True))
     for path in ("/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"):
         p = Path(path)
-        if p.exists():
+        if p.exists() and stat.S_ISCHR(p.stat().st_mode):
             specs.append(BindSpec(p, PurePosixPath(path), False))
     return tuple(specs)
 
@@ -246,7 +330,7 @@ def _mirror_host_symlinks(root: Path) -> None:
 def setup_sandbox_root(sandbox_root: Path, workspace: Path, extra_binds: Sequence[BindSpec]) -> None:
     workspace, root = _validate_layout(workspace, sandbox_root)
     validated_extra = tuple(_validate_extra_bind(spec) for spec in extra_binds)
-    root.mkdir(parents=True, exist_ok=True)
+    root.mkdir(mode=0o700, parents=False, exist_ok=False)
     _mount("tmpfs", root, "tmpfs", MS_NOSUID | MS_NODEV, TMPFS_SIZE)
     for path, mode in (("proc", 0o555), ("tmp", 0o1777), ("dev", 0o755)):
         target = root / path
@@ -265,8 +349,78 @@ def setup_sandbox_root(sandbox_root: Path, workspace: Path, extra_binds: Sequenc
     os.chdir("/")
     _umount2(f"/{OLDROOT_NAME}", MNT_DETACH)
     os.rmdir(f"/{OLDROOT_NAME}")
+    if Path(f"/{OLDROOT_NAME}").exists():
+        raise SandboxUnavailable("old root remains visible after pivot")
     _mount("proc", "/proc", "proc", MS_NOSUID | MS_NODEV | MS_NOEXEC)
+    if os.path.realpath("/proc/1/root") != "/":
+        raise SandboxUnavailable("PID1 proc root is not the pivoted root")
     os.chdir(str(workspace))
+
+
+def _set_parent_death_signal() -> None:
+    parent = os.getppid()
+    libc = _libc()
+    if libc.prctl(ctypes.c_int(PR_SET_PDEATHSIG), ctypes.c_ulong(signal.SIGKILL), 0, 0, 0) != 0:
+        _raise_errno("PR_SET_PDEATHSIG failed")
+    if os.getppid() != parent:
+        raise SandboxUnavailable("launcher parent died during PID1 setup")
+
+
+def _validated_command(argv: Sequence[str]) -> tuple[str, ...]:
+    if not argv:
+        raise ValueError("worker command required")
+    if len(argv) > MAX_COMMAND_ARGS:
+        raise ValueError("worker command has too many arguments")
+    values: list[str] = []
+    total = 0
+    for value in argv:
+        if not isinstance(value, str) or not value or "\x00" in value:
+            raise ValueError("worker command contains an invalid argument")
+        size = len(os.fsencode(value))
+        if size > MAX_COMMAND_ARG_BYTES:
+            raise ValueError("worker command argument is too large")
+        total += size + 1
+        values.append(value)
+    if total > MAX_COMMAND_BYTES:
+        raise ValueError("worker command is too large")
+    if not Path(values[0]).is_absolute():
+        resolved = shutil.which(values[0], path=FIXED_WORKER_PATH)
+        if resolved is None:
+            raise ValueError("worker executable is not in the fixed launcher PATH")
+        values[0] = resolved
+    return tuple(values)
+
+
+def _worker_environment(workspace: Path, source: dict[str, str] | None = None) -> dict[str, str]:
+    incoming = os.environ if source is None else source
+    result = {
+        "PATH": FIXED_WORKER_PATH,
+        "HOME": str(workspace),
+        "PWD": str(workspace),
+        "TMPDIR": "/tmp",
+        "GITHUB_WORKSPACE": str(workspace),
+        "USER": "w1-worker",
+        "LOGNAME": "w1-worker",
+    }
+    for key in PASSTHROUGH_ENV_KEYS:
+        value = incoming.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str) or "\x00" in value or len(value) > 1024:
+            raise SandboxUnavailable(f"invalid environment value for {key}")
+        result[key] = value
+    return result
+
+
+def _close_inherited_fds() -> None:
+    rc = _libc().syscall(
+        ctypes.c_long(_syscall_number("close_range")),
+        ctypes.c_uint(3),
+        ctypes.c_uint(UINT_MAX),
+        ctypes.c_uint(CLOSE_RANGE_UNSHARE),
+    )
+    if rc != 0:
+        _raise_errno("close_range inherited descriptors failed")
 
 
 def _decode_wait_status(status: int) -> int:
@@ -284,12 +438,13 @@ def _forward_signal(pid: int, signum: int) -> None:
         return
 
 
-def _outer_wait(pid1: int) -> int:
+def _outer_wait(pid1: int, original_mask: set[signal.Signals]) -> int:
     previous = {}
     def handler(signum: int, _frame: object) -> None:
         _forward_signal(pid1, signum)
-    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    for sig in HANDLED_SIGNALS:
         previous[sig] = signal.signal(sig, handler)
+    signal.pthread_sigmask(signal.SIG_SETMASK, original_mask)
     try:
         while True:
             try:
@@ -319,7 +474,7 @@ def _terminate_worker_group(worker_pid: int, grace_seconds: float = 1.0) -> None
                 time.sleep(0.02)
 
 
-def _pid1_reaper(argv: Sequence[str]) -> int:
+def _pid1_reaper(argv: Sequence[str], workspace: Path, original_mask: set[signal.Signals]) -> int:
     worker_pid: int | None = None
     group_ready = False
     pending_signals: list[int] = []
@@ -333,8 +488,9 @@ def _pid1_reaper(argv: Sequence[str]) -> int:
         except ProcessLookupError:
             pass
 
-    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    for sig in HANDLED_SIGNALS:
         signal.signal(sig, handler)
+    signal.pthread_sigmask(signal.SIG_SETMASK, original_mask)
 
     ready_r, ready_w = os.pipe2(os.O_CLOEXEC)
     worker_pid = os.fork()
@@ -346,8 +502,11 @@ def _pid1_reaper(argv: Sequence[str]) -> int:
         v1.set_no_new_privs()
         v1.install_seccomp_deny_policy(DENIED_SYSCALLS)
         v1.drop_capability_bounding_set()
-        os.execvp(argv[0], list(argv))
-        raise AssertionError("execvp returned")
+        environment = _worker_environment(workspace)
+        os.umask(0o077)
+        _close_inherited_fds()
+        os.execve(argv[0], list(argv), environment)
+        raise AssertionError("execve returned")
 
     os.close(ready_w)
     try:
@@ -386,18 +545,32 @@ def _pid1_reaper(argv: Sequence[str]) -> int:
 
 
 def launch(argv: Sequence[str], *, workspace: Path, sandbox_root: Path, extra_binds: Sequence[BindSpec] = ()) -> int:
-    if not argv:
-        raise ValueError("worker command required")
+    argv = _validated_command(argv)
+    workspace, sandbox_root = _validate_layout(workspace, sandbox_root)
+    if sandbox_root.exists() or sandbox_root.is_symlink():
+        raise SandboxUnavailable("sandbox root must not exist before launch")
     enter_user_namespace()
     prepare_pid_namespace()
-    pid1 = os.fork()
+    original_mask = signal.pthread_sigmask(signal.SIG_BLOCK, HANDLED_SIGNALS)
+    try:
+        pid1 = os.fork()
+    except BaseException:
+        signal.pthread_sigmask(signal.SIG_SETMASK, original_mask)
+        raise
     if pid1 != 0:
-        return _outer_wait(pid1)
+        try:
+            return _outer_wait(pid1, original_mask)
+        finally:
+            try:
+                sandbox_root.rmdir()
+            except FileNotFoundError:
+                pass
     if os.getpid() != 1:
         raise SandboxUnavailable(f"namespace init expected pid 1, got {os.getpid()}")
+    _set_parent_death_signal()
     enter_pid1_isolation_namespaces()
     setup_sandbox_root(sandbox_root, workspace, extra_binds)
-    return _pid1_reaper(argv)
+    return _pid1_reaper(argv, workspace, original_mask)
 
 
 def _parse_bind(raw: str) -> BindSpec:

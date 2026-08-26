@@ -106,7 +106,7 @@ declare
   v_h1_sha text;
   v_outer_sha text;
   v_manifest_sha text;
-  v_expected_s2_source constant text := 'f262cd5468b5eb51754cf397cdb1879c2e90d0670b74f479d3b28af8cd20f521';
+  v_expected_s2_source constant text := 'da03e661f9ddfaeb2ffa53b625c19ad06a48f51802e4b27201becfaf40c8d0b5';
 begin
   if nullif(p_worker_id,'') is null or p_lifecycle_receipt_id is null
      or p_claim_id is null or p_directive_id is null then

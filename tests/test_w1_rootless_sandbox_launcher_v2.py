@@ -12,7 +12,7 @@ from unittest import mock
 
 from worker.native_linux import rootless_sandbox_launcher_v2 as launcher
 
-EXPECTED_SOURCE_SHA256 = "f262cd5468b5eb51754cf397cdb1879c2e90d0670b74f479d3b28af8cd20f521"
+EXPECTED_SOURCE_SHA256 = "da03e661f9ddfaeb2ffa53b625c19ad06a48f51802e4b27201becfaf40c8d0b5"
 
 
 class RootlessSandboxLauncherV2ContractTests(unittest.TestCase):
@@ -39,6 +39,33 @@ class RootlessSandboxLauncherV2ContractTests(unittest.TestCase):
         self.assertEqual(launcher.PID1_ROLE, "DEDICATED_INIT_REAPER")
         for value in (launcher.CLONE_NEWPID, launcher.CLONE_NEWNET, launcher.CLONE_NEWNS, launcher.CLONE_NEWUSER):
             self.assertNotEqual(value, 0)
+
+    def test_recursive_mount_hardening_uses_mount_setattr(self):
+        calls: list[tuple[object, ...]] = []
+
+        class FakeLibc:
+            def syscall(self, *args):
+                calls.append(args)
+                return 0
+
+        with mock.patch.object(launcher, "_libc", return_value=FakeLibc()), \
+             mock.patch.object(launcher, "_syscall_number", return_value=442):
+            launcher._recursive_mount_attributes(
+                Path("/bounded"), read_only=True, no_exec=True
+            )
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0].value, 442)
+        self.assertEqual(calls[0][3].value, launcher.AT_RECURSIVE)
+
+    def test_supported_syscall_numbers_cover_x86_and_arm(self):
+        with mock.patch.object(launcher.platform, "machine", return_value="x86_64"):
+            self.assertEqual(launcher._syscall_number("pivot_root"), 155)
+            self.assertEqual(launcher._syscall_number("close_range"), 436)
+            self.assertEqual(launcher._syscall_number("mount_setattr"), 442)
+        with mock.patch.object(launcher.platform, "machine", return_value="aarch64"):
+            self.assertEqual(launcher._syscall_number("pivot_root"), 41)
+            self.assertEqual(launcher._syscall_number("close_range"), 436)
+            self.assertEqual(launcher._syscall_number("mount_setattr"), 442)
 
     def test_inherited_seccomp_policy_remains_substantive(self):
         denied = set(launcher.DENIED_SYSCALLS)
@@ -76,6 +103,14 @@ class RootlessSandboxLauncherV2ContractTests(unittest.TestCase):
         with self.assertRaisesRegex(launcher.SandboxUnavailable, "workspace path forbidden"):
             launcher._validate_layout(Path("/"), Path("/tmp/metaengine-test-root"))
 
+    def test_launch_requires_fresh_sandbox_root_and_exact_cleanup(self):
+        source = inspect.getsource(launcher.launch)
+        self.assertIn("sandbox root must not exist before launch", source)
+        self.assertIn("sandbox_root.rmdir()", source)
+        self.assertNotIn("rmtree", source)
+        setup = inspect.getsource(launcher.setup_sandbox_root)
+        self.assertIn("exist_ok=False", setup)
+
     def test_wait_status_is_deterministic(self):
         self.assertEqual(launcher._decode_wait_status(0), 0)
         self.assertEqual(launcher._decode_wait_status(7 << 8), 7)
@@ -89,11 +124,67 @@ class RootlessSandboxLauncherV2ContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "worker command required"):
             launcher.launch([], workspace=Path.cwd(), sandbox_root=Path("/tmp/nope"))
 
+    def test_command_is_bounded_and_resolved_only_from_fixed_path(self):
+        with mock.patch.object(launcher.shutil, "which", return_value="/usr/bin/python3") as which:
+            value = launcher._validated_command(["python3", "-V"])
+        self.assertEqual(value[0], "/usr/bin/python3")
+        which.assert_called_once_with("python3", path=launcher.FIXED_WORKER_PATH)
+        with self.assertRaisesRegex(ValueError, "invalid argument"):
+            launcher._validated_command(["/bin/echo", "bad\x00arg"])
+        with self.assertRaisesRegex(ValueError, "too many arguments"):
+            launcher._validated_command(["/bin/true", *(["x"] * launcher.MAX_COMMAND_ARGS)])
+
+    def test_worker_environment_strips_credentials_and_proxies(self):
+        value = launcher._worker_environment(Path("/workspace"), {
+            "LANG": "C.UTF-8",
+            "GITHUB_TOKEN": "secret",
+            "SUPABASE_SERVICE_ROLE_KEY": "secret",
+            "HTTPS_PROXY": "http://credential@example.invalid",
+            "PATH": "/attacker/bin",
+        })
+        self.assertEqual(value["PATH"], launcher.FIXED_WORKER_PATH)
+        self.assertEqual(value["GITHUB_WORKSPACE"], "/workspace")
+        self.assertEqual(value["LANG"], "C.UTF-8")
+        for key in ("GITHUB_TOKEN", "SUPABASE_SERVICE_ROLE_KEY", "HTTPS_PROXY"):
+            self.assertNotIn(key, value)
+
+    def test_inherited_fd_cleanup_uses_atomic_close_range(self):
+        calls: list[tuple[object, ...]] = []
+
+        class FakeLibc:
+            def syscall(self, *args):
+                calls.append(args)
+                return 0
+
+        with mock.patch.object(launcher, "_libc", return_value=FakeLibc()), \
+             mock.patch.object(launcher, "_syscall_number", return_value=436):
+            launcher._close_inherited_fds()
+        self.assertEqual(calls[0][1].value, 3)
+        self.assertEqual(calls[0][2].value, launcher.UINT_MAX)
+        self.assertEqual(calls[0][3].value, launcher.CLOSE_RANGE_UNSHARE)
+
+    def test_worker_exec_boundary_is_private_and_credential_free(self):
+        source = inspect.getsource(launcher._pid1_reaper)
+        self.assertLess(source.index("v1.set_no_new_privs"), source.index("_worker_environment"))
+        self.assertLess(source.index("_worker_environment"), source.index("_close_inherited_fds"))
+        self.assertLess(source.index("_close_inherited_fds"), source.index("os.execve"))
+        self.assertIn("os.umask(0o077)", source)
+        self.assertNotIn("os.execvp", source)
+
+    def test_signals_are_blocked_across_outer_fork_and_parent_death_is_fenced(self):
+        source = inspect.getsource(launcher.launch)
+        self.assertLess(source.index("signal.SIG_BLOCK"), source.index("pid1 = os.fork()"))
+        self.assertIn("_set_parent_death_signal()", source)
+        pdeath = inspect.getsource(launcher._set_parent_death_signal)
+        self.assertIn("PR_SET_PDEATHSIG", pdeath)
+        self.assertGreaterEqual(pdeath.count("os.getppid()"), 2)
+
     def test_source_contains_pid1_reaper_pivot_and_no_unsafe_shortcuts(self):
         source = Path(launcher.__file__).read_text()
         for token in (
             "CLONE_NEWPID", "CLONE_NEWNET", "MS_REC | MS_PRIVATE", "pivot_root", "MNT_DETACH",
             "os.waitpid(-1", "os.killpg", "os.pipe2", "pending_signals", 'os.getpid() != 1', '_mount("proc"',
+            "mount_setattr", "AT_RECURSIVE", "PR_SET_PDEATHSIG", "close_range", "os.execve",
         ):
             self.assertIn(token, source)
         for token in (

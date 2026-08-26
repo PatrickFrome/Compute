@@ -38,7 +38,7 @@ from worker.native_linux import h1_h13_prereq_probe
 CAPTURE_SCHEMA = "metaengine.compute.w1-lifecycle-local-capture.h205f22.v1"
 ACTION_SCHEMA = "metaengine.compute.w1-lifecycle-action-window.h205f22.v1"
 COMPOSE_SCHEMA = "metaengine.compute.w1-lifecycle-evidence-harness.h205f22.v1"
-EXPECTED_S2_SOURCE_SHA256 = "f262cd5468b5eb51754cf397cdb1879c2e90d0670b74f479d3b28af8cd20f521"
+EXPECTED_S2_SOURCE_SHA256 = "da03e661f9ddfaeb2ffa53b625c19ad06a48f51802e4b27201becfaf40c8d0b5"
 SENTINEL_BYTES = 32
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
