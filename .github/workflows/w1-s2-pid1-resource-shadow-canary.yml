@@ -1,0 +1,55 @@
+name: W1 S2 PID1 Resource Shadow Canary
+
+on:
+  push:
+    branches:
+      - work/w1-sandbox-launcher-prep
+    paths:
+      - 'controller/w1/s2_pid1_resource_hardening_shadow_canary.py'
+      - 'worker/native_linux/rootless_sandbox_launcher_v2.py'
+      - '.github/workflows/w1-s2-pid1-resource-shadow-canary.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shadow-canary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Compile exact canary
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/w1/s2_pid1_resource_hardening_shadow_canary.py
+      - name: Measure PID1 dumpability and resource candidates
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python3 controller/w1/s2_pid1_resource_hardening_shadow_canary.py \
+            --output out/w1-s2-pid1-resource-shadow-canary.json
+          cat out/w1-s2-pid1-resource-shadow-canary.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r = json.loads(Path('out/w1-s2-pid1-resource-shadow-canary.json').read_text())
+          assert r['outcome'] == 'ACCEPT_CANARY_PID1_DUMPABLE_CORE'
+          assert r['evidence']['checks']['pr_set_dumpable_zero_verified'] is True
+          assert r['evidence']['checks']['rlimit_core_zero_verified'] is True
+          assert r['evidence']['checks']['nofile_shadow_probe_safe_on_runner'] is True
+          assert r['runtime_isolation_verified'] is False
+          assert r['w1_verified'] is False
+          assert r['authority_effect'] is False
+          print('PID1 dumpable/core candidate: ACCEPT_CANARY')
+          PY
+      - name: Upload non-authority canary receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: w1-s2-pid1-resource-${{ github.run_id }}-${{ github.run_attempt }}
+          path: out/w1-s2-pid1-resource-shadow-canary.json
+          if-no-files-found: error
+          retention-days: 14
