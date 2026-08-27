@@ -25,6 +25,7 @@ ROADMAP_ID = "compute-fabric-roadmap-v1"
 MILESTONE_KEY = "W1_PERSISTENT_LINUX_WORKER_SAFETY"
 HOLDER_ID = "aop1:W1_IMPLEMENTER"
 ALLOWED_ROADMAP_STATES = {"READY", "IN_PROGRESS"}
+ALLOWED_DIRECTIVE_KINDS = {"OPEN", "CONTINUE", "REASSIGN"}
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -100,11 +101,13 @@ def evaluate(snapshot: dict[str, Any]) -> dict[str, Any]:
         "claim_payload_root_matches_head": claim.get("base_payload_root_sha256") == root_sha,
         "directive_roadmap_exact": directive.get("roadmap_id") == ROADMAP_ID,
         "directive_milestone_exact": directive.get("milestone_key") == MILESTONE_KEY,
+        "directive_kind_allows_execution": directive.get("directive_kind") in ALLOWED_DIRECTIVE_KINDS,
         "directive_target_holder_exact": directive.get("target_holder_id") == HOLDER_ID,
         "directive_status_active": directive.get("status") == "ACTIVE",
         "directive_not_expired": _dt(directive_exp) > now_dt,
-        "directive_not_superseded": directive.get("superseded_at") in (None, ""),
+        "directive_not_superseded": directive.get("superseded_at") is None,
         "directive_checkpoint_matches_head": directive.get("base_checkpoint_id") == checkpoint,
+        "holder_pair_aligned": claim.get("holder_id") == directive.get("target_holder_id"),
         "semantic_payload_root_well_formed": _is_sha256(root_sha),
     }
 
