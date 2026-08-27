@@ -1,11 +1,15 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
+const SEMANTIC_CLICK_ROLES = new Set(["button", "checkbox", "radio", "switch", "tab", "menuitem"]);
+const SEMANTIC_EDITABLE_ROLES = new Set(["textbox", "searchbox", "combobox"]);
+const SEMANTIC_ROLES = new Set([...SEMANTIC_CLICK_ROLES, ...SEMANTIC_EDITABLE_ROLES]);
 let lastIntentId = null;
 let lastArmed = false;
 let captureBusy = false;
 let actionBusy = false;
 let currentPerception = null;
+let semanticTargets = [];
 
 function setStatus(text, error = false) {
   const el = $("status");
@@ -31,6 +35,72 @@ function shortHash(value) {
   return text.length > 16 ? `${text.slice(0, 12)}…${text.slice(-4)}` : (text || "—");
 }
 
+function selectedSemanticTarget() {
+  const index = Number($("semanticTarget").value);
+  return Number.isInteger(index) && index >= 0 && index < semanticTargets.length ? semanticTargets[index] : null;
+}
+
+function updateSemanticControls() {
+  const select = $("semanticTarget");
+  const target = selectedSemanticTarget();
+  const disabled = actionBusy || captureBusy || !currentPerception || semanticTargets.length === 0;
+  select.disabled = disabled;
+  $("semanticFocus").disabled = disabled || !target;
+  $("semanticClick").disabled = disabled || !target || !SEMANTIC_CLICK_ROLES.has(target.role);
+  $("semanticType").disabled = disabled || !target || !SEMANTIC_EDITABLE_ROLES.has(target.role);
+  if (!target && !actionBusy) $("semanticState").textContent = semanticTargets.length ? "Select a semantic target." : "No unique supported semantic target in this capture.";
+}
+
+function renderSemanticTargets(perception) {
+  const select = $("semanticTarget");
+  select.replaceChildren();
+  semanticTargets = [];
+  if (!perception) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Capture a page first…";
+    select.append(option);
+    $("semanticState").textContent = "No semantic target selected.";
+    updateSemanticControls();
+    return;
+  }
+
+  const candidates = (Array.isArray(perception.accessibility) ? perception.accessibility : [])
+    .map((node) => ({
+      role: String(node?.role || "").trim().toLowerCase(),
+      name: String(node?.name || "").replace(/\s+/gu, " ").trim(),
+      backendNodeId: Number(node?.backend_dom_node_id),
+      ignored: node?.ignored === true
+    }))
+    .filter((node) => !node.ignored && SEMANTIC_ROLES.has(node.role) && node.name && Number.isInteger(node.backendNodeId));
+
+  const counts = new Map();
+  for (const node of candidates) {
+    const key = `${node.role}\u0000${node.name}`;
+    counts.set(key, Number(counts.get(key) || 0) + 1);
+  }
+  semanticTargets = candidates
+    .filter((node) => counts.get(`${node.role}\u0000${node.name}`) === 1)
+    .sort((a, b) => `${a.role}:${a.name}`.localeCompare(`${b.role}:${b.name}`));
+
+  if (!semanticTargets.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No unique supported AX target";
+    select.append(option);
+  } else {
+    semanticTargets.forEach((target, index) => {
+      const option = document.createElement("option");
+      option.value = String(index);
+      option.textContent = `[${target.role}] ${target.name.length > 90 ? `${target.name.slice(0, 87)}…` : target.name}`;
+      select.append(option);
+    });
+  }
+  updateSemanticControls();
+  const target = selectedSemanticTarget();
+  if (target) $("semanticState").textContent = `${target.role} · ${target.name}`;
+}
+
 function renderPerception(perception) {
   currentPerception = perception || null;
   const image = $("perceptionScreenshot");
@@ -46,6 +116,7 @@ function renderPerception(perception) {
     image.hidden = true;
     image.removeAttribute("src");
     image.removeAttribute("data-frame-token");
+    renderSemanticTargets(null);
     return;
   }
   $("perceptionTarget").textContent = `${compact(perception.platform)} · ${compact(perception.url)}`;
@@ -74,6 +145,7 @@ function renderPerception(perception) {
     image.removeAttribute("src");
     image.removeAttribute("data-frame-token");
   }
+  renderSemanticTargets(perception);
 }
 
 function renderRuntimeHardening(state) {
@@ -180,6 +252,7 @@ async function capturePerception(platform) {
   captureBusy = true;
   $("captureGlm").disabled = true;
   $("captureGpt").disabled = true;
+  updateSemanticControls();
   try {
     setStatus(`Capturing ${platform} perception…`);
     const response = await request("A2_OPERATOR_CAPTURE_PERCEPTION", {
@@ -194,12 +267,14 @@ async function capturePerception(platform) {
     captureBusy = false;
     $("captureGlm").disabled = false;
     $("captureGpt").disabled = false;
+    updateSemanticControls();
   }
 }
 
 function setActionControlsDisabled(disabled) {
   for (const id of ["stopGeneration", "scrollUp", "scrollDown"]) $(id).disabled = disabled;
   $("perceptionScreenshot").classList.toggle("busy", disabled);
+  updateSemanticControls();
 }
 
 async function runOperatorAction(action, extra = {}) {
@@ -238,6 +313,54 @@ async function runOperatorAction(action, extra = {}) {
   }
 }
 
+async function runSemanticAction(action) {
+  if (actionBusy || captureBusy) return;
+  const perception = currentPerception;
+  const target = selectedSemanticTarget();
+  if (!perception?.platform || !perception?.captured_at || !target) return setStatus("Capture and select a unique semantic target first.", true);
+  const payload = {
+    action,
+    platform: String(perception.platform),
+    perception_captured_at: String(perception.captured_at),
+    role: target.role,
+    accessible_name: target.name
+  };
+  if (action === "TYPE_SEMANTIC") {
+    const text = String($("semanticText").value || "");
+    if (!text) return setStatus("Trusted semantic text cannot be empty.", true);
+    payload.text = text;
+    payload.replace_existing = true;
+  }
+
+  actionBusy = true;
+  setActionControlsDisabled(true);
+  try {
+    setStatus(`Running ${action} on ${perception.platform} · ${target.role}…`);
+    const response = await request("A2_OPERATOR_SEMANTIC_ACTION", payload);
+    const result = response.result || {};
+    $("semanticState").textContent = JSON.stringify(result);
+    setStatus(`${action} completed with live AX/backend-node verification.`);
+    if (action !== "FOCUS_SEMANTIC") {
+      try {
+        const preview = await request("A2_OPERATOR_CAPTURE_PERCEPTION", {
+          platform: perception.platform,
+          options: { include_screenshot: true, body_limit: 12000, ax_limit: 70, dom_limit: 80 }
+        });
+        renderPerception(preview.perception || null);
+      } catch (_) { renderPerception(null); }
+    }
+    await refresh();
+  } catch (error) {
+    const message = String(error?.message || error);
+    $("semanticState").textContent = message;
+    setStatus(message, true);
+    if (message.includes("recapture") || message.includes("frame_") || message.includes("target_replaced")) renderPerception(null);
+  } finally {
+    actionBusy = false;
+    setActionControlsDisabled(false);
+  }
+}
+
 function screenshotCoordinates(event) {
   if (!currentPerception?.frame_token) throw new Error("Capture a fresh pixel frame first.");
   const viewport = currentPerception.page?.viewport || {};
@@ -263,6 +386,14 @@ $("rewriteAllow").addEventListener("click", () => {
 $("captureGlm").addEventListener("click", () => capturePerception("GLM_ZAI"));
 $("captureGpt").addEventListener("click", () => capturePerception("CHATGPT"));
 $("clearPerception").addEventListener("click", () => { renderPerception(null); setStatus("Local perception preview cleared."); });
+$("semanticTarget").addEventListener("change", () => {
+  updateSemanticControls();
+  const target = selectedSemanticTarget();
+  $("semanticState").textContent = target ? `${target.role} · ${target.name}` : "No semantic target selected.";
+});
+$("semanticFocus").addEventListener("click", () => runSemanticAction("FOCUS_SEMANTIC"));
+$("semanticClick").addEventListener("click", () => runSemanticAction("CLICK_SEMANTIC"));
+$("semanticType").addEventListener("click", () => runSemanticAction("TYPE_SEMANTIC"));
 $("perceptionScreenshot").addEventListener("click", (event) => {
   try {
     if (actionBusy || captureBusy) return;
