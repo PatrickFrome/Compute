@@ -11,18 +11,24 @@ BROKER = ROOT / "supabase/functions/metaengine-w1-authority-broker-h205f22/index
 PREFLIGHT_SQL = ROOT / "supabase/prep/w1_effective_execution_preflight_v1.sql"
 SELF_CHECK = "      - name: Validate live W1 credential and trust-zone contract"
 NEXT_JOB = "\n  preflight-environment:"
+GATE_SELF_CHECK = "      - name: Prove PREP-only nonauthority boundary"
+GATE_NEXT_STEP = "      - name: Build deterministic provider-dispatch contract receipt"
 
 
 def execution_workflow() -> str:
-    """Return workflow text with the inline policy checker removed.
-
-    The checker necessarily quotes forbidden tokens and step names as assertions;
-    treating those policy literals as runtime consumers creates false positives.
-    """
+    """Return provider workflow text with its inline policy checker removed."""
     raw = WORKFLOW.read_text(encoding="utf-8")
     before, remainder = raw.split(SELF_CHECK, 1)
     _checker, after = remainder.split(NEXT_JOB, 1)
     return before + NEXT_JOB + after
+
+
+def gate_execution_workflow() -> str:
+    """Return gate workflow with the self-referential policy checker removed."""
+    raw = GATE_WORKFLOW.read_text(encoding="utf-8")
+    before, remainder = raw.split(GATE_SELF_CHECK, 1)
+    _checker, after = remainder.split(GATE_NEXT_STEP, 1)
+    return before + GATE_NEXT_STEP + after
 
 
 class ProviderDispatchAuthorityBrokerContractTests(unittest.TestCase):
@@ -48,15 +54,13 @@ class ProviderDispatchAuthorityBrokerContractTests(unittest.TestCase):
     def test_elevated_database_key_stays_server_side(self):
         broker = BROKER.read_text(encoding="utf-8")
         workflow = execution_workflow()
-        gate = GATE_WORKFLOW.read_text(encoding="utf-8")
+        gate = gate_execution_workflow()
         self.assertIn('SUPABASE_SERVICE_ROLE_KEY', broker)
-        self.assertNotIn('SUPABASE_SERVICE_ROLE_KEY', workflow)
-        self.assertNotIn('SUPABASE_SECRET_KEYS', workflow)
-        self.assertNotIn('secrets.SUPABASE', workflow)
-        self.assertNotIn('sb_secret_', workflow)
-        self.assertNotIn('SUPABASE_SERVICE_ROLE_KEY', gate)
-        self.assertNotIn('SUPABASE_SECRET_KEYS', gate)
-        self.assertNotIn('secrets.SUPABASE', gate)
+        for text in (workflow, gate):
+            self.assertNotIn('SUPABASE_SERVICE_ROLE_KEY', text)
+            self.assertNotIn('SUPABASE_SECRET_KEYS', text)
+            self.assertNotIn('secrets.SUPABASE', text)
+            self.assertNotIn('sb_secret_', text)
 
     def test_real_provider_mutation_is_structurally_after_external_gate(self):
         workflow = execution_workflow()
