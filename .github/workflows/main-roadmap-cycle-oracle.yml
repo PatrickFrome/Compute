@@ -13,8 +13,10 @@ on:
       - 'tests/test_main_roadmap_cycle_oracle.py'
       - 'tests/test_main_roadmap_projection_guard.py'
       - 'tests/test_main_roadmap_lease_truth_guard.py'
+      - 'tests/test_main_roadmap_lease_reconciliation_sql_contract.py'
       - 'tests/fixtures/main_roadmap_live_snapshot_20260827.json'
       - 'supabase/prep/main_roadmap_lease_truth_snapshot_v1.sql'
+      - 'supabase/migrations/20260827201500_main_roadmap_lease_reconciliation_v1.sql'
       - 'docs/ROADMAP_EXECUTION_PROTOCOL.md'
       - 'research/main-roadmap-accelerators/**'
       - '.github/workflows/main-roadmap-cycle-oracle.yml'
@@ -47,7 +49,8 @@ jobs:
           set -euo pipefail
           python3 -m unittest \
             tests.test_main_roadmap_cycle_oracle \
-            tests.test_main_roadmap_lease_truth_guard -v
+            tests.test_main_roadmap_lease_truth_guard \
+            tests.test_main_roadmap_lease_reconciliation_sql_contract -v
 
       - name: Prove read-only snapshot contract
         run: |
