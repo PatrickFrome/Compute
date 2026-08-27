@@ -10,6 +10,9 @@ export const RPC_METHODS = Object.freeze([
   'profile.start',
   'profile.stop',
   'profile.list',
+  'context.create',
+  'context.list',
+  'context.close',
   'target.create',
   'target.list',
   'target.activate',
@@ -21,6 +24,9 @@ export const RPC_METHOD_EFFECTS = Object.freeze({
   'profile.start': 'LOCAL_LIFECYCLE',
   'profile.stop': 'LOCAL_LIFECYCLE',
   'profile.list': 'READ_ONLY',
+  'context.create': 'LOCAL_LIFECYCLE',
+  'context.list': 'READ_ONLY',
+  'context.close': 'LOCAL_LIFECYCLE',
   'target.create': 'LOCAL_LIFECYCLE',
   'target.list': 'READ_ONLY',
   'target.activate': 'LOCAL_UI',
@@ -39,6 +45,9 @@ async function dispatch(runtime, method, params) {
     case 'profile.start': return runtime.startProfile({ profileId: params?.profileId });
     case 'profile.stop': return runtime.stopProfile(params?.profileId);
     case 'profile.list': return runtime.listProfiles();
+    case 'context.create': return runtime.createContext({ profileId: params?.profileId, contextId: params?.contextId, kind: params?.kind });
+    case 'context.list': return runtime.listContexts(params?.profileId, { includeRetired: params?.includeRetired === true });
+    case 'context.close': return runtime.closeContext({ profileId: params?.profileId, contextId: params?.contextId });
     case 'target.create': return runtime.createTarget(params);
     case 'target.list': return runtime.listTargets(params?.profileId, { includeRetired: params?.includeRetired === true });
     case 'target.activate': return runtime.activateTarget(params);
