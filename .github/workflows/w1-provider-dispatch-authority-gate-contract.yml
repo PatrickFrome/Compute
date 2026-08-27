@@ -5,13 +5,16 @@ on:
     branches: [work/w1-sandbox-launcher-prep]
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   contract:
     runs-on: ubuntu-24.04
-    timeout-minutes: 6
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout exact revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -62,3 +65,100 @@ jobs:
           assert workflow.count('aws ec2 reboot-instances --instance-ids "$INSTANCE_ID"\n') == 1
           print('provider dispatch authority gate: PREP_NONAUTHORITY_CONTRACT_PASS')
           PY
+
+      - name: Build deterministic provider-dispatch contract receipt
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          python3 - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+
+          files=[
+            '.github/workflows/w1-provider-dispatch-authority-gate-contract.yml',
+            '.github/workflows/w1-aws-provider-reboot-proof.yml',
+            'controller/w1/effective_execution_preflight.py',
+            'controller/w1/provider_dispatch_authority_guard.py',
+            'supabase/functions/metaengine-w1-authority-broker-h205f22/index.ts',
+            'supabase/prep/w1_effective_execution_preflight_v1.sql',
+            'tests/test_w1_effective_execution_preflight.py',
+            'tests/test_w1_effective_execution_preflight_sql_contract.py',
+            'tests/test_w1_provider_dispatch_authority_guard.py',
+            'tests/test_w1_provider_dispatch_authority_broker_contract.py',
+          ]
+          def sha(path):
+              return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+          file_sha={path:sha(path) for path in sorted(files)}
+          evidence={
+            'schema':'metaengine.compute.w1-provider-dispatch-authority-contract-evidence.h205f22.v1',
+            'outcome':'PASS_PROVIDER_DISPATCH_AUTHORITY_CONTRACT_NONAUTHORITY',
+            'source_git_sha':os.environ['GITHUB_SHA'],
+            'source_ref':os.environ['GITHUB_REF'],
+            'source_file_count':len(file_sha),
+            'source_file_sha256':file_sha,
+            'contract_test_modules':[
+              'tests.test_w1_effective_execution_preflight',
+              'tests.test_w1_effective_execution_preflight_sql_contract',
+              'tests.test_w1_provider_dispatch_authority_guard',
+              'tests.test_w1_provider_dispatch_authority_broker_contract',
+            ],
+            'checks':{
+              'integrated_adversarial_authority_chain_passed':True,
+              'prep_nonauthority_boundary_passed':True,
+              'source_bound':True,
+              'deterministic_receipt':True,
+            },
+            'boundaries':{
+              'provider_mutation_authorized':False,
+              'authority_effect':False,
+              'canonical':False,
+              'persistent_worker_proof':False,
+              'worker_admitted':False,
+              'w1_verified':False,
+              'database_ddl_applied':False,
+              'authority_broker_deployed':False,
+              'live_provider_mutation_performed':False,
+            },
+          }
+          packed=json.dumps(evidence,sort_keys=True,separators=(',',':')).encode()
+          receipt=dict(evidence)
+          receipt['evidence_sha256']=hashlib.sha256(packed).hexdigest()
+          Path('evidence/w1-provider-dispatch-authority-contract-receipt.json').write_text(
+              json.dumps(receipt,sort_keys=True,indent=2)+'\n',encoding='utf-8')
+          PY
+          sha256sum evidence/w1-provider-dispatch-authority-contract-receipt.json \
+            > evidence/w1-provider-dispatch-authority-contract-receipt.sha256
+          cat evidence/w1-provider-dispatch-authority-contract-receipt.json
+
+      - name: Attest deterministic provider-dispatch contract receipt
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: evidence/w1-provider-dispatch-authority-contract-receipt.json
+
+      - name: Verify keyless provider-dispatch contract attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh attestation verify \
+            evidence/w1-provider-dispatch-authority-contract-receipt.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/w1-provider-dispatch-authority-gate-contract.yml" \
+            --source-digest "$GITHUB_SHA" \
+            --source-ref "$GITHUB_REF" \
+            --deny-self-hosted-runners \
+            --format json \
+            > evidence/w1-provider-dispatch-authority-attestation-verification.json
+          test -s evidence/w1-provider-dispatch-authority-attestation-verification.json
+
+      - name: Upload addressable provider-dispatch contract evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: w1-provider-dispatch-authority-contract-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            evidence/w1-provider-dispatch-authority-contract-receipt.json
+            evidence/w1-provider-dispatch-authority-contract-receipt.sha256
+            evidence/w1-provider-dispatch-authority-attestation-verification.json
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
