@@ -3,7 +3,9 @@
 
   const bootstrap = globalThis.A2_BRIDGE_BOOTSTRAP || {};
   const ORDERING_POLICY = "STRICT_GLM_FIRST_ACTUATED_V1";
-  const OPERATOR_RUNTIME = "0.6.3-supervisor-authority-dev.2";
+  const runtimeDescriptor = globalThis.A2_RUNTIME;
+  if (!runtimeDescriptor?.version) throw new Error("runtime_descriptor_missing");
+  const OPERATOR_RUNTIME = String(runtimeDescriptor.version);
   const DEFAULTS = Object.freeze({
     daemonUrl: String(bootstrap.daemonUrl || "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-chat-bridge-remote"),
     armed: false,
