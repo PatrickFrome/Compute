@@ -60,7 +60,7 @@ def valid_observations() -> dict:
 
 
 class GitHubCodespacesLifecycleProvenanceTests(unittest.TestCase):
-    def test_dry_plan_is_exact_and_nonmutating(self):
+    def test_dry_plan_is_exact_nonmutating_and_explicitly_blocked(self):
         plan = provenance.dry_plan(name=NAME, repo=REPO, token_env="GITHUB_TOKEN")
         self.assertEqual(plan["mode"], "DRY_RUN")
         self.assertEqual(plan["api_version"], "2026-03-10")
@@ -70,15 +70,19 @@ class GitHubCodespacesLifecycleProvenanceTests(unittest.TestCase):
         self.assertFalse(plan["provider_mutation_performed"])
         self.assertFalse(plan["authority_effect"])
         self.assertFalse(plan["w1_verified"])
+        self.assertFalse(plan["local_execute_available"])
+        self.assertEqual(plan["execute_block"], provenance.EXECUTE_BLOCK)
+        self.assertIn("externally verified W1 dispatch receipt", " ".join(plan["execute_requires"]))
         self.assertEqual(plan["token_source"]["kind"], "ENVIRONMENT_VARIABLE")
         self.assertEqual(plan["token_source"]["name"], "GITHUB_TOKEN")
         self.assertFalse(plan["token_source"]["material_persisted"])
         self.assertNotIn("value", plan["token_source"])
         self.assertNotIn("material", plan["token_source"])
 
-    def test_valid_observations_compose_nonauthority_receipt(self):
+    def test_valid_external_observations_compose_nonauthority_receipt(self):
         obs = valid_observations()
         result = provenance.compose_execute_receipt(name=NAME, repo=REPO, **obs)
+        self.assertEqual(result["mode"], "EXTERNAL_CAPTURE_READBACK")
         self.assertEqual(result["outcome"], "CAPTURED_NONAUTHORITY")
         self.assertTrue(result["api_authentication_observed"])
         self.assertFalse(result["provider_action_verified"])
@@ -136,15 +140,18 @@ class GitHubCodespacesLifecycleProvenanceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unsupported Codespaces lifecycle suffix"):
             provenance._endpoint(NAME, "/delete")
 
-    def test_execute_requires_separate_mutation_env_gate(self):
-        with mock.patch.dict(os.environ, {}, clear=True):
-            with self.assertRaisesRegex(RuntimeError, provenance.EXECUTE_ENV):
+    def test_execute_is_blocked_even_with_legacy_flag_and_token(self):
+        env = {provenance.EXECUTE_ENV: "1", "GITHUB_TOKEN": "synthetic-not-used"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            with self.assertRaisesRegex(RuntimeError, provenance.EXECUTE_BLOCK):
                 provenance.execute(name=NAME, repo=REPO, token_env="GITHUB_TOKEN", timeout_seconds=120)
 
-    def test_execute_gate_without_token_still_fails_before_network(self):
-        with mock.patch.dict(os.environ, {provenance.EXECUTE_ENV: "1"}, clear=True):
-            with self.assertRaisesRegex(RuntimeError, "requires token"):
-                provenance.execute(name=NAME, repo=REPO, token_env="GITHUB_TOKEN", timeout_seconds=120)
+    def test_execute_block_precedes_token_or_network_semantics(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, provenance.EXECUTE_BLOCK):
+                provenance.execute(name=NAME, repo=REPO, token_env="MISSING_TOKEN", timeout_seconds=1)
+        self.assertFalse(hasattr(provenance, "_call"), "local network mutator must not exist in PREP collector")
+        self.assertFalse(hasattr(provenance, "_poll_state"), "local lifecycle poller must not exist in PREP collector")
 
 
 if __name__ == "__main__":
