@@ -3,6 +3,7 @@
 
   const DEVICE_AUTH_URL = "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-device-auth-v2-canary";
   const SUPERVISOR_URL = "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-supervisor-v4-auth-canary";
+  const nativeFetch = globalThis.fetch.bind(globalThis);
   let enrollmentPromise = null;
 
   async function ensureDevice() {
@@ -39,6 +40,7 @@
     ]);
     if (!signature?.device_id || !signature?.signature_b64url) throw new Error("supervisor_device_signature_missing");
     const headers = new Headers(init.headers || {});
+    headers.delete("x-a2-chat-bridge-secret");
     headers.set("content-type", "application/json");
     headers.set("x-a2-chat-bridge-client", client);
     headers.set("x-a2-device-profile", signature.profile);
@@ -47,9 +49,10 @@
     headers.set("x-a2-device-nonce", signature.nonce);
     headers.set("x-a2-device-body-sha256", signature.body_sha256);
     headers.set("x-a2-device-signature", signature.signature_b64url);
-    return fetch(`${SUPERVISOR_URL}${path}`, { ...init, method, body: method === "GET" ? undefined : body, headers, cache: "no-store" });
+    return nativeFetch(`${SUPERVISOR_URL}${path}`, { ...init, method, body: method === "GET" ? undefined : body, headers, cache: "no-store" });
   }
 
+  globalThis.A2_SUPERVISOR_NATIVE_FETCH = nativeFetch;
   globalThis.A2_SUPERVISOR_DEVICE_ENSURE = ensureDevice;
   globalThis.A2_SUPERVISOR_SIGNED_REQUEST = signedRequest;
   globalThis.A2_SUPERVISOR_SIGNED_URL = SUPERVISOR_URL;
