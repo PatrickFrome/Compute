@@ -41,6 +41,21 @@ class S2Pid1EvidenceConsumerAuditTests(unittest.TestCase):
         result = audit.evaluate(root)
         self.assertEqual(result["outcome"], "FAIL_PID1_EVIDENCE_CONSUMER_DRIFT")
         self.assertEqual(result["evidence"]["legacy_layout_consumers"][0]["path"], "consumer.py")
+        self.assertIn("python_ast_legacy_subscript", result["evidence"]["legacy_layout_consumers"][0]["matches"])
+
+    def test_defensive_dynamic_field_assertion_is_not_a_consumer(self):
+        tmp, root = self.make_root()
+        self.addCleanup(tmp.cleanup)
+        (root / "defensive_test.py").write_text(
+            "fields = ['rlimit_nofile_before', 'rlimit_nofile_after']\n"
+            "for field in fields:\n"
+            "    assert field not in receipt['evidence']['probe']\n"
+            "    assert field not in receipt['evidence']['checks']\n",
+            encoding="utf-8",
+        )
+        result = audit.evaluate(root)
+        self.assertEqual(result["outcome"], "PASS_PID1_EVIDENCE_CONSUMER_AUDIT_NONAUTHORITY")
+        self.assertEqual(result["evidence"]["legacy_layout_consumers"], [])
 
     def test_jsonpath_old_checks_layout_fails_closed(self):
         tmp, root = self.make_root()
