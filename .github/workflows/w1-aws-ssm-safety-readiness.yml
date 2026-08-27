@@ -1,0 +1,291 @@
+name: W1 AWS SSM Safety Readiness
+
+on:
+  push:
+    branches:
+      - work/main-roadmap-accelerators-v5
+      - work/w1-linux-worker-safety
+    paths:
+      - '.github/workflows/w1-aws-ssm-safety-readiness.yml'
+      - 'controller/w1/aws_ssm_safety_readiness_guard.py'
+      - 'controller/w1/aws_persistent_host_preflight_guard.py'
+      - 'controller/w1/aws_provider_reboot_live_guard.py'
+      - 'controller/w1/aws_provider_reboot_controller.py'
+      - 'controller/w1/aws_ssm_safety_provision_guard.py'
+      - 'controller/w1/aws_ssm_iid_capture_guard.py'
+      - 'infra/w1/ssm/Metaengine-W1-IID-Capture-H205F22.json'
+      - 'tests/test_w1_aws_ssm_safety_readiness_guard.py'
+      - 'tests/test_w1_aws_ssm_safety_readiness_workflow_contract.py'
+      - 'research/W1_SSM_SAFETY_READINESS.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/w1-aws-ssm-safety-readiness.yml'
+      - 'controller/w1/aws_ssm_safety_readiness_guard.py'
+      - 'controller/w1/aws_persistent_host_preflight_guard.py'
+      - 'controller/w1/aws_provider_reboot_live_guard.py'
+      - 'controller/w1/aws_provider_reboot_controller.py'
+      - 'controller/w1/aws_ssm_safety_provision_guard.py'
+      - 'controller/w1/aws_ssm_iid_capture_guard.py'
+      - 'infra/w1/ssm/Metaengine-W1-IID-Capture-H205F22.json'
+      - 'tests/test_w1_aws_ssm_safety_readiness_guard.py'
+      - 'tests/test_w1_aws_ssm_safety_readiness_workflow_contract.py'
+      - 'research/W1_SSM_SAFETY_READINESS.md'
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type PREFLIGHT_W1_SSM_SAFETY_READINESS exactly
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: w1-aws-ssm-safety-readiness
+  cancel-in-progress: false
+
+env:
+  EXPECTED_PACKAGE_SOURCE_SHA: 73ab09c75b71a6ea40f11e953cbcf9d9b94b9a89
+  PROVISION_DOCUMENT_NAME: Metaengine-W1-Safety-Provision-H205F22
+  IID_DOCUMENT_NAME: Metaengine-W1-IID-Capture-H205F22
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Verify readiness contracts
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m py_compile \
+            controller/w1/aws_ssm_safety_readiness_guard.py \
+            controller/w1/aws_persistent_host_preflight_guard.py \
+            controller/w1/aws_provider_reboot_live_guard.py \
+            controller/w1/aws_provider_reboot_controller.py \
+            controller/w1/aws_ssm_safety_provision_guard.py \
+            controller/w1/aws_ssm_iid_capture_guard.py
+          python3 -m unittest \
+            tests.test_w1_aws_ssm_safety_readiness_guard \
+            tests.test_w1_aws_persistent_host_preflight_guard \
+            tests.test_w1_aws_provider_reboot_live_guard \
+            tests.test_w1_aws_provider_reboot_controller \
+            tests.test_w1_aws_ssm_safety_provision_guard \
+            tests.test_w1_aws_ssm_iid_capture_guard \
+            tests.test_w1_aws_ssm_safety_readiness_workflow_contract -v
+
+  github-environment:
+    if: github.event_name == 'workflow_dispatch'
+    needs: [contract]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    permissions:
+      actions: read
+      contents: read
+    env:
+      CONFIRMATION: ${{ inputs.confirmation }}
+    steps:
+      - name: Checkout exact main revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Require explicit main read-only preflight
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$CONFIRMATION" = 'PREFLIGHT_W1_SSM_SAFETY_READINESS'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Fetch GitHub environment and main deployment metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          api_get() {
+            curl --fail-with-body --silent --show-error --location \
+              -H 'Accept: application/vnd.github+json' \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "$1"
+          }
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/environments/w1-persistent-host-proof" > evidence/environment.json
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/main" > evidence/main-branch.json
+          if python3 -c "import json;v=json.load(open('evidence/environment.json'));raise SystemExit(0 if (v.get('deployment_branch_policy') or {}).get('custom_branch_policies') is True else 1)"; then
+            api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/environments/w1-persistent-host-proof/deployment-branch-policies?per_page=100" > evidence/custom-policies.json
+          else
+            printf '%s\n' '{"total_count":0,"branch_policies":[]}' > evidence/custom-policies.json
+          fi
+
+      - name: Validate independent review and main deployment route
+        run: |
+          set -euo pipefail
+          python3 controller/w1/aws_provider_reboot_live_guard.py validate-environment \
+            --input evidence/environment.json \
+            --output evidence/environment-receipt.json
+          python3 controller/w1/aws_persistent_host_preflight_guard.py validate-deployment \
+            --environment evidence/environment.json \
+            --branch evidence/main-branch.json \
+            --custom-policies evidence/custom-policies.json \
+            --output evidence/deployment-receipt.json
+          rm -f evidence/environment.json evidence/main-branch.json evidence/custom-policies.json
+
+      - name: Upload credential-free GitHub readiness evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: w1-github-readiness-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
+
+  aws-readonly:
+    if: github.event_name == 'workflow_dispatch'
+    needs: [contract, github-environment]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    environment: w1-persistent-host-proof
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      INSTANCE_ID: ${{ vars.W1_AWS_INSTANCE_ID }}
+      WORKER_ID: ${{ vars.W1_WORKER_ID }}
+      AWS_ACCOUNT_ID: ${{ vars.W1_AWS_ACCOUNT_ID }}
+      AWS_REGION: ${{ vars.W1_AWS_REGION }}
+      PROVISION_ROLE_ARN: ${{ vars.W1_AWS_SSM_PROVISION_ROLE_ARN }}
+      IID_ROLE_ARN: ${{ vars.W1_AWS_SSM_IID_CAPTURE_ROLE_ARN }}
+      VERIFIER_ROLE_ARN: ${{ vars.W1_AWS_SSM_VERIFY_ROLE_ARN }}
+      ROLE_SESSION: w1-readiness-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Checkout exact main revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Download validated GitHub boundary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: w1-github-readiness-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/github
+
+      - name: Validate immutable configuration and build read-only session boundary
+        id: session
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          [[ "$INSTANCE_ID" =~ ^i-[0-9a-f]+$ ]]
+          [[ "$WORKER_ID" =~ ^[A-Za-z0-9._:-]{3,160}$ ]]
+          [[ "$AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]
+          [[ "$AWS_REGION" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]]
+          python3 -c "import os;from controller.w1 import aws_ssm_safety_readiness_guard as g;g.validate_role_configuration(account_id=os.environ['AWS_ACCOUNT_ID'],provision_role_arn=os.environ['PROVISION_ROLE_ARN'],iid_role_arn=os.environ['IID_ROLE_ARN'],verifier_role_arn=os.environ['VERIFIER_ROLE_ARN'])"
+          python3 -c "from controller.w1 import build_host_safety_package as p;assert p.SOURCE_COMMIT == '$EXPECTED_PACKAGE_SOURCE_SHA'"
+          mkdir -p evidence/aws
+          python3 controller/w1/aws_ssm_safety_readiness_guard.py build-readonly-boundary \
+            --account-id "$AWS_ACCOUNT_ID" --region "$AWS_REGION" \
+            --output evidence/aws/session-boundary.json
+          POLICY="$(python3 -c "import json;print(json.dumps(json.load(open('evidence/aws/session-boundary.json'))['session_policy'],separators=(',',':')))" )"
+          echo "policy=$POLICY" >> "$GITHUB_OUTPUT"
+
+      - name: Configure 15-minute read-only AWS OIDC session
+        id: aws
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
+        with:
+          role-to-assume: ${{ vars.W1_AWS_SSM_VERIFY_ROLE_ARN }}
+          aws-region: ${{ vars.W1_AWS_REGION }}
+          allowed-account-ids: ${{ vars.W1_AWS_ACCOUNT_ID }}
+          role-session-name: w1-readiness-${{ github.run_id }}-${{ github.run_attempt }}
+          role-duration-seconds: 900
+          mask-aws-account-id: true
+          output-env-credentials: false
+          output-credentials: true
+          unset-current-credentials: true
+          inline-session-policy: ${{ steps.session.outputs.policy }}
+
+      - name: Read exact AWS candidate and immutable documents
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
+          AWS_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_DEFAULT_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_EC2_METADATA_DISABLED: 'true'
+        run: |
+          set -euo pipefail
+          aws sts get-caller-identity --output json > evidence/aws/caller.json
+          aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0]' --output json > evidence/aws/instance.json
+          ROOT_VOLUME_ID="$(python3 - <<'PY'
+          import json
+          value=json.load(open('evidence/aws/instance.json'))
+          root=value.get('RootDeviceName')
+          for mapping in value.get('BlockDeviceMappings') or []:
+              if mapping.get('DeviceName') == root and (mapping.get('Ebs') or {}).get('VolumeId'):
+                  print(mapping['Ebs']['VolumeId'])
+                  break
+          PY
+          )"
+          [[ "$ROOT_VOLUME_ID" =~ ^vol-[0-9a-f]+$ ]]
+          aws ec2 describe-volumes --volume-ids "$ROOT_VOLUME_ID" --query 'Volumes[0]' --output json > evidence/aws/root-volume.json
+          mapfile -t SG_IDS < <(python3 - <<'PY'
+          import json
+          for group in json.load(open('evidence/aws/instance.json')).get('SecurityGroups') or []:
+              print(group['GroupId'])
+          PY
+          )
+          (( ${#SG_IDS[@]} > 0 ))
+          aws ec2 describe-security-groups --group-ids "${SG_IDS[@]}" --query 'SecurityGroups' --output json > evidence/aws/security-groups.json
+          aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$INSTANCE_ID" --output json > evidence/aws/managed-node.json
+          aws ssm describe-document --name "$PROVISION_DOCUMENT_NAME" --document-version '1' --output json > evidence/aws/provision-description.json
+          aws ssm get-document --name "$PROVISION_DOCUMENT_NAME" --document-version '1' --document-format JSON --output json > evidence/aws/provision-get-document.json
+          aws ssm describe-document --name "$IID_DOCUMENT_NAME" --document-version '1' --output json > evidence/aws/iid-description.json
+          aws ssm get-document --name "$IID_DOCUMENT_NAME" --document-version '1' --document-format JSON --output json > evidence/aws/iid-get-document.json
+          python3 - <<'PY'
+          import json
+          bundle={
+              'instance':json.load(open('evidence/aws/instance.json')),
+              'security_groups':json.load(open('evidence/aws/security-groups.json')),
+              'root_volume':json.load(open('evidence/aws/root-volume.json')),
+          }
+          json.dump(bundle,open('evidence/aws/preflight-bundle.json','w'),sort_keys=True,separators=(',',':'))
+          PY
+
+      - name: Compose non-authoritative external readiness receipt
+        run: |
+          set -euo pipefail
+          python3 controller/w1/aws_ssm_safety_readiness_guard.py compose \
+            --environment-receipt evidence/github/environment-receipt.json \
+            --deployment-receipt evidence/github/deployment-receipt.json \
+            --caller-identity evidence/aws/caller.json \
+            --preflight-bundle evidence/aws/preflight-bundle.json \
+            --managed-node evidence/aws/managed-node.json \
+            --provision-description evidence/aws/provision-description.json \
+            --provision-get-document evidence/aws/provision-get-document.json \
+            --iid-description evidence/aws/iid-description.json \
+            --iid-get-document evidence/aws/iid-get-document.json \
+            --iid-document-source infra/w1/ssm/Metaengine-W1-IID-Capture-H205F22.json \
+            --instance-id "$INSTANCE_ID" --worker-id "$WORKER_ID" \
+            --account-id "$AWS_ACCOUNT_ID" --region "$AWS_REGION" \
+            --provision-role-arn "$PROVISION_ROLE_ARN" \
+            --iid-role-arn "$IID_ROLE_ARN" \
+            --verifier-role-arn "$VERIFIER_ROLE_ARN" \
+            --output evidence/aws/readiness-receipt.json
+          python3 -c "import json;v=json.load(open('evidence/aws/readiness-receipt.json'));assert v['readiness_preflight_passed'] is True;assert v['send_command_executed'] is False;assert v['host_filesystem_mutation'] is False;assert v['reboot_performed'] is False;assert v['database_mutation'] is False;assert v['w1_verified'] is False;assert v['authority_effect'] is False"
+
+      - name: Upload noncanonical read-only readiness evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: w1-ssm-safety-readiness-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/aws/
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
