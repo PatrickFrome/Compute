@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import copy
+import json
+from pathlib import Path
 import unittest
 
 from controller.roadmap import roadmap_lease_truth_guard_v2 as guard
 from tests.test_main_roadmap_lease_truth_guard import snapshot, claim, directive, W1
+
+
+LIVE_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "main_roadmap_live_lease_truth_v2_20260827.json"
 
 
 def with_v2_alignment(value: dict) -> dict:
@@ -117,6 +122,20 @@ class MainRoadmapLeaseTruthGuardV2Tests(unittest.TestCase):
         result = guard.evaluate(value)
         self.assertFalse(result["lease_truth_passed"])
         self.assertIn("selected_active_claim_unique", result["evidence"]["failed_checks"])
+
+    def test_live_supabase_v2_fixture_passes_with_cleanup_debt(self):
+        value = json.loads(LIVE_FIXTURE.read_text(encoding="utf-8"))
+        result = guard.evaluate(value)
+        self.assertTrue(result["lease_truth_passed"])
+        self.assertEqual("PASS_MAIN_ROADMAP_LEASE_TRUTH_NONAUTHORITY", result["outcome"])
+        self.assertTrue(result["cleanup_required"])
+        self.assertEqual([], result["evidence"]["failed_checks"])
+        self.assertEqual([], result["evidence"]["projections"]["alignment_claim_ids"])
+        self.assertEqual([], result["evidence"]["projections"]["supervisor_active_claim_ids"])
+        self.assertEqual([], result["evidence"]["projections"]["fresh_raw_claim_ids"])
+        self.assertEqual([], result["evidence"]["projections"]["fresh_raw_directive_ids"])
+        self.assertEqual(1, len(result["evidence"]["leases"]["stale_claims_cleanup_debt"]))
+        self.assertEqual(3, len(result["evidence"]["leases"]["stale_directives_cleanup_debt"]))
 
     def test_receipt_is_deterministic_and_non_authoritative(self):
         value = with_v2_alignment(snapshot())
