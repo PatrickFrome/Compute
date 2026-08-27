@@ -5,10 +5,13 @@ import { dirname, resolve } from 'node:path';
 import assert from 'node:assert/strict';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const source = readFileSync(resolve(HERE, '../coordination/chat-control-plane/extension/content.js'), 'utf8');
-const compat = readFileSync(resolve(HERE, '../coordination/chat-control-plane/extension/platform-dom-compat.js'), 'utf8');
-const trusted = readFileSync(resolve(HERE, '../coordination/chat-control-plane/extension/trusted-chatgpt.js'), 'utf8');
-const manifest = JSON.parse(readFileSync(resolve(HERE, '../coordination/chat-control-plane/extension/manifest.json'), 'utf8'));
+const EXT = resolve(HERE, '../coordination/chat-control-plane/extension');
+const source = readFileSync(resolve(EXT, 'content.js'), 'utf8');
+const compat = readFileSync(resolve(EXT, 'platform-dom-compat.js'), 'utf8');
+const trustedGpt = readFileSync(resolve(EXT, 'trusted-chatgpt.js'), 'utf8');
+const trustedGlm = readFileSync(resolve(EXT, 'trusted-glm.js'), 'utf8');
+const promptGate = readFileSync(resolve(EXT, 'prompt-gate.js'), 'utf8');
+const manifest = JSON.parse(readFileSync(resolve(EXT, 'manifest.json'), 'utf8'));
 
 function extractFn(name) {
   const start = source.indexOf(`function ${name}(`);
@@ -25,78 +28,85 @@ function extractFn(name) {
   throw new Error(`unbalanced ${name}`);
 }
 
-const normalizeSrc = 'const normalize = (value) => String(value ?? "").replace(/\\r\\n/g, "\\n").trim();';
-const fns = [extractFn('semanticFields'), extractFn('matchesButtonSemantics'), extractFn('sharedContainer')].join('\n');
+// Execute only the pure semantic-button functions in a tiny fake DOM. The
+// content layer is otherwise treated as read-only source and must never send.
+const normalizeSrc = 'const normalize = (value) => String(value ?? "").replace(/\\r\\n?/g, "\\n").trim();';
+const fns = [extractFn('semanticFields'), extractFn('buttonMatches')].join('\n');
 const factory = new Function(`
-class HTMLElement {}
-const visible = () => true;
 ${normalizeSrc}
 ${fns}
-return { semanticFields, matchesButtonSemantics, sharedContainer, HTMLElement };
+return { semanticFields, buttonMatches };
 `);
-const { matchesButtonSemantics, sharedContainer, HTMLElement } = factory();
+const { buttonMatches } = factory();
 
 function button(fields) {
-  const b = new HTMLElement();
-  b.getAttribute = (n) => fields[n] ?? null;
-  b.textContent = fields.text ?? '';
-  return b;
-}
-function node(children = [], parent = null) {
-  const n = new HTMLElement();
-  n.parentElement = parent;
-  n.contains = (x) => n === x || children.includes(x);
-  return n;
+  return {
+    getAttribute: (name) => fields[name] ?? null,
+    textContent: fields.text ?? ''
+  };
 }
 
 const checks = [];
 const check = (name, ok) => checks.push([name, Boolean(ok)]);
 
-check('Resend is rejected', !matchesButtonSemantics(button({ 'aria-label': 'Resend' }), 'send'));
-check('Send feedback is rejected', !matchesButtonSemantics(button({ text: 'Send feedback' }), 'send'));
-check('Send matches', matchesButtonSemantics(button({ 'aria-label': 'Send' }), 'send'));
-check('Send prompt matches', matchesButtonSemantics(button({ 'aria-label': 'Send prompt' }), 'send'));
-check('Russian Send matches', matchesButtonSemantics(button({ 'aria-label': 'Отправить' }), 'send'));
-check('Stop generating matches', matchesButtonSemantics(button({ 'aria-label': 'Stop generating' }), 'stop'));
+// F7 semantic false-positive resistance remains mandatory.
+check('Resend is rejected', !buttonMatches(button({ 'aria-label': 'Resend' }), 'send'));
+check('Send feedback is rejected', !buttonMatches(button({ text: 'Send feedback' }), 'send'));
+check('Send later is rejected', !buttonMatches(button({ 'aria-label': 'Send later' }), 'send'));
+check('Send matches', buttonMatches(button({ 'aria-label': 'Send' }), 'send'));
+check('Send prompt matches', buttonMatches(button({ 'aria-label': 'Send prompt' }), 'send'));
+check('Russian Send matches', buttonMatches(button({ 'aria-label': 'Отправить' }), 'send'));
+check('Stop generating matches', buttonMatches(button({ 'aria-label': 'Stop generating' }), 'stop'));
+check('Stop sharing is rejected', !buttonMatches(button({ 'aria-label': 'Stop sharing' }), 'stop'));
 
-const send = new HTMLElement();
-const root = node([send]);
-const composer = node([], root);
-check('shared container accepted', sharedContainer(composer, send));
-check('unrelated send rejected', !sharedContainer(node([]), send));
+// v0.6 content script is a sensor only. It may resolve/read composer and
+// messages, but must contain no physical send or composer-write path.
+check('content keeps composer ambiguity fence', source.includes('composer_ambiguous'));
+check('content keeps exact message node identity', source.includes('dom_node_key') && source.includes('nodeKey(node'));
+check('content emits SHA-256 identities', source.includes('sha256Text') && source.includes('text_sha256'));
+check('content has no executeSend', !source.includes('executeSend('));
+check('content has no synthetic click', !source.includes('.click('));
+check('content has no CDP input', !source.includes('Input.insertText') && !source.includes('Input.dispatchMouseEvent'));
+check('content has no composer writer', !source.includes('writeComposerExact') && !source.includes('nativeValueSetter'));
+check('content runtime listener is snapshot-only', source.includes('message?.type !== "GET_CHAT_SNAPSHOT"'));
 
-const execute = source.split('async function executeSend(command)')[1].split('async function emitSnapshot')[0];
-const gptBlock = execute.split('if (platform() === "CHATGPT")')[1].split('} else {')[0];
-const glmBlock = execute.split('} else {')[1];
-check('GPT uses one trusted send', gptBlock.includes('await callTrustedChatgpt(text);'));
-check('GPT avoids DOM writer', !gptBlock.includes('writeComposerExact'));
-check('GPT avoids synthetic click', !gptBlock.includes('sendButton.click'));
-check('GPT avoids duplicate Send wait', !gptBlock.includes('waitForEnabledSend'));
-check('GLM keeps DOM writer', glmBlock.includes('await writeComposerExact(text);'));
-check('GLM keeps real DOM click', glmBlock.includes('sendButton.click();'));
-check('GPT requires empty composer', gptBlock.includes('chatgpt_composer_not_empty_before_send'));
-check('verification timeout still fails closed', source.includes('send_click_not_observed_in_dom'));
-
-check('compat loads before content', JSON.stringify(manifest.content_scripts[0].js) === JSON.stringify(['platform-dom-compat.js', 'content.js']));
+// Compatibility layer remains selector marking only, never transport/actuation.
 check('compat has ChatGPT exact anchor', compat.includes('markExactSendButton("#composer-submit-button")'));
 check('compat has ZAI exact anchor', compat.includes('markExactSendButton("#send-message-button")'));
 check('compat has no runtime messaging', !compat.includes('runtime.sendMessage'));
 check('compat has no click', !compat.includes('.click('));
 
-check('trusted worker accepts only bridge-owned GPT prompt', trusted.includes('bridge_job_target=GPT') && trusted.includes('transport=WEB_CHAT_INTERACTIVE_REMOTE'));
-check('trusted worker has one message type', trusted.includes('A2_CHATGPT_TRUSTED_SEND') && !trusted.includes('A2_CHATGPT_TRUSTED_PRIME') && !trusted.includes('A2_CHATGPT_TRUSTED_CLICK'));
-check('trusted worker uses CDP input', trusted.includes('"Input.insertText"'));
-check('trusted worker waits only for enabled Send', trusted.includes('await waitForReadySend(tabId);'));
-check('trusted worker does not full-readback prompt', !trusted.includes('composer_readback_pending') && !trusted.includes('expectedText'));
-check('trusted worker uses CDP Enter', trusted.includes('"Input.dispatchKeyEvent"') && trusted.includes('key: "Enter"') && trusted.includes('windowsVirtualKeyCode: 13'));
-check('trusted worker has no CDP mouse', !trusted.includes('"Input.dispatchMouseEvent"'));
-check('trusted worker rejects ambiguous Send', trusted.includes('send_ambiguous'));
-check('trusted worker requires nonempty composer after input', trusted.includes("error:'composer_empty'"));
-check('trusted worker detaches debugger', trusted.includes('chrome.debugger.detach'));
-check('trusted worker has no session lease', !trusted.includes('chrome.storage.session'));
-check('trusted worker never targets ZAI', !trusted.includes('chat.z.ai'));
-check('fast send ready budget', trusted.includes('const SEND_READY_TIMEOUT_MS = 1800;'));
-check('fast verification budget', source.includes('const SEND_VERIFY_TIMEOUT_MS = 6000;'));
+// Prompt Gate starts before idle DOM sensor and blocks/re-writes user intent;
+// it is not an autonomous synthetic Send implementation.
+check('Prompt Gate loads at document_start', manifest.content_scripts[0].run_at === 'document_start' && manifest.content_scripts[0].js.includes('prompt-gate.js'));
+check('read-only sensor loads after compat', JSON.stringify(manifest.content_scripts[1].js) === JSON.stringify(['platform-dom-compat.js', 'content.js']));
+check('Prompt Gate has bridge capability path', promptGate.includes('A2_PROMPT_GATE_BRIDGE_BYPASS'));
+check('Prompt Gate has no chrome.debugger authority', !promptGate.includes('chrome.debugger'));
+
+// GPT autonomous Send: exact bridge-owned scope, broker-only CDP, trusted Enter.
+check('GPT accepts only bridge-owned prompt', trustedGpt.includes('bridge_job_target=GPT') && trustedGpt.includes('transport=WEB_CHAT_INTERACTIVE_REMOTE'));
+check('GPT uses debugger broker', trustedGpt.includes('A2_DEBUGGER_RUN'));
+check('GPT has no direct debugger attach', !trustedGpt.includes('chrome.debugger.attach') && !trustedGpt.includes('chrome.debugger.detach') && !trustedGpt.includes('chrome.debugger.getTargets'));
+check('GPT uses trusted text input', trustedGpt.includes('"Input.insertText"'));
+check('GPT uses trusted Enter', trustedGpt.includes('"Input.dispatchKeyEvent"') && trustedGpt.includes('key: "Enter"') && trustedGpt.includes('windowsVirtualKeyCode: 13'));
+check('GPT has no mouse Send', !trustedGpt.includes('"Input.dispatchMouseEvent"'));
+check('GPT rejects ambiguous Send', trustedGpt.includes('send_ambiguous'));
+check('GPT durable boundary precedes Enter', trustedGpt.indexOf('PRE_ENTER_DURABLE') < trustedGpt.indexOf('key: "Enter"'));
+check('GPT ambiguity is no-retry', trustedGpt.includes('AMBIGUOUS_NO_RETRY'));
+
+// GLM autonomous Send: broker-owned trusted text + physical CDP mouse; no
+// synthetic DOM click/value-setter resurrection.
+check('GLM uses debugger broker hold/run', trustedGlm.includes('A2_DEBUGGER_HOLD') && trustedGlm.includes('A2_DEBUGGER_RUN'));
+check('GLM has no direct debugger attach', !trustedGlm.includes('chrome.debugger.attach') && !trustedGlm.includes('chrome.debugger.detach') && !trustedGlm.includes('chrome.debugger.getTargets'));
+check('GLM uses trusted text input', trustedGlm.includes('Input.insertText'));
+check('GLM uses trusted physical mouse', trustedGlm.includes('type: "mousePressed"') && trustedGlm.includes('type: "mouseReleased"'));
+check('GLM has no synthetic DOM click', !trustedGlm.includes('.click('));
+check('GLM has no native value setter', !trustedGlm.includes("Object.getOwnPropertyDescriptor(proto, 'value')"));
+check('GLM durable DISPATCHED precedes mouse release', trustedGlm.indexOf('state: "DISPATCHED"') < trustedGlm.indexOf('type: "mouseReleased", x: point.x'));
+check('GLM ambiguity is no-retry', trustedGlm.includes('AMBIGUOUS_NO_RETRY'));
+
+check('manifest is v0.6 Browser Operator', manifest.version === '0.6.0' && Number(manifest.minimum_chrome_version) >= 125);
+check('incognito remains disabled', manifest.incognito === 'not_allowed');
 
 let passed = 0;
 for (const [name, ok] of checks) {
@@ -104,4 +114,4 @@ for (const [name, ok] of checks) {
   if (!ok) process.exitCode = 1;
   else passed += 1;
 }
-console.log(`\n${passed}/${checks.length} adversarial checks passed`);
+console.log(`\n${passed}/${checks.length} v0.6 adversarial DOM/operator checks passed`);
