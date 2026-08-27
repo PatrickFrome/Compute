@@ -54,7 +54,7 @@ const context = vm.createContext({
   fetch: async (input, init = {}) => {
     const url = String(input);
     fetchCalls.push({ url, init });
-    if (url.endsWith("/v1/commands/next")) {
+    if (url.endsWith("/v1/commands/bootstrap-next")) {
       const command = queuedCommand;
       queuedCommand = null;
       return new Response(JSON.stringify({ command }), { status: 200, headers: { "content-type": "application/json" } });
@@ -113,6 +113,8 @@ assert.equal(local.get("armed"), false, "remote supervisor could not DISARM from
 assert.equal(postedResults.at(-1)?.ok, true);
 assert.equal(postedResults.at(-1)?.receipt?.action, "DISARM");
 
+// Defense in depth: even if a malformed edge response ever hands a normal action
+// to the bootstrap client, the extension itself must reject it before execution.
 session.set("a2SupervisorModeV1", "OFF");
 queuedCommand = {
   command_id: "00000000-0000-4000-8000-000000000634",
@@ -126,8 +128,8 @@ assert.equal(rejected.status, "FAILED", "non-bootstrap action was accepted befor
 assert.match(rejected.error, /bootstrap_action_not_allowed/);
 assert.equal(postedResults.at(-1)?.ok, false);
 
-assert.ok(fetchCalls.some((row) => row.url.endsWith("/v1/commands/next")), "bootstrap did not use existing v2 lease endpoint");
-assert.ok(!source.includes("bootstrap-next"), "bootstrap depends on an undeployed edge route");
+assert.ok(fetchCalls.some((row) => row.url.endsWith("/v1/commands/bootstrap-next")), "bootstrap did not use the filtered v3 lease route");
+assert.ok(source.includes("a2-browser-supervisor-v3-canary"), "bootstrap is not pinned to the v3 edge canary");
 assert.equal(alarmListeners.length, 1);
 assert.equal(storageListeners.length, 1);
 
