@@ -31,6 +31,15 @@ jobs:
       - name: R0 source-of-truth contract
         run: node tests/a2_r0_source_of_truth_lab.mjs
 
+      - name: v0.6.7 targeted repair labs
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/a2_v067_release_contract_lab.mjs
+          node tests/a2_v067_supervisor_prompt_ready_lab.mjs
+          node tests/a2_v067_supervisor_session_singleton_lab.mjs
+          node tests/a2_v067_supervisor_transport_backoff_lab.mjs
+
       - name: Existing critical Browser Operator regressions
         shell: bash
         run: |
