@@ -124,13 +124,26 @@ class BrowserOperatorV060P0(unittest.TestCase):
         for token in ["updateState", "compatState", "debuggerState", "capabilityState"]:
             self.assertIn(token, self.panel)
 
-    def test_16_glm_gate_capability_and_autonomous_kill_switch(self):
+    def test_16_prompt_gate_capability_lives_at_trusted_actuation_boundary(self):
         self.assertIn("const originalGlm", self.bindings)
         self.assertIn("const originalChatgpt", self.bindings)
-        self.assertIn("A2_PROMPT_GATE_BRIDGE_BYPASS", self.bindings)
-        self.assertIn("A2_PROMPT_GATE_BRIDGE_BYPASS_CLEAR", self.bindings)
-        self.assertIn("finally", self.bindings)
         self.assertIn("compat_kill_switch_autonomous_send_disabled", self.bindings)
+        for transport in [self.glm, self.gpt]:
+            self.assertIn("A2_PROMPT_GATE_BRIDGE_BYPASS", transport)
+            self.assertIn("A2_PROMPT_GATE_BRIDGE_BYPASS_CLEAR", transport)
+            self.assertIn("armPromptGateBypass", transport)
+            self.assertIn("clearPromptGateBypass", transport)
+        glm_dispatched = self.glm.index('postProgress(commandId, transportTraceId, "DISPATCHED")')
+        glm_bypass = self.glm.index("bypassArmed = await armPromptGateBypass", glm_dispatched)
+        glm_release = self.glm.index('type: "mouseReleased", x: point.x', glm_bypass)
+        self.assertLess(glm_dispatched, glm_bypass)
+        self.assertLess(glm_bypass, glm_release)
+        self.assertIn("finally", self.glm[glm_bypass:])
+        gpt_ready = self.gpt.index("await waitForReadySend(session)")
+        gpt_bypass = self.gpt.index("bypassArmed = await armPromptGateBypass", gpt_ready)
+        gpt_enter = self.gpt.index("await dispatchTrustedEnter", gpt_bypass)
+        self.assertLess(gpt_ready, gpt_bypass)
+        self.assertLess(gpt_bypass, gpt_enter)
 
     def test_17_perception_uses_hybrid_cdp_sensors_through_broker(self):
         for token in ["Accessibility.getFullAXTree", "DOMSnapshot.captureSnapshot", "Page.captureScreenshot", "Page.getLayoutMetrics", "document.body?.innerText"]:
