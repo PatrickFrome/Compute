@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const SUPERVISOR_URL = "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-supervisor-v2-canary";
+  const SUPERVISOR_URL = "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-supervisor-v3-canary";
   const MODE_KEY = "a2SupervisorModeV1";
   const EVENTS_KEY = "a2SupervisorEventsV1";
   const LAST_KEY = "a2SupervisorLastReceiptV1";
@@ -84,7 +84,7 @@
       const mode = await currentMode();
       if (mode === "CONTROL") return { skipped: true, reason: "already_control" };
 
-      const r = await request("/v1/commands/next", { method: "POST", body: "{}" });
+      const r = await request("/v1/commands/bootstrap-next", { method: "POST", body: "{}" });
       if (!r.ok) throw new Error(`supervisor_bootstrap_next_http_${r.status}`);
       const body = await r.json();
       const command = body?.command || null;
