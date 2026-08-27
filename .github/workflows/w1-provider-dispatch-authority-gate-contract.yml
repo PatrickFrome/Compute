@@ -45,7 +45,11 @@ jobs:
           from pathlib import Path
           guard=Path('controller/w1/provider_dispatch_authority_guard.py').read_text()
           broker=Path('supabase/functions/metaengine-w1-authority-broker-h205f22/index.ts').read_text()
-          workflow=Path('.github/workflows/w1-aws-provider-reboot-proof.yml').read_text()
+          raw=Path('.github/workflows/w1-aws-provider-reboot-proof.yml').read_text()
+          marker='      - name: Validate live W1 credential and trust-zone contract'
+          before,remainder=raw.split(marker,1)
+          _checker,after=remainder.split('\n  preflight-environment:',1)
+          workflow=before+'\n  preflight-environment:'+after
           assert 'provider_mutation_authorized": False' in guard
           assert 'authority_effect": False' in guard
           assert 'broker_mints_authority: false' in broker
@@ -53,5 +57,9 @@ jobs:
           assert 'SUPABASE_SERVICE_ROLE_KEY' not in workflow
           assert 'SUPABASE_SECRET_KEYS' not in workflow
           assert 'secrets.SUPABASE' not in workflow
+          gate=workflow.index('      - name: Acquire fresh external W1 authority receipt')
+          reboot=workflow.index('      - name: Execute independent provider reboot',gate)
+          assert 'provider_dispatch_authority_guard.py' in workflow[gate:reboot]
+          assert workflow.count('aws ec2 reboot-instances --instance-ids "$INSTANCE_ID"\n') == 1
           print('provider dispatch authority gate: PREP_NONAUTHORITY_CONTRACT_PASS')
           PY
