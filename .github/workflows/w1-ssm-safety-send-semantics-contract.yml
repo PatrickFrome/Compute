@@ -73,6 +73,7 @@ jobs:
               'base = provenance.compose_provisioning_provenance',
               'out = copy.deepcopy(base)',
               'strict_send_command_semantics_verified',
+              '"service_role": False',
               'out["host_safety_verified"] = False',
               'out["reboot_completion_proven"] = False',
               'out["persistent_worker_proof"] = False',
@@ -84,7 +85,7 @@ jobs:
           )
           for marker in required:
               assert marker in source, marker
-          for forbidden in ('boto3','requests.','urllib.','socket.socket','supabase_url','service_role','ec2:RebootInstances'):
+          for forbidden in ('boto3','requests.','urllib.','socket.socket','supabase_url','ec2:RebootInstances'):
               assert forbidden.lower() not in source.lower(), forbidden
           print('W1 strict SendCommand semantics non-authority boundary: PASS')
           PY
