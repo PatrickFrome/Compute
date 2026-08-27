@@ -9,19 +9,14 @@
 <body>
   <div class="shell">
     <header class="topbar">
-      <div class="brand">
-        <span class="brand-mark">A2</span>
-        <div><h1>Browser Operator</h1><p id="runtime">loading…</p></div>
-      </div>
+      <div class="brand"><span class="brand-mark">A2</span><div><h1>Browser Operator</h1><p id="runtime">loading…</p></div></div>
       <span id="armedBadge" class="badge off">DISARMED</span>
     </header>
-
     <section class="status-strip" aria-label="Live status">
       <div><span class="dot" id="bridgeDot"></span><small>Bridge</small><strong id="bridgePulse">—</strong></div>
       <div><span class="dot" id="supervisorDot"></span><small>Supervisor</small><strong id="supervisorPulse">—</strong></div>
       <div><span class="dot"></span><small>Gate</small><strong id="gatePulse">OBSERVE</strong></div>
     </section>
-
     <section class="card causal-card">
       <div class="section-title"><span>Strict causal lane</span><span class="micro" id="ordering">—</span></div>
       <div class="causal-lane">
@@ -31,87 +26,42 @@
       </div>
       <div class="causal-meta"><span>predecessor <code id="predecessor">—</code></span><span>pending <code id="pendingCommand">—</code></span></div>
     </section>
-
     <section class="card supervisor-card">
       <div class="section-title"><span>Chat Supervisor</span><span id="supervisorBadge" class="badge neutral">OFF</span></div>
       <p class="lead">This channel lets the connected supervisor chat inspect state, issue typed commands and receive execution receipts. Remote JavaScript and free-form selectors are never accepted.</p>
-      <div class="segmented" role="group" aria-label="Supervisor mode">
-        <button id="supervisorOff" class="seg active">OFF</button>
-        <button id="supervisorMonitor" class="seg">MONITOR</button>
-        <button id="supervisorControl" class="seg danger-outline">CONTROL</button>
-      </div>
-      <div class="supervisor-grid">
-        <div class="metric"><small>Link</small><strong id="supervisorLink">not connected</strong></div>
-        <div class="metric"><small>Current command</small><strong id="supervisorCommand">none</strong></div>
-        <div class="metric wide"><small>Last receipt</small><strong id="supervisorReceipt">none</strong></div>
-      </div>
+      <div class="segmented" role="group" aria-label="Supervisor mode"><button id="supervisorOff" class="seg active">OFF</button><button id="supervisorMonitor" class="seg">MONITOR</button><button id="supervisorControl" class="seg danger-outline">CONTROL</button></div>
+      <div class="supervisor-grid"><div class="metric"><small>Link</small><strong id="supervisorLink">not connected</strong></div><div class="metric"><small>Current command</small><strong id="supervisorCommand">none</strong></div><div class="metric wide"><small>Last receipt</small><strong id="supervisorReceipt">none</strong></div></div>
       <div class="actions compact"><button id="supervisorPoll">Sync now</button><button id="clearTimeline">Clear timeline</button></div>
       <p class="hint">Only a local click on CONTROL grants execution. The chat cannot enable its own authority.</p>
     </section>
-
-    <section class="card timeline-card">
-      <div class="section-title"><span>Live timeline</span><span class="micro">commands · sensors · receipts</span></div>
-      <div id="supervisorTimeline" class="timeline"><div class="empty">Waiting for events…</div></div>
-    </section>
-
+    <section class="card timeline-card"><div class="section-title"><span>Live timeline</span><span class="micro">commands · sensors · receipts</span></div><div id="supervisorTimeline" class="timeline"><div class="empty">Waiting for events…</div></div></section>
     <section class="card control-card">
       <div class="section-title"><span>Operator control</span><span class="micro">local authority</span></div>
-      <div class="actions">
-        <button id="toggleArmed" class="primary">Arm bridge</button>
-        <button id="pollNow">Poll bridge</button>
-        <button id="openOptions">Options</button>
-      </div>
+      <div class="actions"><button id="toggleArmed" class="primary">Arm bridge</button><button id="pollNow">Poll bridge</button><button id="openOptions">Options</button></div>
       <div class="mode-row"><button id="modeObserve" class="mode active">OBSERVE</button><button id="modeGate" class="mode">GATE SEND</button></div>
       <p class="hint">ARM controls autonomous A2 transport. GATE SEND controls physical user prompt interception. The two are deliberately independent.</p>
     </section>
-
     <section class="card intent" id="intentCard" hidden>
-      <div class="section-title"><span>Prompt held</span><span class="badge warn">ACTION REQUIRED</span></div>
-      <div class="meta" id="intentMeta"></div>
-      <label for="draftOriginal">Original</label><textarea id="draftOriginal" readonly></textarea>
-      <label for="draftRewrite">Rewrite</label><textarea id="draftRewrite" placeholder="Edit the prompt here…"></textarea>
+      <div class="section-title"><span>Prompt held</span><span class="badge warn">ACTION REQUIRED</span></div><div class="meta" id="intentMeta"></div>
+      <label for="draftOriginal">Original</label><textarea id="draftOriginal" readonly></textarea><label for="draftRewrite">Rewrite</label><textarea id="draftRewrite" placeholder="Edit the prompt here…"></textarea>
       <div class="actions"><button id="cancelIntent" class="danger">Cancel send</button><button id="allowOriginal">Allow once</button><button id="rewriteAllow" class="primary">Rewrite + allow</button></div>
     </section>
-
-    <details class="drawer" open>
-      <summary><span>Live perception</span><span class="micro">DOM · AX · pixels</span></summary>
-      <section class="drawer-body perception">
-        <div class="actions compact"><button id="captureGlm">Capture GLM</button><button id="captureGpt">Capture GPT</button><button id="clearPerception">Clear</button></div>
-        <dl class="perception-meta"><dt>Target</dt><dd id="perceptionTarget">none</dd><dt>Captured</dt><dd id="perceptionCaptured">—</dd><dt>Frame</dt><dd id="perceptionFrame">—</dd><dt>Text</dt><dd id="perceptionTextMeta">—</dd><dt>AX / DOM</dt><dd id="perceptionStructure">—</dd><dt>Hashes</dt><dd id="perceptionHashes">—</dd></dl>
-        <img id="perceptionScreenshot" alt="Captured browser viewport; click to actuate this exact frame" hidden>
-        <label for="perceptionBody">Visible text excerpt</label><textarea id="perceptionBody" readonly placeholder="Capture a configured GPT or GLM tab…"></textarea>
-        <details class="nested"><summary>Accessibility / DOM excerpt</summary><pre id="perceptionStructureDump">No capture.</pre></details>
-      </section>
-    </details>
-
-    <details class="drawer">
-      <summary><span>Semantic actions</span><span class="micro">live AX target</span></summary>
-      <section class="drawer-body">
-        <label for="semanticTarget">Target from last capture</label><select id="semanticTarget" disabled><option value="">Capture a page first…</option></select>
-        <label for="semanticText">Trusted text</label><textarea id="semanticText" placeholder="Text for TYPE / replace…"></textarea>
-        <div class="actions action-row"><button id="semanticFocus" disabled>Focus</button><button id="semanticClick" disabled>Click</button><button id="semanticType" disabled>Type / replace</button></div>
-        <div id="semanticState" class="meta">No semantic target selected.</div>
-      </section>
-    </details>
-
-    <details class="drawer">
-      <summary><span>Action dock</span><span class="micro">trusted CDP</span></summary>
-      <section class="drawer-body">
-        <label for="actionTarget">Target</label><select id="actionTarget"><option value="GLM_ZAI">GLM / Z.AI</option><option value="CHATGPT">GPT / ChatGPT</option></select>
-        <div class="actions action-row"><button id="stopGeneration" class="danger">Stop generation</button><button id="scrollUp">Scroll up</button><button id="scrollDown">Scroll down</button></div>
-        <div id="lastAction" class="meta">No operator action yet.</div>
-      </section>
-    </details>
-
-    <details class="drawer diagnostics">
-      <summary><span>Runtime diagnostics</span><span class="micro">health & fences</span></summary>
-      <section class="drawer-body"><dl>
-        <dt>Daemon</dt><dd id="daemon">—</dd><dt>Update</dt><dd id="updateState">—</dd><dt>Compatibility</dt><dd id="compatState">—</dd><dt>Capabilities</dt><dd id="capabilityState">—</dd><dt>Debugger</dt><dd id="debuggerState">—</dd><dt>Sensor error</dt><dd id="sensorError">—</dd><dt>Last error</dt><dd id="lastError">—</dd>
-      </dl></section>
-    </details>
-
+    <details class="drawer" open><summary><span>Live perception</span><span class="micro">DOM · AX · pixels</span></summary><section class="drawer-body perception">
+      <div class="actions compact"><button id="captureGlm">Capture GLM</button><button id="captureGpt">Capture GPT</button><button id="clearPerception">Clear</button></div>
+      <dl class="perception-meta"><dt>Target</dt><dd id="perceptionTarget">none</dd><dt>Captured</dt><dd id="perceptionCaptured">—</dd><dt>Frame</dt><dd id="perceptionFrame">—</dd><dt>Text</dt><dd id="perceptionTextMeta">—</dd><dt>AX / DOM</dt><dd id="perceptionStructure">—</dd><dt>Hashes</dt><dd id="perceptionHashes">—</dd></dl>
+      <img id="perceptionScreenshot" alt="Captured browser viewport; click to actuate this exact frame" hidden><label for="perceptionBody">Visible text excerpt</label><textarea id="perceptionBody" readonly placeholder="Capture a configured GPT or GLM tab…"></textarea><details class="nested"><summary>Accessibility / DOM excerpt</summary><pre id="perceptionStructureDump">No capture.</pre></details>
+    </section></details>
+    <details class="drawer"><summary><span>Semantic actions</span><span class="micro">live AX target</span></summary><section class="drawer-body">
+      <label for="semanticTarget">Target from last capture</label><select id="semanticTarget" disabled><option value="">Capture a page first…</option></select><label for="semanticText">Trusted text</label><textarea id="semanticText" placeholder="Text for TYPE / replace…"></textarea>
+      <div class="actions action-row"><button id="semanticFocus" disabled>Focus</button><button id="semanticClick" disabled>Click</button><button id="semanticType" disabled>Type / replace</button></div><div id="semanticState" class="meta">No semantic target selected.</div>
+    </section></details>
+    <details class="drawer"><summary><span>Action dock</span><span class="micro">trusted CDP</span></summary><section class="drawer-body">
+      <label for="actionTarget">Target</label><select id="actionTarget"><option value="GLM_ZAI">GLM / Z.AI</option><option value="CHATGPT">GPT / ChatGPT</option></select><div class="actions action-row"><button id="stopGeneration" class="danger">Stop generation</button><button id="scrollUp">Scroll up</button><button id="scrollDown">Scroll down</button></div><div id="lastAction" class="meta">No operator action yet.</div>
+    </section></details>
+    <details class="drawer diagnostics"><summary><span>Runtime diagnostics</span><span class="micro">health & fences</span></summary><section class="drawer-body"><dl><dt>Daemon</dt><dd id="daemon">—</dd><dt>Update</dt><dd id="updateState">—</dd><dt>Compatibility</dt><dd id="compatState">—</dd><dt>Capabilities</dt><dd id="capabilityState">—</dd><dt>Debugger</dt><dd id="debuggerState">—</dd><dt>Sensor error</dt><dd id="sensorError">—</dd><dt>Last error</dt><dd id="lastError">—</dd></dl></section></details>
     <p id="status" role="status"></p>
   </div>
   <script src="sidepanel.js"></script>
+  <script src="sidepanel-supervisor.js"></script>
 </body>
 </html>
