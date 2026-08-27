@@ -45,6 +45,9 @@ jobs:
           set -euo pipefail
           CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
           test -n "$CHROME"
+          printf 'A2_CHROME_EXECUTABLE=%s\n' "$CHROME"
+          readlink -f "$CHROME" || true
+          "$CHROME" --version || true
           export A2_CHROME_EXECUTABLE="$CHROME"
           export A2_COMPUTE_STATE_ROOT="$RUNNER_TEMP/a2-compute-browser"
           export CI=true
