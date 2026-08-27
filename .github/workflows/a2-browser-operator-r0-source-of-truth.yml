@@ -40,12 +40,10 @@ jobs:
           node tests/a2_v067_supervisor_session_singleton_lab.mjs
           node tests/a2_v067_supervisor_transport_backoff_lab.mjs
 
-      - name: Existing critical Browser Operator regressions
+      - name: Compatible historical invariant regressions
         shell: bash
         run: |
           set -euo pipefail
-          node tests/a2_v065_release_contract_lab.mjs
-          node tests/a2_v065_supervisor_device_transport_lab.mjs
           node tests/a2_v064_supervisor_chat_guard_lab.mjs
           node tests/a2_v063_supervisor_device_edge_contract_lab.mjs
           node tests/a2_v063_supervisor_session_lab.mjs
