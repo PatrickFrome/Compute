@@ -1,0 +1,88 @@
+name: W1 SSM Safety Document Provision Contract
+
+on:
+  push:
+    branches:
+      - work/w1-linux-worker-safety
+      - work/main-roadmap-accelerators-v5
+    paths:
+      - 'controller/w1/build_host_safety_package.py'
+      - 'controller/w1/build_ssm_safety_provision_document.py'
+      - 'controller/w1/aws_ssm_safety_provision_guard.py'
+      - 'controller/w1/aws_ssm_safety_document_provision_guard.py'
+      - 'tests/test_w1_aws_ssm_safety_document_provision_guard.py'
+      - '.github/workflows/w1-ssm-safety-document-provision-contract.yml'
+      - 'research/W1_SSM_SAFETY_DOCUMENT_PROVISIONING.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/w1/build_host_safety_package.py'
+      - 'controller/w1/build_ssm_safety_provision_document.py'
+      - 'controller/w1/aws_ssm_safety_provision_guard.py'
+      - 'controller/w1/aws_ssm_safety_document_provision_guard.py'
+      - 'tests/test_w1_aws_ssm_safety_document_provision_guard.py'
+      - '.github/workflows/w1-ssm-safety-document-provision-contract.yml'
+      - 'research/W1_SSM_SAFETY_DOCUMENT_PROVISIONING.md'
+
+permissions:
+  contents: read
+
+jobs:
+  create-once-document:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Verify exact source head
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Compile document provisioning contracts
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            controller/w1/build_host_safety_package.py \
+            controller/w1/build_ssm_safety_provision_document.py \
+            controller/w1/aws_ssm_safety_provision_guard.py \
+            controller/w1/aws_ssm_safety_document_provision_guard.py
+
+      - name: Run create-once adversarial tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_w1_aws_ssm_safety_document_provision_guard -v
+
+      - name: Prove document authority cannot execute or mutate runtime
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from controller.w1 import aws_ssm_safety_document_provision_guard as g
+          plan=g.build_provision_plan(account_id='123456789012',region='us-east-2')
+          policy=json.dumps(plan['provisioning_policy'],sort_keys=True)
+          request=plan['create_request']
+          assert 'ssm:CreateDocument' in policy
+          assert 'ssm:DescribeDocument' in policy
+          assert 'ssm:GetDocument' in policy
+          for forbidden in ('ssm:SendCommand','ssm:UpdateDocument','ssm:DeleteDocument','ssm:ModifyDocumentPermission','ssm:StartSession','ec2:RebootInstances','s3:','kms:','secretsmanager:'):
+              assert forbidden not in policy, forbidden
+          assert request['DocumentType']=='Command'
+          assert request['DocumentFormat']=='JSON'
+          assert request['TargetType']=='/AWS::EC2::Instance'
+          assert json.loads(request['Content'])['parameters']=={}
+          assert plan['create_once'] is True
+          assert plan['update_allowed'] is False
+          assert plan['delete_allowed'] is False
+          assert plan['share_allowed'] is False
+          assert plan['send_command_allowed'] is False
+          assert plan['database_mutation_allowed'] is False
+          assert plan['document_provisioned'] is False
+          assert plan['w1_verified'] is False
+          assert plan['canonical'] is False
+          assert plan['authority_effect'] is False
+          print('W1 safety SSM create-once authority boundary: PASS')
+          PY
