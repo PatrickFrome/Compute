@@ -39,12 +39,7 @@ async function releaseOwnedPidLock(file) {
 }
 
 export class ComputeBrowserRuntime {
-  constructor({
-    stateRoot = defaultStateRoot(),
-    engineExecutable = process.env.A2_CHROME_EXECUTABLE || null,
-    headlessDefault = false,
-    allowNoSandbox = false
-  } = {}) {
+  constructor({ stateRoot = defaultStateRoot(), engineExecutable = process.env.A2_CHROME_EXECUTABLE || null, headlessDefault = false, allowNoSandbox = false } = {}) {
     this.stateRoot = path.resolve(stateRoot);
     this.engineExecutable = engineExecutable ? path.resolve(String(engineExecutable)) : null;
     this.headlessDefault = headlessDefault === true;
@@ -96,12 +91,7 @@ export class ComputeBrowserRuntime {
       await releaseOwnedPidLock(lockFile);
       throw new Error('engine_executable_not_configured');
     }
-    const processRef = new ManagedChromeProcess({
-      executablePath: this.engineExecutable,
-      userDataDir,
-      headless: this.headlessDefault,
-      allowNoSandbox: this.allowNoSandbox
-    });
+    const processRef = new ManagedChromeProcess({ executablePath: this.engineExecutable, userDataDir, headless: this.headlessDefault, allowNoSandbox: this.allowNoSandbox });
     try {
       await processRef.start();
       this.running.set(id, { processRef, meta, lockFile, bindings: new Map() });
@@ -127,11 +117,8 @@ export class ComputeBrowserRuntime {
     const id = validateProfileId(profileId);
     const entry = this.running.get(id);
     if (!entry) return { profile_id: id, running: false };
-    try {
-      return { profile_id: id, browser_node_id: entry.meta.browser_node_id, ...(await entry.processRef.health()) };
-    } catch (error) {
-      return { profile_id: id, browser_node_id: entry.meta.browser_node_id, running: false, error: String(error?.message || error) };
-    }
+    try { return { profile_id: id, browser_node_id: entry.meta.browser_node_id, ...(await entry.processRef.health()) }; }
+    catch (error) { return { profile_id: id, browser_node_id: entry.meta.browser_node_id, running: false, error: String(error?.message || error), debug_transport: 'native_pipe' }; }
   }
 
   async listProfiles() {
@@ -147,10 +134,7 @@ export class ComputeBrowserRuntime {
     return out.sort((a, b) => a.profile_id.localeCompare(b.profile_id));
   }
 
-  async #loadTargets(profileId) {
-    return readJson(path.join(this.profileDir(profileId), TARGETS_FILE), blankRegistry());
-  }
-
+  async #loadTargets(profileId) { return readJson(path.join(this.profileDir(profileId), TARGETS_FILE), blankRegistry()); }
   async #saveTargets(profileId, registry) {
     registry.revision = Number(registry.revision || 0) + 1;
     registry.updated_at = now();
@@ -175,17 +159,10 @@ export class ComputeBrowserRuntime {
     if (!created.targetId) throw new Error('cdp_target_create_failed');
     const previous = registry.targets.find((row) => row.target_id === logicalId);
     const target = {
-      schema: 'metaengine.a2-browser-operator.target.v1',
-      target_id: logicalId,
-      provider: 'BROWSER',
-      platform: 'COMPUTE_BROWSER',
-      surface: 'WEB',
+      schema: 'metaengine.a2-browser-operator.target.v1', target_id: logicalId, provider: 'BROWSER', platform: 'COMPUTE_BROWSER', surface: 'WEB',
       role: String(role || 'WORKER').toUpperCase().replace(/[^A-Z0-9_:-]+/g, '_').slice(0, 64),
-      conversation_epoch: Math.max(1, Number(previous?.conversation_epoch || 0) + 1),
-      conversation_url: navUrl,
-      status: 'ACTIVE',
-      created_at: previous?.created_at || now(),
-      updated_at: now()
+      conversation_epoch: Math.max(1, Number(previous?.conversation_epoch || 0) + 1), conversation_url: navUrl, status: 'ACTIVE',
+      created_at: previous?.created_at || now(), updated_at: now()
     };
     registry.targets = registry.targets.filter((row) => row.target_id !== logicalId);
     registry.targets.push(target);
@@ -230,14 +207,9 @@ export class ComputeBrowserRuntime {
     const profiles = [];
     for (const id of this.running.keys()) profiles.push(await this.profileHealth(id));
     return {
-      schema: 'metaengine.a2-compute-browser.health.v1',
-      runtime: '0.1.0-dev.2',
-      started_at: this.startedAt,
-      web_authority_effect: false,
-      local_effects_present: true,
-      raw_cdp_rpc_exposed: false,
-      debug_transport: 'loopback_tcp_transitional_b1',
-      profiles
+      schema: 'metaengine.a2-compute-browser.health.v1', runtime: '0.1.0-dev.3', started_at: this.startedAt,
+      web_authority_effect: false, local_effects_present: true, raw_cdp_rpc_exposed: false,
+      debug_transport: 'native_pipe_b3', devtools_tcp_exposed: false, profiles
     };
   }
 
