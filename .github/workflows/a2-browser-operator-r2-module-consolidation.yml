@@ -1,0 +1,116 @@
+name: A2 Browser Operator R2 Module Consolidation
+
+on:
+  push:
+    branches:
+      - 'work/a2-browser-operator-r2-module-consolidation*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r2-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Establish reproducible source epoch
+        shell: bash
+        run: echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+
+      - name: Syntax gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          find coordination/chat-control-plane/extension -maxdepth 1 -name '*.js' -print0 | sort -z | xargs -0 -n1 node --check
+          node --check tests/a2_v069_module_consolidation_lab.mjs
+          node --check tests/a2_v069_release_contract_lab.mjs
+          python3 -m py_compile scripts/a2_build_extension.py
+
+      - name: Canonical module and release contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/a2_v069_module_consolidation_lab.mjs
+          node tests/a2_v069_release_contract_lab.mjs
+
+      - name: Compatible safety regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/a2_v068_supervisor_reconciliation_lab.mjs
+          node tests/a2_v067_supervisor_prompt_ready_lab.mjs
+          node tests/a2_v067_supervisor_session_singleton_lab.mjs
+          node tests/a2_v064_supervisor_chat_guard_lab.mjs
+          node tests/a2_v063_bridge_disarm_lab.mjs
+          node tests/a2_v063_remote_authority_lab.mjs
+          node tests/a2_v060_debugger_broker_lab.mjs
+          node tests/a2_v060_perception_lab.mjs
+          node tests/a2_v060_oopif_perception_lab.mjs
+          node tests/a2_v060_semantic_actions_lab.mjs
+          node tests/a2_v060_rollover_v062_lab.mjs
+
+      - name: Build canonical runtime twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=coordination/chat-control-plane/extension
+          SPEC="$ROOT/runtime-package-manifest.json"
+          rm -rf dist/a2-browser-operator-r2
+          mkdir -p dist/a2-browser-operator-r2
+          python3 scripts/a2_build_extension.py \
+            --source "$ROOT" --package-manifest "$SPEC" \
+            --stage dist/a2-browser-operator-r2/stage-a \
+            --zip dist/a2-browser-operator-r2/METAENGINE_A2_Browser_Operator_v0.6.9_GENERIC.zip \
+            --evidence-dir dist/a2-browser-operator-r2/evidence-a \
+            --source-commit "$GITHUB_SHA" --source-date-epoch "$SOURCE_DATE_EPOCH"
+          python3 scripts/a2_build_extension.py \
+            --source "$ROOT" --package-manifest "$SPEC" \
+            --stage dist/a2-browser-operator-r2/stage-b \
+            --zip dist/a2-browser-operator-r2/repro-check.zip \
+            --evidence-dir dist/a2-browser-operator-r2/evidence-b \
+            --source-commit "$GITHUB_SHA" --source-date-epoch "$SOURCE_DATE_EPOCH"
+          cmp dist/a2-browser-operator-r2/METAENGINE_A2_Browser_Operator_v0.6.9_GENERIC.zip dist/a2-browser-operator-r2/repro-check.zip
+          cp "$SPEC" dist/a2-browser-operator-r2/evidence-a/RUNTIME_PACKAGE_MANIFEST.json
+          rm -f dist/a2-browser-operator-r2/repro-check.zip
+
+      - name: Assert minimal runtime closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(find dist/a2-browser-operator-r2/stage-a -type f -regextype posix-extended -regex '.*-v[0-9]{3}([.]|$).*' -print -quit)"
+          EXPECTED="$(python3 -c 'import json; print(len(json.load(open("coordination/chat-control-plane/extension/runtime-package-manifest.json"))["files"]))')"
+          ACTUAL="$(find dist/a2-browser-operator-r2/stage-a -type f | wc -l | tr -d ' ')"
+          test "$EXPECTED" = "$ACTUAL"
+          unzip -t dist/a2-browser-operator-r2/METAENGINE_A2_Browser_Operator_v0.6.9_GENERIC.zip
+
+      - name: MV3 pack staged canonical runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          "$CHROME" --no-sandbox --disable-gpu --pack-extension="$GITHUB_WORKSPACE/dist/a2-browser-operator-r2/stage-a"
+          test -s dist/a2-browser-operator-r2/stage-a.crx
+
+      - name: Attest canonical v0.6.9 ZIP provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-browser-operator-r2/METAENGINE_A2_Browser_Operator_v0.6.9_GENERIC.zip
+
+      - name: Upload R2 evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-operator-r2-v069-${{ github.sha }}
+          path: |
+            dist/a2-browser-operator-r2/METAENGINE_A2_Browser_Operator_v0.6.9_GENERIC.zip
+            dist/a2-browser-operator-r2/evidence-a/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
