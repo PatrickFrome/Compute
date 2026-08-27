@@ -18,6 +18,29 @@ Before every meaningful semantic step, the workstream must record:
 
 If a Level-2 assignment cannot be mapped unambiguously to Level-1, stop at `EVIDENCE_READY` and request Supervisor reconciliation.
 
+### Lease-truth fence
+
+Before PLAN or PUBLISH, capture the read-only snapshot in
+`supabase/prep/main_roadmap_lease_truth_snapshot_v1.sql` and evaluate it with
+`controller/roadmap/roadmap_lease_truth_guard.py`.
+
+The snapshot uses one PostgreSQL `statement_timestamp()` as the observation
+instant and includes the durable Level-2 → Level-1 mapping plus the raw rows
+still labelled `ACTIVE`. A stored `ACTIVE` label is not current authority after
+its finite lease has expired. The guard therefore fails closed on stale active
+claims/directives, duplicate fresh authority for the selected milestone,
+alignment references to expired claims, supervisor/raw fresh-claim projection
+mismatch, malformed timestamps, or missing durable Level-1 ownership.
+
+Level-1 ownership is a durable roadmap property. It must not be inferred solely
+from whichever transient work claim happens to be active. A work claim may be
+absent during planning without erasing the Level-1 mapping.
+
+The lease-truth receipt is PREP evidence only: `canonical=false`,
+`authority_effect=false`, and it authorizes no database mutation, provider
+mutation, Edge deployment, PR merge, or checkpoint promotion. A blocked receipt
+must be reconciled before a normal roadmap cycle can be considered publishable.
+
 ### Deterministic cycle oracle
 
 Before a new source slice starts, run
@@ -32,7 +55,8 @@ non-fast-forward history. Its receipt is PREP evidence only:
 `canonical=false`, `authority_effect=false`, and it never authorizes provider,
 database, Edge, PR-merge, or checkpoint promotion actions.
 
-The input JSON is the direct result shape of:
+The legacy minimal input JSON for the cycle oracle is the direct result shape
+of:
 
 ```sql
 select jsonb_build_object(
@@ -40,6 +64,9 @@ select jsonb_build_object(
   'alignment_status', destruktion_meta.compute_fabric_roadmap_alignment_status_h205f22()
 );
 ```
+
+For normal roadmap execution, prefer the richer lease-truth snapshot first and
+retain its exact input hash beside the cycle-oracle receipt.
 
 After fetching the workstream ref, invoke the oracle with the exact observed
 remote SHA and write the receipt outside the worktree so the receipt itself
@@ -62,19 +89,20 @@ strict descendant of the still-unchanged expected remote SHA.
 ## Per-workstream loop
 
 1. Read current semantic checkpoint and roadmap status.
-2. Fetch the exact workstream rail and obtain a passing `PLAN` cycle-oracle receipt.
-3. Read `docs/CANONICAL_ROADMAP.md` and identify the owning Level-1 milestone.
-4. Read the active supervisor directive and work claim.
-5. Verify dependency gates, mutation domains and the Level-1 ↔ Level-2 mapping.
-6. Implement only within the assigned workstream.
-7. Run positive tests and fail-closed negative canaries.
-8. Perform deep upstream/amplifier research for semantic steps.
-9. Run Supabase security/performance advisors after schema changes.
-10. Clearly label `LIVE`, `SYNTHETIC`, `CONTROL_PLANE_ONLY`, `SCHEMA_ONLY`, and `HISTORICAL` evidence.
-11. Commit, refetch, and obtain a passing `PUBLISH` cycle-oracle receipt.
-12. Publish only as a fast-forward workstream update and keep the PR draft until integration gates pass.
-13. Finish the Level-2 roadmap claim as `EVIDENCE_READY`.
-14. State explicitly which Level-1 acceptance criterion is now evidence-ready.
+2. Capture a single-statement lease-truth snapshot and obtain a passing lease-truth receipt.
+3. Fetch the exact workstream rail and obtain a passing `PLAN` cycle-oracle receipt.
+4. Read `docs/CANONICAL_ROADMAP.md` and identify the owning Level-1 milestone.
+5. Read the active supervisor directive and work claim.
+6. Verify dependency gates, mutation domains and the Level-1 ↔ Level-2 mapping.
+7. Implement only within the assigned workstream.
+8. Run positive tests and fail-closed negative canaries.
+9. Perform deep upstream/amplifier research for semantic steps.
+10. Run Supabase security/performance advisors after schema changes.
+11. Clearly label `LIVE`, `SYNTHETIC`, `CONTROL_PLANE_ONLY`, `SCHEMA_ONLY`, and `HISTORICAL` evidence.
+12. Re-capture lease truth, commit, refetch, and obtain passing lease-truth plus `PUBLISH` cycle-oracle receipts.
+13. Publish only as a fast-forward workstream update and keep the PR draft until integration gates pass.
+14. Finish the Level-2 roadmap claim as `EVIDENCE_READY`.
+15. State explicitly which Level-1 acceptance criterion is now evidence-ready.
 
 ## Integration loop
 
