@@ -6,12 +6,15 @@ on:
       - work/main-roadmap-accelerators-v1
       - work/main-roadmap-accelerators-v2
       - work/main-roadmap-accelerators-v3
+      - work/main-roadmap-accelerators-v4
       - work/w1-sandbox-launcher-prep
     paths:
       - 'controller/roadmap/**'
       - 'tests/test_main_roadmap_cycle_oracle.py'
       - 'tests/test_main_roadmap_projection_guard.py'
+      - 'tests/test_main_roadmap_lease_truth_guard.py'
       - 'tests/fixtures/main_roadmap_live_snapshot_20260827.json'
+      - 'supabase/prep/main_roadmap_lease_truth_snapshot_v1.sql'
       - 'docs/ROADMAP_EXECUTION_PROTOCOL.md'
       - 'research/main-roadmap-accelerators/**'
       - '.github/workflows/main-roadmap-cycle-oracle.yml'
@@ -32,32 +35,58 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Compile deterministic oracle
+      - name: Compile deterministic roadmap guards
         run: |
           set -euo pipefail
-          python3 -m py_compile controller/roadmap/roadmap_cycle_oracle.py
+          python3 -m py_compile \
+            controller/roadmap/roadmap_cycle_oracle.py \
+            controller/roadmap/roadmap_lease_truth_guard.py
 
       - name: Run positive and adversarial contracts
         run: |
           set -euo pipefail
-          python3 -m unittest tests.test_main_roadmap_cycle_oracle -v
+          python3 -m unittest \
+            tests.test_main_roadmap_cycle_oracle \
+            tests.test_main_roadmap_lease_truth_guard -v
+
+      - name: Prove read-only snapshot contract
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          sql = Path('supabase/prep/main_roadmap_lease_truth_snapshot_v1.sql').read_text(encoding='utf-8').lower()
+          assert 'statement_timestamp()' in sql
+          assert 'compute_fabric_level2_canonical_mapping_h205f22' in sql
+          assert "state = 'active'" in sql
+          assert "status = 'active'" in sql
+          for forbidden in (' insert ', ' update ', ' delete ', ' create ', ' alter ', ' drop ', ' truncate '):
+              assert forbidden not in f' {sql} ', forbidden
+          print('main-roadmap lease snapshot read-only contract: PASS')
+          PY
 
       - name: Prove non-authority boundary is source-visible
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          source = Path('controller/roadmap/roadmap_cycle_oracle.py').read_text(encoding='utf-8')
+          source = '\n'.join(
+              Path(path).read_text(encoding='utf-8')
+              for path in (
+                  'controller/roadmap/roadmap_cycle_oracle.py',
+                  'controller/roadmap/roadmap_lease_truth_guard.py',
+              )
+          )
           required = [
               '"provider_mutation_authorized": False',
-              '"database_ddl_authorized": False',
               '"edge_deployment_authorized": False',
               '"pr_merge_authorized": False',
               '"authority_effect": False',
+              '"database_mutation_authorized": False',
+              '"checkpoint_promotion_authorized": False',
               'merge-base',
               '--is-ancestor',
           ]
           for marker in required:
               assert marker in source, marker
-          print('main-roadmap cycle oracle non-authority boundary: PASS')
+          print('main-roadmap cycle + lease guards non-authority boundary: PASS')
           PY
