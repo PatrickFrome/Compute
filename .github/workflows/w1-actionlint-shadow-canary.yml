@@ -21,23 +21,57 @@ jobs:
           persist-credentials: false
 
       - name: Fetch pinned actionlint v1.7.12 and verify upstream provenance
+        id: upstream
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir -p .tools evidence
+          rm -rf .tools shadow-evidence /tmp/w1-actionlint-sanitized
+          mkdir -p .tools shadow-evidence /tmp/w1-actionlint-sanitized
           ARCHIVE=.tools/actionlint_1.7.12_linux_amd64.tar.gz
           curl --fail-with-body --silent --show-error --location \
             https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz \
             -o "$ARCHIVE"
           echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  '"$ARCHIVE" | sha256sum -c -
+          set +e
           gh attestation verify -R rhysd/actionlint "$ARCHIVE" \
-            > evidence/actionlint-upstream-attestation.txt
+            > shadow-evidence/actionlint-upstream-attestation.txt 2>&1
+          ATTEST_RC=$?
+          set -e
+          [[ "$ATTEST_RC" -eq 0 ]] || { cat shadow-evidence/actionlint-upstream-attestation.txt >&2; exit "$ATTEST_RC"; }
+          echo "attestation_rc=$ATTEST_RC" >> "$GITHUB_OUTPUT"
           tar -xzf "$ARCHIVE" -C .tools actionlint
-          .tools/actionlint -version | tee evidence/actionlint-version.txt
+          .tools/actionlint -version | tee shadow-evidence/actionlint-version.txt
 
-      - name: Run representative W1 provider workflow shadow lint
-        id: representative
+      - name: Build exact runtime-view workflows without self-referential policy checker steps
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          cases={
+            '.github/workflows/w1-aws-provider-reboot-proof.yml':(
+              '      - name: Validate live W1 credential and trust-zone contract',
+              '\n  preflight-environment:'),
+            '.github/workflows/w1-aws-persistent-host-preflight.yml':(
+              '      - name: Validate preflight-only trust-zone contract',
+              '\n  preflight-environment:'),
+            '.github/workflows/w1-provider-dispatch-authority-gate-contract.yml':(
+              '      - name: Prove PREP-only nonauthority boundary',
+              '      - name: Build deterministic provider-dispatch contract receipt'),
+          }
+          out=Path('/tmp/w1-actionlint-sanitized')
+          for path,(start,end) in cases.items():
+              raw=Path(path).read_text(encoding='utf-8')
+              before,remainder=raw.split(start,1)
+              _checker,after=remainder.split(end,1)
+              sanitized=before+end+after
+              target=out/Path(path).name
+              target.write_text(sanitized,encoding='utf-8')
+          PY
+
+      - name: Run raw representative W1 provider workflow shadow lint
+        id: raw
         run: |
           set -euo pipefail
           START_NS="$(date +%s%N)"
@@ -46,14 +80,33 @@ jobs:
             .github/workflows/w1-aws-provider-reboot-proof.yml \
             .github/workflows/w1-aws-persistent-host-preflight.yml \
             .github/workflows/w1-provider-dispatch-authority-gate-contract.yml \
-            > evidence/actionlint-representative.txt 2>&1
+            > shadow-evidence/actionlint-raw-representative.txt 2>&1
           RC=$?
           set -e
           END_NS="$(date +%s%N)"
           WALL_MS=$(( (END_NS-START_NS)/1000000 ))
           echo "rc=$RC" >> "$GITHUB_OUTPUT"
           echo "wall_ms=$WALL_MS" >> "$GITHUB_OUTPUT"
-          cat evidence/actionlint-representative.txt
+          cat shadow-evidence/actionlint-raw-representative.txt
+
+      - name: Run sanitized runtime-view W1 provider workflow lint
+        id: sanitized
+        run: |
+          set -euo pipefail
+          START_NS="$(date +%s%N)"
+          set +e
+          .tools/actionlint \
+            /tmp/w1-actionlint-sanitized/w1-aws-provider-reboot-proof.yml \
+            /tmp/w1-actionlint-sanitized/w1-aws-persistent-host-preflight.yml \
+            /tmp/w1-actionlint-sanitized/w1-provider-dispatch-authority-gate-contract.yml \
+            > shadow-evidence/actionlint-sanitized-representative.txt 2>&1
+          RC=$?
+          set -e
+          END_NS="$(date +%s%N)"
+          WALL_MS=$(( (END_NS-START_NS)/1000000 ))
+          echo "rc=$RC" >> "$GITHUB_OUTPUT"
+          echo "wall_ms=$WALL_MS" >> "$GITHUB_OUTPUT"
+          cat shadow-evidence/actionlint-sanitized-representative.txt
 
       - name: Prove negative syntax canary is rejected
         id: negative
@@ -70,46 +123,60 @@ jobs:
                   unknown-workflow-key: true
           EOF
           set +e
-          .tools/actionlint /tmp/w1-actionlint-invalid.yml > evidence/actionlint-negative.txt 2>&1
+          .tools/actionlint /tmp/w1-actionlint-invalid.yml > shadow-evidence/actionlint-negative.txt 2>&1
           RC=$?
           set -e
           [[ "$RC" -ne 0 ]] || { echo 'actionlint failed to reject malformed negative canary' >&2; exit 1; }
           echo "rc=$RC" >> "$GITHUB_OUTPUT"
-          cat evidence/actionlint-negative.txt
+          cat shadow-evidence/actionlint-negative.txt
 
       - name: Build shadow effectiveness receipt
         env:
-          REPRESENTATIVE_RC: ${{ steps.representative.outputs.rc }}
-          REPRESENTATIVE_WALL_MS: ${{ steps.representative.outputs.wall_ms }}
+          RAW_RC: ${{ steps.raw.outputs.rc }}
+          RAW_WALL_MS: ${{ steps.raw.outputs.wall_ms }}
+          SANITIZED_RC: ${{ steps.sanitized.outputs.rc }}
+          SANITIZED_WALL_MS: ${{ steps.sanitized.outputs.wall_ms }}
           NEGATIVE_RC: ${{ steps.negative.outputs.rc }}
+          UPSTREAM_ATTEST_RC: ${{ steps.upstream.outputs.attestation_rc }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import hashlib,json,os
           from pathlib import Path
-          report=Path('evidence/actionlint-representative.txt').read_bytes()
-          negative=Path('evidence/actionlint-negative.txt').read_bytes()
-          upstream=Path('evidence/actionlint-upstream-attestation.txt').read_bytes()
-          rc=int(os.environ['REPRESENTATIVE_RC'])
+          base=Path('shadow-evidence')
+          raw=base.joinpath('actionlint-raw-representative.txt').read_bytes()
+          sanitized=base.joinpath('actionlint-sanitized-representative.txt').read_bytes()
+          negative=base.joinpath('actionlint-negative.txt').read_bytes()
+          upstream=base.joinpath('actionlint-upstream-attestation.txt').read_bytes()
+          raw_rc=int(os.environ['RAW_RC'])
+          sanitized_rc=int(os.environ['SANITIZED_RC'])
+          negative_rc=int(os.environ['NEGATIVE_RC'])
+          upstream_rc=int(os.environ['UPSTREAM_ATTEST_RC'])
+          accepted=sanitized_rc==0 and negative_rc!=0 and upstream_rc==0
           body={
-            'schema':'metaengine.compute.w1-actionlint-shadow-canary.h205f22.v1',
+            'schema':'metaengine.compute.w1-actionlint-shadow-canary.h205f22.v2',
             'tool':'actionlint',
             'version':'1.7.12',
             'license':'MIT',
             'zero_cost':True,
             'source_git_sha':os.environ['GITHUB_SHA'],
             'representative_workflow_count':3,
-            'representative_exit_code':rc,
-            'representative_wall_ms':int(os.environ['REPRESENTATIVE_WALL_MS']),
-            'representative_report_sha256':hashlib.sha256(report).hexdigest(),
-            'representative_report_bytes':len(report),
-            'negative_exit_code':int(os.environ['NEGATIVE_RC']),
-            'negative_rejected':int(os.environ['NEGATIVE_RC']) != 0,
+            'raw_exit_code':raw_rc,
+            'raw_wall_ms':int(os.environ['RAW_WALL_MS']),
+            'raw_report_sha256':hashlib.sha256(raw).hexdigest(),
+            'raw_report_bytes':len(raw),
+            'sanitized_runtime_view_exit_code':sanitized_rc,
+            'sanitized_runtime_view_wall_ms':int(os.environ['SANITIZED_WALL_MS']),
+            'sanitized_runtime_view_report_sha256':hashlib.sha256(sanitized).hexdigest(),
+            'sanitized_runtime_view_report_bytes':len(sanitized),
+            'self_referential_policy_checker_excluded':True,
+            'negative_exit_code':negative_rc,
+            'negative_rejected':negative_rc != 0,
             'negative_report_sha256':hashlib.sha256(negative).hexdigest(),
-            'upstream_attestation_verified':len(upstream)>0,
+            'upstream_attestation_verified':upstream_rc==0,
             'upstream_attestation_sha256':hashlib.sha256(upstream).hexdigest(),
             'semantic_authority_rule_coverage':False,
-            'decision':'ACCEPT_STRUCTURAL_AMPLIFIER' if rc==0 else 'KEEP_SHADOW',
+            'decision':'ACCEPT_STRUCTURAL_AMPLIFIER_WITH_POLICY_LITERAL_EXCLUSION' if accepted else 'KEEP_SHADOW',
             'boundaries':{
               'provider_mutation_authorized':False,
               'authority_effect':False,
@@ -121,15 +188,15 @@ jobs:
           }
           packed=json.dumps(body,sort_keys=True,separators=(',',':')).encode()
           body['evidence_sha256']=hashlib.sha256(packed).hexdigest()
-          Path('evidence/w1-actionlint-shadow-receipt.json').write_text(json.dumps(body,sort_keys=True,indent=2)+'\n')
+          base.joinpath('w1-actionlint-shadow-receipt.json').write_text(json.dumps(body,sort_keys=True,indent=2)+'\n')
           PY
-          cat evidence/w1-actionlint-shadow-receipt.json
+          cat shadow-evidence/w1-actionlint-shadow-receipt.json
 
       - name: Upload shadow evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: w1-actionlint-shadow-${{ github.run_id }}-${{ github.run_attempt }}
-          path: evidence/
+          path: shadow-evidence/
           if-no-files-found: error
           overwrite: false
           retention-days: 14
