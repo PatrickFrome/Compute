@@ -131,7 +131,8 @@ jobs:
       - name: Uninstall runtime without destroying worker state
         run: |
           set -euo pipefail
-          touch /var/lib/metaengine/w1/workspace/.preserve-canary
+          sudo -u metaengine-w1 touch /var/lib/metaengine/w1/workspace/.preserve-canary
+          test ! -w /var/lib/metaengine/w1/workspace
           cd /tmp/w1-package-extract
           sudo ./uninstall.sh
           test ! -e '/opt/metaengine/w1/safety/73ab09c75b71a6ea40f11e953cbcf9d9b94b9a89'
