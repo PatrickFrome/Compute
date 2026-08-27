@@ -4,28 +4,39 @@ on:
   push:
     branches:
       - work/w1-linux-worker-safety
+      - work/main-roadmap-accelerators-v5
     paths:
       - 'worker/native_linux/admission_contract.py'
       - 'worker/native_linux/admission_candidate.py'
+      - 'worker/native_linux/host_safety_envelope_probe.py'
+      - 'controller/w1/host_safety_envelope_validator.py'
+      - 'controller/w1/host_safety_evidence_bundle.py'
       - 'tests/test_w1_admission_contract.py'
       - 'tests/test_w1_admission_candidate.py'
+      - 'tests/test_w1_host_safety_envelope_v2.py'
       - 'supabase/migrations/*w1_persisted_admission_candidate_readback_v1.sql'
       - 'supabase/migrations/*w1_admission_candidate_readback_volatility_fix.sql'
       - '.github/workflows/w1-admission-contract.yml'
       - 'research/W1_DEV_CYCLE_001_ADMISSION_CONTRACT.md'
       - 'research/W1_DEV_CYCLE_001_PERSISTENCE_COMPOSITOR.md'
+      - 'research/W1_HOST_SAFETY_ENVELOPE_V2.md'
   pull_request:
     branches: [main]
     paths:
       - 'worker/native_linux/admission_contract.py'
       - 'worker/native_linux/admission_candidate.py'
+      - 'worker/native_linux/host_safety_envelope_probe.py'
+      - 'controller/w1/host_safety_envelope_validator.py'
+      - 'controller/w1/host_safety_evidence_bundle.py'
       - 'tests/test_w1_admission_contract.py'
       - 'tests/test_w1_admission_candidate.py'
+      - 'tests/test_w1_host_safety_envelope_v2.py'
       - 'supabase/migrations/*w1_persisted_admission_candidate_readback_v1.sql'
       - 'supabase/migrations/*w1_admission_candidate_readback_volatility_fix.sql'
       - '.github/workflows/w1-admission-contract.yml'
       - 'research/W1_DEV_CYCLE_001_ADMISSION_CONTRACT.md'
       - 'research/W1_DEV_CYCLE_001_PERSISTENCE_COMPOSITOR.md'
+      - 'research/W1_HOST_SAFETY_ENVELOPE_V2.md'
   workflow_dispatch:
 
 permissions:
@@ -46,16 +57,49 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 
-      - name: Compile contracts
+      - name: Compile contracts and active probe
         run: |
           set -euo pipefail
           python3 -m py_compile \
             worker/native_linux/admission_contract.py \
-            worker/native_linux/admission_candidate.py
+            worker/native_linux/admission_candidate.py \
+            worker/native_linux/host_safety_envelope_probe.py \
+            controller/w1/host_safety_envelope_validator.py \
+            controller/w1/host_safety_evidence_bundle.py
 
       - name: Run fail-closed W1 tests
         run: |
           set -euo pipefail
           python3 -m unittest \
             tests.test_w1_admission_contract \
-            tests.test_w1_admission_candidate -v
+            tests.test_w1_admission_candidate \
+            tests.test_w1_host_safety_envelope_v2 -v
+
+      - name: Prove bundle has no external mutation authority
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          source = '\n'.join(
+              Path(p).read_text(encoding='utf-8')
+              for p in (
+                  'worker/native_linux/host_safety_envelope_probe.py',
+                  'controller/w1/host_safety_envelope_validator.py',
+                  'controller/w1/host_safety_evidence_bundle.py',
+              )
+          )
+          forbidden = ('shell=True', 'boto3', 'requests.', 'urllib.', 'socket.socket', 'supabase_url', 'service_role')
+          for marker in forbidden:
+              assert marker.lower() not in source.lower(), marker
+          required = (
+              '"provider_mutation": False',
+              '"worker_admitted": False',
+              '"w1_verified": False',
+              'cgroup.kill',
+              'pidfd_open',
+              'PR_SET_SECCOMP',
+          )
+          for marker in required:
+              assert marker in source, marker
+          print('W1 active safety bundle non-authority boundary: PASS')
+          PY
