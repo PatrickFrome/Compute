@@ -38,6 +38,7 @@ jobs:
           set -euo pipefail
           node tests/a2_v068_release_contract_lab.mjs
           node tests/a2_v068_supervisor_reconciliation_lab.mjs
+          node tests/a2_v068_upgrade_identity_lab.mjs
           node tests/a2_v067_supervisor_prompt_ready_lab.mjs
           node tests/a2_v067_supervisor_session_singleton_lab.mjs
 
