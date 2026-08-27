@@ -26,9 +26,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
+          set +e
           python3 controller/w1/s2_pid1_evidence_consumer_audit.py \
             --root . \
             --output out/w1-s2-pid1-evidence-consumer-audit.json
+          audit_rc=$?
+          set -e
           cat out/w1-s2-pid1-evidence-consumer-audit.json
           python3 - <<'PY'
           import json
@@ -46,7 +49,9 @@ jobs:
           print('PID1 evidence consumer audit: PASS_NONAUTHORITY')
           print('evidence_sha256=' + r['evidence_sha256'])
           PY
+          test "$audit_rc" -eq 0
       - name: Upload non-authority consumer receipt
+        if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: w1-s2-pid1-evidence-consumer-${{ github.run_id }}-${{ github.run_attempt }}
