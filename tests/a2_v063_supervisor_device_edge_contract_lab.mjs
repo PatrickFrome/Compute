@@ -12,15 +12,22 @@ assert.match(source, /crypto\.subtle\.importKey\('jwk'/);
 assert.match(source, /crypto\.subtle\.verify\(\{name:'ECDSA',hash:'SHA-256'\}/);
 assert.match(source, /BODY_HASH_MISMATCH/);
 assert.match(source, /INVALID_SIGNATURE/);
+assert.match(source, /PAIRING_REVOKED/);
 assert.match(source, /NONCE_REJECTED/);
 assert.match(source, /device_auth_required:true/);
+assert.match(source, /pairing_kill_switch:true/);
 assert.match(source, /transport_identity/);
 assert.match(source, /key_fingerprint_sha256:fingerprint/);
 assert.match(source, /fingerprint=await sha256\(JSON\.stringify\(jwk\)\)/, "enrollment fingerprint must be server-derived");
+assert.match(source, /enrollment_pairing_token_hash/);
 
 const verifyIndex = source.indexOf("crypto.subtle.verify");
+const pairingCheckIndex = source.indexOf("PAIRING_REVOKED");
 const nonceIndex = source.indexOf("h205f22_a2_browser_device_consume_nonce_v2");
-assert.ok(verifyIndex > 0 && nonceIndex > verifyIndex, "nonce must be consumed only after signature verification");
+assert.ok(verifyIndex > 0 && pairingCheckIndex > verifyIndex && nonceIndex > pairingCheckIndex, "pairing kill switch must run after signature verification and before nonce consumption");
+
+const deviceQuery = source.match(/DEVICE_TABLE[^\n]+select=device_id,client_id,profile,public_jwk,enrollment_pairing_token_hash,active,revoked_at/);
+assert.ok(deviceQuery, "device lookup must read revoked devices instead of filtering active=true before explicit revocation checks");
 
 const enrollRoute = source.indexOf("path==='/v1/device/enroll'");
 const signedAuth = source.indexOf("authenticateDevice(req,url.pathname,bodyText)");
@@ -38,7 +45,9 @@ for (const header of [
 ]) assert.match(source, new RegExp(header));
 
 console.log("a2_v063_supervisor_device_edge_contract_lab: PASS", {
-  signatureBeforeNonce: verifyIndex < nonceIndex,
+  signatureBeforePairingKillSwitch: verifyIndex < pairingCheckIndex,
+  pairingKillSwitchBeforeNonce: pairingCheckIndex < nonceIndex,
+  revokedDeviceExplicitlyDetected: true,
   serverDerivedFingerprint: true,
   serviceBoundPath: true,
   privilegedBearerFallback: false
