@@ -1,0 +1,152 @@
+name: W1 Host Safety Package Supply Chain
+
+on:
+  push:
+    branches:
+      - work/w1-linux-worker-safety
+      - work/main-roadmap-accelerators-v5
+    paths:
+      - 'controller/w1/build_host_safety_package.py'
+      - 'controller/w1/host_safety_evidence_bundle.py'
+      - 'controller/w1/host_safety_envelope_validator.py'
+      - 'worker/native_linux/host_safety_envelope_probe.py'
+      - 'infra/w1/package/W1_SAFETY_ENVELOPE_73AB09C7_MANIFEST.json'
+      - 'tests/test_w1_host_safety_package_builder.py'
+      - '.github/workflows/w1-host-safety-package-supply-chain.yml'
+      - 'research/W1_HOST_SAFETY_PACKAGE_SUPPLY_CHAIN.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/w1/build_host_safety_package.py'
+      - 'controller/w1/host_safety_evidence_bundle.py'
+      - 'controller/w1/host_safety_envelope_validator.py'
+      - 'worker/native_linux/host_safety_envelope_probe.py'
+      - 'infra/w1/package/W1_SAFETY_ENVELOPE_73AB09C7_MANIFEST.json'
+      - 'tests/test_w1_host_safety_package_builder.py'
+      - '.github/workflows/w1-host-safety-package-supply-chain.yml'
+      - 'research/W1_HOST_SAFETY_PACKAGE_SUPPLY_CHAIN.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Verify exact source head
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Compile builder and runtime
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            controller/w1/build_host_safety_package.py \
+            controller/w1/host_safety_evidence_bundle.py \
+            controller/w1/host_safety_envelope_validator.py \
+            worker/native_linux/host_safety_envelope_probe.py
+
+      - name: Run supply-chain unit tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_w1_host_safety_package_builder -v
+
+      - name: Prove byte-for-byte reproducible archive
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/w1-build-a /tmp/w1-build-b
+          python3 controller/w1/build_host_safety_package.py --output-dir /tmp/w1-build-a > /tmp/w1-build-a.json
+          python3 controller/w1/build_host_safety_package.py --output-dir /tmp/w1-build-b > /tmp/w1-build-b.json
+          cmp /tmp/w1-build-a.json /tmp/w1-build-b.json
+          ARCHIVE="$(python3 - <<'PY'
+          import json
+          print(json.load(open('/tmp/w1-build-a.json'))['filename'])
+          PY
+          )"
+          cmp "/tmp/w1-build-a/$ARCHIVE" "/tmp/w1-build-b/$ARCHIVE"
+          python3 - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          receipt=json.load(open('/tmp/w1-build-a.json'))
+          archive=Path('/tmp/w1-build-a')/receipt['filename']
+          assert hashlib.sha256(archive.read_bytes()).hexdigest()==receipt['sha256']
+          assert receipt['backend_neutral'] is True
+          assert receipt['provisioning_authority'] is False
+          assert receipt['runtime_authority'] is False
+          assert receipt['authority_effect'] is False
+          print('deterministic package sha256:', receipt['sha256'])
+          PY
+          echo "W1_PACKAGE_ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - name: Install package through isolated provisioning action
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/w1-package-extract
+          mkdir -p /tmp/w1-package-extract
+          unzip -q "/tmp/w1-build-a/$W1_PACKAGE_ARCHIVE" -d /tmp/w1-package-extract
+          cd /tmp/w1-package-extract
+          sudo ./install.sh
+          PACKAGE_ROOT='/opt/metaengine/w1/safety/73ab09c75b71a6ea40f11e953cbcf9d9b94b9a89'
+          test -f "$PACKAGE_ROOT/manifest.json"
+          test -f "$PACKAGE_ROOT/package-lock.json"
+          test "$(stat -c %U "$PACKAGE_ROOT/controller/w1/host_safety_evidence_bundle.py")" = root
+          test "$(stat -c %G "$PACKAGE_ROOT/controller/w1/host_safety_evidence_bundle.py")" = root
+          test "$(stat -c %a "$PACKAGE_ROOT/controller/w1/host_safety_evidence_bundle.py")" = 444
+          test "$(stat -c %U /var/lib/metaengine/w1/workspace)" = metaengine-w1
+          test "$(stat -c %a /var/lib/metaengine/w1/workspace)" = 700
+
+      - name: Execute installed package as dedicated non-root worker
+        run: |
+          set -euo pipefail
+          PACKAGE_ROOT='/opt/metaengine/w1/safety/73ab09c75b71a6ea40f11e953cbcf9d9b94b9a89'
+          set +e
+          printf '%s' '{"source":{"git_sha":"73ab09c75b71a6ea40f11e953cbcf9d9b94b9a89","tree_sha":"c8ae850c8ce2ab9f688ae0525cbce55d39186d78"}}' \
+            | sudo -u metaengine-w1 python3 "$PACKAGE_ROOT/controller/w1/host_safety_evidence_bundle.py" > /tmp/w1-installed-bundle.json
+          RC=$?
+          set -e
+          test "$RC" -eq 0 -o "$RC" -eq 2
+          python3 - <<'PY'
+          import json
+          value=json.load(open('/tmp/w1-installed-bundle.json'))
+          assert value['schema']=='metaengine.compute.w1-host-safety-evidence-bundle.h205f22.v2'
+          assert value['observation']['source']=={
+              'git_sha':'73ab09c75b71a6ea40f11e953cbcf9d9b94b9a89',
+              'tree_sha':'c8ae850c8ce2ab9f688ae0525cbce55d39186d78',
+          }
+          assert value['execution_context']['execution_user']=='metaengine-w1'
+          assert value['execution_context']['effective_uid']!=0
+          assert value['authority']['worker_admitted'] is False
+          assert value['authority']['w1_verified'] is False
+          print('installed package runtime outcome:', value['decision']['outcome'])
+          PY
+
+      - name: Uninstall runtime without destroying worker state
+        run: |
+          set -euo pipefail
+          touch /var/lib/metaengine/w1/workspace/.preserve-canary
+          cd /tmp/w1-package-extract
+          sudo ./uninstall.sh
+          test ! -e '/opt/metaengine/w1/safety/73ab09c75b71a6ea40f11e953cbcf9d9b94b9a89'
+          test -d /var/lib/metaengine/w1/workspace
+          test -f /var/lib/metaengine/w1/workspace/.preserve-canary
+          test "$(stat -c %U /var/lib/metaengine/w1/workspace)" = metaengine-w1
+          echo 'W1 package uninstall preserves dedicated workspace/state: PASS'
+
+      - name: Assert provisioning package has no external control-plane client
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          source=Path('controller/w1/build_host_safety_package.py').read_text(encoding='utf-8').lower()
+          for forbidden in ('boto3', 'requests.', 'urllib.', 'socket.socket', 'supabase', 'service_role', 'ec2:rebootinstances', 'ssm:sendcommand'):
+              assert forbidden not in source, forbidden
+          print('W1 package builder external authority surface: NONE')
+          PY
