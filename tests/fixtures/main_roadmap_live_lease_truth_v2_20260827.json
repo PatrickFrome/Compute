@@ -1,0 +1,111 @@
+{
+  "schema": "metaengine.compute.main-roadmap-lease-truth-snapshot.h205f22.v1",
+  "roadmap_id": "compute-fabric-roadmap-v1",
+  "observed_at": "2026-08-27T20:28:44.228546+00:00",
+  "level2_mapping": [
+    {"mapping_kind":"SUBMILESTONE","milestone_key":"A1_ISOLATED_WORKSPACE_AGENT_ADAPTER","canonical_milestone_key":"C2"},
+    {"mapping_kind":"PRIMARY","milestone_key":"ACC1_BASE_ACCELERATORS","canonical_milestone_key":"C3"},
+    {"mapping_kind":"PRIMARY","milestone_key":"AI1_AI_SERVING_PLANE","canonical_milestone_key":"C14"},
+    {"mapping_kind":"CROSS_CUTTING","milestone_key":"B0_CONTROL_TRUST_BASELINE","canonical_milestone_key":null},
+    {"mapping_kind":"ACCEPTANCE_GATE","milestone_key":"C1_FIRST_SERIAL_CODING_LOOP","canonical_milestone_key":"C2"},
+    {"mapping_kind":"ACCEPTANCE_GATE","milestone_key":"C10_REMOTE_OUTPUT_MATERIALIZATION","canonical_milestone_key":"C11"},
+    {"mapping_kind":"PRIMARY","milestone_key":"C11_INCREMENTAL_IMPACT_GRAPH","canonical_milestone_key":"C12"},
+    {"mapping_kind":"PRIMARY","milestone_key":"C2_CACHE_IDENTITY_EQUIVALENCE","canonical_milestone_key":"C4"},
+    {"mapping_kind":"PRIMARY","milestone_key":"C3_DETERMINISTIC_SHARDING","canonical_milestone_key":"C5"},
+    {"mapping_kind":"PRIMARY","milestone_key":"C4_GLOBAL_SLOT_BROKER","canonical_milestone_key":"C6"},
+    {"mapping_kind":"PRIMARY","milestone_key":"C5_TRUSTED_TELEMETRY","canonical_milestone_key":"C7"},
+    {"mapping_kind":"PRIMARY","milestone_key":"C6_DURATION_SCHEDULER_TOURNAMENT","canonical_milestone_key":"C8"},
+    {"mapping_kind":"PRIMARY","milestone_key":"C7_TRANSACTIONAL_WORK_STEALING","canonical_milestone_key":"C9"},
+    {"mapping_kind":"PRIMARY","milestone_key":"C8_SPECULATIVE_EXECUTION","canonical_milestone_key":"C10"},
+    {"mapping_kind":"PRIMARY","milestone_key":"C9_REAPI_BUILD_FARM_TOURNAMENT","canonical_milestone_key":"C11"},
+    {"mapping_kind":"PRIMARY","milestone_key":"E1_ECONOMIC_AUTOSCALER","canonical_milestone_key":"C17"},
+    {"mapping_kind":"PRIMARY","milestone_key":"F1_LIVE_EXTERNAL_FEDERATION","canonical_milestone_key":"F1+"},
+    {"mapping_kind":"PRIMARY","milestone_key":"G1_GPU_WORKER_ADMISSION","canonical_milestone_key":"C13"},
+    {"mapping_kind":"PRIMARY","milestone_key":"K1_CLUSTER_ADMISSION_KUEUE","canonical_milestone_key":"C16"},
+    {"mapping_kind":"CROSS_CUTTING","milestone_key":"P1_PRODUCTION_CORE_ACCEPTANCE","canonical_milestone_key":null},
+    {"mapping_kind":"CROSS_CUTTING","milestone_key":"P2_SCALE_TIER_ACCEPTANCE","canonical_milestone_key":null},
+    {"mapping_kind":"PRIMARY","milestone_key":"R1_CONTINUITY_PLANE_ADOPTION","canonical_milestone_key":"R1"},
+    {"mapping_kind":"ACCEPTANCE_GATE","milestone_key":"R2_TWO_DOMAIN_PERSISTED_READBACK","canonical_milestone_key":"R1"},
+    {"mapping_kind":"ACCEPTANCE_GATE","milestone_key":"R3_RESTORE_DRILL_QUORUM","canonical_milestone_key":"R1"},
+    {"mapping_kind":"PRIMARY","milestone_key":"S1_DISTRIBUTED_COMPUTE_RAY","canonical_milestone_key":"C15"},
+    {"mapping_kind":"SUBMILESTONE","milestone_key":"T0_HERMETIC_TOOLCHAIN_CONTRACT","canonical_milestone_key":"C2"},
+    {"mapping_kind":"ACCEPTANCE_GATE","milestone_key":"T1_TOOLCHAIN_PARITY_VERIFICATION","canonical_milestone_key":"C2"},
+    {"mapping_kind":"PRIMARY","milestone_key":"W1_PERSISTENT_LINUX_WORKER_SAFETY","canonical_milestone_key":"C1"}
+  ],
+  "roadmap_status": {
+    "next_mainline": {
+      "lane": "EXECUTION",
+      "title": "First persistent Linux worker + safety envelope",
+      "blocked_by": [],
+      "milestone_key": "W1_PERSISTENT_LINUX_WORKER_SAFETY",
+      "effective_status": "READY"
+    }
+  },
+  "alignment_status": {
+    "lease_truth": {
+      "version": 2,
+      "observed_at": "2026-08-27T20:28:44.228546+00:00",
+      "cleanup_required": true,
+      "lease_fence_kind": "CLAIM_ID_MONOTONIC_SEQUENCER",
+      "fresh_active_claim_count": 0,
+      "stale_rows_authority_effect": false,
+      "stale_persisted_active_claims": [
+        {
+          "reason":"EXPIRED",
+          "claim_id":32,
+          "holder_id":"aop1:W1_IMPLEMENTER",
+          "expires_at":"2026-08-25T23:00:00.637797+00:00",
+          "lease_fence":32,
+          "heartbeat_at":"2026-08-25T20:00:00.637797+00:00",
+          "milestone_key":"W1_PERSISTENT_LINUX_WORKER_SAFETY",
+          "persisted_state":"ACTIVE"
+        }
+      ],
+      "stale_persisted_active_claim_count": 1
+    },
+    "active_claim_alignment": []
+  },
+  "active_claim_rows": [
+    {
+      "state":"ACTIVE",
+      "claim_id":32,
+      "holder_id":"aop1:W1_IMPLEMENTER",
+      "expires_at":"2026-08-25T23:00:00.637797+00:00",
+      "heartbeat_at":"2026-08-25T20:00:00.637797+00:00",
+      "milestone_key":"W1_PERSISTENT_LINUX_WORKER_SAFETY"
+    }
+  ],
+  "supervisor_snapshot": {
+    "directives": [],
+    "active_claims": []
+  },
+  "active_directive_rows": [
+    {
+      "status":"ACTIVE",
+      "created_at":"2026-08-23T13:35:24.506642+00:00",
+      "expires_at":"2026-08-23T16:35:24.506642+00:00",
+      "directive_id":25,
+      "milestone_key":"F1_LIVE_EXTERNAL_FEDERATION",
+      "directive_kind":"REASSIGN",
+      "target_holder_id":"aop1:F1_IMPLEMENTER"
+    },
+    {
+      "status":"ACTIVE",
+      "created_at":"2026-08-24T09:52:09.164716+00:00",
+      "expires_at":"2026-08-24T12:52:09.164716+00:00",
+      "directive_id":26,
+      "milestone_key":"R1_CONTINUITY_PLANE_ADOPTION",
+      "directive_kind":"REASSIGN",
+      "target_holder_id":"aop1:R1_IMPLEMENTER"
+    },
+    {
+      "status":"ACTIVE",
+      "created_at":"2026-08-25T19:59:47.410995+00:00",
+      "expires_at":"2026-08-25T22:59:47.410995+00:00",
+      "directive_id":29,
+      "milestone_key":"W1_PERSISTENT_LINUX_WORKER_SAFETY",
+      "directive_kind":"REASSIGN",
+      "target_holder_id":"aop1:W1_IMPLEMENTER"
+    }
+  ]
+}
