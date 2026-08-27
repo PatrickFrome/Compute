@@ -75,13 +75,23 @@ jobs:
             tests.test_w1_admission_candidate \
             tests.test_w1_host_safety_envelope_v2 -v
 
+      - name: Prepare dedicated non-root CI smoke identity
+        run: |
+          set -euo pipefail
+          if ! id -u metaengine-w1 >/dev/null 2>&1; then
+            sudo useradd --system --home-dir /var/lib/metaengine/w1 --shell /usr/sbin/nologin metaengine-w1
+          fi
+          sudo install -d -o metaengine-w1 -g metaengine-w1 -m 0700 /var/lib/metaengine/w1/workspace
+          test "$(stat -c %U /var/lib/metaengine/w1/workspace)" = metaengine-w1
+          test "$(stat -c %a /var/lib/metaengine/w1/workspace)" = 700
+
       - name: Execute active probe on CI host as non-authority smoke
         run: |
           set -euo pipefail
           TREE_SHA="$(git rev-parse HEAD^{tree})"
           set +e
           printf '{"source":{"git_sha":"%s","tree_sha":"%s"}}' "$GITHUB_SHA" "$TREE_SHA" \
-            | python3 controller/w1/host_safety_evidence_bundle.py > /tmp/w1-host-safety-bundle.json
+            | sudo -u metaengine-w1 python3 controller/w1/host_safety_evidence_bundle.py > /tmp/w1-host-safety-bundle.json
           RC=$?
           set -e
           test "$RC" -eq 0 -o "$RC" -eq 2
@@ -90,8 +100,13 @@ jobs:
           from pathlib import Path
           p = Path('/tmp/w1-host-safety-bundle.json')
           value = json.loads(p.read_text(encoding='utf-8'))
-          assert value['schema'] == 'metaengine.compute.w1-host-safety-evidence-bundle.h205f22.v1'
+          assert value['schema'] == 'metaengine.compute.w1-host-safety-evidence-bundle.h205f22.v2'
           assert value['decision']['outcome'] in {'SAFETY_ENVELOPE_ELIGIBLE_NON_PERSISTENT','REJECTED_SAFETY_ENVELOPE'}
+          assert value['execution_context']['execution_user'] == 'metaengine-w1'
+          assert value['execution_context']['workspace_root'] == '/var/lib/metaengine/w1/workspace'
+          assert value['execution_context']['workspace_owned_by_execution_user'] is True
+          assert value['execution_context']['workspace_group_world_writable'] is False
+          assert value['execution_context']['effective_uid'] != 0
           assert value['authority'] == {
               'canonical': False,
               'authority_effect': False,
@@ -128,6 +143,8 @@ jobs:
               '"provider_mutation": False',
               '"worker_admitted": False',
               '"w1_verified": False',
+              'EXECUTION_USER = "metaengine-w1"',
+              'WORKSPACE_ROOT = Path("/var/lib/metaengine/w1/workspace")',
               'cgroup.kill',
               'pidfd_open',
               'PR_SET_SECCOMP',
