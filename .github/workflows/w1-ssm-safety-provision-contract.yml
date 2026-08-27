@@ -8,12 +8,14 @@ on:
     paths:
       - 'controller/w1/build_host_safety_package.py'
       - 'controller/w1/build_ssm_safety_provision_document.py'
+      - 'controller/w1/aws_ssm_safety_provision_guard.py'
       - 'controller/w1/host_safety_evidence_bundle.py'
       - 'controller/w1/host_safety_envelope_validator.py'
       - 'worker/native_linux/host_safety_envelope_probe.py'
       - 'infra/w1/package/W1_SAFETY_ENVELOPE_73AB09C7_MANIFEST.json'
       - 'tests/test_w1_host_safety_package_builder.py'
       - 'tests/test_w1_ssm_safety_provision_document.py'
+      - 'tests/test_w1_aws_ssm_safety_provision_guard.py'
       - '.github/workflows/w1-ssm-safety-provision-contract.yml'
       - 'research/W1_SSM_SAFETY_PROVISIONING.md'
   pull_request:
@@ -21,12 +23,14 @@ on:
     paths:
       - 'controller/w1/build_host_safety_package.py'
       - 'controller/w1/build_ssm_safety_provision_document.py'
+      - 'controller/w1/aws_ssm_safety_provision_guard.py'
       - 'controller/w1/host_safety_evidence_bundle.py'
       - 'controller/w1/host_safety_envelope_validator.py'
       - 'worker/native_linux/host_safety_envelope_probe.py'
       - 'infra/w1/package/W1_SAFETY_ENVELOPE_73AB09C7_MANIFEST.json'
       - 'tests/test_w1_host_safety_package_builder.py'
       - 'tests/test_w1_ssm_safety_provision_document.py'
+      - 'tests/test_w1_aws_ssm_safety_provision_guard.py'
       - '.github/workflows/w1-ssm-safety-provision-contract.yml'
       - 'research/W1_SSM_SAFETY_PROVISIONING.md'
   workflow_dispatch:
@@ -49,19 +53,21 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 
-      - name: Compile provisioning builders
+      - name: Compile provisioning contracts
         run: |
           set -euo pipefail
           python3 -m py_compile \
             controller/w1/build_host_safety_package.py \
-            controller/w1/build_ssm_safety_provision_document.py
+            controller/w1/build_ssm_safety_provision_document.py \
+            controller/w1/aws_ssm_safety_provision_guard.py
 
-      - name: Run package and document adversarial tests
+      - name: Run provisioning adversarial tests
         run: |
           set -euo pipefail
           python3 -m unittest \
             tests.test_w1_host_safety_package_builder \
-            tests.test_w1_ssm_safety_provision_document -v
+            tests.test_w1_ssm_safety_provision_document \
+            tests.test_w1_aws_ssm_safety_provision_guard -v
 
       - name: Prove deterministic parameterless document
         run: |
@@ -72,7 +78,6 @@ jobs:
           cmp /tmp/w1-provision-a.receipt.json /tmp/w1-provision-b.receipt.json
           python3 - <<'PY'
           import hashlib,json
-          from pathlib import Path
           receipt=json.load(open('/tmp/w1-provision-a.receipt.json'))
           document=json.load(open('/tmp/w1-provision-a.json'))
           raw=json.dumps(document,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()
@@ -87,6 +92,34 @@ jobs:
           assert receipt['admission_authority'] is False
           print('provision document bytes:', len(raw))
           print('embedded package sha256:', receipt['package_sha256'])
+          PY
+
+      - name: Prove least-authority provisioning session policy
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from controller.w1 import aws_ssm_safety_provision_guard as g
+          boundary=g.build_session_boundary(
+              instance_id='i-0123456789abcdef0',
+              worker_id='w1-worker-ci',
+              account_id='123456789012',
+              region='us-east-2',
+          )
+          policy=json.dumps(boundary['session_policy'],sort_keys=True)
+          for required in ('ssm:SendCommand','ssm:GetCommandInvocation','ssm:DescribeInstanceInformation',g.DOCUMENT_NAME,'ssm:resourceTag/metaengine:worker_id'):
+              assert required in policy, required
+          for forbidden in ('AWS-ConfigureAWSPackage','Metaengine-W1-Safety-Capture-H205F22','ssm:StartSession','ssm:CreateDocument','ssm:UpdateDocument','ssm:DeleteDocument','ec2:RebootInstances','s3:','kms:Decrypt','secretsmanager:'):
+              assert forbidden not in policy, forbidden
+          assert boundary['arbitrary_command_parameters_allowed'] is False
+          assert boundary['generic_package_document_allowed'] is False
+          assert boundary['capture_document_allowed'] is False
+          assert boundary['reboot_allowed'] is False
+          assert boundary['database_mutation_allowed'] is False
+          assert boundary['package_provisioning_verified'] is False
+          assert boundary['w1_verified'] is False
+          assert boundary['authority_effect'] is False
+          print('W1 SSM provisioning least-authority boundary: PASS')
           PY
 
       - name: Extract reviewed fixed command from generated document
@@ -111,11 +144,10 @@ jobs:
           sudo /bin/sh /tmp/w1-provision-command.sh > /tmp/w1-provision-courier.json
           python3 - <<'PY'
           import json
+          from controller.w1 import aws_ssm_safety_provision_guard as g
           value=json.load(open('/tmp/w1-provision-courier.json'))
-          assert value['schema']=='metaengine.compute.w1-aws-ssm-safety-provision-courier.h205f22.v1'
-          assert value['source']=='HOST_UNTRUSTED_TRANSPORT'
-          assert value['transport']=='AWS_SSM_RUN_COMMAND_FIXED_EMBEDDED_PACKAGE'
-          assert value['package_install_observed'] is True
+          validated=g.validate_courier(value)
+          assert validated['package_install_observed'] is True
           assert value['package_provisioning_verified'] is False
           assert value['host_safety_verified'] is False
           assert value['capture_executed'] is False
