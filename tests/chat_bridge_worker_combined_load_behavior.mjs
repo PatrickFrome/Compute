@@ -92,6 +92,7 @@ const chrome = {
   sidePanel: { async setPanelBehavior() {} },
   alarms: {
     async create() {},
+    async clear() { return true; },
     onAlarm: { addListener(fn) { listeners.alarm.push(fn); } },
   },
   tabs: {
@@ -164,9 +165,14 @@ context.importScripts = (...scripts) => {
 vm.runInContext(fs.readFileSync(path.join(EXT, 'background-entry.js'), 'utf8'), context, { filename: 'background-entry.js' });
 await new Promise((resolve) => setTimeout(resolve, 180));
 
+// v0.6 intentionally has multiple install/alarm consumers (background,
+// compatibility refresh and safe updater). The regression is about the
+// required capabilities being registered, not a fragile exact listener count.
 assert.ok(listeners.runtimeMessage.length >= 4, `expected operator/runtime message listeners, got ${listeners.runtimeMessage.length}`);
-assert.equal(listeners.installed.length, 1, 'install listener not registered');
-assert.equal(listeners.alarm.length, 1, 'alarm listener not registered');
+assert.ok(listeners.installed.length >= 3, `expected background + compat + updater install listeners, got ${listeners.installed.length}`);
+assert.ok(listeners.alarm.length >= 3, `expected bridge + compat + updater alarm listeners, got ${listeners.alarm.length}`);
+assert.ok(listeners.startup.length >= 2, `expected background + compat startup listeners, got ${listeners.startup.length}`);
+assert.equal(listeners.updateAvailable.length, 1, 'safe update listener not registered exactly once');
 assert.ok(listeners.debuggerEvent.length >= 2, 'broker + GLM debugger event listeners not registered');
 assert.ok(listeners.debuggerDetach.length >= 2, 'broker + GLM debugger detach listeners not registered');
 assert.ok(listeners.tabRemoved.length >= 2, 'operator/broker tab removal listeners not registered');
@@ -187,6 +193,9 @@ assert.equal(idbSecrets.get('pairing_secret'), 'x'.repeat(64), 'pairing secret w
 console.log('classic-worker-combined-load-v060: PASS', {
   fetchCalls: fetchCalls.length,
   runtimeMessageListeners: listeners.runtimeMessage.length,
+  installedListeners: listeners.installed.length,
+  alarmListeners: listeners.alarm.length,
+  startupListeners: listeners.startup.length,
   debuggerEventListeners: listeners.debuggerEvent.length,
   vaultMigrated: true,
 });
