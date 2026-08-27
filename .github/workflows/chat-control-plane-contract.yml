@@ -20,6 +20,8 @@ on:
       - 'tests/chat_bridge_receipt_recorder_behavior.mjs'
       - 'tests/chat_bridge_required_receipt_proxy_behavior.mjs'
       - 'tests/adversarial_chat_bridge_dom_f7.mjs'
+      - 'tests/a2_v060_*.mjs'
+      - 'tests/test_a2_browser_operator_v060_*.py'
       - '.github/workflows/chat-control-plane-contract.yml'
   workflow_dispatch:
 
@@ -29,7 +31,7 @@ permissions:
 jobs:
   contract:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Checkout exact workflow revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -37,30 +39,39 @@ jobs:
           persist-credentials: false
 
       - name: Python contract tests
-        run: python3 -m unittest -v tests.test_chat_control_plane_bridge_contract tests.test_a2_chat_bridge_receipt_contract tests.test_a2_chat_bridge_remote_contract
+        shell: bash
+        run: |
+          python3 -m unittest -v tests.test_chat_control_plane_bridge_contract tests.test_a2_chat_bridge_receipt_contract tests.test_a2_chat_bridge_remote_contract
+          if [ -f tests/test_a2_browser_operator_v060_debugger_integration.py ]; then
+            python3 -m unittest -v tests.test_a2_browser_operator_v060_debugger_integration
+          fi
 
       - name: JavaScript syntax checks
+        shell: bash
         run: |
-          node --check coordination/chat-control-plane/extension/bootstrap-config.js
-          node --check coordination/chat-control-plane/extension/content.js
-          node --check coordination/chat-control-plane/extension/auth-fetch.js
-          node --check coordination/chat-control-plane/extension/durable-fetch.js
-          node --check coordination/chat-control-plane/extension/background-entry.js
-          node --check coordination/chat-control-plane/extension/background.js
-          node --check coordination/chat-control-plane/extension/options.js
-          node --check coordination/chat-control-plane/daemon/server.mjs
-          node --check coordination/chat-control-plane/daemon/run.mjs
-          node --check coordination/chat-control-plane/daemon/secure-entry.mjs
-          node --check coordination/chat-control-plane/daemon/receipt-recorder.mjs
-          node --check tests/chat_bridge_worker_combined_load_behavior.mjs
-          node --check tests/chat_bridge_blind_phase_behavior.mjs
-          node --check tests/chat_bridge_durable_idempotency_behavior.mjs
-          node --check tests/chat_bridge_receipt_recorder_behavior.mjs
-          node --check tests/chat_bridge_required_receipt_proxy_behavior.mjs
-          node --check tests/adversarial_chat_bridge_dom_f7.mjs
+          for f in coordination/chat-control-plane/extension/*.js; do node --check "$f"; done
+          for f in coordination/chat-control-plane/daemon/*.mjs; do node --check "$f"; done
+          for f in tests/chat_bridge_worker_combined_load_behavior.mjs tests/chat_bridge_blind_phase_behavior.mjs tests/chat_bridge_durable_idempotency_behavior.mjs tests/chat_bridge_receipt_recorder_behavior.mjs tests/chat_bridge_required_receipt_proxy_behavior.mjs tests/adversarial_chat_bridge_dom_f7.mjs; do node --check "$f"; done
+          for f in tests/a2_v060_*.mjs; do
+            if [ -f "$f" ]; then node --check "$f"; fi
+          done
 
       - name: Classic service-worker combined-load regression
         run: node tests/chat_bridge_worker_combined_load_behavior.mjs
+
+      - name: Browser Operator v0.6 behavioral labs when present
+        shell: bash
+        run: |
+          for f in \
+            tests/a2_v060_debugger_broker_lab.mjs \
+            tests/a2_v060_operator_control_lab.mjs \
+            tests/a2_v060_perception_lab.mjs \
+            tests/a2_v060_oopif_perception_lab.mjs \
+            tests/a2_v060_operator_actions_lab.mjs \
+            tests/a2_v060_update_manager_lab.mjs \
+            tests/a2_v060_compat_config_lab.mjs; do
+            if [ -f "$f" ]; then node "$f"; fi
+          done
 
       - name: Manifest parse
         run: python3 -m json.tool coordination/chat-control-plane/extension/manifest.json >/dev/null
