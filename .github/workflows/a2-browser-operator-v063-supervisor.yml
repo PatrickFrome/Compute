@@ -26,6 +26,8 @@ jobs:
         run: |
           node tests/a2_v063_supervisor_session_lab.mjs
           node tests/a2_v063_supervisor_bootstrap_lab.mjs
+          node tests/a2_v063_signed_supervisor_transport_lab.mjs
+          node tests/a2_v063_signed_supervisor_edge_contract_lab.mjs
           node tests/a2_v063_bridge_disarm_lab.mjs
 
       - name: Existing Browser Operator regression labs
@@ -57,6 +59,8 @@ jobs:
       - name: Assert active v0.6.3 entrypoint
         run: |
           grep -E '^[[:space:]]*importScripts\("\./background-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
+          grep -E '^[[:space:]]*importScripts\("\./supervisor-transport-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
+          grep -E '^[[:space:]]*importScripts\("\./supervisor-fetch-router-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
           grep -E '^[[:space:]]*importScripts\("\./supervisor-client-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
           grep -E '^[[:space:]]*importScripts\("\./supervisor-bootstrap-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
           grep -F '0.6.3-supervisor-fsm-dev.1' coordination/chat-control-plane/extension/runtime-marker-v063.js
