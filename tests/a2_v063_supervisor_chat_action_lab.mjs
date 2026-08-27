@@ -89,14 +89,23 @@ assert.throws(
   () => context.A2_SUPERVISOR_CHAT_PARSE_ACTION(`A2_SUPERVISOR_ACTION\n{"action":"EXECUTE_JS","payload":{"code":"alert(1)"}}`),
   /supervisor_chat_action_not_allowed/
 );
-assert.throws(
-  () => context.A2_SUPERVISOR_CHAT_PARSE_ACTION(`A2_SUPERVISOR_ACTION\n{"action":"ARM","payload":{"secret":"x"}}`),
-  /supervisor_chat_action_payload_unknown_field/
+const unknownPayload = await context.A2_SUPERVISOR_CHAT_PROCESS_RESPONSE(
+  { incident_id: "i-unknown-payload" },
+  row(`A2_SUPERVISOR_ACTION\n{"action":"ARM","payload":{"secret":"x"}}`, "response-unknown")
 );
-assert.throws(
-  () => context.A2_SUPERVISOR_CHAT_PARSE_ACTION(`A2_SUPERVISOR_ACTION\n{"action":"SCROLL","platform":"CHATGPT","payload":{"delta_y":99999}}`),
-  /supervisor_chat_scroll_invalid/
+assert.equal(unknownPayload.detected, true);
+assert.equal(unknownPayload.ok, false);
+assert.match(unknownPayload.error_code, /supervisor_chat_action_payload_unknown_field/);
+assert.equal(local.get("armed"), true, "invalid ARM payload mutated authority state");
+
+const invalidScroll = await context.A2_SUPERVISOR_CHAT_PROCESS_RESPONSE(
+  { incident_id: "i-invalid-scroll" },
+  row(`A2_SUPERVISOR_ACTION\n{"action":"SCROLL","platform":"CHATGPT","payload":{"delta_y":99999}}`, "response-invalid-scroll")
 );
+assert.equal(invalidScroll.detected, true);
+assert.equal(invalidScroll.ok, false);
+assert.match(invalidScroll.error_code, /supervisor_chat_scroll_invalid/);
+assert.equal(scrollCalls, 0, "invalid SCROLL reached action runtime");
 
 await chrome.storage.session.set({ a2SupervisorModeV1: "CONTROL" });
 await chrome.storage.local.set({
