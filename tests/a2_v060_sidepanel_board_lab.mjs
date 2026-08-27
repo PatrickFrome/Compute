@@ -9,7 +9,11 @@ const css=fs.readFileSync(path.join(ext,'sidepanel.css'),'utf8');
 const js=fs.readFileSync(path.join(ext,'sidepanel.js'),'utf8');
 const sup=fs.readFileSync(path.join(ext,'sidepanel-supervisor.js'),'utf8');
 const entry=fs.readFileSync(path.join(ext,'background-entry.js'),'utf8');
-const activeClientName=entry.includes('supervisor-client-v063.js')?'supervisor-client-v063.js':'supervisor-client.js';
+const activeClientName=entry.includes('supervisor-client-v063-authority.js')
+  ? 'supervisor-client-v063-authority.js'
+  : entry.includes('supervisor-client-v063.js')
+    ? 'supervisor-client-v063.js'
+    : 'supervisor-client.js';
 const client=fs.readFileSync(path.join(ext,activeClientName),'utf8');
 
 function idsFrom(source){return [...source.matchAll(/\$\(["']([^"']+)["']\)/g)].map(m=>m[1]);}
@@ -21,10 +25,10 @@ assert.match(html,/Strict causal lane/);
 assert.match(html,/Chat Supervisor/);
 assert.match(html,/Live timeline/);
 assert.match(html,/<script src="sidepanel\.js"><\/script>\s*<script src="sidepanel-supervisor\.js"><\/script>/);
-assert.match(entry,/importScripts\("\.\/operator-semantic-actions\.js"\);\s*importScripts\("\.\/supervisor-client(?:-v063)?\.js"\);/);
+assert.match(entry,/importScripts\("\.\/operator-semantic-actions\.js"\);\s*importScripts\("\.\/supervisor-client(?:-v063(?:-authority)?)?\.js"\);/);
 assert.match(css,/\.causal-lane/);
 assert.match(css,/\.timeline-item/);
-assert.match(client,/supervisor_local_control_required/);
+assert.match(client,/supervisor_(?:local_)?control_required/);
 assert.match(client,/new Set\(\[\s*"ARM"/);
 assert.match(client,/A2_SUPERVISOR_SET_MODE/);
 assert.match(client,/CONTROL/);
@@ -34,5 +38,12 @@ assert.doesNotMatch(client,/EXECUTE_JS/);
 assert.doesNotMatch(client,/eval\(command/);
 assert.match(client,/A2_GET_PAIRING_SECRET/);
 assert.match(client,/A2_BRIDGE_CLIENT_ID/);
+
+if(activeClientName==='supervisor-client-v063-authority.js'){
+  assert.match(client,/SET_SUPERVISOR_MODE/);
+  assert.match(client,/BOOTSTRAP_ACTIONS/);
+  assert.match(client,/a2-browser-supervisor-v3-canary/);
+  assert.doesNotMatch(client,/body_excerpt/);
+}
 
 console.log('a2_v060_sidepanel_board_lab: PASS',{requiredIds:required.size,activeClientName});
