@@ -4,6 +4,7 @@
   const REGISTRY_KEY = "a2TargetRegistryV1";
   const BINDINGS_KEY = "a2TargetBindingsV1";
   const SESSION_NONCE_KEY = "a2TargetRegistrySessionNonceV1";
+  const ERROR_KEY = "a2TargetRegistryLastError";
   const SCHEMA = "metaengine.a2-browser-operator.target-registry.v1";
   const BINDING_SCHEMA = "metaengine.a2-browser-operator.target-bindings.v1";
   const TARGET_ID_RE = /^[a-z0-9][a-z0-9._:-]{2,95}$/;
@@ -123,8 +124,7 @@
 
   async function loadRegistry() {
     const stored = await chrome.storage.local.get(REGISTRY_KEY);
-    if (!stored[REGISTRY_KEY]) return emptyRegistry();
-    return validateRegistry(stored[REGISTRY_KEY]);
+    return stored[REGISTRY_KEY] ? validateRegistry(stored[REGISTRY_KEY]) : emptyRegistry();
   }
 
   async function persistRegistry(registry) {
@@ -150,15 +150,87 @@
   async function loadBindings() {
     const stored = await chrome.storage.session.get(BINDINGS_KEY);
     const raw = stored[BINDINGS_KEY];
-    return raw && raw.schema === BINDING_SCHEMA && raw.bindings && typeof raw.bindings === "object"
-      ? raw
-      : { schema: BINDING_SCHEMA, browser_session_nonce: await ensureSessionNonce(), bindings: {}, updated_at: nowIso() };
+    if (raw?.schema === BINDING_SCHEMA && raw.bindings && typeof raw.bindings === "object") return raw;
+    return { schema: BINDING_SCHEMA, browser_session_nonce: await ensureSessionNonce(), bindings: {}, updated_at: nowIso() };
   }
 
   async function persistBindings(bindings) {
-    const clean = { schema: BINDING_SCHEMA, browser_session_nonce: await ensureSessionNonce(), bindings: { ...(bindings?.bindings || {}) }, updated_at: nowIso() };
+    const clean = {
+      schema: BINDING_SCHEMA,
+      browser_session_nonce: await ensureSessionNonce(),
+      bindings: { ...(bindings?.bindings || {}) },
+      updated_at: nowIso()
+    };
     await chrome.storage.session.set({ [BINDINGS_KEY]: clean });
     return clean;
+  }
+
+  async function getBinding(targetId) {
+    const id = normalizeTargetId(targetId);
+    const state = await loadBindings();
+    return state.bindings[id] ? clone(state.bindings[id]) : null;
+  }
+
+  async function clearBinding(targetId) {
+    const id = normalizeTargetId(targetId);
+    const state = await loadBindings();
+    if (!state.bindings[id]) return;
+    delete state.bindings[id];
+    await persistBindings(state);
+  }
+
+  async function clearBindingsForTab(tabId) {
+    const state = await loadBindings();
+    let changed = false;
+    for (const [targetId, binding] of Object.entries(state.bindings)) {
+      if (Number(binding?.tab_id) === Number(tabId)) {
+        delete state.bindings[targetId];
+        changed = true;
+      }
+    }
+    if (changed) await persistBindings(state);
+  }
+
+  async function bind(target, tab) {
+    if (!target?.target_id || !Number.isInteger(Number(tab?.id))) throw new Error("target_binding_invalid");
+    const liveUrl = normUrl(tab?.url || "");
+    if (!target.conversation_url || liveUrl !== target.conversation_url || platformOf(liveUrl) !== target.platform) throw new Error("target_binding_url_mismatch");
+    const state = await loadBindings();
+    for (const [otherId, binding] of Object.entries(state.bindings)) {
+      if (otherId !== target.target_id && Number(binding?.tab_id) === Number(tab.id)) delete state.bindings[otherId];
+    }
+    state.bindings[target.target_id] = {
+      schema: "metaengine.a2-browser-operator.target-binding.v1",
+      target_id: target.target_id,
+      tab_id: Number(tab.id),
+      conversation_epoch: target.conversation_epoch,
+      conversation_url: target.conversation_url,
+      browser_session_nonce: state.browser_session_nonce,
+      bound_at: state.bindings[target.target_id]?.bound_at || nowIso(),
+      validated_at: nowIso()
+    };
+    await persistBindings(state);
+    return clone(state.bindings[target.target_id]);
+  }
+
+  async function recordLegacyConflict(platform, spec, current, configured, conflict) {
+    const restoredUrl = current?.conversation_url || "";
+    suppressLegacyStorageSync = true;
+    try { await chrome.storage.local.set({ [spec.configKey]: restoredUrl }); }
+    finally { suppressLegacyStorageSync = false; }
+    await chrome.storage.local.set({
+      [ERROR_KEY]: {
+        schema: "metaengine.a2-browser-operator.target-registry-error.v1",
+        code: "LEGACY_URL_CONFLICT",
+        platform,
+        conflicting_target_id: conflict.target_id,
+        attempted_url: configured,
+        restored_url: restoredUrl || null,
+        at: nowIso(),
+        authority_effect: false
+      }
+    });
+    throw new Error(`target_registry_legacy_url_conflict:${platform}:${conflict.target_id}`);
   }
 
   async function syncLegacySeeds() {
@@ -166,10 +238,18 @@
       const registry = await loadRegistry();
       const settings = await chrome.storage.local.get(Object.values(PLATFORMS).map((spec) => spec.configKey));
       let changed = false;
+      const bindingsToClear = [];
+
       for (const [platform, spec] of Object.entries(PLATFORMS)) {
         const configured = normUrl(settings[spec.configKey] || "");
         if (configured) assertPlatformUrl(platform, configured);
         const index = registry.targets.findIndex((target) => target.legacy_alias === platform);
+        const current = index >= 0 ? registry.targets[index] : null;
+        const conflict = configured
+          ? registry.targets.find((target, i) => i !== index && target.status !== "RETIRED" && target.conversation_url === configured)
+          : null;
+        if (conflict) await recordLegacyConflict(platform, spec, current, configured, conflict);
+
         if (index < 0) {
           registry.targets.push(canonicalTarget({
             target_id: spec.seedId,
@@ -184,9 +264,11 @@
           changed = true;
           continue;
         }
-        const current = registry.targets[index];
+
         if ((current.conversation_url || "") !== configured) {
-          const nextEpoch = current.conversation_url && configured ? current.conversation_epoch + 1 : configured ? Math.max(1, current.conversation_epoch) : current.conversation_epoch;
+          const nextEpoch = configured
+            ? (current.conversation_epoch > 0 ? current.conversation_epoch + 1 : 1)
+            : current.conversation_epoch;
           registry.targets[index] = canonicalTarget({
             ...current,
             conversation_url: configured || null,
@@ -194,10 +276,15 @@
             status: configured ? "ACTIVE" : "UNBOUND",
             updated_at: nowIso()
           }, current);
+          bindingsToClear.push(current.target_id);
           changed = true;
         }
       }
-      return changed ? persistRegistry(registry) : registry;
+
+      const result = changed ? await persistRegistry(registry) : registry;
+      for (const targetId of bindingsToClear) await clearBinding(targetId);
+      await chrome.storage.local.remove(ERROR_KEY);
+      return result;
     });
   }
 
@@ -271,13 +358,14 @@
       }, current);
       registry.targets[index] = next;
       await persistRegistry(registry);
-      await clearBinding(id);
+      if (changedUrl) await clearBinding(id);
       if (next.legacy_alias) {
         const configKey = PLATFORMS[next.legacy_alias].configKey;
         suppressLegacyStorageSync = true;
         try { await chrome.storage.local.set({ [configKey]: url }); }
         finally { suppressLegacyStorageSync = false; }
       }
+      await chrome.storage.local.remove(ERROR_KEY);
       return clone(next);
     });
   }
@@ -295,56 +383,9 @@
   }
 
   async function retireTarget(targetId) {
-    return setStatus(targetId, "RETIRED").then(async (target) => {
-      await clearBinding(target.target_id);
-      return target;
-    });
-  }
-
-  async function bind(target, tab) {
-    if (!target?.target_id || !Number.isInteger(Number(tab?.id))) throw new Error("target_binding_invalid");
-    const liveUrl = normUrl(tab?.url || "");
-    if (!target.conversation_url || liveUrl !== target.conversation_url || platformOf(liveUrl) !== target.platform) throw new Error("target_binding_url_mismatch");
-    const state = await loadBindings();
-    for (const [otherId, binding] of Object.entries(state.bindings)) {
-      if (otherId !== target.target_id && Number(binding?.tab_id) === Number(tab.id)) delete state.bindings[otherId];
-    }
-    state.bindings[target.target_id] = {
-      schema: "metaengine.a2-browser-operator.target-binding.v1",
-      target_id: target.target_id,
-      tab_id: Number(tab.id),
-      conversation_epoch: target.conversation_epoch,
-      conversation_url: target.conversation_url,
-      browser_session_nonce: state.browser_session_nonce,
-      bound_at: state.bindings[target.target_id]?.bound_at || nowIso(),
-      validated_at: nowIso()
-    };
-    await persistBindings(state);
-    return clone(state.bindings[target.target_id]);
-  }
-
-  async function clearBinding(targetId) {
-    const id = normalizeTargetId(targetId);
-    const state = await loadBindings();
-    if (state.bindings[id]) {
-      delete state.bindings[id];
-      await persistBindings(state);
-    }
-  }
-
-  async function clearBindingsForTab(tabId) {
-    const state = await loadBindings();
-    let changed = false;
-    for (const [targetId, binding] of Object.entries(state.bindings)) {
-      if (Number(binding?.tab_id) === Number(tabId)) { delete state.bindings[targetId]; changed = true; }
-    }
-    if (changed) await persistBindings(state);
-  }
-
-  async function getBinding(targetId) {
-    const id = normalizeTargetId(targetId);
-    const state = await loadBindings();
-    return state.bindings[id] ? clone(state.bindings[id]) : null;
+    const target = await setStatus(targetId, "RETIRED");
+    await clearBinding(target.target_id);
+    return target;
   }
 
   async function resolveLiveTab(selector, { exactTabId = null, allowBind = true } = {}) {
@@ -356,14 +397,15 @@
         const live = await chrome.tabs.get(Number(existing.tab_id));
         if (Number.isInteger(Number(live?.id)) && normUrl(live.url || "") === target.conversation_url && platformOf(live.url || "") === target.platform) {
           if (exactTabId != null && Number(live.id) !== Number(exactTabId)) throw new Error("target_tab_binding_mismatch");
-          if (allowBind) await bind(target, live);
-          return { target, tab: live, binding: allowBind ? await getBinding(target.target_id) : existing };
+          const binding = allowBind ? await bind(target, live) : existing;
+          return { target, tab: live, binding };
         }
       } catch (error) {
         if (String(error?.message || error) === "target_tab_binding_mismatch") throw error;
       }
       await clearBinding(target.target_id);
     }
+
     const tabs = await chrome.tabs.query({});
     const matches = tabs.filter((tab) => Number.isInteger(Number(tab?.id)) && normUrl(tab.url || "") === target.conversation_url && platformOf(tab.url || "") === target.platform);
     if (matches.length !== 1) throw new Error(matches.length ? `target_duplicate_tabs:${target.target_id}:${matches.length}` : `target_tab_not_found:${target.target_id}`);
@@ -398,9 +440,8 @@
 
   chrome.tabs.onRemoved.addListener((tabId) => { clearBindingsForTab(tabId).catch(() => {}); });
   chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-    if (typeof changeInfo?.url === "string") {
-      clearBindingsForTab(tabId).then(() => bindObservedTab({ id: tabId, url: changeInfo.url })).catch(() => {});
-    }
+    if (typeof changeInfo?.url !== "string") return;
+    clearBindingsForTab(tabId).then(() => bindObservedTab({ id: tabId, url: changeInfo.url })).catch(() => {});
   });
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -411,12 +452,19 @@
       return false;
     }
     if (!["A2_TARGET_REGISTRY_LIST", "A2_TARGET_REGISTRY_CREATE", "A2_TARGET_REGISTRY_ROLLOVER", "A2_TARGET_REGISTRY_RETIRE", "A2_TARGET_REGISTRY_RESOLVE"].includes(type)) return false;
-    if (!trustedExtensionPage(sender)) { sendResponse({ ok: false, error: "target_registry_sender_not_trusted" }); return false; }
-    const job = type === "A2_TARGET_REGISTRY_LIST" ? listTargets({ includeRetired: message?.include_retired === true })
-      : type === "A2_TARGET_REGISTRY_CREATE" ? createTarget(message?.target || {})
-      : type === "A2_TARGET_REGISTRY_ROLLOVER" ? updateConversation(message?.target_id, message?.conversation_url, { status: message?.status || "ACTIVE" })
-      : type === "A2_TARGET_REGISTRY_RETIRE" ? retireTarget(message?.target_id)
-      : resolveLiveTab(message?.selector || message?.target_id || message?.platform, { exactTabId: message?.exact_tab_id ?? null });
+    if (!trustedExtensionPage(sender)) {
+      sendResponse({ ok: false, error: "target_registry_sender_not_trusted" });
+      return false;
+    }
+    const job = type === "A2_TARGET_REGISTRY_LIST"
+      ? listTargets({ includeRetired: message?.include_retired === true })
+      : type === "A2_TARGET_REGISTRY_CREATE"
+        ? createTarget(message?.target || {})
+        : type === "A2_TARGET_REGISTRY_ROLLOVER"
+          ? updateConversation(message?.target_id, message?.conversation_url, { status: message?.status || "ACTIVE" })
+          : type === "A2_TARGET_REGISTRY_RETIRE"
+            ? retireTarget(message?.target_id)
+            : resolveLiveTab(message?.selector || message?.target_id || message?.platform, { exactTabId: message?.exact_tab_id ?? null });
     Promise.resolve(job).then((result) => sendResponse({ ok: true, result })).catch((error) => sendResponse({ ok: false, error: String(error?.message || error) }));
     return true;
   });
