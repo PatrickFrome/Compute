@@ -1,0 +1,160 @@
+name: W1 SSM Safety Provision Contract
+
+on:
+  push:
+    branches:
+      - work/w1-linux-worker-safety
+      - work/main-roadmap-accelerators-v5
+    paths:
+      - 'controller/w1/build_host_safety_package.py'
+      - 'controller/w1/build_ssm_safety_provision_document.py'
+      - 'controller/w1/host_safety_evidence_bundle.py'
+      - 'controller/w1/host_safety_envelope_validator.py'
+      - 'worker/native_linux/host_safety_envelope_probe.py'
+      - 'infra/w1/package/W1_SAFETY_ENVELOPE_73AB09C7_MANIFEST.json'
+      - 'tests/test_w1_host_safety_package_builder.py'
+      - 'tests/test_w1_ssm_safety_provision_document.py'
+      - '.github/workflows/w1-ssm-safety-provision-contract.yml'
+      - 'research/W1_SSM_SAFETY_PROVISIONING.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/w1/build_host_safety_package.py'
+      - 'controller/w1/build_ssm_safety_provision_document.py'
+      - 'controller/w1/host_safety_evidence_bundle.py'
+      - 'controller/w1/host_safety_envelope_validator.py'
+      - 'worker/native_linux/host_safety_envelope_probe.py'
+      - 'infra/w1/package/W1_SAFETY_ENVELOPE_73AB09C7_MANIFEST.json'
+      - 'tests/test_w1_host_safety_package_builder.py'
+      - 'tests/test_w1_ssm_safety_provision_document.py'
+      - '.github/workflows/w1-ssm-safety-provision-contract.yml'
+      - 'research/W1_SSM_SAFETY_PROVISIONING.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  provision-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Verify exact source head
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Compile provisioning builders
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            controller/w1/build_host_safety_package.py \
+            controller/w1/build_ssm_safety_provision_document.py
+
+      - name: Run package and document adversarial tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest \
+            tests.test_w1_host_safety_package_builder \
+            tests.test_w1_ssm_safety_provision_document -v
+
+      - name: Prove deterministic parameterless document
+        run: |
+          set -euo pipefail
+          python3 controller/w1/build_ssm_safety_provision_document.py --document-out /tmp/w1-provision-a.json > /tmp/w1-provision-a.receipt.json
+          python3 controller/w1/build_ssm_safety_provision_document.py --document-out /tmp/w1-provision-b.json > /tmp/w1-provision-b.receipt.json
+          cmp /tmp/w1-provision-a.json /tmp/w1-provision-b.json
+          cmp /tmp/w1-provision-a.receipt.json /tmp/w1-provision-b.receipt.json
+          python3 - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          receipt=json.load(open('/tmp/w1-provision-a.receipt.json'))
+          document=json.load(open('/tmp/w1-provision-a.json'))
+          raw=json.dumps(document,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()
+          assert len(raw)==receipt['document_bytes']
+          assert len(raw)<=65536
+          assert hashlib.sha256(raw).hexdigest()==receipt['document_sha256']
+          assert document['parameters']=={}
+          assert receipt['parameterless'] is True
+          assert receipt['network_fetch_allowed'] is False
+          assert receipt['capture_authority'] is False
+          assert receipt['reboot_authority'] is False
+          assert receipt['admission_authority'] is False
+          print('provision document bytes:', len(raw))
+          print('embedded package sha256:', receipt['package_sha256'])
+          PY
+
+      - name: Extract reviewed fixed command from generated document
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          document=json.load(open('/tmp/w1-provision-a.json'))
+          assert document['parameters']=={}
+          steps=document['mainSteps']
+          assert len(steps)==1 and steps[0]['action']=='aws:runShellScript'
+          commands=steps[0]['inputs']['runCommand']
+          assert len(commands)==1
+          Path('/tmp/w1-provision-command.sh').write_text(commands[0]+'\n',encoding='utf-8')
+          PY
+          chmod 0500 /tmp/w1-provision-command.sh
+
+      - name: Execute generated provisioning command as isolated root action
+        run: |
+          set -euo pipefail
+          sudo /bin/sh /tmp/w1-provision-command.sh > /tmp/w1-provision-courier.json
+          python3 - <<'PY'
+          import json
+          value=json.load(open('/tmp/w1-provision-courier.json'))
+          assert value['schema']=='metaengine.compute.w1-aws-ssm-safety-provision-courier.h205f22.v1'
+          assert value['source']=='HOST_UNTRUSTED_TRANSPORT'
+          assert value['transport']=='AWS_SSM_RUN_COMMAND_FIXED_EMBEDDED_PACKAGE'
+          assert value['package_install_observed'] is True
+          assert value['package_provisioning_verified'] is False
+          assert value['host_safety_verified'] is False
+          assert value['capture_executed'] is False
+          assert value['provider_identity_verified'] is False
+          assert value['reboot_completion_proven'] is False
+          assert value['persistent_worker_proof'] is False
+          assert value['w1_verified'] is False
+          assert value['canonical'] is False
+          assert value['authority_effect'] is False
+          print('provision courier package sha256:', value['package_zip_sha256'])
+          PY
+          ROOT='/opt/metaengine/w1/safety/73ab09c75b71a6ea40f11e953cbcf9d9b94b9a89'
+          test -f "$ROOT/manifest.json"
+          test -f "$ROOT/package-lock.json"
+          test "$(stat -c %U "$ROOT/controller/w1/host_safety_evidence_bundle.py")" = root
+          test "$(stat -c %a "$ROOT/controller/w1/host_safety_evidence_bundle.py")" = 444
+          test "$(stat -c %U /var/lib/metaengine/w1/workspace)" = metaengine-w1
+          test "$(stat -c %a /var/lib/metaengine/w1/workspace)" = 700
+
+      - name: Prove provisioning command cannot perform capture or external fetch
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          command=Path('/tmp/w1-provision-command.sh').read_text(encoding='utf-8').lower()
+          for forbidden in (
+              'host_safety_evidence_bundle.py" >',
+              'curl ', 'wget ', 'https://', 'http://', 'aws ', 'ssh ',
+              'ssm:sendcommand', 'ec2:rebootinstances', 'supabase',
+              'aws-configureawspackage', 'aws-rundocument',
+          ):
+              assert forbidden not in command, forbidden
+          print('W1 provisioning command capture/network authority: NONE')
+          PY
+
+      - name: Cleanup ephemeral CI installation
+        if: always()
+        run: |
+          sudo rm -rf '/opt/metaengine/w1/safety/73ab09c75b71a6ea40f11e953cbcf9d9b94b9a89' /var/lib/metaengine/w1
+          if id -u metaengine-w1 >/dev/null 2>&1; then
+            sudo userdel metaengine-w1 || true
+          fi
