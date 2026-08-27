@@ -3,14 +3,6 @@ name: W1 Provider Dispatch Authority Gate Contract
 on:
   push:
     branches: [work/w1-sandbox-launcher-prep]
-    paths:
-      - 'controller/w1/provider_dispatch_authority_guard.py'
-      - 'tests/test_w1_provider_dispatch_authority_guard.py'
-      - 'tests/test_w1_provider_dispatch_authority_broker_contract.py'
-      - 'supabase/functions/metaengine-w1-authority-broker-h205f22/index.ts'
-      - 'supabase/prep/w1_effective_execution_preflight_v1.sql'
-      - '.github/workflows/w1-aws-provider-reboot-proof.yml'
-      - '.github/workflows/w1-provider-dispatch-authority-gate-contract.yml'
   workflow_dispatch:
 
 permissions:
@@ -26,15 +18,19 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Compile fail-closed verifier
+      - name: Compile fail-closed verifiers
         run: |
           set -euo pipefail
-          python3 -m py_compile controller/w1/provider_dispatch_authority_guard.py
+          python3 -m py_compile \
+            controller/w1/effective_execution_preflight.py \
+            controller/w1/provider_dispatch_authority_guard.py
 
-      - name: Run adversarial receipt and broker-boundary tests
+      - name: Run integrated adversarial authority-chain tests
         run: |
           set -euo pipefail
           python3 -m unittest \
+            tests.test_w1_effective_execution_preflight \
+            tests.test_w1_effective_execution_preflight_sql_contract \
             tests.test_w1_provider_dispatch_authority_guard \
             tests.test_w1_provider_dispatch_authority_broker_contract -v
 
@@ -45,6 +41,7 @@ jobs:
           from pathlib import Path
           guard=Path('controller/w1/provider_dispatch_authority_guard.py').read_text()
           broker=Path('supabase/functions/metaengine-w1-authority-broker-h205f22/index.ts').read_text()
+          sql=Path('supabase/prep/w1_effective_execution_preflight_v1.sql').read_text()
           raw=Path('.github/workflows/w1-aws-provider-reboot-proof.yml').read_text()
           marker='      - name: Validate live W1 credential and trust-zone contract'
           before,remainder=raw.split(marker,1)
@@ -57,6 +54,8 @@ jobs:
           assert 'SUPABASE_SERVICE_ROLE_KEY' not in workflow
           assert 'SUPABASE_SECRET_KEYS' not in workflow
           assert 'secrets.SUPABASE' not in workflow
+          assert "bool_and(coalesce((value #>> '{}')::boolean,false))" in sql
+          assert "directive_kind in ('OPEN','CONTINUE','REASSIGN')" in sql
           gate=workflow.index('      - name: Acquire fresh external W1 authority receipt')
           reboot=workflow.index('      - name: Execute independent provider reboot',gate)
           assert 'provider_dispatch_authority_guard.py' in workflow[gate:reboot]
