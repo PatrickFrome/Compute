@@ -13,6 +13,7 @@ No provider mutation, worker admission, or W1 verification occurs here.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 from pathlib import Path
@@ -34,13 +35,12 @@ POLICY_FIXTURE_PATHS = {
     "tests/test_w1_s2_pid1_evidence_consumer_audit.py",
 }
 
-# Common programmatic forms of the old layout. These deliberately target reads
-# under evidence.probe/evidence.checks rather than mere field-name mentions in
-# migration notes or the v3 excluded_host_dependent_fields metadata.
-LEGACY_LAYOUT_PATTERNS = (
-    re.compile(r"\[\s*['\"]evidence['\"]\s*\].{0,160}\[\s*['\"](?:probe|checks)['\"]\s*\].{0,160}\[\s*['\"]rlimit_nofile_", re.S),
-    re.compile(r"\$\.evidence\.(?:probe|checks)\.rlimit_nofile_"),
-    re.compile(r"\{\s*evidence\s*,\s*(?:probe|checks)\s*,\s*rlimit_nofile_"),
+# Non-Python machine-readable forms of the legacy layout. Python is parsed with
+# AST below so defensive tests like ``assert field not in evidence['probe']`` do
+# not become false consumers merely because a NOFILE literal appears nearby.
+LEGACY_TEXT_LAYOUT_PATTERNS = (
+    ("jsonpath_legacy_layout", re.compile(r"\$\.evidence\.(?:probe|checks)\.rlimit_nofile_")),
+    ("sql_json_path_legacy_layout", re.compile(r"\{\s*evidence\s*,\s*(?:probe|checks)\s*,\s*rlimit_nofile_")),
 )
 
 
@@ -76,11 +76,47 @@ def _repo_text_files(root: Path):
             yield rel.as_posix(), text
 
 
-def _legacy_layout_matches(text: str) -> list[str]:
-    labels = []
-    for index, pattern in enumerate(LEGACY_LAYOUT_PATTERNS, start=1):
+def _subscript_string_chain(node: ast.AST) -> list[str]:
+    keys: list[str] = []
+    current = node
+    while isinstance(current, ast.Subscript):
+        index = current.slice
+        if not isinstance(index, ast.Constant) or not isinstance(index.value, str):
+            return []
+        keys.append(index.value)
+        current = current.value
+    keys.reverse()
+    return keys
+
+
+def _python_legacy_layout(text: str) -> bool:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return False
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Subscript):
+            continue
+        chain = _subscript_string_chain(node)
+        for offset in range(max(0, len(chain) - 2)):
+            triplet = chain[offset:offset + 3]
+            if (
+                len(triplet) == 3
+                and triplet[0] == "evidence"
+                and triplet[1] in {"probe", "checks"}
+                and triplet[2].startswith("rlimit_nofile_")
+            ):
+                return True
+    return False
+
+
+def _legacy_layout_matches(rel: str, text: str) -> list[str]:
+    labels: list[str] = []
+    if rel.endswith(".py") and _python_legacy_layout(text):
+        labels.append("python_ast_legacy_subscript")
+    for label, pattern in LEGACY_TEXT_LAYOUT_PATTERNS:
         if pattern.search(text):
-            labels.append(f"legacy_layout_pattern_{index}")
+            labels.append(label)
     return labels
 
 
@@ -97,7 +133,7 @@ def evaluate(root: Path) -> dict[str, Any]:
         scanned += 1
         if LEGACY_PID1_SCHEMA in text:
             legacy_schema_consumers.append(rel)
-        layout = _legacy_layout_matches(text)
+        layout = _legacy_layout_matches(rel, text)
         if layout:
             legacy_layout_consumers.append({"path": rel, "matches": layout})
         if CURRENT_PID1_SCHEMA in text:
