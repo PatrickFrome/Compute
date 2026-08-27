@@ -11,7 +11,7 @@
   let activeEnvelope = null;
   let activePayload = Object.freeze({});
 
-  const ALLOWED_FEATURES = new Set(["point_click_enabled", "screenshot_sensor_enabled", "prompt_gate_enabled"]);
+  const ALLOWED_FEATURES = new Set(["point_click_enabled", "screenshot_sensor_enabled", "prompt_gate_enabled", "semantic_actions_enabled"]);
   const ALLOWED_KILL_SWITCHES = new Set(["autonomous_send_disabled", "operator_actions_disabled"]);
   const ALLOWED_TIMEOUTS = Object.freeze({
     frame_max_age_ms: [5000, 120000],
