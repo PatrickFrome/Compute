@@ -7,6 +7,7 @@ on:
       - work/w1-linux-worker-safety
     paths:
       - '.github/workflows/w1-aws-ssm-safety-provision-live.yml'
+      - 'controller/w1/aws_ssm_safety_live_cli.py'
       - 'controller/w1/aws_ssm_safety_provision_guard.py'
       - 'controller/w1/aws_ssm_safety_provision_provenance.py'
       - 'controller/w1/aws_ssm_safety_send_semantics_guard.py'
@@ -15,12 +16,14 @@ on:
       - 'controller/w1/aws_instance_identity_verifier.py'
       - 'controller/w1/aws_provider_reboot_controller.py'
       - 'infra/w1/ssm/Metaengine-W1-IID-Capture-H205F22.json'
+      - 'tests/test_w1_aws_ssm_safety_live_cli.py'
       - 'tests/test_w1_aws_ssm_safety_live_workflow_contract.py'
       - 'research/W1_SSM_SAFETY_LIVE_WORKFLOW.md'
   pull_request:
     branches: [main]
     paths:
       - '.github/workflows/w1-aws-ssm-safety-provision-live.yml'
+      - 'controller/w1/aws_ssm_safety_live_cli.py'
       - 'controller/w1/aws_ssm_safety_provision_guard.py'
       - 'controller/w1/aws_ssm_safety_provision_provenance.py'
       - 'controller/w1/aws_ssm_safety_send_semantics_guard.py'
@@ -29,6 +32,7 @@ on:
       - 'controller/w1/aws_instance_identity_verifier.py'
       - 'controller/w1/aws_provider_reboot_controller.py'
       - 'infra/w1/ssm/Metaengine-W1-IID-Capture-H205F22.json'
+      - 'tests/test_w1_aws_ssm_safety_live_cli.py'
       - 'tests/test_w1_aws_ssm_safety_live_workflow_contract.py'
       - 'research/W1_SSM_SAFETY_LIVE_WORKFLOW.md'
   workflow_dispatch:
@@ -74,6 +78,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           python3 -m py_compile \
+            controller/w1/aws_ssm_safety_live_cli.py \
             controller/w1/aws_ssm_safety_provision_guard.py \
             controller/w1/aws_ssm_safety_provision_provenance.py \
             controller/w1/aws_ssm_safety_send_semantics_guard.py \
@@ -88,6 +93,7 @@ jobs:
             tests.test_w1_aws_ssm_iid_capture_guard \
             tests.test_w1_aws_iid_courier_verifier \
             tests.test_w1_aws_instance_identity_verifier \
+            tests.test_w1_aws_ssm_safety_live_cli \
             tests.test_w1_aws_ssm_safety_live_workflow_contract -v
 
   live-gate:
@@ -119,10 +125,7 @@ jobs:
           [[ "$INSTANCE_ID" =~ ^i-[0-9a-f]+$ ]]
           [[ "$WORKER_ID" =~ ^[A-Za-z0-9._:-]{3,160}$ ]]
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          python3 - <<'PY'
-          from controller.w1 import build_host_safety_package as p
-          assert p.SOURCE_COMMIT == '73ab09c75b71a6ea40f11e953cbcf9d9b94b9a89'
-          PY
+          python3 -c "from controller.w1 import build_host_safety_package as p; assert p.SOURCE_COMMIT == '$EXPECTED_PACKAGE_SOURCE_SHA'"
           echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
           echo "worker_id=$WORKER_ID" >> "$GITHUB_OUTPUT"
 
@@ -157,13 +160,7 @@ jobs:
           [[ "$AWS_REGION" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]]
           [[ "$AWS_ROLE_ARN" =~ ^arn:aws(-[a-z]+)?:iam::${AWS_ACCOUNT_ID}:role/.+ ]]
           mkdir -p evidence
-          python3 - <<'PY'
-          import json,os
-          from controller.w1 import aws_ssm_safety_provision_guard as g
-          value=g.build_session_boundary(instance_id=os.environ['INSTANCE_ID'],worker_id=os.environ['WORKER_ID'],account_id=os.environ['AWS_ACCOUNT_ID'],region=os.environ['AWS_REGION'])
-          json.dump(value,open('evidence/provision-session-boundary.json','w'),sort_keys=True,separators=(',',':'))
-          print(value['package_sha256'])
-          PY
+          python3 -c "import json,os;from controller.w1 import aws_ssm_safety_provision_guard as g;v=g.build_session_boundary(instance_id=os.environ['INSTANCE_ID'],worker_id=os.environ['WORKER_ID'],account_id=os.environ['AWS_ACCOUNT_ID'],region=os.environ['AWS_REGION']);json.dump(v,open('evidence/provision-session-boundary.json','w'),sort_keys=True,separators=(',',':'))"
           POLICY="$(python3 -c "import json;print(json.dumps(json.load(open('evidence/provision-session-boundary.json'))['session_policy'],separators=(',',':')))" )"
           echo "policy=$POLICY" >> "$GITHUB_OUTPUT"
 
@@ -182,8 +179,8 @@ jobs:
           unset-current-credentials: true
           inline-session-policy: ${{ steps.session.outputs.policy }}
 
-      - name: Validate remote managed node and immutable provisioning document
-        env: &provision_creds
+      - name: Validate managed node and immutable remote document
+        env:
           AWS_ACCESS_KEY_ID: ${{ steps.aws.outputs.aws-access-key-id }}
           AWS_SECRET_ACCESS_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
           AWS_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
@@ -192,85 +189,72 @@ jobs:
           AWS_EC2_METADATA_DISABLED: 'true'
         run: |
           set -euo pipefail
-          aws sts get-caller-identity --output json > evidence/provision-caller.json
           aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$INSTANCE_ID" --output json > evidence/provision-managed-node.json
           aws ssm describe-document --name "$PROVISION_DOCUMENT_NAME" --document-version '1' --output json > evidence/provision-document-description.json
           aws ssm get-document --name "$PROVISION_DOCUMENT_NAME" --document-version '1' --document-format JSON --output json > evidence/provision-get-document.json
-          python3 - <<'PY'
-          import json,os
-          from controller.w1 import aws_ssm_safety_provision_guard as g
-          caller=json.load(open('evidence/provision-caller.json'))
-          assert caller.get('Account') == os.environ['AWS_ACCOUNT_ID']
-          g.validate_managed_node(json.load(open('evidence/provision-managed-node.json')),expected_instance_id=os.environ['INSTANCE_ID'])
-          remote=g.validate_remote_document(description=json.load(open('evidence/provision-document-description.json')),get_document=json.load(open('evidence/provision-get-document.json')),account_id=os.environ['AWS_ACCOUNT_ID'])
-          plan=g.build_command_plan(instance_id=os.environ['INSTANCE_ID'],aws_document_sha256=remote['aws_document_sha256'])
-          json.dump(plan,open('evidence/provision-command-plan.json','w'),sort_keys=True,separators=(',',':'))
-          PY
+          python3 controller/w1/aws_ssm_safety_live_cli.py validate-remote \
+            --managed-node evidence/provision-managed-node.json \
+            --description evidence/provision-document-description.json \
+            --get-document evidence/provision-get-document.json \
+            --instance-id "$INSTANCE_ID" --account-id "$AWS_ACCOUNT_ID" \
+            --remote-output evidence/provision-remote.json \
+            --plan-output evidence/provision-command-plan.json
 
       - name: Send exact parameterless provisioning command
         id: send
-        env: *provision_creds
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
+          AWS_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_DEFAULT_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_EC2_METADATA_DISABLED: 'true'
         run: |
           set -euo pipefail
           DOCUMENT_HASH="$(python3 -c "import json;print(json.load(open('evidence/provision-command-plan.json'))['document_hash'])")"
           REQUESTED_AT="$(python3 -c "from datetime import datetime,timezone;print(datetime.now(timezone.utc).isoformat())")"
           aws ssm send-command \
-            --document-name "$PROVISION_DOCUMENT_NAME" \
-            --document-version '1' \
-            --document-hash "$DOCUMENT_HASH" \
-            --document-hash-type Sha256 \
-            --instance-ids "$INSTANCE_ID" \
-            --timeout-seconds 120 \
+            --document-name "$PROVISION_DOCUMENT_NAME" --document-version '1' \
+            --document-hash "$DOCUMENT_HASH" --document-hash-type Sha256 \
+            --instance-ids "$INSTANCE_ID" --timeout-seconds 120 \
             --output json > evidence/provision-send-response.json
           API_RETURNED_AT="$(python3 -c "from datetime import datetime,timezone;print(datetime.now(timezone.utc).isoformat())")"
-          python3 - <<'PY'
-          import json
-          from controller.w1 import aws_ssm_safety_send_semantics_guard as s
-          plan=json.load(open('evidence/provision-command-plan.json'))
-          response=json.load(open('evidence/provision-send-response.json'))
-          receipt=s.validate_send_command_response_strict(response,plan=plan)
-          json.dump(receipt,open('evidence/provision-send-semantics.json','w'),sort_keys=True,separators=(',',':'))
-          print(receipt['evidence']['command_id'])
-          PY
+          python3 controller/w1/aws_ssm_safety_live_cli.py validate-send \
+            --response evidence/provision-send-response.json --plan evidence/provision-command-plan.json \
+            --output evidence/provision-send-semantics.json
           COMMAND_ID="$(python3 -c "import json;print(json.load(open('evidence/provision-send-semantics.json'))['evidence']['command_id'])")"
-          python3 - <<PY
-          import json
-          json.dump({'requested_at':'$REQUESTED_AT','api_returned_at':'$API_RETURNED_AT','command_id':'$COMMAND_ID','provisioner_role_arn':'$AWS_ROLE_ARN','role_session':'$ROLE_SESSION'},open('evidence/provision-request-metadata.json','w'),sort_keys=True,separators=(',',':'))
-          PY
+          python3 -c "import json,os;json.dump({'requested_at':os.environ['REQUESTED_AT'],'api_returned_at':os.environ['API_RETURNED_AT'],'command_id':os.environ['COMMAND_ID'],'provisioner_role_arn':os.environ['AWS_ROLE_ARN'],'role_session':os.environ['ROLE_SESSION']},open('evidence/provision-request-metadata.json','w'),sort_keys=True,separators=(',',':'))" \
+            REQUESTED_AT="$REQUESTED_AT" API_RETURNED_AT="$API_RETURNED_AT" COMMAND_ID="$COMMAND_ID"
           echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
 
       - name: Bounded retry for eventually-consistent command invocation
-        env: *provision_creds
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
+          AWS_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_DEFAULT_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_EC2_METADATA_DISABLED: 'true'
+          COMMAND_ID: ${{ steps.send.outputs.command_id }}
         run: |
           set -euo pipefail
-          COMMAND_ID='${{ steps.send.outputs.command_id }}'
           rm -f evidence/provision-command-invocation.json
           for attempt in $(seq 1 36); do
             set +e
-            aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --plugin-name installPinnedSafetyPackage --output json > evidence/provision-command-invocation.tmp 2> evidence/provision-command-invocation.err
+            aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --plugin-name installPinnedSafetyPackage --output json > evidence/provision-command-invocation.tmp 2>evidence/provision-command-invocation.err
             rc=$?
             set -e
             if [[ $rc -eq 0 ]]; then
               status="$(python3 -c "import json;print(json.load(open('evidence/provision-command-invocation.tmp')).get('Status',''))")"
-              if [[ "$status" == 'Success' ]]; then
-                mv evidence/provision-command-invocation.tmp evidence/provision-command-invocation.json
-                break
-              fi
+              if [[ "$status" == 'Success' ]]; then mv evidence/provision-command-invocation.tmp evidence/provision-command-invocation.json; break; fi
               case "$status" in Pending|InProgress|Delayed) ;; *) cat evidence/provision-command-invocation.tmp >&2; exit 1;; esac
             fi
             sleep 5
           done
           test -s evidence/provision-command-invocation.json
-          python3 - <<'PY'
-          import json,os
-          from controller.w1 import aws_ssm_safety_provision_provenance as p
-          value=p.validate_strict_command_invocation(json.load(open('evidence/provision-command-invocation.json')),command_id=os.environ['COMMAND_ID'],instance_id=os.environ['INSTANCE_ID'])
-          json.dump(value,open('evidence/provision-invocation-transport.json','w'),sort_keys=True,separators=(',',':'))
-          assert value['response_code']==0
-          PY
-        env:
-          <<: *provision_creds
-          COMMAND_ID: ${{ steps.send.outputs.command_id }}
+          python3 controller/w1/aws_ssm_safety_live_cli.py validate-invocation \
+            --invocation evidence/provision-command-invocation.json --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" --output evidence/provision-invocation-transport.json
 
       - name: Upload credential-free provisioning transport evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -314,8 +298,7 @@ jobs:
           [[ "$AWS_ROLE_ARN" =~ ^arn:aws(-[a-z]+)?:iam::${AWS_ACCOUNT_ID}:role/.+ ]]
           mkdir -p evidence
           python3 controller/w1/aws_ssm_iid_capture_guard.py build-boundary \
-            --instance-id "$INSTANCE_ID" --worker-id "$WORKER_ID" \
-            --w1-sha "$EXPECTED_PACKAGE_SOURCE_SHA" \
+            --instance-id "$INSTANCE_ID" --worker-id "$WORKER_ID" --w1-sha "$EXPECTED_PACKAGE_SOURCE_SHA" \
             --account-id "$AWS_ACCOUNT_ID" --region "$AWS_REGION" \
             --document-source infra/w1/ssm/Metaengine-W1-IID-Capture-H205F22.json \
             --output evidence/iid-session-boundary.json
@@ -359,18 +342,11 @@ jobs:
           PY
           HASH="$(python3 -c "import json;print(json.load(open('evidence/iid-command-plan.json'))['document_hash'])")"
           aws ssm send-command --document-name "$IID_DOCUMENT_NAME" --document-version '1' --document-hash "$HASH" --document-hash-type Sha256 --instance-ids "$INSTANCE_ID" --timeout-seconds 60 --output json > evidence/iid-send-response.json
-          COMMAND_ID="$(python3 - <<'PY'
-          import json
-          from controller.w1 import aws_ssm_iid_capture_guard as g
-          plan=json.load(open('evidence/iid-command-plan.json'))
-          command_id=g.validate_send_command_response(json.load(open('evidence/iid-send-response.json')),plan=plan)
-          print(command_id)
-          PY
-          )"
+          COMMAND_ID="$(python3 -c "import json;from controller.w1 import aws_ssm_iid_capture_guard as g;p=json.load(open('evidence/iid-command-plan.json'));print(g.validate_send_command_response(json.load(open('evidence/iid-send-response.json')),plan=p))")"
           rm -f evidence/iid-command-invocation.json
           for attempt in $(seq 1 36); do
             set +e
-            aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --plugin-name captureSignedIID --output json > evidence/iid-command-invocation.tmp 2> evidence/iid-command-invocation.err
+            aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --plugin-name captureSignedIID --output json > evidence/iid-command-invocation.tmp 2>evidence/iid-command-invocation.err
             rc=$?
             set -e
             if [[ $rc -eq 0 ]]; then
@@ -385,8 +361,7 @@ jobs:
           import json,os
           from controller.w1 import aws_ssm_iid_capture_guard as g
           plan=json.load(open('evidence/iid-command-plan.json'))
-          response=json.load(open('evidence/iid-send-response.json'))
-          command_id=response['Command']['CommandId']
+          command_id=json.load(open('evidence/iid-send-response.json'))['Command']['CommandId']
           receipt=g.validate_invocation(json.load(open('evidence/iid-command-invocation.json')),command_id=command_id,instance_id=os.environ['INSTANCE_ID'],aws_document_sha256=plan['document_hash'],repository_document_source_sha256=plan['repository_document_source_sha256'])
           json.dump(receipt,open('evidence/iid-capture-receipt.json','w'),sort_keys=True,separators=(',',':'))
           json.dump(receipt['courier_envelope'],open('evidence/iid-envelope.json','w'),sort_keys=True,separators=(',',':'))
@@ -446,12 +421,7 @@ jobs:
           [[ "$AWS_REGION" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]]
           [[ "$AWS_ROLE_ARN" =~ ^arn:aws(-[a-z]+)?:iam::${AWS_ACCOUNT_ID}:role/.+ ]]
           mkdir -p evidence/verify
-          python3 - <<'PY'
-          import json,os
-          from controller.w1 import aws_ssm_safety_provision_provenance as p
-          value=p.build_verifier_session_boundary(account_id=os.environ['AWS_ACCOUNT_ID'],region=os.environ['AWS_REGION'])
-          json.dump(value,open('evidence/verify/verifier-session-boundary.json','w'),sort_keys=True,separators=(',',':'))
-          PY
+          python3 -c "import json,os;from controller.w1 import aws_ssm_safety_provision_provenance as p;v=p.build_verifier_session_boundary(account_id=os.environ['AWS_ACCOUNT_ID'],region=os.environ['AWS_REGION']);json.dump(v,open('evidence/verify/verifier-session-boundary.json','w'),sort_keys=True,separators=(',',':'))"
           POLICY="$(python3 -c "import json;print(json.dumps(json.load(open('evidence/verify/verifier-session-boundary.json'))['session_policy'],separators=(',',':')))" )"
           echo "policy=$POLICY" >> "$GITHUB_OUTPUT"
 
@@ -470,8 +440,8 @@ jobs:
           unset-current-credentials: true
           inline-session-policy: ${{ steps.session.outputs.policy }}
 
-      - name: Independently verify signed IID and provider host binding
-        env: &verify_creds
+      - name: Independently capture provider-side host state
+        env:
           AWS_ACCESS_KEY_ID: ${{ steps.aws.outputs.aws-access-key-id }}
           AWS_SECRET_ACCESS_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
           AWS_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
@@ -482,43 +452,25 @@ jobs:
           set -euo pipefail
           aws sts get-caller-identity --output json > evidence/verify/verifier-caller.json
           aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0]' --output json > evidence/verify/instance.json
-          ROOT_VOLUME_ID="$(python3 - <<'PY'
-          import json
-          i=json.load(open('evidence/verify/instance.json')); root=i.get('RootDeviceName')
-          for m in i.get('BlockDeviceMappings') or []:
-              if m.get('DeviceName')==root and (m.get('Ebs') or {}).get('VolumeId'):
-                  print(m['Ebs']['VolumeId']); break
-          PY
-          )"
+          ROOT_VOLUME_ID="$(python3 -c "import json;i=json.load(open('evidence/verify/instance.json'));r=i.get('RootDeviceName');print(next(m['Ebs']['VolumeId'] for m in i.get('BlockDeviceMappings') or [] if m.get('DeviceName')==r and (m.get('Ebs') or {}).get('VolumeId')))" )"
           [[ "$ROOT_VOLUME_ID" =~ ^vol-[0-9a-f]+$ ]]
           aws ec2 describe-volumes --volume-ids "$ROOT_VOLUME_ID" --query 'Volumes[0]' --output json > evidence/verify/root-volume.json
-          mapfile -t SG_IDS < <(python3 - <<'PY'
-          import json
-          for g in json.load(open('evidence/verify/instance.json')).get('SecurityGroups') or []: print(g['GroupId'])
-          PY
-          )
+          mapfile -t SG_IDS < <(python3 -c "import json;[print(g['GroupId']) for g in json.load(open('evidence/verify/instance.json')).get('SecurityGroups') or []]")
           (( ${#SG_IDS[@]} > 0 ))
           aws ec2 describe-security-groups --group-ids "${SG_IDS[@]}" --query 'SecurityGroups' --output json > evidence/verify/security-groups.json
-          python3 - <<'PY'
-          import json
-          out={'instance':json.load(open('evidence/verify/instance.json')),'security_groups':json.load(open('evidence/verify/security-groups.json')),'root_volume':json.load(open('evidence/verify/root-volume.json'))}
-          json.dump(out,open('evidence/verify/preflight-bundle.json','w'),sort_keys=True,separators=(',',':'))
-          PY
-          python3 - <<'PY'
-          import base64,os
-          raw=base64.b64decode(os.environ['AWS_RSA2048_CERT_PEM_BASE64'],validate=True)
-          assert raw.startswith(b'-----BEGIN CERTIFICATE-----') and raw.rstrip().endswith(b'-----END CERTIFICATE-----')
-          open('evidence/verify/aws-rsa2048.pem','wb').write(raw)
-          PY
-          python3 controller/w1/aws_iid_courier_verifier.py \
-            --envelope evidence/iid/iid-envelope.json \
-            --certificate evidence/verify/aws-rsa2048.pem \
-            --instance-id "$INSTANCE_ID" --account-id "$AWS_ACCOUNT_ID" --region "$AWS_REGION" \
-            --output evidence/verify/verified-iid.json
+          python3 -c "import json;json.dump({'instance':json.load(open('evidence/verify/instance.json')),'security_groups':json.load(open('evidence/verify/security-groups.json')),'root_volume':json.load(open('evidence/verify/root-volume.json'))},open('evidence/verify/preflight-bundle.json','w'),sort_keys=True,separators=(',',':'))"
+          python3 -c "import base64,os;raw=base64.b64decode(os.environ['AWS_RSA2048_CERT_PEM_BASE64'],validate=True);assert raw.startswith(b'-----BEGIN CERTIFICATE-----') and raw.rstrip().endswith(b'-----END CERTIFICATE-----');open('evidence/verify/aws-rsa2048.pem','wb').write(raw)"
+          python3 controller/w1/aws_iid_courier_verifier.py --envelope evidence/iid/iid-envelope.json --certificate evidence/verify/aws-rsa2048.pem --instance-id "$INSTANCE_ID" --account-id "$AWS_ACCOUNT_ID" --region "$AWS_REGION" --output evidence/verify/verified-iid.json
           rm -f evidence/verify/aws-rsa2048.pem
 
-      - name: Independently read SSM node document and invocation
-        env: *verify_creds
+      - name: Independently read SSM state and invocation
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
+          AWS_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_DEFAULT_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_EC2_METADATA_DISABLED: 'true'
         run: |
           set -euo pipefail
           aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$INSTANCE_ID" --output json > evidence/verify/managed-node.json
@@ -535,27 +487,23 @@ jobs:
           done
           test -s evidence/verify/provision-command-invocation.json
 
-      - name: Bounded CloudTrail correlation and strict provenance composition
-        env: *verify_creds
+      - name: Bounded CloudTrail correlation and strict composition
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
+          AWS_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_DEFAULT_REGION: ${{ vars.W1_AWS_REGION }}
+          AWS_EC2_METADATA_DISABLED: 'true'
         run: |
           set -euo pipefail
           REQUESTED_AT="$(python3 -c "import json;print(json.load(open('evidence/provision/provision-request-metadata.json'))['requested_at'])")"
-          API_RETURNED_AT="$(python3 -c "import json;print(json.load(open('evidence/provision/provision-request-metadata.json'))['api_returned_at'])")"
+          rc=2
           for attempt in $(seq 1 24); do
             END_TIME="$(python3 -c "from datetime import datetime,timezone;print(datetime.now(timezone.utc).isoformat())")"
             aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventName,AttributeValue=SendCommand --start-time "$REQUESTED_AT" --end-time "$END_TIME" --max-results 50 --output json > evidence/verify/cloudtrail.json
             set +e
-            python3 - <<'PY'
-          import json,os
-          from controller.w1 import aws_ssm_safety_provision_guard as g
-          from controller.w1 import aws_ssm_safety_send_semantics_guard as s
-          meta=json.load(open('evidence/provision/provision-request-metadata.json'))
-          remote=g.validate_remote_document(description=json.load(open('evidence/verify/provision-document-description.json')),get_document=json.load(open('evidence/verify/provision-get-document.json')),account_id=os.environ['AWS_ACCOUNT_ID'])
-          try:
-              s.select_strict_send_command_event(json.load(open('evidence/verify/cloudtrail.json')),instance_id=os.environ['INSTANCE_ID'],account_id=os.environ['AWS_ACCOUNT_ID'],region=os.environ['AWS_REGION'],provisioner_role_arn=meta['provisioner_role_arn'],role_session=meta['role_session'],requested_at=meta['requested_at'],api_returned_at=meta['api_returned_at'],aws_document_sha256=remote['aws_document_sha256'])
-          except s.CloudTrailEventNotYetVisible:
-              raise SystemExit(2)
-          PY
+            python3 controller/w1/aws_ssm_safety_live_cli.py check-cloudtrail --lookup evidence/verify/cloudtrail.json --description evidence/verify/provision-document-description.json --get-document evidence/verify/provision-get-document.json --metadata evidence/provision/provision-request-metadata.json --instance-id "$INSTANCE_ID" --account-id "$AWS_ACCOUNT_ID" --region "$AWS_REGION" --output evidence/verify/cloudtrail-match.json
             rc=$?
             set -e
             if [[ $rc -eq 0 ]]; then break; fi
@@ -563,28 +511,13 @@ jobs:
             sleep 5
           done
           test "$rc" -eq 0
-          python3 - <<'PY'
-          import json,os
-          from controller.w1 import aws_ssm_safety_send_semantics_guard as s
-          meta=json.load(open('evidence/provision/provision-request-metadata.json'))
-          result=s.compose_strict_provisioning_provenance(
-              cloudtrail_lookup=json.load(open('evidence/verify/cloudtrail.json')),
-              instance_id=os.environ['INSTANCE_ID'],worker_id=os.environ['WORKER_ID'],account_id=os.environ['AWS_ACCOUNT_ID'],region=os.environ['AWS_REGION'],
-              provisioner_role_arn=meta['provisioner_role_arn'],role_session=meta['role_session'],requested_at=meta['requested_at'],api_returned_at=meta['api_returned_at'],
-              verifier_caller_identity=json.load(open('evidence/verify/verifier-caller.json')),
-              preflight_bundle=json.load(open('evidence/verify/preflight-bundle.json')),
-              managed_node_response=json.load(open('evidence/verify/managed-node.json')),
-              document_description=json.load(open('evidence/verify/provision-document-description.json')),
-              get_document_response=json.load(open('evidence/verify/provision-get-document.json')),
-              command_invocation=json.load(open('evidence/verify/provision-command-invocation.json')),
-              verified_iid=json.load(open('evidence/verify/verified-iid.json')),
-          )
-          assert result['package_provisioning_verified'] is True
-          assert result['strict_send_command_semantics_verified'] is True
-          for key in ('capture_executed','host_safety_verified','reboot_completion_proven','persistent_worker_proof','worker_admitted','w1_verified','database_mutation','canonical','authority_effect'):
-              assert result[key] is False, key
-          json.dump(result,open('evidence/verify/strict-provisioning-provenance.json','w'),sort_keys=True,separators=(',',':'))
-          PY
+          python3 controller/w1/aws_ssm_safety_live_cli.py compose \
+            --metadata evidence/provision/provision-request-metadata.json --cloudtrail evidence/verify/cloudtrail.json \
+            --verifier-caller evidence/verify/verifier-caller.json --preflight-bundle evidence/verify/preflight-bundle.json \
+            --managed-node evidence/verify/managed-node.json --description evidence/verify/provision-document-description.json \
+            --get-document evidence/verify/provision-get-document.json --invocation evidence/verify/provision-command-invocation.json \
+            --verified-iid evidence/verify/verified-iid.json --instance-id "$INSTANCE_ID" --worker-id "$WORKER_ID" \
+            --account-id "$AWS_ACCOUNT_ID" --region "$AWS_REGION" --output evidence/verify/strict-provisioning-provenance.json
 
       - name: Upload independent noncanonical provisioning provenance
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
