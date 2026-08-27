@@ -56,6 +56,8 @@ jobs:
 
       - name: Assert active v0.6.3 entrypoint
         run: |
+          node -e 'const m=require("./coordination/chat-control-plane/extension/manifest.json"); if(m.version!=="0.6.3") process.exit(1); if(Number(m.minimum_chrome_version)<120) process.exit(2)'
+          grep -F 'METAENGINE A2 Browser Operator 0.6.3' coordination/chat-control-plane/extension/manifest.json
           grep -E '^[[:space:]]*importScripts\("\./background-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
           grep -E '^[[:space:]]*importScripts\("\./supervisor-client-v063-authority\.js"\);' coordination/chat-control-plane/extension/background-entry.js
           grep -F '0.6.3-supervisor-authority-dev.2' coordination/chat-control-plane/extension/runtime-marker-v063.js
