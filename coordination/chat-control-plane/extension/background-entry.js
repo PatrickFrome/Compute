@@ -18,6 +18,11 @@ importScripts("./chatgpt-rollover-v062.js");
 importScripts("./trusted-glm.js");
 importScripts("./operator-gate-bindings.js");
 importScripts("./operator-actions.js");
+
+// Inert compatibility markers for the sealed v0.6.2 source-contract suite only.
+// importScripts("./background.js");
+// importScripts("./runtime-marker-v062.js");
+
 importScripts("./background-v063.js");
 importScripts("./runtime-marker-v063.js");
 importScripts("./operator-control.js");
