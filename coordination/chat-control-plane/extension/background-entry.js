@@ -8,6 +8,7 @@ importScripts("./bootstrap-config.js");
 importScripts("./secret-vault.js");
 importScripts("./device-identity.js");
 importScripts("./bridge-client.js");
+importScripts("./supervisor-device-transport-v063.js");
 importScripts("./compat-root-key.js");
 importScripts("./compat-config.js");
 importScripts("./update-manager.js");
