@@ -1,16 +1,17 @@
 {
   "schema": "metaengine.a2-browser-protocol.v1",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "transport": {
     "scope": "local_machine_only",
     "unix": "unix_domain_socket",
     "windows": "named_pipe",
     "authentication": "256_bit_per_daemon_session_capability_token",
-    "max_request_bytes": 1048576
+    "max_request_bytes": 1048576,
+    "internal_devtools": "native_remote_debugging_pipe"
   },
   "identity": {
     "durable": ["browser_node_id", "profile_id", "target_id", "conversation_epoch"],
-    "ephemeral": ["browser_pid", "cdp_target_id", "debug_port"]
+    "ephemeral": ["browser_pid", "cdp_target_id", "cdp_session_id"]
   },
   "methods": [
     "runtime.health",
@@ -43,8 +44,10 @@
     "sandbox_override",
     "remote_navigation_b1",
     "default_profile_import",
-    "cookie_import"
+    "cookie_import",
+    "devtools_tcp_listener"
   ],
   "web_authority_effect": false,
-  "local_effects_present": true
+  "local_effects_present": true,
+  "devtools_tcp_exposed": false
 }
