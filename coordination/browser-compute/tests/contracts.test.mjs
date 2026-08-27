@@ -15,7 +15,19 @@ test('identity validators are fail closed', () => {
   assert.throws(() => validateTargetId('x'), /target_id_invalid/);
 });
 
-test('URL parser accepts canonical input but B1 policy keeps remote navigation disabled', () => {
+test('B3 Chrome args expose native pipe and no DevTools TCP surface', () => {
+  const dir = path.resolve('/tmp/a2-cb-contract-profile');
+  const args = buildChromeArgs({ userDataDir: dir, headless: true });
+  assert.ok(args.includes(`--user-data-dir=${dir}`));
+  assert.ok(args.includes('--remote-debugging-pipe'));
+  assert.ok(args.includes('--headless'));
+  assert.ok(!args.some((value) => value.startsWith('--remote-debugging-port')));
+  assert.ok(!args.some((value) => value.startsWith('--remote-debugging-address')));
+  assert.ok(!args.includes('--no-sandbox'));
+  assert.throws(() => buildChromeArgs({ userDataDir: dir, allowNoSandbox: true }), /no_sandbox_forbidden_outside_ci/);
+});
+
+test('URL parser remains narrow and remote navigation remains disabled at B3 boundary', () => {
   assert.equal(validateNavigationUrl('about:blank'), 'about:blank');
   assert.match(validateNavigationUrl('https://example.com/a'), /^https:\/\/example\.com\/a/);
   assert.throws(() => validateNavigationUrl('http://example.com'), /target_url_scheme_forbidden/);
@@ -23,29 +35,14 @@ test('URL parser accepts canonical input but B1 policy keeps remote navigation d
   assert.ok(protocol.forbidden_external_capabilities.includes('remote_navigation_b1'));
 });
 
-test('chrome args always isolate profile and debugger', () => {
-  const dir = path.resolve('/tmp/a2-cb-contract-profile');
-  const args = buildChromeArgs({ userDataDir: dir, debuggingPort: 43210, headless: true });
-  assert.ok(args.includes(`--user-data-dir=${dir}`));
-  assert.ok(args.includes('--remote-debugging-address=127.0.0.1'));
-  assert.ok(args.includes('--remote-debugging-port=43210'));
-  assert.ok(args.includes('--headless'));
-  assert.ok(!args.includes('--no-sandbox'));
-  assert.throws(() => buildChromeArgs({ userDataDir: dir, debuggingPort: 43210, allowNoSandbox: true }), /no_sandbox_forbidden_outside_ci/);
-  assert.throws(() => buildChromeArgs({ userDataDir: dir, debuggingPort: 80 }), /debugging_port_invalid/);
-});
-
-test('RPC surface is typed, effect-classed, and exposes no raw browser code path', () => {
-  assert.deepEqual(RPC_METHODS, ['runtime.health', 'profile.start', 'profile.stop', 'profile.list', 'target.create', 'target.list', 'target.activate', 'target.close']);
+test('RPC surface is typed, effect-classed, and external raw CDP remains forbidden', () => {
   assert.deepEqual(protocol.methods, RPC_METHODS);
   assert.deepEqual(protocol.method_effects, RPC_METHOD_EFFECTS);
-  assert.equal(protocol.web_authority_effect, false);
-  assert.equal(protocol.local_effects_present, true);
-  for (const forbidden of ['raw_cdp', 'runtime_evaluate', 'javascript_eval', 'shell_exec', 'arbitrary_browser_flags', 'arbitrary_executable_path', 'headless_override', 'sandbox_override']) {
-    assert.ok(protocol.forbidden_external_capabilities.includes(forbidden));
-  }
-  const joined = RPC_METHODS.join(' ');
-  assert.doesNotMatch(joined, /cdp|evaluate|javascript|exec|shell/i);
+  assert.equal(protocol.transport.internal_devtools, 'native_remote_debugging_pipe');
+  assert.equal(protocol.devtools_tcp_exposed, false);
+  assert.ok(!protocol.identity.ephemeral.includes('debug_port'));
+  for (const forbidden of ['raw_cdp', 'runtime_evaluate', 'javascript_eval', 'shell_exec', 'devtools_tcp_listener']) assert.ok(protocol.forbidden_external_capabilities.includes(forbidden));
+  assert.doesNotMatch(RPC_METHODS.join(' '), /cdp|evaluate|javascript|exec|shell/i);
 });
 
 test('control token is a fresh 256-bit daemon-session capability', async () => {
@@ -56,9 +53,7 @@ test('control token is a fresh 256-bit daemon-session capability', async () => {
     assert.match(first.token, /^[a-f0-9]{64}$/);
     assert.match(second.token, /^[a-f0-9]{64}$/);
     assert.notEqual(first.token, second.token);
-  } finally {
-    await fs.rm(root, { recursive: true, force: true });
-  }
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
 test('atomic json store preserves exact structured state', async () => {
