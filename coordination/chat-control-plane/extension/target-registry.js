@@ -257,7 +257,7 @@
             role: platform === "CHATGPT" ? "OPERATOR_PRIMARY" : "OPERATOR_PREDECESSOR",
             legacy_alias: platform,
             conversation_epoch: configured ? 1 : 0,
-            conversation_url: configured || null,
+            conversation_url: configured,
             status: configured ? "ACTIVE" : "UNBOUND",
             updated_at: nowIso()
           }));
@@ -271,7 +271,7 @@
             : current.conversation_epoch;
           registry.targets[index] = canonicalTarget({
             ...current,
-            conversation_url: configured || null,
+            conversation_url: configured,
             conversation_epoch: nextEpoch,
             status: configured ? "ACTIVE" : "UNBOUND",
             updated_at: nowIso()
