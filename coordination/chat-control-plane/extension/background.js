@@ -198,7 +198,6 @@
   chrome.runtime.onInstalled.addListener(async()=>{const old=await chrome.storage.local.get(Object.keys(DEFAULTS)),seed={};for(const[k,v]of Object.entries(DEFAULTS))if(old[k]===undefined)seed[k]=v;await chrome.storage.local.set(seed);await initialize();});
   chrome.runtime.onStartup.addListener(()=>initialize());
   chrome.alarms.onAlarm.addListener((a)=>{if(a.name==="a2-chat-bridge-poll")pollSnapshots().finally(()=>poll(true));});
-  chrome.action.onClicked.addListener(async()=>{const s=await settings();await chrome.storage.local.set({armed:!s.armed});await badge();if(!s.armed)await poll(true);});
   chrome.storage.onChanged.addListener(async(changes,area)=>{if(area!=="local")return;if(changes.armed||changes.chatgptUrl||changes.zaiUrl||changes.daemonUrl||changes.pollMs){await badge();await poll(true);}});
   chrome.runtime.onMessage.addListener((m,sender,sendResponse)=>{
     if(m?.type==="CHAT_SNAPSHOT"&&sender.tab?.id&&m.snapshot){reportSnapshot(sender.tab.id,m.snapshot).then(()=>poll(false)).then(()=>sendResponse({ok:true})).catch((e)=>sendResponse({ok:false,error:String(e?.message||e)}));return true;}
