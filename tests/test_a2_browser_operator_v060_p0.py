@@ -33,7 +33,7 @@ class BrowserOperatorV060P0(unittest.TestCase):
 
     def test_01_version_and_identity(self):
         self.assertEqual(self.manifest["manifest_version"], 3)
-        self.assertIn(self.manifest["version"], {"0.6.2", "0.6.3", "0.6.4"})
+        self.assertIn(self.manifest["version"], {"0.6.2", "0.6.3", "0.6.4", "0.6.5"})
         self.assertEqual(self.manifest["name"], "METAENGINE A2 Browser Operator")
         self.assertIn("key", self.manifest)
         self.assertIn("sidePanel", self.manifest["permissions"])
