@@ -33,4 +33,5 @@ importScripts("./operator-semantic-actions.js");
 importScripts("./supervisor-client-v063-authority.js");
 importScripts("./supervisor-chat-session-v063.js");
 importScripts("./trusted-supervisor-chat-v063.js");
+importScripts("./supervisor-chat-action-v063.js");
 importScripts("./supervisor-incident-router-v063.js");
