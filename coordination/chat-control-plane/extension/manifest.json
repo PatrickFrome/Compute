@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "METAENGINE A2 Browser Operator",
-  "version": "0.6.0",
+  "version": "0.6.2",
   "minimum_chrome_version": "125",
-  "description": "Strict GLM-first browser operator runtime with typed actuation, prompt gating, multi-sensor perception, restart-safe transport, and exact tab fencing.",
+  "description": "Strict GLM-first browser operator with autonomous ChatGPT max-length rollover, debugger watchdog recovery, typed actuation, prompt gating, multi-sensor perception, restart-safe transport, and exact tab fencing.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyhqRE5U0FGkdVCvNgrhYuDGlBxEOxiwGyt1qBtUZYNWsJHt8xntkqCvR6YDq6k/0BhtStFsO/vIn2/JQA4RIMl15GRq4el7gF/Pw3uCouV2ExhJfnyqPmXUsNrAW0USL0r84usQgYb1RGAfiJte+ifq7rTxppIwkXuKmcF52O1MqhjV6YJlf6kiegN5ZjLsFwGWEiEpsBggRcAifG89W5Xy/850sZEJ1AvhRCIHZ1IRr760sgIu43SjugvSz3pJNe40KIVmng/YFBscZ+uzC4Tn9Wpk+TRxWepxOQ4/0/fbzPs09g/aucXjDlf+r2tFM2FcZ0Wj2yTYhk07DDNHJoQIDAQAB",
   "permissions": ["storage", "tabs", "alarms", "debugger", "sidePanel"],
   "host_permissions": [
@@ -24,11 +24,11 @@
     },
     {
       "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*", "https://chat.z.ai/*"],
-      "js": ["platform-dom-compat.js", "content.js"],
+      "js": ["platform-dom-compat.js", "content.js", "content-recovery-v062.js"],
       "run_at": "document_idle"
     }
   ],
   "side_panel": { "default_path": "sidepanel.html" },
   "options_page": "options.html",
-  "action": { "default_title": "METAENGINE A2 Browser Operator — GLM first" }
+  "action": { "default_title": "METAENGINE A2 Browser Operator 0.6.2 — GLM first · Auto rollover" }
 }
