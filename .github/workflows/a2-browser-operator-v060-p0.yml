@@ -34,6 +34,7 @@ jobs:
           node tests/a2_v060_perception_lab.mjs
           node tests/a2_v060_oopif_perception_lab.mjs
           node tests/a2_v060_operator_actions_lab.mjs
+          node tests/a2_v060_semantic_actions_lab.mjs
           node tests/a2_v060_update_manager_lab.mjs
           node tests/a2_v060_compat_config_lab.mjs
 
@@ -106,6 +107,9 @@ jobs:
             'oopif_flat_child_sessions_chrome125':True,
             'oopif_accessibility_bounded_disable':True,
             'point_actions_frame_sha256_bound':True,
+            'semantic_ax_actions_live_revalidated':True,
+            'semantic_focus_no_activation':True,
+            'semantic_actions_signed_feature_fence':True,
             'external_navigation_download_file_input_fenced':True,
             'safe_chrome_update_transaction_drain':True,
             'signed_declarative_compatibility_framework':True,
