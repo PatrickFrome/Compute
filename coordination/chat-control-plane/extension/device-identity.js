@@ -47,9 +47,6 @@
       if (row.privateKey.extractable === true) throw new Error("device_private_key_extractable_rejected");
       return row;
     }
-    // For asymmetric WebCrypto key generation, extractable=false keeps the private
-    // signing key non-exportable while the public verification key remains exportable.
-    // No private PKCS#8/JWK bytes ever enter JavaScript memory.
     const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
     if (pair.privateKey.extractable === true || pair.publicKey.extractable !== true) throw new Error("device_key_extractability_contract_failed");
     row = { privateKey: pair.privateKey, publicKey: pair.publicKey, created_at: new Date().toISOString(), profile: PROFILE };
@@ -123,6 +120,15 @@
     };
   }
 
+  function enrollmentHttpError(status, body) {
+    const reason = String(body?.reason || body?.error || "UNKNOWN").trim().slice(0, 160).toUpperCase();
+    const error = new Error(`device_enrollment_http_${Number(status) || 0}:${reason}`);
+    error.a2HttpStatus = Number(status) || 0;
+    error.a2ServerReason = reason;
+    error.a2Terminal = [400, 401, 403, 409].includes(Number(status));
+    return error;
+  }
+
   async function enroll(base, clientId, pairingSecret) {
     const secret = String(pairingSecret || "");
     if (secret.length < 32) throw new Error("device_enrollment_pairing_secret_missing");
@@ -137,8 +143,8 @@
       body: JSON.stringify({ profile: PROFILE, public_jwk: jwk }),
       cache: "no-store"
     });
-    if (!response.ok) throw new Error(`device_enrollment_http_${response.status}`);
     const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw enrollmentHttpError(response.status, body);
     if (!body?.device_id || body?.profile !== PROFILE) throw new Error("device_enrollment_response_invalid");
     const meta = {
       status: "ACTIVE",
