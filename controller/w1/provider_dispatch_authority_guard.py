@@ -47,6 +47,13 @@ def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _int_eq(left: Any, right: Any) -> bool:
+    try:
+        return int(left) == int(right)
+    except (TypeError, ValueError):
+        return False
+
+
 def verify(receipt: dict[str, Any], expected: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     checks: dict[str, bool] = {}
@@ -60,6 +67,8 @@ def verify(receipt: dict[str, Any], expected: dict[str, Any], now: datetime | No
         oidc_expires_at = _utc(receipt["oidc_expires_at"])
         claim_expires_at = _utc(preflight["evidence"]["claim"]["expires_at"])
         directive_expires_at = _utc(preflight["evidence"]["directive"]["expires_at"])
+        if not isinstance(binding, dict) or not isinstance(preflight, dict):
+            raise TypeError("binding and preflight must be objects")
     except (KeyError, TypeError, ValueError) as exc:
         errors.append(f"INVALID_RECEIPT:{type(exc).__name__}:{exc}")
         evidence = {"checks": {"input_valid": False}, "failed_checks": errors}
@@ -93,9 +102,9 @@ def verify(receipt: dict[str, Any], expected: dict[str, Any], now: datetime | No
         "preflight_canonical_false": preflight.get("canonical") is False,
         "receipt_not_from_future": issued_at <= now,
         "receipt_not_expired": expires_at > now,
-        "receipt_age_bounded": (now - issued_at).total_seconds() <= MAX_RECEIPT_AGE_SECONDS,
+        "receipt_age_bounded": 0 <= (now - issued_at).total_seconds() <= MAX_RECEIPT_AGE_SECONDS,
         "receipt_ttl_positive": expires_at > issued_at,
-        "receipt_ttl_bounded": (expires_at - issued_at).total_seconds() <= MAX_RECEIPT_TTL_SECONDS,
+        "receipt_ttl_bounded": 0 < (expires_at - issued_at).total_seconds() <= MAX_RECEIPT_TTL_SECONDS,
         "receipt_expires_before_oidc": expires_at <= oidc_expires_at,
         "receipt_expires_before_claim": expires_at <= claim_expires_at,
         "receipt_expires_before_directive": expires_at <= directive_expires_at,
@@ -105,7 +114,7 @@ def verify(receipt: dict[str, Any], expected: dict[str, Any], now: datetime | No
         "github_sha_exact": binding.get("github_sha") == expected.get("github_sha"),
         "github_sha_well_formed": isinstance(binding.get("github_sha"), str) and SHA40_RE.fullmatch(binding["github_sha"]) is not None,
         "github_run_id_exact": str(binding.get("github_run_id", "")) == str(expected.get("github_run_id", "")),
-        "github_run_attempt_exact": int(binding.get("github_run_attempt", 0)) == int(expected.get("github_run_attempt", 0)),
+        "github_run_attempt_exact": _int_eq(binding.get("github_run_attempt"), expected.get("github_run_attempt")),
         "actor_id_exact": str(binding.get("actor_id", "")) == str(expected.get("actor_id", "")),
         "workflow_ref_exact": binding.get("workflow_ref") == expected.get("workflow_ref"),
         "ref_exact": binding.get("ref") == expected.get("ref"),
@@ -114,10 +123,10 @@ def verify(receipt: dict[str, Any], expected: dict[str, Any], now: datetime | No
         "instance_id_well_formed": isinstance(binding.get("instance_id"), str) and INSTANCE_RE.fullmatch(binding["instance_id"]) is not None,
         "worker_id_exact": binding.get("worker_id") == expected.get("worker_id"),
         "worker_id_well_formed": isinstance(binding.get("worker_id"), str) and WORKER_RE.fullmatch(binding["worker_id"]) is not None,
-        "claim_id_exact": int(binding.get("claim_id", 0)) == int(expected.get("claim_id", 0)),
-        "directive_id_exact": int(binding.get("directive_id", 0)) == int(expected.get("directive_id", 0)),
-        "preflight_claim_id_exact": int(preflight.get("evidence", {}).get("claim", {}).get("claim_id", 0)) == int(expected.get("claim_id", 0)),
-        "preflight_directive_id_exact": int(preflight.get("evidence", {}).get("directive", {}).get("directive_id", 0)) == int(expected.get("directive_id", 0)),
+        "claim_id_exact": _int_eq(binding.get("claim_id"), expected.get("claim_id")),
+        "directive_id_exact": _int_eq(binding.get("directive_id"), expected.get("directive_id")),
+        "preflight_claim_id_exact": _int_eq(preflight.get("evidence", {}).get("claim", {}).get("claim_id"), expected.get("claim_id")),
+        "preflight_directive_id_exact": _int_eq(preflight.get("evidence", {}).get("directive", {}).get("directive_id"), expected.get("directive_id")),
         "oidc_jti_sha256_well_formed": isinstance(receipt.get("oidc_jti_sha256"), str) and SHA64_RE.fullmatch(receipt["oidc_jti_sha256"]) is not None,
     })
 
