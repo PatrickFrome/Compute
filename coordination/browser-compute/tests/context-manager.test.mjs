@@ -6,10 +6,14 @@ import test from 'node:test';
 import { CONTEXT_KIND, DEFAULT_CONTEXT_ID, ProfileContextManager } from '../src/context-manager.mjs';
 
 class FakeCdp {
-  constructor() { this.next = 1; this.disposed = []; }
+  constructor({ failDispose = false } = {}) { this.next = 1; this.disposed = []; this.failDispose = failDispose; }
   async call(method, params = {}) {
     if (method === 'Target.createBrowserContext') return { browserContextId: `physical-${this.next++}` };
-    if (method === 'Target.disposeBrowserContext') { this.disposed.push(params.browserContextId); return {}; }
+    if (method === 'Target.disposeBrowserContext') {
+      this.disposed.push(params.browserContextId);
+      if (this.failDispose) throw new Error('transport_lost_after_dispatch');
+      return {};
+    }
     throw new Error(`unexpected_method:${method}`);
   }
 }
@@ -45,26 +49,34 @@ test('B2 contexts keep logical identity separate from physical CDP bindings', as
     const rows = await manager.list({ includeRetired: true });
     assert.equal(rows.find((row) => row.context_id === 'context_alpha')?.status, 'RETIRED');
     assert.equal(rows.find((row) => row.context_id === 'context_beta')?.status, 'ACTIVE');
-  } finally {
-    await fs.rm(root, { recursive: true, force: true });
-  }
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
 test('an unbound logical context may be safely reincarnated with a higher epoch', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'a2-context-epoch-'));
   try {
-    const firstBindings = new Map();
-    const first = new ProfileContextManager({ profileDir: root, cdp: new FakeCdp(), bindings: firstBindings });
+    const first = new ProfileContextManager({ profileDir: root, cdp: new FakeCdp(), bindings: new Map() });
     const original = await first.create({ contextId: 'context_worker' });
     assert.equal(original.context_epoch, 1);
-
     const secondBindings = new Map();
     const second = new ProfileContextManager({ profileDir: root, cdp: new FakeCdp(), bindings: secondBindings });
     const rebound = await second.create({ contextId: 'context_worker' });
     assert.equal(rebound.context_epoch, 2);
     assert.equal(rebound.context_id, original.context_id);
     assert.ok(secondBindings.has('context_worker'));
-  } finally {
-    await fs.rm(root, { recursive: true, force: true });
-  }
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('ambiguous physical close is durably fenced and never blindly retried', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'a2-context-ambiguous-'));
+  const bindings = new Map();
+  const manager = new ProfileContextManager({ profileDir: root, cdp: new FakeCdp({ failDispose: true }), bindings });
+  try {
+    await manager.create({ contextId: 'context_risky' });
+    await assert.rejects(manager.close('context_risky'), /context_close_ambiguous_no_retry/);
+    const rows = await manager.list({ includeRetired: true });
+    assert.equal(rows.find((row) => row.context_id === 'context_risky')?.status, 'CLOSE_AMBIGUOUS');
+    await assert.rejects(manager.close('context_risky'), /context_close_reconciliation_required/);
+    await assert.rejects(manager.create({ contextId: 'context_risky' }), /context_reconciliation_required/);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
