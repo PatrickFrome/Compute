@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "METAENGINE A2 Browser Operator",
-  "version": "0.6.7",
+  "version": "0.6.8",
   "minimum_chrome_version": "125",
-  "description": "Strict GLM-first browser operator with test-run repaired supervisor enrollment backoff, singleton/lazy supervisor chat creation, readiness-gated trusted supervisor Enter, stable device-bound supervisor transport, typed actuation, action budgets, prompt gating, multi-sensor perception, and metadata-only audit receipts.",
+  "description": "Strict GLM-first browser operator with capability-confirmed supervisor enrollment reconciliation, device-bound signed control, singleton/lazy supervisor chat recovery, readiness-gated trusted Enter, typed actuation, action budgets, prompt gating, multi-sensor perception, and durable no-blind-retry receipts.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyhqRE5U0FGkdVCvNgrhYuDGlBxEOxiwGyt1qBtUZYNWsJHt8xntkqCvR6YDq6k/0BhtStFsO/vIn2/JQA4RIMl15GRq4el7gF/Pw3uCouV2ExhJfnyqPmXUsNrAW0USL0r84usQgYb1RGAfiJte+ifq7rTxppIwkXuKmcF52O1MqhjV6YJlf6kiegN5ZjLsFwGWEiEpsBggRcAifG89W5Xy/850sZEJ1AvhRCIHZ1IRr760sgIu43SjugvSz3pJNe40KIVmng/YFBscZ+uzC4Tn9Wpk+TRxWepxOQ4/0/fbzPs09g/aucXjDlf+r2tFM2FcZ0Wj2yTYhk07DDNHJoQIDAQAB",
   "permissions": [
     "storage",
@@ -55,6 +55,6 @@
   },
   "options_page": "options.html",
   "action": {
-    "default_title": "METAENGINE A2 Browser Operator 0.6.7 — GLM first · Supervisor test-run repair"
+    "default_title": "METAENGINE A2 Browser Operator 0.6.8 — GLM first · Self-reconciling supervisor transport"
   }
 }
