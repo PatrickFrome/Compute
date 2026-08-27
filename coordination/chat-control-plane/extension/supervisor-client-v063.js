@@ -2,7 +2,7 @@
   "use strict";
 
   const WORKSPACE_ID = "2de9f84b-7c0a-4091-911c-894ff1d6eaf4";
-  const SUPERVISOR_URL = "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-supervisor-v1";
+  const SUPERVISOR_URL = "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-supervisor-v2-canary";
   const MODE_KEY = "a2SupervisorModeV1";
   const EVENTS_KEY = "a2SupervisorEventsV1";
   const CURRENT_KEY = "a2SupervisorCurrentCommandV1";
@@ -27,7 +27,7 @@
     return "UNKNOWN";
   }
   function normUrl(value) {
-    try { const u = new URL(String(value || "")); u.hash=""; u.search=""; u.pathname=u.pathname.replace(/\/+$/," ").trim()||"/"; return `${u.origin}${u.pathname}`; }
+    try { const u = new URL(String(value || "")); u.hash=""; u.search=""; u.pathname=u.pathname.replace(/\/+$/,"")||"/"; return `${u.origin}${u.pathname}`; }
     catch (_) { return ""; }
   }
   function trustedSidePanel(sender) {
@@ -232,7 +232,7 @@
   }
 
   async function postResult(command, ok, receipt, error = null) {
-    const r = await supervisorRequest(`/v1/commands/${encodeURIComponent(command.command_id)}/result`, { method:"POST", body:JSON.stringify({ ok, receipt:{ schema:"metaengine.a2-browser-supervisor.receipt.v1", command_id:command.command_id, action:command.action, platform:command.platform||null, result:receipt||null, recorded_at:new Date().toISOString(), authority_effect:false }, error }) });
+    const r = await supervisorRequest(`/v1/commands/${encodeURIComponent(command.command_id)}/result`, { method:"POST", body:JSON.stringify({ ok, receipt:{ schema:"metaengine.a2-browser-supervisor.receipt.v1", command_id:command.command_id, idempotency_key:command.idempotency_key||null, action:command.action, platform:command.platform||null, result:receipt||null, recorded_at:new Date().toISOString(), authority_effect:false }, error }) });
     if (!r.ok) throw new Error(`supervisor_result_http_${r.status}`);
   }
   async function poll() {
@@ -248,22 +248,22 @@
         current = body?.command || null;
         if (!current) return state;
         await chrome.storage.local.set({ [CURRENT_KEY]: current });
-        await addEvent("CHAT", "COMMAND", `${current.action}${current.platform ? ` · ${current.platform}` : ""}`, "command", { command_id: current.command_id });
+        await addEvent("CHAT", "COMMAND", `${current.action}${current.platform ? ` · ${current.platform}` : ""}`, "command", { command_id: current.command_id, idempotency_key: current.idempotency_key || null });
         let result = null;
         try {
           result = await execute(current);
           await postResult(current,true,result,null);
-          const receipt = { command_id:current.command_id,action:current.action,platform:current.platform||null,status:"COMPLETED",result,completed_at:new Date().toISOString() };
+          const receipt = { command_id:current.command_id,idempotency_key:current.idempotency_key||null,action:current.action,platform:current.platform||null,status:"COMPLETED",result,completed_at:new Date().toISOString() };
           await chrome.storage.local.set({ [LAST_KEY]:receipt,[CURRENT_KEY]:null });
-          await addEvent("EXTENSION","RECEIPT",`${current.action} completed`,"success",{command_id:current.command_id});
+          await addEvent("EXTENSION","RECEIPT",`${current.action} completed`,"success",{command_id:current.command_id,idempotency_key:current.idempotency_key||null});
           await heartbeat(current.command_id,"COMPLETED");
           return receipt;
         } catch (error) {
           const message = String(error?.message || error);
           await postResult(current,false,result,message).catch(()=>{});
-          const receipt = { command_id:current.command_id,action:current.action,platform:current.platform||null,status:"FAILED",error:message,completed_at:new Date().toISOString() };
+          const receipt = { command_id:current.command_id,idempotency_key:current.idempotency_key||null,action:current.action,platform:current.platform||null,status:"FAILED",error:message,completed_at:new Date().toISOString() };
           await chrome.storage.local.set({ [LAST_KEY]:receipt,[CURRENT_KEY]:null,[LAST_ERROR_KEY]:message });
-          await addEvent("EXTENSION","ERROR",`${current.action}: ${message}`,"error",{command_id:current.command_id});
+          await addEvent("EXTENSION","ERROR",`${current.action}: ${message}`,"error",{command_id:current.command_id,idempotency_key:current.idempotency_key||null});
           await heartbeat(current.command_id,"FAILED").catch(()=>{});
           return receipt;
         }
