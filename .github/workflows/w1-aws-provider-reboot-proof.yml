@@ -7,8 +7,13 @@ on:
       - '.github/workflows/w1-aws-provider-reboot-proof.yml'
       - 'controller/w1/aws_provider_reboot_controller.py'
       - 'controller/w1/aws_provider_reboot_live_guard.py'
+      - 'controller/w1/provider_dispatch_authority_guard.py'
       - 'tests/test_w1_aws_provider_reboot_controller.py'
       - 'tests/test_w1_aws_provider_reboot_live_guard.py'
+      - 'tests/test_w1_provider_dispatch_authority_guard.py'
+      - 'tests/test_w1_provider_dispatch_authority_broker_contract.py'
+      - 'supabase/prep/w1_effective_execution_preflight_v1.sql'
+      - 'supabase/functions/metaengine-w1-authority-broker-h205f22/index.ts'
       - 'research/W1_STEP06_GITHUB_OIDC_PROVIDER_REBOOT_CONTROLLER.md'
       - 'research/W1_STEP07_LIVE_PREFLIGHT_HARDENING.md'
   workflow_dispatch:
@@ -20,6 +25,16 @@ on:
       worker_id:
         description: 'Expected METAENGINE W1 worker_id tag'
         required: true
+        type: string
+      claim_id:
+        description: 'Fresh AOP1 W1 claim id; required only for real reboot'
+        required: false
+        default: ''
+        type: string
+      directive_id:
+        description: 'Fresh AOP1 W1 directive id; required only for real reboot'
+        required: false
+        default: ''
         type: string
       execute_reboot:
         description: 'Actually call EC2 RebootInstances after preflight'
@@ -51,8 +66,11 @@ jobs:
           set -euo pipefail
           python3 -m py_compile controller/w1/aws_provider_reboot_controller.py
           python3 -m py_compile controller/w1/aws_provider_reboot_live_guard.py
+          python3 -m py_compile controller/w1/provider_dispatch_authority_guard.py
           python3 -m unittest tests.test_w1_aws_provider_reboot_controller -v
           python3 -m unittest tests.test_w1_aws_provider_reboot_live_guard -v
+          python3 -m unittest tests.test_w1_provider_dispatch_authority_guard -v
+          python3 -m unittest tests.test_w1_provider_dispatch_authority_broker_contract -v
 
       - name: Validate live W1 credential and trust-zone contract
         run: |
@@ -76,6 +94,8 @@ jobs:
           assert 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' in p
           assert 'secrets.'+'AWS' not in p
           assert 'vars.'+'AWS_ACCESS_KEY_ID' not in p
+          assert 'SUPABASE_SERVICE_ROLE_KEY' not in p
+          assert 'SUPABASE_SECRET_KEYS' not in p
           assert p.count('steps.aws-creds.outputs.aws-access-key-id') == 4
           assert p.count('steps.aws-creds.outputs.aws-secret-access-key') == 4
           assert p.count('steps.aws-creds.outputs.aws-session-token') == 4
@@ -84,6 +104,12 @@ jobs:
           assert 'RunInstances' not in guard
           assert 'TerminateInstances' not in guard
           assert 'credential_export_mode' in guard and 'STEP_OUTPUTS_ONLY' in guard
+          authority=p.index('Acquire fresh external W1 authority receipt')
+          reboot=p.index('Execute independent provider reboot')
+          assert authority < reboot
+          assert 'provider_dispatch_authority_guard.py' in p[authority:reboot]
+          assert 'metaengine-h205f22-w1-authority-broker' in p[authority:reboot]
+          assert p.count('aws ec2 reboot-instances --instance-ids "$INSTANCE_ID"\n') == 1
           post_aws=p.split('      - name: Build live provider receipt candidate',1)[1]
           assert 'steps.aws-creds.outputs' not in post_aws
           assert 'LIVE_PROVIDER_CONTROLLER_RECEIPT_UNINGESTED' in Path('controller/w1/aws_provider_reboot_controller.py').read_text()
@@ -156,12 +182,15 @@ jobs:
     env:
       INSTANCE_ID: ${{ inputs.instance_id }}
       WORKER_ID: ${{ inputs.worker_id }}
+      CLAIM_ID: ${{ inputs.claim_id }}
+      DIRECTIVE_ID: ${{ inputs.directive_id }}
       EXECUTE_REBOOT: ${{ inputs.execute_reboot }}
       CONFIRMATION: ${{ inputs.confirmation }}
       AWS_ROLE_ARN: ${{ vars.W1_AWS_ROLE_ARN }}
       AWS_ACCOUNT_ID: ${{ vars.W1_AWS_ACCOUNT_ID }}
       AWS_REGION: ${{ vars.W1_AWS_REGION }}
       ROLE_SESSION: w1-${{ github.run_id }}-${{ github.run_attempt }}
+      W1_AUTHORITY_BROKER_URL: https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/metaengine-w1-authority-broker-h205f22
 
     steps:
       - name: Checkout exact main execution revision
@@ -179,9 +208,10 @@ jobs:
           [[ "$AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]
           [[ "$AWS_REGION" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]]
           [[ "$AWS_ROLE_ARN" =~ ^arn:aws(-[a-z]+)?:iam::${AWS_ACCOUNT_ID}:role/.+ ]]
-          if [[ "$EXECUTE_REBOOT" == "true" && "$CONFIRMATION" != "REBOOT_W1_PERSISTENT_HOST" ]]; then
-            echo 'real reboot requires exact confirmation token' >&2
-            exit 1
+          if [[ "$EXECUTE_REBOOT" == "true" ]]; then
+            [[ "$CONFIRMATION" == "REBOOT_W1_PERSISTENT_HOST" ]] || { echo 'real reboot requires exact confirmation token' >&2; exit 1; }
+            [[ "$CLAIM_ID" =~ ^[0-9]+$ ]] || { echo 'real reboot requires fresh numeric W1 claim_id' >&2; exit 1; }
+            [[ "$DIRECTIVE_ID" =~ ^[0-9]+$ ]] || { echo 'real reboot requires fresh numeric W1 directive_id' >&2; exit 1; }
           fi
           mkdir -p evidence
           python3 controller/w1/aws_provider_reboot_live_guard.py build-session-policy \
@@ -336,6 +366,53 @@ jobs:
             echo '**NONCLAIM:** no reboot executed; persistent_worker_proof=false; w1_verified=false.'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Acquire fresh external W1 authority receipt
+        if: inputs.execute_reboot == true
+        run: |
+          set -euo pipefail
+          [[ "$CLAIM_ID" =~ ^[0-9]+$ ]]
+          [[ "$DIRECTIVE_ID" =~ ^[0-9]+$ ]]
+          python3 - <<'PY'
+          import json,os
+          body={
+            'action':'W1_AWS_REBOOT_EXISTING_HOST',
+            'instance_id':os.environ['INSTANCE_ID'],
+            'worker_id':os.environ['WORKER_ID'],
+            'claim_id':int(os.environ['CLAIM_ID']),
+            'directive_id':int(os.environ['DIRECTIVE_ID']),
+          }
+          json.dump(body,open('evidence/w1-authority-broker-request.json','w'),sort_keys=True,separators=(',',':'))
+          PY
+          OIDC_RESPONSE="$(curl --fail-with-body --silent --show-error --location \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=metaengine-h205f22-w1-authority-broker")"
+          OIDC_TOKEN="$(python3 -c 'import json,sys; value=json.load(sys.stdin).get("value",""); assert len(value)>100; print(value)' <<<"$OIDC_RESPONSE")"
+          unset OIDC_RESPONSE
+          curl --fail-with-body --silent --show-error --location \
+            -H "Authorization: Bearer ${OIDC_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data-binary @evidence/w1-authority-broker-request.json \
+            "$W1_AUTHORITY_BROKER_URL" \
+            > evidence/w1-authority-broker-receipt.json
+          unset OIDC_TOKEN
+          rm -f evidence/w1-authority-broker-request.json
+          python3 controller/w1/provider_dispatch_authority_guard.py \
+            --receipt evidence/w1-authority-broker-receipt.json \
+            --output evidence/w1-provider-dispatch-authority-guard.json \
+            --repository 'PatrickFrome/Compute' \
+            --repository-id '1341371143' \
+            --github-sha "$GITHUB_SHA" \
+            --github-run-id "$GITHUB_RUN_ID" \
+            --github-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --actor-id "$GITHUB_ACTOR_ID" \
+            --workflow-ref 'PatrickFrome/Compute/.github/workflows/w1-aws-provider-reboot-proof.yml@refs/heads/main' \
+            --ref 'refs/heads/main' \
+            --instance-id "$INSTANCE_ID" \
+            --worker-id "$WORKER_ID" \
+            --claim-id "$CLAIM_ID" \
+            --directive-id "$DIRECTIVE_ID"
+          cat evidence/w1-provider-dispatch-authority-guard.json
+
       - name: Execute independent provider reboot
         if: inputs.execute_reboot == true
         env:
@@ -347,6 +424,15 @@ jobs:
           AWS_EC2_METADATA_DISABLED: 'true'
         run: |
           set -euo pipefail
+          test -s evidence/w1-provider-dispatch-authority-guard.json
+          python3 - <<'PY'
+          import json
+          r=json.load(open('evidence/w1-provider-dispatch-authority-guard.json'))
+          assert r['dispatch_gate_passed'] is True
+          assert r['outcome']=='PASS_W1_PROVIDER_DISPATCH_GUARD_NONAUTHORITY'
+          assert r['provider_mutation_authorized'] is False
+          assert r['authority_effect'] is False
+          PY
           REQUESTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"
           echo "REQUESTED_AT=$REQUESTED_AT" >> "$GITHUB_ENV"
           aws ec2 reboot-instances --instance-ids "$INSTANCE_ID"
