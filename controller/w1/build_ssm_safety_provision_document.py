@@ -15,7 +15,10 @@ from pathlib import Path
 import tempfile
 from typing import Any
 
-from controller.w1 import build_host_safety_package as package_builder
+try:
+    from controller.w1 import build_host_safety_package as package_builder
+except ModuleNotFoundError:  # direct script execution from controller/w1
+    import build_host_safety_package as package_builder  # type: ignore
 
 
 SCHEMA = "metaengine.compute.w1-ssm-safety-provision-document-build.h205f22.v1"
@@ -92,7 +95,7 @@ PY
 cd "$TMPDIR_W1/package"
 ./install.sh
 python3 - <<'PY'
-import hashlib,json,os,stat
+import json,stat
 from pathlib import Path
 root=Path({package_builder.INSTALL_ROOT!r})
 if not root.is_dir() or root.is_symlink():
