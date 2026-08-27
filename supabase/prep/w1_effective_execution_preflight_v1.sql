@@ -100,6 +100,7 @@ begin
     'claim_payload_root_matches_head',v_claim.base_payload_root_sha256=v_head_root,
     'directive_roadmap_exact',v_directive.roadmap_id='compute-fabric-roadmap-v1',
     'directive_milestone_exact',v_directive.milestone_key='W1_PERSISTENT_LINUX_WORKER_SAFETY',
+    'directive_kind_allows_execution',v_directive.directive_kind in ('OPEN','CONTINUE','REASSIGN'),
     'directive_target_holder_exact',v_directive.target_holder_id='aop1:W1_IMPLEMENTER',
     'directive_status_active',v_directive.status='ACTIVE',
     'directive_not_expired',v_directive.expires_at>v_now,
@@ -109,7 +110,12 @@ begin
     'holder_pair_aligned',v_claim.holder_id=v_directive.target_holder_id
   );
 
-  select coalesce(bool_and(value::boolean),false) into v_pass
+  -- jsonb_build_object represents SQL NULL as JSON null. Casting JSON null
+  -- directly to boolean raises 22023, while extracting text with #>> turns it
+  -- back into SQL NULL; coalesce then makes every unevaluable check FALSE.
+  -- This preserves a structured BLOCK response instead of an exception and
+  -- prevents NULL-valued checks from ever being treated as passing.
+  select coalesce(bool_and(coalesce((value #>> '{}')::boolean,false)),false) into v_pass
   from jsonb_each(v_checks);
 
   return jsonb_build_object(
@@ -142,6 +148,7 @@ begin
       ),
       'directive',jsonb_build_object(
         'directive_id',v_directive.directive_id,
+        'directive_kind',v_directive.directive_kind,
         'target_holder_id',v_directive.target_holder_id,
         'status',v_directive.status,
         'expires_at',v_directive.expires_at,
