@@ -4,11 +4,18 @@ import os from 'node:os';
 import path from 'node:path';
 
 const PROFILE_ID_RE = /^[a-z0-9][a-z0-9._-]{2,63}$/;
+const CONTEXT_ID_RE = /^[a-z0-9][a-z0-9._:-]{2,95}$/;
 const TARGET_ID_RE = /^[a-z0-9][a-z0-9._:-]{2,95}$/;
 
 export function validateProfileId(value) {
   const id = String(value || '').trim().toLowerCase();
   if (!PROFILE_ID_RE.test(id)) throw new Error('profile_id_invalid');
+  return id;
+}
+
+export function validateContextId(value) {
+  const id = String(value || '').trim().toLowerCase();
+  if (!CONTEXT_ID_RE.test(id)) throw new Error('context_id_invalid');
   return id;
 }
 
