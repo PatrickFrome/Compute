@@ -1,28 +1,24 @@
 #!/usr/bin/env python3
-"""GitHub Codespaces lifecycle provenance collector for W1.
+"""GitHub Codespaces lifecycle provenance contract for W1.
 
-Default mode is DRY_RUN and performs no network/provider mutation. EXECUTE is
-armed only when BOTH --execute and METAENGINE_W1_PROVIDER_MUTATION_AUTHORIZED=1
-are present. The GitHub token is read from an environment variable and is never
-serialized, hashed, echoed or stored in the receipt.
+This module is PREP-only. It can build a deterministic lifecycle plan and
+validate already-captured authenticated observations, but it deliberately does
+not perform Codespaces start/stop provider mutations itself.
 
-An executed receipt is still NON-AUTHORITY: it records successful authenticated
-REST observations, but Supabase persisted readback and supervisor verification
-must independently bind it to a fresh W1 claim/directive before any W1 outcome.
+Historically EXECUTE could be armed with --execute plus the local environment
+flag METAENGINE_W1_PROVIDER_MUTATION_AUTHORIZED=1. That was only a caller
+assertion and was not equivalent to a fresh DB-authoritative W1 claim/directive
+receipt. The local network mutation path is therefore fail-closed until a
+Codespaces-specific external dispatch receipt is implemented and independently
+verified. A receipt composed from observations remains NON-AUTHORITY.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
-import os
 import re
-import ssl
 import sys
-import time
-import urllib.error
-import urllib.request
-from datetime import datetime, timezone
 from typing import Any
 
 from controller.w1 import github_codespaces_snapshot_guard
@@ -31,21 +27,15 @@ SCHEMA = "metaengine.compute.w1-github-codespaces-lifecycle-provenance.h205f22.v
 API_BASE = "https://api.github.com"
 API_VERSION = "2026-03-10"
 ACCEPT = "application/vnd.github+json"
-USER_AGENT = "METAENGINE-H205F22-W1-Provenance/1"
 EXECUTE_ENV = "METAENGINE_W1_PROVIDER_MUTATION_AUTHORIZED"
+EXECUTE_BLOCK = "CODESPACES_EXTERNAL_W1_DISPATCH_RECEIPT_REQUIRED"
 NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,240}$")
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-POLL_SECONDS = 2.0
-DEFAULT_TIMEOUT_SECONDS = 120
 
 
 def canonical_hash(value: Any) -> str:
     raw = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def _endpoint(name: str, suffix: str = "") -> str:
@@ -56,23 +46,15 @@ def _endpoint(name: str, suffix: str = "") -> str:
     return f"{API_BASE}/user/codespaces/{name}{suffix}"
 
 
-def _request_headers(token: str) -> dict[str, str]:
-    if not isinstance(token, str) or not token.strip():
-        raise RuntimeError("GitHub token required for execute mode")
-    return {
-        "Accept": ACCEPT,
-        "Authorization": "Bearer " + token,
-        "X-GitHub-Api-Version": API_VERSION,
-        "User-Agent": USER_AGENT,
-    }
-
-
 def _selected_snapshot(body: Any, *, expected_name: str, expected_repo: str) -> dict[str, Any]:
     if not isinstance(body, dict):
         raise ValueError("GitHub Codespaces response must be an object")
     if not NAME_RE.fullmatch(expected_name) or not REPO_RE.fullmatch(expected_repo):
         raise ValueError("invalid expected Codespace identity")
-    required = ("id", "name", "environment_id", "repository", "machine", "updated_at", "state", "location", "url", "start_url", "stop_url")
+    required = (
+        "id", "name", "environment_id", "repository", "machine", "updated_at",
+        "state", "location", "url", "start_url", "stop_url",
+    )
     missing = [key for key in required if key not in body]
     if missing:
         raise ValueError(f"GitHub Codespaces response missing fields: {missing}")
@@ -91,7 +73,6 @@ def _selected_snapshot(body: Any, *, expected_name: str, expected_repo: str) -> 
         "start_url": body["start_url"],
         "stop_url": body["stop_url"],
     }
-    # Reuse the exact structural parser by constructing a single-state payload later.
     if selected["name"] != expected_name or selected["repository"]["full_name"] != expected_repo:
         raise ValueError("GitHub Codespaces response identity mismatch")
     if selected["machine"]["operating_system"] != "linux":
@@ -102,92 +83,20 @@ def _selected_snapshot(body: Any, *, expected_name: str, expected_repo: str) -> 
     return selected
 
 
-def _safe_response_headers(headers: Any) -> dict[str, str]:
-    # Only non-secret response metadata. Do not persist request headers or token-derived values.
-    allow = {"date", "etag", "x-github-api-version-selected", "x-github-request-id", "x-ratelimit-resource"}
-    result: dict[str, str] = {}
-    if headers is None:
-        return result
-    for key in allow:
-        value = headers.get(key)
-        if value:
-            result[key] = str(value)[:512]
-    return result
-
-
-def _call(*, method: str, url: str, token: str, timeout: float) -> dict[str, Any]:
-    if method not in {"GET", "POST"}:
-        raise ValueError("only GET/POST allowed")
-    if not url.startswith(API_BASE + "/user/codespaces/"):
-        raise ValueError("GitHub endpoint outside Codespaces allow-list")
-    request = urllib.request.Request(
-        url=url,
-        data=b"" if method == "POST" else None,
-        headers=_request_headers(token),
-        method=method,
-    )
-    started = _utc_now()
-    try:
-        # Default HTTPS context performs normal certificate and hostname validation.
-        with urllib.request.urlopen(request, timeout=timeout, context=ssl.create_default_context()) as response:
-            raw = response.read()
-            status = int(response.status)
-            response_headers = _safe_response_headers(response.headers)
-    except urllib.error.HTTPError as exc:
-        raw = exc.read()
-        status = int(exc.code)
-        response_headers = _safe_response_headers(exc.headers)
-    completed = _utc_now()
-    try:
-        body = json.loads(raw.decode("utf-8")) if raw else {}
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise RuntimeError("GitHub response is not valid UTF-8 JSON") from exc
-    return {
-        "method": method,
-        "url": url,
-        "requested_at": started,
-        "completed_at": completed,
-        "http_status": status,
-        "response_body_sha256": hashlib.sha256(raw).hexdigest(),
-        "response_headers": response_headers,
-        "body": body,
-    }
-
-
-def _observation(call: dict[str, Any], *, kind: str, expected_name: str, expected_repo: str, expected_status: int = 200) -> dict[str, Any]:
-    if call.get("http_status") != expected_status:
-        raise RuntimeError(f"GitHub {kind} returned HTTP {call.get('http_status')}")
-    selected = _selected_snapshot(call.get("body"), expected_name=expected_name, expected_repo=expected_repo)
-    return {
-        "kind": kind,
-        "method": call["method"],
-        "url": call["url"],
-        "requested_at": call["requested_at"],
-        "completed_at": call["completed_at"],
-        "http_status": call["http_status"],
-        "response_body_sha256": call["response_body_sha256"],
-        "response_headers": call["response_headers"],
-        "selected_snapshot": selected,
-        "selected_snapshot_sha256": github_codespaces_snapshot_guard.canonical_hash(selected),
-    }
-
-
-def _poll_state(*, name: str, repo: str, token: str, wanted: str, deadline: float) -> dict[str, Any]:
-    last: dict[str, Any] | None = None
-    while time.monotonic() < deadline:
-        call = _call(method="GET", url=_endpoint(name), token=token, timeout=20)
-        last = _observation(call, kind=f"poll_{wanted.lower()}", expected_name=name, expected_repo=repo)
-        if last["selected_snapshot"]["state"] == wanted:
-            return last
-        time.sleep(POLL_SECONDS)
-    state = None if last is None else last["selected_snapshot"].get("state")
-    raise RuntimeError(f"Codespace did not reach {wanted}; last_state={state}")
-
-
-def compose_execute_receipt(*, name: str, repo: str, pre: dict[str, Any], stop: dict[str, Any], stopped: dict[str, Any], start: dict[str, Any], post: dict[str, Any]) -> dict[str, Any]:
+def compose_execute_receipt(
+    *, name: str, repo: str, pre: dict[str, Any], stop: dict[str, Any],
+    stopped: dict[str, Any], start: dict[str, Any], post: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate externally captured lifecycle observations as NON-AUTHORITY evidence."""
     if not NAME_RE.fullmatch(name) or not REPO_RE.fullmatch(repo):
         raise ValueError("invalid Codespace identity")
-    observations = {"pre_get": pre, "stop_post": stop, "stopped_get": stopped, "start_post": start, "post_get": post}
+    observations = {
+        "pre_get": pre,
+        "stop_post": stop,
+        "stopped_get": stopped,
+        "start_post": start,
+        "post_get": post,
+    }
     for label, obs in observations.items():
         if not isinstance(obs, dict) or obs.get("http_status") != 200:
             raise ValueError(f"{label} must be a successful GitHub observation")
@@ -205,23 +114,20 @@ def compose_execute_receipt(*, name: str, repo: str, pre: dict[str, Any], stop: 
     if start["method"] != "POST" or start["url"] != _endpoint(name, "/start"):
         raise ValueError("start action endpoint mismatch")
 
-    pre_snap = pre["selected_snapshot"]
-    stop_snap = stop["selected_snapshot"]
-    stopped_snap = stopped["selected_snapshot"]
-    start_snap = start["selected_snapshot"]
-    post_snap = post["selected_snapshot"]
-    if pre_snap["state"] != "Available" or stopped_snap["state"] != "Shutdown" or post_snap["state"] != "Available":
+    snapshots = [
+        pre["selected_snapshot"], stop["selected_snapshot"], stopped["selected_snapshot"],
+        start["selected_snapshot"], post["selected_snapshot"],
+    ]
+    if snapshots[0]["state"] != "Available" or snapshots[2]["state"] != "Shutdown" or snapshots[4]["state"] != "Available":
         raise ValueError("provider state sequence must be Available->Shutdown->Available")
-    ids = {x["id"] for x in (pre_snap, stop_snap, stopped_snap, start_snap, post_snap)}
-    names = {x["name"] for x in (pre_snap, stop_snap, stopped_snap, start_snap, post_snap)}
-    if len(ids) != 1 or len(names) != 1:
+    if len({item["id"] for item in snapshots}) != 1 or len({item["name"] for item in snapshots}) != 1:
         raise ValueError("Codespace provider identity changed across lifecycle")
 
     snapshot_input = {
         "schema": github_codespaces_snapshot_guard.INPUT_SCHEMA,
-        "pre": pre_snap,
-        "stopped": stopped_snap,
-        "post": post_snap,
+        "pre": snapshots[0],
+        "stopped": snapshots[2],
+        "post": snapshots[4],
         "nonclaims": {
             "canonical": False,
             "authority_effect": False,
@@ -242,7 +148,6 @@ def compose_execute_receipt(*, name: str, repo: str, pre: dict[str, Any], stop: 
         "accept": ACCEPT,
         "codespace_name": name,
         "repository_full_name": repo,
-        "transport": "HTTPS_DEFAULT_CA_HOSTNAME_VALIDATION",
         "token_material_persisted": False,
         "observations": observations,
         "provider_oracle": oracle,
@@ -259,12 +164,11 @@ def compose_execute_receipt(*, name: str, repo: str, pre: dict[str, Any], stop: 
             "provider_sequence_eligible": True,
             "provider_identity_stable": True,
             "token_not_persisted": True,
-            "https_default_ca_hostname_validation": True,
         },
     }
     return {
         "schema": SCHEMA,
-        "mode": "EXECUTE",
+        "mode": "EXTERNAL_CAPTURE_READBACK",
         "outcome": "CAPTURED_NONAUTHORITY",
         "evidence": evidence,
         "receipt_sha256": canonical_hash(evidence),
@@ -305,7 +209,13 @@ def dry_plan(*, name: str, repo: str, token_env: str) -> dict[str, Any]:
             {"method": "GET_POLL", "url": _endpoint(name), "expected_state": "Available"},
         ],
         "token_source": {"kind": "ENVIRONMENT_VARIABLE", "name": token_env, "material_persisted": False},
-        "execute_requires": ["--execute", f"{EXECUTE_ENV}=1", "fresh external W1 authority before invocation"],
+        "local_execute_available": False,
+        "execute_block": EXECUTE_BLOCK,
+        "execute_requires": [
+            "external Codespaces lifecycle mutator",
+            "fresh externally verified W1 dispatch receipt bound to Codespace/action/claim/directive",
+            "persisted readback before W1 acceptance",
+        ],
         "provider_mutation_performed": False,
         "canonical": False,
         "authority_effect": False,
@@ -315,23 +225,14 @@ def dry_plan(*, name: str, repo: str, token_env: str) -> dict[str, Any]:
 
 
 def execute(*, name: str, repo: str, token_env: str, timeout_seconds: int) -> dict[str, Any]:
-    if os.environ.get(EXECUTE_ENV) != "1":
-        raise RuntimeError(f"execute mode requires {EXECUTE_ENV}=1")
-    token = os.environ.get(token_env)
-    if not token:
-        raise RuntimeError(f"execute mode requires token in {token_env}")
-    if timeout_seconds < 30 or timeout_seconds > 600:
-        raise ValueError("timeout_seconds must be in [30,600]")
+    """Fail closed before token access or network activity.
 
-    pre = _observation(_call(method="GET", url=_endpoint(name), token=token, timeout=20), kind="pre_get", expected_name=name, expected_repo=repo)
-    if pre["selected_snapshot"]["state"] != "Available":
-        raise RuntimeError("Codespace must be Available before STOP_RESUME provenance capture")
-    stop = _observation(_call(method="POST", url=_endpoint(name, "/stop"), token=token, timeout=30), kind="stop_post", expected_name=name, expected_repo=repo)
-    deadline = time.monotonic() + timeout_seconds
-    stopped = _poll_state(name=name, repo=repo, token=token, wanted="Shutdown", deadline=deadline)
-    start = _observation(_call(method="POST", url=_endpoint(name, "/start"), token=token, timeout=30), kind="start_post", expected_name=name, expected_repo=repo)
-    post = _poll_state(name=name, repo=repo, token=token, wanted="Available", deadline=deadline)
-    return compose_execute_receipt(name=name, repo=repo, pre=pre, stop=stop, stopped=stopped, start=start, post=post)
+    EXECUTE_ENV is retained only so old callers receive an explicit semantic
+    break rather than silently falling through. It is never sufficient to
+    authorize mutation.
+    """
+    del name, repo, token_env, timeout_seconds
+    raise RuntimeError(EXECUTE_BLOCK)
 
 
 def main() -> int:
@@ -339,7 +240,7 @@ def main() -> int:
     parser.add_argument("--codespace-name", required=True)
     parser.add_argument("--repository", required=True)
     parser.add_argument("--token-env", default="GITHUB_TOKEN")
-    parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
+    parser.add_argument("--timeout-seconds", type=int, default=120)
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     result = (
