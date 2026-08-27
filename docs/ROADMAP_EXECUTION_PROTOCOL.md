@@ -18,20 +18,63 @@ Before every meaningful semantic step, the workstream must record:
 
 If a Level-2 assignment cannot be mapped unambiguously to Level-1, stop at `EVIDENCE_READY` and request Supervisor reconciliation.
 
+### Deterministic cycle oracle
+
+Before a new source slice starts, run
+`controller/roadmap/roadmap_cycle_oracle.py` in `PLAN` mode against a fresh
+Supabase roadmap/alignment snapshot and the exact fetched remote rail. Before
+publication, run it again in `PUBLISH` mode after the local commit and after a
+second remote fetch.
+
+The oracle fails closed on roadmap-definition drift, dependency cycles, a
+missing Level-1 mapping, remote-head advancement, dirty publication state, or
+non-fast-forward history. Its receipt is PREP evidence only:
+`canonical=false`, `authority_effect=false`, and it never authorizes provider,
+database, Edge, PR-merge, or checkpoint promotion actions.
+
+The input JSON is the direct result shape of:
+
+```sql
+select jsonb_build_object(
+  'roadmap_status', destruktion_meta.compute_fabric_roadmap_status_h205f22(),
+  'alignment_status', destruktion_meta.compute_fabric_roadmap_alignment_status_h205f22()
+);
+```
+
+After fetching the workstream ref, invoke the oracle with the exact observed
+remote SHA and write the receipt outside the worktree so the receipt itself
+does not make the publication rail dirty:
+
+```bash
+python3 controller/roadmap/roadmap_cycle_oracle.py \
+  --snapshot /tmp/main-roadmap-live.json \
+  --repo . \
+  --remote-ref origin/work/w1-sandbox-launcher-prep \
+  --local-ref HEAD \
+  --expected-remote-head "$EXACT_REMOTE_SHA" \
+  --phase PLAN \
+  --output /tmp/main-roadmap-plan-receipt.json
+```
+
+Use `PUBLISH` only after committing and refetching. It requires `HEAD` to be a
+strict descendant of the still-unchanged expected remote SHA.
+
 ## Per-workstream loop
 
 1. Read current semantic checkpoint and roadmap status.
-2. Read `docs/CANONICAL_ROADMAP.md` and identify the owning Level-1 milestone.
-3. Read the active supervisor directive and work claim.
-4. Verify dependency gates, mutation domains and the Level-1 ↔ Level-2 mapping.
-5. Implement only within the assigned workstream.
-6. Run positive tests and fail-closed negative canaries.
-7. Perform deep upstream/amplifier research for semantic steps.
-8. Run Supabase security/performance advisors after schema changes.
-9. Clearly label `LIVE`, `SYNTHETIC`, `CONTROL_PLANE_ONLY`, `SCHEMA_ONLY`, and `HISTORICAL` evidence.
-10. Commit work on the assigned branch and open a draft PR.
-11. Finish the Level-2 roadmap claim as `EVIDENCE_READY`.
-12. State explicitly which Level-1 acceptance criterion is now evidence-ready.
+2. Fetch the exact workstream rail and obtain a passing `PLAN` cycle-oracle receipt.
+3. Read `docs/CANONICAL_ROADMAP.md` and identify the owning Level-1 milestone.
+4. Read the active supervisor directive and work claim.
+5. Verify dependency gates, mutation domains and the Level-1 ↔ Level-2 mapping.
+6. Implement only within the assigned workstream.
+7. Run positive tests and fail-closed negative canaries.
+8. Perform deep upstream/amplifier research for semantic steps.
+9. Run Supabase security/performance advisors after schema changes.
+10. Clearly label `LIVE`, `SYNTHETIC`, `CONTROL_PLANE_ONLY`, `SCHEMA_ONLY`, and `HISTORICAL` evidence.
+11. Commit, refetch, and obtain a passing `PUBLISH` cycle-oracle receipt.
+12. Publish only as a fast-forward workstream update and keep the PR draft until integration gates pass.
+13. Finish the Level-2 roadmap claim as `EVIDENCE_READY`.
+14. State explicitly which Level-1 acceptance criterion is now evidence-ready.
 
 ## Integration loop
 
