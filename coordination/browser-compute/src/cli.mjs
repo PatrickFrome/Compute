@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { ComputeBrowserRuntime } from './runtime.mjs';
+import { ComputeBrowserRuntime, COMPUTE_BROWSER_RUNTIME_VERSION } from './runtime.mjs';
 import { startRpcServer } from './rpc-server.mjs';
 
 function arg(name) {
@@ -19,7 +19,7 @@ async function serve() {
   const rpc = await startRpcServer(runtime);
   console.log(JSON.stringify({
     schema: 'metaengine.a2-compute-browser.ready.v1',
-    runtime: '0.1.0-dev.2',
+    runtime: COMPUTE_BROWSER_RUNTIME_VERSION,
     endpoint: rpc.endpoint,
     token_file: rpc.tokenFile,
     web_authority_effect: false,
@@ -55,25 +55,45 @@ async function selfTest() {
 
     const entryBeforeRestart = runtime.running.get(profileId);
     const oldPid = entryBeforeRestart?.processRef?.child?.pid;
+    const oldIncarnation = entryBeforeRestart?.processRef?.processIncarnationId;
+    const launchArgs = entryBeforeRestart?.processRef?.child?.spawnargs || [];
+    const pipeLaunchVerified = launchArgs.includes('--remote-debugging-pipe')
+      && !launchArgs.some((value) => String(value).startsWith('--remote-debugging-port='))
+      && !launchArgs.some((value) => String(value).startsWith('--remote-debugging-address='));
+    if (!pipeLaunchVerified) throw new Error('self_test_native_pipe_launch_not_proven');
+    await runtime.createTarget({ profileId, targetId: 'precrash_target', role: 'CI_CRASH_FENCE', url: 'about:blank' });
     const browserExited = new Promise((resolve) => entryBeforeRestart.processRef.child.once('exit', resolve));
     await entryBeforeRestart.processRef.cdp.call('Browser.close');
     await Promise.race([browserExited, new Promise((_, reject) => setTimeout(() => reject(new Error('self_test_browser_exit_timeout')), 5000))]);
     const restarted = await runtime.startProfile({ profileId });
-    if (!restarted.running || restarted.pid === oldPid) throw new Error('self_test_crash_aware_restart_failed');
+    if (!restarted.running || restarted.pid === oldPid || restarted.process_incarnation_id === oldIncarnation) throw new Error('self_test_crash_aware_restart_failed');
+
+    const afterRestart = await runtime.listTargets(profileId);
+    if (!afterRestart.some((row) => row.target_id === 'precrash_target' && row.bound === false && row.process_incarnation_id === null)) {
+      throw new Error('self_test_stale_binding_not_invalidated');
+    }
 
     const created = await runtime.createTarget({ profileId, targetId: 'smoke_target', role: 'CI_SMOKE', url: 'about:blank' });
     const targets = await runtime.listTargets(profileId);
     const health = await runtime.health();
     if (!started.running || !created.bound || !targets.some((row) => row.target_id === 'smoke_target' && row.bound) || health.profiles.length !== 1) throw new Error('self_test_contract_failed');
+    await runtime.activateTarget({ profileId, targetId: 'smoke_target' });
     await runtime.closeTarget({ profileId, targetId: 'smoke_target' });
     console.log(JSON.stringify({
       schema: 'metaengine.a2-compute-browser.self-test.v1',
       ok: true,
+      runtime: COMPUTE_BROWSER_RUNTIME_VERSION,
       product: started.product,
       protocol_version: started.protocol_version,
+      debug_transport: health.debug_transport,
+      devtools_tcp_listener: health.devtools_tcp_listener,
+      native_pipe_launch_verified: pipeLaunchVerified,
       raw_cdp_rpc_exposed: false,
       web_authority_effect: false,
       crash_aware_restart: true,
+      process_incarnation_rotated: true,
+      stale_target_binding_invalidated: true,
+      durable_pre_effect_target_intents: true,
       remote_navigation_blocked: true
     }));
   } finally {

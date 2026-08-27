@@ -1,42 +1,119 @@
-export class CdpClient {
-  #endpoint;
-  #socket = null;
+import { TextDecoder } from 'node:util';
+
+export const DEFAULT_CDP_PIPE_MAX_FRAME_BYTES = 16 * 1024 * 1024;
+
+export class NulJsonFrameDecoder {
+  #segments = [];
+  #bufferedBytes = 0;
+  #decoder = new TextDecoder('utf-8', { fatal: true });
+  #maxFrameBytes;
+  #onMessage;
+
+  constructor({ maxFrameBytes = DEFAULT_CDP_PIPE_MAX_FRAME_BYTES, onMessage } = {}) {
+    if (!Number.isInteger(maxFrameBytes) || maxFrameBytes < 1024) throw new Error('cdp_pipe_frame_limit_invalid');
+    if (typeof onMessage !== 'function') throw new Error('cdp_pipe_message_handler_required');
+    this.#maxFrameBytes = maxFrameBytes;
+    this.#onMessage = onMessage;
+  }
+
+  push(chunk) {
+    const incoming = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    if (incoming.length === 0) return;
+    let start = 0;
+    let delimiter;
+    while ((delimiter = incoming.indexOf(0, start)) >= 0) {
+      const tail = incoming.subarray(start, delimiter);
+      const frameBytes = this.#bufferedBytes + tail.length;
+      if (frameBytes === 0) throw new Error('cdp_pipe_empty_frame');
+      if (frameBytes > this.#maxFrameBytes) throw new Error('cdp_pipe_frame_too_large');
+      const frame = this.#segments.length === 0 ? tail : Buffer.concat([...this.#segments, tail], frameBytes);
+      this.#segments = [];
+      this.#bufferedBytes = 0;
+      let message;
+      try {
+        message = JSON.parse(this.#decoder.decode(frame));
+      } catch (_) {
+        throw new Error('cdp_pipe_json_invalid');
+      }
+      if (!message || typeof message !== 'object' || Array.isArray(message)) throw new Error('cdp_pipe_message_invalid');
+      this.#onMessage(message);
+      start = delimiter + 1;
+    }
+    if (start < incoming.length) {
+      const remainder = incoming.subarray(start);
+      this.#bufferedBytes += remainder.length;
+      if (this.#bufferedBytes > this.#maxFrameBytes) throw new Error('cdp_pipe_frame_too_large');
+      this.#segments.push(Buffer.from(remainder));
+    }
+  }
+
+  finish() {
+    if (this.#bufferedBytes !== 0) throw new Error('cdp_pipe_truncated_frame');
+  }
+}
+
+export class CdpPipeClient {
+  #writable;
+  #readable;
+  #maxFrameBytes;
   #nextId = 1;
   #pending = new Map();
   #events = new Map();
+  #decoder = null;
+  #connected = false;
+  #closed = false;
+  #listeners = [];
 
-  constructor(endpoint) { this.#endpoint = endpoint; }
+  constructor({ writable, readable, maxFrameBytes = DEFAULT_CDP_PIPE_MAX_FRAME_BYTES } = {}) {
+    this.#writable = writable;
+    this.#readable = readable;
+    this.#maxFrameBytes = maxFrameBytes;
+  }
 
-  async connect(timeoutMs = 10000) {
-    if (this.#socket) return this;
-    if (typeof WebSocket !== 'function') throw new Error('node_websocket_unavailable');
-    const socket = new WebSocket(this.#endpoint);
-    this.#socket = socket;
-    socket.addEventListener('message', (event) => this.#onMessage(event.data));
-    socket.addEventListener('close', () => this.#failAll(new Error('cdp_socket_closed')));
-    socket.addEventListener('error', () => this.#failAll(new Error('cdp_socket_error')));
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('cdp_connect_timeout')), timeoutMs);
-      socket.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
-      socket.addEventListener('error', () => { clearTimeout(timer); reject(new Error('cdp_connect_failed')); }, { once: true });
+  async connect() {
+    if (this.#connected) return this;
+    if (this.#closed) throw new Error('cdp_pipe_client_closed');
+    if (typeof this.#writable?.write !== 'function' || typeof this.#readable?.on !== 'function') throw new Error('cdp_pipe_streams_invalid');
+    this.#decoder = new NulJsonFrameDecoder({
+      maxFrameBytes: this.#maxFrameBytes,
+      onMessage: (message) => this.#onMessage(message)
     });
+    const listen = (stream, event, listener) => {
+      stream.on(event, listener);
+      this.#listeners.push([stream, event, listener]);
+    };
+    listen(this.#readable, 'data', (chunk) => {
+      try { this.#decoder.push(chunk); }
+      catch (error) { this.abort(error); }
+    });
+    listen(this.#readable, 'end', () => {
+      try { this.#decoder.finish(); }
+      catch (error) { this.abort(error); return; }
+      this.abort(new Error('cdp_pipe_read_ended'));
+    });
+    listen(this.#readable, 'close', () => this.abort(new Error('cdp_pipe_read_closed')));
+    listen(this.#readable, 'error', (error) => this.abort(new Error(`cdp_pipe_read_error:${error?.message || error}`)));
+    listen(this.#writable, 'close', () => this.abort(new Error('cdp_pipe_write_closed')));
+    listen(this.#writable, 'error', (error) => this.abort(new Error(`cdp_pipe_write_error:${error?.message || error}`)));
+    this.#connected = true;
     return this;
   }
 
-  #onMessage(raw) {
-    let msg;
-    try { msg = JSON.parse(String(raw)); } catch (_) { return; }
-    if (msg.id) {
-      const pending = this.#pending.get(msg.id);
+  get connected() { return this.#connected && !this.#closed; }
+  get pendingCount() { return this.#pending.size; }
+
+  #onMessage(message) {
+    if (Number.isInteger(message.id)) {
+      const pending = this.#pending.get(message.id);
       if (!pending) return;
-      this.#pending.delete(msg.id);
-      if (msg.error) pending.reject(new Error(`cdp_error:${msg.error.code}:${msg.error.message}`));
-      else pending.resolve(msg.result || {});
+      this.#pending.delete(message.id);
+      if (message.error) pending.reject(new Error(`cdp_error:${message.error.code}:${message.error.message}`));
+      else pending.resolve(message.result || {});
       return;
     }
-    if (msg.method) {
-      for (const listener of this.#events.get(msg.method) || []) {
-        try { listener(msg.params || {}, msg.sessionId || null); } catch (_) {}
+    if (typeof message.method === 'string' && message.method) {
+      for (const listener of this.#events.get(message.method) || []) {
+        try { listener(message.params || {}, message.sessionId || null); } catch (_) {}
       }
     }
   }
@@ -46,7 +123,13 @@ export class CdpClient {
     this.#pending.clear();
   }
 
+  #detachListeners() {
+    for (const [stream, event, listener] of this.#listeners) stream.off?.(event, listener);
+    this.#listeners = [];
+  }
+
   on(method, listener) {
+    if (typeof method !== 'string' || !method || typeof listener !== 'function') throw new Error('cdp_event_listener_invalid');
     const list = this.#events.get(method) || [];
     list.push(listener);
     this.#events.set(method, list);
@@ -54,25 +137,46 @@ export class CdpClient {
   }
 
   call(method, params = {}, { sessionId = null, timeoutMs = 15000 } = {}) {
-    if (!this.#socket || this.#socket.readyState !== WebSocket.OPEN) return Promise.reject(new Error('cdp_not_connected'));
+    if (!this.connected) return Promise.reject(new Error('cdp_not_connected'));
+    if (typeof method !== 'string' || !method || !Number.isInteger(timeoutMs) || timeoutMs < 1) return Promise.reject(new Error('cdp_call_invalid'));
     const id = this.#nextId++;
     const message = { id, method, params };
     if (sessionId) message.sessionId = sessionId;
+    const frame = Buffer.from(`${JSON.stringify(message)}\0`, 'utf8');
+    if (frame.length - 1 > this.#maxFrameBytes) return Promise.reject(new Error('cdp_pipe_frame_too_large'));
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.#pending.delete(id); reject(new Error(`cdp_call_timeout:${method}`)); }, timeoutMs);
-      this.#pending.set(id, {
+      const timer = setTimeout(() => {
+        this.#pending.delete(id);
+        reject(new Error(`cdp_call_timeout:${method}`));
+      }, timeoutMs);
+      const pending = {
         resolve: (value) => { clearTimeout(timer); resolve(value); },
         reject: (error) => { clearTimeout(timer); reject(error); }
-      });
-      this.#socket.send(JSON.stringify(message));
+      };
+      this.#pending.set(id, pending);
+      try {
+        this.#writable.write(frame, (error) => {
+          if (!error) return;
+          if (this.#pending.delete(id)) pending.reject(new Error(`cdp_pipe_write_failed:${error?.message || error}`));
+        });
+      } catch (error) {
+        if (this.#pending.delete(id)) pending.reject(new Error(`cdp_pipe_write_failed:${error?.message || error}`));
+      }
     });
   }
 
+  abort(error = new Error('cdp_pipe_aborted')) {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.#connected = false;
+    this.#detachListeners();
+    this.#failAll(error instanceof Error ? error : new Error(String(error)));
+    try { this.#writable.destroy?.(); } catch (_) {}
+    try { this.#readable.destroy?.(); } catch (_) {}
+  }
+
   async close() {
-    if (!this.#socket) return;
-    const socket = this.#socket;
-    this.#socket = null;
-    try { socket.close(); } catch (_) {}
-    this.#failAll(new Error('cdp_client_closed'));
+    if (this.#closed) return;
+    this.abort(new Error('cdp_client_closed'));
   }
 }
