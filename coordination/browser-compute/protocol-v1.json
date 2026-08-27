@@ -1,0 +1,35 @@
+{
+  "schema": "metaengine.a2-browser-protocol.v1",
+  "version": "1.0.0",
+  "transport": {
+    "scope": "local_machine_only",
+    "unix": "unix_domain_socket",
+    "windows": "named_pipe",
+    "authentication": "256_bit_local_capability_token",
+    "max_request_bytes": 1048576
+  },
+  "identity": {
+    "durable": ["browser_node_id", "profile_id", "target_id", "conversation_epoch"],
+    "ephemeral": ["browser_pid", "cdp_target_id", "debug_port"]
+  },
+  "methods": [
+    "runtime.health",
+    "profile.start",
+    "profile.stop",
+    "profile.list",
+    "target.create",
+    "target.list",
+    "target.activate",
+    "target.close"
+  ],
+  "forbidden_external_capabilities": [
+    "raw_cdp",
+    "runtime_evaluate",
+    "javascript_eval",
+    "shell_exec",
+    "arbitrary_browser_flags",
+    "default_profile_import",
+    "cookie_import"
+  ],
+  "authority_effect": false
+}
