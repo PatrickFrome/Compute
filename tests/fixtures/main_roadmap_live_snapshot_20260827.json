@@ -1,0 +1,636 @@
+{
+  "roadmap_status": {
+    "title": "METAENGINE Compute Fabric Production Roadmap",
+    "schema": "metaengine.compute.fabric-roadmap-status.h205f22.v1",
+    "version": 1,
+    "milestones": [
+      {
+        "lane": "FOUNDATION",
+        "title": "Current control/trust baseline",
+        "priority": 1,
+        "blocked_by": [],
+        "phase_order": 0,
+        "critical_path": true,
+        "milestone_key": "B0_CONTROL_TRUST_BASELINE",
+        "execution_class": "MERGE_GATE",
+        "effective_status": "VERIFIED",
+        "verified_checkpoint_id": "metaengine-h205f22-recovery-dev-20260821-cp068"
+      },
+      {
+        "lane": "EXECUTION",
+        "title": "First persistent Linux worker + safety envelope",
+        "priority": 1,
+        "blocked_by": [],
+        "phase_order": 10,
+        "critical_path": true,
+        "milestone_key": "W1_PERSISTENT_LINUX_WORKER_SAFETY",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "READY",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "TOOLCHAIN",
+        "title": "Hermetic toolchain identity contract",
+        "priority": 2,
+        "blocked_by": [],
+        "phase_order": 10,
+        "critical_path": true,
+        "milestone_key": "T0_HERMETIC_TOOLCHAIN_CONTRACT",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "VERIFIED",
+        "verified_checkpoint_id": "metaengine-h205f22-recovery-dev-20260821-cp072"
+      },
+      {
+        "lane": "FEDERATION",
+        "title": "First live external federation provider",
+        "priority": 5,
+        "blocked_by": [],
+        "phase_order": 10,
+        "critical_path": true,
+        "milestone_key": "F1_LIVE_EXTERNAL_FEDERATION",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "READY",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "DURABILITY",
+        "title": "Adopt H41-H49 continuity plane",
+        "priority": 10,
+        "blocked_by": [],
+        "phase_order": 10,
+        "critical_path": false,
+        "milestone_key": "R1_CONTINUITY_PLANE_ADOPTION",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "READY",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "TOOLCHAIN",
+        "title": "Toolchain parity verification",
+        "priority": 3,
+        "blocked_by": [
+          "W1_PERSISTENT_LINUX_WORKER_SAFETY"
+        ],
+        "phase_order": 20,
+        "critical_path": true,
+        "milestone_key": "T1_TOOLCHAIN_PARITY_VERIFICATION",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "CODING",
+        "title": "Isolated coding workspace + safe agent adapter",
+        "priority": 4,
+        "blocked_by": [
+          "W1_PERSISTENT_LINUX_WORKER_SAFETY"
+        ],
+        "phase_order": 20,
+        "critical_path": true,
+        "milestone_key": "A1_ISOLATED_WORKSPACE_AGENT_ADAPTER",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "DURABILITY",
+        "title": "Two-domain persisted readback",
+        "priority": 20,
+        "blocked_by": [
+          "R1_CONTINUITY_PLANE_ADOPTION"
+        ],
+        "phase_order": 20,
+        "critical_path": false,
+        "milestone_key": "R2_TWO_DOMAIN_PERSISTED_READBACK",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "CODING",
+        "title": "First real serial coding loop",
+        "priority": 1,
+        "blocked_by": [
+          "A1_ISOLATED_WORKSPACE_AGENT_ADAPTER",
+          "T1_TOOLCHAIN_PARITY_VERIFICATION",
+          "W1_PERSISTENT_LINUX_WORKER_SAFETY"
+        ],
+        "phase_order": 30,
+        "critical_path": true,
+        "milestone_key": "C1_FIRST_SERIAL_CODING_LOOP",
+        "execution_class": "SERIAL_MAINLINE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "DURABILITY",
+        "title": "Restore drill quorum",
+        "priority": 25,
+        "blocked_by": [
+          "R2_TWO_DOMAIN_PERSISTED_READBACK"
+        ],
+        "phase_order": 30,
+        "critical_path": true,
+        "milestone_key": "R3_RESTORE_DRILL_QUORUM",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "ACCELERATION",
+        "title": "Baseline coding accelerators",
+        "priority": 10,
+        "blocked_by": [
+          "C1_FIRST_SERIAL_CODING_LOOP"
+        ],
+        "phase_order": 40,
+        "critical_path": false,
+        "milestone_key": "ACC1_BASE_ACCELERATORS",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "OBSERVABILITY",
+        "title": "Trusted telemetry provenance",
+        "priority": 14,
+        "blocked_by": [
+          "C1_FIRST_SERIAL_CODING_LOOP"
+        ],
+        "phase_order": 40,
+        "critical_path": true,
+        "milestone_key": "C5_TRUSTED_TELEMETRY",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "ACCELERATION",
+        "title": "Cache identity + equivalence witnesses",
+        "priority": 11,
+        "blocked_by": [
+          "ACC1_BASE_ACCELERATORS"
+        ],
+        "phase_order": 50,
+        "critical_path": true,
+        "milestone_key": "C2_CACHE_IDENTITY_EQUIVALENCE",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "SCHEDULING",
+        "title": "Deterministic shard planner",
+        "priority": 12,
+        "blocked_by": [
+          "C1_FIRST_SERIAL_CODING_LOOP"
+        ],
+        "phase_order": 50,
+        "critical_path": true,
+        "milestone_key": "C3_DETERMINISTIC_SHARDING",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "SCHEDULING",
+        "title": "Global cross-tool slot broker",
+        "priority": 13,
+        "blocked_by": [
+          "C3_DETERMINISTIC_SHARDING"
+        ],
+        "phase_order": 60,
+        "critical_path": true,
+        "milestone_key": "C4_GLOBAL_SLOT_BROKER",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "BUILD_GRAPH",
+        "title": "Incremental build/test impact graph",
+        "priority": 20,
+        "blocked_by": [
+          "C1_FIRST_SERIAL_CODING_LOOP"
+        ],
+        "phase_order": 60,
+        "critical_path": false,
+        "milestone_key": "C11_INCREMENTAL_IMPACT_GRAPH",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "SCHEDULING",
+        "title": "Duration learner + scheduler tournament",
+        "priority": 15,
+        "blocked_by": [
+          "C3_DETERMINISTIC_SHARDING",
+          "C5_TRUSTED_TELEMETRY"
+        ],
+        "phase_order": 70,
+        "critical_path": false,
+        "milestone_key": "C6_DURATION_SCHEDULER_TOURNAMENT",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "REMOTE_EXECUTION",
+        "title": "REAPI build-farm tournament",
+        "priority": 18,
+        "blocked_by": [
+          "C2_CACHE_IDENTITY_EQUIVALENCE",
+          "C4_GLOBAL_SLOT_BROKER",
+          "C5_TRUSTED_TELEMETRY"
+        ],
+        "phase_order": 70,
+        "critical_path": true,
+        "milestone_key": "C9_REAPI_BUILD_FARM_TOURNAMENT",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "GPU",
+        "title": "GPU worker admission + locality",
+        "priority": 21,
+        "blocked_by": [
+          "C5_TRUSTED_TELEMETRY",
+          "T1_TOOLCHAIN_PARITY_VERIFICATION",
+          "W1_PERSISTENT_LINUX_WORKER_SAFETY"
+        ],
+        "phase_order": 70,
+        "critical_path": true,
+        "milestone_key": "G1_GPU_WORKER_ADMISSION",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "RUNTIME",
+        "title": "Transactional runtime work stealing",
+        "priority": 16,
+        "blocked_by": [
+          "C4_GLOBAL_SLOT_BROKER",
+          "C6_DURATION_SCHEDULER_TOURNAMENT"
+        ],
+        "phase_order": 80,
+        "critical_path": true,
+        "milestone_key": "C7_TRANSACTIONAL_WORK_STEALING",
+        "execution_class": "SERIAL_MAINLINE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "REMOTE_EXECUTION",
+        "title": "Remote output materialization",
+        "priority": 19,
+        "blocked_by": [
+          "C9_REAPI_BUILD_FARM_TOURNAMENT"
+        ],
+        "phase_order": 80,
+        "critical_path": true,
+        "milestone_key": "C10_REMOTE_OUTPUT_MATERIALIZATION",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "RUNTIME",
+        "title": "Selective speculative execution",
+        "priority": 17,
+        "blocked_by": [
+          "C2_CACHE_IDENTITY_EQUIVALENCE",
+          "C5_TRUSTED_TELEMETRY",
+          "C7_TRANSACTIONAL_WORK_STEALING"
+        ],
+        "phase_order": 90,
+        "critical_path": true,
+        "milestone_key": "C8_SPECULATIVE_EXECUTION",
+        "execution_class": "SERIAL_MAINLINE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "AI",
+        "title": "AI serving plane",
+        "priority": 30,
+        "blocked_by": [
+          "C5_TRUSTED_TELEMETRY",
+          "G1_GPU_WORKER_ADMISSION"
+        ],
+        "phase_order": 100,
+        "critical_path": false,
+        "milestone_key": "AI1_AI_SERVING_PLANE",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "DISTRIBUTED",
+        "title": "Distributed compute runtime",
+        "priority": 31,
+        "blocked_by": [
+          "C4_GLOBAL_SLOT_BROKER",
+          "C5_TRUSTED_TELEMETRY",
+          "W1_PERSISTENT_LINUX_WORKER_SAFETY"
+        ],
+        "phase_order": 100,
+        "critical_path": false,
+        "milestone_key": "S1_DISTRIBUTED_COMPUTE_RAY",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "CLUSTER",
+        "title": "Cluster admission / Kueue tier",
+        "priority": 40,
+        "blocked_by": [
+          "G1_GPU_WORKER_ADMISSION",
+          "S1_DISTRIBUTED_COMPUTE_RAY"
+        ],
+        "phase_order": 110,
+        "critical_path": false,
+        "milestone_key": "K1_CLUSTER_ADMISSION_KUEUE",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "ECONOMICS",
+        "title": "Economic autoscaler",
+        "priority": 41,
+        "blocked_by": [
+          "C6_DURATION_SCHEDULER_TOURNAMENT",
+          "C9_REAPI_BUILD_FARM_TOURNAMENT",
+          "G1_GPU_WORKER_ADMISSION"
+        ],
+        "phase_order": 110,
+        "critical_path": false,
+        "milestone_key": "E1_ECONOMIC_AUTOSCALER",
+        "execution_class": "PARALLEL_SAFE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "ACCEPTANCE",
+        "title": "Production core acceptance",
+        "priority": 1,
+        "blocked_by": [
+          "C10_REMOTE_OUTPUT_MATERIALIZATION",
+          "C11_INCREMENTAL_IMPACT_GRAPH",
+          "C8_SPECULATIVE_EXECUTION",
+          "F1_LIVE_EXTERNAL_FEDERATION",
+          "G1_GPU_WORKER_ADMISSION",
+          "R3_RESTORE_DRILL_QUORUM"
+        ],
+        "phase_order": 120,
+        "critical_path": true,
+        "milestone_key": "P1_PRODUCTION_CORE_ACCEPTANCE",
+        "execution_class": "MERGE_GATE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      },
+      {
+        "lane": "ACCEPTANCE",
+        "title": "Scale-tier acceptance",
+        "priority": 50,
+        "blocked_by": [
+          "AI1_AI_SERVING_PLANE",
+          "E1_ECONOMIC_AUTOSCALER",
+          "K1_CLUSTER_ADMISSION_KUEUE",
+          "P1_PRODUCTION_CORE_ACCEPTANCE",
+          "S1_DISTRIBUTED_COMPUTE_RAY"
+        ],
+        "phase_order": 130,
+        "critical_path": false,
+        "milestone_key": "P2_SCALE_TIER_ACCEPTANCE",
+        "execution_class": "MERGE_GATE",
+        "effective_status": "BLOCKED",
+        "verified_checkpoint_id": null
+      }
+    ],
+    "roadmap_id": "compute-fabric-roadmap-v1",
+    "next_mainline": {
+      "lane": "EXECUTION",
+      "title": "First persistent Linux worker + safety envelope",
+      "blocked_by": [],
+      "milestone_key": "W1_PERSISTENT_LINUX_WORKER_SAFETY",
+      "effective_status": "READY"
+    },
+    "semantic_head": {
+      "checkpoint_id": "metaengine-h205f22-recovery-dev-20260821-cp072",
+      "payload_root_sha256": "14ef848e935dd12a6b3ada23f7fed6016788fcbaf2856c1490fd4e45caeed140"
+    },
+    "ready_parallel": [
+      {
+        "lane": "EXECUTION",
+        "title": "First persistent Linux worker + safety envelope",
+        "priority": 1,
+        "milestone_key": "W1_PERSISTENT_LINUX_WORKER_SAFETY",
+        "parallel_group": "foundation-parallel",
+        "mutation_domains": [
+          "worker",
+          "enrollment",
+          "execution_safety",
+          "scheduler"
+        ]
+      },
+      {
+        "lane": "FEDERATION",
+        "title": "First live external federation provider",
+        "priority": 5,
+        "milestone_key": "F1_LIVE_EXTERNAL_FEDERATION",
+        "parallel_group": "foundation-parallel",
+        "mutation_domains": [
+          "federation",
+          "provider",
+          "signature"
+        ]
+      },
+      {
+        "lane": "DURABILITY",
+        "title": "Adopt H41-H49 continuity plane",
+        "priority": 10,
+        "milestone_key": "R1_CONTINUITY_PLANE_ADOPTION",
+        "parallel_group": "foundation-parallel",
+        "mutation_domains": [
+          "continuity",
+          "checkpoint",
+          "durability"
+        ]
+      }
+    ],
+    "definition_integrity": true,
+    "sealed_definition_sha256": "96068a842c7dcb37d216aad6defc7b51e291394e916f76beed447be630024925",
+    "current_definition_sha256": "96068a842c7dcb37d216aad6defc7b51e291394e916f76beed447be630024925"
+  },
+  "alignment_status": {
+    "schema": "metaengine.compute.roadmap-alignment.h205f22.v1",
+    "git_source": {
+      "path": "docs/CANONICAL_ROADMAP.md",
+      "commit": "f73ac4c7730381b13239744979f8fa4731951109",
+      "repository": "PatrickFrome/Compute"
+    },
+    "drift_reasons": [],
+    "drift_detected": false,
+    "level2_roadmap": "compute-fabric-roadmap-v1",
+    "canonical_digest": "bb08794d6887fe394b0e74042e31236140e611b48169f542e5e3026203f06f15",
+    "invalid_mappings": [],
+    "canonical_roadmap": {
+      "title": "METAENGINE H205F22 Canonical Level-1 Roadmap",
+      "sealed": true,
+      "version": 1,
+      "roadmap_key": "compute-fabric-canonical-roadmap-v1",
+      "source_git_path": "docs/CANONICAL_ROADMAP.md",
+      "source_git_commit": "f73ac4c7730381b13239744979f8fa4731951109",
+      "source_git_repository": "PatrickFrome/Compute"
+    },
+    "mapped_milestones": 28,
+    "canonical_integrity": true,
+    "critical_spine_status": [
+      {
+        "title": "Continuity Plane Adoption",
+        "ordinal": 1,
+        "progress_state": "PLANNED",
+        "canonical_milestone_key": "R1"
+      },
+      {
+        "title": "First Real Linux Worker",
+        "ordinal": 2,
+        "progress_state": "IN_PROGRESS",
+        "canonical_milestone_key": "C1"
+      },
+      {
+        "title": "First Serial Coding Loop",
+        "ordinal": 3,
+        "progress_state": "PARTIAL",
+        "canonical_milestone_key": "C2"
+      },
+      {
+        "title": "Coding Accelerator Pack",
+        "ordinal": 4,
+        "progress_state": "PLANNED",
+        "canonical_milestone_key": "C3"
+      },
+      {
+        "title": "Cache Identity & Toolchain Equivalence",
+        "ordinal": 5,
+        "progress_state": "PLANNED",
+        "canonical_milestone_key": "C4"
+      },
+      {
+        "title": "Deterministic Parallel Planner",
+        "ordinal": 6,
+        "progress_state": "PLANNED",
+        "canonical_milestone_key": "C5"
+      },
+      {
+        "title": "Global Slot Broker",
+        "ordinal": 7,
+        "progress_state": "PLANNED",
+        "canonical_milestone_key": "C6"
+      },
+      {
+        "title": "Trusted Telemetry",
+        "ordinal": 8,
+        "progress_state": "PLANNED",
+        "canonical_milestone_key": "C7"
+      },
+      {
+        "title": "Duration & Scheduler Tournament",
+        "ordinal": 9,
+        "progress_state": "PLANNED",
+        "canonical_milestone_key": "C8"
+      },
+      {
+        "title": "Transactional Work Stealing",
+        "ordinal": 10,
+        "progress_state": "PLANNED",
+        "canonical_milestone_key": "C9"
+      },
+      {
+        "title": "Speculative Dynamic Execution",
+        "ordinal": 11,
+        "progress_state": "PLANNED",
+        "canonical_milestone_key": "C10"
+      },
+      {
+        "title": "REAPI Build Farm",
+        "ordinal": 12,
+        "progress_state": "PLANNED",
+        "canonical_milestone_key": "C11"
+      },
+      {
+        "title": "Incremental Impact Graph",
+        "ordinal": 13,
+        "progress_state": "PLANNED",
+        "canonical_milestone_key": "C12"
+      },
+      {
+        "title": "GPU Worker Admission",
+        "ordinal": 14,
+        "progress_state": "PLANNED",
+        "canonical_milestone_key": "C13"
+      },
+      {
+        "title": "AI Serving Plane",
+        "ordinal": 15,
+        "progress_state": "PLANNED",
+        "canonical_milestone_key": "C14"
+      },
+      {
+        "title": "Distributed Compute",
+        "ordinal": 16,
+        "progress_state": "PLANNED",
+        "canonical_milestone_key": "C15"
+      },
+      {
+        "title": "Cluster Admission",
+        "ordinal": 17,
+        "progress_state": "PLANNED",
+        "canonical_milestone_key": "C16"
+      },
+      {
+        "title": "Economic Autoscaler",
+        "ordinal": 18,
+        "progress_state": "PLANNED",
+        "canonical_milestone_key": "C17"
+      },
+      {
+        "title": "Live Multi-CAT Federation",
+        "ordinal": 19,
+        "progress_state": "PLANNED",
+        "canonical_milestone_key": "F1+"
+      }
+    ],
+    "active_claim_alignment": [
+      {
+        "aligned": true,
+        "claim_id": 32,
+        "mapping_kind": "PRIMARY",
+        "milestone_key": "W1_PERSISTENT_LINUX_WORKER_SAFETY",
+        "canonical_milestone_key": "C1"
+      }
+    ],
+    "current_canonical_focus": {
+      "execution": {
+        "progress_state": "IN_PROGRESS",
+        "canonical_milestone_key": "C1"
+      },
+      "foundation": {
+        "progress_state": "PLANNED",
+        "canonical_milestone_key": "R1"
+      },
+      "parallel_federation": {
+        "progress_state": "PLANNED",
+        "canonical_milestone_key": "F1+"
+      }
+    },
+    "evidence_ready_alignment": [],
+    "unmapped_level2_milestones": [],
+    "level2_definition_integrity": true
+  }
+}

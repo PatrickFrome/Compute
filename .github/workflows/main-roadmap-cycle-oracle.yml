@@ -1,0 +1,59 @@
+name: Main Roadmap Cycle Oracle
+
+on:
+  push:
+    branches:
+      - work/main-roadmap-accelerators-v1
+      - work/w1-sandbox-launcher-prep
+    paths:
+      - 'controller/roadmap/**'
+      - 'tests/test_main_roadmap_cycle_oracle.py'
+      - 'tests/fixtures/main_roadmap_live_snapshot_20260827.json'
+      - 'docs/ROADMAP_EXECUTION_PROTOCOL.md'
+      - 'research/main-roadmap-accelerators/**'
+      - '.github/workflows/main-roadmap-cycle-oracle.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oracle-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact revision without credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Compile deterministic oracle
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/roadmap/roadmap_cycle_oracle.py
+
+      - name: Run positive and adversarial contracts
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_main_roadmap_cycle_oracle -v
+
+      - name: Prove non-authority boundary is source-visible
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('controller/roadmap/roadmap_cycle_oracle.py').read_text(encoding='utf-8')
+          required = [
+              '"provider_mutation_authorized": False',
+              '"database_ddl_authorized": False',
+              '"edge_deployment_authorized": False',
+              '"pr_merge_authorized": False',
+              '"authority_effect": False',
+              'merge-base',
+              '--is-ancestor',
+          ]
+          for marker in required:
+              assert marker in source, marker
+          print('main-roadmap cycle oracle non-authority boundary: PASS')
+          PY
