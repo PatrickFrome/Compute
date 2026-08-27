@@ -66,6 +66,23 @@
   </section>
 
   <section class="card">
+    <h2>Semantic AX actions</h2>
+    <label for="semanticTarget">Target from last Accessibility capture</label>
+    <select id="semanticTarget" disabled>
+      <option value="">Capture a page first…</option>
+    </select>
+    <label for="semanticText">Trusted text</label>
+    <textarea id="semanticText" placeholder="Text for TYPE / replace…"></textarea>
+    <div class="actions action-row">
+      <button id="semanticFocus" disabled>Focus</button>
+      <button id="semanticClick" disabled>Click</button>
+      <button id="semanticType" disabled>Type / replace</button>
+    </div>
+    <p class="hint">Targets are derived only from the latest local Accessibility capture. No CSS selector or remote JavaScript is accepted. Focus/type use DOM.focus without activation; click is live-AX + backend-node revalidated immediately before physical mouse actuation.</p>
+    <div id="semanticState" class="meta">No semantic target selected.</div>
+  </section>
+
+  <section class="card">
     <h2>Operator actions</h2>
     <label for="actionTarget">Target</label>
     <select id="actionTarget">
