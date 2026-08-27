@@ -29,5 +29,7 @@ importScripts("./operator-control.js");
 importScripts("./operator-perception.js");
 importScripts("./operator-oopif-perception.js");
 importScripts("./operator-semantic-actions.js");
+importScripts("./supervisor-transport-v063.js");
+importScripts("./supervisor-fetch-router-v063.js");
 importScripts("./supervisor-client-v063.js");
 importScripts("./supervisor-bootstrap-v063.js");
