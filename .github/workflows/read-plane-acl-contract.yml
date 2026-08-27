@@ -1,0 +1,36 @@
+name: Read-plane trusted ingress ACL
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'coordination/read-plane/read-barrier-migration.sql'
+      - 'supabase/migrations/20260824143000_coordination_read_barrier_acl_v2.sql'
+      - 'tests/test_read_barrier_acl_contract.py'
+      - 'research/READ_PLANE_TRUSTED_INGRESS_2026-08-24.md'
+      - '.github/workflows/read-plane-acl-contract.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: read-plane-acl-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fail-closed-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Verify source and ACL contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m py_compile tests/test_read_barrier_acl_contract.py
+          python3 -m unittest tests.test_read_barrier_acl_contract -v

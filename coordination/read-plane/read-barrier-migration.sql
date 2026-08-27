@@ -13,7 +13,9 @@
 --   Plane separation: PROJECT CLAIM LEASE != AOP RUN LEASE != PAP TRANSPORT LEASE.
 --
 -- SECURITY: SECURITY DEFINER, executes with the migration owner's role.
--- Exposed via PostgREST to authenticated callers; returns NO secrets.
+-- It is intentionally callable only by service_role.  Postgres grants EXECUTE
+-- on new functions to PUBLIC by default, so the explicit revokes below are a
+-- required part of this contract rather than optional hardening.
 
 create or replace function public.coordination_read_barrier_h205f22()
 returns jsonb
@@ -121,8 +123,12 @@ exception
 end;
 $$;
 
--- PostgREST exposure: executable by authenticated callers (agents), read-only semantics.
-grant execute on function public.coordination_read_barrier_h205f22() to authenticated, service_role;
+-- Trusted read-plane ingress only.  Untrusted clients must not be able to use
+-- this privileged function to bypass the private-schema RLS boundary.
+revoke execute on function public.coordination_read_barrier_h205f22()
+  from public, anon, authenticated;
+grant execute on function public.coordination_read_barrier_h205f22()
+  to service_role;
 
 -- NOTE FOR PR REVIEW (ChatGPT):
 --   1. Table/column names in destruktion_meta are best-effort from public
