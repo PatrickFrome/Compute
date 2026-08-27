@@ -24,6 +24,7 @@ const nativeFetch = async (input, init = {}) => {
   if (url.startsWith("https://example.com/")) return new Response(null, { status: 204 });
   if (!url.startsWith(V4)) throw new Error(`unexpected_native_url:${url}`);
   if (nativeMode === "invalid_signature") return new Response(JSON.stringify({ error: "supervisor_device_auth_required", reason: "INVALID_SIGNATURE" }), { status: 401, headers: { "content-type": "application/json" } });
+  if (nativeMode === "pairing_revoked") return new Response(JSON.stringify({ error: "supervisor_device_auth_required", reason: "PAIRING_REVOKED" }), { status: 401, headers: { "content-type": "application/json" } });
   if (nativeMode === "recover_once" && !recoverableSeen) {
     recoverableSeen = true;
     return new Response(JSON.stringify({ error: "supervisor_device_auth_required", reason: "DEVICE_NOT_FOUND" }), { status: 401, headers: { "content-type": "application/json" } });
@@ -89,6 +90,16 @@ assert.equal(enrollCalls, enrollBeforeInvalid, "INVALID_SIGNATURE triggered forb
 assert.equal(clearCalls, clearBeforeInvalid, "INVALID_SIGNATURE cleared trusted enrollment");
 assert.equal(signCalls, signBeforeInvalid + 1, "invalid signature request was unexpectedly retried");
 
+nativeMode = "pairing_revoked";
+const enrollBeforePairingRevoke = enrollCalls;
+const clearBeforePairingRevoke = clearCalls;
+const signBeforePairingRevoke = signCalls;
+const revoked = await context.fetch(`${LEGACY}/v1/status`, { method: "GET", headers });
+assert.equal(revoked.status, 401);
+assert.equal(enrollCalls, enrollBeforePairingRevoke, "PAIRING_REVOKED triggered forbidden re-enroll fallback");
+assert.equal(clearCalls, clearBeforePairingRevoke, "PAIRING_REVOKED cleared local enrollment and attempted recovery");
+assert.equal(signCalls, signBeforePairingRevoke + 1, "PAIRING_REVOKED request was unexpectedly retried");
+
 nativeMode = "recover_once";
 recoverableSeen = false;
 const enrollBeforeRecovery = enrollCalls;
@@ -106,6 +117,7 @@ assert.equal(recoveryWire.headers["x-a2-chat-bridge-secret"], undefined);
 assert.match(source, /DEVICE_SIGNED_NO_BEARER_FALLBACK/);
 assert.match(source, /headers\.delete\("x-a2-chat-bridge-secret"\)/);
 assert.match(source, /signaturePath: signed\.pathname/);
+assert.doesNotMatch(source, /PAIRING_REVOKED/);
 assert.doesNotMatch(source, /INVALID_SIGNATURE["']\s*\)/);
 
 console.log("a2_v063_supervisor_device_transport_lab: PASS", {
@@ -113,5 +125,6 @@ console.log("a2_v063_supervisor_device_transport_lab: PASS", {
   clearCalls,
   signCalls,
   serviceBoundPaths: signedPaths.length,
+  pairingKillSwitchNoFallback: true,
   supervisorWireCalls: nativeCalls.filter((call) => call.url.startsWith(V4)).length
 });
