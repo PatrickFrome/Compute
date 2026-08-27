@@ -49,7 +49,7 @@ jobs:
           export A2_COMPUTE_STATE_ROOT="$RUNNER_TEMP/a2-compute-browser-b2"
           export CI=true
           export A2_CI_ALLOW_NO_SANDBOX=1
-          export A2_SELF_TEST_REMOVE_STATE=1
+          export A2_SELF_TEST_REMOVE_STATE=0
           node src/cli.mjs self-test | tee "$RUNNER_TEMP/a2-compute-browser-b2-self-test.json"
           grep -q '"ok":true' "$RUNNER_TEMP/a2-compute-browser-b2-self-test.json"
           grep -q '"context_isolation_verified":true' "$RUNNER_TEMP/a2-compute-browser-b2-self-test.json"
@@ -61,7 +61,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ! grep -R -n -E 'physical-|cdp_browser_context_id|cookie|authorization|storage_state|secret' "$RUNNER_TEMP/a2-compute-browser-b2" 2>/dev/null || false
+          mapfile -t CONTEXT_FILES < <(find "$RUNNER_TEMP/a2-compute-browser-b2" -type f -name contexts.json -print)
+          test "${#CONTEXT_FILES[@]}" -ge 1
+          for file in "${CONTEXT_FILES[@]}"; do
+            ! grep -n -E 'physical-|cdp_browser_context_id|cookie|authorization|storage_state|secret|proxy|permission' "$file"
+            grep -q '"context_id"' "$file"
+            grep -q '"context_epoch"' "$file"
+          done
+          rm -rf "$RUNNER_TEMP/a2-compute-browser-b2"
 
       - name: Build deterministic B2 evidence bundle
         shell: bash
