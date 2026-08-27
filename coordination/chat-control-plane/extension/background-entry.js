@@ -19,3 +19,4 @@ importScripts("./background.js");
 importScripts("./operator-control.js");
 importScripts("./operator-perception.js");
 importScripts("./operator-oopif-perception.js");
+importScripts("./operator-semantic-actions.js");
