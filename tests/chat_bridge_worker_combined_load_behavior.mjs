@@ -41,8 +41,6 @@ function makeStorage(map) {
   };
 }
 
-// Minimal asynchronous IndexedDB implementation sufficient for the extension's
-// pairing-secret vault. This intentionally executes the real secret-vault.js.
 const indexedDB = {
   open() {
     const request = { result: null, error: null, onsuccess: null, onerror: null, onupgradeneeded: null };
@@ -114,7 +112,7 @@ const chrome = {
   runtime: {
     id: 'combined-load-extension-id',
     getURL: (p = '') => `chrome-extension://combined-load-extension-id/${p}`,
-    getManifest: () => ({ version: '0.6.0' }),
+    getManifest: () => ({ version: '0.6.2' }),
     async openOptionsPage() {},
     reload() {},
     onInstalled: { addListener(fn) { listeners.installed.push(fn); } },
@@ -149,8 +147,6 @@ const context = vm.createContext({
     if (call.input.includes('/v1/snapshots')) {
       return new Response(JSON.stringify({ accepted: true }), { status: 202, headers: { 'content-type': 'application/json' } });
     }
-    // Compatibility/config fetches fail closed in this harness; runtime must
-    // still load and continue with bundled last-known-good/default behavior.
     return new Response(JSON.stringify({ error: 'not configured in combined-load harness' }), { status: 404, headers: { 'content-type': 'application/json' } });
   },
 });
@@ -165,9 +161,6 @@ context.importScripts = (...scripts) => {
 vm.runInContext(fs.readFileSync(path.join(EXT, 'background-entry.js'), 'utf8'), context, { filename: 'background-entry.js' });
 await new Promise((resolve) => setTimeout(resolve, 180));
 
-// v0.6 intentionally has multiple install/alarm consumers (background,
-// compatibility refresh and safe updater). The regression is about the
-// required capabilities being registered, not a fragile exact listener count.
 assert.ok(listeners.runtimeMessage.length >= 4, `expected operator/runtime message listeners, got ${listeners.runtimeMessage.length}`);
 assert.ok(listeners.installed.length >= 3, `expected background + compat + updater install listeners, got ${listeners.installed.length}`);
 assert.ok(listeners.alarm.length >= 3, `expected bridge + compat + updater alarm listeners, got ${listeners.alarm.length}`);
@@ -176,7 +169,7 @@ assert.equal(listeners.updateAvailable.length, 1, 'safe update listener not regi
 assert.ok(listeners.debuggerEvent.length >= 2, 'broker + GLM debugger event listeners not registered');
 assert.ok(listeners.debuggerDetach.length >= 2, 'broker + GLM debugger detach listeners not registered');
 assert.ok(listeners.tabRemoved.length >= 2, 'operator/broker tab removal listeners not registered');
-assert.equal(context.A2_OPERATOR_RUNTIME, '0.6.0-dev.1');
+assert.equal(context.A2_OPERATOR_RUNTIME, '0.6.2-auto-rollover');
 assert.equal(typeof context.A2_DEBUGGER_RUN, 'function');
 assert.equal(typeof context.A2_DEBUGGER_HOLD, 'function');
 assert.equal(typeof context.A2_CHATGPT_TRUSTED_SEND, 'function');
@@ -190,7 +183,7 @@ assert.equal(commandPoll.headers.get('x-a2-chat-bridge-secret'), 'x'.repeat(64),
 assert.equal(local.has('bridgeSecret'), false, 'legacy pairing secret was not removed from chrome.storage.local');
 assert.equal(idbSecrets.get('pairing_secret'), 'x'.repeat(64), 'pairing secret was not migrated into IndexedDB vault');
 
-console.log('classic-worker-combined-load-v060: PASS', {
+console.log('classic-worker-combined-load-v062: PASS', {
   fetchCalls: fetchCalls.length,
   runtimeMessageListeners: listeners.runtimeMessage.length,
   installedListeners: listeners.installed.length,
@@ -198,4 +191,5 @@ console.log('classic-worker-combined-load-v060: PASS', {
   startupListeners: listeners.startup.length,
   debuggerEventListeners: listeners.debuggerEvent.length,
   vaultMigrated: true,
+  runtime: context.A2_OPERATOR_RUNTIME,
 });
