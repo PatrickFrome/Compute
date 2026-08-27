@@ -1,0 +1,57 @@
+name: W1 Provider Dispatch Authority Gate Contract
+
+on:
+  push:
+    branches: [work/w1-sandbox-launcher-prep]
+    paths:
+      - 'controller/w1/provider_dispatch_authority_guard.py'
+      - 'tests/test_w1_provider_dispatch_authority_guard.py'
+      - 'tests/test_w1_provider_dispatch_authority_broker_contract.py'
+      - 'supabase/functions/metaengine-w1-authority-broker-h205f22/index.ts'
+      - 'supabase/prep/w1_effective_execution_preflight_v1.sql'
+      - '.github/workflows/w1-aws-provider-reboot-proof.yml'
+      - '.github/workflows/w1-provider-dispatch-authority-gate-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile fail-closed verifier
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/w1/provider_dispatch_authority_guard.py
+
+      - name: Run adversarial receipt and broker-boundary tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest \
+            tests.test_w1_provider_dispatch_authority_guard \
+            tests.test_w1_provider_dispatch_authority_broker_contract -v
+
+      - name: Prove PREP-only nonauthority boundary
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          guard=Path('controller/w1/provider_dispatch_authority_guard.py').read_text()
+          broker=Path('supabase/functions/metaengine-w1-authority-broker-h205f22/index.ts').read_text()
+          workflow=Path('.github/workflows/w1-aws-provider-reboot-proof.yml').read_text()
+          assert 'provider_mutation_authorized": False' in guard
+          assert 'authority_effect": False' in guard
+          assert 'broker_mints_authority: false' in broker
+          assert 'SUPABASE_SERVICE_ROLE_KEY' in broker
+          assert 'SUPABASE_SERVICE_ROLE_KEY' not in workflow
+          assert 'SUPABASE_SECRET_KEYS' not in workflow
+          assert 'secrets.SUPABASE' not in workflow
+          print('provider dispatch authority gate: PREP_NONAUTHORITY_CONTRACT_PASS')
+          PY
