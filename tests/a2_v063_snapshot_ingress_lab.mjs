@@ -108,16 +108,27 @@ assert.equal(session.get("a2SupervisorChatSnapshotV1")?.snapshot?.messages?.[0]?
 assert.equal(local.get("snapshot:CHATGPT")?.tab_id, 11, "supervisor ChatGPT tab polluted operator snapshot");
 assert.equal(bridgeCalls.filter((x) => x.url === "/v1/snapshots").length, snapshotPostsAfterOperator, "supervisor snapshot leaked into operator bridge");
 
+const priorSupervisorRow = structuredClone(session.get("a2SupervisorChatSnapshotV1"));
+const duplicateResult = await sendSnapshot({ id: 23, url: supervisorUrl }, { ...supervisorSnapshot, message_count: 6, messages: [{ role: "assistant", text: "duplicate-tab" }] });
+assert.equal(duplicateResult?.ok, true);
+assert.equal(duplicateResult?.accepted, false, "duplicate same-URL supervisor tab was accepted");
+assert.equal(duplicateResult?.role, "UNMANAGED");
+assert.equal(duplicateResult?.reason, "supervisor_tab_id_mismatch");
+assert.deepEqual(session.get("a2SupervisorChatSnapshotV1"), priorSupervisorRow, "duplicate same-URL tab replaced tagged supervisor snapshot");
+assert.equal(bridgeCalls.filter((x) => x.url === "/v1/snapshots").length, snapshotPostsAfterOperator, "duplicate supervisor tab leaked into operator bridge");
+
 const spoofResult = await sendSnapshot({ id: 33, url: supervisorUrl }, { platform: "GLM_ZAI", url: supervisorUrl, message_count: 9, messages: [] });
 assert.equal(spoofResult?.accepted, false);
 assert.equal(spoofResult?.reason, "platform_mismatch");
 
 assert.ok(source.includes("ingestContentSnapshot"));
 assert.ok(source.includes("a2SupervisorChatSnapshotV1"));
+assert.ok(source.includes("supervisor_tab_id_mismatch"));
 assert.ok(source.includes("0.6.3-supervisor-authority-dev.2"));
 
 console.log("a2_v063_snapshot_ingress_lab: PASS", {
   snapshotPosts: bridgeCalls.filter((x) => x.url === "/v1/snapshots").length,
   operatorTab: local.get("snapshot:CHATGPT")?.tab_id,
-  supervisorTab: session.get("a2SupervisorChatSnapshotV1")?.tab_id
+  supervisorTab: session.get("a2SupervisorChatSnapshotV1")?.tab_id,
+  duplicateTabRejected: duplicateResult?.reason
 });
