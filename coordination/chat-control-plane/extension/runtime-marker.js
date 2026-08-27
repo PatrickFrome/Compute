@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  const RUNTIME = "0.7.0-dev.1";
+  const RUNTIME = "0.7.0-dev.2";
   const descriptor = Object.freeze({
     schema: "metaengine.a2-browser-operator.runtime.v1",
     version: RUNTIME,
