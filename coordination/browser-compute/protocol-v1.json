@@ -1,6 +1,6 @@
 {
   "schema": "metaengine.a2-browser-protocol.v1",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "transport": {
     "scope": "local_machine_only",
     "unix": "unix_domain_socket",
@@ -10,14 +10,17 @@
     "internal_devtools": "native_remote_debugging_pipe"
   },
   "identity": {
-    "durable": ["browser_node_id", "profile_id", "target_id", "conversation_epoch"],
-    "ephemeral": ["browser_pid", "cdp_target_id", "cdp_session_id"]
+    "durable": ["browser_node_id", "profile_id", "context_id", "target_id", "conversation_epoch"],
+    "ephemeral": ["browser_pid", "cdp_browser_context_id", "cdp_target_id", "cdp_session_id"]
   },
   "methods": [
     "runtime.health",
     "profile.start",
     "profile.stop",
     "profile.list",
+    "context.create",
+    "context.list",
+    "context.close",
     "target.create",
     "target.list",
     "target.activate",
@@ -28,13 +31,18 @@
     "profile.start": "LOCAL_LIFECYCLE",
     "profile.stop": "LOCAL_LIFECYCLE",
     "profile.list": "READ_ONLY",
+    "context.create": "LOCAL_LIFECYCLE",
+    "context.list": "READ_ONLY",
+    "context.close": "LOCAL_LIFECYCLE",
     "target.create": "LOCAL_LIFECYCLE",
     "target.list": "READ_ONLY",
     "target.activate": "LOCAL_UI",
     "target.close": "LOCAL_LIFECYCLE"
   },
+  "context_kinds": ["PERSISTENT_DEFAULT", "EPHEMERAL_ISOLATED"],
   "forbidden_external_capabilities": [
     "raw_cdp",
+    "raw_bidi",
     "runtime_evaluate",
     "javascript_eval",
     "shell_exec",
@@ -45,6 +53,12 @@
     "remote_navigation_b1",
     "default_profile_import",
     "cookie_import",
+    "cookie_export",
+    "storage_state_import",
+    "storage_state_export",
+    "context_proxy_override",
+    "context_permission_override",
+    "accept_insecure_certificates_override",
     "devtools_tcp_listener"
   ],
   "web_authority_effect": false,
