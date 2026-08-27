@@ -38,6 +38,7 @@ jobs:
             tests/a2_v060_operator_actions_lab.mjs \
             tests/a2_v060_semantic_actions_lab.mjs \
             tests/a2_v060_supervisor_control_lab.mjs \
+            tests/a2_v060_sidepanel_board_lab.mjs \
             tests/a2_v060_update_manager_lab.mjs \
             tests/a2_v060_compat_config_lab.mjs; do
             test -f "$f"
@@ -97,6 +98,7 @@ jobs:
             'semantic_ax_actions':True,
             'supervisor_board_v1':True,
             'chat_supervisor_typed_commands':True,
+            'sidepanel_board_contract':True,
             'debugger_broker_v2':True,
             'oopif_flat_sessions':True,
             'prompt_gate':True,
