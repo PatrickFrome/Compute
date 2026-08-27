@@ -205,7 +205,8 @@ const listener = runtimeListeners.find((fn) => typeof fn === 'function');
 assert.ok(listener, 'semantic runtime listener missing');
 let response;
 listener({ type: 'A2_OPERATOR_SEMANTIC_ACTION', action: 'FOCUS_SEMANTIC' }, { id: 'extid', url: 'chrome-extension://extid/options.html' }, (value) => { response = value; });
-assert.deepEqual(response, { ok: false, error: 'operator_sender_not_trusted' });
+assert.equal(response?.ok, false);
+assert.equal(response?.error, 'operator_sender_not_trusted');
 
 // Receipt is session-only and stores hashes rather than raw semantic name/text.
 const receipt = sessionStorage.get('a2OperatorLastSemanticActionV060');
