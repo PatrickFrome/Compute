@@ -74,9 +74,9 @@ for (const name of fs.readdirSync(ext).filter((n) => /^supervisor-.*\.js$/.test(
 const architecture = read('coordination/chat-control-plane/A2_BROWSER_OPERATOR_V1_ARCHITECTURE.md');
 for (const required of [
   'R0_SOURCE_OF_TRUTH_REPAIR',
-  'MANY AGENTS MAY THINK',
-  'NO BLIND RETRY',
-  'MV3 = EXECUTOR'
+  'MANY_AGENTS_MAY_THINK_ONE_ACTUATOR_MAY_EFFECT',
+  'NO_BLIND_RETRY_AFTER_AMBIGUOUS_EFFECT',
+  'MV3_IS_EXECUTOR_NOT_DURABLE_BRAIN'
 ]) assert.ok(architecture.includes(required), `authoritative architecture missing ${required}`);
 
 console.log('A2 R0 SOURCE_OF_TRUTH parity contract: PASS');
