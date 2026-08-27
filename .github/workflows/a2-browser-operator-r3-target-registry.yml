@@ -30,14 +30,16 @@ jobs:
           set -euo pipefail
           find coordination/chat-control-plane/extension -maxdepth 1 -name '*.js' -print0 | sort -z | xargs -0 -n1 node --check
           node --check tests/a2_v070_target_registry_lab.mjs
+          node --check tests/a2_v070_target_observability_lab.mjs
           node --check tests/a2_v070_release_contract_lab.mjs
           python3 -m py_compile scripts/a2_build_extension.py
 
-      - name: Logical target identity contracts
+      - name: Logical target identity and read-plane contracts
         shell: bash
         run: |
           set -euo pipefail
           node tests/a2_v070_target_registry_lab.mjs
+          node tests/a2_v070_target_observability_lab.mjs
           node tests/a2_v070_release_contract_lab.mjs
 
       - name: Existing safety regressions
@@ -85,11 +87,12 @@ jobs:
         run: |
           set -euo pipefail
           test -f dist/a2-browser-operator-r3/stage-a/target-registry.js
+          test -f dist/a2-browser-operator-r3/stage-a/target-observability.js
           test -z "$(find dist/a2-browser-operator-r3/stage-a -type f -regextype posix-extended -regex '.*-v[0-9]{3}([.]|$).*' -print -quit)"
           EXPECTED="$(python3 -c 'import json; print(len(json.load(open("coordination/chat-control-plane/extension/runtime-package-manifest.json"))["files"]))')"
           ACTUAL="$(find dist/a2-browser-operator-r3/stage-a -type f | wc -l | tr -d ' ')"
           test "$EXPECTED" = "$ACTUAL"
-          test "$EXPECTED" = "43"
+          test "$EXPECTED" = "44"
           unzip -t dist/a2-browser-operator-r3/METAENGINE_A2_Browser_Operator_v0.7.0_GENERIC.zip
 
       - name: MV3 pack staged target-aware runtime
