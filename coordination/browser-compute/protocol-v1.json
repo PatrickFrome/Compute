@@ -1,6 +1,6 @@
 {
   "schema": "metaengine.a2-browser-protocol.v1",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "transport": {
     "scope": "local_machine_only",
     "unix": "unix_domain_socket",
@@ -9,8 +9,8 @@
     "max_request_bytes": 1048576
   },
   "identity": {
-    "durable": ["browser_node_id", "profile_id", "target_id", "conversation_epoch"],
-    "ephemeral": ["browser_pid", "process_incarnation_id", "cdp_target_id"]
+    "durable": ["browser_node_id", "profile_id", "context_id", "context_epoch", "target_id", "conversation_epoch"],
+    "ephemeral": ["browser_pid", "process_incarnation_id", "cdp_browser_context_id", "cdp_target_id"]
   },
   "trusted_engine_transport": {
     "kind": "chromium_remote_debugging_pipe",
@@ -24,6 +24,9 @@
     "profile.start",
     "profile.stop",
     "profile.list",
+    "context.create",
+    "context.list",
+    "context.close",
     "target.create",
     "target.list",
     "target.activate",
@@ -34,6 +37,9 @@
     "profile.start": "LOCAL_LIFECYCLE",
     "profile.stop": "LOCAL_LIFECYCLE",
     "profile.list": "READ_ONLY",
+    "context.create": "LOCAL_LIFECYCLE",
+    "context.list": "READ_ONLY",
+    "context.close": "LOCAL_LIFECYCLE",
     "target.create": "LOCAL_LIFECYCLE",
     "target.list": "READ_ONLY",
     "target.activate": "LOCAL_UI",
@@ -50,7 +56,12 @@
     "sandbox_override",
     "remote_navigation_b1",
     "default_profile_import",
-    "cookie_import"
+    "cookie_import",
+    "raw_browser_context_id",
+    "context_proxy_override",
+    "context_universal_network_access",
+    "default_context_disposal",
+    "silent_context_recreation"
   ],
   "web_authority_effect": false,
   "local_effects_present": true

@@ -76,6 +76,9 @@ conversation_epoch    logical incarnation
 cdp_target_id         ephemeral browser-process binding
 browser PID           ephemeral process identity
 process_incarnation_id ephemeral causal identity for one browser start
+context_id            stable logical storage-partition identity
+context_epoch         logical context incarnation
+cdp_browser_context_id ephemeral exact process binding, internal only
 ```
 
 A `cdp_target_id`, PID, URL, or tab-like browser identifier must never replace `target_id` as durable identity.
@@ -116,5 +119,18 @@ every target binding. Pipe/process loss rejects pending protocol calls and makes
 old bindings unbound. Recovery may restart the same durable profile, but it does
 not replay or silently rebind an action. Target create/activate/close persists a
 pre-effect lifecycle intent; ambiguous completion remains recovery-required.
-Multiple user contexts and the session
-scheduler remain later typed B2/B3 slices.
+The session scheduler remains a later typed B3 slice.
+
+## B2 typed context boundary
+
+The context manager adds a synthesized, non-disposable logical `default`
+context plus explicitly-created ephemeral contexts. Each non-default context is
+bound to one `process_incarnation_id`; a browser restart records the previous
+context as `LOST` and never silently recreates its storage or targets. Reuse is
+an explicit create with a higher `context_epoch`.
+
+Context create/close is intent-before-effect and ambiguity remains
+recovery-required. Context close is rejected while any non-retired logical
+target belongs to it. External callers cannot supply or observe Chromium
+`browserContextId`, proxy overrides, proxy bypasses, or universal-network-access
+origins.

@@ -10,6 +10,9 @@ export const RPC_METHODS = Object.freeze([
   'profile.start',
   'profile.stop',
   'profile.list',
+  'context.create',
+  'context.list',
+  'context.close',
   'target.create',
   'target.list',
   'target.activate',
@@ -21,11 +24,36 @@ export const RPC_METHOD_EFFECTS = Object.freeze({
   'profile.start': 'LOCAL_LIFECYCLE',
   'profile.stop': 'LOCAL_LIFECYCLE',
   'profile.list': 'READ_ONLY',
+  'context.create': 'LOCAL_LIFECYCLE',
+  'context.list': 'READ_ONLY',
+  'context.close': 'LOCAL_LIFECYCLE',
   'target.create': 'LOCAL_LIFECYCLE',
   'target.list': 'READ_ONLY',
   'target.activate': 'LOCAL_UI',
   'target.close': 'LOCAL_LIFECYCLE'
 });
+
+const RPC_PARAM_KEYS = Object.freeze({
+  'runtime.health': [],
+  'profile.start': ['profileId'],
+  'profile.stop': ['profileId'],
+  'profile.list': [],
+  'context.create': ['profileId', 'contextId'],
+  'context.list': ['profileId', 'includeRetired'],
+  'context.close': ['profileId', 'contextId'],
+  'target.create': ['profileId', 'targetId', 'contextId', 'role', 'url'],
+  'target.list': ['profileId', 'includeRetired'],
+  'target.activate': ['profileId', 'targetId'],
+  'target.close': ['profileId', 'targetId']
+});
+
+export function validateRpcParams(method, params) {
+  if (!params || typeof params !== 'object' || Array.isArray(params)) throw new Error('rpc_params_invalid');
+  const allowed = RPC_PARAM_KEYS[method];
+  if (!allowed) throw new Error('rpc_method_forbidden');
+  if (Object.keys(params).some((key) => !allowed.includes(key))) throw new Error('rpc_params_forbidden');
+  return params;
+}
 
 function safeEqual(a, b) {
   const aa = Buffer.from(String(a || ''));
@@ -34,11 +62,15 @@ function safeEqual(a, b) {
 }
 
 async function dispatch(runtime, method, params) {
+  params = validateRpcParams(method, params);
   switch (method) {
     case 'runtime.health': return runtime.health();
     case 'profile.start': return runtime.startProfile({ profileId: params?.profileId });
     case 'profile.stop': return runtime.stopProfile(params?.profileId);
     case 'profile.list': return runtime.listProfiles();
+    case 'context.create': return runtime.createContext(params);
+    case 'context.list': return runtime.listContexts(params?.profileId, { includeRetired: params?.includeRetired === true });
+    case 'context.close': return runtime.closeContext(params);
     case 'target.create': return runtime.createTarget(params);
     case 'target.list': return runtime.listTargets(params?.profileId, { includeRetired: params?.includeRetired === true });
     case 'target.activate': return runtime.activateTarget(params);
@@ -51,10 +83,10 @@ export async function startRpcServer(runtime) {
   const { token, file: tokenFile } = await rotateControlToken(runtime.stateRoot);
   const endpoint = rpcEndpoint(runtime.stateRoot);
   if (process.platform !== 'win32') await fs.rm(endpoint, { force: true }).catch(() => {});
+  let queue = Promise.resolve();
   const server = net.createServer((socket) => {
     socket.setNoDelay(true);
     let buffer = '';
-    let queue = Promise.resolve();
 
     async function drain() {
       let newline;
