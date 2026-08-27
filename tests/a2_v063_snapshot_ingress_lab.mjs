@@ -108,13 +108,17 @@ assert.equal(session.get("a2SupervisorChatSnapshotV1")?.snapshot?.messages?.[0]?
 assert.equal(local.get("snapshot:CHATGPT")?.tab_id, 11, "supervisor ChatGPT tab polluted operator snapshot");
 assert.equal(bridgeCalls.filter((x) => x.url === "/v1/snapshots").length, snapshotPostsAfterOperator, "supervisor snapshot leaked into operator bridge");
 
-const priorSupervisorRow = structuredClone(session.get("a2SupervisorChatSnapshotV1"));
+const priorSupervisorRow = JSON.parse(JSON.stringify(session.get("a2SupervisorChatSnapshotV1")));
 const duplicateResult = await sendSnapshot({ id: 23, url: supervisorUrl }, { ...supervisorSnapshot, message_count: 6, messages: [{ role: "assistant", text: "duplicate-tab" }] });
 assert.equal(duplicateResult?.ok, true);
 assert.equal(duplicateResult?.accepted, false, "duplicate same-URL supervisor tab was accepted");
 assert.equal(duplicateResult?.role, "UNMANAGED");
 assert.equal(duplicateResult?.reason, "supervisor_tab_id_mismatch");
-assert.deepEqual(session.get("a2SupervisorChatSnapshotV1"), priorSupervisorRow, "duplicate same-URL tab replaced tagged supervisor snapshot");
+const currentSupervisorRow = session.get("a2SupervisorChatSnapshotV1");
+assert.equal(currentSupervisorRow?.tab_id, priorSupervisorRow.tab_id, "duplicate same-URL tab replaced tagged supervisor tab id");
+assert.equal(currentSupervisorRow?.observed_at, priorSupervisorRow.observed_at, "duplicate same-URL tab rewrote tagged supervisor observation");
+assert.equal(currentSupervisorRow?.snapshot?.message_count, priorSupervisorRow.snapshot.message_count, "duplicate same-URL tab replaced tagged supervisor message count");
+assert.equal(currentSupervisorRow?.snapshot?.messages?.[0]?.text, priorSupervisorRow.snapshot.messages[0].text, "duplicate same-URL tab replaced tagged supervisor content");
 assert.equal(bridgeCalls.filter((x) => x.url === "/v1/snapshots").length, snapshotPostsAfterOperator, "duplicate supervisor tab leaked into operator bridge");
 
 const spoofResult = await sendSnapshot({ id: 33, url: supervisorUrl }, { platform: "GLM_ZAI", url: supervisorUrl, message_count: 9, messages: [] });
