@@ -109,8 +109,11 @@
   }
 
   async function createIntent(message, sender) {
-    if (await getMode() !== "GATE_SEND") throw new Error("prompt_gate_not_enabled");
+    // Sender/tab/platform binding is checked before mutable operator mode. This
+    // keeps the trust boundary deterministic and avoids returning mode-derived
+    // errors to a sender that never had authority to create an intent.
     if (!trustedPageSender(sender, message?.platform)) throw new Error("prompt_gate_sender_invalid");
+    if (await getMode() !== "GATE_SEND") throw new Error("prompt_gate_not_enabled");
     const draft = String(message?.draft || "").slice(0, MAX_DRAFT_CHARS);
     if (!normalize(draft)) throw new Error("prompt_gate_draft_empty");
     const pageUrl = normUrl(sender.tab.url || message?.page_url || "");
@@ -118,7 +121,7 @@
     const draftSha256 = await sha256(normalize(draft));
     const existing = await heldIntent();
     if (existing) {
-      if (Number(existing.tab_id) === Number(sender.tab.id) && existing.draft_sha256 === draftSha256) return existing;
+      if (Number(existing.tab_id) === Number(sender.tab.id) && existing.platform === String(message.platform) && existing.page_url === pageUrl && existing.draft_sha256 === draftSha256) return existing;
       throw new Error("prompt_gate_intent_already_held");
     }
     const intent = {
