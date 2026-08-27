@@ -47,9 +47,6 @@ SOURCE_MUTATIONS: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 SERVICE_ROLE_MARKERS = ("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEYS", "secrets.SUPABASE", "sb_secret_")
 
-# Exact policy-literal ranges. These steps inspect workflow source and therefore
-# necessarily quote forbidden commands/secrets. Only these explicit ranges are
-# removed; executable steps remain in the runtime view.
 POLICY_LITERAL_RANGES: dict[str, tuple[str, str | None]] = {
     ".github/workflows/w1-aws-provider-reboot-proof.yml": (
         "      - name: Validate live W1 credential and trust-zone contract",
@@ -64,7 +61,7 @@ POLICY_LITERAL_RANGES: dict[str, tuple[str, str | None]] = {
         "      - name: Build deterministic provider-dispatch contract receipt",
     ),
     ".github/workflows/w1-codespaces-persistent-storage-guard-contract.yml": (
-        "      - name: Assert mutation and secret boundaries",
+        "      - name: Assert persistent-root and non-authority boundaries",
         None,
     ),
 }
