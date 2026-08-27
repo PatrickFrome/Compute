@@ -3,6 +3,7 @@
 
   const LEGACY_BASE = "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-supervisor-v3-canary";
   const SIGNED_BASE = "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-supervisor-v4-canary";
+  const SIGNED_RUNTIME_PREFIX = "/a2-browser-supervisor-v4-canary";
   const PROFILE = "A2_DEVICE_HTTP_SIGNATURE_V1";
   const RECOVERABLE_IDENTITY_REASONS = new Set(["DEVICE_NOT_FOUND", "DEVICE_REVOKED", "DEVICE_BINDING_MISMATCH"]);
   const nativeFetch = globalThis.fetch.bind(globalThis);
@@ -18,7 +19,7 @@
     const suffix = url.pathname.slice(legacy.pathname.length);
     const signed = new URL(`${SIGNED_BASE}${suffix || ""}`);
     signed.search = url.search;
-    return { url: signed.toString(), routePath: suffix || "/", signaturePath: signed.pathname };
+    return { url: signed.toString(), routePath: suffix || "/", signaturePath: `${SIGNED_RUNTIME_PREFIX}${suffix || ""}` };
   }
 
   async function ensureEnrollment(clientId, pairingSecret, force = false) {
@@ -90,6 +91,7 @@
     profile: PROFILE,
     legacy_base: LEGACY_BASE,
     signed_base: SIGNED_BASE,
+    signed_runtime_prefix: SIGNED_RUNTIME_PREFIX,
     mode: "DEVICE_SIGNED_NO_BEARER_FALLBACK"
   });
 })();
