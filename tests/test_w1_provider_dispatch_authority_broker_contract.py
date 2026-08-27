@@ -6,6 +6,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/w1-aws-provider-reboot-proof.yml"
+GATE_WORKFLOW = ROOT / ".github/workflows/w1-provider-dispatch-authority-gate-contract.yml"
 BROKER = ROOT / "supabase/functions/metaengine-w1-authority-broker-h205f22/index.ts"
 PREFLIGHT_SQL = ROOT / "supabase/prep/w1_effective_execution_preflight_v1.sql"
 SELF_CHECK = "      - name: Validate live W1 credential and trust-zone contract"
@@ -47,11 +48,15 @@ class ProviderDispatchAuthorityBrokerContractTests(unittest.TestCase):
     def test_elevated_database_key_stays_server_side(self):
         broker = BROKER.read_text(encoding="utf-8")
         workflow = execution_workflow()
+        gate = GATE_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn('SUPABASE_SERVICE_ROLE_KEY', broker)
         self.assertNotIn('SUPABASE_SERVICE_ROLE_KEY', workflow)
         self.assertNotIn('SUPABASE_SECRET_KEYS', workflow)
         self.assertNotIn('secrets.SUPABASE', workflow)
         self.assertNotIn('sb_secret_', workflow)
+        self.assertNotIn('SUPABASE_SERVICE_ROLE_KEY', gate)
+        self.assertNotIn('SUPABASE_SECRET_KEYS', gate)
+        self.assertNotIn('secrets.SUPABASE', gate)
 
     def test_real_provider_mutation_is_structurally_after_external_gate(self):
         workflow = execution_workflow()
@@ -82,6 +87,42 @@ class ProviderDispatchAuthorityBrokerContractTests(unittest.TestCase):
         self.assertIn(expected, workflow)
         self.assertNotIn('inputs.authority_broker_url', workflow)
         self.assertNotIn('vars.W1_AUTHORITY_BROKER_URL', workflow)
+
+    def test_gate_emits_deterministic_attested_nonauthority_evidence(self):
+        gate = GATE_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn('id-token: write', gate)
+        self.assertIn('attestations: write', gate)
+        self.assertIn('actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6', gate)
+        self.assertIn('actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a', gate)
+        self.assertIn('gh attestation verify', gate)
+        self.assertIn('--deny-self-hosted-runners', gate)
+        self.assertIn('metaengine.compute.w1-provider-dispatch-authority-contract-evidence.h205f22.v1', gate)
+        self.assertIn('PASS_PROVIDER_DISPATCH_AUTHORITY_CONTRACT_NONAUTHORITY', gate)
+        for field in (
+            "'provider_mutation_authorized':False",
+            "'authority_effect':False",
+            "'canonical':False",
+            "'persistent_worker_proof':False",
+            "'worker_admitted':False",
+            "'w1_verified':False",
+            "'database_ddl_applied':False",
+            "'authority_broker_deployed':False",
+            "'live_provider_mutation_performed':False",
+        ):
+            self.assertIn(field, gate)
+        start = gate.index('      - name: Build deterministic provider-dispatch contract receipt')
+        end = gate.index('      - name: Attest deterministic provider-dispatch contract receipt', start)
+        builder = gate[start:end]
+        self.assertNotIn('GITHUB_RUN_ID', builder)
+        self.assertNotIn('GITHUB_RUN_ATTEMPT', builder)
+        self.assertNotIn('datetime', builder)
+        self.assertNotIn('time.time', builder)
+        self.assertNotIn('aws-actions/configure-aws-credentials', gate)
+        self.assertIn("'source_git_sha':os.environ['GITHUB_SHA']", builder)
+        self.assertIn("'source_ref':os.environ['GITHUB_REF']", builder)
+        self.assertIn("'.github/workflows/w1-aws-provider-reboot-proof.yml'", builder)
+        self.assertIn("'supabase/prep/w1_effective_execution_preflight_v1.sql'", builder)
+        self.assertIn("'supabase/functions/metaengine-w1-authority-broker-h205f22/index.ts'", builder)
 
 
 if __name__ == "__main__":
