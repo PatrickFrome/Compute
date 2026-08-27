@@ -15,6 +15,10 @@ class BrowserOperatorV060P0(unittest.TestCase):
         cls.gpt = (EXT / "trusted-chatgpt.js").read_text()
         cls.glm = (EXT / "trusted-glm.js").read_text()
         cls.content = (EXT / "content.js").read_text()
+        cls.recovery_content = (EXT / "content-recovery-v062.js").read_text()
+        cls.rollover = (EXT / "chatgpt-rollover-v062.js").read_text()
+        cls.watchdog = (EXT / "debugger-watchdog-v062.js").read_text()
+        cls.runtime_marker = (EXT / "runtime-marker-v062.js").read_text()
         cls.gate = (EXT / "prompt-gate.js").read_text()
         cls.control = (EXT / "operator-control.js").read_text()
         cls.bindings = (EXT / "operator-gate-bindings.js").read_text()
@@ -29,7 +33,7 @@ class BrowserOperatorV060P0(unittest.TestCase):
 
     def test_01_version_and_identity(self):
         self.assertEqual(self.manifest["manifest_version"], 3)
-        self.assertEqual(self.manifest["version"], "0.6.0")
+        self.assertEqual(self.manifest["version"], "0.6.2")
         self.assertEqual(self.manifest["name"], "METAENGINE A2 Browser Operator")
         self.assertIn("key", self.manifest)
         self.assertIn("sidePanel", self.manifest["permissions"])
@@ -93,6 +97,8 @@ class BrowserOperatorV060P0(unittest.TestCase):
     def test_11_operator_runtime_marker(self):
         self.assertIn('const OPERATOR_RUNTIME = "0.6.0-dev.1"', self.bg)
         self.assertIn("globalThis.A2_OPERATOR_RUNTIME=OPERATOR_RUNTIME", self.bg)
+        self.assertIn('"0.6.2-auto-rollover"', self.runtime_marker)
+        self.assertLess(self.entry.index('importScripts("./background.js")'), self.entry.index('importScripts("./runtime-marker-v062.js")'))
 
     def test_12_prompt_gate_runs_at_document_start(self):
         first = self.manifest["content_scripts"][0]
@@ -211,6 +217,10 @@ class BrowserOperatorV060P0(unittest.TestCase):
             "a2_v060_debugger_broker_lab.mjs",
             "a2_v060_update_manager_lab.mjs",
             "a2_v060_compat_config_lab.mjs",
+            "a2_v060_supervisor_control_lab.mjs",
+            "a2_v060_sidepanel_board_lab.mjs",
+            "a2_v060_pairing_epoch_lab.mjs",
+            "a2_v060_rollover_v062_lab.mjs",
         ]:
             self.assertTrue((ROOT / "tests" / name).exists())
 
@@ -230,6 +240,19 @@ class BrowserOperatorV060P0(unittest.TestCase):
         focus_start = self.semantic.index("async function focusWithoutActivation")
         click_start = self.semantic.index("async function clickByMouse")
         self.assertNotIn("Input.dispatchMouseEvent", self.semantic[focus_start:click_start])
+
+    def test_25_v062_rollover_is_exhaustion_scoped_durable_and_watchdog_fenced(self):
+        self.assertIn("A2_CHATGPT_EXHAUSTION_STATUS", self.recovery_content)
+        self.assertIn("maximum length for this conversation", self.recovery_content)
+        self.assertIn("probeExhaustion", self.rollover)
+        self.assertIn("DURABLE_REPLAY_NO_RESEND", self.rollover)
+        self.assertIn("NEW_CONVERSATION_PINNED", self.rollover)
+        self.assertIn("chatgptRolloverPending", self.rollover)
+        self.assertIn("A2_CHATGPT_TRUSTED_SEND_RAW_V062", self.rollover)
+        self.assertIn("debugger_watchdog_timeout", self.watchdog)
+        self.assertIn("chrome.runtime.reload()", self.watchdog)
+        self.assertLess(self.entry.index('importScripts("./debugger-watchdog-v062.js")'), self.entry.index('importScripts("./trusted-chatgpt.js")'))
+        self.assertGreater(self.entry.index('importScripts("./chatgpt-rollover-v062.js")'), self.entry.index('importScripts("./trusted-chatgpt.js")'))
 
 
 if __name__ == "__main__":
