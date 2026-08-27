@@ -13,6 +13,7 @@ importScripts("./device-identity.js");
 importScripts("./bridge-client.js");
 importScripts("./runtime-marker.js");
 importScripts("./target-registry.js");
+importScripts("./target-observability.js");
 importScripts("./bridge-runtime.js");
 importScripts("./supervisor-device-transport.js");
 
