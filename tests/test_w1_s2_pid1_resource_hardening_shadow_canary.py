@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import json
 import unittest
 
 from controller.w1 import s2_pid1_resource_hardening_shadow_canary as canary
@@ -58,11 +57,15 @@ class S2Pid1ResourceHardeningShadowCanaryTests(unittest.TestCase):
         self.assertTrue(high_result["environment"]["nofile_shadow_target_reached"])
         self.assertFalse(low_result["environment"]["nofile_shadow_target_reached"])
 
-    def test_host_dependent_fields_are_not_in_deterministic_evidence(self):
+    def test_host_dependent_values_are_not_in_deterministic_probe_or_checks(self):
         result = canary.compose(base_probe(), SOURCE, SOURCE_SHA)
-        serialized = json.dumps(result["evidence"], sort_keys=True)
+        self.assertEqual(
+            set(result["evidence"]["probe"]),
+            set(canary.ADOPTED_PROBE_FIELDS),
+        )
         for field in canary.ENVIRONMENT_PROBE_FIELDS:
-            self.assertNotIn('"' + field + '"', serialized)
+            self.assertNotIn(field, result["evidence"]["probe"])
+            self.assertNotIn(field, result["evidence"]["checks"])
         self.assertEqual(
             result["evidence"]["excluded_host_dependent_fields"],
             list(canary.ENVIRONMENT_PROBE_FIELDS),
