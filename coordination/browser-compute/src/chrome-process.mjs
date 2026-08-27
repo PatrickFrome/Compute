@@ -1,19 +1,14 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import net from 'node:net';
-import { CdpClient } from './cdp-client.mjs';
+import { CdpPipeClient } from './cdp-pipe-client.mjs';
 import { ensurePrivateDir } from './security.mjs';
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-export function buildChromeArgs({ userDataDir, debuggingPort, headless = false, allowNoSandbox = false } = {}) {
+export function buildChromeArgs({ userDataDir, headless = false, allowNoSandbox = false } = {}) {
   if (!path.isAbsolute(String(userDataDir || ''))) throw new Error('user_data_dir_must_be_absolute');
-  if (!Number.isInteger(debuggingPort) || debuggingPort < 1024 || debuggingPort > 65535) throw new Error('debugging_port_invalid');
   const args = [
     `--user-data-dir=${userDataDir}`,
-    '--remote-debugging-address=127.0.0.1',
-    `--remote-debugging-port=${debuggingPort}`,
+    '--remote-debugging-pipe',
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-sync'
@@ -29,37 +24,42 @@ export function buildChromeArgs({ userDataDir, debuggingPort, headless = false, 
 
 async function assertExecutable(executablePath) {
   const resolved = path.resolve(String(executablePath || ''));
-  if (!path.isAbsolute(resolved)) throw new Error('chrome_executable_must_be_absolute');
   const stat = await fs.stat(resolved).catch(() => null);
   if (!stat?.isFile()) throw new Error('chrome_executable_not_found');
   return resolved;
 }
 
-async function allocateLoopbackPort() {
-  const server = net.createServer();
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
-  const address = server.address();
-  const port = typeof address === 'object' && address ? address.port : 0;
-  await new Promise((resolve) => server.close(resolve));
-  if (!Number.isInteger(port) || port <= 0) throw new Error('debugging_port_allocate_failed');
-  return port;
+async function waitForExit(child, timeoutMs) {
+  if (!child || child.exitCode != null) return true;
+  return new Promise((resolve) => {
+    let settled = false;
+    const onExit = () => finish(true);
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.off('exit', onExit);
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(child.exitCode != null), timeoutMs);
+    child.once('exit', onExit);
+  });
 }
 
-async function readEndpoint(port, processRef, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (processRef.exitCode != null) throw new Error(`chrome_exited_before_debug_ready:${processRef.exitCode}`);
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(750) });
-      if (response.ok) {
-        const body = await response.json();
-        const endpoint = String(body?.webSocketDebuggerUrl || '');
-        if (endpoint.startsWith(`ws://127.0.0.1:${port}/devtools/browser/`)) return endpoint;
-      }
-    } catch (_) {}
-    await sleep(50);
+function signalChildTree(child, signal) {
+  if (!child || child.exitCode != null) return;
+  if (process.platform !== 'win32' && Number.isInteger(child.pid)) {
+    try { process.kill(-child.pid, signal); return; } catch (_) {}
   }
-  throw new Error('chrome_debug_endpoint_timeout');
+  try { child.kill(signal); } catch (_) {}
+}
+
+async function terminateChild(child) {
+  if (!child || child.exitCode != null) return;
+  signalChildTree(child, 'SIGTERM');
+  if (await waitForExit(child, 2000)) return;
+  signalChildTree(child, 'SIGKILL');
+  await waitForExit(child, 2000);
 }
 
 export class ManagedChromeProcess {
@@ -77,26 +77,52 @@ export class ManagedChromeProcess {
   }
 
   async start() {
-    if (this.child && this.child.exitCode == null) return this;
+    if (this.child && this.child.exitCode == null && this.cdp) return this;
     this.executablePath = await assertExecutable(this.executablePath);
     await ensurePrivateDir(this.userDataDir);
-    const debuggingPort = await allocateLoopbackPort();
-    const args = buildChromeArgs({ userDataDir: this.userDataDir, debuggingPort, headless: this.headless, allowNoSandbox: this.allowNoSandbox });
-    const child = spawn(this.executablePath, args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: false });
+    const args = buildChromeArgs({ userDataDir: this.userDataDir, headless: this.headless, allowNoSandbox: this.allowNoSandbox });
+    const child = spawn(this.executablePath, args, {
+      stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'],
+      windowsHide: false,
+      detached: process.platform !== 'win32'
+    });
     this.child = child;
     child.stderr?.setEncoding('utf8');
     child.stderr?.on('data', (chunk) => { this.stderrTail = `${this.stderrTail}${chunk}`.slice(-12000); });
-    const endpoint = await readEndpoint(debuggingPort, child, this.startupTimeoutMs);
-    this.cdp = await new CdpClient(endpoint).connect();
-    this.version = await this.cdp.call('Browser.getVersion');
-    this.startedAt = new Date().toISOString();
-    return this;
+
+    const pipeWrite = child.stdio?.[3];
+    const pipeRead = child.stdio?.[4];
+    if (!pipeWrite || !pipeRead) {
+      await terminateChild(child);
+      this.child = null;
+      throw new Error('chrome_debug_pipe_missing');
+    }
+
+    try {
+      this.cdp = await new CdpPipeClient(pipeWrite, pipeRead).connect();
+      this.version = await this.cdp.call('Browser.getVersion', {}, { timeoutMs: this.startupTimeoutMs });
+      this.startedAt = new Date().toISOString();
+      return this;
+    } catch (error) {
+      await this.cdp?.close().catch(() => {});
+      this.cdp = null;
+      await terminateChild(child);
+      if (this.child === child) this.child = null;
+      throw error;
+    }
   }
 
   async health() {
-    if (!this.child || this.child.exitCode != null || !this.cdp) return { running: false, exit_code: this.child?.exitCode ?? null };
+    if (!this.child || this.child.exitCode != null || !this.cdp) return { running: false, exit_code: this.child?.exitCode ?? null, debug_transport: 'native_pipe' };
     const version = await this.cdp.call('Browser.getVersion');
-    return { running: true, pid: this.child.pid, started_at: this.startedAt, product: version.product, protocol_version: version.protocolVersion };
+    return {
+      running: true,
+      pid: this.child.pid,
+      started_at: this.startedAt,
+      product: version.product,
+      protocol_version: version.protocolVersion,
+      debug_transport: 'native_pipe'
+    };
   }
 
   async stop({ timeoutMs = 5000 } = {}) {
@@ -104,12 +130,12 @@ export class ManagedChromeProcess {
     const child = this.child;
     if (child.exitCode == null) {
       try { if (this.cdp) await this.cdp.call('Browser.close', {}, { timeoutMs: 1500 }); } catch (_) {}
-      if (child.exitCode == null) {
-        const exited = new Promise((resolve) => child.once('exit', resolve));
-        await Promise.race([exited, sleep(timeoutMs)]);
-        if (child.exitCode == null) child.kill('SIGTERM');
-        await Promise.race([exited, sleep(1500)]);
-        if (child.exitCode == null) child.kill('SIGKILL');
+      if (!(await waitForExit(child, timeoutMs))) {
+        signalChildTree(child, 'SIGTERM');
+        if (!(await waitForExit(child, 1500))) {
+          signalChildTree(child, 'SIGKILL');
+          await waitForExit(child, 1500);
+        }
       }
     }
     await this.cdp?.close().catch(() => {});
