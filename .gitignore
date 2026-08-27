@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+.npm
+
+# Secrets / local env
+.env
+.env.*
+!.env.example
+*.local
+
+# Build / dist artifacts
+dist/
+build/
+*.tsbuildinfo
+.coverage/
+
+# Runtime state (daemon STATE_DIR default 'state')
+state/
+*.dump
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
