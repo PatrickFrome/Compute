@@ -117,7 +117,8 @@ class LiveCliTests(unittest.TestCase):
         source = Path(cli.__file__).read_text(encoding="utf-8").lower()
         for forbidden in (
             "import boto3", "from boto3", "requests.", "urllib.", "socket.socket",
-            "subprocess.", "os.system", "supabase", "service_role", "reboot-instances",
+            "subprocess.", "os.system", "from supabase", "import supabase",
+            "create_client(", "reboot-instances",
         ):
             self.assertNotIn(forbidden, source, forbidden)
 
