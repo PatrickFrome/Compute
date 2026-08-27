@@ -47,7 +47,8 @@ context.A2_DEVICE_CLEAR_ENROLLMENT = async () => { clearCalls += 1; enrolled = f
 context.A2_DEVICE_SIGN_REQUEST = async (method, requestPath, body) => {
   signCalls += 1;
   signedPaths.push(requestPath);
-  assert.ok(requestPath.startsWith("/functions/v1/a2-browser-supervisor-v4-canary/"), `signature path not service-bound: ${requestPath}`);
+  assert.ok(requestPath.startsWith("/a2-browser-supervisor-v4-canary/"), `signature path not runtime-service-bound: ${requestPath}`);
+  assert.ok(!requestPath.startsWith("/functions/v1/"), `gateway-only prefix leaked into runtime signature path: ${requestPath}`);
   return {
     profile: "A2_DEVICE_HTTP_SIGNATURE_V1",
     device_id: "11111111-1111-4111-8111-111111111111",
@@ -71,7 +72,7 @@ const first = await context.fetch(`${LEGACY}/v1/state`, { method: "POST", header
 assert.equal(first.status, 200);
 assert.equal(enrollCalls, 1, "first signed request did not enroll device");
 assert.equal(signCalls, 1);
-assert.equal(signedPaths[0], "/functions/v1/a2-browser-supervisor-v4-canary/v1/state");
+assert.equal(signedPaths[0], "/a2-browser-supervisor-v4-canary/v1/state");
 const firstWire = nativeCalls.at(-1);
 assert.equal(firstWire.url, `${V4}/v1/state`);
 assert.equal(firstWire.headers["x-a2-chat-bridge-secret"], undefined, "pairing bearer leaked onto privileged signed request");
@@ -116,7 +117,8 @@ assert.equal(recoveryWire.headers["x-a2-chat-bridge-secret"], undefined);
 
 assert.match(source, /DEVICE_SIGNED_NO_BEARER_FALLBACK/);
 assert.match(source, /headers\.delete\("x-a2-chat-bridge-secret"\)/);
-assert.match(source, /signaturePath: signed\.pathname/);
+assert.match(source, /SIGNED_RUNTIME_PREFIX/);
+assert.match(source, /signaturePath: `\$\{SIGNED_RUNTIME_PREFIX\}/);
 assert.doesNotMatch(source, /PAIRING_REVOKED/);
 assert.doesNotMatch(source, /INVALID_SIGNATURE["']\s*\)/);
 
@@ -124,7 +126,7 @@ console.log("a2_v063_supervisor_device_transport_lab: PASS", {
   enrollCalls,
   clearCalls,
   signCalls,
-  serviceBoundPaths: signedPaths.length,
+  runtimeServiceBoundPaths: signedPaths.length,
   pairingKillSwitchNoFallback: true,
   supervisorWireCalls: nativeCalls.filter((call) => call.url.startsWith(V4)).length
 });
