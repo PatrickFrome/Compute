@@ -20,6 +20,7 @@
       timer = setTimeout(async () => {
         const marker = {
           schema: "metaengine.a2-debugger-watchdog.v1",
+          reason: "debugger_watchdog_timeout",
           tab_id: Number(tabId),
           owner: String(owner || "anonymous").slice(0, 96),
           timeout_ms: ms,
