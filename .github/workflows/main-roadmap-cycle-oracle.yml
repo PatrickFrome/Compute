@@ -7,16 +7,20 @@ on:
       - work/main-roadmap-accelerators-v2
       - work/main-roadmap-accelerators-v3
       - work/main-roadmap-accelerators-v4
+      - work/main-roadmap-accelerators-v5
       - work/w1-sandbox-launcher-prep
     paths:
       - 'controller/roadmap/**'
       - 'tests/test_main_roadmap_cycle_oracle.py'
       - 'tests/test_main_roadmap_projection_guard.py'
       - 'tests/test_main_roadmap_lease_truth_guard.py'
+      - 'tests/test_main_roadmap_lease_truth_guard_v2.py'
       - 'tests/test_main_roadmap_lease_reconciliation_sql_contract.py'
+      - 'tests/test_roadmap_alignment_lease_truth_projection_sql_contract.py'
       - 'tests/fixtures/main_roadmap_live_snapshot_20260827.json'
       - 'supabase/prep/main_roadmap_lease_truth_snapshot_v1.sql'
       - 'supabase/migrations/20260827201500_main_roadmap_lease_reconciliation_v1.sql'
+      - 'supabase/migrations/20260827202500_roadmap_alignment_lease_truth_projection_v2.sql'
       - 'docs/ROADMAP_EXECUTION_PROTOCOL.md'
       - 'research/main-roadmap-accelerators/**'
       - '.github/workflows/main-roadmap-cycle-oracle.yml'
@@ -42,7 +46,8 @@ jobs:
           set -euo pipefail
           python3 -m py_compile \
             controller/roadmap/roadmap_cycle_oracle.py \
-            controller/roadmap/roadmap_lease_truth_guard.py
+            controller/roadmap/roadmap_lease_truth_guard.py \
+            controller/roadmap/roadmap_lease_truth_guard_v2.py
 
       - name: Run positive and adversarial contracts
         run: |
@@ -50,7 +55,9 @@ jobs:
           python3 -m unittest \
             tests.test_main_roadmap_cycle_oracle \
             tests.test_main_roadmap_lease_truth_guard \
-            tests.test_main_roadmap_lease_reconciliation_sql_contract -v
+            tests.test_main_roadmap_lease_truth_guard_v2 \
+            tests.test_main_roadmap_lease_reconciliation_sql_contract \
+            tests.test_roadmap_alignment_lease_truth_projection_sql_contract -v
 
       - name: Prove read-only snapshot contract
         run: |
@@ -77,6 +84,7 @@ jobs:
               for path in (
                   'controller/roadmap/roadmap_cycle_oracle.py',
                   'controller/roadmap/roadmap_lease_truth_guard.py',
+                  'controller/roadmap/roadmap_lease_truth_guard_v2.py',
               )
           )
           required = [
