@@ -101,13 +101,17 @@ export class ManagedChromeProcess {
 
   async stop({ timeoutMs = 5000 } = {}) {
     if (!this.child) return;
-    try { if (this.cdp) await this.cdp.call('Browser.close', {}, { timeoutMs: 1500 }); } catch (_) {}
     const child = this.child;
-    const exited = new Promise((resolve) => child.once('exit', resolve));
-    await Promise.race([exited, sleep(timeoutMs)]);
-    if (child.exitCode == null) child.kill('SIGTERM');
-    await Promise.race([exited, sleep(1500)]);
-    if (child.exitCode == null) child.kill('SIGKILL');
+    if (child.exitCode == null) {
+      try { if (this.cdp) await this.cdp.call('Browser.close', {}, { timeoutMs: 1500 }); } catch (_) {}
+      if (child.exitCode == null) {
+        const exited = new Promise((resolve) => child.once('exit', resolve));
+        await Promise.race([exited, sleep(timeoutMs)]);
+        if (child.exitCode == null) child.kill('SIGTERM');
+        await Promise.race([exited, sleep(1500)]);
+        if (child.exitCode == null) child.kill('SIGKILL');
+      }
+    }
     await this.cdp?.close().catch(() => {});
     this.cdp = null;
     this.child = null;

@@ -1,11 +1,11 @@
 {
   "schema": "metaengine.a2-browser-protocol.v1",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "transport": {
     "scope": "local_machine_only",
     "unix": "unix_domain_socket",
     "windows": "named_pipe",
-    "authentication": "256_bit_local_capability_token",
+    "authentication": "256_bit_per_daemon_session_capability_token",
     "max_request_bytes": 1048576
   },
   "identity": {
@@ -22,14 +22,29 @@
     "target.activate",
     "target.close"
   ],
+  "method_effects": {
+    "runtime.health": "READ_ONLY",
+    "profile.start": "LOCAL_LIFECYCLE",
+    "profile.stop": "LOCAL_LIFECYCLE",
+    "profile.list": "READ_ONLY",
+    "target.create": "LOCAL_LIFECYCLE",
+    "target.list": "READ_ONLY",
+    "target.activate": "LOCAL_UI",
+    "target.close": "LOCAL_LIFECYCLE"
+  },
   "forbidden_external_capabilities": [
     "raw_cdp",
     "runtime_evaluate",
     "javascript_eval",
     "shell_exec",
     "arbitrary_browser_flags",
+    "arbitrary_executable_path",
+    "headless_override",
+    "sandbox_override",
+    "remote_navigation_b1",
     "default_profile_import",
     "cookie_import"
   ],
-  "authority_effect": false
+  "web_authority_effect": false,
+  "local_effects_present": true
 }

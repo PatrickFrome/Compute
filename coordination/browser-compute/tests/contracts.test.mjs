@@ -5,8 +5,8 @@ import path from 'node:path';
 import test from 'node:test';
 import protocol from '../protocol-v1.json' with { type: 'json' };
 import { buildChromeArgs } from '../src/chrome-process.mjs';
-import { RPC_METHODS } from '../src/rpc-server.mjs';
-import { atomicJsonWrite, getOrCreateControlToken, readJson, validateNavigationUrl, validateProfileId, validateTargetId } from '../src/security.mjs';
+import { RPC_METHOD_EFFECTS, RPC_METHODS } from '../src/rpc-server.mjs';
+import { atomicJsonWrite, readJson, rotateControlToken, validateNavigationUrl, validateProfileId, validateTargetId } from '../src/security.mjs';
 
 test('identity validators are fail closed', () => {
   assert.equal(validateProfileId('GPT_WORKER-01'), 'gpt_worker-01');
@@ -15,11 +15,12 @@ test('identity validators are fail closed', () => {
   assert.throws(() => validateTargetId('x'), /target_id_invalid/);
 });
 
-test('navigation permits only https or about:blank', () => {
+test('URL parser accepts canonical input but B1 policy keeps remote navigation disabled', () => {
   assert.equal(validateNavigationUrl('about:blank'), 'about:blank');
   assert.match(validateNavigationUrl('https://example.com/a'), /^https:\/\/example\.com\/a/);
   assert.throws(() => validateNavigationUrl('http://example.com'), /target_url_scheme_forbidden/);
   assert.throws(() => validateNavigationUrl('file:///etc/passwd'), /target_url_scheme_forbidden/);
+  assert.ok(protocol.forbidden_external_capabilities.includes('remote_navigation_b1'));
 });
 
 test('chrome args always isolate profile and debugger', () => {
@@ -34,23 +35,30 @@ test('chrome args always isolate profile and debugger', () => {
   assert.throws(() => buildChromeArgs({ userDataDir: dir, debuggingPort: 80 }), /debugging_port_invalid/);
 });
 
-test('RPC surface is typed and does not expose raw CDP or eval', () => {
+test('RPC surface is typed, effect-classed, and exposes no raw browser code path', () => {
   assert.deepEqual(RPC_METHODS, ['runtime.health', 'profile.start', 'profile.stop', 'profile.list', 'target.create', 'target.list', 'target.activate', 'target.close']);
   assert.deepEqual(protocol.methods, RPC_METHODS);
-  assert.equal(protocol.authority_effect, false);
-  assert.ok(protocol.forbidden_external_capabilities.includes('raw_cdp'));
-  assert.ok(protocol.forbidden_external_capabilities.includes('runtime_evaluate'));
+  assert.deepEqual(protocol.method_effects, RPC_METHOD_EFFECTS);
+  assert.equal(protocol.web_authority_effect, false);
+  assert.equal(protocol.local_effects_present, true);
+  for (const forbidden of ['raw_cdp', 'runtime_evaluate', 'javascript_eval', 'shell_exec', 'arbitrary_browser_flags', 'arbitrary_executable_path', 'headless_override', 'sandbox_override']) {
+    assert.ok(protocol.forbidden_external_capabilities.includes(forbidden));
+  }
   const joined = RPC_METHODS.join(' ');
   assert.doesNotMatch(joined, /cdp|evaluate|javascript|exec|shell/i);
 });
 
-test('control token is stable 256-bit local capability', async () => {
+test('control token is a fresh 256-bit daemon-session capability', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'a2-cb-token-'));
-  const first = await getOrCreateControlToken(root);
-  const second = await getOrCreateControlToken(root);
-  assert.match(first, /^[a-f0-9]{64}$/);
-  assert.equal(first, second);
-  await fs.rm(root, { recursive: true, force: true });
+  try {
+    const first = await rotateControlToken(root);
+    const second = await rotateControlToken(root);
+    assert.match(first.token, /^[a-f0-9]{64}$/);
+    assert.match(second.token, /^[a-f0-9]{64}$/);
+    assert.notEqual(first.token, second.token);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });
 
 test('atomic json store preserves exact structured state', async () => {

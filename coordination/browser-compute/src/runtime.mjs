@@ -6,7 +6,8 @@ import { atomicJsonWrite, defaultStateRoot, ensurePrivateDir, readJson, validate
 
 const PROFILE_META = 'a2-profile.json';
 const TARGETS_FILE = 'targets.json';
-const LOCK_FILE = 'a2-runtime.lock';
+const PROFILE_LOCK_FILE = 'a2-runtime.lock';
+const DAEMON_LOCK_FILE = 'a2-daemon.lock';
 
 function now() { return new Date().toISOString(); }
 function blankRegistry() { return { schema: 'metaengine.a2-compute-browser.targets.v1', revision: 0, targets: [], updated_at: now() }; }
@@ -16,15 +17,50 @@ async function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (error) { return error?.code === 'EPERM'; }
 }
 
+async function acquirePidLock(file, kind) {
+  try {
+    await fs.writeFile(file, `${JSON.stringify({ schema: `metaengine.a2-compute-browser.${kind}-lock.v1`, pid: process.pid, acquired_at: now() })}\n`, { flag: 'wx', mode: 0o600 });
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error;
+    let existing = null;
+    try { existing = JSON.parse(await fs.readFile(file, 'utf8')); } catch (_) {}
+    if (await pidAlive(Number(existing?.pid))) throw new Error(`${kind}_lock_held`);
+    await fs.rm(file, { force: true });
+    return acquirePidLock(file, kind);
+  }
+  return file;
+}
+
+async function releaseOwnedPidLock(file) {
+  if (!file) return;
+  let existing = null;
+  try { existing = JSON.parse(await fs.readFile(file, 'utf8')); } catch (_) {}
+  if (Number(existing?.pid) === process.pid) await fs.rm(file, { force: true }).catch(() => {});
+}
+
 export class ComputeBrowserRuntime {
-  constructor({ stateRoot = defaultStateRoot() } = {}) {
+  constructor({
+    stateRoot = defaultStateRoot(),
+    engineExecutable = process.env.A2_CHROME_EXECUTABLE || null,
+    headlessDefault = false,
+    allowNoSandbox = false
+  } = {}) {
     this.stateRoot = path.resolve(stateRoot);
+    this.engineExecutable = engineExecutable ? path.resolve(String(engineExecutable)) : null;
+    this.headlessDefault = headlessDefault === true;
+    this.allowNoSandbox = allowNoSandbox === true;
     this.profilesRoot = path.join(this.stateRoot, 'profiles');
     this.running = new Map();
     this.startedAt = now();
+    this.daemonLockFile = null;
   }
 
-  async init() { await ensurePrivateDir(this.profilesRoot); return this; }
+  async init() {
+    await ensurePrivateDir(this.stateRoot);
+    await ensurePrivateDir(this.profilesRoot);
+    if (!this.daemonLockFile) this.daemonLockFile = await acquirePidLock(path.join(this.stateRoot, DAEMON_LOCK_FILE), 'daemon');
+    return this;
+  }
 
   profileDir(profileId) { return path.join(this.profilesRoot, validateProfileId(profileId)); }
 
@@ -41,35 +77,38 @@ export class ComputeBrowserRuntime {
     return meta;
   }
 
-  async #acquireLock(profileId) {
-    const file = path.join(this.profileDir(profileId), LOCK_FILE);
-    try {
-      await fs.writeFile(file, `${JSON.stringify({ pid: process.pid, acquired_at: now() })}\n`, { flag: 'wx', mode: 0o600 });
-    } catch (error) {
-      if (error?.code !== 'EEXIST') throw error;
-      let existing = null;
-      try { existing = JSON.parse(await fs.readFile(file, 'utf8')); } catch (_) {}
-      if (await pidAlive(Number(existing?.pid))) throw new Error('profile_runtime_lock_held');
-      await fs.rm(file, { force: true });
-      return this.#acquireLock(profileId);
-    }
-    return file;
+  async #acquireProfileLock(profileId) {
+    return acquirePidLock(path.join(this.profileDir(profileId), PROFILE_LOCK_FILE), 'profile_runtime');
   }
 
-  async startProfile({ profileId, executablePath, headless = false, allowNoSandbox = false } = {}) {
+  async startProfile({ profileId } = {}) {
     const id = validateProfileId(profileId);
-    if (this.running.has(id)) return this.profileHealth(id);
+    const existing = this.running.get(id);
+    if (existing) {
+      const health = await this.profileHealth(id);
+      if (health.running) return health;
+      await this.stopProfile(id);
+    }
     const meta = await this.#profileMeta(id);
-    const lockFile = await this.#acquireLock(id);
+    const lockFile = await this.#acquireProfileLock(id);
     const userDataDir = path.join(this.profileDir(id), 'chrome-data');
-    const processRef = new ManagedChromeProcess({ executablePath, userDataDir, headless, allowNoSandbox });
+    if (!this.engineExecutable) {
+      await releaseOwnedPidLock(lockFile);
+      throw new Error('engine_executable_not_configured');
+    }
+    const processRef = new ManagedChromeProcess({
+      executablePath: this.engineExecutable,
+      userDataDir,
+      headless: this.headlessDefault,
+      allowNoSandbox: this.allowNoSandbox
+    });
     try {
       await processRef.start();
       this.running.set(id, { processRef, meta, lockFile, bindings: new Map() });
       return this.profileHealth(id);
     } catch (error) {
       await processRef.stop().catch(() => {});
-      await fs.rm(lockFile, { force: true }).catch(() => {});
+      await releaseOwnedPidLock(lockFile);
       throw error;
     }
   }
@@ -78,9 +117,9 @@ export class ComputeBrowserRuntime {
     const id = validateProfileId(profileId);
     const entry = this.running.get(id);
     if (!entry) return { profile_id: id, running: false };
-    await entry.processRef.stop();
+    await entry.processRef.stop().catch(() => {});
     this.running.delete(id);
-    await fs.rm(entry.lockFile, { force: true }).catch(() => {});
+    await releaseOwnedPidLock(entry.lockFile);
     return { profile_id: id, running: false };
   }
 
@@ -88,7 +127,11 @@ export class ComputeBrowserRuntime {
     const id = validateProfileId(profileId);
     const entry = this.running.get(id);
     if (!entry) return { profile_id: id, running: false };
-    return { profile_id: id, browser_node_id: entry.meta.browser_node_id, ...(await entry.processRef.health()) };
+    try {
+      return { profile_id: id, browser_node_id: entry.meta.browser_node_id, ...(await entry.processRef.health()) };
+    } catch (error) {
+      return { profile_id: id, browser_node_id: entry.meta.browser_node_id, running: false, error: String(error?.message || error) };
+    }
   }
 
   async listProfiles() {
@@ -127,6 +170,7 @@ export class ComputeBrowserRuntime {
     const logicalId = targetId ? validateTargetId(targetId) : `browser_${crypto.randomUUID().replaceAll('-', '').slice(0, 20)}`;
     if (registry.targets.some((row) => row.target_id === logicalId && row.status !== 'RETIRED')) throw new Error('target_id_exists');
     const navUrl = validateNavigationUrl(url);
+    if (navUrl !== 'about:blank') throw new Error('b1_remote_navigation_not_enabled');
     const created = await entry.processRef.cdp.call('Target.createTarget', { url: navUrl });
     if (!created.targetId) throw new Error('cdp_target_create_failed');
     const previous = registry.targets.find((row) => row.target_id === logicalId);
@@ -187,15 +231,19 @@ export class ComputeBrowserRuntime {
     for (const id of this.running.keys()) profiles.push(await this.profileHealth(id));
     return {
       schema: 'metaengine.a2-compute-browser.health.v1',
-      runtime: '0.1.0-dev.1',
+      runtime: '0.1.0-dev.2',
       started_at: this.startedAt,
-      authority_effect: false,
+      web_authority_effect: false,
+      local_effects_present: true,
       raw_cdp_rpc_exposed: false,
+      debug_transport: 'loopback_tcp_transitional_b1',
       profiles
     };
   }
 
   async shutdown() {
     for (const id of [...this.running.keys()]) await this.stopProfile(id).catch(() => {});
+    await releaseOwnedPidLock(this.daemonLockFile);
+    this.daemonLockFile = null;
   }
 }

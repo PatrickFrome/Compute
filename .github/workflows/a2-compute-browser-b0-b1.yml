@@ -26,16 +26,19 @@ jobs:
           set -euo pipefail
           node -e 'const m=Number(process.versions.node.split(".")[0]); if (m < 22) process.exit(1); console.log(process.version)'
 
-      - name: Static and unit contracts
+      - name: Static, unit, and capability contracts
         shell: bash
         working-directory: coordination/browser-compute
         run: |
           set -euo pipefail
           find src tests -type f -name '*.mjs' -print0 | sort -z | xargs -0 -n1 node --check
           node --test tests/*.test.mjs
-          ! grep -R -n -E 'nodeIntegration[[:space:]]*:[[:space:]]*true|Runtime\.evaluate.*case|rpc.*cdp\.call|--user-data-dir=.*/Default' src tests
+          ! grep -R -n -E 'nodeIntegration[[:space:]]*:[[:space:]]*true|Runtime\.evaluate.*case|rpc.*cdp\.call|--user-data-dir=.*/Default|profile\.start.*executablePath' src tests protocol-v1.json
+          grep -q '"arbitrary_executable_path"' protocol-v1.json
+          grep -q '"remote_navigation_b1"' protocol-v1.json
+          grep -q '"web_authority_effect": false' protocol-v1.json
 
-      - name: Real Chromium lifecycle smoke
+      - name: Real Chromium lifecycle and recovery smoke
         shell: bash
         working-directory: coordination/browser-compute
         run: |
@@ -50,6 +53,9 @@ jobs:
           node src/cli.mjs self-test | tee "$RUNNER_TEMP/a2-compute-browser-self-test.json"
           grep -q '"ok":true' "$RUNNER_TEMP/a2-compute-browser-self-test.json"
           grep -q '"raw_cdp_rpc_exposed":false' "$RUNNER_TEMP/a2-compute-browser-self-test.json"
+          grep -q '"crash_aware_restart":true' "$RUNNER_TEMP/a2-compute-browser-self-test.json"
+          grep -q '"remote_navigation_blocked":true' "$RUNNER_TEMP/a2-compute-browser-self-test.json"
+          grep -q '"web_authority_effect":false' "$RUNNER_TEMP/a2-compute-browser-self-test.json"
 
       - name: Build deterministic B0 B1 evidence bundle
         shell: bash

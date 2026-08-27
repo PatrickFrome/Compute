@@ -52,23 +52,15 @@ export async function readJson(file, fallback) {
   catch (error) { if (error?.code === 'ENOENT') return structuredClone(fallback); throw error; }
 }
 
-export async function getOrCreateControlToken(root) {
+export async function rotateControlToken(root) {
   await ensurePrivateDir(root);
   const file = path.join(root, 'control-token');
-  try {
-    const token = (await fs.readFile(file, 'utf8')).trim();
-    if (/^[a-f0-9]{64}$/.test(token)) return token;
-    throw new Error('control_token_corrupt');
-  } catch (error) {
-    if (error?.code !== 'ENOENT') throw error;
-    const token = crypto.randomBytes(32).toString('hex');
-    try { await fs.writeFile(file, `${token}\n`, { flag: 'wx', mode: 0o600 }); }
-    catch (writeError) {
-      if (writeError?.code === 'EEXIST') return getOrCreateControlToken(root);
-      throw writeError;
-    }
-    return token;
-  }
+  const token = crypto.randomBytes(32).toString('hex');
+  const temp = `${file}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+  await fs.writeFile(temp, `${token}\n`, { mode: 0o600 });
+  await fs.rename(temp, file);
+  if (process.platform !== 'win32') await fs.chmod(file, 0o600).catch(() => {});
+  return { token, file };
 }
 
 export function rpcEndpoint(root) {

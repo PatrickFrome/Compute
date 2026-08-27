@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import net from 'node:net';
-import { getOrCreateControlToken, rpcEndpoint } from './security.mjs';
+import { rotateControlToken, rpcEndpoint } from './security.mjs';
 
 const MAX_LINE_BYTES = 1024 * 1024;
 
@@ -16,6 +16,17 @@ export const RPC_METHODS = Object.freeze([
   'target.close'
 ]);
 
+export const RPC_METHOD_EFFECTS = Object.freeze({
+  'runtime.health': 'READ_ONLY',
+  'profile.start': 'LOCAL_LIFECYCLE',
+  'profile.stop': 'LOCAL_LIFECYCLE',
+  'profile.list': 'READ_ONLY',
+  'target.create': 'LOCAL_LIFECYCLE',
+  'target.list': 'READ_ONLY',
+  'target.activate': 'LOCAL_UI',
+  'target.close': 'LOCAL_LIFECYCLE'
+});
+
 function safeEqual(a, b) {
   const aa = Buffer.from(String(a || ''));
   const bb = Buffer.from(String(b || ''));
@@ -25,7 +36,7 @@ function safeEqual(a, b) {
 async function dispatch(runtime, method, params) {
   switch (method) {
     case 'runtime.health': return runtime.health();
-    case 'profile.start': return runtime.startProfile(params);
+    case 'profile.start': return runtime.startProfile({ profileId: params?.profileId });
     case 'profile.stop': return runtime.stopProfile(params?.profileId);
     case 'profile.list': return runtime.listProfiles();
     case 'target.create': return runtime.createTarget(params);
@@ -37,15 +48,15 @@ async function dispatch(runtime, method, params) {
 }
 
 export async function startRpcServer(runtime) {
-  const token = await getOrCreateControlToken(runtime.stateRoot);
+  const { token, file: tokenFile } = await rotateControlToken(runtime.stateRoot);
   const endpoint = rpcEndpoint(runtime.stateRoot);
   if (process.platform !== 'win32') await fs.rm(endpoint, { force: true }).catch(() => {});
   const server = net.createServer((socket) => {
     socket.setNoDelay(true);
     let buffer = '';
-    socket.on('data', async (chunk) => {
-      buffer += chunk.toString('utf8');
-      if (Buffer.byteLength(buffer) > MAX_LINE_BYTES) return socket.destroy(new Error('rpc_frame_too_large'));
+    let queue = Promise.resolve();
+
+    async function drain() {
       let newline;
       while ((newline = buffer.indexOf('\n')) >= 0) {
         const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);
@@ -58,14 +69,35 @@ export async function startRpcServer(runtime) {
           if (!safeEqual(request.token, token)) throw new Error('rpc_unauthorized');
           if (!RPC_METHODS.includes(String(request.method || ''))) throw new Error('rpc_method_forbidden');
           const result = await dispatch(runtime, request.method, request.params || {});
-          socket.write(`${JSON.stringify({ id, ok: true, result })}\n`);
+          socket.write(`${JSON.stringify({ id, ok: true, effect_class: RPC_METHOD_EFFECTS[request.method], web_authority_effect: false, result })}\n`);
         } catch (error) {
           socket.write(`${JSON.stringify({ id, ok: false, error: String(error?.message || error) })}\n`);
         }
       }
+    }
+
+    socket.on('data', (chunk) => {
+      buffer += chunk.toString('utf8');
+      if (Buffer.byteLength(buffer) > MAX_LINE_BYTES) return socket.destroy(new Error('rpc_frame_too_large'));
+      queue = queue.then(drain, drain).catch(() => socket.destroy());
     });
   });
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(endpoint, resolve); });
+
+  try {
+    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(endpoint, resolve); });
+  } catch (error) {
+    await fs.rm(tokenFile, { force: true }).catch(() => {});
+    throw error;
+  }
   if (process.platform !== 'win32') await fs.chmod(endpoint, 0o600).catch(() => {});
-  return { endpoint, server, async close() { await new Promise((resolve) => server.close(resolve)); if (process.platform !== 'win32') await fs.rm(endpoint, { force: true }).catch(() => {}); } };
+  return {
+    endpoint,
+    tokenFile,
+    server,
+    async close() {
+      await new Promise((resolve) => server.close(resolve));
+      if (process.platform !== 'win32') await fs.rm(endpoint, { force: true }).catch(() => {});
+      await fs.rm(tokenFile, { force: true }).catch(() => {});
+    }
+  };
 }
