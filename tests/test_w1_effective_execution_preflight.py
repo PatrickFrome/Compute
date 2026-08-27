@@ -88,12 +88,14 @@ class W1EffectiveExecutionPreflightTests(unittest.TestCase):
         snap["claim"]["holder_id"] = "someone-else"
         result = preflight.evaluate(snap)
         self.assertIn("claim_holder_exact", result["evidence"]["failed_checks"])
+        self.assertIn("holder_pair_aligned", result["evidence"]["failed_checks"])
 
     def test_directive_target_mismatch_is_blocked(self):
         snap = fresh_snapshot()
         snap["directive"]["target_holder_id"] = "someone-else"
         result = preflight.evaluate(snap)
         self.assertIn("directive_target_holder_exact", result["evidence"]["failed_checks"])
+        self.assertIn("holder_pair_aligned", result["evidence"]["failed_checks"])
 
     def test_checkpoint_and_payload_root_drift_are_blocked(self):
         snap = fresh_snapshot()
@@ -120,6 +122,30 @@ class W1EffectiveExecutionPreflightTests(unittest.TestCase):
         snap["directive"]["superseded_at"] = "2026-08-26T17:30:00Z"
         result = preflight.evaluate(snap)
         self.assertIn("directive_not_superseded", result["evidence"]["failed_checks"])
+
+    def test_empty_string_supersession_is_blocked_strictly(self):
+        snap = fresh_snapshot()
+        snap["directive"]["superseded_at"] = ""
+        result = preflight.evaluate(snap)
+        self.assertFalse(result["effective_execution_preflight_passed"])
+        self.assertIn("directive_not_superseded", result["evidence"]["failed_checks"])
+
+    def test_non_execution_directive_kinds_are_blocked(self):
+        for kind in ("PAUSE", "STOP", "HOLD", "REVOKE"):
+            with self.subTest(kind=kind):
+                snap = fresh_snapshot()
+                snap["directive"]["directive_kind"] = kind
+                result = preflight.evaluate(snap)
+                self.assertFalse(result["effective_execution_preflight_passed"])
+                self.assertIn("directive_kind_allows_execution", result["evidence"]["failed_checks"])
+
+    def test_all_execution_directive_kinds_are_accepted_when_otherwise_aligned(self):
+        for kind in sorted(preflight.ALLOWED_DIRECTIVE_KINDS):
+            with self.subTest(kind=kind):
+                snap = fresh_snapshot()
+                snap["directive"]["directive_kind"] = kind
+                result = preflight.evaluate(snap)
+                self.assertTrue(result["effective_execution_preflight_passed"])
 
     def test_blocked_roadmap_state_is_blocked(self):
         snap = fresh_snapshot()
