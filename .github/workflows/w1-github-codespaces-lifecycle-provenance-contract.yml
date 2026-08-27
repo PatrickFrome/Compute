@@ -33,7 +33,7 @@ jobs:
           set -euo pipefail
           python3 -m unittest tests.test_w1_github_codespaces_lifecycle_provenance -v
 
-      - name: Assert mutation and secret boundaries
+      - name: Assert PREP mutation and secret boundaries
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -45,8 +45,10 @@ jobs:
               'API_VERSION = "2026-03-10"',
               'ACCEPT = "application/vnd.github+json"',
               'METAENGINE_W1_PROVIDER_MUTATION_AUTHORIZED',
-              'ssl.create_default_context()',
+              'CODESPACES_EXTERNAL_W1_DISPATCH_RECEIPT_REQUIRED',
               'suffix not in {"", "/stop", "/start"}',
+              'local_execute_available": False',
+              'raise RuntimeError(EXECUTE_BLOCK)',
               'token_material_persisted": False',
               'provider_action_verified": False',
               'authenticated_provider_provenance_verified": False',
@@ -58,6 +60,9 @@ jobs:
           for token in required:
               assert token in text, token
           forbidden = (
+              'urllib.request', 'requests.', 'httpx.',
+              'subprocess.', 'os.system(',
+              '_call(method="post"', '_call(method="delete"',
               'method="delete"', 'method="patch"', 'method="put"',
               '/delete', '/rebuild',
               'print(token', 'json.dump(token', 'json.dumps(token',
@@ -67,4 +72,5 @@ jobs:
           )
           for token in forbidden:
               assert token not in low, token
+          print('codespaces lifecycle collector: PREP_EXTERNAL_DISPATCH_FENCE_PASS')
           PY
