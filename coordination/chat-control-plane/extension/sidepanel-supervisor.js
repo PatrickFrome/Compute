@@ -150,7 +150,6 @@
   refresh();
   setInterval(async () => {
     if (document.visibilityState === "visible") {
-      await request("A2_SUPERVISOR_POLL_NOW").catch(()=>{});
       await refresh();
     }
   }, 2500);
