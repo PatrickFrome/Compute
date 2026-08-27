@@ -87,7 +87,19 @@ assert.equal(postedResults.at(-1)?.ok, true, "CONTROL bootstrap receipt was not 
 assert.equal(postedResults.at(-1)?.receipt?.action, "SET_SUPERVISOR_MODE");
 assert.equal(supervisorPollHandoffs, 1, "CONTROL bootstrap did not hand off to main supervisor FSM");
 
-session.set("a2SupervisorModeV1", "OFF");
+local.set("armed", true);
+queuedCommand = {
+  command_id: "00000000-0000-4000-8000-000000000635",
+  idempotency_key: "v063.bootstrap.off.0000001",
+  action: "SET_SUPERVISOR_MODE",
+  platform: null,
+  payload: { mode: "OFF" }
+};
+await context.A2_SUPERVISOR_BOOTSTRAP_POLL();
+assert.equal(session.get("a2SupervisorModeV1"), "OFF", "remote supervisor could not revoke CONTROL to OFF");
+assert.equal(local.get("armed"), false, "remote OFF must fail closed by disarming");
+assert.equal(postedResults.at(-1)?.ok, true);
+
 queuedCommand = {
   command_id: "00000000-0000-4000-8000-000000000632",
   idempotency_key: "v063.bootstrap.arm.000001",
@@ -130,6 +142,7 @@ assert.equal(postedResults.at(-1)?.ok, false);
 
 assert.ok(fetchCalls.some((row) => row.url.endsWith("/v1/commands/bootstrap-next")), "bootstrap did not use the filtered v3 lease route");
 assert.ok(source.includes("a2-browser-supervisor-v3-canary"), "bootstrap is not pinned to the v3 edge canary");
+assert.doesNotMatch(source,/already_control/,"bootstrap lane incorrectly disables itself in CONTROL");
 assert.equal(alarmListeners.length, 1);
 assert.equal(storageListeners.length, 1);
 
