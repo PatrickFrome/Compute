@@ -2,8 +2,8 @@
   "use strict";
 
   const LEGACY_BASE = "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-supervisor-v3-canary";
-  const SIGNED_BASE = "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-supervisor-v4-canary";
-  const SIGNED_RUNTIME_PREFIX = "/a2-browser-supervisor-v4-canary";
+  const SIGNED_BASE = "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-supervisor-v4";
+  const SIGNED_RUNTIME_PREFIX = "/a2-browser-supervisor-v4";
   const PROFILE = "A2_DEVICE_HTTP_SIGNATURE_V1";
   const RECOVERABLE_IDENTITY_REASONS = new Set(["DEVICE_NOT_FOUND", "DEVICE_REVOKED", "DEVICE_BINDING_MISMATCH"]);
   const nativeFetch = globalThis.fetch.bind(globalThis);
