@@ -1,0 +1,72 @@
+name: W1 Provider Mutation Authority Gap Audit
+
+on:
+  push:
+    branches: [work/w1-sandbox-launcher-prep]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile whole-provider auditor
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/w1/provider_mutation_authority_gap_audit.py
+
+      - name: Run adversarial audit contracts
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_w1_provider_mutation_authority_gap_audit -v
+
+      - name: Audit current W1 provider mutation surface
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          python3 controller/w1/provider_mutation_authority_gap_audit.py \
+            --output evidence/w1-provider-mutation-authority-gap-audit.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('evidence/w1-provider-mutation-authority-gap-audit.json')
+          r=json.loads(p.read_text())
+          assert r['schema']=='metaengine.compute.w1-provider-mutation-authority-gap-audit.h205f22.v2'
+          assert r['outcome']=='PASS_ALL_PROVIDER_MUTATION_ENTRYPOINTS_EXTERNALLY_GATED_NONAUTHORITY'
+          assert r['audit_passed'] is True
+          assert r['provider_mutation_authorized'] is False
+          assert r['authority_effect'] is False
+          assert r['canonical'] is False
+          assert r['w1_verified'] is False
+          assert r['evidence']['ungated_workflow_mutation_count']==0
+          assert r['evidence']['direct_code_mutation_count']==0
+          assert r['evidence']['service_role_consumers']==[]
+          assert r['evidence']['gated_workflow_mutation_count'] >= 1
+          print(json.dumps({
+              'evidence_sha256':r['evidence_sha256'],
+              'scanned_file_count':r['evidence']['scanned_file_count'],
+              'gated_workflow_mutation_count':r['evidence']['gated_workflow_mutation_count'],
+          },sort_keys=True))
+          PY
+          sha256sum evidence/w1-provider-mutation-authority-gap-audit.json \
+            > evidence/w1-provider-mutation-authority-gap-audit.sha256
+
+      - name: Upload whole-provider audit evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: w1-provider-mutation-authority-gap-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            evidence/w1-provider-mutation-authority-gap-audit.json
+            evidence/w1-provider-mutation-authority-gap-audit.sha256
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
