@@ -36,3 +36,4 @@ importScripts("./trusted-supervisor-chat-v063.js");
 importScripts("./supervisor-chat-action-v063.js");
 importScripts("./supervisor-chat-action-monitor-v063.js");
 importScripts("./supervisor-incident-router-v063.js");
+importScripts("./supervisor-chat-ui-bridge-v063.js");
