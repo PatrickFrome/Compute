@@ -75,23 +75,39 @@ jobs:
             tests.test_w1_admission_candidate \
             tests.test_w1_host_safety_envelope_v2 -v
 
-      - name: Prepare dedicated non-root CI smoke identity
+      - name: Prepare root-owned package and dedicated non-root CI identity
         run: |
           set -euo pipefail
           if ! id -u metaengine-w1 >/dev/null 2>&1; then
             sudo useradd --system --home-dir /var/lib/metaengine/w1 --shell /usr/sbin/nologin metaengine-w1
           fi
           sudo install -d -o metaengine-w1 -g metaengine-w1 -m 0700 /var/lib/metaengine/w1/workspace
+          PACKAGE_ROOT="/opt/metaengine/w1/ci/$GITHUB_SHA"
+          sudo install -d -o root -g root -m 0555 \
+            /opt/metaengine \
+            /opt/metaengine/w1 \
+            /opt/metaengine/w1/ci \
+            "$PACKAGE_ROOT" \
+            "$PACKAGE_ROOT/controller" \
+            "$PACKAGE_ROOT/controller/w1" \
+            "$PACKAGE_ROOT/worker" \
+            "$PACKAGE_ROOT/worker/native_linux"
+          sudo install -o root -g root -m 0444 controller/w1/host_safety_evidence_bundle.py "$PACKAGE_ROOT/controller/w1/host_safety_evidence_bundle.py"
+          sudo install -o root -g root -m 0444 controller/w1/host_safety_envelope_validator.py "$PACKAGE_ROOT/controller/w1/host_safety_envelope_validator.py"
+          sudo install -o root -g root -m 0444 worker/native_linux/host_safety_envelope_probe.py "$PACKAGE_ROOT/worker/native_linux/host_safety_envelope_probe.py"
           test "$(stat -c %U /var/lib/metaengine/w1/workspace)" = metaengine-w1
           test "$(stat -c %a /var/lib/metaengine/w1/workspace)" = 700
+          test "$(stat -c %U "$PACKAGE_ROOT/controller/w1/host_safety_evidence_bundle.py")" = root
+          test "$(stat -c %a "$PACKAGE_ROOT/controller/w1/host_safety_evidence_bundle.py")" = 444
+          echo "W1_CI_PACKAGE_ROOT=$PACKAGE_ROOT" >> "$GITHUB_ENV"
 
-      - name: Execute active probe on CI host as non-authority smoke
+      - name: Execute active probe from root-owned package as non-authority smoke
         run: |
           set -euo pipefail
           TREE_SHA="$(git rev-parse HEAD^{tree})"
           set +e
           printf '{"source":{"git_sha":"%s","tree_sha":"%s"}}' "$GITHUB_SHA" "$TREE_SHA" \
-            | sudo -u metaengine-w1 python3 controller/w1/host_safety_evidence_bundle.py > /tmp/w1-host-safety-bundle.json
+            | sudo -u metaengine-w1 python3 "$W1_CI_PACKAGE_ROOT/controller/w1/host_safety_evidence_bundle.py" > /tmp/w1-host-safety-bundle.json
           RC=$?
           set -e
           test "$RC" -eq 0 -o "$RC" -eq 2
