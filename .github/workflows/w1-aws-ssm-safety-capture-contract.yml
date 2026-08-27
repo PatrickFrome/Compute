@@ -1,0 +1,128 @@
+name: W1 AWS SSM Safety Capture Contract
+
+on:
+  push:
+    branches:
+      - work/w1-linux-worker-safety
+      - work/main-roadmap-accelerators-v5
+    paths:
+      - 'controller/w1/aws_ssm_safety_capture_guard.py'
+      - 'controller/w1/host_safety_envelope_validator.py'
+      - 'infra/w1/ssm/Metaengine-W1-Safety-Capture-H205F22.json'
+      - 'infra/w1/package/W1_SAFETY_ENVELOPE_73AB09C7_MANIFEST.json'
+      - 'tests/test_w1_aws_ssm_safety_capture_guard.py'
+      - '.github/workflows/w1-aws-ssm-safety-capture-contract.yml'
+      - 'research/W1_AWS_SSM_SAFETY_CAPTURE.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/w1/aws_ssm_safety_capture_guard.py'
+      - 'controller/w1/host_safety_envelope_validator.py'
+      - 'infra/w1/ssm/Metaengine-W1-Safety-Capture-H205F22.json'
+      - 'infra/w1/package/W1_SAFETY_ENVELOPE_73AB09C7_MANIFEST.json'
+      - 'tests/test_w1_aws_ssm_safety_capture_guard.py'
+      - '.github/workflows/w1-aws-ssm-safety-capture-contract.yml'
+      - 'research/W1_AWS_SSM_SAFETY_CAPTURE.md'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Verify exact source head
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Compile safety transport contracts
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            controller/w1/aws_ssm_safety_capture_guard.py \
+            controller/w1/host_safety_envelope_validator.py
+
+      - name: Run SSM safety adversarial tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_w1_aws_ssm_safety_capture_guard -v
+
+      - name: Assert immutable package and parameterless document boundary
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          from controller.w1 import aws_ssm_safety_capture_guard as g
+
+          manifest_path = Path('infra/w1/package/W1_SAFETY_ENVELOPE_73AB09C7_MANIFEST.json')
+          document_path = Path('infra/w1/ssm/Metaengine-W1-Safety-Capture-H205F22.json')
+          raw_manifest = manifest_path.read_bytes()
+          raw_document = document_path.read_bytes()
+          manifest = json.loads(raw_manifest)
+          document = g.parse_local_document(raw_document)
+          command = document['mainSteps'][0]['inputs']['runCommand'][0]
+
+          assert hashlib.sha256(raw_manifest).hexdigest() == g.PACKAGE_MANIFEST_SHA256
+          assert manifest['source_commit_sha'] == g.PACKAGE_SOURCE_COMMIT
+          assert manifest['source_tree_sha'] == g.PACKAGE_SOURCE_TREE
+          assert manifest['package_root'] == g.PACKAGE_ROOT
+          assert manifest['execution_user'] == g.EXECUTION_USER
+          assert manifest['workspace_root'] == g.WORKSPACE_ROOT
+          assert document['parameters'] == {}
+          assert 'runuser -u' in command
+          assert g.EXECUTION_USER in command
+          assert g.PACKAGE_MANIFEST_SHA256 in command
+
+          for forbidden in (
+              '{{', 'https://', 'http://', 'curl ', 'wget ', 'git clone',
+              'git pull', 'ssh ', 'sudo ', 'aws ', 'AWS-RunDocument',
+              'aws:runDocument', 's3://',
+          ):
+              assert forbidden.lower() not in command.lower(), forbidden
+          print('W1 pinned safety package/document boundary: PASS')
+          PY
+
+      - name: Assert least-authority SSM session policy
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from controller.w1 import aws_ssm_safety_capture_guard as g
+
+          boundary = g.build_session_boundary(
+              instance_id='i-0123456789abcdef0',
+              worker_id='w1-worker-ci',
+              account_id='123456789012',
+              region='us-east-2',
+              local_document_source=Path('infra/w1/ssm/Metaengine-W1-Safety-Capture-H205F22.json').read_bytes(),
+          )
+          policy = json.dumps(boundary['session_policy'], sort_keys=True)
+          required = ('ssm:SendCommand', 'ssm:GetCommandInvocation', 'ssm:DescribeInstanceInformation', g.DOCUMENT_NAME)
+          for marker in required:
+              assert marker in policy, marker
+          forbidden = (
+              'ssm:StartSession', 'ssm:CreateDocument', 'ssm:UpdateDocument',
+              'ssm:DeleteDocument', 'ec2:RebootInstances', 'secretsmanager:',
+              'kms:Decrypt', 's3:', 'AWS-RunDocument',
+          )
+          for marker in forbidden:
+              assert marker not in policy, marker
+          for key in (
+              'host_safety_verified', 'provider_identity_verified',
+              'persistent_worker_proof', 'w1_verified', 'canonical',
+              'authority_effect',
+          ):
+              assert boundary[key] is False, key
+          print('W1 SSM safety least-authority session boundary: PASS')
+          PY
