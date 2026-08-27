@@ -230,12 +230,36 @@
     return receipt;
   }
 
-  async function recoverAndResend(pending, reason) {
+  async function prepareNextAttempt(pending, reason) {
     if (Number(pending.attempt || 1) >= MAX_ATTEMPTS) {
       const hold = { ...pending, status: "HOLD", hold_reason: safeToken(reason, 160), updated_at: nowIso() };
       await writePending(hold);
-      return hold;
+      return { hold };
     }
+    const next = {
+      ...pending,
+      status: "PENDING",
+      attempt: Number(pending.attempt || 1) + 1,
+      epoch: null,
+      tab_id: null,
+      baseline: null,
+      last_signal: null,
+      last_progress_at: nowIso(),
+      updated_at: nowIso()
+    };
+    await writePending(next);
+    return { next };
+  }
+
+  async function resendOnAdvancedEpoch(pending, reason) {
+    const prepared = await prepareNextAttempt(pending, reason);
+    if (prepared.hold) return prepared.hold;
+    return dispatch(prepared.next, `new_epoch:${reason}`);
+  }
+
+  async function recoverAndResend(pending, reason) {
+    const prepared = await prepareNextAttempt(pending, reason);
+    if (prepared.hold) return prepared.hold;
     if (typeof globalThis.A2_SUPERVISOR_CHAT_RECOVER !== "function") {
       const retryable = { ...pending, status: "RETRYABLE", retry_after: new Date(Date.now() + RETRY_DELAY_MS).toISOString(), last_error_code: "supervisor_chat_recover_unavailable", updated_at: nowIso() };
       await writePending(retryable);
@@ -244,19 +268,8 @@
     await writePending({ ...pending, status: "RECOVERING_CHAT", recovery_reason: safeToken(reason, 160), updated_at: nowIso() });
     try {
       await globalThis.A2_SUPERVISOR_CHAT_RECOVER(`incident:${safeToken(reason, 120)}`);
-      const next = {
-        ...pending,
-        status: "PENDING",
-        attempt: Number(pending.attempt || 1) + 1,
-        epoch: null,
-        tab_id: null,
-        baseline: null,
-        last_signal: null,
-        last_progress_at: nowIso(),
-        updated_at: nowIso()
-      };
-      await writePending(next);
-      return dispatch(next, `recovery:${reason}`);
+      await writePending(prepared.next);
+      return dispatch(prepared.next, `recovery:${reason}`);
     } catch (error) {
       const retryable = {
         ...pending,
@@ -295,7 +308,7 @@
 
       const status = await sessionStatus();
       if (Number(current.epoch || 0) > 0 && Number(status?.epoch || 0) > Number(current.epoch || 0)) {
-        return recoverAndResend(current, "session_epoch_advanced");
+        return resendOnAdvancedEpoch(current, "session_epoch_advanced");
       }
 
       const progressAt = Date.parse(String(current.last_progress_at || current.sent_at || current.updated_at || ""));
