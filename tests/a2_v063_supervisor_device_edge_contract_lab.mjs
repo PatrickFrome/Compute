@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
-const file = path.join(process.cwd(), "supabase/functions/a2-browser-supervisor-v4-canary/index.ts");
+const file = path.join(process.cwd(), "supabase/functions/a2-browser-supervisor-v4/index.ts");
 const source = fs.readFileSync(file, "utf8");
 
 assert.match(source, /DEVICE_PROFILE='A2_DEVICE_HTTP_SIGNATURE_V1'/);
+assert.match(source, /SERVICE_MARKER='\/a2-browser-supervisor-v4'/);
 assert.match(source, /h205f22_a2_browser_device_enroll_v1/);
 assert.match(source, /h205f22_a2_browser_device_consume_nonce_v2/);
+assert.match(source, /h205f22_a2_browser_device_rotate_embedded_bootstrap_v1/);
+assert.match(source, /h205f22_a2_browser_supervisor_complete_v4/);
 assert.match(source, /crypto\.subtle\.importKey\('jwk'/);
 assert.match(source, /crypto\.subtle\.verify\(\{name:'ECDSA',hash:'SHA-256'\}/);
 assert.match(source, /BODY_HASH_MISMATCH/);
@@ -16,6 +19,7 @@ assert.match(source, /PAIRING_REVOKED/);
 assert.match(source, /NONCE_REJECTED/);
 assert.match(source, /device_auth_required:true/);
 assert.match(source, /pairing_kill_switch:true/);
+assert.match(source, /embedded_bootstrap_rotation:true/);
 assert.match(source, /transport_identity/);
 assert.match(source, /key_fingerprint_sha256:fingerprint/);
 assert.match(source, /fingerprint=await sha256\(JSON\.stringify\(jwk\)\)/, "enrollment fingerprint must be server-derived");
@@ -37,7 +41,7 @@ const serveTail = source.slice(source.indexOf("Deno.serve"));
 assert.match(serveTail, /path==='\/health'/);
 assert.match(serveTail, /path==='\/v1\/device\/enroll'/);
 assert.match(serveTail, /authenticateDevice\(req,url\.pathname,bodyText\)/, "edge must verify signature against full service pathname");
-assert.doesNotMatch(serveTail.slice(signedAuth), /pairingTokenHash\(req\)/, "privileged routes must not bearer-fallback after signed authentication starts");
+assert.doesNotMatch(serveTail.slice(signedAuth), /pairingRecord\(req\)/, "privileged routes must not bearer-fallback after signed authentication starts");
 
 for (const header of [
   "x-a2-device-profile", "x-a2-device-id", "x-a2-device-timestamp",
@@ -50,5 +54,7 @@ console.log("a2_v063_supervisor_device_edge_contract_lab: PASS", {
   revokedDeviceExplicitlyDetected: true,
   serverDerivedFingerprint: true,
   serviceBoundPath: true,
+  embeddedBootstrapRotation: true,
+  atomicResult: true,
   privilegedBearerFallback: false
 });
