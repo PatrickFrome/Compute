@@ -4,27 +4,14 @@ import { atomicJsonWrite, readJson, validateContextId } from './security.mjs';
 
 const CONTEXTS_FILE = 'contexts.json';
 export const DEFAULT_CONTEXT_ID = 'context_default';
-export const CONTEXT_KIND = Object.freeze({
-  PERSISTENT_DEFAULT: 'PERSISTENT_DEFAULT',
-  EPHEMERAL_ISOLATED: 'EPHEMERAL_ISOLATED'
-});
+export const CONTEXT_KIND = Object.freeze({ PERSISTENT_DEFAULT: 'PERSISTENT_DEFAULT', EPHEMERAL_ISOLATED: 'EPHEMERAL_ISOLATED' });
 
 function now() { return new Date().toISOString(); }
-
 function freshRegistry() {
   const timestamp = now();
   return {
-    schema: 'metaengine.a2-compute-browser.contexts.v1',
-    revision: 0,
-    updated_at: timestamp,
-    contexts: [{
-      context_id: DEFAULT_CONTEXT_ID,
-      context_kind: CONTEXT_KIND.PERSISTENT_DEFAULT,
-      context_epoch: 1,
-      status: 'ACTIVE',
-      created_at: timestamp,
-      updated_at: timestamp
-    }]
+    schema: 'metaengine.a2-compute-browser.contexts.v1', revision: 0, updated_at: timestamp,
+    contexts: [{ context_id: DEFAULT_CONTEXT_ID, context_kind: CONTEXT_KIND.PERSISTENT_DEFAULT, context_epoch: 1, status: 'ACTIVE', created_at: timestamp, updated_at: timestamp }]
   };
 }
 
@@ -50,19 +37,13 @@ export class ProfileContextManager {
     this.bindings = bindings;
   }
 
-  async ensure() {
-    await loadOrCreate(this.profileDir);
-    return this;
-  }
+  async ensure() { await loadOrCreate(this.profileDir); return this; }
 
   async list({ includeRetired = false } = {}) {
     const registry = await loadOrCreate(this.profileDir);
     return registry.contexts
       .filter((row) => includeRetired || row.status !== 'RETIRED')
-      .map((row) => ({
-        ...row,
-        bound: row.context_id === DEFAULT_CONTEXT_ID || this.bindings.has(row.context_id)
-      }));
+      .map((row) => ({ ...row, bound: row.context_id === DEFAULT_CONTEXT_ID || this.bindings.has(row.context_id) }));
   }
 
   async create({ contextId = null, kind = CONTEXT_KIND.EPHEMERAL_ISOLATED } = {}) {
@@ -72,6 +53,7 @@ export class ProfileContextManager {
     const registry = await loadOrCreate(this.profileDir);
     const previous = registry.contexts.find((row) => row.context_id === logicalId);
     if (previous?.status === 'ACTIVE' && this.bindings.has(logicalId)) throw new Error('context_id_exists');
+    if (previous?.status === 'CLOSING' || previous?.status === 'CLOSE_AMBIGUOUS') throw new Error('context_reconciliation_required');
 
     const physical = await this.cdp.call('Target.createBrowserContext', { disposeOnDetach: true });
     if (!physical.browserContextId) throw new Error('cdp_context_create_failed');
@@ -86,7 +68,13 @@ export class ProfileContextManager {
     };
     registry.contexts = registry.contexts.filter((row) => row.context_id !== logicalId);
     registry.contexts.push(record);
-    await save(this.profileDir, registry);
+    try {
+      await save(this.profileDir, registry);
+    } catch (persistError) {
+      try { await this.cdp.call('Target.disposeBrowserContext', { browserContextId: physical.browserContextId }); }
+      catch (_) { throw new Error('context_create_persist_failed_cleanup_ambiguous'); }
+      throw persistError;
+    }
     this.bindings.set(logicalId, { cdp_browser_context_id: physical.browserContextId, bound_at: timestamp, context_epoch: record.context_epoch });
     return { ...record, bound: true };
   }
@@ -105,15 +93,29 @@ export class ProfileContextManager {
     const registry = await loadOrCreate(this.profileDir);
     const index = registry.contexts.findIndex((row) => row.context_id === id && row.status !== 'RETIRED');
     if (index < 0) throw new Error('context_not_found');
+    if (registry.contexts[index].status === 'CLOSING' || registry.contexts[index].status === 'CLOSE_AMBIGUOUS') throw new Error('context_close_reconciliation_required');
+
     const binding = this.bindings.get(id);
-    let physicalDisposed = false;
-    if (binding) {
-      await this.cdp.call('Target.disposeBrowserContext', { browserContextId: binding.cdp_browser_context_id });
-      this.bindings.delete(id);
-      physicalDisposed = true;
+    registry.contexts[index] = { ...registry.contexts[index], status: 'CLOSING', updated_at: now() };
+    await save(this.profileDir, registry);
+
+    if (!binding) {
+      registry.contexts[index] = { ...registry.contexts[index], status: 'RETIRED', updated_at: now() };
+      await save(this.profileDir, registry);
+      return { context_id: id, closed: true, physical_disposed: false };
     }
+
+    try {
+      await this.cdp.call('Target.disposeBrowserContext', { browserContextId: binding.cdp_browser_context_id });
+    } catch (_) {
+      registry.contexts[index] = { ...registry.contexts[index], status: 'CLOSE_AMBIGUOUS', updated_at: now() };
+      await save(this.profileDir, registry).catch(() => {});
+      throw new Error('context_close_ambiguous_no_retry');
+    }
+
+    this.bindings.delete(id);
     registry.contexts[index] = { ...registry.contexts[index], status: 'RETIRED', updated_at: now() };
     await save(this.profileDir, registry);
-    return { context_id: id, closed: true, physical_disposed: physicalDisposed };
+    return { context_id: id, closed: true, physical_disposed: true };
   }
 }
