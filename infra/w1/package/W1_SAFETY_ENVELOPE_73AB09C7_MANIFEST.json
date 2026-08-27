@@ -1,0 +1,44 @@
+{
+  "authority": {
+    "authority_effect": false,
+    "canonical": false,
+    "database_mutation": false,
+    "provider_mutation": false,
+    "reboot_authorized": false,
+    "w1_verified": false,
+    "worker_admitted": false
+  },
+  "execution_user": "metaengine-w1",
+  "files": [
+    {
+      "git_blob_sha1": "778c10804a7e8d8400a8c830f336dc53d1f8b790",
+      "path": "worker/native_linux/host_safety_envelope_probe.py"
+    },
+    {
+      "git_blob_sha1": "c35f1f5cf999badca23f04cd14938a8b885df382",
+      "path": "controller/w1/host_safety_envelope_validator.py"
+    },
+    {
+      "git_blob_sha1": "bb66341c96c75eb7ece18432ead122f8da53df55",
+      "path": "controller/w1/host_safety_evidence_bundle.py"
+    }
+  ],
+  "ownership": {
+    "package_gid": 0,
+    "package_tree_group_world_writable": false,
+    "package_uid": 0,
+    "workspace_group_world_writable": false,
+    "workspace_owned_by_execution_user": true
+  },
+  "package_id": "w1-safety-envelope-73ab09c7",
+  "package_root": "/opt/metaengine/w1/safety/73ab09c75b71a6ea40f11e953cbcf9d9b94b9a89",
+  "schema": "metaengine.compute.w1-host-safety-package-manifest.h205f22.v1",
+  "source_commit_sha": "73ab09c75b71a6ea40f11e953cbcf9d9b94b9a89",
+  "source_tree_sha": "c8ae850c8ce2ab9f688ae0525cbce55d39186d78",
+  "transport": {
+    "nested_document_allowed": false,
+    "network_fetch_allowed": false,
+    "runtime_parameters_allowed": false
+  },
+  "workspace_root": "/var/lib/metaengine/w1/workspace"
+}
