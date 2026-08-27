@@ -43,6 +43,13 @@ const chrome = {
   storage: { local: { async set() {} } }
 };
 
+function simulateExternalDetach(tabId, reason = 'canceled_by_user') {
+  // Chrome has already removed the debugger attachment when onDetach fires.
+  // Keep the mock's physical attachment model consistent with that API contract.
+  attached.delete(tabId);
+  for (const listener of detachListeners) listener({ tabId }, reason);
+}
+
 const context = vm.createContext({
   chrome,
   globalThis: null,
@@ -122,7 +129,7 @@ failAttachFor = null;
 // External DevTools detach invalidates generation and every previously-issued lease.
 const staleLease = await hold(3, 'detach-event');
 const generationBeforeDetach = staleLease.generation;
-for (const listener of detachListeners) listener({ tabId: 3 }, 'canceled_by_user');
+simulateExternalDetach(3, 'canceled_by_user');
 const detached = status().find((row) => row.tab_id === 3);
 assert.equal(detached?.attached, false);
 assert.equal(detached?.hold_count, 0);
@@ -132,11 +139,13 @@ await assert.rejects(() => staleLease.send('Runtime.enable'), /debugger_broker_l
 // Fresh generation can recover, then removed tab drops broker state entirely.
 await run(3, 'post-detach-recovery', (session) => session.send('Runtime.enable'));
 for (const listener of removedListeners) listener(3);
+attached.delete(3); // browser tab removal also removes the underlying debugger target.
 assert.ok(!status().some((row) => row.tab_id === 3));
 
 console.log('A2 v0.6 Debugger Broker Lab: PASS', JSON.stringify({
   attach_calls: attachCalls,
   detach_calls: detachCalls,
   child_session_tested: true,
-  stale_lease_rejected: true
+  stale_lease_rejected: true,
+  external_detach_physical_state_modeled: true
 }));
