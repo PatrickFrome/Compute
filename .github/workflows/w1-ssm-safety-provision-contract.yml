@@ -9,6 +9,9 @@ on:
       - 'controller/w1/build_host_safety_package.py'
       - 'controller/w1/build_ssm_safety_provision_document.py'
       - 'controller/w1/aws_ssm_safety_provision_guard.py'
+      - 'controller/w1/aws_ssm_safety_provision_provenance.py'
+      - 'controller/w1/aws_instance_identity_verifier.py'
+      - 'controller/w1/aws_provider_reboot_controller.py'
       - 'controller/w1/host_safety_evidence_bundle.py'
       - 'controller/w1/host_safety_envelope_validator.py'
       - 'worker/native_linux/host_safety_envelope_probe.py'
@@ -16,14 +19,19 @@ on:
       - 'tests/test_w1_host_safety_package_builder.py'
       - 'tests/test_w1_ssm_safety_provision_document.py'
       - 'tests/test_w1_aws_ssm_safety_provision_guard.py'
+      - 'tests/test_w1_aws_ssm_safety_provision_provenance.py'
       - '.github/workflows/w1-ssm-safety-provision-contract.yml'
       - 'research/W1_SSM_SAFETY_PROVISIONING.md'
+      - 'research/W1_SSM_PROVISIONING_PROVENANCE.md'
   pull_request:
     branches: [main]
     paths:
       - 'controller/w1/build_host_safety_package.py'
       - 'controller/w1/build_ssm_safety_provision_document.py'
       - 'controller/w1/aws_ssm_safety_provision_guard.py'
+      - 'controller/w1/aws_ssm_safety_provision_provenance.py'
+      - 'controller/w1/aws_instance_identity_verifier.py'
+      - 'controller/w1/aws_provider_reboot_controller.py'
       - 'controller/w1/host_safety_evidence_bundle.py'
       - 'controller/w1/host_safety_envelope_validator.py'
       - 'worker/native_linux/host_safety_envelope_probe.py'
@@ -31,8 +39,10 @@ on:
       - 'tests/test_w1_host_safety_package_builder.py'
       - 'tests/test_w1_ssm_safety_provision_document.py'
       - 'tests/test_w1_aws_ssm_safety_provision_guard.py'
+      - 'tests/test_w1_aws_ssm_safety_provision_provenance.py'
       - '.github/workflows/w1-ssm-safety-provision-contract.yml'
       - 'research/W1_SSM_SAFETY_PROVISIONING.md'
+      - 'research/W1_SSM_PROVISIONING_PROVENANCE.md'
   workflow_dispatch:
 
 permissions:
@@ -59,7 +69,10 @@ jobs:
           python3 -m py_compile \
             controller/w1/build_host_safety_package.py \
             controller/w1/build_ssm_safety_provision_document.py \
-            controller/w1/aws_ssm_safety_provision_guard.py
+            controller/w1/aws_ssm_safety_provision_guard.py \
+            controller/w1/aws_ssm_safety_provision_provenance.py \
+            controller/w1/aws_instance_identity_verifier.py \
+            controller/w1/aws_provider_reboot_controller.py
 
       - name: Run provisioning adversarial tests
         run: |
@@ -67,7 +80,8 @@ jobs:
           python3 -m unittest \
             tests.test_w1_host_safety_package_builder \
             tests.test_w1_ssm_safety_provision_document \
-            tests.test_w1_aws_ssm_safety_provision_guard -v
+            tests.test_w1_aws_ssm_safety_provision_guard \
+            tests.test_w1_aws_ssm_safety_provision_provenance -v
 
       - name: Prove deterministic parameterless document
         run: |
@@ -120,6 +134,27 @@ jobs:
           assert boundary['w1_verified'] is False
           assert boundary['authority_effect'] is False
           print('W1 SSM provisioning least-authority boundary: PASS')
+          PY
+
+      - name: Prove independent verifier has zero mutation authority
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from controller.w1 import aws_ssm_safety_provision_provenance as p
+          boundary=p.build_verifier_session_boundary(account_id='123456789012',region='us-east-2')
+          policy=json.dumps(boundary['session_policy'],sort_keys=True)
+          for required in ('ec2:DescribeInstances','ssm:DescribeInstanceInformation','ssm:GetDocument','ssm:GetCommandInvocation','cloudtrail:LookupEvents'):
+              assert required in policy, required
+          for forbidden in ('ssm:SendCommand','ssm:StartSession','ssm:CreateDocument','ssm:UpdateDocument','ssm:DeleteDocument','ec2:RebootInstances','ec2:RunInstances','ec2:TerminateInstances','s3:','kms:','secretsmanager:'):
+              assert forbidden not in policy, forbidden
+          assert boundary['send_command_allowed'] is False
+          assert boundary['reboot_allowed'] is False
+          assert boundary['database_mutation_allowed'] is False
+          assert boundary['package_provisioning_verified'] is False
+          assert boundary['w1_verified'] is False
+          assert boundary['authority_effect'] is False
+          print('W1 independent provisioning verifier mutation authority: NONE')
           PY
 
       - name: Extract reviewed fixed command from generated document
