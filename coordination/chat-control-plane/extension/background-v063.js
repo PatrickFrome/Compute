@@ -3,7 +3,7 @@
 
   const bootstrap = globalThis.A2_BRIDGE_BOOTSTRAP || {};
   const ORDERING_POLICY = "STRICT_GLM_FIRST_ACTUATED_V1";
-  const OPERATOR_RUNTIME = "0.6.3-supervisor-fsm-dev.1";
+  const OPERATOR_RUNTIME = "0.6.3-supervisor-authority-dev.2";
   const DEFAULTS = Object.freeze({
     daemonUrl: String(bootstrap.daemonUrl || "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-chat-bridge-remote"),
     armed: false,
@@ -16,6 +16,9 @@
   const COMPLETED_KEY = "a2BridgeCompletedCommandsV0523";
   const PENDING_KEY = "a2BridgePendingCommandV0523";
   const PREDECESSOR_KEY = "a2BridgeGlmActuatedPredecessorV0523";
+  const SUPERVISOR_CHAT_URL_KEY = "a2SupervisorChatUrlV1";
+  const SUPERVISOR_CHAT_TAB_KEY = "a2SupervisorChatTabIdV1";
+  const SUPERVISOR_SNAPSHOT_KEY = "a2SupervisorChatSnapshotV1";
   const MAX_COMPLETED = 512;
   const EXECUTION_CLASSES = new Set(["SAFE_RETRY_PRE_ACTUATION","AMBIGUOUS_NO_RETRY","ACTUATED","VERIFIED","BLOCKED"]);
   const inFlight = new Set();
@@ -73,6 +76,45 @@
       await chrome.storage.local.set({daemonLastError:String(error?.message||error),daemonLastErrorAt:new Date().toISOString()});
     }
   }
+
+  async function ingestContentSnapshot(senderTab,snapshot) {
+    const tabId=Number(senderTab?.id);
+    const senderUrl=normUrl(senderTab?.url||"");
+    const senderPlatform=platformOf(senderTab?.url||"");
+    const claimedPlatform=String(snapshot?.platform||"UNKNOWN");
+    if(!Number.isInteger(tabId)||!senderUrl||senderPlatform==="UNKNOWN")return{accepted:false,role:"UNMANAGED",reason:"sender_invalid"};
+    if(claimedPlatform!==senderPlatform)return{accepted:false,role:"UNMANAGED",reason:"platform_mismatch"};
+
+    const s=await settings();
+    const operatorUrl=senderPlatform==="CHATGPT"?normUrl(s.chatgptUrl):senderPlatform==="GLM_ZAI"?normUrl(s.zaiUrl):"";
+    if(operatorUrl&&senderUrl===operatorUrl){
+      await reportSnapshot(tabId,snapshot);
+      return{accepted:true,role:"OPERATOR",platform:senderPlatform};
+    }
+
+    if(senderPlatform==="CHATGPT"){
+      const tagged=await chrome.storage.local.get([SUPERVISOR_CHAT_URL_KEY,SUPERVISOR_CHAT_TAB_KEY]);
+      const supervisorUrl=normUrl(tagged[SUPERVISOR_CHAT_URL_KEY]||"");
+      const supervisorTabId=Number(tagged[SUPERVISOR_CHAT_TAB_KEY]);
+      const tabTagged=Number.isInteger(supervisorTabId)&&supervisorTabId===tabId;
+      const urlTagged=Boolean(supervisorUrl)&&supervisorUrl===senderUrl;
+      if((tabTagged&&(!supervisorUrl||urlTagged))||urlTagged){
+        await chrome.storage.session.set({
+          [SUPERVISOR_SNAPSHOT_KEY]:{
+            schema:"metaengine.a2-browser-supervisor.chat-snapshot.v1",
+            tab_id:tabId,
+            url:senderUrl,
+            observed_at:new Date().toISOString(),
+            snapshot
+          }
+        });
+        return{accepted:true,role:"SUPERVISOR",platform:"CHATGPT"};
+      }
+    }
+
+    return{accepted:false,role:"UNMANAGED",reason:"unmanaged_tab"};
+  }
+
   async function snapshotEnvelopes() {
     const x=await chrome.storage.local.get(["snapshot:CHATGPT","snapshot:GLM_ZAI"]);
     return [x["snapshot:CHATGPT"],x["snapshot:GLM_ZAI"]].filter((v)=>v?.snapshot);
@@ -318,7 +360,13 @@
     if(changes.armed||changes.chatgptUrl||changes.zaiUrl||changes.daemonUrl||changes.pollMs){await badge();await poll(true);}
   });
   chrome.runtime.onMessage.addListener((m,sender,sendResponse)=>{
-    if(m?.type==="CHAT_SNAPSHOT"&&sender.tab?.id&&m.snapshot){reportSnapshot(sender.tab.id,m.snapshot).then(()=>poll(false)).then(()=>sendResponse({ok:true})).catch((e)=>sendResponse({ok:false,error:String(e?.message||e)}));return true;}
+    if(m?.type==="CHAT_SNAPSHOT"&&sender.tab?.id&&m.snapshot){
+      ingestContentSnapshot(sender.tab,m.snapshot)
+        .then((result)=>result.role==="OPERATOR"?poll(false).then(()=>result):result)
+        .then((result)=>sendResponse({ok:true,...result}))
+        .catch((e)=>sendResponse({ok:false,error:String(e?.message||e)}));
+      return true;
+    }
     if(m?.type==="BRIDGE_POLL_NOW"){directPoll().then((result)=>sendResponse({ok:true,result})).catch((e)=>sendResponse({ok:false,error:String(e?.message||e)}));return true;}
     if(m?.type==="A2_PAIRING_STATUS"){Promise.resolve(globalThis.A2_HAS_PAIRING_SECRET?.()).then((has)=>sendResponse({ok:true,configured:has===true})).catch((e)=>sendResponse({ok:false,error:String(e?.message||e)}));return true;}
     if(m?.type==="A2_SET_PAIRING_SECRET"){Promise.resolve(globalThis.A2_SET_PAIRING_SECRET?.(m.secret)).then(()=>sendResponse({ok:true})).catch((e)=>sendResponse({ok:false,error:String(e?.message||e)}));return true;}
