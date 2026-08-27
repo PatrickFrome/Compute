@@ -2,7 +2,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ManagedChromeProcess } from './chrome-process.mjs';
-import { atomicJsonWrite, defaultStateRoot, ensurePrivateDir, readJson, validateNavigationUrl, validateProfileId, validateTargetId } from './security.mjs';
+import { CONTEXT_KIND, DEFAULT_CONTEXT_ID, ProfileContextManager } from './context-manager.mjs';
+import { atomicJsonWrite, defaultStateRoot, ensurePrivateDir, readJson, validateContextId, validateNavigationUrl, validateProfileId, validateTargetId } from './security.mjs';
 
 const PROFILE_META = 'a2-profile.json';
 const TARGETS_FILE = 'targets.json';
@@ -72,8 +73,18 @@ export class ComputeBrowserRuntime {
     return meta;
   }
 
-  async #acquireProfileLock(profileId) {
-    return acquirePidLock(path.join(this.profileDir(profileId), PROFILE_LOCK_FILE), 'profile_runtime');
+  async #acquireProfileLock(profileId) { return acquirePidLock(path.join(this.profileDir(profileId), PROFILE_LOCK_FILE), 'profile_runtime'); }
+
+  #runningEntry(profileId) {
+    const id = validateProfileId(profileId);
+    const entry = this.running.get(id);
+    if (!entry?.processRef?.cdp) throw new Error('profile_not_running');
+    return { id, entry };
+  }
+
+  #contextManager(profileId) {
+    const { id, entry } = this.#runningEntry(profileId);
+    return { id, entry, manager: new ProfileContextManager({ profileDir: this.profileDir(id), cdp: entry.processRef.cdp, bindings: entry.contextBindings }) };
   }
 
   async startProfile({ profileId } = {}) {
@@ -94,10 +105,13 @@ export class ComputeBrowserRuntime {
     const processRef = new ManagedChromeProcess({ executablePath: this.engineExecutable, userDataDir, headless: this.headlessDefault, allowNoSandbox: this.allowNoSandbox });
     try {
       await processRef.start();
-      this.running.set(id, { processRef, meta, lockFile, bindings: new Map() });
+      const entry = { processRef, meta, lockFile, bindings: new Map(), contextBindings: new Map() };
+      this.running.set(id, entry);
+      await new ProfileContextManager({ profileDir: this.profileDir(id), cdp: processRef.cdp, bindings: entry.contextBindings }).ensure();
       return this.profileHealth(id);
     } catch (error) {
       await processRef.stop().catch(() => {});
+      this.running.delete(id);
       await releaseOwnedPidLock(lockFile);
       throw error;
     }
@@ -134,6 +148,32 @@ export class ComputeBrowserRuntime {
     return out.sort((a, b) => a.profile_id.localeCompare(b.profile_id));
   }
 
+  async createContext({ profileId, contextId = null, kind = CONTEXT_KIND.EPHEMERAL_ISOLATED } = {}) {
+    const { manager } = this.#contextManager(profileId);
+    return manager.create({ contextId, kind });
+  }
+
+  async listContexts(profileId, { includeRetired = false } = {}) {
+    const { manager } = this.#contextManager(profileId);
+    return manager.list({ includeRetired });
+  }
+
+  async closeContext({ profileId, contextId } = {}) {
+    const { id, entry, manager } = this.#contextManager(profileId);
+    const logicalId = validateContextId(contextId);
+    const result = await manager.close(logicalId);
+    const registry = await this.#loadTargets(id);
+    let changed = false;
+    registry.targets = registry.targets.map((target) => {
+      if (target.context_id !== logicalId || target.status === 'RETIRED') return target;
+      changed = true;
+      entry.bindings.delete(target.target_id);
+      return { ...target, status: 'RETIRED', updated_at: now() };
+    });
+    if (changed) await this.#saveTargets(id, registry);
+    return result;
+  }
+
   async #loadTargets(profileId) { return readJson(path.join(this.profileDir(profileId), TARGETS_FILE), blankRegistry()); }
   async #saveTargets(profileId, registry) {
     registry.revision = Number(registry.revision || 0) + 1;
@@ -141,25 +181,23 @@ export class ComputeBrowserRuntime {
     await atomicJsonWrite(path.join(this.profileDir(profileId), TARGETS_FILE), registry);
   }
 
-  #runningEntry(profileId) {
-    const id = validateProfileId(profileId);
-    const entry = this.running.get(id);
-    if (!entry?.processRef?.cdp) throw new Error('profile_not_running');
-    return { id, entry };
-  }
-
-  async createTarget({ profileId, targetId = null, role = 'WORKER', url = 'about:blank' } = {}) {
-    const { id, entry } = this.#runningEntry(profileId);
+  async createTarget({ profileId, targetId = null, contextId = DEFAULT_CONTEXT_ID, role = 'WORKER', url = 'about:blank' } = {}) {
+    const { id, entry, manager } = this.#contextManager(profileId);
     const registry = await this.#loadTargets(id);
     const logicalId = targetId ? validateTargetId(targetId) : `browser_${crypto.randomUUID().replaceAll('-', '').slice(0, 20)}`;
+    const logicalContextId = validateContextId(contextId || DEFAULT_CONTEXT_ID);
     if (registry.targets.some((row) => row.target_id === logicalId && row.status !== 'RETIRED')) throw new Error('target_id_exists');
     const navUrl = validateNavigationUrl(url);
     if (navUrl !== 'about:blank') throw new Error('b1_remote_navigation_not_enabled');
-    const created = await entry.processRef.cdp.call('Target.createTarget', { url: navUrl });
+    const browserContextId = manager.resolvePhysical(logicalContextId);
+    const createParams = { url: navUrl };
+    if (browserContextId) createParams.browserContextId = browserContextId;
+    const created = await entry.processRef.cdp.call('Target.createTarget', createParams);
     if (!created.targetId) throw new Error('cdp_target_create_failed');
     const previous = registry.targets.find((row) => row.target_id === logicalId);
     const target = {
-      schema: 'metaengine.a2-browser-operator.target.v1', target_id: logicalId, provider: 'BROWSER', platform: 'COMPUTE_BROWSER', surface: 'WEB',
+      schema: 'metaengine.a2-browser-operator.target.v1', target_id: logicalId, context_id: logicalContextId,
+      provider: 'BROWSER', platform: 'COMPUTE_BROWSER', surface: 'WEB',
       role: String(role || 'WORKER').toUpperCase().replace(/[^A-Z0-9_:-]+/g, '_').slice(0, 64),
       conversation_epoch: Math.max(1, Number(previous?.conversation_epoch || 0) + 1), conversation_url: navUrl, status: 'ACTIVE',
       created_at: previous?.created_at || now(), updated_at: now()
@@ -167,7 +205,7 @@ export class ComputeBrowserRuntime {
     registry.targets = registry.targets.filter((row) => row.target_id !== logicalId);
     registry.targets.push(target);
     await this.#saveTargets(id, registry);
-    entry.bindings.set(logicalId, { cdp_target_id: created.targetId, bound_at: now(), conversation_epoch: target.conversation_epoch });
+    entry.bindings.set(logicalId, { cdp_target_id: created.targetId, context_id: logicalContextId, bound_at: now(), conversation_epoch: target.conversation_epoch });
     return { ...target, bound: true };
   }
 
@@ -207,9 +245,9 @@ export class ComputeBrowserRuntime {
     const profiles = [];
     for (const id of this.running.keys()) profiles.push(await this.profileHealth(id));
     return {
-      schema: 'metaengine.a2-compute-browser.health.v1', runtime: '0.1.0-dev.3', started_at: this.startedAt,
+      schema: 'metaengine.a2-compute-browser.health.v1', runtime: '0.2.0-dev.1', started_at: this.startedAt,
       web_authority_effect: false, local_effects_present: true, raw_cdp_rpc_exposed: false,
-      debug_transport: 'native_pipe_b3', devtools_tcp_exposed: false, profiles
+      debug_transport: 'native_pipe_b3', devtools_tcp_exposed: false, context_manager: 'b2_logical_context_v1', profiles
     };
   }
 
