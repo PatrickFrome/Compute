@@ -1,0 +1,254 @@
+const SUPABASE_URL = (Deno.env.get("SUPABASE_URL") || "").replace(/\/+$/, "");
+const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+const WORKSPACE_ID = "2de9f84b-7c0a-4091-911c-894ff1d6eaf4";
+const PAIRING_TABLE = "compute_fabric_a2_chat_bridge_remote_pairing_h205f22";
+const STATE_TABLE = "compute_fabric_a2_browser_supervisor_state_h205f22";
+const COMMAND_TABLE = "compute_fabric_a2_browser_supervisor_command_h205f22";
+const LEASE_TIMEOUT_SECONDS = 120;
+
+const cors = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET,POST,OPTIONS",
+  "access-control-allow-headers": "content-type,x-a2-chat-bridge-secret,x-a2-chat-bridge-client",
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff"
+};
+
+function json(status: number, body: unknown) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...cors, "content-type": "application/json; charset=utf-8" }
+  });
+}
+
+function restHeaders(extra: Record<string, string> = {}) {
+  if (!SERVICE_ROLE) throw new Error("service_role_missing");
+  return {
+    apikey: SERVICE_ROLE,
+    authorization: `Bearer ${SERVICE_ROLE}`,
+    "content-type": "application/json",
+    ...extra
+  };
+}
+
+async function rest(path: string, init: RequestInit = {}) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...init,
+    headers: restHeaders((init.headers as Record<string, string>) || {})
+  });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`rest_${r.status}`);
+  return text ? JSON.parse(text) : null;
+}
+
+async function rpc(name: string, args: unknown) {
+  return rest(`rpc/${encodeURIComponent(name)}`, {
+    method: "POST",
+    body: JSON.stringify(args)
+  });
+}
+
+async function sha256(value: unknown) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(String(value ?? ""))
+  );
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function authenticate(req: Request) {
+  const token = String(req.headers.get("x-a2-chat-bridge-secret") || "");
+  if (token.length < 32) return false;
+  const hash = await sha256(token);
+  const rows = await rest(
+    `${PAIRING_TABLE}?token_hash=eq.${hash}&active=eq.true&select=token_hash&limit=1`
+  );
+  return Array.isArray(rows) && rows.length === 1;
+}
+
+function clientId(req: Request) {
+  return String(req.headers.get("x-a2-chat-bridge-client") || "")
+    .trim()
+    .slice(0, 160);
+}
+
+function boundedState(input: any) {
+  const state = input && typeof input === "object" ? input : {};
+  const events = Array.isArray(state.events) ? state.events.slice(-30) : [];
+  const semantic = Array.isArray(state.semantic_targets)
+    ? state.semantic_targets.slice(0, 60)
+    : [];
+  return {
+    schema: "metaengine.a2-browser-supervisor.state.v3",
+    operator_runtime: String(state.operator_runtime || "").slice(0, 80),
+    extension_version: String(state.extension_version || "").slice(0, 32),
+    armed: state.armed === true,
+    operator_mode: String(state.operator_mode || "").slice(0, 32),
+    supervisor_mode: String(state.supervisor_mode || "OFF").slice(0, 16),
+    ordering_policy: String(state.ordering_policy || "").slice(0, 80),
+    bridge: {
+      online_at: state.bridge?.online_at || null,
+      error: String(state.bridge?.error || "").slice(0, 240),
+      command_fetch_suppressed:
+        String(state.bridge?.command_fetch_suppressed || "").slice(0, 40) || null
+    },
+    peers: state.peers && typeof state.peers === "object" ? state.peers : {},
+    ordering:
+      state.ordering && typeof state.ordering === "object" ? state.ordering : {},
+    perception:
+      state.perception && typeof state.perception === "object" ? state.perception : {},
+    semantic_targets: semantic,
+    prompt_intent:
+      state.prompt_intent && typeof state.prompt_intent === "object"
+        ? state.prompt_intent
+        : null,
+    current_supervisor_command:
+      state.current_supervisor_command && typeof state.current_supervisor_command === "object"
+        ? state.current_supervisor_command
+        : null,
+    events
+  };
+}
+
+async function upsertState(req: Request, body: any) {
+  const id = clientId(req);
+  if (!id) throw new Error("client_id_required");
+  const s = boundedState(body?.state || {});
+  const row = {
+    client_id: id,
+    workspace_id: WORKSPACE_ID,
+    last_seen_at: new Date().toISOString(),
+    extension_version: s.extension_version || null,
+    operator_runtime: s.operator_runtime || null,
+    supervisor_mode: ["OFF", "MONITOR", "CONTROL"].includes(s.supervisor_mode)
+      ? s.supervisor_mode
+      : "OFF",
+    armed: s.armed,
+    operator_mode: s.operator_mode || null,
+    ordering_policy: s.ordering_policy || null,
+    last_command_id: body?.last_command_id || null,
+    last_command_status: body?.last_command_status || null,
+    state: s,
+    authority_effect: false
+  };
+  await rest(`${STATE_TABLE}?on_conflict=client_id`, {
+    method: "POST",
+    headers: { prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify(row)
+  });
+  return row;
+}
+
+async function lease(req: Request) {
+  const id = clientId(req);
+  if (!id) throw new Error("client_id_required");
+  return rpc("h205f22_a2_browser_supervisor_lease_v2", {
+    p_workspace_id: WORKSPACE_ID,
+    p_client_id: id,
+    p_lease_timeout_seconds: LEASE_TIMEOUT_SECONDS
+  });
+}
+
+async function bootstrapLease(req: Request) {
+  const id = clientId(req);
+  if (!id) throw new Error("client_id_required");
+  return rpc("h205f22_a2_browser_supervisor_lease_bootstrap_v3", {
+    p_workspace_id: WORKSPACE_ID,
+    p_client_id: id,
+    p_lease_timeout_seconds: LEASE_TIMEOUT_SECONDS
+  });
+}
+
+async function result(req: Request, commandId: string, body: any) {
+  const id = clientId(req);
+  if (!id) throw new Error("client_id_required");
+  const rows = await rest(
+    `${COMMAND_TABLE}?command_id=eq.${encodeURIComponent(commandId)}&select=command_id,status,leased_by&limit=1`
+  );
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (!row) return json(404, { error: "command_not_found" });
+  if (row.leased_by !== id) return json(409, { error: "supervisor_lease_owner_mismatch" });
+  if (row.status !== "LEASED") return json(409, { error: "supervisor_command_not_leased" });
+  const ok = body?.ok === true;
+  const receipt = body?.receipt && typeof body.receipt === "object" ? body.receipt : {};
+  await rest(`${COMMAND_TABLE}?command_id=eq.${encodeURIComponent(commandId)}`, {
+    method: "PATCH",
+    headers: { prefer: "return=minimal" },
+    body: JSON.stringify({
+      status: ok ? "COMPLETED" : "FAILED",
+      completed_at: new Date().toISOString(),
+      receipt,
+      error: ok
+        ? null
+        : String(body?.error || receipt?.error || "command_failed").slice(0, 500)
+    })
+  });
+  return json(200, {
+    accepted: true,
+    status: ok ? "COMPLETED" : "FAILED",
+    authority_effect: false
+  });
+}
+
+async function status() {
+  const states = await rest(
+    `${STATE_TABLE}?workspace_id=eq.${WORKSPACE_ID}&select=*&order=last_seen_at.desc&limit=8`
+  );
+  const commands = await rest(
+    `${COMMAND_TABLE}?workspace_id=eq.${WORKSPACE_ID}&select=command_id,idempotency_key,action,platform,status,issued_by,issued_at,expires_at,leased_by,leased_at,completed_at,receipt,error&order=issued_at.desc&limit=30`
+  );
+  return {
+    schema: "metaengine.a2-browser-supervisor.status.v3",
+    workspace_id: WORKSPACE_ID,
+    lease_timeout_seconds: LEASE_TIMEOUT_SECONDS,
+    states,
+    commands,
+    authority_effect: false
+  };
+}
+
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+  const url = new URL(req.url);
+  const marker = "/a2-browser-supervisor-v3-canary";
+  const i = url.pathname.indexOf(marker);
+  const path = i >= 0 ? url.pathname.slice(i + marker.length) || "/" : url.pathname;
+
+  try {
+    if (req.method === "GET" && path === "/health") {
+      return json(200, {
+        ok: true,
+        schema: "metaengine.a2-browser-supervisor.health.v3",
+        lease_rpc: "h205f22_a2_browser_supervisor_lease_v2",
+        bootstrap_lease_rpc: "h205f22_a2_browser_supervisor_lease_bootstrap_v3"
+      });
+    }
+    if (!(await authenticate(req))) return json(401, { error: "supervisor_pairing_required" });
+    if (req.method === "POST" && path === "/v1/state") {
+      return json(202, {
+        accepted: true,
+        state: await upsertState(req, await req.json().catch(() => ({}))),
+        authority_effect: false
+      });
+    }
+    if (req.method === "POST" && path === "/v1/commands/bootstrap-next") {
+      return json(200, await bootstrapLease(req));
+    }
+    if (req.method === "POST" && path === "/v1/commands/next") {
+      return json(200, await lease(req));
+    }
+    const match = path.match(/^\/v1\/commands\/([^/]+)\/result$/);
+    if (req.method === "POST" && match) {
+      return result(req, decodeURIComponent(match[1]), await req.json().catch(() => ({})));
+    }
+    if (req.method === "GET" && path === "/v1/status") {
+      return json(200, await status());
+    }
+    return json(404, { error: "not_found" });
+  } catch (error) {
+    console.error("a2_browser_supervisor_v3_failure", String((error as Error)?.message || error));
+    return json(502, { error: "supervisor_v3_failure" });
+  }
+});
