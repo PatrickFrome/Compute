@@ -34,6 +34,21 @@ class W1EffectiveExecutionPreflightSqlContractTests(unittest.TestCase):
         ):
             self.assertIn(token, self.text)
 
+    def test_directive_kind_is_explicit_execution_gate(self):
+        self.assertIn(
+            "'directive_kind_allows_execution',v_directive.directive_kind in ('OPEN','CONTINUE','REASSIGN')",
+            self.text,
+        )
+        self.assertIn("'directive_kind',v_directive.directive_kind", self.text)
+
+    def test_null_valued_checks_become_false_without_json_null_cast_exception(self):
+        self.assertIn(
+            "bool_and(coalesce((value #>> '{}')::boolean,false))",
+            self.text,
+        )
+        self.assertNotIn("bool_and(value::boolean)", self.text)
+        self.assertIn("jsonb_build_object represents SQL NULL as JSON null", self.text)
+
     def test_exact_identity_and_semantic_head_alignment_are_required(self):
         for token in (
             "v_claim.roadmap_id='compute-fabric-roadmap-v1'",
