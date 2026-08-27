@@ -97,8 +97,8 @@
       const supervisorUrl=normUrl(tagged[SUPERVISOR_CHAT_URL_KEY]||"");
       const supervisorTabId=Number(tagged[SUPERVISOR_CHAT_TAB_KEY]);
       const tabTagged=Number.isInteger(supervisorTabId)&&supervisorTabId===tabId;
-      const urlTagged=Boolean(supervisorUrl)&&supervisorUrl===senderUrl;
-      if((tabTagged&&(!supervisorUrl||urlTagged))||urlTagged){
+      const urlConsistent=!supervisorUrl||supervisorUrl===senderUrl;
+      if(tabTagged&&urlConsistent){
         await chrome.storage.session.set({
           [SUPERVISOR_SNAPSHOT_KEY]:{
             schema:"metaengine.a2-browser-supervisor.chat-snapshot.v1",
@@ -110,6 +110,7 @@
         });
         return{accepted:true,role:"SUPERVISOR",platform:"CHATGPT"};
       }
+      if(supervisorUrl===senderUrl&&!tabTagged)return{accepted:false,role:"UNMANAGED",reason:"supervisor_tab_id_mismatch"};
     }
 
     return{accepted:false,role:"UNMANAGED",reason:"unmanaged_tab"};
