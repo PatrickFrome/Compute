@@ -1,0 +1,98 @@
+name: Main Roadmap Projection Guard
+
+on:
+  push:
+    branches:
+      - work/main-roadmap-accelerators-v2
+      - work/main-roadmap-accelerators-v3
+    paths:
+      - 'controller/roadmap/**'
+      - 'tests/test_main_roadmap_cycle_oracle.py'
+      - 'tests/test_main_roadmap_projection_guard.py'
+      - 'tests/fixtures/main_roadmap_live_snapshot_20260827.json'
+      - 'docs/ROADMAP_EXECUTION_PROTOCOL.md'
+      - 'research/main-roadmap-accelerators/**'
+      - '.github/workflows/main-roadmap-cycle-oracle.yml'
+      - '.github/workflows/main-roadmap-projection-guard.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  projection-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - name: Checkout exact revision without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Fetch exact comparison rails
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main work/main-roadmap-accelerators-v1
+
+      - name: Compile roadmap guards
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            controller/roadmap/roadmap_cycle_oracle.py \
+            controller/roadmap/roadmap_projection_guard.py
+
+      - name: Run roadmap oracle and projection adversarial tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest \
+            tests.test_main_roadmap_cycle_oracle \
+            tests.test_main_roadmap_projection_guard -v
+
+      - name: Verify clean content-addressed projection
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          python3 controller/roadmap/roadmap_projection_guard.py \
+            --repo . \
+            --base-ref origin/main \
+            --projected-ref HEAD~1 \
+            --candidate-ref HEAD \
+            --source-parent-ref e7c4bac9f1d71f2bc967f533ec4572abf9c1e507 \
+            --source-commit-ref 17c9667651aee19a2207e8ade86451e17ed556fd \
+            --output evidence/main-roadmap-projection-receipt.json
+          cat evidence/main-roadmap-projection-receipt.json
+
+      - name: Prove PREP-only nonauthority boundary
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('controller/roadmap/roadmap_projection_guard.py').read_text(encoding='utf-8')
+          for marker in (
+              '"canonical": False',
+              '"authority_effect": False',
+              '"pr_merge_authorized": False',
+              '"checkpoint_promotion_authorized": False',
+              '"database_ddl_authorized": False',
+              '"edge_deployment_authorized": False',
+              '"provider_mutation_authorized": False',
+              '"milestone_acceptance_authorized": False',
+              'patch-id',
+              '--stable',
+              'range-diff',
+              'merge-base',
+              '--is-ancestor',
+          ):
+              assert marker in source, marker
+          print('main-roadmap projection nonauthority boundary: PASS')
+          PY
+
+      - name: Upload deterministic projection receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: main-roadmap-projection-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/main-roadmap-projection-receipt.json
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30

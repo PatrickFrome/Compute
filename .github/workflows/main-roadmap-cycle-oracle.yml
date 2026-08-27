@@ -4,14 +4,18 @@ on:
   push:
     branches:
       - work/main-roadmap-accelerators-v1
+      - work/main-roadmap-accelerators-v2
+      - work/main-roadmap-accelerators-v3
       - work/w1-sandbox-launcher-prep
     paths:
       - 'controller/roadmap/**'
       - 'tests/test_main_roadmap_cycle_oracle.py'
+      - 'tests/test_main_roadmap_projection_guard.py'
       - 'tests/fixtures/main_roadmap_live_snapshot_20260827.json'
       - 'docs/ROADMAP_EXECUTION_PROTOCOL.md'
       - 'research/main-roadmap-accelerators/**'
       - '.github/workflows/main-roadmap-cycle-oracle.yml'
+      - '.github/workflows/main-roadmap-projection-guard.yml'
   workflow_dispatch:
 
 permissions:
