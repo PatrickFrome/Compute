@@ -34,7 +34,13 @@
 
   const clip = (value, max = MAX_TEXT) => {
     const text = String(value ?? "");
-    return text.length <= max ? text : `${text.slice(0, max)}\n…[truncated ${text.length - max} chars]`;
+    const budget = Math.max(0, Number(max) || 0);
+    if (text.length <= budget) return text;
+    if (budget === 0) return "";
+    const marker = `…[truncated ${Math.max(0, text.length - budget)} chars]`;
+    if (marker.length >= budget) return text.slice(0, budget);
+    const head = Math.max(0, budget - marker.length - 1);
+    return `${text.slice(0, head)}\n${marker}`.slice(0, budget);
   };
 
   async function sha256Text(text) {
