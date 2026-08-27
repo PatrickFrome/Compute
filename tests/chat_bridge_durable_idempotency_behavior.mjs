@@ -1,121 +1,180 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
 
-const storage = new Map();
-globalThis.chrome = {
-  storage: {
-    local: {
-      async get(key) {
-        if (Array.isArray(key)) {
-          return Object.fromEntries(key.map((k) => [k, storage.get(k)]));
-        }
-        return { [key]: storage.get(key) };
-      },
-      async set(values) {
-        for (const [key, value] of Object.entries(values)) storage.set(key, value);
-      }
-    }
-  }
-};
+const source = fs.readFileSync('coordination/chat-control-plane/extension/background.js', 'utf8');
+const ZAI = 'https://chat.z.ai/c/restart-idempotency';
+const COMPLETED_KEY = 'a2BridgeCompletedCommandsV0523';
+const PENDING_KEY = 'a2BridgePendingCommandV0523';
+const storage = new Map([
+  ['armed', true],
+  ['autoOpenTabs', false],
+  ['pollMs', 2500],
+  ['chatgptUrl', ''],
+  ['zaiUrl', ZAI],
+  ['daemonUrl', 'https://example.invalid/a2']
+]);
 
-const nextResponses = [];
-const resultCalls = [];
-let failFirstVerifiedAck = true;
+const command = (id, idem) => ({
+  command_id: id,
+  idempotency_key: idem,
+  target_platform: 'GLM_ZAI',
+  prompt: 'A2 CHAT BRIDGE — AUTONOMOUS CONTINUE\nbridge_job_target=GLM',
+  launch_order: 1,
+  ordering_basis: 'GLM_FIRST',
+  predecessor_command_id: null,
+  authority_effect: false
+});
 
-globalThis.fetch = async (input, init = {}) => {
-  const url = typeof input === 'string' ? input : input?.url || String(input);
-  const method = String(init.method || 'GET').toUpperCase();
-  if (method === 'POST' && url.endsWith('/v1/commands/next')) {
-    const body = nextResponses.shift() || { command: null };
-    return new Response(JSON.stringify(body), {
-      status: 200,
-      headers: { 'content-type': 'application/json' }
-    });
-  }
-  if (method === 'POST' && /\/v1\/commands\/[^/]+\/result$/.test(url)) {
-    const body = JSON.parse(String(init.body || '{}'));
-    resultCalls.push({ url, body });
-    if (body.status === 'SENT_AND_DOM_VERIFIED' && failFirstVerifiedAck) {
-      failFirstVerifiedAck = false;
-      throw new Error('simulated_daemon_ack_loss');
-    }
-    return new Response(JSON.stringify({ accepted: true }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' }
-    });
-  }
-  throw new Error(`unexpected fetch ${method} ${url}`);
-};
-
-await import('../coordination/chat-control-plane/extension/durable-fetch.js?behavior-test=1');
-
-const BRIDGE_BASE = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-chat-bridge-remote';
-const NEXT_URL = `${BRIDGE_BASE}/v1/commands/next`;
-const next = () => ({ method: 'POST', body: JSON.stringify({ snapshots: [] }) });
-function command(commandId, idem) {
+function makeStorage() {
   return {
-    command_id: commandId,
-    idempotency_key: idem,
-    target_platform: 'GLM_ZAI',
-    prompt: 'continue'
+    async get(keys) {
+      if (keys == null) return Object.fromEntries(storage);
+      if (typeof keys === 'string') return { [keys]: storage.get(keys) };
+      const names = Array.isArray(keys) ? keys : Object.keys(keys || {});
+      const out = {};
+      for (const key of names) if (storage.has(key)) out[key] = storage.get(key);
+      return out;
+    },
+    async set(values) { for (const [key, value] of Object.entries(values || {})) storage.set(key, structuredClone(value)); },
+    async remove(keys) { for (const key of (Array.isArray(keys) ? keys : [keys])) storage.delete(key); }
   };
 }
 
-// 1) Lease a command and then lose the remote ACK after exact DOM verification.
-nextResponses.push({ command: command('cmd-1', 'idem-A') });
-let response = await fetch(NEXT_URL, next());
-let body = await response.json();
-assert.equal(body.command.command_id, 'cmd-1');
+function makeRuntime({ nextResponses, resultPolicy, trustedCounter, resultCalls }) {
+  const listeners = { installed: [], startup: [], alarm: [], action: [], storage: [], runtime: [] };
+  const chrome = {
+    storage: {
+      local: makeStorage(),
+      onChanged: { addListener(fn) { listeners.storage.push(fn); } }
+    },
+    action: {
+      async setBadgeText() {},
+      async setBadgeBackgroundColor() {},
+      async setTitle() {},
+      onClicked: { addListener(fn) { listeners.action.push(fn); } }
+    },
+    alarms: {
+      async create() {},
+      onAlarm: { addListener(fn) { listeners.alarm.push(fn); } }
+    },
+    tabs: {
+      async query() { return [{ id: 7, url: ZAI }]; },
+      async get(id) { assert.equal(id, 7); return { id: 7, url: ZAI }; },
+      async sendMessage(id, message) {
+        assert.equal(id, 7);
+        if (message?.type === 'GET_CHAT_SNAPSHOT') {
+          return { ok: true, snapshot: { platform: 'GLM_ZAI', generating: false, composer_text: '', message_count: 1, messages: [] } };
+        }
+        throw new Error(`unexpected tab message ${String(message?.type)}`);
+      },
+      async create() { throw new Error('unexpected tab create'); },
+      async update() { throw new Error('unexpected tab update'); }
+    },
+    runtime: {
+      onInstalled: { addListener(fn) { listeners.installed.push(fn); } },
+      onStartup: { addListener(fn) { listeners.startup.push(fn); } },
+      onMessage: { addListener(fn) { listeners.runtime.push(fn); } }
+    }
+  };
 
-await assert.rejects(
-  fetch(`${BRIDGE_BASE}/v1/commands/cmd-1/result`, {
-    method: 'POST',
-    body: JSON.stringify({
+  const context = vm.createContext({
+    chrome,
+    globalThis: null,
+    console,
+    URL,
+    Date,
+    Promise,
+    Response,
+    structuredClone,
+    setTimeout,
+    clearTimeout
+  });
+  context.globalThis = context;
+  context.A2_BRIDGE_BOOTSTRAP = { daemonUrl: 'https://example.invalid/a2' };
+  context.A2_SECRET_VAULT_READY = Promise.resolve();
+  context.A2_BRIDGE_CLIENT_ID = async () => 'restart-test-client';
+  context.A2_GLM_RECONCILE = async () => null;
+  context.A2_GLM_TRUSTED_SEND = async (_tabId, cmd) => {
+    trustedCounter.count += 1;
+    return {
+      ok: true,
       status: 'SENT_AND_DOM_VERIFIED',
+      execution_class: 'VERIFIED',
       clicked_send_button: true,
-      verification: { verified: true },
-      target_url: 'https://chat.z.ai/c/example'
-    })
-  }),
-  /simulated_daemon_ack_loss/
-);
+      verification: { verified: true, command_id: cmd.command_id },
+      transport_trace_id: 'a'.repeat(32)
+    };
+  };
+  context.A2_CHATGPT_TRUSTED_SEND = async () => { throw new Error('unexpected GPT send'); };
+  context.A2_BRIDGE_REQUEST = async (path, init = {}) => {
+    if (path === '/v1/snapshots') return new Response(JSON.stringify({ accepted: true }), { status: 202, headers: { 'content-type': 'application/json' } });
+    if (path === '/v1/commands/next') {
+      const body = nextResponses.shift() || { command: null, ordering_policy: 'STRICT_GLM_FIRST_ACTUATED_V1' };
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    const match = String(path).match(/^\/v1\/commands\/([^/]+)\/result$/);
+    if (match) {
+      const body = JSON.parse(String(init.body || '{}'));
+      resultCalls.push({ command_id: decodeURIComponent(match[1]), body });
+      const result = resultPolicy(decodeURIComponent(match[1]), body);
+      if (result instanceof Error) throw result;
+      return new Response(JSON.stringify({ accepted: true }), { status: result ?? 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error(`unexpected bridge request ${path}`);
+  };
 
-const completed = storage.get('a2BridgeCompletedCommandsV1');
-assert.equal(completed.length, 1, 'verified Send must persist before remote ACK');
-assert.equal(completed[0].idempotency_key, 'idem-A');
-assert.equal(completed[0].dom_send_verified, true);
+  vm.runInContext(source, context, { filename: 'background.js' });
+  return { context, listeners };
+}
 
-// 2) A restarted scheduler uses a new command ID but deterministic same idempotency key.
-// The wrapper must ACK it as durable and hide it from background.js, preventing a second Send.
-nextResponses.push({ command: command('cmd-2', 'idem-A') });
-response = await fetch(NEXT_URL, next());
-body = await response.json();
-assert.equal(body.command, null);
-assert.equal(body.durable_duplicate_command_id, 'cmd-2');
-assert.equal(body.durable_duplicate_idempotency_key, 'idem-A');
-assert.equal(resultCalls.at(-1).body.status, 'SENT_ALREADY_DURABLE');
-assert.equal(resultCalls.at(-1).body.verification.verified, true);
-assert.equal(resultCalls.at(-1).url, `${BRIDGE_BASE}/v1/commands/cmd-2/result`, 'remote Edge Function base path must be preserved');
+const trustedCounter = { count: 0 };
+const phase1Results = [];
 
-// 3) A mere click/SENT status without exact DOM verification must NOT poison the durable ledger.
-nextResponses.push({ command: command('cmd-3', 'idem-B') });
-response = await fetch(NEXT_URL, next());
-body = await response.json();
-assert.equal(body.command.command_id, 'cmd-3');
-
-response = await fetch(`${BRIDGE_BASE}/v1/commands/cmd-3/result`, {
-  method: 'POST',
-  body: JSON.stringify({
-    status: 'SENT',
-    clicked_send_button: true,
-    verification: { verified: true }
-  })
+// Phase 1: physical GLM actuation succeeds, but every final result ACK is lost.
+makeRuntime({
+  nextResponses: [{ command: command('cmd-1', 'idem-A'), ordering_policy: 'STRICT_GLM_FIRST_ACTUATED_V1' }],
+  resultPolicy: () => new Error('simulated_result_ack_loss'),
+  trustedCounter,
+  resultCalls: phase1Results
 });
-assert.equal(response.status, 200);
-assert.equal(storage.get('a2BridgeCompletedCommandsV1').length, 1);
 
-nextResponses.push({ command: command('cmd-4', 'idem-B') });
-response = await fetch(NEXT_URL, next());
-body = await response.json();
-assert.equal(body.command.command_id, 'cmd-4', 'unverified prior result must not suppress a retry');
+await new Promise((resolve) => setTimeout(resolve, 420));
+assert.equal(trustedCounter.count, 1, 'phase 1 must physically actuate exactly once');
+const completedAfterLoss = storage.get(COMPLETED_KEY);
+assert.equal(Array.isArray(completedAfterLoss), true, 'durable completion ledger missing after ACK loss');
+assert.equal(completedAfterLoss.length, 1, 'verified send must persist exactly once before remote ACK');
+assert.equal(completedAfterLoss[0].idempotency_key, 'idem-A');
+assert.equal(completedAfterLoss[0].execution_class, 'VERIFIED');
+assert.equal(storage.get(PENDING_KEY)?.command_id, 'cmd-1', 'pending command must remain until result ACK is accepted');
 
-console.log('durable idempotency behavioral contract PASS');
+const phase2Results = [];
+
+// Phase 2: service-worker restart over the same storage. First replay the old
+// pending command, then receive a new command id with the same idempotency key.
+makeRuntime({
+  nextResponses: [{ command: command('cmd-2', 'idem-A'), ordering_policy: 'STRICT_GLM_FIRST_ACTUATED_V1' }],
+  resultPolicy: () => 200,
+  trustedCounter,
+  resultCalls: phase2Results
+});
+
+await new Promise((resolve) => setTimeout(resolve, 420));
+assert.equal(trustedCounter.count, 1, 'restart/idempotent replay caused a duplicate physical Send');
+assert.equal(storage.has(PENDING_KEY), false, 'accepted replay result did not clear pending journal');
+
+const replayCmd1 = phase2Results.find((row) => row.command_id === 'cmd-1' && row.body.status === 'SENT_ALREADY_DURABLE');
+const replayCmd2 = phase2Results.find((row) => row.command_id === 'cmd-2' && row.body.status === 'SENT_ALREADY_DURABLE');
+assert.ok(replayCmd1, 'restart did not ACK durable pending command without re-actuation');
+assert.ok(replayCmd2, 'same-idempotency new command was not suppressed as durable replay');
+assert.equal(replayCmd1.body.verification?.durable_replay, true);
+assert.equal(replayCmd2.body.verification?.durable_replay, true);
+assert.equal(replayCmd2.body.execution_class, 'VERIFIED');
+assert.equal(storage.get(COMPLETED_KEY).length, 1, 'durable replay mutated completion identity unexpectedly');
+
+console.log('v0.6 durable restart idempotency behavioral contract PASS', {
+  trusted_send_calls: trustedCounter.count,
+  phase1_result_attempts: phase1Results.length,
+  phase2_result_attempts: phase2Results.length,
+  durable_entries: storage.get(COMPLETED_KEY).length
+});
