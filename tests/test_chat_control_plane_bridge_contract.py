@@ -34,18 +34,19 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
 
     def test_manifest_and_worker_entrypoints(self):
         self.assertEqual(self.manifest["manifest_version"], 3)
-        self.assertEqual(self.manifest["version"], "0.6.0")
+        self.assertEqual(self.manifest["version"], "0.6.2")
         self.assertGreaterEqual(int(self.manifest["minimum_chrome_version"]), 125)
         self.assertEqual(self.manifest["background"]["service_worker"], "background-entry.js")
         self.assertIn("debugger", self.manifest["permissions"])
         self.assertIn("sidePanel", self.manifest["permissions"])
         self.assertEqual(self.manifest["content_scripts"][0]["js"], ["prompt-gate.js"])
         self.assertEqual(self.manifest["content_scripts"][0]["run_at"], "document_start")
-        self.assertEqual(self.manifest["content_scripts"][1]["js"], ["platform-dom-compat.js", "content.js"])
+        self.assertEqual(self.manifest["content_scripts"][1]["js"], ["platform-dom-compat.js", "content.js", "content-recovery-v062.js"])
         for script in [
             "bootstrap-config.js", "secret-vault.js", "bridge-client.js", "debugger-broker.js",
             "trusted-chatgpt.js", "trusted-glm.js", "operator-gate-bindings.js", "operator-actions.js",
-            "background.js", "operator-control.js", "operator-perception.js", "operator-oopif-perception.js"
+            "background.js", "operator-control.js", "operator-perception.js", "operator-oopif-perception.js",
+            "debugger-watchdog-v062.js", "chatgpt-rollover-v062.js", "runtime-marker-v062.js"
         ]:
             self.assertIn(f'importScripts("./{script}")', self.background_entry)
         self.assertNotIn("background-v0522.js", self.background_entry)
