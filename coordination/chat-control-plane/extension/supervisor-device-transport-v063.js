@@ -1,6 +1,7 @@
 (() => {
   "use strict";
 
+  const bootstrap = globalThis.A2_BRIDGE_BOOTSTRAP || {};
   const LEGACY_BASE = "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-supervisor-v3-canary";
   const SIGNED_BASE = "https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-supervisor-v4";
   const SIGNED_RUNTIME_PREFIX = "/a2-browser-supervisor-v4";
@@ -22,7 +23,15 @@
     return { url: signed.toString(), routePath: suffix || "/", signaturePath: `${SIGNED_RUNTIME_PREFIX}${suffix || ""}` };
   }
 
-  async function ensureEnrollment(clientId, pairingSecret, force = false) {
+  function enrollmentSecret(sourceHeaders) {
+    const dedicated = String(bootstrap.supervisorBootstrapSecret || "").trim();
+    if (dedicated.length >= 32) return dedicated;
+    // Backward-compatible generic/dev fallback only. Personalized v0.6.6 bundles
+    // always provide a distinct supervisorBootstrapSecret.
+    return String(sourceHeaders.get("x-a2-chat-bridge-secret") || "").trim();
+  }
+
+  async function ensureEnrollment(clientId, supervisorSecret, force = false) {
     if (typeof globalThis.A2_DEVICE_STATUS !== "function" || typeof globalThis.A2_DEVICE_ENROLL !== "function") {
       throw new Error("supervisor_device_identity_unavailable");
     }
@@ -33,7 +42,7 @@
     if (enrollmentPromise) return enrollmentPromise;
     enrollmentPromise = (async () => {
       if (force && typeof globalThis.A2_DEVICE_CLEAR_ENROLLMENT === "function") await globalThis.A2_DEVICE_CLEAR_ENROLLMENT();
-      await globalThis.A2_DEVICE_ENROLL(SIGNED_BASE, clientId, pairingSecret);
+      await globalThis.A2_DEVICE_ENROLL(SIGNED_BASE, clientId, supervisorSecret);
       const status = await globalThis.A2_DEVICE_STATUS();
       if (status?.enrolled !== true || !status?.device_id) throw new Error("supervisor_device_enrollment_incomplete");
       return status;
@@ -72,17 +81,17 @@
     if (!mapped) return nativeFetch(input, init);
 
     const sourceHeaders = new Headers(init?.headers || {});
-    const pairingSecret = String(sourceHeaders.get("x-a2-chat-bridge-secret") || "");
+    const supervisorSecret = enrollmentSecret(sourceHeaders);
     const clientId = String(sourceHeaders.get("x-a2-chat-bridge-client") || "").trim().slice(0, 160);
-    if (pairingSecret.length < 32) throw new Error("supervisor_device_pairing_secret_missing");
+    if (supervisorSecret.length < 32) throw new Error("supervisor_device_bootstrap_secret_missing");
     if (!clientId) throw new Error("supervisor_device_client_id_missing");
 
-    await ensureEnrollment(clientId, pairingSecret, false);
+    await ensureEnrollment(clientId, supervisorSecret, false);
     let response = await signedFetch(mapped, init, clientId);
     const reason = await authReason(response);
     if (!RECOVERABLE_IDENTITY_REASONS.has(reason)) return response;
 
-    await ensureEnrollment(clientId, pairingSecret, true);
+    await ensureEnrollment(clientId, supervisorSecret, true);
     response = await signedFetch(mapped, init, clientId);
     return response;
   };
@@ -92,6 +101,7 @@
     legacy_base: LEGACY_BASE,
     signed_base: SIGNED_BASE,
     signed_runtime_prefix: SIGNED_RUNTIME_PREFIX,
-    mode: "DEVICE_SIGNED_NO_BEARER_FALLBACK"
+    mode: "DEVICE_SIGNED_NO_BEARER_FALLBACK",
+    credential_mode: "DUAL_SCOPED_BRIDGE_AND_SINGLE_USE_SUPERVISOR_BOOTSTRAP"
   });
 })();
