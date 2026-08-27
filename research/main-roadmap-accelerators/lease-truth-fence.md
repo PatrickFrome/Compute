@@ -59,7 +59,7 @@ Add a separate, deterministic `roadmap_lease_truth_guard.py` before PLAN/PUBLISH
 
 ## Reconciliation design decision
 
-Prepare `compute_fabric_supervisor_reconcile_roadmap_leases_h205f22(uuid)` as an explicit, supervisor-token-gated mutation primitive:
+`compute_fabric_supervisor_reconcile_roadmap_leases_h205f22(uuid)` is an explicit, supervisor-token-gated mutation primitive:
 
 1. Require the current `COMPUTE_FABRIC_MAINLINE` supervisor token and ACTIVE supervisor mode.
 2. Take a transaction-level advisory lock for the reconciliation resource.
@@ -71,20 +71,39 @@ Prepare `compute_fabric_supervisor_reconcile_roadmap_leases_h205f22(uuid)` as an
 8. State mutation truth explicitly: this operation has `database_mutation=true` and `authority_effect=true`, while provider, Edge, PR-merge and checkpoint-promotion effects remain false.
 9. Revoke PUBLIC execution and grant the primitive only to `service_role`; the supervisor token remains an additional application-level gate.
 
-The migration file defines the primitive but does not invoke it. No supervisor token is retrieved, logged, embedded, or requested by the implementation.
+No supervisor token is retrieved, logged, embedded, or requested by the implementation.
+
+## Live DDL readback
+
+The definition-only migration was applied to the live recovery Supabase project as migration `20260827201322 main_roadmap_lease_reconciliation_v1`.
+
+Post-DDL readback verified:
+
+- `SECURITY INVOKER` (`prosecdef=false`);
+- ACL: `postgres=EXECUTE`, `service_role=EXECUTE`;
+- `anon` execute privilege: false;
+- `authenticated` execute privilege: false;
+- `service_role` execute privilege: true;
+- function body matches the reviewed token gate, advisory-lock, single-observation-time and exact `UPDATE ... RETURNING` contract.
+
+A second read-only lease witness at `2026-08-27T20:15:15.573437+00:00` still observed stale claim `[32]`, stale directives `[25,26,29]`, alignment claim `[32]`, fresh claims `[]`, and supervisor projected claims `[]`. Therefore installing the function definition did not execute reconciliation or mutate lease rows.
+
+Post-DDL advisors were run. No advisor item identified the new reconciliation function as a security or performance defect. Security advisor output still contains pre-existing project-wide items, notably RLS-enabled-without-policy INFO findings, public `SECURITY DEFINER` exposure warnings for `public.coordination_read_barrier_h205f22()`, and disabled leaked-password protection. Performance output consists of existing unused-index INFO findings; it does not justify deleting indexes during this correctness-focused slice.
 
 ## Why this outranks more CI acceleration
 
 The local suite is already small enough that sharding/REAPI would optimize seconds while leaving a correctness ambiguity in roadmap authority. Lease truth sits directly on the W1 critical path and can prevent stale authority from contaminating target selection, checkpoint evidence, or supervisor handoff. Correctness therefore has higher expected value than another test-speed layer at this stage.
 
-## Non-claims
+## Current boundaries / non-claims
 
-- migration prepared, but live DDL not applied;
-- reconciliation primitive not invoked;
-- no supervisor secret accessed;
-- no stale rows mutated or expired by this branch;
+- reconciliation function definition is live;
+- reconciliation function has **not** been invoked;
+- no supervisor secret accessed or requested;
+- stale rows remain unchanged after definition-only DDL;
+- lease-truth guard correctly remains BLOCK on the current live state;
 - no Edge deployment;
 - no provider mutation;
 - no PR merge;
+- no force-push;
 - no W1 promotion to VERIFIED;
 - no canonical checkpoint seal.
