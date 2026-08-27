@@ -16,6 +16,8 @@ const tabs = [
 ];
 let screenshotEnabled = true;
 let brokerRuns = 0;
+let axEnableCalls = 0;
+let axDisableCalls = 0;
 
 function assert(condition, message) { if (!condition) throw new Error(message); }
 function storage(map) {
@@ -58,7 +60,9 @@ const pageReadback = {
 const tinyJpegBase64 = Buffer.from([0xff, 0xd8, 0xff, 0xd9]).toString('base64');
 
 async function sessionSend(method) {
-  if (method === 'Runtime.enable' || method === 'Page.enable' || method === 'Accessibility.enable') return {};
+  if (method === 'Runtime.enable' || method === 'Page.enable') return {};
+  if (method === 'Accessibility.enable') { axEnableCalls += 1; return {}; }
+  if (method === 'Accessibility.disable') { axDisableCalls += 1; return {}; }
   if (method === 'Runtime.evaluate') return { result: { value: { ...pageReadback } } };
   if (method === 'Accessibility.getFullAXTree') return axTree;
   if (method === 'DOMSnapshot.captureSnapshot') return domSnapshot;
@@ -116,11 +120,12 @@ assert(response?.ok === true, 'trusted capture failed');
 assert(response.perception.schema.endsWith('perception-preview.v2'), 'capture did not return v2 bounded preview');
 assert(response.perception.frame_token?.length === 64, 'pixel frame token missing');
 assert(response.perception.frame_max_age_ms === 45000, 'signed frame timeout not reflected');
-assert(response.perception.page.body_text_excerpt.length < pageReadback.body_text.length, 'body preview was not bounded');
+assert(response.perception.page.body_text_excerpt.length <= 5, 'body preview exceeded requested budget');
 assert(response.perception.accessibility.length === 1 && response.perception.accessibility_total === 2, 'AX preview limit failed');
 assert(response.perception.dom_snapshot.records.length === 1 && response.perception.dom_snapshot.visible_record_count === 2, 'DOM preview limit failed');
 assert(response.perception.screenshot.base64 === tinyJpegBase64, 'screenshot preview missing');
 assert(brokerRuns === 1, 'perception did not use debugger broker exactly once');
+assert(axEnableCalls === 1 && axDisableCalls === 1, 'Accessibility domain was not disabled after capture');
 
 const meta = session.get('a2OperatorPerceptionMeta:CHATGPT');
 assert(meta?.body_text_sha256?.length === 64 && meta?.screenshot_sha256?.length === 64, 'perception hashes not persisted');
@@ -130,6 +135,7 @@ assert(!JSON.stringify(Object.fromEntries(session)).includes('hello visible\nSen
 
 response = await dispatch({ type: 'A2_OPERATOR_PERCEPTION_PREVIEW', platform: 'CHATGPT', options: { include_screenshot: false, body_limit: 8, ax_limit: 2, dom_limit: 2 } }, sidePanel);
 assert(response?.ok === true && response.perception.screenshot.omitted === true && !response.perception.screenshot.base64, 'cached screenshot omission failed');
+assert(response.perception.page.body_text_excerpt.length <= 8, 'cached body preview exceeded requested budget');
 
 // Signed pixel kill-switch must preserve structural perception while removing frame actuation proof.
 screenshotEnabled = false;
@@ -138,6 +144,7 @@ assert(response?.ok === true, 'structural perception failed when screenshots dis
 assert(response.perception.screenshot.available === false && !response.perception.screenshot.base64, 'pixel kill-switch leaked screenshot');
 assert(response.perception.frame_token === null && response.perception.hashes.screenshot_sha256 === null, 'pixel-disabled capture still created actionable frame');
 assert(response.perception.accessibility_total === 2 && response.perception.dom_snapshot.visible_record_count === 2, 'structural sensors were disabled with pixels');
+assert(axEnableCalls === 2 && axDisableCalls === 2, 'Accessibility lifecycle leaked after pixel-disabled capture');
 screenshotEnabled = true;
 
 // Duplicate exact target must fail closed before broker execution.
@@ -154,5 +161,7 @@ console.log('A2 v0.6 Perception Lab: PASS', JSON.stringify({
   ax_nodes: meta.ax_node_count,
   dom_records: meta.dom_visible_record_count,
   broker_runs: brokerRuns,
+  ax_enable_calls: axEnableCalls,
+  ax_disable_calls: axDisableCalls,
   session_keys: [...session.keys()].sort()
 }));
