@@ -10,7 +10,8 @@ receipt binding is implemented.
 
 The audit never authorizes a provider action and never interprets manual
 confirmation, protected environments, OIDC permission, or local environment
-flags as W1 authority.
+flags as W1 authority. Self-referential policy-checker source literals are
+removed only by exact path+step boundaries before runtime mutation scanning.
 """
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ from typing import Any
 
 SCHEMA = "metaengine.compute.w1-provider-mutation-authority-gap-audit.h205f22.v2"
 BROKER_SLUG = "metaengine-w1-authority-broker-h205f22"
+BROKER_URL_VAR = "W1_AUTHORITY_BROKER_URL"
 GUARD_PATH = "controller/w1/provider_dispatch_authority_guard.py"
 ACQUIRE_STEP = "Acquire fresh external W1 authority receipt"
 
@@ -45,6 +47,28 @@ SOURCE_MUTATIONS: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 SERVICE_ROLE_MARKERS = ("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEYS", "secrets.SUPABASE", "sb_secret_")
 
+# Exact policy-literal ranges. These steps inspect workflow source and therefore
+# necessarily quote forbidden commands/secrets. Only these explicit ranges are
+# removed; executable steps remain in the runtime view.
+POLICY_LITERAL_RANGES: dict[str, tuple[str, str | None]] = {
+    ".github/workflows/w1-aws-provider-reboot-proof.yml": (
+        "      - name: Validate live W1 credential and trust-zone contract",
+        "\n  preflight-environment:",
+    ),
+    ".github/workflows/w1-aws-persistent-host-preflight.yml": (
+        "      - name: Validate preflight-only trust-zone contract",
+        "\n  preflight-environment:",
+    ),
+    ".github/workflows/w1-provider-dispatch-authority-gate-contract.yml": (
+        "      - name: Prove PREP-only nonauthority boundary",
+        "      - name: Build deterministic provider-dispatch contract receipt",
+    ),
+    ".github/workflows/w1-codespaces-persistent-storage-guard-contract.yml": (
+        "      - name: Assert mutation and secret boundaries",
+        None,
+    ),
+}
+
 
 def canonical_hash(value: Any) -> str:
     raw = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
@@ -59,22 +83,29 @@ def _line(text: str, offset: int) -> int:
     return text.count("\n", 0, offset) + 1
 
 
-def _strip_provider_reboot_policy_checker(text: str) -> str:
-    """Remove the self-referential static checker, not executable provider steps."""
-    marker = "      - name: Validate live W1 credential and trust-zone contract"
-    next_job = "\n  preflight-environment:"
-    if marker not in text or next_job not in text:
-        return text
-    before, remainder = text.split(marker, 1)
-    _checker, after = remainder.split(next_job, 1)
-    return before + next_job + after
+def _runtime_workflow_view(path: str, text: str) -> tuple[str, bool]:
+    spec = POLICY_LITERAL_RANGES.get(path)
+    if spec is None:
+        return text, False
+    start, end = spec
+    if start not in text:
+        raise ValueError(f"policy literal start marker missing: {path}")
+    before, remainder = text.split(start, 1)
+    if end is None:
+        return before, True
+    if end not in remainder:
+        raise ValueError(f"policy literal end marker missing: {path}")
+    _policy, after = remainder.split(end, 1)
+    return before + end + after, True
 
 
 def _workflow_gate(text: str, mutation_offset: int) -> tuple[bool, dict[str, Any]]:
     gate = text.find(ACQUIRE_STEP)
-    broker = text.find(BROKER_SLUG, gate if gate >= 0 else 0)
+    broker_slug = text.find(BROKER_SLUG, gate if gate >= 0 else 0)
+    broker_var = text.find(BROKER_URL_VAR, gate if gate >= 0 else 0)
+    broker = min([x for x in (broker_slug, broker_var) if x >= 0], default=-1)
     guard = text.find(GUARD_PATH, gate if gate >= 0 else 0)
-    ordered = gate >= 0 and broker >= gate and guard >= broker and guard < mutation_offset
+    ordered = gate >= 0 and broker >= gate and guard >= gate and guard < mutation_offset
     return ordered, {
         "acquire_step_present": gate >= 0,
         "broker_call_present": broker >= 0,
@@ -87,28 +118,33 @@ def evaluate(workflows: dict[str, str], sources: dict[str, str]) -> dict[str, An
     workflow_surfaces: list[dict[str, Any]] = []
     source_surfaces: list[dict[str, Any]] = []
     service_role_consumers: list[str] = []
+    sanitized_policy_literal_files: list[str] = []
     file_sha256: dict[str, str] = {}
 
     for path, text in sorted(workflows.items()):
         file_sha256[path] = _sha(text)
-        runtime = _strip_provider_reboot_policy_checker(text)
+        runtime, sanitized = _runtime_workflow_view(path, text)
+        if sanitized:
+            sanitized_policy_literal_files.append(path)
+        path_surfaces: list[dict[str, Any]] = []
         for kind, pattern in WORKFLOW_MUTATIONS:
             for match in pattern.finditer(runtime):
                 gated, gate_checks = _workflow_gate(runtime, match.start())
-                workflow_surfaces.append({
+                item = {
                     "path": path,
                     "kind": kind,
                     "line": _line(runtime, match.start()),
                     "authority_gate": "PROVEN_EXTERNAL_RECEIPT_GUARD" if gated else "GAP_UNGATED_MUTATION",
                     "gate_checks": gate_checks,
-                })
-        if any(item["path"] == path for item in workflow_surfaces):
-            if any(marker in runtime for marker in SERVICE_ROLE_MARKERS):
-                service_role_consumers.append(path)
+                }
+                workflow_surfaces.append(item)
+                path_surfaces.append(item)
+        if path_surfaces and any(marker in runtime for marker in SERVICE_ROLE_MARKERS):
+            service_role_consumers.append(path)
 
     for path, text in sorted(sources.items()):
         file_sha256[path] = _sha(text)
-        low = text.lower()
+        low = (path + "\n" + text).lower()
         provider_hint = any(token in low for token in ("codespace", "aws", "vercel", "sandbox", "microvm"))
         if not provider_hint:
             continue
@@ -135,6 +171,7 @@ def evaluate(workflows: dict[str, str], sources: dict[str, str]) -> dict[str, An
         "controller_source_count": len(sources),
         "scanned_file_count": len(file_sha256),
         "file_sha256": file_sha256,
+        "sanitized_policy_literal_files": sorted(sanitized_policy_literal_files),
         "workflow_mutation_surfaces": workflow_surfaces,
         "direct_code_mutation_surfaces": source_surfaces,
         "gated_workflow_mutation_count": len(workflow_surfaces) - len(ungated_workflow),
