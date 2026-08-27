@@ -113,7 +113,16 @@
     return { attrs, nodeName, type };
   }
 
-  async function focusByMouse(session, backendNodeId) {
+  async function focusWithoutActivation(session, backendNodeId) {
+    await session.send("DOM.scrollIntoViewIfNeeded", { backendNodeId }).catch(() => {});
+    await session.send("DOM.focus", { backendNodeId });
+    const focused = await inspectResolved(session, backendNodeId);
+    if (focused?.focused !== true) throw new Error("semantic_focus_verification_failed");
+    return { focused: true, activation: false };
+  }
+
+  async function clickByMouse(session, backendNodeId) {
+    await session.send("DOM.scrollIntoViewIfNeeded", { backendNodeId }).catch(() => {});
     const box = await session.send("DOM.getBoxModel", { backendNodeId });
     const point = quadCenter(box?.model);
     const hit = await session.send("DOM.getNodeForLocation", {
@@ -155,8 +164,6 @@
   }
 
   async function validateLiveSemantic(session, role, name, expectedBackendNodeId) {
-    await session.send("DOM.enable", { includeWhitespace: "none" });
-    await session.send("Accessibility.enable");
     const document = await session.send("DOM.getDocument", { depth: 0, pierce: true });
     const rootNodeId = Number(document?.root?.nodeId || 0);
     if (!rootNodeId) throw new Error("semantic_dom_root_unavailable");
@@ -210,22 +217,23 @@
       let domEnabled = false;
       try {
         await session.send("Runtime.enable");
-        const live = await validateLiveSemantic(session, target.role, target.name, target.backendNodeId);
-        axEnabled = true;
+        await session.send("DOM.enable", { includeWhitespace: "none" });
         domEnabled = true;
+        await session.send("Accessibility.enable");
+        axEnabled = true;
+        const live = await validateLiveSemantic(session, target.role, target.name, target.backendNodeId);
         assertNodeSafe(action, target.role, live.node);
-        const point = await focusByMouse(session, live.backendNodeId);
-        const focused = await inspectResolved(session, live.backendNodeId);
-        if (focused?.focused !== true) throw new Error("semantic_focus_verification_failed");
 
-        if (action === "FOCUS_SEMANTIC") {
-          const receipt = await persistReceipt({ action, platform, frame: target.frame, role: target.role, name: target.name, backendNodeId: live.backendNodeId, text: null, verification: "LIVE_AX_BACKEND_NODE_FOCUSED" });
+        if (action === "CLICK_SEMANTIC") {
+          const point = await clickByMouse(session, live.backendNodeId);
+          const receipt = await persistReceipt({ action, platform, frame: target.frame, role: target.role, name: target.name, backendNodeId: live.backendNodeId, text: null, verification: "LIVE_AX_BACKEND_NODE_MOUSE_CLICKED" });
           return { ok: true, action, platform, tab_id: tab.id, backend_node_id: live.backendNodeId, point, verification: receipt.verification, authority_effect: false };
         }
 
-        if (action === "CLICK_SEMANTIC") {
-          const receipt = await persistReceipt({ action, platform, frame: target.frame, role: target.role, name: target.name, backendNodeId: live.backendNodeId, text: null, verification: "LIVE_AX_BACKEND_NODE_CLICKED" });
-          return { ok: true, action, platform, tab_id: tab.id, backend_node_id: live.backendNodeId, point, verification: receipt.verification, authority_effect: false };
+        const focus = await focusWithoutActivation(session, live.backendNodeId);
+        if (action === "FOCUS_SEMANTIC") {
+          const receipt = await persistReceipt({ action, platform, frame: target.frame, role: target.role, name: target.name, backendNodeId: live.backendNodeId, text: null, verification: "LIVE_AX_BACKEND_NODE_DOM_FOCUSED_NO_ACTIVATION" });
+          return { ok: true, action, platform, tab_id: tab.id, backend_node_id: live.backendNodeId, focus, verification: receipt.verification, authority_effect: false };
         }
 
         const text = String(message?.text ?? "");
@@ -238,8 +246,8 @@
         const after = await inspectResolved(session, live.backendNodeId);
         const expected = message?.replace_existing === true ? normalize(text) : null;
         if (expected != null && normalize(after?.text) !== expected) throw new Error("semantic_type_exact_readback_failed");
-        const receipt = await persistReceipt({ action, platform, frame: target.frame, role: target.role, name: target.name, backendNodeId: live.backendNodeId, text, verification: message?.replace_existing === true ? "TRUSTED_TEXT_EXACT_READBACK" : "TRUSTED_TEXT_INSERTED_FOCUS_VERIFIED" });
-        return { ok: true, action, platform, tab_id: tab.id, backend_node_id: live.backendNodeId, point, text_length: text.length, exact_readback: message?.replace_existing === true, verification: receipt.verification, authority_effect: false };
+        const receipt = await persistReceipt({ action, platform, frame: target.frame, role: target.role, name: target.name, backendNodeId: live.backendNodeId, text, verification: message?.replace_existing === true ? "TRUSTED_TEXT_EXACT_READBACK" : "TRUSTED_TEXT_INSERTED_DOM_FOCUS_VERIFIED" });
+        return { ok: true, action, platform, tab_id: tab.id, backend_node_id: live.backendNodeId, focus, text_length: text.length, exact_readback: message?.replace_existing === true, verification: receipt.verification, authority_effect: false };
       } finally {
         if (axEnabled) await session.send("Accessibility.disable").catch(() => {});
         if (domEnabled) await session.send("DOM.disable").catch(() => {});
