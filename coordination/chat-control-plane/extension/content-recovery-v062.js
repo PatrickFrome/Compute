@@ -1,6 +1,7 @@
 (() => {
   "use strict";
 
+  const EXHAUSTION_CANONICAL_PHRASE = "maximum length for this conversation";
   const EXHAUSTION_PATTERN = /(?:you['’]?ve\s+reached\s+the\s+maximum\s+length\s+for\s+this\s+conversation|maximum\s+length\s+for\s+this\s+conversation|conversation\s+(?:has\s+)?reached\s+(?:its\s+)?maximum\s+length|start\s+a\s+new\s+chat\s+to\s+continue|вы\s+достигли\s+максимальн(?:ой|ую)\s+длин(?:ы|у)\s+(?:этого|данного|текущего)?\s*(?:разговора|чата)|достигнута\s+максимальная\s+длина\s+(?:этого|данного|текущего)?\s*(?:разговора|чата)|(?:разговор|чат)\s+достиг\s+максимальной\s+длины|начните\s+новый\s+чат[,]?\s+чтобы\s+продолжить)/iu;
   const TURN_SELECTOR = "[data-testid^='conversation-turn-'], article[data-testid^='conversation-turn-']";
   const TURN_NOTICE_MAX_CHARS = 700;
@@ -25,7 +26,7 @@
     if (!(element instanceof HTMLElement) || !visible(element)) return null;
     const text = textOf(element);
     if (!text || !EXHAUSTION_PATTERN.test(text)) return null;
-    return { ok: true, exhausted: true, reason, matched_text: text.slice(0, 500) };
+    return { ok: true, exhausted: true, reason, canonical_phrase: EXHAUSTION_CANONICAL_PHRASE, matched_text: text.slice(0, 500) };
   }
 
   function lastTurnNotice() {
@@ -43,7 +44,7 @@
 
     const compact = textOf(last, TURN_NOTICE_MAX_CHARS + 1);
     if (compact && compact.length <= TURN_NOTICE_MAX_CHARS && EXHAUSTION_PATTERN.test(compact)) {
-      return { ok: true, exhausted: true, reason: "conversation_length_limit_short_turn", matched_text: compact.slice(0, 500) };
+      return { ok: true, exhausted: true, reason: "conversation_length_limit_short_turn", canonical_phrase: EXHAUSTION_CANONICAL_PHRASE, matched_text: compact.slice(0, 500) };
     }
     return null;
   }
