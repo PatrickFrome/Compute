@@ -75,6 +75,39 @@ jobs:
             tests.test_w1_admission_candidate \
             tests.test_w1_host_safety_envelope_v2 -v
 
+      - name: Execute active probe on CI host as non-authority smoke
+        run: |
+          set -euo pipefail
+          TREE_SHA="$(git rev-parse HEAD^{tree})"
+          set +e
+          printf '{"source":{"git_sha":"%s","tree_sha":"%s"}}' "$GITHUB_SHA" "$TREE_SHA" \
+            | python3 controller/w1/host_safety_evidence_bundle.py > /tmp/w1-host-safety-bundle.json
+          RC=$?
+          set -e
+          test "$RC" -eq 0 -o "$RC" -eq 2
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('/tmp/w1-host-safety-bundle.json')
+          value = json.loads(p.read_text(encoding='utf-8'))
+          assert value['schema'] == 'metaengine.compute.w1-host-safety-evidence-bundle.h205f22.v1'
+          assert value['decision']['outcome'] in {'SAFETY_ENVELOPE_ELIGIBLE_NON_PERSISTENT','REJECTED_SAFETY_ENVELOPE'}
+          assert value['authority'] == {
+              'canonical': False,
+              'authority_effect': False,
+              'database_mutation': False,
+              'provider_mutation': False,
+              'reboot_authorized': False,
+              'worker_admitted': False,
+              'w1_verified': False,
+          }
+          assert value['persistence_status'] == 'NOT_EVALUATED'
+          assert value['provider_identity_status'] == 'NOT_EVALUATED'
+          assert value['reboot_status'] == 'NOT_EVALUATED'
+          print('W1 active probe CI runtime smoke:', value['decision']['outcome'])
+          print('failed checks:', ','.join(value['decision']['failures']))
+          PY
+
       - name: Prove bundle has no external mutation authority
         run: |
           set -euo pipefail
