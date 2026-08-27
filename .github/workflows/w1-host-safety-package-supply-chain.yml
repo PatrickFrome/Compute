@@ -136,8 +136,9 @@ jobs:
           sudo ./uninstall.sh
           test ! -e '/opt/metaengine/w1/safety/73ab09c75b71a6ea40f11e953cbcf9d9b94b9a89'
           test -d /var/lib/metaengine/w1/workspace
-          test -f /var/lib/metaengine/w1/workspace/.preserve-canary
+          sudo -u metaengine-w1 test -f /var/lib/metaengine/w1/workspace/.preserve-canary
           test "$(stat -c %U /var/lib/metaengine/w1/workspace)" = metaengine-w1
+          test "$(stat -c %a /var/lib/metaengine/w1/workspace)" = 700
           echo 'W1 package uninstall preserves dedicated workspace/state: PASS'
 
       - name: Assert provisioning package has no external control-plane client
