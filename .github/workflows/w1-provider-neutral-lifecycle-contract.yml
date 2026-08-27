@@ -1,0 +1,66 @@
+name: W1 Provider-Neutral Lifecycle Contract
+
+on:
+  push:
+    branches: [work/w1-provider-neutral-lifecycle-v2]
+    paths:
+      - 'controller/w1/provider_neutral_lifecycle_guard.py'
+      - 'tests/test_w1_provider_neutral_lifecycle_guard.py'
+      - 'research/W1_PROVIDER_NEUTRAL_LIFECYCLE_V2.md'
+      - '.github/workflows/w1-provider-neutral-lifecycle-contract.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/w1/provider_neutral_lifecycle_guard.py'
+      - 'tests/test_w1_provider_neutral_lifecycle_guard.py'
+      - 'research/W1_PROVIDER_NEUTRAL_LIFECYCLE_V2.md'
+      - '.github/workflows/w1-provider-neutral-lifecycle-contract.yml'
+
+permissions: {}
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile lifecycle oracle
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/w1/provider_neutral_lifecycle_guard.py
+
+      - name: Run adversarial lifecycle tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest tests.test_w1_provider_neutral_lifecycle_guard -v
+
+      - name: Assert non-authority and provider-neutral contract boundaries
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('controller/w1/provider_neutral_lifecycle_guard.py').read_text()
+          required=(
+            'GITHUB_CODESPACES','VERCEL_SANDBOX','AWS_EC2','STOP_RESUME','REBOOT',
+            'provider_object_identity_stable','provider_session_identity_changed',
+            'kernel_boot_id_changed','persistent_sentinel_hash_equal_pre_post',
+            'input_provenance_verified','provider_identity_verified','provider_action_verified',
+            'persisted_readback_verified','persistent_worker_proof','w1_verified',
+            'requires_server_side_provider_validation','requires_persisted_db_composition',
+          )
+          for token in required:
+              assert token in p, token
+          assert 'persistent_worker_proof": False' in p
+          assert 'w1_verified": False' in p
+          assert 'authority_effect": False' in p
+          assert 'canonical": False' in p
+          assert 'requests.' not in p
+          assert 'urllib' not in p
+          assert 'subprocess' not in p
+          PY

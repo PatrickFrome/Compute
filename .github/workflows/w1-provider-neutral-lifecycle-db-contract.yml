@@ -1,0 +1,91 @@
+name: W1 Provider-Neutral Lifecycle DB Contract
+
+on:
+  push:
+    branches: [work/w1-provider-neutral-lifecycle-v2]
+    paths:
+      - 'supabase/migrations/20260825023000_w1_provider_neutral_lifecycle_receipt_v2.sql'
+      - '.github/workflows/w1-provider-neutral-lifecycle-db-contract.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/20260825023000_w1_provider_neutral_lifecycle_receipt_v2.sql'
+      - '.github/workflows/w1-provider-neutral-lifecycle-db-contract.yml'
+
+permissions: {}
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Validate additive fail-closed SQL contract
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('supabase/migrations/20260825023000_w1_provider_neutral_lifecycle_receipt_v2.sql').read_text()
+          low = p.lower()
+          required = (
+              'compute_fabric_worker_lifecycle_receipt_v2_h205f22',
+              'h205f22_w1_lifecycle_receipt_ingest_v2',
+              'enrollment_id uuid not null',
+              'probe_sha256 text not null',
+              'policy_key text not null',
+              'policy_sha256 text not null',
+              'source_github_sha text not null',
+              'pre_runtime_session_id text not null',
+              'post_runtime_session_id text not null',
+              'provider_readback_sha256 text not null',
+              'github_codespaces', 'vercel_sandbox', 'aws_ec2',
+              'stop_resume', 'reboot',
+              'pending_provider_validation',
+              'provider_identity_verified=false',
+              'lifecycle_action_verified=false',
+              'accepted=false',
+              'persistent_worker_proof', 'worker_admitted', 'w1_verified',
+              'requires_authenticated_provider_validation',
+              'requires_persisted_readback_composition',
+              'w1_lifecycle_enrollment_probe_binding_invalid',
+              'w1_lifecycle_safety_policy_binding_invalid',
+              'service_role',
+          )
+          for token in required:
+              assert token in low, token
+
+          # V2 must be additive: legacy AWS v1 remains untouched.
+          forbidden = (
+              'alter table destruktion_meta.compute_fabric_worker_reboot_receipt_h205f22',
+              'drop table destruktion_meta.compute_fabric_worker_reboot_receipt_h205f22',
+              'drop function public.h205f22_w1_admission_candidate_readback_v1',
+              'grant execute on function public.h205f22_w1_lifecycle_receipt_ingest_v2' + '(' + 'uuid,text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,jsonb,jsonb,text,jsonb' + ') to authenticated',
+              'grant execute on function public.h205f22_w1_lifecycle_receipt_ingest_v2' + '(' + 'uuid,text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,jsonb,jsonb,text,jsonb' + ') to anon',
+          )
+          for token in forbidden:
+              assert token not in low, token
+
+          assert "verification_status text not null default 'pending_provider_validation'" in low
+          assert 'provider_identity_verified boolean not null default false check (provider_identity_verified=false)' in low
+          assert 'lifecycle_action_verified boolean not null default false check (lifecycle_action_verified=false)' in low
+          assert 'accepted boolean not null default false check (accepted=false)' in low
+          assert 'canonical boolean not null default false check (canonical=false)' in low
+          assert 'authority_effect boolean not null default false check (authority_effect=false)' in low
+          assert 'pre_runtime_session_id <> post_runtime_session_id' in low
+          assert 'latest_probe_sha256 is distinct from p_probe_sha256' in low
+          assert 'v_policy.policy_sha256 is distinct from p_policy_sha256' in low
+
+          # Direct table writes, including service_role, are denied; service_role
+          # receives only SELECT plus EXECUTE on the narrow SECURITY DEFINER RPC.
+          assert 'revoke all on table destruktion_meta.compute_fabric_worker_lifecycle_receipt_v2_h205f22 from public, anon, authenticated, service_role' in low
+          assert 'grant select on table destruktion_meta.compute_fabric_worker_lifecycle_receipt_v2_h205f22 to service_role' in low
+          assert 'revoke all on function public.h205f22_w1_lifecycle_receipt_ingest_v2' in low
+          assert 'to service_role;' in low
+          print('provider-neutral lifecycle DB contract: PASS')
+          PY

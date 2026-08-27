@@ -1,0 +1,64 @@
+name: W1 Codespaces Snapshot Contract
+
+on:
+  push:
+    branches: [work/w1-provider-neutral-lifecycle-v2]
+    paths:
+      - 'controller/w1/github_codespaces_snapshot_guard.py'
+      - 'tests/test_w1_github_codespaces_snapshot_guard.py'
+      - '.github/workflows/w1-codespaces-snapshot-contract.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/w1/github_codespaces_snapshot_guard.py'
+      - 'tests/test_w1_github_codespaces_snapshot_guard.py'
+      - '.github/workflows/w1-codespaces-snapshot-contract.yml'
+
+permissions: {}
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile snapshot guard
+        run: python3 -m py_compile controller/w1/github_codespaces_snapshot_guard.py
+
+      - name: Run adversarial snapshot tests
+        run: python3 -m unittest tests.test_w1_github_codespaces_snapshot_guard -v
+
+      - name: Assert no caller-supplied session IDs or authority
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('controller/w1/github_codespaces_snapshot_guard.py').read_text()
+          required = (
+              'provider_object_id_stable',
+              'provider_object_name_stable',
+              'repository_binding_stable',
+              'provider_state_sequence_available_shutdown_available',
+              'provider_updated_at_progresses',
+              'provider_session_fingerprint_changed',
+              'requires_authenticated_github_readback',
+              'requires_kernel_boot_id_change',
+              'requires_persistent_sentinel_match',
+          )
+          for token in required:
+              assert token in p, token
+          assert 'pre_session_id' not in p
+          assert 'post_session_id' not in p
+          assert 'persistent_worker_proof": False' in p
+          assert 'w1_verified": False' in p
+          assert 'authority_effect": False' in p
+          assert 'canonical": False' in p
+          assert 'requests.' not in p
+          assert 'urllib' not in p
+          assert 'subprocess' not in p
+          PY
