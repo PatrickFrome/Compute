@@ -3,7 +3,7 @@ name: A2 Browser Operator v0.6.3 Supervisor
 on:
   push:
     branches:
-      - work/a2-browser-operator-v063-supervisor
+      - 'work/a2-browser-operator-v063-supervisor*'
   workflow_dispatch:
 
 permissions:
@@ -26,6 +26,7 @@ jobs:
         run: |
           node tests/a2_v063_supervisor_session_lab.mjs
           node tests/a2_v063_bridge_disarm_lab.mjs
+          node tests/a2_v063_remote_authority_lab.mjs
 
       - name: Existing Browser Operator regression labs
         run: |
@@ -56,7 +57,10 @@ jobs:
       - name: Assert active v0.6.3 entrypoint
         run: |
           grep -E '^[[:space:]]*importScripts\("\./background-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
-          grep -E '^[[:space:]]*importScripts\("\./supervisor-client-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
-          grep -F '0.6.3-supervisor-fsm-dev.1' coordination/chat-control-plane/extension/runtime-marker-v063.js
+          grep -E '^[[:space:]]*importScripts\("\./supervisor-client-v063-authority\.js"\);' coordination/chat-control-plane/extension/background-entry.js
+          grep -F '0.6.3-supervisor-authority-dev.2' coordination/chat-control-plane/extension/runtime-marker-v063.js
+          grep -F 'a2-browser-supervisor-v3-canary' coordination/chat-control-plane/extension/supervisor-client-v063-authority.js
+          grep -F 'SET_SUPERVISOR_MODE' coordination/chat-control-plane/extension/supervisor-client-v063-authority.js
           ! grep -E '^[[:space:]]*importScripts\("\./background\.js"\);' coordination/chat-control-plane/extension/background-entry.js
           ! grep -E '^[[:space:]]*importScripts\("\./supervisor-client\.js"\);' coordination/chat-control-plane/extension/background-entry.js
+          ! grep -E '^[[:space:]]*importScripts\("\./supervisor-client-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
