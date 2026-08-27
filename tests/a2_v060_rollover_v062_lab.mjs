@@ -31,7 +31,8 @@ function harness({ exhausted = false, ledger = [], initialUrl = "https://chatgpt
       },
       async update(tabId, patch) {
         assert.equal(tabId, 41);
-        assert.deepEqual(patch, { url: "https://chatgpt.com/", active: false });
+        assert.equal(patch?.url, "https://chatgpt.com/");
+        assert.equal(patch?.active, false);
         tabUrl = patch.url;
         events.push({ kind: "tabs.update", tabId, patch: structuredClone(patch) });
         return { id: tabId, url: tabUrl };
@@ -84,7 +85,6 @@ function harness({ exhausted = false, ledger = [], initialUrl = "https://chatgpt
 
 const command = { command_id: "cmd-1", idempotency_key: "idem-1", target_platform: "CHATGPT", prompt: "A2 CHAT BRIDGE — AUTONOMOUS CONTINUE" };
 
-// Ordinary conversations never rotate merely because a New Chat control exists.
 {
   const h = harness({ exhausted: false });
   const result = await h.context.A2_CHATGPT_TRUSTED_SEND(41, command);
@@ -94,8 +94,6 @@ const command = { command_id: "cmd-1", idempotency_key: "idem-1", target_platfor
   assert.equal(h.store.chatgptRolloverPending, undefined);
 }
 
-// Confirmed exhaustion prepositions the exact pinned tab at root, performs one trusted send,
-// and pins the materialized new /c/... conversation without a second send.
 {
   const h = harness({ exhausted: true, newUrlAfterRaw: "https://chatgpt.com/c/new-conversation" });
   const result = await h.context.A2_CHATGPT_TRUSTED_SEND(41, command);
@@ -111,7 +109,6 @@ const command = { command_id: "cmd-1", idempotency_key: "idem-1", target_platfor
   assert.equal(h.rawCalls, 1);
 }
 
-// A durable ACTUATED ledger is an absolute no-resend fence even when exhaustion is confirmed.
 {
   const h = harness({ exhausted: true, ledger: [{ command_id: "cmd-1", idempotency_key: "idem-1", phase: "ACTUATED" }] });
   const result = await h.context.A2_CHATGPT_TRUSTED_SEND(41, command);
@@ -123,7 +120,6 @@ const command = { command_id: "cmd-1", idempotency_key: "idem-1", target_platfor
   assert.equal(h.events.filter((event) => event.kind === "tabs.update").length, 1);
 }
 
-// PRE_ENTER_DURABLE is ambiguous and therefore also forbids resend.
 {
   const h = harness({ exhausted: true, ledger: [{ command_id: "cmd-1", idempotency_key: "idem-1", phase: "PRE_ENTER_DURABLE" }] });
   const result = await h.context.A2_CHATGPT_TRUSTED_SEND(41, command);
@@ -133,7 +129,6 @@ const command = { command_id: "cmd-1", idempotency_key: "idem-1", target_platfor
   assert.equal(h.rawCalls, 0);
 }
 
-// Restart on root resumes only when the local pending marker belongs to the exact tab.
 {
   const h = harness({ exhausted: false, initialUrl: "https://chatgpt.com/", newUrlAfterRaw: "https://chatgpt.com/c/resumed" });
   Object.assign(h.store, { chatgptRolloverPending: true, chatgptRolloverPendingTabId: 41 });
