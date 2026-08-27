@@ -9,9 +9,11 @@ importScripts("./bootstrap-config.js");
 importScripts("./secret-vault.js");
 importScripts("./device-identity.js");
 
-// Phase 1 — bridge transport and single authoritative runtime identity.
+// Phase 1 — bridge transport, runtime identity and persistent logical targets.
 importScripts("./bridge-client.js");
 importScripts("./runtime-marker.js");
+importScripts("./target-registry.js");
+importScripts("./target-observability.js");
 importScripts("./bridge-runtime.js");
 importScripts("./supervisor-device-transport.js");
 
