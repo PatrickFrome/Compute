@@ -11,20 +11,9 @@ function arg(name) {
 }
 
 async function serve() {
-  const runtime = await new ComputeBrowserRuntime({
-    engineExecutable: process.env.A2_CHROME_EXECUTABLE || null,
-    headlessDefault: false,
-    allowNoSandbox: false
-  }).init();
+  const runtime = await new ComputeBrowserRuntime({ engineExecutable: process.env.A2_CHROME_EXECUTABLE || null, headlessDefault: false, allowNoSandbox: false }).init();
   const rpc = await startRpcServer(runtime);
-  console.log(JSON.stringify({
-    schema: 'metaengine.a2-compute-browser.ready.v1',
-    runtime: '0.1.0-dev.2',
-    endpoint: rpc.endpoint,
-    token_file: rpc.tokenFile,
-    web_authority_effect: false,
-    local_effects_present: true
-  }));
+  console.log(JSON.stringify({ schema: 'metaengine.a2-compute-browser.ready.v1', runtime: '0.1.0-dev.3', endpoint: rpc.endpoint, token_file: rpc.tokenFile, web_authority_effect: false, local_effects_present: true, debug_transport: 'native_pipe_b3', devtools_tcp_exposed: false }));
   let stopping = false;
   const stop = async () => {
     if (stopping) return;
@@ -40,11 +29,7 @@ async function serve() {
 async function selfTest() {
   const executablePath = arg('chrome') || process.env.A2_CHROME_EXECUTABLE;
   if (!executablePath) throw new Error('self_test_chrome_executable_required');
-  const runtime = await new ComputeBrowserRuntime({
-    engineExecutable: executablePath,
-    headlessDefault: true,
-    allowNoSandbox: process.env.A2_CI_ALLOW_NO_SANDBOX === '1'
-  }).init();
+  const runtime = await new ComputeBrowserRuntime({ engineExecutable: executablePath, headlessDefault: true, allowNoSandbox: process.env.A2_CI_ALLOW_NO_SANDBOX === '1' }).init();
   const profileId = `ci-smoke-${process.pid}`;
   try {
     const started = await runtime.startProfile({ profileId });
@@ -56,26 +41,17 @@ async function selfTest() {
     const entryBeforeRestart = runtime.running.get(profileId);
     const oldPid = entryBeforeRestart?.processRef?.child?.pid;
     const browserExited = new Promise((resolve) => entryBeforeRestart.processRef.child.once('exit', resolve));
-    await entryBeforeRestart.processRef.cdp.call('Browser.close');
+    await entryBeforeRestart.processRef.cdp.call('Browser.close', {}, { timeoutMs: 1500 }).catch(() => {});
     await Promise.race([browserExited, new Promise((_, reject) => setTimeout(() => reject(new Error('self_test_browser_exit_timeout')), 5000))]);
     const restarted = await runtime.startProfile({ profileId });
-    if (!restarted.running || restarted.pid === oldPid) throw new Error('self_test_crash_aware_restart_failed');
+    if (!restarted.running || restarted.pid === oldPid || restarted.debug_transport !== 'native_pipe') throw new Error('self_test_crash_aware_restart_failed');
 
     const created = await runtime.createTarget({ profileId, targetId: 'smoke_target', role: 'CI_SMOKE', url: 'about:blank' });
     const targets = await runtime.listTargets(profileId);
     const health = await runtime.health();
-    if (!started.running || !created.bound || !targets.some((row) => row.target_id === 'smoke_target' && row.bound) || health.profiles.length !== 1) throw new Error('self_test_contract_failed');
+    if (!started.running || !created.bound || !targets.some((row) => row.target_id === 'smoke_target' && row.bound) || health.profiles.length !== 1 || health.devtools_tcp_exposed !== false) throw new Error('self_test_contract_failed');
     await runtime.closeTarget({ profileId, targetId: 'smoke_target' });
-    console.log(JSON.stringify({
-      schema: 'metaengine.a2-compute-browser.self-test.v1',
-      ok: true,
-      product: started.product,
-      protocol_version: started.protocol_version,
-      raw_cdp_rpc_exposed: false,
-      web_authority_effect: false,
-      crash_aware_restart: true,
-      remote_navigation_blocked: true
-    }));
+    console.log(JSON.stringify({ schema: 'metaengine.a2-compute-browser.self-test.v1', ok: true, product: started.product, protocol_version: started.protocol_version, raw_cdp_rpc_exposed: false, web_authority_effect: false, crash_aware_restart: true, remote_navigation_blocked: true, debug_transport: 'native_pipe_b3', devtools_tcp_exposed: false }));
   } finally {
     await runtime.shutdown();
     if (process.env.A2_SELF_TEST_REMOVE_STATE === '1') await fs.rm(runtime.stateRoot, { recursive: true, force: true }).catch(() => {});
