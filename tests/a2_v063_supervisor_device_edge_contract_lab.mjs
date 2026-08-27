@@ -23,13 +23,13 @@ const nonceIndex = source.indexOf("h205f22_a2_browser_device_consume_nonce_v2");
 assert.ok(verifyIndex > 0 && nonceIndex > verifyIndex, "nonce must be consumed only after signature verification");
 
 const enrollRoute = source.indexOf("path==='/v1/device/enroll'");
-const signedAuth = source.indexOf("authenticateDevice(req,path,bodyText)");
+const signedAuth = source.indexOf("authenticateDevice(req,url.pathname,bodyText)");
 assert.ok(enrollRoute > 0 && signedAuth > enrollRoute, "pairing enrollment must be handled before signed-only privileged routes");
 
 const serveTail = source.slice(source.indexOf("Deno.serve"));
 assert.match(serveTail, /path==='\/health'/);
 assert.match(serveTail, /path==='\/v1\/device\/enroll'/);
-assert.match(serveTail, /authenticateDevice\(req,path,bodyText\)/);
+assert.match(serveTail, /authenticateDevice\(req,url\.pathname,bodyText\)/, "edge must verify signature against full service pathname");
 assert.doesNotMatch(serveTail.slice(signedAuth), /pairingTokenHash\(req\)/, "privileged routes must not bearer-fallback after signed authentication starts");
 
 for (const header of [
@@ -40,5 +40,6 @@ for (const header of [
 console.log("a2_v063_supervisor_device_edge_contract_lab: PASS", {
   signatureBeforeNonce: verifyIndex < nonceIndex,
   serverDerivedFingerprint: true,
+  serviceBoundPath: true,
   privilegedBearerFallback: false
 });
