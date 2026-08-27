@@ -22,6 +22,7 @@ importScripts("./operator-actions.js");
 // Inert compatibility markers for the sealed v0.6.2 source-contract suite only.
 // importScripts("./background.js");
 // importScripts("./runtime-marker-v062.js");
+// importScripts("./supervisor-client-v063.js");
 
 importScripts("./background-v063.js");
 importScripts("./runtime-marker-v063.js");
@@ -29,4 +30,4 @@ importScripts("./operator-control.js");
 importScripts("./operator-perception.js");
 importScripts("./operator-oopif-perception.js");
 importScripts("./operator-semantic-actions.js");
-importScripts("./supervisor-client-v063.js");
+importScripts("./supervisor-client-v063-authority.js");
