@@ -87,6 +87,7 @@ assert.equal(capture.child_frame_count, 1);
 assert.equal(capture.child_frames[0].title, 'Cross origin frame');
 assert.equal(capture.child_frames[0].accessibility[0].role, 'button');
 assert.equal(capture.child_frames[0].dom_snapshot.records[0].node_name, 'BUTTON');
+assert.equal(capture.child_frames[0].body_text_excerpt.length <= 12000, true, 'OOPIF body preview exceeded hard budget');
 assert.equal(childTargetsDisabled, true, 'child auto-attach must be disabled after bounded capture');
 assert.ok(childCommands.some((row) => row[1] === 'Accessibility.disable'), 'Accessibility must be disabled after child capture');
 assert.ok(sessionWrites.length === 1);
@@ -102,16 +103,29 @@ listener({ type: 'A2_OPERATOR_CAPTURE_OOPIF', platform: 'CHATGPT' }, untrustedSe
 assert.equal(untrustedResponse?.ok, false);
 assert.equal(untrustedResponse?.error, 'operator_sender_not_trusted');
 
-let trustedResponse = null;
-const asyncFlag = listener({ type: 'A2_OPERATOR_CAPTURE_OOPIF', platform: 'CHATGPT' }, trustedSender, (value) => { trustedResponse = value; });
-assert.equal(asyncFlag, true);
-await new Promise((resolve) => setTimeout(resolve, 0));
-assert.equal(trustedResponse?.ok, true);
-assert.equal(trustedResponse?.perception?.child_frame_count, 1);
+async function dispatchTrusted(message) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('trusted OOPIF response timeout')), 1500);
+    const asyncFlag = listener(message, trustedSender, (value) => {
+      clearTimeout(timer);
+      resolve({ asyncFlag, value });
+    });
+    if (asyncFlag !== true) {
+      clearTimeout(timer);
+      reject(new Error(`trusted OOPIF handler was not asynchronous: ${String(asyncFlag)}`));
+    }
+  });
+}
+
+const trusted = await dispatchTrusted({ type: 'A2_OPERATOR_CAPTURE_OOPIF', platform: 'CHATGPT' });
+assert.equal(trusted.asyncFlag, true);
+assert.equal(trusted.value?.ok, true);
+assert.equal(trusted.value?.perception?.child_frame_count, 1);
 
 console.log('A2 v0.6 OOPIF Perception Lab: PASS', JSON.stringify({
   child_frames: capture.child_frame_count,
   accessibility_disabled: true,
   child_auto_attach_disabled: childTargetsDisabled,
-  metadata_only_storage: true
+  metadata_only_storage: true,
+  async_response_awaited: true
 }));
