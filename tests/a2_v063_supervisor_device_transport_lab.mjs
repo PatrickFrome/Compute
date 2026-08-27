@@ -21,7 +21,7 @@ const nativeFetch = async (input, init = {}) => {
   const url = String(input);
   const headers = new Headers(init.headers || {});
   nativeCalls.push({ url, method: String(init.method || "GET"), headers: Object.fromEntries(headers.entries()), body: init.body ?? "" });
-  if (url.startsWith("https://example.com/")) return new Response("", { status: 204 });
+  if (url.startsWith("https://example.com/")) return new Response(null, { status: 204 });
   if (!url.startsWith(V4)) throw new Error(`unexpected_native_url:${url}`);
   if (nativeMode === "invalid_signature") return new Response(JSON.stringify({ error: "supervisor_device_auth_required", reason: "INVALID_SIGNATURE" }), { status: 401, headers: { "content-type": "application/json" } });
   if (nativeMode === "recover_once" && !recoverableSeen) {
