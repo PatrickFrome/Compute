@@ -119,7 +119,7 @@ assert.equal(live.binding.conversation_epoch, 1);
 const persistent = h.local.state.a2TargetRegistryV1;
 assert.ok(persistent);
 assert.equal(JSON.stringify(persistent).includes('"tab_id"'), false, 'tab ids must not leak into chrome.storage.local registry');
-const sessionBindings = h.session.state.a2TargetBindingsV1;
+const sessionBindings = structuredClone(h.session.state.a2TargetBindingsV1);
 assert.equal(sessionBindings.bindings.gpt_primary.tab_id, 11);
 assert.ok(sessionBindings.browser_session_nonce);
 
@@ -147,9 +147,39 @@ assert.equal(h.local.state.chatgptUrl, 'https://chatgpt.com/c/alpha-next', 'lega
 assert.equal((await h.context.A2_TARGET_REGISTRY.getBinding('gpt_primary')), null, 'rollover must invalidate ephemeral binding');
 
 h.tabRows[0].url = 'https://chatgpt.com/c/alpha-next';
-const rebound = await h.context.A2_TARGET_REGISTRY.resolveLiveTab('CHATGPT');
+let rebound = await h.context.A2_TARGET_REGISTRY.resolveLiveTab('CHATGPT');
 assert.equal(rebound.target.target_id, 'gpt_primary');
 assert.equal(rebound.binding.conversation_epoch, 2);
+
+// A legacy config change may not steal another logical target's exact URL.
+h.local.state.chatgptUrl = 'https://chatgpt.com/c/beta';
+await assert.rejects(
+  h.context.A2_TARGET_REGISTRY.syncLegacySeeds(),
+  new RegExp(`target_registry_legacy_url_conflict:CHATGPT:${worker2.target_id}`)
+);
+assert.equal(h.local.state.chatgptUrl, 'https://chatgpt.com/c/alpha-next', 'conflicting legacy URL was not rolled back');
+assert.equal(h.local.state.a2TargetRegistryLastError?.code, 'LEGACY_URL_CONFLICT');
+assert.equal(h.local.state.a2TargetRegistryLastError?.conflicting_target_id, worker2.target_id);
+assert.equal((await h.context.A2_TARGET_REGISTRY.resolveSelector('CHATGPT')).conversation_epoch, 2, 'conflict mutated logical epoch');
+
+// Clearing a legacy URL invalidates the old physical binding but must not reuse its epoch later.
+h.local.state.chatgptUrl = '';
+await h.context.A2_TARGET_REGISTRY.syncLegacySeeds();
+let unbound = await h.context.A2_TARGET_REGISTRY.resolveSelector('CHATGPT');
+assert.equal(unbound.status, 'UNBOUND');
+assert.equal(unbound.conversation_url, null);
+assert.equal(unbound.conversation_epoch, 2);
+assert.equal(await h.context.A2_TARGET_REGISTRY.getBinding('gpt_primary'), null, 'legacy unbind left stale physical binding');
+
+h.local.state.chatgptUrl = 'https://chatgpt.com/c/alpha-next';
+await h.context.A2_TARGET_REGISTRY.syncLegacySeeds();
+const reboundLogical = await h.context.A2_TARGET_REGISTRY.resolveSelector('CHATGPT');
+assert.equal(reboundLogical.target_id, 'gpt_primary');
+assert.equal(reboundLogical.conversation_epoch, 3, 'reappearing conversation reused an old epoch');
+assert.equal(reboundLogical.status, 'ACTIVE');
+assert.equal(h.local.state.a2TargetRegistryLastError, undefined, 'successful reconciliation did not clear diagnostic');
+rebound = await h.context.A2_TARGET_REGISTRY.resolveLiveTab('gpt_primary');
+assert.equal(rebound.binding.conversation_epoch, 3);
 
 await h.context.A2_TARGET_REGISTRY.retireTarget(worker2.target_id);
 targets = await h.context.A2_TARGET_REGISTRY.listTargets();
@@ -161,11 +191,12 @@ const h2 = harness({ localInitial: localSnapshot, sessionInitial: {}, tabs: [{ i
 await h2.context.A2_TARGET_REGISTRY.ready;
 const gptAfterRestart = await h2.context.A2_TARGET_REGISTRY.resolveSelector('CHATGPT');
 assert.equal(gptAfterRestart.target_id, 'gpt_primary');
-assert.equal(gptAfterRestart.conversation_epoch, 2);
+assert.equal(gptAfterRestart.conversation_epoch, 3);
 assert.equal(await h2.context.A2_TARGET_REGISTRY.getBinding('gpt_primary'), null, 'browser restart must not restore prior tab binding');
 const reboundAfterRestart = await h2.context.A2_TARGET_REGISTRY.resolveLiveTab('gpt_primary');
 assert.equal(reboundAfterRestart.tab.id, 101);
-assert.notEqual(h2.session.state.a2TargetBindingsV1.browser_session_nonce, sessionBindings.browser_session_nonce);
+assert.equal(reboundAfterRestart.binding.conversation_epoch, 3);
+assert.notEqual(h2.session.state.a2TargetBindingsV1.browser_session_nonce, h.session.state.a2TargetBindingsV1.browser_session_nonce);
 
 console.log('A2 v0.7.0 target registry contract: PASS', {
   logical_targets: (await h2.context.A2_TARGET_REGISTRY.listTargets({ includeRetired: true })).length,
