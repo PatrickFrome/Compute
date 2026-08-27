@@ -18,7 +18,7 @@
     const suffix = url.pathname.slice(legacy.pathname.length);
     const signed = new URL(`${SIGNED_BASE}${suffix || ""}`);
     signed.search = url.search;
-    return { url: signed.toString(), path: suffix || "/" };
+    return { url: signed.toString(), routePath: suffix || "/", signaturePath: signed.pathname };
   }
 
   async function ensureEnrollment(clientId, pairingSecret, force = false) {
@@ -44,7 +44,7 @@
     if (typeof globalThis.A2_DEVICE_SIGN_REQUEST !== "function") throw new Error("supervisor_device_signer_unavailable");
     const method = String(init?.method || "GET").toUpperCase();
     const body = typeof init?.body === "string" ? init.body : (init?.body == null ? "" : String(init.body));
-    const signature = await globalThis.A2_DEVICE_SIGN_REQUEST(method, mapped.path, body);
+    const signature = await globalThis.A2_DEVICE_SIGN_REQUEST(method, mapped.signaturePath, body);
     if (!signature || signature.profile !== PROFILE || !signature.device_id) throw new Error("supervisor_device_signature_unavailable");
     const headers = new Headers(init?.headers || {});
     headers.delete("x-a2-chat-bridge-secret");
