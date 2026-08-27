@@ -31,12 +31,6 @@
     return fetch(`${SUPERVISOR_URL}${path}`, { ...init, headers, cache: "no-store" });
   }
 
-  async function currentMode() {
-    const x = await chrome.storage.session.get(MODE_KEY);
-    const value = String(x[MODE_KEY] || "OFF").toUpperCase();
-    return MODES.has(value) ? value : "OFF";
-  }
-
   async function setSupervisorMode(value) {
     const next = String(value || "").toUpperCase();
     if (!MODES.has(next)) throw new Error("supervisor_bootstrap_mode_invalid");
@@ -81,9 +75,9 @@
   async function poll() {
     if (pollPromise) return pollPromise;
     pollPromise = (async () => {
-      const mode = await currentMode();
-      if (mode === "CONTROL") return { skipped: true, reason: "already_control" };
-
+      // Bootstrap authority remains pollable in every local mode. The server-side
+      // bootstrap lease is action-filtered, so this lane can always revoke or
+      // change supervisor authority without competing for ordinary browser work.
       const r = await request("/v1/commands/bootstrap-next", { method: "POST", body: "{}" });
       if (!r.ok) throw new Error(`supervisor_bootstrap_next_http_${r.status}`);
       const body = await r.json();
