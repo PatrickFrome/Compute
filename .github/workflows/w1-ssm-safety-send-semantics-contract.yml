@@ -1,0 +1,89 @@
+name: W1 SSM Safety Send Semantics Contract
+
+on:
+  push:
+    branches:
+      - work/w1-linux-worker-safety
+      - work/main-roadmap-accelerators-v5
+    paths:
+      - 'controller/w1/aws_ssm_safety_provision_guard.py'
+      - 'controller/w1/aws_ssm_safety_provision_provenance.py'
+      - 'controller/w1/aws_ssm_safety_send_semantics_guard.py'
+      - 'tests/test_w1_aws_ssm_safety_provision_guard.py'
+      - 'tests/test_w1_aws_ssm_safety_provision_provenance.py'
+      - 'tests/test_w1_aws_ssm_safety_send_semantics_guard.py'
+      - '.github/workflows/w1-ssm-safety-send-semantics-contract.yml'
+      - 'research/W1_SSM_PROVISIONING_PROVENANCE.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'controller/w1/aws_ssm_safety_provision_guard.py'
+      - 'controller/w1/aws_ssm_safety_provision_provenance.py'
+      - 'controller/w1/aws_ssm_safety_send_semantics_guard.py'
+      - 'tests/test_w1_aws_ssm_safety_provision_guard.py'
+      - 'tests/test_w1_aws_ssm_safety_provision_provenance.py'
+      - 'tests/test_w1_aws_ssm_safety_send_semantics_guard.py'
+      - '.github/workflows/w1-ssm-safety-send-semantics-contract.yml'
+      - 'research/W1_SSM_PROVISIONING_PROVENANCE.md'
+
+permissions:
+  contents: read
+
+jobs:
+  strict-send-semantics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Verify exact source head
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Compile strict provisioning proof
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            controller/w1/aws_ssm_safety_provision_guard.py \
+            controller/w1/aws_ssm_safety_provision_provenance.py \
+            controller/w1/aws_ssm_safety_send_semantics_guard.py
+
+      - name: Run strict execution-semantics adversarial tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest \
+            tests.test_w1_aws_ssm_safety_provision_guard \
+            tests.test_w1_aws_ssm_safety_provision_provenance \
+            tests.test_w1_aws_ssm_safety_send_semantics_guard -v
+
+      - name: Prove strict layer remains below W1 authority
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          source=Path('controller/w1/aws_ssm_safety_send_semantics_guard.py').read_text(encoding='utf-8')
+          required=(
+              'EXPECTED_TIMEOUT_SECONDS = 120',
+              'matching_send_command_event_not_yet_visible',
+              'duplicate_matching_send_command_events',
+              'strict_send_command_semantics_verified',
+              '"package_provisioning_verified"] = True',
+              'out["host_safety_verified"] = False',
+              'out["reboot_completion_proven"] = False',
+              'out["persistent_worker_proof"] = False',
+              'out["worker_admitted"] = False',
+              'out["w1_verified"] = False',
+              'out["database_mutation"] = False',
+              'out["canonical"] = False',
+              'out["authority_effect"] = False',
+          )
+          for marker in required:
+              assert marker in source, marker
+          for forbidden in ('boto3','requests.','urllib.','socket.socket','supabase_url','service_role','ec2:RebootInstances'):
+              assert forbidden.lower() not in source.lower(), forbidden
+          print('W1 strict SendCommand semantics non-authority boundary: PASS')
+          PY
