@@ -272,7 +272,7 @@
       return dispatch(prepared.next, `recovery:${reason}`);
     } catch (error) {
       const retryable = {
-        ...pending,
+        ...prepared.next,
         status: "RETRYABLE",
         retry_after: new Date(Date.now() + RETRY_DELAY_MS).toISOString(),
         last_error_code: safeToken(error?.message || error, 180),

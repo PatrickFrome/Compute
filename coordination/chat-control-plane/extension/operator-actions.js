@@ -24,7 +24,17 @@
 
   function trustedOperatorSender(sender) {
     const expected = chrome.runtime.getURL("sidepanel.html");
-    return sender?.id === chrome.runtime.id && typeof sender?.url === "string" && sender.url.startsWith(expected);
+    try {
+      const expectedUrl = new URL(expected);
+      const senderUrl = new URL(String(sender?.url || ""));
+      return sender?.id === chrome.runtime.id
+        && senderUrl.origin === expectedUrl.origin
+        && senderUrl.pathname === expectedUrl.pathname
+        && senderUrl.search === expectedUrl.search
+        && senderUrl.hash === expectedUrl.hash;
+    } catch (_) {
+      return false;
+    }
   }
 
   function platformOf(value) {

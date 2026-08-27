@@ -266,11 +266,18 @@ async function nextCommand(req: Request, body: any) {
       if (same.status === 'COMPLETED' || (same.status === 'FAILED' && age < FAILED_RETRY_MS) || (same.status === 'LEASED' && age < LEASE_TIMEOUT_MS)) continue;
     }
     const prompt = buildWakePrompt(platform, snapshots, a2);
-    const commandId = crypto.randomUUID();
-    const createdAt = new Date().toISOString();
-    const command = { schema: 'metaengine.chat-bridge.command.v1', command_id: commandId, idempotency_key: idempotencyKey, target_platform: platform, target_agent: agentForPlatform(platform), created_at: createdAt, prompt, prompt_sha256: await sha256(prompt), a2_head_message_seq: a2.cursor, a2_peer_payloads_exposed: a2.peerPayloadsExposed === true, duel_id: a2.pendingRelay?.relay?.duel_id || null, authority_effect: false, status: 'LEASED', leased_to: clientId, leased_at: createdAt };
-    await rest(COMMAND_TABLE, { method: 'POST', headers: { prefer: 'return=minimal' }, body: JSON.stringify({ command_id: commandId, idempotency_key: idempotencyKey, target_platform: platform, target_agent: agentForPlatform(platform), client_id: clientId, status: 'LEASED', created_at: createdAt, leased_at: createdAt, prompt_sha256: command.prompt_sha256, a2_head_message_seq: a2.cursor, a2_peer_payloads_exposed: command.a2_peer_payloads_exposed, duel_id: command.duel_id, authority_effect: false }) });
-    return command;
+    const command = await rpc('h205f22_a2_chat_bridge_issue_command_v2', {
+      p_workspace_id: WORKSPACE_ID,
+      p_idempotency_key: idempotencyKey,
+      p_target_platform: platform,
+      p_target_agent: agentForPlatform(platform),
+      p_client_id: clientId,
+      p_prompt_sha256: await sha256(prompt),
+      p_a2_head_message_seq: a2.cursor,
+      p_a2_peer_payloads_exposed: a2.peerPayloadsExposed === true,
+      p_duel_id: a2.pendingRelay?.relay?.duel_id || null
+    });
+    return { schema: 'metaengine.chat-bridge.command.v1', ...command, prompt };
   }
   return null;
 }

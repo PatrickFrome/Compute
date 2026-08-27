@@ -182,6 +182,23 @@ assert.equal(afterEpoch.attempt, 3);
 assert.equal(afterEpoch.epoch, sessionEpoch);
 assert.equal(afterEpoch.status, "WAITING_RESPONSE");
 
+context.A2_SUPERVISOR_CHAT_RECOVER = async () => {
+  throw new Error("recovery_unavailable");
+};
+await chrome.storage.local.set({
+  a2SupervisorPendingIncidentV1: {
+    ...afterEpoch,
+    status: "WAITING_RESPONSE",
+    attempt: 2,
+    last_progress_at: new Date(Date.now() - 180_000).toISOString(),
+    sent_at: new Date(Date.now() - 180_000).toISOString()
+  }
+});
+const failedRecovery = await context.A2_SUPERVISOR_INCIDENT_TICK();
+assert.equal(failedRecovery.status, "RETRYABLE");
+assert.equal(failedRecovery.attempt, 3, "recovery failure must preserve incremented attempt");
+assert.equal(failedRecovery.last_error_code, "recovery_unavailable");
+
 assert.ok(source.includes("daemonLastError"));
 assert.ok(source.includes("operatorSensorLastError"));
 assert.ok(source.includes("unhandledrejection"));

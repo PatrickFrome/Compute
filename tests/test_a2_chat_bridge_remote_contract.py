@@ -6,6 +6,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 EDGE = ROOT / "supabase" / "functions" / "a2-chat-bridge-remote" / "index.ts"
 MIGRATION = ROOT / "supabase" / "migrations" / "20260825213000_a2_chat_bridge_remote_runtime_v1.sql"
+ATOMIC_MIGRATION = ROOT / "supabase" / "migrations" / "20260827140000_a2_chat_bridge_remote_atomic_command_v2.sql"
 RLS_MIGRATION = ROOT / "supabase" / "migrations" / "20260825215000_a2_chat_bridge_remote_runtime_rls_deny_v1.sql"
 BOOTSTRAP = ROOT / "coordination" / "chat-control-plane" / "extension" / "bootstrap-config.js"
 AMPLIFIER_POLICY = ROOT / "coordination" / "amplifier-loop" / "AMPLIFIER_LOOP_V1.md"
@@ -26,6 +27,7 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
     def setUpClass(cls):
         cls.edge = EDGE.read_text()
         cls.migration = MIGRATION.read_text()
+        cls.atomic_migration = ATOMIC_MIGRATION.read_text()
         cls.rls = RLS_MIGRATION.read_text()
         cls.bootstrap = BOOTSTRAP.read_text()
         cls.amplifier_policy = AMPLIFIER_POLICY.read_text()
@@ -48,9 +50,12 @@ class A2ChatBridgeRemoteContract(unittest.TestCase):
         self.assertIn("target_url_sha256", self.migration)
         self.assertIn("message_count", self.migration)
         self.assertIn("authority_effect boolean not null default false check (authority_effect = false)", self.migration)
-        persisted_command = self.edge.split("await rest(COMMAND_TABLE", 1)[1].split("return command", 1)[0]
-        self.assertIn("prompt_sha256: command.prompt_sha256", persisted_command)
-        self.assertNotIn("prompt: command.prompt", persisted_command)
+        self.assertIn("h205f22_a2_chat_bridge_issue_command_v2", self.edge)
+        self.assertIn("p_prompt_sha256", self.edge)
+        self.assertIn("pg_advisory_xact_lock", self.atomic_migration)
+        self.assertIn("h205f22_a2_chat_bridge_issue_command_v2", self.atomic_migration)
+        self.assertNotIn("p_prompt text", self.atomic_migration.lower())
+        self.assertNotIn("'prompt',", self.atomic_migration.lower())
         persisted_peer = self.edge.split("const row = {", 1)[1].split("await rest(`${PEER_TABLE}", 1)[0]
         self.assertNotIn("messages:", persisted_peer)
         self.assertNotIn("snapshot:", persisted_peer)
