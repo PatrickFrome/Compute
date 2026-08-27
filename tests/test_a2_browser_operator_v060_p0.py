@@ -20,6 +20,7 @@ class BrowserOperatorV060P0(unittest.TestCase):
         cls.bindings = (EXT / "operator-gate-bindings.js").read_text()
         cls.perception = (EXT / "operator-perception.js").read_text()
         cls.actions = (EXT / "operator-actions.js").read_text()
+        cls.semantic = (EXT / "operator-semantic-actions.js").read_text()
         cls.broker = (EXT / "debugger-broker.js").read_text()
         cls.updater = (EXT / "update-manager.js").read_text()
         cls.compat = (EXT / "compat-config.js").read_text()
@@ -206,11 +207,29 @@ class BrowserOperatorV060P0(unittest.TestCase):
             "a2_v060_operator_control_lab.mjs",
             "a2_v060_perception_lab.mjs",
             "a2_v060_operator_actions_lab.mjs",
+            "a2_v060_semantic_actions_lab.mjs",
             "a2_v060_debugger_broker_lab.mjs",
             "a2_v060_update_manager_lab.mjs",
             "a2_v060_compat_config_lab.mjs",
         ]:
             self.assertTrue((ROOT / "tests" / name).exists())
+
+    def test_24_semantic_ax_actions_are_live_revalidated_and_focus_is_non_activating(self):
+        for token in ["Accessibility.queryAXTree", "DOM.describeNode", "semantic_live_target_ambiguous", "semantic_target_replaced_recapture_required", "DOM.focus", "DOM.scrollIntoViewIfNeeded"]:
+            self.assertIn(token, self.semantic)
+        self.assertIn("clickByMouse", self.semantic)
+        self.assertIn("focusWithoutActivation", self.semantic)
+        self.assertIn("semantic_password_input_blocked", self.semantic)
+        self.assertIn("semantic_navigation_or_download_blocked", self.semantic)
+        self.assertIn('compat("features.semantic_actions_enabled", true)', self.semantic)
+        self.assertIn('"semantic_actions_enabled"', self.compat)
+        self.assertIn('importScripts("./operator-semantic-actions.js")', self.entry)
+        self.assertGreater(self.entry.index('importScripts("./operator-semantic-actions.js")'), self.entry.index('importScripts("./operator-perception.js")'))
+        self.assertNotIn("EXECUTE_JS", self.semantic)
+        self.assertNotIn("chrome.debugger.attach", self.semantic)
+        focus_start = self.semantic.index("async function focusWithoutActivation")
+        click_start = self.semantic.index("async function clickByMouse")
+        self.assertNotIn("Input.dispatchMouseEvent", self.semantic[focus_start:click_start])
 
 
 if __name__ == "__main__":
