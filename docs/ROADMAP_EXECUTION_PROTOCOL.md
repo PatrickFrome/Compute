@@ -22,15 +22,40 @@ If a Level-2 assignment cannot be mapped unambiguously to Level-1, stop at `EVID
 
 Before PLAN or PUBLISH, capture the read-only snapshot in
 `supabase/prep/main_roadmap_lease_truth_snapshot_v1.sql` and evaluate it with
-`controller/roadmap/roadmap_lease_truth_guard.py`.
+`controller/roadmap/roadmap_lease_truth_guard_v2.py`.
 
 The snapshot uses one PostgreSQL `statement_timestamp()` as the observation
-instant and includes the durable Level-2 → Level-1 mapping plus the raw rows
-still labelled `ACTIVE`. A stored `ACTIVE` label is not current authority after
-its finite lease has expired. The guard therefore fails closed on stale active
-claims/directives, duplicate fresh authority for the selected milestone,
-alignment references to expired claims, supervisor/raw fresh-claim projection
-mismatch, malformed timestamps, or missing durable Level-1 ownership.
+instant and includes the durable Level-2 → Level-1 mapping, authoritative
+alignment/supervisor projections, and raw rows still labelled `ACTIVE`.
+A stored `ACTIVE` label is not authority after the finite lease has expired.
+Current authority is derived from a fresh lease plus exact projection equality.
+
+A fresh roadmap claim requires all of:
+
+- `state='ACTIVE'`;
+- `expires_at > observed_at`;
+- `heartbeat_at <= observed_at`;
+- `heartbeat_at < expires_at`.
+
+The authoritative alignment projection must contain exactly the fresh raw claim
+IDs. The supervisor projection must contain exactly the fresh raw claim and
+fresh raw directive IDs. Any stale ID reappearing in either authoritative
+projection is a fail-closed error.
+
+Expired rows that remain physically labelled `ACTIVE` may be retained as
+**cleanup debt** when every authoritative projection excludes them. In that
+case the receipt may PASS with `cleanup_required=true` and
+`stale_rows_authority_effect=false`. Reconciliation remains useful maintenance,
+but physical cleanup is not the source of lease validity and is not by itself a
+prerequisite for PLAN/PUBLISH.
+
+`claim_id` is exposed as a monotonic lease fence/sequencer. A later holder must
+not acquire authority from an older claim merely because an old persisted row
+still exists.
+
+An `IN_PROGRESS` Level-2 milestone without a fresh owning claim is projected as
+`PLANNED` in the canonical progress spine; the read path does not mutate the
+underlying milestone row.
 
 Level-1 ownership is a durable roadmap property. It must not be inferred solely
 from whichever transient work claim happens to be active. A work claim may be
@@ -39,7 +64,13 @@ absent during planning without erasing the Level-1 mapping.
 The lease-truth receipt is PREP evidence only: `canonical=false`,
 `authority_effect=false`, and it authorizes no database mutation, provider
 mutation, Edge deployment, PR merge, or checkpoint promotion. A blocked receipt
-must be reconciled before a normal roadmap cycle can be considered publishable.
+must be resolved before a normal roadmap cycle can be considered publishable.
+A PASS with cleanup debt permits roadmap planning but does not authorize the
+cleanup mutation itself.
+
+The prior `roadmap_lease_truth_guard.py` V1 behavior is retained only as a
+historical/strict-cleanliness contract; V2 is the current roadmap authority
+gate.
 
 ### Deterministic cycle oracle
 
@@ -89,10 +120,10 @@ strict descendant of the still-unchanged expected remote SHA.
 ## Per-workstream loop
 
 1. Read current semantic checkpoint and roadmap status.
-2. Capture a single-statement lease-truth snapshot and obtain a passing lease-truth receipt.
+2. Capture a single-statement lease-truth snapshot and obtain a passing V2 lease-truth receipt; record cleanup debt separately from authority.
 3. Fetch the exact workstream rail and obtain a passing `PLAN` cycle-oracle receipt.
 4. Read `docs/CANONICAL_ROADMAP.md` and identify the owning Level-1 milestone.
-5. Read the active supervisor directive and work claim.
+5. Read the active supervisor directive and work claim, if fresh authority exists.
 6. Verify dependency gates, mutation domains and the Level-1 ↔ Level-2 mapping.
 7. Implement only within the assigned workstream.
 8. Run positive tests and fail-closed negative canaries.
@@ -101,7 +132,7 @@ strict descendant of the still-unchanged expected remote SHA.
 11. Clearly label `LIVE`, `SYNTHETIC`, `CONTROL_PLANE_ONLY`, `SCHEMA_ONLY`, and `HISTORICAL` evidence.
 12. Re-capture lease truth, commit, refetch, and obtain passing lease-truth plus `PUBLISH` cycle-oracle receipts.
 13. Publish only as a fast-forward workstream update and keep the PR draft until integration gates pass.
-14. Finish the Level-2 roadmap claim as `EVIDENCE_READY`.
+14. Finish the Level-2 roadmap claim as `EVIDENCE_READY` only through an authority-bearing path.
 15. State explicitly which Level-1 acceptance criterion is now evidence-ready.
 
 ## Integration loop
@@ -128,6 +159,8 @@ C1 requires a real admitted Linux worker. C2 requires a real repo → edit → b
 - Worker chats never seal mainline checkpoints.
 - Synthetic evidence never counts as live evidence.
 - A dependency-gated milestone cannot gain runtime authority early.
+- Expired lease rows never regain authority from their persisted state alone.
+- Cleanup/reconciliation is distinct from authority projection; stale cleanup debt must remain visible until reconciled.
 - Parallel workstreams must not overlap mutation domains without explicit Supervisor coordination.
 - `main` is the integration result, not a workspace for direct experimentation.
 - Every PR must name both its canonical Level-1 milestone and its Level-2 milestone.
