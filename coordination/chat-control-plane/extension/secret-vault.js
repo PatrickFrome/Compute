@@ -5,6 +5,7 @@
   const DB_VERSION = 1;
   const STORE = "secrets";
   const PAIRING_KEY = "pairing_secret";
+  const BOOTSTRAP_EPOCH_KEY = "a2PairingBootstrapEpoch";
   const bootstrap = globalThis.A2_BRIDGE_BOOTSTRAP || {};
 
   function openDb() {
@@ -55,9 +56,22 @@
   }
 
   async function migrateLegacySecret() {
-    const stored = await chrome.storage.local.get("bridgeSecret");
-    const legacy = String(stored.bridgeSecret || bootstrap.bridgeSecret || "").trim();
-    if (legacy.length >= 32 && !(await hasPairingSecret())) await setPairingSecret(legacy);
+    const stored = await chrome.storage.local.get(["bridgeSecret", BOOTSTRAP_EPOCH_KEY]);
+    const bootstrapSecret = String(bootstrap.bridgeSecret || "").trim();
+    const bootstrapEpoch = String(bootstrap.pairingEpoch || "").trim();
+    const legacy = String(stored.bridgeSecret || "").trim();
+
+    // A personalized bundle may intentionally rotate a stale vault credential.
+    // The embedded token is applied once per explicit pairingEpoch. After that,
+    // a manual token update remains authoritative across MV3 worker restarts.
+    if (bootstrapSecret.length >= 32 && bootstrapEpoch && stored[BOOTSTRAP_EPOCH_KEY] !== bootstrapEpoch) {
+      await setPairingSecret(bootstrapSecret);
+      await chrome.storage.local.set({ [BOOTSTRAP_EPOCH_KEY]: bootstrapEpoch });
+    } else if (!(await hasPairingSecret())) {
+      const seed = legacy || bootstrapSecret;
+      if (seed.length >= 32) await setPairingSecret(seed);
+    }
+
     if (stored.bridgeSecret !== undefined) await chrome.storage.local.remove("bridgeSecret");
   }
 
