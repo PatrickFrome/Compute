@@ -28,15 +28,17 @@ assert.match(html,/<script src="sidepanel\.js"><\/script>\s*<script src="sidepan
 
 const semanticImport='importScripts("./operator-semantic-actions.js");';
 const sessionImport='importScripts("./supervisor-chat-session-v063.js");';
+const trustedSupervisorImport='importScripts("./trusted-supervisor-chat-v063.js");';
 const clientImport=`importScripts("./${activeClientName}");`;
 const semanticIndex=entry.indexOf(semanticImport);
 const sessionIndex=entry.indexOf(sessionImport);
+const trustedSupervisorIndex=entry.indexOf(trustedSupervisorImport);
 const clientIndex=entry.indexOf(clientImport);
 assert.ok(semanticIndex>=0,'operator semantic actions must be active');
 assert.ok(clientIndex>semanticIndex,'supervisor authority client must load after semantic actions');
 if(sessionIndex>=0){
   assert.ok(sessionIndex>semanticIndex,'supervisor session manager must load after semantic actions');
-  assert.ok(clientIndex>sessionIndex,'supervisor authority client must load after supervisor session manager');
+  if(trustedSupervisorIndex>=0) assert.ok(trustedSupervisorIndex>sessionIndex,'trusted supervisor chat must load after its session manager');
 }
 
 assert.match(css,/\.causal-lane/);
@@ -57,7 +59,7 @@ if(activeClientName==='supervisor-client-v063-authority.js'){
   assert.match(client,/BOOTSTRAP_ACTIONS/);
   assert.match(client,/a2-browser-supervisor-v3-canary/);
   assert.doesNotMatch(client,/body_excerpt/);
-  assert.ok(sessionIndex>=0,'v0.6.3 authority client requires the self-healing supervisor session manager');
+  assert.ok(sessionIndex>=0,'v0.6.3 authority runtime requires the self-healing supervisor session manager');
 }
 
-console.log('a2_v060_sidepanel_board_lab: PASS',{requiredIds:required.size,activeClientName,sessionManager:sessionIndex>=0});
+console.log('a2_v060_sidepanel_board_lab: PASS',{requiredIds:required.size,activeClientName,sessionManager:sessionIndex>=0,trustedSupervisorChat:trustedSupervisorIndex>=0});
