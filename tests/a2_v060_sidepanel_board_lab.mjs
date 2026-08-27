@@ -8,8 +8,9 @@ const html=fs.readFileSync(path.join(ext,'sidepanel.html'),'utf8');
 const css=fs.readFileSync(path.join(ext,'sidepanel.css'),'utf8');
 const js=fs.readFileSync(path.join(ext,'sidepanel.js'),'utf8');
 const sup=fs.readFileSync(path.join(ext,'sidepanel-supervisor.js'),'utf8');
-const client=fs.readFileSync(path.join(ext,'supervisor-client.js'),'utf8');
 const entry=fs.readFileSync(path.join(ext,'background-entry.js'),'utf8');
+const activeClientName=entry.includes('supervisor-client-v063.js')?'supervisor-client-v063.js':'supervisor-client.js';
+const client=fs.readFileSync(path.join(ext,activeClientName),'utf8');
 
 function idsFrom(source){return [...source.matchAll(/\$\(["']([^"']+)["']\)/g)].map(m=>m[1]);}
 const required=new Set([...idsFrom(js),...idsFrom(sup)]);
@@ -20,7 +21,7 @@ assert.match(html,/Strict causal lane/);
 assert.match(html,/Chat Supervisor/);
 assert.match(html,/Live timeline/);
 assert.match(html,/<script src="sidepanel\.js"><\/script>\s*<script src="sidepanel-supervisor\.js"><\/script>/);
-assert.match(entry,/importScripts\("\.\/operator-semantic-actions\.js"\);\s*importScripts\("\.\/supervisor-client\.js"\);/);
+assert.match(entry,/importScripts\("\.\/operator-semantic-actions\.js"\);\s*importScripts\("\.\/supervisor-client(?:-v063)?\.js"\);/);
 assert.match(css,/\.causal-lane/);
 assert.match(css,/\.timeline-item/);
 assert.match(client,/supervisor_local_control_required/);
@@ -34,4 +35,4 @@ assert.doesNotMatch(client,/eval\(command/);
 assert.match(client,/A2_GET_PAIRING_SECRET/);
 assert.match(client,/A2_BRIDGE_CLIENT_ID/);
 
-console.log('a2_v060_sidepanel_board_lab: PASS',{requiredIds:required.size});
+console.log('a2_v060_sidepanel_board_lab: PASS',{requiredIds:required.size,activeClientName});
