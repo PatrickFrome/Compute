@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>METAENGINE A2 Cognitive Bus</title>
+  <link rel="stylesheet" href="/a2/assets/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">A2</div>
+      <div><strong>Realtime Multi-Agent Cognitive Bus</strong><span id="workspaceLabel">workspace</span></div>
+    </div>
+    <div class="status-strip">
+      <span class="pill" id="liveHealth">LIVE — connecting</span>
+      <span class="pill" id="causalHealth">CAUSAL — unknown</span>
+      <span class="pill" id="authorityHealth">AUTHORITY — unknown</span>
+      <span class="pill mono" id="frontierBadge">seq —</span>
+    </div>
+  </header>
+
+  <section class="semantic-rail">
+    <div><span class="label">Semantic point</span><strong id="semanticPoint">—</strong></div>
+    <div><span class="label">Mode</span><strong id="mode">COLLABORATE</strong></div>
+    <div><span class="label">Conflict</span><strong id="conflictState">none</strong></div>
+    <div><span class="label">Duel</span><strong id="duelState">idle</strong></div>
+  </section>
+
+  <main class="workspace-grid">
+    <section class="agent-pane" data-agent="GPT">
+      <div class="pane-head">
+        <div><span class="agent-dot"></span><strong>GPT 5.6 Sol</strong><small id="gptModel">exact model pending</small></div>
+        <div class="agent-stats"><span id="gptSeen">seen —</span><span id="gptLag">lag —</span></div>
+      </div>
+      <div class="microstep-card">
+        <span class="label">Current microstep</span>
+        <strong id="gptCurrent">waiting</strong>
+        <div class="gap-line"><span>opaque gap</span><span id="gptGap">0 ms</span></div>
+      </div>
+      <div class="stream-head"><span>Observable reasoning</span><span class="mono" id="gptFrontier">frontier —</span></div>
+      <div class="agent-stream" id="gptStream"></div>
+    </section>
+
+    <section class="causal-pane">
+      <div class="pane-head">
+        <div><strong>Shared causal timeline</strong><small>commit order + causal parents</small></div>
+        <div class="filters">
+          <button data-filter="ALL" class="active">All</button>
+          <button data-filter="COGNITION">Cognition</button>
+          <button data-filter="TOOLS">Tools</button>
+          <button data-filter="EVIDENCE">Evidence</button>
+        </div>
+      </div>
+      <div class="timeline" id="timeline"></div>
+    </section>
+
+    <section class="agent-pane" data-agent="GLM">
+      <div class="pane-head">
+        <div><span class="agent-dot"></span><strong>GLM 5.3</strong><small id="glmModel">exact model pending</small></div>
+        <div class="agent-stats"><span id="glmSeen">seen —</span><span id="glmLag">lag —</span></div>
+      </div>
+      <div class="microstep-card">
+        <span class="label">Current microstep</span>
+        <strong id="glmCurrent">waiting</strong>
+        <div class="gap-line"><span>opaque gap</span><span id="glmGap">0 ms</span></div>
+      </div>
+      <div class="stream-head"><span>Observable reasoning</span><span class="mono" id="glmFrontier">frontier —</span></div>
+      <div class="agent-stream" id="glmStream"></div>
+    </section>
+  </main>
+
+  <section class="authority-rail">
+    <div><span class="label">Semantic head</span><strong class="mono" id="authorityCheckpoint">—</strong></div>
+    <div><span class="label">Git main</span><strong class="mono" id="authorityGit">—</strong></div>
+    <div><span class="label">Claim / directive</span><strong id="authorityClaim">—</strong></div>
+    <div><span class="label">Execution candidate</span><strong id="executionCandidate">none</strong></div>
+    <div><span class="label">Executor</span><strong id="executorState">idle</strong></div>
+  </section>
+
+  <aside class="inspector" id="inspector" aria-hidden="true">
+    <div class="inspector-head"><div><span class="label">Event inspector</span><strong id="inspectTitle">WHY?</strong></div><button id="closeInspector">Close</button></div>
+    <div class="inspect-tabs">
+      <button class="active" data-tab="why">WHY?</button>
+      <button data-tab="seen">WHAT DID IT SEE?</button>
+      <button data-tab="evidence">EVIDENCE</button>
+      <button data-tab="tool">TOOL I/O</button>
+      <button data-tab="hashes">HASHES</button>
+    </div>
+    <div id="inspectBody" class="inspect-body"></div>
+  </aside>
+
+  <div class="toast" id="toast"></div>
+  <script type="module" src="/a2/assets/app.js"></script>
+</body>
+</html>
