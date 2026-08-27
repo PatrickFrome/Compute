@@ -62,7 +62,8 @@ Additional Compute Browser invariants:
 - browser renderer/page content never receives privileged local IPC;
 - raw CDP is internal-only and is never an external RPC capability;
 - arbitrary Chrome command-line flags are never remotely supplied;
-- loopback CDP in B1 is transitional and must move to pipe in B3;
+- DevTools control uses inherited pipe descriptors; no DevTools TCP listener or discovery HTTP is permitted after B3;
+- every ephemeral CDP binding is exact to one `process_incarnation_id` and is invalid after process loss;
 - Chrome for Testing is CI/benchmark-only, not the production browser for arbitrary web content.
 
 ## Identity model
@@ -74,6 +75,7 @@ profile_id            persistent browser storage/security boundary
 conversation_epoch    logical incarnation
 cdp_target_id         ephemeral browser-process binding
 browser PID           ephemeral process identity
+process_incarnation_id ephemeral causal identity for one browser start
 ```
 
 A `cdp_target_id`, PID, URL, or tab-like browser identifier must never replace `target_id` as durable identity.
@@ -105,3 +107,14 @@ Pin Chrome for Testing. Initial B0/B1 benchmark pin: `152.0.7977.64`, revision `
 B1 is intentionally **non-actuating**. It may launch/stop a dedicated browser, create/activate/close browser targets and report health. It must not expose typing, clicking, prompt submission, arbitrary evaluation, shell execution, or raw CDP through its external RPC.
 
 This lets process/profile/identity recovery be verified before the irreversible action kernel is ported from the extension.
+
+## B2/B3 foundation boundary
+
+The first B2/B3 slice replaces loopback WebSocket discovery with Chromium's
+inherited JSON/NUL DevTools pipe and adds a fresh process-incarnation identity to
+every target binding. Pipe/process loss rejects pending protocol calls and makes
+old bindings unbound. Recovery may restart the same durable profile, but it does
+not replay or silently rebind an action. Target create/activate/close persists a
+pre-effect lifecycle intent; ambiguous completion remains recovery-required.
+Multiple user contexts and the session
+scheduler remain later typed B2/B3 slices.

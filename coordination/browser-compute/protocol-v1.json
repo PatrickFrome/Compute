@@ -1,6 +1,6 @@
 {
   "schema": "metaengine.a2-browser-protocol.v1",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "transport": {
     "scope": "local_machine_only",
     "unix": "unix_domain_socket",
@@ -10,7 +10,14 @@
   },
   "identity": {
     "durable": ["browser_node_id", "profile_id", "target_id", "conversation_epoch"],
-    "ephemeral": ["browser_pid", "cdp_target_id", "debug_port"]
+    "ephemeral": ["browser_pid", "process_incarnation_id", "cdp_target_id"]
+  },
+  "trusted_engine_transport": {
+    "kind": "chromium_remote_debugging_pipe",
+    "framing": "nul_delimited_json",
+    "max_frame_bytes": 16777216,
+    "devtools_tcp_listener": false,
+    "raw_cdp_external": false
   },
   "methods": [
     "runtime.health",

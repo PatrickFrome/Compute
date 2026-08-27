@@ -23,16 +23,20 @@ test('URL parser accepts canonical input but B1 policy keeps remote navigation d
   assert.ok(protocol.forbidden_external_capabilities.includes('remote_navigation_b1'));
 });
 
-test('chrome args always isolate profile and debugger', () => {
+test('chrome args isolate profile and expose only the inherited B3 pipe', () => {
   const dir = path.resolve('/tmp/a2-cb-contract-profile');
-  const args = buildChromeArgs({ userDataDir: dir, debuggingPort: 43210, headless: true });
+  const args = buildChromeArgs({ userDataDir: dir, headless: true });
   assert.ok(args.includes(`--user-data-dir=${dir}`));
-  assert.ok(args.includes('--remote-debugging-address=127.0.0.1'));
-  assert.ok(args.includes('--remote-debugging-port=43210'));
+  assert.ok(args.includes('--remote-debugging-pipe'));
+  assert.ok(!args.some((arg) => arg.startsWith('--remote-debugging-address=')));
+  assert.ok(!args.some((arg) => arg.startsWith('--remote-debugging-port=')));
   assert.ok(args.includes('--headless'));
   assert.ok(!args.includes('--no-sandbox'));
-  assert.throws(() => buildChromeArgs({ userDataDir: dir, debuggingPort: 43210, allowNoSandbox: true }), /no_sandbox_forbidden_outside_ci/);
-  assert.throws(() => buildChromeArgs({ userDataDir: dir, debuggingPort: 80 }), /debugging_port_invalid/);
+  assert.throws(() => buildChromeArgs({ userDataDir: dir, allowNoSandbox: true }), /no_sandbox_forbidden_outside_ci/);
+  assert.deepEqual(protocol.identity.ephemeral, ['browser_pid', 'process_incarnation_id', 'cdp_target_id']);
+  assert.equal(protocol.trusted_engine_transport.kind, 'chromium_remote_debugging_pipe');
+  assert.equal(protocol.trusted_engine_transport.devtools_tcp_listener, false);
+  assert.equal(protocol.trusted_engine_transport.raw_cdp_external, false);
 });
 
 test('RPC surface is typed, effect-classed, and exposes no raw browser code path', () => {
