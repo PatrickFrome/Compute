@@ -103,6 +103,20 @@
     throw new Error("supervisor_chat_content_not_ready");
   }
 
+  async function storeDirectSnapshot(tabId, snapshot) {
+    const tab = await tabById(tabId);
+    if (!tab || !snapshot) return null;
+    const row = {
+      schema: "metaengine.a2-browser-supervisor.chat-snapshot.v1",
+      tab_id: Number(tab.id),
+      url: normUrl(tab.url || ""),
+      observed_at: new Date().toISOString(),
+      snapshot
+    };
+    await chrome.storage.session.set({ [SNAPSHOT_KEY]: row });
+    return row;
+  }
+
   async function probeExhaustion(tabId) {
     try {
       const result = await chrome.tabs.sendMessage(Number(tabId), { type: "A2_CHATGPT_EXHAUSTION_STATUS" });
@@ -137,15 +151,17 @@
     const tab = await chrome.tabs.create({ url: CHATGPT_ROOT, active: false });
     if (!Number.isInteger(Number(tab?.id))) throw new Error("supervisor_chat_create_failed");
     const epoch = Math.max(1, meta.epoch + 1);
+    const recoveryCount = Math.max(0, Number(meta.health?.recovery_count || 0));
     await chrome.storage.local.set({
       [TAB_KEY]: Number(tab.id),
       [URL_KEY]: null,
       [EPOCH_KEY]: epoch
     });
     await chrome.storage.session.remove(SNAPSHOT_KEY);
-    await writeHealth("BOOTSTRAP_ROOT", reason, { tab_id: Number(tab.id), epoch });
-    await waitContent(Number(tab.id));
-    await writeHealth("READY_ROOT", reason, { tab_id: Number(tab.id), epoch });
+    await writeHealth("BOOTSTRAP_ROOT", reason, { tab_id: Number(tab.id), epoch, recovery_count: recoveryCount });
+    const snapshot = await waitContent(Number(tab.id));
+    await storeDirectSnapshot(Number(tab.id), snapshot);
+    await writeHealth("READY_ROOT", reason, { tab_id: Number(tab.id), epoch, recovery_count: recoveryCount });
     return chrome.tabs.get(Number(tab.id));
   }
 
@@ -156,7 +172,7 @@
     const stored = meta.url;
     if (isConversation(url) && stored !== url) {
       await chrome.storage.local.set({ [URL_KEY]: url });
-      await writeHealth("READY_CONVERSATION", reason, { tab_id: Number(tab.id), url, epoch: meta.epoch });
+      await writeHealth("READY_CONVERSATION", reason, { tab_id: Number(tab.id), url, epoch: meta.epoch, recovery_count: Math.max(0, Number(meta.health?.recovery_count || 0)) });
     } else if (!isConversation(url) && stored) {
       await chrome.storage.local.set({ [URL_KEY]: null });
     }
@@ -178,23 +194,34 @@
       const snap = await currentSnapshot();
       if (!snapshotFresh(snap)) {
         const previousReloadAt = Date.parse(String(meta.health?.reload_requested_at || ""));
-        const reloadStillInGrace = Number.isFinite(previousReloadAt) && Date.now() - previousReloadAt < HEALTH_RELOAD_GRACE_MS;
-        if (!reloadStillInGrace) {
-          await chrome.tabs.reload(tab.id);
-          await writeHealth("RELOAD_REQUESTED", `${reason}:snapshot_stale`, {
-            tab_id: tab.id,
-            epoch: meta.epoch,
-            reload_requested_at: new Date().toISOString()
-          });
-          return { ...tab, supervisor_health: "RELOAD_REQUESTED" };
+        if (Number.isFinite(previousReloadAt)) {
+          if (Date.now() - previousReloadAt < HEALTH_RELOAD_GRACE_MS) {
+            await writeHealth("RELOAD_GRACE", `${reason}:snapshot_stale_waiting`, {
+              tab_id: tab.id,
+              epoch: meta.epoch,
+              recovery_count: Math.max(0, Number(meta.health?.recovery_count || 0)),
+              reload_requested_at: meta.health.reload_requested_at
+            });
+            return { ...tab, supervisor_health: "RELOAD_GRACE" };
+          }
+          return recover(`${reason}:snapshot_stale_after_reload`);
         }
-        return recover(`${reason}:snapshot_stale_after_reload`);
+
+        await chrome.tabs.reload(tab.id);
+        await writeHealth("RELOAD_REQUESTED", `${reason}:snapshot_stale`, {
+          tab_id: tab.id,
+          epoch: meta.epoch,
+          recovery_count: Math.max(0, Number(meta.health?.recovery_count || 0)),
+          reload_requested_at: new Date().toISOString()
+        });
+        return { ...tab, supervisor_health: "RELOAD_REQUESTED" };
       }
 
       await writeHealth(isConversation(tab.url || "") ? "READY_CONVERSATION" : "READY_ROOT", reason, {
         tab_id: tab.id,
         url: isConversation(tab.url || "") ? normUrl(tab.url) : null,
         epoch: meta.epoch,
+        recovery_count: Math.max(0, Number(meta.health?.recovery_count || 0)),
         snapshot_observed_at: snap.observed_at || null
       });
       return tab;
@@ -226,7 +253,8 @@
       });
 
       await chrome.tabs.update(tab.id, { url: CHATGPT_ROOT, active: false });
-      await waitContent(tab.id);
+      const snapshot = await waitContent(tab.id);
+      await storeDirectSnapshot(tab.id, snapshot);
       tab = await chrome.tabs.get(tab.id);
       await writeHealth("READY_ROOT", reason, {
         tab_id: tab.id,
@@ -245,7 +273,7 @@
     const meta = await readMeta();
     const url = normUrl(tab.url);
     await chrome.storage.local.set({ [TAB_KEY]: Number(tab.id), [URL_KEY]: url });
-    await writeHealth("READY_CONVERSATION", reason, { tab_id: tab.id, url, epoch: meta.epoch });
+    await writeHealth("READY_CONVERSATION", reason, { tab_id: tab.id, url, epoch: meta.epoch, recovery_count: Math.max(0, Number(meta.health?.recovery_count || 0)) });
     return { tab_id: tab.id, url, epoch: meta.epoch };
   }
 
@@ -273,7 +301,7 @@
     readMeta().then((meta) => {
       if (Number(meta.tab_id) !== Number(tabId)) return;
       return chrome.storage.local.set({ [TAB_KEY]: null, [URL_KEY]: null })
-        .then(() => writeHealth("MISSING", "tab_removed", { tab_id: Number(tabId), epoch: meta.epoch }));
+        .then(() => writeHealth("MISSING", "tab_removed", { tab_id: Number(tabId), epoch: meta.epoch, recovery_count: Math.max(0, Number(meta.health?.recovery_count || 0)) }));
     }).catch(() => {});
   });
 
