@@ -27,6 +27,8 @@ jobs:
           node tests/a2_v063_supervisor_session_lab.mjs
           node tests/a2_v063_bridge_disarm_lab.mjs
           node tests/a2_v063_remote_authority_lab.mjs
+          node tests/a2_v063_snapshot_ingress_lab.mjs
+          node tests/a2_v063_supervisor_chat_session_lab.mjs
 
       - name: Existing Browser Operator regression labs
         run: |
@@ -60,9 +62,11 @@ jobs:
           grep -F 'METAENGINE A2 Browser Operator 0.6.3' coordination/chat-control-plane/extension/manifest.json
           grep -E '^[[:space:]]*importScripts\("\./background-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
           grep -E '^[[:space:]]*importScripts\("\./supervisor-client-v063-authority\.js"\);' coordination/chat-control-plane/extension/background-entry.js
+          grep -E '^[[:space:]]*importScripts\("\./supervisor-chat-session-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
           grep -F '0.6.3-supervisor-authority-dev.2' coordination/chat-control-plane/extension/runtime-marker-v063.js
           grep -F 'a2-browser-supervisor-v3-canary' coordination/chat-control-plane/extension/supervisor-client-v063-authority.js
           grep -F 'SET_SUPERVISOR_MODE' coordination/chat-control-plane/extension/supervisor-client-v063-authority.js
+          grep -F 'A2_SUPERVISOR_CHAT_RECOVER' coordination/chat-control-plane/extension/supervisor-chat-session-v063.js
           ! grep -E '^[[:space:]]*importScripts\("\./background\.js"\);' coordination/chat-control-plane/extension/background-entry.js
           ! grep -E '^[[:space:]]*importScripts\("\./supervisor-client\.js"\);' coordination/chat-control-plane/extension/background-entry.js
           ! grep -E '^[[:space:]]*importScripts\("\./supervisor-client-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
