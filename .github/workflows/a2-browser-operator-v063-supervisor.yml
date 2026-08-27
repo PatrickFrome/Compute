@@ -1,0 +1,62 @@
+name: A2 Browser Operator v0.6.3 Supervisor
+
+on:
+  push:
+    branches:
+      - work/a2-browser-operator-v063-supervisor
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  supervisor-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: JavaScript syntax
+        run: |
+          for f in coordination/chat-control-plane/extension/*.js; do node --check "$f"; done
+          for f in tests/a2_v060_*.mjs tests/a2_v063_*.mjs; do node --check "$f"; done
+
+      - name: v0.6.3 supervisor failure injection
+        run: |
+          node tests/a2_v063_supervisor_session_lab.mjs
+          node tests/a2_v063_bridge_disarm_lab.mjs
+
+      - name: Existing Browser Operator regression labs
+        run: |
+          node tests/a2_v060_debugger_broker_lab.mjs
+          node tests/a2_v060_operator_control_lab.mjs
+          node tests/a2_v060_perception_lab.mjs
+          node tests/a2_v060_oopif_perception_lab.mjs
+          node tests/a2_v060_operator_actions_lab.mjs
+          node tests/a2_v060_semantic_actions_lab.mjs
+          node tests/a2_v060_update_manager_lab.mjs
+          node tests/a2_v060_compat_config_lab.mjs
+          node tests/a2_v060_supervisor_control_lab.mjs
+          node tests/a2_v060_sidepanel_board_lab.mjs
+          node tests/a2_v060_pairing_epoch_lab.mjs
+
+      - name: Python contracts
+        run: |
+          python3 -m unittest -v tests.test_a2_browser_operator_v060_p0
+          python3 -m unittest -v tests.test_a2_browser_operator_v060_debugger_integration
+
+      - name: MV3 pack smoke
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          "$CHROME" --no-sandbox --disable-gpu --pack-extension="$GITHUB_WORKSPACE/coordination/chat-control-plane/extension"
+          test -s coordination/chat-control-plane/extension.crx
+
+      - name: Assert active v0.6.3 entrypoint
+        run: |
+          grep -F 'importScripts("./background-v063.js")' coordination/chat-control-plane/extension/background-entry.js
+          grep -F 'importScripts("./supervisor-client-v063.js")' coordination/chat-control-plane/extension/background-entry.js
+          grep -F '0.6.3-supervisor-fsm-dev.1' coordination/chat-control-plane/extension/runtime-marker-v063.js
+          ! grep -F 'importScripts("./background.js")' coordination/chat-control-plane/extension/background-entry.js
+          ! grep -F 'importScripts("./supervisor-client.js")' coordination/chat-control-plane/extension/background-entry.js
