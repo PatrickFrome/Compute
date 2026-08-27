@@ -1,7 +1,7 @@
 {
   "schema": "metaengine.a2-browser-operator.runtime-package.v1",
   "package_version": "0.7.0",
-  "operator_runtime": "0.7.0-dev.1",
+  "operator_runtime": "0.7.0-dev.2",
   "policy": {
     "canonical_filenames_only": true,
     "reject_versioned_runtime_files": true,
@@ -17,6 +17,7 @@
     "bridge-client.js",
     "runtime-marker.js",
     "target-registry.js",
+    "target-observability.js",
     "bridge-runtime.js",
     "supervisor-device-transport.js",
     "compat-root-key.js",
