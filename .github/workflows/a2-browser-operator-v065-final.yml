@@ -26,8 +26,8 @@ jobs:
       - name: v0.6.5 final hardening labs
         run: |
           node tests/a2_v065_release_contract_lab.mjs
+          node tests/a2_v065_supervisor_device_transport_lab.mjs
           node tests/a2_v064_supervisor_chat_guard_lab.mjs
-          node tests/a2_v063_supervisor_device_transport_lab.mjs
           node tests/a2_v063_supervisor_device_edge_contract_lab.mjs
           node tests/a2_v063_supervisor_session_lab.mjs
           node tests/a2_v063_bridge_disarm_lab.mjs
