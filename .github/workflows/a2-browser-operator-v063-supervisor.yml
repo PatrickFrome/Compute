@@ -55,8 +55,8 @@ jobs:
 
       - name: Assert active v0.6.3 entrypoint
         run: |
-          grep -F 'importScripts("./background-v063.js")' coordination/chat-control-plane/extension/background-entry.js
-          grep -F 'importScripts("./supervisor-client-v063.js")' coordination/chat-control-plane/extension/background-entry.js
+          grep -E '^[[:space:]]*importScripts\("\./background-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
+          grep -E '^[[:space:]]*importScripts\("\./supervisor-client-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
           grep -F '0.6.3-supervisor-fsm-dev.1' coordination/chat-control-plane/extension/runtime-marker-v063.js
-          ! grep -F 'importScripts("./background.js")' coordination/chat-control-plane/extension/background-entry.js
-          ! grep -F 'importScripts("./supervisor-client.js")' coordination/chat-control-plane/extension/background-entry.js
+          ! grep -E '^[[:space:]]*importScripts\("\./background\.js"\);' coordination/chat-control-plane/extension/background-entry.js
+          ! grep -E '^[[:space:]]*importScripts\("\./supervisor-client\.js"\);' coordination/chat-control-plane/extension/background-entry.js
