@@ -8,7 +8,7 @@ importScripts("./bootstrap-config.js");
 importScripts("./secret-vault.js");
 importScripts("./device-identity.js");
 importScripts("./bridge-client.js");
-importScripts("./bridge-runtime-v065.js");
+importScripts("./bridge-runtime-v066.js");
 importScripts("./supervisor-device-transport-v063.js");
 importScripts("./compat-root-key.js");
 importScripts("./compat-config.js");
@@ -27,7 +27,7 @@ importScripts("./operator-actions.js");
 // importScripts("./supervisor-client-v063.js");
 
 importScripts("./background-v063.js");
-importScripts("./runtime-marker-v065.js");
+importScripts("./runtime-marker-v066.js");
 importScripts("./operator-control.js");
 importScripts("./operator-perception.js");
 importScripts("./operator-oopif-perception.js");
