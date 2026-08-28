@@ -28,7 +28,7 @@ fn run() -> Result<(), &'static str> {
     #[cfg(feature = "r7l-test-hooks")]
     executable_identity::test_pause_after_open().map_err(|error| error.code())?;
 
-    rustix::thread::set_no_new_privs().map_err(|_| "skill_launcher_no_new_privs_failed")?;
+    rustix::thread::set_no_new_privs(true).map_err(|_| "skill_launcher_no_new_privs_failed")?;
     launch_contract::sanitize_inherited_fds(Some(exec_fd)).map_err(|error| error.code())?;
     let report = launch_contract::verify_clean_inherited_fds(Some(exec_fd))
         .map_err(|error| error.code())?;
