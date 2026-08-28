@@ -3,6 +3,7 @@ import { SemanticActionCache, semanticActionCacheNamespace } from './semantic-ac
 
 const SCHEMA = 'metaengine.a2-browser-operator.semantic-planning-broker.v1';
 const LOOKUP_SCHEMA = 'metaengine.a2-browser-operator.semantic-planning-lookup.v1';
+const CONTEXT_SCHEMA = 'metaengine.a2-browser-operator.semantic-planning-context.v1';
 const PROMOTION_SCHEMA = 'metaengine.a2-browser-operator.semantic-planning-promotion.v1';
 const DEFAULT_LEASE_TTL_MS = 30_000;
 const DEFAULT_MAX_FLIGHTS = 256;
@@ -92,6 +93,8 @@ export class SemanticPlanningBroker {
       cache_hits: 0,
       leader_misses: 0,
       waiters: 0,
+      context_revalidations: 0,
+      context_revalidation_failures: 0,
       promotions: 0,
       promotion_revalidation_failures: 0,
       aborts: 0,
@@ -188,6 +191,38 @@ export class SemanticPlanningBroker {
       source_token: record.source_token,
       lease_expires_in_ms: this.leaseTtlMs
     });
+  }
+
+  revalidateContext({ flightId, leaseToken, freshEnvelope } = {}) {
+    const id = cleanId(flightId, 'semantic_planning_broker_flight_id_invalid');
+    const token = cleanId(leaseToken, 'semantic_planning_broker_lease_token_invalid', 512);
+    const envelope = assertPerceptionEnvelope(freshEnvelope);
+    const nowMs = finiteTimestamp(this.clock(), 'semantic_planning_broker_clock_invalid');
+    this.sweep(nowMs);
+    const flight = this.flightsById.get(id);
+    if (!flight || flight.lease_token !== token) {
+      this.metrics.lease_rejections += 1;
+      throw new Error('semantic_planning_broker_lease_invalid');
+    }
+    try {
+      const expectedKey = flightKey(envelope, flight.intent_id, flight.action_kind);
+      if (expectedKey !== flight.key) throw new Error('semantic_planning_broker_namespace_changed');
+      this.metrics.context_revalidations += 1;
+      return Object.freeze({
+        schema: CONTEXT_SCHEMA,
+        status: 'CONTEXT_REVALIDATED',
+        flight_id: id,
+        intent_id: flight.intent_id,
+        action_kind: flight.action_kind,
+        document_epoch: envelope.document_epoch,
+        authority_effect: false,
+        actuation_eligible: false,
+        stores_execution_payload: false
+      });
+    } catch (error) {
+      this.metrics.context_revalidation_failures += 1;
+      throw error;
+    }
   }
 
   promote({ flightId, leaseToken, candidateRef, freshEnvelope } = {}) {
@@ -317,4 +352,5 @@ export class SemanticPlanningBroker {
 
 export const SEMANTIC_PLANNING_BROKER_SCHEMA = SCHEMA;
 export const SEMANTIC_PLANNING_LOOKUP_SCHEMA = LOOKUP_SCHEMA;
+export const SEMANTIC_PLANNING_CONTEXT_SCHEMA = CONTEXT_SCHEMA;
 export const SEMANTIC_PLANNING_PROMOTION_SCHEMA = PROMOTION_SCHEMA;
