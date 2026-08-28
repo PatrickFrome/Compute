@@ -29,9 +29,10 @@ importScripts("./trusted-glm.js");
 importScripts("./operator-gate-bindings.js");
 importScripts("./operator-actions.js");
 
-// Phase 3 — bridge core, perception and typed action execution.
+// Phase 3 — bridge core, shared semantic compiler, perception and typed action execution.
 importScripts("./runtime-core.js");
 importScripts("./operator-control.js");
+importScripts("./semantic-perception-compiler.js");
 importScripts("./operator-perception.js");
 importScripts("./operator-oopif-perception.js");
 importScripts("./operator-semantic-actions.js");
