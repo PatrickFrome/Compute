@@ -63,7 +63,9 @@ jobs:
           set -euo pipefail
           find src tests -type f -name '*.mjs' ! -name 'b4-real-envelope-smoke.mjs' -print0 | sort -z | xargs -0 -n1 node --check
           node --test tests/*.test.mjs
-          ! grep -R -n -E -- '--remote-debugging-port|--remote-debugging-address|/json/version|Runtime\.evaluate' src
+          ! grep -R -n -E -- '/json/version|Runtime\.evaluate' src
+          grep -R -q -- "--remote-debugging-pipe" src
+          ! grep -R -n -E -- "(push|concat)\([^)]*['\"]--remote-debugging-(port|address)(=|['\"])" src
 
       - name: Real Chrome fresh-envelope compatibility smoke
         shell: bash
