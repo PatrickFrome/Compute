@@ -23,10 +23,8 @@ impl TempTree {
             .duration_since(UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "a2-r7k-{label}-{}-{nonce}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("a2-r7k-{label}-{}-{nonce}", std::process::id()));
         fs::create_dir_all(&path).expect("create temp tree");
         Self { path }
     }
@@ -146,11 +144,8 @@ fn response_header(frame: &mut Decoder<'_>) -> (u8, u8, u64) {
 
 fn copy_launcher(directory: &Path) -> PathBuf {
     let destination = directory.join("a2-skill-source-launcher");
-    fs::copy(
-        env!("CARGO_BIN_EXE_a2-skill-source-launcher"),
-        &destination,
-    )
-    .expect("copy launcher");
+    fs::copy(env!("CARGO_BIN_EXE_a2-skill-source-launcher"), &destination)
+        .expect("copy launcher");
     let mut permissions = fs::metadata(&destination).unwrap().permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(&destination, permissions).unwrap();
@@ -163,11 +158,7 @@ fn launcher_serves_list_and_package_through_fixed_sibling_helper() {
     write_skill(tree.path(), "inspect");
 
     let mut input = frame(OPCODE_LIST_SKILLS, 11, &[]);
-    input.extend_from_slice(&frame(
-        OPCODE_READ_PACKAGE,
-        12,
-        &read_body("inspect"),
-    ));
+    input.extend_from_slice(&frame(OPCODE_READ_PACKAGE, 12, &read_body("inspect")));
     let output = launch(tree.path(), &input);
     assert!(
         output.status.success(),
@@ -207,7 +198,9 @@ fn launcher_serves_list_and_package_through_fixed_sibling_helper() {
 #[test]
 fn launcher_argument_contract_fails_closed() {
     let launcher = env!("CARGO_BIN_EXE_a2-skill-source-launcher");
-    let missing = Command::new(launcher).output().expect("missing root launch");
+    let missing = Command::new(launcher)
+        .output()
+        .expect("missing root launch");
     assert_eq!(missing.status.code(), Some(70));
     assert_eq!(
         String::from_utf8(missing.stderr).unwrap().trim(),
