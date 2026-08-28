@@ -1,6 +1,6 @@
 {
   "schema": "metaengine.a2-browser-protocol.v1",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "transport": {
     "scope": "local_machine_only",
     "unix": "unix_domain_socket",
@@ -30,6 +30,7 @@
     "target.create",
     "target.list",
     "perception.snapshot",
+    "webmcp.snapshot",
     "planning.lookup",
     "planning.promote",
     "planning.abort",
@@ -48,6 +49,7 @@
     "target.create": "LOCAL_LIFECYCLE",
     "target.list": "READ_ONLY",
     "perception.snapshot": "READ_ONLY",
+    "webmcp.snapshot": "READ_ONLY",
     "planning.lookup": "LOCAL_COORDINATION",
     "planning.promote": "LOCAL_COORDINATION",
     "planning.abort": "LOCAL_COORDINATION",
@@ -79,7 +81,12 @@
     "oopif_completeness_without_proof",
     "planner_provider_credentials",
     "planner_execution_payload_persistence",
-    "cached_node_ref_authority"
+    "cached_node_ref_authority",
+    "webmcp_invoke_r6a",
+    "webmcp_raw_frame_id",
+    "webmcp_raw_backend_node_id",
+    "webmcp_registration_stack_trace",
+    "webmcp_annotation_as_authority"
   ],
   "semantic_perception": {
     "schema": "metaengine.a2-compute-browser.semantic-snapshot.v1",
@@ -105,6 +112,23 @@
     "execution_payload_stored": false,
     "cached_node_ref_authority": false,
     "must_run_actionability_checks": true,
+    "web_authority_effect": false
+  },
+  "webmcp_discovery": {
+    "schema": "metaengine.a2-browser-operator.webmcp-tools.v1",
+    "stage": "R6A_DISCOVERY_ONLY",
+    "progressive_enhancement": true,
+    "cdp_domain": "WebMCP",
+    "runtime_evaluate_used": false,
+    "tool_invocation_exposed": false,
+    "tool_metadata_tainted": true,
+    "annotations_are_hints_only": true,
+    "raw_frame_ids_exposed": false,
+    "raw_backend_node_ids_exposed": false,
+    "registration_stack_traces_exposed": false,
+    "document_loader_fenced": true,
+    "unsupported_is_typed_fallback": true,
+    "fallback": "SEMANTIC_PERCEPTION_B4",
     "web_authority_effect": false
   },
   "web_authority_effect": false,
