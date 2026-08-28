@@ -34,7 +34,6 @@ export class CdpSessionScheduler {
     this.#client = client;
     this.#processIncarnationId = assertNonempty(processIncarnationId, 'process_incarnation_id_invalid');
     if (!Number.isSafeInteger(maxInFlight) || maxInFlight < 1 || maxInFlight > 32) throw new Error('session_max_inflight_invalid');
-    this.#maxInFlight = maxInFlight;
     if (onTargetInvalidated != null && typeof onTargetInvalidated !== 'function') throw new Error('session_invalidation_handler_invalid');
     if (onDisposed != null && typeof onDisposed !== 'function') throw new Error('session_dispose_handler_invalid');
     this.#onTargetInvalidated = onTargetInvalidated;
@@ -178,6 +177,7 @@ export class CdpSessionScheduler {
     return this.#enqueue(identity.targetId, async () => {
       await this.#acquireSlot();
       const deadline = Date.now() + deadlineMs;
+      const eventUnsubscribers = [];
       try {
         const binding = await this.#attach(identity);
         const generation = binding.generation;
@@ -196,11 +196,34 @@ export class CdpSessionScheduler {
             throw error;
           }
         };
-        const result = await operation({ call, sessionGeneration: generation });
+        const onEvent = (method, listener) => {
+          if (typeof method !== 'string' || !method || typeof listener !== 'function') throw new Error('session_event_subscription_invalid');
+          const live = this.#assertLive(identity, generation);
+          const sessionId = live.sessionId;
+          let active = true;
+          const unsubscribe = this.#client.on(method, (params, eventSessionId) => {
+            if (!active || eventSessionId !== sessionId) return;
+            try {
+              this.#assertLive(identity, generation);
+              listener(params);
+            } catch (_) {}
+          });
+          const stop = () => {
+            if (!active) return;
+            active = false;
+            try { unsubscribe?.(); } catch (_) {}
+          };
+          eventUnsubscribers.push(stop);
+          return stop;
+        };
+        const result = await operation({ call, onEvent, sessionGeneration: generation });
         this.#assertLive(identity, generation);
         if (Date.now() > deadline) throw new Error('snapshot_deadline_exceeded');
         return result;
       } finally {
+        for (const unsubscribe of eventUnsubscribers.splice(0)) {
+          try { unsubscribe(); } catch (_) {}
+        }
         this.#releaseSlot();
       }
     });
