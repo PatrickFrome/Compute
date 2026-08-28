@@ -9,7 +9,7 @@ Candidate artifact: `9700546022`
 
 The revised sanitize-then-verify architecture passed on GitHub-hosted Ubuntu 24.04:
 
-- dependency resolver/audit: PASS, 18 packages;
+- dependency resolver/audit: PASS, 18 external packages plus the root crate serialized as 19 `Cargo.lock` package entries;
 - fmt + Clippy `-D warnings`: PASS;
 - inherited R7G protocol unit tests: PASS;
 - R7F1 cardinality tests: PASS;
@@ -70,7 +70,9 @@ Under the helper’s controlled Linux bootstrap:
 
 ## Supply-chain finding
 
-`seccompiler=0.5.0` adds one direct package and reuses exact `libc=0.2.189`; the complete candidate closure is 18 packages. Introducing a separate fd-guard crate would have expanded the dependency trust surface for functionality expressible through the already-pinned libc boundary, so the local one-syscall seam remains the smaller TCB.
+`seccompiler=0.5.0` adds one direct external package and reuses exact `libc=0.2.189`. The candidate resolver reports 18 external packages. The exact source-controlled Cargo lock serializes those dependencies plus the root package `a2-skill-source-linux`, yielding 19 `[[package]]` entries. The distinction matters for deterministic evidence: resolver cardinality and lockfile package-entry cardinality are related but not identical metrics.
+
+Introducing a separate fd-guard crate would have expanded the dependency trust surface for functionality expressible through the already-pinned libc boundary, so the local one-syscall seam remains the smaller TCB.
 
 ## Next best milestone: R7J positive Seccomp allowlist
 

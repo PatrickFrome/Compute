@@ -87,8 +87,10 @@ jobs:
           ]:
               if expected not in packages:
                   raise SystemExit(f'missing exact dependency {expected}')
-          if len(packages) != 18:
-              raise SystemExit(f'unexpected dependency closure cardinality: {len(packages)}')
+          # Candidate resolver reported 18 external packages; modern Cargo.lock also
+          # serializes this root crate, so the exact lock contains 19 package entries.
+          if len(packages) != 19:
+              raise SystemExit(f'unexpected Cargo.lock package-entry cardinality: {len(packages)}')
           PY
 
       - name: Prove R7I Rust and process contracts
