@@ -1,5 +1,8 @@
 #![cfg(target_os = "linux")]
 
+mod sandbox;
+pub use sandbox::{SandboxError, SandboxReport};
+
 use rustix::fd::OwnedFd;
 use rustix::fs::{Dir, Mode, OFlags, ResolveFlags, open, openat2};
 use rustix::io::Errno;

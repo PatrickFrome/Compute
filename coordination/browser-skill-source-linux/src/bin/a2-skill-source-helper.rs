@@ -24,6 +24,10 @@ fn run() -> Result<(), &'static str> {
 
     let root = PathBuf::from(root);
     let source = LinuxSkillSource::open(&root).map_err(|error| error.code())?;
+    let _sandbox = source
+        .restrict_helper_process()
+        .map_err(|error| error.code())?;
+
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut input = stdin.lock();

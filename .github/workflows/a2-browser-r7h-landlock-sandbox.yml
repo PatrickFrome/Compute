@@ -1,0 +1,171 @@
+name: A2 Browser R7H Landlock Sandbox
+
+on:
+  push:
+    branches:
+      - 'work/a2-browser-r7h-landlock-sandbox*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r7h-landlock-sandbox-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Establish source epoch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = "Linux"
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+
+      - name: Resolve exact R7H dependency candidate
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          rustc --version | tee "$RUNNER_TEMP/r7h-rustc-version.txt"
+          cargo --version | tee "$RUNNER_TEMP/r7h-cargo-version.txt"
+          test "$(rustc --version | awk '{print $2}')" = "1.98.0"
+          cargo generate-lockfile
+          cp Cargo.lock "$RUNNER_TEMP/r7h-generated-Cargo.lock"
+          cargo tree --locked | tee "$RUNNER_TEMP/r7h-cargo-tree.txt"
+          grep -q 'rustix v1\.1\.4' "$RUNNER_TEMP/r7h-cargo-tree.txt"
+          grep -q 'landlock v0\.4\.7' "$RUNNER_TEMP/r7h-cargo-tree.txt"
+          python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          cargo = tomllib.loads(Path('Cargo.toml').read_text())
+          deps = cargo.get('dependencies', {})
+          if set(deps) != {'landlock', 'rustix'}:
+              raise SystemExit(f'unexpected direct dependency surface: {sorted(deps)}')
+          if deps.get('landlock') != '=0.4.7':
+              raise SystemExit('landlock must remain exact-pinned at 0.4.7')
+          rustix = deps.get('rustix')
+          if not isinstance(rustix, dict) or rustix.get('version') != '=1.1.4':
+              raise SystemExit('rustix must remain exact-pinned at 1.1.4')
+
+          lock = tomllib.loads(Path('Cargo.lock').read_text())
+          packages = {(p['name'], p['version']) for p in lock.get('package', [])}
+          forbidden_names = {
+              'proc-macro1', 'proc-macro-en', 'aovine', 'arone', 'aronenao', 'tinymember'
+          }
+          forbidden_versions = {
+              ('arrayref', '0.3.10'),
+              ('append-only-vec', '0.1.9'),
+              ('internment', '0.8.7'),
+          }
+          found_names = sorted((n, v) for n, v in packages if n in forbidden_names)
+          found_versions = sorted(packages & forbidden_versions)
+          if found_names or found_versions:
+              raise SystemExit(f'forbidden dependency closure: {found_names + found_versions}')
+          for expected in [('landlock', '0.4.7'), ('rustix', '1.1.4')]:
+              if expected not in packages:
+                  raise SystemExit(f'missing exact dependency {expected}')
+          PY
+
+      - name: R7H Landlock and inherited Rust contracts
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --all-targets | tee "$RUNNER_TEMP/r7h-rust-tests.log"
+          cargo test --locked --test sandbox -- --nocapture | tee "$RUNNER_TEMP/r7h-sandbox-test.log"
+          cargo test --locked --test helper_process | tee "$RUNNER_TEMP/r7h-helper-process.log"
+          cargo build --locked --release --bin a2-skill-source-helper
+          sha256sum target/release/a2-skill-source-helper | tee "$RUNNER_TEMP/r7h-helper-sha256.txt"
+          stat -c '%s' target/release/a2-skill-source-helper | tee "$RUNNER_TEMP/r7h-helper-size.txt"
+          test "$(cat "$RUNNER_TEMP/r7h-helper-size.txt")" -lt 3145728
+
+          grep -q 'AccessFs::from_all(REQUIRED_ABI)' src/sandbox.rs
+          grep -q 'AccessFs::from_read(REQUIRED_ABI)' src/sandbox.rs
+          grep -q 'AccessNet::from_all(REQUIRED_ABI)' src/sandbox.rs
+          grep -q 'CompatLevel::HardRequirement' src/sandbox.rs
+          grep -q 'RulesetStatus::FullyEnforced' src/sandbox.rs
+          grep -q 'udp_isolation_claimed: false' src/sandbox.rs
+          ! grep -n -E -- 'NetPort|BindUdp|ConnectSendUdp|udp_isolation_claimed: true' src/sandbox.rs
+          ! grep -n -E -- '\bunsafe\b|std::process::Command|Runtime\.evaluate|WebMCP\.' src/sandbox.rs
+
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('src/bin/a2-skill-source-helper.rs').read_text()
+          opened = source.index('LinuxSkillSource::open')
+          restricted = source.index('.restrict_helper_process()')
+          loop = source.index('read_request(&mut input)')
+          if not (opened < restricted < loop):
+              raise SystemExit('helper sandbox ordering invariant violated')
+          PY
+
+      - name: R7C and R7E semantic package regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            coordination/browser-shared/tests/skill-package-identity-v1.test.mjs \
+            coordination/browser-shared/tests/skill-registry-v1.test.mjs | tee "$RUNNER_TEMP/r7h-js-regression.log"
+
+      - name: Build deterministic R7H evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          EPOCH="$SOURCE_DATE_EPOCH"
+          mkdir -p dist/a2-browser-r7h/evidence
+          cp "$RUNNER_TEMP/r7h-rustc-version.txt" dist/a2-browser-r7h/evidence/R7H_RUSTC_VERSION.txt
+          cp "$RUNNER_TEMP/r7h-cargo-version.txt" dist/a2-browser-r7h/evidence/R7H_CARGO_VERSION.txt
+          cp "$RUNNER_TEMP/r7h-generated-Cargo.lock" dist/a2-browser-r7h/evidence/R7H_GENERATED_CARGO_LOCK.txt
+          cp "$RUNNER_TEMP/r7h-cargo-tree.txt" dist/a2-browser-r7h/evidence/R7H_CARGO_TREE.txt
+          cp "$RUNNER_TEMP/r7h-rust-tests.log" dist/a2-browser-r7h/evidence/R7H_RUST_TESTS.log
+          cp "$RUNNER_TEMP/r7h-sandbox-test.log" dist/a2-browser-r7h/evidence/R7H_SANDBOX_TEST.log
+          cp "$RUNNER_TEMP/r7h-helper-process.log" dist/a2-browser-r7h/evidence/R7H_HELPER_PROCESS.log
+          cp "$RUNNER_TEMP/r7h-helper-sha256.txt" dist/a2-browser-r7h/evidence/R7H_HELPER_SHA256.txt
+          cp "$RUNNER_TEMP/r7h-helper-size.txt" dist/a2-browser-r7h/evidence/R7H_HELPER_SIZE.txt
+          cp "$RUNNER_TEMP/r7h-js-regression.log" dist/a2-browser-r7h/evidence/R7H_JS_REGRESSION.log
+          printf '%s\n' "$GITHUB_SHA" > dist/a2-browser-r7h/evidence/SOURCE_COMMIT.txt
+          cat > dist/a2-browser-r7h/evidence/R7H_CLAIMS.json <<'JSON'
+          {"filesystem_read_only":true,"tcp_bind_connect_denied":true,"udp_isolation_claimed":false,"node_integration":false,"browser_authority":false}
+          JSON
+          tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf dist/a2-browser-r7h/A2_BROWSER_R7H_LANDLOCK_SANDBOX.tar \
+            coordination/browser-skill-source-linux/Cargo.toml \
+            coordination/browser-skill-source-linux/rust-toolchain.toml \
+            coordination/browser-skill-source-linux/src/lib.rs \
+            coordination/browser-skill-source-linux/src/sandbox.rs \
+            coordination/browser-skill-source-linux/src/helper_protocol.rs \
+            coordination/browser-skill-source-linux/src/bin/a2-skill-source-helper.rs \
+            coordination/browser-skill-source-linux/tests/source.rs \
+            coordination/browser-skill-source-linux/tests/cardinality.rs \
+            coordination/browser-skill-source-linux/tests/helper_process.rs \
+            coordination/browser-skill-source-linux/tests/sandbox.rs \
+            research/A2_BROWSER_R7F_LINUX_OPENAT2_SKILL_SOURCE_PRE_RESEARCH_2026-08-28.md \
+            research/A2_BROWSER_R7F1_BOUNDED_DIRECTORY_ENUMERATION_2026-08-28.md \
+            research/A2_BROWSER_R7G_BOUNDED_BINARY_HELPER_PROTOCOL_PRE_RESEARCH_2026-08-28.md \
+            research/A2_BROWSER_R7H_LANDLOCK_HELPER_SANDBOX_PRE_RESEARCH_2026-08-28.md
+          sha256sum dist/a2-browser-r7h/A2_BROWSER_R7H_LANDLOCK_SANDBOX.tar > dist/a2-browser-r7h/R7H_SHA256SUMS.txt
+
+      - name: Attest R7H evidence provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-browser-r7h/A2_BROWSER_R7H_LANDLOCK_SANDBOX.tar
+
+      - name: Upload R7H evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-r7h-landlock-${{ github.sha }}
+          path: |
+            dist/a2-browser-r7h/A2_BROWSER_R7H_LANDLOCK_SANDBOX.tar
+            dist/a2-browser-r7h/R7H_SHA256SUMS.txt
+            dist/a2-browser-r7h/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
