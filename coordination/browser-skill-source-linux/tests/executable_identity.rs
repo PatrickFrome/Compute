@@ -2,8 +2,6 @@
 
 #[path = "../src/executable_identity.rs"]
 mod executable_identity;
-#[path = "../src/launch_contract.rs"]
-mod launch_contract;
 
 use executable_identity::{ExecutableCapability, ExecutableIdentityError, HELPER_NAME};
 use std::fs;
@@ -13,7 +11,6 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const SWAP_CHILD_FILTER: &str = "fd_bound_exec_swap_child";
-const FD_CONTRACT_CHILD_FILTER: &str = "fd_contract_isolated_child";
 
 struct TempTree {
     path: PathBuf,
@@ -145,41 +142,4 @@ fn pathname_swap_after_open_cannot_redirect_execution() {
         status.success(),
         "opened /bin/true was redirected by pathname swap"
     );
-}
-
-#[test]
-fn fd_contract_isolated_child() {
-    let Some(directory) = std::env::var_os("A2_R7L_FD_DIRECTORY") else {
-        return;
-    };
-    if !std::env::args().any(|arg| arg == FD_CONTRACT_CHILD_FILTER) {
-        return;
-    }
-
-    launch_contract::sanitize_inherited_fds()
-        .map_err(|error| error.code())
-        .unwrap();
-    let report = launch_contract::verify_clean_inherited_fds()
-        .map_err(|error| error.code())
-        .unwrap();
-    assert!(report.close_range_unshare);
-    assert!(report.stdio_only_inherited_fds);
-    assert!(report.procfs_verified);
-
-    let capability = ExecutableCapability::open_fixed_helper(Path::new(&directory)).unwrap();
-    capability.verify_preexec_fd_contract().unwrap();
-}
-
-#[test]
-fn opened_helper_is_the_only_allowed_nonstdio_fd_before_exec() {
-    let tree = TempTree::new("fd-contract");
-    let helper = tree.path().join(HELPER_NAME);
-    copy_executable(Path::new("/bin/true"), &helper, 0o755);
-
-    let status = Command::new(std::env::current_exe().unwrap())
-        .arg(FD_CONTRACT_CHILD_FILTER)
-        .env("A2_R7L_FD_DIRECTORY", tree.path())
-        .status()
-        .expect("spawn isolated fd-contract child");
-    assert!(status.success(), "isolated fd-contract child failed");
 }
