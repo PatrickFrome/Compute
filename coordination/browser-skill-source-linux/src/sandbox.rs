@@ -45,9 +45,7 @@ fn map_ruleset_error<T>(result: Result<T, landlock::RulesetError>) -> Result<T, 
 
 fn require_full_enforcement(status: RestrictionStatus) -> Result<SandboxReport, SandboxError> {
     if status.ruleset != RulesetStatus::FullyEnforced || !status.no_new_privs {
-        return Err(SandboxError::new(
-            "skill_helper_sandbox_not_fully_enforced",
-        ));
+        return Err(SandboxError::new("skill_helper_sandbox_not_fully_enforced"));
     }
     Ok(SandboxReport {
         fully_enforced: true,
@@ -75,8 +73,8 @@ impl LinuxSkillSource {
                 .handle_access(filesystem_all),
         )?;
         let ruleset = map_ruleset_error(ruleset.handle_access(tcp_all))?;
-        let created = map_ruleset_error(ruleset.create())?
-            .set_compatibility(CompatLevel::HardRequirement);
+        let created =
+            map_ruleset_error(ruleset.create())?.set_compatibility(CompatLevel::HardRequirement);
         let root_rule = PathBeneath::new(&self.root, filesystem_read)
             .set_compatibility(CompatLevel::HardRequirement);
         let created = map_ruleset_error(created.add_rule(root_rule))?;

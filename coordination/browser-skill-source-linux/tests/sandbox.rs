@@ -11,10 +11,7 @@ fn fixture_root() -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("clock")
         .as_nanos();
-    let root = std::env::temp_dir().join(format!(
-        "a2-r7h-landlock-{}-{nonce}",
-        std::process::id()
-    ));
+    let root = std::env::temp_dir().join(format!("a2-r7h-landlock-{}-{nonce}", std::process::id()));
     let skill = root.join("inspect");
     fs::create_dir_all(skill.join("references")).unwrap();
     fs::write(
