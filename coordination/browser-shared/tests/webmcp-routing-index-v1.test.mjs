@@ -37,6 +37,19 @@ function envelope({ count = 8, documentEpoch = 'doc_route' } = {}) {
   );
 }
 
+function unicodeEnvelope(names) {
+  return webMcpEnvelopeFromCdpTools(names.map((name) => ({
+    name,
+    description: `Capability ${name}`,
+    inputSchema: { type: 'object', properties: { query: { type: 'string' } }, additionalProperties: false },
+    annotations: { readOnly: true },
+    frameId: 'frame-main'
+  })), {
+    targetId: 'target_route', contextId: 'default', conversationEpoch: 9,
+    documentEpoch: 'doc_unicode', mainFrameId: 'frame-main', capturedAt: '2026-08-28T15:00:00.000Z'
+  });
+}
+
 function resealCatalogBytes(catalog) {
   let bytes = 0;
   for (let pass = 0; pass < 8; pass += 1) {
@@ -80,6 +93,15 @@ test('routing index is deterministic, explicitly lossy, and byte accounting cove
   assert.equal(first.tools[0].description_hint.length, WEBMCP_ROUTING_INDEX_LIMITS.maxDescriptionHint);
   assert.equal(first.tools[0].preview_lossy, true);
   assert.equal(first.routing_index_bytes, Buffer.byteLength(JSON.stringify(first)));
+});
+
+test('routing index order is locale-independent even for Unicode metadata', () => {
+  const expected = ['Zeta', 'alpha', 'Ångstrom', 'äther'];
+  const first = compileWebMcpRoutingIndex(compileWebMcpCatalog(unicodeEnvelope(['äther', 'Zeta', 'alpha', 'Ångstrom'])));
+  const second = compileWebMcpRoutingIndex(compileWebMcpCatalog(unicodeEnvelope(['Ångstrom', 'alpha', 'Zeta', 'äther'])));
+  assert.deepEqual(first.tools.map((tool) => tool.name), expected);
+  assert.deepEqual(second.tools.map((tool) => tool.name), expected);
+  assert.deepEqual(first, second);
 });
 
 test('routing index preserves document-bound tool identity but never authority', () => {
