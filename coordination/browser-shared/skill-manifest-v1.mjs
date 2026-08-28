@@ -91,9 +91,26 @@ function parseFrontmatter(lines, end) {
   return data;
 }
 
-function normalizeSource(source) {
+function snapshotSource(source) {
   if (!source || typeof source !== 'object' || Array.isArray(source)) throw new Error('skill_source_invalid');
-  const path = String(source.path || '');
+  const rawPath = source.path;
+  const rawContent = source.content;
+  return Object.freeze({ rawPath, rawContent });
+}
+
+function snapshotSourceList(sources) {
+  if (!Array.isArray(sources)) throw new Error('skill_sources_invalid');
+  const length = sources.length;
+  if (!Number.isSafeInteger(length) || length < 0) throw new Error('skill_sources_invalid');
+  if (length > MAX_SKILLS) throw new Error('skill_sources_too_many');
+  const snapshot = new Array(length);
+  for (let index = 0; index < length; index += 1) snapshot[index] = sources[index];
+  return Object.freeze(snapshot);
+}
+
+function normalizeSource(source) {
+  const { rawPath, rawContent } = snapshotSource(source);
+  const path = String(rawPath || '');
   if (path.includes('\\') || path.startsWith('/') || path.includes('\u0000')) throw new Error('skill_source_path_invalid');
   const parts = path.split('/');
   if (parts.length !== 2 || parts[1] !== 'SKILL.md' || !parts[0]) throw new Error('skill_source_path_invalid');
@@ -101,11 +118,11 @@ function normalizeSource(source) {
   if (!/^(?!-)(?!.*--)[a-z0-9]+(?:-[a-z0-9]+)*$/.test(directoryName) || directoryName.length > 64) {
     throw new Error('skill_directory_name_invalid');
   }
-  if (typeof source.content !== 'string') throw new Error('skill_source_content_invalid');
-  let content = source.content.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+  if (typeof rawContent !== 'string') throw new Error('skill_source_content_invalid');
+  const content = rawContent.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
   if (Buffer.byteLength(content) > MAX_SKILL_BYTES) throw new Error('skill_document_too_large');
   if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(content)) throw new Error('skill_document_control_character');
-  return { path, directoryName, content };
+  return Object.freeze({ path, directoryName, content });
 }
 
 function skillRef(document) {
@@ -174,6 +191,7 @@ export function compileSkillDocument(source) {
     instruction_lines: instructionLines,
     declared_allowed_tools: Boolean(frontmatter['allowed-tools']),
     declared_tool_permissions_honored: false,
+    source_snapshot_once: true,
     tainted_skill_data: true,
     authority_effect: false,
     execution_eligible: false,
@@ -182,10 +200,9 @@ export function compileSkillDocument(source) {
 }
 
 export function compileSkillCatalog(sources) {
-  if (!Array.isArray(sources)) throw new Error('skill_sources_invalid');
-  if (sources.length > MAX_SKILLS) throw new Error('skill_sources_too_many');
+  const sourceSnapshot = snapshotSourceList(sources);
   const seen = new Set();
-  const tools = sources.map((source) => {
+  const tools = sourceSnapshot.map((source) => {
     const document = compileSkillDocument(source);
     if (seen.has(document.name)) throw new Error('skill_name_duplicate');
     seen.add(document.name);
@@ -212,6 +229,7 @@ export function compileSkillCatalog(sources) {
     progressive_disclosure: true,
     full_instructions_embedded: false,
     tool_permissions_embedded: false,
+    source_snapshot_once: true,
     authority_effect: false,
     execution_eligible: false,
     skills: tools
@@ -234,6 +252,7 @@ export function hydrateSkillInstructions(source, { expectedSkillRef, expectedFin
     instructions: document.instructions,
     instruction_bytes: document.instruction_bytes,
     instruction_lines: document.instruction_lines,
+    source_snapshot_once: true,
     tainted_skill_data: true,
     authority_effect: false,
     execution_eligible: false,

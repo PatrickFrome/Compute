@@ -17,6 +17,7 @@ test('portable SKILL.md subset preserves Agent Skills naming and progressive dis
   assert.equal(document.name, 'code-review');
   assert.equal(document.declared_allowed_tools, true);
   assert.equal(document.declared_tool_permissions_honored, false);
+  assert.equal(document.source_snapshot_once, true);
   assert.equal(document.authority_effect, false);
   assert.equal(document.execution_eligible, false);
   assert.equal(document.script_execution_exposed, false);
@@ -26,6 +27,7 @@ test('portable SKILL.md subset preserves Agent Skills naming and progressive dis
   assert.equal(catalog.skill_count, 1);
   assert.equal(catalog.full_instructions_embedded, false);
   assert.equal(catalog.tool_permissions_embedded, false);
+  assert.equal(catalog.source_snapshot_once, true);
   const serialized = JSON.stringify(catalog);
   assert.equal(serialized.includes('Follow the bounded procedure'), false);
   assert.equal(serialized.includes('Bash(git:*)'), false);
@@ -72,6 +74,7 @@ test('fresh instruction hydration is fingerprint-bound and still grants no autho
     expectedFingerprint: selected.skill_fingerprint
   });
   assert.match(hydrated.instructions, /Inspect the document/);
+  assert.equal(hydrated.source_snapshot_once, true);
   assert.equal(hydrated.authority_effect, false);
   assert.equal(hydrated.execution_eligible, false);
   assert.equal(hydrated.script_execution_exposed, false);
@@ -82,6 +85,28 @@ test('fresh instruction hydration is fingerprint-bound and still grants no autho
     expectedSkillRef: selected.skill_ref,
     expectedFingerprint: selected.skill_fingerprint
   }), /skill_ref_stale|skill_fingerprint_stale/);
+});
+
+test('external source fields are snapshotted exactly once before validation and hashing', () => {
+  let pathReads = 0;
+  let contentReads = 0;
+  const source = {
+    get path() {
+      pathReads += 1;
+      return pathReads === 1 ? 'snapshot-safe/SKILL.md' : '../escape/SKILL.md';
+    },
+    get content() {
+      contentReads += 1;
+      return contentReads === 1
+        ? '---\nname: snapshot-safe\ndescription: Snapshot test\n---\nStable instructions.\n'
+        : '---\nname: snapshot-safe\ndescription: Mutated getter\n---\nDifferent instructions.\n';
+    }
+  };
+  const document = compileSkillDocument(source);
+  assert.equal(document.name, 'snapshot-safe');
+  assert.match(document.instructions, /Stable instructions/);
+  assert.equal(pathReads, 1);
+  assert.equal(contentReads, 1);
 });
 
 test('instruction and catalog budgets are hard limits', () => {

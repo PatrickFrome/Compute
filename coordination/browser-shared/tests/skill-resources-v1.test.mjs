@@ -18,6 +18,7 @@ test('selected-skill resource inventory is content-addressed and embeds no resou
   assert.equal(inventory.resource_count, 3);
   assert.equal(inventory.content_embedded, false);
   assert.equal(inventory.scripts_inert, true);
+  assert.equal(inventory.source_snapshot_once, true);
   assert.equal(inventory.authority_effect, false);
   assert.equal(inventory.execution_eligible, false);
   assert.equal(inventory.script_execution_exposed, false);
@@ -73,6 +74,7 @@ test('fresh resource hydration is inventory, ref and digest bound while scripts 
   assert.match(hydrated.content, /inspect-only/);
   assert.equal(hydrated.resource_kind, 'SCRIPT');
   assert.equal(hydrated.source_executable_bit, true);
+  assert.equal(hydrated.source_snapshot_once, true);
   assert.equal(hydrated.authority_effect, false);
   assert.equal(hydrated.execution_eligible, false);
   assert.equal(hydrated.script_execution_exposed, false);
@@ -86,6 +88,39 @@ test('fresh resource hydration is inventory, ref and digest bound while scripts 
     expectedResourceRef: selected.resource_ref,
     expectedResourceDigest: selected.resource_digest
   }), /skill_resource_inventory_stale/);
+});
+
+test('resource source fields are read exactly once during hydration', () => {
+  const reads = { type: 0, executable: 0, path: 0, content: 0 };
+  const source = {
+    get type() {
+      reads.type += 1;
+      return reads.type === 1 ? 'file' : 'symlink';
+    },
+    get executable() {
+      reads.executable += 1;
+      return true;
+    },
+    get path() {
+      reads.path += 1;
+      return reads.path === 1 ? 'scripts/snapshot.sh' : '../escape.sh';
+    },
+    get content() {
+      reads.content += 1;
+      return reads.content === 1 ? '#!/bin/sh\necho stable\n' : '#!/bin/sh\necho mutated\n';
+    }
+  };
+
+  const seed = resource('scripts/snapshot.sh', '#!/bin/sh\necho stable\n', true);
+  const inventory = compileSkillResourceInventory(SKILL_FP, [seed]);
+  const selected = inventory.resources[0];
+  const hydrated = hydrateSkillResource(SKILL_FP, [source], {
+    expectedInventoryFingerprint: inventory.inventory_fingerprint,
+    expectedResourceRef: selected.resource_ref,
+    expectedResourceDigest: selected.resource_digest
+  });
+  assert.match(hydrated.content, /echo stable/);
+  assert.deepEqual(reads, { type: 1, executable: 1, path: 1, content: 1 });
 });
 
 test('resource cardinality and byte budgets are hard limits', () => {
