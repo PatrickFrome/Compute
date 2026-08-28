@@ -52,10 +52,7 @@ fn root_enumeration_is_bounded_even_when_every_entry_is_lexically_ignored() {
 
     let source = LinuxSkillSource::open(tree.path()).unwrap();
     let error = source.list_skill_names().unwrap_err();
-    assert_eq!(
-        error.code(),
-        "skill_loader_directory_entry_count_exceeded"
-    );
+    assert_eq!(error.code(), "skill_loader_directory_entry_count_exceeded");
 }
 
 #[test]
@@ -68,10 +65,7 @@ fn resource_enumeration_is_bounded_before_package_file_processing() {
 
     let source = LinuxSkillSource::open(tree.path()).unwrap();
     let error = source.read_skill_package("inspect").unwrap_err();
-    assert_eq!(
-        error.code(),
-        "skill_loader_directory_entry_count_exceeded"
-    );
+    assert_eq!(error.code(), "skill_loader_directory_entry_count_exceeded");
 }
 
 #[test]
@@ -84,8 +78,5 @@ fn skill_top_level_enumeration_is_bounded_before_unsupported_entry_dispatch() {
 
     let source = LinuxSkillSource::open(tree.path()).unwrap();
     let error = source.read_skill_package("inspect").unwrap_err();
-    assert_eq!(
-        error.code(),
-        "skill_loader_directory_entry_count_exceeded"
-    );
+    assert_eq!(error.code(), "skill_loader_directory_entry_count_exceeded");
 }
