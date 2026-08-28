@@ -27,7 +27,7 @@ jobs:
           test "$(uname -s)" = "Linux"
           echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
 
-      - name: Resolve exact R7H dependency candidate
+      - name: Validate exact source-controlled dependency closure
         shell: bash
         working-directory: coordination/browser-skill-source-linux
         run: |
@@ -35,8 +35,8 @@ jobs:
           rustc --version | tee "$RUNNER_TEMP/r7h-rustc-version.txt"
           cargo --version | tee "$RUNNER_TEMP/r7h-cargo-version.txt"
           test "$(rustc --version | awk '{print $2}')" = "1.98.0"
-          cargo generate-lockfile
-          cp Cargo.lock "$RUNNER_TEMP/r7h-generated-Cargo.lock"
+          test -f Cargo.lock
+          cp Cargo.lock "$RUNNER_TEMP/r7h-source-Cargo.lock"
           cargo tree --locked | tee "$RUNNER_TEMP/r7h-cargo-tree.txt"
           grep -q 'rustix v1\.1\.4' "$RUNNER_TEMP/r7h-cargo-tree.txt"
           grep -q 'landlock v0\.4\.7' "$RUNNER_TEMP/r7h-cargo-tree.txt"
@@ -71,6 +71,9 @@ jobs:
           for expected in [('landlock', '0.4.7'), ('rustix', '1.1.4')]:
               if expected not in packages:
                   raise SystemExit(f'missing exact dependency {expected}')
+          root = [p for p in lock.get('package', []) if p.get('name') == 'a2-skill-source-linux']
+          if len(root) != 1 or set(root[0].get('dependencies', [])) != {'landlock', 'rustix'}:
+              raise SystemExit('source lock does not bind the exact direct dependency set')
           PY
 
       - name: R7H Landlock and inherited Rust contracts
@@ -88,6 +91,7 @@ jobs:
           stat -c '%s' target/release/a2-skill-source-helper | tee "$RUNNER_TEMP/r7h-helper-size.txt"
           test "$(cat "$RUNNER_TEMP/r7h-helper-size.txt")" -lt 3145728
 
+          grep -q 'const REQUIRED_ABI: ABI = ABI::V4' src/sandbox.rs
           grep -q 'AccessFs::from_all(REQUIRED_ABI)' src/sandbox.rs
           grep -q 'AccessFs::from_read(REQUIRED_ABI)' src/sandbox.rs
           grep -q 'AccessNet::from_all(REQUIRED_ABI)' src/sandbox.rs
@@ -123,7 +127,7 @@ jobs:
           mkdir -p dist/a2-browser-r7h/evidence
           cp "$RUNNER_TEMP/r7h-rustc-version.txt" dist/a2-browser-r7h/evidence/R7H_RUSTC_VERSION.txt
           cp "$RUNNER_TEMP/r7h-cargo-version.txt" dist/a2-browser-r7h/evidence/R7H_CARGO_VERSION.txt
-          cp "$RUNNER_TEMP/r7h-generated-Cargo.lock" dist/a2-browser-r7h/evidence/R7H_GENERATED_CARGO_LOCK.txt
+          cp "$RUNNER_TEMP/r7h-source-Cargo.lock" dist/a2-browser-r7h/evidence/R7H_SOURCE_CARGO_LOCK.txt
           cp "$RUNNER_TEMP/r7h-cargo-tree.txt" dist/a2-browser-r7h/evidence/R7H_CARGO_TREE.txt
           cp "$RUNNER_TEMP/r7h-rust-tests.log" dist/a2-browser-r7h/evidence/R7H_RUST_TESTS.log
           cp "$RUNNER_TEMP/r7h-sandbox-test.log" dist/a2-browser-r7h/evidence/R7H_SANDBOX_TEST.log
@@ -133,11 +137,12 @@ jobs:
           cp "$RUNNER_TEMP/r7h-js-regression.log" dist/a2-browser-r7h/evidence/R7H_JS_REGRESSION.log
           printf '%s\n' "$GITHUB_SHA" > dist/a2-browser-r7h/evidence/SOURCE_COMMIT.txt
           cat > dist/a2-browser-r7h/evidence/R7H_CLAIMS.json <<'JSON'
-          {"filesystem_read_only":true,"tcp_bind_connect_denied":true,"udp_isolation_claimed":false,"node_integration":false,"browser_authority":false}
+          {"landlock_required_abi":4,"filesystem_abi4_read_only_beneath_skill_root":true,"tcp_bind_connect_denied":true,"udp_isolation_claimed":false,"network_namespace_isolation":false,"seccomp_isolation":false,"node_integration":false,"browser_authority":false}
           JSON
           tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
             -cf dist/a2-browser-r7h/A2_BROWSER_R7H_LANDLOCK_SANDBOX.tar \
             coordination/browser-skill-source-linux/Cargo.toml \
+            coordination/browser-skill-source-linux/Cargo.lock \
             coordination/browser-skill-source-linux/rust-toolchain.toml \
             coordination/browser-skill-source-linux/src/lib.rs \
             coordination/browser-skill-source-linux/src/sandbox.rs \
@@ -150,7 +155,8 @@ jobs:
             research/A2_BROWSER_R7F_LINUX_OPENAT2_SKILL_SOURCE_PRE_RESEARCH_2026-08-28.md \
             research/A2_BROWSER_R7F1_BOUNDED_DIRECTORY_ENUMERATION_2026-08-28.md \
             research/A2_BROWSER_R7G_BOUNDED_BINARY_HELPER_PROTOCOL_PRE_RESEARCH_2026-08-28.md \
-            research/A2_BROWSER_R7H_LANDLOCK_HELPER_SANDBOX_PRE_RESEARCH_2026-08-28.md
+            research/A2_BROWSER_R7H_LANDLOCK_HELPER_SANDBOX_PRE_RESEARCH_2026-08-28.md \
+            research/A2_BROWSER_R7H_LANDLOCK_HELPER_SANDBOX_POST_RESEARCH_2026-08-28.md
           sha256sum dist/a2-browser-r7h/A2_BROWSER_R7H_LANDLOCK_SANDBOX.tar > dist/a2-browser-r7h/R7H_SHA256SUMS.txt
 
       - name: Attest R7H evidence provenance
