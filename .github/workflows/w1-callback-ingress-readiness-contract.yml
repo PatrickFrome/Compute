@@ -1,0 +1,49 @@
+name: W1 Callback Ingress Readiness Contract
+
+on:
+  push:
+    branches:
+      - work/main-roadmap-accelerators-v8
+    paths:
+      - "controller/w1/w1_callback_ingress_readiness_guard.py"
+      - "tests/test_w1_callback_ingress_readiness_guard.py"
+      - "research/W1_CALLBACK_INGRESS_READINESS.md"
+      - "supabase/prep/w1_callback_auth_v1.sql"
+      - "supabase/functions/w1-execution-callback/index.ts"
+      - "supabase/config.toml"
+      - "infra/w1/ssm/Metaengine-W1-Callback-Key-Enroll-H205F22.json"
+      - "infra/w1/ssm/Metaengine-W1-Execution-Marker-H205F22.json"
+      - ".github/workflows/w1-callback-ingress-readiness-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Record exact source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git rev-parse HEAD
+          git rev-parse HEAD^{tree}
+
+      - name: Compile readiness guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/w1/w1_callback_ingress_readiness_guard.py
+
+      - name: Run fail-closed readiness contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest -v tests.test_w1_callback_ingress_readiness_guard
