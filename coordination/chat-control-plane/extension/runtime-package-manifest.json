@@ -32,6 +32,7 @@
     "operator-actions.js",
     "runtime-core.js",
     "operator-control.js",
+    "semantic-perception-compiler.js",
     "operator-perception.js",
     "operator-oopif-perception.js",
     "operator-semantic-actions.js",
