@@ -1,0 +1,12 @@
+{
+  "name": "@metaengine/a2-compute-browser",
+  "version": "0.3.0-dev.1",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "self-test": "node src/cli.mjs self-test",
+    "serve": "node src/cli.mjs serve"
+  }
+}
