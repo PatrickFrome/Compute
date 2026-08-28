@@ -55,6 +55,14 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           source = Path('.github/workflows/w1-aws-ssm-callback-documents-provision-contract.yml').read_text()
+          marker = '      - name: Prove workflow is non-authority'
+          if source.count(marker) != 1:
+              raise SystemExit('workflow audit marker invalid')
+          policy_surface = source.split(marker, 1)[0]
+          if 'permissions:\n  contents: read\n' not in policy_surface:
+              raise SystemExit('least privilege permissions missing')
+          if 'persist-credentials: false' not in policy_surface:
+              raise SystemExit('checkout credential persistence not disabled')
           forbidden = (
               'aws-actions/configure-aws-credentials',
               'supabase db push',
@@ -65,6 +73,6 @@ jobs:
               'id-token: write',
           )
           for item in forbidden:
-              if item in source:
+              if item in policy_surface:
                   raise SystemExit(f'forbidden authority surface: {item}')
           PY
