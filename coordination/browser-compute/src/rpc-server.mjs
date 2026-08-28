@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import net from 'node:net';
+import { ComputePlanningBrokerService } from './planning-broker-service.mjs';
 import { rotateControlToken, rpcEndpoint } from './security.mjs';
 
 const MAX_LINE_BYTES = 1024 * 1024;
@@ -16,6 +17,10 @@ export const RPC_METHODS = Object.freeze([
   'target.create',
   'target.list',
   'perception.snapshot',
+  'planning.lookup',
+  'planning.promote',
+  'planning.abort',
+  'planning.stats',
   'target.activate',
   'target.close'
 ]);
@@ -31,6 +36,10 @@ export const RPC_METHOD_EFFECTS = Object.freeze({
   'target.create': 'LOCAL_LIFECYCLE',
   'target.list': 'READ_ONLY',
   'perception.snapshot': 'READ_ONLY',
+  'planning.lookup': 'LOCAL_COORDINATION',
+  'planning.promote': 'LOCAL_COORDINATION',
+  'planning.abort': 'LOCAL_COORDINATION',
+  'planning.stats': 'READ_ONLY',
   'target.activate': 'LOCAL_UI',
   'target.close': 'LOCAL_LIFECYCLE'
 });
@@ -46,9 +55,21 @@ const RPC_PARAM_KEYS = Object.freeze({
   'target.create': ['profileId', 'targetId', 'contextId', 'role', 'url'],
   'target.list': ['profileId', 'includeRetired'],
   'perception.snapshot': ['profileId', 'targetId'],
+  'planning.lookup': ['profileId', 'targetId', 'intentId', 'actionKind'],
+  'planning.promote': ['profileId', 'targetId', 'flightId', 'leaseToken', 'candidateRef'],
+  'planning.abort': ['profileId', 'flightId', 'leaseToken', 'reasonCode'],
+  'planning.stats': ['profileId'],
   'target.activate': ['profileId', 'targetId'],
   'target.close': ['profileId', 'targetId']
 });
+
+const CONCURRENT_METHODS = new Set([
+  'perception.snapshot',
+  'planning.lookup',
+  'planning.promote',
+  'planning.abort',
+  'planning.stats'
+]);
 
 export function validateRpcParams(method, params) {
   if (!params || typeof params !== 'object' || Array.isArray(params)) throw new Error('rpc_params_invalid');
@@ -64,7 +85,7 @@ function safeEqual(a, b) {
   return aa.length === bb.length && crypto.timingSafeEqual(aa, bb);
 }
 
-async function dispatch(runtime, method, params) {
+async function dispatch(runtime, planning, method, params) {
   params = validateRpcParams(method, params);
   switch (method) {
     case 'runtime.health': return runtime.health();
@@ -77,6 +98,10 @@ async function dispatch(runtime, method, params) {
     case 'target.create': return runtime.createTarget(params);
     case 'target.list': return runtime.listTargets(params?.profileId, { includeRetired: params?.includeRetired === true });
     case 'perception.snapshot': return runtime.snapshotTarget(params);
+    case 'planning.lookup': return planning.lookup(params);
+    case 'planning.promote': return planning.promote(params);
+    case 'planning.abort': return planning.abort(params);
+    case 'planning.stats': return planning.stats(params);
     case 'target.activate': return runtime.activateTarget(params);
     case 'target.close': return runtime.closeTarget(params);
     default: throw new Error('rpc_method_forbidden');
@@ -86,6 +111,7 @@ async function dispatch(runtime, method, params) {
 export async function startRpcServer(runtime) {
   const { token, file: tokenFile } = await rotateControlToken(runtime.stateRoot);
   const endpoint = rpcEndpoint(runtime.stateRoot);
+  const planning = new ComputePlanningBrokerService(runtime);
   if (process.platform !== 'win32') await fs.rm(endpoint, { force: true }).catch(() => {});
   let effectQueue = Promise.resolve();
   const server = net.createServer((socket) => {
@@ -97,7 +123,7 @@ export async function startRpcServer(runtime) {
       try {
         if (!safeEqual(request.token, token)) throw new Error('rpc_unauthorized');
         if (!RPC_METHODS.includes(String(request.method || ''))) throw new Error('rpc_method_forbidden');
-        const result = await dispatch(runtime, request.method, request.params || {});
+        const result = await dispatch(runtime, planning, request.method, request.params || {});
         socket.write(`${JSON.stringify({ id, ok: true, effect_class: RPC_METHOD_EFFECTS[request.method], web_authority_effect: false, result })}\n`);
       } catch (error) {
         socket.write(`${JSON.stringify({ id, ok: false, error: String(error?.message || error) })}\n`);
@@ -114,7 +140,7 @@ export async function startRpcServer(runtime) {
         catch (_) { socket.write(`${JSON.stringify({ ok: false, error: 'rpc_json_invalid' })}\n`); continue; }
         const id = request.id ?? null;
         const execute = () => respond(request, id);
-        const schedule = request.method === 'perception.snapshot'
+        const schedule = CONCURRENT_METHODS.has(request.method)
           ? execute
           : () => {
               const job = effectQueue.then(execute, execute);
@@ -144,6 +170,7 @@ export async function startRpcServer(runtime) {
     tokenFile,
     server,
     async close() {
+      planning.clear();
       await new Promise((resolve) => server.close(resolve));
       if (process.platform !== 'win32') await fs.rm(endpoint, { force: true }).catch(() => {});
       await fs.rm(tokenFile, { force: true }).catch(() => {});
