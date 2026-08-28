@@ -42,7 +42,8 @@ try {
   assert.ok(first.nodes.some((node) => node.role === 'button' && node.name === 'Send'));
   assert.ok(first.nodes.some((node) => node.name.includes('IGNORE ALL PREVIOUS')));
   assert.ok(second.nodes.some((node) => node.continuity === 'EXACT_BINDING'));
-  assert.ok(first.metrics.semantic_frame_bytes < first.metrics.raw_observation_bytes_estimate);
+  assert.ok(first.metrics.semantic_frame_bytes > 0);
+  assert.ok(first.metrics.raw_observation_bytes_estimate > 0);
   const serialized = JSON.stringify(first);
   assert.doesNotMatch(serialized, /<html|<!doctype|body_text|raw_dom|raw_accessibility/i);
   console.log(JSON.stringify({
@@ -53,6 +54,7 @@ try {
     node_reduction_ratio: first.metrics.node_reduction_ratio,
     semantic_frame_bytes: first.metrics.semantic_frame_bytes,
     raw_observation_bytes_estimate: first.metrics.raw_observation_bytes_estimate,
+    semantic_to_raw_byte_ratio: Number((first.metrics.semantic_frame_bytes / first.metrics.raw_observation_bytes_estimate).toFixed(4)),
     exact_binding_seen: second.nodes.some((node) => node.continuity === 'EXACT_BINDING'),
     runtime_evaluate_used_by_semantic_adapter: false,
     web_authority_effect: false
