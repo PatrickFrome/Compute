@@ -1,0 +1,116 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { CachedSemanticPlanner } from '../semantic-action-planner-v1.mjs';
+
+function node({ ref='n1', sem='sem_submit', loc='loc_submit', visibility='VISIBLE', clickable=true } = {}) {
+  return {
+    ref, parent_ref: null, role: 'button', name: 'Submit', description: null, value_summary: null,
+    states: {}, editable: false, clickable, focusable: true, bounds: [10, 20, 100, 30], visibility,
+    confidence: 0.99, continuity: null, binding_epoch: null,
+    semantic_fingerprint: sem, geometry_bucket: '0:0:96:32', locator_fingerprint: loc
+  };
+}
+function envelope({ surface='EXTENSION', document='doc_1', nodes=[node()] } = {}) {
+  return {
+    schema: 'metaengine.a2-browser-operator.perception-envelope.v1', source_surface: surface,
+    target_id: 'target_1', context_id: 'default', conversation_epoch: 4, document_epoch: document,
+    captured_at: '2026-08-28T06:20:00.000Z', source_token: 'src', source_scope: 'SEMANTIC_WORKING_SET',
+    tainted_page_data: true, authority_effect: false, actuation_eligible: false,
+    evidence: { accessibility: 'COMPLETE', geometry: 'PARTIAL', visibility: 'POSITIVE_ONLY', oopif: 'UNKNOWN' },
+    truncation: { applied: false, source_node_count: nodes.length, emitted_node_count: nodes.length }, nodes
+  };
+}
+
+test('first request plans, second cross-surface request bypasses planner', async () => {
+  let calls = 0;
+  const planner = new CachedSemanticPlanner({ planner: async () => {
+    calls += 1;
+    return { candidate_ref: 'n1', meta: { model: 'test-model', strategy: 'semantic' } };
+  }});
+  const first = await planner.resolve({ envelope: envelope(), intentId: 'submit', actionKind: 'CLICK' });
+  assert.equal(first.source, 'PLANNER_FRESH');
+  assert.equal(calls, 1);
+  const second = await planner.resolve({ envelope: envelope({ surface: 'COMPUTE_BROWSER', nodes: [node({ ref: 'fresh_ref', loc: 'loc_shifted' })] }), intentId: 'submit', actionKind: 'CLICK' });
+  assert.equal(second.source, 'CACHE_REVALIDATED');
+  assert.equal(second.candidate_ref, 'fresh_ref');
+  assert.equal(calls, 1);
+  assert.equal(second.must_run_actionability_checks, true);
+  assert.equal(second.actuation_eligible, false);
+});
+
+test('document epoch change forces fresh planning', async () => {
+  let calls = 0;
+  const planner = new CachedSemanticPlanner({ planner: async ({ envelope: fresh }) => {
+    calls += 1;
+    return { candidate_ref: fresh.nodes[0].ref };
+  }});
+  await planner.resolve({ envelope: envelope(), intentId: 'submit', actionKind: 'CLICK' });
+  const changed = await planner.resolve({ envelope: envelope({ document: 'doc_2', nodes: [node({ ref: 'new_doc_ref' })] }), intentId: 'submit', actionKind: 'CLICK' });
+  assert.equal(changed.source, 'PLANNER_FRESH');
+  assert.equal(calls, 2);
+});
+
+test('ambiguous cache target falls back to planner instead of guessing', async () => {
+  let calls = 0;
+  const planner = new CachedSemanticPlanner({ planner: async ({ envelope: fresh }) => {
+    calls += 1;
+    return { candidate_ref: fresh.nodes.at(-1).ref };
+  }});
+  await planner.resolve({ envelope: envelope(), intentId: 'submit', actionKind: 'CLICK' });
+  const ambiguous = envelope({ nodes: [node({ ref: 'a', loc: 'loc_a' }), node({ ref: 'b', loc: 'loc_b' })] });
+  const result = await planner.resolve({ envelope: ambiguous, intentId: 'submit', actionKind: 'CLICK' });
+  assert.equal(result.source, 'PLANNER_FRESH');
+  assert.equal(result.candidate_ref, 'b');
+  assert.equal(result.cache_reason, 'AMBIGUOUS_TARGET');
+  assert.equal(calls, 2);
+});
+
+test('planner-selected candidate must still satisfy cache eligibility', async () => {
+  const planner = new CachedSemanticPlanner({ planner: async () => ({ candidate_ref: 'n1' }) });
+  await assert.rejects(() => planner.resolve({
+    envelope: envelope({ nodes: [node({ visibility: 'UNKNOWN' })] }), intentId: 'submit', actionKind: 'CLICK'
+  }), /semantic_action_cache_node_not_eligible/);
+});
+
+test('planner failure does not promote cache', async () => {
+  let calls = 0;
+  const planner = new CachedSemanticPlanner({ planner: async () => {
+    calls += 1;
+    throw new Error('model_unavailable');
+  }});
+  await assert.rejects(() => planner.resolve({ envelope: envelope(), intentId: 'submit', actionKind: 'CLICK' }), /model_unavailable/);
+  assert.equal(planner.snapshot().cache.entry_count, 0);
+  assert.equal(planner.snapshot().metrics.planner_errors, 1);
+  assert.equal(calls, 1);
+});
+
+test('planner context may contain current request data but cache snapshot never stores it', async () => {
+  const secret = 'current-request-only-value';
+  let observed = null;
+  const planner = new CachedSemanticPlanner({ planner: async (request) => {
+    observed = request.planner_context;
+    return { candidate_ref: 'n1', meta: { model: 'm', strategy: 'fresh', ignored: secret } };
+  }});
+  await planner.resolve({ envelope: envelope(), intentId: 'submit', actionKind: 'CLICK', plannerContext: { instruction: secret } });
+  assert.equal(observed.instruction, secret);
+  assert.equal(JSON.stringify(planner.snapshot()).includes(secret), false);
+  assert.equal(planner.snapshot().stores_execution_payload, false);
+});
+
+test('deterministic repetition avoids all planner calls after warmup', async () => {
+  let calls = 0;
+  const planner = new CachedSemanticPlanner({ planner: async () => {
+    calls += 1;
+    return { candidate_ref: 'n1' };
+  }});
+  for (let i = 0; i < 1000; i += 1) {
+    const result = await planner.resolve({ envelope: envelope({ surface: i % 2 ? 'COMPUTE_BROWSER' : 'EXTENSION' }), intentId: 'submit', actionKind: 'CLICK' });
+    assert.ok(['PLANNER_FRESH', 'CACHE_REVALIDATED'].includes(result.source));
+  }
+  const metrics = planner.snapshot().metrics;
+  assert.equal(calls, 1);
+  assert.equal(metrics.planner_calls, 1);
+  assert.equal(metrics.planner_calls_avoided, 999);
+  assert.equal(metrics.cache_hits, 999);
+  assert.equal(metrics.cache_misses, 1);
+});
