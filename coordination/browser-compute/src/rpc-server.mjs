@@ -22,6 +22,7 @@ export const RPC_METHODS = Object.freeze([
   'webmcp.catalog',
   'webmcp.describe',
   'planning.lookup',
+  'planning.context',
   'planning.promote',
   'planning.abort',
   'planning.stats',
@@ -44,6 +45,7 @@ export const RPC_METHOD_EFFECTS = Object.freeze({
   'webmcp.catalog': 'READ_ONLY',
   'webmcp.describe': 'READ_ONLY',
   'planning.lookup': 'LOCAL_COORDINATION',
+  'planning.context': 'LOCAL_COORDINATION',
   'planning.promote': 'LOCAL_COORDINATION',
   'planning.abort': 'LOCAL_COORDINATION',
   'planning.stats': 'READ_ONLY',
@@ -66,6 +68,7 @@ const RPC_PARAM_KEYS = Object.freeze({
   'webmcp.catalog': ['profileId', 'targetId'],
   'webmcp.describe': ['profileId', 'targetId', 'toolRef'],
   'planning.lookup': ['profileId', 'targetId', 'intentId', 'actionKind'],
+  'planning.context': ['profileId', 'targetId', 'flightId', 'leaseToken', 'surface'],
   'planning.promote': ['profileId', 'targetId', 'flightId', 'leaseToken', 'candidateRef'],
   'planning.abort': ['profileId', 'flightId', 'leaseToken', 'reasonCode'],
   'planning.stats': ['profileId'],
@@ -79,6 +82,7 @@ const CONCURRENT_METHODS = new Set([
   'webmcp.catalog',
   'webmcp.describe',
   'planning.lookup',
+  'planning.context',
   'planning.promote',
   'planning.abort',
   'planning.stats'
@@ -115,6 +119,7 @@ async function dispatch(runtime, planning, webmcp, method, params) {
     case 'webmcp.catalog': return webmcp.catalog(params);
     case 'webmcp.describe': return webmcp.describe(params);
     case 'planning.lookup': return planning.lookup(params);
+    case 'planning.context': return planning.context(params);
     case 'planning.promote': return planning.promote(params);
     case 'planning.abort': return planning.abort(params);
     case 'planning.stats': return planning.stats(params);
@@ -127,8 +132,8 @@ async function dispatch(runtime, planning, webmcp, method, params) {
 export async function startRpcServer(runtime) {
   const { token, file: tokenFile } = await rotateControlToken(runtime.stateRoot);
   const endpoint = rpcEndpoint(runtime.stateRoot);
-  const planning = new ComputePlanningBrokerService(runtime);
   const webmcp = new ComputeWebMcpService(runtime);
+  const planning = new ComputePlanningBrokerService(runtime, { webMcpService: webmcp });
   if (process.platform !== 'win32') await fs.rm(endpoint, { force: true }).catch(() => {});
   let effectQueue = Promise.resolve();
   const server = net.createServer((socket) => {
