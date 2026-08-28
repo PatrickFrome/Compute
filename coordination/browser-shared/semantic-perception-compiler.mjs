@@ -244,16 +244,27 @@ function assignIdentity(candidates, raw, previousFrame) {
 
 function sameJson(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
 
+function deltaScope(current, previousFrame) {
+  const sameDocument = previousFrame && String(previousFrame.document_epoch) === String(current.document_epoch);
+  const bounded = current.truncation?.applied === true || previousFrame?.truncation?.applied === true;
+  if (!sameDocument) return bounded ? 'FULL_REFRESH_BOUNDED' : 'FULL_REFRESH';
+  return bounded ? 'EMITTED_WORKING_SET' : 'FULL_CANDIDATE_SET';
+}
+
 function computeChanges(current, previousFrame) {
-  if (!previousFrame || String(previousFrame.document_epoch) !== String(current.document_epoch)) {
-    return current.nodes.map((node) => ({ type: 'ADDED', semantic_id: node.semantic_id }));
+  const sameDocument = previousFrame && String(previousFrame.document_epoch) === String(current.document_epoch);
+  const bounded = current.truncation?.applied === true || previousFrame?.truncation?.applied === true;
+  const enteredType = bounded ? 'WORKING_SET_ENTERED' : 'ADDED';
+  const exitedType = bounded ? 'WORKING_SET_EVICTED' : 'REMOVED';
+  if (!sameDocument) {
+    return current.nodes.map((node) => ({ type: enteredType, semantic_id: node.semantic_id }));
   }
   const before = new Map((previousFrame.nodes || []).map((node) => [node.semantic_id, node]));
   const after = new Map(current.nodes.map((node) => [node.semantic_id, node]));
   const changes = [];
   for (const [id, node] of after) {
     const prior = before.get(id);
-    if (!prior) { changes.push({ type: 'ADDED', semantic_id: id }); continue; }
+    if (!prior) { changes.push({ type: enteredType, semantic_id: id }); continue; }
     const fields = [];
     if (prior.name !== node.name) fields.push('name');
     if (prior.value_summary !== node.value_summary) fields.push('value_summary');
@@ -262,7 +273,7 @@ function computeChanges(current, previousFrame) {
     if (Number(prior.binding_epoch || 1) !== Number(node.binding_epoch || 1)) fields.push('binding');
     if (fields.length) changes.push({ type: 'CHANGED', semantic_id: id, fields });
   }
-  for (const id of before.keys()) if (!after.has(id)) changes.push({ type: 'REMOVED', semantic_id: id });
+  for (const id of before.keys()) if (!after.has(id)) changes.push({ type: exitedType, semantic_id: id });
   return changes.sort((a,b) => String(a.semantic_id).localeCompare(String(b.semantic_id)) || a.type.localeCompare(b.type));
 }
 
@@ -305,6 +316,7 @@ export function compileSemanticFrame(rawObservation, options = {}) {
     authority_effect: false,
     nodes,
     changes: [],
+    delta: { scope: 'PENDING', complete: false },
     ambiguity: ambiguous.map((item) => ({
       semantic_id: item.candidate.semantic_id,
       matches: item.matches
@@ -327,6 +339,8 @@ export function compileSemanticFrame(rawObservation, options = {}) {
       ambiguous_nodes: nodes.filter((node) => node.continuity === 'AMBIGUOUS').length
     }
   };
+  const scope = deltaScope(frame, options.previousFrame || null);
+  frame.delta = { scope, complete: scope === 'FULL_REFRESH' || scope === 'FULL_CANDIDATE_SET' };
   frame.changes = computeChanges(frame, options.previousFrame || null);
   frame.metrics.semantic_frame_bytes = jsonBytes(frame);
   frame.metrics.node_reduction_ratio = frame.metrics.source_ax_nodes > 0 ? Number((1 - nodes.length / frame.metrics.source_ax_nodes).toFixed(6)) : 0;
