@@ -143,6 +143,31 @@ test('compiler rejects sparse tables, invalid joins, and daemon-owned limit over
   }), /snapshot_dom_nodes_too_many/);
 });
 
+test('compiler accepts producer-short style rows only as conservative visibility evidence', () => {
+  const emptyRow = domFixture();
+  emptyRow.documents[0].layout.styles[1] = [];
+  const emptyCompiled = compileSemanticSnapshot({ domSnapshot: emptyRow, axTree: axFixture(), identity: IDENTITY, sessionGeneration: 1, nodeKey: NODE_KEY });
+  assert.equal(emptyCompiled.snapshot.nodes[1].visible, false);
+
+  const shortRow = domFixture();
+  shortRow.documents[0].layout.styles[1] = [3, 4, 5];
+  const shortCompiled = compileSemanticSnapshot({ domSnapshot: shortRow, axTree: axFixture(), identity: IDENTITY, sessionGeneration: 1, nodeKey: NODE_KEY });
+  assert.equal(shortCompiled.snapshot.nodes[1].visible, false);
+
+  const sentinelRow = domFixture();
+  sentinelRow.documents[0].layout.styles[1] = [3, 4, 5, -1];
+  const sentinelCompiled = compileSemanticSnapshot({ domSnapshot: sentinelRow, axTree: axFixture(), identity: IDENTITY, sessionGeneration: 1, nodeKey: NODE_KEY });
+  assert.equal(sentinelCompiled.snapshot.nodes[1].visible, false);
+
+  const badIndex = domFixture();
+  badIndex.documents[0].layout.styles[1] = [3, 4, 999, 6];
+  assert.throws(() => compileSemanticSnapshot({ domSnapshot: badIndex, axTree: axFixture(), identity: IDENTITY, sessionGeneration: 1, nodeKey: NODE_KEY }), /snapshot_layout_style_index_invalid/);
+
+  const overlong = domFixture();
+  overlong.documents[0].layout.styles[1] = [3, 4, 5, 6, 3];
+  assert.throws(() => compileSemanticSnapshot({ domSnapshot: overlong, axTree: axFixture(), identity: IDENTITY, sessionGeneration: 1, nodeKey: NODE_KEY }), /snapshot_layout_style_row_invalid/);
+});
+
 test('compiler accepts Chromium empty-string sentinel only in producer-defined fields', () => {
   const emptyAttribute = domFixture();
   emptyAttribute.documents[0].nodes.attributes[2][1] = -1;
@@ -186,13 +211,14 @@ test('compiler accepts Chromium empty-string sentinel only in producer-defined f
 
   const sentinelStyle = domFixture();
   sentinelStyle.documents[0].layout.styles[0][0] = -1;
-  assert.throws(() => compileSemanticSnapshot({
+  const compiled = compileSemanticSnapshot({
     domSnapshot: sentinelStyle,
     axTree: axFixture(),
     identity: IDENTITY,
     sessionGeneration: 1,
     nodeKey: NODE_KEY
-  }), /snapshot_layout_style_index_invalid/);
+  });
+  assert.equal(compiled.snapshot.nodes[0].visible, false);
 });
 
 test('capture uses exactly two read-only CDP methods with daemon-owned parameters', async () => {
