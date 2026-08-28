@@ -42,19 +42,32 @@ test('chrome args isolate profile and expose only the inherited B3 pipe', () => 
 });
 
 test('RPC surface is typed, effect-classed, and exposes no raw browser code path', () => {
-  assert.deepEqual(RPC_METHODS, ['runtime.health', 'profile.start', 'profile.stop', 'profile.list', 'context.create', 'context.list', 'context.close', 'target.create', 'target.list', 'target.activate', 'target.close']);
+  assert.deepEqual(RPC_METHODS, [
+    'runtime.health', 'profile.start', 'profile.stop', 'profile.list',
+    'context.create', 'context.list', 'context.close',
+    'target.create', 'target.list', 'target.activate', 'target.close',
+    'perception.capture'
+  ]);
   assert.deepEqual(protocol.methods, RPC_METHODS);
   assert.deepEqual(protocol.method_effects, RPC_METHOD_EFFECTS);
+  assert.equal(RPC_METHOD_EFFECTS['perception.capture'], 'READ_ONLY');
+  assert.equal(protocol.semantic_perception.authority, false);
+  assert.equal(protocol.semantic_perception.tainted_page_data, true);
+  assert.equal(protocol.semantic_perception.live_revalidation_required_before_actuation, true);
+  assert.equal(protocol.semantic_perception.raw_dom_external, false);
+  assert.equal(protocol.semantic_perception.raw_accessibility_external, false);
   assert.equal(protocol.web_authority_effect, false);
   assert.equal(protocol.local_effects_present, true);
-  for (const forbidden of ['raw_cdp', 'runtime_evaluate', 'javascript_eval', 'shell_exec', 'arbitrary_browser_flags', 'arbitrary_executable_path', 'headless_override', 'sandbox_override', 'raw_browser_context_id', 'context_proxy_override', 'context_universal_network_access', 'default_context_disposal', 'silent_context_recreation']) {
+  for (const forbidden of ['raw_cdp', 'runtime_evaluate', 'javascript_eval', 'shell_exec', 'arbitrary_browser_flags', 'arbitrary_executable_path', 'headless_override', 'sandbox_override', 'raw_browser_context_id', 'context_proxy_override', 'context_universal_network_access', 'default_context_disposal', 'silent_context_recreation', 'raw_dom_export', 'raw_accessibility_export', 'body_text_export_r4']) {
     assert.ok(protocol.forbidden_external_capabilities.includes(forbidden));
   }
   const joined = RPC_METHODS.join(' ');
   assert.doesNotMatch(joined, /cdp|evaluate|javascript|exec|shell/i);
   assert.deepEqual(validateRpcParams('context.create', { profileId: 'one', contextId: 'two' }), { profileId: 'one', contextId: 'two' });
+  assert.deepEqual(validateRpcParams('perception.capture', { profileId: 'one', targetId: 'two', nodeBudget: 80, taskTerms: ['send'] }), { profileId: 'one', targetId: 'two', nodeBudget: 80, taskTerms: ['send'] });
   for (const key of ['proxyServer', 'proxyBypassList', 'originsWithUniversalNetworkAccess', 'browserContextId', 'executablePath', 'headless', 'allowNoSandbox']) {
     assert.throws(() => validateRpcParams('context.create', { profileId: 'one', [key]: 'attacker' }), /rpc_params_forbidden/);
+    assert.throws(() => validateRpcParams('perception.capture', { profileId: 'one', targetId: 'two', [key]: 'attacker' }), /rpc_params_forbidden/);
   }
 });
 
