@@ -1,0 +1,133 @@
+name: A2 Browser R7F Linux Skill Source
+
+on:
+  push:
+    branches:
+      - 'work/a2-browser-r7-skill-runtime*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r7f-linux-skill-source-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Establish source epoch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = "Linux"
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+
+      - name: R7F pinned Rust toolchain and dependency closure
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          rustc --version | tee "$RUNNER_TEMP/r7f-rustc-version.txt"
+          cargo --version | tee "$RUNNER_TEMP/r7f-cargo-version.txt"
+          test "$(rustc --version | awk '{print $2}')" = "1.98.0"
+          cargo generate-lockfile
+          cat Cargo.lock | tee "$RUNNER_TEMP/r7f-cargo-lock.txt"
+          cargo tree --locked | tee "$RUNNER_TEMP/r7f-cargo-tree.txt"
+          grep -q 'rustix v1\.1\.4' "$RUNNER_TEMP/r7f-cargo-tree.txt"
+          python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          lock = tomllib.loads(Path('Cargo.lock').read_text())
+          packages = {(p['name'], p['version']) for p in lock.get('package', [])}
+          forbidden_names = {
+              'proc-macro1', 'proc-macro-en', 'aovine', 'arone', 'aronenao', 'tinymember'
+          }
+          forbidden_versions = {
+              ('arrayref', '0.3.10'),
+              ('append-only-vec', '0.1.9'),
+              ('internment', '0.8.7'),
+          }
+          found_names = sorted((n, v) for n, v in packages if n in forbidden_names)
+          found_versions = sorted(packages & forbidden_versions)
+          if found_names or found_versions:
+              raise SystemExit(f'forbidden dependency closure: {found_names + found_versions}')
+          if ('rustix', '1.1.4') not in packages:
+              raise SystemExit('exact rustix 1.1.4 missing from Cargo.lock')
+          PY
+
+      - name: R7F openat2 capability contracts
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --all-targets | tee "$RUNNER_TEMP/r7f-rust-tests.log"
+          grep -q 'openat2' src/lib.rs
+          grep -q 'ResolveFlags::BENEATH' src/lib.rs
+          grep -q 'ResolveFlags::NO_SYMLINKS' src/lib.rs
+          grep -q 'ResolveFlags::NO_MAGICLINKS' src/lib.rs
+          grep -q 'ResolveFlags::NO_XDEV' src/lib.rs
+          grep -q 'OFlags::NONBLOCK' src/lib.rs
+          grep -q 'OFlags::NOCTTY' src/lib.rs
+          grep -q 'skill_loader_file_hardlink_rejected' src/lib.rs
+          grep -q 'skill_loader_file_changed_during_read' src/lib.rs
+          ! grep -n -E -- '\bunsafe\b|std::process|Command::|\bopenat\s*\(|realpath|canonicalize|/proc/self/fd' src/lib.rs
+          test "$(grep -c 'let root = open(' src/lib.rs)" -eq 1
+
+      - name: R7C R7E package and registry regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            coordination/browser-shared/tests/skill-package-identity-v1.test.mjs \
+            coordination/browser-shared/tests/skill-registry-v1.test.mjs | tee "$RUNNER_TEMP/r7f-js-regression.log"
+
+      - name: Build deterministic R7F evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          EPOCH="$SOURCE_DATE_EPOCH"
+          mkdir -p dist/a2-browser-r7f/evidence
+          cp "$RUNNER_TEMP/r7f-rustc-version.txt" dist/a2-browser-r7f/evidence/R7F_RUSTC_VERSION.txt
+          cp "$RUNNER_TEMP/r7f-cargo-version.txt" dist/a2-browser-r7f/evidence/R7F_CARGO_VERSION.txt
+          cp "$RUNNER_TEMP/r7f-cargo-lock.txt" dist/a2-browser-r7f/evidence/R7F_CARGO_LOCK.txt
+          cp "$RUNNER_TEMP/r7f-cargo-tree.txt" dist/a2-browser-r7f/evidence/R7F_CARGO_TREE.txt
+          cp "$RUNNER_TEMP/r7f-rust-tests.log" dist/a2-browser-r7f/evidence/R7F_RUST_TESTS.log
+          cp "$RUNNER_TEMP/r7f-js-regression.log" dist/a2-browser-r7f/evidence/R7F_JS_REGRESSION.log
+          printf '%s\n' "$GITHUB_SHA" > dist/a2-browser-r7f/evidence/SOURCE_COMMIT.txt
+          tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf dist/a2-browser-r7f/A2_BROWSER_R7F_LINUX_OPENAT2_SKILL_SOURCE.tar \
+            coordination/browser-skill-source-linux/Cargo.toml \
+            coordination/browser-skill-source-linux/Cargo.lock \
+            coordination/browser-skill-source-linux/rust-toolchain.toml \
+            coordination/browser-skill-source-linux/src/lib.rs \
+            coordination/browser-skill-source-linux/tests/source.rs \
+            coordination/browser-shared/skill-package-identity-v1.mjs \
+            coordination/browser-shared/skill-registry-v1.mjs \
+            research/A2_BROWSER_R7E_AMBIENT_FREE_SKILL_REGISTRY_PRE_RESEARCH_2026-08-28.md \
+            research/A2_BROWSER_R7F_LINUX_OPENAT2_SKILL_SOURCE_PRE_RESEARCH_2026-08-28.md
+          sha256sum dist/a2-browser-r7f/A2_BROWSER_R7F_LINUX_OPENAT2_SKILL_SOURCE.tar > dist/a2-browser-r7f/R7F_SHA256SUMS.txt
+
+      - name: Attest R7F evidence provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-browser-r7f/A2_BROWSER_R7F_LINUX_OPENAT2_SKILL_SOURCE.tar
+
+      - name: Upload R7F evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-r7f-linux-skill-source-${{ github.sha }}
+          path: |
+            dist/a2-browser-r7f/A2_BROWSER_R7F_LINUX_OPENAT2_SKILL_SOURCE.tar
+            dist/a2-browser-r7f/R7F_SHA256SUMS.txt
+            dist/a2-browser-r7f/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
