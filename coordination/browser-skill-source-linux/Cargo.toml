@@ -5,10 +5,13 @@ edition = "2024"
 rust-version = "1.85"
 publish = false
 
+[features]
+r7l-test-hooks = []
+
 [dependencies]
 landlock = "=0.4.7"
 libc = "=0.2.189"
-rustix = { version = "=1.1.4", features = ["fs"] }
+rustix = { version = "=1.1.4", features = ["fs", "thread"] }
 seccompiler = "=0.5.0"
 
 [profile.release]
