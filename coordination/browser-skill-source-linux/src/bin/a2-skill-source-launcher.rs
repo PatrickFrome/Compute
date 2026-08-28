@@ -6,6 +6,7 @@ mod executable_identity;
 mod launch_contract;
 
 use std::env;
+use std::path::Path;
 use std::process::ExitCode;
 
 fn run() -> Result<(), &'static str> {
@@ -17,6 +18,9 @@ fn run() -> Result<(), &'static str> {
     if args.next().is_some() {
         return Err("skill_launcher_root_argument_count_invalid");
     }
+    if !Path::new(&root).is_absolute() {
+        return Err("skill_launcher_root_not_absolute");
+    }
 
     let executable = executable_identity::open_fixed_helper().map_err(|error| error.code())?;
     let exec_fd = executable.raw_fd();
@@ -24,8 +28,7 @@ fn run() -> Result<(), &'static str> {
     #[cfg(feature = "r7l-test-hooks")]
     executable_identity::test_pause_after_open().map_err(|error| error.code())?;
 
-    rustix::thread::set_no_new_privs()
-        .map_err(|_| "skill_launcher_no_new_privs_failed")?;
+    rustix::thread::set_no_new_privs().map_err(|_| "skill_launcher_no_new_privs_failed")?;
     launch_contract::sanitize_inherited_fds(Some(exec_fd)).map_err(|error| error.code())?;
     let report = launch_contract::verify_clean_inherited_fds(Some(exec_fd))
         .map_err(|error| error.code())?;
