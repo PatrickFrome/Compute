@@ -2,13 +2,13 @@ import crypto from 'node:crypto';
 import { DEFAULT_PERCEPTION_LIMITS, PERCEPTION_COMPUTED_STYLES, compileSemanticSnapshot } from './perception.mjs';
 import { assertPerceptionEnvelope, envelopeFromComputeSnapshot } from '../../browser-shared/perception-envelope-v1.mjs';
 
-function mainLoaderId(frameTreeResult) {
+export function mainLoaderId(frameTreeResult) {
   const loaderId = frameTreeResult?.frameTree?.frame?.loaderId;
   if (typeof loaderId !== 'string' || loaderId.length < 1 || loaderId.length > 512) throw new Error('perception_main_loader_id_invalid');
   return loaderId;
 }
 
-function documentEpoch({ loaderId, targetId, conversationEpoch, nodeKey }) {
+export function computeDocumentEpoch({ loaderId, targetId, conversationEpoch, nodeKey }) {
   if (!Buffer.isBuffer(nodeKey) || nodeKey.length < 32) throw new Error('perception_node_key_invalid');
   const material = `${targetId}\0${conversationEpoch}\0${loaderId}`;
   return `doc_${crypto.createHmac('sha256', nodeKey).update(material).digest('hex').slice(0, 32)}`;
@@ -50,7 +50,7 @@ export async function captureComputePerceptionEnvelope({
       limits
     });
     const snapshot = { ...compiled.snapshot, captured_at: capturedAt };
-    const epoch = documentEpoch({
+    const epoch = computeDocumentEpoch({
       loaderId: loaderBefore,
       targetId: identity.targetId,
       conversationEpoch: identity.conversationEpoch,
