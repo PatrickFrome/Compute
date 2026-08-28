@@ -1,6 +1,6 @@
 {
   "schema": "metaengine.a2-browser-protocol.v1",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "transport": {
     "scope": "local_machine_only",
     "unix": "unix_domain_socket",
@@ -19,6 +19,17 @@
     "devtools_tcp_listener": false,
     "raw_cdp_external": false
   },
+  "semantic_perception": {
+    "schema": "metaengine.a2-semantic-frame.v1",
+    "authority": false,
+    "tainted_page_data": true,
+    "live_revalidation_required_before_actuation": true,
+    "default_node_budget": 80,
+    "max_node_budget": 200,
+    "raw_dom_external": false,
+    "raw_accessibility_external": false,
+    "runtime_evaluate_required": false
+  },
   "methods": [
     "runtime.health",
     "profile.start",
@@ -30,7 +41,8 @@
     "target.create",
     "target.list",
     "target.activate",
-    "target.close"
+    "target.close",
+    "perception.capture"
   ],
   "method_effects": {
     "runtime.health": "READ_ONLY",
@@ -43,7 +55,8 @@
     "target.create": "LOCAL_LIFECYCLE",
     "target.list": "READ_ONLY",
     "target.activate": "LOCAL_UI",
-    "target.close": "LOCAL_LIFECYCLE"
+    "target.close": "LOCAL_LIFECYCLE",
+    "perception.capture": "READ_ONLY"
   },
   "forbidden_external_capabilities": [
     "raw_cdp",
@@ -61,7 +74,10 @@
     "context_proxy_override",
     "context_universal_network_access",
     "default_context_disposal",
-    "silent_context_recreation"
+    "silent_context_recreation",
+    "raw_dom_export",
+    "raw_accessibility_export",
+    "body_text_export_r4"
   ],
   "web_authority_effect": false,
   "local_effects_present": true
