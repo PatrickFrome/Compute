@@ -1,3 +1,4 @@
+import { compileWebMcpCatalog, hydrateWebMcpTool } from '../../browser-shared/webmcp-catalog-v1.mjs';
 import { captureWebMcpTools } from './webmcp.mjs';
 import { validateContextId, validateProfileId, validateTargetId } from './security.mjs';
 
@@ -49,5 +50,14 @@ export class ComputeWebMcpService {
     });
     if (!entry.processRef.isRunning() || entry.processRef.processIncarnationId !== incarnation) throw new Error('webmcp_capture_stale');
     return envelope;
+  }
+
+  async catalog(params = {}) {
+    return compileWebMcpCatalog(await this.snapshot(params));
+  }
+
+  async describe({ profileId, targetId, toolRef } = {}) {
+    const freshEnvelope = await this.snapshot({ profileId, targetId });
+    return hydrateWebMcpTool(freshEnvelope, toolRef);
   }
 }
