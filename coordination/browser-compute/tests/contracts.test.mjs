@@ -42,19 +42,48 @@ test('chrome args isolate profile and expose only the inherited B3 pipe', () => 
 });
 
 test('RPC surface is typed, effect-classed, and exposes no raw browser code path', () => {
-  assert.deepEqual(RPC_METHODS, ['runtime.health', 'profile.start', 'profile.stop', 'profile.list', 'context.create', 'context.list', 'context.close', 'target.create', 'target.list', 'perception.snapshot', 'target.activate', 'target.close']);
+  assert.deepEqual(RPC_METHODS, [
+    'runtime.health', 'profile.start', 'profile.stop', 'profile.list',
+    'context.create', 'context.list', 'context.close',
+    'target.create', 'target.list', 'perception.snapshot',
+    'planning.lookup', 'planning.promote', 'planning.abort', 'planning.stats',
+    'target.activate', 'target.close'
+  ]);
   assert.deepEqual(protocol.methods, RPC_METHODS);
   assert.deepEqual(protocol.method_effects, RPC_METHOD_EFFECTS);
   assert.equal(protocol.web_authority_effect, false);
   assert.equal(protocol.local_effects_present, true);
-  for (const forbidden of ['raw_cdp', 'runtime_evaluate', 'javascript_eval', 'shell_exec', 'arbitrary_browser_flags', 'arbitrary_executable_path', 'headless_override', 'sandbox_override', 'raw_browser_context_id', 'context_proxy_override', 'context_universal_network_access', 'default_context_disposal', 'silent_context_recreation', 'raw_cdp_session_id', 'raw_cdp_backend_node_id', 'arbitrary_perception_limits', 'arbitrary_computed_styles', 'oopif_completeness_without_proof']) {
+  assert.equal(protocol.semantic_planning.provider_neutral, true);
+  assert.equal(protocol.semantic_planning.model_execution_location, 'external_agent');
+  assert.equal(protocol.semantic_planning.cache_hit_skips_model_call, true);
+  assert.equal(protocol.semantic_planning.promotion_requires_fresh_perception, true);
+  assert.equal(protocol.semantic_planning.cached_node_ref_authority, false);
+  assert.equal(protocol.semantic_planning.must_run_actionability_checks, true);
+  for (const forbidden of [
+    'raw_cdp', 'runtime_evaluate', 'javascript_eval', 'shell_exec', 'arbitrary_browser_flags',
+    'arbitrary_executable_path', 'headless_override', 'sandbox_override', 'raw_browser_context_id',
+    'context_proxy_override', 'context_universal_network_access', 'default_context_disposal',
+    'silent_context_recreation', 'raw_cdp_session_id', 'raw_cdp_backend_node_id',
+    'arbitrary_perception_limits', 'arbitrary_computed_styles', 'oopif_completeness_without_proof',
+    'planner_provider_credentials', 'planner_execution_payload_persistence', 'cached_node_ref_authority'
+  ]) {
     assert.ok(protocol.forbidden_external_capabilities.includes(forbidden));
   }
   const joined = RPC_METHODS.join(' ');
   assert.doesNotMatch(joined, /cdp|evaluate|javascript|exec|shell/i);
   assert.deepEqual(validateRpcParams('context.create', { profileId: 'one', contextId: 'two' }), { profileId: 'one', contextId: 'two' });
   assert.deepEqual(validateRpcParams('perception.snapshot', { profileId: 'one', targetId: 'target_one' }), { profileId: 'one', targetId: 'target_one' });
+  assert.deepEqual(validateRpcParams('planning.lookup', { profileId: 'one', targetId: 'target_one', intentId: 'submit', actionKind: 'CLICK' }), {
+    profileId: 'one', targetId: 'target_one', intentId: 'submit', actionKind: 'CLICK'
+  });
+  assert.deepEqual(validateRpcParams('planning.promote', {
+    profileId: 'one', targetId: 'target_one', flightId: 'flight_one', leaseToken: 'lease_one', candidateRef: 'node_one'
+  }), {
+    profileId: 'one', targetId: 'target_one', flightId: 'flight_one', leaseToken: 'lease_one', candidateRef: 'node_one'
+  });
   assert.throws(() => validateRpcParams('perception.snapshot', { profileId: 'one', targetId: 'target_one', computedStyles: ['all'] }), /rpc_params_forbidden/);
+  assert.throws(() => validateRpcParams('planning.lookup', { profileId: 'one', targetId: 'target_one', intentId: 'submit', actionKind: 'CLICK', providerApiKey: 'secret' }), /rpc_params_forbidden/);
+  assert.throws(() => validateRpcParams('planning.promote', { profileId: 'one', targetId: 'target_one', flightId: 'flight_one', leaseToken: 'lease_one', candidateRef: 'node_one', text: 'payload' }), /rpc_params_forbidden/);
   for (const key of ['proxyServer', 'proxyBypassList', 'originsWithUniversalNetworkAccess', 'browserContextId', 'executablePath', 'headless', 'allowNoSandbox']) {
     assert.throws(() => validateRpcParams('context.create', { profileId: 'one', [key]: 'attacker' }), /rpc_params_forbidden/);
   }
