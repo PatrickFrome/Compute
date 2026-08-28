@@ -66,7 +66,9 @@ Official references:
 
 ### Time semantics
 
-GitHub's documented token example has `nbf < iat < exp`; a validator must not require `iat <= nbf`. V12 includes a regression test for this exact ordering and bounds total validity rather than inventing a different JWT timing model.
+GitHub's documented token example has `nbf < iat < exp`; a validator must not require `iat <= nbf`. The corrected V12 guard accepts `nbf <= iat <= exp`, bounds the complete `exp - nbf` validity window to 1200 seconds, and includes a regression test for the documented ordering.
+
+The first adversarial CI run intentionally exposed the earlier incorrect ordering and was kept as evidence rather than hidden or rerun unchanged.
 
 ## 3. Submit the same checked token directly to AWS STS
 
@@ -129,9 +131,15 @@ Authenticated absence is accepted only after successful inventory:
 Transport/auth/provider errors are not normalized into absence.
 
 Official references:
-- https://api.supabase.com/api/v1#tag/edge-functions/GET/v1/projects/{ref}/functions
-- https://api.supabase.com/api/v1#tag/edge-functions/GET/v1/projects/{ref}/functions/{function_slug}
-- https://api.supabase.com/api/v1#tag/edge-functions/GET/v1/projects/{ref}/functions/{function_slug}/body
+- https://supabase.com/docs/reference/api/v1-list-all-functions
+- https://supabase.com/docs/reference/api/v1-get-a-function
+- https://supabase.com/docs/reference/api/v1-get-a-function-body
+
+### Credential-scope limitation discovered in post-research
+
+GET-only application code does **not** prove that the bearer token itself is read-scoped. Supabase documents that Personal Access Tokens inherit the privileges of the user account, while OAuth2 tokens can be short-lived and restricted by scopes. The three V12 Edge endpoints require only `edge_functions:read` / `edge_functions_read`.
+
+Therefore V12 records no claim that `W1_SUPABASE_MGMT_READ_TOKEN` is provider-verifiably least privilege. That is a separate credential-provenance property and becomes the next hardening milestone. A future V13 must prefer a provider-issued scoped/short-lived credential and must fail closed if the credential's scope cannot be independently established. It must not infer least privilege merely from HTTP method choice.
 
 ## 7. Comparison with stronger supply-chain patterns
 
@@ -145,12 +153,84 @@ Sigstore keyless signing is the closest useful analogue: a short-lived OIDC iden
 - one final portable receipt;
 - no authority upgrade from identity proof alone.
 
+Sigstore's verification model additionally checks the artifact digest, identity/issuer and a verification bundle containing certificate/signature/log proof. This reinforces the V12 rule that identity evidence is meaningful only when bound to exact content and independently verified.
+
 References:
 - https://docs.sigstore.dev/cosign/signing/signing_with_blobs/
-- https://docs.sigstore.dev/about/system_config/identity-provider/
-- https://docs.sigstore.dev/about/bundle/
+- https://docs.sigstore.dev/cosign/verifying/verify/
+- https://docs.sigstore.dev/quickstart/quickstart-cosign/
 
-## 8. Authority boundary
+## 8. Exact source CI evidence
+
+Initial adversarial V12 run:
+
+- run `33188032949`: `failure` in `contract-tests` only;
+- `credential-free-preflight`: skipped;
+- `protected-binding`: skipped;
+- no protected Environment/OIDC/AWS/Supabase credential path executed.
+
+It exposed the JWT temporal-order bug plus legacy test migration debt.
+
+After fixes:
+
+- semantic fix commit: `29b70b0572bb882c13981b47646e2c72df6f5949`;
+- legacy-v2 standalone run `33190303230`: success;
+- latest source head before this documentation seal: `dcd803fc9a28f2fe1079747fc58f18a57ab1753a`;
+- legacy-v1 run `33190426700`: success;
+- protected-binding run `33190426781`: success;
+- on `33190426781`, `contract-tests` succeeded while both manual-only jobs (`credential-free-preflight`, `protected-binding`) were skipped.
+
+Thus source contracts are green without exercising or claiming live provider readiness.
+
+## 9. Live Supabase read-only post-audit
+
+Observed at approximately `2026-08-28T16:33:51Z` using explicit read-only SQL against project `xpeibufgzjknrhbhpffp`:
+
+- authoritative H205F22 control-plane objects are in `destruktion_meta`, not `public`;
+- roadmap definition integrity: true;
+- roadmap drift detected: false;
+- canonical integrity: true;
+- W1 `effective_status = READY`;
+- W1 `verified_checkpoint_id = null`;
+- safety observations: 18;
+- safety verifications: 0;
+- backend bindings: 0;
+- reboot receipts: 0;
+- non-revoked worker enrollments: 2;
+- admitted non-revoked workers: 0;
+- non-revoked `cpu-local`: 1;
+- admitted `cpu-local`: 0;
+- callback key table: absent;
+- callback receipt table: absent;
+- callback RPC count: 0.
+
+The active CPU/GPU/cache safety policy remains:
+
+- policy: `linux-h1-h13-v1`;
+- SHA-256: `3dba3ce69e945e52ff1a2ab23e2981dd543296c72f229673bcc44c94c9e70122`;
+- enabled: true;
+- `authority_effect=false`.
+
+This is consistent with the hard boundary: W1 remains READY, not VERIFIED, and callback readiness remains absent rather than inferred.
+
+Roadmap lease truth remains v2 with no fresh active claims; one expired persisted W1 claim remains cleanup debt with `stale_rows_authority_effect=false`. No reconciliation mutation was executed.
+
+## 10. Advisor post-audit
+
+No DDL was performed in V12. Security advisors nevertheless surface pre-existing project-wide hardening debt that must not be silently conflated with this source change:
+
+- many `destruktion_meta` tables have RLS enabled with no policies; this can be intentional for a closed schema but should be normalized/documented rather than left ambiguous;
+- `public.coordination_read_barrier_h205f22()` is `SECURITY DEFINER` and executable by both `anon` and `authenticated` — WARN, separate security-hardening lane;
+- leaked-password protection is disabled — WARN for Auth;
+- performance advisors primarily report currently-unused indexes; no index is removed based on this snapshot alone because low-use/new tables can legitimately have zero scans.
+
+Relevant Supabase remediation:
+- https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy
+- https://supabase.com/docs/guides/database/database-linter?lint=0028_anon_security_definer_function_executable
+- https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable
+- https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection
+
+## 11. Authority boundary
 
 Even a fully successful V12 manual run proves only that:
 
@@ -173,7 +253,7 @@ It does **not** prove:
 
 All final authority fields remain false. `READY_CANDIDATE_NON_AUTHORITY` is still only callback-plane readiness; `NOT_READY` is a valid successful evidence result when authenticated inventory proves missing components.
 
-## Post-research conclusion
+## Post-research conclusion and next step
 
 Compared with v9/v10, V12 removes four trust gaps simultaneously:
 
@@ -182,4 +262,6 @@ Compared with v9/v10, V12 removes four trust gaps simultaneously:
 3. unverified broad IAM role trust;
 4. alternate legacy manual callback workflows that could bypass the newer gate.
 
-The next safe action after source CI is exact manual preflight on `main` only after the required GitHub Environment is known to exist and is independently approved. No provider mutation should be added to this workflow.
+Post-research adds a fifth hardening target rather than weakening V12: provider-verifiable Supabase credential scope. The next safe implementation is a V13 credential-provenance contract that accepts only a short-lived/scoped Management API credential with the minimum Edge read capability when provider support allows it. Until then, V12 must say only that its **operations** are GET-only, not that its Management bearer credential is proven least privilege.
+
+No manual provider run, provider mutation, callback provisioning, worker admission, reboot, W1 verification, roadmap reconciliation, DDL, or Edge deployment is authorized by this checkpoint.
