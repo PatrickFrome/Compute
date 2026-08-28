@@ -1,0 +1,197 @@
+name: W1 Callback Environment Preflight
+
+on:
+  push:
+    branches:
+      - work/main-roadmap-accelerators-v11
+    paths:
+      - "controller/w1/w1_callback_environment_preflight_guard.py"
+      - "tests/test_w1_callback_environment_preflight_guard.py"
+      - "research/W1_CALLBACK_GITHUB_ENVIRONMENT_PREFLIGHT.md"
+      - ".github/workflows/w1-callback-environment-preflight.yml"
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type READBACK_W1_CALLBACK_ENVIRONMENT_ONLY"
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile and test callback environment preflight contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git rev-parse HEAD
+          git rev-parse HEAD^{tree}
+          python3 -m py_compile controller/w1/w1_callback_environment_preflight_guard.py
+          python3 -m unittest -v tests.test_w1_callback_environment_preflight_guard
+
+  environment-preflight:
+    if: github.event_name == 'workflow_dispatch'
+    needs: contract-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      CONFIRMATION: ${{ inputs.confirmation }}
+    steps:
+      - name: Checkout exact main preflight revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Require explicit main credential-free preflight dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_REPOSITORY" == 'PatrickFrome/Compute' ]]
+          [[ "$GITHUB_REPOSITORY_ID" == '1341371143' ]]
+          [[ "$GITHUB_REPOSITORY_OWNER_ID" == '20597814' ]]
+          [[ "$CONFIRMATION" == 'READBACK_W1_CALLBACK_ENVIRONMENT_ONLY' ]]
+          mkdir -p evidence
+
+      - name: Capture public GitHub environment protection metadata before gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_get() {
+            curl --fail-with-body --silent --show-error --location \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "$1"
+          }
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/environments/w1-callback-readback" \
+            > evidence/environment-before.json
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/main" \
+            > evidence/main-before.json
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/environments/w1-callback-readback/deployment-branch-policies?per_page=100" \
+            > evidence/branch-policies-before.json
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/environments/w1-callback-readback/deployment_protection_rules" \
+            > evidence/custom-rules-before.json
+
+      - name: Validate exact environment and main-only deployment boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 controller/w1/w1_callback_environment_preflight_guard.py validate-environment \
+            --environment evidence/environment-before.json \
+            --branch evidence/main-before.json \
+            --branch-policies evidence/branch-policies-before.json \
+            --custom-rules evidence/custom-rules-before.json \
+            --output evidence/w1-callback-environment-preflight.json
+          python3 -m json.tool evidence/w1-callback-environment-preflight.json >/dev/null
+          rm -f evidence/environment-before.json evidence/main-before.json \
+            evidence/branch-policies-before.json evidence/custom-rules-before.json
+
+      - name: Upload credential-free preflight receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: w1-callback-environment-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/w1-callback-environment-preflight.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
+
+  environment-gate-proof:
+    if: github.event_name == 'workflow_dispatch'
+    needs: [contract-tests, environment-preflight]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: w1-callback-readback
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout exact gated main revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Download exact current-run preflight receipt
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: w1-callback-environment-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence
+          digest-mismatch: error
+
+      - name: Revalidate GitHub execution context after environment gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_REPOSITORY" == 'PatrickFrome/Compute' ]]
+          [[ "$GITHUB_REPOSITORY_ID" == '1341371143' ]]
+          [[ "$GITHUB_REPOSITORY_OWNER_ID" == '20597814' ]]
+          python3 controller/w1/w1_callback_environment_preflight_guard.py validate-receipt \
+            --input evidence/w1-callback-environment-preflight.json
+
+      - name: Capture public GitHub environment protection metadata after gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_get() {
+            curl --fail-with-body --silent --show-error --location \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "$1"
+          }
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/environments/w1-callback-readback" \
+            > evidence/environment-after.json
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/main" \
+            > evidence/main-after.json
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/environments/w1-callback-readback/deployment-branch-policies?per_page=100" \
+            > evidence/branch-policies-after.json
+          api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/environments/w1-callback-readback/deployment_protection_rules" \
+            > evidence/custom-rules-after.json
+
+      - name: Require environment metadata stability across approval gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 controller/w1/w1_callback_environment_preflight_guard.py validate-environment \
+            --environment evidence/environment-after.json \
+            --branch evidence/main-after.json \
+            --branch-policies evidence/branch-policies-after.json \
+            --custom-rules evidence/custom-rules-after.json \
+            --output evidence/w1-callback-environment-post-gate.json
+          python3 controller/w1/w1_callback_environment_preflight_guard.py seal-gate \
+            --before evidence/w1-callback-environment-preflight.json \
+            --after evidence/w1-callback-environment-post-gate.json \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --repository "$GITHUB_REPOSITORY" \
+            --repository-id "$GITHUB_REPOSITORY_ID" \
+            --owner-id "$GITHUB_REPOSITORY_OWNER_ID" \
+            --ref "$GITHUB_REF" \
+            --output evidence/w1-callback-environment-gate.json
+          python3 -m json.tool evidence/w1-callback-environment-gate.json >/dev/null
+          rm -f evidence/environment-after.json evidence/main-after.json \
+            evidence/branch-policies-after.json evidence/custom-rules-after.json \
+            evidence/w1-callback-environment-post-gate.json
+
+      - name: Upload non-authority environment gate proof
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: w1-callback-environment-gate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/w1-callback-environment-gate.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
