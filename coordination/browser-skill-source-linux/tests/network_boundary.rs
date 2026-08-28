@@ -88,7 +88,8 @@ fn controlled_launch_rejects_inherited_authority_and_seccomp_closes_new_network_
         .expect("install Landlock sandbox");
     assert!(landlock.fully_enforced);
 
-    let seccomp = syscall_sandbox::restrict_network_syscalls().expect("install seccomp filter");
+    let seccomp = syscall_sandbox::restrict_network_syscalls()
+        .unwrap_or_else(|error| panic!("install seccomp filter: {}", error.code()));
     assert_eq!(seccomp.denied_syscall_count, 21);
     assert!(seccomp.all_socket_creation_denied);
     assert!(seccomp.io_uring_disabled);
