@@ -95,7 +95,7 @@ jobs:
               if token not in identity:
                   raise SystemExit(f'missing R7L identity invariant: {token}')
           required_launcher = [
-              'open_fixed_helper()', 'set_no_new_privs()',
+              'open_fixed_helper()', 'set_no_new_privs(true)',
               'sanitize_inherited_fds(Some(exec_fd))',
               'verify_clean_inherited_fds(Some(exec_fd))',
               'exec_opened_helper(executable', 'root_not_absolute',
