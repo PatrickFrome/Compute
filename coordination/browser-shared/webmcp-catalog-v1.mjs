@@ -18,6 +18,12 @@ function fnv1a64(value) {
   return hash.toString(16).padStart(16, '0');
 }
 
+function stableStringCompare(left, right) {
+  const a = String(left ?? '');
+  const b = String(right ?? '');
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 function cleanToolRef(value) {
   const text = String(value ?? '').trim();
   if (!/^tool_[a-f0-9]{16}$/.test(text)) throw new Error('webmcp_catalog_tool_ref_invalid');
@@ -136,7 +142,7 @@ export function compileWebMcpCatalog(envelope) {
   }
 
   const tools = source.tools.map(compactTool).sort((a, b) =>
-    `${a.name_preview}\u0000${a.tool_ref}`.localeCompare(`${b.name_preview}\u0000${b.tool_ref}`, 'en')
+    stableStringCompare(`${a.name_preview}\u0000${a.tool_ref}`, `${b.name_preview}\u0000${b.tool_ref}`)
   );
   return finalizeCatalog({
     schema: CATALOG_SCHEMA,
