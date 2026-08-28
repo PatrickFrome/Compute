@@ -91,10 +91,10 @@ jobs:
         with:
           name: w1-v15-attestation-subject-${{ github.run_id }}-${{ github.run_attempt }}
           path: evidence/v15-attestation-subject.json
-          archive: false
           if-no-files-found: error
           overwrite: false
           retention-days: 7
+          compression-level: 0
 
   attest-and-verify:
     if: github.event_name == 'push' && github.repository == 'PatrickFrome/Compute'
