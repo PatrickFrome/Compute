@@ -1,0 +1,48 @@
+name: A2 Browser R7H Lockgen Research
+
+on:
+  push:
+    branches:
+      - 'work/a2-browser-r7h-lockgen'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: coordination/browser-skill-source-linux
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Resolve exact R7H closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --version
+          test "$(rustc --version | awk '{print $2}')" = "1.98.0"
+          rm -f Cargo.lock
+          cargo generate-lockfile
+          printf '%s\n' '---R7H-CARGO-LOCK-BEGIN---'
+          cat Cargo.lock
+          printf '%s\n' '---R7H-CARGO-LOCK-END---'
+          printf '%s\n' '---R7H-CARGO-TREE-BEGIN---'
+          cargo tree --locked
+          printf '%s\n' '---R7H-CARGO-TREE-END---'
+          python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+          lock = tomllib.loads(Path('Cargo.lock').read_text())
+          packages = {(p['name'], p['version']) for p in lock.get('package', [])}
+          if ('landlock', '0.4.7') not in packages or ('rustix', '1.1.4') not in packages:
+              raise SystemExit('exact direct dependency missing')
+          forbidden = {'proc-macro1', 'proc-macro-en', 'aovine', 'arone', 'aronenao', 'tinymember'}
+          hits = sorted((n, v) for n, v in packages if n in forbidden)
+          if hits:
+              raise SystemExit(f'forbidden closure: {hits}')
+          print('R7H_LOCKGEN_OK', len(packages))
+          PY
