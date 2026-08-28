@@ -13,6 +13,12 @@ export function validateProfileId(value) {
   return id;
 }
 
+export function validateContextId(value) {
+  const id = String(value || '').trim().toLowerCase();
+  if (!CONTEXT_ID_RE.test(id)) throw new Error('context_id_invalid');
+  return id;
+}
+
 export function validateTargetId(value) {
   const id = String(value || '').trim().toLowerCase();
   if (!TARGET_ID_RE.test(id)) throw new Error('target_id_invalid');

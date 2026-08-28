@@ -1,23 +1,24 @@
-{
+﻿{
   "schema": "metaengine.a2-browser-protocol.v1",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "transport": {
     "scope": "local_machine_only",
     "unix": "unix_domain_socket",
     "windows": "named_pipe",
     "authentication": "256_bit_per_daemon_session_capability_token",
-    "max_request_bytes": 1048576
+    "max_request_bytes": 1048576,
+    "internal_devtools": "native_remote_debugging_pipe"
   },
   "identity": {
     "durable": ["browser_node_id", "profile_id", "context_id", "context_epoch", "target_id", "conversation_epoch"],
-    "ephemeral": ["browser_pid", "process_incarnation_id", "cdp_browser_context_id", "cdp_target_id"]
-  },
-  "trusted_engine_transport": {
-    "kind": "chromium_remote_debugging_pipe",
-    "framing": "nul_delimited_json",
-    "max_frame_bytes": 16777216,
-    "devtools_tcp_listener": false,
-    "raw_cdp_external": false
+    "ephemeral": ["browser_pid", "process_incarnation_id", "cdp_browser_context_id", "cdp_target_id", "cdp_session_id", "semantic_frame_id", "backend_dom_node_id", "ax_node_id"],
+    "trusted_engine_transport": {
+      "kind": "chromium_remote_debugging_pipe",
+      "framing": "nul_delimited_json",
+      "max_frame_bytes": 16777216,
+      "devtools_tcp_listener": false,
+      "raw_cdp_external": false
+    }
   },
   "methods": [
     "runtime.health",
@@ -29,6 +30,7 @@
     "context.close",
     "target.create",
     "target.list",
+    "target.semantic_snapshot",
     "target.activate",
     "target.close"
   ],
@@ -42,11 +44,25 @@
     "context.close": "LOCAL_LIFECYCLE",
     "target.create": "LOCAL_LIFECYCLE",
     "target.list": "READ_ONLY",
+    "target.semantic_snapshot": "READ_ONLY",
     "target.activate": "LOCAL_UI",
     "target.close": "LOCAL_LIFECYCLE"
   },
+  "semantic_perception": {
+    "schema": "metaengine.a2-browser-operator.semantic-frame.v1",
+    "page_data_tainted": true,
+    "authority_effect": false,
+    "page_script_evaluation": false,
+    "default_node_budget": 60,
+    "min_node_budget": 30,
+    "max_node_budget": 80,
+    "document_epoch_source": "main_frame_loader_id",
+    "raw_cdp_exposed": false
+  },
+  "context_kinds": ["PERSISTENT_DEFAULT", "EPHEMERAL_ISOLATED"],
   "forbidden_external_capabilities": [
     "raw_cdp",
+    "raw_bidi",
     "runtime_evaluate",
     "javascript_eval",
     "shell_exec",
@@ -61,8 +77,15 @@
     "context_proxy_override",
     "context_universal_network_access",
     "default_context_disposal",
-    "silent_context_recreation"
+    "silent_context_recreation",
+    "cookie_export",
+    "storage_state_import",
+    "storage_state_export",
+    "context_permission_override",
+    "accept_insecure_certificates_override",
+    "devtools_tcp_listener"
   ],
   "web_authority_effect": false,
-  "local_effects_present": true
+  "local_effects_present": true,
+  "devtools_tcp_exposed": false
 }

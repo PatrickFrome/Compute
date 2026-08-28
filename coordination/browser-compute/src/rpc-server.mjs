@@ -1,4 +1,4 @@
-import crypto from 'node:crypto';
+﻿import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import { rotateControlToken, rpcEndpoint } from './security.mjs';
@@ -15,6 +15,7 @@ export const RPC_METHODS = Object.freeze([
   'context.close',
   'target.create',
   'target.list',
+  'target.semantic_snapshot',
   'target.activate',
   'target.close'
 ]);
@@ -29,6 +30,7 @@ export const RPC_METHOD_EFFECTS = Object.freeze({
   'context.close': 'LOCAL_LIFECYCLE',
   'target.create': 'LOCAL_LIFECYCLE',
   'target.list': 'READ_ONLY',
+  'target.semantic_snapshot': 'READ_ONLY',
   'target.activate': 'LOCAL_UI',
   'target.close': 'LOCAL_LIFECYCLE'
 });
@@ -38,11 +40,12 @@ const RPC_PARAM_KEYS = Object.freeze({
   'profile.start': ['profileId'],
   'profile.stop': ['profileId'],
   'profile.list': [],
-  'context.create': ['profileId', 'contextId'],
+  'context.create': ['profileId', 'contextId', 'kind'],
   'context.list': ['profileId', 'includeRetired'],
   'context.close': ['profileId', 'contextId'],
   'target.create': ['profileId', 'targetId', 'contextId', 'role', 'url'],
   'target.list': ['profileId', 'includeRetired'],
+  'target.semantic_snapshot': ['profileId', 'targetId', 'maxNodes', 'taskText'],
   'target.activate': ['profileId', 'targetId'],
   'target.close': ['profileId', 'targetId']
 });
@@ -68,11 +71,12 @@ async function dispatch(runtime, method, params) {
     case 'profile.start': return runtime.startProfile({ profileId: params?.profileId });
     case 'profile.stop': return runtime.stopProfile(params?.profileId);
     case 'profile.list': return runtime.listProfiles();
-    case 'context.create': return runtime.createContext(params);
+    case 'context.create': return runtime.createContext({ profileId: params?.profileId, contextId: params?.contextId, kind: params?.kind });
     case 'context.list': return runtime.listContexts(params?.profileId, { includeRetired: params?.includeRetired === true });
-    case 'context.close': return runtime.closeContext(params);
+    case 'context.close': return runtime.closeContext({ profileId: params?.profileId, contextId: params?.contextId });
     case 'target.create': return runtime.createTarget(params);
     case 'target.list': return runtime.listTargets(params?.profileId, { includeRetired: params?.includeRetired === true });
+    case 'target.semantic_snapshot': return runtime.semanticSnapshot({ profileId: params?.profileId, targetId: params?.targetId, maxNodes: params?.maxNodes, taskText: params?.taskText });
     case 'target.activate': return runtime.activateTarget(params);
     case 'target.close': return runtime.closeTarget(params);
     default: throw new Error('rpc_method_forbidden');

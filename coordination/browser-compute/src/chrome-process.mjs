@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+﻿import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -51,11 +51,19 @@ async function waitForExit(child, timeoutMs) {
   });
 }
 
+function signalChildTree(child, signal) {
+  if (!child || child.exitCode != null) return;
+  if (process.platform !== 'win32' && Number.isInteger(child.pid)) {
+    try { process.kill(-child.pid, signal); return; } catch (_) {}
+  }
+  try { child.kill(signal); } catch (_) {}
+}
+
 async function terminateChild(child) {
   if (!child || child.exitCode != null || child.signalCode != null) return;
-  try { child.kill('SIGTERM'); } catch (_) {}
+  signalChildTree(child, 'SIGTERM');
   if (await waitForExit(child, 2000)) return;
-  try { child.kill('SIGKILL'); } catch (_) {}
+  signalChildTree(child, 'SIGKILL');
   await waitForExit(child, 2000);
 }
 
@@ -85,7 +93,7 @@ export class ManagedChromeProcess {
     const incarnation = crypto.randomUUID();
     this.processIncarnationId = incarnation;
     this.lifecycleState = 'STARTING';
-    const child = spawn(this.executablePath, args, { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'], windowsHide: false });
+    const child = spawn(this.executablePath, args, { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'], windowsHide: false, detached: process.platform !== 'win32' });
     this.child = child;
     child.stderr?.setEncoding('utf8');
     child.stderr?.on('data', (chunk) => { this.stderrTail = `${this.stderrTail}${chunk}`.slice(-12000); });
@@ -173,9 +181,9 @@ export class ManagedChromeProcess {
     if (child.exitCode == null && child.signalCode == null) {
       try { if (cdp?.connected) await cdp.call('Browser.close', {}, { timeoutMs: 1500 }); } catch (_) {}
       if (!(await waitForExit(child, timeoutMs))) {
-        try { child.kill('SIGTERM'); } catch (_) {}
+        signalChildTree(child, 'SIGTERM');
         if (!(await waitForExit(child, 1500))) {
-          try { child.kill('SIGKILL'); } catch (_) {}
+          signalChildTree(child, 'SIGKILL');
           await waitForExit(child, 1500);
         }
       }

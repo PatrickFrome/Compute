@@ -1,7 +1,9 @@
-import crypto from 'node:crypto';
+﻿import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ManagedChromeProcess } from './chrome-process.mjs';
+import { DEFAULT_CONTEXT_ID } from './context-manager.mjs';
+import { SemanticCaptureAdapter } from './semantic-capture-adapter.mjs';
 import { atomicJsonWrite, defaultStateRoot, ensurePrivateDir, readJson, validateContextId, validateNavigationUrl, validateProfileId, validateTargetId } from './security.mjs';
 
 const PROFILE_META = 'a2-profile.json';
@@ -114,7 +116,8 @@ export class ComputeBrowserRuntime {
         bindings: new Map(),
         contextBindings: new Map([
           ['default', { browser_context_id: null, process_incarnation_id: processRef.processIncarnationId, bound_at: now() }]
-        ])
+        ]),
+        semanticFrames: new Map()
       };
       this.running.set(id, entry);
       await this.#reconcileContextsAfterStart(id, entry);
@@ -122,6 +125,7 @@ export class ComputeBrowserRuntime {
     } catch (error) {
       this.running.delete(id);
       await processRef.stop().catch(() => {});
+      this.running.delete(id);
       await releaseOwnedPidLock(lockFile);
       throw error;
     }
@@ -144,7 +148,7 @@ export class ComputeBrowserRuntime {
     try {
       return { profile_id: id, browser_node_id: entry.meta.browser_node_id, ...(await entry.processRef.health()) };
     } catch (error) {
-      return { profile_id: id, browser_node_id: entry.meta.browser_node_id, running: false, error: String(error?.message || error) };
+      return { profile_id: id, browser_node_id: entry.meta.browser_node_id, running: false, error: String(error?.message || error), debug_transport: 'native_pipe_b3' };
     }
   }
 
@@ -255,7 +259,7 @@ export class ComputeBrowserRuntime {
   async createContext({ profileId, contextId = null } = {}) {
     const { id, entry } = this.#runningEntry(profileId);
     const logicalId = contextId ? validateContextId(contextId) : `context_${crypto.randomUUID().replaceAll('-', '').slice(0, 20)}`;
-    if (logicalId === 'default') throw new Error('default_context_reserved');
+    if (logicalId === 'default' || logicalId === DEFAULT_CONTEXT_ID) throw new Error('default_context_reserved');
     const registry = await this.#loadContexts(id);
     const previous = registry.contexts.find((row) => row.context_id === logicalId);
     if (previous && !['LOST', 'RETIRED'].includes(previous.status)) throw new Error('context_id_exists');
@@ -343,6 +347,7 @@ export class ComputeBrowserRuntime {
   async closeContext({ profileId, contextId } = {}) {
     const logicalId = validateContextId(contextId);
     if (logicalId === 'default') throw new Error('default_context_not_disposable');
+    if (logicalId === DEFAULT_CONTEXT_ID) throw new Error('default_context_close_forbidden');
     const { id, entry } = this.#runningEntry(profileId);
     const registry = await this.#loadContexts(id);
     const index = registry.contexts.findIndex((row) => row.context_id === logicalId);
@@ -352,6 +357,9 @@ export class ComputeBrowserRuntime {
     const targets = await this.#loadTargets(id);
     if (targets.targets.some((row) => (row.context_id || 'default') === logicalId && row.status !== 'RETIRED')) {
       throw new Error('context_has_live_targets');
+    }
+    for (const target of targets.targets) {
+      if ((target.context_id || 'default') === logicalId) entry.semanticFrames.delete(target.target_id);
     }
     const operationId = crypto.randomUUID();
     registry.contexts[index] = {
@@ -427,10 +435,12 @@ export class ComputeBrowserRuntime {
     await this.#saveTargets(id, registry);
     entry.bindings.set(logicalId, {
       cdp_target_id: created.targetId,
+      context_id: context.context_id,
       process_incarnation_id: entry.processRef.processIncarnationId,
       bound_at: now(),
       conversation_epoch: activeTarget.conversation_epoch
     });
+    entry.semanticFrames.delete(logicalId);
     return { ...activeTarget, bound: true, process_incarnation_id: entry.processRef.processIncarnationId };
   }
 
@@ -445,6 +455,21 @@ export class ComputeBrowserRuntime {
       const bound = Boolean(binding && incarnation && binding.process_incarnation_id === incarnation);
       return { ...row, context_id: row.context_id || 'default', bound, process_incarnation_id: bound ? incarnation : null };
     });
+  }
+
+  async semanticSnapshot({ profileId, targetId, maxNodes = 60, taskText = '' } = {}) {
+    const { id: profile, entry } = this.#runningEntry(profileId);
+    const id = validateTargetId(targetId);
+    const registry = await this.#loadTargets(profile);
+    const target = registry.targets.find((row) => row.target_id === id && row.status === 'ACTIVE');
+    if (!target) throw new Error('semantic_target_not_active');
+    const binding = entry.bindings.get(id);
+    if (!binding) throw new Error('semantic_target_not_bound');
+    const adapter = new SemanticCaptureAdapter({ cdp: entry.processRef.cdp });
+    const previousFrame = entry.semanticFrames.get(id) || null;
+    const frame = await adapter.capture({ target, binding, previousFrame, maxNodes, taskText: String(taskText || '').slice(0, 4000) });
+    entry.semanticFrames.set(id, frame);
+    return frame;
   }
 
   async activateTarget({ profileId, targetId } = {}) {
@@ -499,6 +524,7 @@ export class ComputeBrowserRuntime {
     await this.#saveTargets(profile, registry);
     await entry.processRef.cdp.call('Target.closeTarget', { targetId: binding.cdp_target_id });
     entry.bindings.delete(id);
+    entry.semanticFrames.delete(id);
     registry.targets[index] = {
       ...registry.targets[index],
       status: 'RETIRED',
@@ -524,6 +550,10 @@ export class ComputeBrowserRuntime {
       raw_cdp_rpc_exposed: false,
       debug_transport: 'native_pipe_b3',
       devtools_tcp_listener: false,
+      devtools_tcp_exposed: false,
+      context_manager: 'b2_logical_context_v1',
+      semantic_perception: 'r4_semantic_frame_v1',
+      semantic_page_script_evaluation: false,
       profiles
     };
   }
