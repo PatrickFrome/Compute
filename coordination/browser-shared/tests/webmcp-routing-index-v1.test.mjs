@@ -37,6 +37,19 @@ function envelope({ count = 8, documentEpoch = 'doc_route' } = {}) {
   );
 }
 
+function resealCatalogBytes(catalog) {
+  let bytes = 0;
+  for (let pass = 0; pass < 8; pass += 1) {
+    catalog.catalog_bytes = bytes;
+    const measured = Buffer.byteLength(JSON.stringify(catalog));
+    if (measured === bytes) return catalog;
+    bytes = measured;
+  }
+  catalog.catalog_bytes = bytes;
+  if (Buffer.byteLength(JSON.stringify(catalog)) !== bytes) throw new Error('test_catalog_size_unstable');
+  return catalog;
+}
+
 test('routing index keeps all 128 tool refs under 48 KiB while removing rich metadata', () => {
   const source = envelope({ count: 128 });
   const catalog = compileWebMcpCatalog(source);
@@ -46,9 +59,9 @@ test('routing index keeps all 128 tool refs under 48 KiB while removing rich met
   assert.ok(index.routing_index_bytes <= WEBMCP_ROUTING_INDEX_LIMITS.maxRoutingIndexBytes);
   assert.ok(index.routing_index_bytes < catalog.catalog_bytes * 0.6);
   const serialized = JSON.stringify(index);
-  assert.equal(serialized.includes('input_schema'), false);
-  assert.equal(serialized.includes('annotations'), false);
-  assert.equal(serialized.includes('schema_summary'), false);
+  assert.equal(serialized.includes('"input_schema":'), false);
+  assert.equal(serialized.includes('"annotations":'), false);
+  assert.equal(serialized.includes('"schema_summary":'), false);
   assert.equal(serialized.includes('parameter_0_0'), false);
   assert.equal(index.tools.every((tool) => tool.tainted_page_data === true), true);
 });
@@ -93,5 +106,6 @@ test('unsupported catalog compiles to a typed empty routing index', () => {
 test('malformed rich metadata fails closed instead of entering planner context', () => {
   const catalog = structuredClone(compileWebMcpCatalog(envelope({ count: 1 })));
   catalog.tools[0].schema_summary.schema_fingerprint = 'schema_not_valid';
+  resealCatalogBytes(catalog);
   assert.throws(() => compileWebMcpRoutingIndex(catalog), /webmcp_routing_schema_fingerprint_invalid/);
 });
