@@ -1,6 +1,6 @@
 {
   "schema": "metaengine.a2-browser-protocol.v1",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "transport": {
     "scope": "local_machine_only",
     "unix": "unix_domain_socket",
@@ -34,6 +34,7 @@
     "webmcp.catalog",
     "webmcp.describe",
     "planning.lookup",
+    "planning.context",
     "planning.promote",
     "planning.abort",
     "planning.stats",
@@ -55,6 +56,7 @@
     "webmcp.catalog": "READ_ONLY",
     "webmcp.describe": "READ_ONLY",
     "planning.lookup": "LOCAL_COORDINATION",
+    "planning.context": "LOCAL_COORDINATION",
     "planning.promote": "LOCAL_COORDINATION",
     "planning.abort": "LOCAL_COORDINATION",
     "planning.stats": "READ_ONLY",
@@ -92,7 +94,11 @@
     "webmcp_registration_stack_trace",
     "webmcp_annotation_as_authority",
     "webmcp_catalog_full_schema_embedding",
-    "webmcp_stale_tool_ref_hydration"
+    "webmcp_stale_tool_ref_hydration",
+    "webmcp_routing_annotations",
+    "webmcp_routing_full_schema",
+    "unleased_planning_context",
+    "cross_document_planning_context"
   ],
   "semantic_perception": {
     "schema": "metaengine.a2-compute-browser.semantic-snapshot.v1",
@@ -118,6 +124,12 @@
     "execution_payload_stored": false,
     "cached_node_ref_authority": false,
     "must_run_actionability_checks": true,
+    "cold_leader_context_routing": "R6C_CONTEXT_NEGOTIATION",
+    "cache_hits_receive_planner_context": false,
+    "waiters_receive_planner_context": false,
+    "semantic_fallback_lease_bound": true,
+    "semantic_fallback_fresh_capture": true,
+    "routing_failure_aborts_unseen_flight": true,
     "web_authority_effect": false
   },
   "webmcp_discovery": {
@@ -147,6 +159,24 @@
     "tool_ref_document_bound": true,
     "annotations_are_hints_only": true,
     "catalog_max_bytes": 98304,
+    "tool_invocation_exposed": false,
+    "runtime_evaluate_used": false,
+    "web_authority_effect": false
+  },
+  "webmcp_routing": {
+    "schema": "metaengine.a2-browser-operator.webmcp-routing-index.v1",
+    "stage": "R6C_CONTEXT_NEGOTIATION",
+    "provider_neutral": true,
+    "selection_only": true,
+    "lossy_index": true,
+    "routing_index_max_bytes": 49152,
+    "description_hint_max_chars": 64,
+    "full_schema_embedded": false,
+    "annotations_embedded": false,
+    "fresh_description_required": true,
+    "semantic_fallback_available": true,
+    "semantic_fallback_lease_bound": true,
+    "daemon_semantic_tool_selection": false,
     "tool_invocation_exposed": false,
     "runtime_evaluate_used": false,
     "web_authority_effect": false
