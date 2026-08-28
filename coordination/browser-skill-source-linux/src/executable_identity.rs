@@ -7,8 +7,10 @@ use std::ffi::CString;
 use std::fmt;
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
-use std::path::Path;
 use std::ptr;
+
+#[cfg(feature = "r7l-test-hooks")]
+use std::path::Path;
 
 const HELPER_NAME: &str = "a2-skill-source-helper";
 
@@ -150,7 +152,7 @@ pub fn exec_opened_helper(
     // is a valid NUL-terminated empty C string; argv/envp are NUL-terminated pointer arrays whose
     // pointed-to CStrings remain alive for the syscall. AT_EMPTY_PATH instructs the kernel to
     // execute the already-open descriptor, so no pathname is re-resolved at this boundary.
-    let result = unsafe {
+    unsafe {
         libc::syscall(
             libc::SYS_execveat,
             executable.fd.as_raw_fd(),
@@ -158,9 +160,8 @@ pub fn exec_opened_helper(
             argv.as_ptr(),
             envp.as_ptr(),
             libc::AT_EMPTY_PATH,
-        )
-    };
-    let _ = result;
+        );
+    }
     Err(ExecutableIdentityError::new(
         "skill_launcher_execveat_failed",
     ))
