@@ -1,0 +1,117 @@
+name: W1 Trusted Receipt Attestor V16
+
+on:
+  push:
+    branches:
+      - work/main-roadmap-accelerators-v16
+    paths:
+      - '.github/workflows/w1-trusted-receipt-attestor.yml'
+      - '.github/workflows/w1-trusted-receipt-attestor-contract.yml'
+      - 'controller/w1/w1_trusted_receipt_attestor_guard.py'
+      - 'tests/test_w1_trusted_receipt_attestor.py'
+      - 'tests/test_w1_trusted_receipt_attestor_workflow_contract.py'
+      - 'research/W1_TRUSTED_REUSABLE_RECEIPT_ATTESTOR_V16.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/w1-trusted-receipt-attestor.yml'
+      - '.github/workflows/w1-trusted-receipt-attestor-contract.yml'
+      - 'controller/w1/w1_trusted_receipt_attestor_guard.py'
+      - 'tests/test_w1_trusted_receipt_attestor.py'
+      - 'tests/test_w1_trusted_receipt_attestor_workflow_contract.py'
+      - 'research/W1_TRUSTED_REUSABLE_RECEIPT_ATTESTOR_V16.md'
+
+permissions: {}
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Compile and run reusable-attestor contracts
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m py_compile controller/w1/w1_trusted_receipt_attestor_guard.py
+          python3 -m unittest \
+            tests.test_w1_trusted_receipt_attestor \
+            tests.test_w1_trusted_receipt_attestor_workflow_contract -v
+
+  build-subject:
+    needs: [contract-tests]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    outputs:
+      subject_sha256: ${{ steps.subject.outputs.subject_sha256 }}
+      artifact_name: ${{ steps.subject.outputs.artifact_name }}
+    steps:
+      - name: Checkout exact revision without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Build deterministic reusable-attestor smoke subject
+        id: subject
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          mkdir -p evidence
+          SOURCE_TREE="$(git rev-parse HEAD^{tree})"
+          python3 controller/w1/w1_trusted_receipt_attestor_guard.py build-smoke \
+            --source-sha "$GITHUB_SHA" \
+            --source-tree "$SOURCE_TREE" \
+            --source-ref "$GITHUB_REF" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --output evidence/w1-attestation-subject.json
+          SUBJECT_SHA256="$(sha256sum evidence/w1-attestation-subject.json | awk '{print $1}')"
+          ARTIFACT_NAME="w1-v16-trusted-attestor-subject-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ "$SUBJECT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          echo "subject_sha256=$SUBJECT_SHA256" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+      - name: Upload exact nonsecret subject for reusable signer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ${{ steps.subject.outputs.artifact_name }}
+          path: evidence/w1-attestation-subject.json
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+          compression-level: 0
+
+  trusted-attestor:
+    if: github.event_name == 'push' && github.repository == 'PatrickFrome/Compute'
+    needs: [contract-tests, build-subject]
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: ./.github/workflows/w1-trusted-receipt-attestor.yml
+    with:
+      artifact_name: ${{ needs.build-subject.outputs.artifact_name }}
+      expected_sha256: ${{ needs.build-subject.outputs.subject_sha256 }}
+
+  verify-reusable-outputs:
+    if: github.event_name == 'push' && github.repository == 'PatrickFrome/Compute'
+    needs: [build-subject, trusted-attestor]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      ATTESTATION_ID: ${{ needs.trusted-attestor.outputs.attestation_id }}
+      VERIFICATION_ARTIFACT_NAME: ${{ needs.trusted-attestor.outputs.verification_receipt_artifact_name }}
+    steps:
+      - name: Require reusable signer outputs without provider authority
+        run: |
+          set -euo pipefail
+          [[ "$ATTESTATION_ID" =~ ^[0-9]+$ ]]
+          test "$VERIFICATION_ARTIFACT_NAME" = "w1-v16-reusable-attestor-verification-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
