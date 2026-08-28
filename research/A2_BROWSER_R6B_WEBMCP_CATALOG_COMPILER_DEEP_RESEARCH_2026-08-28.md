@@ -1,7 +1,7 @@
 # A2 Browser Operator R6B — WebMCP Catalog Compiler Deep Research
 
 Date: 2026-08-28
-Branch: `work/a2-browser-r6-webmcp-adapter`
+Branch: `work/a2-browser-r6b-webmcp-catalog`
 Baseline: R6A authoritative commit `9ebd5dbfcb76c08b339ad0d1eb64e1610462decc`
 
 ## Research question
@@ -18,13 +18,14 @@ The remaining inefficiency is context size: the R6A snapshot intentionally prese
 
 ### Chromium WebMCP
 
-Chrome's WebMCP guidance treats descriptions and schemas as model-facing interface material and recommends keeping tool and parameter descriptions concise. The API is dynamic: tools can be registered/removed and discovery state can change while the page is live. WebMCP metadata and tool output are untrusted page-originated data.
+Chrome's WebMCP guidance treats descriptions and schemas as model-facing interface material, warns that every additional tool occupies context and makes correct selection harder, and recommends keeping tools semantically distinct and dynamically registered only when useful. The API is dynamic: tools can be registered/removed and discovery state can change while the page is live. WebMCP metadata and tool output are untrusted page-originated data.
 
 Implication for A2: preserve the complete sanitized discovery envelope as the truth source, but compile a deliberately lossy planner catalog. Never convert page annotations into authorization policy.
 
 Sources:
 - https://developer.chrome.com/docs/ai/webmcp
-- https://developer.chrome.com/docs/ai/webmcp-security
+- https://developer.chrome.com/docs/ai/webmcp/best-practices
+- https://developer.chrome.com/docs/agents/security
 - https://chromedevtools.github.io/devtools-protocol/tot/WebMCP/
 
 ### MCP 2026-07-28
@@ -43,7 +44,7 @@ Implication for A2: R5 should continue to eliminate repeat reasoning, while R6B 
 Sources:
 - https://www.browserbase.com/blog/stagehand-v4
 - https://www.browserbase.com/changelog/caching-configurable
-- https://www.browserbase.com/changelog
+- https://www.browserbase.com/blog/stagehand-caching
 
 ### Playwright
 
@@ -84,14 +85,15 @@ not:
 
 The catalog compiler must have daemon-owned hard bounds independent of page input. The full envelope already bounds source schemas; R6B additionally bounds planner-facing previews and total serialized catalog size.
 
-Initial v1 limits:
+Initial v1 limits after budget modelling:
 - tool name preview: 64 characters
-- description preview: 240 characters
+- description preview: 128 characters
 - all tools retained up to the R6A 128-tool maximum
 - schema represented only by root type/count hints plus a deterministic schema fingerprint
-- catalog serialized size: maximum 96 KiB; overflow fails closed rather than silently dropping tools
+- final serialized catalog size: maximum 96 KiB; overflow fails closed rather than silently dropping tools
+- `catalog_bytes` is a fixed-point measurement of the final JSON representation, including the size field itself
 
-The catalog marks whether name/description previews were truncated. Truncation is acceptable here because this artifact is explicitly a lossy index and exact hydration is required before argument construction.
+The first implementation used a 240-character description preview. Worst-case size modelling showed that 128 valid tools could exceed the 96 KiB catalog budget before full schemas were even present. Because exact hydration immediately follows shortlisting, the catalog preview was tightened to 128 characters rather than weakening the total context bound. This is an intentional information-budget trade-off, not silent truncation: every entry exposes a truncation flag and the exact description/schema remains available through fresh `describe`.
 
 ## Why not vector embeddings yet
 
@@ -107,9 +109,10 @@ Discovery and invocation have different authority semantics. `WebMCP.invokeTool`
 
 1. Unit/adversarial tests for deterministic catalog compilation.
 2. Demonstrate full schemas are absent from catalog serialization.
-3. Demonstrate fresh hydration returns the exact sanitized schema for a document-bound `tool_ref`.
-4. Demonstrate old refs fail after document identity changes.
-5. Compare serialized bytes for full envelope vs catalog across 8/32/128-tool synthetic workloads.
-6. Extend typed RPC with read-only `webmcp.catalog` and `webmcp.describe` only.
-7. Preserve all R6A, R5, B4, scheduler, and extension safety regressions.
-8. Add dedicated evidence/provenance gate before ledger promotion.
+3. Demonstrate final byte accounting exactly matches the serialized response and respects the 96 KiB bound.
+4. Demonstrate fresh hydration returns the exact sanitized schema for a document-bound `tool_ref`.
+5. Demonstrate old refs fail after document identity changes.
+6. Compare serialized bytes for full envelope vs catalog across 8/32/128-tool synthetic workloads.
+7. Extend typed RPC with read-only `webmcp.catalog` and `webmcp.describe` only.
+8. Preserve all R6A, R5, B4, scheduler, and extension safety regressions.
+9. Add dedicated evidence/provenance gate before ledger promotion.
