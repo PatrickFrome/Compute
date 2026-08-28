@@ -118,15 +118,67 @@ Every V13 receipt must keep these false:
 
 The contract is self-hashed and fails closed on receipt tampering.
 
-## Next implementation after source CI
+## Source implementation and exact CI
 
-If V13 source CI is green, the next safe step is NOT automatic OAuth app creation. The next step is a credential-migration readiness design that first proves which provider-supported mechanism can be configured on the actual organization without increasing authority:
+Source branch: `work/main-roadmap-accelerators-v13`.
 
-1. Prefer a scoped OAuth app with only Edge Functions Read if it can be created under the current tier.
-2. Keep initial authorization/refresh-secret provisioning separate from the callback collector.
-3. Mint a short-lived access token only inside the protected GitHub Environment job.
-4. Never persist access-token bytes into artifacts.
-5. Treat requested scope as requested, not independently verified, until a provider introspection/readback surface exists.
-6. If the organization later moves to Team/Enterprise, re-evaluate IDJAG as the preferred no-refresh-secret workload-identity path.
+Semantic source commit:
+- commit `a5785e114cab5702dc67d19ebb37fd21f2f7fd10`;
+- tree `57591c7a68ff566e8f2dd9b02bd436fbb318f3b6`.
+
+Implemented:
+- `controller/w1/w1_supabase_management_credential_provenance_guard.py`;
+- `tests/test_w1_supabase_management_credential_provenance_guard.py`;
+- `.github/workflows/w1-supabase-management-credential-provenance-contract.yml`.
+
+The workflow is source-only: no `workflow_dispatch`, no OIDC permission, no secrets/vars, no Supabase endpoint, no provider call.
+
+Exact CI:
+- run `33191345822`;
+- workflow `W1 Supabase Management Credential Provenance V13`;
+- head SHA `a5785e114cab5702dc67d19ebb37fd21f2f7fd10`;
+- conclusion `success`.
+
+The tests cover PAT non-verification, Free-plan IDJAG blocking, Team-plan IDJAG non-promotion, exact read-only OAuth scope, write/compound-scope rejection, short-lived access-token local cap, raw-token redaction, receipt tamper rejection and all authority fields remaining false.
+
+## Provider API inventory post-research
+
+A second provider/documentation search did not find a documented read-only Management API endpoint for listing OAuth applications and their configured scopes. The connected Supabase tool surface also exposes no OAuth-app inventory action.
+
+Supabase documents OAuth app creation/configuration through the Dashboard, and scopes are configured on the OAuth app. Therefore V13 does not invent an OAuth-app readback or infer the app's granted scopes from a token request.
+
+This creates a real boundary:
+- operations can be proven GET-only;
+- requested OAuth scope can be proven exact;
+- access-token type/lifetime can be observed from a token response;
+- configured/granted provider scope cannot currently be independently introspected by this automation.
+
+## Live control-plane post-audit
+
+Read-only Supabase audit at `2026-08-28T16:45:03.140152Z` confirms V13 caused no runtime/control-plane drift:
+
+- W1 `effective_status = READY`;
+- W1 `verified_checkpoint_id = null`;
+- safety verifications: `0`;
+- backend bindings: `0`;
+- reboot receipts: `0`;
+- admitted non-revoked `cpu-local`: `0`;
+- callback key table: absent;
+- callback receipt table: absent;
+- roadmap definition integrity: true;
+- current/sealed roadmap definition digest remains `96068a842c7dcb37d216aad6defc7b51e291394e916f76beed447be630024925`.
+
+Thus V13 is a trust-model improvement only. It does not create false W1 or callback progress.
+
+## Next safe implementation
+
+The next safe step is NOT automatic OAuth app creation. The next implementation should first define a separately approved OAuth provisioning/handoff boundary:
+
+1. Prefer an OAuth app configured only for Edge Functions Read if the current tier/dashboard permits it.
+2. Keep OAuth-app provisioning and initial interactive authorization outside the callback collector trust domain.
+3. Store any refresh credential only in the protected GitHub Environment and mint a short-lived access token per approved run.
+4. Never persist access-token bytes into Actions artifacts.
+5. Treat `edge_functions:read` as requested/configured intent, not independently verified granted scope, until Supabase exposes a trustworthy scope readback/introspection surface.
+6. On Team/Enterprise, re-evaluate IDJAG and prefer workload federation to eliminate the refresh-secret dependency.
 
 W1 remains READY, not VERIFIED. V13 has no authority to change that state.
