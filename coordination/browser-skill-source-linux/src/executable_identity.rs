@@ -60,17 +60,17 @@ struct ExecutableIdentity {
 impl ExecutableIdentity {
     fn from_stat(stat: &rustix::fs::Stat) -> Self {
         Self {
-            dev: stat.st_dev as u64,
-            ino: stat.st_ino as u64,
-            nlink: stat.st_nlink as u64,
+            dev: stat.st_dev,
+            ino: stat.st_ino,
+            nlink: stat.st_nlink,
             mode: stat.st_mode,
             uid: stat.st_uid,
             gid: stat.st_gid,
             size: stat.st_size,
             mtime: stat.st_mtime,
-            mtime_nsec: stat.st_mtime_nsec as u64,
+            mtime_nsec: stat.st_mtime_nsec,
             ctime: stat.st_ctime,
-            ctime_nsec: stat.st_ctime_nsec as u64,
+            ctime_nsec: stat.st_ctime_nsec,
         }
     }
 }
@@ -104,7 +104,7 @@ fn validate_executable(stat: &rustix::fs::Stat) -> Result<(), ExecutableIdentity
             "skill_launcher_helper_not_executable",
         ));
     }
-    if stat.st_mode & ((libc::S_ISUID | libc::S_ISGID) as u32) != 0 {
+    if stat.st_mode & (libc::S_ISUID | libc::S_ISGID) != 0 {
         return Err(ExecutableIdentityError::new(
             "skill_launcher_helper_privileged_mode_rejected",
         ));
@@ -142,10 +142,6 @@ impl ExecutableCapability {
             fd: helper,
             identity,
         })
-    }
-
-    pub fn raw_fd(&self) -> RawFd {
-        self.fd.as_raw_fd()
     }
 
     pub fn revalidate(&self) -> Result<(), ExecutableIdentityError> {

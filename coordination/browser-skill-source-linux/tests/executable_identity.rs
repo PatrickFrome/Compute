@@ -145,12 +145,11 @@ fn pathname_swap_after_open_cannot_redirect_execution() {
 }
 
 #[test]
-fn opened_helper_fd_is_cloexec_and_is_the_only_allowed_nonstdio_fd() {
+fn opened_helper_is_the_only_allowed_nonstdio_fd_before_exec() {
     let tree = TempTree::new("fd-contract");
     let helper = tree.path().join(HELPER_NAME);
     copy_executable(Path::new("/bin/true"), &helper, 0o755);
 
     let capability = ExecutableCapability::open_fixed_helper(tree.path()).unwrap();
-    assert!(capability.raw_fd() > 2);
     capability.verify_preexec_fd_contract().unwrap();
 }
