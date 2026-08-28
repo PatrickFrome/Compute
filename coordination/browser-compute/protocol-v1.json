@@ -1,6 +1,6 @@
 {
   "schema": "metaengine.a2-browser-protocol.v1",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "transport": {
     "scope": "local_machine_only",
     "unix": "unix_domain_socket",
@@ -31,6 +31,8 @@
     "target.list",
     "perception.snapshot",
     "webmcp.snapshot",
+    "webmcp.catalog",
+    "webmcp.describe",
     "planning.lookup",
     "planning.promote",
     "planning.abort",
@@ -50,6 +52,8 @@
     "target.list": "READ_ONLY",
     "perception.snapshot": "READ_ONLY",
     "webmcp.snapshot": "READ_ONLY",
+    "webmcp.catalog": "READ_ONLY",
+    "webmcp.describe": "READ_ONLY",
     "planning.lookup": "LOCAL_COORDINATION",
     "planning.promote": "LOCAL_COORDINATION",
     "planning.abort": "LOCAL_COORDINATION",
@@ -86,7 +90,9 @@
     "webmcp_raw_frame_id",
     "webmcp_raw_backend_node_id",
     "webmcp_registration_stack_trace",
-    "webmcp_annotation_as_authority"
+    "webmcp_annotation_as_authority",
+    "webmcp_catalog_full_schema_embedding",
+    "webmcp_stale_tool_ref_hydration"
   ],
   "semantic_perception": {
     "schema": "metaengine.a2-compute-browser.semantic-snapshot.v1",
@@ -129,6 +135,20 @@
     "document_loader_fenced": true,
     "unsupported_is_typed_fallback": true,
     "fallback": "SEMANTIC_PERCEPTION_B4",
+    "web_authority_effect": false
+  },
+  "webmcp_catalog": {
+    "schema": "metaengine.a2-browser-operator.webmcp-catalog.v1",
+    "stage": "R6B_PROGRESSIVE_DISCLOSURE",
+    "provider_neutral": true,
+    "deterministic": true,
+    "full_schema_embedded": false,
+    "fresh_hydration_required": true,
+    "tool_ref_document_bound": true,
+    "annotations_are_hints_only": true,
+    "catalog_max_bytes": 98304,
+    "tool_invocation_exposed": false,
+    "runtime_evaluate_used": false,
     "web_authority_effect": false
   },
   "web_authority_effect": false,
