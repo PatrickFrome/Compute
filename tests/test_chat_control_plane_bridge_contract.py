@@ -1,5 +1,6 @@
 import json
 import pathlib
+import re
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -34,21 +35,50 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
 
     def test_manifest_and_worker_entrypoints(self):
         self.assertEqual(self.manifest["manifest_version"], 3)
-        self.assertEqual(self.manifest["version"], "0.6.2")
+        # Version and SW-import contracts are derived from the tree's own runtime package
+        # descriptor (its single source of runtime identity) instead of hand-pinned
+        # constants that silently go stale on every release bump or module rename
+        # (observed stale pins: 0.5.23, 0.6.7, 0.6.8, 0.6.9, 0.7.0, 0.7.1 and the
+        # de-versioned filenames content-recovery-v062.js, debugger-watchdog-v062.js,
+        # chatgpt-rollover-v062.js, runtime-marker-v062.js, background.js).
+        # Trees predating the package descriptor keep their own pinned copy of this test.
+        package_manifest = None
+        package_manifest_path = EXT / "runtime-package-manifest.json"
+        if package_manifest_path.exists():
+            package_manifest = json.loads(package_manifest_path.read_text())
+            self.assertEqual(
+                str(self.manifest["version"]),
+                str(package_manifest["package_version"]),
+                "manifest version must match runtime-package-manifest.json package_version",
+            )
         self.assertGreaterEqual(int(self.manifest["minimum_chrome_version"]), 125)
         self.assertEqual(self.manifest["background"]["service_worker"], "background-entry.js")
         self.assertIn("debugger", self.manifest["permissions"])
         self.assertIn("sidePanel", self.manifest["permissions"])
         self.assertEqual(self.manifest["content_scripts"][0]["js"], ["prompt-gate.js"])
         self.assertEqual(self.manifest["content_scripts"][0]["run_at"], "document_start")
-        self.assertEqual(self.manifest["content_scripts"][1]["js"], ["platform-dom-compat.js", "content.js", "content-recovery-v062.js"])
-        for script in [
-            "bootstrap-config.js", "secret-vault.js", "bridge-client.js", "debugger-broker.js",
-            "trusted-chatgpt.js", "trusted-glm.js", "operator-gate-bindings.js", "operator-actions.js",
-            "background.js", "operator-control.js", "operator-perception.js", "operator-oopif-perception.js",
-            "debugger-watchdog-v062.js", "chatgpt-rollover-v062.js", "runtime-marker-v062.js"
-        ]:
-            self.assertIn(f'importScripts("./{script}")', self.background_entry)
+        self.assertEqual(self.manifest["content_scripts"][1]["js"], ["platform-dom-compat.js", "content.js", "content-recovery.js"])
+        if package_manifest is not None:
+            package_files = set(package_manifest["files"])
+            imported = set(re.findall(r'importScripts\("\./([^"]+)"\)', self.background_entry))
+            self.assertTrue(
+                imported <= package_files,
+                f"service worker imports files outside the runtime package closure: {sorted(imported - package_files)}",
+            )
+            non_service_worker_js = {
+                "background-entry.js",
+                "prompt-gate.js", "platform-dom-compat.js", "content.js", "content-recovery.js",
+                "sidepanel.js", "sidepanel-supervisor.js", "options.js",
+            }
+            expected_sw_imports = {
+                name for name in package_files
+                if name.endswith(".js") and name not in non_service_worker_js
+            }
+            self.assertEqual(
+                imported,
+                expected_sw_imports,
+                "service worker import closure must exactly match the runtime package descriptor",
+            )
         self.assertNotIn("background-v0522.js", self.background_entry)
         self.assertNotIn("import(", self.background_entry)
 
