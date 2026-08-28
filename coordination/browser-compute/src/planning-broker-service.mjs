@@ -1,5 +1,5 @@
 import { compileWebMcpRoutingIndex } from '../../browser-shared/webmcp-routing-index-v1.mjs';
-import { compileWebMcpToolSearchHandle, searchWebMcpRoutingIndex } from '../../browser-shared/webmcp-tool-search-v1.mjs';
+import { compileWebMcpToolSearchHandle, searchWebMcpRoutingIndex, validateWebMcpToolSearchQuery } from '../../browser-shared/webmcp-tool-search-v1.mjs';
 import { SemanticPlanningBroker } from '../../browser-shared/semantic-planning-broker-v1.mjs';
 import { captureComputePerceptionEnvelope } from './perception-envelope.mjs';
 import { validateContextId, validateProfileId, validateTargetId } from './security.mjs';
@@ -27,7 +27,8 @@ function sameCausalNamespace(left, right) {
 function fatalWebMcpRoutingError(error) {
   const message = String(error?.message || error || '');
   return /webmcp_(document_changed_during_capture|capture_stale|profile_not_running|perception_runtime_unavailable|target_not_active|target_binding_stale|context_not_active)/.test(message)
-    || /planning_(routing|tool_search)_namespace_changed/.test(message);
+    || /planning_(routing|tool_search)_namespace_changed/.test(message)
+    || /semantic_planning_broker_lease_invalid/.test(message);
 }
 
 function plannerContextBytes(value) {
@@ -121,22 +122,25 @@ export class ComputePlanningBrokerService {
     const lease = broker.assertLease({ flightId, leaseToken });
     const target = validateTargetId(targetId);
     if (lease.target_id !== target) throw new Error('planning_tool_search_target_mismatch');
+    validateWebMcpToolSearchQuery(query);
     try {
       const catalog = await this.webMcpService.catalog({ profileId: profile, targetId: target });
-      if (!sameCausalNamespace(catalog, lease)) throw new Error('planning_tool_search_namespace_changed');
+      const postflightLease = broker.assertLease({ flightId, leaseToken });
+      if (postflightLease.target_id !== target) throw new Error('planning_tool_search_target_mismatch');
+      if (!sameCausalNamespace(catalog, postflightLease)) throw new Error('planning_tool_search_namespace_changed');
       if (catalog.status !== 'SUPPORTED' || catalog.tool_count === 0) {
-        return Object.freeze({ schema: TOOL_SEARCH_SCHEMA, status: 'UNAVAILABLE', reason: catalog.status === 'SUPPORTED' ? 'WEBMCP_NO_TOOLS' : 'WEBMCP_UNSUPPORTED', flight_id: lease.flight_id, search_result: null, fresh_toolset_used: true, semantic_fallback_available: true, query_persisted: false, authority_effect: false, web_authority_effect: false, actuation_eligible: false });
+        return Object.freeze({ schema: TOOL_SEARCH_SCHEMA, status: 'UNAVAILABLE', reason: catalog.status === 'SUPPORTED' ? 'WEBMCP_NO_TOOLS' : 'WEBMCP_UNSUPPORTED', flight_id: postflightLease.flight_id, search_result: null, fresh_toolset_used: true, lease_postflight_used: true, semantic_fallback_available: true, query_persisted: false, authority_effect: false, web_authority_effect: false, actuation_eligible: false });
       }
       const index = compileWebMcpRoutingIndex(catalog);
-      if (!sameCausalNamespace(index, lease)) throw new Error('planning_tool_search_namespace_changed');
+      if (!sameCausalNamespace(index, postflightLease)) throw new Error('planning_tool_search_namespace_changed');
       const result = searchWebMcpRoutingIndex(index, query);
-      return Object.freeze({ schema: TOOL_SEARCH_SCHEMA, status: result.status, reason: null, flight_id: lease.flight_id, search_result: result, fresh_toolset_used: true, semantic_fallback_available: true, query_persisted: false, authority_effect: false, web_authority_effect: false, actuation_eligible: false });
+      return Object.freeze({ schema: TOOL_SEARCH_SCHEMA, status: result.status, reason: null, flight_id: postflightLease.flight_id, search_result: result, fresh_toolset_used: true, lease_postflight_used: true, semantic_fallback_available: true, query_persisted: false, authority_effect: false, web_authority_effect: false, actuation_eligible: false });
     } catch (error) {
       if (fatalWebMcpRoutingError(error)) {
-        try { broker.abort({ flightId, leaseToken, reasonCode: 'TOOL_SEARCH_NAMESPACE_CHANGED' }); } catch (_) {}
+        try { broker.abort({ flightId, leaseToken, reasonCode: 'TOOL_SEARCH_FENCE_FAILED' }); } catch (_) {}
         throw error;
       }
-      return Object.freeze({ schema: TOOL_SEARCH_SCHEMA, status: 'UNAVAILABLE', reason: 'WEBMCP_SEARCH_INVALID', flight_id: lease.flight_id, search_result: null, fresh_toolset_used: true, semantic_fallback_available: true, query_persisted: false, authority_effect: false, web_authority_effect: false, actuation_eligible: false });
+      return Object.freeze({ schema: TOOL_SEARCH_SCHEMA, status: 'UNAVAILABLE', reason: 'WEBMCP_SEARCH_INVALID', flight_id: lease.flight_id, search_result: null, fresh_toolset_used: true, lease_postflight_used: false, semantic_fallback_available: true, query_persisted: false, authority_effect: false, web_authority_effect: false, actuation_eligible: false });
     }
   }
 
