@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "2.2",
+  "description": "H205F22 W1 execution marker. A persistent non-root P-256 key signs a bounded marker; root SSM transport alone posts the signed envelope to fixed Supabase callback ingress. No worker network entitlement, secrets, reboot, admission or authority.",
+  "parameters": {
+    "WorkerId": {
+      "type": "String",
+      "description": "Expected W1 worker id; non-secret correlation input.",
+      "interpolationType": "ENV_VAR",
+      "allowedPattern": "^[A-Za-z0-9._:-]{3,160}$",
+      "minChars": 3,
+      "maxChars": 160
+    },
+    "PackageSha256": {
+      "type": "String",
+      "description": "Expected installed package SHA-256; non-secret.",
+      "interpolationType": "ENV_VAR",
+      "allowedPattern": "^[0-9a-f]{64}$",
+      "minChars": 64,
+      "maxChars": 64
+    },
+    "PayloadLockSha256": {
+      "type": "String",
+      "description": "Expected payload lock SHA-256; non-secret.",
+      "interpolationType": "ENV_VAR",
+      "allowedPattern": "^[0-9a-f]{64}$",
+      "minChars": 64,
+      "maxChars": 64
+    },
+    "ExecutionPayloadSha256": {
+      "type": "String",
+      "description": "Off-host execution payload SHA-256; non-secret.",
+      "interpolationType": "ENV_VAR",
+      "allowedPattern": "^[0-9a-f]{64}$",
+      "minChars": 64,
+      "maxChars": 64
+    },
+    "ChallengeNonce": {
+      "type": "String",
+      "description": "Per-dispatch non-secret correlation nonce, 256 bits encoded as lowercase hex.",
+      "interpolationType": "ENV_VAR",
+      "allowedPattern": "^[0-9a-f]{64}$",
+      "minChars": 64,
+      "maxChars": 64
+    }
+  },
+  "mainSteps": [
+    {
+      "action": "aws:runShellScript",
+      "name": "emitExecutionMarker",
+      "precondition": {
+        "StringEquals": [
+          "platformType",
+          "Linux"
+        ]
+      },
+      "inputs": {
+        "timeoutSeconds": "60",
+        "runCommand": [
+          "set -eu\numask 077\nEXEC_USER='metaengine-w1'\nIDENTITY_ROOT='/var/lib/metaengine/w1/identity'\nPRIVATE_KEY=\"$IDENTITY_ROOT/callback-es256-private.pem\"\nPUBLIC_JWK=\"$IDENTITY_ROOT/callback-es256-public.jwk.json\"\nCALLBACK_URL='https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/w1-execution-callback'\nPACKAGE_SOURCE_COMMIT='73ab09c75b71a6ea40f11e953cbcf9d9b94b9a89'\n: \"${SSM_WorkerId:?SSM Agent 3.3.2746.0+ ENV_VAR interpolation required}\"\n: \"${SSM_PackageSha256:?}\"\n: \"${SSM_PayloadLockSha256:?}\"\n: \"${SSM_ExecutionPayloadSha256:?}\"\n: \"${SSM_ChallengeNonce:?}\"\ncommand -v curl >/dev/null 2>&1\ncommand -v openssl >/dev/null 2>&1\ncommand -v python3 >/dev/null 2>&1\ncommand -v runuser >/dev/null 2>&1\nid \"$EXEC_USER\" >/dev/null 2>&1\npython3 - \"$IDENTITY_ROOT\" \"$PRIVATE_KEY\" \"$PUBLIC_JWK\" \"$EXEC_USER\" <<'PY'\nimport json,pwd,stat,sys\nfrom pathlib import Path\nroot,key,jwk,user=Path(sys.argv[1]),Path(sys.argv[2]),Path(sys.argv[3]),sys.argv[4]\nacct=pwd.getpwnam(user)\nrst=root.lstat()\nif not stat.S_ISDIR(rst.st_mode) or stat.S_ISLNK(rst.st_mode) or rst.st_uid!=acct.pw_uid or stat.S_IMODE(rst.st_mode)!=0o700:\n    raise RuntimeError('identity_root_invalid')\nkst=key.lstat()\nif not stat.S_ISREG(kst.st_mode) or stat.S_ISLNK(kst.st_mode) or kst.st_uid!=acct.pw_uid or stat.S_IMODE(kst.st_mode)!=0o600:\n    raise RuntimeError('callback_private_key_invalid')\njst=jwk.lstat()\nif not stat.S_ISREG(jst.st_mode) or stat.S_ISLNK(jst.st_mode) or jst.st_uid!=acct.pw_uid or (stat.S_IMODE(jst.st_mode)&0o022):\n    raise RuntimeError('callback_public_jwk_invalid')\nvalue=json.loads(jwk.read_text())\nif not isinstance(value,dict) or set(value)!={'kty','crv','x','y'} or value.get('kty')!='EC' or value.get('crv')!='P-256':\n    raise RuntimeError('callback_public_jwk_shape_invalid')\nPY\nTOKEN=\"$(curl -fsS --connect-timeout 2 --max-time 4 -X PUT \\\n  -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' \\\n  'http://169.254.169.254/latest/api/token')\"\ntest -n \"$TOKEN\"\nINSTANCE_ID=\"$(curl -fsS --connect-timeout 2 --max-time 4 \\\n  -H \"X-aws-ec2-metadata-token: $TOKEN\" \\\n  'http://169.254.169.254/latest/meta-data/instance-id')\"\ncase \"$INSTANCE_ID\" in\n  i-[0-9a-f]*) ;;\n  *) exit 41 ;;\nesac\nOUT=''\nRESP=''\ntrap 'test -z \"$OUT\" || rm -f \"$OUT\"; test -z \"$RESP\" || rm -f \"$RESP\"' EXIT HUP INT TERM\nOUT=\"$(runuser -u \"$EXEC_USER\" -- mktemp \"$IDENTITY_ROOT/.execution-envelope.XXXXXX\")\"\nRESP=\"$(mktemp /tmp/metaengine-w1-callback-response.XXXXXX)\"\nrunuser -u \"$EXEC_USER\" -- env \\\n  METAENGINE_W1_PRIVATE_KEY=\"$PRIVATE_KEY\" \\\n  METAENGINE_W1_PUBLIC_JWK=\"$PUBLIC_JWK\" \\\n  METAENGINE_W1_INSTANCE_ID=\"$INSTANCE_ID\" \\\n  METAENGINE_W1_WORKER_ID=\"$SSM_WorkerId\" \\\n  METAENGINE_W1_PACKAGE_SHA256=\"$SSM_PackageSha256\" \\\n  METAENGINE_W1_PAYLOAD_LOCK_SHA256=\"$SSM_PayloadLockSha256\" \\\n  METAENGINE_W1_EXECUTION_PAYLOAD_SHA256=\"$SSM_ExecutionPayloadSha256\" \\\n  METAENGINE_W1_CHALLENGE_NONCE=\"$SSM_ChallengeNonce\" \\\n  METAENGINE_W1_PACKAGE_SOURCE_COMMIT=\"$PACKAGE_SOURCE_COMMIT\" \\\n  python3 - \"$OUT\" <<'PY'\nimport base64,hashlib,json,os,pathlib,subprocess,sys,uuid\nfrom datetime import datetime,timezone\n\nMARKER_SCHEMA='metaengine.compute.w1-execution-marker.h205f22.v1'\nENVELOPE_SCHEMA='metaengine.compute.w1-execution-callback-envelope.h205f22.v1'\nALGORITHM='ES256-P1363-SHA256'\nDOMAIN=b'METAENGINE:H205F22:W1:EXECUTION-CALLBACK:v1\\n'\n\ndef canonical(value):\n    return json.dumps(value,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode('utf-8')\n\ndef b64u(raw):\n    return base64.urlsafe_b64encode(raw).rstrip(b'=').decode('ascii')\n\ndef read_len(raw,pos):\n    first=raw[pos]; pos+=1\n    if first<0x80:\n        return first,pos\n    n=first&0x7f\n    if n<1 or n>2 or pos+n>len(raw):\n        raise RuntimeError('ecdsa_der_length_invalid')\n    value=int.from_bytes(raw[pos:pos+n],'big')\n    return value,pos+n\n\ndef der_to_p1363(raw):\n    pos=0\n    if len(raw)<8 or raw[pos]!=0x30:\n        raise RuntimeError('ecdsa_der_sequence_invalid')\n    pos+=1\n    seq_len,pos=read_len(raw,pos)\n    if pos+seq_len!=len(raw):\n        raise RuntimeError('ecdsa_der_sequence_length_invalid')\n    values=[]\n    for _ in range(2):\n        if pos>=len(raw) or raw[pos]!=0x02:\n            raise RuntimeError('ecdsa_der_integer_invalid')\n        pos+=1\n        n,pos=read_len(raw,pos)\n        if n<1 or pos+n>len(raw):\n            raise RuntimeError('ecdsa_der_integer_length_invalid')\n        integer=raw[pos:pos+n]; pos+=n\n        if integer[0]&0x80:\n            raise RuntimeError('ecdsa_der_negative_integer')\n        integer=integer.lstrip(b'\\x00')\n        if len(integer)>32:\n            raise RuntimeError('ecdsa_der_integer_too_large')\n        values.append(integer.rjust(32,b'\\x00'))\n    if pos!=len(raw):\n        raise RuntimeError('ecdsa_der_trailing_data')\n    return values[0]+values[1]\n\nprivate_key=pathlib.Path(os.environ['METAENGINE_W1_PRIVATE_KEY'])\njwk=json.loads(pathlib.Path(os.environ['METAENGINE_W1_PUBLIC_JWK']).read_text())\nkey_id=hashlib.sha256(canonical(jwk)).hexdigest()\nmarker={\n    'schema':MARKER_SCHEMA,\n    'marker_id':str(uuid.uuid4()),\n    'worker_id':os.environ['METAENGINE_W1_WORKER_ID'],\n    'provider_kind':'AWS_EC2',\n    'provider_instance_id':os.environ['METAENGINE_W1_INSTANCE_ID'],\n    'package_source_commit':os.environ['METAENGINE_W1_PACKAGE_SOURCE_COMMIT'],\n    'package_sha256':os.environ['METAENGINE_W1_PACKAGE_SHA256'],\n    'payload_lock_sha256':os.environ['METAENGINE_W1_PAYLOAD_LOCK_SHA256'],\n    'execution_payload_sha256':os.environ['METAENGINE_W1_EXECUTION_PAYLOAD_SHA256'],\n    'callback_key_id':key_id,\n    'callback_challenge_nonce':os.environ['METAENGINE_W1_CHALLENGE_NONCE'],\n    'observed_at':datetime.now(timezone.utc).isoformat(),\n    'host_safety_verified':False,\n    'persistent_worker_proof':False,\n    'worker_admitted':False,\n    'w1_verified':False,\n    'canonical':False,\n    'authority_effect':False,\n}\nmessage=DOMAIN+canonical(marker)\nproc=subprocess.run(\n    ['openssl','dgst','-sha256','-sign',str(private_key)],\n    input=message,stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=False)\nif proc.returncode!=0:\n    raise RuntimeError('callback_signature_failed')\nsignature=der_to_p1363(proc.stdout)\nenvelope={\n    'schema':ENVELOPE_SCHEMA,\n    'algorithm':ALGORITHM,\n    'key_id':key_id,\n    'marker':marker,\n    'signed_payload_sha256':hashlib.sha256(message).hexdigest(),\n    'signature_b64u':b64u(signature),\n}\nencoded=canonical(envelope)\nif len(encoded)>8192:\n    raise RuntimeError('callback_envelope_too_large')\npathlib.Path(sys.argv[1]).write_bytes(encoded+b'\\n')\nPY\ncurl -fsS --connect-timeout 3 --max-time 8 \\\n  -H 'content-type: application/json' \\\n  --data-binary \"@$OUT\" \\\n  -o \"$RESP\" \\\n  \"$CALLBACK_URL\"\npython3 - \"$OUT\" \"$RESP\" <<'PY'\nimport hashlib,json,sys\nfrom pathlib import Path\nenvelope=json.loads(Path(sys.argv[1]).read_text())\nraw=Path(sys.argv[2]).read_bytes()\nif not raw or len(raw)>4096:\n    raise RuntimeError('callback_response_size_invalid')\nresponse=json.loads(raw)\nif response.get('accepted') is not True or response.get('auth_verified') is not True:\n    raise RuntimeError('callback_response_not_verified')\nmarker=envelope['marker']\ncanonical=json.dumps(marker,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode('utf-8')\nif response.get('marker_id')!=marker.get('marker_id') or response.get('key_id')!=envelope.get('key_id'):\n    raise RuntimeError('callback_response_binding_invalid')\nif response.get('marker_body_sha256')!=hashlib.sha256(canonical).hexdigest():\n    raise RuntimeError('callback_response_marker_hash_mismatch')\nprint('METAENGINE_W1_EXECUTION_MARKER_JSON='+canonical.decode('utf-8'))\nPY"
+        ]
+      }
+    }
+  ]
+}

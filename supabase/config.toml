@@ -1,0 +1,3 @@
+# PREP: public signed callback ingress performs its own P-256 authentication.
+[functions.w1-execution-callback]
+verify_jwt = false

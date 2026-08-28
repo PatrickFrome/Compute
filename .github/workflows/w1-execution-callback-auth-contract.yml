@@ -1,0 +1,72 @@
+name: W1 Execution Callback Auth Contract
+
+on:
+  push:
+    branches:
+      - work/main-roadmap-accelerators-v6
+    paths:
+      - '.github/workflows/w1-execution-callback-auth-contract.yml'
+      - 'controller/w1/w1_callback_signature_guard.py'
+      - 'controller/w1/w1_execution_marker_guard.py'
+      - 'infra/w1/ssm/Metaengine-W1-Callback-Key-Enroll-H205F22.json'
+      - 'infra/w1/ssm/Metaengine-W1-Execution-Marker-H205F22.json'
+      - 'supabase/config.toml'
+      - 'supabase/functions/w1-execution-callback/index.ts'
+      - 'supabase/prep/w1_callback_auth_v1.sql'
+      - 'tests/test_w1_callback_signature_guard.py'
+      - 'tests/test_w1_callback_auth_contract.py'
+      - 'research/W1_EXECUTION_CALLBACK_AUTH_V1.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/w1-execution-callback-auth-contract.yml'
+      - 'controller/w1/w1_callback_signature_guard.py'
+      - 'controller/w1/w1_execution_marker_guard.py'
+      - 'infra/w1/ssm/Metaengine-W1-Callback-Key-Enroll-H205F22.json'
+      - 'infra/w1/ssm/Metaengine-W1-Execution-Marker-H205F22.json'
+      - 'supabase/config.toml'
+      - 'supabase/functions/w1-execution-callback/index.ts'
+      - 'supabase/prep/w1_callback_auth_v1.sql'
+      - 'tests/test_w1_callback_signature_guard.py'
+      - 'tests/test_w1_callback_auth_contract.py'
+      - 'research/W1_EXECUTION_CALLBACK_AUTH_V1.md'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Validate exact callback auth contracts
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m py_compile \
+            controller/w1/w1_callback_signature_guard.py \
+            controller/w1/w1_execution_marker_guard.py
+          python3 -m json.tool infra/w1/ssm/Metaengine-W1-Callback-Key-Enroll-H205F22.json >/dev/null
+          python3 -m json.tool infra/w1/ssm/Metaengine-W1-Execution-Marker-H205F22.json >/dev/null
+          python3 -m unittest \
+            tests.test_w1_callback_signature_guard \
+            tests.test_w1_callback_auth_contract \
+            tests.test_w1_execution_marker_guard -v
+
+      - name: Prove source-visible nonauthority boundary
+        run: |
+          set -euo pipefail
+          grep -F 'WORKER_ENROLLMENT_SIGNATURE_V1' controller/w1/w1_callback_signature_guard.py
+          grep -F '"w1_verified": False' controller/w1/w1_callback_signature_guard.py
+          grep -F '"authority_effect": False' controller/w1/w1_callback_signature_guard.py
+          grep -F 'crypto.subtle.verify' supabase/functions/w1-execution-callback/index.ts
+          grep -F '"apikey": secretApiKey()' supabase/functions/w1-execution-callback/index.ts
+          ! grep -F 'Authorization:' supabase/functions/w1-execution-callback/index.ts
+          grep -Fi 'security invoker' supabase/prep/w1_callback_auth_v1.sql
+          ! grep -Fi 'security definer' supabase/prep/w1_callback_auth_v1.sql
+          ! grep -Fi 'w1_verified = true' supabase/prep/w1_callback_auth_v1.sql
