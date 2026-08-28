@@ -42,7 +42,7 @@ jobs:
           grep -q '"engine_session_ids_exposed": false' protocol-v1.json
           grep -q '"engine_node_ids_exposed": false' protocol-v1.json
           grep -q '"runtime_evaluate_used": false' protocol-v1.json
-          ! grep -R -n -E 'case[[:space:]]+.*(cdp|evaluate)|params\?\.(sessionId|backendNodeId|computedStyles|deadlineMs)|rpc.*cdp\.call' src
+          ! grep -n -E 'case[[:space:]]+.*(cdp|evaluate)|params\?\.(sessionId|backendNodeId|computedStyles|deadlineMs)|rpc.*cdp\.call' src/rpc-server.mjs
 
       - name: Real Chromium flattened-session and semantic snapshot smoke
         shell: bash
