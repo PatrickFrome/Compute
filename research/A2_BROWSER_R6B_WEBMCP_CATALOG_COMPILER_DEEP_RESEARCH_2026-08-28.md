@@ -39,7 +39,7 @@ Source:
 
 Stagehand v4 reports large token reductions from better context management and skips inference entirely on validated cache hits. Its WebMCP support uses first-party structured tools instead of inferring equivalent DOM actions where available.
 
-Implication for A2: R5 should continue to eliminate repeat reasoning, while R6B should minimize the context cost of unavoidable misses.
+Implication for A2: R5 should continue to eliminate repeat reasoning, while R6B should minimize the context cost of unavoidable misses. The two optimizations are orthogonal: R5 removes many model calls; R6B shrinks the context of the calls that remain.
 
 Sources:
 - https://www.browserbase.com/blog/stagehand-v4
@@ -95,24 +95,50 @@ Initial v1 limits after budget modelling:
 
 The first implementation used a 240-character description preview. Worst-case size modelling showed that 128 valid tools could exceed the 96 KiB catalog budget before full schemas were even present. Because exact hydration immediately follows shortlisting, the catalog preview was tightened to 128 characters rather than weakening the total context bound. This is an intentional information-budget trade-off, not silent truncation: every entry exposes a truncation flag and the exact description/schema remains available through fresh `describe`.
 
-## Why not vector embeddings yet
+## Post-implementation benchmark
 
-An embedding/vector retrieval layer could improve very large catalogs, but R6A currently caps discovery at 128 tools. Adding embeddings would introduce model/provider coupling, persistence/privacy questions, and a new cache identity problem before measurements show it is needed.
+Dedicated R6B CI run `33180051054` executed a deterministic synthetic benchmark using schema-heavy tools and no provider model. Exact serialized JSON results:
 
-R6B therefore starts with a deterministic provider-neutral catalog. A later benchmark can justify lexical ranking or embeddings only if catalog size/relevance becomes a measured bottleneck.
+| Tools | Full R6A envelope | R6B catalog | Byte reduction |
+|---:|---:|---:|---:|
+| 8 | 59,098 B | 6,140 B | 89.61% |
+| 32 | 236,055 B | 23,068 B | 90.23% |
+| 128 | 945,246 B | 90,807 B | 90.39% |
+
+The 128-tool case remains below the 96 KiB hard catalog limit with every tool retained. These are serialized byte measurements, not token estimates; model/token savings will depend on tokenizer and planner prompt composition.
+
+The same run passed 10 shared R6A/R6B tests, 50 Compute Browser tests, 35 R5 regression tests, extension safety labs, an R6A real-Chrome regression, and an R6B real-Chrome catalog smoke. Real Chrome reported WebMCP `SUPPORTED`; the empty `about:blank` catalog serialized to 538 bytes. No runtime evaluation, WebMCP invocation, remote navigation, raw engine identity, or actuation was used.
+
+## Comparison after implementation
+
+### Versus Stagehand caching
+
+Stagehand's validated cache hits skip inference entirely, which is the strongest optimization for repeated tasks. A2 R5 already targets that same class of repeated-work elimination with causal namespace fencing and fresh revalidation. R6B is not a replacement for caching: it targets cold or cache-miss planning and reduces the amount of structured tool context by roughly 90% in the benchmark.
+
+### Versus exposing all WebMCP tools directly
+
+Direct full-schema exposure is semantically complete but scales linearly with schema verbosity and competes for model context. Chrome explicitly notes that more tools consume context and can make selection harder. R6B retains semantic discovery completeness in daemon memory while presenting only a compact shortlist surface to the planner.
+
+### Versus embeddings/vector retrieval
+
+The measured 128-tool catalog is 90,807 bytes and deterministic without any provider model. This is small enough to justify postponing embeddings: vector retrieval would add model/provider dependence, embedding cache identity, persistence/privacy questions, and another failure surface before there is measured need.
 
 ## Why not invoke WebMCP yet
 
 Discovery and invocation have different authority semantics. `WebMCP.invokeTool` may cause consequential web effects. R6B remains read-only so that context optimization can be verified independently before a later milestone designs confirmation, actionability, idempotency, and receipt contracts for tool execution.
 
-## Verification plan
+## Next architecture candidate: R6C planner routing
 
-1. Unit/adversarial tests for deterministic catalog compilation.
-2. Demonstrate full schemas are absent from catalog serialization.
-3. Demonstrate final byte accounting exactly matches the serialized response and respects the 96 KiB bound.
-4. Demonstrate fresh hydration returns the exact sanitized schema for a document-bound `tool_ref`.
-5. Demonstrate old refs fail after document identity changes.
-6. Compare serialized bytes for full envelope vs catalog across 8/32/128-tool synthetic workloads.
-7. Extend typed RPC with read-only `webmcp.catalog` and `webmcp.describe` only.
-8. Preserve all R6A, R5, B4, scheduler, and extension safety regressions.
-9. Add dedicated evidence/provenance gate before ledger promotion.
+The next highest-leverage step is not invocation. It is a deterministic/provider-neutral router that decides which perception surface should feed the external planner:
+
+1. R5 semantic-action cache hit -> skip planner.
+2. R5 cold leader -> query R6B WebMCP catalog.
+3. If WebMCP is supported and a structured-tool route is applicable -> provide compact catalog, shortlist, then fresh `describe` for only the selected tool.
+4. Otherwise -> fall back to B4 semantic perception envelope.
+5. Keep all outputs non-authoritative until a later execution milestone defines the exact action/tool authority fence.
+
+R6C must benchmark routing accuracy, ambiguity, planner-context bytes, and provider calls without adding `WebMCP.invokeTool`.
+
+## Verification status
+
+R6B implementation is code-complete for catalog/describe and has a successful dedicated CI/provenance run at commit `1046ad45fc6ba0168986c90e7f64d9d1bd1ac3b8`. Because this document records post-run research, the branch must receive one final exact-head verification run before ledger promotion.
