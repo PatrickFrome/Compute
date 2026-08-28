@@ -54,8 +54,13 @@ function finite(value, code) {
   return Object.is(value, -0) ? 0 : value;
 }
 
-function stringAt(strings, index) {
-  return strings[integer(index, 'snapshot_string_index_invalid', { max: strings.length - 1 })];
+function stringAt(strings, index, code = 'snapshot_string_index_invalid') {
+  return strings[integer(index, code, { max: strings.length - 1 })];
+}
+
+function stringAtOrEmpty(strings, index, code) {
+  if (index === -1) return '';
+  return stringAt(strings, index, code);
 }
 
 function canonical(value) {
@@ -134,21 +139,30 @@ function compileDom(domSnapshot, limits) {
     const nodeValues = exactLength(nodes.nodeValue, count, 'snapshot_node_values_invalid');
     const backendIds = exactLength(nodes.backendNodeId, count, 'snapshot_backend_ids_invalid');
     const attributes = exactLength(nodes.attributes, count, 'snapshot_attributes_invalid');
-    if (document.frameId != null) stringAt(strings, document.frameId);
-    if (document.documentURL != null) stringAt(strings, document.documentURL);
+    for (const field of [
+      'documentURL', 'title', 'baseURL', 'contentLanguage',
+      'encodingName', 'publicId', 'systemId', 'frameId'
+    ]) {
+      if (document[field] != null) {
+        stringAtOrEmpty(strings, document[field], `snapshot_document_${field}_index_invalid`);
+      }
+    }
 
     for (let index = 0; index < count; index += 1) {
       integer(nodeTypes[index], 'snapshot_node_type_invalid', { max: 255 });
       integer(parentIndexes[index], 'snapshot_parent_index_invalid', { min: -1, max: Math.max(-1, count - 1) });
-      stringAt(strings, nodeNames[index]);
-      stringAt(strings, nodeValues[index]);
+      stringAt(strings, nodeNames[index], 'snapshot_node_name_index_invalid');
+      stringAtOrEmpty(strings, nodeValues[index], 'snapshot_node_value_index_invalid');
       const backendNodeId = integer(backendIds[index], 'snapshot_backend_id_invalid', { min: 1 });
       if (domByBackendId.has(backendNodeId)) throw new Error('snapshot_backend_id_duplicate');
       const attr = denseArray(attributes[index], 'snapshot_attribute_row_invalid');
       if (attr.length % 2 !== 0) throw new Error('snapshot_attribute_row_odd');
       attributeIndexes += attr.length;
       if (attributeIndexes > limits.maxAttributeIndexes) throw new Error('snapshot_attributes_too_many');
-      for (const stringIndex of attr) stringAt(strings, stringIndex);
+      for (let attrIndex = 0; attrIndex < attr.length; attrIndex += 2) {
+        stringAt(strings, attr[attrIndex], 'snapshot_attribute_name_index_invalid');
+        stringAtOrEmpty(strings, attr[attrIndex + 1], 'snapshot_attribute_value_index_invalid');
+      }
       domByBackendId.set(backendNodeId, {
         documentIndex,
         nodeIndex: index,
@@ -163,7 +177,7 @@ function compileDom(domSnapshot, limits) {
     const layoutCount = layoutNodeIndexes.length;
     const styles = exactLength(layout.styles, layoutCount, 'snapshot_layout_styles_invalid');
     const bounds = exactLength(layout.bounds, layoutCount, 'snapshot_layout_bounds_invalid');
-    exactLength(layout.text, layoutCount, 'snapshot_layout_text_invalid');
+    const layoutText = exactLength(layout.text, layoutCount, 'snapshot_layout_text_invalid');
     const paintOrders = layout.paintOrders == null ? null : exactLength(layout.paintOrders, layoutCount, 'snapshot_paint_orders_invalid');
     const seenLayoutNodes = new Set();
     for (let layoutIndex = 0; layoutIndex < layoutCount; layoutIndex += 1) {
@@ -172,7 +186,8 @@ function compileDom(domSnapshot, limits) {
       seenLayoutNodes.add(nodeIndex);
       const styleIndexes = denseArray(styles[layoutIndex], 'snapshot_layout_style_row_invalid', PERCEPTION_COMPUTED_STYLES.length);
       if (styleIndexes.length !== PERCEPTION_COMPUTED_STYLES.length) throw new Error('snapshot_layout_style_row_length');
-      const styleValues = styleIndexes.map((stringIndex) => stringAt(strings, stringIndex));
+      const styleValues = styleIndexes.map((stringIndex) => stringAt(strings, stringIndex, 'snapshot_layout_style_index_invalid'));
+      stringAtOrEmpty(strings, layoutText[layoutIndex], 'snapshot_layout_text_index_invalid');
       const rectangle = denseArray(bounds[layoutIndex], 'snapshot_layout_bounds_row_invalid', 4);
       if (rectangle.length !== 4) throw new Error('snapshot_layout_bounds_row_length');
       const normalizedBounds = rectangle.map((value) => finite(value, 'snapshot_layout_bound_invalid'));

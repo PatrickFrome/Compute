@@ -18,23 +18,32 @@ const NODE_KEY = Buffer.alloc(32, 7);
 
 function domFixture() {
   return {
-    strings: ['#document', '', 'HTML', 'BUTTON', 'block', 'visible', '1', 'auto', 'type', 'button', 'Click me'],
+    strings: [
+      '#document', 'HTML', 'BUTTON', 'block', 'visible', '1', 'auto',
+      'type', 'button', 'Click me', 'about:blank', 'frame-1', 'UTF-8'
+    ],
     documents: [{
-      documentURL: 1,
-      frameId: 1,
+      documentURL: 10,
+      title: -1,
+      baseURL: 10,
+      contentLanguage: -1,
+      encodingName: 12,
+      publicId: -1,
+      systemId: -1,
+      frameId: 11,
       nodes: {
         parentIndex: [-1, 0, 1],
         nodeType: [9, 1, 1],
-        nodeName: [0, 2, 3],
-        nodeValue: [1, 1, 1],
+        nodeName: [0, 1, 2],
+        nodeValue: [-1, -1, -1],
         backendNodeId: [101, 102, 103],
-        attributes: [[], [], [8, 9]]
+        attributes: [[], [], [7, 8]]
       },
       layout: {
         nodeIndex: [1, 2],
-        styles: [[4, 5, 6, 7], [4, 5, 6, 7]],
+        styles: [[3, 4, 5, 6], [3, 4, 5, 6]],
         bounds: [[0, 0, 800, 600], [10, 20, 120, 40]],
-        text: [1, 10],
+        text: [-1, 9],
         paintOrders: [1, 2]
       }
     }]
@@ -132,6 +141,58 @@ test('compiler rejects sparse tables, invalid joins, and daemon-owned limit over
     nodeKey: NODE_KEY,
     limits: { maxDomNodes: 2 }
   }), /snapshot_dom_nodes_too_many/);
+});
+
+test('compiler accepts Chromium empty-string sentinel only in producer-defined fields', () => {
+  const emptyAttribute = domFixture();
+  emptyAttribute.documents[0].nodes.attributes[2][1] = -1;
+  assert.doesNotThrow(() => compileSemanticSnapshot({
+    domSnapshot: emptyAttribute,
+    axTree: axFixture(),
+    identity: IDENTITY,
+    sessionGeneration: 1,
+    nodeKey: NODE_KEY
+  }));
+
+  const invalidNodeValue = domFixture();
+  invalidNodeValue.documents[0].nodes.nodeValue[0] = -2;
+  assert.throws(() => compileSemanticSnapshot({
+    domSnapshot: invalidNodeValue,
+    axTree: axFixture(),
+    identity: IDENTITY,
+    sessionGeneration: 1,
+    nodeKey: NODE_KEY
+  }), /snapshot_node_value_index_invalid/);
+
+  const sentinelNodeName = domFixture();
+  sentinelNodeName.documents[0].nodes.nodeName[0] = -1;
+  assert.throws(() => compileSemanticSnapshot({
+    domSnapshot: sentinelNodeName,
+    axTree: axFixture(),
+    identity: IDENTITY,
+    sessionGeneration: 1,
+    nodeKey: NODE_KEY
+  }), /snapshot_node_name_index_invalid/);
+
+  const sentinelAttributeName = domFixture();
+  sentinelAttributeName.documents[0].nodes.attributes[2][0] = -1;
+  assert.throws(() => compileSemanticSnapshot({
+    domSnapshot: sentinelAttributeName,
+    axTree: axFixture(),
+    identity: IDENTITY,
+    sessionGeneration: 1,
+    nodeKey: NODE_KEY
+  }), /snapshot_attribute_name_index_invalid/);
+
+  const sentinelStyle = domFixture();
+  sentinelStyle.documents[0].layout.styles[0][0] = -1;
+  assert.throws(() => compileSemanticSnapshot({
+    domSnapshot: sentinelStyle,
+    axTree: axFixture(),
+    identity: IDENTITY,
+    sessionGeneration: 1,
+    nodeKey: NODE_KEY
+  }), /snapshot_layout_style_index_invalid/);
 });
 
 test('capture uses exactly two read-only CDP methods with daemon-owned parameters', async () => {

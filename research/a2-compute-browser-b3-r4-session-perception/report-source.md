@@ -37,6 +37,17 @@ should remain daemon-owned policy.
 
 Source: <https://chromedevtools.github.io/devtools-protocol/tot/DOMSnapshot/>
 
+The generated protocol schema describes `StringIndex` only as an integer, but
+the Chromium producer has a stricter implementation detail that a consumer must
+honor: `InspectorDOMSnapshotAgent::AddString` returns `-1` for an empty string.
+The producer uses that function for node values, layout text, document metadata,
+and attribute values. The parser must therefore decode `-1` as empty only in
+fields where empty content is valid, while retaining non-negative bounds for
+node names, attribute names, and the selected computed styles. A real Chrome
+151 run exposed this gap after all 39 transport/compiler unit contracts passed.
+
+Source: <https://github.com/chromium/chromium/blob/main/third_party/blink/renderer/core/inspector/inspector_dom_snapshot_agent.cc>
+
 The Accessibility domain supplies the semantic accessibility tree without page
 script execution. It complements, rather than replaces, DOM/layout evidence.
 `AXNode.backendDOMNodeId` is the exact join key for
@@ -82,6 +93,7 @@ Source: <https://www.w3.org/TR/webdriver-bidi/>
 | Snapshot covers same-process iframe and flattened shadow DOM | CDP DOMSnapshot contract | High | Unit-test flattening compiler and real same-process fixture. |
 | One root snapshot is sufficient for every OOPIF | No authoritative proof found | Low | Do not claim or merge OOPIF yet; require explicit attached-session fixture in a later gate. |
 | BiDi can replace the current semantic snapshot | BiDi has contexts and locators, but no equivalent layout snapshot | Low | Keep backend-neutral public schema; defer BiDi adapter. |
+| Every DOMSnapshot string index is non-negative | Chromium producer returns `-1` for empty strings | High | Decode the sentinel only for producer-defined empty fields; reject it for names/styles and reject every value below `-1`. |
 
 ## Hard boundaries
 
@@ -109,6 +121,7 @@ Source: <https://www.w3.org/TR/webdriver-bidi/>
 - per-target FIFO plus bounded global in-flight work
 - attach/detach registry with OOPIF completeness explicitly unclaimed
 - DOMSnapshot string-table and sparse-array bounds
+- real Chromium empty-string sentinel plus wrong-field and below-sentinel rejection
 - accessibility/DOM merge without eval
 - deterministic snapshot hash and exact causal receipt
 - real Chromium main-target fixture; cross-origin OOPIF is a separate gate
