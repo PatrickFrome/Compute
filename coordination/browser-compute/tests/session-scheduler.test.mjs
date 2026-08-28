@@ -25,8 +25,8 @@ class FakeClient {
     return () => this.closeHandlers.delete(listener);
   }
 
-  emit(method, params) {
-    for (const listener of this.handlers.get(method) || []) listener(params, null);
+  emit(method, params, sessionId = null) {
+    for (const listener of this.handlers.get(method) || []) listener(params, sessionId);
   }
 
   async call(method, params, options = {}) {
@@ -58,9 +58,9 @@ test('scheduler uses flattened attachment and never exposes the engine session t
   const client = new FakeClient();
   const scheduler = new CdpSessionScheduler({ client, processIncarnationId: INCARNATION });
   try {
-    const result = await scheduler.run(identity('target-one'), async ({ call, sessionGeneration }) => {
+    const result = await scheduler.run(identity('target-one'), async ({ call, onEvent, sessionGeneration }) => {
       assert.equal(sessionGeneration, 1);
-      assert.deepEqual(Object.keys({ call, sessionGeneration }).sort(), ['call', 'sessionGeneration']);
+      assert.deepEqual(Object.keys({ call, onEvent, sessionGeneration }).sort(), ['call', 'onEvent', 'sessionGeneration']);
       return call('DOMSnapshot.captureSnapshot', { computedStyles: [] });
     });
     assert.deepEqual(result, { ok: true });
@@ -70,6 +70,26 @@ test('scheduler uses flattened attachment and never exposes the engine session t
       options: {}
     });
     assert.equal(client.calls[1].options.sessionId, 'session-1');
+  } finally {
+    scheduler.dispose();
+  }
+});
+
+test('scheduler event subscriptions are exact-session scoped and automatically removed', async () => {
+  const client = new FakeClient();
+  const scheduler = new CdpSessionScheduler({ client, processIncarnationId: INCARNATION });
+  const observed = [];
+  try {
+    await scheduler.run(identity('target-one'), async ({ call, onEvent }) => {
+      onEvent('WebMCP.toolsAdded', (params) => observed.push(params));
+      await call('Test.ready');
+      client.emit('WebMCP.toolsAdded', { tools: ['wrong-session'] }, 'session-999');
+      client.emit('WebMCP.toolsAdded', { tools: ['exact-session'] }, 'session-1');
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    assert.deepEqual(observed, [{ tools: ['exact-session'] }]);
+    client.emit('WebMCP.toolsAdded', { tools: ['after-operation'] }, 'session-1');
+    assert.deepEqual(observed, [{ tools: ['exact-session'] }]);
   } finally {
     scheduler.dispose();
   }
