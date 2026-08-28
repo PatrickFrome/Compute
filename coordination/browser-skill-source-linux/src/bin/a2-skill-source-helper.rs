@@ -2,6 +2,10 @@
 
 #[path = "../helper_protocol.rs"]
 mod helper_protocol;
+#[path = "../launch_contract.rs"]
+mod launch_contract;
+#[path = "../syscall_sandbox.rs"]
+mod syscall_sandbox;
 
 use a2_skill_source_linux::LinuxSkillSource;
 use helper_protocol::{
@@ -22,10 +26,14 @@ fn run() -> Result<(), &'static str> {
         return Err("skill_helper_root_argument_count_invalid");
     }
 
+    let _launch_contract = launch_contract::verify_clean_inherited_fds()
+        .map_err(|error| error.code())?;
     let root = PathBuf::from(root);
     let source = LinuxSkillSource::open(&root).map_err(|error| error.code())?;
-    let _sandbox = source
+    let _landlock = source
         .restrict_helper_process()
+        .map_err(|error| error.code())?;
+    let _syscall_sandbox = syscall_sandbox::restrict_network_syscalls()
         .map_err(|error| error.code())?;
 
     let stdin = io::stdin();
