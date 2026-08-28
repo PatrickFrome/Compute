@@ -1,0 +1,116 @@
+name: A2 Browser R5 Semantic Action Cache
+
+on:
+  push:
+    branches:
+      - 'work/a2-browser-r5-semantic-action-cache*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r5-cache-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Establish source epoch and Node runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+          node -e 'const m=Number(process.versions.node.split(".")[0]); if (m < 22) process.exit(1); console.log(process.version)'
+
+      - name: Shared B4 and R5 contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check coordination/browser-shared/perception-envelope-v1.mjs
+          node --check coordination/browser-shared/semantic-action-cache-v1.mjs
+          node --check coordination/browser-shared/tests/perception-envelope-v1.test.mjs
+          node --check coordination/browser-shared/tests/semantic-action-cache-v1.test.mjs
+          node --test coordination/browser-shared/tests/perception-envelope-v1.test.mjs coordination/browser-shared/tests/semantic-action-cache-v1.test.mjs
+          grep -q "stores_action_payload: false" coordination/browser-shared/semantic-action-cache-v1.mjs
+          grep -q "stores_node_ref: false" coordination/browser-shared/semantic-action-cache-v1.mjs
+          grep -q "negative_cache_enabled: false" coordination/browser-shared/semantic-action-cache-v1.mjs
+          grep -q "must_run_actionability_checks: true" coordination/browser-shared/semantic-action-cache-v1.mjs
+          grep -q "AMBIGUOUS_TARGET" coordination/browser-shared/semantic-action-cache-v1.mjs
+
+      - name: Extension semantic action safety regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/a2_v060_semantic_actions_lab.mjs
+          node tests/a2_v060_oopif_perception_lab.mjs
+          node tests/a2_r4_semantic_perception_compiler_lab.mjs
+          node tests/a2_v063_remote_authority_lab.mjs
+          node tests/a2_v063_bridge_disarm_lab.mjs
+
+      - name: Compute Browser regression suite
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          find src tests -type f -name '*.mjs' ! -name 'b4-real-envelope-smoke.mjs' -print0 | sort -z | xargs -0 -n1 node --check
+          node --test tests/*.test.mjs
+          ! grep -R -n -E -- '--remote-debugging-port|--remote-debugging-address|/json/version|Runtime\.evaluate' src
+          grep -q "DOMSnapshot.captureSnapshot" src/perception.mjs
+          grep -q "Accessibility.getFullAXTree" src/perception.mjs
+
+      - name: Real Chromium B4 producer compatibility smoke
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          export A2_CHROME_EXECUTABLE="$CHROME"
+          export CI=true
+          export A2_CI_ALLOW_NO_SANDBOX=1
+          export A2_SELF_TEST_REMOVE_STATE=1
+          export A2_COMPUTE_STATE_ROOT="$RUNNER_TEMP/a2-compute-browser-r5-envelope"
+          node tests/b4-real-envelope-smoke.mjs | tee "$RUNNER_TEMP/a2-compute-browser-r5-envelope.json"
+          grep -q '"ok":true' "$RUNNER_TEMP/a2-compute-browser-r5-envelope.json"
+          grep -q '"document_epoch_stable":true' "$RUNNER_TEMP/a2-compute-browser-r5-envelope.json"
+          grep -q '"raw_engine_identity_exposed":false' "$RUNNER_TEMP/a2-compute-browser-r5-envelope.json"
+          grep -q '"actuation_used":false' "$RUNNER_TEMP/a2-compute-browser-r5-envelope.json"
+
+      - name: Build deterministic R5 evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          EPOCH="$SOURCE_DATE_EPOCH"
+          mkdir -p dist/a2-browser-r5/evidence
+          cp "$RUNNER_TEMP/a2-compute-browser-r5-envelope.json" dist/a2-browser-r5/evidence/B4_PRODUCER_COMPAT_SMOKE.json
+          printf '%s\n' "$GITHUB_SHA" > dist/a2-browser-r5/evidence/SOURCE_COMMIT.txt
+          tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf dist/a2-browser-r5/A2_BROWSER_R5_SEMANTIC_ACTION_CACHE.tar \
+            coordination/browser-shared/perception-envelope-v1.mjs \
+            coordination/browser-shared/semantic-action-cache-v1.mjs \
+            coordination/browser-shared/tests/perception-envelope-v1.test.mjs \
+            coordination/browser-shared/tests/semantic-action-cache-v1.test.mjs \
+            research/A2_BROWSER_R5_SEMANTIC_ACTION_CACHE_DEEP_RESEARCH_2026-08-28.md
+          sha256sum dist/a2-browser-r5/A2_BROWSER_R5_SEMANTIC_ACTION_CACHE.tar > dist/a2-browser-r5/R5_SHA256SUMS.txt
+
+      - name: Attest R5 evidence provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-browser-r5/A2_BROWSER_R5_SEMANTIC_ACTION_CACHE.tar
+
+      - name: Upload R5 evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-r5-semantic-action-cache-${{ github.sha }}
+          path: |
+            dist/a2-browser-r5/A2_BROWSER_R5_SEMANTIC_ACTION_CACHE.tar
+            dist/a2-browser-r5/R5_SHA256SUMS.txt
+            dist/a2-browser-r5/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
