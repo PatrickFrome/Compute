@@ -21,6 +21,8 @@ function envelope({ surface='EXTENSION', document='doc_1', nodes=[node()] } = {}
   };
 }
 
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+
 test('first request plans, second cross-surface request bypasses planner', async () => {
   let calls = 0;
   const planner = new CachedSemanticPlanner({ planner: async () => {
@@ -113,4 +115,156 @@ test('deterministic repetition avoids all planner calls after warmup', async () 
   assert.equal(metrics.planner_calls_avoided, 999);
   assert.equal(metrics.cache_hits, 999);
   assert.equal(metrics.cache_misses, 1);
+});
+
+test('64 concurrent cold misses collapse to one planner call and each follower revalidates its own fresh ref', async () => {
+  let calls = 0;
+  let release;
+  let startedResolve;
+  const blocked = new Promise((resolve) => { release = resolve; });
+  const started = new Promise((resolve) => { startedResolve = resolve; });
+  const planner = new CachedSemanticPlanner({ planner: async ({ envelope: fresh }) => {
+    calls += 1;
+    startedResolve();
+    await blocked;
+    return { candidate_ref: fresh.nodes[0].ref };
+  }});
+
+  const requests = Array.from({ length: 64 }, (_, index) => planner.resolve({
+    envelope: envelope({
+      surface: index % 2 ? 'COMPUTE_BROWSER' : 'EXTENSION',
+      nodes: [node({ ref: `fresh_${index}`, loc: `loc_${index}` })]
+    }),
+    intentId: 'submit',
+    actionKind: 'CLICK'
+  }));
+  await started;
+  await tick();
+  assert.equal(calls, 1);
+  assert.equal(planner.snapshot().in_flight_count, 1);
+  release();
+  const results = await Promise.all(requests);
+
+  assert.equal(results[0].source, 'PLANNER_FRESH');
+  for (let index = 0; index < results.length; index += 1) {
+    assert.equal(results[index].candidate_ref, `fresh_${index}`);
+    assert.equal(results[index].authority_effect, false);
+    assert.equal(results[index].actuation_eligible, false);
+  }
+  assert.equal(results.filter((row) => row.source === 'CACHE_COALESCED_REVALIDATED').length, 63);
+  const metrics = planner.snapshot().metrics;
+  assert.equal(calls, 1);
+  assert.equal(metrics.planner_calls, 1);
+  assert.equal(metrics.singleflight_leaders, 1);
+  assert.equal(metrics.singleflight_waiters, 63);
+  assert.equal(metrics.singleflight_revalidation_hits, 63);
+  assert.equal(metrics.planner_calls_avoided, 63);
+  assert.equal(planner.snapshot().in_flight_count, 0);
+});
+
+test('singleflight never shares an ephemeral node ref when follower semantic evidence differs', async () => {
+  let calls = 0;
+  let release;
+  let startedResolve;
+  const blocked = new Promise((resolve) => { release = resolve; });
+  const started = new Promise((resolve) => { startedResolve = resolve; });
+  const planner = new CachedSemanticPlanner({ planner: async ({ envelope: fresh }) => {
+    calls += 1;
+    if (calls === 1) {
+      startedResolve();
+      await blocked;
+    }
+    return { candidate_ref: fresh.nodes[0].ref };
+  }});
+
+  const leader = planner.resolve({
+    envelope: envelope({ nodes: [node({ ref: 'leader_ref', sem: 'sem_leader' })] }),
+    intentId: 'submit', actionKind: 'CLICK'
+  });
+  await started;
+  const follower = planner.resolve({
+    envelope: envelope({ surface: 'COMPUTE_BROWSER', nodes: [node({ ref: 'follower_ref', sem: 'sem_follower' })] }),
+    intentId: 'submit', actionKind: 'CLICK'
+  });
+  await tick();
+  assert.equal(calls, 1);
+  release();
+  const [leaderResult, followerResult] = await Promise.all([leader, follower]);
+  assert.equal(leaderResult.candidate_ref, 'leader_ref');
+  assert.equal(followerResult.candidate_ref, 'follower_ref');
+  assert.equal(followerResult.source, 'PLANNER_FRESH');
+  assert.equal(calls, 2);
+  assert.equal(planner.snapshot().metrics.singleflight_revalidation_misses, 1);
+});
+
+test('singleflight key is fenced by document epoch', async () => {
+  let calls = 0;
+  let releases = [];
+  let twoStartedResolve;
+  const twoStarted = new Promise((resolve) => { twoStartedResolve = resolve; });
+  const planner = new CachedSemanticPlanner({ planner: async ({ envelope: fresh }) => {
+    calls += 1;
+    if (calls === 2) twoStartedResolve();
+    await new Promise((resolve) => releases.push(resolve));
+    return { candidate_ref: fresh.nodes[0].ref };
+  }});
+  const a = planner.resolve({ envelope: envelope({ document: 'doc_a', nodes: [node({ ref: 'a' })] }), intentId: 'submit', actionKind: 'CLICK' });
+  const b = planner.resolve({ envelope: envelope({ document: 'doc_b', nodes: [node({ ref: 'b' })] }), intentId: 'submit', actionKind: 'CLICK' });
+  await twoStarted;
+  assert.equal(calls, 2);
+  assert.equal(planner.snapshot().in_flight_count, 2);
+  for (const resolve of releases) resolve();
+  const [ra, rb] = await Promise.all([a, b]);
+  assert.equal(ra.candidate_ref, 'a');
+  assert.equal(rb.candidate_ref, 'b');
+});
+
+test('singleflight shares planner failure and prevents failure stampede', async () => {
+  let calls = 0;
+  let release;
+  let startedResolve;
+  const blocked = new Promise((resolve) => { release = resolve; });
+  const started = new Promise((resolve) => { startedResolve = resolve; });
+  const planner = new CachedSemanticPlanner({ planner: async () => {
+    calls += 1;
+    startedResolve();
+    await blocked;
+    throw new Error('planner_down');
+  }});
+  const requests = Array.from({ length: 32 }, () => planner.resolve({ envelope: envelope(), intentId: 'submit', actionKind: 'CLICK' }));
+  await started;
+  await tick();
+  assert.equal(calls, 1);
+  release();
+  const settled = await Promise.allSettled(requests);
+  assert.equal(settled.filter((row) => row.status === 'rejected').length, 32);
+  assert.ok(settled.every((row) => row.status === 'rejected' && /planner_down/.test(String(row.reason?.message || row.reason))));
+  const snapshot = planner.snapshot();
+  assert.equal(snapshot.metrics.planner_errors, 1);
+  assert.equal(snapshot.metrics.singleflight_shared_errors, 31);
+  assert.equal(snapshot.in_flight_count, 0);
+});
+
+test('singleflight in-flight cardinality is bounded fail-closed', async () => {
+  let calls = 0;
+  let releases = [];
+  let twoStartedResolve;
+  const twoStarted = new Promise((resolve) => { twoStartedResolve = resolve; });
+  const planner = new CachedSemanticPlanner({ maxInFlight: 2, planner: async ({ envelope: fresh }) => {
+    calls += 1;
+    if (calls === 2) twoStartedResolve();
+    await new Promise((resolve) => releases.push(resolve));
+    return { candidate_ref: fresh.nodes[0].ref };
+  }});
+  const a = planner.resolve({ envelope: envelope(), intentId: 'intent_a', actionKind: 'CLICK' });
+  const b = planner.resolve({ envelope: envelope(), intentId: 'intent_b', actionKind: 'CLICK' });
+  await twoStarted;
+  await assert.rejects(
+    () => planner.resolve({ envelope: envelope(), intentId: 'intent_c', actionKind: 'CLICK' }),
+    /semantic_action_planner_inflight_capacity_exceeded/
+  );
+  assert.equal(planner.snapshot().metrics.singleflight_capacity_rejections, 1);
+  for (const resolve of releases) resolve();
+  await Promise.all([a, b]);
+  assert.equal(planner.snapshot().in_flight_count, 0);
 });
