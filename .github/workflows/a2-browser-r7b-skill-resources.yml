@@ -1,0 +1,122 @@
+name: A2 Browser R7B Skill Resources
+
+on:
+  push:
+    branches:
+      - 'work/a2-browser-r7-skill-runtime*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r7b-resource-plane-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Establish source epoch and Node runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+          node -e 'const m=Number(process.versions.node.split(".")[0]); if (m < 22) process.exit(1); console.log(process.version)'
+
+      - name: R7A and R7B skill contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check coordination/browser-shared/skill-manifest-v1.mjs
+          node --check coordination/browser-shared/skill-resources-v1.mjs
+          node --check coordination/browser-shared/tests/skill-manifest-v1.test.mjs
+          node --check coordination/browser-shared/tests/skill-resources-v1.test.mjs
+          node --check coordination/browser-shared/tests/skill-resource-benchmark.mjs
+          node --test \
+            coordination/browser-shared/tests/skill-manifest-v1.test.mjs \
+            coordination/browser-shared/tests/skill-resources-v1.test.mjs | tee "$RUNNER_TEMP/r7b-skill-tests.log"
+          node coordination/browser-shared/tests/skill-resource-benchmark.mjs | tee "$RUNNER_TEMP/r7b-resource-benchmark.json"
+          node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/r7b-resource-benchmark.json","utf8")); const r=b.rows.find(x=>x.resource_count===64); if(b.ok!==true||!r||r.inventory_bytes>=98304||r.reduction_vs_full<0.95||b.content_embedded!==false||b.scripts_inert!==true||b.authority_effect!==false||b.execution_eligible!==false) process.exit(1)'
+          ! grep -n -E -- 'child_process|\bexec\b|\bspawn\b|Runtime\.evaluate|WebMCP\.invokeTool|WebMCP\.cancelInvocation' \
+            coordination/browser-shared/skill-manifest-v1.mjs \
+            coordination/browser-shared/skill-resources-v1.mjs
+
+      - name: Inherited browser regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            coordination/browser-shared/tests/webmcp-tools-v1.test.mjs \
+            coordination/browser-shared/tests/webmcp-catalog-v1.test.mjs \
+            coordination/browser-shared/tests/webmcp-routing-index-v1.test.mjs \
+            coordination/browser-shared/tests/webmcp-tool-search-v1.test.mjs \
+            coordination/browser-shared/tests/perception-envelope-v1.test.mjs \
+            coordination/browser-shared/tests/semantic-action-cache-v1.test.mjs \
+            coordination/browser-shared/tests/semantic-action-planner-v1.test.mjs \
+            coordination/browser-shared/tests/semantic-planning-broker-v1.test.mjs | tee "$RUNNER_TEMP/r7b-inherited-shared.log"
+          (cd coordination/browser-compute && node --test tests/*.test.mjs) | tee "$RUNNER_TEMP/r7b-compute-tests.log"
+          node tests/a2_v060_semantic_actions_lab.mjs
+          node tests/a2_v060_oopif_perception_lab.mjs
+          node tests/a2_r4_semantic_perception_compiler_lab.mjs
+          node tests/a2_v063_remote_authority_lab.mjs
+          node tests/a2_v063_bridge_disarm_lab.mjs
+
+      - name: Real Chrome inherited R6C regression
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          export A2_CHROME_EXECUTABLE="$CHROME"
+          export CI=true
+          export A2_CI_ALLOW_NO_SANDBOX=1
+          export A2_SELF_TEST_REMOVE_STATE=1
+          export A2_COMPUTE_STATE_ROOT="$RUNNER_TEMP/a2-r7b-r6c"
+          node tests/r6c-real-planning-routing-smoke.mjs | tee "$RUNNER_TEMP/r7b-r6c-real.json"
+          grep -q '"ok":true' "$RUNNER_TEMP/r7b-r6c-real.json"
+          grep -q '"actuation_used":false' "$RUNNER_TEMP/r7b-r6c-real.json"
+
+      - name: Build deterministic R7B evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          EPOCH="$SOURCE_DATE_EPOCH"
+          mkdir -p dist/a2-browser-r7b/evidence
+          cp "$RUNNER_TEMP/r7b-skill-tests.log" dist/a2-browser-r7b/evidence/R7B_SKILL_TESTS.log
+          cp "$RUNNER_TEMP/r7b-resource-benchmark.json" dist/a2-browser-r7b/evidence/R7B_RESOURCE_BENCHMARK.json
+          cp "$RUNNER_TEMP/r7b-inherited-shared.log" dist/a2-browser-r7b/evidence/R7B_INHERITED_SHARED.log
+          cp "$RUNNER_TEMP/r7b-compute-tests.log" dist/a2-browser-r7b/evidence/R7B_COMPUTE_TESTS.log
+          cp "$RUNNER_TEMP/r7b-r6c-real.json" dist/a2-browser-r7b/evidence/R7B_R6C_REAL.json
+          printf '%s\n' "$GITHUB_SHA" > dist/a2-browser-r7b/evidence/SOURCE_COMMIT.txt
+          tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf dist/a2-browser-r7b/A2_BROWSER_R7B_CONTENT_ADDRESSED_RESOURCE_PLANE.tar \
+            coordination/browser-shared/skill-manifest-v1.mjs \
+            coordination/browser-shared/skill-resources-v1.mjs \
+            coordination/browser-shared/tests/skill-manifest-v1.test.mjs \
+            coordination/browser-shared/tests/skill-resources-v1.test.mjs \
+            coordination/browser-shared/tests/skill-resource-benchmark.mjs \
+            research/A2_BROWSER_R7A_PORTABLE_SKILL_METADATA_PLANE_PRE_RESEARCH_2026-08-28.md \
+            research/A2_BROWSER_R7B_CONTENT_ADDRESSED_RESOURCE_PLANE_PRE_RESEARCH_2026-08-28.md
+          sha256sum dist/a2-browser-r7b/A2_BROWSER_R7B_CONTENT_ADDRESSED_RESOURCE_PLANE.tar > dist/a2-browser-r7b/R7B_SHA256SUMS.txt
+
+      - name: Attest R7B evidence provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-browser-r7b/A2_BROWSER_R7B_CONTENT_ADDRESSED_RESOURCE_PLANE.tar
+
+      - name: Upload R7B evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-r7b-skill-resources-${{ github.sha }}
+          path: |
+            dist/a2-browser-r7b/A2_BROWSER_R7B_CONTENT_ADDRESSED_RESOURCE_PLANE.tar
+            dist/a2-browser-r7b/R7B_SHA256SUMS.txt
+            dist/a2-browser-r7b/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
