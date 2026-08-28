@@ -46,26 +46,31 @@ test('RPC surface is typed, effect-classed, and exposes no raw browser code path
     'runtime.health', 'profile.start', 'profile.stop', 'profile.list',
     'context.create', 'context.list', 'context.close',
     'target.create', 'target.list', 'perception.snapshot', 'webmcp.snapshot', 'webmcp.catalog', 'webmcp.describe',
-    'planning.lookup', 'planning.context', 'planning.promote', 'planning.abort', 'planning.stats',
+    'planning.lookup', 'planning.tools.search', 'planning.context', 'planning.promote', 'planning.abort', 'planning.stats',
     'target.activate', 'target.close'
   ]);
   assert.deepEqual(protocol.methods, RPC_METHODS);
   assert.deepEqual(protocol.method_effects, RPC_METHOD_EFFECTS);
-  assert.equal(protocol.version, '1.7.0');
+  assert.equal(protocol.version, '1.8.0');
   assert.equal(protocol.web_authority_effect, false);
   assert.equal(protocol.local_effects_present, true);
+
   assert.equal(protocol.semantic_planning.provider_neutral, true);
   assert.equal(protocol.semantic_planning.cache_hit_skips_model_call, true);
   assert.equal(protocol.semantic_planning.promotion_requires_fresh_perception, true);
-  assert.equal(protocol.semantic_planning.cold_leader_context_routing, 'R6C_CONTEXT_NEGOTIATION');
+  assert.equal(protocol.semantic_planning.cold_leader_context_routing, 'R6C_DEFERRED_TOOL_SEARCH');
   assert.equal(protocol.semantic_planning.cache_hits_receive_planner_context, false);
   assert.equal(protocol.semantic_planning.waiters_receive_planner_context, false);
   assert.equal(protocol.semantic_planning.semantic_fallback_lease_bound, true);
+  assert.equal(protocol.semantic_planning.semantic_fallback_fresh_capture, true);
+  assert.equal(protocol.semantic_planning.lease_preflight_before_browser_work, true);
   assert.equal(protocol.semantic_planning.routing_failure_aborts_unseen_flight, true);
+
   assert.equal(protocol.webmcp_discovery.stage, 'R6A_DISCOVERY_ONLY');
   assert.equal(protocol.webmcp_discovery.runtime_evaluate_used, false);
   assert.equal(protocol.webmcp_discovery.tool_invocation_exposed, false);
   assert.equal(protocol.webmcp_discovery.annotations_are_hints_only, true);
+
   assert.equal(protocol.webmcp_catalog.stage, 'R6B_PROGRESSIVE_DISCLOSURE');
   assert.equal(protocol.webmcp_catalog.provider_neutral, true);
   assert.equal(protocol.webmcp_catalog.deterministic, true);
@@ -75,10 +80,12 @@ test('RPC surface is typed, effect-classed, and exposes no raw browser code path
   assert.equal(protocol.webmcp_catalog.annotations_are_hints_only, true);
   assert.equal(protocol.webmcp_catalog.tool_invocation_exposed, false);
   assert.equal(protocol.webmcp_catalog.runtime_evaluate_used, false);
-  assert.equal(protocol.webmcp_routing.stage, 'R6C_CONTEXT_NEGOTIATION');
+
+  assert.equal(protocol.webmcp_routing.stage, 'R6C_INTERNAL_SEARCH_INDEX');
   assert.equal(protocol.webmcp_routing.selection_only, true);
   assert.equal(protocol.webmcp_routing.lossy_index, true);
   assert.equal(protocol.webmcp_routing.routing_index_max_bytes, 49152);
+  assert.equal(protocol.webmcp_routing.planner_receives_full_routing_index, false);
   assert.equal(protocol.webmcp_routing.full_schema_embedded, false);
   assert.equal(protocol.webmcp_routing.annotations_embedded, false);
   assert.equal(protocol.webmcp_routing.fresh_description_required, true);
@@ -86,6 +93,25 @@ test('RPC surface is typed, effect-classed, and exposes no raw browser code path
   assert.equal(protocol.webmcp_routing.daemon_semantic_tool_selection, false);
   assert.equal(protocol.webmcp_routing.tool_invocation_exposed, false);
   assert.equal(protocol.webmcp_routing.runtime_evaluate_used, false);
+
+  assert.equal(protocol.webmcp_tool_search.stage, 'R6C_DEFERRED_TOOL_SEARCH');
+  assert.equal(protocol.webmcp_tool_search.provider_neutral, true);
+  assert.equal(protocol.webmcp_tool_search.search_algorithm, 'DETERMINISTIC_LEXICAL');
+  assert.equal(protocol.webmcp_tool_search.search_handle_max_bytes, 2048);
+  assert.equal(protocol.webmcp_tool_search.query_max_chars, 512);
+  assert.equal(protocol.webmcp_tool_search.max_results, 5);
+  assert.equal(protocol.webmcp_tool_search.search_result_max_bytes, 12288);
+  assert.equal(protocol.webmcp_tool_search.fresh_toolset_required, true);
+  assert.equal(protocol.webmcp_tool_search.lease_bound, true);
+  assert.equal(protocol.webmcp_tool_search.query_persisted, false);
+  assert.equal(protocol.webmcp_tool_search.full_tool_list_embedded, false);
+  assert.equal(protocol.webmcp_tool_search.full_schema_embedded, false);
+  assert.equal(protocol.webmcp_tool_search.annotations_embedded, false);
+  assert.equal(protocol.webmcp_tool_search.semantic_fallback_available, true);
+  assert.equal(protocol.webmcp_tool_search.exact_description_required, true);
+  assert.equal(protocol.webmcp_tool_search.tool_invocation_exposed, false);
+  assert.equal(protocol.webmcp_tool_search.runtime_evaluate_used, false);
+
   for (const forbidden of [
     'raw_cdp', 'runtime_evaluate', 'javascript_eval', 'shell_exec', 'arbitrary_browser_flags',
     'arbitrary_executable_path', 'headless_override', 'sandbox_override', 'raw_browser_context_id',
@@ -97,7 +123,8 @@ test('RPC surface is typed, effect-classed, and exposes no raw browser code path
     'webmcp_registration_stack_trace', 'webmcp_annotation_as_authority',
     'webmcp_catalog_full_schema_embedding', 'webmcp_stale_tool_ref_hydration',
     'webmcp_routing_annotations', 'webmcp_routing_full_schema', 'unleased_planning_context',
-    'cross_document_planning_context'
+    'cross_document_planning_context', 'unleased_tool_search', 'tool_search_full_catalog',
+    'tool_search_query_persistence'
   ]) assert.ok(protocol.forbidden_external_capabilities.includes(forbidden));
 
   const joined = RPC_METHODS.join(' ');
@@ -109,6 +136,11 @@ test('RPC surface is typed, effect-classed, and exposes no raw browser code path
   assert.deepEqual(validateRpcParams('webmcp.describe', { profileId: 'one', targetId: 'target_one', toolRef: 'tool_0123456789abcdef' }), {
     profileId: 'one', targetId: 'target_one', toolRef: 'tool_0123456789abcdef'
   });
+  assert.deepEqual(validateRpcParams('planning.tools.search', {
+    profileId: 'one', targetId: 'target_one', flightId: 'flight_one', leaseToken: 'lease_one', query: 'flight schedule'
+  }), {
+    profileId: 'one', targetId: 'target_one', flightId: 'flight_one', leaseToken: 'lease_one', query: 'flight schedule'
+  });
   assert.deepEqual(validateRpcParams('planning.context', {
     profileId: 'one', targetId: 'target_one', flightId: 'flight_one', leaseToken: 'lease_one', surface: 'SEMANTIC_PERCEPTION'
   }), {
@@ -118,6 +150,7 @@ test('RPC surface is typed, effect-classed, and exposes no raw browser code path
   assert.throws(() => validateRpcParams('webmcp.describe', { profileId: 'one', targetId: 'target_one', toolRef: 'tool_0123456789abcdef', invoke: true }), /rpc_params_forbidden/);
   assert.throws(() => validateRpcParams('perception.snapshot', { profileId: 'one', targetId: 'target_one', computedStyles: ['all'] }), /rpc_params_forbidden/);
   assert.throws(() => validateRpcParams('planning.lookup', { profileId: 'one', targetId: 'target_one', intentId: 'submit', actionKind: 'CLICK', providerApiKey: 'secret' }), /rpc_params_forbidden/);
+  assert.throws(() => validateRpcParams('planning.tools.search', { profileId: 'one', targetId: 'target_one', flightId: 'flight_one', leaseToken: 'lease_one', query: 'flight', fullCatalog: true }), /rpc_params_forbidden/);
   assert.throws(() => validateRpcParams('planning.context', { profileId: 'one', targetId: 'target_one', flightId: 'flight_one', leaseToken: 'lease_one', rawCdp: true }), /rpc_params_forbidden/);
   for (const key of ['proxyServer', 'proxyBypassList', 'originsWithUniversalNetworkAccess', 'browserContextId', 'executablePath', 'headless', 'allowNoSandbox']) {
     assert.throws(() => validateRpcParams('context.create', { profileId: 'one', [key]: 'attacker' }), /rpc_params_forbidden/);
