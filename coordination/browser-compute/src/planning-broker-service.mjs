@@ -16,15 +16,17 @@ function assertRuntime(runtime) {
 
 export class ComputePlanningBrokerService {
   constructor(runtime, { brokerFactory = () => new SemanticPlanningBroker() } = {}) {
-    this.runtime = assertRuntime(runtime);
+    if (!runtime || typeof runtime !== 'object') throw new Error('planning_broker_runtime_missing');
+    this.runtime = runtime;
     if (typeof brokerFactory !== 'function') throw new Error('planning_broker_factory_invalid');
     this.brokerFactory = brokerFactory;
     this.brokers = new Map();
   }
 
   #runningProfile(profileId) {
+    const runtime = assertRuntime(this.runtime);
     const profile = validateProfileId(profileId);
-    const entry = this.runtime.running.get(profile);
+    const entry = runtime.running.get(profile);
     if (!entry?.processRef?.isRunning?.() || !entry.processRef.cdp) throw new Error('planning_profile_not_running');
     if (!entry.sessionScheduler || !Buffer.isBuffer(entry.perceptionNodeKey) || entry.perceptionNodeKey.length < 32) {
       throw new Error('planning_perception_runtime_unavailable');
