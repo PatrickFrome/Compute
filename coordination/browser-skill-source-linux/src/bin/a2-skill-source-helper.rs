@@ -34,8 +34,8 @@ fn run() -> Result<(), &'static str> {
     let _landlock = source
         .restrict_helper_process()
         .map_err(|error| error.code())?;
-    let _syscall_sandbox = syscall_sandbox::restrict_to_steady_state_syscalls()
-        .map_err(|error| error.code())?;
+    let _syscall_sandbox =
+        syscall_sandbox::restrict_to_steady_state_syscalls().map_err(|error| error.code())?;
 
     let stdin = io::stdin();
     let stdout = io::stdout();
