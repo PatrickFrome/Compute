@@ -53,8 +53,6 @@ struct ExecutableIdentity {
     size: i64,
     mtime: i64,
     mtime_nsec: u64,
-    ctime: i64,
-    ctime_nsec: u64,
 }
 
 impl ExecutableIdentity {
@@ -69,8 +67,6 @@ impl ExecutableIdentity {
             size: stat.st_size,
             mtime: stat.st_mtime,
             mtime_nsec: stat.st_mtime_nsec,
-            ctime: stat.st_ctime,
-            ctime_nsec: stat.st_ctime_nsec,
         }
     }
 }
@@ -94,7 +90,13 @@ fn map_helper_open_error(error: Errno) -> ExecutableIdentityError {
 }
 
 fn validate_executable(stat: &rustix::fs::Stat) -> Result<(), ExecutableIdentityError> {
-    if !FileType::from_raw_mode(stat.st_mode).is_file() {
+    let file_type = FileType::from_raw_mode(stat.st_mode);
+    if file_type.is_symlink() {
+        return Err(ExecutableIdentityError::new(
+            "skill_launcher_helper_symlink_rejected",
+        ));
+    }
+    if !file_type.is_file() {
         return Err(ExecutableIdentityError::new(
             "skill_launcher_helper_not_regular",
         ));
