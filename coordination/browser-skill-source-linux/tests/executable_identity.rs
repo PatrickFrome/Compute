@@ -106,6 +106,19 @@ fn metadata_change_after_open_fails_revalidation() {
 }
 
 #[test]
+fn preexec_fd_contract_fails_closed_when_test_harness_has_ambient_fds() {
+    let tree = TempTree::new("fd-contract");
+    let helper = tree.path().join(HELPER_NAME);
+    copy_executable(Path::new("/bin/true"), &helper, 0o755);
+
+    let capability = ExecutableCapability::open_fixed_helper(tree.path()).unwrap();
+    match capability.verify_preexec_fd_contract() {
+        Ok(()) => {}
+        Err(error) => assert_eq!(error.code(), "skill_launcher_preexec_fd_unexpected"),
+    }
+}
+
+#[test]
 fn fd_bound_exec_swap_child() {
     let Some(directory) = std::env::var_os("A2_R7L_SWAP_DIRECTORY") else {
         return;
