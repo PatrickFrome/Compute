@@ -138,7 +138,10 @@ fn pathname_swap_after_open_cannot_redirect_execution() {
         .status()
         .expect("spawn swap child");
 
-    assert!(status.success(), "opened /bin/true was redirected by pathname swap");
+    assert!(
+        status.success(),
+        "opened /bin/true was redirected by pathname swap"
+    );
 }
 
 #[test]

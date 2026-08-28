@@ -119,7 +119,9 @@ impl ExecutableCapability {
             OFlags::PATH | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
             Mode::empty(),
         )
-        .map_err(|_| ExecutableIdentityError::new("skill_launcher_install_directory_open_failed"))?;
+        .map_err(|_| {
+            ExecutableIdentityError::new("skill_launcher_install_directory_open_failed")
+        })?;
 
         let helper = openat2(
             &directory,
@@ -188,9 +190,8 @@ impl ExecutableCapability {
             }
             let path = format!("/proc/self/fd/{fd}");
             if fd == expected {
-                fs::read_link(&path).map_err(|_| {
-                    ExecutableIdentityError::new("skill_launcher_exec_fd_missing")
-                })?;
+                fs::read_link(&path)
+                    .map_err(|_| ExecutableIdentityError::new("skill_launcher_exec_fd_missing"))?;
                 expected_seen = true;
                 continue;
             }
