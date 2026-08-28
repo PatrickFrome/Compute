@@ -12,14 +12,30 @@ The protected collector is manual-only and, once merged, must execute only from 
 
 ### GitHub OIDC → AWS
 
-GitHub and AWS both require a constrained OIDC trust policy. AWS recommends matching `token.actions.githubusercontent.com:aud=sts.amazonaws.com` and a repository-specific `sub`; GitHub documents that jobs referencing an Environment use an Environment-based subject context. GitHub also introduced immutable repository-ID-based default subjects for repositories created after July 15, 2026 or repositories that opt in, so the AWS trust policy must match the repository's actual configured subject format rather than a guessed legacy string.
+GitHub and AWS require a constrained OIDC trust policy. AWS recommends matching `token.actions.githubusercontent.com:aud=sts.amazonaws.com` plus a constrained `sub`; GitHub documents that jobs referencing an Environment use an Environment-based subject context. GitHub also introduced immutable owner/repository-ID-based default subjects for repositories created after July 15, 2026 or repositories that opt in, so the AWS trust policy must match the repository's actual configured subject format rather than a guessed legacy string.
 
+Repository `PatrickFrome/Compute` was created on 2026-08-21. Its immutable repository identifiers observed through GitHub are:
+- repository ID `1341371143`
+- repository owner ID `20597814`
+
+References:
 - https://docs.github.com/en/actions/reference/security/oidc
 - https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws
 - https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-idp_oidc.html
 - https://docs.aws.amazon.com/IAM/latest/UserGuide/access-analyzer-reference-policy-checks.html
 
-The workflow therefore does not embed a guessed OIDC subject. The dedicated environment/role must be provisioned separately with exact trust-policy readback. The job additionally supplies an inline session policy, `allowed-account-ids`, a 900-second role duration, output-only credentials, and an exact read-only SSM action set.
+The workflow does not embed a guessed `sub`. The protected Environment supplies `W1_AWS_OIDC_SUB`; before AWS STS is invoked, the job requests an actual GitHub OIDC token with audience `sts.amazonaws.com`, never prints the token, decodes only its claims locally, and requires exact matches for:
+- `aud=sts.amazonaws.com`
+- `sub=$W1_AWS_OIDC_SUB`
+- `repository=PatrickFrome/Compute`
+- `repository_id=1341371143`
+- `repository_owner_id=20597814`
+- `environment=w1-callback-readback`
+- `ref=refs/heads/main`
+
+The temporary OIDC token response is deleted immediately after the claim check. AWS independently verifies the signed OIDC token when `AssumeRoleWithWebIdentity` occurs. The AWS role still needs an independently reviewed trust-policy readback before any protected live run is treated as provider evidence.
+
+The job additionally supplies an inline session policy, `allowed-account-ids`, a 900-second role duration, output-only credentials, and an exact read-only SSM action set.
 
 ### AWS SSM readback and document sharing
 
@@ -39,16 +55,13 @@ for the two exact account/region document ARNs. It contains no `CreateDocument`,
 
 ### Supabase Edge readback
 
-Supabase Management API exposes Edge metadata through a GET endpoint requiring `edge_functions:read`; the separate deploy endpoint requires `edge_functions:write`. Supabase also documents `functions download` as the supported way to retrieve deployed source code, and the CLI supports `--use-api`.
+Supabase Management API exposes Edge metadata through a GET endpoint requiring `edge_functions:read`; the function-body read endpoint uses the same read scope, while the separate deploy endpoint requires `edge_functions:write`.
 
 - https://supabase.com/docs/reference/api/v1-get-a-function
 - https://supabase.com/docs/reference/api/v1-get-a-function-body
 - https://supabase.com/docs/reference/api/v1-deploy-a-function
-- https://supabase.com/docs/reference/cli/v1/supabase-login
 
-The workflow expects a dedicated fine-grained secret `W1_SUPABASE_MGMT_READ_TOKEN`. It performs only GET metadata plus `supabase functions download`. The downloaded `index.ts` must match the reviewed repository file byte-for-byte before readiness can pass.
-
-The source contract currently pins Supabase CLI `2.116.0`, which was the latest release observed on 2026-08-28. Updating the CLI requires a reviewed source change rather than floating `latest`.
+The v9 workflow currently expects a dedicated fine-grained secret `W1_SUPABASE_MGMT_READ_TOKEN`. Its source contract performs only Edge read operations; no Edge deploy/write permission is present. A follow-up collector slice should prefer the direct function-body GET endpoint over executing a package-manager/CLI download path, reducing supply-chain surface while preserving exact source comparison.
 
 ### Postgres readback
 
@@ -78,11 +91,11 @@ The normalizer remains pure/offline and cannot cryptographically prove that arbi
 `.github/workflows/w1-callback-protected-readback.yml` has two zones:
 
 1. `contract-tests`: runs on the v9 development branch with `contents: read` only. No cloud credentials.
-2. `protected-readback`: runs only on explicit `workflow_dispatch`, requires `READBACK_W1_CALLBACK_ONLY`, checks `refs/heads/main`, uses the `w1-callback-readback` Environment, and obtains short-lived AWS credentials via OIDC.
+2. `protected-readback`: runs only on explicit `workflow_dispatch`, requires `READBACK_W1_CALLBACK_ONLY`, checks `refs/heads/main`, exact repository IDs and the `w1-callback-readback` Environment, validates actual GitHub OIDC claims, and only then obtains short-lived AWS credentials via OIDC.
 
 AWS credentials are exposed as outputs and injected only into the single AWS capture step. Normalization happens after that step without AWS credential references.
 
-Raw DB/Edge/AWS readback files and downloaded Edge source are deleted before artifact upload. Only the normalized non-secret readiness receipt is uploaded.
+Raw DB/Edge/AWS readback files, downloaded Edge source and the temporary GitHub OIDC token response are deleted before artifact upload. Only the normalized non-secret readiness receipt is uploaded.
 
 ## Fail-closed behavior
 
@@ -93,9 +106,14 @@ The collector rejects:
 - AWS owner/version/default/latest/hash/content drift;
 - public or private SSM document sharing;
 - paginated document-sharing readback;
-- malformed provider response JSON.
+- malformed provider response JSON;
+- GitHub OIDC audience/subject/repository/repository-ID/owner-ID/environment/ref drift.
 
-A provider API/authentication/network error fails the workflow instead of being misclassified as an absent resource.
+A provider authentication/network error fails the workflow instead of being accepted as provider evidence.
+
+## Known follow-up
+
+The current v9 provider normalizer treats an absent Edge function or absent AWS SSM document as a collection failure because the raw provider command fails before normalization. The v8 readiness schema already supports explicit `present=false` and `NOT_READY`. The next bounded slice should distinguish authenticated provider-level absence (`HTTP 404` for Edge; AWS `InvalidDocument`) from authentication/network failures and normalize only the former into non-authority `NOT_READY` evidence.
 
 ## Authority statement
 

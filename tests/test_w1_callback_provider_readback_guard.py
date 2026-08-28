@@ -219,6 +219,25 @@ class CallbackProviderReadbackGuardTests(unittest.TestCase):
             self.assertNotIn(forbidden, source)
         self.assertNotRegex(source, r"curl[^\n]+(?:--request|-X)\s+(?:POST|PUT|PATCH|DELETE)")
 
+    def test_oidc_claims_are_validated_before_aws_sts(self):
+        source = WORKFLOW.read_text()
+        oidc = source.split("      - name: Validate actual GitHub OIDC claims before AWS STS", 1)[1]
+        oidc = oidc.split("      - name: Capture Postgres callback privilege state", 1)[0]
+        self.assertIn("ACTIONS_ID_TOKEN_REQUEST_URL", oidc)
+        self.assertIn("ACTIONS_ID_TOKEN_REQUEST_TOKEN", oidc)
+        self.assertIn("audience=sts.amazonaws.com", oidc)
+        self.assertIn("'aud':'sts.amazonaws.com'", oidc)
+        self.assertIn("'sub':os.environ['AWS_OIDC_SUB']", oidc)
+        self.assertIn("'repository':'PatrickFrome/Compute'", oidc)
+        self.assertIn("'repository_id':'1341371143'", oidc)
+        self.assertIn("'repository_owner_id':'20597814'", oidc)
+        self.assertIn("'environment':'w1-callback-readback'", oidc)
+        self.assertIn("'ref':'refs/heads/main'", oidc)
+        self.assertIn("rm -f evidence/github-oidc-token-response.json", oidc)
+        self.assertNotIn("print(token)", oidc)
+        self.assertLess(source.index("Validate actual GitHub OIDC claims before AWS STS"),
+                        source.index("Configure 15-minute AWS OIDC read-only credentials"))
+
     def test_aws_credentials_are_scoped_to_capture_step_only(self):
         source = WORKFLOW.read_text()
         capture = source.split("      - name: Capture exact AWS SSM document readback", 1)[1]
