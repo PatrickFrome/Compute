@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import { rotateControlToken, rpcEndpoint } from './security.mjs';
+import { captureRuntimeSemanticPerception } from './semantic-perception-service.mjs';
 
 const MAX_LINE_BYTES = 1024 * 1024;
 
@@ -16,7 +17,8 @@ export const RPC_METHODS = Object.freeze([
   'target.create',
   'target.list',
   'target.activate',
-  'target.close'
+  'target.close',
+  'perception.capture'
 ]);
 
 export const RPC_METHOD_EFFECTS = Object.freeze({
@@ -30,7 +32,8 @@ export const RPC_METHOD_EFFECTS = Object.freeze({
   'target.create': 'LOCAL_LIFECYCLE',
   'target.list': 'READ_ONLY',
   'target.activate': 'LOCAL_UI',
-  'target.close': 'LOCAL_LIFECYCLE'
+  'target.close': 'LOCAL_LIFECYCLE',
+  'perception.capture': 'READ_ONLY'
 });
 
 const RPC_PARAM_KEYS = Object.freeze({
@@ -44,7 +47,8 @@ const RPC_PARAM_KEYS = Object.freeze({
   'target.create': ['profileId', 'targetId', 'contextId', 'role', 'url'],
   'target.list': ['profileId', 'includeRetired'],
   'target.activate': ['profileId', 'targetId'],
-  'target.close': ['profileId', 'targetId']
+  'target.close': ['profileId', 'targetId'],
+  'perception.capture': ['profileId', 'targetId', 'nodeBudget', 'taskTerms']
 });
 
 export function validateRpcParams(method, params) {
@@ -75,6 +79,7 @@ async function dispatch(runtime, method, params) {
     case 'target.list': return runtime.listTargets(params?.profileId, { includeRetired: params?.includeRetired === true });
     case 'target.activate': return runtime.activateTarget(params);
     case 'target.close': return runtime.closeTarget(params);
+    case 'perception.capture': return captureRuntimeSemanticPerception(runtime, params);
     default: throw new Error('rpc_method_forbidden');
   }
 }
@@ -91,11 +96,16 @@ export async function startRpcServer(runtime) {
     async function drain() {
       let newline;
       while ((newline = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
         if (!line.trim()) continue;
         let request;
-        try { request = JSON.parse(line); }
-        catch (_) { socket.write(`${JSON.stringify({ ok: false, error: 'rpc_json_invalid' })}\n`); continue; }
+        try {
+          request = JSON.parse(line);
+        } catch (_) {
+          socket.write(`${JSON.stringify({ ok: false, error: 'rpc_json_invalid' })}\n`);
+          continue;
+        }
         const id = request.id ?? null;
         try {
           if (!safeEqual(request.token, token)) throw new Error('rpc_unauthorized');
@@ -116,7 +126,10 @@ export async function startRpcServer(runtime) {
   });
 
   try {
-    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(endpoint, resolve); });
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(endpoint, resolve);
+    });
   } catch (error) {
     await fs.rm(tokenFile, { force: true }).catch(() => {});
     throw error;
