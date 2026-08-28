@@ -47,17 +47,29 @@ jobs:
           workflow=Path('.github/workflows/w1-same-world-evidence-chain-contract.yml').read_text()
           source=Path('controller/w1/w1_same_world_evidence_chain.py').read_text()
 
-          assert 'workflow_dispatch:' not in workflow
-          assert 'id-token: write' not in workflow
-          assert 'secrets.' not in workflow
-          assert 'aws ' not in workflow.lower()
-          assert 'psql ' not in workflow.lower()
-          assert 'supabase ' not in workflow.lower()
-          assert 'curl ' not in workflow.lower()
-          assert 'wget ' not in workflow.lower()
-          assert 'actions/upload-artifact' not in workflow
+          forbidden_workflow=(
+              'workflow_'+'dispatch:',
+              'id-'+'token: write',
+              'sec'+'rets.',
+              'a'+'ws ',
+              'p'+'sql ',
+              'supa'+'base ',
+              'cu'+'rl ',
+              'w'+'get ',
+              'actions/'+'upload-artifact',
+          )
+          lowered=workflow.lower()
+          for marker in forbidden_workflow:
+              assert marker.lower() not in lowered, marker
 
-          for forbidden in ('import boto3', 'import requests', 'import urllib', 'import subprocess', 'import socket'):
+          forbidden_source=(
+              'import '+'boto3',
+              'import '+'requests',
+              'import '+'urllib',
+              'import '+'subprocess',
+              'import '+'socket',
+          )
+          for forbidden in forbidden_source:
               assert forbidden not in source
           for required in (
               'producer_attestations_authenticated": False',
