@@ -144,8 +144,7 @@ fn response_header(frame: &mut Decoder<'_>) -> (u8, u8, u64) {
 
 fn copy_launcher(directory: &Path) -> PathBuf {
     let destination = directory.join("a2-skill-source-launcher");
-    fs::copy(env!("CARGO_BIN_EXE_a2-skill-source-launcher"), &destination)
-        .expect("copy launcher");
+    fs::copy(env!("CARGO_BIN_EXE_a2-skill-source-launcher"), &destination).expect("copy launcher");
     let mut permissions = fs::metadata(&destination).unwrap().permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(&destination, permissions).unwrap();
