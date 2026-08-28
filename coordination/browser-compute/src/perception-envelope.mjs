@@ -17,13 +17,14 @@ function documentEpoch({ loaderId, targetId, conversationEpoch, nodeKey }) {
 export async function captureComputePerceptionEnvelope({
   scheduler,
   identity,
-  contextId = null,
+  contextId,
   nodeKey,
   limits,
   maxNodes,
   capturedAt = new Date().toISOString()
 } = {}) {
   if (!scheduler || typeof scheduler.run !== 'function') throw new Error('perception_scheduler_invalid');
+  if (typeof contextId !== 'string' || !contextId) throw new Error('perception_context_id_required');
   const deadlineMs = Number(limits?.deadlineMs ?? DEFAULT_PERCEPTION_LIMITS.deadlineMs);
   if (!Number.isSafeInteger(deadlineMs) || deadlineMs < 1) throw new Error('perception_deadline_invalid');
 
