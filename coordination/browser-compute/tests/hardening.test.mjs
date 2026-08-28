@@ -41,9 +41,11 @@ test('RPC effect classes are explicit and web authority remains absent', () => {
   assert.deepEqual(Object.keys(RPC_METHOD_EFFECTS), RPC_METHODS);
   assert.equal(RPC_METHOD_EFFECTS['runtime.health'], 'READ_ONLY');
   assert.equal(RPC_METHOD_EFFECTS['profile.start'], 'LOCAL_LIFECYCLE');
+  assert.equal(RPC_METHOD_EFFECTS['planning.lookup'], 'LOCAL_COORDINATION');
+  assert.equal(RPC_METHOD_EFFECTS['planning.promote'], 'LOCAL_COORDINATION');
   assert.equal(RPC_METHOD_EFFECTS['target.activate'], 'LOCAL_UI');
   for (const value of Object.values(RPC_METHOD_EFFECTS)) {
-    assert.match(value, /^(READ_ONLY|LOCAL_LIFECYCLE|LOCAL_UI)$/);
+    assert.match(value, /^(READ_ONLY|LOCAL_LIFECYCLE|LOCAL_COORDINATION|LOCAL_UI)$/);
   }
 });
 
