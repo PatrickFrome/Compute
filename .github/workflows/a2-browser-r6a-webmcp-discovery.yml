@@ -1,0 +1,141 @@
+name: A2 Browser R6A WebMCP Discovery
+
+on:
+  push:
+    branches:
+      - 'work/a2-browser-r6-webmcp-adapter*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r6a-webmcp-discovery-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Establish source epoch and Node runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+          node -e 'const m=Number(process.versions.node.split(".")[0]); if (m < 22) process.exit(1); console.log(process.version)'
+
+      - name: Shared WebMCP contract and adversarial tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check coordination/browser-shared/webmcp-tools-v1.mjs
+          node --check coordination/browser-shared/tests/webmcp-tools-v1.test.mjs
+          node --test coordination/browser-shared/tests/webmcp-tools-v1.test.mjs | tee "$RUNNER_TEMP/r6a-shared-webmcp-tests.log"
+          grep -q "tool_invocation_exposed: false" coordination/browser-shared/webmcp-tools-v1.mjs
+          grep -q "tainted_page_data: true" coordination/browser-shared/webmcp-tools-v1.mjs
+          grep -q "authority_effect: false" coordination/browser-shared/webmcp-tools-v1.mjs
+          grep -q "actuation_eligible: false" coordination/browser-shared/webmcp-tools-v1.mjs
+          ! grep -R -n -E -- 'backendNodeId|stackTrace|sessionId|loaderId' coordination/browser-shared/webmcp-tools-v1.mjs
+
+      - name: Compute Browser R6A protocol and regressions
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          node --check src/webmcp.mjs
+          node --check src/webmcp-service.mjs
+          node --check src/session-scheduler.mjs
+          node --check src/rpc-server.mjs
+          node --check tests/r6a-real-webmcp-smoke.mjs
+          node --test tests/*.test.mjs | tee "$RUNNER_TEMP/r6a-compute-tests.log"
+          node -e 'const p=require("./protocol-v1.json"); if(p.version!=="1.5.0"||p.webmcp?.discovery_only!==true||p.webmcp?.tool_invocation_exposed!==false||p.webmcp?.annotations_are_authority!==false) process.exit(1)'
+          grep -q "'webmcp.snapshot': 'READ_ONLY'" src/rpc-server.mjs
+          grep -q "WebMCP.enable" src/webmcp.mjs
+          grep -q "WebMCP.disable" src/webmcp.mjs
+          ! grep -R -n -E -- 'Runtime\.evaluate|WebMCP\.invokeTool|WebMCP\.cancelInvocation' src
+          grep -R -q -- "--remote-debugging-pipe" src
+          ! grep -R -n -E -- "(push|concat)\([^)]*['\"]--remote-debugging-(port|address)(=|['\"])" src
+
+      - name: Existing R5 and extension safety regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            coordination/browser-shared/tests/perception-envelope-v1.test.mjs \
+            coordination/browser-shared/tests/semantic-action-cache-v1.test.mjs \
+            coordination/browser-shared/tests/semantic-action-planner-v1.test.mjs \
+            coordination/browser-shared/tests/semantic-planning-broker-v1.test.mjs | tee "$RUNNER_TEMP/r6a-r5-regressions.log"
+          node tests/a2_v060_semantic_actions_lab.mjs
+          node tests/a2_v060_oopif_perception_lab.mjs
+          node tests/a2_r4_semantic_perception_compiler_lab.mjs
+          node tests/a2_v063_remote_authority_lab.mjs
+          node tests/a2_v063_bridge_disarm_lab.mjs
+
+      - name: Real Chrome R6A WebMCP capability smoke
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          export A2_CHROME_EXECUTABLE="$CHROME"
+          export CI=true
+          export A2_CI_ALLOW_NO_SANDBOX=1
+          export A2_SELF_TEST_REMOVE_STATE=1
+          export A2_COMPUTE_STATE_ROOT="$RUNNER_TEMP/a2-compute-browser-r6a"
+          node tests/r6a-real-webmcp-smoke.mjs | tee "$RUNNER_TEMP/a2-compute-browser-r6a.json"
+          grep -q '"ok":true' "$RUNNER_TEMP/a2-compute-browser-r6a.json"
+          grep -q '"typed_webmcp_discovery":true' "$RUNNER_TEMP/a2-compute-browser-r6a.json"
+          grep -q '"runtime_evaluate_used":false' "$RUNNER_TEMP/a2-compute-browser-r6a.json"
+          grep -q '"webmcp_invoke_used":false' "$RUNNER_TEMP/a2-compute-browser-r6a.json"
+          grep -q '"raw_engine_identity_exposed":false' "$RUNNER_TEMP/a2-compute-browser-r6a.json"
+          grep -q '"remote_navigation_used":false' "$RUNNER_TEMP/a2-compute-browser-r6a.json"
+          grep -q '"actuation_used":false' "$RUNNER_TEMP/a2-compute-browser-r6a.json"
+
+      - name: Build deterministic R6A evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          EPOCH="$SOURCE_DATE_EPOCH"
+          mkdir -p dist/a2-browser-r6a/evidence
+          cp "$RUNNER_TEMP/r6a-shared-webmcp-tests.log" dist/a2-browser-r6a/evidence/R6A_SHARED_WEBMCP_TESTS.log
+          cp "$RUNNER_TEMP/r6a-compute-tests.log" dist/a2-browser-r6a/evidence/R6A_COMPUTE_TESTS.log
+          cp "$RUNNER_TEMP/r6a-r5-regressions.log" dist/a2-browser-r6a/evidence/R6A_R5_REGRESSIONS.log
+          cp "$RUNNER_TEMP/a2-compute-browser-r6a.json" dist/a2-browser-r6a/evidence/R6A_REAL_CHROME_WEBMCP_SMOKE.json
+          printf '%s\n' "$GITHUB_SHA" > dist/a2-browser-r6a/evidence/SOURCE_COMMIT.txt
+          tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf dist/a2-browser-r6a/A2_BROWSER_R6A_WEBMCP_DISCOVERY.tar \
+            coordination/browser-shared/webmcp-tools-v1.mjs \
+            coordination/browser-shared/tests/webmcp-tools-v1.test.mjs \
+            coordination/browser-compute/protocol-v1.json \
+            coordination/browser-compute/src/perception-envelope.mjs \
+            coordination/browser-compute/src/session-scheduler.mjs \
+            coordination/browser-compute/src/webmcp.mjs \
+            coordination/browser-compute/src/webmcp-service.mjs \
+            coordination/browser-compute/src/rpc-server.mjs \
+            coordination/browser-compute/tests/contracts.test.mjs \
+            coordination/browser-compute/tests/session-scheduler.test.mjs \
+            coordination/browser-compute/tests/webmcp.test.mjs \
+            coordination/browser-compute/tests/r6a-real-webmcp-smoke.mjs \
+            research/A2_BROWSER_R6_WEBMCP_ADAPTER_DEEP_RESEARCH_2026-08-28.md
+          sha256sum dist/a2-browser-r6a/A2_BROWSER_R6A_WEBMCP_DISCOVERY.tar > dist/a2-browser-r6a/R6A_SHA256SUMS.txt
+
+      - name: Attest R6A evidence provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-browser-r6a/A2_BROWSER_R6A_WEBMCP_DISCOVERY.tar
+
+      - name: Upload R6A evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-r6a-webmcp-discovery-${{ github.sha }}
+          path: |
+            dist/a2-browser-r6a/A2_BROWSER_R6A_WEBMCP_DISCOVERY.tar
+            dist/a2-browser-r6a/R6A_SHA256SUMS.txt
+            dist/a2-browser-r6a/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
