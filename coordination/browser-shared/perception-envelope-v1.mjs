@@ -4,6 +4,7 @@ const MAX_TEXT = 1024;
 const MAX_STATE_KEYS = 64;
 const VISIBILITY = Object.freeze({ VISIBLE: 'VISIBLE', UNKNOWN: 'UNKNOWN' });
 const COVERAGE = Object.freeze({ COMPLETE: 'COMPLETE', PARTIAL: 'PARTIAL', UNKNOWN: 'UNKNOWN', POSITIVE_ONLY: 'POSITIVE_ONLY' });
+const COVERAGE_VALUES = new Set(Object.values(COVERAGE));
 
 function fnv1a64(value) {
   let hash = 0xcbf29ce484222325n;
@@ -79,16 +80,17 @@ function normalizedNode({ ref, parentRef = null, role, name, description = null,
   const normalizedName = cleanText(name);
   const normalizedDescription = cleanText(description);
   const normalizedValue = cleanText(valueSummary);
-  const structuralMaterial = [
+  const geometry = geometryBucket(normalizedBounds);
+  const semanticMaterial = [
     normalizedRole.toLowerCase(),
     (normalizedName || '').toLowerCase(),
     (normalizedDescription || '').toLowerCase(),
     (normalizedValue || '').toLowerCase(),
     flags.editable ? 'e1' : 'e0',
     flags.clickable ? 'c1' : 'c0',
-    flags.focusable ? 'f1' : 'f0',
-    geometryBucket(normalizedBounds)
+    flags.focusable ? 'f1' : 'f0'
   ].join('|');
+  const semanticFingerprint = `semfp_${fnv1a64(semanticMaterial)}`;
   const numericConfidence = confidence == null ? null : Number(confidence);
   return {
     ref: cleanId(ref, 'perception_envelope_node_ref_invalid'),
@@ -106,7 +108,9 @@ function normalizedNode({ ref, parentRef = null, role, name, description = null,
     confidence: Number.isFinite(numericConfidence) ? Math.max(0, Math.min(1, numericConfidence)) : null,
     continuity: cleanText(continuity, 64),
     binding_epoch: bindingEpoch == null ? null : positiveInt(bindingEpoch, 'perception_envelope_binding_epoch_invalid'),
-    locator_fingerprint: `loc_${fnv1a64(structuralMaterial)}`
+    semantic_fingerprint: semanticFingerprint,
+    geometry_bucket: geometry,
+    locator_fingerprint: `loc_${fnv1a64(`${semanticFingerprint}|${geometry}`)}`
   };
 }
 
@@ -123,7 +127,7 @@ function finalize({ sourceSurface, targetId, contextId, conversationEpoch, docum
     schema: SCHEMA,
     source_surface: sourceSurface,
     target_id: cleanId(targetId, 'perception_envelope_target_id_invalid'),
-    context_id: contextId == null ? null : cleanId(contextId, 'perception_envelope_context_id_invalid'),
+    context_id: cleanId(contextId, 'perception_envelope_context_id_required'),
     conversation_epoch: positiveInt(conversationEpoch, 'perception_envelope_conversation_epoch_invalid'),
     document_epoch: cleanId(documentEpoch, 'perception_envelope_document_epoch_invalid'),
     captured_at: cleanText(capturedAt, 64) || new Date(0).toISOString(),
@@ -156,6 +160,8 @@ function maxNodes(options) {
 export function envelopeFromExtensionFrame(frame, options = {}) {
   if (frame?.schema !== 'metaengine.a2-browser-operator.semantic-frame.v1') throw new Error('perception_extension_frame_schema_invalid');
   if (frame.tainted_page_data !== true || frame.authority_effect !== false) throw new Error('perception_extension_trust_contract_invalid');
+  const conversationEpoch = options.conversationEpoch ?? frame.conversation_epoch;
+  if (conversationEpoch == null) throw new Error('perception_extension_conversation_epoch_required');
   const sourceNodes = Array.isArray(frame.nodes) ? frame.nodes : [];
   const limit = maxNodes(options);
   const nodes = sourceNodes.slice(0, limit).map((node) => normalizedNode({
@@ -178,7 +184,7 @@ export function envelopeFromExtensionFrame(frame, options = {}) {
     sourceSurface: 'EXTENSION',
     targetId: frame.target_id,
     contextId: frame.context_id,
-    conversationEpoch: options.conversationEpoch ?? frame.conversation_epoch ?? 1,
+    conversationEpoch,
     documentEpoch: frame.document_epoch,
     capturedAt: frame.captured_at,
     sourceToken: frame.frame_id,
@@ -199,6 +205,7 @@ export function envelopeFromComputeSnapshot(snapshot, options = {}) {
   if (snapshot.actuation_eligible !== false) throw new Error('perception_compute_snapshot_authority_invalid');
   const documentEpoch = options.documentEpoch;
   if (!documentEpoch) throw new Error('perception_compute_document_epoch_required');
+  if (!options.contextId) throw new Error('perception_compute_context_id_required');
   const sourceNodes = Array.isArray(snapshot.nodes) ? snapshot.nodes : [];
   const limit = maxNodes(options);
   const nodes = sourceNodes.slice(0, limit).map((node) => normalizedNode({
@@ -215,7 +222,7 @@ export function envelopeFromComputeSnapshot(snapshot, options = {}) {
   return finalize({
     sourceSurface: 'COMPUTE_BROWSER',
     targetId: snapshot.target_id,
-    contextId: options.contextId ?? null,
+    contextId: options.contextId,
     conversationEpoch: snapshot.conversation_epoch,
     documentEpoch,
     capturedAt: snapshot.captured_at,
@@ -236,10 +243,13 @@ export function assertPerceptionEnvelope(value) {
   if (value?.schema !== SCHEMA) throw new Error('perception_envelope_schema_invalid');
   if (value.tainted_page_data !== true || value.authority_effect !== false || value.actuation_eligible !== false) throw new Error('perception_envelope_authority_invalid');
   cleanId(value.target_id, 'perception_envelope_target_id_invalid');
-  if (value.context_id != null) cleanId(value.context_id, 'perception_envelope_context_id_invalid');
+  cleanId(value.context_id, 'perception_envelope_context_id_required');
   positiveInt(value.conversation_epoch, 'perception_envelope_conversation_epoch_invalid');
   cleanId(value.document_epoch, 'perception_envelope_document_epoch_invalid');
   if (!Array.isArray(value.nodes) || value.nodes.length > 20000) throw new Error('perception_envelope_nodes_invalid');
+  for (const key of ['accessibility', 'geometry', 'visibility', 'oopif']) {
+    if (!COVERAGE_VALUES.has(value.evidence?.[key])) throw new Error(`perception_envelope_evidence_invalid:${key}`);
+  }
   const serialized = JSON.stringify(value);
   if (/backendDOMNodeId|backend_node|cdp_target|session_generation|process_incarnation|browserContextId|loaderId|Runtime\.evaluate/i.test(serialized)) {
     throw new Error('perception_envelope_engine_identity_leak');
