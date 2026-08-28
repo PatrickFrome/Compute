@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import json
 from pathlib import Path
 import unittest
 
@@ -174,7 +173,8 @@ class CallbackEnvironmentPreflightTests(unittest.TestCase):
         source = WORKFLOW.read_text()
         self.assertNotIn("Authorization: Bearer", source)
         self.assertNotIn("GH_TOKEN", source)
-        self.assertGreaterEqual(source.count("curl --fail-with-body --silent --show-error --location"), 8)
+        self.assertEqual(2, source.count("curl --fail-with-body --silent --show-error --location"))
+        self.assertEqual(8, source.count('api_get "https://api.github.com/repos/${GITHUB_REPOSITORY}'))
 
 
 if __name__ == "__main__":
