@@ -3,6 +3,7 @@ import { SemanticActionCache, semanticActionCacheNamespace } from './semantic-ac
 
 const SCHEMA = 'metaengine.a2-browser-operator.semantic-planning-broker.v1';
 const LOOKUP_SCHEMA = 'metaengine.a2-browser-operator.semantic-planning-lookup.v1';
+const LEASE_SCHEMA = 'metaengine.a2-browser-operator.semantic-planning-lease.v1';
 const CONTEXT_SCHEMA = 'metaengine.a2-browser-operator.semantic-planning-context.v1';
 const PROMOTION_SCHEMA = 'metaengine.a2-browser-operator.semantic-planning-promotion.v1';
 const DEFAULT_LEASE_TTL_MS = 30_000;
@@ -41,14 +42,7 @@ function randomOpaque(prefix) {
 
 function flightKey(envelope, intentId, actionKind) {
   const ns = semanticActionCacheNamespace(envelope);
-  return [
-    ns.target_id,
-    ns.context_id,
-    ns.conversation_epoch,
-    ns.document_epoch,
-    intentId,
-    actionKind
-  ].join('\u001f');
+  return [ns.target_id, ns.context_id, ns.conversation_epoch, ns.document_epoch, intentId, actionKind].join('\u001f');
 }
 
 function publicBase() {
@@ -71,13 +65,9 @@ export class SemanticPlanningBroker {
     flightIdFactory = () => randomOpaque('flight'),
     leaseTokenFactory = () => randomOpaque('lease')
   } = {}) {
-    if (!cache || typeof cache.resolve !== 'function' || typeof cache.put !== 'function') {
-      throw new Error('semantic_planning_broker_cache_invalid');
-    }
+    if (!cache || typeof cache.resolve !== 'function' || typeof cache.put !== 'function') throw new Error('semantic_planning_broker_cache_invalid');
     if (typeof clock !== 'function') throw new Error('semantic_planning_broker_clock_invalid');
-    if (typeof flightIdFactory !== 'function' || typeof leaseTokenFactory !== 'function') {
-      throw new Error('semantic_planning_broker_id_factory_invalid');
-    }
+    if (typeof flightIdFactory !== 'function' || typeof leaseTokenFactory !== 'function') throw new Error('semantic_planning_broker_id_factory_invalid');
     this.cache = cache;
     this.clock = clock;
     this.leaseTtlMs = positiveInt(leaseTtlMs, 'semantic_planning_broker_lease_ttl_invalid');
@@ -93,6 +83,7 @@ export class SemanticPlanningBroker {
       cache_hits: 0,
       leader_misses: 0,
       waiters: 0,
+      lease_preflights: 0,
       context_revalidations: 0,
       context_revalidation_failures: 0,
       promotions: 0,
@@ -111,85 +102,57 @@ export class SemanticPlanningBroker {
     const nowMs = finiteTimestamp(this.clock(), 'semantic_planning_broker_clock_invalid');
     this.sweep(nowMs);
     this.metrics.lookups += 1;
-
-    const cached = this.cache.resolve({
-      envelope: freshEnvelope,
-      intentId: normalizedIntent,
-      actionKind: normalizedAction
-    });
+    const cached = this.cache.resolve({ envelope: freshEnvelope, intentId: normalizedIntent, actionKind: normalizedAction });
     if (cached.cache_status === 'HIT_REVALIDATED') {
       this.metrics.cache_hits += 1;
-      return Object.freeze({
-        ...publicBase(),
-        status: 'HIT_REVALIDATED',
-        reason: cached.reason,
-        intent_id: normalizedIntent,
-        action_kind: normalizedAction,
-        candidate_ref: cached.candidate_ref,
-        semantic_fingerprint: cached.semantic_fingerprint,
-        locator_fingerprint: cached.locator_fingerprint,
-        model_call_required: false,
-        wait_required: false,
-        flight_id: null,
-        lease_token: null
-      });
+      return Object.freeze({ ...publicBase(), status: 'HIT_REVALIDATED', reason: cached.reason, intent_id: normalizedIntent, action_kind: normalizedAction, candidate_ref: cached.candidate_ref, semantic_fingerprint: cached.semantic_fingerprint, locator_fingerprint: cached.locator_fingerprint, model_call_required: false, wait_required: false, flight_id: null, lease_token: null });
     }
-
     const key = flightKey(freshEnvelope, normalizedIntent, normalizedAction);
     const existingFlightId = this.flightIdByKey.get(key);
     const existing = existingFlightId ? this.flightsById.get(existingFlightId) : null;
     if (existing) {
       this.metrics.waiters += 1;
-      return Object.freeze({
-        ...publicBase(),
-        status: 'WAIT_FOR_PROMOTION',
-        reason: cached.reason,
-        intent_id: normalizedIntent,
-        action_kind: normalizedAction,
-        candidate_ref: null,
-        model_call_required: false,
-        wait_required: true,
-        flight_id: existing.flight_id,
-        lease_token: null,
-        lease_expires_in_ms: Math.max(0, existing.expires_at_ms - nowMs)
-      });
+      return Object.freeze({ ...publicBase(), status: 'WAIT_FOR_PROMOTION', reason: cached.reason, intent_id: normalizedIntent, action_kind: normalizedAction, candidate_ref: null, model_call_required: false, wait_required: true, flight_id: existing.flight_id, lease_token: null, lease_expires_in_ms: Math.max(0, existing.expires_at_ms - nowMs) });
     }
-
     if (this.flightsById.size >= this.maxFlights) {
       this.metrics.capacity_rejections += 1;
       throw new Error('semantic_planning_broker_capacity_exceeded');
     }
-
     const flightId = cleanId(this.flightIdFactory(), 'semantic_planning_broker_flight_id_invalid');
     const leaseToken = cleanId(this.leaseTokenFactory(), 'semantic_planning_broker_lease_token_invalid', 512);
     if (this.flightsById.has(flightId)) throw new Error('semantic_planning_broker_flight_id_collision');
-    const record = Object.freeze({
-      key,
-      flight_id: flightId,
-      lease_token: leaseToken,
-      intent_id: normalizedIntent,
-      action_kind: normalizedAction,
-      leader_envelope: freshEnvelope,
-      source_token: String(freshEnvelope.source_token || ''),
-      created_at_ms: nowMs,
-      expires_at_ms: nowMs + this.leaseTtlMs
-    });
+    const record = Object.freeze({ key, flight_id: flightId, lease_token: leaseToken, intent_id: normalizedIntent, action_kind: normalizedAction, leader_envelope: freshEnvelope, source_token: String(freshEnvelope.source_token || ''), created_at_ms: nowMs, expires_at_ms: nowMs + this.leaseTtlMs });
     this.flightsById.set(flightId, record);
     this.flightIdByKey.set(key, flightId);
     this.metrics.leader_misses += 1;
+    return Object.freeze({ ...publicBase(), status: 'MISS_LEADER', reason: cached.reason, intent_id: normalizedIntent, action_kind: normalizedAction, candidate_ref: null, model_call_required: true, wait_required: false, flight_id: flightId, lease_token: leaseToken, source_token: record.source_token, lease_expires_in_ms: this.leaseTtlMs });
+  }
+
+  assertLease({ flightId, leaseToken } = {}) {
+    const id = cleanId(flightId, 'semantic_planning_broker_flight_id_invalid');
+    const token = cleanId(leaseToken, 'semantic_planning_broker_lease_token_invalid', 512);
+    const nowMs = finiteTimestamp(this.clock(), 'semantic_planning_broker_clock_invalid');
+    this.sweep(nowMs);
+    const flight = this.flightsById.get(id);
+    if (!flight || flight.lease_token !== token) {
+      this.metrics.lease_rejections += 1;
+      throw new Error('semantic_planning_broker_lease_invalid');
+    }
+    const ns = semanticActionCacheNamespace(flight.leader_envelope);
+    this.metrics.lease_preflights += 1;
     return Object.freeze({
-      ...publicBase(),
-      status: 'MISS_LEADER',
-      reason: cached.reason,
-      intent_id: normalizedIntent,
-      action_kind: normalizedAction,
-      candidate_ref: null,
-      model_call_required: true,
-      wait_required: false,
-      flight_id: flightId,
-      lease_token: leaseToken,
-      source_token: record.source_token,
-      lease_expires_in_ms: this.leaseTtlMs
+      schema: LEASE_SCHEMA,
+      status: 'LEASE_VALID',
+      flight_id: id,
+      intent_id: flight.intent_id,
+      action_kind: flight.action_kind,
+      target_id: ns.target_id,
+      context_id: ns.context_id,
+      conversation_epoch: ns.conversation_epoch,
+      document_epoch: ns.document_epoch,
+      lease_expires_in_ms: Math.max(0, flight.expires_at_ms - nowMs),
+      authority_effect: false,
+      actuation_eligible: false
     });
   }
 
@@ -208,17 +171,7 @@ export class SemanticPlanningBroker {
       const expectedKey = flightKey(envelope, flight.intent_id, flight.action_kind);
       if (expectedKey !== flight.key) throw new Error('semantic_planning_broker_namespace_changed');
       this.metrics.context_revalidations += 1;
-      return Object.freeze({
-        schema: CONTEXT_SCHEMA,
-        status: 'CONTEXT_REVALIDATED',
-        flight_id: id,
-        intent_id: flight.intent_id,
-        action_kind: flight.action_kind,
-        document_epoch: envelope.document_epoch,
-        authority_effect: false,
-        actuation_eligible: false,
-        stores_execution_payload: false
-      });
+      return Object.freeze({ schema: CONTEXT_SCHEMA, status: 'CONTEXT_REVALIDATED', flight_id: id, intent_id: flight.intent_id, action_kind: flight.action_kind, document_epoch: envelope.document_epoch, authority_effect: false, actuation_eligible: false, stores_execution_payload: false });
     } catch (error) {
       this.metrics.context_revalidation_failures += 1;
       throw error;
@@ -237,47 +190,16 @@ export class SemanticPlanningBroker {
       this.metrics.lease_rejections += 1;
       throw new Error('semantic_planning_broker_lease_invalid');
     }
-
     try {
       const expectedKey = flightKey(envelope, flight.intent_id, flight.action_kind);
       if (expectedKey !== flight.key) throw new Error('semantic_planning_broker_namespace_changed');
-
       const probe = new SemanticActionCache({ maxEntries: 1, maxAgeMs: this.leaseTtlMs, clock: this.clock });
-      probe.put({
-        envelope: flight.leader_envelope,
-        intentId: flight.intent_id,
-        actionKind: flight.action_kind,
-        nodeRef: candidate
-      });
-      const revalidated = probe.resolve({
-        envelope,
-        intentId: flight.intent_id,
-        actionKind: flight.action_kind
-      });
-      if (revalidated.cache_status !== 'HIT_REVALIDATED') {
-        throw new Error(`semantic_planning_broker_target_not_revalidated:${revalidated.reason}`);
-      }
-
-      this.cache.put({
-        envelope,
-        intentId: flight.intent_id,
-        actionKind: flight.action_kind,
-        nodeRef: revalidated.candidate_ref
-      });
+      probe.put({ envelope: flight.leader_envelope, intentId: flight.intent_id, actionKind: flight.action_kind, nodeRef: candidate });
+      const revalidated = probe.resolve({ envelope, intentId: flight.intent_id, actionKind: flight.action_kind });
+      if (revalidated.cache_status !== 'HIT_REVALIDATED') throw new Error(`semantic_planning_broker_target_not_revalidated:${revalidated.reason}`);
+      this.cache.put({ envelope, intentId: flight.intent_id, actionKind: flight.action_kind, nodeRef: revalidated.candidate_ref });
       this.metrics.promotions += 1;
-      return Object.freeze({
-        schema: PROMOTION_SCHEMA,
-        status: 'PROMOTED_REVALIDATED',
-        flight_id: id,
-        intent_id: flight.intent_id,
-        action_kind: flight.action_kind,
-        candidate_ref: revalidated.candidate_ref,
-        revalidation_reason: revalidated.reason,
-        authority_effect: false,
-        actuation_eligible: false,
-        must_run_actionability_checks: true,
-        stores_execution_payload: false
-      });
+      return Object.freeze({ schema: PROMOTION_SCHEMA, status: 'PROMOTED_REVALIDATED', flight_id: id, intent_id: flight.intent_id, action_kind: flight.action_kind, candidate_ref: revalidated.candidate_ref, revalidation_reason: revalidated.reason, authority_effect: false, actuation_eligible: false, must_run_actionability_checks: true, stores_execution_payload: false });
     } catch (error) {
       this.metrics.promotion_revalidation_failures += 1;
       throw error;
@@ -297,14 +219,7 @@ export class SemanticPlanningBroker {
     }
     this.#removeFlight(id);
     this.metrics.aborts += 1;
-    return Object.freeze({
-      schema: PROMOTION_SCHEMA,
-      status: 'ABORTED',
-      flight_id: id,
-      reason_code: reason,
-      authority_effect: false,
-      actuation_eligible: false
-    });
+    return Object.freeze({ schema: PROMOTION_SCHEMA, status: 'ABORTED', flight_id: id, reason_code: reason, authority_effect: false, actuation_eligible: false });
   }
 
   sweep(nowValue = this.clock()) {
@@ -327,18 +242,7 @@ export class SemanticPlanningBroker {
   }
 
   snapshot() {
-    return Object.freeze({
-      schema: SCHEMA,
-      authority_effect: false,
-      actuation_eligible: false,
-      stores_execution_payload: false,
-      stores_perception_persistently: false,
-      in_flight_count: this.flightsById.size,
-      max_flights: this.maxFlights,
-      lease_ttl_ms: this.leaseTtlMs,
-      metrics: { ...this.metrics },
-      cache: this.cache.snapshot()
-    });
+    return Object.freeze({ schema: SCHEMA, authority_effect: false, actuation_eligible: false, stores_execution_payload: false, stores_perception_persistently: false, in_flight_count: this.flightsById.size, max_flights: this.maxFlights, lease_ttl_ms: this.leaseTtlMs, metrics: { ...this.metrics }, cache: this.cache.snapshot() });
   }
 
   #removeFlight(id) {
@@ -352,5 +256,6 @@ export class SemanticPlanningBroker {
 
 export const SEMANTIC_PLANNING_BROKER_SCHEMA = SCHEMA;
 export const SEMANTIC_PLANNING_LOOKUP_SCHEMA = LOOKUP_SCHEMA;
+export const SEMANTIC_PLANNING_LEASE_SCHEMA = LEASE_SCHEMA;
 export const SEMANTIC_PLANNING_CONTEXT_SCHEMA = CONTEXT_SCHEMA;
 export const SEMANTIC_PLANNING_PROMOTION_SCHEMA = PROMOTION_SCHEMA;
