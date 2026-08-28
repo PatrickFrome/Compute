@@ -40,19 +40,22 @@ jobs:
     timeout-minutes: 8
     permissions:
       contents: read
+    outputs:
+      subject_sha256: ${{ steps.subject.outputs.subject_sha256 }}
     steps:
       - name: Checkout exact revision without persisted credentials
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Build deterministic nonauthority attestation subject
+        id: subject
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           mkdir -p evidence
           SOURCE_TREE="$(git rev-parse HEAD^{tree})"
           SOURCE_TREE="$SOURCE_TREE" python3 - <<'PY'
-          import hashlib,json,os
+          import json,os
           body={
             'schema':'metaengine.compute.w1-github-attestation-subject.h205f22.v1',
             'classification':'W1_GITHUB_KEYLESS_ATTESTATION_MECHANISM_SMOKE_NONAUTHORITY',
@@ -79,16 +82,15 @@ jobs:
           }
           raw=json.dumps(body,sort_keys=True,separators=(',',':')).encode()
           open('evidence/v15-attestation-subject.json','wb').write(raw)
-          open('evidence/v15-attestation-subject.sha256','w').write(hashlib.sha256(raw).hexdigest()+'\n')
           PY
-          test "$(sha256sum evidence/v15-attestation-subject.json | awk '{print $1}')" = "$(cat evidence/v15-attestation-subject.sha256)"
+          SUBJECT_SHA256="$(sha256sum evidence/v15-attestation-subject.json | awk '{print $1}')"
+          [[ "$SUBJECT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          echo "subject_sha256=$SUBJECT_SHA256" >> "$GITHUB_OUTPUT"
       - name: Upload nonsecret subject bytes only
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: w1-v15-attestation-subject-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            evidence/v15-attestation-subject.json
-            evidence/v15-attestation-subject.sha256
+          path: evidence/v15-attestation-subject.json
           archive: false
           if-no-files-found: error
           overwrite: false
@@ -104,6 +106,8 @@ jobs:
       id-token: write
       attestations: write
       artifact-metadata: write
+    env:
+      EXPECTED_SUBJECT_SHA256: ${{ needs.build-subject.outputs.subject_sha256 }}
     steps:
       - name: Checkout exact revision without persisted credentials
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -118,7 +122,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(sha256sum evidence/v15-attestation-subject.json | awk '{print $1}')" = "$(cat evidence/v15-attestation-subject.sha256)"
+          [[ "$EXPECTED_SUBJECT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "$(sha256sum evidence/v15-attestation-subject.json | awk '{print $1}')" = "$EXPECTED_SUBJECT_SHA256"
           python3 - <<'PY'
           import json,os
           v=json.load(open('evidence/v15-attestation-subject.json'))
@@ -166,6 +171,7 @@ jobs:
           values=json.load(open('evidence/v15-attestation-verification.json'))
           assert isinstance(values,list) and values
           expected=hashlib.sha256(open('evidence/v15-attestation-subject.json','rb').read()).hexdigest()
+          assert expected==os.environ['EXPECTED_SUBJECT_SHA256']
           matched=False
           for item in values:
               vr=item.get('verificationResult') or {}
