@@ -438,7 +438,7 @@ fn response_payload_length(response: &HelperResponse) -> Result<usize, ProtocolE
                 .ok_or_else(|| ProtocolError::new("skill_helper_protocol_length_overflow"))?
         }
     };
-    if length < MIN_RESPONSE_PAYLOAD_BYTES || length > MAX_RESPONSE_PAYLOAD_BYTES {
+    if !(MIN_RESPONSE_PAYLOAD_BYTES..=MAX_RESPONSE_PAYLOAD_BYTES).contains(&length) {
         return Err(ProtocolError::new(
             "skill_helper_protocol_response_size_invalid",
         ));
