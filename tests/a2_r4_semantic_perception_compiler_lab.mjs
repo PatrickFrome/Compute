@@ -39,6 +39,9 @@ assert.deepEqual(SEMANTIC_PERCEPTION_LIMITS, {
   assert.equal(frame.truncation.applied, true);
   assert.equal(frame.truncation.source_candidate_count, 140);
   assert.equal(frame.truncation.omitted_node_count, 110);
+  assert.equal(frame.delta.scope, 'FULL_REFRESH_BOUNDED');
+  assert.equal(frame.delta.complete, false);
+  assert.ok(frame.changes.every((c) => c.type === 'WORKING_SET_ENTERED'));
   assert.ok(frame.metrics.semantic_frame_bytes < frame.metrics.raw_observation_bytes);
   assert.ok(frame.metrics.node_reduction_ratio > 0.7);
   assert.equal(frame.tainted_page_data, true);
@@ -62,6 +65,8 @@ let first;
   assert.equal(second.nodes[0].semantic_id, first.nodes[0].semantic_id);
   assert.equal(second.nodes[0].continuity, 'EXACT_BINDING');
   assert.equal(second.nodes[0].binding_epoch, 1);
+  assert.equal(second.delta.scope, 'FULL_CANDIDATE_SET');
+  assert.equal(second.delta.complete, true);
   assert.ok(second.changes.some((c) => c.type === 'CHANGED' && c.fields.includes('value_summary')));
 }
 
@@ -88,6 +93,8 @@ let first;
   assert.notEqual(navigated.nodes[0].semantic_id, first.nodes[0].semantic_id);
   assert.equal(navigated.nodes[0].continuity, 'NEW_NODE');
   assert.equal(navigated.nodes[0].binding_epoch, 1);
+  assert.equal(navigated.delta.scope, 'FULL_REFRESH');
+  assert.equal(navigated.delta.complete, true);
 }
 
 // Duplicate structural candidates are ambiguous and must not silently inherit either prior semantic ID.
@@ -132,7 +139,7 @@ let first;
   assert.doesNotMatch(encoded, /cookie|authorization_header|storage_state/i);
 }
 
-// Working-set delta exposes add/remove without carrying raw source payloads.
+// Complete candidate-set delta may assert real add/remove semantics.
 {
   const base = compileSemanticFrame(raw({
     frame: 'delta-1',
@@ -144,8 +151,40 @@ let first;
     axNodes: [ax({ id: 'd1b', backend: 1, role: 'button', name: 'Alpha' }), ax({ id: 'd3', backend: 3, role: 'button', name: 'Gamma' })],
     domNodes: [dom({ backend: 1, index: 1, tag: 'BUTTON' }), dom({ backend: 3, index: 3, tag: 'BUTTON' })]
   }), { previousFrame: base });
+  assert.equal(next.delta.scope, 'FULL_CANDIDATE_SET');
+  assert.equal(next.delta.complete, true);
   assert.ok(next.changes.some((c) => c.type === 'REMOVED'));
   assert.ok(next.changes.some((c) => c.type === 'ADDED'));
+}
+
+// Bounded working-set churn is not evidence that a DOM node was added or removed.
+{
+  const axNodes = [];
+  const domNodes = [];
+  for (let i = 0; i < 31; i++) {
+    const backend = 9000 + i;
+    axNodes.push(ax({ id: `rank-${i}`, backend, role: 'StaticText', name: `uniquetoken${i}` }));
+    domNodes.push(dom({ backend, index: i, tag: 'DIV', bounds: [0, i * 24, 200, 20] }));
+  }
+  const observation = raw({ frame: 'bounded-1', axNodes, domNodes });
+  const base = compileSemanticFrame(observation, { maxNodes: 30 });
+  assert.equal(base.truncation.applied, true);
+  const emittedNames = new Set(base.nodes.map((node) => node.name));
+  const omittedName = axNodes.map((node) => node.name).find((name) => !emittedNames.has(name));
+  assert.ok(omittedName, 'bounded fixture did not omit one candidate');
+
+  const reranked = compileSemanticFrame({ ...observation, frame_id: 'bounded-2' }, {
+    previousFrame: base,
+    maxNodes: 30,
+    taskText: omittedName
+  });
+  assert.equal(reranked.truncation.applied, true);
+  assert.equal(reranked.delta.scope, 'EMITTED_WORKING_SET');
+  assert.equal(reranked.delta.complete, false);
+  assert.ok(reranked.nodes.some((node) => node.name === omittedName), 'task relevance did not move omitted node into working set');
+  assert.ok(reranked.changes.some((c) => c.type === 'WORKING_SET_ENTERED'));
+  assert.ok(reranked.changes.some((c) => c.type === 'WORKING_SET_EVICTED'));
+  assert.equal(reranked.changes.some((c) => c.type === 'ADDED' || c.type === 'REMOVED'), false);
 }
 
 console.log('A2 R4 semantic perception compiler core: PASS', {
