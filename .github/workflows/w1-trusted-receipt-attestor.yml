@@ -1,0 +1,180 @@
+name: W1 Trusted Receipt Attestor
+
+on:
+  workflow_call:
+    inputs:
+      artifact_name:
+        description: Same-run GitHub artifact containing exactly w1-attestation-subject.json
+        required: true
+        type: string
+      expected_sha256:
+        description: SHA-256 of canonical subject bytes emitted by the unprivileged caller job
+        required: true
+        type: string
+    outputs:
+      attestation_id:
+        description: GitHub attestation ID created for the validated subject
+        value: ${{ jobs.attest.outputs.attestation_id }}
+      verification_receipt_artifact_name:
+        description: Artifact containing the credential-free attestation verification receipt
+        value: ${{ jobs.attest.outputs.verification_receipt_artifact_name }}
+
+permissions: {}
+
+jobs:
+  attest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    outputs:
+      attestation_id: ${{ steps.attest.outputs.attestation-id }}
+      verification_receipt_artifact_name: ${{ steps.outputs.outputs.verification_receipt_artifact_name }}
+    env:
+      EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+      INPUT_ARTIFACT_NAME: ${{ inputs.artifact_name }}
+      TRUSTED_SIGNER_WORKFLOW: .github/workflows/w1-trusted-receipt-attestor.yml
+      TRUSTED_CALLER_WORKFLOW: .github/workflows/w1-trusted-receipt-attestor-contract.yml
+    steps:
+      - name: Checkout exact caller source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Fail closed on caller/source boundary before artifact access
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'PatrickFrome/Compute'
+          test "$GITHUB_EVENT_NAME" = 'push'
+          [[ "$GITHUB_REF" == refs/heads/work/main-roadmap-accelerators-v16* ]]
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$INPUT_ARTIFACT_NAME" =~ ^w1-v16-trusted-attestor-subject-[0-9]+-[0-9]+$ ]]
+          EXPECTED_WORKFLOW_REF="${GITHUB_REPOSITORY}/${TRUSTED_CALLER_WORKFLOW}@${GITHUB_REF}"
+          test "$GITHUB_WORKFLOW_REF" = "$EXPECTED_WORKFLOW_REF"
+
+      - name: Download subject produced by unprivileged caller job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: evidence
+
+      - name: Recompute digest and rerun trusted semantic guard
+        run: |
+          set -euo pipefail
+          test -f evidence/w1-attestation-subject.json
+          test "$(find evidence -maxdepth 1 -type f | wc -l)" -eq 1
+          test "$(sha256sum evidence/w1-attestation-subject.json | awk '{print $1}')" = "$EXPECTED_SHA256"
+          mkdir -p verified
+          python3 controller/w1/w1_trusted_receipt_attestor_guard.py validate-smoke \
+            --input evidence/w1-attestation-subject.json \
+            --expected-sha256 "$EXPECTED_SHA256" \
+            --source-sha "$GITHUB_SHA" \
+            --source-ref "$GITHUB_REF" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" \
+            --output verified/pre-sign-validation.json
+          python3 - <<'PY'
+          import json
+          v=json.load(open('verified/pre-sign-validation.json'))
+          assert v['subject_semantics_validated'] is True
+          assert v['caller_workflow_allowlist_verified'] is True
+          assert v['reusable_signer_boundary_expected'] is True
+          assert v['producer_attestation_verified'] is False
+          for k in ('live_w1_receipt_authenticated','reboot_completion_proven','boot_id_transition_verified','database_persisted_readback_verified','persistent_worker_proof','worker_admitted','w1_verified','canonical','authority_effect'):
+              assert v[k] is False,k
+          PY
+
+      - name: Create reusable-workflow keyless SLSA attestation
+        id: attest
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d
+        with:
+          subject-path: evidence/w1-attestation-subject.json
+          show-summary: false
+
+      - name: Verify exact reusable signer identity and source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+          ATTESTATION_ID: ${{ steps.attest.outputs.attestation-id }}
+          ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
+        run: |
+          set -euo pipefail
+          [[ "$ATTESTATION_ID" =~ ^[0-9]+$ ]]
+          test -n "$ATTESTATION_URL"
+          test -s "$BUNDLE_PATH"
+          gh attestation verify evidence/w1-attestation-subject.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --bundle "$BUNDLE_PATH" \
+            --predicate-type 'https://slsa.dev/provenance/v1' \
+            --signer-workflow "$GITHUB_REPOSITORY/$TRUSTED_SIGNER_WORKFLOW" \
+            --source-ref "$GITHUB_REF" \
+            --source-digest "$GITHUB_SHA" \
+            --deny-self-hosted-runners \
+            --format json > verified/attestation-verification.json
+          python3 - <<'PY'
+          import hashlib,json,os
+          values=json.load(open('verified/attestation-verification.json'))
+          assert isinstance(values,list) and values
+          expected=os.environ['EXPECTED_SHA256']
+          matched=False
+          for item in values:
+              vr=item.get('verificationResult') or {}
+              statement=vr.get('statement') or {}
+              cert=((vr.get('signature') or {}).get('certificate') or {})
+              subjects=statement.get('subject') or []
+              if not any((s.get('digest') or {}).get('sha256')==expected for s in subjects):
+                  continue
+              assert statement.get('predicateType')=='https://slsa.dev/provenance/v1'
+              assert cert.get('issuer')=='https://token.actions.githubusercontent.com'
+              assert cert.get('sourceRepositoryRef')==os.environ['GITHUB_REF']
+              assert cert.get('sourceRepositoryDigest')==os.environ['GITHUB_SHA']
+              assert str(cert.get('sourceRepositoryIdentifier'))==os.environ['GITHUB_REPOSITORY_ID']
+              assert str(cert.get('sourceRepositoryOwnerIdentifier'))==os.environ['GITHUB_REPOSITORY_OWNER_ID']
+              assert cert.get('runnerEnvironment')=='github-hosted'
+              matched=True
+          assert matched,'verified bundle did not match exact subject and certificate source policy'
+          receipt={
+            'schema':'metaengine.compute.w1-reusable-attestor-verification.h205f22.v1',
+            'classification':'W1_REUSABLE_TRUSTED_ATTESTOR_VERIFIED_NONAUTHORITY',
+            'subject_sha256':expected,
+            'repository':os.environ['GITHUB_REPOSITORY'],
+            'repository_id':os.environ['GITHUB_REPOSITORY_ID'],
+            'repository_owner_id':os.environ['GITHUB_REPOSITORY_OWNER_ID'],
+            'source_sha':os.environ['GITHUB_SHA'],
+            'source_ref':os.environ['GITHUB_REF'],
+            'caller_workflow_ref':os.environ['GITHUB_WORKFLOW_REF'],
+            'trusted_signer_workflow':os.environ['TRUSTED_SIGNER_WORKFLOW'],
+            'attestation_id':os.environ['ATTESTATION_ID'],
+            'attestation_url':os.environ['ATTESTATION_URL'],
+            'reusable_signer_attestation_verified':True,
+            'live_w1_receipt_authenticated':False,
+            'reboot_completion_proven':False,
+            'boot_id_transition_verified':False,
+            'database_persisted_readback_verified':False,
+            'persistent_worker_proof':False,
+            'worker_admitted':False,
+            'w1_verified':False,
+            'canonical':False,
+            'authority_effect':False,
+          }
+          raw=json.dumps(receipt,sort_keys=True,separators=(',',':')).encode()
+          receipt['receipt_sha256']=hashlib.sha256(raw).hexdigest()
+          open('verified/reusable-attestor-verification-receipt.json','w').write(json.dumps(receipt,sort_keys=True,separators=(',',':')))
+          PY
+
+      - name: Upload credential-free reusable-signer verification receipt
+        id: outputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: w1-v16-reusable-attestor-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: verified/reusable-attestor-verification-receipt.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
