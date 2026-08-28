@@ -40,6 +40,29 @@ function envelope({ count = 8, documentEpoch = 'doc_a', marker = 'a', descriptio
   );
 }
 
+function unicodeEnvelope(names) {
+  const schema = {
+    type: 'object',
+    properties: {
+      äther: { type: 'string' },
+      Ångstrom: { type: 'string' },
+      alpha: { type: 'string' },
+      Zeta: { type: 'string' }
+    },
+    additionalProperties: false
+  };
+  return webMcpEnvelopeFromCdpTools(names.map((name) => ({
+    name,
+    description: `Capability ${name}`,
+    inputSchema: schema,
+    annotations: { readOnly: true },
+    frameId: 'frame-main'
+  })), {
+    targetId: 'target_catalog', contextId: 'default', conversationEpoch: 7,
+    documentEpoch: 'doc_unicode', mainFrameId: 'frame-main', capturedAt: '2026-08-28T14:20:00.000Z'
+  });
+}
+
 test('catalog preserves every tool but excludes full schemas and stays dramatically smaller', () => {
   const source = envelope({ count: 32, descriptionSize: 1400, propertyCount: 32 });
   const catalog = assertWebMcpCatalog(compileWebMcpCatalog(source));
@@ -63,6 +86,20 @@ test('catalog previews are deterministic, explicitly lossy, and keep annotations
   assert.equal(first.tools[0].tainted_page_data, true);
   assert.equal(first.tools[0].authority_effect, false);
   assert.equal(first.tools[0].actuation_eligible, false);
+});
+
+test('WebMCP normalization and catalog order are locale-independent even for Unicode metadata', () => {
+  const expected = ['Zeta', 'alpha', 'Ångstrom', 'äther'];
+  const firstEnvelope = unicodeEnvelope(['äther', 'alpha', 'Ångstrom', 'Zeta']);
+  const secondEnvelope = unicodeEnvelope(['Zeta', 'Ångstrom', 'alpha', 'äther']);
+  assert.deepEqual(firstEnvelope.tools.map((tool) => tool.name), expected);
+  assert.deepEqual(secondEnvelope.tools.map((tool) => tool.name), expected);
+  assert.deepEqual(Object.keys(firstEnvelope.tools[0].input_schema.properties), expected);
+  assert.deepEqual(firstEnvelope, secondEnvelope);
+  const firstCatalog = compileWebMcpCatalog(firstEnvelope);
+  const secondCatalog = compileWebMcpCatalog(secondEnvelope);
+  assert.deepEqual(firstCatalog.tools.map((tool) => tool.name_preview), expected);
+  assert.deepEqual(firstCatalog, secondCatalog);
 });
 
 test('fresh hydration returns one exact sanitized schema and never creates invocation authority', () => {
