@@ -8,26 +8,12 @@ import { ComputeWebMcpService } from './webmcp-service.mjs';
 const MAX_LINE_BYTES = 1024 * 1024;
 
 export const RPC_METHODS = Object.freeze([
-  'runtime.health',
-  'profile.start',
-  'profile.stop',
-  'profile.list',
-  'context.create',
-  'context.list',
-  'context.close',
-  'target.create',
-  'target.list',
-  'perception.snapshot',
-  'webmcp.snapshot',
-  'webmcp.catalog',
-  'webmcp.describe',
-  'planning.lookup',
-  'planning.context',
-  'planning.promote',
-  'planning.abort',
-  'planning.stats',
-  'target.activate',
-  'target.close'
+  'runtime.health', 'profile.start', 'profile.stop', 'profile.list',
+  'context.create', 'context.list', 'context.close',
+  'target.create', 'target.list',
+  'perception.snapshot', 'webmcp.snapshot', 'webmcp.catalog', 'webmcp.describe',
+  'planning.lookup', 'planning.tools.search', 'planning.context', 'planning.promote', 'planning.abort', 'planning.stats',
+  'target.activate', 'target.close'
 ]);
 
 export const RPC_METHOD_EFFECTS = Object.freeze({
@@ -45,6 +31,7 @@ export const RPC_METHOD_EFFECTS = Object.freeze({
   'webmcp.catalog': 'READ_ONLY',
   'webmcp.describe': 'READ_ONLY',
   'planning.lookup': 'LOCAL_COORDINATION',
+  'planning.tools.search': 'LOCAL_COORDINATION',
   'planning.context': 'LOCAL_COORDINATION',
   'planning.promote': 'LOCAL_COORDINATION',
   'planning.abort': 'LOCAL_COORDINATION',
@@ -68,6 +55,7 @@ const RPC_PARAM_KEYS = Object.freeze({
   'webmcp.catalog': ['profileId', 'targetId'],
   'webmcp.describe': ['profileId', 'targetId', 'toolRef'],
   'planning.lookup': ['profileId', 'targetId', 'intentId', 'actionKind'],
+  'planning.tools.search': ['profileId', 'targetId', 'flightId', 'leaseToken', 'query'],
   'planning.context': ['profileId', 'targetId', 'flightId', 'leaseToken', 'surface'],
   'planning.promote': ['profileId', 'targetId', 'flightId', 'leaseToken', 'candidateRef'],
   'planning.abort': ['profileId', 'flightId', 'leaseToken', 'reasonCode'],
@@ -77,15 +65,8 @@ const RPC_PARAM_KEYS = Object.freeze({
 });
 
 const CONCURRENT_METHODS = new Set([
-  'perception.snapshot',
-  'webmcp.snapshot',
-  'webmcp.catalog',
-  'webmcp.describe',
-  'planning.lookup',
-  'planning.context',
-  'planning.promote',
-  'planning.abort',
-  'planning.stats'
+  'perception.snapshot', 'webmcp.snapshot', 'webmcp.catalog', 'webmcp.describe',
+  'planning.lookup', 'planning.tools.search', 'planning.context', 'planning.promote', 'planning.abort', 'planning.stats'
 ]);
 
 export function validateRpcParams(method, params) {
@@ -119,6 +100,7 @@ async function dispatch(runtime, planning, webmcp, method, params) {
     case 'webmcp.catalog': return webmcp.catalog(params);
     case 'webmcp.describe': return webmcp.describe(params);
     case 'planning.lookup': return planning.lookup(params);
+    case 'planning.tools.search': return planning.searchTools(params);
     case 'planning.context': return planning.context(params);
     case 'planning.promote': return planning.promote(params);
     case 'planning.abort': return planning.abort(params);
@@ -140,7 +122,6 @@ export async function startRpcServer(runtime) {
     socket.setNoDelay(true);
     let buffer = '';
     let socketQueue = Promise.resolve();
-
     async function respond(request, id) {
       try {
         if (!safeEqual(request.token, token)) throw new Error('rpc_unauthorized');
@@ -151,7 +132,6 @@ export async function startRpcServer(runtime) {
         socket.write(`${JSON.stringify({ id, ok: false, error: String(error?.message || error) })}\n`);
       }
     }
-
     function drain() {
       let newline;
       while ((newline = buffer.indexOf('\n')) >= 0) {
@@ -162,24 +142,20 @@ export async function startRpcServer(runtime) {
         catch (_) { socket.write(`${JSON.stringify({ ok: false, error: 'rpc_json_invalid' })}\n`); continue; }
         const id = request.id ?? null;
         const execute = () => respond(request, id);
-        const schedule = CONCURRENT_METHODS.has(request.method)
-          ? execute
-          : () => {
-              const job = effectQueue.then(execute, execute);
-              effectQueue = job.catch(() => {});
-              return job;
-            };
+        const schedule = CONCURRENT_METHODS.has(request.method) ? execute : () => {
+          const job = effectQueue.then(execute, execute);
+          effectQueue = job.catch(() => {});
+          return job;
+        };
         socketQueue = socketQueue.then(schedule, schedule).catch(() => socket.destroy());
       }
     }
-
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8');
       if (Buffer.byteLength(buffer) > MAX_LINE_BYTES) return socket.destroy(new Error('rpc_frame_too_large'));
       try { drain(); } catch (_) { socket.destroy(); }
     });
   });
-
   try {
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(endpoint, resolve); });
   } catch (error) {
@@ -188,9 +164,7 @@ export async function startRpcServer(runtime) {
   }
   if (process.platform !== 'win32') await fs.chmod(endpoint, 0o600).catch(() => {});
   return {
-    endpoint,
-    tokenFile,
-    server,
+    endpoint, tokenFile, server,
     async close() {
       planning.clear();
       await new Promise((resolve) => server.close(resolve));
