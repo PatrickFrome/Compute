@@ -51,7 +51,7 @@ jobs:
           node --check src/rpc-server.mjs
           node --check tests/r6a-real-webmcp-smoke.mjs
           node --test tests/*.test.mjs | tee "$RUNNER_TEMP/r6a-compute-tests.log"
-          node -e 'const p=require("./protocol-v1.json"); if(p.version!=="1.5.0"||p.webmcp?.discovery_only!==true||p.webmcp?.tool_invocation_exposed!==false||p.webmcp?.annotations_are_authority!==false) process.exit(1)'
+          node -e 'const p=require("./protocol-v1.json"); const w=p.webmcp_discovery; if(p.version!=="1.5.0"||w?.stage!=="R6A_DISCOVERY_ONLY"||w?.progressive_enhancement!==true||w?.tool_invocation_exposed!==false||w?.annotations_are_hints_only!==true||w?.runtime_evaluate_used!==false) process.exit(1)'
           grep -q "'webmcp.snapshot': 'READ_ONLY'" src/rpc-server.mjs
           grep -q "WebMCP.enable" src/webmcp.mjs
           grep -q "WebMCP.disable" src/webmcp.mjs
