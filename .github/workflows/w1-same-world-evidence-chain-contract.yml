@@ -1,0 +1,77 @@
+name: W1 Same World Evidence Chain V14
+
+on:
+  push:
+    branches:
+      - work/main-roadmap-accelerators-v14
+    paths:
+      - '.github/workflows/w1-same-world-evidence-chain-contract.yml'
+      - 'controller/w1/w1_same_world_evidence_chain.py'
+      - 'tests/test_w1_same_world_evidence_chain.py'
+      - 'research/W1_SAME_WORLD_EVIDENCE_CHAIN_V14.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/w1-same-world-evidence-chain-contract.yml'
+      - 'controller/w1/w1_same_world_evidence_chain.py'
+      - 'tests/test_w1_same_world_evidence_chain.py'
+      - 'research/W1_SAME_WORLD_EVIDENCE_CHAIN_V14.md'
+
+permissions: {}
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Compile and run adversarial same-world tests
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m py_compile controller/w1/w1_same_world_evidence_chain.py
+          python3 -m unittest tests.test_w1_same_world_evidence_chain -v
+
+      - name: Enforce credential-free nonauthority contract
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow=Path('.github/workflows/w1-same-world-evidence-chain-contract.yml').read_text()
+          source=Path('controller/w1/w1_same_world_evidence_chain.py').read_text()
+
+          assert 'workflow_dispatch:' not in workflow
+          assert 'id-token: write' not in workflow
+          assert 'secrets.' not in workflow
+          assert 'aws ' not in workflow.lower()
+          assert 'psql ' not in workflow.lower()
+          assert 'supabase ' not in workflow.lower()
+          assert 'curl ' not in workflow.lower()
+          assert 'wget ' not in workflow.lower()
+          assert 'actions/upload-artifact' not in workflow
+
+          for forbidden in ('import boto3', 'import requests', 'import urllib', 'import subprocess', 'import socket'):
+              assert forbidden not in source
+          for required in (
+              'producer_attestations_authenticated": False',
+              'reboot_completion_proven": False',
+              'boot_id_transition_verified": False',
+              'database_persisted_readback_verified": False',
+              'persistent_worker_proof": False',
+              'worker_admitted": False',
+              'w1_verified": False',
+              'canonical": False',
+              'authority_effect": False',
+              'previous-link',
+              'previous-receipt',
+              'world-anchor',
+          ):
+              assert required in source, required
+          PY
