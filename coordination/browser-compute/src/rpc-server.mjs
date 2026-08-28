@@ -15,6 +15,7 @@ export const RPC_METHODS = Object.freeze([
   'context.close',
   'target.create',
   'target.list',
+  'target.semantic_snapshot',
   'target.activate',
   'target.close'
 ]);
@@ -29,6 +30,7 @@ export const RPC_METHOD_EFFECTS = Object.freeze({
   'context.close': 'LOCAL_LIFECYCLE',
   'target.create': 'LOCAL_LIFECYCLE',
   'target.list': 'READ_ONLY',
+  'target.semantic_snapshot': 'READ_ONLY',
   'target.activate': 'LOCAL_UI',
   'target.close': 'LOCAL_LIFECYCLE'
 });
@@ -50,6 +52,7 @@ async function dispatch(runtime, method, params) {
     case 'context.close': return runtime.closeContext({ profileId: params?.profileId, contextId: params?.contextId });
     case 'target.create': return runtime.createTarget(params);
     case 'target.list': return runtime.listTargets(params?.profileId, { includeRetired: params?.includeRetired === true });
+    case 'target.semantic_snapshot': return runtime.semanticSnapshot({ profileId: params?.profileId, targetId: params?.targetId, maxNodes: params?.maxNodes, taskText: params?.taskText });
     case 'target.activate': return runtime.activateTarget(params);
     case 'target.close': return runtime.closeTarget(params);
     default: throw new Error('rpc_method_forbidden');
