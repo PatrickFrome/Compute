@@ -1,0 +1,70 @@
+name: W1 AWS SSM Callback Documents Provision Contract
+
+on:
+  push:
+    branches:
+      - work/main-roadmap-accelerators-v7
+    paths:
+      - "controller/w1/aws_ssm_callback_document_provision_guard.py"
+      - "infra/w1/ssm/Metaengine-W1-Callback-Key-Enroll-H205F22.json"
+      - "infra/w1/ssm/Metaengine-W1-Execution-Marker-H205F22.json"
+      - "tests/test_w1_aws_ssm_callback_document_provision_guard.py"
+      - "tests/test_w1_callback_auth_contract.py"
+      - "research/W1_CALLBACK_DOCUMENT_PROVISIONING.md"
+      - ".github/workflows/w1-aws-ssm-callback-documents-provision-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Record exact source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git rev-parse HEAD
+          git rev-parse HEAD^{tree}
+
+      - name: Compile provisioning guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/w1/aws_ssm_callback_document_provision_guard.py
+
+      - name: Run fail-closed callback provisioning contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest -v \
+            tests.test_w1_aws_ssm_callback_document_provision_guard \
+            tests.test_w1_callback_auth_contract
+
+      - name: Prove workflow is non-authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('.github/workflows/w1-aws-ssm-callback-documents-provision-contract.yml').read_text()
+          forbidden = (
+              'aws-actions/configure-aws-credentials',
+              'supabase db push',
+              'supabase functions deploy',
+              'ssm send-command',
+              'start-session',
+              'contents: write',
+              'id-token: write',
+          )
+          for item in forbidden:
+              if item in source:
+                  raise SystemExit(f'forbidden authority surface: {item}')
+          PY
