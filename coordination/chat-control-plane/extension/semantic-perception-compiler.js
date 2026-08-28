@@ -98,13 +98,6 @@
     return x + w > 0 && y + h > 0 && x < width && y < height;
   }
 
-  function geometryBucket(bounds) {
-    if (!bounds) return "none";
-    const [x, y, w, h] = bounds;
-    const q = (n, step) => Math.round(Number(n || 0) / step);
-    return `${q(x, 64)}:${q(y, 64)}:${q(w, 32)}:${q(h, 32)}`;
-  }
-
   function center(bounds) {
     if (!bounds) return null;
     return [bounds[0] + bounds[2] / 2, bounds[1] + bounds[3] / 2];
@@ -125,9 +118,7 @@
     if (!taskTerms.length) return 0;
     const haystack = normText(`${candidate.name} ${candidate.value_summary} ${candidate.role}`);
     let score = 0;
-    for (const term of taskTerms) {
-      if (term && haystack.includes(term)) score += 8;
-    }
+    for (const term of taskTerms) if (term && haystack.includes(term)) score += 8;
     return Math.min(score, 24);
   }
 
@@ -182,22 +173,20 @@
     const editable = EDITABLE_ROLES.has(role) || boolish(attrs.contenteditable) || props.editable === true;
     const clickable = INTERACTIVE_ROLES.has(role) || CLICKABLE_TAGS.has(String(dom?.node_name || "").toUpperCase()) || props.clickable === true;
     const focusable = clickable || editable || props.focusable === true;
-    const disabled = props.disabled === true || boolish(attrs.disabled);
-    const states = {
-      disabled,
-      busy: props.busy === true,
-      expanded: props.expanded ?? null,
-      checked: props.checked ?? null,
-      selected: props.selected ?? null,
-      pressed: props.pressed ?? null,
-      required: props.required === true,
-      readonly: props.readonly === true || props.read_only === true
-    };
     const candidate = {
       role,
       name,
       value_summary: value,
-      states,
+      states: {
+        disabled: props.disabled === true || boolish(attrs.disabled),
+        busy: props.busy === true,
+        expanded: props.expanded ?? null,
+        checked: props.checked ?? null,
+        selected: props.selected ?? null,
+        pressed: props.pressed ?? null,
+        required: props.required === true,
+        readonly: props.readonly === true || props.read_only === true
+      },
       editable,
       clickable,
       focusable,
@@ -206,7 +195,6 @@
       frame_path: String(ax?.frame_id || ax?.frameId || "root"),
       name_fingerprint: stableHash(normText(name)),
       parent_signature: parentSignature(dom, domMaps),
-      geometry_bucket: geometryBucket(bounds),
       source_rank: 0,
       source_kind: dom ? "AX_DOM" : "AX",
       source_order: Number(dom?.node_index ?? 0),
@@ -228,7 +216,6 @@
     const tag = String(dom?.node_name || "").toUpperCase();
     const editable = EDITABLE_ROLES.has(role) || boolish(attrs.contenteditable);
     const clickable = INTERACTIVE_ROLES.has(role) || CLICKABLE_TAGS.has(tag);
-    const focusable = clickable || editable;
     const candidate = {
       role,
       name,
@@ -239,13 +226,12 @@
       },
       editable,
       clickable,
-      focusable,
+      focusable: clickable || editable,
       visible: visibleInViewport(bounds, viewport),
       bounds,
       frame_path: `document:${Number(dom?.document_index ?? 0)}`,
       name_fingerprint: stableHash(normText(name)),
       parent_signature: parentSignature(dom, domMaps),
-      geometry_bucket: geometryBucket(bounds),
       source_rank: 1,
       source_kind: "DOM",
       source_order: Number(dom?.node_index ?? 0),
@@ -291,7 +277,7 @@
       if (meaningful(candidate) && (candidate.clickable || candidate.editable || candidate.focusable || candidate.name)) candidates.push(candidate);
     }
 
-    return { candidates, axCount: axNodes.length, domCount: domRecords.length, viewport };
+    return { candidates, axCount: axNodes.length, domCount: domRecords.length };
   }
 
   function assignInitialIds(candidates, identity) {
@@ -305,9 +291,7 @@
       const structural = `${candidate.role}|${candidate.name_fingerprint}|${candidate.parent_signature}`;
       const ordinal = duplicateCounters.get(structural) || 0;
       duplicateCounters.set(structural, ordinal + 1);
-      candidate.structural_signature = structural;
       candidate.structural_fingerprint = stableHash(structural);
-      candidate.duplicate_ordinal = ordinal;
       const material = `${identity.target_id}|${identity.context_id}|${identity.document_epoch}|${structural}|${ordinal}`;
       candidate.semantic_id = `sem_${stableHash(material)}`;
       candidate.binding_epoch = 1;
@@ -320,7 +304,7 @@
 
   function structuralGroupKey(node) {
     if (node?.structural_fingerprint) return String(node.structural_fingerprint);
-    return stableHash(`${normalizedRole(node?.role)}|${stableHash(normText(node?.name))}|${node?.parent_signature || "root"}`);
+    return stableHash(`${normalizedRole(node?.role)}|${stableHash(normText(node?.name))}|root`);
   }
 
   function structuralGroupCounts(nodes) {
@@ -333,8 +317,7 @@
   }
 
   function continuityScore(current, previous) {
-    if (!current || !previous) return 0;
-    if (current.role !== previous.role) return 0;
+    if (!current || !previous || current.role !== previous.role) return 0;
     let score = 0.45;
     if (normText(current.name) === normText(previous.name)) score += 0.25;
     if (structuralGroupKey(current) === structuralGroupKey(previous)) score += 0.15;
@@ -353,9 +336,9 @@
     for (const node of currentNodes) {
       const direct = previousById.get(node.semantic_id);
       if (!direct) continue;
-      const sameDocument = String(previousFrame?.document_epoch ?? "") === String(identity.document_epoch);
-      if (!sameDocument) continue;
-      const sameBackend = direct.binding_evidence?.backend_dom_node_id != null &&\        String(direct.binding_evidence.backend_dom_node_id) === String(node.binding_evidence?.backend_dom_node_id ?? "");
+      if (String(previousFrame?.document_epoch ?? "") !== String(identity.document_epoch)) continue;
+      const sameBackend = direct.binding_evidence?.backend_dom_node_id != null &&
+        String(direct.binding_evidence.backend_dom_node_id) === String(node.binding_evidence?.backend_dom_node_id ?? "");
       if (sameBackend) {
         usedPrevious.add(direct.semantic_id);
         node.continuity = "EXACT_BINDING";
@@ -479,8 +462,7 @@
     const nodeBudget = Math.max(1, Math.min(MAX_NODE_BUDGET, Math.floor(Number(options.node_budget || DEFAULT_NODE_BUDGET))));
     const identity = { target_id: targetId, context_id: contextId, document_epoch: documentEpoch };
     const built = buildCandidates(input, options);
-    let allNodes = assignInitialIds(built.candidates, identity);
-    allNodes = applyContinuity(allNodes, options.previous_frame || null, identity);
+    let allNodes = applyContinuity(assignInitialIds(built.candidates, identity), options.previous_frame || null, identity);
 
     allNodes.sort((a, b) => b.relevance_score - a.relevance_score || a.source_rank - b.source_rank || a.source_order - b.source_order || a.semantic_id.localeCompare(b.semantic_id));
     const selected = allNodes.slice(0, nodeBudget);
