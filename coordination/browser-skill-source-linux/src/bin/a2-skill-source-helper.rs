@@ -26,9 +26,9 @@ fn run() -> Result<(), &'static str> {
         return Err("skill_helper_root_argument_count_invalid");
     }
 
-    launch_contract::sanitize_inherited_fds().map_err(|error| error.code())?;
+    launch_contract::sanitize_inherited_fds(None).map_err(|error| error.code())?;
     let _launch_contract =
-        launch_contract::verify_clean_inherited_fds().map_err(|error| error.code())?;
+        launch_contract::verify_clean_inherited_fds(None).map_err(|error| error.code())?;
     let root = PathBuf::from(root);
     let source = LinuxSkillSource::open(&root).map_err(|error| error.code())?;
     let _landlock = source
