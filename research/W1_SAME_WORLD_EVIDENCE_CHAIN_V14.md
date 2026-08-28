@@ -1,7 +1,7 @@
 # W1 Same-World Evidence Chain V14
 
 Date: 2026-08-28
-Status: source-only provenance fence / non-authority
+Status: source-only provenance fence / non-authority / exact source CI green
 
 ## Problem
 
@@ -142,17 +142,47 @@ Even a fully linked V14 chain keeps these false:
 
 The database-native W1 compositor remains authoritative for the eventual persistence candidate. It must independently read persisted pre/post probes, require a changed Linux `boot_id`, validate ordering against the reboot receipt, validate the post-reboot safety verification, and recompute all persisted digests.
 
-## Source-only workflow
+## Source-only workflow and exact CI
 
 `.github/workflows/w1-same-world-evidence-chain-contract.yml` is intentionally credential-free:
 
-- no `workflow_dispatch`;
+- no manual/provider execution trigger;
 - no OIDC permission;
 - no AWS/Supabase/psql/curl/wget execution;
 - no artifacts containing provider evidence;
 - only compilation, adversarial unit tests and static non-authority checks.
 
-The V14 allowlist references a future `.github/workflows/w1-aws-ssm-safety-capture-live.yml` as the dedicated safety producer. That live workflow is deliberately not created by this source-only step because producer authentication and protected Environment semantics must be researched first.
+Fourteen adversarial tests passed. The first two workflow runs were red only because the self-audit contained its own forbidden marker literally; all Python tests were already green. The self-reference was removed without changing the production guard.
+
+Exact green source checkpoint before this documentation seal:
+
+- source commit: `0efaf8c0b8af0fa74b3a7e2e7a91e8beb0f6327d`
+- source tree: `99268952288fdb7c09da7b2a3bc7d4c4b35910ae`
+- Actions run: `33193111009`
+- conclusion: `success`
+
+The V14 allowlist references a future `.github/workflows/w1-aws-ssm-safety-capture-live.yml` as the dedicated safety producer. That live workflow is deliberately not created by this source-only step because authenticated producer provenance and protected Environment semantics remain a separate trust boundary.
+
+## Live post-audit after source CI
+
+Read-only Supabase audit at `2026-08-28T17:07Z` confirmed no runtime authority was manufactured:
+
+- W1 effective status: `READY`;
+- W1 verified checkpoint: `null`;
+- roadmap definition integrity: `true`;
+- semantic head: `metaengine-h205f22-recovery-dev-20260821-cp072`;
+- Linux safety policy SHA remains `3dba3ce69e945e52ff1a2ab23e2981dd543296c72f229673bcc44c94c9e70122`;
+- backend bindings: `0`;
+- reboot receipts: `0`;
+- Linux safety verifications: `0`;
+- admitted non-revoked `cpu-local`: `0`.
+
+Namespace correction discovered during audit:
+
+- `destruktion_meta.compute_fabric_roadmap_status_h205f22()` is the actual roadmap function;
+- `public.h205f22_w1_admission_candidate_readback_v1(...)` is the persisted W1 admission compositor.
+
+Future audit code must not assume the roadmap function is in `public`.
 
 ## Adversarial cases
 
@@ -171,17 +201,30 @@ The test contract rejects:
 - reuse of one SSM command for pre and post capture;
 - reuse of one transported safety bundle for pre and post capture.
 
-## Next research / implementation boundary
+## Post-research: authenticated producer provenance
 
-After V14 source CI is green, the next strongest accelerator is authenticated producer provenance, not another self-hash wrapper.
+GitHub Artifact Attestations are available for public repositories across current GitHub plans. They use GitHub OIDC identity and signed attestations; GitHub's build-provenance implementation binds an artifact subject/digest to SLSA provenance in in-toto form and uses a short-lived Sigstore signing certificate. Required workflow permissions include `id-token: write`, `contents: read`, and `attestations: write`.
 
-Candidates to research against current product availability:
+Current GitHub guidance also recommends `actions/attest` for new implementations; `actions/attest-build-provenance` v4 is a wrapper around it.
 
-1. GitHub Artifact Attestations / `actions/attest-build-provenance` with GitHub OIDC builder identity;
-2. DSSE/in-toto statement signing and verification;
-3. Sigstore keyless verification/bundle semantics;
-4. a reusable live W1 orchestrator that generates one world anchor on protected `main` and passes its digest through provision, pre-capture, reboot and post-capture without merging provider authorities.
+References:
+- https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations
+- https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/increase-security-rating
+- https://github.com/marketplace/actions/attest-build-provenance
 
-Any authenticated link integration must still preserve separate AWS roles for provisioning, capture and reboot and must not replace changed-`boot_id` persisted-readback proof.
+This is the strongest next amplifier because it can close V14's deliberate `producer_attestations_authenticated=false` gap without giving the attestation job AWS provisioning/reboot authority.
+
+## Next implementation boundary
+
+V15 should implement a separate authenticated receipt-attestor trust domain:
+
+1. accept only already-produced, non-authority W1 receipt/link bytes;
+2. recompute their digests before attestation;
+3. use a dedicated/reusable GitHub attestation job with only `contents: read`, `id-token: write`, `attestations: write`;
+4. keep AWS credentials and provider mutation permissions out of the attestor job;
+5. verify the resulting attestation against exact repository/workflow/ref identity before allowing `producer_attestations_authenticated=true` in a later compositor;
+6. continue to keep reboot completion, boot-id transition, DB persisted-readback, admission and W1 verification false.
+
+Any later live integration must preserve separate AWS roles for provisioning, safety capture and reboot and must not replace changed-`boot_id` persisted-readback proof.
 
 W1 remains READY, not VERIFIED.
