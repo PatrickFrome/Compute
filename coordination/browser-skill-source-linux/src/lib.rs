@@ -16,6 +16,9 @@ const MAX_PACKAGE_BYTES: usize = (2 * 1024 * 1024) + (96 * 1024);
 const MAX_SKILL_BYTES: usize = 96 * 1024;
 const MAX_RESOURCE_BYTES: usize = 256 * 1024;
 const MAX_FILENAME: usize = 128;
+const MAX_ROOT_ENTRIES: usize = MAX_SKILLS;
+const MAX_SKILL_DIRECTORY_ENTRIES: usize = 8;
+const MAX_RESOURCE_DIRECTORY_ENTRIES: usize = MAX_PACKAGE_FILES;
 const RESOURCE_DIRS: [&str; 3] = ["assets", "references", "scripts"];
 
 const RESOLVE_CONFINED: ResolveFlags = ResolveFlags::BENEATH
@@ -193,10 +196,10 @@ fn read_open_file(fd: OwnedFd, max_bytes: usize) -> Result<(Vec<u8>, bool), Load
     Ok((bytes, executable))
 }
 
-fn read_directory(fd: &OwnedFd) -> Result<Vec<String>, LoaderError> {
+fn read_directory(fd: &OwnedFd, max_entries: usize) -> Result<Vec<String>, LoaderError> {
     let mut dir = Dir::read_from(fd)
         .map_err(|error| LoaderError::with_detail("skill_loader_directory_read_failed", error))?;
-    let mut names = Vec::new();
+    let mut names = Vec::with_capacity(max_entries.min(16));
     while let Some(entry) = dir.read() {
         let entry = entry.map_err(|error| {
             LoaderError::with_detail("skill_loader_directory_read_failed", error)
@@ -204,6 +207,11 @@ fn read_directory(fd: &OwnedFd) -> Result<Vec<String>, LoaderError> {
         let name = dir_entry_name(&entry)?;
         if matches!(name, "." | "..") {
             continue;
+        }
+        if names.len() == max_entries {
+            return Err(LoaderError::new(
+                "skill_loader_directory_entry_count_exceeded",
+            ));
         }
         names.push(name.to_owned());
     }
@@ -244,7 +252,7 @@ impl LinuxSkillSource {
     }
 
     pub fn list_skill_names(&self) -> Result<Vec<String>, LoaderError> {
-        let root_entries = read_directory(&self.root)?;
+        let root_entries = read_directory(&self.root, MAX_ROOT_ENTRIES)?;
         let mut names = Vec::new();
         for name in root_entries {
             if !validate_skill_name(&name) {
@@ -265,7 +273,7 @@ impl LinuxSkillSource {
             return Err(LoaderError::new("skill_loader_skill_name_invalid"));
         }
         let skill_dir = open_confined_dir(&self.root, skill_name)?;
-        let entries = read_directory(&skill_dir)?;
+        let entries = read_directory(&skill_dir, MAX_SKILL_DIRECTORY_ENTRIES)?;
         let mut package = Vec::new();
         let mut total_bytes = 0usize;
         let mut saw_skill = false;
@@ -294,7 +302,7 @@ impl LinuxSkillSource {
 
             if RESOURCE_DIRS.contains(&entry.as_str()) {
                 let resource_dir = open_confined_dir(&skill_dir, &entry)?;
-                for filename in read_directory(&resource_dir)? {
+                for filename in read_directory(&resource_dir, MAX_RESOURCE_DIRECTORY_ENTRIES)? {
                     if !validate_resource_filename(&filename) {
                         return Err(LoaderError::new("skill_loader_resource_filename_invalid"));
                     }
@@ -339,6 +347,9 @@ pub const SKILL_SOURCE_LIMITS: SkillSourceLimits = SkillSourceLimits {
     max_package_bytes: MAX_PACKAGE_BYTES,
     max_skill_bytes: MAX_SKILL_BYTES,
     max_resource_bytes: MAX_RESOURCE_BYTES,
+    max_root_entries: MAX_ROOT_ENTRIES,
+    max_skill_directory_entries: MAX_SKILL_DIRECTORY_ENTRIES,
+    max_resource_directory_entries: MAX_RESOURCE_DIRECTORY_ENTRIES,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -349,4 +360,7 @@ pub struct SkillSourceLimits {
     pub max_package_bytes: usize,
     pub max_skill_bytes: usize,
     pub max_resource_bytes: usize,
+    pub max_root_entries: usize,
+    pub max_skill_directory_entries: usize,
+    pub max_resource_directory_entries: usize,
 }

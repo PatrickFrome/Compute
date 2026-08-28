@@ -1,0 +1,103 @@
+name: A2 Browser R7F1 Bounded Enumeration
+
+on:
+  push:
+    branches:
+      - 'work/a2-browser-r7-skill-runtime*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r7f1-bounded-enumeration-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Establish source epoch and exact toolchain
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = "Linux"
+          echo "SOURCE_DATE_EPOCH=$(git -C ../.. show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+          rustc --version | tee "$RUNNER_TEMP/r7f1-rustc-version.txt"
+          test "$(rustc --version | awk '{print $2}')" = "1.98.0"
+          test -f Cargo.lock
+          cargo tree --locked | tee "$RUNNER_TEMP/r7f1-cargo-tree.txt"
+          grep -q 'rustix v1\.1\.4' "$RUNNER_TEMP/r7f1-cargo-tree.txt"
+
+      - name: R7F1 bounded traversal contracts
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --all-targets | tee "$RUNNER_TEMP/r7f1-rust-tests.log"
+          cargo test --locked --test cardinality | tee "$RUNNER_TEMP/r7f1-cardinality-tests.log"
+          grep -q 'MAX_ROOT_ENTRIES' src/lib.rs
+          grep -q 'MAX_SKILL_DIRECTORY_ENTRIES' src/lib.rs
+          grep -q 'MAX_RESOURCE_DIRECTORY_ENTRIES' src/lib.rs
+          grep -q 'skill_loader_directory_entry_count_exceeded' src/lib.rs
+          grep -q 'read_directory(&self.root, MAX_ROOT_ENTRIES)' src/lib.rs
+          grep -q 'read_directory(&skill_dir, MAX_SKILL_DIRECTORY_ENTRIES)' src/lib.rs
+          grep -q 'read_directory(&resource_dir, MAX_RESOURCE_DIRECTORY_ENTRIES)' src/lib.rs
+          ! grep -n -E -- '\bunsafe\b|std::process|Command::|\bopenat\s*\(|realpath|canonicalize|/proc/self/fd' src/lib.rs
+
+      - name: R7C R7E package and registry regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            coordination/browser-shared/tests/skill-package-identity-v1.test.mjs \
+            coordination/browser-shared/tests/skill-registry-v1.test.mjs | tee "$RUNNER_TEMP/r7f1-js-regression.log"
+
+      - name: Build deterministic R7F1 evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          EPOCH="$SOURCE_DATE_EPOCH"
+          mkdir -p dist/a2-browser-r7f1/evidence
+          cp "$RUNNER_TEMP/r7f1-rustc-version.txt" dist/a2-browser-r7f1/evidence/R7F1_RUSTC_VERSION.txt
+          cp "$RUNNER_TEMP/r7f1-cargo-tree.txt" dist/a2-browser-r7f1/evidence/R7F1_CARGO_TREE.txt
+          cp "$RUNNER_TEMP/r7f1-rust-tests.log" dist/a2-browser-r7f1/evidence/R7F1_RUST_TESTS.log
+          cp "$RUNNER_TEMP/r7f1-cardinality-tests.log" dist/a2-browser-r7f1/evidence/R7F1_CARDINALITY_TESTS.log
+          cp "$RUNNER_TEMP/r7f1-js-regression.log" dist/a2-browser-r7f1/evidence/R7F1_JS_REGRESSION.log
+          printf '%s\n' "$GITHUB_SHA" > dist/a2-browser-r7f1/evidence/SOURCE_COMMIT.txt
+          tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf dist/a2-browser-r7f1/A2_BROWSER_R7F1_BOUNDED_ENUMERATION.tar \
+            coordination/browser-skill-source-linux/Cargo.toml \
+            coordination/browser-skill-source-linux/Cargo.lock \
+            coordination/browser-skill-source-linux/rust-toolchain.toml \
+            coordination/browser-skill-source-linux/src/lib.rs \
+            coordination/browser-skill-source-linux/tests/source.rs \
+            coordination/browser-skill-source-linux/tests/cardinality.rs \
+            coordination/browser-shared/skill-package-identity-v1.mjs \
+            coordination/browser-shared/skill-registry-v1.mjs \
+            research/A2_BROWSER_R7F_LINUX_OPENAT2_SKILL_SOURCE_PRE_RESEARCH_2026-08-28.md \
+            research/A2_BROWSER_R7F1_BOUNDED_DIRECTORY_ENUMERATION_2026-08-28.md
+          sha256sum dist/a2-browser-r7f1/A2_BROWSER_R7F1_BOUNDED_ENUMERATION.tar > dist/a2-browser-r7f1/R7F1_SHA256SUMS.txt
+
+      - name: Attest R7F1 evidence provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-browser-r7f1/A2_BROWSER_R7F1_BOUNDED_ENUMERATION.tar
+
+      - name: Upload R7F1 evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-r7f1-bounded-enumeration-${{ github.sha }}
+          path: |
+            dist/a2-browser-r7f1/A2_BROWSER_R7F1_BOUNDED_ENUMERATION.tar
+            dist/a2-browser-r7f1/R7F1_SHA256SUMS.txt
+            dist/a2-browser-r7f1/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
