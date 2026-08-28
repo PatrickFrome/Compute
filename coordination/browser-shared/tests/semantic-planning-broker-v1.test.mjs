@@ -48,6 +48,42 @@ test('one cold semantic key elects exactly one external planner leader', () => {
   assert.equal(broker.snapshot().metrics.waiters, 1);
 });
 
+test('leader lease may revalidate fresh same-document context without consuming the flight', () => {
+  const broker = deterministicBroker();
+  const leader = broker.lookup({ envelope: envelope(), intentId: 'submit', actionKind: 'CLICK' });
+  const context = broker.revalidateContext({
+    flightId: leader.flight_id,
+    leaseToken: leader.lease_token,
+    freshEnvelope: envelope({ source: 'src_context', nodes: [node({ ref: 'fresh_context_ref' })] })
+  });
+  assert.equal(context.status, 'CONTEXT_REVALIDATED');
+  assert.equal(context.flight_id, leader.flight_id);
+  assert.equal(context.document_epoch, 'doc_1');
+  assert.equal(context.authority_effect, false);
+  assert.equal(context.actuation_eligible, false);
+  assert.equal(broker.snapshot().in_flight_count, 1);
+  assert.equal(broker.snapshot().metrics.context_revalidations, 1);
+});
+
+test('context revalidation rejects wrong lease and cross-document drift without destroying a valid flight', () => {
+  const broker = deterministicBroker();
+  const leader = broker.lookup({ envelope: envelope(), intentId: 'submit', actionKind: 'CLICK' });
+  assert.throws(() => broker.revalidateContext({
+    flightId: leader.flight_id,
+    leaseToken: 'lease_wrong_XXXXXXXXXXXXXXXXXXXXXXXX',
+    freshEnvelope: envelope({ source: 'src_wrong_lease' })
+  }), /semantic_planning_broker_lease_invalid/);
+  assert.equal(broker.snapshot().in_flight_count, 1);
+  assert.throws(() => broker.revalidateContext({
+    flightId: leader.flight_id,
+    leaseToken: leader.lease_token,
+    freshEnvelope: envelope({ document: 'doc_2', source: 'src_doc2' })
+  }), /semantic_planning_broker_namespace_changed/);
+  assert.equal(broker.snapshot().in_flight_count, 1);
+  assert.equal(broker.snapshot().metrics.context_revalidation_failures, 1);
+  broker.abort({ flightId: leader.flight_id, leaseToken: leader.lease_token, reasonCode: 'TEST_DONE' });
+});
+
 test('leader promotion revalidates its selected semantics against a fresh envelope and warms cache', () => {
   const broker = deterministicBroker();
   const first = envelope({ nodes: [node({ ref: 'old_ref', loc: 'loc_old' })] });
