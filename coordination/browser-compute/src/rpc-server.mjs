@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import net from 'node:net';
 import { ComputePlanningBrokerService } from './planning-broker-service.mjs';
 import { rotateControlToken, rpcEndpoint } from './security.mjs';
+import { ComputeWebMcpService } from './webmcp-service.mjs';
 
 const MAX_LINE_BYTES = 1024 * 1024;
 
@@ -17,6 +18,7 @@ export const RPC_METHODS = Object.freeze([
   'target.create',
   'target.list',
   'perception.snapshot',
+  'webmcp.snapshot',
   'planning.lookup',
   'planning.promote',
   'planning.abort',
@@ -36,6 +38,7 @@ export const RPC_METHOD_EFFECTS = Object.freeze({
   'target.create': 'LOCAL_LIFECYCLE',
   'target.list': 'READ_ONLY',
   'perception.snapshot': 'READ_ONLY',
+  'webmcp.snapshot': 'READ_ONLY',
   'planning.lookup': 'LOCAL_COORDINATION',
   'planning.promote': 'LOCAL_COORDINATION',
   'planning.abort': 'LOCAL_COORDINATION',
@@ -55,6 +58,7 @@ const RPC_PARAM_KEYS = Object.freeze({
   'target.create': ['profileId', 'targetId', 'contextId', 'role', 'url'],
   'target.list': ['profileId', 'includeRetired'],
   'perception.snapshot': ['profileId', 'targetId'],
+  'webmcp.snapshot': ['profileId', 'targetId'],
   'planning.lookup': ['profileId', 'targetId', 'intentId', 'actionKind'],
   'planning.promote': ['profileId', 'targetId', 'flightId', 'leaseToken', 'candidateRef'],
   'planning.abort': ['profileId', 'flightId', 'leaseToken', 'reasonCode'],
@@ -65,6 +69,7 @@ const RPC_PARAM_KEYS = Object.freeze({
 
 const CONCURRENT_METHODS = new Set([
   'perception.snapshot',
+  'webmcp.snapshot',
   'planning.lookup',
   'planning.promote',
   'planning.abort',
@@ -85,7 +90,7 @@ function safeEqual(a, b) {
   return aa.length === bb.length && crypto.timingSafeEqual(aa, bb);
 }
 
-async function dispatch(runtime, planning, method, params) {
+async function dispatch(runtime, planning, webmcp, method, params) {
   params = validateRpcParams(method, params);
   switch (method) {
     case 'runtime.health': return runtime.health();
@@ -98,6 +103,7 @@ async function dispatch(runtime, planning, method, params) {
     case 'target.create': return runtime.createTarget(params);
     case 'target.list': return runtime.listTargets(params?.profileId, { includeRetired: params?.includeRetired === true });
     case 'perception.snapshot': return runtime.snapshotTarget(params);
+    case 'webmcp.snapshot': return webmcp.snapshot(params);
     case 'planning.lookup': return planning.lookup(params);
     case 'planning.promote': return planning.promote(params);
     case 'planning.abort': return planning.abort(params);
@@ -112,6 +118,7 @@ export async function startRpcServer(runtime) {
   const { token, file: tokenFile } = await rotateControlToken(runtime.stateRoot);
   const endpoint = rpcEndpoint(runtime.stateRoot);
   const planning = new ComputePlanningBrokerService(runtime);
+  const webmcp = new ComputeWebMcpService(runtime);
   if (process.platform !== 'win32') await fs.rm(endpoint, { force: true }).catch(() => {});
   let effectQueue = Promise.resolve();
   const server = net.createServer((socket) => {
@@ -123,7 +130,7 @@ export async function startRpcServer(runtime) {
       try {
         if (!safeEqual(request.token, token)) throw new Error('rpc_unauthorized');
         if (!RPC_METHODS.includes(String(request.method || ''))) throw new Error('rpc_method_forbidden');
-        const result = await dispatch(runtime, planning, request.method, request.params || {});
+        const result = await dispatch(runtime, planning, webmcp, request.method, request.params || {});
         socket.write(`${JSON.stringify({ id, ok: true, effect_class: RPC_METHOD_EFFECTS[request.method], web_authority_effect: false, result })}\n`);
       } catch (error) {
         socket.write(`${JSON.stringify({ id, ok: false, error: String(error?.message || error) })}\n`);
