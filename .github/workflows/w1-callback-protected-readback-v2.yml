@@ -1,23 +1,16 @@
-name: W1 Callback Protected Readback V2
+name: W1 Callback Protected Readback V2 (Legacy Contract Only)
 
 on:
   push:
     branches:
-      - work/main-roadmap-accelerators-v10
+      - work/main-roadmap-accelerators-v12
     paths:
       - "controller/w1/w1_callback_provider_readback_guard_v2.py"
       - "controller/w1/w1_callback_provider_readback_guard.py"
-      - "controller/w1/w1_callback_db_readback.sql"
       - "controller/w1/w1_callback_ingress_readiness_guard.py"
       - "tests/test_w1_callback_provider_readback_guard_v2.py"
-      - "research/W1_CALLBACK_AUTHENTICATED_ABSENCE_READBACK.md"
       - ".github/workflows/w1-callback-protected-readback-v2.yml"
-  workflow_dispatch:
-    inputs:
-      confirmation:
-        description: "Type READBACK_W1_CALLBACK_V2_ONLY"
-        required: true
-        type: string
+      - ".github/workflows/w1-callback-protected-binding.yml"
 
 permissions: {}
 
@@ -33,258 +26,24 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Compile and test authenticated-inventory readback contracts
+      - name: Verify legacy v2 is contract-only and run inventory-readback tests
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          git rev-parse HEAD
-          git rev-parse HEAD^{tree}
           python3 -m py_compile \
-            controller/w1/w1_callback_ingress_readiness_guard.py \
+            controller/w1/w1_callback_provider_readback_guard_v2.py \
             controller/w1/w1_callback_provider_readback_guard.py \
-            controller/w1/w1_callback_provider_readback_guard_v2.py
-          python3 -m unittest -v \
-            tests.test_w1_callback_provider_readback_guard \
-            tests.test_w1_callback_provider_readback_guard_v2
-
-  protected-readback:
-    if: github.event_name == 'workflow_dispatch'
-    needs: contract-tests
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    environment: w1-callback-readback
-    permissions:
-      contents: read
-      id-token: write
-    env:
-      SUPABASE_PROJECT_REF: xpeibufgzjknrhbhpffp
-      AWS_ACCOUNT_ID: ${{ vars.W1_AWS_ACCOUNT_ID }}
-      AWS_REGION: ${{ vars.W1_AWS_REGION }}
-      AWS_ROLE_ARN: ${{ vars.W1_AWS_READBACK_ROLE_ARN }}
-      AWS_OIDC_SUB: ${{ vars.W1_AWS_OIDC_SUB }}
-      EDGE_SLUG: w1-execution-callback
-      CONFIRMATION: ${{ inputs.confirmation }}
-    steps:
-      - name: Checkout exact main readback revision
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-
-      - name: Require protected main readback-only dispatch
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
-          [[ "$CONFIRMATION" == 'READBACK_W1_CALLBACK_V2_ONLY' ]]
-          [[ "$SUPABASE_PROJECT_REF" == 'xpeibufgzjknrhbhpffp' ]]
-          [[ "$GITHUB_REPOSITORY" == 'PatrickFrome/Compute' ]]
-          [[ "$GITHUB_REPOSITORY_ID" == '1341371143' ]]
-          [[ "$GITHUB_REPOSITORY_OWNER_ID" == '20597814' ]]
-          [[ "$AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]
-          [[ "$AWS_REGION" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]]
-          [[ "$AWS_ROLE_ARN" =~ ^arn:aws(-[a-z]+)?:iam::${AWS_ACCOUNT_ID}:role/[A-Za-z0-9+=,.@_/-]+$ ]]
-          test -n "$AWS_OIDC_SUB"
-          mkdir -p evidence
-          echo "TREE_SHA=$(git rev-parse HEAD^{tree})" >> "$GITHUB_ENV"
-
-      - name: Validate actual GitHub OIDC claims before AWS STS
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$ACTIONS_ID_TOKEN_REQUEST_URL"
-          test -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN"
-          curl --fail-with-body --silent --show-error --location \
-            -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
-            > evidence/github-oidc-token-response.json
+            controller/w1/w1_callback_ingress_readiness_guard.py
+          python3 -m unittest -v tests.test_w1_callback_provider_readback_guard_v2
           python3 - <<'PY'
-          import base64, json, os
-          raw=json.load(open('evidence/github-oidc-token-response.json'))
-          token=raw.get('value')
-          if not isinstance(token,str) or token.count('.') != 2:
-              raise SystemExit('github_oidc_token_invalid')
-          payload=token.split('.')[1]
-          payload += '=' * (-len(payload) % 4)
-          claims=json.loads(base64.urlsafe_b64decode(payload.encode()))
-          expected={
-              'aud':'sts.amazonaws.com',
-              'sub':os.environ['AWS_OIDC_SUB'],
-              'repository':'PatrickFrome/Compute',
-              'repository_id':'1341371143',
-              'repository_owner_id':'20597814',
-              'environment':'w1-callback-readback',
-              'ref':'refs/heads/main',
-          }
-          for key,value in expected.items():
-              if claims.get(key) != value:
-                  raise SystemExit(f'github_oidc_claim_mismatch:{key}')
+          from pathlib import Path
+          raw=Path('.github/workflows/w1-callback-protected-readback-v2.yml').read_text()
+          for forbidden in ('workflow_dispatch:', 'id-token: write', 'secrets.W1_',
+                            'configure-aws-credentials', 'ACTIONS_ID_TOKEN_REQUEST',
+                            'aws sts assume-role-with-web-identity', 'W1_AWS_OIDC_SUB'):
+              assert forbidden not in raw, forbidden
+          current=Path('.github/workflows/w1-callback-protected-binding.yml').read_text()
+          assert 'workflow_dispatch:' in current
+          assert 'actions/oidc/customization/sub' in current
           PY
-          rm -f evidence/github-oidc-token-response.json
-
-      - name: Capture Postgres callback privilege state in a read-only transaction
-        env:
-          DATABASE_URL: ${{ secrets.W1_SUPABASE_DB_READONLY_URL }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$DATABASE_URL"
-          psql "$DATABASE_URL" -X -A -t -q -v ON_ERROR_STOP=1 \
-            -f controller/w1/w1_callback_db_readback.sql > evidence/db.json
-          python3 -m json.tool evidence/db.json >/dev/null
-
-      - name: Capture Edge authenticated inventory
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.W1_SUPABASE_MGMT_READ_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$SUPABASE_ACCESS_TOKEN"
-          curl --fail-with-body --silent --show-error --location \
-            -H 'Accept: application/json' \
-            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
-            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_REF}/functions" \
-            > evidence/edge-inventory.json
-          EDGE_PRESENT="$(python3 - <<'PY'
-          import json, os
-          value=json.load(open('evidence/edge-inventory.json'))
-          if not isinstance(value,list): raise SystemExit('edge_inventory_not_array')
-          matches=[x for x in value if isinstance(x,dict) and x.get('slug') == os.environ['EDGE_SLUG']]
-          if len(matches) > 1: raise SystemExit('edge_inventory_duplicate_slug')
-          print('1' if matches else '0')
-          PY
-          )"
-          if [[ "$EDGE_PRESENT" == '1' ]]; then
-            curl --fail-with-body --silent --show-error --location \
-              -H 'Accept: application/json' \
-              -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
-              "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_REF}/functions/${EDGE_SLUG}" \
-              > evidence/edge-metadata.json
-            curl --fail-with-body --silent --show-error --location \
-              -H 'Accept: application/json' \
-              -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
-              "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_REF}/functions/${EDGE_SLUG}/body" \
-              > evidence/edge-body.json
-          else
-            printf '%s\n' 'null' > evidence/edge-metadata.json
-            printf '%s\n' 'null' > evidence/edge-body.json
-          fi
-          EDGE_OBSERVED_AT="$(date -u +'%Y-%m-%dT%H:%M:%S.%6NZ')"
-          echo "EDGE_OBSERVED_AT=$EDGE_OBSERVED_AT" >> "$GITHUB_ENV"
-          python3 -m json.tool evidence/edge-inventory.json >/dev/null
-          python3 -m json.tool evidence/edge-metadata.json >/dev/null
-          python3 -m json.tool evidence/edge-body.json >/dev/null
-
-      - name: Build exact AWS read-only inline session policy
-        id: aws-policy
-        shell: bash
-        run: |
-          set -euo pipefail
-          POLICY="$(python3 - <<'PY'
-          import json, os
-          account=os.environ['AWS_ACCOUNT_ID']; region=os.environ['AWS_REGION']
-          partition='aws-us-gov' if region.startswith('us-gov-') else ('aws-cn' if region.startswith('cn-') else 'aws')
-          names=['Metaengine-W1-Callback-Key-Enroll-H205F22','Metaengine-W1-Execution-Marker-H205F22']
-          resources=[f'arn:{partition}:ssm:{region}:{account}:document/{name}' for name in names]
-          policy={'Version':'2012-10-17','Statement':[
-              {'Effect':'Allow','Action':['ssm:ListDocuments'],'Resource':'*'},
-              {'Effect':'Allow','Action':['ssm:DescribeDocument','ssm:GetDocument','ssm:DescribeDocumentPermission'],'Resource':resources},
-          ]}
-          print(json.dumps(policy,separators=(',',':')))
-          PY
-          )"
-          echo "policy=$POLICY" >> "$GITHUB_OUTPUT"
-
-      - name: Configure 15-minute AWS OIDC read-only credentials as step outputs only
-        id: aws-creds
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
-        with:
-          role-to-assume: ${{ vars.W1_AWS_READBACK_ROLE_ARN }}
-          aws-region: ${{ vars.W1_AWS_REGION }}
-          allowed-account-ids: ${{ vars.W1_AWS_ACCOUNT_ID }}
-          role-session-name: w1-callback-readback-v2-${{ github.run_id }}-${{ github.run_attempt }}
-          role-duration-seconds: 900
-          mask-aws-account-id: true
-          output-env-credentials: false
-          output-credentials: true
-          unset-current-credentials: true
-          inline-session-policy: ${{ steps.aws-policy.outputs.policy }}
-
-      - name: Capture AWS authenticated document inventories
-        env:
-          AWS_ACCESS_KEY_ID: ${{ steps.aws-creds.outputs.aws-access-key-id }}
-          AWS_SECRET_ACCESS_KEY: ${{ steps.aws-creds.outputs.aws-secret-access-key }}
-          AWS_SESSION_TOKEN: ${{ steps.aws-creds.outputs.aws-session-token }}
-          AWS_REGION: ${{ vars.W1_AWS_REGION }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          capture_document() {
-            local label="$1" name="$2"
-            aws ssm list-documents \
-              --filters Key=Owner,Values=Self Key=Name,Values="$name" \
-              --output json > "evidence/aws-${label}-inventory.json"
-            local present
-            present="$(python3 - "$label" "$name" <<'PY'
-          import json,sys
-          label,name=sys.argv[1:]
-          value=json.load(open(f'evidence/aws-{label}-inventory.json'))
-          identifiers=value.get('DocumentIdentifiers')
-          if not isinstance(identifiers,list): raise SystemExit('aws_inventory_identifiers_invalid')
-          exact=[x for x in identifiers if isinstance(x,dict) and x.get('Name') == name]
-          if len(exact) > 1: raise SystemExit('aws_inventory_duplicate_exact_name')
-          print('1' if exact else '0')
-          PY
-            )"
-            if [[ "$present" == '1' ]]; then
-              aws ssm describe-document --name "$name" --document-version 1 --output json > "evidence/aws-${label}-describe.json"
-              aws ssm get-document --name "$name" --document-version 1 --document-format JSON --output json > "evidence/aws-${label}-get.json"
-              aws ssm describe-document-permission --name "$name" --permission-type Share --output json > "evidence/aws-${label}-permission.json"
-            fi
-          }
-          capture_document key_enrollment Metaengine-W1-Callback-Key-Enroll-H205F22
-          capture_document execution_marker Metaengine-W1-Execution-Marker-H205F22
-          AWS_OBSERVED_AT="$(date -u +'%Y-%m-%dT%H:%M:%S.%6NZ')"
-          echo "AWS_OBSERVED_AT=$AWS_OBSERVED_AT" >> "$GITHUB_ENV"
-
-      - name: Normalize authenticated provider readback after AWS credentials leave scope
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json, os
-          docs={}
-          for label in ('key_enrollment','execution_marker'):
-              with open(f'evidence/aws-{label}-inventory.json') as f:
-                  item={'inventory':json.load(f)}
-              for kind in ('describe','get','permission'):
-                  path=f'evidence/aws-{label}-{kind}.json'
-                  if os.path.exists(path):
-                      with open(path) as f: item[kind]=json.load(f)
-              docs[label]=item
-          with open('evidence/aws.json','w') as f:
-              json.dump({'account_id':os.environ['AWS_ACCOUNT_ID'],'documents':docs},f,separators=(',',':'))
-          PY
-          python3 controller/w1/w1_callback_provider_readback_guard_v2.py \
-            --git-sha "$GITHUB_SHA" \
-            --tree-sha "$TREE_SHA" \
-            --db evidence/db.json \
-            --edge-inventory evidence/edge-inventory.json \
-            --edge-metadata evidence/edge-metadata.json \
-            --edge-body evidence/edge-body.json \
-            --edge-observed-at "$EDGE_OBSERVED_AT" \
-            --aws evidence/aws.json \
-            --aws-observed-at "$AWS_OBSERVED_AT" \
-            --output evidence/w1-callback-readback-v2.json
-          python3 -m json.tool evidence/w1-callback-readback-v2.json >/dev/null
-          rm -f evidence/db.json evidence/edge-inventory.json evidence/edge-metadata.json evidence/edge-body.json evidence/aws*.json
-
-      - name: Upload non-secret normalized readiness readback
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: w1-callback-readback-v2-${{ github.run_id }}-${{ github.run_attempt }}
-          path: evidence/w1-callback-readback-v2.json
-          archive: false
-          if-no-files-found: error
-          overwrite: false
-          retention-days: 30
