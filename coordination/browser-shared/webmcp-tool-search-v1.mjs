@@ -19,12 +19,18 @@ function normalizeText(value) {
     .trim();
 }
 
-function queryTerms(value) {
+function stableStringCompare(left, right) {
+  const a = String(left ?? '');
+  const b = String(right ?? '');
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+export function validateWebMcpToolSearchQuery(value) {
   if (typeof value !== 'string' || value.length < 1 || value.length > MAX_QUERY_CHARS) throw new Error('webmcp_tool_search_query_invalid');
   const normalized = normalizeText(value);
   const terms = [...new Set(normalized.match(/[\p{L}\p{N}_:-]{2,64}/gu) || [])].slice(0, MAX_QUERY_TERMS);
   if (!normalized || terms.length === 0) throw new Error('webmcp_tool_search_query_invalid');
-  return { normalized, terms };
+  return Object.freeze({ normalized, terms: Object.freeze(terms) });
 }
 
 function toolsetFingerprint(index) {
@@ -128,11 +134,11 @@ export function compileWebMcpToolSearchHandle(catalog) {
 export function searchWebMcpRoutingIndex(index, queryValue) {
   const source = assertWebMcpRoutingIndex(index);
   if (source.status !== 'SUPPORTED' || source.tool_count < 1) throw new Error('webmcp_tool_search_unavailable');
-  const query = queryTerms(queryValue);
+  const query = validateWebMcpToolSearchQuery(queryValue);
   const scored = source.tools
     .map((tool) => ({ tool, score: scoreTool(tool, query) }))
     .filter((row) => row.score > 0)
-    .sort((a, b) => b.score - a.score || `${a.tool.name}\u0000${a.tool.tool_ref}`.localeCompare(`${b.tool.name}\u0000${b.tool.tool_ref}`, 'en'))
+    .sort((a, b) => b.score - a.score || stableStringCompare(`${a.tool.name}\u0000${a.tool.tool_ref}`, `${b.tool.name}\u0000${b.tool.tool_ref}`))
     .slice(0, MAX_RESULTS)
     .map((row) => compactMatch(row.tool, row.score));
 
