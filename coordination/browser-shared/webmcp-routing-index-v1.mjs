@@ -7,6 +7,12 @@ const MAX_ROUTING_INDEX_BYTES = 48 * 1024;
 const MAX_SIZE_FIXPOINT_PASSES = 8;
 const ENCODER = new TextEncoder();
 
+function stableStringCompare(left, right) {
+  const a = String(left ?? '');
+  const b = String(right ?? '');
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 function cleanToolRef(value) {
   const text = String(value ?? '').trim();
   if (!/^tool_[a-f0-9]{16}$/.test(text)) throw new Error('webmcp_routing_tool_ref_invalid');
@@ -108,7 +114,7 @@ export function compileWebMcpRoutingIndex(catalog) {
   }
 
   const tools = source.tools.map(compactTool).sort((a, b) =>
-    `${a.name}\u0000${a.tool_ref}`.localeCompare(`${b.name}\u0000${b.tool_ref}`, 'en')
+    stableStringCompare(`${a.name}\u0000${a.tool_ref}`, `${b.name}\u0000${b.tool_ref}`)
   );
   return finalize({
     ...common,
