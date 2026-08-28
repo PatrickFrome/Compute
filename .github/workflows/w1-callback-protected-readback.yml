@@ -58,6 +58,7 @@ jobs:
       AWS_ACCOUNT_ID: ${{ vars.W1_AWS_ACCOUNT_ID }}
       AWS_REGION: ${{ vars.W1_AWS_REGION }}
       AWS_ROLE_ARN: ${{ vars.W1_AWS_READBACK_ROLE_ARN }}
+      AWS_OIDC_SUB: ${{ vars.W1_AWS_OIDC_SUB }}
       EDGE_SLUG: w1-execution-callback
       CONFIRMATION: ${{ inputs.confirmation }}
     steps:
@@ -71,13 +72,53 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_REPOSITORY" == 'PatrickFrome/Compute' ]]
+          [[ "$GITHUB_REPOSITORY_ID" == '1341371143' ]]
+          [[ "$GITHUB_REPOSITORY_OWNER_ID" == '20597814' ]]
           [[ "$CONFIRMATION" == 'READBACK_W1_CALLBACK_ONLY' ]]
           [[ "$SUPABASE_PROJECT_REF" == 'xpeibufgzjknrhbhpffp' ]]
+          test -n "$AWS_OIDC_SUB"
           [[ "$AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]
           [[ "$AWS_REGION" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]]
           [[ "$AWS_ROLE_ARN" =~ ^arn:aws(-[a-z]+)?:iam::${AWS_ACCOUNT_ID}:role/[A-Za-z0-9+=,.@_/-]+$ ]]
           mkdir -p evidence
           echo "TREE_SHA=$(git rev-parse HEAD^{tree})" >> "$GITHUB_ENV"
+
+      - name: Validate actual GitHub OIDC claims before AWS STS
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          test -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
+          curl --fail-with-body --silent --show-error --location \
+            -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
+            > evidence/github-oidc-token-response.json
+          python3 - <<'PY'
+          import base64, json, os
+          with open('evidence/github-oidc-token-response.json') as f:
+              token=json.load(f).get('value')
+          if not isinstance(token,str) or token.count('.') != 2:
+              raise SystemExit('OIDC token response invalid')
+          payload=token.split('.')[1]
+          payload += '=' * (-len(payload) % 4)
+          claims=json.loads(base64.urlsafe_b64decode(payload.encode()))
+          expected={
+              'aud':'sts.amazonaws.com',
+              'sub':os.environ['AWS_OIDC_SUB'],
+              'repository':'PatrickFrome/Compute',
+              'repository_id':'1341371143',
+              'repository_owner_id':'20597814',
+              'environment':'w1-callback-readback',
+              'ref':'refs/heads/main',
+          }
+          for key,value in expected.items():
+              if claims.get(key) != value:
+                  raise SystemExit(f'OIDC claim mismatch: {key}')
+          print('OIDC_CLAIMS_MATCH_PROTECTED_READBACK_CONTEXT')
+          PY
+          rm -f evidence/github-oidc-token-response.json
 
       - name: Capture Postgres callback privilege state in a read-only transaction
         env:
