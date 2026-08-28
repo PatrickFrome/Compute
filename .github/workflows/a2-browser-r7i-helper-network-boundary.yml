@@ -9,6 +9,7 @@ on:
       - 'coordination/browser-shared/**'
       - 'research/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY_PRE_RESEARCH_2026-08-28.md'
       - 'research/A2_BROWSER_R7I_INHERITED_FD_SANITIZATION_RESEARCH_2026-08-28.md'
+      - 'research/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY_POST_RESEARCH_2026-08-28.md'
       - '.github/workflows/a2-browser-r7i-helper-network-boundary.yml'
   workflow_dispatch:
 
@@ -33,7 +34,7 @@ jobs:
           test "$(uname -s)" = "Linux"
           echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
 
-      - name: Resolve and audit candidate dependency closure
+      - name: Verify sealed dependency closure
         shell: bash
         working-directory: coordination/browser-skill-source-linux
         run: |
@@ -41,8 +42,10 @@ jobs:
           rustc --version | tee "$RUNNER_TEMP/r7i-rustc-version.txt"
           cargo --version | tee "$RUNNER_TEMP/r7i-cargo-version.txt"
           test "$(rustc --version | awk '{print $2}')" = "1.98.0"
-          cargo generate-lockfile
-          cp Cargo.lock "$RUNNER_TEMP/r7i-generated-Cargo.lock"
+          test -f Cargo.lock
+          sha256sum Cargo.lock | tee "$RUNNER_TEMP/r7i-source-lock-sha256.txt"
+          test "$(awk '{print $1}' "$RUNNER_TEMP/r7i-source-lock-sha256.txt")" = \
+            "ffdf4d85f832e92b20960ecdbc581103a113cf9ddfa93fa319ba124f21a3d003"
           cargo tree --locked | tee "$RUNNER_TEMP/r7i-cargo-tree.txt"
           python3 - <<'PY'
           import tomllib
@@ -84,7 +87,7 @@ jobs:
           ]:
               if expected not in packages:
                   raise SystemExit(f'missing exact dependency {expected}')
-          if len(packages) > 24:
+          if len(packages) != 18:
               raise SystemExit(f'unexpected dependency closure cardinality: {len(packages)}')
           PY
 
@@ -146,7 +149,7 @@ jobs:
             coordination/browser-shared/tests/skill-package-identity-v1.test.mjs \
             coordination/browser-shared/tests/skill-registry-v1.test.mjs | tee "$RUNNER_TEMP/r7i-js-regression.log"
 
-      - name: Build deterministic candidate evidence
+      - name: Build deterministic sealed evidence
         shell: bash
         run: |
           set -euo pipefail
@@ -154,7 +157,7 @@ jobs:
           mkdir -p dist/a2-browser-r7i/evidence
           cp "$RUNNER_TEMP/r7i-rustc-version.txt" dist/a2-browser-r7i/evidence/R7I_RUSTC_VERSION.txt
           cp "$RUNNER_TEMP/r7i-cargo-version.txt" dist/a2-browser-r7i/evidence/R7I_CARGO_VERSION.txt
-          cp "$RUNNER_TEMP/r7i-generated-Cargo.lock" dist/a2-browser-r7i/evidence/R7I_GENERATED_CARGO_LOCK.txt
+          cp "$RUNNER_TEMP/r7i-source-lock-sha256.txt" dist/a2-browser-r7i/evidence/R7I_SOURCE_CARGO_LOCK_SHA256.txt
           cp "$RUNNER_TEMP/r7i-cargo-tree.txt" dist/a2-browser-r7i/evidence/R7I_CARGO_TREE.txt
           cp "$RUNNER_TEMP/r7i-rust-tests.log" dist/a2-browser-r7i/evidence/R7I_RUST_TESTS.log
           cp "$RUNNER_TEMP/r7i-network-boundary.log" dist/a2-browser-r7i/evidence/R7I_NETWORK_BOUNDARY.log
@@ -165,11 +168,12 @@ jobs:
           cp "$RUNNER_TEMP/r7i-js-regression.log" dist/a2-browser-r7i/evidence/R7I_JS_REGRESSION.log
           printf '%s\n' "$GITHUB_SHA" > dist/a2-browser-r7i/evidence/SOURCE_COMMIT.txt
           cat > dist/a2-browser-r7i/evidence/R7I_CLAIMS.json <<'JSON'
-          {"close_range_unshare":true,"unexpected_inherited_fd_sanitized":true,"post_sanitize_fd_verification":true,"audited_unsafe_close_range_seam":true,"seccomp_network_denylist_installed":true,"udp_socket_creation_denied":true,"all_socket_creation_denied":true,"io_uring_disabled":true,"full_seccomp_allowlist":false,"network_namespace_isolation":false,"source_controlled_cargo_lock":false,"node_integration":false,"browser_authority":false}
+          {"close_range_unshare":true,"unexpected_inherited_fd_sanitized":true,"post_sanitize_fd_verification":true,"audited_unsafe_close_range_seam":true,"seccomp_network_denylist_installed":true,"udp_socket_creation_denied":true,"all_socket_creation_denied":true,"io_uring_disabled":true,"full_seccomp_allowlist":false,"network_namespace_isolation":false,"source_controlled_cargo_lock":true,"node_integration":false,"browser_authority":false}
           JSON
           tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
-            -cf dist/a2-browser-r7i/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY_CANDIDATE.tar \
+            -cf dist/a2-browser-r7i/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY.tar \
             coordination/browser-skill-source-linux/Cargo.toml \
+            coordination/browser-skill-source-linux/Cargo.lock \
             coordination/browser-skill-source-linux/rust-toolchain.toml \
             coordination/browser-skill-source-linux/src/lib.rs \
             coordination/browser-skill-source-linux/src/sandbox.rs \
@@ -183,21 +187,22 @@ jobs:
             coordination/browser-skill-source-linux/tests/sandbox.rs \
             coordination/browser-skill-source-linux/tests/network_boundary.rs \
             research/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY_PRE_RESEARCH_2026-08-28.md \
-            research/A2_BROWSER_R7I_INHERITED_FD_SANITIZATION_RESEARCH_2026-08-28.md
-          sha256sum dist/a2-browser-r7i/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY_CANDIDATE.tar \
+            research/A2_BROWSER_R7I_INHERITED_FD_SANITIZATION_RESEARCH_2026-08-28.md \
+            research/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY_POST_RESEARCH_2026-08-28.md
+          sha256sum dist/a2-browser-r7i/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY.tar \
             > dist/a2-browser-r7i/R7I_SHA256SUMS.txt
 
-      - name: Attest candidate build provenance
+      - name: Attest sealed build provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373
         with:
-          subject-path: dist/a2-browser-r7i/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY_CANDIDATE.tar
+          subject-path: dist/a2-browser-r7i/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY.tar
 
-      - name: Upload R7I candidate evidence
+      - name: Upload R7I sealed evidence
         uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1
         with:
-          name: a2-browser-r7i-network-boundary-${{ github.sha }}
+          name: a2-browser-r7i-network-boundary-seal-${{ github.sha }}
           path: |
-            dist/a2-browser-r7i/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY_CANDIDATE.tar
+            dist/a2-browser-r7i/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY.tar
             dist/a2-browser-r7i/R7I_SHA256SUMS.txt
             dist/a2-browser-r7i/evidence/
           if-no-files-found: error
