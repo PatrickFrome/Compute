@@ -1,0 +1,164 @@
+name: A2 Browser B4 Perception Parity
+
+on:
+  push:
+    branches:
+      - 'work/a2-browser-b4-perception-parity*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  b4-parity-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Establish source epoch and Node runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+          node -e 'const m=Number(process.versions.node.split(".")[0]); if (m < 22) process.exit(1); console.log(process.version)'
+
+      - name: Shared B4 parity and trust contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check coordination/browser-shared/semantic-perception-compiler.mjs
+          node --check coordination/browser-shared/perception-envelope-v1.mjs
+          node --check coordination/browser-compute/src/perception-envelope.mjs
+          node --check coordination/browser-shared/tests/perception-envelope-v1.test.mjs
+          node --test coordination/browser-shared/tests/perception-envelope-v1.test.mjs
+          ! grep -n -E 'Runtime\.evaluate|eval\(|new Function|cookie|authorization_header|storage_state' coordination/browser-shared/perception-envelope-v1.mjs coordination/browser-compute/src/perception-envelope.mjs
+          grep -q 'PAGE_MAIN_LOADER_SANDWICH_V1' coordination/browser-compute/src/perception-envelope.mjs
+          grep -q 'tainted_page_data: true' coordination/browser-shared/perception-envelope-v1.mjs
+          grep -q 'actuation_eligible: false' coordination/browser-shared/perception-envelope-v1.mjs
+
+      - name: Extension R4 compiler and physical safety regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/a2_build_extension.py
+          node tests/a2_r4_semantic_perception_compiler_lab.mjs
+          node tests/a2_v071_release_contract_lab.mjs
+          node tests/a2_v070_target_registry_lab.mjs
+          node tests/a2_v070_target_observability_lab.mjs
+          node tests/a2_v068_supervisor_reconciliation_lab.mjs
+          node tests/a2_v067_supervisor_prompt_ready_lab.mjs
+          node tests/a2_v067_supervisor_session_singleton_lab.mjs
+          node tests/a2_v064_supervisor_chat_guard_lab.mjs
+          node tests/a2_v063_bridge_disarm_lab.mjs
+          node tests/a2_v063_remote_authority_lab.mjs
+          node tests/a2_v060_debugger_broker_lab.mjs
+          node tests/a2_v060_perception_lab.mjs
+          node tests/a2_v060_oopif_perception_lab.mjs
+          node tests/a2_v060_semantic_actions_lab.mjs
+
+      - name: Compute Browser B2 B3 R4 regressions
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          find src tests -type f -name '*.mjs' ! -name 'b4-real-envelope-smoke.mjs' -print0 | sort -z | xargs -0 -n1 node --check
+          node --test tests/*.test.mjs
+          ! grep -R -n -E -- '--remote-debugging-port|--remote-debugging-address|/json/version|Runtime\.evaluate' src
+          grep -q "Target.attachToTarget" src/session-scheduler.mjs
+          grep -q "flatten: true" src/session-scheduler.mjs
+          grep -q "DOMSnapshot.captureSnapshot" src/perception.mjs
+          grep -q "Accessibility.getFullAXTree" src/perception.mjs
+
+      - name: Real Chromium Compute Browser and B4 envelope smoke
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          printf 'A2_CHROME_EXECUTABLE=%s\n' "$CHROME"
+          readlink -f "$CHROME" || true
+          "$CHROME" --version || true
+          export A2_CHROME_EXECUTABLE="$CHROME"
+          export CI=true
+          export A2_CI_ALLOW_NO_SANDBOX=1
+          export A2_SELF_TEST_REMOVE_STATE=1
+
+          export A2_COMPUTE_STATE_ROOT="$RUNNER_TEMP/a2-compute-browser-b4-base"
+          node src/cli.mjs self-test | tee "$RUNNER_TEMP/a2-compute-browser-b4-base.json"
+          grep -q '"ok":true' "$RUNNER_TEMP/a2-compute-browser-b4-base.json"
+          grep -q '"semantic_snapshot_verified":true' "$RUNNER_TEMP/a2-compute-browser-b4-base.json"
+          grep -q '"debug_transport":"native_pipe_b3"' "$RUNNER_TEMP/a2-compute-browser-b4-base.json"
+
+          export A2_COMPUTE_STATE_ROOT="$RUNNER_TEMP/a2-compute-browser-b4-envelope"
+          node tests/b4-real-envelope-smoke.mjs | tee "$RUNNER_TEMP/a2-compute-browser-b4-envelope.json"
+          grep -q '"ok":true' "$RUNNER_TEMP/a2-compute-browser-b4-envelope.json"
+          grep -q '"document_epoch_stable":true' "$RUNNER_TEMP/a2-compute-browser-b4-envelope.json"
+          grep -q '"raw_engine_identity_exposed":false' "$RUNNER_TEMP/a2-compute-browser-b4-envelope.json"
+          grep -q '"remote_navigation_used":false' "$RUNNER_TEMP/a2-compute-browser-b4-envelope.json"
+          grep -q '"actuation_used":false' "$RUNNER_TEMP/a2-compute-browser-b4-envelope.json"
+
+      - name: Build and pack canonical extension R4 closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=coordination/chat-control-plane/extension
+          SPEC="$ROOT/runtime-package-manifest.json"
+          mkdir -p dist/a2-browser-b4
+          python3 scripts/a2_build_extension.py \
+            --source "$ROOT" --package-manifest "$SPEC" \
+            --stage dist/a2-browser-b4/extension-stage \
+            --zip dist/a2-browser-b4/METAENGINE_A2_Browser_Operator_v0.7.1_B4_COMPAT.zip \
+            --evidence-dir dist/a2-browser-b4/extension-evidence \
+            --source-commit "$GITHUB_SHA" --source-date-epoch "$SOURCE_DATE_EPOCH"
+          test "$(find dist/a2-browser-b4/extension-stage -type f | wc -l)" = "46"
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          "$CHROME" --no-sandbox --disable-gpu --pack-extension="$GITHUB_WORKSPACE/dist/a2-browser-b4/extension-stage"
+          test -s dist/a2-browser-b4/extension-stage.crx
+
+      - name: Build deterministic B4 evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          EPOCH="$SOURCE_DATE_EPOCH"
+          mkdir -p dist/a2-browser-b4/evidence
+          cp "$RUNNER_TEMP/a2-compute-browser-b4-base.json" dist/a2-browser-b4/evidence/COMPUTE_BASE_SELF_TEST.json
+          cp "$RUNNER_TEMP/a2-compute-browser-b4-envelope.json" dist/a2-browser-b4/evidence/B4_REAL_ENVELOPE_SMOKE.json
+          printf '%s\n' "$GITHUB_SHA" > dist/a2-browser-b4/evidence/SOURCE_COMMIT.txt
+          tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf dist/a2-browser-b4/A2_BROWSER_B4_PERCEPTION_PARITY.tar \
+            coordination/browser-shared/semantic-perception-compiler.mjs \
+            coordination/browser-shared/perception-envelope-v1.mjs \
+            coordination/browser-compute/src/perception.mjs \
+            coordination/browser-compute/src/perception-envelope.mjs \
+            coordination/browser-shared/tests/perception-envelope-v1.test.mjs \
+            coordination/browser-compute/tests/b4-real-envelope-smoke.mjs \
+            research/A2_BROWSER_B4_PERCEPTION_PARITY_DEEP_RESEARCH_2026-08-28.md
+          sha256sum dist/a2-browser-b4/A2_BROWSER_B4_PERCEPTION_PARITY.tar dist/a2-browser-b4/METAENGINE_A2_Browser_Operator_v0.7.1_B4_COMPAT.zip > dist/a2-browser-b4/B4_SHA256SUMS.txt
+
+      - name: Attest B4 evidence provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: |
+            dist/a2-browser-b4/A2_BROWSER_B4_PERCEPTION_PARITY.tar
+            dist/a2-browser-b4/METAENGINE_A2_Browser_Operator_v0.7.1_B4_COMPAT.zip
+
+      - name: Upload B4 evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-b4-perception-parity-${{ github.sha }}
+          path: |
+            dist/a2-browser-b4/A2_BROWSER_B4_PERCEPTION_PARITY.tar
+            dist/a2-browser-b4/METAENGINE_A2_Browser_Operator_v0.7.1_B4_COMPAT.zip
+            dist/a2-browser-b4/B4_SHA256SUMS.txt
+            dist/a2-browser-b4/evidence/
+            dist/a2-browser-b4/extension-evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
