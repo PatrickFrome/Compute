@@ -128,14 +128,15 @@ test('cold leader with WebMCP tools receives routing index and no semantic envel
 });
 
 test('unsupported, empty, and malformed WebMCP degrade to semantic perception without authority', async () => {
-  for (const webMcpService of [
-    { catalog: async () => unsupportedCatalog() },
-    { catalog: async () => supportedCatalog({ count: 0 }) },
-    { catalog: async () => { throw new Error('webmcp_catalog_tool_ref_invalid'); } }
-  ]) {
+  const cases = [
+    ['unsupported', { catalog: async () => unsupportedCatalog() }],
+    ['empty', { catalog: async () => supportedCatalog({ count: 0 }) }],
+    ['invalid', { catalog: async () => { throw new Error('webmcp_catalog_tool_ref_invalid'); } }]
+  ];
+  for (const [intentSuffix, webMcpService] of cases) {
     const { runtime } = runtimeFixture();
     const service = new ComputePlanningBrokerService(runtime, { webMcpService });
-    const result = await service.lookup({ profileId, targetId, intentId: `intent_${Math.random().toString(16).slice(2)}`, actionKind: 'CLICK' });
+    const result = await service.lookup({ profileId, targetId, intentId: `intent_${intentSuffix}`, actionKind: 'CLICK' });
     assert.equal(result.lookup.status, 'MISS_LEADER');
     assert.equal(result.planner_context_surface, 'SEMANTIC_PERCEPTION');
     assert.ok(result.planning_envelope?.nodes?.length > 0);
