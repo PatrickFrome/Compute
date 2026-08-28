@@ -27,7 +27,7 @@ test('B3 Chrome args expose native pipe and no DevTools TCP surface', () => {
   assert.throws(() => buildChromeArgs({ userDataDir: dir, allowNoSandbox: true }), /no_sandbox_forbidden_outside_ci/);
 });
 
-test('URL parser remains narrow and remote navigation remains disabled at B3 boundary', () => {
+test('URL parser remains narrow and remote navigation remains disabled at R4 boundary', () => {
   assert.equal(validateNavigationUrl('about:blank'), 'about:blank');
   assert.match(validateNavigationUrl('https://example.com/a'), /^https:\/\/example\.com\/a/);
   assert.throws(() => validateNavigationUrl('http://example.com'), /target_url_scheme_forbidden/);
@@ -41,8 +41,21 @@ test('RPC surface is typed, effect-classed, and external raw CDP remains forbidd
   assert.equal(protocol.transport.internal_devtools, 'native_remote_debugging_pipe');
   assert.equal(protocol.devtools_tcp_exposed, false);
   assert.ok(!protocol.identity.ephemeral.includes('debug_port'));
-  for (const forbidden of ['raw_cdp', 'runtime_evaluate', 'javascript_eval', 'shell_exec', 'devtools_tcp_listener']) assert.ok(protocol.forbidden_external_capabilities.includes(forbidden));
+  for (const forbidden of ['raw_cdp', 'raw_bidi', 'runtime_evaluate', 'javascript_eval', 'shell_exec', 'devtools_tcp_listener']) assert.ok(protocol.forbidden_external_capabilities.includes(forbidden));
   assert.doesNotMatch(RPC_METHODS.join(' '), /cdp|evaluate|javascript|exec|shell/i);
+});
+
+test('R4 semantic snapshot is perception-only and explicitly tainted', () => {
+  assert.equal(protocol.version, '1.3.0');
+  assert.equal(protocol.method_effects['target.semantic_snapshot'], 'READ_ONLY');
+  assert.equal(protocol.semantic_perception.schema, 'metaengine.a2-browser-operator.semantic-frame.v1');
+  assert.equal(protocol.semantic_perception.page_data_tainted, true);
+  assert.equal(protocol.semantic_perception.authority_effect, false);
+  assert.equal(protocol.semantic_perception.page_script_evaluation, false);
+  assert.equal(protocol.semantic_perception.raw_cdp_exposed, false);
+  assert.equal(protocol.semantic_perception.document_epoch_source, 'main_frame_loader_id');
+  assert.equal(protocol.semantic_perception.min_node_budget, 30);
+  assert.equal(protocol.semantic_perception.max_node_budget, 80);
 });
 
 test('control token is a fresh 256-bit daemon-session capability', async () => {
