@@ -12,6 +12,7 @@ const OPCODE_LIST_SKILLS: u8 = 1;
 const OPCODE_READ_PACKAGE: u8 = 2;
 const STATUS_OK: u8 = 0;
 const REQUEST_HEADER_BYTES: usize = 12;
+const NATIVE_PROBE_FILTER: &str = "launcher_native_unsanitized_probe_child";
 
 struct TempTree {
     path: PathBuf,
@@ -151,6 +152,28 @@ fn copy_launcher(directory: &Path) -> PathBuf {
     destination
 }
 
+fn assert_no_live_fd_above_stderr() {
+    let observed = {
+        let entries = fs::read_dir("/proc/self/fd").expect("scan proc fd");
+        let mut fds = Vec::new();
+        for entry in entries {
+            let name = entry.expect("fd entry").file_name();
+            let fd = name.to_str().unwrap().parse::<u32>().unwrap();
+            fds.push(fd);
+        }
+        fds
+    };
+    for fd in observed {
+        if fd <= 2 {
+            continue;
+        }
+        match fs::read_link(format!("/proc/self/fd/{fd}")) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            other => panic!("unexpected live fd {fd}: {other:?}"),
+        }
+    }
+}
+
 #[test]
 fn launcher_serves_list_and_package_through_fixed_sibling_helper() {
     let tree = TempTree::new("roundtrip");
@@ -255,17 +278,20 @@ fn launcher_rejects_missing_symlink_and_non_executable_sibling() {
 }
 
 #[test]
-fn launcher_cuts_ambient_fd_and_environment_before_unsanitized_probe_exec() {
+fn launcher_native_unsanitized_probe_child() {
+    if !std::env::args().any(|arg| arg == NATIVE_PROBE_FILTER) {
+        return;
+    }
+    assert!(std::env::var_os("A2_R7K_ENV_SENTINEL").is_none());
+    assert_no_live_fd_above_stderr();
+}
+
+#[test]
+fn launcher_cuts_ambient_fd_and_environment_before_native_probe_exec() {
     let tree = TempTree::new("preexec-probe");
     let launcher = copy_launcher(tree.path());
-    let root = tree.path().join("root");
-    fs::create_dir(&root).unwrap();
     let helper = tree.path().join("a2-skill-source-helper");
-    fs::write(
-        &helper,
-        b"#!/bin/sh\nif [ -e /proc/self/fd/9 ]; then echo skill_launcher_probe_fd_survived >&2; exit 91; fi\nif [ \"${A2_R7K_ENV_SENTINEL+x}\" = x ]; then echo skill_launcher_probe_env_survived >&2; exit 92; fi\nexit 0\n",
-    )
-    .unwrap();
+    fs::copy(std::env::current_exe().unwrap(), &helper).unwrap();
     let mut permissions = fs::metadata(&helper).unwrap().permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(&helper, permissions).unwrap();
@@ -275,19 +301,18 @@ fn launcher_cuts_ambient_fd_and_environment_before_unsanitized_probe_exec() {
         .arg("exec 9</dev/null; exec \"$1\" \"$2\"")
         .arg("r7k-preexec")
         .arg(&launcher)
-        .arg(&root)
+        .arg(NATIVE_PROBE_FILTER)
         .env("A2_R7K_ENV_SENTINEL", "must-not-cross-exec")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .expect("launch unsanitized sibling probe");
+        .expect("launch native unsanitized sibling probe");
 
     assert!(
         output.status.success(),
         "pre-exec probe failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(output.stdout.is_empty());
     assert!(output.stderr.is_empty());
 }

@@ -1,0 +1,284 @@
+name: A2 Browser R7L Executable Identity Binding
+
+on:
+  push:
+    branches:
+      - work/a2-browser-r7l-executable-identity-binding
+    paths:
+      - 'coordination/browser-skill-source-linux/**'
+      - 'coordination/browser-shared/**'
+      - 'research/A2_BROWSER_R7L_EXECUTABLE_IDENTITY_BINDING_PRE_RESEARCH_2026-08-28.md'
+      - 'research/A2_BROWSER_R7L_EXECUTABLE_IDENTITY_BINDING_POST_RESEARCH_2026-08-28.md'
+      - '.github/workflows/a2-browser-r7l-executable-identity-binding.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r7l-executable-identity-binding-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+
+      - name: Establish exact Linux target and source epoch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          test "$(rustc --version | awk '{print $2}')" = "1.98.0"
+          command -v strace
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+
+      - name: Verify unchanged supply-chain closure
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          test -f Cargo.lock
+          sha256sum Cargo.lock | tee "$RUNNER_TEMP/r7l-lock-sha256.txt"
+          test "$(awk '{print $1}' "$RUNNER_TEMP/r7l-lock-sha256.txt")" = \
+            "ffdf4d85f832e92b20960ecdbc581103a113cf9ddfa93fa319ba124f21a3d003"
+          cargo tree --locked | tee "$RUNNER_TEMP/r7l-cargo-tree.txt"
+          python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          cargo = tomllib.loads(Path('Cargo.toml').read_text())
+          deps = cargo.get('dependencies', {})
+          if set(deps) != {'landlock', 'libc', 'rustix', 'seccompiler'}:
+              raise SystemExit(f'unexpected direct dependency surface: {sorted(deps)}')
+          expected = {'landlock': '=0.4.7', 'libc': '=0.2.189', 'seccompiler': '=0.5.0'}
+          for name, version in expected.items():
+              if deps.get(name) != version:
+                  raise SystemExit(f'{name} drifted')
+          rustix = deps.get('rustix')
+          if not isinstance(rustix, dict) or rustix.get('version') != '=1.1.4':
+              raise SystemExit('rustix drifted')
+          lock = tomllib.loads(Path('Cargo.lock').read_text())
+          packages = {(p['name'], p['version']) for p in lock.get('package', [])}
+          if len(packages) != 19:
+              raise SystemExit(f'unexpected Cargo.lock package-entry count: {len(packages)}')
+          PY
+
+      - name: Prove static executable-identity contract
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          launcher = Path('src/bin/a2-skill-source-launcher.rs').read_text()
+          identity = Path('src/executable_identity.rs').read_text()
+          contract = Path('src/launch_contract.rs').read_text()
+          helper = Path('src/bin/a2-skill-source-helper.rs').read_text()
+
+          required_identity = [
+              'openat2(', 'OFlags::PATH', 'OFlags::CLOEXEC', 'OFlags::NOFOLLOW',
+              'ResolveFlags::BENEATH', 'ResolveFlags::NO_SYMLINKS',
+              'ResolveFlags::NO_MAGICLINKS', 'ResolveFlags::NO_XDEV',
+              'fstat(&helper)', 'libc::S_ISUID', 'libc::S_ISGID',
+              'verify_preexec_fd_contract', 'libc::fexecve',
+          ]
+          for token in required_identity:
+              if token not in identity:
+                  raise SystemExit(f'missing R7L identity invariant: {token}')
+          required_launcher = [
+              'sanitize_inherited_fds()', 'verify_clean_inherited_fds()',
+              'ExecutableCapability::open_fixed_helper(&directory)',
+              'verify_preexec_fd_contract()', 'helper.execute(&root)',
+          ]
+          for token in required_launcher:
+              if token not in launcher:
+                  raise SystemExit(f'missing R7L launcher invariant: {token}')
+          for forbidden in [
+              'Command::new', 'command.exec()', 'symlink_metadata',
+              'Runtime.evaluate', 'WebMCP.', '--remote-debugging-port',
+              '--remote-debugging-address'
+          ]:
+              if forbidden in launcher:
+                  raise SystemExit(f'forbidden launcher token: {forbidden}')
+          if launcher.count('unsafe {') != 0:
+              raise SystemExit('unsafe code escaped audited modules into launcher')
+          if contract.count('unsafe {') != 1:
+              raise SystemExit('launch-contract unsafe seam drifted')
+          if identity.count('unsafe {') != 1:
+              raise SystemExit('R7L fexecve unsafe seam cardinality drifted')
+          if 'sanitize_inherited_fds' not in helper or 'verify_clean_inherited_fds' not in helper:
+              raise SystemExit('helper defense-in-depth sanitation was removed')
+
+          sanitize = launcher.index('sanitize_inherited_fds')
+          clean = launcher.index('verify_clean_inherited_fds')
+          acquire = launcher.index('open_fixed_helper')
+          preexec = launcher.index('verify_preexec_fd_contract')
+          execute = launcher.index('helper.execute')
+          if not (sanitize < clean < acquire < preexec < execute):
+              raise SystemExit('R7L ambient-cut/acquire/exec ordering invariant violated')
+          PY
+
+      - name: Compile lint and run Rust adversarial regressions
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --all-targets -- --nocapture | tee "$RUNNER_TEMP/r7l-rust-tests.log"
+          cargo test --locked --test executable_identity -- --nocapture | tee "$RUNNER_TEMP/r7l-identity-tests.log"
+          cargo test --locked --test preexec_launcher -- --nocapture | tee "$RUNNER_TEMP/r7l-r7k-regression.log"
+          cargo test --locked --test network_boundary -- --nocapture | tee "$RUNNER_TEMP/r7l-r7j-regression.log"
+          cargo test --locked --test sandbox -- --nocapture | tee "$RUNNER_TEMP/r7l-landlock-regression.log"
+
+      - name: Build release launcher and helper
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --bin a2-skill-source-launcher --bin a2-skill-source-helper
+          sha256sum target/release/a2-skill-source-launcher | tee "$RUNNER_TEMP/r7l-launcher-sha256.txt"
+          sha256sum target/release/a2-skill-source-helper | tee "$RUNNER_TEMP/r7l-helper-sha256.txt"
+          stat -c '%s' target/release/a2-skill-source-launcher | tee "$RUNNER_TEMP/r7l-launcher-size.txt"
+          stat -c '%s' target/release/a2-skill-source-helper | tee "$RUNNER_TEMP/r7l-helper-size.txt"
+          test "$(cat "$RUNNER_TEMP/r7l-launcher-size.txt")" -lt 4194304
+          test "$(cat "$RUNNER_TEMP/r7l-helper-size.txt")" -lt 4194304
+
+      - name: Prove open-once fd-bound exec ordering on real Linux
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/r7l-root"
+          mkdir -p "$ROOT/inspect/references"
+          cat > "$ROOT/inspect/SKILL.md" <<'EOF'
+          ---
+          name: inspect
+          description: R7L fd-bound exec trace
+          ---
+          Read only.
+          EOF
+          printf 'reference-v1' > "$ROOT/inspect/references/REFERENCE.md"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, struct
+          payload = bytes([1, 1]) + struct.pack('>H', 0) + struct.pack('>Q', 51)
+          (Path(os.environ['RUNNER_TEMP']) / 'r7l-request.bin').write_bytes(
+              struct.pack('>I', len(payload)) + payload
+          )
+          PY
+
+          TRACE="$RUNNER_TEMP/r7l-exec.trace"
+          LAUNCHER="$PWD/target/release/a2-skill-source-launcher"
+          A2_R7L_ENV_SENTINEL=must-not-cross-exec \
+            bash -c 'exec 9</dev/null; exec strace -qq -f -v -s 1024 -e trace=execve,execveat,openat2,close_range -o "$1" "$2" "$3"' \
+              r7l-trace "$TRACE" "$LAUNCHER" "$ROOT" \
+              < "$RUNNER_TEMP/r7l-request.bin" \
+              > "$RUNNER_TEMP/r7l-trace.stdout" \
+              2> "$RUNNER_TEMP/r7l-trace.stderr"
+          test -s "$RUNNER_TEMP/r7l-trace.stdout"
+          test ! -s "$RUNNER_TEMP/r7l-trace.stderr"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+
+          lines = (Path(os.environ['RUNNER_TEMP']) / 'r7l-exec.trace').read_text(errors='replace').splitlines()
+          launcher_exec = next(i for i, line in enumerate(lines)
+                               if 'execve(' in line and 'a2-skill-source-launcher' in line)
+          helper_open = next(i for i, line in enumerate(lines[launcher_exec + 1:], launcher_exec + 1)
+                             if 'openat2(' in line and 'a2-skill-source-helper' in line)
+          fd_exec = next(i for i, line in enumerate(lines[helper_open + 1:], helper_open + 1)
+                         if 'execveat(' in line and 'AT_EMPTY_PATH' in line)
+          closes = [i for i, line in enumerate(lines)
+                    if 'close_range(3,' in line and 'CLOSE_RANGE_UNSHARE' in line and '= 0' in line]
+          if not any(launcher_exec < i < helper_open for i in closes):
+              raise SystemExit('ambient close_range did not precede executable capability acquisition')
+          if not any(i > fd_exec for i in closes):
+              raise SystemExit('helper defense-in-depth close_range missing after fd-bound exec')
+          if any('execve(' in line and 'a2-skill-source-helper' in line
+                 for line in lines[launcher_exec + 1:fd_exec + 1]):
+              raise SystemExit('pathname helper exec remained reachable')
+          fd_line = lines[fd_exec]
+          if 'A2_R7L_ENV_SENTINEL' in fd_line:
+              raise SystemExit('inherited environment crossed fd-bound helper exec')
+          open_line = lines[helper_open]
+          for token in ['O_PATH', 'O_CLOEXEC', 'O_NOFOLLOW']:
+              if token not in open_line:
+                  raise SystemExit(f'helper open missing {token}')
+          print(f'launcher_exec_line={launcher_exec + 1}')
+          print(f'helper_openat2_line={helper_open + 1}')
+          print(f'helper_execveat_line={fd_exec + 1}')
+          print('close_range_lines=' + ','.join(str(i + 1) for i in closes))
+          PY
+          cp "$TRACE" "$RUNNER_TEMP/r7l-verified-exec.trace"
+
+      - name: Run R7 package and registry regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            coordination/browser-shared/tests/skill-package-identity-v1.test.mjs \
+            coordination/browser-shared/tests/skill-registry-v1.test.mjs | tee "$RUNNER_TEMP/r7l-js-regression.log"
+
+      - name: Build deterministic R7L evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=dist/a2-browser-r7l
+          mkdir -p "$OUT/evidence"
+          cp "$RUNNER_TEMP/r7l-lock-sha256.txt" "$OUT/evidence/R7L_CARGO_LOCK_SHA256.txt"
+          cp "$RUNNER_TEMP/r7l-cargo-tree.txt" "$OUT/evidence/R7L_CARGO_TREE.txt"
+          cp "$RUNNER_TEMP/r7l-rust-tests.log" "$OUT/evidence/R7L_RUST_TESTS.log"
+          cp "$RUNNER_TEMP/r7l-identity-tests.log" "$OUT/evidence/R7L_IDENTITY_TESTS.log"
+          cp "$RUNNER_TEMP/r7l-r7k-regression.log" "$OUT/evidence/R7L_R7K_REGRESSION.log"
+          cp "$RUNNER_TEMP/r7l-r7j-regression.log" "$OUT/evidence/R7L_R7J_REGRESSION.log"
+          cp "$RUNNER_TEMP/r7l-landlock-regression.log" "$OUT/evidence/R7L_LANDLOCK_REGRESSION.log"
+          cp "$RUNNER_TEMP/r7l-launcher-sha256.txt" "$OUT/evidence/R7L_LAUNCHER_SHA256.txt"
+          cp "$RUNNER_TEMP/r7l-helper-sha256.txt" "$OUT/evidence/R7L_HELPER_SHA256.txt"
+          cp "$RUNNER_TEMP/r7l-launcher-size.txt" "$OUT/evidence/R7L_LAUNCHER_SIZE.txt"
+          cp "$RUNNER_TEMP/r7l-helper-size.txt" "$OUT/evidence/R7L_HELPER_SIZE.txt"
+          cp "$RUNNER_TEMP/r7l-verified-exec.trace" "$OUT/evidence/R7L_EXEC_IDENTITY.trace"
+          cp "$RUNNER_TEMP/r7l-js-regression.log" "$OUT/evidence/R7L_JS_REGRESSION.log"
+          printf '%s\n' "$GITHUB_SHA" > "$OUT/evidence/SOURCE_COMMIT.txt"
+          printf '%s\n' 'cbdb70e9be5a99251d57a7be7d0c43a95683ebae' > "$OUT/evidence/PARENT_VERIFIED_COMMIT.txt"
+          cat > "$OUT/evidence/R7L_CLAIMS.json" <<'JSON'
+          {"milestone":"R7L_EXECUTABLE_IDENTITY_BINDING_V1","fd_bound_exec":true,"openat2_confined_fixed_sibling":true,"exec_fd_cloexec":true,"path_swap_cannot_redirect":true,"empty_environment":true,"new_dependencies":0,"node_integration":false,"browser_authority":false,"network_authority":false}
+          JSON
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf "$OUT/A2_BROWSER_R7L_EXECUTABLE_IDENTITY_BINDING.tar" \
+            coordination/browser-skill-source-linux/Cargo.toml \
+            coordination/browser-skill-source-linux/Cargo.lock \
+            coordination/browser-skill-source-linux/rust-toolchain.toml \
+            coordination/browser-skill-source-linux/src \
+            coordination/browser-skill-source-linux/tests \
+            research/A2_BROWSER_R7L_EXECUTABLE_IDENTITY_BINDING_PRE_RESEARCH_2026-08-28.md \
+            "$OUT/evidence"
+          if test -f research/A2_BROWSER_R7L_EXECUTABLE_IDENTITY_BINDING_POST_RESEARCH_2026-08-28.md; then
+            tar --append --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+              -f "$OUT/A2_BROWSER_R7L_EXECUTABLE_IDENTITY_BINDING.tar" \
+              research/A2_BROWSER_R7L_EXECUTABLE_IDENTITY_BINDING_POST_RESEARCH_2026-08-28.md
+          fi
+          sha256sum "$OUT/A2_BROWSER_R7L_EXECUTABLE_IDENTITY_BINDING.tar" > "$OUT/R7L_SHA256SUMS.txt"
+
+      - name: Attest R7L build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373
+        with:
+          subject-path: dist/a2-browser-r7l/A2_BROWSER_R7L_EXECUTABLE_IDENTITY_BINDING.tar
+
+      - name: Upload R7L evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1
+        with:
+          name: a2-browser-r7l-executable-identity-${{ github.sha }}
+          path: |
+            dist/a2-browser-r7l/A2_BROWSER_R7L_EXECUTABLE_IDENTITY_BINDING.tar
+            dist/a2-browser-r7l/R7L_SHA256SUMS.txt
+            dist/a2-browser-r7l/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
