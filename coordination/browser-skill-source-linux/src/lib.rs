@@ -1,7 +1,7 @@
 #![cfg(target_os = "linux")]
 
 use rustix::fd::OwnedFd;
-use rustix::fs::{open, openat2, Dir, Mode, OFlags, ResolveFlags};
+use rustix::fs::{Dir, Mode, OFlags, ResolveFlags, open, openat2};
 use rustix::io::Errno;
 use std::fmt;
 use std::fs::File;
@@ -122,11 +122,7 @@ fn open_confined_file<Fd: rustix::fd::AsFd>(dirfd: Fd, path: &str) -> Result<Own
     openat2(
         dirfd,
         path,
-        OFlags::RDONLY
-            | OFlags::CLOEXEC
-            | OFlags::NOFOLLOW
-            | OFlags::NONBLOCK
-            | OFlags::NOCTTY,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::NOCTTY,
         Mode::empty(),
         RESOLVE_CONFINED,
     )
@@ -202,8 +198,9 @@ fn read_directory(fd: &OwnedFd) -> Result<Vec<String>, LoaderError> {
         .map_err(|error| LoaderError::with_detail("skill_loader_directory_read_failed", error))?;
     let mut names = Vec::new();
     while let Some(entry) = dir.read() {
-        let entry = entry
-            .map_err(|error| LoaderError::with_detail("skill_loader_directory_read_failed", error))?;
+        let entry = entry.map_err(|error| {
+            LoaderError::with_detail("skill_loader_directory_read_failed", error)
+        })?;
         let name = dir_entry_name(&entry)?;
         if matches!(name, "." | "..") {
             continue;
@@ -239,7 +236,10 @@ impl LinuxSkillSource {
                 "skill_loader_openat2_unavailable",
                 error,
             )),
-            Err(error) => Err(LoaderError::with_detail("skill_loader_root_probe_failed", error)),
+            Err(error) => Err(LoaderError::with_detail(
+                "skill_loader_root_probe_failed",
+                error,
+            )),
         }
     }
 

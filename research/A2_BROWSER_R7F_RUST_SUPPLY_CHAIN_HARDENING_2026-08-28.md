@@ -19,7 +19,7 @@ The Rust project published an incident report on 2026-08-20 for a supply-chain a
 R7F responds in three ways:
 
 1. exactly one direct third-party dependency: `rustix = 1.1.4`;
-2. CI materializes and records the complete `Cargo.lock` and `cargo tree --locked` closure;
+2. CI records the complete `Cargo.lock` and `cargo tree --locked` closure;
 3. CI parses `Cargo.lock` with Python `tomllib` and fails if the known malicious names or compromised versions are present.
 
 The lockfile check is structural, not a line-oriented grep, so package name/version pairing cannot be lost across TOML lines.
@@ -32,15 +32,22 @@ A 2026 Cargo advisory described a cache overwrite issue involving symlinks in cr
 
 Source: https://blog.rust-lang.org/2026/04/22/cve-2026-5223/
 
-## Lockfile rollout strategy
+## Lockfile promotion from the first resolver gate
 
-The initial R7F CI must generate `Cargo.lock` once so the repository obtains the real resolver output for the exact crate/toolchain combination. The workflow prints that lockfile into immutable evidence. Immediately after the first green R7F gate, the exact generated lockfile is promoted into Git source and the workflow is hardened from “generate then --locked” to “source lockfile must already exist and all build/test commands use --locked”.
+The first R7F CI attempt reached and successfully completed the pinned toolchain/dependency-closure stage before `cargo fmt --check` stopped the later source-contract stage. That successful resolver stage produced the exact lockfile for the pinned manifest and Rust 1.98.0:
 
-This two-step rollout avoids hand-authoring a lockfile while still converging to a fully pinned build after one verified resolver run.
+- `rustix 1.1.4`
+- `bitflags 2.13.1`
+- `linux-raw-sys 0.12.1`
+- target-conditional closure recorded in the lockfile: `errno 0.3.14`, `libc 0.2.189`, `windows-sys 0.61.2`, `windows-link 0.2.1`.
+
+Because dependency resolution itself was already proven, the follow-up formatting fix promotes that exact machine-generated `Cargo.lock` into Git source immediately. Subsequent CI no longer runs `cargo generate-lockfile`; it requires the source lockfile and uses `cargo tree --locked`, `cargo clippy --locked`, and `cargo test --locked`.
+
+This is stricter than repeatedly resolving dependencies until the first full source test pass.
 
 ## Trust boundary conclusion
 
 Dependency provenance and source-loader confinement solve different problems and neither substitutes for the other. R7F therefore requires both:
 
-- supply-chain closure: exact compiler + exact direct dependency + audited lockfile;
-- runtime confinement: `openat2` capability-root resolution, no fallback, bounded regular-file reads, hardlink rejection, and mutation fences.
+- supply-chain closure: exact compiler + exact direct dependency + source-controlled lockfile;
+- runtime confinement: `openat2` capability-root resolution, no fallback, bounded regular-file reads, hardlink rejection, nonblocking special-file defense, and mutation fences.

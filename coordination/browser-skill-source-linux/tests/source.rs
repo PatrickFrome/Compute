@@ -2,7 +2,7 @@
 
 use a2_skill_source_linux::{LinuxSkillSource, SKILL_SOURCE_LIMITS};
 use std::fs;
-use std::os::unix::fs::{symlink, PermissionsExt};
+use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -16,10 +16,8 @@ impl TempTree {
             .duration_since(UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "a2-r7f-{label}-{}-{nonce}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("a2-r7f-{label}-{}-{nonce}", std::process::id()));
         fs::create_dir_all(&path).expect("create temp tree");
         Self { path }
     }
@@ -49,11 +47,7 @@ fn write_skill(root: &Path, name: &str) -> PathBuf {
     .unwrap();
     fs::write(dir.join("references/REFERENCE.md"), b"reference-v1").unwrap();
     fs::write(dir.join("assets/template.txt"), b"template-v1").unwrap();
-    fs::write(
-        dir.join("scripts/check.sh"),
-        b"#!/bin/sh\necho inert\n",
-    )
-    .unwrap();
+    fs::write(dir.join("scripts/check.sh"), b"#!/bin/sh\necho inert\n").unwrap();
     let mut permissions = fs::metadata(dir.join("scripts/check.sh"))
         .unwrap()
         .permissions();
@@ -70,10 +64,7 @@ fn valid_package_is_confined_sorted_and_preserves_executable_metadata_only() {
     fs::write(tree.path().join(".ignored"), b"not a skill").unwrap();
 
     let source = LinuxSkillSource::open(tree.path()).unwrap();
-    assert_eq!(
-        source.list_skill_names().unwrap(),
-        vec!["alpha", "zeta"]
-    );
+    assert_eq!(source.list_skill_names().unwrap(), vec!["alpha", "zeta"]);
     let package = source.read_skill_package("alpha").unwrap();
     assert_eq!(
         package
@@ -95,9 +86,11 @@ fn valid_package_is_confined_sorted_and_preserves_executable_metadata_only() {
             .unwrap()
             .executable
     );
-    assert!(String::from_utf8(package[0].bytes.clone())
-        .unwrap()
-        .contains("name: alpha"));
+    assert!(
+        String::from_utf8(package[0].bytes.clone())
+            .unwrap()
+            .contains("name: alpha")
+    );
 }
 
 #[test]
@@ -164,11 +157,7 @@ fn hardlinked_regular_file_is_rejected_even_without_a_symlink() {
     fs::remove_file(skill.join("references/REFERENCE.md")).unwrap();
     let outside_file = outside.path().join("shared.txt");
     fs::write(&outside_file, b"shared-sensitive-content").unwrap();
-    fs::hard_link(
-        &outside_file,
-        skill.join("references/REFERENCE.md"),
-    )
-    .unwrap();
+    fs::hard_link(&outside_file, skill.join("references/REFERENCE.md")).unwrap();
 
     let source = LinuxSkillSource::open(tree.path()).unwrap();
     let error = source.read_skill_package("inspect").unwrap_err();

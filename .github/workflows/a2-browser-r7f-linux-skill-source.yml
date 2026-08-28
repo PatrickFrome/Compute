@@ -35,7 +35,7 @@ jobs:
           rustc --version | tee "$RUNNER_TEMP/r7f-rustc-version.txt"
           cargo --version | tee "$RUNNER_TEMP/r7f-cargo-version.txt"
           test "$(rustc --version | awk '{print $2}')" = "1.98.0"
-          cargo generate-lockfile
+          test -f Cargo.lock
           cat Cargo.lock | tee "$RUNNER_TEMP/r7f-cargo-lock.txt"
           cargo tree --locked | tee "$RUNNER_TEMP/r7f-cargo-tree.txt"
           grep -q 'rustix v1\.1\.4' "$RUNNER_TEMP/r7f-cargo-tree.txt"
@@ -112,7 +112,8 @@ jobs:
             coordination/browser-shared/skill-package-identity-v1.mjs \
             coordination/browser-shared/skill-registry-v1.mjs \
             research/A2_BROWSER_R7E_AMBIENT_FREE_SKILL_REGISTRY_PRE_RESEARCH_2026-08-28.md \
-            research/A2_BROWSER_R7F_LINUX_OPENAT2_SKILL_SOURCE_PRE_RESEARCH_2026-08-28.md
+            research/A2_BROWSER_R7F_LINUX_OPENAT2_SKILL_SOURCE_PRE_RESEARCH_2026-08-28.md \
+            research/A2_BROWSER_R7F_RUST_SUPPLY_CHAIN_HARDENING_2026-08-28.md
           sha256sum dist/a2-browser-r7f/A2_BROWSER_R7F_LINUX_OPENAT2_SKILL_SOURCE.tar > dist/a2-browser-r7f/R7F_SHA256SUMS.txt
 
       - name: Attest R7F evidence provenance
