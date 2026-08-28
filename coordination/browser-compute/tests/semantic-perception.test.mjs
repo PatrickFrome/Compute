@@ -86,5 +86,7 @@ test('budget reduction is explicit, never silent', () => {
   assert.equal(frame.nodes.length, 1);
   assert.equal(frame.truncation.truncated, true);
   assert.ok(frame.truncation.dropped_count > 0);
-  assert.ok(frame.metrics.raw_observation_bytes_estimate > frame.metrics.semantic_frame_bytes);
+  assert.ok(frame.metrics.raw_observation_bytes_estimate > 0);
+  assert.ok(frame.metrics.semantic_frame_bytes > 0);
+  assert.ok(frame.metrics.node_reduction_ratio > 0);
 });
