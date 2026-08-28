@@ -1,6 +1,6 @@
 {
   "schema": "metaengine.a2-browser-protocol.v1",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "transport": {
     "scope": "local_machine_only",
     "unix": "unix_domain_socket",
@@ -30,6 +30,10 @@
     "target.create",
     "target.list",
     "perception.snapshot",
+    "planning.lookup",
+    "planning.promote",
+    "planning.abort",
+    "planning.stats",
     "target.activate",
     "target.close"
   ],
@@ -44,6 +48,10 @@
     "target.create": "LOCAL_LIFECYCLE",
     "target.list": "READ_ONLY",
     "perception.snapshot": "READ_ONLY",
+    "planning.lookup": "LOCAL_COORDINATION",
+    "planning.promote": "LOCAL_COORDINATION",
+    "planning.abort": "LOCAL_COORDINATION",
+    "planning.stats": "READ_ONLY",
     "target.activate": "LOCAL_UI",
     "target.close": "LOCAL_LIFECYCLE"
   },
@@ -68,7 +76,10 @@
     "raw_cdp_backend_node_id",
     "arbitrary_perception_limits",
     "arbitrary_computed_styles",
-    "oopif_completeness_without_proof"
+    "oopif_completeness_without_proof",
+    "planner_provider_credentials",
+    "planner_execution_payload_persistence",
+    "cached_node_ref_authority"
   ],
   "semantic_perception": {
     "schema": "metaengine.a2-compute-browser.semantic-snapshot.v1",
@@ -81,6 +92,20 @@
     "runtime_evaluate_used": false,
     "computed_styles": ["display", "visibility", "opacity", "pointer-events"],
     "limits_owner": "daemon"
+  },
+  "semantic_planning": {
+    "schema": "metaengine.a2-browser-operator.semantic-planning-broker.v1",
+    "provider_neutral": true,
+    "model_execution_location": "external_agent",
+    "cache_hit_skips_model_call": true,
+    "cold_miss_single_leader": true,
+    "promotion_requires_fresh_perception": true,
+    "lease_tokens_ephemeral": true,
+    "provider_credentials_stored": false,
+    "execution_payload_stored": false,
+    "cached_node_ref_authority": false,
+    "must_run_actionability_checks": true,
+    "web_authority_effect": false
   },
   "web_authority_effect": false,
   "local_effects_present": true
