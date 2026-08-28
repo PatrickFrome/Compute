@@ -1,0 +1,216 @@
+name: W1 Authenticated Receipt Attestation V15
+
+on:
+  push:
+    branches:
+      - work/main-roadmap-accelerators-v15
+    paths:
+      - '.github/workflows/w1-authenticated-receipt-attestation-contract.yml'
+      - 'tests/test_w1_github_receipt_attestation_workflow_contract.py'
+      - 'research/W1_AUTHENTICATED_RECEIPT_ATTESTATION_V15.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/w1-authenticated-receipt-attestation-contract.yml'
+      - 'tests/test_w1_github_receipt_attestation_workflow_contract.py'
+      - 'research/W1_AUTHENTICATED_RECEIPT_ATTESTATION_V15.md'
+
+permissions: {}
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Verify V15 workflow separation contracts
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m unittest tests.test_w1_github_receipt_attestation_workflow_contract -v
+
+  build-subject:
+    needs: [contract-tests]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact revision without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Build deterministic nonauthority attestation subject
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          mkdir -p evidence
+          SOURCE_TREE="$(git rev-parse HEAD^{tree})"
+          SOURCE_TREE="$SOURCE_TREE" python3 - <<'PY'
+          import hashlib,json,os
+          body={
+            'schema':'metaengine.compute.w1-github-attestation-subject.h205f22.v1',
+            'classification':'W1_GITHUB_KEYLESS_ATTESTATION_MECHANISM_SMOKE_NONAUTHORITY',
+            'repository':os.environ['GITHUB_REPOSITORY'],
+            'repository_id':os.environ['GITHUB_REPOSITORY_ID'],
+            'repository_owner_id':os.environ['GITHUB_REPOSITORY_OWNER_ID'],
+            'source_sha':os.environ['GITHUB_SHA'],
+            'source_tree':os.environ['SOURCE_TREE'],
+            'source_ref':os.environ['GITHUB_REF'],
+            'workflow':'.github/workflows/w1-authenticated-receipt-attestation-contract.yml',
+            'github_run_id':os.environ['GITHUB_RUN_ID'],
+            'github_run_attempt':os.environ['GITHUB_RUN_ATTEMPT'],
+            'same_world_chain_live_evidence':False,
+            'aws_credentials_used':False,
+            'provider_mutation_observed':False,
+            'database_mutation_observed':False,
+            'reboot_completion_proven':False,
+            'boot_id_transition_verified':False,
+            'persistent_worker_proof':False,
+            'worker_admitted':False,
+            'w1_verified':False,
+            'canonical':False,
+            'authority_effect':False,
+          }
+          raw=json.dumps(body,sort_keys=True,separators=(',',':')).encode()
+          open('evidence/v15-attestation-subject.json','wb').write(raw)
+          open('evidence/v15-attestation-subject.sha256','w').write(hashlib.sha256(raw).hexdigest()+'\n')
+          PY
+          test "$(sha256sum evidence/v15-attestation-subject.json | awk '{print $1}')" = "$(cat evidence/v15-attestation-subject.sha256)"
+      - name: Upload nonsecret subject bytes only
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: w1-v15-attestation-subject-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            evidence/v15-attestation-subject.json
+            evidence/v15-attestation-subject.sha256
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+
+  attest-and-verify:
+    if: github.event_name == 'push' && github.repository == 'PatrickFrome/Compute'
+    needs: [contract-tests, build-subject]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Checkout exact revision without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Download exact subject from unprivileged builder
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: w1-v15-attestation-subject-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence
+      - name: Revalidate subject bytes before signing
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(sha256sum evidence/v15-attestation-subject.json | awk '{print $1}')" = "$(cat evidence/v15-attestation-subject.sha256)"
+          python3 - <<'PY'
+          import json,os
+          v=json.load(open('evidence/v15-attestation-subject.json'))
+          exact={
+            'schema':'metaengine.compute.w1-github-attestation-subject.h205f22.v1',
+            'classification':'W1_GITHUB_KEYLESS_ATTESTATION_MECHANISM_SMOKE_NONAUTHORITY',
+            'repository':os.environ['GITHUB_REPOSITORY'],
+            'repository_id':os.environ['GITHUB_REPOSITORY_ID'],
+            'repository_owner_id':os.environ['GITHUB_REPOSITORY_OWNER_ID'],
+            'source_sha':os.environ['GITHUB_SHA'],
+            'source_ref':os.environ['GITHUB_REF'],
+            'workflow':'.github/workflows/w1-authenticated-receipt-attestation-contract.yml',
+            'github_run_id':os.environ['GITHUB_RUN_ID'],
+            'github_run_attempt':os.environ['GITHUB_RUN_ATTEMPT'],
+          }
+          for k,x in exact.items():
+              assert v.get(k)==x,(k,v.get(k),x)
+          for k in ('same_world_chain_live_evidence','aws_credentials_used','provider_mutation_observed','database_mutation_observed','reboot_completion_proven','boot_id_transition_verified','persistent_worker_proof','worker_admitted','w1_verified','canonical','authority_effect'):
+              assert v.get(k) is False,k
+          PY
+      - name: Create keyless SLSA attestation for exact subject bytes
+        id: attest
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d
+        with:
+          subject-path: evidence/v15-attestation-subject.json
+          show-summary: false
+      - name: Cryptographically verify bundle and exact builder identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          test -s "$BUNDLE_PATH"
+          gh attestation verify evidence/v15-attestation-subject.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --bundle "$BUNDLE_PATH" \
+            --predicate-type 'https://slsa.dev/provenance/v1' \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/w1-authenticated-receipt-attestation-contract.yml" \
+            --source-ref "$GITHUB_REF" \
+            --source-digest "$GITHUB_SHA" \
+            --deny-self-hosted-runners \
+            --format json > evidence/v15-attestation-verification.json
+          python3 - <<'PY'
+          import hashlib,json,os
+          values=json.load(open('evidence/v15-attestation-verification.json'))
+          assert isinstance(values,list) and values
+          expected=hashlib.sha256(open('evidence/v15-attestation-subject.json','rb').read()).hexdigest()
+          matched=False
+          for item in values:
+              vr=item.get('verificationResult') or {}
+              statement=vr.get('statement') or {}
+              cert=((vr.get('signature') or {}).get('certificate') or {})
+              subjects=statement.get('subject') or []
+              if not any((s.get('digest') or {}).get('sha256')==expected for s in subjects):
+                  continue
+              assert statement.get('predicateType')=='https://slsa.dev/provenance/v1'
+              assert cert.get('issuer')=='https://token.actions.githubusercontent.com'
+              assert cert.get('sourceRepositoryRef')==os.environ['GITHUB_REF']
+              assert cert.get('sourceRepositoryDigest')==os.environ['GITHUB_SHA']
+              assert str(cert.get('sourceRepositoryIdentifier'))==os.environ['GITHUB_REPOSITORY_ID']
+              assert str(cert.get('sourceRepositoryOwnerIdentifier'))==os.environ['GITHUB_REPOSITORY_OWNER_ID']
+              assert cert.get('runnerEnvironment')=='github-hosted'
+              matched=True
+          assert matched,'no cryptographically verified subject matched exact digest and certificate policy'
+          receipt={
+            'schema':'metaengine.compute.w1-github-attestation-verification.h205f22.v1',
+            'classification':'GITHUB_KEYLESS_ATTESTATION_MECHANISM_VERIFIED_NONAUTHORITY',
+            'subject_sha256':expected,
+            'source_sha':os.environ['GITHUB_SHA'],
+            'source_ref':os.environ['GITHUB_REF'],
+            'repository_id':os.environ['GITHUB_REPOSITORY_ID'],
+            'repository_owner_id':os.environ['GITHUB_REPOSITORY_OWNER_ID'],
+            'producer_attestation_mechanism_verified':True,
+            'live_w1_receipt_authenticated':False,
+            'reboot_completion_proven':False,
+            'boot_id_transition_verified':False,
+            'database_persisted_readback_verified':False,
+            'persistent_worker_proof':False,
+            'worker_admitted':False,
+            'w1_verified':False,
+            'canonical':False,
+            'authority_effect':False,
+          }
+          receipt['receipt_sha256']=hashlib.sha256(json.dumps(receipt,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+          json.dump(receipt,open('evidence/v15-attestation-verification-receipt.json','w'),sort_keys=True,separators=(',',':'))
+          PY
+      - name: Upload credential-free verification receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: w1-v15-attestation-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/v15-attestation-verification-receipt.json
+          archive: false
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
