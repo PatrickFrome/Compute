@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { webMcpEnvelopeFromCdpTools, unsupportedWebMcpEnvelope } from '../../browser-shared/webmcp-tools-v1.mjs';
 import { compileWebMcpCatalog } from '../../browser-shared/webmcp-catalog-v1.mjs';
+import { SemanticPlanningBroker } from '../../browser-shared/semantic-planning-broker-v1.mjs';
 import { computeDocumentEpoch } from '../src/perception-envelope.mjs';
 import { ComputePlanningBrokerService } from '../src/planning-broker-service.mjs';
 
@@ -72,6 +73,7 @@ test('cold leader receives tiny tool-search handle, then exact lease gets bounde
   const searched = await service.searchTools({ profileId, targetId, flightId: leader.lookup.flight_id, leaseToken: leader.lookup.lease_token, query: 'find flight schedule' });
   assert.equal(searched.status, 'MATCHES');
   assert.equal(searched.query_persisted, false);
+  assert.equal(searched.lease_postflight_used, true);
   assert.equal(searched.search_result.results[0].name, 'search_flights');
   assert.ok(searched.search_result.result_count <= 5);
   assert.ok(searched.search_result.result_bytes < 12 * 1024);
@@ -91,6 +93,35 @@ test('invalid tool-search lease is rejected before fresh WebMCP browser work', a
   await assert.rejects(service.searchTools({ profileId, targetId, flightId: leader.lookup.flight_id, leaseToken: 'lease_wrong_XXXXXXXXXXXXXXXXXXXXXXXX', query: 'flight' }), /semantic_planning_broker_lease_invalid/);
   assert.equal(catalogCalls, 1);
   service.abort({ profileId, flightId: leader.lookup.flight_id, leaseToken: leader.lookup.lease_token, reasonCode: 'TEST_DONE' });
+});
+
+test('invalid tool-search query is rejected before fresh WebMCP browser work', async () => {
+  const { runtime } = runtimeFixture();
+  let catalogCalls = 0;
+  const service = new ComputePlanningBrokerService(runtime, { webMcpService: { catalog: async () => { catalogCalls += 1; return supportedCatalog({ count: 3 }); } } });
+  const leader = await service.lookup({ profileId, targetId, intentId: 'query_guard', actionKind: 'CLICK' });
+  assert.equal(catalogCalls, 1);
+  await assert.rejects(service.searchTools({ profileId, targetId, flightId: leader.lookup.flight_id, leaseToken: leader.lookup.lease_token, query: 'x'.repeat(513) }), /webmcp_tool_search_query_invalid/);
+  assert.equal(catalogCalls, 1);
+  service.abort({ profileId, flightId: leader.lookup.flight_id, leaseToken: leader.lookup.lease_token, reasonCode: 'TEST_DONE' });
+});
+
+test('tool-search lease expiry during fresh catalog work is rejected by postflight fence', async () => {
+  const { runtime } = runtimeFixture();
+  let now = 0;
+  let catalogCalls = 0;
+  const brokerFactory = () => new SemanticPlanningBroker({ clock: () => now, leaseTtlMs: 10 });
+  const webMcpService = { catalog: async () => {
+    catalogCalls += 1;
+    if (catalogCalls === 2) now = 11;
+    return supportedCatalog({ count: 3 });
+  } };
+  const service = new ComputePlanningBrokerService(runtime, { brokerFactory, webMcpService });
+  const leader = await service.lookup({ profileId, targetId, intentId: 'expiry_guard', actionKind: 'CLICK' });
+  assert.equal(leader.lookup.status, 'MISS_LEADER');
+  await assert.rejects(service.searchTools({ profileId, targetId, flightId: leader.lookup.flight_id, leaseToken: leader.lookup.lease_token, query: 'flight' }), /semantic_planning_broker_lease_invalid/);
+  assert.equal(catalogCalls, 2);
+  assert.equal(service.stats({ profileId }).broker.in_flight_count, 0);
 });
 
 test('tool search NO_MATCH does not guess and leaves semantic fallback available', async () => {
