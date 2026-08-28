@@ -50,13 +50,8 @@ impl std::error::Error for ProtocolError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HelperRequest {
-    ListSkills {
-        request_id: u64,
-    },
-    ReadPackage {
-        request_id: u64,
-        skill_name: String,
-    },
+    ListSkills { request_id: u64 },
+    ReadPackage { request_id: u64, skill_name: String },
 }
 
 impl HelperRequest {
@@ -114,7 +109,9 @@ impl<'a> Decoder<'a> {
             .checked_add(length)
             .ok_or_else(|| ProtocolError::new("skill_helper_protocol_length_overflow"))?;
         if end > self.bytes.len() {
-            return Err(ProtocolError::new("skill_helper_protocol_payload_truncated"));
+            return Err(ProtocolError::new(
+                "skill_helper_protocol_payload_truncated",
+            ));
         }
         let value = &self.bytes[self.offset..end];
         self.offset = end;
@@ -234,25 +231,33 @@ fn read_frame<R: Read>(reader: &mut R) -> Result<Option<Vec<u8>>, ProtocolError>
         return Err(ProtocolError::new("skill_helper_protocol_frame_too_large"));
     }
     let mut payload = vec![0_u8; length];
-    reader.read_exact(&mut payload).map_err(|error| match error.kind() {
-        ErrorKind::UnexpectedEof => ProtocolError::new("skill_helper_protocol_frame_truncated"),
-        _ => ProtocolError::new("skill_helper_protocol_read_failed"),
-    })?;
+    reader
+        .read_exact(&mut payload)
+        .map_err(|error| match error.kind() {
+            ErrorKind::UnexpectedEof => ProtocolError::new("skill_helper_protocol_frame_truncated"),
+            _ => ProtocolError::new("skill_helper_protocol_read_failed"),
+        })?;
     Ok(Some(payload))
 }
 
 fn decode_request_payload(payload: &[u8]) -> Result<HelperRequest, ProtocolError> {
     if payload.len() < MIN_REQUEST_PAYLOAD_BYTES || payload.len() > MAX_REQUEST_PAYLOAD_BYTES {
-        return Err(ProtocolError::new("skill_helper_protocol_request_size_invalid"));
+        return Err(ProtocolError::new(
+            "skill_helper_protocol_request_size_invalid",
+        ));
     }
     let mut decoder = Decoder::new(payload);
     let version = decoder.u8()?;
     if version != PROTOCOL_VERSION {
-        return Err(ProtocolError::new("skill_helper_protocol_version_unsupported"));
+        return Err(ProtocolError::new(
+            "skill_helper_protocol_version_unsupported",
+        ));
     }
     let opcode = decoder.u8()?;
     if !known_opcode(opcode) {
-        return Err(ProtocolError::new("skill_helper_protocol_opcode_unsupported"));
+        return Err(ProtocolError::new(
+            "skill_helper_protocol_opcode_unsupported",
+        ));
     }
     let flags = decoder.u16()?;
     if flags != 0 {
@@ -260,7 +265,9 @@ fn decode_request_payload(payload: &[u8]) -> Result<HelperRequest, ProtocolError
     }
     let request_id = decoder.u64()?;
     if request_id == 0 {
-        return Err(ProtocolError::new("skill_helper_protocol_request_id_invalid"));
+        return Err(ProtocolError::new(
+            "skill_helper_protocol_request_id_invalid",
+        ));
     }
 
     match opcode {
@@ -271,14 +278,18 @@ fn decode_request_payload(payload: &[u8]) -> Result<HelperRequest, ProtocolError
         OPCODE_READ_PACKAGE => {
             let name_length = decoder.u8()? as usize;
             if name_length == 0 || name_length > MAX_SKILL_NAME_BYTES {
-                return Err(ProtocolError::new("skill_helper_protocol_skill_name_invalid"));
+                return Err(ProtocolError::new(
+                    "skill_helper_protocol_skill_name_invalid",
+                ));
             }
             let name_bytes = decoder.take(name_length)?;
             decoder.finish()?;
             let name = std::str::from_utf8(name_bytes)
                 .map_err(|_| ProtocolError::new("skill_helper_protocol_skill_name_invalid"))?;
             if !validate_skill_name(name) {
-                return Err(ProtocolError::new("skill_helper_protocol_skill_name_invalid"));
+                return Err(ProtocolError::new(
+                    "skill_helper_protocol_skill_name_invalid",
+                ));
             }
             Ok(HelperRequest::ReadPackage {
                 request_id,
@@ -298,25 +309,35 @@ pub fn read_request<R: Read>(reader: &mut R) -> Result<Option<HelperRequest>, Pr
 
 fn validate_response_header(opcode: u8, request_id: u64) -> Result<(), ProtocolError> {
     if !known_opcode(opcode) {
-        return Err(ProtocolError::new("skill_helper_protocol_response_opcode_invalid"));
+        return Err(ProtocolError::new(
+            "skill_helper_protocol_response_opcode_invalid",
+        ));
     }
     if request_id == 0 {
-        return Err(ProtocolError::new("skill_helper_protocol_response_id_invalid"));
+        return Err(ProtocolError::new(
+            "skill_helper_protocol_response_id_invalid",
+        ));
     }
     Ok(())
 }
 
 fn validate_skill_names(names: &[String]) -> Result<(), ProtocolError> {
     if names.len() > MAX_SKILL_COUNT {
-        return Err(ProtocolError::new("skill_helper_protocol_skill_count_exceeded"));
+        return Err(ProtocolError::new(
+            "skill_helper_protocol_skill_count_exceeded",
+        ));
     }
     let mut previous: Option<&str> = None;
     for name in names {
         if !validate_skill_name(name) {
-            return Err(ProtocolError::new("skill_helper_protocol_skill_name_invalid"));
+            return Err(ProtocolError::new(
+                "skill_helper_protocol_skill_name_invalid",
+            ));
         }
         if previous.is_some_and(|value| value >= name.as_str()) {
-            return Err(ProtocolError::new("skill_helper_protocol_skill_order_invalid"));
+            return Err(ProtocolError::new(
+                "skill_helper_protocol_skill_order_invalid",
+            ));
         }
         previous = Some(name);
     }
@@ -325,7 +346,9 @@ fn validate_skill_names(names: &[String]) -> Result<(), ProtocolError> {
 
 fn validate_package_files(files: &[WirePackageFile]) -> Result<usize, ProtocolError> {
     if files.is_empty() || files.len() > MAX_PACKAGE_FILES {
-        return Err(ProtocolError::new("skill_helper_protocol_package_file_count_invalid"));
+        return Err(ProtocolError::new(
+            "skill_helper_protocol_package_file_count_invalid",
+        ));
     }
     let mut total_bytes = 0_usize;
     let mut previous: Option<&str> = None;
@@ -333,15 +356,21 @@ fn validate_package_files(files: &[WirePackageFile]) -> Result<usize, ProtocolEr
     let mut encoded_bytes = RESPONSE_HEADER_BYTES + 2;
     for file in files {
         if !validate_package_path(&file.path) {
-            return Err(ProtocolError::new("skill_helper_protocol_package_path_invalid"));
+            return Err(ProtocolError::new(
+                "skill_helper_protocol_package_path_invalid",
+            ));
         }
         if previous.is_some_and(|value| value >= file.path.as_str()) {
-            return Err(ProtocolError::new("skill_helper_protocol_package_order_invalid"));
+            return Err(ProtocolError::new(
+                "skill_helper_protocol_package_order_invalid",
+            ));
         }
         previous = Some(&file.path);
         let file_limit = if file.path == "SKILL.md" {
             if saw_skill || file.executable {
-                return Err(ProtocolError::new("skill_helper_protocol_skill_file_invalid"));
+                return Err(ProtocolError::new(
+                    "skill_helper_protocol_skill_file_invalid",
+                ));
             }
             saw_skill = true;
             MAX_SKILL_BYTES
@@ -355,17 +384,23 @@ fn validate_package_files(files: &[WirePackageFile]) -> Result<usize, ProtocolEr
             .checked_add(file.bytes.len())
             .ok_or_else(|| ProtocolError::new("skill_helper_protocol_length_overflow"))?;
         if total_bytes > MAX_PACKAGE_BYTES {
-            return Err(ProtocolError::new("skill_helper_protocol_package_too_large"));
+            return Err(ProtocolError::new(
+                "skill_helper_protocol_package_too_large",
+            ));
         }
         encoded_bytes = encoded_bytes
             .checked_add(2 + 1 + 4 + file.path.len() + file.bytes.len())
             .ok_or_else(|| ProtocolError::new("skill_helper_protocol_length_overflow"))?;
         if encoded_bytes > MAX_RESPONSE_PAYLOAD_BYTES {
-            return Err(ProtocolError::new("skill_helper_protocol_response_too_large"));
+            return Err(ProtocolError::new(
+                "skill_helper_protocol_response_too_large",
+            ));
         }
     }
     if !saw_skill {
-        return Err(ProtocolError::new("skill_helper_protocol_skill_file_missing"));
+        return Err(ProtocolError::new(
+            "skill_helper_protocol_skill_file_missing",
+        ));
     }
     Ok(encoded_bytes)
 }
@@ -375,11 +410,13 @@ fn response_payload_length(response: &HelperResponse) -> Result<usize, ProtocolE
         HelperResponse::Skills { request_id, names } => {
             validate_response_header(OPCODE_LIST_SKILLS, *request_id)?;
             validate_skill_names(names)?;
-            names.iter().try_fold(RESPONSE_HEADER_BYTES + 2, |total, name| {
-                total
-                    .checked_add(1 + name.len())
-                    .ok_or_else(|| ProtocolError::new("skill_helper_protocol_length_overflow"))
-            })?
+            names
+                .iter()
+                .try_fold(RESPONSE_HEADER_BYTES + 2, |total, name| {
+                    total
+                        .checked_add(1 + name.len())
+                        .ok_or_else(|| ProtocolError::new("skill_helper_protocol_length_overflow"))
+                })?
         }
         HelperResponse::Package { request_id, files } => {
             validate_response_header(OPCODE_READ_PACKAGE, *request_id)?;
@@ -392,7 +429,9 @@ fn response_payload_length(response: &HelperResponse) -> Result<usize, ProtocolE
         } => {
             validate_response_header(*opcode, *request_id)?;
             if !validate_error_code(code) {
-                return Err(ProtocolError::new("skill_helper_protocol_error_code_invalid"));
+                return Err(ProtocolError::new(
+                    "skill_helper_protocol_error_code_invalid",
+                ));
             }
             RESPONSE_HEADER_BYTES
                 .checked_add(1 + code.len())
@@ -400,7 +439,9 @@ fn response_payload_length(response: &HelperResponse) -> Result<usize, ProtocolE
         }
     };
     if length < MIN_RESPONSE_PAYLOAD_BYTES || length > MAX_RESPONSE_PAYLOAD_BYTES {
-        return Err(ProtocolError::new("skill_helper_protocol_response_size_invalid"));
+        return Err(ProtocolError::new(
+            "skill_helper_protocol_response_size_invalid",
+        ));
     }
     Ok(length)
 }

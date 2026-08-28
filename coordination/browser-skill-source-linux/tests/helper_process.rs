@@ -24,10 +24,8 @@ impl TempTree {
             .duration_since(UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "a2-r7g-{label}-{}-{nonce}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("a2-r7g-{label}-{}-{nonce}", std::process::id()));
         fs::create_dir_all(&path).expect("create temp tree");
         Self { path }
     }
@@ -162,7 +160,10 @@ fn helper_serves_list_then_package_sequentially_over_one_stream() {
 
     let mut stream = Decoder::new(&output.stdout);
     let mut list = take_frame(&mut stream);
-    assert_eq!(response_header(&mut list), (OPCODE_LIST_SKILLS, STATUS_OK, 11));
+    assert_eq!(
+        response_header(&mut list),
+        (OPCODE_LIST_SKILLS, STATUS_OK, 11)
+    );
     let count = list.u16();
     assert_eq!(count, 1);
     let name_length = list.u8() as usize;
@@ -191,8 +192,18 @@ fn helper_serves_list_then_package_sequentially_over_one_stream() {
     assert!(package.done());
     assert!(stream.done());
     assert_eq!(paths[0].0, "SKILL.md");
-    assert!(String::from_utf8(paths[0].1.clone()).unwrap().contains("name: inspect"));
-    assert_eq!(paths[1], ("references/REFERENCE.md".to_owned(), b"reference-v1".to_vec()));
+    assert!(
+        String::from_utf8(paths[0].1.clone())
+            .unwrap()
+            .contains("name: inspect")
+    );
+    assert_eq!(
+        paths[1],
+        (
+            "references/REFERENCE.md".to_owned(),
+            b"reference-v1".to_vec()
+        )
+    );
 }
 
 #[test]
@@ -228,11 +239,7 @@ fn valid_request_source_failure_returns_only_a_bounded_error_token() {
     write_skill(tree.path(), "inspect");
     let output = run_helper(
         tree.path(),
-        &request_frame(
-            OPCODE_READ_PACKAGE,
-            21,
-            &read_request_body("missing"),
-        ),
+        &request_frame(OPCODE_READ_PACKAGE, 21, &read_request_body("missing")),
     );
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
