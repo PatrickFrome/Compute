@@ -92,13 +92,13 @@ try {
   assert.equal(leader.planner_context_surface, 'SEMANTIC_PERCEPTION');
   assert.equal(leader.webmcp_degraded_reason, 'WEBMCP_NO_TOOLS');
   assert.ok(leader.planning_envelope);
-  assert.equal(leader.webmcp_routing_index, null);
+  assert.equal(leader.webmcp_search_handle, null);
   assert.equal(leader.planner_context_bytes, Buffer.byteLength(JSON.stringify(leader.planning_envelope)));
   assert.ok(waiters.every((row) =>
     row.result?.planner_context_surface === 'NONE'
     && row.result?.planner_context_bytes === 0
     && row.result?.planning_envelope == null
-    && row.result?.webmcp_routing_index == null
+    && row.result?.webmcp_search_handle == null
   ));
 
   const freshContext = await rpcCall(rpc.endpoint, token, 'planning.context', {
@@ -112,6 +112,7 @@ try {
   assert.equal(freshContext.effect_class, 'LOCAL_COORDINATION');
   assert.equal(freshContext.result?.revalidation?.status, 'CONTEXT_REVALIDATED');
   assert.equal(freshContext.result?.fresh_capture_used, true);
+  assert.equal(freshContext.result?.lease_preflight_used, true);
   assert.equal(freshContext.result?.lease_bound, true);
   assert.equal(freshContext.result?.planning_envelope?.document_epoch, leader.planning_envelope.document_epoch);
   assert.equal(freshContext.result?.planner_context_bytes, Buffer.byteLength(JSON.stringify(freshContext.result.planning_envelope)));
@@ -145,7 +146,7 @@ try {
   assert.equal(hot.result?.planner_context_surface, 'NONE');
   assert.equal(hot.result?.planner_context_bytes, 0);
   assert.equal(hot.result?.planning_envelope, null);
-  assert.equal(hot.result?.webmcp_routing_index, null);
+  assert.equal(hot.result?.webmcp_search_handle, null);
 
   const stats = await rpcCall(rpc.endpoint, token, 'planning.stats', { profileId }, 'stats');
   assert.equal(stats.ok, true);
@@ -153,6 +154,7 @@ try {
   assert.equal(stats.result?.broker?.metrics?.leader_misses, 1);
   assert.equal(stats.result?.broker?.metrics?.waiters, 7);
   assert.equal(stats.result?.broker?.metrics?.context_revalidations, 1);
+  assert.ok(Number(stats.result?.broker?.metrics?.lease_preflights || 0) >= 1);
   assert.equal(stats.result?.broker?.metrics?.promotions, 1);
   assert.ok(Number(stats.result?.broker?.metrics?.cache_hits || 0) >= 1);
 
@@ -169,7 +171,7 @@ try {
   ]) assert.equal(serialized.includes(forbidden), false);
 
   console.log(JSON.stringify({
-    schema: 'metaengine.a2-compute-browser.r6c-real-planning-routing-smoke.v1',
+    schema: 'metaengine.a2-compute-browser.r6c-real-planning-routing-smoke.v2',
     ok: true,
     chrome_webmcp_status: 'SUPPORTED',
     registered_tools: 0,
@@ -181,6 +183,7 @@ try {
     waiter_context_bytes: 0,
     semantic_fallback_reason: leader.webmcp_degraded_reason,
     fresh_semantic_fallback: true,
+    lease_preflight_used: true,
     lease_bound_context: true,
     cache_hit_context_bytes: hot.result.planner_context_bytes,
     runtime_evaluate_used: false,
