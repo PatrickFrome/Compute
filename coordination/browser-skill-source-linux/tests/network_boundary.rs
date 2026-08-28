@@ -134,7 +134,7 @@ fn positive_allowlist_child_probe() {
 
     let report = match syscall_sandbox::restrict_to_steady_state_syscalls() {
         Ok(report) => report,
-        Err(_) => child_fail("r7j_child_seccomp_failed"),
+        Err(error) => child_fail(error.code()),
     };
     if report.allowed_syscall_count != 14
         || !report.positive_allowlist
