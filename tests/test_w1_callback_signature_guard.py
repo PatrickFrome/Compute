@@ -80,7 +80,7 @@ class CallbackSignatureGuardTests(unittest.TestCase):
             "provider_instance_id": self.instance_id,
             "algorithm": guard.ALGORITHM,
             "key_id": self.key_id,
-            "public_jwk": self.jwk,
+            "public_jwk": copy.deepcopy(self.jwk),
             "observed_at": "2026-08-28T02:00:00+00:00",
             "private_key_exported": False,
             "canonical": False,
