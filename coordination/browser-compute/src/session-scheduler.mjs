@@ -34,6 +34,7 @@ export class CdpSessionScheduler {
     this.#client = client;
     this.#processIncarnationId = assertNonempty(processIncarnationId, 'process_incarnation_id_invalid');
     if (!Number.isSafeInteger(maxInFlight) || maxInFlight < 1 || maxInFlight > 32) throw new Error('session_max_inflight_invalid');
+    this.#maxInFlight = maxInFlight;
     if (onTargetInvalidated != null && typeof onTargetInvalidated !== 'function') throw new Error('session_invalidation_handler_invalid');
     if (onDisposed != null && typeof onDisposed !== 'function') throw new Error('session_dispose_handler_invalid');
     this.#onTargetInvalidated = onTargetInvalidated;
