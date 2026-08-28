@@ -1,0 +1,140 @@
+name: A2 Browser R7G Helper Protocol
+
+on:
+  push:
+    branches:
+      - 'work/a2-browser-r7-skill-runtime*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r7g-helper-protocol-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Establish source epoch and exact dependency surface
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = "Linux"
+          echo "SOURCE_DATE_EPOCH=$(git -C ../.. show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+          rustc --version | tee "$RUNNER_TEMP/r7g-rustc-version.txt"
+          cargo --version | tee "$RUNNER_TEMP/r7g-cargo-version.txt"
+          test "$(rustc --version | awk '{print $2}')" = "1.98.0"
+          test -f Cargo.lock
+          cargo tree --locked | tee "$RUNNER_TEMP/r7g-cargo-tree.txt"
+          grep -q 'rustix v1\.1\.4' "$RUNNER_TEMP/r7g-cargo-tree.txt"
+          python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          cargo = tomllib.loads(Path('Cargo.toml').read_text())
+          deps = cargo.get('dependencies', {})
+          if set(deps) != {'rustix'}:
+              raise SystemExit(f'unexpected direct dependency surface: {sorted(deps)}')
+          rustix = deps['rustix']
+          if not isinstance(rustix, dict) or rustix.get('version') != '=1.1.4':
+              raise SystemExit('rustix must remain exact-pinned at 1.1.4')
+          PY
+
+      - name: R7G parser service and process contracts
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --all-targets | tee "$RUNNER_TEMP/r7g-rust-tests.log"
+          cargo test --locked --bin a2-skill-source-helper | tee "$RUNNER_TEMP/r7g-protocol-tests.log"
+          cargo test --locked --test helper_process | tee "$RUNNER_TEMP/r7g-process-tests.log"
+          cargo build --locked --release --bin a2-skill-source-helper
+          sha256sum target/release/a2-skill-source-helper | tee "$RUNNER_TEMP/r7g-helper-sha256.txt"
+          stat -c '%s' target/release/a2-skill-source-helper | tee "$RUNNER_TEMP/r7g-helper-size.txt"
+          test "$(cat "$RUNNER_TEMP/r7g-helper-size.txt")" -lt 2097152
+
+          grep -q 'MAX_REQUEST_PAYLOAD_BYTES' src/helper_protocol.rs
+          grep -q 'MAX_RESPONSE_PAYLOAD_BYTES' src/helper_protocol.rs
+          grep -q 'OPCODE_LIST_SKILLS' src/helper_protocol.rs
+          grep -q 'OPCODE_READ_PACKAGE' src/helper_protocol.rs
+          grep -q 'skill_name' src/helper_protocol.rs
+          grep -q 'skill_helper_protocol_frame_too_large' src/helper_protocol.rs
+          grep -q 'skill_helper_protocol_error_code_invalid' src/helper_protocol.rs
+          grep -q 'response_payload_length' src/helper_protocol.rs
+          grep -q 'write_response_header' src/helper_protocol.rs
+          ! grep -q 'encode_response_payload' src/helper_protocol.rs
+          grep -q 'read_request' src/bin/a2-skill-source-helper.rs
+          grep -q 'LinuxSkillSource::open' src/bin/a2-skill-source-helper.rs
+          ! grep -n -E -- 'std::net|TcpStream|UdpSocket|UnixStream|serde|bincode|capnp|prost|flate|zstd|gzip|Command::|\bunsafe\b|Runtime\.evaluate|WebMCP\.' \
+            src/helper_protocol.rs src/bin/a2-skill-source-helper.rs
+          ! grep -n -E -- 'std::fs|File::open|OpenOptions' \
+            src/helper_protocol.rs src/bin/a2-skill-source-helper.rs
+
+      - name: R7F1 R7C and R7E regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            coordination/browser-shared/tests/skill-package-identity-v1.test.mjs \
+            coordination/browser-shared/tests/skill-registry-v1.test.mjs | tee "$RUNNER_TEMP/r7g-js-regression.log"
+
+      - name: Build deterministic R7G evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          EPOCH="$SOURCE_DATE_EPOCH"
+          mkdir -p dist/a2-browser-r7g/evidence dist/a2-browser-r7g/bin
+          cp coordination/browser-skill-source-linux/target/release/a2-skill-source-helper dist/a2-browser-r7g/bin/
+          cp "$RUNNER_TEMP/r7g-rustc-version.txt" dist/a2-browser-r7g/evidence/R7G_RUSTC_VERSION.txt
+          cp "$RUNNER_TEMP/r7g-cargo-version.txt" dist/a2-browser-r7g/evidence/R7G_CARGO_VERSION.txt
+          cp "$RUNNER_TEMP/r7g-cargo-tree.txt" dist/a2-browser-r7g/evidence/R7G_CARGO_TREE.txt
+          cp "$RUNNER_TEMP/r7g-rust-tests.log" dist/a2-browser-r7g/evidence/R7G_RUST_TESTS.log
+          cp "$RUNNER_TEMP/r7g-protocol-tests.log" dist/a2-browser-r7g/evidence/R7G_PROTOCOL_TESTS.log
+          cp "$RUNNER_TEMP/r7g-process-tests.log" dist/a2-browser-r7g/evidence/R7G_PROCESS_TESTS.log
+          cp "$RUNNER_TEMP/r7g-helper-sha256.txt" dist/a2-browser-r7g/evidence/R7G_HELPER_SHA256.txt
+          cp "$RUNNER_TEMP/r7g-helper-size.txt" dist/a2-browser-r7g/evidence/R7G_HELPER_SIZE.txt
+          cp "$RUNNER_TEMP/r7g-js-regression.log" dist/a2-browser-r7g/evidence/R7G_JS_REGRESSION.log
+          printf '%s\n' "$GITHUB_SHA" > dist/a2-browser-r7g/evidence/SOURCE_COMMIT.txt
+          tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf dist/a2-browser-r7g/A2_BROWSER_R7G_BOUNDED_HELPER_PROTOCOL.tar \
+            coordination/browser-skill-source-linux/Cargo.toml \
+            coordination/browser-skill-source-linux/Cargo.lock \
+            coordination/browser-skill-source-linux/rust-toolchain.toml \
+            coordination/browser-skill-source-linux/src/lib.rs \
+            coordination/browser-skill-source-linux/src/helper_protocol.rs \
+            coordination/browser-skill-source-linux/src/bin/a2-skill-source-helper.rs \
+            coordination/browser-skill-source-linux/tests/source.rs \
+            coordination/browser-skill-source-linux/tests/cardinality.rs \
+            coordination/browser-skill-source-linux/tests/helper_process.rs \
+            coordination/browser-shared/skill-package-identity-v1.mjs \
+            coordination/browser-shared/skill-registry-v1.mjs \
+            research/A2_BROWSER_R7F1_BOUNDED_DIRECTORY_ENUMERATION_2026-08-28.md \
+            research/A2_BROWSER_R7G_BOUNDED_BINARY_HELPER_PROTOCOL_PRE_RESEARCH_2026-08-28.md \
+            dist/a2-browser-r7g/bin/a2-skill-source-helper
+          sha256sum dist/a2-browser-r7g/A2_BROWSER_R7G_BOUNDED_HELPER_PROTOCOL.tar > dist/a2-browser-r7g/R7G_SHA256SUMS.txt
+
+      - name: Attest R7G evidence provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-browser-r7g/A2_BROWSER_R7G_BOUNDED_HELPER_PROTOCOL.tar
+
+      - name: Upload R7G evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-r7g-helper-protocol-${{ github.sha }}
+          path: |
+            dist/a2-browser-r7g/A2_BROWSER_R7G_BOUNDED_HELPER_PROTOCOL.tar
+            dist/a2-browser-r7g/R7G_SHA256SUMS.txt
+            dist/a2-browser-r7g/bin/
+            dist/a2-browser-r7g/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
