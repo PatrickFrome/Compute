@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ManagedChromeProcess } from './chrome-process.mjs';
 import { CONTEXT_KIND, DEFAULT_CONTEXT_ID, ProfileContextManager } from './context-manager.mjs';
+import { SemanticCaptureAdapter } from './semantic-capture-adapter.mjs';
 import { atomicJsonWrite, defaultStateRoot, ensurePrivateDir, readJson, validateContextId, validateNavigationUrl, validateProfileId, validateTargetId } from './security.mjs';
 
 const PROFILE_META = 'a2-profile.json';
@@ -105,7 +106,7 @@ export class ComputeBrowserRuntime {
     const processRef = new ManagedChromeProcess({ executablePath: this.engineExecutable, userDataDir, headless: this.headlessDefault, allowNoSandbox: this.allowNoSandbox });
     try {
       await processRef.start();
-      const entry = { processRef, meta, lockFile, bindings: new Map(), contextBindings: new Map() };
+      const entry = { processRef, meta, lockFile, bindings: new Map(), contextBindings: new Map(), semanticFrames: new Map() };
       this.running.set(id, entry);
       await new ProfileContextManager({ profileDir: this.profileDir(id), cdp: processRef.cdp, bindings: entry.contextBindings }).ensure();
       return this.profileHealth(id);
@@ -168,6 +169,7 @@ export class ComputeBrowserRuntime {
       if (target.context_id !== logicalId || target.status === 'RETIRED') return target;
       changed = true;
       entry.bindings.delete(target.target_id);
+      entry.semanticFrames.delete(target.target_id);
       return { ...target, status: 'RETIRED', updated_at: now() };
     });
     if (changed) await this.#saveTargets(id, registry);
@@ -206,6 +208,7 @@ export class ComputeBrowserRuntime {
     registry.targets.push(target);
     await this.#saveTargets(id, registry);
     entry.bindings.set(logicalId, { cdp_target_id: created.targetId, context_id: logicalContextId, bound_at: now(), conversation_epoch: target.conversation_epoch });
+    entry.semanticFrames.delete(logicalId);
     return { ...target, bound: true };
   }
 
@@ -214,6 +217,21 @@ export class ComputeBrowserRuntime {
     const registry = await this.#loadTargets(id);
     const bindings = this.running.get(id)?.bindings || new Map();
     return registry.targets.filter((row) => includeRetired || row.status !== 'RETIRED').map((row) => ({ ...row, bound: bindings.has(row.target_id) }));
+  }
+
+  async semanticSnapshot({ profileId, targetId, maxNodes = 60, taskText = '' } = {}) {
+    const { id: profile, entry } = this.#runningEntry(profileId);
+    const id = validateTargetId(targetId);
+    const registry = await this.#loadTargets(profile);
+    const target = registry.targets.find((row) => row.target_id === id && row.status === 'ACTIVE');
+    if (!target) throw new Error('semantic_target_not_active');
+    const binding = entry.bindings.get(id);
+    if (!binding) throw new Error('semantic_target_not_bound');
+    const adapter = new SemanticCaptureAdapter({ cdp: entry.processRef.cdp });
+    const previousFrame = entry.semanticFrames.get(id) || null;
+    const frame = await adapter.capture({ target, binding, previousFrame, maxNodes, taskText: String(taskText || '').slice(0, 4000) });
+    entry.semanticFrames.set(id, frame);
+    return frame;
   }
 
   async activateTarget({ profileId, targetId } = {}) {
@@ -232,6 +250,7 @@ export class ComputeBrowserRuntime {
     if (!binding) throw new Error('target_not_bound');
     await entry.processRef.cdp.call('Target.closeTarget', { targetId: binding.cdp_target_id });
     entry.bindings.delete(id);
+    entry.semanticFrames.delete(id);
     const registry = await this.#loadTargets(profile);
     const index = registry.targets.findIndex((row) => row.target_id === id);
     if (index >= 0) {
@@ -245,9 +264,10 @@ export class ComputeBrowserRuntime {
     const profiles = [];
     for (const id of this.running.keys()) profiles.push(await this.profileHealth(id));
     return {
-      schema: 'metaengine.a2-compute-browser.health.v1', runtime: '0.2.0-dev.1', started_at: this.startedAt,
+      schema: 'metaengine.a2-compute-browser.health.v1', runtime: '0.3.0-dev.1', started_at: this.startedAt,
       web_authority_effect: false, local_effects_present: true, raw_cdp_rpc_exposed: false,
-      debug_transport: 'native_pipe_b3', devtools_tcp_exposed: false, context_manager: 'b2_logical_context_v1', profiles
+      debug_transport: 'native_pipe_b3', devtools_tcp_exposed: false, context_manager: 'b2_logical_context_v1',
+      semantic_perception: 'r4_semantic_frame_v1', semantic_page_script_evaluation: false, profiles
     };
   }
 
