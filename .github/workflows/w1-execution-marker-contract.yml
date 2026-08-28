@@ -1,0 +1,66 @@
+name: W1 Execution Marker Correlation Contract
+
+on:
+  push:
+    branches:
+      - work/main-roadmap-accelerators-v5
+      - work/w1-linux-worker-safety
+    paths:
+      - '.github/workflows/w1-execution-marker-contract.yml'
+      - 'controller/w1/w1_execution_marker_guard.py'
+      - 'controller/w1/aws_ssm_safety_send_semantics_guard.py'
+      - 'controller/w1/aws_ssm_safety_provision_provenance.py'
+      - 'controller/w1/build_host_safety_package.py'
+      - 'supabase/prep/w1_execution_marker_receipt_v1.sql'
+      - 'tests/test_w1_execution_marker_guard.py'
+      - 'tests/test_w1_execution_marker_sql_contract.py'
+      - 'research/W1_EXECUTION_MARKER_CORRELATION.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/w1-execution-marker-contract.yml'
+      - 'controller/w1/w1_execution_marker_guard.py'
+      - 'controller/w1/aws_ssm_safety_send_semantics_guard.py'
+      - 'controller/w1/aws_ssm_safety_provision_provenance.py'
+      - 'controller/w1/build_host_safety_package.py'
+      - 'supabase/prep/w1_execution_marker_receipt_v1.sql'
+      - 'tests/test_w1_execution_marker_guard.py'
+      - 'tests/test_w1_execution_marker_sql_contract.py'
+      - 'research/W1_EXECUTION_MARKER_CORRELATION.md'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Verify exact execution-marker contracts
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m py_compile \
+            controller/w1/w1_execution_marker_guard.py \
+            controller/w1/aws_ssm_safety_send_semantics_guard.py \
+            controller/w1/aws_ssm_safety_provision_provenance.py \
+            controller/w1/build_host_safety_package.py
+          python3 -m unittest \
+            tests.test_w1_aws_ssm_safety_send_semantics_guard \
+            tests.test_w1_execution_marker_guard \
+            tests.test_w1_execution_marker_sql_contract -v
+
+      - name: Prove source-visible nonauthority boundary
+        run: |
+          set -euo pipefail
+          grep -F 'database_persistence_verified": False' controller/w1/w1_execution_marker_guard.py
+          grep -F 'persistent_worker_proof": False' controller/w1/w1_execution_marker_guard.py
+          grep -F 'w1_verified": False' controller/w1/w1_execution_marker_guard.py
+          grep -F 'security invoker' supabase/prep/w1_execution_marker_receipt_v1.sql
+          ! grep -Fi 'security definer' supabase/prep/w1_execution_marker_receipt_v1.sql
+          ! grep -Fi "'w1_verified',true" supabase/prep/w1_execution_marker_receipt_v1.sql
