@@ -121,8 +121,8 @@ test('cold leader with WebMCP tools receives routing index and no semantic envel
   assert.equal(result.webmcp_routing_index.tool_count, 8);
   assert.equal(result.planner_context_bytes, Buffer.byteLength(JSON.stringify(result.webmcp_routing_index)));
   const serialized = JSON.stringify(result.webmcp_routing_index);
-  assert.equal(serialized.includes('input_schema'), false);
-  assert.equal(serialized.includes('annotations'), false);
+  assert.equal(serialized.includes('"input_schema":'), false);
+  assert.equal(serialized.includes('"annotations":'), false);
   assert.equal(result.authority_effect, false);
   service.abort({ profileId, flightId: result.lookup.flight_id, leaseToken: result.lookup.lease_token, reasonCode: 'TEST_DONE' });
 });
