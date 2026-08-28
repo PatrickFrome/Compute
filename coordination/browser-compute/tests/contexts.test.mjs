@@ -294,3 +294,63 @@ test('RPC lifecycle operations are serialized across separate client connections
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('RPC perception reads may overlap while the scheduler remains the bounded execution gate', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'a2-cb-rpc-perception-'));
+  let rpc;
+  let concurrent = 0;
+  let maximum = 0;
+  const runtime = {
+    stateRoot: root,
+    async snapshotTarget({ targetId }) {
+      concurrent += 1;
+      maximum = Math.max(maximum, concurrent);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      concurrent -= 1;
+      return { target_id: targetId };
+    }
+  };
+  function request(endpoint, token, id) {
+    return new Promise((resolve, reject) => {
+      const socket = net.createConnection(endpoint);
+      let buffer = '';
+      socket.once('error', reject);
+      socket.on('data', (chunk) => {
+        buffer += chunk.toString('utf8');
+        const newline = buffer.indexOf('\n');
+        if (newline < 0) return;
+        const response = JSON.parse(buffer.slice(0, newline));
+        socket.end();
+        resolve(response);
+      });
+      socket.once('connect', () => socket.write(`${JSON.stringify({
+        id,
+        token,
+        method: 'perception.snapshot',
+        params: { profileId: 'rpc-profile', targetId: `target_${id}` }
+      })}\n`));
+    });
+  }
+  try {
+    try {
+      rpc = await startRpcServer(runtime);
+    } catch (error) {
+      if (error?.code === 'EPERM') {
+        t.skip('local sandbox forbids Unix-domain socket listen');
+        return;
+      }
+      throw error;
+    }
+    const token = (await fs.readFile(rpc.tokenFile, 'utf8')).trim();
+    const [first, second] = await Promise.all([
+      request(rpc.endpoint, token, 1),
+      request(rpc.endpoint, token, 2)
+    ]);
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, true);
+    assert.equal(maximum, 2);
+  } finally {
+    await rpc?.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

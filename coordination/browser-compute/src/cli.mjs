@@ -90,6 +90,19 @@ async function selfTest() {
     const targets = await runtime.listTargets(profileId);
     const health = await runtime.health();
     if (!started.running || !created.bound || !targets.some((row) => row.target_id === 'smoke_target' && row.bound) || health.profiles.length !== 1) throw new Error('self_test_contract_failed');
+    const snapshot = await runtime.snapshotTarget({ profileId, targetId: 'smoke_target' });
+    const snapshotJson = JSON.stringify(snapshot);
+    if (snapshot.schema !== 'metaengine.a2-compute-browser.semantic-snapshot.v1'
+      || snapshot.scope !== 'MAIN_TARGET'
+      || snapshot.oopif_complete !== false
+      || snapshot.actuation_eligible !== false
+      || !snapshot.snapshot_id?.startsWith('snapshot_')
+      || snapshot.nodes.length < 1) {
+      throw new Error('self_test_semantic_snapshot_invalid');
+    }
+    if (/sessionId|backendDOMNodeId|cdp_target_id|engine-target/i.test(snapshotJson)) {
+      throw new Error('self_test_semantic_snapshot_identity_leak');
+    }
     await runtime.activateTarget({ profileId, targetId: 'smoke_target' });
     await runtime.closeTarget({ profileId, targetId: 'smoke_target' });
     await runtime.closeContext({ profileId, contextId: 'smoke_context' });
@@ -114,7 +127,15 @@ async function selfTest() {
       context_epoch_rotated: true,
       default_context_non_disposable: true,
       context_authority_params_exposed: false,
-      remote_navigation_blocked: true
+      remote_navigation_blocked: true,
+      flattened_session_scheduler_verified: true,
+      semantic_snapshot_verified: true,
+      semantic_snapshot_scope: snapshot.scope,
+      semantic_snapshot_actuation_eligible: snapshot.actuation_eligible,
+      semantic_node_count: snapshot.nodes.length,
+      oopif_complete: snapshot.oopif_complete,
+      runtime_evaluate_used: false,
+      raw_engine_identity_exposed: false
     }));
   } finally {
     await runtime.shutdown();

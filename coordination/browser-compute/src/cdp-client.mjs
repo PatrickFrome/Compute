@@ -63,6 +63,7 @@ export class CdpPipeClient {
   #connected = false;
   #closed = false;
   #listeners = [];
+  #closeListeners = new Set();
 
   constructor({ writable, readable, maxFrameBytes = DEFAULT_CDP_PIPE_MAX_FRAME_BYTES } = {}) {
     this.#writable = writable;
@@ -107,6 +108,13 @@ export class CdpPipeClient {
       const pending = this.#pending.get(message.id);
       if (!pending) return;
       this.#pending.delete(message.id);
+      const responseSessionId = typeof message.sessionId === 'string' && message.sessionId ? message.sessionId : null;
+      if (responseSessionId !== pending.sessionId) {
+        const error = new Error('cdp_session_response_mismatch');
+        pending.reject(error);
+        this.abort(error);
+        return;
+      }
       if (message.error) pending.reject(new Error(`cdp_error:${message.error.code}:${message.error.message}`));
       else pending.resolve(message.result || {});
       return;
@@ -136,9 +144,33 @@ export class CdpPipeClient {
     return () => this.#events.set(method, (this.#events.get(method) || []).filter((fn) => fn !== listener));
   }
 
+  onClose(listener) {
+    if (typeof listener !== 'function') throw new Error('cdp_close_listener_invalid');
+    if (this.#closed) {
+      queueMicrotask(() => { try { listener(new Error('cdp_pipe_client_closed')); } catch (_) {} });
+      return () => {};
+    }
+    this.#closeListeners.add(listener);
+    return () => this.#closeListeners.delete(listener);
+  }
+
+  rejectSession(sessionId, error = new Error('cdp_session_detached')) {
+    if (typeof sessionId !== 'string' || !sessionId) throw new Error('cdp_session_id_invalid');
+    const rejection = error instanceof Error ? error : new Error(String(error));
+    let rejected = 0;
+    for (const [id, pending] of this.#pending) {
+      if (pending.sessionId !== sessionId) continue;
+      this.#pending.delete(id);
+      pending.reject(rejection);
+      rejected += 1;
+    }
+    return rejected;
+  }
+
   call(method, params = {}, { sessionId = null, timeoutMs = 15000 } = {}) {
     if (!this.connected) return Promise.reject(new Error('cdp_not_connected'));
     if (typeof method !== 'string' || !method || !Number.isInteger(timeoutMs) || timeoutMs < 1) return Promise.reject(new Error('cdp_call_invalid'));
+    if (sessionId != null && (typeof sessionId !== 'string' || !sessionId)) return Promise.reject(new Error('cdp_session_id_invalid'));
     const id = this.#nextId++;
     const message = { id, method, params };
     if (sessionId) message.sessionId = sessionId;
@@ -150,6 +182,7 @@ export class CdpPipeClient {
         reject(new Error(`cdp_call_timeout:${method}`));
       }, timeoutMs);
       const pending = {
+        sessionId: typeof sessionId === 'string' && sessionId ? sessionId : null,
         resolve: (value) => { clearTimeout(timer); resolve(value); },
         reject: (error) => { clearTimeout(timer); reject(error); }
       };
@@ -170,7 +203,12 @@ export class CdpPipeClient {
     this.#closed = true;
     this.#connected = false;
     this.#detachListeners();
-    this.#failAll(error instanceof Error ? error : new Error(String(error)));
+    const rejection = error instanceof Error ? error : new Error(String(error));
+    this.#failAll(rejection);
+    for (const listener of this.#closeListeners) {
+      try { listener(rejection); } catch (_) {}
+    }
+    this.#closeListeners.clear();
     try { this.#writable.destroy?.(); } catch (_) {}
     try { this.#readable.destroy?.(); } catch (_) {}
   }

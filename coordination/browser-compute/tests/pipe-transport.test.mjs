@@ -57,6 +57,53 @@ test('pipe client correlates success and CDP error responses', async () => {
   }
 });
 
+test('flattened session correlation is exact and detach rejects only that session', async () => {
+  const toChrome = new PassThrough();
+  const fromChrome = new PassThrough();
+  const client = await new CdpPipeClient({ writable: toChrome, readable: fromChrome }).connect();
+  const requests = [];
+  toChrome.on('data', (frame) => requests.push(JSON.parse(frame.subarray(0, frame.length - 1).toString('utf8'))));
+  try {
+    const root = client.call('Browser.getVersion');
+    const sessionA = client.call('DOMSnapshot.captureSnapshot', {}, { sessionId: 'session-a' });
+    const sessionB = client.call('Accessibility.getFullAXTree', {}, { sessionId: 'session-b' });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(requests.length, 3);
+    assert.equal(requests[0].sessionId, undefined);
+    assert.equal(requests[1].sessionId, 'session-a');
+    assert.equal(requests[2].sessionId, 'session-b');
+    fromChrome.write(`${JSON.stringify({ id: requests[0].id, result: { root: true } })}\0`);
+    fromChrome.write(`${JSON.stringify({ id: requests[2].id, sessionId: 'session-b', result: { b: true } })}\0`);
+    assert.deepEqual(await root, { root: true });
+    assert.deepEqual(await sessionB, { b: true });
+    assert.equal(client.rejectSession('session-a', new Error('snapshot_stale')), 1);
+    await assert.rejects(sessionA, /snapshot_stale/);
+    assert.equal(client.pendingCount, 0);
+  } finally {
+    await client.close();
+  }
+});
+
+test('a response cannot cross a flattened session boundary', async () => {
+  const toChrome = new PassThrough();
+  const fromChrome = new PassThrough();
+  const client = await new CdpPipeClient({ writable: toChrome, readable: fromChrome }).connect();
+  try {
+    toChrome.once('data', (frame) => {
+      const request = JSON.parse(frame.subarray(0, frame.length - 1).toString('utf8'));
+      fromChrome.write(`${JSON.stringify({ id: request.id, sessionId: 'session-b', result: {} })}\0`);
+    });
+    await assert.rejects(
+      client.call('DOMSnapshot.captureSnapshot', {}, { sessionId: 'session-a' }),
+      /cdp_session_response_mismatch/
+    );
+    assert.equal(client.connected, false);
+    await assert.rejects(client.call('Browser.getVersion'), /cdp_not_connected/);
+  } finally {
+    await client.close();
+  }
+});
+
 test('pipe close and malformed input reject every pending call', async () => {
   const toChrome = new PassThrough();
   const fromChrome = new PassThrough();
