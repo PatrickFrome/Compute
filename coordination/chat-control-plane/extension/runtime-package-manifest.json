@@ -1,12 +1,18 @@
 {
   "schema": "metaengine.a2-browser-operator.runtime-package.v1",
-  "package_version": "0.7.0",
-  "operator_runtime": "0.7.0-dev.2",
+  "package_version": "0.7.1",
+  "operator_runtime": "0.7.1-dev.1",
   "policy": {
     "canonical_filenames_only": true,
     "reject_versioned_runtime_files": true,
     "reject_unlisted_files": true,
     "generic_bootstrap_must_be_empty": true
+  },
+  "generated_files": {
+    "semantic-perception-compiler.js": {
+      "kind": "classic_semantic_perception_v1",
+      "source": "coordination/browser-shared/semantic-perception-compiler.mjs"
+    }
   },
   "files": [
     "manifest.json",
@@ -33,6 +39,8 @@
     "runtime-core.js",
     "operator-control.js",
     "operator-perception.js",
+    "semantic-perception-compiler.js",
+    "operator-semantic-perception.js",
     "operator-oopif-perception.js",
     "operator-semantic-actions.js",
     "supervisor-authority.js",
