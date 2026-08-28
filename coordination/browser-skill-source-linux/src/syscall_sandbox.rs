@@ -5,29 +5,26 @@ use std::collections::BTreeMap;
 use std::convert::TryInto;
 use std::fmt;
 
-const DENIED_SYSCALLS: [i64; 21] = [
-    libc::SYS_socket,
-    libc::SYS_socketpair,
-    libc::SYS_connect,
-    libc::SYS_bind,
-    libc::SYS_listen,
-    libc::SYS_accept,
-    libc::SYS_accept4,
-    libc::SYS_sendto,
-    libc::SYS_sendmsg,
-    libc::SYS_sendmmsg,
-    libc::SYS_recvfrom,
-    libc::SYS_recvmsg,
-    libc::SYS_recvmmsg,
-    libc::SYS_shutdown,
-    libc::SYS_getsockname,
-    libc::SYS_getpeername,
-    libc::SYS_setsockopt,
-    libc::SYS_getsockopt,
-    libc::SYS_io_uring_setup,
-    libc::SYS_io_uring_enter,
-    libc::SYS_io_uring_register,
+#[cfg(target_arch = "x86_64")]
+const ALLOWED_SYSCALLS: [i64; 14] = [
+    libc::SYS_brk,
+    libc::SYS_close,
+    libc::SYS_exit_group,
+    libc::SYS_fcntl,
+    libc::SYS_getdents64,
+    libc::SYS_lseek,
+    libc::SYS_mmap,
+    libc::SYS_munmap,
+    libc::SYS_openat,
+    libc::SYS_openat2,
+    libc::SYS_read,
+    libc::SYS_sigaltstack,
+    libc::SYS_statx,
+    libc::SYS_write,
 ];
+
+#[cfg(not(target_arch = "x86_64"))]
+const ALLOWED_SYSCALLS: [i64; 0] = [];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyscallSandboxError {
@@ -54,16 +51,24 @@ impl std::error::Error for SyscallSandboxError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SyscallSandboxReport {
-    pub denied_syscall_count: usize,
-    pub all_socket_creation_denied: bool,
-    pub io_uring_disabled: bool,
+    pub allowed_syscall_count: usize,
+    pub positive_allowlist: bool,
+    pub default_deny: bool,
+    pub default_errno: i32,
     pub tsync: bool,
-    pub full_allowlist_claimed: bool,
+    pub architecture_bound: bool,
     pub network_namespace_isolation: bool,
+    pub kill_on_violation: bool,
 }
 
-pub fn restrict_network_syscalls() -> Result<SyscallSandboxReport, SyscallSandboxError> {
-    let rules: BTreeMap<i64, Vec<_>> = DENIED_SYSCALLS
+pub fn restrict_to_steady_state_syscalls() -> Result<SyscallSandboxReport, SyscallSandboxError> {
+    if std::env::consts::ARCH != "x86_64" {
+        return Err(SyscallSandboxError::new(
+            "skill_helper_seccomp_arch_unsupported",
+        ));
+    }
+
+    let rules: BTreeMap<i64, Vec<_>> = ALLOWED_SYSCALLS
         .into_iter()
         .map(|syscall| (syscall, Vec::new()))
         .collect();
@@ -72,8 +77,8 @@ pub fn restrict_network_syscalls() -> Result<SyscallSandboxReport, SyscallSandbo
         .map_err(|_| SyscallSandboxError::new("skill_helper_seccomp_arch_unsupported"))?;
     let filter = SeccompFilter::new(
         rules,
-        SeccompAction::Allow,
         SeccompAction::Errno(libc::EPERM as u32),
+        SeccompAction::Allow,
         target_arch,
     )
     .map_err(|_| SyscallSandboxError::new("skill_helper_seccomp_filter_invalid"))?;
@@ -84,11 +89,13 @@ pub fn restrict_network_syscalls() -> Result<SyscallSandboxReport, SyscallSandbo
         .map_err(|_| SyscallSandboxError::new("skill_helper_seccomp_install_failed"))?;
 
     Ok(SyscallSandboxReport {
-        denied_syscall_count: DENIED_SYSCALLS.len(),
-        all_socket_creation_denied: true,
-        io_uring_disabled: true,
+        allowed_syscall_count: ALLOWED_SYSCALLS.len(),
+        positive_allowlist: true,
+        default_deny: true,
+        default_errno: libc::EPERM,
         tsync: true,
-        full_allowlist_claimed: false,
+        architecture_bound: true,
         network_namespace_isolation: false,
+        kill_on_violation: false,
     })
 }
