@@ -176,9 +176,12 @@ function compileDocumentNodes({ document, documentIndex, strings, domByBackendId
   };
 }
 
-function visibleLayoutRow(bounds, styles) {
+function visibleLayoutRow(bounds, styles, styleEvidenceComplete) {
+  if (!styleEvidenceComplete || styles.some((value) => value === '')) return false;
+  const opacity = Number(styles[2]);
   return bounds[2] > 0 && bounds[3] > 0 &&
-    styles[0] !== 'none' && !['hidden', 'collapse'].includes(styles[1]) && Number(styles[2]) > 0;
+    styles[0] !== 'none' && !['hidden', 'collapse'].includes(styles[1]) &&
+    Number.isFinite(opacity) && opacity > 0;
 }
 
 function compileDocumentLayout({ document, strings, domByBackendId, backendIds, count }) {
@@ -196,8 +199,8 @@ function compileDocumentLayout({ document, strings, domByBackendId, backendIds, 
     if (seenNodes.has(nodeIndex)) throw new Error('snapshot_layout_node_duplicate');
     seenNodes.add(nodeIndex);
     const styleIndexes = denseArray(styles[index], 'snapshot_layout_style_row_invalid', PERCEPTION_COMPUTED_STYLES.length);
-    if (styleIndexes.length !== PERCEPTION_COMPUTED_STYLES.length) throw new Error('snapshot_layout_style_row_length');
-    const styleValues = styleIndexes.map((stringIndex) => stringAt(strings, stringIndex, 'snapshot_layout_style_index_invalid'));
+    const styleValues = styleIndexes.map((stringIndex) => stringAtOrEmpty(strings, stringIndex, 'snapshot_layout_style_index_invalid'));
+    const styleEvidenceComplete = styleIndexes.length === PERCEPTION_COMPUTED_STYLES.length;
     stringAtOrEmpty(strings, text[index], 'snapshot_layout_text_index_invalid');
     const rectangle = denseArray(bounds[index], 'snapshot_layout_bounds_row_invalid', 4);
     if (rectangle.length !== 4) throw new Error('snapshot_layout_bounds_row_length');
@@ -206,7 +209,7 @@ function compileDocumentLayout({ document, strings, domByBackendId, backendIds, 
     const row = domByBackendId.get(backendIds[nodeIndex]);
     row.bounds = normalizedBounds;
     row.paintOrder = paintOrder;
-    row.visible = visibleLayoutRow(normalizedBounds, styleValues);
+    row.visible = visibleLayoutRow(normalizedBounds, styleValues, styleEvidenceComplete);
   }
 }
 
