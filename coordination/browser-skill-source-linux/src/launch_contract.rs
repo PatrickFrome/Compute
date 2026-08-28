@@ -32,33 +32,61 @@ pub struct LaunchContractReport {
     pub close_range_unshare: bool,
     pub stdio_only_inherited_fds: bool,
     pub procfs_verified: bool,
+    pub preserved_fd: Option<u32>,
 }
 
-pub fn sanitize_inherited_fds() -> Result<(), LaunchContractError> {
-    // SAFETY: close_range takes scalar values only. The range is valid (3..=UINT_MAX),
-    // CLOSE_RANGE_UNSHARE is a kernel-defined flag, and no pointer, borrowed memory, aliasing,
-    // or Rust lifetime crosses this syscall boundary. This is intentionally the sole explicit
-    // unsafe seam in the R7I launch contract.
-    let result = unsafe {
-        libc::syscall(
-            libc::SYS_close_range,
-            3_u32,
-            u32::MAX,
-            libc::CLOSE_RANGE_UNSHARE,
-        )
-    };
+fn close_range(first: u32, last: u32, flags: u32, code: &'static str) -> Result<(), LaunchContractError> {
+    // SAFETY: close_range takes scalar values only. Callers validate first <= last, flags are
+    // kernel-defined close_range flags, and no pointer, borrowed memory, aliasing, or Rust
+    // lifetime crosses this syscall boundary. This remains the sole explicit unsafe seam in the
+    // launch-contract module.
+    let result = unsafe { libc::syscall(libc::SYS_close_range, first, last, flags) };
     if result != 0 {
-        return Err(LaunchContractError::new(
-            "skill_helper_close_range_unshare_failed",
-        ));
+        return Err(LaunchContractError::new(code));
     }
     Ok(())
 }
 
-pub fn verify_clean_inherited_fds() -> Result<LaunchContractReport, LaunchContractError> {
-    // Snapshot /proc/self/fd in a lexical scope so the directory iterator's own descriptor is
-    // closed before we probe any descriptor above stderr. In the single-threaded bootstrap phase,
-    // a descriptor that still exists after this scope is ambient authority that survived cleanup.
+pub fn sanitize_inherited_fds(preserve_fd: Option<u32>) -> Result<(), LaunchContractError> {
+    match preserve_fd {
+        None => close_range(
+            3,
+            u32::MAX,
+            libc::CLOSE_RANGE_UNSHARE,
+            "skill_helper_close_range_unshare_failed",
+        ),
+        Some(fd) if fd < 3 => Err(LaunchContractError::new(
+            "skill_launcher_preserved_fd_invalid",
+        )),
+        Some(3) => close_range(
+            4,
+            u32::MAX,
+            libc::CLOSE_RANGE_UNSHARE,
+            "skill_launcher_close_range_unshare_failed",
+        ),
+        Some(fd) => {
+            close_range(
+                3,
+                fd - 1,
+                libc::CLOSE_RANGE_UNSHARE,
+                "skill_launcher_close_range_unshare_failed",
+            )?;
+            if fd < u32::MAX {
+                close_range(
+                    fd + 1,
+                    u32::MAX,
+                    0,
+                    "skill_launcher_close_range_upper_failed",
+                )?;
+            }
+            Ok(())
+        }
+    }
+}
+
+pub fn verify_clean_inherited_fds(
+    preserve_fd: Option<u32>,
+) -> Result<LaunchContractReport, LaunchContractError> {
     let observed = {
         let entries = fs::read_dir("/proc/self/fd")
             .map_err(|_| LaunchContractError::new("skill_helper_procfs_fd_scan_failed"))?;
@@ -78,17 +106,26 @@ pub fn verify_clean_inherited_fds() -> Result<LaunchContractReport, LaunchContra
         fds
     };
 
+    let mut preserved_seen = preserve_fd.is_none();
     for fd in observed {
         if fd <= 2 {
             continue;
         }
         match fs::read_link(format!("/proc/self/fd/{fd}")) {
-            Err(error) if error.kind() == ErrorKind::NotFound => {
-                // This is the descriptor owned by the now-dropped read_dir iterator.
+            Ok(_) if Some(fd) == preserve_fd => {
+                preserved_seen = true;
             }
             Ok(_) => {
                 return Err(LaunchContractError::new(
                     "skill_helper_inherited_fd_unexpected",
+                ));
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound && Some(fd) != preserve_fd => {
+                // The descriptor was owned by the now-dropped read_dir iterator.
+            }
+            Err(_) if Some(fd) == preserve_fd => {
+                return Err(LaunchContractError::new(
+                    "skill_launcher_preserved_fd_missing",
                 ));
             }
             Err(_) => {
@@ -99,9 +136,16 @@ pub fn verify_clean_inherited_fds() -> Result<LaunchContractReport, LaunchContra
         }
     }
 
+    if !preserved_seen {
+        return Err(LaunchContractError::new(
+            "skill_launcher_preserved_fd_missing",
+        ));
+    }
+
     Ok(LaunchContractReport {
         close_range_unshare: true,
-        stdio_only_inherited_fds: true,
+        stdio_only_inherited_fds: preserve_fd.is_none(),
         procfs_verified: true,
+        preserved_fd: preserve_fd,
     })
 }
