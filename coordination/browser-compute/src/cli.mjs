@@ -52,6 +52,10 @@ async function selfTest() {
     try { await runtime.createTarget({ profileId, targetId: 'forbidden_remote', role: 'CI_NEGATIVE', url: 'https://example.com/' }); }
     catch (error) { remoteNavigationBlocked = String(error?.message || error) === 'b1_remote_navigation_not_enabled'; }
     if (!remoteNavigationBlocked) throw new Error('self_test_remote_navigation_not_blocked');
+    let defaultContextCloseBlocked = false;
+    try { await runtime.closeContext({ profileId, contextId: 'default' }); }
+    catch (error) { defaultContextCloseBlocked = String(error?.message || error) === 'default_context_not_disposable'; }
+    if (!defaultContextCloseBlocked) throw new Error('self_test_default_context_disposable');
 
     const entryBeforeRestart = runtime.running.get(profileId);
     const oldPid = entryBeforeRestart?.processRef?.child?.pid;
@@ -61,6 +65,7 @@ async function selfTest() {
       && !launchArgs.some((value) => String(value).startsWith('--remote-debugging-port='))
       && !launchArgs.some((value) => String(value).startsWith('--remote-debugging-address='));
     if (!pipeLaunchVerified) throw new Error('self_test_native_pipe_launch_not_proven');
+    const precrashContext = await runtime.createContext({ profileId, contextId: 'precrash_context' });
     await runtime.createTarget({ profileId, targetId: 'precrash_target', role: 'CI_CRASH_FENCE', url: 'about:blank' });
     const browserExited = new Promise((resolve) => entryBeforeRestart.processRef.child.once('exit', resolve));
     await entryBeforeRestart.processRef.cdp.call('Browser.close');
@@ -72,13 +77,22 @@ async function selfTest() {
     if (!afterRestart.some((row) => row.target_id === 'precrash_target' && row.bound === false && row.process_incarnation_id === null)) {
       throw new Error('self_test_stale_binding_not_invalidated');
     }
+    const contextsAfterRestart = await runtime.listContexts(profileId);
+    if (!contextsAfterRestart.some((row) => row.context_id === 'precrash_context' && row.status === 'LOST' && row.bound === false)) {
+      throw new Error('self_test_lost_context_not_recorded');
+    }
+    const recoveredContext = await runtime.createContext({ profileId, contextId: 'precrash_context' });
+    if (recoveredContext.context_epoch !== precrashContext.context_epoch + 1) throw new Error('self_test_context_epoch_not_rotated');
+    await runtime.closeContext({ profileId, contextId: 'precrash_context' });
 
-    const created = await runtime.createTarget({ profileId, targetId: 'smoke_target', role: 'CI_SMOKE', url: 'about:blank' });
+    const smokeContext = await runtime.createContext({ profileId, contextId: 'smoke_context' });
+    const created = await runtime.createTarget({ profileId, contextId: smokeContext.context_id, targetId: 'smoke_target', role: 'CI_SMOKE', url: 'about:blank' });
     const targets = await runtime.listTargets(profileId);
     const health = await runtime.health();
     if (!started.running || !created.bound || !targets.some((row) => row.target_id === 'smoke_target' && row.bound) || health.profiles.length !== 1) throw new Error('self_test_contract_failed');
     await runtime.activateTarget({ profileId, targetId: 'smoke_target' });
     await runtime.closeTarget({ profileId, targetId: 'smoke_target' });
+    await runtime.closeContext({ profileId, contextId: 'smoke_context' });
     console.log(JSON.stringify({
       schema: 'metaengine.a2-compute-browser.self-test.v1',
       ok: true,
@@ -94,6 +108,12 @@ async function selfTest() {
       process_incarnation_rotated: true,
       stale_target_binding_invalidated: true,
       durable_pre_effect_target_intents: true,
+      durable_pre_effect_context_intents: true,
+      context_isolation_verified: true,
+      lost_context_observed: true,
+      context_epoch_rotated: true,
+      default_context_non_disposable: true,
+      context_authority_params_exposed: false,
       remote_navigation_blocked: true
     }));
   } finally {
