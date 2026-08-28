@@ -35,24 +35,26 @@ test('chrome args isolate profile and expose only the inherited B3 pipe', () => 
   assert.ok(args.includes('--headless'));
   assert.ok(!args.includes('--no-sandbox'));
   assert.throws(() => buildChromeArgs({ userDataDir: dir, allowNoSandbox: true }), /no_sandbox_forbidden_outside_ci/);
-  assert.deepEqual(protocol.identity.ephemeral, ['browser_pid', 'process_incarnation_id', 'cdp_browser_context_id', 'cdp_target_id']);
+  assert.deepEqual(protocol.identity.ephemeral, ['browser_pid', 'process_incarnation_id', 'cdp_browser_context_id', 'cdp_target_id', 'cdp_session_id', 'cdp_backend_node_id']);
   assert.equal(protocol.trusted_engine_transport.kind, 'chromium_remote_debugging_pipe');
   assert.equal(protocol.trusted_engine_transport.devtools_tcp_listener, false);
   assert.equal(protocol.trusted_engine_transport.raw_cdp_external, false);
 });
 
 test('RPC surface is typed, effect-classed, and exposes no raw browser code path', () => {
-  assert.deepEqual(RPC_METHODS, ['runtime.health', 'profile.start', 'profile.stop', 'profile.list', 'context.create', 'context.list', 'context.close', 'target.create', 'target.list', 'target.activate', 'target.close']);
+  assert.deepEqual(RPC_METHODS, ['runtime.health', 'profile.start', 'profile.stop', 'profile.list', 'context.create', 'context.list', 'context.close', 'target.create', 'target.list', 'perception.snapshot', 'target.activate', 'target.close']);
   assert.deepEqual(protocol.methods, RPC_METHODS);
   assert.deepEqual(protocol.method_effects, RPC_METHOD_EFFECTS);
   assert.equal(protocol.web_authority_effect, false);
   assert.equal(protocol.local_effects_present, true);
-  for (const forbidden of ['raw_cdp', 'runtime_evaluate', 'javascript_eval', 'shell_exec', 'arbitrary_browser_flags', 'arbitrary_executable_path', 'headless_override', 'sandbox_override', 'raw_browser_context_id', 'context_proxy_override', 'context_universal_network_access', 'default_context_disposal', 'silent_context_recreation']) {
+  for (const forbidden of ['raw_cdp', 'runtime_evaluate', 'javascript_eval', 'shell_exec', 'arbitrary_browser_flags', 'arbitrary_executable_path', 'headless_override', 'sandbox_override', 'raw_browser_context_id', 'context_proxy_override', 'context_universal_network_access', 'default_context_disposal', 'silent_context_recreation', 'raw_cdp_session_id', 'raw_cdp_backend_node_id', 'arbitrary_perception_limits', 'arbitrary_computed_styles', 'oopif_completeness_without_proof']) {
     assert.ok(protocol.forbidden_external_capabilities.includes(forbidden));
   }
   const joined = RPC_METHODS.join(' ');
   assert.doesNotMatch(joined, /cdp|evaluate|javascript|exec|shell/i);
   assert.deepEqual(validateRpcParams('context.create', { profileId: 'one', contextId: 'two' }), { profileId: 'one', contextId: 'two' });
+  assert.deepEqual(validateRpcParams('perception.snapshot', { profileId: 'one', targetId: 'target_one' }), { profileId: 'one', targetId: 'target_one' });
+  assert.throws(() => validateRpcParams('perception.snapshot', { profileId: 'one', targetId: 'target_one', computedStyles: ['all'] }), /rpc_params_forbidden/);
   for (const key of ['proxyServer', 'proxyBypassList', 'originsWithUniversalNetworkAccess', 'browserContextId', 'executablePath', 'headless', 'allowNoSandbox']) {
     assert.throws(() => validateRpcParams('context.create', { profileId: 'one', [key]: 'attacker' }), /rpc_params_forbidden/);
   }

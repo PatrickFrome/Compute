@@ -2,7 +2,7 @@
 
 `A2 Compute Browser` is the standalone execution surface for Browser Operator. The Chrome extension remains a compatibility adapter; this runtime owns a dedicated browser process and profile.
 
-## B0–B3 typed runtime scope
+## B0–B3 + R4 typed runtime scope
 
 This first slice is deliberately small and fail-closed:
 
@@ -22,6 +22,13 @@ This first slice is deliberately small and fail-closed:
 - target create/activate/close writes a durable `PREPARING`/`ACTIVATING`/`CLOSING` intent before the CDP effect; an ambiguous operation remains recovery-required and is not blindly retried;
 - B1 target creation is restricted to `about:blank`; remote navigation is not yet an enabled capability;
 - browser-process failure rejects all pending CDP calls, invalidates ephemeral bindings and may restart the process with a new incarnation, but never implies replay of a browser/web action;
+- flattened CDP sessions are internal and bind exactly to logical target, conversation epoch, browser-process incarnation, and session generation;
+- detach/crash/destroy rejects only the affected session work, while pipe loss invalidates all session bindings;
+- calls are FIFO per logical target and browser-wide in-flight perception is bounded by daemon policy;
+- `perception.snapshot` is a read-only `DOMSnapshot` + Accessibility compiler with fixed style inputs and daemon-owned document/node/string/byte/deadline limits;
+- public snapshots use HMAC-opaque node IDs and never expose CDP session, target, backend-node, remote-object, or AX-node IDs;
+- the current snapshot is explicitly `MAIN_TARGET` and `oopif_complete=false`; cross-origin OOPIF completeness is not claimed without a later real fixture;
+- DOM/layout and AX are sequential read-only observations, so this first snapshot is explicitly `actuation_eligible=false`; a later node-bound action gate must revalidate exact identity and geometry immediately before input;
 - no click/type/submit actuation is exposed in B1.
 
 ## Engine policy
@@ -42,7 +49,7 @@ For a destructive-free smoke test (headless `about:blank` only):
 A2_CHROME_EXECUTABLE=/absolute/path/to/chrome node src/cli.mjs self-test
 ```
 
-The self-test verifies real Chromium startup over the inherited pipe, negative remote-navigation policy, browser-process restart after `Browser.close`, PID/incarnation rotation, old-binding invalidation, explicit `LOST` context recovery with epoch rotation, isolated target creation, context disposal, target retirement and clean shutdown.
+The self-test verifies real Chromium startup over the inherited pipe, negative remote-navigation policy, browser-process restart after `Browser.close`, PID/incarnation rotation, old-binding invalidation, explicit `LOST` context recovery with epoch rotation, isolated target creation, a bounded semantic snapshot without eval or raw engine identity, context disposal, target retirement and clean shutdown.
 
 `--no-sandbox` is not accepted in normal operation. The runtime permits it only when both `CI=true` and `A2_CI_ALLOW_NO_SANDBOX=1` are set by the CI smoke environment.
 
@@ -57,6 +64,7 @@ The self-test verifies real Chromium startup over the inherited pipe, negative r
 - `context.close`
 - `target.create`
 - `target.list`
+- `perception.snapshot`
 - `target.activate`
 - `target.close`
 
@@ -66,4 +74,4 @@ There is intentionally no `cdp.call`, `Runtime.evaluate`, `exec`, generic browse
 
 ## Research
 
-See `research/A2_COMPUTE_BROWSER_B1_B3_DEEP_RESEARCH_2026-08-28.md`, `research/a2-compute-browser-b2-b3/report-source.md`, and `research/a2-compute-browser-b2-contexts/report-source.md` for the Chromium profile-lock, remote-debugging security, native-pipe, process-incarnation, and context-recovery decisions.
+See `research/A2_COMPUTE_BROWSER_B1_B3_DEEP_RESEARCH_2026-08-28.md`, `research/a2-compute-browser-b2-b3/report-source.md`, `research/a2-compute-browser-b2-contexts/report-source.md`, and `research/a2-compute-browser-b3-r4-session-perception/report-source.md` for the Chromium profile-lock, remote-debugging security, native-pipe, process-incarnation, session-lifecycle, semantic-perception, and context-recovery decisions.

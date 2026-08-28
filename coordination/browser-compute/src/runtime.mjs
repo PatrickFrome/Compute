@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ManagedChromeProcess } from './chrome-process.mjs';
+import { captureSemanticSnapshot } from './perception.mjs';
+import { CdpSessionScheduler } from './session-scheduler.mjs';
 import { atomicJsonWrite, defaultStateRoot, ensurePrivateDir, readJson, validateContextId, validateNavigationUrl, validateProfileId, validateTargetId } from './security.mjs';
 
 const PROFILE_META = 'a2-profile.json';
@@ -9,7 +11,7 @@ const CONTEXTS_FILE = 'contexts.json';
 const TARGETS_FILE = 'targets.json';
 const PROFILE_LOCK_FILE = 'a2-runtime.lock';
 const DAEMON_LOCK_FILE = 'a2-daemon.lock';
-export const COMPUTE_BROWSER_RUNTIME_VERSION = '0.2.0-dev.2';
+export const COMPUTE_BROWSER_RUNTIME_VERSION = '0.3.0-dev.1';
 
 function now() { return new Date().toISOString(); }
 function blankRegistry() { return { schema: 'metaengine.a2-compute-browser.targets.v1', revision: 0, targets: [], updated_at: now() }; }
@@ -112,10 +114,19 @@ export class ComputeBrowserRuntime {
         meta,
         lockFile,
         bindings: new Map(),
+        sessionScheduler: null,
+        perceptionNodeKey: crypto.randomBytes(32),
+        perceptionBindings: new Map(),
         contextBindings: new Map([
           ['default', { browser_context_id: null, process_incarnation_id: processRef.processIncarnationId, bound_at: now() }]
         ])
       };
+      entry.sessionScheduler = new CdpSessionScheduler({
+        client: processRef.cdp,
+        processIncarnationId: processRef.processIncarnationId,
+        onTargetInvalidated: (targetId) => entry.perceptionBindings.delete(targetId),
+        onDisposed: () => entry.perceptionBindings.clear()
+      });
       this.running.set(id, entry);
       await this.#reconcileContextsAfterStart(id, entry);
       return this.profileHealth(id);
@@ -131,6 +142,8 @@ export class ComputeBrowserRuntime {
     const id = validateProfileId(profileId);
     const entry = this.running.get(id);
     if (!entry) return { profile_id: id, running: false };
+    entry.sessionScheduler?.dispose?.('profile_stopped');
+    entry.perceptionBindings?.clear();
     await entry.processRef.stop().catch(() => {});
     this.running.delete(id);
     await releaseOwnedPidLock(entry.lockFile);
@@ -222,6 +235,20 @@ export class ComputeBrowserRuntime {
       throw new Error('target_binding_stale');
     }
     return binding;
+  }
+
+  #sessionScheduler(entry) {
+    if (!entry.sessionScheduler) {
+      entry.sessionScheduler = new CdpSessionScheduler({
+        client: entry.processRef.cdp,
+        processIncarnationId: entry.processRef.processIncarnationId,
+        onTargetInvalidated: (targetId) => entry.perceptionBindings?.delete(targetId),
+        onDisposed: () => entry.perceptionBindings?.clear()
+      });
+    }
+    if (!entry.perceptionNodeKey) entry.perceptionNodeKey = crypto.randomBytes(32);
+    if (!entry.perceptionBindings) entry.perceptionBindings = new Map();
+    return entry.sessionScheduler;
   }
 
   #liveContextBinding(entry, contextId) {
@@ -447,6 +474,39 @@ export class ComputeBrowserRuntime {
     });
   }
 
+  async snapshotTarget({ profileId, targetId } = {}) {
+    const { id: profile, entry } = this.#runningEntry(profileId);
+    const id = validateTargetId(targetId);
+    const binding = this.#liveBinding(entry, id);
+    const registry = await this.#loadTargets(profile);
+    const target = registry.targets.find((row) => row.target_id === id);
+    if (!target) throw new Error('target_registry_missing');
+    if (target.status !== 'ACTIVE') throw new Error('target_recovery_required');
+    if (target.conversation_epoch !== binding.conversation_epoch) throw new Error('target_binding_stale');
+    const identity = {
+      targetId: id,
+      cdpTargetId: binding.cdp_target_id,
+      conversationEpoch: target.conversation_epoch,
+      processIncarnationId: entry.processRef.processIncarnationId
+    };
+    const captured = await captureSemanticSnapshot({
+      scheduler: this.#sessionScheduler(entry),
+      identity,
+      nodeKey: entry.perceptionNodeKey
+    });
+    if (!entry.processRef.isRunning() || entry.processRef.processIncarnationId !== identity.processIncarnationId) {
+      throw new Error('snapshot_stale');
+    }
+    entry.perceptionBindings.set(id, {
+      snapshot_id: captured.snapshot.snapshot_id,
+      conversation_epoch: identity.conversationEpoch,
+      process_incarnation_id: identity.processIncarnationId,
+      session_generation: captured.snapshot.session_generation,
+      nodes: captured.nodeBindings
+    });
+    return captured.snapshot;
+  }
+
   async activateTarget({ profileId, targetId } = {}) {
     const { id: profile, entry } = this.#runningEntry(profileId);
     const id = validateTargetId(targetId);
@@ -498,6 +558,8 @@ export class ComputeBrowserRuntime {
     };
     await this.#saveTargets(profile, registry);
     await entry.processRef.cdp.call('Target.closeTarget', { targetId: binding.cdp_target_id });
+    entry.sessionScheduler?.invalidateTarget?.(id, 'target_closed');
+    entry.perceptionBindings?.delete(id);
     entry.bindings.delete(id);
     registry.targets[index] = {
       ...registry.targets[index],

@@ -15,6 +15,7 @@ export const RPC_METHODS = Object.freeze([
   'context.close',
   'target.create',
   'target.list',
+  'perception.snapshot',
   'target.activate',
   'target.close'
 ]);
@@ -29,6 +30,7 @@ export const RPC_METHOD_EFFECTS = Object.freeze({
   'context.close': 'LOCAL_LIFECYCLE',
   'target.create': 'LOCAL_LIFECYCLE',
   'target.list': 'READ_ONLY',
+  'perception.snapshot': 'READ_ONLY',
   'target.activate': 'LOCAL_UI',
   'target.close': 'LOCAL_LIFECYCLE'
 });
@@ -43,6 +45,7 @@ const RPC_PARAM_KEYS = Object.freeze({
   'context.close': ['profileId', 'contextId'],
   'target.create': ['profileId', 'targetId', 'contextId', 'role', 'url'],
   'target.list': ['profileId', 'includeRetired'],
+  'perception.snapshot': ['profileId', 'targetId'],
   'target.activate': ['profileId', 'targetId'],
   'target.close': ['profileId', 'targetId']
 });
@@ -73,6 +76,7 @@ async function dispatch(runtime, method, params) {
     case 'context.close': return runtime.closeContext(params);
     case 'target.create': return runtime.createTarget(params);
     case 'target.list': return runtime.listTargets(params?.profileId, { includeRetired: params?.includeRetired === true });
+    case 'perception.snapshot': return runtime.snapshotTarget(params);
     case 'target.activate': return runtime.activateTarget(params);
     case 'target.close': return runtime.closeTarget(params);
     default: throw new Error('rpc_method_forbidden');
@@ -83,12 +87,24 @@ export async function startRpcServer(runtime) {
   const { token, file: tokenFile } = await rotateControlToken(runtime.stateRoot);
   const endpoint = rpcEndpoint(runtime.stateRoot);
   if (process.platform !== 'win32') await fs.rm(endpoint, { force: true }).catch(() => {});
-  let queue = Promise.resolve();
+  let effectQueue = Promise.resolve();
   const server = net.createServer((socket) => {
     socket.setNoDelay(true);
     let buffer = '';
+    let socketQueue = Promise.resolve();
 
-    async function drain() {
+    async function respond(request, id) {
+      try {
+        if (!safeEqual(request.token, token)) throw new Error('rpc_unauthorized');
+        if (!RPC_METHODS.includes(String(request.method || ''))) throw new Error('rpc_method_forbidden');
+        const result = await dispatch(runtime, request.method, request.params || {});
+        socket.write(`${JSON.stringify({ id, ok: true, effect_class: RPC_METHOD_EFFECTS[request.method], web_authority_effect: false, result })}\n`);
+      } catch (error) {
+        socket.write(`${JSON.stringify({ id, ok: false, error: String(error?.message || error) })}\n`);
+      }
+    }
+
+    function drain() {
       let newline;
       while ((newline = buffer.indexOf('\n')) >= 0) {
         const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);
@@ -97,21 +113,22 @@ export async function startRpcServer(runtime) {
         try { request = JSON.parse(line); }
         catch (_) { socket.write(`${JSON.stringify({ ok: false, error: 'rpc_json_invalid' })}\n`); continue; }
         const id = request.id ?? null;
-        try {
-          if (!safeEqual(request.token, token)) throw new Error('rpc_unauthorized');
-          if (!RPC_METHODS.includes(String(request.method || ''))) throw new Error('rpc_method_forbidden');
-          const result = await dispatch(runtime, request.method, request.params || {});
-          socket.write(`${JSON.stringify({ id, ok: true, effect_class: RPC_METHOD_EFFECTS[request.method], web_authority_effect: false, result })}\n`);
-        } catch (error) {
-          socket.write(`${JSON.stringify({ id, ok: false, error: String(error?.message || error) })}\n`);
-        }
+        const execute = () => respond(request, id);
+        const schedule = request.method === 'perception.snapshot'
+          ? execute
+          : () => {
+              const job = effectQueue.then(execute, execute);
+              effectQueue = job.catch(() => {});
+              return job;
+            };
+        socketQueue = socketQueue.then(schedule, schedule).catch(() => socket.destroy());
       }
     }
 
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8');
       if (Buffer.byteLength(buffer) > MAX_LINE_BYTES) return socket.destroy(new Error('rpc_frame_too_large'));
-      queue = queue.then(drain, drain).catch(() => socket.destroy());
+      try { drain(); } catch (_) { socket.destroy(); }
     });
   });
 
