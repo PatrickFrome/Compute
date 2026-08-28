@@ -44,8 +44,8 @@ jobs:
               'configure-'+'aws-credentials',
               'ACTIONS_ID_TOKEN_'+'REQUEST',
               'aws sts assume-role-with-'+'web-identity',
-              'npx ',
-              'supabase functions download',
+              'n'+'px ',
+              'supabase functions '+'download',
           )
           for token in forbidden:
               assert token not in raw, token
