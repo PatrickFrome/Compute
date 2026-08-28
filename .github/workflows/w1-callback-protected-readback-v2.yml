@@ -39,11 +39,18 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           raw=Path('.github/workflows/w1-callback-protected-readback-v2.yml').read_text()
-          for forbidden in ('workflow_dispatch:', 'id-token: write', 'secrets.W1_',
-                            'configure-aws-credentials', 'ACTIONS_ID_TOKEN_REQUEST',
-                            'aws sts assume-role-with-web-identity', 'W1_AWS_OIDC_SUB'):
-              assert forbidden not in raw, forbidden
+          forbidden=(
+              'workflow_'+'dispatch:',
+              'id-token:'+' write',
+              'secrets.'+'W1_',
+              'configure-'+'aws-credentials',
+              'ACTIONS_ID_TOKEN_'+'REQUEST',
+              'aws sts assume-role-with-'+'web-identity',
+              'W1_AWS_OIDC_'+'SUB',
+          )
+          for token in forbidden:
+              assert token not in raw, token
           current=Path('.github/workflows/w1-callback-protected-binding.yml').read_text()
-          assert 'workflow_dispatch:' in current
+          assert ('workflow_'+'dispatch:') in current
           assert 'actions/oidc/customization/sub' in current
           PY

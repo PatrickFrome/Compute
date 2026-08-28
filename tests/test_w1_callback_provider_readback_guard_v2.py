@@ -9,7 +9,7 @@ from controller.w1 import w1_callback_provider_readback_guard as v1
 from controller.w1 import w1_callback_provider_readback_guard_v2 as guard
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / ".github/workflows/w1-callback-protected-readback-v2.yml"
+WORKFLOW = ROOT / ".github/workflows/w1-callback-protected-binding.yml"
 
 
 def db_ready() -> dict:
@@ -230,7 +230,8 @@ class CallbackProviderInventoryReadbackV2Tests(unittest.TestCase):
         self.assertIn("aws ssm list-documents", source)
         self.assertIn("Key=Owner,Values=Self", source)
         self.assertIn("Key=Name,Values=\"$name\"", source)
-        self.assertIn("ssm:ListDocuments", source)
+        self.assertIn("default_transaction_read_only=on", source)
+        self.assertIn("build-aws-session-policy", source)
         self.assertNotIn("npx ", source)
         self.assertNotIn("functions download", source)
         self.assertNotIn("InvalidDocument", source)
@@ -243,12 +244,20 @@ class CallbackProviderInventoryReadbackV2Tests(unittest.TestCase):
 
     def test_workflow_provider_reads_fail_on_transport_or_auth_error(self):
         source = WORKFLOW.read_text()
-        edge = source.split("      - name: Capture Edge authenticated inventory", 1)[1]
-        edge = edge.split("      - name: Build exact AWS read-only inline session policy", 1)[0]
-        self.assertGreaterEqual(edge.count("curl --fail-with-body"), 3)
-        aws = source.split("      - name: Capture AWS authenticated document inventories", 1)[1]
-        aws = aws.split("      - name: Normalize authenticated provider readback", 1)[0]
+        edge_name = "      - name: Capture Supabase Edge authenticated inventory and exact reviewed body with GET-only Management API"
+        normalize_name = "      - name: Normalize authenticated provider readback and seal one non-authority binding receipt"
+        edge = source.split(edge_name, 1)[1].split(normalize_name, 1)[0]
+        self.assertGreaterEqual(edge.count("curl --fail-with-body"), 1)
+        self.assertGreaterEqual(edge.count("mgmt_get \"https://api.supabase.com"), 3)
+        self.assertNotIn("|| true", edge)
+        aws_name = "      - name: Exchange the same checked OIDC token for a 15-minute intersected AWS read-only session and prove role trust"
+        db_name = "      - name: Capture Postgres callback privilege state in a forced read-only transaction"
+        aws = source.split(aws_name, 1)[1].split(db_name, 1)[0]
         self.assertIn("set -euo pipefail", aws)
+        self.assertIn("aws ssm list-documents", aws)
+        self.assertIn("aws ssm describe-document", aws)
+        self.assertIn("aws ssm get-document", aws)
+        self.assertIn("aws ssm describe-document-permission", aws)
         self.assertNotIn("|| true", aws)
 
 

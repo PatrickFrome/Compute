@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import json
 from pathlib import Path
 import re
@@ -10,7 +9,7 @@ from controller.w1 import w1_callback_ingress_readiness_guard as readiness
 from controller.w1 import w1_callback_provider_readback_guard as guard
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / ".github/workflows/w1-callback-protected-readback.yml"
+WORKFLOW = ROOT / ".github/workflows/w1-callback-protected-binding.yml"
 SQL = ROOT / "controller/w1/w1_callback_db_readback.sql"
 
 
@@ -58,7 +57,7 @@ def edge_metadata() -> dict:
 
 def aws_doc(label: str, account: str = "123456789012") -> dict:
     name, _ = readiness.DOCUMENTS[label]
-    content = (guard.DOCUMENT_SOURCE[label]).read_text()
+    content = guard.DOCUMENT_SOURCE[label].read_text()
     description = {
         "Name": name,
         "Owner": account,
@@ -197,20 +196,20 @@ class CallbackProviderReadbackGuardTests(unittest.TestCase):
 
     def test_protected_workflow_is_manual_main_only_and_read_only(self):
         source = WORKFLOW.read_text()
-        self.assertIn("READBACK_W1_CALLBACK_ONLY", source)
+        self.assertIn("BIND_W1_CALLBACK_READBACK_ONLY", source)
         self.assertIn("[[ \"$GITHUB_REF\" == 'refs/heads/main' ]]", source)
         self.assertIn("environment: w1-callback-readback", source)
         self.assertEqual(1, source.count("id-token: write"))
         self.assertIn("W1_AWS_READBACK_ROLE_ARN", source)
         self.assertIn("W1_SUPABASE_DB_READONLY_URL", source)
         self.assertIn("W1_SUPABASE_MGMT_READ_TOKEN", source)
-        self.assertIn("allowed-account-ids: ${{ vars.W1_AWS_ACCOUNT_ID }}", source)
-        self.assertIn("role-duration-seconds: 900", source)
-        self.assertIn("output-env-credentials: false", source)
-        self.assertIn("output-credentials: true", source)
-        self.assertIn("inline-session-policy: ${{ steps.aws-policy.outputs.policy }}", source)
-        for action in ("ssm:DescribeDocument", "ssm:GetDocument", "ssm:DescribeDocumentPermission"):
-            self.assertIn(action, source)
+        self.assertIn("aws sts assume-role-with-web-identity", source)
+        self.assertIn("--duration-seconds 900", source)
+        self.assertIn("build-aws-session-policy", source)
+        self.assertIn("aws iam get-role", source)
+        for command in ("aws ssm list-documents", "aws ssm describe-document", "aws ssm get-document", "aws ssm describe-document-permission"):
+            self.assertIn(command, source)
+        self.assertNotIn("configure-aws-credentials", source)
         for forbidden in (
             "ssm:SendCommand", "ec2:RebootInstances", "ssm:StartSession",
             "supabase functions deploy", "supabase db push", "edge_functions:write",
@@ -221,29 +220,32 @@ class CallbackProviderReadbackGuardTests(unittest.TestCase):
 
     def test_oidc_claims_are_validated_before_aws_sts(self):
         source = WORKFLOW.read_text()
-        oidc = source.split("      - name: Validate actual GitHub OIDC claims before AWS STS", 1)[1]
-        oidc = oidc.split("      - name: Capture Postgres callback privilege state", 1)[0]
+        oidc_name = "      - name: Request one GitHub OIDC token and bind immutable claims to exact workflow source"
+        aws_name = "      - name: Exchange the same checked OIDC token for a 15-minute intersected AWS read-only session and prove role trust"
+        oidc = source.split(oidc_name, 1)[1].split(aws_name, 1)[0]
         self.assertIn("ACTIONS_ID_TOKEN_REQUEST_URL", oidc)
         self.assertIn("ACTIONS_ID_TOKEN_REQUEST_TOKEN", oidc)
         self.assertIn("audience=sts.amazonaws.com", oidc)
-        self.assertIn("'aud':'sts.amazonaws.com'", oidc)
-        self.assertIn("'sub':os.environ['AWS_OIDC_SUB']", oidc)
-        self.assertIn("'repository':'PatrickFrome/Compute'", oidc)
-        self.assertIn("'repository_id':'1341371143'", oidc)
-        self.assertIn("'repository_owner_id':'20597814'", oidc)
-        self.assertIn("'environment':'w1-callback-readback'", oidc)
-        self.assertIn("'ref':'refs/heads/main'", oidc)
-        self.assertIn("rm -f evidence/github-oidc-token-response.json", oidc)
+        for claim in ("'repository'", "'repository_id'", "'repository_owner_id'", "'environment'", "'workflow_ref'", "'workflow_sha'", "'jti'", "'iat'", "'nbf'", "'exp'"):
+            self.assertIn(claim, oidc)
+        self.assertIn("token_sha256", oidc)
+        self.assertIn("validate-oidc-claims", oidc)
         self.assertNotIn("print(token)", oidc)
-        self.assertLess(source.index("Validate actual GitHub OIDC claims before AWS STS"),
-                        source.index("Configure 15-minute AWS OIDC read-only credentials"))
+        self.assertLess(source.index(oidc_name), source.index(aws_name))
 
-    def test_aws_credentials_are_scoped_to_capture_step_only(self):
+    def test_aws_credentials_are_scoped_to_exchange_and_capture_step_only(self):
         source = WORKFLOW.read_text()
-        capture = source.split("      - name: Capture exact AWS SSM document readback", 1)[1]
-        post = capture.split("      - name: Normalize readback after AWS credentials leave scope", 1)[1]
-        self.assertIn("steps.aws-creds.outputs.aws-access-key-id", capture.split("      - name: Normalize", 1)[0])
-        self.assertNotIn("steps.aws-creds.outputs", post)
+        aws_name = "      - name: Exchange the same checked OIDC token for a 15-minute intersected AWS read-only session and prove role trust"
+        db_name = "      - name: Capture Postgres callback privilege state in a forced read-only transaction"
+        exchange = source.split(aws_name, 1)[1].split(db_name, 1)[0]
+        for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"):
+            self.assertIn(f"export {name}=", exchange)
+            self.assertIn(name, exchange)
+        self.assertIn("unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN", exchange)
+        self.assertIn("rm -f /tmp/w1-callback-oidc.jwt", exchange)
+        post = source.split(db_name, 1)[1]
+        for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"):
+            self.assertNotIn(name, post)
 
 
 if __name__ == "__main__":

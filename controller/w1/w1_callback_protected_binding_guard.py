@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Bind protected GitHub Environment/OIDC identity to W1 callback readback.
+"""Fail-closed W1 callback protected readback binding.
 
-This module is deliberately non-authoritative: no network access, no credential
-acquisition, no provider mutation, no worker admission and no W1 verification.
+Pure validation only: no network, credentials, provider mutation, admission or W1 authority.
 """
 from __future__ import annotations
 
@@ -88,7 +87,7 @@ def _write(path: Path, value: Any) -> None:
     path.write_bytes(_canonical(value) + b"\n")
 
 
-def _self_hashed(value: Any, *, schema: str, label: str) -> dict[str, Any]:
+def _self_hashed(value: Any, schema: str, label: str) -> dict[str, Any]:
     obj = _obj(value, label)
     if obj.get("schema") != schema:
         raise CallbackProtectedBindingError(f"{label}_schema_invalid")
@@ -125,7 +124,7 @@ def _role(role_arn: str, account_id: str, region: str) -> tuple[str, str]:
     if match is None:
         raise CallbackProtectedBindingError("aws_role_arn_invalid")
     partition, arn_account, role_path = match.groups()
-    if arn_account != account_id or partition != _partition(region):
+    if partition != _partition(region) or arn_account != account_id:
         raise CallbackProtectedBindingError("aws_role_arn_context_mismatch")
     return partition, role_path
 
@@ -158,86 +157,66 @@ def validate_oidc_config(value: Any) -> dict[str, Any]:
         "canonical": False,
         "authority_effect": False,
     }
-    out = dict(core)
-    out["receipt_sha256"] = _sha(core)
-    return out
+    out = dict(core); out["receipt_sha256"] = _sha(core); return out
 
 
 def validate_oidc_config_receipt(value: Any) -> dict[str, Any]:
-    receipt = _self_hashed(value, schema=OIDC_CONFIG_SCHEMA, label="oidc_config_receipt")
-    if receipt.get("repository") != REPOSITORY or receipt.get("repository_id") != REPOSITORY_ID:
-        raise CallbackProtectedBindingError("oidc_config_repository_mismatch")
-    if receipt.get("repository_owner_id") != REPOSITORY_OWNER_ID or receipt.get("environment") != ENVIRONMENT:
+    r = _self_hashed(value, OIDC_CONFIG_SCHEMA, "oidc_config_receipt")
+    expected = (r.get("repository"), r.get("repository_id"), r.get("repository_owner_id"), r.get("environment"), r.get("expected_subject"))
+    if expected != (REPOSITORY, REPOSITORY_ID, REPOSITORY_OWNER_ID, ENVIRONMENT, EXPECTED_SUBJECT):
         raise CallbackProtectedBindingError("oidc_config_identity_mismatch")
-    if receipt.get("expected_subject") != EXPECTED_SUBJECT:
-        raise CallbackProtectedBindingError("oidc_config_expected_subject_mismatch")
-    if receipt.get("use_default") is not True or receipt.get("custom_claim_template_enabled") is not False:
+    if r.get("use_default") is not True or r.get("custom_claim_template_enabled") is not False or r.get("immutable_subject_not_disabled") is not True:
         raise CallbackProtectedBindingError("oidc_config_boundary_invalid")
-    _false(receipt, ("provider_credentials_used", "oidc_token_requested", "w1_verified", "canonical", "authority_effect"), "oidc_config")
-    return receipt
+    _false(r, ("provider_credentials_used", "oidc_token_requested", "w1_verified", "canonical", "authority_effect"), "oidc_config")
+    return r
 
 
 def compare_oidc_config(before: Any, after: Any) -> dict[str, Any]:
-    left = validate_oidc_config_receipt(before)
-    right = validate_oidc_config_receipt(after)
+    left, right = validate_oidc_config_receipt(before), validate_oidc_config_receipt(after)
     if left != right:
         raise CallbackProtectedBindingError("oidc_config_drift_across_environment_gate")
     return left
 
 
 def validate_environment_receipt(value: Any) -> dict[str, Any]:
-    receipt = _self_hashed(value, schema=ENV_SCHEMA, label="environment_receipt")
-    if receipt.get("repository") != REPOSITORY or receipt.get("repository_id") != REPOSITORY_ID:
-        raise CallbackProtectedBindingError("environment_receipt_repository_mismatch")
-    if receipt.get("repository_owner_id") != REPOSITORY_OWNER_ID or receipt.get("environment") != ENVIRONMENT:
+    r = _self_hashed(value, ENV_SCHEMA, "environment_receipt")
+    if (r.get("repository"), r.get("repository_id"), r.get("repository_owner_id"), r.get("environment")) != (REPOSITORY, REPOSITORY_ID, REPOSITORY_OWNER_ID, ENVIRONMENT):
         raise CallbackProtectedBindingError("environment_receipt_identity_mismatch")
-    if receipt.get("can_admins_bypass") is not False or receipt.get("prevent_self_review") is not True:
+    if r.get("can_admins_bypass") is not False or r.get("prevent_self_review") is not True:
         raise CallbackProtectedBindingError("environment_receipt_review_boundary_invalid")
-    if receipt.get("deployment_branch_policy_mode") != "EXACT_CUSTOM_MAIN_ONLY" or receipt.get("main_branch_protected") is not True:
+    if r.get("deployment_branch_policy_mode") != "EXACT_CUSTOM_MAIN_ONLY" or r.get("main_branch_protected") is not True:
         raise CallbackProtectedBindingError("environment_receipt_deployment_boundary_invalid")
-    expected_context = {
-        "repository": REPOSITORY, "repository_id": REPOSITORY_ID,
-        "repository_owner_id": REPOSITORY_OWNER_ID, "ref": EXPECTED_REF,
-        "environment": ENVIRONMENT,
-    }
-    if receipt.get("expected_oidc_context") != expected_context:
+    if r.get("expected_oidc_context") != {"repository": REPOSITORY, "repository_id": REPOSITORY_ID, "repository_owner_id": REPOSITORY_OWNER_ID, "environment": ENVIRONMENT, "ref": EXPECTED_REF}:
         raise CallbackProtectedBindingError("environment_receipt_oidc_context_mismatch")
-    _false(receipt, ("provider_credentials_used", "aws_execution_authorized", "supabase_mutation_authorized",
-                     "worker_admitted", "w1_verified", "canonical", "authority_effect"), "environment_receipt")
-    return receipt
+    _false(r, ("provider_credentials_used", "aws_execution_authorized", "supabase_mutation_authorized", "worker_admitted", "w1_verified", "canonical", "authority_effect"), "environment_receipt")
+    return r
 
 
 def validate_gate_receipt(value: Any) -> dict[str, Any]:
-    receipt = _self_hashed(value, schema=GATE_SCHEMA, label="gate_receipt")
-    if receipt.get("repository") != REPOSITORY or receipt.get("repository_id") != REPOSITORY_ID:
-        raise CallbackProtectedBindingError("gate_repository_mismatch")
-    if receipt.get("repository_owner_id") != REPOSITORY_OWNER_ID or receipt.get("environment") != ENVIRONMENT:
+    r = _self_hashed(value, GATE_SCHEMA, "gate_receipt")
+    if (r.get("repository"), r.get("repository_id"), r.get("repository_owner_id"), r.get("environment"), r.get("ref")) != (REPOSITORY, REPOSITORY_ID, REPOSITORY_OWNER_ID, ENVIRONMENT, EXPECTED_REF):
         raise CallbackProtectedBindingError("gate_identity_mismatch")
-    if receipt.get("ref") != EXPECTED_REF:
-        raise CallbackProtectedBindingError("gate_ref_mismatch")
-    if receipt.get("environment_gate_job_started_after_protection_rules") is not True or receipt.get("environment_metadata_stable_across_gate") is not True:
+    if r.get("environment_gate_job_started_after_protection_rules") is not True or r.get("environment_metadata_stable_across_gate") is not True:
         raise CallbackProtectedBindingError("gate_protection_or_drift_invalid")
     for field in ("github_run_id", "github_run_attempt"):
-        if not isinstance(receipt.get(field), str) or RUN_ID.fullmatch(receipt[field]) is None:
+        if not isinstance(r.get(field), str) or RUN_ID.fullmatch(r[field]) is None:
             raise CallbackProtectedBindingError(f"gate_{field}_invalid")
-    _false(receipt, ("provider_credentials_used", "oidc_token_requested", "aws_execution_authorized",
-                     "supabase_mutation_authorized", "worker_admitted", "w1_verified", "canonical", "authority_effect"), "gate")
-    return receipt
+    _false(r, ("provider_credentials_used", "oidc_token_requested", "aws_execution_authorized", "supabase_mutation_authorized", "worker_admitted", "w1_verified", "canonical", "authority_effect"), "gate")
+    return r
 
 
 def validate_oidc_claims(value: Any, *, gate: Any, oidc_config: Any, git_sha: str, now_epoch: int | None = None) -> dict[str, Any]:
     claims = _obj(value, "oidc_claims")
-    gate_receipt = validate_gate_receipt(gate)
-    oidc_receipt = validate_oidc_config_receipt(oidc_config)
+    gate_r = validate_gate_receipt(gate)
+    oidc_r = validate_oidc_config_receipt(oidc_config)
     if not isinstance(git_sha, str) or HEX40.fullmatch(git_sha) is None:
         raise CallbackProtectedBindingError("git_sha_invalid")
     expected = {
         "iss": ISSUER, "aud": AUDIENCE, "sub": EXPECTED_SUBJECT,
-        "repository": REPOSITORY, "repository_id": REPOSITORY_ID,
-        "repository_owner_id": REPOSITORY_OWNER_ID, "environment": ENVIRONMENT,
-        "ref": EXPECTED_REF, "ref_type": "branch", "event_name": EXPECTED_EVENT,
+        "repository": REPOSITORY, "repository_id": REPOSITORY_ID, "repository_owner_id": REPOSITORY_OWNER_ID,
+        "environment": ENVIRONMENT, "ref": EXPECTED_REF, "ref_type": "branch", "event_name": EXPECTED_EVENT,
         "sha": git_sha, "workflow_ref": EXPECTED_WORKFLOW_REF, "workflow_sha": git_sha,
-        "run_id": gate_receipt["github_run_id"], "run_attempt": gate_receipt["github_run_attempt"],
+        "run_id": gate_r["github_run_id"], "run_attempt": gate_r["github_run_attempt"],
         "runner_environment": EXPECTED_RUNNER_ENVIRONMENT,
     }
     for key, expected_value in expected.items():
@@ -255,9 +234,10 @@ def validate_oidc_claims(value: Any, *, gate: Any, oidc_config: Any, git_sha: st
         if not isinstance(raw, int) or isinstance(raw, bool):
             raise CallbackProtectedBindingError(f"oidc_{key}_invalid")
         times[key] = raw
-    if not (times["iat"] <= times["nbf"] <= times["exp"]):
+    # GitHub's documented JWT example has nbf before iat. Validate the complete token window.
+    if not (times["nbf"] <= times["iat"] <= times["exp"]):
         raise CallbackProtectedBindingError("oidc_time_order_invalid")
-    if times["exp"] - times["iat"] > 1200:
+    if times["exp"] - times["nbf"] > 1200:
         raise CallbackProtectedBindingError("oidc_lifetime_too_long")
     now = int(time.time()) if now_epoch is None else int(now_epoch)
     if times["iat"] > now + 60 or times["nbf"] > now + 60 or times["exp"] < now - 60:
@@ -265,34 +245,29 @@ def validate_oidc_claims(value: Any, *, gate: Any, oidc_config: Any, git_sha: st
     core = {
         "schema": OIDC_CLAIMS_SCHEMA,
         "classification": "W1_CALLBACK_GITHUB_OIDC_CLAIMS_LOCALLY_BOUND_NONAUTHORITY",
-        "environment_gate_receipt_sha256": gate_receipt["receipt_sha256"],
-        "oidc_config_receipt_sha256": oidc_receipt["receipt_sha256"],
-        "repository": REPOSITORY, "repository_id": REPOSITORY_ID,
-        "repository_owner_id": REPOSITORY_OWNER_ID, "environment": ENVIRONMENT,
-        "issuer": ISSUER, "audience": AUDIENCE, "subject": EXPECTED_SUBJECT,
+        "environment_gate_receipt_sha256": gate_r["receipt_sha256"],
+        "oidc_config_receipt_sha256": oidc_r["receipt_sha256"],
+        "repository": REPOSITORY, "repository_id": REPOSITORY_ID, "repository_owner_id": REPOSITORY_OWNER_ID,
+        "environment": ENVIRONMENT, "issuer": ISSUER, "audience": AUDIENCE, "subject": EXPECTED_SUBJECT,
         "ref": EXPECTED_REF, "event_name": EXPECTED_EVENT, "git_sha": git_sha,
         "workflow_ref": EXPECTED_WORKFLOW_REF, "runner_environment": EXPECTED_RUNNER_ENVIRONMENT,
-        "github_run_id": gate_receipt["github_run_id"], "github_run_attempt": gate_receipt["github_run_attempt"],
+        "github_run_id": gate_r["github_run_id"], "github_run_attempt": gate_r["github_run_attempt"],
         "jti": jti, "issued_at": times["iat"], "not_before": times["nbf"], "expires_at": times["exp"],
-        "token_sha256": token_sha,
-        "jwt_signature_locally_verified": False,
-        "cloud_provider_acceptance_required": True,
-        "provider_credentials_used": False, "aws_execution_authorized": False,
-        "w1_verified": False, "canonical": False, "authority_effect": False,
+        "token_sha256": token_sha, "jwt_signature_locally_verified": False,
+        "cloud_provider_acceptance_required": True, "provider_credentials_used": False,
+        "aws_execution_authorized": False, "w1_verified": False, "canonical": False, "authority_effect": False,
     }
-    out = dict(core)
-    out["receipt_sha256"] = _sha(core)
-    return out
+    out = dict(core); out["receipt_sha256"] = _sha(core); return out
 
 
 def validate_oidc_claims_receipt(value: Any) -> dict[str, Any]:
-    receipt = _self_hashed(value, schema=OIDC_CLAIMS_SCHEMA, label="oidc_claims_receipt")
-    if receipt.get("subject") != EXPECTED_SUBJECT or receipt.get("audience") != AUDIENCE:
+    r = _self_hashed(value, OIDC_CLAIMS_SCHEMA, "oidc_claims_receipt")
+    if r.get("subject") != EXPECTED_SUBJECT or r.get("audience") != AUDIENCE:
         raise CallbackProtectedBindingError("oidc_claims_receipt_identity_mismatch")
-    if receipt.get("jwt_signature_locally_verified") is not False or receipt.get("cloud_provider_acceptance_required") is not True:
+    if r.get("jwt_signature_locally_verified") is not False or r.get("cloud_provider_acceptance_required") is not True:
         raise CallbackProtectedBindingError("oidc_claims_receipt_verification_boundary_invalid")
-    _false(receipt, ("provider_credentials_used", "aws_execution_authorized", "w1_verified", "canonical", "authority_effect"), "oidc_claims")
-    return receipt
+    _false(r, ("provider_credentials_used", "aws_execution_authorized", "w1_verified", "canonical", "authority_effect"), "oidc_claims")
+    return r
 
 
 def build_aws_session_policy(*, role_arn: str, account_id: str, region: str) -> dict[str, Any]:
@@ -301,35 +276,27 @@ def build_aws_session_policy(*, role_arn: str, account_id: str, region: str) -> 
     policy = {"Version": "2012-10-17", "Statement": [
         {"Sid": "ReadExactCallbackRoleTrust", "Effect": "Allow", "Action": "iam:GetRole", "Resource": role_arn},
         {"Sid": "InventoryOwnedCallbackDocuments", "Effect": "Allow", "Action": "ssm:ListDocuments", "Resource": "*"},
-        {"Sid": "ReadExactCallbackDocuments", "Effect": "Allow",
-         "Action": ["ssm:DescribeDocument", "ssm:GetDocument", "ssm:DescribeDocumentPermission"], "Resource": doc_arns},
+        {"Sid": "ReadExactCallbackDocuments", "Effect": "Allow", "Action": ["ssm:DescribeDocument", "ssm:GetDocument", "ssm:DescribeDocumentPermission"], "Resource": doc_arns},
     ]}
     policy_json = json.dumps(policy, separators=(",", ":"), sort_keys=True)
     if len(policy_json) > 2048:
         raise CallbackProtectedBindingError("aws_inline_session_policy_too_large")
     core = {
-        "schema": AWS_POLICY_SCHEMA,
-        "classification": "W1_CALLBACK_AWS_READONLY_SESSION_POLICY_NONAUTHORITY",
-        "account_id": account_id, "region": region, "role_arn": role_arn,
-        "session_policy": policy, "session_policy_chars": len(policy_json), "session_duration_seconds": 900,
-        "mutation_actions_present": False,
-        "database_mutation_authorized": False, "edge_deployment_authorized": False,
-        "aws_mutation_authorized": False, "send_command_authorized": False,
-        "w1_verified": False, "canonical": False, "authority_effect": False,
+        "schema": AWS_POLICY_SCHEMA, "classification": "W1_CALLBACK_AWS_READONLY_SESSION_POLICY_NONAUTHORITY",
+        "account_id": account_id, "region": region, "role_arn": role_arn, "session_policy": policy,
+        "session_policy_chars": len(policy_json), "session_duration_seconds": 900, "mutation_actions_present": False,
+        "database_mutation_authorized": False, "edge_deployment_authorized": False, "aws_mutation_authorized": False,
+        "send_command_authorized": False, "w1_verified": False, "canonical": False, "authority_effect": False,
     }
-    out = dict(core)
-    out["receipt_sha256"] = _sha(core)
-    return out
+    out = dict(core); out["receipt_sha256"] = _sha(core); return out
 
 
 def validate_aws_policy_receipt(value: Any) -> dict[str, Any]:
-    receipt = _self_hashed(value, schema=AWS_POLICY_SCHEMA, label="aws_policy_receipt")
-    expected = build_aws_session_policy(role_arn=str(receipt.get("role_arn") or ""),
-                                        account_id=str(receipt.get("account_id") or ""),
-                                        region=str(receipt.get("region") or ""))
-    if receipt != expected:
+    r = _self_hashed(value, AWS_POLICY_SCHEMA, "aws_policy_receipt")
+    expected = build_aws_session_policy(role_arn=str(r.get("role_arn") or ""), account_id=str(r.get("account_id") or ""), region=str(r.get("region") or ""))
+    if r != expected:
         raise CallbackProtectedBindingError("aws_policy_receipt_not_exact_contract")
-    return receipt
+    return r
 
 
 def _trust_document(value: Any) -> dict[str, Any]:
@@ -347,8 +314,7 @@ def _trust_document(value: Any) -> dict[str, Any]:
 
 def validate_exact_role_trust(*, get_role: Any, role_arn: str, account_id: str, region: str) -> dict[str, Any]:
     partition, role_path = _role(role_arn, account_id, region)
-    root = _obj(get_role, "iam_get_role")
-    role = _obj(root.get("Role"), "iam_role")
+    role = _obj(_obj(get_role, "iam_get_role").get("Role"), "iam_role")
     role_name = role_path.rsplit("/", 1)[-1]
     if role.get("Arn") != role_arn or role.get("RoleName") != role_name:
         raise CallbackProtectedBindingError("iam_role_identity_mismatch")
@@ -359,23 +325,16 @@ def validate_exact_role_trust(*, get_role: Any, role_arn: str, account_id: str, 
     statements = policy.get("Statement")
     if not isinstance(statements, list) or len(statements) != 1:
         raise CallbackProtectedBindingError("iam_trust_exactly_one_statement_required")
-    statement = _obj(statements[0], "iam_trust_statement")
-    if statement.get("Effect") != "Allow" or statement.get("Action") != "sts:AssumeRoleWithWebIdentity":
+    st = _obj(statements[0], "iam_trust_statement")
+    if st.get("Effect") != "Allow" or st.get("Action") != "sts:AssumeRoleWithWebIdentity":
         raise CallbackProtectedBindingError("iam_trust_effect_or_action_invalid")
-    principal = _obj(statement.get("Principal"), "iam_trust_principal")
-    if set(principal) != {"Federated"}:
-        raise CallbackProtectedBindingError("iam_trust_principal_shape_invalid")
+    principal = _obj(st.get("Principal"), "iam_trust_principal")
     expected_provider = f"arn:{partition}:iam::{account_id}:oidc-provider/token.actions.githubusercontent.com"
-    if principal.get("Federated") != expected_provider:
+    if set(principal) != {"Federated"} or principal.get("Federated") != expected_provider:
         raise CallbackProtectedBindingError("iam_trust_provider_mismatch")
-    condition = _obj(statement.get("Condition"), "iam_trust_condition")
-    if set(condition) != {"StringEquals"}:
-        raise CallbackProtectedBindingError("iam_trust_condition_must_be_exact_stringequals")
-    expected_equals = {
-        "token.actions.githubusercontent.com:aud": AUDIENCE,
-        "token.actions.githubusercontent.com:sub": EXPECTED_SUBJECT,
-    }
-    if _obj(condition.get("StringEquals"), "iam_trust_stringequals") != expected_equals:
+    condition = _obj(st.get("Condition"), "iam_trust_condition")
+    expected_equals = {"token.actions.githubusercontent.com:aud": AUDIENCE, "token.actions.githubusercontent.com:sub": EXPECTED_SUBJECT}
+    if set(condition) != {"StringEquals"} or _obj(condition.get("StringEquals"), "iam_trust_stringequals") != expected_equals:
         raise CallbackProtectedBindingError("iam_trust_aud_sub_not_exact")
     return {"role_name": role_name, "role_arn": role_arn, "max_session_duration": max_duration,
             "oidc_provider_arn": expected_provider, "audience": AUDIENCE, "subject": EXPECTED_SUBJECT,
@@ -384,23 +343,21 @@ def validate_exact_role_trust(*, get_role: Any, role_arn: str, account_id: str, 
 
 def validate_aws_attestation(*, claims: Any, session_policy: Any, sts_proof: Any, get_role: Any,
                              role_arn: str, account_id: str, region: str) -> dict[str, Any]:
-    claims_receipt = validate_oidc_claims_receipt(claims)
-    policy_receipt = validate_aws_policy_receipt(session_policy)
-    if policy_receipt["role_arn"] != role_arn or policy_receipt["account_id"] != account_id or policy_receipt["region"] != region:
+    claims_r = validate_oidc_claims_receipt(claims)
+    policy_r = validate_aws_policy_receipt(session_policy)
+    if (policy_r["role_arn"], policy_r["account_id"], policy_r["region"]) != (role_arn, account_id, region):
         raise CallbackProtectedBindingError("aws_policy_context_mismatch")
     proof = _obj(sts_proof, "sts_proof")
-    expected_keys = {"subject_from_web_identity_token", "audience", "provider", "assumed_role_arn",
-                     "assumed_role_id", "packed_policy_size", "account_id", "caller_arn",
-                     "token_sha256", "role_session_name"}
+    expected_keys = {"subject_from_web_identity_token", "audience", "provider", "assumed_role_arn", "assumed_role_id", "packed_policy_size", "account_id", "caller_arn", "token_sha256", "role_session_name"}
     if set(proof) != expected_keys:
         raise CallbackProtectedBindingError("sts_proof_shape_invalid")
     if proof["subject_from_web_identity_token"] != EXPECTED_SUBJECT or proof["audience"] != AUDIENCE:
         raise CallbackProtectedBindingError("sts_subject_or_audience_mismatch")
     if not isinstance(proof["provider"], str) or not proof["provider"]:
         raise CallbackProtectedBindingError("sts_provider_invalid")
-    if proof["token_sha256"] != claims_receipt["token_sha256"] or proof["account_id"] != account_id:
+    if proof["token_sha256"] != claims_r["token_sha256"] or proof["account_id"] != account_id:
         raise CallbackProtectedBindingError("sts_token_hash_or_account_mismatch")
-    session_name = f"w1-callback-bind-{claims_receipt['github_run_id']}-{claims_receipt['github_run_attempt']}"
+    session_name = f"w1-callback-bind-{claims_r['github_run_id']}-{claims_r['github_run_attempt']}"
     if proof["role_session_name"] != session_name:
         raise CallbackProtectedBindingError("sts_role_session_name_mismatch")
     partition, role_path = _role(role_arn, account_id, region)
@@ -414,46 +371,38 @@ def validate_aws_attestation(*, claims: Any, session_policy: Any, sts_proof: Any
         raise CallbackProtectedBindingError("sts_packed_policy_size_invalid")
     trust = validate_exact_role_trust(get_role=get_role, role_arn=role_arn, account_id=account_id, region=region)
     core = {
-        "schema": AWS_ATTESTATION_SCHEMA,
-        "classification": "W1_CALLBACK_AWS_OIDC_ATTESTATION_NONAUTHORITY",
-        "oidc_claims_receipt_sha256": claims_receipt["receipt_sha256"],
-        "aws_session_policy_receipt_sha256": policy_receipt["receipt_sha256"],
+        "schema": AWS_ATTESTATION_SCHEMA, "classification": "W1_CALLBACK_AWS_OIDC_ATTESTATION_NONAUTHORITY",
+        "oidc_claims_receipt_sha256": claims_r["receipt_sha256"], "aws_session_policy_receipt_sha256": policy_r["receipt_sha256"],
         "account_id": account_id, "region": region, "role_arn": role_arn, "role_session_name": session_name,
-        "subject_from_web_identity_token": EXPECTED_SUBJECT, "audience": AUDIENCE,
-        "token_sha256": claims_receipt["token_sha256"], "packed_policy_size": proof["packed_policy_size"],
-        "iam_role_trust": trust,
-        "same_checked_oidc_token_submitted_to_sts": True,
-        "aws_sts_accepted_subject": True, "aws_role_trust_policy_exact": True,
-        "temporary_credentials_persisted": False,
-        "database_mutation_authorized": False, "edge_deployment_authorized": False,
-        "aws_mutation_authorized": False, "send_command_authorized": False,
-        "provider_identity_verified": False, "persistent_worker_proof": False,
+        "subject_from_web_identity_token": EXPECTED_SUBJECT, "audience": AUDIENCE, "token_sha256": claims_r["token_sha256"],
+        "packed_policy_size": proof["packed_policy_size"], "iam_role_trust": trust,
+        "same_checked_oidc_token_submitted_to_sts": True, "aws_sts_accepted_subject": True,
+        "aws_role_trust_policy_exact": True, "temporary_credentials_persisted": False,
+        "database_mutation_authorized": False, "edge_deployment_authorized": False, "aws_mutation_authorized": False,
+        "send_command_authorized": False, "provider_identity_verified": False, "persistent_worker_proof": False,
         "worker_admitted": False, "w1_verified": False, "canonical": False, "authority_effect": False,
     }
-    out = dict(core)
-    out["receipt_sha256"] = _sha(core)
-    return out
+    out = dict(core); out["receipt_sha256"] = _sha(core); return out
 
 
 def validate_aws_attestation_receipt(value: Any) -> dict[str, Any]:
-    receipt = _self_hashed(value, schema=AWS_ATTESTATION_SCHEMA, label="aws_attestation_receipt")
-    if receipt.get("subject_from_web_identity_token") != EXPECTED_SUBJECT or receipt.get("audience") != AUDIENCE:
+    r = _self_hashed(value, AWS_ATTESTATION_SCHEMA, "aws_attestation_receipt")
+    if r.get("subject_from_web_identity_token") != EXPECTED_SUBJECT or r.get("audience") != AUDIENCE:
         raise CallbackProtectedBindingError("aws_attestation_identity_mismatch")
-    if receipt.get("same_checked_oidc_token_submitted_to_sts") is not True or receipt.get("aws_sts_accepted_subject") is not True or receipt.get("aws_role_trust_policy_exact") is not True:
+    if not all(r.get(k) is True for k in ("same_checked_oidc_token_submitted_to_sts", "aws_sts_accepted_subject", "aws_role_trust_policy_exact")):
         raise CallbackProtectedBindingError("aws_attestation_boundary_invalid")
-    trust = _obj(receipt.get("iam_role_trust"), "aws_attestation_role_trust")
+    trust = _obj(r.get("iam_role_trust"), "aws_attestation_role_trust")
     if trust.get("subject") != EXPECTED_SUBJECT or trust.get("audience") != AUDIENCE or trust.get("exact_single_statement") is not True:
         raise CallbackProtectedBindingError("aws_attestation_role_trust_invalid")
-    _false(receipt, AUTHORITY_FALSE, "aws_attestation")
-    return receipt
+    _false(r, AUTHORITY_FALSE, "aws_attestation")
+    return r
 
 
 def validate_provider_readback(value: Any, *, git_sha: str, tree_sha: str) -> dict[str, Any]:
     root = _obj(value, "provider_readback")
     if root.get("schema") != PROVIDER_SCHEMA:
         raise CallbackProtectedBindingError("provider_readback_schema_invalid")
-    _false(root, ("database_mutation_authorized", "edge_deployment_authorized", "aws_mutation_authorized",
-                  "send_command_authorized", "worker_admitted", "w1_verified", "canonical", "authority_effect"), "provider_readback")
+    _false(root, ("database_mutation_authorized", "edge_deployment_authorized", "aws_mutation_authorized", "send_command_authorized", "worker_admitted", "w1_verified", "canonical", "authority_effect"), "provider_readback")
     if root.get("absence_requires_authenticated_inventory") is not True or root.get("provider_error_treated_as_absence") is not False:
         raise CallbackProtectedBindingError("provider_readback_inventory_boundary_invalid")
     readiness = _obj(root.get("readiness"), "provider_readiness")
@@ -478,85 +427,74 @@ def validate_provider_readback(value: Any, *, git_sha: str, tree_sha: str) -> di
 def seal_binding(*, environment: Any, gate: Any, oidc_config_before: Any, oidc_config_after: Any,
                  claims: Any, aws_attestation: Any, provider_readback: Any, git_sha: str, tree_sha: str) -> dict[str, Any]:
     env = validate_environment_receipt(environment)
-    gate_receipt = validate_gate_receipt(gate)
+    gate_r = validate_gate_receipt(gate)
     oidc = compare_oidc_config(oidc_config_before, oidc_config_after)
-    claim_receipt = validate_oidc_claims_receipt(claims)
+    claims_r = validate_oidc_claims_receipt(claims)
     aws = validate_aws_attestation_receipt(aws_attestation)
     if not isinstance(git_sha, str) or HEX40.fullmatch(git_sha) is None or not isinstance(tree_sha, str) or HEX40.fullmatch(tree_sha) is None:
         raise CallbackProtectedBindingError("binding_source_revision_invalid")
     provider = validate_provider_readback(provider_readback, git_sha=git_sha, tree_sha=tree_sha)
-    if gate_receipt.get("preflight_receipt_sha256") != env["receipt_sha256"]:
+    if gate_r.get("preflight_receipt_sha256") != env["receipt_sha256"]:
         raise CallbackProtectedBindingError("binding_gate_environment_hash_mismatch")
-    if claim_receipt.get("environment_gate_receipt_sha256") != gate_receipt["receipt_sha256"]:
+    if claims_r.get("environment_gate_receipt_sha256") != gate_r["receipt_sha256"]:
         raise CallbackProtectedBindingError("binding_claim_gate_hash_mismatch")
-    if claim_receipt.get("oidc_config_receipt_sha256") != oidc["receipt_sha256"]:
+    if claims_r.get("oidc_config_receipt_sha256") != oidc["receipt_sha256"]:
         raise CallbackProtectedBindingError("binding_claim_oidc_config_hash_mismatch")
-    if aws.get("oidc_claims_receipt_sha256") != claim_receipt["receipt_sha256"]:
+    if aws.get("oidc_claims_receipt_sha256") != claims_r["receipt_sha256"]:
         raise CallbackProtectedBindingError("binding_aws_claim_hash_mismatch")
     readiness = provider["readiness"]
     core = {
-        "schema": BINDING_SCHEMA,
-        "classification": "W1_CALLBACK_PROTECTED_READBACK_BOUND_NONAUTHORITY",
-        "repository": REPOSITORY, "repository_id": REPOSITORY_ID,
-        "repository_owner_id": REPOSITORY_OWNER_ID, "environment": ENVIRONMENT,
-        "git_sha": git_sha, "tree_sha": tree_sha,
-        "github_run_id": gate_receipt["github_run_id"], "github_run_attempt": gate_receipt["github_run_attempt"],
-        "environment_preflight_receipt_sha256": env["receipt_sha256"],
-        "environment_gate_receipt_sha256": gate_receipt["receipt_sha256"],
-        "oidc_config_receipt_sha256": oidc["receipt_sha256"],
-        "oidc_claims_receipt_sha256": claim_receipt["receipt_sha256"],
-        "aws_oidc_attestation_receipt_sha256": aws["receipt_sha256"],
-        "provider_readback_sha256": _sha(provider), "provider_evidence_sha256": readiness["evidence_sha256"],
-        "callback_readiness_status": readiness["status"], "callback_ready_candidate": readiness["ready_candidate"],
-        "callback_readiness_reasons": readiness["reasons"],
+        "schema": BINDING_SCHEMA, "classification": "W1_CALLBACK_PROTECTED_READBACK_BOUND_NONAUTHORITY",
+        "repository": REPOSITORY, "repository_id": REPOSITORY_ID, "repository_owner_id": REPOSITORY_OWNER_ID,
+        "environment": ENVIRONMENT, "git_sha": git_sha, "tree_sha": tree_sha,
+        "github_run_id": gate_r["github_run_id"], "github_run_attempt": gate_r["github_run_attempt"],
+        "environment_preflight_receipt_sha256": env["receipt_sha256"], "environment_gate_receipt_sha256": gate_r["receipt_sha256"],
+        "oidc_config_receipt_sha256": oidc["receipt_sha256"], "oidc_claims_receipt_sha256": claims_r["receipt_sha256"],
+        "aws_oidc_attestation_receipt_sha256": aws["receipt_sha256"], "provider_readback_sha256": _sha(provider),
+        "provider_evidence_sha256": readiness["evidence_sha256"], "callback_readiness_status": readiness["status"],
+        "callback_ready_candidate": readiness["ready_candidate"], "callback_readiness_reasons": readiness["reasons"],
         "environment_gate_verified": True, "environment_metadata_stable_across_gate": True,
         "oidc_config_stable_across_gate": True, "oidc_claims_locally_bound": True,
         "same_oidc_token_submitted_to_aws_sts": True, "aws_sts_accepted_expected_subject": True,
         "aws_role_trust_policy_exact": True, "authenticated_provider_readback_bound": True,
-        "database_mutation_authorized": False, "edge_deployment_authorized": False,
-        "aws_mutation_authorized": False, "send_command_authorized": False,
-        "provider_identity_verified": False, "persistent_worker_proof": False,
+        "database_mutation_authorized": False, "edge_deployment_authorized": False, "aws_mutation_authorized": False,
+        "send_command_authorized": False, "provider_identity_verified": False, "persistent_worker_proof": False,
         "worker_admitted": False, "w1_verified": False, "canonical": False, "authority_effect": False,
     }
-    out = dict(core)
-    out["receipt_sha256"] = _sha(core)
-    return out
+    out = dict(core); out["receipt_sha256"] = _sha(core); return out
 
 
 def validate_binding_receipt(value: Any) -> dict[str, Any]:
-    receipt = _self_hashed(value, schema=BINDING_SCHEMA, label="binding_receipt")
-    if receipt.get("callback_readiness_status") not in ("READY_CANDIDATE_NON_AUTHORITY", "NOT_READY"):
+    r = _self_hashed(value, BINDING_SCHEMA, "binding_receipt")
+    if r.get("callback_readiness_status") not in ("READY_CANDIDATE_NON_AUTHORITY", "NOT_READY"):
         raise CallbackProtectedBindingError("binding_readiness_status_invalid")
-    if receipt.get("callback_ready_candidate") is not (receipt["callback_readiness_status"] == "READY_CANDIDATE_NON_AUTHORITY"):
+    if r.get("callback_ready_candidate") is not (r["callback_readiness_status"] == "READY_CANDIDATE_NON_AUTHORITY"):
         raise CallbackProtectedBindingError("binding_readiness_boolean_mismatch")
-    _false(receipt, AUTHORITY_FALSE, "binding")
-    return receipt
+    _false(r, AUTHORITY_FALSE, "binding")
+    return r
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser()
-    sub = parser.add_subparsers(dest="command", required=True)
-    p = sub.add_parser("validate-oidc-config"); p.add_argument("--input", type=Path, required=True); p.add_argument("--output", type=Path, required=True)
-    p = sub.add_parser("compare-oidc-config"); p.add_argument("--before", type=Path, required=True); p.add_argument("--after", type=Path, required=True)
-    p = sub.add_parser("validate-oidc-claims"); p.add_argument("--input", type=Path, required=True); p.add_argument("--gate", type=Path, required=True); p.add_argument("--oidc-config", type=Path, required=True); p.add_argument("--git-sha", required=True); p.add_argument("--now-epoch", type=int); p.add_argument("--output", type=Path, required=True)
-    p = sub.add_parser("build-aws-session-policy"); p.add_argument("--role-arn", required=True); p.add_argument("--account-id", required=True); p.add_argument("--region", required=True); p.add_argument("--output", type=Path, required=True)
-    p = sub.add_parser("validate-aws-attestation"); p.add_argument("--claims", type=Path, required=True); p.add_argument("--session-policy", type=Path, required=True); p.add_argument("--sts-proof", type=Path, required=True); p.add_argument("--get-role", type=Path, required=True); p.add_argument("--role-arn", required=True); p.add_argument("--account-id", required=True); p.add_argument("--region", required=True); p.add_argument("--output", type=Path, required=True)
-    p = sub.add_parser("seal-binding"); p.add_argument("--environment", type=Path, required=True); p.add_argument("--gate", type=Path, required=True); p.add_argument("--oidc-config-before", type=Path, required=True); p.add_argument("--oidc-config-after", type=Path, required=True); p.add_argument("--claims", type=Path, required=True); p.add_argument("--aws-attestation", type=Path, required=True); p.add_argument("--provider-readback", type=Path, required=True); p.add_argument("--git-sha", required=True); p.add_argument("--tree-sha", required=True); p.add_argument("--output", type=Path, required=True)
-    p = sub.add_parser("validate-binding"); p.add_argument("--input", type=Path, required=True)
-    args = parser.parse_args(argv)
+    p = argparse.ArgumentParser(); sub = p.add_subparsers(dest="command", required=True)
+    x=sub.add_parser("validate-oidc-config"); x.add_argument("--input",type=Path,required=True); x.add_argument("--output",type=Path,required=True)
+    x=sub.add_parser("compare-oidc-config"); x.add_argument("--before",type=Path,required=True); x.add_argument("--after",type=Path,required=True)
+    x=sub.add_parser("validate-oidc-claims"); x.add_argument("--input",type=Path,required=True); x.add_argument("--gate",type=Path,required=True); x.add_argument("--oidc-config",type=Path,required=True); x.add_argument("--git-sha",required=True); x.add_argument("--now-epoch",type=int); x.add_argument("--output",type=Path,required=True)
+    x=sub.add_parser("build-aws-session-policy"); x.add_argument("--role-arn",required=True); x.add_argument("--account-id",required=True); x.add_argument("--region",required=True); x.add_argument("--output",type=Path,required=True)
+    x=sub.add_parser("validate-aws-attestation"); x.add_argument("--claims",type=Path,required=True); x.add_argument("--session-policy",type=Path,required=True); x.add_argument("--sts-proof",type=Path,required=True); x.add_argument("--get-role",type=Path,required=True); x.add_argument("--role-arn",required=True); x.add_argument("--account-id",required=True); x.add_argument("--region",required=True); x.add_argument("--output",type=Path,required=True)
+    x=sub.add_parser("seal-binding"); x.add_argument("--environment",type=Path,required=True); x.add_argument("--gate",type=Path,required=True); x.add_argument("--oidc-config-before",type=Path,required=True); x.add_argument("--oidc-config-after",type=Path,required=True); x.add_argument("--claims",type=Path,required=True); x.add_argument("--aws-attestation",type=Path,required=True); x.add_argument("--provider-readback",type=Path,required=True); x.add_argument("--git-sha",required=True); x.add_argument("--tree-sha",required=True); x.add_argument("--output",type=Path,required=True)
+    x=sub.add_parser("validate-binding"); x.add_argument("--input",type=Path,required=True)
+    a=p.parse_args(argv)
     try:
-        if args.command == "validate-oidc-config": _write(args.output, validate_oidc_config(_read(args.input, "oidc_config")))
-        elif args.command == "compare-oidc-config": compare_oidc_config(_read(args.before, "oidc_before"), _read(args.after, "oidc_after"))
-        elif args.command == "validate-oidc-claims": _write(args.output, validate_oidc_claims(_read(args.input, "oidc_claims"), gate=_read(args.gate, "gate"), oidc_config=_read(args.oidc_config, "oidc_config"), git_sha=args.git_sha, now_epoch=args.now_epoch))
-        elif args.command == "build-aws-session-policy": _write(args.output, build_aws_session_policy(role_arn=args.role_arn, account_id=args.account_id, region=args.region))
-        elif args.command == "validate-aws-attestation": _write(args.output, validate_aws_attestation(claims=_read(args.claims, "claims"), session_policy=_read(args.session_policy, "session_policy"), sts_proof=_read(args.sts_proof, "sts_proof"), get_role=_read(args.get_role, "get_role"), role_arn=args.role_arn, account_id=args.account_id, region=args.region))
-        elif args.command == "seal-binding": _write(args.output, seal_binding(environment=_read(args.environment, "environment"), gate=_read(args.gate, "gate"), oidc_config_before=_read(args.oidc_config_before, "oidc_before"), oidc_config_after=_read(args.oidc_config_after, "oidc_after"), claims=_read(args.claims, "claims"), aws_attestation=_read(args.aws_attestation, "aws_attestation"), provider_readback=_read(args.provider_readback, "provider_readback"), git_sha=args.git_sha, tree_sha=args.tree_sha))
-        else: validate_binding_receipt(_read(args.input, "binding"))
+        if a.command=="validate-oidc-config": _write(a.output,validate_oidc_config(_read(a.input,"oidc_config")))
+        elif a.command=="compare-oidc-config": compare_oidc_config(_read(a.before,"oidc_before"),_read(a.after,"oidc_after"))
+        elif a.command=="validate-oidc-claims": _write(a.output,validate_oidc_claims(_read(a.input,"claims"),gate=_read(a.gate,"gate"),oidc_config=_read(a.oidc_config,"oidc"),git_sha=a.git_sha,now_epoch=a.now_epoch))
+        elif a.command=="build-aws-session-policy": _write(a.output,build_aws_session_policy(role_arn=a.role_arn,account_id=a.account_id,region=a.region))
+        elif a.command=="validate-aws-attestation": _write(a.output,validate_aws_attestation(claims=_read(a.claims,"claims"),session_policy=_read(a.session_policy,"policy"),sts_proof=_read(a.sts_proof,"sts"),get_role=_read(a.get_role,"role"),role_arn=a.role_arn,account_id=a.account_id,region=a.region))
+        elif a.command=="seal-binding": _write(a.output,seal_binding(environment=_read(a.environment,"environment"),gate=_read(a.gate,"gate"),oidc_config_before=_read(a.oidc_config_before,"oidc_before"),oidc_config_after=_read(a.oidc_config_after,"oidc_after"),claims=_read(a.claims,"claims"),aws_attestation=_read(a.aws_attestation,"aws"),provider_readback=_read(a.provider_readback,"provider"),git_sha=a.git_sha,tree_sha=a.tree_sha))
+        else: validate_binding_receipt(_read(a.input,"binding"))
         return 0
     except CallbackProtectedBindingError as exc:
-        print(f"W1_CALLBACK_PROTECTED_BINDING_REJECTED:{exc}", file=sys.stderr)
-        return 2
-
+        print(f"W1_CALLBACK_PROTECTED_BINDING_REJECTED:{exc}",file=sys.stderr); return 2
 
 if __name__ == "__main__":
     raise SystemExit(main())
