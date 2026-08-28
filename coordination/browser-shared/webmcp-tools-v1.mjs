@@ -19,6 +19,12 @@ function fnv1a64(value) {
   return hash.toString(16).padStart(16, '0');
 }
 
+function stableStringCompare(left, right) {
+  const a = String(left ?? '');
+  const b = String(right ?? '');
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 function cleanText(value, max, code) {
   if (typeof value !== 'string') throw new Error(code);
   const text = value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ' ').trim();
@@ -61,7 +67,7 @@ function normalizeSchema(input) {
         if (value.length > MAX_ARRAY_ITEMS) throw new Error('webmcp_input_schema_array_too_large');
         return value.map((item) => visit(item, depth + 1));
       }
-      const keys = Object.keys(value).sort((a, b) => a.localeCompare(b, 'en'));
+      const keys = Object.keys(value).sort(stableStringCompare);
       if (keys.length > MAX_OBJECT_KEYS) throw new Error('webmcp_input_schema_object_too_large');
       const out = {};
       for (const key of keys) {
@@ -158,7 +164,7 @@ export function webMcpEnvelopeFromCdpTools(rawTools, {
     if (seen.has(key)) throw new Error('webmcp_tool_duplicate');
     seen.add(key);
     return normalizeTool(raw, identity);
-  }).sort((a, b) => `${a.frame_scope}:${a.name}:${a.tool_ref}`.localeCompare(`${b.frame_scope}:${b.name}:${b.tool_ref}`, 'en'));
+  }).sort((a, b) => stableStringCompare(`${a.frame_scope}:${a.name}:${a.tool_ref}`, `${b.frame_scope}:${b.name}:${b.tool_ref}`));
   return Object.freeze({
     ...base,
     status: 'SUPPORTED',
