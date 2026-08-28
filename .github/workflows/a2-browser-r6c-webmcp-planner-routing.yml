@@ -34,23 +34,25 @@ jobs:
           node --check coordination/browser-shared/webmcp-tools-v1.mjs
           node --check coordination/browser-shared/webmcp-catalog-v1.mjs
           node --check coordination/browser-shared/webmcp-routing-index-v1.mjs
+          node --check coordination/browser-shared/webmcp-tool-search-v1.mjs
           node --check coordination/browser-shared/semantic-planning-broker-v1.mjs
           node --check coordination/browser-shared/tests/webmcp-routing-index-v1.test.mjs
           node --check coordination/browser-shared/tests/webmcp-routing-index-benchmark.mjs
+          node --check coordination/browser-shared/tests/webmcp-tool-search-v1.test.mjs
+          node --check coordination/browser-shared/tests/webmcp-tool-search-benchmark.mjs
           node --test \
             coordination/browser-shared/tests/webmcp-tools-v1.test.mjs \
             coordination/browser-shared/tests/webmcp-catalog-v1.test.mjs \
             coordination/browser-shared/tests/webmcp-routing-index-v1.test.mjs \
+            coordination/browser-shared/tests/webmcp-tool-search-v1.test.mjs \
             coordination/browser-shared/tests/semantic-planning-broker-v1.test.mjs | tee "$RUNNER_TEMP/r6c-shared-tests.log"
           node coordination/browser-shared/tests/webmcp-catalog-benchmark.mjs | tee "$RUNNER_TEMP/r6c-catalog-benchmark.json"
           node coordination/browser-shared/tests/webmcp-routing-index-benchmark.mjs | tee "$RUNNER_TEMP/r6c-routing-index-benchmark.json"
-          grep -q '"ok":true' "$RUNNER_TEMP/r6c-routing-index-benchmark.json"
-          grep -q '"tool_count":128' "$RUNNER_TEMP/r6c-routing-index-benchmark.json"
-          grep -q '"full_schema_embedded":false' "$RUNNER_TEMP/r6c-routing-index-benchmark.json"
-          grep -q '"annotations_embedded":false' "$RUNNER_TEMP/r6c-routing-index-benchmark.json"
-          grep -q '"provider_model_used":false' "$RUNNER_TEMP/r6c-routing-index-benchmark.json"
+          node coordination/browser-shared/tests/webmcp-tool-search-benchmark.mjs | tee "$RUNNER_TEMP/r6c-tool-search-benchmark.json"
+          node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/r6c-tool-search-benchmark.json","utf8")); const r=b.rows.find(x=>x.tool_count===128); if(b.ok!==true||!r||r.search_handle_bytes>=2048||r.search_result_bytes>=12288||r.searched_reduction_vs_routing_index<0.85||r.searched_reduction_vs_full<0.99||b.max_results!==5||b.query_persisted!==false||b.full_tool_list_embedded!==false||b.full_schema_embedded!==false||b.annotations_embedded!==false||b.provider_model_used!==false||b.authority_effect!==false) process.exit(1)'
           ! grep -R -n -E -- 'WebMCP\.invokeTool|Runtime\.evaluate' \
             coordination/browser-shared/webmcp-routing-index-v1.mjs \
+            coordination/browser-shared/webmcp-tool-search-v1.mjs \
             coordination/browser-shared/semantic-planning-broker-v1.mjs
 
       - name: Compute Browser R6C protocol and regressions
@@ -63,7 +65,8 @@ jobs:
           node --check tests/r6c-planning-routing.test.mjs
           node --check tests/r6c-real-planning-routing-smoke.mjs
           node --test tests/*.test.mjs | tee "$RUNNER_TEMP/r6c-compute-tests.log"
-          node -e 'const p=require("./protocol-v1.json"); const r=p.webmcp_routing; const s=p.semantic_planning; if(p.version!=="1.7.0"||r?.stage!=="R6C_CONTEXT_NEGOTIATION"||r?.selection_only!==true||r?.lossy_index!==true||r?.routing_index_max_bytes!==49152||r?.full_schema_embedded!==false||r?.annotations_embedded!==false||r?.fresh_description_required!==true||r?.semantic_fallback_lease_bound!==true||r?.daemon_semantic_tool_selection!==false||r?.tool_invocation_exposed!==false||r?.runtime_evaluate_used!==false||s?.cache_hits_receive_planner_context!==false||s?.waiters_receive_planner_context!==false||s?.semantic_fallback_fresh_capture!==true||s?.routing_failure_aborts_unseen_flight!==true) process.exit(1)'
+          node -e 'const p=require("./protocol-v1.json"); const r=p.webmcp_routing; const t=p.webmcp_tool_search; const s=p.semantic_planning; if(p.version!=="1.8.0"||r?.stage!=="R6C_INTERNAL_SEARCH_INDEX"||r?.selection_only!==true||r?.lossy_index!==true||r?.routing_index_max_bytes!==49152||r?.planner_receives_full_routing_index!==false||r?.full_schema_embedded!==false||r?.annotations_embedded!==false||r?.fresh_description_required!==true||r?.semantic_fallback_lease_bound!==true||r?.daemon_semantic_tool_selection!==false||r?.tool_invocation_exposed!==false||r?.runtime_evaluate_used!==false||t?.stage!=="R6C_DEFERRED_TOOL_SEARCH"||t?.search_algorithm!=="DETERMINISTIC_LEXICAL"||t?.search_handle_max_bytes!==2048||t?.query_max_chars!==512||t?.max_results!==5||t?.search_result_max_bytes!==12288||t?.fresh_toolset_required!==true||t?.lease_bound!==true||t?.query_preflight_before_browser_work!==true||t?.lease_preflight_before_browser_work!==true||t?.lease_postflight_after_browser_work!==true||t?.query_persisted!==false||t?.full_tool_list_embedded!==false||t?.full_schema_embedded!==false||t?.annotations_embedded!==false||t?.tool_invocation_exposed!==false||t?.runtime_evaluate_used!==false||s?.cold_leader_context_routing!=="R6C_DEFERRED_TOOL_SEARCH"||s?.cache_hits_receive_planner_context!==false||s?.waiters_receive_planner_context!==false||s?.semantic_fallback_fresh_capture!==true||s?.lease_preflight_before_browser_work!==true||s?.routing_failure_aborts_unseen_flight!==true) process.exit(1)'
+          grep -q "'planning.tools.search': 'LOCAL_COORDINATION'" src/rpc-server.mjs
           grep -q "'planning.context': 'LOCAL_COORDINATION'" src/rpc-server.mjs
           ! grep -R -n -E -- 'Runtime\.evaluate|WebMCP\.invokeTool|WebMCP\.cancelInvocation' src
           grep -R -q -- "--remote-debugging-pipe" src
@@ -135,6 +138,7 @@ jobs:
           grep -q '"waiters":7' "$RUNNER_TEMP/r6c-real-routing-smoke.json"
           grep -q '"waiter_context_bytes":0' "$RUNNER_TEMP/r6c-real-routing-smoke.json"
           grep -q '"fresh_semantic_fallback":true' "$RUNNER_TEMP/r6c-real-routing-smoke.json"
+          grep -q '"lease_preflight_used":true' "$RUNNER_TEMP/r6c-real-routing-smoke.json"
           grep -q '"lease_bound_context":true' "$RUNNER_TEMP/r6c-real-routing-smoke.json"
           grep -q '"cache_hit_context_bytes":0' "$RUNNER_TEMP/r6c-real-routing-smoke.json"
           grep -q '"runtime_evaluate_used":false' "$RUNNER_TEMP/r6c-real-routing-smoke.json"
@@ -150,6 +154,7 @@ jobs:
           cp "$RUNNER_TEMP/r6c-shared-tests.log" dist/a2-browser-r6c/evidence/R6C_SHARED_TESTS.log
           cp "$RUNNER_TEMP/r6c-catalog-benchmark.json" dist/a2-browser-r6c/evidence/R6C_R6B_CATALOG_BENCHMARK.json
           cp "$RUNNER_TEMP/r6c-routing-index-benchmark.json" dist/a2-browser-r6c/evidence/R6C_ROUTING_INDEX_BENCHMARK.json
+          cp "$RUNNER_TEMP/r6c-tool-search-benchmark.json" dist/a2-browser-r6c/evidence/R6C_TOOL_SEARCH_BENCHMARK.json
           cp "$RUNNER_TEMP/r6c-compute-tests.log" dist/a2-browser-r6c/evidence/R6C_COMPUTE_TESTS.log
           cp "$RUNNER_TEMP/r6c-r5-regressions.log" dist/a2-browser-r6c/evidence/R6C_R5_REGRESSIONS.log
           cp "$RUNNER_TEMP/r6c-r6a-real-smoke.json" dist/a2-browser-r6c/evidence/R6C_R6A_REAL_CHROME_REGRESSION.json
@@ -161,9 +166,12 @@ jobs:
             coordination/browser-shared/webmcp-tools-v1.mjs \
             coordination/browser-shared/webmcp-catalog-v1.mjs \
             coordination/browser-shared/webmcp-routing-index-v1.mjs \
+            coordination/browser-shared/webmcp-tool-search-v1.mjs \
             coordination/browser-shared/semantic-planning-broker-v1.mjs \
             coordination/browser-shared/tests/webmcp-routing-index-v1.test.mjs \
             coordination/browser-shared/tests/webmcp-routing-index-benchmark.mjs \
+            coordination/browser-shared/tests/webmcp-tool-search-v1.test.mjs \
+            coordination/browser-shared/tests/webmcp-tool-search-benchmark.mjs \
             coordination/browser-shared/tests/semantic-planning-broker-v1.test.mjs \
             coordination/browser-compute/protocol-v1.json \
             coordination/browser-compute/src/planning-broker-service.mjs \
