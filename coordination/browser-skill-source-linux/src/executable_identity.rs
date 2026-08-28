@@ -50,9 +50,9 @@ impl OpenedExecutable {
 pub fn open_fixed_helper() -> Result<OpenedExecutable, ExecutableIdentityError> {
     let launcher = env::current_exe()
         .map_err(|_| ExecutableIdentityError::new("skill_launcher_current_exe_failed"))?;
-    let directory = launcher
-        .parent()
-        .ok_or_else(|| ExecutableIdentityError::new("skill_launcher_executable_directory_missing"))?;
+    let directory = launcher.parent().ok_or_else(|| {
+        ExecutableIdentityError::new("skill_launcher_executable_directory_missing")
+    })?;
 
     let directory_fd = open(
         directory,
@@ -121,8 +121,9 @@ pub fn test_pause_after_open() -> Result<(), ExecutableIdentityError> {
             ));
         }
         (Some(ready), Some(proceed)) => {
-            fs::write(&ready, b"opened")
-                .map_err(|_| ExecutableIdentityError::new("skill_launcher_test_hook_ready_failed"))?;
+            fs::write(&ready, b"opened").map_err(|_| {
+                ExecutableIdentityError::new("skill_launcher_test_hook_ready_failed")
+            })?;
             for _ in 0..500 {
                 if Path::new(&proceed).exists() {
                     return Ok(());

@@ -30,8 +30,8 @@ fn run() -> Result<(), &'static str> {
 
     rustix::thread::set_no_new_privs(true).map_err(|_| "skill_launcher_no_new_privs_failed")?;
     launch_contract::sanitize_inherited_fds(Some(exec_fd)).map_err(|error| error.code())?;
-    let report = launch_contract::verify_clean_inherited_fds(Some(exec_fd))
-        .map_err(|error| error.code())?;
+    let report =
+        launch_contract::verify_clean_inherited_fds(Some(exec_fd)).map_err(|error| error.code())?;
     if !report.close_range_unshare
         || report.stdio_only_inherited_fds
         || !report.procfs_verified

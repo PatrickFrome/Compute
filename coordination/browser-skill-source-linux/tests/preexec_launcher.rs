@@ -356,7 +356,7 @@ fn swap_after_open_cannot_redirect_fd_bound_execution() {
 
     let ready = tree.path().join("opened.ready");
     let proceed = tree.path().join("continue.ready");
-    let mut child = Command::new(&launcher)
+    let child = Command::new(&launcher)
         .arg(&root)
         .env("A2_R7L_TEST_READY", &ready)
         .env("A2_R7L_TEST_PROCEED", &proceed)
@@ -375,7 +375,9 @@ fn swap_after_open_cannot_redirect_fd_bound_execution() {
     );
     fs::write(&proceed, b"continue").unwrap();
 
-    let output = child.wait_with_output().expect("wait identity-bound launcher");
+    let output = child
+        .wait_with_output()
+        .expect("wait identity-bound launcher");
     assert!(
         output.status.success(),
         "opened helper identity was redirected: {}",

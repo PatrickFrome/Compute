@@ -35,7 +35,12 @@ pub struct LaunchContractReport {
     pub preserved_fd: Option<u32>,
 }
 
-fn close_range(first: u32, last: u32, flags: u32, code: &'static str) -> Result<(), LaunchContractError> {
+fn close_range(
+    first: u32,
+    last: u32,
+    flags: u32,
+    code: &'static str,
+) -> Result<(), LaunchContractError> {
     // SAFETY: close_range takes scalar values only. Callers validate first <= last, flags are
     // kernel-defined close_range flags, and no pointer, borrowed memory, aliasing, or Rust
     // lifetime crosses this syscall boundary. This remains the sole explicit unsafe seam in the
