@@ -21,10 +21,8 @@ impl TempTree {
             .duration_since(UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "a2-r7i-{label}-{}-{nonce}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("a2-r7i-{label}-{}-{nonce}", std::process::id()));
         fs::create_dir_all(&path).expect("create temp tree");
         Self { path }
     }
