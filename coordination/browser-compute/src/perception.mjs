@@ -25,6 +25,11 @@ const ALLOWED_STATES = new Set([
   'selected'
 ]);
 
+const DOCUMENT_STRING_FIELDS = Object.freeze([
+  'documentURL', 'title', 'baseURL', 'contentLanguage',
+  'encodingName', 'publicId', 'systemId', 'frameId'
+]);
+
 function denseArray(value, code, max = Number.MAX_SAFE_INTEGER) {
   if (!Array.isArray(value) || value.length > max) throw new Error(code);
   for (let index = 0; index < value.length; index += 1) {
@@ -66,7 +71,9 @@ function stringAtOrEmpty(strings, index, code) {
 function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (value && typeof value === 'object') {
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
+    const keys = Object.keys(value).sort((left, right) => left.localeCompare(right, 'en'));
+    const properties = keys.map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`);
+    return `{${properties.join(',')}}`;
   }
   return JSON.stringify(value);
 }
@@ -99,7 +106,7 @@ function axState(properties, limits) {
 }
 
 function mergeLimits(overrides) {
-  const limits = { ...DEFAULT_PERCEPTION_LIMITS, ...(overrides || {}) };
+  const limits = Object.assign({}, DEFAULT_PERCEPTION_LIMITS, overrides);
   for (const [name, value] of Object.entries(limits)) {
     if (!Number.isSafeInteger(value) || value < 1) throw new Error(`perception_limit_invalid:${name}`);
   }
@@ -119,6 +126,90 @@ function validateStrings(raw, limits) {
   return strings;
 }
 
+function validateDocumentStrings(document, strings) {
+  for (const field of DOCUMENT_STRING_FIELDS) {
+    if (document[field] == null) continue;
+    stringAtOrEmpty(strings, document[field], `snapshot_document_${field}_index_invalid`);
+  }
+}
+
+function validateAttributes(attributes, strings, limits, initialCount) {
+  let attributeIndexes = initialCount;
+  for (const attr of attributes) {
+    const row = denseArray(attr, 'snapshot_attribute_row_invalid');
+    if (row.length % 2 !== 0) throw new Error('snapshot_attribute_row_odd');
+    attributeIndexes += row.length;
+    if (attributeIndexes > limits.maxAttributeIndexes) throw new Error('snapshot_attributes_too_many');
+    for (let index = 0; index < row.length; index += 2) {
+      stringAt(strings, row[index], 'snapshot_attribute_name_index_invalid');
+      stringAtOrEmpty(strings, row[index + 1], 'snapshot_attribute_value_index_invalid');
+    }
+  }
+  return attributeIndexes;
+}
+
+function compileDocumentNodes({ document, documentIndex, strings, domByBackendId, limits, attributeIndexes }) {
+  const nodes = object(document.nodes, 'snapshot_nodes_invalid');
+  const nodeTypes = denseArray(nodes.nodeType, 'snapshot_node_types_invalid');
+  const count = nodeTypes.length;
+  const parentIndexes = exactLength(nodes.parentIndex, count, 'snapshot_parent_indexes_invalid');
+  const nodeNames = exactLength(nodes.nodeName, count, 'snapshot_node_names_invalid');
+  const nodeValues = exactLength(nodes.nodeValue, count, 'snapshot_node_values_invalid');
+  const backendIds = exactLength(nodes.backendNodeId, count, 'snapshot_backend_ids_invalid');
+  const attributes = exactLength(nodes.attributes, count, 'snapshot_attributes_invalid');
+  validateDocumentStrings(document, strings);
+
+  for (let index = 0; index < count; index += 1) {
+    integer(nodeTypes[index], 'snapshot_node_type_invalid', { max: 255 });
+    integer(parentIndexes[index], 'snapshot_parent_index_invalid', { min: -1, max: Math.max(-1, count - 1) });
+    stringAt(strings, nodeNames[index], 'snapshot_node_name_index_invalid');
+    stringAtOrEmpty(strings, nodeValues[index], 'snapshot_node_value_index_invalid');
+    const backendNodeId = integer(backendIds[index], 'snapshot_backend_id_invalid', { min: 1 });
+    if (domByBackendId.has(backendNodeId)) throw new Error('snapshot_backend_id_duplicate');
+    domByBackendId.set(backendNodeId, { documentIndex, nodeIndex: index, bounds: null, paintOrder: null, visible: false });
+  }
+
+  return {
+    backendIds,
+    count,
+    attributeIndexes: validateAttributes(attributes, strings, limits, attributeIndexes)
+  };
+}
+
+function visibleLayoutRow(bounds, styles) {
+  return bounds[2] > 0 && bounds[3] > 0 &&
+    styles[0] !== 'none' && !['hidden', 'collapse'].includes(styles[1]) && Number(styles[2]) > 0;
+}
+
+function compileDocumentLayout({ document, strings, domByBackendId, backendIds, count }) {
+  const layout = object(document.layout, 'snapshot_layout_invalid');
+  const nodeIndexes = denseArray(layout.nodeIndex, 'snapshot_layout_node_indexes_invalid', count);
+  const layoutCount = nodeIndexes.length;
+  const styles = exactLength(layout.styles, layoutCount, 'snapshot_layout_styles_invalid');
+  const bounds = exactLength(layout.bounds, layoutCount, 'snapshot_layout_bounds_invalid');
+  const text = exactLength(layout.text, layoutCount, 'snapshot_layout_text_invalid');
+  const paintOrders = layout.paintOrders == null ? null : exactLength(layout.paintOrders, layoutCount, 'snapshot_paint_orders_invalid');
+  const seenNodes = new Set();
+
+  for (let index = 0; index < layoutCount; index += 1) {
+    const nodeIndex = integer(nodeIndexes[index], 'snapshot_layout_node_index_invalid', { max: count - 1 });
+    if (seenNodes.has(nodeIndex)) throw new Error('snapshot_layout_node_duplicate');
+    seenNodes.add(nodeIndex);
+    const styleIndexes = denseArray(styles[index], 'snapshot_layout_style_row_invalid', PERCEPTION_COMPUTED_STYLES.length);
+    if (styleIndexes.length !== PERCEPTION_COMPUTED_STYLES.length) throw new Error('snapshot_layout_style_row_length');
+    const styleValues = styleIndexes.map((stringIndex) => stringAt(strings, stringIndex, 'snapshot_layout_style_index_invalid'));
+    stringAtOrEmpty(strings, text[index], 'snapshot_layout_text_index_invalid');
+    const rectangle = denseArray(bounds[index], 'snapshot_layout_bounds_row_invalid', 4);
+    if (rectangle.length !== 4) throw new Error('snapshot_layout_bounds_row_length');
+    const normalizedBounds = rectangle.map((value) => finite(value, 'snapshot_layout_bound_invalid'));
+    const paintOrder = paintOrders == null ? null : integer(paintOrders[index], 'snapshot_paint_order_invalid');
+    const row = domByBackendId.get(backendIds[nodeIndex]);
+    row.bounds = normalizedBounds;
+    row.paintOrder = paintOrder;
+    row.visible = visibleLayoutRow(normalizedBounds, styleValues);
+  }
+}
+
 function compileDom(domSnapshot, limits) {
   const root = object(domSnapshot, 'dom_snapshot_invalid');
   const strings = validateStrings(root.strings, limits);
@@ -129,94 +220,30 @@ function compileDom(domSnapshot, limits) {
 
   for (let documentIndex = 0; documentIndex < documents.length; documentIndex += 1) {
     const document = object(documents[documentIndex], 'snapshot_document_invalid');
-    const nodes = object(document.nodes, 'snapshot_nodes_invalid');
-    const nodeTypes = denseArray(nodes.nodeType, 'snapshot_node_types_invalid');
-    const count = nodeTypes.length;
-    totalNodes += count;
+    const compiled = compileDocumentNodes({ document, documentIndex, strings, domByBackendId, limits, attributeIndexes });
+    totalNodes += compiled.count;
     if (totalNodes > limits.maxDomNodes) throw new Error('snapshot_dom_nodes_too_many');
-    const parentIndexes = exactLength(nodes.parentIndex, count, 'snapshot_parent_indexes_invalid');
-    const nodeNames = exactLength(nodes.nodeName, count, 'snapshot_node_names_invalid');
-    const nodeValues = exactLength(nodes.nodeValue, count, 'snapshot_node_values_invalid');
-    const backendIds = exactLength(nodes.backendNodeId, count, 'snapshot_backend_ids_invalid');
-    const attributes = exactLength(nodes.attributes, count, 'snapshot_attributes_invalid');
-    for (const field of [
-      'documentURL', 'title', 'baseURL', 'contentLanguage',
-      'encodingName', 'publicId', 'systemId', 'frameId'
-    ]) {
-      if (document[field] != null) {
-        stringAtOrEmpty(strings, document[field], `snapshot_document_${field}_index_invalid`);
-      }
-    }
-
-    for (let index = 0; index < count; index += 1) {
-      integer(nodeTypes[index], 'snapshot_node_type_invalid', { max: 255 });
-      integer(parentIndexes[index], 'snapshot_parent_index_invalid', { min: -1, max: Math.max(-1, count - 1) });
-      stringAt(strings, nodeNames[index], 'snapshot_node_name_index_invalid');
-      stringAtOrEmpty(strings, nodeValues[index], 'snapshot_node_value_index_invalid');
-      const backendNodeId = integer(backendIds[index], 'snapshot_backend_id_invalid', { min: 1 });
-      if (domByBackendId.has(backendNodeId)) throw new Error('snapshot_backend_id_duplicate');
-      const attr = denseArray(attributes[index], 'snapshot_attribute_row_invalid');
-      if (attr.length % 2 !== 0) throw new Error('snapshot_attribute_row_odd');
-      attributeIndexes += attr.length;
-      if (attributeIndexes > limits.maxAttributeIndexes) throw new Error('snapshot_attributes_too_many');
-      for (let attrIndex = 0; attrIndex < attr.length; attrIndex += 2) {
-        stringAt(strings, attr[attrIndex], 'snapshot_attribute_name_index_invalid');
-        stringAtOrEmpty(strings, attr[attrIndex + 1], 'snapshot_attribute_value_index_invalid');
-      }
-      domByBackendId.set(backendNodeId, {
-        documentIndex,
-        nodeIndex: index,
-        bounds: null,
-        paintOrder: null,
-        visible: false
-      });
-    }
-
-    const layout = object(document.layout, 'snapshot_layout_invalid');
-    const layoutNodeIndexes = denseArray(layout.nodeIndex, 'snapshot_layout_node_indexes_invalid', count);
-    const layoutCount = layoutNodeIndexes.length;
-    const styles = exactLength(layout.styles, layoutCount, 'snapshot_layout_styles_invalid');
-    const bounds = exactLength(layout.bounds, layoutCount, 'snapshot_layout_bounds_invalid');
-    const layoutText = exactLength(layout.text, layoutCount, 'snapshot_layout_text_invalid');
-    const paintOrders = layout.paintOrders == null ? null : exactLength(layout.paintOrders, layoutCount, 'snapshot_paint_orders_invalid');
-    const seenLayoutNodes = new Set();
-    for (let layoutIndex = 0; layoutIndex < layoutCount; layoutIndex += 1) {
-      const nodeIndex = integer(layoutNodeIndexes[layoutIndex], 'snapshot_layout_node_index_invalid', { max: count - 1 });
-      if (seenLayoutNodes.has(nodeIndex)) throw new Error('snapshot_layout_node_duplicate');
-      seenLayoutNodes.add(nodeIndex);
-      const styleIndexes = denseArray(styles[layoutIndex], 'snapshot_layout_style_row_invalid', PERCEPTION_COMPUTED_STYLES.length);
-      if (styleIndexes.length !== PERCEPTION_COMPUTED_STYLES.length) throw new Error('snapshot_layout_style_row_length');
-      const styleValues = styleIndexes.map((stringIndex) => stringAt(strings, stringIndex, 'snapshot_layout_style_index_invalid'));
-      stringAtOrEmpty(strings, layoutText[layoutIndex], 'snapshot_layout_text_index_invalid');
-      const rectangle = denseArray(bounds[layoutIndex], 'snapshot_layout_bounds_row_invalid', 4);
-      if (rectangle.length !== 4) throw new Error('snapshot_layout_bounds_row_length');
-      const normalizedBounds = rectangle.map((value) => finite(value, 'snapshot_layout_bound_invalid'));
-      const paintOrder = paintOrders == null ? null : integer(paintOrders[layoutIndex], 'snapshot_paint_order_invalid');
-      const row = domByBackendId.get(backendIds[nodeIndex]);
-      row.bounds = normalizedBounds;
-      row.paintOrder = paintOrder;
-      row.visible = normalizedBounds[2] > 0 && normalizedBounds[3] > 0 &&
-        styleValues[0] !== 'none' && !['hidden', 'collapse'].includes(styleValues[1]) && Number(styleValues[2]) > 0;
-    }
+    attributeIndexes = compiled.attributeIndexes;
+    compileDocumentLayout({ document, strings, domByBackendId, backendIds: compiled.backendIds, count: compiled.count });
   }
   return { domByBackendId, totalNodes, documentCount: documents.length, strings };
 }
 
-export function compileSemanticSnapshot({ domSnapshot, axTree, identity, sessionGeneration, nodeKey, limits: overrides } = {}) {
-  const limits = mergeLimits(overrides);
+function validateSnapshotIdentity(identity, sessionGeneration, nodeKey) {
   if (!Buffer.isBuffer(nodeKey) || nodeKey.length < 32) throw new Error('perception_node_key_invalid');
   if (typeof identity?.targetId !== 'string' || !identity.targetId) throw new Error('target_id_invalid');
   if (!Number.isSafeInteger(identity?.conversationEpoch) || identity.conversationEpoch < 1) throw new Error('conversation_epoch_invalid');
   if (typeof identity?.processIncarnationId !== 'string' || !identity.processIncarnationId) throw new Error('process_incarnation_id_invalid');
   integer(sessionGeneration, 'session_generation_invalid', { min: 1 });
+}
 
-  const dom = compileDom(domSnapshot, limits);
-  const axNodes = denseArray(object(axTree, 'ax_tree_invalid').nodes, 'ax_nodes_invalid', limits.maxAxNodes);
+function collectSemanticCandidates({ axNodes, dom, identity, sessionGeneration, nodeKey, limits }) {
   const candidates = [];
   const publicIdByAxId = new Map();
   const seenAxIds = new Set();
   const seenNodeIds = new Set();
   const nodeBindings = new Map();
+
   for (const raw of axNodes) {
     const ax = object(raw, 'ax_node_invalid');
     if (typeof ax.nodeId !== 'string' || !ax.nodeId) throw new Error('ax_node_id_invalid');
@@ -232,19 +259,17 @@ export function compileSemanticSnapshot({ domSnapshot, axTree, identity, session
     if (seenNodeIds.has(nodeId)) throw new Error('semantic_node_id_duplicate');
     seenNodeIds.add(nodeId);
     publicIdByAxId.set(ax.nodeId, nodeId);
-    const candidate = {
+    candidates.push({
       axId: ax.nodeId,
       parentAxId: typeof ax.parentId === 'string' ? ax.parentId : null,
       nodeId,
-      backendNodeId,
       role: axScalar(ax.role, limits, 'ax_role'),
       name: axScalar(ax.name, limits, 'ax_name'),
       description: axScalar(ax.description, limits, 'ax_description'),
       ignored: ax.ignored === true,
       state: axState(ax.properties, limits),
       domNode
-    };
-    candidates.push(candidate);
+    });
     nodeBindings.set(nodeId, {
       backendNodeId,
       targetId: identity.targetId,
@@ -253,8 +278,11 @@ export function compileSemanticSnapshot({ domSnapshot, axTree, identity, session
       sessionGeneration
     });
   }
+  return { candidates, publicIdByAxId, nodeBindings };
+}
 
-  const nodes = candidates.map((candidate) => ({
+function publicSemanticNodes(candidates, publicIdByAxId) {
+  return candidates.map((candidate) => ({
     node_id: candidate.nodeId,
     parent_node_id: publicIdByAxId.get(candidate.parentAxId) || null,
     role: candidate.role,
@@ -266,6 +294,15 @@ export function compileSemanticSnapshot({ domSnapshot, axTree, identity, session
     bounds: candidate.domNode.bounds,
     paint_order: candidate.domNode.paintOrder
   }));
+}
+
+export function compileSemanticSnapshot({ domSnapshot, axTree, identity, sessionGeneration, nodeKey, limits: overrides } = {}) {
+  const limits = mergeLimits(overrides);
+  validateSnapshotIdentity(identity, sessionGeneration, nodeKey);
+  const dom = compileDom(domSnapshot, limits);
+  const axNodes = denseArray(object(axTree, 'ax_tree_invalid').nodes, 'ax_nodes_invalid', limits.maxAxNodes);
+  const compiledAx = collectSemanticCandidates({ axNodes, dom, identity, sessionGeneration, nodeKey, limits });
+  const nodes = publicSemanticNodes(compiledAx.candidates, compiledAx.publicIdByAxId);
   const content = {
     schema: 'metaengine.a2-compute-browser.semantic-snapshot.v1',
     target_id: identity.targetId,
@@ -287,7 +324,7 @@ export function compileSemanticSnapshot({ domSnapshot, axTree, identity, session
   const snapshotId = `snapshot_${crypto.createHash('sha256').update(canonical(content)).digest('hex')}`;
   return {
     snapshot: { ...content, snapshot_id: snapshotId },
-    nodeBindings
+    nodeBindings: compiledAx.nodeBindings
   };
 }
 

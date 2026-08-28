@@ -103,27 +103,31 @@ export class CdpPipeClient {
   get connected() { return this.#connected && !this.#closed; }
   get pendingCount() { return this.#pending.size; }
 
-  #onMessage(message) {
-    if (Number.isInteger(message.id)) {
-      const pending = this.#pending.get(message.id);
-      if (!pending) return;
-      this.#pending.delete(message.id);
-      const responseSessionId = typeof message.sessionId === 'string' && message.sessionId ? message.sessionId : null;
-      if (responseSessionId !== pending.sessionId) {
-        const error = new Error('cdp_session_response_mismatch');
-        pending.reject(error);
-        this.abort(error);
-        return;
-      }
-      if (message.error) pending.reject(new Error(`cdp_error:${message.error.code}:${message.error.message}`));
-      else pending.resolve(message.result || {});
+  #onResponse(message) {
+    const pending = this.#pending.get(message.id);
+    if (!pending) return;
+    this.#pending.delete(message.id);
+    const responseSessionId = typeof message.sessionId === 'string' && message.sessionId ? message.sessionId : null;
+    if (responseSessionId !== pending.sessionId) {
+      const error = new Error('cdp_session_response_mismatch');
+      pending.reject(error);
+      this.abort(error);
       return;
     }
-    if (typeof message.method === 'string' && message.method) {
-      for (const listener of this.#events.get(message.method) || []) {
-        try { listener(message.params || {}, message.sessionId || null); } catch (_) {}
-      }
+    if (message.error) pending.reject(new Error(`cdp_error:${message.error.code}:${message.error.message}`));
+    else pending.resolve(message.result || {});
+  }
+
+  #emitEvent(message) {
+    if (typeof message.method !== 'string' || !message.method) return;
+    for (const listener of this.#events.get(message.method) || []) {
+      try { listener(message.params || {}, message.sessionId || null); } catch (_) {}
     }
+  }
+
+  #onMessage(message) {
+    if (Number.isInteger(message.id)) this.#onResponse(message);
+    else this.#emitEvent(message);
   }
 
   #failAll(error) {

@@ -212,7 +212,7 @@ export class CdpSessionScheduler {
     for (const unsubscribe of this.#unsubscribers.splice(0)) {
       try { unsubscribe?.(); } catch (_) {}
     }
-    for (const targetId of [...this.#bindings.keys()]) this.invalidateTarget(targetId, reason);
+    for (const targetId of this.#bindings.keys()) this.invalidateTarget(targetId, reason);
     for (const waiter of this.#waiters.splice(0)) waiter.reject(staleError());
     try { this.#onDisposed?.(reason); } catch (_) {}
   }
