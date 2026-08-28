@@ -1,0 +1,161 @@
+name: A2 Browser R7J-A Max Package Inventory
+
+on:
+  push:
+    branches:
+      - work/a2-browser-r7j-positive-seccomp-allowlist
+    paths:
+      - 'coordination/browser-skill-source-linux/**'
+      - 'research/A2_BROWSER_R7J_A_SYSCALL_INVENTORY_PRE_RESEARCH_2026-08-28.md'
+      - '.github/workflows/a2-browser-r7j-a-max-package-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r7j-a-max-package-inventory:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+
+      - name: Verify environment and parent identity
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          command -v strace
+          test "$(rustc --version | awk '{print $2}')" = "1.98.0"
+          test "$(sha256sum Cargo.lock | awk '{print $1}')" = \
+            "ffdf4d85f832e92b20960ecdbc581103a113cf9ddfa93fa319ba124f21a3d003"
+          cargo build --locked --release --bin a2-skill-source-helper
+          sha256sum target/release/a2-skill-source-helper > "$RUNNER_TEMP/r7j-a-max-helper-sha256.txt"
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+
+      - name: Build near-limit package and request
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/r7j-a-max-root"
+          mkdir -p "$ROOT/bulk/assets"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, struct
+
+          root = Path(os.environ['RUNNER_TEMP']) / 'r7j-a-max-root' / 'bulk'
+          (root / 'SKILL.md').write_bytes(b'S' * (96 * 1024))
+          for index in range(8):
+              (root / 'assets' / f'blob-{index}.bin').write_bytes(bytes([65 + index]) * (256 * 1024))
+
+          name = b'bulk'
+          body = bytes([len(name)]) + name
+          payload = bytes([1, 2]) + struct.pack('>H', 0) + struct.pack('>Q', 99) + body
+          request = struct.pack('>I', len(payload)) + payload
+          (Path(os.environ['RUNNER_TEMP']) / 'r7j-a-max-request.bin').write_bytes(request)
+          PY
+
+      - name: Trace near-limit package read
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          HELPER=target/release/a2-skill-source-helper
+          strace -qq -f -s 256 -o "$RUNNER_TEMP/r7j-a-max.trace" \
+            "$HELPER" "$RUNNER_TEMP/r7j-a-max-root" \
+            < "$RUNNER_TEMP/r7j-a-max-request.bin" \
+            > "$RUNNER_TEMP/r7j-a-max.stdout" \
+            2> "$RUNNER_TEMP/r7j-a-max.stderr"
+          test ! -s "$RUNNER_TEMP/r7j-a-max.stderr"
+          test "$(stat -c '%s' "$RUNNER_TEMP/r7j-a-max.stdout")" -gt 2195456
+
+      - name: Derive allocator-stressed steady-state inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, os, re
+
+          trace = Path(os.environ['RUNNER_TEMP']) / 'r7j-a-max.trace'
+          lines = trace.read_text(errors='replace').splitlines()
+          call_re = re.compile(r'^(?:\d+\s+)?([A-Za-z0-9_]+)\(')
+          calls = []
+          last_seccomp = None
+          for index, line in enumerate(lines):
+              match = call_re.match(line)
+              if not match:
+                  continue
+              name = match.group(1)
+              calls.append((index, name))
+              if name == 'seccomp':
+                  last_seccomp = index
+          if last_seccomp is None:
+              raise SystemExit('no seccomp installation observed')
+          steady = sorted({name for index, name in calls if index > last_seccomp})
+          dangerous = {
+              'socket','socketpair','connect','bind','listen','accept','accept4',
+              'sendto','sendmsg','sendmmsg','recvfrom','recvmsg','recvmmsg','shutdown',
+              'clone','clone3','fork','vfork','execve','execveat','ptrace','unshare','setns',
+              'mount','umount2','pivot_root','bpf','perf_event_open','keyctl','add_key','request_key',
+              'io_uring_setup','io_uring_enter','io_uring_register',
+          }
+          bad = sorted(set(steady) & dangerous)
+          if bad:
+              raise SystemExit(f'dangerous post-seccomp syscalls observed: {bad}')
+          data = {
+              'schema': 'a2.browser.r7j-a.max-package-inventory.v1',
+              'platform': {'os':'linux','arch':'x86_64','rust':'1.98.0'},
+              'steady_state_syscalls': steady,
+              'steady_state_count': len(steady),
+              'dangerous_intersection': bad,
+              'package_payload_bytes': (96 * 1024) + (8 * 256 * 1024),
+              'policy_changed': False,
+              'authority_effect': False,
+          }
+          out = Path(os.environ['RUNNER_TEMP']) / 'R7J_A_MAX_PACKAGE_INVENTORY.json'
+          out.write_text(json.dumps(data, indent=2, sort_keys=True) + '\n')
+          print(out.read_text())
+          PY
+
+      - name: Build deterministic evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=dist/a2-browser-r7j-a-max
+          mkdir -p "$OUT/evidence"
+          cp "$RUNNER_TEMP/R7J_A_MAX_PACKAGE_INVENTORY.json" "$OUT/evidence/"
+          cp "$RUNNER_TEMP/r7j-a-max.trace" "$OUT/evidence/R7J_A_MAX_PACKAGE.trace"
+          cp "$RUNNER_TEMP/r7j-a-max-helper-sha256.txt" "$OUT/evidence/R7J_A_HELPER_SHA256.txt"
+          printf '%s\n' "$GITHUB_SHA" > "$OUT/evidence/SOURCE_COMMIT.txt"
+          printf '%s\n' '8da22eee9426f267f5982e90db246799cfe37e1c' > "$OUT/evidence/PARENT_VERIFIED_COMMIT.txt"
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf "$OUT/A2_BROWSER_R7J_A_MAX_PACKAGE_INVENTORY.tar" \
+            coordination/browser-skill-source-linux/Cargo.toml \
+            coordination/browser-skill-source-linux/Cargo.lock \
+            coordination/browser-skill-source-linux/src \
+            "$OUT/evidence"
+          sha256sum "$OUT/A2_BROWSER_R7J_A_MAX_PACKAGE_INVENTORY.tar" > "$OUT/R7J_A_MAX_SHA256SUMS.txt"
+
+      - name: Attest max-package inventory provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373
+        with:
+          subject-path: dist/a2-browser-r7j-a-max/A2_BROWSER_R7J_A_MAX_PACKAGE_INVENTORY.tar
+
+      - name: Upload max-package inventory evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1
+        with:
+          name: a2-browser-r7j-a-max-package-${{ github.sha }}
+          path: |
+            dist/a2-browser-r7j-a-max/A2_BROWSER_R7J_A_MAX_PACKAGE_INVENTORY.tar
+            dist/a2-browser-r7j-a-max/R7J_A_MAX_SHA256SUMS.txt
+            dist/a2-browser-r7j-a-max/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
