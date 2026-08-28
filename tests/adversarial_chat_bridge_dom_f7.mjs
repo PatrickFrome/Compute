@@ -11,7 +11,8 @@ const compat = readFileSync(resolve(EXT, 'platform-dom-compat.js'), 'utf8');
 const trustedGpt = readFileSync(resolve(EXT, 'trusted-chatgpt.js'), 'utf8');
 const trustedGlm = readFileSync(resolve(EXT, 'trusted-glm.js'), 'utf8');
 const promptGate = readFileSync(resolve(EXT, 'prompt-gate.js'), 'utf8');
-const recovery = readFileSync(resolve(EXT, 'content-recovery-v062.js'), 'utf8');
+const recovery = readFileSync(resolve(EXT, 'content-recovery.js'), 'utf8');
+const packageDescriptor = JSON.parse(readFileSync(resolve(EXT, 'runtime-package-manifest.json'), 'utf8'));
 const manifest = JSON.parse(readFileSync(resolve(EXT, 'manifest.json'), 'utf8'));
 
 function extractFn(name) {
@@ -72,7 +73,7 @@ check('compat has no runtime messaging', !compat.includes('runtime.sendMessage')
 check('compat has no click', !compat.includes('.click('));
 
 check('Prompt Gate loads at document_start', manifest.content_scripts[0].run_at === 'document_start' && manifest.content_scripts[0].js.includes('prompt-gate.js'));
-check('read-only sensor + recovery load after compat', JSON.stringify(manifest.content_scripts[1].js) === JSON.stringify(['platform-dom-compat.js', 'content.js', 'content-recovery-v062.js']));
+check('read-only sensor + recovery load after compat', JSON.stringify(manifest.content_scripts[1].js) === JSON.stringify(['platform-dom-compat.js', 'content.js', 'content-recovery.js']));
 check('recovery sensor is read-only', !recovery.includes('.click(') && !recovery.includes('Input.dispatch') && recovery.includes('A2_CHATGPT_EXHAUSTION_STATUS'));
 check('Prompt Gate has bridge capability path', promptGate.includes('A2_PROMPT_GATE_BRIDGE_BYPASS'));
 check('Prompt Gate has no chrome.debugger authority', !promptGate.includes('chrome.debugger'));
@@ -96,7 +97,7 @@ check('GLM has no native value setter', !trustedGlm.includes("Object.getOwnPrope
 check('GLM durable DISPATCHED precedes mouse release', trustedGlm.indexOf('state: "DISPATCHED"') < trustedGlm.indexOf('type: "mouseReleased", x: point.x'));
 check('GLM ambiguity is no-retry', trustedGlm.includes('AMBIGUOUS_NO_RETRY'));
 
-check('manifest is v0.6.2 Browser Operator', manifest.version === '0.6.2' && Number(manifest.minimum_chrome_version) >= 125);
+check('manifest version matches runtime package descriptor', manifest.version === packageDescriptor.package_version && Number(manifest.minimum_chrome_version) >= 125);
 check('incognito remains disabled', manifest.incognito === 'not_allowed');
 
 let passed = 0;
@@ -105,4 +106,4 @@ for (const [name, ok] of checks) {
   if (!ok) process.exitCode = 1;
   else passed += 1;
 }
-console.log(`\n${passed}/${checks.length} v0.6.2 adversarial DOM/operator checks passed`);
+console.log(`\n${passed}/${checks.length} adversarial DOM/operator checks passed`);

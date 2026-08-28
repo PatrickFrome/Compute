@@ -7,6 +7,7 @@ import { webcrypto } from 'node:crypto';
 const ROOT = path.resolve(import.meta.dirname, '..');
 const EXT = path.join(ROOT, 'coordination', 'chat-control-plane', 'extension');
 const REMOTE = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-chat-bridge-remote';
+const packageDescriptor = JSON.parse(fs.readFileSync(path.join(EXT, 'runtime-package-manifest.json'), 'utf8'));
 const ZAI = 'https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db';
 
 const local = new Map([
@@ -169,7 +170,7 @@ assert.equal(listeners.updateAvailable.length, 1, 'safe update listener not regi
 assert.ok(listeners.debuggerEvent.length >= 2, 'broker + GLM debugger event listeners not registered');
 assert.ok(listeners.debuggerDetach.length >= 2, 'broker + GLM debugger detach listeners not registered');
 assert.ok(listeners.tabRemoved.length >= 2, 'operator/broker tab removal listeners not registered');
-assert.equal(context.A2_OPERATOR_RUNTIME, '0.6.2-auto-rollover');
+assert.equal(context.A2_OPERATOR_RUNTIME, packageDescriptor.operator_runtime);
 assert.equal(typeof context.A2_DEBUGGER_RUN, 'function');
 assert.equal(typeof context.A2_DEBUGGER_HOLD, 'function');
 assert.equal(typeof context.A2_CHATGPT_TRUSTED_SEND, 'function');
@@ -177,13 +178,22 @@ assert.equal(typeof context.A2_GLM_TRUSTED_SEND, 'function');
 assert.equal(typeof context.A2_OPERATOR_CAPTURE_PERCEPTION, 'function');
 assert.equal(typeof context.A2_OPERATOR_CAPTURE_OOPIF, 'function');
 
+// v0.6.3+ DISARM fetch-suppression invariant: a disarmed bridge must issue no remote
+// command fetch (closes the live command regeneration storm) and must persist the marker.
+assert.equal(fetchCalls.length, 0, 'disarmed bridge must not issue remote calls');
+assert.equal(local.get('bridgeCommandFetchSuppressed'), 'DISARMED', 'disarmed fetch suppression marker not persisted');
+
+// Arming via the storage-change path must unlock the command poll.
+local.set('armed', true);
+for (const listener of listeners.storage) listener({ armed: { newValue: true } }, 'local');
+await new Promise((resolve) => setTimeout(resolve, 400));
 const commandPoll = fetchCalls.find((call) => call.input.endsWith('/v1/commands/next'));
-assert.ok(commandPoll, 'initial remote poll did not reach commands/next');
+assert.ok(commandPoll, 'armed bridge poll did not reach commands/next');
 assert.equal(commandPoll.headers.get('x-a2-chat-bridge-secret'), 'x'.repeat(64), 'pairing header was not sourced from real IndexedDB vault');
 assert.equal(local.has('bridgeSecret'), false, 'legacy pairing secret was not removed from chrome.storage.local');
 assert.equal(idbSecrets.get('pairing_secret'), 'x'.repeat(64), 'pairing secret was not migrated into IndexedDB vault');
 
-console.log('classic-worker-combined-load-v062: PASS', {
+console.log('classic-worker-combined-load: PASS', {
   fetchCalls: fetchCalls.length,
   runtimeMessageListeners: listeners.runtimeMessage.length,
   installedListeners: listeners.installed.length,
