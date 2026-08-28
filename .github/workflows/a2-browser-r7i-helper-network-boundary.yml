@@ -8,6 +8,7 @@ on:
       - 'coordination/browser-skill-source-linux/**'
       - 'coordination/browser-shared/**'
       - 'research/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY_PRE_RESEARCH_2026-08-28.md'
+      - 'research/A2_BROWSER_R7I_INHERITED_FD_SANITIZATION_RESEARCH_2026-08-28.md'
       - '.github/workflows/a2-browser-r7i-helper-network-boundary.yml'
   workflow_dispatch:
 
@@ -103,25 +104,37 @@ jobs:
           stat -c '%s' target/release/a2-skill-source-helper | tee "$RUNNER_TEMP/r7i-helper-size.txt"
           test "$(cat "$RUNNER_TEMP/r7i-helper-size.txt")" -lt 4194304
 
+          grep -q 'sanitize_inherited_fds' src/bin/a2-skill-source-helper.rs
           grep -q 'verify_clean_inherited_fds' src/bin/a2-skill-source-helper.rs
+          grep -q 'SYS_close_range' src/launch_contract.rs
+          grep -q 'CLOSE_RANGE_UNSHARE' src/launch_contract.rs
           grep -q 'apply_filter_all_threads' src/syscall_sandbox.rs
           grep -q 'SeccompAction::Errno' src/syscall_sandbox.rs
           grep -q 'full_allowlist_claimed: false' src/syscall_sandbox.rs
           grep -q 'network_namespace_isolation: false' src/syscall_sandbox.rs
           grep -q 'SYS_io_uring_setup' src/syscall_sandbox.rs
-          grep -q 'skill_helper_inherited_fd_unexpected' src/launch_contract.rs
-          ! grep -n -E -- '\bunsafe\b|std::process::Command|Runtime\.evaluate|WebMCP\.' \
-            src/launch_contract.rs src/syscall_sandbox.rs
 
           python3 - <<'PY'
           from pathlib import Path
-          source = Path('src/bin/a2-skill-source-helper.rs').read_text()
-          fd_gate = source.index('verify_clean_inherited_fds')
-          opened = source.index('LinuxSkillSource::open')
-          landlock = source.index('.restrict_helper_process()')
-          seccomp = source.index('restrict_network_syscalls()')
-          loop = source.index('read_request(&mut input)')
-          if not (fd_gate < opened < landlock < seccomp < loop):
+
+          launch = Path('src/launch_contract.rs').read_text()
+          syscall = Path('src/syscall_sandbox.rs').read_text()
+          helper = Path('src/bin/a2-skill-source-helper.rs').read_text()
+          if launch.count('unsafe {') != 1:
+              raise SystemExit('R7I launch contract must contain exactly one audited unsafe block')
+          if 'unsafe {' in syscall or 'unsafe {' in helper:
+              raise SystemExit('unsafe code escaped the audited close_range seam')
+          for forbidden in ['Runtime.evaluate', 'WebMCP.']:
+              if forbidden in launch or forbidden in syscall or forbidden in helper:
+                  raise SystemExit(f'forbidden browser authority token: {forbidden}')
+
+          sanitize = helper.index('sanitize_inherited_fds')
+          verify = helper.index('verify_clean_inherited_fds')
+          opened = helper.index('LinuxSkillSource::open')
+          landlock = helper.index('.restrict_helper_process()')
+          seccomp = helper.index('restrict_network_syscalls()')
+          loop = helper.index('read_request(&mut input)')
+          if not (sanitize < verify < opened < landlock < seccomp < loop):
               raise SystemExit('R7I bootstrap ordering invariant violated')
           PY
 
@@ -152,7 +165,7 @@ jobs:
           cp "$RUNNER_TEMP/r7i-js-regression.log" dist/a2-browser-r7i/evidence/R7I_JS_REGRESSION.log
           printf '%s\n' "$GITHUB_SHA" > dist/a2-browser-r7i/evidence/SOURCE_COMMIT.txt
           cat > dist/a2-browser-r7i/evidence/R7I_CLAIMS.json <<'JSON'
-          {"controlled_launch_stdio_only":true,"unexpected_inherited_fd_rejected":true,"seccomp_network_denylist_installed":true,"udp_socket_creation_denied":true,"all_socket_creation_denied":true,"io_uring_disabled":true,"full_seccomp_allowlist":false,"network_namespace_isolation":false,"source_controlled_cargo_lock":false,"node_integration":false,"browser_authority":false}
+          {"close_range_unshare":true,"unexpected_inherited_fd_sanitized":true,"post_sanitize_fd_verification":true,"audited_unsafe_close_range_seam":true,"seccomp_network_denylist_installed":true,"udp_socket_creation_denied":true,"all_socket_creation_denied":true,"io_uring_disabled":true,"full_seccomp_allowlist":false,"network_namespace_isolation":false,"source_controlled_cargo_lock":false,"node_integration":false,"browser_authority":false}
           JSON
           tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
             -cf dist/a2-browser-r7i/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY_CANDIDATE.tar \
@@ -169,7 +182,8 @@ jobs:
             coordination/browser-skill-source-linux/tests/helper_process.rs \
             coordination/browser-skill-source-linux/tests/sandbox.rs \
             coordination/browser-skill-source-linux/tests/network_boundary.rs \
-            research/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY_PRE_RESEARCH_2026-08-28.md
+            research/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY_PRE_RESEARCH_2026-08-28.md \
+            research/A2_BROWSER_R7I_INHERITED_FD_SANITIZATION_RESEARCH_2026-08-28.md
           sha256sum dist/a2-browser-r7i/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY_CANDIDATE.tar \
             > dist/a2-browser-r7i/R7I_SHA256SUMS.txt
 

@@ -55,13 +55,12 @@ fn assert_permission_denied<T>(result: std::io::Result<T>) {
 }
 
 #[test]
-fn controlled_launch_rejects_inherited_authority_and_seccomp_closes_new_network_surface() {
+fn controlled_launch_sanitizes_inherited_authority_and_seccomp_closes_new_network_surface() {
     let tree = TempTree::new("network-boundary");
     write_skill(tree.path(), "inspect");
 
-    // Prove the helper fails before root acquisition when the launcher deliberately leaks fd 9.
-    // The shell is used only by the test harness to create a real inherited descriptor without
-    // adding unsafe descriptor manipulation to the helper implementation.
+    // Deliberately leak non-CLOEXEC fd 9 across exec. A successful EOF-only helper run proves
+    // close_range removed the descriptor and the post-sanitize verifier accepted the process.
     let helper = env!("CARGO_BIN_EXE_a2-skill-source-helper");
     let output = Command::new("bash")
         .arg("-c")
@@ -74,12 +73,9 @@ fn controlled_launch_rejects_inherited_authority_and_seccomp_closes_new_network_
         .stderr(Stdio::piped())
         .output()
         .expect("launch helper with inherited fd");
-    assert_eq!(output.status.code(), Some(70));
+    assert!(output.status.success());
     assert!(output.stdout.is_empty());
-    assert_eq!(
-        String::from_utf8(output.stderr).unwrap().trim(),
-        "skill_helper_inherited_fd_unexpected"
-    );
+    assert!(output.stderr.is_empty());
 
     // Prepare the only intended filesystem capability before irreversible restrictions.
     let source = LinuxSkillSource::open(tree.path()).expect("open skill source");

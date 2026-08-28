@@ -29,14 +29,36 @@ impl std::error::Error for LaunchContractError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LaunchContractReport {
+    pub close_range_unshare: bool,
     pub stdio_only_inherited_fds: bool,
     pub procfs_verified: bool,
+}
+
+pub fn sanitize_inherited_fds() -> Result<(), LaunchContractError> {
+    // SAFETY: close_range takes scalar values only. The range is valid (3..=UINT_MAX),
+    // CLOSE_RANGE_UNSHARE is a kernel-defined flag, and no pointer, borrowed memory, aliasing,
+    // or Rust lifetime crosses this syscall boundary. This is intentionally the sole explicit
+    // unsafe seam in the R7I launch contract.
+    let result = unsafe {
+        libc::syscall(
+            libc::SYS_close_range,
+            3_u32,
+            u32::MAX,
+            libc::CLOSE_RANGE_UNSHARE,
+        )
+    };
+    if result != 0 {
+        return Err(LaunchContractError::new(
+            "skill_helper_close_range_unshare_failed",
+        ));
+    }
+    Ok(())
 }
 
 pub fn verify_clean_inherited_fds() -> Result<LaunchContractReport, LaunchContractError> {
     // Snapshot /proc/self/fd in a lexical scope so the directory iterator's own descriptor is
     // closed before we probe any descriptor above stderr. In the single-threaded bootstrap phase,
-    // a descriptor that still exists after this scope is ambient authority inherited at launch.
+    // a descriptor that still exists after this scope is ambient authority that survived cleanup.
     let observed = {
         let entries = fs::read_dir("/proc/self/fd")
             .map_err(|_| LaunchContractError::new("skill_helper_procfs_fd_scan_failed"))?;
@@ -78,6 +100,7 @@ pub fn verify_clean_inherited_fds() -> Result<LaunchContractReport, LaunchContra
     }
 
     Ok(LaunchContractReport {
+        close_range_unshare: true,
         stdio_only_inherited_fds: true,
         procfs_verified: true,
     })
