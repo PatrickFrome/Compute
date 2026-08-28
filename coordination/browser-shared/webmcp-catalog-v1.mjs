@@ -3,12 +3,14 @@ import { assertWebMcpEnvelope } from './webmcp-tools-v1.mjs';
 const CATALOG_SCHEMA = 'metaengine.a2-browser-operator.webmcp-catalog.v1';
 const DESCRIPTION_SCHEMA = 'metaengine.a2-browser-operator.webmcp-tool-description.v1';
 const MAX_NAME_PREVIEW = 64;
-const MAX_DESCRIPTION_PREVIEW = 240;
+const MAX_DESCRIPTION_PREVIEW = 128;
 const MAX_CATALOG_BYTES = 96 * 1024;
+const MAX_SIZE_FIXPOINT_PASSES = 8;
+const ENCODER = new TextEncoder();
 
 function fnv1a64(value) {
   let hash = 0xcbf29ce484222325n;
-  const bytes = new TextEncoder().encode(String(value ?? ''));
+  const bytes = ENCODER.encode(String(value ?? ''));
   for (const byte of bytes) {
     hash ^= BigInt(byte);
     hash = BigInt.asUintN(64, hash * 0x100000001b3n);
@@ -97,11 +99,30 @@ function compactTool(tool) {
   });
 }
 
+function finalizeCatalog(base) {
+  let bytes = 0;
+  let value = null;
+  for (let pass = 0; pass < MAX_SIZE_FIXPOINT_PASSES; pass += 1) {
+    value = { ...base, catalog_bytes: bytes };
+    const measured = ENCODER.encode(JSON.stringify(value)).length;
+    if (measured === bytes) {
+      if (measured > MAX_CATALOG_BYTES) throw new Error('webmcp_catalog_too_large');
+      return Object.freeze(value);
+    }
+    bytes = measured;
+  }
+  value = { ...base, catalog_bytes: bytes };
+  const measured = ENCODER.encode(JSON.stringify(value)).length;
+  if (measured !== bytes) throw new Error('webmcp_catalog_size_unstable');
+  if (measured > MAX_CATALOG_BYTES) throw new Error('webmcp_catalog_too_large');
+  return Object.freeze(value);
+}
+
 export function compileWebMcpCatalog(envelope) {
   const source = assertWebMcpEnvelope(envelope);
   const common = commonEnvelopeFields(source);
   if (source.status === 'UNSUPPORTED') {
-    return Object.freeze({
+    return finalizeCatalog({
       schema: CATALOG_SCHEMA,
       ...common,
       status: 'UNSUPPORTED',
@@ -110,15 +131,14 @@ export function compileWebMcpCatalog(envelope) {
       tools: Object.freeze([]),
       progressive_disclosure: true,
       full_schema_embedded: false,
-      fresh_hydration_required: true,
-      catalog_bytes: 0
+      fresh_hydration_required: true
     });
   }
 
   const tools = source.tools.map(compactTool).sort((a, b) =>
     `${a.name_preview}\u0000${a.tool_ref}`.localeCompare(`${b.name_preview}\u0000${b.tool_ref}`, 'en')
   );
-  const base = {
+  return finalizeCatalog({
     schema: CATALOG_SCHEMA,
     ...common,
     status: 'SUPPORTED',
@@ -127,10 +147,7 @@ export function compileWebMcpCatalog(envelope) {
     progressive_disclosure: true,
     full_schema_embedded: false,
     fresh_hydration_required: true
-  };
-  const bytes = new TextEncoder().encode(JSON.stringify(base)).length;
-  if (bytes > MAX_CATALOG_BYTES) throw new Error('webmcp_catalog_too_large');
-  return Object.freeze({ ...base, catalog_bytes: bytes });
+  });
 }
 
 export function hydrateWebMcpTool(envelope, toolRef) {
@@ -173,6 +190,8 @@ export function assertWebMcpCatalog(value) {
     cleanToolRef(tool?.tool_ref);
     if (tool.full_schema_embedded !== false || 'input_schema' in tool) throw new Error('webmcp_catalog_full_schema_forbidden');
   }
+  const measured = ENCODER.encode(JSON.stringify(value)).length;
+  if (value.catalog_bytes !== measured || measured > MAX_CATALOG_BYTES) throw new Error('webmcp_catalog_size_invalid');
   return value;
 }
 
