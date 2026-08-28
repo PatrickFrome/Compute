@@ -19,6 +19,8 @@ export const RPC_METHODS = Object.freeze([
   'target.list',
   'perception.snapshot',
   'webmcp.snapshot',
+  'webmcp.catalog',
+  'webmcp.describe',
   'planning.lookup',
   'planning.promote',
   'planning.abort',
@@ -39,6 +41,8 @@ export const RPC_METHOD_EFFECTS = Object.freeze({
   'target.list': 'READ_ONLY',
   'perception.snapshot': 'READ_ONLY',
   'webmcp.snapshot': 'READ_ONLY',
+  'webmcp.catalog': 'READ_ONLY',
+  'webmcp.describe': 'READ_ONLY',
   'planning.lookup': 'LOCAL_COORDINATION',
   'planning.promote': 'LOCAL_COORDINATION',
   'planning.abort': 'LOCAL_COORDINATION',
@@ -59,6 +63,8 @@ const RPC_PARAM_KEYS = Object.freeze({
   'target.list': ['profileId', 'includeRetired'],
   'perception.snapshot': ['profileId', 'targetId'],
   'webmcp.snapshot': ['profileId', 'targetId'],
+  'webmcp.catalog': ['profileId', 'targetId'],
+  'webmcp.describe': ['profileId', 'targetId', 'toolRef'],
   'planning.lookup': ['profileId', 'targetId', 'intentId', 'actionKind'],
   'planning.promote': ['profileId', 'targetId', 'flightId', 'leaseToken', 'candidateRef'],
   'planning.abort': ['profileId', 'flightId', 'leaseToken', 'reasonCode'],
@@ -70,6 +76,8 @@ const RPC_PARAM_KEYS = Object.freeze({
 const CONCURRENT_METHODS = new Set([
   'perception.snapshot',
   'webmcp.snapshot',
+  'webmcp.catalog',
+  'webmcp.describe',
   'planning.lookup',
   'planning.promote',
   'planning.abort',
@@ -104,6 +112,8 @@ async function dispatch(runtime, planning, webmcp, method, params) {
     case 'target.list': return runtime.listTargets(params?.profileId, { includeRetired: params?.includeRetired === true });
     case 'perception.snapshot': return runtime.snapshotTarget(params);
     case 'webmcp.snapshot': return webmcp.snapshot(params);
+    case 'webmcp.catalog': return webmcp.catalog(params);
+    case 'webmcp.describe': return webmcp.describe(params);
     case 'planning.lookup': return planning.lookup(params);
     case 'planning.promote': return planning.promote(params);
     case 'planning.abort': return planning.abort(params);
