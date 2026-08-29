@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { ComputeBrowserRuntime, COMPUTE_BROWSER_RUNTIME_VERSION } from './runtime.mjs';
 import { DEFAULT_CONTEXT_ID } from './context-manager.mjs';
@@ -20,6 +21,16 @@ async function serve() {
     const numericPort = Number(bridgePort);
     const { token } = await import('./security.mjs').then(m => m.rotateControlToken(runtime.stateRoot));
     bridge = await startHttpBridge(runtime, numericPort, token);
+  }
+  if (bridge) {
+    const manifestDir = path.join(os.homedir(), '.a2');
+    await fs.mkdir(manifestDir, { recursive: true });
+    const manifest = {
+      url: `http://127.0.0.1:${bridge.port}/rpc`,
+      token,
+      written_at: new Date().toISOString()
+    };
+    await fs.writeFile(path.join(manifestDir, 'compute-bridge.json'), JSON.stringify(manifest, null, 2));
   }
   const output = {
     schema: 'metaengine.a2-compute-browser.ready.v1',

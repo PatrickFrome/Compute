@@ -136,7 +136,7 @@
     return `(() => {
       const visible=(el)=>{if(!(el instanceof HTMLElement))return false;const s=getComputedStyle(el),r=el.getBoundingClientRect();return s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity)!==0&&r.width>0&&r.height>0;};
       const strong=[...document.querySelectorAll("button[data-testid='stop-button'],button[data-testid='composer-stop-button'],#stop-button,#composer-stop-button")].filter(visible);
-      const semantic=[...document.querySelectorAll('button')].filter(visible).filter((b)=>{const f=[b.getAttribute('aria-label'),b.getAttribute('title'),b.textContent].map(v=>String(v||'').trim().toLowerCase());return f.some(v=>/^(stop|stop generating|stop generation|остановить|остановить генерацию|??|????)$/iu.test(v));});
+      const semantic=[...document.querySelectorAll('button')].filter(visible).filter((b)=>{const f=[b.getAttribute('aria-label'),b.getAttribute('title'),b.textContent].map(v=>String(v||'').trim().toLowerCase());return f.some(v=>/^(stop|stop generating|stop generation|inoaiiaeou|inoaiiaeou aaia?aoe?|??|????)$/iu.test(v));});
       const candidates=strong.length?strong:semantic;
       if(candidates.length===0)return{ok:false,error:'stop_not_found'};
       if(candidates.length!==1)return{ok:false,error:'stop_ambiguous',count:candidates.length};
@@ -363,6 +363,51 @@
     });
   }
 
+  async function computeBrowserDispatch(platform, action, message) {
+    const bridge = globalThis.A2_OPERATOR_COMPUTE_BRIDGE;
+    if (!bridge?.call) throw new Error('compute_bridge_unavailable');
+
+    const profileId = `a2-${platform.toLowerCase()}`;
+    const targetId = `target-${platform.toLowerCase()}`;
+
+    if (action === 'CLICK_POINT' || action === 'DOUBLE_CLICK_POINT') {
+      const frame = frameFor(platform, message?.frame_token);
+      const x = Number(message?.x), y = Number(message?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error('operator_action_point_coordinates_invalid');
+
+      const semanticId = frame.page?.semantic_focus?.semantic_id || frame.nodes?.[0]?.semantic_id;
+      if (!semanticId) throw new Error('compute_bridge_semantic_id_missing');
+
+      return await bridge.call('action.click', {
+        profileId,
+        targetId,
+        actionId: crypto.randomUUID(),
+        lease: message?.lease,
+        semanticId,
+        framePath: message?.frame_token ? [message.frame_token] : [],
+        idempotencyKey: `${action}:${platform}:${message?.frame_token}:${x}:${y}`
+      });
+    }
+
+    if (action === 'STOP_GENERATION') {
+      return await bridge.call('action.click', {
+        profileId,
+        targetId,
+        actionId: crypto.randomUUID(),
+        lease: message?.lease,
+        semanticId: 'stop-button',
+        framePath: [],
+        idempotencyKey: `STOP_GENERATION:${platform}`
+      });
+    }
+
+    if (action === 'SCROLL') {
+      throw new Error('compute_bridge_scroll_not_supported');
+    }
+
+    throw new Error('compute_bridge_action_unsupported');
+  }
+
   async function run(message) {
     const platform = String(message?.platform || "");
     if (!["CHATGPT", "GLM_ZAI"].includes(platform)) throw new Error("operator_action_platform_invalid");
@@ -370,6 +415,14 @@
     if (!ACTIONS.has(action)) throw new Error("operator_action_invalid");
     assertActionsEnabled(action);
     await assertLeaseValid(message);
+
+    if (globalThis.A2_OPERATOR_COMPUTE_BRIDGE?.call) {
+      try {
+        const ready = await globalThis.A2_OPERATOR_COMPUTE_BRIDGE.isReady();
+        if (ready) return await computeBrowserDispatch(platform, action, message);
+      } catch (_) { /* fall back to debugger */ }
+    }
+
     if (action === "STOP_GENERATION") return stopGeneration(platform);
     if (action === "SCROLL") return scroll(platform, message?.delta_y);
     if (action === "CLICK_POINT") return pointClick(platform, message?.frame_token, message?.x, message?.y, false);
@@ -391,4 +444,5 @@
   globalThis.A2_OPERATOR_STOP_GENERATION = stopGeneration;
   globalThis.A2_OPERATOR_SCROLL = scroll;
   globalThis.A2_OPERATOR_POINT_CLICK = pointClick;
+  globalThis.A2_OPERATOR_COMPUTE_BRIDGE_DISPATCH = computeBrowserDispatch;
 })();
