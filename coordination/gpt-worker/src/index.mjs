@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { LESSONS, evaluateDecision, looksLikeSecret, responseRequiresReply } from "./guards.mjs";
+import { openAIMaxReasoningConfig } from "./reasoning-policy.mjs";
 
 const AGENT = "chatgpt";
 const PEER = "glm";
@@ -43,6 +44,7 @@ const DECISION_SCHEMA = {
 };
 
 const CHARTER = `You are the autonomous ChatGPT coordination worker for METAENGINE H205F22.
+Use the highest available reasoning level on every non-trivial cycle. This runtime requires GPT-5.6 with reasoning.effort=max and reasoning.mode=pro; never silently downgrade reasoning for latency or convenience.
 You are PREPARED-only. You never grant, infer, or exercise canonical project authority.
 Project claim authority, AOP execution leases, and PAP transport identity are separate planes.
 A run lease or RUN_FENCED event never by itself grants project claim authority.
@@ -51,7 +53,7 @@ Do not claim VERIFIED, LIVE, DURABLE, SAME_WORLD, or percentage metrics unless t
 Do not output secrets, credentials, private keys, access tokens, or environment values.
 For messages that require a response, obey the PAP transition contract exactly:
 PROPOSAL -> ATTACK or ACCEPT; ATTACK -> FIX or REBUTTAL; FIX -> RECHECK; REVIEW -> REVIEW.
-Return only the structured decision. Do not provide hidden reasoning or chain-of-thought.`;
+Return only the structured decision. Do not provide hidden reasoning or chain-of-thought, and never treat hidden reasoning as evidence.`;
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -132,6 +134,7 @@ async function callOpenAI(env, incoming, guardFeedback = []) {
     incoming_message: incoming,
     lessons: LESSONS,
     previous_guard_feedback: guardFeedback,
+    reasoning_policy: "MAX_AVAILABLE",
     response_contract: {
       PROPOSAL: ["ATTACK", "ACCEPT"],
       ATTACK: ["FIX", "REBUTTAL"],
@@ -139,6 +142,7 @@ async function callOpenAI(env, incoming, guardFeedback = []) {
       REVIEW: ["REVIEW"],
     },
   };
+  const reasoning = openAIMaxReasoningConfig(env.OPENAI_MODEL);
 
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -149,6 +153,7 @@ async function callOpenAI(env, incoming, guardFeedback = []) {
     body: JSON.stringify({
       model: env.OPENAI_MODEL,
       store: false,
+      reasoning,
       instructions: CHARTER,
       input: JSON.stringify(contextPack),
       max_output_tokens: 1400,
@@ -194,6 +199,9 @@ function buildEnvelope(incoming, decision) {
       schema: "metaengine.gpt-coordination-worker.h205f22.v1",
       runtime: "CLOUDFLARE_DURABLE_OBJECT",
       evidence_scope: "PREPARED_ONLY",
+      reasoning_policy: "MAX_AVAILABLE",
+      reasoning_effort: "max",
+      reasoning_mode: "pro",
     },
   };
 }
@@ -250,6 +258,9 @@ export class GptCoordinationAgent extends DurableObject {
       agent: AGENT,
       runtime: "CLOUDFLARE_DURABLE_OBJECT",
       evidence_scope: "PREPARED_ONLY",
+      reasoning_policy: "MAX_AVAILABLE",
+      reasoning_effort: "max",
+      reasoning_mode: "pro",
       cursor: (await this.ctx.storage.get("peer_cursor")) ?? 0,
       last_cycle_at: (await this.ctx.storage.get("last_cycle_at")) ?? null,
       last_success_at: (await this.ctx.storage.get("last_success_at")) ?? null,
@@ -277,6 +288,7 @@ export class GptCoordinationAgent extends DurableObject {
       if (!this.env.PAP_CHATGPT_TOKEN) throw new Error("missing_PAP_CHATGPT_TOKEN");
       if (!this.env.OPENAI_API_KEY) throw new Error("missing_OPENAI_API_KEY");
       if (!this.env.OPENAI_MODEL) throw new Error("missing_OPENAI_MODEL");
+      openAIMaxReasoningConfig(this.env.OPENAI_MODEL);
 
       let cursor = (await this.ctx.storage.get("peer_cursor")) ?? 0;
       const read = await papRead(this.env, cursor);
