@@ -1,0 +1,250 @@
+name: A2 Browser Operator Extension Final
+
+on:
+  push:
+    branches:
+      - work/a2-browser-extension-final
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  extension-final:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Bind finalization to verified R16 base
+        shell: bash
+        run: |
+          set -euo pipefail
+          R16_BASE=5fcd79c4b37e862c8fb8466dae7a9e182501b559
+          git merge-base --is-ancestor "$R16_BASE" "$GITHUB_SHA"
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+          git diff --name-only "$R16_BASE" "$GITHUB_SHA" | tee "$RUNNER_TEMP/final-changed-files.txt"
+          if grep -Eq '(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.(toml|lock))$' "$RUNNER_TEMP/final-changed-files.txt"; then
+            echo 'final extension line must not add source dependency manifests' >&2
+            exit 1
+          fi
+          if grep -Ev '^(coordination/chat-control-plane/extension/|tests/a2_v071_|research/A2_BROWSER_EXTENSION_FINAL_|\.github/workflows/a2-browser-extension-final\.yml$)' "$RUNNER_TEMP/final-changed-files.txt" | grep -q .; then
+            echo 'final extension line changed files outside the bounded release surface' >&2
+            exit 1
+          fi
+
+      - name: Static syntax and final release contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/a2_build_extension.py
+          node --check tests/a2_v071_release_contract_lab.mjs
+          node --check tests/a2_v071_extension_final_playwright_smoke.mjs
+          python3 - <<'PY'
+          import json, pathlib, subprocess
+          root=pathlib.Path('coordination/chat-control-plane/extension')
+          spec=json.loads((root/'runtime-package-manifest.json').read_text())
+          for rel in spec['files']:
+              p=root/rel
+              if p.suffix=='.js' and p.exists():
+                  subprocess.run(['node','--check',str(p)],check=True)
+          PY
+          node tests/a2_v071_release_contract_lab.mjs | tee "$RUNNER_TEMP/final-release-contract.log"
+
+      - name: Typed effect and supervisor safety regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/a2_r8c_typed_click_outcome_lab.mjs | tee "$RUNNER_TEMP/final-r8c.log"
+          node --test \
+            tests/a2_r8d_extension_typed_click_actuator.test.mjs \
+            tests/a2_r8d_durable_fence_bridge.test.mjs \
+            tests/a2_r8d_supervisor_typed_click.test.mjs \
+            | tee "$RUNNER_TEMP/final-r8d.log"
+          for f in \
+            tests/a2_v070_target_registry_lab.mjs \
+            tests/a2_v070_target_observability_lab.mjs \
+            tests/a2_v068_supervisor_reconciliation_lab.mjs \
+            tests/a2_v067_supervisor_prompt_ready_lab.mjs \
+            tests/a2_v067_supervisor_session_singleton_lab.mjs \
+            tests/a2_v064_supervisor_chat_guard_lab.mjs \
+            tests/a2_v063_bridge_disarm_lab.mjs \
+            tests/a2_v063_remote_authority_lab.mjs \
+            tests/a2_v060_debugger_broker_lab.mjs \
+            tests/a2_v060_perception_lab.mjs \
+            tests/a2_v060_oopif_perception_lab.mjs \
+            tests/a2_v060_semantic_actions_lab.mjs; do
+            node "$f"
+          done | tee "$RUNNER_TEMP/final-extension-regressions.log"
+
+      - name: Build canonical final MV3 twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=coordination/chat-control-plane/extension
+          SPEC="$ROOT/runtime-package-manifest.json"
+          OUT=dist/a2-browser-extension-final
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+          python3 scripts/a2_build_extension.py \
+            --source "$ROOT" --package-manifest "$SPEC" \
+            --stage "$OUT/stage-a" \
+            --zip "$OUT/METAENGINE_A2_Browser_Operator_v0.7.1_FINAL.zip" \
+            --evidence-dir "$OUT/build-evidence-a" \
+            --source-commit "$GITHUB_SHA" --source-date-epoch "$SOURCE_DATE_EPOCH"
+          python3 scripts/a2_build_extension.py \
+            --source "$ROOT" --package-manifest "$SPEC" \
+            --stage "$OUT/stage-b" \
+            --zip "$OUT/repro-check.zip" \
+            --evidence-dir "$OUT/build-evidence-b" \
+            --source-commit "$GITHUB_SHA" --source-date-epoch "$SOURCE_DATE_EPOCH"
+          cmp "$OUT/METAENGINE_A2_Browser_Operator_v0.7.1_FINAL.zip" "$OUT/repro-check.zip"
+          EXPECTED="$(python3 -c 'import json; print(len(json.load(open("coordination/chat-control-plane/extension/runtime-package-manifest.json"))["files"]))')"
+          test "$EXPECTED" = "47"
+          test "$(find "$OUT/stage-a" -type f | wc -l)" = "$EXPECTED"
+          test "$(find "$OUT/stage-b" -type f | wc -l)" = "$EXPECTED"
+          ! find "$OUT/stage-a" -type f -printf '%f\n' | grep -Eq -- '-v[0-9]'
+          A2_EXTENSION_STAGE="$OUT/stage-a" node tests/a2_v071_semantic_perception_lab.mjs
+          unzip -t "$OUT/METAENGINE_A2_Browser_Operator_v0.7.1_FINAL.zip"
+
+      - name: Reject remote code and unsafe dynamic execution in staged package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib, re
+          root=pathlib.Path('dist/a2-browser-extension-final/stage-a')
+          manifest=json.loads((root/'manifest.json').read_text())
+          if manifest.get('manifest_version') != 3:
+              raise SystemExit('final package is not MV3')
+          if 'content_security_policy' in manifest:
+              text=json.dumps(manifest['content_security_policy'])
+              if 'unsafe-eval' in text or 'http:' in text or 'https:' in text:
+                  raise SystemExit('unsafe extension CSP')
+          for p in root.rglob('*.js'):
+              text=p.read_text(errors='strict')
+              forbidden=[r'\beval\s*\(', r'\bnew\s+Function\s*\(', r'WebAssembly\.(?:compile|instantiate)Streaming\s*\(']
+              for pattern in forbidden:
+                  if re.search(pattern,text):
+                      raise SystemExit(f'unsafe dynamic execution token in {p}: {pattern}')
+              for call in re.findall(r'importScripts\s*\(([^)]*)\)', text):
+                  args=re.findall(r'["\']([^"\']+)["\']',call)
+                  if not args or any(not arg.startswith('./') for arg in args):
+                      raise SystemExit(f'non-local importScripts in {p}: {call}')
+          print('staged remote-code/dynamic-execution policy: PASS')
+          PY
+
+      - name: Install pinned Chromium harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          PW_ROOT="$RUNNER_TEMP/a2-final-playwright"
+          npm install --prefix "$PW_ROOT" --no-save --no-package-lock --ignore-scripts playwright@1.62.1
+          node "$PW_ROOT/node_modules/playwright/cli.js" install --with-deps chromium
+          CHROME="$(PW_ROOT="$PW_ROOT" node -e 'const { chromium } = require(process.env.PW_ROOT + "/node_modules/playwright"); process.stdout.write(chromium.executablePath())')"
+          test -x "$CHROME"
+          "$CHROME" --version | tee "$RUNNER_TEMP/final-chrome-version.txt"
+          echo "A2_FINAL_PLAYWRIGHT_MODULE=$PW_ROOT/node_modules/playwright" >> "$GITHUB_ENV"
+          echo "A2_FINAL_CHROME=$CHROME" >> "$GITHUB_ENV"
+
+      - name: Prove cold restart and runtime rehydration
+        shell: bash
+        run: |
+          set -euo pipefail
+          A2_PLAYWRIGHT_MODULE="$A2_FINAL_PLAYWRIGHT_MODULE" \
+          A2_EXTENSION_STAGE="$GITHUB_WORKSPACE/dist/a2-browser-extension-final/stage-a" \
+          timeout --signal=TERM --kill-after=5s 90s \
+          node tests/a2_v071_extension_final_playwright_smoke.mjs \
+          | tee "$RUNNER_TEMP/final-cold-restart.log"
+          grep -q 'cold-restart MV3 smoke: PASS' "$RUNNER_TEMP/final-cold-restart.log"
+
+      - name: Prove real staged physical click outcome
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v openssl >/dev/null
+          A2_CHROME_EXECUTABLE="$A2_FINAL_CHROME" \
+          A2_R8C_STAGE="$GITHUB_WORKSPACE/dist/a2-browser-extension-final/stage-a" \
+          CI=true \
+          timeout --signal=TERM --kill-after=5s 90s \
+          node tests/a2_r8c_real_chrome_extension_canary.mjs \
+          | tee "$RUNNER_TEMP/final-live-click.jsonl"
+          grep -q '"ok":true' "$RUNNER_TEMP/final-live-click.jsonl"
+          grep -q '"staged_extension_under_test":true' "$RUNNER_TEMP/final-live-click.jsonl"
+          grep -q '"typed_click_outcome":"COMMITTED"' "$RUNNER_TEMP/final-live-click.jsonl"
+          grep -q '"real_page_physical_effect_verified":true' "$RUNNER_TEMP/final-live-click.jsonl"
+          grep -q '"page_click_count":1' "$RUNNER_TEMP/final-live-click.jsonl"
+          grep -q '"automatic_retry_allowed":false' "$RUNNER_TEMP/final-live-click.jsonl"
+          grep -q '"authority_effect":false' "$RUNNER_TEMP/final-live-click.jsonl"
+
+      - name: Pack final staged extension with Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$A2_FINAL_CHROME" --no-sandbox --disable-gpu \
+            --pack-extension="$GITHUB_WORKSPACE/dist/a2-browser-extension-final/stage-a"
+          test -s dist/a2-browser-extension-final/stage-a.crx
+          sha256sum \
+            dist/a2-browser-extension-final/METAENGINE_A2_Browser_Operator_v0.7.1_FINAL.zip \
+            dist/a2-browser-extension-final/stage-a.crx \
+            | tee dist/a2-browser-extension-final/FINAL_SHA256SUMS.txt
+
+      - name: Build final exact-head evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=dist/a2-browser-extension-final
+          EVID="$OUT/final-evidence"
+          mkdir -p "$EVID"
+          cp "$RUNNER_TEMP/final-changed-files.txt" "$EVID/CHANGED_FILES.txt"
+          cp "$RUNNER_TEMP/final-release-contract.log" "$EVID/RELEASE_CONTRACT.log"
+          cp "$RUNNER_TEMP/final-r8c.log" "$EVID/R8C_TYPED_OUTCOME.log"
+          cp "$RUNNER_TEMP/final-r8d.log" "$EVID/R8D_DURABLE_BRIDGE.log"
+          cp "$RUNNER_TEMP/final-extension-regressions.log" "$EVID/EXTENSION_REGRESSIONS.log"
+          cp "$RUNNER_TEMP/final-cold-restart.log" "$EVID/COLD_RESTART.log"
+          cp "$RUNNER_TEMP/final-live-click.jsonl" "$EVID/LIVE_CLICK.jsonl"
+          cp "$RUNNER_TEMP/final-chrome-version.txt" "$EVID/CHROME_VERSION.txt"
+          printf '%s\n' "$GITHUB_SHA" > "$EVID/SOURCE_COMMIT.txt"
+          printf '%s\n' '5fcd79c4b37e862c8fb8466dae7a9e182501b559' > "$EVID/R16_VERIFIED_BASE.txt"
+          cat > "$EVID/FINAL_CLAIMS.json" <<'JSON'
+          {"milestone":"EXTENSION_FINAL_V1","version":"0.7.1","release_channel":"stable","r_roadmap_state":"R_ROADMAP_COMPLETE","canonical_files":47,"deterministic_package":true,"mv3_cold_restart_verified":true,"durable_local_state_survives_restart":true,"typed_click_outcomes":["COMMITTED","NO_EFFECT","AMBIGUOUS"],"real_page_physical_effect_verified":true,"automatic_retry_allowed":false,"authority_effect":false,"remote_code_allowed":false,"new_source_dependency_packages":0}
+          JSON
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf "$OUT/A2_BROWSER_OPERATOR_EXTENSION_FINAL_V1.tar" \
+            coordination/chat-control-plane/extension/manifest.json \
+            coordination/chat-control-plane/extension/runtime-marker.js \
+            coordination/chat-control-plane/extension/runtime-package-manifest.json \
+            tests/a2_v071_release_contract_lab.mjs \
+            tests/a2_v071_extension_final_playwright_smoke.mjs \
+            .github/workflows/a2-browser-extension-final.yml \
+            "$EVID"
+          sha256sum "$OUT/A2_BROWSER_OPERATOR_EXTENSION_FINAL_V1.tar" >> "$OUT/FINAL_SHA256SUMS.txt"
+
+      - name: Attest final extension provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: |
+            dist/a2-browser-extension-final/METAENGINE_A2_Browser_Operator_v0.7.1_FINAL.zip
+            dist/a2-browser-extension-final/stage-a.crx
+            dist/a2-browser-extension-final/A2_BROWSER_OPERATOR_EXTENSION_FINAL_V1.tar
+
+      - name: Upload final extension evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-extension-final-${{ github.sha }}
+          path: |
+            dist/a2-browser-extension-final/METAENGINE_A2_Browser_Operator_v0.7.1_FINAL.zip
+            dist/a2-browser-extension-final/stage-a.crx
+            dist/a2-browser-extension-final/A2_BROWSER_OPERATOR_EXTENSION_FINAL_V1.tar
+            dist/a2-browser-extension-final/FINAL_SHA256SUMS.txt
+            dist/a2-browser-extension-final/build-evidence-a/
+            dist/a2-browser-extension-final/final-evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
