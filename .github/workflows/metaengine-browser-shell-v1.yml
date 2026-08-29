@@ -65,9 +65,16 @@ jobs:
           grep -q 'direct_promote_current: false' apps/metaengine-browser/src/development-plane.mjs
           grep -q 'verified_shutdown_required: true' apps/metaengine-browser/src/development-plane.mjs
           grep -q 'cooperative_shutdown: true' apps/metaengine-browser/src/development-plane.mjs
+          grep -q 'verification_sandbox_prepare_only: true' apps/metaengine-browser/src/development-plane.mjs
+          grep -q 'verification_sandbox_execution: false' apps/metaengine-browser/src/development-plane.mjs
+          grep -q 'host_repository_mounted: false' apps/metaengine-browser/src/verification-sandbox-plan.cjs
+          grep -q 'deny_by_default: true' apps/metaengine-browser/src/verification-sandbox-plan.cjs
+          grep -q 'execution_authority: false' apps/metaengine-browser/src/verification-sandbox-plan.cjs
+          grep -q 'promotion_authority: false' apps/metaengine-browser/src/verification-sandbox-plan.cjs
           grep -q 'stopAndWait(4000)' apps/metaengine-browser/smoke/dp/main.cjs
           grep -q 'cooperative_shutdown_ack === true' apps/metaengine-browser/smoke/dp/main.cjs
           grep -q "app.once('ready'" apps/metaengine-browser/smoke/dp/main.cjs
+          ! grep -E 'child_process|exec\(|spawn\(|eval\(|new Function' apps/metaengine-browser/src/verification-sandbox-plan.cjs
           ! grep -E 'child_process|exec\(|eval\(|new Function' apps/metaengine-browser/src/development-plane-worker.cjs apps/metaengine-browser/smoke/dp/main.cjs
           ! grep -R -E 'executeJavaScript|Runtime\.evaluate|--remote-debugging-port|--no-sandbox|chat\.z\.ai|GLM_ZAI|STRICT_GLM_FIRST' apps/metaengine-browser --exclude-dir=node_modules
           ! grep -R -E 'nodeIntegration:[[:space:]]*true|sandbox:[[:space:]]*false' apps/metaengine-browser --exclude-dir=node_modules
@@ -86,7 +93,12 @@ jobs:
           test -f /tmp/metaengine-dp-trace.jsonl
           grep -q '"stage":"APP_READY"' /tmp/metaengine-dp-trace.jsonl
           grep -q '"stage":"DP_READY"' /tmp/metaengine-dp-trace.jsonl
+          grep -q '"stage":"DP_SANDBOX_PLAN_VERIFIED"' /tmp/metaengine-dp-trace.jsonl
           grep -q '"stage":"COMPLETE"' /tmp/metaengine-dp-trace.jsonl
+          grep -q '"sandbox_plan_verified":true' /tmp/metaengine-dp-trace.jsonl
+          grep -q '"sandbox_backend_bound":false' /tmp/metaengine-dp-trace.jsonl
+          grep -q '"sandbox_execution_authorized":false' /tmp/metaengine-dp-trace.jsonl
+          grep -q '"promotion_authorized":false' /tmp/metaengine-dp-trace.jsonl
           grep -q '"ok":true' /tmp/metaengine-dp-trace.jsonl
           grep -q '"shutdown_state":"STOPPED"' /tmp/metaengine-dp-trace.jsonl
           grep -q '"cooperative_shutdown_ack":true' /tmp/metaengine-dp-trace.jsonl
@@ -102,8 +114,8 @@ jobs:
         if: always()
         run: |
           mkdir -p evidence-out
-          if grep -q '"stage":"COMPLETE"' /tmp/metaengine-dp-trace.jsonl 2>/dev/null && grep -q '"ok":true' /tmp/metaengine-dp-trace.jsonl 2>/dev/null && grep -q '"shutdown_state":"STOPPED"' /tmp/metaengine-dp-trace.jsonl 2>/dev/null && grep -q '"cooperative_shutdown_ack":true' /tmp/metaengine-dp-trace.jsonl 2>/dev/null; then
-            echo 'linux_devplane_smoke=PASS_WITH_VERIFIED_COOPERATIVE_SHUTDOWN' | tee evidence-out/linux-devplane-smoke-status.txt
+          if grep -q '"stage":"DP_SANDBOX_PLAN_VERIFIED"' /tmp/metaengine-dp-trace.jsonl 2>/dev/null && grep -q '"stage":"COMPLETE"' /tmp/metaengine-dp-trace.jsonl 2>/dev/null && grep -q '"sandbox_plan_verified":true' /tmp/metaengine-dp-trace.jsonl 2>/dev/null && grep -q '"sandbox_execution_authorized":false' /tmp/metaengine-dp-trace.jsonl 2>/dev/null && grep -q '"promotion_authorized":false' /tmp/metaengine-dp-trace.jsonl 2>/dev/null && grep -q '"shutdown_state":"STOPPED"' /tmp/metaengine-dp-trace.jsonl 2>/dev/null && grep -q '"cooperative_shutdown_ack":true' /tmp/metaengine-dp-trace.jsonl 2>/dev/null; then
+            echo 'linux_devplane_smoke=PASS_WITH_DP2_PREPARE_ONLY_AND_VERIFIED_COOPERATIVE_SHUTDOWN' | tee evidence-out/linux-devplane-smoke-status.txt
           else
             echo 'linux_devplane_smoke=FAILED' | tee evidence-out/linux-devplane-smoke-status.txt
           fi
@@ -125,6 +137,9 @@ jobs:
           cp research/METAENGINE_BROWSER_STEP7_ISOLATED_DP_SMOKE_2026-08-29.md evidence-out/
           cp research/METAENGINE_BROWSER_STEP8_SMOKE_APP_PACKAGING_2026-08-29.md evidence-out/
           cp research/METAENGINE_BROWSER_STEP9_CJS_READY_SMOKE_2026-08-29.md evidence-out/
+          cp research/METAENGINE_BROWSER_DP1_CANDIDATE_PROVENANCE_RESEARCH_2026-08-29.md evidence-out/
+          cp research/METAENGINE_BROWSER_DP2_VERIFICATION_SANDBOX_PLAN_2026-08-29.md evidence-out/
+          cp research/METAENGINE_BROWSER_DP2_TYPED_SANDBOX_PLAN_PROTOCOL_2026-08-29.md evidence-out/
           test ! -f /tmp/metaengine-browser-smoke.jsonl || cp /tmp/metaengine-browser-smoke.jsonl evidence-out/
           test ! -f /tmp/metaengine-devplane-smoke.jsonl || cp /tmp/metaengine-devplane-smoke.jsonl evidence-out/
           test ! -f /tmp/metaengine-dp-trace.jsonl || cp /tmp/metaengine-dp-trace.jsonl evidence-out/
@@ -200,6 +215,11 @@ jobs:
           if ($exitCode -ne 0) { throw "development_plane_windows_exit_$exitCode" }
           if (-not (Select-String -Path $trace -Pattern '"stage":"APP_READY"' -Quiet)) { throw "development_plane_windows_app_ready_missing" }
           if (-not (Select-String -Path $trace -Pattern '"stage":"DP_READY"' -Quiet)) { throw "development_plane_windows_dp_ready_missing" }
+          if (-not (Select-String -Path $trace -Pattern '"stage":"DP_SANDBOX_PLAN_VERIFIED"' -Quiet)) { throw "development_plane_windows_dp2_receipt_missing" }
+          if (-not (Select-String -Path $trace -Pattern '"sandbox_plan_verified":true' -Quiet)) { throw "development_plane_windows_dp2_verify_missing" }
+          if (-not (Select-String -Path $trace -Pattern '"sandbox_backend_bound":false' -Quiet)) { throw "development_plane_windows_backend_boundary_invalid" }
+          if (-not (Select-String -Path $trace -Pattern '"sandbox_execution_authorized":false' -Quiet)) { throw "development_plane_windows_execution_authority_invalid" }
+          if (-not (Select-String -Path $trace -Pattern '"promotion_authorized":false' -Quiet)) { throw "development_plane_windows_promotion_authority_invalid" }
           if (-not (Select-String -Path $trace -Pattern '"stage":"COMPLETE"' -Quiet)) { throw "development_plane_windows_complete_marker_missing" }
           if (-not (Select-String -Path $trace -Pattern '"ok":true' -Quiet)) { throw "development_plane_windows_receipt_missing" }
           if (-not (Select-String -Path $trace -Pattern '"shutdown_state":"STOPPED"' -Quiet)) { throw "development_plane_windows_shutdown_receipt_missing" }
