@@ -7,6 +7,7 @@ const PAID_MODEL_PROFILES = Object.freeze({
   architecture: [
     'anthropic/claude-sonnet-5',
     'google/gemini-3.7-flash',
+    'alibaba/qwen3.8-max',
     'deepseek/deepseek-v4-pro-0813',
     'zai/glm-5.3'
   ],
@@ -14,11 +15,13 @@ const PAID_MODEL_PROFILES = Object.freeze({
     'deepseek/deepseek-v4-pro-0813',
     'anthropic/claude-sonnet-5',
     'google/gemini-3.7-flash',
+    'alibaba/qwen3.8-flash',
     'spacexai/grok-4.6'
   ],
   critic: [
     'google/gemini-3.7-flash',
     'zai/glm-5.3',
+    'alibaba/qwen3.8-max',
     'deepseek/deepseek-v4-pro-0813',
     'anthropic/claude-sonnet-5'
   ],
@@ -26,6 +29,7 @@ const PAID_MODEL_PROFILES = Object.freeze({
     'spacexai/grok-4.6',
     'google/gemini-3.7-flash',
     'anthropic/claude-sonnet-5',
+    'alibaba/qwen3.8-max',
     'zai/glm-5.3'
   ]
 });
