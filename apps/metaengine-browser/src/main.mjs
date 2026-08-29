@@ -80,7 +80,7 @@ function assertShellSender(event) {
 async function shellSnapshot() {
   return {
     schema: 'metaengine.browser-shell.snapshot.v2',
-    version: '0.3.2',
+    version: '0.3.5',
     tabs: registry.snapshot(),
     fleet: fleet?.snapshot() || null,
     development_plane: developmentPlane?.snapshot() || null,
@@ -329,26 +329,37 @@ async function createWindow() {
 ipcMain.handle('metaengine:shell:snapshot', async (event) => { assertShellSender(event); return shellSnapshot(); });
 ipcMain.handle('metaengine:shell:command', async (event, message) => { assertShellSender(event); return handleCommand(String(message?.command || ''), message?.payload || {}); });
 
-await app.whenReady();
-await registerShellProtocol();
-configureUserSession();
-if (isDevelopmentPlaneSmoke) {
-  try {
-    await runDevelopmentPlaneSmoke();
-  } catch (error) {
-    console.error(JSON.stringify({
-      schema: 'metaengine.development-plane.smoke.v2',
-      ok: false,
-      error: String(error?.message || error).slice(0, 240),
-      state: developmentPlane?.snapshot() || null,
-      authority_effect: false,
-    }));
-    try { await developmentPlane?.stopAndWait?.(2000); } catch {}
-    app.exit(1);
+async function startAfterReady() {
+  await registerShellProtocol();
+  configureUserSession();
+  if (isDevelopmentPlaneSmoke) {
+    try {
+      await runDevelopmentPlaneSmoke();
+    } catch (error) {
+      console.error(JSON.stringify({
+        schema: 'metaengine.development-plane.smoke.v2',
+        ok: false,
+        error: String(error?.message || error).slice(0, 240),
+        state: developmentPlane?.snapshot() || null,
+        authority_effect: false,
+      }));
+      try { await developmentPlane?.stopAndWait?.(2000); } catch {}
+      app.exit(1);
+    }
+    return;
   }
-} else if (isSmoke) await runSmoke();
-else {
+  if (isSmoke) {
+    await runSmoke();
+    return;
+  }
   await createWindow();
-  app.on('activate', () => { if (!windowRef) createWindow().catch((error) => { console.error(error); app.exit(1); }); });
-  app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 }
+
+app.on('activate', () => { if (app.isReady() && !windowRef) createWindow().catch((error) => { console.error(error); app.exit(1); }); });
+app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.once('ready', () => {
+  startAfterReady().catch((error) => {
+    console.error('browser-start-failed', error);
+    app.exit(1);
+  });
+});
