@@ -3,6 +3,7 @@ const ID_RE = /^[a-z0-9][a-z0-9._:-]{2,127}$/;
 const CAP_RE = /^[A-Z][A-Z0-9_]{1,63}$/;
 const HEALTH = new Set(['HEALTHY','DRAINING','UNHEALTHY']);
 const TERMINALS = new Set(['COMMITTED','NO_EFFECT','AMBIGUOUS']);
+const cmp = (a,b) => a < b ? -1 : a > b ? 1 : 0;
 
 export class RemoteBrowserPoolError extends Error {
   constructor(code) { super(code); this.name='RemoteBrowserPoolError'; this.code=code; }
@@ -17,7 +18,7 @@ function exactKeys(value,expected,code){
 }
 function capabilities(value,code){
   if(!Array.isArray(value)||value.length>64) throw new RemoteBrowserPoolError(code);
-  const out=value.map(v=>token(v,CAP_RE,code)).sort();
+  const out=value.map(v=>token(v,CAP_RE,code)).sort(cmp);
   if(new Set(out).size!==out.length) throw new RemoteBrowserPoolError(code);
   return Object.freeze(out);
 }
@@ -63,7 +64,7 @@ export class RemoteBrowserPoolV1 {
     if(node.node_epoch!==node_epoch||node.process_incarnation_id!==process_incarnation_id) throw new RemoteBrowserPoolError('pool_node_incarnation_mismatch');
     if(!HEALTH.has(health)) throw new RemoteBrowserPoolError('pool_node_health_invalid');
     const next=freeze({...node,health}); this.#nodes.set(id,next);
-    if(health!=='HEALTHY') this.#terminateNodeLeases(next,'NODE_UNAVAILABLE');
+    if(health==='UNHEALTHY') this.#terminateNodeLeases(next,'NODE_UNAVAILABLE');
     return clone(next);
   }
 
@@ -81,7 +82,7 @@ export class RemoteBrowserPoolV1 {
     const eligible=[...this.#nodes.values()].filter(node=>
       node.health==='HEALTHY' && node.context_isolation===true && node.raw_engine_exposed===false &&
       required.every(cap=>node.capabilities.includes(cap)) && this.#activeNodeLeases(node.node_id)<node.max_leases
-    ).sort((a,b)=>this.#activeNodeLeases(a.node_id)-this.#activeNodeLeases(b.node_id)||a.node_id.localeCompare(b.node_id));
+    ).sort((a,b)=>this.#activeNodeLeases(a.node_id)-this.#activeNodeLeases(b.node_id)||cmp(a.node_id,b.node_id));
     if(!eligible.length) throw new RemoteBrowserPoolError('pool_no_eligible_node');
     const node=eligible[0];
     const lease=freeze({
@@ -99,7 +100,7 @@ export class RemoteBrowserPoolV1 {
     if(lease.state!=='RESERVED') throw new RemoteBrowserPoolError('pool_lease_not_reserved');
     if(lease.node_id!==node_id||lease.node_epoch!==node_epoch||lease.process_incarnation_id!==process_incarnation_id) throw new RemoteBrowserPoolError('pool_dispatch_incarnation_mismatch');
     const node=this.#nodes.get(lease.node_id);
-    if(!node||node.health!=='HEALTHY'||node.context_isolation!==true||node.raw_engine_exposed!==false) throw new RemoteBrowserPoolError('pool_node_not_dispatch_eligible');
+    if(!node||!['HEALTHY','DRAINING'].includes(node.health)||node.node_epoch!==lease.node_epoch||node.process_incarnation_id!==lease.process_incarnation_id||node.context_isolation!==true||node.raw_engine_exposed!==false) throw new RemoteBrowserPoolError('pool_node_not_dispatch_eligible');
     return freeze({lease_id:lease.lease_id,node_id:lease.node_id,node_epoch:lease.node_epoch,process_incarnation_id:lease.process_incarnation_id,routing_eligible:true,authority_effect:false,actuation_eligible:false,automatic_retry_allowed:false});
   }
 
