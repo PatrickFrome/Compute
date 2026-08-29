@@ -3,7 +3,7 @@
   "version": "0.6.1-dev.1",
   "private": true,
   "type": "module",
-  "description": "METAENGINE Development Fabric browser shell with autonomous GPT fleet, embedded Development Plane, durable supervisor keepalive, host resilience and self-update runtime",
+  "description": "METAENGINE Development Fabric browser shell with autonomous GPT fleet, embedded Development Plane, durable supervisor keepalive, host resilience, bounded Browser Sentinel and self-update runtime",
   "main": "src/main.mjs",
   "repository": {
     "type": "git",
@@ -11,7 +11,7 @@
   },
   "scripts": {
     "start": "electron .",
-    "check": "node --check src/main.mjs && node --check src/browser-policy.mjs && node --check src/compute-bridge-client.mjs && node --check src/fleet-provisioner.mjs && node --check src/development-plane.mjs && node --check src/development-plane-worker.cjs && node --check src/candidate-capsule.cjs && node --check src/verification-sandbox-plan.cjs && node --check src/verification-sandbox-backend-binding.cjs && node --check src/advisory-evidence-verifier.cjs && node --check src/development-plane-smoke.mjs && node --check smoke/dp/main.cjs && node --check src/tab-registry.mjs && node --check src/supervisor-device-identity.mjs && node --check src/native-supervisor-client.mjs && node --check src/native-browser-control.mjs && node --check src/supervisor-keepalive.mjs && node --check src/supervisor-lifecycle-runtime.mjs && node --check src/self-update-runtime.mjs && node --check src/host-resilience-runtime.mjs && node --check src/preload-shell.cjs && node --check ui/app.js",
+    "check": "node --check src/main.mjs && node --check src/browser-policy.mjs && node --check src/compute-bridge-client.mjs && node --check src/fleet-provisioner.mjs && node --check src/development-plane.mjs && node --check src/development-plane-worker.cjs && node --check src/candidate-capsule.cjs && node --check src/verification-sandbox-plan.cjs && node --check src/verification-sandbox-backend-binding.cjs && node --check src/advisory-evidence-verifier.cjs && node --check src/development-plane-smoke.mjs && node --check smoke/dp/main.cjs && node --check src/tab-registry.mjs && node --check src/supervisor-device-identity.mjs && node --check src/native-supervisor-client.mjs && node --check src/native-browser-control.mjs && node --check src/supervisor-keepalive.mjs && node --check src/supervisor-lifecycle-runtime.mjs && node --check src/self-update-runtime.mjs && node --check src/host-resilience-runtime.mjs && node --check src/browser-sentinel-heartbeat.mjs && node --check src/preload-shell.cjs && node --check ui/app.js",
     "test": "node --test test/*.test.mjs",
     "smoke": "electron . --metaengine-smoke",
     "devplane-smoke": "electron ./smoke/dp"
