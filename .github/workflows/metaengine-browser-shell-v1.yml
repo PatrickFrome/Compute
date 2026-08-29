@@ -57,6 +57,7 @@ jobs:
         run: |
           grep -q 'app.enableSandbox()' apps/metaengine-browser/src/main.mjs
           grep -q 'app.enableSandbox()' apps/metaengine-browser/src/development-plane-smoke.mjs
+          grep -q '"main": "../../src/development-plane-smoke.mjs"' apps/metaengine-browser/smoke/dp/package.json
           grep -q 'nodeIntegration: false' apps/metaengine-browser/src/browser-policy.mjs
           grep -q 'contextIsolation: true' apps/metaengine-browser/src/browser-policy.mjs
           grep -q 'sandbox: true' apps/metaengine-browser/src/browser-policy.mjs
@@ -114,6 +115,7 @@ jobs:
           cp research/METAENGINE_BROWSER_STEP5_COOPERATIVE_UTILITY_SHUTDOWN_2026-08-29.md evidence-out/
           cp research/METAENGINE_BROWSER_STEP6_WINDOWS_RUNNER_DIAGNOSTIC_2026-08-29.md evidence-out/
           cp research/METAENGINE_BROWSER_STEP7_ISOLATED_DP_SMOKE_2026-08-29.md evidence-out/
+          cp research/METAENGINE_BROWSER_STEP8_SMOKE_APP_PACKAGING_2026-08-29.md evidence-out/
           test ! -f /tmp/metaengine-browser-smoke.jsonl || cp /tmp/metaengine-browser-smoke.jsonl evidence-out/
           test ! -f /tmp/metaengine-devplane-smoke.jsonl || cp /tmp/metaengine-devplane-smoke.jsonl evidence-out/
           git rev-parse HEAD > evidence-out/git-head.txt
@@ -171,7 +173,7 @@ jobs:
           $env:METAENGINE_SMOKE_TRACE = $trace
           $electron = Join-Path (Get-Location) 'node_modules\electron\dist\electron.exe'
           if (-not (Test-Path $electron)) { throw "electron_binary_missing" }
-          $arguments = @('--enable-logging=stderr', '--v=1', '--disable-gpu', 'src/development-plane-smoke.mjs')
+          $arguments = @('--enable-logging=stderr', '--v=1', '--disable-gpu', 'smoke/dp')
           $p = Start-Process -FilePath $electron -ArgumentList $arguments -WorkingDirectory (Get-Location) -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
           if (-not $p.WaitForExit(30000)) {
             try { $p.Kill($true) } catch {}
