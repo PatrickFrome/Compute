@@ -15,7 +15,8 @@
       "provider": "github",
       "owner": "PatrickFrome",
       "repo": "Compute",
-      "releaseType": "prerelease"
+      "releaseType": "prerelease",
+      "channel": "dev"
     }
   ],
   "win": {
