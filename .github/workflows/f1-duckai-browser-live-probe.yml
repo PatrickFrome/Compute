@@ -1,0 +1,36 @@
+name: F1 Duck.ai Browser Live Probe
+
+on:
+  push:
+    branches:
+      - work/f1-multimodel-vercel-gateway-v1
+    paths:
+      - 'apps/model-gateway/probes/duckai_browser_probe.py'
+      - '.github/workflows/f1-duckai-browser-live-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-browser-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Install Playwright Python package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check playwright
+          command -v google-chrome || command -v chromium || true
+
+      - name: Run real Duck.ai browser inference probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 apps/model-gateway/probes/duckai_browser_probe.py
