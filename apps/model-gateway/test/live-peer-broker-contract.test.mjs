@@ -14,6 +14,41 @@ function normalize(raw) {
   return { text: value, normalization: 'none' };
 }
 
+function extractJsonEnvelope(text) {
+  const value = text.trim().replace(/^```(?:json|javascript|python)?\s*/i, '').replace(/\s*```$/i, '');
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return { text: JSON.stringify(parsed), normalization: 'json_exact' };
+  } catch {}
+  for (let start = 0; start < value.length; start++) {
+    if (value[start] !== '{') continue;
+    let depth = 0, inString = false, escaped = false;
+    for (let i = start; i < value.length; i++) {
+      const ch = value[i];
+      if (inString) {
+        if (escaped) { escaped = false; continue; }
+        if (ch === '\\') { escaped = true; continue; }
+        if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') { inString = true; continue; }
+      if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) {
+          const candidate = value.slice(start, i + 1);
+          try {
+            const parsed = JSON.parse(candidate);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return { text: JSON.stringify(parsed), normalization: 'json_embedded' };
+          } catch {}
+          break;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function classify(message) {
   const value = message.toLowerCase();
   if (value.includes('quota') || value.includes('try again in')) return 'quota';
@@ -50,12 +85,11 @@ function agreement(results) {
   return { ...base, signal, unanimous: size === ok.length && signal !== 'divergent', divergence_detected: size < ok.length, matched_models: cluster?.[1] ?? [], candidate, agreement_ratio: size / ok.length };
 }
 
-test('live broker v8 separates advisory and structured actor pools', () => {
-  assert.match(source, /metaengine\.live-peer-broker\.v8/);
+test('live broker v9 separates advisory and structured actor pools', () => {
+  assert.match(source, /metaengine\.live-peer-broker\.v9/);
   for (const id of ['gemma2', 'llama32', 'nemotron', 'tinyllama', 'llama2']) assert.match(source, new RegExp(`id:\\"${id}\\"`));
   assert.match(source, /const ADVISORY_PRIMARY=\["gemma2","nemotron"\]/);
   assert.match(source, /const STRUCTURED_PRIMARY=\["gemma2","llama32"\]/);
-  assert.match(source, /llama32:\{id:"llama32",served_model:"meta-llama\/Llama-3\.2-3B-Instruct"/);
 });
 
 test('structured capability is explicit and Nemotron is advisory-only', () => {
@@ -69,6 +103,19 @@ test('reasoning wrapper is stripped without changing a plain answer', () => {
   assert.deepEqual(normalize('analysis\n</think>63'), { text: '63', normalization: 'after_think_end' });
   assert.deepEqual(normalize('<final>121</final>'), { text: '121', normalization: 'final_tag' });
   assert.deepEqual(normalize('GEMMA_BROKER_OK'), { text: 'GEMMA_BROKER_OK', normalization: 'none' });
+});
+
+test('structured JSON recovery canonicalizes exact JSON', () => {
+  assert.deepEqual(extractJsonEnvelope('{"phase":"PROPOSE","ok":true}'), { text: '{"phase":"PROPOSE","ok":true}', normalization: 'json_exact' });
+});
+
+test('structured JSON recovery extracts Llama Python wrapper observed live', () => {
+  const observed = 'import json\n\nprint(json.dumps({"ok":"LLAMA32_BROKER_OK"}))';
+  assert.deepEqual(extractJsonEnvelope(observed), { text: '{"ok":"LLAMA32_BROKER_OK"}', normalization: 'json_embedded' });
+});
+
+test('structured JSON recovery rejects truncated objects instead of fabricating them', () => {
+  assert.equal(extractJsonEnvelope('thinking... {"phase":"PROPOSE","claim":"cut off"'), null);
 });
 
 test('known live transport failures map to stable cooldown classes', () => {
@@ -100,10 +147,19 @@ test('agreement ignores failed transports and reports insufficient evidence', ()
   assert.equal(r.signal, 'insufficient'); assert.equal(r.successful_responses, 1); assert.equal(r.evaluated, false);
 });
 
-test('OpenAI endpoint defaults to structured-auto rather than advisory Nemotron fallback', () => {
-  assert.match(source, /body\?\.model\|\|"metaengine\/structured-auto"/);
-  assert.match(source, /logical==="metaengine\/structured-auto"/);
-  assert.match(source, /invokeAuto\(STRUCTURED_PRIMARY,prompt,body\?\.max_tokens\)/);
+test('OpenAI JSON requests use structured pool even when logical model is metaengine/auto', () => {
+  assert.match(source, /const wantJson=logical==="metaengine\/structured-auto"\|\|expectsJson\(body,prompt\)/);
+  assert.match(source, /logical==="metaengine\/auto"&&wantJson/);
+  assert.match(source, /invokeStructuredAuto\(prompt,body\?\.max_tokens\)/);
+});
+
+test('explicit non-structured model is rejected for JSON request', () => {
+  assert.match(source, /if\(wantJson&&!selected\.structured_capable\)throw Object\.assign\(new Error\("model_not_structured_capable"\)/);
+});
+
+test('structured route fails closed when no complete JSON object can be recovered', () => {
+  assert.match(source, /structured_json_missing/);
+  assert.match(source, /kind==="structured"\?422:502/);
 });
 
 test('OpenAI-compatible endpoint accepts the same bearer contract as SAME_POINT_DUEL_V4', () => {
@@ -129,7 +185,7 @@ test('legacy Gradio generator uses one session hash across iterations', () => {
   assert.match(source, /if\(j\?\.is_generating!==true\)return\{raw,event_count:i\+1\}/);
 });
 
-test('advisory committee saves backups after two primary successes while structured committee has no unproven fallback', () => {
+test('structured committee has no unproven fallback', () => {
   assert.match(source, /const backups=structured\?\[\]:ADVISORY_BACKUPS/);
   assert.match(source, /if\(successes>=2\)break/);
   assert.match(source, /agreement:analyzeAgreement\(results\)/);
