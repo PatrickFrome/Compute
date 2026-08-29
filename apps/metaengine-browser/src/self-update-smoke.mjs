@@ -42,6 +42,10 @@ export async function runSelfUpdateSmoke({ app, timeoutMs = 120_000 } = {}) {
         last_error: null,
         authority_effect: false,
       });
+      if (!app.hasSingleInstanceLock()) throw new Error('self_update_smoke_primary_lock_missing');
+      // Match production handoff: release the primary lock only after durable pre-install evidence.
+      // N is already quiescent in this smoke; N+1 must be able to acquire the same stable app lock.
+      app.releaseSingleInstanceLock();
     },
   });
   let lastState = null;
