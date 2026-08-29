@@ -8,18 +8,48 @@
   const INTENT_KEY = "a2OperatorHeldPromptIntentV060";
   const DRAIN_ALARM = "a2-operator-update-drain";
   const ORDERING_POLICY = "STRICT_GLM_FIRST_ACTUATED_V1";
+  const RESTORABLE_DRAIN_STATES = new Set(["DRAINING", "WAITING_SAFE_BOUNDARY"]);
   let draining = false;
   let targetVersion = null;
   let checkPromise = null;
+  let hydrationComplete = false;
+  let hydrationFailed = false;
 
   const baseRequest = globalThis.A2_BRIDGE_REQUEST;
+
+  async function hydrateDrainState() {
+    try {
+      const stored = await chrome.storage.local.get(STATE_KEY);
+      const state = stored[STATE_KEY] && typeof stored[STATE_KEY] === "object" ? stored[STATE_KEY] : {};
+      targetVersion = state.target_version ? String(state.target_version).slice(0, 64) : null;
+      draining = RESTORABLE_DRAIN_STATES.has(String(state.status || ""));
+      if (draining) await chrome.alarms.create(DRAIN_ALARM, { periodInMinutes: 0.5 });
+    } catch (error) {
+      hydrationFailed = true;
+      draining = true;
+      console.error("update_drain_hydration_failed", error);
+    } finally {
+      hydrationComplete = true;
+    }
+  }
+
+  const hydrationPromise = hydrateDrainState();
+
   if (typeof baseRequest === "function") {
     globalThis.A2_BRIDGE_REQUEST = async (path, init = {}) => {
-      if (draining && String(path || "") === "/v1/commands/next") {
-        return new Response(JSON.stringify({ command: null, ordering_policy: ORDERING_POLICY, update_drain: true }), {
-          status: 200,
-          headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }
-        });
+      if (String(path || "") === "/v1/commands/next") {
+        await hydrationPromise.catch(() => {});
+        if (draining || hydrationFailed) {
+          return new Response(JSON.stringify({
+            command: null,
+            ordering_policy: ORDERING_POLICY,
+            update_drain: true,
+            update_drain_reason: hydrationFailed ? "STATE_HYDRATION_FAILED" : "ACTIVE"
+          }), {
+            status: 200,
+            headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }
+          });
+        }
       }
       return baseRequest(path, init);
     };
@@ -68,7 +98,8 @@
   }
 
   async function checkDrain() {
-    if (!draining || checkPromise) return checkPromise;
+    await hydrationPromise.catch(() => {});
+    if (!draining || hydrationFailed || checkPromise) return checkPromise;
     checkPromise = (async () => {
       const state = await safeReloadState();
       if (!state.safe) {
@@ -84,8 +115,10 @@
   }
 
   async function beginDrain(version) {
+    await hydrationPromise.catch(() => {});
     targetVersion = String(version || "unknown").slice(0, 64);
     draining = true;
+    hydrationFailed = false;
     await statePatch({
       status: "DRAINING",
       target_version: targetVersion,
@@ -101,16 +134,25 @@
   });
 
   chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm?.name === DRAIN_ALARM) checkDrain().catch(() => {});
+    if (alarm?.name !== DRAIN_ALARM) return;
+    hydrationPromise.then(() => checkDrain()).catch(() => {});
   });
 
   chrome.runtime.onInstalled.addListener(() => {
-    draining = false;
-    targetVersion = null;
-    chrome.alarms.clear(DRAIN_ALARM).catch(() => {});
-    chrome.storage.local.set({ [STATE_KEY]: { status: "CURRENT", version: chrome.runtime.getManifest().version, updated_at: new Date().toISOString() } }).catch(() => {});
+    hydrationPromise.finally(() => {
+      draining = false;
+      hydrationFailed = false;
+      targetVersion = null;
+      chrome.alarms.clear(DRAIN_ALARM).catch(() => {});
+      chrome.storage.local.set({ [STATE_KEY]: { status: "CURRENT", version: chrome.runtime.getManifest().version, updated_at: new Date().toISOString() } }).catch(() => {});
+    });
   });
 
-  globalThis.A2_UPDATE_DRAIN_ACTIVE = () => draining;
+  hydrationPromise.then(() => {
+    if (draining && !hydrationFailed) checkDrain().catch(() => {});
+  }).catch(() => {});
+
+  globalThis.A2_UPDATE_DRAIN_ACTIVE = () => !hydrationComplete || draining || hydrationFailed;
   globalThis.A2_UPDATE_SAFE_STATE = safeReloadState;
+  globalThis.A2_UPDATE_DRAIN_READY = hydrationPromise;
 })();
