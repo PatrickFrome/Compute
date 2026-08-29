@@ -1,0 +1,32 @@
+name: F1 GitHub Models Live Probe
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/model-gateway/probes/github_models_live_probe.py'
+      - '.github/workflows/f1-github-models-live-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  models: read
+
+jobs:
+  live-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout PR merge revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      # This is intentionally real inference, not a catalog-only check.
+      - name: Run real GitHub Models inference probes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 apps/model-gateway/probes/github_models_live_probe.py

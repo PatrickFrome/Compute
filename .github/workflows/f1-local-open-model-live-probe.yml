@@ -1,0 +1,102 @@
+name: F1 Local Open Model Live Probe
+
+on:
+  push:
+    branches:
+      - work/f1-multimodel-vercel-gateway-v1
+    paths:
+      - '.github/workflows/f1-local-open-model-live-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-local-models:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Install Ollama
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama --version
+          nohup ollama serve >/tmp/ollama.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/ollama.log
+          exit 1
+
+      - name: Pull compact independent models
+        shell: bash
+        run: |
+          set -euo pipefail
+          ollama pull qwen3:0.6b
+          ollama pull deepseek-r1:1.5b
+          ollama pull llama3.2:1b
+          ollama pull gemma3:1b
+
+      - name: Run real four-family local inference
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, urllib.request
+
+          probes = [
+              ('qwen', 'qwen3:0.6b', 'METAENGINE_QWEN_LOCAL_CONNECTED', 96),
+              ('deepseek', 'deepseek-r1:1.5b', 'METAENGINE_DEEPSEEK_LOCAL_CONNECTED', 384),
+              ('llama', 'llama3.2:1b', 'METAENGINE_LLAMA_LOCAL_CONNECTED', 96),
+              ('gemma', 'gemma3:1b', 'METAENGINE_GEMMA_LOCAL_CONNECTED', 96),
+          ]
+          successes=[]
+          for family, model, marker, budget in probes:
+              data=json.dumps({
+                  'model': model,
+                  'messages': [
+                      {'role':'user','content':f'Reply with exactly {marker} and nothing else.'}
+                  ],
+                  'stream': False,
+                  'think': False,
+                  'options': {'temperature': 0, 'num_predict': budget},
+              }).encode()
+              req=urllib.request.Request('http://127.0.0.1:11434/api/chat', data=data, headers={'Content-Type':'application/json'})
+              with urllib.request.urlopen(req, timeout=240) as r:
+                  payload=json.load(r)
+              message=payload.get('message') if isinstance(payload,dict) else None
+              content=(message or {}).get('content') if isinstance(message,dict) else None
+              thinking=(message or {}).get('thinking') if isinstance(message,dict) else None
+              legacy=payload.get('response') if isinstance(payload,dict) else None
+              generated='\n'.join(str(x) for x in (content,legacy,thinking) if isinstance(x,str) and x.strip()).strip()
+              normalized=''.join(ch.lower() for ch in generated if ch.isalnum())
+              expected=''.join(ch.lower() for ch in marker if ch.isalnum())
+              marker_seen=expected in normalized
+              inference_observed=bool(payload.get('done') is True and generated)
+              rec={
+                  'family':family,
+                  'model':model,
+                  'inference_observed':inference_observed,
+                  'marker_seen_normalized':marker_seen,
+                  'content':str(content or '')[:600],
+                  'thinking':str(thinking or '')[:600],
+                  'done':payload.get('done') if isinstance(payload,dict) else None,
+                  'done_reason':payload.get('done_reason') if isinstance(payload,dict) else None,
+                  'eval_count':payload.get('eval_count') if isinstance(payload,dict) else None,
+                  'eval_duration':payload.get('eval_duration') if isinstance(payload,dict) else None,
+              }
+              print('LOCAL_OPEN_MODEL_PROBE', json.dumps(rec, ensure_ascii=False))
+              if inference_observed: successes.append(rec)
+          summary={
+              'schema':'metaengine.local-open-model-live-probe.v1',
+              'success_count':len(successes),
+              'models':[r['model'] for r in successes],
+              'families':[r['family'] for r in successes],
+              'strict_marker_count':sum(1 for r in successes if r['marker_seen_normalized'])
+          }
+          print('LOCAL_OPEN_MODEL_SUMMARY', json.dumps(summary, ensure_ascii=False))
+          if len(successes) < 4:
+              raise SystemExit('local_four_family_probe_incomplete')
+          PY

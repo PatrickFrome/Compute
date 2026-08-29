@@ -1,0 +1,126 @@
+name: F1 Cloudflare Workers AI Live Probe
+
+on:
+  push:
+    branches:
+      - work/f1-multimodel-vercel-gateway-v1
+    paths:
+      - '.github/workflows/f1-cloudflare-workers-ai-live-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Verify Cloudflare rail is configured
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          echo 'Cloudflare credentials are present (values withheld).'
+
+      - name: Run real Workers AI inference probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, urllib.request, urllib.error
+
+          token = os.environ['CLOUDFLARE_API_TOKEN']
+          account = os.environ['CLOUDFLARE_ACCOUNT_ID']
+          probes = [
+              ('gpt_oss', '@cf/openai/gpt-oss-20b'),
+              ('qwen', '@cf/qwen/qwen3.8-27b'),
+              ('deepseek', '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b'),
+              ('llama', '@cf/meta/llama-3.1-8b-instruct'),
+          ]
+
+          def extract_text(payload):
+              if not isinstance(payload, dict):
+                  return None
+              result = payload.get('result')
+              if isinstance(result, str):
+                  return result
+              if isinstance(result, dict):
+                  if isinstance(result.get('response'), str):
+                      return result['response']
+                  choices = result.get('choices')
+                  if isinstance(choices, list) and choices:
+                      c = choices[0]
+                      if isinstance(c, dict):
+                          msg = c.get('message')
+                          if isinstance(msg, dict) and isinstance(msg.get('content'), str):
+                              return msg['content']
+                          if isinstance(c.get('text'), str):
+                              return c['text']
+              return None
+
+          records = []
+          for family, model in probes:
+              marker = f'METAENGINE_{family.upper()}_CONNECTED'
+              url = f'https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{model}'
+              body = json.dumps({
+                  'messages': [
+                      {'role': 'user', 'content': f'Reply exactly with this marker and nothing else: {marker}'}
+                  ],
+                  'max_tokens': 32,
+                  'temperature': 0,
+              }).encode('utf-8')
+              req = urllib.request.Request(url, data=body, method='POST', headers={
+                  'Authorization': f'Bearer {token}',
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json',
+                  'User-Agent': 'METAENGINE-Cloudflare-Workers-AI-Probe/1',
+              })
+              status = None
+              payload = None
+              try:
+                  with urllib.request.urlopen(req, timeout=90) as resp:
+                      status = resp.status
+                      raw = resp.read().decode('utf-8', 'replace')
+                      payload = json.loads(raw) if raw else None
+              except urllib.error.HTTPError as exc:
+                  status = exc.code
+                  raw = exc.read().decode('utf-8', 'replace')
+                  try:
+                      payload = json.loads(raw) if raw else None
+                  except Exception:
+                      payload = {'raw': raw[:500]}
+              except Exception as exc:
+                  payload = {'transport_error': type(exc).__name__, 'message': str(exc)[:300]}
+
+              text = extract_text(payload)
+              api_success = bool(isinstance(payload, dict) and payload.get('success') is True)
+              marker_seen = isinstance(text, str) and marker in text
+              errors = payload.get('errors') if isinstance(payload, dict) else None
+              rec = {
+                  'family': family,
+                  'model': model,
+                  'http_status': status,
+                  'api_success': api_success,
+                  'marker_seen': marker_seen,
+                  'response_preview': text[:240] if isinstance(text, str) else None,
+                  'errors': errors[:3] if isinstance(errors, list) else errors,
+              }
+              records.append(rec)
+              print('CLOUDFLARE_WORKERS_AI_PROBE', json.dumps(rec, ensure_ascii=False))
+
+          successes = [r for r in records if r['http_status'] == 200 and r['api_success'] and r['marker_seen']]
+          summary = {
+              'schema': 'metaengine.cloudflare-workers-ai-live-probe.v1',
+              'success_count': len(successes),
+              'success_models': [r['model'] for r in successes],
+              'records': records,
+          }
+          print('CLOUDFLARE_WORKERS_AI_SUMMARY', json.dumps(summary, ensure_ascii=False))
+          if not successes:
+              raise SystemExit('cloudflare_workers_ai_live_inference_unavailable')
+          PY

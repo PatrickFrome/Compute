@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metaengine.local/spec/f1/model-peer-receipt.schema.json",
+  "title": "METAENGINE Model Peer Receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "task_id", "role", "models_requested", "primary_model",
+    "fallback_models", "served_model", "paid_route_authorized", "zero_spend_verified",
+    "zero_spend_evidence", "answer", "request_sha256", "response_sha256",
+    "started_at", "completed_at", "tariff_dependency", "data_policy", "authority_effect"
+  ],
+  "properties": {
+    "schema": { "const": "metaengine.model-gateway.peer-receipt.v1" },
+    "task_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "role": { "enum": ["free", "architecture", "coding", "critic", "research"] },
+    "models_requested": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "primary_model": { "type": "string", "minLength": 1 },
+    "fallback_models": { "type": "array", "items": { "type": "string" } },
+    "served_model": { "type": "string", "minLength": 1 },
+    "paid_route_authorized": { "type": "boolean" },
+    "zero_spend_verified": { "type": "boolean" },
+    "zero_spend_evidence": {
+      "type": ["object", "null"],
+      "properties": {
+        "models": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["model", "owned_by", "zdr", "no_training", "zero_price"],
+            "properties": {
+              "model": { "type": "string", "minLength": 1 },
+              "owned_by": { "type": ["string", "null"] },
+              "zdr": { "type": "string", "minLength": 1 },
+              "no_training": { "type": "string", "minLength": 1 },
+              "zero_price": { "const": true }
+            }
+          }
+        },
+        "privacy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["all_zdr", "all_no_training", "classification"],
+          "properties": {
+            "all_zdr": { "type": "boolean" },
+            "all_no_training": { "type": "boolean" },
+            "classification": {
+              "enum": ["CATALOG_ZDR_AND_NO_TRAINING", "EXTERNAL_NON_ZDR_OR_TRAINING_UNCERTAIN"]
+            }
+          }
+        }
+      },
+      "required": ["models", "privacy"],
+      "additionalProperties": false
+    },
+    "max_output_tokens": { "type": "integer", "minimum": 1, "maximum": 4096 },
+    "paid_budget": {
+      "type": ["object", "null"],
+      "properties": {
+        "cap_usd": { "type": "number", "minimum": 0, "maximum": 0.5 },
+        "worst_case_usd": { "type": "number", "minimum": 0 },
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["model", "worst_case_usd"],
+            "properties": {
+              "model": { "type": "string", "minLength": 1 },
+              "worst_case_usd": { "type": "number", "minimum": 0 }
+            }
+          }
+        }
+      },
+      "required": ["cap_usd", "worst_case_usd", "models"],
+      "additionalProperties": false
+    },
+    "answer": { "type": "string", "minLength": 1 },
+    "request_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "response_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "tariff_dependency": { "const": true },
+    "data_policy": { "const": "PUBLIC_OR_NON_SENSITIVE_ONLY" },
+    "authority_effect": { "const": false }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "paid_route_authorized": { "const": false } } },
+      "then": {
+        "properties": {
+          "zero_spend_verified": { "const": true },
+          "zero_spend_evidence": { "type": "object" },
+          "paid_budget": { "const": null }
+        }
+      },
+      "else": {
+        "properties": {
+          "zero_spend_evidence": { "const": null }
+        }
+      }
+    }
+  ]
+}
