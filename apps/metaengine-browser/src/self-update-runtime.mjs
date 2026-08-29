@@ -4,6 +4,14 @@ const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const SAFE_ARTIFACT_RE = /^[0-9A-Za-z._-]+$/;
 export const DEFAULT_TRUSTED_UPDATE_CHANNEL = 'dev';
 export const DEFAULT_TRUSTED_ARTIFACT_PREFIX = 'METAENGINE-Browser-Test-Setup-';
+export const SELF_UPDATE_COMMANDS = Object.freeze([
+  'SELF_UPDATE_STATUS',
+  'SELF_UPDATE_CHECK',
+  'SELF_UPDATE_DOWNLOAD',
+  'SELF_UPDATE_INSTALL',
+  'SELF_UPDATE_RETRY',
+  'SELF_UPDATE_SET_AUTOMATIC',
+]);
 
 function clipError(error) { return String(error?.message || error || 'unknown_error').slice(0, 300); }
 
@@ -56,9 +64,11 @@ export class SelfUpdateRuntime {
     download_percent: null, restart_gate_safe: false, restart_gate_since: null,
     restart_grace_ms: null, install_attempted_version: null, publisher_verified: false,
     ci_test_feed_active: false, pre_install_receipt_persisted: false,
-    installer_handoff_prepared: false,
+    installer_handoff_prepared: false, automatic_update_enabled: true,
+    manual_install_requested: false, last_control_action: null,
   };
   #lastCheck = 0; #intervalMs; #canRestart; #clock; #restartGraceMs; #restartSafeSince = null;
+  #automaticUpdateEnabled = true; #manualInstallRequested = false; #downloadPromise = null;
 
   constructor({
     intervalMs = 10 * 60 * 1000,
@@ -69,6 +79,7 @@ export class SelfUpdateRuntime {
     hostResilience = undefined,
     trustedChannel = DEFAULT_TRUSTED_UPDATE_CHANNEL,
     trustedArtifactPrefix = DEFAULT_TRUSTED_ARTIFACT_PREFIX,
+    automaticUpdate = true,
     ciTestFeedUrl = process.env.METAENGINE_SELF_UPDATE_TEST_FEED_URL || null,
     ciTestMode = process.env.METAENGINE_SELF_UPDATE_TEST_MODE === '1',
     githubActions = process.env.GITHUB_ACTIONS === 'true',
@@ -85,6 +96,8 @@ export class SelfUpdateRuntime {
     this.#trustedChannel = String(trustedChannel || DEFAULT_TRUSTED_UPDATE_CHANNEL).trim();
     this.#trustedArtifactPrefix = String(trustedArtifactPrefix || DEFAULT_TRUSTED_ARTIFACT_PREFIX).trim();
     this.#clock = clock;
+    this.#automaticUpdateEnabled = automaticUpdate !== false;
+    this.#state.automatic_update_enabled = this.#automaticUpdateEnabled;
     if (typeof beforeInstall !== 'function') throw new Error('self_update_before_install_invalid');
     if (typeof beforeInstallerLaunch !== 'function') throw new Error('self_update_before_installer_launch_invalid');
     this.#beforeInstall = beforeInstall;
@@ -97,7 +110,7 @@ export class SelfUpdateRuntime {
   }
 
   snapshot() {
-    return structuredClone({ schema: 'metaengine.self-update-runtime.v7', ...this.#state, host_resilience: this.#host?.snapshot?.() || null, authority_effect: false });
+    return structuredClone({ schema: 'metaengine.self-update-runtime.v8', ...this.#state, host_resilience: this.#host?.snapshot?.() || null, authority_effect: false });
   }
 
   #resetRestartGate() {
@@ -111,7 +124,30 @@ export class SelfUpdateRuntime {
     this.#state.installer_handoff_prepared = false;
   }
 
-  async #approveAndDownload(info) {
+  async #beginDownload() {
+    if (this.#downloadPromise) return this.#downloadPromise;
+    if (!this.#state.metadata_verified || !this.#state.available_version) throw new Error('self_update_download_requires_verified_candidate');
+    if (!['AVAILABLE_VERIFIED','APPROVED_DOWNLOAD'].includes(this.#state.state)) return this.snapshot();
+    if (typeof this.#updater?.downloadUpdate !== 'function') throw new Error('electron_updater_download_unavailable');
+    this.#state.state = 'APPROVED_DOWNLOAD';
+    this.#downloadPromise = (async () => {
+      try {
+        await this.#updater.downloadUpdate();
+        if (this.#state.state === 'APPROVED_DOWNLOAD') this.#state.state = 'DOWNLOADING';
+      } catch (error) {
+        this.#state.state = 'ERROR';
+        this.#state.last_error = clipError(error);
+        this.#resetRestartGate();
+        throw error;
+      } finally {
+        this.#downloadPromise = null;
+      }
+      return this.snapshot();
+    })();
+    return this.#downloadPromise;
+  }
+
+  async #approveCandidate(info) {
     try {
       const metadata = verifiedMetadata(info, { trustedArtifactPrefix: this.#trustedArtifactPrefix });
       this.#state.available_version = metadata.version;
@@ -119,13 +155,11 @@ export class SelfUpdateRuntime {
       this.#state.candidate_file_count = metadata.files.length;
       this.#state.staging_percentage = metadata.staging_percentage;
       this.#state.last_error = null;
-      this.#state.state = 'APPROVED_DOWNLOAD';
+      this.#state.state = 'AVAILABLE_VERIFIED';
       this.#state.install_attempted_version = null;
       this.#resetInstallHandoff();
       this.#resetRestartGate();
-      if (typeof this.#updater?.downloadUpdate !== 'function') throw new Error('electron_updater_download_unavailable');
-      await this.#updater.downloadUpdate();
-      if (this.#state.state === 'APPROVED_DOWNLOAD') this.#state.state = 'DOWNLOADING';
+      if (this.#automaticUpdateEnabled) await this.#beginDownload();
     } catch (error) {
       this.#state.state = 'REJECTED_METADATA';
       this.#state.metadata_verified = false;
@@ -165,7 +199,7 @@ export class SelfUpdateRuntime {
         this.#state.ci_test_feed_active = true;
       }
       updater.on('checking-for-update', () => { this.#state.state = 'CHECKING'; });
-      updater.on('update-available', (info) => { void this.#approveAndDownload(info); });
+      updater.on('update-available', (info) => { void this.#approveCandidate(info); });
       updater.on('update-not-available', () => {
         this.#state.state = 'CURRENT';
         this.#state.available_version = null;
@@ -174,6 +208,8 @@ export class SelfUpdateRuntime {
         this.#state.candidate_file_count = 0;
         this.#state.download_percent = null;
         this.#state.install_attempted_version = null;
+        this.#manualInstallRequested = false;
+        this.#state.manual_install_requested = false;
         this.#resetInstallHandoff();
         this.#resetRestartGate();
       });
@@ -201,6 +237,11 @@ export class SelfUpdateRuntime {
 
   async #cycleRestartGate() {
     if (!['READY_RESTART','RESTART_GRACE'].includes(this.#state.state)) return;
+    if (!this.#automaticUpdateEnabled && !this.#manualInstallRequested) {
+      this.#resetRestartGate();
+      this.#state.state = 'READY_RESTART';
+      return;
+    }
     const safe = await this.#canRestart();
     const now = this.#clock();
     if (!safe) {
@@ -223,6 +264,8 @@ export class SelfUpdateRuntime {
     if (!this.#state.downloaded_version || this.#state.install_attempted_version === this.#state.downloaded_version) return;
     this.#state.install_attempted_version = this.#state.downloaded_version;
     this.#state.state = 'RESTARTING';
+    this.#manualInstallRequested = false;
+    this.#state.manual_install_requested = false;
     try {
       const receipt = {
         schema: 'metaengine.self-update.pre-install-receipt.v1',
@@ -234,9 +277,6 @@ export class SelfUpdateRuntime {
         recorded_at: new Date(now).toISOString(),
         authority_effect: false,
       };
-      // Ordering is intentional and safety-critical:
-      // 1. persist exact update intent; 2. arm crash sentinel expected-restart state;
-      // 3. quiesce/release singleton handoff; 4. launch the already-verified silent installer.
       await this.#beforeInstall(structuredClone(receipt));
       this.#state.pre_install_receipt_persisted = true;
       await this.#host?.prepareExpectedRestart?.('SELF_UPDATE');
@@ -251,12 +291,46 @@ export class SelfUpdateRuntime {
     }
   }
 
+  async command(action, payload = {}) {
+    const normalized = String(action || '').toUpperCase();
+    if (!SELF_UPDATE_COMMANDS.includes(normalized)) throw new Error('self_update_command_unknown');
+    this.#state.last_control_action = normalized;
+    if (normalized === 'SELF_UPDATE_STATUS') return this.snapshot();
+    if (!this.#updater) throw new Error('self_update_runtime_not_ready');
+    if (normalized === 'SELF_UPDATE_SET_AUTOMATIC') {
+      if (typeof payload?.enabled !== 'boolean') throw new Error('self_update_automatic_flag_invalid');
+      this.#automaticUpdateEnabled = payload.enabled;
+      this.#state.automatic_update_enabled = payload.enabled;
+      if (payload.enabled && this.#state.state === 'AVAILABLE_VERIFIED') await this.#beginDownload();
+      if (payload.enabled) await this.#cycleRestartGate();
+      return this.snapshot();
+    }
+    if (normalized === 'SELF_UPDATE_CHECK') return this.cycle({ force: true });
+    if (normalized === 'SELF_UPDATE_RETRY') {
+      if (!['ERROR','REJECTED_METADATA'].includes(this.#state.state)) return this.snapshot();
+      return this.cycle({ force: true });
+    }
+    if (normalized === 'SELF_UPDATE_DOWNLOAD') {
+      if (['DOWNLOADING','READY_RESTART','RESTART_GRACE','RESTARTING'].includes(this.#state.state)) return this.snapshot();
+      return this.#beginDownload();
+    }
+    if (normalized === 'SELF_UPDATE_INSTALL') {
+      if (!['READY_RESTART','RESTART_GRACE'].includes(this.#state.state)) throw new Error('self_update_install_requires_downloaded_candidate');
+      this.#manualInstallRequested = true;
+      this.#state.manual_install_requested = true;
+      await this.#cycleRestartGate();
+      return this.snapshot();
+    }
+    throw new Error('self_update_command_unknown');
+  }
+
   async cycle({ force = false } = {}) {
     if (!this.#updater) return this.snapshot();
     const now = this.#clock();
     const latchedFailure = ['ERROR','REJECTED_METADATA'].includes(this.#state.state);
-    const busy = ['APPROVED_DOWNLOAD','DOWNLOADING','READY_RESTART','RESTART_GRACE','RESTARTING'].includes(this.#state.state);
-    if (!busy && (!latchedFailure || force) && (force || now - this.#lastCheck >= this.#intervalMs)) {
+    const busy = ['AVAILABLE_VERIFIED','APPROVED_DOWNLOAD','DOWNLOADING','READY_RESTART','RESTART_GRACE','RESTARTING'].includes(this.#state.state);
+    const shouldCheck = this.#automaticUpdateEnabled || force;
+    if (shouldCheck && !busy && (!latchedFailure || force) && (force || now - this.#lastCheck >= this.#intervalMs)) {
       this.#lastCheck = now;
       this.#state.last_check_at = new Date(now).toISOString();
       try {
@@ -268,12 +342,15 @@ export class SelfUpdateRuntime {
           this.#state.candidate_file_count = 0;
           this.#state.download_percent = null;
           this.#state.install_attempted_version = null;
+          this.#manualInstallRequested = false;
+          this.#state.manual_install_requested = false;
           this.#resetInstallHandoff();
           this.#resetRestartGate();
         }
         await this.#updater.checkForUpdates();
       } catch (e) { this.#state.state = 'ERROR'; this.#state.last_error = clipError(e); this.#resetRestartGate(); }
     }
+    if (this.#automaticUpdateEnabled && this.#state.state === 'AVAILABLE_VERIFIED') await this.#beginDownload().catch(() => {});
     await this.#cycleRestartGate();
     return this.snapshot();
   }
