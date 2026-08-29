@@ -29,13 +29,13 @@ test('disables updater outside packaged application', async () => {
   assert.equal(updater.checks, 0);
 });
 
-test('binds updater to trusted dev channel and reasserts no downgrade after channel selection', async () => {
+test('binds updater to builder-compatible latest channel and reasserts no downgrade', async () => {
   const updater = new FakeUpdater();
   const runtime = runtimeFor(updater, { intervalMs: 60000 });
   const started = await runtime.start();
   await runtime.cycle({ force: true });
-  assert.equal(started.trusted_channel, 'dev');
-  assert.equal(updater.channel, 'dev');
+  assert.equal(started.trusted_channel, 'latest');
+  assert.equal(updater.channel, 'latest');
   assert.equal(updater.allowPrerelease, true);
   assert.equal(updater.allowDowngrade, false);
   assert.equal(updater.autoDownload, false);
@@ -93,9 +93,10 @@ test('absolute, traversing, wrong-prefix or version-mismatched artifacts fail cl
   }
 });
 
-test('downloaded update waits for quiescent restart gate and arms sentinel handoff', async () => {
+test('downloaded update requires continuously quiescent restart grace before install', async () => {
   const updater = new FakeUpdater();
   let safe = false;
+  let now = Date.parse('2026-08-29T15:00:00Z');
   const host = {
     starts: 0,
     restarts: [],
@@ -103,7 +104,14 @@ test('downloaded update waits for quiescent restart gate and arms sentinel hando
     snapshot() { return { state: 'ACTIVE', authority_effect: false }; },
     async prepareExpectedRestart(reason) { this.restarts.push(reason); },
   };
-  const runtime = new SelfUpdateRuntime({ updater, packaged: true, hostResilience: host, canRestart: async () => safe });
+  const runtime = new SelfUpdateRuntime({
+    updater,
+    packaged: true,
+    hostResilience: host,
+    canRestart: async () => safe,
+    restartGraceMs: 3000,
+    clock: () => now,
+  });
   await runtime.start();
   updater.emit('update-available', VALID_INFO);
   await new Promise((resolve) => setImmediate(resolve));
@@ -111,13 +119,48 @@ test('downloaded update waits for quiescent restart gate and arms sentinel hando
   await runtime.cycle();
   assert.equal(runtime.snapshot().state, 'READY_RESTART');
   assert.equal(updater.installs, 0);
-  assert.deepEqual(host.restarts, []);
+
   safe = true;
+  await runtime.cycle();
+  assert.equal(runtime.snapshot().state, 'RESTART_GRACE');
+  assert.equal(runtime.snapshot().restart_gate_safe, true);
+  assert.equal(updater.installs, 0);
+
+  now += 2500;
+  await runtime.cycle();
+  assert.equal(updater.installs, 0);
+
+  safe = false;
+  await runtime.cycle();
+  assert.equal(runtime.snapshot().state, 'READY_RESTART');
+  assert.equal(runtime.snapshot().restart_gate_since, null);
+
+  safe = true;
+  await runtime.cycle();
+  now += 3100;
   await runtime.cycle();
   assert.equal(updater.installs, 1);
   assert.deepEqual(host.restarts, ['SELF_UPDATE']);
   assert.deepEqual(updater.installArgs, { isSilent: false, forceRunAfter: true });
   assert.equal(runtime.snapshot().state, 'RESTARTING');
+  assert.equal(runtime.snapshot().install_attempted_version, VALID_INFO.version);
+});
+
+test('one downloaded version gets at most one install attempt', async () => {
+  const updater = new FakeUpdater();
+  let now = 1_000_000;
+  const runtime = runtimeFor(updater, { canRestart: async () => true, restartGraceMs: 3000, clock: () => now });
+  await runtime.start();
+  updater.emit('update-available', VALID_INFO);
+  await new Promise((resolve) => setImmediate(resolve));
+  updater.emit('update-downloaded', { version: VALID_INFO.version });
+  await runtime.cycle();
+  now += 3100;
+  await runtime.cycle();
+  assert.equal(updater.installs, 1);
+  now += 5000;
+  await runtime.cycle();
+  assert.equal(updater.installs, 1);
 });
 
 test('downloaded version mismatch remains latched until explicit recovery', async () => {
