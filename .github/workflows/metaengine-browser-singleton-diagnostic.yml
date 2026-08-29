@@ -1,0 +1,84 @@
+name: METAENGINE Browser Singleton Diagnostic
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/**'
+      - '.github/workflows/metaengine-browser-singleton-diagnostic.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: metaengine-browser-singleton-diagnostic-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  packaged-singleton:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Build and install diagnostic package
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          $version = "0.6.3-dev.${{ github.run_number }}.9"
+          npm pkg set version=$version
+          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
+          if (-not $installer) { throw 'singleton_diag_installer_missing' }
+          $install = Start-Process -FilePath $installer.FullName -ArgumentList '/S' -PassThru -Wait
+          if ($install.ExitCode -ne 0) { throw "singleton_diag_install_exit_$($install.ExitCode)" }
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test\METAENGINE Browser Test.exe'
+          if (-not (Test-Path $app)) { throw 'singleton_diag_app_missing' }
+          $app | Set-Content "$env:RUNNER_TEMP\singleton-app.txt"
+      - name: Prove primary remains live while secondary is rejected
+        shell: powershell
+        run: |
+          $app = (Get-Content "$env:RUNNER_TEMP\singleton-app.txt").Trim()
+          $firstOut = "$env:RUNNER_TEMP\singleton-first.out"
+          $firstErr = "$env:RUNNER_TEMP\singleton-first.err"
+          $secondOut = "$env:RUNNER_TEMP\singleton-second.out"
+          $secondErr = "$env:RUNNER_TEMP\singleton-second.err"
+          $first = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $firstOut -RedirectStandardError $firstErr
+          $null = $first.Handle
+          $deadline = (Get-Date).AddSeconds(10)
+          while ((-not (Test-Path $firstOut) -or (Get-Item $firstOut -ErrorAction SilentlyContinue).Length -eq 0) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 100 }
+          $first.Refresh()
+          if (-not (Test-Path $firstOut)) { throw 'singleton_diag_primary_no_output' }
+          Get-Content $firstOut -ErrorAction SilentlyContinue
+          Get-Content $firstErr -ErrorAction SilentlyContinue
+          if ($first.HasExited) { throw "singleton_diag_primary_exited_early:$($first.ExitCode)" }
+          $firstRow = (Get-Content $firstOut | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
+          if ($firstRow.primary_instance -ne $true) { throw 'singleton_diag_primary_identity_invalid' }
+          $second = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $secondOut -RedirectStandardError $secondErr
+          $null = $second.Handle
+          if (-not $second.WaitForExit(5000)) {
+            try { Stop-Process -Id $second.Id -Force } catch {}
+            try { Stop-Process -Id $first.Id -Force } catch {}
+            Get-Content $secondOut -ErrorAction SilentlyContinue
+            Get-Content $secondErr -ErrorAction SilentlyContinue
+            throw 'singleton_diag_secondary_did_not_exit'
+          }
+          "secondary_exit=$($second.ExitCode)"
+          Get-Content $secondOut -ErrorAction SilentlyContinue
+          Get-Content $secondErr -ErrorAction SilentlyContinue
+          $first.Refresh()
+          if ($first.HasExited) { throw "singleton_diag_secondary_displaced_primary:$($first.ExitCode)" }
+          try { Stop-Process -Id $first.Id -Force -ErrorAction SilentlyContinue } catch {}
+          'physical_singleton_diagnostic=PASS'
