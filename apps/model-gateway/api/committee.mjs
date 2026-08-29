@@ -3,6 +3,7 @@ import { authorized, buildPeerInput, sha256 } from '../lib/security.mjs';
 import { callGateway } from '../lib/gateway.mjs';
 import { assertZeroSpend } from '../lib/catalog.mjs';
 import { runCommittee } from '../lib/committee.mjs';
+import { toSupervisorAdvisory } from '../lib/supervisor-advisory.mjs';
 
 function send(response, status, body) {
   response.status(status).json(body);
@@ -55,6 +56,9 @@ export default async function handler(request, response) {
       maxOutputTokens: task.maxOutputTokens,
       callModel: callGateway
     });
+    // The supervisor envelope independently re-validates the committee receipt.
+    // It cannot synthesize consensus or authorize an action.
+    const supervisorAdvisory = toSupervisorAdvisory(committee);
     const body = {
       ...committee,
       request_sha256: requestHash,
@@ -62,6 +66,7 @@ export default async function handler(request, response) {
       zero_spend_evidence: zeroSpendEvidence,
       privacy_classification: zeroSpendEvidence.privacy?.classification || 'UNKNOWN',
       confidential_data_supported: false,
+      supervisor_advisory: supervisorAdvisory,
       authority_effect: false
     };
     return send(response, committee.quorum_met ? 200 : 503, body);
