@@ -7,6 +7,17 @@ export const DEFAULT_TRUSTED_ARTIFACT_PREFIX = 'METAENGINE-Browser-Test-Setup-';
 
 function clipError(error) { return String(error?.message || error || 'unknown_error').slice(0, 300); }
 
+export function validateCiTestFeedUrl(value, { testMode = false, githubActions = false } = {}) {
+  if (value == null || String(value).trim() === '') return null;
+  if (testMode !== true || githubActions !== true) throw new Error('self_update_test_feed_not_allowed');
+  const url = new URL(String(value).trim());
+  if (url.protocol !== 'http:') throw new Error('self_update_test_feed_protocol_invalid');
+  if (!['127.0.0.1','localhost','[::1]'].includes(url.hostname.toLowerCase())) throw new Error('self_update_test_feed_not_loopback');
+  if (url.username || url.password || url.search || url.hash) throw new Error('self_update_test_feed_url_components_invalid');
+  if (!url.pathname.endsWith('/')) throw new Error('self_update_test_feed_path_invalid');
+  return url.href;
+}
+
 function verifiedMetadata(info, { trustedArtifactPrefix = DEFAULT_TRUSTED_ARTIFACT_PREFIX } = {}) {
   const version = String(info?.version || '').trim();
   if (!VERSION_RE.test(version)) throw new Error('update_metadata_version_invalid');
@@ -37,13 +48,14 @@ function verifiedMetadata(info, { trustedArtifactPrefix = DEFAULT_TRUSTED_ARTIFA
 
 export class SelfUpdateRuntime {
   #updater = null; #injectedUpdater; #packagedOverride; #host = null; #hostOverride;
-  #trustedChannel; #trustedArtifactPrefix;
+  #trustedChannel; #trustedArtifactPrefix; #ciTestFeedUrl;
   #state = {
     state: 'UNINITIALIZED', available_version: null, downloaded_version: null,
     metadata_verified: false, candidate_file_count: 0, staging_percentage: null,
     last_check_at: null, last_error: null, trusted_channel: null,
     download_percent: null, restart_gate_safe: false, restart_gate_since: null,
     restart_grace_ms: null, install_attempted_version: null, publisher_verified: false,
+    ci_test_feed_active: false,
   };
   #lastCheck = 0; #intervalMs; #canRestart; #clock; #restartGraceMs; #restartSafeSince = null;
 
@@ -56,6 +68,9 @@ export class SelfUpdateRuntime {
     hostResilience = undefined,
     trustedChannel = DEFAULT_TRUSTED_UPDATE_CHANNEL,
     trustedArtifactPrefix = DEFAULT_TRUSTED_ARTIFACT_PREFIX,
+    ciTestFeedUrl = process.env.METAENGINE_SELF_UPDATE_TEST_FEED_URL || null,
+    ciTestMode = process.env.METAENGINE_SELF_UPDATE_TEST_MODE === '1',
+    githubActions = process.env.GITHUB_ACTIONS === 'true',
     clock = () => Date.now(),
   } = {}) {
     this.#intervalMs = Math.max(60 * 1000, Number(intervalMs) || 10 * 60 * 1000);
@@ -69,12 +84,13 @@ export class SelfUpdateRuntime {
     this.#clock = clock;
     if (!/^[0-9A-Za-z._-]+$/.test(this.#trustedChannel)) throw new Error('trusted_update_channel_invalid');
     if (!SAFE_ARTIFACT_RE.test(this.#trustedArtifactPrefix)) throw new Error('trusted_update_artifact_prefix_invalid');
+    this.#ciTestFeedUrl = validateCiTestFeedUrl(ciTestFeedUrl, { testMode: ciTestMode, githubActions });
     this.#state.trusted_channel = this.#trustedChannel;
     this.#state.restart_grace_ms = this.#restartGraceMs;
   }
 
   snapshot() {
-    return structuredClone({ schema: 'metaengine.self-update-runtime.v4', ...this.#state, host_resilience: this.#host?.snapshot?.() || null, authority_effect: false });
+    return structuredClone({ schema: 'metaengine.self-update-runtime.v5', ...this.#state, host_resilience: this.#host?.snapshot?.() || null, authority_effect: false });
   }
 
   #resetRestartGate() {
@@ -125,12 +141,16 @@ export class SelfUpdateRuntime {
       if (!updater) throw new Error('electron_updater_unavailable');
       updater.allowPrerelease = true;
       updater.channel = this.#trustedChannel;
-      // allowPrerelease/channel assignment can enable downgrade in electron-updater; re-assert fail-closed order afterwards.
       updater.allowDowngrade = false;
       updater.autoDownload = false;
       updater.autoInstallOnAppQuit = false;
       if ('disableWebInstaller' in updater) updater.disableWebInstaller = true;
       if ('allowUnverifiedLinuxPackages' in updater) updater.allowUnverifiedLinuxPackages = false;
+      if (this.#ciTestFeedUrl) {
+        if (typeof updater.setFeedURL !== 'function') throw new Error('electron_updater_set_feed_url_unavailable');
+        updater.setFeedURL({ provider: 'generic', url: this.#ciTestFeedUrl, channel: this.#trustedChannel });
+        this.#state.ci_test_feed_active = true;
+      }
       updater.on('checking-for-update', () => { this.#state.state = 'CHECKING'; });
       updater.on('update-available', (info) => { void this.#approveAndDownload(info); });
       updater.on('update-not-available', () => {
