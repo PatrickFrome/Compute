@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -33,6 +34,7 @@ assert(pkg.files.includes('semantic-perception-compiler.js'), 'generated semanti
 assert(pkg.files.includes('operator-semantic-perception.js'), 'semantic adapter missing from package closure');
 assert(pkg.files.includes('operator-typed-click-outcome.js'), 'typed click outcome executor missing from final closure');
 assert(pkg.files.includes('supervisor-authority.js'), 'signed supervisor authority missing from final closure');
+assert(pkg.files.includes('update-manager.js'), 'restart-safe update manager missing from final closure');
 assert(pkg.generated_files?.['semantic-perception-compiler.js']?.kind === 'classic_semantic_perception_v1', 'semantic generated-file contract missing');
 assert(pkg.generated_files?.['semantic-perception-compiler.js']?.source === 'coordination/browser-shared/semantic-perception-compiler.mjs', 'semantic compiler does not use shared source');
 assert(!fs.existsSync(path.join(root, 'semantic-perception-compiler.js')), 'generated compiler must not be hand-maintained in source directory');
@@ -51,6 +53,14 @@ assert(!semanticAdapter.includes('Runtime.evaluate') && !semanticAdapter.include
 assert(!semanticAdapter.includes('document.body') && !semanticAdapter.includes('innerText'), 'semantic adapter reads page body');
 assert(builder.includes('classic_semantic_perception_v1') && builder.includes('A2_SEMANTIC_PERCEPTION'), 'builder does not deterministically generate classic semantic compiler');
 
+const restartLab = spawnSync(process.execPath, ['tests/a2_v071_update_manager_restart_lab.mjs'], {
+  encoding: 'utf8',
+  stdio: ['ignore', 'pipe', 'pipe']
+});
+if (restartLab.stdout) process.stdout.write(restartLab.stdout);
+if (restartLab.stderr) process.stderr.write(restartLab.stderr);
+assert(restartLab.status === 0, `update-manager restart lab failed with status ${restartLab.status}`);
+
 console.log('A2 v0.7.1 Final Release Contract Lab: PASS', JSON.stringify({
   version: manifest.version,
   runtime: pkg.operator_runtime,
@@ -59,5 +69,6 @@ console.log('A2 v0.7.1 Final Release Contract Lab: PASS', JSON.stringify({
   semantic_adapter: true,
   typed_click: true,
   supervisor_authority: true,
+  mv3_update_drain_restart_safe: true,
   release_channel: 'stable'
 }));
