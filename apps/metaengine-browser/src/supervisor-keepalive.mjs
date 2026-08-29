@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-export const SUPERVISOR_KEEPALIVE_VERSION = '1.1.1';
+export const SUPERVISOR_KEEPALIVE_VERSION = '1.1.2';
 export const SUPERVISOR_ID = 'METAENGINE_SUPERVISOR';
 export const KEEPALIVE_STATES = Object.freeze([
   'ACTIVE',
@@ -183,18 +183,29 @@ export class SupervisorKeepalive {
     const normalizedReason = String(reason || '');
     if (!WAKE_REASONS.has(normalizedReason)) throw new Error('keepalive_wake_reason_invalid');
     const key = `${normalizedReason}:${String(metadata.agent_id || metadata.key || '')}`;
-    const existing = this.#state.queued_wakes.some((row) => row.key === key);
-    if (!existing) {
-      this.#state.queued_wakes.push({
-        key,
-        reason: normalizedReason,
-        metadata: clone(metadata),
-        queued_at: iso(this.#clock),
-      });
-      this.#state.queued_wakes = this.#state.queued_wakes.slice(-32);
-      if (normalizedReason === 'RESEARCH_ACCELERATOR_DUE') this.#state.last_research_wake_at = iso(this.#clock);
-      await this.#persist();
+    const existing = this.#state.queued_wakes.find((row) => row.key === key);
+    if (existing) {
+      const incomingAgentIds = Array.isArray(metadata.agent_ids) ? metadata.agent_ids.map(String) : [];
+      const existingAgentIds = Array.isArray(existing.metadata?.agent_ids) ? existing.metadata.agent_ids.map(String) : [];
+      if (incomingAgentIds.length > 0) {
+        existing.metadata = {
+          ...existing.metadata,
+          ...clone(metadata),
+          agent_ids: [...new Set([...existingAgentIds, ...incomingAgentIds])],
+        };
+        await this.#persist();
+      }
+      return this.snapshot();
     }
+    this.#state.queued_wakes.push({
+      key,
+      reason: normalizedReason,
+      metadata: clone(metadata),
+      queued_at: iso(this.#clock),
+    });
+    this.#state.queued_wakes = this.#state.queued_wakes.slice(-32);
+    if (normalizedReason === 'RESEARCH_ACCELERATOR_DUE') this.#state.last_research_wake_at = iso(this.#clock);
+    await this.#persist();
     return this.snapshot();
   }
 
@@ -245,7 +256,14 @@ export class SupervisorKeepalive {
     }
     this.#state.previous_worker_generation = next;
     await this.#persist();
-    for (const event of events) await this.enqueueWake(event.reason, { agent_id: event.agent_id });
+
+    for (const event of events.filter((row) => row.reason === 'WORKER_RESULT_READY')) {
+      await this.enqueueWake(event.reason, { agent_id: event.agent_id });
+    }
+    for (const reason of ['WORKER_LOST', 'WORKER_FAILED']) {
+      const agentIds = events.filter((row) => row.reason === reason).map((row) => row.agent_id);
+      if (agentIds.length > 0) await this.enqueueWake(reason, { key: 'fleet-terminal-burst', agent_ids: agentIds });
+    }
     return events;
   }
 
