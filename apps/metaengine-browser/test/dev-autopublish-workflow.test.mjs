@@ -15,7 +15,7 @@ test('dev autopublish consumes exact physical evidence and never rebuilds releas
   assert.match(raw, /TRUSTED_E2E_WORKFLOW_BLOB: b1b5dfbd63cf659560b5bb232f1555de7351ed77/);
   assert.match(raw, /TRUSTED_SHELL_WORKFLOW_BLOB: 766834e8a92f62d5da778392686fd5f535a5948e/);
   assert.match(raw, /head_sha=\$sha&status=success/);
-  assert.match(raw, /metaengine-browser-self-update-e2e-\$\{sha\}-\{e2e\['run_attempt'\]\}/);
+  assert.match(raw, /metaengine-browser-self-update-e2e-\{sha\}-\{e2e\['run_attempt'\]\}/);
   assert.match(raw, /actions\/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c/);
   assert.match(raw, /metaengine\.browser\.self-update-e2e-manifest\.v2/);
   assert.match(raw, /physical_n_to_n_plus_1/);
