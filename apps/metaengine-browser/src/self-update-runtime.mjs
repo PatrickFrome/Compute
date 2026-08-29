@@ -25,7 +25,7 @@ export class SelfUpdateRuntime {
         packaged = app.isPackaged;
       }
       if (packaged && this.#hostOverride !== false) {
-        this.#host = this.#hostOverride || new HostResilienceRuntime();
+        this.#host = this.#hostOverride || new HostResilienceRuntime({ getUpdateState: () => this.#state.state });
         await this.#host.start();
       }
       if (!packaged || process.env.METAENGINE_DISABLE_SELF_UPDATE === '1') { this.#state.state = 'DISABLED'; return this.snapshot(); }
