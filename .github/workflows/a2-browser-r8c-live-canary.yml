@@ -74,15 +74,26 @@ jobs:
           test -s "$OUT/stage/debugger-broker.js"
           test "$(find "$OUT/stage" -type f | wc -l)" = "47"
 
-      - name: Run real Chrome staged-extension canary
+      - name: Install pinned Chromium test engine
         shell: bash
         run: |
           set -euo pipefail
-          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
-          test -n "$CHROME"
+          PW_ROOT="$RUNNER_TEMP/r8c-playwright"
+          npm install --prefix "$PW_ROOT" --no-save --no-package-lock --ignore-scripts playwright@1.62.1
+          node "$PW_ROOT/node_modules/playwright/cli.js" install --with-deps chromium
+          CHROME="$(PW_ROOT="$PW_ROOT" node -e 'const { chromium } = require(process.env.PW_ROOT + "/node_modules/playwright"); process.stdout.write(chromium.executablePath())')"
+          test -x "$CHROME"
+          "$CHROME" --version | tee "$RUNNER_TEMP/r8c-live-chrome-version.txt"
+          echo "A2_R8C_TEST_CHROME=$CHROME" >> "$GITHUB_ENV"
+
+      - name: Run real Chromium staged-extension canary
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHROME="$A2_R8C_TEST_CHROME"
+          test -x "$CHROME"
           command -v xvfb-run >/dev/null
           command -v openssl >/dev/null
-          "$CHROME" --version | tee "$RUNNER_TEMP/r8c-live-chrome-version.txt"
           A2_CHROME_EXECUTABLE="$CHROME" \
           A2_R8C_STAGE="$GITHUB_WORKSPACE/dist/a2-browser-r8c-live/stage" \
           CI=true \
@@ -107,7 +118,7 @@ jobs:
           printf '%s\n' "$GITHUB_SHA" > "$OUT/evidence/SOURCE_COMMIT.txt"
           printf '%s\n' 'bd4b3c029fc4531d355ca181a0897d50e68268b3' > "$OUT/evidence/PARENT_VERIFIED_COMMIT.txt"
           cat > "$OUT/evidence/R8C_LIVE_CLAIMS.json" <<'JSON'
-          {"milestone":"R8C_TYPED_EXTENSION_CLICK_OUTCOME","staged_extension_under_test":true,"trusted_sidepanel_sender":true,"perception_from_staged_extension":true,"typed_click_outcome":"COMMITTED","real_page_physical_effect_verified":true,"page_click_count":1,"harness_input_dispatch":false,"automatic_retry_allowed":false,"page_exactly_once_semantics_claimed":false,"new_dependency_packages":0}
+          {"milestone":"R8C_TYPED_EXTENSION_CLICK_OUTCOME","test_engine":"playwright-chromium-1.62.1","staged_extension_under_test":true,"trusted_sidepanel_sender":true,"perception_from_staged_extension":true,"typed_click_outcome":"COMMITTED","real_page_physical_effect_verified":true,"page_click_count":1,"harness_input_dispatch":false,"automatic_retry_allowed":false,"page_exactly_once_semantics_claimed":false,"new_source_dependency_packages":0}
           JSON
           tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
             -cf "$OUT/A2_BROWSER_R8C_REAL_CHROME_CANARY.tar" \
