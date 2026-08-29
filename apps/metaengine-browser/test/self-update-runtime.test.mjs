@@ -29,13 +29,13 @@ test('disables updater outside packaged application', async () => {
   assert.equal(updater.checks, 0);
 });
 
-test('binds updater to builder-compatible latest channel and reasserts no downgrade', async () => {
+test('binds updater to builder-compatible dev channel and reasserts no downgrade', async () => {
   const updater = new FakeUpdater();
   const runtime = runtimeFor(updater, { intervalMs: 60000 });
   const started = await runtime.start();
   await runtime.cycle({ force: true });
-  assert.equal(started.trusted_channel, 'latest');
-  assert.equal(updater.channel, 'latest');
+  assert.equal(started.trusted_channel, 'dev');
+  assert.equal(updater.channel, 'dev');
   assert.equal(updater.allowPrerelease, true);
   assert.equal(updater.allowDowngrade, false);
   assert.equal(updater.autoDownload, false);
