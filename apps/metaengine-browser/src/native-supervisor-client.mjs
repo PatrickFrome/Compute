@@ -43,6 +43,7 @@ export class NativeSupervisorClient {
     this.#intervalMs = Math.max(1000, Number(intervalMs || 2000));
     this.#lifecycle = new SupervisorLifecycleRuntime({
       getState: this.#getState,
+      canActuate: () => this.#supervisorMode === 'CONTROL' && this.#armed === true,
       executeCommand: async (command) => {
         const action = String(command?.action || '');
         if (!READ_ONLY_ACTIONS.has(action)) {
@@ -53,7 +54,10 @@ export class NativeSupervisorClient {
       },
     });
     this.#selfUpdate = new SelfUpdateRuntime({
-      canRestart: async () => this.#currentCommand == null && this.#lifecycle?.isQuiescent() === true,
+      canRestart: async () => this.#supervisorMode === 'CONTROL'
+        && this.#armed === true
+        && this.#currentCommand == null
+        && this.#lifecycle?.isQuiescent() === true,
     });
   }
 
