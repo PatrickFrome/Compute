@@ -53,6 +53,13 @@ jobs:
       - name: Contract tests
         working-directory: apps/metaengine-browser
         run: npm test
+      - name: Development Plane UtilityProcess gate
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 20s xvfb-run -a npm run devplane-smoke | tee /tmp/metaengine-devplane-smoke.jsonl
+          grep -q '"ok":true' /tmp/metaengine-devplane-smoke.jsonl
       - name: Security static gate
         run: |
           grep -q 'app.enableSandbox()' apps/metaengine-browser/src/main.mjs
@@ -60,6 +67,9 @@ jobs:
           grep -q 'contextIsolation: true' apps/metaengine-browser/src/browser-policy.mjs
           grep -q 'sandbox: true' apps/metaengine-browser/src/browser-policy.mjs
           grep -q 'cookie_transfer_to_compute_space: false' apps/metaengine-browser/src/browser-policy.mjs
+          grep -q 'direct_promote_current: false' apps/metaengine-browser/src/development-plane.mjs
+          grep -q "env: { METAENGINE_REPO_ROOT: repoRoot }" apps/metaengine-browser/src/main.mjs
+          ! grep -E 'child_process|exec\(|eval\(|new Function' apps/metaengine-browser/src/development-plane-worker.mjs
           ! grep -R -E 'executeJavaScript|Runtime\.evaluate|--remote-debugging-port|--no-sandbox|chat\.z\.ai|GLM_ZAI|STRICT_GLM_FIRST' apps/metaengine-browser --exclude-dir=node_modules
           ! grep -R -E 'nodeIntegration:[[:space:]]*true|sandbox:[[:space:]]*false' apps/metaengine-browser --exclude-dir=node_modules
       - name: Preserve B-line contracts
@@ -87,7 +97,9 @@ jobs:
         if: always()
         run: |
           cp research/METAENGINE_BROWSER_SHELL_STEP1_RESEARCH_2026-08-29.md evidence-out/
+          cp research/METAENGINE_BROWSER_STEP2_FLEET_DEVELOPMENT_PLANE_RESEARCH_2026-08-29.md evidence-out/
           test ! -f /tmp/metaengine-browser-smoke.jsonl || cp /tmp/metaengine-browser-smoke.jsonl evidence-out/
+          test ! -f /tmp/metaengine-devplane-smoke.jsonl || cp /tmp/metaengine-devplane-smoke.jsonl evidence-out/
           git rev-parse HEAD > evidence-out/git-head.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()

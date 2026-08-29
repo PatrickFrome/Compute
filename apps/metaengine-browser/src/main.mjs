@@ -1,8 +1,9 @@
-import { app, BaseWindow, WebContentsView, ipcMain, protocol, session } from 'electron';
+import { app, BaseWindow, WebContentsView, ipcMain, protocol, session, utilityProcess } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ComputeBridgeClient } from './compute-bridge-client.mjs';
+import { DevelopmentPlane } from './development-plane.mjs';
 import { FleetProvisioner } from './fleet-provisioner.mjs';
 import { navigationDecision, newWindowDecision, REMOTE_WEB_PREFERENCES, SECURITY_POLICY } from './browser-policy.mjs';
 import { TabRegistry } from './tab-registry.mjs';
@@ -12,6 +13,7 @@ const APP_ROOT = path.resolve(__dirname, '..');
 const UI_ROOT = path.join(APP_ROOT, 'ui');
 const TOOLBAR_HEIGHT = 92;
 const isSmoke = process.argv.includes('--metaengine-smoke');
+const isDevelopmentPlaneSmoke = process.argv.includes('--metaengine-devplane-smoke');
 
 app.enableSandbox();
 protocol.registerSchemesAsPrivileged([{ scheme: 'metaengine', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: false } }]);
@@ -23,6 +25,7 @@ let windowRef = null;
 let shellView = null;
 let userSession = null;
 let fleet = null;
+let developmentPlane = null;
 
 function mimeFor(filePath) {
   if (filePath.endsWith('.html')) return 'text/html; charset=utf-8';
@@ -77,9 +80,10 @@ function assertShellSender(event) {
 async function shellSnapshot() {
   return {
     schema: 'metaengine.browser-shell.snapshot.v2',
-    version: '0.2.0',
+    version: '0.3.0',
     tabs: registry.snapshot(),
     fleet: fleet?.snapshot() || null,
+    development_plane: developmentPlane?.snapshot() || null,
     compute: await bridge.health(),
     policy: SECURITY_POLICY,
     authority_effect: false,
@@ -197,6 +201,45 @@ async function initFleet() {
   await fleet.reconcile({ active: false });
 }
 
+async function initDevelopmentPlane() {
+  if (!developmentPlane) {
+    const repoRoot = path.resolve(APP_ROOT, '../..');
+    developmentPlane = new DevelopmentPlane({
+      spawnWorker: () => utilityProcess.fork(path.join(__dirname, 'development-plane-worker.mjs'), [], {
+        cwd: repoRoot,
+        env: { METAENGINE_REPO_ROOT: repoRoot },
+        stdio: 'pipe',
+        serviceName: 'METAENGINE Development Plane',
+      }),
+    });
+  }
+  if (developmentPlane.snapshot().state !== 'READY') await developmentPlane.start();
+  return developmentPlane.snapshot();
+}
+
+async function runDevelopmentPlaneSmoke() {
+  const state = await initDevelopmentPlane();
+  const health = await developmentPlane.request('HEALTH');
+  const capabilities = await developmentPlane.request('CAPABILITIES');
+  const repo = await developmentPlane.request('REPO_HEAD_READ');
+  const invariant = state.state === 'READY'
+    && health?.ok === true
+    && Array.isArray(capabilities?.capabilities)
+    && capabilities.direct_promote_current === false
+    && repo?.repository_present === true;
+  console.log(JSON.stringify({
+    schema: 'metaengine.development-plane.smoke.v1',
+    ok: invariant,
+    state,
+    health,
+    capabilities,
+    repo,
+    authority_effect: false,
+  }));
+  developmentPlane.stop();
+  app.exit(invariant ? 0 : 1);
+}
+
 async function handleCommand(command, payload = {}) {
   const selected = registry.selected();
   const selectedView = selected ? views.get(selected.tab_id) : null;
@@ -217,6 +260,11 @@ async function handleCommand(command, payload = {}) {
   if (command === 'FORWARD') { if (selectedView?.webContents.navigationHistory.canGoForward()) selectedView.webContents.navigationHistory.goForward(); return { ok: true }; }
   if (command === 'RELOAD') { selectedView?.webContents.reload(); return { ok: true }; }
   if (command === 'COMPUTE_HEALTH') return bridge.health();
+  if (command === 'DEV_PLANE_STATUS') return developmentPlane?.snapshot() || null;
+  if (command === 'DEV_PLANE_HEALTH') return developmentPlane?.request('HEALTH');
+  if (command === 'DEV_PLANE_CAPABILITIES') return developmentPlane?.request('CAPABILITIES');
+  if (command === 'DEV_PLANE_PROCESS_METRICS') return developmentPlane?.request('PROCESS_METRICS');
+  if (command === 'DEV_PLANE_REPO_HEAD') return developmentPlane?.request('REPO_HEAD_READ');
   if (command === 'FLEET_STATUS') return fleet?.snapshot() || null;
   if (command === 'FLEET_RECONCILE') { const result = await fleet?.reconcile({ active: payload?.active === true }); await publishSnapshot(); return result; }
   if (command === 'FLEET_SET_PROFILE') { const result = await fleet?.setProfile(payload?.profile); await publishSnapshot(); return result; }
@@ -228,6 +276,7 @@ function destroyWindowContents() {
   views.clear();
   if (shellView && !shellView.webContents.isDestroyed()) shellView.webContents.close();
   shellView = null;
+  developmentPlane?.stop();
 }
 
 async function runSmoke() {
@@ -269,6 +318,7 @@ async function createWindow() {
   await shellView.webContents.loadURL('metaengine://shell/');
   await createTab('https://chatgpt.com/', { select: true, load: true });
   await initFleet();
+  await initDevelopmentPlane().catch((error) => console.error('development-plane-start-failed', error));
   layout();
   await publishSnapshot();
 }
@@ -279,7 +329,8 @@ ipcMain.handle('metaengine:shell:command', async (event, message) => { assertShe
 await app.whenReady();
 await registerShellProtocol();
 configureUserSession();
-if (isSmoke) await runSmoke();
+if (isDevelopmentPlaneSmoke) await runDevelopmentPlaneSmoke();
+else if (isSmoke) await runSmoke();
 else {
   await createWindow();
   app.on('activate', () => { if (!windowRef) createWindow().catch((error) => { console.error(error); app.exit(1); }); });
