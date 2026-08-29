@@ -1,10 +1,11 @@
-﻿import crypto from 'node:crypto';
+import crypto from 'node:crypto';
+import { LeaseBroker, LEASE_KINDS } from './lease-broker.mjs';
 
 const ACTION_KINDS = Object.freeze(['NAVIGATE', 'CLICK', 'TYPE', 'SUBMIT']);
 
 export { ACTION_KINDS };
 
-export function validateActionIntent(intent) {
+export async function validateActionIntent(intent) {
   if (!intent || typeof intent !== 'object' || Array.isArray(intent)) return { ok: false, reason: 'action_intent_required' };
   const { action_id, target_id, profile_id, context_id, lease, kind, locator, payload, requested_at } = intent;
 
@@ -13,7 +14,7 @@ export function validateActionIntent(intent) {
   if (!profile_id || typeof profile_id !== 'string') return { ok: false, reason: 'profile_id_required' };
   if (!context_id || typeof context_id !== 'string') return { ok: false, reason: 'context_id_required' };
 
-  const leaseCheck = validateLeaseEnvelope(lease);
+  const leaseCheck = await validateLeaseEnvelope(lease);
   if (!leaseCheck.ok) return leaseCheck;
 
   if (lease.resource_id !== target_id) return { ok: false, reason: 'lease_resource_mismatch' };
@@ -54,9 +55,9 @@ export function validateActionIntent(intent) {
   };
 }
 
-export function validateLeaseEnvelope(lease) {
+export async function validateLeaseEnvelope(lease, supervisorKey = '') {
   if (!lease || typeof lease !== 'object' || Array.isArray(lease)) return { ok: false, reason: 'lease_required' };
-  const { lease_id, resource_id, actor_id, not_after, hmac } = lease;
+  const { lease_id, resource_id, actor_id, not_after, hmac, kind } = lease;
 
   if (!lease_id || typeof lease_id !== 'string') return { ok: false, reason: 'lease_id_required' };
   if (!resource_id || typeof resource_id !== 'string') return { ok: false, reason: 'lease_resource_id_required' };
@@ -67,6 +68,16 @@ export function validateLeaseEnvelope(lease) {
   const expiry = new Date(not_after).getTime();
   if (Number.isNaN(expiry)) return { ok: false, reason: 'lease_not_after_invalid' };
   if (Date.now() > expiry) return { ok: false, reason: 'lease_expired' };
+
+  if (supervisorKey) {
+    try {
+      const broker = new LeaseBroker({ supervisorKey });
+      if (!LEASE_KINDS.includes(String(kind || '').toUpperCase())) return { ok: false, reason: 'lease_kind_invalid' };
+      return broker.verify(lease);
+    } catch (error) {
+      return { ok: false, reason: 'lease_verification_failed' };
+    }
+  }
 
   return { ok: true, lease };
 }

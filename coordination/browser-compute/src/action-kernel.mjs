@@ -1,4 +1,4 @@
-﻿import crypto from 'node:crypto';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { atomicJsonWrite, readJson } from './security.mjs';
@@ -148,10 +148,10 @@ export class ActionKernel {
 
   async executeAction({ action, lease, target, perception, context } = {}) {
     if (!(this._semanticActionEnabled ?? SEMANTIC_ACTION_ENABLED)) throw new Error('semantic_action_not_enabled');
-    const intent = validateActionIntent({ ...action, lease });
+    const intent = await validateActionIntent({ ...action, lease });
     if (!intent.ok) throw new Error(intent.reason);
 
-    const leaseCheck = validateLeaseEnvelope(lease, this.sessionKey);
+    const leaseCheck = await validateLeaseEnvelope(lease, this.sessionKey);
     if (!leaseCheck.ok) throw new Error(leaseCheck.reason);
 
     const resourceId = String(action?.target_id || '');
@@ -275,3 +275,4 @@ export class ActionKernel {
 export function createActionKernel({ runtime, cdpClient, profileDir, sessionKey, receiptsStore } = {}) {
   return new ActionKernel({ runtime, cdpClient, profileDir, sessionKey, receiptsStore });
 }
+

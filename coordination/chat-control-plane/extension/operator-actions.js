@@ -87,6 +87,19 @@
     });
   }
 
+  async function assertLeaseValid(message) {
+    const lease = message?.lease;
+    if (!lease) return;
+    const gate = globalThis.A2_OPERATOR_LEASE_GATE;
+    if (!gate?.validateActionLease) return;
+    const supervisorKey = String(message?.supervisorKey || globalThis.A2_SUPERVISOR_KEY || "").trim();
+    if (!supervisorKey) throw new Error("lease_supervisor_key_required");
+    const targetId = String(message?.target_id || "").trim();
+    if (!targetId) throw new Error("lease_target_id_required");
+    const result = await gate.validateActionLease(lease, supervisorKey, targetId);
+    if (!result.ok) throw new Error(result.reason);
+  }
+
   function composerInspectionExpression(platform) {
     const selectors = platform === "CHATGPT"
       ? ["#prompt-textarea", "[data-testid='composer-text-input'] textarea", "[contenteditable='true'][data-lexical-editor='true']", "[role='textbox'][contenteditable='true']"]
@@ -123,7 +136,7 @@
     return `(() => {
       const visible=(el)=>{if(!(el instanceof HTMLElement))return false;const s=getComputedStyle(el),r=el.getBoundingClientRect();return s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity)!==0&&r.width>0&&r.height>0;};
       const strong=[...document.querySelectorAll("button[data-testid='stop-button'],button[data-testid='composer-stop-button'],#stop-button,#composer-stop-button")].filter(visible);
-      const semantic=[...document.querySelectorAll('button')].filter(visible).filter((b)=>{const f=[b.getAttribute('aria-label'),b.getAttribute('title'),b.textContent].map(v=>String(v||'').trim().toLowerCase());return f.some(v=>/^(stop|stop generating|stop generation|РѕСЃС‚Р°РЅРѕРІРёС‚СЊ|РѕСЃС‚Р°РЅРѕРІРёС‚СЊ РіРµРЅРµСЂР°С†РёСЋ|еЃњж­ў|еЃњж­ўз”џж€ђ)$/iu.test(v));});
+      const semantic=[...document.querySelectorAll('button')].filter(visible).filter((b)=>{const f=[b.getAttribute('aria-label'),b.getAttribute('title'),b.textContent].map(v=>String(v||'').trim().toLowerCase());return f.some(v=>/^(stop|stop generating|stop generation|остановить|остановить генерацию|??|????)$/iu.test(v));});
       const candidates=strong.length?strong:semantic;
       if(candidates.length===0)return{ok:false,error:'stop_not_found'};
       if(candidates.length!==1)return{ok:false,error:'stop_ambiguous',count:candidates.length};
@@ -277,8 +290,6 @@
       };
     }
 
-    // If the original DOMSnapshot had no reliable record for this point, keep
-    // the previous strict full-frame equality fence rather than weakening safety.
     const currentHash = await currentScreenshotHash(session);
     if (currentHash !== frame.hashes?.screenshot_sha256) throw new Error("operator_action_frame_stale_recapture_required");
     return { strategy: "FULL_SCREENSHOT_SHA256", screenshot_sha256: currentHash };
@@ -358,6 +369,7 @@
     const action = String(message?.action || "");
     if (!ACTIONS.has(action)) throw new Error("operator_action_invalid");
     assertActionsEnabled(action);
+    await assertLeaseValid(message);
     if (action === "STOP_GENERATION") return stopGeneration(platform);
     if (action === "SCROLL") return scroll(platform, message?.delta_y);
     if (action === "CLICK_POINT") return pointClick(platform, message?.frame_token, message?.x, message?.y, false);
