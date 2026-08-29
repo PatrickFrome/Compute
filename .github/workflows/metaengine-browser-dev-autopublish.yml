@@ -1,0 +1,232 @@
+name: METAENGINE Browser Verified Dev Auto Publish
+
+on:
+  push:
+    branches:
+      - integration/browser-dev-auto-update
+
+permissions: {}
+
+concurrency:
+  group: metaengine-browser-dev-autopublish
+  cancel-in-progress: false
+
+jobs:
+  publish-verified-dev:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TRUSTED_E2E_WORKFLOW_BLOB: b1b5dfbd63cf659560b5bb232f1555de7351ed77
+      TRUSTED_SHELL_WORKFLOW_BLOB: 766834e8a92f62d5da778392686fd5f535a5948e
+    steps:
+      - name: Bind trusted workflow definitions and successful exact-SHA runs
+        id: evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          sha="$GITHUB_SHA"
+
+          gh api "repos/$repo/contents/.github/workflows/metaengine-browser-self-update-e2e.yml?ref=$sha" > "$RUNNER_TEMP/e2e-content.json"
+          gh api "repos/$repo/contents/.github/workflows/metaengine-browser-shell-v1.yml?ref=$sha" > "$RUNNER_TEMP/shell-content.json"
+          gh api "repos/$repo/actions/workflows/metaengine-browser-self-update-e2e.yml/runs?head_sha=$sha&status=success&per_page=20" > "$RUNNER_TEMP/e2e-runs.json"
+          gh api "repos/$repo/actions/workflows/metaengine-browser-shell-v1.yml/runs?head_sha=$sha&status=success&per_page=20" > "$RUNNER_TEMP/shell-runs.json"
+          gh api "repos/$repo/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+
+          temp = Path(os.environ['RUNNER_TEMP'])
+          sha = os.environ['GITHUB_SHA']
+          e2e_content = json.loads((temp / 'e2e-content.json').read_text())
+          shell_content = json.loads((temp / 'shell-content.json').read_text())
+          if e2e_content.get('sha') != os.environ['TRUSTED_E2E_WORKFLOW_BLOB']:
+              raise SystemExit('trusted_e2e_workflow_blob_mismatch')
+          if shell_content.get('sha') != os.environ['TRUSTED_SHELL_WORKFLOW_BLOB']:
+              raise SystemExit('trusted_shell_workflow_blob_mismatch')
+
+          def exact_success(path):
+              data = json.loads(path.read_text())
+              rows = [r for r in data.get('workflow_runs', [])
+                      if r.get('head_sha') == sha and r.get('status') == 'completed' and r.get('conclusion') == 'success']
+              if not rows:
+                  raise SystemExit(f'exact_successful_run_missing:{path.name}')
+              rows.sort(key=lambda r: (r.get('run_started_at') or '', int(r.get('run_attempt') or 0), int(r.get('id') or 0)))
+              return rows[-1]
+
+          e2e = exact_success(temp / 'e2e-runs.json')
+          shell = exact_success(temp / 'shell-runs.json')
+          if int(e2e.get('workflow_id') or 0) != 345450338:
+              raise SystemExit('e2e_workflow_identity_mismatch')
+          if int(shell.get('workflow_id') or 0) != 345209107:
+              raise SystemExit('shell_workflow_identity_mismatch')
+
+          print(f"e2e_run_id={e2e['id']}", file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+          print(f"e2e_run_attempt={e2e['run_attempt']}", file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+          print(f"artifact_name=metaengine-browser-self-update-e2e-{sha}-{e2e['run_attempt']}", file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+          print(f"shell_run_id={shell['id']}", file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+          PY
+
+      - name: Download immutable exact-SHA E2E artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ${{ steps.evidence.outputs.artifact_name }}
+          path: verified-release
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.evidence.outputs.e2e_run_id }}
+
+      - name: Verify physical manifest, assets and monotonic dev version
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, hashlib, json, os, re
+          from pathlib import Path
+
+          root = Path('verified-release')
+          manifest_path = root / 'verified-self-update-manifest.json'
+          if not manifest_path.is_file():
+              raise SystemExit('verified_manifest_missing')
+          m = json.loads(manifest_path.read_text())
+          if m.get('schema') != 'metaengine.browser.self-update-e2e-manifest.v2':
+              raise SystemExit('verified_manifest_schema_invalid')
+          if m.get('git_sha') != os.environ['GITHUB_SHA']:
+              raise SystemExit('verified_manifest_git_sha_mismatch')
+          for key in ('physical_n_to_n_plus_1','durable_successor_binding','forced_successor','profile_continuity','single_install_directory','physical_singleton','development_channel'):
+              if m.get(key) is not True:
+                  raise SystemExit(f'verified_manifest_gate_missing:{key}')
+          if m.get('production_safe') is not False or m.get('update_channel') != 'dev' or m.get('update_metadata') != 'dev.yml':
+              raise SystemExit('verified_manifest_channel_invalid')
+
+          version = str(m.get('version') or '')
+          match = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)-dev\.(\d+)\.(\d+)', version)
+          if not match:
+              raise SystemExit('verified_dev_version_invalid')
+          version_tuple = tuple(map(int, match.groups()))
+          installer_name = str(m.get('installer_name') or '')
+          expected_installer = f'METAENGINE-Browser-Test-Setup-{version}-x64.exe'
+          if installer_name != expected_installer:
+              raise SystemExit('verified_installer_name_binding_invalid')
+          blockmap_name = str(m.get('blockmap_name') or '')
+          if blockmap_name != installer_name + '.blockmap':
+              raise SystemExit('verified_blockmap_name_binding_invalid')
+
+          installer = root / installer_name
+          blockmap = root / blockmap_name
+          dev_yml = root / 'dev.yml'
+          for p in (installer, blockmap, dev_yml):
+              if not p.is_file() or p.stat().st_size <= 0:
+                  raise SystemExit(f'verified_release_asset_missing:{p.name}')
+          actual_sha256 = hashlib.sha256(installer.read_bytes()).hexdigest()
+          if actual_sha256 != str(m.get('installer_sha256') or '').lower():
+              raise SystemExit('verified_installer_digest_mismatch')
+          sha512 = base64.b64encode(hashlib.sha512(installer.read_bytes()).digest()).decode()
+          dev_text = dev_yml.read_text(encoding='utf-8-sig')
+          if f'version: {version}' not in dev_text or installer_name not in dev_text or sha512 not in dev_text:
+              raise SystemExit('verified_dev_yml_binding_invalid')
+
+          releases = json.loads((Path(os.environ['RUNNER_TEMP']) / 'releases.json').read_text())
+          published = []
+          for release in releases:
+              tag = str(release.get('tag_name') or '')
+              mm = re.fullmatch(r'v(\d+)\.(\d+)\.(\d+)-dev\.(\d+)\.(\d+)', tag)
+              if mm:
+                  published.append(tuple(map(int, mm.groups())))
+          if published and version_tuple <= max(published):
+              raise SystemExit('verified_dev_version_not_monotonic')
+
+          outputs = {
+              'version': version,
+              'tag': f'v{version}',
+              'installer': str(installer),
+              'installer_name': installer_name,
+              'installer_sha256': actual_sha256,
+              'blockmap': str(blockmap),
+              'dev_yml': str(dev_yml),
+              'manifest': str(manifest_path),
+          }
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              for key, value in outputs.items():
+                  print(f'{key}={value}', file=out)
+          PY
+
+      - name: Publish exact verified bytes with ambiguity-safe readback
+        shell: bash
+        env:
+          TAG: ${{ steps.verify.outputs.tag }}
+          INSTALLER: ${{ steps.verify.outputs.installer }}
+          INSTALLER_NAME: ${{ steps.verify.outputs.installer_name }}
+          INSTALLER_SHA256: ${{ steps.verify.outputs.installer_sha256 }}
+          BLOCKMAP: ${{ steps.verify.outputs.blockmap }}
+          DEV_YML: ${{ steps.verify.outputs.dev_yml }}
+          MANIFEST: ${{ steps.verify.outputs.manifest }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+
+          verify_existing_release() {
+            gh api "repos/$repo/releases/tags/$TAG" > "$RUNNER_TEMP/release-readback.json"
+            python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          release = json.loads((Path(os.environ['RUNNER_TEMP']) / 'release-readback.json').read_text())
+          if release.get('prerelease') is not True:
+              raise SystemExit('existing_release_not_prerelease')
+          expected = {}
+          for env_name in ('INSTALLER','BLOCKMAP','DEV_YML','MANIFEST'):
+              p = Path(os.environ[env_name])
+              expected[p.name] = 'sha256:' + hashlib.sha256(p.read_bytes()).hexdigest()
+          assets = {str(a.get('name')): str(a.get('digest') or '') for a in release.get('assets', [])}
+          if set(expected) - set(assets):
+              raise SystemExit('existing_release_assets_missing')
+          for name, digest in expected.items():
+              if assets.get(name) != digest:
+                  raise SystemExit(f'existing_release_asset_digest_mismatch:{name}')
+          PY
+          }
+
+          if gh api "repos/$repo/git/ref/tags/$TAG" > "$RUNNER_TEMP/tag-readback.json" 2>/dev/null; then
+            python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          row = json.loads((Path(os.environ['RUNNER_TEMP']) / 'tag-readback.json').read_text())
+          if row.get('object', {}).get('sha') != os.environ['GITHUB_SHA']:
+              raise SystemExit('existing_tag_target_mismatch')
+          PY
+          else
+            gh api --method POST "repos/$repo/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" > "$RUNNER_TEMP/tag-create.json"
+          fi
+
+          if gh api "repos/$repo/releases/tags/$TAG" > "$RUNNER_TEMP/release-readback.json" 2>/dev/null; then
+            verify_existing_release
+            echo 'exact verified dev release already present; readback matched all asset digests'
+            exit 0
+          fi
+
+          set +e
+          gh release create "$TAG" "$INSTALLER" "$BLOCKMAP" "$DEV_YML" "$MANIFEST" \
+            --verify-tag --prerelease --title "METAENGINE Browser $TAG" \
+            --notes "Exact development bytes promoted from successful physical N→N+1 E2E for $GITHUB_SHA. Automated dev channel only; no rebuild and no production authority." 
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            if gh api "repos/$repo/releases/tags/$TAG" > "$RUNNER_TEMP/release-readback.json" 2>/dev/null; then
+              verify_existing_release
+              echo 'release create returned ambiguous failure but exact readback matched; accepting persisted effect'
+            else
+              echo 'release_effect_ambiguous_no_readback' >&2
+              exit "$rc"
+            fi
+          fi
+
+          verify_existing_release
+          echo "published_tag=$TAG" >> "$GITHUB_STEP_SUMMARY"
+          echo "git_sha=$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "installer_sha256=$INSTALLER_SHA256" >> "$GITHUB_STEP_SUMMARY"
