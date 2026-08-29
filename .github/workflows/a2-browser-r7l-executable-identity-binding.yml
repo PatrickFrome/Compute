@@ -9,6 +9,7 @@ on:
       - 'coordination/browser-shared/**'
       - 'research/A2_BROWSER_R7L_EXECUTABLE_IDENTITY_BINDING_PRE_RESEARCH_2026-08-28.md'
       - 'research/A2_BROWSER_R7L_EXECUTABLE_IDENTITY_BINDING_POST_RESEARCH_2026-08-28.md'
+      - 'research/A2_BROWSER_R7L_EVIDENCE_CONFIDENTIALITY_REPAIR_2026-08-29.md'
       - '.github/workflows/a2-browser-r7l-executable-identity-binding.yml'
   workflow_dispatch:
 
@@ -160,13 +161,13 @@ jobs:
           set -euo pipefail
           ROOT="$RUNNER_TEMP/r7l-root"
           mkdir -p "$ROOT/inspect/references"
-          cat > "$ROOT/inspect/SKILL.md" <<'EOF'
+          cat > "$ROOT/inspect/SKILL.md" <<'EOF_SKILL'
           ---
           name: inspect
           description: R7L fd-bound exec trace
           ---
           Read only.
-          EOF
+          EOF_SKILL
           printf 'reference-v1' > "$ROOT/inspect/references/REFERENCE.md"
           python3 - <<'PY'
           from pathlib import Path
@@ -179,9 +180,11 @@ jobs:
 
           TRACE="$RUNNER_TEMP/r7l-exec.trace"
           LAUNCHER="$PWD/target/release/a2-skill-source-launcher"
-          A2_R7L_ENV_SENTINEL=must-not-cross-exec \
-            bash -c 'exec 9</dev/null; exec strace -qq -f -v -s 1024 -e trace=execve,execveat,openat2,close_range,prctl -o "$1" "$2" "$3"' \
-              r7l-trace "$TRACE" "$LAUNCHER" "$ROOT" \
+          STRACE="$(command -v strace)"
+          BASH_BIN="$(command -v bash)"
+          env -i A2_R7L_ENV_SENTINEL=must-not-cross-exec \
+            "$BASH_BIN" -c 'exec 9</dev/null; exec "$1" -qq -f -v -s 1024 -e trace=execve,execveat,openat2,close_range,prctl -o "$2" "$3" "$4"' \
+              r7l-trace "$STRACE" "$TRACE" "$LAUNCHER" "$ROOT" \
               < "$RUNNER_TEMP/r7l-request.bin" \
               > "$RUNNER_TEMP/r7l-trace.stdout" \
               2> "$RUNNER_TEMP/r7l-trace.stderr"
@@ -193,6 +196,7 @@ jobs:
           import os
 
           lines = (Path(os.environ['RUNNER_TEMP']) / 'r7l-exec.trace').read_text(errors='replace').splitlines()
+          trace_text = '\n'.join(lines)
           launcher_exec = next(i for i, line in enumerate(lines)
                                if 'execve(' in line and 'a2-skill-source-launcher' in line)
           helper_open = next(i for i, line in enumerate(lines[launcher_exec + 1:], launcher_exec + 1)
@@ -217,9 +221,26 @@ jobs:
           if any('execve(' in line and 'a2-skill-source-helper' in line
                  for line in lines[launcher_exec + 1:fd_exec + 1]):
               raise SystemExit('pathname helper exec remained reachable')
+
+          launcher_line = lines[launcher_exec]
+          if 'A2_R7L_ENV_SENTINEL=must-not-cross-exec' not in launcher_line:
+              raise SystemExit('synthetic ambient environment sentinel missing at launcher exec')
+          forbidden_trace_markers = [
+              'ACTIONS_ID_TOKEN_REQUEST_TOKEN=',
+              'ACTIONS_ID_TOKEN_REQUEST_URL=',
+              'GITHUB_TOKEN=',
+              'SUPABASE_SERVICE_ROLE_KEY=',
+              'CLOUDFLARE_API_TOKEN=',
+          ]
+          for marker in forbidden_trace_markers:
+              if marker in trace_text:
+                  raise SystemExit(f'credential-bearing environment marker escaped into evidence: {marker[:-1]}')
+
           fd_line = lines[fd_exec]
+          if ', [], AT_EMPTY_PATH) = 0' not in fd_line:
+              raise SystemExit('helper exec environment was not proven exactly empty')
           if 'A2_R7L_ENV_SENTINEL' in fd_line:
-              raise SystemExit('inherited environment crossed fd-bound helper exec')
+              raise SystemExit('synthetic ambient environment crossed fd-bound helper exec')
           open_line = lines[helper_open]
           for token in ['O_PATH', 'O_CLOEXEC', 'O_NOFOLLOW']:
               if token not in open_line:
@@ -262,7 +283,7 @@ jobs:
           printf '%s\n' "$GITHUB_SHA" > "$OUT/evidence/SOURCE_COMMIT.txt"
           printf '%s\n' 'cbdb70e9be5a99251d57a7be7d0c43a95683ebae' > "$OUT/evidence/PARENT_VERIFIED_COMMIT.txt"
           cat > "$OUT/evidence/R7L_CLAIMS.json" <<'JSON'
-          {"milestone":"R7L_EXECUTABLE_IDENTITY_BINDING_V1","fd_bound_exec":true,"openat2_confined_fixed_sibling":true,"exec_fd_cloexec":true,"path_swap_cannot_redirect":true,"no_new_privs_before_helper_open":true,"empty_environment":true,"new_dependencies":0,"node_integration":false,"browser_authority":false,"network_authority":false}
+          {"milestone":"R7L_EXECUTABLE_IDENTITY_BINDING_V1","fd_bound_exec":true,"openat2_confined_fixed_sibling":true,"exec_fd_cloexec":true,"path_swap_cannot_redirect":true,"no_new_privs_before_helper_open":true,"empty_environment":true,"evidence_trace_input_env":"synthetic_only","ci_credentials_in_retained_trace":false,"new_dependencies":0,"node_integration":false,"browser_authority":false,"network_authority":false}
           JSON
           tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
             -cf "$OUT/A2_BROWSER_R7L_EXECUTABLE_IDENTITY_BINDING.tar" \
@@ -272,6 +293,7 @@ jobs:
             coordination/browser-skill-source-linux/src \
             coordination/browser-skill-source-linux/tests \
             research/A2_BROWSER_R7L_EXECUTABLE_IDENTITY_BINDING_PRE_RESEARCH_2026-08-28.md \
+            research/A2_BROWSER_R7L_EVIDENCE_CONFIDENTIALITY_REPAIR_2026-08-29.md \
             "$OUT/evidence"
           if test -f research/A2_BROWSER_R7L_EXECUTABLE_IDENTITY_BINDING_POST_RESEARCH_2026-08-28.md; then
             tar --append --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
