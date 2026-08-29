@@ -48,7 +48,7 @@ function verifiedMetadata(info, { trustedArtifactPrefix = DEFAULT_TRUSTED_ARTIFA
 
 export class SelfUpdateRuntime {
   #updater = null; #injectedUpdater; #packagedOverride; #host = null; #hostOverride;
-  #trustedChannel; #trustedArtifactPrefix; #ciTestFeedUrl; #beforeInstall;
+  #trustedChannel; #trustedArtifactPrefix; #ciTestFeedUrl; #beforeInstall; #beforeInstallerLaunch;
   #state = {
     state: 'UNINITIALIZED', available_version: null, downloaded_version: null,
     metadata_verified: false, candidate_file_count: 0, staging_percentage: null,
@@ -56,6 +56,7 @@ export class SelfUpdateRuntime {
     download_percent: null, restart_gate_safe: false, restart_gate_since: null,
     restart_grace_ms: null, install_attempted_version: null, publisher_verified: false,
     ci_test_feed_active: false, pre_install_receipt_persisted: false,
+    installer_handoff_prepared: false,
   };
   #lastCheck = 0; #intervalMs; #canRestart; #clock; #restartGraceMs; #restartSafeSince = null;
 
@@ -72,6 +73,7 @@ export class SelfUpdateRuntime {
     ciTestMode = process.env.METAENGINE_SELF_UPDATE_TEST_MODE === '1',
     githubActions = process.env.GITHUB_ACTIONS === 'true',
     beforeInstall = async () => {},
+    beforeInstallerLaunch = async () => {},
     clock = () => Date.now(),
   } = {}) {
     this.#intervalMs = Math.max(60 * 1000, Number(intervalMs) || 10 * 60 * 1000);
@@ -84,7 +86,9 @@ export class SelfUpdateRuntime {
     this.#trustedArtifactPrefix = String(trustedArtifactPrefix || DEFAULT_TRUSTED_ARTIFACT_PREFIX).trim();
     this.#clock = clock;
     if (typeof beforeInstall !== 'function') throw new Error('self_update_before_install_invalid');
+    if (typeof beforeInstallerLaunch !== 'function') throw new Error('self_update_before_installer_launch_invalid');
     this.#beforeInstall = beforeInstall;
+    this.#beforeInstallerLaunch = beforeInstallerLaunch;
     if (!/^[0-9A-Za-z._-]+$/.test(this.#trustedChannel)) throw new Error('trusted_update_channel_invalid');
     if (!SAFE_ARTIFACT_RE.test(this.#trustedArtifactPrefix)) throw new Error('trusted_update_artifact_prefix_invalid');
     this.#ciTestFeedUrl = validateCiTestFeedUrl(ciTestFeedUrl, { testMode: ciTestMode, githubActions });
@@ -93,13 +97,18 @@ export class SelfUpdateRuntime {
   }
 
   snapshot() {
-    return structuredClone({ schema: 'metaengine.self-update-runtime.v6', ...this.#state, host_resilience: this.#host?.snapshot?.() || null, authority_effect: false });
+    return structuredClone({ schema: 'metaengine.self-update-runtime.v7', ...this.#state, host_resilience: this.#host?.snapshot?.() || null, authority_effect: false });
   }
 
   #resetRestartGate() {
     this.#restartSafeSince = null;
     this.#state.restart_gate_safe = false;
     this.#state.restart_gate_since = null;
+  }
+
+  #resetInstallHandoff() {
+    this.#state.pre_install_receipt_persisted = false;
+    this.#state.installer_handoff_prepared = false;
   }
 
   async #approveAndDownload(info) {
@@ -112,7 +121,7 @@ export class SelfUpdateRuntime {
       this.#state.last_error = null;
       this.#state.state = 'APPROVED_DOWNLOAD';
       this.#state.install_attempted_version = null;
-      this.#state.pre_install_receipt_persisted = false;
+      this.#resetInstallHandoff();
       this.#resetRestartGate();
       if (typeof this.#updater?.downloadUpdate !== 'function') throw new Error('electron_updater_download_unavailable');
       await this.#updater.downloadUpdate();
@@ -165,7 +174,7 @@ export class SelfUpdateRuntime {
         this.#state.candidate_file_count = 0;
         this.#state.download_percent = null;
         this.#state.install_attempted_version = null;
-        this.#state.pre_install_receipt_persisted = false;
+        this.#resetInstallHandoff();
         this.#resetRestartGate();
       });
       updater.on('download-progress', (p) => { this.#state.state = 'DOWNLOADING'; this.#state.download_percent = Number(p?.percent || 0); });
@@ -180,7 +189,7 @@ export class SelfUpdateRuntime {
         this.#state.state = 'READY_RESTART';
         this.#state.downloaded_version = downloaded;
         this.#state.download_percent = 100;
-        this.#state.pre_install_receipt_persisted = false;
+        this.#resetInstallHandoff();
         this.#resetRestartGate();
       });
       updater.on('error', (e) => { this.#state.state = 'ERROR'; this.#state.last_error = clipError(e); this.#resetRestartGate(); });
@@ -225,16 +234,18 @@ export class SelfUpdateRuntime {
         recorded_at: new Date(now).toISOString(),
         authority_effect: false,
       };
+      // Ordering is intentional and safety-critical:
+      // 1. persist exact update intent; 2. arm crash sentinel expected-restart state;
+      // 3. quiesce/release singleton handoff; 4. launch the already-verified silent installer.
       await this.#beforeInstall(structuredClone(receipt));
       this.#state.pre_install_receipt_persisted = true;
       await this.#host?.prepareExpectedRestart?.('SELF_UPDATE');
-      // NSIS is configured as an assisted installer (`oneClick:false`). Automatic updates must therefore
-      // run the already-verified installer silently or the updater can block indefinitely on the wizard.
-      // forceRunAfter remains true so the exact N+1 binary performs the successor handoff.
+      await this.#beforeInstallerLaunch(structuredClone(receipt));
+      this.#state.installer_handoff_prepared = true;
       this.#updater.quitAndInstall(true, true);
     } catch (e) {
       this.#state.state = 'ERROR';
-      this.#state.pre_install_receipt_persisted = false;
+      this.#state.installer_handoff_prepared = false;
       this.#state.last_error = clipError(e);
       this.#resetRestartGate();
     }
@@ -257,7 +268,7 @@ export class SelfUpdateRuntime {
           this.#state.candidate_file_count = 0;
           this.#state.download_percent = null;
           this.#state.install_attempted_version = null;
-          this.#state.pre_install_receipt_persisted = false;
+          this.#resetInstallHandoff();
           this.#resetRestartGate();
         }
         await this.#updater.checkForUpdates();
