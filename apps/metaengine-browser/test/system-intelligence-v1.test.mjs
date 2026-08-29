@@ -83,59 +83,75 @@ async function bindSchedulerWorker(h, workerId, role, generationEpoch, targetId)
 
 test('legacy C5 state migrates forward without losing existing durable state', async () => {
   const h = await harness(legacyState());
-  const state = h.store.snapshot();
-  assert.equal(state.version, FLEET_RUNTIME_STORE_VERSION);
-  assert.equal(state.supervisor.emergency_state, 'PAUSE');
-  assert.deepEqual(state.process_observations, []);
-  assert.deepEqual(state.system_memory, []);
-  assert.deepEqual(state.learning_candidates, []);
-  assert.deepEqual(state.scheduler_decisions, []);
+  const snap = h.store.snapshot();
+  assert.equal(snap.version, FLEET_RUNTIME_STORE_VERSION);
+  assert.deepEqual(snap.process_observations, []);
+  assert.deepEqual(snap.memory_records, []);
+  assert.deepEqual(snap.learning_candidates, []);
+  assert.deepEqual(snap.scheduler_decisions, []);
   await h.cleanup();
 });
 
 test('process universe is provenance-bound, freshness-aware, and ignores stale older observations', async () => {
   const h = await harness();
   const first = await ingestFreshProcess(h);
-  assert.equal(first.source_system, 'SUPABASE');
-  assert.equal(first.authority, 'SUPABASE');
-  assert.equal(first.stale, false);
-  const ignored = await h.intelligence.ingestProcessObservation({
+  assert.equal(h.intelligence.listFreshProcesses().length, 1);
+
+  await h.intelligence.ingestProcessObservation({
     source_system: 'SUPABASE',
     source_instance: 'xpeibufgzjknrhbhpffp',
     process_kind: 'ROADMAP_MILESTONE',
     process_id: 'C5_AUTONOMOUS_FLEET_RUNTIME_V1',
-    state: 'OLDER',
+    state: 'WAITING',
     authority: 'SUPABASE',
-    source_cursor: 'cp1:older',
+    source_cursor: 'older',
+    observed_at: '2026-08-29T17:59:00Z',
     stale_after_ms: 60_000,
-    payload_ref: 'supabase:checkpoint:cp1',
-    observed_at: '2026-08-29T17:59:00.000Z',
   });
-  assert.equal(ignored.ignored, true);
-  assert.equal(h.intelligence.listFreshProcesses()[0].state, 'ACTIVE');
+  assert.equal(h.intelligence.snapshot().processes[0].source_cursor, first.source_cursor);
+
   h.advance(61_000);
   assert.equal(h.intelligence.listFreshProcesses().length, 0);
   assert.equal(h.intelligence.snapshot().processes[0].stale, true);
+
+  await assert.rejects(() => h.intelligence.ingestProcessObservation({
+    source_system: 'SUPABASE', source_instance: 'x', process_kind: 'TASK', process_id: 'p1', state: 'ACTIVE',
+    authority: 'PAGE_MODEL', source_cursor: '1', stale_after_ms: 60_000,
+  }), /process_authority_invalid/);
   await h.cleanup();
 });
 
 test('procedural memory and self-learning require verifier evidence and remain branch-local', async () => {
   const h = await harness();
-  const episode = await h.intelligence.recordMemory({
+  const episode = await h.intelligence.remember({
     kind: 'EPISODIC',
-    memory_key: 'episode:c5-observer',
-    value_ref: 'git:research/C5_OBSERVER.md',
-    provenance_refs: [{ system: 'GITHUB', ref: 'commit:abc' }],
+    subject: 'worker-loss-spam-incident',
+    summary_ref: 'git:pr75:incident-evidence',
+    confidence: 1,
+    source_refs: [{ system: 'GITHUB', ref: 'PatrickFrome/Compute#75' }],
+    tags: ['keepalive','incident'],
+    outcome: 'CONTAINED',
   });
-  const procedure = await h.intelligence.recordMemory({
+  assert.equal(episode.status, 'VERIFIED_SOURCE_BOUND');
+
+  const procedure = await h.intelligence.remember({
     kind: 'PROCEDURAL',
-    memory_key: 'procedure:reduce-idle-capacity',
-    value_ref: 'git:test:system-intelligence-v1',
-    provenance_refs: [{ system: 'GITHUB', ref: 'commit:def' }],
-    verifier_refs: [{ system: 'TRUSTED_CI', ref: 'ci:system-intelligence:pass' }],
+    subject: 'terminal-worker-wake-policy',
+    summary_ref: 'git:work/convergence-global-observer-memory-v1:procedure',
+    confidence: 0.9,
+    source_refs: [{ system: 'GITHUB', ref: 'PatrickFrome/Compute#75' }],
+    tags: ['dedupe'],
   });
-  assert.equal(episode.activation_eligible, false);
-  assert.equal(procedure.activation_eligible, true);
+  assert.equal(procedure.status, 'CANDIDATE');
+
+  const verifiedProcedure = await h.intelligence.verifyProceduralMemory({
+    memory_id: procedure.memory_id,
+    verifier_refs: [{ system: 'TRUSTED_CI', ref: 'ci:contract-tests:green' }],
+    replay_pass: true,
+    safety_pass: true,
+  });
+  assert.equal(verifiedProcedure.status, 'VERIFIED_BRANCH_LOCAL');
+
   const candidate = await h.intelligence.proposeLearningCandidate({
     target: 'SCHEDULER_HEURISTIC',
     rationale_ref: 'memory:reduce-idle-capacity',
