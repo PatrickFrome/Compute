@@ -209,7 +209,7 @@ export class ActionGraphState {
   }
 
   snapshot() {
-    const actions = [...this.#actions.values()].map(structuredClone).sort((a, b) => cmp(a.action_id, b.action_id));
+    const actions = [...this.#actions.values()].map((value) => structuredClone(value)).sort((a, b) => cmp(a.action_id, b.action_id));
     return Object.freeze({
       version: ACTION_GRAPH_VERSION, graph_id: this.#graphId,
       event_count: this.#events.length, action_count: actions.length,
