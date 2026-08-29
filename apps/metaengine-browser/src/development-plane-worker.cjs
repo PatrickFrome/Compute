@@ -3,9 +3,10 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createCandidateCapsule, verifyCandidateCapsule } = require('./candidate-capsule.cjs');
+const { createVerificationSandboxPlan, verifyVerificationSandboxPlan } = require('./verification-sandbox-plan.cjs');
 
 const PROTOCOL = 'metaengine.development-plane.v1';
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const CAPABILITIES = Object.freeze([
   'HEALTH',
   'CAPABILITIES',
@@ -13,6 +14,8 @@ const CAPABILITIES = Object.freeze([
   'REPO_HEAD_READ',
   'CANDIDATE_CAPSULE_CREATE',
   'CANDIDATE_CAPSULE_VERIFY',
+  'VERIFICATION_SANDBOX_PLAN_CREATE',
+  'VERIFICATION_SANDBOX_PLAN_VERIFY',
 ]);
 const repoRoot = path.resolve(process.env.METAENGINE_REPO_ROOT || process.cwd());
 const repositoryName = String(process.env.METAENGINE_GIT_REPOSITORY || 'PatrickFrome/Compute');
@@ -52,6 +55,11 @@ async function requireCurrentSource() {
   return { repository: repo.repository, head: String(repo.head).toLowerCase(), ref: repo.ref };
 }
 
+function requireObjectPayload(payload, name) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error(`${name}_payload_invalid`);
+  return payload;
+}
+
 async function execute(capability, payload) {
   if (!CAPABILITIES.includes(capability)) throw new Error('capability_denied');
   if (capability === 'HEALTH') return { ok: true, pid: process.pid, uptime_seconds: process.uptime(), process_type: process.type || 'utility' };
@@ -60,6 +68,10 @@ async function execute(capability, payload) {
     capabilities: [...CAPABILITIES],
     candidate_capsules: true,
     candidate_capsules_executable: false,
+    verification_sandbox_planning: true,
+    verification_sandbox_prepare_only: true,
+    verification_sandbox_execution: false,
+    sandbox_backend_bound: false,
     direct_promote_current: false,
     arbitrary_eval: false,
     signed_attestation_required_before_promotion: true,
@@ -68,8 +80,28 @@ async function execute(capability, payload) {
   if (capability === 'REPO_HEAD_READ') return readRepoHead();
   if (capability === 'CANDIDATE_CAPSULE_CREATE') return createCandidateCapsule(payload, await requireCurrentSource());
   if (capability === 'CANDIDATE_CAPSULE_VERIFY') {
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !payload.capsule) throw new Error('candidate_verify_payload_invalid');
+    requireObjectPayload(payload, 'candidate_verify');
+    if (!payload.capsule) throw new Error('candidate_verify_payload_invalid');
     return verifyCandidateCapsule(payload.capsule, await requireCurrentSource());
+  }
+  if (capability === 'VERIFICATION_SANDBOX_PLAN_CREATE') {
+    requireObjectPayload(payload, 'sandbox_plan_create');
+    if (!payload.capsule) throw new Error('sandbox_plan_create_payload_invalid');
+    const source = await requireCurrentSource();
+    const candidateVerification = verifyCandidateCapsule(payload.capsule, source);
+    return createVerificationSandboxPlan({
+      capsule: payload.capsule,
+      candidate_verification: candidateVerification,
+      requested_backend: payload.requested_backend ?? null,
+      resources: payload.resources ?? null,
+    });
+  }
+  if (capability === 'VERIFICATION_SANDBOX_PLAN_VERIFY') {
+    requireObjectPayload(payload, 'sandbox_plan_verify');
+    if (!payload.capsule || !payload.plan) throw new Error('sandbox_plan_verify_payload_invalid');
+    const source = await requireCurrentSource();
+    const candidateVerification = verifyCandidateCapsule(payload.capsule, source);
+    return verifyVerificationSandboxPlan(payload.plan, payload.capsule, candidateVerification);
   }
   throw new Error('capability_denied');
 }

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-export const DEVELOPMENT_PLANE_VERSION = '0.2.0';
+export const DEVELOPMENT_PLANE_VERSION = '0.3.0';
 export const DEVELOPMENT_PLANE_PROTOCOL = 'metaengine.development-plane.v1';
 export const DEVELOPMENT_PLANE_CAPABILITIES = Object.freeze([
   'HEALTH',
@@ -9,9 +9,16 @@ export const DEVELOPMENT_PLANE_CAPABILITIES = Object.freeze([
   'REPO_HEAD_READ',
   'CANDIDATE_CAPSULE_CREATE',
   'CANDIDATE_CAPSULE_VERIFY',
+  'VERIFICATION_SANDBOX_PLAN_CREATE',
+  'VERIFICATION_SANDBOX_PLAN_VERIFY',
 ]);
 
-const PAYLOAD_CAPABILITIES = new Set(['CANDIDATE_CAPSULE_CREATE', 'CANDIDATE_CAPSULE_VERIFY']);
+const PAYLOAD_CAPABILITIES = new Set([
+  'CANDIDATE_CAPSULE_CREATE',
+  'CANDIDATE_CAPSULE_VERIFY',
+  'VERIFICATION_SANDBOX_PLAN_CREATE',
+  'VERIFICATION_SANDBOX_PLAN_VERIFY',
+]);
 const MAX_REQUEST_PAYLOAD_BYTES = 256 * 1024;
 
 function clone(value) { return value == null ? value : structuredClone(value); }
@@ -57,6 +64,10 @@ export class DevelopmentPlane {
       candidate_capsules: true,
       candidate_capsules_executable: false,
       candidate_capsule_max_payload_bytes: MAX_REQUEST_PAYLOAD_BYTES,
+      verification_sandbox_planning: true,
+      verification_sandbox_prepare_only: true,
+      verification_sandbox_execution: false,
+      sandbox_backend_bound: false,
       direct_promote_current: false,
       arbitrary_eval: false,
       page_command_authority: false,

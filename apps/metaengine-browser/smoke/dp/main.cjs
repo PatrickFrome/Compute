@@ -16,7 +16,7 @@ let readyTimer = null;
 function trace(stage, detail = {}) {
   if (!TRACE_PATH) return;
   const row = {
-    schema: 'metaengine.development-plane.stage-trace.v3',
+    schema: 'metaengine.development-plane.stage-trace.v4',
     stage: String(stage),
     pid: process.pid,
     platform: process.platform,
@@ -73,7 +73,7 @@ async function run() {
   const candidate = await plane.request('CANDIDATE_CAPSULE_CREATE', {
     source_head: repo.head,
     sequence: 1,
-    intent: 'Physical DP1 candidate capsule provenance smoke',
+    intent: 'Physical DP2 verification sandbox planning smoke',
     components: [{
       path: 'apps/metaengine-browser/src/development-plane.mjs',
       change: 'MODIFY',
@@ -94,6 +94,24 @@ async function run() {
     executable: candidate?.policy?.executable === true,
     promotion_authorized: candidateVerification?.promotion_authorized === true,
   });
+  const sandboxPlan = await plane.request('VERIFICATION_SANDBOX_PLAN_CREATE', {
+    capsule: candidate,
+    requested_backend: 'CLOUDFLARE_SANDBOX',
+    resources: { wall_time_seconds: 120 },
+  });
+  const sandboxVerification = await plane.request('VERIFICATION_SANDBOX_PLAN_VERIFY', {
+    capsule: candidate,
+    plan: sandboxPlan,
+  });
+  trace('DP_SANDBOX_PLAN_VERIFIED', {
+    ok: sandboxVerification?.ok === true,
+    plan_id: sandboxPlan?.plan_id || null,
+    mode: sandboxPlan?.mode || null,
+    requested_backend: sandboxPlan?.isolation?.requested_backend || null,
+    backend_bound: sandboxVerification?.backend_bound === true,
+    execution_authorized: sandboxVerification?.execution_authorized === true,
+    promotion_authorized: sandboxVerification?.promotion_authorized === true,
+  });
   const shutdown = await plane.stopAndWait(4000);
   trace('DP_STOPPED', { shutdown });
   const ok = state.state === 'READY'
@@ -101,6 +119,10 @@ async function run() {
     && capabilities?.version === state.version
     && capabilities?.candidate_capsules === true
     && capabilities?.candidate_capsules_executable === false
+    && capabilities?.verification_sandbox_planning === true
+    && capabilities?.verification_sandbox_prepare_only === true
+    && capabilities?.verification_sandbox_execution === false
+    && capabilities?.sandbox_backend_bound === false
     && capabilities?.direct_promote_current === false
     && repo?.repository_present === true
     && candidate?.source?.head === repo.head
@@ -110,11 +132,24 @@ async function run() {
     && candidateVerification?.ok === true
     && candidateVerification?.source_current === true
     && candidateVerification?.promotion_authorized === false
+    && sandboxPlan?.candidate?.candidate_id === candidate.candidate_id
+    && sandboxPlan?.mode === 'PREPARE_ONLY'
+    && sandboxPlan?.isolation?.requested_backend === 'CLOUDFLARE_SANDBOX'
+    && sandboxPlan?.isolation?.backend_bound === false
+    && sandboxPlan?.isolation?.execution_authority === false
+    && sandboxPlan?.filesystem?.source_read_only === true
+    && sandboxPlan?.filesystem?.host_repository_mounted === false
+    && sandboxPlan?.network?.deny_by_default === true
+    && sandboxPlan?.network?.credential_brokering === false
+    && sandboxVerification?.ok === true
+    && sandboxVerification?.backend_bound === false
+    && sandboxVerification?.execution_authorized === false
+    && sandboxVerification?.promotion_authorized === false
     && shutdown?.ok === true
     && shutdown?.state === 'STOPPED'
     && shutdown?.cooperative_shutdown_ack === true;
   const receipt = {
-    schema: 'metaengine.development-plane.physical-smoke.v3',
+    schema: 'metaengine.development-plane.physical-smoke.v4',
     ok,
     state,
     health,
@@ -122,6 +157,8 @@ async function run() {
     repo,
     candidate,
     candidate_verification: candidateVerification,
+    sandbox_plan: sandboxPlan,
+    sandbox_plan_verification: sandboxVerification,
     shutdown,
     authority_effect: false,
   };
@@ -130,7 +167,10 @@ async function run() {
     ok,
     candidate_verified: candidateVerification?.ok === true,
     candidate_executable: candidate?.policy?.executable === true,
-    promotion_authorized: candidateVerification?.promotion_authorized === true,
+    sandbox_plan_verified: sandboxVerification?.ok === true,
+    sandbox_backend_bound: sandboxVerification?.backend_bound === true,
+    sandbox_execution_authorized: sandboxVerification?.execution_authorized === true,
+    promotion_authorized: sandboxVerification?.promotion_authorized === true,
     shutdown_state: shutdown?.state || null,
     cooperative_shutdown_ack: shutdown?.cooperative_shutdown_ack === true,
   });
