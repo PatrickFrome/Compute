@@ -1,6 +1,6 @@
 {
   "name": "metaengine-browser-test",
-  "version": "0.5.0-test.2",
+  "version": "0.5.0-test.3",
   "private": true,
   "type": "module",
   "description": "METAENGINE Development Browser test build with embedded live diagnostics console",
