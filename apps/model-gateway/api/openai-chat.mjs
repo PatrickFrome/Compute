@@ -11,12 +11,12 @@ export default async function handler(request, response) {
   try {
     chat = sanitizeChatCompletion(request.body);
   } catch (error) {
-    return response.status(400).json({ error: error.message });
+    return response.status(400).json({ error: error.message, authority_effect: false });
   }
 
   const models = logicalModelPlan(chat.logicalModel);
   try {
-    await assertZeroSpend(models);
+    const zeroSpendEvidence = await assertZeroSpend(models);
     const result = await callChatGateway({
       models,
       messages: chat.messages,
@@ -32,6 +32,8 @@ export default async function handler(request, response) {
         upstream_fallbacks: result.fallbacks,
         upstream_served_model: result.servedModel,
         zero_spend_verified: true,
+        zero_spend_evidence: zeroSpendEvidence,
+        confidential_data_supported: false,
         authority_effect: false
       }
     });

@@ -1,4 +1,4 @@
-import { TRUSTED_SYSTEM_PREAMBLE } from './security.mjs';
+import { TRUSTED_SYSTEM_PREAMBLE, assertNoSecretLikeMaterial } from './security.mjs';
 
 export const LOGICAL_MODELS = Object.freeze({
   'metaengine/peer-a-free': Object.freeze([
@@ -37,7 +37,8 @@ export function logicalInventory() {
       owned_by: 'metaengine',
       permission: [],
       authority_effect: false,
-      zero_spend_required: true
+      zero_spend_required: true,
+      confidential_data_supported: false
     }))
   };
 }
@@ -56,6 +57,7 @@ export function sanitizeChatCompletion(body) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('invalid_message');
     if (!['system', 'user', 'assistant'].includes(raw.role)) throw new Error('invalid_message_role');
     if (typeof raw.content !== 'string' || !raw.content.trim()) throw new Error('invalid_message_content');
+    assertNoSecretLikeMaterial(raw.content);
     totalChars += raw.content.length;
     return { role: raw.role, content: raw.content };
   });

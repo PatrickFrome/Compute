@@ -23,7 +23,14 @@ export default async function handler(request, response) {
     paidOk: task.paidOk,
     preferredModels: task.preferredModels
   });
-  const input = buildPeerInput(task);
+
+  let input;
+  try {
+    input = buildPeerInput(task);
+  } catch (error) {
+    return send(response, 400, { error: error.message, authority_effect: false });
+  }
+
   const requestHash = sha256(JSON.stringify({
     task_id: task.taskId,
     role: task.role,
@@ -35,8 +42,9 @@ export default async function handler(request, response) {
 
   try {
     let paidBudget = null;
+    let zeroSpendEvidence = null;
     if (!paidRouteAuthorized) {
-      await assertZeroSpend(models);
+      zeroSpendEvidence = await assertZeroSpend(models);
     } else {
       paidBudget = await assertPaidBudget(models, {
         input,
@@ -61,6 +69,7 @@ export default async function handler(request, response) {
       served_model: result.servedModel,
       paid_route_authorized: paidRouteAuthorized,
       zero_spend_verified: !paidRouteAuthorized,
+      zero_spend_evidence: zeroSpendEvidence,
       max_output_tokens: task.maxOutputTokens,
       paid_budget: paidBudget,
       answer,

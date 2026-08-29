@@ -5,10 +5,61 @@ const DEFAULT_TTL_MS = 10 * 60 * 1000;
 
 let cache = { fetchedAt: 0, models: null };
 
+function numeric(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function collectChargeValues(node, output = []) {
+  if (!node || typeof node !== 'object') return output;
+  if (Array.isArray(node)) {
+    for (const item of node) collectChargeValues(item, output);
+    return output;
+  }
+
+  for (const [name, value] of Object.entries(node)) {
+    const lower = name.toLowerCase();
+    const chargeKey =
+      lower === 'input' ||
+      lower === 'output' ||
+      lower === 'cost' ||
+      lower.startsWith('input_') ||
+      lower.startsWith('output_') ||
+      lower.includes('cost_per') ||
+      lower.endsWith('_cost') ||
+      lower.endsWith('_price');
+
+    if (chargeKey && (typeof value === 'string' || typeof value === 'number')) {
+      const parsed = numeric(value);
+      if (parsed !== null) output.push(parsed);
+    }
+    if (value && typeof value === 'object') collectChargeValues(value, output);
+  }
+  return output;
+}
+
 export function isZeroPrice(model) {
   const pricing = model?.pricing;
-  if (!pricing || pricing.input === undefined || pricing.output === undefined) return false;
-  return Number(pricing.input) === 0 && Number(pricing.output) === 0;
+  if (!pricing || typeof pricing !== 'object') return false;
+  if (pricing.input === undefined || pricing.output === undefined) return false;
+  if (pricing.varies_by_provider === true) return false;
+
+  const input = numeric(pricing.input);
+  const output = numeric(pricing.output);
+  if (input !== 0 || output !== 0) return false;
+
+  const charges = collectChargeValues(pricing);
+  return charges.length >= 2 && charges.every((value) => value === 0);
+}
+
+export function privacySnapshot(model) {
+  return {
+    model: String(model?.id || ''),
+    owned_by: typeof model?.owned_by === 'string' ? model.owned_by : null,
+    zdr: typeof model?.zdr === 'string' ? model.zdr : 'unknown',
+    no_training: typeof model?.no_training === 'string' ? model.no_training : 'unknown',
+    zero_price: isZeroPrice(model)
+  };
 }
 
 export async function getModelCatalog({ fetchImpl = fetch, now = Date.now, ttlMs = DEFAULT_TTL_MS } = {}) {
@@ -31,17 +82,26 @@ export async function getModelCatalog({ fetchImpl = fetch, now = Date.now, ttlMs
 
 export async function assertZeroSpend(models, options = {}) {
   const catalog = await getModelCatalog(options);
+  const evidence = [];
   for (const id of models) {
     const model = catalog.get(id);
     if (!model) throw new Error(`free_model_missing:${id}`);
     if (!isZeroPrice(model)) throw new Error(`free_model_not_zero_cost:${id}`);
+    evidence.push(privacySnapshot(model));
   }
-  return true;
-}
 
-function numeric(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  const allZdr = evidence.length > 0 && evidence.every((item) => item.zdr === 'all');
+  const allNoTraining = evidence.length > 0 && evidence.every((item) => item.no_training === 'all');
+  return {
+    models: evidence,
+    privacy: {
+      all_zdr: allZdr,
+      all_no_training: allNoTraining,
+      classification: allZdr && allNoTraining
+        ? 'CATALOG_ZDR_AND_NO_TRAINING'
+        : 'EXTERNAL_NON_ZDR_OR_TRAINING_UNCERTAIN'
+    }
+  };
 }
 
 function collectUnitPrices(node, key, output = []) {
