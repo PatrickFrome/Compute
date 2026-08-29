@@ -130,6 +130,23 @@ Commands:
 - `npm run start:control` — HTTP gateway only.
 - `npm run start:legacy` — previous multi-tick runner only.
 
+## Start the complete A2 runtime
+
+`npm run start:a2` launches the trusted ingress, conflict/V4 coordinator, read-only observer and both exact-model peers. It fails closed unless both model endpoints and the workspace are configured. The launcher deliberately removes `DATABASE_URL` from the GPT and GLM processes; only trusted control services receive database credentials.
+
+```bash
+export DATABASE_URL='postgresql://...'
+export A2_WORKSPACE_ID='063e3923-ef85-4226-9843-861ad4ec5a21'
+export A2_GPT_MODEL_URL='http://127.0.0.1:8011'
+export A2_GLM_MODEL_URL='http://127.0.0.1:8012'
+export A2_INGRESS_TOKEN='replace-with-a-random-secret'
+npm run start:a2
+```
+
+The endpoints must expose `/v1/models` and `/v1/chat/completions`. The runtime accepts only provider-reported `openai/gpt-5.6-sol` and `zai/glm-5.3`. Open the observer at `http://127.0.0.1:8091/a2`; it is read-only and shows visibility proofs, causal ancestry, authority freshness and signature-bound ingress receipts.
+
+For no-tariff verification, run `npm run test:a2:coverage` and bounded-check `formal/A2CausalBus.tla` with Apalache or TLC. The production acceptance matrix and research basis live in `docs/A2_ACCEPTANCE_AND_FREE_AMPLIFIERS_2026-08-24.md`.
+
 Optional variables:
 
 - `SOVEREIGN_GPT_MODEL`

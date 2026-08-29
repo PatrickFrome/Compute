@@ -1,0 +1,5 @@
+-- HISTORY MARKER ONLY.
+-- This migration was executed live in production while A2 was being developed.
+-- Its complete replayable DDL is consolidated by
+-- 20260824114241_a2_replayable_consolidated_contract_v1.sql.
+-- Remote migration: 20260824113516_a2_event_visibility_projection_and_semantic_fencing.

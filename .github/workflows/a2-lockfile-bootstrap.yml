@@ -1,0 +1,36 @@
+name: A2 lockfile bootstrap
+
+on:
+  push:
+    branches:
+      - "work/same-point-duel-v4-a2-cognitive-bus"
+    paths:
+      - ".github/workflows/a2-lockfile-bootstrap.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  lock:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: work/same-point-duel-v4-a2-cognitive-bus
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Generate lockfile without lifecycle scripts
+        working-directory: orchestration/sovereign
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Commit lockfile only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add orchestration/sovereign/package-lock.json
+          test -z "$(git status --short | grep -v '^A  orchestration/sovereign/package-lock.json$' || true)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "build(a2): lock sovereign dependencies"
+          git push origin HEAD:work/same-point-duel-v4-a2-cognitive-bus

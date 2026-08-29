@@ -1,0 +1,124 @@
+name: A2 cognitive bus
+
+on:
+  pull_request:
+    paths:
+      - "orchestration/sovereign/src/a2_*.ts"
+      - "orchestration/sovereign/ui/**"
+      - "orchestration/sovereign/formal/**"
+      - "orchestration/sovereign/scripts/start-a2.sh"
+      - "orchestration/sovereign/package.json"
+      - "supabase/migrations/*a2*"
+      - "supabase/functions/metaengine-a2-*/**"
+      - "supabase/tests/a2_*"
+      - ".github/workflows/a2-cognitive-bus.yml"
+      - ".github/workflows/a2-live-acceptance.yml"
+  push:
+    branches:
+      - "work/same-point-duel-v4-a2-cognitive-bus"
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - name: Git whitespace integrity
+        run: git diff --check HEAD^ HEAD
+      - name: A2 migration topology
+        shell: bash
+        run: |
+          set -euo pipefail
+          migrations=(
+            20260824112049_a2_realtime_multi_agent_cognitive_bus_core.sql
+            20260824112546_a2_visibility_readback_and_peer_key_fencing.sql
+            20260824113516_a2_event_visibility_projection_and_semantic_fencing.sql
+            20260824113730_a2_atomic_visibility_and_sequence_fencing.sql
+            20260824114241_a2_replayable_consolidated_contract_v1.sql
+            20260824120951_a2_trusted_ingress_receipt_v2.sql
+            20260824121554_a2_cursor_frontier_and_fk_index_hardening.sql
+            20260824121749_a2_peer_nologin_capability_role.sql
+            20260824121943_a2_trusted_ingress_signature_binding_v3.sql
+            20260824122043_a2_duel_state_machine_bridge.sql
+            20260824122743_a2_ingress_single_preimage_contract.sql
+            20260824124953_a2_duel_mode_cognition_fence.sql
+            20260824133018_a2_lockstep_sync_rounds_v1.sql
+            20260824133130_a2_sync_round_fk_indexes_v1.sql
+            20260824142553_a2_peer_session_lease_and_crash_recovery_v1.sql
+            20260824142732_a2_peer_session_heartbeat_guard_fix_v1.sql
+            20260824143159_a2_session_lease_fenced_renewal_v2.sql
+            20260824160100_a2_acceptance_oidc_replay_fence_v1.sql
+            20260824160209_a2_edge_ingress_verified_emit_v1.sql
+            20260824160318_a2_ephemeral_runtime_access_capability_v1.sql
+            20260824160910_a2_edge_conflict_reconciliation_v1.sql
+            20260824170822_a2_acceptance_oidc_digest_namespace_fix_v1.sql
+            20260824171926_a2_permanent_provider_failure_fence_v1.sql
+          )
+          for migration in "${migrations[@]}"; do
+            test -s "supabase/migrations/$migration" || { echo "missing A2 migration: $migration"; exit 1; }
+          done
+          test ! -e supabase/migrations/20260824131019_a2_lockstep_sync_rounds_v1.sql
+          test ! -e supabase/migrations/20260824133207_a2_sync_round_fk_indexes_v1.sql
+          replay="supabase/migrations/20260824114241_a2_replayable_consolidated_contract_v1.sql"
+          grep -q "create table if not exists destruktion_meta.compute_fabric_a2_workspace_h205f22" "$replay"
+          grep -q "create or replace function public.h205f22_a2_emit_agent_event_v1" "$replay"
+          grep -q "create or replace function public.h205f22_a2_read_frontier_v1" "$replay"
+          grep -q "create trigger trg_a2_guard_event" "$replay"
+          lockstep="supabase/migrations/20260824133018_a2_lockstep_sync_rounds_v1.sql"
+          grep -q "compute_fabric_a2_sync_round_h205f22" "$lockstep"
+          grep -q "a2_sync_round_visibility_frontier_mismatch" "$lockstep"
+          grep -q "a2_model_event_stale_frontier" "$lockstep"
+          lease="supabase/migrations/20260824143159_a2_session_lease_fenced_renewal_v2.sql"
+          grep -q "pg_advisory_xact_lock" "$lease"
+          grep -q "a2_session_lease_lost" "$lease"
+          capability="supabase/migrations/20260824160318_a2_ephemeral_runtime_access_capability_v1.sql"
+          grep -q "h205f22_a2_validate_runtime_access_token_v1" "$capability"
+          grep -q "raw tokens are never persisted" "$capability"
+          reconcile="supabase/migrations/20260824160910_a2_edge_conflict_reconciliation_v1.sql"
+          grep -q "openai/gpt-5.6-sol" "$reconcile"
+          grep -q "zai/glm-5.3" "$reconcile"
+          grep -q "h205f22_a2_reconcile_workspace_conflicts_v2" "$reconcile"
+          digest_fix="supabase/migrations/20260824170822_a2_acceptance_oidc_digest_namespace_fix_v1.sql"
+          grep -q "extensions.digest" "$digest_fix"
+          provider_fence="supabase/migrations/20260824171926_a2_permanent_provider_failure_fence_v1.sql"
+          grep -q "compute_fabric_a2_provider_block_h205f22" "$provider_fence"
+          grep -q "CUSTOMER_VERIFICATION_REQUIRED" "$provider_fence"
+          grep -q "h205f22_a2_clear_provider_block_v1" "$provider_fence"
+          test -s supabase/functions/metaengine-a2-ingress-h205f22/index.ts
+          test -s supabase/functions/metaengine-a2-github-oidc-acceptance-h205f22/index.ts
+          grep -q "A2_EDGE_WEBCRYPTO_ED25519_V1" supabase/functions/metaengine-a2-ingress-h205f22/index.ts
+          grep -q "EPHEMERAL_SCOPED_BEARER_CAPABILITY_SHA256_DB_FENCED" supabase/functions/metaengine-a2-ingress-h205f22/index.ts
+          grep -q "metaengine-h205f22-a2-acceptance" supabase/functions/metaengine-a2-github-oidc-acceptance-h205f22/index.ts
+          test -s orchestration/sovereign/src/a2_model_probe.ts
+          grep -q "CUSTOMER_VERIFICATION_REQUIRED" orchestration/sovereign/src/a2_model_probe.ts
+          grep -q "peers were not registered and no sync round was opened" orchestration/sovereign/scripts/start-a2.sh
+          if grep -q "HISTORY MARKER ONLY" "$replay"; then
+            echo "consolidated A2 replay contract must not be a history marker"
+            exit 1
+          fi
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Install sovereign dependencies
+        working-directory: orchestration/sovereign
+        run: npm install --no-audit --no-fund
+      - name: TypeScript contract
+        working-directory: orchestration/sovereign
+        run: npm run check
+      - name: A2 protocol tests
+        working-directory: orchestration/sovereign
+        run: npm run test:a2:coverage
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: A2 causal invariants
+        working-directory: orchestration/sovereign/formal
+        run: |
+          curl -L --fail --silent --show-error -o /tmp/tla2tools.jar https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
+          echo "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88  /tmp/tla2tools.jar" | sha256sum -c -
+          java -XX:+UseParallelGC -cp /tmp/tla2tools.jar tlc2.TLC -config A2CausalBus.cfg A2CausalBus.tla

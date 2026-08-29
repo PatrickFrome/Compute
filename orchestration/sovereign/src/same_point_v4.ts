@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { hostname } from "node:os";
 import { Client, Pool } from "pg";
+import { exactModel } from "./a2_protocol.js";
 
 type JsonObject = Record<string, unknown>;
 type Actor = "GPT" | "GLM";
@@ -65,8 +66,9 @@ const DATABASE_URL = required("DATABASE_URL");
 const RUNNER_ID = `sovereign:v4:${process.env.DUEL_RUNNER_ID || hostname()}`;
 const GPT_URL = process.env.SOVEREIGN_GPT_URL || "http://127.0.0.1:8001";
 const GLM_URL = process.env.SOVEREIGN_GLM_URL || "http://127.0.0.1:8002";
-const GPT_MODEL = process.env.SOVEREIGN_GPT_MODEL || "openai/gpt-oss-20b";
-const GLM_MODEL = process.env.SOVEREIGN_GLM_MODEL || "zai-org/GLM-4.7-Flash";
+const GPT_MODEL = process.env.SOVEREIGN_GPT_MODEL || exactModel("GPT");
+const GLM_MODEL = process.env.SOVEREIGN_GLM_MODEL || exactModel("GLM");
+if(GPT_MODEL!==exactModel("GPT")||GLM_MODEL!==exactModel("GLM"))throw new Error("same_point_v4_exact_models_required");
 const COMMON_TOKEN = process.env.SOVEREIGN_INFERENCE_TOKEN || "";
 const GPT_TOKEN = process.env.SOVEREIGN_GPT_TOKEN || COMMON_TOKEN;
 const GLM_TOKEN = process.env.SOVEREIGN_GLM_TOKEN || COMMON_TOKEN;
