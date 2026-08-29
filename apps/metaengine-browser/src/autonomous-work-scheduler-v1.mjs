@@ -54,7 +54,11 @@ export class AutonomousWorkScheduler {
       .map((row) => row.process_key));
     const activeWorkers = workers
       .filter((row) => row && row.ready === true && row.lost !== true)
-      .map((row) => ({ worker_id: opaque(row.worker_id, 100).toLowerCase(), role: String(row.role || 'WORKER').toUpperCase() }));
+      .map((row) => ({
+        worker_id: opaque(row.worker_id, 100).toLowerCase(),
+        worker_incarnation_id: opaque(row.worker_incarnation_id, 500),
+        role: String(row.role || 'WORKER').toUpperCase(),
+      }));
     const assignedWorkers = new Set(running.map((row) => row.worker_id));
     const availableWorkers = activeWorkers.filter((row) => !assignedWorkers.has(row.worker_id));
     const runningObjectives = new Set(running.map((row) => String(row.objective_key || row.assignment_id)));
@@ -110,6 +114,7 @@ export class AutonomousWorkScheduler {
         objective_key: row.objective_key,
         task_kind: opaque(row.task_kind || 'AUTONOMOUS_WORK', 100).toUpperCase(),
         worker_id: worker.worker_id,
+        worker_incarnation_id: worker.worker_incarnation_id,
         worker_role: worker.role,
         work_branch: String(row.work_branch),
         process_refs: row.process_refs.map(String),
