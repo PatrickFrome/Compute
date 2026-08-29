@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-export const DEVELOPMENT_PLANE_VERSION = '0.1.2';
+export const DEVELOPMENT_PLANE_VERSION = '0.1.3';
 export const DEVELOPMENT_PLANE_PROTOCOL = 'metaengine.development-plane.v1';
 export const DEVELOPMENT_PLANE_CAPABILITIES = Object.freeze([
   'HEALTH',
@@ -23,6 +23,7 @@ export class DevelopmentPlane {
   #pending = new Map();
   #readyWait = null;
   #stopWait = null;
+  #shutdownAck = false;
 
   constructor({ spawnWorker, clock = () => Date.now(), uuid = () => crypto.randomUUID(), timeout_ms = 5000 } = {}) {
     if (typeof spawnWorker !== 'function') throw new Error('development_plane_spawn_invalid');
@@ -49,6 +50,7 @@ export class DevelopmentPlane {
       browser_actuation_authority: false,
       automatic_restart: false,
       verified_shutdown_required: true,
+      cooperative_shutdown: true,
       authority_effect: false,
     });
   }
@@ -59,6 +61,7 @@ export class DevelopmentPlane {
     if (this.#child) throw new Error('development_plane_child_already_present');
     this.#state = 'STARTING';
     this.#lastExitCode = null;
+    this.#shutdownAck = false;
     const child = this.#spawn();
     if (!child || typeof child.on !== 'function' || typeof child.postMessage !== 'function' || typeof child.kill !== 'function') {
       this.#state = 'LOST';
@@ -122,17 +125,20 @@ export class DevelopmentPlane {
     if (!Number.isSafeInteger(timeout_ms) || timeout_ms < 100 || timeout_ms > 60000) throw new Error('development_plane_stop_timeout_invalid');
     if (!this.#child) {
       this.#state = 'STOPPED';
-      return Object.freeze({ ok: true, state: 'STOPPED', last_exit_code: this.#lastExitCode, already_stopped: true, authority_effect: false });
+      return Object.freeze({ ok: true, state: 'STOPPED', last_exit_code: this.#lastExitCode, already_stopped: true, cooperative_shutdown_ack: this.#shutdownAck, authority_effect: false });
     }
     if (this.#stopWait) return this.#stopWait;
     const child = this.#child;
     this.#state = 'STOPPING';
+    this.#shutdownAck = false;
     this.#stopWait = new Promise((resolve, reject) => {
       let settled = false;
+      let fallbackTimer = null;
       const finish = (fn, value) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        if (fallbackTimer) clearTimeout(fallbackTimer);
         child.off?.('exit', onExit);
         fn(value);
       };
@@ -141,6 +147,7 @@ export class DevelopmentPlane {
         state: 'STOPPED',
         last_exit_code: Number.isInteger(code) ? code : this.#lastExitCode,
         already_stopped: false,
+        cooperative_shutdown_ack: this.#shutdownAck,
         authority_effect: false,
       }));
       const timer = setTimeout(() => {
@@ -149,18 +156,30 @@ export class DevelopmentPlane {
         finish(reject, new Error('development_plane_stop_timeout'));
       }, timeout_ms);
       child.on('exit', onExit);
-      let killed = false;
-      try { killed = child.kill(); } catch {}
-      if (!killed) {
-        this.#state = 'LOST';
-        finish(reject, new Error('development_plane_stop_failed'));
+      try {
+        child.postMessage({
+          protocol: DEVELOPMENT_PLANE_PROTOCOL,
+          type: 'CONTROL',
+          control: 'SHUTDOWN',
+          authority_effect: false,
+        });
+      } catch {
+        try { child.kill(); } catch {}
       }
+      fallbackTimer = setTimeout(() => {
+        if (settled) return;
+        try { child.kill(); } catch {}
+      }, Math.min(1500, Math.max(100, Math.floor(timeout_ms / 2))));
     }).finally(() => { this.#stopWait = null; });
     return this.#stopWait;
   }
 
   #onMessage(message) {
     if (!message || message.protocol !== DEVELOPMENT_PLANE_PROTOCOL) return;
+    if (message.type === 'SHUTDOWN_ACK') {
+      if (this.#state === 'STOPPING') this.#shutdownAck = true;
+      return;
+    }
     if (message.type === 'READY') {
       if (this.#state !== 'STARTING') return;
       const advertised = Array.isArray(message.capabilities) ? [...message.capabilities].sort() : [];

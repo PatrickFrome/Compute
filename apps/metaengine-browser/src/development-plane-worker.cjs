@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 
 const PROTOCOL = 'metaengine.development-plane.v1';
-const VERSION = '0.1.2';
+const VERSION = '0.1.3';
 const CAPABILITIES = Object.freeze(['HEALTH', 'CAPABILITIES', 'PROCESS_METRICS', 'REPO_HEAD_READ']);
 const repoRoot = path.resolve(process.env.METAENGINE_REPO_ROOT || process.cwd());
 
@@ -50,7 +50,13 @@ if (!process.parentPort) throw new Error('development_plane_parent_port_missing'
 
 process.parentPort.on('message', async (event) => {
   const message = event?.data;
-  if (!message || message.protocol !== PROTOCOL || message.type !== 'REQUEST' || typeof message.request_id !== 'string') return;
+  if (!message || message.protocol !== PROTOCOL) return;
+  if (message.type === 'CONTROL' && message.control === 'SHUTDOWN') {
+    send({ type: 'SHUTDOWN_ACK', version: VERSION });
+    setTimeout(() => process.exit(0), 25);
+    return;
+  }
+  if (message.type !== 'REQUEST' || typeof message.request_id !== 'string') return;
   const capability = String(message.capability || '').toUpperCase();
   try {
     const result = await execute(capability);

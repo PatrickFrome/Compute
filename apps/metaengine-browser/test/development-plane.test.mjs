@@ -7,11 +7,20 @@ class FakeChild extends EventEmitter {
   pid = 4242;
   sent = [];
   killed = false;
-  postMessage(message) { this.sent.push(message); }
+  postMessage(message) {
+    this.sent.push(message);
+    if (message?.type === 'CONTROL' && message?.control === 'SHUTDOWN') {
+      queueMicrotask(() => {
+        this.emit('message', { protocol: DEVELOPMENT_PLANE_PROTOCOL, type: 'SHUTDOWN_ACK', version: DEVELOPMENT_PLANE_VERSION, authority_effect: false });
+        this.emit('exit', 0);
+      });
+    }
+  }
   kill() { this.killed = true; queueMicrotask(() => this.emit('exit', 0)); return true; }
 }
 
 class StuckChild extends FakeChild {
+  postMessage(message) { this.sent.push(message); }
   kill() { this.killed = true; return true; }
 }
 
@@ -41,6 +50,7 @@ test('starts only after exact version and capability handshake', async () => {
   assert.equal(snap.direct_promote_current, false);
   assert.equal(snap.browser_actuation_authority, false);
   assert.equal(snap.verified_shutdown_required, true);
+  assert.equal(snap.cooperative_shutdown, true);
 });
 
 test('mismatched capability handshake fails closed', async () => {
@@ -54,7 +64,7 @@ test('mismatched capability handshake fails closed', async () => {
 test('mismatched worker version fails closed', async () => {
   const h = makePlane();
   const p = h.plane.start();
-  h.child.emit('message', { protocol: DEVELOPMENT_PLANE_PROTOCOL, type: 'READY', version: '0.1.1', capabilities: [...DEVELOPMENT_PLANE_CAPABILITIES] });
+  h.child.emit('message', { protocol: DEVELOPMENT_PLANE_PROTOCOL, type: 'READY', version: '0.1.2', capabilities: [...DEVELOPMENT_PLANE_CAPABILITIES] });
   await assert.rejects(p, /capability_handshake_mismatch/);
   assert.equal(h.plane.snapshot().state, 'LOST');
 });
@@ -90,7 +100,7 @@ test('process loss rejects pending requests and is never auto-restarted', async 
   assert.equal(snap.last_exit_code, 9);
 });
 
-test('stop is explicit and transitions to stopped after exit', async () => {
+test('legacy stop remains explicit and transitions to stopped after exit', async () => {
   const h = makePlane();
   await ready(h);
   assert.equal(h.plane.stop(), true);
@@ -99,20 +109,29 @@ test('stop is explicit and transitions to stopped after exit', async () => {
   assert.equal(h.child.killed, true);
 });
 
-test('stopAndWait proves utility process exit before returning', async () => {
+test('stopAndWait uses typed cooperative shutdown and proves exit', async () => {
   const h = makePlane();
   await ready(h);
   const receipt = await h.plane.stopAndWait(500);
+  const control = h.child.sent.at(-1);
+  assert.deepEqual(control, {
+    protocol: DEVELOPMENT_PLANE_PROTOCOL,
+    type: 'CONTROL',
+    control: 'SHUTDOWN',
+    authority_effect: false,
+  });
   assert.equal(receipt.ok, true);
   assert.equal(receipt.state, 'STOPPED');
   assert.equal(receipt.last_exit_code, 0);
+  assert.equal(receipt.cooperative_shutdown_ack, true);
   assert.equal(receipt.authority_effect, false);
   assert.equal(h.plane.snapshot().state, 'STOPPED');
 });
 
-test('stopAndWait fails closed when process does not acknowledge exit', async () => {
+test('stopAndWait fails closed when process neither cooperates nor exits', async () => {
   const h = makePlane({ child: new StuckChild(), timeout_ms: 150 });
   await ready(h);
   await assert.rejects(h.plane.stopAndWait(150), /stop_timeout/);
   assert.equal(h.plane.snapshot().state, 'LOST');
+  assert.equal(h.child.killed, true);
 });
