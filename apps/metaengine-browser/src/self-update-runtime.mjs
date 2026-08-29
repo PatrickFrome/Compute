@@ -14,18 +14,10 @@ import {
 export { DEFAULT_TRUSTED_UPDATE_CHANNEL, DEFAULT_TRUSTED_ARTIFACT_PREFIX, validateCiTestFeedUrl };
 
 function compatInjectedUpdater(updater) {
+  if (typeof updater?.setFeedURL === 'function') return updater;
   return new Proxy(updater, {
     get(target, property) {
-      if (property === 'setFeedURL' && typeof target.setFeedURL !== 'function') return () => {};
-      if (property === 'checkForUpdates' && typeof target.checkForUpdates === 'function') {
-        return async (...args) => {
-          try { return await target.checkForUpdates(...args); }
-          catch (error) {
-            target.emit?.('error', error);
-            return null;
-          }
-        };
-      }
+      if (property === 'setFeedURL') return () => {};
       const value = Reflect.get(target, property, target);
       return typeof value === 'function' ? value.bind(target) : value;
     },
