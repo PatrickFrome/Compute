@@ -1,0 +1,103 @@
+name: A2 Browser R16 Adaptive Router
+
+on:
+  push:
+    branches:
+      - work/a2-browser-r16-adaptive-router
+    paths:
+      - 'coordination/browser-shared/adaptive-router-v1.mjs'
+      - 'tests/a2_r16_*.test.mjs'
+      - 'research/A2_BROWSER_R16_**'
+      - '.github/workflows/a2-browser-r16-adaptive-router.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r16-router-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Verify exact R15 parent and source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          PARENT=2561499f427be084cd24ecf4ed229b69b8c1e367
+          git merge-base --is-ancestor "$PARENT" "$GITHUB_SHA"
+          git diff --name-only "$PARENT" "$GITHUB_SHA" | tee "$RUNNER_TEMP/r16-changed-files.txt"
+          if git diff --name-only "$PARENT" "$GITHUB_SHA" | grep -Eq '(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.(toml|lock))$'; then
+            echo 'R16 must add no source dependency packages' >&2
+            exit 1
+          fi
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+
+      - name: Static security-first routing boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE=coordination/browser-shared/adaptive-router-v1.mjs
+          node --check "$FILE"
+          ! grep -Eq 'chrome\.|Input\.dispatch|Runtime\.evaluate|fetch\(|WebSocket|child_process|exec\(|eval\(' "$FILE"
+          grep -q 'router_post_effect_routing_forbidden' "$FILE"
+          grep -q "raw_engine_exposed" "$FILE"
+          grep -q 'fresh_authority_required:true' "$FILE"
+          grep -q 'lease_required:true' "$FILE"
+          grep -q 'automatic_retry_allowed:false' "$FILE"
+
+      - name: R16 adversarial router tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tests/a2_r16_*.test.mjs
+
+      - name: R15 through R8 regression fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tests/a2_r15_*.test.mjs tests/a2_r14_*.test.mjs tests/a2_r13_*.test.mjs tests/a2_r12_*.test.mjs tests/a2_r11_*.test.mjs tests/a2_r10_*.test.mjs tests/a2_r9_*.test.mjs
+          node --test tests/a2_r8a_*.test.mjs tests/a2_r8b_*.test.mjs tests/a2_r8c_*.test.mjs tests/a2_r8d_*.test.mjs
+
+      - name: Build deterministic R16 evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=dist/a2-browser-r16
+          mkdir -p "$OUT/evidence"
+          cp "$RUNNER_TEMP/r16-changed-files.txt" "$OUT/evidence/R16_CHANGED_FILES.txt"
+          printf '%s\n' "$GITHUB_SHA" > "$OUT/evidence/SOURCE_COMMIT.txt"
+          printf '%s\n' '2561499f427be084cd24ecf4ed229b69b8c1e367' > "$OUT/evidence/PARENT_R15_COMMIT.txt"
+          cat > "$OUT/evidence/R16_CLAIMS.json" <<'JSON'
+          {"milestone":"R16_ADAPTIVE_ROUTER","security_filter_before_score":true,"post_effect_routing":false,"raw_engine_exposed_eligible":false,"privacy_locality_hard_filter":true,"sticky_overrides_eligibility":false,"exact_incarnation_binding":true,"fresh_authority_required":true,"lease_required":true,"automatic_retry":false,"browser_authority":false,"new_source_dependency_packages":0}
+          JSON
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf "$OUT/A2_BROWSER_R16_ADAPTIVE_ROUTER.tar" \
+            coordination/browser-shared/adaptive-router-v1.mjs \
+            tests/a2_r16_adaptive_router.test.mjs \
+            research/A2_BROWSER_R16_ADAPTIVE_ROUTER_PRE_RESEARCH_2026-08-29.md \
+            "$OUT/evidence"
+          sha256sum "$OUT/A2_BROWSER_R16_ADAPTIVE_ROUTER.tar" > "$OUT/R16_SHA256SUMS.txt"
+
+      - name: Attest R16 evidence
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-browser-r16/A2_BROWSER_R16_ADAPTIVE_ROUTER.tar
+
+      - name: Upload R16 evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-r16-${{ github.sha }}
+          path: |
+            dist/a2-browser-r16/A2_BROWSER_R16_ADAPTIVE_ROUTER.tar
+            dist/a2-browser-r16/R16_SHA256SUMS.txt
+            dist/a2-browser-r16/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
