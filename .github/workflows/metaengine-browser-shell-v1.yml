@@ -185,6 +185,7 @@ jobs:
           if (-not (Test-Path $electron)) { throw "electron_binary_missing" }
           $arguments = @('--enable-logging=stderr', '--v=1', '--disable-gpu', 'smoke/dp')
           $p = Start-Process -FilePath $electron -ArgumentList $arguments -WorkingDirectory (Get-Location) -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          $cachedHandle = $p.Handle
           if (-not $p.WaitForExit(30000)) {
             try { $p.Kill($true) } catch {}
             Get-Content $trace -ErrorAction SilentlyContinue
@@ -192,10 +193,11 @@ jobs:
             Get-Content $err -ErrorAction SilentlyContinue
             throw "development_plane_windows_timeout"
           }
+          $exitCode = $p.ExitCode
           Get-Content $trace -ErrorAction SilentlyContinue
           Get-Content $out -ErrorAction SilentlyContinue
           Get-Content $err -ErrorAction SilentlyContinue
-          if ($p.ExitCode -ne 0) { throw "development_plane_windows_exit_$($p.ExitCode)" }
+          if ($exitCode -ne 0) { throw "development_plane_windows_exit_$exitCode" }
           if (-not (Select-String -Path $trace -Pattern '"stage":"APP_READY"' -Quiet)) { throw "development_plane_windows_app_ready_missing" }
           if (-not (Select-String -Path $trace -Pattern '"stage":"DP_READY"' -Quiet)) { throw "development_plane_windows_dp_ready_missing" }
           if (-not (Select-String -Path $trace -Pattern '"stage":"COMPLETE"' -Quiet)) { throw "development_plane_windows_complete_marker_missing" }
