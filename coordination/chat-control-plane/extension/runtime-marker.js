@@ -1,10 +1,13 @@
 (() => {
   "use strict";
-  const RUNTIME = "0.7.1-dev.1";
+  const RUNTIME = "0.7.1";
   const descriptor = Object.freeze({
     schema: "metaengine.a2-browser-operator.runtime.v1",
     version: RUNTIME,
-    milestone: "R4_SEMANTIC_PERCEPTION_COMPILER_V1"
+    milestone: "EXTENSION_FINAL_V1",
+    roadmap_state: "R_ROADMAP_COMPLETE",
+    release_channel: "stable",
+    authority_effect: false
   });
   globalThis.A2_RUNTIME = descriptor;
   globalThis.A2_OPERATOR_RUNTIME = RUNTIME;
