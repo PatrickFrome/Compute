@@ -38,8 +38,9 @@ jobs:
           (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content "$env:RUNNER_TEMP\installer-sha256.txt"
           $asar = Join-Path (Resolve-Path 'dist-test\win-unpacked\resources').Path 'app.asar'
           $listing = npx --yes @electron/asar list $asar
-          foreach ($required in @('src/supervisor-device-identity.mjs','src/native-supervisor-client.mjs','src/native-browser-control.mjs')) {
-            if (-not ($listing -match [regex]::Escape($required))) { throw "packaged_supervisor_module_missing:$required" }
+          $listingText = (($listing -join "`n") -replace '\\','/')
+          foreach ($required in @('/src/supervisor-device-identity.mjs','/src/native-supervisor-client.mjs','/src/native-browser-control.mjs')) {
+            if (-not $listingText.Contains($required)) { throw "packaged_supervisor_module_missing:$required" }
           }
           "native_supervisor_modules=present" | Set-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
       - name: Install generated Setup EXE
