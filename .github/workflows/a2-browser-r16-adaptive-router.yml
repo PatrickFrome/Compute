@@ -30,7 +30,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          PARENT=2561499f427be084cd24ecf4ed229b69b8c1e367
+          PARENT=65b0a8d24ff418bfbc2ebdec8d2700f8f253b22f
           git merge-base --is-ancestor "$PARENT" "$GITHUB_SHA"
           git diff --name-only "$PARENT" "$GITHUB_SHA" | tee "$RUNNER_TEMP/r16-changed-files.txt"
           if git diff --name-only "$PARENT" "$GITHUB_SHA" | grep -Eq '(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.(toml|lock))$'; then
@@ -46,11 +46,14 @@ jobs:
           FILE=coordination/browser-shared/adaptive-router-v1.mjs
           node --check "$FILE"
           ! grep -Eq 'chrome\.|Input\.dispatch|Runtime\.evaluate|fetch\(|WebSocket|child_process|exec\(|eval\(' "$FILE"
+          ! grep -q 'localeCompare' "$FILE"
           grep -q 'router_post_effect_routing_forbidden' "$FILE"
-          grep -q "raw_engine_exposed" "$FILE"
+          grep -q 'raw_engine_exposed' "$FILE"
+          grep -q "health==='DRAINING'" "$FILE"
           grep -q 'fresh_authority_required:true' "$FILE"
           grep -q 'lease_required:true' "$FILE"
           grep -q 'automatic_retry_allowed:false' "$FILE"
+          grep -q 'safety_filter_complete:true' "$FILE"
 
       - name: R16 adversarial router tests
         shell: bash
@@ -73,15 +76,16 @@ jobs:
           mkdir -p "$OUT/evidence"
           cp "$RUNNER_TEMP/r16-changed-files.txt" "$OUT/evidence/R16_CHANGED_FILES.txt"
           printf '%s\n' "$GITHUB_SHA" > "$OUT/evidence/SOURCE_COMMIT.txt"
-          printf '%s\n' '2561499f427be084cd24ecf4ed229b69b8c1e367' > "$OUT/evidence/PARENT_R15_COMMIT.txt"
+          printf '%s\n' '65b0a8d24ff418bfbc2ebdec8d2700f8f253b22f' > "$OUT/evidence/PARENT_R15_COMMIT.txt"
           cat > "$OUT/evidence/R16_CLAIMS.json" <<'JSON'
-          {"milestone":"R16_ADAPTIVE_ROUTER","security_filter_before_score":true,"post_effect_routing":false,"raw_engine_exposed_eligible":false,"privacy_locality_hard_filter":true,"sticky_overrides_eligibility":false,"exact_incarnation_binding":true,"fresh_authority_required":true,"lease_required":true,"automatic_retry":false,"browser_authority":false,"new_source_dependency_packages":0}
+          {"milestone":"R16_ADAPTIVE_ROUTER","security_filter_before_score":true,"post_effect_routing":false,"raw_engine_exposed_eligible":false,"draining_executor_eligible":false,"privacy_locality_hard_filter":true,"sticky_overrides_eligibility":false,"locale_independent_tie_break":true,"exact_incarnation_binding":true,"fresh_authority_required":true,"lease_required":true,"automatic_retry":false,"browser_authority":false,"new_source_dependency_packages":0}
           JSON
           tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
             -cf "$OUT/A2_BROWSER_R16_ADAPTIVE_ROUTER.tar" \
             coordination/browser-shared/adaptive-router-v1.mjs \
             tests/a2_r16_adaptive_router.test.mjs \
             research/A2_BROWSER_R16_ADAPTIVE_ROUTER_PRE_RESEARCH_2026-08-29.md \
+            research/A2_BROWSER_R16_FIXTURE_VALIDATION_NOTE_2026-08-29.md \
             "$OUT/evidence"
           sha256sum "$OUT/A2_BROWSER_R16_ADAPTIVE_ROUTER.tar" > "$OUT/R16_SHA256SUMS.txt"
 
