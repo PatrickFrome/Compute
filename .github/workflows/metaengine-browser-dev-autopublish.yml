@@ -254,7 +254,7 @@ jobs:
 
           set +e
           gh release create "$TAG" "$INSTALLER" "$BLOCKMAP" "$DEV_YML" "$MANIFEST" \
-            --verify-tag --prerelease --title "METAENGINE Browser $TAG" \
+            --repo "$repo" --prerelease --title "METAENGINE Browser $TAG" \
             --notes "Exact development bytes promoted from successful physical N→N+1 E2E for $TARGET_SHA. Automated dev channel only; no rebuild and no production authority."
           rc=$?
           set -e
