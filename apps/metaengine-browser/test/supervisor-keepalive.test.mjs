@@ -93,16 +93,43 @@ test('positive send confirmation consumes exactly one queued wake', async () => 
   assert.equal(h.keepalive.snapshot().queued_wakes.length, 1);
 });
 
-test('conversation epoch rolls over and resets cycle sequence only after verified bind', async () => {
+test('rollover stays deferred until the current authoritative supervisor is explicitly released', async () => {
   const h = harness();
   await h.keepalive.init();
   await h.keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
   await h.keepalive.requestRollover('CONTEXT_DEGRADATION');
+  assert.equal(h.keepalive.snapshot().state, 'ROLLOVER_DEFERRED');
+  assert.equal(h.keepalive.canWake(), false);
+  await assert.rejects(
+    () => h.keepalive.bindRollover({ url: 'https://chatgpt.com/c/ffffffff-1111-2222-3333-444444444444', tab_id: 'tab_new' }),
+    /keepalive_rollover_not_released/,
+  );
+  assert.equal(h.keepalive.snapshot().conversation_url, 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+
+  await h.keepalive.approveRollover('CURRENT_SUPERVISOR_TERMINAL_CONFIRMED');
   assert.equal(h.keepalive.snapshot().state, 'ROLLOVER_REQUIRED');
   await h.keepalive.bindRollover({ url: 'https://chatgpt.com/c/ffffffff-1111-2222-3333-444444444444', tab_id: 'tab_new' });
   assert.equal(h.keepalive.snapshot().supervisor_epoch, 2);
   assert.equal(h.keepalive.snapshot().cycle_seq, 0);
   assert.equal(h.keepalive.snapshot().state, 'WAITING');
+});
+
+test('max-cycle rollover is deferred rather than automatically authorizing a replacement chat', async () => {
+  const h = harness();
+  await h.keepalive.init();
+  await h.keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+  for (let i = 0; i < 4; i += 1) {
+    await h.keepalive.enqueueWake('CI_TERMINAL', { key: `ci-${i}` });
+    const wake = await h.keepalive.prepareNextWake();
+    await h.keepalive.confirmWakeSent(wake.pending.wake_id);
+    await h.keepalive.markCycleComplete();
+    h.advance(31_000);
+  }
+  await h.keepalive.enqueueWake('WATCHDOG_DEADLINE', { key: 'after-budget' });
+  const blocked = await h.keepalive.prepareNextWake();
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.rollover_deferred, true);
+  assert.equal(h.keepalive.snapshot().state, 'ROLLOVER_DEFERRED');
 });
 
 test('wake and rollover messages carry continuity but not worker instructions', () => {
