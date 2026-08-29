@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { SelfUpdateRuntime } from './self-update-runtime.mjs';
+import { persistPreInstallReceipt, SUCCESSOR_STARTUP_PROBE_ONLY } from './self-update-handoff.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -26,6 +27,11 @@ export async function runSelfUpdateSmoke({ app, timeoutMs = 120_000 } = {}) {
     intervalMs: 60_000,
     canRestart: async () => true,
     beforeInstall: async (receipt) => {
+      const persisted = {
+        ...receipt,
+        successor_startup: SUCCESSOR_STARTUP_PROBE_ONLY,
+      };
+      await persistPreInstallReceipt(app, persisted);
       await appendTrace(tracePath, {
         schema: 'metaengine.self-update-smoke.trace.v1',
         label: 'PRE_INSTALL_INTENT',
@@ -38,6 +44,7 @@ export async function runSelfUpdateSmoke({ app, timeoutMs = 120_000 } = {}) {
         restart_gate_safe: receipt.restart_gate_safe === true,
         ci_test_feed_active: process.env.METAENGINE_SELF_UPDATE_TEST_MODE === '1' && process.env.GITHUB_ACTIONS === 'true',
         pre_install_receipt_persisted: true,
+        successor_startup: SUCCESSOR_STARTUP_PROBE_ONLY,
         receipt_schema: receipt.schema,
         last_error: null,
         authority_effect: false,
