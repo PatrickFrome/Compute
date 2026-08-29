@@ -1,37 +1,14 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import { SUPERVISOR_DEVICE_PROFILE } from './supervisor-device-identity.mjs';
 import { SupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime.mjs';
-import { SelfUpdateRuntime } from './self-update-runtime.mjs';
+import { persistPreInstallReceipt } from './self-update-handoff.mjs';
+import { SelfUpdateRuntime, SELF_UPDATE_COMMANDS } from './self-update-runtime.mjs';
 
 export const NATIVE_SUPERVISOR_BASE = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1';
 export const NATIVE_SUPERVISOR_RUNTIME_PATH = '/a2-browser-native-supervisor-v1';
 
 const clipError = (error) => String(error?.message || error || 'unknown_error').slice(0, 500);
-const READ_ONLY_ACTIONS = new Set(['POLL','CAPTURE','CAPTURE_VIEW','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD']);
-
-async function persistSelfUpdateHandoffReceipt(receipt) {
-  if (receipt?.schema !== 'metaengine.self-update.pre-install-receipt.v1') throw new Error('native_supervisor_self_update_receipt_schema_invalid');
-  if (!receipt?.version || receipt?.version !== receipt?.available_version) throw new Error('native_supervisor_self_update_receipt_version_invalid');
-  if (receipt?.metadata_verified !== true || receipt?.restart_gate_safe !== true || receipt?.authority_effect !== false) {
-    throw new Error('native_supervisor_self_update_receipt_invariant_invalid');
-  }
-  const { app } = await import('electron');
-  if (!app?.isPackaged) throw new Error('native_supervisor_self_update_packaged_required');
-  if (!app.hasSingleInstanceLock()) throw new Error('native_supervisor_self_update_primary_lock_required');
-  const target = path.join(app.getPath('userData'), 'metaengine-self-update-pre-install-receipt-v1.json');
-  const temp = `${target}.${process.pid}.tmp`;
-  await fs.mkdir(path.dirname(target), { recursive: true });
-  const handle = await fs.open(temp, 'w', 0o600);
-  try {
-    await handle.write(`${JSON.stringify(receipt)}\n`);
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  await fs.rename(temp, target);
-  return { target };
-}
+const READ_ONLY_ACTIONS = new Set(['POLL','CAPTURE','CAPTURE_VIEW','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD','SELF_UPDATE_STATUS']);
+const SELF_UPDATE_ACTIONS = new Set(SELF_UPDATE_COMMANDS);
 
 export class NativeSupervisorClient {
   #identity;
@@ -80,13 +57,15 @@ export class NativeSupervisorClient {
       },
     });
     this.#selfUpdate = new SelfUpdateRuntime({
+      automaticUpdate: true,
       canRestart: async () => this.#supervisorMode === 'CONTROL'
         && this.#armed === true
         && this.#currentCommand == null
         && this.#lifecycle?.isQuiescent() === true,
-      // Phase 1: durable receipt while the current N process still holds its singleton lock.
+      // Phase 1: exact durable receipt while N still holds the singleton lock.
       beforeInstall: async (receipt) => {
-        await persistSelfUpdateHandoffReceipt(receipt);
+        const { app } = await import('electron');
+        await persistPreInstallReceipt(app, receipt);
       },
       // SelfUpdateRuntime arms HostResilienceRuntime's expected-restart sentinel between these hooks.
       // Phase 2: stop polling/actuation, then release the singleton lock immediately before NSIS launch.
@@ -286,6 +265,18 @@ export class NativeSupervisorClient {
       if (!['OFF','MONITOR','CONTROL'].includes(next)) throw new Error('native_supervisor_mode_invalid');
       this.#supervisorMode = next;
       return { supervisor_mode: next, armed: this.#armed, authority_effect: true };
+    }
+    if (SELF_UPDATE_ACTIONS.has(action)) {
+      const readOnly = action === 'SELF_UPDATE_STATUS';
+      if (!readOnly && this.#supervisorMode !== 'CONTROL') throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
+      if (!readOnly && !this.#armed) throw new Error('native_supervisor_disarmed');
+      const snapshot = await this.#selfUpdate.command(action, command?.payload || {});
+      return {
+        schema: 'metaengine.native-supervisor.self-update-command-result.v1',
+        command: action,
+        self_update: snapshot,
+        authority_effect: !readOnly,
+      };
     }
     if (this.#supervisorMode !== 'CONTROL' && !READ_ONLY_ACTIONS.has(action)) {
       throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
