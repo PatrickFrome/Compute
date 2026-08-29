@@ -1,0 +1,48 @@
+name: convergence-fleet-runtime-v1
+
+on:
+  push:
+    branches:
+      - work/convergence-fleet-runtime-v1
+    paths:
+      - 'apps/metaengine-browser/**'
+      - 'coordination/convergence/SUPERVISOR_KEEPALIVE_V1.md'
+      - '.github/workflows/convergence-fleet-runtime-v1.yml'
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/**'
+      - 'coordination/convergence/SUPERVISOR_KEEPALIVE_V1.md'
+      - '.github/workflows/convergence-fleet-runtime-v1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  c5-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Runtime
+        run: node --version
+      - name: Syntax
+        working-directory: apps/metaengine-browser
+        run: |
+          node --check src/main-c5.mjs
+          node --check src/c5-main-bootstrap.mjs
+          node --check src/fleet-runtime-store-v1.mjs
+          node --check src/fleet-runtime-v1.mjs
+          node --check src/supervisor-keepalive-v1.mjs
+          node --check src/supervisor-keepalive-transport-v1.mjs
+          node --check src/preload-shell.cjs
+      - name: C5 contract tests
+        working-directory: apps/metaengine-browser
+        run: node --test test/fleet-runtime-v1.test.mjs test/supervisor-keepalive-v1.test.mjs
+      - name: Fail-closed static guards
+        run: |
+          ! grep -R "executeJavaScript" apps/metaengine-browser/src/supervisor-keepalive-*.mjs apps/metaengine-browser/src/c5-main-bootstrap.mjs
+          ! grep -R "direct_peer_messaging: true" apps/metaengine-browser/src/fleet-runtime-v1.mjs
+          ! grep -R "browser_authority: true" apps/metaengine-browser/src/fleet-runtime-v1.mjs
+          grep -q "WAKE_AMBIGUOUS" apps/metaengine-browser/src/supervisor-keepalive-v1.mjs
+          grep -q "automatic_work_retry_after_ambiguous_effect: false" apps/metaengine-browser/src/fleet-runtime-v1.mjs
