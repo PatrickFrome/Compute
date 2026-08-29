@@ -3,7 +3,7 @@
   "name": "METAENGINE A2 Browser Operator",
   "version": "0.7.1",
   "minimum_chrome_version": "125",
-  "description": "Logical-target A2 browser operator with shared semantic perception, session-scoped tab binding, signed supervisor control, typed actuation, multi-sensor fallback perception, and durable no-blind-retry receipts.",
+  "description": "MV3 browser operator with semantic perception, exact target binding, signed supervisor control, and no-blind-retry actuation.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyhqRE5U0FGkdVCvNgrhYuDGlBxEOxiwGyt1qBtUZYNWsJHt8xntkqCvR6YDq6k/0BhtStFsO/vIn2/JQA4RIMl15GRq4el7gF/Pw3uCouV2ExhJfnyqPmXUsNrAW0USL0r84usQgYb1RGAfiJte+ifq7rTxppIwkXuKmcF52O1MqhjV6YJlf6kiegN5ZjLsFwGWEiEpsBggRcAifG89W5Xy/850sZEJ1AvhRCIHZ1IRr760sgIu43SjugvSz3pJNe40KIVmng/YFBscZ+uzC4Tn9Wpk+TRxWepxOQ4/0/fbzPs09g/aucXjDlf+r2tFM2FcZ0Wj2yTYhk07DDNHJoQIDAQAB",
   "permissions": [
     "storage",
@@ -55,6 +55,6 @@
   },
   "options_page": "options.html",
   "action": {
-    "default_title": "METAENGINE A2 Browser Operator 0.7.1 — Shared semantic perception"
+    "default_title": "METAENGINE A2 Browser Operator 0.7.1 — Final runtime"
   }
 }
