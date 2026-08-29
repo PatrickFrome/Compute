@@ -5,6 +5,7 @@ const bypassSingleInstance = process.argv.includes('--metaengine-smoke')
   || process.argv.includes('--metaengine-devplane-smoke');
 const instanceHoldProbe = process.argv.includes('--metaengine-single-instance-probe');
 const versionProbe = process.argv.includes('--metaengine-version-probe');
+const selfUpdateSmoke = process.argv.includes('--metaengine-self-update-smoke');
 
 const guard = acquirePrimaryInstance(app, { bypass: bypassSingleInstance });
 
@@ -13,8 +14,24 @@ if (guard.primary) {
     app.setAppUserModelId(METAENGINE_BROWSER_APP_ID);
   }
 
-  if (versionProbe || instanceHoldProbe) {
-    app.once('ready', () => {
+  if (versionProbe || instanceHoldProbe || selfUpdateSmoke) {
+    app.once('ready', async () => {
+      if (selfUpdateSmoke) {
+        try {
+          const { runSelfUpdateSmoke } = await import('./self-update-smoke.mjs');
+          await runSelfUpdateSmoke({ app });
+        } catch (error) {
+          console.error(JSON.stringify({
+            schema: 'metaengine.self-update-smoke.trace.v1',
+            label: 'BOOT_FAILURE',
+            app_version: app.getVersion(),
+            error: String(error?.message || error).slice(0, 300),
+            authority_effect: false,
+          }));
+          app.exit(4);
+        }
+        return;
+      }
       console.log(JSON.stringify({
         schema: versionProbe
           ? 'metaengine.browser.version-probe.v1'
