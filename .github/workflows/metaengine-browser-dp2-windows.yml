@@ -59,17 +59,18 @@ jobs:
             $sha512Provider.Dispose()
           }
           $releaseDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
-          @"
-version: $version
-files:
-  - url: $($installer.Name)
-    sha512: $sha512
-    size: $($installer.Length)
-path: $($installer.Name)
-sha512: $sha512
-releaseDate: '$releaseDate'
-stagingPercentage: 100
-"@ | Set-Content -Path $latest -Encoding utf8
+          $latestLines = @(
+            "version: $version",
+            'files:',
+            "  - url: $($installer.Name)",
+            "    sha512: $sha512",
+            "    size: $($installer.Length)",
+            "path: $($installer.Name)",
+            "sha512: $sha512",
+            "releaseDate: '$releaseDate'",
+            'stagingPercentage: 100'
+          )
+          $latestLines | Set-Content -Path $latest -Encoding utf8
           $latestText = Get-Content $latest -Raw
           if ($latestText -notmatch [regex]::Escape("version: $version")) { throw 'latest_yml_version_binding_missing' }
           if ($latestText -notmatch [regex]::Escape($installer.Name)) { throw 'latest_yml_installer_binding_missing' }
