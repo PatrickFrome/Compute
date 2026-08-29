@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-export const SUPERVISOR_KEEPALIVE_VERSION = '1.1.0';
+export const SUPERVISOR_KEEPALIVE_VERSION = '1.1.1';
 export const SUPERVISOR_ID = 'METAENGINE_SUPERVISOR';
 export const KEEPALIVE_STATES = Object.freeze([
   'ACTIVE',
@@ -239,8 +239,8 @@ export class SupervisorKeepalive {
       const generation = String(signal?.generation_state || 'UNKNOWN').toUpperCase();
       const prev = String(next[id] || 'UNKNOWN');
       if (prev === 'GENERATING' && generation === 'IDLE') events.push({ reason: 'WORKER_RESULT_READY', agent_id: id });
-      if (lifecycle === 'LOST') events.push({ reason: 'WORKER_LOST', agent_id: id });
-      if (lifecycle === 'PROVISIONING_AMBIGUOUS') events.push({ reason: 'WORKER_FAILED', agent_id: id });
+      if (lifecycle === 'LOST' && prev !== 'TERMINAL') events.push({ reason: 'WORKER_LOST', agent_id: id });
+      if (lifecycle === 'PROVISIONING_AMBIGUOUS' && prev !== 'TERMINAL') events.push({ reason: 'WORKER_FAILED', agent_id: id });
       next[id] = generation;
     }
     this.#state.previous_worker_generation = next;
