@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { SUPERVISOR_DEVICE_PROFILE } from './supervisor-device-identity.mjs';
 import { SupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime.mjs';
 import { SelfUpdateRuntime } from './self-update-runtime.mjs';
@@ -7,6 +9,29 @@ export const NATIVE_SUPERVISOR_RUNTIME_PATH = '/a2-browser-native-supervisor-v1'
 
 const clipError = (error) => String(error?.message || error || 'unknown_error').slice(0, 500);
 const READ_ONLY_ACTIONS = new Set(['POLL','CAPTURE','CAPTURE_VIEW','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD']);
+
+async function persistSelfUpdateHandoffReceipt(receipt) {
+  if (receipt?.schema !== 'metaengine.self-update.pre-install-receipt.v1') throw new Error('native_supervisor_self_update_receipt_schema_invalid');
+  if (!receipt?.version || receipt?.version !== receipt?.available_version) throw new Error('native_supervisor_self_update_receipt_version_invalid');
+  if (receipt?.metadata_verified !== true || receipt?.restart_gate_safe !== true || receipt?.authority_effect !== false) {
+    throw new Error('native_supervisor_self_update_receipt_invariant_invalid');
+  }
+  const { app } = await import('electron');
+  if (!app?.isPackaged) throw new Error('native_supervisor_self_update_packaged_required');
+  if (!app.hasSingleInstanceLock()) throw new Error('native_supervisor_self_update_primary_lock_required');
+  const target = path.join(app.getPath('userData'), 'metaengine-self-update-pre-install-receipt-v1.json');
+  const temp = `${target}.${process.pid}.tmp`;
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  const handle = await fs.open(temp, 'w', 0o600);
+  try {
+    await handle.write(`${JSON.stringify(receipt)}\n`);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  await fs.rename(temp, target);
+  return { target };
+}
 
 export class NativeSupervisorClient {
   #identity;
@@ -30,11 +55,12 @@ export class NativeSupervisorClient {
   #lifecycle = null;
   #selfUpdate = null;
 
-  constructor({ identity, fetchImpl = globalThis.fetch, getState, executeCommand, version, intervalMs = 2000 }) {
+  constructor({ identity, fetchImpl = globalThis.fetch, getState, executeCommand, version, intervalMs = 2000, beforeSelfUpdateInstall = null }) {
     if (!identity) throw new Error('native_supervisor_identity_required');
     if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
     if (typeof getState !== 'function') throw new Error('native_supervisor_state_provider_required');
     if (typeof executeCommand !== 'function') throw new Error('native_supervisor_command_executor_required');
+    if (beforeSelfUpdateInstall != null && typeof beforeSelfUpdateInstall !== 'function') throw new Error('native_supervisor_self_update_handoff_invalid');
     this.#identity = identity;
     this.#fetch = fetchImpl;
     this.#getState = getState;
@@ -58,6 +84,20 @@ export class NativeSupervisorClient {
         && this.#armed === true
         && this.#currentCommand == null
         && this.#lifecycle?.isQuiescent() === true,
+      // Phase 1: durable receipt while the current N process still holds its singleton lock.
+      beforeInstall: async (receipt) => {
+        await persistSelfUpdateHandoffReceipt(receipt);
+      },
+      // SelfUpdateRuntime arms HostResilienceRuntime's expected-restart sentinel between these hooks.
+      // Phase 2: stop polling/actuation, then release the singleton lock immediately before NSIS launch.
+      beforeInstallerLaunch: async (receipt) => {
+        await beforeSelfUpdateInstall?.(structuredClone(receipt));
+        const { app } = await import('electron');
+        if (!app?.isPackaged) throw new Error('native_supervisor_self_update_packaged_required');
+        if (!app.hasSingleInstanceLock()) throw new Error('native_supervisor_self_update_primary_lock_required');
+        this.stop();
+        app.releaseSingleInstanceLock();
+      },
     });
   }
 

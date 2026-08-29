@@ -93,16 +93,23 @@ test('absolute, traversing, wrong-prefix or version-mismatched artifacts fail cl
   }
 });
 
-test('downloaded update requires continuously quiescent restart grace before install', async () => {
+test('downloaded update orders receipt, sentinel, handoff, then silent NSIS install', async () => {
   const updater = new FakeUpdater();
   let safe = false;
   let now = Date.parse('2026-08-29T15:00:00Z');
+  const order = [];
+  let receipt = null;
+  const originalInstall = updater.quitAndInstall.bind(updater);
+  updater.quitAndInstall = (isSilent, forceRunAfter) => {
+    order.push('install');
+    return originalInstall(isSilent, forceRunAfter);
+  };
   const host = {
     starts: 0,
     restarts: [],
     async start() { this.starts += 1; },
     snapshot() { return { state: 'ACTIVE', authority_effect: false }; },
-    async prepareExpectedRestart(reason) { this.restarts.push(reason); },
+    async prepareExpectedRestart(reason) { this.restarts.push(reason); order.push('sentinel'); },
   };
   const runtime = new SelfUpdateRuntime({
     updater,
@@ -110,6 +117,11 @@ test('downloaded update requires continuously quiescent restart grace before ins
     hostResilience: host,
     canRestart: async () => safe,
     restartGraceMs: 3000,
+    beforeInstall: async (value) => { order.push('receipt'); receipt = value; },
+    beforeInstallerLaunch: async (value) => {
+      assert.equal(value.version, VALID_INFO.version);
+      order.push('handoff');
+    },
     clock: () => now,
   });
   await runtime.start();
@@ -140,10 +152,97 @@ test('downloaded update requires continuously quiescent restart grace before ins
   now += 3100;
   await runtime.cycle();
   assert.equal(updater.installs, 1);
+  assert.deepEqual(order, ['receipt', 'sentinel', 'handoff', 'install']);
+  assert.equal(receipt.schema, 'metaengine.self-update.pre-install-receipt.v1');
+  assert.equal(receipt.version, VALID_INFO.version);
+  assert.equal(receipt.available_version, VALID_INFO.version);
+  assert.equal(receipt.metadata_verified, true);
+  assert.equal(receipt.restart_gate_safe, true);
   assert.deepEqual(host.restarts, ['SELF_UPDATE']);
-  assert.deepEqual(updater.installArgs, { isSilent: false, forceRunAfter: true });
+  assert.deepEqual(updater.installArgs, { isSilent: true, forceRunAfter: true });
   assert.equal(runtime.snapshot().state, 'RESTARTING');
+  assert.equal(runtime.snapshot().pre_install_receipt_persisted, true);
+  assert.equal(runtime.snapshot().installer_handoff_prepared, true);
   assert.equal(runtime.snapshot().install_attempted_version, VALID_INFO.version);
+});
+
+test('pre-install receipt persistence failure blocks sentinel, handoff and NSIS launch', async () => {
+  const updater = new FakeUpdater();
+  let now = 2_000_000;
+  let receiptAttempts = 0;
+  let handoffAttempts = 0;
+  const host = {
+    restarts: 0,
+    async start() {},
+    snapshot() { return { state: 'ACTIVE', authority_effect: false }; },
+    async prepareExpectedRestart() { this.restarts += 1; },
+  };
+  const runtime = new SelfUpdateRuntime({
+    updater,
+    packaged: true,
+    hostResilience: host,
+    canRestart: async () => true,
+    restartGraceMs: 3000,
+    clock: () => now,
+    beforeInstall: async () => {
+      receiptAttempts += 1;
+      throw new Error('receipt_persist_failed');
+    },
+    beforeInstallerLaunch: async () => { handoffAttempts += 1; },
+  });
+  await runtime.start();
+  updater.emit('update-available', VALID_INFO);
+  await new Promise((resolve) => setImmediate(resolve));
+  updater.emit('update-downloaded', { version: VALID_INFO.version });
+  await runtime.cycle();
+  now += 3100;
+  await runtime.cycle();
+  assert.equal(receiptAttempts, 1);
+  assert.equal(host.restarts, 0);
+  assert.equal(handoffAttempts, 0);
+  assert.equal(updater.installs, 0);
+  assert.equal(runtime.snapshot().state, 'ERROR');
+  assert.equal(runtime.snapshot().pre_install_receipt_persisted, false);
+  assert.equal(runtime.snapshot().installer_handoff_prepared, false);
+  assert.match(runtime.snapshot().last_error, /receipt_persist_failed/);
+  now += 10_000;
+  await runtime.cycle();
+  assert.equal(receiptAttempts, 1);
+  assert.equal(updater.installs, 0);
+});
+
+test('installer handoff failure happens after sentinel and blocks NSIS launch', async () => {
+  const updater = new FakeUpdater();
+  let now = 3_000_000;
+  const order = [];
+  const host = {
+    async start() {},
+    snapshot() { return { state: 'ACTIVE', authority_effect: false }; },
+    async prepareExpectedRestart() { order.push('sentinel'); },
+  };
+  const runtime = new SelfUpdateRuntime({
+    updater,
+    packaged: true,
+    hostResilience: host,
+    canRestart: async () => true,
+    restartGraceMs: 3000,
+    clock: () => now,
+    beforeInstall: async () => { order.push('receipt'); },
+    beforeInstallerLaunch: async () => { order.push('handoff'); throw new Error('singleton_release_failed'); },
+  });
+  await runtime.start();
+  updater.emit('update-available', VALID_INFO);
+  await new Promise((resolve) => setImmediate(resolve));
+  updater.emit('update-downloaded', { version: VALID_INFO.version });
+  await runtime.cycle();
+  now += 3100;
+  await runtime.cycle();
+  assert.deepEqual(order, ['receipt', 'sentinel', 'handoff']);
+  assert.equal(updater.installs, 0);
+  assert.equal(runtime.snapshot().state, 'ERROR');
+  assert.equal(runtime.snapshot().pre_install_receipt_persisted, true);
+  assert.equal(runtime.snapshot().installer_handoff_prepared, false);
+  assert.match(runtime.snapshot().last_error, /singleton_release_failed/);
 });
 
 test('one downloaded version gets at most one install attempt', async () => {

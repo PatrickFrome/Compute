@@ -7,6 +7,17 @@ export const DEFAULT_TRUSTED_ARTIFACT_PREFIX = 'METAENGINE-Browser-Test-Setup-';
 
 function clipError(error) { return String(error?.message || error || 'unknown_error').slice(0, 300); }
 
+export function validateCiTestFeedUrl(value, { testMode = false, githubActions = false } = {}) {
+  if (value == null || String(value).trim() === '') return null;
+  if (testMode !== true || githubActions !== true) throw new Error('self_update_test_feed_not_allowed');
+  const url = new URL(String(value).trim());
+  if (url.protocol !== 'http:') throw new Error('self_update_test_feed_protocol_invalid');
+  if (!['127.0.0.1','localhost','[::1]'].includes(url.hostname.toLowerCase())) throw new Error('self_update_test_feed_not_loopback');
+  if (url.username || url.password || url.search || url.hash) throw new Error('self_update_test_feed_url_components_invalid');
+  if (!url.pathname.endsWith('/')) throw new Error('self_update_test_feed_path_invalid');
+  return url.href;
+}
+
 function verifiedMetadata(info, { trustedArtifactPrefix = DEFAULT_TRUSTED_ARTIFACT_PREFIX } = {}) {
   const version = String(info?.version || '').trim();
   if (!VERSION_RE.test(version)) throw new Error('update_metadata_version_invalid');
@@ -37,13 +48,15 @@ function verifiedMetadata(info, { trustedArtifactPrefix = DEFAULT_TRUSTED_ARTIFA
 
 export class SelfUpdateRuntime {
   #updater = null; #injectedUpdater; #packagedOverride; #host = null; #hostOverride;
-  #trustedChannel; #trustedArtifactPrefix;
+  #trustedChannel; #trustedArtifactPrefix; #ciTestFeedUrl; #beforeInstall; #beforeInstallerLaunch;
   #state = {
     state: 'UNINITIALIZED', available_version: null, downloaded_version: null,
     metadata_verified: false, candidate_file_count: 0, staging_percentage: null,
     last_check_at: null, last_error: null, trusted_channel: null,
     download_percent: null, restart_gate_safe: false, restart_gate_since: null,
     restart_grace_ms: null, install_attempted_version: null, publisher_verified: false,
+    ci_test_feed_active: false, pre_install_receipt_persisted: false,
+    installer_handoff_prepared: false,
   };
   #lastCheck = 0; #intervalMs; #canRestart; #clock; #restartGraceMs; #restartSafeSince = null;
 
@@ -56,6 +69,11 @@ export class SelfUpdateRuntime {
     hostResilience = undefined,
     trustedChannel = DEFAULT_TRUSTED_UPDATE_CHANNEL,
     trustedArtifactPrefix = DEFAULT_TRUSTED_ARTIFACT_PREFIX,
+    ciTestFeedUrl = process.env.METAENGINE_SELF_UPDATE_TEST_FEED_URL || null,
+    ciTestMode = process.env.METAENGINE_SELF_UPDATE_TEST_MODE === '1',
+    githubActions = process.env.GITHUB_ACTIONS === 'true',
+    beforeInstall = async () => {},
+    beforeInstallerLaunch = async () => {},
     clock = () => Date.now(),
   } = {}) {
     this.#intervalMs = Math.max(60 * 1000, Number(intervalMs) || 10 * 60 * 1000);
@@ -67,20 +85,30 @@ export class SelfUpdateRuntime {
     this.#trustedChannel = String(trustedChannel || DEFAULT_TRUSTED_UPDATE_CHANNEL).trim();
     this.#trustedArtifactPrefix = String(trustedArtifactPrefix || DEFAULT_TRUSTED_ARTIFACT_PREFIX).trim();
     this.#clock = clock;
+    if (typeof beforeInstall !== 'function') throw new Error('self_update_before_install_invalid');
+    if (typeof beforeInstallerLaunch !== 'function') throw new Error('self_update_before_installer_launch_invalid');
+    this.#beforeInstall = beforeInstall;
+    this.#beforeInstallerLaunch = beforeInstallerLaunch;
     if (!/^[0-9A-Za-z._-]+$/.test(this.#trustedChannel)) throw new Error('trusted_update_channel_invalid');
     if (!SAFE_ARTIFACT_RE.test(this.#trustedArtifactPrefix)) throw new Error('trusted_update_artifact_prefix_invalid');
+    this.#ciTestFeedUrl = validateCiTestFeedUrl(ciTestFeedUrl, { testMode: ciTestMode, githubActions });
     this.#state.trusted_channel = this.#trustedChannel;
     this.#state.restart_grace_ms = this.#restartGraceMs;
   }
 
   snapshot() {
-    return structuredClone({ schema: 'metaengine.self-update-runtime.v4', ...this.#state, host_resilience: this.#host?.snapshot?.() || null, authority_effect: false });
+    return structuredClone({ schema: 'metaengine.self-update-runtime.v7', ...this.#state, host_resilience: this.#host?.snapshot?.() || null, authority_effect: false });
   }
 
   #resetRestartGate() {
     this.#restartSafeSince = null;
     this.#state.restart_gate_safe = false;
     this.#state.restart_gate_since = null;
+  }
+
+  #resetInstallHandoff() {
+    this.#state.pre_install_receipt_persisted = false;
+    this.#state.installer_handoff_prepared = false;
   }
 
   async #approveAndDownload(info) {
@@ -93,6 +121,7 @@ export class SelfUpdateRuntime {
       this.#state.last_error = null;
       this.#state.state = 'APPROVED_DOWNLOAD';
       this.#state.install_attempted_version = null;
+      this.#resetInstallHandoff();
       this.#resetRestartGate();
       if (typeof this.#updater?.downloadUpdate !== 'function') throw new Error('electron_updater_download_unavailable');
       await this.#updater.downloadUpdate();
@@ -125,12 +154,16 @@ export class SelfUpdateRuntime {
       if (!updater) throw new Error('electron_updater_unavailable');
       updater.allowPrerelease = true;
       updater.channel = this.#trustedChannel;
-      // allowPrerelease/channel assignment can enable downgrade in electron-updater; re-assert fail-closed order afterwards.
       updater.allowDowngrade = false;
       updater.autoDownload = false;
       updater.autoInstallOnAppQuit = false;
       if ('disableWebInstaller' in updater) updater.disableWebInstaller = true;
       if ('allowUnverifiedLinuxPackages' in updater) updater.allowUnverifiedLinuxPackages = false;
+      if (this.#ciTestFeedUrl) {
+        if (typeof updater.setFeedURL !== 'function') throw new Error('electron_updater_set_feed_url_unavailable');
+        updater.setFeedURL({ provider: 'generic', url: this.#ciTestFeedUrl, channel: this.#trustedChannel });
+        this.#state.ci_test_feed_active = true;
+      }
       updater.on('checking-for-update', () => { this.#state.state = 'CHECKING'; });
       updater.on('update-available', (info) => { void this.#approveAndDownload(info); });
       updater.on('update-not-available', () => {
@@ -141,6 +174,7 @@ export class SelfUpdateRuntime {
         this.#state.candidate_file_count = 0;
         this.#state.download_percent = null;
         this.#state.install_attempted_version = null;
+        this.#resetInstallHandoff();
         this.#resetRestartGate();
       });
       updater.on('download-progress', (p) => { this.#state.state = 'DOWNLOADING'; this.#state.download_percent = Number(p?.percent || 0); });
@@ -155,6 +189,7 @@ export class SelfUpdateRuntime {
         this.#state.state = 'READY_RESTART';
         this.#state.downloaded_version = downloaded;
         this.#state.download_percent = 100;
+        this.#resetInstallHandoff();
         this.#resetRestartGate();
       });
       updater.on('error', (e) => { this.#state.state = 'ERROR'; this.#state.last_error = clipError(e); this.#resetRestartGate(); });
@@ -189,10 +224,28 @@ export class SelfUpdateRuntime {
     this.#state.install_attempted_version = this.#state.downloaded_version;
     this.#state.state = 'RESTARTING';
     try {
+      const receipt = {
+        schema: 'metaengine.self-update.pre-install-receipt.v1',
+        version: this.#state.downloaded_version,
+        available_version: this.#state.available_version,
+        metadata_verified: this.#state.metadata_verified === true,
+        restart_gate_safe: this.#state.restart_gate_safe === true,
+        restart_gate_since: this.#state.restart_gate_since,
+        recorded_at: new Date(now).toISOString(),
+        authority_effect: false,
+      };
+      // Ordering is intentional and safety-critical:
+      // 1. persist exact update intent; 2. arm crash sentinel expected-restart state;
+      // 3. quiesce/release singleton handoff; 4. launch the already-verified silent installer.
+      await this.#beforeInstall(structuredClone(receipt));
+      this.#state.pre_install_receipt_persisted = true;
       await this.#host?.prepareExpectedRestart?.('SELF_UPDATE');
-      this.#updater.quitAndInstall(false, true);
+      await this.#beforeInstallerLaunch(structuredClone(receipt));
+      this.#state.installer_handoff_prepared = true;
+      this.#updater.quitAndInstall(true, true);
     } catch (e) {
       this.#state.state = 'ERROR';
+      this.#state.installer_handoff_prepared = false;
       this.#state.last_error = clipError(e);
       this.#resetRestartGate();
     }
@@ -215,6 +268,7 @@ export class SelfUpdateRuntime {
           this.#state.candidate_file_count = 0;
           this.#state.download_percent = null;
           this.#state.install_attempted_version = null;
+          this.#resetInstallHandoff();
           this.#resetRestartGate();
         }
         await this.#updater.checkForUpdates();
