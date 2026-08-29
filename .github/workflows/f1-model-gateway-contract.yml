@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'apps/model-gateway/**'
+      - 'spec/f1/model-peer-*.schema.json'
       - '.github/workflows/f1-model-gateway-contract.yml'
   workflow_dispatch:
 
@@ -21,13 +22,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Syntax gates
+      - name: Syntax and schema gates
         shell: bash
         run: |
           set -euo pipefail
           for f in apps/model-gateway/api/*.mjs apps/model-gateway/lib/*.mjs apps/model-gateway/test/*.mjs; do
             node --check "$f"
           done
+          node -e "const fs=require('fs'); for (const f of ['spec/f1/model-peer-request.schema.json','spec/f1/model-peer-receipt.schema.json']) JSON.parse(fs.readFileSync(f,'utf8'));"
 
       - name: Model gateway contract tests
         working-directory: apps/model-gateway
@@ -43,4 +45,5 @@ jobs:
           grep -F "minimax/minimax-m3-free" apps/model-gateway/lib/policy.mjs
           grep -F "poolside/laguna-s-2.1-free" apps/model-gateway/lib/policy.mjs
           grep -F "METAENGINE_ALLOW_PAID_MODELS === '1'" apps/model-gateway/lib/policy.mjs
+          grep -F "assertZeroSpend(models)" apps/model-gateway/api/peer.mjs
           ! grep -R -E '(ANTHROPIC_API_KEY|GOOGLE_API_KEY|DEEPSEEK_API_KEY|ZAI_API_KEY|XAI_API_KEY)' apps/model-gateway
