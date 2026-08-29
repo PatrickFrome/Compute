@@ -3,8 +3,16 @@ import assert from 'node:assert/strict';
 import {
   ADVISORY_EVIDENCE_SCHEMA,
   createAdvisoryEvidenceEnvelope,
+  createCommitteeAdvisoryEvidence,
   verifyAdvisoryEvidenceEnvelope
 } from '../lib/advisory-evidence-envelope.mjs';
+import { toSupervisorAdvisory } from '../lib/supervisor-advisory.mjs';
+
+const MODELS = [
+  'minimax/minimax-m3-free',
+  'poolside/laguna-s-2.1-free',
+  'inclusionai/ling-3.0-flash-fin-free'
+];
 
 const base = {
   task_id: 'task-multi-gateway-001',
@@ -16,12 +24,68 @@ const base = {
   source_receipt_schema: 'metaengine.model-gateway.free-committee.v1',
   receipt_kind: 'COMMITTEE',
   object_sha256: '2'.repeat(64),
-  served_models: ['minimax/minimax-m3-free', 'poolside/laguna-s-2.1-free'],
+  served_models: MODELS.slice(0, 2),
   availability_quorum_met: true,
   decision_state: null,
   tariff_dependency: true,
   data_policy: 'PUBLIC_OR_NON_SENSITIVE_ONLY'
 };
+
+function committeeReceipt() {
+  const providers = ['minimax', 'poolside', 'inclusionai'];
+  const members = MODELS.map((model, index) => ({
+    member_id: `member-${index + 1}`,
+    status: 'SUCCESS',
+    provider_family: providers[index],
+    requested_model: model,
+    served_model: model,
+    answer: `answer-${index + 1}`,
+    response_sha256: String(index + 3).repeat(64),
+    started_at: '2026-08-29T11:00:00.000Z',
+    completed_at: '2026-08-29T11:00:01.000Z',
+    tariff_dependency: true,
+    data_policy: 'PUBLIC_OR_NON_SENSITIVE_ONLY',
+    authority_effect: false
+  }));
+  const zeroSpendEvidence = {
+    models: MODELS.map((model, index) => ({
+      model,
+      owned_by: providers[index],
+      zdr: 'unknown',
+      no_training: 'unknown',
+      zero_price: true
+    })),
+    privacy: {
+      all_zdr: false,
+      all_no_training: false,
+      classification: 'EXTERNAL_NON_ZDR_OR_TRAINING_UNCERTAIN'
+    }
+  };
+  return {
+    schema: 'metaengine.model-gateway.free-committee.v1',
+    task_id: 'task-committee-evidence',
+    committee_size: 3,
+    quorum_required: 2,
+    successful_members: 3,
+    quorum_met: true,
+    committee_status: 'QUORUM_MET',
+    providers,
+    models_requested: [...MODELS],
+    members,
+    synthesis_performed: false,
+    synthesis: null,
+    started_at: '2026-08-29T11:00:00.000Z',
+    completed_at: '2026-08-29T11:00:01.000Z',
+    request_sha256: 'b'.repeat(64),
+    zero_spend_verified: true,
+    zero_spend_evidence: zeroSpendEvidence,
+    privacy_classification: zeroSpendEvidence.privacy.classification,
+    confidential_data_supported: false,
+    tariff_dependency: true,
+    data_policy: 'PUBLIC_OR_NON_SENSITIVE_ONLY',
+    authority_effect: false
+  };
+}
 
 test('Vercel and Supabase rails normalize into one advisory evidence schema', () => {
   const vercel = createAdvisoryEvidenceEnvelope(base);
@@ -55,6 +119,40 @@ test('same evidence input is deterministic and hash bound', () => {
   assert.match(a.evidence_id, /^advisory_evidence_sha256_[0-9a-f]{64}$/);
   assert.match(a.envelope_sha256, /^[0-9a-f]{64}$/);
   assert.equal(verifyAdvisoryEvidenceEnvelope(a).valid, true);
+});
+
+test('validated committee plus supervisor advisory produces downstream evidence without authority', () => {
+  const committee = committeeReceipt();
+  const advisory = toSupervisorAdvisory(committee);
+  const envelope = createCommitteeAdvisoryEvidence({
+    committeeReceipt: committee,
+    supervisorAdvisory: advisory,
+    traceId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  });
+  const verified = verifyAdvisoryEvidenceEnvelope(envelope);
+
+  assert.equal(envelope.subject.task_id, committee.task_id);
+  assert.equal(envelope.result.receipt_kind, 'COMMITTEE');
+  assert.deepEqual(envelope.result.served_models, MODELS);
+  assert.equal(envelope.result.availability_quorum_met, true);
+  assert.equal(envelope.result.decision_state, 'QUORUM_MET');
+  assert.equal(envelope.trust.state, 'HASH_BOUND_ADVISORY_UNATTESTED');
+  assert.equal(verified.valid, true);
+  assert.equal(verified.direct_action_allowed, false);
+  assert.equal(verified.browser_authority, false);
+});
+
+test('committee evidence rejects advisory subject or authority drift', () => {
+  const committee = committeeReceipt();
+  const advisory = toSupervisorAdvisory(committee);
+  assert.throws(() => createCommitteeAdvisoryEvidence({
+    committeeReceipt: committee,
+    supervisorAdvisory: { ...advisory, task_id: 'other-task' }
+  }), /subject_mismatch/);
+  assert.throws(() => createCommitteeAdvisoryEvidence({
+    committeeReceipt: committee,
+    supervisorAdvisory: { ...advisory, direct_action_allowed: true }
+  }), /supervisor_authority_invalid/);
 });
 
 test('multi-gateway evidence can never claim truth or action authority', () => {
