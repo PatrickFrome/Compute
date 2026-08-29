@@ -1,0 +1,111 @@
+name: METAENGINE Browser Sentinel V1 Gate
+on:
+  push:
+    branches: ['work/convergence-browser-sentinel-v1']
+permissions:
+  contents: read
+concurrency:
+  group: metaengine-browser-sentinel-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  sentinel-windows:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Setup Node 24
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: '24'
+      - name: Setup Go 1.24
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+        with:
+          go-version: '1.24.x'
+          cache: false
+      - name: Install browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Parse and Node contract gates
+        working-directory: apps/metaengine-browser
+        run: |
+          npm run check
+          npm test
+      - name: Sentinel policy and Win32 readback tests
+        working-directory: apps/metaengine-browser/sentinel
+        run: go test -trimpath .
+      - name: Build packaged browser image
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          npx --yes electron-builder@26.15.7 --dir --win --x64 --config electron-builder.test.json --publish never
+          $root = (Resolve-Path 'dist-test\win-unpacked').Path
+          $browser = Join-Path $root 'METAENGINE Browser Test.exe'
+          $asar = Join-Path $root 'resources\app.asar'
+          if (-not (Test-Path $browser)) { throw "packaged_browser_missing:$browser" }
+          if (-not (Test-Path $asar)) { throw "packaged_asar_missing:$asar" }
+          (Get-FileHash $browser -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content "$env:RUNNER_TEMP\browser-sha.txt"
+          (Get-FileHash $asar -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content "$env:RUNNER_TEMP\package-sha.txt"
+          $root | Set-Content "$env:RUNNER_TEMP\packaged-root.txt"
+      - name: Compile exact-bound Sentinel and provenance
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $root = Get-Content "$env:RUNNER_TEMP\packaged-root.txt"
+          $browserSha = (Get-Content "$env:RUNNER_TEMP\browser-sha.txt").Trim()
+          $packageSha = (Get-Content "$env:RUNNER_TEMP\package-sha.txt").Trim()
+          $sentinelDir = Join-Path $root 'resources\sentinel'
+          New-Item -ItemType Directory -Force -Path $sentinelDir | Out-Null
+          $sentinel = Join-Path $sentinelDir 'browser-sentinel.exe'
+          Push-Location sentinel
+          $ld = "-H=windowsgui -X 'main.expectedBrowserName=METAENGINE Browser Test.exe' -X main.expectedBrowserSHA256=$browserSha -X main.expectedSourceCommit=$env:GITHUB_SHA -X main.expectedPackageSHA256=$packageSha"
+          go build -trimpath -ldflags $ld -o $sentinel .
+          Pop-Location
+          if (-not (Test-Path $sentinel)) { throw 'sentinel_binary_missing' }
+          $sentinelSha = (Get-FileHash $sentinel -Algorithm SHA256).Hash.ToLowerInvariant()
+          $provenance = [ordered]@{
+            schema = 'metaengine.browser-sentinel.provenance.v1'
+            executable_name = 'METAENGINE Browser Test.exe'
+            executable_sha256 = $browserSha
+            source_commit_sha = $env:GITHUB_SHA.ToLowerInvariant()
+            package_sha256 = $packageSha
+            sentinel_sha256 = $sentinelSha
+            build_kind = 'TEST_UNSIGNED'
+            authority_effect = $false
+          }
+          $provenance | ConvertTo-Json -Depth 3 | Set-Content (Join-Path $sentinelDir 'provenance.json') -Encoding utf8NoBOM
+      - name: Verify packaged Sentinel surface is bounded
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $root = Get-Content "$env:RUNNER_TEMP\packaged-root.txt"
+          $asar = Join-Path $root 'resources\app.asar'
+          $listing = npx --yes @electron/asar list $asar
+          $listingText = (($listing -join "`n") -replace '\\','/')
+          foreach ($required in @('/src/browser-sentinel-heartbeat.mjs','/src/host-resilience-runtime.mjs','/src/self-update-runtime.mjs')) {
+            if (-not $listingText.Contains($required)) { throw "sentinel_browser_module_missing:$required" }
+          }
+          $sentinel = Join-Path $root 'resources\sentinel\browser-sentinel.exe'
+          $provenancePath = Join-Path $root 'resources\sentinel\provenance.json'
+          if (-not (Test-Path $sentinel) -or -not (Test-Path $provenancePath)) { throw 'sentinel_packaged_resources_missing' }
+          $p = Get-Content $provenancePath -Raw | ConvertFrom-Json
+          $actual = (Get-FileHash $sentinel -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($p.sentinel_sha256 -ne $actual) { throw 'sentinel_provenance_digest_mismatch' }
+          if ($p.source_commit_sha -ne $env:GITHUB_SHA.ToLowerInvariant()) { throw 'sentinel_provenance_source_mismatch' }
+      - name: Build installer from provenance-bound image
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          $root = Get-Content "$env:RUNNER_TEMP\packaged-root.txt"
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --prepackaged $root --config electron-builder.test.json --publish never
+          $installer = Get-ChildItem dist-test -Filter 'METAENGINE-Browser-Test-Setup-*.exe' -File | Select-Object -First 1
+          if (-not $installer) { throw 'sentinel_installer_missing' }
+          "installer=$($installer.Name)" | Set-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
+          "installer_sha256=$((Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant())" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
+          "source_commit=$env:GITHUB_SHA" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
