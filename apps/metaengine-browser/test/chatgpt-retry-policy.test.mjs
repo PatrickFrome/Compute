@@ -13,6 +13,26 @@ test('read-only silent request first stops and retries in the same conversation'
   assert.equal(result.retry_allowed, true);
 });
 
+test('adaptive timeout can safely extend a long-running request beyond fixed defaults', () => {
+  const result = classifyRetryDecision({
+    effect_class: REQUEST_EFFECT_CLASS.READ_ONLY,
+    silence_age_ms: 2 * 60_000,
+    adaptive_timeout_ms: 5 * 60_000,
+    request_accepted: true,
+  });
+  assert.equal(result.action, 'WAIT');
+});
+
+test('adaptive timeout becomes the retry boundary once reached', () => {
+  const result = classifyRetryDecision({
+    effect_class: REQUEST_EFFECT_CLASS.IDEMPOTENT_WRITE,
+    silence_age_ms: 5 * 60_000,
+    adaptive_timeout_ms: 4 * 60_000,
+    request_accepted: true,
+  });
+  assert.equal(result.action, 'STOP_AND_RETRY_SAME_CONVERSATION');
+});
+
 test('same-chat retry falls back to a new conversation after its local budget is exhausted', () => {
   const result = classifyRetryDecision({
     effect_class: REQUEST_EFFECT_CLASS.READ_ONLY,
@@ -42,6 +62,15 @@ test('database or durable external progress suppresses retry regardless of visua
     external_progress: true,
   });
   assert.deepEqual(result, { action: 'WAIT', reason: 'POSITIVE_LIVENESS_EVIDENCE', retry_allowed: false, authority_effect: false });
+});
+
+test('network liveness suppresses retry independently of DOM silence', () => {
+  const result = classifyRetryDecision({
+    effect_class: REQUEST_EFFECT_CLASS.READ_ONLY,
+    silence_age_ms: 45 * 60_000,
+    network_active: true,
+  });
+  assert.equal(result.action, 'WAIT');
 });
 
 test('completed execution waits for delayed ChatGPT rendering instead of replaying', () => {
