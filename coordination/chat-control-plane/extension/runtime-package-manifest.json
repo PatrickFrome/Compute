@@ -1,12 +1,15 @@
 {
   "schema": "metaengine.a2-browser-operator.runtime-package.v1",
-  "package_version": "0.7.1",
-  "operator_runtime": "0.7.1",
+  "package_version": "0.7.2",
+  "operator_runtime": "0.7.2",
+  "credential_architecture": "DURABLE_DEVICE_BOUND_V1",
   "policy": {
     "canonical_filenames_only": true,
     "reject_versioned_runtime_files": true,
     "reject_unlisted_files": true,
-    "generic_bootstrap_must_be_empty": true
+    "generic_bootstrap_must_be_empty": true,
+    "privileged_master_secret_in_bundle_allowed": false,
+    "personalized_scoped_seed_allowed": true
   },
   "generated_files": {
     "semantic-perception-compiler.js": {
