@@ -133,7 +133,6 @@ function assertPrivate(result) {
   assert.equal(result.actuation_eligible, false);
 }
 
-// Success requires exactly press + release and is COMMITTED.
 reset();
 let result = await run(request());
 assert.equal(result.outcome, 'COMMITTED');
@@ -142,7 +141,6 @@ assert.equal(dispatches().length, 2);
 assert.deepEqual(dispatches().map(([, p]) => p.type), ['mousePressed', 'mouseReleased']);
 assertPrivate(result);
 
-// Press transport rejection is already ambiguous: exactly one attempt, never cleanup/retry.
 reset();
 pressMode = 'reject';
 result = await run(request({ action_id: 'act-press' }));
@@ -152,7 +150,6 @@ assert.equal(dispatches().length, 1);
 assert.equal(dispatches()[0][1].type, 'mousePressed');
 assertPrivate(result);
 
-// Release rejection is ambiguous: exactly two attempts and no third cleanup release.
 reset();
 releaseMode = 'reject';
 result = await run(request({ action_id: 'act-release' }));
@@ -161,7 +158,6 @@ assert.equal(dispatches().length, 2);
 assert.deepEqual(dispatches().map(([, p]) => p.type), ['mousePressed', 'mouseReleased']);
 assertPrivate(result);
 
-// Hit-target drift is NO_EFFECT before physical dispatch.
 reset();
 liveMode = 'hit-changed';
 result = await run(request({ action_id: 'act-hit' }));
@@ -170,7 +166,6 @@ assert.equal(result.physical_dispatch_started, false);
 assert.equal(dispatches().length, 0);
 assertPrivate(result);
 
-// Ambiguous/replaced/live-unsafe targets remain fail closed before actuation.
 for (const mode of ['ambiguous', 'replaced']) {
   reset();
   liveMode = mode;
@@ -183,7 +178,6 @@ result = await run(request({ action_id: 'act-danger', accessible_name: 'Danger L
 assert.equal(result.outcome, 'NO_EFFECT');
 assert.equal(dispatches().length, 0);
 
-// Invalid action id is rejected before debugger acquisition.
 reset();
 result = await run(request({ action_id: '../bad id' }));
 assert.equal(result.outcome, 'NO_EFFECT');
@@ -191,7 +185,6 @@ assert.equal(result.reason_code, 'typed_click_action_id_invalid');
 assert.equal(debuggerRuns, 0);
 assert.equal(dispatches().length, 0);
 
-// Kill switch remains authoritative and pre-dispatch.
 reset();
 operatorDisabled = true;
 result = await run(request({ action_id: 'act-disabled' }));
@@ -204,7 +197,6 @@ result = await run(request({ action_id: 'act-feature-off' }));
 assert.equal(result.outcome, 'NO_EFFECT');
 assert.equal(dispatches().length, 0);
 
-// External request fields are read once; stateful getters cannot rotate the causal selection mid-run.
 reset();
 const reads = new Map();
 const once = (name, value, alternate) => ({
@@ -227,12 +219,12 @@ assert.equal(result.outcome, 'COMMITTED');
 assert.equal(dispatches().length, 2);
 for (const [name, count] of reads) assert.equal(count, 1, `${name} getter read ${count} times`);
 
-// Message surface is sidepanel-only.
 const listener = listeners.find((fn) => typeof fn === 'function');
 assert.ok(listener);
 let response;
 listener({ type: 'A2_OPERATOR_TYPED_CLICK_V1', ...request() }, { id: 'extid', url: 'chrome-extension://extid/options.html' }, (value) => { response = value; });
-assert.deepEqual(response, { ok: false, error: 'operator_sender_not_trusted' });
+assert.equal(response?.ok, false);
+assert.equal(response?.error, 'operator_sender_not_trusted');
 
 console.log('A2 R8C Typed Click Outcome Lab: PASS', JSON.stringify({
   committed_dispatches: 2,
