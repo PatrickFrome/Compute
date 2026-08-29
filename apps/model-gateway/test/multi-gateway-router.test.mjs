@@ -18,6 +18,8 @@ function rail({
   quality_verified = true,
   structured_verified = true,
   quorum_eligible = true,
+  evidence_trust_state = 'PERSISTED_READBACK_VERIFIED',
+  evidence_source = 'SUPABASE_PERSISTED_READBACK',
   tariff_dependency = true,
   evidence = 'a'
 }) {
@@ -35,7 +37,9 @@ function rail({
       transport_verified,
       quality_verified,
       structured_verified,
-      quorum_eligible
+      quorum_eligible,
+      evidence_trust_state,
+      evidence_source
     },
     evidence_sha256: evidence.repeat(64),
     tariff_dependency,
@@ -78,6 +82,8 @@ const vercelGatewayBlocked = rail({
   quality_verified: false,
   structured_verified: false,
   quorum_eligible: false,
+  evidence_trust_state: 'HASH_BOUND_ADVISORY_UNATTESTED',
+  evidence_source: 'F1_GATEWAY_ADVISORY_ENVELOPE',
   latency_ms: null,
   evidence: '3'
 });
@@ -94,6 +100,8 @@ const vercelDeploymentOnly = rail({
   quality_verified: false,
   structured_verified: false,
   quorum_eligible: false,
+  evidence_trust_state: 'SELF_REPORTED',
+  evidence_source: 'VERCEL_DEPLOYMENT_STATE_ONLY',
   evidence: '4'
 });
 
@@ -105,11 +113,13 @@ const localQualified = rail({
   failure_domain: 'local:host-a',
   models: ['local/model'],
   latency_ms: 8000,
+  evidence_trust_state: 'SIGNED_ATTESTED',
+  evidence_source: 'LOCAL_EXECUTION_ATTESTATION',
   tariff_dependency: false,
   evidence: '5'
 });
 
-test('structured routing uses qualification evidence and excludes deployment-only or blocked rails', () => {
+test('structured routing uses trusted qualification evidence and excludes deployment-only or blocked rails', () => {
   const plan = createMultiGatewayRoutePlan({
     task_id: 'task-structured-1',
     strategy: 'STRUCTURED',
@@ -117,13 +127,15 @@ test('structured routing uses qualification evidence and excludes deployment-onl
     rails: [vercelGatewayBlocked, vercelDeploymentOnly, supabaseStructured]
   });
   assert.equal(plan.selected[0].rail_id, 'supabase-live-broker-structured');
+  assert.equal(plan.selected[0].evidence_trust_state, 'PERSISTED_READBACK_VERIFIED');
   assert.deepEqual(plan.excluded.map((x) => x.reason).sort(), ['TRANSPORT_UNQUALIFIED', 'UNAVAILABLE']);
   assert.equal(plan.semantics.availability_is_not_quality, true);
+  assert.equal(plan.semantics.quality_routing_requires_persisted_or_attested_evidence, true);
   assert.equal(plan.policy.direct_action_allowed, false);
   assert.equal(plan.policy.browser_authority, false);
 });
 
-test('remote zero-price rail remains tariff-dependent while proved local can rank ahead without gaining authority', () => {
+test('remote zero-price rail remains tariff-dependent while attested local can rank ahead without gaining authority', () => {
   const plan = createMultiGatewayRoutePlan({
     task_id: 'task-structured-2',
     strategy: 'STRUCTURED',
@@ -131,13 +143,14 @@ test('remote zero-price rail remains tariff-dependent while proved local can ran
     rails: [supabaseStructured, localQualified]
   });
   assert.equal(plan.selected[0].rail_id, 'local-qualified-open-model');
+  assert.equal(plan.selected[0].evidence_trust_state, 'SIGNED_ATTESTED');
   assert.equal(plan.selected[0].tariff_dependency, false);
   assert.equal(plan.selected[1].tariff_dependency, true);
   assert.equal(plan.policy.promotion_authority, false);
   assert.equal(plan.authority_effect, false);
 });
 
-test('diverse advisory requires two independently qualified failure domains', () => {
+test('diverse advisory requires two independently trusted failure domains', () => {
   const otherDomain = rail({
     rail_id: 'vercel-qualified-advisory',
     gateway_plane: 'VERCEL_LIVE_PEER_PROJECT',
@@ -146,6 +159,8 @@ test('diverse advisory requires two independently qualified failure domains', ()
     failure_domain: 'vercel:qualified-peer',
     models: ['other/model'],
     structured_verified: false,
+    evidence_trust_state: 'SIGNED_ATTESTED',
+    evidence_source: 'VERCEL_PEER_ATTESTATION',
     latency_ms: 5000,
     evidence: '6'
   });
@@ -161,7 +176,7 @@ test('diverse advisory requires two independently qualified failure domains', ()
   assert.equal(plan.semantics.requires_supervisor_arbitration, true);
 });
 
-test('two qualified rails in one failure domain cannot fake diversity quorum', () => {
+test('two trusted rails in one failure domain cannot fake diversity quorum', () => {
   const sameDomain = rail({
     rail_id: 'supabase-second-advisory',
     gateway_plane: 'SUPABASE_PEER_DECISION',
@@ -189,6 +204,8 @@ test('tiebreak excludes a previously used failure domain', () => {
     failure_domain: 'vercel:independent-tiebreak',
     models: ['independent/model'],
     structured_verified: false,
+    evidence_trust_state: 'SIGNED_ATTESTED',
+    evidence_source: 'VERCEL_TIEBREAK_ATTESTATION',
     evidence: '8'
   });
   const plan = createMultiGatewayRoutePlan({
@@ -202,7 +219,43 @@ test('tiebreak excludes a previously used failure domain', () => {
   assert.equal(plan.excluded[0].reason, 'FAILURE_DOMAIN_NOT_INDEPENDENT');
 });
 
-test('stale evidence and availability-only peers cannot enter a quality route', () => {
+test('self-reported or unattested quality claims cannot enter automatic quality routing', () => {
+  const selfReported = rail({
+    rail_id: 'self-reported-quality',
+    gateway_plane: 'VERCEL_LIVE_PEER_PROJECT',
+    route_id: 'self/reported',
+    transport: 'VERCEL_FUNCTION_HTTP',
+    failure_domain: 'vercel:self-report',
+    models: ['claimed/model'],
+    evidence_trust_state: 'SELF_REPORTED',
+    evidence_source: 'CALLER_OBJECT',
+    evidence: 'c'
+  });
+  const unattested = rail({
+    rail_id: 'unattested-quality',
+    gateway_plane: 'VERCEL_AI_GATEWAY',
+    route_id: 'committee:free:v1',
+    transport: 'OPENAI_COMPAT_HTTP',
+    failure_domain: 'vercel:gateway',
+    models: ['claimed/model-2'],
+    evidence_trust_state: 'HASH_BOUND_ADVISORY_UNATTESTED',
+    evidence_source: 'ADVISORY_ENVELOPE',
+    evidence: 'd'
+  });
+  const plan = createMultiGatewayRoutePlan({
+    task_id: 'task-trust-fence',
+    strategy: 'STRUCTURED',
+    now: NOW,
+    rails: [selfReported, unattested, supabaseStructured]
+  });
+  assert.equal(plan.selected[0].rail_id, supabaseStructured.rail_id);
+  assert.deepEqual(
+    plan.excluded.filter((row) => row.reason === 'QUALIFICATION_EVIDENCE_UNTRUSTED').map((row) => row.rail_id).sort(),
+    ['self-reported-quality', 'unattested-quality']
+  );
+});
+
+test('stale evidence and availability-only peers cannot enter a quality route, but diagnostic qualification remains advisory', () => {
   const stale = { ...supabaseStructured, rail_id: 'stale', observed_at: '2026-08-29T08:00:00.000Z', evidence_sha256: '9'.repeat(64) };
   const availabilityOnly = rail({
     rail_id: 'tiny-availability',
@@ -214,6 +267,8 @@ test('stale evidence and availability-only peers cannot enter a quality route', 
     quality_verified: false,
     structured_verified: false,
     quorum_eligible: false,
+    evidence_trust_state: 'HASH_BOUND_ADVISORY_UNATTESTED',
+    evidence_source: 'LIVE_TRANSPORT_OBSERVATION',
     evidence: 'b'
   });
   assert.throws(() => createMultiGatewayRoutePlan({
@@ -231,6 +286,7 @@ test('stale evidence and availability-only peers cannot enter a quality route', 
     rails: [availabilityOnly]
   });
   assert.equal(probe.selected[0].rail_id, 'tiny-availability');
+  assert.equal(probe.selected[0].evidence_trust_state, 'HASH_BOUND_ADVISORY_UNATTESTED');
   assert.equal(probe.semantics.availability_is_not_quality, true);
   assert.equal(probe.policy.direct_action_allowed, false);
 });
