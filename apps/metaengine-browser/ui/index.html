@@ -1,3 +1,38 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><meta name="viewport" content="width=device-width,initial-scale=1"><title>METAENGINE Browser</title><link rel="stylesheet" href="metaengine://shell/app.css"></head>
-<body><header><div class="brand"><strong>METAENGINE</strong><span>Development Browser</span></div><nav><button data-cmd="BACK" title="Back">←</button><button data-cmd="FORWARD" title="Forward">→</button><button data-cmd="RELOAD" title="Reload">↻</button></nav><form id="addressForm"><input id="address" aria-label="Address" autocomplete="off" spellcheck="false"><button>Go</button></form><button id="newChat">+ ChatGPT</button><div id="compute" class="pill">Compute: …</div></header><section id="tabs" aria-label="Tabs"></section><script src="metaengine://shell/app.js"></script></body></html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>METAENGINE Browser TEST</title>
+  <link rel="stylesheet" href="metaengine://shell/app.css">
+</head>
+<body>
+  <header>
+    <div class="brand"><strong>METAENGINE</strong><span>Development Browser <b>TEST</b></span></div>
+    <nav><button data-cmd="BACK" title="Back">←</button><button data-cmd="FORWARD" title="Forward">→</button><button data-cmd="RELOAD" title="Reload">↻</button></nav>
+    <form id="addressForm"><input id="address" aria-label="Address" autocomplete="off" spellcheck="false"><button>Go</button></form>
+    <button id="newChat">+ ChatGPT</button>
+    <div id="compute" class="pill">Compute: …</div>
+    <button id="toggleConsole" class="accent">Dev Console</button>
+  </header>
+  <section id="tabs" aria-label="Tabs"></section>
+  <section id="devConsole" class="devConsole">
+    <div class="consoleToolbar">
+      <div><strong>Live Development Console</strong><span id="buildMeta">initializing…</span></div>
+      <div class="consoleActions"><button id="runSelfTest">Run self-test</button><button id="clearEvents">Clear events</button></div>
+    </div>
+    <div class="statusGrid">
+      <article class="statusCard"><div class="cardTitle">Development Plane <span id="dpBadge" class="badge">…</span></div><pre id="dpState">loading…</pre></article>
+      <article class="statusCard"><div class="cardTitle">Multi-gateway evidence <span id="gatewayBadge" class="badge">…</span></div><pre id="gatewayState">loading…</pre></article>
+      <article class="statusCard"><div class="cardTitle">Fleet / Compute <span id="fleetBadge" class="badge">…</span></div><pre id="fleetState">loading…</pre></article>
+      <article class="statusCard"><div class="cardTitle">Security fences <span id="securityBadge" class="badge">…</span></div><pre id="securityState">loading…</pre></article>
+    </div>
+    <div class="lowerGrid">
+      <article class="panel"><div class="panelTitle">Self-test <span id="selfTestBadge" class="badge">not run</span></div><div id="selfTest" class="checkList"></div></article>
+      <article class="panel eventsPanel"><div class="panelTitle">Runtime events <span id="eventCount" class="muted">0</span></div><div id="events" class="eventList"></div></article>
+    </div>
+  </section>
+  <script src="metaengine://shell/app.js"></script>
+</body>
+</html>
