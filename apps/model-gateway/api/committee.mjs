@@ -56,18 +56,22 @@ export default async function handler(request, response) {
       maxOutputTokens: task.maxOutputTokens,
       callModel: callGateway
     });
-    // The supervisor envelope independently re-validates the committee receipt.
-    // It cannot synthesize consensus or authorize an action.
-    const supervisorAdvisory = toSupervisorAdvisory(committee);
-    const body = {
+    const enrichedCommittee = {
       ...committee,
       request_sha256: requestHash,
       zero_spend_verified: true,
       zero_spend_evidence: zeroSpendEvidence,
       privacy_classification: zeroSpendEvidence.privacy?.classification || 'UNKNOWN',
       confidential_data_supported: false,
-      supervisor_advisory: supervisorAdvisory,
       authority_effect: false
+    };
+    // The supervisor envelope independently re-validates and hashes the full
+    // pricing/privacy/provenance-bound committee receipt. It cannot synthesize
+    // consensus or authorize an action.
+    const supervisorAdvisory = toSupervisorAdvisory(enrichedCommittee);
+    const body = {
+      ...enrichedCommittee,
+      supervisor_advisory: supervisorAdvisory
     };
     return send(response, committee.quorum_met ? 200 : 503, body);
   } catch (error) {

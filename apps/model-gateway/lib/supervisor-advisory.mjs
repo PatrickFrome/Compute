@@ -17,6 +17,45 @@ function requireString(value, code) {
   return value.trim();
 }
 
+function requireSha256(value, code) {
+  if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) throw new Error(code);
+  return value;
+}
+
+export function canonicalJson(value) {
+  if (value === null) return 'null';
+  if (typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value);
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error('canonical_json_non_finite_number');
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(',')}]`;
+  if (typeof value === 'object') {
+    const keys = Object.keys(value).sort();
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+  }
+  throw new Error('canonical_json_unsupported_value');
+}
+
+function validateZeroSpendEvidence(receipt, requestedModels) {
+  requireBoolean(receipt.zero_spend_verified, true, 'committee_zero_spend_verification_required');
+  requireBoolean(receipt.confidential_data_supported, false, 'committee_confidentiality_claim_forbidden');
+  requireSha256(receipt.request_sha256, 'committee_request_hash_required');
+  const evidence = requireObject(receipt.zero_spend_evidence, 'committee_zero_spend_evidence_required');
+  if (!Array.isArray(evidence.models) || evidence.models.length !== 3) {
+    throw new Error('committee_zero_spend_models_invalid');
+  }
+  evidence.models.forEach((item, index) => {
+    requireObject(item, 'committee_zero_spend_model_evidence_invalid');
+    if (item.model !== requestedModels[index]) throw new Error('committee_zero_spend_model_order_mismatch');
+    if (item.zero_price !== true) throw new Error('committee_zero_price_evidence_required');
+  });
+  const privacy = requireObject(evidence.privacy, 'committee_privacy_evidence_required');
+  const classification = requireString(privacy.classification, 'committee_privacy_classification_required');
+  if (receipt.privacy_classification !== classification) throw new Error('committee_privacy_classification_mismatch');
+  return evidence;
+}
+
 export function validateCommitteeReceipt(receipt) {
   requireObject(receipt, 'committee_receipt_object_required');
   if (receipt.schema !== COMMITTEE_SCHEMA) throw new Error('committee_receipt_schema_invalid');
@@ -30,6 +69,7 @@ export function validateCommitteeReceipt(receipt) {
   if (!Array.isArray(receipt.members) || receipt.members.length !== 3) throw new Error('committee_members_invalid');
   if (!Array.isArray(receipt.providers) || receipt.providers.length !== 3) throw new Error('committee_providers_invalid');
   if (new Set(receipt.providers).size !== 3) throw new Error('committee_provider_diversity_invalid');
+  if (!Array.isArray(receipt.models_requested) || receipt.models_requested.length !== 3) throw new Error('committee_models_requested_invalid');
 
   const members = receipt.members.map((member, index) => {
     requireObject(member, `committee_member_${index + 1}_invalid`);
@@ -39,6 +79,7 @@ export function validateCommitteeReceipt(receipt) {
     const provider = requireString(member.provider_family, 'committee_member_provider_required');
     if (provider !== receipt.providers[index]) throw new Error('committee_member_provider_order_mismatch');
     const requestedModel = requireString(member.requested_model, 'committee_member_requested_model_required');
+    if (requestedModel !== receipt.models_requested[index]) throw new Error('committee_member_requested_model_order_mismatch');
     if (!requestedModel.startsWith(`${provider}/`)) throw new Error('committee_member_provider_model_mismatch');
     if (member.status !== 'SUCCESS' && member.status !== 'FAILED') throw new Error('committee_member_status_invalid');
 
@@ -46,7 +87,7 @@ export function validateCommitteeReceipt(receipt) {
       const servedModel = requireString(member.served_model, 'committee_member_served_model_required');
       if (servedModel !== requestedModel) throw new Error('committee_member_served_model_mismatch');
       const answer = requireString(member.answer, 'committee_member_answer_required');
-      requireString(member.response_sha256, 'committee_member_response_hash_required');
+      requireSha256(member.response_sha256, 'committee_member_response_hash_required');
       return { ...member, answer };
     }
 
@@ -63,12 +104,13 @@ export function validateCommitteeReceipt(receipt) {
     throw new Error('committee_status_mismatch');
   }
 
-  return { receipt, members, successes, quorumMet: expectedQuorum };
+  const zeroSpendEvidence = validateZeroSpendEvidence(receipt, receipt.models_requested);
+  return { receipt, members, successes, quorumMet: expectedQuorum, zeroSpendEvidence };
 }
 
 export function toSupervisorAdvisory(receipt) {
   const validated = validateCommitteeReceipt(receipt);
-  const committeeReceiptSha256 = sha256(JSON.stringify(receipt));
+  const committeeReceiptSha256 = sha256(canonicalJson(receipt));
   const members = validated.members.map((member) => ({
     member_id: member.member_id,
     status: member.status,
@@ -87,7 +129,11 @@ export function toSupervisorAdvisory(receipt) {
     schema: ADVISORY_SCHEMA,
     source: 'F1_ZERO_SPEND_COMMITTEE',
     task_id: receipt.task_id,
+    request_sha256: receipt.request_sha256,
     committee_receipt_sha256: committeeReceiptSha256,
+    zero_spend_verified: true,
+    zero_spend_evidence_sha256: sha256(canonicalJson(validated.zeroSpendEvidence)),
+    privacy_classification: receipt.privacy_classification,
     quorum_met: validated.quorumMet,
     availability_quorum_only: true,
     semantic_consensus_evaluated: false,
