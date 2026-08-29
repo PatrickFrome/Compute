@@ -1,0 +1,162 @@
+name: A2 Browser R8B Action Graph Actuation Fence
+
+on:
+  push:
+    branches:
+      - work/a2-browser-r8b-action-fence
+    paths:
+      - 'coordination/browser-shared/durable-action-graph-**'
+      - 'coordination/browser-shared/durable-action-fence-v1.mjs'
+      - 'coordination/browser-shared/tests/durable-action-graph-**'
+      - 'coordination/browser-shared/tests/durable-action-fence-**'
+      - 'research/A2_BROWSER_R8B_ACTION_GRAPH_ACTUATION_FENCE_**'
+      - '.github/workflows/a2-browser-r8b-action-fence.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r8b-action-fence-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Establish exact parent and unchanged dependency surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          PARENT=c7d8fa332f83310b81098611ff8c6f8664a03122
+          git merge-base --is-ancestor "$PARENT" "$GITHUB_SHA"
+          node --version | tee "$RUNNER_TEMP/r8b-node-version.txt"
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+          git diff --name-only "$PARENT" "$GITHUB_SHA" | tee "$RUNNER_TEMP/r8b-changed-files.txt"
+          if grep -Eq '(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.(toml|lock))$' "$RUNNER_TEMP/r8b-changed-files.txt"; then
+            echo 'R8B unexpectedly changed dependency manifests' >&2
+            exit 1
+          fi
+
+      - name: Prove static typed-fence and authority contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check coordination/browser-shared/durable-action-graph-core-v1.mjs
+          node --check coordination/browser-shared/durable-action-graph-store-v1.mjs
+          node --check coordination/browser-shared/durable-action-fence-v1.mjs
+          python3 - <<'PY'
+          from pathlib import Path
+          core = Path('coordination/browser-shared/durable-action-graph-core-v1.mjs').read_text()
+          fence = Path('coordination/browser-shared/durable-action-fence-v1.mjs').read_text()
+          joined = core + '\n' + fence
+          required = [
+              "'ACTION_NO_EFFECT'", 'prepareNoEffect', "'COMMITTED'", "'NO_EFFECT'", "'AMBIGUOUS'",
+              'automatic_retry_allowed: false', 'fresh_authority_required',
+              'action_fence_terminal_persistence_failed', 'UNTYPED_ACTUATOR_THROW',
+              'ACTION_GRAPH_LEGACY_VERSION', "ACTION_GRAPH_VERSION = '1.1.0'"
+          ]
+          for token in required:
+              if token not in joined:
+                  raise SystemExit(f'missing R8B invariant: {token}')
+          forbidden = [
+              'Runtime.evaluate', 'chrome.debugger', 'Input.dispatchMouseEvent',
+              "node:child_process", 'execFile(', 'spawn(',
+              'authority_effect: true', 'actuation_eligible: true',
+              'retryAction', 'retryEffect', 'automatic_retry_allowed: true'
+          ]
+          for token in forbidden:
+              if token in joined:
+                  raise SystemExit(f'forbidden R8B authority/retry token: {token}')
+          PY
+
+      - name: Run R8B typed outcome and legacy migration tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            coordination/browser-shared/tests/durable-action-fence-v1.test.mjs \
+            coordination/browser-shared/tests/durable-action-graph-legacy-v1.test.mjs \
+            | tee "$RUNNER_TEMP/r8b-tests.log"
+
+      - name: Run full R8A graph regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            coordination/browser-shared/tests/durable-action-graph-v1.test.mjs \
+            coordination/browser-shared/tests/durable-action-graph-forgery-v1.test.mjs \
+            | tee "$RUNNER_TEMP/r8b-r8a-regressions.log"
+
+      - name: Run inherited R7M source-boundary regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            coordination/browser-shared/tests/skill-source-adapter-linux-v1.test.mjs \
+            coordination/browser-shared/tests/skill-package-identity-v1.test.mjs \
+            coordination/browser-shared/tests/skill-registry-v1.test.mjs \
+            | tee "$RUNNER_TEMP/r8b-r7m-node-regressions.log"
+          cd coordination/browser-skill-source-linux
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --all-targets -- --nocapture | tee "$RUNNER_TEMP/r8b-r7m-rust-regressions.log"
+
+      - name: Build deterministic R8B evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=dist/a2-browser-r8b
+          mkdir -p "$OUT/evidence"
+          cp "$RUNNER_TEMP/r8b-node-version.txt" "$OUT/evidence/R8B_NODE_VERSION.txt"
+          cp "$RUNNER_TEMP/r8b-changed-files.txt" "$OUT/evidence/R8B_CHANGED_FILES.txt"
+          cp "$RUNNER_TEMP/r8b-tests.log" "$OUT/evidence/R8B_TESTS.log"
+          cp "$RUNNER_TEMP/r8b-r8a-regressions.log" "$OUT/evidence/R8B_R8A_REGRESSIONS.log"
+          cp "$RUNNER_TEMP/r8b-r7m-node-regressions.log" "$OUT/evidence/R8B_R7M_NODE_REGRESSIONS.log"
+          cp "$RUNNER_TEMP/r8b-r7m-rust-regressions.log" "$OUT/evidence/R8B_R7M_RUST_REGRESSIONS.log"
+          printf '%s\n' "$GITHUB_SHA" > "$OUT/evidence/SOURCE_COMMIT.txt"
+          printf '%s\n' 'c7d8fa332f83310b81098611ff8c6f8664a03122' > "$OUT/evidence/PARENT_VERIFIED_COMMIT.txt"
+          cat > "$OUT/evidence/R8B_CLAIMS.json" <<'JSON'
+          {"milestone":"R8B_ACTION_GRAPH_ACTUATION_FENCE","graph_version":"1.1.0","legacy_r8a_replay":true,"typed_post_seal_outcomes":["COMMITTED","NO_EFFECT","AMBIGUOUS"],"preflight_abort_before_effect":true,"durable_seal_before_actuator":true,"untyped_post_seal_failure_is_ambiguous":true,"automatic_retry_allowed":false,"terminal_persistence_failure_recovery_required":true,"authority_effect":false,"actuation_eligible":false,"real_mv3_transport_integration":false,"new_dependency_packages":0}
+          JSON
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf "$OUT/A2_BROWSER_R8B_ACTION_GRAPH_ACTUATION_FENCE.tar" \
+            coordination/browser-shared/durable-action-graph-core-v1.mjs \
+            coordination/browser-shared/durable-action-graph-store-v1.mjs \
+            coordination/browser-shared/durable-action-fence-v1.mjs \
+            coordination/browser-shared/tests/durable-action-graph-v1.test.mjs \
+            coordination/browser-shared/tests/durable-action-graph-forgery-v1.test.mjs \
+            coordination/browser-shared/tests/durable-action-graph-legacy-v1.test.mjs \
+            coordination/browser-shared/tests/durable-action-fence-v1.test.mjs \
+            research/A2_BROWSER_R8B_ACTION_GRAPH_ACTUATION_FENCE_PRE_RESEARCH_2026-08-29.md \
+            .github/workflows/a2-browser-r8b-action-fence.yml \
+            "$OUT/evidence"
+          if test -f research/A2_BROWSER_R8B_ACTION_GRAPH_ACTUATION_FENCE_POST_RESEARCH_2026-08-29.md; then
+            tar --append --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+              -f "$OUT/A2_BROWSER_R8B_ACTION_GRAPH_ACTUATION_FENCE.tar" \
+              research/A2_BROWSER_R8B_ACTION_GRAPH_ACTUATION_FENCE_POST_RESEARCH_2026-08-29.md
+          fi
+          sha256sum "$OUT/A2_BROWSER_R8B_ACTION_GRAPH_ACTUATION_FENCE.tar" > "$OUT/R8B_SHA256SUMS.txt"
+
+      - name: Attest R8B build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373
+        with:
+          subject-path: dist/a2-browser-r8b/A2_BROWSER_R8B_ACTION_GRAPH_ACTUATION_FENCE.tar
+
+      - name: Upload R8B evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1
+        with:
+          name: a2-browser-r8b-action-fence-${{ github.sha }}
+          path: |
+            dist/a2-browser-r8b/A2_BROWSER_R8B_ACTION_GRAPH_ACTUATION_FENCE.tar
+            dist/a2-browser-r8b/R8B_SHA256SUMS.txt
+            dist/a2-browser-r8b/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

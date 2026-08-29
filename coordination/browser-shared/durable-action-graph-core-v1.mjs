@@ -1,15 +1,24 @@
 import crypto from 'node:crypto';
 
-export const ACTION_GRAPH_VERSION = '1.0.0';
+export const ACTION_GRAPH_VERSION = '1.1.0';
+export const ACTION_GRAPH_LEGACY_VERSION = '1.0.0';
 export const ACTION_GRAPH_LIMITS = Object.freeze({ maxActions: 4096, maxEvents: 16384, maxParents: 32 });
 export const ACTION_GRAPH_ZERO_HASH = `sha256:${'0'.repeat(64)}`;
 
+const ACCEPTED_VERSIONS = new Set([ACTION_GRAPH_LEGACY_VERSION, ACTION_GRAPH_VERSION]);
 const ID_RE = /^[a-z0-9][a-z0-9._:-]{2,127}$/;
 const RESOURCE_RE = /^[a-z0-9][a-z0-9._:-]{2,95}$/;
 const KIND_RE = /^[A-Z][A-Z0-9_]{1,31}$/;
 const REASON_RE = /^[A-Z][A-Z0-9_]{1,63}$/;
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
-const TYPES = new Set(['ACTION_DECLARED', 'EFFECT_INTENT_SEALED', 'ACTION_COMMITTED', 'ACTION_AMBIGUOUS', 'ACTION_ABORTED']);
+const TYPES = new Set([
+  'ACTION_DECLARED',
+  'EFFECT_INTENT_SEALED',
+  'ACTION_COMMITTED',
+  'ACTION_NO_EFFECT',
+  'ACTION_AMBIGUOUS',
+  'ACTION_ABORTED',
+]);
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
 function stable(value) {
@@ -50,9 +59,9 @@ function digest(value, code) {
   return v;
 }
 function exactKeys(value, expected, code) {
-  const a = Object.keys(value).sort(cmp);
-  const b = [...expected].sort(cmp);
-  if (a.length !== b.length || a.some((key, i) => key !== b[i])) throw new ActionGraphError(code);
+  const actual = Object.keys(value).sort(cmp);
+  const wanted = [...expected].sort(cmp);
+  if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) throw new ActionGraphError(code);
 }
 function normalizeNamespace(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ActionGraphError('action_graph_namespace_invalid');
@@ -79,6 +88,7 @@ function validateShape(event) {
     ACTION_DECLARED: ['action_kind', 'intent_digest', 'namespace', 'depends_on'],
     EFFECT_INTENT_SEALED: ['pre_effect_evidence_digest'],
     ACTION_COMMITTED: ['effect_receipt_digest'],
+    ACTION_NO_EFFECT: ['no_effect_evidence_digest'],
     ACTION_AMBIGUOUS: ['uncertainty_digest'],
     ACTION_ABORTED: ['reason_code'],
   }[event.event_type];
@@ -122,6 +132,7 @@ function apply(event, actions) {
   const next = { ...actions.get(event.action_id) };
   if (event.event_type === 'EFFECT_INTENT_SEALED') { next.state = 'EFFECT_INTENT_SEALED'; next.sealed_seq = event.seq; }
   if (event.event_type === 'ACTION_COMMITTED') { next.state = 'COMMITTED'; next.terminal_seq = event.seq; }
+  if (event.event_type === 'ACTION_NO_EFFECT') { next.state = 'NO_EFFECT'; next.terminal_seq = event.seq; }
   if (event.event_type === 'ACTION_AMBIGUOUS') { next.state = 'AMBIGUOUS'; next.terminal_seq = event.seq; }
   if (event.event_type === 'ACTION_ABORTED') { next.state = 'ABORTED'; next.terminal_seq = event.seq; }
   actions.set(event.action_id, Object.freeze(next));
@@ -129,7 +140,8 @@ function apply(event, actions) {
 
 function normalizeVerifiedEvent(raw, graphId, seq, prevHash, actions) {
   validateShape(raw);
-  if (raw.version !== ACTION_GRAPH_VERSION || raw.graph_id !== graphId) throw new ActionGraphError('action_graph_event_identity_mismatch');
+  if (!ACCEPTED_VERSIONS.has(raw.version) || raw.graph_id !== graphId) throw new ActionGraphError('action_graph_event_identity_mismatch');
+  if (raw.event_type === 'ACTION_NO_EFFECT' && raw.version !== ACTION_GRAPH_VERSION) throw new ActionGraphError('action_graph_no_effect_version_invalid');
   if (raw.seq !== seq || raw.prev_hash !== prevHash) throw new ActionGraphError('action_graph_sequence_or_chain_invalid');
   id(raw.action_id, 'action_graph_action_id_invalid');
   digest(raw.prev_hash, 'action_graph_prev_hash_invalid');
@@ -142,6 +154,7 @@ function normalizeVerifiedEvent(raw, graphId, seq, prevHash, actions) {
     raw.depends_on = normalizeParents(raw.depends_on);
   } else if (raw.event_type === 'EFFECT_INTENT_SEALED') digest(raw.pre_effect_evidence_digest, 'action_graph_pre_effect_evidence_digest_invalid');
   else if (raw.event_type === 'ACTION_COMMITTED') digest(raw.effect_receipt_digest, 'action_graph_effect_receipt_digest_invalid');
+  else if (raw.event_type === 'ACTION_NO_EFFECT') digest(raw.no_effect_evidence_digest, 'action_graph_no_effect_evidence_digest_invalid');
   else if (raw.event_type === 'ACTION_AMBIGUOUS') digest(raw.uncertainty_digest, 'action_graph_uncertainty_digest_invalid');
   else if (typeof raw.reason_code !== 'string' || !REASON_RE.test(raw.reason_code)) throw new ActionGraphError('action_graph_abort_reason_invalid');
   validateTransition(raw, actions);
@@ -183,6 +196,11 @@ export class ActionGraphState {
   prepareCommit({ actionId, effectReceiptDigest }) {
     return this.#prepare('ACTION_COMMITTED', id(actionId, 'action_graph_action_id_invalid'), {
       effect_receipt_digest: digest(effectReceiptDigest, 'action_graph_effect_receipt_digest_invalid'),
+    });
+  }
+  prepareNoEffect({ actionId, noEffectEvidenceDigest }) {
+    return this.#prepare('ACTION_NO_EFFECT', id(actionId, 'action_graph_action_id_invalid'), {
+      no_effect_evidence_digest: digest(noEffectEvidenceDigest, 'action_graph_no_effect_evidence_digest_invalid'),
     });
   }
   prepareAmbiguous({ actionId, uncertaintyDigest }) {

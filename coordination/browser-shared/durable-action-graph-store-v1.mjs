@@ -3,6 +3,7 @@ import { constants as C } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
+  ACTION_GRAPH_LEGACY_VERSION,
   ACTION_GRAPH_LIMITS,
   ACTION_GRAPH_VERSION,
   ACTION_GRAPH_ZERO_HASH,
@@ -13,6 +14,7 @@ import {
 
 const MAX_JOURNAL_BYTES = 32 * 1024 * 1024;
 const MAX_HEAD_BYTES = 16 * 1024;
+const ACCEPTED_HEAD_VERSIONS = new Set([ACTION_GRAPH_LEGACY_VERSION, ACTION_GRAPH_VERSION]);
 
 async function privateDir(dir) {
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
@@ -83,7 +85,7 @@ function parseJournal(text) {
 function validateHead(raw, state, events) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ActionGraphError('action_graph_head_invalid');
   if (Object.keys(raw).sort().join(',') !== 'event_hash,graph_id,seq,version') throw new ActionGraphError('action_graph_head_fields_invalid');
-  if (raw.version !== ACTION_GRAPH_VERSION || raw.graph_id !== state.graphId) throw new ActionGraphError('action_graph_head_identity_mismatch');
+  if (!ACCEPTED_HEAD_VERSIONS.has(raw.version) || raw.graph_id !== state.graphId) throw new ActionGraphError('action_graph_head_identity_mismatch');
   if (!Number.isSafeInteger(raw.seq) || raw.seq < 0 || raw.seq > state.eventCount) throw new ActionGraphError('action_graph_head_sequence_invalid');
   const expected = raw.seq === 0 ? ACTION_GRAPH_ZERO_HASH : events[raw.seq - 1]?.event_hash;
   if (raw.event_hash !== expected) throw new ActionGraphError('action_graph_head_history_mismatch');
@@ -116,7 +118,7 @@ export class DurableActionGraphStore {
       try { head = JSON.parse(headText); } catch { throw new ActionGraphError('action_graph_head_json_invalid'); }
       validateHead(head, state, events);
     }
-    if (!head || head.seq !== state.eventCount) {
+    if (!head || head.seq !== state.eventCount || head.version !== ACTION_GRAPH_VERSION) {
       await writeHeadAtomic(headPath, makeHead(state.graphId, state.eventCount, state.lastHash));
     }
     return new DurableActionGraphStore(DurableActionGraphStore, { state, journalPath, headPath });
@@ -126,6 +128,7 @@ export class DurableActionGraphStore {
   declareAction(input) { return this.#enqueue(() => this.#persist(this.#state.prepareDeclared(input))); }
   sealEffectIntent(input) { return this.#enqueue(() => this.#persist(this.#state.prepareSeal(input))); }
   commitEffect(input) { return this.#enqueue(() => this.#persist(this.#state.prepareCommit(input))); }
+  markNoEffect(input) { return this.#enqueue(() => this.#persist(this.#state.prepareNoEffect(input))); }
   markAmbiguous(input) { return this.#enqueue(() => this.#persist(this.#state.prepareAmbiguous(input))); }
   abortAction(input) { return this.#enqueue(() => this.#persist(this.#state.prepareAbort(input))); }
 
