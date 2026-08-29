@@ -121,11 +121,21 @@ export class SelfUpdateRuntime {
   async cycle({ force = false } = {}) {
     if (!this.#updater) return this.snapshot();
     const now = Date.now();
-    if (!['APPROVED_DOWNLOAD','DOWNLOADING','READY_RESTART','RESTARTING'].includes(this.#state.state) && (force || now - this.#lastCheck >= this.#intervalMs)) {
+    const latchedFailure = ['ERROR','REJECTED_METADATA'].includes(this.#state.state);
+    const busy = ['APPROVED_DOWNLOAD','DOWNLOADING','READY_RESTART','RESTARTING'].includes(this.#state.state);
+    if (!busy && (!latchedFailure || force) && (force || now - this.#lastCheck >= this.#intervalMs)) {
       this.#lastCheck = now;
       this.#state.last_check_at = new Date(now).toISOString();
-      try { await this.#updater.checkForUpdates(); }
-      catch (e) { this.#state.state = 'ERROR'; this.#state.last_error = clipError(e); }
+      try {
+        if (force && latchedFailure) {
+          this.#state.last_error = null;
+          this.#state.metadata_verified = false;
+          this.#state.available_version = null;
+          this.#state.downloaded_version = null;
+          this.#state.candidate_file_count = 0;
+        }
+        await this.#updater.checkForUpdates();
+      } catch (e) { this.#state.state = 'ERROR'; this.#state.last_error = clipError(e); }
     }
     if (this.#state.state === 'READY_RESTART' && await this.#canRestart()) {
       this.#state.state = 'RESTARTING';
