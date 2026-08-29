@@ -43,6 +43,7 @@
     "operator-semantic-perception.js",
     "operator-oopif-perception.js",
     "operator-semantic-actions.js",
+    "operator-typed-click-outcome.js",
     "supervisor-authority.js",
     "supervisor-chat-session.js",
     "trusted-supervisor-chat.js",
