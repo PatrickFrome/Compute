@@ -1,4 +1,6 @@
 import { SUPERVISOR_DEVICE_PROFILE } from './supervisor-device-identity.mjs';
+import { SupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime.mjs';
+import { SelfUpdateRuntime } from './self-update-runtime.mjs';
 
 export const NATIVE_SUPERVISOR_BASE = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1';
 export const NATIVE_SUPERVISOR_RUNTIME_PATH = '/a2-browser-native-supervisor-v1';
@@ -25,6 +27,8 @@ export class NativeSupervisorClient {
   #enrollmentStatus = 'UNINITIALIZED';
   #supervisorMode = 'CONTROL';
   #armed = true;
+  #lifecycle = null;
+  #selfUpdate = null;
 
   constructor({ identity, fetchImpl = globalThis.fetch, getState, executeCommand, version, intervalMs = 2000 }) {
     if (!identity) throw new Error('native_supervisor_identity_required');
@@ -37,6 +41,20 @@ export class NativeSupervisorClient {
     this.#executeCommand = executeCommand;
     this.#version = String(version || '0.0.0');
     this.#intervalMs = Math.max(1000, Number(intervalMs || 2000));
+    this.#lifecycle = new SupervisorLifecycleRuntime({
+      getState: this.#getState,
+      executeCommand: async (command) => {
+        const action = String(command?.action || '');
+        if (!READ_ONLY_ACTIONS.has(action)) {
+          if (this.#supervisorMode !== 'CONTROL') throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
+          if (!this.#armed) throw new Error('native_supervisor_disarmed');
+        }
+        return this.#executeCommand(command);
+      },
+    });
+    this.#selfUpdate = new SelfUpdateRuntime({
+      canRestart: async () => this.#currentCommand == null && this.#lifecycle?.isQuiescent() === true,
+    });
   }
 
   snapshot() {
@@ -54,6 +72,8 @@ export class NativeSupervisorClient {
       identity: this.#identity.snapshot(),
       supervisor_mode: this.#supervisorMode,
       armed: this.#armed,
+      lifecycle: this.#lifecycle?.snapshot() || null,
+      self_update: this.#selfUpdate?.snapshot() || null,
       arbitrary_eval: false,
       os_shell_authority: false,
     };
@@ -64,6 +84,8 @@ export class NativeSupervisorClient {
     this.#running = true;
     this.#startedAt = new Date().toISOString();
     await this.#identity.ensure();
+    await this.#lifecycle.start().catch((error) => { this.#lastError = `lifecycle_start:${clipError(error)}`; });
+    await this.#selfUpdate.start().catch((error) => { this.#lastError = `self_update_start:${clipError(error)}`; });
     await this.cycle().catch(() => {});
     this.#schedule();
     return this.snapshot();
@@ -71,6 +93,7 @@ export class NativeSupervisorClient {
 
   stop() {
     this.#running = false;
+    this.#lifecycle?.stop?.();
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
   }
@@ -168,6 +191,8 @@ export class NativeSupervisorClient {
         operator_mode: this.#supervisorMode === 'CONTROL' ? 'CONTROL' : 'OBSERVE',
         started_at: this.#startedAt,
         last_error: this.#lastError,
+        supervisor_lifecycle: this.#lifecycle?.snapshot() || null,
+        self_update: this.#selfUpdate?.snapshot() || null,
       },
       last_command_id: this.#lastCommandId,
       last_command_status: this.#lastCommandStatus,
@@ -255,14 +280,15 @@ export class NativeSupervisorClient {
     if (this.#cyclePromise) return this.#cyclePromise;
     this.#cyclePromise = (async () => {
       try {
+        await this.#lifecycle?.cycle().catch((error) => { this.#lastError = `lifecycle:${clipError(error)}`; });
+        await this.#selfUpdate?.cycle().catch((error) => { this.#lastError = `self_update:${clipError(error)}`; });
         const identity = await this.ensureEnrollment();
-        if (!identity?.device_id) {
-          this.#lastError = null;
-          return this.snapshot();
-        }
+        if (!identity?.device_id) return this.snapshot();
         await this.#heartbeat();
         const command = await this.#nextCommand();
         if (command) await this.#runCommand(command);
+        await this.#lifecycle?.cycle().catch(() => {});
+        await this.#selfUpdate?.cycle().catch(() => {});
         this.#lastError = null;
         return this.snapshot();
       } catch (error) {
