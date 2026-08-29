@@ -203,31 +203,53 @@ jobs:
 
             $traceDeadline = (Get-Date).AddSeconds(10)
             $verified = $false
-            $restarting = $false
+            $feedActive = $false
             do {
               $rows = @()
               if (Test-Path $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE) {
                 try { $rows = @(Get-Content $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json }) } catch { $rows = @() }
               }
               $verified = [bool]($rows | Where-Object { $_.metadata_verified -eq $true -and [string]$_.available_version -eq $target })
-              $restarting = [bool]($rows | Where-Object { $_.state -eq 'RESTARTING' })
-              if ($verified -and $restarting) { break }
+              $feedActive = [bool]($rows | Where-Object { $_.ci_test_feed_active -eq $true })
+              if ($verified -and $feedActive) { break }
               Start-Sleep -Milliseconds 200
             } while ((Get-Date) -lt $traceDeadline)
             if (-not $verified) { throw 'self_update_verified_target_not_observed' }
-            if (-not ($rows | Where-Object { $_.ci_test_feed_active -eq $true })) { throw 'self_update_ci_feed_not_active' }
-            if (-not $restarting) { throw 'self_update_restarting_state_not_observed' }
+            if (-not $feedActive) { throw 'self_update_ci_feed_not_active' }
 
+            # Do not fail on an intermediate RESTARTING read before NSIS has finished.
+            # The exact N+1 successor is the stronger physical proof that quitAndInstall completed.
             $deadline = (Get-Date).AddSeconds(90)
             while (-not (Test-Path $env:METAENGINE_SELF_UPDATE_SUCCESSOR_TRACE) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
-            if (-not (Test-Path $env:METAENGINE_SELF_UPDATE_SUCCESSOR_TRACE)) { throw 'self_update_forced_successor_trace_missing' }
+            if (-not (Test-Path $env:METAENGINE_SELF_UPDATE_SUCCESSOR_TRACE)) {
+              Get-Content $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE -ErrorAction SilentlyContinue
+              Get-Content "$env:RUNNER_TEMP\self-update-smoke.out" -ErrorAction SilentlyContinue
+              Get-Content "$env:RUNNER_TEMP\self-update-smoke.err" -ErrorAction SilentlyContinue
+              throw 'self_update_forced_successor_trace_missing'
+            }
             $successor = Get-Content $env:METAENGINE_SELF_UPDATE_SUCCESSOR_TRACE -Raw | ConvertFrom-Json
             if ([string]$successor.version -ne $target) { throw "self_update_successor_version_mismatch:$($successor.version):$target" }
             if ($successor.primary_instance -ne $true) { throw 'self_update_successor_not_primary' }
+
+            # After successor exists, require durable readback of the pre-install RESTARTING state as secondary evidence.
+            $restartDeadline = (Get-Date).AddSeconds(10)
+            $restarting = $false
+            do {
+              $rows = @()
+              if (Test-Path $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE) {
+                try { $rows = @(Get-Content $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json }) } catch { $rows = @() }
+              }
+              $restarting = [bool]($rows | Where-Object { $_.state -eq 'RESTARTING' })
+              if ($restarting) { break }
+              Start-Sleep -Milliseconds 200
+            } while ((Get-Date) -lt $restartDeadline)
+            if (-not $restarting) { throw 'self_update_restarting_state_not_durable_after_successor' }
+
             "source_pid=$sourcePid" | Set-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
             "target_version=$target" | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
             "successor_pid=$($successor.pid)" | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
             'metadata_verified=PASS' | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
+            'restart_state_durable=PASS' | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
             'forced_relaunch=PASS' | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
           } finally {
             if ($server -and -not $server.HasExited) { try { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue } catch {} }
@@ -298,12 +320,51 @@ jobs:
             $source = Join-Path $env:RUNNER_TEMP $file
             if (Test-Path $source) { Copy-Item $source self-update-evidence\ }
           }
-          git rev-parse HEAD | Set-Content self-update-evidence\git-head.txt
+          $head = (git rev-parse HEAD).Trim()
+          $head | Set-Content self-update-evidence\git-head.txt
+
+          $proofPath = "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
+          if (Test-Path $proofPath) {
+            $proof = Get-Content $proofPath -Raw
+            if ($proof -match 'physical_singleton=PASS') {
+              $installer = Get-Item ((Get-Content "$env:RUNNER_TEMP\target-installer-path.txt").Trim())
+              $blockmap = Get-Item ((Get-Content "$env:RUNNER_TEMP\target-blockmap-path.txt").Trim())
+              $devYml = Get-Item ((Get-Content "$env:RUNNER_TEMP\target-dev-yml-path.txt").Trim())
+              $expected = (Get-Content "$env:RUNNER_TEMP\target-sha256.txt").Trim()
+              $actual = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ($actual -ne $expected) { throw 'verified_target_digest_changed_before_staging' }
+              Copy-Item $installer.FullName self-update-evidence\
+              Copy-Item $blockmap.FullName self-update-evidence\
+              Copy-Item $devYml.FullName self-update-evidence\dev.yml
+              $target = (Get-Content "$env:RUNNER_TEMP\target-version.txt").Trim()
+              $manifest = [ordered]@{
+                schema = 'metaengine.browser.self-update-e2e-manifest.v1'
+                version = $target
+                git_sha = $head
+                run_id = '${{ github.run_id }}'
+                run_attempt = '${{ github.run_attempt }}'
+                installer_name = $installer.Name
+                installer_sha256 = $actual
+                blockmap_name = $blockmap.Name
+                update_channel = 'dev'
+                update_metadata = 'dev.yml'
+                physical_n_to_n_plus_1 = $true
+                forced_successor = $true
+                profile_continuity = $true
+                single_install_directory = $true
+                physical_singleton = $true
+                development_channel = $true
+                production_safe = $false
+              } | ConvertTo-Json -Depth 4
+              $manifest | Set-Content self-update-evidence\verified-self-update-manifest.json
+            }
+          }
 
       - name: Upload self-update evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: metaengine-browser-self-update-e2e-${{ github.sha }}-${{ github.run_attempt }}
+          name: metaengine-browser-self-update-e2e-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
           path: self-update-evidence/
           if-no-files-found: error
+          compression-level: 0
