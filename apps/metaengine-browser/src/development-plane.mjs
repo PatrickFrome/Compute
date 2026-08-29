@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-export const DEVELOPMENT_PLANE_VERSION = '0.3.0';
+export const DEVELOPMENT_PLANE_VERSION = '0.4.0';
 export const DEVELOPMENT_PLANE_PROTOCOL = 'metaengine.development-plane.v1';
 export const DEVELOPMENT_PLANE_CAPABILITIES = Object.freeze([
   'HEALTH',
@@ -11,6 +11,7 @@ export const DEVELOPMENT_PLANE_CAPABILITIES = Object.freeze([
   'CANDIDATE_CAPSULE_VERIFY',
   'VERIFICATION_SANDBOX_PLAN_CREATE',
   'VERIFICATION_SANDBOX_PLAN_VERIFY',
+  'ADVISORY_EVIDENCE_VERIFY',
 ]);
 
 const PAYLOAD_CAPABILITIES = new Set([
@@ -18,6 +19,7 @@ const PAYLOAD_CAPABILITIES = new Set([
   'CANDIDATE_CAPSULE_VERIFY',
   'VERIFICATION_SANDBOX_PLAN_CREATE',
   'VERIFICATION_SANDBOX_PLAN_VERIFY',
+  'ADVISORY_EVIDENCE_VERIFY',
 ]);
 const MAX_REQUEST_PAYLOAD_BYTES = 256 * 1024;
 
@@ -68,6 +70,10 @@ export class DevelopmentPlane {
       verification_sandbox_prepare_only: true,
       verification_sandbox_execution: false,
       sandbox_backend_bound: false,
+      advisory_evidence_verification: true,
+      advisory_evidence_network_dispatch: false,
+      advisory_evidence_browser_authority: false,
+      advisory_evidence_promotion_authority: false,
       direct_promote_current: false,
       arbitrary_eval: false,
       page_command_authority: false,
