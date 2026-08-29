@@ -106,7 +106,7 @@ jobs:
           cd coordination/browser-skill-source-linux
           cargo fmt --all -- --check
           cargo clippy --locked --all-targets -- -D warnings
-          cargo test --locked --all-targets -- --nocapture | tee "$RUNNER_TEMP/r8b-r7m-rust-regressions.log"
+          cargo test --locked --all-targets -- --nocapture --test-threads=1 | tee "$RUNNER_TEMP/r8b-r7m-rust-regressions.log"
 
       - name: Build deterministic R8B evidence bundle
         shell: bash
