@@ -5,63 +5,58 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>METAENGINE A2 Browser Operator</title>
   <style>
-    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
-    body { margin: 0; background: #0b0d10; color: #edf1f5; }
-    main { max-width: 880px; margin: 0 auto; padding: 32px 20px 56px; }
-    h1 { margin: 0 0 8px; font-size: 28px; }
-    p { color: #aeb7c2; line-height: 1.55; }
-    .card { background: #12161b; border: 1px solid #252b33; border-radius: 14px; padding: 18px; margin: 18px 0; }
-    label { display: block; font-weight: 650; margin: 14px 0 7px; }
-    input[type="url"], input[type="number"], input[type="password"] { width: 100%; box-sizing: border-box; background: #090b0e; color: #edf1f5; border: 1px solid #303844; border-radius: 9px; padding: 11px 12px; font: inherit; }
-    input:focus { outline: 2px solid #6ba7ff; outline-offset: 1px; }
-    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-    button { background: #edf1f5; color: #0b0d10; border: 0; border-radius: 9px; padding: 10px 14px; font-weight: 700; cursor: pointer; }
-    button.secondary { background: #242a31; color: #edf1f5; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
-    .status { min-height: 1.4em; margin-top: 12px; color: #8fe3a7; }
-    .warn { color: #f0c26b; }
-    .pill { border: 1px solid #303844; border-radius: 999px; padding: 6px 9px; color: #c8d0d9; font-size: 13px; }
+    :root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--bg:#070a10;--panel:#101722;--panel2:#0b111a;--line:#243249;--text:#f6f8fb;--muted:#8998ab;--blue:#6aa9ff;--green:#61dc94;--amber:#f5c66c;--red:#ff8080}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 20% -10%,rgba(59,124,231,.2),transparent 34%),linear-gradient(180deg,#0a1019,var(--bg));color:var(--text)}main{max-width:980px;margin:0 auto;padding:34px 22px 64px}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:22px}.eyebrow{color:var(--blue);font-size:11px;font-weight:850;letter-spacing:.12em;text-transform:uppercase}.top h1{margin:6px 0 8px;font-size:32px;letter-spacing:-.035em}.top p{max-width:680px;margin:0;color:var(--muted);line-height:1.6}.version{padding:7px 10px;border:1px solid #315177;border-radius:999px;background:#122039;color:#cfe2ff;font-size:12px;font-weight:800;white-space:nowrap}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.card{background:linear-gradient(180deg,rgba(17,25,37,.94),rgba(11,17,26,.96));border:1px solid var(--line);border-radius:18px;padding:18px;box-shadow:0 14px 36px rgba(0,0,0,.18)}.card.full{grid-column:1/-1}.card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px}.card h2{margin:2px 0 0;font-size:16px}.card p{margin:7px 0 0;color:var(--muted);font-size:13px;line-height:1.55}.pill{display:inline-flex;align-items:center;gap:6px;border:1px solid #31425b;border-radius:999px;padding:6px 9px;color:#c7d2e1;background:#0c1420;font-size:11px;font-weight:750}.status-dot{width:7px;height:7px;border-radius:50%;background:#66748a}.field{margin-top:13px}label{display:block;margin-bottom:7px;color:#aab6c5;font-size:12px;font-weight:720}input[type="url"],input[type="number"],input[type="password"]{width:100%;border:1px solid #2c3b50;border-radius:10px;background:#070c13;color:#eef3fa;padding:11px 12px;font:inherit}input:focus{outline:2px solid rgba(106,169,255,.5);border-color:var(--blue)}.row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}.actions{margin-top:13px}.check{display:flex;align-items:flex-start;gap:9px;margin-top:12px;color:#d9e1eb;font-size:13px;line-height:1.45}.check input{margin-top:2px}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}.security{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}.security div{padding:11px;border:1px solid #24344c;border-radius:12px;background:#0a111b}.security strong{display:block;font-size:12px}.security small{display:block;margin-top:5px;color:var(--muted);line-height:1.4}.warn{color:var(--amber)!important}.good{color:var(--green)!important}button{border:1px solid #365070;border-radius:10px;padding:10px 14px;background:#1a2a40;color:#eef5ff;font-weight:780;cursor:pointer}button:hover{background:#223653;border-color:#5579a5}button.primary{background:linear-gradient(180deg,#327fdc,#2365b8);border-color:#438fe6;color:#fff}button.secondary{background:#131e2d}details{margin-top:14px;border-top:1px solid #233148;padding-top:12px}summary{cursor:pointer;color:#9eacbd;font-size:12px;font-weight:750}.status{min-height:1.5em;margin-top:14px;color:var(--green);font-size:13px}.footer-actions{position:sticky;bottom:0;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:18px;padding:13px 0;background:linear-gradient(0deg,rgba(7,10,16,.98) 70%,rgba(7,10,16,0))}.footer-actions .row{margin-left:auto}@media(max-width:760px){main{padding:24px 14px 48px}.top{flex-direction:column}.grid{grid-template-columns:1fr}.card.full{grid-column:auto}.security{grid-template-columns:1fr}.footer-actions{align-items:flex-start;flex-direction:column}.footer-actions .row{margin-left:0}}
   </style>
 </head>
 <body>
 <main>
-  <h1>METAENGINE A2 Browser Operator</h1>
-  <p><strong>Strict GLM-first compatibility policy:</strong> GLM is physically actuated first. GPT is released only after the durable GLM <span class="mono">ACTUATED</span> barrier (or when A2 proves GLM already submitted the current wave). Provider ordering is a policy profile and will later be generalized by the durable action graph.</p>
+  <header class="top">
+    <div><div class="eyebrow">METAENGINE · A2</div><h1>Browser Operator setup</h1><p>Configure exact peer bindings and automation behavior. The personalized build provisions its scoped bridge credential automatically; supervisor authority then moves to a durable non-extractable P-256 device identity.</p></div>
+    <span class="version">v0.7.2</span>
+  </header>
 
-  <section class="card">
-    <div class="row"><span class="pill">GPT peer</span><span class="pill">exact URL binding</span></div>
-    <label for="chatgptUrl">ChatGPT conversation URL</label>
-    <input id="chatgptUrl" type="url" placeholder="https://chatgpt.com/c/..." autocomplete="off" />
-    <div class="row" style="margin-top:10px"><button id="detectChatgpt" class="secondary" type="button">Use open ChatGPT tab</button></div>
-  </section>
+  <div class="grid">
+    <section class="card full">
+      <div class="card-head"><div><span class="pill"><span class="status-dot"></span><span id="pairingState">checking transport…</span></span><h2>Connection & identity</h2><p>Normal use should require no secret entry. The bridge credential lives in the extension-origin trusted vault; supervisor requests are device-signed after enrollment.</p></div></div>
+      <div class="field"><label for="daemonUrl">Bridge endpoint</label><input id="daemonUrl" type="url" autocomplete="off" /></div>
+      <div class="security">
+        <div><strong>Bridge vault</strong><small>Long-lived scoped credential in extension-origin IndexedDB.</small></div>
+        <div><strong>Supervisor identity</strong><small>Non-extractable P-256 private key with server device grant.</small></div>
+        <div><strong>Privileged secrets</strong><small>No Supabase service-role, database password, or provider master key in Chrome.</small></div>
+      </div>
+      <details>
+        <summary>Credential maintenance</summary>
+        <p>Use only when deliberately rotating the scoped bridge credential. Leaving this empty preserves the existing trusted-vault value.</p>
+        <div class="field"><label for="bridgeSecret">Rotate scoped bridge credential</label><input id="bridgeSecret" type="password" minlength="32" autocomplete="new-password" placeholder="Leave blank to keep current credential" /></div>
+      </details>
+    </section>
 
-  <section class="card">
-    <div class="row"><span class="pill">GLM peer</span><span class="pill">launch order #1</span></div>
-    <label for="zaiUrl">Z.AI conversation URL</label>
-    <input id="zaiUrl" type="url" autocomplete="off" />
-    <p class="mono">Default: project-pinned Z.AI conversation</p>
-    <div class="row"><button id="restoreZai" class="secondary" type="button">Restore project Z.AI chat</button></div>
-  </section>
+    <section class="card">
+      <div class="card-head"><div><span class="pill">GPT peer</span><h2>ChatGPT target</h2><p>Exact conversation binding prevents accidental actuation in a different chat.</p></div></div>
+      <div class="field"><label for="chatgptUrl">Conversation URL</label><input id="chatgptUrl" type="url" placeholder="https://chatgpt.com/c/..." autocomplete="off" /></div>
+      <div class="row actions"><button id="detectChatgpt" class="secondary" type="button">Use open ChatGPT tab</button></div>
+    </section>
 
-  <section class="card">
-    <div class="row"><span class="pill">REMOTE</span><span class="pill" id="pairingState">pairing unknown</span></div>
-    <label for="daemonUrl">Bridge endpoint</label>
-    <input id="daemonUrl" type="url" autocomplete="off" />
-    <label for="bridgeSecret">Scoped bridge pairing token</label>
-    <input id="bridgeSecret" type="password" minlength="32" autocomplete="new-password" placeholder="Leave blank to keep the token already in the trusted vault" />
-    <p class="mono">The token is stored in extension-origin IndexedDB, not chrome.storage.local. Content scripts cannot read the vault. Supabase service-role credentials never enter Chrome.</p>
-    <label for="pollMs">Command poll interval, ms</label>
-    <input id="pollMs" type="number" min="1000" max="30000" step="250" />
-    <div style="margin-top:14px"><label><input id="autoOpenTabs" type="checkbox" /> Automatically reopen a pinned peer tab if it is closed</label></div>
-    <div><label><input id="armed" type="checkbox" /> ARMED — allow trusted CDP actuation on exact pinned conversations</label></div>
-    <p class="warn">GLM actuation is trusted CDP mouse input only. Content scripts have no Send capability. GPT uses trusted CDP Enter. Ambiguous actuation is never automatically retried.</p>
-  </section>
+    <section class="card">
+      <div class="card-head"><div><span class="pill">GLM peer · first</span><h2>Z.AI target</h2><p>GLM remains the first physical actuation lane under the current strict ordering policy.</p></div></div>
+      <div class="field"><label for="zaiUrl">Conversation URL</label><input id="zaiUrl" type="url" autocomplete="off" /></div>
+      <div class="row actions"><button id="restoreZai" class="secondary" type="button">Restore project Z.AI chat</button></div>
+    </section>
 
-  <div class="row">
-    <button id="save" type="button">Save settings</button>
-    <button id="pollNow" class="secondary" type="button">Poll bridge now</button>
+    <section class="card full">
+      <div class="card-head"><div><span class="pill">Automation</span><h2>Runtime behavior</h2><p>These settings affect availability, not the underlying execution fences. Ambiguous physical effects are still never retried automatically.</p></div></div>
+      <div class="field"><label for="pollMs">Command poll interval, ms</label><input id="pollMs" type="number" min="1000" max="30000" step="250" /></div>
+      <label class="check"><input id="autoOpenTabs" type="checkbox" /><span>Automatically reopen an exact pinned peer tab when it is closed.</span></label>
+      <label class="check"><input id="armed" type="checkbox" /><span><strong>ARM bridge</strong> — allow trusted CDP actuation on exact pinned conversations.</span></label>
+      <p class="warn">GLM uses trusted CDP mouse input; GPT uses trusted CDP Enter. Content scripts have no direct Send authority.</p>
+    </section>
   </div>
-  <div id="status" class="status" role="status"></div>
+
+  <div class="footer-actions">
+    <div id="status" class="status" role="status"></div>
+    <div class="row"><button id="pollNow" class="secondary" type="button">Sync now</button><button id="save" class="primary" type="button">Save configuration</button></div>
+  </div>
 </main>
 <script src="bootstrap-config.js"></script>
 <script src="options.js"></script>
