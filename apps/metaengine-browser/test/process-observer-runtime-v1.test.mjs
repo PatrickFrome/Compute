@@ -40,21 +40,37 @@ function observation(overrides = {}) {
   };
 }
 
-test('one failing source does not block healthy authoritative observations', async () => {
+test('one failing Supabase projection does not block the healthy authoritative Supabase feed', async () => {
   const h = await harness();
   const observer = new ProcessObserverRuntime({
     intelligence: h.intelligence,
     clock: h.clock,
     sources: [
-      { id: 'supabase', read: async () => ({ cursor: 'sb:1', observations: [observation()] }) },
-      { id: 'neon-control-plane', read: async () => { throw new Error('archived_compute_unavailable'); } },
+      { id: 'supabase-authoritative', read: async () => ({ cursor: 'sb:1', observations: [observation()] }) },
+      { id: 'supabase-secondary-projection', read: async () => { throw new Error('supabase_projection_unavailable'); } },
     ],
   });
   const snap = await observer.pollOnce();
   assert.equal(h.intelligence.listFreshProcesses().length, 1);
-  assert.equal(snap.sources.find((x) => x.id === 'supabase').ok, true);
-  assert.equal(snap.sources.find((x) => x.id === 'neon-control-plane').ok, false);
-  assert.match(snap.sources.find((x) => x.id === 'neon-control-plane').last_error, /archived_compute_unavailable/);
+  assert.equal(snap.sources.find((x) => x.id === 'supabase-authoritative').ok, true);
+  assert.equal(snap.sources.find((x) => x.id === 'supabase-secondary-projection').ok, false);
+  assert.match(snap.sources.find((x) => x.id === 'supabase-secondary-projection').last_error, /supabase_projection_unavailable/);
+  await h.cleanup();
+});
+
+test('Neon is rejected as a process source and cannot compete with Supabase authority', async () => {
+  const h = await harness();
+  await assert.rejects(() => h.intelligence.ingestProcessObservation({
+    source_system: 'NEON',
+    source_instance: 'legacy-neon',
+    process_kind: 'ROADMAP_MILESTONE',
+    process_id: 'C5_AUTONOMOUS_FLEET_RUNTIME_V1',
+    state: 'ACTIVE',
+    authority: 'SUPABASE',
+    source_cursor: 'legacy:1',
+    stale_after_ms: 30_000,
+  }), /process_source_invalid/);
+  assert.equal(h.intelligence.snapshot().policy.database_authority, 'SUPABASE_ONLY');
   await h.cleanup();
 });
 
@@ -84,7 +100,7 @@ test('concurrent polls coalesce into one source read and one ingestion pass', as
   await h.cleanup();
 });
 
-test('source failure preserves last known observation but freshness eventually fails closed', async () => {
+test('Supabase source failure preserves last known observation but freshness eventually fails closed', async () => {
   const h = await harness();
   let fail = false;
   const observer = new ProcessObserverRuntime({
@@ -93,7 +109,7 @@ test('source failure preserves last known observation but freshness eventually f
     sources: [{
       id: 'supabase',
       read: async () => {
-        if (fail) throw new Error('temporary_read_failure');
+        if (fail) throw new Error('temporary_supabase_read_failure');
         return { cursor: 'sb:1', observations: [observation({ stale_after_ms: 5_000 })] };
       },
     }],
@@ -103,7 +119,7 @@ test('source failure preserves last known observation but freshness eventually f
   fail = true;
   h.advance(2_000);
   await observer.pollOnce();
-  assert.equal(h.intelligence.listFreshProcesses().length, 1, 'short source outage should retain fresh last-known authoritative state');
+  assert.equal(h.intelligence.listFreshProcesses().length, 1, 'short Supabase outage should retain fresh last-known authoritative state');
   h.advance(4_000);
   assert.equal(h.intelligence.listFreshProcesses().length, 0, 'expired evidence must not remain scheduler-authoritative');
   assert.equal(h.intelligence.snapshot().processes[0].stale, true);
