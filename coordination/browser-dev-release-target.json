@@ -1,8 +1,8 @@
 {
   "schema": "metaengine.browser.dev-release-target.v1",
-  "enabled": false,
-  "source_sha": null,
-  "reason": "INITIALIZE_RELEASE_CONTROL_BRANCH",
+  "enabled": true,
+  "source_sha": "4217b7f225046229ccb20f80a46f7d80b35b875b",
+  "reason": "BOOTSTRAP_LIVE_SELF_UPDATE_FROM_PHYSICAL_N_TO_N_PLUS_1_EVIDENCE",
   "requested_by": "METAENGINE_SUPERVISOR",
   "authority_effect": false
 }
