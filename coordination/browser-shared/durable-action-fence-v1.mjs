@@ -30,6 +30,16 @@ function uncertaintyDigest(classification, error = null) {
   });
 }
 
+function snapshotNamespace(value) {
+  let snapshot;
+  try { snapshot = structuredClone(value); }
+  catch { throw new DurableActionFenceError('action_fence_namespace_snapshot_failed'); }
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    throw new DurableActionFenceError('action_fence_namespace_snapshot_failed');
+  }
+  return Object.freeze(snapshot);
+}
+
 export class DurableActionFenceError extends Error {
   constructor(code, { recoveryRequired = false, cause = null } = {}) {
     super(code, cause ? { cause } : undefined);
@@ -64,14 +74,15 @@ export class DurableActionFence {
   }
 
   async execute({ actionId, actionKind, intentDigest, namespace, dependsOn = [], ephemeral = undefined }) {
-    await this.#declare({ actionId, actionKind, intentDigest, namespace, dependsOn });
+    const namespaceSnapshot = snapshotNamespace(namespace);
+    await this.#declare({ actionId, actionKind, intentDigest, namespace: namespaceSnapshot, dependsOn });
 
     let preflight;
     try {
       preflight = await this.#preflight(Object.freeze({
         action_id: actionId,
         action_kind: actionKind,
-        namespace: structuredClone(namespace),
+        namespace: namespaceSnapshot,
         ephemeral,
       }));
     } catch (error) {
@@ -102,7 +113,7 @@ export class DurableActionFence {
       outcome = await this.#actuator(Object.freeze({
         action_id: actionId,
         action_kind: actionKind,
-        namespace: structuredClone(namespace),
+        namespace: namespaceSnapshot,
         authority: preflight.authority,
         ephemeral,
       }));
