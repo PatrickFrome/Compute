@@ -30,11 +30,12 @@ export class NativeSupervisorClient {
   #lifecycle = null;
   #selfUpdate = null;
 
-  constructor({ identity, fetchImpl = globalThis.fetch, getState, executeCommand, version, intervalMs = 2000 }) {
+  constructor({ identity, fetchImpl = globalThis.fetch, getState, executeCommand, version, intervalMs = 2000, beforeSelfUpdateInstall }) {
     if (!identity) throw new Error('native_supervisor_identity_required');
     if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
     if (typeof getState !== 'function') throw new Error('native_supervisor_state_provider_required');
     if (typeof executeCommand !== 'function') throw new Error('native_supervisor_command_executor_required');
+    if (typeof beforeSelfUpdateInstall !== 'function') throw new Error('native_supervisor_self_update_handoff_required');
     this.#identity = identity;
     this.#fetch = fetchImpl;
     this.#getState = getState;
@@ -58,6 +59,7 @@ export class NativeSupervisorClient {
         && this.#armed === true
         && this.#currentCommand == null
         && this.#lifecycle?.isQuiescent() === true,
+      beforeInstall: beforeSelfUpdateInstall,
     });
   }
 
