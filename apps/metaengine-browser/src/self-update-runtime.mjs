@@ -139,8 +139,10 @@ export class SelfUpdateRuntime {
     }
     if (this.#state.state === 'READY_RESTART' && await this.#canRestart()) {
       this.#state.state = 'RESTARTING';
-      try { this.#updater.quitAndInstall(false, true); }
-      catch (e) { this.#state.state = 'ERROR'; this.#state.last_error = clipError(e); }
+      try {
+        await this.#host?.prepareExpectedRestart?.('SELF_UPDATE');
+        this.#updater.quitAndInstall(false, true);
+      } catch (e) { this.#state.state = 'ERROR'; this.#state.last_error = clipError(e); }
     }
     return this.snapshot();
   }
