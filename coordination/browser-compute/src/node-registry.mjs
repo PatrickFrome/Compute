@@ -1,4 +1,4 @@
-﻿import { BrowserNode, NodeRegistry, NODE_CAPABILITIES, NODE_HEALTH } from '../../browser-shared/node-registry.mjs';
+import { BrowserNode, NodeRegistry, NODE_CAPABILITIES, NODE_HEALTH } from '../../browser-shared/node-registry.mjs';
 
 export class LocalNodeRegistry extends NodeRegistry {
   constructor(runtime, options = {}) {
@@ -17,6 +17,10 @@ export class LocalNodeRegistry extends NodeRegistry {
     });
     this.register(localNode);
     this.healthCheckTimer = setInterval(() => this.checkAll(), this.healthCheckIntervalMs);
+    // Library-hygiene invariant: a health probe timer must never pin the host
+    // process event loop. The daemon stays alive through its RPC server and
+    // serve loop; hosts (tests, embedders) exit when their own work drains.
+    this.healthCheckTimer.unref?.();
     await this.checkAll();
     return localNode;
   }

@@ -1,0 +1,199 @@
+name: A2 Compute Browser B4 Parity
+
+on:
+  push:
+    branches:
+      - 'work/a2-compute-browser-b4-parity*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  b4-parity-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Verify Node runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e 'const m=Number(process.versions.node.split(".")[0]); if (m < 22) process.exit(1); console.log(process.version)'
+
+      - name: Static parse gate, full test suite, and B4/B5/B6 contracts
+        shell: bash
+        working-directory: coordination/browser-compute
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          # Parse gate: rejects await-in-non-async-constructor SyntaxErrors and
+          # BOM-corrupted shebangs (both shipped unnoticed in 097a3b2 because
+          # no workflow triggered on this branch and AppVeyor runs no
+          # browser-compute tests).
+          find src tests -type f -name '*.mjs' -print0 | sort -z | xargs -0 -n1 node --check
+          # Full suite: must terminate on its own; an interval leak pins the
+          # event loop and this step fails on the timeout instead of green-hanging.
+          node --test tests/*.test.mjs
+          # B4 action/receipt parity contracts
+          grep -q "'action.navigate': 'ACTUATION'" src/rpc-server.mjs
+          grep -q "'action.click': 'ACTUATION'" src/rpc-server.mjs
+          grep -q "'action.type': 'ACTUATION'" src/rpc-server.mjs
+          grep -q "'action.submit': 'ACTUATION'" src/rpc-server.mjs
+          grep -q "'receipt.get': 'READ_ONLY'" src/rpc-server.mjs
+          grep -q "'receipt.verify': 'READ_ONLY'" src/rpc-server.mjs
+          grep -q "authority_effect" ../browser-shared/receipt-contract.mjs
+          grep -q "hmac" ../browser-shared/lease-broker.mjs
+          # B5 local HTTP bridge + compute bridge manifest contracts
+          grep -q "compute-bridge.json" src/cli.mjs
+          grep -q "127.0.0.1" src/rpc-server.mjs
+          grep -q "dispatchRpc" src/rpc-server.mjs
+          # B6 node registry contracts + event-loop pin invariant
+          grep -q "unref" src/node-registry.mjs
+          grep -q "node_registry: true" src/cli.mjs
+          grep -q "NODE_HEALTH" ../browser-shared/node-registry.mjs
+          # Extension lease gate MUST be loaded by the MV3 service worker
+          # BEFORE operator-actions.js, otherwise lease enforcement no-ops.
+          grep -q 'importScripts("./operator-lease-gate.js");' ../chat-control-plane/extension/background-entry.js
+          grep -q "validateActionLease" ../chat-control-plane/extension/operator-lease-gate.js
+          grep -q "assertLeaseValid" ../chat-control-plane/extension/operator-actions.js
+          grep -q 'importScripts("./operator-compute-bridge.js");' ../chat-control-plane/extension/background-entry.js
+          # Security boundaries preserved from B1-B3
+          grep -q "'target.semantic_snapshot': 'READ_ONLY'" src/rpc-server.mjs
+          grep -q "'runtime.health': 'READ_ONLY'" src/rpc-server.mjs
+          ! grep -rn "runtime_evaluate_used.*true" protocol-v1.json
+
+      - name: Real Chromium compute-browser self-test smoke
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          printf 'A2_CHROME_EXECUTABLE=%s\n' "$CHROME"
+          readlink -f "$CHROME" || true
+          "$CHROME" --version || true
+          export A2_CHROME_EXECUTABLE="$CHROME"
+          export A2_COMPUTE_STATE_ROOT="$RUNNER_TEMP/a2-compute-browser-b4"
+          export CI=true
+          export A2_CI_ALLOW_NO_SANDBOX=1
+          export A2_SELF_TEST_REMOVE_STATE=1
+          node src/cli.mjs self-test | tee "$RUNNER_TEMP/a2-compute-browser-b4-self-test.json"
+          grep -q '"ok":true' "$RUNNER_TEMP/a2-compute-browser-b4-self-test.json"
+          grep -q '"debug_transport":"native_pipe_b3"' "$RUNNER_TEMP/a2-compute-browser-b4-self-test.json"
+          grep -q '"crash_aware_restart":true' "$RUNNER_TEMP/a2-compute-browser-b4-self-test.json"
+          grep -q '"context_epoch_rotated":true' "$RUNNER_TEMP/a2-compute-browser-b4-self-test.json"
+          grep -q '"raw_cdp_rpc_exposed":false' "$RUNNER_TEMP/a2-compute-browser-b4-self-test.json"
+          grep -q '"web_authority_effect":false' "$RUNNER_TEMP/a2-compute-browser-b4-self-test.json"
+
+      - name: Serve boot, bridge, node registry, and clean shutdown smoke
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          export A2_COMPUTE_STATE_ROOT="$RUNNER_TEMP/a2-cb-b4-serve-state"
+          export SMOKE_HOME="$RUNNER_TEMP/a2-cb-b4-serve-home"
+          mkdir -p "$SMOKE_HOME"
+          HOME="$SMOKE_HOME" node src/cli.mjs serve --bridge-port=0 \
+            > "$RUNNER_TEMP/a2-cb-b4-serve-ready.json" 2> "$RUNNER_TEMP/a2-cb-b4-serve.err" &
+          SERVE_PID=$!
+          cleanup() { kill -TERM "$SERVE_PID" 2>/dev/null || true; wait "$SERVE_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+          for _ in $(seq 1 100); do
+            [ -s "$RUNNER_TEMP/a2-cb-b4-serve-ready.json" ] && break
+            sleep 0.2
+          done
+          READY="$(head -n 1 "$RUNNER_TEMP/a2-cb-b4-serve-ready.json")"
+          PARSED="$(node -e '
+            const ready = JSON.parse(process.argv[1]);
+            const assert = require("node:assert");
+            assert.equal(ready.schema, "metaengine.a2-compute-browser.ready.v1");
+            assert.equal(ready.node_registry, true);
+            assert.equal(ready.web_authority_effect, false);
+            assert.equal(ready.devtools_tcp_exposed, false);
+            assert.ok(Number.isInteger(ready.bridge_port) && ready.bridge_port > 0, "bridge_port_missing");
+            console.log(ready.bridge_port + " " + ready.token_file);
+          ' "$READY")"
+          BRIDGE_PORT="${PARSED%% *}"
+          TOKEN_FILE="${PARSED#* }"
+          echo "bridge_port=$BRIDGE_PORT"
+          # The compute bridge manifest must exist for extension discovery.
+          test -f "$SMOKE_HOME/.a2/compute-bridge.json"
+          node -e '
+            const assert = require("node:assert");
+            const manifest = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+            assert.equal(manifest.url, "http://127.0.0.1:" + process.argv[2] + "/rpc");
+            assert.ok(typeof manifest.token === "string" && manifest.token.length > 0, "manifest_token_missing");
+          ' "$SMOKE_HOME/.a2/compute-bridge.json" "$BRIDGE_PORT"
+          BRIDGE_TOKEN="$(node -e 'console.log(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).token)' "$SMOKE_HOME/.a2/compute-bridge.json")"
+          # Positive: authenticated runtime.health through the local bridge.
+          HEALTH_CODE="$(curl -s -o "$RUNNER_TEMP/a2-cb-b4-health.json" -w '%{http_code}' \
+            -X POST "http://127.0.0.1:${BRIDGE_PORT}/rpc" \
+            -H "Authorization: Bearer ${BRIDGE_TOKEN}" \
+            -H 'content-type: application/json' \
+            -d '{"method":"runtime.health","params":{},"id":"smoke-1"}')"
+          test "$HEALTH_CODE" = "200"
+          node -e '
+            const assert = require("node:assert");
+            const body = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+            assert.equal(body.ok, true);
+            assert.equal(body.effect_class, "READ_ONLY");
+            assert.equal(body.web_authority_effect, false);
+            assert.equal(body.result.schema, "metaengine.a2-compute-browser.health.v1");
+          ' "$RUNNER_TEMP/a2-cb-b4-health.json"
+          # Negative: wrong bearer token is rejected (401, not silent pass).
+          DENY_CODE="$(curl -s -o /dev/null -w '%{http_code}' \
+            -X POST "http://127.0.0.1:${BRIDGE_PORT}/rpc" \
+            -H "Authorization: Bearer definitely-not-the-token" \
+            -H 'content-type: application/json' \
+            -d '{"method":"runtime.health","params":{},"id":"smoke-2"}')"
+          test "$DENY_CODE" = "401"
+          # Negative: methods outside the typed RPC surface are forbidden (403).
+          FORBIDDEN_CODE="$(curl -s -o /dev/null -w '%{http_code}' \
+            -X POST "http://127.0.0.1:${BRIDGE_PORT}/rpc" \
+            -H "Authorization: Bearer ${BRIDGE_TOKEN}" \
+            -H 'content-type: application/json' \
+            -d '{"method":"engine.rawCdp","params":{},"id":"smoke-3"}')"
+          test "$FORBIDDEN_CODE" = "403"
+          # Clean shutdown: SIGTERM must exit 0 (stops RPC, bridge, node registry).
+          trap - EXIT
+          kill -TERM "$SERVE_PID"
+          wait "$SERVE_PID"
+          echo "serve exited cleanly"
+
+      - name: Build deterministic B4 parity evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
+          mkdir -p dist/a2-compute-browser-b4-parity
+          cp "$RUNNER_TEMP/a2-compute-browser-b4-self-test.json" dist/a2-compute-browser-b4-parity/SELF_TEST.json
+          cp "$RUNNER_TEMP/a2-cb-b4-health.json" dist/a2-compute-browser-b4-parity/BRIDGE_HEALTH.json
+          printf '%s\n' "$GITHUB_SHA" > dist/a2-compute-browser-b4-parity/SOURCE_COMMIT.txt
+          tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf dist/a2-compute-browser-b4-parity/A2_COMPUTE_BROWSER_B4_PARITY.tar \
+            coordination/browser-compute \
+            coordination/browser-shared \
+            coordination/chat-control-plane/extension/operator-lease-gate.js \
+            coordination/chat-control-plane/extension/operator-compute-bridge.js \
+            coordination/chat-control-plane/extension/operator-actions.js \
+            coordination/chat-control-plane/extension/background-entry.js \
+            research/A2_COMPUTE_BROWSER_B6_REPAIR_2026-08-29.md
+          sha256sum dist/a2-compute-browser-b4-parity/A2_COMPUTE_BROWSER_B4_PARITY.tar > dist/a2-compute-browser-b4-parity/SHA256SUMS.txt
+
+      - name: Attest evidence bundle provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-compute-browser-b4-parity/A2_COMPUTE_BROWSER_B4_PARITY.tar
+
+      - name: Upload evidence bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: a2-compute-browser-b4-parity-evidence
+          path: dist/a2-compute-browser-b4-parity/
+          if-no-files-found: error

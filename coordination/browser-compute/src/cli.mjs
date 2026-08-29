@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,17 +18,19 @@ async function serve() {
   await runtime.startNodeRegistry();
   const bridgePort = arg('bridge-port');
   let bridge = null;
+  let bridgeToken = null;
   if (bridgePort !== null && !Number.isNaN(Number(bridgePort))) {
     const numericPort = Number(bridgePort);
-    const { token } = await import('./security.mjs').then(m => m.rotateControlToken(runtime.stateRoot));
-    bridge = await startHttpBridge(runtime, numericPort, token);
+    const rotated = await import('./security.mjs').then(m => m.rotateControlToken(runtime.stateRoot));
+    bridgeToken = rotated.token;
+    bridge = await startHttpBridge(runtime, numericPort, bridgeToken);
   }
   if (bridge) {
     const manifestDir = path.join(os.homedir(), '.a2');
     await fs.mkdir(manifestDir, { recursive: true });
     const manifest = {
       url: `http://127.0.0.1:${bridge.port}/rpc`,
-      token,
+      token: bridgeToken,
       written_at: new Date().toISOString()
     };
     await fs.writeFile(path.join(manifestDir, 'compute-bridge.json'), JSON.stringify(manifest, null, 2));
@@ -103,8 +105,8 @@ async function selfTest() {
     const contextA = await runtime.createContext({ profileId, contextId: 'context_alpha' });
     const contextB = await runtime.createContext({ profileId, contextId: 'context_beta' });
     const entry = runtime.running.get(profileId);
-    const physicalA = entry.contextBindings.get(contextA.context_id)?.cdp_browser_context_id;
-    const physicalB = entry.contextBindings.get(contextB.context_id)?.cdp_browser_context_id;
+    const physicalA = entry.contextBindings.get(contextA.context_id)?.browser_context_id;
+    const physicalB = entry.contextBindings.get(contextB.context_id)?.browser_context_id;
     if (!physicalA || !physicalB || physicalA === physicalB) throw new Error('self_test_context_physical_isolation_failed');
 
     const targetA = await runtime.createTarget({ profileId, targetId: 'target_alpha', contextId: contextA.context_id, role: 'CI_CONTEXT_A' });
@@ -133,6 +135,10 @@ async function selfTest() {
     if (!textbox1 || !textbox2 || textbox1.semantic_id !== textbox2.semantic_id || textbox2.binding_epoch <= textbox1.binding_epoch) throw new Error('self_test_semantic_structural_rebind_failed');
     if (textbox2.continuity !== 'STRUCTURAL_REBIND' && textbox2.continuity !== 'EXACT_BINDING') throw new Error('self_test_semantic_continuity_failed');
 
+    // Canonical B2 contract: closeContext REJECTS a context with live targets
+    // (context_has_live_targets, fail-closed). Targets must be retired
+    // explicitly before their context is disposable.
+    await runtime.closeTarget({ profileId, targetId: targetA.target_id });
     await runtime.closeContext({ profileId, contextId: contextA.context_id });
     const targetsAfterClose = await runtime.listTargets(profileId, { includeRetired: true });
     if (targetsAfterClose.find((row) => row.target_id === targetA.target_id)?.status !== 'RETIRED') throw new Error('self_test_context_target_retirement_failed');

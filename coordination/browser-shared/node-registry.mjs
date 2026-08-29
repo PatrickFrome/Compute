@@ -1,4 +1,4 @@
-﻿export const NODE_CAPABILITIES = Object.freeze({
+export const NODE_CAPABILITIES = Object.freeze({
   ACTUATION: 'actuation',
   PERCEPTION: 'perception',
   CONTEXT_MANAGEMENT: 'context_management',

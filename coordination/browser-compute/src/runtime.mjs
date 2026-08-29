@@ -59,7 +59,7 @@ export class ComputeBrowserRuntime {
     this.running = new Map();
     this.startedAt = now();
     this.daemonLockFile = null;
-    await this.stopNodeRegistry();
+    this.nodeRegistry = null;
   }
 
   async init() {

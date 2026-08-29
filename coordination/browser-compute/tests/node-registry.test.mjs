@@ -1,4 +1,4 @@
-﻿import assert from 'node:assert/strict';
+import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BrowserNode, NodeRegistry, NODE_CAPABILITIES, NODE_HEALTH } from '../../browser-shared/node-registry.mjs';
 
@@ -87,6 +87,9 @@ test('LocalNodeRegistry starts with local node', async () => {
   assert.equal(node.nodeId, 'node-test');
   assert.equal(node.nodeType, 'local');
   assert.deepEqual(node.capabilities, ['actuation', 'perception', 'context_management', 'target_management']);
+  // Test hygiene: a registry that was started must be stopped, otherwise its
+  // health interval keeps the process alive and node --test never terminates.
+  await registry.stop();
 });
 
 test('LocalNodeRegistry checks health on interval', async () => {
