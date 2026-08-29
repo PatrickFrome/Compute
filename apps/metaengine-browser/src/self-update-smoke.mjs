@@ -7,7 +7,13 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function appendTrace(tracePath, row) {
   if (!tracePath) return;
   await fs.mkdir(path.dirname(tracePath), { recursive: true });
-  await fs.appendFile(tracePath, `${JSON.stringify(row)}\n`, { mode: 0o600 });
+  const handle = await fs.open(tracePath, 'a', 0o600);
+  try {
+    await handle.write(`${JSON.stringify(row)}\n`);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
 }
 
 export async function runSelfUpdateSmoke({ app, timeoutMs = 120_000 } = {}) {
