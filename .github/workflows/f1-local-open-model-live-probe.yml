@@ -1,0 +1,71 @@
+name: F1 Local Open Model Live Probe
+
+on:
+  push:
+    branches:
+      - work/f1-multimodel-vercel-gateway-v1
+    paths:
+      - '.github/workflows/f1-local-open-model-live-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-local-models:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Install Ollama
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama --version
+          nohup ollama serve >/tmp/ollama.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/ollama.log
+          exit 1
+
+      - name: Pull compact independent models
+        shell: bash
+        run: |
+          set -euo pipefail
+          ollama pull qwen3:0.6b
+          ollama pull deepseek-r1:1.5b
+
+      - name: Run real Qwen and DeepSeek inference
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, urllib.request
+
+          probes = [
+              ('qwen', 'qwen3:0.6b', 'METAENGINE_QWEN_LOCAL_CONNECTED'),
+              ('deepseek', 'deepseek-r1:1.5b', 'METAENGINE_DEEPSEEK_LOCAL_CONNECTED'),
+          ]
+          successes=[]
+          for family, model, marker in probes:
+              prompt=f'Reply with exactly {marker} and nothing else. /no_think'
+              data=json.dumps({
+                  'model': model,
+                  'prompt': prompt,
+                  'stream': False,
+                  'options': {'temperature': 0, 'num_predict': 40},
+              }).encode()
+              req=urllib.request.Request('http://127.0.0.1:11434/api/generate', data=data, headers={'Content-Type':'application/json'})
+              with urllib.request.urlopen(req, timeout=180) as r:
+                  payload=json.load(r)
+              text=str(payload.get('response') or '').strip()
+              ok=marker in text
+              rec={'family':family,'model':model,'marker_seen':ok,'response':text[:300],'done':payload.get('done')}
+              print('LOCAL_OPEN_MODEL_PROBE', json.dumps(rec, ensure_ascii=False))
+              if ok: successes.append(rec)
+          print('LOCAL_OPEN_MODEL_SUMMARY', json.dumps({'success_count':len(successes),'models':[r['model'] for r in successes]}, ensure_ascii=False))
+          if len(successes) < 2:
+              raise SystemExit('local_multimodel_probe_incomplete')
+          PY
