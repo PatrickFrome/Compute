@@ -170,18 +170,19 @@ async function handleCommand(command, payload = {}) {
   throw new Error('shell_command_unknown');
 }
 
+function destroyWindowContents() {
+  for (const view of views.values()) if (!view.webContents.isDestroyed()) view.webContents.close();
+  views.clear();
+  if (shellView && !shellView.webContents.isDestroyed()) shellView.webContents.close();
+  shellView = null;
+}
+
 async function createWindow() {
   windowRef = new BaseWindow({ width: 1440, height: 960, minWidth: 900, minHeight: 640, title: 'METAENGINE Browser', backgroundColor: '#101216' });
   shellView = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-shell.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true } });
   windowRef.contentView.addChildView(shellView);
   windowRef.on('resize', layout);
-  windowRef.on('closed', () => {
-    for (const view of views.values()) if (!view.webContents.isDestroyed()) view.webContents.close();
-    views.clear();
-    if (shellView && !shellView.webContents.isDestroyed()) shellView.webContents.close();
-    shellView = null;
-    windowRef = null;
-  });
+  windowRef.on('closed', () => { destroyWindowContents(); windowRef = null; });
   await shellView.webContents.loadURL('metaengine://shell/');
   await createTab('https://chatgpt.com/', { select: true, load: !isSmoke });
   layout();
@@ -189,7 +190,7 @@ async function createWindow() {
     const snap = await shellSnapshot();
     const invariant = userSession.isPersistent() && snap.tabs.tabs.length === 1 && snap.tabs.tabs[0].kind === 'CHATGPT' && snap.policy.cookie_transfer_to_compute_space === false;
     console.log(JSON.stringify({ schema: 'metaengine.browser-shell.smoke.v1', ok: invariant, persistent_user_space: userSession.isPersistent(), chatgpt_tab_created: snap.tabs.tabs[0].kind === 'CHATGPT', remote_node_integration: REMOTE_WEB_PREFERENCES.nodeIntegration, remote_sandbox: REMOTE_WEB_PREFERENCES.sandbox, compute_bridge_read_only: true, authority_effect: false }));
-    setTimeout(() => app.quit(), 100).unref();
+    setTimeout(() => { destroyWindowContents(); windowRef?.destroy(); app.exit(invariant ? 0 : 1); }, 100);
   }
 }
 
@@ -200,5 +201,5 @@ await app.whenReady();
 await registerShellProtocol();
 configureUserSession();
 await createWindow();
-app.on('activate', () => { if (!windowRef) createWindow().catch((error) => { console.error(error); app.quit(); }); });
+app.on('activate', () => { if (!windowRef) createWindow().catch((error) => { console.error(error); app.exit(1); }); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
