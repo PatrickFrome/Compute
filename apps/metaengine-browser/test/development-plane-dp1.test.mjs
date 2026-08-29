@@ -28,10 +28,10 @@ const payload = {
   evidence: [],
 };
 
-test('DP1 capability handshake advertises candidate create and verify without promotion authority', async () => {
+test('DP1 capability handshake preserves candidate create and verify without promotion authority', async () => {
   const { plane } = await ready();
   const snap = plane.snapshot();
-  assert.equal(snap.version, '0.2.0');
+  assert.equal(snap.version, DEVELOPMENT_PLANE_VERSION);
   assert.equal(snap.capabilities.includes('CANDIDATE_CAPSULE_CREATE'), true);
   assert.equal(snap.capabilities.includes('CANDIDATE_CAPSULE_VERIFY'), true);
   assert.equal(snap.candidate_capsules, true);
