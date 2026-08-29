@@ -100,7 +100,8 @@ try {
   if (openssl.status !== 0) throw new Error('r8c_canary_openssl_failed');
 
   const html = `<!doctype html><meta charset="utf-8"><title>R8C Canary</title>
-    <main><input id="r8c-canary" type="button" aria-label="R8C Canary" value="R8C Canary">
+    <style>#r8c-canary{display:block;width:180px;height:64px;margin:40px;border:1px solid currentColor}</style>
+    <main><div id="r8c-canary" role="button" tabindex="0" aria-label="R8C Canary"></div>
     <output id="r8c-canary-state">0</output></main>
     <script>
       window.__a2R8cClickCount = 0;

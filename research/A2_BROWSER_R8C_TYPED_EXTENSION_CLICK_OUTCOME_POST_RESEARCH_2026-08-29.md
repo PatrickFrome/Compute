@@ -6,6 +6,8 @@ Initial candidate head: `f3f7cb0acb35d3619347af43b81e9e4fa7563f2d`
 Initial candidate workflow: `33233814228` SUCCESS
 First live-proof head: `fb95235f750d23b814eb4204ab7f5032b2c71a70`
 First live-proof workflow: `33235471140` FAILED at runtime only
+Second live-proof head: `00ce324fda68ba4a800d6de081536052fe1fcf9c`
+Second live-proof workflow: `33235572188` reached staged MV3 actuation and returned fail-closed `NO_EFFECT`
 
 ## Observed implementation results
 
@@ -27,7 +29,11 @@ Manifest V3 `chrome.debugger.sendCommand()` is an asynchronous CDP transport. It
 
 The first live-proof run built the staged MV3 successfully and reached Chrome 151, but the extension page had no `chrome.storage` API. This was an environment/harness failure, not an actuator failure: official Chrome branded builds removed `--load-extension` starting in Chrome 137, and later also removed `--disable-extensions-except`. Chromium and Chrome for Testing retain these development/test flags. The existing project MV3 runtime canary already uses a pinned Playwright Chromium for this reason.
 
-Therefore the live proof must run on a non-branded test engine that explicitly supports unpacked extension loading. It must not weaken production browser policy or alter the R8C actuator.
+The second run fixed that environment problem: Playwright-provisioned Chrome for Testing loaded the staged extension, the trusted sidepanel captured a real perception frame, and the real R8C actuator executed its pre-effect validation. It returned `NO_EFFECT / typed_click_target_hit_changed` before `mousePressed`.
+
+CDP `DOM.getNodeForLocation` explicitly returns the hit node at a coordinate; when `includeUserAgentShadowDOM=true`, it may return a user-agent shadow DOM node. The second fixture used native `<input type=button>`, which has browser-controlled internal rendering and therefore is not a valid fixture for proving exact backend-node equality. The production fence behaved correctly by failing closed.
+
+The verification fixture is therefore changed, not the actuator: use a leaf `<div role=button aria-label=...>` with explicit geometry and no child or UA shadow DOM. This keeps the exact-backend-node hit fence intact.
 
 ### OOPIF/session model
 
@@ -43,7 +49,7 @@ A unit or VM-only lab is insufficient for this final claim because it can verify
 
 ## Verification decision
 
-Keep the already-green actuator unchanged. Repair only the live-test engine selection by using exact-pinned Playwright `1.62.1` to provision its Chromium build, matching the repository's previously proven MV3 test pattern.
+Keep the already-green actuator unchanged. Repair only test assumptions: use exact-pinned Playwright `1.62.1` to provision a supported Chromium test engine, and use a leaf semantic button fixture whose visual hit target is the same backend node as the accessibility target.
 
 The canary must:
 
@@ -72,6 +78,7 @@ The remote-debugging endpoint used by this canary is test-only bootstrap/observa
 - `TEST_HARNESS_DOES_NOT_DISPATCH_BROWSER_INPUT`.
 - `REAL_PAGE_EFFECT_IS_A_CANARY_NOT_AN_EXACTLY_ONCE_CLAIM`.
 - `BRANDED_CHROME_EXTENSION_LOADING_IS_NOT_A_TEST_ASSUMPTION`.
+- `EXACT_BACKEND_HIT_FENCE_IS_NOT_WEAKENED_FOR_TEST_GREEN`.
 
 ## Explicit non-claims
 
