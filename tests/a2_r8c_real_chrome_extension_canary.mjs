@@ -129,6 +129,19 @@ async function stopBrowserTree() {
   }
 }
 
+async function removeEphemeralRoot() {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      await rm(root, { recursive: true, force: true });
+      return true;
+    } catch (error) {
+      if (!['ENOTEMPTY', 'EBUSY'].includes(error?.code)) throw error;
+      await sleep(200);
+    }
+  }
+  return false;
+}
+
 try {
   const openssl = spawnSync('openssl', [
     'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
@@ -236,5 +249,6 @@ try {
     try { server.closeAllConnections(); } catch {}
     await Promise.race([new Promise((resolve) => server.close(resolve)), sleep(2000)]);
   }
-  await rm(root, { recursive: true, force: true });
+  const removed = await removeEphemeralRoot();
+  if (!removed) process.stderr.write('R8C canary teardown warning: ephemeral profile cleanup deferred\n');
 }
