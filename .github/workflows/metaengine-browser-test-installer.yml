@@ -1,0 +1,92 @@
+name: METAENGINE Browser Test Installer
+on:
+  push:
+    branches: ['build/metaengine-browser-test-exe-v035']
+permissions:
+  contents: read
+jobs:
+  build-install-launch:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Parse and contract gates
+        working-directory: apps/metaengine-browser
+        run: |
+          npm run check
+          npm test
+      - name: Build unsigned NSIS installer
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          npx --yes electron-builder@26.15.3 --win nsis --x64 --config electron-builder.test.json --publish never
+          $installer = Get-ChildItem dist-test -Filter 'METAENGINE-Browser-Test-Setup-*.exe' -File | Select-Object -First 1
+          if (-not $installer) { throw 'installer_missing' }
+          $installer.FullName | Set-Content "$env:RUNNER_TEMP\installer-path.txt"
+          (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content "$env:RUNNER_TEMP\installer-sha256.txt"
+      - name: Install generated Setup EXE
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $installer = Get-Content "$env:RUNNER_TEMP\installer-path.txt"
+          $install = Start-Process -FilePath $installer -ArgumentList '/S' -PassThru -Wait
+          if ($install.ExitCode -ne 0) { throw "installer_exit_$($install.ExitCode)" }
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test\METAENGINE Browser Test.exe'
+          if (-not (Test-Path $app)) { throw "installed_browser_missing:$app" }
+          $app | Set-Content "$env:RUNNER_TEMP\installed-app-path.txt"
+      - name: Launch installed browser and verify window
+        shell: powershell
+        run: |
+          $app = Get-Content "$env:RUNNER_TEMP\installed-app-path.txt"
+          $p = Start-Process -FilePath $app -PassThru
+          $deadline = (Get-Date).AddSeconds(25)
+          $windowReady = $false
+          do {
+            Start-Sleep -Milliseconds 500
+            $p.Refresh()
+            if ($p.HasExited) { throw "installed_browser_exited_early:$($p.ExitCode)" }
+            if ($p.MainWindowHandle -ne 0) { $windowReady = $true; break }
+          } while ((Get-Date) -lt $deadline)
+          if (-not $windowReady) {
+            try { $p.Kill($true) } catch {}
+            throw 'installed_browser_main_window_missing'
+          }
+          $title = $p.MainWindowTitle
+          "pid=$($p.Id)" | Set-Content "$env:RUNNER_TEMP\launch-proof.txt"
+          "main_window_handle=$($p.MainWindowHandle)" | Add-Content "$env:RUNNER_TEMP\launch-proof.txt"
+          "main_window_title=$title" | Add-Content "$env:RUNNER_TEMP\launch-proof.txt"
+          "installed_path=$app" | Add-Content "$env:RUNNER_TEMP\launch-proof.txt"
+          if ($title -notmatch 'METAENGINE Browser') {
+            try { $p.Kill($true) } catch {}
+            throw "installed_browser_title_unexpected:$title"
+          }
+          try { $p.CloseMainWindow() | Out-Null } catch {}
+          if (-not $p.WaitForExit(5000)) { try { $p.Kill($true) } catch {} }
+      - name: Stage single installer artifact
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path release-single | Out-Null
+          $installer = Get-Content "$env:RUNNER_TEMP\installer-path.txt"
+          Copy-Item $installer 'release-single\METAENGINE-Browser-Test-Setup.exe'
+          Copy-Item "$env:RUNNER_TEMP\installer-sha256.txt" 'release-single\METAENGINE-Browser-Test-Setup.exe.sha256'
+          Copy-Item "$env:RUNNER_TEMP\launch-proof.txt" 'release-single\launch-proof.txt'
+          git rev-parse HEAD | Set-Content 'release-single\git-head.txt'
+      - name: Upload verified installer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: metaengine-browser-test-installer-${{ github.sha }}
+          path: apps/metaengine-browser/release-single/
+          if-no-files-found: error
