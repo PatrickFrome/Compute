@@ -6,6 +6,7 @@ on:
     paths:
       - 'apps/model-gateway/**'
       - 'spec/f1/model-peer-*.schema.json'
+      - 'spec/f1/advisory-evidence-envelope.schema.json'
       - '.github/workflows/f1-model-gateway-contract.yml'
   workflow_dispatch:
 
@@ -29,7 +30,7 @@ jobs:
           for f in apps/model-gateway/api/*.mjs apps/model-gateway/lib/*.mjs apps/model-gateway/test/*.mjs; do
             node --check "$f"
           done
-          node -e "const fs=require('fs'); for (const f of ['spec/f1/model-peer-request.schema.json','spec/f1/model-peer-receipt.schema.json']) JSON.parse(fs.readFileSync(f,'utf8'));"
+          node -e "const fs=require('fs'); for (const f of ['spec/f1/model-peer-request.schema.json','spec/f1/model-peer-receipt.schema.json','spec/f1/advisory-evidence-envelope.schema.json']) JSON.parse(fs.readFileSync(f,'utf8'));"
 
       - name: Model gateway contract tests
         working-directory: apps/model-gateway
@@ -147,7 +148,7 @@ jobs:
           }, indent=2))
           PY
 
-      - name: Spend privacy and authority source gates
+      - name: Spend privacy authority and evidence source gates
         shell: bash
         run: |
           set -euo pipefail
@@ -163,4 +164,9 @@ jobs:
           grep -F "confidential_data_supported: false" apps/model-gateway/lib/openai-compat.mjs
           grep -F "max_output_tokens: maxOutputTokens" apps/model-gateway/lib/gateway.mjs
           grep -F "authority_effect: false" apps/model-gateway/api/peer.mjs
+          grep -F "HASH_BOUND_ADVISORY_UNATTESTED" apps/model-gateway/lib/advisory-evidence-envelope.mjs
+          grep -F "direct_action_allowed: false" apps/model-gateway/lib/advisory-evidence-envelope.mjs
+          grep -F "browser_authority: false" apps/model-gateway/lib/advisory-evidence-envelope.mjs
+          grep -F "promotion_authority: false" apps/model-gateway/lib/advisory-evidence-envelope.mjs
+          grep -F "createCommitteeAdvisoryEvidence" apps/model-gateway/api/committee.mjs
           ! grep -R -E '(ANTHROPIC_API_KEY|GOOGLE_API_KEY|DEEPSEEK_API_KEY|ZAI_API_KEY|XAI_API_KEY)' apps/model-gateway
