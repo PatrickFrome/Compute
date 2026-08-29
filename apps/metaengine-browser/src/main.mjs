@@ -1,10 +1,13 @@
-import { app, BaseWindow, WebContentsView, ipcMain, protocol, session, utilityProcess } from 'electron';
+import { app, BaseWindow, WebContentsView, ipcMain, protocol, safeStorage, session, utilityProcess } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ComputeBridgeClient } from './compute-bridge-client.mjs';
 import { DevelopmentPlane } from './development-plane.mjs';
 import { FleetProvisioner } from './fleet-provisioner.mjs';
+import { captureSemanticFrame, captureViewThumbnail, executeSemanticCommand } from './native-browser-control.mjs';
+import { NativeSupervisorClient } from './native-supervisor-client.mjs';
+import { SupervisorDeviceIdentity } from './supervisor-device-identity.mjs';
 import { navigationDecision, newWindowDecision, REMOTE_WEB_PREFERENCES, SECURITY_POLICY } from './browser-policy.mjs';
 import { TabRegistry } from './tab-registry.mjs';
 
@@ -12,6 +15,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
 const UI_ROOT = path.join(APP_ROOT, 'ui');
 const TOOLBAR_HEIGHT = 92;
+const PERCEPTION_CACHE_MS = 4000;
 const isSmoke = process.argv.includes('--metaengine-smoke');
 const isDevelopmentPlaneSmoke = process.argv.includes('--metaengine-devplane-smoke');
 
@@ -26,6 +30,8 @@ let shellView = null;
 let userSession = null;
 let fleet = null;
 let developmentPlane = null;
+let nativeSupervisor = null;
+let perceptionCache = { tab_id: null, captured_ms: 0, frame: null, error: null };
 
 function mimeFor(filePath) {
   if (filePath.endsWith('.html')) return 'text/html; charset=utf-8';
@@ -56,6 +62,10 @@ function fleetStatePath() {
   return path.join(app.getPath('userData'), 'metaengine-fleet-state-v1.json');
 }
 
+function supervisorIdentityPath() {
+  return path.join(app.getPath('userData'), 'metaengine-native-supervisor-device-v1.json');
+}
+
 async function loadFleetState() {
   try {
     return JSON.parse(await fs.readFile(fleetStatePath(), 'utf8'));
@@ -79,11 +89,12 @@ function assertShellSender(event) {
 
 async function shellSnapshot() {
   return {
-    schema: 'metaengine.browser-shell.snapshot.v2',
-    version: '0.3.5',
+    schema: 'metaengine.browser-shell.snapshot.v3',
+    version: app.getVersion(),
     tabs: registry.snapshot(),
     fleet: fleet?.snapshot() || null,
     development_plane: developmentPlane?.snapshot() || null,
+    supervisor: nativeSupervisor?.snapshot() || null,
     compute: await bridge.health(),
     policy: SECURITY_POLICY,
     authority_effect: false,
@@ -121,6 +132,10 @@ function attachSelected() {
   layout();
 }
 
+function invalidatePerception(tabId = null) {
+  if (!tabId || perceptionCache.tab_id === tabId) perceptionCache = { tab_id: null, captured_ms: 0, frame: null, error: null };
+}
+
 function wireRemoteView(tab, view) {
   view.webContents.setWindowOpenHandler(({ url }) => {
     const d = newWindowDecision(url);
@@ -140,12 +155,13 @@ function wireRemoteView(tab, view) {
     const url = view.webContents.getURL() || tab.url;
     const d = navigationDecision(url);
     registry.update(tab.tab_id, { url: d.allow ? d.normalized_url : tab.url, kind: d.allow ? d.kind : tab.kind, title: view.webContents.getTitle() || tab.title });
+    invalidatePerception(tab.tab_id);
     publishSnapshot().catch(() => {});
   };
   view.webContents.on('did-navigate', sync);
   view.webContents.on('did-navigate-in-page', sync);
   view.webContents.on('page-title-updated', sync);
-  view.webContents.on('render-process-gone', () => publishSnapshot().catch(() => {}));
+  view.webContents.on('render-process-gone', () => { invalidatePerception(tab.tab_id); publishSnapshot().catch(() => {}); });
 }
 
 async function createTab(input = 'https://chatgpt.com/', { select = true, load = true } = {}) {
@@ -158,6 +174,7 @@ async function createTab(input = 'https://chatgpt.com/', { select = true, load =
   if (select) registry.select(tab.tab_id);
   attachSelected();
   if (load) await view.webContents.loadURL(d.normalized_url);
+  invalidatePerception();
   await publishSnapshot();
   return { ...tab, webcontents_id: view.webContents.id };
 }
@@ -169,8 +186,9 @@ async function loadTab(tabId, input) {
   if (!d.allow) throw new Error(`navigation_blocked:${d.reason}`);
   await view.webContents.loadURL(d.normalized_url);
   registry.update(String(tabId), { url: d.normalized_url, kind: d.kind });
+  invalidatePerception(String(tabId));
   await publishSnapshot();
-  return { ok: true };
+  return { ok: true, tab_id: String(tabId), url: d.normalized_url };
 }
 
 async function closeTab(tabId) {
@@ -184,6 +202,7 @@ async function closeTab(tabId) {
   registry.close(id);
   await fleet?.onTabClosed(id, 'PHYSICAL_TAB_CLOSED_BY_SHELL');
   if (!registry.selected()) await createTab('https://chatgpt.com/', { select: true, load: true });
+  invalidatePerception(id);
   attachSelected();
   await publishSnapshot();
 }
@@ -201,9 +220,13 @@ async function initFleet() {
   await fleet.reconcile({ active: false });
 }
 
+function developmentPlaneRepoRoot() {
+  return app.isPackaged ? process.resourcesPath : path.resolve(APP_ROOT, '../..');
+}
+
 async function initDevelopmentPlane() {
   if (!developmentPlane) {
-    const repoRoot = path.resolve(APP_ROOT, '../..');
+    const repoRoot = developmentPlaneRepoRoot();
     developmentPlane = new DevelopmentPlane({
       spawnWorker: () => utilityProcess.fork(path.join(__dirname, 'development-plane-worker.cjs'), [], {
         cwd: repoRoot,
@@ -222,17 +245,18 @@ async function runDevelopmentPlaneSmoke() {
   const health = await developmentPlane.request('HEALTH');
   const capabilities = await developmentPlane.request('CAPABILITIES');
   const repo = await developmentPlane.request('REPO_HEAD_READ');
-  const preShutdownInvariant = state.state === 'READY'
+  const handshakeInvariant = state.state === 'READY'
     && health?.ok === true
     && Array.isArray(capabilities?.capabilities)
     && capabilities.version === state.version
-    && capabilities.direct_promote_current === false
-    && repo?.repository_present === true;
+    && capabilities.direct_promote_current === false;
+  const sourceRepoInvariant = app.isPackaged ? true : repo?.repository_present === true;
   const shutdown = await developmentPlane.stopAndWait(4000);
-  const invariant = preShutdownInvariant && shutdown?.ok === true && shutdown?.state === 'STOPPED';
+  const invariant = handshakeInvariant && sourceRepoInvariant && shutdown?.ok === true && shutdown?.state === 'STOPPED';
   console.log(JSON.stringify({
-    schema: 'metaengine.development-plane.smoke.v2',
+    schema: 'metaengine.development-plane.smoke.v3',
     ok: invariant,
+    packaged: app.isPackaged,
     state,
     health,
     capabilities,
@@ -247,21 +271,23 @@ async function handleCommand(command, payload = {}) {
   const selected = registry.selected();
   const selectedView = selected ? views.get(selected.tab_id) : null;
   if (command === 'NEW_CHATGPT') return createTab('https://chatgpt.com/', { select: true, load: true });
-  if (command === 'NEW_TAB') return createTab('https://chatgpt.com/', { select: true, load: true });
-  if (command === 'SELECT_TAB') { registry.select(payload?.tab_id); attachSelected(); await publishSnapshot(); return { ok: true }; }
+  if (command === 'NEW_TAB') return createTab(payload?.url || 'https://chatgpt.com/', { select: payload?.select !== false, load: true });
+  if (command === 'SELECT_TAB') { registry.select(payload?.tab_id); attachSelected(); invalidatePerception(); await publishSnapshot(); return { ok: true, tab_id: String(payload?.tab_id) }; }
   if (command === 'CLOSE_TAB') { await closeTab(payload?.tab_id); return { ok: true }; }
   if (command === 'NAVIGATE') {
+    if (payload?.tab_id) return loadTab(payload.tab_id, payload?.url);
     if (!selectedView) throw new Error('no_selected_tab');
     const d = navigationDecision(payload?.url);
     if (!d.allow) throw new Error(`navigation_blocked:${d.reason}`);
     await selectedView.webContents.loadURL(d.normalized_url);
     registry.update(selected.tab_id, { url: d.normalized_url, kind: d.kind });
+    invalidatePerception(selected.tab_id);
     await publishSnapshot();
-    return { ok: true };
+    return { ok: true, tab_id: selected.tab_id, url: d.normalized_url };
   }
   if (command === 'BACK') { if (selectedView?.webContents.navigationHistory.canGoBack()) selectedView.webContents.navigationHistory.goBack(); return { ok: true }; }
   if (command === 'FORWARD') { if (selectedView?.webContents.navigationHistory.canGoForward()) selectedView.webContents.navigationHistory.goForward(); return { ok: true }; }
-  if (command === 'RELOAD') { selectedView?.webContents.reload(); return { ok: true }; }
+  if (command === 'RELOAD') { selectedView?.webContents.reload(); invalidatePerception(selected?.tab_id); return { ok: true }; }
   if (command === 'COMPUTE_HEALTH') return bridge.health();
   if (command === 'DEV_PLANE_STATUS') return developmentPlane?.snapshot() || null;
   if (command === 'DEV_PLANE_HEALTH') return developmentPlane?.request('HEALTH');
@@ -274,7 +300,117 @@ async function handleCommand(command, payload = {}) {
   throw new Error('shell_command_unknown');
 }
 
+function tabForPlatform(platform) {
+  const rows = registry.snapshot().tabs;
+  const selected = registry.selected();
+  const p = String(platform || '').toUpperCase();
+  const match = (tab) => {
+    try {
+      const host = new URL(tab.url).hostname.toLowerCase();
+      if (p === 'CHATGPT') return host === 'chatgpt.com' || host === 'www.chatgpt.com' || host === 'chat.openai.com';
+      if (p === 'GLM_ZAI') return host === 'chat.z.ai';
+    } catch {}
+    return false;
+  };
+  if (selected && match(selected)) return selected;
+  return rows.find(match) || null;
+}
+
+function targetTabForSupervisor(command) {
+  const explicit = command?.payload?.tab_id ? registry.get(command.payload.tab_id) : null;
+  if (explicit) return explicit;
+  const byPlatform = tabForPlatform(command?.platform);
+  return byPlatform || registry.selected();
+}
+
+function targetViewForSupervisor(command) {
+  const tab = targetTabForSupervisor(command);
+  const view = tab ? views.get(tab.tab_id) : null;
+  if (!tab || !view || view.webContents.isDestroyed()) throw new Error('native_supervisor_target_view_unavailable');
+  return { tab, view };
+}
+
+async function perceptionForSelected({ force = false } = {}) {
+  const tab = registry.selected();
+  if (!tab) return null;
+  const view = views.get(tab.tab_id);
+  if (!view || view.webContents.isDestroyed()) return null;
+  const now = Date.now();
+  if (!force && perceptionCache.tab_id === tab.tab_id && perceptionCache.frame && now - perceptionCache.captured_ms < PERCEPTION_CACHE_MS) return perceptionCache.frame;
+  try {
+    const frame = await captureSemanticFrame(view.webContents);
+    perceptionCache = { tab_id: tab.tab_id, captured_ms: now, frame: { ...frame, tab_id: tab.tab_id }, error: null };
+    return perceptionCache.frame;
+  } catch (error) {
+    perceptionCache = { tab_id: tab.tab_id, captured_ms: now, frame: null, error: String(error?.message || error).slice(0, 300) };
+    return { schema: 'metaengine.native-browser.perception.v1', tab_id: tab.tab_id, error: perceptionCache.error, authority_effect: false };
+  }
+}
+
+async function nativeSupervisorState() {
+  const snap = registry.snapshot();
+  const selected = registry.selected();
+  const perception = await perceptionForSelected();
+  return {
+    tabs: snap.tabs.map((tab) => ({ ...tab, selected: tab.tab_id === snap.selected_tab_id })),
+    active_tab: selected,
+    development_plane: developmentPlane?.snapshot() || null,
+    fleet: fleet?.snapshot() || null,
+    perception,
+  };
+}
+
+async function executeNativeSupervisorCommand(command) {
+  const action = String(command?.action || '');
+  const payload = command?.payload || {};
+  if (action === 'POLL') return { ok: true, snapshot: await nativeSupervisorState(), authority_effect: false };
+  if (action === 'SET_MODE') {
+    const requested = String(payload?.mode || '').toUpperCase();
+    if (requested === 'OBSERVE') return nativeSupervisor.setControlState({ mode: 'MONITOR' });
+    if (requested === 'CONTROL' || requested === 'GATE_SEND') return nativeSupervisor.setControlState({ mode: 'CONTROL' });
+    throw new Error('native_operator_mode_invalid');
+  }
+  if (['NEW_TAB','SELECT_TAB','CLOSE_TAB','NAVIGATE','BACK','FORWARD','RELOAD','FLEET_RECONCILE','FLEET_SET_PROFILE','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD'].includes(action)) {
+    if (['BACK','FORWARD','RELOAD'].includes(action) && payload?.tab_id) {
+      const tab = registry.get(payload.tab_id);
+      const view = tab ? views.get(tab.tab_id) : null;
+      if (!view || view.webContents.isDestroyed()) throw new Error('native_supervisor_target_view_unavailable');
+      if (action === 'BACK' && view.webContents.navigationHistory.canGoBack()) view.webContents.navigationHistory.goBack();
+      if (action === 'FORWARD' && view.webContents.navigationHistory.canGoForward()) view.webContents.navigationHistory.goForward();
+      if (action === 'RELOAD') view.webContents.reload();
+      invalidatePerception(tab.tab_id);
+      return { ok: true, tab_id: tab.tab_id, authority_effect: true };
+    }
+    return handleCommand(action, payload);
+  }
+  const { tab, view } = targetViewForSupervisor(command);
+  if (action === 'CAPTURE') return { ...(await captureSemanticFrame(view.webContents)), tab_id: tab.tab_id };
+  if (action === 'CAPTURE_VIEW') return { ...(await captureViewThumbnail(view.webContents)), tab_id: tab.tab_id };
+  if (['STOP_GENERATION','SCROLL','SEMANTIC_FOCUS','SEMANTIC_TYPE','TYPED_CLICK'].includes(action)) {
+    const result = await executeSemanticCommand(view.webContents, command);
+    invalidatePerception(tab.tab_id);
+    return { ...result, tab_id: tab.tab_id };
+  }
+  throw new Error('native_supervisor_command_unknown');
+}
+
+async function initNativeSupervisor() {
+  if (nativeSupervisor) return nativeSupervisor.snapshot();
+  const identity = new SupervisorDeviceIdentity({ statePath: supervisorIdentityPath(), secureStorage: safeStorage });
+  nativeSupervisor = new NativeSupervisorClient({
+    identity,
+    version: app.getVersion(),
+    intervalMs: 2000,
+    getState: nativeSupervisorState,
+    executeCommand: executeNativeSupervisorCommand,
+  });
+  await nativeSupervisor.start();
+  await publishSnapshot().catch(() => {});
+  return nativeSupervisor.snapshot();
+}
+
 function destroyWindowContents() {
+  nativeSupervisor?.stop();
   for (const view of views.values()) if (!view.webContents.isDestroyed()) view.webContents.close();
   views.clear();
   if (shellView && !shellView.webContents.isDestroyed()) shellView.webContents.close();
@@ -296,7 +432,7 @@ async function runSmoke() {
     && REMOTE_WEB_PREFERENCES.sandbox === true
     && SECURITY_POLICY.cookie_transfer_to_compute_space === false;
   console.log(JSON.stringify({
-    schema: 'metaengine.browser-shell.smoke.v2',
+    schema: 'metaengine.browser-shell.smoke.v3',
     ok: invariant,
     persistent_user_space: userSession.isPersistent(),
     custom_shell_protocol_registered: protocol.isProtocolHandled('metaengine'),
@@ -305,6 +441,7 @@ async function runSmoke() {
     remote_context_isolation: REMOTE_WEB_PREFERENCES.contextIsolation,
     remote_sandbox: REMOTE_WEB_PREFERENCES.sandbox,
     compute_bridge_read_only: true,
+    native_supervisor_arbitrary_eval: false,
     authority_effect: false,
   }));
   remoteView.webContents.close();
@@ -324,6 +461,7 @@ async function createWindow() {
   await initDevelopmentPlane().catch((error) => console.error('development-plane-start-failed', error));
   layout();
   await publishSnapshot();
+  setImmediate(() => initNativeSupervisor().catch((error) => console.error('native-supervisor-start-failed', error)));
 }
 
 ipcMain.handle('metaengine:shell:snapshot', async (event) => { assertShellSender(event); return shellSnapshot(); });
@@ -337,7 +475,7 @@ async function startAfterReady() {
       await runDevelopmentPlaneSmoke();
     } catch (error) {
       console.error(JSON.stringify({
-        schema: 'metaengine.development-plane.smoke.v2',
+        schema: 'metaengine.development-plane.smoke.v3',
         ok: false,
         error: String(error?.message || error).slice(0, 240),
         state: developmentPlane?.snapshot() || null,
