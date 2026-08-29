@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { hostname } from "node:os";
 import { Client, Pool } from "pg";
+import { configuredTariffDependency, mergeUpstreamProvenance } from "./upstream_provenance.js";
 
 type JsonObject = Record<string, unknown>;
 type Actor = "GPT" | "GLM";
@@ -45,13 +46,26 @@ Return exactly one JSON object and no markdown.`;
 const VOTES = new Set(["WIN_GPT", "WIN_GLM", "SYNTHESIS", "NO_ACTION"]);
 const DATABASE_URL = required("DATABASE_URL");
 const RUNNER_ID = `sovereign:${process.env.DUEL_RUNNER_ID || hostname()}`;
-const GPT_URL = process.env.SOVEREIGN_GPT_URL || "http://127.0.0.1:8001";
-const GLM_URL = process.env.SOVEREIGN_GLM_URL || "http://127.0.0.1:8002";
+const GPT_URL_RAW = process.env.SOVEREIGN_GPT_URL;
+const GLM_URL_RAW = process.env.SOVEREIGN_GLM_URL;
+const GPT_URL = GPT_URL_RAW || "http://127.0.0.1:8001";
+const GLM_URL = GLM_URL_RAW || "http://127.0.0.1:8002";
 const GPT_MODEL = process.env.SOVEREIGN_GPT_MODEL || "openai/gpt-oss-20b";
 const GLM_MODEL = process.env.SOVEREIGN_GLM_MODEL || "zai-org/GLM-4.7-Flash";
 const COMMON_TOKEN = process.env.SOVEREIGN_INFERENCE_TOKEN || "";
 const GPT_TOKEN = process.env.SOVEREIGN_GPT_TOKEN || COMMON_TOKEN;
 const GLM_TOKEN = process.env.SOVEREIGN_GLM_TOKEN || COMMON_TOKEN;
+const GPT_TARIFF_DEPENDENCY = configuredTariffDependency(
+  GPT_URL_RAW !== undefined,
+  process.env.SOVEREIGN_GPT_TARIFF_DEPENDENCY,
+  "SOVEREIGN_GPT_TARIFF_DEPENDENCY",
+);
+const GLM_TARIFF_DEPENDENCY = configuredTariffDependency(
+  GLM_URL_RAW !== undefined,
+  process.env.SOVEREIGN_GLM_TARIFF_DEPENDENCY,
+  "SOVEREIGN_GLM_TARIFF_DEPENDENCY",
+);
+const RUNNER_TARIFF_DEPENDENCY = GPT_TARIFF_DEPENDENCY || GLM_TARIFF_DEPENDENCY;
 const MODEL_TIMEOUT_MS = boundedInt(process.env.DUEL_MODEL_TIMEOUT_MS, 90_000, 5_000, 300_000);
 const MAX_OUTPUT_TOKENS = boundedInt(process.env.DUEL_MAX_OUTPUT_TOKENS, 1_200, 256, 4_096);
 const RECOVERY_MS = boundedInt(process.env.DUEL_RECOVERY_MS, 60_000, 5_000, 600_000);
@@ -149,23 +163,47 @@ function prompt(actor: Actor, lease: Lease, read: Readback): string {
   ].join("\n");
 }
 
+function actorConfig(actor: Actor, lease: Lease) {
+  return actor === "GPT"
+    ? {
+        base: GPT_URL,
+        model: lease.gpt_model || GPT_MODEL,
+        token: GPT_TOKEN,
+        tariffDependency: GPT_TARIFF_DEPENDENCY,
+      }
+    : {
+        base: GLM_URL,
+        model: lease.glm_model || GLM_MODEL,
+        token: GLM_TOKEN,
+        tariffDependency: GLM_TARIFF_DEPENDENCY,
+      };
+}
+
+function payloadTariffDependency(payload: JsonObject): boolean {
+  const executor = payload._executor;
+  return Boolean(
+    executor &&
+    typeof executor === "object" &&
+    !Array.isArray(executor) &&
+    (executor as JsonObject).tariff_dependency === true
+  );
+}
+
 async function modelCall(actor: Actor, lease: Lease, text: string): Promise<JsonObject> {
-  const base = actor === "GPT" ? GPT_URL : GLM_URL;
-  const model = actor === "GPT" ? (lease.gpt_model || GPT_MODEL) : (lease.glm_model || GLM_MODEL);
-  const token = actor === "GPT" ? GPT_TOKEN : GLM_TOKEN;
+  const config = actorConfig(actor, lease);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("model_timeout"), MODEL_TIMEOUT_MS);
   const started = Date.now();
   try {
-    const response = await fetch(`${base.replace(/\/$/, "")}/v1/chat/completions`, {
+    const response = await fetch(`${config.base.replace(/\/$/, "")}/v1/chat/completions`, {
       method: "POST",
       signal: controller.signal,
       headers: {
         "content-type": "application/json",
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...(config.token ? { authorization: `Bearer ${config.token}` } : {}),
       },
       body: JSON.stringify({
-        model,
+        model: config.model,
         messages: [
           { role: "system", content: SYSTEM },
           { role: "user", content: text },
@@ -176,18 +214,25 @@ async function modelCall(actor: Actor, lease: Lease, text: string): Promise<Json
       }),
     });
     const bodyText = await response.text();
-    if (!response.ok) throw new Error(`local_${actor.toLowerCase()}:${response.status}:${bodyText.slice(0, 800)}`);
+    if (!response.ok) throw new Error(`endpoint_${actor.toLowerCase()}:${response.status}:${bodyText.slice(0, 800)}`);
     const body = asObj(JSON.parse(bodyText));
     const choices = Array.isArray(body.choices) ? body.choices : [];
     const first = choices[0] && typeof choices[0] === "object" && !Array.isArray(choices[0]) ? asObj(choices[0]) : {};
     const message = first.message && typeof first.message === "object" && !Array.isArray(first.message) ? asObj(first.message) : {};
-    if (typeof message.content !== "string" || !message.content.trim()) throw new Error(`local_${actor.toLowerCase()}_empty`);
+    if (typeof message.content !== "string" || !message.content.trim()) throw new Error(`endpoint_${actor.toLowerCase()}_empty`);
     const payload = parseJson(message.content);
+    const provenance = mergeUpstreamProvenance(body, config.model, config.tariffDependency);
     payload._executor = {
       mode: "SOVEREIGN_OPENAI_COMPAT",
-      tariff_dependency: false,
-      model,
-      endpoint_sha256: endpointHash(base),
+      tariff_dependency: provenance.tariffDependency,
+      model: config.model,
+      logical_model: provenance.logicalModel,
+      served_model: provenance.servedModel,
+      served_model_source: provenance.servedModelSource,
+      zero_spend_verified: provenance.zeroSpendVerified,
+      data_policy: provenance.dataPolicy,
+      confidential_data_supported: provenance.confidentialDataSupported,
+      endpoint_sha256: endpointHash(config.base),
       latency_ms: Date.now() - started,
       canonical: false,
       authority_effect: false,
@@ -224,7 +269,24 @@ async function actorVisible(actor: Actor, lease: Lease, read: Readback): Promise
   try {
     return { payload: await modelCall(actor, lease, prompt(actor, lease, read)), executorError: false };
   } catch (error) {
-    return { payload: visibleError(actor, peer, error), executorError: true };
+    const config = actorConfig(actor, lease);
+    const payload = visibleError(actor, peer, error);
+    payload._executor = {
+      mode: "SOVEREIGN_OPENAI_COMPAT",
+      tariff_dependency: config.tariffDependency,
+      model: config.model,
+      logical_model: config.model,
+      served_model: null,
+      served_model_source: "unavailable",
+      zero_spend_verified: null,
+      data_policy: null,
+      confidential_data_supported: null,
+      endpoint_sha256: endpointHash(config.base),
+      executor_error: true,
+      canonical: false,
+      authority_effect: false,
+    };
+    return { payload, executorError: true };
   }
 }
 
@@ -313,6 +375,9 @@ async function processLease(lease: Lease): Promise<void> {
   let checkpoint = String(read.current_checkpoint_sha256 || lease.current_checkpoint_sha256 || "");
   let lastTick = Number(read.current_tick || lease.current_tick || 0);
   const maxTicks = Math.min(Number(lease.max_ticks || 64), 512);
+  // Sticky raise-only accumulator: starts at the configuration minimum and any
+  // wave whose executor metadata reports dependency raises it permanently.
+  let observedTariffDependency = RUNNER_TARIFF_DEPENDENCY;
 
   try {
     for (let tick = lastTick + 1; tick <= maxTicks; tick++) {
@@ -322,8 +387,9 @@ async function processLease(lease: Lease): Promise<void> {
       const started = Date.now();
       const [g, l] = await Promise.all([actorVisible("GPT", lease, read), actorVisible("GLM", lease, read)]);
       if (!peerAckOk(g.payload, gPeer) || !peerAckOk(l.payload, lPeer)) throw new Error(`peer_hash_ack_failed:${tick}`);
-      g.payload._lockstep = { tick_no: tick, pair_inference_ms: Date.now() - started, execution_plane: "SOVEREIGN_PERSISTENT_RUNNER", tariff_dependency: false };
-      l.payload._lockstep = { tick_no: tick, pair_inference_ms: Date.now() - started, execution_plane: "SOVEREIGN_PERSISTENT_RUNNER", tariff_dependency: false };
+      if (payloadTariffDependency(g.payload) || payloadTariffDependency(l.payload)) observedTariffDependency = true;
+      g.payload._lockstep = { tick_no: tick, pair_inference_ms: Date.now() - started, execution_plane: "SOVEREIGN_PERSISTENT_RUNNER", tariff_dependency: payloadTariffDependency(g.payload) };
+      l.payload._lockstep = { tick_no: tick, pair_inference_ms: Date.now() - started, execution_plane: "SOVEREIGN_PERSISTENT_RUNNER", tariff_dependency: payloadTariffDependency(l.payload) };
 
       const receipt = await submitPair(lease, tick, checkpoint, g.payload, l.payload);
       const gp = eventPayload(receipt.gpt_event);
@@ -337,7 +403,7 @@ async function processLease(lease: Lease): Promise<void> {
           schema: "metaengine.compute.duel-sovereign-result.h205f22.v1",
           outcome: "BLOCKED_EXECUTOR",
           inference_backend: "SOVEREIGN_OPENAI_COMPAT",
-          tariff_dependency: false,
+          tariff_dependency: observedTariffDependency,
           final_tick: tick,
           final_checkpoint_sha256: checkpoint,
           gpt_step: gp,
@@ -356,7 +422,7 @@ async function processLease(lease: Lease): Promise<void> {
           outcome: "RESOLVED",
           winner: gv,
           inference_backend: "SOVEREIGN_OPENAI_COMPAT",
-          tariff_dependency: false,
+          tariff_dependency: observedTariffDependency,
           final_tick: tick,
           final_checkpoint_sha256: checkpoint,
           canonical: false,
@@ -370,7 +436,7 @@ async function processLease(lease: Lease): Promise<void> {
           schema: "metaengine.compute.duel-sovereign-result.h205f22.v1",
           outcome: "CANARY_REQUIRED",
           inference_backend: "SOVEREIGN_OPENAI_COMPAT",
-          tariff_dependency: false,
+          tariff_dependency: observedTariffDependency,
           final_tick: tick,
           final_checkpoint_sha256: checkpoint,
           canonical: false,
@@ -385,7 +451,7 @@ async function processLease(lease: Lease): Promise<void> {
       outcome: "CANARY_REQUIRED",
       reason: "MAX_MICROSTEPS",
       inference_backend: "SOVEREIGN_OPENAI_COMPAT",
-      tariff_dependency: false,
+      tariff_dependency: observedTariffDependency,
       final_tick: lastTick,
       final_checkpoint_sha256: checkpoint,
       canonical: false,
@@ -397,7 +463,7 @@ async function processLease(lease: Lease): Promise<void> {
       outcome: "FAILED",
       error: String(error).slice(0, 2400),
       inference_backend: "SOVEREIGN_OPENAI_COMPAT",
-      tariff_dependency: false,
+      tariff_dependency: observedTariffDependency,
       final_tick: lastTick,
       final_checkpoint_sha256: checkpoint,
       canonical: false,
@@ -438,7 +504,14 @@ async function listenForever(): Promise<void> {
         }
       });
       await client.query("listen h205f22_duel_ready_v1");
-      console.log(JSON.stringify({ status: "LISTENING", runner_id: RUNNER_ID, tariff_dependency: false }));
+      console.log(JSON.stringify({
+        status: "LISTENING",
+        runner_id: RUNNER_ID,
+        tariff_dependency: RUNNER_TARIFF_DEPENDENCY,
+        tariff_dependency_basis: "CONFIGURATION_MINIMUM",
+        gpt_tariff_dependency: GPT_TARIFF_DEPENDENCY,
+        glm_tariff_dependency: GLM_TARIFF_DEPENDENCY,
+      }));
       await new Promise<void>((_resolve, reject) => client.once("error", reject));
     } catch (error) {
       console.error("sovereign_listener_error", String(error));
@@ -458,7 +531,10 @@ async function main(): Promise<void> {
     glm_model: GLM_MODEL,
     gpt_endpoint_sha256: endpointHash(GPT_URL),
     glm_endpoint_sha256: endpointHash(GLM_URL),
-    tariff_dependency: false,
+    tariff_dependency: RUNNER_TARIFF_DEPENDENCY,
+    tariff_dependency_basis: "CONFIGURATION_MINIMUM",
+    gpt_tariff_dependency: GPT_TARIFF_DEPENDENCY,
+    glm_tariff_dependency: GLM_TARIFF_DEPENDENCY,
   }));
   await reconcile();
   setInterval(() => void reconcile().catch((error) => console.error("sovereign_reconcile_failed", String(error))), RECOVERY_MS).unref();

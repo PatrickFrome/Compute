@@ -1,0 +1,68 @@
+name: Sovereign Legacy Upstream Provenance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'orchestration/sovereign/src/index.ts'
+      - 'orchestration/sovereign/src/upstream_provenance.ts'
+      - 'orchestration/sovereign/src/upstream_provenance.test.ts'
+      - 'orchestration/sovereign/package.json'
+      - 'orchestration/sovereign/tsconfig.json'
+      - 'tests/test_sovereign_inference_contract.py'
+      - 'tests/test_sovereign_legacy_upstream_provenance.py'
+      - 'tests/test_same_point_duel_v4_upstream_provenance.py'
+      - '.github/workflows/sovereign-legacy-upstream-provenance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout PR merge revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Install exact sovereign dependencies
+        working-directory: orchestration/sovereign
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Typecheck sovereign runner
+        working-directory: orchestration/sovereign
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run check
+
+      - name: Execute upstream provenance tests
+        working-directory: orchestration/sovereign
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run test:provenance
+
+      - name: Legacy and V4 source contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/test_sovereign_inference_contract.py
+          python3 tests/test_sovereign_legacy_upstream_provenance.py
+          python3 tests/test_same_point_duel_v4_upstream_provenance.py
+          python3 tests/test_same_point_duel_v4_contract.py
+
+      - name: No managed endpoint or authority regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -E '(ai-gateway\.vercel\.sh|api\.openai\.com|api\.z\.ai|api\.cloudflare\.com/client/v4)' orchestration/sovereign/src/index.ts
+          grep -F 'canonical: false' orchestration/sovereign/src/index.ts
+          grep -F 'authority_effect: false' orchestration/sovereign/src/index.ts
+          ! grep -F 'tariff_dependency: false' orchestration/sovereign/src/index.ts
