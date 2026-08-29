@@ -1,0 +1,167 @@
+name: METAENGINE Browser Native Supervisor Windows Gate
+on:
+  push:
+    branches:
+      - 'work/metaengine-browser-native-supervisor-v1'
+      - 'work/convergence-supervisor-keepalive-v1'
+permissions:
+  contents: write
+concurrency:
+  group: metaengine-browser-windows-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build-install-dp-launch:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Stamp monotonic development version
+        if: github.ref_name == 'work/convergence-supervisor-keepalive-v1'
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $version = "0.6.1-dev.${{ github.run_number }}"
+          npm pkg set version=$version
+          "browser_version=$version" | Set-Content "$env:RUNNER_TEMP\browser-version.txt"
+      - name: Parse and contract gates
+        working-directory: apps/metaengine-browser
+        run: |
+          npm run check
+          npm test
+      - name: Build NSIS installer with update metadata
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $installer = Get-ChildItem dist-test -Filter 'METAENGINE-Browser-Test-Setup-*.exe' -File | Select-Object -First 1
+          if (-not $installer) { throw 'installer_missing' }
+          $installer.FullName | Set-Content "$env:RUNNER_TEMP\installer-path.txt"
+          (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content "$env:RUNNER_TEMP\installer-sha256.txt"
+          $asar = Join-Path (Resolve-Path 'dist-test\win-unpacked\resources').Path 'app.asar'
+          $listing = npx --yes @electron/asar list $asar
+          $listingText = (($listing -join "`n") -replace '\\','/')
+          foreach ($required in @('/src/supervisor-device-identity.mjs','/src/native-supervisor-client.mjs','/src/native-browser-control.mjs','/src/supervisor-keepalive.mjs','/src/supervisor-lifecycle-runtime.mjs','/src/self-update-runtime.mjs','/src/host-resilience-runtime.mjs')) {
+            if (-not $listingText.Contains($required)) { throw "packaged_supervisor_module_missing:$required" }
+          }
+          $updateConfig = Join-Path (Resolve-Path 'dist-test\win-unpacked\resources').Path 'app-update.yml'
+          if (-not (Test-Path $updateConfig)) { throw 'packaged_update_config_missing' }
+          "native_supervisor_keepalive_self_update_host_resilience_modules=present" | Set-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
+          "app_update_config=present" | Add-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
+      - name: Install generated Setup EXE
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $installer = Get-Content "$env:RUNNER_TEMP\installer-path.txt"
+          $install = Start-Process -FilePath $installer -ArgumentList '/S' -PassThru -Wait
+          if ($install.ExitCode -ne 0) { throw "installer_exit_$($install.ExitCode)" }
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test\METAENGINE Browser Test.exe'
+          if (-not (Test-Path $app)) { throw "installed_browser_missing:$app" }
+          $app | Set-Content "$env:RUNNER_TEMP\installed-app-path.txt"
+      - name: Verify packaged Development Plane lifecycle
+        shell: powershell
+        run: |
+          $app = Get-Content "$env:RUNNER_TEMP\installed-app-path.txt"
+          $p = Start-Process -FilePath $app -ArgumentList '--metaengine-devplane-smoke' -PassThru
+          $deadline = (Get-Date).AddSeconds(35)
+          do {
+            Start-Sleep -Milliseconds 500
+            $p.Refresh()
+            if ($p.HasExited) { break }
+          } while ((Get-Date) -lt $deadline)
+          if (-not $p.HasExited) {
+            try { $p.Kill($true) } catch {}
+            throw 'packaged_devplane_smoke_timeout'
+          }
+          if ($p.ExitCode -ne 0) { throw "packaged_devplane_smoke_exit_$($p.ExitCode)" }
+          "packaged_devplane_smoke_exit=$($p.ExitCode)" | Set-Content "$env:RUNNER_TEMP\dp-proof.txt"
+      - name: Launch installed browser and verify window
+        shell: powershell
+        env:
+          METAENGINE_DISABLE_SELF_UPDATE: '1'
+        run: |
+          $app = Get-Content "$env:RUNNER_TEMP\installed-app-path.txt"
+          $p = Start-Process -FilePath $app -PassThru
+          $deadline = (Get-Date).AddSeconds(25)
+          $windowReady = $false
+          do {
+            Start-Sleep -Milliseconds 500
+            $p.Refresh()
+            if ($p.HasExited) { throw "installed_browser_exited_early:$($p.ExitCode)" }
+            if ($p.MainWindowHandle -ne 0) { $windowReady = $true; break }
+          } while ((Get-Date) -lt $deadline)
+          if (-not $windowReady) {
+            try { $p.Kill($true) } catch {}
+            throw 'installed_browser_main_window_missing'
+          }
+          $title = $p.MainWindowTitle
+          "pid=$($p.Id)" | Set-Content "$env:RUNNER_TEMP\launch-proof.txt"
+          "main_window_handle=$($p.MainWindowHandle)" | Add-Content "$env:RUNNER_TEMP\launch-proof.txt"
+          "main_window_title=$title" | Add-Content "$env:RUNNER_TEMP\launch-proof.txt"
+          "installed_path=$app" | Add-Content "$env:RUNNER_TEMP\launch-proof.txt"
+          if ($title -notmatch 'METAENGINE Browser') {
+            try { $p.Kill($true) } catch {}
+            throw "installed_browser_title_unexpected:$title"
+          }
+          Start-Sleep -Seconds 5
+          if ($p.HasExited) { throw "installed_browser_exited_after_supervisor_bootstrap:$($p.ExitCode)" }
+          try { $p.CloseMainWindow() | Out-Null } catch {}
+          if (-not $p.WaitForExit(5000)) { try { $p.Kill($true) } catch {} }
+      - name: Stage verified installer evidence
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path release-single | Out-Null
+          $installer = Get-Content "$env:RUNNER_TEMP\installer-path.txt"
+          Copy-Item $installer 'release-single\METAENGINE-Browser-Supervisor-Keepalive-Setup.exe'
+          Copy-Item "$env:RUNNER_TEMP\installer-sha256.txt" 'release-single\METAENGINE-Browser-Supervisor-Keepalive-Setup.exe.sha256'
+          Copy-Item "$env:RUNNER_TEMP\dp-proof.txt" 'release-single\development-plane-proof.txt'
+          Copy-Item "$env:RUNNER_TEMP\supervisor-package-proof.txt" 'release-single\supervisor-package-proof.txt'
+          Copy-Item "$env:RUNNER_TEMP\launch-proof.txt" 'release-single\launch-proof.txt'
+          if (Test-Path "$env:RUNNER_TEMP\browser-version.txt") { Copy-Item "$env:RUNNER_TEMP\browser-version.txt" 'release-single\browser-version.txt' }
+          git rev-parse HEAD | Set-Content 'release-single\git-head.txt'
+      - name: Upload verified installer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: metaengine-browser-supervisor-keepalive-windows-${{ github.sha }}
+          path: apps/metaengine-browser/release-single/
+          if-no-files-found: error
+      - name: Bind immutable release tag to verified source
+        if: github.ref_name == 'work/convergence-supervisor-keepalive-v1'
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = node -p "require('./package.json').version"
+          $tag = "v$version"
+          $existing = $null
+          gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$tag" 2>$null | Set-Content "$env:RUNNER_TEMP\existing-tag.json"
+          if ($LASTEXITCODE -eq 0) {
+            $existing = Get-Content "$env:RUNNER_TEMP\existing-tag.json" | ConvertFrom-Json
+            if ($existing.object.sha -ne $env:GITHUB_SHA) { throw "release_tag_points_to_other_commit:$tag:$($existing.object.sha)" }
+          } else {
+            gh api --method POST "repos/$env:GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$env:GITHUB_SHA"
+            if ($LASTEXITCODE -ne 0) { throw "release_tag_create_failed:$tag" }
+          }
+          "release_tag=$tag" | Set-Content "$env:RUNNER_TEMP\release-tag.txt"
+      - name: Publish self-update prerelease channel
+        if: github.ref_name == 'work/convergence-supervisor-keepalive-v1'
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish always
