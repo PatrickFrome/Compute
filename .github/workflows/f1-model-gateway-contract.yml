@@ -1,0 +1,46 @@
+name: F1 Model Gateway Contract
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/model-gateway/**'
+      - '.github/workflows/f1-model-gateway-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout PR merge revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Syntax gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in apps/model-gateway/api/*.mjs apps/model-gateway/lib/*.mjs apps/model-gateway/test/*.mjs; do
+            node --check "$f"
+          done
+
+      - name: Model gateway contract tests
+        working-directory: apps/model-gateway
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test
+
+      - name: Zero-spend source gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F "minimax/minimax-m3-free" apps/model-gateway/lib/policy.mjs
+          grep -F "poolside/laguna-s-2.1-free" apps/model-gateway/lib/policy.mjs
+          grep -F "METAENGINE_ALLOW_PAID_MODELS === '1'" apps/model-gateway/lib/policy.mjs
+          ! grep -R -E '(ANTHROPIC_API_KEY|GOOGLE_API_KEY|DEEPSEEK_API_KEY|ZAI_API_KEY|XAI_API_KEY)' apps/model-gateway
