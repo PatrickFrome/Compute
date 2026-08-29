@@ -1,0 +1,140 @@
+name: A2 Browser R8C Real Chrome Extension Canary
+
+on:
+  push:
+    branches:
+      - work/a2-browser-r8c-typed-extension-click-outcome
+    paths:
+      - 'coordination/chat-control-plane/extension/operator-typed-click-outcome.js'
+      - 'coordination/chat-control-plane/extension/operator-perception.js'
+      - 'coordination/chat-control-plane/extension/debugger-broker.js'
+      - 'coordination/chat-control-plane/extension/background-entry.js'
+      - 'coordination/chat-control-plane/extension/runtime-package-manifest.json'
+      - 'tests/a2_r8c_real_chrome_extension_canary.mjs'
+      - 'research/A2_BROWSER_R8C_TYPED_EXTENSION_CLICK_OUTCOME_**'
+      - '.github/workflows/a2-browser-r8c-live-canary.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r8c-live-canary:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Establish source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          PARENT=bd4b3c029fc4531d355ca181a0897d50e68268b3
+          git merge-base --is-ancestor "$PARENT" "$GITHUB_SHA"
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+          git diff --name-only "$PARENT" "$GITHUB_SHA" | tee "$RUNNER_TEMP/r8c-live-changed-files.txt"
+          if grep -Eq '(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.(toml|lock))$' "$RUNNER_TEMP/r8c-live-changed-files.txt"; then
+            echo 'R8C live proof unexpectedly changed dependency manifests' >&2
+            exit 1
+          fi
+
+      - name: Verify canary isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check tests/a2_r8c_real_chrome_extension_canary.mjs
+          ! grep -q 'Input\.dispatchMouseEvent' tests/a2_r8c_real_chrome_extension_canary.mjs
+          ! grep -q 'Runtime\.evaluate.*Input\.' tests/a2_r8c_real_chrome_extension_canary.mjs
+          grep -q 'A2_OPERATOR_CAPTURE_PERCEPTION' tests/a2_r8c_real_chrome_extension_canary.mjs
+          grep -q 'A2_OPERATOR_TYPED_CLICK_V1' tests/a2_r8c_real_chrome_extension_canary.mjs
+          grep -q 'real_page_physical_effect_verified: true' tests/a2_r8c_real_chrome_extension_canary.mjs
+
+      - name: Build exact staged MV3
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=coordination/chat-control-plane/extension
+          OUT=dist/a2-browser-r8c-live
+          mkdir -p "$OUT"
+          python3 scripts/a2_build_extension.py \
+            --source "$ROOT" \
+            --package-manifest "$ROOT/runtime-package-manifest.json" \
+            --stage "$OUT/stage" \
+            --zip "$OUT/R8C_LIVE_GENERIC.zip" \
+            --evidence-dir "$OUT/build-evidence" \
+            --source-commit "$GITHUB_SHA" \
+            --source-date-epoch "$SOURCE_DATE_EPOCH"
+          test -s "$OUT/stage/operator-typed-click-outcome.js"
+          test -s "$OUT/stage/operator-perception.js"
+          test -s "$OUT/stage/debugger-broker.js"
+          test "$(find "$OUT/stage" -type f | wc -l)" = "47"
+
+      - name: Run real Chrome staged-extension canary
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          command -v xvfb-run >/dev/null
+          command -v openssl >/dev/null
+          "$CHROME" --version | tee "$RUNNER_TEMP/r8c-live-chrome-version.txt"
+          A2_CHROME_EXECUTABLE="$CHROME" \
+          A2_R8C_STAGE="$GITHUB_WORKSPACE/dist/a2-browser-r8c-live/stage" \
+          CI=true \
+          node tests/a2_r8c_real_chrome_extension_canary.mjs | tee "$RUNNER_TEMP/r8c-live-canary.jsonl"
+          grep -q '"ok":true' "$RUNNER_TEMP/r8c-live-canary.jsonl"
+          grep -q '"staged_extension_under_test":true' "$RUNNER_TEMP/r8c-live-canary.jsonl"
+          grep -q '"typed_click_outcome":"COMMITTED"' "$RUNNER_TEMP/r8c-live-canary.jsonl"
+          grep -q '"real_page_physical_effect_verified":true' "$RUNNER_TEMP/r8c-live-canary.jsonl"
+          grep -q '"page_click_count":1' "$RUNNER_TEMP/r8c-live-canary.jsonl"
+          grep -q '"automatic_retry_allowed":false' "$RUNNER_TEMP/r8c-live-canary.jsonl"
+          grep -q '"authority_effect":false' "$RUNNER_TEMP/r8c-live-canary.jsonl"
+
+      - name: Build deterministic live-proof evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=dist/a2-browser-r8c-live
+          mkdir -p "$OUT/evidence"
+          cp "$RUNNER_TEMP/r8c-live-changed-files.txt" "$OUT/evidence/R8C_LIVE_CHANGED_FILES.txt"
+          cp "$RUNNER_TEMP/r8c-live-chrome-version.txt" "$OUT/evidence/R8C_LIVE_CHROME_VERSION.txt"
+          cp "$RUNNER_TEMP/r8c-live-canary.jsonl" "$OUT/evidence/R8C_LIVE_CANARY.jsonl"
+          printf '%s\n' "$GITHUB_SHA" > "$OUT/evidence/SOURCE_COMMIT.txt"
+          printf '%s\n' 'bd4b3c029fc4531d355ca181a0897d50e68268b3' > "$OUT/evidence/PARENT_VERIFIED_COMMIT.txt"
+          cat > "$OUT/evidence/R8C_LIVE_CLAIMS.json" <<'JSON'
+          {"milestone":"R8C_TYPED_EXTENSION_CLICK_OUTCOME","staged_extension_under_test":true,"trusted_sidepanel_sender":true,"perception_from_staged_extension":true,"typed_click_outcome":"COMMITTED","real_page_physical_effect_verified":true,"page_click_count":1,"harness_input_dispatch":false,"automatic_retry_allowed":false,"page_exactly_once_semantics_claimed":false,"new_dependency_packages":0}
+          JSON
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf "$OUT/A2_BROWSER_R8C_REAL_CHROME_CANARY.tar" \
+            tests/a2_r8c_real_chrome_extension_canary.mjs \
+            research/A2_BROWSER_R8C_TYPED_EXTENSION_CLICK_OUTCOME_PRE_RESEARCH_2026-08-29.md \
+            research/A2_BROWSER_R8C_TYPED_EXTENSION_CLICK_OUTCOME_POST_RESEARCH_2026-08-29.md \
+            coordination/chat-control-plane/extension/operator-typed-click-outcome.js \
+            .github/workflows/a2-browser-r8c-live-canary.yml \
+            "$OUT/evidence"
+          sha256sum "$OUT/A2_BROWSER_R8C_REAL_CHROME_CANARY.tar" "$OUT/R8C_LIVE_GENERIC.zip" > "$OUT/R8C_LIVE_SHA256SUMS.txt"
+
+      - name: Attest R8C live proof
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: |
+            dist/a2-browser-r8c-live/A2_BROWSER_R8C_REAL_CHROME_CANARY.tar
+            dist/a2-browser-r8c-live/R8C_LIVE_GENERIC.zip
+
+      - name: Upload R8C live proof
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-r8c-live-canary-${{ github.sha }}
+          path: |
+            dist/a2-browser-r8c-live/A2_BROWSER_R8C_REAL_CHROME_CANARY.tar
+            dist/a2-browser-r8c-live/R8C_LIVE_GENERIC.zip
+            dist/a2-browser-r8c-live/R8C_LIVE_SHA256SUMS.txt
+            dist/a2-browser-r8c-live/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
