@@ -138,7 +138,9 @@
     hydrationPromise.then(() => checkDrain()).catch(() => {});
   });
 
-  chrome.runtime.onInstalled.addListener(() => {
+  chrome.runtime.onInstalled.addListener((details) => {
+    const reason = String(details?.reason || "");
+    if (reason !== "install" && reason !== "update") return;
     hydrationPromise.finally(() => {
       draining = false;
       hydrationFailed = false;
