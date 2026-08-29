@@ -148,12 +148,14 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import os
+          import re
 
           trace_path = Path(os.environ['RUNNER_TEMP']) / 'r7m-real-runtime.trace'
           lines = trace_path.read_text(errors='replace').splitlines()
           text = '\n'.join(lines)
-          launcher = [line for line in lines if 'execve(' in line and 'a2-skill-source-launcher' in line]
-          helper = [line for line in lines if 'execveat(' in line and 'AT_EMPTY_PATH' in line and 'a2-skill-source-helper' in line]
+          launcher_exec = re.compile(r'\bexecve\("[^"]*/a2-skill-source-launcher",')
+          launcher = [line for line in lines if launcher_exec.search(line)]
+          helper = [line for line in lines if 'execveat(' in line and 'AT_EMPTY_PATH' in line and '["a2-skill-source-helper"' in line]
           if len(launcher) != 1:
               raise SystemExit(f'expected one long-lived launcher process epoch, saw {len(launcher)}')
           if len(helper) != 1:
