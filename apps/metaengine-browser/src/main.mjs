@@ -80,7 +80,7 @@ function assertShellSender(event) {
 async function shellSnapshot() {
   return {
     schema: 'metaengine.browser-shell.snapshot.v2',
-    version: '0.3.0',
+    version: '0.3.1',
     tabs: registry.snapshot(),
     fleet: fleet?.snapshot() || null,
     development_plane: developmentPlane?.snapshot() || null,
@@ -205,10 +205,10 @@ async function initDevelopmentPlane() {
   if (!developmentPlane) {
     const repoRoot = path.resolve(APP_ROOT, '../..');
     developmentPlane = new DevelopmentPlane({
-      spawnWorker: () => utilityProcess.fork(path.join(__dirname, 'development-plane-worker.mjs'), [], {
+      spawnWorker: () => utilityProcess.fork(path.join(__dirname, 'development-plane-worker.cjs'), [], {
         cwd: repoRoot,
         env: { METAENGINE_REPO_ROOT: repoRoot },
-        stdio: 'pipe',
+        stdio: 'inherit',
         serviceName: 'METAENGINE Development Plane',
       }),
     });
@@ -329,8 +329,21 @@ ipcMain.handle('metaengine:shell:command', async (event, message) => { assertShe
 await app.whenReady();
 await registerShellProtocol();
 configureUserSession();
-if (isDevelopmentPlaneSmoke) await runDevelopmentPlaneSmoke();
-else if (isSmoke) await runSmoke();
+if (isDevelopmentPlaneSmoke) {
+  try {
+    await runDevelopmentPlaneSmoke();
+  } catch (error) {
+    console.error(JSON.stringify({
+      schema: 'metaengine.development-plane.smoke.v1',
+      ok: false,
+      error: String(error?.message || error).slice(0, 240),
+      state: developmentPlane?.snapshot() || null,
+      authority_effect: false,
+    }));
+    try { developmentPlane?.stop(); } catch {}
+    app.exit(1);
+  }
+} else if (isSmoke) await runSmoke();
 else {
   await createWindow();
   app.on('activate', () => { if (!windowRef) createWindow().catch((error) => { console.error(error); app.exit(1); }); });

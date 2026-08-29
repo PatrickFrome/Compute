@@ -1,13 +1,13 @@
 {
   "name": "@metaengine/browser-shell",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "description": "METAENGINE Development Fabric browser shell with autonomous GPT fleet and embedded Development Plane",
   "main": "src/main.mjs",
   "scripts": {
     "start": "electron .",
-    "check": "node --check src/main.mjs && node --check src/browser-policy.mjs && node --check src/compute-bridge-client.mjs && node --check src/fleet-provisioner.mjs && node --check src/development-plane.mjs && node --check src/development-plane-worker.mjs && node --check src/tab-registry.mjs && node --check src/preload-shell.cjs && node --check ui/app.js",
+    "check": "node --check src/main.mjs && node --check src/browser-policy.mjs && node --check src/compute-bridge-client.mjs && node --check src/fleet-provisioner.mjs && node --check src/development-plane.mjs && node --check src/development-plane-worker.cjs && node --check src/tab-registry.mjs && node --check src/preload-shell.cjs && node --check ui/app.js",
     "test": "node --test test/*.test.mjs",
     "smoke": "electron . --metaengine-smoke",
     "devplane-smoke": "electron . --metaengine-devplane-smoke"

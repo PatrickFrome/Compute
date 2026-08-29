@@ -1,12 +1,15 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
+'use strict';
+
+const fs = require('node:fs/promises');
+const path = require('node:path');
 
 const PROTOCOL = 'metaengine.development-plane.v1';
 const CAPABILITIES = Object.freeze(['HEALTH', 'CAPABILITIES', 'PROCESS_METRICS', 'REPO_HEAD_READ']);
 const repoRoot = path.resolve(process.env.METAENGINE_REPO_ROOT || process.cwd());
 
 function send(message) {
-  process.parentPort?.postMessage({ protocol: PROTOCOL, ...message, authority_effect: false });
+  if (!process.parentPort) throw new Error('development_plane_parent_port_missing');
+  process.parentPort.postMessage({ protocol: PROTOCOL, ...message, authority_effect: false });
 }
 
 async function readRepoHead() {
@@ -56,4 +59,4 @@ process.parentPort.on('message', async (event) => {
   }
 });
 
-send({ type: 'READY', version: '0.1.0', capabilities: [...CAPABILITIES] });
+send({ type: 'READY', version: '0.1.1', capabilities: [...CAPABILITIES] });
