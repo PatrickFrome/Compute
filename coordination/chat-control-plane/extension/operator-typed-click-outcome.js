@@ -4,6 +4,11 @@
   const DEFAULT_FRAME_MAX_AGE_MS = 30000;
   const CLICKABLE_ROLES = new Set(["button", "checkbox", "radio", "switch", "tab", "menuitem"]);
   const ACTION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+  const MAX_ACTION_ID_CHARS = 128;
+  const MAX_PLATFORM_CHARS = 16;
+  const MAX_CAPTURED_AT_CHARS = 64;
+  const MAX_ROLE_CHARS = 64;
+  const MAX_ACCESSIBLE_NAME_CHARS = 500;
 
   const normalize = (value) => String(value ?? "").replace(/\r\n?/g, "\n").replace(/\s+/gu, " ").trim();
   const axValue = (value) => value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, "value") ? value.value : value;
@@ -59,8 +64,9 @@
   }
 
   function typed(actionId, outcome, reasonCode, physicalDispatchStarted) {
+    const safeActionId = typeof actionId === "string" && ACTION_ID.test(actionId) ? actionId : "";
     return Object.freeze({
-      action_id: actionId,
+      action_id: safeActionId,
       outcome,
       reason_code: reasonCode,
       physical_dispatch_started: physicalDispatchStarted === true,
@@ -76,6 +82,10 @@
     return token || String(fallback || "typed_click_failed");
   }
 
+  function boundedExternalString(raw, maxChars) {
+    return typeof raw === "string" && raw.length <= maxChars ? raw : null;
+  }
+
   function snapshotRequest(message) {
     const actionIdRaw = message?.action_id;
     const platformRaw = message?.platform;
@@ -83,11 +93,11 @@
     const roleRaw = message?.role;
     const nameRaw = message?.accessible_name;
     return Object.freeze({
-      actionId: String(actionIdRaw ?? ""),
-      platform: String(platformRaw ?? ""),
-      capturedAt: String(capturedAtRaw ?? ""),
-      role: String(roleRaw ?? ""),
-      name: String(nameRaw ?? ""),
+      actionId: boundedExternalString(actionIdRaw, MAX_ACTION_ID_CHARS),
+      platform: boundedExternalString(platformRaw, MAX_PLATFORM_CHARS),
+      capturedAt: boundedExternalString(capturedAtRaw, MAX_CAPTURED_AT_CHARS),
+      role: boundedExternalString(roleRaw, MAX_ROLE_CHARS),
+      name: boundedExternalString(nameRaw, MAX_ACCESSIBLE_NAME_CHARS),
     });
   }
 
@@ -97,6 +107,9 @@
   }
 
   function frameFor(request) {
+    if (request.capturedAt == null) throw new Error("typed_click_perception_captured_at_invalid");
+    if (request.role == null) throw new Error("typed_click_role_invalid");
+    if (request.name == null) throw new Error("typed_click_accessible_name_invalid");
     const frame = globalThis.A2_OPERATOR_PERCEPTION_CACHE?.get?.(request.platform) || null;
     if (!frame) throw new Error("typed_click_perception_frame_missing");
     const frameCapturedAt = String(frame.captured_at || "");
@@ -109,7 +122,7 @@
     const role = normalize(request.role).toLowerCase();
     const name = normalize(request.name);
     if (!CLICKABLE_ROLES.has(role)) throw new Error("typed_click_role_not_allowed");
-    if (!name || name.length > 500) throw new Error("typed_click_accessible_name_invalid");
+    if (!name || name.length > MAX_ACCESSIBLE_NAME_CHARS) throw new Error("typed_click_accessible_name_invalid");
     const matches = accessibility.filter((node) =>
       node?.ignored !== true && Number.isInteger(Number(node?.backend_dom_node_id)) &&
       normalize(node?.role).toLowerCase() === role && normalize(node?.name) === name
@@ -180,11 +193,11 @@
   async function run(message) {
     const request = snapshotRequest(message);
     let physicalDispatchStarted = false;
-    if (!ACTION_ID.test(request.actionId)) return typed(request.actionId, "NO_EFFECT", "typed_click_action_id_invalid", false);
+    if (request.actionId == null || !ACTION_ID.test(request.actionId)) return typed("", "NO_EFFECT", "typed_click_action_id_invalid", false);
 
     try {
       assertEnabled();
-      if (!["CHATGPT", "GLM_ZAI"].includes(request.platform)) throw new Error("typed_click_platform_invalid");
+      if (request.platform == null || !["CHATGPT", "GLM_ZAI"].includes(request.platform)) throw new Error("typed_click_platform_invalid");
       const target = frameFor(request);
       const tab = await resolvePinned(request.platform, target.tabId);
       if (normUrl(tab.url) !== target.url) throw new Error("typed_click_frame_url_changed");
