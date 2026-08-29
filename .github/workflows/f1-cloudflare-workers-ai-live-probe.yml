@@ -26,6 +26,7 @@ jobs:
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           echo 'Cloudflare credentials are present (values withheld).'
 
+      # This job performs actual inference; it is not a catalog-only probe.
       - name: Run real Workers AI inference probes
         shell: bash
         run: |
