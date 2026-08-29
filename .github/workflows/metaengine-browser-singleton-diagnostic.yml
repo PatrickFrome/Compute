@@ -82,3 +82,22 @@ jobs:
           if ($first.HasExited) { throw "singleton_diag_secondary_displaced_primary:$($first.ExitCode)" }
           try { Stop-Process -Id $first.Id -Force -ErrorAction SilentlyContinue } catch {}
           'physical_singleton_diagnostic=PASS'
+      - name: Persist singleton diagnostic evidence
+        if: always()
+        shell: powershell
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'singleton-diagnostic-evidence'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          foreach ($name in @('singleton-first.out','singleton-first.err','singleton-second.out','singleton-second.err','singleton-app.txt')) {
+            $src = Join-Path $env:RUNNER_TEMP $name
+            if (Test-Path $src) { Copy-Item $src (Join-Path $dir $name) -Force }
+          }
+          Get-Process | Where-Object { $_.ProcessName -like 'METAENGINE*' } | Select-Object ProcessName,Id,HasExited | ConvertTo-Json | Set-Content (Join-Path $dir 'metaengine-processes.json')
+      - name: Upload singleton diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-singleton-diagnostic-${{ github.run_id }}
+          path: ${{ runner.temp }}/singleton-diagnostic-evidence
+          if-no-files-found: error
+          retention-days: 14
