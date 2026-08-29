@@ -50,8 +50,30 @@ jobs:
           $latest = Join-Path (Get-Location) 'dist-test\latest.yml'
           if (-not $installer) { throw 'installer_missing' }
           if (-not $blockmap) { throw 'blockmap_missing' }
-          if (-not (Test-Path $latest)) { throw 'latest_yml_missing' }
-          Add-Content -Path $latest -Value "stagingPercentage: 100"
+          $version = node -p "require('./package.json').version"
+          if ($installer.Name -notmatch [regex]::Escape("-$version-x64.exe")) { throw "installer_version_binding_invalid:$($installer.Name):$version" }
+          $sha512Provider = [System.Security.Cryptography.SHA512]::Create()
+          try {
+            $sha512 = [Convert]::ToBase64String($sha512Provider.ComputeHash([System.IO.File]::ReadAllBytes($installer.FullName)))
+          } finally {
+            $sha512Provider.Dispose()
+          }
+          $releaseDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+          @"
+version: $version
+files:
+  - url: $($installer.Name)
+    sha512: $sha512
+    size: $($installer.Length)
+path: $($installer.Name)
+sha512: $sha512
+releaseDate: '$releaseDate'
+stagingPercentage: 100
+"@ | Set-Content -Path $latest -Encoding utf8
+          $latestText = Get-Content $latest -Raw
+          if ($latestText -notmatch [regex]::Escape("version: $version")) { throw 'latest_yml_version_binding_missing' }
+          if ($latestText -notmatch [regex]::Escape($installer.Name)) { throw 'latest_yml_installer_binding_missing' }
+          if ($latestText -notmatch 'stagingPercentage: 100') { throw 'latest_yml_staging_missing' }
           $installer.FullName | Set-Content "$env:RUNNER_TEMP\installer-path.txt"
           $blockmap.FullName | Set-Content "$env:RUNNER_TEMP\blockmap-path.txt"
           $latest | Set-Content "$env:RUNNER_TEMP\latest-yml-path.txt"
@@ -59,13 +81,14 @@ jobs:
           $asar = Join-Path (Resolve-Path 'dist-test\win-unpacked\resources').Path 'app.asar'
           $listing = npx --yes @electron/asar list $asar
           $listingText = (($listing -join "`n") -replace '\\','/')
-          foreach ($required in @('/src/supervisor-device-identity.mjs','/src/native-supervisor-client.mjs','/src/native-browser-control.mjs','/src/supervisor-keepalive.mjs','/src/supervisor-lifecycle-runtime.mjs','/src/self-update-runtime.mjs','/src/host-resilience-runtime.mjs','/src/browser-sentinel.mjs','/src/browser-sentinel-worker.cjs')) {
+          foreach ($required in @('/src/supervisor-device-identity.mjs','/src/native-supervisor-client.mjs','/src/native-browser-control.mjs','/src/supervisor-keepalive.mjs','/src/supervisor-lifecycle-runtime.mjs','/src/chatgpt-session-monitor.mjs','/src/chatgpt-retry-policy.mjs','/src/self-update-runtime.mjs','/src/host-resilience-runtime.mjs','/src/browser-sentinel.mjs','/src/browser-sentinel-worker.cjs')) {
             if (-not $listingText.Contains($required)) { throw "packaged_supervisor_module_missing:$required" }
           }
           $updateConfig = Join-Path (Resolve-Path 'dist-test\win-unpacked\resources').Path 'app-update.yml'
           if (-not (Test-Path $updateConfig)) { throw 'packaged_update_config_missing' }
-          "native_supervisor_keepalive_self_update_host_resilience_sentinel_modules=present" | Set-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
+          "native_supervisor_keepalive_adaptive_retry_self_update_host_resilience_sentinel_modules=present" | Set-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
           "app_update_config=present" | Add-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
+          "update_metadata_derived_from_exact_installer=true" | Add-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
           "single_build_promotion=true" | Add-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
           "staging_percentage=100" | Add-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
       - name: Install exact generated Setup EXE
