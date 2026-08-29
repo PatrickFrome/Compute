@@ -25,7 +25,7 @@ async function harness() {
 }
 
 async function prepare(h, { source_system = 'SUPABASE', authority = 'SUPABASE' } = {}) {
-  await h.fleetRuntime.bindWorkerIncarnation({
+  const binding = await h.fleetRuntime.bindWorkerIncarnation({
     agent_id: 'agent_research', role: 'RESEARCHER', lifecycle_state: 'BOUND_UNVERIFIED',
     tab_id: 'tab-r', target_id: 'webcontents:81', generation_epoch: 1, conversation_epoch: 0,
   });
@@ -37,7 +37,12 @@ async function prepare(h, { source_system = 'SUPABASE', authority = 'SUPABASE' }
   });
   const plan = h.scheduler.plan({
     supervisor_busy: true,
-    workers: [{ worker_id: 'agent_research', role: 'RESEARCHER', ready: true }],
+    workers: [{
+      worker_id: 'agent_research',
+      worker_incarnation_id: binding.worker_incarnation_id,
+      role: 'RESEARCHER',
+      ready: true,
+    }],
     opportunities: [{
       objective_key: 'memory-eval', task_kind: 'RESEARCH', work_branch: 'research/memory-eval-v1',
       process_refs: [process.process_key], effect_class: 'READ_ONLY', dependencies_satisfied: true,
@@ -58,6 +63,8 @@ test('trusted native dispatcher can reserve independent work while supervisor is
   assert.equal(receipt.automatic_start_authority, false);
   assert.equal(receipt.mainline_promotion_authority, false);
   assert.equal(receipt.assignment.cycle_id, proposal.proposal_id);
+  assert.equal(receipt.worker_incarnation_id, proposal.worker_incarnation_id);
+  assert.equal(receipt.assignment.worker_incarnation_id, proposal.worker_incarnation_id);
   assert.equal(h.store.snapshot().assignments.length, 1);
 });
 
@@ -69,6 +76,21 @@ test('dispatcher refuses non-native authority, non-durable proposals and stale p
   await assert.rejects(() => h.dispatcher.dispatchProposal({ ...proposal, proposal_id: 'proposal_not_durable' }, { authority: 'TRUSTED_NATIVE_CONTROL_PLANE' }), /proposal_not_durable/);
   h.advance(31_000);
   await assert.rejects(() => h.dispatcher.dispatchProposal(proposal, { authority: 'TRUSTED_NATIVE_CONTROL_PLANE' }), /process_ref_stale/);
+  assert.equal(h.store.snapshot().assignments.length, 0);
+});
+
+test('durable proposal cannot jump to a newer worker incarnation after browser recovery', async (t) => {
+  const h = await harness();
+  t.after(() => fs.rm(h.dir, { recursive: true, force: true }));
+  const proposal = await prepare(h);
+  await h.fleetRuntime.bindWorkerIncarnation({
+    agent_id: 'agent_research', role: 'RESEARCHER', lifecycle_state: 'BOUND_UNVERIFIED',
+    tab_id: 'tab-r2', target_id: 'webcontents:181', generation_epoch: 2, conversation_epoch: 1,
+  });
+  await assert.rejects(
+    () => h.dispatcher.dispatchProposal(proposal, { authority: 'TRUSTED_NATIVE_CONTROL_PLANE' }),
+    /worker_incarnation_mismatch/,
+  );
   assert.equal(h.store.snapshot().assignments.length, 0);
 });
 
