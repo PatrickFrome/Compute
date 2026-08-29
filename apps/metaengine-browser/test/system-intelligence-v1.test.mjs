@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { FleetRuntimeStore, FLEET_RUNTIME_STORE_VERSION } from '../src/fleet-runtime-store-v1.mjs';
+import { FleetRuntime } from '../src/fleet-runtime-v1.mjs';
 import { SystemIntelligence } from '../src/system-intelligence-v1.mjs';
 import { AutonomousWorkScheduler } from '../src/autonomous-work-scheduler-v1.mjs';
 
@@ -14,14 +15,16 @@ async function harness(seed = null) {
   let seq = 0;
   if (seed) await fs.writeFile(statePath, `${JSON.stringify(seed)}\n`);
   const store = new FleetRuntimeStore({ statePath, clock: () => now });
-  await store.init();
   const uuid = () => `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
+  const fleetRuntime = new FleetRuntime({ store, clock: () => now, uuid });
+  await fleetRuntime.init();
   const intelligence = new SystemIntelligence({ store, clock: () => now, uuid });
   const scheduler = new AutonomousWorkScheduler({ store, clock: () => now, uuid });
   return {
     dir,
     statePath,
     store,
+    fleetRuntime,
     intelligence,
     scheduler,
     advance: (ms) => { now += ms; },
@@ -63,6 +66,18 @@ async function ingestFreshProcess(h, overrides = {}) {
     stale_after_ms: 60_000,
     payload_ref: 'supabase:checkpoint:cp2',
     ...overrides,
+  });
+}
+
+async function bindSchedulerWorker(h, workerId, role, generationEpoch, targetId) {
+  return h.fleetRuntime.bindWorkerIncarnation({
+    agent_id: workerId,
+    role,
+    lifecycle_state: 'BOUND_UNVERIFIED',
+    tab_id: `tab-${workerId}`,
+    target_id: targetId,
+    generation_epoch: generationEpoch,
+    conversation_epoch: generationEpoch - 1,
   });
 }
 
@@ -160,12 +175,14 @@ test('procedural memory and self-learning require verifier evidence and remain b
 test('autonomous scheduler can start independent work while supervisor is busy without granting actuation authority', async () => {
   const h = await harness();
   const process = await ingestFreshProcess(h);
+  const a = await bindSchedulerWorker(h, 'agent_a', 'IMPLEMENTER', 1, 'webcontents:101');
+  const b = await bindSchedulerWorker(h, 'agent_b', 'RESEARCHER', 1, 'webcontents:102');
   const plan = h.scheduler.plan({
     supervisor_busy: true,
     max_parallel: 6,
     workers: [
-      { worker_id: 'agent_a', role: 'IMPLEMENTER', ready: true },
-      { worker_id: 'agent_b', role: 'RESEARCHER', ready: true },
+      { worker_id: 'agent_a', worker_incarnation_id: a.worker_incarnation_id, role: 'IMPLEMENTER', ready: true },
+      { worker_id: 'agent_b', worker_incarnation_id: b.worker_incarnation_id, role: 'RESEARCHER', ready: true },
     ],
     opportunities: [
       {
@@ -200,6 +217,7 @@ test('autonomous scheduler can start independent work while supervisor is busy w
   assert.equal(plan.proposals[0].objective_key, 'independent-research');
   assert.equal(plan.proposals[0].supervisor_busy_at_plan, true);
   assert.equal(plan.proposals[0].automatic_execution_authority, false);
+  assert.equal(plan.proposals[0].worker_incarnation_id, a.worker_incarnation_id);
   assert.ok(plan.suppressed.some((x) => x.includes('SUPERVISOR_EXCLUSIVE')));
 
   const decision = await h.scheduler.recordDecision(plan);

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { FleetRuntimeStore } from '../src/fleet-runtime-store-v1.mjs';
+import { FleetRuntime } from '../src/fleet-runtime-v1.mjs';
 import { SystemIntelligence } from '../src/system-intelligence-v1.mjs';
 import { ProcessObserverRuntime } from '../src/process-observer-runtime-v1.mjs';
 import { SystemIntelligenceCoordinator } from '../src/system-intelligence-coordinator-v1.mjs';
@@ -14,11 +15,12 @@ async function harness() {
   let now = Date.parse('2026-08-29T18:30:00Z');
   let seq = 0;
   const store = new FleetRuntimeStore({ statePath, clock: () => now });
-  await store.init();
   const uuid = () => `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
+  const fleetRuntime = new FleetRuntime({ store, clock: () => now, uuid });
+  await fleetRuntime.init();
   const intelligence = new SystemIntelligence({ store, clock: () => now, uuid });
   return {
-    dir, store, intelligence, uuid,
+    dir, store, fleetRuntime, intelligence, uuid,
     clock: () => now,
     advance: (ms) => { now += ms; },
     cleanup: () => fs.rm(dir, { recursive: true, force: true }),
@@ -128,6 +130,15 @@ test('Supabase source failure preserves last known observation but freshness eve
 
 test('coordinator reconciles durable process state before planning independent work', async () => {
   const h = await harness();
+  const binding = await h.fleetRuntime.bindWorkerIncarnation({
+    agent_id: 'agent_research',
+    role: 'RESEARCHER',
+    lifecycle_state: 'BOUND_UNVERIFIED',
+    tab_id: 'tab-research',
+    target_id: 'webcontents:201',
+    generation_epoch: 1,
+    conversation_epoch: 0,
+  });
   const coordinator = new SystemIntelligenceCoordinator({
     store: h.store,
     clock: h.clock,
@@ -150,7 +161,7 @@ test('coordinator reconciles durable process state before planning independent w
   const process = coordinator.snapshot().intelligence.processes[0];
   const plan = await coordinator.planIndependentWork({
     supervisor_busy: true,
-    workers: [{ worker_id: 'agent_research', role: 'RESEARCHER', ready: true }],
+    workers: [{ worker_id: 'agent_research', worker_incarnation_id: binding.worker_incarnation_id, role: 'RESEARCHER', ready: true }],
     opportunities: [{
       objective_key: 'memory-research',
       task_kind: 'RESEARCH',
@@ -166,6 +177,7 @@ test('coordinator reconciles durable process state before planning independent w
     }],
   });
   assert.equal(plan.proposals.length, 1);
+  assert.equal(plan.proposals[0].worker_incarnation_id, binding.worker_incarnation_id);
   assert.equal(plan.proposals[0].supervisor_busy_at_plan, true);
   assert.equal(plan.proposals[0].automatic_execution_authority, false);
   assert.equal(h.store.snapshot().scheduler_decisions.length, 1);

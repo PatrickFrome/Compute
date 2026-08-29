@@ -5,6 +5,7 @@ on:
     branches:
       - work/convergence-fleet-runtime-v1
       - work/convergence-global-observer-memory-v1
+      - work/c5-incarnation-pinned-dispatch-v1
     paths:
       - 'apps/metaengine-browser/**'
       - 'coordination/convergence/SUPERVISOR_KEEPALIVE_V1.md'
@@ -38,6 +39,7 @@ jobs:
           node --check src/supervisor-keepalive-transport-v1.mjs
           node --check src/system-intelligence-v1.mjs
           node --check src/autonomous-work-scheduler-v1.mjs
+          node --check src/autonomous-assignment-dispatcher-v1.mjs
           node --check src/process-observer-runtime-v1.mjs
           node --check src/system-intelligence-coordinator-v1.mjs
           node --check src/preload-shell.cjs
@@ -49,13 +51,16 @@ jobs:
           test/supervisor-keepalive-v1.test.mjs
           test/system-intelligence-v1.test.mjs
           test/process-observer-runtime-v1.test.mjs
+          test/autonomous-assignment-dispatcher-v1.test.mjs
       - name: Fail-closed static guards
         run: |
-          ! grep -R "executeJavaScript" apps/metaengine-browser/src/supervisor-keepalive-*.mjs apps/metaengine-browser/src/c5-main-bootstrap.mjs apps/metaengine-browser/src/system-intelligence-*.mjs apps/metaengine-browser/src/autonomous-work-scheduler-v1.mjs apps/metaengine-browser/src/process-observer-runtime-v1.mjs
+          ! grep -R "executeJavaScript" apps/metaengine-browser/src/supervisor-keepalive-*.mjs apps/metaengine-browser/src/c5-main-bootstrap.mjs apps/metaengine-browser/src/system-intelligence-*.mjs apps/metaengine-browser/src/autonomous-work-scheduler-v1.mjs apps/metaengine-browser/src/autonomous-assignment-dispatcher-v1.mjs apps/metaengine-browser/src/process-observer-runtime-v1.mjs
           ! grep -R "direct_peer_messaging: true" apps/metaengine-browser/src/fleet-runtime-v1.mjs
           ! grep -R "browser_authority: true" apps/metaengine-browser/src/fleet-runtime-v1.mjs
-          ! grep -R "production_activation_authority: true\|mainline_promotion_authority: true\|automatic_execution_authority: true" apps/metaengine-browser/src/system-intelligence-*.mjs apps/metaengine-browser/src/autonomous-work-scheduler-v1.mjs
+          ! grep -R "production_activation_authority: true\|mainline_promotion_authority: true\|automatic_execution_authority: true" apps/metaengine-browser/src/system-intelligence-*.mjs apps/metaengine-browser/src/autonomous-work-scheduler-v1.mjs apps/metaengine-browser/src/autonomous-assignment-dispatcher-v1.mjs
           grep -q "WAKE_AMBIGUOUS" apps/metaengine-browser/src/supervisor-keepalive-v1.mjs
           grep -q "automatic_work_retry_after_ambiguous_effect: false" apps/metaengine-browser/src/fleet-runtime-v1.mjs
           grep -q "BRANCH_LOCAL_ONLY" apps/metaengine-browser/src/system-intelligence-v1.mjs
           grep -q "STALE_PROCESS_STATE" apps/metaengine-browser/src/autonomous-work-scheduler-v1.mjs
+          grep -q "worker_incarnation_id" apps/metaengine-browser/src/autonomous-work-scheduler-v1.mjs
+          grep -q "autonomous_dispatcher_worker_incarnation_mismatch" apps/metaengine-browser/src/autonomous-assignment-dispatcher-v1.mjs
