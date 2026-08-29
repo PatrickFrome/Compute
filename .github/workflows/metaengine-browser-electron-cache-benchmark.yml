@@ -1,0 +1,113 @@
+name: METAENGINE Browser Electron Cache Benchmark
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/**'
+      - '.github/workflows/metaengine-browser-electron-cache-benchmark.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: metaengine-browser-electron-cache-benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cold-seed:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    outputs:
+      cache-key: ${{ steps.key.outputs.value }}
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Derive immutable cache key
+        id: key
+        shell: powershell
+        run: |
+          $lock = (Get-FileHash apps/metaengine-browser/package-lock.json -Algorithm SHA256).Hash.ToLowerInvariant()
+          "value=windows-2022-electron-builder-26.15.7-$lock" >> $env:GITHUB_OUTPUT
+      - name: Restore or initialize builder cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\electron-builder-cache
+          key: ${{ steps.key.outputs.value }}
+      - name: Install dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Seed cache with one hermetic NSIS packaging pass
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          ELECTRON_BUILDER_CACHE: ${{ runner.temp }}\electron-builder-cache
+        run: |
+          $sw = [System.Diagnostics.Stopwatch]::StartNew()
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $sw.Stop()
+          "cold_or_restored_seconds=$([math]::Round($sw.Elapsed.TotalSeconds,2))" | Tee-Object -FilePath "$env:RUNNER_TEMP\cache-benchmark.txt"
+          "cache_hit=${{ steps.cache.outputs.cache-hit }}" | Add-Content "$env:RUNNER_TEMP\cache-benchmark.txt"
+      - name: Upload seed timing
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-cache-seed-timing
+          path: ${{ runner.temp }}\cache-benchmark.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  warm-verify:
+    needs: cold-seed
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Restore seeded builder cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\electron-builder-cache
+          key: ${{ needs.cold-seed.outputs.cache-key }}
+      - name: Require warm cache evidence
+        shell: powershell
+        run: |
+          if ('${{ steps.cache.outputs.cache-hit }}' -ne 'true') { throw 'electron_builder_cache_not_restored' }
+      - name: Install dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Measure warm NSIS packaging pass
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          ELECTRON_BUILDER_CACHE: ${{ runner.temp }}\electron-builder-cache
+        run: |
+          $sw = [System.Diagnostics.Stopwatch]::StartNew()
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $sw.Stop()
+          "warm_seconds=$([math]::Round($sw.Elapsed.TotalSeconds,2))" | Tee-Object -FilePath "$env:RUNNER_TEMP\cache-benchmark-warm.txt"
+          "cache_hit=${{ steps.cache.outputs.cache-hit }}" | Add-Content "$env:RUNNER_TEMP\cache-benchmark-warm.txt"
+      - name: Upload warm timing
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-cache-warm-timing
+          path: ${{ runner.temp }}\cache-benchmark-warm.txt
+          if-no-files-found: error
+          retention-days: 7
