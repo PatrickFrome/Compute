@@ -27,8 +27,9 @@ test('MEDIUM is exactly three workers plus integrator and reuses ready capabilit
   });
   assert.equal(plan.worker_count, 4);
   assert.deepEqual(plan.slots.map((slot) => slot.role), ['RESEARCHER', 'CODER', 'CRITIC', 'INTEGRATOR']);
-  assert.deepEqual(plan.reused_agent_ids.sort(), ['agent.integrator', 'agent.research']);
+  assert.deepEqual([...plan.reused_agent_ids].sort(), ['agent.integrator', 'agent.research']);
   assert.equal(plan.spawn_requests.length, 2);
+  assert.equal(Object.isFrozen(plan.reused_agent_ids), true);
 });
 
 test('HARD scales from six to twelve specialists under explicit bound', () => {
