@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import http from 'node:http';
 import net from 'node:net';
 import { rotateControlToken, rpcEndpoint } from './security.mjs';
 
@@ -82,7 +83,7 @@ function safeEqual(a, b) {
   return aa.length === bb.length && crypto.timingSafeEqual(aa, bb);
 }
 
-async function dispatch(runtime, method, params) {
+export async function dispatchRpc(runtime, method, params) {
   params = validateRpcParams(method, params);
   switch (method) {
     case 'runtime.health': return runtime.health();
@@ -97,8 +98,81 @@ async function dispatch(runtime, method, params) {
     case 'target.semantic_snapshot': return runtime.semanticSnapshot({ profileId: params?.profileId, targetId: params?.targetId, maxNodes: params?.maxNodes, taskText: params?.taskText });
     case 'target.activate': return runtime.activateTarget(params);
     case 'target.close': return runtime.closeTarget(params);
+    case 'action.navigate': return runtime.navigateAction(params);
+    case 'action.click': return runtime.clickAction(params);
+    case 'action.type': return runtime.typeAction(params);
+    case 'action.submit': return runtime.submitAction(params);
     default: throw new Error('rpc_method_forbidden');
   }
+}
+
+export async function startHttpBridge(runtime, port, token) {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer(async (req, res) => {
+      if (req.method !== 'POST' || req.url !== '/rpc') {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'not_found' }));
+        return;
+      }
+
+      const authHeader = req.headers['authorization'] || '';
+      const bearerMatch = authHeader.match(/^Bearer\s+(.+)$/);
+      if (!bearerMatch || !safeEqual(bearerMatch[1], token)) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ error: 'rpc_unauthorized' }));
+        return;
+      }
+
+      const chunks = [];
+      let totalBytes = 0;
+
+      for await (const chunk of req) {
+        totalBytes += chunk.length;
+        if (totalBytes > MAX_LINE_BYTES) {
+          res.writeHead(413);
+          res.end(JSON.stringify({ error: 'rpc_frame_too_large' }));
+          return;
+        }
+        chunks.push(chunk);
+      }
+
+      let request;
+      try {
+        request = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      } catch {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'rpc_json_invalid' }));
+        return;
+      }
+
+      const id = request.id ?? null;
+      const method = String(request.method || '');
+
+      try {
+        if (!RPC_METHODS.includes(method)) throw new Error('rpc_method_forbidden');
+        const result = await dispatchRpc(runtime, method, request.params || {});
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ id, ok: true, effect_class: RPC_METHOD_EFFECTS[method], web_authority_effect: false, result }));
+      } catch (error) {
+        const message = String(error?.message || error);
+        if (message === 'rpc_method_forbidden') {
+          res.writeHead(403);
+          res.end(JSON.stringify({ id, ok: false, error: message }));
+          return;
+        }
+        res.writeHead(500);
+        res.end(JSON.stringify({ id, ok: false, error: message }));
+      }
+    });
+
+    server.on('error', reject);
+    server.listen(port, '127.0.0.1', () => {
+      resolve({
+        port: server.address().port,
+        close: () => new Promise((resolve) => server.close(resolve))
+      });
+    });
+  });
 }
 
 export async function startRpcServer(runtime) {
@@ -122,7 +196,7 @@ export async function startRpcServer(runtime) {
         try {
           if (!safeEqual(request.token, token)) throw new Error('rpc_unauthorized');
           if (!RPC_METHODS.includes(String(request.method || ''))) throw new Error('rpc_method_forbidden');
-          const result = await dispatch(runtime, request.method, request.params || {});
+          const result = await dispatchRpc(runtime, request.method, request.params || {});
           socket.write(`${JSON.stringify({ id, ok: true, effect_class: RPC_METHOD_EFFECTS[request.method], web_authority_effect: false, result })}\n`);
         } catch (error) {
           socket.write(`${JSON.stringify({ id, ok: false, error: String(error?.message || error) })}\n`);

@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ComputeBrowserRuntime, COMPUTE_BROWSER_RUNTIME_VERSION } from './runtime.mjs';
 import { DEFAULT_CONTEXT_ID } from './context-manager.mjs';
-import { startRpcServer } from './rpc-server.mjs';
+import { startRpcServer, startHttpBridge } from './rpc-server.mjs';
 
 function arg(name) {
   const prefix = `--${name}=`;
@@ -14,7 +14,14 @@ function arg(name) {
 async function serve() {
   const runtime = await new ComputeBrowserRuntime({ engineExecutable: process.env.A2_CHROME_EXECUTABLE || null, headlessDefault: false, allowNoSandbox: false }).init();
   const rpc = await startRpcServer(runtime);
-  console.log(JSON.stringify({
+  const bridgePort = arg('bridge-port');
+  let bridge = null;
+  if (bridgePort !== null && !Number.isNaN(Number(bridgePort))) {
+    const numericPort = Number(bridgePort);
+    const { token } = await import('./security.mjs').then(m => m.rotateControlToken(runtime.stateRoot));
+    bridge = await startHttpBridge(runtime, numericPort, token);
+  }
+  const output = {
     schema: 'metaengine.a2-compute-browser.ready.v1',
     runtime: COMPUTE_BROWSER_RUNTIME_VERSION,
     endpoint: rpc.endpoint,
@@ -25,12 +32,15 @@ async function serve() {
     devtools_tcp_exposed: false,
     context_manager: 'b2_logical_context_v1',
     semantic_perception: 'r4_semantic_frame_v1'
-  }));
+  };
+  if (bridge) output.bridge_port = bridge.port;
+  console.log(JSON.stringify(output));
   let stopping = false;
   const stop = async () => {
     if (stopping) return;
     stopping = true;
     await rpc.close().catch(() => {});
+    if (bridge) await bridge.close().catch(() => {});
     await runtime.shutdown();
     process.exit(0);
   };
