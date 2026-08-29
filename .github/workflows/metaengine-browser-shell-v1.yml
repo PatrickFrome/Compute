@@ -88,6 +88,7 @@ jobs:
           grep -q '"ok":true' "$METAENGINE_SMOKE_TRACE"
           grep -q '"shutdown_state":"STOPPED"' "$METAENGINE_SMOKE_TRACE"
           grep -q '"cooperative_shutdown_ack":true' "$METAENGINE_SMOKE_TRACE"
+          grep -q '"stage":"APP_EXIT".*"code":0' "$METAENGINE_SMOKE_TRACE"
       - name: Electron renderer diagnostic
         id: renderer_smoke
         continue-on-error: true
@@ -123,6 +124,7 @@ jobs:
           cp research/METAENGINE_BROWSER_STEP7_ISOLATED_DP_SMOKE_2026-08-29.md evidence-out/
           cp research/METAENGINE_BROWSER_STEP8_SMOKE_APP_PACKAGING_2026-08-29.md evidence-out/
           cp research/METAENGINE_BROWSER_STEP9_CJS_READY_HARNESS_2026-08-29.md evidence-out/
+          cp research/METAENGINE_BROWSER_STEP10_WINDOWS_RECEIPT_GATE_2026-08-29.md evidence-out/
           test ! -f /tmp/metaengine-browser-smoke.jsonl || cp /tmp/metaengine-browser-smoke.jsonl evidence-out/
           test ! -f /tmp/metaengine-devplane-smoke.jsonl || cp /tmp/metaengine-devplane-smoke.jsonl evidence-out/
           test ! -f /tmp/metaengine-dp-trace.jsonl || cp /tmp/metaengine-dp-trace.jsonl evidence-out/
@@ -194,13 +196,13 @@ jobs:
           Get-Content $trace -ErrorAction SilentlyContinue
           Get-Content $out -ErrorAction SilentlyContinue
           Get-Content $err -ErrorAction SilentlyContinue
-          if ($p.ExitCode -ne 0) { throw "development_plane_windows_exit_$($p.ExitCode)" }
           if (-not (Select-String -Path $trace -Pattern '"stage":"MODULE_LOADED"' -Quiet)) { throw "development_plane_windows_module_marker_missing" }
           if (-not (Select-String -Path $trace -Pattern '"stage":"APP_READY"' -Quiet)) { throw "development_plane_windows_ready_marker_missing" }
           if (-not (Select-String -Path $trace -Pattern '"stage":"COMPLETE"' -Quiet)) { throw "development_plane_windows_complete_marker_missing" }
           if (-not (Select-String -Path $trace -Pattern '"ok":true' -Quiet)) { throw "development_plane_windows_receipt_missing" }
           if (-not (Select-String -Path $trace -Pattern '"shutdown_state":"STOPPED"' -Quiet)) { throw "development_plane_windows_shutdown_receipt_missing" }
           if (-not (Select-String -Path $trace -Pattern '"cooperative_shutdown_ack":true' -Quiet)) { throw "development_plane_windows_shutdown_ack_missing" }
+          if (-not (Select-String -Path $trace -Pattern '"stage":"APP_EXIT".*"code":0' -Quiet)) { throw "development_plane_windows_app_exit_receipt_missing" }
       - name: Windows evidence
         if: always()
         shell: powershell
