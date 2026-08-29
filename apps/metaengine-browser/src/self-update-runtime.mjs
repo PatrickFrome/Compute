@@ -1,16 +1,21 @@
+import { HostResilienceRuntime } from './host-resilience-runtime.mjs';
+
 export class SelfUpdateRuntime {
-  #updater = null; #injectedUpdater; #packagedOverride;
+  #updater = null; #injectedUpdater; #packagedOverride; #host = null; #hostOverride;
   #state = { state: 'UNINITIALIZED', available_version: null, downloaded_version: null, last_check_at: null, last_error: null };
   #lastCheck = 0; #intervalMs; #canRestart;
 
-  constructor({ intervalMs = 10 * 60 * 1000, canRestart = async () => false, updater = null, packaged = null } = {}) {
+  constructor({ intervalMs = 10 * 60 * 1000, canRestart = async () => false, updater = null, packaged = null, hostResilience = undefined } = {}) {
     this.#intervalMs = Math.max(60 * 1000, Number(intervalMs) || 10 * 60 * 1000);
     this.#canRestart = canRestart;
     this.#injectedUpdater = updater;
     this.#packagedOverride = packaged;
+    this.#hostOverride = hostResilience;
   }
 
-  snapshot() { return structuredClone({ schema: 'metaengine.self-update-runtime.v1', ...this.#state, authority_effect: false }); }
+  snapshot() {
+    return structuredClone({ schema: 'metaengine.self-update-runtime.v1', ...this.#state, host_resilience: this.#host?.snapshot?.() || null, authority_effect: false });
+  }
 
   async start() {
     try {
@@ -18,6 +23,10 @@ export class SelfUpdateRuntime {
       if (packaged == null) {
         const { app } = await import('electron');
         packaged = app.isPackaged;
+      }
+      if (packaged && this.#hostOverride !== false) {
+        this.#host = this.#hostOverride || new HostResilienceRuntime();
+        await this.#host.start();
       }
       if (!packaged || process.env.METAENGINE_DISABLE_SELF_UPDATE === '1') { this.#state.state = 'DISABLED'; return this.snapshot(); }
       let updater = this.#injectedUpdater;
