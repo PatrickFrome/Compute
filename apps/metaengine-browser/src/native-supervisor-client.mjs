@@ -4,6 +4,7 @@ export const NATIVE_SUPERVISOR_BASE = 'https://xpeibufgzjknrhbhpffp.supabase.co/
 export const NATIVE_SUPERVISOR_RUNTIME_PATH = '/a2-browser-native-supervisor-v1';
 
 const clipError = (error) => String(error?.message || error || 'unknown_error').slice(0, 500);
+const READ_ONLY_ACTIONS = new Set(['POLL','CAPTURE','CAPTURE_VIEW','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD']);
 
 export class NativeSupervisorClient {
   #identity;
@@ -22,6 +23,8 @@ export class NativeSupervisorClient {
   #lastCommandStatus = null;
   #currentCommand = null;
   #enrollmentStatus = 'UNINITIALIZED';
+  #supervisorMode = 'CONTROL';
+  #armed = true;
 
   constructor({ identity, fetchImpl = globalThis.fetch, getState, executeCommand, version, intervalMs = 2000 }) {
     if (!identity) throw new Error('native_supervisor_identity_required');
@@ -49,8 +52,8 @@ export class NativeSupervisorClient {
       current_command: this.#currentCommand,
       enrollment_status: this.#enrollmentStatus,
       identity: this.#identity.snapshot(),
-      supervisor_mode: 'CONTROL',
-      armed: true,
+      supervisor_mode: this.#supervisorMode,
+      armed: this.#armed,
       arbitrary_eval: false,
       os_shell_authority: false,
     };
@@ -70,6 +73,16 @@ export class NativeSupervisorClient {
     this.#running = false;
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
+  }
+
+  setControlState({ mode, armed } = {}) {
+    if (mode !== undefined) {
+      const next = String(mode).toUpperCase();
+      if (!['OFF','MONITOR','CONTROL'].includes(next)) throw new Error('native_supervisor_mode_invalid');
+      this.#supervisorMode = next;
+    }
+    if (armed !== undefined) this.#armed = armed === true;
+    return this.snapshot();
   }
 
   #schedule() {
@@ -150,9 +163,9 @@ export class NativeSupervisorClient {
       state: {
         ...state,
         shell_version: this.#version,
-        supervisor_mode: 'CONTROL',
-        armed: true,
-        operator_mode: 'CONTROL',
+        supervisor_mode: this.#supervisorMode,
+        armed: this.#armed,
+        operator_mode: this.#supervisorMode === 'CONTROL' ? 'CONTROL' : 'OBSERVE',
         started_at: this.#startedAt,
         last_error: this.#lastError,
       },
@@ -165,7 +178,7 @@ export class NativeSupervisorClient {
   }
 
   async #nextCommand() {
-    const response = await this.#signedRequest('/v1/commands/next', { payload: { supervisor_mode: 'CONTROL' } });
+    const response = await this.#signedRequest('/v1/commands/next', { payload: { supervisor_mode: this.#supervisorMode } });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(`native_supervisor_next_http_${response.status}`);
     return body?.command || null;
@@ -189,6 +202,29 @@ export class NativeSupervisorClient {
     if (!response.ok) throw new Error(`native_supervisor_result_http_${response.status}`);
   }
 
+  async #executeLocalOrRemote(command) {
+    const action = String(command?.action || '');
+    if (action === 'ARM') {
+      this.#armed = true;
+      return { armed: true, supervisor_mode: this.#supervisorMode, authority_effect: true };
+    }
+    if (action === 'DISARM') {
+      this.#armed = false;
+      return { armed: false, supervisor_mode: this.#supervisorMode, authority_effect: true };
+    }
+    if (action === 'SET_SUPERVISOR_MODE') {
+      const next = String(command?.payload?.mode || '').toUpperCase();
+      if (!['OFF','MONITOR','CONTROL'].includes(next)) throw new Error('native_supervisor_mode_invalid');
+      this.#supervisorMode = next;
+      return { supervisor_mode: next, armed: this.#armed, authority_effect: true };
+    }
+    if (this.#supervisorMode !== 'CONTROL' && !READ_ONLY_ACTIONS.has(action)) {
+      throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
+    }
+    if (!this.#armed && !READ_ONLY_ACTIONS.has(action)) throw new Error('native_supervisor_disarmed');
+    return this.#executeCommand(command);
+  }
+
   async #runCommand(command) {
     this.#currentCommand = {
       command_id: command.command_id,
@@ -199,7 +235,7 @@ export class NativeSupervisorClient {
     };
     let result = null;
     try {
-      result = await this.#executeCommand(command);
+      result = await this.#executeLocalOrRemote(command);
       await this.#postResult(command, true, result, null);
       this.#lastCommandId = command.command_id;
       this.#lastCommandStatus = 'COMPLETED';
