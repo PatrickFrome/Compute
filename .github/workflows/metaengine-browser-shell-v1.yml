@@ -53,13 +53,6 @@ jobs:
       - name: Contract tests
         working-directory: apps/metaengine-browser
         run: npm test
-      - name: Development Plane UtilityProcess gate
-        working-directory: apps/metaengine-browser
-        shell: bash
-        run: |
-          set -euo pipefail
-          timeout 12s xvfb-run -a npm run devplane-smoke | tee /tmp/metaengine-devplane-smoke.jsonl
-          grep -q '"ok":true' /tmp/metaengine-devplane-smoke.jsonl
       - name: Security static gate
         run: |
           grep -q 'app.enableSandbox()' apps/metaengine-browser/src/main.mjs
@@ -75,6 +68,15 @@ jobs:
       - name: Preserve B-line contracts
         working-directory: coordination/browser-compute
         run: node --test tests/*.test.mjs
+      - name: Linux Development Plane launch diagnostic
+        id: linux_devplane
+        continue-on-error: true
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 12s xvfb-run -a npm run devplane-smoke | tee /tmp/metaengine-devplane-smoke.jsonl
+          grep -q '"ok":true' /tmp/metaengine-devplane-smoke.jsonl
       - name: Electron renderer diagnostic
         id: renderer_smoke
         continue-on-error: true
@@ -83,10 +85,15 @@ jobs:
         run: |
           set -euo pipefail
           timeout 20s xvfb-run -a npm run smoke | tee /tmp/metaengine-browser-smoke.jsonl
-      - name: Record renderer diagnostic status
+      - name: Record Linux diagnostics
         if: always()
         run: |
           mkdir -p evidence-out
+          if grep -q '"ok":true' /tmp/metaengine-devplane-smoke.jsonl 2>/dev/null; then
+            echo 'linux_devplane_smoke=PASS' | tee evidence-out/linux-devplane-smoke-status.txt
+          else
+            echo 'linux_devplane_smoke=NOT_PROVED_ON_HOSTED_UBUNTU' | tee evidence-out/linux-devplane-smoke-status.txt
+          fi
           if grep -q '"ok":true' /tmp/metaengine-browser-smoke.jsonl 2>/dev/null; then
             echo 'renderer_smoke=PASS' | tee evidence-out/renderer-smoke-status.txt
           else
@@ -105,5 +112,58 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: metaengine-browser-shell-v1-${{ github.sha }}
+          name: metaengine-browser-shell-linux-${{ github.sha }}
           path: evidence-out/
+
+  development-plane-windows:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install shell dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Materialize Electron binary
+        working-directory: apps/metaengine-browser
+        env:
+          ELECTRON_GET_NO_PROGRESS: '1'
+        run: npx install-electron --no
+      - name: Windows physical Development Plane gate
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'metaengine-dp-out.txt'
+          $err = Join-Path $env:RUNNER_TEMP 'metaengine-dp-err.txt'
+          $electron = Join-Path (Get-Location) 'node_modules\electron\dist\electron.exe'
+          if (-not (Test-Path $electron)) { throw "electron_binary_missing" }
+          $p = Start-Process -FilePath $electron -ArgumentList '.', '--metaengine-devplane-smoke' -WorkingDirectory (Get-Location) -NoNewWindow -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          if (-not $p.WaitForExit(20000)) {
+            try { $p.Kill($true) } catch {}
+            Get-Content $out -ErrorAction SilentlyContinue
+            Get-Content $err -ErrorAction SilentlyContinue
+            throw "development_plane_windows_timeout"
+          }
+          Get-Content $out -ErrorAction SilentlyContinue
+          Get-Content $err -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { throw "development_plane_windows_exit_$($p.ExitCode)" }
+          if (-not (Select-String -Path $out -Pattern '"ok":true' -Quiet)) { throw "development_plane_windows_receipt_missing" }
+      - name: Windows evidence
+        if: always()
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path evidence-windows | Out-Null
+          git rev-parse HEAD | Set-Content evidence-windows\git-head.txt
+          if (Test-Path "$env:RUNNER_TEMP\metaengine-dp-out.txt") { Copy-Item "$env:RUNNER_TEMP\metaengine-dp-out.txt" evidence-windows\ }
+          if (Test-Path "$env:RUNNER_TEMP\metaengine-dp-err.txt") { Copy-Item "$env:RUNNER_TEMP\metaengine-dp-err.txt" evidence-windows\ }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: metaengine-browser-devplane-windows-${{ github.sha }}
+          path: apps/metaengine-browser/evidence-windows/
