@@ -82,7 +82,8 @@ jobs:
           tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
             -cf dist/a2-compute-browser-b3-r4/A2_COMPUTE_BROWSER_B3_R4.tar \
             coordination/browser-compute \
-            research/a2-compute-browser-b3-r4-session-perception/report-source.md
+            research/a2-compute-browser-b3-r4-session-perception/report-source.md \
+            research/a2-compute-browser-b3-orphan-recovery/report-source.md
           sha256sum dist/a2-compute-browser-b3-r4/A2_COMPUTE_BROWSER_B3_R4.tar > dist/a2-compute-browser-b3-r4/SHA256SUMS.txt
 
       - name: Attest evidence bundle provenance

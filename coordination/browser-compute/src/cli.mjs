@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ComputeBrowserRuntime, COMPUTE_BROWSER_RUNTIME_VERSION } from './runtime.mjs';
 import { startRpcServer } from './rpc-server.mjs';
+import { atomicJsonWrite, readJson } from './security.mjs';
 
 function arg(name) {
   const prefix = `--${name}=`;
@@ -66,7 +67,79 @@ async function selfTest() {
       && !launchArgs.some((value) => String(value).startsWith('--remote-debugging-address='));
     if (!pipeLaunchVerified) throw new Error('self_test_native_pipe_launch_not_proven');
     const precrashContext = await runtime.createContext({ profileId, contextId: 'precrash_context' });
-    await runtime.createTarget({ profileId, targetId: 'precrash_target', role: 'CI_CRASH_FENCE', url: 'about:blank' });
+    const precrashTarget = await runtime.createTarget({ profileId, targetId: 'precrash_target', role: 'CI_CRASH_FENCE', url: 'about:blank' });
+
+    // Inject the exact pre-effect intent shapes the runtime persists mid-flight
+    // (proven byte-shape by the unit suites) so the crash below leaves one
+    // orphaned open intent and one orphaned closing intent per registry, all
+    // bound to the incarnation that is about to die.
+    const contextsFile = path.join(runtime.profileDir(profileId), 'contexts.json');
+    const targetsFile = path.join(runtime.profileDir(profileId), 'targets.json');
+    const contextsBeforeCrash = await readJson(contextsFile, null);
+    const targetsBeforeCrash = await readJson(targetsFile, null);
+    contextsBeforeCrash.contexts.push({
+      schema: 'metaengine.a2-compute-browser.context.v1',
+      context_id: 'orphan_open_ctx',
+      context_epoch: 1,
+      persistence: 'EPHEMERAL',
+      status: 'PREPARING',
+      pending_operation_id: 'self-test-orphan-open-ctx',
+      pending_operation: 'CONTEXT_CREATE',
+      pending_process_incarnation_id: oldIncarnation,
+      last_process_incarnation_id: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }, {
+      schema: 'metaengine.a2-compute-browser.context.v1',
+      context_id: 'orphan_close_ctx',
+      context_epoch: 1,
+      persistence: 'EPHEMERAL',
+      status: 'CLOSING',
+      pending_operation_id: 'self-test-orphan-close-ctx',
+      pending_operation: 'CONTEXT_CLOSE',
+      pending_process_incarnation_id: oldIncarnation,
+      last_process_incarnation_id: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    });
+    contextsBeforeCrash.revision = Number(contextsBeforeCrash.revision || 0) + 1;
+    await atomicJsonWrite(contextsFile, contextsBeforeCrash);
+    targetsBeforeCrash.targets.push({
+      schema: 'metaengine.a2-browser-operator.target.v1',
+      target_id: 'orphan_open_target',
+      provider: 'BROWSER',
+      platform: 'COMPUTE_BROWSER',
+      surface: 'WEB',
+      context_id: 'default',
+      role: 'CI_ORPHAN_FENCE',
+      conversation_epoch: 2,
+      conversation_url: 'about:blank',
+      status: 'PREPARING',
+      pending_operation_id: 'self-test-orphan-open-target',
+      pending_operation: 'TARGET_CREATE',
+      pending_process_incarnation_id: oldIncarnation,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }, {
+      schema: 'metaengine.a2-browser-operator.target.v1',
+      target_id: 'orphan_close_target',
+      provider: 'BROWSER',
+      platform: 'COMPUTE_BROWSER',
+      surface: 'WEB',
+      context_id: 'default',
+      role: 'CI_ORPHAN_FENCE',
+      conversation_epoch: 1,
+      conversation_url: 'about:blank',
+      status: 'CLOSING',
+      pending_operation_id: 'self-test-orphan-close-target',
+      pending_operation: 'TARGET_CLOSE',
+      pending_process_incarnation_id: oldIncarnation,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    });
+    targetsBeforeCrash.revision = Number(targetsBeforeCrash.revision || 0) + 1;
+    await atomicJsonWrite(targetsFile, targetsBeforeCrash);
+
     const browserExited = new Promise((resolve) => entryBeforeRestart.processRef.child.once('exit', resolve));
     await entryBeforeRestart.processRef.cdp.call('Browser.close');
     await Promise.race([browserExited, new Promise((_, reject) => setTimeout(() => reject(new Error('self_test_browser_exit_timeout')), 5000))]);
@@ -74,16 +147,35 @@ async function selfTest() {
     if (!restarted.running || restarted.pid === oldPid || restarted.process_incarnation_id === oldIncarnation) throw new Error('self_test_crash_aware_restart_failed');
 
     const afterRestart = await runtime.listTargets(profileId);
-    if (!afterRestart.some((row) => row.target_id === 'precrash_target' && row.bound === false && row.process_incarnation_id === null)) {
+    if (!afterRestart.some((row) => row.target_id === 'precrash_target' && row.status === 'LOST' && row.bound === false && row.process_incarnation_id === null)) {
       throw new Error('self_test_stale_binding_not_invalidated');
+    }
+    if (!afterRestart.some((row) => row.target_id === 'orphan_open_target' && row.status === 'LOST')) {
+      throw new Error('self_test_orphan_open_target_not_lost');
+    }
+    if (afterRestart.some((row) => row.target_id === 'orphan_close_target')) {
+      throw new Error('self_test_orphan_close_target_not_retired');
     }
     const contextsAfterRestart = await runtime.listContexts(profileId);
     if (!contextsAfterRestart.some((row) => row.context_id === 'precrash_context' && row.status === 'LOST' && row.bound === false)) {
       throw new Error('self_test_lost_context_not_recorded');
     }
+    if (!contextsAfterRestart.some((row) => row.context_id === 'orphan_open_ctx' && row.status === 'LOST')) {
+      throw new Error('self_test_orphan_open_context_not_lost');
+    }
+    if (contextsAfterRestart.some((row) => row.context_id === 'orphan_close_ctx')) {
+      throw new Error('self_test_orphan_close_context_not_retired');
+    }
     const recoveredContext = await runtime.createContext({ profileId, contextId: 'precrash_context' });
     if (recoveredContext.context_epoch !== precrashContext.context_epoch + 1) throw new Error('self_test_context_epoch_not_rotated');
     await runtime.closeContext({ profileId, contextId: 'precrash_context' });
+    const recoveredOrphanContext = await runtime.createContext({ profileId, contextId: 'orphan_open_ctx' });
+    if (recoveredOrphanContext.context_epoch !== 2) throw new Error('self_test_orphan_context_epoch_not_rotated');
+    await runtime.closeContext({ profileId, contextId: 'orphan_open_ctx' });
+    const recoveredOrphanTarget = await runtime.createTarget({ profileId, targetId: 'orphan_open_target', role: 'CI_ORPHAN_RECOVERY', url: 'about:blank' });
+    if (recoveredOrphanTarget.conversation_epoch !== 3 || recoveredOrphanTarget.status !== 'ACTIVE') throw new Error('self_test_orphan_target_epoch_not_rotated');
+    await runtime.closeTarget({ profileId, targetId: 'orphan_open_target' });
+    if (precrashTarget.status !== 'ACTIVE') throw new Error('self_test_precrash_target_state_invalid');
 
     const smokeContext = await runtime.createContext({ profileId, contextId: 'smoke_context' });
     const created = await runtime.createTarget({ profileId, contextId: smokeContext.context_id, targetId: 'smoke_target', role: 'CI_SMOKE', url: 'about:blank' });
@@ -120,6 +212,12 @@ async function selfTest() {
       crash_aware_restart: true,
       process_incarnation_rotated: true,
       stale_target_binding_invalidated: true,
+      stale_target_lost_recorded: true,
+      orphan_open_context_lost: true,
+      orphan_closing_context_retired: true,
+      orphan_open_target_lost: true,
+      orphan_closing_target_retired: true,
+      orphan_intent_recovery: true,
       durable_pre_effect_target_intents: true,
       durable_pre_effect_context_intents: true,
       context_isolation_verified: true,

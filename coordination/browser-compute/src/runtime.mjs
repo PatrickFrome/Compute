@@ -11,9 +11,46 @@ const CONTEXTS_FILE = 'contexts.json';
 const TARGETS_FILE = 'targets.json';
 const PROFILE_LOCK_FILE = 'a2-runtime.lock';
 const DAEMON_LOCK_FILE = 'a2-daemon.lock';
-export const COMPUTE_BROWSER_RUNTIME_VERSION = '0.3.0-dev.1';
+export const COMPUTE_BROWSER_RUNTIME_VERSION = '0.3.0-dev.2';
 
 function now() { return new Date().toISOString(); }
+
+// A registry row is live only for the exact browser process incarnation that
+// recorded it. Ephemeral engine state (browser contexts, targets) cannot
+// outlive its process, so a row whose recorded incarnation is not the running
+// one is definitionally dead: an open intent (PREPARING/ACTIVATING/ACTIVE)
+// becomes LOST and a closing intent (CLOSING) becomes RETIRED because process
+// death already fulfilled the close. Mid-flight intents of the CURRENT
+// incarnation are never retired here: their ambiguity stays fenced from
+// blind retry by the create/close guards.
+function rowIncarnation(row) {
+  return row?.pending_process_incarnation_id ?? row?.last_process_incarnation_id ?? null;
+}
+
+function retiredIntentStatus(status) {
+  if (status === 'PREPARING' || status === 'ACTIVE' || status === 'ACTIVATING') return 'LOST';
+  if (status === 'CLOSING') return 'RETIRED';
+  return null;
+}
+
+function retireRow(row, incarnation) {
+  if (!row || row.status === 'RETIRED' || row.status === 'LOST') return row;
+  const recorded = rowIncarnation(row);
+  if (incarnation && recorded === incarnation) return row;
+  const next = retiredIntentStatus(row.status);
+  if (!next) return row;
+  return {
+    ...row,
+    status: next,
+    lost_process_incarnation_id: next === 'LOST' ? (recorded || row.lost_process_incarnation_id || null) : (row.lost_process_incarnation_id || null),
+    pending_operation_id: null,
+    pending_operation: null,
+    pending_process_incarnation_id: null,
+    last_process_incarnation_id: null,
+    updated_at: now()
+  };
+}
+
 function blankRegistry() { return { schema: 'metaengine.a2-compute-browser.targets.v1', revision: 0, targets: [], updated_at: now() }; }
 function blankContextRegistry() { return { schema: 'metaengine.a2-compute-browser.contexts.v1', revision: 0, contexts: [], updated_at: now() }; }
 
@@ -129,6 +166,7 @@ export class ComputeBrowserRuntime {
       });
       this.running.set(id, entry);
       await this.#reconcileContextsAfterStart(id, entry);
+      await this.#reconcileTargets(id, entry.processRef.processIncarnationId);
       return this.profileHealth(id);
     } catch (error) {
       this.running.delete(id);
@@ -206,18 +244,26 @@ export class ComputeBrowserRuntime {
   async #reconcileContextsAfterStart(profileId, entry) {
     const registry = await this.#loadContexts(profileId);
     let changed = false;
+    const incarnation = entry.processRef.processIncarnationId;
     registry.contexts = registry.contexts.map((row) => {
-      if (row.status !== 'ACTIVE' || row.last_process_incarnation_id === entry.processRef.processIncarnationId) return row;
+      const retired = retireRow(row, incarnation);
+      if (retired === row) return row;
       changed = true;
-      return {
-        ...row,
-        status: 'LOST',
-        lost_process_incarnation_id: row.last_process_incarnation_id || null,
-        last_process_incarnation_id: null,
-        updated_at: now()
-      };
+      return retired;
     });
     if (changed) await this.#saveContexts(profileId, registry);
+  }
+
+  async #reconcileTargets(profileId, incarnation) {
+    const registry = await this.#loadTargets(profileId);
+    let changed = false;
+    registry.targets = registry.targets.map((row) => {
+      const retired = retireRow(row, incarnation);
+      if (retired === row) return row;
+      changed = true;
+      return retired;
+    });
+    if (changed) await this.#saveTargets(profileId, registry);
   }
 
   #runningEntry(profileId) {
@@ -336,15 +382,10 @@ export class ComputeBrowserRuntime {
     const incarnation = entry?.processRef?.isRunning() ? entry.processRef.processIncarnationId : null;
     let changed = false;
     registry.contexts = registry.contexts.map((row) => {
-      if (row.status !== 'ACTIVE' || (incarnation && row.last_process_incarnation_id === incarnation)) return row;
+      const retired = retireRow(row, incarnation);
+      if (retired === row) return row;
       changed = true;
-      return {
-        ...row,
-        status: 'LOST',
-        lost_process_incarnation_id: row.last_process_incarnation_id || null,
-        last_process_incarnation_id: null,
-        updated_at: now()
-      };
+      return retired;
     });
     if (changed) await this.#saveContexts(id, registry);
     const defaultContext = {
@@ -411,10 +452,10 @@ export class ComputeBrowserRuntime {
     const context = await this.#activeContext(id, entry, contextId);
     const registry = await this.#loadTargets(id);
     const logicalId = targetId ? validateTargetId(targetId) : `browser_${crypto.randomUUID().replaceAll('-', '').slice(0, 20)}`;
-    if (registry.targets.some((row) => row.target_id === logicalId && row.status !== 'RETIRED')) throw new Error('target_id_exists');
+    const previous = registry.targets.find((row) => row.target_id === logicalId);
+    if (previous && !['LOST', 'RETIRED'].includes(previous.status)) throw new Error('target_id_exists');
     const navUrl = validateNavigationUrl(url);
     if (navUrl !== 'about:blank') throw new Error('b1_remote_navigation_not_enabled');
-    const previous = registry.targets.find((row) => row.target_id === logicalId);
     const operationId = crypto.randomUUID();
     const target = {
       schema: 'metaengine.a2-browser-operator.target.v1',
@@ -447,6 +488,7 @@ export class ComputeBrowserRuntime {
       pending_operation: null,
       pending_process_incarnation_id: null,
       last_operation_id: operationId,
+      last_process_incarnation_id: entry.processRef.processIncarnationId,
       updated_at: now()
     };
     registry.targets = registry.targets.filter((row) => row.target_id !== logicalId);
@@ -467,9 +509,17 @@ export class ComputeBrowserRuntime {
     const entry = this.running.get(id);
     const bindings = entry?.bindings || new Map();
     const incarnation = entry?.processRef?.isRunning() ? entry.processRef.processIncarnationId : null;
+    let changed = false;
+    registry.targets = registry.targets.map((row) => {
+      const retired = retireRow(row, incarnation);
+      if (retired === row) return row;
+      changed = true;
+      return retired;
+    });
+    if (changed) await this.#saveTargets(id, registry);
     return registry.targets.filter((row) => includeRetired || row.status !== 'RETIRED').map((row) => {
       const binding = bindings.get(row.target_id);
-      const bound = Boolean(binding && incarnation && binding.process_incarnation_id === incarnation);
+      const bound = Boolean(binding && incarnation && binding.process_incarnation_id === incarnation && row.status === 'ACTIVE');
       return { ...row, context_id: row.context_id || 'default', bound, process_incarnation_id: bound ? incarnation : null };
     });
   }
@@ -568,6 +618,7 @@ export class ComputeBrowserRuntime {
       pending_operation: null,
       pending_process_incarnation_id: null,
       last_operation_id: operationId,
+      last_process_incarnation_id: null,
       updated_at: now()
     };
     await this.#saveTargets(profile, registry);
