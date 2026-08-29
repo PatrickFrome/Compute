@@ -1,21 +1,17 @@
 (() => {
   "use strict";
 
-  const REGISTRY_KEY = "a2TargetRegistryV1";
-  const BINDINGS_KEY = "a2TargetBindingsV1";
-  const SESSION_NONCE_KEY = "a2TargetRegistrySessionNonceV1";
-  const ERROR_KEY = "a2TargetRegistryLastError";
-  const SCHEMA = "metaengine.a2-browser-operator.target-registry.v1";
-  const BINDING_SCHEMA = "metaengine.a2-browser-operator.target-bindings.v1";
+  const REGISTRY_KEY = "a2TargetRegistryV2";
+  const BINDINGS_KEY = "a2TargetBindingsV2";
+  const SELECTED_KEY = "a2FleetSelectedAgentIdV1";
+  const SESSION_NONCE_KEY = "a2TargetRegistrySessionNonceV2";
+  const SCHEMA = "metaengine.a2-browser-operator.target-registry.v2";
+  const BINDING_SCHEMA = "metaengine.a2-browser-operator.target-bindings.v2";
   const TARGET_ID_RE = /^[a-z0-9][a-z0-9._:-]{2,95}$/;
-  const STATUSES = new Set(["UNBOUND", "ACTIVE", "IDLE", "GENERATING", "STALLED", "EXHAUSTED", "ROLLOVER", "RETIRED"]);
-  const PLATFORMS = Object.freeze({
-    CHATGPT: Object.freeze({ provider: "OPENAI", surface: "WEB_CHAT", configKey: "chatgptUrl", seedId: "gpt_primary" }),
-    GLM_ZAI: Object.freeze({ provider: "ZAI", surface: "WEB_CHAT", configKey: "zaiUrl", seedId: "glm_primary" })
-  });
-
+  const STATUSES = new Set(["REGISTERED", "READY", "BUSY", "DRAINING", "LOST", "RETIRED"]);
+  const SUPERVISOR_TAB_KEY = "a2SupervisorChatTabIdV1";
+  const SUPERVISOR_URL_KEY = "a2SupervisorChatUrlV1";
   let mutation = Promise.resolve();
-  let suppressLegacyStorageSync = false;
 
   const nowIso = () => new Date().toISOString();
   const clone = (value) => value == null ? value : JSON.parse(JSON.stringify(value));
@@ -24,6 +20,7 @@
     try {
       const url = new URL(String(value || "").trim());
       if (url.protocol !== "https:") return "";
+      if (!["chatgpt.com", "chat.openai.com"].includes(url.hostname.toLowerCase())) return "";
       url.hash = "";
       url.search = "";
       url.pathname = url.pathname.replace(/\/+$/, "") || "/";
@@ -31,13 +28,11 @@
     } catch (_) { return ""; }
   }
 
-  function platformOf(value) {
+  function isConversationUrl(value) {
     try {
-      const host = new URL(String(value || "")).hostname.toLowerCase();
-      if (host === "chatgpt.com" || host === "chat.openai.com") return "CHATGPT";
-      if (host === "chat.z.ai") return "GLM_ZAI";
-    } catch (_) {}
-    return "UNKNOWN";
+      const url = new URL(String(value || ""));
+      return ["chatgpt.com", "chat.openai.com"].includes(url.hostname.toLowerCase()) && url.pathname.startsWith("/c/");
+    } catch (_) { return false; }
   }
 
   function normalizeTargetId(value) {
@@ -52,42 +47,31 @@
     return role;
   }
 
-  function normalizeStatus(value, hasUrl) {
-    const status = String(value || (hasUrl ? "ACTIVE" : "UNBOUND")).trim().toUpperCase();
+  function normalizeStatus(value) {
+    const status = String(value || "REGISTERED").trim().toUpperCase();
     if (!STATUSES.has(status)) throw new Error("target_status_invalid");
-    if (!hasUrl && status !== "UNBOUND" && status !== "RETIRED") return "UNBOUND";
     return status;
   }
 
-  function assertPlatformUrl(platform, url) {
-    if (!PLATFORMS[platform]) throw new Error("target_platform_invalid");
-    if (url && platformOf(url) !== platform) throw new Error("target_platform_url_mismatch");
-  }
-
   function canonicalTarget(raw, previous = null) {
-    const platform = String(raw?.platform || previous?.platform || "").toUpperCase();
-    const spec = PLATFORMS[platform];
-    if (!spec) throw new Error("target_platform_invalid");
-    const conversationUrl = normUrl(raw?.conversation_url ?? raw?.conversationUrl ?? previous?.conversation_url ?? "");
-    assertPlatformUrl(platform, conversationUrl);
+    const url = normUrl(raw?.conversation_url ?? previous?.conversation_url ?? "");
     const createdAt = String(previous?.created_at || raw?.created_at || nowIso());
-    const epochRaw = Number(raw?.conversation_epoch ?? raw?.conversationEpoch ?? previous?.conversation_epoch ?? (conversationUrl ? 1 : 0));
-    const epoch = Number.isInteger(epochRaw) && epochRaw >= 0 ? epochRaw : 0;
-    const legacyAlias = raw?.legacy_alias == null && previous?.legacy_alias == null
-      ? null
-      : String(raw?.legacy_alias ?? previous?.legacy_alias ?? "").toUpperCase() || null;
-    if (legacyAlias && !PLATFORMS[legacyAlias]) throw new Error("target_legacy_alias_invalid");
+    const epochRaw = Number(raw?.conversation_epoch ?? previous?.conversation_epoch ?? (url ? 1 : 0));
+    const epoch = Number.isSafeInteger(epochRaw) && epochRaw >= 0 ? epochRaw : 0;
     return {
-      schema: "metaengine.a2-browser-operator.target.v1",
+      schema: "metaengine.a2-browser-operator.target.v2",
       target_id: normalizeTargetId(raw?.target_id || previous?.target_id),
-      provider: spec.provider,
-      platform,
-      surface: spec.surface,
+      agent_id: normalizeTargetId(raw?.agent_id || previous?.agent_id || raw?.target_id || previous?.target_id),
+      provider: "OPENAI",
+      platform: "CHATGPT",
+      surface: "WEB_CHAT",
       role: normalizeRole(raw?.role ?? previous?.role ?? "WORKER"),
-      legacy_alias: legacyAlias,
+      capability_set: Array.isArray(raw?.capability_set ?? previous?.capability_set)
+        ? [...new Set((raw?.capability_set ?? previous?.capability_set).map((v) => String(v || "").trim().toLowerCase()).filter(Boolean))].slice(0, 64)
+        : ["chat", "perception"],
       conversation_epoch: epoch,
-      conversation_url: conversationUrl || null,
-      status: normalizeStatus(raw?.status ?? previous?.status, Boolean(conversationUrl)),
+      conversation_url: url || null,
+      status: normalizeStatus(raw?.status ?? previous?.status ?? (url ? "READY" : "REGISTERED")),
       created_at: createdAt,
       updated_at: String(raw?.updated_at || previous?.updated_at || nowIso())
     };
@@ -98,16 +82,13 @@
   }
 
   function validateRegistry(registry) {
-    const ids = new Set(), aliases = new Set(), urls = new Set();
+    const ids = new Set();
+    const urls = new Set();
     const targets = [];
     for (const raw of Array.isArray(registry?.targets) ? registry.targets : []) {
       const target = canonicalTarget(raw, raw);
       if (ids.has(target.target_id)) throw new Error("target_registry_duplicate_id");
       ids.add(target.target_id);
-      if (target.legacy_alias) {
-        if (aliases.has(target.legacy_alias)) throw new Error("target_registry_duplicate_legacy_alias");
-        aliases.add(target.legacy_alias);
-      }
       if (target.status !== "RETIRED" && target.conversation_url) {
         if (urls.has(target.conversation_url)) throw new Error("target_registry_duplicate_active_url");
         urls.add(target.conversation_url);
@@ -128,7 +109,11 @@
   }
 
   async function persistRegistry(registry) {
-    const clean = validateRegistry({ ...registry, revision: (Number(registry?.revision) || 0) + 1, updated_at: nowIso() });
+    const clean = validateRegistry({
+      ...registry,
+      revision: (Number(registry?.revision) || 0) + 1,
+      updated_at: nowIso()
+    });
     await chrome.storage.local.set({ [REGISTRY_KEY]: clean });
     return clean;
   }
@@ -154,11 +139,11 @@
     return { schema: BINDING_SCHEMA, browser_session_nonce: await ensureSessionNonce(), bindings: {}, updated_at: nowIso() };
   }
 
-  async function persistBindings(bindings) {
+  async function persistBindings(state) {
     const clean = {
       schema: BINDING_SCHEMA,
       browser_session_nonce: await ensureSessionNonce(),
-      bindings: { ...(bindings?.bindings || {}) },
+      bindings: { ...(state?.bindings || {}) },
       updated_at: nowIso()
     };
     await chrome.storage.session.set({ [BINDINGS_KEY]: clean });
@@ -171,38 +156,19 @@
     return state.bindings[id] ? clone(state.bindings[id]) : null;
   }
 
-  async function clearBinding(targetId) {
-    const id = normalizeTargetId(targetId);
-    const state = await loadBindings();
-    if (!state.bindings[id]) return;
-    delete state.bindings[id];
-    await persistBindings(state);
-  }
-
-  async function clearBindingsForTab(tabId) {
-    const state = await loadBindings();
-    let changed = false;
-    for (const [targetId, binding] of Object.entries(state.bindings)) {
-      if (Number(binding?.tab_id) === Number(tabId)) {
-        delete state.bindings[targetId];
-        changed = true;
-      }
-    }
-    if (changed) await persistBindings(state);
-  }
-
   async function bind(target, tab) {
-    if (!target?.target_id || !Number.isInteger(Number(tab?.id))) throw new Error("target_binding_invalid");
-    const liveUrl = normUrl(tab?.url || "");
-    if (!target.conversation_url || liveUrl !== target.conversation_url || platformOf(liveUrl) !== target.platform) throw new Error("target_binding_url_mismatch");
+    const tabId = Number(tab?.id);
+    const url = normUrl(tab?.url || "");
+    if (!Number.isInteger(tabId) || !url || url !== target.conversation_url) throw new Error("target_binding_url_mismatch");
     const state = await loadBindings();
-    for (const [otherId, binding] of Object.entries(state.bindings)) {
-      if (otherId !== target.target_id && Number(binding?.tab_id) === Number(tab.id)) delete state.bindings[otherId];
+    for (const [otherId, row] of Object.entries(state.bindings)) {
+      if (otherId !== target.target_id && Number(row?.tab_id) === tabId) delete state.bindings[otherId];
     }
     state.bindings[target.target_id] = {
-      schema: "metaengine.a2-browser-operator.target-binding.v1",
+      schema: "metaengine.a2-browser-operator.target-binding.v2",
       target_id: target.target_id,
-      tab_id: Number(tab.id),
+      agent_id: target.agent_id,
+      tab_id: tabId,
       conversation_epoch: target.conversation_epoch,
       conversation_url: target.conversation_url,
       browser_session_nonce: state.browser_session_nonce,
@@ -213,79 +179,37 @@
     return clone(state.bindings[target.target_id]);
   }
 
-  async function recordLegacyConflict(platform, spec, current, configured, conflict) {
-    const restoredUrl = current?.conversation_url || "";
-    suppressLegacyStorageSync = true;
-    try { await chrome.storage.local.set({ [spec.configKey]: restoredUrl }); }
-    finally { suppressLegacyStorageSync = false; }
-    await chrome.storage.local.set({
-      [ERROR_KEY]: {
-        schema: "metaengine.a2-browser-operator.target-registry-error.v1",
-        code: "LEGACY_URL_CONFLICT",
-        platform,
-        conflicting_target_id: conflict.target_id,
-        attempted_url: configured,
-        restored_url: restoredUrl || null,
-        at: nowIso(),
-        authority_effect: false
-      }
-    });
-    throw new Error(`target_registry_legacy_url_conflict:${platform}:${conflict.target_id}`);
+  async function clearBinding(targetId) {
+    const id = normalizeTargetId(targetId);
+    const state = await loadBindings();
+    if (!state.bindings[id]) return;
+    delete state.bindings[id];
+    await persistBindings(state);
   }
 
-  async function syncLegacySeeds() {
-    return mutate(async () => {
-      const registry = await loadRegistry();
-      const settings = await chrome.storage.local.get(Object.values(PLATFORMS).map((spec) => spec.configKey));
-      let changed = false;
-      const bindingsToClear = [];
+  async function targetForTab(tabId) {
+    const state = await loadBindings();
+    for (const [targetId, binding] of Object.entries(state.bindings)) {
+      if (Number(binding?.tab_id) === Number(tabId)) return targetId;
+    }
+    return null;
+  }
 
-      for (const [platform, spec] of Object.entries(PLATFORMS)) {
-        const configured = normUrl(settings[spec.configKey] || "");
-        if (configured) assertPlatformUrl(platform, configured);
-        const index = registry.targets.findIndex((target) => target.legacy_alias === platform);
-        const current = index >= 0 ? registry.targets[index] : null;
-        const conflict = configured
-          ? registry.targets.find((target, i) => i !== index && target.status !== "RETIRED" && target.conversation_url === configured)
-          : null;
-        if (conflict) await recordLegacyConflict(platform, spec, current, configured, conflict);
+  async function selectedTargetId() {
+    const stored = await chrome.storage.local.get(SELECTED_KEY);
+    return stored[SELECTED_KEY] ? String(stored[SELECTED_KEY]) : null;
+  }
 
-        if (index < 0) {
-          registry.targets.push(canonicalTarget({
-            target_id: spec.seedId,
-            platform,
-            role: platform === "CHATGPT" ? "OPERATOR_PRIMARY" : "OPERATOR_PREDECESSOR",
-            legacy_alias: platform,
-            conversation_epoch: configured ? 1 : 0,
-            conversation_url: configured,
-            status: configured ? "ACTIVE" : "UNBOUND",
-            updated_at: nowIso()
-          }));
-          changed = true;
-          continue;
-        }
-
-        if ((current.conversation_url || "") !== configured) {
-          const nextEpoch = configured
-            ? (current.conversation_epoch > 0 ? current.conversation_epoch + 1 : 1)
-            : current.conversation_epoch;
-          registry.targets[index] = canonicalTarget({
-            ...current,
-            conversation_url: configured,
-            conversation_epoch: nextEpoch,
-            status: configured ? "ACTIVE" : "UNBOUND",
-            updated_at: nowIso()
-          }, current);
-          bindingsToClear.push(current.target_id);
-          changed = true;
-        }
-      }
-
-      const result = changed ? await persistRegistry(registry) : registry;
-      for (const targetId of bindingsToClear) await clearBinding(targetId);
-      await chrome.storage.local.remove(ERROR_KEY);
-      return result;
+  async function selectTarget(targetId) {
+    const id = normalizeTargetId(targetId);
+    const registry = await loadRegistry();
+    const target = registry.targets.find((row) => row.target_id === id && row.status !== "RETIRED");
+    if (!target) throw new Error("target_not_found");
+    await chrome.storage.local.set({
+      [SELECTED_KEY]: id,
+      chatgptUrl: target.conversation_url || ""
     });
+    return clone(target);
   }
 
   async function listTargets({ includeRetired = false } = {}) {
@@ -301,72 +225,22 @@
   }
 
   async function resolveSelector(selector) {
-    const registry = await loadRegistry();
-    const value = typeof selector === "string" ? selector : selector?.target_id || selector?.legacy_alias || selector?.platform || "";
-    const raw = String(value || "").trim();
-    if (!raw) throw new Error("target_selector_missing");
-    const upper = raw.toUpperCase();
-    let target = registry.targets.find((row) => row.target_id === raw.toLowerCase());
-    if (!target && PLATFORMS[upper]) target = registry.targets.find((row) => row.legacy_alias === upper);
+    const raw = typeof selector === "string" ? selector : selector?.target_id || selector?.agent_id || "";
+    const id = normalizeTargetId(raw);
+    const target = await getTarget(id);
     if (!target || target.status === "RETIRED") throw new Error("target_not_found");
-    return clone(target);
+    return target;
   }
 
-  async function createTarget(input = {}) {
-    return mutate(async () => {
-      const registry = await loadRegistry();
-      const platform = String(input.platform || "").toUpperCase();
-      if (!PLATFORMS[platform]) throw new Error("target_platform_invalid");
-      const targetId = input.target_id
-        ? normalizeTargetId(input.target_id)
-        : `${platform === "CHATGPT" ? "gpt" : "glm"}_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
-      if (registry.targets.some((row) => row.target_id === targetId)) throw new Error("target_id_exists");
-      const target = canonicalTarget({
-        target_id: targetId,
-        platform,
-        role: input.role || "WORKER",
-        conversation_url: input.conversation_url ?? input.conversationUrl ?? null,
-        conversation_epoch: input.conversation_url || input.conversationUrl ? 1 : 0,
-        status: input.conversation_url || input.conversationUrl ? "ACTIVE" : "UNBOUND",
-        updated_at: nowIso()
-      });
-      registry.targets.push(target);
-      await persistRegistry(registry);
-      return clone(target);
-    });
-  }
-
-  async function updateConversation(targetId, newUrl, { status = "ACTIVE" } = {}) {
+  async function setRole(targetId, role) {
     return mutate(async () => {
       const registry = await loadRegistry();
       const id = normalizeTargetId(targetId);
       const index = registry.targets.findIndex((row) => row.target_id === id);
       if (index < 0) throw new Error("target_not_found");
-      const current = registry.targets[index];
-      if (current.status === "RETIRED") throw new Error("target_retired");
-      const url = normUrl(newUrl || "");
-      if (!url) throw new Error("target_conversation_url_invalid");
-      assertPlatformUrl(current.platform, url);
-      if (registry.targets.some((row, i) => i !== index && row.status !== "RETIRED" && row.conversation_url === url)) throw new Error("target_registry_duplicate_active_url");
-      const changedUrl = current.conversation_url !== url;
-      const next = canonicalTarget({
-        ...current,
-        conversation_url: url,
-        conversation_epoch: changedUrl ? Math.max(1, current.conversation_epoch + 1) : current.conversation_epoch,
-        status,
-        updated_at: nowIso()
-      }, current);
-      registry.targets[index] = next;
+      registry.targets[index] = canonicalTarget({ ...registry.targets[index], role: normalizeRole(role), updated_at: nowIso() }, registry.targets[index]);
       await persistRegistry(registry);
-      if (changedUrl) await clearBinding(id);
-      if (next.legacy_alias) {
-        const configKey = PLATFORMS[next.legacy_alias].configKey;
-        suppressLegacyStorageSync = true;
-        try { await chrome.storage.local.set({ [configKey]: url }); }
-        finally { suppressLegacyStorageSync = false; }
-      }
-      await chrome.storage.local.remove(ERROR_KEY);
-      return clone(next);
+      return clone(registry.targets[index]);
     });
   }
 
@@ -376,7 +250,7 @@
       const id = normalizeTargetId(targetId);
       const index = registry.targets.findIndex((row) => row.target_id === id);
       if (index < 0) throw new Error("target_not_found");
-      registry.targets[index] = canonicalTarget({ ...registry.targets[index], status, updated_at: nowIso() }, registry.targets[index]);
+      registry.targets[index] = canonicalTarget({ ...registry.targets[index], status: normalizeStatus(status), updated_at: nowIso() }, registry.targets[index]);
       await persistRegistry(registry);
       return clone(registry.targets[index]);
     });
@@ -388,41 +262,119 @@
     return target;
   }
 
+  function nextAgentId(registry) {
+    let id;
+    do { id = `gpt_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`; }
+    while (registry.targets.some((target) => target.target_id === id));
+    return id;
+  }
+
+  async function supervisorIdentity() {
+    const stored = await chrome.storage.local.get([SUPERVISOR_TAB_KEY, SUPERVISOR_URL_KEY]);
+    return {
+      tab_id: Number.isInteger(Number(stored[SUPERVISOR_TAB_KEY])) ? Number(stored[SUPERVISOR_TAB_KEY]) : null,
+      url: normUrl(stored[SUPERVISOR_URL_KEY] || "")
+    };
+  }
+
+  async function discoverOpenChats() {
+    return mutate(async () => {
+      const registry = await loadRegistry();
+      const bindings = await loadBindings();
+      const supervisor = await supervisorIdentity();
+      const tabs = await chrome.tabs.query({});
+      const chats = tabs
+        .filter((tab) => Number.isInteger(Number(tab?.id)) && isConversationUrl(tab.url || ""))
+        .filter((tab) => Number(tab.id) !== supervisor.tab_id && (!supervisor.url || normUrl(tab.url || "") !== supervisor.url))
+        .sort((a, b) => Number(a.id) - Number(b.id));
+
+      const liveIds = new Set();
+      let changed = false;
+
+      for (const tab of chats) {
+        const tabId = Number(tab.id);
+        const url = normUrl(tab.url || "");
+        let target = null;
+        const boundEntry = Object.entries(bindings.bindings).find(([, row]) => Number(row?.tab_id) === tabId);
+        if (boundEntry) {
+          target = registry.targets.find((row) => row.target_id === boundEntry[0] && row.status !== "RETIRED") || null;
+          if (target && target.conversation_url !== url) {
+            const index = registry.targets.findIndex((row) => row.target_id === target.target_id);
+            target = canonicalTarget({ ...target, conversation_url: url, conversation_epoch: Math.max(1, target.conversation_epoch + 1), status: "READY", updated_at: nowIso() }, target);
+            registry.targets[index] = target;
+            changed = true;
+          }
+        }
+        if (!target) target = registry.targets.find((row) => row.status !== "RETIRED" && row.conversation_url === url) || null;
+        if (!target) {
+          const id = nextAgentId(registry);
+          target = canonicalTarget({ target_id: id, agent_id: id, role: "WORKER", capability_set: ["chat", "perception"], conversation_url: url, conversation_epoch: 1, status: "READY", updated_at: nowIso() });
+          registry.targets.push(target);
+          changed = true;
+        } else if (!["BUSY", "DRAINING"].includes(target.status) && target.status !== "READY") {
+          const index = registry.targets.findIndex((row) => row.target_id === target.target_id);
+          target = canonicalTarget({ ...target, status: "READY", updated_at: nowIso() }, target);
+          registry.targets[index] = target;
+          changed = true;
+        }
+        liveIds.add(target.target_id);
+        bindings.bindings[target.target_id] = { schema: "metaengine.a2-browser-operator.target-binding.v2", target_id: target.target_id, agent_id: target.agent_id, tab_id: tabId, conversation_epoch: target.conversation_epoch, conversation_url: url, browser_session_nonce: bindings.browser_session_nonce, bound_at: bindings.bindings[target.target_id]?.bound_at || nowIso(), validated_at: nowIso() };
+      }
+
+      for (let i = 0; i < registry.targets.length; i += 1) {
+        const target = registry.targets[i];
+        if (target.status === "RETIRED" || liveIds.has(target.target_id)) continue;
+        if (target.status === "BUSY") continue;
+        if (target.status !== "LOST") {
+          registry.targets[i] = canonicalTarget({ ...target, status: "LOST", updated_at: nowIso() }, target);
+          changed = true;
+        }
+        delete bindings.bindings[target.target_id];
+      }
+
+      const persisted = changed ? await persistRegistry(registry) : registry;
+      await persistBindings(bindings);
+      let selected = await selectedTargetId();
+      const selectedTarget = selected ? persisted.targets.find((row) => row.target_id === selected && row.status !== "RETIRED") : null;
+      if (!selectedTarget || !selectedTarget.conversation_url) {
+        const fallback = persisted.targets.find((row) => row.status === "READY" && row.conversation_url);
+        if (fallback) await selectTarget(fallback.target_id);
+      } else {
+        await chrome.storage.local.set({ chatgptUrl: selectedTarget.conversation_url });
+      }
+      return persisted.targets.filter((row) => row.status !== "RETIRED").map(clone);
+    });
+  }
+
   async function resolveLiveTab(selector, { exactTabId = null, allowBind = true } = {}) {
     const target = await resolveSelector(selector);
     if (!target.conversation_url) throw new Error(`target_not_configured:${target.target_id}`);
-    const existing = await getBinding(target.target_id);
-    if (existing) {
+    const binding = await getBinding(target.target_id);
+    if (binding) {
       try {
-        const live = await chrome.tabs.get(Number(existing.tab_id));
-        if (Number.isInteger(Number(live?.id)) && normUrl(live.url || "") === target.conversation_url && platformOf(live.url || "") === target.platform) {
-          if (exactTabId != null && Number(live.id) !== Number(exactTabId)) throw new Error("target_tab_binding_mismatch");
-          const binding = allowBind ? await bind(target, live) : existing;
-          return { target, tab: live, binding };
+        const tab = await chrome.tabs.get(Number(binding.tab_id));
+        if (normUrl(tab?.url || "") === target.conversation_url) {
+          if (exactTabId != null && Number(tab.id) !== Number(exactTabId)) throw new Error("target_tab_binding_mismatch");
+          return { target, tab, binding: allowBind ? await bind(target, tab) : binding };
         }
       } catch (error) {
         if (String(error?.message || error) === "target_tab_binding_mismatch") throw error;
       }
       await clearBinding(target.target_id);
     }
-
-    const tabs = await chrome.tabs.query({});
-    const matches = tabs.filter((tab) => Number.isInteger(Number(tab?.id)) && normUrl(tab.url || "") === target.conversation_url && platformOf(tab.url || "") === target.platform);
-    if (matches.length !== 1) throw new Error(matches.length ? `target_duplicate_tabs:${target.target_id}:${matches.length}` : `target_tab_not_found:${target.target_id}`);
-    if (exactTabId != null && Number(matches[0].id) !== Number(exactTabId)) throw new Error("target_tab_binding_mismatch");
-    const binding = allowBind ? await bind(target, matches[0]) : null;
-    return { target, tab: matches[0], binding };
+    await discoverOpenChats();
+    const next = await getBinding(target.target_id);
+    if (!next) throw new Error(`target_tab_not_found:${target.target_id}`);
+    const tab = await chrome.tabs.get(Number(next.tab_id));
+    if (exactTabId != null && Number(tab.id) !== Number(exactTabId)) throw new Error("target_tab_binding_mismatch");
+    return { target: await getTarget(target.target_id), tab, binding: next };
   }
 
   async function bindObservedTab(tab) {
-    const tabId = Number(tab?.id);
-    const url = normUrl(tab?.url || "");
-    const platform = platformOf(url);
-    if (!Number.isInteger(tabId) || !url || !PLATFORMS[platform]) return null;
-    const registry = await loadRegistry();
-    const matches = registry.targets.filter((target) => target.status !== "RETIRED" && target.platform === platform && target.conversation_url === url);
-    if (matches.length !== 1) return null;
-    return bind(matches[0], { id: tabId, url });
+    if (!Number.isInteger(Number(tab?.id)) || !isConversationUrl(tab?.url || "")) return null;
+    await discoverOpenChats();
+    const id = await targetForTab(Number(tab.id));
+    return id ? getBinding(id) : null;
   }
 
   function trustedExtensionPage(sender) {
@@ -431,60 +383,45 @@
     return Boolean(root) && String(sender.url).startsWith(root);
   }
 
-  const ready = syncLegacySeeds().then(ensureSessionNonce);
+  const ready = ensureSessionNonce().then(discoverOpenChats);
 
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local" || suppressLegacyStorageSync) return;
-    if (Object.values(PLATFORMS).some((spec) => changes[spec.configKey])) syncLegacySeeds().catch(() => {});
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    mutate(async () => {
+      const targetId = await targetForTab(tabId);
+      if (!targetId) return;
+      const registry = await loadRegistry();
+      const index = registry.targets.findIndex((row) => row.target_id === targetId);
+      if (index >= 0) {
+        const current = registry.targets[index];
+        if (current.status !== "RETIRED" && current.status !== "BUSY") {
+          registry.targets[index] = canonicalTarget({ ...current, status: "LOST", updated_at: nowIso() }, current);
+          await persistRegistry(registry);
+        }
+      }
+      await clearBinding(targetId);
+    }).catch(() => {});
   });
 
-  chrome.tabs.onRemoved.addListener((tabId) => { clearBindingsForTab(tabId).catch(() => {}); });
-  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
     if (typeof changeInfo?.url !== "string") return;
-    clearBindingsForTab(tabId).then(() => bindObservedTab({ id: tabId, url: changeInfo.url })).catch(() => {});
+    discoverOpenChats().catch(() => {});
   });
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const type = String(message?.type || "");
     if (type === "CHAT_SNAPSHOT" && sender?.tab?.id) {
-      // Observe only. Do not answer CHAT_SNAPSHOT: runtime-core owns its response contract.
       bindObservedTab(sender.tab).catch(() => {});
       return false;
     }
-    if (!["A2_TARGET_REGISTRY_LIST", "A2_TARGET_REGISTRY_CREATE", "A2_TARGET_REGISTRY_ROLLOVER", "A2_TARGET_REGISTRY_RETIRE", "A2_TARGET_REGISTRY_RESOLVE"].includes(type)) return false;
+    if (!["A2_TARGET_REGISTRY_LIST", "A2_TARGET_REGISTRY_DISCOVER", "A2_TARGET_REGISTRY_SELECT", "A2_TARGET_REGISTRY_SET_ROLE", "A2_TARGET_REGISTRY_RETIRE", "A2_TARGET_REGISTRY_RESOLVE"].includes(type)) return false;
     if (!trustedExtensionPage(sender)) {
       sendResponse({ ok: false, error: "target_registry_sender_not_trusted" });
       return false;
     }
-    const job = type === "A2_TARGET_REGISTRY_LIST"
-      ? listTargets({ includeRetired: message?.include_retired === true })
-      : type === "A2_TARGET_REGISTRY_CREATE"
-        ? createTarget(message?.target || {})
-        : type === "A2_TARGET_REGISTRY_ROLLOVER"
-          ? updateConversation(message?.target_id, message?.conversation_url, { status: message?.status || "ACTIVE" })
-          : type === "A2_TARGET_REGISTRY_RETIRE"
-            ? retireTarget(message?.target_id)
-            : resolveLiveTab(message?.selector || message?.target_id || message?.platform, { exactTabId: message?.exact_tab_id ?? null });
+    const job = type === "A2_TARGET_REGISTRY_LIST" ? listTargets({ includeRetired: message?.include_retired === true }) : type === "A2_TARGET_REGISTRY_DISCOVER" ? discoverOpenChats() : type === "A2_TARGET_REGISTRY_SELECT" ? selectTarget(message?.target_id) : type === "A2_TARGET_REGISTRY_SET_ROLE" ? setRole(message?.target_id, message?.role) : type === "A2_TARGET_REGISTRY_RETIRE" ? retireTarget(message?.target_id) : resolveLiveTab(message?.target_id || message?.agent_id, { exactTabId: message?.exact_tab_id ?? null });
     Promise.resolve(job).then((result) => sendResponse({ ok: true, result })).catch((error) => sendResponse({ ok: false, error: String(error?.message || error) }));
     return true;
   });
 
-  globalThis.A2_TARGET_REGISTRY = Object.freeze({
-    schema: SCHEMA,
-    ready,
-    listTargets,
-    getTarget,
-    resolveSelector,
-    resolveLiveTab,
-    createTarget,
-    updateConversation,
-    setStatus,
-    retireTarget,
-    bindObservedTab,
-    getBinding,
-    clearBinding,
-    syncLegacySeeds,
-    platformOf,
-    normUrl
-  });
+  globalThis.A2_TARGET_REGISTRY = Object.freeze({ schema: SCHEMA, ready, listTargets, getTarget, resolveSelector, resolveLiveTab, discoverOpenChats, selectTarget, selectedTargetId, setRole, setStatus, retireTarget, bindObservedTab, getBinding, targetForTab, clearBinding, isConversationUrl, normUrl });
 })();
