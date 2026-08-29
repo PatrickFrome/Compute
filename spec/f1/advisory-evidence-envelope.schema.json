@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metaengine.local/spec/f1/advisory-evidence-envelope.schema.json",
+  "title": "METAENGINE Advisory Evidence Envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "subject",
+    "producer",
+    "result",
+    "trust",
+    "tariff_dependency",
+    "data_policy",
+    "confidential_data_supported",
+    "policy",
+    "canonical",
+    "authority_effect",
+    "evidence_id",
+    "envelope_sha256"
+  ],
+  "properties": {
+    "schema": { "const": "metaengine.advisory-evidence-envelope.v1" },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "task_id", "trace_id", "request_sha256"],
+      "properties": {
+        "kind": { "const": "MODEL_ADVISORY_TASK" },
+        "task_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "trace_id": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "request_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gateway_plane", "route_id", "transport", "source_receipt_schema"],
+      "properties": {
+        "gateway_plane": {
+          "enum": [
+            "VERCEL_AI_GATEWAY",
+            "VERCEL_LIVE_PEER_PROJECT",
+            "SUPABASE_LIVE_PEER_BROKER",
+            "SUPABASE_PEER_DECISION",
+            "GITHUB_MODELS_PROBE",
+            "CLOUDFLARE_WORKERS_AI_PROBE",
+            "LOCAL_OPEN_MODEL_PROBE"
+          ]
+        },
+        "route_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "transport": {
+          "enum": [
+            "OPENAI_COMPAT_HTTP",
+            "SUPABASE_EDGE_HTTP",
+            "VERCEL_FUNCTION_HTTP",
+            "PROVIDER_NATIVE_HTTP",
+            "LOCAL_PROCESS"
+          ]
+        },
+        "source_receipt_schema": { "type": "string", "minLength": 1, "maxLength": 192 }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receipt_kind",
+        "object_sha256",
+        "served_models",
+        "availability_quorum_met",
+        "decision_state",
+        "truth_claimed"
+      ],
+      "properties": {
+        "receipt_kind": {
+          "enum": ["PEER", "COMMITTEE", "CHALLENGE", "DECISION", "QUALIFICATION", "ROUTE_PLAN"]
+        },
+        "object_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "served_models": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 160 }
+        },
+        "availability_quorum_met": { "type": ["boolean", "null"] },
+        "decision_state": { "type": ["string", "null"], "maxLength": 96 },
+        "truth_claimed": { "const": false }
+      }
+    },
+    "trust": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "source_receipt_hash_bound", "source_receipt_attested", "persisted_readback_verified"],
+      "properties": {
+        "state": { "const": "HASH_BOUND_ADVISORY_UNATTESTED" },
+        "source_receipt_hash_bound": { "const": true },
+        "source_receipt_attested": { "const": false },
+        "persisted_readback_verified": { "const": false }
+      }
+    },
+    "tariff_dependency": { "type": "boolean" },
+    "data_policy": { "const": "PUBLIC_OR_NON_SENSITIVE_ONLY" },
+    "confidential_data_supported": { "const": false },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "advisory_only",
+        "requires_supervisor_arbitration",
+        "direct_action_allowed",
+        "executable_action",
+        "browser_authority",
+        "development_authority",
+        "sandbox_execution_authority",
+        "promotion_authority",
+        "semantic_truth_claimed",
+        "canonical",
+        "authority_effect"
+      ],
+      "properties": {
+        "advisory_only": { "const": true },
+        "requires_supervisor_arbitration": { "const": true },
+        "direct_action_allowed": { "const": false },
+        "executable_action": { "const": null },
+        "browser_authority": { "const": false },
+        "development_authority": { "const": false },
+        "sandbox_execution_authority": { "const": false },
+        "promotion_authority": { "const": false },
+        "semantic_truth_claimed": { "const": false },
+        "canonical": { "const": false },
+        "authority_effect": { "const": false }
+      }
+    },
+    "canonical": { "const": false },
+    "authority_effect": { "const": false },
+    "evidence_id": { "type": "string", "pattern": "^advisory_evidence_sha256_[0-9a-f]{64}$" },
+    "envelope_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}
