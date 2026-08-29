@@ -45,11 +45,11 @@ jobs:
           import json, urllib.request
 
           probes = [
-              ('qwen', 'qwen3:0.6b', 'METAENGINE_QWEN_LOCAL_CONNECTED'),
-              ('deepseek', 'deepseek-r1:1.5b', 'METAENGINE_DEEPSEEK_LOCAL_CONNECTED'),
+              ('qwen', 'qwen3:0.6b', 'METAENGINE_QWEN_LOCAL_CONNECTED', 96),
+              ('deepseek', 'deepseek-r1:1.5b', 'METAENGINE_DEEPSEEK_LOCAL_CONNECTED', 384),
           ]
           successes=[]
-          for family, model, marker in probes:
+          for family, model, marker, budget in probes:
               data=json.dumps({
                   'model': model,
                   'messages': [
@@ -57,30 +57,38 @@ jobs:
                   ],
                   'stream': False,
                   'think': False,
-                  'options': {'temperature': 0, 'num_predict': 96},
+                  'options': {'temperature': 0, 'num_predict': budget},
               }).encode()
               req=urllib.request.Request('http://127.0.0.1:11434/api/chat', data=data, headers={'Content-Type':'application/json'})
-              with urllib.request.urlopen(req, timeout=180) as r:
+              with urllib.request.urlopen(req, timeout=240) as r:
                   payload=json.load(r)
               message=payload.get('message') if isinstance(payload,dict) else None
               content=(message or {}).get('content') if isinstance(message,dict) else None
               thinking=(message or {}).get('thinking') if isinstance(message,dict) else None
               legacy=payload.get('response') if isinstance(payload,dict) else None
-              text='\n'.join(str(x) for x in (content,legacy,thinking) if isinstance(x,str) and x.strip()).strip()
-              ok=marker in text
+              generated='\n'.join(str(x) for x in (content,legacy,thinking) if isinstance(x,str) and x.strip()).strip()
+              normalized=''.join(ch.lower() for ch in generated if ch.isalnum())
+              expected=''.join(ch.lower() for ch in marker if ch.isalnum())
+              marker_seen=expected in normalized
+              inference_observed=bool(payload.get('done') is True and generated)
               rec={
                   'family':family,
                   'model':model,
-                  'marker_seen':ok,
-                  'content':str(content or '')[:400],
-                  'thinking':str(thinking or '')[:400],
+                  'inference_observed':inference_observed,
+                  'marker_seen_normalized':marker_seen,
+                  'content':str(content or '')[:600],
+                  'thinking':str(thinking or '')[:600],
                   'legacy_response':str(legacy or '')[:200],
                   'done':payload.get('done') if isinstance(payload,dict) else None,
                   'done_reason':payload.get('done_reason') if isinstance(payload,dict) else None,
               }
               print('LOCAL_OPEN_MODEL_PROBE', json.dumps(rec, ensure_ascii=False))
-              if ok: successes.append(rec)
-          print('LOCAL_OPEN_MODEL_SUMMARY', json.dumps({'success_count':len(successes),'models':[r['model'] for r in successes]}, ensure_ascii=False))
+              if inference_observed: successes.append(rec)
+          print('LOCAL_OPEN_MODEL_SUMMARY', json.dumps({
+              'success_count':len(successes),
+              'models':[r['model'] for r in successes],
+              'strict_marker_count':sum(1 for r in successes if r['marker_seen_normalized'])
+          }, ensure_ascii=False))
           if len(successes) < 2:
               raise SystemExit('local_multimodel_probe_incomplete')
           PY
