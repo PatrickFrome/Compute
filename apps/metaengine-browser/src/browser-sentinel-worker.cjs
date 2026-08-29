@@ -10,6 +10,7 @@ const TOKEN = String(process.env.METAENGINE_SENTINEL_TOKEN || '');
 const PARENT_PID = Number(process.env.METAENGINE_SENTINEL_PARENT_PID || 0);
 const POLL_MS = 2000;
 const EXPECTED_RESTART_GRACE_MS = 45000;
+const RELAUNCH_ACK_TIMEOUT_MS = 5000;
 
 async function readState() {
   try { return JSON.parse(await fs.readFile(STATE_PATH, 'utf8')); }
@@ -55,6 +56,7 @@ async function relaunchOnce(state) {
     lifecycle: 'RELAUNCH_INTENT',
     relaunch_attempted: true,
     relaunch_intent_at: new Date().toISOString(),
+    relaunch_pid: null,
     relaunch_result: null,
   };
   await writeState(intent);
@@ -75,23 +77,34 @@ async function relaunchOnce(state) {
       env,
     });
   } catch (error) {
-    await writeState({ ...intent, lifecycle: 'RELAUNCH_FAILED', relaunch_result: String(error && error.message || error).slice(0, 240) });
+    await writeState({
+      ...intent,
+      lifecycle: 'RELAUNCH_FAILED',
+      relaunch_result: String(error && error.message || error).slice(0, 240),
+    });
     return;
   }
 
-  let settled = false;
-  const mark = async (lifecycle, result) => {
-    if (settled) return;
-    settled = true;
-    await writeState({ ...intent, lifecycle, relaunch_result: result });
-  };
-  child.once('spawn', () => {
-    child.unref && child.unref();
-    void mark('RELAUNCH_DISPATCHED', `pid:${child.pid || 0}`);
+  const outcome = await new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish({ lifecycle: 'RELAUNCH_AMBIGUOUS', pid: null, result: 'spawn_ack_timeout' }), RELAUNCH_ACK_TIMEOUT_MS);
+    child.once('spawn', () => finish({ lifecycle: 'RELAUNCH_DISPATCHED', pid: Number(child.pid || 0) || null, result: `pid:${child.pid || 0}` }));
+    child.once('error', (error) => finish({ lifecycle: 'RELAUNCH_FAILED', pid: null, result: String(error && error.message || error).slice(0, 240) }));
   });
-  child.once('error', (error) => { void mark('RELAUNCH_FAILED', String(error && error.message || error).slice(0, 240)); });
-  await sleep(5000);
-  if (!settled) await mark('RELAUNCH_AMBIGUOUS', 'spawn_ack_timeout');
+
+  if (outcome.lifecycle === 'RELAUNCH_DISPATCHED') child.unref && child.unref();
+  await writeState({
+    ...intent,
+    lifecycle: outcome.lifecycle,
+    relaunch_pid: outcome.pid,
+    relaunch_result: outcome.result,
+  });
 }
 
 async function main() {
