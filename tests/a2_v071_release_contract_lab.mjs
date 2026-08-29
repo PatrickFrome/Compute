@@ -23,7 +23,7 @@ assert(marker.includes('EXTENSION_FINAL_V1'), 'runtime marker is not extension-f
 assert(marker.includes('R_ROADMAP_COMPLETE'), 'runtime marker lost canonical roadmap terminal state');
 assert(marker.includes('release_channel: "stable"'), 'runtime marker is not on stable channel');
 assert(marker.includes('authority_effect: false'), 'runtime marker must not mint authority');
-assert(pkg.files.length === 46, `expected 46 canonical files, got ${pkg.files.length}`);
+assert(pkg.files.length === 47, `expected 47 canonical files, got ${pkg.files.length}`);
 assert(new Set(pkg.files).size === pkg.files.length, 'runtime package contains duplicate paths');
 assert(pkg.files.every((file) => !/-v\d+/i.test(file)), 'versioned runtime filename leaked into canonical package closure');
 assert(pkg.policy?.canonical_filenames_only === true, 'canonical filename policy is not enforced');
