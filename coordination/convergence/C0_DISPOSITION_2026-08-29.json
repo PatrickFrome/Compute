@@ -1,0 +1,160 @@
+{
+  "schema": "metaengine.compute-unified.c0-disposition.v1",
+  "generated_at": "2026-08-29T13:27:18Z",
+  "authority_effect": false,
+  "base": {
+    "repository": "PatrickFrome/Compute",
+    "integration_branch": "integration/compute-unified-v1",
+    "integration_sha": "03684f0731e6d12dc477c09f217ea2bca3aa29db",
+    "main_sha": "0d1c074c7f513f25000d967761c7bb13912dacaa",
+    "supabase_project": "xpeibufgzjknrhbhpffp",
+    "semantic_head": "metaengine-h205f22-recovery-dev-20260821-cp072",
+    "browser_architecture_head": "METAENGINE_COMPUTE_UNIFIED_V1_CONVERGENCE_2026-08-29"
+  },
+  "rules": [
+    "No main merge, PR close, provider mutation, secret mutation or production authority change is authorized by this record.",
+    "Port unique code by bounded package; do not wholesale merge divergent source families.",
+    "A PR may be closed only after its closure_gate is satisfied and its evidence remains addressable by commit SHA.",
+    "Production schema state is not inferred from Git ancestry; migration/readback evidence is required."
+  ],
+  "source_drift": [
+    {
+      "id": "D1_MAIN_VS_UNIFIED",
+      "fact": "main remains at 0d1c074c while the unified integration line is 03684f07 and is not merged to main.",
+      "action": "Treat integration/compute-unified-v1 as C0-C5 work base only; keep main untouched."
+    },
+    {
+      "id": "D2_DUAL_AUTHORITY_PLANES",
+      "fact": "Supabase browser architecture now marks METAENGINE_COMPUTE_UNIFIED_V1_CONVERGENCE_2026-08-29 authoritative at 03684f07, while the canonical Compute Fabric roadmap semantic head remains CP072 and canonical roadmap source remains f73ac4c7.",
+      "action": "Do not equate browser convergence authority with canonical roadmap verification; C6 must reconcile them through normal evidence gates."
+    },
+    {
+      "id": "D3_SOURCE_SNAPSHOT_MOVED",
+      "fact": "COMPUTE_UNIFIED_V1.md pins B6 at 3eccaee and DP baseline at 72f9454, but current work/a2-compute-browser-b4-parity is b3fe90c (+3 commits) and current work/metaengine-browser-shell-v1 is 06dd5cc (+3 commits).",
+      "action": "Pin both documented source snapshots and current heads in port plans; review post-snapshot deltas explicitly."
+    },
+    {
+      "id": "D4_SHELL_DESTRUCTIVE_ADVANCE",
+      "fact": "The current shell head after 72f9454 removes DP1/DP2 candidate, verifier and sandbox modules while adding Windows receipt/lifecycle harness changes.",
+      "action": "C4 must source DP semantics from pinned 72f9454 plus work/metaengine-browser-dp2-vercel-physical-v1 b8bb767; only selectively port useful lifecycle/receipt deltas from shell 06dd5cc."
+    },
+    {
+      "id": "D5_STALE_W1_LEASE_ROW",
+      "fact": "Supabase stores W1 claim_id 32 as ACTIVE but expired; effective live claim count is zero and cleanup_required is true.",
+      "action": "Planner records the drift only; no lease/authority mutation."
+    },
+    {
+      "id": "D6_READ_PLANE_NOT_HARDENED",
+      "fact": "public.coordination_read_barrier_h205f22 currently grants EXECUTE to anon and authenticated; PR #51 service-role-only hardening is not reflected in production ACL.",
+      "action": "Port/test the hardening contract under C3, but production grant changes remain a separately authorized migration."
+    },
+    {
+      "id": "D7_R1_EVIDENCE_NOT_VERIFIED",
+      "fact": "Continuity ledger contains R1 EVIDENCE_READY history, but authoritative roadmap still reports R1 READY and supervisor snapshot has no current EVIDENCE_READY claim.",
+      "action": "Do not promote R1 based on historical ledger state; defer canonical closure to C6."
+    }
+  ],
+  "major_branch_families": [
+    {
+      "family": "browser-operator-r0-r16",
+      "source": "integration/compute-unified-v1@03684f0731e6d12dc477c09f217ea2bca3aa29db",
+      "disposition": "BASELINE_CONTAINED",
+      "target": "C1-C5",
+      "notes": "R0-R16 semantic/control-plane lineage is already the unified base. Preserve R5-R16 safety/router contracts; older family branches are historical after evidence indexing."
+    },
+    {
+      "family": "extension-final-v072",
+      "source": "work/a2-browser-v072-durable-identity-ui@09a205a6d1deb00e71ae5401b8c6a36f4dace0b0",
+      "disposition": "SELECTIVE_PORT_REQUIRED",
+      "target": "C1,C3",
+      "notes": "Port durable device identity/UI and live-install acceptance requirements; do not replace R16 semantics."
+    },
+    {
+      "family": "native-metaengine-browser",
+      "source": "work/metaengine-browser-native-supervisor-v1@0a3d9300959b6220f24b3014b0359c9566b2f169",
+      "provenance": "work/metaengine-browser-native-supervisor-server-v1@3eb7d4a7171cc5ba2f43513a9e98e36f8cbb2653",
+      "disposition": "SELECTIVE_PORT_REQUIRED",
+      "target": "C1,C3",
+      "notes": "Primary physical execution edge: identity, signed supervisor client, native semantic actuation, persistent shell, fleet provisioner, Windows packaging/E2E. Diverged strongly from R16; port bounded packages, not branch merge."
+    },
+    {
+      "family": "compute-browser-b0-b7",
+      "source": "work/a2-compute-browser-b4-parity@b3fe90cb77531222ba67797ab3b0d11282cb7eaa",
+      "checkpoint_source": "3eccaee205c70d15eae004c6e2a42767fce0bacb",
+      "disposition": "SELECTIVE_PORT_REQUIRED",
+      "target": "C2,C3",
+      "notes": "Port node registry, exact incarnation leases, action kernel, receipt contracts, privacy/local-auth, B6 pool semantics, plus post-checkpoint identity envelope/effect ledger/action-seam commits. PR #64 scheduler and #65 test repair remain separate inputs."
+    },
+    {
+      "family": "development-plane",
+      "source": "72f9454c17e509350591dd54812dafc5d5090975",
+      "physical_source": "work/metaengine-browser-dp2-vercel-physical-v1@b8bb767b93406b997890db2e6aa12a6ca8c4ea4b",
+      "current_shell_head": "06dd5cc023c01cd3463d11a7a6b8824eca1a686e",
+      "disposition": "PINNED_BASELINE_PLUS_SELECTIVE_PORT",
+      "target": "C4",
+      "notes": "Keep candidate/evidence/sandbox non-authority contract. Do not use current shell wholesale because it removes DP modules; selectively retain Windows readiness/receipt fixes."
+    },
+    {
+      "family": "same-point-cognitive-bus",
+      "source": "work/same-point-duel-v4-a2-cognitive-bus@85570df184b76ff3cccb4bd617aa76b57fef72a2",
+      "interactive_source": "work/same-point-duel-v4-a2-interactive-v2@e4b2844e51740587a92121274369b167119caab1",
+      "disposition": "SELECTIVE_PORT_AND_DEFER",
+      "target": "C5,C6",
+      "notes": "DB cognition bus, lockstep/commit-reveal, macroblock/replay and peer/governance evidence are distinct from R11 in-process swarm. Integrate durable assignment/evidence semantics into C5; canonical Same-Point closure remains C6."
+    },
+    {
+      "family": "w1-f1-r1-a1-aop1",
+      "disposition": "DEFER_CANONICAL_CLOSURE",
+      "target": "C6",
+      "notes": "Keep milestone evidence branches addressable. Browser convergence does not verify canonical Compute Fabric milestones. W1/F1/R1 are READY, A1 remains W1-blocked, and AOP1 is not a substitute for C5 until reconciled."
+    },
+    {
+      "family": "ops-archive-scratch-release",
+      "disposition": "HISTORICAL_OR_OPERATIONAL_EVIDENCE",
+      "target": "C6-or-none",
+      "notes": "Not integration candidates by default. Retain only when referenced by a selected milestone/evidence receipt."
+    }
+  ],
+  "open_prs": [
+    {"pr":8,"head":"a84a6cec0bc143932438b8b86741ac3b6920dc0c","disposition":"DEFER_C6_SELECTIVE_PORT","target":"C6/F1","unique":"live federation trust/provider evidence and verifier requirements","closure_gate":"F1 reconciliation and evidence disposition"},
+    {"pr":12,"head":"879258640969b58db1c08f9622d5cff9c1ef72d7","disposition":"SELECTIVE_PORT_AND_DEFER","target":"C5,C6/AOP1","unique":"autonomous orchestration state/queue/workflow evidence","closure_gate":"C5 durable-assignment comparison plus AOP1 C6 disposition"},
+    {"pr":37,"head":"9377f76d8e26ad9144bffd239b002a133626beac","disposition":"HISTORICAL_EVIDENCE_WITH_INVARIANT_REVIEW","target":"C3","unique":"earlier read-plane fingerprint/separation evidence","closure_gate":"C3 confirms no unique hardening beyond #51 and indexes evidence"},
+    {"pr":48,"head":"bfca124352e84f02bc1557c51621af62b4a96ded","disposition":"CONTAINED_SUPERSEDED","target":"C5","unique":"none after #49; exact head is ancestor of #49 by 88 commits","closure_gate":"C0 evidence index complete"},
+    {"pr":49,"head":"85570df184b76ff3cccb4bd617aa76b57fef72a2","disposition":"SELECTIVE_PORT_AND_DEFER","target":"C5,C6","unique":"realtime cognitive bus, causal/lease/ingress and DB contracts","closure_gate":"C5 bus/evidence semantics integrated and C6 Same-Point disposition"},
+    {"pr":50,"head":"961ae65c4d3e913e3d1b5fba305f4ea9c4566f74","disposition":"DEFER_C6_SELECTIVE_PORT","target":"C6/W1","unique":"W1 safety regression acceleration/evidence","closure_gate":"W1 canonical evidence review"},
+    {"pr":51,"head":"927182c79cdc0951eaf10e614cbcea7234a2dce3","disposition":"SELECTIVE_PORT_REQUIRED","target":"C3","unique":"service-role-only coordination read-plane hardening; production ACL still permits anon/authenticated","closure_gate":"C3 contract tests green; any production ACL mutation separately authorized"},
+    {"pr":52,"head":"e4b2844e51740587a92121274369b167119caab1","disposition":"SELECTIVE_PORT_AND_DEFER","target":"C5,C6","unique":"interactive dual-round commit/reveal, direct resolution, macroblock replay/execution DB contracts","closure_gate":"C5/C6 reconciliation against cognitive bus and R11 swarm"},
+    {"pr":53,"head":"e73a6524fb8b325de0f08c2b6db7de5de4ef3ffe","disposition":"DEFER_C6_SELECTIVE_PORT","target":"C6/W1","unique":"provider-neutral worker lifecycle receipt/evidence path","closure_gate":"W1 canonical evidence review"},
+    {"pr":54,"head":"b0f1b66bc28325336ba22726d2b6ef15e2f31c14","disposition":"CONTAINED_SUPERSEDED","target":"none","unique":"none; integration is 603 commits ahead with this exact head as merge base","closure_gate":"C0 evidence index complete"},
+    {"pr":57,"head":"bd846ed20490e9b7b4447cda5448a6975d35bd41","disposition":"CONTAINED_HISTORICAL","target":"none","unique":"v0.6.0 historical evidence only; exact head is ancestor of R0 by 129 commits","closure_gate":"C0 evidence index complete"},
+    {"pr":58,"head":"c438ebfdddeca11b268cd24a60093c9838bdf2bc","disposition":"CONTAINED_SUPERSEDED","target":"none","unique":"R0 source-of-truth lineage already contained","closure_gate":"C0 evidence index complete"},
+    {"pr":59,"head":"06bc0d666742fd7d8c7f700be489801ddc75c67f","disposition":"CONTAINED_BUT_LIVE_GAP_RETAINED","target":"C1","unique":"no unique code; unresolved live-stability acceptance remains a requirement","closure_gate":"C1 physical Windows/supervisor E2E covers deferred live gap"},
+    {"pr":60,"head":"0365731c73662d6e385be79af053561479fc0742","disposition":"CONTAINED_SUPERSEDED","target":"none","unique":"none; exact head is ancestor of #61/R16","closure_gate":"C0 evidence index complete"},
+    {"pr":61,"head":"a5ad4ff23ad8fe379c00658370634060c9fadd29","disposition":"CONTAINED_SUPERSEDED","target":"none","unique":"none; integration is 294 commits ahead with exact head as merge base","closure_gate":"C0 evidence index complete"},
+    {"pr":62,"head":"d927d4e9e88f494f5503c534837ce2e6767bf1e0","disposition":"CONTAINED_IN_COMPUTE_SOURCE","target":"C2","unique":"native-pipe/incarnation lineage is in selected B6/B7 source ancestry","closure_gate":"C2 ports selected compute source and preserves tests"},
+    {"pr":63,"head":"c50dd08650a81305c42ab8369e0e519df35ff321","disposition":"CONTAINED_IN_COMPUTE_SOURCE","target":"C2","unique":"context-manager baseline; selected compute source is 45 commits ahead with exact merge base","closure_gate":"C2 ports selected compute source and preserves tests"},
+    {"pr":64,"head":"11181e72d8f8b1a85749baf58d4408a708815a2e","disposition":"SELECTIVE_PORT_REQUIRED","target":"C2","unique":"session scheduler/R4 side branch; selected B6/B7 source diverges and lacks session-scheduler.mjs","closure_gate":"C2 ports/reimplements scheduler semantics with exact node-incarnation lease tests"},
+    {"pr":65,"head":"1fc383b02f3560c3053d4d99ce1f285ebd58b6fe","disposition":"SELECTIVE_PORT_REQUIRED","target":"C2","unique":"contract-pin test repair deriving extension version/import closure from runtime package manifest","closure_gate":"repair test ported or superseded by an equivalent machine-derived contract test"},
+    {"pr":66,"head":"df1459478a4dc714193593c1d462e8134bbbec96","disposition":"DEFER_C6_SELECTIVE_PORT","target":"C6/F1","unique":"Vercel multi-model gateway, committee/challenge orchestration and provider evidence","closure_gate":"F1 reconciles #8/#67/#69 and provider live evidence"},
+    {"pr":67,"head":"9af19936336df816e21e9142b61e17e76be79642","disposition":"DEFER_C6_SELECTIVE_PORT","target":"C6/F1","unique":"upstream tariff and served-model provenance for current sovereign path","closure_gate":"F1 provenance contract integrated before sovereign provider acceptance"},
+    {"pr":68,"head":"11f10b38ecbcc966237c418e3aa0f4cad724fd7d","disposition":"OPTIONAL_SELECTIVE_PORT_AFTER_CORE","target":"C3,C5","unique":"Gemini observation-only advisory adapter","closure_gate":"unified supervisor/advisory protocol exists and adapter remains non-actuating"},
+    {"pr":69,"head":"367b7fbd51c1249e888c0bc1a43a00d87318d1f2","disposition":"DEFER_C6_SELECTIVE_PORT","target":"C6/F1","unique":"legacy sovereign runner upstream provenance parity","closure_gate":"F1 decides whether legacy runner remains supported; preserve provenance invariant either way"}
+  ],
+  "dependency_dag": {
+    "C0": {"requires": [], "unlocks": ["C1a","C2a","C4a"]},
+    "C1a": {"requires": ["C0"], "purpose": "native identity, signed transport, persistent shell and physical lifecycle port"},
+    "C2a": {"requires": ["C0"], "purpose": "compute source diff, node/lease/effect-ledger port and #64/#65 reconciliation"},
+    "C2b": {"requires": ["C1a","C2a"], "purpose": "B7 scheduler bound to stable native node-incarnation identity"},
+    "C3": {"requires": ["C1a","C2b"], "purpose": "one typed supervisor core with extension/native/compute adapters; includes #51 read-plane contract"},
+    "C4a": {"requires": ["C0"], "purpose": "DP2 sandbox backend work from pinned 72f9454 + b8bb767 without authority"},
+    "C4": {"requires": ["C3","C4a"], "purpose": "bind physical sandbox through unified typed supervisor boundary"},
+    "C5": {"requires": ["C1a","C2b","C3","C4"], "purpose": "transport-proved fleet readiness, durable assignments, context/evidence/results"},
+    "C6": {"requires": ["C5"], "purpose": "canonical W1/F1/R1/A1/AOP1/Same-Point/browser/compute closure wave"}
+  },
+  "unlocked_work_packages": [
+    "WP-C1A-NATIVE-PORT-MATRIX",
+    "WP-C2A-COMPUTE-B6-B7-DIFF",
+    "WP-C4A-DP2-PINNED-SANDBOX",
+    "WP-C0-CI-EVIDENCE-INDEX"
+  ]
+}
