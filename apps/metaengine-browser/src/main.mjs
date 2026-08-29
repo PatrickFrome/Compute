@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ComputeBridgeClient } from './compute-bridge-client.mjs';
+import { FleetProvisioner } from './fleet-provisioner.mjs';
 import { navigationDecision, newWindowDecision, REMOTE_WEB_PREFERENCES, SECURITY_POLICY } from './browser-policy.mjs';
 import { TabRegistry } from './tab-registry.mjs';
 
@@ -21,6 +22,7 @@ const bridge = new ComputeBridgeClient();
 let windowRef = null;
 let shellView = null;
 let userSession = null;
+let fleet = null;
 
 function mimeFor(filePath) {
   if (filePath.endsWith('.html')) return 'text/html; charset=utf-8';
@@ -47,15 +49,37 @@ function configureUserSession() {
   userSession.on('will-download', (event) => event.preventDefault());
 }
 
+function fleetStatePath() {
+  return path.join(app.getPath('userData'), 'metaengine-fleet-state-v1.json');
+}
+
+async function loadFleetState() {
+  try {
+    return JSON.parse(await fs.readFile(fleetStatePath(), 'utf8'));
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null;
+    throw error;
+  }
+}
+
+async function saveFleetState(state) {
+  const target = fleetStatePath();
+  const temp = `${target}.tmp`;
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(temp, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  await fs.rename(temp, target);
+}
+
 function assertShellSender(event) {
   if (!shellView || event.sender.id !== shellView.webContents.id) throw new Error('shell_sender_not_trusted');
 }
 
 async function shellSnapshot() {
   return {
-    schema: 'metaengine.browser-shell.snapshot.v1',
-    version: '0.1.0',
+    schema: 'metaengine.browser-shell.snapshot.v2',
+    version: '0.2.0',
     tabs: registry.snapshot(),
+    fleet: fleet?.snapshot() || null,
     compute: await bridge.health(),
     policy: SECURITY_POLICY,
     authority_effect: false,
@@ -131,20 +155,46 @@ async function createTab(input = 'https://chatgpt.com/', { select = true, load =
   attachSelected();
   if (load) await view.webContents.loadURL(d.normalized_url);
   await publishSnapshot();
-  return tab;
+  return { ...tab, webcontents_id: view.webContents.id };
+}
+
+async function loadTab(tabId, input) {
+  const view = views.get(String(tabId));
+  if (!view || view.webContents.isDestroyed()) throw new Error('tab_binding_not_live');
+  const d = navigationDecision(input);
+  if (!d.allow) throw new Error(`navigation_blocked:${d.reason}`);
+  await view.webContents.loadURL(d.normalized_url);
+  registry.update(String(tabId), { url: d.normalized_url, kind: d.kind });
+  await publishSnapshot();
+  return { ok: true };
 }
 
 async function closeTab(tabId) {
-  const view = views.get(tabId);
+  const id = String(tabId);
+  const view = views.get(id);
   if (view) {
     try { windowRef?.contentView.removeChildView(view); } catch {}
-    views.delete(tabId);
+    views.delete(id);
     if (!view.webContents.isDestroyed()) view.webContents.close();
   }
-  registry.close(tabId);
+  registry.close(id);
+  await fleet?.onTabClosed(id, 'PHYSICAL_TAB_CLOSED_BY_SHELL');
   if (!registry.selected()) await createTab('https://chatgpt.com/', { select: true, load: true });
   attachSelected();
   await publishSnapshot();
+}
+
+async function initFleet() {
+  fleet = new FleetProvisioner({
+    createTab: async ({ url, select, load }) => createTab(url, { select, load }),
+    loadTab,
+    tabExists: (tabId) => views.has(String(tabId)) && !views.get(String(tabId)).webContents.isDestroyed(),
+    loadState: loadFleetState,
+    saveState: saveFleetState,
+    policy: { profile: 'BALANCED', warm_agents: 2, desired_agents: 6, max_agents: 8 },
+  });
+  await fleet.init();
+  await fleet.reconcile({ active: false });
 }
 
 async function handleCommand(command, payload = {}) {
@@ -167,6 +217,9 @@ async function handleCommand(command, payload = {}) {
   if (command === 'FORWARD') { if (selectedView?.webContents.navigationHistory.canGoForward()) selectedView.webContents.navigationHistory.goForward(); return { ok: true }; }
   if (command === 'RELOAD') { selectedView?.webContents.reload(); return { ok: true }; }
   if (command === 'COMPUTE_HEALTH') return bridge.health();
+  if (command === 'FLEET_STATUS') return fleet?.snapshot() || null;
+  if (command === 'FLEET_RECONCILE') { const result = await fleet?.reconcile({ active: payload?.active === true }); await publishSnapshot(); return result; }
+  if (command === 'FLEET_SET_PROFILE') { const result = await fleet?.setProfile(payload?.profile); await publishSnapshot(); return result; }
   throw new Error('shell_command_unknown');
 }
 
@@ -215,7 +268,9 @@ async function createWindow() {
   windowRef.on('closed', () => { destroyWindowContents(); windowRef = null; });
   await shellView.webContents.loadURL('metaengine://shell/');
   await createTab('https://chatgpt.com/', { select: true, load: true });
+  await initFleet();
   layout();
+  await publishSnapshot();
 }
 
 ipcMain.handle('metaengine:shell:snapshot', async (event) => { assertShellSender(event); return shellSnapshot(); });
