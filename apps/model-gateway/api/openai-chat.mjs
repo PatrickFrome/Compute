@@ -1,0 +1,44 @@
+import { authorized } from '../lib/security.mjs';
+import { assertZeroSpend } from '../lib/catalog.mjs';
+import { callChatGateway } from '../lib/gateway.mjs';
+import { logicalModelPlan, sanitizeChatCompletion } from '../lib/openai-compat.mjs';
+
+export default async function handler(request, response) {
+  if (request.method !== 'POST') return response.status(405).json({ error: 'method_not_allowed' });
+  if (!authorized(request)) return response.status(401).json({ error: 'unauthorized' });
+
+  let chat;
+  try {
+    chat = sanitizeChatCompletion(request.body);
+  } catch (error) {
+    return response.status(400).json({ error: error.message });
+  }
+
+  const models = logicalModelPlan(chat.logicalModel);
+  try {
+    await assertZeroSpend(models);
+    const result = await callChatGateway({
+      models,
+      messages: chat.messages,
+      maxTokens: chat.maxTokens,
+      temperature: chat.temperature,
+      logicalModel: chat.logicalModel
+    });
+    return response.status(200).json({
+      ...result.payload,
+      metaengine: {
+        logical_model: chat.logicalModel,
+        upstream_primary: result.primary,
+        upstream_fallbacks: result.fallbacks,
+        zero_spend_verified: true,
+        authority_effect: false
+      }
+    });
+  } catch (error) {
+    return response.status(502).json({
+      error: error.message || 'gateway_failure',
+      upstream_status: Number.isInteger(error.status) ? error.status : null,
+      authority_effect: false
+    });
+  }
+}
