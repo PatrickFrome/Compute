@@ -25,6 +25,24 @@ export async function runSelfUpdateSmoke({ app, timeoutMs = 120_000 } = {}) {
     restartGraceMs: 3000,
     intervalMs: 60_000,
     canRestart: async () => true,
+    beforeInstall: async (receipt) => {
+      await appendTrace(tracePath, {
+        schema: 'metaengine.self-update-smoke.trace.v1',
+        label: 'PRE_INSTALL_INTENT',
+        at: new Date().toISOString(),
+        app_version: app.getVersion(),
+        state: 'RESTARTING',
+        available_version: receipt.available_version,
+        downloaded_version: receipt.version,
+        metadata_verified: receipt.metadata_verified === true,
+        restart_gate_safe: receipt.restart_gate_safe === true,
+        ci_test_feed_active: process.env.METAENGINE_SELF_UPDATE_TEST_MODE === '1' && process.env.GITHUB_ACTIONS === 'true',
+        pre_install_receipt_persisted: true,
+        receipt_schema: receipt.schema,
+        last_error: null,
+        authority_effect: false,
+      });
+    },
   });
   let lastState = null;
   const startedAt = Date.now();
@@ -43,6 +61,7 @@ export async function runSelfUpdateSmoke({ app, timeoutMs = 120_000 } = {}) {
         metadata_verified: snapshot.metadata_verified,
         restart_gate_safe: snapshot.restart_gate_safe,
         ci_test_feed_active: snapshot.ci_test_feed_active,
+        pre_install_receipt_persisted: snapshot.pre_install_receipt_persisted,
         last_error: snapshot.last_error,
         authority_effect: false,
       };
