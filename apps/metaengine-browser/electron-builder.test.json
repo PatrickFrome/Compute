@@ -1,0 +1,32 @@
+{
+  "appId": "com.metaengine.browser.test",
+  "productName": "METAENGINE Browser Test",
+  "asar": true,
+  "directories": {
+    "output": "dist-test"
+  },
+  "files": [
+    "src/**/*",
+    "ui/**/*",
+    "package.json"
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "artifactName": "METAENGINE-Browser-Test-Setup-${version}-${arch}.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "METAENGINE Browser Test",
+    "runAfterFinish": false,
+    "deleteAppDataOnUninstall": false
+  }
+}
