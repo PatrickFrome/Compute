@@ -1,0 +1,104 @@
+name: A2 Browser R11 Same-Point Swarm
+
+on:
+  push:
+    branches:
+      - work/a2-browser-r11-same-point-swarm
+    paths:
+      - 'coordination/browser-shared/same-point-swarm-v1.mjs'
+      - 'tests/a2_r11_*.test.mjs'
+      - 'research/A2_BROWSER_R11_**'
+      - '.github/workflows/a2-browser-r11-same-point-swarm.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r11-swarm-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Verify exact R10 parent and source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          PARENT=23dad9bdf117f7d732bf01da5866bdec46f206be
+          git merge-base --is-ancestor "$PARENT" "$GITHUB_SHA"
+          git diff --name-only "$PARENT" "$GITHUB_SHA" | tee "$RUNNER_TEMP/r11-changed-files.txt"
+          if git diff --name-only "$PARENT" "$GITHUB_SHA" | grep -Eq '(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.(toml|lock))$'; then
+            echo 'R11 must add no source dependency packages' >&2
+            exit 1
+          fi
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+
+      - name: Static zero-authority and no-peer-bus checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE=coordination/browser-shared/same-point-swarm-v1.mjs
+          node --check "$FILE"
+          ! grep -Eq 'chrome\.|Input\.dispatch|Runtime\.evaluate|fetch\(|WebSocket|child_process|exec\(|eval\(' "$FILE"
+          ! grep -Eq 'sendMessage|broadcast|peer_message|direct_message' "$FILE"
+          grep -q 'direct_peer_messaging: false' "$FILE"
+          grep -q 'automatic_browser_effect_allowed: false' "$FILE"
+          grep -q 'swarm_self_critique_forbidden' "$FILE"
+          grep -q 'swarm_jury_evidence_incomplete' "$FILE"
+
+      - name: R11 swarm adversarial tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tests/a2_r11_*.test.mjs
+
+      - name: R10 R9 R8 regression fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tests/a2_r10_*.test.mjs
+          node --test tests/a2_r9_*.test.mjs
+          node --test tests/a2_r8a_*.test.mjs tests/a2_r8b_*.test.mjs tests/a2_r8c_*.test.mjs tests/a2_r8d_*.test.mjs
+
+      - name: Build deterministic R11 evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=dist/a2-browser-r11
+          mkdir -p "$OUT/evidence"
+          cp "$RUNNER_TEMP/r11-changed-files.txt" "$OUT/evidence/R11_CHANGED_FILES.txt"
+          printf '%s\n' "$GITHUB_SHA" > "$OUT/evidence/SOURCE_COMMIT.txt"
+          printf '%s\n' '23dad9bdf117f7d732bf01da5866bdec46f206be' > "$OUT/evidence/PARENT_R10_COMMIT.txt"
+          cat > "$OUT/evidence/R11_CLAIMS.json" <<'JSON'
+          {"milestone":"R11_SAME_POINT_SWARM_V1","blind_proposals":true,"cross_critique_required":true,"critical_falsifier_required":true,"critical_security_required":true,"evidence_bound_jury":true,"manager_outcome_override":false,"direct_peer_messaging":false,"browser_authority":false,"model_invocation":false,"new_source_dependency_packages":0}
+          JSON
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf "$OUT/A2_BROWSER_R11_SAME_POINT_SWARM.tar" \
+            coordination/browser-shared/same-point-swarm-v1.mjs \
+            tests/a2_r11_same_point_swarm.test.mjs \
+            research/A2_BROWSER_R11_SAME_POINT_SWARM_PRE_RESEARCH_2026-08-29.md \
+            "$OUT/evidence"
+          sha256sum "$OUT/A2_BROWSER_R11_SAME_POINT_SWARM.tar" > "$OUT/R11_SHA256SUMS.txt"
+
+      - name: Attest R11 evidence
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-browser-r11/A2_BROWSER_R11_SAME_POINT_SWARM.tar
+
+      - name: Upload R11 evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-r11-${{ github.sha }}
+          path: |
+            dist/a2-browser-r11/A2_BROWSER_R11_SAME_POINT_SWARM.tar
+            dist/a2-browser-r11/R11_SHA256SUMS.txt
+            dist/a2-browser-r11/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
