@@ -62,6 +62,25 @@ test('duplicate wake reasons for one worker are deduplicated', async () => {
   assert.equal(h.keepalive.snapshot().queued_wakes.length, 1);
 });
 
+test('terminal worker state emits one lost wake per loss edge, not once per poll', async () => {
+  const h = harness();
+  await h.keepalive.init();
+  await h.keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+
+  const first = await h.keepalive.observeWorkers([{ agent_id: 'agent_a', lifecycle_state: 'LOST', generation_state: 'TERMINAL' }]);
+  assert.deepEqual(first, [{ reason: 'WORKER_LOST', agent_id: 'agent_a' }]);
+  const wake = await h.keepalive.prepareNextWake();
+  await h.keepalive.confirmWakeSent(wake.pending.wake_id);
+
+  const repeated = await h.keepalive.observeWorkers([{ agent_id: 'agent_a', lifecycle_state: 'LOST', generation_state: 'TERMINAL' }]);
+  assert.deepEqual(repeated, []);
+  assert.equal(h.keepalive.snapshot().queued_wakes.length, 0);
+
+  await h.keepalive.observeWorkers([{ agent_id: 'agent_a', lifecycle_state: 'BOUND_UNVERIFIED', generation_state: 'IDLE' }]);
+  const lostAgain = await h.keepalive.observeWorkers([{ agent_id: 'agent_a', lifecycle_state: 'LOST', generation_state: 'TERMINAL' }]);
+  assert.deepEqual(lostAgain, [{ reason: 'WORKER_LOST', agent_id: 'agent_a' }]);
+});
+
 test('positive send confirmation consumes exactly one queued wake', async () => {
   const h = harness();
   await h.keepalive.init();
