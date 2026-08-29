@@ -33,7 +33,7 @@ test('adaptive timeout becomes the retry boundary once reached', () => {
   assert.equal(result.action, 'STOP_AND_RETRY_SAME_CONVERSATION');
 });
 
-test('same-chat retry falls back to a new conversation after its local budget is exhausted', () => {
+test('same-chat retry budget exhaustion holds current supervisor instead of opening a new conversation', () => {
   const result = classifyRetryDecision({
     effect_class: REQUEST_EFFECT_CLASS.READ_ONLY,
     silence_age_ms: 91_000,
@@ -42,17 +42,19 @@ test('same-chat retry falls back to a new conversation after its local budget is
     same_chat_retry_attempt: 1,
     max_same_chat_retry_attempts: 1,
   });
-  assert.equal(result.action, 'NEW_CONVERSATION_RETRY');
-  assert.equal(result.retry_allowed, true);
+  assert.equal(result.action, 'HOLD_SUPERVISOR_CONVERSATION');
+  assert.equal(result.retry_allowed, false);
+  assert.match(result.reason, /SUPERVISOR_REPLACEMENT_REQUIRES_RELEASE/);
 });
 
-test('unusable conversation goes directly to a new conversation', () => {
+test('unusable conversation holds instead of automatically creating a replacement supervisor', () => {
   const result = classifyRetryDecision({
     effect_class: REQUEST_EFFECT_CLASS.READ_ONLY,
     silence_age_ms: 91_000,
     same_conversation_usable: false,
   });
-  assert.equal(result.action, 'NEW_CONVERSATION_RETRY');
+  assert.equal(result.action, 'HOLD_SUPERVISOR_CONVERSATION');
+  assert.equal(result.retry_allowed, false);
 });
 
 test('database or durable external progress suppresses retry regardless of visual silence', () => {
@@ -113,12 +115,13 @@ test('observed commit/effect forbids replay even when chat request fails', () =>
   assert.equal(result.retry_allowed, false);
 });
 
-test('hard conversation failure uses a new conversation rather than same-chat replay', () => {
+test('hard conversation failure holds current supervisor binding instead of replacing it', () => {
   const result = classifyRetryDecision({
     effect_class: REQUEST_EFFECT_CLASS.READ_ONLY,
     terminal_failure: 'RENDERER_GONE',
   });
-  assert.equal(result.action, 'NEW_CONVERSATION_RETRY');
+  assert.equal(result.action, 'HOLD_SUPERVISOR_CONVERSATION');
+  assert.equal(result.retry_allowed, false);
 });
 
 test('soft server error prefers same-chat replay', () => {

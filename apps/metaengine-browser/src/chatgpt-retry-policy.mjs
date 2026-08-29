@@ -1,4 +1,4 @@
-export const CHATGPT_RETRY_POLICY_VERSION = '1.2.0';
+export const CHATGPT_RETRY_POLICY_VERSION = '1.3.0';
 
 export const REQUEST_EFFECT_CLASS = Object.freeze({
   READ_ONLY: 'READ_ONLY',
@@ -46,14 +46,15 @@ function retryAction({ sameConversationUsable, sameChatAttempt, maxSameChatAttem
   if (sameConversationUsable && sameChatAttempt < maxSameChatAttempts) {
     return 'STOP_AND_RETRY_SAME_CONVERSATION';
   }
-  return 'NEW_CONVERSATION_RETRY';
+  return 'HOLD_SUPERVISOR_CONVERSATION';
 }
 
 function retryResult(reason, retryContext) {
+  const action = retryAction(retryContext);
   return {
-    action: retryAction(retryContext),
-    reason,
-    retry_allowed: true,
+    action,
+    reason: action === 'HOLD_SUPERVISOR_CONVERSATION' ? `${reason}_SUPERVISOR_REPLACEMENT_REQUIRES_RELEASE` : reason,
+    retry_allowed: action === 'STOP_AND_RETRY_SAME_CONVERSATION',
     authority_effect: false,
   };
 }
