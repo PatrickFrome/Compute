@@ -3,12 +3,13 @@ import { fileURLToPath } from 'node:url';
 import { BrowserSentinelHost } from './browser-sentinel.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SENTINEL_APPDATA_DIR = 'METAENGINE Browser';
 
 export class HostResilienceRuntime {
   #electron; #onResume; #platform; #blockerId = null; #resumeHandler = null; #sentinel = null;
   #state = {
     state: 'UNINITIALIZED', open_at_login: false, executable_will_launch_at_login: false,
-    prevent_app_suspension: false, sentinel: null, last_resume_at: null, last_error: null,
+    prevent_app_suspension: false, sentinel: null, sentinel_state_path: null, last_resume_at: null, last_error: null,
   };
 
   constructor({ electron = null, onResume = async () => {}, platform = process.platform } = {}) {
@@ -19,7 +20,7 @@ export class HostResilienceRuntime {
 
   snapshot() {
     return structuredClone({
-      schema: 'metaengine.host-resilience-runtime.v2',
+      schema: 'metaengine.host-resilience-runtime.v3',
       ...this.#state,
       sentinel: this.#sentinel?.snapshot?.() || this.#state.sentinel,
       authority_effect: false,
@@ -38,8 +39,12 @@ export class HostResilienceRuntime {
         this.#state.executable_will_launch_at_login = settings?.executableWillLaunchAtLogin === true;
       }
       if (this.#platform === 'win32' && process.env.METAENGINE_DISABLE_CRASH_SENTINEL !== '1' && typeof app.getPath === 'function') {
+        // Sentinel continuity is a host-lifecycle concern, not a renderer/profile concern.
+        // Keep its state on a stable appData path so package/product-name drift cannot orphan recovery state.
+        const sentinelStatePath = path.join(app.getPath('appData'), SENTINEL_APPDATA_DIR, 'metaengine-browser-sentinel-v1.json');
+        this.#state.sentinel_state_path = sentinelStatePath;
         this.#sentinel = new BrowserSentinelHost({
-          statePath: path.join(app.getPath('userData'), 'metaengine-browser-sentinel-v1.json'),
+          statePath: sentinelStatePath,
           workerScript: path.join(__dirname, 'browser-sentinel-worker.cjs'),
           executable: process.execPath,
         });
