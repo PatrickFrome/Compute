@@ -30,7 +30,7 @@ async function persistSelfUpdateHandoffReceipt(receipt) {
     await handle.close();
   }
   await fs.rename(temp, target);
-  return { app, target };
+  return { target };
 }
 
 export class NativeSupervisorClient {
@@ -84,11 +84,17 @@ export class NativeSupervisorClient {
         && this.#armed === true
         && this.#currentCommand == null
         && this.#lifecycle?.isQuiescent() === true,
+      // Phase 1: durable receipt while the current N process still holds its singleton lock.
       beforeInstall: async (receipt) => {
+        await persistSelfUpdateHandoffReceipt(receipt);
+      },
+      // SelfUpdateRuntime arms HostResilienceRuntime's expected-restart sentinel between these hooks.
+      // Phase 2: stop polling/actuation, then release the singleton lock immediately before NSIS launch.
+      beforeInstallerLaunch: async (receipt) => {
         await beforeSelfUpdateInstall?.(structuredClone(receipt));
-        const { app } = await persistSelfUpdateHandoffReceipt(receipt);
-        // Stop command polling before releasing the singleton lock. The old N process may remain alive
-        // briefly while NSIS starts N+1, but it no longer has a scheduled supervisor actuation loop.
+        const { app } = await import('electron');
+        if (!app?.isPackaged) throw new Error('native_supervisor_self_update_packaged_required');
+        if (!app.hasSingleInstanceLock()) throw new Error('native_supervisor_self_update_primary_lock_required');
         this.stop();
         app.releaseSingleInstanceLock();
       },
