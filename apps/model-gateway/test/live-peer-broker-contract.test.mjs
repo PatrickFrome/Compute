@@ -13,23 +13,25 @@ function normalize(raw) {
   if (final?.[1]?.trim()) return { text: final[1].trim(), normalization: 'final_tag' };
   return { text: value, normalization: 'none' };
 }
-
 function incompleteNemotron(raw, normalization = 'none') {
   if (normalization !== 'none') return false;
   const value = raw.trim();
   const end = value.lastIndexOf('</think>');
   const hasThinkFinal = end >= 0 && Boolean(value.slice(end + 8).trim());
   const hasFinalTag = /<final>[\s\S]+<\/final>/i.test(value);
-  return !hasThinkFinal && !hasFinalTag && value.length > 180
-    && (/^(?:here(?:'|’)s a thinking process:|<think>)/i.test(value)
-      || /\*\*analy(?:ze|sis)|\*\*identify|\*\*apply the rules|\*\*perform calculation/i.test(value));
+  return !hasThinkFinal && !hasFinalTag && value.length > 180 && (/^(?:here(?:'|’)s a thinking process:|<think>)/i.test(value) || /\*\*analy(?:ze|sis)|\*\*identify|\*\*apply the rules|\*\*perform calculation/i.test(value));
 }
-
+function sortJson(value) {
+  if (Array.isArray(value)) return value.map(sortJson);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, sortJson(value[key])]));
+  return value;
+}
+function canonicalJson(value) { return JSON.stringify(sortJson(value)); }
 function extractJsonEnvelope(text) {
   const value = text.trim().replace(/^```(?:json|javascript|python)?\s*/i, '').replace(/\s*```$/i, '');
   try {
     const parsed = JSON.parse(value);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return { text: JSON.stringify(parsed), normalization: 'json_exact' };
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return { text: canonicalJson(parsed), normalization: 'json_exact' };
   } catch {}
   for (let start = 0; start < value.length; start++) {
     if (value[start] !== '{') continue;
@@ -48,7 +50,7 @@ function extractJsonEnvelope(text) {
         const candidate = value.slice(start, i + 1);
         try {
           const parsed = JSON.parse(candidate);
-          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return { text: JSON.stringify(parsed), normalization: 'json_embedded' };
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return { text: canonicalJson(parsed), normalization: 'json_embedded' };
         } catch {}
         break;
       }
@@ -57,8 +59,8 @@ function extractJsonEnvelope(text) {
   return null;
 }
 
-test('live broker v12 exposes separated advisory and structured actor pools', () => {
-  assert.match(source, /metaengine\.live-peer-broker\.v12/);
+test('live broker v13 exposes separated advisory and structured actor pools', () => {
+  assert.match(source, /metaengine\.live-peer-broker\.v13/);
   for (const id of ['gemma2', 'llama32', 'nemotron', 'tinyllama', 'llama2']) assert.match(source, new RegExp(`id:\\"${id}\\"`));
   assert.match(source, /ADVISORY_PRIMARY=\["gemma2","nemotron"\]/);
   assert.match(source, /ADVISORY_BACKUPS=\["llama32","llama2"\]/);
@@ -91,10 +93,22 @@ test('completed Nemotron reasoning remains qualified', () => {
   assert.equal(incompleteNemotron("Here's a thinking process:\n" + 'x'.repeat(200) + '\n</think>169'), false);
 });
 
-test('structured JSON recovery canonicalizes exact and embedded JSON', () => {
-  assert.deepEqual(extractJsonEnvelope('{"ok":true,"value":42}'), { text: '{"ok":true,"value":42}', normalization: 'json_exact' });
-  assert.deepEqual(extractJsonEnvelope('return json.dumps({"answer":"144"})'), { text: '{"answer":"144"}', normalization: 'json_embedded' });
+test('structured JSON recovery canonicalizes exact and embedded JSON with stable key order', () => {
+  assert.deepEqual(extractJsonEnvelope('{"z":1,"a":{"y":2,"b":3}}'), { text: '{"a":{"b":3,"y":2},"z":1}', normalization: 'json_exact' });
+  assert.deepEqual(extractJsonEnvelope('return json.dumps({"z":1,"a":2})'), { text: '{"a":2,"z":1}', normalization: 'json_embedded' });
   assert.equal(extractJsonEnvelope('thinking {"answer":"cut off"'), null);
+  assert.match(source, /function canonicalJson/);
+});
+
+test('structured committee canonicalizes every successful member before agreement', () => {
+  assert.match(source, /async function invokeStructuredMember/);
+  assert.match(source, /structured\?invokeStructuredMember\(PEERS\[id\],prompt,t\):invokePeer/);
+  assert.match(source, /member_recovery_before_agreement:true/);
+});
+
+test('Llama 3.2 structured committee budget is capped at 128 tokens', () => {
+  assert.match(source, /p\.id==="llama32"\?Math\.min\(128,Number\(requested\)\|\|128\):requested/);
+  assert.match(source, /llama32_committee_max_tokens:128/);
 });
 
 test('Llama 3.2 advisory backup is forced through a structured independent answer', () => {
