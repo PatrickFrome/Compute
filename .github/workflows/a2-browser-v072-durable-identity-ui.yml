@@ -1,0 +1,206 @@
+name: A2 Browser Operator v0.7.2 Durable Identity UI
+
+on:
+  push:
+    branches:
+      - work/a2-browser-v072-durable-identity-ui
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  v072-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Bind to verified 0.7.1 final baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=166c35243f6e336eb3613426b889a549d7ebdbe5
+          git merge-base --is-ancestor "$BASE" "$GITHUB_SHA"
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+          git diff --name-only "$BASE" "$GITHUB_SHA" | tee "$RUNNER_TEMP/v072-changed-files.txt"
+          if grep -Eq '(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.(toml|lock))$' "$RUNNER_TEMP/v072-changed-files.txt"; then
+            echo 'v0.7.2 UI/identity line must not add source dependency manifests' >&2
+            exit 1
+          fi
+          if grep -Ev '^(coordination/chat-control-plane/extension/|tests/a2_v072_|\.github/workflows/a2-browser-v072-durable-identity-ui\.yml$)' "$RUNNER_TEMP/v072-changed-files.txt" | grep -q .; then
+            echo 'v0.7.2 changed files outside bounded extension surface' >&2
+            exit 1
+          fi
+
+      - name: Static syntax and identity UI contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/a2_build_extension.py
+          node --check tests/a2_v072_ui_identity_contract_lab.mjs
+          node --check tests/a2_v072_extension_playwright_smoke.mjs
+          python3 - <<'PY'
+          import json, pathlib, subprocess
+          root=pathlib.Path('coordination/chat-control-plane/extension')
+          spec=json.loads((root/'runtime-package-manifest.json').read_text())
+          for rel in spec['files']:
+              p=root/rel
+              if p.suffix=='.js' and p.exists():
+                  subprocess.run(['node','--check',str(p)],check=True)
+          PY
+          node tests/a2_v072_ui_identity_contract_lab.mjs | tee "$RUNNER_TEMP/v072-contract.log"
+
+      - name: Preserve typed effect and supervisor regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/a2_r8c_typed_click_outcome_lab.mjs | tee "$RUNNER_TEMP/v072-r8c.log"
+          node --test \
+            tests/a2_r8d_extension_typed_click_actuator.test.mjs \
+            tests/a2_r8d_durable_fence_bridge.test.mjs \
+            tests/a2_r8d_supervisor_typed_click.test.mjs \
+            | tee "$RUNNER_TEMP/v072-r8d.log"
+          for f in \
+            tests/a2_v070_target_registry_lab.mjs \
+            tests/a2_v070_target_observability_lab.mjs \
+            tests/a2_v068_supervisor_reconciliation_lab.mjs \
+            tests/a2_v067_supervisor_prompt_ready_lab.mjs \
+            tests/a2_v067_supervisor_session_singleton_lab.mjs \
+            tests/a2_v064_supervisor_chat_guard_lab.mjs \
+            tests/a2_v063_bridge_disarm_lab.mjs \
+            tests/a2_v063_remote_authority_lab.mjs \
+            tests/a2_v060_debugger_broker_lab.mjs \
+            tests/a2_v060_perception_lab.mjs \
+            tests/a2_v060_oopif_perception_lab.mjs \
+            tests/a2_v060_semantic_actions_lab.mjs; do
+            node "$f"
+          done | tee "$RUNNER_TEMP/v072-regressions.log"
+
+      - name: Build canonical MV3 twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=coordination/chat-control-plane/extension
+          SPEC="$ROOT/runtime-package-manifest.json"
+          OUT=dist/a2-browser-v072
+          rm -rf "$OUT" && mkdir -p "$OUT"
+          python3 scripts/a2_build_extension.py \
+            --source "$ROOT" --package-manifest "$SPEC" \
+            --stage "$OUT/stage-a" \
+            --zip "$OUT/METAENGINE_A2_Browser_Operator_v0.7.2.zip" \
+            --evidence-dir "$OUT/build-evidence-a" \
+            --source-commit "$GITHUB_SHA" --source-date-epoch "$SOURCE_DATE_EPOCH"
+          python3 scripts/a2_build_extension.py \
+            --source "$ROOT" --package-manifest "$SPEC" \
+            --stage "$OUT/stage-b" \
+            --zip "$OUT/repro-check.zip" \
+            --evidence-dir "$OUT/build-evidence-b" \
+            --source-commit "$GITHUB_SHA" --source-date-epoch "$SOURCE_DATE_EPOCH"
+          cmp "$OUT/METAENGINE_A2_Browser_Operator_v0.7.2.zip" "$OUT/repro-check.zip"
+          test "$(find "$OUT/stage-a" -type f | wc -l)" = "47"
+          test "$(find "$OUT/stage-b" -type f | wc -l)" = "47"
+          unzip -t "$OUT/METAENGINE_A2_Browser_Operator_v0.7.2.zip"
+
+      - name: Reject remote code and unsafe dynamic execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib, re
+          root=pathlib.Path('dist/a2-browser-v072/stage-a')
+          manifest=json.loads((root/'manifest.json').read_text())
+          if manifest.get('manifest_version') != 3: raise SystemExit('not MV3')
+          for p in root.rglob('*.js'):
+              text=p.read_text(errors='strict')
+              for pattern in [r'\beval\s*\(', r'\bnew\s+Function\s*\(', r'WebAssembly\.(?:compile|instantiate)Streaming\s*\(']:
+                  if re.search(pattern,text): raise SystemExit(f'unsafe dynamic execution in {p}: {pattern}')
+              for call in re.findall(r'importScripts\s*\(([^)]*)\)', text):
+                  args=re.findall(r'["\']([^"\']+)["\']',call)
+                  if not args or any(not arg.startswith('./') for arg in args): raise SystemExit(f'non-local importScripts in {p}: {call}')
+          print('v0.7.2 staged remote-code policy: PASS')
+          PY
+
+      - name: Install pinned Chromium harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          PW_ROOT="$RUNNER_TEMP/a2-v072-playwright"
+          npm install --prefix "$PW_ROOT" --no-save --no-package-lock --ignore-scripts playwright@1.62.1
+          node "$PW_ROOT/node_modules/playwright/cli.js" install --with-deps chromium
+          CHROME="$(PW_ROOT="$PW_ROOT" node -e 'const { chromium } = require(process.env.PW_ROOT + "/node_modules/playwright"); process.stdout.write(chromium.executablePath())')"
+          test -x "$CHROME"
+          "$CHROME" --version | tee "$RUNNER_TEMP/v072-chrome-version.txt"
+          echo "A2_V072_PLAYWRIGHT_MODULE=$PW_ROOT/node_modules/playwright" >> "$GITHUB_ENV"
+          echo "A2_V072_CHROME=$CHROME" >> "$GITHUB_ENV"
+
+      - name: Prove cold restart durable identity runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          A2_PLAYWRIGHT_MODULE="$A2_V072_PLAYWRIGHT_MODULE" \
+          A2_EXTENSION_STAGE="$GITHUB_WORKSPACE/dist/a2-browser-v072/stage-a" \
+          timeout --signal=TERM --kill-after=5s 90s \
+          node tests/a2_v072_extension_playwright_smoke.mjs \
+          | tee "$RUNNER_TEMP/v072-cold-restart.log"
+          grep -q 'durable-identity cold-restart smoke: PASS' "$RUNNER_TEMP/v072-cold-restart.log"
+
+      - name: Prove real staged physical click outcome
+        shell: bash
+        run: |
+          set -euo pipefail
+          A2_CHROME_EXECUTABLE="$A2_V072_CHROME" \
+          A2_R8C_STAGE="$GITHUB_WORKSPACE/dist/a2-browser-v072/stage-a" \
+          CI=true timeout --signal=TERM --kill-after=5s 90s \
+          node tests/a2_r8c_real_chrome_extension_canary.mjs \
+          | tee "$RUNNER_TEMP/v072-live-click.jsonl"
+          grep -q '"ok":true' "$RUNNER_TEMP/v072-live-click.jsonl"
+          grep -q '"typed_click_outcome":"COMMITTED"' "$RUNNER_TEMP/v072-live-click.jsonl"
+          grep -q '"real_page_physical_effect_verified":true' "$RUNNER_TEMP/v072-live-click.jsonl"
+          grep -q '"page_click_count":1' "$RUNNER_TEMP/v072-live-click.jsonl"
+          grep -q '"automatic_retry_allowed":false' "$RUNNER_TEMP/v072-live-click.jsonl"
+          grep -q '"authority_effect":false' "$RUNNER_TEMP/v072-live-click.jsonl"
+
+      - name: Pack and hash staged extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$A2_V072_CHROME" --no-sandbox --disable-gpu --pack-extension="$GITHUB_WORKSPACE/dist/a2-browser-v072/stage-a"
+          test -s dist/a2-browser-v072/stage-a.crx
+          sha256sum dist/a2-browser-v072/METAENGINE_A2_Browser_Operator_v0.7.2.zip dist/a2-browser-v072/stage-a.crx | tee dist/a2-browser-v072/SHA256SUMS.txt
+          mkdir -p dist/a2-browser-v072/evidence
+          cp "$RUNNER_TEMP/v072-changed-files.txt" dist/a2-browser-v072/evidence/CHANGED_FILES.txt
+          cp "$RUNNER_TEMP/v072-contract.log" dist/a2-browser-v072/evidence/CONTRACT.log
+          cp "$RUNNER_TEMP/v072-r8c.log" dist/a2-browser-v072/evidence/R8C.log
+          cp "$RUNNER_TEMP/v072-r8d.log" dist/a2-browser-v072/evidence/R8D.log
+          cp "$RUNNER_TEMP/v072-regressions.log" dist/a2-browser-v072/evidence/REGRESSIONS.log
+          cp "$RUNNER_TEMP/v072-cold-restart.log" dist/a2-browser-v072/evidence/COLD_RESTART.log
+          cp "$RUNNER_TEMP/v072-live-click.jsonl" dist/a2-browser-v072/evidence/LIVE_CLICK.jsonl
+          printf '%s\n' "$GITHUB_SHA" > dist/a2-browser-v072/evidence/SOURCE_COMMIT.txt
+
+      - name: Attest v0.7.2 provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: |
+            dist/a2-browser-v072/METAENGINE_A2_Browser_Operator_v0.7.2.zip
+            dist/a2-browser-v072/stage-a.crx
+
+      - name: Upload v0.7.2 artifact
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-v072-${{ github.sha }}
+          path: |
+            dist/a2-browser-v072/METAENGINE_A2_Browser_Operator_v0.7.2.zip
+            dist/a2-browser-v072/stage-a.crx
+            dist/a2-browser-v072/SHA256SUMS.txt
+            dist/a2-browser-v072/build-evidence-a/
+            dist/a2-browser-v072/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
