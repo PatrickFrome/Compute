@@ -18,6 +18,7 @@ importScripts("./debugger-watchdog-v062.js");
 importScripts("./trusted-chatgpt.js");
 importScripts("./chatgpt-rollover-v062.js");
 importScripts("./trusted-glm.js");
+importScripts("./gemini-advisory-bridge.js");
 importScripts("./operator-gate-bindings.js");
 importScripts("./operator-actions.js");
 

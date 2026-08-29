@@ -16,6 +16,7 @@
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
     "https://chat.z.ai/*",
+    "https://gemini.google.com/*",
     "https://xpeibufgzjknrhbhpffp.supabase.co/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
@@ -46,6 +47,15 @@
         "platform-dom-compat.js",
         "content.js",
         "content-recovery-v062.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://gemini.google.com/*"
+      ],
+      "js": [
+        "gemini-advisory-observer.js"
       ],
       "run_at": "document_idle"
     }
