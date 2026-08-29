@@ -45,6 +45,8 @@ export class AutonomousAssignmentDispatcher {
     const binding = state.worker_bindings.find((row) => row.agent_id === String(proposal.worker_id || '').toLowerCase());
     if (!binding) throw new Error('autonomous_dispatcher_worker_binding_required');
     if (binding.lifecycle_state !== 'BOUND_UNVERIFIED') throw new Error('autonomous_dispatcher_worker_binding_state_invalid');
+    const proposedIncarnation = opaque(proposal.worker_incarnation_id, 500);
+    if (binding.worker_incarnation_id !== proposedIncarnation) throw new Error('autonomous_dispatcher_worker_incarnation_mismatch');
 
     const refs = [];
     for (const processRef of proposal.process_refs || []) {
@@ -71,12 +73,14 @@ export class AutonomousAssignmentDispatcher {
       task_kind: proposal.task_kind,
       authority_refs: refs,
     });
+    if (assignment.worker_incarnation_id !== proposedIncarnation) throw new Error('autonomous_dispatcher_assignment_incarnation_mismatch');
     return {
       schema: 'metaengine.browser.autonomous-dispatch-receipt.v1',
       proposal_id: proposal.proposal_id,
       objective_key: proposal.objective_key,
       work_branch: branch,
       effect_class: effectClass,
+      worker_incarnation_id: proposedIncarnation,
       assignment: structuredClone(assignment),
       dispatched_at: new Date(this.#clock()).toISOString(),
       worker_browser_authority: false,
