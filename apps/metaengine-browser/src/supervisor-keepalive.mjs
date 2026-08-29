@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
+import { buildMaxReasoningDirective } from './reasoning-policy.mjs';
 
-export const SUPERVISOR_KEEPALIVE_VERSION = '1.1.3';
+export const SUPERVISOR_KEEPALIVE_VERSION = '1.2.0';
 export const SUPERVISOR_ID = 'METAENGINE_SUPERVISOR';
 export const KEEPALIVE_STATES = Object.freeze([
   'ACTIVE',
@@ -97,6 +98,7 @@ export function buildSupervisorWakeMessage({ supervisorEpoch, cycleSeq, wakeId, 
     `cycle_seq=${Number(cycleSeq)}`,
     `wake_id=${String(wakeId)}`,
     `reason=${String(reason)}`,
+    ...buildMaxReasoningDirective({ role: 'SUPERVISOR' }),
     '',
     'Re-read authoritative GitHub, Supabase and native-browser state and execute one evidence-gated supervisor cycle.',
     'Continuously analyze every project layer and research ways to increase compute capacity, parallelism, reliability, reasoning quality and implementation speed; convert useful findings into tests, code, routing or roadmap changes.',
@@ -113,6 +115,7 @@ export function buildSupervisorRolloverMessage({ previousUrl, supervisorEpoch })
     `supervisor_epoch=${Number(supervisorEpoch) + 1}`,
     `previous_conversation=${String(previousUrl || '')}`,
     'integration_line=integration/compute-unified-v1',
+    ...buildMaxReasoningDirective({ role: 'SUPERVISOR' }),
     '',
     'You are the continuing METAENGINE Compute supervisor, not a fresh project.',
     'Reconstruct current state from authoritative GitHub/Supabase checkpoints, live Browser/fleet state and the convergence documents before acting.',
