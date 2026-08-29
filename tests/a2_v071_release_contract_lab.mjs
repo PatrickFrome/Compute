@@ -3,6 +3,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 function assert(condition, message) { if (!condition) throw new Error(message); }
+function runLab(file) {
+  const result = spawnSync(process.execPath, [file], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  assert(result.status === 0, `${file} failed with status ${result.status}`);
+}
+
 const root = path.resolve('coordination/chat-control-plane/extension');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'runtime-package-manifest.json'), 'utf8'));
@@ -53,13 +60,8 @@ assert(!semanticAdapter.includes('Runtime.evaluate') && !semanticAdapter.include
 assert(!semanticAdapter.includes('document.body') && !semanticAdapter.includes('innerText'), 'semantic adapter reads page body');
 assert(builder.includes('classic_semantic_perception_v1') && builder.includes('A2_SEMANTIC_PERCEPTION'), 'builder does not deterministically generate classic semantic compiler');
 
-const restartLab = spawnSync(process.execPath, ['tests/a2_v071_update_manager_restart_lab.mjs'], {
-  encoding: 'utf8',
-  stdio: ['ignore', 'pipe', 'pipe']
-});
-if (restartLab.stdout) process.stdout.write(restartLab.stdout);
-if (restartLab.stderr) process.stderr.write(restartLab.stderr);
-assert(restartLab.status === 0, `update-manager restart lab failed with status ${restartLab.status}`);
+runLab('tests/a2_v060_update_manager_lab.mjs');
+runLab('tests/a2_v071_update_manager_restart_lab.mjs');
 
 console.log('A2 v0.7.1 Final Release Contract Lab: PASS', JSON.stringify({
   version: manifest.version,
@@ -69,6 +71,7 @@ console.log('A2 v0.7.1 Final Release Contract Lab: PASS', JSON.stringify({
   semantic_adapter: true,
   typed_click: true,
   supervisor_authority: true,
+  update_manager_legacy_contract: true,
   mv3_update_drain_restart_safe: true,
   release_channel: 'stable'
 }));
