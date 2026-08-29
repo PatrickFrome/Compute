@@ -1,6 +1,6 @@
 {
   "schema": "metaengine.a2-browser-protocol.v1",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "transport": {
     "scope": "local_machine_only",
     "unix": "unix_domain_socket",
@@ -47,7 +47,10 @@
     "action.type",
     "action.submit",
     "receipt.get",
-    "receipt.verify"
+    "receipt.verify",
+    "ledger.head",
+    "ledger.verify",
+    "ledger.timeline"
   ],
   "method_effects": {
     "runtime.health": "READ_ONLY",
@@ -67,7 +70,10 @@
     "action.type": "ACTUATION",
     "action.submit": "ACTUATION",
     "receipt.get": "READ_ONLY",
-    "receipt.verify": "READ_ONLY"
+    "receipt.verify": "READ_ONLY",
+    "ledger.head": "READ_ONLY",
+    "ledger.verify": "READ_ONLY",
+    "ledger.timeline": "READ_ONLY"
   },
   "semantic_perception": {
     "schema": "metaengine.a2-browser-operator.semantic-frame.v1",
@@ -121,5 +127,12 @@
     "max_frame_bytes": 16777216,
     "devtools_tcp_listener": false,
     "raw_cdp_external": false
+  },
+  "effect_ledger": {
+    "schema": "metaengine.a2-effect-ledger.ledger.v1",
+    "identity_envelope": "metaengine.a2-identity-envelope.v1",
+    "entry_chain": "sha256_prev_link_v1",
+    "append_only": true,
+    "authority_effect": false
   }
 }

@@ -76,7 +76,7 @@ test('RPC surface is typed, effect-classed, and external raw CDP remains forbidd
 });
 
 test('R4 semantic snapshot is perception-only and explicitly tainted', () => {
-  assert.equal(protocol.version, '1.3.0');
+  assert.equal(protocol.version, '1.4.0');
   assert.equal(protocol.method_effects['target.semantic_snapshot'], 'READ_ONLY');
   assert.equal(protocol.semantic_perception.schema, 'metaengine.a2-browser-operator.semantic-frame.v1');
   assert.equal(protocol.semantic_perception.page_data_tainted, true);

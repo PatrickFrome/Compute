@@ -3,21 +3,26 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { atomicJsonWrite, readJson } from './security.mjs';
 import { validateActionIntent, validateLeaseEnvelope, ACTION_KINDS } from '../../browser-shared/action-contract.mjs';
+import { buildIdentityEnvelope } from '../../browser-shared/effect-ledger.mjs';
 import { emitReceipt } from './receipt.mjs';
 
 const ACTIONS_FILE = 'actions.json';
 const SEMANTIC_ACTION_ENABLED = process.env.SEMANTIC_ACTION_ENABLED === '1';
 
 export class ActionKernel {
-  constructor({ runtime = null, cdpClient = null, profileDir = null, sessionKey = '', receiptsStore = null } = {}) {
+  constructor({ runtime = null, cdpClient = null, profileDir = null, sessionKey = '', receiptsStore = null, effectLedgerStore = null, semanticActionEnabled = false } = {}) {
     this.runtime = runtime;
     this.cdpClient = cdpClient;
     this.profileDir = profileDir;
     this.sessionKey = String(sessionKey || '');
     this.receiptsStore = receiptsStore;
+    this.effectLedgerStore = effectLedgerStore || null;
     this.liveLeases = new Map();
     this._actionsFile = profileDir ? path.join(profileDir, ACTIONS_FILE) : null;
     this._cache = null;
+    // The daemon's lease-gated action RPCs construct the kernel with the
+    // flag explicitly on; library embedders keep the env-gate semantics.
+    if (semanticActionEnabled === true) this._semanticActionEnabled = true;
   }
 
   async _loadActions() {
@@ -146,6 +151,34 @@ export class ActionKernel {
     if (current === leaseId) this.liveLeases.delete(targetId);
   }
 
+  // B7-PRE1 — durable effect ledger. Events are evidence, never authority:
+  // a ledger write failure before dispatch fails the action closed; after the
+  // effect it surfaces loudly so the inconsistency is diagnosable.
+  async _ledgerAppend(type, { action, lease, extraIdentity = {}, payload = null } = {}) {
+    if (!this.effectLedgerStore) return null;
+    const entry = this.runtime?.running?.get?.(action?.profile_id);
+    const binding = entry?.bindings?.get?.(action?.target_id) || null;
+    const identity = buildIdentityEnvelope({
+      lease_id: lease?.lease_id || '',
+      action_id: action?.action_id || '',
+      target_id: action?.target_id || '',
+      profile_id: action?.profile_id || '',
+      context_id: action?.context_id || 'default',
+      browser_node_id: entry?.meta?.browser_node_id || '',
+      process_incarnation_id: binding?.process_incarnation_id
+        || entry?.processRef?.processIncarnationId
+        || '',
+      target_conversation_epoch: binding?.conversation_epoch ?? null,
+      ...extraIdentity
+    });
+    try {
+      return await this.effectLedgerStore.append({ type, identity, payload });
+    } catch (error) {
+      const reason = String(error?.message || error);
+      throw new Error(`effect_ledger_append_failed:${type}:${reason}`);
+    }
+  }
+
   async executeAction({ action, lease, target, perception, context } = {}) {
     if (!(this._semanticActionEnabled ?? SEMANTIC_ACTION_ENABLED)) throw new Error('semantic_action_not_enabled');
     const intent = await validateActionIntent({ ...action, lease });
@@ -182,6 +215,15 @@ export class ActionKernel {
 
     await this._writePendingIntent(pendingIntent);
 
+    // Pre-effect durable fence in the ledger: the sealed intent is chained
+    // BEFORE any CDP dispatch. A failure here aborts the action with zero
+    // effect (fail-closed), matching the pending-intent fence above.
+    await this._ledgerAppend('INTENT_SEALED', {
+      action: pendingIntent,
+      lease,
+      payload: { kind, idempotency_key: pendingIntent.idempotency_key }
+    });
+
     let cdpResult = { status: 'FAILED_NO_EFFECT', effect_evidence: { dispatched: false } };
     try {
       if (kind === 'NAVIGATE') {
@@ -211,9 +253,22 @@ export class ActionKernel {
       sessionKey: this.sessionKey
     });
 
+    await this._ledgerAppend('EFFECT_OBSERVED', {
+      action: pendingIntent,
+      lease,
+      payload: { status: cdpResult.status, effect_evidence: cdpResult.effect_evidence }
+    });
+
     if (this.receiptsStore) {
       await this.receiptsStore.append(receipt);
     }
+
+    await this._ledgerAppend('RECEIPT_EMITTED', {
+      action: pendingIntent,
+      lease,
+      extraIdentity: { receipt_id: receipt.receipt_id },
+      payload: { receipt_id: receipt.receipt_id, receipt_sha256: receipt.receipt_sha256, status: receipt.status }
+    });
 
     return receipt;
   }
@@ -272,7 +327,7 @@ export class ActionKernel {
   }
 }
 
-export function createActionKernel({ runtime, cdpClient, profileDir, sessionKey, receiptsStore } = {}) {
-  return new ActionKernel({ runtime, cdpClient, profileDir, sessionKey, receiptsStore });
+export function createActionKernel({ runtime, cdpClient, profileDir, sessionKey, receiptsStore, effectLedgerStore, semanticActionEnabled } = {}) {
+  return new ActionKernel({ runtime, cdpClient, profileDir, sessionKey, receiptsStore, effectLedgerStore, semanticActionEnabled });
 }
 

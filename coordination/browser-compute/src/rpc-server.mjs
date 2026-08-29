@@ -24,7 +24,10 @@ export const RPC_METHODS = Object.freeze([
   'action.type',
   'action.submit',
   'receipt.get',
-  'receipt.verify'
+  'receipt.verify',
+  'ledger.head',
+  'ledger.verify',
+  'ledger.timeline'
 ]);
 
 export const RPC_METHOD_EFFECTS = Object.freeze({
@@ -45,7 +48,10 @@ export const RPC_METHOD_EFFECTS = Object.freeze({
   'action.type': 'ACTUATION',
   'action.submit': 'ACTUATION',
   'receipt.get': 'READ_ONLY',
-  'receipt.verify': 'READ_ONLY'
+  'receipt.verify': 'READ_ONLY',
+  'ledger.head': 'READ_ONLY',
+  'ledger.verify': 'READ_ONLY',
+  'ledger.timeline': 'READ_ONLY'
 });
 
 const RPC_PARAM_KEYS = Object.freeze({
@@ -66,7 +72,10 @@ const RPC_PARAM_KEYS = Object.freeze({
   'action.type': ['profileId', 'targetId', 'actionId', 'lease', 'semanticId', 'text', 'idempotencyKey'],
   'action.submit': ['profileId', 'targetId', 'actionId', 'lease', 'semanticId', 'idempotencyKey'],
   'receipt.get': ['receiptId'],
-  'receipt.verify': ['receiptId']
+  'receipt.verify': ['receiptId'],
+  'ledger.head': ['profileId'],
+  'ledger.verify': ['profileId'],
+  'ledger.timeline': ['profileId', 'actionId']
 });
 
 export function validateRpcParams(method, params) {
@@ -102,6 +111,9 @@ export async function dispatchRpc(runtime, method, params) {
     case 'action.click': return runtime.clickAction(params);
     case 'action.type': return runtime.typeAction(params);
     case 'action.submit': return runtime.submitAction(params);
+    case 'ledger.head': return runtime.ledgerHead(params?.profileId);
+    case 'ledger.verify': return runtime.ledgerVerify(params?.profileId);
+    case 'ledger.timeline': return runtime.ledgerTimeline(params);
     default: throw new Error('rpc_method_forbidden');
   }
 }

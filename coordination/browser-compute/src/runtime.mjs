@@ -6,13 +6,16 @@ import { DEFAULT_CONTEXT_ID } from './context-manager.mjs';
 import { SemanticCaptureAdapter } from './semantic-capture-adapter.mjs';
 import { atomicJsonWrite, defaultStateRoot, ensurePrivateDir, readJson, validateContextId, validateNavigationUrl, validateProfileId, validateTargetId } from './security.mjs';
 import { LocalNodeRegistry } from './node-registry.mjs';
+import { ActionKernel } from './action-kernel.mjs';
+import { ReceiptStore } from './receipt.mjs';
+import { EffectLedgerStore } from './effect-ledger-store.mjs';
 
 const PROFILE_META = 'a2-profile.json';
 const CONTEXTS_FILE = 'contexts.json';
 const TARGETS_FILE = 'targets.json';
 const PROFILE_LOCK_FILE = 'a2-runtime.lock';
 const DAEMON_LOCK_FILE = 'a2-daemon.lock';
-export const COMPUTE_BROWSER_RUNTIME_VERSION = '0.3.0-dev.3';
+export const COMPUTE_BROWSER_RUNTIME_VERSION = '0.3.0-dev.4';
 
 function now() { return new Date().toISOString(); }
 function blankRegistry() { return { schema: 'metaengine.a2-compute-browser.targets.v1', revision: 0, targets: [], updated_at: now() }; }
@@ -49,17 +52,20 @@ export class ComputeBrowserRuntime {
     stateRoot = defaultStateRoot(),
     engineExecutable = process.env.A2_CHROME_EXECUTABLE || null,
     headlessDefault = false,
-    allowNoSandbox = false
+    allowNoSandbox = false,
+    actionSessionKey = process.env.A2_ACTION_SESSION_KEY || ''
   } = {}) {
     this.stateRoot = path.resolve(stateRoot);
     this.engineExecutable = engineExecutable ? path.resolve(String(engineExecutable)) : null;
     this.headlessDefault = headlessDefault === true;
     this.allowNoSandbox = allowNoSandbox === true;
+    this.actionSessionKey = String(actionSessionKey || '');
     this.profilesRoot = path.join(this.stateRoot, 'profiles');
     this.running = new Map();
     this.startedAt = now();
     this.daemonLockFile = null;
     this.nodeRegistry = null;
+    this.actionPlanes = new Map();
   }
 
   async init() {
@@ -556,6 +562,7 @@ export class ComputeBrowserRuntime {
       context_manager: 'b2_logical_context_v1',
       semantic_perception: 'r4_semantic_frame_v1',
       semantic_page_script_evaluation: false,
+      effect_ledger: 'b7_pre1_durable_effect_ledger_v1',
       profiles
     };
   }
@@ -563,6 +570,137 @@ export class ComputeBrowserRuntime {
   async startNodeRegistry(options = {}) {
     this.nodeRegistry = new LocalNodeRegistry(this, options);
     return this.nodeRegistry.start();
+  }
+
+  // B7-PRE1 — lease-gated action plane. This closes the B5 seam where the
+  // RPC layer dispatched action.* methods that the runtime never exposed:
+  // the ActionKernel (lease HMAC validation, ambiguous-retry fence,
+  // pre-effect pending intent, receipts) is now the single execution path
+  // for daemon actions, with a durable effect ledger per profile.
+  #actionPlane(profileId) {
+    const id = validateProfileId(profileId);
+    let plane = this.actionPlanes.get(id);
+    if (!plane) {
+      const profileDir = this.profileDir(id);
+      const receiptsStore = new ReceiptStore({ profileDir, sessionKey: this.actionSessionKey });
+      const effectLedgerStore = new EffectLedgerStore({ profileDir });
+      plane = {
+        kernel: new ActionKernel({
+          runtime: this,
+          profileDir,
+          sessionKey: this.actionSessionKey,
+          receiptsStore,
+          effectLedgerStore,
+          semanticActionEnabled: true
+        }),
+        receiptsStore,
+        effectLedgerStore
+      };
+      this.actionPlanes.set(id, plane);
+    }
+    return plane;
+  }
+
+  async #actionTarget(profileId, targetId) {
+    const { id, entry } = this.#runningEntry(profileId);
+    const binding = this.#liveBinding(entry, validateTargetId(targetId));
+    const registry = await this.#loadTargets(id);
+    const target = registry.targets.find((row) => row.target_id === targetId);
+    return {
+      id,
+      entry,
+      binding,
+      contextId: target?.context_id || 'default',
+      target
+    };
+  }
+
+  async #executeAction({ profileId, targetId, actionId, lease, kind, locator, payload, idempotencyKey }) {
+    const resolved = await this.#actionTarget(profileId, targetId);
+    const plane = this.#actionPlane(resolved.id);
+    const action = {
+      action_id: actionId || crypto.randomUUID(),
+      target_id: validateTargetId(targetId),
+      profile_id: resolved.id,
+      context_id: resolved.contextId,
+      kind,
+      locator: locator || null,
+      payload: payload || null,
+      requested_at: now(),
+      idempotency_key: idempotencyKey || crypto.randomUUID()
+    };
+    return plane.kernel.executeAction({
+      action,
+      lease,
+      target: {
+        target_id: action.target_id,
+        process_incarnation_id: resolved.entry.processRef.processIncarnationId
+      }
+    });
+  }
+
+  async navigateAction({ profileId, targetId, actionId, lease, url, idempotencyKey } = {}) {
+    return this.#executeAction({
+      profileId,
+      targetId,
+      actionId,
+      lease,
+      idempotencyKey,
+      kind: 'NAVIGATE',
+      payload: { url: String(url || '') }
+    });
+  }
+
+  async clickAction({ profileId, targetId, actionId, lease, semanticId, framePath, idempotencyKey } = {}) {
+    return this.#executeAction({
+      profileId,
+      targetId,
+      actionId,
+      lease,
+      idempotencyKey,
+      kind: 'CLICK',
+      locator: { semantic_id: String(semanticId || ''), frame_path: Array.isArray(framePath) ? framePath : [] }
+    });
+  }
+
+  async typeAction({ profileId, targetId, actionId, lease, semanticId, text, framePath, idempotencyKey } = {}) {
+    return this.#executeAction({
+      profileId,
+      targetId,
+      actionId,
+      lease,
+      idempotencyKey,
+      kind: 'TYPE',
+      locator: { semantic_id: String(semanticId || ''), frame_path: Array.isArray(framePath) ? framePath : [] },
+      payload: { text: String(text ?? '') }
+    });
+  }
+
+  async submitAction({ profileId, targetId, actionId, lease, semanticId, framePath, idempotencyKey } = {}) {
+    return this.#executeAction({
+      profileId,
+      targetId,
+      actionId,
+      lease,
+      idempotencyKey,
+      kind: 'SUBMIT',
+      locator: { semantic_id: String(semanticId || ''), frame_path: Array.isArray(framePath) ? framePath : [] }
+    });
+  }
+
+  async ledgerHead(profileId) {
+    const plane = this.#actionPlane(profileId);
+    return plane.effectLedgerStore.head();
+  }
+
+  async ledgerVerify(profileId) {
+    const plane = this.#actionPlane(profileId);
+    return plane.effectLedgerStore.verify();
+  }
+
+  async ledgerTimeline({ profileId, actionId = null } = {}) {
+    const plane = this.#actionPlane(profileId);
+    return plane.effectLedgerStore.timeline({ actionId: actionId ? String(actionId) : null });
   }
 
   async stopNodeRegistry() {
@@ -576,6 +714,7 @@ export class ComputeBrowserRuntime {
     await releaseOwnedPidLock(this.daemonLockFile);
     this.daemonLockFile = null;
     await this.stopNodeRegistry();
+    this.actionPlanes.clear();
   }
 }
 
