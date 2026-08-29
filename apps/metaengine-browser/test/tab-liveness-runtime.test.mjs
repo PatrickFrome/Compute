@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import { TabHealthRegistry } from '../src/tab-health-registry.mjs';
+import { TabLivenessRuntime } from '../src/tab-liveness-runtime.mjs';
 import { TabNetworkActivityRegistry } from '../src/tab-network-activity.mjs';
 
 test('network liveness tracks only bounded counters and never persists request content', () => {
@@ -65,4 +67,37 @@ test('tab health records renderer/load state without page content authority', ()
   row = health.get('tab-1');
   assert.equal(row.state, 'HEALTHY');
   assert.equal(health.snapshot().authority_effect, false);
+});
+
+test('liveness runtime binds exact tab to webContents and ignores aborted/subframe load failures', () => {
+  const runtime = new TabLivenessRuntime();
+  const wc = new EventEmitter();
+  wc.id = 77;
+  wc.getOSProcessId = () => 4321;
+  runtime.wire('tab-exact', wc);
+
+  wc.emit('did-start-loading');
+  assert.equal(runtime.tabSnapshot('tab-exact').health.state, 'LOADING');
+  wc.emit('unresponsive');
+  assert.equal(runtime.tabSnapshot('tab-exact').health.state, 'UNRESPONSIVE');
+  assert.equal(runtime.tabSnapshot('tab-exact').health.detail.process_id, 4321);
+  wc.emit('responsive');
+  assert.equal(runtime.tabSnapshot('tab-exact').health.state, 'HEALTHY');
+
+  wc.emit('did-fail-load', {}, -3, 'ERR_ABORTED', 'https://chatgpt.com/', true, 4321, 1);
+  assert.equal(runtime.tabSnapshot('tab-exact').health.state, 'HEALTHY');
+  wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'https://chatgpt.com/', false, 4321, 1);
+  assert.equal(runtime.tabSnapshot('tab-exact').health.state, 'HEALTHY');
+  wc.emit('did-fail-load', {}, -105, 'ERR_NAME_NOT_RESOLVED', 'https://chatgpt.com/', true, 4321, 1);
+  assert.equal(runtime.tabSnapshot('tab-exact').health.state, 'LOAD_FAILED');
+
+  wc.emit('render-process-gone', {}, { reason: 'crashed', exitCode: -1 });
+  const gone = runtime.tabSnapshot('tab-exact');
+  assert.equal(gone.health.state, 'RENDERER_GONE');
+  assert.equal(gone.webcontents_id, 77);
+  assert.equal(gone.authority_effect, false);
+
+  runtime.remove('tab-exact');
+  assert.equal(runtime.tabSnapshot('tab-exact').health, null);
+  assert.equal(runtime.tabSnapshot('tab-exact').webcontents_id, null);
 });
