@@ -1,0 +1,66 @@
+name: C1 Native R16 Rejoin
+
+on:
+  push:
+    branches:
+      - 'work/convergence-native-r16-v1'
+  pull_request:
+    branches:
+      - 'integration/compute-unified-v1'
+    paths:
+      - 'apps/metaengine-browser/**'
+      - 'coordination/browser-shared/effect-ledger.mjs'
+      - 'coordination/browser-compute/src/effect-ledger-store.mjs'
+      - 'coordination/chat-control-plane/**'
+      - 'tests/a2_r*.mjs'
+      - '.github/workflows/convergence-native-r16-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-r16-safety-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Native edge parse and contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          npm --prefix apps/metaengine-browser run check
+          npm --prefix apps/metaengine-browser test
+
+      - name: Preserve R9-R16 router and safety contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/a2_r9_agent_fleet_core.test.mjs
+          node tests/a2_r9_agent_fleet_scheduler.test.mjs
+          node tests/a2_r9_evidence_blackboard.test.mjs
+          node tests/a2_r10_context_compiler.test.mjs
+          node tests/a2_r11_same_point_swarm.test.mjs
+          node tests/a2_r12_trust_taint_graph.test.mjs
+          node tests/a2_r13_trace_replay.test.mjs
+          node tests/a2_r14_browser_bench.test.mjs
+          node tests/a2_r15_remote_browser_pool.test.mjs
+          node tests/a2_r15_remote_browser_pool_hardening.test.mjs
+          node tests/a2_r16_adaptive_router.test.mjs
+          node tests/a2_r16_adaptive_router_hardening.test.mjs
+
+      - name: Preserve physical actuator regressions inherited from R5-R8
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/a2_v060_debugger_broker_lab.mjs
+          node tests/a2_v060_operator_actions_lab.mjs
+          node tests/a2_v060_semantic_actions_lab.mjs
+          node tests/a2_r8d_durable_fence_bridge.test.mjs
+          node tests/a2_r8d_extension_typed_click_actuator.test.mjs
+          node tests/a2_r8d_supervisor_typed_click.test.mjs

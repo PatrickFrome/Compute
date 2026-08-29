@@ -1,0 +1,14 @@
+{
+  "name": "@metaengine/browser-shell",
+  "version": "0.6.0-r16-rejoin.1",
+  "private": true,
+  "type": "module",
+  "description": "METAENGINE Native Browser C1 R16 convergence slice",
+  "scripts": {
+    "check": "node --check src/browser-policy.mjs && node --check src/native-browser-control.mjs && node --check src/native-supervisor-client.mjs && node --check src/supervisor-device-identity.mjs && node --check src/native-r16-actuation-gate.mjs && node --check ../../coordination/browser-shared/effect-ledger.mjs && node --check ../../coordination/browser-compute/src/effect-ledger-store.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
