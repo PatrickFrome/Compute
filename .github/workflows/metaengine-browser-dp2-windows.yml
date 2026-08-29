@@ -171,19 +171,51 @@ jobs:
           if ($p.MainWindowHandle -eq 0) { try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}; throw 'sentinel_source_window_missing' }
           Start-Sleep -Seconds 6
           $oldPid = $p.Id
+          $statePath = $null
+          $sourceState = $null
+          foreach ($candidate in Get-ChildItem -Path $env:APPDATA -Filter 'metaengine-browser-sentinel-v1.json' -File -Recurse -ErrorAction SilentlyContinue) {
+            try {
+              $parsed = Get-Content $candidate.FullName -Raw | ConvertFrom-Json
+              if ($parsed.schema -eq 'metaengine.browser-sentinel.state.v1' -and [int]$parsed.parent_pid -eq $oldPid) {
+                if ($statePath) { throw 'sentinel_source_state_ambiguous' }
+                $statePath = $candidate.FullName
+                $sourceState = $parsed
+              }
+            } catch {
+              if ($_.Exception.Message -eq 'sentinel_source_state_ambiguous') { throw }
+            }
+          }
+          if (-not $statePath) { throw 'sentinel_source_state_not_found' }
+          if (-not $sourceState.token) { throw 'sentinel_source_token_missing' }
+          if ($sourceState.executable -ne $app) { throw "sentinel_source_executable_mismatch:$($sourceState.executable)" }
+          $sourceToken = [string]$sourceState.token
+          $receiptPath = "$statePath.relaunch-v1.json"
+          Remove-Item $receiptPath -Force -ErrorAction SilentlyContinue
           Stop-Process -Id $oldPid -Force -ErrorAction Stop
           $p.WaitForExit()
-          $recoverDeadline = (Get-Date).AddSeconds(30)
-          $recovered = $null
+          $receiptDeadline = (Get-Date).AddSeconds(30)
+          $receipt = $null
           do {
-            Start-Sleep -Seconds 1
-            $rows = Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $oldPid -and $_.ExecutablePath -eq $app }
-            $recovered = $rows | Sort-Object ProcessId | Select-Object -First 1
-            if ($recovered) { break }
-          } while ((Get-Date) -lt $recoverDeadline)
-          if (-not $recovered) { throw 'browser_sentinel_relaunch_not_observed' }
-          $rp = Get-Process -Id $recovered.ProcessId -ErrorAction Stop
-          $windowDeadline = (Get-Date).AddSeconds(20)
+            Start-Sleep -Milliseconds 500
+            if (Test-Path $receiptPath) {
+              try {
+                $candidateReceipt = Get-Content $receiptPath -Raw | ConvertFrom-Json
+                if ($candidateReceipt.schema -eq 'metaengine.browser-sentinel.relaunch-receipt.v1' -and [int]$candidateReceipt.source_parent_pid -eq $oldPid -and [string]$candidateReceipt.source_token -eq $sourceToken) {
+                  $receipt = $candidateReceipt
+                  break
+                }
+              } catch {}
+            }
+          } while ((Get-Date) -lt $receiptDeadline)
+          if (-not $receipt) { throw 'browser_sentinel_relaunch_receipt_not_observed' }
+          if ($receipt.lifecycle -ne 'RELAUNCH_DISPATCHED') { throw "browser_sentinel_relaunch_not_dispatched:$($receipt.lifecycle):$($receipt.relaunch_result)" }
+          $recoveredPid = [int]$receipt.relaunch_pid
+          if ($recoveredPid -le 0 -or $recoveredPid -eq $oldPid) { throw "browser_sentinel_relaunch_pid_invalid:$recoveredPid" }
+          if ([string]$receipt.executable -ne $app) { throw "browser_sentinel_receipt_executable_mismatch:$($receipt.executable)" }
+          $recoveredWmi = Get-CimInstance Win32_Process -Filter "ProcessId = $recoveredPid" -ErrorAction Stop
+          if ($recoveredWmi.ExecutablePath -ne $app) { throw "recovered_browser_executable_mismatch:$($recoveredWmi.ExecutablePath)" }
+          $rp = Get-Process -Id $recoveredPid -ErrorAction Stop
+          $windowDeadline = (Get-Date).AddSeconds(25)
           do {
             Start-Sleep -Milliseconds 500
             $rp.Refresh()
@@ -191,8 +223,25 @@ jobs:
             if ($rp.MainWindowHandle -ne 0) { break }
           } while ((Get-Date) -lt $windowDeadline)
           if ($rp.MainWindowHandle -eq 0) { try { Stop-Process -Id $rp.Id -Force -ErrorAction SilentlyContinue } catch {}; throw 'recovered_browser_window_missing' }
+          $successorDeadline = (Get-Date).AddSeconds(15)
+          $successor = $null
+          do {
+            Start-Sleep -Milliseconds 500
+            try {
+              $candidateState = Get-Content $statePath -Raw | ConvertFrom-Json
+              if ($candidateState.schema -eq 'metaengine.browser-sentinel.state.v1' -and [int]$candidateState.parent_pid -eq $recoveredPid -and [string]$candidateState.token -ne $sourceToken) {
+                $successor = $candidateState
+                break
+              }
+            } catch {}
+          } while ((Get-Date) -lt $successorDeadline)
+          if (-not $successor) { try { Stop-Process -Id $rp.Id -Force -ErrorAction SilentlyContinue } catch {}; throw 'recovered_browser_successor_sentinel_not_bound' }
           "source_pid=$oldPid" | Set-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
-          "recovered_pid=$($rp.Id)" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
+          "source_token=$sourceToken" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
+          "relaunch_pid=$recoveredPid" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
+          "relaunch_receipt=PASS" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
+          "successor_parent_pid=$($successor.parent_pid)" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
+          "successor_token_rotated=true" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
           "exact_executable=$app" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
           "recovery=PASS" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
           try { $rp.CloseMainWindow() | Out-Null } catch {}
@@ -270,5 +319,5 @@ jobs:
           $expected = (Get-Content "$env:RUNNER_TEMP\installer-sha256.txt").Trim()
           $actual = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $expected) { throw 'release_installer_digest_not_verified_candidate' }
-          gh release create $tag $installer.FullName $blockmap.FullName $latest.FullName $manifest.FullName --verify-tag --prerelease --title "METAENGINE Browser $tag" --notes "Development self-update candidate. Exact artifact passed contract tests, NSIS install, Development Plane smoke, installed Browser launch, crash-sentinel recovery, and digest revalidation. Not production-safe until Authenticode publisher verification is sealed."
+          gh release create $tag $installer.FullName $blockmap.FullName $latest.FullName $manifest.FullName --verify-tag --prerelease --title "METAENGINE Browser $tag" --notes "Development self-update candidate. Exact artifact passed contract tests, NSIS install, Development Plane smoke, installed Browser launch, exact crash-sentinel relaunch receipt/successor binding, and digest revalidation. Not production-safe until Authenticode publisher verification is sealed."
           if ($LASTEXITCODE -ne 0) { throw "verified_release_publish_failed:${tag}" }
