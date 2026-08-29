@@ -1,6 +1,7 @@
 const CHATGPT_HOSTS = new Set(['chatgpt.com', 'www.chatgpt.com', 'chat.openai.com']);
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const BLOCKED_PROTOCOLS = new Set(['javascript:', 'data:', 'file:', 'chrome:', 'chrome-extension:', 'devtools:', 'metaengine:']);
+let packagedBootRewriteRemaining = process.env.METAENGINE_PACKAGED_BOOT_SAFE === '1' ? 1 : 0;
 
 export function parseUserUrl(input) {
   const raw = String(input || '').trim();
@@ -28,6 +29,15 @@ export function isChatGptUrl(input) {
 
 export function navigationDecision(input) {
   const x = classifyRemoteUrl(input);
+  if (packagedBootRewriteRemaining > 0 && x.allowed && x.kind === 'CHATGPT') {
+    packagedBootRewriteRemaining -= 1;
+    return Object.freeze({
+      allow: true,
+      reason: 'PACKAGED_BOOT_NETWORK_DEFERRED',
+      normalized_url: 'about:blank',
+      kind: 'BLANK',
+    });
+  }
   return Object.freeze({ allow: x.allowed, reason: x.reason, normalized_url: x.url?.href || null, kind: x.kind });
 }
 
