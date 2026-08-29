@@ -16,6 +16,7 @@ const local = new Map([
 ]);
 const session = new Map();
 const alarmListeners = [];
+const installedListeners = [];
 const alarms = new Map();
 const baseCalls = [];
 let reloadCalls = 0;
@@ -39,7 +40,7 @@ const chrome = {
   runtime: {
     getManifest: () => ({ version: '0.7.1' }),
     onUpdateAvailable: { addListener() {} },
-    onInstalled: { addListener() {} },
+    onInstalled: { addListener(fn) { installedListeners.push(fn); } },
     reload() { reloadCalls += 1; }
   },
   alarms: {
@@ -79,6 +80,11 @@ assert(local.get(STATE_KEY)?.status === 'WAITING_SAFE_BOUNDARY', 'restart recove
 assert(String(local.get(STATE_KEY)?.blocked_by || '').includes('pending_command'), 'restart recovery did not re-evaluate durable blocker');
 assert(reloadCalls === 0, 'restart recovery reloaded across a pending command');
 
+for (const listener of installedListeners) listener({ reason: 'chrome_update' });
+await sleep(10);
+assert(context.A2_UPDATE_DRAIN_ACTIVE() === true, 'Chrome-only update incorrectly cleared extension update drain');
+assert(local.get(STATE_KEY)?.status === 'WAITING_SAFE_BOUNDARY', 'Chrome-only update overwrote durable drain state');
+
 const response = await context.A2_BRIDGE_REQUEST('/v1/commands/next', { method: 'POST' });
 const body = await response.json();
 assert(body.command === null && body.update_drain === true, 'rehydrated drain did not suppress new command lease');
@@ -92,6 +98,7 @@ assert(local.get(STATE_KEY)?.status === 'SAFE_RELOAD', 'rehydrated drain did not
 
 console.log('A2 v0.7.1 Update Manager Restart Lab: PASS', JSON.stringify({
   rehydrated: true,
+  chrome_update_preserved_drain: true,
   suppressed_command_next: true,
   reload_calls: reloadCalls,
   final_status: local.get(STATE_KEY)?.status
