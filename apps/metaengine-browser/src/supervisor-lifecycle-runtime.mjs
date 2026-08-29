@@ -28,7 +28,7 @@ async function writeJson(file, value) {
 
 export class SupervisorLifecycleRuntime {
   #getState; #execute; #keepalive = null; #statePath; #lastRun = 0; #lastSupervisorGeneration = 'UNKNOWN'; #lastError = null;
-  #monitorMs; #researchMs;
+  #lastWorkerSignals = []; #monitorMs; #researchMs;
 
   constructor({ getState, executeCommand, statePath = null, monitorMs = 15000, researchMs = 30 * 60 * 1000 } = {}) {
     if (typeof getState !== 'function' || typeof executeCommand !== 'function') throw new Error('supervisor_lifecycle_dependencies_required');
@@ -49,7 +49,22 @@ export class SupervisorLifecycleRuntime {
   }
 
   snapshot() {
-    return { schema: 'metaengine.supervisor-lifecycle-runtime.v1', keepalive: this.#keepalive?.snapshot() || null, last_error: this.#lastError, authority_effect: false };
+    return {
+      schema: 'metaengine.supervisor-lifecycle-runtime.v1',
+      keepalive: this.#keepalive?.snapshot() || null,
+      supervisor_generation: this.#lastSupervisorGeneration,
+      worker_signals: structuredClone(this.#lastWorkerSignals),
+      quiescent: this.isQuiescent(),
+      last_error: this.#lastError,
+      authority_effect: false,
+    };
+  }
+
+  isQuiescent() {
+    const ks = this.#keepalive?.snapshot();
+    if (!ks || this.#lastSupervisorGeneration !== 'IDLE') return false;
+    if (['WAKE_PENDING','WAKE_AMBIGUOUS','ROLLOVER_REQUIRED','ROLLOVER_AMBIGUOUS','RECOVERING'].includes(ks.state)) return false;
+    return this.#lastWorkerSignals.every((s) => ['IDLE','TERMINAL'].includes(String(s?.generation_state || 'UNKNOWN')));
   }
 
   async #capture(tabId) { return this.#execute({ action: 'CAPTURE', payload: { tab_id: String(tabId) }, platform: null }); }
@@ -79,6 +94,7 @@ export class SupervisorLifecycleRuntime {
       }
       signals.push({ agent_id: agent?.agent_id, lifecycle_state: agent?.lifecycle_state, generation_state });
     }
+    this.#lastWorkerSignals = signals;
     await this.#keepalive.observeWorkers(signals);
   }
 
