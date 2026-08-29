@@ -21,10 +21,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - name: Checkout immutable source
+      - name: Checkout exact source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Setup Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -50,10 +51,11 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
-      - name: Checkout immutable source
+      - name: Checkout exact source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Setup Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -83,7 +85,7 @@ jobs:
           $baseline | Set-Content "$env:RUNNER_TEMP\baseline-version.txt"
           (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content "$env:RUNNER_TEMP\baseline-sha256.txt"
 
-      - name: Install baseline N and seal real userData marker
+      - name: Install N and seal real profile continuity marker
         shell: powershell
         run: |
           $install = Start-Process -FilePath "$env:RUNNER_TEMP\baseline-setup.exe" -ArgumentList '/S' -PassThru -Wait
@@ -101,8 +103,7 @@ jobs:
           $exitCode = $p.ExitCode
           if ($exitCode -ne 0) { Get-Content $probeErr -ErrorAction SilentlyContinue; throw "baseline_version_probe_exit_$exitCode" }
           $versionRow = (Get-Content $probeOut | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
-          if ([string]$versionRow.version -ne $baseline) { throw "baseline_version_probe_mismatch:$($versionRow.version):$baseline" }
-          if ($versionRow.primary_instance -ne $true) { throw 'baseline_version_probe_not_primary' }
+          if ([string]$versionRow.version -ne $baseline -or $versionRow.primary_instance -ne $true) { throw 'baseline_version_probe_invalid' }
 
           $env:METAENGINE_PROFILE_PROBE_WRITE = '1'
           $profileOut = "$env:RUNNER_TEMP\baseline-profile-probe.out"
@@ -114,11 +115,10 @@ jobs:
           Remove-Item Env:METAENGINE_PROFILE_PROBE_WRITE -ErrorAction SilentlyContinue
           if ($profileExit -ne 0) { Get-Content $profileErr -ErrorAction SilentlyContinue; throw "baseline_profile_probe_exit_$profileExit" }
           $profileRow = (Get-Content $profileOut | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
-          if ($profileRow.marker_present -ne $true) { throw 'baseline_profile_marker_not_written' }
-          if (-not $profileRow.user_data_path) { throw 'baseline_user_data_path_missing' }
+          if ($profileRow.marker_present -ne $true -or -not $profileRow.user_data_path) { throw 'baseline_profile_probe_invalid' }
           [string]$profileRow.user_data_path | Set-Content "$env:RUNNER_TEMP\baseline-user-data-path.txt"
 
-      - name: Build target N plus 1 update feed
+      - name: Build exact target N plus 1 and feed metadata
         working-directory: apps/metaengine-browser
         shell: powershell
         env:
@@ -133,6 +133,7 @@ jobs:
           if (-not $installer) { throw 'target_installer_missing' }
           if (-not $blockmap) { throw 'target_blockmap_missing' }
           $feed = "$env:RUNNER_TEMP\self-update-feed"
+          Remove-Item $feed -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path $feed | Out-Null
           Copy-Item $installer.FullName (Join-Path $feed $installer.Name)
           Copy-Item $blockmap.FullName (Join-Path $feed $blockmap.Name)
@@ -152,27 +153,12 @@ jobs:
             'stagingPercentage: 100'
           ) | Set-Content (Join-Path $feed 'dev.yml') -Encoding utf8
           $target | Set-Content "$env:RUNNER_TEMP\target-version.txt"
+          $installer.FullName | Set-Content "$env:RUNNER_TEMP\target-installer-path.txt"
+          $blockmap.FullName | Set-Content "$env:RUNNER_TEMP\target-blockmap-path.txt"
+          (Join-Path $feed 'dev.yml') | Set-Content "$env:RUNNER_TEMP\target-dev-yml-path.txt"
           (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content "$env:RUNNER_TEMP\target-sha256.txt"
 
-      - name: Start loopback-only update feed
-        working-directory: apps/metaengine-browser
-        shell: powershell
-        run: |
-          $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
-          $listener.Start()
-          $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
-          $listener.Stop()
-          $env:METAENGINE_UPDATE_FEED_ROOT = "$env:RUNNER_TEMP\self-update-feed"
-          $env:METAENGINE_UPDATE_FEED_PORT = "$port"
-          $env:METAENGINE_UPDATE_FEED_READY = "$env:RUNNER_TEMP\self-update-feed.ready"
-          $server = Start-Process -FilePath (Get-Command node).Source -ArgumentList 'test/self-update-feed-server.cjs' -WorkingDirectory (Get-Location) -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\self-update-feed.out" -RedirectStandardError "$env:RUNNER_TEMP\self-update-feed.err"
-          $deadline = (Get-Date).AddSeconds(10)
-          while (-not (Test-Path $env:METAENGINE_UPDATE_FEED_READY) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 100 }
-          if (-not (Test-Path $env:METAENGINE_UPDATE_FEED_READY)) { Get-Content "$env:RUNNER_TEMP\self-update-feed.err" -ErrorAction SilentlyContinue; throw 'self_update_feed_not_ready' }
-          $server.Id | Set-Content "$env:RUNNER_TEMP\self-update-feed.pid"
-          $port | Set-Content "$env:RUNNER_TEMP\self-update-feed.port"
-
-      - name: Exercise installed N updater through forced N plus 1 relaunch
+      - name: Run one physical update transaction N to N plus 1
         working-directory: apps/metaengine-browser
         shell: powershell
         env:
@@ -181,42 +167,65 @@ jobs:
           METAENGINE_DISABLE_CRASH_SENTINEL: '1'
           METAENGINE_SELF_UPDATE_E2E_SUCCESSOR_PROBE: '1'
         run: |
-          $app = (Get-Content "$env:RUNNER_TEMP\installed-app-path.txt").Trim()
-          $target = (Get-Content "$env:RUNNER_TEMP\target-version.txt").Trim()
-          $port = (Get-Content "$env:RUNNER_TEMP\self-update-feed.port").Trim()
-          $env:METAENGINE_SELF_UPDATE_TEST_FEED_URL = "http://127.0.0.1:$port/"
-          $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE = "$env:RUNNER_TEMP\self-update-smoke.jsonl"
-          $env:METAENGINE_SELF_UPDATE_SUCCESSOR_TRACE = "$env:RUNNER_TEMP\self-update-successor.json"
-          Remove-Item $env:METAENGINE_SELF_UPDATE_SUCCESSOR_TRACE -Force -ErrorAction SilentlyContinue
-          $source = Start-Process -FilePath $app -ArgumentList '--metaengine-self-update-smoke' -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\self-update-smoke.out" -RedirectStandardError "$env:RUNNER_TEMP\self-update-smoke.err"
-          $sourceHandle = $source.Handle
-          $sourcePid = $source.Id
-          if (-not $source.WaitForExit(150000)) {
-            try { Stop-Process -Id $source.Id -Force } catch {}
-            Get-Content $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE -ErrorAction SilentlyContinue
-            Get-Content "$env:RUNNER_TEMP\self-update-smoke.err" -ErrorAction SilentlyContinue
-            throw 'self_update_source_timeout'
-          }
-          $rows = @(Get-Content $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
-          if (-not ($rows | Where-Object { $_.metadata_verified -eq $true -and [string]$_.available_version -eq $target })) { throw 'self_update_verified_target_not_observed' }
-          if (-not ($rows | Where-Object { $_.ci_test_feed_active -eq $true })) { throw 'self_update_ci_feed_not_active' }
-          if (-not ($rows | Where-Object { $_.state -eq 'RESTARTING' })) { throw 'self_update_restarting_state_not_observed' }
-          $deadline = (Get-Date).AddSeconds(90)
-          while (-not (Test-Path $env:METAENGINE_SELF_UPDATE_SUCCESSOR_TRACE) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
-          if (-not (Test-Path $env:METAENGINE_SELF_UPDATE_SUCCESSOR_TRACE)) { throw 'self_update_forced_successor_trace_missing' }
-          $successor = Get-Content $env:METAENGINE_SELF_UPDATE_SUCCESSOR_TRACE -Raw | ConvertFrom-Json
-          if ([string]$successor.version -ne $target) { throw "self_update_successor_version_mismatch:$($successor.version):$target" }
-          if ($successor.primary_instance -ne $true) { throw 'self_update_successor_not_primary' }
-          "source_pid=$sourcePid" | Set-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
-          "target_version=$target" | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
-          "successor_pid=$($successor.pid)" | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
-          'forced_relaunch=PASS' | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
+          $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+          $listener.Start()
+          $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+          $listener.Stop()
+          $env:METAENGINE_UPDATE_FEED_ROOT = "$env:RUNNER_TEMP\self-update-feed"
+          $env:METAENGINE_UPDATE_FEED_PORT = "$port"
+          $env:METAENGINE_UPDATE_FEED_READY = "$env:RUNNER_TEMP\self-update-feed.ready"
+          Remove-Item $env:METAENGINE_UPDATE_FEED_READY -Force -ErrorAction SilentlyContinue
+          $server = $null
+          try {
+            $server = Start-Process -FilePath (Get-Command node).Source -ArgumentList 'test/self-update-feed-server.cjs' -WorkingDirectory (Get-Location) -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\self-update-feed.out" -RedirectStandardError "$env:RUNNER_TEMP\self-update-feed.err"
+            $serverHandle = $server.Handle
+            $deadline = (Get-Date).AddSeconds(10)
+            while (-not (Test-Path $env:METAENGINE_UPDATE_FEED_READY) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 100 }
+            if (-not (Test-Path $env:METAENGINE_UPDATE_FEED_READY)) { Get-Content "$env:RUNNER_TEMP\self-update-feed.err" -ErrorAction SilentlyContinue; throw 'self_update_feed_not_ready' }
 
-      - name: Verify target version profile continuity and in-place directory
+            $app = (Get-Content "$env:RUNNER_TEMP\installed-app-path.txt").Trim()
+            $target = (Get-Content "$env:RUNNER_TEMP\target-version.txt").Trim()
+            $env:METAENGINE_SELF_UPDATE_TEST_FEED_URL = "http://127.0.0.1:$port/"
+            $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE = "$env:RUNNER_TEMP\self-update-smoke.jsonl"
+            $env:METAENGINE_SELF_UPDATE_SUCCESSOR_TRACE = "$env:RUNNER_TEMP\self-update-successor.json"
+            Remove-Item $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE -Force -ErrorAction SilentlyContinue
+            Remove-Item $env:METAENGINE_SELF_UPDATE_SUCCESSOR_TRACE -Force -ErrorAction SilentlyContinue
+
+            $source = Start-Process -FilePath $app -ArgumentList '--metaengine-self-update-smoke' -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\self-update-smoke.out" -RedirectStandardError "$env:RUNNER_TEMP\self-update-smoke.err"
+            $sourceHandle = $source.Handle
+            $sourcePid = $source.Id
+            if (-not $source.WaitForExit(150000)) {
+              try { Stop-Process -Id $source.Id -Force } catch {}
+              Get-Content $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE -ErrorAction SilentlyContinue
+              Get-Content "$env:RUNNER_TEMP\self-update-smoke.err" -ErrorAction SilentlyContinue
+              throw 'self_update_source_timeout'
+            }
+            $rows = @(Get-Content $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+            if (-not ($rows | Where-Object { $_.metadata_verified -eq $true -and [string]$_.available_version -eq $target })) { throw 'self_update_verified_target_not_observed' }
+            if (-not ($rows | Where-Object { $_.ci_test_feed_active -eq $true })) { throw 'self_update_ci_feed_not_active' }
+            if (-not ($rows | Where-Object { $_.state -eq 'RESTARTING' })) { throw 'self_update_restarting_state_not_observed' }
+
+            $deadline = (Get-Date).AddSeconds(90)
+            while (-not (Test-Path $env:METAENGINE_SELF_UPDATE_SUCCESSOR_TRACE) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
+            if (-not (Test-Path $env:METAENGINE_SELF_UPDATE_SUCCESSOR_TRACE)) { throw 'self_update_forced_successor_trace_missing' }
+            $successor = Get-Content $env:METAENGINE_SELF_UPDATE_SUCCESSOR_TRACE -Raw | ConvertFrom-Json
+            if ([string]$successor.version -ne $target) { throw "self_update_successor_version_mismatch:$($successor.version):$target" }
+            if ($successor.primary_instance -ne $true) { throw 'self_update_successor_not_primary' }
+            "source_pid=$sourcePid" | Set-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
+            "target_version=$target" | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
+            "successor_pid=$($successor.pid)" | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
+            'metadata_verified=PASS' | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
+            'forced_relaunch=PASS' | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
+          } finally {
+            if ($server -and -not $server.HasExited) { try { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue } catch {} }
+          }
+
+      - name: Verify N plus 1 profile continuity and singleton
         shell: powershell
         run: |
           $app = (Get-Content "$env:RUNNER_TEMP\installed-app-path.txt").Trim()
           $target = (Get-Content "$env:RUNNER_TEMP\target-version.txt").Trim()
+
           $probeOut = "$env:RUNNER_TEMP\target-version-probe.out"
           $probeErr = "$env:RUNNER_TEMP\target-version-probe.err"
           $probe = Start-Process -FilePath $app -ArgumentList '--metaengine-version-probe' -PassThru -RedirectStandardOutput $probeOut -RedirectStandardError $probeErr
@@ -244,10 +253,6 @@ jobs:
           'real_user_data_continuity=PASS' | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
           'in_place_install_directory=PASS' | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
 
-      - name: Prove physical singleton after update
-        shell: powershell
-        run: |
-          $app = (Get-Content "$env:RUNNER_TEMP\installed-app-path.txt").Trim()
           $firstOut = "$env:RUNNER_TEMP\singleton-first.out"
           $firstErr = "$env:RUNNER_TEMP\singleton-first.err"
           $first = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $firstOut -RedirectStandardError $firstErr
@@ -258,7 +263,6 @@ jobs:
           if ($first.HasExited) { Get-Content $firstErr -ErrorAction SilentlyContinue; throw 'singleton_primary_exited_early' }
           $firstRow = (Get-Content $firstOut | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
           if ($firstRow.primary_instance -ne $true) { throw 'singleton_primary_probe_invalid' }
-
           $second = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\singleton-second.out" -RedirectStandardError "$env:RUNNER_TEMP\singleton-second.err"
           $secondHandle = $second.Handle
           if (-not $second.WaitForExit(5000)) { try { Stop-Process -Id $second.Id -Force } catch {}; try { Stop-Process -Id $first.Id -Force } catch {}; throw 'singleton_secondary_did_not_exit' }
@@ -266,14 +270,6 @@ jobs:
           if ($first.HasExited) { throw 'singleton_secondary_displaced_primary' }
           try { Stop-Process -Id $first.Id -Force -ErrorAction SilentlyContinue } catch {}
           'physical_singleton=PASS' | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
-
-      - name: Stop loopback feed
-        if: always()
-        shell: powershell
-        run: |
-          if (Test-Path "$env:RUNNER_TEMP\self-update-feed.pid") {
-            try { Stop-Process -Id ([int](Get-Content "$env:RUNNER_TEMP\self-update-feed.pid")) -Force -ErrorAction SilentlyContinue } catch {}
-          }
 
       - name: Stage E2E evidence
         if: always()
