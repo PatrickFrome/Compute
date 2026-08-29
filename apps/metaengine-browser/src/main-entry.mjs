@@ -7,6 +7,8 @@ const instanceHoldProbe = process.argv.includes('--metaengine-single-instance-pr
 const versionProbe = process.argv.includes('--metaengine-version-probe');
 const profileProbe = process.argv.includes('--metaengine-profile-probe');
 const selfUpdateSmoke = process.argv.includes('--metaengine-self-update-smoke');
+const successorProbe = process.env.METAENGINE_SELF_UPDATE_E2E_SUCCESSOR_PROBE === '1'
+  && process.env.GITHUB_ACTIONS === 'true';
 
 const guard = acquirePrimaryInstance(app, { bypass: bypassSingleInstance });
 
@@ -15,7 +17,7 @@ if (guard.primary) {
     app.setAppUserModelId(METAENGINE_BROWSER_APP_ID);
   }
 
-  if (versionProbe || profileProbe || instanceHoldProbe || selfUpdateSmoke) {
+  if (versionProbe || profileProbe || instanceHoldProbe || selfUpdateSmoke || successorProbe) {
     app.once('ready', async () => {
       if (selfUpdateSmoke) {
         try {
@@ -31,6 +33,29 @@ if (guard.primary) {
           }));
           app.exit(4);
         }
+        return;
+      }
+      if (successorProbe) {
+        const row = {
+          schema: 'metaengine.browser.self-update-successor-probe.v1',
+          version: app.getVersion(),
+          pid: process.pid,
+          primary_instance: true,
+          app_id: METAENGINE_BROWSER_APP_ID,
+          authority_effect: false,
+        };
+        const tracePath = process.env.METAENGINE_SELF_UPDATE_SUCCESSOR_TRACE || '';
+        if (!tracePath) {
+          console.error(JSON.stringify({ ...row, error: 'successor_trace_path_missing' }));
+          app.exit(6);
+          return;
+        }
+        const fs = await import('node:fs/promises');
+        const path = await import('node:path');
+        await fs.mkdir(path.dirname(tracePath), { recursive: true });
+        await fs.writeFile(tracePath, `${JSON.stringify(row)}\n`, { mode: 0o600 });
+        console.log(JSON.stringify(row));
+        app.exit(0);
         return;
       }
       if (profileProbe) {
