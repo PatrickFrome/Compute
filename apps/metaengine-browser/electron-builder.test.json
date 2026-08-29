@@ -13,10 +13,20 @@
   "win": {
     "target": [
       {
-        "target": "portable",
+        "target": "nsis",
         "arch": ["x64"]
       }
     ],
-    "artifactName": "METAENGINE-Browser-Test-${version}-${arch}.${ext}"
+    "artifactName": "METAENGINE-Browser-Test-Setup-${version}-${arch}.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "METAENGINE Browser Test",
+    "runAfterFinish": false,
+    "deleteAppDataOnUninstall": false
   }
 }
