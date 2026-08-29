@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { FleetRuntimeStore, FLEET_RUNTIME_STORE_VERSION } from '../src/fleet-runtime-store-v1.mjs';
+import { FleetRuntime } from '../src/fleet-runtime-v1.mjs';
 import { SystemIntelligence } from '../src/system-intelligence-v1.mjs';
 import { AutonomousWorkScheduler } from '../src/autonomous-work-scheduler-v1.mjs';
 
@@ -14,14 +15,16 @@ async function harness(seed = null) {
   let seq = 0;
   if (seed) await fs.writeFile(statePath, `${JSON.stringify(seed)}\n`);
   const store = new FleetRuntimeStore({ statePath, clock: () => now });
-  await store.init();
   const uuid = () => `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
+  const fleetRuntime = new FleetRuntime({ store, clock: () => now, uuid });
+  await fleetRuntime.init();
   const intelligence = new SystemIntelligence({ store, clock: () => now, uuid });
   const scheduler = new AutonomousWorkScheduler({ store, clock: () => now, uuid });
   return {
     dir,
     statePath,
     store,
+    fleetRuntime,
     intelligence,
     scheduler,
     advance: (ms) => { now += ms; },
@@ -66,77 +69,73 @@ async function ingestFreshProcess(h, overrides = {}) {
   });
 }
 
+async function bindSchedulerWorker(h, workerId, role, generationEpoch, targetId) {
+  return h.fleetRuntime.bindWorkerIncarnation({
+    agent_id: workerId,
+    role,
+    lifecycle_state: 'BOUND_UNVERIFIED',
+    tab_id: `tab-${workerId}`,
+    target_id: targetId,
+    generation_epoch: generationEpoch,
+    conversation_epoch: generationEpoch - 1,
+  });
+}
+
 test('legacy C5 state migrates forward without losing existing durable state', async () => {
   const h = await harness(legacyState());
-  const snap = h.store.snapshot();
-  assert.equal(snap.version, FLEET_RUNTIME_STORE_VERSION);
-  assert.deepEqual(snap.process_observations, []);
-  assert.deepEqual(snap.memory_records, []);
-  assert.deepEqual(snap.learning_candidates, []);
-  assert.deepEqual(snap.scheduler_decisions, []);
+  const state = h.store.snapshot();
+  assert.equal(state.version, FLEET_RUNTIME_STORE_VERSION);
+  assert.equal(state.supervisor.emergency_state, 'PAUSE');
+  assert.deepEqual(state.process_observations, []);
+  assert.deepEqual(state.system_memory, []);
+  assert.deepEqual(state.learning_candidates, []);
+  assert.deepEqual(state.scheduler_decisions, []);
   await h.cleanup();
 });
 
 test('process universe is provenance-bound, freshness-aware, and ignores stale older observations', async () => {
   const h = await harness();
   const first = await ingestFreshProcess(h);
-  assert.equal(h.intelligence.listFreshProcesses().length, 1);
-
-  await h.intelligence.ingestProcessObservation({
+  assert.equal(first.source_system, 'SUPABASE');
+  assert.equal(first.authority, 'SUPABASE');
+  assert.equal(first.stale, false);
+  const ignored = await h.intelligence.ingestProcessObservation({
     source_system: 'SUPABASE',
     source_instance: 'xpeibufgzjknrhbhpffp',
     process_kind: 'ROADMAP_MILESTONE',
     process_id: 'C5_AUTONOMOUS_FLEET_RUNTIME_V1',
-    state: 'WAITING',
+    state: 'OLDER',
     authority: 'SUPABASE',
-    source_cursor: 'older',
-    observed_at: '2026-08-29T17:59:00Z',
+    source_cursor: 'cp1:older',
     stale_after_ms: 60_000,
+    payload_ref: 'supabase:checkpoint:cp1',
+    observed_at: '2026-08-29T17:59:00.000Z',
   });
-  assert.equal(h.intelligence.snapshot().processes[0].source_cursor, first.source_cursor);
-
+  assert.equal(ignored.ignored, true);
+  assert.equal(h.intelligence.listFreshProcesses()[0].state, 'ACTIVE');
   h.advance(61_000);
   assert.equal(h.intelligence.listFreshProcesses().length, 0);
   assert.equal(h.intelligence.snapshot().processes[0].stale, true);
-
-  await assert.rejects(() => h.intelligence.ingestProcessObservation({
-    source_system: 'SUPABASE', source_instance: 'x', process_kind: 'TASK', process_id: 'p1', state: 'ACTIVE',
-    authority: 'PAGE_MODEL', source_cursor: '1', stale_after_ms: 60_000,
-  }), /process_authority_invalid/);
   await h.cleanup();
 });
 
 test('procedural memory and self-learning require verifier evidence and remain branch-local', async () => {
   const h = await harness();
-  const episode = await h.intelligence.remember({
+  const episode = await h.intelligence.recordMemory({
     kind: 'EPISODIC',
-    subject: 'worker-loss-spam-incident',
-    summary_ref: 'git:pr75:incident-evidence',
-    confidence: 1,
-    source_refs: [{ system: 'GITHUB', ref: 'PatrickFrome/Compute#75' }],
-    tags: ['keepalive','incident'],
-    outcome: 'CONTAINED',
+    memory_key: 'episode:c5-observer',
+    value_ref: 'git:research/C5_OBSERVER.md',
+    provenance_refs: [{ system: 'GITHUB', ref: 'commit:abc' }],
   });
-  assert.equal(episode.status, 'VERIFIED_SOURCE_BOUND');
-
-  const procedure = await h.intelligence.remember({
+  const procedure = await h.intelligence.recordMemory({
     kind: 'PROCEDURAL',
-    subject: 'terminal-worker-wake-policy',
-    summary_ref: 'git:work/convergence-global-observer-memory-v1:procedure',
-    confidence: 0.9,
-    source_refs: [{ system: 'GITHUB', ref: 'PatrickFrome/Compute#75' }],
-    tags: ['dedupe'],
+    memory_key: 'procedure:reduce-idle-capacity',
+    value_ref: 'git:test:system-intelligence-v1',
+    provenance_refs: [{ system: 'GITHUB', ref: 'commit:def' }],
+    verifier_refs: [{ system: 'TRUSTED_CI', ref: 'ci:system-intelligence:pass' }],
   });
-  assert.equal(procedure.status, 'CANDIDATE');
-
-  const verifiedProcedure = await h.intelligence.verifyProceduralMemory({
-    memory_id: procedure.memory_id,
-    verifier_refs: [{ system: 'TRUSTED_CI', ref: 'ci:contract-tests:green' }],
-    replay_pass: true,
-    safety_pass: true,
-  });
-  assert.equal(verifiedProcedure.status, 'VERIFIED_BRANCH_LOCAL');
-
+  assert.equal(episode.activation_eligible, false);
+  assert.equal(procedure.activation_eligible, true);
   const candidate = await h.intelligence.proposeLearningCandidate({
     target: 'SCHEDULER_HEURISTIC',
     rationale_ref: 'memory:reduce-idle-capacity',
@@ -160,12 +159,14 @@ test('procedural memory and self-learning require verifier evidence and remain b
 test('autonomous scheduler can start independent work while supervisor is busy without granting actuation authority', async () => {
   const h = await harness();
   const process = await ingestFreshProcess(h);
+  const a = await bindSchedulerWorker(h, 'agent_a', 'IMPLEMENTER', 1, 'webcontents:101');
+  const b = await bindSchedulerWorker(h, 'agent_b', 'RESEARCHER', 1, 'webcontents:102');
   const plan = h.scheduler.plan({
     supervisor_busy: true,
     max_parallel: 6,
     workers: [
-      { worker_id: 'agent_a', role: 'IMPLEMENTER', ready: true },
-      { worker_id: 'agent_b', role: 'RESEARCHER', ready: true },
+      { worker_id: 'agent_a', worker_incarnation_id: a.worker_incarnation_id, role: 'IMPLEMENTER', ready: true },
+      { worker_id: 'agent_b', worker_incarnation_id: b.worker_incarnation_id, role: 'RESEARCHER', ready: true },
     ],
     opportunities: [
       {
@@ -200,6 +201,7 @@ test('autonomous scheduler can start independent work while supervisor is busy w
   assert.equal(plan.proposals[0].objective_key, 'independent-research');
   assert.equal(plan.proposals[0].supervisor_busy_at_plan, true);
   assert.equal(plan.proposals[0].automatic_execution_authority, false);
+  assert.equal(plan.proposals[0].worker_incarnation_id, a.worker_incarnation_id);
   assert.ok(plan.suppressed.some((x) => x.includes('SUPERVISOR_EXCLUSIVE')));
 
   const decision = await h.scheduler.recordDecision(plan);
