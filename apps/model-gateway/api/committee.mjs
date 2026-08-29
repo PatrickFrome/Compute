@@ -4,6 +4,7 @@ import { callGateway } from '../lib/gateway.mjs';
 import { assertZeroSpend } from '../lib/catalog.mjs';
 import { runCommittee } from '../lib/committee.mjs';
 import { toSupervisorAdvisory } from '../lib/supervisor-advisory.mjs';
+import { createCommitteeAdvisoryEvidence } from '../lib/advisory-evidence-envelope.mjs';
 
 function send(response, status, body) {
   response.status(status).json(body);
@@ -69,9 +70,17 @@ export default async function handler(request, response) {
     // pricing/privacy/provenance-bound committee receipt. It cannot synthesize
     // consensus or authorize an action.
     const supervisorAdvisory = toSupervisorAdvisory(enrichedCommittee);
+    // Cross-gateway evidence is deliberately weaker than attestation: it binds
+    // the advisory receipt for downstream Browser/Supervisor verification but
+    // cannot mint truth, browser authority, sandbox execution, or promotion.
+    const advisoryEvidence = createCommitteeAdvisoryEvidence({
+      committeeReceipt: enrichedCommittee,
+      supervisorAdvisory
+    });
     const body = {
       ...enrichedCommittee,
-      supervisor_advisory: supervisorAdvisory
+      supervisor_advisory: supervisorAdvisory,
+      advisory_evidence: advisoryEvidence
     };
     return send(response, committee.quorum_met ? 200 : 503, body);
   } catch (error) {
