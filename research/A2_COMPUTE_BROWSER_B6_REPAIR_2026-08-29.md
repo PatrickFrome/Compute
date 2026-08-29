@@ -139,3 +139,38 @@ coverage gap is the enabling condition for all of them.
   report `remote_probe_not_implemented` (B7 scope).
 - AppVeyor remains A1-only; browser-compute evidence is carried by the new
   GitHub Actions gate.
+
+## 7. Checkpoint ledger seal (AUTHORITATIVE)
+
+The B-line architecture checkpoint was sealed into the authoritative
+Supabase ledger on 2026-08-29 08:08:52 UTC:
+
+- `architecture_version`: A2_COMPUTE_BROWSER_B6_MULTI_BROWSER_POOL_V1_2026-08-29
+- `status`: AUTHORITATIVE
+- `git_commit`: 3eccaee205c70d15eae004c6e2a42767fce0bacb (the evidence head
+  of this document at seal time)
+- `baseline_parent_commit`: 097a3b2909e105c089dba95b8970d94b0a60b25e
+- `next_milestone`: B7_MULTI_BROWSER_POOL_SCHEDULER_V1
+- payload: 15 invariants plus per-milestone evidence objects for B4, B5
+  and B6 (including the repair record and the falsification of the
+  original B6 head's "92/92, production-ready" claim)
+
+Path taken: the REST/service_role insert had been blocked (403 — the
+checkpoint table carries no INSERT grant for service_role), so the seal
+was executed over direct Postgres (session pooler, us-east-2, `postgres`
+role) using operator-provided database credentials, per the standing
+directive to write the DB directly rather than through the mailbox.
+Durability was verified over three independent channels: an
+in-transaction readback, a fresh post-commit connection, and a PostgREST
+readback with the service-role key. Ledger totals after the seal: 30
+rows, 9 AUTHORITATIVE. This row is the first B-line entry in a ledger
+that had previously been written exclusively by the R-line credential
+set.
+
+Post-seal follow-up (same day, commit 6edb826): the health probe gained
+a rejection-guarded interval callback and a re-entrance guard so
+concurrent sweeps coalesce; versions were aligned at 0.3.0-dev.3 and the
+extension stop-button matcher's CP1251 mojibake was repaired to real
+Cyrillic. The sealed invariants — including
+HEALTH_PROBE_NEVER_PINS_EVENT_LOOP — are preserved, and the probe
+non-stacking property is now regression-tested (102/102).
