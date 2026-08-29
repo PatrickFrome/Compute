@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
-export const BROWSER_SENTINEL_VERSION = '1.1.0';
+export const BROWSER_SENTINEL_VERSION = '1.2.0';
 
 async function readJson(file) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); }
@@ -31,6 +31,7 @@ function writeJsonSync(file, value) {
 }
 
 function safeState(value) {
+  const relaunchPid = Number(value.relaunch_pid || 0);
   return {
     schema: 'metaengine.browser-sentinel.state.v1',
     version: BROWSER_SENTINEL_VERSION,
@@ -43,6 +44,7 @@ function safeState(value) {
     expected_restart_reason: value.expected_restart_reason ? String(value.expected_restart_reason).slice(0, 120) : null,
     relaunch_attempted: value.relaunch_attempted === true,
     relaunch_intent_at: value.relaunch_intent_at || null,
+    relaunch_pid: Number.isSafeInteger(relaunchPid) && relaunchPid > 0 ? relaunchPid : null,
     relaunch_result: value.relaunch_result || null,
     created_at: value.created_at || new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -90,6 +92,7 @@ export class BrowserSentinelHost {
       lifecycle: 'ARMED',
       expected_restart: false,
       relaunch_attempted: false,
+      relaunch_pid: null,
     });
     await writeJson(this.#statePath, this.#state);
     const env = sentinelEnvironment(process.env, { statePath: this.#statePath, token, parentPid: process.pid });
