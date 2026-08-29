@@ -2,15 +2,37 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { classifyRetryDecision, REQUEST_EFFECT_CLASS } from '../src/chatgpt-retry-policy.mjs';
 
-test('read-only silent request retries aggressively after 90s when all liveness channels are quiet', () => {
+test('read-only silent request first stops and retries in the same conversation', () => {
   const result = classifyRetryDecision({
     effect_class: REQUEST_EFFECT_CLASS.READ_ONLY,
     silence_age_ms: 91_000,
     request_accepted: true,
     retry_attempt: 0,
   });
+  assert.equal(result.action, 'STOP_AND_RETRY_SAME_CONVERSATION');
+  assert.equal(result.retry_allowed, true);
+});
+
+test('same-chat retry falls back to a new conversation after its local budget is exhausted', () => {
+  const result = classifyRetryDecision({
+    effect_class: REQUEST_EFFECT_CLASS.READ_ONLY,
+    silence_age_ms: 91_000,
+    request_accepted: true,
+    retry_attempt: 1,
+    same_chat_retry_attempt: 1,
+    max_same_chat_retry_attempts: 1,
+  });
   assert.equal(result.action, 'NEW_CONVERSATION_RETRY');
   assert.equal(result.retry_allowed, true);
+});
+
+test('unusable conversation goes directly to a new conversation', () => {
+  const result = classifyRetryDecision({
+    effect_class: REQUEST_EFFECT_CLASS.READ_ONLY,
+    silence_age_ms: 91_000,
+    same_conversation_usable: false,
+  });
+  assert.equal(result.action, 'NEW_CONVERSATION_RETRY');
 });
 
 test('database or durable external progress suppresses retry regardless of visual silence', () => {
@@ -42,24 +64,40 @@ test('effectful ambiguous silence asks for effect check before retry', () => {
   assert.equal(result.retry_allowed, false);
 });
 
-test('effectful request can retry quickly once NO_EFFECT is proven', () => {
+test('effectful request retries in the same conversation once NO_EFFECT is proven', () => {
   const result = classifyRetryDecision({
     effect_class: REQUEST_EFFECT_CLASS.EFFECTFUL,
     silence_age_ms: 5 * 60_000,
     effect_check: 'NO_EFFECT',
   });
-  assert.equal(result.action, 'NEW_CONVERSATION_RETRY');
+  assert.equal(result.action, 'STOP_AND_RETRY_SAME_CONVERSATION');
   assert.equal(result.retry_allowed, true);
 });
 
-test('observed commit/effect forbids replay even when chat is dead', () => {
+test('observed commit/effect forbids replay even when chat request fails', () => {
   const result = classifyRetryDecision({
     effect_class: REQUEST_EFFECT_CLASS.EFFECTFUL,
-    terminal_failure: 'RENDERER_GONE',
+    terminal_failure: 'REQUEST_FAILED',
     effect_check: 'COMMITTED',
   });
   assert.equal(result.action, 'WAIT_FOR_RESULT_RECONCILIATION');
   assert.equal(result.retry_allowed, false);
+});
+
+test('hard conversation failure uses a new conversation rather than same-chat replay', () => {
+  const result = classifyRetryDecision({
+    effect_class: REQUEST_EFFECT_CLASS.READ_ONLY,
+    terminal_failure: 'RENDERER_GONE',
+  });
+  assert.equal(result.action, 'NEW_CONVERSATION_RETRY');
+});
+
+test('soft server error prefers same-chat replay', () => {
+  const result = classifyRetryDecision({
+    effect_class: REQUEST_EFFECT_CLASS.READ_ONLY,
+    terminal_failure: 'SERVER_ERROR',
+  });
+  assert.equal(result.action, 'STOP_AND_RETRY_SAME_CONVERSATION');
 });
 
 test('explicit Continue generating is preferred to replay', () => {
@@ -71,7 +109,7 @@ test('explicit Continue generating is preferred to replay', () => {
   assert.equal(result.action, 'CONTINUE_EXISTING');
 });
 
-test('bounded retry budget prevents loops', () => {
+test('bounded total retry budget prevents loops', () => {
   const result = classifyRetryDecision({
     effect_class: REQUEST_EFFECT_CLASS.READ_ONLY,
     silence_age_ms: 20 * 60_000,
