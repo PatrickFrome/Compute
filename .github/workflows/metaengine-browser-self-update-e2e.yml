@@ -1,0 +1,277 @@
+name: METAENGINE Browser Self Update E2E
+
+on:
+  push:
+    branches:
+      - work/self-update-finalization-v1
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/**'
+      - '.github/workflows/metaengine-browser-self-update-e2e.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: metaengine-browser-self-update-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Parse and contract gates
+        working-directory: apps/metaengine-browser
+        run: |
+          npm run check
+          npm test
+      - name: Static update invariants
+        run: |
+          grep -q 'requestSingleInstanceLock' apps/metaengine-browser/src/single-instance-guard.mjs
+          grep -q "com.metaengine.browser.test" apps/metaengine-browser/src/single-instance-guard.mjs
+          grep -q '"allowToChangeInstallationDirectory": false' apps/metaengine-browser/electron-builder.test.json
+          grep -q 'self_update_test_feed_not_allowed' apps/metaengine-browser/src/self-update-runtime.mjs
+          grep -q 'GITHUB_ACTIONS' apps/metaengine-browser/src/self-update-runtime.mjs
+          ! grep -q "NEON" apps/metaengine-browser/src/self-update-runtime.mjs
+
+  windows-n-to-n-plus-1:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Contract gates before packaging
+        working-directory: apps/metaengine-browser
+        run: |
+          npm run check
+          npm test
+      - name: Build baseline N installer
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          $baseline = "0.6.3-dev.${{ github.run_number }}.0"
+          npm pkg set version=$baseline
+          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$baseline-x64.exe" -File | Select-Object -First 1
+          if (-not $installer) { throw 'baseline_installer_missing' }
+          Copy-Item $installer.FullName "$env:RUNNER_TEMP\baseline-setup.exe"
+          $baseline | Set-Content "$env:RUNNER_TEMP\baseline-version.txt"
+          (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content "$env:RUNNER_TEMP\baseline-sha256.txt"
+      - name: Install baseline N at default identity path
+        shell: powershell
+        run: |
+          $installer = "$env:RUNNER_TEMP\baseline-setup.exe"
+          $install = Start-Process -FilePath $installer -ArgumentList '/S' -PassThru -Wait
+          if ($install.ExitCode -ne 0) { throw "baseline_installer_exit_$($install.ExitCode)" }
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test\METAENGINE Browser Test.exe'
+          if (-not (Test-Path $app)) { throw "baseline_browser_missing:$app" }
+          $app | Set-Content "$env:RUNNER_TEMP\installed-app-path.txt"
+          $profile = Join-Path $env:APPDATA 'METAENGINE Browser Test'
+          New-Item -ItemType Directory -Force -Path $profile | Out-Null
+          'profile-continuity-v1' | Set-Content (Join-Path $profile 'self-update-e2e-marker.txt')
+          $probeOut = "$env:RUNNER_TEMP\baseline-version-probe.out"
+          $probeErr = "$env:RUNNER_TEMP\baseline-version-probe.err"
+          $p = Start-Process -FilePath $app -ArgumentList '--metaengine-version-probe' -PassThru -RedirectStandardOutput $probeOut -RedirectStandardError $probeErr
+          if (-not $p.WaitForExit(15000)) { try { Stop-Process -Id $p.Id -Force } catch {}; throw 'baseline_version_probe_timeout' }
+          if ($p.ExitCode -ne 0) { Get-Content $probeErr -ErrorAction SilentlyContinue; throw "baseline_version_probe_exit_$($p.ExitCode)" }
+          $baseline = (Get-Content "$env:RUNNER_TEMP\baseline-version.txt").Trim()
+          $text = Get-Content $probeOut -Raw
+          if ($text -notmatch [regex]::Escape("\"version\":\"$baseline\"")) { throw "baseline_version_probe_mismatch:$text" }
+      - name: Build target N plus 1 update feed
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          $target = "0.6.3-dev.${{ github.run_number }}.1"
+          npm pkg set version=$target
+          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$target-x64.exe" -File | Select-Object -First 1
+          $blockmap = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$target-x64.exe.blockmap" -File | Select-Object -First 1
+          if (-not $installer) { throw 'target_installer_missing' }
+          if (-not $blockmap) { throw 'target_blockmap_missing' }
+          $feed = "$env:RUNNER_TEMP\self-update-feed"
+          New-Item -ItemType Directory -Force -Path $feed | Out-Null
+          Copy-Item $installer.FullName (Join-Path $feed $installer.Name)
+          Copy-Item $blockmap.FullName (Join-Path $feed $blockmap.Name)
+          $sha512Provider = [System.Security.Cryptography.SHA512]::Create()
+          try {
+            $sha512 = [Convert]::ToBase64String($sha512Provider.ComputeHash([System.IO.File]::ReadAllBytes($installer.FullName)))
+          } finally {
+            $sha512Provider.Dispose()
+          }
+          $releaseDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+          @(
+            "version: $target",
+            'files:',
+            "  - url: $($installer.Name)",
+            "    sha512: $sha512",
+            "    size: $($installer.Length)",
+            "path: $($installer.Name)",
+            "sha512: $sha512",
+            "releaseDate: '$releaseDate'",
+            'stagingPercentage: 100'
+          ) | Set-Content (Join-Path $feed 'dev.yml') -Encoding utf8
+          $target | Set-Content "$env:RUNNER_TEMP\target-version.txt"
+          (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content "$env:RUNNER_TEMP\target-sha256.txt"
+      - name: Start loopback-only update feed
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+          $listener.Start()
+          $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+          $listener.Stop()
+          $env:METAENGINE_UPDATE_FEED_ROOT = "$env:RUNNER_TEMP\self-update-feed"
+          $env:METAENGINE_UPDATE_FEED_PORT = "$port"
+          $env:METAENGINE_UPDATE_FEED_READY = "$env:RUNNER_TEMP\self-update-feed.ready"
+          $node = (Get-Command node).Source
+          $serverOut = "$env:RUNNER_TEMP\self-update-feed.out"
+          $serverErr = "$env:RUNNER_TEMP\self-update-feed.err"
+          $server = Start-Process -FilePath $node -ArgumentList 'test/self-update-feed-server.cjs' -WorkingDirectory (Get-Location) -PassThru -RedirectStandardOutput $serverOut -RedirectStandardError $serverErr
+          $deadline = (Get-Date).AddSeconds(10)
+          while (-not (Test-Path $env:METAENGINE_UPDATE_FEED_READY) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 100 }
+          if (-not (Test-Path $env:METAENGINE_UPDATE_FEED_READY)) { Get-Content $serverErr -ErrorAction SilentlyContinue; throw 'self_update_feed_not_ready' }
+          $server.Id | Set-Content "$env:RUNNER_TEMP\self-update-feed.pid"
+          $port | Set-Content "$env:RUNNER_TEMP\self-update-feed.port"
+      - name: Exercise installed N through updater download install and forced relaunch
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          GITHUB_ACTIONS: 'true'
+          METAENGINE_SELF_UPDATE_TEST_MODE: '1'
+          METAENGINE_DISABLE_CRASH_SENTINEL: '1'
+        run: |
+          $app = (Get-Content "$env:RUNNER_TEMP\installed-app-path.txt").Trim()
+          $baseline = (Get-Content "$env:RUNNER_TEMP\baseline-version.txt").Trim()
+          $target = (Get-Content "$env:RUNNER_TEMP\target-version.txt").Trim()
+          $port = (Get-Content "$env:RUNNER_TEMP\self-update-feed.port").Trim()
+          $env:METAENGINE_SELF_UPDATE_TEST_FEED_URL = "http://127.0.0.1:$port/"
+          $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE = "$env:RUNNER_TEMP\self-update-smoke.jsonl"
+          $out = "$env:RUNNER_TEMP\self-update-smoke.out"
+          $err = "$env:RUNNER_TEMP\self-update-smoke.err"
+          $source = Start-Process -FilePath $app -ArgumentList '--metaengine-self-update-smoke' -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          $sourcePid = $source.Id
+          if (-not $source.WaitForExit(150000)) {
+            try { Stop-Process -Id $source.Id -Force } catch {}
+            Get-Content $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE -ErrorAction SilentlyContinue
+            Get-Content $err -ErrorAction SilentlyContinue
+            throw 'self_update_source_timeout'
+          }
+          $trace = Get-Content $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE -Raw -ErrorAction Stop
+          if ($trace -notmatch '"metadata_verified":true') { throw 'self_update_metadata_verified_missing' }
+          if ($trace -notmatch '"state":"READY_RESTART"|"state":"RESTART_GRACE"|"state":"RESTARTING"') { throw 'self_update_restart_state_missing' }
+          if ($trace -notmatch '"ci_test_feed_active":true') { throw 'self_update_ci_feed_not_active' }
+          if ($trace -notmatch [regex]::Escape("\"available_version\":\"$target\"")) { throw 'self_update_target_version_not_observed' }
+          $successor = $null
+          $deadline = (Get-Date).AddSeconds(90)
+          do {
+            Start-Sleep -Milliseconds 500
+            $rows = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -eq $app -and $_.ProcessId -ne $sourcePid }
+            if ($rows) { $successor = $rows | Select-Object -First 1; break }
+          } while ((Get-Date) -lt $deadline)
+          if (-not $successor) {
+            Get-Content $out -ErrorAction SilentlyContinue
+            Get-Content $err -ErrorAction SilentlyContinue
+            throw 'self_update_forced_successor_not_observed'
+          }
+          "source_version=$baseline" | Set-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
+          "target_version=$target" | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
+          "source_pid=$sourcePid" | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
+          "successor_pid=$($successor.ProcessId)" | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
+          "installed_path=$app" | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
+          try { Stop-Process -Id $successor.ProcessId -Force -ErrorAction Stop } catch { throw "successor_stop_failed:$($_.Exception.Message)" }
+          Start-Sleep -Seconds 2
+          $probeOut = "$env:RUNNER_TEMP\target-version-probe.out"
+          $probeErr = "$env:RUNNER_TEMP\target-version-probe.err"
+          $probe = Start-Process -FilePath $app -ArgumentList '--metaengine-version-probe' -PassThru -RedirectStandardOutput $probeOut -RedirectStandardError $probeErr
+          if (-not $probe.WaitForExit(15000)) { try { Stop-Process -Id $probe.Id -Force } catch {}; throw 'target_version_probe_timeout' }
+          if ($probe.ExitCode -ne 0) { Get-Content $probeErr -ErrorAction SilentlyContinue; throw "target_version_probe_exit_$($probe.ExitCode)" }
+          $text = Get-Content $probeOut -Raw
+          if ($text -notmatch [regex]::Escape("\"version\":\"$target\"")) { throw "target_version_probe_mismatch:$text" }
+          "target_version_probe=PASS" | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
+          $marker = Join-Path $env:APPDATA 'METAENGINE Browser Test\self-update-e2e-marker.txt'
+          if (-not (Test-Path $marker)) { throw 'profile_continuity_marker_missing_after_update' }
+          if ((Get-Content $marker -Raw).Trim() -ne 'profile-continuity-v1') { throw 'profile_continuity_marker_changed' }
+          "profile_continuity=PASS" | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
+          $folders = @(Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Directory | Where-Object { $_.Name -eq 'METAENGINE Browser Test' })
+          if ($folders.Count -ne 1) { throw "in_place_install_directory_count_invalid:$($folders.Count)" }
+          "in_place_install_directory=PASS" | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
+      - name: Prove physical singleton after update
+        shell: powershell
+        run: |
+          $app = (Get-Content "$env:RUNNER_TEMP\installed-app-path.txt").Trim()
+          $firstOut = "$env:RUNNER_TEMP\singleton-first.out"
+          $firstErr = "$env:RUNNER_TEMP\singleton-first.err"
+          $first = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $firstOut -RedirectStandardError $firstErr
+          $deadline = (Get-Date).AddSeconds(10)
+          while ((-not (Test-Path $firstOut) -or (Get-Item $firstOut -ErrorAction SilentlyContinue).Length -eq 0) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 100 }
+          $first.Refresh()
+          if ($first.HasExited) { Get-Content $firstErr -ErrorAction SilentlyContinue; throw 'singleton_primary_exited_early' }
+          $secondOut = "$env:RUNNER_TEMP\singleton-second.out"
+          $secondErr = "$env:RUNNER_TEMP\singleton-second.err"
+          $second = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $secondOut -RedirectStandardError $secondErr
+          if (-not $second.WaitForExit(7000)) { try { Stop-Process -Id $second.Id -Force } catch {}; throw 'singleton_secondary_did_not_exit' }
+          $first.Refresh()
+          if ($first.HasExited) { throw 'singleton_secondary_displaced_primary' }
+          $primaryText = Get-Content $firstOut -Raw
+          if ($primaryText -notmatch '"primary_instance":true') { throw 'singleton_primary_receipt_missing' }
+          $secondaryText = Get-Content $secondOut -Raw -ErrorAction SilentlyContinue
+          if ($secondaryText -match '"primary_instance":true') { throw 'singleton_secondary_claimed_primary' }
+          "single_instance_physical=PASS" | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
+          try { Stop-Process -Id $first.Id -Force -ErrorAction SilentlyContinue } catch {}
+      - name: Stop loopback feed
+        if: always()
+        shell: powershell
+        run: |
+          if (Test-Path "$env:RUNNER_TEMP\self-update-feed.pid") {
+            $pidToStop = [int](Get-Content "$env:RUNNER_TEMP\self-update-feed.pid")
+            try { Stop-Process -Id $pidToStop -Force -ErrorAction SilentlyContinue } catch {}
+          }
+      - name: Stage E2E evidence
+        if: always()
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path self-update-evidence | Out-Null
+          foreach ($file in @(
+            'baseline-version.txt','target-version.txt','baseline-sha256.txt','target-sha256.txt',
+            'self-update-smoke.jsonl','self-update-smoke.out','self-update-smoke.err',
+            'self-update-e2e-proof.txt','baseline-version-probe.out','target-version-probe.out',
+            'singleton-first.out','singleton-second.out','self-update-feed.out','self-update-feed.err'
+          )) {
+            $source = Join-Path $env:RUNNER_TEMP $file
+            if (Test-Path $source) { Copy-Item $source self-update-evidence\ }
+          }
+          git rev-parse HEAD | Set-Content self-update-evidence\git-head.txt
+      - name: Upload self-update evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: metaengine-browser-self-update-e2e-${{ github.sha }}-${{ github.run_attempt }}
+          path: self-update-evidence/
+          if-no-files-found: error
