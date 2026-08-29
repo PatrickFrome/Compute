@@ -1,12 +1,12 @@
 import crypto from 'node:crypto';
 
-export const SYSTEM_INTELLIGENCE_VERSION = '1.0.0';
-export const PROCESS_SOURCE_SYSTEMS = Object.freeze(['GITHUB','SUPABASE','NEON','NATIVE_CONTROL_PLANE','CI']);
+export const SYSTEM_INTELLIGENCE_VERSION = '1.0.1';
+export const PROCESS_SOURCE_SYSTEMS = Object.freeze(['GITHUB','SUPABASE','NATIVE_CONTROL_PLANE','CI']);
 export const PROCESS_STATES = Object.freeze(['ACTIVE','WAITING','BLOCKED','TERMINAL','FAILED','ARCHIVED','UNKNOWN']);
 export const MEMORY_KINDS = Object.freeze(['EPISODIC','SEMANTIC','PROCEDURAL']);
 export const LEARNING_TARGETS = Object.freeze(['ROUTER_HEURISTIC','SCHEDULER_HEURISTIC','SKILL_CANDIDATE','MEMORY_POLICY']);
 
-const TRUSTED_AUTHORITIES = new Set(['GITHUB','SUPABASE','NEON_CONTROL_PLANE','TRUSTED_NATIVE_CONTROL_PLANE','TRUSTED_CI']);
+const TRUSTED_AUTHORITIES = new Set(['GITHUB','SUPABASE','TRUSTED_NATIVE_CONTROL_PLANE','TRUSTED_CI']);
 const clone = (value) => value == null ? value : structuredClone(value);
 
 function iso(clock, value = null) {
@@ -80,6 +80,7 @@ export class SystemIntelligence {
       learning_candidates: clone(state.learning_candidates),
       scheduler_decisions: clone(state.scheduler_decisions),
       policy: {
+        database_authority: 'SUPABASE_ONLY',
         raw_database_secrets_in_browser: false,
         page_or_model_memory_authority: false,
         self_learning_direct_production_activation: false,
@@ -111,6 +112,7 @@ export class SystemIntelligence {
     if (!PROCESS_STATES.includes(processState)) throw new Error('system_intelligence_process_state_invalid');
     const trustedAuthority = String(authority || '').toUpperCase();
     if (!TRUSTED_AUTHORITIES.has(trustedAuthority)) throw new Error('system_intelligence_process_authority_invalid');
+    if (sourceSystem === 'SUPABASE' && trustedAuthority !== 'SUPABASE') throw new Error('system_intelligence_supabase_authority_mismatch');
     const cursor = opaque(source_cursor, 500);
     const observedAt = iso(this.#clock, observed_at);
     const staleMs = Number(stale_after_ms);
