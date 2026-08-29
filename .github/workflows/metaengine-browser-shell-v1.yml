@@ -56,6 +56,7 @@ jobs:
       - name: Security static gate
         run: |
           grep -q 'app.enableSandbox()' apps/metaengine-browser/src/main.mjs
+          grep -q 'app.enableSandbox()' apps/metaengine-browser/src/development-plane-smoke.mjs
           grep -q 'nodeIntegration: false' apps/metaengine-browser/src/browser-policy.mjs
           grep -q 'contextIsolation: true' apps/metaengine-browser/src/browser-policy.mjs
           grep -q 'sandbox: true' apps/metaengine-browser/src/browser-policy.mjs
@@ -63,17 +64,15 @@ jobs:
           grep -q 'direct_promote_current: false' apps/metaengine-browser/src/development-plane.mjs
           grep -q 'verified_shutdown_required: true' apps/metaengine-browser/src/development-plane.mjs
           grep -q 'cooperative_shutdown: true' apps/metaengine-browser/src/development-plane.mjs
-          grep -q 'stopAndWait(4000)' apps/metaengine-browser/src/main.mjs
-          grep -q "env: { METAENGINE_REPO_ROOT: repoRoot }" apps/metaengine-browser/src/main.mjs
+          grep -q 'stopAndWait(4000)' apps/metaengine-browser/src/development-plane-smoke.mjs
+          grep -q 'cooperative_shutdown_ack === true' apps/metaengine-browser/src/development-plane-smoke.mjs
           ! grep -E 'child_process|exec\(|eval\(|new Function' apps/metaengine-browser/src/development-plane-worker.cjs
           ! grep -R -E 'executeJavaScript|Runtime\.evaluate|--remote-debugging-port|--no-sandbox|chat\.z\.ai|GLM_ZAI|STRICT_GLM_FIRST' apps/metaengine-browser --exclude-dir=node_modules
           ! grep -R -E 'nodeIntegration:[[:space:]]*true|sandbox:[[:space:]]*false' apps/metaengine-browser --exclude-dir=node_modules
       - name: Preserve B-line contracts
         working-directory: coordination/browser-compute
         run: node --test tests/*.test.mjs
-      - name: Linux Development Plane launch diagnostic
-        id: linux_devplane
-        continue-on-error: true
+      - name: Linux Development Plane physical smoke
         working-directory: apps/metaengine-browser
         shell: bash
         run: |
@@ -81,6 +80,7 @@ jobs:
           timeout 15s xvfb-run -a npm run devplane-smoke | tee /tmp/metaengine-devplane-smoke.jsonl
           grep -q '"ok":true' /tmp/metaengine-devplane-smoke.jsonl
           grep -q '"state":"STOPPED"' /tmp/metaengine-devplane-smoke.jsonl
+          grep -q '"cooperative_shutdown_ack":true' /tmp/metaengine-devplane-smoke.jsonl
       - name: Electron renderer diagnostic
         id: renderer_smoke
         continue-on-error: true
@@ -94,9 +94,9 @@ jobs:
         run: |
           mkdir -p evidence-out
           if grep -q '"ok":true' /tmp/metaengine-devplane-smoke.jsonl 2>/dev/null && grep -q '"state":"STOPPED"' /tmp/metaengine-devplane-smoke.jsonl 2>/dev/null; then
-            echo 'linux_devplane_smoke=PASS_WITH_VERIFIED_SHUTDOWN' | tee evidence-out/linux-devplane-smoke-status.txt
+            echo 'linux_devplane_smoke=PASS_WITH_VERIFIED_COOPERATIVE_SHUTDOWN' | tee evidence-out/linux-devplane-smoke-status.txt
           else
-            echo 'linux_devplane_smoke=NOT_PROVED_ON_HOSTED_UBUNTU' | tee evidence-out/linux-devplane-smoke-status.txt
+            echo 'linux_devplane_smoke=FAILED' | tee evidence-out/linux-devplane-smoke-status.txt
           fi
           if grep -q '"ok":true' /tmp/metaengine-browser-smoke.jsonl 2>/dev/null; then
             echo 'renderer_smoke=PASS' | tee evidence-out/renderer-smoke-status.txt
@@ -113,6 +113,7 @@ jobs:
           cp research/METAENGINE_BROWSER_STEP4_WINDOWS_LIFECYCLE_REPAIR_2026-08-29.md evidence-out/
           cp research/METAENGINE_BROWSER_STEP5_COOPERATIVE_UTILITY_SHUTDOWN_2026-08-29.md evidence-out/
           cp research/METAENGINE_BROWSER_STEP6_WINDOWS_RUNNER_DIAGNOSTIC_2026-08-29.md evidence-out/
+          cp research/METAENGINE_BROWSER_STEP7_ISOLATED_DP_SMOKE_2026-08-29.md evidence-out/
           test ! -f /tmp/metaengine-browser-smoke.jsonl || cp /tmp/metaengine-browser-smoke.jsonl evidence-out/
           test ! -f /tmp/metaengine-devplane-smoke.jsonl || cp /tmp/metaengine-devplane-smoke.jsonl evidence-out/
           git rev-parse HEAD > evidence-out/git-head.txt
@@ -166,27 +167,34 @@ jobs:
         run: |
           $out = Join-Path $env:RUNNER_TEMP 'metaengine-dp-out.txt'
           $err = Join-Path $env:RUNNER_TEMP 'metaengine-dp-err.txt'
+          $trace = Join-Path $env:RUNNER_TEMP 'metaengine-dp-trace.jsonl'
+          $env:METAENGINE_SMOKE_TRACE = $trace
           $electron = Join-Path (Get-Location) 'node_modules\electron\dist\electron.exe'
           if (-not (Test-Path $electron)) { throw "electron_binary_missing" }
-          $arguments = @('--enable-logging=stderr', '--v=1', '--disable-gpu', '.', '--metaengine-devplane-smoke')
+          $arguments = @('--enable-logging=stderr', '--v=1', '--disable-gpu', 'src/development-plane-smoke.mjs')
           $p = Start-Process -FilePath $electron -ArgumentList $arguments -WorkingDirectory (Get-Location) -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
           if (-not $p.WaitForExit(30000)) {
             try { $p.Kill($true) } catch {}
+            Get-Content $trace -ErrorAction SilentlyContinue
             Get-Content $out -ErrorAction SilentlyContinue
             Get-Content $err -ErrorAction SilentlyContinue
             throw "development_plane_windows_timeout"
           }
+          Get-Content $trace -ErrorAction SilentlyContinue
           Get-Content $out -ErrorAction SilentlyContinue
           Get-Content $err -ErrorAction SilentlyContinue
           if ($p.ExitCode -ne 0) { throw "development_plane_windows_exit_$($p.ExitCode)" }
-          if (-not (Select-String -Path $out -Pattern '"ok":true' -Quiet)) { throw "development_plane_windows_receipt_missing" }
-          if (-not (Select-String -Path $out -Pattern '"state":"STOPPED"' -Quiet)) { throw "development_plane_windows_shutdown_receipt_missing" }
+          if (-not (Select-String -Path $trace -Pattern '"stage":"COMPLETE"' -Quiet)) { throw "development_plane_windows_complete_marker_missing" }
+          if (-not (Select-String -Path $trace -Pattern '"ok":true' -Quiet)) { throw "development_plane_windows_receipt_missing" }
+          if (-not (Select-String -Path $trace -Pattern '"shutdown_state":"STOPPED"' -Quiet)) { throw "development_plane_windows_shutdown_receipt_missing" }
+          if (-not (Select-String -Path $trace -Pattern '"cooperative_shutdown_ack":true' -Quiet)) { throw "development_plane_windows_shutdown_ack_missing" }
       - name: Windows evidence
         if: always()
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force -Path evidence-windows | Out-Null
           git rev-parse HEAD | Set-Content evidence-windows\git-head.txt
+          if (Test-Path "$env:RUNNER_TEMP\metaengine-dp-trace.jsonl") { Copy-Item "$env:RUNNER_TEMP\metaengine-dp-trace.jsonl" evidence-windows\ }
           if (Test-Path "$env:RUNNER_TEMP\metaengine-dp-out.txt") { Copy-Item "$env:RUNNER_TEMP\metaengine-dp-out.txt" evidence-windows\ }
           if (Test-Path "$env:RUNNER_TEMP\metaengine-dp-err.txt") { Copy-Item "$env:RUNNER_TEMP\metaengine-dp-err.txt" evidence-windows\ }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
