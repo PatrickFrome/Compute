@@ -1,5 +1,5 @@
 import { sha256 } from './security.mjs';
-import { canonicalJson } from './supervisor-advisory.mjs';
+import { canonicalJson, validateCommitteeReceipt } from './supervisor-advisory.mjs';
 
 export const ADVISORY_EVIDENCE_SCHEMA = 'metaengine.advisory-evidence-envelope.v1';
 export const ADVISORY_EVIDENCE_VERIFY_SCHEMA = 'metaengine.advisory-evidence-envelope-verify.v1';
@@ -163,6 +163,42 @@ export function createAdvisoryEvidenceEnvelope(input) {
     ...core,
     evidence_id: `advisory_evidence_sha256_${envelopeSha256}`,
     envelope_sha256: envelopeSha256
+  });
+}
+
+export function createCommitteeAdvisoryEvidence({ committeeReceipt, supervisorAdvisory, traceId = null } = {}) {
+  const validated = validateCommitteeReceipt(committeeReceipt);
+  requireObject(supervisorAdvisory, 'advisory_evidence_supervisor_advisory_required');
+  if (supervisorAdvisory.schema !== 'metaengine.supervisor.advisory-committee.v1') throw new Error('advisory_evidence_supervisor_schema_invalid');
+  if (supervisorAdvisory.task_id !== committeeReceipt.task_id || supervisorAdvisory.request_sha256 !== committeeReceipt.request_sha256) {
+    throw new Error('advisory_evidence_supervisor_subject_mismatch');
+  }
+  if (supervisorAdvisory.committee_receipt_sha256 !== sha256(canonicalJson(committeeReceipt))) {
+    throw new Error('advisory_evidence_committee_hash_mismatch');
+  }
+  if (supervisorAdvisory.requires_supervisor_arbitration !== true || supervisorAdvisory.direct_action_allowed !== false || supervisorAdvisory.executable_action !== null || supervisorAdvisory.canonical !== false || supervisorAdvisory.authority_effect !== false) {
+    throw new Error('advisory_evidence_supervisor_authority_invalid');
+  }
+
+  const servedModels = validated.members
+    .filter((member) => member.status === 'SUCCESS')
+    .map((member) => member.served_model);
+
+  return createAdvisoryEvidenceEnvelope({
+    task_id: committeeReceipt.task_id,
+    trace_id: traceId,
+    request_sha256: committeeReceipt.request_sha256,
+    gateway_plane: 'VERCEL_AI_GATEWAY',
+    route_id: 'committee:free:v1',
+    transport: 'OPENAI_COMPAT_HTTP',
+    source_receipt_schema: supervisorAdvisory.schema,
+    receipt_kind: 'COMMITTEE',
+    object_sha256: sha256(canonicalJson(supervisorAdvisory)),
+    served_models: servedModels,
+    availability_quorum_met: validated.quorumMet,
+    decision_state: committeeReceipt.committee_status,
+    tariff_dependency: true,
+    data_policy: DATA_POLICY
   });
 }
 
