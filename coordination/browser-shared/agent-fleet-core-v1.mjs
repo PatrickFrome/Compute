@@ -8,7 +8,6 @@ const CAPABILITY_RE = /^[a-z0-9][a-z0-9._:-]{1,95}$/;
 
 export const AGENT_FLEET_VERSION = '1.0.0';
 export const AGENT_STATES = Object.freeze(['REGISTERED', 'READY', 'BUSY', 'DRAINING', 'LOST', 'RETIRED']);
-const STATE_SET = new Set(AGENT_STATES);
 
 function clone(value) { return value == null ? value : structuredClone(value); }
 function exactKeys(value, expected, code) {
@@ -164,7 +163,7 @@ export class AgentFleetCoreV1 {
   completeWork({ manager_id, agent_id, assignment_id, generation_epoch, disposition = 'READY' }) {
     this.#assertManager(manager_id);
     const agent = this.#requireAgent(agent_id);
-    if (agent.lifecycle_state !== 'BUSY' || !agent.active_assignment) throw new AgentFleetError('agent_assignment_not_active');
+    if (!['BUSY', 'DRAINING'].includes(agent.lifecycle_state) || !agent.active_assignment) throw new AgentFleetError('agent_assignment_not_active');
     const assignmentId = token(assignment_id, ASSIGNMENT_ID_RE, 128, 'agent_assignment_id_invalid', (v) => v.toLowerCase());
     if (agent.active_assignment.assignment_id !== assignmentId) throw new AgentFleetError('agent_assignment_identity_mismatch');
     if (Number(generation_epoch) !== agent.generation_epoch || agent.active_assignment.generation_epoch !== agent.generation_epoch) {
@@ -172,6 +171,7 @@ export class AgentFleetCoreV1 {
     }
     const nextState = String(disposition || '').toUpperCase();
     if (!['READY', 'DRAINING'].includes(nextState)) throw new AgentFleetError('agent_completion_disposition_invalid');
+    if (agent.lifecycle_state === 'DRAINING' && nextState !== 'DRAINING') throw new AgentFleetError('agent_draining_completion_must_remain_draining');
     const at = nowIso(this.#clock);
     const next = withAgent(agent, { lifecycle_state: nextState, active_assignment: null }, at);
     this.#agents.set(agent.agent_id, next);
