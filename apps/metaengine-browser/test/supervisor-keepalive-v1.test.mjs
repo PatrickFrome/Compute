@@ -14,7 +14,8 @@ async function harness({ outcome = 'CONFIRMED', watchdogMs = 60000 } = {}) {
   let seq = 0;
   const clock = () => now;
   const uuid = () => `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
-  const store = new FleetRuntimeStore({ statePath: path.join(dir, 'state.json'), clock });
+  const statePath = path.join(dir, 'state.json');
+  const store = new FleetRuntimeStore({ statePath, clock });
   const runtime = new FleetRuntime({ store, clock, uuid });
   await runtime.init();
   const sends = [];
@@ -60,7 +61,7 @@ async function harness({ outcome = 'CONFIRMED', watchdogMs = 60000 } = {}) {
   await keepalive.bindTargetIncarnation({ tab_id: 'supervisor-tab', target_incarnation: 'webcontents:99' });
   await keepalive.resume();
   return {
-    dir, store, runtime, keepalive, transport, sends,
+    dir, statePath, clock, uuid, store, runtime, keepalive, transport, sends,
     advance(ms) { now += ms; },
   };
 }
@@ -143,6 +144,88 @@ test('watchdog is coarse and only wakes after durable deadline', async (t) => {
   assert.equal(result.woke, true);
   assert.equal(result.reason, 'WATCHDOG_DEADLINE');
   assert.equal(h.sends.length, 1);
+});
+
+test('settled worker result receipt produces exactly one supervisor wake', async (t) => {
+  const h = await harness();
+  t.after(() => fs.rm(h.dir, { recursive: true, force: true }));
+  const binding = await h.runtime.bindWorkerIncarnation({
+    agent_id: 'agent_result01',
+    role: 'SYNTHESIZER',
+    lifecycle_state: 'BOUND_UNVERIFIED',
+    tab_id: 'tab-result',
+    target_id: 'webcontents:77',
+    generation_epoch: 1,
+    conversation_epoch: 0,
+  });
+  await h.runtime.createAssignment({
+    assignment_id: 'assignment-result-1',
+    attempt_id: 'attempt-result-1',
+    worker_id: 'agent_result01',
+    cycle_id: 'cycle-result-1',
+    authority_refs: [{ system: 'GITHUB', ref: 'checkpoint:c5-result' }],
+  });
+  await h.runtime.recordReadinessProof({
+    assignment_id: 'assignment-result-1',
+    attempt_id: 'attempt-result-1',
+    worker_incarnation_id: binding.worker_incarnation_id,
+    proof_id: 'proof-result-1',
+    authority: 'TRUSTED_NATIVE_CONTROL_PLANE',
+    source_taint: 'TRUSTED_CONTROL_PLANE',
+    transport_kind: 'SUPERVISOR_MEDIATED_ROUNDTRIP',
+    transport_session_id: 'transport-result-1',
+    ready: true,
+  });
+  await h.runtime.startAssignment({ assignment_id: 'assignment-result-1', attempt_id: 'attempt-result-1' });
+  await h.runtime.recordResultReceipt({
+    assignment_id: 'assignment-result-1',
+    attempt_id: 'attempt-result-1',
+    worker_incarnation_id: binding.worker_incarnation_id,
+    receipt_id: 'receipt-result-1',
+    result_status: 'SUCCEEDED',
+    effect_outcome: 'CONFIRMED_EFFECT',
+    evidence_refs: [{ kind: 'TRACE', ref: 'artifact:opaque-result', sha256: 'b'.repeat(64) }],
+  });
+
+  const first = await h.keepalive.tick();
+  assert.equal(first.woke, true);
+  assert.equal(first.reason, 'WORKER_RESULT_READY');
+  assert.equal(h.sends.length, 1);
+  assert.doesNotMatch(h.sends[0].message, /opaque-result|artifact|TRACE/);
+
+  h.advance(6000);
+  await h.keepalive.tick();
+  assert.equal(h.sends.length, 1);
+  assert.equal(h.runtime.snapshot().wake_events[0].status, 'SENT');
+});
+
+test('durable binding and emergency PAUSE/OFF survive runtime restart', async (t) => {
+  const h = await harness();
+  t.after(() => fs.rm(h.dir, { recursive: true, force: true }));
+  await h.keepalive.pause();
+
+  const pausedStore = new FleetRuntimeStore({ statePath: h.statePath, clock: h.clock });
+  const pausedRuntime = new FleetRuntime({ store: pausedStore, clock: h.clock, uuid: h.uuid });
+  await pausedRuntime.init();
+  const pausedTransport = {
+    configured: false,
+    async proveIdleComposerReady() { return { ok: false }; },
+    async semanticSend() { throw new Error('must_not_send'); },
+  };
+  const pausedKeepalive = new SupervisorKeepalive({ store: pausedStore, runtime: pausedRuntime, transport: pausedTransport, clock: h.clock });
+  await pausedKeepalive.init();
+  assert.equal(pausedKeepalive.status().emergency_state, 'PAUSE');
+  assert.equal(pausedKeepalive.status().binding.conversation_id, '01234567-89ab-cdef-0123-456789abcdef');
+
+  await pausedKeepalive.off();
+  const offStore = new FleetRuntimeStore({ statePath: h.statePath, clock: h.clock });
+  const offRuntime = new FleetRuntime({ store: offStore, clock: h.clock, uuid: h.uuid });
+  await offRuntime.init();
+  const offKeepalive = new SupervisorKeepalive({ store: offStore, runtime: offRuntime, transport: pausedTransport, clock: h.clock });
+  await offKeepalive.init();
+  assert.equal(offKeepalive.status().emergency_state, 'OFF');
+  assert.equal(offKeepalive.status().keepalive_state, 'OFF');
+  assert.equal(offKeepalive.status().binding.conversation_url, 'https://chatgpt.com/c/01234567-89ab-cdef-0123-456789abcdef');
 });
 
 test('native transport uses semantic type/click only and classifies unproven send readback as ambiguous', async () => {
