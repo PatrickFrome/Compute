@@ -14,8 +14,8 @@ import {
 import { logicalInventory, logicalModelPlan, sanitizeChatCompletion } from '../lib/openai-compat.mjs';
 
 test('free route is zero-cost allowlist only', () => {
-  assert.deepEqual(modelPlan('free'), ['minimax/minimax-m3-free', 'poolside/laguna-s-2.1-free']);
-  assert.deepEqual(modelPlan('coding', { paidOk: true, env: {} }), ['minimax/minimax-m3-free', 'poolside/laguna-s-2.1-free']);
+  assert.deepEqual(modelPlan('free'), ['minimax/minimax-m3-free', 'poolside/laguna-s-2.1-free', 'inclusionai/ling-3.0-flash-fin-free']);
+  assert.deepEqual(modelPlan('coding', { paidOk: true, env: {} }), ['minimax/minimax-m3-free', 'poolside/laguna-s-2.1-free', 'inclusionai/ling-3.0-flash-fin-free']);
 });
 
 test('paid frontier route requires two-key opt in', () => {
@@ -65,7 +65,7 @@ test('gateway call emits bounded trusted envelope without provider keys', async 
     return new Response(JSON.stringify({ output_text: 'ok' }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
   const result = await callGateway({
-    models: ['minimax/minimax-m3-free', 'poolside/laguna-s-2.1-free'],
+    models: ['minimax/minimax-m3-free', 'poolside/laguna-s-2.1-free', 'inclusionai/ling-3.0-flash-fin-free'],
     input: 'hello',
     taskId: 't1',
     maxOutputTokens: 777,
@@ -75,7 +75,7 @@ test('gateway call emits bounded trusted envelope without provider keys', async 
   assert.equal(result.primary, 'minimax/minimax-m3-free');
   assert.equal(captured.headers.authorization, 'Bearer oidc-test');
   const body = JSON.parse(captured.body);
-  assert.deepEqual(body.providerOptions.gateway.models, ['minimax/minimax-m3-free', 'poolside/laguna-s-2.1-free']);
+  assert.deepEqual(body.providerOptions.gateway.models, ['minimax/minimax-m3-free', 'poolside/laguna-s-2.1-free', 'inclusionai/ling-3.0-flash-fin-free']);
   assert.equal(body.providerOptions.gateway.user, 'metaengine:t1');
   assert.equal(body.max_output_tokens, 777);
 });
@@ -96,10 +96,11 @@ test('live catalog gate blocks missing or repriced free models', async () => {
   const zeroCatalog = async () => new Response(JSON.stringify({
     data: [
       { id: 'minimax/minimax-m3-free', pricing: { input: '0', output: '0' } },
-      { id: 'poolside/laguna-s-2.1-free', pricing: { input: '0', output: '0' } }
+      { id: 'poolside/laguna-s-2.1-free', pricing: { input: '0', output: '0' } },
+      { id: 'inclusionai/ling-3.0-flash-fin-free', pricing: { input: '0', output: '0' } }
     ]
   }), { status: 200, headers: { 'content-type': 'application/json' } });
-  await assertZeroSpend(['minimax/minimax-m3-free', 'poolside/laguna-s-2.1-free'], { fetchImpl: zeroCatalog, ttlMs: 0 });
+  await assertZeroSpend(['minimax/minimax-m3-free', 'poolside/laguna-s-2.1-free', 'inclusionai/ling-3.0-flash-fin-free'], { fetchImpl: zeroCatalog, ttlMs: 0 });
 
   resetCatalogCacheForTests();
   const repricedCatalog = async () => new Response(JSON.stringify({
@@ -180,15 +181,16 @@ test('paid route fails closed when live pricing exceeds budget', async () => {
   );
 });
 
-test('logical inventory exposes two sovereign peer aliases', () => {
+test('logical inventory exposes three sovereign peer aliases', () => {
   const inventory = logicalInventory();
-  assert.deepEqual(inventory.data.map((x) => x.id), ['metaengine/peer-a-free', 'metaengine/peer-b-free']);
+  assert.deepEqual(inventory.data.map((x) => x.id), ['metaengine/peer-a-free', 'metaengine/peer-b-free', 'metaengine/peer-c-free']);
   assert.equal(inventory.data.every((x) => x.authority_effect === false && x.zero_spend_required === true), true);
 });
 
 test('logical peers prefer different zero-spend providers', () => {
-  assert.deepEqual(logicalModelPlan('metaengine/peer-a-free'), ['minimax/minimax-m3-free', 'poolside/laguna-s-2.1-free']);
-  assert.deepEqual(logicalModelPlan('metaengine/peer-b-free'), ['poolside/laguna-s-2.1-free', 'minimax/minimax-m3-free']);
+  assert.deepEqual(logicalModelPlan('metaengine/peer-a-free'), ['minimax/minimax-m3-free', 'poolside/laguna-s-2.1-free', 'inclusionai/ling-3.0-flash-fin-free']);
+  assert.deepEqual(logicalModelPlan('metaengine/peer-b-free'), ['poolside/laguna-s-2.1-free', 'minimax/minimax-m3-free', 'inclusionai/ling-3.0-flash-fin-free']);
+  assert.deepEqual(logicalModelPlan('metaengine/peer-c-free'), ['inclusionai/ling-3.0-flash-fin-free', 'minimax/minimax-m3-free', 'poolside/laguna-s-2.1-free']);
   assert.throws(() => logicalModelPlan('openai/gpt-5.6-sol'), /logical_model_not_allowed/);
 });
 
@@ -214,7 +216,7 @@ test('OpenAI chat gateway overwrites logical alias with zero-spend upstream plan
     return new Response(JSON.stringify({ choices: [{ message: { role: 'assistant', content: '{"step_type":"OBSERVE"}' } }] }), { status: 200 });
   };
   const result = await callChatGateway({
-    models: ['poolside/laguna-s-2.1-free', 'minimax/minimax-m3-free'],
+    models: ['poolside/laguna-s-2.1-free', 'minimax/minimax-m3-free', 'inclusionai/ling-3.0-flash-fin-free'],
     messages: [{ role: 'user', content: 'hello' }],
     maxTokens: 1200,
     temperature: 0.2,
@@ -224,7 +226,7 @@ test('OpenAI chat gateway overwrites logical alias with zero-spend upstream plan
   });
   const body = JSON.parse(captured.body);
   assert.equal(body.model, 'poolside/laguna-s-2.1-free');
-  assert.deepEqual(body.providerOptions.gateway.models, ['minimax/minimax-m3-free']);
+  assert.deepEqual(body.providerOptions.gateway.models, ['minimax/minimax-m3-free', 'inclusionai/ling-3.0-flash-fin-free']);
   assert.equal(body.stream, false);
   assert.equal(result.primary, 'poolside/laguna-s-2.1-free');
 });

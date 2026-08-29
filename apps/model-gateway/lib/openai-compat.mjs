@@ -3,11 +3,18 @@ import { TRUSTED_SYSTEM_PREAMBLE } from './security.mjs';
 export const LOGICAL_MODELS = Object.freeze({
   'metaengine/peer-a-free': Object.freeze([
     'minimax/minimax-m3-free',
-    'poolside/laguna-s-2.1-free'
+    'poolside/laguna-s-2.1-free',
+    'inclusionai/ling-3.0-flash-fin-free'
   ]),
   'metaengine/peer-b-free': Object.freeze([
     'poolside/laguna-s-2.1-free',
-    'minimax/minimax-m3-free'
+    'minimax/minimax-m3-free',
+    'inclusionai/ling-3.0-flash-fin-free'
+  ]),
+  'metaengine/peer-c-free': Object.freeze([
+    'inclusionai/ling-3.0-flash-fin-free',
+    'minimax/minimax-m3-free',
+    'poolside/laguna-s-2.1-free'
   ])
 });
 

@@ -18,14 +18,16 @@ A small Vercel Serverless API that turns Vercel AI Gateway into an advisory peer
 - Streaming is disabled in the sovereign compatibility façade to keep bounded receipts and failure semantics.
 - Every custom peer result returns request/response SHA-256 receipts and `authority_effect=false`.
 - Paid models require a two-key opt-in (deployment + request), preventing accidental credit spend.
+- Paid custom-peer requests are additionally bounded to 1200 output tokens by default / 4096 maximum and a compile-time $0.50 worst-case ceiling across the full fallback chain; `METAENGINE_MAX_PAID_REQUEST_USD` may only lower this ceiling.
 - Before every zero-spend inference, `/v1/models` is revalidated through a short TTL cache; missing/repriced models fail closed before inference.
 
 ## Default free route
 
 1. `minimax/minimax-m3-free`
 2. `poolside/laguna-s-2.1-free`
+3. `inclusionai/ling-3.0-flash-fin-free`
 
-The live Vercel model catalog must be re-checked before promotion because model IDs, pricing, and availability can change.
+The third route adds an independent provider family rather than another MiniMax fallback. The live Vercel model catalog must be re-checked before promotion because model IDs, pricing, and availability can change.
 
 ## Frontier profiles (disabled by default)
 
@@ -43,12 +45,13 @@ The app exposes an authenticated OpenAI-compatible façade matching the existing
 
 Logical zero-spend model IDs:
 
-- `metaengine/peer-a-free` → MiniMax M3 Free first, Laguna S 2.1 Free fallback.
-- `metaengine/peer-b-free` → Laguna S 2.1 Free first, MiniMax M3 Free fallback.
+- `metaengine/peer-a-free` → MiniMax M3 Free first, Laguna S 2.1 Free second, Ling 3.0 Flash Fin Free third.
+- `metaengine/peer-b-free` → Laguna S 2.1 Free first, MiniMax M3 Free second, Ling 3.0 Flash Fin Free third.
+- `metaengine/peer-c-free` → Ling 3.0 Flash Fin Free first, MiniMax M3 Free second, Laguna S 2.1 Free third.
 
-The two aliases intentionally prefer different upstream providers so the two contender roles are not identical first-choice inference paths. The façade overwrites the logical model with the fixed upstream plan, prepends the non-authority security fence, rejects tools/streaming, bounds message/output sizes, and performs the live zero-price gate before forwarding.
+The aliases intentionally prefer different upstream providers so independent contender/critic roles need not share the same first-choice inference path. The façade overwrites the logical model with the fixed upstream plan, prepends the non-authority security fence, rejects tools/streaming, bounds message/output sizes, and performs the live zero-price gate before forwarding.
 
-After an authorized deployment, the current sovereign runner can point both inference URLs at the same gateway while keeping distinct logical models:
+After an authorized deployment, the current sovereign runner can point inference URLs at the same gateway while keeping distinct logical models:
 
 ```text
 SOVEREIGN_GPT_URL=https://<gateway-host>
@@ -57,6 +60,8 @@ SOVEREIGN_GPT_MODEL=metaengine/peer-a-free
 SOVEREIGN_GLM_MODEL=metaengine/peer-b-free
 SOVEREIGN_INFERENCE_TOKEN=<same value as METAENGINE_MODEL_GATEWAY_TOKEN>
 ```
+
+`metaengine/peer-c-free` is available to a future third independent critic/contender without changing the upstream security model.
 
 This is compatibility plumbing only. It does not turn a Vercel-hosted model call into local/tariff-independent sovereign evidence, and it does not satisfy F1 live acceptance by itself.
 
@@ -82,6 +87,7 @@ A Vercel deployment is allowed only after:
   "prompt": "Review this architecture.",
   "context": "optional untrusted context",
   "paid_ok": false,
+  "max_output_tokens": 1200,
   "preferred_models": []
 }
 ```

@@ -1,6 +1,7 @@
 const FREE_MODELS = Object.freeze([
   'minimax/minimax-m3-free',
-  'poolside/laguna-s-2.1-free'
+  'poolside/laguna-s-2.1-free',
+  'inclusionai/ling-3.0-flash-fin-free'
 ]);
 
 const PAID_MODEL_PROFILES = Object.freeze({
