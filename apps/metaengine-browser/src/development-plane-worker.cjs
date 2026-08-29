@@ -2,25 +2,11 @@
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { createCandidateCapsule, verifyCandidateCapsule } = require('./candidate-capsule.cjs');
-const { createVerificationSandboxPlan, verifyVerificationSandboxPlan } = require('./verification-sandbox-plan.cjs');
-const { verifyEnvelope: verifyAdvisoryEvidenceEnvelope } = require('./advisory-evidence-verifier.cjs');
 
 const PROTOCOL = 'metaengine.development-plane.v1';
-const VERSION = '0.4.0';
-const CAPABILITIES = Object.freeze([
-  'HEALTH',
-  'CAPABILITIES',
-  'PROCESS_METRICS',
-  'REPO_HEAD_READ',
-  'CANDIDATE_CAPSULE_CREATE',
-  'CANDIDATE_CAPSULE_VERIFY',
-  'VERIFICATION_SANDBOX_PLAN_CREATE',
-  'VERIFICATION_SANDBOX_PLAN_VERIFY',
-  'ADVISORY_EVIDENCE_VERIFY',
-]);
+const VERSION = '0.1.3';
+const CAPABILITIES = Object.freeze(['HEALTH', 'CAPABILITIES', 'PROCESS_METRICS', 'REPO_HEAD_READ']);
 const repoRoot = path.resolve(process.env.METAENGINE_REPO_ROOT || process.cwd());
-const repositoryName = String(process.env.METAENGINE_GIT_REPOSITORY || 'PatrickFrome/Compute');
 
 function send(message) {
   if (!process.parentPort) throw new Error('development_plane_parent_port_missing');
@@ -38,7 +24,7 @@ async function readRepoHead() {
       gitDir = path.resolve(repoRoot, marker.slice('gitdir: '.length).trim());
     }
   } catch (error) {
-    if (error?.code === 'ENOENT') return { repository_present: false, repository: repositoryName, head: null, ref: null };
+    if (error?.code === 'ENOENT') return { repository_present: false, head: null, ref: null };
     throw error;
   }
   const head = (await fs.readFile(path.join(gitDir, 'HEAD'), 'utf8')).trim();
@@ -46,74 +32,17 @@ async function readRepoHead() {
     const ref = head.slice(5).trim();
     let sha = null;
     try { sha = (await fs.readFile(path.join(gitDir, ref), 'utf8')).trim(); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
-    return { repository_present: true, repository: repositoryName, head: sha, ref };
+    return { repository_present: true, head: sha, ref };
   }
-  return { repository_present: true, repository: repositoryName, head, ref: null };
+  return { repository_present: true, head, ref: null };
 }
 
-async function requireCurrentSource() {
-  const repo = await readRepoHead();
-  if (repo.repository_present !== true || !/^[0-9a-f]{40}$/.test(String(repo.head || '').toLowerCase())) throw new Error('repo_head_unavailable');
-  return { repository: repo.repository, head: String(repo.head).toLowerCase(), ref: repo.ref };
-}
-
-function requireObjectPayload(payload, name) {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error(`${name}_payload_invalid`);
-  return payload;
-}
-
-async function execute(capability, payload) {
+async function execute(capability) {
   if (!CAPABILITIES.includes(capability)) throw new Error('capability_denied');
   if (capability === 'HEALTH') return { ok: true, pid: process.pid, uptime_seconds: process.uptime(), process_type: process.type || 'utility' };
-  if (capability === 'CAPABILITIES') return {
-    version: VERSION,
-    capabilities: [...CAPABILITIES],
-    candidate_capsules: true,
-    candidate_capsules_executable: false,
-    verification_sandbox_planning: true,
-    verification_sandbox_prepare_only: true,
-    verification_sandbox_execution: false,
-    sandbox_backend_bound: false,
-    advisory_evidence_verification: true,
-    advisory_evidence_network_dispatch: false,
-    advisory_evidence_browser_authority: false,
-    advisory_evidence_promotion_authority: false,
-    direct_promote_current: false,
-    arbitrary_eval: false,
-    signed_attestation_required_before_promotion: true,
-  };
+  if (capability === 'CAPABILITIES') return { version: VERSION, capabilities: [...CAPABILITIES], direct_promote_current: false, arbitrary_eval: false };
   if (capability === 'PROCESS_METRICS') return { memory: process.memoryUsage(), cpu: process.cpuUsage(), pid: process.pid };
   if (capability === 'REPO_HEAD_READ') return readRepoHead();
-  if (capability === 'CANDIDATE_CAPSULE_CREATE') return createCandidateCapsule(payload, await requireCurrentSource());
-  if (capability === 'CANDIDATE_CAPSULE_VERIFY') {
-    requireObjectPayload(payload, 'candidate_verify');
-    if (!payload.capsule) throw new Error('candidate_verify_payload_invalid');
-    return verifyCandidateCapsule(payload.capsule, await requireCurrentSource());
-  }
-  if (capability === 'VERIFICATION_SANDBOX_PLAN_CREATE') {
-    requireObjectPayload(payload, 'sandbox_plan_create');
-    if (!payload.capsule) throw new Error('sandbox_plan_create_payload_invalid');
-    const source = await requireCurrentSource();
-    const candidateVerification = verifyCandidateCapsule(payload.capsule, source);
-    return createVerificationSandboxPlan({
-      capsule: payload.capsule,
-      candidate_verification: candidateVerification,
-      requested_backend: payload.requested_backend ?? null,
-      resources: payload.resources ?? null,
-    });
-  }
-  if (capability === 'VERIFICATION_SANDBOX_PLAN_VERIFY') {
-    requireObjectPayload(payload, 'sandbox_plan_verify');
-    if (!payload.capsule || !payload.plan) throw new Error('sandbox_plan_verify_payload_invalid');
-    const source = await requireCurrentSource();
-    const candidateVerification = verifyCandidateCapsule(payload.capsule, source);
-    return verifyVerificationSandboxPlan(payload.plan, payload.capsule, candidateVerification);
-  }
-  if (capability === 'ADVISORY_EVIDENCE_VERIFY') {
-    requireObjectPayload(payload, 'advisory_evidence_verify');
-    if (!payload.envelope) throw new Error('advisory_evidence_verify_payload_invalid');
-    return verifyAdvisoryEvidenceEnvelope(payload.envelope);
-  }
   throw new Error('capability_denied');
 }
 
@@ -130,7 +59,7 @@ process.parentPort.on('message', async (event) => {
   if (message.type !== 'REQUEST' || typeof message.request_id !== 'string') return;
   const capability = String(message.capability || '').toUpperCase();
   try {
-    const result = await execute(capability, message.payload ?? null);
+    const result = await execute(capability);
     send({ type: 'RESPONSE', request_id: message.request_id, ok: true, result });
   } catch (error) {
     send({ type: 'RESPONSE', request_id: message.request_id, ok: false, error: String(error?.message || error).slice(0, 160) });

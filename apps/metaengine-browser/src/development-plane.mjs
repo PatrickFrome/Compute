@@ -1,34 +1,15 @@
 import crypto from 'node:crypto';
 
-export const DEVELOPMENT_PLANE_VERSION = '0.4.0';
+export const DEVELOPMENT_PLANE_VERSION = '0.1.3';
 export const DEVELOPMENT_PLANE_PROTOCOL = 'metaengine.development-plane.v1';
 export const DEVELOPMENT_PLANE_CAPABILITIES = Object.freeze([
   'HEALTH',
   'CAPABILITIES',
   'PROCESS_METRICS',
   'REPO_HEAD_READ',
-  'CANDIDATE_CAPSULE_CREATE',
-  'CANDIDATE_CAPSULE_VERIFY',
-  'VERIFICATION_SANDBOX_PLAN_CREATE',
-  'VERIFICATION_SANDBOX_PLAN_VERIFY',
-  'ADVISORY_EVIDENCE_VERIFY',
 ]);
-
-const PAYLOAD_CAPABILITIES = new Set([
-  'CANDIDATE_CAPSULE_CREATE',
-  'CANDIDATE_CAPSULE_VERIFY',
-  'VERIFICATION_SANDBOX_PLAN_CREATE',
-  'VERIFICATION_SANDBOX_PLAN_VERIFY',
-  'ADVISORY_EVIDENCE_VERIFY',
-]);
-const MAX_REQUEST_PAYLOAD_BYTES = 256 * 1024;
 
 function clone(value) { return value == null ? value : structuredClone(value); }
-function plainObject(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
 
 export class DevelopmentPlane {
   #spawn;
@@ -63,17 +44,6 @@ export class DevelopmentPlane {
       started_at: this.#startedAt,
       last_exit_code: this.#lastExitCode,
       capabilities: [...DEVELOPMENT_PLANE_CAPABILITIES],
-      candidate_capsules: true,
-      candidate_capsules_executable: false,
-      candidate_capsule_max_payload_bytes: MAX_REQUEST_PAYLOAD_BYTES,
-      verification_sandbox_planning: true,
-      verification_sandbox_prepare_only: true,
-      verification_sandbox_execution: false,
-      sandbox_backend_bound: false,
-      advisory_evidence_verification: true,
-      advisory_evidence_network_dispatch: false,
-      advisory_evidence_browser_authority: false,
-      advisory_evidence_promotion_authority: false,
       direct_promote_current: false,
       arbitrary_eval: false,
       page_command_authority: false,
@@ -114,19 +84,10 @@ export class DevelopmentPlane {
     return this.#readyWait;
   }
 
-  async request(capability, payload = null) {
+  async request(capability) {
     const cap = String(capability || '').toUpperCase();
     if (!DEVELOPMENT_PLANE_CAPABILITIES.includes(cap)) throw new Error('development_plane_capability_denied');
     if (this.#state !== 'READY' || !this.#child) throw new Error('development_plane_not_ready');
-    let normalizedPayload = null;
-    if (PAYLOAD_CAPABILITIES.has(cap)) {
-      if (!plainObject(payload)) throw new Error('development_plane_payload_required');
-      const encoded = JSON.stringify(payload);
-      if (Buffer.byteLength(encoded, 'utf8') > MAX_REQUEST_PAYLOAD_BYTES) throw new Error('development_plane_payload_too_large');
-      normalizedPayload = clone(payload);
-    } else if (payload !== null && payload !== undefined) {
-      throw new Error('development_plane_payload_denied');
-    }
     const requestId = `req_${String(this.#uuid()).replace(/[^a-z0-9-]/gi, '').toLowerCase()}`;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -142,7 +103,7 @@ export class DevelopmentPlane {
         type: 'REQUEST',
         request_id: requestId,
         capability: cap,
-        payload: normalizedPayload,
+        payload: null,
         authority_effect: false,
       });
     });

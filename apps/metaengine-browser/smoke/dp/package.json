@@ -2,6 +2,5 @@
   "name": "@metaengine/development-plane-smoke",
   "version": "0.0.0",
   "private": true,
-  "type": "commonjs",
   "main": "main.cjs"
 }
