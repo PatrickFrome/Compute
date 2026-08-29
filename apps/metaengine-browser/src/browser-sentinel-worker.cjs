@@ -11,18 +11,46 @@ const PARENT_PID = Number(process.env.METAENGINE_SENTINEL_PARENT_PID || 0);
 const POLL_MS = 2000;
 const EXPECTED_RESTART_GRACE_MS = 45000;
 const RELAUNCH_ACK_TIMEOUT_MS = 5000;
+const RELAUNCH_RECEIPT_PATH = `${STATE_PATH}.relaunch-v1.json`;
 
 async function readState() {
   try { return JSON.parse(await fs.readFile(STATE_PATH, 'utf8')); }
   catch (error) { if (error && error.code === 'ENOENT') return null; throw error; }
 }
 
+async function atomicWrite(target, value) {
+  const temp = `${target}.tmp`;
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  await fs.rename(temp, target);
+}
+
 async function writeState(value) {
   const next = { ...value, updated_at: new Date().toISOString(), authority_effect: false };
-  const temp = `${STATE_PATH}.tmp`;
-  await fs.mkdir(path.dirname(STATE_PATH), { recursive: true });
-  await fs.writeFile(temp, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
-  await fs.rename(temp, STATE_PATH);
+  await atomicWrite(STATE_PATH, next);
+}
+
+async function writeStateIfBound(value) {
+  const current = await readState().catch(() => null);
+  if (!current || current.token !== TOKEN || Number(current.parent_pid) !== PARENT_PID) return false;
+  await writeState(value);
+  return true;
+}
+
+async function writeRelaunchReceipt(state, outcome) {
+  const receipt = {
+    schema: 'metaengine.browser-sentinel.relaunch-receipt.v1',
+    source_token: TOKEN,
+    source_parent_pid: PARENT_PID,
+    executable: String(state?.executable || ''),
+    lifecycle: String(outcome?.lifecycle || 'RELAUNCH_AMBIGUOUS'),
+    relaunch_pid: Number.isSafeInteger(Number(outcome?.pid)) && Number(outcome.pid) > 0 ? Number(outcome.pid) : null,
+    relaunch_result: String(outcome?.result || '').slice(0, 240),
+    recorded_at: new Date().toISOString(),
+    authority_effect: false,
+  };
+  await atomicWrite(RELAUNCH_RECEIPT_PATH, receipt);
+  return receipt;
 }
 
 function parentAlive() {
@@ -59,7 +87,7 @@ async function relaunchOnce(state) {
     relaunch_pid: null,
     relaunch_result: null,
   };
-  await writeState(intent);
+  await writeStateIfBound(intent);
 
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
@@ -77,11 +105,9 @@ async function relaunchOnce(state) {
       env,
     });
   } catch (error) {
-    await writeState({
-      ...intent,
-      lifecycle: 'RELAUNCH_FAILED',
-      relaunch_result: String(error && error.message || error).slice(0, 240),
-    });
+    const outcome = { lifecycle: 'RELAUNCH_FAILED', pid: null, result: String(error && error.message || error).slice(0, 240) };
+    await writeRelaunchReceipt(state, outcome);
+    await writeStateIfBound({ ...intent, lifecycle: outcome.lifecycle, relaunch_result: outcome.result });
     return;
   }
 
@@ -99,7 +125,8 @@ async function relaunchOnce(state) {
   });
 
   if (outcome.lifecycle === 'RELAUNCH_DISPATCHED') child.unref && child.unref();
-  await writeState({
+  await writeRelaunchReceipt(state, outcome);
+  await writeStateIfBound({
     ...intent,
     lifecycle: outcome.lifecycle,
     relaunch_pid: outcome.pid,
@@ -130,7 +157,7 @@ async function main() {
 main().then(() => process.exit(0)).catch(async (error) => {
   try {
     const state = await readState();
-    if (validBinding(state)) await writeState({ ...state, lifecycle: 'SENTINEL_ERROR', relaunch_result: String(error && error.message || error).slice(0, 240) });
+    if (validBinding(state)) await writeStateIfBound({ ...state, lifecycle: 'SENTINEL_ERROR', relaunch_result: String(error && error.message || error).slice(0, 240) });
   } catch {}
   process.exit(1);
 });
