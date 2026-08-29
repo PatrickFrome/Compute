@@ -1,0 +1,43 @@
+{
+  "appId": "com.metaengine.browser",
+  "productName": "METAENGINE Browser",
+  "asar": true,
+  "directories": {
+    "output": "dist-bootstrap"
+  },
+  "files": [
+    "src/**/*",
+    "ui/**/*",
+    "package.json"
+  ],
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "PatrickFrome",
+      "repo": "Compute",
+      "releaseType": "prerelease",
+      "channel": "dev"
+    }
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "artifactName": "METAENGINE-Browser-Setup-${version}-${arch}.${ext}",
+    "requestedExecutionLevel": "asInvoker"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowElevation": false,
+    "allowToChangeInstallationDirectory": false,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "METAENGINE Browser",
+    "runAfterFinish": false,
+    "deleteAppDataOnUninstall": false
+  }
+}
