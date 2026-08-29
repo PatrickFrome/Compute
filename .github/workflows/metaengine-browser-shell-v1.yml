@@ -25,10 +25,16 @@ jobs:
       - name: Install shell dependencies
         working-directory: apps/metaengine-browser
         run: npm install --no-audit --no-fund
+      - name: Materialize Electron binary without launching Chromium
+        working-directory: apps/metaengine-browser
+        env:
+          ELECTRON_GET_NO_PROGRESS: '1'
+        run: npx install-electron --no
       - name: Configure Electron Chromium sandbox helper
         working-directory: apps/metaengine-browser
         run: |
           set -euo pipefail
+          test -f node_modules/electron/dist/chrome-sandbox
           sudo chown root:root node_modules/electron/dist/chrome-sandbox
           sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
           test "$(stat -c '%U:%G %a' node_modules/electron/dist/chrome-sandbox)" = 'root:root 4755'
