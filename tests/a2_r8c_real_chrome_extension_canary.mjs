@@ -36,20 +36,37 @@ class CdpClient {
       const entry = this.pending.get(message.id);
       if (!entry) return;
       this.pending.delete(message.id);
+      clearTimeout(entry.timer);
       if (message.error) entry.reject(new Error(`cdp_${message.error.code}:${message.error.message}`));
       else entry.resolve(message.result || {});
     });
   }
-  async send(method, params = {}, sessionId = null) {
+  async send(method, params = {}, sessionId = null, timeoutMs = 20000) {
     await this.opened;
     const id = this.nextId++;
     const payload = { id, method, params };
     if (sessionId) payload.sessionId = sessionId;
-    const response = new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
+    const response = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`cdp_timeout:${method}`));
+      }, timeoutMs);
+      this.pending.set(id, { resolve, reject, timer });
+    });
     this.ws.send(JSON.stringify(payload));
     return response;
   }
-  close() { try { this.ws.close(); } catch {} }
+  async close() {
+    for (const [id, entry] of this.pending) {
+      clearTimeout(entry.timer);
+      entry.reject(new Error(`cdp_closed:${id}`));
+    }
+    this.pending.clear();
+    if (this.ws.readyState >= 2) return;
+    const closed = new Promise((resolve) => this.ws.addEventListener('close', resolve, { once: true }));
+    try { this.ws.close(); } catch { return; }
+    await Promise.race([closed, sleep(2000)]);
+  }
 }
 
 function extensionIdFromManifest() {
@@ -89,6 +106,27 @@ async function waitForTarget(predicate, timeoutMs = 20000) {
     await sleep(100);
   }
   throw new Error('r8c_canary_target_timeout');
+}
+
+function killBrowserTree(signal) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  try {
+    if (process.platform === 'win32') child.kill(signal);
+    else process.kill(-child.pid, signal);
+  } catch {
+    try { child.kill(signal); } catch {}
+  }
+}
+
+async function stopBrowserTree() {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise((resolve) => child.once('exit', resolve));
+  killBrowserTree('SIGTERM');
+  const graceful = await Promise.race([exited.then(() => true), sleep(2500).then(() => false)]);
+  if (!graceful && child.exitCode === null && child.signalCode === null) {
+    killBrowserTree('SIGKILL');
+    await Promise.race([exited, sleep(2500)]);
+  }
 }
 
 try {
@@ -132,10 +170,8 @@ try {
   if (process.env.CI === 'true') chromeArgs.unshift('--no-sandbox');
   const useXvfb = process.platform === 'linux' && !process.env.DISPLAY;
   child = useXvfb
-    ? spawn('xvfb-run', ['-a', chrome, ...chromeArgs], { stdio: ['ignore', 'pipe', 'pipe'] })
-    : spawn(chrome, chromeArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
-  child.stdout?.on('data', () => {});
-  child.stderr?.on('data', () => {});
+    ? spawn('xvfb-run', ['-a', chrome, ...chromeArgs], { stdio: 'ignore', detached: process.platform !== 'win32' })
+    : spawn(chrome, chromeArgs, { stdio: 'ignore', detached: process.platform !== 'win32' });
 
   const activePortFile = path.join(profile, 'DevToolsActivePort');
   await waitForFile(activePortFile);
@@ -194,8 +230,11 @@ try {
     authority_effect: click.result.authority_effect,
   }));
 } finally {
-  cdp?.close();
-  if (child && !child.killed) child.kill('SIGTERM');
-  if (server) await new Promise((resolve) => server.close(resolve));
+  if (cdp) await cdp.close();
+  await stopBrowserTree();
+  if (server) {
+    try { server.closeAllConnections(); } catch {}
+    await Promise.race([new Promise((resolve) => server.close(resolve)), sleep(2000)]);
+  }
   await rm(root, { recursive: true, force: true });
 }
