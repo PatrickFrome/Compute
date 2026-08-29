@@ -1,0 +1,8 @@
+{
+  "schema": "metaengine.browser.dev-release-target.v1",
+  "enabled": false,
+  "source_sha": null,
+  "reason": "INITIALIZE_RELEASE_CONTROL_BRANCH",
+  "requested_by": "METAENGINE_SUPERVISOR",
+  "authority_effect": false
+}
