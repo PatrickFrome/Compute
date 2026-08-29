@@ -148,24 +148,26 @@ export class SelfUpdateRuntime {
   }
 
   async #approveCandidate(info) {
+    let metadata;
     try {
-      const metadata = verifiedMetadata(info, { trustedArtifactPrefix: this.#trustedArtifactPrefix });
-      this.#state.available_version = metadata.version;
-      this.#state.metadata_verified = true;
-      this.#state.candidate_file_count = metadata.files.length;
-      this.#state.staging_percentage = metadata.staging_percentage;
-      this.#state.last_error = null;
-      this.#state.state = 'AVAILABLE_VERIFIED';
-      this.#state.install_attempted_version = null;
-      this.#resetInstallHandoff();
-      this.#resetRestartGate();
-      if (this.#automaticUpdateEnabled) await this.#beginDownload();
+      metadata = verifiedMetadata(info, { trustedArtifactPrefix: this.#trustedArtifactPrefix });
     } catch (error) {
       this.#state.state = 'REJECTED_METADATA';
       this.#state.metadata_verified = false;
       this.#state.last_error = clipError(error);
       this.#resetRestartGate();
+      return;
     }
+    this.#state.available_version = metadata.version;
+    this.#state.metadata_verified = true;
+    this.#state.candidate_file_count = metadata.files.length;
+    this.#state.staging_percentage = metadata.staging_percentage;
+    this.#state.last_error = null;
+    this.#state.state = 'AVAILABLE_VERIFIED';
+    this.#state.install_attempted_version = null;
+    this.#resetInstallHandoff();
+    this.#resetRestartGate();
+    if (this.#automaticUpdateEnabled) await this.#beginDownload().catch(() => {});
   }
 
   async start() {
@@ -302,7 +304,7 @@ export class SelfUpdateRuntime {
       this.#automaticUpdateEnabled = payload.enabled;
       this.#state.automatic_update_enabled = payload.enabled;
       if (payload.enabled && this.#state.state === 'AVAILABLE_VERIFIED') await this.#beginDownload();
-      if (payload.enabled) await this.#cycleRestartGate();
+      await this.#cycleRestartGate();
       return this.snapshot();
     }
     if (normalized === 'SELF_UPDATE_CHECK') return this.cycle({ force: true });
