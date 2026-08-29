@@ -66,31 +66,55 @@ jobs:
           "signed=false" | Add-Content dist-installer\INSTALLER_RECEIPT.txt
           Get-AuthenticodeSignature $setup.FullName | Format-List Status,StatusMessage,SignerCertificate | Out-String | Add-Content dist-installer\INSTALLER_RECEIPT.txt
           Get-ChildItem dist-installer
-      - name: Silent install smoke
+      - name: Install and launch installed EXE smoke
         working-directory: apps/metaengine-browser
         shell: powershell
         run: |
           $setup = Get-ChildItem dist-installer\METAENGINE-Browser-TEST-Setup-*.exe | Select-Object -First 1
-          $p = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -PassThru
-          if (-not $p.WaitForExit(60000)) { try { $p.Kill($true) } catch {}; throw 'installer_silent_install_timeout' }
-          if ($p.ExitCode -ne 0) { throw "installer_silent_install_exit_$($p.ExitCode)" }
+          $install = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -PassThru
+          if (-not $install.WaitForExit(60000)) { try { $install.Kill($true) } catch {}; throw 'installer_silent_install_timeout' }
+          if ($install.ExitCode -ne 0) { throw "installer_silent_install_exit_$($install.ExitCode)" }
           $candidateRoots = @(
+            (Join-Path $env:LOCALAPPDATA 'Programs\metaengine-browser-test'),
             (Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser TEST'),
+            (Join-Path $env:LOCALAPPDATA 'Programs\@metaenginebrowser-shell'),
             (Join-Path $env:LOCALAPPDATA 'Programs\metaengine-browser-shell'),
             (Join-Path $env:LOCALAPPDATA 'Programs\@metaengine\browser-shell')
           )
           $installedExe = $null
           foreach ($root in $candidateRoots) {
             if (Test-Path $root) {
-              $installedExe = Get-ChildItem $root -Filter '*.exe' -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch 'Uninstall' } | Select-Object -First 1
+              $installedExe = Get-ChildItem $root -Filter 'METAENGINE Browser TEST.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1
               if ($installedExe) { break }
             }
           }
           if (-not $installedExe) {
-            $installedExe = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Filter 'METAENGINE*.exe' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            $installedExe = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Filter 'METAENGINE Browser TEST.exe' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           }
           if (-not $installedExe) { throw 'installed_browser_exe_not_found' }
           "installed_exe=$($installedExe.FullName)" | Add-Content dist-installer\INSTALLER_RECEIPT.txt
+
+          $appOut = Join-Path $env:RUNNER_TEMP 'metaengine-installed-out.txt'
+          $appErr = Join-Path $env:RUNNER_TEMP 'metaengine-installed-err.txt'
+          $app = Start-Process -FilePath $installedExe.FullName -PassThru -RedirectStandardOutput $appOut -RedirectStandardError $appErr
+          Start-Sleep -Seconds 8
+          $app.Refresh()
+          if ($app.HasExited) {
+            Get-Content $appOut -ErrorAction SilentlyContinue
+            Get-Content $appErr -ErrorAction SilentlyContinue
+            throw "installed_browser_exited_early_$($app.ExitCode)"
+          }
+          if ($app.MainWindowHandle -eq 0) {
+            Get-Content $appOut -ErrorAction SilentlyContinue
+            Get-Content $appErr -ErrorAction SilentlyContinue
+            try { $app.Kill($true) } catch {}
+            throw 'installed_browser_main_window_missing'
+          }
+          "installed_launch=PASS" | Add-Content dist-installer\INSTALLER_RECEIPT.txt
+          "main_window_handle=$($app.MainWindowHandle)" | Add-Content dist-installer\INSTALLER_RECEIPT.txt
+          try { $app.CloseMainWindow() | Out-Null } catch {}
+          Start-Sleep -Seconds 1
+          if (-not $app.HasExited) { try { $app.Kill($true) } catch {} }
       - name: Upload single installer
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
