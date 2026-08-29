@@ -30,6 +30,7 @@ export default async function handler(request, response) {
         logical_model: chat.logicalModel,
         upstream_primary: result.primary,
         upstream_fallbacks: result.fallbacks,
+        upstream_served_model: result.servedModel,
         zero_spend_verified: true,
         authority_effect: false
       }

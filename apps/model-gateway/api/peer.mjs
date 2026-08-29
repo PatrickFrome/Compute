@@ -58,6 +58,7 @@ export default async function handler(request, response) {
       models_requested: models,
       primary_model: result.primary,
       fallback_models: result.fallbacks,
+      served_model: result.servedModel,
       paid_route_authorized: paidRouteAuthorized,
       zero_spend_verified: !paidRouteAuthorized,
       max_output_tokens: task.maxOutputTokens,

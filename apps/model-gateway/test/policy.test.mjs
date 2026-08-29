@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { LIMITS, modelPlan, validateTask } from '../lib/policy.mjs';
 import { authorized, buildPeerInput } from '../lib/security.mjs';
-import { callGateway, callChatGateway, extractText } from '../lib/gateway.mjs';
+import { assertServedModel, callGateway, callChatGateway, extractText } from '../lib/gateway.mjs';
 import {
   assertPaidBudget,
   assertZeroSpend,
@@ -58,11 +58,14 @@ test('incoming token is fail closed and timing-safe comparable', () => {
   assert.equal(authorized(request, { METAENGINE_MODEL_GATEWAY_TOKEN: 'abcd' }), false);
 });
 
-test('gateway call emits bounded trusted envelope without provider keys', async () => {
+test('gateway call emits only fallback models and records actual served model', async () => {
   let captured;
   const fetchImpl = async (_url, init) => {
     captured = init;
-    return new Response(JSON.stringify({ output_text: 'ok' }), { status: 200, headers: { 'content-type': 'application/json' } });
+    return new Response(JSON.stringify({
+      model: 'inclusionai/ling-3.0-flash-fin-free',
+      output_text: 'ok'
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
   const result = await callGateway({
     models: ['minimax/minimax-m3-free', 'poolside/laguna-s-2.1-free', 'inclusionai/ling-3.0-flash-fin-free'],
@@ -73,11 +76,20 @@ test('gateway call emits bounded trusted envelope without provider keys', async 
     fetchImpl
   });
   assert.equal(result.primary, 'minimax/minimax-m3-free');
+  assert.equal(result.servedModel, 'inclusionai/ling-3.0-flash-fin-free');
   assert.equal(captured.headers.authorization, 'Bearer oidc-test');
   const body = JSON.parse(captured.body);
-  assert.deepEqual(body.providerOptions.gateway.models, ['minimax/minimax-m3-free', 'poolside/laguna-s-2.1-free', 'inclusionai/ling-3.0-flash-fin-free']);
+  assert.equal(body.model, 'minimax/minimax-m3-free');
+  assert.deepEqual(body.providerOptions.gateway.models, ['poolside/laguna-s-2.1-free', 'inclusionai/ling-3.0-flash-fin-free']);
   assert.equal(body.providerOptions.gateway.user, 'metaengine:t1');
   assert.equal(body.max_output_tokens, 777);
+});
+
+test('served-model provenance is fail closed', () => {
+  const approved = ['minimax/minimax-m3-free', 'poolside/laguna-s-2.1-free'];
+  assert.equal(assertServedModel({ model: approved[1] }, approved), approved[1]);
+  assert.throws(() => assertServedModel({}, approved), /gateway_served_model_missing/);
+  assert.throws(() => assertServedModel({ model: 'evil/provider' }, approved), /gateway_served_model_unapproved/);
 });
 
 test('extractText tolerates OpenResponses variants', () => {
@@ -213,7 +225,10 @@ test('OpenAI chat gateway overwrites logical alias with zero-spend upstream plan
   let captured;
   const fetchImpl = async (_url, init) => {
     captured = init;
-    return new Response(JSON.stringify({ choices: [{ message: { role: 'assistant', content: '{"step_type":"OBSERVE"}' } }] }), { status: 200 });
+    return new Response(JSON.stringify({
+      model: 'minimax/minimax-m3-free',
+      choices: [{ message: { role: 'assistant', content: '{"step_type":"OBSERVE"}' } }]
+    }), { status: 200 });
   };
   const result = await callChatGateway({
     models: ['poolside/laguna-s-2.1-free', 'minimax/minimax-m3-free', 'inclusionai/ling-3.0-flash-fin-free'],
@@ -229,4 +244,5 @@ test('OpenAI chat gateway overwrites logical alias with zero-spend upstream plan
   assert.deepEqual(body.providerOptions.gateway.models, ['minimax/minimax-m3-free', 'inclusionai/ling-3.0-flash-fin-free']);
   assert.equal(body.stream, false);
   assert.equal(result.primary, 'poolside/laguna-s-2.1-free');
+  assert.equal(result.servedModel, 'minimax/minimax-m3-free');
 });
