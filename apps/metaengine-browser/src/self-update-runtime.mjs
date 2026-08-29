@@ -48,14 +48,14 @@ function verifiedMetadata(info, { trustedArtifactPrefix = DEFAULT_TRUSTED_ARTIFA
 
 export class SelfUpdateRuntime {
   #updater = null; #injectedUpdater; #packagedOverride; #host = null; #hostOverride;
-  #trustedChannel; #trustedArtifactPrefix; #ciTestFeedUrl;
+  #trustedChannel; #trustedArtifactPrefix; #ciTestFeedUrl; #beforeInstall;
   #state = {
     state: 'UNINITIALIZED', available_version: null, downloaded_version: null,
     metadata_verified: false, candidate_file_count: 0, staging_percentage: null,
     last_check_at: null, last_error: null, trusted_channel: null,
     download_percent: null, restart_gate_safe: false, restart_gate_since: null,
     restart_grace_ms: null, install_attempted_version: null, publisher_verified: false,
-    ci_test_feed_active: false,
+    ci_test_feed_active: false, pre_install_receipt_persisted: false,
   };
   #lastCheck = 0; #intervalMs; #canRestart; #clock; #restartGraceMs; #restartSafeSince = null;
 
@@ -71,6 +71,7 @@ export class SelfUpdateRuntime {
     ciTestFeedUrl = process.env.METAENGINE_SELF_UPDATE_TEST_FEED_URL || null,
     ciTestMode = process.env.METAENGINE_SELF_UPDATE_TEST_MODE === '1',
     githubActions = process.env.GITHUB_ACTIONS === 'true',
+    beforeInstall = async () => {},
     clock = () => Date.now(),
   } = {}) {
     this.#intervalMs = Math.max(60 * 1000, Number(intervalMs) || 10 * 60 * 1000);
@@ -82,6 +83,8 @@ export class SelfUpdateRuntime {
     this.#trustedChannel = String(trustedChannel || DEFAULT_TRUSTED_UPDATE_CHANNEL).trim();
     this.#trustedArtifactPrefix = String(trustedArtifactPrefix || DEFAULT_TRUSTED_ARTIFACT_PREFIX).trim();
     this.#clock = clock;
+    if (typeof beforeInstall !== 'function') throw new Error('self_update_before_install_invalid');
+    this.#beforeInstall = beforeInstall;
     if (!/^[0-9A-Za-z._-]+$/.test(this.#trustedChannel)) throw new Error('trusted_update_channel_invalid');
     if (!SAFE_ARTIFACT_RE.test(this.#trustedArtifactPrefix)) throw new Error('trusted_update_artifact_prefix_invalid');
     this.#ciTestFeedUrl = validateCiTestFeedUrl(ciTestFeedUrl, { testMode: ciTestMode, githubActions });
@@ -90,7 +93,7 @@ export class SelfUpdateRuntime {
   }
 
   snapshot() {
-    return structuredClone({ schema: 'metaengine.self-update-runtime.v5', ...this.#state, host_resilience: this.#host?.snapshot?.() || null, authority_effect: false });
+    return structuredClone({ schema: 'metaengine.self-update-runtime.v6', ...this.#state, host_resilience: this.#host?.snapshot?.() || null, authority_effect: false });
   }
 
   #resetRestartGate() {
@@ -109,6 +112,7 @@ export class SelfUpdateRuntime {
       this.#state.last_error = null;
       this.#state.state = 'APPROVED_DOWNLOAD';
       this.#state.install_attempted_version = null;
+      this.#state.pre_install_receipt_persisted = false;
       this.#resetRestartGate();
       if (typeof this.#updater?.downloadUpdate !== 'function') throw new Error('electron_updater_download_unavailable');
       await this.#updater.downloadUpdate();
@@ -161,6 +165,7 @@ export class SelfUpdateRuntime {
         this.#state.candidate_file_count = 0;
         this.#state.download_percent = null;
         this.#state.install_attempted_version = null;
+        this.#state.pre_install_receipt_persisted = false;
         this.#resetRestartGate();
       });
       updater.on('download-progress', (p) => { this.#state.state = 'DOWNLOADING'; this.#state.download_percent = Number(p?.percent || 0); });
@@ -175,6 +180,7 @@ export class SelfUpdateRuntime {
         this.#state.state = 'READY_RESTART';
         this.#state.downloaded_version = downloaded;
         this.#state.download_percent = 100;
+        this.#state.pre_install_receipt_persisted = false;
         this.#resetRestartGate();
       });
       updater.on('error', (e) => { this.#state.state = 'ERROR'; this.#state.last_error = clipError(e); this.#resetRestartGate(); });
@@ -209,10 +215,23 @@ export class SelfUpdateRuntime {
     this.#state.install_attempted_version = this.#state.downloaded_version;
     this.#state.state = 'RESTARTING';
     try {
+      const receipt = {
+        schema: 'metaengine.self-update.pre-install-receipt.v1',
+        version: this.#state.downloaded_version,
+        available_version: this.#state.available_version,
+        metadata_verified: this.#state.metadata_verified === true,
+        restart_gate_safe: this.#state.restart_gate_safe === true,
+        restart_gate_since: this.#state.restart_gate_since,
+        recorded_at: new Date(now).toISOString(),
+        authority_effect: false,
+      };
+      await this.#beforeInstall(structuredClone(receipt));
+      this.#state.pre_install_receipt_persisted = true;
       await this.#host?.prepareExpectedRestart?.('SELF_UPDATE');
       this.#updater.quitAndInstall(false, true);
     } catch (e) {
       this.#state.state = 'ERROR';
+      this.#state.pre_install_receipt_persisted = false;
       this.#state.last_error = clipError(e);
       this.#resetRestartGate();
     }
@@ -235,6 +254,7 @@ export class SelfUpdateRuntime {
           this.#state.candidate_file_count = 0;
           this.#state.download_percent = null;
           this.#state.install_attempted_version = null;
+          this.#state.pre_install_receipt_persisted = false;
           this.#resetRestartGate();
         }
         await this.#updater.checkForUpdates();
