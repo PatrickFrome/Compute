@@ -84,12 +84,17 @@ test('LocalNodeRegistry starts with local node', async () => {
   const { LocalNodeRegistry } = await import('../src/node-registry.mjs');
   const registry = new LocalNodeRegistry(runtime);
   const node = await registry.start();
-  assert.equal(node.nodeId, 'node-test');
-  assert.equal(node.nodeType, 'local');
-  assert.deepEqual(node.capabilities, ['actuation', 'perception', 'context_management', 'target_management']);
-  // Test hygiene: a registry that was started must be stopped, otherwise its
-  // health interval keeps the process alive and node --test never terminates.
-  await registry.stop();
+  try {
+    assert.equal(node.nodeId, 'node-test');
+    assert.equal(node.nodeType, 'local');
+    assert.deepEqual(node.capabilities, ['actuation', 'perception', 'context_management', 'target_management']);
+    assert.equal(node.health, 'healthy');
+  } finally {
+    // Test hygiene: a registry that was started must be stopped even when an
+    // assert fails mid-test, otherwise its health interval keeps the process
+    // alive and node --test never terminates.
+    await registry.stop();
+  }
 });
 
 test('LocalNodeRegistry checks health on interval', async () => {
@@ -101,10 +106,39 @@ test('LocalNodeRegistry checks health on interval', async () => {
   const { LocalNodeRegistry } = await import('../src/node-registry.mjs');
   const registry = new LocalNodeRegistry(runtime, { healthCheckIntervalMs: 50 });
   await registry.start();
-  assert.equal(healthCalls.length, 1);
-  await new Promise((r) => setTimeout(r, 6000));
-  assert.ok(healthCalls.length >= 2);
-  await registry.stop();
+  try {
+    assert.equal(healthCalls.length, 1);
+    await new Promise((r) => setTimeout(r, 6000));
+    assert.ok(healthCalls.length >= 2);
+  } finally {
+    await registry.stop();
+  }
+  assert.equal(registry.healthCheckTimer, null);
+});
+
+
+test('LocalNodeRegistry overlapping health probes do not stack', async () => {
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const runtime = {
+    stateRoot: '/tmp/test3',
+    health: async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 120));
+      inFlight -= 1;
+      return { ok: true, profiles: [] };
+    }
+  };
+  const { LocalNodeRegistry } = await import('../src/node-registry.mjs');
+  const registry = new LocalNodeRegistry(runtime, { healthCheckIntervalMs: 5 });
+  await registry.start();
+  try {
+    await Promise.all([registry.checkAll(), registry.checkAll(), registry.checkAll()]);
+    assert.equal(maxInFlight, 1, 'concurrent health probes must not stack');
+  } finally {
+    await registry.stop();
+  }
 });
 
 

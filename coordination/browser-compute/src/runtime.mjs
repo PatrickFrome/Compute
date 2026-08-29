@@ -12,7 +12,7 @@ const CONTEXTS_FILE = 'contexts.json';
 const TARGETS_FILE = 'targets.json';
 const PROFILE_LOCK_FILE = 'a2-runtime.lock';
 const DAEMON_LOCK_FILE = 'a2-daemon.lock';
-export const COMPUTE_BROWSER_RUNTIME_VERSION = '0.2.0-dev.2';
+export const COMPUTE_BROWSER_RUNTIME_VERSION = '0.3.0-dev.3';
 
 function now() { return new Date().toISOString(); }
 function blankRegistry() { return { schema: 'metaengine.a2-compute-browser.targets.v1', revision: 0, targets: [], updated_at: now() }; }

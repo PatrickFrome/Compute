@@ -136,7 +136,7 @@
     return `(() => {
       const visible=(el)=>{if(!(el instanceof HTMLElement))return false;const s=getComputedStyle(el),r=el.getBoundingClientRect();return s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity)!==0&&r.width>0&&r.height>0;};
       const strong=[...document.querySelectorAll("button[data-testid='stop-button'],button[data-testid='composer-stop-button'],#stop-button,#composer-stop-button")].filter(visible);
-      const semantic=[...document.querySelectorAll('button')].filter(visible).filter((b)=>{const f=[b.getAttribute('aria-label'),b.getAttribute('title'),b.textContent].map(v=>String(v||'').trim().toLowerCase());return f.some(v=>/^(stop|stop generating|stop generation|inoaiiaeou|inoaiiaeou aaia?aoe?|??|????)$/iu.test(v));});
+      const semantic=[...document.querySelectorAll('button')].filter(visible).filter((b)=>{const f=[b.getAttribute('aria-label'),b.getAttribute('title'),b.textContent].map(v=>String(v||'').trim().toLowerCase());return f.some(v=>/^(stop|stop generating|stop generation|остановить|остановить генерацию|??|????)$/iu.test(v));});
       const candidates=strong.length?strong:semantic;
       if(candidates.length===0)return{ok:false,error:'stop_not_found'};
       if(candidates.length!==1)return{ok:false,error:'stop_ambiguous',count:candidates.length};
