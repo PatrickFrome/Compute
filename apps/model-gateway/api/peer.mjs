@@ -1,6 +1,7 @@
-import { validateTask, modelPlan } from '../lib/policy.mjs';
+import { validateTask, modelPlan, paidModelsEnabled } from '../lib/policy.mjs';
 import { authorized, buildPeerInput, sha256 } from '../lib/security.mjs';
 import { callGateway, extractText } from '../lib/gateway.mjs';
+import { assertZeroSpend } from '../lib/catalog.mjs';
 
 function send(response, status, body) {
   response.status(status).json(body);
@@ -17,6 +18,7 @@ export default async function handler(request, response) {
     return send(response, 400, { error: error.message });
   }
 
+  const paidRouteAuthorized = task.paidOk && paidModelsEnabled();
   const models = modelPlan(task.role, {
     paidOk: task.paidOk,
     preferredModels: task.preferredModels
@@ -26,6 +28,7 @@ export default async function handler(request, response) {
   const startedAt = new Date().toISOString();
 
   try {
+    if (!paidRouteAuthorized) await assertZeroSpend(models);
     const result = await callGateway({ models, input, taskId: task.taskId });
     const answer = extractText(result.payload);
     const responseHash = sha256(JSON.stringify(result.payload));
@@ -36,6 +39,8 @@ export default async function handler(request, response) {
       models_requested: models,
       primary_model: result.primary,
       fallback_models: result.fallbacks,
+      paid_route_authorized: paidRouteAuthorized,
+      zero_spend_verified: !paidRouteAuthorized,
       answer,
       request_sha256: requestHash,
       response_sha256: responseHash,
