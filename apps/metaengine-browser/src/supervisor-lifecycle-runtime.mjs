@@ -27,12 +27,12 @@ async function writeJson(file, value) {
 }
 
 export class SupervisorLifecycleRuntime {
-  #getState; #execute; #keepalive = null; #statePath; #lastRun = 0; #lastSupervisorGeneration = 'UNKNOWN'; #lastError = null;
+  #getState; #execute; #canActuate; #keepalive = null; #statePath; #lastRun = 0; #lastSupervisorGeneration = 'UNKNOWN'; #lastError = null;
   #lastWorkerSignals = []; #monitorMs; #researchMs;
 
-  constructor({ getState, executeCommand, statePath = null, monitorMs = 15000, researchMs = 30 * 60 * 1000 } = {}) {
-    if (typeof getState !== 'function' || typeof executeCommand !== 'function') throw new Error('supervisor_lifecycle_dependencies_required');
-    this.#getState = getState; this.#execute = executeCommand; this.#statePath = statePath;
+  constructor({ getState, executeCommand, canActuate = () => true, statePath = null, monitorMs = 15000, researchMs = 30 * 60 * 1000 } = {}) {
+    if (typeof getState !== 'function' || typeof executeCommand !== 'function' || typeof canActuate !== 'function') throw new Error('supervisor_lifecycle_dependencies_required');
+    this.#getState = getState; this.#execute = executeCommand; this.#canActuate = canActuate; this.#statePath = statePath;
     this.#monitorMs = Math.max(5000, Number(monitorMs) || 15000);
     this.#researchMs = Math.max(5 * 60 * 1000, Number(researchMs) || 30 * 60 * 1000);
   }
@@ -55,6 +55,7 @@ export class SupervisorLifecycleRuntime {
       supervisor_generation: this.#lastSupervisorGeneration,
       worker_signals: structuredClone(this.#lastWorkerSignals),
       quiescent: this.isQuiescent(),
+      actuation_enabled: this.#canActuate() === true,
       last_error: this.#lastError,
       authority_effect: false,
     };
@@ -76,6 +77,7 @@ export class SupervisorLifecycleRuntime {
     if (snap.conversation_url) {
       const exact = tabs.find((t) => String(t?.url || '') === snap.conversation_url && !fleetTabs.has(String(t?.tab_id || '')));
       if (exact) { if (snap.tab_id !== String(exact.tab_id)) await this.#keepalive.rebindTab(exact.tab_id); return exact; }
+      if (this.#canActuate() !== true) return null;
       const restored = await this.#execute({ action: 'NEW_TAB', payload: { url: snap.conversation_url, select: false }, platform: null });
       if (restored?.tab_id) { await this.#keepalive.rebindTab(restored.tab_id); return { ...restored, url: snap.conversation_url }; }
     }
@@ -114,6 +116,7 @@ export class SupervisorLifecycleRuntime {
   }
 
   async #sendWake(prepared) {
+    if (this.#canActuate() !== true) return false;
     let clicked = false;
     try {
       const before = await this.#capture(prepared.tab_id);
@@ -142,6 +145,7 @@ export class SupervisorLifecycleRuntime {
   }
 
   async #rollover() {
+    if (this.#canActuate() !== true) return false;
     const s = this.#keepalive.snapshot();
     let tab = null;
     try {
@@ -178,12 +182,14 @@ export class SupervisorLifecycleRuntime {
       await this.#queueResearch();
       if (supervisor) {
         const frame = await this.#observeSupervisor(supervisor);
-        const ks = this.#keepalive.snapshot();
-        if (ks.state === 'ROLLOVER_REQUIRED') await this.#rollover();
-        else if (!generating(frame)) {
-          const prepared = await this.#keepalive.prepareNextWake();
-          if (prepared?.rollover_required) await this.#rollover();
-          else if (prepared?.ok) await this.#sendWake(prepared);
+        if (this.#canActuate() === true) {
+          const ks = this.#keepalive.snapshot();
+          if (ks.state === 'ROLLOVER_REQUIRED') await this.#rollover();
+          else if (!generating(frame)) {
+            const prepared = await this.#keepalive.prepareNextWake();
+            if (prepared?.rollover_required) await this.#rollover();
+            else if (prepared?.ok) await this.#sendWake(prepared);
+          }
         }
       }
       this.#lastError = null;
