@@ -1,4 +1,4 @@
-export const CHATGPT_RETRY_POLICY_VERSION = '1.1.0';
+export const CHATGPT_RETRY_POLICY_VERSION = '1.2.0';
 
 export const REQUEST_EFFECT_CLASS = Object.freeze({
   READ_ONLY: 'READ_ONLY',
@@ -18,6 +18,9 @@ const SOFT_REQUEST_FAILURES = new Set([
   'SERVER_ERROR',
 ]);
 
+const MIN_ADAPTIVE_TIMEOUT_MS = 30_000;
+const MAX_ADAPTIVE_TIMEOUT_MS = 30 * 60_000;
+
 function normEffectClass(value) {
   const v = String(value || 'UNKNOWN').toUpperCase();
   return REQUEST_EFFECT_CLASS[v] || REQUEST_EFFECT_CLASS.UNKNOWN;
@@ -26,6 +29,17 @@ function normEffectClass(value) {
 function finiteAge(value) {
   const n = Number(value);
   return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+function finitePositive(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function boundedAdaptiveTimeout(value, fallback) {
+  const requested = finitePositive(value);
+  if (requested == null) return fallback;
+  return Math.min(MAX_ADAPTIVE_TIMEOUT_MS, Math.max(MIN_ADAPTIVE_TIMEOUT_MS, requested));
 }
 
 function retryAction({ sameConversationUsable, sameChatAttempt, maxSameChatAttempts }) {
@@ -110,11 +124,12 @@ export function classifyRetryDecision(input = {}) {
     return { action: 'CHECK_EFFECT', reason: 'TERMINAL_FAILURE_EFFECT_UNKNOWN', retry_allowed: false, authority_effect: false };
   }
 
-  const aggressiveMs = effectClass === REQUEST_EFFECT_CLASS.READ_ONLY ? 90_000
+  const fallbackMs = effectClass === REQUEST_EFFECT_CLASS.READ_ONLY ? 90_000
     : effectClass === REQUEST_EFFECT_CLASS.IDEMPOTENT_WRITE ? 150_000
       : 240_000;
+  const timeoutMs = boundedAdaptiveTimeout(input.adaptive_timeout_ms, fallbackMs);
 
-  if (requestAccepted && ageMs >= aggressiveMs) {
+  if (requestAccepted && ageMs >= timeoutMs) {
     if (effectClass === REQUEST_EFFECT_CLASS.READ_ONLY) {
       return retryResult('SILENT_READ_ONLY_TIMEOUT', retryContext);
     }
