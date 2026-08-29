@@ -1,7 +1,7 @@
-name: METAENGINE Browser DP2 Packaged Windows Gate
+name: METAENGINE Browser Native Supervisor Windows Gate
 on:
   push:
-    branches: ['work/metaengine-browser-dp2-vercel-physical-v1']
+    branches: ['work/metaengine-browser-native-supervisor-v1']
 permissions:
   contents: read
 jobs:
@@ -36,6 +36,12 @@ jobs:
           if (-not $installer) { throw 'installer_missing' }
           $installer.FullName | Set-Content "$env:RUNNER_TEMP\installer-path.txt"
           (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content "$env:RUNNER_TEMP\installer-sha256.txt"
+          $asar = Join-Path (Resolve-Path 'dist-test\win-unpacked\resources').Path 'app.asar'
+          $listing = npx --yes @electron/asar list $asar
+          foreach ($required in @('src/supervisor-device-identity.mjs','src/native-supervisor-client.mjs','src/native-browser-control.mjs')) {
+            if (-not ($listing -match [regex]::Escape($required))) { throw "packaged_supervisor_module_missing:$required" }
+          }
+          "native_supervisor_modules=present" | Set-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
       - name: Install generated Setup EXE
         working-directory: apps/metaengine-browser
         shell: powershell
@@ -89,6 +95,8 @@ jobs:
             try { $p.Kill($true) } catch {}
             throw "installed_browser_title_unexpected:$title"
           }
+          Start-Sleep -Seconds 4
+          if ($p.HasExited) { throw "installed_browser_exited_after_supervisor_bootstrap:$($p.ExitCode)" }
           try { $p.CloseMainWindow() | Out-Null } catch {}
           if (-not $p.WaitForExit(5000)) { try { $p.Kill($true) } catch {} }
       - name: Stage verified installer evidence
@@ -97,14 +105,15 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path release-single | Out-Null
           $installer = Get-Content "$env:RUNNER_TEMP\installer-path.txt"
-          Copy-Item $installer 'release-single\METAENGINE-Browser-Test-Setup.exe'
-          Copy-Item "$env:RUNNER_TEMP\installer-sha256.txt" 'release-single\METAENGINE-Browser-Test-Setup.exe.sha256'
+          Copy-Item $installer 'release-single\METAENGINE-Browser-Native-Supervisor-Setup.exe'
+          Copy-Item "$env:RUNNER_TEMP\installer-sha256.txt" 'release-single\METAENGINE-Browser-Native-Supervisor-Setup.exe.sha256'
           Copy-Item "$env:RUNNER_TEMP\dp-proof.txt" 'release-single\development-plane-proof.txt'
+          Copy-Item "$env:RUNNER_TEMP\supervisor-package-proof.txt" 'release-single\supervisor-package-proof.txt'
           Copy-Item "$env:RUNNER_TEMP\launch-proof.txt" 'release-single\launch-proof.txt'
           git rev-parse HEAD | Set-Content 'release-single\git-head.txt'
       - name: Upload verified installer
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: metaengine-browser-dp2-windows-${{ github.sha }}
+          name: metaengine-browser-native-supervisor-windows-${{ github.sha }}
           path: apps/metaengine-browser/release-single/
           if-no-files-found: error
