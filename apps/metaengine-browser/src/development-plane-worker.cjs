@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 
 const PROTOCOL = 'metaengine.development-plane.v1';
+const VERSION = '0.1.2';
 const CAPABILITIES = Object.freeze(['HEALTH', 'CAPABILITIES', 'PROCESS_METRICS', 'REPO_HEAD_READ']);
 const repoRoot = path.resolve(process.env.METAENGINE_REPO_ROOT || process.cwd());
 
@@ -39,7 +40,7 @@ async function readRepoHead() {
 async function execute(capability) {
   if (!CAPABILITIES.includes(capability)) throw new Error('capability_denied');
   if (capability === 'HEALTH') return { ok: true, pid: process.pid, uptime_seconds: process.uptime(), process_type: process.type || 'utility' };
-  if (capability === 'CAPABILITIES') return { capabilities: [...CAPABILITIES], direct_promote_current: false, arbitrary_eval: false };
+  if (capability === 'CAPABILITIES') return { version: VERSION, capabilities: [...CAPABILITIES], direct_promote_current: false, arbitrary_eval: false };
   if (capability === 'PROCESS_METRICS') return { memory: process.memoryUsage(), cpu: process.cpuUsage(), pid: process.pid };
   if (capability === 'REPO_HEAD_READ') return readRepoHead();
   throw new Error('capability_denied');
@@ -59,4 +60,4 @@ process.parentPort.on('message', async (event) => {
   }
 });
 
-send({ type: 'READY', version: '0.1.1', capabilities: [...CAPABILITIES] });
+send({ type: 'READY', version: VERSION, capabilities: [...CAPABILITIES] });

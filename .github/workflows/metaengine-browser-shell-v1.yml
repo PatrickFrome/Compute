@@ -61,6 +61,8 @@ jobs:
           grep -q 'sandbox: true' apps/metaengine-browser/src/browser-policy.mjs
           grep -q 'cookie_transfer_to_compute_space: false' apps/metaengine-browser/src/browser-policy.mjs
           grep -q 'direct_promote_current: false' apps/metaengine-browser/src/development-plane.mjs
+          grep -q 'verified_shutdown_required: true' apps/metaengine-browser/src/development-plane.mjs
+          grep -q 'stopAndWait(4000)' apps/metaengine-browser/src/main.mjs
           grep -q "env: { METAENGINE_REPO_ROOT: repoRoot }" apps/metaengine-browser/src/main.mjs
           ! grep -E 'child_process|exec\(|eval\(|new Function' apps/metaengine-browser/src/development-plane-worker.cjs
           ! grep -R -E 'executeJavaScript|Runtime\.evaluate|--remote-debugging-port|--no-sandbox|chat\.z\.ai|GLM_ZAI|STRICT_GLM_FIRST' apps/metaengine-browser --exclude-dir=node_modules
@@ -75,8 +77,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          timeout 12s xvfb-run -a npm run devplane-smoke | tee /tmp/metaengine-devplane-smoke.jsonl
+          timeout 15s xvfb-run -a npm run devplane-smoke | tee /tmp/metaengine-devplane-smoke.jsonl
           grep -q '"ok":true' /tmp/metaengine-devplane-smoke.jsonl
+          grep -q '"state":"STOPPED"' /tmp/metaengine-devplane-smoke.jsonl
       - name: Electron renderer diagnostic
         id: renderer_smoke
         continue-on-error: true
@@ -89,8 +92,8 @@ jobs:
         if: always()
         run: |
           mkdir -p evidence-out
-          if grep -q '"ok":true' /tmp/metaengine-devplane-smoke.jsonl 2>/dev/null; then
-            echo 'linux_devplane_smoke=PASS' | tee evidence-out/linux-devplane-smoke-status.txt
+          if grep -q '"ok":true' /tmp/metaengine-devplane-smoke.jsonl 2>/dev/null && grep -q '"state":"STOPPED"' /tmp/metaengine-devplane-smoke.jsonl 2>/dev/null; then
+            echo 'linux_devplane_smoke=PASS_WITH_VERIFIED_SHUTDOWN' | tee evidence-out/linux-devplane-smoke-status.txt
           else
             echo 'linux_devplane_smoke=NOT_PROVED_ON_HOSTED_UBUNTU' | tee evidence-out/linux-devplane-smoke-status.txt
           fi
@@ -106,6 +109,7 @@ jobs:
           cp research/METAENGINE_BROWSER_SHELL_STEP1_RESEARCH_2026-08-29.md evidence-out/
           cp research/METAENGINE_BROWSER_STEP2_FLEET_DEVELOPMENT_PLANE_RESEARCH_2026-08-29.md evidence-out/
           cp research/METAENGINE_BROWSER_STEP3_DP0_POST_RESEARCH_2026-08-29.md evidence-out/
+          cp research/METAENGINE_BROWSER_STEP4_WINDOWS_LIFECYCLE_REPAIR_2026-08-29.md evidence-out/
           test ! -f /tmp/metaengine-browser-smoke.jsonl || cp /tmp/metaengine-browser-smoke.jsonl evidence-out/
           test ! -f /tmp/metaengine-devplane-smoke.jsonl || cp /tmp/metaengine-devplane-smoke.jsonl evidence-out/
           git rev-parse HEAD > evidence-out/git-head.txt
@@ -143,8 +147,8 @@ jobs:
           $err = Join-Path $env:RUNNER_TEMP 'metaengine-dp-err.txt'
           $electron = Join-Path (Get-Location) 'node_modules\electron\dist\electron.exe'
           if (-not (Test-Path $electron)) { throw "electron_binary_missing" }
-          $p = Start-Process -FilePath $electron -ArgumentList '.', '--metaengine-devplane-smoke' -WorkingDirectory (Get-Location) -NoNewWindow -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
-          if (-not $p.WaitForExit(20000)) {
+          $p = Start-Process -FilePath $electron -ArgumentList '.', '--metaengine-devplane-smoke' -WorkingDirectory (Get-Location) -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          if (-not $p.WaitForExit(30000)) {
             try { $p.Kill($true) } catch {}
             Get-Content $out -ErrorAction SilentlyContinue
             Get-Content $err -ErrorAction SilentlyContinue
@@ -154,6 +158,7 @@ jobs:
           Get-Content $err -ErrorAction SilentlyContinue
           if ($p.ExitCode -ne 0) { throw "development_plane_windows_exit_$($p.ExitCode)" }
           if (-not (Select-String -Path $out -Pattern '"ok":true' -Quiet)) { throw "development_plane_windows_receipt_missing" }
+          if (-not (Select-String -Path $out -Pattern '"state":"STOPPED"' -Quiet)) { throw "development_plane_windows_shutdown_receipt_missing" }
       - name: Windows evidence
         if: always()
         shell: powershell
@@ -166,4 +171,4 @@ jobs:
         if: always()
         with:
           name: metaengine-browser-devplane-windows-${{ github.sha }}
-          path: apps/metaengine-browser/evidence-windows/
+          path: evidence-windows/

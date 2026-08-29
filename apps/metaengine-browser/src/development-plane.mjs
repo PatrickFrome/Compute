@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-export const DEVELOPMENT_PLANE_VERSION = '0.1.0';
+export const DEVELOPMENT_PLANE_VERSION = '0.1.2';
 export const DEVELOPMENT_PLANE_PROTOCOL = 'metaengine.development-plane.v1';
 export const DEVELOPMENT_PLANE_CAPABILITIES = Object.freeze([
   'HEALTH',
@@ -22,6 +22,7 @@ export class DevelopmentPlane {
   #lastExitCode = null;
   #pending = new Map();
   #readyWait = null;
+  #stopWait = null;
 
   constructor({ spawnWorker, clock = () => Date.now(), uuid = () => crypto.randomUUID(), timeout_ms = 5000 } = {}) {
     if (typeof spawnWorker !== 'function') throw new Error('development_plane_spawn_invalid');
@@ -47,6 +48,7 @@ export class DevelopmentPlane {
       page_command_authority: false,
       browser_actuation_authority: false,
       automatic_restart: false,
+      verified_shutdown_required: true,
       authority_effect: false,
     });
   }
@@ -110,11 +112,51 @@ export class DevelopmentPlane {
       return false;
     }
     const child = this.#child;
-    this.#child = null;
     this.#state = 'STOPPING';
     const killed = child.kill();
     if (!killed) this.#state = 'LOST';
     return killed;
+  }
+
+  async stopAndWait(timeout_ms = this.#timeoutMs) {
+    if (!Number.isSafeInteger(timeout_ms) || timeout_ms < 100 || timeout_ms > 60000) throw new Error('development_plane_stop_timeout_invalid');
+    if (!this.#child) {
+      this.#state = 'STOPPED';
+      return Object.freeze({ ok: true, state: 'STOPPED', last_exit_code: this.#lastExitCode, already_stopped: true, authority_effect: false });
+    }
+    if (this.#stopWait) return this.#stopWait;
+    const child = this.#child;
+    this.#state = 'STOPPING';
+    this.#stopWait = new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        child.off?.('exit', onExit);
+        fn(value);
+      };
+      const onExit = (code) => finish(resolve, Object.freeze({
+        ok: true,
+        state: 'STOPPED',
+        last_exit_code: Number.isInteger(code) ? code : this.#lastExitCode,
+        already_stopped: false,
+        authority_effect: false,
+      }));
+      const timer = setTimeout(() => {
+        this.#state = 'LOST';
+        try { child.kill(); } catch {}
+        finish(reject, new Error('development_plane_stop_timeout'));
+      }, timeout_ms);
+      child.on('exit', onExit);
+      let killed = false;
+      try { killed = child.kill(); } catch {}
+      if (!killed) {
+        this.#state = 'LOST';
+        finish(reject, new Error('development_plane_stop_failed'));
+      }
+    }).finally(() => { this.#stopWait = null; });
+    return this.#stopWait;
   }
 
   #onMessage(message) {
@@ -123,7 +165,7 @@ export class DevelopmentPlane {
       if (this.#state !== 'STARTING') return;
       const advertised = Array.isArray(message.capabilities) ? [...message.capabilities].sort() : [];
       const expected = [...DEVELOPMENT_PLANE_CAPABILITIES].sort();
-      if (advertised.length !== expected.length || advertised.some((x, i) => x !== expected[i])) {
+      if (message.version !== DEVELOPMENT_PLANE_VERSION || advertised.length !== expected.length || advertised.some((x, i) => x !== expected[i])) {
         const waiter = this.#pending.get('__READY__');
         this.#pending.delete('__READY__');
         this.#state = 'LOST';

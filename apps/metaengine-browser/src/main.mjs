@@ -80,7 +80,7 @@ function assertShellSender(event) {
 async function shellSnapshot() {
   return {
     schema: 'metaengine.browser-shell.snapshot.v2',
-    version: '0.3.1',
+    version: '0.3.2',
     tabs: registry.snapshot(),
     fleet: fleet?.snapshot() || null,
     development_plane: developmentPlane?.snapshot() || null,
@@ -222,21 +222,24 @@ async function runDevelopmentPlaneSmoke() {
   const health = await developmentPlane.request('HEALTH');
   const capabilities = await developmentPlane.request('CAPABILITIES');
   const repo = await developmentPlane.request('REPO_HEAD_READ');
-  const invariant = state.state === 'READY'
+  const preShutdownInvariant = state.state === 'READY'
     && health?.ok === true
     && Array.isArray(capabilities?.capabilities)
+    && capabilities.version === state.version
     && capabilities.direct_promote_current === false
     && repo?.repository_present === true;
+  const shutdown = await developmentPlane.stopAndWait(4000);
+  const invariant = preShutdownInvariant && shutdown?.ok === true && shutdown?.state === 'STOPPED';
   console.log(JSON.stringify({
-    schema: 'metaengine.development-plane.smoke.v1',
+    schema: 'metaengine.development-plane.smoke.v2',
     ok: invariant,
     state,
     health,
     capabilities,
     repo,
+    shutdown,
     authority_effect: false,
   }));
-  developmentPlane.stop();
   app.exit(invariant ? 0 : 1);
 }
 
@@ -334,13 +337,13 @@ if (isDevelopmentPlaneSmoke) {
     await runDevelopmentPlaneSmoke();
   } catch (error) {
     console.error(JSON.stringify({
-      schema: 'metaengine.development-plane.smoke.v1',
+      schema: 'metaengine.development-plane.smoke.v2',
       ok: false,
       error: String(error?.message || error).slice(0, 240),
       state: developmentPlane?.snapshot() || null,
       authority_effect: false,
     }));
-    try { developmentPlane?.stop(); } catch {}
+    try { await developmentPlane?.stopAndWait?.(2000); } catch {}
     app.exit(1);
   }
 } else if (isSmoke) await runSmoke();
