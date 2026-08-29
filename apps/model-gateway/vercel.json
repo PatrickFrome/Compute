@@ -8,6 +8,7 @@
   "rewrites": [
     { "source": "/v1/models", "destination": "/api/openai-models" },
     { "source": "/v1/chat/completions", "destination": "/api/openai-chat" },
-    { "source": "/v1/committee", "destination": "/api/committee" }
+    { "source": "/v1/committee", "destination": "/api/committee" },
+    { "source": "/v1/committee/challenge", "destination": "/api/committee-challenge" }
   ]
 }
