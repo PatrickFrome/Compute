@@ -17,6 +17,19 @@ Exercise the broadest zero-spend model set reachable through the already-authori
 - Benchmark tasks: arithmetic, JavaScript coding selection, untrusted-instruction fence, strict JSON output.
 - Benchmark output/content was not promoted to project authority. `canonical=false`, `authority_effect=false`.
 
+## Full zero-spend language coverage
+
+A fresh scan of the complete live Vercel AI Gateway catalog observed **360 total models**. Under the project fail-closed rule — `type=language`, explicit published `pricing.input=0`, explicit published `pricing.output=0`, and no non-zero published tier/charge — the usable zero-spend language pool is exactly four current routes:
+
+1. `minimax/minimax-m3-free`
+2. `minimax/minimax-m2.7-free`
+3. `poolside/laguna-s-2.1-free`
+4. `inclusionai/ling-3.0-flash-fin-free`
+
+All **4/4 current explicit zero-price language routes** were actually sent inference requests in the benchmark run. `inclusionai/ling-3.0-tiny-free` was also checked as a previously observed candidate but is no longer present in the live catalog.
+
+Routes whose catalog pricing object is empty or ambiguous are deliberately **not** treated as zero-spend; absence of a published price is not proof of zero cost.
+
 ## Zero-spend candidates actually attempted
 
 | Model | Live zero-price gate | Inference attempt | Qualification disposition |
@@ -70,9 +83,25 @@ The existing logical peers remain:
 - `metaengine/peer-b-free` → Laguna first;
 - `metaengine/peer-c-free` → Ling first.
 
+The F1 branch additionally contains a regression contract that requires exactly these three default routes, three distinct provider prefixes, and prevents request preferences from resurrecting MiniMax M2.7 Free or Ling Tiny into the default plan.
+
 ## Frontier candidates
 
 Claude Sonnet 5, Gemini 3.7 Flash, DeepSeek V4 Pro 0813, GLM 5.3, Qwen 3.8 Flash/Max, and Grok 4.6 remain allowlisted only in paid role profiles and remain disabled by default. They are **not live-quality-qualified** by this receipt. Enabling them still requires both deployment and per-request paid opt-in plus the hard request budget fence.
+
+## F1 shortlist contract verification
+
+After sealing the shortlist, `F1 Model Gateway Contract` run #16 / Actions run `33234341990` on head `0a835fa11315eac0361dae7214a2fb550fa3244e` completed **SUCCESS**:
+
+- syntax/schema: PASS;
+- model-gateway tests: **31/31 PASS**;
+- full live catalog observed: 360 models;
+- all three selected routes still zero-price under tier-aware checks;
+- seven disabled frontier allowlist entries present;
+- inference calls in the F1 contract workflow: 0;
+- `authority_effect=false`.
+
+Governance Preview remains red by design because this accelerator branch is not an authoritative registered workstream. The qualification work does not weaken that gate.
 
 ## Re-run condition
 
