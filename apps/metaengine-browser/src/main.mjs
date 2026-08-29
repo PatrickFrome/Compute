@@ -9,6 +9,7 @@ import { captureSemanticFrame, captureViewThumbnail, executeSemanticCommand } fr
 import { NativeSupervisorClient } from './native-supervisor-client.mjs';
 import { SupervisorDeviceIdentity } from './supervisor-device-identity.mjs';
 import { navigationDecision, newWindowDecision, REMOTE_WEB_PREFERENCES, SECURITY_POLICY } from './browser-policy.mjs';
+import { TabLivenessRuntime } from './tab-liveness-runtime.mjs';
 import { TabRegistry } from './tab-registry.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -25,6 +26,7 @@ protocol.registerSchemesAsPrivileged([{ scheme: 'metaengine', privileges: { stan
 const registry = new TabRegistry();
 const views = new Map();
 const bridge = new ComputeBridgeClient();
+const liveness = new TabLivenessRuntime();
 let windowRef = null;
 let shellView = null;
 let userSession = null;
@@ -56,6 +58,7 @@ function configureUserSession() {
   userSession.setPermissionCheckHandler(() => false);
   userSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
   userSession.on('will-download', (event) => event.preventDefault());
+  liveness.attachSession(userSession);
 }
 
 function fleetStatePath() {
@@ -87,11 +90,19 @@ function assertShellSender(event) {
   if (!shellView || event.sender.id !== shellView.webContents.id) throw new Error('shell_sender_not_trusted');
 }
 
+function registrySnapshotWithLiveness() {
+  const snap = registry.snapshot();
+  return { ...snap, tabs: snap.tabs.map((tab) => liveness.enrichTab(tab)) };
+}
+
 async function shellSnapshot() {
+  const live = liveness.snapshot();
   return {
-    schema: 'metaengine.browser-shell.snapshot.v3',
+    schema: 'metaengine.browser-shell.snapshot.v4',
     version: app.getVersion(),
-    tabs: registry.snapshot(),
+    tabs: registrySnapshotWithLiveness(),
+    tab_network: live.network,
+    tab_health: live.health,
     fleet: fleet?.snapshot() || null,
     development_plane: developmentPlane?.snapshot() || null,
     supervisor: nativeSupervisor?.snapshot() || null,
@@ -137,6 +148,7 @@ function invalidatePerception(tabId = null) {
 }
 
 function wireRemoteView(tab, view) {
+  liveness.wire(tab.tab_id, view.webContents);
   view.webContents.setWindowOpenHandler(({ url }) => {
     const d = newWindowDecision(url);
     if (d.allow) setImmediate(() => createTab(d.normalized_url, { select: true }).catch(() => {}));
@@ -176,7 +188,7 @@ async function createTab(input = 'https://chatgpt.com/', { select = true, load =
   if (load) await view.webContents.loadURL(d.normalized_url);
   invalidatePerception();
   await publishSnapshot();
-  return { ...tab, webcontents_id: view.webContents.id };
+  return { ...tab, ...liveness.tabSnapshot(tab.tab_id) };
 }
 
 async function loadTab(tabId, input) {
@@ -197,7 +209,10 @@ async function closeTab(tabId) {
   if (view) {
     try { windowRef?.contentView.removeChildView(view); } catch {}
     views.delete(id);
+    liveness.remove(id);
     if (!view.webContents.isDestroyed()) view.webContents.close();
+  } else {
+    liveness.remove(id);
   }
   registry.close(id);
   await fleet?.onTabClosed(id, 'PHYSICAL_TAB_CLOSED_BY_SHELL');
@@ -351,9 +366,13 @@ async function nativeSupervisorState() {
   const snap = registry.snapshot();
   const selected = registry.selected();
   const perception = await perceptionForSelected();
+  const live = liveness.snapshot();
+  const tabs = snap.tabs.map((tab) => liveness.enrichTab({ ...tab, selected: tab.tab_id === snap.selected_tab_id }));
   return {
-    tabs: snap.tabs.map((tab) => ({ ...tab, selected: tab.tab_id === snap.selected_tab_id })),
-    active_tab: selected,
+    tabs,
+    active_tab: selected ? liveness.enrichTab(selected) : null,
+    network: live.network,
+    health: live.health,
     development_plane: developmentPlane?.snapshot() || null,
     fleet: fleet?.snapshot() || null,
     perception,
@@ -411,7 +430,10 @@ async function initNativeSupervisor() {
 
 function destroyWindowContents() {
   nativeSupervisor?.stop();
-  for (const view of views.values()) if (!view.webContents.isDestroyed()) view.webContents.close();
+  for (const [tabId, view] of views) {
+    liveness.remove(tabId);
+    if (!view.webContents.isDestroyed()) view.webContents.close();
+  }
   views.clear();
   if (shellView && !shellView.webContents.isDestroyed()) shellView.webContents.close();
   shellView = null;
