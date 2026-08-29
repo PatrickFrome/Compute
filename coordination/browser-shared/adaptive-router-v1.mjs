@@ -1,6 +1,7 @@
 export const ADAPTIVE_ROUTER_VERSION='1.0.0';
 const ID_RE=/^[a-z0-9][a-z0-9._:-]{2,127}$/;
 const CAP_RE=/^[A-Z][A-Z0-9_]{1,63}$/;
+const ENUM_RE=/^[A-Z][A-Z0-9_]{1,63}$/;
 const SURFACES=new Set(['EXTENSION_COMPAT','COMPUTE_BROWSER_PRIMARY','REMOTE_BROWSER_POOL']);
 const HEALTH=new Set(['HEALTHY','DRAINING','UNHEALTHY']);
 const TRUST=new Set(['COMPAT_USER_SESSION','TRUSTED_LOCAL','ATTESTED_REMOTE']);
@@ -11,17 +12,17 @@ function token(v,re,code){if(typeof v!=='string'||!re.test(v))throw new Adaptive
 function integer(v,min,max,code){if(!Number.isInteger(v)||v<min||v>max)throw new AdaptiveRouterError(code);return v;}
 function number(v,min,max,code){if(typeof v!=='number'||!Number.isFinite(v)||v<min||v>max)throw new AdaptiveRouterError(code);return v;}
 function bool(v,code){if(typeof v!=='boolean')throw new AdaptiveRouterError(code);return v;}
-function list(v,set,code,max=16){if(!Array.isArray(v)||!v.length||v.length>max)throw new AdaptiveRouterError(code);const out=v.map(x=>token(x,/^[A-Z][A-Z0-9_]{1,63}$/,code));if(new Set(out).size!==out.length||out.some(x=>set&&!set.has(x)))throw new AdaptiveRouterError(code);return Object.freeze(out);}
+function list(v,set,code,max=16){if(!Array.isArray(v)||!v.length||v.length>max)throw new AdaptiveRouterError(code);const out=v.map(x=>token(x,ENUM_RE,code));if(new Set(out).size!==out.length||out.some(x=>set&&!set.has(x)))throw new AdaptiveRouterError(code);return Object.freeze(out);}
 function caps(v,code){if(!Array.isArray(v)||v.length>64)throw new AdaptiveRouterError(code);const out=v.map(x=>token(x,CAP_RE,code)).sort();if(new Set(out).size!==out.length)throw new AdaptiveRouterError(code);return Object.freeze(out);}
 function exact(v,keys,code){if(!v||typeof v!=='object'||Array.isArray(v))throw new AdaptiveRouterError(code);const a=Object.keys(v).sort(),b=[...keys].sort();if(a.length!==b.length||a.some((k,i)=>k!==b[i]))throw new AdaptiveRouterError(code);}
 function freeze(v){if(v&&typeof v==='object'&&!Object.isFrozen(v)){Object.freeze(v);for(const x of Object.values(v))freeze(x);}return v;}
 
 function normalizeExecutor(v){
  exact(v,['executor_id','executor_incarnation_id','surface','health','trust_class','session_class','capabilities','raw_engine_exposed','locality','region','active_leases','max_leases','observed_latency_ms'],'router_executor_fields_invalid');
- const surface=token(v.surface,/^[A-Z_]+$/,'router_surface_invalid'); if(!SURFACES.has(surface))throw new AdaptiveRouterError('router_surface_invalid');
- const health=token(v.health,/^[A-Z]+$/,'router_health_invalid'); if(!HEALTH.has(health))throw new AdaptiveRouterError('router_health_invalid');
- const trust=token(v.trust_class,/^[A-Z_]+$/,'router_trust_invalid'); if(!TRUST.has(trust))throw new AdaptiveRouterError('router_trust_invalid');
- const session=token(v.session_class,/^[A-Z_]+$/,'router_session_invalid'); if(!SESSIONS.has(session))throw new AdaptiveRouterError('router_session_invalid');
+ const surface=token(v.surface,ENUM_RE,'router_surface_invalid'); if(!SURFACES.has(surface))throw new AdaptiveRouterError('router_surface_invalid');
+ const health=token(v.health,ENUM_RE,'router_health_invalid'); if(!HEALTH.has(health))throw new AdaptiveRouterError('router_health_invalid');
+ const trust=token(v.trust_class,ENUM_RE,'router_trust_invalid'); if(!TRUST.has(trust))throw new AdaptiveRouterError('router_trust_invalid');
+ const session=token(v.session_class,ENUM_RE,'router_session_invalid'); if(!SESSIONS.has(session))throw new AdaptiveRouterError('router_session_invalid');
  const locality=token(v.locality,/^(LOCAL|REMOTE)$/,'router_locality_invalid');
  return freeze({executor_id:token(v.executor_id,ID_RE,'router_executor_id_invalid'),executor_incarnation_id:token(v.executor_incarnation_id,ID_RE,'router_incarnation_invalid'),surface,health,trust_class:trust,session_class:session,capabilities:caps(v.capabilities,'router_capabilities_invalid'),raw_engine_exposed:bool(v.raw_engine_exposed,'router_raw_engine_invalid'),locality,region:token(v.region,/^[a-z0-9][a-z0-9.-]{1,63}$/,'router_region_invalid'),active_leases:integer(v.active_leases,0,1000000,'router_active_leases_invalid'),max_leases:integer(v.max_leases,1,1000000,'router_max_leases_invalid'),observed_latency_ms:number(v.observed_latency_ms,0,3600000,'router_latency_invalid')});
 }
