@@ -129,7 +129,7 @@ async function createTab(input = 'https://chatgpt.com/', { select = true, load =
   wireRemoteView(tab, view);
   if (select) registry.select(tab.tab_id);
   attachSelected();
-  if (load && !isSmoke) await view.webContents.loadURL(d.normalized_url);
+  if (load) await view.webContents.loadURL(d.normalized_url);
   await publishSnapshot();
   return tab;
 }
@@ -142,7 +142,7 @@ async function closeTab(tabId) {
     if (!view.webContents.isDestroyed()) view.webContents.close();
   }
   registry.close(tabId);
-  if (!registry.selected()) await createTab('https://chatgpt.com/', { select: true, load: !isSmoke });
+  if (!registry.selected()) await createTab('https://chatgpt.com/', { select: true, load: true });
   attachSelected();
   await publishSnapshot();
 }
@@ -150,15 +150,15 @@ async function closeTab(tabId) {
 async function handleCommand(command, payload = {}) {
   const selected = registry.selected();
   const selectedView = selected ? views.get(selected.tab_id) : null;
-  if (command === 'NEW_CHATGPT') return createTab('https://chatgpt.com/', { select: true, load: !isSmoke });
-  if (command === 'NEW_TAB') return createTab('https://chatgpt.com/', { select: true, load: !isSmoke });
+  if (command === 'NEW_CHATGPT') return createTab('https://chatgpt.com/', { select: true, load: true });
+  if (command === 'NEW_TAB') return createTab('https://chatgpt.com/', { select: true, load: true });
   if (command === 'SELECT_TAB') { registry.select(payload?.tab_id); attachSelected(); await publishSnapshot(); return { ok: true }; }
   if (command === 'CLOSE_TAB') { await closeTab(payload?.tab_id); return { ok: true }; }
   if (command === 'NAVIGATE') {
     if (!selectedView) throw new Error('no_selected_tab');
     const d = navigationDecision(payload?.url);
     if (!d.allow) throw new Error(`navigation_blocked:${d.reason}`);
-    if (!isSmoke) await selectedView.webContents.loadURL(d.normalized_url);
+    await selectedView.webContents.loadURL(d.normalized_url);
     registry.update(selected.tab_id, { url: d.normalized_url, kind: d.kind });
     await publishSnapshot();
     return { ok: true };
@@ -177,6 +177,36 @@ function destroyWindowContents() {
   shellView = null;
 }
 
+async function runSmoke() {
+  const smokeWindow = new BaseWindow({ width: 320, height: 240, title: 'METAENGINE Browser Smoke' });
+  const remoteView = new WebContentsView({ webPreferences: { ...REMOTE_WEB_PREFERENCES, session: userSession } });
+  smokeWindow.contentView.addChildView(remoteView);
+  remoteView.setBounds({ x: 0, y: 0, width: 320, height: 240 });
+  await remoteView.webContents.loadURL('about:blank');
+  const invariant = userSession.isPersistent()
+    && remoteView.webContents.session === userSession
+    && protocol.isProtocolHandled('metaengine')
+    && REMOTE_WEB_PREFERENCES.nodeIntegration === false
+    && REMOTE_WEB_PREFERENCES.contextIsolation === true
+    && REMOTE_WEB_PREFERENCES.sandbox === true
+    && SECURITY_POLICY.cookie_transfer_to_compute_space === false;
+  console.log(JSON.stringify({
+    schema: 'metaengine.browser-shell.smoke.v2',
+    ok: invariant,
+    persistent_user_space: userSession.isPersistent(),
+    custom_shell_protocol_registered: protocol.isProtocolHandled('metaengine'),
+    remote_session_exact: remoteView.webContents.session === userSession,
+    remote_node_integration: REMOTE_WEB_PREFERENCES.nodeIntegration,
+    remote_context_isolation: REMOTE_WEB_PREFERENCES.contextIsolation,
+    remote_sandbox: REMOTE_WEB_PREFERENCES.sandbox,
+    compute_bridge_read_only: true,
+    authority_effect: false,
+  }));
+  remoteView.webContents.close();
+  smokeWindow.destroy();
+  app.exit(invariant ? 0 : 1);
+}
+
 async function createWindow() {
   windowRef = new BaseWindow({ width: 1440, height: 960, minWidth: 900, minHeight: 640, title: 'METAENGINE Browser', backgroundColor: '#101216' });
   shellView = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-shell.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true } });
@@ -184,14 +214,8 @@ async function createWindow() {
   windowRef.on('resize', layout);
   windowRef.on('closed', () => { destroyWindowContents(); windowRef = null; });
   await shellView.webContents.loadURL('metaengine://shell/');
-  await createTab('https://chatgpt.com/', { select: true, load: !isSmoke });
+  await createTab('https://chatgpt.com/', { select: true, load: true });
   layout();
-  if (isSmoke) {
-    const snap = await shellSnapshot();
-    const invariant = userSession.isPersistent() && snap.tabs.tabs.length === 1 && snap.tabs.tabs[0].kind === 'CHATGPT' && snap.policy.cookie_transfer_to_compute_space === false;
-    console.log(JSON.stringify({ schema: 'metaengine.browser-shell.smoke.v1', ok: invariant, persistent_user_space: userSession.isPersistent(), chatgpt_tab_created: snap.tabs.tabs[0].kind === 'CHATGPT', remote_node_integration: REMOTE_WEB_PREFERENCES.nodeIntegration, remote_sandbox: REMOTE_WEB_PREFERENCES.sandbox, compute_bridge_read_only: true, authority_effect: false }));
-    setTimeout(() => { destroyWindowContents(); windowRef?.destroy(); app.exit(invariant ? 0 : 1); }, 100);
-  }
 }
 
 ipcMain.handle('metaengine:shell:snapshot', async (event) => { assertShellSender(event); return shellSnapshot(); });
@@ -200,6 +224,9 @@ ipcMain.handle('metaengine:shell:command', async (event, message) => { assertShe
 await app.whenReady();
 await registerShellProtocol();
 configureUserSession();
-await createWindow();
-app.on('activate', () => { if (!windowRef) createWindow().catch((error) => { console.error(error); app.exit(1); }); });
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+if (isSmoke) await runSmoke();
+else {
+  await createWindow();
+  app.on('activate', () => { if (!windowRef) createWindow().catch((error) => { console.error(error); app.exit(1); }); });
+  app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+}
