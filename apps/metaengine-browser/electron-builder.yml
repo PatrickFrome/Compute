@@ -1,0 +1,30 @@
+appId: com.metaengine.browser.test
+productName: METAENGINE Browser TEST
+copyright: Copyright © 2026 METAENGINE
+electronVersion: 44.0.0
+asar: false
+npmRebuild: false
+directories:
+  output: dist-installer
+files:
+  - src/**/*
+  - ui/**/*
+  - package.json
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: METAENGINE-Browser-TEST-Setup-${version}.${ext}
+nsis:
+  oneClick: true
+  perMachine: false
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: METAENGINE Browser TEST
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
+  allowElevation: false
+  installerLanguages:
+    - en_US
+    - ru_RU
