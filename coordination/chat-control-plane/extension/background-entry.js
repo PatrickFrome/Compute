@@ -37,6 +37,7 @@ importScripts("./semantic-perception-compiler.js");
 importScripts("./operator-semantic-perception.js");
 importScripts("./operator-oopif-perception.js");
 importScripts("./operator-semantic-actions.js");
+importScripts("./operator-typed-click-outcome.js");
 
 // Phase 4 — signed supervisor authority and self-healing supervisor chat.
 importScripts("./supervisor-authority.js");
