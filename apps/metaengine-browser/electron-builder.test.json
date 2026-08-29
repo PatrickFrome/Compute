@@ -10,6 +10,14 @@
     "ui/**/*",
     "package.json"
   ],
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "PatrickFrome",
+      "repo": "Compute",
+      "releaseType": "prerelease"
+    }
+  ],
   "win": {
     "target": [
       {
