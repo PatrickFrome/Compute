@@ -16,7 +16,7 @@ let readyTimer = null;
 function trace(stage, detail = {}) {
   if (!TRACE_PATH) return;
   const row = {
-    schema: 'metaengine.development-plane.stage-trace.v2',
+    schema: 'metaengine.development-plane.stage-trace.v3',
     stage: String(stage),
     pid: process.pid,
     platform: process.platform,
@@ -49,6 +49,7 @@ async function run() {
       cwd: REPO_ROOT,
       env: {
         METAENGINE_REPO_ROOT: REPO_ROOT,
+        METAENGINE_GIT_REPOSITORY: 'PatrickFrome/Compute',
         SYSTEMROOT: process.env.SYSTEMROOT || '',
         WINDIR: process.env.WINDIR || '',
         TEMP: process.env.TEMP || process.env.TMP || '',
@@ -69,28 +70,70 @@ async function run() {
     capabilities_version: capabilities?.version || null,
     repository_present: repo?.repository_present === true,
   });
+  const candidate = await plane.request('CANDIDATE_CAPSULE_CREATE', {
+    source_head: repo.head,
+    sequence: 1,
+    intent: 'Physical DP1 candidate capsule provenance smoke',
+    components: [{
+      path: 'apps/metaengine-browser/src/development-plane.mjs',
+      change: 'MODIFY',
+      digest: `sha256:${'1'.repeat(64)}`,
+    }],
+    verification_plan: [
+      { id: 'PARSE_GATE', required: true },
+      { id: 'UNIT_TESTS', required: true },
+      { id: 'PHYSICAL_DP_SMOKE', required: true },
+    ],
+    evidence: [],
+  });
+  const candidateVerification = await plane.request('CANDIDATE_CAPSULE_VERIFY', { capsule: candidate });
+  trace('DP_CANDIDATE_VERIFIED', {
+    ok: candidateVerification?.ok === true,
+    candidate_id: candidate?.candidate_id || null,
+    candidate_only: candidate?.policy?.candidate_only === true,
+    executable: candidate?.policy?.executable === true,
+    promotion_authorized: candidateVerification?.promotion_authorized === true,
+  });
   const shutdown = await plane.stopAndWait(4000);
   trace('DP_STOPPED', { shutdown });
   const ok = state.state === 'READY'
     && health?.ok === true
     && capabilities?.version === state.version
+    && capabilities?.candidate_capsules === true
+    && capabilities?.candidate_capsules_executable === false
     && capabilities?.direct_promote_current === false
     && repo?.repository_present === true
+    && candidate?.source?.head === repo.head
+    && candidate?.policy?.candidate_only === true
+    && candidate?.policy?.executable === false
+    && candidate?.policy?.direct_promote_current === false
+    && candidateVerification?.ok === true
+    && candidateVerification?.source_current === true
+    && candidateVerification?.promotion_authorized === false
     && shutdown?.ok === true
     && shutdown?.state === 'STOPPED'
     && shutdown?.cooperative_shutdown_ack === true;
   const receipt = {
-    schema: 'metaengine.development-plane.physical-smoke.v2',
+    schema: 'metaengine.development-plane.physical-smoke.v3',
     ok,
     state,
     health,
     capabilities,
     repo,
+    candidate,
+    candidate_verification: candidateVerification,
     shutdown,
     authority_effect: false,
   };
   try { process.stdout.write(`${JSON.stringify(receipt)}\n`); } catch {}
-  trace('COMPLETE', { ok, shutdown_state: shutdown?.state || null, cooperative_shutdown_ack: shutdown?.cooperative_shutdown_ack === true });
+  trace('COMPLETE', {
+    ok,
+    candidate_verified: candidateVerification?.ok === true,
+    candidate_executable: candidate?.policy?.executable === true,
+    promotion_authorized: candidateVerification?.promotion_authorized === true,
+    shutdown_state: shutdown?.state || null,
+    cooperative_shutdown_ack: shutdown?.cooperative_shutdown_ack === true,
+  });
   completed = true;
   app.exit(ok ? 0 : 1);
 }
