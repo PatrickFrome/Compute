@@ -31,6 +31,9 @@ fn run() -> Result<(), &'static str> {
         return Err("skill_launcher_fd_contract_not_verified");
     }
 
+    rustix::thread::set_no_new_privs(true)
+        .map_err(|_| "skill_launcher_no_new_privs_failed")?;
+
     let helper =
         ExecutableCapability::open_fixed_helper(&directory).map_err(|error| error.code())?;
     helper

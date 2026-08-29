@@ -61,6 +61,8 @@ jobs:
           rustix = deps.get('rustix')
           if not isinstance(rustix, dict) or rustix.get('version') != '=1.1.4':
               raise SystemExit('rustix drifted')
+          if sorted(rustix.get('features', [])) != ['fs', 'thread']:
+              raise SystemExit('rustix feature surface drifted')
           lock = tomllib.loads(Path('Cargo.lock').read_text())
           packages = {(p['name'], p['version']) for p in lock.get('package', [])}
           if len(packages) != 19:
@@ -92,6 +94,7 @@ jobs:
                   raise SystemExit(f'missing R7L identity invariant: {token}')
           required_launcher = [
               'sanitize_inherited_fds()', 'verify_clean_inherited_fds()',
+              'rustix::thread::set_no_new_privs(true)',
               'ExecutableCapability::open_fixed_helper(&directory)',
               'verify_preexec_fd_contract()', 'helper.execute(&root)',
           ]
@@ -116,11 +119,12 @@ jobs:
 
           sanitize = launcher.index('sanitize_inherited_fds')
           clean = launcher.index('verify_clean_inherited_fds')
+          no_new_privs = launcher.index('set_no_new_privs(true)')
           acquire = launcher.index('open_fixed_helper')
           preexec = launcher.index('verify_preexec_fd_contract')
           execute = launcher.index('helper.execute')
-          if not (sanitize < clean < acquire < preexec < execute):
-              raise SystemExit('R7L ambient-cut/acquire/exec ordering invariant violated')
+          if not (sanitize < clean < no_new_privs < acquire < preexec < execute):
+              raise SystemExit('R7L ambient-cut/no-new-privs/acquire/exec ordering invariant violated')
           PY
 
       - name: Compile lint and run Rust adversarial regressions
@@ -176,7 +180,7 @@ jobs:
           TRACE="$RUNNER_TEMP/r7l-exec.trace"
           LAUNCHER="$PWD/target/release/a2-skill-source-launcher"
           A2_R7L_ENV_SENTINEL=must-not-cross-exec \
-            bash -c 'exec 9</dev/null; exec strace -qq -f -v -s 1024 -e trace=execve,execveat,openat2,close_range -o "$1" "$2" "$3"' \
+            bash -c 'exec 9</dev/null; exec strace -qq -f -v -s 1024 -e trace=execve,execveat,openat2,close_range,prctl -o "$1" "$2" "$3"' \
               r7l-trace "$TRACE" "$LAUNCHER" "$ROOT" \
               < "$RUNNER_TEMP/r7l-request.bin" \
               > "$RUNNER_TEMP/r7l-trace.stdout" \
@@ -197,8 +201,17 @@ jobs:
                          if 'execveat(' in line and 'AT_EMPTY_PATH' in line)
           closes = [i for i, line in enumerate(lines)
                     if 'close_range(3,' in line and 'CLOSE_RANGE_UNSHARE' in line and '= 0' in line]
-          if not any(launcher_exec < i < helper_open for i in closes):
+          launcher_closes = [i for i in closes if launcher_exec < i < helper_open]
+          if len(launcher_closes) != 1:
               raise SystemExit('ambient close_range did not precede executable capability acquisition')
+          no_new_privs = [i for i, line in enumerate(lines)
+                          if launcher_exec < i < helper_open
+                          and 'PR_SET_NO_NEW_PRIVS' in line
+                          and ', 1' in line and '= 0' in line]
+          if len(no_new_privs) != 1:
+              raise SystemExit('successful no_new_privs was not observed before executable capability acquisition')
+          if not launcher_closes[0] < no_new_privs[0] < helper_open:
+              raise SystemExit('ambient-cut/no-new-privs/helper-open runtime ordering violated')
           if not any(i > fd_exec for i in closes):
               raise SystemExit('helper defense-in-depth close_range missing after fd-bound exec')
           if any('execve(' in line and 'a2-skill-source-helper' in line
@@ -212,6 +225,7 @@ jobs:
               if token not in open_line:
                   raise SystemExit(f'helper open missing {token}')
           print(f'launcher_exec_line={launcher_exec + 1}')
+          print(f'no_new_privs_line={no_new_privs[0] + 1}')
           print(f'helper_openat2_line={helper_open + 1}')
           print(f'helper_execveat_line={fd_exec + 1}')
           print('close_range_lines=' + ','.join(str(i + 1) for i in closes))
@@ -248,7 +262,7 @@ jobs:
           printf '%s\n' "$GITHUB_SHA" > "$OUT/evidence/SOURCE_COMMIT.txt"
           printf '%s\n' 'cbdb70e9be5a99251d57a7be7d0c43a95683ebae' > "$OUT/evidence/PARENT_VERIFIED_COMMIT.txt"
           cat > "$OUT/evidence/R7L_CLAIMS.json" <<'JSON'
-          {"milestone":"R7L_EXECUTABLE_IDENTITY_BINDING_V1","fd_bound_exec":true,"openat2_confined_fixed_sibling":true,"exec_fd_cloexec":true,"path_swap_cannot_redirect":true,"empty_environment":true,"new_dependencies":0,"node_integration":false,"browser_authority":false,"network_authority":false}
+          {"milestone":"R7L_EXECUTABLE_IDENTITY_BINDING_V1","fd_bound_exec":true,"openat2_confined_fixed_sibling":true,"exec_fd_cloexec":true,"path_swap_cannot_redirect":true,"no_new_privs_before_helper_open":true,"empty_environment":true,"new_dependencies":0,"node_integration":false,"browser_authority":false,"network_authority":false}
           JSON
           tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
             -cf "$OUT/A2_BROWSER_R7L_EXECUTABLE_IDENTITY_BINDING.tar" \
