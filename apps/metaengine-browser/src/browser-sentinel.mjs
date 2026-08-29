@@ -1,12 +1,18 @@
 import crypto from 'node:crypto';
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
-export const BROWSER_SENTINEL_VERSION = '1.0.0';
+export const BROWSER_SENTINEL_VERSION = '1.1.0';
 
 async function readJson(file) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); }
+  catch (error) { if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null; throw error; }
+}
+
+function readJsonSync(file) {
+  try { return JSON.parse(fsSync.readFileSync(file, 'utf8')); }
   catch (error) { if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null; throw error; }
 }
 
@@ -15,6 +21,13 @@ async function writeJson(file, value) {
   const temp = `${file}.tmp`;
   await fs.writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   await fs.rename(temp, file);
+}
+
+function writeJsonSync(file, value) {
+  fsSync.mkdirSync(path.dirname(file), { recursive: true });
+  const temp = `${file}.tmp`;
+  fsSync.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  fsSync.renameSync(temp, file);
 }
 
 function safeState(value) {
@@ -35,6 +48,23 @@ function safeState(value) {
     updated_at: new Date().toISOString(),
     authority_effect: false,
   };
+}
+
+function sentinelEnvironment(source, { statePath, token, parentPid }) {
+  const env = {};
+  const allow = new Set([
+    'SystemRoot','WINDIR','ComSpec','PATH','PATHEXT','TEMP','TMP','USERPROFILE',
+    'LOCALAPPDATA','APPDATA','ProgramData','PROGRAMFILES','PROGRAMFILES(X86)',
+    'PROCESSOR_ARCHITECTURE','PROCESSOR_IDENTIFIER','NUMBER_OF_PROCESSORS',
+  ].map((x) => x.toUpperCase()));
+  for (const [key, value] of Object.entries(source || {})) {
+    if (allow.has(String(key).toUpperCase()) && value != null) env[key] = String(value);
+  }
+  env.ELECTRON_RUN_AS_NODE = '1';
+  env.METAENGINE_SENTINEL_STATE_PATH = statePath;
+  env.METAENGINE_SENTINEL_TOKEN = token;
+  env.METAENGINE_SENTINEL_PARENT_PID = String(parentPid);
+  return env;
 }
 
 export class BrowserSentinelHost {
@@ -62,13 +92,7 @@ export class BrowserSentinelHost {
       relaunch_attempted: false,
     });
     await writeJson(this.#statePath, this.#state);
-    const env = {
-      ...process.env,
-      ELECTRON_RUN_AS_NODE: '1',
-      METAENGINE_SENTINEL_STATE_PATH: this.#statePath,
-      METAENGINE_SENTINEL_TOKEN: token,
-      METAENGINE_SENTINEL_PARENT_PID: String(process.pid),
-    };
+    const env = sentinelEnvironment(process.env, { statePath: this.#statePath, token, parentPid: process.pid });
     this.#child = this.#spawn(this.#executable, [this.#workerScript], {
       detached: true,
       stdio: 'ignore',
@@ -79,7 +103,7 @@ export class BrowserSentinelHost {
     this.#child.unref?.();
     this.#app = app;
     if (app?.on) {
-      this.#beforeQuit = () => { void this.markPlannedShutdown(); };
+      this.#beforeQuit = () => { this.markPlannedShutdownSync(); };
       app.on('before-quit', this.#beforeQuit);
     }
     return this.snapshot();
@@ -93,22 +117,32 @@ export class BrowserSentinelHost {
     return this.snapshot();
   }
 
+  #mutateSync(patch) {
+    const current = readJsonSync(this.#statePath);
+    if (!current || current.token !== this.#state?.token) return this.snapshot();
+    this.#state = safeState({ ...current, ...patch });
+    writeJsonSync(this.#statePath, this.#state);
+    return this.snapshot();
+  }
+
   async prepareExpectedRestart(reason = 'EXPECTED_RESTART') {
     return this.#mutate({ expected_restart: true, expected_restart_reason: reason, lifecycle: 'EXPECTED_RESTART' });
   }
 
-  async markPlannedShutdown() {
-    const current = await readJson(this.#statePath);
+  markPlannedShutdownSync() {
+    const current = readJsonSync(this.#statePath);
     if (!current || current.token !== this.#state?.token) return this.snapshot();
-    if (current.expected_restart === true) return this.#mutate({ lifecycle: 'EXPECTED_RESTART' });
-    return this.#mutate({ lifecycle: 'PLANNED_SHUTDOWN' });
+    if (current.expected_restart === true) return this.#mutateSync({ lifecycle: 'EXPECTED_RESTART' });
+    return this.#mutateSync({ lifecycle: 'PLANNED_SHUTDOWN' });
   }
+
+  async markPlannedShutdown() { return this.markPlannedShutdownSync(); }
 
   async stop() {
     if (this.#beforeQuit && this.#app?.removeListener) this.#app.removeListener('before-quit', this.#beforeQuit);
     this.#beforeQuit = null;
     this.#app = null;
-    return this.markPlannedShutdown();
+    return this.markPlannedShutdownSync();
   }
 }
 
