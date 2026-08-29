@@ -1,0 +1,22 @@
+{
+  "appId": "com.metaengine.browser.test",
+  "productName": "METAENGINE Browser Test",
+  "asar": true,
+  "directories": {
+    "output": "dist-test"
+  },
+  "files": [
+    "src/**/*",
+    "ui/**/*",
+    "package.json"
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "portable",
+        "arch": ["x64"]
+      }
+    ],
+    "artifactName": "METAENGINE-Browser-Test-${version}-${arch}.${ext}"
+  }
+}
