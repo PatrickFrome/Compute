@@ -5,6 +5,7 @@ const bypassSingleInstance = process.argv.includes('--metaengine-smoke')
   || process.argv.includes('--metaengine-devplane-smoke');
 const instanceHoldProbe = process.argv.includes('--metaengine-single-instance-probe');
 const versionProbe = process.argv.includes('--metaengine-version-probe');
+const profileProbe = process.argv.includes('--metaengine-profile-probe');
 const selfUpdateSmoke = process.argv.includes('--metaengine-self-update-smoke');
 
 const guard = acquirePrimaryInstance(app, { bypass: bypassSingleInstance });
@@ -14,7 +15,7 @@ if (guard.primary) {
     app.setAppUserModelId(METAENGINE_BROWSER_APP_ID);
   }
 
-  if (versionProbe || instanceHoldProbe || selfUpdateSmoke) {
+  if (versionProbe || profileProbe || instanceHoldProbe || selfUpdateSmoke) {
     app.once('ready', async () => {
       if (selfUpdateSmoke) {
         try {
@@ -30,6 +31,33 @@ if (guard.primary) {
           }));
           app.exit(4);
         }
+        return;
+      }
+      if (profileProbe) {
+        const fs = await import('node:fs/promises');
+        const path = await import('node:path');
+        const userData = app.getPath('userData');
+        const markerPath = path.join(userData, 'metaengine-self-update-profile-continuity-v1.txt');
+        const expected = 'metaengine-profile-continuity-v1';
+        if (process.env.METAENGINE_PROFILE_PROBE_WRITE === '1') {
+          await fs.mkdir(userData, { recursive: true });
+          await fs.writeFile(markerPath, `${expected}\n`, { mode: 0o600 });
+        }
+        let marker = null;
+        try { marker = (await fs.readFile(markerPath, 'utf8')).trim(); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
+        const ok = marker === expected;
+        console.log(JSON.stringify({
+          schema: 'metaengine.browser.profile-probe.v1',
+          version: app.getVersion(),
+          pid: process.pid,
+          primary_instance: true,
+          app_id: METAENGINE_BROWSER_APP_ID,
+          user_data_path: userData,
+          marker_present: ok,
+          marker_path: markerPath,
+          authority_effect: false,
+        }));
+        app.exit(ok ? 0 : 5);
         return;
       }
       console.log(JSON.stringify({
