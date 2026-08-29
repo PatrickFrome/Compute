@@ -20,6 +20,13 @@ const TRANSPORTS = new Set([
   'PROVIDER_NATIVE_HTTP',
   'LOCAL_PROCESS'
 ]);
+const EVIDENCE_TRUST_STATES = new Set([
+  'SELF_REPORTED',
+  'HASH_BOUND_ADVISORY_UNATTESTED',
+  'PERSISTED_READBACK_VERIFIED',
+  'SIGNED_ATTESTED'
+]);
+const ROUTING_TRUST_STATES = new Set(['PERSISTED_READBACK_VERIFIED', 'SIGNED_ATTESTED']);
 const DATA_POLICY = 'PUBLIC_OR_NON_SENSITIVE_ONLY';
 
 function object(value, code) {
@@ -66,6 +73,8 @@ function normalizeRail(input, nowMs, freshnessMs) {
   for (const key of ['transport_verified', 'quality_verified', 'structured_verified', 'quorum_eligible']) {
     if (typeof qualification[key] !== 'boolean') throw new Error(`multi_gateway_rail_${key}_invalid`);
   }
+  const trustState = enumValue(qualification.evidence_trust_state, EVIDENCE_TRUST_STATES, 'multi_gateway_rail_evidence_trust_invalid');
+  const evidenceSource = text(qualification.evidence_source, 'multi_gateway_rail_evidence_source_invalid', 192);
   if (typeof input.available !== 'boolean') throw new Error('multi_gateway_rail_available_invalid');
   const models = Array.isArray(input.models) ? input.models.map((model) => text(model, 'multi_gateway_rail_model_invalid', 160)) : [];
   if (models.length > 16 || new Set(models).size !== models.length) throw new Error('multi_gateway_rail_models_invalid');
@@ -85,7 +94,9 @@ function normalizeRail(input, nowMs, freshnessMs) {
       transport_verified: qualification.transport_verified,
       quality_verified: qualification.quality_verified,
       structured_verified: qualification.structured_verified,
-      quorum_eligible: qualification.quorum_eligible
+      quorum_eligible: qualification.quorum_eligible,
+      evidence_trust_state: trustState,
+      evidence_source: evidenceSource
     },
     evidence_sha256: digest(input.evidence_sha256, 'multi_gateway_rail_evidence_hash_invalid'),
     tariff_dependency: input.tariff_dependency,
@@ -98,6 +109,7 @@ function eligibility(rail, strategy, excludedDomains) {
   if (!rail.available) return 'UNAVAILABLE';
   if (!rail.qualification.transport_verified) return 'TRANSPORT_UNQUALIFIED';
   if (strategy === 'QUALIFICATION') return null;
+  if (!ROUTING_TRUST_STATES.has(rail.qualification.evidence_trust_state)) return 'QUALIFICATION_EVIDENCE_UNTRUSTED';
   if (!rail.qualification.quality_verified) return 'QUALITY_UNQUALIFIED';
   if ((strategy === 'DIVERSE_ADVISORY' || strategy === 'TIEBREAK') && !rail.qualification.quorum_eligible) return 'QUORUM_INELIGIBLE';
   if (strategy === 'STRUCTURED' && !rail.qualification.structured_verified) return 'STRUCTURED_UNQUALIFIED';
@@ -123,6 +135,8 @@ function selectedSummary(rail, role) {
     failure_domain: rail.failure_domain,
     models: rail.models,
     evidence_sha256: rail.evidence_sha256,
+    evidence_trust_state: rail.qualification.evidence_trust_state,
+    evidence_source: rail.qualification.evidence_source,
     tariff_dependency: rail.tariff_dependency,
     observed_at: rail.observed_at,
     latency_ms: rail.latency_ms
@@ -152,7 +166,7 @@ export function createMultiGatewayRoutePlan({
   const eligible = [];
   for (const rail of normalized) {
     const reason = eligibility(rail, normalizedStrategy, excludedDomains);
-    if (reason) excluded.push({ rail_id: rail.rail_id, reason, evidence_sha256: rail.evidence_sha256 });
+    if (reason) excluded.push({ rail_id: rail.rail_id, reason, evidence_sha256: rail.evidence_sha256, evidence_trust_state: rail.qualification.evidence_trust_state });
     else eligible.push(rail);
   }
   eligible.sort(compareRails);
@@ -184,6 +198,8 @@ export function createMultiGatewayRoutePlan({
     semantics: {
       provider_internal_failover_is_nested_below_gateway_plane_routing: true,
       availability_is_not_quality: true,
+      self_reported_quality_is_not_routing_authority: true,
+      quality_routing_requires_persisted_or_attested_evidence: true,
       quorum_is_not_semantic_truth: true,
       routing_is_advisory_only: true,
       requires_supervisor_arbitration: true
