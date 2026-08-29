@@ -8,28 +8,32 @@ import test from 'node:test';
 import { VerifiedDownloadManager, validateVerifiedDownloadRequest } from '../src/verified-download-manager.mjs';
 
 class FakeDownloadItem extends EventEmitter {
-  constructor(url, body) {
+  constructor(url, body, chain = [url]) {
     super();
     this.url = url;
+    this.chain = chain;
     this.body = Buffer.from(body);
     this.savePath = null;
     this.cancelled = false;
     this.received = 0;
   }
-  getURLChain() { return [this.url]; }
+  getURLChain() { return this.chain; }
+  getURL() { return this.url; }
   setSavePath(value) { this.savePath = value; }
   getReceivedBytes() { return this.received; }
   cancel() { this.cancelled = true; }
 }
 
 class FakeSession extends EventEmitter {
-  constructor(body = Buffer.from('verified-body')) {
+  constructor(body = Buffer.from('verified-body'), chainFactory = (url) => [url]) {
     super();
     this.body = Buffer.from(body);
+    this.chainFactory = chainFactory;
     this.lastItem = null;
   }
   downloadURL(url) {
-    const item = new FakeDownloadItem(url, this.body);
+    const chain = this.chainFactory(url);
+    const item = new FakeDownloadItem(String(chain.at(-1) || url), this.body, chain);
     this.lastItem = item;
     const event = { prevented: false, preventDefault() { this.prevented = true; } };
     this.emit('will-download', event, item);
@@ -81,9 +85,48 @@ test('typed download persists only after exact sha256 verification', async (t) =
   });
   assert.equal(receipt.schema, 'metaengine.verified-download-receipt.v1');
   assert.equal(receipt.sha256, digest(body));
+  assert.deepEqual(receipt.url_chain, ['https://example.com/METAENGINE.exe']);
   assert.equal(receipt.executable_started, false);
   assert.equal(await fs.readFile(path.join(root, 'METAENGINE.exe'), 'utf8'), body.toString());
   assert.equal(manager.snapshot().active, null);
+});
+
+test('safe HTTPS redirect chain is allowed only with exact digest binding', async (t) => {
+  const body = Buffer.from('release bytes');
+  const root = await tempRoot(t);
+  const requested = 'https://github.com/example/releases/download/v1/build.exe';
+  const final = 'https://objects.githubusercontent.com/release/build.exe?signature=opaque';
+  const session = new FakeSession(body, (url) => [url, final]);
+  const manager = new VerifiedDownloadManager({ session, rootPath: root });
+  t.after(() => manager.close());
+  const receipt = await manager.download({
+    url: requested,
+    filename: 'build.exe',
+    expected_sha256: digest(body),
+    max_bytes: 4096,
+  });
+  assert.deepEqual(receipt.url_chain, [requested, final]);
+  assert.equal(receipt.sha256, digest(body));
+});
+
+test('redirect chain missing requested origin or containing unsafe hop fails closed', async (t) => {
+  const body = Buffer.from('x');
+  for (const chain of [
+    ['https://cdn.example.com/build.exe'],
+    ['https://example.com/build.exe', 'http://cdn.example.com/build.exe'],
+    ['https://example.com/build.exe', 'https://127.0.0.1/build.exe'],
+  ]) {
+    const root = await tempRoot(t);
+    const session = new FakeSession(body, () => chain);
+    const manager = new VerifiedDownloadManager({ session, rootPath: root });
+    await assert.rejects(manager.download({
+      url: 'https://example.com/build.exe',
+      filename: `build-${crypto.randomUUID()}.exe`,
+      expected_sha256: digest(body),
+      max_bytes: 4096,
+    }), /url_binding_mismatch|redirect_https_required|redirect_loopback_blocked/);
+    await manager.close();
+  }
 });
 
 test('digest mismatch fails closed and removes partial bytes', async (t) => {
