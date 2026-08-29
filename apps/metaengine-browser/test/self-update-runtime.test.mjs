@@ -11,7 +11,7 @@ const VALID_INFO = {
 };
 
 class FakeUpdater extends EventEmitter {
-  constructor() { super(); this.checks = 0; this.downloads = 0; this.installs = 0; this.disableWebInstaller = false; }
+  constructor() { super(); this.checks = 0; this.downloads = 0; this.installs = 0; this.disableWebInstaller = false; this.allowUnverifiedLinuxPackages = true; }
   async checkForUpdates() { this.checks += 1; this.emit('checking-for-update'); return { updateInfo: VALID_INFO }; }
   async downloadUpdate() { this.downloads += 1; return ['candidate.exe']; }
   quitAndInstall(isSilent, forceRunAfter) { this.installs += 1; this.installArgs = { isSilent, forceRunAfter }; }
@@ -29,16 +29,19 @@ test('disables updater outside packaged application', async () => {
   assert.equal(updater.checks, 0);
 });
 
-test('hardens updater policy and checks for updates without automatic download', async () => {
+test('binds updater to trusted dev channel and reasserts no downgrade after channel selection', async () => {
   const updater = new FakeUpdater();
   const runtime = runtimeFor(updater, { intervalMs: 60000 });
-  await runtime.start();
+  const started = await runtime.start();
   await runtime.cycle({ force: true });
+  assert.equal(started.trusted_channel, 'dev');
+  assert.equal(updater.channel, 'dev');
   assert.equal(updater.allowPrerelease, true);
   assert.equal(updater.allowDowngrade, false);
   assert.equal(updater.autoDownload, false);
   assert.equal(updater.autoInstallOnAppQuit, false);
   assert.equal(updater.disableWebInstaller, true);
+  assert.equal(updater.allowUnverifiedLinuxPackages, false);
   assert.equal(updater.checks, 1);
   assert.equal(updater.downloads, 0);
 });
@@ -71,6 +74,23 @@ test('invalid or sha512-less update metadata fails closed before download', asyn
   await runtime.cycle();
   assert.equal(runtime.snapshot().state, 'REJECTED_METADATA');
   assert.equal(updater.checks, 0);
+});
+
+test('absolute, traversing, wrong-prefix or version-mismatched artifacts fail closed', async () => {
+  for (const url of [
+    'https://example.invalid/METAENGINE-Browser-Test-Setup-0.6.2-dev.1-x64.exe',
+    '../METAENGINE-Browser-Test-Setup-0.6.2-dev.1-x64.exe',
+    'Other-Setup-0.6.2-dev.1-x64.exe',
+    'METAENGINE-Browser-Test-Setup-0.6.9-dev.1-x64.exe',
+  ]) {
+    const updater = new FakeUpdater();
+    const runtime = runtimeFor(updater);
+    await runtime.start();
+    updater.emit('update-available', { ...VALID_INFO, files: [{ url, sha512: 'a'.repeat(88), size: 12345 }] });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(runtime.snapshot().state, 'REJECTED_METADATA', url);
+    assert.equal(updater.downloads, 0, url);
+  }
 });
 
 test('downloaded update waits for quiescent restart gate and arms sentinel handoff', async () => {
