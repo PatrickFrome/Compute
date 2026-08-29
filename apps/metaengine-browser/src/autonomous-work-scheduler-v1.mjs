@@ -52,13 +52,25 @@ export class AutonomousWorkScheduler {
     const freshProcessKeys = new Set(runtime.process_observations
       .filter((row) => now <= new Date(row.stale_after_at).getTime())
       .map((row) => row.process_key));
+    const bindingsByWorker = new Map(runtime.worker_bindings.map((row) => [String(row.agent_id || '').toLowerCase(), row]));
     const activeWorkers = workers
       .filter((row) => row && row.ready === true && row.lost !== true)
-      .map((row) => ({
-        worker_id: opaque(row.worker_id, 100).toLowerCase(),
-        worker_incarnation_id: opaque(row.worker_incarnation_id, 500),
-        role: String(row.role || 'WORKER').toUpperCase(),
-      }));
+      .map((row) => {
+        const workerId = opaque(row.worker_id, 100).toLowerCase();
+        const binding = bindingsByWorker.get(workerId);
+        if (!binding || binding.lifecycle_state !== 'BOUND_UNVERIFIED') return null;
+        const durableIncarnation = opaque(binding.worker_incarnation_id, 500);
+        if (row.worker_incarnation_id != null && String(row.worker_incarnation_id).trim() !== '') {
+          const suppliedIncarnation = opaque(row.worker_incarnation_id, 500);
+          if (suppliedIncarnation !== durableIncarnation) return null;
+        }
+        return {
+          worker_id: workerId,
+          worker_incarnation_id: durableIncarnation,
+          role: String(row.role || binding.role || 'WORKER').toUpperCase(),
+        };
+      })
+      .filter(Boolean);
     const assignedWorkers = new Set(running.map((row) => row.worker_id));
     const availableWorkers = activeWorkers.filter((row) => !assignedWorkers.has(row.worker_id));
     const runningObjectives = new Set(running.map((row) => String(row.objective_key || row.assignment_id)));
