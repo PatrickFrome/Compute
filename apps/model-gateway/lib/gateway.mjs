@@ -1,4 +1,5 @@
-const GATEWAY_URL = 'https://ai-gateway.vercel.sh/v1/responses';
+const RESPONSES_URL = 'https://ai-gateway.vercel.sh/v1/responses';
+const CHAT_COMPLETIONS_URL = 'https://ai-gateway.vercel.sh/v1/chat/completions';
 
 export function gatewayCredential(env = process.env) {
   return env.AI_GATEWAY_API_KEY || env.VERCEL_OIDC_TOKEN || '';
@@ -16,6 +17,27 @@ export function extractText(payload) {
     }
   }
   return parts.join('\n').trim();
+}
+
+function authHeaders(credential) {
+  return {
+    authorization: `Bearer ${credential}`,
+    'content-type': 'application/json',
+    'x-metaengine-authority-effect': 'false'
+  };
+}
+
+async function parseGatewayResponse(response) {
+  const text = await response.text();
+  let payload;
+  try { payload = JSON.parse(text); } catch { payload = { raw: text }; }
+  if (!response.ok) {
+    const error = new Error(`gateway_http_${response.status}`);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return payload;
 }
 
 export async function callGateway({ models, input, taskId, env = process.env, fetchImpl = fetch }) {
@@ -36,27 +58,41 @@ export async function callGateway({ models, input, taskId, env = process.env, fe
     }
   };
 
-  const response = await fetchImpl(GATEWAY_URL, {
+  const response = await fetchImpl(RESPONSES_URL, {
     method: 'POST',
-    headers: {
-      authorization: `Bearer ${credential}`,
-      'content-type': 'application/json',
-      'x-metaengine-authority-effect': 'false'
-    },
+    headers: authHeaders(credential),
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(55_000)
   });
 
-  const text = await response.text();
-  let payload;
-  try { payload = JSON.parse(text); } catch { payload = { raw: text }; }
+  return { payload: await parseGatewayResponse(response), primary, fallbacks };
+}
 
-  if (!response.ok) {
-    const error = new Error(`gateway_http_${response.status}`);
-    error.status = response.status;
-    error.payload = payload;
-    throw error;
-  }
+export async function callChatGateway({ models, messages, maxTokens, temperature, logicalModel, env = process.env, fetchImpl = fetch }) {
+  if (!Array.isArray(models) || models.length === 0) throw new Error('empty_model_plan');
+  const credential = gatewayCredential(env);
+  if (!credential) throw new Error('gateway_auth_unavailable');
+  const [primary, ...fallbacks] = models;
 
-  return { payload, primary, fallbacks };
+  const response = await fetchImpl(CHAT_COMPLETIONS_URL, {
+    method: 'POST',
+    headers: authHeaders(credential),
+    body: JSON.stringify({
+      model: primary,
+      messages,
+      max_tokens: maxTokens,
+      temperature,
+      stream: false,
+      providerOptions: {
+        gateway: {
+          models: fallbacks,
+          user: `metaengine:${logicalModel}`,
+          tags: ['metaengine', 'f1-prep', 'sovereign-openai-compat', `logical:${logicalModel}`]
+        }
+      }
+    }),
+    signal: AbortSignal.timeout(55_000)
+  });
+
+  return { payload: await parseGatewayResponse(response), primary, fallbacks };
 }
