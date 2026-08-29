@@ -131,9 +131,17 @@ export class DurableActionGraphStore {
 
   async #persist(event) {
     if (this.#poisoned) throw new ActionGraphError('action_graph_store_reopen_required', { recoveryRequired: true });
-    const h = await openRegularNoFollow(this.#journalPath, C.O_CREAT | C.O_APPEND | C.O_WRONLY, 0o600);
-    try { await h.writeFile(`${JSON.stringify(event)}\n`, 'utf8'); await h.sync(); }
-    finally { await h.close(); }
+    let h = null;
+    try {
+      h = await openRegularNoFollow(this.#journalPath, C.O_CREAT | C.O_APPEND | C.O_WRONLY, 0o600);
+      await h.writeFile(`${JSON.stringify(event)}\n`, 'utf8');
+      await h.sync();
+    } catch {
+      this.#poisoned = true;
+      throw new ActionGraphError('action_graph_journal_write_ambiguous', { recoveryRequired: true });
+    } finally {
+      await h?.close().catch(() => {});
+    }
 
     try {
       await writeHeadAtomic(this.#headPath, makeHead(this.#state.graphId, event.seq, event.event_hash));
