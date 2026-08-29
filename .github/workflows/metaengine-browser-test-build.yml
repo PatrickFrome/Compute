@@ -1,0 +1,143 @@
+name: METAENGINE Browser TEST Build
+on:
+  push:
+    branches: ['work/metaengine-browser-test-console-v1']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Materialize Electron runtime
+        working-directory: apps/metaengine-browser
+        env:
+          ELECTRON_GET_NO_PROGRESS: '1'
+        run: npx install-electron --no
+      - name: Parse gate
+        working-directory: apps/metaengine-browser
+        run: npm run check
+      - name: Contract tests
+        working-directory: apps/metaengine-browser
+        run: npm test
+      - name: Security gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'app.enableSandbox()' apps/metaengine-browser/src/main.mjs
+          grep -q 'nodeIntegration: false' apps/metaengine-browser/src/browser-policy.mjs
+          grep -q 'contextIsolation: true' apps/metaengine-browser/src/browser-policy.mjs
+          grep -q 'sandbox: true' apps/metaengine-browser/src/browser-policy.mjs
+          grep -q 'advisory_evidence_network_dispatch === false' apps/metaengine-browser/src/main.mjs
+          grep -q 'advisory_evidence_browser_authority === false' apps/metaengine-browser/src/main.mjs
+          grep -q 'advisory_evidence_promotion_authority === false' apps/metaengine-browser/src/main.mjs
+          ! grep -R -E 'executeJavaScript|Runtime\.evaluate|--remote-debugging-port|--no-sandbox|nodeIntegration:[[:space:]]*true|sandbox:[[:space:]]*false' apps/metaengine-browser --exclude-dir=node_modules
+      - name: Configure Chromium sandbox on Ubuntu CI
+        working-directory: apps/metaengine-browser
+        run: |
+          set -euo pipefail
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          fi
+          test -f node_modules/electron/dist/chrome-sandbox
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+      - name: Physical Development Plane smoke
+        working-directory: apps/metaengine-browser
+        env:
+          METAENGINE_SMOKE_TRACE: /tmp/metaengine-test-dp-trace.jsonl
+        run: |
+          set -euo pipefail
+          timeout 25s xvfb-run -a npm run devplane-smoke | tee /tmp/metaengine-test-dp-out.jsonl
+          grep -q '"stage":"COMPLETE"' /tmp/metaengine-test-dp-trace.jsonl
+          grep -q '"ok":true' /tmp/metaengine-test-dp-trace.jsonl
+          grep -q '"sandbox_execution_authorized":false' /tmp/metaengine-test-dp-trace.jsonl
+          grep -q '"promotion_authorized":false' /tmp/metaengine-test-dp-trace.jsonl
+
+  portable-windows-x64:
+    needs: verify
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Materialize Electron runtime
+        working-directory: apps/metaengine-browser
+        env:
+          ELECTRON_GET_NO_PROGRESS: '1'
+        run: npx install-electron --no
+      - name: Windows contract tests
+        working-directory: apps/metaengine-browser
+        run: npm test
+      - name: Windows physical DP smoke
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'metaengine-test-dp-out.txt'
+          $err = Join-Path $env:RUNNER_TEMP 'metaengine-test-dp-err.txt'
+          $trace = Join-Path $env:RUNNER_TEMP 'metaengine-test-dp-trace.jsonl'
+          $env:METAENGINE_SMOKE_TRACE = $trace
+          $electron = Join-Path (Get-Location) 'node_modules\electron\dist\electron.exe'
+          $p = Start-Process -FilePath $electron -ArgumentList @('--disable-gpu','smoke/dp') -WorkingDirectory (Get-Location) -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          $cachedHandle = $p.Handle
+          if (-not $p.WaitForExit(30000)) { try { $p.Kill($true) } catch {}; throw 'windows_dp_timeout' }
+          if ($p.ExitCode -ne 0) { Get-Content $out -ErrorAction SilentlyContinue; Get-Content $err -ErrorAction SilentlyContinue; throw "windows_dp_exit_$($p.ExitCode)" }
+          if (-not (Select-String -Path $trace -Pattern '"stage":"COMPLETE"' -Quiet)) { throw 'windows_dp_complete_missing' }
+          if (-not (Select-String -Path $trace -Pattern '"ok":true' -Quiet)) { throw 'windows_dp_ok_missing' }
+          if (-not (Select-String -Path $trace -Pattern '"promotion_authorized":false' -Quiet)) { throw 'windows_dp_promotion_fence_missing' }
+      - name: Assemble portable test browser
+        shell: powershell
+        run: |
+          $src = Join-Path (Get-Location) 'apps\metaengine-browser'
+          $bundle = Join-Path (Get-Location) 'portable\METAENGINE-Browser-TEST-0.5.0-test.1'
+          New-Item -ItemType Directory -Force -Path $bundle | Out-Null
+          Copy-Item "$src\src" "$bundle\src" -Recurse
+          Copy-Item "$src\ui" "$bundle\ui" -Recurse
+          Copy-Item "$src\package.json" "$bundle\package.json"
+          Copy-Item "$src\START_METAENGINE_TEST_BROWSER.cmd" "$bundle\START_METAENGINE_TEST_BROWSER.cmd"
+          New-Item -ItemType Directory -Force -Path "$bundle\node_modules\electron" | Out-Null
+          Copy-Item "$src\node_modules\electron\dist" "$bundle\node_modules\electron\dist" -Recurse
+          @"
+          METAENGINE Browser TEST 0.5.0-test.1
+
+          Run START_METAENGINE_TEST_BROWSER.cmd.
+
+          The embedded Dev Console opens by default and shows:
+          - runtime/navigation/load errors
+          - Development Plane state and authority fences
+          - multi-gateway evidence verification state
+          - Fleet/Compute status
+          - self-test results
+
+          Standalone portable mode can show REPOSITORY_BOUND as WARN because the archive is not a Git checkout. This warning does not weaken browser security fences.
+          "@ | Set-Content "$bundle\README_TEST.txt"
+          git rev-parse HEAD | Set-Content "$bundle\BUILD_GIT_HEAD.txt"
+          Get-ChildItem $bundle
+      - name: Upload portable Windows browser
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: METAENGINE-Browser-TEST-Windows-x64-${{ github.sha }}
+          path: portable/METAENGINE-Browser-TEST-0.5.0-test.1/
+          if-no-files-found: error
+          retention-days: 14
