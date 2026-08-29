@@ -44,19 +44,32 @@ test('generation must settle before worker is terminal-ready', () => {
   assert.equal(row.terminal_ready, true);
 });
 
-test('content progress resets stall timer and hard stall needs bounded silence', () => {
+test('content progress resets stall timer and adaptive hard stall stops before replay', () => {
   const h = harness();
   h.monitor.observe({ tab_id: 'tab1', frame: frame({ text: 'a', buttons: ['Stop generating'] }) });
   h.advance(45_000);
   let row = h.monitor.observe({ tab_id: 'tab1', frame: frame({ text: 'a more', buttons: ['Stop generating'] }) });
   assert.equal(row.hard_stall, false);
   assert.equal(row.progress_age_ms, 0);
+  assert.equal(row.last_progress_source, 'DOM');
 
   h.advance(61_000);
   row = h.monitor.observe({ tab_id: 'tab1', frame: frame({ text: 'a more', buttons: ['Stop generating'] }) });
   assert.equal(row.state, 'STALLED');
   assert.equal(row.hard_stall, true);
-  assert.equal(h.monitor.nextRecovery('tab1').action, 'RELOAD_SAME_CONVERSATION');
+  assert.equal(row.adaptive_hard_ms, 60_000);
+  assert.equal(h.monitor.nextRecovery('tab1').action, 'STOP_GENERATION');
+});
+
+test('positive network liveness resets the adaptive stall timer without persisting network content', () => {
+  const h = harness();
+  h.monitor.observe({ tab_id: 'tab1', frame: frame({ text: 'a', buttons: ['Stop generating'] }) });
+  h.advance(61_000);
+  let row = h.monitor.observe({ tab_id: 'tab1', frame: frame({ text: 'a', buttons: ['Stop generating'] }), network_active: true });
+  assert.equal(row.state, 'GENERATING');
+  assert.equal(row.progress_age_ms, 0);
+  assert.equal(row.last_progress_source, 'NETWORK');
+  assert.equal(row.network_active, true);
 });
 
 test('unique Continue generating is continuation, never a prompt replay', () => {
@@ -95,4 +108,5 @@ test('monitor snapshots never persist response text', () => {
   const serialized = JSON.stringify(h.monitor.snapshot());
   assert.doesNotMatch(serialized, /SECRET RESPONSE BODY/);
   assert.match(serialized, /last_digest/);
+  assert.match(serialized, /persisted_response_text/);
 });
