@@ -1,8 +1,8 @@
 {
   "schema": "metaengine.browser.dev-release-target.v1",
-  "enabled": false,
+  "enabled": true,
   "source_sha": "4217b7f225046229ccb20f80a46f7d80b35b875b",
-  "reason": "HOLD_AFTER_DETERMINISTIC_GH_REPO_CONTEXT_FAILURE",
+  "reason": "RESUME_AFTER_CHECKOUT_INDEPENDENT_PUBLISHER_FIX",
   "requested_by": "METAENGINE_SUPERVISOR",
   "authority_effect": false
 }
