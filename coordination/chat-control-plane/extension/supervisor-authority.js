@@ -13,12 +13,12 @@
   const MODES = new Set(["OFF", "MONITOR", "CONTROL"]);
   const CONTROL_ACTIONS = new Set([
     "ARM", "DISARM", "SET_SUPERVISOR_MODE", "SET_MODE", "POLL", "CAPTURE",
-    "STOP_GENERATION", "SCROLL", "SEMANTIC_FOCUS", "SEMANTIC_TYPE", "RESOLVE_PROMPT"
+    "STOP_GENERATION", "SCROLL", "SEMANTIC_FOCUS", "SEMANTIC_TYPE", "RESOLVE_PROMPT", "TYPED_CLICK"
   ]);
   const BOOTSTRAP_ACTIONS = new Set(["ARM", "DISARM", "SET_SUPERVISOR_MODE"]);
   const AUTHORITY_ACTIONS = new Set([
     "ARM", "DISARM", "SET_SUPERVISOR_MODE", "SET_MODE", "STOP_GENERATION",
-    "SCROLL", "SEMANTIC_FOCUS", "SEMANTIC_TYPE", "RESOLVE_PROMPT"
+    "SCROLL", "SEMANTIC_FOCUS", "SEMANTIC_TYPE", "RESOLVE_PROMPT", "TYPED_CLICK"
   ]);
   const SAFE_REMOTE_SEMANTIC_ROLES = new Set([
     "textbox", "searchbox", "combobox", "button", "checkbox", "radio", "switch", "tab", "menuitem"
@@ -309,6 +309,31 @@
     return globalThis.A2_OPERATOR_SEMANTIC_ACTION(message);
   }
 
+  async function typedClick(command) {
+    const local = await chrome.storage.local.get("armed");
+    if (local.armed !== true) throw new Error("supervisor_typed_click_armed_required");
+    const platform = String(command.platform || "");
+    if (!["CHATGPT", "GLM_ZAI"].includes(platform)) throw new Error("supervisor_typed_click_platform_invalid");
+    if (typeof globalThis.A2_OPERATOR_CAPTURE_PERCEPTION !== "function" || typeof globalThis.A2_OPERATOR_TYPED_CLICK_V1 !== "function") {
+      throw new Error("supervisor_typed_click_runtime_unavailable");
+    }
+    const frame = await globalThis.A2_OPERATOR_CAPTURE_PERCEPTION(platform);
+    const role = normalize(command.payload?.role).toLowerCase();
+    const name = normalize(command.payload?.accessible_name);
+    const matches = semanticTargets(frame).filter((target) => target.role === role && target.name === name);
+    if (matches.length !== 1) {
+      throw new Error(matches.length ? `supervisor_typed_click_target_ambiguous:${matches.length}` : "supervisor_typed_click_target_not_found");
+    }
+    const actionId = String(command.payload?.action_id || "");
+    return globalThis.A2_OPERATOR_TYPED_CLICK_V1({
+      action_id: actionId,
+      platform,
+      perception_captured_at: frame.captured_at,
+      role,
+      accessible_name: name
+    });
+  }
+
   async function resolvePrompt(command) {
     const x = await chrome.storage.session.get("a2OperatorHeldPromptIntentV060");
     const intent = x.a2OperatorHeldPromptIntentV060 || null;
@@ -374,6 +399,7 @@
     }
     if (action === "SEMANTIC_FOCUS") return semantic("FOCUS_SEMANTIC", command);
     if (action === "SEMANTIC_TYPE") return semantic("TYPE_SEMANTIC", command);
+    if (action === "TYPED_CLICK") return typedClick(command);
     if (action === "RESOLVE_PROMPT") return resolvePrompt(command);
     throw new Error("supervisor_command_unreachable");
   }
