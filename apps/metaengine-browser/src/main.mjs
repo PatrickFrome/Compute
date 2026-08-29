@@ -12,6 +12,7 @@ const UI_ROOT = path.join(APP_ROOT, 'ui');
 const TOOLBAR_HEIGHT = 92;
 const isSmoke = process.argv.includes('--metaengine-smoke');
 
+app.enableSandbox();
 protocol.registerSchemesAsPrivileged([{ scheme: 'metaengine', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: false } }]);
 
 const registry = new TabRegistry();
