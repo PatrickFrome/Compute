@@ -1,13 +1,13 @@
 {
   "name": "@metaengine/browser-shell",
-  "version": "0.5.0",
+  "version": "0.5.0-test.1",
   "private": true,
   "type": "module",
-  "description": "METAENGINE Development Fabric browser shell with autonomous GPT fleet and embedded Development Plane",
+  "description": "METAENGINE Development Browser test build with embedded live diagnostics console",
   "main": "src/main.mjs",
   "scripts": {
     "start": "electron .",
-    "check": "node --check src/main.mjs && node --check src/browser-policy.mjs && node --check src/compute-bridge-client.mjs && node --check src/fleet-provisioner.mjs && node --check src/development-plane.mjs && node --check src/development-plane-worker.cjs && node --check src/candidate-capsule.cjs && node --check src/verification-sandbox-plan.cjs && node --check src/verification-sandbox-backend-binding.cjs && node --check src/advisory-evidence-verifier.cjs && node --check src/development-plane-smoke.mjs && node --check smoke/dp/main.cjs && node --check src/tab-registry.mjs && node --check src/preload-shell.cjs && node --check ui/app.js",
+    "check": "node --check src/main.mjs && node --check src/browser-policy.mjs && node --check src/compute-bridge-client.mjs && node --check src/fleet-provisioner.mjs && node --check src/development-plane.mjs && node --check src/development-plane-worker.cjs && node --check src/candidate-capsule.cjs && node --check src/verification-sandbox-plan.cjs && node --check src/verification-sandbox-backend-binding.cjs && node --check src/advisory-evidence-verifier.cjs && node --check src/test-console-diagnostics.mjs && node --check src/development-plane-smoke.mjs && node --check smoke/dp/main.cjs && node --check src/tab-registry.mjs && node --check src/preload-shell.cjs && node --check ui/app.js",
     "test": "node --test test/*.test.mjs",
     "smoke": "electron . --metaengine-smoke",
     "devplane-smoke": "electron ./smoke/dp"
