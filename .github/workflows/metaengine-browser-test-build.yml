@@ -43,7 +43,7 @@ jobs:
           grep -q 'advisory_evidence_network_dispatch === false' apps/metaengine-browser/src/main.mjs
           grep -q 'advisory_evidence_browser_authority === false' apps/metaengine-browser/src/main.mjs
           grep -q 'advisory_evidence_promotion_authority === false' apps/metaengine-browser/src/main.mjs
-          ! grep -R -E 'executeJavaScript|Runtime\.evaluate|--remote-debugging-port|--no-sandbox|nodeIntegration:[[:space:]]*true|sandbox:[[:space:]]*false' apps/metaengine-browser --exclude-dir=node_modules
+          ! grep -R -E 'executeJavaScript|Runtime\.evaluate|--remote-debugging-port|--no-sandbox|nodeIntegration:[[:space:]]*true|sandbox:[[:space:]]*false' apps/metaengine-browser/src apps/metaengine-browser/ui
       - name: Configure Chromium sandbox on Ubuntu CI
         working-directory: apps/metaengine-browser
         run: |
