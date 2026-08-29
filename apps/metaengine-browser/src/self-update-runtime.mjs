@@ -228,7 +228,10 @@ export class SelfUpdateRuntime {
       await this.#beforeInstall(structuredClone(receipt));
       this.#state.pre_install_receipt_persisted = true;
       await this.#host?.prepareExpectedRestart?.('SELF_UPDATE');
-      this.#updater.quitAndInstall(false, true);
+      // NSIS is configured as an assisted installer (`oneClick:false`). Automatic updates must therefore
+      // run the already-verified installer silently or the updater can block indefinitely on the wizard.
+      // forceRunAfter remains true so the exact N+1 binary performs the successor handoff.
+      this.#updater.quitAndInstall(true, true);
     } catch (e) {
       this.#state.state = 'ERROR';
       this.#state.pre_install_receipt_persisted = false;
