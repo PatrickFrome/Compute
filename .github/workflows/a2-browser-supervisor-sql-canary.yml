@@ -1,0 +1,56 @@
+name: A2 Browser Supervisor SQL Canary
+
+on:
+  push:
+    branches:
+      - work/a2-browser-supervisor-sql-canary-v1
+  pull_request:
+    paths:
+      - 'supabase/migrations/20260827043107_a2_browser_supervisor_control_plane_v1.sql'
+      - 'supabase/migrations/20260827115000_a2_browser_supervisor_idempotent_issuance_v2.sql'
+      - 'supabase/migrations/20260827120215_a2_browser_supervisor_remote_authority_v3.sql'
+      - 'supabase/migrations/20260827121557_a2_browser_supervisor_remote_bootstrap_v3.sql'
+      - 'supabase/migrations/20260827123023_a2_browser_supervisor_control_lease_v4.sql'
+      - 'supabase/migrations/20260827123103_a2_browser_supervisor_route_v2_control_lease_v4.sql'
+      - 'supabase/migrations/20260827140612_a2_browser_supervisor_lease_budget_guard_v4.sql'
+      - 'supabase/migrations/20260827140935_a2_browser_supervisor_privacy_scrub_v4.sql'
+      - 'supabase/migrations/20260827141000_a2_browser_supervisor_atomic_result_v4.sql'
+      - 'tests/a2_browser_supervisor_sql_canary.sh'
+      - '.github/workflows/a2-browser-supervisor-sql-canary.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  supervisor-sql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: supervisor_canary
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d supervisor_canary"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=12
+
+    steps:
+      - name: Checkout exact PR/branch tree
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Execute migration and adversarial supervisor canaries
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: '5432'
+          PGDATABASE: supervisor_canary
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: bash tests/a2_browser_supervisor_sql_canary.sh
