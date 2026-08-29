@@ -2,7 +2,7 @@ import { HostResilienceRuntime } from './host-resilience-runtime.mjs';
 
 const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const SAFE_ARTIFACT_RE = /^[0-9A-Za-z._-]+$/;
-export const DEFAULT_TRUSTED_UPDATE_CHANNEL = 'latest';
+export const DEFAULT_TRUSTED_UPDATE_CHANNEL = 'dev';
 export const DEFAULT_TRUSTED_ARTIFACT_PREFIX = 'METAENGINE-Browser-Test-Setup-';
 
 function clipError(error) { return String(error?.message || error || 'unknown_error').slice(0, 300); }
