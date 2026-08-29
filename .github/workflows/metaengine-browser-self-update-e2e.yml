@@ -200,10 +200,23 @@ jobs:
               Get-Content "$env:RUNNER_TEMP\self-update-smoke.err" -ErrorAction SilentlyContinue
               throw 'self_update_source_timeout'
             }
-            $rows = @(Get-Content $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
-            if (-not ($rows | Where-Object { $_.metadata_verified -eq $true -and [string]$_.available_version -eq $target })) { throw 'self_update_verified_target_not_observed' }
+
+            $traceDeadline = (Get-Date).AddSeconds(10)
+            $verified = $false
+            $restarting = $false
+            do {
+              $rows = @()
+              if (Test-Path $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE) {
+                try { $rows = @(Get-Content $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json }) } catch { $rows = @() }
+              }
+              $verified = [bool]($rows | Where-Object { $_.metadata_verified -eq $true -and [string]$_.available_version -eq $target })
+              $restarting = [bool]($rows | Where-Object { $_.state -eq 'RESTARTING' })
+              if ($verified -and $restarting) { break }
+              Start-Sleep -Milliseconds 200
+            } while ((Get-Date) -lt $traceDeadline)
+            if (-not $verified) { throw 'self_update_verified_target_not_observed' }
             if (-not ($rows | Where-Object { $_.ci_test_feed_active -eq $true })) { throw 'self_update_ci_feed_not_active' }
-            if (-not ($rows | Where-Object { $_.state -eq 'RESTARTING' })) { throw 'self_update_restarting_state_not_observed' }
+            if (-not $restarting) { throw 'self_update_restarting_state_not_observed' }
 
             $deadline = (Get-Date).AddSeconds(90)
             while (-not (Test-Path $env:METAENGINE_SELF_UPDATE_SUCCESSOR_TRACE) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
