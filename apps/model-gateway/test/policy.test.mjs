@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { modelPlan, validateTask } from '../lib/policy.mjs';
 import { authorized, buildPeerInput } from '../lib/security.mjs';
-import { callGateway, extractText } from '../lib/gateway.mjs';
+import { callGateway, callChatGateway, extractText } from '../lib/gateway.mjs';
 import { assertZeroSpend, isZeroPrice, resetCatalogCacheForTests } from '../lib/catalog.mjs';
+import { logicalInventory, logicalModelPlan, sanitizeChatCompletion } from '../lib/openai-compat.mjs';
 
 test('free route is zero-cost allowlist only', () => {
   assert.deepEqual(modelPlan('free'), ['minimax/minimax-m3-free', 'poolside/laguna-s-2.1-free']);
@@ -106,4 +107,53 @@ test('live catalog gate blocks missing or repriced free models', async () => {
     assertZeroSpend(['minimax/minimax-m3-free'], { fetchImpl: missingCatalog, ttlMs: 0 }),
     /free_model_missing/
   );
+});
+
+test('logical inventory exposes two sovereign peer aliases', () => {
+  const inventory = logicalInventory();
+  assert.deepEqual(inventory.data.map((x) => x.id), ['metaengine/peer-a-free', 'metaengine/peer-b-free']);
+  assert.equal(inventory.data.every((x) => x.authority_effect === false && x.zero_spend_required === true), true);
+});
+
+test('logical peers prefer different zero-spend providers', () => {
+  assert.deepEqual(logicalModelPlan('metaengine/peer-a-free'), ['minimax/minimax-m3-free', 'poolside/laguna-s-2.1-free']);
+  assert.deepEqual(logicalModelPlan('metaengine/peer-b-free'), ['poolside/laguna-s-2.1-free', 'minimax/minimax-m3-free']);
+  assert.throws(() => logicalModelPlan('openai/gpt-5.6-sol'), /logical_model_not_allowed/);
+});
+
+test('OpenAI compatibility sanitizer rejects tools and streaming and injects authority fence', () => {
+  const clean = sanitizeChatCompletion({
+    model: 'metaengine/peer-a-free',
+    messages: [{ role: 'system', content: 'runner system' }, { role: 'user', content: 'hello' }],
+    max_tokens: 9000,
+    temperature: 9,
+    stream: false
+  });
+  assert.equal(clean.maxTokens, 4096);
+  assert.equal(clean.temperature, 1);
+  assert.match(clean.messages[0].content, /no execution authority/i);
+  assert.throws(() => sanitizeChatCompletion({ model: 'metaengine/peer-a-free', messages: [{ role: 'user', content: 'x' }], stream: true }), /streaming_not_supported/);
+  assert.throws(() => sanitizeChatCompletion({ model: 'metaengine/peer-a-free', messages: [{ role: 'user', content: 'x' }], tools: [] }), /tools_not_allowed/);
+});
+
+test('OpenAI chat gateway overwrites logical alias with zero-spend upstream plan', async () => {
+  let captured;
+  const fetchImpl = async (_url, init) => {
+    captured = init;
+    return new Response(JSON.stringify({ choices: [{ message: { role: 'assistant', content: '{"step_type":"OBSERVE"}' } }] }), { status: 200 });
+  };
+  const result = await callChatGateway({
+    models: ['poolside/laguna-s-2.1-free', 'minimax/minimax-m3-free'],
+    messages: [{ role: 'user', content: 'hello' }],
+    maxTokens: 1200,
+    temperature: 0.2,
+    logicalModel: 'metaengine/peer-b-free',
+    env: { VERCEL_OIDC_TOKEN: 'oidc-test' },
+    fetchImpl
+  });
+  const body = JSON.parse(captured.body);
+  assert.equal(body.model, 'poolside/laguna-s-2.1-free');
+  assert.deepEqual(body.providerOptions.gateway.models, ['minimax/minimax-m3-free']);
+  assert.equal(body.stream, false);
+  assert.equal(result.primary, 'poolside/laguna-s-2.1-free');
 });
