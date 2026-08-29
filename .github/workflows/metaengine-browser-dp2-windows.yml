@@ -117,7 +117,7 @@ jobs:
             if ($p.HasExited) { break }
           } while ((Get-Date) -lt $deadline)
           if (-not $p.HasExited) {
-            try { $p.Kill($true) } catch {}
+            try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
             throw 'packaged_devplane_smoke_timeout'
           }
           if ($p.ExitCode -ne 0) { throw "packaged_devplane_smoke_exit_$($p.ExitCode)" }
@@ -138,7 +138,7 @@ jobs:
             if ($p.MainWindowHandle -ne 0) { $windowReady = $true; break }
           } while ((Get-Date) -lt $deadline)
           if (-not $windowReady) {
-            try { $p.Kill($true) } catch {}
+            try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
             throw 'installed_browser_main_window_missing'
           }
           $title = $p.MainWindowTitle
@@ -147,13 +147,13 @@ jobs:
           "main_window_title=$title" | Add-Content "$env:RUNNER_TEMP\launch-proof.txt"
           "installed_path=$app" | Add-Content "$env:RUNNER_TEMP\launch-proof.txt"
           if ($title -notmatch 'METAENGINE Browser') {
-            try { $p.Kill($true) } catch {}
+            try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
             throw "installed_browser_title_unexpected:$title"
           }
           Start-Sleep -Seconds 5
           if ($p.HasExited) { throw "installed_browser_exited_after_supervisor_bootstrap:$($p.ExitCode)" }
           try { $p.CloseMainWindow() | Out-Null } catch {}
-          if (-not $p.WaitForExit(5000)) { try { $p.Kill($true) } catch {} }
+          if (-not $p.WaitForExit(5000)) { try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {} }
       - name: Crash sentinel physical recovery smoke
         shell: powershell
         env:
@@ -168,10 +168,10 @@ jobs:
             if ($p.HasExited) { throw "sentinel_source_browser_exited_early:$($p.ExitCode)" }
             if ($p.MainWindowHandle -ne 0) { break }
           } while ((Get-Date) -lt $deadline)
-          if ($p.MainWindowHandle -eq 0) { try { $p.Kill($true) } catch {}; throw 'sentinel_source_window_missing' }
+          if ($p.MainWindowHandle -eq 0) { try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}; throw 'sentinel_source_window_missing' }
           Start-Sleep -Seconds 6
           $oldPid = $p.Id
-          $p.Kill($true)
+          Stop-Process -Id $oldPid -Force -ErrorAction Stop
           $p.WaitForExit()
           $recoverDeadline = (Get-Date).AddSeconds(30)
           $recovered = $null
@@ -190,13 +190,13 @@ jobs:
             if ($rp.HasExited) { throw "recovered_browser_exited_early:$($rp.ExitCode)" }
             if ($rp.MainWindowHandle -ne 0) { break }
           } while ((Get-Date) -lt $windowDeadline)
-          if ($rp.MainWindowHandle -eq 0) { try { $rp.Kill($true) } catch {}; throw 'recovered_browser_window_missing' }
+          if ($rp.MainWindowHandle -eq 0) { try { Stop-Process -Id $rp.Id -Force -ErrorAction SilentlyContinue } catch {}; throw 'recovered_browser_window_missing' }
           "source_pid=$oldPid" | Set-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
           "recovered_pid=$($rp.Id)" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
           "exact_executable=$app" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
           "recovery=PASS" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
           try { $rp.CloseMainWindow() | Out-Null } catch {}
-          if (-not $rp.WaitForExit(5000)) { try { $rp.Kill($true) } catch {} }
+          if (-not $rp.WaitForExit(5000)) { try { Stop-Process -Id $rp.Id -Force -ErrorAction SilentlyContinue } catch {} }
       - name: Stage exact verified release evidence
         working-directory: apps/metaengine-browser
         shell: powershell
