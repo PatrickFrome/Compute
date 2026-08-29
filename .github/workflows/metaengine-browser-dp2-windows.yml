@@ -1,13 +1,18 @@
 name: METAENGINE Browser Native Supervisor Windows Gate
 on:
   push:
-    branches: ['work/metaengine-browser-native-supervisor-v1']
+    branches:
+      - 'work/metaengine-browser-native-supervisor-v1'
+      - 'work/convergence-supervisor-keepalive-v1'
 permissions:
-  contents: read
+  contents: write
+concurrency:
+  group: metaengine-browser-windows-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build-install-dp-launch:
     runs-on: windows-2022
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - name: Checkout immutable source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -20,34 +25,85 @@ jobs:
       - name: Install browser dependencies
         working-directory: apps/metaengine-browser
         run: npm install --no-audit --no-fund
+      - name: Stamp monotonic development version
+        if: github.ref_name == 'work/convergence-supervisor-keepalive-v1'
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $version = "0.6.1-dev.${{ github.run_number }}.${{ github.run_attempt }}"
+          npm pkg set version=$version
+          "browser_version=$version" | Set-Content "$env:RUNNER_TEMP\browser-version.txt"
       - name: Parse and contract gates
         working-directory: apps/metaengine-browser
         run: |
           npm run check
           npm test
-      - name: Build unsigned NSIS installer
+      - name: Build single NSIS candidate with dev-channel update metadata
         working-directory: apps/metaengine-browser
         shell: powershell
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: |
-          npx --yes electron-builder@26.15.3 --win nsis --x64 --config electron-builder.test.json --publish never
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
           $installer = Get-ChildItem dist-test -Filter 'METAENGINE-Browser-Test-Setup-*.exe' -File | Select-Object -First 1
+          $blockmap = Get-ChildItem dist-test -Filter 'METAENGINE-Browser-Test-Setup-*.exe.blockmap' -File | Select-Object -First 1
+          $channelMeta = Join-Path (Get-Location) 'dist-test\dev.yml'
           if (-not $installer) { throw 'installer_missing' }
+          if (-not $blockmap) { throw 'blockmap_missing' }
+          $version = node -p "require('./package.json').version"
+          if ($installer.Name -notmatch [regex]::Escape("-$version-x64.exe")) { throw "installer_version_binding_invalid:$($installer.Name):$version" }
+          $sha512Provider = [System.Security.Cryptography.SHA512]::Create()
+          try {
+            $sha512 = [Convert]::ToBase64String($sha512Provider.ComputeHash([System.IO.File]::ReadAllBytes($installer.FullName)))
+          } finally {
+            $sha512Provider.Dispose()
+          }
+          $releaseDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+          $channelLines = @(
+            "version: $version",
+            'files:',
+            "  - url: $($installer.Name)",
+            "    sha512: $sha512",
+            "    size: $($installer.Length)",
+            "path: $($installer.Name)",
+            "sha512: $sha512",
+            "releaseDate: '$releaseDate'",
+            'stagingPercentage: 100'
+          )
+          $channelLines | Set-Content -Path $channelMeta -Encoding utf8
+          $channelText = Get-Content $channelMeta -Raw
+          if ($channelText -notmatch [regex]::Escape("version: $version")) { throw 'dev_yml_version_binding_missing' }
+          if ($channelText -notmatch [regex]::Escape($installer.Name)) { throw 'dev_yml_installer_binding_missing' }
+          if ($channelText -notmatch 'stagingPercentage: 100') { throw 'dev_yml_staging_missing' }
           $installer.FullName | Set-Content "$env:RUNNER_TEMP\installer-path.txt"
+          $blockmap.FullName | Set-Content "$env:RUNNER_TEMP\blockmap-path.txt"
+          $channelMeta | Set-Content "$env:RUNNER_TEMP\channel-yml-path.txt"
           (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content "$env:RUNNER_TEMP\installer-sha256.txt"
           $asar = Join-Path (Resolve-Path 'dist-test\win-unpacked\resources').Path 'app.asar'
           $listing = npx --yes @electron/asar list $asar
           $listingText = (($listing -join "`n") -replace '\\','/')
-          foreach ($required in @('/src/supervisor-device-identity.mjs','/src/native-supervisor-client.mjs','/src/native-browser-control.mjs')) {
+          foreach ($required in @('/src/supervisor-device-identity.mjs','/src/native-supervisor-client.mjs','/src/native-browser-control.mjs','/src/supervisor-keepalive.mjs','/src/supervisor-lifecycle-runtime.mjs','/src/chatgpt-session-monitor.mjs','/src/chatgpt-retry-policy.mjs','/src/self-update-runtime.mjs','/src/host-resilience-runtime.mjs','/src/browser-sentinel.mjs','/src/browser-sentinel-worker.cjs')) {
             if (-not $listingText.Contains($required)) { throw "packaged_supervisor_module_missing:$required" }
           }
-          "native_supervisor_modules=present" | Set-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
-      - name: Install generated Setup EXE
+          $updateConfig = Join-Path (Resolve-Path 'dist-test\win-unpacked\resources').Path 'app-update.yml'
+          if (-not (Test-Path $updateConfig)) { throw 'packaged_update_config_missing' }
+          $updateConfigText = Get-Content $updateConfig -Raw
+          if ($updateConfigText -notmatch '(?m)^\s*channel:\s*dev\s*$') { throw 'packaged_update_channel_not_dev' }
+          "native_supervisor_keepalive_adaptive_retry_self_update_host_resilience_sentinel_modules=present" | Set-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
+          "app_update_config=present" | Add-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
+          "app_update_channel=dev" | Add-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
+          "update_metadata=dev.yml" | Add-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
+          "update_metadata_derived_from_exact_installer=true" | Add-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
+          "single_build_promotion=true" | Add-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
+          "staging_percentage=100" | Add-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
+      - name: Install exact generated Setup EXE
         working-directory: apps/metaengine-browser
         shell: powershell
         run: |
           $installer = Get-Content "$env:RUNNER_TEMP\installer-path.txt"
+          $before = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expected = (Get-Content "$env:RUNNER_TEMP\installer-sha256.txt").Trim()
+          if ($before -ne $expected) { throw 'installer_digest_changed_before_install' }
           $install = Start-Process -FilePath $installer -ArgumentList '/S' -PassThru -Wait
           if ($install.ExitCode -ne 0) { throw "installer_exit_$($install.ExitCode)" }
           $app = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test\METAENGINE Browser Test.exe'
@@ -65,13 +121,15 @@ jobs:
             if ($p.HasExited) { break }
           } while ((Get-Date) -lt $deadline)
           if (-not $p.HasExited) {
-            try { $p.Kill($true) } catch {}
+            try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
             throw 'packaged_devplane_smoke_timeout'
           }
           if ($p.ExitCode -ne 0) { throw "packaged_devplane_smoke_exit_$($p.ExitCode)" }
           "packaged_devplane_smoke_exit=$($p.ExitCode)" | Set-Content "$env:RUNNER_TEMP\dp-proof.txt"
       - name: Launch installed browser and verify window
         shell: powershell
+        env:
+          METAENGINE_DISABLE_SELF_UPDATE: '1'
         run: |
           $app = Get-Content "$env:RUNNER_TEMP\installed-app-path.txt"
           $p = Start-Process -FilePath $app -PassThru
@@ -84,7 +142,7 @@ jobs:
             if ($p.MainWindowHandle -ne 0) { $windowReady = $true; break }
           } while ((Get-Date) -lt $deadline)
           if (-not $windowReady) {
-            try { $p.Kill($true) } catch {}
+            try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
             throw 'installed_browser_main_window_missing'
           }
           $title = $p.MainWindowTitle
@@ -93,28 +151,171 @@ jobs:
           "main_window_title=$title" | Add-Content "$env:RUNNER_TEMP\launch-proof.txt"
           "installed_path=$app" | Add-Content "$env:RUNNER_TEMP\launch-proof.txt"
           if ($title -notmatch 'METAENGINE Browser') {
-            try { $p.Kill($true) } catch {}
+            try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
             throw "installed_browser_title_unexpected:$title"
           }
-          Start-Sleep -Seconds 4
+          Start-Sleep -Seconds 5
           if ($p.HasExited) { throw "installed_browser_exited_after_supervisor_bootstrap:$($p.ExitCode)" }
           try { $p.CloseMainWindow() | Out-Null } catch {}
-          if (-not $p.WaitForExit(5000)) { try { $p.Kill($true) } catch {} }
-      - name: Stage verified installer evidence
+          if (-not $p.WaitForExit(5000)) { try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {} }
+      - name: Crash sentinel physical recovery smoke
+        shell: powershell
+        env:
+          METAENGINE_DISABLE_SELF_UPDATE: '1'
+        run: |
+          $app = (Get-Content "$env:RUNNER_TEMP\installed-app-path.txt").Trim()
+          $p = Start-Process -FilePath $app -PassThru
+          $deadline = (Get-Date).AddSeconds(30)
+          do {
+            Start-Sleep -Milliseconds 500
+            $p.Refresh()
+            if ($p.HasExited) { throw "sentinel_source_browser_exited_early:$($p.ExitCode)" }
+            if ($p.MainWindowHandle -ne 0) { break }
+          } while ((Get-Date) -lt $deadline)
+          if ($p.MainWindowHandle -eq 0) { try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}; throw 'sentinel_source_window_missing' }
+          Start-Sleep -Seconds 6
+          $oldPid = $p.Id
+          $statePath = $null
+          $sourceState = $null
+          foreach ($candidate in Get-ChildItem -Path $env:APPDATA -Filter 'metaengine-browser-sentinel-v1.json' -File -Recurse -ErrorAction SilentlyContinue) {
+            try {
+              $parsed = Get-Content $candidate.FullName -Raw | ConvertFrom-Json
+              if ($parsed.schema -eq 'metaengine.browser-sentinel.state.v1' -and [int]$parsed.parent_pid -eq $oldPid) {
+                if ($statePath) { throw 'sentinel_source_state_ambiguous' }
+                $statePath = $candidate.FullName
+                $sourceState = $parsed
+              }
+            } catch {
+              if ($_.Exception.Message -eq 'sentinel_source_state_ambiguous') { throw }
+            }
+          }
+          if (-not $statePath) { throw 'sentinel_source_state_not_found' }
+          if (-not $sourceState.token) { throw 'sentinel_source_token_missing' }
+          if ($sourceState.executable -ne $app) { throw "sentinel_source_executable_mismatch:$($sourceState.executable)" }
+          $sourceToken = [string]$sourceState.token
+          $receiptPath = "$statePath.relaunch-v1.json"
+          Remove-Item $receiptPath -Force -ErrorAction SilentlyContinue
+          Stop-Process -Id $oldPid -Force -ErrorAction Stop
+          $p.WaitForExit()
+          $receiptDeadline = (Get-Date).AddSeconds(30)
+          $receipt = $null
+          do {
+            Start-Sleep -Milliseconds 500
+            if (Test-Path $receiptPath) {
+              try {
+                $candidateReceipt = Get-Content $receiptPath -Raw | ConvertFrom-Json
+                if ($candidateReceipt.schema -eq 'metaengine.browser-sentinel.relaunch-receipt.v1' -and [int]$candidateReceipt.source_parent_pid -eq $oldPid -and [string]$candidateReceipt.source_token -eq $sourceToken) {
+                  $receipt = $candidateReceipt
+                  break
+                }
+              } catch {}
+            }
+          } while ((Get-Date) -lt $receiptDeadline)
+          if (-not $receipt) { throw 'browser_sentinel_relaunch_receipt_not_observed' }
+          if ($receipt.lifecycle -ne 'RELAUNCH_DISPATCHED') { throw "browser_sentinel_relaunch_not_dispatched:$($receipt.lifecycle):$($receipt.relaunch_result)" }
+          $recoveredPid = [int]$receipt.relaunch_pid
+          if ($recoveredPid -le 0 -or $recoveredPid -eq $oldPid) { throw "browser_sentinel_relaunch_pid_invalid:$recoveredPid" }
+          if ([string]$receipt.executable -ne $app) { throw "browser_sentinel_receipt_executable_mismatch:$($receipt.executable)" }
+          $recoveredWmi = Get-CimInstance Win32_Process -Filter "ProcessId = $recoveredPid" -ErrorAction Stop
+          if ($recoveredWmi.ExecutablePath -ne $app) { throw "recovered_browser_executable_mismatch:$($recoveredWmi.ExecutablePath)" }
+          $rp = Get-Process -Id $recoveredPid -ErrorAction Stop
+          $windowDeadline = (Get-Date).AddSeconds(25)
+          do {
+            Start-Sleep -Milliseconds 500
+            $rp.Refresh()
+            if ($rp.HasExited) { throw "recovered_browser_exited_early:$($rp.ExitCode)" }
+            if ($rp.MainWindowHandle -ne 0) { break }
+          } while ((Get-Date) -lt $windowDeadline)
+          if ($rp.MainWindowHandle -eq 0) { try { Stop-Process -Id $rp.Id -Force -ErrorAction SilentlyContinue } catch {}; throw 'recovered_browser_window_missing' }
+          $successorDeadline = (Get-Date).AddSeconds(15)
+          $successor = $null
+          do {
+            Start-Sleep -Milliseconds 500
+            try {
+              $candidateState = Get-Content $statePath -Raw | ConvertFrom-Json
+              if ($candidateState.schema -eq 'metaengine.browser-sentinel.state.v1' -and [int]$candidateState.parent_pid -eq $recoveredPid -and [string]$candidateState.token -ne $sourceToken) {
+                $successor = $candidateState
+                break
+              }
+            } catch {}
+          } while ((Get-Date) -lt $successorDeadline)
+          if (-not $successor) { try { Stop-Process -Id $rp.Id -Force -ErrorAction SilentlyContinue } catch {}; throw 'recovered_browser_successor_sentinel_not_bound' }
+          "source_pid=$oldPid" | Set-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
+          "source_token=$sourceToken" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
+          "relaunch_pid=$recoveredPid" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
+          "relaunch_receipt=PASS" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
+          "successor_parent_pid=$($successor.parent_pid)" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
+          "successor_token_rotated=true" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
+          "exact_executable=$app" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
+          "recovery=PASS" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
+          try { $rp.CloseMainWindow() | Out-Null } catch {}
+          if (-not $rp.WaitForExit(5000)) { try { Stop-Process -Id $rp.Id -Force -ErrorAction SilentlyContinue } catch {} }
+      - name: Stage exact verified release evidence
         working-directory: apps/metaengine-browser
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force -Path release-single | Out-Null
           $installer = Get-Content "$env:RUNNER_TEMP\installer-path.txt"
-          Copy-Item $installer 'release-single\METAENGINE-Browser-Native-Supervisor-Setup.exe'
-          Copy-Item "$env:RUNNER_TEMP\installer-sha256.txt" 'release-single\METAENGINE-Browser-Native-Supervisor-Setup.exe.sha256'
+          $channelMeta = (Get-Content "$env:RUNNER_TEMP\channel-yml-path.txt").Trim()
+          $expected = (Get-Content "$env:RUNNER_TEMP\installer-sha256.txt").Trim()
+          $actual = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw 'verified_installer_digest_changed_before_promotion' }
+          Copy-Item $installer 'release-single\METAENGINE-Browser-Supervisor-Keepalive-Setup.exe'
+          Copy-Item "$env:RUNNER_TEMP\installer-sha256.txt" 'release-single\METAENGINE-Browser-Supervisor-Keepalive-Setup.exe.sha256'
+          Copy-Item $channelMeta 'release-single\dev.yml'
           Copy-Item "$env:RUNNER_TEMP\dp-proof.txt" 'release-single\development-plane-proof.txt'
           Copy-Item "$env:RUNNER_TEMP\supervisor-package-proof.txt" 'release-single\supervisor-package-proof.txt'
           Copy-Item "$env:RUNNER_TEMP\launch-proof.txt" 'release-single\launch-proof.txt'
+          Copy-Item "$env:RUNNER_TEMP\sentinel-proof.txt" 'release-single\sentinel-proof.txt'
+          if (Test-Path "$env:RUNNER_TEMP\browser-version.txt") { Copy-Item "$env:RUNNER_TEMP\browser-version.txt" 'release-single\browser-version.txt' }
           git rev-parse HEAD | Set-Content 'release-single\git-head.txt'
-      - name: Upload verified installer
+          $manifest = [ordered]@{
+            schema = 'metaengine.browser.verified-release-manifest.v1'
+            version = (node -p "require('./package.json').version")
+            git_sha = $env:GITHUB_SHA
+            run_id = $env:GITHUB_RUN_ID
+            run_attempt = $env:GITHUB_RUN_ATTEMPT
+            installer_sha256 = $actual
+            update_channel = 'dev'
+            update_metadata = 'dev.yml'
+            single_build_promotion = $true
+            crash_sentinel_physical_recovery = $true
+            development_channel = $true
+            staging_percentage = 100
+            production_safe = $false
+          } | ConvertTo-Json -Depth 4
+          $manifest | Set-Content 'release-single\verified-release-manifest.json'
+      - name: Upload verified installer evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: metaengine-browser-native-supervisor-windows-${{ github.sha }}
+          name: metaengine-browser-supervisor-keepalive-windows-${{ github.sha }}-${{ github.run_attempt }}
           path: apps/metaengine-browser/release-single/
           if-no-files-found: error
+      - name: Bind immutable release tag to verified source
+        if: github.ref_name == 'work/convergence-supervisor-keepalive-v1'
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = node -p "require('./package.json').version"
+          $tag = "v$version"
+          gh api --method POST "repos/$env:GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$env:GITHUB_SHA" | Out-Null
+          "release_tag=$tag" | Set-Content "$env:RUNNER_TEMP\release-tag.txt"
+      - name: Publish exact verified self-update prerelease
+        if: github.ref_name == 'work/convergence-supervisor-keepalive-v1'
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = ((Get-Content "$env:RUNNER_TEMP\release-tag.txt") -replace '^release_tag=','').Trim()
+          $installer = Get-Item (Get-Content "$env:RUNNER_TEMP\installer-path.txt")
+          $blockmap = Get-Item (Get-Content "$env:RUNNER_TEMP\blockmap-path.txt")
+          $channelMeta = Get-Item (Get-Content "$env:RUNNER_TEMP\channel-yml-path.txt")
+          $manifest = Get-Item 'release-single\verified-release-manifest.json'
+          $expected = (Get-Content "$env:RUNNER_TEMP\installer-sha256.txt").Trim()
+          $actual = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw 'release_installer_digest_not_verified_candidate' }
+          if ($channelMeta.Name -ne 'dev.yml') { throw "release_channel_metadata_unexpected:$($channelMeta.Name)" }
+          gh release create $tag $installer.FullName $blockmap.FullName $channelMeta.FullName $manifest.FullName --verify-tag --prerelease --title "METAENGINE Browser $tag" --notes "Development self-update candidate on channel dev. Exact artifact passed contract tests, NSIS install, Development Plane smoke, installed Browser launch, exact crash-sentinel relaunch receipt/successor binding, channel binding, and digest revalidation. Not production-safe until Authenticode publisher verification is sealed."
