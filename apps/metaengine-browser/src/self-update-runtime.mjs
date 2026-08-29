@@ -1,10 +1,13 @@
 import { HostResilienceRuntime } from './host-resilience-runtime.mjs';
 
 const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+const SAFE_ARTIFACT_RE = /^[0-9A-Za-z._-]+$/;
+export const DEFAULT_TRUSTED_UPDATE_CHANNEL = 'dev';
+export const DEFAULT_TRUSTED_ARTIFACT_PREFIX = 'METAENGINE-Browser-Test-Setup-';
 
 function clipError(error) { return String(error?.message || error || 'unknown_error').slice(0, 300); }
 
-function verifiedMetadata(info) {
+function verifiedMetadata(info, { trustedArtifactPrefix = DEFAULT_TRUSTED_ARTIFACT_PREFIX } = {}) {
   const version = String(info?.version || '').trim();
   if (!VERSION_RE.test(version)) throw new Error('update_metadata_version_invalid');
   const files = Array.isArray(info?.files) ? info.files : [];
@@ -13,6 +16,8 @@ function verifiedMetadata(info) {
     const url = String(file?.url || '').trim();
     const sha512 = String(file?.sha512 || '').trim();
     if (!url || !sha512 || sha512.length < 40) throw new Error('update_metadata_file_digest_invalid');
+    if (!SAFE_ARTIFACT_RE.test(url) || url.includes('..') || url.includes('/') || url.includes('\\')) throw new Error('update_metadata_artifact_path_invalid');
+    if (!url.startsWith(trustedArtifactPrefix) || !url.endsWith('.exe') || !url.includes(`-${version}-`)) throw new Error('update_metadata_artifact_binding_invalid');
     return { url: url.slice(0, 500), sha512: sha512.slice(0, 200), size: Number(file?.size || 0) };
   });
   const stagingPercentage = info?.stagingPercentage == null ? null : Number(info.stagingPercentage);
@@ -29,28 +34,42 @@ function verifiedMetadata(info) {
 
 export class SelfUpdateRuntime {
   #updater = null; #injectedUpdater; #packagedOverride; #host = null; #hostOverride;
+  #trustedChannel; #trustedArtifactPrefix;
   #state = {
     state: 'UNINITIALIZED', available_version: null, downloaded_version: null,
     metadata_verified: false, candidate_file_count: 0, staging_percentage: null,
-    last_check_at: null, last_error: null,
+    last_check_at: null, last_error: null, trusted_channel: null,
   };
   #lastCheck = 0; #intervalMs; #canRestart;
 
-  constructor({ intervalMs = 10 * 60 * 1000, canRestart = async () => false, updater = null, packaged = null, hostResilience = undefined } = {}) {
+  constructor({
+    intervalMs = 10 * 60 * 1000,
+    canRestart = async () => false,
+    updater = null,
+    packaged = null,
+    hostResilience = undefined,
+    trustedChannel = DEFAULT_TRUSTED_UPDATE_CHANNEL,
+    trustedArtifactPrefix = DEFAULT_TRUSTED_ARTIFACT_PREFIX,
+  } = {}) {
     this.#intervalMs = Math.max(60 * 1000, Number(intervalMs) || 10 * 60 * 1000);
     this.#canRestart = canRestart;
     this.#injectedUpdater = updater;
     this.#packagedOverride = packaged;
     this.#hostOverride = hostResilience;
+    this.#trustedChannel = String(trustedChannel || DEFAULT_TRUSTED_UPDATE_CHANNEL).trim();
+    this.#trustedArtifactPrefix = String(trustedArtifactPrefix || DEFAULT_TRUSTED_ARTIFACT_PREFIX).trim();
+    if (!/^[0-9A-Za-z._-]+$/.test(this.#trustedChannel)) throw new Error('trusted_update_channel_invalid');
+    if (!SAFE_ARTIFACT_RE.test(this.#trustedArtifactPrefix)) throw new Error('trusted_update_artifact_prefix_invalid');
+    this.#state.trusted_channel = this.#trustedChannel;
   }
 
   snapshot() {
-    return structuredClone({ schema: 'metaengine.self-update-runtime.v2', ...this.#state, host_resilience: this.#host?.snapshot?.() || null, authority_effect: false });
+    return structuredClone({ schema: 'metaengine.self-update-runtime.v3', ...this.#state, host_resilience: this.#host?.snapshot?.() || null, authority_effect: false });
   }
 
   async #approveAndDownload(info) {
     try {
-      const metadata = verifiedMetadata(info);
+      const metadata = verifiedMetadata(info, { trustedArtifactPrefix: this.#trustedArtifactPrefix });
       this.#state.available_version = metadata.version;
       this.#state.metadata_verified = true;
       this.#state.candidate_file_count = metadata.files.length;
@@ -86,10 +105,14 @@ export class SelfUpdateRuntime {
       }
       if (!updater) throw new Error('electron_updater_unavailable');
       updater.allowPrerelease = true;
+      updater.channel = this.#trustedChannel;
+      // electron-updater may enable downgrade when allowPrerelease/channel are set.
+      // Re-assert this invariant only after both properties are configured.
       updater.allowDowngrade = false;
       updater.autoDownload = false;
       updater.autoInstallOnAppQuit = false;
       if ('disableWebInstaller' in updater) updater.disableWebInstaller = true;
+      if ('allowUnverifiedLinuxPackages' in updater) updater.allowUnverifiedLinuxPackages = false;
       updater.on('checking-for-update', () => { this.#state.state = 'CHECKING'; });
       updater.on('update-available', (info) => { void this.#approveAndDownload(info); });
       updater.on('update-not-available', () => {
