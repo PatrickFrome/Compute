@@ -18,6 +18,28 @@
     "fallback_models": { "type": "array", "items": { "type": "string" } },
     "paid_route_authorized": { "type": "boolean" },
     "zero_spend_verified": { "type": "boolean" },
+    "max_output_tokens": { "type": "integer", "minimum": 1, "maximum": 4096 },
+    "paid_budget": {
+      "type": ["object", "null"],
+      "properties": {
+        "cap_usd": { "type": "number", "minimum": 0, "maximum": 0.5 },
+        "worst_case_usd": { "type": "number", "minimum": 0 },
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["model", "worst_case_usd"],
+            "properties": {
+              "model": { "type": "string", "minLength": 1 },
+              "worst_case_usd": { "type": "number", "minimum": 0 }
+            }
+          }
+        }
+      },
+      "required": ["cap_usd", "worst_case_usd", "models"],
+      "additionalProperties": false
+    },
     "answer": { "type": "string" },
     "request_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "response_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
@@ -28,7 +50,12 @@
   "allOf": [
     {
       "if": { "properties": { "paid_route_authorized": { "const": false } } },
-      "then": { "properties": { "zero_spend_verified": { "const": true } } }
+      "then": {
+        "properties": {
+          "zero_spend_verified": { "const": true },
+          "paid_budget": { "const": null }
+        }
+      }
     }
   ]
 }

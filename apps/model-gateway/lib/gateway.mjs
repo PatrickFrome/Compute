@@ -40,7 +40,7 @@ async function parseGatewayResponse(response) {
   return payload;
 }
 
-export async function callGateway({ models, input, taskId, env = process.env, fetchImpl = fetch }) {
+export async function callGateway({ models, input, taskId, maxOutputTokens = 1200, env = process.env, fetchImpl = fetch }) {
   if (!Array.isArray(models) || models.length === 0) throw new Error('empty_model_plan');
   const credential = gatewayCredential(env);
   if (!credential) throw new Error('gateway_auth_unavailable');
@@ -49,6 +49,7 @@ export async function callGateway({ models, input, taskId, env = process.env, fe
   const body = {
     model: primary,
     input: [{ type: 'message', role: 'user', content: input }],
+    max_output_tokens: maxOutputTokens,
     providerOptions: {
       gateway: {
         models,

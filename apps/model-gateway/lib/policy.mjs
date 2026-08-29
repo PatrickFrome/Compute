@@ -46,7 +46,10 @@ export const LIMITS = Object.freeze({
   maxPromptChars: 120_000,
   maxContextChars: 240_000,
   maxTaskIdChars: 160,
-  maxPreferredModels: 8
+  maxPreferredModels: 8,
+  defaultPeerOutputTokens: 1200,
+  maxPeerOutputTokens: 4096,
+  hardMaxPaidRequestUsd: 0.50
 });
 
 export function paidModelsEnabled(env = process.env) {
@@ -78,6 +81,7 @@ export function validateTask(body) {
   const prompt = typeof body.prompt === 'string' ? body.prompt : '';
   const context = typeof body.context === 'string' ? body.context : '';
   const preferredModels = Array.isArray(body.preferred_models) ? body.preferred_models : [];
+  const requestedMaxOutputTokens = body.max_output_tokens ?? LIMITS.defaultPeerOutputTokens;
 
   if (!taskId || taskId.length > LIMITS.maxTaskIdChars) throw new Error('invalid_task_id');
   if (!ALLOWED_ROLES.includes(role)) throw new Error('unsupported_role');
@@ -86,6 +90,9 @@ export function validateTask(body) {
   if (preferredModels.length > LIMITS.maxPreferredModels || preferredModels.some((x) => typeof x !== 'string')) {
     throw new Error('invalid_preferred_models');
   }
+  if (!Number.isInteger(requestedMaxOutputTokens) || requestedMaxOutputTokens < 1 || requestedMaxOutputTokens > LIMITS.maxPeerOutputTokens) {
+    throw new Error('invalid_max_output_tokens');
+  }
 
   return {
     taskId,
@@ -93,6 +100,7 @@ export function validateTask(body) {
     prompt,
     context,
     paidOk: body.paid_ok === true,
-    preferredModels
+    preferredModels,
+    maxOutputTokens: requestedMaxOutputTokens
   };
 }

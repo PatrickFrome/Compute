@@ -1,7 +1,7 @@
 import { validateTask, modelPlan, paidModelsEnabled } from '../lib/policy.mjs';
 import { authorized, buildPeerInput, sha256 } from '../lib/security.mjs';
 import { callGateway, extractText } from '../lib/gateway.mjs';
-import { assertZeroSpend } from '../lib/catalog.mjs';
+import { assertPaidBudget, assertZeroSpend } from '../lib/catalog.mjs';
 
 function send(response, status, body) {
   response.status(status).json(body);
@@ -24,12 +24,31 @@ export default async function handler(request, response) {
     preferredModels: task.preferredModels
   });
   const input = buildPeerInput(task);
-  const requestHash = sha256(JSON.stringify({ task_id: task.taskId, role: task.role, models, input }));
+  const requestHash = sha256(JSON.stringify({
+    task_id: task.taskId,
+    role: task.role,
+    models,
+    max_output_tokens: task.maxOutputTokens,
+    input
+  }));
   const startedAt = new Date().toISOString();
 
   try {
-    if (!paidRouteAuthorized) await assertZeroSpend(models);
-    const result = await callGateway({ models, input, taskId: task.taskId });
+    let paidBudget = null;
+    if (!paidRouteAuthorized) {
+      await assertZeroSpend(models);
+    } else {
+      paidBudget = await assertPaidBudget(models, {
+        input,
+        maxOutputTokens: task.maxOutputTokens
+      });
+    }
+    const result = await callGateway({
+      models,
+      input,
+      taskId: task.taskId,
+      maxOutputTokens: task.maxOutputTokens
+    });
     const answer = extractText(result.payload);
     const responseHash = sha256(JSON.stringify(result.payload));
     return send(response, 200, {
@@ -41,6 +60,8 @@ export default async function handler(request, response) {
       fallback_models: result.fallbacks,
       paid_route_authorized: paidRouteAuthorized,
       zero_spend_verified: !paidRouteAuthorized,
+      max_output_tokens: task.maxOutputTokens,
+      paid_budget: paidBudget,
       answer,
       request_sha256: requestHash,
       response_sha256: responseHash,
