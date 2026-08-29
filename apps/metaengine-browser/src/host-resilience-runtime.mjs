@@ -1,6 +1,15 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { BrowserSentinelHost } from './browser-sentinel.mjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 export class HostResilienceRuntime {
-  #electron; #onResume; #platform; #blockerId = null; #resumeHandler = null;
-  #state = { state: 'UNINITIALIZED', open_at_login: false, executable_will_launch_at_login: false, prevent_app_suspension: false, last_resume_at: null, last_error: null };
+  #electron; #onResume; #platform; #blockerId = null; #resumeHandler = null; #sentinel = null;
+  #state = {
+    state: 'UNINITIALIZED', open_at_login: false, executable_will_launch_at_login: false,
+    prevent_app_suspension: false, sentinel: null, last_resume_at: null, last_error: null,
+  };
 
   constructor({ electron = null, onResume = async () => {}, platform = process.platform } = {}) {
     this.#electron = electron;
@@ -8,7 +17,14 @@ export class HostResilienceRuntime {
     this.#platform = platform;
   }
 
-  snapshot() { return structuredClone({ schema: 'metaengine.host-resilience-runtime.v1', ...this.#state, authority_effect: false }); }
+  snapshot() {
+    return structuredClone({
+      schema: 'metaengine.host-resilience-runtime.v2',
+      ...this.#state,
+      sentinel: this.#sentinel?.snapshot?.() || this.#state.sentinel,
+      authority_effect: false,
+    });
+  }
 
   async start() {
     try {
@@ -20,6 +36,14 @@ export class HostResilienceRuntime {
         const settings = app.getLoginItemSettings();
         this.#state.open_at_login = settings?.openAtLogin === true;
         this.#state.executable_will_launch_at_login = settings?.executableWillLaunchAtLogin === true;
+      }
+      if (this.#platform === 'win32' && process.env.METAENGINE_DISABLE_CRASH_SENTINEL !== '1' && typeof app.getPath === 'function') {
+        this.#sentinel = new BrowserSentinelHost({
+          statePath: path.join(app.getPath('userData'), 'metaengine-browser-sentinel-v1.json'),
+          workerScript: path.join(__dirname, 'browser-sentinel-worker.cjs'),
+          executable: process.execPath,
+        });
+        await this.#sentinel.start({ app });
       }
       if (process.env.METAENGINE_ALLOW_SUSPEND !== '1' && powerSaveBlocker) {
         this.#blockerId = powerSaveBlocker.start('prevent-app-suspension');
@@ -40,11 +64,17 @@ export class HostResilienceRuntime {
     return this.snapshot();
   }
 
+  async prepareExpectedRestart(reason = 'SELF_UPDATE') {
+    if (this.#sentinel) await this.#sentinel.prepareExpectedRestart(reason);
+    return this.snapshot();
+  }
+
   async stop() {
     try {
       const electron = this.#electron || await import('electron');
       if (this.#resumeHandler && electron.powerMonitor?.removeListener) electron.powerMonitor.removeListener('resume', this.#resumeHandler);
       if (this.#blockerId != null && electron.powerSaveBlocker?.isStarted?.(this.#blockerId)) electron.powerSaveBlocker.stop(this.#blockerId);
+      await this.#sentinel?.stop?.();
     } catch {}
     this.#blockerId = null;
     this.#resumeHandler = null;
