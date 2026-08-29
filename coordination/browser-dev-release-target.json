@@ -1,8 +1,8 @@
 {
   "schema": "metaengine.browser.dev-release-target.v1",
   "enabled": true,
-  "source_sha": "4217b7f225046229ccb20f80a46f7d80b35b875b",
-  "reason": "RESUME_AFTER_CHECKOUT_INDEPENDENT_PUBLISHER_FIX",
+  "source_sha": "3d90adae9b658971f005f2a5abb563112441ac47",
+  "reason": "LIVE_SELF_UPDATE_N_TO_N_PLUS_1_AFTER_64_1_IN_PLACE_CONTINUITY_PASS",
   "requested_by": "METAENGINE_SUPERVISOR",
   "authority_effect": false
 }
