@@ -1,0 +1,101 @@
+name: A2 Browser R10 Context Compiler
+
+on:
+  push:
+    branches:
+      - work/a2-browser-r10-context-compiler
+    paths:
+      - 'coordination/browser-shared/context-compiler-v1.mjs'
+      - 'tests/a2_r10_*.test.mjs'
+      - 'research/A2_BROWSER_R10_**'
+      - '.github/workflows/a2-browser-r10-context-compiler.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r10-context-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Verify exact R9 parent and source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          PARENT=a7c01d917f5b14b0eb18688651622d223e90e47d
+          git merge-base --is-ancestor "$PARENT" "$GITHUB_SHA"
+          git diff --name-only "$PARENT" "$GITHUB_SHA" | tee "$RUNNER_TEMP/r10-changed-files.txt"
+          if git diff --name-only "$PARENT" "$GITHUB_SHA" | grep -Eq '(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.(toml|lock))$'; then
+            echo 'R10 must add no source dependency packages' >&2
+            exit 1
+          fi
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+
+      - name: Static zero-authority checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE=coordination/browser-shared/context-compiler-v1.mjs
+          node --check "$FILE"
+          ! grep -Eq 'chrome\.|Input\.dispatch|Runtime\.evaluate|fetch\(|WebSocket|child_process|exec\(|eval\(' "$FILE"
+          grep -q 'source_of_truth_rewritten: false' "$FILE"
+          grep -q 'UNTRUSTED_DATA' "$FILE"
+          grep -q 'context_source_digest_mismatch' "$FILE"
+
+      - name: R10 context compiler tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tests/a2_r10_*.test.mjs
+
+      - name: R9 and R8 regression fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tests/a2_r9_*.test.mjs
+          node --test tests/a2_r8a_*.test.mjs tests/a2_r8b_*.test.mjs tests/a2_r8c_*.test.mjs tests/a2_r8d_*.test.mjs
+
+      - name: Build deterministic R10 evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=dist/a2-browser-r10
+          mkdir -p "$OUT/evidence"
+          cp "$RUNNER_TEMP/r10-changed-files.txt" "$OUT/evidence/R10_CHANGED_FILES.txt"
+          printf '%s\n' "$GITHUB_SHA" > "$OUT/evidence/SOURCE_COMMIT.txt"
+          printf '%s\n' 'a7c01d917f5b14b0eb18688651622d223e90e47d' > "$OUT/evidence/PARENT_R9_COMMIT.txt"
+          cat > "$OUT/evidence/R10_CLAIMS.json" <<'JSON'
+          {"milestone":"R10_CONTEXT_COMPILER_V1","source_digest_required":true,"tainted_directive_as_instruction":false,"source_of_truth_rewritten":false,"whole_source_admission":true,"role_specific_visibility":true,"deterministic_capsule":true,"context_delta":true,"browser_authority":false,"model_invocation":false,"new_source_dependency_packages":0}
+          JSON
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf "$OUT/A2_BROWSER_R10_CONTEXT_COMPILER.tar" \
+            coordination/browser-shared/context-compiler-v1.mjs \
+            tests/a2_r10_context_compiler.test.mjs \
+            research/A2_BROWSER_R10_CONTEXT_COMPILER_PRE_RESEARCH_2026-08-29.md \
+            "$OUT/evidence"
+          sha256sum "$OUT/A2_BROWSER_R10_CONTEXT_COMPILER.tar" > "$OUT/R10_SHA256SUMS.txt"
+
+      - name: Attest R10 evidence
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-browser-r10/A2_BROWSER_R10_CONTEXT_COMPILER.tar
+
+      - name: Upload R10 evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-r10-${{ github.sha }}
+          path: |
+            dist/a2-browser-r10/A2_BROWSER_R10_CONTEXT_COMPILER.tar
+            dist/a2-browser-r10/R10_SHA256SUMS.txt
+            dist/a2-browser-r10/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
