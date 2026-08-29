@@ -4,6 +4,8 @@ import path from 'node:path';
 
 export const PRE_INSTALL_RECEIPT_FILE = 'metaengine-self-update-pre-install-receipt-v1.json';
 export const SUCCESSOR_RECEIPT_FILE = 'metaengine-self-update-successor-receipt-v1.json';
+export const SUCCESSOR_STARTUP_NORMAL = 'NORMAL';
+export const SUCCESSOR_STARTUP_PROBE_ONLY = 'PROBE_ONLY';
 const PRE_INSTALL_SCHEMA = 'metaengine.self-update.pre-install-receipt.v1';
 const SUCCESSOR_SCHEMA = 'metaengine.self-update.successor-receipt.v1';
 const DEFAULT_MAX_AGE_MS = 30 * 60 * 1000;
@@ -12,12 +14,21 @@ function assertApp(app) {
   if (!app || typeof app.getPath !== 'function' || typeof app.getVersion !== 'function') throw new Error('self_update_handoff_app_invalid');
 }
 
+function successorStartupMode(receipt) {
+  const mode = String(receipt?.successor_startup || SUCCESSOR_STARTUP_NORMAL).toUpperCase();
+  if (![SUCCESSOR_STARTUP_NORMAL, SUCCESSOR_STARTUP_PROBE_ONLY].includes(mode)) {
+    throw new Error('self_update_handoff_successor_startup_invalid');
+  }
+  return mode;
+}
+
 function validatePreInstallReceipt(receipt) {
   if (receipt?.schema !== PRE_INSTALL_SCHEMA) throw new Error('self_update_handoff_receipt_schema_invalid');
   if (!receipt?.version || receipt.version !== receipt?.available_version) throw new Error('self_update_handoff_receipt_version_invalid');
   if (receipt?.metadata_verified !== true || receipt?.restart_gate_safe !== true || receipt?.authority_effect !== false) {
     throw new Error('self_update_handoff_receipt_invariant_invalid');
   }
+  successorStartupMode(receipt);
   const recordedMs = Date.parse(String(receipt?.recorded_at || ''));
   if (!Number.isFinite(recordedMs)) throw new Error('self_update_handoff_receipt_time_invalid');
   return recordedMs;
@@ -45,6 +56,12 @@ export function selfUpdateHandoffPaths(app) {
   };
 }
 
+export async function clearSuccessorReceipt(app) {
+  const { successor } = selfUpdateHandoffPaths(app);
+  try { await fs.unlink(successor); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
+  return successor;
+}
+
 export async function persistPreInstallReceipt(app, receipt) {
   assertApp(app);
   if (app.isPackaged !== true) throw new Error('self_update_handoff_packaged_required');
@@ -53,14 +70,9 @@ export async function persistPreInstallReceipt(app, receipt) {
   }
   validatePreInstallReceipt(receipt);
   const { pre_install } = selfUpdateHandoffPaths(app);
+  await clearSuccessorReceipt(app);
   await atomicWriteJson(pre_install, receipt);
-  return { path: pre_install };
-}
-
-export async function clearSuccessorReceipt(app) {
-  const { successor } = selfUpdateHandoffPaths(app);
-  try { await fs.unlink(successor); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
-  return successor;
+  return { path: pre_install, successor_startup: successorStartupMode(receipt) };
 }
 
 export async function readExpectedPreInstallReceipt(app, { maxAgeMs = DEFAULT_MAX_AGE_MS, clock = () => Date.now() } = {}) {
@@ -80,6 +92,7 @@ export async function readExpectedPreInstallReceipt(app, { maxAgeMs = DEFAULT_MA
     receipt,
     raw,
     sha256: createHash('sha256').update(raw).digest('hex'),
+    successor_startup: successorStartupMode(receipt),
     path: pre_install,
   };
 }
@@ -108,6 +121,7 @@ export async function persistUpdatedSuccessorReceipt(app, {
     pid: process.pid,
     primary_instance: true,
     app_id: appId ? String(appId) : null,
+    successor_startup: expected.successor_startup,
     pre_install_receipt_sha256: expected.sha256,
     pre_install_recorded_at: expected.receipt.recorded_at,
     recorded_at: new Date(Number(clock())).toISOString(),
@@ -115,5 +129,5 @@ export async function persistUpdatedSuccessorReceipt(app, {
   };
   const { successor } = selfUpdateHandoffPaths(app);
   await atomicWriteJson(successor, row);
-  return { row, path: successor };
+  return { row, path: successor, successor_startup: expected.successor_startup };
 }
