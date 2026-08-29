@@ -1,0 +1,22 @@
+name: A2 Browser R7J-A Max Package Inventory (Sealed Record)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sealed-record:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report immutable R7J-A max-package evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'R7J-A max-package inventory is sealed and intentionally not re-run after the runtime policy changes.'
+          echo 'source_commit=09251dd9fed769c74d05e38a971da5213e417ea6'
+          echo 'workflow_run=33209903551'
+          echo 'artifact_id=9701164110'
+          echo 'artifact_zip_sha256=16e27a9408dad7f74e99767dd323f8386ae1801cc0955d92aa41f1bbb578c818'
+          echo 'attested_tar_sha256=222e496a0841e1c18b5eefa0febf2b6e3e3f0651d88a91551deb996b495b7ea6'

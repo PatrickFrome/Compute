@@ -1,0 +1,221 @@
+name: A2 Browser R7J-B Positive Seccomp Allowlist
+
+on:
+  push:
+    branches:
+      - work/a2-browser-r7j-positive-seccomp-allowlist
+    paths:
+      - 'coordination/browser-skill-source-linux/**'
+      - 'coordination/browser-shared/**'
+      - 'research/A2_BROWSER_R7J_A_SYSCALL_INVENTORY_POST_RESEARCH_2026-08-28.md'
+      - 'research/A2_BROWSER_R7J_B_POSITIVE_SECCOMP_ALLOWLIST_PRE_RESEARCH_2026-08-28.md'
+      - 'research/A2_BROWSER_R7J_B_POSITIVE_SECCOMP_ALLOWLIST_POST_RESEARCH_2026-08-28.md'
+      - '.github/workflows/a2-browser-r7j-b-positive-seccomp-allowlist.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r7j-b-positive-allowlist-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+
+      - name: Establish exact target and source epoch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          test "$(rustc --version | awk '{print $2}')" = "1.98.0"
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+
+      - name: Verify unchanged supply-chain closure
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          test -f Cargo.lock
+          sha256sum Cargo.lock | tee "$RUNNER_TEMP/r7j-b-lock-sha256.txt"
+          test "$(awk '{print $1}' "$RUNNER_TEMP/r7j-b-lock-sha256.txt")" = \
+            "ffdf4d85f832e92b20960ecdbc581103a113cf9ddfa93fa319ba124f21a3d003"
+          cargo tree --locked | tee "$RUNNER_TEMP/r7j-b-cargo-tree.txt"
+          python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          cargo = tomllib.loads(Path('Cargo.toml').read_text())
+          deps = cargo.get('dependencies', {})
+          if set(deps) != {'landlock', 'libc', 'rustix', 'seccompiler'}:
+              raise SystemExit(f'unexpected direct dependency surface: {sorted(deps)}')
+          expected = {
+              'landlock': '=0.4.7',
+              'libc': '=0.2.189',
+              'seccompiler': '=0.5.0',
+          }
+          for name, version in expected.items():
+              if deps.get(name) != version:
+                  raise SystemExit(f'{name} version drifted: {deps.get(name)!r}')
+          rustix = deps.get('rustix')
+          if not isinstance(rustix, dict) or rustix.get('version') != '=1.1.4':
+              raise SystemExit('rustix version drifted')
+          lock = tomllib.loads(Path('Cargo.lock').read_text())
+          packages = {(p['name'], p['version']) for p in lock.get('package', [])}
+          if len(packages) != 19:
+              raise SystemExit(f'unexpected Cargo.lock package-entry count: {len(packages)}')
+          PY
+
+      - name: Prove static positive-allowlist contract
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path('src/syscall_sandbox.rs').read_text()
+          helper = Path('src/bin/a2-skill-source-helper.rs').read_text()
+          required = [
+              'libc::SYS_brk', 'libc::SYS_close', 'libc::SYS_exit_group',
+              'libc::SYS_fcntl', 'libc::SYS_getdents64', 'libc::SYS_lseek',
+              'libc::SYS_mmap', 'libc::SYS_munmap', 'libc::SYS_openat',
+              'libc::SYS_openat2', 'libc::SYS_read', 'libc::SYS_sigaltstack',
+              'libc::SYS_statx', 'libc::SYS_write',
+          ]
+          if 'const ALLOWED_SYSCALLS: [i64; 14]' not in source:
+              raise SystemExit('R7J-B exact allowlist cardinality is not 14')
+          for token in required:
+              if token not in source:
+                  raise SystemExit(f'missing required allowlist token: {token}')
+          if 'SeccompAction::Errno(libc::EPERM as u32)' not in source:
+              raise SystemExit('R7J-B default EPERM action missing')
+          if 'SeccompAction::Allow' not in source:
+              raise SystemExit('R7J-B matched Allow action missing')
+          if 'restrict_network_syscalls' in source or 'restrict_network_syscalls' in helper:
+              raise SystemExit('R7I default-allow fallback remains reachable')
+          if 'restrict_to_steady_state_syscalls' not in helper:
+              raise SystemExit('helper is not using R7J-B allowlist')
+          if 'skill_helper_seccomp_arch_unsupported' not in source:
+              raise SystemExit('architecture fail-closed guard missing')
+          default_pos = source.index('SeccompAction::Errno(libc::EPERM as u32)')
+          allow_pos = source.index('SeccompAction::Allow', default_pos)
+          if not default_pos < allow_pos:
+              raise SystemExit('seccompiler default/filter action ordering is wrong')
+          PY
+
+      - name: Compile, lint, and run all Rust adversarial regressions
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --all-targets -- --nocapture | tee "$RUNNER_TEMP/r7j-b-rust-tests.log"
+          cargo test --locked --test helper_process -- --nocapture | tee "$RUNNER_TEMP/r7j-b-helper-process.log"
+          cargo test --locked --test network_boundary -- --nocapture | tee "$RUNNER_TEMP/r7j-b-network-boundary.log"
+          cargo test --locked --test sandbox -- --nocapture | tee "$RUNNER_TEMP/r7j-b-landlock.log"
+
+      - name: Prove maximum-content helper path under default deny
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --bin a2-skill-source-helper
+          HELPER=target/release/a2-skill-source-helper
+          sha256sum "$HELPER" | tee "$RUNNER_TEMP/r7j-b-helper-sha256.txt"
+          stat -c '%s' "$HELPER" | tee "$RUNNER_TEMP/r7j-b-helper-size.txt"
+          test "$(cat "$RUNNER_TEMP/r7j-b-helper-size.txt")" -lt 4194304
+
+          ROOT="$RUNNER_TEMP/r7j-b-max-root"
+          mkdir -p "$ROOT/bulk/assets"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, struct
+
+          root = Path(os.environ['RUNNER_TEMP']) / 'r7j-b-max-root' / 'bulk'
+          (root / 'SKILL.md').write_bytes(b'S' * (96 * 1024))
+          for index in range(8):
+              (root / 'assets' / f'blob-{index}.bin').write_bytes(bytes([65 + index]) * (256 * 1024))
+          name = b'bulk'
+          body = bytes([len(name)]) + name
+          payload = bytes([1, 2]) + struct.pack('>H', 0) + struct.pack('>Q', 777) + body
+          request = struct.pack('>I', len(payload)) + payload
+          (Path(os.environ['RUNNER_TEMP']) / 'r7j-b-max-request.bin').write_bytes(request)
+          PY
+
+          "$HELPER" "$ROOT" \
+            < "$RUNNER_TEMP/r7j-b-max-request.bin" \
+            > "$RUNNER_TEMP/r7j-b-max.stdout" \
+            2> "$RUNNER_TEMP/r7j-b-max.stderr"
+          test ! -s "$RUNNER_TEMP/r7j-b-max.stderr"
+          stat -c '%s' "$RUNNER_TEMP/r7j-b-max.stdout" | tee "$RUNNER_TEMP/r7j-b-max-output-size.txt"
+          test "$(cat "$RUNNER_TEMP/r7j-b-max-output-size.txt")" -gt 2195456
+
+      - name: Run R7 package and registry regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            coordination/browser-shared/tests/skill-package-identity-v1.test.mjs \
+            coordination/browser-shared/tests/skill-registry-v1.test.mjs | tee "$RUNNER_TEMP/r7j-b-js-regression.log"
+
+      - name: Build deterministic candidate evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=dist/a2-browser-r7j-b
+          mkdir -p "$OUT/evidence"
+          cp "$RUNNER_TEMP/r7j-b-lock-sha256.txt" "$OUT/evidence/R7J_B_CARGO_LOCK_SHA256.txt"
+          cp "$RUNNER_TEMP/r7j-b-cargo-tree.txt" "$OUT/evidence/R7J_B_CARGO_TREE.txt"
+          cp "$RUNNER_TEMP/r7j-b-rust-tests.log" "$OUT/evidence/R7J_B_RUST_TESTS.log"
+          cp "$RUNNER_TEMP/r7j-b-helper-process.log" "$OUT/evidence/R7J_B_HELPER_PROCESS.log"
+          cp "$RUNNER_TEMP/r7j-b-network-boundary.log" "$OUT/evidence/R7J_B_NETWORK_BOUNDARY.log"
+          cp "$RUNNER_TEMP/r7j-b-landlock.log" "$OUT/evidence/R7J_B_LANDLOCK.log"
+          cp "$RUNNER_TEMP/r7j-b-helper-sha256.txt" "$OUT/evidence/R7J_B_HELPER_SHA256.txt"
+          cp "$RUNNER_TEMP/r7j-b-helper-size.txt" "$OUT/evidence/R7J_B_HELPER_SIZE.txt"
+          cp "$RUNNER_TEMP/r7j-b-max-output-size.txt" "$OUT/evidence/R7J_B_MAX_OUTPUT_SIZE.txt"
+          cp "$RUNNER_TEMP/r7j-b-js-regression.log" "$OUT/evidence/R7J_B_JS_REGRESSION.log"
+          printf '%s\n' "$GITHUB_SHA" > "$OUT/evidence/SOURCE_COMMIT.txt"
+          printf '%s\n' '8da22eee9426f267f5982e90db246799cfe37e1c' > "$OUT/evidence/PARENT_VERIFIED_COMMIT.txt"
+          cat > "$OUT/evidence/R7J_B_CLAIMS.json" <<'JSON'
+          {"milestone":"R7J_B_POSITIVE_SECCOMP_ALLOWLIST","platform":"linux-x86_64","allowed_syscall_count":14,"positive_allowlist":true,"default_deny":true,"default_errno":"EPERM","tsync":true,"kill_on_violation":false,"network_namespace_isolation":false,"node_integration":false,"browser_authority":false}
+          JSON
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf "$OUT/A2_BROWSER_R7J_B_POSITIVE_SECCOMP_ALLOWLIST.tar" \
+            coordination/browser-skill-source-linux/Cargo.toml \
+            coordination/browser-skill-source-linux/Cargo.lock \
+            coordination/browser-skill-source-linux/rust-toolchain.toml \
+            coordination/browser-skill-source-linux/src \
+            coordination/browser-skill-source-linux/tests \
+            research/A2_BROWSER_R7J_A_SYSCALL_INVENTORY_POST_RESEARCH_2026-08-28.md \
+            research/A2_BROWSER_R7J_B_POSITIVE_SECCOMP_ALLOWLIST_PRE_RESEARCH_2026-08-28.md \
+            "$OUT/evidence"
+          if test -f research/A2_BROWSER_R7J_B_POSITIVE_SECCOMP_ALLOWLIST_POST_RESEARCH_2026-08-28.md; then
+            tar --append --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+              -f "$OUT/A2_BROWSER_R7J_B_POSITIVE_SECCOMP_ALLOWLIST.tar" \
+              research/A2_BROWSER_R7J_B_POSITIVE_SECCOMP_ALLOWLIST_POST_RESEARCH_2026-08-28.md
+          fi
+          sha256sum "$OUT/A2_BROWSER_R7J_B_POSITIVE_SECCOMP_ALLOWLIST.tar" > "$OUT/R7J_B_SHA256SUMS.txt"
+
+      - name: Attest candidate build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373
+        with:
+          subject-path: dist/a2-browser-r7j-b/A2_BROWSER_R7J_B_POSITIVE_SECCOMP_ALLOWLIST.tar
+
+      - name: Upload R7J-B candidate evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1
+        with:
+          name: a2-browser-r7j-b-positive-allowlist-${{ github.sha }}
+          path: |
+            dist/a2-browser-r7j-b/A2_BROWSER_R7J_B_POSITIVE_SECCOMP_ALLOWLIST.tar
+            dist/a2-browser-r7j-b/R7J_B_SHA256SUMS.txt
+            dist/a2-browser-r7j-b/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

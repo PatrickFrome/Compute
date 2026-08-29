@@ -1,0 +1,18 @@
+[package]
+name = "a2-skill-source-linux"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[dependencies]
+landlock = "=0.4.7"
+libc = "=0.2.189"
+rustix = { version = "=1.1.4", features = ["fs", "thread"] }
+seccompiler = "=0.5.0"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = "thin"
+strip = "symbols"

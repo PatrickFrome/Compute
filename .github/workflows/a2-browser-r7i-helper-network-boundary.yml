@@ -1,0 +1,212 @@
+name: A2 Browser R7I Helper Network Boundary
+
+on:
+  push:
+    branches:
+      - work/a2-browser-r7i-helper-network-boundary
+    paths:
+      - 'coordination/browser-skill-source-linux/**'
+      - 'coordination/browser-shared/**'
+      - 'research/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY_PRE_RESEARCH_2026-08-28.md'
+      - 'research/A2_BROWSER_R7I_INHERITED_FD_SANITIZATION_RESEARCH_2026-08-28.md'
+      - 'research/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY_POST_RESEARCH_2026-08-28.md'
+      - '.github/workflows/a2-browser-r7i-helper-network-boundary.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r7i-helper-network-boundary-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+
+      - name: Establish deterministic source epoch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = "Linux"
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+
+      - name: Verify sealed dependency closure
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          rustc --version | tee "$RUNNER_TEMP/r7i-rustc-version.txt"
+          cargo --version | tee "$RUNNER_TEMP/r7i-cargo-version.txt"
+          test "$(rustc --version | awk '{print $2}')" = "1.98.0"
+          test -f Cargo.lock
+          sha256sum Cargo.lock | tee "$RUNNER_TEMP/r7i-source-lock-sha256.txt"
+          test "$(awk '{print $1}' "$RUNNER_TEMP/r7i-source-lock-sha256.txt")" = \
+            "ffdf4d85f832e92b20960ecdbc581103a113cf9ddfa93fa319ba124f21a3d003"
+          cargo tree --locked | tee "$RUNNER_TEMP/r7i-cargo-tree.txt"
+          python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          cargo = tomllib.loads(Path('Cargo.toml').read_text())
+          deps = cargo.get('dependencies', {})
+          if set(deps) != {'landlock', 'libc', 'rustix', 'seccompiler'}:
+              raise SystemExit(f'unexpected direct dependency surface: {sorted(deps)}')
+          if deps.get('landlock') != '=0.4.7':
+              raise SystemExit('landlock must remain exact-pinned at 0.4.7')
+          if deps.get('libc') != '=0.2.189':
+              raise SystemExit('libc must remain exact-pinned at 0.2.189')
+          if deps.get('seccompiler') != '=0.5.0':
+              raise SystemExit('seccompiler must remain exact-pinned at 0.5.0')
+          rustix = deps.get('rustix')
+          if not isinstance(rustix, dict) or rustix.get('version') != '=1.1.4':
+              raise SystemExit('rustix must remain exact-pinned at 1.1.4')
+
+          lock = tomllib.loads(Path('Cargo.lock').read_text())
+          packages = {(p['name'], p['version']) for p in lock.get('package', [])}
+          forbidden_names = {
+              'proc-macro1', 'proc-macro-en', 'aovine', 'arone', 'aronenao', 'tinymember'
+          }
+          forbidden_versions = {
+              ('arrayref', '0.3.10'),
+              ('append-only-vec', '0.1.9'),
+              ('internment', '0.8.7'),
+          }
+          found_names = sorted((n, v) for n, v in packages if n in forbidden_names)
+          found_versions = sorted(packages & forbidden_versions)
+          if found_names or found_versions:
+              raise SystemExit(f'forbidden dependency closure: {found_names + found_versions}')
+          for expected in [
+              ('landlock', '0.4.7'),
+              ('libc', '0.2.189'),
+              ('rustix', '1.1.4'),
+              ('seccompiler', '0.5.0'),
+          ]:
+              if expected not in packages:
+                  raise SystemExit(f'missing exact dependency {expected}')
+          # Candidate resolver reported 18 external packages; modern Cargo.lock also
+          # serializes this root crate, so the exact lock contains 19 package entries.
+          if len(packages) != 19:
+              raise SystemExit(f'unexpected Cargo.lock package-entry cardinality: {len(packages)}')
+          PY
+
+      - name: Prove R7I Rust and process contracts
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --all-targets | tee "$RUNNER_TEMP/r7i-rust-tests.log"
+          cargo test --locked --test network_boundary -- --nocapture | tee "$RUNNER_TEMP/r7i-network-boundary.log"
+          cargo test --locked --test helper_process | tee "$RUNNER_TEMP/r7i-helper-process.log"
+          cargo test --locked --test sandbox -- --nocapture | tee "$RUNNER_TEMP/r7i-landlock-regression.log"
+          cargo build --locked --release --bin a2-skill-source-helper
+          sha256sum target/release/a2-skill-source-helper | tee "$RUNNER_TEMP/r7i-helper-sha256.txt"
+          stat -c '%s' target/release/a2-skill-source-helper | tee "$RUNNER_TEMP/r7i-helper-size.txt"
+          test "$(cat "$RUNNER_TEMP/r7i-helper-size.txt")" -lt 4194304
+
+          grep -q 'sanitize_inherited_fds' src/bin/a2-skill-source-helper.rs
+          grep -q 'verify_clean_inherited_fds' src/bin/a2-skill-source-helper.rs
+          grep -q 'SYS_close_range' src/launch_contract.rs
+          grep -q 'CLOSE_RANGE_UNSHARE' src/launch_contract.rs
+          grep -q 'apply_filter_all_threads' src/syscall_sandbox.rs
+          grep -q 'SeccompAction::Errno' src/syscall_sandbox.rs
+          grep -q 'full_allowlist_claimed: false' src/syscall_sandbox.rs
+          grep -q 'network_namespace_isolation: false' src/syscall_sandbox.rs
+          grep -q 'SYS_io_uring_setup' src/syscall_sandbox.rs
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          launch = Path('src/launch_contract.rs').read_text()
+          syscall = Path('src/syscall_sandbox.rs').read_text()
+          helper = Path('src/bin/a2-skill-source-helper.rs').read_text()
+          if launch.count('unsafe {') != 1:
+              raise SystemExit('R7I launch contract must contain exactly one audited unsafe block')
+          if 'unsafe {' in syscall or 'unsafe {' in helper:
+              raise SystemExit('unsafe code escaped the audited close_range seam')
+          for forbidden in ['Runtime.evaluate', 'WebMCP.']:
+              if forbidden in launch or forbidden in syscall or forbidden in helper:
+                  raise SystemExit(f'forbidden browser authority token: {forbidden}')
+
+          sanitize = helper.index('sanitize_inherited_fds')
+          verify = helper.index('verify_clean_inherited_fds')
+          opened = helper.index('LinuxSkillSource::open')
+          landlock = helper.index('.restrict_helper_process()')
+          seccomp = helper.index('restrict_network_syscalls()')
+          loop = helper.index('read_request(&mut input)')
+          if not (sanitize < verify < opened < landlock < seccomp < loop):
+              raise SystemExit('R7I bootstrap ordering invariant violated')
+          PY
+
+      - name: Run R7 package and registry regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            coordination/browser-shared/tests/skill-package-identity-v1.test.mjs \
+            coordination/browser-shared/tests/skill-registry-v1.test.mjs | tee "$RUNNER_TEMP/r7i-js-regression.log"
+
+      - name: Build deterministic sealed evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          EPOCH="$SOURCE_DATE_EPOCH"
+          mkdir -p dist/a2-browser-r7i/evidence
+          cp "$RUNNER_TEMP/r7i-rustc-version.txt" dist/a2-browser-r7i/evidence/R7I_RUSTC_VERSION.txt
+          cp "$RUNNER_TEMP/r7i-cargo-version.txt" dist/a2-browser-r7i/evidence/R7I_CARGO_VERSION.txt
+          cp "$RUNNER_TEMP/r7i-source-lock-sha256.txt" dist/a2-browser-r7i/evidence/R7I_SOURCE_CARGO_LOCK_SHA256.txt
+          cp "$RUNNER_TEMP/r7i-cargo-tree.txt" dist/a2-browser-r7i/evidence/R7I_CARGO_TREE.txt
+          cp "$RUNNER_TEMP/r7i-rust-tests.log" dist/a2-browser-r7i/evidence/R7I_RUST_TESTS.log
+          cp "$RUNNER_TEMP/r7i-network-boundary.log" dist/a2-browser-r7i/evidence/R7I_NETWORK_BOUNDARY.log
+          cp "$RUNNER_TEMP/r7i-helper-process.log" dist/a2-browser-r7i/evidence/R7I_HELPER_PROCESS.log
+          cp "$RUNNER_TEMP/r7i-landlock-regression.log" dist/a2-browser-r7i/evidence/R7I_LANDLOCK_REGRESSION.log
+          cp "$RUNNER_TEMP/r7i-helper-sha256.txt" dist/a2-browser-r7i/evidence/R7I_HELPER_SHA256.txt
+          cp "$RUNNER_TEMP/r7i-helper-size.txt" dist/a2-browser-r7i/evidence/R7I_HELPER_SIZE.txt
+          cp "$RUNNER_TEMP/r7i-js-regression.log" dist/a2-browser-r7i/evidence/R7I_JS_REGRESSION.log
+          printf '%s\n' "$GITHUB_SHA" > dist/a2-browser-r7i/evidence/SOURCE_COMMIT.txt
+          cat > dist/a2-browser-r7i/evidence/R7I_CLAIMS.json <<'JSON'
+          {"close_range_unshare":true,"unexpected_inherited_fd_sanitized":true,"post_sanitize_fd_verification":true,"audited_unsafe_close_range_seam":true,"seccomp_network_denylist_installed":true,"udp_socket_creation_denied":true,"all_socket_creation_denied":true,"io_uring_disabled":true,"full_seccomp_allowlist":false,"network_namespace_isolation":false,"source_controlled_cargo_lock":true,"node_integration":false,"browser_authority":false}
+          JSON
+          tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf dist/a2-browser-r7i/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY.tar \
+            coordination/browser-skill-source-linux/Cargo.toml \
+            coordination/browser-skill-source-linux/Cargo.lock \
+            coordination/browser-skill-source-linux/rust-toolchain.toml \
+            coordination/browser-skill-source-linux/src/lib.rs \
+            coordination/browser-skill-source-linux/src/sandbox.rs \
+            coordination/browser-skill-source-linux/src/helper_protocol.rs \
+            coordination/browser-skill-source-linux/src/launch_contract.rs \
+            coordination/browser-skill-source-linux/src/syscall_sandbox.rs \
+            coordination/browser-skill-source-linux/src/bin/a2-skill-source-helper.rs \
+            coordination/browser-skill-source-linux/tests/source.rs \
+            coordination/browser-skill-source-linux/tests/cardinality.rs \
+            coordination/browser-skill-source-linux/tests/helper_process.rs \
+            coordination/browser-skill-source-linux/tests/sandbox.rs \
+            coordination/browser-skill-source-linux/tests/network_boundary.rs \
+            research/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY_PRE_RESEARCH_2026-08-28.md \
+            research/A2_BROWSER_R7I_INHERITED_FD_SANITIZATION_RESEARCH_2026-08-28.md \
+            research/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY_POST_RESEARCH_2026-08-28.md
+          sha256sum dist/a2-browser-r7i/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY.tar \
+            > dist/a2-browser-r7i/R7I_SHA256SUMS.txt
+
+      - name: Attest sealed build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373
+        with:
+          subject-path: dist/a2-browser-r7i/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY.tar
+
+      - name: Upload R7I sealed evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1
+        with:
+          name: a2-browser-r7i-network-boundary-seal-${{ github.sha }}
+          path: |
+            dist/a2-browser-r7i/A2_BROWSER_R7I_HELPER_NETWORK_BOUNDARY.tar
+            dist/a2-browser-r7i/R7I_SHA256SUMS.txt
+            dist/a2-browser-r7i/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

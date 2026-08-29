@@ -1,0 +1,271 @@
+name: A2 Browser R7K Pre-Exec Helper Launcher
+
+on:
+  push:
+    branches:
+      - work/a2-browser-r7k-preexec-helper-launcher
+    paths:
+      - 'coordination/browser-skill-source-linux/**'
+      - 'coordination/browser-shared/**'
+      - 'research/A2_BROWSER_R7K_PREEXEC_HELPER_LAUNCHER_PRE_RESEARCH_2026-08-28.md'
+      - 'research/A2_BROWSER_R7K_PREEXEC_HELPER_LAUNCHER_POST_RESEARCH_2026-08-28.md'
+      - '.github/workflows/a2-browser-r7k-preexec-helper-launcher.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r7k-preexec-helper-launcher-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+
+      - name: Establish exact Linux target and source epoch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          test "$(rustc --version | awk '{print $2}')" = "1.98.0"
+          command -v strace
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+
+      - name: Verify unchanged supply-chain closure
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          test -f Cargo.lock
+          sha256sum Cargo.lock | tee "$RUNNER_TEMP/r7k-lock-sha256.txt"
+          test "$(awk '{print $1}' "$RUNNER_TEMP/r7k-lock-sha256.txt")" = \
+            "ffdf4d85f832e92b20960ecdbc581103a113cf9ddfa93fa319ba124f21a3d003"
+          cargo tree --locked | tee "$RUNNER_TEMP/r7k-cargo-tree.txt"
+          python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          cargo = tomllib.loads(Path('Cargo.toml').read_text())
+          deps = cargo.get('dependencies', {})
+          if set(deps) != {'landlock', 'libc', 'rustix', 'seccompiler'}:
+              raise SystemExit(f'unexpected direct dependency surface: {sorted(deps)}')
+          if deps.get('landlock') != '=0.4.7':
+              raise SystemExit('landlock drifted')
+          if deps.get('libc') != '=0.2.189':
+              raise SystemExit('libc drifted')
+          if deps.get('seccompiler') != '=0.5.0':
+              raise SystemExit('seccompiler drifted')
+          rustix = deps.get('rustix')
+          if not isinstance(rustix, dict) or rustix.get('version') != '=1.1.4':
+              raise SystemExit('rustix drifted')
+          lock = tomllib.loads(Path('Cargo.lock').read_text())
+          packages = {(p['name'], p['version']) for p in lock.get('package', [])}
+          if len(packages) != 19:
+              raise SystemExit(f'unexpected Cargo.lock package-entry count: {len(packages)}')
+          PY
+
+      - name: Prove static pre-exec launcher contract
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          launcher = Path('src/bin/a2-skill-source-launcher.rs').read_text()
+          helper = Path('src/bin/a2-skill-source-helper.rs').read_text()
+          contract = Path('src/launch_contract.rs').read_text()
+
+          required = [
+              'const HELPER_NAME: &str = "a2-skill-source-helper"',
+              'fs::symlink_metadata(&helper)',
+              'file_type.is_symlink()',
+              'metadata.permissions().mode() & 0o111',
+              'command.env_clear()',
+              'launch_contract::sanitize_inherited_fds()',
+              'launch_contract::verify_clean_inherited_fds()',
+              'command.exec()',
+          ]
+          for token in required:
+              if token not in launcher:
+                  raise SystemExit(f'missing R7K launcher invariant: {token}')
+          for forbidden in [
+              'pre_exec(', 'before_exec(', 'Runtime.evaluate', 'WebMCP.',
+              '--remote-debugging-port', '--remote-debugging-address'
+          ]:
+              if forbidden in launcher:
+                  raise SystemExit(f'forbidden launcher token: {forbidden}')
+          if 'unsafe {' in launcher:
+              raise SystemExit('unsafe code escaped the shared launch contract')
+          if contract.count('unsafe {') != 1:
+              raise SystemExit('shared launch contract unsafe seam drifted')
+          if 'sanitize_inherited_fds' not in helper or 'verify_clean_inherited_fds' not in helper:
+              raise SystemExit('helper defense-in-depth sanitation was removed')
+
+          command = launcher.index('let mut command = Command::new')
+          clear = launcher.index('command.env_clear()')
+          sanitize = launcher.index('sanitize_inherited_fds')
+          verify = launcher.index('verify_clean_inherited_fds')
+          execute = launcher.index('command.exec()')
+          if not (command < clear < sanitize < verify < execute):
+              raise SystemExit('R7K pre-exec ordering invariant violated')
+          PY
+
+      - name: Compile lint and run Rust adversarial regressions
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --all-targets -- --nocapture | tee "$RUNNER_TEMP/r7k-rust-tests.log"
+          cargo test --locked --test preexec_launcher -- --nocapture | tee "$RUNNER_TEMP/r7k-launcher-tests.log"
+          cargo test --locked --test network_boundary -- --nocapture | tee "$RUNNER_TEMP/r7k-r7j-regression.log"
+          cargo test --locked --test sandbox -- --nocapture | tee "$RUNNER_TEMP/r7k-landlock-regression.log"
+
+      - name: Build release launcher and helper
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --bin a2-skill-source-launcher --bin a2-skill-source-helper
+          sha256sum target/release/a2-skill-source-launcher | tee "$RUNNER_TEMP/r7k-launcher-sha256.txt"
+          sha256sum target/release/a2-skill-source-helper | tee "$RUNNER_TEMP/r7k-helper-sha256.txt"
+          stat -c '%s' target/release/a2-skill-source-launcher | tee "$RUNNER_TEMP/r7k-launcher-size.txt"
+          stat -c '%s' target/release/a2-skill-source-helper | tee "$RUNNER_TEMP/r7k-helper-size.txt"
+          test "$(cat "$RUNNER_TEMP/r7k-launcher-size.txt")" -lt 4194304
+          test "$(cat "$RUNNER_TEMP/r7k-helper-size.txt")" -lt 4194304
+
+      - name: Prove close-range precedes real helper exec
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/r7k-root"
+          mkdir -p "$ROOT/inspect/references"
+          cat > "$ROOT/inspect/SKILL.md" <<'EOF'
+          ---
+          name: inspect
+          description: R7K real exec trace
+          ---
+          Read only.
+          EOF
+          printf 'reference-v1' > "$ROOT/inspect/references/REFERENCE.md"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, struct
+
+          payload = bytes([1, 1]) + struct.pack('>H', 0) + struct.pack('>Q', 41)
+          request = struct.pack('>I', len(payload)) + payload
+          (Path(os.environ['RUNNER_TEMP']) / 'r7k-request.bin').write_bytes(request)
+          PY
+
+          TRACE="$RUNNER_TEMP/r7k-exec.trace"
+          LAUNCHER="$PWD/target/release/a2-skill-source-launcher"
+          A2_R7K_ENV_SENTINEL=must-not-cross-exec \
+            bash -c 'exec 9</dev/null; exec strace -qq -f -v -s 512 -e trace=execve,close_range -o "$1" "$2" "$3"' \
+              r7k-trace "$TRACE" "$LAUNCHER" "$ROOT" \
+              < "$RUNNER_TEMP/r7k-request.bin" \
+              > "$RUNNER_TEMP/r7k-trace.stdout" \
+              2> "$RUNNER_TEMP/r7k-trace.stderr"
+          test -s "$RUNNER_TEMP/r7k-trace.stdout"
+          test ! -s "$RUNNER_TEMP/r7k-trace.stderr"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+
+          lines = (Path(os.environ['RUNNER_TEMP']) / 'r7k-exec.trace').read_text(errors='replace').splitlines()
+          launcher_exec = next(
+              i for i, line in enumerate(lines)
+              if 'execve(' in line and 'a2-skill-source-launcher' in line
+          )
+          helper_exec = next(
+              i for i, line in enumerate(lines[launcher_exec + 1:], launcher_exec + 1)
+              if 'execve(' in line and 'a2-skill-source-helper' in line
+          )
+          closes = [
+              i for i, line in enumerate(lines)
+              if 'close_range(3,' in line and 'CLOSE_RANGE_UNSHARE' in line and '= 0' in line
+          ]
+          if not any(launcher_exec < i < helper_exec for i in closes):
+              raise SystemExit('no successful launcher close_range before helper exec')
+          if not any(i > helper_exec for i in closes):
+              raise SystemExit('helper defense-in-depth close_range missing after exec')
+          helper_line = lines[helper_exec]
+          if 'A2_R7K_ENV_SENTINEL' in helper_line:
+              raise SystemExit('launcher environment sentinel crossed helper exec')
+          print(f'launcher_exec_line={launcher_exec + 1}')
+          print(f'helper_exec_line={helper_exec + 1}')
+          print('close_range_lines=' + ','.join(str(i + 1) for i in closes))
+          PY
+          cp "$TRACE" "$RUNNER_TEMP/r7k-verified-exec.trace"
+
+      - name: Run R7 package and registry regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            coordination/browser-shared/tests/skill-package-identity-v1.test.mjs \
+            coordination/browser-shared/tests/skill-registry-v1.test.mjs | tee "$RUNNER_TEMP/r7k-js-regression.log"
+
+      - name: Build deterministic R7K evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=dist/a2-browser-r7k
+          mkdir -p "$OUT/evidence"
+          cp "$RUNNER_TEMP/r7k-lock-sha256.txt" "$OUT/evidence/R7K_CARGO_LOCK_SHA256.txt"
+          cp "$RUNNER_TEMP/r7k-cargo-tree.txt" "$OUT/evidence/R7K_CARGO_TREE.txt"
+          cp "$RUNNER_TEMP/r7k-rust-tests.log" "$OUT/evidence/R7K_RUST_TESTS.log"
+          cp "$RUNNER_TEMP/r7k-launcher-tests.log" "$OUT/evidence/R7K_LAUNCHER_TESTS.log"
+          cp "$RUNNER_TEMP/r7k-r7j-regression.log" "$OUT/evidence/R7K_R7J_REGRESSION.log"
+          cp "$RUNNER_TEMP/r7k-landlock-regression.log" "$OUT/evidence/R7K_LANDLOCK_REGRESSION.log"
+          cp "$RUNNER_TEMP/r7k-launcher-sha256.txt" "$OUT/evidence/R7K_LAUNCHER_SHA256.txt"
+          cp "$RUNNER_TEMP/r7k-helper-sha256.txt" "$OUT/evidence/R7K_HELPER_SHA256.txt"
+          cp "$RUNNER_TEMP/r7k-launcher-size.txt" "$OUT/evidence/R7K_LAUNCHER_SIZE.txt"
+          cp "$RUNNER_TEMP/r7k-helper-size.txt" "$OUT/evidence/R7K_HELPER_SIZE.txt"
+          cp "$RUNNER_TEMP/r7k-verified-exec.trace" "$OUT/evidence/R7K_EXEC_ORDER.trace"
+          cp "$RUNNER_TEMP/r7k-js-regression.log" "$OUT/evidence/R7K_JS_REGRESSION.log"
+          printf '%s\n' "$GITHUB_SHA" > "$OUT/evidence/SOURCE_COMMIT.txt"
+          printf '%s\n' 'efb3af6bad80b7efcccdeba24be9daef26eddb3d' > "$OUT/evidence/PARENT_VERIFIED_COMMIT.txt"
+          cat > "$OUT/evidence/R7K_CLAIMS.json" <<'JSON'
+          {"milestone":"R7K_PREEXEC_HELPER_LAUNCHER_V1","preexec_ambient_fd_cut":true,"fixed_sibling_helper":true,"inherited_environment_cleared":true,"helper_internal_sanitation_retained":true,"new_dependencies":0,"node_integration":false,"browser_authority":false,"network_authority":false}
+          JSON
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf "$OUT/A2_BROWSER_R7K_PREEXEC_HELPER_LAUNCHER.tar" \
+            coordination/browser-skill-source-linux/Cargo.toml \
+            coordination/browser-skill-source-linux/Cargo.lock \
+            coordination/browser-skill-source-linux/rust-toolchain.toml \
+            coordination/browser-skill-source-linux/src \
+            coordination/browser-skill-source-linux/tests \
+            research/A2_BROWSER_R7K_PREEXEC_HELPER_LAUNCHER_PRE_RESEARCH_2026-08-28.md \
+            "$OUT/evidence"
+          if test -f research/A2_BROWSER_R7K_PREEXEC_HELPER_LAUNCHER_POST_RESEARCH_2026-08-28.md; then
+            tar --append --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+              -f "$OUT/A2_BROWSER_R7K_PREEXEC_HELPER_LAUNCHER.tar" \
+              research/A2_BROWSER_R7K_PREEXEC_HELPER_LAUNCHER_POST_RESEARCH_2026-08-28.md
+          fi
+          sha256sum "$OUT/A2_BROWSER_R7K_PREEXEC_HELPER_LAUNCHER.tar" > "$OUT/R7K_SHA256SUMS.txt"
+
+      - name: Attest R7K build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373
+        with:
+          subject-path: dist/a2-browser-r7k/A2_BROWSER_R7K_PREEXEC_HELPER_LAUNCHER.tar
+
+      - name: Upload R7K evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1
+        with:
+          name: a2-browser-r7k-preexec-launcher-${{ github.sha }}
+          path: |
+            dist/a2-browser-r7k/A2_BROWSER_R7K_PREEXEC_HELPER_LAUNCHER.tar
+            dist/a2-browser-r7k/R7K_SHA256SUMS.txt
+            dist/a2-browser-r7k/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

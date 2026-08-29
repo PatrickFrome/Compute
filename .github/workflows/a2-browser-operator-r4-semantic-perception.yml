@@ -1,0 +1,154 @@
+name: A2 Browser Operator R4 Semantic Perception
+
+on:
+  push:
+    branches:
+      - 'work/a2-browser-operator-r4-semantic-perception*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r4-semantic-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Establish reproducible source epoch
+        shell: bash
+        run: echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+
+      - name: R4 compiler and release contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/a2_build_extension.py
+          node --check coordination/browser-shared/semantic-perception-compiler.mjs
+          node --check coordination/chat-control-plane/extension/operator-semantic-perception.js
+          node --check tests/a2_r4_semantic_perception_compiler_lab.mjs
+          node --check tests/a2_v071_semantic_perception_lab.mjs
+          node --check tests/a2_v071_release_contract_lab.mjs
+          node tests/a2_r4_semantic_perception_compiler_lab.mjs
+          node tests/a2_v071_release_contract_lab.mjs
+          ! grep -n -E 'chrome\.|Runtime\.evaluate|cdp\.call|fetch\(|cookie|authorization_header|storage_state' coordination/browser-shared/semantic-perception-compiler.mjs
+          ! grep -n -E 'Runtime\.evaluate|Runtime\.enable|document\.body|innerText|cookie|authorization_header|storage_state' coordination/chat-control-plane/extension/operator-semantic-perception.js
+
+      - name: Existing target and physical safety regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/a2_v070_target_registry_lab.mjs
+          node tests/a2_v070_target_observability_lab.mjs
+          node tests/a2_v068_supervisor_reconciliation_lab.mjs
+          node tests/a2_v067_supervisor_prompt_ready_lab.mjs
+          node tests/a2_v067_supervisor_session_singleton_lab.mjs
+          node tests/a2_v064_supervisor_chat_guard_lab.mjs
+          node tests/a2_v063_bridge_disarm_lab.mjs
+          node tests/a2_v063_remote_authority_lab.mjs
+          node tests/a2_v060_debugger_broker_lab.mjs
+          node tests/a2_v060_perception_lab.mjs
+          node tests/a2_v060_oopif_perception_lab.mjs
+          node tests/a2_v060_semantic_actions_lab.mjs
+
+      - name: Build canonical R4 extension closure twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=coordination/chat-control-plane/extension
+          SPEC="$ROOT/runtime-package-manifest.json"
+          rm -rf dist/a2-browser-operator-r4
+          mkdir -p dist/a2-browser-operator-r4
+          python3 scripts/a2_build_extension.py \
+            --source "$ROOT" --package-manifest "$SPEC" \
+            --stage dist/a2-browser-operator-r4/stage-a \
+            --zip dist/a2-browser-operator-r4/METAENGINE_A2_Browser_Operator_v0.7.1_R4_GENERIC.zip \
+            --evidence-dir dist/a2-browser-operator-r4/evidence-a \
+            --source-commit "$GITHUB_SHA" --source-date-epoch "$SOURCE_DATE_EPOCH"
+          python3 scripts/a2_build_extension.py \
+            --source "$ROOT" --package-manifest "$SPEC" \
+            --stage dist/a2-browser-operator-r4/stage-b \
+            --zip dist/a2-browser-operator-r4/repro-check.zip \
+            --evidence-dir dist/a2-browser-operator-r4/evidence-b \
+            --source-commit "$GITHUB_SHA" --source-date-epoch "$SOURCE_DATE_EPOCH"
+          cmp dist/a2-browser-operator-r4/METAENGINE_A2_Browser_Operator_v0.7.1_R4_GENERIC.zip dist/a2-browser-operator-r4/repro-check.zip
+          EXPECTED="$(python3 -c 'import json; print(len(json.load(open("coordination/chat-control-plane/extension/runtime-package-manifest.json"))["files"]))')"
+          test "$EXPECTED" = "46"
+          test "$(find dist/a2-browser-operator-r4/stage-a -type f | wc -l)" = "46"
+          test -s dist/a2-browser-operator-r4/stage-a/semantic-perception-compiler.js
+          node --check dist/a2-browser-operator-r4/stage-a/semantic-perception-compiler.js
+          grep -q 'A2_SEMANTIC_PERCEPTION' dist/a2-browser-operator-r4/stage-a/semantic-perception-compiler.js
+          grep -q 'classic_semantic_perception_v1' coordination/chat-control-plane/extension/runtime-package-manifest.json
+          ! test -e coordination/chat-control-plane/extension/semantic-perception-compiler.js
+
+      - name: Generated MV3 semantic adapter VM lab
+        shell: bash
+        env:
+          A2_EXTENSION_STAGE: dist/a2-browser-operator-r4/stage-a
+        run: |
+          set -euo pipefail
+          node tests/a2_v071_semantic_perception_lab.mjs
+          python3 - <<'PY'
+          import json
+          m=json.load(open('dist/a2-browser-operator-r4/evidence-a/BUILD_MANIFEST.json'))
+          g=m['generated_files']['semantic-perception-compiler.js']
+          assert g['source']=='coordination/browser-shared/semantic-perception-compiler.mjs'
+          assert g['kind']=='classic_semantic_perception_v1'
+          assert g['source_sha256']
+          assert g['output_sha256']==m['source_files_sha256']['semantic-perception-compiler.js']
+          print('generated semantic compiler provenance: PASS', g)
+          PY
+
+      - name: MV3 pack R4 extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          "$CHROME" --no-sandbox --disable-gpu --pack-extension="$GITHUB_WORKSPACE/dist/a2-browser-operator-r4/stage-a"
+          test -s dist/a2-browser-operator-r4/stage-a.crx
+
+      - name: Build deterministic R4 evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          EPOCH="$SOURCE_DATE_EPOCH"
+          cp research/A2_SEMANTIC_PERCEPTION_R4_DEEP_RESEARCH_2026-08-28.md dist/a2-browser-operator-r4/evidence-a/RESEARCH.md
+          cp coordination/browser-shared/semantic-perception-compiler.mjs dist/a2-browser-operator-r4/evidence-a/SEMANTIC_COMPILER.mjs
+          cp coordination/chat-control-plane/extension/operator-semantic-perception.js dist/a2-browser-operator-r4/evidence-a/EXTENSION_ADAPTER.js
+          cp tests/a2_v071_semantic_perception_lab.mjs dist/a2-browser-operator-r4/evidence-a/EXTENSION_ADAPTER_LAB.mjs
+          tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf dist/a2-browser-operator-r4/A2_BROWSER_OPERATOR_R4_SEMANTIC_PERCEPTION.tar \
+            coordination/browser-shared/semantic-perception-compiler.mjs \
+            coordination/chat-control-plane/extension/operator-semantic-perception.js \
+            coordination/chat-control-plane/extension/runtime-package-manifest.json \
+            tests/a2_r4_semantic_perception_compiler_lab.mjs \
+            tests/a2_v071_semantic_perception_lab.mjs \
+            tests/a2_v071_release_contract_lab.mjs \
+            research/A2_SEMANTIC_PERCEPTION_R4_DEEP_RESEARCH_2026-08-28.md
+          sha256sum dist/a2-browser-operator-r4/A2_BROWSER_OPERATOR_R4_SEMANTIC_PERCEPTION.tar dist/a2-browser-operator-r4/METAENGINE_A2_Browser_Operator_v0.7.1_R4_GENERIC.zip > dist/a2-browser-operator-r4/R4_SHA256SUMS.txt
+
+      - name: Attest R4 evidence provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: |
+            dist/a2-browser-operator-r4/A2_BROWSER_OPERATOR_R4_SEMANTIC_PERCEPTION.tar
+            dist/a2-browser-operator-r4/METAENGINE_A2_Browser_Operator_v0.7.1_R4_GENERIC.zip
+
+      - name: Upload R4 evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-operator-r4-semantic-${{ github.sha }}
+          path: |
+            dist/a2-browser-operator-r4/A2_BROWSER_OPERATOR_R4_SEMANTIC_PERCEPTION.tar
+            dist/a2-browser-operator-r4/METAENGINE_A2_Browser_Operator_v0.7.1_R4_GENERIC.zip
+            dist/a2-browser-operator-r4/R4_SHA256SUMS.txt
+            dist/a2-browser-operator-r4/evidence-a/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

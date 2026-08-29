@@ -1,0 +1,175 @@
+name: A2 Browser R7 Skill Runtime
+
+on:
+  push:
+    branches:
+      - 'work/a2-browser-r7-skill-runtime*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r7-skill-runtime-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Establish source epoch and Node runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+          node -e 'const m=Number(process.versions.node.split(".")[0]); if (m < 22) process.exit(1); console.log(process.version)'
+
+      - name: R7A R7B R7C R7D and R7E skill contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check coordination/browser-shared/skill-manifest-v1.mjs
+          node --check coordination/browser-shared/skill-resources-v1.mjs
+          node --check coordination/browser-shared/skill-package-identity-v1.mjs
+          node --check coordination/browser-shared/skill-provenance-receipt-v1.mjs
+          node --check coordination/browser-shared/skill-registry-v1.mjs
+          node --check coordination/browser-shared/tests/skill-manifest-v1.test.mjs
+          node --check coordination/browser-shared/tests/skill-resources-v1.test.mjs
+          node --check coordination/browser-shared/tests/skill-package-identity-v1.test.mjs
+          node --check coordination/browser-shared/tests/skill-provenance-receipt-v1.test.mjs
+          node --check coordination/browser-shared/tests/skill-registry-v1.test.mjs
+          node --check coordination/browser-shared/tests/skill-catalog-benchmark.mjs
+          node --check coordination/browser-shared/tests/skill-resource-benchmark.mjs
+          node --check coordination/browser-shared/tests/skill-package-identity-benchmark.mjs
+          node --check coordination/browser-shared/tests/skill-registry-benchmark.mjs
+          node --test \
+            coordination/browser-shared/tests/skill-manifest-v1.test.mjs \
+            coordination/browser-shared/tests/skill-resources-v1.test.mjs \
+            coordination/browser-shared/tests/skill-package-identity-v1.test.mjs \
+            coordination/browser-shared/tests/skill-provenance-receipt-v1.test.mjs \
+            coordination/browser-shared/tests/skill-registry-v1.test.mjs | tee "$RUNNER_TEMP/r7-skill-tests.log"
+          node coordination/browser-shared/tests/skill-catalog-benchmark.mjs | tee "$RUNNER_TEMP/r7a-skill-benchmark.json"
+          node coordination/browser-shared/tests/skill-resource-benchmark.mjs | tee "$RUNNER_TEMP/r7b-resource-benchmark.json"
+          node coordination/browser-shared/tests/skill-package-identity-benchmark.mjs | tee "$RUNNER_TEMP/r7c-package-benchmark.json"
+          node coordination/browser-shared/tests/skill-registry-benchmark.mjs | tee "$RUNNER_TEMP/r7e-registry-benchmark.json"
+          node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/r7a-skill-benchmark.json","utf8")); const r=b.rows.find(x=>x.skill_count===128); if(b.ok!==true||!r||r.catalog_bytes>=196608||r.reduction_vs_full<0.95||b.full_instructions_embedded!==false||b.tool_permissions_embedded!==false||b.authority_effect!==false||b.execution_eligible!==false) process.exit(1)'
+          node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/r7b-resource-benchmark.json","utf8")); const r=b.rows.find(x=>x.resource_count===64); if(b.ok!==true||!r||r.inventory_bytes>=98304||r.reduction_vs_full<0.95||b.content_embedded!==false||b.scripts_inert!==true||b.authority_effect!==false||b.execution_eligible!==false) process.exit(1)'
+          node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/r7c-package-benchmark.json","utf8")); const r=b.rows.find(x=>x.resource_count===64); if(b.ok!==true||!r||r.identity_bytes>=98304||r.reduction_vs_raw_package<0.95||b.exact_raw_file_digests!==true||b.semantic_and_raw_identity_separate!==true||b.content_embedded!==false||b.signature_verified!==false||b.provenance_verified!==false||b.authority_effect!==false||b.execution_eligible!==false) process.exit(1)'
+          node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/r7e-registry-benchmark.json","utf8")); if(b.ok!==true||b.skill_count!==128||b.registry_bytes>=262144||b.reduction_vs_raw_packages<0.95||b.progressive_disclosure!==true||b.package_identity_bound!==true||b.fresh_package_revalidation_required!==true||b.ambient_filesystem_access!==false||b.content_embedded!==false||b.provenance_verified!==false||b.authority_effect!==false||b.execution_eligible!==false) process.exit(1)'
+          ! grep -n -E -- 'child_process|\bexec\b|\bspawn\b|Runtime\.evaluate|WebMCP\.invokeTool|WebMCP\.cancelInvocation' \
+            coordination/browser-shared/skill-manifest-v1.mjs \
+            coordination/browser-shared/skill-resources-v1.mjs \
+            coordination/browser-shared/skill-package-identity-v1.mjs \
+            coordination/browser-shared/skill-provenance-receipt-v1.mjs \
+            coordination/browser-shared/skill-registry-v1.mjs
+          ! grep -n -E -- "node:fs|from ['\"]fs['\"]" coordination/browser-shared/skill-registry-v1.mjs
+
+      - name: Inherited R6 and R5 shared regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            coordination/browser-shared/tests/webmcp-tools-v1.test.mjs \
+            coordination/browser-shared/tests/webmcp-catalog-v1.test.mjs \
+            coordination/browser-shared/tests/webmcp-routing-index-v1.test.mjs \
+            coordination/browser-shared/tests/webmcp-tool-search-v1.test.mjs \
+            coordination/browser-shared/tests/perception-envelope-v1.test.mjs \
+            coordination/browser-shared/tests/semantic-action-cache-v1.test.mjs \
+            coordination/browser-shared/tests/semantic-action-planner-v1.test.mjs \
+            coordination/browser-shared/tests/semantic-planning-broker-v1.test.mjs | tee "$RUNNER_TEMP/r7-inherited-shared.log"
+
+      - name: Compute Browser protocol and extension regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd coordination/browser-compute && node --test tests/*.test.mjs) | tee "$RUNNER_TEMP/r7-compute-tests.log"
+          node tests/a2_v060_semantic_actions_lab.mjs
+          node tests/a2_v060_oopif_perception_lab.mjs
+          node tests/a2_r4_semantic_perception_compiler_lab.mjs
+          node tests/a2_v063_remote_authority_lab.mjs
+          node tests/a2_v063_bridge_disarm_lab.mjs
+          ! grep -R -n -E -- 'Runtime\.evaluate|WebMCP\.invokeTool|WebMCP\.cancelInvocation' coordination/browser-compute/src
+          grep -R -q -- "--remote-debugging-pipe" coordination/browser-compute/src
+
+      - name: Real Chrome R6A R6B R6C regressions
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          export A2_CHROME_EXECUTABLE="$CHROME"
+          export CI=true
+          export A2_CI_ALLOW_NO_SANDBOX=1
+          export A2_SELF_TEST_REMOVE_STATE=1
+          export A2_COMPUTE_STATE_ROOT="$RUNNER_TEMP/a2-r7-r6a"
+          node tests/r6a-real-webmcp-smoke.mjs | tee "$RUNNER_TEMP/r7-r6a-real.json"
+          grep -q '"ok":true' "$RUNNER_TEMP/r7-r6a-real.json"
+          export A2_COMPUTE_STATE_ROOT="$RUNNER_TEMP/a2-r7-r6b"
+          node tests/r6b-real-webmcp-catalog-smoke.mjs | tee "$RUNNER_TEMP/r7-r6b-real.json"
+          grep -q '"ok":true' "$RUNNER_TEMP/r7-r6b-real.json"
+          export A2_COMPUTE_STATE_ROOT="$RUNNER_TEMP/a2-r7-r6c"
+          node tests/r6c-real-planning-routing-smoke.mjs | tee "$RUNNER_TEMP/r7-r6c-real.json"
+          grep -q '"ok":true' "$RUNNER_TEMP/r7-r6c-real.json"
+          grep -q '"actuation_used":false' "$RUNNER_TEMP/r7-r6c-real.json"
+
+      - name: Build deterministic R7E evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          EPOCH="$SOURCE_DATE_EPOCH"
+          mkdir -p dist/a2-browser-r7e/evidence
+          cp "$RUNNER_TEMP/r7-skill-tests.log" dist/a2-browser-r7e/evidence/R7_SKILL_TESTS.log
+          cp "$RUNNER_TEMP/r7a-skill-benchmark.json" dist/a2-browser-r7e/evidence/R7A_SKILL_BENCHMARK.json
+          cp "$RUNNER_TEMP/r7b-resource-benchmark.json" dist/a2-browser-r7e/evidence/R7B_RESOURCE_BENCHMARK.json
+          cp "$RUNNER_TEMP/r7c-package-benchmark.json" dist/a2-browser-r7e/evidence/R7C_PACKAGE_BENCHMARK.json
+          cp "$RUNNER_TEMP/r7e-registry-benchmark.json" dist/a2-browser-r7e/evidence/R7E_REGISTRY_BENCHMARK.json
+          cp "$RUNNER_TEMP/r7-inherited-shared.log" dist/a2-browser-r7e/evidence/R7_INHERITED_SHARED.log
+          cp "$RUNNER_TEMP/r7-compute-tests.log" dist/a2-browser-r7e/evidence/R7_COMPUTE_TESTS.log
+          cp "$RUNNER_TEMP/r7-r6a-real.json" dist/a2-browser-r7e/evidence/R7_R6A_REAL.json
+          cp "$RUNNER_TEMP/r7-r6b-real.json" dist/a2-browser-r7e/evidence/R7_R6B_REAL.json
+          cp "$RUNNER_TEMP/r7-r6c-real.json" dist/a2-browser-r7e/evidence/R7_R6C_REAL.json
+          printf '%s\n' "$GITHUB_SHA" > dist/a2-browser-r7e/evidence/SOURCE_COMMIT.txt
+          tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf dist/a2-browser-r7e/A2_BROWSER_R7E_AMBIENT_FREE_SKILL_REGISTRY.tar \
+            coordination/browser-shared/skill-manifest-v1.mjs \
+            coordination/browser-shared/skill-resources-v1.mjs \
+            coordination/browser-shared/skill-package-identity-v1.mjs \
+            coordination/browser-shared/skill-provenance-receipt-v1.mjs \
+            coordination/browser-shared/skill-registry-v1.mjs \
+            coordination/browser-shared/tests/skill-manifest-v1.test.mjs \
+            coordination/browser-shared/tests/skill-resources-v1.test.mjs \
+            coordination/browser-shared/tests/skill-package-identity-v1.test.mjs \
+            coordination/browser-shared/tests/skill-provenance-receipt-v1.test.mjs \
+            coordination/browser-shared/tests/skill-registry-v1.test.mjs \
+            coordination/browser-shared/tests/skill-catalog-benchmark.mjs \
+            coordination/browser-shared/tests/skill-resource-benchmark.mjs \
+            coordination/browser-shared/tests/skill-package-identity-benchmark.mjs \
+            coordination/browser-shared/tests/skill-registry-benchmark.mjs \
+            research/A2_BROWSER_R7A_PORTABLE_SKILL_METADATA_PLANE_PRE_RESEARCH_2026-08-28.md \
+            research/A2_BROWSER_R7B_CONTENT_ADDRESSED_RESOURCE_PLANE_PRE_RESEARCH_2026-08-28.md \
+            research/A2_BROWSER_R7AB_UNTRUSTED_INPUT_SNAPSHOT_HARDENING_2026-08-28.md \
+            research/A2_BROWSER_R7C_EXACT_RAW_PACKAGE_IDENTITY_PRE_RESEARCH_2026-08-28.md \
+            research/A2_BROWSER_R7D_SESSION_VERIFIER_RECEIPTS_PRE_RESEARCH_2026-08-28.md \
+            research/A2_BROWSER_R7E_AMBIENT_FREE_SKILL_REGISTRY_PRE_RESEARCH_2026-08-28.md
+          sha256sum dist/a2-browser-r7e/A2_BROWSER_R7E_AMBIENT_FREE_SKILL_REGISTRY.tar > dist/a2-browser-r7e/R7E_SHA256SUMS.txt
+
+      - name: Attest R7E evidence provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-browser-r7e/A2_BROWSER_R7E_AMBIENT_FREE_SKILL_REGISTRY.tar
+
+      - name: Upload R7E evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-r7e-skill-registry-${{ github.sha }}
+          path: |
+            dist/a2-browser-r7e/A2_BROWSER_R7E_AMBIENT_FREE_SKILL_REGISTRY.tar
+            dist/a2-browser-r7e/R7E_SHA256SUMS.txt
+            dist/a2-browser-r7e/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

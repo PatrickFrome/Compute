@@ -1,0 +1,22 @@
+name: A2 Browser R7J-A Syscall Inventory (Sealed Record)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sealed-record:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report immutable R7J-A evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'R7J-A representative-path inventory is sealed and intentionally not re-run after the runtime policy changes.'
+          echo 'source_commit=60a0efae6d2a99aafec0e3e97d56fc6cb4c2a130'
+          echo 'workflow_run=33209707580'
+          echo 'artifact_id=9701094540'
+          echo 'artifact_zip_sha256=4b7ae2467bcf6ea8f3ab840b3bc302b949572d67d7d85753b0cfcc0fefd3c51c'
+          echo 'attested_tar_sha256=2d7a3f62de3cead0d96cc19f72c6b279c3d2a23a86d7eb4f6b60f88e4ca5faf0'

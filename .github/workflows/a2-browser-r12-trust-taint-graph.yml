@@ -1,0 +1,105 @@
+name: A2 Browser R12 Trust Taint Graph
+
+on:
+  push:
+    branches:
+      - work/a2-browser-r12-trust-taint-graph
+    paths:
+      - 'coordination/browser-shared/trust-taint-graph-v1.mjs'
+      - 'tests/a2_r12_*.test.mjs'
+      - 'research/A2_BROWSER_R12_**'
+      - '.github/workflows/a2-browser-r12-trust-taint-graph.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r12-taint-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Verify exact R11 parent and source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          PARENT=d768954aa541e5927ddf14d5bb751a9a7620a6aa
+          git merge-base --is-ancestor "$PARENT" "$GITHUB_SHA"
+          git diff --name-only "$PARENT" "$GITHUB_SHA" | tee "$RUNNER_TEMP/r12-changed-files.txt"
+          if git diff --name-only "$PARENT" "$GITHUB_SHA" | grep -Eq '(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.(toml|lock))$'; then
+            echo 'R12 must add no source dependency packages' >&2
+            exit 1
+          fi
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+
+      - name: Static deterministic policy checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE=coordination/browser-shared/trust-taint-graph-v1.mjs
+          node --check "$FILE"
+          ! grep -Eq 'chrome\.|Input\.dispatch|Runtime\.evaluate|fetch\(|WebSocket|child_process|exec\(|eval\(' "$FILE"
+          grep -q 'PAGE_DATA' "$FILE"
+          grep -q 'data_granted_authority: false' "$FILE"
+          grep -q 'live_revalidation_required' "$FILE"
+          grep -q 'taint_authority_data_lane_alias_forbidden' "$FILE"
+          grep -q 'taint_endorsement_not_verified' "$FILE"
+
+      - name: R12 trust taint adversarial tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tests/a2_r12_*.test.mjs
+
+      - name: R11 through R8 regression fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tests/a2_r11_*.test.mjs
+          node --test tests/a2_r10_*.test.mjs
+          node --test tests/a2_r9_*.test.mjs
+          node --test tests/a2_r8a_*.test.mjs tests/a2_r8b_*.test.mjs tests/a2_r8c_*.test.mjs tests/a2_r8d_*.test.mjs
+
+      - name: Build deterministic R12 evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=dist/a2-browser-r12
+          mkdir -p "$OUT/evidence"
+          cp "$RUNNER_TEMP/r12-changed-files.txt" "$OUT/evidence/R12_CHANGED_FILES.txt"
+          printf '%s\n' "$GITHUB_SHA" > "$OUT/evidence/SOURCE_COMMIT.txt"
+          printf '%s\n' 'd768954aa541e5927ddf14d5bb751a9a7620a6aa' > "$OUT/evidence/PARENT_R11_COMMIT.txt"
+          cat > "$OUT/evidence/R12_CLAIMS.json" <<'JSON'
+          {"milestone":"R12_TRUST_TAINT_GRAPH_V1","page_model_tool_authority":false,"monotonic_taint_provenance":true,"authority_data_lane_separation":true,"deterministic_privileged_sink_check":true,"scoped_verified_endorsement":true,"endorsement_retains_taint":true,"tainted_browser_data_requires_live_revalidation":true,"browser_authority":false,"new_source_dependency_packages":0}
+          JSON
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf "$OUT/A2_BROWSER_R12_TRUST_TAINT_GRAPH.tar" \
+            coordination/browser-shared/trust-taint-graph-v1.mjs \
+            tests/a2_r12_trust_taint_graph.test.mjs \
+            research/A2_BROWSER_R12_TRUST_TAINT_GRAPH_PRE_RESEARCH_2026-08-29.md \
+            "$OUT/evidence"
+          sha256sum "$OUT/A2_BROWSER_R12_TRUST_TAINT_GRAPH.tar" > "$OUT/R12_SHA256SUMS.txt"
+
+      - name: Attest R12 evidence
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-browser-r12/A2_BROWSER_R12_TRUST_TAINT_GRAPH.tar
+
+      - name: Upload R12 evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-r12-${{ github.sha }}
+          path: |
+            dist/a2-browser-r12/A2_BROWSER_R12_TRUST_TAINT_GRAPH.tar
+            dist/a2-browser-r12/R12_SHA256SUMS.txt
+            dist/a2-browser-r12/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

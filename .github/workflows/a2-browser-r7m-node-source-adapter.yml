@@ -1,0 +1,247 @@
+name: A2 Browser R7M Node Source Adapter
+
+on:
+  push:
+    branches:
+      - work/a2-browser-r7m-node-source-adapter
+    paths:
+      - 'coordination/browser-shared/skill-source-adapter-linux-v1.mjs'
+      - 'coordination/browser-shared/skill-registry-v1.mjs'
+      - 'coordination/browser-shared/skill-manifest-v1.mjs'
+      - 'coordination/browser-shared/skill-package-identity-v1.mjs'
+      - 'coordination/browser-shared/tests/skill-source-adapter-linux-v1.test.mjs'
+      - 'coordination/browser-shared/tests/skill-source-adapter-linux-v1.runtime.test.mjs'
+      - 'coordination/browser-skill-source-linux/**'
+      - 'research/A2_BROWSER_R7M_NODE_SOURCE_ADAPTER_PRE_RESEARCH_2026-08-29.md'
+      - 'research/A2_BROWSER_R7M_NODE_SOURCE_ADAPTER_POST_RESEARCH_2026-08-29.md'
+      - '.github/workflows/a2-browser-r7m-node-source-adapter.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r7m-node-source-adapter-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Establish exact target and toolchain evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          test "$(rustc --version | awk '{print $2}')" = "1.98.0"
+          command -v node
+          command -v strace
+          node --version | tee "$RUNNER_TEMP/r7m-node-version.txt"
+          rustc --version | tee "$RUNNER_TEMP/r7m-rust-version.txt"
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+
+      - name: Verify unchanged supply-chain closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          PARENT=8eb4931e3090f3d36a5fbe15527cfcd1870811b0
+          git diff --name-only "$PARENT" "$GITHUB_SHA" | tee "$RUNNER_TEMP/r7m-changed-files.txt"
+          if grep -Eq '(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock)$' "$RUNNER_TEMP/r7m-changed-files.txt"; then
+            echo 'R7M unexpectedly changed Node dependency manifests' >&2
+            exit 1
+          fi
+          if grep -Eq '^coordination/browser-skill-source-linux/(Cargo\.toml|Cargo\.lock)$' "$RUNNER_TEMP/r7m-changed-files.txt"; then
+            echo 'R7M unexpectedly changed Rust dependency closure' >&2
+            exit 1
+          fi
+          cd coordination/browser-skill-source-linux
+          sha256sum Cargo.lock | tee "$RUNNER_TEMP/r7m-lock-sha256.txt"
+          test "$(awk '{print $1}' "$RUNNER_TEMP/r7m-lock-sha256.txt")" = \
+            "ffdf4d85f832e92b20960ecdbc581103a113cf9ddfa93fa319ba124f21a3d003"
+          cargo tree --locked | tee "$RUNNER_TEMP/r7m-cargo-tree.txt"
+
+      - name: Prove static adapter authority boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          adapter = Path('coordination/browser-shared/skill-source-adapter-linux-v1.mjs').read_text()
+          required = [
+              "import { spawn } from 'node:child_process'",
+              "basename(executable) !== EXPECTED_LAUNCHER_BASENAME",
+              "cwd: '/'",
+              'env: {}',
+              'shell: false',
+              "stdio: ['pipe', 'pipe', 'pipe']",
+              "child.kill('SIGKILL')",
+              "skill_source_adapter_busy",
+              "skill_source_adapter_protocol_desynchronized",
+              "skill_source_adapter_timeout",
+              "Object.freeze({ listSkillNames, readSkillPackage, close })",
+          ]
+          for token in required:
+              if token not in adapter:
+                  raise SystemExit(f'missing R7M invariant: {token}')
+          forbidden = [
+              "from 'node:fs'", 'execFile(', 'execSync(', 'spawnSync(', 'fork(',
+              'shell: true', 'process.env', 'eval(', 'new Function(', 'Runtime.evaluate',
+              '--remote-debugging-port', '--remote-debugging-address'
+          ]
+          for token in forbidden:
+              if token in adapter:
+                  raise SystemExit(f'forbidden R7M adapter authority token: {token}')
+          if adapter.count('spawn(') != 1:
+              raise SystemExit('generic spawn surface cardinality drifted')
+          PY
+          sha256sum coordination/browser-shared/skill-source-adapter-linux-v1.mjs | tee "$RUNNER_TEMP/r7m-adapter-sha256.txt"
+
+      - name: Run Node positive negative adversarial and registry regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            coordination/browser-shared/tests/skill-source-adapter-linux-v1.test.mjs \
+            coordination/browser-shared/tests/skill-package-identity-v1.test.mjs \
+            coordination/browser-shared/tests/skill-registry-v1.test.mjs \
+            | tee "$RUNNER_TEMP/r7m-node-tests.log"
+
+      - name: Run R7 native regressions and build release boundary
+        shell: bash
+        working-directory: coordination/browser-skill-source-linux
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --all-targets -- --nocapture | tee "$RUNNER_TEMP/r7m-rust-tests.log"
+          cargo build --locked --release --bin a2-skill-source-launcher --bin a2-skill-source-helper
+          sha256sum target/release/a2-skill-source-launcher | tee "$RUNNER_TEMP/r7m-launcher-sha256.txt"
+          sha256sum target/release/a2-skill-source-helper | tee "$RUNNER_TEMP/r7m-helper-sha256.txt"
+
+      - name: Prove real Node to R7L process epoch with synthetic-only trace environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          LAUNCHER="$PWD/coordination/browser-skill-source-linux/target/release/a2-skill-source-launcher"
+          NODE_BIN="$(command -v node)"
+          STRACE="$(command -v strace)"
+          TRACE="$RUNNER_TEMP/r7m-real-runtime.trace"
+          test -x "$LAUNCHER"
+          env -i \
+            A2_R7M_PARENT_SENTINEL=must-not-cross-spawn \
+            A2_R7M_REAL_LAUNCHER="$LAUNCHER" \
+            "$STRACE" -qq -f -v -s 1024 \
+              -e trace=execve,execveat,openat2,close_range,prctl \
+              -o "$TRACE" \
+              "$NODE_BIN" --test --test-concurrency=1 coordination/browser-shared/tests/skill-source-adapter-linux-v1.runtime.test.mjs \
+              > "$RUNNER_TEMP/r7m-real-runtime.log" \
+              2> "$RUNNER_TEMP/r7m-real-runtime.stderr"
+          test -s "$RUNNER_TEMP/r7m-real-runtime.log"
+          test ! -s "$RUNNER_TEMP/r7m-real-runtime.stderr"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+
+          trace_path = Path(os.environ['RUNNER_TEMP']) / 'r7m-real-runtime.trace'
+          lines = trace_path.read_text(errors='replace').splitlines()
+          text = '\n'.join(lines)
+          launcher_exec = re.compile(r'\bexecve\("[^"]*/a2-skill-source-launcher",')
+          launcher = [line for line in lines if launcher_exec.search(line)]
+          helper = [line for line in lines if 'execveat(' in line and 'AT_EMPTY_PATH' in line and '["a2-skill-source-helper"' in line]
+          if len(launcher) != 1:
+              raise SystemExit(f'expected one long-lived launcher process epoch, saw {len(launcher)}')
+          if len(helper) != 1:
+              raise SystemExit(f'expected one fd-bound helper exec, saw {len(helper)}')
+          if ', []) = 0' not in launcher[0]:
+              raise SystemExit('Node adapter did not spawn launcher with exactly empty envp')
+          if 'A2_R7M_PARENT_SENTINEL' in launcher[0]:
+              raise SystemExit('parent sentinel crossed Node adapter spawn boundary')
+          if ', [], AT_EMPTY_PATH) = 0' not in helper[0]:
+              raise SystemExit('R7L helper fd-bound exec no longer has exactly empty envp')
+          if not any('A2_R7M_PARENT_SENTINEL=must-not-cross-spawn' in line and 'execve(' in line for line in lines):
+              raise SystemExit('synthetic non-empty parent environment was not observed')
+          if any('execve("/bin/sh"' in line or 'execve("/usr/bin/sh"' in line for line in lines):
+              raise SystemExit('shell execution appeared in R7M runtime trace')
+          forbidden = [
+              'ACTIONS_ID_TOKEN_REQUEST_TOKEN=', 'ACTIONS_ID_TOKEN_REQUEST_URL=',
+              'GITHUB_TOKEN=', 'SUPABASE_SERVICE_ROLE_KEY=', 'CLOUDFLARE_API_TOKEN='
+          ]
+          for marker in forbidden:
+              if marker in text:
+                  raise SystemExit(f'credential-bearing marker escaped into R7M retained trace: {marker[:-1]}')
+          print('launcher_exec_count=1')
+          print('helper_execveat_count=1')
+          print('node_to_launcher_env=empty')
+          print('shell_exec_count=0')
+          PY
+          cp "$TRACE" "$RUNNER_TEMP/r7m-verified-runtime.trace"
+
+      - name: Build deterministic R7M evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=dist/a2-browser-r7m
+          mkdir -p "$OUT/evidence"
+          cp "$RUNNER_TEMP/r7m-node-version.txt" "$OUT/evidence/R7M_NODE_VERSION.txt"
+          cp "$RUNNER_TEMP/r7m-rust-version.txt" "$OUT/evidence/R7M_RUST_VERSION.txt"
+          cp "$RUNNER_TEMP/r7m-changed-files.txt" "$OUT/evidence/R7M_CHANGED_FILES.txt"
+          cp "$RUNNER_TEMP/r7m-lock-sha256.txt" "$OUT/evidence/R7M_CARGO_LOCK_SHA256.txt"
+          cp "$RUNNER_TEMP/r7m-cargo-tree.txt" "$OUT/evidence/R7M_CARGO_TREE.txt"
+          cp "$RUNNER_TEMP/r7m-adapter-sha256.txt" "$OUT/evidence/R7M_ADAPTER_SHA256.txt"
+          cp "$RUNNER_TEMP/r7m-node-tests.log" "$OUT/evidence/R7M_NODE_TESTS.log"
+          cp "$RUNNER_TEMP/r7m-rust-tests.log" "$OUT/evidence/R7M_RUST_TESTS.log"
+          cp "$RUNNER_TEMP/r7m-launcher-sha256.txt" "$OUT/evidence/R7M_LAUNCHER_SHA256.txt"
+          cp "$RUNNER_TEMP/r7m-helper-sha256.txt" "$OUT/evidence/R7M_HELPER_SHA256.txt"
+          cp "$RUNNER_TEMP/r7m-real-runtime.log" "$OUT/evidence/R7M_REAL_RUNTIME.log"
+          cp "$RUNNER_TEMP/r7m-verified-runtime.trace" "$OUT/evidence/R7M_REAL_RUNTIME.trace"
+          printf '%s\n' "$GITHUB_SHA" > "$OUT/evidence/SOURCE_COMMIT.txt"
+          printf '%s\n' '8eb4931e3090f3d36a5fbe15527cfcd1870811b0' > "$OUT/evidence/PARENT_VERIFIED_COMMIT.txt"
+          cat > "$OUT/evidence/R7M_CLAIMS.json" <<'JSON'
+          {"milestone":"R7M_NODE_SOURCE_ADAPTER_V1","long_lived_process_epoch":true,"single_outstanding_request":true,"bounded_binary_protocol":true,"node_child_environment":"exactly_empty","shell_execution":false,"silent_respawn":false,"planner_executable_path_authority":false,"real_r7l_runtime":true,"new_dependency_packages":0,"browser_authority":false,"network_authority":false,"actuation_authority":false}
+          JSON
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf "$OUT/A2_BROWSER_R7M_NODE_SOURCE_ADAPTER.tar" \
+            coordination/browser-shared/skill-source-adapter-linux-v1.mjs \
+            coordination/browser-shared/skill-registry-v1.mjs \
+            coordination/browser-shared/skill-manifest-v1.mjs \
+            coordination/browser-shared/skill-package-identity-v1.mjs \
+            coordination/browser-shared/tests/skill-source-adapter-linux-v1.test.mjs \
+            coordination/browser-shared/tests/skill-source-adapter-linux-v1.runtime.test.mjs \
+            coordination/browser-skill-source-linux/Cargo.toml \
+            coordination/browser-skill-source-linux/Cargo.lock \
+            coordination/browser-skill-source-linux/rust-toolchain.toml \
+            coordination/browser-skill-source-linux/src \
+            research/A2_BROWSER_R7M_NODE_SOURCE_ADAPTER_PRE_RESEARCH_2026-08-29.md \
+            .github/workflows/a2-browser-r7m-node-source-adapter.yml \
+            "$OUT/evidence"
+          if test -f research/A2_BROWSER_R7M_NODE_SOURCE_ADAPTER_POST_RESEARCH_2026-08-29.md; then
+            tar --append --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+              -f "$OUT/A2_BROWSER_R7M_NODE_SOURCE_ADAPTER.tar" \
+              research/A2_BROWSER_R7M_NODE_SOURCE_ADAPTER_POST_RESEARCH_2026-08-29.md
+          fi
+          sha256sum "$OUT/A2_BROWSER_R7M_NODE_SOURCE_ADAPTER.tar" > "$OUT/R7M_SHA256SUMS.txt"
+
+      - name: Attest R7M build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373
+        with:
+          subject-path: dist/a2-browser-r7m/A2_BROWSER_R7M_NODE_SOURCE_ADAPTER.tar
+
+      - name: Upload R7M evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1
+        with:
+          name: a2-browser-r7m-node-source-adapter-${{ github.sha }}
+          path: |
+            dist/a2-browser-r7m/A2_BROWSER_R7M_NODE_SOURCE_ADAPTER.tar
+            dist/a2-browser-r7m/R7M_SHA256SUMS.txt
+            dist/a2-browser-r7m/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

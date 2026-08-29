@@ -1,0 +1,170 @@
+name: A2 Browser R8A Durable Action Graph
+
+on:
+  push:
+    branches:
+      - work/a2-browser-r8-durable-action-graph
+    paths:
+      - 'coordination/browser-shared/durable-action-graph-**'
+      - 'coordination/browser-shared/tests/durable-action-graph-**'
+      - 'research/A2_BROWSER_R8A_DURABLE_ACTION_GRAPH_**'
+      - '.github/workflows/a2-browser-r8a-durable-action-graph.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r8a-durable-action-graph-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Establish exact parent and runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          PARENT=e4da88a5c79d3e0c4f86c5378c5bfa19a93973cb
+          git merge-base --is-ancestor "$PARENT" "$GITHUB_SHA"
+          node --version | tee "$RUNNER_TEMP/r8a-node-version.txt"
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+          git diff --name-only "$PARENT" "$GITHUB_SHA" | tee "$RUNNER_TEMP/r8a-changed-files.txt"
+          if grep -Eq '(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.(toml|lock))$' "$RUNNER_TEMP/r8a-changed-files.txt"; then
+            echo 'R8A unexpectedly changed dependency manifests' >&2
+            exit 1
+          fi
+
+      - name: Prove static authority and durability contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check coordination/browser-shared/durable-action-graph-core-v1.mjs
+          node --check coordination/browser-shared/durable-action-graph-store-v1.mjs
+          python3 - <<'PY'
+          from pathlib import Path
+          core = Path('coordination/browser-shared/durable-action-graph-core-v1.mjs').read_text()
+          store = Path('coordination/browser-shared/durable-action-graph-store-v1.mjs').read_text()
+          joined = core + '\n' + store
+          required = [
+              "'ACTION_AMBIGUOUS'", 'fresh_authority_required', 'authority_effect: false',
+              'actuation_eligible: false', 'action_graph_abort_after_effect_intent_forbidden',
+              'action_graph_dependency_not_committed', 'O_NOFOLLOW', 'O_APPEND',
+              'await h.sync()', 'await syncDir(dir)', 'action_graph_head_seal_failed'
+          ]
+          for token in required:
+              if token not in joined:
+                  raise SystemExit(f'missing R8A invariant: {token}')
+          forbidden = [
+              'Runtime.evaluate', 'chrome.debugger', 'Target.createTarget',
+              "node:child_process", 'execFile(', 'spawn(', 'action_payload',
+              'typed_text', 'password', 'cookie', 'storage_state',
+              'authority_effect: true', 'actuation_eligible: true'
+          ]
+          for token in forbidden:
+              if token in joined:
+                  raise SystemExit(f'forbidden R8A authority/payload token: {token}')
+          if 'retryAction' in joined or 'retryEffect' in joined:
+              raise SystemExit('R8A exposes an automatic retry surface')
+          PY
+
+      - name: Run R8A positive negative adversarial and real-filesystem tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            coordination/browser-shared/tests/durable-action-graph-v1.test.mjs \
+            coordination/browser-shared/tests/durable-action-graph-forgery-v1.test.mjs \
+            | tee "$RUNNER_TEMP/r8a-tests.log"
+
+      - name: Run inherited R7M source-boundary regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            coordination/browser-shared/tests/skill-source-adapter-linux-v1.test.mjs \
+            coordination/browser-shared/tests/skill-package-identity-v1.test.mjs \
+            coordination/browser-shared/tests/skill-registry-v1.test.mjs \
+            | tee "$RUNNER_TEMP/r8a-r7m-node-regressions.log"
+          cd coordination/browser-skill-source-linux
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --all-targets -- --nocapture | tee "$RUNNER_TEMP/r8a-r7m-rust-regressions.log"
+
+      - name: Measure bounded 128-action durable journal
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE' | tee "$RUNNER_TEMP/r8a-benchmark.txt"
+          import fs from 'node:fs/promises';
+          import os from 'node:os';
+          import path from 'node:path';
+          import { DurableActionGraphStore } from './coordination/browser-shared/durable-action-graph-store-v1.mjs';
+          import { digestActionGraphEvidence } from './coordination/browser-shared/durable-action-graph-core-v1.mjs';
+          const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'r8a-bench-'));
+          const journalPath = path.join(dir, 'graph.jsonl');
+          const store = await DurableActionGraphStore.open({ graphId: 'graph.bench', journalPath });
+          const ns = { target_id:'tgt.bench', context_id:'ctx.bench', conversation_epoch:'conv:1', document_epoch:'doc:1' };
+          for (let i=0; i<128; i++) await store.declareAction({ actionId:`act.b${String(i).padStart(3,'0')}`, actionKind:'CLICK', intentDigest:digestActionGraphEvidence({i}), namespace:ns });
+          const bytes = (await fs.stat(journalPath)).size;
+          if (bytes > 262144) throw new Error(`journal budget exceeded: ${bytes}`);
+          console.log(`actions=128`); console.log(`events=128`); console.log(`journal_bytes=${bytes}`);
+          await fs.rm(dir, { recursive:true, force:true });
+          NODE
+
+      - name: Build deterministic R8A evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=dist/a2-browser-r8a
+          mkdir -p "$OUT/evidence"
+          cp "$RUNNER_TEMP/r8a-node-version.txt" "$OUT/evidence/R8A_NODE_VERSION.txt"
+          cp "$RUNNER_TEMP/r8a-changed-files.txt" "$OUT/evidence/R8A_CHANGED_FILES.txt"
+          cp "$RUNNER_TEMP/r8a-tests.log" "$OUT/evidence/R8A_TESTS.log"
+          cp "$RUNNER_TEMP/r8a-r7m-node-regressions.log" "$OUT/evidence/R8A_R7M_NODE_REGRESSIONS.log"
+          cp "$RUNNER_TEMP/r8a-r7m-rust-regressions.log" "$OUT/evidence/R8A_R7M_RUST_REGRESSIONS.log"
+          cp "$RUNNER_TEMP/r8a-benchmark.txt" "$OUT/evidence/R8A_BENCHMARK.txt"
+          printf '%s\n' "$GITHUB_SHA" > "$OUT/evidence/SOURCE_COMMIT.txt"
+          printf '%s\n' 'e4da88a5c79d3e0c4f86c5378c5bfa19a93973cb' > "$OUT/evidence/PARENT_VERIFIED_COMMIT.txt"
+          cat > "$OUT/evidence/R8A_CLAIMS.json" <<'JSON'
+          {"milestone":"R8A_APPEND_ONLY_CAUSAL_ACTION_GRAPH","append_only":true,"pre_effect_durable_seal":true,"ambiguous_terminal_no_retry":true,"dependency_commit_gate":true,"hash_chained_journal":true,"journal_fsync":true,"atomic_head_receipt":true,"fresh_authority_required_after_seal":true,"authority_effect":false,"actuation_eligible":false,"browser_actuation_integration":false,"distributed_durability":false,"new_dependency_packages":0}
+          JSON
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf "$OUT/A2_BROWSER_R8A_DURABLE_ACTION_GRAPH.tar" \
+            coordination/browser-shared/durable-action-graph-core-v1.mjs \
+            coordination/browser-shared/durable-action-graph-store-v1.mjs \
+            coordination/browser-shared/tests/durable-action-graph-v1.test.mjs \
+            coordination/browser-shared/tests/durable-action-graph-forgery-v1.test.mjs \
+            research/A2_BROWSER_R8A_DURABLE_ACTION_GRAPH_PRE_RESEARCH_2026-08-29.md \
+            .github/workflows/a2-browser-r8a-durable-action-graph.yml \
+            "$OUT/evidence"
+          if test -f research/A2_BROWSER_R8A_DURABLE_ACTION_GRAPH_POST_RESEARCH_2026-08-29.md; then
+            tar --append --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+              -f "$OUT/A2_BROWSER_R8A_DURABLE_ACTION_GRAPH.tar" \
+              research/A2_BROWSER_R8A_DURABLE_ACTION_GRAPH_POST_RESEARCH_2026-08-29.md
+          fi
+          sha256sum "$OUT/A2_BROWSER_R8A_DURABLE_ACTION_GRAPH.tar" > "$OUT/R8A_SHA256SUMS.txt"
+
+      - name: Attest R8A build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373
+        with:
+          subject-path: dist/a2-browser-r8a/A2_BROWSER_R8A_DURABLE_ACTION_GRAPH.tar
+
+      - name: Upload R8A evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1
+        with:
+          name: a2-browser-r8a-durable-action-graph-${{ github.sha }}
+          path: |
+            dist/a2-browser-r8a/A2_BROWSER_R8A_DURABLE_ACTION_GRAPH.tar
+            dist/a2-browser-r8a/R8A_SHA256SUMS.txt
+            dist/a2-browser-r8a/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

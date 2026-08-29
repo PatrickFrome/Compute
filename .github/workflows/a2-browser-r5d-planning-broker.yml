@@ -1,0 +1,140 @@
+name: A2 Browser R5D Planning Broker
+
+on:
+  push:
+    branches:
+      - 'work/a2-browser-r5-semantic-action-cache*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r5d-planning-broker-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Establish source epoch and Node runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+          node -e 'const m=Number(process.versions.node.split(".")[0]); if (m < 22) process.exit(1); console.log(process.version)'
+
+      - name: Shared B4 plus R5A-D contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check coordination/browser-shared/perception-envelope-v1.mjs
+          node --check coordination/browser-shared/semantic-action-cache-v1.mjs
+          node --check coordination/browser-shared/semantic-action-planner-v1.mjs
+          node --check coordination/browser-shared/semantic-planning-broker-v1.mjs
+          node --check coordination/browser-shared/tests/semantic-planning-broker-v1.test.mjs
+          node --test \
+            coordination/browser-shared/tests/perception-envelope-v1.test.mjs \
+            coordination/browser-shared/tests/semantic-action-cache-v1.test.mjs \
+            coordination/browser-shared/tests/semantic-action-planner-v1.test.mjs \
+            coordination/browser-shared/tests/semantic-planning-broker-v1.test.mjs | tee "$RUNNER_TEMP/r5d-shared-tests.log"
+          grep -q "MISS_LEADER" coordination/browser-shared/semantic-planning-broker-v1.mjs
+          grep -q "WAIT_FOR_PROMOTION" coordination/browser-shared/semantic-planning-broker-v1.mjs
+          grep -q "HIT_REVALIDATED" coordination/browser-shared/semantic-planning-broker-v1.mjs
+          grep -q "must_run_actionability_checks: true" coordination/browser-shared/semantic-planning-broker-v1.mjs
+          grep -q "stores_execution_payload: false" coordination/browser-shared/semantic-planning-broker-v1.mjs
+
+      - name: Compute Browser R5D protocol and regressions
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          node --check src/planning-broker-service.mjs
+          node --check src/rpc-server.mjs
+          node --check tests/r5d-real-planning-rpc-smoke.mjs
+          node --test tests/*.test.mjs | tee "$RUNNER_TEMP/r5d-compute-tests.log"
+          node -e 'const p=require("./protocol-v1.json"); if(p.version!=="1.4.0"||p.semantic_planning?.provider_neutral!==true||p.semantic_planning?.promotion_requires_fresh_perception!==true) process.exit(1)'
+          ! grep -R -n -E -- '/json/version|Runtime\.evaluate' src
+          grep -R -q -- "--remote-debugging-pipe" src
+          ! grep -R -n -E -- "(push|concat)\([^)]*['\"]--remote-debugging-(port|address)(=|['\"])" src
+          ! grep -R -n -E -- 'providerApiKey|OPENAI_API_KEY|ANTHROPIC_API_KEY|GOOGLE_API_KEY' src
+
+      - name: Existing extension actuation safety regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/a2_v060_semantic_actions_lab.mjs
+          node tests/a2_v060_oopif_perception_lab.mjs
+          node tests/a2_r4_semantic_perception_compiler_lab.mjs
+          node tests/a2_v063_remote_authority_lab.mjs
+          node tests/a2_v063_bridge_disarm_lab.mjs
+
+      - name: Real Chrome R5D planning RPC smoke
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          export A2_CHROME_EXECUTABLE="$CHROME"
+          export CI=true
+          export A2_CI_ALLOW_NO_SANDBOX=1
+          export A2_SELF_TEST_REMOVE_STATE=1
+          export A2_COMPUTE_STATE_ROOT="$RUNNER_TEMP/a2-compute-browser-r5d"
+          node tests/r5d-real-planning-rpc-smoke.mjs | tee "$RUNNER_TEMP/a2-compute-browser-r5d.json"
+          grep -q '"ok":true' "$RUNNER_TEMP/a2-compute-browser-r5d.json"
+          grep -q '"cold_requests":8' "$RUNNER_TEMP/a2-compute-browser-r5d.json"
+          grep -q '"leader_calls":1' "$RUNNER_TEMP/a2-compute-browser-r5d.json"
+          grep -q '"waiters":7' "$RUNNER_TEMP/a2-compute-browser-r5d.json"
+          grep -q '"cache_hit":true' "$RUNNER_TEMP/a2-compute-browser-r5d.json"
+          grep -q '"fresh_promotion":true' "$RUNNER_TEMP/a2-compute-browser-r5d.json"
+          grep -q '"provider_credentials_stored":false' "$RUNNER_TEMP/a2-compute-browser-r5d.json"
+          grep -q '"remote_navigation_used":false' "$RUNNER_TEMP/a2-compute-browser-r5d.json"
+          grep -q '"runtime_evaluate_used":false' "$RUNNER_TEMP/a2-compute-browser-r5d.json"
+          grep -q '"actuation_used":false' "$RUNNER_TEMP/a2-compute-browser-r5d.json"
+
+      - name: Build deterministic R5D evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          EPOCH="$SOURCE_DATE_EPOCH"
+          mkdir -p dist/a2-browser-r5d/evidence
+          cp "$RUNNER_TEMP/r5d-shared-tests.log" dist/a2-browser-r5d/evidence/R5D_SHARED_TESTS.log
+          cp "$RUNNER_TEMP/r5d-compute-tests.log" dist/a2-browser-r5d/evidence/R5D_COMPUTE_TESTS.log
+          cp "$RUNNER_TEMP/a2-compute-browser-r5d.json" dist/a2-browser-r5d/evidence/R5D_REAL_CHROME_RPC_SMOKE.json
+          printf '%s\n' "$GITHUB_SHA" > dist/a2-browser-r5d/evidence/SOURCE_COMMIT.txt
+          tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf dist/a2-browser-r5d/A2_BROWSER_R5D_PLANNING_BROKER.tar \
+            coordination/browser-shared/perception-envelope-v1.mjs \
+            coordination/browser-shared/semantic-action-cache-v1.mjs \
+            coordination/browser-shared/semantic-action-planner-v1.mjs \
+            coordination/browser-shared/semantic-planning-broker-v1.mjs \
+            coordination/browser-shared/tests/semantic-planning-broker-v1.test.mjs \
+            coordination/browser-compute/protocol-v1.json \
+            coordination/browser-compute/src/perception-envelope.mjs \
+            coordination/browser-compute/src/planning-broker-service.mjs \
+            coordination/browser-compute/src/rpc-server.mjs \
+            coordination/browser-compute/tests/contracts.test.mjs \
+            coordination/browser-compute/tests/r5d-real-planning-rpc-smoke.mjs \
+            research/A2_BROWSER_R5D_PLANNING_BROKER_DEEP_RESEARCH_2026-08-28.md
+          sha256sum dist/a2-browser-r5d/A2_BROWSER_R5D_PLANNING_BROKER.tar > dist/a2-browser-r5d/R5D_SHA256SUMS.txt
+
+      - name: Attest R5D evidence provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-browser-r5d/A2_BROWSER_R5D_PLANNING_BROKER.tar
+
+      - name: Upload R5D evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-r5d-planning-broker-${{ github.sha }}
+          path: |
+            dist/a2-browser-r5d/A2_BROWSER_R5D_PLANNING_BROKER.tar
+            dist/a2-browser-r5d/R5D_SHA256SUMS.txt
+            dist/a2-browser-r5d/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

@@ -1,0 +1,19 @@
+name: A2 Browser R7B Skill Resources Legacy Gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  legacy-r7b-note:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: R7B superseded by consolidated R7 gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'R7B push verification moved to a2-browser-r7-skill-runtime.yml at R7C.'

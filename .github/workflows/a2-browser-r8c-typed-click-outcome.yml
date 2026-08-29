@@ -1,0 +1,193 @@
+name: A2 Browser R8C Typed Extension Click Outcome
+
+on:
+  push:
+    branches:
+      - work/a2-browser-r8c-typed-extension-click-outcome
+    paths:
+      - 'coordination/chat-control-plane/extension/operator-typed-click-outcome.js'
+      - 'coordination/chat-control-plane/extension/background-entry.js'
+      - 'coordination/chat-control-plane/extension/runtime-package-manifest.json'
+      - 'tests/a2_r8c_typed_click_outcome_lab.mjs'
+      - 'research/A2_BROWSER_R8C_TYPED_EXTENSION_CLICK_OUTCOME_**'
+      - '.github/workflows/a2-browser-r8c-typed-click-outcome.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r8c-typed-click-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Establish exact parent and source epoch
+        shell: bash
+        run: |
+          set -euo pipefail
+          PARENT=bd4b3c029fc4531d355ca181a0897d50e68268b3
+          git merge-base --is-ancestor "$PARENT" "$GITHUB_SHA"
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+          git diff --name-only "$PARENT" "$GITHUB_SHA" | tee "$RUNNER_TEMP/r8c-changed-files.txt"
+          if grep -Eq '(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.(toml|lock))$' "$RUNNER_TEMP/r8c-changed-files.txt"; then
+            echo 'R8C unexpectedly changed dependency manifests' >&2
+            exit 1
+          fi
+
+      - name: Prove static typed-click contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check coordination/chat-control-plane/extension/operator-typed-click-outcome.js
+          node --check tests/a2_r8c_typed_click_outcome_lab.mjs
+          python3 -m py_compile scripts/a2_build_extension.py
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          src=Path('coordination/chat-control-plane/extension/operator-typed-click-outcome.js').read_text()
+          bg=Path('coordination/chat-control-plane/extension/background-entry.js').read_text()
+          spec=json.loads(Path('coordination/chat-control-plane/extension/runtime-package-manifest.json').read_text())
+          required=[
+            'A2_OPERATOR_TYPED_CLICK_V1', 'NO_EFFECT', 'COMMITTED', 'AMBIGUOUS',
+            'physical_dispatch_started', 'automatic_retry_allowed: false',
+            'authority_effect: false', 'actuation_eligible: false',
+            'mousePressed', 'mouseReleased', 'typed_click_target_hit_changed'
+          ]
+          for token in required:
+            if token not in src: raise SystemExit(f'missing R8C contract token: {token}')
+          forbidden=['Runtime.evaluate','automatic_retry_allowed: true','authority_effect: true','actuation_eligible: true']
+          for token in forbidden:
+            if token in src: raise SystemExit(f'forbidden R8C token: {token}')
+          if src.count('Input.dispatchMouseEvent') != 2:
+            raise SystemExit('R8C source must have exactly press/release dispatch sites')
+          if './operator-typed-click-outcome.js' not in bg:
+            raise SystemExit('R8C worker import missing')
+          if 'operator-typed-click-outcome.js' not in spec['files']:
+            raise SystemExit('R8C runtime package inclusion missing')
+          if len(spec['files']) != 47:
+            raise SystemExit(f'unexpected R8C runtime package cardinality: {len(spec["files"])}')
+          PY
+
+      - name: Run R8C adversarial outcome lab
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/a2_r8c_typed_click_outcome_lab.mjs | tee "$RUNNER_TEMP/r8c-tests.log"
+
+      - name: Run legacy extension safety regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/a2_v060_semantic_actions_lab.mjs | tee "$RUNNER_TEMP/r8c-legacy-semantic.log"
+          node tests/a2_v060_debugger_broker_lab.mjs | tee "$RUNNER_TEMP/r8c-debugger.log"
+          node tests/a2_v060_perception_lab.mjs | tee "$RUNNER_TEMP/r8c-perception.log"
+          node tests/a2_v060_oopif_perception_lab.mjs | tee "$RUNNER_TEMP/r8c-oopif.log"
+
+      - name: Run inherited R8A and R8B regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-concurrency=1 \
+            coordination/browser-shared/tests/durable-action-graph-v1.test.mjs \
+            coordination/browser-shared/tests/durable-action-graph-forgery-v1.test.mjs \
+            coordination/browser-shared/tests/durable-action-graph-legacy-v1.test.mjs \
+            coordination/browser-shared/tests/durable-action-fence-v1.test.mjs \
+            | tee "$RUNNER_TEMP/r8c-r8-regressions.log"
+
+      - name: Build canonical staged MV3 twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=coordination/chat-control-plane/extension
+          SPEC="$ROOT/runtime-package-manifest.json"
+          OUT=dist/a2-browser-r8c
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+          python3 scripts/a2_build_extension.py \
+            --source "$ROOT" --package-manifest "$SPEC" \
+            --stage "$OUT/stage-a" --zip "$OUT/R8C_GENERIC.zip" \
+            --evidence-dir "$OUT/evidence-a" --source-commit "$GITHUB_SHA" \
+            --source-date-epoch "$SOURCE_DATE_EPOCH"
+          python3 scripts/a2_build_extension.py \
+            --source "$ROOT" --package-manifest "$SPEC" \
+            --stage "$OUT/stage-b" --zip "$OUT/repro.zip" \
+            --evidence-dir "$OUT/evidence-b" --source-commit "$GITHUB_SHA" \
+            --source-date-epoch "$SOURCE_DATE_EPOCH"
+          cmp "$OUT/R8C_GENERIC.zip" "$OUT/repro.zip"
+          test -s "$OUT/stage-a/operator-typed-click-outcome.js"
+          grep -q 'operator-typed-click-outcome.js' "$OUT/stage-a/background-entry.js"
+          test "$(find "$OUT/stage-a" -type f | wc -l)" = "47"
+          node --check "$OUT/stage-a/operator-typed-click-outcome.js"
+
+      - name: Pack staged extension with real Chrome
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          "$CHROME" --version | tee "$RUNNER_TEMP/r8c-chrome-version.txt"
+          "$CHROME" --no-sandbox --disable-gpu --pack-extension="$GITHUB_WORKSPACE/dist/a2-browser-r8c/stage-a"
+          test -s dist/a2-browser-r8c/stage-a.crx
+          sha256sum dist/a2-browser-r8c/stage-a.crx | tee "$RUNNER_TEMP/r8c-crx-sha256.txt"
+
+      - name: Build deterministic candidate evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=dist/a2-browser-r8c
+          mkdir -p "$OUT/evidence"
+          cp "$RUNNER_TEMP/r8c-changed-files.txt" "$OUT/evidence/R8C_CHANGED_FILES.txt"
+          cp "$RUNNER_TEMP/r8c-tests.log" "$OUT/evidence/R8C_TESTS.log"
+          cp "$RUNNER_TEMP/r8c-legacy-semantic.log" "$OUT/evidence/R8C_LEGACY_SEMANTIC.log"
+          cp "$RUNNER_TEMP/r8c-r8-regressions.log" "$OUT/evidence/R8C_R8_REGRESSIONS.log"
+          cp "$RUNNER_TEMP/r8c-chrome-version.txt" "$OUT/evidence/R8C_CHROME_VERSION.txt"
+          cp "$RUNNER_TEMP/r8c-crx-sha256.txt" "$OUT/evidence/R8C_CRX_SHA256.txt"
+          printf '%s\n' "$GITHUB_SHA" > "$OUT/evidence/SOURCE_COMMIT.txt"
+          printf '%s\n' 'bd4b3c029fc4531d355ca181a0897d50e68268b3' > "$OUT/evidence/PARENT_VERIFIED_COMMIT.txt"
+          cat > "$OUT/evidence/R8C_CLAIMS.json" <<'JSON'
+          {"milestone":"R8C_TYPED_EXTENSION_CLICK_OUTCOME","typed_outcomes":["COMMITTED","NO_EFFECT","AMBIGUOUS"],"click_only":true,"no_effect_only_pre_dispatch":true,"post_dispatch_failure_ambiguous":true,"cleanup_retry_dispatch":false,"automatic_retry_allowed":false,"action_id_page_idempotency":false,"staged_mv3_verified":true,"crx_pack_verified":true,"real_page_physical_effect_verified":false,"new_dependency_packages":0}
+          JSON
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf "$OUT/A2_BROWSER_R8C_TYPED_EXTENSION_CLICK_OUTCOME.tar" \
+            coordination/chat-control-plane/extension/operator-typed-click-outcome.js \
+            coordination/chat-control-plane/extension/background-entry.js \
+            coordination/chat-control-plane/extension/runtime-package-manifest.json \
+            tests/a2_r8c_typed_click_outcome_lab.mjs \
+            research/A2_BROWSER_R8C_TYPED_EXTENSION_CLICK_OUTCOME_PRE_RESEARCH_2026-08-29.md \
+            .github/workflows/a2-browser-r8c-typed-click-outcome.yml \
+            "$OUT/evidence"
+          if test -f research/A2_BROWSER_R8C_TYPED_EXTENSION_CLICK_OUTCOME_POST_RESEARCH_2026-08-29.md; then
+            tar --append --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+              -f "$OUT/A2_BROWSER_R8C_TYPED_EXTENSION_CLICK_OUTCOME.tar" \
+              research/A2_BROWSER_R8C_TYPED_EXTENSION_CLICK_OUTCOME_POST_RESEARCH_2026-08-29.md
+          fi
+          sha256sum "$OUT/A2_BROWSER_R8C_TYPED_EXTENSION_CLICK_OUTCOME.tar" "$OUT/R8C_GENERIC.zip" dist/a2-browser-r8c/stage-a.crx > "$OUT/R8C_SHA256SUMS.txt"
+
+      - name: Attest R8C candidate provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373
+        with:
+          subject-path: |
+            dist/a2-browser-r8c/A2_BROWSER_R8C_TYPED_EXTENSION_CLICK_OUTCOME.tar
+            dist/a2-browser-r8c/R8C_GENERIC.zip
+            dist/a2-browser-r8c/stage-a.crx
+
+      - name: Upload R8C candidate evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1
+        with:
+          name: a2-browser-r8c-typed-click-${{ github.sha }}
+          path: |
+            dist/a2-browser-r8c/A2_BROWSER_R8C_TYPED_EXTENSION_CLICK_OUTCOME.tar
+            dist/a2-browser-r8c/R8C_GENERIC.zip
+            dist/a2-browser-r8c/stage-a.crx
+            dist/a2-browser-r8c/R8C_SHA256SUMS.txt
+            dist/a2-browser-r8c/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

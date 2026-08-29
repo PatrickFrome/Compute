@@ -1,0 +1,205 @@
+name: A2 Browser R6C WebMCP Planner Routing
+
+on:
+  push:
+    branches:
+      - 'work/a2-browser-r6c-webmcp-planner-routing*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r6c-planner-routing-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Establish source epoch and Node runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+          node -e 'const m=Number(process.versions.node.split(".")[0]); if (m < 22) process.exit(1); console.log(process.version)'
+
+      - name: Shared R6A R6B and R6C contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check coordination/browser-shared/webmcp-tools-v1.mjs
+          node --check coordination/browser-shared/webmcp-catalog-v1.mjs
+          node --check coordination/browser-shared/webmcp-routing-index-v1.mjs
+          node --check coordination/browser-shared/webmcp-tool-search-v1.mjs
+          node --check coordination/browser-shared/semantic-planning-broker-v1.mjs
+          node --check coordination/browser-shared/tests/webmcp-routing-index-v1.test.mjs
+          node --check coordination/browser-shared/tests/webmcp-routing-index-benchmark.mjs
+          node --check coordination/browser-shared/tests/webmcp-tool-search-v1.test.mjs
+          node --check coordination/browser-shared/tests/webmcp-tool-search-benchmark.mjs
+          node --test \
+            coordination/browser-shared/tests/webmcp-tools-v1.test.mjs \
+            coordination/browser-shared/tests/webmcp-catalog-v1.test.mjs \
+            coordination/browser-shared/tests/webmcp-routing-index-v1.test.mjs \
+            coordination/browser-shared/tests/webmcp-tool-search-v1.test.mjs \
+            coordination/browser-shared/tests/semantic-planning-broker-v1.test.mjs | tee "$RUNNER_TEMP/r6c-shared-tests.log"
+          node coordination/browser-shared/tests/webmcp-catalog-benchmark.mjs | tee "$RUNNER_TEMP/r6c-catalog-benchmark.json"
+          node coordination/browser-shared/tests/webmcp-routing-index-benchmark.mjs | tee "$RUNNER_TEMP/r6c-routing-index-benchmark.json"
+          node coordination/browser-shared/tests/webmcp-tool-search-benchmark.mjs | tee "$RUNNER_TEMP/r6c-tool-search-benchmark.json"
+          node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/r6c-tool-search-benchmark.json","utf8")); const r=b.rows.find(x=>x.tool_count===128); if(b.ok!==true||!r||r.search_handle_bytes>=2048||r.search_result_bytes>=12288||r.searched_reduction_vs_routing_index<0.85||r.searched_reduction_vs_full<0.99||b.max_results!==5||b.query_persisted!==false||b.full_tool_list_embedded!==false||b.full_schema_embedded!==false||b.annotations_embedded!==false||b.provider_model_used!==false||b.authority_effect!==false) process.exit(1)'
+          ! grep -R -n -E -- 'WebMCP\.invokeTool|Runtime\.evaluate' \
+            coordination/browser-shared/webmcp-routing-index-v1.mjs \
+            coordination/browser-shared/webmcp-tool-search-v1.mjs \
+            coordination/browser-shared/semantic-planning-broker-v1.mjs
+
+      - name: Compute Browser R6C protocol and regressions
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          node --check src/planning-broker-service.mjs
+          node --check src/rpc-server.mjs
+          node --check tests/r6c-planning-routing.test.mjs
+          node --check tests/r6c-real-planning-routing-smoke.mjs
+          node --test tests/*.test.mjs | tee "$RUNNER_TEMP/r6c-compute-tests.log"
+          node -e 'const p=require("./protocol-v1.json"); const r=p.webmcp_routing; const t=p.webmcp_tool_search; const s=p.semantic_planning; if(p.version!=="1.8.0"||r?.stage!=="R6C_INTERNAL_SEARCH_INDEX"||r?.selection_only!==true||r?.lossy_index!==true||r?.routing_index_max_bytes!==49152||r?.planner_receives_full_routing_index!==false||r?.planner_receives_routing_index_max_tools!==8||r?.large_toolsets_deferred_search!==true||r?.full_schema_embedded!==false||r?.annotations_embedded!==false||r?.fresh_description_required!==true||r?.semantic_fallback_lease_bound!==true||r?.daemon_semantic_tool_selection!==false||r?.tool_invocation_exposed!==false||r?.runtime_evaluate_used!==false||t?.stage!=="R6C_DEFERRED_TOOL_SEARCH"||t?.search_algorithm!=="DETERMINISTIC_LEXICAL"||t?.min_tool_count!==9||t?.search_handle_max_bytes!==2048||t?.query_max_chars!==512||t?.max_results!==5||t?.search_result_max_bytes!==12288||t?.fresh_toolset_required!==true||t?.lease_bound!==true||t?.query_preflight_before_browser_work!==true||t?.lease_preflight_before_browser_work!==true||t?.lease_postflight_after_browser_work!==true||t?.query_persisted!==false||t?.full_tool_list_embedded!==false||t?.full_schema_embedded!==false||t?.annotations_embedded!==false||t?.tool_invocation_exposed!==false||t?.runtime_evaluate_used!==false||s?.cold_leader_context_routing!=="R6C_ADAPTIVE_DISCLOSURE"||s?.cache_hits_receive_planner_context!==false||s?.waiters_receive_planner_context!==false||s?.semantic_fallback_fresh_capture!==true||s?.lease_preflight_before_browser_work!==true||s?.routing_failure_aborts_unseen_flight!==true) process.exit(1)'
+          grep -q "'planning.tools.search': 'LOCAL_COORDINATION'" src/rpc-server.mjs
+          grep -q "'planning.context': 'LOCAL_COORDINATION'" src/rpc-server.mjs
+          ! grep -R -n -E -- 'Runtime\.evaluate|WebMCP\.invokeTool|WebMCP\.cancelInvocation' src
+          grep -R -q -- "--remote-debugging-pipe" src
+          ! grep -R -n -E -- "(push|concat)\([^)]*['\"]--remote-debugging-(port|address)(=|['\"])" src
+
+      - name: Existing R5 and extension safety regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            coordination/browser-shared/tests/perception-envelope-v1.test.mjs \
+            coordination/browser-shared/tests/semantic-action-cache-v1.test.mjs \
+            coordination/browser-shared/tests/semantic-action-planner-v1.test.mjs \
+            coordination/browser-shared/tests/semantic-planning-broker-v1.test.mjs | tee "$RUNNER_TEMP/r6c-r5-regressions.log"
+          node tests/a2_v060_semantic_actions_lab.mjs
+          node tests/a2_v060_oopif_perception_lab.mjs
+          node tests/a2_r4_semantic_perception_compiler_lab.mjs
+          node tests/a2_v063_remote_authority_lab.mjs
+          node tests/a2_v063_bridge_disarm_lab.mjs
+
+      - name: Real Chrome R6A discovery regression
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          export A2_CHROME_EXECUTABLE="$CHROME"
+          export CI=true
+          export A2_CI_ALLOW_NO_SANDBOX=1
+          export A2_SELF_TEST_REMOVE_STATE=1
+          export A2_COMPUTE_STATE_ROOT="$RUNNER_TEMP/a2-compute-browser-r6a-regression"
+          node tests/r6a-real-webmcp-smoke.mjs | tee "$RUNNER_TEMP/r6c-r6a-real-smoke.json"
+          grep -q '"ok":true' "$RUNNER_TEMP/r6c-r6a-real-smoke.json"
+          grep -q '"chrome_webmcp_status":"SUPPORTED"' "$RUNNER_TEMP/r6c-r6a-real-smoke.json"
+
+      - name: Real Chrome R6B catalog regression
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          export A2_CHROME_EXECUTABLE="$CHROME"
+          export CI=true
+          export A2_CI_ALLOW_NO_SANDBOX=1
+          export A2_SELF_TEST_REMOVE_STATE=1
+          export A2_COMPUTE_STATE_ROOT="$RUNNER_TEMP/a2-compute-browser-r6b-regression"
+          node tests/r6b-real-webmcp-catalog-smoke.mjs | tee "$RUNNER_TEMP/r6c-r6b-real-smoke.json"
+          grep -q '"ok":true' "$RUNNER_TEMP/r6c-r6b-real-smoke.json"
+          grep -q '"chrome_webmcp_status":"SUPPORTED"' "$RUNNER_TEMP/r6c-r6b-real-smoke.json"
+          grep -q '"full_schema_embedded":false' "$RUNNER_TEMP/r6c-r6b-real-smoke.json"
+
+      - name: Real Chrome R6C planner routing smoke
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          export A2_CHROME_EXECUTABLE="$CHROME"
+          export CI=true
+          export A2_CI_ALLOW_NO_SANDBOX=1
+          export A2_SELF_TEST_REMOVE_STATE=1
+          export A2_COMPUTE_STATE_ROOT="$RUNNER_TEMP/a2-compute-browser-r6c"
+          node tests/r6c-real-planning-routing-smoke.mjs | tee "$RUNNER_TEMP/r6c-real-routing-smoke.json"
+          grep -q '"ok":true' "$RUNNER_TEMP/r6c-real-routing-smoke.json"
+          grep -q '"leader_calls":1' "$RUNNER_TEMP/r6c-real-routing-smoke.json"
+          grep -q '"waiters":7' "$RUNNER_TEMP/r6c-real-routing-smoke.json"
+          grep -q '"waiter_context_bytes":0' "$RUNNER_TEMP/r6c-real-routing-smoke.json"
+          grep -q '"fresh_semantic_fallback":true' "$RUNNER_TEMP/r6c-real-routing-smoke.json"
+          grep -q '"lease_preflight_used":true' "$RUNNER_TEMP/r6c-real-routing-smoke.json"
+          grep -q '"lease_bound_context":true' "$RUNNER_TEMP/r6c-real-routing-smoke.json"
+          grep -q '"cache_hit_context_bytes":0' "$RUNNER_TEMP/r6c-real-routing-smoke.json"
+          grep -q '"runtime_evaluate_used":false' "$RUNNER_TEMP/r6c-real-routing-smoke.json"
+          grep -q '"webmcp_invoke_used":false' "$RUNNER_TEMP/r6c-real-routing-smoke.json"
+          grep -q '"actuation_used":false' "$RUNNER_TEMP/r6c-real-routing-smoke.json"
+
+      - name: Build deterministic R6C evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          EPOCH="$SOURCE_DATE_EPOCH"
+          mkdir -p dist/a2-browser-r6c/evidence
+          cp "$RUNNER_TEMP/r6c-shared-tests.log" dist/a2-browser-r6c/evidence/R6C_SHARED_TESTS.log
+          cp "$RUNNER_TEMP/r6c-catalog-benchmark.json" dist/a2-browser-r6c/evidence/R6C_R6B_CATALOG_BENCHMARK.json
+          cp "$RUNNER_TEMP/r6c-routing-index-benchmark.json" dist/a2-browser-r6c/evidence/R6C_ROUTING_INDEX_BENCHMARK.json
+          cp "$RUNNER_TEMP/r6c-tool-search-benchmark.json" dist/a2-browser-r6c/evidence/R6C_TOOL_SEARCH_BENCHMARK.json
+          cp "$RUNNER_TEMP/r6c-compute-tests.log" dist/a2-browser-r6c/evidence/R6C_COMPUTE_TESTS.log
+          cp "$RUNNER_TEMP/r6c-r5-regressions.log" dist/a2-browser-r6c/evidence/R6C_R5_REGRESSIONS.log
+          cp "$RUNNER_TEMP/r6c-r6a-real-smoke.json" dist/a2-browser-r6c/evidence/R6C_R6A_REAL_CHROME_REGRESSION.json
+          cp "$RUNNER_TEMP/r6c-r6b-real-smoke.json" dist/a2-browser-r6c/evidence/R6C_R6B_REAL_CHROME_REGRESSION.json
+          cp "$RUNNER_TEMP/r6c-real-routing-smoke.json" dist/a2-browser-r6c/evidence/R6C_REAL_CHROME_ROUTING_SMOKE.json
+          printf '%s\n' "$GITHUB_SHA" > dist/a2-browser-r6c/evidence/SOURCE_COMMIT.txt
+          tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf dist/a2-browser-r6c/A2_BROWSER_R6C_WEBMCP_PLANNER_ROUTING.tar \
+            coordination/browser-shared/webmcp-tools-v1.mjs \
+            coordination/browser-shared/webmcp-catalog-v1.mjs \
+            coordination/browser-shared/webmcp-routing-index-v1.mjs \
+            coordination/browser-shared/webmcp-tool-search-v1.mjs \
+            coordination/browser-shared/semantic-planning-broker-v1.mjs \
+            coordination/browser-shared/tests/webmcp-routing-index-v1.test.mjs \
+            coordination/browser-shared/tests/webmcp-routing-index-benchmark.mjs \
+            coordination/browser-shared/tests/webmcp-tool-search-v1.test.mjs \
+            coordination/browser-shared/tests/webmcp-tool-search-benchmark.mjs \
+            coordination/browser-shared/tests/semantic-planning-broker-v1.test.mjs \
+            coordination/browser-compute/protocol-v1.json \
+            coordination/browser-compute/src/planning-broker-service.mjs \
+            coordination/browser-compute/src/rpc-server.mjs \
+            coordination/browser-compute/src/webmcp.mjs \
+            coordination/browser-compute/src/webmcp-service.mjs \
+            coordination/browser-compute/tests/contracts.test.mjs \
+            coordination/browser-compute/tests/r6c-planning-routing.test.mjs \
+            coordination/browser-compute/tests/r6c-real-planning-routing-smoke.mjs \
+            coordination/browser-compute/tests/r6a-real-webmcp-smoke.mjs \
+            coordination/browser-compute/tests/r6b-real-webmcp-catalog-smoke.mjs \
+            research/A2_BROWSER_R6C_WEBMCP_PLANNER_ROUTING_DEEP_RESEARCH_2026-08-28.md \
+            research/A2_BROWSER_R6C_WEBMCP_PLANNER_ROUTING_CHECKPOINT_2026-08-28.md
+          sha256sum dist/a2-browser-r6c/A2_BROWSER_R6C_WEBMCP_PLANNER_ROUTING.tar > dist/a2-browser-r6c/R6C_SHA256SUMS.txt
+
+      - name: Attest R6C evidence provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-browser-r6c/A2_BROWSER_R6C_WEBMCP_PLANNER_ROUTING.tar
+
+      - name: Upload R6C evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-r6c-webmcp-planner-routing-${{ github.sha }}
+          path: |
+            dist/a2-browser-r6c/A2_BROWSER_R6C_WEBMCP_PLANNER_ROUTING.tar
+            dist/a2-browser-r6c/R6C_SHA256SUMS.txt
+            dist/a2-browser-r6c/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

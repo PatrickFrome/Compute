@@ -1,0 +1,116 @@
+name: A2 Browser R14 A2 Browser Bench
+
+on:
+  push:
+    branches:
+      - work/a2-browser-r14-a2-browser-bench
+    paths:
+      - 'coordination/browser-shared/a2-browser-bench-v1.mjs'
+      - 'scripts/a2_r14_browser_bench.mjs'
+      - 'tests/a2_r14_*.test.mjs'
+      - 'research/A2_BROWSER_R14_**'
+      - '.github/workflows/a2-browser-r14-a2-browser-bench.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r14-bench-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Verify exact R13 parent and source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          PARENT=6e113ec7eaa85c1c689d40874b7c52c2c5f4305e
+          git merge-base --is-ancestor "$PARENT" "$GITHUB_SHA"
+          git diff --name-only "$PARENT" "$GITHUB_SHA" | tee "$RUNNER_TEMP/r14-changed-files.txt"
+          if git diff --name-only "$PARENT" "$GITHUB_SHA" | grep -Eq '(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.(toml|lock))$'; then
+            echo 'R14 must add no source dependency packages' >&2
+            exit 1
+          fi
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+
+      - name: Static zero-authority benchmark checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check coordination/browser-shared/a2-browser-bench-v1.mjs
+          node --check scripts/a2_r14_browser_bench.mjs
+          ! grep -Eq 'chrome\.|Input\.dispatch|Runtime\.evaluate|fetch\(|WebSocket|child_process|exec\(|eval\(' coordination/browser-shared/a2-browser-bench-v1.mjs
+          grep -q 'correctness_precedes_performance: true' coordination/browser-shared/a2-browser-bench-v1.mjs
+          grep -q 'aggregate_score: null' coordination/browser-shared/a2-browser-bench-v1.mjs
+          grep -q 'p95' coordination/browser-shared/a2-browser-bench-v1.mjs
+          grep -q 'p99' coordination/browser-shared/a2-browser-bench-v1.mjs
+
+      - name: R14 adversarial harness tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tests/a2_r14_*.test.mjs
+
+      - name: Run representative browser-core benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/a2-browser-r14/evidence
+          node scripts/a2_r14_browser_bench.mjs "$GITHUB_SHA" dist/a2-browser-r14/evidence/R14_RESULTS.json
+          node -e "const x=require('./dist/a2-browser-r14/evidence/R14_RESULTS.json'); if(x.eligible!==true||x.results.some(r=>r.correctness_passed!==true)) process.exit(1);"
+
+      - name: R13 through R8 regression fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tests/a2_r13_*.test.mjs
+          node --test tests/a2_r12_*.test.mjs
+          node --test tests/a2_r11_*.test.mjs
+          node --test tests/a2_r10_*.test.mjs
+          node --test tests/a2_r9_*.test.mjs
+          node --test tests/a2_r8a_*.test.mjs tests/a2_r8b_*.test.mjs tests/a2_r8c_*.test.mjs tests/a2_r8d_*.test.mjs
+
+      - name: Build deterministic R14 evidence envelope
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=dist/a2-browser-r14
+          cp "$RUNNER_TEMP/r14-changed-files.txt" "$OUT/evidence/R14_CHANGED_FILES.txt"
+          printf '%s\n' "$GITHUB_SHA" > "$OUT/evidence/SOURCE_COMMIT.txt"
+          printf '%s\n' '6e113ec7eaa85c1c689d40874b7c52c2c5f4305e' > "$OUT/evidence/PARENT_R13_COMMIT.txt"
+          cat > "$OUT/evidence/R14_CLAIMS.json" <<'JSON'
+          {"milestone":"R14_A2_BROWSER_BENCH_V1","correctness_precedes_performance":true,"failed_correctness_ineligible":true,"percentiles":[50,95,99],"aggregate_score":null,"environment_scoped":true,"browser_authority":false,"network_authority":false,"process_authority":false,"model_authority":false,"external_effect_replay":false,"new_source_dependency_packages":0}
+          JSON
+          # Performance samples are intentionally environment-specific. Attest both source harness and exact result evidence.
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf "$OUT/A2_BROWSER_R14_BENCH.tar" \
+            coordination/browser-shared/a2-browser-bench-v1.mjs \
+            scripts/a2_r14_browser_bench.mjs \
+            tests/a2_r14_browser_bench.test.mjs \
+            research/A2_BROWSER_R14_A2_BROWSER_BENCH_PRE_RESEARCH_2026-08-29.md \
+            "$OUT/evidence"
+          sha256sum "$OUT/A2_BROWSER_R14_BENCH.tar" > "$OUT/R14_SHA256SUMS.txt"
+
+      - name: Attest R14 evidence
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-browser-r14/A2_BROWSER_R14_BENCH.tar
+
+      - name: Upload R14 evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-r14-${{ github.sha }}
+          path: |
+            dist/a2-browser-r14/A2_BROWSER_R14_BENCH.tar
+            dist/a2-browser-r14/R14_SHA256SUMS.txt
+            dist/a2-browser-r14/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

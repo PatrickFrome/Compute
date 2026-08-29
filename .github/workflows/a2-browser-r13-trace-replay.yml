@@ -1,0 +1,105 @@
+name: A2 Browser R13 Trace Replay
+
+on:
+  push:
+    branches:
+      - work/a2-browser-r13-trace-replay
+    paths:
+      - 'coordination/browser-shared/trace-replay-v1.mjs'
+      - 'tests/a2_r13_*.test.mjs'
+      - 'research/A2_BROWSER_R13_**'
+      - '.github/workflows/a2-browser-r13-trace-replay.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  r13-replay-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Verify exact R12 parent and source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          PARENT=2c61104b7eb27e56c9955e602f12bc6b2ea68302
+          git merge-base --is-ancestor "$PARENT" "$GITHUB_SHA"
+          git diff --name-only "$PARENT" "$GITHUB_SHA" | tee "$RUNNER_TEMP/r13-changed-files.txt"
+          if git diff --name-only "$PARENT" "$GITHUB_SHA" | grep -Eq '(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.(toml|lock))$'; then
+            echo 'R13 must add no source dependency packages' >&2
+            exit 1
+          fi
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")" >> "$GITHUB_ENV"
+
+      - name: Static zero-effect replay checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE=coordination/browser-shared/trace-replay-v1.mjs
+          node --check "$FILE"
+          ! grep -Eq 'chrome\.|Input\.dispatch|Runtime\.evaluate|fetch\(|WebSocket|child_process|exec\(|eval\(' "$FILE"
+          grep -q "replay_executes_effects: false" "$FILE"
+          grep -q "AMBIGUOUS" "$FILE"
+          grep -q "trace_parent_must_precede_child" "$FILE"
+          grep -q "trace_event_hash_invalid" "$FILE"
+
+      - name: R13 adversarial replay tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tests/a2_r13_*.test.mjs
+
+      - name: R12 through R8 regression fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tests/a2_r12_*.test.mjs
+          node --test tests/a2_r11_*.test.mjs
+          node --test tests/a2_r10_*.test.mjs
+          node --test tests/a2_r9_*.test.mjs
+          node --test tests/a2_r8a_*.test.mjs tests/a2_r8b_*.test.mjs tests/a2_r8c_*.test.mjs tests/a2_r8d_*.test.mjs
+
+      - name: Build deterministic R13 evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=dist/a2-browser-r13
+          mkdir -p "$OUT/evidence"
+          cp "$RUNNER_TEMP/r13-changed-files.txt" "$OUT/evidence/R13_CHANGED_FILES.txt"
+          printf '%s\n' "$GITHUB_SHA" > "$OUT/evidence/SOURCE_COMMIT.txt"
+          printf '%s\n' '2c61104b7eb27e56c9955e602f12bc6b2ea68302' > "$OUT/evidence/PARENT_R12_COMMIT.txt"
+          cat > "$OUT/evidence/R13_CLAIMS.json" <<'JSON'
+          {"milestone":"R13_TRACE_REPLAY_V1","replay_executes_effects":false,"hash_chained_events":true,"causal_parent_ordering":true,"source_commit_bound":true,"single_terminal_assignment":true,"ambiguity_preserved":true,"browser_authority":false,"network_authority":false,"process_authority":false,"model_authority":false,"new_source_dependency_packages":0}
+          JSON
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf "$OUT/A2_BROWSER_R13_TRACE_REPLAY.tar" \
+            coordination/browser-shared/trace-replay-v1.mjs \
+            tests/a2_r13_trace_replay.test.mjs \
+            research/A2_BROWSER_R13_TRACE_REPLAY_PRE_RESEARCH_2026-08-29.md \
+            "$OUT/evidence"
+          sha256sum "$OUT/A2_BROWSER_R13_TRACE_REPLAY.tar" > "$OUT/R13_SHA256SUMS.txt"
+
+      - name: Attest R13 evidence
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-browser-r13/A2_BROWSER_R13_TRACE_REPLAY.tar
+
+      - name: Upload R13 evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-r13-${{ github.sha }}
+          path: |
+            dist/a2-browser-r13/A2_BROWSER_R13_TRACE_REPLAY.tar
+            dist/a2-browser-r13/R13_SHA256SUMS.txt
+            dist/a2-browser-r13/evidence/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
