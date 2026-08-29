@@ -1,0 +1,102 @@
+name: METAENGINE Browser TEST Installer
+on:
+  push:
+    branches: ['work/metaengine-browser-test-console-v1']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-installer-x64:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Materialize Electron runtime
+        working-directory: apps/metaengine-browser
+        env:
+          ELECTRON_GET_NO_PROGRESS: '1'
+        run: npx install-electron --no
+      - name: Parse and contract tests
+        working-directory: apps/metaengine-browser
+        run: |
+          npm run check
+          npm test
+      - name: Windows physical Development Plane smoke
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'metaengine-installer-dp-out.txt'
+          $err = Join-Path $env:RUNNER_TEMP 'metaengine-installer-dp-err.txt'
+          $trace = Join-Path $env:RUNNER_TEMP 'metaengine-installer-dp-trace.jsonl'
+          $env:METAENGINE_SMOKE_TRACE = $trace
+          $electron = Join-Path (Get-Location) 'node_modules\electron\dist\electron.exe'
+          $p = Start-Process -FilePath $electron -ArgumentList @('--disable-gpu','smoke/dp') -WorkingDirectory (Get-Location) -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          $cachedHandle = $p.Handle
+          if (-not $p.WaitForExit(30000)) { try { $p.Kill($true) } catch {}; throw 'windows_dp_timeout' }
+          if ($p.ExitCode -ne 0) { Get-Content $out -ErrorAction SilentlyContinue; Get-Content $err -ErrorAction SilentlyContinue; throw "windows_dp_exit_$($p.ExitCode)" }
+          if (-not (Select-String -Path $trace -Pattern '"stage":"COMPLETE"' -Quiet)) { throw 'windows_dp_complete_missing' }
+          if (-not (Select-String -Path $trace -Pattern '"ok":true' -Quiet)) { throw 'windows_dp_ok_missing' }
+          if (-not (Select-String -Path $trace -Pattern '"sandbox_execution_authorized":false' -Quiet)) { throw 'windows_dp_execution_fence_missing' }
+          if (-not (Select-String -Path $trace -Pattern '"promotion_authorized":false' -Quiet)) { throw 'windows_dp_promotion_fence_missing' }
+      - name: Build one-file NSIS setup
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          ELECTRON_BUILDER_ALLOW_UNRESOLVED_DEPENDENCIES: 'false'
+        run: |
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.yml
+          $setup = Get-ChildItem dist-installer\METAENGINE-Browser-TEST-Setup-*.exe | Select-Object -First 1
+          if (-not $setup) { throw 'installer_exe_missing' }
+          if ($setup.Length -lt 1000000) { throw 'installer_exe_too_small' }
+          $hash = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "installer=$($setup.Name)" | Set-Content dist-installer\INSTALLER_RECEIPT.txt
+          "sha256=$hash" | Add-Content dist-installer\INSTALLER_RECEIPT.txt
+          "source_head=${{ github.sha }}" | Add-Content dist-installer\INSTALLER_RECEIPT.txt
+          "signed=false" | Add-Content dist-installer\INSTALLER_RECEIPT.txt
+          Get-AuthenticodeSignature $setup.FullName | Format-List Status,StatusMessage,SignerCertificate | Out-String | Add-Content dist-installer\INSTALLER_RECEIPT.txt
+          Get-ChildItem dist-installer
+      - name: Silent install smoke
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $setup = Get-ChildItem dist-installer\METAENGINE-Browser-TEST-Setup-*.exe | Select-Object -First 1
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -PassThru
+          if (-not $p.WaitForExit(60000)) { try { $p.Kill($true) } catch {}; throw 'installer_silent_install_timeout' }
+          if ($p.ExitCode -ne 0) { throw "installer_silent_install_exit_$($p.ExitCode)" }
+          $candidateRoots = @(
+            (Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser TEST'),
+            (Join-Path $env:LOCALAPPDATA 'Programs\metaengine-browser-shell'),
+            (Join-Path $env:LOCALAPPDATA 'Programs\@metaengine\browser-shell')
+          )
+          $installedExe = $null
+          foreach ($root in $candidateRoots) {
+            if (Test-Path $root) {
+              $installedExe = Get-ChildItem $root -Filter '*.exe' -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch 'Uninstall' } | Select-Object -First 1
+              if ($installedExe) { break }
+            }
+          }
+          if (-not $installedExe) {
+            $installedExe = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Filter 'METAENGINE*.exe' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
+          if (-not $installedExe) { throw 'installed_browser_exe_not_found' }
+          "installed_exe=$($installedExe.FullName)" | Add-Content dist-installer\INSTALLER_RECEIPT.txt
+      - name: Upload single installer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: METAENGINE-Browser-TEST-Setup-${{ github.sha }}
+          path: |
+            apps/metaengine-browser/dist-installer/METAENGINE-Browser-TEST-Setup-*.exe
+            apps/metaengine-browser/dist-installer/INSTALLER_RECEIPT.txt
+          if-no-files-found: error
+          retention-days: 14
