@@ -4,9 +4,10 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createCandidateCapsule, verifyCandidateCapsule } = require('./candidate-capsule.cjs');
 const { createVerificationSandboxPlan, verifyVerificationSandboxPlan } = require('./verification-sandbox-plan.cjs');
+const { verifyEnvelope: verifyAdvisoryEvidenceEnvelope } = require('./advisory-evidence-verifier.cjs');
 
 const PROTOCOL = 'metaengine.development-plane.v1';
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 const CAPABILITIES = Object.freeze([
   'HEALTH',
   'CAPABILITIES',
@@ -16,6 +17,7 @@ const CAPABILITIES = Object.freeze([
   'CANDIDATE_CAPSULE_VERIFY',
   'VERIFICATION_SANDBOX_PLAN_CREATE',
   'VERIFICATION_SANDBOX_PLAN_VERIFY',
+  'ADVISORY_EVIDENCE_VERIFY',
 ]);
 const repoRoot = path.resolve(process.env.METAENGINE_REPO_ROOT || process.cwd());
 const repositoryName = String(process.env.METAENGINE_GIT_REPOSITORY || 'PatrickFrome/Compute');
@@ -72,6 +74,10 @@ async function execute(capability, payload) {
     verification_sandbox_prepare_only: true,
     verification_sandbox_execution: false,
     sandbox_backend_bound: false,
+    advisory_evidence_verification: true,
+    advisory_evidence_network_dispatch: false,
+    advisory_evidence_browser_authority: false,
+    advisory_evidence_promotion_authority: false,
     direct_promote_current: false,
     arbitrary_eval: false,
     signed_attestation_required_before_promotion: true,
@@ -102,6 +108,11 @@ async function execute(capability, payload) {
     const source = await requireCurrentSource();
     const candidateVerification = verifyCandidateCapsule(payload.capsule, source);
     return verifyVerificationSandboxPlan(payload.plan, payload.capsule, candidateVerification);
+  }
+  if (capability === 'ADVISORY_EVIDENCE_VERIFY') {
+    requireObjectPayload(payload, 'advisory_evidence_verify');
+    if (!payload.envelope) throw new Error('advisory_evidence_verify_payload_invalid');
+    return verifyAdvisoryEvidenceEnvelope(payload.envelope);
   }
   throw new Error('capability_denied');
 }
