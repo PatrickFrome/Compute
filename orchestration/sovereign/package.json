@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "check": "tsc --noEmit",
+    "test:provenance": "tsx --test src/upstream_provenance.test.ts",
     "start": "bash scripts/start-all.sh",
     "start:all": "bash scripts/start-all.sh",
     "start:v4": "tsx src/same_point_v4.ts",
