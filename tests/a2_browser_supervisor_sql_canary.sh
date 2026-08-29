@@ -697,4 +697,167 @@ if psql17 -c "set role anon; select count(*) from public.compute_fabric_a2_brows
 fi
 grep -Eqi 'permission denied|no permission' /tmp/a2-supervisor-anon-table.err
 
+# ---------------------------------------------------------------------------
+# Phase G — concurrency race probes (genuine multi-session races).
+#
+# The assertions are deterministic for every legal interleaving; the racers
+# provide the sampling. Race A: 20 concurrent enqueues of the SAME
+# idempotency key must yield exactly one fresh row, 19 replay readbacks of
+# the same command id, and one table row (ON CONFLICT speculative-insert
+# wait under READ COMMITTED). Race B: 10 concurrent clients contending for
+# one broadcast command must elect exactly one lease holder (FOR UPDATE
+# SKIP LOCKED). Race C: 10 commands drained by 10 concurrent clients must
+# lease every command exactly once with no double-lease.
+# ---------------------------------------------------------------------------
+RACE_WS='ffffffff-0000-4000-8000-00000000000f'
+
+for i in $(seq 1 20); do
+  psql17 -tA -c "select (x->>'command_id') || '|' || (x->>'replayed') from (select public.h205f22_a2_browser_supervisor_enqueue_v3('${RACE_WS}'::uuid,'POLL',null,'{}'::jsonb,'race-isolated-client',3000,'CANARY_RACE','canary:20260829:race:a1') as x) s;" \
+    > /tmp/a2-sup-race-a-$i.out 2>/tmp/a2-sup-race-a-$i.err &
+done
+wait
+
+re_a='^[0-9a-f-]{36}\|(true|false)$'
+fresh=0
+replays=0
+for i in $(seq 1 20); do
+  if [[ -s /tmp/a2-sup-race-a-$i.err ]]; then
+    echo "race-a racer $i errored:" >&2
+    cat /tmp/a2-sup-race-a-$i.err >&2
+    exit 1
+  fi
+  line="$(cat /tmp/a2-sup-race-a-$i.out)"
+  if ! [[ "$line" =~ $re_a ]]; then
+    echo "race-a racer $i unexpected output: ${line}" >&2
+    exit 1
+  fi
+  if [[ "$line" == *'|false' ]]; then fresh=$((fresh+1)); fi
+  if [[ "$line" == *'|true' ]]; then replays=$((replays+1)); fi
+done
+if [[ $fresh -ne 1 ]]; then
+  echo "race-a fresh insert count = ${fresh} (want exactly 1)" >&2
+  exit 1
+fi
+if [[ $replays -ne 19 ]]; then
+  echo "race-a replay count = ${replays} (want 19)" >&2
+  exit 1
+fi
+distinct_cids="$(cat /tmp/a2-sup-race-a-*.out | cut -d'|' -f1 | sort -u | wc -l)"
+if [[ "$distinct_cids" -ne 1 ]]; then
+  echo "race-a distinct command ids = ${distinct_cids} (want 1)" >&2
+  exit 1
+fi
+
+psql17 -X -v ON_ERROR_STOP=1 -c "select public.h205f22_a2_browser_supervisor_enqueue_v3('${RACE_WS}'::uuid,'CAPTURE',null,'{}'::jsonb,null,3000,'CANARY_RACE','canary:20260829:race:b1');" > /dev/null
+
+for i in $(seq 1 10); do
+  cid=$(printf 'race-client-%02d' "$i")
+  psql17 -tA -c "select nullif(coalesce(x->'command'->>'command_id','') || '|' || coalesce(x->'command'->>'idempotency_key',''),'|') from (select public.h205f22_a2_browser_supervisor_lease_control_v4('${RACE_WS}'::uuid,'${cid}') as x) s;" \
+    > /tmp/a2-sup-race-b-$i.out 2>/tmp/a2-sup-race-b-$i.err &
+done
+wait
+
+re_b='^[0-9a-f-]{36}\|canary:20260829:race:b1$'
+winners=0
+for i in $(seq 1 10); do
+  if [[ -s /tmp/a2-sup-race-b-$i.err ]]; then
+    echo "race-b racer $i errored:" >&2
+    cat /tmp/a2-sup-race-b-$i.err >&2
+    exit 1
+  fi
+  line="$(cat /tmp/a2-sup-race-b-$i.out)"
+  if [[ -n "$line" ]]; then
+    if ! [[ "$line" =~ $re_b ]]; then
+      echo "race-b racer $i unexpected output: ${line}" >&2
+      exit 1
+    fi
+    winners=$((winners+1))
+  fi
+done
+if [[ $winners -ne 1 ]]; then
+  echo "race-b lease winners = ${winners} (want exactly 1)" >&2
+  exit 1
+fi
+
+for i in $(seq 1 10); do
+  key=$(printf 'canary:20260829:race:c%02d' "$i")
+  psql17 -X -v ON_ERROR_STOP=1 -c "select public.h205f22_a2_browser_supervisor_enqueue_v3('${RACE_WS}'::uuid,'POLL',null,'{}'::jsonb,null,3000,'CANARY_RACE','${key}');" > /dev/null
+done
+
+for i in $(seq 1 10); do
+  cid=$(printf 'race-drain-%02d' "$i")
+  psql17 -tA -c "select nullif(coalesce(x->'command'->>'command_id','') || '|' || coalesce(x->'command'->>'idempotency_key',''),'|') from (select public.h205f22_a2_browser_supervisor_lease_control_v4('${RACE_WS}'::uuid,'${cid}') as x) s;" \
+    > /tmp/a2-sup-race-c-$i.out 2>/tmp/a2-sup-race-c-$i.err &
+done
+wait
+
+re_c='^[0-9a-f-]{36}\|canary:20260829:race:c[0-9]{2}$'
+drained=0
+for i in $(seq 1 10); do
+  if [[ -s /tmp/a2-sup-race-c-$i.err ]]; then
+    echo "race-c racer $i errored:" >&2
+    cat /tmp/a2-sup-race-c-$i.err >&2
+    exit 1
+  fi
+  line="$(cat /tmp/a2-sup-race-c-$i.out)"
+  if [[ -n "$line" ]]; then
+    if ! [[ "$line" =~ $re_c ]]; then
+      echo "race-c racer $i unexpected output: ${line}" >&2
+      exit 1
+    fi
+    drained=$((drained+1))
+  fi
+done
+if [[ $drained -ne 10 ]]; then
+  echo "race-c drained clients = ${drained} (want 10)" >&2
+  exit 1
+fi
+distinct_drained="$(cat /tmp/a2-sup-race-c-*.out | cut -d'|' -f1 | sort -u | wc -l)"
+if [[ "$distinct_drained" -ne 10 ]]; then
+  echo "race-c distinct leased command ids = ${distinct_drained} (want 10)" >&2
+  exit 1
+fi
+distinct_keys="$(cat /tmp/a2-sup-race-c-*.out | cut -d'|' -f2 | sort -u | wc -l)"
+if [[ "$distinct_keys" -ne 10 ]]; then
+  echo "race-c distinct leased keys = ${distinct_keys} (want 10)" >&2
+  exit 1
+fi
+
+# Race database-state verdicts (single writer session, deterministic).
+psql17 <<'SQL'
+do $$
+declare
+  v_ws uuid := 'ffffffff-0000-4000-8000-00000000000f';
+  v_n integer;
+  v_ok boolean;
+begin
+  -- exactly one physical row for the raced key, still PENDING
+  select count(*) into v_n
+    from public.compute_fabric_a2_browser_supervisor_command_h205f22
+   where workspace_id = v_ws and idempotency_key = 'canary:20260829:race:a1';
+  if v_n <> 1 then
+    raise exception 'canary_race_a_row_count (%)', v_n;
+  end if;
+
+  -- exactly one lease holder for the contended command
+  select (count(*) = 1 and count(distinct leased_by) = 1) into v_ok
+    from public.compute_fabric_a2_browser_supervisor_command_h205f22
+   where workspace_id = v_ws and idempotency_key = 'canary:20260829:race:b1'
+     and status = 'LEASED' and leased_by like 'race-client-%';
+  if v_ok is not true then
+    raise exception 'canary_race_b_lease_election_broken';
+  end if;
+
+  -- all ten drain commands leased exactly once by ten distinct clients
+  select (count(*) = 10 and count(distinct leased_by) = 10) into v_ok
+    from public.compute_fabric_a2_browser_supervisor_command_h205f22
+   where workspace_id = v_ws and idempotency_key like 'canary:20260829:race:c%'
+     and status = 'LEASED' and leased_by like 'race-drain-%';
+  if v_ok is not true then
+    raise exception 'canary_race_c_drain_broken';
+  end if;
+end;
+$$;
+SQL
+
 echo 'A2 browser supervisor control-plane PostgreSQL 17 canary: PASS'
