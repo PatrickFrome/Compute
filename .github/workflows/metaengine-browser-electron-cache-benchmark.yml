@@ -44,7 +44,9 @@ jobs:
             }
           }
           $material = ($inputs | ForEach-Object {
-            "$_:$((Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant())"
+            $path = $_
+            $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            '{0}:{1}' -f $path, $hash
           }) -join "`n"
           $bytes = [System.Text.Encoding]::UTF8.GetBytes($material)
           $sha = [System.Security.Cryptography.SHA256]::Create()
