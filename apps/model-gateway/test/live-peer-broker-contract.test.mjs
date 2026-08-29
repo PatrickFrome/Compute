@@ -50,11 +50,19 @@ function agreement(results) {
   return { ...base, signal, unanimous: size === ok.length && signal !== 'divergent', divergence_detected: size < ok.length, matched_models: cluster?.[1] ?? [], candidate, agreement_ratio: size / ok.length };
 }
 
-test('live broker v7 registry and adaptive order are persisted', () => {
-  assert.match(source, /metaengine\.live-peer-broker\.v7/);
-  for (const id of ['gemma2', 'nemotron', 'tinyllama', 'llama2']) assert.match(source, new RegExp(`id:\\"${id}\\"`));
-  assert.match(source, /const PRIMARY=\["gemma2","nemotron"\]/);
-  assert.match(source, /const BACKUPS=\["tinyllama","llama2"\]/);
+test('live broker v8 separates advisory and structured actor pools', () => {
+  assert.match(source, /metaengine\.live-peer-broker\.v8/);
+  for (const id of ['gemma2', 'llama32', 'nemotron', 'tinyllama', 'llama2']) assert.match(source, new RegExp(`id:\\"${id}\\"`));
+  assert.match(source, /const ADVISORY_PRIMARY=\["gemma2","nemotron"\]/);
+  assert.match(source, /const STRUCTURED_PRIMARY=\["gemma2","llama32"\]/);
+  assert.match(source, /llama32:\{id:"llama32",served_model:"meta-llama\/Llama-3\.2-3B-Instruct"/);
+});
+
+test('structured capability is explicit and Nemotron is advisory-only', () => {
+  assert.match(source, /gemma2:\{[^\n]*structured_capable:true/);
+  assert.match(source, /llama32:\{[^\n]*structured_capable:true/);
+  assert.match(source, /nemotron:\{[^\n]*structured_capable:false/);
+  assert.match(source, /quality:"strong-advisory"/);
 });
 
 test('reasoning wrapper is stripped without changing a plain answer', () => {
@@ -92,6 +100,12 @@ test('agreement ignores failed transports and reports insufficient evidence', ()
   assert.equal(r.signal, 'insufficient'); assert.equal(r.successful_responses, 1); assert.equal(r.evaluated, false);
 });
 
+test('OpenAI endpoint defaults to structured-auto rather than advisory Nemotron fallback', () => {
+  assert.match(source, /body\?\.model\|\|"metaengine\/structured-auto"/);
+  assert.match(source, /logical==="metaengine\/structured-auto"/);
+  assert.match(source, /invokeAuto\(STRUCTURED_PRIMARY,prompt,body\?\.max_tokens\)/);
+});
+
 test('OpenAI-compatible endpoint accepts the same bearer contract as SAME_POINT_DUEL_V4', () => {
   assert.match(source, /bearer===`Bearer \$\{CLIENT_MARKER\}`/);
   assert.match(source, /u\.pathname\.endsWith\("\/v1\/chat\/completions"\)/);
@@ -104,7 +118,7 @@ test('OpenAI compatibility reports served-model provenance metadata', () => {
 });
 
 test('requested output tokens are bounded per peer', () => {
-  assert.match(source, /max_tokens_cap:384/);
+  assert.match(source, /llama32:\{[^\n]*max_tokens_cap:512/);
   assert.match(source, /Math\.max\(16,Math\.min\(p\.max_tokens_cap,Math\.trunc\(n\)\)\)/);
   assert.match(source, /max_output_tokens:maxTokens/);
 });
@@ -115,8 +129,8 @@ test('legacy Gradio generator uses one session hash across iterations', () => {
   assert.match(source, /if\(j\?\.is_generating!==true\)return\{raw,event_count:i\+1\}/);
 });
 
-test('committee does not spend backup capacity after two primary successes', () => {
+test('advisory committee saves backups after two primary successes while structured committee has no unproven fallback', () => {
+  assert.match(source, /const backups=structured\?\[\]:ADVISORY_BACKUPS/);
   assert.match(source, /if\(successes>=2\)break/);
-  assert.match(source, /Promise\.allSettled\(ids\.map\(id=>invokePeer\(PEERS\[id\],prompt,requestedTokens\)\)\)/);
   assert.match(source, /agreement:analyzeAgreement\(results\)/);
 });
