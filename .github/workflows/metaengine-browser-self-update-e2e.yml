@@ -96,8 +96,10 @@ jobs:
           $probeOut = "$env:RUNNER_TEMP\baseline-version-probe.out"
           $probeErr = "$env:RUNNER_TEMP\baseline-version-probe.err"
           $p = Start-Process -FilePath $app -ArgumentList '--metaengine-version-probe' -PassThru -RedirectStandardOutput $probeOut -RedirectStandardError $probeErr
+          $cachedHandle = $p.Handle
           if (-not $p.WaitForExit(15000)) { try { Stop-Process -Id $p.Id -Force } catch {}; throw 'baseline_version_probe_timeout' }
-          if ($p.ExitCode -ne 0) { Get-Content $probeErr -ErrorAction SilentlyContinue; throw "baseline_version_probe_exit_$($p.ExitCode)" }
+          $exitCode = $p.ExitCode
+          if ($exitCode -ne 0) { Get-Content $probeErr -ErrorAction SilentlyContinue; throw "baseline_version_probe_exit_$exitCode" }
           $versionRow = (Get-Content $probeOut | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
           if ([string]$versionRow.version -ne $baseline) { throw "baseline_version_probe_mismatch:$($versionRow.version):$baseline" }
           if ($versionRow.primary_instance -ne $true) { throw 'baseline_version_probe_not_primary' }
@@ -106,9 +108,11 @@ jobs:
           $profileOut = "$env:RUNNER_TEMP\baseline-profile-probe.out"
           $profileErr = "$env:RUNNER_TEMP\baseline-profile-probe.err"
           $profile = Start-Process -FilePath $app -ArgumentList '--metaengine-profile-probe' -PassThru -RedirectStandardOutput $profileOut -RedirectStandardError $profileErr
+          $profileHandle = $profile.Handle
           if (-not $profile.WaitForExit(15000)) { try { Stop-Process -Id $profile.Id -Force } catch {}; throw 'baseline_profile_probe_timeout' }
+          $profileExit = $profile.ExitCode
           Remove-Item Env:METAENGINE_PROFILE_PROBE_WRITE -ErrorAction SilentlyContinue
-          if ($profile.ExitCode -ne 0) { Get-Content $profileErr -ErrorAction SilentlyContinue; throw "baseline_profile_probe_exit_$($profile.ExitCode)" }
+          if ($profileExit -ne 0) { Get-Content $profileErr -ErrorAction SilentlyContinue; throw "baseline_profile_probe_exit_$profileExit" }
           $profileRow = (Get-Content $profileOut | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
           if ($profileRow.marker_present -ne $true) { throw 'baseline_profile_marker_not_written' }
           if (-not $profileRow.user_data_path) { throw 'baseline_user_data_path_missing' }
@@ -185,6 +189,7 @@ jobs:
           $env:METAENGINE_SELF_UPDATE_SUCCESSOR_TRACE = "$env:RUNNER_TEMP\self-update-successor.json"
           Remove-Item $env:METAENGINE_SELF_UPDATE_SUCCESSOR_TRACE -Force -ErrorAction SilentlyContinue
           $source = Start-Process -FilePath $app -ArgumentList '--metaengine-self-update-smoke' -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\self-update-smoke.out" -RedirectStandardError "$env:RUNNER_TEMP\self-update-smoke.err"
+          $sourceHandle = $source.Handle
           $sourcePid = $source.Id
           if (-not $source.WaitForExit(150000)) {
             try { Stop-Process -Id $source.Id -Force } catch {}
@@ -215,16 +220,20 @@ jobs:
           $probeOut = "$env:RUNNER_TEMP\target-version-probe.out"
           $probeErr = "$env:RUNNER_TEMP\target-version-probe.err"
           $probe = Start-Process -FilePath $app -ArgumentList '--metaengine-version-probe' -PassThru -RedirectStandardOutput $probeOut -RedirectStandardError $probeErr
+          $probeHandle = $probe.Handle
           if (-not $probe.WaitForExit(15000)) { try { Stop-Process -Id $probe.Id -Force } catch {}; throw 'target_version_probe_timeout' }
-          if ($probe.ExitCode -ne 0) { Get-Content $probeErr -ErrorAction SilentlyContinue; throw "target_version_probe_exit_$($probe.ExitCode)" }
+          $probeExit = $probe.ExitCode
+          if ($probeExit -ne 0) { Get-Content $probeErr -ErrorAction SilentlyContinue; throw "target_version_probe_exit_$probeExit" }
           $versionRow = (Get-Content $probeOut | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
           if ([string]$versionRow.version -ne $target) { throw "target_version_probe_mismatch:$($versionRow.version):$target" }
 
           $profileOut = "$env:RUNNER_TEMP\target-profile-probe.out"
           $profileErr = "$env:RUNNER_TEMP\target-profile-probe.err"
           $profile = Start-Process -FilePath $app -ArgumentList '--metaengine-profile-probe' -PassThru -RedirectStandardOutput $profileOut -RedirectStandardError $profileErr
+          $profileHandle = $profile.Handle
           if (-not $profile.WaitForExit(15000)) { try { Stop-Process -Id $profile.Id -Force } catch {}; throw 'target_profile_probe_timeout' }
-          if ($profile.ExitCode -ne 0) { Get-Content $profileErr -ErrorAction SilentlyContinue; throw "target_profile_probe_exit_$($profile.ExitCode)" }
+          $profileExit = $profile.ExitCode
+          if ($profileExit -ne 0) { Get-Content $profileErr -ErrorAction SilentlyContinue; throw "target_profile_probe_exit_$profileExit" }
           $profileRow = (Get-Content $profileOut | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
           $baselinePath = (Get-Content "$env:RUNNER_TEMP\baseline-user-data-path.txt").Trim()
           if ($profileRow.marker_present -ne $true) { throw 'target_profile_marker_missing' }
@@ -242,6 +251,7 @@ jobs:
           $firstOut = "$env:RUNNER_TEMP\singleton-first.out"
           $firstErr = "$env:RUNNER_TEMP\singleton-first.err"
           $first = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $firstOut -RedirectStandardError $firstErr
+          $firstHandle = $first.Handle
           $deadline = (Get-Date).AddSeconds(10)
           while ((-not (Test-Path $firstOut) -or (Get-Item $firstOut -ErrorAction SilentlyContinue).Length -eq 0) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 100 }
           $first.Refresh()
@@ -250,6 +260,7 @@ jobs:
           if ($firstRow.primary_instance -ne $true) { throw 'singleton_primary_probe_invalid' }
 
           $second = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\singleton-second.out" -RedirectStandardError "$env:RUNNER_TEMP\singleton-second.err"
+          $secondHandle = $second.Handle
           if (-not $second.WaitForExit(5000)) { try { Stop-Process -Id $second.Id -Force } catch {}; try { Stop-Process -Id $first.Id -Force } catch {}; throw 'singleton_secondary_did_not_exit' }
           $first.Refresh()
           if ($first.HasExited) { throw 'singleton_secondary_displaced_primary' }
