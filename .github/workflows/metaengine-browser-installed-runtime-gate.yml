@@ -1,0 +1,67 @@
+name: METAENGINE Browser Installed Runtime Gate
+on:
+  push:
+    branches: ['work/metaengine-browser-test-console-v1']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  installed-runtime-windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Parse and contract gate
+        working-directory: apps/metaengine-browser
+        run: |
+          npm run check
+          npm test
+      - name: Materialize Electron runtime
+        working-directory: apps/metaengine-browser
+        env:
+          ELECTRON_GET_NO_PROGRESS: '1'
+        run: npx install-electron --no
+      - name: Physical Development Plane gate
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $trace = Join-Path $env:RUNNER_TEMP 'metaengine-installed-gate-dp.jsonl'
+          $env:METAENGINE_SMOKE_TRACE = $trace
+          $electron = Join-Path (Get-Location) 'node_modules\electron\dist\electron.exe'
+          $p = Start-Process -FilePath $electron -ArgumentList @('--disable-gpu','smoke/dp') -WorkingDirectory (Get-Location) -PassThru
+          $cachedHandle = $p.Handle
+          if (-not $p.WaitForExit(30000)) { try { $p.Kill($true) } catch {}; throw 'windows_dp_timeout' }
+          if ($p.ExitCode -ne 0) { throw "windows_dp_exit_$($p.ExitCode)" }
+          if (-not (Select-String -Path $trace -Pattern '"ok":true' -Quiet)) { throw 'windows_dp_ok_missing' }
+          if (-not (Select-String -Path $trace -Pattern '"promotion_authorized":false' -Quiet)) { throw 'windows_dp_promotion_fence_missing' }
+      - name: Build NSIS installer
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          ELECTRON_BUILDER_ALLOW_UNRESOLVED_DEPENDENCIES: 'false'
+        run: npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.yml
+      - name: Install and verify internal startup receipt
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: .\ci\verify-installed-startup.ps1
+      - name: Upload proven installer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: METAENGINE-Browser-TEST-Proven-Setup-${{ github.sha }}
+          path: |
+            apps/metaengine-browser/dist-installer/METAENGINE-Browser-TEST-Setup-*.exe
+            apps/metaengine-browser/dist-installer/INSTALLER_RECEIPT.txt
+            apps/metaengine-browser/dist-installer/INSTALLED_STARTUP_RECEIPT.json
+          if-no-files-found: error
+          retention-days: 14
