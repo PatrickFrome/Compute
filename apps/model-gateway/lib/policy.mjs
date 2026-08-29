@@ -60,19 +60,17 @@ export function paidModelsEnabled(env = process.env) {
 export function modelPlan(role, { paidOk = false, preferredModels = [], env = process.env } = {}) {
   if (!ALLOWED_ROLES.includes(role)) throw new Error('unsupported_role');
 
-  const canUsePaid = paidOk && paidModelsEnabled(env);
-  const base = role === 'free' || !canUsePaid
-    ? FREE_MODELS
-    : PAID_MODEL_PROFILES[role];
-
-  const allow = new Set([...FREE_MODELS, ...Object.values(PAID_MODEL_PROFILES).flat()]);
+  // The semantic role `free` is an invariant, not a hint. It can never be
+  // upgraded into paid inference by request flags or preferred model ordering.
+  const canUsePaid = role !== 'free' && paidOk && paidModelsEnabled(env);
+  const base = canUsePaid ? PAID_MODEL_PROFILES[role] : FREE_MODELS;
+  const allow = new Set(canUsePaid
+    ? [...FREE_MODELS, ...Object.values(PAID_MODEL_PROFILES).flat()]
+    : FREE_MODELS);
   const preferred = preferredModels.filter((model) => allow.has(model));
   const ordered = [...preferred, ...base].filter((model, index, all) => all.indexOf(model) === index);
 
-  if (!canUsePaid) {
-    return ordered.filter((model) => FREE_MODELS.includes(model));
-  }
-  return ordered;
+  return canUsePaid ? ordered : ordered.filter((model) => FREE_MODELS.includes(model));
 }
 
 export function validateTask(body) {

@@ -18,7 +18,7 @@ export default async function handler(request, response) {
     return send(response, 400, { error: error.message });
   }
 
-  const paidRouteAuthorized = task.paidOk && paidModelsEnabled();
+  const paidRouteAuthorized = task.role !== 'free' && task.paidOk && paidModelsEnabled();
   const models = modelPlan(task.role, {
     paidOk: task.paidOk,
     preferredModels: task.preferredModels
@@ -58,6 +58,7 @@ export default async function handler(request, response) {
       maxOutputTokens: task.maxOutputTokens
     });
     const answer = extractText(result.payload);
+    if (!answer) throw new Error('gateway_empty_answer');
     const responseHash = sha256(JSON.stringify(result.payload));
     return send(response, 200, {
       schema: 'metaengine.model-gateway.peer-receipt.v1',
@@ -77,6 +78,8 @@ export default async function handler(request, response) {
       response_sha256: responseHash,
       started_at: startedAt,
       completed_at: new Date().toISOString(),
+      tariff_dependency: true,
+      data_policy: 'PUBLIC_OR_NON_SENSITIVE_ONLY',
       authority_effect: false
     });
   } catch (error) {
@@ -86,6 +89,8 @@ export default async function handler(request, response) {
       error: error.message || 'gateway_failure',
       upstream_status: Number.isInteger(error.status) ? error.status : null,
       request_sha256: requestHash,
+      tariff_dependency: true,
+      data_policy: 'PUBLIC_OR_NON_SENSITIVE_ONLY',
       authority_effect: false
     });
   }

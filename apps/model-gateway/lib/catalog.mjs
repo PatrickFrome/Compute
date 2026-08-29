@@ -81,7 +81,10 @@ export async function getModelCatalog({ fetchImpl = fetch, now = Date.now, ttlMs
 }
 
 export async function assertZeroSpend(models, options = {}) {
-  const catalog = await getModelCatalog(options);
+  // Spend authorization must use current pricing. A stale cache can turn a
+  // formerly-free route into an unintended paid request after repricing.
+  const ttlMs = options.ttlMs ?? 0;
+  const catalog = await getModelCatalog({ ...options, ttlMs });
   const evidence = [];
   for (const id of models) {
     const model = catalog.get(id);
@@ -168,9 +171,11 @@ export async function assertPaidBudget(models, {
   input,
   maxOutputTokens,
   env = process.env,
+  ttlMs = 0,
   ...catalogOptions
 } = {}) {
-  const catalog = await getModelCatalog(catalogOptions);
+  // Paid budget decisions are also based on a fresh catalog by default.
+  const catalog = await getModelCatalog({ ...catalogOptions, ttlMs });
   const estimates = [];
   for (const id of models) {
     const model = catalog.get(id);

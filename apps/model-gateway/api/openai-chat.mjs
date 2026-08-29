@@ -24,6 +24,9 @@ export default async function handler(request, response) {
       temperature: chat.temperature,
       logicalModel: chat.logicalModel
     });
+    const first = Array.isArray(result.payload?.choices) ? result.payload.choices[0] : null;
+    const content = first?.message?.content;
+    if (typeof content !== 'string' || !content.trim()) throw new Error('gateway_empty_answer');
     return response.status(200).json({
       ...result.payload,
       metaengine: {
@@ -34,6 +37,8 @@ export default async function handler(request, response) {
         zero_spend_verified: true,
         zero_spend_evidence: zeroSpendEvidence,
         confidential_data_supported: false,
+        tariff_dependency: true,
+        data_policy: 'PUBLIC_OR_NON_SENSITIVE_ONLY',
         authority_effect: false
       }
     });
@@ -41,6 +46,8 @@ export default async function handler(request, response) {
     return response.status(502).json({
       error: error.message || 'gateway_failure',
       upstream_status: Number.isInteger(error.status) ? error.status : null,
+      tariff_dependency: true,
+      data_policy: 'PUBLIC_OR_NON_SENSITIVE_ONLY',
       authority_effect: false
     });
   }

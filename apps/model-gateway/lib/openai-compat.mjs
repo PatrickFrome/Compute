@@ -38,7 +38,9 @@ export function logicalInventory() {
       permission: [],
       authority_effect: false,
       zero_spend_required: true,
-      confidential_data_supported: false
+      confidential_data_supported: false,
+      tariff_dependency: true,
+      data_policy: 'PUBLIC_OR_NON_SENSITIVE_ONLY'
     }))
   };
 }
