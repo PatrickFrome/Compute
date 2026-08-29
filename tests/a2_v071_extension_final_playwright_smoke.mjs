@@ -1,8 +1,11 @@
-import { chromium } from 'playwright';
+import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+const require = createRequire(import.meta.url);
+const playwrightModule = process.env.A2_PLAYWRIGHT_MODULE || 'playwright';
+const { chromium } = require(playwrightModule);
 const ext = path.resolve(process.env.A2_EXTENSION_STAGE || 'coordination/chat-control-plane/extension');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'a2-v071-final-'));
 const sentinel = `final-${Date.now()}-${Math.random().toString(16).slice(2)}`;
