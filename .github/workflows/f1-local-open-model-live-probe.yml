@@ -36,8 +36,10 @@ jobs:
           set -euo pipefail
           ollama pull qwen3:0.6b
           ollama pull deepseek-r1:1.5b
+          ollama pull llama3.2:1b
+          ollama pull gemma3:1b
 
-      - name: Run real Qwen and DeepSeek inference
+      - name: Run real four-family local inference
         shell: bash
         run: |
           set -euo pipefail
@@ -47,6 +49,8 @@ jobs:
           probes = [
               ('qwen', 'qwen3:0.6b', 'METAENGINE_QWEN_LOCAL_CONNECTED', 96),
               ('deepseek', 'deepseek-r1:1.5b', 'METAENGINE_DEEPSEEK_LOCAL_CONNECTED', 384),
+              ('llama', 'llama3.2:1b', 'METAENGINE_LLAMA_LOCAL_CONNECTED', 96),
+              ('gemma', 'gemma3:1b', 'METAENGINE_GEMMA_LOCAL_CONNECTED', 96),
           ]
           successes=[]
           for family, model, marker, budget in probes:
@@ -78,17 +82,21 @@ jobs:
                   'marker_seen_normalized':marker_seen,
                   'content':str(content or '')[:600],
                   'thinking':str(thinking or '')[:600],
-                  'legacy_response':str(legacy or '')[:200],
                   'done':payload.get('done') if isinstance(payload,dict) else None,
                   'done_reason':payload.get('done_reason') if isinstance(payload,dict) else None,
+                  'eval_count':payload.get('eval_count') if isinstance(payload,dict) else None,
+                  'eval_duration':payload.get('eval_duration') if isinstance(payload,dict) else None,
               }
               print('LOCAL_OPEN_MODEL_PROBE', json.dumps(rec, ensure_ascii=False))
               if inference_observed: successes.append(rec)
-          print('LOCAL_OPEN_MODEL_SUMMARY', json.dumps({
+          summary={
+              'schema':'metaengine.local-open-model-live-probe.v1',
               'success_count':len(successes),
               'models':[r['model'] for r in successes],
+              'families':[r['family'] for r in successes],
               'strict_marker_count':sum(1 for r in successes if r['marker_seen_normalized'])
-          }, ensure_ascii=False))
-          if len(successes) < 2:
-              raise SystemExit('local_multimodel_probe_incomplete')
+          }
+          print('LOCAL_OPEN_MODEL_SUMMARY', json.dumps(summary, ensure_ascii=False))
+          if len(successes) < 4:
+              raise SystemExit('local_four_family_probe_incomplete')
           PY
