@@ -12,7 +12,7 @@ concurrency:
 jobs:
   build-install-dp-launch:
     runs-on: windows-2022
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - name: Checkout immutable source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -59,12 +59,12 @@ jobs:
           $asar = Join-Path (Resolve-Path 'dist-test\win-unpacked\resources').Path 'app.asar'
           $listing = npx --yes @electron/asar list $asar
           $listingText = (($listing -join "`n") -replace '\\','/')
-          foreach ($required in @('/src/supervisor-device-identity.mjs','/src/native-supervisor-client.mjs','/src/native-browser-control.mjs','/src/supervisor-keepalive.mjs','/src/supervisor-lifecycle-runtime.mjs','/src/self-update-runtime.mjs','/src/host-resilience-runtime.mjs')) {
+          foreach ($required in @('/src/supervisor-device-identity.mjs','/src/native-supervisor-client.mjs','/src/native-browser-control.mjs','/src/supervisor-keepalive.mjs','/src/supervisor-lifecycle-runtime.mjs','/src/self-update-runtime.mjs','/src/host-resilience-runtime.mjs','/src/browser-sentinel.mjs','/src/browser-sentinel-worker.cjs')) {
             if (-not $listingText.Contains($required)) { throw "packaged_supervisor_module_missing:$required" }
           }
           $updateConfig = Join-Path (Resolve-Path 'dist-test\win-unpacked\resources').Path 'app-update.yml'
           if (-not (Test-Path $updateConfig)) { throw 'packaged_update_config_missing' }
-          "native_supervisor_keepalive_self_update_host_resilience_modules=present" | Set-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
+          "native_supervisor_keepalive_self_update_host_resilience_sentinel_modules=present" | Set-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
           "app_update_config=present" | Add-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
           "single_build_promotion=true" | Add-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
           "staging_percentage=100" | Add-Content "$env:RUNNER_TEMP\supervisor-package-proof.txt"
@@ -130,22 +130,66 @@ jobs:
           if ($p.HasExited) { throw "installed_browser_exited_after_supervisor_bootstrap:$($p.ExitCode)" }
           try { $p.CloseMainWindow() | Out-Null } catch {}
           if (-not $p.WaitForExit(5000)) { try { $p.Kill($true) } catch {} }
+      - name: Crash sentinel physical recovery smoke
+        shell: powershell
+        env:
+          METAENGINE_DISABLE_SELF_UPDATE: '1'
+        run: |
+          $app = (Get-Content "$env:RUNNER_TEMP\installed-app-path.txt").Trim()
+          $p = Start-Process -FilePath $app -PassThru
+          $deadline = (Get-Date).AddSeconds(30)
+          do {
+            Start-Sleep -Milliseconds 500
+            $p.Refresh()
+            if ($p.HasExited) { throw "sentinel_source_browser_exited_early:$($p.ExitCode)" }
+            if ($p.MainWindowHandle -ne 0) { break }
+          } while ((Get-Date) -lt $deadline)
+          if ($p.MainWindowHandle -eq 0) { try { $p.Kill($true) } catch {}; throw 'sentinel_source_window_missing' }
+          Start-Sleep -Seconds 6
+          $oldPid = $p.Id
+          $p.Kill($true)
+          $p.WaitForExit()
+          $recoverDeadline = (Get-Date).AddSeconds(30)
+          $recovered = $null
+          do {
+            Start-Sleep -Seconds 1
+            $rows = Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $oldPid -and $_.ExecutablePath -eq $app }
+            $recovered = $rows | Sort-Object ProcessId | Select-Object -First 1
+            if ($recovered) { break }
+          } while ((Get-Date) -lt $recoverDeadline)
+          if (-not $recovered) { throw 'browser_sentinel_relaunch_not_observed' }
+          $rp = Get-Process -Id $recovered.ProcessId -ErrorAction Stop
+          $windowDeadline = (Get-Date).AddSeconds(20)
+          do {
+            Start-Sleep -Milliseconds 500
+            $rp.Refresh()
+            if ($rp.HasExited) { throw "recovered_browser_exited_early:$($rp.ExitCode)" }
+            if ($rp.MainWindowHandle -ne 0) { break }
+          } while ((Get-Date) -lt $windowDeadline)
+          if ($rp.MainWindowHandle -eq 0) { try { $rp.Kill($true) } catch {}; throw 'recovered_browser_window_missing' }
+          "source_pid=$oldPid" | Set-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
+          "recovered_pid=$($rp.Id)" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
+          "exact_executable=$app" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
+          "recovery=PASS" | Add-Content "$env:RUNNER_TEMP\sentinel-proof.txt"
+          try { $rp.CloseMainWindow() | Out-Null } catch {}
+          if (-not $rp.WaitForExit(5000)) { try { $rp.Kill($true) } catch {} }
       - name: Stage exact verified release evidence
         working-directory: apps/metaengine-browser
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force -Path release-single | Out-Null
           $installer = Get-Content "$env:RUNNER_TEMP\installer-path.txt"
-          $latest = Get-Content "$env:RUNNER_TEMP\latest-yml-path.txt"
+          $latest = (Get-Content "$env:RUNNER_TEMP\latest-yml-path.txt").Trim()
           $expected = (Get-Content "$env:RUNNER_TEMP\installer-sha256.txt").Trim()
           $actual = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $expected) { throw 'verified_installer_digest_changed_before_promotion' }
           Copy-Item $installer 'release-single\METAENGINE-Browser-Supervisor-Keepalive-Setup.exe'
           Copy-Item "$env:RUNNER_TEMP\installer-sha256.txt" 'release-single\METAENGINE-Browser-Supervisor-Keepalive-Setup.exe.sha256'
+          Copy-Item $latest 'release-single\latest.yml'
           Copy-Item "$env:RUNNER_TEMP\dp-proof.txt" 'release-single\development-plane-proof.txt'
           Copy-Item "$env:RUNNER_TEMP\supervisor-package-proof.txt" 'release-single\supervisor-package-proof.txt'
           Copy-Item "$env:RUNNER_TEMP\launch-proof.txt" 'release-single\launch-proof.txt'
-          Copy-Item "$env:RUNNER_TEMP\latest-yml-path.txt" 'release-single\latest.yml.path.txt'
+          Copy-Item "$env:RUNNER_TEMP\sentinel-proof.txt" 'release-single\sentinel-proof.txt'
           if (Test-Path "$env:RUNNER_TEMP\browser-version.txt") { Copy-Item "$env:RUNNER_TEMP\browser-version.txt" 'release-single\browser-version.txt' }
           git rev-parse HEAD | Set-Content 'release-single\git-head.txt'
           $manifest = [ordered]@{
@@ -156,6 +200,7 @@ jobs:
             run_attempt = $env:GITHUB_RUN_ATTEMPT
             installer_sha256 = $actual
             single_build_promotion = $true
+            crash_sentinel_physical_recovery = $true
             development_channel = $true
             staging_percentage = 100
             production_safe = $false
@@ -201,5 +246,5 @@ jobs:
           $expected = (Get-Content "$env:RUNNER_TEMP\installer-sha256.txt").Trim()
           $actual = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $expected) { throw 'release_installer_digest_not_verified_candidate' }
-          gh release create $tag $installer.FullName $blockmap.FullName $latest.FullName $manifest.FullName --verify-tag --prerelease --title "METAENGINE Browser $tag" --notes "Development self-update candidate. Exact artifact passed contract tests, NSIS install, Development Plane smoke, installed Browser launch, and digest revalidation. Not production-safe until Authenticode publisher verification is sealed."
+          gh release create $tag $installer.FullName $blockmap.FullName $latest.FullName $manifest.FullName --verify-tag --prerelease --title "METAENGINE Browser $tag" --notes "Development self-update candidate. Exact artifact passed contract tests, NSIS install, Development Plane smoke, installed Browser launch, crash-sentinel recovery, and digest revalidation. Not production-safe until Authenticode publisher verification is sealed."
           if ($LASTEXITCODE -ne 0) { throw "verified_release_publish_failed:${tag}" }
