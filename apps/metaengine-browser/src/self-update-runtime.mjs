@@ -1,20 +1,30 @@
 export class SelfUpdateRuntime {
-  #updater = null; #state = { state: 'UNINITIALIZED', available_version: null, downloaded_version: null, last_check_at: null, last_error: null };
+  #updater = null; #injectedUpdater; #packagedOverride;
+  #state = { state: 'UNINITIALIZED', available_version: null, downloaded_version: null, last_check_at: null, last_error: null };
   #lastCheck = 0; #intervalMs; #canRestart;
 
-  constructor({ intervalMs = 10 * 60 * 1000, canRestart = async () => false } = {}) {
+  constructor({ intervalMs = 10 * 60 * 1000, canRestart = async () => false, updater = null, packaged = null } = {}) {
     this.#intervalMs = Math.max(60 * 1000, Number(intervalMs) || 10 * 60 * 1000);
     this.#canRestart = canRestart;
+    this.#injectedUpdater = updater;
+    this.#packagedOverride = packaged;
   }
 
   snapshot() { return structuredClone({ schema: 'metaengine.self-update-runtime.v1', ...this.#state, authority_effect: false }); }
 
   async start() {
     try {
-      const { app } = await import('electron');
-      if (!app.isPackaged || process.env.METAENGINE_DISABLE_SELF_UPDATE === '1') { this.#state.state = 'DISABLED'; return this.snapshot(); }
-      const mod = await import('electron-updater');
-      const updater = mod.autoUpdater || mod.default?.autoUpdater;
+      let packaged = this.#packagedOverride;
+      if (packaged == null) {
+        const { app } = await import('electron');
+        packaged = app.isPackaged;
+      }
+      if (!packaged || process.env.METAENGINE_DISABLE_SELF_UPDATE === '1') { this.#state.state = 'DISABLED'; return this.snapshot(); }
+      let updater = this.#injectedUpdater;
+      if (!updater) {
+        const mod = await import('electron-updater');
+        updater = mod.autoUpdater || mod.default?.autoUpdater;
+      }
       if (!updater) throw new Error('electron_updater_unavailable');
       updater.allowPrerelease = true;
       updater.allowDowngrade = false;
