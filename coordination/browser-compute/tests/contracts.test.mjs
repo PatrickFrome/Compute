@@ -51,6 +51,7 @@ test('chrome args isolate profile and expose only the inherited B3 pipe with sem
     assert.ok(protocol.identity.ephemeral.includes(required), `identity.ephemeral missing ${required}`);
   }
   assert.ok(!protocol.identity.ephemeral.includes('debug_port'));
+  assert.ok(protocol.trusted_engine_transport, 'protocol.trusted_engine_transport missing');
   assert.equal(protocol.trusted_engine_transport.kind, 'chromium_remote_debugging_pipe');
   assert.equal(protocol.trusted_engine_transport.devtools_tcp_listener, false);
   assert.equal(protocol.trusted_engine_transport.raw_cdp_external, false);

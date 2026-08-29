@@ -1,4 +1,4 @@
-﻿import crypto from 'node:crypto';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import { rotateControlToken, rpcEndpoint } from './security.mjs';
@@ -17,7 +17,13 @@ export const RPC_METHODS = Object.freeze([
   'target.list',
   'target.semantic_snapshot',
   'target.activate',
-  'target.close'
+  'target.close',
+  'action.navigate',
+  'action.click',
+  'action.type',
+  'action.submit',
+  'receipt.get',
+  'receipt.verify'
 ]);
 
 export const RPC_METHOD_EFFECTS = Object.freeze({
@@ -32,7 +38,13 @@ export const RPC_METHOD_EFFECTS = Object.freeze({
   'target.list': 'READ_ONLY',
   'target.semantic_snapshot': 'READ_ONLY',
   'target.activate': 'LOCAL_UI',
-  'target.close': 'LOCAL_LIFECYCLE'
+  'target.close': 'LOCAL_LIFECYCLE',
+  'action.navigate': 'ACTUATION',
+  'action.click': 'ACTUATION',
+  'action.type': 'ACTUATION',
+  'action.submit': 'ACTUATION',
+  'receipt.get': 'READ_ONLY',
+  'receipt.verify': 'READ_ONLY'
 });
 
 const RPC_PARAM_KEYS = Object.freeze({
@@ -47,7 +59,13 @@ const RPC_PARAM_KEYS = Object.freeze({
   'target.list': ['profileId', 'includeRetired'],
   'target.semantic_snapshot': ['profileId', 'targetId', 'maxNodes', 'taskText'],
   'target.activate': ['profileId', 'targetId'],
-  'target.close': ['profileId', 'targetId']
+  'target.close': ['profileId', 'targetId'],
+  'action.navigate': ['profileId', 'targetId', 'actionId', 'lease', 'url', 'idempotencyKey'],
+  'action.click': ['profileId', 'targetId', 'actionId', 'lease', 'semanticId', 'framePath', 'idempotencyKey'],
+  'action.type': ['profileId', 'targetId', 'actionId', 'lease', 'semanticId', 'text', 'idempotencyKey'],
+  'action.submit': ['profileId', 'targetId', 'actionId', 'lease', 'semanticId', 'idempotencyKey'],
+  'receipt.get': ['receiptId'],
+  'receipt.verify': ['receiptId']
 });
 
 export function validateRpcParams(method, params) {

@@ -29,7 +29,8 @@ async function fixture(name, cdpCall) {
       ['default', { browser_context_id: null, process_incarnation_id: INCARNATION }]
     ]),
     meta: {},
-    lockFile: null
+    lockFile: null,
+    semanticFrames: new Map()
   });
   return {
     root,
@@ -294,3 +295,5 @@ test('RPC lifecycle operations are serialized across separate client connections
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+

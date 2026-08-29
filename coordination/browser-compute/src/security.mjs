@@ -1,4 +1,4 @@
-import crypto from 'node:crypto';
+﻿import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -22,12 +22,6 @@ export function validateContextId(value) {
 export function validateTargetId(value) {
   const id = String(value || '').trim().toLowerCase();
   if (!TARGET_ID_RE.test(id)) throw new Error('target_id_invalid');
-  return id;
-}
-
-export function validateContextId(value) {
-  const id = String(value || '').trim().toLowerCase();
-  if (!CONTEXT_ID_RE.test(id)) throw new Error('context_id_invalid');
   return id;
 }
 
@@ -82,4 +76,17 @@ export function rpcEndpoint(root) {
     return `\\\\.\\pipe\\metaengine-a2-compute-browser-${user}`;
   }
   return path.join(root, 'control.sock');
+}
+
+export function validateLeaseHmac(lease, key) {
+  if (!lease || typeof lease !== 'object') return false;
+  if (!key) return true;
+  const data = `${lease.lease_id}|${lease.resource_id}|${lease.actor_id}|${lease.not_after}`;
+  const expected = crypto.createHmac('sha256', String(key)).update(data).digest('hex');
+  return expected === String(lease.hmac || '');
+}
+
+export function validateActionKind(kind) {
+  const valid = new Set(['NAVIGATE', 'CLICK', 'TYPE', 'SUBMIT']);
+  return valid.has(String(kind || '').toUpperCase());
 }

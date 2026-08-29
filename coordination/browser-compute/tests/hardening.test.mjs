@@ -43,7 +43,7 @@ test('RPC effect classes are explicit and web authority remains absent', () => {
   assert.equal(RPC_METHOD_EFFECTS['profile.start'], 'LOCAL_LIFECYCLE');
   assert.equal(RPC_METHOD_EFFECTS['target.activate'], 'LOCAL_UI');
   for (const value of Object.values(RPC_METHOD_EFFECTS)) {
-    assert.match(value, /^(READ_ONLY|LOCAL_LIFECYCLE|LOCAL_UI)$/);
+    assert.match(value, /^(READ_ONLY|LOCAL_LIFECYCLE|LOCAL_UI|ACTUATION)$/);
   }
 });
 
@@ -87,7 +87,7 @@ test('target creation persists PREPARING intent before the Chromium effect', asy
         }
       }
     };
-    runtime.running.set(profileId, { processRef, bindings: new Map(), meta: {}, lockFile: null });
+    runtime.running.set(profileId, { processRef, bindings: new Map(), meta: {}, lockFile: null, semanticFrames: new Map() });
     const created = await runtime.createTarget({ profileId, targetId: 'intent_target' });
     assert.equal(created.status, 'ACTIVE');
     assert.equal(created.pending_operation_id, null);
