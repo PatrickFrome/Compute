@@ -42,10 +42,25 @@ export async function runSelfUpdateSmoke({ app, timeoutMs = 120_000 } = {}) {
         last_error: null,
         authority_effect: false,
       });
+    },
+    beforeInstallerLaunch: async (receipt) => {
       if (!app.hasSingleInstanceLock()) throw new Error('self_update_smoke_primary_lock_missing');
-      // Match production handoff: release the primary lock only after durable pre-install evidence.
-      // N is already quiescent in this smoke; N+1 must be able to acquire the same stable app lock.
       app.releaseSingleInstanceLock();
+      const released = !app.hasSingleInstanceLock();
+      if (!released) throw new Error('self_update_smoke_singleton_release_failed');
+      await appendTrace(tracePath, {
+        schema: 'metaengine.self-update-smoke.trace.v1',
+        label: 'INSTALLER_HANDOFF_PREPARED',
+        at: new Date().toISOString(),
+        app_version: app.getVersion(),
+        state: 'RESTARTING',
+        available_version: receipt.available_version,
+        downloaded_version: receipt.version,
+        metadata_verified: receipt.metadata_verified === true,
+        restart_gate_safe: receipt.restart_gate_safe === true,
+        singleton_lock_released: true,
+        authority_effect: false,
+      });
     },
   });
   let lastState = null;
@@ -66,6 +81,7 @@ export async function runSelfUpdateSmoke({ app, timeoutMs = 120_000 } = {}) {
         restart_gate_safe: snapshot.restart_gate_safe,
         ci_test_feed_active: snapshot.ci_test_feed_active,
         pre_install_receipt_persisted: snapshot.pre_install_receipt_persisted,
+        installer_handoff_prepared: snapshot.installer_handoff_prepared,
         last_error: snapshot.last_error,
         authority_effect: false,
       };
