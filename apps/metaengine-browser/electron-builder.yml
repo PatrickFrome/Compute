@@ -22,7 +22,7 @@ nsis:
   createDesktopShortcut: always
   createStartMenuShortcut: true
   shortcutName: METAENGINE Browser TEST
-  runAfterFinish: true
+  runAfterFinish: false
   deleteAppDataOnUninstall: false
   allowElevation: false
   installerLanguages:
