@@ -22,6 +22,7 @@ jobs:
         with:
           persist-credentials: false
 
+      # This is intentionally real inference, not a catalog-only check.
       - name: Run real GitHub Models inference probes
         env:
           GH_TOKEN: ${{ github.token }}
