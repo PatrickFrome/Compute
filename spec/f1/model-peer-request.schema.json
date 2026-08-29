@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metaengine.local/spec/f1/model-peer-request.schema.json",
+  "title": "METAENGINE Model Peer Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task_id", "prompt"],
+  "properties": {
+    "task_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "role": {
+      "type": "string",
+      "enum": ["free", "architecture", "coding", "critic", "research"],
+      "default": "free"
+    },
+    "prompt": { "type": "string", "minLength": 1, "maxLength": 120000 },
+    "context": { "type": "string", "maxLength": 240000, "default": "" },
+    "paid_ok": { "type": "boolean", "default": false },
+    "preferred_models": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 },
+      "default": []
+    }
+  }
+}
