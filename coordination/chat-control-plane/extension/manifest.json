@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "METAENGINE A2 Browser Operator",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "minimum_chrome_version": "125",
-  "description": "Device-bound MV3 browser operator with semantic perception, supervisor control, durable identity, and fenced physical actuation.",
+  "description": "GPT fleet MV3 operator with durable agents, same-point dispatch, supervisor control, and single fenced browser actuation.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyhqRE5U0FGkdVCvNgrhYuDGlBxEOxiwGyt1qBtUZYNWsJHt8xntkqCvR6YDq6k/0BhtStFsO/vIn2/JQA4RIMl15GRq4el7gF/Pw3uCouV2ExhJfnyqPmXUsNrAW0USL0r84usQgYb1RGAfiJte+ifq7rTxppIwkXuKmcF52O1MqhjV6YJlf6kiegN5ZjLsFwGWEiEpsBggRcAifG89W5Xy/850sZEJ1AvhRCIHZ1IRr760sgIu43SjugvSz3pJNe40KIVmng/YFBscZ+uzC4Tn9Wpk+TRxWepxOQ4/0/fbzPs09g/aucXjDlf+r2tFM2FcZ0Wj2yTYhk07DDNHJoQIDAQAB",
   "permissions": [
     "storage",
@@ -15,7 +15,6 @@
   "host_permissions": [
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
-    "https://chat.z.ai/*",
     "https://xpeibufgzjknrhbhpffp.supabase.co/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
@@ -28,8 +27,7 @@
     {
       "matches": [
         "https://chatgpt.com/*",
-        "https://chat.openai.com/*",
-        "https://chat.z.ai/*"
+        "https://chat.openai.com/*"
       ],
       "js": [
         "prompt-gate.js"
@@ -39,13 +37,10 @@
     {
       "matches": [
         "https://chatgpt.com/*",
-        "https://chat.openai.com/*",
-        "https://chat.z.ai/*"
+        "https://chat.openai.com/*"
       ],
       "js": [
-        "platform-dom-compat.js",
-        "content.js",
-        "content-recovery.js"
+        "content.js"
       ],
       "run_at": "document_idle"
     }
@@ -55,6 +50,6 @@
   },
   "options_page": "options.html",
   "action": {
-    "default_title": "METAENGINE A2 Browser Operator 0.7.2 — Durable Identity"
+    "default_title": "METAENGINE A2 Browser Operator 0.8.0 — GPT Fleet Runtime"
   }
 }
