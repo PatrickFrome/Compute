@@ -6,21 +6,26 @@ const SHA256_RE = /^[a-f0-9]{64}$/;
 const SAFE_FILENAME_RE = /^[0-9A-Za-z][0-9A-Za-z._ -]{0,179}$/;
 const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
 const HARD_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+const MAX_REDIRECT_CHAIN = 12;
 
 function clipError(error) { return String(error?.message || error || 'unknown_error').slice(0, 300); }
 function clone(value) { return value == null ? value : structuredClone(value); }
 
-export function validateVerifiedDownloadRequest(input = {}) {
-  const rawUrl = String(input?.url || '').trim();
-  if (!rawUrl || rawUrl.length > 4096) throw new Error('verified_download_url_invalid');
-  const url = new URL(rawUrl);
-  if (url.protocol !== 'https:') throw new Error('verified_download_https_required');
-  if (url.username || url.password || url.hash) throw new Error('verified_download_url_components_invalid');
+function validateSafeHttpsUrl(value, errorPrefix = 'verified_download') {
+  const raw = String(value || '').trim();
+  if (!raw || raw.length > 4096) throw new Error(`${errorPrefix}_url_invalid`);
+  const url = new URL(raw);
+  if (url.protocol !== 'https:') throw new Error(`${errorPrefix}_https_required`);
+  if (url.username || url.password || url.hash) throw new Error(`${errorPrefix}_url_components_invalid`);
   const hostname = url.hostname.toLowerCase();
   if (!hostname || hostname === 'localhost' || hostname.endsWith('.localhost') || hostname === '[::1]' || /^127\./.test(hostname)) {
-    throw new Error('verified_download_loopback_blocked');
+    throw new Error(`${errorPrefix}_loopback_blocked`);
   }
+  return url.href;
+}
 
+export function validateVerifiedDownloadRequest(input = {}) {
+  const safeUrl = validateSafeHttpsUrl(input?.url);
   const filename = String(input?.filename || '').trim();
   if (!SAFE_FILENAME_RE.test(filename) || filename === '.' || filename === '..' || filename.includes('/') || filename.includes('\\')) {
     throw new Error('verified_download_filename_invalid');
@@ -30,11 +35,21 @@ export function validateVerifiedDownloadRequest(input = {}) {
   const maxBytes = Number(input?.max_bytes ?? DEFAULT_MAX_BYTES);
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > HARD_MAX_BYTES) throw new Error('verified_download_max_bytes_invalid');
   return Object.freeze({
-    url: url.href,
+    url: safeUrl,
     filename,
     expected_sha256: expectedSha256,
     max_bytes: maxBytes,
   });
+}
+
+function validateObservedChain(item, expectedUrl) {
+  const rawChain = typeof item?.getURLChain === 'function' ? item.getURLChain() : [];
+  const rawCurrent = String(item?.getURL?.() || '').trim();
+  const chain = Array.isArray(rawChain) && rawChain.length > 0 ? rawChain.map(String) : (rawCurrent ? [rawCurrent] : []);
+  if (chain.length === 0 || chain.length > MAX_REDIRECT_CHAIN) throw new Error('verified_download_url_chain_invalid');
+  const normalized = chain.map((url) => validateSafeHttpsUrl(url, 'verified_download_redirect'));
+  if (!normalized.includes(expectedUrl)) throw new Error('verified_download_url_binding_mismatch');
+  return normalized;
 }
 
 export class VerifiedDownloadManager {
@@ -136,17 +151,19 @@ export class VerifiedDownloadManager {
       return;
     }
 
-    const chain = typeof item?.getURLChain === 'function' ? item.getURLChain() : [];
-    const observedUrl = String(chain?.at?.(-1) || item?.getURL?.() || '');
-    if (observedUrl !== active.request.url) {
+    let chain;
+    try {
+      chain = validateObservedChain(item, active.request.url);
+    } catch (error) {
       event?.preventDefault?.();
       try { item?.cancel?.(); } catch {}
-      await this.#failActive(new Error('verified_download_url_binding_mismatch'));
+      await this.#failActive(error);
       return;
     }
 
     active.item = item;
     active.state = 'DOWNLOADING';
+    active.url_chain = chain;
     item.setSavePath(active.partial_path);
     item.on?.('updated', () => {
       if (!this.#active || this.#active.request_id !== active.request_id || active.settled) return;
@@ -191,6 +208,7 @@ export class VerifiedDownloadManager {
         schema: 'metaengine.verified-download-receipt.v1',
         request_id: active.request_id,
         url: active.request.url,
+        url_chain: clone(active.url_chain || [active.request.url]),
         filename: active.request.filename,
         path: active.target_path,
         bytes: stat.size,
