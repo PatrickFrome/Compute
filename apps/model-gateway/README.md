@@ -29,10 +29,10 @@ The live Vercel model catalog must be re-checked before promotion because model 
 
 ## Frontier profiles (disabled by default)
 
-- architecture: Claude Sonnet 5 → Gemini 3.7 Flash → DeepSeek V4 Pro 0813 → GLM 5.3
-- coding: DeepSeek V4 Pro 0813 → Claude Sonnet 5 → Gemini 3.7 Flash → Grok 4.6
-- critic: Gemini 3.7 Flash → GLM 5.3 → DeepSeek V4 Pro 0813 → Claude Sonnet 5
-- research: Grok 4.6 → Gemini 3.7 Flash → Claude Sonnet 5 → GLM 5.3
+- architecture: Claude Sonnet 5 → Gemini 3.7 Flash → Qwen 3.8 Max → DeepSeek V4 Pro 0813 → GLM 5.3
+- coding: DeepSeek V4 Pro 0813 → Claude Sonnet 5 → Gemini 3.7 Flash → Qwen 3.8 Flash → Grok 4.6
+- critic: Gemini 3.7 Flash → GLM 5.3 → Qwen 3.8 Max → DeepSeek V4 Pro 0813 → Claude Sonnet 5
+- research: Grok 4.6 → Gemini 3.7 Flash → Claude Sonnet 5 → Qwen 3.8 Max → GLM 5.3
 
 ## SAME_POINT_DUEL_V4 / sovereign compatibility
 
