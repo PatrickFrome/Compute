@@ -8,9 +8,7 @@ const source = await readFile(edgePath, 'utf8');
 function normalize(raw) {
   const value = raw.trim();
   const thinkEnd = value.lastIndexOf('</think>');
-  if (thinkEnd >= 0 && value.slice(thinkEnd + 8).trim()) {
-    return { text: value.slice(thinkEnd + 8).trim(), normalization: 'after_think_end' };
-  }
+  if (thinkEnd >= 0 && value.slice(thinkEnd + 8).trim()) return { text: value.slice(thinkEnd + 8).trim(), normalization: 'after_think_end' };
   const final = value.match(/<final>([\s\S]*?)<\/final>/i);
   if (final?.[1]?.trim()) return { text: final[1].trim(), normalization: 'final_tag' };
   return { text: value, normalization: 'none' };
@@ -27,10 +25,7 @@ function classify(message) {
   return 'upstream';
 }
 
-function comparableText(value) {
-  return value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
-}
-
+function comparableText(value) { return value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase(); }
 function comparableNumber(value) {
   const s = value.normalize('NFKC').trim().replace(/,/g, '');
   if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(s)) return null;
@@ -38,39 +33,26 @@ function comparableNumber(value) {
   if (!Number.isFinite(n)) return null;
   return Object.is(n, -0) ? '0' : String(n);
 }
-
 function agreement(results) {
   const ok = results.filter(x => x?.ok === true && typeof x.text === 'string');
   const base = { evaluated: ok.length >= 2, successful_responses: ok.length, truth_claimed: false, semantic_consensus: null, requires_supervisor_judgment: true };
   if (ok.length < 2) return { ...base, signal: 'insufficient', unanimous: false, divergence_detected: false, matched_models: [], candidate: null, agreement_ratio: ok.length ? 1 : 0 };
-  const exact = new Map();
-  const nums = new Map();
+  const exact = new Map(); const nums = new Map();
   for (const r of ok) {
-    const ek = comparableText(r.text);
-    exact.set(ek, [...(exact.get(ek) || []), r.model]);
-    const nk = comparableNumber(r.text);
-    if (nk !== null) nums.set(nk, [...(nums.get(nk) || []), r.model]);
+    const ek = comparableText(r.text); exact.set(ek, [...(exact.get(ek) || []), r.model]);
+    const nk = comparableNumber(r.text); if (nk !== null) nums.set(nk, [...(nums.get(nk) || []), r.model]);
   }
   const largest = groups => [...groups.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))[0] ?? null;
-  const ex = largest(exact);
-  const nu = largest(nums);
-  let signal = 'divergent';
-  let cluster = null;
-  let candidate = null;
-  if (ex && ex[1].length >= 2) {
-    signal = 'exact_match'; cluster = ex; candidate = ok.find(x => comparableText(x.text) === ex[0])?.text?.trim() ?? ex[0];
-  } else if (nu && nu[1].length >= 2) {
-    signal = 'numeric_match'; cluster = nu; candidate = nu[0];
-  }
+  const ex = largest(exact); const nu = largest(nums); let signal = 'divergent'; let cluster = null; let candidate = null;
+  if (ex && ex[1].length >= 2) { signal = 'exact_match'; cluster = ex; candidate = ok.find(x => comparableText(x.text) === ex[0])?.text?.trim() ?? ex[0]; }
+  else if (nu && nu[1].length >= 2) { signal = 'numeric_match'; cluster = nu; candidate = nu[0]; }
   const size = cluster?.[1].length ?? 1;
   return { ...base, signal, unanimous: size === ok.length && signal !== 'divergent', divergence_detected: size < ok.length, matched_models: cluster?.[1] ?? [], candidate, agreement_ratio: size / ok.length };
 }
 
-test('live broker v6 registry and adaptive order are persisted', () => {
-  assert.match(source, /metaengine\.live-peer-broker\.v6/);
-  for (const id of ['gemma2', 'nemotron', 'tinyllama', 'llama2']) {
-    assert.match(source, new RegExp(`id:\\"${id}\\"`));
-  }
+test('live broker v7 registry and adaptive order are persisted', () => {
+  assert.match(source, /metaengine\.live-peer-broker\.v7/);
+  for (const id of ['gemma2', 'nemotron', 'tinyllama', 'llama2']) assert.match(source, new RegExp(`id:\\"${id}\\"`));
   assert.match(source, /const PRIMARY=\["gemma2","nemotron"\]/);
   assert.match(source, /const BACKUPS=\["tinyllama","llama2"\]/);
 });
@@ -92,35 +74,39 @@ test('known live transport failures map to stable cooldown classes', () => {
 
 test('agreement is observational and never claims truth', () => {
   const r = agreement([{ ok: true, model: 'a', text: '63' }, { ok: true, model: 'b', text: '63' }]);
-  assert.equal(r.signal, 'exact_match');
-  assert.equal(r.unanimous, true);
-  assert.equal(r.truth_claimed, false);
-  assert.equal(r.semantic_consensus, null);
-  assert.equal(r.requires_supervisor_judgment, true);
-  assert.deepEqual(r.matched_models, ['a', 'b']);
+  assert.equal(r.signal, 'exact_match'); assert.equal(r.unanimous, true); assert.equal(r.truth_claimed, false); assert.equal(r.semantic_consensus, null); assert.equal(r.requires_supervisor_judgment, true); assert.deepEqual(r.matched_models, ['a', 'b']);
 });
 
-test('numeric agreement recognizes equivalent numeric forms without calling them semantic consensus', () => {
+test('numeric agreement recognizes equivalent numeric forms without semantic consensus', () => {
   const r = agreement([{ ok: true, model: 'a', text: '63.0' }, { ok: true, model: 'b', text: '63' }]);
-  assert.equal(r.signal, 'numeric_match');
-  assert.equal(r.candidate, '63');
-  assert.equal(r.truth_claimed, false);
-  assert.equal(r.unanimous, true);
+  assert.equal(r.signal, 'numeric_match'); assert.equal(r.candidate, '63'); assert.equal(r.truth_claimed, false); assert.equal(r.unanimous, true);
 });
 
 test('divergent peer answers remain explicit', () => {
   const r = agreement([{ ok: true, model: 'a', text: '42' }, { ok: true, model: 'b', text: '43' }]);
-  assert.equal(r.signal, 'divergent');
-  assert.equal(r.unanimous, false);
-  assert.equal(r.divergence_detected, true);
-  assert.equal(r.agreement_ratio, 0.5);
+  assert.equal(r.signal, 'divergent'); assert.equal(r.unanimous, false); assert.equal(r.divergence_detected, true); assert.equal(r.agreement_ratio, 0.5);
 });
 
 test('agreement ignores failed transports and reports insufficient evidence', () => {
   const r = agreement([{ ok: true, model: 'a', text: '42' }, { ok: false, model: 'b', error: 'quota' }]);
-  assert.equal(r.signal, 'insufficient');
-  assert.equal(r.successful_responses, 1);
-  assert.equal(r.evaluated, false);
+  assert.equal(r.signal, 'insufficient'); assert.equal(r.successful_responses, 1); assert.equal(r.evaluated, false);
+});
+
+test('OpenAI-compatible endpoint accepts the same bearer contract as SAME_POINT_DUEL_V4', () => {
+  assert.match(source, /bearer===`Bearer \$\{CLIENT_MARKER\}`/);
+  assert.match(source, /u\.pathname\.endsWith\("\/v1\/chat\/completions"\)/);
+  assert.match(source, /object:"chat\.completion"/);
+  assert.match(source, /choices:\[\{index:0,message:\{role:"assistant",content:result\.text\}/);
+});
+
+test('OpenAI compatibility reports served-model provenance metadata', () => {
+  for (const field of ['upstream_served_model', 'tariff_dependency:true', 'zero_spend_verified:null', 'data_policy:"PUBLIC_EXTERNAL_HUGGINGFACE_SPACE"', 'confidential_data_supported:false', 'authority_effect:false']) assert.match(source, new RegExp(field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+test('requested output tokens are bounded per peer', () => {
+  assert.match(source, /max_tokens_cap:384/);
+  assert.match(source, /Math\.max\(16,Math\.min\(p\.max_tokens_cap,Math\.trunc\(n\)\)\)/);
+  assert.match(source, /max_output_tokens:maxTokens/);
 });
 
 test('legacy Gradio generator uses one session hash across iterations', () => {
@@ -131,6 +117,6 @@ test('legacy Gradio generator uses one session hash across iterations', () => {
 
 test('committee does not spend backup capacity after two primary successes', () => {
   assert.match(source, /if\(successes>=2\)break/);
-  assert.match(source, /Promise\.allSettled\(ids\.map\(id=>invokePeer\(PEERS\[id\],prompt\)\)\)/);
+  assert.match(source, /Promise\.allSettled\(ids\.map\(id=>invokePeer\(PEERS\[id\],prompt,requestedTokens\)\)\)/);
   assert.match(source, /agreement:analyzeAgreement\(results\)/);
 });
