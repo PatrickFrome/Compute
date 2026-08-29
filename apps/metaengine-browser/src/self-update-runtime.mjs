@@ -56,7 +56,7 @@ export class SelfUpdateRuntime {
     download_percent: null, restart_gate_safe: false, restart_gate_since: null,
     restart_grace_ms: null, install_attempted_version: null, publisher_verified: false,
     ci_test_feed_active: false, pre_install_receipt_persisted: false,
-    installer_handoff_prepared: false,
+    installer_handoff_prepared: false, automatic_install: true,
   };
   #lastCheck = 0; #intervalMs; #canRestart; #clock; #restartGraceMs; #restartSafeSince = null;
 
@@ -196,6 +196,19 @@ export class SelfUpdateRuntime {
       this.#updater = updater;
       this.#state.state = 'IDLE';
     } catch (e) { this.#state.state = 'ERROR'; this.#state.last_error = clipError(e); this.#resetRestartGate(); }
+    return this.snapshot();
+  }
+
+  async checkNow() {
+    if (!this.#updater) return this.snapshot();
+    return this.cycle({ force: true });
+  }
+
+  async applyWhenSafe() {
+    if (!this.#updater) return this.snapshot();
+    if (this.#state.state === 'RESTARTING') return this.snapshot();
+    if (!['READY_RESTART','RESTART_GRACE'].includes(this.#state.state)) throw new Error('self_update_apply_not_ready');
+    await this.#cycleRestartGate();
     return this.snapshot();
   }
 
