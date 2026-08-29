@@ -1,0 +1,59 @@
+name: METAENGINE Browser Shell V1
+on:
+  push:
+    branches: ['work/metaengine-browser-shell-v1']
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/**'
+      - 'coordination/browser-compute/**'
+      - '.github/workflows/metaengine-browser-shell-v1.yml'
+permissions:
+  contents: read
+jobs:
+  shell-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install shell dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Parse gate
+        working-directory: apps/metaengine-browser
+        run: npm run check
+      - name: Contract tests
+        working-directory: apps/metaengine-browser
+        run: npm test
+      - name: Security static gate
+        run: |
+          grep -q 'nodeIntegration: false' apps/metaengine-browser/src/browser-policy.mjs
+          grep -q 'contextIsolation: true' apps/metaengine-browser/src/browser-policy.mjs
+          grep -q 'sandbox: true' apps/metaengine-browser/src/browser-policy.mjs
+          grep -q 'cookie_transfer_to_compute_space: false' apps/metaengine-browser/src/browser-policy.mjs
+          ! grep -R -E 'executeJavaScript|Runtime\.evaluate|--remote-debugging-port|chat\.z\.ai|GLM_ZAI|STRICT_GLM_FIRST' apps/metaengine-browser --exclude-dir=node_modules
+          ! grep -R -E 'nodeIntegration:[[:space:]]*true|sandbox:[[:space:]]*false' apps/metaengine-browser --exclude-dir=node_modules
+      - name: Preserve B-line contracts
+        working-directory: coordination/browser-compute
+        run: node --test tests/*.test.mjs
+      - name: Electron shell smoke
+        working-directory: apps/metaengine-browser
+        run: xvfb-run -a npm run smoke | tee /tmp/metaengine-browser-smoke.jsonl
+      - name: Validate smoke receipt
+        run: grep -q '"ok":true' /tmp/metaengine-browser-smoke.jsonl
+      - name: Evidence bundle
+        run: |
+          mkdir -p evidence-out
+          cp research/METAENGINE_BROWSER_SHELL_STEP1_RESEARCH_2026-08-29.md evidence-out/
+          cp /tmp/metaengine-browser-smoke.jsonl evidence-out/
+          git rev-parse HEAD > evidence-out/git-head.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: metaengine-browser-shell-v1-${{ github.sha }}
+          path: evidence-out/
