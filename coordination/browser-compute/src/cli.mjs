@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,6 +15,7 @@ function arg(name) {
 async function serve() {
   const runtime = await new ComputeBrowserRuntime({ engineExecutable: process.env.A2_CHROME_EXECUTABLE || null, headlessDefault: false, allowNoSandbox: false }).init();
   const rpc = await startRpcServer(runtime);
+  await runtime.startNodeRegistry();
   const bridgePort = arg('bridge-port');
   let bridge = null;
   if (bridgePort !== null && !Number.isNaN(Number(bridgePort))) {
@@ -42,7 +43,8 @@ async function serve() {
     debug_transport: 'native_pipe_b3',
     devtools_tcp_exposed: false,
     context_manager: 'b2_logical_context_v1',
-    semantic_perception: 'r4_semantic_frame_v1'
+    semantic_perception: 'r4_semantic_frame_v1',
+    node_registry: true
   };
   if (bridge) output.bridge_port = bridge.port;
   console.log(JSON.stringify(output));

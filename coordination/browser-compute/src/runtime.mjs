@@ -5,6 +5,7 @@ import { ManagedChromeProcess } from './chrome-process.mjs';
 import { DEFAULT_CONTEXT_ID } from './context-manager.mjs';
 import { SemanticCaptureAdapter } from './semantic-capture-adapter.mjs';
 import { atomicJsonWrite, defaultStateRoot, ensurePrivateDir, readJson, validateContextId, validateNavigationUrl, validateProfileId, validateTargetId } from './security.mjs';
+import { LocalNodeRegistry } from './node-registry.mjs';
 
 const PROFILE_META = 'a2-profile.json';
 const CONTEXTS_FILE = 'contexts.json';
@@ -58,6 +59,7 @@ export class ComputeBrowserRuntime {
     this.running = new Map();
     this.startedAt = now();
     this.daemonLockFile = null;
+    await this.stopNodeRegistry();
   }
 
   async init() {
@@ -558,9 +560,24 @@ export class ComputeBrowserRuntime {
     };
   }
 
+  async startNodeRegistry(options = {}) {
+    this.nodeRegistry = new LocalNodeRegistry(this, options);
+    return this.nodeRegistry.start();
+  }
+
+  async stopNodeRegistry() {
+    if (this.nodeRegistry) {
+      await this.nodeRegistry.stop();
+      this.nodeRegistry = null;
+    }
+  }
   async shutdown() {
     for (const id of [...this.running.keys()]) await this.stopProfile(id).catch(() => {});
     await releaseOwnedPidLock(this.daemonLockFile);
     this.daemonLockFile = null;
+    await this.stopNodeRegistry();
   }
 }
+
+
+
