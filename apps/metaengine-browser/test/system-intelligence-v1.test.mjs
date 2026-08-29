@@ -1,0 +1,230 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { FleetRuntimeStore, FLEET_RUNTIME_STORE_VERSION } from '../src/fleet-runtime-store-v1.mjs';
+import { SystemIntelligence } from '../src/system-intelligence-v1.mjs';
+import { AutonomousWorkScheduler } from '../src/autonomous-work-scheduler-v1.mjs';
+
+async function harness(seed = null) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-intelligence-'));
+  const statePath = path.join(dir, 'runtime.json');
+  let now = Date.parse('2026-08-29T18:00:00Z');
+  let seq = 0;
+  if (seed) await fs.writeFile(statePath, `${JSON.stringify(seed)}\n`);
+  const store = new FleetRuntimeStore({ statePath, clock: () => now });
+  await store.init();
+  const uuid = () => `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
+  const intelligence = new SystemIntelligence({ store, clock: () => now, uuid });
+  const scheduler = new AutonomousWorkScheduler({ store, clock: () => now, uuid });
+  return {
+    dir,
+    statePath,
+    store,
+    intelligence,
+    scheduler,
+    advance: (ms) => { now += ms; },
+    cleanup: () => fs.rm(dir, { recursive: true, force: true }),
+  };
+}
+
+function legacyState() {
+  return {
+    schema: 'metaengine.browser.fleet-runtime-state.v1',
+    version: '1.0.0',
+    worker_bindings: [],
+    assignments: [],
+    readiness_proofs: [],
+    result_receipts: [],
+    wake_events: [],
+    supervisor: {
+      emergency_state: 'PAUSE',
+      keepalive_state: 'PAUSED',
+      binding: null,
+      wake_leases: [],
+      cooldown_until: null,
+      watchdog_deadline_at: null,
+      updated_at: '2026-08-29T17:00:00.000Z',
+    },
+    updated_at: '2026-08-29T17:00:00.000Z',
+  };
+}
+
+async function ingestFreshProcess(h, overrides = {}) {
+  return h.intelligence.ingestProcessObservation({
+    source_system: 'SUPABASE',
+    source_instance: 'xpeibufgzjknrhbhpffp',
+    process_kind: 'ROADMAP_MILESTONE',
+    process_id: 'C5_AUTONOMOUS_FLEET_RUNTIME_V1',
+    state: 'ACTIVE',
+    authority: 'SUPABASE',
+    source_cursor: 'cp2:a23b647',
+    stale_after_ms: 60_000,
+    payload_ref: 'supabase:checkpoint:cp2',
+    ...overrides,
+  });
+}
+
+test('legacy C5 state migrates forward without losing existing durable state', async () => {
+  const h = await harness(legacyState());
+  const snap = h.store.snapshot();
+  assert.equal(snap.version, FLEET_RUNTIME_STORE_VERSION);
+  assert.deepEqual(snap.process_observations, []);
+  assert.deepEqual(snap.memory_records, []);
+  assert.deepEqual(snap.learning_candidates, []);
+  assert.deepEqual(snap.scheduler_decisions, []);
+  await h.cleanup();
+});
+
+test('process universe is provenance-bound, freshness-aware, and ignores stale older observations', async () => {
+  const h = await harness();
+  const first = await ingestFreshProcess(h);
+  assert.equal(h.intelligence.listFreshProcesses().length, 1);
+
+  await h.intelligence.ingestProcessObservation({
+    source_system: 'SUPABASE',
+    source_instance: 'xpeibufgzjknrhbhpffp',
+    process_kind: 'ROADMAP_MILESTONE',
+    process_id: 'C5_AUTONOMOUS_FLEET_RUNTIME_V1',
+    state: 'WAITING',
+    authority: 'SUPABASE',
+    source_cursor: 'older',
+    observed_at: '2026-08-29T17:59:00Z',
+    stale_after_ms: 60_000,
+  });
+  assert.equal(h.intelligence.snapshot().processes[0].source_cursor, first.source_cursor);
+
+  h.advance(61_000);
+  assert.equal(h.intelligence.listFreshProcesses().length, 0);
+  assert.equal(h.intelligence.snapshot().processes[0].stale, true);
+
+  await assert.rejects(() => h.intelligence.ingestProcessObservation({
+    source_system: 'SUPABASE', source_instance: 'x', process_kind: 'TASK', process_id: 'p1', state: 'ACTIVE',
+    authority: 'PAGE_MODEL', source_cursor: '1', stale_after_ms: 60_000,
+  }), /process_authority_invalid/);
+  await h.cleanup();
+});
+
+test('procedural memory and self-learning require verifier evidence and remain branch-local', async () => {
+  const h = await harness();
+  const episode = await h.intelligence.remember({
+    kind: 'EPISODIC',
+    subject: 'worker-loss-spam-incident',
+    summary_ref: 'git:pr75:incident-evidence',
+    confidence: 1,
+    source_refs: [{ system: 'GITHUB', ref: 'PatrickFrome/Compute#75' }],
+    tags: ['keepalive','incident'],
+    outcome: 'CONTAINED',
+  });
+  assert.equal(episode.status, 'VERIFIED_SOURCE_BOUND');
+
+  const procedure = await h.intelligence.remember({
+    kind: 'PROCEDURAL',
+    subject: 'terminal-worker-wake-policy',
+    summary_ref: 'git:work/convergence-global-observer-memory-v1:procedure',
+    confidence: 0.9,
+    source_refs: [{ system: 'GITHUB', ref: 'PatrickFrome/Compute#75' }],
+    tags: ['dedupe'],
+  });
+  assert.equal(procedure.status, 'CANDIDATE');
+
+  const verifiedProcedure = await h.intelligence.verifyProceduralMemory({
+    memory_id: procedure.memory_id,
+    verifier_refs: [{ system: 'TRUSTED_CI', ref: 'ci:contract-tests:green' }],
+    replay_pass: true,
+    safety_pass: true,
+  });
+  assert.equal(verifiedProcedure.status, 'VERIFIED_BRANCH_LOCAL');
+
+  const candidate = await h.intelligence.proposeLearningCandidate({
+    target: 'SCHEDULER_HEURISTIC',
+    rationale_ref: 'memory:reduce-idle-capacity',
+    memory_ids: [episode.memory_id, procedure.memory_id],
+    evaluation_plan_ref: 'git:test:system-intelligence-v1',
+  });
+  const verified = await h.intelligence.verifyLearningCandidate({
+    candidate_id: candidate.candidate_id,
+    verifier_refs: [{ system: 'TRUSTED_CI', ref: 'ci:benchmark:pass' }],
+    replay_pass: true,
+    safety_pass: true,
+    benchmark_delta: 0.12,
+    regression_count: 0,
+  });
+  assert.equal(verified.status, 'VERIFIED');
+  assert.equal(verified.activation_scope, 'BRANCH_LOCAL_ONLY');
+  assert.equal(verified.production_activation_authority, false);
+  await h.cleanup();
+});
+
+test('autonomous scheduler can start independent work while supervisor is busy without granting actuation authority', async () => {
+  const h = await harness();
+  const process = await ingestFreshProcess(h);
+  const plan = h.scheduler.plan({
+    supervisor_busy: true,
+    max_parallel: 6,
+    workers: [
+      { worker_id: 'agent_a', role: 'IMPLEMENTER', ready: true },
+      { worker_id: 'agent_b', role: 'RESEARCHER', ready: true },
+    ],
+    opportunities: [
+      {
+        objective_key: 'independent-research',
+        task_kind: 'RESEARCH',
+        work_branch: 'research/memory-eval-v1',
+        process_refs: [process.process_key],
+        effect_class: 'READ_ONLY',
+        dependencies_satisfied: true,
+        requires_supervisor_exclusive: false,
+        urgency: 2,
+        expected_information_gain: 3,
+        unblock_count: 1,
+        confidence: 0.8,
+      },
+      {
+        objective_key: 'exclusive-review',
+        task_kind: 'REVIEW',
+        work_branch: 'work/exclusive-review-v1',
+        process_refs: [process.process_key],
+        effect_class: 'BRANCH_LOCAL',
+        dependencies_satisfied: true,
+        requires_supervisor_exclusive: true,
+        urgency: 10,
+        expected_information_gain: 10,
+        unblock_count: 10,
+        confidence: 1,
+      },
+    ],
+  });
+  assert.equal(plan.proposals.length, 1);
+  assert.equal(plan.proposals[0].objective_key, 'independent-research');
+  assert.equal(plan.proposals[0].supervisor_busy_at_plan, true);
+  assert.equal(plan.proposals[0].automatic_execution_authority, false);
+  assert.ok(plan.suppressed.some((x) => x.includes('SUPERVISOR_EXCLUSIVE')));
+
+  const decision = await h.scheduler.recordDecision(plan);
+  assert.equal(decision.proposals.length, 1);
+  assert.equal(h.store.snapshot().scheduler_decisions.length, 1);
+  await h.cleanup();
+});
+
+test('scheduler suppresses stale state, production effects, ambiguity, and unsafe branch scopes', async () => {
+  const h = await harness();
+  const process = await ingestFreshProcess(h, { stale_after_ms: 5_000 });
+  h.advance(6_000);
+  const plan = h.scheduler.plan({
+    workers: [{ worker_id: 'agent_a', ready: true }],
+    opportunities: [
+      { objective_key: 'stale', work_branch: 'work/stale', process_refs: [process.process_key], effect_class: 'READ_ONLY', dependencies_satisfied: true },
+      { objective_key: 'prod', work_branch: 'work/prod', process_refs: [process.process_key], effect_class: 'PRODUCTION', dependencies_satisfied: true },
+      { objective_key: 'ambiguous', work_branch: 'work/ambiguous', process_refs: [process.process_key], effect_class: 'BRANCH_LOCAL', dependencies_satisfied: true, ambiguous_effect_barrier: true },
+      { objective_key: 'main', work_branch: 'main', process_refs: [process.process_key], effect_class: 'BRANCH_LOCAL', dependencies_satisfied: true },
+    ],
+  });
+  assert.equal(plan.proposals.length, 0);
+  assert.ok(plan.suppressed.some((x) => x.includes('STALE_PROCESS_STATE')));
+  assert.ok(plan.suppressed.some((x) => x.includes('EFFECT_CLASS')));
+  assert.ok(plan.suppressed.some((x) => x.includes('AMBIGUOUS_EFFECT_BARRIER')));
+  assert.ok(plan.suppressed.some((x) => x.includes('BRANCH_SCOPE')));
+  await h.cleanup();
+});
