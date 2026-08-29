@@ -100,6 +100,30 @@ Add incarnation-recorded retirement, mirroring the shipped `ACTIVE -> LOST` mech
 - Registry tampering itself remains outside the threat model (daemon-private state
   root, 0600 files, single-owner daemon lock), unchanged from B2/B3.
 
+## Post-research: OBS_CB_5 runtime probe (closes GLM #237 open question)
+
+`tests/obscb5-dispose-probe.mjs` runs four cases on a real engine over the
+production native-pipe transport (Chrome for Testing 151.0.7922.34):
+
+- `dispose_with_live_target` — succeeds (control case).
+- `dispose_after_last_target_close` — **succeeds**. The hypothesized orphan mode
+  ("disposeOnDetach auto-disposes the emptied context, so closeContext's
+  disposeBrowserContext fails and leaves a CLOSING orphan") is FALSIFIED on
+  this engine: disposing after draining targets works.
+- `double_dispose` — fails with `cdp_error:-32000 Failed to find context`,
+  proving dispose is not generally idempotent. The dangerous window is a
+  dispose that succeeded at the engine while the runtime died before persisting
+  `RETIRED`: replaying the dispose would error. This slice handles exactly that
+  case by reconciling the dead-incarnation `CLOSING` row to `RETIRED` without
+  ever replaying the engine call — the design is consistent with the observed
+  engine behavior.
+- `create_target_in_disposed_context` — fails cleanly; no silent resurrection
+  into the disposed context id.
+
+Conclusion: OBS_CB_5 is closed with falsifiable primary-source evidence; no
+closeContext change is required; the orphan-recovery reconciliation is the
+correct and sufficient mechanism for both failure windows observed.
+
 ## Verification matrix
 
 - Unit (new `tests/orphan-recovery.test.mjs`, 8 tests):
