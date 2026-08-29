@@ -97,7 +97,7 @@ jobs:
           A2_CHROME_EXECUTABLE="$CHROME" \
           A2_R8C_STAGE="$GITHUB_WORKSPACE/dist/a2-browser-r8c-live/stage" \
           CI=true \
-          node tests/a2_r8c_real_chrome_extension_canary.mjs | tee "$RUNNER_TEMP/r8c-live-canary.jsonl"
+          timeout --signal=TERM --kill-after=5s 90s node tests/a2_r8c_real_chrome_extension_canary.mjs | tee "$RUNNER_TEMP/r8c-live-canary.jsonl"
           grep -q '"ok":true' "$RUNNER_TEMP/r8c-live-canary.jsonl"
           grep -q '"staged_extension_under_test":true' "$RUNNER_TEMP/r8c-live-canary.jsonl"
           grep -q '"typed_click_outcome":"COMMITTED"' "$RUNNER_TEMP/r8c-live-canary.jsonl"
