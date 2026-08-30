@@ -1,0 +1,107 @@
+name: METAENGINE DevOS Finalize Exact Release 168.1
+
+on:
+  push:
+    branches:
+      - ops/devos-release-168-1
+    paths:
+      - '.github/workflows/devos-release-168-1-finalize.yml'
+
+concurrency:
+  group: metaengine-devos-exact-release-168-1-finalize
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  finalize-exact-draft:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: 84a71aaedc49186c24a992f507ca1d3f14767181
+      SOURCE_RUN_ID: '33308347657'
+      VERSION: 0.6.3-dev.168.1
+      TAG: v0.6.3-dev.168.1
+      EXPECTED_INSTALLER_SHA256: d3f26c29c7750386c0100ee251199102f5cee3144da3aee533c20746032eacd8
+    steps:
+      - name: Re-verify immutable physical source run
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}" > run.json
+          python3 - <<'PY'
+          import json, os
+          r=json.load(open('run.json','r',encoding='utf-8'))
+          if r.get('head_sha') != os.environ['SOURCE_SHA'] or r.get('status') != 'completed' or r.get('conclusion') != 'success':
+              raise SystemExit('physical_source_run_invalid')
+          if r.get('name') != 'METAENGINE Browser Self Update E2E': raise SystemExit('physical_workflow_invalid')
+          PY
+
+      - name: Locate and verify exact draft from release collection
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > releases.json
+          python3 - <<'PY'
+          import json, os, pathlib
+          rows=json.load(open('releases.json','r',encoding='utf-8'))
+          drafts=[r for r in rows if r.get('tag_name')==os.environ['TAG'] and r.get('draft') is True]
+          if len(drafts) != 1: raise SystemExit(f'exact_draft_cardinality_invalid:{len(drafts)}')
+          r=drafts[0]
+          if r.get('prerelease') is not True: raise SystemExit('draft_prerelease_invalid')
+          if r.get('target_commitish') != os.environ['SOURCE_SHA']: raise SystemExit('draft_target_mismatch')
+          if r.get('name') != f"METAENGINE Browser {os.environ['VERSION']}": raise SystemExit('draft_name_mismatch')
+          expected={f"METAENGINE-Browser-Test-Setup-{os.environ['VERSION']}-x64.exe",f"METAENGINE-Browser-Test-Setup-{os.environ['VERSION']}-x64.exe.blockmap",'dev.yml','verified-self-update-manifest.json'}
+          assets={a.get('name'):a for a in r.get('assets',[])}
+          if set(assets) != expected: raise SystemExit(f'draft_asset_set_invalid:{sorted(assets)}')
+          installer=assets[f"METAENGINE-Browser-Test-Setup-{os.environ['VERSION']}-x64.exe"]
+          digest=installer.get('digest')
+          if digest and digest != f"sha256:{os.environ['EXPECTED_INSTALLER_SHA256']}": raise SystemExit('draft_installer_digest_mismatch')
+          pathlib.Path('release-id.txt').write_text(str(r['id']),encoding='utf-8')
+          print('exact_draft_verified', r['id'], r.get('target_commitish'), digest)
+          PY
+
+      - name: Publish exact draft and read back by tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/$(cat release-id.txt)" -F draft=false -F prerelease=true -f make_latest=false > published.json
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" > tag-readback.json
+          python3 - <<'PY'
+          import json, os
+          r=json.load(open('tag-readback.json','r',encoding='utf-8'))
+          if r.get('draft') is not False or r.get('prerelease') is not True: raise SystemExit('published_boundary_invalid')
+          if r.get('tag_name') != os.environ['TAG'] or r.get('target_commitish') != os.environ['SOURCE_SHA']: raise SystemExit('published_identity_invalid')
+          assets={a.get('name'):a for a in r.get('assets',[])}
+          installer=assets.get(f"METAENGINE-Browser-Test-Setup-{os.environ['VERSION']}-x64.exe",{})
+          digest=installer.get('digest')
+          if digest and digest != f"sha256:{os.environ['EXPECTED_INSTALLER_SHA256']}": raise SystemExit('published_digest_mismatch')
+          print('published_verified', r['tag_name'], r['target_commitish'], digest)
+          PY
+
+      - name: Advance non-authority dev hint after release readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/contents/dev-hint.json?ref=update%2Fbrowser-dev-channel" > pointer.json
+          python3 - <<'PY'
+          import base64, datetime, json, os, pathlib
+          p=json.load(open('pointer.json','r',encoding='utf-8'))
+          pathlib.Path('pointer-sha.txt').write_text(str(p['sha']),encoding='utf-8')
+          row={'schema':'metaengine.browser.dev-update-hint.v1','version':os.environ['VERSION'],'tag':os.environ['TAG'],'git_sha':os.environ['SOURCE_SHA'],'updated_at':datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00','Z'),'authority_effect':False}
+          raw=(json.dumps(row,indent=2,separators=(',', ': '))+'\n').encode()
+          pathlib.Path('pointer-content.txt').write_text(base64.b64encode(raw).decode(),encoding='utf-8')
+          PY
+          gh api -X PUT "repos/${GITHUB_REPOSITORY}/contents/dev-hint.json" -f message="chore(browser): advance DevOS verified update hint to ${VERSION}" -f content="$(cat pointer-content.txt)" -f sha="$(cat pointer-sha.txt)" -f branch='update/browser-dev-channel' > pointer-write.json
+          gh api "repos/${GITHUB_REPOSITORY}/contents/dev-hint.json?ref=update%2Fbrowser-dev-channel" > pointer-readback.json
+          python3 - <<'PY'
+          import base64, json, os
+          p=json.load(open('pointer-readback.json','r',encoding='utf-8'))
+          row=json.loads(base64.b64decode(p['content']).decode('utf-8'))
+          if row.get('version') != os.environ['VERSION'] or row.get('tag') != os.environ['TAG'] or row.get('git_sha') != os.environ['SOURCE_SHA']: raise SystemExit('pointer_binding_invalid')
+          if row.get('authority_effect') is not False: raise SystemExit('pointer_authority_invalid')
+          print('dev_hint_verified', row['version'], row['git_sha'])
+          PY
