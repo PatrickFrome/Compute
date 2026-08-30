@@ -142,16 +142,27 @@ export class SupervisorMeshRuntime {
     }
   }
 
+  async #settleNoEffect(delivery, reason) {
+    await this.#mesh.markDeliveryAmbiguous(delivery.supervisor_id, delivery.pending.delivery_id, `NO_SEND_EFFECT:${String(reason || '')}`);
+    await this.#mesh.resolveDeliveryAmbiguity(delivery.supervisor_id, { observed_sent: false });
+  }
+
   async dispatchRecoveryIfNeeded() {
     if (!this.#running || !this.#mesh || this.#canActuate() !== true) return { ok: false, suppressed: true, authority_effect: false };
     const lifecycle = this.#primaryLifecycle() || null;
     const keepalive = lifecycle?.keepalive || null;
     const state = String(keepalive?.state || '');
-    const primaryId = this.#mesh.snapshot().supervisors.find((row) => row.conversation_url === keepalive?.conversation_url)?.supervisor_id || null;
+    const meshSnapshot = this.#mesh.snapshot();
+    const primary = meshSnapshot.supervisors.find((row) => row.conversation_url === keepalive?.conversation_url) || null;
+    const primaryId = primary?.supervisor_id || null;
     let reason = null;
     let eventKey = null;
     let priorAmbiguousEventId = null;
-    if (state === 'WAKE_AMBIGUOUS') {
+
+    if (keepalive?.conversation_url && (!primary || !['ACTIVE'].includes(String(primary.status)))) {
+      reason = 'PRIMARY_SUPERVISOR_UNAVAILABLE';
+      eventKey = `primary-unavailable:${keepalive?.supervisor_epoch || 0}:${String(keepalive.conversation_url)}`;
+    } else if (state === 'WAKE_AMBIGUOUS') {
       const wakeId = String(keepalive?.pending_wake?.wake_id || 'unknown');
       reason = 'PRIMARY_WAKE_AMBIGUOUS_RECOVERY';
       eventKey = `wake-ambiguous:${keepalive?.supervisor_epoch || 0}:${wakeId}`;
@@ -175,7 +186,7 @@ export class SupervisorMeshRuntime {
     const delivery = reservation.deliveries[0];
     const sent = await this.#send(delivery);
     if (sent.busy === true && sent.clicked === false) {
-      await this.#mesh.resolveReservedNoEffect?.(delivery.supervisor_id, delivery.pending.delivery_id).catch?.(() => {});
+      await this.#settleNoEffect(delivery, sent.reason);
       this.#lastDelivery = { event_id: reservation.event_id, status: 'TARGET_BUSY_NO_EFFECT', supervisor_id: delivery.supervisor_id, authority_effect: false };
       return { ok: false, busy: true, authority_effect: false };
     }
@@ -189,10 +200,7 @@ export class SupervisorMeshRuntime {
       this.#lastDelivery = { event_id: reservation.event_id, status: 'AMBIGUOUS', supervisor_id: delivery.supervisor_id, reason: sent.reason, authority_effect: false };
       return { ok: false, ambiguous: true, authority_effect: false };
     }
-    // No click means no message effect. Keep the event reservation terminal; a later
-    // coordinator cycle may create a new recovery event after fresh reconciliation.
-    await this.#mesh.markDeliveryAmbiguous(delivery.supervisor_id, delivery.pending.delivery_id, `NO_SEND_EFFECT:${sent.reason}`);
-    await this.#mesh.resolveDeliveryAmbiguity(delivery.supervisor_id, { observed_sent: false });
+    await this.#settleNoEffect(delivery, sent.reason);
     this.#lastDelivery = { event_id: reservation.event_id, status: 'NO_EFFECT', supervisor_id: delivery.supervisor_id, reason: sent.reason, authority_effect: false };
     return { ok: false, no_effect: true, authority_effect: false };
   }
