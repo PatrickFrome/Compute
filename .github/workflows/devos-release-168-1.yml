@@ -1,0 +1,201 @@
+name: METAENGINE DevOS Exact Release 168.1
+
+on:
+  push:
+    branches:
+      - ops/devos-release-168-1
+    paths:
+      - '.github/workflows/devos-release-168-1.yml'
+
+concurrency:
+  group: metaengine-devos-exact-release-168-1
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish-exact-green-bytes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: 84a71aaedc49186c24a992f507ca1d3f14767181
+      SOURCE_RUN_ID: '33308347657'
+      VERSION: 0.6.3-dev.168.1
+      TAG: v0.6.3-dev.168.1
+      EXPECTED_INSTALLER_SHA256: d3f26c29c7750386c0100ee251199102f5cee3144da3aee533c20746032eacd8
+    steps:
+      - name: Verify immutable source run
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}" > run.json
+          python3 - <<'PY'
+          import json, os
+          r=json.load(open('run.json','r',encoding='utf-8'))
+          assert r.get('head_sha') == os.environ['SOURCE_SHA'], (r.get('head_sha'), os.environ['SOURCE_SHA'])
+          assert r.get('status') == 'completed'
+          assert r.get('conclusion') == 'success'
+          assert r.get('name') == 'METAENGINE Browser Self Update E2E'
+          print('source_run_verified', r['id'], r['head_sha'])
+          PY
+
+      - name: Download exact physical E2E artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts?per_page=100" > artifacts.json
+          python3 - <<'PY'
+          import json, os, pathlib
+          rows=json.load(open('artifacts.json','r',encoding='utf-8')).get('artifacts',[])
+          prefix=f"metaengine-browser-self-update-e2e-{os.environ['SOURCE_SHA']}-"
+          rows=[a for a in rows if a.get('name','').startswith(prefix) and not a.get('expired',False)]
+          if len(rows) != 1:
+              raise SystemExit(f'artifact_cardinality_invalid:{len(rows)}')
+          a=rows[0]
+          pathlib.Path('artifact-id.txt').write_text(str(a['id']),encoding='utf-8')
+          print('artifact', a['id'], a.get('digest'))
+          PY
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/$(cat artifact-id.txt)/zip" > e2e.zip
+          mkdir evidence
+          unzip -q e2e.zip -d evidence
+
+      - name: Verify exact tested bytes and provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib
+          root=pathlib.Path('evidence')
+          manifests=list(root.rglob('verified-self-update-manifest.json'))
+          if len(manifests) != 1: raise SystemExit(f'manifest_cardinality_invalid:{len(manifests)}')
+          m=json.loads(manifests[0].read_text(encoding='utf-8'))
+          if m.get('schema') != 'metaengine.browser.self-update-e2e-manifest.v2': raise SystemExit('manifest_schema_invalid')
+          exact={
+            'version': os.environ['VERSION'],
+            'git_sha': os.environ['SOURCE_SHA'],
+            'run_id': os.environ['SOURCE_RUN_ID'],
+            'update_channel': 'dev',
+          }
+          for k,v in exact.items():
+              if str(m.get(k)) != str(v): raise SystemExit(f'manifest_{k}_mismatch:{m.get(k)}!={v}')
+          required=['physical_n_to_n_plus_1','durable_successor_binding','forced_successor','profile_continuity','single_install_directory','physical_singleton','development_channel']
+          for k in required:
+              if m.get(k) is not True: raise SystemExit(f'physical_gate_missing:{k}')
+          if m.get('production_safe') is not False: raise SystemExit('production_boundary_invalid')
+          installer=root / m['installer_name']
+          blockmap=root / m['blockmap_name']
+          dev=root / 'dev.yml'
+          if not installer.is_file() or not blockmap.is_file() or not dev.is_file(): raise SystemExit('release_asset_missing')
+          digest=hashlib.sha256(installer.read_bytes()).hexdigest()
+          if digest != os.environ['EXPECTED_INSTALLER_SHA256'] or digest != str(m.get('installer_sha256','')).lower():
+              raise SystemExit('installer_digest_mismatch')
+          pathlib.Path('installer-path.txt').write_text(str(installer),encoding='utf-8')
+          pathlib.Path('blockmap-path.txt').write_text(str(blockmap),encoding='utf-8')
+          pathlib.Path('manifest-path.txt').write_text(str(manifests[0]),encoding='utf-8')
+          print('exact_bytes_verified', os.environ['VERSION'], digest)
+          PY
+
+      - name: Enforce monotonic dev release and absent tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" >/dev/null 2>&1; then
+            echo "release_tag_already_exists:${TAG}" >&2
+            exit 1
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > releases.json
+          python3 - <<'PY'
+          import json, os, re
+          target=tuple(map(int,re.fullmatch(r'(\d+)\.(\d+)\.(\d+)-dev\.(\d+)\.(\d+)',os.environ['VERSION']).groups()))
+          prior=[]
+          for r in json.load(open('releases.json','r',encoding='utf-8')):
+              m=re.fullmatch(r'v(\d+)\.(\d+)\.(\d+)-dev\.(\d+)\.(\d+)',str(r.get('tag_name') or ''))
+              if m: prior.append(tuple(map(int,m.groups())))
+          if prior and target <= max(prior): raise SystemExit(f'dev_version_not_monotonic:{target}<={max(prior)}')
+          print('monotonic_release_verified', target, max(prior) if prior else None)
+          PY
+
+      - name: Create draft prerelease from exact CI bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          INSTALLER="$(cat installer-path.txt)"
+          BLOCKMAP="$(cat blockmap-path.txt)"
+          MANIFEST="$(cat manifest-path.txt)"
+          gh release create "$TAG" "$INSTALLER" "$BLOCKMAP" evidence/dev.yml "$MANIFEST" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SOURCE_SHA" \
+            --title "METAENGINE Browser ${VERSION}" \
+            --notes "METAENGINE Development OS verified successor. Exact bytes from physical N-to-N+1 run ${SOURCE_RUN_ID} for ${SOURCE_SHA}; no rebuild; production-safe=false." \
+            --prerelease --draft
+
+      - name: Read back draft assets then publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" > draft.json
+          python3 - <<'PY'
+          import json, os, pathlib
+          r=json.load(open('draft.json','r',encoding='utf-8'))
+          if r.get('draft') is not True or r.get('prerelease') is not True: raise SystemExit('draft_boundary_invalid')
+          if r.get('target_commitish') != os.environ['SOURCE_SHA']: raise SystemExit('release_target_mismatch')
+          expected={
+            f"METAENGINE-Browser-Test-Setup-{os.environ['VERSION']}-x64.exe",
+            f"METAENGINE-Browser-Test-Setup-{os.environ['VERSION']}-x64.exe.blockmap",
+            'dev.yml','verified-self-update-manifest.json'
+          }
+          assets={a.get('name'):a for a in r.get('assets',[])}
+          if set(assets) != expected: raise SystemExit(f'asset_set_invalid:{sorted(assets)}')
+          d=assets[f"METAENGINE-Browser-Test-Setup-{os.environ['VERSION']}-x64.exe"].get('digest')
+          if d and d != f"sha256:{os.environ['EXPECTED_INSTALLER_SHA256']}": raise SystemExit('github_asset_digest_mismatch')
+          pathlib.Path('release-id.txt').write_text(str(r['id']),encoding='utf-8')
+          PY
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/$(cat release-id.txt)" \
+            -F draft=false -F prerelease=true -f make_latest=false > published.json
+          python3 - <<'PY'
+          import json, os
+          r=json.load(open('published.json','r',encoding='utf-8'))
+          if r.get('draft') is not False or r.get('prerelease') is not True: raise SystemExit('publish_readback_invalid')
+          if r.get('tag_name') != os.environ['TAG'] or r.get('target_commitish') != os.environ['SOURCE_SHA']:
+              raise SystemExit('publish_identity_invalid')
+          print('published', r['tag_name'], r['target_commitish'])
+          PY
+
+      - name: Advance dev hint only after release readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/contents/dev-hint.json?ref=update%2Fbrowser-dev-channel" > pointer.json
+          python3 - <<'PY'
+          import base64, datetime, json, os, pathlib
+          p=json.load(open('pointer.json','r',encoding='utf-8'))
+          pathlib.Path('pointer-sha.txt').write_text(str(p['sha']),encoding='utf-8')
+          row={
+            'schema':'metaengine.browser.dev-update-hint.v1',
+            'version':os.environ['VERSION'],
+            'tag':os.environ['TAG'],
+            'git_sha':os.environ['SOURCE_SHA'],
+            'updated_at':datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00','Z'),
+            'authority_effect':False,
+          }
+          raw=(json.dumps(row,indent=2,separators=(',', ': '))+'\n').encode()
+          pathlib.Path('pointer-content.txt').write_text(base64.b64encode(raw).decode(),encoding='utf-8')
+          PY
+          gh api -X PUT "repos/${GITHUB_REPOSITORY}/contents/dev-hint.json" \
+            -f message="chore(browser): advance DevOS verified update hint to ${VERSION}" \
+            -f content="$(cat pointer-content.txt)" \
+            -f sha="$(cat pointer-sha.txt)" \
+            -f branch='update/browser-dev-channel' > pointer-write.json
+          gh api "repos/${GITHUB_REPOSITORY}/contents/dev-hint.json?ref=update%2Fbrowser-dev-channel" > pointer-readback.json
+          python3 - <<'PY'
+          import base64, json, os
+          p=json.load(open('pointer-readback.json','r',encoding='utf-8'))
+          row=json.loads(base64.b64decode(p['content']).decode('utf-8'))
+          if row.get('version') != os.environ['VERSION'] or row.get('tag') != os.environ['TAG'] or row.get('git_sha') != os.environ['SOURCE_SHA']:
+              raise SystemExit('pointer_readback_binding_invalid')
+          if row.get('authority_effect') is not False: raise SystemExit('pointer_authority_invalid')
+          print('dev_hint_advanced', row['version'], row['git_sha'])
+          PY
