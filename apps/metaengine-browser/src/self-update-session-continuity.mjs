@@ -72,6 +72,70 @@ export function buildSelfUpdateSessionContinuity({
   };
 }
 
+export async function restoreSelfUpdateSessionContinuity({ row, currentVersion, getState, executeCommand } = {}) {
+  if (row?.schema !== SELF_UPDATE_SESSION_CONTINUITY_SCHEMA || !Array.isArray(row.tabs)) {
+    throw new Error('self_update_session_continuity_schema_invalid');
+  }
+  if (typeof getState !== 'function' || typeof executeCommand !== 'function') {
+    throw new Error('self_update_session_continuity_restore_dependencies_invalid');
+  }
+  if (row.target_version && String(row.target_version) !== String(currentVersion || '')) {
+    return {
+      state: 'TARGET_VERSION_MISMATCH', restored_tabs: 0, failed_tabs: 0,
+      tab_count: row.tabs.length, target_version: row.target_version, authority_effect: false,
+    };
+  }
+
+  const state = await getState();
+  const byUrl = new Map();
+  for (const tab of state?.tabs || []) {
+    const url = String(tab?.url || '');
+    if (url && !byUrl.has(url)) byUrl.set(url, tab);
+  }
+
+  let selectedTabId = null;
+  let restoredTabs = 0;
+  let failedTabs = 0;
+  for (const prior of row.tabs) {
+    const url = String(prior?.url || '');
+    if (!HTTPS_RE.test(url)) { failedTabs += 1; continue; }
+    let current = byUrl.get(url) || null;
+    if (!current) {
+      try {
+        current = await executeCommand({ action: 'NEW_TAB', payload: { url, select: false }, platform: null });
+        if (current?.tab_id) {
+          byUrl.set(url, current);
+          restoredTabs += 1;
+        } else {
+          failedTabs += 1;
+          continue;
+        }
+      } catch {
+        failedTabs += 1;
+        continue;
+      }
+    }
+    if (prior?.selected === true && current?.tab_id) selectedTabId = String(current.tab_id);
+  }
+
+  if (selectedTabId) {
+    try { await executeCommand({ action: 'SELECT_TAB', payload: { tab_id: selectedTabId }, platform: null }); }
+    catch { failedTabs += 1; }
+  }
+
+  return {
+    state: failedTabs === 0 ? 'RESTORED' : 'PARTIAL',
+    restored_tabs: restoredTabs,
+    failed_tabs: failedTabs,
+    tab_count: row.tabs.length,
+    target_version: row.target_version || null,
+    selected_tab_id: selectedTabId,
+    had_generating_tabs: row.tabs.some((tab) => tab?.generation_state === 'GENERATING'),
+    lifecycle_resume_present: Boolean(row.lifecycle?.active_request),
+    authority_effect: false,
+  };
+}
+
 export function selfUpdateSessionContinuityPath(userDataPath) {
   return path.join(String(userDataPath), 'metaengine-self-update-session-continuity-v1.json');
 }
