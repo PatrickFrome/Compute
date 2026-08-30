@@ -1,0 +1,40 @@
+name: DevOS continuity keepalive v1
+
+on:
+  push:
+    branches:
+      - work/devos-continuity-keepalive-v1
+    paths:
+      - apps/metaengine-browser/src/supervisor-keepalive.mjs
+      - apps/metaengine-browser/src/supervisor-lifecycle-runtime.mjs
+      - apps/metaengine-browser/test/supervisor-continuity-hardening.test.mjs
+      - apps/metaengine-browser/test/supervisor-continuity-keepalive-v1.test.mjs
+      - .github/workflows/devos-continuity-keepalive-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-continuity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Verify exact branch SHA
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Syntax checks
+        working-directory: apps/metaengine-browser
+        run: |
+          node --check src/supervisor-keepalive.mjs
+          node --check src/supervisor-lifecycle-runtime.mjs
+          node --check test/supervisor-continuity-hardening.test.mjs
+          node --check test/supervisor-continuity-keepalive-v1.test.mjs
+      - name: Browser unit suite
+        working-directory: apps/metaengine-browser
+        run: npm test
