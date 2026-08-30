@@ -51,7 +51,7 @@ Do **not** add a second polling scheduler.
 - PR #100 body explicitly freezes `e8f3a482...` as the gate proof and sends further runtime work to stacked `work/federated-autonomy-runtime-v1`.
 - PR #100 head had green AppVeyor PR and branch statuses at observation.
 - `work/federated-autonomy-runtime-v1` is `a21c9e241718274433531aaaa702c9d9748abaa6` and also had green AppVeyor PR + branch statuses.
-- Source `724612...` AppVeyor branch status was still pending at observation. This source must not be promoted until exact CI is green.
+- Source `724612...` AppVeyor branch status was rechecked green at checkpoint refresh (AppVeyor branch build `54628617`).
 
 ### Browser runtime inherited by source
 
@@ -227,7 +227,7 @@ Legend: **PASS-CONTRACT** = authoritative contract exists; **PASS-OBSERVED** = l
 | A17 | Terminal completion oracle | DB completion follows verified GitHub/CI evidence and exact lease tuple, not page text | **PENDING** |
 | A18 | Crash/restart continuity | Restart during active task resumes/reconciles without duplicate effect and stale target is fenced | Existing supervisor/self-update primitives present; integrated test required |
 | A19 | Gate-line regression | Frozen PR #100 head exact checks remain green after convergence | **PASS-OBSERVED baseline**, must re-run on convergence candidate |
-| A20 | Source CI | Full Browser syntax/tests/self-update gates green on exact convergence SHA | **PENDING** — source branch status was pending at observation |
+| A20 | Source CI | Full Browser syntax/tests/self-update gates green on exact convergence SHA | **PASS-OBSERVED baseline** — exact source `724612...` AppVeyor branch build `54628617` succeeded; convergence-candidate CI still required after runtime wiring |
 | A21 | Main/production safety | No main merge, production deployment, secret request, or authority broadening during convergence | **PASS-OBSERVED for this checkpoint** |
 
 ## 7. Minimal evidence suite before autonomy can be called self-sustaining
