@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import {
+  DEFAULT_CONTINUOUS_DEV_RESTART_GRACE_MS,
   DEFAULT_CONTINUOUS_DEV_UPDATE_INTERVAL_MS,
   SelfUpdateRuntime,
 } from '../src/self-update-runtime.mjs';
@@ -18,8 +19,9 @@ class FakeUpdater extends EventEmitter {
   }
 }
 
-test('packaged dev runtime rechecks on the bounded five-minute default cadence', async () => {
-  assert.equal(DEFAULT_CONTINUOUS_DEV_UPDATE_INTERVAL_MS, 5 * 60 * 1000);
+test('packaged dev runtime rechecks on the permanent one-minute default cadence', async () => {
+  assert.equal(DEFAULT_CONTINUOUS_DEV_UPDATE_INTERVAL_MS, 60 * 1000);
+  assert.equal(DEFAULT_CONTINUOUS_DEV_RESTART_GRACE_MS, 3 * 1000);
   let now = 1;
   const updater = new FakeUpdater();
   const runtime = new SelfUpdateRuntime({
@@ -36,6 +38,7 @@ test('packaged dev runtime rechecks on the bounded five-minute default cadence',
   await runtime.start();
   await runtime.checkNow();
   assert.equal(updater.checks, 1);
+  assert.equal(runtime.snapshot().restart_grace_ms, DEFAULT_CONTINUOUS_DEV_RESTART_GRACE_MS);
 
   now += DEFAULT_CONTINUOUS_DEV_UPDATE_INTERVAL_MS - 1;
   await runtime.cycle();
