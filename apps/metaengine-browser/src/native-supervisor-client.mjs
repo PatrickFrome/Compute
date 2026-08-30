@@ -4,6 +4,7 @@ import { SupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime.mjs';
 import { SelfUpdateRuntime } from './self-update-runtime.mjs';
 import { confirmSelfUpdateRestartSafety } from './self-update-restart-safety.mjs';
 import { persistPreInstallReceipt } from './self-update-handoff.mjs';
+import { reconcileRestoredGeneratingChats } from './self-update-chat-reconcile.mjs';
 import {
   buildSelfUpdateSessionContinuity,
   clearSelfUpdateSessionContinuity,
@@ -141,6 +142,7 @@ export class NativeSupervisorClient {
       restored_tabs: 0,
       tab_count: row.tabs.length,
       target_version: row.target_version,
+      had_generating_tabs: row.tabs.some((tab) => tab?.generation_state === 'GENERATING'),
       authority_effect: false,
     };
   }
@@ -172,6 +174,7 @@ export class NativeSupervisorClient {
     let selectedTabId = null;
     let restoredTabs = 0;
     let failedTabs = 0;
+    const bindings = [];
     for (const prior of row.tabs || []) {
       const url = String(prior?.url || '');
       if (!url) continue;
@@ -192,6 +195,13 @@ export class NativeSupervisorClient {
           continue;
         }
       }
+      if (current?.tab_id) {
+        bindings.push({
+          prior_tab_id: String(prior?.prior_tab_id || ''),
+          tab_id: String(current.tab_id),
+          generation_state: String(prior?.generation_state || 'UNKNOWN').toUpperCase(),
+        });
+      }
       if (prior?.selected === true && current?.tab_id) selectedTabId = String(current.tab_id);
     }
     if (selectedTabId) {
@@ -202,6 +212,25 @@ export class NativeSupervisorClient {
       }
     }
 
+    let reconcile = {
+      schema: 'metaengine.self-update-chat-reconcile.v1',
+      tabs: [], ambiguous_count: 0, unresolved_count: 0, authority_effect: false,
+    };
+    if (failedTabs === 0 && bindings.some((binding) => binding.generation_state === 'GENERATING')) {
+      reconcile = await reconcileRestoredGeneratingChats({
+        bindings,
+        captureTab: async (tabId) => this.#executeCommand({
+          action: 'CAPTURE', payload: { tab_id: String(tabId) }, platform: 'CHATGPT',
+        }),
+        clickControl: async (tabId, accessibleName) => this.#executeCommand({
+          action: 'TYPED_CLICK',
+          payload: { tab_id: String(tabId), role: 'button', accessible_name: String(accessibleName) },
+          platform: 'CHATGPT',
+        }),
+      });
+      failedTabs += Number(reconcile.unresolved_count || 0);
+    }
+
     this.#continuityStatus = {
       state: failedTabs === 0 ? 'RESTORED' : 'PARTIAL',
       restored_tabs: restoredTabs,
@@ -210,6 +239,10 @@ export class NativeSupervisorClient {
       target_version: row.target_version || null,
       had_generating_tabs: row.tabs.some((tab) => tab?.generation_state === 'GENERATING'),
       lifecycle_resume_present: Boolean(row.lifecycle?.active_request),
+      reconciled_generating_tabs: reconcile.tabs.length,
+      reconcile_ambiguous_count: reconcile.ambiguous_count,
+      reconcile_unresolved_count: reconcile.unresolved_count,
+      reconcile_authority_effect: reconcile.authority_effect === true,
       authority_effect: false,
     };
     if (failedTabs === 0) await clearSelfUpdateSessionContinuity(userData);
