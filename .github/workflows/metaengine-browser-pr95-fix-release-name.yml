@@ -1,0 +1,43 @@
+name: METAENGINE Browser PR95 Align Trusted Release Name
+
+on:
+  push:
+    branches:
+      - work/self-update-restart-safe-v1
+    paths:
+      - '.github/workflows/metaengine-browser-pr95-fix-release-name.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  align:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_ID: '379210670'
+      TAG: v0.6.3-dev.124.1
+      EXPECTED_NAME: METAENGINE Browser v0.6.3-dev.124.1
+      VERIFIED_SOURCE_SHA: 54f241c88a00ffc3b64c383b2285125cce0eb41c
+    steps:
+      - name: Verify immutable bindings, align name, and read back
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" > before.json
+          python3 - <<'PY'
+          import json, os
+          r=json.load(open('before.json','r',encoding='utf-8'))
+          if r.get('tag_name')!=os.environ['TAG']: raise SystemExit('release_tag_binding_invalid')
+          if r.get('target_commitish')!=os.environ['VERIFIED_SOURCE_SHA']: raise SystemExit('release_source_binding_invalid')
+          if r.get('draft') is not False or r.get('prerelease') is not True: raise SystemExit('release_boundary_invalid')
+          PY
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" -f name="$EXPECTED_NAME" > after.json
+          python3 - <<'PY'
+          import json, os
+          r=json.load(open('after.json','r',encoding='utf-8'))
+          if r.get('name')!=os.environ['EXPECTED_NAME']: raise SystemExit('release_name_readback_failed')
+          if r.get('tag_name')!=os.environ['TAG'] or r.get('target_commitish')!=os.environ['VERIFIED_SOURCE_SHA']: raise SystemExit('release_binding_changed')
+          print(f"trusted_release_name={r.get('name')} tag={r.get('tag_name')}")
+          PY
