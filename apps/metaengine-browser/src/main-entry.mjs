@@ -5,6 +5,7 @@ import {
   persistUpdatedSuccessorReceipt,
   SUCCESSOR_STARTUP_PROBE_ONLY,
 } from './self-update-handoff.mjs';
+import { qualifyUpdatedSuccessorWhenHealthy } from './self-update-successor-qualification.mjs';
 
 const bypassSingleInstance = process.argv.includes('--metaengine-smoke')
   || process.argv.includes('--metaengine-devplane-smoke');
@@ -33,9 +34,6 @@ if (guard.primary) {
       authority_effect: false,
     }));
     if (startupUpdateInspection?.state === 'AMBIGUOUS_INSTALL') {
-      // Firefox-style durable status: an unknown installer result is never retried blindly.
-      // The Browser remains usable, but self-update is held until a newer/manual repair
-      // establishes an observable installed version.
       process.env.METAENGINE_DISABLE_SELF_UPDATE = '1';
       process.env.METAENGINE_SELF_UPDATE_HOLD_REASON = 'AMBIGUOUS_INSTALL';
       if (startupUpdateInspection.target_version) {
@@ -131,5 +129,23 @@ if (guard.primary) {
     });
   } else {
     await import('./main.mjs');
+    if (updatedLaunch) {
+      setImmediate(() => {
+        qualifyUpdatedSuccessorWhenHealthy({ app })
+          .then((result) => console.log(JSON.stringify({
+            schema: 'metaengine.browser.self-update-qualification.v1',
+            version: app.getVersion(),
+            ...result,
+            authority_effect: false,
+          })))
+          .catch((error) => console.error(JSON.stringify({
+            schema: 'metaengine.browser.self-update-qualification.v1',
+            version: app.getVersion(),
+            state: 'QUALIFICATION_ERROR',
+            error: String(error?.message || error).slice(0, 300),
+            authority_effect: false,
+          })));
+      });
+    }
   }
 }
