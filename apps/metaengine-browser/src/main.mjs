@@ -10,6 +10,7 @@ import { NativeSupervisorClient } from './native-supervisor-client.mjs';
 import { SupervisorDeviceIdentity } from './supervisor-device-identity.mjs';
 import { navigationDecision, newWindowDecision, REMOTE_WEB_PREFERENCES, SECURITY_POLICY } from './browser-policy.mjs';
 import { TabRegistry } from './tab-registry.mjs';
+import { VerifiedDownloadManager } from './verified-download-manager.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -28,6 +29,7 @@ const bridge = new ComputeBridgeClient();
 let windowRef = null;
 let shellView = null;
 let userSession = null;
+let downloads = null;
 let fleet = null;
 let developmentPlane = null;
 let nativeSupervisor = null;
@@ -55,7 +57,10 @@ function configureUserSession() {
   userSession = session.fromPartition(SECURITY_POLICY.user_space_partition, { cache: true });
   userSession.setPermissionCheckHandler(() => false);
   userSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
-  userSession.on('will-download', (event) => event.preventDefault());
+  downloads = new VerifiedDownloadManager({
+    session: userSession,
+    rootPath: path.join(app.getPath('downloads'), 'METAENGINE'),
+  });
 }
 
 function fleetStatePath() {
@@ -92,6 +97,7 @@ async function shellSnapshot() {
     schema: 'metaengine.browser-shell.snapshot.v3',
     version: app.getVersion(),
     tabs: registry.snapshot(),
+    downloads: downloads?.snapshot() || null,
     fleet: fleet?.snapshot() || null,
     development_plane: developmentPlane?.snapshot() || null,
     supervisor: nativeSupervisor?.snapshot() || null,
@@ -289,6 +295,9 @@ async function handleCommand(command, payload = {}) {
   if (command === 'FORWARD') { if (selectedView?.webContents.navigationHistory.canGoForward()) selectedView.webContents.navigationHistory.goForward(); return { ok: true }; }
   if (command === 'RELOAD') { selectedView?.webContents.reload(); invalidatePerception(selected?.tab_id); return { ok: true }; }
   if (command === 'COMPUTE_HEALTH') return bridge.health();
+  if (command === 'DOWNLOAD_STATUS') return downloads?.snapshot() || null;
+  if (command === 'DOWNLOAD_FILE') { const result = await downloads?.download(payload); await publishSnapshot(); return result; }
+  if (command === 'DOWNLOAD_CANCEL') { const result = await downloads?.cancel(); await publishSnapshot(); return result; }
   if (command === 'DEV_PLANE_STATUS') return developmentPlane?.snapshot() || null;
   if (command === 'DEV_PLANE_HEALTH') return developmentPlane?.request('HEALTH');
   if (command === 'DEV_PLANE_CAPABILITIES') return developmentPlane?.request('CAPABILITIES');
@@ -354,6 +363,7 @@ async function nativeSupervisorState() {
   return {
     tabs: snap.tabs.map((tab) => ({ ...tab, selected: tab.tab_id === snap.selected_tab_id })),
     active_tab: selected,
+    downloads: downloads?.snapshot() || null,
     development_plane: developmentPlane?.snapshot() || null,
     fleet: fleet?.snapshot() || null,
     perception,
@@ -370,7 +380,7 @@ async function executeNativeSupervisorCommand(command) {
     if (requested === 'CONTROL' || requested === 'GATE_SEND') return nativeSupervisor.setControlState({ mode: 'CONTROL' });
     throw new Error('native_operator_mode_invalid');
   }
-  if (['NEW_TAB','SELECT_TAB','CLOSE_TAB','NAVIGATE','BACK','FORWARD','RELOAD','FLEET_RECONCILE','FLEET_SET_PROFILE','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD'].includes(action)) {
+  if (['NEW_TAB','SELECT_TAB','CLOSE_TAB','NAVIGATE','BACK','FORWARD','RELOAD','DOWNLOAD_STATUS','DOWNLOAD_FILE','DOWNLOAD_CANCEL','FLEET_RECONCILE','FLEET_SET_PROFILE','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD'].includes(action)) {
     if (['BACK','FORWARD','RELOAD'].includes(action) && payload?.tab_id) {
       const tab = registry.get(payload.tab_id);
       const view = tab ? views.get(tab.tab_id) : null;
@@ -411,6 +421,8 @@ async function initNativeSupervisor() {
 
 function destroyWindowContents() {
   nativeSupervisor?.stop();
+  downloads?.close?.().catch(() => {});
+  downloads = null;
   for (const view of views.values()) if (!view.webContents.isDestroyed()) view.webContents.close();
   views.clear();
   if (shellView && !shellView.webContents.isDestroyed()) shellView.webContents.close();
@@ -430,7 +442,8 @@ async function runSmoke() {
     && REMOTE_WEB_PREFERENCES.nodeIntegration === false
     && REMOTE_WEB_PREFERENCES.contextIsolation === true
     && REMOTE_WEB_PREFERENCES.sandbox === true
-    && SECURITY_POLICY.cookie_transfer_to_compute_space === false;
+    && SECURITY_POLICY.cookie_transfer_to_compute_space === false
+    && downloads?.snapshot()?.arbitrary_execution === false;
   console.log(JSON.stringify({
     schema: 'metaengine.browser-shell.smoke.v3',
     ok: invariant,
@@ -442,6 +455,7 @@ async function runSmoke() {
     remote_sandbox: REMOTE_WEB_PREFERENCES.sandbox,
     compute_bridge_read_only: true,
     native_supervisor_arbitrary_eval: false,
+    verified_download_arbitrary_execution: false,
     authority_effect: false,
   }));
   remoteView.webContents.close();
