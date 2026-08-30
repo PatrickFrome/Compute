@@ -1,0 +1,73 @@
+name: METAENGINE Browser Self Update Health Packaged
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/**'
+      - '.github/workflows/metaengine-browser-self-update-health-packaged.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: metaengine-browser-self-update-health-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-packaged-health:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Contract gates
+        working-directory: apps/metaengine-browser
+        run: |
+          npm run check
+          npm test
+      - name: Build packaged Windows target
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          $target = "0.6.3-dev.health.${{ github.run_number }}"
+          npm pkg set version=$target
+          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
+          npx --yes electron-builder@26.15.7 --win dir --x64 --config electron-builder.test.json --publish never
+          $app = Join-Path (Get-Location) 'dist-test\win-unpacked\METAENGINE Browser Test.exe'
+          if (-not (Test-Path $app)) { throw "packaged_browser_missing:$app" }
+          $asar = Join-Path (Get-Location) 'dist-test\win-unpacked\resources\app.asar'
+          if (-not (Test-Path $asar)) { throw "packaged_asar_missing:$asar" }
+          $app | Set-Content "$env:RUNNER_TEMP\packaged-app.txt"
+          $asar | Set-Content "$env:RUNNER_TEMP\packaged-asar.txt"
+          $target | Set-Content "$env:RUNNER_TEMP\packaged-version.txt"
+      - name: Execute qualification from packaged app.asar
+        shell: powershell
+        run: |
+          $app = (Get-Content "$env:RUNNER_TEMP\packaged-app.txt").Trim()
+          $asar = (Get-Content "$env:RUNNER_TEMP\packaged-asar.txt").Trim()
+          $target = (Get-Content "$env:RUNNER_TEMP\packaged-version.txt").Trim()
+          $probe = "$asar\smoke\self-update-health-probe.mjs"
+          $env:ELECTRON_RUN_AS_NODE = '1'
+          $env:METAENGINE_PACKAGED_HEALTH_VERSION = $target
+          $out = "$env:RUNNER_TEMP\packaged-health.out"
+          $err = "$env:RUNNER_TEMP\packaged-health.err"
+          $p = Start-Process -FilePath $app -ArgumentList $probe -PassThru -Wait -RedirectStandardOutput $out -RedirectStandardError $err
+          Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
+          Remove-Item Env:METAENGINE_PACKAGED_HEALTH_VERSION -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { Get-Content $err -ErrorAction SilentlyContinue; throw "packaged_health_probe_exit_$($p.ExitCode)" }
+          $row = (Get-Content $out | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
+          if ($row.schema -ne 'metaengine.self-update.packaged-health-probe.v1') { throw 'packaged_health_schema_invalid' }
+          if ([string]$row.version -ne $target -or $row.qualified -ne $true) { throw 'packaged_health_not_qualified' }
+          if ($row.exact_host_bound -ne $true -or $row.signed_envelope_shape_bound -ne $true) { throw 'packaged_health_binding_missing' }

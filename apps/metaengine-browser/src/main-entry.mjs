@@ -1,5 +1,6 @@
 import { app } from 'electron';
 import { acquirePrimaryInstance, METAENGINE_BROWSER_APP_ID } from './single-instance-guard.mjs';
+import { installSelfUpdateHealthQualificationFetchHook } from './self-update-health-qualification.mjs';
 import {
   inspectSelfUpdateStartup,
   persistUpdatedSuccessorReceipt,
@@ -130,6 +131,7 @@ if (guard.primary) {
       else setTimeout(() => app.exit(0), 15_000);
     });
   } else {
+    globalThis.fetch = installSelfUpdateHealthQualificationFetchHook({ app, fetchImpl: globalThis.fetch });
     await import('./main.mjs');
   }
 }
