@@ -149,6 +149,11 @@ export function selfUpdateSessionContinuityPath(userDataPath) {
   return path.join(String(userDataPath), 'metaengine-self-update-session-continuity-v1.json');
 }
 
+export function selfUpdateSessionContinuityQuarantinePath(userDataPath, quarantinedAt = new Date().toISOString()) {
+  const stamp = String(quarantinedAt || new Date().toISOString()).replace(/[^0-9A-Za-z.-]/g, '-').slice(0, 96);
+  return path.join(String(userDataPath), `metaengine-self-update-session-continuity-quarantine-${stamp}.json`);
+}
+
 export async function persistSelfUpdateSessionContinuity(userDataPath, row) {
   if (row?.schema !== SELF_UPDATE_SESSION_CONTINUITY_SCHEMA) throw new Error('self_update_session_continuity_schema_invalid');
   const target = selfUpdateSessionContinuityPath(userDataPath);
@@ -167,6 +172,18 @@ export async function loadSelfUpdateSessionContinuity(userDataPath) {
     return row;
   } catch (error) {
     if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null;
+    throw error;
+  }
+}
+
+export async function quarantineSelfUpdateSessionContinuity(userDataPath, { quarantinedAt = new Date().toISOString() } = {}) {
+  const target = selfUpdateSessionContinuityPath(userDataPath);
+  const quarantine = selfUpdateSessionContinuityQuarantinePath(userDataPath, quarantinedAt);
+  try {
+    await fs.rename(target, quarantine);
+    return quarantine;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
     throw error;
   }
 }
