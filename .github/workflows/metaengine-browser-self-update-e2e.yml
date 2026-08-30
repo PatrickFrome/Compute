@@ -142,7 +142,8 @@ jobs:
           try { $sha512 = [Convert]::ToBase64String($sha512Provider.ComputeHash([System.IO.File]::ReadAllBytes($installer.FullName))) }
           finally { $sha512Provider.Dispose() }
           $releaseDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
-          @(
+          $devYmlPath = Join-Path $feed 'dev.yml'
+          $devYmlLines = @(
             "version: $target",
             'files:',
             "  - url: $($installer.Name)",
@@ -152,11 +153,16 @@ jobs:
             "sha512: $sha512",
             "releaseDate: '$releaseDate'",
             'stagingPercentage: 100'
-          ) | Set-Content (Join-Path $feed 'dev.yml') -Encoding utf8
+          )
+          [System.IO.File]::WriteAllLines($devYmlPath, $devYmlLines, [System.Text.UTF8Encoding]::new($false))
+          $devYmlBytes = [System.IO.File]::ReadAllBytes($devYmlPath)
+          if ($devYmlBytes.Length -ge 3 -and $devYmlBytes[0] -eq 0xEF -and $devYmlBytes[1] -eq 0xBB -and $devYmlBytes[2] -eq 0xBF) {
+            throw 'target_dev_yml_utf8_bom_present'
+          }
           $target | Set-Content "$env:RUNNER_TEMP\target-version.txt"
           $installer.FullName | Set-Content "$env:RUNNER_TEMP\target-installer-path.txt"
           $blockmap.FullName | Set-Content "$env:RUNNER_TEMP\target-blockmap-path.txt"
-          (Join-Path $feed 'dev.yml') | Set-Content "$env:RUNNER_TEMP\target-dev-yml-path.txt"
+          $devYmlPath | Set-Content "$env:RUNNER_TEMP\target-dev-yml-path.txt"
           (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content "$env:RUNNER_TEMP\target-sha256.txt"
 
       - name: Run one physical update transaction N to N plus 1
