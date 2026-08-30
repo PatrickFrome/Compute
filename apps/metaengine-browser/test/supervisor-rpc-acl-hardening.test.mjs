@@ -18,7 +18,12 @@ const effectFunctions = [
 ];
 
 for (const fn of effectFunctions) {
-  test(`effect-capable supervisor RPC is service-role only: ${fn}`, () => {
+  test(`effect-capable supervisor RPC is service-role only with fixed search_path: ${fn}`, () => {
+    assert.equal(
+      hasStatement(`alter function ${fn} set search_path = ''`),
+      true,
+      `missing fixed search_path for SECURITY DEFINER ${fn}`,
+    );
     for (const role of ['public', 'anon', 'authenticated']) {
       assert.equal(
         hasStatement(`revoke execute on function ${fn} from ${role}`),
