@@ -1,0 +1,28 @@
+name: C3 Supervisor RPC ACL Hardening
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/test/supervisor-rpc-acl-hardening.test.mjs'
+      - 'supabase/migrations/20260830175500_h205f22_supervisor_rpc_acl_hardening_v1.sql'
+      - '.github/workflows/c3-supervisor-rpc-acl-hardening.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify least-authority supervisor RPC ACL contract
+        run: node --test apps/metaengine-browser/test/supervisor-rpc-acl-hardening.test.mjs
