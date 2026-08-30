@@ -1,0 +1,83 @@
+name: METAENGINE Browser Fast Self Update E2E
+
+on:
+  push:
+    branches:
+      - work/self-update-fast-loop-v1
+    paths:
+      - 'apps/metaengine-browser/**'
+      - '.github/workflows/metaengine-browser-self-update-fast-e2e.yml'
+      - '.github/workflows/metaengine-browser-fast-autorelease.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: metaengine-browser-fast-self-update-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Fast-loop contract gates
+        working-directory: apps/metaengine-browser
+        run: |
+          npm run check
+          npm test
+          grep -q 'DEFAULT_CONTINUOUS_DEV_UPDATE_INTERVAL_MS = 60 \* 1000' src/self-update-runtime.mjs
+          grep -q 'DEFAULT_CONTINUOUS_DEV_RESTART_GRACE_MS = 3 \* 1000' src/self-update-runtime.mjs
+          grep -q 'DEFAULT_DEV_UPDATE_HINT_INTERVAL_MS = 15 \* 1000' src/dev-update-hint.mjs
+          grep -q 'authority_effect: false' src/dev-update-hint.mjs
+
+  windows-published-n-to-one-build-target:
+    runs-on: windows-2022
+    timeout-minutes: 32
+    env:
+      GITHUB_ACTIONS: 'true'
+      METAENGINE_SELF_UPDATE_TEST_MODE: '1'
+      METAENGINE_DISABLE_CRASH_SENTINEL: '1'
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Contract gates before physical proof
+        working-directory: apps/metaengine-browser
+        run: |
+          npm run check
+          npm test
+      - name: Published baseline to one-build target physical update
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: ./test/self-update-fast-physical.ps1
+      - name: Upload exact fast self-update evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: metaengine-browser-self-update-fast-${{ github.sha }}-${{ github.run_attempt }}
+          path: apps/metaengine-browser/self-update-fast-evidence/
+          if-no-files-found: error
+          compression-level: 0
