@@ -1,0 +1,36 @@
+{
+  "schema": "metaengine.development-gate-policy.v1",
+  "mode": "GATE_DISABLE_ALL_DEV",
+  "scope": "DEVELOPMENT_ONLY",
+  "noncritical_gate_mode": "ADVISORY",
+  "hard_safety_mode": "ENFORCED",
+  "disabled_noncritical_gate_classes": [
+    "QUALITY_THRESHOLD",
+    "STYLE_LINT",
+    "DUPLICATION_THRESHOLD",
+    "OPTIONAL_REVIEW",
+    "OPTIONAL_BENCHMARK",
+    "OPTIONAL_RESEARCH",
+    "ROADMAP_DEPENDENCY_HOLD",
+    "CANARY_DURATION",
+    "NONCRITICAL_ROLLOUT_HOLD",
+    "OPTIONAL_CI"
+  ],
+  "hard_gate_classes": [
+    "TYPED_COMMAND_ONLY",
+    "ONE_RESOURCE_ONE_ACTUATION_LEASE",
+    "NO_BLIND_RETRY_AFTER_AMBIGUOUS_EFFECT",
+    "EXACT_TARGET_PROCESS_TAB_INCARNATION_BINDING",
+    "SECRET_BOUNDARIES",
+    "PAGE_MODEL_WEBMCP_ZERO_AUTHORITY",
+    "NO_ARBITRARY_EVAL",
+    "DURABLE_PRE_EFFECT_RECORD",
+    "LIVE_REVALIDATION_BEFORE_ACTUATION",
+    "MAIN_PRODUCTION_IRREVERSIBLE_EFFECT_AUTHORIZATION"
+  ],
+  "parallel_development_allowed": true,
+  "branch_local_implementation_allowed": true,
+  "noncritical_failure_blocks_development": false,
+  "main_or_production_promotion_unchanged": true,
+  "authority_effect": false
+}
