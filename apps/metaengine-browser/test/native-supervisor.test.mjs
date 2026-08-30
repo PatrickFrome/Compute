@@ -109,6 +109,46 @@ test('native supervisor client completes approval enrollment then executes lease
   assert.ok(seen.some((row) => row.pathname.endsWith('/v1/commands/next')));
 });
 
+test('CONTROL_CAPABILITIES is handled locally as read-only and never delegated to page executor', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-supervisor-capabilities-'));
+  const identity = new SupervisorDeviceIdentity({ statePath: path.join(dir, 'device.json'), secureStorage });
+  await identity.ensure();
+  await identity.bindDevice(crypto.randomUUID());
+  let commandIssued = false;
+  let postedReceipt = null;
+  const commandId = crypto.randomUUID();
+  const fetchImpl = async (url, init = {}) => {
+    const pathname = new URL(url).pathname;
+    if (pathname.endsWith('/v1/state')) return new Response('{}', { status:202, headers:{'content-type':'application/json'} });
+    if (pathname.endsWith('/v1/commands/next')) {
+      if (commandIssued) return new Response(JSON.stringify({ command:null }), { status:200, headers:{'content-type':'application/json'} });
+      commandIssued = true;
+      return new Response(JSON.stringify({ command:{ command_id:commandId, action:'CONTROL_CAPABILITIES', payload:{}, issued_at:new Date().toISOString(), expires_at:new Date(Date.now()+60000).toISOString() } }), { status:200, headers:{'content-type':'application/json'} });
+    }
+    if (/\/v1\/commands\/[^/]+\/result$/.test(pathname)) {
+      postedReceipt = JSON.parse(init.body || '{}');
+      return new Response('{}', { status:200, headers:{'content-type':'application/json'} });
+    }
+    throw new Error(`unexpected_fetch:${pathname}`);
+  };
+  const client = new NativeSupervisorClient({
+    identity,
+    fetchImpl,
+    version:'0.6.0',
+    intervalMs:60000,
+    getState: async () => ({ tabs:[], active_tab:null, development_plane:null, fleet:null, perception:null }),
+    executeCommand: async () => { throw new Error('CONTROL_CAPABILITIES must remain local'); },
+  });
+  await client.cycle();
+  assert.equal(client.snapshot().last_command_status, 'COMPLETED');
+  assert.equal(postedReceipt?.ok, true);
+  assert.equal(postedReceipt?.receipt?.result?.schema, 'metaengine.browser-control-capabilities.v2');
+  assert.equal(postedReceipt?.receipt?.result?.authority_effect, false);
+  assert.ok(postedReceipt?.receipt?.result?.implemented?.some((row) => row.action === 'CONTROL_CAPABILITIES' && row.effect === 'READ_ONLY'));
+  assert.equal(postedReceipt?.receipt?.result?.invariants?.arbitrary_eval, false);
+  await fs.rm(dir, { recursive:true, force:true });
+});
+
 test('native semantic perception exposes unique accessibility targets and typed click uses CDP point actuation', async () => {
   const calls = [];
   const nodes = [
@@ -137,5 +177,30 @@ test('native semantic perception exposes unique accessibility targets and typed 
   assert.equal(result.target.backend_node_id, 42);
   assert.equal(result.point.x, 60);
   assert.equal(result.point.y, 45);
+  assert.ok(calls.some(([method]) => method === 'Input.dispatchMouseEvent'));
+});
+
+test('dedicated STOP_GENERATION recognizes current Russian ChatGPT stop-response control', async () => {
+  const calls = [];
+  const nodes = [
+    { ignored:false, role:{value:'button'}, name:{value:'Остановить ответ'}, backendDOMNodeId:77 },
+  ];
+  const dbg = {
+    attached:false,
+    isAttached() { return this.attached; },
+    attach() { this.attached=true; },
+    detach() { this.attached=false; },
+    async sendCommand(method, params) {
+      calls.push([method, params || null]);
+      if (method === 'Accessibility.getFullAXTree') return { nodes };
+      if (method === 'DOM.getBoxModel') return { model:{ content:[0,0,100,0,100,40,0,40] } };
+      return {};
+    },
+  };
+  const webContents = { debugger:dbg, isDestroyed:()=>false };
+  const result = await executeSemanticCommand(webContents, { action:'STOP_GENERATION', payload:{} });
+  assert.equal(result.target.name, 'Остановить ответ');
+  assert.equal(result.target.backend_node_id, 77);
+  assert.equal(result.authority_effect, true);
   assert.ok(calls.some(([method]) => method === 'Input.dispatchMouseEvent'));
 });
