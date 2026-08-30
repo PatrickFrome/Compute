@@ -41,10 +41,13 @@ export async function reconcileRestoredGeneratingChats({ bindings = [], captureT
       rows.push({ tab_id: tabId, state: 'CONTINUE_AMBIGUOUS', authority_effect: false });
     }
   }
+  const ambiguousCount = rows.filter((row) => row.state === 'CONTINUE_AMBIGUOUS').length;
+  const unresolvedCount = rows.filter((row) => ['CONTINUE_AMBIGUOUS', 'CAPTURE_FAILED'].includes(row.state)).length;
   return {
     schema: 'metaengine.self-update-chat-reconcile.v1',
     tabs: rows,
-    ambiguous_count: rows.filter((row) => row.state === 'CONTINUE_AMBIGUOUS').length,
+    ambiguous_count: ambiguousCount,
+    unresolved_count: unresolvedCount,
     authority_effect: rows.some((row) => row.authority_effect === true),
   };
 }
