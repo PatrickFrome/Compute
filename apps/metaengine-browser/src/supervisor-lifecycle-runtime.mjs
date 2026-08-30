@@ -47,12 +47,14 @@ async function writeJson(file, value) {
 export class SupervisorLifecycleRuntime {
   #getState; #execute; #canActuate; #keepalive = null; #statePath; #lastRun = 0; #lastSupervisorGeneration = 'UNKNOWN'; #lastError = null;
   #lastWorkerSignals = []; #monitorMs; #researchMs; #sessionMonitor; #activeRequest = null; #lastRecovery = null;
+  #workerSampleCursor = 0; #workerSampleSize;
 
-  constructor({ getState, executeCommand, canActuate = () => true, statePath = null, monitorMs = 2000, researchMs = 30 * 60 * 1000, sessionMonitor = null } = {}) {
+  constructor({ getState, executeCommand, canActuate = () => true, statePath = null, monitorMs = 2000, researchMs = 30 * 60 * 1000, sessionMonitor = null, workerSampleSize = 4 } = {}) {
     if (typeof getState !== 'function' || typeof executeCommand !== 'function' || typeof canActuate !== 'function') throw new Error('supervisor_lifecycle_dependencies_required');
     this.#getState = getState; this.#execute = executeCommand; this.#canActuate = canActuate; this.#statePath = statePath;
     this.#monitorMs = Math.max(1000, Number(monitorMs) || 2000);
     this.#researchMs = Math.max(5 * 60 * 1000, Number(researchMs) || 30 * 60 * 1000);
+    this.#workerSampleSize = Math.max(1, Math.min(8, Number(workerSampleSize) || 4));
     this.#sessionMonitor = sessionMonitor || new ChatGptSessionMonitor();
   }
 
@@ -104,6 +106,9 @@ export class SupervisorLifecycleRuntime {
         orphaned_stall_stop_only: true,
         ambiguous_terminal_retirement: true,
         ambiguous_same_wake_retry: false,
+        supervisor_priority: true,
+        worker_sample_size: this.#workerSampleSize,
+        worker_sampling_bounded: true,
         authority_effect: false,
       },
       active_request: this.#activeRequest ? {
@@ -156,10 +161,23 @@ export class SupervisorLifecycleRuntime {
   }
 
   async #observeWorkers(state) {
+    const agents = state?.fleet?.agents || [];
+    const previous = new Map(this.#lastWorkerSignals.map((row) => [String(row?.agent_id || ''), String(row?.generation_state || 'UNKNOWN')]));
+    const liveCandidates = agents.filter((agent) => agent?.tab_id && !['LOST','RETIRED','PROVISIONING_AMBIGUOUS'].includes(String(agent?.lifecycle_state || '')));
+    const sampled = new Set();
+    if (liveCandidates.length > 0) {
+      const count = Math.min(this.#workerSampleSize, liveCandidates.length);
+      const start = this.#workerSampleCursor % liveCandidates.length;
+      for (let i = 0; i < count; i += 1) sampled.add(String(liveCandidates[(start + i) % liveCandidates.length]?.agent_id || ''));
+      this.#workerSampleCursor = (start + count) % liveCandidates.length;
+    }
+
     const signals = [];
-    for (const agent of state?.fleet?.agents || []) {
-      let generation_state = ['LOST','RETIRED','PROVISIONING_AMBIGUOUS'].includes(String(agent?.lifecycle_state || '')) ? 'TERMINAL' : 'UNKNOWN';
-      if (agent?.tab_id && generation_state !== 'TERMINAL') {
+    for (const agent of agents) {
+      const agentId = String(agent?.agent_id || '');
+      const terminal = ['LOST','RETIRED','PROVISIONING_AMBIGUOUS'].includes(String(agent?.lifecycle_state || ''));
+      let generation_state = terminal ? 'TERMINAL' : (previous.get(agentId) || 'UNKNOWN');
+      if (!terminal && agent?.tab_id && sampled.has(agentId)) {
         try { generation_state = generating(await this.#capture(agent.tab_id)) ? 'GENERATING' : 'IDLE'; } catch {}
       }
       signals.push({ agent_id: agent?.agent_id, lifecycle_state: agent?.lifecycle_state, generation_state });
@@ -464,8 +482,6 @@ export class SupervisorLifecycleRuntime {
     try {
       const state = await this.#getState();
       const supervisor = await this.#supervisorTab(state);
-      await this.#observeWorkers(state);
-      await this.#queueResearch();
       if (supervisor) {
         const observed = await this.#observeSupervisor(supervisor, state);
         if (this.#canActuate() === true) {
@@ -490,6 +506,8 @@ export class SupervisorLifecycleRuntime {
           }
         }
       }
+      await this.#observeWorkers(state);
+      await this.#queueResearch();
       if (!this.#lastError?.startsWith('same_chat_retry:') && !this.#lastError?.startsWith('new_conversation_retry:') && !this.#lastError?.startsWith('orphaned_stall_stop:')) this.#lastError = null;
     } catch (e) { this.#lastError = String(e?.message || e).slice(0, 240); }
     return this.snapshot();
