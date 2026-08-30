@@ -163,6 +163,14 @@ export class FleetProvisioner {
         agent.transport_proof = null;
         agent.generation_epoch += 1;
         agent.updated_at = iso(this.#clock);
+      } else if (agent.lifecycle_state === 'ACTIVE') {
+        // A persisted transport proof is evidence for the prior browser/renderer
+        // incarnation only. Tab existence alone cannot re-authorize it after a
+        // process restart; require a fresh markTransportProven() observation.
+        agent.lifecycle_state = 'BOUND_UNVERIFIED';
+        agent.transport_proof = null;
+        agent.generation_epoch += 1;
+        agent.updated_at = iso(this.#clock);
       }
     }
     this.#ready = true;
