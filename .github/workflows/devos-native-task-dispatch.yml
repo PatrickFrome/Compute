@@ -1,0 +1,47 @@
+name: DevOS Native Task Dispatch
+
+on:
+  push:
+    branches:
+      - 'work/devos-native-task-dispatch-v1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-task-dispatch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+
+      - name: Syntax
+        working-directory: apps/metaengine-browser
+        run: |
+          node --check src/devos-native-task-cycle.mjs
+          node --check src/native-supervisor-client.mjs
+          node --check src/native-supervisor-client-base.mjs
+          node --check supabase/a2-browser-native-supervisor-devos-routes.mjs
+          node --check test/devos-native-task-cycle.test.mjs
+          node --check test/devos-supervisor-routes.test.mjs
+
+      - name: DevOS task dispatch fencing
+        working-directory: apps/metaengine-browser
+        run: node --test test/devos-native-task-cycle.test.mjs test/devos-supervisor-routes.test.mjs
+
+      - name: Scheduler and authority invariants
+        working-directory: apps/metaengine-browser
+        run: |
+          grep -F "devos_scheduler_source: 'NATIVE_SUPERVISOR_HEARTBEAT'" src/native-supervisor-client.mjs
+          grep -F 'devos_second_polling_loop: false' src/native-supervisor-client.mjs
+          grep -F 'second_scheduler_loop: false' src/devos-native-task-cycle.mjs
+          grep -F 'arbitrary_eval: false' src/devos-native-task-cycle.mjs
+          grep -F 'page_model_text_authority: false' src/devos-native-task-cycle.mjs
+          grep -F 'automatic_effect_retry: false' src/devos-native-task-cycle.mjs
+          ! grep -E 'setInterval|setTimeout' src/devos-native-task-cycle.mjs
