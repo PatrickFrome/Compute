@@ -1,5 +1,17 @@
 {
   "schema": "metaengine.browser.dev-public-channel.v1",
-  "enabled": false,
+  "enabled": true,
+  "version": "0.6.3-dev.78.1",
+  "tag": "v0.6.3-dev.78.1",
+  "source_sha": "c469383780b1d022ee58834d05865de418eb6b1a",
+  "feed_url": "https://github.com/PatrickFrome/Compute/releases/download/v0.6.3-dev.78.1/",
+  "installer_name": "METAENGINE-Browser-Test-Setup-0.6.3-dev.78.1-x64.exe",
+  "installer_sha256": "a7bc6f1e3f5bf8a33779cb57f52df77c3c31996bcf1b08fa517d627df136b26c",
+  "installer_size": 120000715,
+  "dev_yml_sha256": "e38d5e5593b206b391b50747d33857ee122c815b34492f3c77cad7648905dc62",
+  "manifest_sha256": "fdb2e1b56470f0ba47e4dd216039cbf5ff21bf8b3bd492003448b58e72f784b2",
+  "blockmap_sha256": "d4e907a3e1a8a104f9d54de3fb45fe3eb2af85bc6421b7da810cf06d2fdedbfa",
+  "trusted_e2e_workflow_blob": "b1b5dfbd63cf659560b5bb232f1555de7351ed77",
+  "trusted_shell_workflow_blob": "766834e8a92f62d5da778392686fd5f535a5948e",
   "authority_effect": false
 }
