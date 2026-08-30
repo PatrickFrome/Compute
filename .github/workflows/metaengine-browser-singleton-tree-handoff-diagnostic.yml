@@ -50,6 +50,22 @@ jobs:
       - name: Prove full process-tree handoff
         shell: powershell
         run: |
+          function Read-ProbeRow([string]$path, [datetime]$deadline) {
+            while ((Get-Date) -lt $deadline) {
+              if (Test-Path $path) {
+                $line = Get-Content $path -ErrorAction SilentlyContinue | Where-Object { $_.Trim() } | Select-Object -Last 1
+                if ($line) {
+                  try { return ($line | ConvertFrom-Json) } catch {}
+                }
+              }
+              Start-Sleep -Milliseconds 25
+            }
+            return $null
+          }
+          function Probe-Pid-Is-Live($row) {
+            if (-not $row -or -not $row.pid) { return $false }
+            return $null -ne (Get-Process -Id ([int]$row.pid) -ErrorAction SilentlyContinue)
+          }
           $app = (Get-Content "$env:RUNNER_TEMP\tree-handoff-app.txt").Trim()
           $rows = @()
           for ($i = 1; $i -le 4; $i++) {
@@ -57,40 +73,36 @@ jobs:
             $primaryErr = "$env:RUNNER_TEMP\tree-$i-primary.err"
             $successorOut = "$env:RUNNER_TEMP\tree-$i-successor.out"
             $successorErr = "$env:RUNNER_TEMP\tree-$i-successor.err"
-            $primary = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $primaryOut -RedirectStandardError $primaryErr
-            $null = $primary.Handle
-            $ready = (Get-Date).AddSeconds(5)
-            while ((-not (Test-Path $primaryOut) -or (Get-Item $primaryOut -ErrorAction SilentlyContinue).Length -eq 0) -and (Get-Date) -lt $ready) { Start-Sleep -Milliseconds 50 }
-            $primary.Refresh()
-            if ($primary.HasExited) { throw "tree_handoff_primary_exited_early:${i}:$($primary.ExitCode)" }
+            $primaryLaunch = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $primaryOut -RedirectStandardError $primaryErr
+            $primaryRow = Read-ProbeRow $primaryOut ((Get-Date).AddSeconds(5))
+            if (-not $primaryRow) { throw "tree_handoff_primary_no_probe:$i" }
+            if ($primaryRow.primary_instance -ne $true) { throw "tree_handoff_primary_identity_invalid:$i" }
+            if (-not (Probe-Pid-Is-Live $primaryRow)) { throw "tree_handoff_primary_probe_pid_not_live:${i}:$($primaryRow.pid)" }
             $releaseStart = Get-Date
-            & taskkill.exe /PID $primary.Id /T /F | Out-Null
+            & taskkill.exe /PID ([int]$primaryRow.pid) /T /F | Out-Null
             $deadline = (Get-Date).AddSeconds(5)
-            while (-not $primary.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 50; $primary.Refresh() }
-            if (-not $primary.HasExited) { throw "tree_handoff_primary_tree_not_terminated:$i" }
-            $successor = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $successorOut -RedirectStandardError $successorErr
-            $null = $successor.Handle
-            $probeDeadline = (Get-Date).AddSeconds(5)
-            while ((-not (Test-Path $successorOut) -or (Get-Item $successorOut -ErrorAction SilentlyContinue).Length -eq 0) -and -not $successor.HasExited -and (Get-Date) -lt $probeDeadline) { Start-Sleep -Milliseconds 25; $successor.Refresh() }
-            $successor.Refresh()
-            $exitCode = if ($successor.HasExited) { $successor.ExitCode } else { $null }
-            $line = if (Test-Path $successorOut) { Get-Content $successorOut | Where-Object { $_.Trim() } | Select-Object -Last 1 } else { $null }
-            $acquired = $false
-            if ($line) {
-              try {
-                $row = $line | ConvertFrom-Json
-                $acquired = ($row.primary_instance -eq $true -and -not $successor.HasExited)
-              } catch {}
-            }
+            while ((Probe-Pid-Is-Live $primaryRow) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 50 }
+            if (Probe-Pid-Is-Live $primaryRow) { throw "tree_handoff_primary_tree_not_terminated:${i}:$($primaryRow.pid)" }
+            $successorLaunch = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $successorOut -RedirectStandardError $successorErr
+            $successorRow = Read-ProbeRow $successorOut ((Get-Date).AddSeconds(5))
+            $acquired = ($null -ne $successorRow -and $successorRow.primary_instance -eq $true -and (Probe-Pid-Is-Live $successorRow))
             $latencyMs = [int]((Get-Date) - $releaseStart).TotalMilliseconds
-            $rows += [pscustomobject]@{ iteration=$i; acquire_latency_ms=$latencyMs; successor_exit=$exitCode; acquired=$acquired }
+            $rows += [pscustomobject]@{
+              iteration=$i
+              acquire_latency_ms=$latencyMs
+              primary_probe_pid=[int]$primaryRow.pid
+              primary_start_process_pid=$primaryLaunch.Id
+              successor_probe_pid=if ($successorRow) { [int]$successorRow.pid } else { $null }
+              successor_start_process_pid=$successorLaunch.Id
+              acquired=$acquired
+            }
             if (-not $acquired) {
               Get-Content $successorOut -ErrorAction SilentlyContinue
               Get-Content $successorErr -ErrorAction SilentlyContinue
               Get-Process | Where-Object { $_.ProcessName -like 'METAENGINE*' -or $_.ProcessName -like 'electron*' } | Select-Object ProcessName,Id,Path | ConvertTo-Json | Set-Content "$env:RUNNER_TEMP\tree-handoff-processes.json"
-              throw "tree_handoff_successor_not_primary:$i"
+              throw "tree_handoff_successor_probe_not_live_primary:$i"
             }
-            & taskkill.exe /PID $successor.Id /T /F | Out-Null
+            & taskkill.exe /PID ([int]$successorRow.pid) /T /F | Out-Null
             Start-Sleep -Milliseconds 150
           }
           $rows | ConvertTo-Json | Set-Content "$env:RUNNER_TEMP\tree-handoff.json"
