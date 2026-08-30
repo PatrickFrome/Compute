@@ -1,0 +1,67 @@
+name: METAENGINE Browser PR95 Finalize Proven Draft
+
+on:
+  push:
+    branches:
+      - work/self-update-restart-safe-v1
+    paths:
+      - '.github/workflows/metaengine-browser-pr95-finalize-draft.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: v0.6.3-dev.124.1
+      VERIFIED_SOURCE_SHA: 54f241c88a00ffc3b64c383b2285125cce0eb41c
+      INSTALLER_NAME: METAENGINE-Browser-Test-Setup-0.6.3-dev.124.1-x64.exe
+      INSTALLER_SHA256: 2c0bea766c99878558bb18af76add771bb30036dead5ffb88fac319cff26edef
+    steps:
+      - name: Resolve unique draft and validate exact assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api -X GET "repos/${GITHUB_REPOSITORY}/releases" -f per_page=100 > releases.json
+          python3 - <<'PY'
+          import json, os, pathlib
+          rows=json.load(open('releases.json','r',encoding='utf-8'))
+          tag=os.environ['TAG']
+          drafts=[r for r in rows if r.get('tag_name')==tag and r.get('draft') is True]
+          published=[r for r in rows if r.get('tag_name')==tag and r.get('draft') is False]
+          if published:
+              r=published[0]
+              if r.get('target_commitish')!=os.environ['VERIFIED_SOURCE_SHA']: raise SystemExit('published_source_sha_mismatch')
+              print('already_published=true')
+              pathlib.Path('already.txt').write_text('1',encoding='utf-8')
+              raise SystemExit(0)
+          if len(drafts)!=1: raise SystemExit(f'draft_cardinality_invalid:{len(drafts)}')
+          r=drafts[0]
+          if r.get('prerelease') is not True: raise SystemExit('draft_prerelease_boundary_invalid')
+          if r.get('target_commitish')!=os.environ['VERIFIED_SOURCE_SHA']: raise SystemExit('draft_source_sha_mismatch')
+          assets={a.get('name'):a for a in r.get('assets',[])}
+          expected={os.environ['INSTALLER_NAME'],os.environ['INSTALLER_NAME']+'.blockmap','dev.yml','verified-self-update-manifest.json'}
+          if set(assets)!=expected: raise SystemExit(f'draft_asset_set_invalid:{sorted(assets)}')
+          digest=assets[os.environ['INSTALLER_NAME']].get('digest')
+          if digest and digest!=f"sha256:{os.environ['INSTALLER_SHA256']}": raise SystemExit('draft_installer_digest_mismatch')
+          pathlib.Path('release-id.txt').write_text(str(r['id']),encoding='utf-8')
+          print(f"draft_id={r['id']} assets_verified=true")
+          PY
+
+      - name: Publish exact draft and read back
+        if: ${{ hashFiles('already.txt') == '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/$(cat release-id.txt)" -F draft=false -F prerelease=true -f make_latest=false > published.json
+          python3 - <<'PY'
+          import json, os
+          r=json.load(open('published.json','r',encoding='utf-8'))
+          if r.get('draft') is not False or r.get('prerelease') is not True: raise SystemExit('publish_boundary_invalid')
+          if r.get('tag_name')!=os.environ['TAG']: raise SystemExit('publish_tag_mismatch')
+          if r.get('target_commitish')!=os.environ['VERIFIED_SOURCE_SHA']: raise SystemExit('publish_source_sha_mismatch')
+          print(f"published={r.get('tag_name')} target={r.get('target_commitish')}")
+          PY

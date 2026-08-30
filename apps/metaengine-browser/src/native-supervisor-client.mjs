@@ -2,7 +2,15 @@ import { browserControlCapabilities } from './browser-control-capabilities.mjs';
 import { SUPERVISOR_DEVICE_PROFILE } from './supervisor-device-identity.mjs';
 import { SupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime.mjs';
 import { SelfUpdateRuntime } from './self-update-runtime.mjs';
+import { confirmSelfUpdateRestartSafety } from './self-update-restart-safety.mjs';
 import { persistPreInstallReceipt } from './self-update-handoff.mjs';
+import { reconcileRestoredGeneratingChats } from './self-update-chat-reconcile.mjs';
+import {
+  buildSelfUpdateSessionContinuity,
+  clearSelfUpdateSessionContinuity,
+  loadSelfUpdateSessionContinuity,
+  persistSelfUpdateSessionContinuity,
+} from './self-update-session-continuity.mjs';
 
 export const NATIVE_SUPERVISOR_BASE = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1';
 export const NATIVE_SUPERVISOR_RUNTIME_PATH = '/a2-browser-native-supervisor-v1';
@@ -12,6 +20,14 @@ const READ_ONLY_ACTIONS = new Set([
   'POLL','CAPTURE','CAPTURE_VIEW','CONTROL_CAPABILITIES','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD',
   'DOWNLOAD_STATUS','SELF_UPDATE_STATUS',
 ]);
+
+function generationStateForTab(lifecycle, tabId) {
+  const row = lifecycle?.supervisor_session?.tabs?.find((item) => String(item?.tab_id || '') === String(tabId || ''));
+  const state = String(row?.state || '').toUpperCase();
+  if (['GENERATING','STALLED'].includes(state)) return 'GENERATING';
+  if (['IDLE','INTERRUPTED'].includes(state)) return 'IDLE';
+  return 'UNKNOWN';
+}
 
 export class NativeSupervisorClient {
   #identity;
@@ -34,6 +50,7 @@ export class NativeSupervisorClient {
   #armed = true;
   #lifecycle = null;
   #selfUpdate = null;
+  #continuityStatus = { state: 'NONE', restored_tabs: 0, target_version: null, authority_effect: false };
 
   constructor({ identity, fetchImpl = globalThis.fetch, getState, executeCommand, version, intervalMs = 2000, beforeSelfUpdateInstall = null }) {
     if (!identity) throw new Error('native_supervisor_identity_required');
@@ -60,19 +77,20 @@ export class NativeSupervisorClient {
       },
     });
     this.#selfUpdate = new SelfUpdateRuntime({
-      canRestart: async () => this.#supervisorMode === 'CONTROL'
-        && this.#armed === true
-        && this.#currentCommand == null
-        && this.#lifecycle?.isQuiescent() === true,
+      canRestart: async () => {
+        if (this.#supervisorMode !== 'CONTROL' || this.#armed !== true || this.#currentCommand != null) return false;
+        return confirmSelfUpdateRestartSafety({ getState: this.#getState });
+      },
       beforeInstall: async (receipt) => {
         const { app } = await import('electron');
         await persistPreInstallReceipt(app, receipt);
       },
       beforeInstallerLaunch: async (receipt) => {
-        await beforeSelfUpdateInstall?.(structuredClone(receipt));
         const { app } = await import('electron');
         if (!app?.isPackaged) throw new Error('native_supervisor_self_update_packaged_required');
         if (!app.hasSingleInstanceLock()) throw new Error('native_supervisor_self_update_primary_lock_required');
+        await this.#persistSessionContinuity(app, receipt);
+        await beforeSelfUpdateInstall?.(structuredClone(receipt));
         this.stop();
         app.releaseSingleInstanceLock();
       },
@@ -96,9 +114,139 @@ export class NativeSupervisorClient {
       armed: this.#armed,
       lifecycle: this.#lifecycle?.snapshot() || null,
       self_update: this.#selfUpdate?.snapshot() || null,
+      session_continuity: structuredClone(this.#continuityStatus),
       arbitrary_eval: false,
       os_shell_authority: false,
     };
+  }
+
+  async #persistSessionContinuity(app, receipt) {
+    const state = await this.#getState();
+    const lifecycle = this.#lifecycle?.snapshot() || null;
+    const tabs = (state?.tabs || []).map((tab) => ({
+      ...tab,
+      generation_state: generationStateForTab(lifecycle, tab?.tab_id),
+    }));
+    const selectedTabId = state?.active_tab?.tab_id
+      || tabs.find((tab) => tab?.selected === true)?.tab_id
+      || null;
+    const row = buildSelfUpdateSessionContinuity({
+      currentVersion: this.#version,
+      targetVersion: receipt?.version,
+      tabsSnapshot: { tabs, selected_tab_id: selectedTabId },
+      lifecycleSnapshot: lifecycle,
+    });
+    await persistSelfUpdateSessionContinuity(app.getPath('userData'), row);
+    this.#continuityStatus = {
+      state: 'PERSISTED',
+      restored_tabs: 0,
+      tab_count: row.tabs.length,
+      target_version: row.target_version,
+      had_generating_tabs: row.tabs.some((tab) => tab?.generation_state === 'GENERATING'),
+      authority_effect: false,
+    };
+  }
+
+  async #restoreSessionContinuity() {
+    const { app } = await import('electron');
+    const userData = app.getPath('userData');
+    const row = await loadSelfUpdateSessionContinuity(userData);
+    if (!row) return null;
+    this.#continuityStatus = {
+      state: 'FOUND',
+      restored_tabs: 0,
+      tab_count: row.tabs.length,
+      target_version: row.target_version || null,
+      authority_effect: false,
+    };
+    if (row.target_version && String(row.target_version) !== this.#version) {
+      this.#continuityStatus.state = 'TARGET_VERSION_MISMATCH';
+      return row;
+    }
+
+    const state = await this.#getState();
+    const byUrl = new Map();
+    for (const tab of state?.tabs || []) {
+      const url = String(tab?.url || '');
+      if (url && !byUrl.has(url)) byUrl.set(url, tab);
+    }
+
+    let selectedTabId = null;
+    let restoredTabs = 0;
+    let failedTabs = 0;
+    const bindings = [];
+    for (const prior of row.tabs || []) {
+      const url = String(prior?.url || '');
+      if (!url) continue;
+      let current = byUrl.get(url) || null;
+      if (!current) {
+        try {
+          current = await this.#executeCommand({
+            action: 'NEW_TAB',
+            payload: { url, select: false },
+            platform: null,
+          });
+          if (current?.tab_id) {
+            byUrl.set(url, current);
+            restoredTabs += 1;
+          } else failedTabs += 1;
+        } catch {
+          failedTabs += 1;
+          continue;
+        }
+      }
+      if (current?.tab_id) {
+        bindings.push({
+          prior_tab_id: String(prior?.prior_tab_id || ''),
+          tab_id: String(current.tab_id),
+          generation_state: String(prior?.generation_state || 'UNKNOWN').toUpperCase(),
+        });
+      }
+      if (prior?.selected === true && current?.tab_id) selectedTabId = String(current.tab_id);
+    }
+    if (selectedTabId) {
+      try {
+        await this.#executeCommand({ action: 'SELECT_TAB', payload: { tab_id: selectedTabId }, platform: null });
+      } catch {
+        failedTabs += 1;
+      }
+    }
+
+    let reconcile = {
+      schema: 'metaengine.self-update-chat-reconcile.v1',
+      tabs: [], ambiguous_count: 0, unresolved_count: 0, authority_effect: false,
+    };
+    if (failedTabs === 0 && bindings.some((binding) => binding.generation_state === 'GENERATING')) {
+      reconcile = await reconcileRestoredGeneratingChats({
+        bindings,
+        captureTab: async (tabId) => this.#executeCommand({
+          action: 'CAPTURE', payload: { tab_id: String(tabId) }, platform: 'CHATGPT',
+        }),
+        clickControl: async (tabId, accessibleName) => this.#executeCommand({
+          action: 'TYPED_CLICK',
+          payload: { tab_id: String(tabId), role: 'button', accessible_name: String(accessibleName) },
+          platform: 'CHATGPT',
+        }),
+      });
+      failedTabs += Number(reconcile.unresolved_count || 0);
+    }
+
+    this.#continuityStatus = {
+      state: failedTabs === 0 ? 'RESTORED' : 'PARTIAL',
+      restored_tabs: restoredTabs,
+      failed_tabs: failedTabs,
+      tab_count: row.tabs.length,
+      target_version: row.target_version || null,
+      had_generating_tabs: row.tabs.some((tab) => tab?.generation_state === 'GENERATING'),
+      lifecycle_resume_present: Boolean(row.lifecycle?.active_request),
+      reconciled_generating_tabs: reconcile.tabs.length,
+      reconcile_ambiguous_count: reconcile.ambiguous_count,
+      reconcile_unresolved_count: reconcile.unresolved_count,
+      reconcile_authority_effect: reconcile.authority_effect === true,
+      authority_effect: false,
+    };
+    if (failedTabs === 0) await clearSelfUpdateSessionContinuity(userData);
+    return row;
   }
 
   async start() {
@@ -106,6 +254,10 @@ export class NativeSupervisorClient {
     this.#running = true;
     this.#startedAt = new Date().toISOString();
     await this.#identity.ensure();
+    await this.#restoreSessionContinuity().catch((error) => {
+      this.#lastError = `continuity_restore:${clipError(error)}`;
+      this.#continuityStatus = { ...this.#continuityStatus, state: 'ERROR', error: clipError(error), authority_effect: false };
+    });
     await this.#lifecycle.start().catch((error) => { this.#lastError = `lifecycle_start:${clipError(error)}`; });
     await this.#selfUpdate.start().catch((error) => { this.#lastError = `self_update_start:${clipError(error)}`; });
     await this.cycle().catch(() => {});
@@ -215,6 +367,7 @@ export class NativeSupervisorClient {
         last_error: this.#lastError,
         supervisor_lifecycle: this.#lifecycle?.snapshot() || null,
         self_update: this.#selfUpdate?.snapshot() || null,
+        self_update_session_continuity: structuredClone(this.#continuityStatus),
       },
       last_command_id: this.#lastCommandId,
       last_command_status: this.#lastCommandStatus,
