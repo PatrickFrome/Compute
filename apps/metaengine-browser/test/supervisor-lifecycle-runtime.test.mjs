@@ -18,14 +18,14 @@ function idleFrame(text = '') {
   };
 }
 
-function generatingFrame(text = '') {
+function generatingFrame(text = '', stopLabel = 'Stop generating') {
   return {
     url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
     title: 'ChatGPT',
     text_excerpt: text,
     semantic_targets: [
       { role: 'textbox', name: 'Message ChatGPT' },
-      { role: 'button', name: 'Stop generating' },
+      { role: 'button', name: stopLabel },
     ],
   };
 }
@@ -86,5 +86,30 @@ test('trusted supervisor wake stops and retries same conversation after adaptive
   assert.equal(snap.last_recovery?.confirmed, true);
   assert.equal(JSON.stringify(snap).includes(typed), false, 'trusted prompt body must not be persisted in lifecycle snapshot');
 
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('lifecycle recognizes current Russian stop-response control as active generation', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-lifecycle-ru-'));
+  const statePath = path.join(dir, 'keepalive.json');
+  let typed = '';
+  let isGenerating = false;
+  const getState = async () => ({
+    tabs: [{ tab_id: 'tab1', url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', selected: true }],
+    fleet: { agents: [] },
+  });
+  const executeCommand = async (command) => {
+    if (command.action === 'CAPTURE') return isGenerating ? generatingFrame(typed, 'Остановить ответ') : idleFrame(typed);
+    if (command.action === 'SEMANTIC_TYPE') { typed = String(command.payload?.text || ''); return { ok: true, authority_effect: true }; }
+    if (command.action === 'TYPED_CLICK') { isGenerating = true; return { ok: true, authority_effect: true }; }
+    throw new Error(`unexpected_action:${command.action}`);
+  };
+  const runtime = new SupervisorLifecycleRuntime({ getState, executeCommand, canActuate: () => true, statePath, monitorMs: 5000, researchMs: 5 * 60 * 1000 });
+  await runtime.start();
+  await runtime.cycle({ force: true });
+  const snap = runtime.snapshot();
+  assert.equal(snap.supervisor_generation, 'GENERATING');
+  assert.equal(snap.quiescent, false);
+  assert.equal(snap.supervisor_session.tabs[0].controls.stop, 1);
   await fs.rm(dir, { recursive: true, force: true });
 });
