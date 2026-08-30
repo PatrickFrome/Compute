@@ -1,6 +1,24 @@
 const GATE_ID_RE = /^(?:\*|[a-z0-9][a-z0-9._:-]{2,127})$/;
 const MAX_AUDIT = 256;
 
+export const OWNER_INTERNAL_GATE_CATALOG = Object.freeze([
+  { gate_id:'authority.control_mode', domain:'AUTHORITY', enforcement:'BROWSER_AND_SERVER' },
+  { gate_id:'authority.armed', domain:'AUTHORITY', enforcement:'BROWSER' },
+  { gate_id:'self_update.restart_safety', domain:'SELF_UPDATE', enforcement:'BROWSER' },
+  { gate_id:'self_update.current_command', domain:'SELF_UPDATE', enforcement:'BROWSER' },
+  { gate_id:'self_update.packaged_required', domain:'SELF_UPDATE', enforcement:'BROWSER' },
+  { gate_id:'self_update.primary_instance_lock', domain:'SELF_UPDATE', enforcement:'BROWSER' },
+  { gate_id:'fleet.ambiguous_compensating_fanout', domain:'FLEET', enforcement:'BROWSER' },
+  { gate_id:'supervisor.action_budget', domain:'SUPERVISOR', enforcement:'SERVER' },
+  { gate_id:'supervisor.failure_circuit', domain:'SUPERVISOR', enforcement:'SERVER' },
+  { gate_id:'supervisor.shared_actuation_lease', domain:'SUPERVISOR_MESH', enforcement:'SERVER' },
+  { gate_id:'browser.navigation_policy', domain:'NAVIGATION', enforcement:'BROWSER' },
+  { gate_id:'browser.new_window_policy', domain:'NAVIGATION', enforcement:'BROWSER' },
+  { gate_id:'browser.site_permission_policy', domain:'SESSION', enforcement:'BROWSER' },
+  { gate_id:'browser.semantic_target_uniqueness', domain:'PAGE_INPUT', enforcement:'BROWSER' },
+  { gate_id:'browser.semantic_role_allowlist', domain:'PAGE_INPUT', enforcement:'BROWSER' },
+]);
+
 let GLOBAL_REGISTRY = null;
 
 function clone(value) { return value == null ? value : structuredClone(value); }
@@ -28,7 +46,7 @@ function normalizeTtl(value) {
 function freshState() {
   return {
     schema: 'metaengine.owner-safety-gates.state.v1',
-    version: '1.0.0',
+    version: '1.1.0',
     overrides: {},
     audit: [],
     updated_at: null,
@@ -101,12 +119,18 @@ export class OwnerSafetyGateRegistry {
 
   snapshot() {
     this.#assertReady();
+    const wildcardDisabled = Boolean(this.#activeOverride('*'));
     return Object.freeze({
       schema: 'metaengine.owner-safety-gates.snapshot.v1',
-      version: '1.0.0',
-      wildcard_disabled: Boolean(this.#activeOverride('*')),
+      version: '1.1.0',
+      wildcard_disabled: wildcardDisabled,
+      registered_gates: OWNER_INTERNAL_GATE_CATALOG.map((gate) => ({
+        ...gate,
+        disabled: wildcardDisabled || Boolean(this.#activeOverride(gate.gate_id)),
+      })),
       overrides: Object.values(this.#state.overrides).filter((row) => this.#rowActive(row)).map(clone),
       audit: this.#state.audit.slice(-64).map(clone),
+      external_platform_gates_overridable: false,
       authority_effect: false,
     });
   }
