@@ -55,6 +55,7 @@ declare
   v_key text := trim(coalesce(p_idempotency_key,''));
   v_state public.compute_fabric_a2_browser_supervisor_state_h205f22%rowtype;
   v_keys text[];
+  v_ttl_override numeric;
 begin
   if v_action not in ('GATE_STATUS','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL') then
     return public.h205f22_a2_browser_supervisor_issue_native_v1(
@@ -70,27 +71,37 @@ begin
   if v_action='GATE_STATUS' then
     if p_payload <> '{}'::jsonb then raise exception 'owner_gate_status_payload_must_be_empty'; end if;
   elsif v_action='GATE_DISABLE' then
-    select array_agg(key order by key) into v_keys from jsonb_object_keys(p_payload) key;
-    if coalesce(v_keys,'{}'::text[]) <@ array['gate_id','ttl_seconds','reason','override_id']::text[] = false then raise exception 'owner_gate_disable_fields_invalid'; end if;
+    select array_agg(k.key order by k.key) into v_keys from jsonb_object_keys(p_payload) as k(key);
+    if not (coalesce(v_keys,'{}'::text[]) <@ array['gate_id','ttl_seconds','reason','override_id']::text[]) then raise exception 'owner_gate_disable_fields_invalid'; end if;
     if coalesce(p_payload->>'gate_id','') !~ '^(\*|[A-Za-z0-9][A-Za-z0-9._:-]{2,127})$' then raise exception 'owner_gate_id_invalid'; end if;
     if length(trim(coalesce(p_payload->>'reason',''))) not between 1 and 500 then raise exception 'owner_gate_reason_invalid'; end if;
     if coalesce(p_payload->>'override_id','') !~ '^[A-Za-z0-9._:-]{8,160}$' then raise exception 'owner_gate_override_id_invalid'; end if;
-    if p_payload ? 'ttl_seconds' and (jsonb_typeof(p_payload->'ttl_seconds')<>'number' or (p_payload->>'ttl_seconds')::numeric <> trunc((p_payload->>'ttl_seconds')::numeric) or (p_payload->>'ttl_seconds')::integer not between 1 and 86400) then raise exception 'owner_gate_ttl_invalid'; end if;
+    if p_payload ? 'ttl_seconds' then
+      if jsonb_typeof(p_payload->'ttl_seconds') <> 'number' then raise exception 'owner_gate_ttl_invalid'; end if;
+      v_ttl_override := (p_payload->>'ttl_seconds')::numeric;
+      if v_ttl_override <> trunc(v_ttl_override) then raise exception 'owner_gate_ttl_invalid'; end if;
+      if v_ttl_override < 1 or v_ttl_override > 86400 then raise exception 'owner_gate_ttl_invalid'; end if;
+    end if;
   elsif v_action='GATE_DISABLE_ALL' then
-    select array_agg(key order by key) into v_keys from jsonb_object_keys(p_payload) key;
-    if coalesce(v_keys,'{}'::text[]) <@ array['ttl_seconds','reason','override_id']::text[] = false then raise exception 'owner_gate_disable_all_fields_invalid'; end if;
+    select array_agg(k.key order by k.key) into v_keys from jsonb_object_keys(p_payload) as k(key);
+    if not (coalesce(v_keys,'{}'::text[]) <@ array['ttl_seconds','reason','override_id']::text[]) then raise exception 'owner_gate_disable_all_fields_invalid'; end if;
     if length(trim(coalesce(p_payload->>'reason',''))) not between 1 and 500 then raise exception 'owner_gate_reason_invalid'; end if;
     if coalesce(p_payload->>'override_id','') !~ '^[A-Za-z0-9._:-]{8,160}$' then raise exception 'owner_gate_override_id_invalid'; end if;
-    if p_payload ? 'ttl_seconds' and (jsonb_typeof(p_payload->'ttl_seconds')<>'number' or (p_payload->>'ttl_seconds')::numeric <> trunc((p_payload->>'ttl_seconds')::numeric) or (p_payload->>'ttl_seconds')::integer not between 1 and 86400) then raise exception 'owner_gate_ttl_invalid'; end if;
+    if p_payload ? 'ttl_seconds' then
+      if jsonb_typeof(p_payload->'ttl_seconds') <> 'number' then raise exception 'owner_gate_ttl_invalid'; end if;
+      v_ttl_override := (p_payload->>'ttl_seconds')::numeric;
+      if v_ttl_override <> trunc(v_ttl_override) then raise exception 'owner_gate_ttl_invalid'; end if;
+      if v_ttl_override < 1 or v_ttl_override > 86400 then raise exception 'owner_gate_ttl_invalid'; end if;
+    end if;
   elsif v_action='GATE_ENABLE' then
-    select array_agg(key order by key) into v_keys from jsonb_object_keys(p_payload) key;
-    if coalesce(v_keys,'{}'::text[]) <@ array['gate_id','reason','override_id']::text[] = false then raise exception 'owner_gate_enable_fields_invalid'; end if;
+    select array_agg(k.key order by k.key) into v_keys from jsonb_object_keys(p_payload) as k(key);
+    if not (coalesce(v_keys,'{}'::text[]) <@ array['gate_id','reason','override_id']::text[]) then raise exception 'owner_gate_enable_fields_invalid'; end if;
     if coalesce(p_payload->>'gate_id','') !~ '^(\*|[A-Za-z0-9][A-Za-z0-9._:-]{2,127})$' then raise exception 'owner_gate_id_invalid'; end if;
     if p_payload ? 'reason' and length(trim(coalesce(p_payload->>'reason',''))) not between 1 and 500 then raise exception 'owner_gate_reason_invalid'; end if;
     if coalesce(p_payload->>'override_id','') !~ '^[A-Za-z0-9._:-]{8,160}$' then raise exception 'owner_gate_override_id_invalid'; end if;
   elsif v_action='GATE_ENABLE_ALL' then
-    select array_agg(key order by key) into v_keys from jsonb_object_keys(p_payload) key;
-    if coalesce(v_keys,'{}'::text[]) <@ array['reason','override_id']::text[] = false then raise exception 'owner_gate_enable_all_fields_invalid'; end if;
+    select array_agg(k.key order by k.key) into v_keys from jsonb_object_keys(p_payload) as k(key);
+    if not (coalesce(v_keys,'{}'::text[]) <@ array['reason','override_id']::text[]) then raise exception 'owner_gate_enable_all_fields_invalid'; end if;
     if p_payload ? 'reason' and length(trim(coalesce(p_payload->>'reason',''))) not between 1 and 500 then raise exception 'owner_gate_reason_invalid'; end if;
     if coalesce(p_payload->>'override_id','') !~ '^[A-Za-z0-9._:-]{8,160}$' then raise exception 'owner_gate_override_id_invalid'; end if;
   end if;
@@ -156,7 +167,7 @@ begin
       when action='SEMANTIC_TYPE' then 3
       when action in ('RESOLVE_PROMPT','TYPED_CLICK','DOWNLOAD_FILE','SELF_UPDATE_APPLY') then 4
       else 4 end),0)::integer,
-    count(*) filter (where status in ('FAILED','EXPIRED'))::integer
+    count(*) filter (where status in ('FAILED','EXPIRED') and action not in ('GATE_STATUS','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL'))::integer
   into v_used_cost,v_recent_failures
   from public.compute_fabric_a2_browser_supervisor_command_h205f22
   where workspace_id=p_workspace_id and leased_by=v_client and leased_at>=v_now-v_window
@@ -165,7 +176,10 @@ begin
   select * into v_row from public.compute_fabric_a2_browser_supervisor_command_h205f22
   where workspace_id=p_workspace_id and status='PENDING' and expires_at>v_now
     and (target_client_id is null or target_client_id=v_client)
-    and (v_mode='CONTROL' or action in ('SET_SUPERVISOR_MODE','ARM','DISARM','POLL','CAPTURE','CAPTURE_VIEW','DOWNLOAD_STATUS','SELF_UPDATE_STATUS','GATE_STATUS'))
+    and (v_mode='CONTROL' or action in (
+      'SET_SUPERVISOR_MODE','ARM','DISARM','POLL','CAPTURE','CAPTURE_VIEW','DOWNLOAD_STATUS','SELF_UPDATE_STATUS',
+      'GATE_STATUS','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL'
+    ))
   order by case when action in ('GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL') then 0 else 1 end, issued_at asc
   for update skip locked limit 1;
 
@@ -276,6 +290,6 @@ grant execute on function public.h205f22_a2_browser_supervisor_complete_v6(uuid,
 comment on function public.h205f22_a2_browser_supervisor_issue_native_v2(text,text,text,jsonb,integer,text,text)
 is 'Append-only native supervisor issue v2. Adds typed owner safety-gate policy commands; all legacy actions delegate to v1.';
 comment on function public.h205f22_a2_browser_supervisor_lease_v4(uuid,text,text,integer)
-is 'Supervisor lease v4. Owner GATE_* policy commands have zero budget cost and emergency circuit bypass; Browser/page effects retain normal budget gates.';
+is 'Supervisor lease v4. Owner GATE_* policy commands have zero budget cost and emergency circuit bypass and are leasable regardless of supervisor mode; Browser/page effects retain normal budget gates.';
 comment on function public.h205f22_a2_browser_supervisor_complete_v6(uuid,uuid,text,boolean,jsonb,text,boolean)
 is 'Supervisor complete v6 with owner safety-gate policy mutations classified as authority effects and GATE_STATUS read-only.';
