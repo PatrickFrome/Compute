@@ -44,6 +44,14 @@ test('generation must settle before worker is terminal-ready', () => {
   assert.equal(row.terminal_ready, true);
 });
 
+test('current Russian Stop response label is generation authority', () => {
+  const h = harness();
+  const row = h.monitor.observe({ tab_id: 'tab1', frame: frame({ text: 'думаю', buttons: ['Остановить ответ'] }) });
+  assert.equal(row.controls.stop, 1);
+  assert.equal(row.state, 'GENERATING');
+  assert.equal(row.terminal_ready, false);
+});
+
 test('content progress resets stall timer and adaptive hard stall stops before replay', () => {
   const h = harness();
   h.monitor.observe({ tab_id: 'tab1', frame: frame({ text: 'a', buttons: ['Stop generating'] }) });
