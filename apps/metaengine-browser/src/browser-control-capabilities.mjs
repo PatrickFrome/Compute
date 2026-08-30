@@ -1,6 +1,6 @@
 const freezeRows = (rows) => Object.freeze(rows.map((row) => Object.freeze({ ...row })));
 
-export const BROWSER_CONTROL_PLANE_VERSION = '2.1.0-dev.1';
+export const BROWSER_CONTROL_PLANE_VERSION = '2.2.0-dev.1';
 
 export const CONTROL_ACTIONS = freezeRows([
   { action: 'POLL', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'SHELL' },
@@ -19,6 +19,8 @@ export const CONTROL_ACTIONS = freezeRows([
   { action: 'SEMANTIC_FOCUS', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_ACCESSIBILITY' },
   { action: 'SEMANTIC_TYPE', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_INPUT' },
   { action: 'TYPED_CLICK', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_INPUT' },
+  { action: 'KEY_PRESS', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'ELECTRON_INPUT', fence: 'ALLOWLISTED_KEY_AND_MODIFIERS' },
+  { action: 'SET_ZOOM', domain: 'VIEW', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS', fence: 'ISOLATED_MODE_AND_READBACK' },
   { action: 'DOWNLOAD_STATUS', domain: 'DOWNLOADS', effect: 'READ_ONLY', backend: 'ELECTRON_SESSION' },
   { action: 'DOWNLOAD_FILE', domain: 'DOWNLOADS', effect: 'MUTATING', backend: 'VERIFIED_DOWNLOAD' },
   { action: 'DOWNLOAD_CANCEL', domain: 'DOWNLOADS', effect: 'MUTATING', backend: 'VERIFIED_DOWNLOAD' },
@@ -38,10 +40,8 @@ export const CONTROL_ACTIONS = freezeRows([
 ]);
 
 export const NEXT_CONTROL_ACTIONS = freezeRows([
-  { action: 'KEY_PRESS', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_INPUT' },
   { action: 'POINTER_CLICK', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_INPUT', fence: 'CAPTURED_VIEWPORT_AND_TAB' },
   { action: 'DRAG', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_INPUT', fence: 'CAPTURED_VIEWPORT_AND_TAB' },
-  { action: 'SET_ZOOM', domain: 'VIEW', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS' },
   { action: 'DUPLICATE_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'SHELL_REGISTRY' },
   { action: 'MOVE_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'SHELL_REGISTRY' },
   { action: 'PIN_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'SHELL_REGISTRY' },
@@ -71,6 +71,8 @@ export const CONTROL_INVARIANTS = Object.freeze({
   target_tab_identity_required_when_ambiguous: true,
   semantic_action_preferred_over_coordinate_action: true,
   coordinate_action_requires_fresh_viewport_fence: true,
+  keyboard_action_requires_allowlisted_key_and_modifiers: true,
+  zoom_action_requires_isolated_mode_and_readback: true,
   account_setting_changes_require_readback: true,
   destructive_account_actions_require_explicit_user_intent: true,
   secrets_must_not_be_extracted_from_page: true,

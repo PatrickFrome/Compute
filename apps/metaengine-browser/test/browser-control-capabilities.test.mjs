@@ -15,7 +15,15 @@ test('control plane advertises broad typed control without arbitrary eval or raw
   assert.ok(capabilities);
   assert.equal(capabilities.effect, 'READ_ONLY');
   assert.equal(NEXT_CONTROL_ACTIONS.some((row) => row.action === 'CONTROL_CAPABILITIES'), false);
-  assert.ok(NEXT_CONTROL_ACTIONS.some((row) => row.action === 'KEY_PRESS'));
+  const keyPress = CONTROL_ACTIONS.find((row) => row.action === 'KEY_PRESS');
+  const setZoom = CONTROL_ACTIONS.find((row) => row.action === 'SET_ZOOM');
+  assert.ok(keyPress);
+  assert.equal(keyPress.backend, 'ELECTRON_INPUT');
+  assert.equal(keyPress.fence, 'ALLOWLISTED_KEY_AND_MODIFIERS');
+  assert.ok(setZoom);
+  assert.equal(setZoom.fence, 'ISOLATED_MODE_AND_READBACK');
+  assert.equal(NEXT_CONTROL_ACTIONS.some((row) => row.action === 'KEY_PRESS'), false);
+  assert.equal(NEXT_CONTROL_ACTIONS.some((row) => row.action === 'SET_ZOOM'), false);
   assert.ok(NEXT_CONTROL_ACTIONS.some((row) => row.action === 'CHATGPT_SET_SETTING'));
   assert.ok(NEXT_CONTROL_ACTIONS.some((row) => row.action === 'WEBMCP_INVOKE'));
   assert.equal(CONTROL_INVARIANTS.arbitrary_eval, false);
@@ -23,6 +31,8 @@ test('control plane advertises broad typed control without arbitrary eval or raw
   assert.equal(CONTROL_INVARIANTS.os_shell_string_command, false);
   assert.equal(CONTROL_INVARIANTS.page_data_authority, false);
   assert.equal(CONTROL_INVARIANTS.mutating_actions_require_actuation_lease, true);
+  assert.equal(CONTROL_INVARIANTS.keyboard_action_requires_allowlisted_key_and_modifiers, true);
+  assert.equal(CONTROL_INVARIANTS.zoom_action_requires_isolated_mode_and_readback, true);
 });
 
 test('planned coordinate fallback remains fenced behind fresh viewport and tab identity', () => {

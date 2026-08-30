@@ -2,6 +2,7 @@ import { app, BaseWindow, WebContentsView, ipcMain, protocol, safeStorage, sessi
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { executeTypedKeyPress, setIsolatedZoom } from './browser-input-view-control.mjs';
 import { ComputeBridgeClient } from './compute-bridge-client.mjs';
 import { DevelopmentPlane } from './development-plane.mjs';
 import { FleetProvisioner } from './fleet-provisioner.mjs';
@@ -396,6 +397,16 @@ async function executeNativeSupervisorCommand(command) {
   const { tab, view } = targetViewForSupervisor(command);
   if (action === 'CAPTURE') return { ...(await captureSemanticFrame(view.webContents)), tab_id: tab.tab_id };
   if (action === 'CAPTURE_VIEW') return { ...(await captureViewThumbnail(view.webContents)), tab_id: tab.tab_id };
+  if (action === 'KEY_PRESS') {
+    const result = executeTypedKeyPress(view.webContents, payload);
+    invalidatePerception(tab.tab_id);
+    return { ...result, tab_id: tab.tab_id };
+  }
+  if (action === 'SET_ZOOM') {
+    const result = setIsolatedZoom(view.webContents, payload);
+    invalidatePerception(tab.tab_id);
+    return { ...result, tab_id: tab.tab_id };
+  }
   if (['STOP_GENERATION','SCROLL','SEMANTIC_FOCUS','SEMANTIC_TYPE','TYPED_CLICK'].includes(action)) {
     const result = await executeSemanticCommand(view.webContents, command);
     invalidatePerception(tab.tab_id);
