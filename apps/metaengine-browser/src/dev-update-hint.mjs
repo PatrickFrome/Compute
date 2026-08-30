@@ -1,6 +1,6 @@
 const DEV_VERSION_RE = /^(\d+)\.(\d+)\.(\d+)-dev\.(\d+)\.(\d+)$/;
 export const DEFAULT_DEV_UPDATE_HINT_URL = 'https://raw.githubusercontent.com/PatrickFrome/Compute/update/browser-dev-channel/dev-hint.json';
-export const DEFAULT_DEV_UPDATE_HINT_INTERVAL_MS = 15 * 1000;
+export const DEFAULT_DEV_UPDATE_HINT_INTERVAL_MS = 2 * 1000;
 const MAX_HINT_BYTES = 4096;
 
 function versionTuple(value) {
