@@ -1,0 +1,30 @@
+name: A2 Supervisor Mesh RLS Hardening
+
+on:
+  push:
+    branches:
+      - work/supervisor-mesh-rls-hardening-v1
+  pull_request:
+    paths:
+      - 'supabase/migrations/20260830085500_a2_supervisor_mesh_rls_hardening_v1.sql'
+      - 'tests/a2_supervisor_mesh_rls_hardening_lab.mjs'
+      - '.github/workflows/a2-supervisor-mesh-rls-hardening.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Prove fail-closed RLS contract
+        run: node tests/a2_supervisor_mesh_rls_hardening_lab.mjs
