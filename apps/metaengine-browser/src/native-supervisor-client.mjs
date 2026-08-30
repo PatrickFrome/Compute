@@ -29,6 +29,43 @@ function generationStateForTab(lifecycle, tabId) {
   return 'UNKNOWN';
 }
 
+function isChatGptRoot(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'https:'
+      && ['chatgpt.com','www.chatgpt.com'].includes(url.hostname.toLowerCase())
+      && url.pathname.replace(/\/+$/, '') === '';
+  } catch {
+    return false;
+  }
+}
+
+export function planPostRestoreBlankTabCleanup({ continuityRow, bindings = [], currentTabs = [] } = {}) {
+  const desiredRootCount = (continuityRow?.tabs || []).filter((tab) => isChatGptRoot(tab?.url)).length;
+  const boundTabIds = new Set((bindings || []).map((row) => String(row?.tab_id || '')).filter(Boolean));
+  let retainedRoots = (currentTabs || []).filter((tab) => boundTabIds.has(String(tab?.tab_id || '')) && isChatGptRoot(tab?.url)).length;
+  const candidates = (currentTabs || [])
+    .filter((tab) => !boundTabIds.has(String(tab?.tab_id || '')) && isChatGptRoot(tab?.url))
+    .sort((a, b) => Number(a?.selected === true) - Number(b?.selected === true));
+  const closeTabIds = [];
+  for (const tab of candidates) {
+    if (retainedRoots < desiredRootCount) {
+      retainedRoots += 1;
+      continue;
+    }
+    const tabId = String(tab?.tab_id || '');
+    if (tabId) closeTabIds.push(tabId);
+  }
+  return Object.freeze({
+    close_tab_ids: closeTabIds,
+    desired_root_count: desiredRootCount,
+    bound_tab_count: boundTabIds.size,
+    current_root_count: (currentTabs || []).filter((tab) => isChatGptRoot(tab?.url)).length,
+    arbitrary_tab_close: false,
+    authority_effect: false,
+  });
+}
+
 export class NativeSupervisorClient {
   #identity;
   #fetch;
@@ -174,6 +211,7 @@ export class NativeSupervisorClient {
     let selectedTabId = null;
     let restoredTabs = 0;
     let failedTabs = 0;
+    let closedExtraTabs = 0;
     const bindings = [];
     for (const prior of row.tabs || []) {
       const url = String(prior?.url || '');
@@ -212,6 +250,23 @@ export class NativeSupervisorClient {
       }
     }
 
+    if (failedTabs === 0) {
+      try {
+        const postRestoreState = await this.#getState();
+        const cleanup = planPostRestoreBlankTabCleanup({
+          continuityRow: row,
+          bindings,
+          currentTabs: postRestoreState?.tabs || [],
+        });
+        for (const tabId of cleanup.close_tab_ids) {
+          await this.#executeCommand({ action: 'CLOSE_TAB', payload: { tab_id: tabId }, platform: null });
+          closedExtraTabs += 1;
+        }
+      } catch {
+        failedTabs += 1;
+      }
+    }
+
     let reconcile = {
       schema: 'metaengine.self-update-chat-reconcile.v1',
       tabs: [], ambiguous_count: 0, unresolved_count: 0, authority_effect: false,
@@ -234,6 +289,7 @@ export class NativeSupervisorClient {
     this.#continuityStatus = {
       state: failedTabs === 0 ? 'RESTORED' : 'PARTIAL',
       restored_tabs: restoredTabs,
+      closed_extra_tabs: closedExtraTabs,
       failed_tabs: failedTabs,
       tab_count: row.tabs.length,
       target_version: row.target_version || null,
