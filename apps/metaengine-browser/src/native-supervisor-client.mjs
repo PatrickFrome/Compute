@@ -1,4 +1,5 @@
 import { browserControlCapabilities } from './browser-control-capabilities.mjs';
+import { globalOwnerGateDisabled } from './owner-safety-gate-registry.mjs';
 import { SUPERVISOR_DEVICE_PROFILE } from './supervisor-device-identity.mjs';
 import { SupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime.mjs';
 import { SelfUpdateRuntime } from './self-update-runtime.mjs';
@@ -21,6 +22,13 @@ const READ_ONLY_ACTIONS = new Set([
   'DOWNLOAD_STATUS','SELF_UPDATE_STATUS','GATE_STATUS',
 ]);
 const ROOT_POLICY_ACTIONS = new Set(['GATE_STATUS','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL']);
+
+function controlModeAllows(supervisorMode) {
+  return supervisorMode === 'CONTROL' || globalOwnerGateDisabled('authority.control_mode');
+}
+function armedAllows(armed) {
+  return armed === true || globalOwnerGateDisabled('authority.armed');
+}
 
 function generationStateForTab(lifecycle, tabId) {
   const row = lifecycle?.supervisor_session?.tabs?.find((item) => String(item?.tab_id || '') === String(tabId || ''));
@@ -104,19 +112,21 @@ export class NativeSupervisorClient {
     this.#intervalMs = Math.max(1000, Number(intervalMs || 2000));
     this.#lifecycle = new SupervisorLifecycleRuntime({
       getState: this.#getState,
-      canActuate: () => this.#supervisorMode === 'CONTROL' && this.#armed === true,
+      canActuate: () => controlModeAllows(this.#supervisorMode) && armedAllows(this.#armed),
       executeCommand: async (command) => {
         const action = String(command?.action || '');
-        if (!READ_ONLY_ACTIONS.has(action)) {
-          if (this.#supervisorMode !== 'CONTROL') throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
-          if (!this.#armed) throw new Error('native_supervisor_disarmed');
+        if (!READ_ONLY_ACTIONS.has(action) && !ROOT_POLICY_ACTIONS.has(action)) {
+          if (!controlModeAllows(this.#supervisorMode)) throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
+          if (!armedAllows(this.#armed)) throw new Error('native_supervisor_disarmed');
         }
         return this.#executeCommand(command);
       },
     });
     this.#selfUpdate = new SelfUpdateRuntime({
       canRestart: async () => {
-        if (this.#supervisorMode !== 'CONTROL' || this.#armed !== true || this.#currentCommand != null) return false;
+        if (!controlModeAllows(this.#supervisorMode)) return false;
+        if (!armedAllows(this.#armed)) return false;
+        if (this.#currentCommand != null && !globalOwnerGateDisabled('self_update.current_command')) return false;
         return confirmSelfUpdateRestartSafety({ getState: this.#getState });
       },
       beforeInstall: async (receipt) => {
@@ -125,8 +135,8 @@ export class NativeSupervisorClient {
       },
       beforeInstallerLaunch: async (receipt) => {
         const { app } = await import('electron');
-        if (!app?.isPackaged) throw new Error('native_supervisor_self_update_packaged_required');
-        if (!app.hasSingleInstanceLock()) throw new Error('native_supervisor_self_update_primary_lock_required');
+        if (!app?.isPackaged && !globalOwnerGateDisabled('self_update.packaged_required')) throw new Error('native_supervisor_self_update_packaged_required');
+        if (!app.hasSingleInstanceLock() && !globalOwnerGateDisabled('self_update.primary_instance_lock')) throw new Error('native_supervisor_self_update_primary_lock_required');
         await this.#persistSessionContinuity(app, receipt);
         await beforeSelfUpdateInstall?.(structuredClone(receipt));
         this.stop();
@@ -479,19 +489,19 @@ export class NativeSupervisorClient {
     if (action === 'CONTROL_CAPABILITIES') return browserControlCapabilities();
     if (action === 'SELF_UPDATE_STATUS') return this.#selfUpdate?.snapshot() || null;
     if (action === 'SELF_UPDATE_CHECK') {
-      if (this.#supervisorMode !== 'CONTROL') throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
-      if (!this.#armed) throw new Error('native_supervisor_disarmed');
+      if (!controlModeAllows(this.#supervisorMode)) throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
+      if (!armedAllows(this.#armed)) throw new Error('native_supervisor_disarmed');
       return this.#selfUpdate?.checkNow();
     }
     if (action === 'SELF_UPDATE_APPLY') {
-      if (this.#supervisorMode !== 'CONTROL') throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
-      if (!this.#armed) throw new Error('native_supervisor_disarmed');
+      if (!controlModeAllows(this.#supervisorMode)) throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
+      if (!armedAllows(this.#armed)) throw new Error('native_supervisor_disarmed');
       return this.#selfUpdate?.applyWhenSafe();
     }
-    if (this.#supervisorMode !== 'CONTROL' && !READ_ONLY_ACTIONS.has(action)) {
+    if (!controlModeAllows(this.#supervisorMode) && !READ_ONLY_ACTIONS.has(action)) {
       throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
     }
-    if (!this.#armed && !READ_ONLY_ACTIONS.has(action)) throw new Error('native_supervisor_disarmed');
+    if (!armedAllows(this.#armed) && !READ_ONLY_ACTIONS.has(action)) throw new Error('native_supervisor_disarmed');
     return this.#executeCommand(command);
   }
 
