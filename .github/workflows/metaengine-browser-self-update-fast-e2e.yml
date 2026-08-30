@@ -76,6 +76,9 @@ jobs:
         run: |
           $raw = Get-Content ./test/self-update-fast-physical.ps1 -Raw
           $raw = $raw.Replace('target_version_not_monotonic:$buildId:$baselineBuild','target_version_not_monotonic:${buildId}:${baselineBuild}')
+          $raw = $raw.Replace('$verified = [bool]($rows | Where-Object { $_.metadata_verified -eq $true -and [string]$_.available_version -eq $target })', '$verified = [bool]($rows | Where-Object { ($_.PSObject.Properties.Name -contains ''metadata_verified'') -and $_.metadata_verified -eq $true -and ($_.PSObject.Properties.Name -contains ''available_version'') -and [string]$_.available_version -eq $target })')
+          $raw = $raw.Replace('$feedActive = [bool]($rows | Where-Object { $_.ci_test_feed_active -eq $true })', '$feedActive = [bool]($rows | Where-Object { ($_.PSObject.Properties.Name -contains ''ci_test_feed_active'') -and $_.ci_test_feed_active -eq $true })')
+          $raw = $raw.Replace('$handoffPrepared = [bool]($rows | Where-Object { $_.label -eq ''INSTALLER_HANDOFF_PREPARED'' -and $_.singleton_lock_released -eq $true })', '$handoffPrepared = [bool]($rows | Where-Object { ($_.PSObject.Properties.Name -contains ''label'') -and $_.label -eq ''INSTALLER_HANDOFF_PREPARED'' -and ($_.PSObject.Properties.Name -contains ''singleton_lock_released'') -and $_.singleton_lock_released -eq $true })')
           $fixed = Join-Path $env:RUNNER_TEMP 'self-update-fast-physical.fixed.ps1'
           [System.IO.File]::WriteAllText($fixed, $raw, [System.Text.UTF8Encoding]::new($false))
           & $fixed
