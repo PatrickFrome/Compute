@@ -1,0 +1,46 @@
+name: C3 Supervisor RPC ACL Hardening
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/test/supervisor-rpc-acl-hardening.test.mjs'
+      - 'apps/metaengine-browser/test/supervisor-rpc-acl-smoke.sql'
+      - 'supabase/migrations/20260830175500_h205f22_supervisor_rpc_acl_hardening_v1.sql'
+      - '.github/workflows/c3-supervisor-rpc-acl-hardening.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: metaengine_acl_smoke
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d metaengine_acl_smoke"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify least-authority supervisor RPC ACL contract
+        run: node --test apps/metaengine-browser/test/supervisor-rpc-acl-hardening.test.mjs
+      - name: Functional PostgreSQL ACL smoke
+        run: psql -h 127.0.0.1 -U postgres -d metaengine_acl_smoke -f apps/metaengine-browser/test/supervisor-rpc-acl-smoke.sql
