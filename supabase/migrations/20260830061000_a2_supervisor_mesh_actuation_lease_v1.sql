@@ -53,8 +53,6 @@ create table if not exists public.compute_fabric_a2_supervisor_actuation_lease_h
   constraint a2_supervisor_actuation_lease_authority_effect_ck check (authority_effect = false)
 );
 
--- Global compatibility fence: even callers that still use the legacy native issue RPC
--- cannot bypass the mesh by creating a second in-flight mutating command.
 do $$
 begin
   if exists (
