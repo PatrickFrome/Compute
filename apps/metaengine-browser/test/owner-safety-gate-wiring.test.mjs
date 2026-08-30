@@ -59,7 +59,7 @@ test('server contract gives owner gate lane zero budget cost and emergency bypas
 
 test('owner policy lane remains separate from Browser actuation singleflight', () => {
   const migration = fs.readFileSync(path.join(repoRoot, 'supabase', 'migrations', '20260830083000_owner_safety_gate_control_v1.sql'), 'utf8');
-  const predicate = migration.match(/create unique index a2_browser_supervisor_one_mutating_inflight_uq[\s\S]*?;\n/)?.[0] || '';
+  const predicate = migration.match(/create unique index a2_browser_supervisor_one_mutating_inflight_uq[\s\S]*?;\r?\n/)?.[0] || '';
   assert.match(predicate, /GATE_STATUS/);
   assert.match(predicate, /GATE_DISABLE/);
   assert.match(predicate, /GATE_ENABLE/);
