@@ -68,6 +68,16 @@ if (guard.primary) {
 
   if (updateHandoff?.successor_startup === SUCCESSOR_STARTUP_PROBE_ONLY) {
     console.log(JSON.stringify(updateHandoff.row));
+    // PROBE_ONLY is an evidence process, not the long-lived successor runtime.
+    // The durable receipt above proves that this exact process acquired primary
+    // authority. Release the lock explicitly before exit so the next normal
+    // Browser start cannot race the asynchronous Electron shutdown path and be
+    // misclassified as a secondary instance.
+    if (typeof app.hasSingleInstanceLock === 'function'
+      && app.hasSingleInstanceLock() === true
+      && typeof app.releaseSingleInstanceLock === 'function') {
+      app.releaseSingleInstanceLock();
+    }
     app.exit(0);
   } else if (versionProbe || profileProbe || instanceHoldProbe || selfUpdateSmoke) {
     app.once('ready', async () => {
