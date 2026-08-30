@@ -1,5 +1,6 @@
 import { SUPERVISOR_DEVICE_PROFILE } from './supervisor-device-identity.mjs';
 import { SupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime.mjs';
+import { SupervisorMeshRuntime } from './supervisor-mesh-runtime.mjs';
 import { SelfUpdateRuntime } from './self-update-runtime.mjs';
 import { persistPreInstallReceipt } from './self-update-handoff.mjs';
 
@@ -32,9 +33,10 @@ export class NativeSupervisorClient {
   #supervisorMode = 'CONTROL';
   #armed = true;
   #lifecycle = null;
+  #mesh = null;
   #selfUpdate = null;
 
-  constructor({ identity, fetchImpl = globalThis.fetch, getState, executeCommand, version, intervalMs = 2000, beforeSelfUpdateInstall = null }) {
+  constructor({ identity, fetchImpl = globalThis.fetch, getState, executeCommand, version, intervalMs = 2000, beforeSelfUpdateInstall = null, meshStatePath = null }) {
     if (!identity) throw new Error('native_supervisor_identity_required');
     if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
     if (typeof getState !== 'function') throw new Error('native_supervisor_state_provider_required');
@@ -46,6 +48,10 @@ export class NativeSupervisorClient {
     this.#executeCommand = executeCommand;
     this.#version = String(version || '0.0.0');
     this.#intervalMs = Math.max(1000, Number(intervalMs || 2000));
+    this.#mesh = new SupervisorMeshRuntime({
+      getState: this.#getState,
+      ...(meshStatePath ? { statePath: meshStatePath } : {}),
+    });
     this.#lifecycle = new SupervisorLifecycleRuntime({
       getState: this.#getState,
       canActuate: () => this.#supervisorMode === 'CONTROL' && this.#armed === true,
@@ -62,7 +68,8 @@ export class NativeSupervisorClient {
       canRestart: async () => this.#supervisorMode === 'CONTROL'
         && this.#armed === true
         && this.#currentCommand == null
-        && this.#lifecycle?.isQuiescent() === true,
+        && this.#lifecycle?.isQuiescent() === true
+        && this.#mesh?.isQuiescent() === true,
       beforeInstall: async (receipt) => {
         const { app } = await import('electron');
         await persistPreInstallReceipt(app, receipt);
@@ -94,6 +101,7 @@ export class NativeSupervisorClient {
       supervisor_mode: this.#supervisorMode,
       armed: this.#armed,
       lifecycle: this.#lifecycle?.snapshot() || null,
+      supervisor_mesh: this.#mesh?.snapshot() || null,
       self_update: this.#selfUpdate?.snapshot() || null,
       arbitrary_eval: false,
       os_shell_authority: false,
@@ -105,6 +113,7 @@ export class NativeSupervisorClient {
     this.#running = true;
     this.#startedAt = new Date().toISOString();
     await this.#identity.ensure();
+    await this.#mesh.start().catch((error) => { this.#lastError = `mesh_start:${clipError(error)}`; });
     await this.#lifecycle.start().catch((error) => { this.#lastError = `lifecycle_start:${clipError(error)}`; });
     await this.#selfUpdate.start().catch((error) => { this.#lastError = `self_update_start:${clipError(error)}`; });
     await this.cycle().catch(() => {});
@@ -114,6 +123,7 @@ export class NativeSupervisorClient {
 
   stop() {
     this.#running = false;
+    this.#mesh?.stop?.();
     this.#lifecycle?.stop?.();
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
@@ -213,6 +223,7 @@ export class NativeSupervisorClient {
         started_at: this.#startedAt,
         last_error: this.#lastError,
         supervisor_lifecycle: this.#lifecycle?.snapshot() || null,
+        supervisor_mesh: this.#mesh?.snapshot() || null,
         self_update: this.#selfUpdate?.snapshot() || null,
       },
       last_command_id: this.#lastCommandId,
@@ -312,6 +323,7 @@ export class NativeSupervisorClient {
     if (this.#cyclePromise) return this.#cyclePromise;
     this.#cyclePromise = (async () => {
       try {
+        await this.#mesh?.reconcile().catch((error) => { this.#lastError = `mesh:${clipError(error)}`; });
         await this.#lifecycle?.cycle().catch((error) => { this.#lastError = `lifecycle:${clipError(error)}`; });
         await this.#selfUpdate?.cycle().catch((error) => { this.#lastError = `self_update:${clipError(error)}`; });
         const identity = await this.ensureEnrollment();
@@ -319,6 +331,7 @@ export class NativeSupervisorClient {
         await this.#heartbeat();
         const command = await this.#nextCommand();
         if (command) await this.#runCommand(command);
+        await this.#mesh?.reconcile().catch(() => {});
         await this.#lifecycle?.cycle().catch(() => {});
         await this.#selfUpdate?.cycle().catch(() => {});
         this.#lastError = null;
