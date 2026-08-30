@@ -1,0 +1,25 @@
+name: Fleet autonomous dispatch falsifier
+
+on:
+  push:
+    branches:
+      - work/fleet-falsifier-autonomous-dispatch-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  adversarial-negatives:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/metaengine-browser
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --no-audit --no-fund --ignore-scripts
+      - run: node --test test/fleet-autonomous-dispatch-falsifier.test.mjs
