@@ -15,3 +15,9 @@ test('development gate policy storage is fail-closed behind RLS', () => {
   assert.match(sql, /revoke\s+all\s+on\s+table\s+public\.compute_fabric_development_gate_policy_h205f22\s+from\s+authenticated/i);
   assert.doesNotMatch(sql, /create\s+policy/i, 'no permissive client policy may be introduced');
 });
+
+test('authoritative SECURITY DEFINER policy readback is not executable by client roles', () => {
+  assert.match(sql, /revoke\s+execute\s+on\s+function\s+public\.h205f22_development_gate_policy_v1\(\)\s+from\s+public/i);
+  assert.match(sql, /revoke\s+execute\s+on\s+function\s+public\.h205f22_development_gate_policy_v1\(\)\s+from\s+anon/i);
+  assert.match(sql, /revoke\s+execute\s+on\s+function\s+public\.h205f22_development_gate_policy_v1\(\)\s+from\s+authenticated/i);
+});
