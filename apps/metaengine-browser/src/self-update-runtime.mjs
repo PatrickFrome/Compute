@@ -24,10 +24,10 @@ export {
   DEFAULT_DEV_UPDATE_HINT_URL,
 };
 
-// Permanent development-loop defaults. Full release discovery remains bounded to one
-// minute while a non-authority raw pointer can wake the exact resolver every 15s.
-export const DEFAULT_CONTINUOUS_DEV_UPDATE_INTERVAL_MS = 60 * 1000;
-export const DEFAULT_CONTINUOUS_DEV_RESTART_GRACE_MS = 3 * 1000;
+// Fast development-loop defaults. Exact trusted release discovery remains the
+// authority path, but the cheap zero-authority pointer wakes it within seconds.
+export const DEFAULT_CONTINUOUS_DEV_UPDATE_INTERVAL_MS = 10 * 1000;
+export const DEFAULT_CONTINUOUS_DEV_RESTART_GRACE_MS = 1 * 1000;
 
 const HINT_BUSY_STATES = new Set(['APPROVED_DOWNLOAD','DOWNLOADING','READY_RESTART','RESTART_GRACE','RESTARTING']);
 const HINT_LATCHED_FAILURE_STATES = new Set(['ERROR','REJECTED_METADATA']);
@@ -77,7 +77,7 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
         githubActions: true,
       });
     }
-    this.#hintIntervalMs = Math.max(5000, Number(options?.hintIntervalMs ?? DEFAULT_DEV_UPDATE_HINT_INTERVAL_MS));
+    this.#hintIntervalMs = Math.max(1000, Number(options?.hintIntervalMs ?? DEFAULT_DEV_UPDATE_HINT_INTERVAL_MS));
     this.#hintProbe = options?.hintProbe ?? probeDevUpdateHint;
     this.#hintFetch = options?.fetchImpl ?? globalThis.fetch;
     this.#clock = options?.clock ?? (() => Date.now());
@@ -115,7 +115,7 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
       this.#lastHintTriggeredVersion = hint.version;
       return true;
     } catch (error) {
-      // Hint failure has zero authority over the updater. The one-minute exact resolver
+      // Hint failure has zero authority over the updater. The ten-second exact resolver
       // remains the fallback and no release/feed/install state is mutated here.
       this.#lastHintError = clipHintError(error);
       return false;
