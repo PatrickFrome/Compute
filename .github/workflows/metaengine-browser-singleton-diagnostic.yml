@@ -99,7 +99,7 @@ jobs:
             $ready = (Get-Date).AddSeconds(5)
             while ((-not (Test-Path $primaryOut) -or (Get-Item $primaryOut -ErrorAction SilentlyContinue).Length -eq 0) -and (Get-Date) -lt $ready) { Start-Sleep -Milliseconds 50 }
             $primary.Refresh()
-            if ($primary.HasExited) { throw "handoff_primary_exited_early:$i:$($primary.ExitCode)" }
+            if ($primary.HasExited) { throw "handoff_primary_exited_early:${i}:$($primary.ExitCode)" }
             $releaseStart = Get-Date
             Stop-Process -Id $primary.Id -Force
             $primary.WaitForExit(5000) | Out-Null
@@ -138,7 +138,7 @@ jobs:
               throw "handoff_contender_did_not_exit:$i"
             }
             $successor.Refresh()
-            if ($successor.HasExited) { throw "handoff_contender_displaced_successor:$i:$($successor.ExitCode)" }
+            if ($successor.HasExited) { throw "handoff_contender_displaced_successor:${i}:$($successor.ExitCode)" }
             $rows += [pscustomobject]@{ iteration=$i; acquire_latency_ms=$latencyMs; acquire_attempts=$attempts; contender_exit=$contender.ExitCode }
             try { Stop-Process -Id $successor.Id -Force } catch {}
             $successor.WaitForExit(3000) | Out-Null
