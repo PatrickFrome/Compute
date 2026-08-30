@@ -18,8 +18,9 @@ export const NATIVE_SUPERVISOR_RUNTIME_PATH = '/a2-browser-native-supervisor-v1'
 const clipError = (error) => String(error?.message || error || 'unknown_error').slice(0, 500);
 const READ_ONLY_ACTIONS = new Set([
   'POLL','CAPTURE','CAPTURE_VIEW','CONTROL_CAPABILITIES','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD',
-  'DOWNLOAD_STATUS','SELF_UPDATE_STATUS',
+  'DOWNLOAD_STATUS','SELF_UPDATE_STATUS','GATE_STATUS',
 ]);
+const ROOT_POLICY_ACTIONS = new Set(['GATE_STATUS','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL']);
 
 function generationStateForTab(lifecycle, tabId) {
   const row = lifecycle?.supervisor_session?.tabs?.find((item) => String(item?.tab_id || '') === String(tabId || ''));
@@ -460,6 +461,7 @@ export class NativeSupervisorClient {
 
   async #executeLocalOrRemote(command) {
     const action = String(command?.action || '');
+    if (ROOT_POLICY_ACTIONS.has(action)) return this.#executeCommand(command);
     if (action === 'ARM') {
       this.#armed = true;
       return { armed: true, supervisor_mode: this.#supervisorMode, authority_effect: true };
