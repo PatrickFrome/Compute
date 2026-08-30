@@ -1,0 +1,47 @@
+name: Supervisor Continuity Hardening
+
+on:
+  push:
+    branches:
+      - 'work/supervisor-continuity-hardening-v1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  continuity-hardening:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+
+      - name: Syntax
+        working-directory: apps/metaengine-browser
+        run: |
+          node --check src/supervisor-keepalive.mjs
+          node --check src/supervisor-lifecycle-runtime.mjs
+          node --check test/supervisor-continuity-hardening.test.mjs
+
+      - name: Continuity regression suite
+        working-directory: apps/metaengine-browser
+        run: |
+          node --test \
+            test/supervisor-keepalive.test.mjs \
+            test/supervisor-lifecycle-runtime.test.mjs \
+            test/supervisor-continuity-hardening.test.mjs \
+            test/devos-supervisor-continuity.test.mjs
+
+      - name: Fail-closed invariants
+        working-directory: apps/metaengine-browser
+        run: |
+          grep -F "ambiguous_same_wake_retry: false" src/supervisor-lifecycle-runtime.mjs
+          grep -F "automatic_retry_allowed: false" src/supervisor-keepalive.mjs
+          grep -F "STOP_ORPHANED_GENERATION" src/supervisor-lifecycle-runtime.mjs
+          grep -F "retireAmbiguousAfterTerminal" src/supervisor-lifecycle-runtime.mjs
+          ! grep -F "METAENGINE_SAME_WAKE_RETRY_V1" test/supervisor-continuity-hardening.test.mjs | grep -v "doesNotMatch"
