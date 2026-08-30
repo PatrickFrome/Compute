@@ -3,10 +3,12 @@ import path from 'node:path';
 import { ChatGptSessionMonitor } from './chatgpt-session-monitor.mjs';
 import { chatGptControlMatches, uniqueChatGptControl } from './chatgpt-ui-controls.mjs';
 import { classifyRetryDecision, REQUEST_EFFECT_CLASS } from './chatgpt-retry-policy.mjs';
-import { SupervisorKeepalive, buildSupervisorRolloverMessage } from './supervisor-keepalive.mjs';
+import { SupervisorKeepalive, buildSupervisorRolloverMessage, buildSupervisorWakeMessage } from './supervisor-keepalive.mjs';
 
 const CHAT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/c\/[a-z0-9-]+/i;
 const LIMIT_RE = /(maximum conversation length|conversation is too long|start a new chat|диалог.{0,20}слишком длин|начните новый чат)/i;
+const CONTINUOUS_WAKE_REASON = 'CONTINUE_DEVELOPMENT';
+const AUTO_ROLLOVER_CYCLES = 24;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function generating(frame) {
@@ -46,10 +48,10 @@ export class SupervisorLifecycleRuntime {
   #getState; #execute; #canActuate; #keepalive = null; #statePath; #lastRun = 0; #lastSupervisorGeneration = 'UNKNOWN'; #lastError = null;
   #lastWorkerSignals = []; #monitorMs; #researchMs; #sessionMonitor; #activeRequest = null; #lastRecovery = null;
 
-  constructor({ getState, executeCommand, canActuate = () => true, statePath = null, monitorMs = 15000, researchMs = 30 * 60 * 1000, sessionMonitor = null } = {}) {
+  constructor({ getState, executeCommand, canActuate = () => true, statePath = null, monitorMs = 2000, researchMs = 30 * 60 * 1000, sessionMonitor = null } = {}) {
     if (typeof getState !== 'function' || typeof executeCommand !== 'function' || typeof canActuate !== 'function') throw new Error('supervisor_lifecycle_dependencies_required');
     this.#getState = getState; this.#execute = executeCommand; this.#canActuate = canActuate; this.#statePath = statePath;
-    this.#monitorMs = Math.max(5000, Number(monitorMs) || 15000);
+    this.#monitorMs = Math.max(1000, Number(monitorMs) || 2000);
     this.#researchMs = Math.max(5 * 60 * 1000, Number(researchMs) || 30 * 60 * 1000);
     this.#sessionMonitor = sessionMonitor || new ChatGptSessionMonitor();
   }
@@ -59,24 +61,55 @@ export class SupervisorLifecycleRuntime {
       const { app } = await import('electron');
       this.#statePath = path.join(app.getPath('userData'), 'metaengine-supervisor-keepalive-v1.json');
     }
-    this.#keepalive = new SupervisorKeepalive({ loadState: () => readJson(this.#statePath), saveState: (v) => writeJson(this.#statePath, v) });
+    this.#keepalive = new SupervisorKeepalive({
+      loadState: () => readJson(this.#statePath),
+      saveState: (v) => writeJson(this.#statePath, v),
+      maxCyclesPerEpoch: AUTO_ROLLOVER_CYCLES,
+    });
     await this.#keepalive.init();
+    const active = this.#keepalive.activeWake();
+    if (active) {
+      this.#activeRequest = {
+        wake_id: active.wake_id,
+        tab_id: String(this.#keepalive.snapshot().tab_id || ''),
+        message: buildSupervisorWakeMessage({
+          supervisorEpoch: active.supervisor_epoch,
+          cycleSeq: active.cycle_seq,
+          wakeId: active.wake_id,
+          reason: active.reason,
+        }),
+        retry_attempt: 0,
+        same_chat_retry_attempt: 0,
+        blocked_ambiguous: false,
+        effect_class: REQUEST_EFFECT_CLASS.IDEMPOTENT_WRITE,
+        restored_from_durable_keepalive: true,
+      };
+    }
     await this.cycle({ force: true });
     return this.snapshot();
   }
 
   snapshot() {
     return {
-      schema: 'metaengine.supervisor-lifecycle-runtime.v2',
+      schema: 'metaengine.supervisor-lifecycle-runtime.v3',
       keepalive: this.#keepalive?.snapshot() || null,
       supervisor_generation: this.#lastSupervisorGeneration,
       supervisor_session: this.#sessionMonitor?.snapshot() || null,
+      continuous_service: {
+        enabled: true,
+        monitor_ms: this.#monitorMs,
+        auto_rollover_cycles: AUTO_ROLLOVER_CYCLES,
+        terminal_requires_user_message: false,
+        restart_resumable: true,
+        authority_effect: false,
+      },
       active_request: this.#activeRequest ? {
         wake_id: this.#activeRequest.wake_id,
         tab_id: this.#activeRequest.tab_id,
         retry_attempt: this.#activeRequest.retry_attempt,
         same_chat_retry_attempt: this.#activeRequest.same_chat_retry_attempt,
         blocked_ambiguous: this.#activeRequest.blocked_ambiguous === true,
+        restored_from_durable_keepalive: this.#activeRequest.restored_from_durable_keepalive === true,
         trusted_prompt_persisted: false,
         effect_class: this.#activeRequest.effect_class,
       } : null,
@@ -93,7 +126,9 @@ export class SupervisorLifecycleRuntime {
     const ks = this.#keepalive?.snapshot();
     if (!ks || this.#lastSupervisorGeneration !== 'IDLE') return false;
     if (this.#activeRequest || this.#lastRecovery?.ambiguous === true) return false;
-    if (ks.pending_wake || (ks.queued_wakes || []).length > 0) return false;
+    if (ks.pending_wake) return false;
+    const blockingQueued = (ks.queued_wakes || []).filter((wake) => String(wake?.reason || '') !== CONTINUOUS_WAKE_REASON);
+    if (blockingQueued.length > 0) return false;
     if (['WAKE_PENDING','WAKE_AMBIGUOUS','ROLLOVER_REQUIRED','ROLLOVER_AMBIGUOUS','RECOVERING','ACTIVE'].includes(ks.state)) return false;
     return this.#lastWorkerSignals.every((s) => ['IDLE','TERMINAL'].includes(String(s?.generation_state || 'UNKNOWN')));
   }
@@ -141,7 +176,9 @@ export class SupervisorLifecycleRuntime {
       this.#activeRequest = null;
       this.#lastRecovery = null;
     }
-    if (LIMIT_RE.test(String(frame?.text_excerpt || ''))) await this.#keepalive.requestRollover('CHATGPT_CONVERSATION_LIMIT_SIGNAL');
+    // Page/model text is only a non-authoritative hint. It may defer the current
+    // conversation but never auto-authorizes a new supervisor conversation.
+    if (LIMIT_RE.test(String(frame?.text_excerpt || ''))) await this.#keepalive.requestRollover('CHATGPT_CONVERSATION_LIMIT_HINT');
     return { frame, row };
   }
 
@@ -149,6 +186,24 @@ export class SupervisorLifecycleRuntime {
     const s = this.#keepalive.snapshot();
     const last = s.last_research_wake_at ? new Date(s.last_research_wake_at).getTime() : 0;
     if (!last || Date.now() - last >= this.#researchMs) await this.#keepalive.enqueueWake('RESEARCH_ACCELERATOR_DUE', { key: `epoch-${s.supervisor_epoch}` });
+  }
+
+  async #ensureContinuousWake() {
+    const s = this.#keepalive.snapshot();
+    if (s.paused || s.pending_wake || s.active_wake) return false;
+    if (['WAKE_AMBIGUOUS','ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_AMBIGUOUS','RECOVERING'].includes(s.state)) return false;
+    if ((s.queued_wakes || []).some((wake) => String(wake?.reason || '') === CONTINUOUS_WAKE_REASON)) return false;
+    await this.#keepalive.enqueueWake(CONTINUOUS_WAKE_REASON, { key: `epoch-${s.supervisor_epoch}-cycle-${s.cycle_seq}` });
+    return true;
+  }
+
+  async #autoReleaseDeterministicRollover() {
+    const s = this.#keepalive.snapshot();
+    if (s.state !== 'ROLLOVER_DEFERRED') return false;
+    const reason = String(s.rollover_reason || '');
+    if (!reason.startsWith('MAX_CYCLES_PER_EPOCH')) return false;
+    await this.#keepalive.approveRollover('TRUSTED_CONTINUOUS_SERVICE');
+    return true;
   }
 
   async #typeAndSend(tabId, message, positiveMarker) {
@@ -186,6 +241,7 @@ export class SupervisorLifecycleRuntime {
           same_chat_retry_attempt: 0,
           blocked_ambiguous: false,
           effect_class: REQUEST_EFFECT_CLASS.IDEMPOTENT_WRITE,
+          restored_from_durable_keepalive: false,
         };
         return true;
       }
@@ -315,6 +371,15 @@ export class SupervisorLifecycleRuntime {
       if (CHAT_RE.test(String(observed?.url || '')) && generating(observed)) {
         await this.#keepalive.bindRollover({ url: observed.url, tab_id: tab.tab_id });
         this.#activeRequest = null;
+        this.#lastRecovery = {
+          action: 'SUPERVISOR_ROLLOVER_BOUND',
+          tab_id: String(tab.tab_id),
+          supervisor_epoch: this.#keepalive.snapshot().supervisor_epoch,
+          confirmed: true,
+          ambiguous: false,
+          at: new Date().toISOString(),
+          authority_effect: false,
+        };
         return true;
       }
       await this.#keepalive.markRolloverAmbiguous('ROLLOVER_WITHOUT_POSITIVE_READBACK');
@@ -338,13 +403,19 @@ export class SupervisorLifecycleRuntime {
       if (supervisor) {
         const observed = await this.#observeSupervisor(supervisor, state);
         if (this.#canActuate() === true) {
-          const ks = this.#keepalive.snapshot();
+          let ks = this.#keepalive.snapshot();
+          if (ks.state === 'ROLLOVER_DEFERRED') {
+            await this.#autoReleaseDeterministicRollover();
+            ks = this.#keepalive.snapshot();
+          }
           if (ks.state === 'ROLLOVER_REQUIRED') await this.#rollover();
           else if (this.#activeRequest && ['STALLED','INTERRUPTED'].includes(observed.row.state)) await this.#recoverSupervisor(supervisor, observed.frame, observed.row);
           else if (observed.row.terminal_ready === true) {
+            await this.#ensureContinuousWake();
             const prepared = await this.#keepalive.prepareNextWake();
-            if (prepared?.rollover_required) await this.#rollover();
-            else if (prepared?.ok) await this.#sendWake(prepared);
+            if (prepared?.rollover_deferred) {
+              if (await this.#autoReleaseDeterministicRollover()) await this.#rollover();
+            } else if (prepared?.ok) await this.#sendWake(prepared);
           }
         }
       }
