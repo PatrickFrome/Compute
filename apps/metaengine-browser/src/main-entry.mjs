@@ -138,6 +138,19 @@ if (guard.primary) {
       else setTimeout(() => app.exit(0), 15_000);
     });
   } else {
+    const { startSelfUpdateContinuityWatchdog } = await import('./self-update-continuity-watchdog.mjs');
+    startSelfUpdateContinuityWatchdog({
+      userDataPath: app.getPath('userData'),
+      currentVersion: app.getVersion(),
+      relaunch: () => app.relaunch({ args: process.argv.slice(1).filter((arg) => arg !== '--updated') }),
+      exit: (code) => app.exit(code),
+      onError: (error) => console.error(JSON.stringify({
+        schema: 'metaengine.self-update-continuity-watchdog.v1',
+        state: 'WATCHDOG_ERROR',
+        error,
+        authority_effect: false,
+      })),
+    });
     await import('./main.mjs');
     if (updatedLaunch) {
       setImmediate(() => {
