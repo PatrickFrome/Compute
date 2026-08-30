@@ -22,7 +22,8 @@ test('mutating mesh commands require one shared active Browser-client lease and 
   assert.match(sql, /where status = 'ACTIVE'/);
   assert.match(sql, /supervisor_mesh_mutation_requires_stable_idempotency_key/);
   assert.match(sql, /pg_advisory_xact_lock/);
-  assert.match(sql, /effect_scope,'BROWSER_CLIENT_ACTUATION'/);
+  assert.match(sql, /effect_scope\s*,\s*'BROWSER_CLIENT_ACTUATION'/);
+  assert.match(sql, /effect_scope\s*=\s*'BROWSER_CLIENT_ACTUATION'/);
 });
 
 test('read-only observation bypasses actuation lease but still identifies the supervisor peer', async () => {
