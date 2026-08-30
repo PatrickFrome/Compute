@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-export const FLEET_PROVISIONER_VERSION = '1.0.0';
+export const FLEET_PROVISIONER_VERSION = '1.1.0';
 export const FLEET_STATES = Object.freeze([
   'REGISTERED',
   'PROVISIONING',
@@ -42,6 +42,7 @@ function normalizePolicy(policy = {}) {
     direct_peer_messaging: false,
     browser_authority: false,
     automatic_work_retry: false,
+    idle_physical_tabs: false,
   });
 }
 
@@ -159,31 +160,23 @@ export class FleetProvisioner {
     return this.#serial(async () => {
       this.#assertReady();
       const desired = active ? this.#state.policy.desired_agents : this.#state.policy.warm_agents;
-      const current = this.#state.agents.filter((a) => !['RETIRED', 'PROVISIONING_AMBIGUOUS'].includes(a.lifecycle_state));
-      const recoverable = current.filter((a) => a.lifecycle_state === 'LOST');
-      for (const agent of recoverable) {
-        if (this.#liveCount() >= desired) break;
-        await this.#provision(agent, { isRecovery: true });
-      }
+
       while (this.#slotCount() < desired && this.#slotCount() < this.#state.policy.max_agents) {
-        const role = this.#nextRole();
-        const at = iso(this.#clock);
-        const agent = {
-          agent_id: `agent_${String(this.#uuid()).replace(/[^a-z0-9-]/gi, '').toLowerCase()}`,
-          role,
-          ownership: 'FLEET_OWNED',
-          lifecycle_state: 'REGISTERED',
-          tab_id: null,
-          target_id: null,
-          conversation_epoch: 0,
-          generation_epoch: 1,
-          created_at: at,
-          updated_at: at,
-          lost_reason: null,
-          ambiguous_reason: null,
-          automatic_retry_allowed: false,
-          authority_effect: false,
-        };
+        const agent = this.#newRegisteredAgent();
+        this.#state.agents.push(agent);
+        await this.#persist();
+      }
+
+      if (!active) return this.snapshot();
+
+      const activatable = this.#state.agents.filter((agent) => ['REGISTERED', 'LOST'].includes(agent.lifecycle_state));
+      for (const agent of activatable) {
+        if (this.#liveCount() >= desired) break;
+        await this.#provision(agent, { isRecovery: agent.lifecycle_state === 'LOST' });
+      }
+
+      while (this.#liveCount() < desired && this.#slotCount() < this.#state.policy.max_agents) {
+        const agent = this.#newRegisteredAgent();
         this.#state.agents.push(agent);
         await this.#persist();
         await this.#provision(agent, { isRecovery: false });
@@ -219,6 +212,26 @@ export class FleetProvisioner {
       await this.#persist();
       return this.snapshot();
     });
+  }
+
+  #newRegisteredAgent() {
+    const at = iso(this.#clock);
+    return {
+      agent_id: `agent_${String(this.#uuid()).replace(/[^a-z0-9-]/gi, '').toLowerCase()}`,
+      role: this.#nextRole(),
+      ownership: 'FLEET_OWNED',
+      lifecycle_state: 'REGISTERED',
+      tab_id: null,
+      target_id: null,
+      conversation_epoch: 0,
+      generation_epoch: 1,
+      created_at: at,
+      updated_at: at,
+      lost_reason: null,
+      ambiguous_reason: null,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    };
   }
 
   #assertReady() { if (!this.#ready) throw new Error('fleet_not_initialized'); }
