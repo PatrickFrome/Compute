@@ -1,6 +1,10 @@
 import { app } from 'electron';
 import { acquirePrimaryInstance, METAENGINE_BROWSER_APP_ID } from './single-instance-guard.mjs';
-import { persistUpdatedSuccessorReceipt, SUCCESSOR_STARTUP_PROBE_ONLY } from './self-update-handoff.mjs';
+import {
+  inspectSelfUpdateStartup,
+  persistUpdatedSuccessorReceipt,
+  SUCCESSOR_STARTUP_PROBE_ONLY,
+} from './self-update-handoff.mjs';
 
 const bypassSingleInstance = process.argv.includes('--metaengine-smoke')
   || process.argv.includes('--metaengine-devplane-smoke');
@@ -15,6 +19,33 @@ const guard = acquirePrimaryInstance(app, { bypass: bypassSingleInstance });
 if (guard.primary) {
   if (process.platform === 'win32' && typeof app.setAppUserModelId === 'function') {
     app.setAppUserModelId(METAENGINE_BROWSER_APP_ID);
+  }
+
+  let startupUpdateInspection = null;
+  if (!selfUpdateSmoke && !versionProbe && !profileProbe && !instanceHoldProbe) {
+    startupUpdateInspection = await inspectSelfUpdateStartup(app).catch((error) => ({
+      schema: 'metaengine.self-update.startup-inspection.v1',
+      state: 'AMBIGUOUS_INSTALL',
+      current_version: app.getVersion(),
+      target_version: null,
+      reason: String(error?.message || error).slice(0, 240),
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    }));
+    if (startupUpdateInspection?.state === 'AMBIGUOUS_INSTALL') {
+      // Firefox-style durable status: an unknown installer result is never retried blindly.
+      // The Browser remains usable, but self-update is held until a newer/manual repair
+      // establishes an observable installed version.
+      process.env.METAENGINE_DISABLE_SELF_UPDATE = '1';
+      process.env.METAENGINE_SELF_UPDATE_HOLD_REASON = 'AMBIGUOUS_INSTALL';
+      if (startupUpdateInspection.target_version) {
+        process.env.METAENGINE_SELF_UPDATE_HOLD_TARGET = String(startupUpdateInspection.target_version);
+      }
+      console.error(JSON.stringify({
+        ...startupUpdateInspection,
+        label: 'SELF_UPDATE_AUTOMATIC_RETRY_HELD',
+      }));
+    }
   }
 
   let updateHandoff = null;

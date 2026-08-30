@@ -9,6 +9,7 @@ export const SUCCESSOR_STARTUP_PROBE_ONLY = 'PROBE_ONLY';
 const PRE_INSTALL_SCHEMA = 'metaengine.self-update.pre-install-receipt.v1';
 const SUCCESSOR_SCHEMA = 'metaengine.self-update.successor-receipt.v1';
 const DEFAULT_MAX_AGE_MS = 30 * 60 * 1000;
+const STARTUP_HOLD_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
 
 function assertApp(app) {
   if (!app || typeof app.getPath !== 'function' || typeof app.getVersion !== 'function') throw new Error('self_update_handoff_app_invalid');
@@ -32,6 +33,22 @@ function validatePreInstallReceipt(receipt) {
   const recordedMs = Date.parse(String(receipt?.recorded_at || ''));
   if (!Number.isFinite(recordedMs)) throw new Error('self_update_handoff_receipt_time_invalid');
   return recordedMs;
+}
+
+function versionTuple(value) {
+  const match = String(value || '').match(/^(\d+)\.(\d+)\.(\d+)-dev\.(\d+)\.(\d+)$/);
+  return match ? match.slice(1).map((part) => BigInt(part)) : null;
+}
+
+function compareVersions(left, right) {
+  const a = versionTuple(left);
+  const b = versionTuple(right);
+  if (!a || !b) return null;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] > b[i]) return 1;
+    if (a[i] < b[i]) return -1;
+  }
+  return 0;
 }
 
 async function atomicWriteJson(target, value) {
@@ -97,6 +114,54 @@ export async function readExpectedPreInstallReceipt(app, { maxAgeMs = DEFAULT_MA
   };
 }
 
+export async function inspectSelfUpdateStartup(app, { clock = () => Date.now() } = {}) {
+  assertApp(app);
+  let expected;
+  try {
+    expected = await readExpectedPreInstallReceipt(app, { maxAgeMs: STARTUP_HOLD_MAX_AGE_MS, clock });
+  } catch (error) {
+    return {
+      schema: 'metaengine.self-update.startup-inspection.v1',
+      state: 'AMBIGUOUS_INSTALL',
+      current_version: String(app.getVersion() || ''),
+      target_version: null,
+      reason: String(error?.message || error).slice(0, 240),
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    };
+  }
+  if (!expected) {
+    return {
+      schema: 'metaengine.self-update.startup-inspection.v1',
+      state: 'NONE', current_version: String(app.getVersion() || ''), target_version: null,
+      automatic_retry_allowed: true, authority_effect: false,
+    };
+  }
+  const current = String(app.getVersion() || '');
+  const target = String(expected.receipt.version || '');
+  const cmp = compareVersions(current, target);
+  if (current === target || cmp === 0) {
+    return {
+      schema: 'metaengine.self-update.startup-inspection.v1',
+      state: 'TARGET_INSTALLED', current_version: current, target_version: target,
+      automatic_retry_allowed: false, authority_effect: false,
+    };
+  }
+  if (cmp != null && cmp > 0) {
+    return {
+      schema: 'metaengine.self-update.startup-inspection.v1',
+      state: 'SUPERSEDED', current_version: current, target_version: target,
+      automatic_retry_allowed: false, authority_effect: false,
+    };
+  }
+  return {
+    schema: 'metaengine.self-update.startup-inspection.v1',
+    state: 'AMBIGUOUS_INSTALL', current_version: current, target_version: target,
+    reason: 'pre_install_receipt_present_but_target_not_installed',
+    automatic_retry_allowed: false, authority_effect: false,
+  };
+}
+
 export async function persistUpdatedSuccessorReceipt(app, {
   argv = process.argv,
   primaryInstance = true,
@@ -122,6 +187,7 @@ export async function persistUpdatedSuccessorReceipt(app, {
     primary_instance: true,
     app_id: appId ? String(appId) : null,
     successor_startup: expected.successor_startup,
+    qualification_state: 'BOOT_VERIFIED',
     pre_install_receipt_sha256: expected.sha256,
     pre_install_recorded_at: expected.receipt.recorded_at,
     recorded_at: new Date(Number(clock())).toISOString(),
