@@ -69,6 +69,11 @@ export class HostResilienceRuntime {
     return this.snapshot();
   }
 
+  async prepareInstallerHandoff(reason = 'SELF_UPDATE') {
+    if (this.#sentinel) await this.#sentinel.prepareInstallerHandoff(reason);
+    return this.snapshot();
+  }
+
   async stop() {
     try {
       const electron = this.#electron || await import('electron');
