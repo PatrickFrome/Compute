@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
-export const BROWSER_SENTINEL_VERSION = '1.2.0';
+export const BROWSER_SENTINEL_VERSION = '1.3.0';
 
 async function readJson(file) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); }
@@ -32,6 +32,7 @@ function writeJsonSync(file, value) {
 
 function safeState(value) {
   const relaunchPid = Number(value.relaunch_pid || 0);
+  const workerPid = Number(value.worker_pid || 0);
   return {
     schema: 'metaengine.browser-sentinel.state.v1',
     version: BROWSER_SENTINEL_VERSION,
@@ -42,6 +43,10 @@ function safeState(value) {
     lifecycle: String(value.lifecycle || 'ARMED'),
     expected_restart: value.expected_restart === true,
     expected_restart_reason: value.expected_restart_reason ? String(value.expected_restart_reason).slice(0, 120) : null,
+    installer_handoff: value.installer_handoff === true,
+    worker_pid: Number.isSafeInteger(workerPid) && workerPid > 0 ? workerPid : null,
+    worker_released: value.worker_released === true,
+    worker_released_at: value.worker_released_at || null,
     relaunch_attempted: value.relaunch_attempted === true,
     relaunch_intent_at: value.relaunch_intent_at || null,
     relaunch_pid: Number.isSafeInteger(relaunchPid) && relaunchPid > 0 ? relaunchPid : null,
@@ -69,6 +74,14 @@ function sentinelEnvironment(source, { statePath, token, parentPid }) {
   return env;
 }
 
+function processAlive(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return error?.code === 'EPERM'; }
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export class BrowserSentinelHost {
   #statePath; #workerScript; #executable; #spawn; #state = null; #child = null; #beforeQuit = null; #app = null;
 
@@ -91,6 +104,9 @@ export class BrowserSentinelHost {
       worker_script: this.#workerScript,
       lifecycle: 'ARMED',
       expected_restart: false,
+      installer_handoff: false,
+      worker_pid: null,
+      worker_released: false,
       relaunch_attempted: false,
       relaunch_pid: null,
     });
@@ -103,6 +119,10 @@ export class BrowserSentinelHost {
       windowsHide: true,
       env,
     });
+    const workerPid = Number(this.#child?.pid || 0);
+    if (Number.isSafeInteger(workerPid) && workerPid > 0) {
+      await this.#mutate({ worker_pid: workerPid, worker_released: false });
+    }
     this.#child.unref?.();
     this.#app = app;
     if (app?.on) {
@@ -132,9 +152,38 @@ export class BrowserSentinelHost {
     return this.#mutate({ expected_restart: true, expected_restart_reason: reason, lifecycle: 'EXPECTED_RESTART' });
   }
 
+  async prepareInstallerHandoff(reason = 'SELF_UPDATE', { timeoutMs = 5000 } = {}) {
+    await this.#mutate({
+      expected_restart: true,
+      expected_restart_reason: reason,
+      installer_handoff: true,
+      lifecycle: 'INSTALLER_HANDOFF',
+      worker_released: false,
+    });
+
+    const child = this.#child;
+    const pid = Number(child?.pid || this.#state?.worker_pid || 0);
+    if (child && typeof child.kill !== 'function') throw new Error('browser_sentinel_installer_release_unavailable');
+    if (child && processAlive(pid)) {
+      const dispatched = child.kill();
+      if (dispatched === false && processAlive(pid)) throw new Error('browser_sentinel_installer_release_failed');
+      const deadline = Date.now() + Math.max(500, Number(timeoutMs) || 5000);
+      while (processAlive(pid) && Date.now() < deadline) await sleep(50);
+      if (processAlive(pid)) throw new Error('browser_sentinel_installer_release_timeout');
+    }
+    this.#child = null;
+    return this.#mutate({
+      lifecycle: 'INSTALLER_HANDOFF',
+      installer_handoff: true,
+      worker_released: true,
+      worker_released_at: new Date().toISOString(),
+    });
+  }
+
   markPlannedShutdownSync() {
     const current = readJsonSync(this.#statePath);
     if (!current || current.token !== this.#state?.token) return this.snapshot();
+    if (current.installer_handoff === true) return this.#mutateSync({ lifecycle: 'INSTALLER_HANDOFF' });
     if (current.expected_restart === true) return this.#mutateSync({ lifecycle: 'EXPECTED_RESTART' });
     return this.#mutateSync({ lifecycle: 'PLANNED_SHUTDOWN' });
   }

@@ -20,9 +20,14 @@ async function appendTrace(tracePath, row) {
 export async function runSelfUpdateSmoke({ app, timeoutMs = 120_000 } = {}) {
   if (!app) throw new Error('self_update_smoke_app_required');
   const tracePath = process.env.METAENGINE_SELF_UPDATE_SMOKE_TRACE || null;
-  const runtime = new SelfUpdateRuntime({
+
+  // Physical update proof must exercise the exact installed crash sentinel. Earlier
+  // E2E disabled it and therefore could not reproduce Windows install-directory locks.
+  delete process.env.METAENGINE_DISABLE_CRASH_SENTINEL;
+
+  let runtime = null;
+  runtime = new SelfUpdateRuntime({
     packaged: true,
-    hostResilience: false,
     restartGraceMs: 3000,
     intervalMs: 60_000,
     canRestart: async () => true,
@@ -51,6 +56,12 @@ export async function runSelfUpdateSmoke({ app, timeoutMs = 120_000 } = {}) {
       });
     },
     beforeInstallerLaunch: async (receipt) => {
+      const sentinel = runtime?.snapshot()?.host_resilience?.sentinel || null;
+      if (!sentinel || sentinel.installer_handoff !== true || sentinel.worker_released !== true) {
+        throw new Error('self_update_smoke_sentinel_not_released');
+      }
+      // Keep historical E2E singleton semantics for the probe successor; production
+      // runtime is separately fenced by the primary-instance guard.
       if (!app.hasSingleInstanceLock()) throw new Error('self_update_smoke_primary_lock_missing');
       app.releaseSingleInstanceLock();
       const released = !app.hasSingleInstanceLock();
@@ -66,6 +77,8 @@ export async function runSelfUpdateSmoke({ app, timeoutMs = 120_000 } = {}) {
         metadata_verified: receipt.metadata_verified === true,
         restart_gate_safe: receipt.restart_gate_safe === true,
         singleton_lock_released: true,
+        sentinel_worker_released: true,
+        sentinel_worker_pid: sentinel.worker_pid || null,
         authority_effect: false,
       });
     },
@@ -76,6 +89,7 @@ export async function runSelfUpdateSmoke({ app, timeoutMs = 120_000 } = {}) {
     const snapshot = runtime.snapshot();
     if (snapshot.state !== lastState || label !== 'POLL') {
       lastState = snapshot.state;
+      const sentinel = snapshot.host_resilience?.sentinel || null;
       const row = {
         schema: 'metaengine.self-update-smoke.trace.v1',
         label,
@@ -89,6 +103,9 @@ export async function runSelfUpdateSmoke({ app, timeoutMs = 120_000 } = {}) {
         ci_test_feed_active: snapshot.ci_test_feed_active,
         pre_install_receipt_persisted: snapshot.pre_install_receipt_persisted,
         installer_handoff_prepared: snapshot.installer_handoff_prepared,
+        sentinel_lifecycle: sentinel?.lifecycle || null,
+        sentinel_worker_pid: sentinel?.worker_pid || null,
+        sentinel_worker_released: sentinel?.worker_released === true,
         last_error: snapshot.last_error,
         authority_effect: false,
       };

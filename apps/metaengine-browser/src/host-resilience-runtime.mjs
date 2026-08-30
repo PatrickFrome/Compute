@@ -65,7 +65,12 @@ export class HostResilienceRuntime {
   }
 
   async prepareExpectedRestart(reason = 'SELF_UPDATE') {
-    if (this.#sentinel) await this.#sentinel.prepareExpectedRestart(reason);
+    if (this.#sentinel) await this.#sentinel.prepareInstallerHandoff(reason);
+    return this.snapshot();
+  }
+
+  async prepareInstallerHandoff(reason = 'SELF_UPDATE') {
+    if (this.#sentinel) await this.#sentinel.prepareInstallerHandoff(reason);
     return this.snapshot();
   }
 
