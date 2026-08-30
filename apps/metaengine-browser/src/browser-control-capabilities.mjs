@@ -1,6 +1,6 @@
 const freezeRows = (rows) => Object.freeze(rows.map((row) => Object.freeze({ ...row })));
 
-export const BROWSER_CONTROL_PLANE_VERSION = '2.1.0-dev.1';
+export const BROWSER_CONTROL_PLANE_VERSION = '2.2.0-dev.1';
 
 export const CONTROL_ACTIONS = freezeRows([
   { action: 'POLL', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'SHELL' },
@@ -32,6 +32,11 @@ export const CONTROL_ACTIONS = freezeRows([
   { action: 'SELF_UPDATE_STATUS', domain: 'SELF_UPDATE', effect: 'READ_ONLY', backend: 'TRUSTED_UPDATER' },
   { action: 'SELF_UPDATE_CHECK', domain: 'SELF_UPDATE', effect: 'MUTATING', backend: 'TRUSTED_UPDATER' },
   { action: 'SELF_UPDATE_APPLY', domain: 'SELF_UPDATE', effect: 'MUTATING', backend: 'TRUSTED_UPDATER' },
+  { action: 'GATE_STATUS', domain: 'OWNER_AUTHORITY', effect: 'READ_ONLY', backend: 'OWNER_GATE_REGISTRY' },
+  { action: 'GATE_DISABLE', domain: 'OWNER_AUTHORITY', effect: 'MUTATING', backend: 'OWNER_GATE_REGISTRY' },
+  { action: 'GATE_DISABLE_ALL', domain: 'OWNER_AUTHORITY', effect: 'MUTATING', backend: 'OWNER_GATE_REGISTRY' },
+  { action: 'GATE_ENABLE', domain: 'OWNER_AUTHORITY', effect: 'MUTATING', backend: 'OWNER_GATE_REGISTRY' },
+  { action: 'GATE_ENABLE_ALL', domain: 'OWNER_AUTHORITY', effect: 'MUTATING', backend: 'OWNER_GATE_REGISTRY' },
   { action: 'ARM', domain: 'AUTHORITY', effect: 'MUTATING', backend: 'NATIVE_SUPERVISOR' },
   { action: 'DISARM', domain: 'AUTHORITY', effect: 'MUTATING', backend: 'NATIVE_SUPERVISOR' },
   { action: 'SET_SUPERVISOR_MODE', domain: 'AUTHORITY', effect: 'MUTATING', backend: 'NATIVE_SUPERVISOR' },
@@ -74,6 +79,9 @@ export const CONTROL_INVARIANTS = Object.freeze({
   account_setting_changes_require_readback: true,
   destructive_account_actions_require_explicit_user_intent: true,
   secrets_must_not_be_extracted_from_page: true,
+  project_internal_safety_gates_owner_overridable: true,
+  owner_gate_override_is_durable_and_audited: true,
+  external_platform_safety_gates_controlled_by_metaengine: false,
 });
 
 export function browserControlCapabilities() {
