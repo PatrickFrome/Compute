@@ -1,6 +1,12 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {
+  beginSelfUpdateTransaction,
+  qualifySelfUpdateTransaction,
+  readSelfUpdateTransaction,
+  transitionSelfUpdateTransaction,
+} from './self-update-transaction-journal.mjs';
 
 export const PRE_INSTALL_RECEIPT_FILE = 'metaengine-self-update-pre-install-receipt-v1.json';
 export const SUCCESSOR_RECEIPT_FILE = 'metaengine-self-update-successor-receipt-v1.json';
@@ -64,6 +70,16 @@ async function atomicWriteJson(target, value) {
   await fs.rename(temp, target);
 }
 
+async function transitionIfPresent(app, state, options = {}) {
+  const row = await readSelfUpdateTransaction(app).catch(() => null);
+  if (!row) return null;
+  try { return await transitionSelfUpdateTransaction(app, state, options); }
+  catch (error) {
+    if (String(error?.message || error).includes('transition_invalid') && row.state === state) return row;
+    throw error;
+  }
+}
+
 export function selfUpdateHandoffPaths(app) {
   assertApp(app);
   const userData = app.getPath('userData');
@@ -89,6 +105,7 @@ export async function persistPreInstallReceipt(app, receipt) {
   const { pre_install } = selfUpdateHandoffPaths(app);
   await clearSuccessorReceipt(app);
   await atomicWriteJson(pre_install, receipt);
+  await beginSelfUpdateTransaction(app, receipt);
   return { path: pre_install, successor_startup: successorStartupMode(receipt) };
 }
 
@@ -116,15 +133,29 @@ export async function readExpectedPreInstallReceipt(app, { maxAgeMs = DEFAULT_MA
 
 export async function inspectSelfUpdateStartup(app, { clock = () => Date.now() } = {}) {
   assertApp(app);
+  const journal = await readSelfUpdateTransaction(app).catch(() => null);
+  if (journal?.state === 'AMBIGUOUS_INSTALL' || journal?.state === 'QUARANTINED') {
+    return {
+      schema: 'metaengine.self-update.startup-inspection.v1',
+      state: journal.state,
+      current_version: String(app.getVersion() || ''),
+      target_version: journal.target_version,
+      reason: journal.evidence?.reason || journal.evidence?.quarantine_reason || 'durable_transaction_hold',
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    };
+  }
+
   let expected;
   try {
     expected = await readExpectedPreInstallReceipt(app, { maxAgeMs: STARTUP_HOLD_MAX_AGE_MS, clock });
   } catch (error) {
+    await transitionIfPresent(app, 'AMBIGUOUS_INSTALL', { evidence: { reason: String(error?.message || error).slice(0, 180) } }).catch(() => {});
     return {
       schema: 'metaengine.self-update.startup-inspection.v1',
       state: 'AMBIGUOUS_INSTALL',
       current_version: String(app.getVersion() || ''),
-      target_version: null,
+      target_version: journal?.target_version || null,
       reason: String(error?.message || error).slice(0, 240),
       automatic_retry_allowed: false,
       authority_effect: false,
@@ -141,6 +172,10 @@ export async function inspectSelfUpdateStartup(app, { clock = () => Date.now() }
   const target = String(expected.receipt.version || '');
   const cmp = compareVersions(current, target);
   if (current === target || cmp === 0) {
+    await transitionIfPresent(app, 'SUCCESSOR_BOOTED', {
+      requireTargetVersion: target,
+      evidence: { boot_version_match: true },
+    }).catch(() => {});
     return {
       schema: 'metaengine.self-update.startup-inspection.v1',
       state: 'TARGET_INSTALLED', current_version: current, target_version: target,
@@ -148,12 +183,16 @@ export async function inspectSelfUpdateStartup(app, { clock = () => Date.now() }
     };
   }
   if (cmp != null && cmp > 0) {
+    await transitionIfPresent(app, 'SUPERSEDED', { evidence: { superseding_version: current } }).catch(() => {});
     return {
       schema: 'metaengine.self-update.startup-inspection.v1',
       state: 'SUPERSEDED', current_version: current, target_version: target,
       automatic_retry_allowed: false, authority_effect: false,
     };
   }
+  await transitionIfPresent(app, 'AMBIGUOUS_INSTALL', {
+    evidence: { reason: 'pre_install_receipt_present_but_target_not_installed' },
+  }).catch(() => {});
   return {
     schema: 'metaengine.self-update.startup-inspection.v1',
     state: 'AMBIGUOUS_INSTALL', current_version: current, target_version: target,
@@ -180,6 +219,10 @@ export async function persistUpdatedSuccessorReceipt(app, {
   if (!expected) return null;
   const version = String(app.getVersion() || '');
   if (!version || expected.receipt.version !== version) throw new Error('self_update_successor_version_binding_invalid');
+  await transitionIfPresent(app, 'SUCCESSOR_BOOTED', {
+    requireTargetVersion: version,
+    evidence: { updated_argv: true, primary_instance: true, boot_version_match: true },
+  });
   const row = {
     schema: SUCCESSOR_SCHEMA,
     version,
@@ -196,4 +239,10 @@ export async function persistUpdatedSuccessorReceipt(app, {
   const { successor } = selfUpdateHandoffPaths(app);
   await atomicWriteJson(successor, row);
   return { row, path: successor, successor_startup: expected.successor_startup };
+}
+
+export async function qualifyUpdatedSuccessor(app, evidence = {}) {
+  const row = await readSelfUpdateTransaction(app);
+  if (!row || row.state !== 'SUCCESSOR_BOOTED') return row;
+  return qualifySelfUpdateTransaction(app, evidence);
 }
