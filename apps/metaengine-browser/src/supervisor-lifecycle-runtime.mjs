@@ -101,6 +101,9 @@ export class SupervisorLifecycleRuntime {
         auto_rollover_cycles: AUTO_ROLLOVER_CYCLES,
         terminal_requires_user_message: false,
         restart_resumable: true,
+        orphaned_stall_stop_only: true,
+        ambiguous_terminal_retirement: true,
+        ambiguous_same_wake_retry: false,
         authority_effect: false,
       },
       active_request: this.#activeRequest ? {
@@ -171,10 +174,39 @@ export class SupervisorLifecycleRuntime {
     const row = this.#sessionMonitor.observe({ tab_id: tab.tab_id, frame, ...live });
     const previous = this.#lastSupervisorGeneration;
     this.#lastSupervisorGeneration = row.state;
+
+    const keepalive = this.#keepalive.snapshot();
+    if (row.terminal_ready === true && keepalive.pending_wake?.ambiguous_at) {
+      const retiredWakeId = String(keepalive.pending_wake.wake_id || '');
+      await this.#keepalive.retireAmbiguousAfterTerminal({
+        tab_id: tab.tab_id,
+        generation_epoch: row.generation_epoch,
+        reason: 'SUPERVISOR_TERMINAL_BOUNDARY_CONFIRMED',
+      });
+      this.#lastRecovery = {
+        action: 'AMBIGUOUS_WAKE_RETIRED_AFTER_TERMINAL',
+        wake_id: retiredWakeId,
+        tab_id: String(tab.tab_id),
+        generation_epoch: row.generation_epoch,
+        confirmed: true,
+        ambiguous: false,
+        automatic_retry_allowed: false,
+        at: new Date().toISOString(),
+        authority_effect: false,
+      };
+    }
+
     if (this.#activeRequest && row.terminal_ready === true && previous !== 'IDLE') {
       await this.#keepalive.markCycleComplete();
       this.#activeRequest = null;
       this.#lastRecovery = null;
+    } else if (row.terminal_ready === true && this.#lastRecovery?.action === 'STOP_ORPHANED_GENERATION') {
+      this.#lastRecovery = {
+        ...this.#lastRecovery,
+        confirmed: true,
+        ambiguous: false,
+        terminal_confirmed_at: new Date().toISOString(),
+      };
     }
     // Page/model text is only a non-authoritative hint. It may defer the current
     // conversation but never auto-authorizes a new supervisor conversation.
@@ -356,6 +388,40 @@ export class SupervisorLifecycleRuntime {
     return false;
   }
 
+  async #recoverOrphanedSupervisor(tab, frame, row) {
+    if (this.#canActuate() !== true || row.state !== 'STALLED' || !generating(frame)) return false;
+    const recovery = this.#sessionMonitor.nextRecovery(tab.tab_id);
+    if (recovery.action !== 'STOP_GENERATION') return false;
+    this.#sessionMonitor.markRecovery(tab.tab_id, 'STOP_GENERATION');
+    const record = {
+      action: 'STOP_ORPHANED_GENERATION',
+      tab_id: String(tab.tab_id),
+      generation_epoch: row.generation_epoch,
+      confirmed: false,
+      ambiguous: false,
+      automatic_retry_allowed: false,
+      at: new Date().toISOString(),
+      authority_effect: false,
+    };
+    this.#lastRecovery = record;
+    try {
+      await this.#execute({ action: 'STOP_GENERATION', payload: { tab_id: String(tab.tab_id) }, platform: null });
+      for (let i = 0; i < 8; i += 1) {
+        await sleep(500);
+        if (!generating(await this.#capture(tab.tab_id))) {
+          this.#lastRecovery = { ...record, confirmed: true, observed_stopped_at: new Date().toISOString() };
+          return true;
+        }
+      }
+      this.#lastRecovery = { ...record, ambiguous: true, reason: 'STOP_WITHOUT_TERMINAL_READBACK' };
+      return false;
+    } catch (e) {
+      this.#lastRecovery = { ...record, ambiguous: true, reason: 'STOP_TRANSPORT_AMBIGUOUS' };
+      this.#lastError = `orphaned_stall_stop:${String(e?.message || e).slice(0, 200)}`;
+      return false;
+    }
+  }
+
   async #rollover() {
     if (this.#canActuate() !== true) return false;
     const s = this.#keepalive.snapshot();
@@ -409,8 +475,13 @@ export class SupervisorLifecycleRuntime {
             ks = this.#keepalive.snapshot();
           }
           if (ks.state === 'ROLLOVER_REQUIRED') await this.#rollover();
-          else if (this.#activeRequest && ['STALLED','INTERRUPTED'].includes(observed.row.state)) await this.#recoverSupervisor(supervisor, observed.frame, observed.row);
-          else if (observed.row.terminal_ready === true) {
+          else if (['STALLED','INTERRUPTED'].includes(observed.row.state)) {
+            if (this.#activeRequest && this.#activeRequest.blocked_ambiguous !== true) {
+              await this.#recoverSupervisor(supervisor, observed.frame, observed.row);
+            } else if (observed.row.state === 'STALLED') {
+              await this.#recoverOrphanedSupervisor(supervisor, observed.frame, observed.row);
+            }
+          } else if (observed.row.terminal_ready === true) {
             await this.#ensureContinuousWake();
             const prepared = await this.#keepalive.prepareNextWake();
             if (prepared?.rollover_deferred) {
@@ -419,7 +490,7 @@ export class SupervisorLifecycleRuntime {
           }
         }
       }
-      if (!this.#lastError?.startsWith('same_chat_retry:') && !this.#lastError?.startsWith('new_conversation_retry:')) this.#lastError = null;
+      if (!this.#lastError?.startsWith('same_chat_retry:') && !this.#lastError?.startsWith('new_conversation_retry:') && !this.#lastError?.startsWith('orphaned_stall_stop:')) this.#lastError = null;
     } catch (e) { this.#lastError = String(e?.message || e).slice(0, 240); }
     return this.snapshot();
   }

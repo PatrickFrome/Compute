@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-export const SUPERVISOR_KEEPALIVE_VERSION = '1.2.1';
+export const SUPERVISOR_KEEPALIVE_VERSION = '1.3.0';
 export const SUPERVISOR_ID = 'METAENGINE_SUPERVISOR';
 export const KEEPALIVE_STATES = Object.freeze([
   'ACTIVE','WAITING','WAKE_PENDING','WAKE_AMBIGUOUS',
@@ -29,8 +29,6 @@ function sanitizeActiveWake(input) {
   if (!input || typeof input !== 'object') return null;
   const reason = String(input.reason || '');
   const wakeId = String(input.wake_id || '');
-  // crypto.randomUUID() contains hyphens; durable restart recovery must accept the
-  // exact wake id produced by prepareNextWake instead of silently discarding it.
   if (!WAKE_REASONS.has(reason) || !/^wake_[a-z0-9-]+$/i.test(wakeId)) return null;
   return {
     wake_id: wakeId,
@@ -57,6 +55,7 @@ function freshState() {
     queued_wakes: [],
     pending_wake: null,
     active_wake: null,
+    ambiguous_history: [],
     last_wake_at: null,
     last_wake_reason: null,
     last_completed_cycle_at: null,
@@ -77,6 +76,9 @@ function sanitize(input) {
   const queued = Array.isArray(input.queued_wakes)
     ? input.queued_wakes.filter((row) => row && WAKE_REASONS.has(String(row.reason))).slice(-32).map(clone)
     : [];
+  const ambiguousHistory = Array.isArray(input.ambiguous_history)
+    ? input.ambiguous_history.filter((row) => row && typeof row === 'object').slice(-32).map(clone)
+    : [];
   return {
     ...base,
     supervisor_epoch: Math.max(1, Number(input.supervisor_epoch) || 1),
@@ -88,6 +90,7 @@ function sanitize(input) {
     queued_wakes: queued,
     pending_wake: input.pending_wake && typeof input.pending_wake === 'object' ? clone(input.pending_wake) : null,
     active_wake: sanitizeActiveWake(input.active_wake),
+    ambiguous_history: ambiguousHistory,
     last_wake_at: input.last_wake_at || null,
     last_wake_reason: input.last_wake_reason || null,
     last_completed_cycle_at: input.last_completed_cycle_at || null,
@@ -156,7 +159,7 @@ export class SupervisorKeepalive {
 
   async init() {
     this.#state = sanitize(await this.#load());
-    if (this.#state.pending_wake) this.#state.state = 'WAKE_AMBIGUOUS';
+    if (this.#state.pending_wake) this.#state.state = this.#state.pending_wake.ambiguous_at ? 'WAKE_AMBIGUOUS' : 'WAKE_PENDING';
     else if (this.#state.paused) this.#state.state = 'PAUSED';
     else if (['ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) {}
     else if (this.#state.active_wake) this.#state.state = 'ACTIVE';
@@ -182,7 +185,9 @@ export class SupervisorKeepalive {
   async rebindTab(tabId) {
     if (!this.#state.conversation_url) throw new Error('keepalive_supervisor_unbound');
     this.#state.tab_id = tabId ? String(tabId) : null;
-    if (!['ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) {
+    if (this.#state.pending_wake) {
+      this.#state.state = this.#state.pending_wake.ambiguous_at ? 'WAKE_AMBIGUOUS' : 'WAKE_PENDING';
+    } else if (!['ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) {
       this.#state.state = this.#state.paused ? 'PAUSED' : (this.#state.active_wake ? 'ACTIVE' : 'WAITING');
     }
     await this.#persist();
@@ -199,7 +204,7 @@ export class SupervisorKeepalive {
   async resume() {
     this.#state.paused = false;
     if (this.#state.rollover_reason && !this.#state.rollover_release_at) this.#state.state = 'ROLLOVER_DEFERRED';
-    else if (this.#state.pending_wake) this.#state.state = 'WAKE_AMBIGUOUS';
+    else if (this.#state.pending_wake) this.#state.state = this.#state.pending_wake.ambiguous_at ? 'WAKE_AMBIGUOUS' : 'WAKE_PENDING';
     else if (this.#state.active_wake) this.#state.state = 'ACTIVE';
     else this.#state.state = this.#state.conversation_url ? 'WAITING' : 'RECOVERING';
     await this.#persist();
@@ -376,6 +381,34 @@ export class SupervisorKeepalive {
     pending.ambiguous_at = iso(this.#clock);
     pending.ambiguous_reason = String(reason).slice(0, 200);
     this.#state.state = 'WAKE_AMBIGUOUS';
+    await this.#persist();
+    return this.snapshot();
+  }
+
+  async retireAmbiguousAfterTerminal({ tab_id = null, generation_epoch = null, reason = 'TERMINAL_BOUNDARY_CONFIRMED' } = {}) {
+    const pending = this.#state.pending_wake;
+    if (!pending || !pending.ambiguous_at) throw new Error('keepalive_no_ambiguous_wake');
+    if (tab_id != null && this.#state.tab_id != null && String(tab_id) !== String(this.#state.tab_id)) {
+      throw new Error('keepalive_terminal_tab_binding_mismatch');
+    }
+    const epoch = generation_epoch == null ? null : Number(generation_epoch);
+    if (epoch != null && (!Number.isSafeInteger(epoch) || epoch < 0)) throw new Error('keepalive_terminal_generation_invalid');
+    const retiredAt = iso(this.#clock);
+    this.#state.cycle_seq = Math.max(this.#state.cycle_seq, Math.max(1, Number(pending.cycle_seq) || 1));
+    this.#state.queued_wakes = this.#state.queued_wakes.filter((row) => row.key !== pending.queue_key);
+    this.#state.ambiguous_history = [
+      ...this.#state.ambiguous_history,
+      {
+        ...clone(pending),
+        retired_at: retiredAt,
+        retired_reason: String(reason || 'TERMINAL_BOUNDARY_CONFIRMED').slice(0, 200),
+        terminal_generation_epoch: epoch,
+        automatic_retry_allowed: false,
+      },
+    ].slice(-32);
+    this.#state.pending_wake = null;
+    this.#state.last_completed_cycle_at = retiredAt;
+    this.#state.state = this.#state.paused ? 'PAUSED' : (this.#state.active_wake ? 'ACTIVE' : 'WAITING');
     await this.#persist();
     return this.snapshot();
   }
