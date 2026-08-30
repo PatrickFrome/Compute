@@ -1,0 +1,153 @@
+name: METAENGINE Browser Dev BOM Compatibility Publish
+
+on:
+  push:
+    branches:
+      - integration/browser-dev-auto-update
+    paths:
+      - 'coordination/browser-dev-release-compat-target.json'
+
+permissions: {}
+
+concurrency:
+  group: metaengine-browser-dev-bom-compat-publish
+  cancel-in-progress: false
+
+jobs:
+  publish-compat-dev:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TRUSTED_E2E_WORKFLOW_BLOB: b1b5dfbd63cf659560b5bb232f1555de7351ed77
+      TRUSTED_SHELL_WORKFLOW_BLOB: 766834e8a92f62d5da778392686fd5f535a5948e
+    steps:
+      - name: Read typed compatibility target
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/contents/coordination/browser-dev-release-compat-target.json?ref=$GITHUB_SHA" > "$RUNNER_TEMP/target.json"
+          python3 - <<'PY'
+          import base64, json, os, re
+          from pathlib import Path
+          row=json.loads((Path(os.environ['RUNNER_TEMP'])/'target.json').read_text())
+          target=json.loads(base64.b64decode(row['content']).decode('utf-8'))
+          if target.get('schema') != 'metaengine.browser.dev-release-compat-target.v1': raise SystemExit('compat_target_schema_invalid')
+          if target.get('authority_effect') is not False: raise SystemExit('compat_target_authority_invalid')
+          sha=str(target.get('source_sha') or '').lower()
+          if not re.fullmatch(r'[0-9a-f]{40}', sha): raise SystemExit('compat_target_source_sha_invalid')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out: print(f'source_sha={sha}',file=out)
+          PY
+
+      - name: Bind trusted workflow definitions and successful exact-SHA runs
+        id: evidence
+        env:
+          SOURCE_SHA: ${{ steps.target.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"; sha="$SOURCE_SHA"
+          gh api "repos/$repo/contents/.github/workflows/metaengine-browser-self-update-e2e.yml?ref=$sha" > "$RUNNER_TEMP/e2e-content.json"
+          gh api "repos/$repo/contents/.github/workflows/metaengine-browser-shell-v1.yml?ref=$sha" > "$RUNNER_TEMP/shell-content.json"
+          gh api "repos/$repo/actions/workflows/metaengine-browser-self-update-e2e.yml/runs?head_sha=$sha&status=success&per_page=20" > "$RUNNER_TEMP/e2e-runs.json"
+          gh api "repos/$repo/actions/workflows/metaengine-browser-shell-v1.yml/runs?head_sha=$sha&status=success&per_page=20" > "$RUNNER_TEMP/shell-runs.json"
+          gh api "repos/$repo/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          t=Path(os.environ['RUNNER_TEMP']); sha=os.environ['SOURCE_SHA']
+          if json.loads((t/'e2e-content.json').read_text()).get('sha') != os.environ['TRUSTED_E2E_WORKFLOW_BLOB']: raise SystemExit('trusted_e2e_workflow_blob_mismatch')
+          if json.loads((t/'shell-content.json').read_text()).get('sha') != os.environ['TRUSTED_SHELL_WORKFLOW_BLOB']: raise SystemExit('trusted_shell_workflow_blob_mismatch')
+          def exact(path,wid):
+            rows=[r for r in json.loads(path.read_text()).get('workflow_runs',[]) if r.get('head_sha')==sha and r.get('status')=='completed' and r.get('conclusion')=='success' and int(r.get('workflow_id') or 0)==wid]
+            if not rows: raise SystemExit(f'exact_success_missing:{path.name}')
+            rows.sort(key=lambda r:(r.get('run_started_at') or '',int(r.get('run_attempt') or 0),int(r.get('id') or 0)))
+            return rows[-1]
+          e2e=exact(t/'e2e-runs.json',345450338); exact(t/'shell-runs.json',345209107)
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+            print(f"run_id={e2e['id']}",file=out)
+            print(f"artifact=metaengine-browser-self-update-e2e-{sha}-{e2e['run_attempt']}",file=out)
+          PY
+
+      - name: Download exact physical E2E artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ${{ steps.evidence.outputs.artifact }}
+          path: verified-release
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.evidence.outputs.run_id }}
+
+      - name: Canonicalize only leading UTF-8 BOM and verify release bindings
+        id: verify
+        env:
+          SOURCE_SHA: ${{ steps.target.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, hashlib, json, os, re
+          from pathlib import Path
+          root=Path('verified-release'); manifest=root/'verified-self-update-manifest.json'
+          m=json.loads(manifest.read_text(encoding='utf-8'))
+          if m.get('schema')!='metaengine.browser.self-update-e2e-manifest.v2' or m.get('git_sha')!=os.environ['SOURCE_SHA']: raise SystemExit('manifest_binding_invalid')
+          for k in ('physical_n_to_n_plus_1','durable_successor_binding','forced_successor','profile_continuity','single_install_directory','physical_singleton','development_channel'):
+            if m.get(k) is not True: raise SystemExit(f'manifest_gate_missing:{k}')
+          if m.get('production_safe') is not False or m.get('update_channel')!='dev': raise SystemExit('manifest_channel_invalid')
+          version=str(m.get('version') or '')
+          vm=re.fullmatch(r'(\d+)\.(\d+)\.(\d+)-dev\.(\d+)\.1',version)
+          if not vm: raise SystemExit('version_invalid')
+          installer=root/str(m.get('installer_name') or ''); blockmap=root/str(m.get('blockmap_name') or ''); dev=root/'dev.yml'
+          if not installer.is_file() or not blockmap.is_file() or not dev.is_file(): raise SystemExit('artifact_missing')
+          if hashlib.sha256(installer.read_bytes()).hexdigest()!=str(m.get('installer_sha256') or '').lower(): raise SystemExit('installer_sha256_mismatch')
+          raw=dev.read_bytes(); bom=b'\xef\xbb\xbf'; canonical=raw[len(bom):] if raw.startswith(bom) else raw
+          if raw != canonical and raw != bom+canonical: raise SystemExit('dev_yml_transform_not_bom_only')
+          text=canonical.decode('utf-8','strict')
+          if '\ufeff' in text: raise SystemExit('dev_yml_embedded_bom')
+          sha512=base64.b64encode(hashlib.sha512(installer.read_bytes()).digest()).decode()
+          if f'version: {version}' not in text or installer.name not in text or sha512 not in text: raise SystemExit('dev_yml_binding_invalid')
+          dev.write_bytes(canonical)
+          releases=json.loads((Path(os.environ['RUNNER_TEMP'])/'releases.json').read_text())
+          published=[]
+          for r in releases:
+            mm=re.fullmatch(r'v(\d+)\.(\d+)\.(\d+)-dev\.(\d+)\.1',str(r.get('tag_name') or ''))
+            if mm: published.append(tuple(map(int,mm.groups())))
+          candidate=tuple(map(int,vm.groups()))
+          if published and candidate <= max(published): raise SystemExit('version_not_monotonic')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+            print(f'version={version}',file=out); print(f'tag=v{version}',file=out); print(f'installer={installer}',file=out); print(f'blockmap={blockmap}',file=out); print(f'dev={dev}',file=out); print(f'manifest={manifest}',file=out)
+          PY
+
+      - name: Publish compatibility release with ambiguity-safe readback
+        env:
+          SOURCE_SHA: ${{ steps.target.outputs.source_sha }}
+          TAG: ${{ steps.verify.outputs.tag }}
+          INSTALLER: ${{ steps.verify.outputs.installer }}
+          BLOCKMAP: ${{ steps.verify.outputs.blockmap }}
+          DEV: ${{ steps.verify.outputs.dev }}
+          MANIFEST: ${{ steps.verify.outputs.manifest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          if gh api "repos/$repo/git/ref/tags/$TAG" > "$RUNNER_TEMP/tag.json" 2>/dev/null; then
+            test "$(python3 -c "import json;print(json.load(open('$RUNNER_TEMP/tag.json'))['object']['sha'])")" = "$SOURCE_SHA" || { echo tag_target_mismatch; exit 1; }
+          else
+            gh api --method POST "repos/$repo/git/refs" -f ref="refs/tags/$TAG" -f sha="$SOURCE_SHA" >/dev/null
+          fi
+          if gh api "repos/$repo/releases/tags/$TAG" >/dev/null 2>&1; then echo release_already_exists; exit 1; fi
+          gh release create "$TAG" "$INSTALLER" "$BLOCKMAP" "$DEV" "$MANIFEST" --repo "$repo" --prerelease --title "METAENGINE Browser $TAG" --notes "Verified physical N→N+1 dev artifact. Compatibility canonicalization removed only an optional leading UTF-8 BOM from dev.yml so legacy raw/text digest clients can converge. Installer, blockmap and manifest remain exact E2E bytes. No production authority."
+          gh api "repos/$repo/releases/tags/$TAG" > "$RUNNER_TEMP/readback.json"
+          python3 - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          r=json.loads((Path(os.environ['RUNNER_TEMP'])/'readback.json').read_text())
+          expected={Path(os.environ[k]).name:'sha256:'+hashlib.sha256(Path(os.environ[k]).read_bytes()).hexdigest() for k in ('INSTALLER','BLOCKMAP','DEV','MANIFEST')}
+          assets={a['name']:a.get('digest') for a in r.get('assets',[])}
+          if assets!=expected: raise SystemExit(f'release_readback_digest_mismatch:{assets}:{expected}')
+          if r.get('prerelease') is not True: raise SystemExit('release_not_prerelease')
+          PY
