@@ -4,10 +4,10 @@ import { SUPERVISOR_KEEPALIVE_VERSION, SupervisorKeepalive } from '../src/superv
 
 const CONVERSATION = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 
-function harness(seed = null, { maxCyclesPerEpoch = 4 } = {}) {
+function harness(seed = null, { maxCyclesPerEpoch = 4, uuidStart = 0 } = {}) {
   let stored = seed == null ? null : structuredClone(seed);
   let now = Date.parse('2026-08-31T00:00:00.000Z');
-  let seq = 0;
+  let seq = uuidStart;
   const keepalive = new SupervisorKeepalive({
     loadState: async () => structuredClone(stored),
     saveState: async (next) => { stored = structuredClone(next); },
@@ -89,7 +89,7 @@ test('restart preserves queued successor while ambiguous predecessor is retired 
   await first.keepalive.enqueueWake('CONTINUE_DEVELOPMENT', { key: 'durable-work-after-restart' });
 
   const persisted = first.state();
-  const restarted = harness(persisted);
+  const restarted = harness(persisted, { uuidStart: 100 });
   await restarted.keepalive.init();
   assert.equal(restarted.keepalive.snapshot().state, 'WAKE_AMBIGUOUS');
   assert.equal(restarted.keepalive.canWake(), false, 'physical actuation remains fenced until trusted terminal/IDLE');
