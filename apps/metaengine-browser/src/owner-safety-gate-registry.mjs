@@ -1,6 +1,8 @@
 const GATE_ID_RE = /^(?:\*|[a-z0-9][a-z0-9._:-]{2,127})$/;
 const MAX_AUDIT = 256;
 
+let GLOBAL_REGISTRY = null;
+
 function clone(value) { return value == null ? value : structuredClone(value); }
 function nowIso(clock) {
   const d = new Date(clock());
@@ -53,6 +55,26 @@ function sanitizeState(input) {
   return state;
 }
 
+export function bindGlobalOwnerSafetyGateRegistry(registry) {
+  if (!(registry instanceof OwnerSafetyGateRegistry)) throw new Error('owner_gate_global_registry_invalid');
+  GLOBAL_REGISTRY = registry;
+  return registry.snapshot();
+}
+
+export function globalOwnerGateDisabled(gateId) {
+  return GLOBAL_REGISTRY?.isDisabledSync(gateId) === true;
+}
+
+export function globalOwnerGateDecision(gateId, defaultAllowed = false) {
+  const disabled = globalOwnerGateDisabled(gateId);
+  return Object.freeze({
+    gate_id: normalizeGateId(gateId),
+    gate_disabled_by_owner: disabled,
+    allowed: disabled ? true : defaultAllowed === true,
+    authority_effect: false,
+  });
+}
+
 export class OwnerSafetyGateRegistry {
   #load;
   #save;
@@ -83,7 +105,7 @@ export class OwnerSafetyGateRegistry {
       schema: 'metaengine.owner-safety-gates.snapshot.v1',
       version: '1.0.0',
       wildcard_disabled: Boolean(this.#activeOverride('*')),
-      overrides: Object.values(this.#state.overrides).map(clone),
+      overrides: Object.values(this.#state.overrides).filter((row) => this.#rowActive(row)).map(clone),
       audit: this.#state.audit.slice(-64).map(clone),
       authority_effect: false,
     });
@@ -133,11 +155,16 @@ export class OwnerSafetyGateRegistry {
     });
   }
 
+  isDisabledSync(gateId) {
+    this.#assertReady();
+    const id = normalizeGateId(gateId);
+    return Boolean(this.#activeOverride(id) || this.#activeOverride('*'));
+  }
+
   async isDisabled(gateId) {
     this.#assertReady();
     await this.#expire();
-    const id = normalizeGateId(gateId);
-    return Boolean(this.#activeOverride(id) || this.#activeOverride('*'));
+    return this.isDisabledSync(gateId);
   }
 
   async decision(gateId, { default_allowed = false } = {}) {
@@ -150,17 +177,21 @@ export class OwnerSafetyGateRegistry {
     });
   }
 
+  #rowActive(row) {
+    if (!row) return false;
+    if (!row.expires_at) return true;
+    return new Date(row.expires_at).getTime() > new Date(this.#clock()).getTime();
+  }
+
   #activeOverride(gateId) {
     const row = this.#state.overrides[gateId];
-    if (!row) return null;
-    if (row.expires_at && new Date(row.expires_at).getTime() <= new Date(this.#clock()).getTime()) return null;
-    return row;
+    return this.#rowActive(row) ? row : null;
   }
 
   async #expire() {
     let changed = false;
     for (const [gateId, row] of Object.entries(this.#state.overrides)) {
-      if (row.expires_at && new Date(row.expires_at).getTime() <= new Date(this.#clock()).getTime()) {
+      if (!this.#rowActive(row)) {
         delete this.#state.overrides[gateId];
         this.#record('EXPIRED', gateId, row.override_id, 'TTL_EXPIRED', null);
         changed = true;
