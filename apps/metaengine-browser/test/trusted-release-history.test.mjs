@@ -6,13 +6,14 @@ import test from 'node:test';
 import { TrustedReleaseHistory, TRUSTED_RELEASE_HISTORY_FILE } from '../src/trusted-release-history.mjs';
 
 function release(version, seed) {
+  const nextHex = (((Number.parseInt(seed, 16) + 1) % 16).toString(16));
   return {
     schema: 'metaengine.trusted-dev-release.v1',
     version,
     tag: `v${version}`,
     git_sha: seed.repeat(40).slice(0, 40),
     manifest_sha256: seed.repeat(64).slice(0, 64),
-    dev_yml_sha256: String((Number.parseInt(seed, 16) + 1) % 16).repeat(64),
+    dev_yml_sha256: nextHex.repeat(64),
     authority_effect: false,
   };
 }
