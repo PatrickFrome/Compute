@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { browserControlCapabilities, CONTROL_ACTIONS, CONTROL_INVARIANTS, NEXT_CONTROL_ACTIONS } from '../src/browser-control-capabilities.mjs';
 import { chatGptControlProfile } from '../src/chatgpt-control-profile.mjs';
+import { chatGptControlMatches, chatGptUiControlVocabulary, uniqueChatGptControl } from '../src/chatgpt-ui-controls.mjs';
 
 test('control plane advertises broad typed control without arbitrary eval or raw CDP passthrough', () => {
   const snapshot = browserControlCapabilities();
@@ -50,4 +51,21 @@ test('ChatGPT adapter is discovery-first and readback-gated for account settings
   assert.ok(profile.modes.some((row) => row.id === 'search'));
   assert.ok(profile.workspaces.some((row) => row.id === 'project_instructions'));
   assert.ok(profile.workspaces.some((row) => row.id === 'apps_plugins'));
+});
+
+test('ChatGPT UI vocabulary recognizes live and legacy stop controls without broad fuzzy matching', () => {
+  const vocabulary = chatGptUiControlVocabulary();
+  assert.equal(vocabulary.schema, 'metaengine.chatgpt-ui-control-vocabulary.v1');
+  assert.equal(chatGptControlMatches('STOP', 'Stop generating'), true);
+  assert.equal(chatGptControlMatches('STOP', 'Stop response'), true);
+  assert.equal(chatGptControlMatches('STOP', 'Остановить создание'), true);
+  assert.equal(chatGptControlMatches('STOP', 'Остановить ответ'), true);
+  assert.equal(chatGptControlMatches('STOP', 'Удалить аккаунт'), false);
+  const frame = {
+    semantic_targets: [
+      { role: 'button', name: 'Остановить ответ', backend_node_id: 42 },
+      { role: 'textbox', name: 'Чат с ChatGPT', backend_node_id: 43 },
+    ],
+  };
+  assert.deepEqual(uniqueChatGptControl(frame, 'STOP'), { role: 'button', name: 'Остановить ответ', backend_node_id: 42 });
 });
