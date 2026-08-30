@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { chatGptControlMatches } from './chatgpt-ui-controls.mjs';
 
 const SAFE_ROLES = new Set(['textbox','searchbox','combobox','button','checkbox','radio','switch','tab','menuitem','link']);
 const clip = (value, max) => String(value ?? '').slice(0, max);
@@ -116,7 +117,7 @@ export async function executeSemanticCommand(webContents, command) {
 
     if (action === 'STOP_GENERATION') {
       const tree = await dbg.sendCommand('Accessibility.getFullAXTree');
-      const targets = uniqueSemanticTargets(tree?.nodes || []).filter((row) => row.role === 'button' && /^(stop|stop generating|остановить|остановить создание)$/i.test(row.name));
+      const targets = uniqueSemanticTargets(tree?.nodes || []).filter((row) => row.role === 'button' && chatGptControlMatches('STOP', row.name));
       if (targets.length !== 1) throw new Error(targets.length ? `native_stop_target_ambiguous:${targets.length}` : 'native_stop_target_not_found');
       const point = await clickBackendNode(dbg, targets[0].backend_node_id);
       return { action, target: targets[0], point, authority_effect: true };
