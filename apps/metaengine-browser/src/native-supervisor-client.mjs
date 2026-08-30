@@ -2,6 +2,7 @@ import { browserControlCapabilities } from './browser-control-capabilities.mjs';
 import { globalOwnerGateDisabled } from './owner-safety-gate-registry.mjs';
 import { SUPERVISOR_DEVICE_PROFILE } from './supervisor-device-identity.mjs';
 import { SupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime.mjs';
+import { SupervisorMeshRuntime } from './supervisor-mesh-runtime.mjs';
 import { SelfUpdateRuntime } from './self-update-runtime.mjs';
 import { confirmSelfUpdateRestartSafety } from './self-update-restart-safety.mjs';
 import { persistPreInstallReceipt } from './self-update-handoff.mjs';
@@ -95,10 +96,11 @@ export class NativeSupervisorClient {
   #supervisorMode = 'CONTROL';
   #armed = true;
   #lifecycle = null;
+  #mesh = null;
   #selfUpdate = null;
   #continuityStatus = { state: 'NONE', restored_tabs: 0, target_version: null, authority_effect: false };
 
-  constructor({ identity, fetchImpl = globalThis.fetch, getState, executeCommand, version, intervalMs = 2000, beforeSelfUpdateInstall = null }) {
+  constructor({ identity, fetchImpl = globalThis.fetch, getState, executeCommand, version, intervalMs = 2000, beforeSelfUpdateInstall = null, meshStatePath = null }) {
     if (!identity) throw new Error('native_supervisor_identity_required');
     if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
     if (typeof getState !== 'function') throw new Error('native_supervisor_state_provider_required');
@@ -110,23 +112,36 @@ export class NativeSupervisorClient {
     this.#executeCommand = executeCommand;
     this.#version = String(version || '0.0.0');
     this.#intervalMs = Math.max(1000, Number(intervalMs || 2000));
+
+    const executeSupervisorCommand = async (command) => {
+      const action = String(command?.action || '');
+      if (!READ_ONLY_ACTIONS.has(action) && !ROOT_POLICY_ACTIONS.has(action)) {
+        if (!controlModeAllows(this.#supervisorMode)) throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
+        if (!armedAllows(this.#armed)) throw new Error('native_supervisor_disarmed');
+      }
+      return this.#executeCommand(command);
+    };
+
     this.#lifecycle = new SupervisorLifecycleRuntime({
       getState: this.#getState,
       canActuate: () => controlModeAllows(this.#supervisorMode) && armedAllows(this.#armed),
-      executeCommand: async (command) => {
-        const action = String(command?.action || '');
-        if (!READ_ONLY_ACTIONS.has(action) && !ROOT_POLICY_ACTIONS.has(action)) {
-          if (!controlModeAllows(this.#supervisorMode)) throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
-          if (!armedAllows(this.#armed)) throw new Error('native_supervisor_disarmed');
-        }
-        return this.#executeCommand(command);
-      },
+      executeCommand: executeSupervisorCommand,
+    });
+    this.#mesh = new SupervisorMeshRuntime({
+      getState: this.#getState,
+      executeCommand: executeSupervisorCommand,
+      canActuate: () => controlModeAllows(this.#supervisorMode) && armedAllows(this.#armed),
+      primaryLifecycle: () => this.#lifecycle?.snapshot() || null,
+      ...(meshStatePath ? { statePath: meshStatePath } : {}),
     });
     this.#selfUpdate = new SelfUpdateRuntime({
       canRestart: async () => {
         if (!controlModeAllows(this.#supervisorMode)) return false;
         if (!armedAllows(this.#armed)) return false;
         if (this.#currentCommand != null && !globalOwnerGateDisabled('self_update.current_command')) return false;
+        // Mesh coordination is restart-resumable durable state. Do not restore the
+        // old model/mesh quiescence gate: the exact-green updater persists tab and
+        // lifecycle continuity before releasing the singleton.
         return confirmSelfUpdateRestartSafety({ getState: this.#getState });
       },
       beforeInstall: async (receipt) => {
@@ -161,6 +176,7 @@ export class NativeSupervisorClient {
       supervisor_mode: this.#supervisorMode,
       armed: this.#armed,
       lifecycle: this.#lifecycle?.snapshot() || null,
+      supervisor_mesh: this.#mesh?.snapshot() || null,
       self_update: this.#selfUpdate?.snapshot() || null,
       session_continuity: structuredClone(this.#continuityStatus),
       arbitrary_eval: false,
@@ -325,6 +341,7 @@ export class NativeSupervisorClient {
       this.#lastError = `continuity_restore:${clipError(error)}`;
       this.#continuityStatus = { ...this.#continuityStatus, state: 'ERROR', error: clipError(error), authority_effect: false };
     });
+    await this.#mesh.start().catch((error) => { this.#lastError = `mesh_start:${clipError(error)}`; });
     await this.#lifecycle.start().catch((error) => { this.#lastError = `lifecycle_start:${clipError(error)}`; });
     await this.#selfUpdate.start().catch((error) => { this.#lastError = `self_update_start:${clipError(error)}`; });
     await this.cycle().catch(() => {});
@@ -334,6 +351,7 @@ export class NativeSupervisorClient {
 
   stop() {
     this.#running = false;
+    this.#mesh?.stop?.();
     this.#lifecycle?.stop?.();
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
@@ -439,6 +457,9 @@ export class NativeSupervisorClient {
       last_command_id: this.#lastCommandId,
       last_command_status: this.#lastCommandStatus,
     };
+    // Do not publish the new mesh projection to live Edge until its bounded schema
+    // and Supabase/RLS path are rejoined on this DevOS line. Local failover is active
+    // now; DB-native mesh sync remains an evidence-gated next slice.
     const response = await this.#signedRequest('/v1/state', { payload });
     if (response.status !== 202) throw new Error(`native_supervisor_state_http_${response.status}`);
     this.#lastHeartbeatAt = new Date().toISOString();
@@ -535,14 +556,18 @@ export class NativeSupervisorClient {
     if (this.#cyclePromise) return this.#cyclePromise;
     this.#cyclePromise = (async () => {
       try {
+        await this.#mesh?.reconcile().catch((error) => { this.#lastError = `mesh:${clipError(error)}`; });
         await this.#lifecycle?.cycle().catch((error) => { this.#lastError = `lifecycle:${clipError(error)}`; });
+        await this.#mesh?.dispatchRecoveryIfNeeded().catch((error) => { this.#lastError = `mesh_recovery:${clipError(error)}`; });
         await this.#selfUpdate?.cycle().catch((error) => { this.#lastError = `self_update:${clipError(error)}`; });
         const identity = await this.ensureEnrollment();
         if (!identity?.device_id) return this.snapshot();
         await this.#heartbeat();
         const command = await this.#nextCommand();
         if (command) await this.#runCommand(command);
+        await this.#mesh?.reconcile().catch(() => {});
         await this.#lifecycle?.cycle().catch(() => {});
+        await this.#mesh?.dispatchRecoveryIfNeeded().catch(() => {});
         await this.#selfUpdate?.cycle().catch(() => {});
         this.#lastError = null;
         return this.snapshot();
