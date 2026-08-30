@@ -82,7 +82,7 @@ export async function restoreSelfUpdateSessionContinuity({ row, currentVersion, 
   if (row.target_version && String(row.target_version) !== String(currentVersion || '')) {
     return {
       state: 'TARGET_VERSION_MISMATCH', restored_tabs: 0, failed_tabs: 0,
-      tab_count: row.tabs.length, target_version: row.target_version, authority_effect: false,
+      tab_count: row.tabs.length, target_version: row.target_version, bindings: [], authority_effect: false,
     };
   }
 
@@ -96,6 +96,7 @@ export async function restoreSelfUpdateSessionContinuity({ row, currentVersion, 
   let selectedTabId = null;
   let restoredTabs = 0;
   let failedTabs = 0;
+  const bindings = [];
   for (const prior of row.tabs) {
     const url = String(prior?.url || '');
     if (!HTTPS_RE.test(url)) { failedTabs += 1; continue; }
@@ -115,6 +116,13 @@ export async function restoreSelfUpdateSessionContinuity({ row, currentVersion, 
         continue;
       }
     }
+    if (current?.tab_id) {
+      bindings.push({
+        prior_tab_id: String(prior.prior_tab_id || ''),
+        tab_id: String(current.tab_id),
+        generation_state: String(prior.generation_state || 'UNKNOWN').toUpperCase(),
+      });
+    }
     if (prior?.selected === true && current?.tab_id) selectedTabId = String(current.tab_id);
   }
 
@@ -132,6 +140,7 @@ export async function restoreSelfUpdateSessionContinuity({ row, currentVersion, 
     selected_tab_id: selectedTabId,
     had_generating_tabs: row.tabs.some((tab) => tab?.generation_state === 'GENERATING'),
     lifecycle_resume_present: Boolean(row.lifecycle?.active_request),
+    bindings,
     authority_effect: false,
   };
 }
