@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { chatGptControlCount, uniqueChatGptControl } from './chatgpt-ui-controls.mjs';
+import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
 
 const TASK_ID_RE = /^[A-Za-z0-9._:-]{8,160}$/;
 const AGENT_ID_RE = /^agent_[a-z0-9-]{8,64}$/;
@@ -7,7 +7,6 @@ const POINT_ID_RE = /^[a-z0-9][a-z0-9._:-]{2,127}$/;
 const SHA_RE = /^[a-f0-9]{40}$/;
 const COMPOSER_NAMES = Object.freeze(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
 
-function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function sha256(value) { return crypto.createHash('sha256').update(String(value), 'utf8').digest('hex'); }
 function normalizePayload(payload = {}) {
   const taskId = String(payload.task_id || '').trim();
@@ -40,15 +39,12 @@ function exactComposer(frame) {
 export async function dispatchFleetTask({
   payload,
   fleet,
-  registry,
   getView,
-  attachSelected,
   publishSnapshot = async () => {},
   captureSemanticFrame,
   executeSemanticCommand,
-  sleep = delay,
 } = {}) {
-  if (!fleet || !registry || typeof getView !== 'function' || typeof attachSelected !== 'function') throw new Error('fleet_task_runtime_dependencies_invalid');
+  if (!fleet || typeof getView !== 'function') throw new Error('fleet_task_runtime_dependencies_invalid');
   if (typeof captureSemanticFrame !== 'function' || typeof executeSemanticCommand !== 'function') throw new Error('fleet_task_control_dependencies_invalid');
   const task = normalizePayload(payload);
   const agent = fleet.snapshot().agents.find((row) => row.agent_id === task.agent_id);
@@ -68,56 +64,36 @@ export async function dispatchFleetTask({
   const composer = exactComposer(pre);
   if (!composer) throw new Error('fleet_task_composer_not_unique');
 
-  await executeSemanticCommand(view.webContents, {
-    action: 'SEMANTIC_TYPE',
-    payload: {
-      role: composer.role,
-      accessible_name: composer.name,
-      text: task.prompt,
-      replace_existing: true,
-    },
-  });
-
-  const priorSelected = registry.selected()?.tab_id || null;
-  let sendAttempted = false;
+  let submit = null;
   let post = null;
-  let sendTarget = null;
   try {
-    registry.select(tabId);
-    attachSelected();
-    await sleep(0);
-    await sleep(0);
-    const ready = await captureSemanticFrame(view.webContents);
-    const viewport = ready?.viewport || {};
-    if (!(Number(viewport.width) > 0 && Number(viewport.height) > 0)) throw new Error('fleet_task_selected_view_geometry_unready');
-    sendTarget = uniqueChatGptControl(ready, 'SEND');
-    if (!sendTarget) throw new Error('fleet_task_send_control_not_unique');
-    sendAttempted = true;
-    await executeSemanticCommand(view.webContents, {
-      action: 'TYPED_CLICK',
-      payload: { role: 'button', accessible_name: sendTarget.name },
+    submit = await executeSemanticCommand(view.webContents, {
+      action: 'SEMANTIC_TYPE',
+      platform: 'CHATGPT',
+      payload: {
+        role: composer.role,
+        accessible_name: composer.name,
+        text: task.prompt,
+        replace_existing: true,
+        submit_after_type: true,
+      },
     });
-    await sleep(80);
     post = await captureSemanticFrame(view.webContents);
   } finally {
-    if (priorSelected && priorSelected !== tabId) {
-      try { registry.select(priorSelected); attachSelected(); } catch {}
-    }
     await publishSnapshot().catch(() => {});
   }
 
-  const stopObserved = chatGptControlCount(post, 'STOP') === 1;
+  const stopObserved = chatGptControlCount(post, 'STOP') === 1 || submit?.stop_observed === true;
   const preConversation = isConversationUrl(pre?.url);
   const postConversation = isConversationUrl(post?.url);
-  const newConversationObserved = !preConversation && postConversation;
-  const sendControlRemaining = chatGptControlCount(post, 'SEND') > 0;
-  const effectProven = stopObserved || newConversationObserved;
+  const newConversationObserved = (!preConversation && postConversation) || submit?.new_conversation_observed === true;
+  const effectProven = stopObserved || postConversation || String(submit?.effect_state || '').startsWith('PROVEN_');
   const effectState = effectProven
-    ? (stopObserved ? 'PROVEN_GENERATING' : 'PROVEN_NEW_CONVERSATION')
-    : (sendAttempted ? 'AMBIGUOUS_AFTER_SEND' : 'NOT_ATTEMPTED');
+    ? (stopObserved ? 'PROVEN_GENERATING' : 'PROVEN_CONVERSATION')
+    : 'AMBIGUOUS_AFTER_ENTER';
 
   const receipt = {
-    schema: 'metaengine.browser.fleet-task-dispatch.v1',
+    schema: 'metaengine.browser.fleet-task-dispatch.v2',
     task_id: task.task_id,
     agent_id: task.agent_id,
     role: agent.role,
@@ -127,21 +103,23 @@ export async function dispatchFleetTask({
     tab_id: tabId,
     target_id: targetId,
     prompt_sha256: sha256(task.prompt),
-    send_control_name: sendTarget?.name || null,
-    send_attempted: sendAttempted,
+    submit_after_type: true,
+    submit_effect_state: submit?.effect_state || null,
     effect_state: effectState,
     stop_observed: stopObserved,
     new_conversation_observed: newConversationObserved,
-    send_control_remaining: sendControlRemaining,
-    post_url_sha256: post?.url ? sha256(post.url) : null,
+    post_url_sha256: post?.url ? sha256(post.url) : (submit?.post_url_sha256 || null),
     prompt_included: false,
+    selected_tab_mutation: false,
+    viewport_geometry_required: false,
+    mouse_geometry_required: false,
     page_data_authority: false,
     automatic_retry_allowed: false,
     authority_effect: true,
   };
 
-  if (!effectProven) {
-    const error = new Error('fleet_task_send_effect_ambiguous');
+  if (!effectProven || !postConversation) {
+    const error = new Error(effectProven ? 'fleet_task_conversation_readback_missing' : 'fleet_task_send_effect_ambiguous');
     error.receipt = receipt;
     throw error;
   }
