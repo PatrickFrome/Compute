@@ -82,16 +82,85 @@ jobs:
           if ($first.HasExited) { throw "singleton_diag_secondary_displaced_primary:$($first.ExitCode)" }
           try { Stop-Process -Id $first.Id -Force -ErrorAction SilentlyContinue } catch {}
           'physical_singleton_diagnostic=PASS'
+      - name: Characterize bounded restart lock handoff
+        shell: powershell
+        run: |
+          $app = (Get-Content "$env:RUNNER_TEMP\singleton-app.txt").Trim()
+          $rows = @()
+          for ($i = 1; $i -le 8; $i++) {
+            $primaryOut = "$env:RUNNER_TEMP\handoff-$i-primary.out"
+            $primaryErr = "$env:RUNNER_TEMP\handoff-$i-primary.err"
+            $successorOut = "$env:RUNNER_TEMP\handoff-$i-successor.out"
+            $successorErr = "$env:RUNNER_TEMP\handoff-$i-successor.err"
+            $contenderOut = "$env:RUNNER_TEMP\handoff-$i-contender.out"
+            $contenderErr = "$env:RUNNER_TEMP\handoff-$i-contender.err"
+            $primary = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $primaryOut -RedirectStandardError $primaryErr
+            $null = $primary.Handle
+            $ready = (Get-Date).AddSeconds(5)
+            while ((-not (Test-Path $primaryOut) -or (Get-Item $primaryOut -ErrorAction SilentlyContinue).Length -eq 0) -and (Get-Date) -lt $ready) { Start-Sleep -Milliseconds 50 }
+            $primary.Refresh()
+            if ($primary.HasExited) { throw "handoff_primary_exited_early:$i:$($primary.ExitCode)" }
+            $releaseStart = Get-Date
+            Stop-Process -Id $primary.Id -Force
+            $primary.WaitForExit(5000) | Out-Null
+            $successor = $null
+            $acquired = $false
+            $attempts = 0
+            $deadline = (Get-Date).AddSeconds(5)
+            while (-not $acquired -and (Get-Date) -lt $deadline) {
+              $attempts++
+              Remove-Item $successorOut,$successorErr -Force -ErrorAction SilentlyContinue
+              $successor = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $successorOut -RedirectStandardError $successorErr
+              $null = $successor.Handle
+              $probeDeadline = (Get-Date).AddMilliseconds(750)
+              while ((-not (Test-Path $successorOut) -or (Get-Item $successorOut -ErrorAction SilentlyContinue).Length -eq 0) -and -not $successor.HasExited -and (Get-Date) -lt $probeDeadline) { Start-Sleep -Milliseconds 25; $successor.Refresh() }
+              if (Test-Path $successorOut) {
+                $line = Get-Content $successorOut | Where-Object { $_.Trim() } | Select-Object -Last 1
+                if ($line) {
+                  try {
+                    $row = $line | ConvertFrom-Json
+                    if ($row.primary_instance -eq $true -and -not $successor.HasExited) { $acquired = $true }
+                  } catch {}
+                }
+              }
+              if (-not $acquired) {
+                try { if (-not $successor.HasExited) { Stop-Process -Id $successor.Id -Force } } catch {}
+                Start-Sleep -Milliseconds 50
+              }
+            }
+            if (-not $acquired) { throw "handoff_successor_never_acquired:$i" }
+            $latencyMs = [int]((Get-Date) - $releaseStart).TotalMilliseconds
+            $contender = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $contenderOut -RedirectStandardError $contenderErr
+            $null = $contender.Handle
+            if (-not $contender.WaitForExit(3000)) {
+              try { Stop-Process -Id $contender.Id -Force } catch {}
+              try { Stop-Process -Id $successor.Id -Force } catch {}
+              throw "handoff_contender_did_not_exit:$i"
+            }
+            $successor.Refresh()
+            if ($successor.HasExited) { throw "handoff_contender_displaced_successor:$i:$($successor.ExitCode)" }
+            $rows += [pscustomobject]@{ iteration=$i; acquire_latency_ms=$latencyMs; acquire_attempts=$attempts; contender_exit=$contender.ExitCode }
+            try { Stop-Process -Id $successor.Id -Force } catch {}
+            $successor.WaitForExit(3000) | Out-Null
+            Start-Sleep -Milliseconds 100
+          }
+          $rows | ConvertTo-Json | Set-Content "$env:RUNNER_TEMP\singleton-handoff.json"
+          $max = ($rows | Measure-Object -Property acquire_latency_ms -Maximum).Maximum
+          "singleton_handoff_max_acquire_ms=$max"
+          if ($max -gt 3000) { throw "handoff_release_latency_excessive:$max" }
+          'physical_singleton_handoff=PASS'
       - name: Persist singleton diagnostic evidence
         if: always()
         shell: powershell
         run: |
           $dir = Join-Path $env:RUNNER_TEMP 'singleton-diagnostic-evidence'
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          foreach ($name in @('singleton-first.out','singleton-first.err','singleton-second.out','singleton-second.err','singleton-app.txt')) {
+          foreach ($name in @('singleton-first.out','singleton-first.err','singleton-second.out','singleton-second.err','singleton-app.txt','singleton-handoff.json')) {
             $src = Join-Path $env:RUNNER_TEMP $name
             if (Test-Path $src) { Copy-Item $src (Join-Path $dir $name) -Force }
           }
+          Get-ChildItem $env:RUNNER_TEMP -Filter 'handoff-*.out' -ErrorAction SilentlyContinue | Copy-Item -Destination $dir -Force
+          Get-ChildItem $env:RUNNER_TEMP -Filter 'handoff-*.err' -ErrorAction SilentlyContinue | Copy-Item -Destination $dir -Force
           Get-Process | Where-Object { $_.ProcessName -like 'METAENGINE*' } | Select-Object ProcessName,Id,HasExited | ConvertTo-Json | Set-Content (Join-Path $dir 'metaengine-processes.json')
       - name: Upload singleton diagnostic evidence
         if: always()
