@@ -1,3 +1,4 @@
+import { browserControlCapabilities } from './browser-control-capabilities.mjs';
 import { SUPERVISOR_DEVICE_PROFILE } from './supervisor-device-identity.mjs';
 import { SupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime.mjs';
 import { SelfUpdateRuntime } from './self-update-runtime.mjs';
@@ -8,7 +9,7 @@ export const NATIVE_SUPERVISOR_RUNTIME_PATH = '/a2-browser-native-supervisor-v1'
 
 const clipError = (error) => String(error?.message || error || 'unknown_error').slice(0, 500);
 const READ_ONLY_ACTIONS = new Set([
-  'POLL','CAPTURE','CAPTURE_VIEW','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD',
+  'POLL','CAPTURE','CAPTURE_VIEW','CONTROL_CAPABILITIES','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD',
   'DOWNLOAD_STATUS','SELF_UPDATE_STATUS',
 ]);
 
@@ -264,6 +265,7 @@ export class NativeSupervisorClient {
       this.#supervisorMode = next;
       return { supervisor_mode: next, armed: this.#armed, authority_effect: true };
     }
+    if (action === 'CONTROL_CAPABILITIES') return browserControlCapabilities();
     if (action === 'SELF_UPDATE_STATUS') return this.#selfUpdate?.snapshot() || null;
     if (action === 'SELF_UPDATE_CHECK') {
       if (this.#supervisorMode !== 'CONTROL') throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
