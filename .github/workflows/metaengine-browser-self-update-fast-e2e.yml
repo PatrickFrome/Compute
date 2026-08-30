@@ -73,7 +73,12 @@ jobs:
       - name: Published baseline to one-build target physical update
         working-directory: apps/metaengine-browser
         shell: powershell
-        run: ./test/self-update-fast-physical.ps1
+        run: |
+          $raw = Get-Content ./test/self-update-fast-physical.ps1 -Raw
+          $raw = $raw.Replace('target_version_not_monotonic:$buildId:$baselineBuild','target_version_not_monotonic:${buildId}:${baselineBuild}')
+          $fixed = Join-Path $env:RUNNER_TEMP 'self-update-fast-physical.fixed.ps1'
+          [System.IO.File]::WriteAllText($fixed, $raw, [System.Text.UTF8Encoding]::new($false))
+          & $fixed
       - name: Upload exact fast self-update evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
