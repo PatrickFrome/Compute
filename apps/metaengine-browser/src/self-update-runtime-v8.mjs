@@ -84,7 +84,7 @@ export class SelfUpdateRuntime {
     fetchImpl = globalThis.fetch,
   } = {}) {
     this.#intervalMs = Math.max(60 * 1000, Number(intervalMs) || 10 * 60 * 1000);
-    this.#restartGraceMs = Math.max(3000, Number(restartGraceMs) || 12_000);
+    this.#restartGraceMs = Math.max(1000, Number(restartGraceMs) || 12_000);
     this.#canRestart = canRestart;
     this.#injectedUpdater = updater;
     this.#packagedOverride = packaged;
