@@ -1,0 +1,129 @@
+name: METAENGINE Browser Singleton Tree Handoff Diagnostic
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/**'
+      - '.github/workflows/metaengine-browser-singleton-tree-handoff-diagnostic.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: metaengine-browser-singleton-tree-handoff-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  packaged-tree-handoff:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Build and install diagnostic package
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          $version = "0.6.3-dev.${{ github.run_number }}.10"
+          npm pkg set version=$version
+          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
+          if (-not $installer) { throw 'tree_handoff_installer_missing' }
+          $install = Start-Process -FilePath $installer.FullName -ArgumentList '/S' -PassThru -Wait
+          if ($install.ExitCode -ne 0) { throw "tree_handoff_install_exit_$($install.ExitCode)" }
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test\METAENGINE Browser Test.exe'
+          if (-not (Test-Path $app)) { throw 'tree_handoff_app_missing' }
+          $app | Set-Content "$env:RUNNER_TEMP\tree-handoff-app.txt"
+      - name: Prove full process-tree handoff
+        shell: powershell
+        run: |
+          function Read-ProbeRow([string]$path, [datetime]$deadline) {
+            while ((Get-Date) -lt $deadline) {
+              if (Test-Path $path) {
+                $line = Get-Content $path -ErrorAction SilentlyContinue | Where-Object { $_.Trim() } | Select-Object -Last 1
+                if ($line) {
+                  try { return ($line | ConvertFrom-Json) } catch {}
+                }
+              }
+              Start-Sleep -Milliseconds 25
+            }
+            return $null
+          }
+          function Probe-Pid-Is-Live($row) {
+            if (-not $row -or -not $row.pid) { return $false }
+            return $null -ne (Get-Process -Id ([int]$row.pid) -ErrorAction SilentlyContinue)
+          }
+          $app = (Get-Content "$env:RUNNER_TEMP\tree-handoff-app.txt").Trim()
+          $rows = @()
+          for ($i = 1; $i -le 4; $i++) {
+            $primaryOut = "$env:RUNNER_TEMP\tree-$i-primary.out"
+            $primaryErr = "$env:RUNNER_TEMP\tree-$i-primary.err"
+            $successorOut = "$env:RUNNER_TEMP\tree-$i-successor.out"
+            $successorErr = "$env:RUNNER_TEMP\tree-$i-successor.err"
+            $primaryLaunch = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $primaryOut -RedirectStandardError $primaryErr
+            $primaryRow = Read-ProbeRow $primaryOut ((Get-Date).AddSeconds(5))
+            if (-not $primaryRow) { throw "tree_handoff_primary_no_probe:$i" }
+            if ($primaryRow.primary_instance -ne $true) { throw "tree_handoff_primary_identity_invalid:$i" }
+            if (-not (Probe-Pid-Is-Live $primaryRow)) { throw "tree_handoff_primary_probe_pid_not_live:${i}:$($primaryRow.pid)" }
+            $releaseStart = Get-Date
+            & taskkill.exe /PID ([int]$primaryRow.pid) /T /F | Out-Null
+            $deadline = (Get-Date).AddSeconds(5)
+            while ((Probe-Pid-Is-Live $primaryRow) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 50 }
+            if (Probe-Pid-Is-Live $primaryRow) { throw "tree_handoff_primary_tree_not_terminated:${i}:$($primaryRow.pid)" }
+            $successorLaunch = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $successorOut -RedirectStandardError $successorErr
+            $successorRow = Read-ProbeRow $successorOut ((Get-Date).AddSeconds(5))
+            $acquired = ($null -ne $successorRow -and $successorRow.primary_instance -eq $true -and (Probe-Pid-Is-Live $successorRow))
+            $latencyMs = [int]((Get-Date) - $releaseStart).TotalMilliseconds
+            $rows += [pscustomobject]@{
+              iteration=$i
+              acquire_latency_ms=$latencyMs
+              primary_probe_pid=[int]$primaryRow.pid
+              primary_start_process_pid=$primaryLaunch.Id
+              successor_probe_pid=if ($successorRow) { [int]$successorRow.pid } else { $null }
+              successor_start_process_pid=$successorLaunch.Id
+              acquired=$acquired
+            }
+            if (-not $acquired) {
+              Get-Content $successorOut -ErrorAction SilentlyContinue
+              Get-Content $successorErr -ErrorAction SilentlyContinue
+              Get-Process | Where-Object { $_.ProcessName -like 'METAENGINE*' -or $_.ProcessName -like 'electron*' } | Select-Object ProcessName,Id,Path | ConvertTo-Json | Set-Content "$env:RUNNER_TEMP\tree-handoff-processes.json"
+              throw "tree_handoff_successor_probe_not_live_primary:$i"
+            }
+            & taskkill.exe /PID ([int]$successorRow.pid) /T /F | Out-Null
+            Start-Sleep -Milliseconds 150
+          }
+          $rows | ConvertTo-Json | Set-Content "$env:RUNNER_TEMP\tree-handoff.json"
+          'physical_singleton_tree_handoff=PASS'
+      - name: Persist tree handoff evidence
+        if: always()
+        shell: powershell
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'tree-handoff-evidence'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          foreach ($name in @('tree-handoff-app.txt','tree-handoff.json','tree-handoff-processes.json')) {
+            $src = Join-Path $env:RUNNER_TEMP $name
+            if (Test-Path $src) { Copy-Item $src (Join-Path $dir $name) -Force }
+          }
+          Get-ChildItem $env:RUNNER_TEMP -Filter 'tree-*.out' -ErrorAction SilentlyContinue | Copy-Item -Destination $dir -Force
+          Get-ChildItem $env:RUNNER_TEMP -Filter 'tree-*.err' -ErrorAction SilentlyContinue | Copy-Item -Destination $dir -Force
+      - name: Upload tree handoff evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-singleton-tree-handoff-${{ github.run_id }}
+          path: ${{ runner.temp }}/tree-handoff-evidence
+          if-no-files-found: error
+          retention-days: 14
