@@ -1,45 +1,37 @@
 import crypto from 'node:crypto';
 
-export const SUPERVISOR_KEEPALIVE_VERSION = '1.2.0';
+export const SUPERVISOR_KEEPALIVE_VERSION = '1.2.1';
 export const SUPERVISOR_ID = 'METAENGINE_SUPERVISOR';
 export const KEEPALIVE_STATES = Object.freeze([
-  'ACTIVE',
-  'WAITING',
-  'WAKE_PENDING',
-  'WAKE_AMBIGUOUS',
-  'ROLLOVER_DEFERRED',
-  'ROLLOVER_REQUIRED',
-  'ROLLOVER_AMBIGUOUS',
-  'PAUSED',
-  'RECOVERING',
+  'ACTIVE','WAITING','WAKE_PENDING','WAKE_AMBIGUOUS',
+  'ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_AMBIGUOUS',
+  'PAUSED','RECOVERING',
 ]);
 
 const CHATGPT_CONVERSATION_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/c\/[a-z0-9-]+(?:[/?#].*)?$/i;
 const WAKE_REASONS = new Set([
   'CONTINUE_DEVELOPMENT',
-  'WORKER_RESULT_READY',
-  'WORKER_FAILED',
-  'WORKER_LOST',
-  'CI_TERMINAL',
-  'INTEGRATION_HEAD_CHANGED',
-  'MILESTONE_READY_FOR_REVIEW',
-  'SUPERVISOR_RECOVERY_REQUIRED',
-  'WATCHDOG_DEADLINE',
-  'RESEARCH_ACCELERATOR_DUE',
+  'WORKER_RESULT_READY','WORKER_FAILED','WORKER_LOST','CI_TERMINAL',
+  'INTEGRATION_HEAD_CHANGED','MILESTONE_READY_FOR_REVIEW',
+  'SUPERVISOR_RECOVERY_REQUIRED','WATCHDOG_DEADLINE','RESEARCH_ACCELERATOR_DUE',
 ]);
 
-function clone(value) { return value == null ? value : structuredClone(value); }
-function iso(clock) { return new Date(clock()).toISOString(); }
+const clone = (value) => value == null ? value : structuredClone(value);
+const iso = (clock) => new Date(clock()).toISOString();
+
 function normalizeUrl(value) {
   const url = String(value || '').trim();
   if (!CHATGPT_CONVERSATION_RE.test(url)) throw new Error('keepalive_supervisor_conversation_invalid');
   return url;
 }
+
 function sanitizeActiveWake(input) {
   if (!input || typeof input !== 'object') return null;
   const reason = String(input.reason || '');
   const wakeId = String(input.wake_id || '');
-  if (!WAKE_REASONS.has(reason) || !/^wake_[a-z0-9]+$/i.test(wakeId)) return null;
+  // crypto.randomUUID() contains hyphens; durable restart recovery must accept the
+  // exact wake id produced by prepareNextWake instead of silently discarding it.
+  if (!WAKE_REASONS.has(reason) || !/^wake_[a-z0-9-]+$/i.test(wakeId)) return null;
   return {
     wake_id: wakeId,
     reason,
@@ -50,6 +42,7 @@ function sanitizeActiveWake(input) {
     cycle_seq: Math.max(1, Number(input.cycle_seq) || 1),
   };
 }
+
 function freshState() {
   return {
     schema: 'metaengine.supervisor-keepalive.state.v1',
@@ -75,10 +68,10 @@ function freshState() {
     authority_effect: false,
   };
 }
+
 function sanitize(input) {
   const base = freshState();
   if (!input || input.schema !== base.schema || input.supervisor_id !== SUPERVISOR_ID) return base;
-  const state = KEEPALIVE_STATES.includes(input.state) ? input.state : 'RECOVERING';
   let conversationUrl = null;
   try { if (input.conversation_url) conversationUrl = normalizeUrl(input.conversation_url); } catch {}
   const queued = Array.isArray(input.queued_wakes)
@@ -88,7 +81,7 @@ function sanitize(input) {
     ...base,
     supervisor_epoch: Math.max(1, Number(input.supervisor_epoch) || 1),
     cycle_seq: Math.max(0, Number(input.cycle_seq) || 0),
-    state: input.paused === true ? 'PAUSED' : state,
+    state: input.paused === true ? 'PAUSED' : (KEEPALIVE_STATES.includes(input.state) ? input.state : 'RECOVERING'),
     conversation_url: conversationUrl,
     tab_id: input.tab_id ? String(input.tab_id) : null,
     paused: input.paused === true,
@@ -99,7 +92,8 @@ function sanitize(input) {
     last_wake_reason: input.last_wake_reason || null,
     last_completed_cycle_at: input.last_completed_cycle_at || null,
     last_research_wake_at: input.last_research_wake_at || null,
-    previous_worker_generation: input.previous_worker_generation && typeof input.previous_worker_generation === 'object' ? clone(input.previous_worker_generation) : {},
+    previous_worker_generation: input.previous_worker_generation && typeof input.previous_worker_generation === 'object'
+      ? clone(input.previous_worker_generation) : {},
     rollover_reason: input.rollover_reason ? String(input.rollover_reason).slice(0, 160) : null,
     rollover_release_at: input.rollover_release_at || null,
     updated_at: input.updated_at || null,
@@ -139,7 +133,7 @@ export function buildSupervisorRolloverMessage({ previousUrl, supervisorEpoch })
     'integration_line=integration/metaengine-development-os-v1',
     'legacy_convergence_line=integration/compute-unified-v1',
     '',
-    'You are the continuing METAENGINE Development OS supervisor service, not a fresh project or a user-driven chat.',
+    'You are the continuing METAENGINE Compute supervisor, now operating as the METAENGINE Development OS supervisor service, not a fresh project or a user-driven chat.',
     'Reconstruct current state from authoritative GitHub/Supabase checkpoints, live Browser/fleet state, durable tasks/claims/evidence and convergence documents before acting.',
     'Resume supervisor, developer and coordinator work immediately. Keep the fleet productive, recover lost work from durable state, and continue autonomous coordination without waiting for a user message.',
     'Preserve the same hard authority, taint, lease, ambiguity and evidence invariants. Never repeat an ambiguous physical effect.',
@@ -147,13 +141,7 @@ export function buildSupervisorRolloverMessage({ previousUrl, supervisorEpoch })
 }
 
 export class SupervisorKeepalive {
-  #load;
-  #save;
-  #clock;
-  #uuid;
-  #state;
-  #minWakeIntervalMs;
-  #maxCyclesPerEpoch;
+  #load; #save; #clock; #uuid; #state; #minWakeIntervalMs; #maxCyclesPerEpoch;
 
   constructor({ loadState, saveState, clock = () => Date.now(), uuid = () => crypto.randomUUID(), minWakeIntervalMs = 60000, maxCyclesPerEpoch = 48 } = {}) {
     if (typeof loadState !== 'function' || typeof saveState !== 'function') throw new Error('keepalive_persistence_required');
@@ -170,7 +158,7 @@ export class SupervisorKeepalive {
     this.#state = sanitize(await this.#load());
     if (this.#state.pending_wake) this.#state.state = 'WAKE_AMBIGUOUS';
     else if (this.#state.paused) this.#state.state = 'PAUSED';
-    else if (this.#state.state === 'ROLLOVER_DEFERRED' || this.#state.state === 'ROLLOVER_REQUIRED' || this.#state.state === 'ROLLOVER_AMBIGUOUS') {}
+    else if (['ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) {}
     else if (this.#state.active_wake) this.#state.state = 'ACTIVE';
     else this.#state.state = this.#state.conversation_url ? 'WAITING' : 'RECOVERING';
     await this.#persist();
@@ -224,24 +212,15 @@ export class SupervisorKeepalive {
     const key = `${normalizedReason}:${String(metadata.agent_id || metadata.key || '')}`;
     const existing = this.#state.queued_wakes.find((row) => row.key === key);
     if (existing) {
-      const incomingAgentIds = Array.isArray(metadata.agent_ids) ? metadata.agent_ids.map(String) : [];
-      const existingAgentIds = Array.isArray(existing.metadata?.agent_ids) ? existing.metadata.agent_ids.map(String) : [];
-      if (incomingAgentIds.length > 0) {
-        existing.metadata = {
-          ...existing.metadata,
-          ...clone(metadata),
-          agent_ids: [...new Set([...existingAgentIds, ...incomingAgentIds])],
-        };
+      const incoming = Array.isArray(metadata.agent_ids) ? metadata.agent_ids.map(String) : [];
+      const prior = Array.isArray(existing.metadata?.agent_ids) ? existing.metadata.agent_ids.map(String) : [];
+      if (incoming.length > 0) {
+        existing.metadata = { ...existing.metadata, ...clone(metadata), agent_ids: [...new Set([...prior, ...incoming])] };
         await this.#persist();
       }
       return this.snapshot();
     }
-    this.#state.queued_wakes.push({
-      key,
-      reason: normalizedReason,
-      metadata: clone(metadata),
-      queued_at: iso(this.#clock),
-    });
+    this.#state.queued_wakes.push({ key, reason: normalizedReason, metadata: clone(metadata), queued_at: iso(this.#clock) });
     this.#state.queued_wakes = this.#state.queued_wakes.slice(-32);
     if (normalizedReason === 'RESEARCH_ACCELERATOR_DUE') this.#state.last_research_wake_at = iso(this.#clock);
     await this.#persist();
@@ -275,7 +254,7 @@ export class SupervisorKeepalive {
   }
 
   async markRolloverAmbiguous(reason = 'ROLLOVER_SEND_EFFECT_UNKNOWN') {
-    if (this.#state.state !== 'ROLLOVER_REQUIRED' && this.#state.state !== 'ROLLOVER_AMBIGUOUS') throw new Error('keepalive_rollover_not_released');
+    if (!['ROLLOVER_REQUIRED','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) throw new Error('keepalive_rollover_not_released');
     this.#state.state = 'ROLLOVER_AMBIGUOUS';
     this.#state.rollover_reason = String(reason).slice(0, 160);
     await this.#persist();
@@ -316,13 +295,12 @@ export class SupervisorKeepalive {
     }
     this.#state.previous_worker_generation = next;
     await this.#persist();
-
     for (const event of events.filter((row) => row.reason === 'WORKER_RESULT_READY')) {
       await this.enqueueWake(event.reason, { agent_id: event.agent_id });
     }
-    for (const reason of ['WORKER_LOST', 'WORKER_FAILED']) {
+    for (const reason of ['WORKER_LOST','WORKER_FAILED']) {
       const agentIds = events.filter((row) => row.reason === reason).map((row) => row.agent_id);
-      if (agentIds.length > 0) await this.enqueueWake(reason, { key: 'fleet-terminal-burst', agent_ids: agentIds });
+      if (agentIds.length) await this.enqueueWake(reason, { key: 'fleet-terminal-burst', agent_ids: agentIds });
     }
     return events;
   }
@@ -332,10 +310,8 @@ export class SupervisorKeepalive {
     if (!this.#state.conversation_url || this.#state.pending_wake || this.#state.active_wake || this.#state.queued_wakes.length === 0) return false;
     if (this.#state.cycle_seq >= this.#maxCyclesPerEpoch) return false;
     if (!this.#state.last_wake_at) return true;
-    const immediate = String(this.#state.queued_wakes[0]?.reason || '') === 'CONTINUE_DEVELOPMENT';
-    if (immediate) return true;
-    const elapsed = this.#clock() - new Date(this.#state.last_wake_at).getTime();
-    return elapsed >= this.#minWakeIntervalMs;
+    if (String(this.#state.queued_wakes[0]?.reason || '') === 'CONTINUE_DEVELOPMENT') return true;
+    return this.#clock() - new Date(this.#state.last_wake_at).getTime() >= this.#minWakeIntervalMs;
   }
 
   async prepareNextWake() {
