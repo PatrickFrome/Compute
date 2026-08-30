@@ -11,7 +11,7 @@ const MAX_RELEASES_BYTES = 2 * 1024 * 1024;
 const MAX_SMALL_ASSET_BYTES = 128 * 1024;
 
 function clip(value, max = 300) { return String(value ?? '').slice(0, max); }
-function sha256Text(value) { return crypto.createHash('sha256').update(value, 'utf8').digest('hex'); }
+function sha256Bytes(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
 
 export function parseMetaengineDevVersion(value) {
   const text = String(value || '').trim();
@@ -67,16 +67,35 @@ function pickNewestRelease(releases, currentVersion) {
   return candidates[0] || null;
 }
 
-async function readBoundedText(response, maxBytes, label) {
+function assertReadableResponse(response, maxBytes, label) {
   if (!response?.ok) throw new Error(`${label}_http_${Number(response?.status || 0)}`);
   const lengthText = response.headers?.get?.('content-length');
   if (lengthText) {
     const length = Number(lengthText);
     if (Number.isFinite(length) && length > maxBytes) throw new Error(`${label}_too_large`);
   }
+}
+
+async function readBoundedText(response, maxBytes, label) {
+  assertReadableResponse(response, maxBytes, label);
   const text = await response.text();
   if (Buffer.byteLength(text, 'utf8') > maxBytes) throw new Error(`${label}_too_large`);
   return text;
+}
+
+async function readBoundedBytes(response, maxBytes, label) {
+  assertReadableResponse(response, maxBytes, label);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length > maxBytes) throw new Error(`${label}_too_large`);
+  return bytes;
+}
+
+function decodeUtf8Strict(bytes, label) {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error(`${label}_utf8_invalid`);
+  }
 }
 
 async function fetchJson(fetchImpl, url, maxBytes, label) {
@@ -96,9 +115,9 @@ async function fetchJson(fetchImpl, url, maxBytes, label) {
 
 async function fetchVerifiedAssetText(fetchImpl, asset, label) {
   const response = await fetchImpl(asset.url, { method: 'GET', cache: 'no-store', redirect: 'follow' });
-  const text = await readBoundedText(response, MAX_SMALL_ASSET_BYTES, label);
-  if (sha256Text(text) !== asset.sha256) throw new Error(`${label}_sha256_mismatch`);
-  return text;
+  const bytes = await readBoundedBytes(response, MAX_SMALL_ASSET_BYTES, label);
+  if (sha256Bytes(bytes) !== asset.sha256) throw new Error(`${label}_sha256_mismatch`);
+  return decodeUtf8Strict(bytes, label);
 }
 
 function verifyManifest(manifest, { version, gitSha, assets }) {

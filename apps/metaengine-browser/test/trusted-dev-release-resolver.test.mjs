@@ -8,6 +8,7 @@ const REPO = 'Compute';
 const API = `https://api.github.com/repos/${OWNER}/${REPO}`;
 const DL = `https://github.com/${OWNER}/${REPO}/releases/download`;
 const sha256 = (value) => crypto.createHash('sha256').update(value, 'utf8').digest('hex');
+const sha256Bytes = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const sha512 = Buffer.alloc(64, 7).toString('base64');
 
 function fixture(version = '0.6.3-dev.66.1', gitSha = 'a'.repeat(40)) {
@@ -47,8 +48,10 @@ function fixture(version = '0.6.3-dev.66.1', gitSha = 'a'.repeat(40)) {
 }
 
 function response(body, status = 200) {
-  const text = typeof body === 'string' ? body : JSON.stringify(body);
-  return new Response(text, { status, headers:{ 'content-type':'application/json', 'content-length':String(Buffer.byteLength(text)) } });
+  const bytes = Buffer.isBuffer(body) || body instanceof Uint8Array
+    ? Buffer.from(body)
+    : Buffer.from(typeof body === 'string' ? body : JSON.stringify(body), 'utf8');
+  return new Response(bytes, { status, headers:{ 'content-type':'application/json', 'content-length':String(bytes.length) } });
 }
 
 function fetchFor({ releases, selected }) {
@@ -87,6 +90,33 @@ test('resolver ignores unrelated releases and verifies the newest same-family de
   assert.equal(result.installer_sha512, sha512);
   assert.equal(result.authority_effect, false);
   assert.ok(calls.includes(`${API}/git/ref/tags/${encodeURIComponent(r66.tag)}`));
+});
+
+test('resolver verifies raw metadata bytes before decoding, including a UTF-8 BOM', async () => {
+  const r66 = fixture('0.6.3-dev.66.1', '2'.repeat(40));
+  const bomDevYml = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(r66.devYml, 'utf8')]);
+  r66.devYml = bomDevYml;
+  const devAsset = r66.release.assets.find((asset) => asset.name === 'dev.yml');
+  devAsset.digest = `sha256:${sha256Bytes(bomDevYml)}`;
+  devAsset.size = bomDevYml.length;
+  const { fetchImpl } = fetchFor({ releases:[r66.release], selected:r66 });
+  const result = await resolveTrustedMetaengineDevRelease({ currentVersion:'0.6.3-dev.64.1', fetchImpl });
+  assert.equal(result.version, r66.version);
+  assert.equal(result.dev_yml_sha256, sha256Bytes(bomDevYml));
+});
+
+test('resolver fails closed when digest-valid metadata is not valid UTF-8', async () => {
+  const r66 = fixture('0.6.3-dev.66.1', '2'.repeat(40));
+  const invalidUtf8 = Buffer.from([0xff, 0xfe, 0xfd, 0xfc]);
+  r66.devYml = invalidUtf8;
+  const devAsset = r66.release.assets.find((asset) => asset.name === 'dev.yml');
+  devAsset.digest = `sha256:${sha256Bytes(invalidUtf8)}`;
+  devAsset.size = invalidUtf8.length;
+  const { fetchImpl } = fetchFor({ releases:[r66.release], selected:r66 });
+  await assert.rejects(
+    resolveTrustedMetaengineDevRelease({ currentVersion:'0.6.3-dev.64.1', fetchImpl }),
+    /trusted_release_dev_yml_utf8_invalid/,
+  );
 });
 
 test('resolver fails closed on malformed newest candidate instead of falling back to an older release', async () => {
