@@ -1,11 +1,12 @@
 const freezeRows = (rows) => Object.freeze(rows.map((row) => Object.freeze({ ...row })));
 
-export const BROWSER_CONTROL_PLANE_VERSION = '2.0.0-dev.1';
+export const BROWSER_CONTROL_PLANE_VERSION = '2.1.0-dev.1';
 
 export const CONTROL_ACTIONS = freezeRows([
   { action: 'POLL', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'SHELL' },
   { action: 'CAPTURE', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'CDP_ACCESSIBILITY' },
   { action: 'CAPTURE_VIEW', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'ELECTRON_CAPTURE' },
+  { action: 'CONTROL_CAPABILITIES', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'CONTROL_PLANE' },
   { action: 'NEW_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS' },
   { action: 'SELECT_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'SHELL_REGISTRY' },
   { action: 'CLOSE_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS' },
@@ -37,7 +38,6 @@ export const CONTROL_ACTIONS = freezeRows([
 ]);
 
 export const NEXT_CONTROL_ACTIONS = freezeRows([
-  { action: 'CONTROL_CAPABILITIES', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'CONTROL_PLANE' },
   { action: 'KEY_PRESS', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_INPUT' },
   { action: 'POINTER_CLICK', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_INPUT', fence: 'CAPTURED_VIEWPORT_AND_TAB' },
   { action: 'DRAG', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_INPUT', fence: 'CAPTURED_VIEWPORT_AND_TAB' },
