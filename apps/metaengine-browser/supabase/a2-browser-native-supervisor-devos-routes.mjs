@@ -46,9 +46,17 @@ function runningForAgents(snapshot,agents){
   }
   return out;
 }
+function taskStatusFromSnapshot(snapshot,taskId){
+  const active=(Array.isArray(snapshot?.active_tasks)?snapshot.active_tasks:[]).find(t=>String(t?.task_id||'').toLowerCase()===taskId);
+  if(active)return {task_id:active.task_id,state:String(active.state||'').toUpperCase(),lease_generation:Number(active.lease_generation)||0,result_sha256:active.result_sha256||null,error_code:active.error_code||null};
+  const event=(Array.isArray(snapshot?.recent_events)?snapshot.recent_events:[]).find(e=>String(e?.task_id||'').toLowerCase()===taskId&&/^TASK_RESULT_(RESULT_READY|BLOCKED|AMBIGUOUS|COMPLETED|FAILED)$/.test(String(e?.event_type||'')));
+  if(!event)return null;
+  const state=String(event.event_type).slice('TASK_RESULT_'.length);
+  return {task_id:taskId,state,lease_generation:Number(event.lease_generation)||0,result_sha256:event?.payload?.result_sha256||null,error_code:event?.payload?.error_code||null};
+}
 
-export function createDevosSupervisorRoutes({rpc,rest,workspaceId}={}){
-  if(typeof rpc!=='function'||typeof rest!=='function'||!UUID_RE.test(String(workspaceId||'')))throw new Error('devos_routes_dependencies_invalid');
+export function createDevosSupervisorRoutes({rpc,workspaceId}={}){
+  if(typeof rpc!=='function'||!UUID_RE.test(String(workspaceId||'')))throw new Error('devos_routes_dependencies_invalid');
   return async function handle({req,path,body,clientId}={}){
     if(!String(path||'').startsWith('/v1/devos/'))return null;
     if(!clientId)return json(401,{error:'device_auth_required'});
@@ -80,9 +88,9 @@ export function createDevosSupervisorRoutes({rpc,rest,workspaceId}={}){
     if(req?.method==='GET'&&match){
       const taskId=match[1].toLowerCase();
       if(!UUID_RE.test(taskId))return json(400,{error:'task_id_invalid'});
-      const rows=await rest(`destruktion_meta.devos_fleet_task_h205f22?task_id=eq.${encodeURIComponent(taskId)}&select=task_id,state,lease_generation,lease_agent_id,lease_tab_id,lease_target_id,lease_agent_generation_epoch,result_sha256,error_code&limit=1`);
-      const row=Array.isArray(rows)?rows[0]:null;
-      return row?json(200,{...row,automatic_retry_allowed:false,authority_effect:false}):json(404,{error:'task_not_found'});
+      const snapshot=await rpc('devos_fleet_snapshot_v1',{p_workspace:workspaceId});
+      const row=taskStatusFromSnapshot(snapshot,taskId);
+      return row?json(200,{...row,automatic_retry_allowed:false,authority_effect:false}):json(404,{error:'task_status_not_proven'});
     }
     return json(404,{error:'devos_route_not_found'});
   };
