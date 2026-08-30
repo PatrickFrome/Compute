@@ -55,7 +55,7 @@ function fetchFor({ releases, selected }) {
   const calls = [];
   const fetchImpl = async (url) => {
     calls.push(String(url));
-    if (url === `${API}/releases?per_page=30`) return response(releases);
+    if (url === `${API}/releases?per_page=10`) return response(releases);
     if (url === `${API}/git/ref/tags/${encodeURIComponent(selected.tag)}`) return response({ ref:`refs/tags/${selected.tag}`, object:{ type:'commit', sha:selected.gitSha } });
     if (url === `${DL}/${selected.tag}/verified-self-update-manifest.json`) return response(selected.manifest);
     if (url === `${DL}/${selected.tag}/dev.yml`) return response(selected.devYml);
@@ -130,5 +130,5 @@ test('resolver returns null without touching tag or assets when no newer same-fa
   const { fetchImpl, calls } = fetchFor({ releases:[r64.release], selected:r64 });
   const result = await resolveTrustedMetaengineDevRelease({ currentVersion:'0.6.3-dev.64.1', fetchImpl });
   assert.equal(result, null);
-  assert.deepEqual(calls, [`${API}/releases?per_page=30`]);
+  assert.deepEqual(calls, [`${API}/releases?per_page=10`]);
 });
