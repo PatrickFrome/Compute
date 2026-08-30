@@ -171,7 +171,6 @@ jobs:
         env:
           GITHUB_ACTIONS: 'true'
           METAENGINE_SELF_UPDATE_TEST_MODE: '1'
-          METAENGINE_DISABLE_CRASH_SENTINEL: '1'
         run: |
           $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
           $listener.Start()
@@ -299,17 +298,44 @@ jobs:
           $first = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $firstOut -RedirectStandardError $firstErr
           $null = $first.Handle
           $deadline = (Get-Date).AddSeconds(10)
-          while ((-not (Test-Path $firstOut) -or (Get-Item $firstOut -ErrorAction SilentlyContinue).Length -eq 0) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 100 }
-          $first.Refresh()
-          if ($first.HasExited) { Get-Content $firstErr -ErrorAction SilentlyContinue; throw 'singleton_primary_exited_early' }
-          $firstRow = (Get-Content $firstOut | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
-          if ($firstRow.primary_instance -ne $true) { throw 'singleton_primary_probe_invalid' }
+          $firstRow = $null
+          do {
+            if (Test-Path $firstOut) {
+              try {
+                $candidateText = (Get-Content $firstOut -Raw -ErrorAction Stop).Trim()
+                if ($candidateText) {
+                  $candidate = $candidateText | ConvertFrom-Json
+                  if ($candidate.schema -eq 'metaengine.browser.single-instance-probe.v1' -and
+                      [string]$candidate.version -eq $target -and
+                      [System.Convert]::ToBoolean($candidate.primary_instance)) {
+                    $firstRow = $candidate
+                    break
+                  }
+                }
+              } catch {}
+            }
+            Start-Sleep -Milliseconds 100
+          } while ((Get-Date) -lt $deadline)
+          if (-not $firstRow) {
+            Get-Content $firstOut -ErrorAction SilentlyContinue
+            Get-Content $firstErr -ErrorAction SilentlyContinue
+            throw 'singleton_primary_probe_invalid'
+          }
+          $primaryPid = [int]$firstRow.pid
+          if ($primaryPid -le 0) { throw 'singleton_primary_probe_pid_invalid' }
+          $primaryProcess = Get-Process -Id $primaryPid -ErrorAction SilentlyContinue
+          if (-not $primaryProcess) { throw "singleton_primary_probe_pid_not_alive:$primaryPid" }
+
           $second = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\singleton-second.out" -RedirectStandardError "$env:RUNNER_TEMP\singleton-second.err"
           $null = $second.Handle
-          if (-not $second.WaitForExit(5000)) { try { Stop-Process -Id $second.Id -Force } catch {}; try { Stop-Process -Id $first.Id -Force } catch {}; throw 'singleton_secondary_did_not_exit' }
-          $first.Refresh()
-          if ($first.HasExited) { throw 'singleton_secondary_displaced_primary' }
-          try { Stop-Process -Id $first.Id -Force -ErrorAction SilentlyContinue } catch {}
+          if (-not $second.WaitForExit(5000)) {
+            try { Stop-Process -Id $second.Id -Force } catch {}
+            try { taskkill /PID $primaryPid /T /F | Out-Null } catch {}
+            throw 'singleton_secondary_did_not_exit'
+          }
+          if (-not (Get-Process -Id $primaryPid -ErrorAction SilentlyContinue)) { throw 'singleton_secondary_displaced_primary' }
+          "singleton_primary_pid=$primaryPid" | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
+          try { taskkill /PID $primaryPid /T /F | Out-Null } catch {}
           'physical_singleton=PASS' | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
 
       - name: Stage E2E evidence
@@ -322,7 +348,7 @@ jobs:
             'baseline-version-probe.out','baseline-profile-probe.out','target-version-probe.out','target-profile-probe.out',
             'self-update-smoke.jsonl','self-update-smoke.out','self-update-smoke.err',
             'self-update-pre-install-receipt.json','self-update-successor-receipt.json','self-update-e2e-proof.txt',
-            'singleton-first.out','singleton-second.out','self-update-feed.out','self-update-feed.err'
+            'singleton-first.out','singleton-first.err','singleton-second.out','singleton-second.err','self-update-feed.out','self-update-feed.err'
           )) {
             $source = Join-Path $env:RUNNER_TEMP $file
             if (Test-Path $source) { Copy-Item $source self-update-evidence\ }
