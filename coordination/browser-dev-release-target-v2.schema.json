@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "metaengine.browser.dev-release-target.v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "enabled", "source_sha", "reason", "requested_by", "authority_effect"],
+  "properties": {
+    "schema": {"const": "metaengine.browser.dev-release-target.v2"},
+    "enabled": {"const": true},
+    "source_sha": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+    "reason": {"type": "string", "minLength": 1, "maxLength": 200},
+    "requested_by": {"type": "string", "minLength": 1, "maxLength": 100},
+    "authority_effect": {"const": false}
+  }
+}
