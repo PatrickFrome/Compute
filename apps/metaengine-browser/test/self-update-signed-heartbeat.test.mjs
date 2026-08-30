@@ -49,6 +49,7 @@ async function appFixture() {
   const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-signed-heartbeat-'));
   let version = '0.6.3-dev.152.0';
   const app = {
+    isPackaged: true,
     getPath: (name) => { assert.equal(name, 'userData'); return userData; },
     getVersion: () => version,
     hasSingleInstanceLock: () => true,
