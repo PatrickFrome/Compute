@@ -1,0 +1,125 @@
+name: METAENGINE Browser Publish 149 Once
+
+on:
+  push:
+    branches:
+      - work/self-update-publish-149-v1
+    paths:
+      - '.github/workflows/metaengine-browser-publish-149-once.yml'
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish-exact-tested-bytes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: a21c9e241718274433531aaaa702c9d9748abaa6
+      E2E_RUN_ID: '33303238978'
+      ARTIFACT_ID: '9729666824'
+      VERSION: 0.6.3-dev.149.1
+      TAG: v0.6.3-dev.149.1
+      INSTALLER_SHA256: a6711beb5d627b6431cde3e65b85aa471474e4cfc5a2223b5f03bf0db754919b
+    steps:
+      - name: Verify exact physical E2E run
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${E2E_RUN_ID}" > run.json
+          python3 - <<'PY'
+          import json, os
+          r=json.load(open('run.json','r',encoding='utf-8'))
+          if r.get('head_sha') != os.environ['SOURCE_SHA']: raise SystemExit('e2e_source_sha_mismatch')
+          if r.get('status') != 'completed' or r.get('conclusion') != 'success': raise SystemExit('e2e_not_success')
+          if r.get('name') != 'METAENGINE Browser Self Update E2E': raise SystemExit('e2e_workflow_mismatch')
+          PY
+
+      - name: Download immutable exact artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${E2E_RUN_ID}/artifacts" > artifacts.json
+          python3 - <<'PY'
+          import json, os
+          rows=json.load(open('artifacts.json','r',encoding='utf-8')).get('artifacts',[])
+          rows=[a for a in rows if str(a.get('id'))==os.environ['ARTIFACT_ID'] and not a.get('expired',False)]
+          if len(rows)!=1: raise SystemExit(f'artifact_binding_invalid:{len(rows)}')
+          a=rows[0]
+          if a.get('workflow_run',{}).get('head_sha') != os.environ['SOURCE_SHA']: raise SystemExit('artifact_source_sha_mismatch')
+          PY
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" > e2e.zip
+          mkdir evidence
+          unzip -q e2e.zip -d evidence
+
+      - name: Verify manifest and exact bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re, shlex
+          root=pathlib.Path('evidence')
+          manifests=list(root.rglob('verified-self-update-manifest.json'))
+          if len(manifests)!=1: raise SystemExit('manifest_cardinality_invalid')
+          mp=manifests[0]
+          m=json.loads(mp.read_text(encoding='utf-8'))
+          if m.get('schema')!='metaengine.browser.self-update-e2e-manifest.v2': raise SystemExit('manifest_schema_invalid')
+          if m.get('git_sha')!=os.environ['SOURCE_SHA']: raise SystemExit('manifest_git_sha_mismatch')
+          if m.get('version')!=os.environ['VERSION']: raise SystemExit('manifest_version_mismatch')
+          required=['physical_n_to_n_plus_1','durable_successor_binding','forced_successor','profile_continuity','single_install_directory','physical_singleton','development_channel']
+          if any(m.get(k) is not True for k in required): raise SystemExit('physical_gate_incomplete')
+          if m.get('update_channel')!='dev' or m.get('production_safe') is not False: raise SystemExit('channel_boundary_invalid')
+          installer=list(root.rglob(str(m.get('installer_name') or '')))
+          blockmap=list(root.rglob(str(m.get('blockmap_name') or '')))
+          dev=list(root.rglob('dev.yml'))
+          if len(installer)!=1 or len(blockmap)!=1 or len(dev)!=1: raise SystemExit('asset_cardinality_invalid')
+          digest=hashlib.sha256(installer[0].read_bytes()).hexdigest()
+          if digest!=os.environ['INSTALLER_SHA256'] or digest!=str(m.get('installer_sha256') or '').lower(): raise SystemExit('installer_digest_mismatch')
+          rows={'INSTALLER':str(installer[0]),'BLOCKMAP':str(blockmap[0]),'DEV_YML':str(dev[0]),'MANIFEST':str(mp)}
+          with open('release.env','w',encoding='utf-8') as f:
+              for k,v in rows.items(): f.write(f'{k}={shlex.quote(v)}\n')
+          PY
+          cat release.env >> "$GITHUB_ENV"
+
+      - name: Refuse overwrite and create draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" >/dev/null 2>&1; then
+            echo "release_tag_already_exists:${TAG}" >&2
+            exit 1
+          fi
+          gh release create "$TAG" "$INSTALLER" "$BLOCKMAP" "$DEV_YML" "$MANIFEST" \
+            --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" \
+            --title "METAENGINE Browser ${TAG}" \
+            --notes "Exact tested development bytes from physical N-to-N+1 E2E run ${E2E_RUN_ID} for ${SOURCE_SHA}. No rebuild. production-safe=false." \
+            --prerelease --draft
+
+      - name: Validate draft collection and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api -X GET "repos/${GITHUB_REPOSITORY}/releases" -f per_page=100 > releases.json
+          python3 - <<'PY'
+          import json, os, pathlib
+          rows=json.load(open('releases.json','r',encoding='utf-8'))
+          matches=[r for r in rows if r.get('tag_name')==os.environ['TAG'] and r.get('draft') is True]
+          if len(matches)!=1: raise SystemExit(f'draft_cardinality_invalid:{len(matches)}')
+          r=matches[0]
+          if r.get('target_commitish')!=os.environ['SOURCE_SHA'] or r.get('prerelease') is not True: raise SystemExit('draft_binding_invalid')
+          assets={a.get('name'):a for a in r.get('assets',[])}
+          expected={f"METAENGINE-Browser-Test-Setup-{os.environ['VERSION']}-x64.exe",f"METAENGINE-Browser-Test-Setup-{os.environ['VERSION']}-x64.exe.blockmap",'dev.yml','verified-self-update-manifest.json'}
+          if set(assets)!=expected: raise SystemExit(f'draft_asset_set_invalid:{sorted(assets)}')
+          digest=assets[f"METAENGINE-Browser-Test-Setup-{os.environ['VERSION']}-x64.exe"].get('digest')
+          if digest and digest!=f"sha256:{os.environ['INSTALLER_SHA256']}": raise SystemExit('github_asset_digest_mismatch')
+          pathlib.Path('release-id.txt').write_text(str(r['id']),encoding='utf-8')
+          PY
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/$(cat release-id.txt)" -F draft=false -F prerelease=true -f make_latest=false > published.json
+          python3 - <<'PY'
+          import json, os
+          r=json.load(open('published.json','r',encoding='utf-8'))
+          if r.get('draft') is not False or r.get('prerelease') is not True: raise SystemExit('publish_state_invalid')
+          if r.get('tag_name')!=os.environ['TAG'] or r.get('target_commitish')!=os.environ['SOURCE_SHA']: raise SystemExit('publish_binding_invalid')
+          PY
