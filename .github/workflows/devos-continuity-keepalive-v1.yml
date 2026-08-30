@@ -35,6 +35,11 @@ jobs:
           node --check src/supervisor-lifecycle-runtime.mjs
           node --check test/supervisor-continuity-hardening.test.mjs
           node --check test/supervisor-continuity-keepalive-v1.test.mjs
-      - name: Browser unit suite
+      - name: Continuity regression suite
         working-directory: apps/metaengine-browser
-        run: npm test
+        run: |
+          node --test \
+            test/supervisor-keepalive.test.mjs \
+            test/supervisor-lifecycle-runtime.test.mjs \
+            test/supervisor-continuity-hardening.test.mjs \
+            test/supervisor-continuity-keepalive-v1.test.mjs
