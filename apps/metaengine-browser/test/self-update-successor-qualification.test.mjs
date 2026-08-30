@@ -90,3 +90,16 @@ test('production entry schedules qualification only on --updated launches', asyn
   assert.match(source, /if \(updatedLaunch\)/);
   assert.match(source, /SELF_UPDATE_AUTOMATIC_RETRY_HELD/);
 });
+
+test('proof-only successor releases singleton only after durable successor receipt path', async () => {
+  const source = await fs.readFile(new URL('../src/main-entry.mjs', import.meta.url), 'utf8');
+  const persistIndex = source.indexOf('persistUpdatedSuccessorReceipt');
+  const probeOnlyIndex = source.indexOf('updateHandoff?.successor_startup === SUCCESSOR_STARTUP_PROBE_ONLY');
+  const releaseIndex = source.indexOf('app.releaseSingleInstanceLock()');
+  const exitIndex = source.indexOf('app.exit(0)', releaseIndex);
+  assert.ok(persistIndex >= 0 && probeOnlyIndex > persistIndex, 'successor receipt must be persisted before proof-only branch');
+  assert.ok(releaseIndex > probeOnlyIndex, 'proof-only release must stay scoped to successor evidence path');
+  assert.ok(exitIndex > releaseIndex, 'proof-only process must release singleton before exit');
+  assert.match(source, /app\.hasSingleInstanceLock\(\) === true/);
+  assert.match(source, /typeof app\.releaseSingleInstanceLock === 'function'/);
+});
