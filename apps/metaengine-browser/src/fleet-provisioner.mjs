@@ -1,11 +1,12 @@
 import crypto from 'node:crypto';
 import { globalOwnerGateDisabled } from './owner-safety-gate-registry.mjs';
 
-export const FLEET_PROVISIONER_VERSION = '1.2.0';
+export const FLEET_PROVISIONER_VERSION = '1.3.0';
 export const FLEET_STATES = Object.freeze([
   'REGISTERED',
   'PROVISIONING',
   'BOUND_UNVERIFIED',
+  'ACTIVE',
   'PROVISIONING_AMBIGUOUS',
   'LOST',
   'RETIRED',
@@ -57,6 +58,36 @@ function freshState(policy) {
   };
 }
 
+function sanitizeTransportProof(value) {
+  if (!value || value.schema !== 'metaengine.browser.fleet-transport-proof.v1') return null;
+  const tabId = String(value.tab_id || '');
+  const targetId = String(value.target_id || '').toLowerCase();
+  const generationEpoch = Number(value.generation_epoch);
+  const conversationUrlSha256 = String(value.conversation_url_sha256 || '').toLowerCase();
+  const provenAt = String(value.proven_at || '');
+  if (!tabId || !targetId || !Number.isSafeInteger(generationEpoch) || generationEpoch < 1) return null;
+  if (!/^[a-f0-9]{64}$/.test(conversationUrlSha256) || !provenAt) return null;
+  return {
+    schema: 'metaengine.browser.fleet-transport-proof.v1',
+    tab_id: tabId,
+    target_id: targetId,
+    generation_epoch: generationEpoch,
+    conversation_url_sha256: conversationUrlSha256,
+    proven_at: provenAt,
+    authority_effect: false,
+  };
+}
+
+function normalizeConversationUrl(value) {
+  const url = new URL(String(value || '').trim());
+  if (url.protocol !== 'https:' || !['chatgpt.com', 'www.chatgpt.com'].includes(url.hostname.toLowerCase())) {
+    throw new Error('fleet_transport_conversation_origin_invalid');
+  }
+  const path = url.pathname.replace(/\/+$/, '');
+  if (!/^\/c\/[a-z0-9-]+$/i.test(path)) throw new Error('fleet_transport_conversation_path_invalid');
+  return `https://chatgpt.com${path.toLowerCase()}`;
+}
+
 function sanitizeLoadedState(input, policy) {
   if (!input || input.schema !== 'metaengine.browser.fleet-state.v1' || !Array.isArray(input.agents)) return freshState(policy);
   const agents = [];
@@ -65,7 +96,9 @@ function sanitizeLoadedState(input, policy) {
     if (!row || typeof row !== 'object') continue;
     const agentId = String(row.agent_id || '').toLowerCase();
     if (!/^agent_[a-z0-9-]{8,64}$/.test(agentId) || seen.has(agentId)) continue;
-    const lifecycle = FLEET_STATES.includes(row.lifecycle_state) ? row.lifecycle_state : 'LOST';
+    let lifecycle = FLEET_STATES.includes(row.lifecycle_state) ? row.lifecycle_state : 'LOST';
+    const transportProof = sanitizeTransportProof(row.transport_proof);
+    if (lifecycle === 'ACTIVE' && !transportProof) lifecycle = 'BOUND_UNVERIFIED';
     seen.add(agentId);
     agents.push({
       agent_id: agentId,
@@ -80,6 +113,7 @@ function sanitizeLoadedState(input, policy) {
       updated_at: String(row.updated_at || ''),
       lost_reason: row.lost_reason ? String(row.lost_reason) : null,
       ambiguous_reason: row.ambiguous_reason ? String(row.ambiguous_reason) : null,
+      transport_proof: transportProof,
       automatic_retry_allowed: false,
       authority_effect: false,
     });
@@ -126,6 +160,7 @@ export class FleetProvisioner {
         agent.lost_reason = 'PHYSICAL_TAB_MISSING_ON_RESTART';
         agent.tab_id = null;
         agent.target_id = null;
+        agent.transport_proof = null;
         agent.generation_epoch += 1;
         agent.updated_at = iso(this.#clock);
       }
@@ -153,6 +188,36 @@ export class FleetProvisioner {
     return this.#serial(async () => {
       const next = normalizePolicy({ ...this.#state.policy, profile });
       this.#state.policy = clone(next);
+      await this.#persist();
+      return this.snapshot();
+    });
+  }
+
+  async markTransportProven({ agent_id, tab_id, target_id, generation_epoch, conversation_url } = {}) {
+    return this.#serial(async () => {
+      this.#assertReady();
+      const agent = this.#requireAgent(agent_id);
+      const tabId = String(tab_id || '');
+      const targetId = String(target_id || '').toLowerCase();
+      const generationEpoch = Number(generation_epoch);
+      if (!['BOUND_UNVERIFIED', 'ACTIVE'].includes(agent.lifecycle_state)) throw new Error(`fleet_transport_state_invalid:${agent.lifecycle_state}`);
+      if (!tabId || agent.tab_id !== tabId) throw new Error('fleet_transport_tab_binding_mismatch');
+      if (!targetId || String(agent.target_id || '').toLowerCase() !== targetId) throw new Error('fleet_transport_target_binding_mismatch');
+      if (!Number.isSafeInteger(generationEpoch) || generationEpoch !== agent.generation_epoch) throw new Error('fleet_transport_generation_binding_mismatch');
+      const conversationUrl = normalizeConversationUrl(conversation_url);
+      agent.transport_proof = {
+        schema: 'metaengine.browser.fleet-transport-proof.v1',
+        tab_id: tabId,
+        target_id: targetId,
+        generation_epoch: generationEpoch,
+        conversation_url_sha256: crypto.createHash('sha256').update(conversationUrl, 'utf8').digest('hex'),
+        proven_at: iso(this.#clock),
+        authority_effect: false,
+      };
+      agent.lifecycle_state = 'ACTIVE';
+      agent.lost_reason = null;
+      agent.ambiguous_reason = null;
+      agent.updated_at = iso(this.#clock);
       await this.#persist();
       return this.snapshot();
     });
@@ -186,9 +251,6 @@ export class FleetProvisioner {
         }
       }
 
-      // By default unresolved PROVISIONING_AMBIGUOUS agents occupy capacity. The
-      // project owner can explicitly disable fleet.ambiguous_compensating_fanout
-      // through the typed owner gate plane when rapid recovery is preferred.
       return this.snapshot();
     });
   }
@@ -200,6 +262,7 @@ export class FleetProvisioner {
       agent.lifecycle_state = 'LOST';
       agent.tab_id = null;
       agent.target_id = null;
+      agent.transport_proof = null;
       agent.generation_epoch += 1;
       agent.lost_reason = String(reason);
       agent.updated_at = iso(this.#clock);
@@ -215,6 +278,7 @@ export class FleetProvisioner {
       agent.lifecycle_state = 'RETIRED';
       agent.tab_id = null;
       agent.target_id = null;
+      agent.transport_proof = null;
       agent.generation_epoch += 1;
       agent.updated_at = iso(this.#clock);
       await this.#persist();
@@ -237,6 +301,7 @@ export class FleetProvisioner {
       updated_at: at,
       lost_reason: null,
       ambiguous_reason: null,
+      transport_proof: null,
       automatic_retry_allowed: false,
       authority_effect: false,
     };
@@ -252,7 +317,7 @@ export class FleetProvisioner {
     const ignoreAmbiguous = globalOwnerGateDisabled('fleet.ambiguous_compensating_fanout');
     return this.#state.agents.filter((a) => a.lifecycle_state !== 'RETIRED' && !(ignoreAmbiguous && a.lifecycle_state === 'PROVISIONING_AMBIGUOUS')).length;
   }
-  #liveCount() { return this.#state.agents.filter((a) => ['PROVISIONING', 'BOUND_UNVERIFIED'].includes(a.lifecycle_state)).length; }
+  #liveCount() { return this.#state.agents.filter((a) => ['PROVISIONING', 'BOUND_UNVERIFIED', 'ACTIVE'].includes(a.lifecycle_state)).length; }
   #nextRole() {
     const roles = FLEET_PROFILES[this.#state.policy.profile];
     const active = this.#state.agents.filter((a) => a.lifecycle_state !== 'RETIRED');
@@ -265,6 +330,7 @@ export class FleetProvisioner {
     agent.lifecycle_state = 'PROVISIONING';
     agent.updated_at = iso(this.#clock);
     agent.lost_reason = null;
+    agent.transport_proof = null;
     await this.#persist();
 
     let tab;
@@ -289,6 +355,7 @@ export class FleetProvisioner {
     agent.conversation_epoch += isRecovery ? 1 : 0;
     agent.lifecycle_state = 'BOUND_UNVERIFIED';
     agent.ambiguous_reason = null;
+    agent.transport_proof = null;
     agent.updated_at = iso(this.#clock);
     await this.#persist();
 

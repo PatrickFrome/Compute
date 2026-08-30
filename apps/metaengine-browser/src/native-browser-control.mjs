@@ -2,8 +2,10 @@ import crypto from 'node:crypto';
 import { chatGptControlMatches } from './chatgpt-ui-controls.mjs';
 
 const SAFE_ROLES = new Set(['textbox','searchbox','combobox','button','checkbox','radio','switch','tab','menuitem','link']);
+const CHATGPT_COMPOSER_NAMES = new Set(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
 const clip = (value, max) => String(value ?? '').slice(0, max);
 const axValue = (node, key) => String(node?.[key]?.value ?? '').trim();
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function withDebugger(webContents, fn) {
   if (!webContents || webContents.isDestroyed?.()) throw new Error('native_control_webcontents_unavailable');
@@ -48,6 +50,60 @@ function textExcerpt(nodes = []) {
     if (parts.join('\n').length >= 12000) break;
   }
   return clip(parts.join('\n'), 12000);
+}
+
+function isChatGptConversationUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'https:'
+      && ['chatgpt.com','www.chatgpt.com'].includes(url.hostname.toLowerCase())
+      && /^\/c\/[a-z0-9-]+\/?$/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function exactChatGptControls(nodes, kind) {
+  return uniqueSemanticTargets(nodes).filter((row) => row.role === 'button' && chatGptControlMatches(kind, row.name));
+}
+
+function isExactChatGptComposer(target, command) {
+  return String(command?.platform || '').toUpperCase() === 'CHATGPT'
+    && target?.role === 'textbox'
+    && CHATGPT_COMPOSER_NAMES.has(String(target?.name || ''));
+}
+
+async function observeChatGptSubmit(dbg, webContents, { preUrl, attempts = 20, intervalMs = 100 } = {}) {
+  let last = { stop_count: 0, send_count: 0, url: clip(webContents.getURL?.() || '', 1200) };
+  for (let i = 0; i < attempts; i += 1) {
+    if (i > 0) await sleep(intervalMs);
+    const tree = await dbg.sendCommand('Accessibility.getFullAXTree');
+    const nodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
+    const stopCount = exactChatGptControls(nodes, 'STOP').length;
+    const sendCount = exactChatGptControls(nodes, 'SEND').length;
+    const url = clip(webContents.getURL?.() || '', 1200);
+    last = { stop_count: stopCount, send_count: sendCount, url };
+    const rootToConversation = !isChatGptConversationUrl(preUrl) && isChatGptConversationUrl(url);
+    if (stopCount === 1 || rootToConversation) {
+      return {
+        effect_state: stopCount === 1 ? 'PROVEN_GENERATING' : 'PROVEN_NEW_CONVERSATION',
+        stop_observed: stopCount === 1,
+        new_conversation_observed: rootToConversation,
+        post_url_sha256: url ? crypto.createHash('sha256').update(url, 'utf8').digest('hex') : null,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      };
+    }
+  }
+  return {
+    effect_state: 'AMBIGUOUS_AFTER_ENTER',
+    stop_observed: last.stop_count === 1,
+    new_conversation_observed: false,
+    send_control_remaining: last.send_count > 0,
+    post_url_sha256: last.url ? crypto.createHash('sha256').update(last.url, 'utf8').digest('hex') : null,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  };
 }
 
 export async function captureSemanticFrame(webContents) {
@@ -117,7 +173,7 @@ export async function executeSemanticCommand(webContents, command) {
 
     if (action === 'STOP_GENERATION') {
       const tree = await dbg.sendCommand('Accessibility.getFullAXTree');
-      const targets = uniqueSemanticTargets(tree?.nodes || []).filter((row) => row.role === 'button' && chatGptControlMatches('STOP', row.name));
+      const targets = exactChatGptControls(tree?.nodes || [], 'STOP');
       if (targets.length !== 1) throw new Error(targets.length ? `native_stop_target_ambiguous:${targets.length}` : 'native_stop_target_not_found');
       const point = await clickBackendNode(dbg, targets[0].backend_node_id);
       return { action, target: targets[0], point, authority_effect: true };
@@ -140,13 +196,41 @@ export async function executeSemanticCommand(webContents, command) {
     if (action === 'SEMANTIC_TYPE') {
       const text = String(command?.payload?.text ?? '');
       if (!text || text.length > 120000) throw new Error('native_semantic_text_invalid');
+      const submitAfterType = command?.payload?.submit_after_type === true;
+      if (submitAfterType && !isExactChatGptComposer(target, command)) throw new Error('native_semantic_submit_requires_exact_chatgpt_composer');
+      const preUrl = clip(webContents.getURL?.() || '', 1200);
       await dbg.sendCommand('DOM.focus', { backendNodeId: target.backend_node_id });
       if (command?.payload?.replace_existing !== false) {
         await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'a', code:'KeyA', modifiers:2 });
         await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'a', code:'KeyA', modifiers:2 });
       }
       await dbg.sendCommand('Input.insertText', { text });
-      return { action, target, inserted_chars: text.length, replace_existing: command?.payload?.replace_existing !== false, authority_effect: true };
+      if (!submitAfterType) {
+        return { action, target, inserted_chars: text.length, replace_existing: command?.payload?.replace_existing !== false, authority_effect: true };
+      }
+
+      const readyTree = await dbg.sendCommand('Accessibility.getFullAXTree');
+      const sendTargets = exactChatGptControls(readyTree?.nodes || [], 'SEND');
+      if (sendTargets.length !== 1) throw new Error(sendTargets.length ? `native_semantic_send_target_ambiguous:${sendTargets.length}` : 'native_semantic_send_target_not_found');
+      await dbg.sendCommand('Input.dispatchKeyEvent', {
+        type:'rawKeyDown', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, nativeVirtualKeyCode:13,
+      });
+      await dbg.sendCommand('Input.dispatchKeyEvent', {
+        type:'keyUp', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, nativeVirtualKeyCode:13,
+      });
+      const observation = await observeChatGptSubmit(dbg, webContents, { preUrl });
+      return {
+        action,
+        target,
+        inserted_chars: text.length,
+        replace_existing: command?.payload?.replace_existing !== false,
+        submit_after_type: true,
+        prompt_sha256: crypto.createHash('sha256').update(text, 'utf8').digest('hex'),
+        prompt_included: false,
+        send_control: { role: sendTargets[0].role, name: sendTargets[0].name },
+        ...observation,
+        authority_effect: true,
+      };
     }
 
     throw new Error('native_semantic_action_not_supported');
