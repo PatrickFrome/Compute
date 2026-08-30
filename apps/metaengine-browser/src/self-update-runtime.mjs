@@ -12,6 +12,7 @@ import {
 } from './self-update-runtime-v8.mjs';
 
 export { DEFAULT_TRUSTED_UPDATE_CHANNEL, DEFAULT_TRUSTED_ARTIFACT_PREFIX, validateCiTestFeedUrl };
+export const DEFAULT_CONTINUOUS_DEV_UPDATE_INTERVAL_MS = 5 * 60 * 1000;
 
 function compatInjectedUpdater(updater) {
   if (typeof updater?.setFeedURL === 'function') return updater;
@@ -27,15 +28,19 @@ function compatInjectedUpdater(updater) {
 
 export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
   constructor(options = {}) {
+    const withDevCadence = {
+      ...options,
+      intervalMs: options?.intervalMs ?? DEFAULT_CONTINUOUS_DEV_UPDATE_INTERVAL_MS,
+    };
     const injectedLegacyTest = options?.updater
       && options?.currentVersion == null
       && options?.ciTestFeedUrl == null;
     if (!injectedLegacyTest) {
-      super(options);
+      super(withDevCadence);
       return;
     }
     super({
-      ...options,
+      ...withDevCadence,
       updater: compatInjectedUpdater(options.updater),
       ciTestFeedUrl: 'http://127.0.0.1:1/',
       ciTestMode: true,
