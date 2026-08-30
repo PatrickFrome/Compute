@@ -1,0 +1,140 @@
+name: METAENGINE Browser PR95 Publish Proven Successor
+
+on:
+  push:
+    branches:
+      - work/self-update-restart-safe-v1
+    paths:
+      - '.github/workflows/metaengine-browser-pr95-publish-verified.yml'
+
+concurrency:
+  group: metaengine-browser-pr95-proven-successor
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERIFIED_SOURCE_SHA: 54f241c88a00ffc3b64c383b2285125cce0eb41c
+    steps:
+      - name: Resolve exact successful physical E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/workflows/metaengine-browser-self-update-e2e.yml/runs" \
+            -f head_sha="$VERIFIED_SOURCE_SHA" -f status=success -f per_page=50 > runs.json
+          python3 - <<'PY'
+          import json, os, pathlib
+          sha=os.environ['VERIFIED_SOURCE_SHA']
+          rows=json.load(open('runs.json','r',encoding='utf-8')).get('workflow_runs',[])
+          rows=[r for r in rows if r.get('head_sha')==sha and r.get('status')=='completed' and r.get('conclusion')=='success']
+          rows.sort(key=lambda r:(r.get('run_attempt',0),r.get('id',0)), reverse=True)
+          if not rows: raise SystemExit('verified_source_e2e_success_missing')
+          pathlib.Path('run-id.txt').write_text(str(rows[0]['id']),encoding='utf-8')
+          print(f"verified_e2e_run={rows[0]['id']} sha={sha}")
+          PY
+
+      - name: Download exact immutable artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_ID="$(cat run-id.txt)"
+          gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts" -f per_page=100 > artifacts.json
+          python3 - <<'PY'
+          import json, pathlib
+          rows=json.load(open('artifacts.json','r',encoding='utf-8')).get('artifacts',[])
+          rows=[a for a in rows if a.get('name','').startswith('metaengine-browser-self-update-e2e-') and not a.get('expired',False)]
+          if len(rows)!=1: raise SystemExit(f'artifact_cardinality_invalid:{len(rows)}')
+          pathlib.Path('artifact-id.txt').write_text(str(rows[0]['id']),encoding='utf-8')
+          print(f"artifact={rows[0]['id']} digest={rows[0].get('digest')}")
+          PY
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/$(cat artifact-id.txt)/zip" > e2e.zip
+          mkdir evidence
+          unzip -q e2e.zip -d evidence
+
+      - name: Verify v2 manifest, exact SHA, physical gates and monotonic version
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api -X GET "repos/${GITHUB_REPOSITORY}/releases" -f per_page=100 > releases.json
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re, shlex
+          root=pathlib.Path('evidence')
+          manifests=list(root.rglob('verified-self-update-manifest.json'))
+          if len(manifests)!=1: raise SystemExit(f'manifest_cardinality_invalid:{len(manifests)}')
+          mp=manifests[0]
+          m=json.loads(mp.read_text(encoding='utf-8'))
+          if m.get('schema') not in {'metaengine.browser.self-update-e2e-manifest.v1','metaengine.browser.self-update-e2e-manifest.v2'}: raise SystemExit('manifest_schema_invalid')
+          if m.get('git_sha')!=os.environ['VERIFIED_SOURCE_SHA']: raise SystemExit('manifest_git_sha_mismatch')
+          required=['physical_n_to_n_plus_1','durable_successor_binding','forced_successor','profile_continuity','single_install_directory','physical_singleton','development_channel']
+          if any(m.get(k) is not True for k in required): raise SystemExit('manifest_physical_gate_incomplete')
+          if m.get('update_channel')!='dev' or m.get('update_metadata')!='dev.yml' or m.get('production_safe') is not False: raise SystemExit('manifest_channel_boundary_invalid')
+          version=str(m.get('version') or '')
+          vm=re.fullmatch(r'(\d+)\.(\d+)\.(\d+)-dev\.(\d+)\.(\d+)',version)
+          if not vm: raise SystemExit('dev_version_invalid')
+          installer=list(root.rglob(str(m.get('installer_name') or '')))
+          blockmap=list(root.rglob(str(m.get('blockmap_name') or '')))
+          dev=list(root.rglob('dev.yml'))
+          if len(installer)!=1 or len(blockmap)!=1 or len(dev)!=1: raise SystemExit('asset_cardinality_invalid')
+          digest=hashlib.sha256(installer[0].read_bytes()).hexdigest()
+          if digest!=str(m.get('installer_sha256') or '').lower(): raise SystemExit('installer_digest_mismatch')
+          releases=json.load(open('releases.json','r',encoding='utf-8'))
+          def parse(tag):
+              x=re.fullmatch(r'v(\d+)\.(\d+)\.(\d+)-dev\.(\d+)\.(\d+)',str(tag or ''))
+              return tuple(map(int,x.groups())) if x else None
+          target=tuple(map(int,vm.groups()))
+          prior=[parse(r.get('tag_name')) for r in releases]
+          prior=[x for x in prior if x is not None]
+          if prior and target<=max(prior): raise SystemExit(f'dev_version_not_monotonic:{target}<={max(prior)}')
+          env={'VERSION':version,'TAG':'v'+version,'INSTALLER':str(installer[0]),'BLOCKMAP':str(blockmap[0]),'DEV_YML':str(dev[0]),'MANIFEST':str(mp),'INSTALLER_SHA256':digest}
+          with open('release.env','w',encoding='utf-8') as f:
+              for k,v in env.items(): f.write(f'{k}={shlex.quote(v)}\n')
+          print(f"verified version={version} sha256={digest}")
+          PY
+          cat release.env >> "$GITHUB_ENV"
+
+      - name: Create draft release from exact proven bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" >/dev/null 2>&1; then
+            echo "release_tag_already_exists:${TAG}" >&2
+            exit 1
+          fi
+          gh release create "$TAG" "$INSTALLER" "$BLOCKMAP" "$DEV_YML" "$MANIFEST" \
+            --repo "$GITHUB_REPOSITORY" --target "$VERIFIED_SOURCE_SHA" \
+            --title "METAENGINE Browser ${VERSION}" \
+            --notes "Exact development bytes from successful physical N-to-N+1 E2E for ${VERIFIED_SOURCE_SHA}. Active-chat continuity enabled; production-safe=false; no rebuild after verification." \
+            --prerelease --draft
+
+      - name: Read back exact assets then publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" > release.json
+          python3 - <<'PY'
+          import json, os, pathlib
+          r=json.load(open('release.json','r',encoding='utf-8'))
+          if r.get('draft') is not True or r.get('prerelease') is not True: raise SystemExit('draft_boundary_invalid')
+          if r.get('target_commitish')!=os.environ['VERIFIED_SOURCE_SHA']: raise SystemExit('release_source_sha_mismatch')
+          assets={a.get('name'):a for a in r.get('assets',[])}
+          expected={os.path.basename(os.environ['INSTALLER']),os.path.basename(os.environ['BLOCKMAP']),'dev.yml','verified-self-update-manifest.json'}
+          if set(assets)!=expected: raise SystemExit(f'release_asset_set_invalid:{sorted(assets)}')
+          digest=assets[os.path.basename(os.environ['INSTALLER'])].get('digest')
+          if digest and digest!=f"sha256:{os.environ['INSTALLER_SHA256']}": raise SystemExit('github_asset_digest_mismatch')
+          pathlib.Path('release-id.txt').write_text(str(r['id']),encoding='utf-8')
+          PY
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/$(cat release-id.txt)" -F draft=false -F prerelease=true -f make_latest=false > published.json
+          python3 - <<'PY'
+          import json, os
+          r=json.load(open('published.json','r',encoding='utf-8'))
+          if r.get('draft') is not False or r.get('prerelease') is not True: raise SystemExit('publish_readback_failed')
+          if r.get('tag_name')!=os.environ['TAG'] or r.get('target_commitish')!=os.environ['VERIFIED_SOURCE_SHA']: raise SystemExit('publish_binding_failed')
+          print(f"published={r.get('tag_name')} target={r.get('target_commitish')}")
+          PY
