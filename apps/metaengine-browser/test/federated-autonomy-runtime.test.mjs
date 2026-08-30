@@ -65,16 +65,27 @@ test('owner override can explicitly permit overlapping implementation claim', ()
   assert.equal(decision.allowed, true);
 });
 
-test('ambiguous physical effects consume fanout capacity unless owner disables that gate', () => {
-  const governor = new AutonomyGovernor({ policy:{ max_parallel_agents:2 } });
+test('ambiguous physical effects consume explicit operational budget unless owner disables that gate', () => {
+  const governor = new AutonomyGovernor({ policy:{ operational_agent_budget:2 } });
   const agents = [
     { agent_id:'agent_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', lifecycle_state:'BOUND_UNVERIFIED' },
     { agent_id:'agent_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', lifecycle_state:'PROVISIONING_AMBIGUOUS' },
   ];
   const blocked = governor.evaluateSpawn({ agents });
   assert.equal(blocked.allowed, false);
+  assert.equal(blocked.reason, 'OPERATIONAL_AGENT_BUDGET');
   const allowed = governor.evaluateSpawn({ agents, disabled_gates:['autonomy.ambiguous_capacity','autonomy.max_fanout'] });
   assert.equal(allowed.allowed, true);
+});
+
+test('legacy fixed caps are ignored and backlog target can grow beyond 32 agents', () => {
+  const governor = new AutonomyGovernor({ policy:{ max_parallel_agents:8, max_children_per_agent:2 } });
+  const backlog = Array.from({ length:40 }, (_, i) => ({ state:'READY', task_id:`task_${i}` }));
+  const target = governor.deriveTarget({ backlog, seed_agents:6 });
+  assert.equal(target.target_agents, 40);
+  assert.equal(target.hard_agent_cap, null);
+  assert.equal(target.budget_limited, false);
+  assert.equal(governor.snapshot().policy.legacy_max_parallel_agents_ignored, true);
 });
 
 test('base SHA drift blocks same-point claim unless owner explicitly overrides it', () => {
