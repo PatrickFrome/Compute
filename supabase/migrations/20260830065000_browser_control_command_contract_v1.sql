@@ -53,9 +53,8 @@ begin
   if p_payload is null or jsonb_typeof(p_payload)<>'object' or octet_length(p_payload::text)>131072 then raise exception 'native_supervisor_payload_invalid'; end if;
 
   if p_payload ? 'tab_id' then
-    if jsonb_typeof(p_payload->'tab_id') <> 'string'
-       or coalesce(p_payload->>'tab_id','') !~ '^tab_[A-Za-z0-9-]{1,80}$'
-    then raise exception 'native_supervisor_tab_id_invalid'; end if;
+    if jsonb_typeof(p_payload->'tab_id') <> 'string' then raise exception 'native_supervisor_tab_id_invalid'; end if;
+    if coalesce(p_payload->>'tab_id','') !~ '^tab_[A-Za-z0-9-]{1,80}$' then raise exception 'native_supervisor_tab_id_invalid'; end if;
   end if;
 
   if v_action='DOWNLOAD_FILE' then
@@ -69,6 +68,7 @@ begin
     for v_key_name in select jsonb_object_keys(p_payload) loop
       if v_key_name not in ('tab_id','key','modifiers') then raise exception 'native_supervisor_key_payload_key_invalid'; end if;
     end loop;
+    if not (p_payload ? 'key') then raise exception 'native_supervisor_key_required'; end if;
     if jsonb_typeof(p_payload->'key') <> 'string' then raise exception 'native_supervisor_key_required'; end if;
     if not (
       coalesce(p_payload->>'key','') ~ '^[A-Za-z0-9]$'
@@ -76,9 +76,8 @@ begin
       or upper(coalesce(p_payload->>'key','')) ~ '^F([1-9]|1[0-9]|2[0-4])$'
     ) then raise exception 'native_supervisor_key_not_allowlisted'; end if;
     if p_payload ? 'modifiers' then
-      if jsonb_typeof(p_payload->'modifiers') <> 'array' or jsonb_array_length(p_payload->'modifiers') > 4 then
-        raise exception 'native_supervisor_key_modifiers_invalid';
-      end if;
+      if jsonb_typeof(p_payload->'modifiers') <> 'array' then raise exception 'native_supervisor_key_modifiers_invalid'; end if;
+      if jsonb_array_length(p_payload->'modifiers') > 4 then raise exception 'native_supervisor_key_modifiers_invalid'; end if;
       for v_modifier in select jsonb_array_elements_text(p_payload->'modifiers') loop
         if upper(v_modifier) not in ('PRIMARY','CMDORCTRL','COMMANDORCONTROL','SHIFT','CTRL','CONTROL','ALT','META','COMMAND','CMD') then
           raise exception 'native_supervisor_key_modifier_not_allowlisted';
@@ -89,7 +88,8 @@ begin
     for v_key_name in select jsonb_object_keys(p_payload) loop
       if v_key_name not in ('tab_id','factor') then raise exception 'native_supervisor_zoom_payload_key_invalid'; end if;
     end loop;
-    if not (p_payload ? 'factor') or jsonb_typeof(p_payload->'factor') <> 'number' then raise exception 'native_supervisor_zoom_factor_required'; end if;
+    if not (p_payload ? 'factor') then raise exception 'native_supervisor_zoom_factor_required'; end if;
+    if jsonb_typeof(p_payload->'factor') <> 'number' then raise exception 'native_supervisor_zoom_factor_required'; end if;
     if (p_payload->>'factor')::numeric < 0.5 or (p_payload->>'factor')::numeric > 3.0 then raise exception 'native_supervisor_zoom_factor_out_of_range'; end if;
   end if;
 
