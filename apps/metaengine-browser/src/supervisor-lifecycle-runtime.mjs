@@ -1,21 +1,19 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ChatGptSessionMonitor } from './chatgpt-session-monitor.mjs';
+import { chatGptControlMatches, uniqueChatGptControl } from './chatgpt-ui-controls.mjs';
 import { classifyRetryDecision, REQUEST_EFFECT_CLASS } from './chatgpt-retry-policy.mjs';
 import { SupervisorKeepalive, buildSupervisorRolloverMessage } from './supervisor-keepalive.mjs';
 
 const CHAT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/c\/[a-z0-9-]+/i;
-const STOP_RE = /^(stop|stop generating|остановить|остановить создание)$/i;
-const CONTINUE_RE = /^(continue generating|continue|продолжить создание|продолжить)$/i;
-const SEND_RE = /^(send|send prompt|отправить|отправить промпт)$/i;
 const LIMIT_RE = /(maximum conversation length|conversation is too long|start a new chat|диалог.{0,20}слишком длин|начните новый чат)/i;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function generating(frame) {
-  return Boolean(frame?.semantic_targets?.some((x) => x?.role === 'button' && STOP_RE.test(String(x?.name || ''))));
+  return Boolean(frame?.semantic_targets?.some((x) => x?.role === 'button' && chatGptControlMatches('STOP', x?.name)));
 }
-function unique(frame, role, matcher = null) {
-  const rows = (frame?.semantic_targets || []).filter((x) => x?.role === role && (!matcher || matcher.test(String(x?.name || ''))));
+function unique(frame, role) {
+  const rows = (frame?.semantic_targets || []).filter((x) => x?.role === role);
   return rows.length === 1 ? rows[0] : null;
 }
 function retryEnvelope(message, wakeId, retryAttempt) {
@@ -160,7 +158,7 @@ export class SupervisorLifecycleRuntime {
     const box = unique(before, 'textbox');
     if (!box) throw new Error('supervisor_composer_not_unique');
     await this.#execute({ action: 'SEMANTIC_TYPE', payload: { tab_id: tabId, role: 'textbox', accessible_name: box.name, text: message, replace_existing: true }, platform: null });
-    const send = unique(await this.#capture(tabId), 'button', SEND_RE);
+    const send = uniqueChatGptControl(await this.#capture(tabId), 'SEND');
     if (!send) throw new Error('supervisor_send_not_unique');
     clicked = true;
     await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: tabId, role: 'button', accessible_name: send.name }, platform: null });
@@ -201,7 +199,7 @@ export class SupervisorLifecycleRuntime {
   }
 
   async #continueExisting(tabId, frame) {
-    const button = unique(frame, 'button', CONTINUE_RE);
+    const button = uniqueChatGptControl(frame, 'CONTINUE');
     if (!button) return false;
     await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: tabId, role: 'button', accessible_name: button.name }, platform: null });
     this.#sessionMonitor.markRecovery(tabId, 'CONTINUE_GENERATION');
