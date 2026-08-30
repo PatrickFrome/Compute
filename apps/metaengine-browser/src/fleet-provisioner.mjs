@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
+import { globalOwnerGateDisabled } from './owner-safety-gate-registry.mjs';
 
-export const FLEET_PROVISIONER_VERSION = '1.1.1';
+export const FLEET_PROVISIONER_VERSION = '1.2.0';
 export const FLEET_STATES = Object.freeze([
   'REGISTERED',
   'PROVISIONING',
@@ -143,6 +144,7 @@ export class FleetProvisioner {
       policy: clone(this.#state.policy),
       agents: this.#state.agents.map(clone),
       counts: Object.fromEntries(FLEET_STATES.map((state) => [state, this.#state.agents.filter((a) => a.lifecycle_state === state).length])),
+      owner_override_ambiguous_compensating_fanout: globalOwnerGateDisabled('fleet.ambiguous_compensating_fanout'),
       authority_effect: false,
     });
   }
@@ -175,9 +177,18 @@ export class FleetProvisioner {
         await this.#provision(agent, { isRecovery: agent.lifecycle_state === 'LOST' });
       }
 
-      // Unresolved PROVISIONING_AMBIGUOUS agents intentionally occupy capacity.
-      // Never compensate an uncertain createTab effect by spawning replacement agents:
-      // that would turn one ambiguous Browser effect into uncontrolled fleet fan-out.
+      if (globalOwnerGateDisabled('fleet.ambiguous_compensating_fanout')) {
+        while (this.#liveCount() < desired && this.#slotCount() < this.#state.policy.max_agents) {
+          const agent = this.#newRegisteredAgent();
+          this.#state.agents.push(agent);
+          await this.#persist();
+          await this.#provision(agent, { isRecovery: false });
+        }
+      }
+
+      // By default unresolved PROVISIONING_AMBIGUOUS agents occupy capacity. The
+      // project owner can explicitly disable fleet.ambiguous_compensating_fanout
+      // through the typed owner gate plane when rapid recovery is preferred.
       return this.snapshot();
     });
   }
@@ -237,7 +248,10 @@ export class FleetProvisioner {
     if (!agent) throw new Error('fleet_agent_not_found');
     return agent;
   }
-  #slotCount() { return this.#state.agents.filter((a) => a.lifecycle_state !== 'RETIRED').length; }
+  #slotCount() {
+    const ignoreAmbiguous = globalOwnerGateDisabled('fleet.ambiguous_compensating_fanout');
+    return this.#state.agents.filter((a) => a.lifecycle_state !== 'RETIRED' && !(ignoreAmbiguous && a.lifecycle_state === 'PROVISIONING_AMBIGUOUS')).length;
+  }
   #liveCount() { return this.#state.agents.filter((a) => ['PROVISIONING', 'BOUND_UNVERIFIED'].includes(a.lifecycle_state)).length; }
   #nextRole() {
     const roles = FLEET_PROFILES[this.#state.policy.profile];
