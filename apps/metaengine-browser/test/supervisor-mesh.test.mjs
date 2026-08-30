@@ -66,7 +66,7 @@ test('same conversation in two physical tabs becomes ambiguous and cannot be sel
   assert.equal(row.status, 'AMBIGUOUS_INCARNATION');
   assert.equal(row.tab_id, null);
   assert.deepEqual(new Set(row.tab_incarnations), new Set(['tab-a1', 'tab-a2']));
-  assert.throws(() => h.mesh.prefer({ supervisor_id: row.supervisor_id }), /not_active/);
+  await assert.rejects(h.mesh.prefer({ supervisor_id: row.supervisor_id }), /not_active/);
 });
 
 test('fanout uses one mesh event with independently bound deliveries', async () => {
