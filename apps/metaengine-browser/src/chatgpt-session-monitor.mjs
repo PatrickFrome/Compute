@@ -1,11 +1,8 @@
 import crypto from 'node:crypto';
+import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
 
-export const CHATGPT_SESSION_MONITOR_VERSION = '1.1.0';
+export const CHATGPT_SESSION_MONITOR_VERSION = '1.2.0';
 
-const STOP_RE = /^(stop|stop generating|остановить|остановить создание)$/i;
-const CONTINUE_RE = /^(continue generating|continue|продолжить создание|продолжить)$/i;
-const RETRY_RE = /^(retry|try again|regenerate|regenerate response|создать заново|повторить)$/i;
-const SEND_RE = /^(send|send prompt|отправить|отправить промпт)$/i;
 const CHAT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/(?:c\/[a-z0-9-]+.*)?$/i;
 const PHYSICAL_BROKEN = new Set(['RENDERER_GONE','LOAD_FAILED']);
 
@@ -19,12 +16,11 @@ function median(values) {
   return rows.length % 2 ? rows[mid] : (rows[mid - 1] + rows[mid]) / 2;
 }
 function controls(frame) {
-  const buttons = (frame?.semantic_targets || []).filter((row) => String(row?.role || '').toLowerCase() === 'button').map((row) => String(row?.name || ''));
   return {
-    stop: buttons.filter((name) => STOP_RE.test(name)).length,
-    continue: buttons.filter((name) => CONTINUE_RE.test(name)).length,
-    retry: buttons.filter((name) => RETRY_RE.test(name)).length,
-    send: buttons.filter((name) => SEND_RE.test(name)).length,
+    stop: chatGptControlCount(frame, 'STOP'),
+    continue: chatGptControlCount(frame, 'CONTINUE'),
+    retry: chatGptControlCount(frame, 'RETRY'),
+    send: chatGptControlCount(frame, 'SEND'),
   };
 }
 function frameDigest(frame) {
