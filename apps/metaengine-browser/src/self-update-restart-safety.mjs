@@ -1,8 +1,5 @@
-const BUSY_DOWNLOAD_STATES = new Set(['STARTING', 'DOWNLOADING', 'VERIFYING', 'CANCELLING']);
-
 function downloadsAllowRestart(state) {
-  const value = String(state?.downloads?.state || state?.downloads?.status || 'IDLE').toUpperCase();
-  return !BUSY_DOWNLOAD_STATES.has(value);
+  return state?.downloads?.active == null;
 }
 
 export async function confirmSelfUpdateRestartSafety({ getState } = {}) {
