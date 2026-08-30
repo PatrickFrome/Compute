@@ -255,7 +255,7 @@ async function initFleet() {
     tabExists: (tabId) => views.has(String(tabId)) && !views.get(String(tabId)).webContents.isDestroyed(),
     loadState: loadFleetState,
     saveState: saveFleetState,
-    policy: { profile: 'BALANCED', warm_agents: 2, desired_agents: 6, max_agents: 8 },
+    policy: { profile: 'BALANCED', warm_agents: 2, desired_agents: 6 },
   });
   await fleet.init();
   await fleet.reconcile({ active: false });
@@ -339,7 +339,15 @@ async function handleCommand(command, payload = {}) {
   if (command === 'DEV_PLANE_PROCESS_METRICS') return developmentPlane?.request('PROCESS_METRICS');
   if (command === 'DEV_PLANE_REPO_HEAD') return developmentPlane?.request('REPO_HEAD_READ');
   if (command === 'FLEET_STATUS') return fleet?.snapshot() || null;
-  if (command === 'FLEET_RECONCILE') { const result = await fleet?.reconcile({ active: payload?.active === true }); await publishSnapshot(); return result; }
+  if (command === 'FLEET_RECONCILE') {
+    const result = await fleet?.reconcile({
+      active: payload?.active === true,
+      target_agents: payload?.target_agents ?? null,
+      spawn_burst_limit: payload?.spawn_burst_limit ?? null,
+    });
+    await publishSnapshot();
+    return result;
+  }
   if (command === 'FLEET_SET_PROFILE') { const result = await fleet?.setProfile(payload?.profile); await publishSnapshot(); return result; }
   if (command === 'GATE_STATUS') return ownerSafetyGates?.snapshot() || null;
   if (command === 'GATE_DISABLE') { const result = await ownerSafetyGates?.disable(payload); await publishSnapshot(); return result; }
