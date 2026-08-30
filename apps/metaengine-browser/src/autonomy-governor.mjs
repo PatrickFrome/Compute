@@ -1,9 +1,16 @@
 const IMPLEMENTATION_ROLES = new Set(['ARCHITECT','IMPLEMENTER','TESTER','FIXER']);
 const COMPLEMENTARY_ROLES = new Set(['PLANNER','RESEARCHER','CRITIC','FALSIFIER','SYNTHESIZER','REVIEWER','DIAGNOSTIC']);
+const TERMINAL_TASK_STATES = new Set(['COMPLETED','FAILED','CANCELLED','FENCED']);
 
 function integer(value, fallback, min, max, name) {
   const out = value == null ? fallback : Number(value);
   if (!Number.isSafeInteger(out) || out < min || out > max) throw new Error(`autonomy_${name}_invalid`);
+  return out;
+}
+function optionalBudget(value, name) {
+  if (value == null) return null;
+  const out = Number(value);
+  if (!Number.isSafeInteger(out) || out < 1) throw new Error(`autonomy_${name}_invalid`);
   return out;
 }
 function role(value) {
@@ -26,12 +33,16 @@ function gateSet(value) {
 }
 function gateDisabled(disabled, id) { return disabled.has('*') || disabled.has(id); }
 function activeClaim(row, nowMs) {
-  if (!row || !['ACTIVE','LEASED'].includes(String(row.status || '').toUpperCase())) return false;
+  if (!row || !['ACTIVE','LEASED'].includes(String(row.status || row.state || '').toUpperCase())) return false;
   if (!row.expires_at) return true;
   const expiry = Date.parse(row.expires_at);
   return Number.isFinite(expiry) && expiry > nowMs;
 }
 function isImplementationRole(value) { return IMPLEMENTATION_ROLES.has(role(value)); }
+function taskActive(row) {
+  if (!row || typeof row !== 'object') return false;
+  return !TERMINAL_TASK_STATES.has(String(row.state || row.status || 'READY').toUpperCase());
+}
 
 export class AutonomyGovernor {
   #policy;
@@ -41,10 +52,16 @@ export class AutonomyGovernor {
     if (typeof clock !== 'function') throw new Error('autonomy_clock_invalid');
     this.#clock = clock;
     this.#policy = Object.freeze({
-      max_parallel_agents: integer(policy.max_parallel_agents, 8, 1, 64, 'max_parallel_agents'),
-      max_children_per_agent: integer(policy.max_children_per_agent, 2, 0, 16, 'max_children_per_agent'),
-      max_implementation_claims_per_point: integer(policy.max_implementation_claims_per_point, 1, 1, 8, 'max_implementation_claims_per_point'),
+      max_parallel_agents: null,
+      max_children_per_agent: null,
+      operational_agent_budget: optionalBudget(policy.operational_agent_budget ?? policy.resource_budget_agents, 'operational_agent_budget'),
+      operational_children_budget: optionalBudget(policy.operational_children_budget ?? policy.resource_budget_children, 'operational_children_budget'),
+      legacy_max_parallel_agents_ignored: policy.max_parallel_agents != null,
+      legacy_max_children_per_agent_ignored: policy.max_children_per_agent != null,
+      max_implementation_claims_per_point: integer(policy.max_implementation_claims_per_point, 1, 1, 64, 'max_implementation_claims_per_point'),
       ambiguous_effects_consume_capacity: policy.ambiguous_effects_consume_capacity !== false,
+      capacity_model: 'ELASTIC_BACKLOG_DRIVEN',
+      hard_agent_cap: null,
     });
   }
 
@@ -57,7 +74,7 @@ export class AutonomyGovernor {
     const ambiguousCapacity = this.#policy.ambiguous_effects_consume_capacity && !gateDisabled(disabled, 'autonomy.ambiguous_capacity')
       ? ambiguousAgents.length : 0;
     return Object.freeze({
-      schema: 'metaengine.autonomy-governor.snapshot.v1',
+      schema: 'metaengine.autonomy-governor.snapshot.v2',
       policy: { ...this.#policy },
       active_agents: activeAgents.length,
       ambiguous_agents: ambiguousAgents.length,
@@ -70,16 +87,40 @@ export class AutonomyGovernor {
     });
   }
 
+  deriveTarget({ backlog = [], seed_agents = 6, agents = [], claims = [], disabled_gates = [] } = {}) {
+    const seed = integer(seed_agents, 6, 0, Number.MAX_SAFE_INTEGER, 'seed_agents');
+    const activeTasks = (backlog || []).filter(taskActive);
+    const snap = this.snapshot({ agents, claims, disabled_gates });
+    const rawTarget = Math.max(seed, activeTasks.length, snap.active_claims);
+    const budget = this.#policy.operational_agent_budget;
+    const target = budget == null ? rawTarget : Math.min(rawTarget, budget);
+    return Object.freeze({
+      schema: 'metaengine.autonomy-governor.target.v1',
+      capacity_model: 'ELASTIC_BACKLOG_DRIVEN',
+      seed_agents: seed,
+      backlog_demand: activeTasks.length,
+      active_claims: snap.active_claims,
+      raw_target_agents: rawTarget,
+      target_agents: target,
+      operational_agent_budget: budget,
+      hard_agent_cap: null,
+      budget_limited: budget != null && target < rawTarget,
+      authority_effect: false,
+    });
+  }
+
   evaluateSpawn({ parent_agent_id = null, agents = [], claims = [], disabled_gates = [] } = {}) {
     const disabled = gateSet(disabled_gates);
     const snap = this.snapshot({ agents, claims, disabled_gates });
-    if (!gateDisabled(disabled, 'autonomy.max_fanout') && snap.effective_capacity_used >= this.#policy.max_parallel_agents) {
-      return this.#deny('MAX_PARALLEL_AGENTS', { capacity_used: snap.effective_capacity_used });
+    const agentBudget = this.#policy.operational_agent_budget;
+    if (agentBudget != null && !gateDisabled(disabled, 'autonomy.max_fanout') && snap.effective_capacity_used >= agentBudget) {
+      return this.#deny('OPERATIONAL_AGENT_BUDGET', { capacity_used: snap.effective_capacity_used, operational_agent_budget: agentBudget });
     }
-    if (parent_agent_id && !gateDisabled(disabled, 'autonomy.child_fanout')) {
+    const childBudget = this.#policy.operational_children_budget;
+    if (parent_agent_id && childBudget != null && !gateDisabled(disabled, 'autonomy.child_fanout')) {
       const parent = String(parent_agent_id);
       const children = agents.filter((row) => String(row?.parent_agent_id || '') === parent && !['LOST','RETIRED'].includes(String(row?.lifecycle_state || row?.status || '').toUpperCase())).length;
-      if (children >= this.#policy.max_children_per_agent) return this.#deny('MAX_CHILDREN_PER_AGENT', { children });
+      if (children >= childBudget) return this.#deny('OPERATIONAL_CHILDREN_BUDGET', { children, operational_children_budget: childBudget });
     }
     return this.#allow('SPAWN_ALLOWED');
   }
@@ -119,10 +160,10 @@ export class AutonomyGovernor {
   }
 
   #allow(reason, extra = {}) {
-    return Object.freeze({ schema:'metaengine.autonomy-governor.decision.v1', allowed:true, reason, ...extra, task_content_authority:false, authority_effect:false });
+    return Object.freeze({ schema:'metaengine.autonomy-governor.decision.v2', allowed:true, reason, ...extra, task_content_authority:false, authority_effect:false });
   }
   #deny(reason, extra = {}) {
-    return Object.freeze({ schema:'metaengine.autonomy-governor.decision.v1', allowed:false, reason, ...extra, task_content_authority:false, authority_effect:false });
+    return Object.freeze({ schema:'metaengine.autonomy-governor.decision.v2', allowed:false, reason, ...extra, task_content_authority:false, authority_effect:false });
   }
 }
 
