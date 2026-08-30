@@ -1,0 +1,88 @@
+const freezeRows = (rows) => Object.freeze(rows.map((row) => Object.freeze({ ...row })));
+
+export const BROWSER_CONTROL_PLANE_VERSION = '2.0.0-dev.1';
+
+export const CONTROL_ACTIONS = freezeRows([
+  { action: 'POLL', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'SHELL' },
+  { action: 'CAPTURE', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'CDP_ACCESSIBILITY' },
+  { action: 'CAPTURE_VIEW', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'ELECTRON_CAPTURE' },
+  { action: 'NEW_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS' },
+  { action: 'SELECT_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'SHELL_REGISTRY' },
+  { action: 'CLOSE_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS' },
+  { action: 'NAVIGATE', domain: 'NAVIGATION', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS' },
+  { action: 'BACK', domain: 'NAVIGATION', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS' },
+  { action: 'FORWARD', domain: 'NAVIGATION', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS' },
+  { action: 'RELOAD', domain: 'NAVIGATION', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS' },
+  { action: 'STOP_GENERATION', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_SEMANTIC' },
+  { action: 'SCROLL', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_INPUT' },
+  { action: 'SEMANTIC_FOCUS', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_ACCESSIBILITY' },
+  { action: 'SEMANTIC_TYPE', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_INPUT' },
+  { action: 'TYPED_CLICK', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_INPUT' },
+  { action: 'DOWNLOAD_STATUS', domain: 'DOWNLOADS', effect: 'READ_ONLY', backend: 'ELECTRON_SESSION' },
+  { action: 'DOWNLOAD_FILE', domain: 'DOWNLOADS', effect: 'MUTATING', backend: 'VERIFIED_DOWNLOAD' },
+  { action: 'DOWNLOAD_CANCEL', domain: 'DOWNLOADS', effect: 'MUTATING', backend: 'VERIFIED_DOWNLOAD' },
+  { action: 'DEV_PLANE_STATUS', domain: 'DEVELOPMENT', effect: 'READ_ONLY', backend: 'UTILITY_PROCESS' },
+  { action: 'DEV_PLANE_HEALTH', domain: 'DEVELOPMENT', effect: 'READ_ONLY', backend: 'UTILITY_PROCESS' },
+  { action: 'DEV_PLANE_CAPABILITIES', domain: 'DEVELOPMENT', effect: 'READ_ONLY', backend: 'UTILITY_PROCESS' },
+  { action: 'DEV_PLANE_PROCESS_METRICS', domain: 'DEVELOPMENT', effect: 'READ_ONLY', backend: 'UTILITY_PROCESS' },
+  { action: 'DEV_PLANE_REPO_HEAD', domain: 'DEVELOPMENT', effect: 'READ_ONLY', backend: 'UTILITY_PROCESS' },
+  { action: 'FLEET_RECONCILE', domain: 'FLEET', effect: 'MUTATING', backend: 'FLEET_PROVISIONER' },
+  { action: 'FLEET_SET_PROFILE', domain: 'FLEET', effect: 'MUTATING', backend: 'FLEET_PROVISIONER' },
+  { action: 'SELF_UPDATE_STATUS', domain: 'SELF_UPDATE', effect: 'READ_ONLY', backend: 'TRUSTED_UPDATER' },
+  { action: 'SELF_UPDATE_CHECK', domain: 'SELF_UPDATE', effect: 'MUTATING', backend: 'TRUSTED_UPDATER' },
+  { action: 'SELF_UPDATE_APPLY', domain: 'SELF_UPDATE', effect: 'MUTATING', backend: 'TRUSTED_UPDATER' },
+  { action: 'ARM', domain: 'AUTHORITY', effect: 'MUTATING', backend: 'NATIVE_SUPERVISOR' },
+  { action: 'DISARM', domain: 'AUTHORITY', effect: 'MUTATING', backend: 'NATIVE_SUPERVISOR' },
+  { action: 'SET_SUPERVISOR_MODE', domain: 'AUTHORITY', effect: 'MUTATING', backend: 'NATIVE_SUPERVISOR' },
+]);
+
+export const NEXT_CONTROL_ACTIONS = freezeRows([
+  { action: 'CONTROL_CAPABILITIES', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'CONTROL_PLANE' },
+  { action: 'KEY_PRESS', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_INPUT' },
+  { action: 'POINTER_CLICK', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_INPUT', fence: 'CAPTURED_VIEWPORT_AND_TAB' },
+  { action: 'DRAG', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_INPUT', fence: 'CAPTURED_VIEWPORT_AND_TAB' },
+  { action: 'SET_ZOOM', domain: 'VIEW', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS' },
+  { action: 'DUPLICATE_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'SHELL_REGISTRY' },
+  { action: 'MOVE_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'SHELL_REGISTRY' },
+  { action: 'PIN_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'SHELL_REGISTRY' },
+  { action: 'MUTE_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS' },
+  { action: 'SEARCH_WEB', domain: 'SEARCH', effect: 'MUTATING', backend: 'NAVIGATION_PROVIDER' },
+  { action: 'FIND_IN_PAGE', domain: 'SEARCH', effect: 'READ_ONLY', backend: 'ELECTRON_WEB_CONTENTS' },
+  { action: 'SESSION_STATUS', domain: 'SESSION', effect: 'READ_ONLY', backend: 'ELECTRON_SESSION' },
+  { action: 'SET_SITE_PERMISSION', domain: 'SESSION', effect: 'MUTATING', backend: 'ELECTRON_SESSION', fence: 'ORIGIN_AND_PERMISSION_ALLOWLIST' },
+  { action: 'SET_PROXY', domain: 'SESSION', effect: 'MUTATING', backend: 'ELECTRON_SESSION', fence: 'TYPED_PROXY_SCHEMA' },
+  { action: 'CLEAR_SITE_DATA', domain: 'SESSION', effect: 'MUTATING', backend: 'ELECTRON_SESSION', fence: 'EXACT_ORIGIN' },
+  { action: 'CHATGPT_STATUS', domain: 'CHATGPT', effect: 'READ_ONLY', backend: 'SITE_ADAPTER' },
+  { action: 'CHATGPT_SET_SETTING', domain: 'CHATGPT', effect: 'MUTATING', backend: 'SITE_ADAPTER', fence: 'DISCOVER_THEN_READBACK' },
+  { action: 'CHATGPT_SET_MODE', domain: 'CHATGPT', effect: 'MUTATING', backend: 'SITE_ADAPTER', fence: 'AVAILABLE_OPTION_ONLY' },
+  { action: 'CHATGPT_SEARCH', domain: 'CHATGPT', effect: 'MUTATING', backend: 'SITE_ADAPTER', fence: 'VISIBLE_TOOL_ONLY' },
+  { action: 'CHATGPT_PROJECT_CONFIGURE', domain: 'CHATGPT', effect: 'MUTATING', backend: 'SITE_ADAPTER', fence: 'EXACT_PROJECT_IDENTITY' },
+  { action: 'WEBMCP_LIST', domain: 'PAGE_TOOLS', effect: 'READ_ONLY', backend: 'WEBMCP' },
+  { action: 'WEBMCP_INVOKE', domain: 'PAGE_TOOLS', effect: 'MUTATING', backend: 'WEBMCP', fence: 'DECLARED_TOOL_SCHEMA' },
+]);
+
+export const CONTROL_INVARIANTS = Object.freeze({
+  arbitrary_eval: false,
+  raw_cdp_passthrough: false,
+  os_shell_string_command: false,
+  page_data_authority: false,
+  mutating_actions_require_typed_schema: true,
+  mutating_actions_require_actuation_lease: true,
+  target_tab_identity_required_when_ambiguous: true,
+  semantic_action_preferred_over_coordinate_action: true,
+  coordinate_action_requires_fresh_viewport_fence: true,
+  account_setting_changes_require_readback: true,
+  destructive_account_actions_require_explicit_user_intent: true,
+  secrets_must_not_be_extracted_from_page: true,
+});
+
+export function browserControlCapabilities() {
+  return Object.freeze({
+    schema: 'metaengine.browser-control-capabilities.v2',
+    version: BROWSER_CONTROL_PLANE_VERSION,
+    implemented: CONTROL_ACTIONS.map((row) => ({ ...row })),
+    next: NEXT_CONTROL_ACTIONS.map((row) => ({ ...row })),
+    invariants: { ...CONTROL_INVARIANTS },
+    authority_effect: false,
+  });
+}
