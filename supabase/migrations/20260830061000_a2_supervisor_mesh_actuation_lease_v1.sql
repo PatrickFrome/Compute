@@ -1,6 +1,7 @@
 -- METAENGINE multi-supervisor mesh: additive registry + shared actuation fence.
 -- This migration does not replace the existing native Browser command path.
--- It adds an opt-in mesh issue RPC that serializes mutating commands per Browser client.
+-- It adds a mesh issue RPC and a table-level fence so legacy and mesh callers
+-- cannot create two concurrent mutating commands for one Browser client.
 
 create table if not exists public.compute_fabric_a2_supervisor_mesh_instance_h205f22 (
   workspace_id uuid not null,
@@ -51,6 +52,36 @@ create table if not exists public.compute_fabric_a2_supervisor_actuation_lease_h
   constraint a2_supervisor_actuation_lease_client_ck check (length(target_client_id) between 1 and 160),
   constraint a2_supervisor_actuation_lease_authority_effect_ck check (authority_effect = false)
 );
+
+-- Global compatibility fence: even callers that still use the legacy native issue RPC
+-- cannot bypass the mesh by creating a second in-flight mutating command.
+do $$
+begin
+  if exists (
+    select 1
+      from public.compute_fabric_a2_browser_supervisor_command_h205f22
+     where status in ('PENDING','LEASED')
+       and action not in (
+         'POLL','CAPTURE','CAPTURE_VIEW',
+         'DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD',
+         'DOWNLOAD_STATUS','SELF_UPDATE_STATUS'
+       )
+     group by workspace_id, target_client_id
+    having count(*) > 1
+  ) then
+    raise exception 'supervisor_mesh_existing_concurrent_mutation_requires_resolution';
+  end if;
+end;
+$$;
+
+create unique index if not exists a2_browser_supervisor_one_mutating_inflight_uq
+  on public.compute_fabric_a2_browser_supervisor_command_h205f22(workspace_id, target_client_id)
+  where status in ('PENDING','LEASED')
+    and action not in (
+      'POLL','CAPTURE','CAPTURE_VIEW',
+      'DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD',
+      'DOWNLOAD_STATUS','SELF_UPDATE_STATUS'
+    );
 
 create unique index if not exists a2_supervisor_actuation_one_active_client_uq
   on public.compute_fabric_a2_supervisor_actuation_lease_h205f22(workspace_id, target_client_id)
@@ -279,5 +310,8 @@ revoke all on function public.h205f22_a2_supervisor_mesh_register_v1(text,text,t
 revoke all on function public.h205f22_a2_supervisor_mesh_heartbeat_v1(text,text,text) from public;
 revoke all on function public.h205f22_a2_browser_supervisor_issue_mesh_v1(text,text,text,text,jsonb,integer,text) from public;
 
+comment on index public.a2_browser_supervisor_one_mutating_inflight_uq
+is 'Global one-mutating-command fence per Browser client. Applies to legacy and mesh issue paths; read-only observation remains concurrent.';
+
 comment on function public.h205f22_a2_browser_supervisor_issue_mesh_v1(text,text,text,text,jsonb,integer,text)
-is 'Multi-supervisor Browser command issue wrapper. Read-only commands bypass actuation lease; mutating commands require one shared per-client lease and stable idempotency key. No blind concurrent actuation.';
+is 'Multi-supervisor Browser command issue wrapper. Read-only commands bypass actuation lease; mutating commands require one shared per-client lease and stable idempotency key. Table-level fence also blocks legacy bypass. No blind concurrent actuation.';
