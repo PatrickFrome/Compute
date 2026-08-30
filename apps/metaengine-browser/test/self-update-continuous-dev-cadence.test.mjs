@@ -34,9 +34,9 @@ function runtimeWith({ updater, clock, hintProbe }) {
   });
 }
 
-test('packaged dev runtime rechecks on the permanent one-minute default cadence', async () => {
-  assert.equal(DEFAULT_CONTINUOUS_DEV_UPDATE_INTERVAL_MS, 60 * 1000);
-  assert.equal(DEFAULT_CONTINUOUS_DEV_RESTART_GRACE_MS, 3 * 1000);
+test('packaged dev runtime rechecks on the ten-second fallback cadence', async () => {
+  assert.equal(DEFAULT_CONTINUOUS_DEV_UPDATE_INTERVAL_MS, 10 * 1000);
+  assert.equal(DEFAULT_CONTINUOUS_DEV_RESTART_GRACE_MS, 1 * 1000);
   let now = 1;
   const updater = new FakeUpdater();
   const runtime = runtimeWith({ updater, clock: () => now, hintProbe: async () => null });
@@ -55,8 +55,8 @@ test('packaged dev runtime rechecks on the permanent one-minute default cadence'
   assert.equal(updater.checks, 2);
 });
 
-test('new 15-second hint wakes the exact resolver once, while repeated same hint is deduplicated', async () => {
-  assert.equal(DEFAULT_DEV_UPDATE_HINT_INTERVAL_MS, 15 * 1000);
+test('new two-second hint wakes the exact resolver once, while repeated same hint is deduplicated', async () => {
+  assert.equal(DEFAULT_DEV_UPDATE_HINT_INTERVAL_MS, 2 * 1000);
   let now = 1;
   let hintChecks = 0;
   const updater = new FakeUpdater();
