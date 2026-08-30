@@ -8,6 +8,7 @@ import {
   clearSelfUpdateSessionContinuity,
   loadSelfUpdateSessionContinuity,
   persistSelfUpdateSessionContinuity,
+  restoreSelfUpdateSessionContinuity,
 } from '../src/self-update-session-continuity.mjs';
 
 test('continuity capsule keeps tab topology and lifecycle metadata without chat text or credentials', () => {
@@ -66,4 +67,52 @@ test('invalid/non-https tab entries are not restored from continuity capsule', (
     },
   });
   assert.equal(row.tabs.length, 1);
+});
+
+test('restore deduplicates existing URL, recreates missing generating chat and restores selection with typed actions only', async () => {
+  const row = buildSelfUpdateSessionContinuity({
+    currentVersion: '1.0.0', targetVersion: '1.0.1',
+    tabsSnapshot: {
+      selected_tab_id: 'tab_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      tabs: [
+        { tab_id: 'tab_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', url: 'https://chatgpt.com/c/live', kind: 'CHATGPT', generation_state: 'GENERATING' },
+        { tab_id: 'tab_bbbbbbbb-cccc-dddd-eeee-ffffffffffff', url: 'https://example.com/', kind: 'USER_WEB' },
+      ],
+    },
+  });
+  const actions = [];
+  const result = await restoreSelfUpdateSessionContinuity({
+    row,
+    currentVersion: '1.0.1',
+    getState: async () => ({ tabs: [{ tab_id: 'tab_existing-existing-existing-existing', url: 'https://example.com/' }] }),
+    executeCommand: async (command) => {
+      actions.push(structuredClone(command));
+      if (command.action === 'NEW_TAB') return { tab_id: 'tab_restored-restored-restored-restored', url: command.payload.url };
+      if (command.action === 'SELECT_TAB') return { ok: true, tab_id: command.payload.tab_id };
+      throw new Error(`unexpected:${command.action}`);
+    },
+  });
+  assert.equal(result.state, 'RESTORED');
+  assert.equal(result.restored_tabs, 1);
+  assert.equal(result.had_generating_tabs, true);
+  assert.deepEqual(actions.map((row) => row.action), ['NEW_TAB', 'SELECT_TAB']);
+  assert.equal(actions[0].payload.url, 'https://chatgpt.com/c/live');
+  assert.equal(actions[1].payload.tab_id, 'tab_restored-restored-restored-restored');
+  assert.equal(JSON.stringify(actions).includes('Runtime.evaluate'), false);
+});
+
+test('restore refuses continuity capsule meant for another target version without actuation', async () => {
+  const row = buildSelfUpdateSessionContinuity({
+    currentVersion: '1.0.0', targetVersion: '1.0.2',
+    tabsSnapshot: { tabs: [], selected_tab_id: null },
+  });
+  let acted = false;
+  const result = await restoreSelfUpdateSessionContinuity({
+    row,
+    currentVersion: '1.0.1',
+    getState: async () => ({ tabs: [] }),
+    executeCommand: async () => { acted = true; },
+  });
+  assert.equal(result.state, 'TARGET_VERSION_MISMATCH');
+  assert.equal(acted, false);
 });
