@@ -16,7 +16,6 @@ function sanitizeTab(tab, selectedTabId) {
     prior_tab_id: tabId,
     url,
     kind: clip(tab?.kind || 'USER_WEB', 48),
-    title: clip(tab?.title || '', 240),
     selected: tabId === String(selectedTabId || ''),
     generation_state: ['GENERATING', 'IDLE', 'UNKNOWN'].includes(String(tab?.generation_state || '').toUpperCase())
       ? String(tab.generation_state).toUpperCase()
@@ -67,6 +66,7 @@ export function buildSelfUpdateSessionContinuity({
     tabs,
     lifecycle: sanitizeLifecycle(lifecycleSnapshot),
     persisted_chat_text: false,
+    persisted_tab_titles: false,
     persisted_credentials: false,
     authority_effect: false,
   };
