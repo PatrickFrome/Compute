@@ -27,6 +27,16 @@ test('mutating mesh commands require one shared active Browser-client lease and 
   assert.match(sql, /v_workspace,v_client,v_supervisor,'BROWSER_CLIENT_ACTUATION',v_key,'ACTIVE'/);
 });
 
+test('global command-table fence prevents legacy RPC callers from bypassing mesh serialization', async () => {
+  const sql = await migration();
+  assert.match(sql, /a2_browser_supervisor_one_mutating_inflight_uq/);
+  assert.match(sql, /compute_fabric_a2_browser_supervisor_command_h205f22\(workspace_id, target_client_id\)/);
+  assert.match(sql, /status in \('PENDING','LEASED'\)/);
+  assert.match(sql, /action not in \([\s\S]*'POLL'[\s\S]*'SELF_UPDATE_STATUS'[\s\S]*\)/);
+  assert.match(sql, /supervisor_mesh_existing_concurrent_mutation_requires_resolution/);
+  assert.match(sql, /Global one-mutating-command fence per Browser client/);
+});
+
 test('read-only observation bypasses actuation lease but still identifies the supervisor peer', async () => {
   const sql = await migration();
   for (const action of ['POLL','CAPTURE','CAPTURE_VIEW','DOWNLOAD_STATUS','SELF_UPDATE_STATUS']) {
