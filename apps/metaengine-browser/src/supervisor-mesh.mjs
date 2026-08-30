@@ -266,6 +266,7 @@ export class SupervisorMesh {
     };
     this.#state.events.push(event);
     this.#state.events = this.#state.events.slice(-64);
+    if (target.supervisor_id !== this.#state.coordinator_supervisor_id) this.#state.mesh_epoch += 1;
     this.#state.coordinator_supervisor_id = target.supervisor_id;
     await this.#persist();
     return {
