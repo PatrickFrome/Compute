@@ -14,7 +14,7 @@ test('heartbeat cycle is sole scheduler source and leases exact physical binding
     if(name==='devos_fleet_snapshot_v1')return{active_tasks:[{task_id:taskId,state:'READY',role:'IMPLEMENTER'}],recent_events:[]};
     if(name==='devos_fleet_lease_v1')return{leased:true,task_id:taskId,agent_id:args.p_agent,role:'IMPLEMENTER',tab_id:args.p_tab,target_id:args.p_target,agent_generation_epoch:args.p_epoch,lease_generation:1,base_sha:'724612235eb7ceb4534c13d126425b274d876394',automatic_retry_allowed:false,task_spec:{objective:'x'}};
   };
-  const route=createDevosSupervisorRoutes({rpc,rest:async()=>[],workspaceId});
+  const route=createDevosSupervisorRoutes({rpc,workspaceId});
   const out=await bodyOf(await route({req:{method:'POST'},path:'/v1/devos/cycle',body:{fleet:{agents:[agent]}},clientId:'device'}));
   assert.equal(out.scheduler_source,'NATIVE_SUPERVISOR_HEARTBEAT');
   assert.equal(out.second_scheduler_loop,false);
@@ -24,10 +24,25 @@ test('heartbeat cycle is sole scheduler source and leases exact physical binding
 
 test('mark-running passes all lease fences and proof to DB RPC',async()=>{
   let args;
-  const route=createDevosSupervisorRoutes({workspaceId,rest:async()=>[],rpc:async(name,a)=>{if(name==='devos_fleet_mark_running_v1'){args=a;return{state:'RUNNING'};}}});
+  const route=createDevosSupervisorRoutes({workspaceId,rpc:async(name,a)=>{if(name==='devos_fleet_mark_running_v1'){args=a;return{state:'RUNNING'};}}});
   const r=await route({req:{method:'POST'},path:'/v1/devos/mark-running',clientId:'device',body:{task_id:taskId,agent_id:agent.agent_id,lease_generation:1,tab_id:agent.tab_id,target_id:agent.target_id,agent_generation_epoch:7,proof:{prompt_sha256:'a'.repeat(64),conversation_url_sha256:'b'.repeat(64),effect_state:'PROVEN_GENERATING'}}});
   assert.equal(r.status,200);
   assert.equal(args.p_target,'webcontents:10');
   assert.equal(args.p_epoch,7);
   assert.equal(args.p_generation,1);
+});
+
+test('status readback proves terminal completion from durable event without a second write',async()=>{
+  let snapshotReads=0;
+  const rpc=async(name)=>{
+    assert.equal(name,'devos_fleet_snapshot_v1');
+    snapshotReads+=1;
+    return{active_tasks:[],recent_events:[{task_id:taskId,event_type:'TASK_RESULT_COMPLETED',lease_generation:1,payload:{result_sha256:'c'.repeat(64),error_code:null}}]};
+  };
+  const route=createDevosSupervisorRoutes({rpc,workspaceId});
+  const out=await bodyOf(await route({req:{method:'GET'},path:`/v1/devos/tasks/${taskId}/status`,body:{},clientId:'device'}));
+  assert.equal(snapshotReads,1);
+  assert.equal(out.state,'COMPLETED');
+  assert.equal(out.result_sha256,'c'.repeat(64));
+  assert.equal(out.automatic_retry_allowed,false);
 });
