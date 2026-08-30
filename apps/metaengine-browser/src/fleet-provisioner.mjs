@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-export const FLEET_PROVISIONER_VERSION = '1.1.0';
+export const FLEET_PROVISIONER_VERSION = '1.1.1';
 export const FLEET_STATES = Object.freeze([
   'REGISTERED',
   'PROVISIONING',
@@ -175,12 +175,9 @@ export class FleetProvisioner {
         await this.#provision(agent, { isRecovery: agent.lifecycle_state === 'LOST' });
       }
 
-      while (this.#liveCount() < desired && this.#slotCount() < this.#state.policy.max_agents) {
-        const agent = this.#newRegisteredAgent();
-        this.#state.agents.push(agent);
-        await this.#persist();
-        await this.#provision(agent, { isRecovery: false });
-      }
+      // Unresolved PROVISIONING_AMBIGUOUS agents intentionally occupy capacity.
+      // Never compensate an uncertain createTab effect by spawning replacement agents:
+      // that would turn one ambiguous Browser effect into uncontrolled fleet fan-out.
       return this.snapshot();
     });
   }
