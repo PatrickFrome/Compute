@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { ComputeBridgeClient } from './compute-bridge-client.mjs';
 import { DevelopmentPlane } from './development-plane.mjs';
 import { FleetProvisioner } from './fleet-provisioner.mjs';
+import { OwnerSafetyGateRegistry, bindGlobalOwnerSafetyGateRegistry } from './owner-safety-gate-registry.mjs';
 import { captureSemanticFrame, captureViewThumbnail, executeSemanticCommand } from './native-browser-control.mjs';
 import { NativeSupervisorClient } from './native-supervisor-client.mjs';
 import { SupervisorDeviceIdentity } from './supervisor-device-identity.mjs';
@@ -31,6 +32,7 @@ let shellView = null;
 let userSession = null;
 let downloads = null;
 let fleet = null;
+let ownerSafetyGates = null;
 let developmentPlane = null;
 let nativeSupervisor = null;
 let perceptionCache = { tab_id: null, captured_ms: 0, frame: null, error: null };
@@ -67,6 +69,10 @@ function fleetStatePath() {
   return path.join(app.getPath('userData'), 'metaengine-fleet-state-v1.json');
 }
 
+function ownerSafetyGateStatePath() {
+  return path.join(app.getPath('userData'), 'metaengine-owner-safety-gates-v1.json');
+}
+
 function supervisorIdentityPath() {
   return path.join(app.getPath('userData'), 'metaengine-native-supervisor-device-v1.json');
 }
@@ -88,6 +94,23 @@ async function saveFleetState(state) {
   await fs.rename(temp, target);
 }
 
+async function loadOwnerSafetyGateState() {
+  try {
+    return JSON.parse(await fs.readFile(ownerSafetyGateStatePath(), 'utf8'));
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null;
+    throw error;
+  }
+}
+
+async function saveOwnerSafetyGateState(state) {
+  const target = ownerSafetyGateStatePath();
+  const temp = `${target}.tmp`;
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(temp, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  await fs.rename(temp, target);
+}
+
 function assertShellSender(event) {
   if (!shellView || event.sender.id !== shellView.webContents.id) throw new Error('shell_sender_not_trusted');
 }
@@ -99,6 +122,7 @@ async function shellSnapshot() {
     tabs: registry.snapshot(),
     downloads: downloads?.snapshot() || null,
     fleet: fleet?.snapshot() || null,
+    owner_safety_gates: ownerSafetyGates?.snapshot() || null,
     development_plane: developmentPlane?.snapshot() || null,
     supervisor: nativeSupervisor?.snapshot() || null,
     compute: await bridge.health(),
@@ -213,6 +237,17 @@ async function closeTab(tabId) {
   await publishSnapshot();
 }
 
+async function initOwnerSafetyGates() {
+  if (ownerSafetyGates) return ownerSafetyGates.snapshot();
+  ownerSafetyGates = new OwnerSafetyGateRegistry({
+    loadState: loadOwnerSafetyGateState,
+    saveState: saveOwnerSafetyGateState,
+  });
+  await ownerSafetyGates.init();
+  bindGlobalOwnerSafetyGateRegistry(ownerSafetyGates);
+  return ownerSafetyGates.snapshot();
+}
+
 async function initFleet() {
   fleet = new FleetProvisioner({
     createTab: async ({ url, select, load }) => createTab(url, { select, load }),
@@ -306,6 +341,11 @@ async function handleCommand(command, payload = {}) {
   if (command === 'FLEET_STATUS') return fleet?.snapshot() || null;
   if (command === 'FLEET_RECONCILE') { const result = await fleet?.reconcile({ active: payload?.active === true }); await publishSnapshot(); return result; }
   if (command === 'FLEET_SET_PROFILE') { const result = await fleet?.setProfile(payload?.profile); await publishSnapshot(); return result; }
+  if (command === 'GATE_STATUS') return ownerSafetyGates?.snapshot() || null;
+  if (command === 'GATE_DISABLE') { const result = await ownerSafetyGates?.disable(payload); await publishSnapshot(); return result; }
+  if (command === 'GATE_DISABLE_ALL') { const result = await ownerSafetyGates?.disable({ ...payload, gate_id: '*' }); await publishSnapshot(); return result; }
+  if (command === 'GATE_ENABLE') { const result = await ownerSafetyGates?.enable(payload); await publishSnapshot(); return result; }
+  if (command === 'GATE_ENABLE_ALL') { const result = await ownerSafetyGates?.enableAll(payload); await publishSnapshot(); return result; }
   throw new Error('shell_command_unknown');
 }
 
@@ -366,6 +406,7 @@ async function nativeSupervisorState() {
     downloads: downloads?.snapshot() || null,
     development_plane: developmentPlane?.snapshot() || null,
     fleet: fleet?.snapshot() || null,
+    owner_safety_gates: ownerSafetyGates?.snapshot() || null,
     perception,
   };
 }
@@ -380,7 +421,7 @@ async function executeNativeSupervisorCommand(command) {
     if (requested === 'CONTROL' || requested === 'GATE_SEND') return nativeSupervisor.setControlState({ mode: 'CONTROL' });
     throw new Error('native_operator_mode_invalid');
   }
-  if (['NEW_TAB','SELECT_TAB','CLOSE_TAB','NAVIGATE','BACK','FORWARD','RELOAD','DOWNLOAD_STATUS','DOWNLOAD_FILE','DOWNLOAD_CANCEL','FLEET_RECONCILE','FLEET_SET_PROFILE','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD'].includes(action)) {
+  if (['NEW_TAB','SELECT_TAB','CLOSE_TAB','NAVIGATE','BACK','FORWARD','RELOAD','DOWNLOAD_STATUS','DOWNLOAD_FILE','DOWNLOAD_CANCEL','FLEET_RECONCILE','FLEET_SET_PROFILE','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD','GATE_STATUS','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL'].includes(action)) {
     if (['BACK','FORWARD','RELOAD'].includes(action) && payload?.tab_id) {
       const tab = registry.get(payload.tab_id);
       const view = tab ? views.get(tab.tab_id) : null;
@@ -470,6 +511,7 @@ async function createWindow() {
   windowRef.on('resize', layout);
   windowRef.on('closed', () => { destroyWindowContents(); windowRef = null; });
   await shellView.webContents.loadURL('metaengine://shell/');
+  await initOwnerSafetyGates();
   await createTab('https://chatgpt.com/', { select: true, load: true });
   await initFleet();
   await initDevelopmentPlane().catch((error) => console.error('development-plane-start-failed', error));
