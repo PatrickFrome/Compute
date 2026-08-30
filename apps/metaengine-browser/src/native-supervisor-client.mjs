@@ -2,6 +2,7 @@ import { browserControlCapabilities } from './browser-control-capabilities.mjs';
 import { SUPERVISOR_DEVICE_PROFILE } from './supervisor-device-identity.mjs';
 import { SupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime.mjs';
 import { SelfUpdateRuntime } from './self-update-runtime.mjs';
+import { confirmSelfUpdateRestartSafety } from './self-update-restart-safety.mjs';
 import { persistPreInstallReceipt } from './self-update-handoff.mjs';
 
 export const NATIVE_SUPERVISOR_BASE = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1';
@@ -60,10 +61,18 @@ export class NativeSupervisorClient {
       },
     });
     this.#selfUpdate = new SelfUpdateRuntime({
-      canRestart: async () => this.#supervisorMode === 'CONTROL'
-        && this.#armed === true
-        && this.#currentCommand == null
-        && this.#lifecycle?.isQuiescent() === true,
+      canRestart: async () => {
+        if (this.#supervisorMode !== 'CONTROL' || this.#armed !== true || this.#currentCommand != null) return false;
+        return confirmSelfUpdateRestartSafety({
+          getState: this.#getState,
+          lifecycleSnapshot: () => this.#lifecycle?.snapshot() || null,
+          captureTab: async (tabId) => this.#executeCommand({
+            action: 'CAPTURE',
+            payload: { tab_id: String(tabId) },
+            platform: null,
+          }),
+        });
+      },
       beforeInstall: async (receipt) => {
         const { app } = await import('electron');
         await persistPreInstallReceipt(app, receipt);
