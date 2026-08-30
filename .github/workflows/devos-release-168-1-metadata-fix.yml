@@ -1,0 +1,54 @@
+name: METAENGINE DevOS Release 168.1 Metadata Fix
+
+on:
+  push:
+    branches:
+      - ops/devos-release-168-1
+    paths:
+      - '.github/workflows/devos-release-168-1-metadata-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix-trusted-release-name:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_ID: '379261851'
+      TAG: v0.6.3-dev.168.1
+      SOURCE_SHA: 84a71aaedc49186c24a992f507ca1d3f14767181
+      EXPECTED_INSTALLER_SHA256: d3f26c29c7750386c0100ee251199102f5cee3144da3aee533c20746032eacd8
+    steps:
+      - name: Verify release identity before metadata-only mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" > before.json
+          python3 - <<'PY'
+          import json, os
+          r=json.load(open('before.json','r',encoding='utf-8'))
+          if r.get('tag_name') != os.environ['TAG'] or r.get('target_commitish') != os.environ['SOURCE_SHA']: raise SystemExit('release_identity_invalid')
+          if r.get('draft') is not False or r.get('prerelease') is not True: raise SystemExit('release_boundary_invalid')
+          assets={a.get('name'):a for a in r.get('assets',[])}
+          name='METAENGINE-Browser-Test-Setup-0.6.3-dev.168.1-x64.exe'
+          d=assets.get(name,{}).get('digest')
+          if d and d != f"sha256:{os.environ['EXPECTED_INSTALLER_SHA256']}": raise SystemExit('installer_digest_changed')
+          PY
+      - name: Correct trusted display name only
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" -f name='METAENGINE Browser v0.6.3-dev.168.1' > after.json
+          python3 - <<'PY'
+          import json, os
+          r=json.load(open('after.json','r',encoding='utf-8'))
+          if r.get('name') != 'METAENGINE Browser v0.6.3-dev.168.1': raise SystemExit('release_name_readback_failed')
+          if r.get('tag_name') != os.environ['TAG'] or r.get('target_commitish') != os.environ['SOURCE_SHA']: raise SystemExit('release_identity_drift')
+          if r.get('draft') is not False or r.get('prerelease') is not True: raise SystemExit('release_boundary_drift')
+          assets={a.get('name'):a for a in r.get('assets',[])}
+          d=assets.get('METAENGINE-Browser-Test-Setup-0.6.3-dev.168.1-x64.exe',{}).get('digest')
+          if d and d != f"sha256:{os.environ['EXPECTED_INSTALLER_SHA256']}": raise SystemExit('asset_digest_drift')
+          print('metadata_fix_verified', r['name'], d)
+          PY
