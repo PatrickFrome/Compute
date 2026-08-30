@@ -1,0 +1,8 @@
+{
+  "schema": "metaengine.browser.dev-release-target.v2",
+  "enabled": true,
+  "source_sha": "0000000000000000000000000000000000000000",
+  "reason": "EXAMPLE_ONLY_DO_NOT_PUBLISH",
+  "requested_by": "METAENGINE_SUPERVISOR",
+  "authority_effect": false
+}
