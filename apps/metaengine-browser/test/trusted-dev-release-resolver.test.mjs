@@ -125,10 +125,14 @@ test('strict dev.yml parser requires one installer record and one identical SHA5
   assert.throws(() => parseStrictDevYml(`${r66.devYml}  - url: duplicate.exe\n    sha512: ${sha512}\n    size: 1\n`), /shape_invalid/);
 });
 
-test('resolver returns null without touching tag or assets when no newer same-family candidate exists', async () => {
+test('resolver returns null after verified raw-channel miss plus bounded REST fallback when no newer same-family candidate exists', async () => {
   const r64 = fixture('0.6.3-dev.64.1', '1'.repeat(40));
   const { fetchImpl, calls } = fetchFor({ releases:[r64.release], selected:r64 });
   const result = await resolveTrustedMetaengineDevRelease({ currentVersion:'0.6.3-dev.64.1', fetchImpl });
   assert.equal(result, null);
-  assert.deepEqual(calls, [`${API}/releases?per_page=10`]);
+  assert.equal(calls.length, 2);
+  assert.match(calls[0], /^https:\/\/raw\.githubusercontent\.com\/PatrickFrome\/Compute\/browser-dev-channel\/coordination\/browser-dev-public-channel\.json\?v=\d+$/);
+  assert.equal(calls[1], `${API}/releases?per_page=10`);
+  assert.equal(calls.some((url) => url.includes('/git/ref/tags/')), false);
+  assert.equal(calls.some((url) => url.includes('/releases/download/')), false);
 });
