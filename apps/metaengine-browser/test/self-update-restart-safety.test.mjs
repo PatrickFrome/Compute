@@ -8,7 +8,7 @@ function liveState(overrides = {}) {
       { tab_id: 'supervisor', url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' },
       { tab_id: 'current-user-chat', url: 'https://chatgpt.com/c/bbbbbbbb-cccc-dddd-eeee-ffffffffffff' },
     ],
-    downloads: { state: 'IDLE' },
+    downloads: { active: null },
     network: { tabs: [{ tab_id: 'current-user-chat', inflight_tracked: 4 }] },
     ...overrides,
   };
@@ -32,10 +32,10 @@ test('supervisor wake backlog and active model request are continuity state, not
 });
 
 test('local verified-download mutation still blocks installer handoff', async () => {
-  for (const state of ['STARTING', 'DOWNLOADING', 'VERIFYING', 'CANCELLING']) {
+  for (const activeState of ['ARMED', 'DOWNLOADING']) {
     assert.equal(await confirmSelfUpdateRestartSafety({
-      getState: async () => liveState({ downloads: { state } }),
-    }), false, state);
+      getState: async () => liveState({ downloads: { active: { request_id: 'd1', state: activeState } } }),
+    }), false, activeState);
   }
 });
 
