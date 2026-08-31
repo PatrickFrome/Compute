@@ -1,0 +1,29 @@
+name: C5 Persisted Target Revalidation
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/fleet-target-revalidation.mjs'
+      - 'apps/metaengine-browser/src/fleet-target-local-observer.mjs'
+      - 'apps/metaengine-browser/src/fleet-target-persistence.mjs'
+      - 'apps/metaengine-browser/test/fleet-target-revalidation.test.mjs'
+      - 'apps/metaengine-browser/test/fleet-target-local-observer.test.mjs'
+      - 'apps/metaengine-browser/test/fleet-target-persistence.test.mjs'
+      - '.github/workflows/c5-persisted-target-revalidation.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c5-persisted-target-revalidation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Verify persisted zero-authority target revalidation
+        run: node --test apps/metaengine-browser/test/fleet-target-revalidation.test.mjs apps/metaengine-browser/test/fleet-target-local-observer.test.mjs apps/metaengine-browser/test/fleet-target-persistence.test.mjs
