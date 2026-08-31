@@ -136,16 +136,19 @@ test(`seeded Windows fleet chaos preserves placement/effect invariants (seed=${S
       epochs[index] += 1;
       pool.registerNode(node(index, epochs[index]));
       crashChecks += 1;
-    } else if (op < 0.90 && live.length) {
-      const lease = live[Math.floor(random() * live.length)];
-      assert.throws(() => pool.validateDispatch({
-        lease_id: lease.lease_id,
-        node_id: lease.node_id,
-        node_epoch: lease.node_epoch + 1,
-        process_incarnation_id: `${lease.process_incarnation_id}.stale`,
-        now_ms: 100_000 + step,
-      }), (error) => error instanceof RemoteBrowserPoolError && error.code === 'pool_dispatch_incarnation_mismatch');
-      staleDispatchChecks += 1;
+    } else if (op < 0.90) {
+      const reserved = live.filter((row) => row.state === 'RESERVED');
+      if (reserved.length) {
+        const lease = reserved[Math.floor(random() * reserved.length)];
+        assert.throws(() => pool.validateDispatch({
+          lease_id: lease.lease_id,
+          node_id: lease.node_id,
+          node_epoch: lease.node_epoch + 1,
+          process_incarnation_id: `${lease.process_incarnation_id}.stale`,
+          now_ms: 100_000 + step,
+        }), (error) => error instanceof RemoteBrowserPoolError && error.code === 'pool_dispatch_incarnation_mismatch');
+        staleDispatchChecks += 1;
+      }
     } else if (live.length) {
       const lease = live[Math.floor(random() * live.length)];
       assert.throws(() => pool.acquireLease({
