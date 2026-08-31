@@ -14,10 +14,12 @@ on:
       - 'apps/metaengine-browser/test/workspace-git-hardening.test.mjs'
       - 'apps/metaengine-browser/test/workspace-binding-registry.test.mjs'
       - 'supabase/migrations/20260831152000_a2_workspace_binding_registry_v1.sql'
+      - 'supabase/migrations/20260831184500_devos_fleet_transport_admission_v1.sql'
       - 'apps/metaengine-browser/src/autonomy-governor.mjs'
       - 'apps/metaengine-browser/src/devos-native-task-cycle-core.mjs'
       - 'apps/metaengine-browser/test/devos-native-task-cycle.test.mjs'
       - 'apps/metaengine-browser/test/devos-fleet-transport-proof-runtime.test.mjs'
+      - 'apps/metaengine-browser/test/devos-fleet-transport-admission.test.mjs'
       - 'coordination/devos/META_ORCHESTRATOR_V1.md'
       - '.github/workflows/browser-meta-orchestrator-v1.yml'
   push:
@@ -62,5 +64,7 @@ jobs:
         run: node --test apps/metaengine-browser/test/meta-orchestrator-workspace-admission.test.mjs
       - name: Workspace binding and Git isolation contracts
         run: node --test apps/metaengine-browser/test/workspace-manager.test.mjs apps/metaengine-browser/test/workspace-git-hardening.test.mjs apps/metaengine-browser/test/workspace-binding-registry.test.mjs
+      - name: DevOS transport-gated lease admission
+        run: node --test apps/metaengine-browser/test/devos-fleet-transport-admission.test.mjs
       - name: Existing physical task-cycle regression seam
         run: node --test apps/metaengine-browser/test/devos-native-task-cycle.test.mjs apps/metaengine-browser/test/devos-fleet-transport-proof-runtime.test.mjs
