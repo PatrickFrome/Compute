@@ -155,7 +155,7 @@ jobs:
       - name: Pin chaos candidate version
         working-directory: apps/metaengine-browser
         shell: pwsh
-        run: npm version 0.6.3-dev.20260831133000.1 --no-git-tag-version
+        run: npm version 0.6.3-dev.20260831143000.1 --no-git-tag-version
       - name: Build fresh Windows NSIS candidate
         working-directory: apps/metaengine-browser
         run: npx electron-builder --win nsis --x64 --config electron-builder.test.json --publish never
@@ -169,7 +169,7 @@ jobs:
           $evidence = [ordered]@{
             schema='metaengine.windows-fleet-chaos-build.v2'
             git_sha='${{ github.sha }}'
-            version='0.6.3-dev.20260831133000.1'
+            version='0.6.3-dev.20260831143000.1'
             installer=$exe.Name
             sha256=$hash
             authenticode_status=[string]$sig.Status
