@@ -4,13 +4,15 @@ import { BrowserSentinelHost } from './browser-sentinel.mjs';
 import { BrowserParentProgressLease } from './browser-parent-progress-lease.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PARENT_PROGRESS_HEARTBEAT_MS = 5_000;
 
 export class HostResilienceRuntime {
-  #electron; #onResume; #platform; #blockerId = null; #resumeHandler = null; #sentinel = null; #progressLease = null;
+  #electron; #onResume; #platform; #blockerId = null; #resumeHandler = null; #sentinel = null; #progressLease = null; #progressTimer = null;
   #state = {
     state: 'UNINITIALIZED', open_at_login: false, executable_will_launch_at_login: false,
     prevent_app_suspension: false, sentinel: null, sentinel_worker_healthy: false,
-    parent_progress: null, last_resume_at: null, last_error: null,
+    parent_progress: null, parent_progress_heartbeat_ms: PARENT_PROGRESS_HEARTBEAT_MS,
+    last_resume_at: null, last_error: null,
   };
 
   constructor({ electron = null, onResume = async () => {}, platform = process.platform } = {}) {
@@ -30,6 +32,8 @@ export class HostResilienceRuntime {
       sentinel_worker_healthy: sentinel?.worker_ready === true,
       useful_progress_required: true,
       pid_liveness_alone_sufficient: false,
+      watchdog_scheduler_authority: false,
+      watchdog_task_leasing: false,
       authority_effect: false,
     });
   }
@@ -47,18 +51,16 @@ export class HostResilienceRuntime {
       }
       if (this.#platform === 'win32' && process.env.METAENGINE_DISABLE_CRASH_SENTINEL !== '1' && typeof app.getPath === 'function') {
         const statePath = path.join(app.getPath('userData'), 'metaengine-browser-sentinel-v1.json');
-        this.#sentinel = new BrowserSentinelHost({
-          statePath,
-          workerScript: path.join(__dirname, 'browser-sentinel-worker.cjs'),
-          executable: process.execPath,
-        });
+        this.#sentinel = new BrowserSentinelHost({ statePath, workerScript: path.join(__dirname, 'browser-sentinel-worker.cjs'), executable: process.execPath });
         await this.#sentinel.start({ app });
         await this.#sentinel.waitUntilHealthy(5_000);
-        this.#progressLease = new BrowserParentProgressLease({
-          statePath,
-          getBinding: () => this.#sentinel?.snapshot?.() || null,
-        });
+        this.#progressLease = new BrowserParentProgressLease({ statePath, getBinding: () => this.#sentinel?.snapshot?.() || null });
         await this.#progressLease.mark({ kind: 'HOST_RESILIENCE_STARTED' });
+        this.#state.parent_progress = this.#progressLease.snapshot();
+        this.#progressTimer = setInterval(() => {
+          void this.markProgress({ kind: 'EVENT_LOOP_HEARTBEAT' }).catch(() => {});
+        }, PARENT_PROGRESS_HEARTBEAT_MS);
+        this.#progressTimer.unref?.();
         this.#state.sentinel_worker_healthy = true;
       }
       if (process.env.METAENGINE_ALLOW_SUSPEND !== '1' && powerSaveBlocker) {
@@ -110,10 +112,12 @@ export class HostResilienceRuntime {
       const electron = this.#electron || await import('electron');
       if (this.#resumeHandler && electron.powerMonitor?.removeListener) electron.powerMonitor.removeListener('resume', this.#resumeHandler);
       if (this.#blockerId != null && electron.powerSaveBlocker?.isStarted?.(this.#blockerId)) electron.powerSaveBlocker.stop(this.#blockerId);
+      if (this.#progressTimer) clearInterval(this.#progressTimer);
       await this.#sentinel?.stop?.();
     } catch {}
     this.#blockerId = null;
     this.#resumeHandler = null;
+    this.#progressTimer = null;
     this.#progressLease = null;
     this.#state.prevent_app_suspension = false;
     this.#state.sentinel_worker_healthy = false;
