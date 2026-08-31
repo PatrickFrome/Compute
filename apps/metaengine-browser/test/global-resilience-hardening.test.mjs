@@ -10,7 +10,7 @@ const read = (relativePath) => fs.readFileSync(path.join(repoRoot, relativePath)
 
 const reconcile = read('supabase/migrations/20260831054300_devos_fleet_reconcile_v1.sql');
 const hardening = read('supabase/migrations/20260831123000_browser_global_resilience_hardening_v1.sql');
-const routes = read('apps/metaengine-browser/supabase/a2-browser-native-supervisor-devos-routes.mjs');
+const routes = read('apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-routes.mjs');
 
 test('expired DevOS effects are fenced ambiguous and never automatically requeued', () => {
   assert.match(reconcile, /state\s*=\s*'AMBIGUOUS'/);
