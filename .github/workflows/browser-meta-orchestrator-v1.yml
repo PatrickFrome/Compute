@@ -10,6 +10,8 @@ on:
       - 'apps/metaengine-browser/src/workspace-git-hardening.mjs'
       - 'apps/metaengine-browser/src/fleet-target-local-observer.mjs'
       - 'apps/metaengine-browser/src/bounded-worker-observer.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
+      - 'apps/metaengine-browser/src/main.mjs'
       - 'apps/metaengine-browser/src/devos-native-task-cycle.mjs'
       - 'apps/metaengine-browser/src/devos-native-task-cycle-core.mjs'
       - 'apps/metaengine-browser/test/meta-orchestrator-core.test.mjs'
@@ -18,6 +20,7 @@ on:
       - 'apps/metaengine-browser/test/workspace-git-hardening.test.mjs'
       - 'apps/metaengine-browser/test/workspace-binding-registry.test.mjs'
       - 'apps/metaengine-browser/test/bounded-worker-observer-v2.test.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-bounded-worker-observer-wiring.test.mjs'
       - 'apps/metaengine-browser/test/devos-native-task-cycle.test.mjs'
       - 'apps/metaengine-browser/test/devos-fleet-transport-proof-runtime.test.mjs'
       - 'apps/metaengine-browser/test/devos-fleet-transport-admission.test.mjs'
@@ -64,6 +67,8 @@ jobs:
           node --check apps/metaengine-browser/src/workspace-git-hardening.mjs
           node --check apps/metaengine-browser/src/fleet-target-local-observer.mjs
           node --check apps/metaengine-browser/src/bounded-worker-observer.mjs
+          node --check apps/metaengine-browser/src/native-supervisor-client.mjs
+          node --check apps/metaengine-browser/src/main.mjs
           node --check apps/metaengine-browser/src/devos-native-task-cycle.mjs
           node --check apps/metaengine-browser/src/devos-native-task-cycle-core.mjs
       - name: Meta-Orchestrator fail-closed contract
@@ -75,6 +80,6 @@ jobs:
       - name: DevOS transport-gated lease admission
         run: node --test apps/metaengine-browser/test/devos-fleet-transport-admission.test.mjs
       - name: Bounded worker liveness observation
-        run: node --test apps/metaengine-browser/test/bounded-worker-observer-v2.test.mjs
+        run: node --test apps/metaengine-browser/test/bounded-worker-observer-v2.test.mjs apps/metaengine-browser/test/native-supervisor-bounded-worker-observer-wiring.test.mjs
       - name: Physical task-cycle transport regression seam
         run: node --test apps/metaengine-browser/test/devos-native-task-cycle.test.mjs apps/metaengine-browser/test/devos-fleet-transport-proof-runtime.test.mjs
