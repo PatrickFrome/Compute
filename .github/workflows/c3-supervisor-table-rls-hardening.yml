@@ -1,0 +1,53 @@
+name: C3 Supervisor Table RLS Hardening
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/test/supervisor-table-rls-hardening.test.mjs'
+      - 'apps/metaengine-browser/test/supervisor-table-rls-hardening.smoke.sql'
+      - 'supabase/migrations/20260831005000_h205f22_supervisor_table_rls_hardening_v1.sql'
+      - '.github/workflows/c3-supervisor-table-rls-hardening.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify supervisor storage least-authority contract
+        run: node --test apps/metaengine-browser/test/supervisor-table-rls-hardening.test.mjs
+      - name: Functional PostgreSQL RLS smoke
+        run: psql -f apps/metaengine-browser/test/supervisor-table-rls-hardening.smoke.sql
