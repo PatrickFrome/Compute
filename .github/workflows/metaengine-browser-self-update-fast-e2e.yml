@@ -75,7 +75,20 @@ jobs:
         working-directory: apps/metaengine-browser
         shell: powershell
         run: |
-          $raw = Get-Content ./test/self-update-fast-physical.ps1 -Raw
+          $raw = (Get-Content ./test/self-update-fast-physical.ps1 -Raw) -replace "`r`n", "`n"
+          $oldVersionBlock = @'
+          $buildId = [DateTime]::UtcNow.ToString('yyyyMMddHHmmss')
+          $target = "0.6.3-dev.$buildId.1"
+          $baselineBuild = [Int64](($baseline -split '\.')[3].Replace('dev','').TrimStart('-'))
+          '@
+          $newVersionBlock = @'
+          $baselineBuild = [Int64](($baseline -split '\.')[3].Replace('dev','').TrimStart('-'))
+          $timestampBuild = [Int64]([DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))
+          $buildId = [Math]::Max($timestampBuild, [Math]::Max($baselineBuild + 1, [Int64]20260831143001)).ToString()
+          $target = "0.6.3-dev.$buildId.1"
+          '@
+          $raw = $raw.Replace($oldVersionBlock.Trim(), $newVersionBlock.Trim())
+          if ($raw -notmatch '\[Int64\]20260831143001') { throw 'target_build_floor_patch_missing' }
           $raw = $raw.Replace('target_version_not_monotonic:$buildId:$baselineBuild','target_version_not_monotonic:${buildId}:${baselineBuild}')
           $raw = $raw.Replace('$verified = [bool]($rows | Where-Object { $_.metadata_verified -eq $true -and [string]$_.available_version -eq $target })', '$verified = [bool]($rows | Where-Object { ($_.PSObject.Properties.Name -contains ''metadata_verified'') -and $_.metadata_verified -eq $true -and ($_.PSObject.Properties.Name -contains ''available_version'') -and [string]$_.available_version -eq $target })')
           $raw = $raw.Replace('$feedActive = [bool]($rows | Where-Object { $_.ci_test_feed_active -eq $true })', '$feedActive = [bool]($rows | Where-Object { ($_.PSObject.Properties.Name -contains ''ci_test_feed_active'') -and $_.ci_test_feed_active -eq $true })')
