@@ -15,6 +15,10 @@ import {
   DEFAULT_DEV_UPDATE_HINT_URL,
   probeDevUpdateHint,
 } from './dev-update-hint.mjs';
+import {
+  createBoundedNetworkFetch,
+  DEFAULT_OPTIONAL_NETWORK_DEADLINE_MS,
+} from './bounded-network-fetch.mjs';
 
 export {
   DEFAULT_TRUSTED_UPDATE_CHANNEL,
@@ -22,6 +26,7 @@ export {
   validateCiTestFeedUrl,
   DEFAULT_DEV_UPDATE_HINT_INTERVAL_MS,
   DEFAULT_DEV_UPDATE_HINT_URL,
+  DEFAULT_OPTIONAL_NETWORK_DEADLINE_MS,
 };
 
 // Fast development-loop defaults. Exact trusted release discovery remains the
@@ -51,6 +56,7 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
   #hintProbe;
   #hintFetch;
   #clock;
+  #networkDeadlineMs;
   #lastHintCheck = 0;
   #lastHintCheckAt = null;
   #lastHintVersion = null;
@@ -58,8 +64,15 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
   #lastHintTriggeredVersion = null;
 
   constructor(options = {}) {
+    const rawFetch = options?.fetchImpl ?? globalThis.fetch;
+    const networkDeadlineMs = Math.max(500, Math.min(30_000, Number(options?.networkDeadlineMs) || DEFAULT_OPTIONAL_NETWORK_DEADLINE_MS));
+    const boundedFetch = createBoundedNetworkFetch(rawFetch, {
+      deadlineMs: networkDeadlineMs,
+      label: 'self_update_discovery',
+    });
     const withDevCadence = {
       ...options,
+      fetchImpl: boundedFetch,
       intervalMs: options?.intervalMs ?? DEFAULT_CONTINUOUS_DEV_UPDATE_INTERVAL_MS,
       restartGraceMs: options?.restartGraceMs ?? DEFAULT_CONTINUOUS_DEV_RESTART_GRACE_MS,
     };
@@ -79,7 +92,8 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
     }
     this.#hintIntervalMs = Math.max(1000, Number(options?.hintIntervalMs ?? DEFAULT_DEV_UPDATE_HINT_INTERVAL_MS));
     this.#hintProbe = options?.hintProbe ?? probeDevUpdateHint;
-    this.#hintFetch = options?.fetchImpl ?? globalThis.fetch;
+    this.#hintFetch = boundedFetch;
+    this.#networkDeadlineMs = networkDeadlineMs;
     this.#clock = options?.clock ?? (() => Date.now());
     if (typeof this.#hintProbe !== 'function') throw new Error('self_update_hint_probe_invalid');
   }
@@ -93,6 +107,8 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
       hint_version: this.#lastHintVersion,
       hint_last_error: this.#lastHintError,
       hint_triggered_version: this.#lastHintTriggeredVersion,
+      network_deadline_ms: this.#networkDeadlineMs,
+      network_discovery_bounded: true,
       hint_authority_effect: false,
     };
   }
@@ -115,8 +131,8 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
       this.#lastHintTriggeredVersion = hint.version;
       return true;
     } catch (error) {
-      // Hint failure has zero authority over the updater. The ten-second exact resolver
-      // remains the fallback and no release/feed/install state is mutated here.
+      // Hint failure has zero authority over the updater. Exact release discovery uses
+      // the same bounded network transport; neither path may stall supervisor liveness.
       this.#lastHintError = clipHintError(error);
       return false;
     }
