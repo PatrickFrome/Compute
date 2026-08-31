@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ComputeBridgeClient } from './compute-bridge-client.mjs';
 import { DevelopmentPlane } from './development-plane.mjs';
-import { FleetProvisioner } from './fleet-provisioner.mjs';
+import { createFleetBrowserComposition } from './fleet-browser-composition.mjs';
 import { OwnerSafetyGateRegistry, bindGlobalOwnerSafetyGateRegistry } from './owner-safety-gate-registry.mjs';
 import { captureSemanticFrame, captureViewThumbnail, executeSemanticCommand } from './native-browser-control.mjs';
 import { NativeSupervisorClient } from './native-supervisor-client.mjs';
@@ -249,12 +249,13 @@ async function initOwnerSafetyGates() {
 }
 
 async function initFleet() {
-  fleet = new FleetProvisioner({
+  fleet = createFleetBrowserComposition({
     createTab: async ({ url, select, load }) => createTab(url, { select, load }),
     loadTab,
     tabExists: (tabId) => views.has(String(tabId)) && !views.get(String(tabId)).webContents.isDestroyed(),
     loadState: loadFleetState,
     saveState: saveFleetState,
+    lookupView: (tabId) => views.get(String(tabId)) || null,
     policy: { profile: 'BALANCED', warm_agents: 2, desired_agents: 6, max_agents: 8 },
   });
   await fleet.init();
