@@ -55,7 +55,8 @@ function exactPlanState(planState, authority) {
   }
   if (!HASH_RE.test(String(planState.plan_sha256 || '').toLowerCase())) throw new Error('meta_privileged_plan_digest_invalid');
   if (planState.authority_effect !== false || planState.scheduler_authority !== false
-      || planState.browser_authority !== false || planState.release_authority !== false) {
+      || planState.browser_authority !== false || planState.release_authority !== false
+      || planState.task_content_authority === true) {
     throw new Error('meta_privileged_plan_state_authority_invalid');
   }
   assertZeroAuthorityMetaOutput(plan);
@@ -75,7 +76,26 @@ function safeCapacity(value) {
   });
 }
 
+function exactAuthoritativeInputs(raw, { workspace, roadmapId }) {
+  const bundle = object(raw, 'authoritative_inputs');
+  if (bundle.schema !== 'metaengine.meta-orchestrator.authoritative-inputs.v1') throw new Error('meta_privileged_authoritative_inputs_schema_invalid');
+  if (String(bundle.workspace_id || '').toLowerCase() !== workspace) throw new Error('meta_privileged_authoritative_inputs_workspace_drift');
+  if (String(bundle.roadmap_id || '').toLowerCase() !== roadmapId) throw new Error('meta_privileged_authoritative_inputs_roadmap_drift');
+  if (bundle.task_meta_projection_only !== true || bundle.task_payload_exposed !== false
+      || bundle.result_summary_exposed !== false || bundle.scheduler_identity_exposed !== false
+      || bundle.receipt_summary_exposed !== false || bundle.receipt_evidence_exposed !== false
+      || bundle.automatic_retry_allowed !== false || bundle.task_content_authority !== false
+      || bundle.scheduler_authority !== false || bundle.browser_authority !== false
+      || bundle.release_authority !== false || bundle.authority_effect !== false) {
+    throw new Error('meta_privileged_authoritative_inputs_membrane_invalid');
+  }
+  if (!Array.isArray(bundle.tasks)) throw new Error('meta_privileged_tasks_invalid');
+  if (!Array.isArray(bundle.roadmap_receipts)) throw new Error('meta_privileged_receipts_invalid');
+  return bundle;
+}
+
 export class MetaOrchestratorPrivilegedAdapter {
+  #readAuthoritativeInputs;
   #readRoadmapAuthority;
   #readPlanState;
   #readDevosTasks;
@@ -84,6 +104,7 @@ export class MetaOrchestratorPrivilegedAdapter {
   #activatePlan;
 
   constructor({
+    readAuthoritativeInputs = null,
     readRoadmapAuthority,
     readPlanState,
     readDevosTasks,
@@ -91,21 +112,26 @@ export class MetaOrchestratorPrivilegedAdapter {
     readCapacity,
     activatePlan,
   } = {}) {
-    for (const [name, fn] of Object.entries({
-      readRoadmapAuthority,
-      readPlanState,
-      readDevosTasks,
-      readRoadmapReceipts,
-      readCapacity,
-      activatePlan,
-    })) {
-      if (typeof fn !== 'function') throw new Error(`meta_privileged_${name}_required`);
+    if (typeof activatePlan !== 'function') throw new Error('meta_privileged_activatePlan_required');
+    if (readAuthoritativeInputs != null) {
+      if (typeof readAuthoritativeInputs !== 'function') throw new Error('meta_privileged_readAuthoritativeInputs_required');
+      this.#readAuthoritativeInputs = readAuthoritativeInputs;
+    } else {
+      for (const [name, fn] of Object.entries({
+        readRoadmapAuthority,
+        readPlanState,
+        readDevosTasks,
+        readRoadmapReceipts,
+        readCapacity,
+      })) {
+        if (typeof fn !== 'function') throw new Error(`meta_privileged_${name}_required`);
+      }
+      this.#readRoadmapAuthority = readRoadmapAuthority;
+      this.#readPlanState = readPlanState;
+      this.#readDevosTasks = readDevosTasks;
+      this.#readRoadmapReceipts = readRoadmapReceipts;
+      this.#readCapacity = readCapacity;
     }
-    this.#readRoadmapAuthority = readRoadmapAuthority;
-    this.#readPlanState = readPlanState;
-    this.#readDevosTasks = readDevosTasks;
-    this.#readRoadmapReceipts = readRoadmapReceipts;
-    this.#readCapacity = readCapacity;
     this.#activatePlan = activatePlan;
   }
 
@@ -114,18 +140,38 @@ export class MetaOrchestratorPrivilegedAdapter {
     const roadmapId = String(roadmap_id || '').trim().toLowerCase();
     if (!roadmapId) throw new Error('meta_privileged_roadmap_id_invalid');
 
-    const roadmapAuthorityRaw = await this.#readRoadmapAuthority({ roadmap_id: roadmapId });
+    let roadmapAuthorityRaw;
+    let planState;
+    let tasks;
+    let roadmapReceipts;
+    let capacityRaw;
+
+    if (this.#readAuthoritativeInputs) {
+      const inputs = exactAuthoritativeInputs(await this.#readAuthoritativeInputs({
+        workspace_id: workspace,
+        roadmap_id: roadmapId,
+      }), { workspace, roadmapId });
+      roadmapAuthorityRaw = inputs.roadmap_authority;
+      planState = inputs.plan_state;
+      tasks = inputs.tasks;
+      roadmapReceipts = inputs.roadmap_receipts;
+      capacityRaw = inputs.capacity;
+    } else {
+      roadmapAuthorityRaw = await this.#readRoadmapAuthority({ roadmap_id: roadmapId });
+      planState = await this.#readPlanState({ workspace_id: workspace, roadmap_id: roadmapId });
+    }
+
     const authority = projectMetaRoadmapAuthority(roadmapAuthorityRaw);
     if (authority.roadmap_id !== roadmapId) throw new Error('meta_privileged_roadmap_authority_mismatch');
-
-    const planState = await this.#readPlanState({ workspace_id: workspace, roadmap_id: roadmapId });
     const { plan, generation } = exactPlanState(planState, authority);
 
-    const [tasks, roadmapReceipts, capacityRaw] = await Promise.all([
-      this.#readDevosTasks({ workspace_id: workspace, roadmap_id: roadmapId, plan_generation: generation }),
-      this.#readRoadmapReceipts({ roadmap_id: roadmapId }),
-      this.#readCapacity({ workspace_id: workspace }),
-    ]);
+    if (!this.#readAuthoritativeInputs) {
+      [tasks, roadmapReceipts, capacityRaw] = await Promise.all([
+        this.#readDevosTasks({ workspace_id: workspace, roadmap_id: roadmapId, plan_generation: generation }),
+        this.#readRoadmapReceipts({ roadmap_id: roadmapId }),
+        this.#readCapacity({ workspace_id: workspace }),
+      ]);
+    }
     if (!Array.isArray(tasks)) throw new Error('meta_privileged_tasks_invalid');
     if (!Array.isArray(roadmapReceipts)) throw new Error('meta_privileged_receipts_invalid');
     const capacity = safeCapacity(capacityRaw);
@@ -190,6 +236,7 @@ export class MetaOrchestratorPrivilegedAdapter {
         || String(response.baseline_sha || '').toLowerCase() !== String(plan.baseline_sha || '').toLowerCase()
         || !HASH_RE.test(String(response.plan_sha256 || '').toLowerCase())
         || response.state !== 'ACTIVE'
+        || response.task_content_authority === true
         || response.authority_effect !== false
         || response.scheduler_authority !== false
         || response.browser_authority !== false
@@ -207,6 +254,7 @@ export class MetaOrchestratorPrivilegedAdapter {
       plan_sha256: String(response.plan_sha256).toLowerCase(),
       state: 'ACTIVE',
       automatic_retry_allowed: false,
+      task_content_authority: false,
       scheduler_authority: false,
       browser_authority: false,
       release_authority: false,
