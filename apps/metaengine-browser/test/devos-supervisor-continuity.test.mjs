@@ -98,6 +98,7 @@ test('lifecycle automatically sends the next supervisor development cycle after 
         tab_id,
         state: active ? 'GENERATING' : 'IDLE',
         terminal_ready: !active,
+        generation_epoch: sendCount,
         controls: { continue: 0 },
         progress_age_ms: 0,
         adaptive_hard_ms: 60_000,
