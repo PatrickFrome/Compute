@@ -17,7 +17,10 @@ const lease = {
   task_spec: { objective: 'Prove the local transport before DB RUNNING.' },
 };
 const composer = { role: 'textbox', name: 'Message ChatGPT' };
+const send = { role: 'button', name: 'Send prompt' };
+const stop = { role: 'button', name: 'Stop generating' };
 const conversation = 'https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789abc';
+const supervisorTab = 'tab_supervisor';
 
 function response(status, body) {
   return { status, ok: status >= 200 && status < 300, async json() { return structuredClone(body); } };
@@ -25,6 +28,7 @@ function response(status, body) {
 
 function harness({ postTarget = lease.target_id } = {}) {
   let lifecycle = 'BOUND_UNVERIFIED';
+  let selectedTab = supervisorTab;
   const order = [];
   const snapshot = () => ({
     schema: 'metaengine.browser.fleet-snapshot.v1',
@@ -38,6 +42,14 @@ function harness({ postTarget = lease.target_id } = {}) {
       generation_epoch: lease.agent_generation_epoch,
       transport_proof: lifecycle === 'ACTIVE' ? { schema: 'metaengine.browser.fleet-transport-proof.v1' } : null,
     }],
+  });
+  const state = () => ({
+    fleet: snapshot(),
+    active_tab: { tab_id: selectedTab },
+    tabs: [
+      { tab_id: supervisorTab, selected: selectedTab === supervisorTab },
+      { tab_id: lease.tab_id, selected: selectedTab === lease.tab_id },
+    ],
   });
   const runtime = {
     snapshot,
@@ -64,16 +76,26 @@ function harness({ postTarget = lease.target_id } = {}) {
   let captures = 0;
   const executeCommand = async (command) => {
     if (command.action === 'FLEET_RECONCILE') return snapshot();
-    if (command.action === 'SEMANTIC_TYPE') return { effect_state: 'PROVEN_GENERATING', stop_observed: true };
+    if (command.action === 'SELECT_TAB') {
+      selectedTab = command.payload.tab_id;
+      return { ok: true, tab_id: selectedTab };
+    }
+    if (command.action === 'SEMANTIC_TYPE') {
+      assert.equal(command.payload.submit_after_type, false);
+      return { authority_effect: true };
+    }
+    if (command.action === 'TYPED_CLICK') return { authority_effect: true };
     if (command.action === 'CAPTURE') {
       captures += 1;
+      const post = captures >= 3;
       return {
         schema: 'metaengine.native-browser.perception.v1',
         tab_id: lease.tab_id,
-        target_id: captures === 1 ? lease.target_id : postTarget,
+        target_id: post ? postTarget : lease.target_id,
         process_incarnation_id: 'browser-process-incarnation-001',
-        url: captures === 1 ? 'https://chatgpt.com/' : conversation,
-        semantic_targets: captures === 1 ? [composer] : [composer, { role: 'button', name: 'Stop generating' }],
+        url: post ? conversation : 'https://chatgpt.com/',
+        viewport: { width: 1200, height: 640 },
+        semantic_targets: post ? [composer, stop] : [composer, send],
         authority_effect: false,
       };
     }
@@ -87,36 +109,39 @@ function harness({ postTarget = lease.target_id } = {}) {
     }
     throw new Error(`unexpected_request:${path}`);
   };
-  return { runtime, snapshot, executeCommand, signedRequest, order };
+  return { runtime, snapshot, state, executeCommand, signedRequest, order, selected: () => selectedTab };
 }
 
 test('BOUND_UNVERIFIED native frame is durably proven before DB mark-running', async () => {
   const h = harness();
   registerFleetRuntime(h.runtime);
-  const cycle = new DevOsNativeTaskCycle({ getState: async () => ({ fleet: h.snapshot() }), executeCommand: h.executeCommand, signedRequest: h.signedRequest });
+  const cycle = new DevOsNativeTaskCycle({ getState: h.state, executeCommand: h.executeCommand, signedRequest: h.signedRequest });
   const out = await cycle.cycle();
   assert.equal(out.dispatch.state, 'RUNNING');
   assert.deepEqual(h.order, ['fleet-proof', 'db-running']);
   assert.equal(h.snapshot().agents[0].lifecycle_state, 'ACTIVE');
   assert.equal(out.fleet_transport_proof.state, 'PROVEN');
   assert.equal(out.fleet_transport_proof_before_db_running, true);
+  assert.equal(h.selected(), supervisorTab);
   clearFleetRuntime(h.runtime);
 });
 
 test('post-capture target replacement fails closed before fleet proof and DB running', async () => {
   const h = harness({ postTarget: 'webcontents:11' });
   registerFleetRuntime(h.runtime);
-  const cycle = new DevOsNativeTaskCycle({ getState: async () => ({ fleet: h.snapshot() }), executeCommand: h.executeCommand, signedRequest: h.signedRequest });
+  const cycle = new DevOsNativeTaskCycle({ getState: h.state, executeCommand: h.executeCommand, signedRequest: h.signedRequest });
   await assert.rejects(cycle.cycle(), /fleet_runtime_frame_target_mismatch/);
   assert.deepEqual(h.order, []);
   assert.equal(h.snapshot().agents[0].lifecycle_state, 'BOUND_UNVERIFIED');
+  assert.equal(h.selected(), supervisorTab);
   clearFleetRuntime(h.runtime);
 });
 
 test('BOUND_UNVERIFIED dispatch cannot claim DB running without registered local fleet runtime', async () => {
   const h = harness();
   clearFleetRuntime();
-  const cycle = new DevOsNativeTaskCycle({ getState: async () => ({ fleet: h.snapshot() }), executeCommand: h.executeCommand, signedRequest: h.signedRequest });
+  const cycle = new DevOsNativeTaskCycle({ getState: h.state, executeCommand: h.executeCommand, signedRequest: h.signedRequest });
   await assert.rejects(cycle.cycle(), /devos_fleet_runtime_transport_proof_unavailable/);
   assert.deepEqual(h.order, []);
+  assert.equal(h.selected(), supervisorTab);
 });

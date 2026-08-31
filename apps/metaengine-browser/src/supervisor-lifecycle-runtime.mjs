@@ -4,6 +4,7 @@ import { ChatGptSessionMonitor } from './chatgpt-session-monitor.mjs';
 import { chatGptControlMatches, uniqueChatGptControl } from './chatgpt-ui-controls.mjs';
 import { classifyRetryDecision, REQUEST_EFFECT_CLASS } from './chatgpt-retry-policy.mjs';
 import { SupervisorKeepalive, buildSupervisorRolloverMessage, buildSupervisorWakeMessage } from './supervisor-keepalive.mjs';
+import { evaluateActiveWakeTerminalRetirement } from './supervisor-terminal-retirement.mjs';
 
 const CHAT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/c\/[a-z0-9-]+/i;
 const LIMIT_RE = /(maximum conversation length|conversation is too long|start a new chat|диалог.{0,20}слишком длин|начните новый чат)/i;
@@ -103,6 +104,7 @@ export class SupervisorLifecycleRuntime {
         restart_resumable: true,
         orphaned_stall_stop_only: true,
         ambiguous_terminal_retirement: true,
+        active_wake_terminal_retirement: 'EXACT_WAKE_TAB_GENERATION_V1',
         ambiguous_same_wake_retry: false,
         authority_effect: false,
       },
@@ -196,10 +198,31 @@ export class SupervisorLifecycleRuntime {
       };
     }
 
-    if (this.#activeRequest && row.terminal_ready === true && previous !== 'IDLE') {
+    const activeRetirement = this.#activeRequest ? evaluateActiveWakeTerminalRetirement({
+      active_request: this.#activeRequest,
+      active_wake: keepalive.active_wake,
+      terminal_row: row,
+      previous_state: previous,
+      observed_tab_id: tab.tab_id,
+      keepalive_tab_id: this.#keepalive.snapshot().tab_id,
+    }) : null;
+    if (activeRetirement?.retire === true) {
+      const request = this.#activeRequest;
       await this.#keepalive.markCycleComplete();
       this.#activeRequest = null;
-      this.#lastRecovery = null;
+      this.#lastRecovery = {
+        action: 'ACTIVE_WAKE_RETIRED_AFTER_TERMINAL',
+        reason: activeRetirement.reason,
+        wake_id: activeRetirement.wake_id,
+        prior_request_tab_id: request?.tab_id || null,
+        tab_id: String(tab.tab_id),
+        generation_epoch: row.generation_epoch,
+        confirmed: true,
+        ambiguous: false,
+        automatic_retry_allowed: false,
+        at: new Date().toISOString(),
+        authority_effect: false,
+      };
     } else if (row.terminal_ready === true && this.#lastRecovery?.action === 'STOP_ORPHANED_GENERATION') {
       this.#lastRecovery = {
         ...this.#lastRecovery,
