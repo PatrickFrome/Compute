@@ -1,0 +1,26 @@
+name: C5 Local Target Observer
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/fleet-target-revalidation.mjs'
+      - 'apps/metaengine-browser/src/fleet-target-local-observer.mjs'
+      - 'apps/metaengine-browser/test/fleet-target-local-observer.test.mjs'
+      - '.github/workflows/c5-local-target-observer.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c5-local-target-observer-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Verify Browser-local target trust boundary
+        run: node --test apps/metaengine-browser/test/fleet-target-revalidation.test.mjs apps/metaengine-browser/test/fleet-target-local-observer.test.mjs
