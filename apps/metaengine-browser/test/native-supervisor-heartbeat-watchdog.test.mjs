@@ -14,6 +14,19 @@ test('watchdog is silent while the primary supervisor heartbeat is fresh', () =>
   assert.equal(DEFAULT_SUPERVISOR_WATCHDOG_STALE_MS, 5000);
 });
 
+test('successful watchdog heartbeat suppresses repeat pulses while the primary cycle remains stale', () => {
+  const now = Date.parse('2026-08-31T10:00:00.000Z');
+  const primary = { last_heartbeat_at: '2026-08-31T09:59:50.000Z' };
+  assert.equal(supervisorHeartbeatIsStale(primary, {
+    nowMs: now,
+    watchdogLastAt: '2026-08-31T09:59:58.000Z',
+  }), false);
+  assert.equal(supervisorHeartbeatIsStale(primary, {
+    nowMs: now,
+    watchdogLastAt: '2026-08-31T09:59:54.000Z',
+  }), true);
+});
+
 test('watchdog state carries lifecycle mesh projection and self-update instead of clobbering them null', () => {
   const payload = buildSupervisorWatchdogHeartbeatPayload({
     version: '0.6.3-dev.20260831150000.1',
