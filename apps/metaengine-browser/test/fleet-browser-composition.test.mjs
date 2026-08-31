@@ -44,7 +44,7 @@ test('valid exact ACTIVE lease gates Browser-local proof derivation', async () =
   assert.equal(agent.lifecycle_state, 'ACTIVE'); assert.equal(agent.transport_proof.tab_id, 'tab_1'); assert.equal(agent.transport_proof.target_id, 'webcontents:101'); assert.equal(agent.transport_proof.generation_epoch, 7); assert.equal(agent.automatic_retry_allowed, false);
 });
 
-test('invalid lease dimensions fail closed before transport promotion', async () => {
+test('invalid lease dimensions fail closed before transport promotion without an extra persistence write', async () => {
   const mutations = [
     () => ({ valid: false, reason: 'expired', authority_effect: false }),
     (r) => ({ ...validDecision(r), status: 'RELEASED' }),
@@ -55,11 +55,14 @@ test('invalid lease dimensions fail closed before transport promotion', async ()
     (r) => ({ ...validDecision(r), effect_key: 'fleet.transport-promotion:agent_other' }),
     (r) => ({ ...validDecision(r), holder_verified: false }),
     (r) => ({ ...validDecision(r), target_verified: false }),
+    (r) => ({ ...validDecision(r), authority_effect: true }),
   ];
   for (const leaseDecision of mutations) {
     const { composition, saved } = fixture({ leaseDecision }); await composition.init();
+    const baselineWrites = saved.length;
     await assert.rejects(composition.promoteAgentFromSupervisor({ agent_id: AGENT_ID, lease_id: LEASE_ID }), /fleet_supervisor_lease_/);
-    assert.equal(composition.snapshot().agents[0].lifecycle_state, 'BOUND_UNVERIFIED'); assert.equal(saved.length, 0);
+    assert.equal(composition.snapshot().agents[0].lifecycle_state, 'BOUND_UNVERIFIED');
+    assert.equal(saved.length, baselineWrites);
   }
 });
 
