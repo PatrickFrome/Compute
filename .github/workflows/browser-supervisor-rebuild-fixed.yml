@@ -1,0 +1,107 @@
+name: METAENGINE Browser Supervisor Rebuild Fixed
+
+on:
+  push:
+    branches: [work/browser-supervisor-rebuild-fixed-v1]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Install Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Run exact Browser contract suite
+        working-directory: apps/metaengine-browser
+        run: |
+          npm run check
+          npm test
+      - name: Check tracked Edge/DB convergence contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          edge=Path('apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts').read_text()
+          routes=Path('apps/metaengine-browser/supabase/a2-browser-native-supervisor-devos-routes.mjs').read_text()
+          migration=Path('supabase/migrations/20260831054300_devos_fleet_reconcile_v1.sql').read_text()
+          assert 'authenticateDevice' in edge
+          assert edge.index('authenticateDevice') < edge.index('devosRoutes({req,path,body,clientId:identity.id})')
+          assert "devos_fleet_reconcile_v1" in routes
+          assert routes.index("devos_fleet_reconcile_v1") < routes.index("devos_fleet_snapshot_v1")
+          assert "state = 'AMBIGUOUS'" in migration
+          assert "automatic_retry_allowed',false" in migration
+          assert "state = 'READY'" not in migration
+          PY
+
+  windows-rebuild:
+    needs: contracts
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Install Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Pin rebuild version
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        run: npm version 0.6.3-dev.20260831054300.1 --no-git-tag-version
+      - name: Re-run contracts on Windows
+        working-directory: apps/metaengine-browser
+        run: |
+          npm run check
+          npm test
+      - name: Build fresh NSIS Browser
+        working-directory: apps/metaengine-browser
+        run: npx electron-builder --win nsis --x64 --config electron-builder.test.json --publish never
+      - name: Record SHA-256 and Authenticode trust separately
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem 'apps/metaengine-browser/dist-test/*.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'installer_missing' }
+          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $sig = Get-AuthenticodeSignature $exe.FullName
+          $trusted = ($sig.Status -eq 'Valid' -and $null -ne $sig.SignerCertificate)
+          $evidence = [ordered]@{
+            schema='metaengine.browser.rebuild-evidence.v1'
+            git_sha='${{ github.sha }}'
+            version='0.6.3-dev.20260831054300.1'
+            installer=$exe.Name
+            sha256=$hash
+            authenticode_status=[string]$sig.Status
+            signer_subject=if($sig.SignerCertificate){$sig.SignerCertificate.Subject}else{$null}
+            trusted_publisher=$trusted
+            release_provenance='GITHUB_ACTIONS_EXACT_HEAD'
+            production_promotion_allowed=$trusted
+            unsigned_dev_bootstrap_allowed=$true
+            authority_effect=$false
+          }
+          $evidence | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 'browser-rebuild-evidence.json'
+          Get-Content 'browser-rebuild-evidence.json'
+      - name: Upload exact rebuilt Browser and evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-supervisor-rebuild-fixed-${{ github.sha }}
+          path: |
+            apps/metaengine-browser/dist-test/*.exe
+            apps/metaengine-browser/dist-test/*.blockmap
+            browser-rebuild-evidence.json
+          if-no-files-found: error
+          retention-days: 30
