@@ -38,13 +38,18 @@ export class MetaOrchestratorCycleStage{
     let reconcile;
     try{
       reconcile=await this.#adapter.reconcile({workspace_id:this.#workspaceId,roadmap_id:this.#roadmapId,leader,policy,worker_observer});
-      assertZeroAuthorityMetaOutput(reconcile);
     }catch(error){
       this.#nextProviderProbeCycle=this.#cycleSeq+this.#providerBackoffCycles;
       return this.#record({state:'PROVIDER_NOT_READY',provider_probe:true,next_provider_probe_cycle:this.#nextProviderProbeCycle,provider_error_code:classifyProviderError(error)});
     }
 
     this.#nextProviderProbeCycle=this.#cycleSeq+1;
+    try{
+      assertZeroAuthorityMetaOutput(reconcile);
+    }catch{
+      return this.#record({state:'RECONCILE_FENCED',provider_probe:true,next_provider_probe_cycle:this.#nextProviderProbeCycle});
+    }
+
     const proposals=[];
     try{
       for(const action of Array.isArray(reconcile.actions)?reconcile.actions:[]){
