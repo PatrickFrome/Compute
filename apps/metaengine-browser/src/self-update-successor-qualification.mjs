@@ -4,6 +4,7 @@ import { quarantineSelfUpdateTransaction, readSelfUpdateTransaction } from './se
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const HARD_CONTINUITY_FAILURES = new Set(['PARTIAL', 'ERROR', 'TARGET_VERSION_MISMATCH']);
+const MAX_SENTINEL_HEARTBEAT_AGE_MS = 8_000;
 let acceptedHeartbeatHealth = null;
 
 function normalized(value) {
@@ -44,7 +45,16 @@ export async function recordAcceptedSignedSupervisorHeartbeat({ app, state, acce
     return { state: 'HEARTBEAT_UPDATER_UNHEALTHY', authority_effect: false };
   }
   const resilience = updater.host_resilience;
-  if (normalized(resilience?.state) !== 'ACTIVE' || normalized(resilience?.sentinel?.lifecycle) !== 'ARMED') {
+  const sentinel = resilience?.sentinel;
+  const sentinelHeartbeatAge = Number(sentinel?.worker_heartbeat_age_ms);
+  const sentinelHealthy = normalized(resilience?.state) === 'ACTIVE'
+    && resilience?.sentinel_worker_healthy === true
+    && normalized(sentinel?.lifecycle) === 'ARMED'
+    && sentinel?.worker_ready === true
+    && Number.isFinite(sentinelHeartbeatAge)
+    && sentinelHeartbeatAge >= 0
+    && sentinelHeartbeatAge <= MAX_SENTINEL_HEARTBEAT_AGE_MS;
+  if (!sentinelHealthy) {
     acceptedHeartbeatHealth = null;
     return { state: 'HEARTBEAT_RESILIENCE_NOT_READY', authority_effect: false };
   }
@@ -57,6 +67,8 @@ export async function recordAcceptedSignedSupervisorHeartbeat({ app, state, acce
     self_update_runtime_healthy: true,
     host_resilience_active: true,
     sentinel_armed: true,
+    sentinel_worker_healthy: true,
+    sentinel_worker_heartbeat_age_ms: sentinelHeartbeatAge,
     authority_effect: false,
   });
   return { state: 'HEARTBEAT_HEALTHY', ...acceptedHeartbeatHealth };
@@ -122,6 +134,8 @@ export async function probeUpdatedSuccessorQualification({
     self_update_runtime_healthy: true,
     host_resilience_active: true,
     sentinel_armed: true,
+    sentinel_worker_healthy: true,
+    sentinel_worker_heartbeat_age_ms: heartbeat.sentinel_worker_heartbeat_age_ms,
     heartbeat_age_ms: heartbeatAge,
   });
   acceptedHeartbeatHealth = null;
