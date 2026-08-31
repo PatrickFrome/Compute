@@ -19,9 +19,16 @@ function frame({ url = 'https://chatgpt.com/', stop = false } = {}) {
   };
 }
 
-function harness({ submitEffect = 'PROVEN_GENERATING', postFrame = frame({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', stop: true }), liveWebContentsId = 77 } = {}) {
+function harness({
+  submitEffect = 'PROVEN_GENERATING',
+  postFrame = frame({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', stop: true }),
+  liveWebContentsId = 77,
+  replacementOnSecondLookup = null,
+} = {}) {
   const calls = [];
   let marked = null;
+  let fenced = null;
+  let lookupCount = 0;
   const fleet = {
     snapshot: () => ({
       agents: [{
@@ -33,6 +40,11 @@ function harness({ submitEffect = 'PROVEN_GENERATING', postFrame = frame({ url: 
         target_id: TARGET_ID,
       }],
     }),
+    onTabClosed: async (tabId, reason) => {
+      fenced = { tab_id: tabId, reason };
+      calls.push(['fence', tabId, reason]);
+      return { ok: true };
+    },
     markTransportProven: async (value) => {
       marked = structuredClone(value);
       return { ok: true };
@@ -43,9 +55,16 @@ function harness({ submitEffect = 'PROVEN_GENERATING', postFrame = frame({ url: 
     calls,
     fleet,
     getMarked: () => marked,
+    getFenced: () => fenced,
     deps: {
       fleet,
-      getView: () => ({ webContents: { id: liveWebContentsId, isDestroyed: () => false } }),
+      getView: () => {
+        lookupCount += 1;
+        const id = replacementOnSecondLookup != null && lookupCount >= 2
+          ? replacementOnSecondLookup
+          : liveWebContentsId;
+        return { webContents: { id, isDestroyed: () => false } };
+      },
       publishSnapshot: async () => { calls.push(['publish']); },
       captureSemanticFrame: async () => {
         captureCount += 1;
@@ -100,6 +119,7 @@ test('fleet dispatcher uses one geometry-independent submit and promotes exact b
   assert.equal(result.automatic_retry_allowed, false);
   assert.equal(result.prompt_sha256, crypto.createHash('sha256').update(payload().prompt).digest('hex'));
   assert.equal(JSON.stringify(result).includes(payload().prompt), false);
+  assert.equal(h.getFenced(), null);
   assert.deepEqual(h.getMarked(), {
     agent_id: AGENT_ID,
     tab_id: TAB_ID,
@@ -127,7 +147,7 @@ test('ambiguous Enter result never promotes and never retries', async () => {
   assert.equal(h.calls.filter(([kind]) => kind === 'execute').length, 1);
 });
 
-test('physical webContents incarnation mismatch fails before any actuation', async () => {
+test('physical webContents incarnation mismatch persistently fences before any actuation', async () => {
   const h = harness({ liveWebContentsId: 999 });
   await assert.rejects(
     () => dispatchFleetTask({ payload: payload(), ...h.deps }),
@@ -135,4 +155,23 @@ test('physical webContents incarnation mismatch fails before any actuation', asy
   );
   assert.equal(h.calls.filter(([kind]) => kind === 'execute').length, 0);
   assert.equal(h.getMarked(), null);
+  assert.deepEqual(h.getFenced(), {
+    tab_id: TAB_ID,
+    reason: 'DISPATCH_TARGET_INCARCATION_MISMATCH_PRE_CAPTURE',
+  });
+});
+
+test('target replacement between capture and effect persistently fences and aborts', async () => {
+  const h = harness({ replacementOnSecondLookup: 88 });
+  await assert.rejects(
+    () => dispatchFleetTask({ payload: payload(), ...h.deps }),
+    /fleet_task_target_incarnation_mismatch/,
+  );
+  assert.equal(h.calls.filter(([kind]) => kind === 'capture').length, 1);
+  assert.equal(h.calls.filter(([kind]) => kind === 'execute').length, 0);
+  assert.equal(h.getMarked(), null);
+  assert.deepEqual(h.getFenced(), {
+    tab_id: TAB_ID,
+    reason: 'DISPATCH_TARGET_INCARCATION_MISMATCH_PRE_EFFECT',
+  });
 });
