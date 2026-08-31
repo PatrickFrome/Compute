@@ -1,0 +1,29 @@
+name: C5 Revalidation Transport Proof E2E
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/fleet-provisioner.mjs'
+      - 'apps/metaengine-browser/src/fleet-target-revalidation.mjs'
+      - 'apps/metaengine-browser/src/fleet-target-local-observer.mjs'
+      - 'apps/metaengine-browser/src/fleet-target-persistence.mjs'
+      - 'apps/metaengine-browser/src/fleet-state-target-revalidation.mjs'
+      - 'apps/metaengine-browser/test/fleet-revalidation-transport-proof-e2e.test.mjs'
+      - '.github/workflows/c5-revalidation-transport-proof-e2e.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c5-revalidation-transport-proof-e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Verify fresh local revalidation precedes fresh transport proof
+        run: node --test apps/metaengine-browser/test/fleet-revalidation-transport-proof-e2e.test.mjs apps/metaengine-browser/test/fleet-provisioner-target-revalidation.test.mjs apps/metaengine-browser/test/fleet-transport-proof-restart-fence.test.mjs apps/metaengine-browser/test/fleet-provisioner.test.mjs
