@@ -120,7 +120,13 @@ begin
     v_result := public.devos_fleet_reconcile_v1(v_workspace);
     v_workspaces := v_workspaces + 1;
     v_tasks := v_tasks + coalesce((v_result->>'expired_tasks_fenced_ambiguous')::integer,0);
-    v_claims := v_claims + coalesce((v_result->>'expired_or_orphan_claims_closed')::integer,0);
+    -- Hardened reconcile v1 returns `expired_claims`; retain fallback compatibility
+    -- with the earlier branch-local field name without losing watchdog telemetry.
+    v_claims := v_claims + coalesce(
+      (v_result->>'expired_claims')::integer,
+      (v_result->>'expired_or_orphan_claims_closed')::integer,
+      0
+    );
   end loop;
 
   return jsonb_build_object(
