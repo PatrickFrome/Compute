@@ -36,6 +36,21 @@ function exactComposer(frame) {
   return rows.length === 1 ? structuredClone(rows[0]) : null;
 }
 
+async function requireLiveBoundView({ fleet, getView, tabId, targetId, unavailableReason, mismatchReason }) {
+  const view = getView(tabId);
+  const webContents = view?.webContents;
+  if (!webContents || typeof webContents.isDestroyed !== 'function' || webContents.isDestroyed()) {
+    await fleet.onTabClosed(tabId, unavailableReason);
+    throw new Error('fleet_task_target_view_unavailable');
+  }
+  const liveTargetId = `webcontents:${String(webContents.id)}`.toLowerCase();
+  if (liveTargetId !== targetId) {
+    await fleet.onTabClosed(tabId, mismatchReason);
+    throw new Error('fleet_task_target_incarnation_mismatch');
+  }
+  return view;
+}
+
 export async function dispatchFleetTask({
   payload,
   fleet,
@@ -44,7 +59,7 @@ export async function dispatchFleetTask({
   captureSemanticFrame,
   executeSemanticCommand,
 } = {}) {
-  if (!fleet || typeof getView !== 'function') throw new Error('fleet_task_runtime_dependencies_invalid');
+  if (!fleet || typeof fleet.onTabClosed !== 'function' || typeof getView !== 'function') throw new Error('fleet_task_runtime_dependencies_invalid');
   if (typeof captureSemanticFrame !== 'function' || typeof executeSemanticCommand !== 'function') throw new Error('fleet_task_control_dependencies_invalid');
   const task = normalizePayload(payload);
   const agent = fleet.snapshot().agents.find((row) => row.agent_id === task.agent_id);
@@ -54,15 +69,32 @@ export async function dispatchFleetTask({
   const tabId = String(agent.tab_id || '');
   const targetId = String(agent.target_id || '').toLowerCase();
   if (!tabId || !targetId) throw new Error('fleet_task_physical_binding_missing');
-  const view = getView(tabId);
-  if (!view || view.webContents?.isDestroyed?.()) throw new Error('fleet_task_target_view_unavailable');
-  const liveTargetId = `webcontents:${String(view.webContents.id)}`.toLowerCase();
-  if (liveTargetId !== targetId) throw new Error('fleet_task_target_incarnation_mismatch');
+
+  let view = await requireLiveBoundView({
+    fleet,
+    getView,
+    tabId,
+    targetId,
+    unavailableReason: 'DISPATCH_TARGET_UNAVAILABLE_PRE_CAPTURE',
+    mismatchReason: 'DISPATCH_TARGET_INCARCATION_MISMATCH_PRE_CAPTURE',
+  });
 
   const pre = await captureSemanticFrame(view.webContents);
   if (chatGptControlCount(pre, 'STOP') > 0) throw new Error('fleet_task_agent_busy_generating');
   const composer = exactComposer(pre);
   if (!composer) throw new Error('fleet_task_composer_not_unique');
+
+  // Re-read the physical tab immediately before the only effect. Capture/model/page data
+  // never authorizes this binding. A replaced WebContents persistently fences the agent,
+  // increments its generation through FleetProvisioner.onTabClosed(), and aborts dispatch.
+  view = await requireLiveBoundView({
+    fleet,
+    getView,
+    tabId,
+    targetId,
+    unavailableReason: 'DISPATCH_TARGET_UNAVAILABLE_PRE_EFFECT',
+    mismatchReason: 'DISPATCH_TARGET_INCARCATION_MISMATCH_PRE_EFFECT',
+  });
 
   let submit = null;
   let post = null;
