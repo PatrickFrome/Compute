@@ -41,6 +41,7 @@ on:
       - 'supabase/migrations/20260831193000_meta_orchestrator_plan_state_v1.sql'
       - 'supabase/migrations/20260831200500_meta_orchestrator_authoritative_inputs_v1.sql'
       - 'supabase/migrations/20260831204000_devos_fleet_scheduler_capacity_snapshot_v1.sql'
+      - 'supabase/migrations/20260901001500_meta_orchestrator_task_admission_v1.sql'
       - 'apps/metaengine-browser/src/autonomy-governor.mjs'
       - 'coordination/devos/META_ORCHESTRATOR_V1.md'
       - '.github/workflows/browser-meta-orchestrator-v1.yml'
