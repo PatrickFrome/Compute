@@ -1,7 +1,8 @@
-export const FLEET_TRANSPORT_LOCAL_OBSERVER_VERSION = '1.0.0';
+export const FLEET_TRANSPORT_LOCAL_OBSERVER_VERSION = '1.1.0';
 export const FLEET_TRANSPORT_LOCAL_SOURCE = 'METAENGINE_BROWSER_LOCAL_WEBCONTENTS';
 
 const trustedObservers = new WeakSet();
+const trustedProofInputs = new WeakSet();
 
 function normalizeConversationUrl(value) {
   const url = new URL(String(value || '').trim());
@@ -73,11 +74,21 @@ export function deriveFleetTransportProofInputFromLocalBrowser({ agent, observeL
     throw new Error('fleet_local_transport_generation_invalid');
   }
 
-  return Object.freeze({
+  const proofInput = Object.freeze({
     tab_id: String(agent.tab_id),
     target_id: String(agent.target_id).toLowerCase(),
     generation_epoch: generationEpoch,
     conversation_url: normalizeConversationUrl(observation.conversation_url),
     authority_effect: false,
   });
+  trustedProofInputs.add(proofInput);
+  return proofInput;
+}
+
+export function assertTrustedFleetTransportProofInput(value) {
+  if (!value || typeof value !== 'object' || !trustedProofInputs.has(value)) {
+    throw new Error('fleet_local_transport_proof_input_untrusted');
+  }
+  if (value.authority_effect !== false) throw new Error('fleet_local_transport_proof_input_invalid');
+  return value;
 }
