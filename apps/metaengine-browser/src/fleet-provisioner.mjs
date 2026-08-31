@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { globalOwnerGateDisabled } from './owner-safety-gate-registry.mjs';
 
-export const FLEET_PROVISIONER_VERSION = '1.3.0';
+export const FLEET_PROVISIONER_VERSION = '1.4.0';
 export const FLEET_STATES = Object.freeze([
   'REGISTERED',
   'PROVISIONING',
@@ -19,27 +19,44 @@ export const FLEET_PROFILES = Object.freeze({
   INCIDENT: Object.freeze(['DIAGNOSTIC', 'REPRODUCER', 'RESEARCHER', 'FIX_REVIEWER', 'FALSIFIER', 'SYNTHESIZER']),
 });
 
+const DEFAULT_SEED_AGENTS = 6;
+const DEFAULT_WARM_AGENTS = 2;
+const DEFAULT_SPAWN_BURST_LIMIT = 8;
+const MAX_SPAWN_BURST_LIMIT = 256;
+
 function clone(value) { return value == null ? value : structuredClone(value); }
 function iso(clock) {
   const d = new Date(clock());
   if (!Number.isFinite(d.getTime())) throw new Error('fleet_clock_invalid');
   return d.toISOString();
 }
+function nonNegativeInteger(value, fallback, name) {
+  const out = value == null ? fallback : Number(value);
+  if (!Number.isSafeInteger(out) || out < 0) throw new Error(`fleet_${name}_invalid`);
+  return out;
+}
+function burstLimit(value, fallback = DEFAULT_SPAWN_BURST_LIMIT) {
+  const out = value == null ? fallback : Number(value);
+  if (!Number.isSafeInteger(out) || out < 1 || out > MAX_SPAWN_BURST_LIMIT) throw new Error('fleet_spawn_burst_limit_invalid');
+  return out;
+}
 function normalizePolicy(policy = {}) {
   const profile = String(policy.profile || 'BALANCED').toUpperCase();
   if (!FLEET_PROFILES[profile]) throw new Error('fleet_profile_invalid');
-  const warmAgents = Number(policy.warm_agents ?? 2);
-  const desiredAgents = Number(policy.desired_agents ?? 6);
-  const maxAgents = Number(policy.max_agents ?? 8);
-  for (const [name, value] of [['warm_agents', warmAgents], ['desired_agents', desiredAgents], ['max_agents', maxAgents]]) {
-    if (!Number.isSafeInteger(value) || value < 0 || value > 32) throw new Error(`fleet_${name}_invalid`);
-  }
-  if (warmAgents > desiredAgents || desiredAgents > maxAgents) throw new Error('fleet_capacity_order_invalid');
+  const warmAgents = nonNegativeInteger(policy.warm_agents, DEFAULT_WARM_AGENTS, 'warm_agents');
+  const desiredAgents = nonNegativeInteger(policy.desired_agents, DEFAULT_SEED_AGENTS, 'desired_agents');
+  const spawnBurstLimit = burstLimit(policy.spawn_burst_limit, DEFAULT_SPAWN_BURST_LIMIT);
+  if (warmAgents > desiredAgents) throw new Error('fleet_capacity_order_invalid');
   return Object.freeze({
     profile,
     warm_agents: warmAgents,
     desired_agents: desiredAgents,
-    max_agents: maxAgents,
+    elastic: true,
+    hard_agent_cap: null,
+    max_agents: null,
+    spawn_burst_limit: spawnBurstLimit,
+    legacy_max_agents_ignored: policy.max_agents != null,
+    capacity_model: 'ELASTIC_BACKLOG_DRIVEN',
     adopt_existing: false,
     direct_peer_messaging: false,
     browser_authority: false,
@@ -164,9 +181,8 @@ export class FleetProvisioner {
         agent.generation_epoch += 1;
         agent.updated_at = iso(this.#clock);
       } else if (agent.lifecycle_state === 'ACTIVE') {
-        // A persisted transport proof is evidence for the prior browser/renderer
-        // incarnation only. Tab existence alone cannot re-authorize it after a
-        // process restart; require a fresh markTransportProven() observation.
+        // Persisted transport proof belongs to the previous Browser/renderer incarnation.
+        // A surviving logical tab id cannot re-authorize it after process restart.
         agent.lifecycle_state = 'BOUND_UNVERIFIED';
         agent.transport_proof = null;
         agent.generation_epoch += 1;
@@ -196,6 +212,17 @@ export class FleetProvisioner {
     return this.#serial(async () => {
       const next = normalizePolicy({ ...this.#state.policy, profile });
       this.#state.policy = clone(next);
+      await this.#persist();
+      return this.snapshot();
+    });
+  }
+
+  async setTargetAgents(targetAgents) {
+    return this.#serial(async () => {
+      this.#assertReady();
+      const target = nonNegativeInteger(targetAgents, this.#state.policy.desired_agents, 'desired_agents');
+      if (target < this.#state.policy.warm_agents) throw new Error('fleet_capacity_order_invalid');
+      this.#state.policy = clone(normalizePolicy({ ...this.#state.policy, desired_agents: target }));
       await this.#persist();
       return this.snapshot();
     });
@@ -231,31 +258,45 @@ export class FleetProvisioner {
     });
   }
 
-  async reconcile({ active = false } = {}) {
+  async reconcile({ active = false, target_agents = null, spawn_burst_limit = null } = {}) {
     return this.#serial(async () => {
       this.#assertReady();
-      const desired = active ? this.#state.policy.desired_agents : this.#state.policy.warm_agents;
+      const desired = active
+        ? nonNegativeInteger(target_agents, this.#state.policy.desired_agents, 'desired_agents')
+        : this.#state.policy.warm_agents;
+      if (desired < this.#state.policy.warm_agents) throw new Error('fleet_capacity_order_invalid');
+      const burst = burstLimit(spawn_burst_limit, this.#state.policy.spawn_burst_limit);
+      if (active && target_agents != null && desired !== this.#state.policy.desired_agents) {
+        this.#state.policy = clone(normalizePolicy({ ...this.#state.policy, desired_agents: desired }));
+        await this.#persist();
+      }
 
-      while (this.#slotCount() < desired && this.#slotCount() < this.#state.policy.max_agents) {
+      let createdThisCycle = 0;
+      while (this.#slotCount() < desired && createdThisCycle < burst) {
         const agent = this.#newRegisteredAgent();
         this.#state.agents.push(agent);
+        createdThisCycle += 1;
         await this.#persist();
       }
 
       if (!active) return this.snapshot();
 
+      let provisionedThisCycle = 0;
       const activatable = this.#state.agents.filter((agent) => ['REGISTERED', 'LOST'].includes(agent.lifecycle_state));
       for (const agent of activatable) {
-        if (this.#liveCount() >= desired) break;
+        if (this.#liveCount() >= desired || provisionedThisCycle >= burst) break;
         await this.#provision(agent, { isRecovery: agent.lifecycle_state === 'LOST' });
+        provisionedThisCycle += 1;
       }
 
       if (globalOwnerGateDisabled('fleet.ambiguous_compensating_fanout')) {
-        while (this.#liveCount() < desired && this.#slotCount() < this.#state.policy.max_agents) {
+        while (this.#liveCount() < desired && createdThisCycle < burst && provisionedThisCycle < burst) {
           const agent = this.#newRegisteredAgent();
           this.#state.agents.push(agent);
+          createdThisCycle += 1;
           await this.#persist();
           await this.#provision(agent, { isRecovery: false });
+          provisionedThisCycle += 1;
         }
       }
 
