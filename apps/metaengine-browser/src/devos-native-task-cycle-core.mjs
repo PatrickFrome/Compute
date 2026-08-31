@@ -1,11 +1,11 @@
 import crypto from 'node:crypto';
 import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
+import { evaluateFleetSubmitReadiness } from './fleet-submit-readiness.mjs';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA40_RE = /^[a-f0-9]{40}$/;
 const HASH_RE = /^[a-f0-9]{64}$/;
 const AGENT_RE = /^agent_[a-z0-9-]{8,64}$/;
-const COMPOSER_NAMES = Object.freeze(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
 const TERMINAL_STATES = new Set(['COMPLETED','FAILED','AMBIGUOUS']);
 
 const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
@@ -20,10 +20,6 @@ function positiveInt(value, name) {
   if (!Number.isSafeInteger(out) || out < 1) throw new Error(`devos_${name}_invalid`);
   return out;
 }
-function exactComposer(frame) {
-  const rows = (frame?.semantic_targets || []).filter((row) => String(row?.role || '').toLowerCase() === 'textbox' && COMPOSER_NAMES.includes(String(row?.name || '')));
-  return rows.length === 1 ? structuredClone(rows[0]) : null;
-}
 function conversationUrl(value) {
   try {
     const url = new URL(String(value || ''));
@@ -32,6 +28,28 @@ function conversationUrl(value) {
     if (!/^\/c\/[a-z0-9-]+$/i.test(path)) return null;
     return `https://chatgpt.com${path.toLowerCase()}`;
   } catch { return null; }
+}
+function selectedTabId(state = {}) {
+  const active = String(state?.active_tab?.tab_id || '');
+  if (active) return active;
+  const selected = (state?.tabs || []).filter((row) => row?.selected === true);
+  return selected.length === 1 ? String(selected[0]?.tab_id || '') : '';
+}
+function readinessOrThrow({ frame, lease, selected_tab_id, phase }) {
+  const readiness = evaluateFleetSubmitReadiness({
+    frame,
+    expected_tab_id: lease.tab_id,
+    observed_tab_id: String(frame?.tab_id || lease.tab_id),
+    expected_target_id: lease.target_id,
+    observed_target_id: lease.target_id,
+    selected_tab_id,
+  });
+  if (!readiness.ready) {
+    const error = new Error(`devos_submit_not_ready:${phase}:${readiness.reason}`);
+    error.readiness = readiness;
+    throw error;
+  }
+  return readiness;
 }
 
 export function renderDevosTaskPrompt(lease = {}) {
@@ -185,56 +203,109 @@ export class DevOsNativeTaskCycle {
     if (this.#attempted.has(key)) return { state: 'NO_REDISPATCH', task_id: lease.task_id, lease_generation: lease.lease_generation, authority_effect: false };
     this.#attempted.add(key);
 
-    const pre = await this.#executeCommand({ action: 'CAPTURE', platform: 'CHATGPT', payload: { tab_id: lease.tab_id } });
-    if (String(pre?.target_id || lease.target_id).toLowerCase() !== lease.target_id && pre?.target_id) throw new Error('devos_capture_target_binding_mismatch');
-    if (chatGptControlCount(pre, 'STOP') > 0) throw new Error('devos_agent_busy_generating');
-    const composer = exactComposer(pre);
-    if (!composer) throw new Error('devos_composer_not_unique');
-    const prompt = renderDevosTaskPrompt(lease);
-    const promptHash = sha256(prompt);
+    const beforeSelection = await this.#getState();
+    const priorTabId = selectedTabId(beforeSelection);
+    await this.#executeCommand({ action: 'SELECT_TAB', platform: null, payload: { tab_id: lease.tab_id } });
 
-    let submit;
+    let promptHash = null;
+    let clickIssued = false;
     try {
-      submit = await this.#executeCommand({
-        action: 'SEMANTIC_TYPE', platform: 'CHATGPT',
-        payload: {
-          tab_id: lease.tab_id,
-          role: composer.role,
-          accessible_name: composer.name,
-          text: prompt,
-          replace_existing: true,
-          submit_after_type: true,
-        },
-      });
-    } catch (error) {
-      await this.#reportAmbiguous(lease, 'SEMANTIC_TYPE_TRANSPORT_AMBIGUOUS').catch(() => {});
-      throw error;
-    }
+      const foregroundState = await this.#getState();
+      const selected = selectedTabId(foregroundState);
+      if (selected !== lease.tab_id) throw new Error('devos_foreground_selection_unproven');
+      assertLiveLeaseBinding(lease, foregroundState?.fleet);
 
-    const post = await this.#executeCommand({ action: 'CAPTURE', platform: 'CHATGPT', payload: { tab_id: lease.tab_id } });
-    const normalizedUrl = conversationUrl(post?.url);
-    const stopObserved = chatGptControlCount(post, 'STOP') === 1 || submit?.stop_observed === true;
-    const effectState = stopObserved ? 'PROVEN_GENERATING' : (normalizedUrl ? 'PROVEN_CONVERSATION' : null);
-    if (!effectState || !normalizedUrl) {
-      await this.#reportAmbiguous(lease, 'SEND_EFFECT_NOT_PROVEN').catch(() => {});
-      const error = new Error('devos_send_effect_ambiguous');
-      error.automatic_retry_allowed = false;
-      throw error;
-    }
+      const pre = await this.#executeCommand({ action: 'CAPTURE', platform: 'CHATGPT', payload: { tab_id: lease.tab_id } });
+      const preReady = readinessOrThrow({ frame: pre, lease, selected_tab_id: selected, phase: 'PRE_TYPE' });
+      const preConversation = conversationUrl(pre?.url);
+      const prompt = renderDevosTaskPrompt(lease);
+      promptHash = sha256(prompt);
 
-    const proof = {
-      prompt_sha256: promptHash,
-      conversation_url_sha256: sha256(normalizedUrl),
-      effect_state: effectState,
-    };
-    const response = await this.#signedRequest('/v1/devos/mark-running', { payload: { ...bindingPayload(lease), proof } });
-    const body = await responseJson(response, 'devos_mark_running_http');
-    return {
-      state: 'RUNNING', task_id: lease.task_id, lease_generation: lease.lease_generation,
-      tab_id: lease.tab_id, target_id: lease.target_id, agent_generation_epoch: lease.agent_generation_epoch,
-      proof, server: body, prompt_included: false, page_data_authority: false,
-      automatic_retry_allowed: false, authority_effect: true,
-    };
+      try {
+        await this.#executeCommand({
+          action: 'SEMANTIC_TYPE', platform: 'CHATGPT',
+          payload: {
+            tab_id: lease.tab_id,
+            role: preReady.composer.role,
+            accessible_name: preReady.composer.name,
+            text: prompt,
+            replace_existing: true,
+            submit_after_type: false,
+          },
+        });
+      } catch (error) {
+        await this.#reportAmbiguous(lease, 'SEMANTIC_TYPE_EFFECT_AMBIGUOUS').catch(() => {});
+        throw error;
+      }
+
+      const beforeClickState = await this.#getState();
+      const selectedBeforeClick = selectedTabId(beforeClickState);
+      if (selectedBeforeClick !== lease.tab_id) {
+        await this.#reportAmbiguous(lease, 'FOREGROUND_LOST_AFTER_TYPE').catch(() => {});
+        throw new Error('devos_foreground_lost_after_type');
+      }
+      assertLiveLeaseBinding(lease, beforeClickState?.fleet);
+
+      const typedFrame = await this.#executeCommand({ action: 'CAPTURE', platform: 'CHATGPT', payload: { tab_id: lease.tab_id } });
+      let typedReady;
+      try {
+        typedReady = readinessOrThrow({ frame: typedFrame, lease, selected_tab_id: selectedBeforeClick, phase: 'PRE_CLICK' });
+      } catch (error) {
+        await this.#reportAmbiguous(lease, 'READINESS_LOST_AFTER_TYPE').catch(() => {});
+        throw error;
+      }
+
+      try {
+        clickIssued = true;
+        await this.#executeCommand({
+          action: 'TYPED_CLICK', platform: 'CHATGPT',
+          payload: {
+            tab_id: lease.tab_id,
+            role: typedReady.send_control.role,
+            accessible_name: typedReady.send_control.name,
+          },
+        });
+      } catch (error) {
+        await this.#reportAmbiguous(lease, 'SEND_CLICK_EFFECT_AMBIGUOUS').catch(() => {});
+        throw error;
+      }
+
+      const post = await this.#executeCommand({ action: 'CAPTURE', platform: 'CHATGPT', payload: { tab_id: lease.tab_id } });
+      const normalizedUrl = conversationUrl(post?.url);
+      const stopObserved = chatGptControlCount(post, 'STOP') === 1;
+      const newConversationObserved = !preConversation && Boolean(normalizedUrl);
+      const effectState = stopObserved ? 'PROVEN_GENERATING' : (newConversationObserved ? 'PROVEN_NEW_CONVERSATION' : null);
+      if (!effectState || !normalizedUrl) {
+        await this.#reportAmbiguous(lease, 'SEND_EFFECT_NOT_PROVEN').catch(() => {});
+        const error = new Error('devos_send_effect_ambiguous');
+        error.automatic_retry_allowed = false;
+        throw error;
+      }
+
+      const proof = {
+        prompt_sha256: promptHash,
+        conversation_url_sha256: sha256(normalizedUrl),
+        effect_state: effectState,
+      };
+      const response = await this.#signedRequest('/v1/devos/mark-running', { payload: { ...bindingPayload(lease), proof } });
+      const body = await responseJson(response, 'devos_mark_running_http');
+      return {
+        state: 'RUNNING', task_id: lease.task_id, lease_generation: lease.lease_generation,
+        tab_id: lease.tab_id, target_id: lease.target_id, agent_generation_epoch: lease.agent_generation_epoch,
+        proof, server: body, prompt_included: false, page_data_authority: false,
+        selected_tab_mutation: true, viewport_geometry_required: true, mouse_geometry_required: true,
+        click_issued: clickIssued, automatic_retry_allowed: false, authority_effect: true,
+      };
+    } finally {
+      if (priorTabId && priorTabId !== lease.tab_id) {
+        try {
+          const after = await this.#getState();
+          if (selectedTabId(after) === lease.tab_id) {
+            await this.#executeCommand({ action: 'SELECT_TAB', platform: null, payload: { tab_id: priorTabId } });
+          }
+        } catch {}
+      }
+    }
   }
 
   async #observeRunning(raw, fleetSnapshot) {
