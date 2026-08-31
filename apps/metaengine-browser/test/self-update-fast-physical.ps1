@@ -78,11 +78,14 @@ $profileRow = Read-LastJsonLine $profileOut
 if ($profileRow.marker_present -ne $true -or -not $profileRow.user_data_path) { throw 'baseline_profile_probe_invalid' }
 [string]$profileRow.user_data_path | Set-Content (Join-Path $temp 'baseline-user-data-path.txt')
 
-# Build exactly one new target. UTC timestamp gives a repository-wide monotonic build id.
-$buildId = [DateTime]::UtcNow.ToString('yyyyMMddHHmmss')
-$target = "0.6.3-dev.$buildId.1"
+# Build exactly one new target. Preserve a permanent floor above the newest locally deployed pre-release,
+# then use UTC or published-baseline+1 thereafter so every verified release remains monotonic.
 $baselineBuild = [Int64](($baseline -split '\.')[3].Replace('dev','').TrimStart('-'))
-if ([Int64]$buildId -le $baselineBuild) { throw "target_version_not_monotonic:$buildId:$baselineBuild" }
+$timestampBuild = [Int64]([DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))
+$deployedBuildFloor = [Int64]20260831143001
+$buildId = [Math]::Max($timestampBuild, [Math]::Max($baselineBuild + 1, $deployedBuildFloor)).ToString()
+$target = "0.6.3-dev.$buildId.1"
+if ([Int64]$buildId -le $baselineBuild) { throw "target_version_not_monotonic:${buildId}:${baselineBuild}" }
 npm pkg set version=$target
 Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
 $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
@@ -160,9 +163,9 @@ try {
     if (Test-Path $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE) {
       try { $rows = @(Get-Content $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json }) } catch { $rows = @() }
     }
-    $verified = [bool]($rows | Where-Object { $_.metadata_verified -eq $true -and [string]$_.available_version -eq $target })
-    $feedActive = [bool]($rows | Where-Object { $_.ci_test_feed_active -eq $true })
-    $handoffPrepared = [bool]($rows | Where-Object { $_.label -eq 'INSTALLER_HANDOFF_PREPARED' -and $_.singleton_lock_released -eq $true })
+    $verified = [bool]($rows | Where-Object { ($_.PSObject.Properties.Name -contains 'metadata_verified') -and $_.metadata_verified -eq $true -and ($_.PSObject.Properties.Name -contains 'available_version') -and [string]$_.available_version -eq $target })
+    $feedActive = [bool]($rows | Where-Object { ($_.PSObject.Properties.Name -contains 'ci_test_feed_active') -and $_.ci_test_feed_active -eq $true })
+    $handoffPrepared = [bool]($rows | Where-Object { ($_.PSObject.Properties.Name -contains 'label') -and $_.label -eq 'INSTALLER_HANDOFF_PREPARED' -and ($_.PSObject.Properties.Name -contains 'singleton_lock_released') -and $_.singleton_lock_released -eq $true })
     if ($verified -and $feedActive -and $handoffPrepared) { break }
     Start-Sleep -Milliseconds 200
   } while ((Get-Date) -lt $traceDeadline)
