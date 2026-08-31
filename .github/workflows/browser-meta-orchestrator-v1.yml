@@ -8,11 +8,14 @@ on:
       - 'apps/metaengine-browser/src/meta-orchestrator-workspace-admission.mjs'
       - 'apps/metaengine-browser/src/workspace-manager.mjs'
       - 'apps/metaengine-browser/src/workspace-git-hardening.mjs'
+      - 'apps/metaengine-browser/src/fleet-target-local-observer.mjs'
+      - 'apps/metaengine-browser/src/bounded-worker-observer.mjs'
       - 'apps/metaengine-browser/test/meta-orchestrator-core.test.mjs'
       - 'apps/metaengine-browser/test/meta-orchestrator-workspace-admission.test.mjs'
       - 'apps/metaengine-browser/test/workspace-manager.test.mjs'
       - 'apps/metaengine-browser/test/workspace-git-hardening.test.mjs'
       - 'apps/metaengine-browser/test/workspace-binding-registry.test.mjs'
+      - 'apps/metaengine-browser/test/bounded-worker-observer-v2.test.mjs'
       - 'supabase/migrations/20260831152000_a2_workspace_binding_registry_v1.sql'
       - 'supabase/migrations/20260831184500_devos_fleet_transport_admission_v1.sql'
       - 'apps/metaengine-browser/src/autonomy-governor.mjs'
@@ -58,6 +61,8 @@ jobs:
           node --check apps/metaengine-browser/src/meta-orchestrator-workspace-admission.mjs
           node --check apps/metaengine-browser/src/workspace-manager.mjs
           node --check apps/metaengine-browser/src/workspace-git-hardening.mjs
+          node --check apps/metaengine-browser/src/fleet-target-local-observer.mjs
+          node --check apps/metaengine-browser/src/bounded-worker-observer.mjs
       - name: Meta-Orchestrator fail-closed contract
         run: node --test apps/metaengine-browser/test/meta-orchestrator-core.test.mjs
       - name: Exact Meta-to-Workspace mutation admission
@@ -66,5 +71,7 @@ jobs:
         run: node --test apps/metaengine-browser/test/workspace-manager.test.mjs apps/metaengine-browser/test/workspace-git-hardening.test.mjs apps/metaengine-browser/test/workspace-binding-registry.test.mjs
       - name: DevOS transport-gated lease admission
         run: node --test apps/metaengine-browser/test/devos-fleet-transport-admission.test.mjs
+      - name: Bounded worker liveness observation
+        run: node --test apps/metaengine-browser/test/bounded-worker-observer-v2.test.mjs
       - name: Existing physical task-cycle regression seam
         run: node --test apps/metaengine-browser/test/devos-native-task-cycle.test.mjs apps/metaengine-browser/test/devos-fleet-transport-proof-runtime.test.mjs
