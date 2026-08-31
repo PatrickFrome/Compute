@@ -12,6 +12,7 @@ const POLL_MS = 2000;
 const EXPECTED_RESTART_GRACE_MS = 45000;
 const RELAUNCH_ACK_TIMEOUT_MS = 5000;
 const RELAUNCH_RECEIPT_PATH = `${STATE_PATH}.relaunch-v1.json`;
+const WORKER_HEARTBEAT_PATH = `${STATE_PATH}.worker-heartbeat-v1.json`;
 
 async function readState() {
   try { return JSON.parse(await fs.readFile(STATE_PATH, 'utf8')); }
@@ -34,6 +35,21 @@ async function writeStateIfBound(value) {
   const current = await readState().catch(() => null);
   if (!current || current.token !== TOKEN || Number(current.parent_pid) !== PARENT_PID) return false;
   await writeState(value);
+  return true;
+}
+
+async function writeWorkerHeartbeat() {
+  const current = await readState().catch(() => null);
+  if (!current || current.token !== TOKEN || Number(current.parent_pid) !== PARENT_PID) return false;
+  await atomicWrite(WORKER_HEARTBEAT_PATH, {
+    schema: 'metaengine.browser-sentinel.worker-heartbeat.v1',
+    token: TOKEN,
+    parent_pid: PARENT_PID,
+    worker_pid: process.pid,
+    lifecycle: 'READY',
+    heartbeat_at: new Date().toISOString(),
+    authority_effect: false,
+  });
   return true;
 }
 
@@ -139,7 +155,11 @@ async function main() {
   const initial = await readState();
   if (!validBinding(initial)) process.exit(3);
 
-  while (parentAlive()) await sleep(POLL_MS);
+  if (!(await writeWorkerHeartbeat())) process.exit(4);
+  while (parentAlive()) {
+    await sleep(POLL_MS);
+    if (!(await writeWorkerHeartbeat())) return;
+  }
 
   let state = await readState();
   if (!validBinding(state)) return;
