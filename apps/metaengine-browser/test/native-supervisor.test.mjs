@@ -149,6 +149,97 @@ test('CONTROL_CAPABILITIES is handled locally as read-only and never delegated t
   await fs.rm(dir, { recursive:true, force:true });
 });
 
+test('DB-leased semantic command seals exact local intent before physical execution', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-supervisor-effect-seal-'));
+  const identity = new SupervisorDeviceIdentity({ statePath: path.join(dir, 'device.json'), secureStorage });
+  await identity.ensure();
+  await identity.bindDevice(crypto.randomUUID());
+  const clientId = (await identity.ensure()).client_id;
+  const commandId = crypto.randomUUID();
+  const tabId = `tab_${crypto.randomUUID()}`;
+  const processId = crypto.randomUUID();
+  const expiresAt = new Date(Date.now()+120000).toISOString();
+  const events = [];
+  let issued = false;
+  let physicalEffects = 0;
+  const fetchImpl = async (url, init={}) => {
+    const pathname = new URL(url).pathname;
+    if (pathname.endsWith('/v1/state')) return new Response('{}',{status:202,headers:{'content-type':'application/json'}});
+    if (pathname.endsWith('/v1/commands/next')) {
+      if (issued) return new Response(JSON.stringify({command:null}),{status:200,headers:{'content-type':'application/json'}});
+      issued = true;
+      return new Response(JSON.stringify({command:{
+        command_id:commandId,
+        idempotency_key:'native.effect.intent.integration.1',
+        action:'TYPED_CLICK',
+        platform:'CHATGPT',
+        payload:{tab_id:tabId,role:'button',accessible_name:'Send'},
+        issued_at:new Date().toISOString(),expires_at:expiresAt,
+      }}),{status:200,headers:{'content-type':'application/json'}});
+    }
+    if (pathname.endsWith(`/v1/commands/${commandId}/effect-intent`)) {
+      events.push('seal');
+      const request = JSON.parse(init.body || '{}');
+      assert.equal(request.binding.client_id, clientId);
+      assert.equal(request.binding.process_incarnation_id, processId);
+      assert.equal(request.binding.tab_id, tabId);
+      assert.equal(request.binding.target_id, 'webcontents:77');
+      return new Response(JSON.stringify({accepted:true,effect_binding:request.binding,effect_binding_sha256:'a'.repeat(64)}),{status:200,headers:{'content-type':'application/json'}});
+    }
+    if (/\/result$/.test(pathname)) return new Response(JSON.stringify({accepted:true}),{status:200,headers:{'content-type':'application/json'}});
+    if (pathname.endsWith('/v1/devos/cycle')) return new Response(JSON.stringify({backlog:{ready:0},lease:null,running:[]}),{status:200,headers:{'content-type':'application/json'}});
+    throw new Error(`unexpected_fetch:${pathname}`);
+  };
+  const client = new NativeSupervisorClient({
+    identity,fetchImpl,version:'0.6.0',intervalMs:60000,
+    getState:async()=>({tabs:[],active_tab:null,development_plane:null,fleet:{agents:[]},perception:null}),
+    prepareEffectBinding:async()=>({process_incarnation_id:processId,tab_id:tabId,target_id:'webcontents:77',observed_at:new Date().toISOString()}),
+    executeCommand:async(command)=>{
+      if(command.action==='TYPED_CLICK'){
+        events.push('effect'); physicalEffects+=1;
+        assert.equal(command.effect_binding?.command_id,commandId);
+        assert.equal(command.effect_binding_sha256,'a'.repeat(64));
+        return {ok:true,authority_effect:true};
+      }
+      throw new Error(`unexpected_execute:${command.action}`);
+    },
+  });
+  await client.cycle();
+  assert.deepEqual(events.slice(0,2),['seal','effect']);
+  assert.equal(physicalEffects,1);
+  assert.equal(client.snapshot().last_command_status,'COMPLETED');
+  await fs.rm(dir,{recursive:true,force:true});
+});
+
+test('rejected DB effect-intent prevents physical semantic execution', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-supervisor-effect-reject-'));
+  const identity = new SupervisorDeviceIdentity({ statePath:path.join(dir,'device.json'), secureStorage });
+  await identity.ensure(); await identity.bindDevice(crypto.randomUUID());
+  const commandId=crypto.randomUUID(); const tabId=`tab_${crypto.randomUUID()}`; const processId=crypto.randomUUID();
+  let issued=false; let physicalEffects=0;
+  const fetchImpl=async(url)=>{
+    const pathname=new URL(url).pathname;
+    if(pathname.endsWith('/v1/state'))return new Response('{}',{status:202,headers:{'content-type':'application/json'}});
+    if(pathname.endsWith('/v1/commands/next')){
+      if(issued)return new Response(JSON.stringify({command:null}),{status:200,headers:{'content-type':'application/json'}});
+      issued=true; return new Response(JSON.stringify({command:{command_id:commandId,idempotency_key:'native.effect.intent.reject.1',action:'TYPED_CLICK',platform:'CHATGPT',payload:{tab_id:tabId,role:'button',accessible_name:'Send'},issued_at:new Date().toISOString(),expires_at:new Date(Date.now()+120000).toISOString()}}),{status:200,headers:{'content-type':'application/json'}});
+    }
+    if(pathname.endsWith(`/v1/commands/${commandId}/effect-intent`))return new Response(JSON.stringify({accepted:false,reason:'binding_conflict'}),{status:409,headers:{'content-type':'application/json'}});
+    if(/\/result$/.test(pathname))return new Response(JSON.stringify({accepted:true}),{status:200,headers:{'content-type':'application/json'}});
+    throw new Error(`unexpected_fetch:${pathname}`);
+  };
+  const client=new NativeSupervisorClient({
+    identity,fetchImpl,version:'0.6.0',intervalMs:60000,
+    getState:async()=>({tabs:[],active_tab:null,development_plane:null,fleet:null,perception:null}),
+    prepareEffectBinding:async()=>({process_incarnation_id:processId,tab_id:tabId,target_id:'webcontents:77',observed_at:new Date().toISOString()}),
+    executeCommand:async()=>{physicalEffects+=1;return {authority_effect:true};},
+  });
+  await assert.rejects(()=>client.cycle(),/effect_binding_http_409/);
+  assert.equal(physicalEffects,0);
+  assert.equal(client.snapshot().last_command_status,'FAILED');
+  await fs.rm(dir,{recursive:true,force:true});
+});
+
 test('native semantic perception exposes unique accessibility targets and typed click uses CDP point actuation', async () => {
   const calls = [];
   const nodes = [
@@ -169,10 +260,12 @@ test('native semantic perception exposes unique accessibility targets and typed 
       return {};
     },
   };
-  const webContents = { debugger:dbg, isDestroyed:()=>false, getURL:()=> 'https://chatgpt.com/c/test', getTitle:()=> 'ChatGPT' };
+  const webContents = { id:101, debugger:dbg, isDestroyed:()=>false, getURL:()=> 'https://chatgpt.com/c/test', getTitle:()=> 'ChatGPT' };
   const frame = await captureSemanticFrame(webContents);
   assert.equal(frame.semantic_targets.length, 2);
   assert.equal(frame.text_excerpt, 'Visible response text');
+  assert.match(frame.process_incarnation_id,/^[0-9a-f-]{36}$/i);
+  assert.equal(frame.target_id,'webcontents:101');
   const result = await executeSemanticCommand(webContents, { action:'TYPED_CLICK', payload:{ role:'button', accessible_name:'Send' } });
   assert.equal(result.target.backend_node_id, 42);
   assert.equal(result.point.x, 60);
@@ -197,7 +290,7 @@ test('dedicated STOP_GENERATION recognizes current Russian ChatGPT stop-response
       return {};
     },
   };
-  const webContents = { debugger:dbg, isDestroyed:()=>false };
+  const webContents = { id:102, debugger:dbg, isDestroyed:()=>false };
   const result = await executeSemanticCommand(webContents, { action:'STOP_GENERATION', payload:{} });
   assert.equal(result.target.name, 'Остановить ответ');
   assert.equal(result.target.backend_node_id, 77);
