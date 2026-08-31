@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 import { globalOwnerGateDisabled } from './owner-safety-gate-registry.mjs';
+import { persistFleetStateTargetRevalidation } from './fleet-state-target-revalidation.mjs';
 
-export const FLEET_PROVISIONER_VERSION = '1.3.0';
+export const FLEET_PROVISIONER_VERSION = '1.4.0';
 export const FLEET_STATES = Object.freeze([
   'REGISTERED',
   'PROVISIONING',
@@ -197,6 +198,20 @@ export class FleetProvisioner {
       const next = normalizePolicy({ ...this.#state.policy, profile });
       this.#state.policy = clone(next);
       await this.#persist();
+      return this.snapshot();
+    });
+  }
+
+  async revalidateTargetBinding({ agent_id, observeLocalTarget } = {}) {
+    return this.#serial(async () => {
+      this.#assertReady();
+      const nextState = await persistFleetStateTargetRevalidation({
+        state: this.#state,
+        agent_id,
+        observeLocalTarget,
+        saveState: this.#saveState,
+      });
+      this.#state = clone(nextState);
       return this.snapshot();
     });
   }
