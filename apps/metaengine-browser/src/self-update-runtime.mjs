@@ -29,9 +29,11 @@ export {
   DEFAULT_OPTIONAL_NETWORK_DEADLINE_MS,
 };
 
-// Fast development-loop defaults. Exact trusted release discovery remains the
-// authority path, but the cheap zero-authority pointer wakes it within seconds.
-export const DEFAULT_CONTINUOUS_DEV_UPDATE_INTERVAL_MS = 10 * 1000;
+// The cheap zero-authority hint remains the fast development wake-up path. Exact
+// GitHub release discovery is deliberately much slower when there is no new hint so
+// a long-lived Browser cannot exhaust the unauthenticated GitHub API quota by itself.
+export const DEFAULT_CONTINUOUS_DEV_UPDATE_INTERVAL_MS = 15 * 60 * 1000;
+export const DEFAULT_DEV_UPDATE_HINT_RETRY_MS = 5 * 60 * 1000;
 export const DEFAULT_CONTINUOUS_DEV_RESTART_GRACE_MS = 1 * 1000;
 
 const HINT_BUSY_STATES = new Set(['APPROVED_DOWNLOAD','DOWNLOADING','READY_RESTART','RESTART_GRACE','RESTARTING']);
@@ -53,6 +55,7 @@ function clipHintError(error) { return String(error?.message || error || 'unknow
 
 export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
   #hintIntervalMs;
+  #hintRetryMs;
   #hintProbe;
   #hintFetch;
   #clock;
@@ -62,6 +65,7 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
   #lastHintVersion = null;
   #lastHintError = null;
   #lastHintTriggeredVersion = null;
+  #lastHintTriggeredAt = 0;
 
   constructor(options = {}) {
     const rawFetch = options?.fetchImpl ?? globalThis.fetch;
@@ -91,6 +95,7 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
       });
     }
     this.#hintIntervalMs = Math.max(1000, Number(options?.hintIntervalMs ?? DEFAULT_DEV_UPDATE_HINT_INTERVAL_MS));
+    this.#hintRetryMs = Math.max(this.#hintIntervalMs, Number(options?.hintRetryMs ?? DEFAULT_DEV_UPDATE_HINT_RETRY_MS));
     this.#hintProbe = options?.hintProbe ?? probeDevUpdateHint;
     this.#hintFetch = boundedFetch;
     this.#networkDeadlineMs = networkDeadlineMs;
@@ -103,10 +108,12 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
     return {
       ...base,
       hint_interval_ms: this.#hintIntervalMs,
+      hint_retry_ms: this.#hintRetryMs,
       hint_last_check_at: this.#lastHintCheckAt,
       hint_version: this.#lastHintVersion,
       hint_last_error: this.#lastHintError,
       hint_triggered_version: this.#lastHintTriggeredVersion,
+      hint_last_triggered_at: this.#lastHintTriggeredAt > 0 ? new Date(this.#lastHintTriggeredAt).toISOString() : null,
       network_deadline_ms: this.#networkDeadlineMs,
       network_discovery_bounded: true,
       hint_authority_effect: false,
@@ -127,8 +134,14 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
       this.#lastHintError = null;
       if (!hint?.newer_than_current || hint.authority_effect !== false) return false;
       if (hint.version === snapshot.available_version || hint.version === snapshot.downloaded_version) return false;
-      if (hint.version === this.#lastHintTriggeredVersion) return false;
+      const sameTriggeredVersion = hint.version === this.#lastHintTriggeredVersion;
+      if (sameTriggeredVersion) {
+        const retryDue = snapshot.state === 'DISCOVERY_ERROR'
+          && now - this.#lastHintTriggeredAt >= this.#hintRetryMs;
+        if (!retryDue) return false;
+      }
       this.#lastHintTriggeredVersion = hint.version;
+      this.#lastHintTriggeredAt = now;
       return true;
     } catch (error) {
       // Hint failure has zero authority over the updater. Exact release discovery uses
