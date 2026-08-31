@@ -17,6 +17,7 @@ export { NATIVE_SUPERVISOR_BASE, NATIVE_SUPERVISOR_RUNTIME_PATH, planPostRestore
 const clipError = (error) => String(error?.message || error || 'unknown_error').slice(0, 500);
 const DEFAULT_REQUEST_DEADLINE_MS = 8000;
 const DEFAULT_BOOTSTRAP_HEARTBEAT_MS = 2000;
+export const DEFAULT_SUPERVISOR_WATCHDOG_STALE_MS = 5000;
 
 function isCommandResultUrl(value) {
   try {
@@ -72,21 +73,62 @@ export function buildBootstrapHeartbeatPayload({ state = {}, version = '0.0.0', 
   });
 }
 
-export async function sendBootstrapHeartbeat({ identity, fetchImpl, getState, version, startedAt } = {}) {
-  if (!identity || typeof identity.ensure !== 'function' || typeof identity.deviceHeaders !== 'function') throw new Error('native_supervisor_identity_required');
-  if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
-  if (typeof getState !== 'function') throw new Error('native_supervisor_state_provider_required');
+export function supervisorHeartbeatIsStale(snapshot, {
+  nowMs = Date.now(),
+  staleMs = DEFAULT_SUPERVISOR_WATCHDOG_STALE_MS,
+} = {}) {
+  const lastMs = Date.parse(String(snapshot?.last_heartbeat_at || ''));
+  return !Number.isFinite(lastMs) || nowMs - lastMs >= Math.max(1000, Number(staleMs) || DEFAULT_SUPERVISOR_WATCHDOG_STALE_MS);
+}
+
+export function buildSupervisorWatchdogHeartbeatPayload({ state = {}, supervisor = {}, version = '0.0.0', startedAt = null } = {}) {
+  const mode = ['OFF','MONITOR','CONTROL'].includes(String(supervisor?.supervisor_mode || '').toUpperCase())
+    ? String(supervisor.supervisor_mode).toUpperCase()
+    : 'MONITOR';
+  return Object.freeze({
+    state: {
+      ...(state && typeof state === 'object' ? structuredClone(state) : {}),
+      shell_version: String(version || '0.0.0'),
+      supervisor_mode: mode,
+      armed: supervisor?.armed === true,
+      operator_mode: mode === 'CONTROL' ? 'CONTROL' : 'OBSERVE',
+      started_at: supervisor?.started_at || startedAt || new Date().toISOString(),
+      last_error: supervisor?.last_error || null,
+      supervisor_lifecycle: supervisor?.lifecycle ? structuredClone(supervisor.lifecycle) : null,
+      self_update: supervisor?.self_update ? structuredClone(supervisor.self_update) : null,
+      self_update_session_continuity: supervisor?.session_continuity
+        ? structuredClone(supervisor.session_continuity)
+        : { state: 'NONE', restored_tabs: 0, target_version: null, authority_effect: false },
+      watchdog_heartbeat: true,
+      authority_effect: false,
+    },
+    last_command_id: supervisor?.last_command_id || null,
+    last_command_status: supervisor?.last_command_status || null,
+  });
+}
+
+async function postStateHeartbeat({ identity, fetchImpl, payload } = {}) {
   const identityState = await identity.ensure();
   if (!identityState?.device_id) return Object.freeze({ sent: false, reason: 'DEVICE_NOT_ENROLLED', authority_effect: false });
-  const payload = buildBootstrapHeartbeatPayload({ state: await getState(), version, startedAt });
   const bodyText = JSON.stringify(payload);
   const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}/v1/state`;
   const headers = await identity.deviceHeaders('POST', requestPath, bodyText);
   const response = await fetchImpl(`${NATIVE_SUPERVISOR_BASE}/v1/state`, {
     method: 'POST', headers, body: bodyText, cache: 'no-store',
   });
-  if (response.status !== 202) throw new Error(`native_supervisor_bootstrap_state_http_${response.status}`);
+  if (response.status !== 202) throw new Error(`native_supervisor_watchdog_state_http_${response.status}`);
   return Object.freeze({ sent: true, at: new Date().toISOString(), authority_effect: false });
+}
+
+export async function sendBootstrapHeartbeat({ identity, fetchImpl, getState, version, startedAt } = {}) {
+  if (!identity || typeof identity.ensure !== 'function' || typeof identity.deviceHeaders !== 'function') throw new Error('native_supervisor_identity_required');
+  if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
+  if (typeof getState !== 'function') throw new Error('native_supervisor_state_provider_required');
+  return postStateHeartbeat({
+    identity,
+    fetchImpl,
+    payload: buildBootstrapHeartbeatPayload({ state: await getState(), version, startedAt }),
+  });
 }
 
 export class NativeSupervisorClient extends BaseNativeSupervisorClient {
@@ -97,6 +139,7 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
   #getStateRef;
   #versionRef;
   #bootstrapHeartbeatMs;
+  #watchdogStaleMs;
   #bootstrapTimer = null;
   #bootstrapInFlight = false;
   #bootstrapLastAt = null;
@@ -147,6 +190,7 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
     this.#getStateRef = getStateWithMeshProjection;
     this.#versionRef = String(options.version || '0.0.0');
     this.#bootstrapHeartbeatMs = Math.max(1000, Number(options.bootstrapHeartbeatMs) || DEFAULT_BOOTSTRAP_HEARTBEAT_MS);
+    this.#watchdogStaleMs = Math.max(this.#bootstrapHeartbeatMs * 2, Number(options.watchdogStaleMs) || DEFAULT_SUPERVISOR_WATCHDOG_STALE_MS);
 
     const signedRequest = async (path, { method = 'POST', payload = null } = {}) => {
       const bodyText = method === 'GET' ? '' : JSON.stringify(payload ?? {});
@@ -215,14 +259,18 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
 
   async #bootstrapPulse(startedAt) {
     if (this.#bootstrapInFlight) return;
+    const supervisor = super.snapshot();
+    if (!supervisorHeartbeatIsStale(supervisor, { staleMs: this.#watchdogStaleMs })) return;
     this.#bootstrapInFlight = true;
     try {
-      const result = await sendBootstrapHeartbeat({
+      const state = await this.#getStateRef();
+      const payload = supervisor?.running === true
+        ? buildSupervisorWatchdogHeartbeatPayload({ state, supervisor, version: this.#versionRef, startedAt })
+        : buildBootstrapHeartbeatPayload({ state, version: this.#versionRef, startedAt });
+      const result = await postStateHeartbeat({
         identity: this.#identityRef,
         fetchImpl: this.#boundedFetch,
-        getState: this.#getStateRef,
-        version: this.#versionRef,
-        startedAt,
+        payload,
       });
       if (result.sent) this.#bootstrapLastAt = result.at;
       this.#bootstrapLastError = result.sent ? null : result.reason;
@@ -252,7 +300,8 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
     this.#startPromise = Promise.resolve()
       .then(() => super.start())
       .finally(() => {
-        this.#stopBootstrapPump();
+        // Keep the heartbeat watchdog alive after startup. It has no command leasing
+        // or actuation authority and emits only when the primary heartbeat is stale.
         this.#startPromise = null;
       });
     return this.#startPromise;
@@ -276,11 +325,14 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
       command_result_timeout_disabled_until_ambiguous_receipt_readback: true,
       bootstrap_heartbeat: {
         active: this.#bootstrapTimer != null,
+        mode: 'STALE_HEARTBEAT_WATCHDOG',
         interval_ms: this.#bootstrapHeartbeatMs,
+        stale_after_ms: this.#watchdogStaleMs,
         last_at: this.#bootstrapLastAt,
         last_error: this.#bootstrapLastError,
         control_authority: false,
         command_leasing: false,
+        devos_leasing: false,
         authority_effect: false,
       },
     };
