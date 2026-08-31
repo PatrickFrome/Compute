@@ -5,9 +5,19 @@ on:
     paths:
       - 'apps/metaengine-browser/src/meta-orchestrator-core.mjs'
       - 'apps/metaengine-browser/src/meta-orchestrator-devos-adapter.mjs'
+      - 'apps/metaengine-browser/src/meta-orchestrator-workspace-admission.mjs'
+      - 'apps/metaengine-browser/src/workspace-manager.mjs'
+      - 'apps/metaengine-browser/src/workspace-git-hardening.mjs'
       - 'apps/metaengine-browser/test/meta-orchestrator-core.test.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-workspace-admission.test.mjs'
+      - 'apps/metaengine-browser/test/workspace-manager.test.mjs'
+      - 'apps/metaengine-browser/test/workspace-git-hardening.test.mjs'
+      - 'apps/metaengine-browser/test/workspace-binding-registry.test.mjs'
+      - 'supabase/migrations/20260831152000_a2_workspace_binding_registry_v1.sql'
       - 'apps/metaengine-browser/src/autonomy-governor.mjs'
       - 'apps/metaengine-browser/src/devos-native-task-cycle-core.mjs'
+      - 'apps/metaengine-browser/test/devos-native-task-cycle.test.mjs'
+      - 'apps/metaengine-browser/test/devos-fleet-transport-proof-runtime.test.mjs'
       - 'coordination/devos/META_ORCHESTRATOR_V1.md'
       - '.github/workflows/browser-meta-orchestrator-v1.yml'
   push:
@@ -18,23 +28,39 @@ permissions:
   contents: read
 
 jobs:
-  contract:
+  exact-head-contract:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Checkout immutable source
+      - name: Checkout exact candidate head
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Prove exact candidate head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          ACTUAL_HEAD="$(git rev-parse HEAD)"
+          test "$ACTUAL_HEAD" = "$EXPECTED_HEAD"
+          printf 'exact_head=%s\n' "$ACTUAL_HEAD"
       - name: Setup Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
-      - name: Syntax check
+      - name: Syntax check convergence modules
         run: |
           node --check apps/metaengine-browser/src/meta-orchestrator-core.mjs
           node --check apps/metaengine-browser/src/meta-orchestrator-devos-adapter.mjs
+          node --check apps/metaengine-browser/src/meta-orchestrator-workspace-admission.mjs
+          node --check apps/metaengine-browser/src/workspace-manager.mjs
+          node --check apps/metaengine-browser/src/workspace-git-hardening.mjs
       - name: Meta-Orchestrator fail-closed contract
         run: node --test apps/metaengine-browser/test/meta-orchestrator-core.test.mjs
+      - name: Exact Meta-to-Workspace mutation admission
+        run: node --test apps/metaengine-browser/test/meta-orchestrator-workspace-admission.test.mjs
+      - name: Workspace binding and Git isolation contracts
+        run: node --test apps/metaengine-browser/test/workspace-manager.test.mjs apps/metaengine-browser/test/workspace-git-hardening.test.mjs apps/metaengine-browser/test/workspace-binding-registry.test.mjs
       - name: Existing physical task-cycle regression seam
         run: node --test apps/metaengine-browser/test/devos-native-task-cycle.test.mjs apps/metaengine-browser/test/devos-fleet-transport-proof-runtime.test.mjs
