@@ -29,6 +29,51 @@ function backlogOf(snapshot){
   for(const t of tasks){const state=String(t?.state||'').toUpperCase();const role=String(t?.role||'').toUpperCase();if(state==='READY'){ready++;if(ROLE_RE.test(role))by_role[role]=(by_role[role]||0)+1;}if(['LEASED','RUNNING'].includes(state))running++;}
   return {ready,running,by_role,authority_effect:false};
 }
+function roleSchedulingStats(snapshot){
+  const out=new Map();
+  for(const task of Array.isArray(snapshot?.active_tasks)?snapshot.active_tasks:[]){
+    const role=String(task?.role||'').toUpperCase(); if(!ROLE_RE.test(role))continue;
+    const state=String(task?.state||'').toUpperCase();
+    const row=out.get(role)||{role,ready:0,inflight:0,oldest_ready_ms:Number.POSITIVE_INFINITY,highest_ready_priority:Number.NEGATIVE_INFINITY};
+    if(state==='READY'){
+      row.ready+=1;
+      const created=Date.parse(String(task?.created_at||'')); if(Number.isFinite(created))row.oldest_ready_ms=Math.min(row.oldest_ready_ms,created);
+      const priority=Number(task?.priority); if(Number.isFinite(priority))row.highest_ready_priority=Math.max(row.highest_ready_priority,priority);
+    }
+    if(['LEASED','RUNNING'].includes(state))row.inflight+=1;
+    out.set(role,row);
+  }
+  return out;
+}
+function fairIdleLeaseCandidates(snapshot,agents,backlog){
+  const busy=new Set((Array.isArray(snapshot?.active_claims)?snapshot.active_claims:[])
+    .filter(row=>String(row?.state||'ACTIVE').toUpperCase()==='ACTIVE')
+    .map(row=>String(row?.agent_id||'').toLowerCase())
+    .filter(id=>AGENT_RE.test(id)));
+  const stats=roleSchedulingStats(snapshot);
+  const groups=new Map();
+  for(const agent of agents){
+    if(busy.has(agent.agent_id)||(backlog.by_role[agent.role]||0)<1)continue;
+    if(!groups.has(agent.role))groups.set(agent.role,[]);
+    groups.get(agent.role).push(agent);
+  }
+  for(const group of groups.values())group.sort((a,b)=>a.agent_id.localeCompare(b.agent_id));
+  const roles=[...groups.keys()].sort((a,b)=>{
+    const sa=stats.get(a)||{inflight:0,oldest_ready_ms:Number.POSITIVE_INFINITY,highest_ready_priority:Number.NEGATIVE_INFINITY};
+    const sb=stats.get(b)||{inflight:0,oldest_ready_ms:Number.POSITIVE_INFINITY,highest_ready_priority:Number.NEGATIVE_INFINITY};
+    return sa.inflight-sb.inflight
+      ||sa.oldest_ready_ms-sb.oldest_ready_ms
+      ||sb.highest_ready_priority-sa.highest_ready_priority
+      ||a.localeCompare(b);
+  });
+  const out=[];
+  for(let round=0;;round+=1){
+    let added=false;
+    for(const role of roles){const agent=groups.get(role)?.[round];if(agent){out.push(agent);added=true;}}
+    if(!added)break;
+  }
+  return out;
+}
 function runningForAgents(snapshot,agents){
   const allowed=new Map(agents.map(a=>[a.agent_id,a]));
   const proofByKey=new Map();
@@ -54,6 +99,16 @@ function taskStatusFromSnapshot(snapshot,taskId){
   const state=String(event.event_type).slice('TASK_RESULT_'.length);
   return {task_id:taskId,state,lease_generation:Number(event.lease_generation)||0,result_sha256:event?.payload?.result_sha256||null,error_code:event?.payload?.error_code||null};
 }
+function fencedRpcResponse(error){
+  const message=String(error?.message||error||'');
+  if(!message.includes('task_lease_fenced'))return null;
+  return json(409,{
+    error:'task_lease_fenced',
+    fenced:true,
+    automatic_retry_allowed:false,
+    authority_effect:false,
+  });
+}
 
 export function createDevosSupervisorRoutes({rpc,workspaceId}={}){
   if(typeof rpc!=='function'||!UUID_RE.test(String(workspaceId||'')))throw new Error('devos_routes_dependencies_invalid');
@@ -73,25 +128,30 @@ export function createDevosSupervisorRoutes({rpc,workspaceId}={}){
       const reconcile=await rpc('devos_fleet_reconcile_v1',{p_workspace:workspaceId});
       const snapshot=await rpc('devos_fleet_snapshot_v1',{p_workspace:workspaceId});
       const backlog=backlogOf(snapshot);
-      let lease=null;
-      const candidates=agents.filter(a=>(backlog.by_role[a.role]||0)>0).sort((a,b)=>a.agent_id.localeCompare(b.agent_id));
+      let lease=null,leaseAttempts=0;
+      const candidates=fairIdleLeaseCandidates(snapshot,agents,backlog);
       for(const agent of candidates.slice(0,8)){
+        leaseAttempts+=1;
         const result=await rpc('devos_fleet_lease_v1',{p_workspace:workspaceId,p_agent:agent.agent_id,p_role:agent.role,p_tab:agent.tab_id,p_target:agent.target_id,p_epoch:agent.generation_epoch,p_seconds:900});
         if(result?.leased===true){lease=result;break;}
       }
-      return json(200,{schema:'metaengine.devos.browser-cycle.v1',reconcile,backlog,lease,running:runningForAgents(snapshot,agents),scheduler_source:'NATIVE_SUPERVISOR_HEARTBEAT',second_scheduler_loop:false,automatic_retry_allowed:false,authority_effect:false});
+      return json(200,{schema:'metaengine.devos.browser-cycle.v1',reconcile,backlog,lease,running:runningForAgents(snapshot,agents),scheduler_source:'NATIVE_SUPERVISOR_HEARTBEAT',scheduler_policy:'IDLE_ROLE_FAIR_SHARE_V1',lease_attempts:leaseAttempts,second_scheduler_loop:false,automatic_retry_allowed:false,authority_effect:false});
     }
     if(req?.method==='POST'&&path==='/v1/devos/mark-running'){
       const b=binding(body); const proof=body?.proof||{};
       if(!HASH_RE.test(String(proof.prompt_sha256||'').toLowerCase())||!HASH_RE.test(String(proof.conversation_url_sha256||'').toLowerCase())||!['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','PROVEN_CONVERSATION'].includes(String(proof.effect_state||'')))return json(400,{error:'transport_not_proven'});
-      const result=await rpc('devos_fleet_mark_running_v1',{p_task:b.task_id,p_agent:b.agent_id,p_generation:b.lease_generation,p_tab:b.tab_id,p_target:b.target_id,p_epoch:b.agent_generation_epoch,p_proof:{prompt_sha256:String(proof.prompt_sha256).toLowerCase(),conversation_url_sha256:String(proof.conversation_url_sha256).toLowerCase(),effect_state:String(proof.effect_state)}});
-      return json(200,{...result,automatic_retry_allowed:false,authority_effect:false});
+      try{
+        const result=await rpc('devos_fleet_mark_running_v1',{p_task:b.task_id,p_agent:b.agent_id,p_generation:b.lease_generation,p_tab:b.tab_id,p_target:b.target_id,p_epoch:b.agent_generation_epoch,p_proof:{prompt_sha256:String(proof.prompt_sha256).toLowerCase(),conversation_url_sha256:String(proof.conversation_url_sha256).toLowerCase(),effect_state:String(proof.effect_state)}});
+        return json(200,{...result,automatic_retry_allowed:false,authority_effect:false});
+      }catch(error){const fenced=fencedRpcResponse(error);if(fenced)return fenced;throw error;}
     }
     if(req?.method==='POST'&&path==='/v1/devos/complete'){
       const b=binding(body); const state=String(body?.state||'').toUpperCase();
       if(!FINALISH.has(state)||!body?.summary||typeof body.summary!=='object'||Array.isArray(body.summary))return json(400,{error:'invalid_result'});
-      const result=await rpc('devos_fleet_complete_v1',{p_task:b.task_id,p_agent:b.agent_id,p_generation:b.lease_generation,p_tab:b.tab_id,p_target:b.target_id,p_epoch:b.agent_generation_epoch,p_state:state,p_summary:body.summary,p_error:body?.error==null?null:String(body.error).slice(0,160)});
-      return json(200,{...result,automatic_retry_allowed:false,authority_effect:false});
+      try{
+        const result=await rpc('devos_fleet_complete_v1',{p_task:b.task_id,p_agent:b.agent_id,p_generation:b.lease_generation,p_tab:b.tab_id,p_target:b.target_id,p_epoch:b.agent_generation_epoch,p_state:state,p_summary:body.summary,p_error:body?.error==null?null:String(body.error).slice(0,160)});
+        return json(200,{...result,automatic_retry_allowed:false,authority_effect:false});
+      }catch(error){const fenced=fencedRpcResponse(error);if(fenced)return fenced;throw error;}
     }
     const match=String(path||'').match(/^\/v1\/devos\/tasks\/([0-9a-f-]{36})\/status$/i);
     if(req?.method==='GET'&&match){
