@@ -2,7 +2,9 @@ name: METAENGINE Browser Supervisor Rebuild Fixed
 
 on:
   push:
-    branches: [work/browser-supervisor-rebuild-fixed-v1]
+    branches:
+      - work/browser-supervisor-rebuild-fixed-v1
+      - work/browser-supervisor-convergence-audit-v2
   workflow_dispatch:
 
 permissions:
