@@ -15,10 +15,30 @@ const lease = {
   automatic_retry_allowed: false,
   task_spec: { schema: 'metaengine.devos.task.v1', objective: 'Implement the safe slice.', constraints: ['no main merge'], deliverable: 'commit tests' },
 };
+const fleetTransportProof = {
+  schema: 'metaengine.browser.fleet-transport-proof.v1',
+  tab_id: lease.tab_id,
+  target_id: lease.target_id,
+  generation_epoch: lease.agent_generation_epoch,
+  conversation_url_sha256: 'a'.repeat(64),
+  proven_at: '2026-08-31T18:00:00.000Z',
+  authority_effect: false,
+};
 const fleet = {
   schema: 'metaengine.browser.fleet-snapshot.v1',
+  readiness_contract: 'TRANSPORT_PROOF_REQUIRED',
   policy: { warm_agents: 2, spawn_burst_limit: 4 },
-  agents: [{ agent_id: lease.agent_id, role: lease.role, lifecycle_state: 'ACTIVE', tab_id: lease.tab_id, target_id: lease.target_id, generation_epoch: 7 }],
+  agents: [{
+    agent_id: lease.agent_id,
+    role: lease.role,
+    lifecycle_state: 'ACTIVE',
+    tab_id: lease.tab_id,
+    target_id: lease.target_id,
+    generation_epoch: 7,
+    transport_proof: fleetTransportProof,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  }],
 };
 const composer = { role: 'textbox', name: 'Message ChatGPT' };
 const send = { role: 'button', name: 'Send prompt' };
@@ -30,6 +50,7 @@ function response(status, body) { return { status, ok: status >= 200 && status <
 function frame({ url = 'https://chatgpt.com/', stopActive = false, sendVisible = true, viewport = { width: 1200, height: 640 } } = {}) {
   return {
     tab_id: lease.tab_id,
+    target_id: lease.target_id,
     url,
     viewport,
     semantic_targets: [composer, ...(sendVisible ? [send] : []), ...(stopActive ? [stop] : [])],
@@ -48,10 +69,42 @@ function state(selected = supervisorTab, fleetValue = fleet) {
   };
 }
 
-test('exact task-agent-tab-target-generation binding is fenced', () => {
+test('exact task-agent-tab-target-generation binding is fenced by ACTIVE transport proof', () => {
   assert.equal(assertLiveLeaseBinding(lease, fleet).target_id, 'webcontents:10');
   assert.throws(() => assertLiveLeaseBinding({ ...lease, lease_generation: 2, tab_id: 'tab_other' }, fleet), /devos_tab_binding_mismatch/);
   assert.throws(() => assertLiveLeaseBinding({ ...lease, agent_generation_epoch: 8 }, fleet), /devos_generation_binding_mismatch/);
+  const bound = structuredClone(fleet);
+  bound.agents[0].lifecycle_state = 'BOUND_UNVERIFIED';
+  bound.agents[0].transport_proof = null;
+  assert.throws(() => assertLiveLeaseBinding(lease, bound), /devos_agent_state_invalid:ADMISSION_FENCED/);
+  const noProof = structuredClone(fleet);
+  noProof.agents[0].transport_proof = null;
+  assert.throws(() => assertLiveLeaseBinding(lease, noProof), /devos_agent_state_invalid:ADMISSION_FENCED/);
+  const driftedProof = structuredClone(fleet);
+  driftedProof.agents[0].transport_proof.target_id = 'webcontents:99';
+  assert.throws(() => assertLiveLeaseBinding(lease, driftedProof), /devos_agent_state_invalid:ADMISSION_FENCED/);
+});
+
+test('BOUND_UNVERIFIED server lease is fenced before SELECT_TAB or any Browser effect', async () => {
+  const boundFleet = structuredClone(fleet);
+  boundFleet.agents[0].lifecycle_state = 'BOUND_UNVERIFIED';
+  boundFleet.agents[0].transport_proof = null;
+  const commands = [];
+  const cycle = new DevOsNativeTaskCycle({
+    getState: async () => state(supervisorTab, boundFleet),
+    executeCommand: async (command) => {
+      commands.push(command.action);
+      if (command.action === 'FLEET_RECONCILE') return boundFleet;
+      throw new Error(`physical_command_must_not_run:${command.action}`);
+    },
+    signedRequest: async (path) => {
+      if (path === '/v1/devos/cycle') return response(200, { schema: 'metaengine.devos.browser-cycle.v1', backlog: { ready: 1, running: 0 }, lease, running: [] });
+      throw new Error(`unexpected:${path}`);
+    },
+  });
+  await assert.rejects(() => cycle.cycle(), /devos_agent_state_invalid:ADMISSION_FENCED/);
+  assert.deepEqual(commands, ['FLEET_RECONCILE']);
+  assert.equal(cycle.snapshot().bound_unverified_dispatch_allowed, false);
 });
 
 test('prompt is deterministic DB task data and never selects an executable action', () => {
@@ -99,6 +152,8 @@ test('cycle foregrounds worker, types without submit, clicks Send once, proves g
   assert.equal(first.dispatch.proof.effect_state, 'PROVEN_GENERATING');
   assert.equal(first.dispatch.selected_tab_mutation, true);
   assert.equal(first.dispatch.viewport_geometry_required, true);
+  assert.equal(first.fleet_transport_proof.state, 'PREEXISTING_ACTIVE_PROOF_REVALIDATED');
+  assert.equal(first.fleet_transport_proof_before_physical_dispatch, true);
   assert.equal(selected, supervisorTab);
   assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'SEMANTIC_TYPE').length, 1);
   assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'TYPED_CLICK').length, 1);
