@@ -1,0 +1,30 @@
+name: C5 Local Transport Observer
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/fleet-transport-local-observer.mjs'
+      - 'apps/metaengine-browser/test/fleet-transport-local-observer.test.mjs'
+      - '.github/workflows/c5-local-transport-observer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify Browser-local transport observation trust boundary
+        run: node --test apps/metaengine-browser/test/fleet-transport-local-observer.test.mjs
