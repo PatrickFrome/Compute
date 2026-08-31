@@ -49,7 +49,8 @@ create table public.compute_fabric_a2_supervisor_actuation_lease_h205f22 (
 \i supabase/migrations/20260831184800_compute_unified_source_snapshot_v1.sql
 
 insert into public.compute_fabric_a2_browser_supervisor_state_h205f22 values
-('client_exact','11111111-1111-4111-8111-111111111111',clock_timestamp(),'0.6.3-test','CONTROL',true,'{"supervisor_lifecycle":{"quiescent":false}}',false);
+('client_exact','11111111-1111-4111-8111-111111111111',clock_timestamp(),'0.6.3-test','CONTROL',true,
+'{"process_incarnation_id":"proc_exact","tabs":[{"url":"https://secret.example/private"}],"perception":{"text_excerpt":"sensitive page text","semantic_targets":[{"name":"private"}]},"fleet":{"counts":{"ACTIVE":2,"BOUND_UNVERIFIED":8},"readiness_contract":"TRANSPORT_PROOF_REQUIRED","policy":{"capacity_model":"ELASTIC_BACKLOG_DRIVEN","desired_agents":7,"automatic_work_retry":false,"browser_authority":false}},"self_update":{"state":"CURRENT","current_version":"0.6.3-test","trusted_channel":"dev","release_resolution":"UNRESOLVED","metadata_verified":false,"publisher_verified":false,"restart_gate_safe":false},"development_plane":{"state":"READY","version":"0.4.0","arbitrary_eval":false,"browser_actuation_authority":false,"direct_promote_current":false},"supervisor_lifecycle":{"quiescent":false,"supervisor_generation":"IDLE","keepalive":{"state":"ACTIVE","cycle_seq":13,"updated_at":"2026-08-31T18:12:46Z","supervisor_id":"METAENGINE_SUPERVISOR","supervisor_epoch":1,"active_wake":{"wake_id":"wake_exact","reason":"WORKER_LOST"},"pending_wake":null,"queued_wakes":[{},{}],"ambiguous_history":[{}],"conversation_url":"https://secret.example/supervisor"}}}',false);
 
 insert into public.compute_fabric_a2_supervisor_mesh_instance_h205f22
 (workspace_id,supervisor_instance_id,tab_id,status,priority,last_seen_at,authority_effect)
@@ -71,6 +72,13 @@ begin
   if j->>'authority_effect' <> 'false' then raise exception 'snapshot granted authority'; end if;
   if j#>>'{roadmap_contract,roadmap_id}' <> 'metaengine-development-os-v1' then raise exception 'roadmap missing: %', j; end if;
   if (j#>>'{browser_supervisor,stale}')::boolean is distinct from false then raise exception 'fresh browser marked stale: %', j; end if;
+  if j#>>'{browser_supervisor,runtime,process_incarnation_id}' <> 'proc_exact' then raise exception 'process incarnation missing: %', j; end if;
+  if j#>>'{browser_supervisor,runtime,keepalive,active_wake_id}' <> 'wake_exact' then raise exception 'active wake identity missing: %', j; end if;
+  if (j#>>'{browser_supervisor,runtime,keepalive,queued_wake_count}')::int <> 2 then raise exception 'queued wake count wrong: %', j; end if;
+  if j#>>'{browser_supervisor,runtime,self_update,restart_gate_safe}' <> 'false' then raise exception 'restart gate missing: %', j; end if;
+  if j#>>'{browser_supervisor,runtime,development_plane,arbitrary_eval}' <> 'false' then raise exception 'development-plane invariant missing: %', j; end if;
+  if j::text like '%sensitive page text%' or j::text like '%secret.example%' or j::text like '%semantic_targets%' or j::text like '%"tabs"%' then raise exception 'raw browser/page state leaked: %', j; end if;
+  if j#>'{browser_supervisor,state}' is not null then raise exception 'raw state surface unexpectedly present: %', j; end if;
   if (j#>>'{supervisor_mesh,active_count}')::int <> 1 then raise exception 'mesh count wrong: %', j; end if;
   if (j#>>'{actuation_leases,active_unreleased_count}')::int <> 1 then raise exception 'lease count wrong: %', j; end if;
   if has_function_privilege('anon','public.h205f22_compute_unified_source_snapshot_v1(uuid)','EXECUTE') then raise exception 'anon execute unexpectedly granted'; end if;

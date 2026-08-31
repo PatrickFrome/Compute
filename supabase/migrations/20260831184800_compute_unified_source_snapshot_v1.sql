@@ -25,7 +25,49 @@ begin
     'extension_version', s.extension_version,
     'supervisor_mode', s.supervisor_mode,
     'armed', s.armed,
-    'state', s.state,
+    'runtime', jsonb_strip_nulls(jsonb_build_object(
+      'process_incarnation_id', s.state->>'process_incarnation_id',
+      'fleet', jsonb_strip_nulls(jsonb_build_object(
+        'counts', s.state#>'{fleet,counts}',
+        'readiness_contract', s.state#>>'{fleet,readiness_contract}',
+        'capacity_model', s.state#>>'{fleet,policy,capacity_model}',
+        'desired_agents', s.state#>'{fleet,policy,desired_agents}',
+        'automatic_work_retry', s.state#>'{fleet,policy,automatic_work_retry}',
+        'browser_authority', s.state#>'{fleet,policy,browser_authority}'
+      )),
+      'keepalive', jsonb_strip_nulls(jsonb_build_object(
+        'state', s.state#>>'{supervisor_lifecycle,keepalive,state}',
+        'cycle_seq', s.state#>'{supervisor_lifecycle,keepalive,cycle_seq}',
+        'updated_at', s.state#>>'{supervisor_lifecycle,keepalive,updated_at}',
+        'supervisor_id', s.state#>>'{supervisor_lifecycle,keepalive,supervisor_id}',
+        'supervisor_epoch', s.state#>'{supervisor_lifecycle,keepalive,supervisor_epoch}',
+        'active_wake_id', s.state#>>'{supervisor_lifecycle,keepalive,active_wake,wake_id}',
+        'active_wake_reason', s.state#>>'{supervisor_lifecycle,keepalive,active_wake,reason}',
+        'pending_wake_id', s.state#>>'{supervisor_lifecycle,keepalive,pending_wake,wake_id}',
+        'pending_wake_reason', s.state#>>'{supervisor_lifecycle,keepalive,pending_wake,reason}',
+        'queued_wake_count', jsonb_array_length(coalesce(s.state#>'{supervisor_lifecycle,keepalive,queued_wakes}', '[]'::jsonb)),
+        'ambiguous_history_count', jsonb_array_length(coalesce(s.state#>'{supervisor_lifecycle,keepalive,ambiguous_history}', '[]'::jsonb))
+      )),
+      'supervisor_generation', s.state#>>'{supervisor_lifecycle,supervisor_generation}',
+      'quiescent', s.state#>'{supervisor_lifecycle,quiescent}',
+      'self_update', jsonb_strip_nulls(jsonb_build_object(
+        'state', s.state#>>'{self_update,state}',
+        'current_version', s.state#>>'{self_update,current_version}',
+        'available_version', s.state#>>'{self_update,available_version}',
+        'trusted_channel', s.state#>>'{self_update,trusted_channel}',
+        'release_resolution', s.state#>>'{self_update,release_resolution}',
+        'metadata_verified', s.state#>'{self_update,metadata_verified}',
+        'publisher_verified', s.state#>'{self_update,publisher_verified}',
+        'restart_gate_safe', s.state#>'{self_update,restart_gate_safe}'
+      )),
+      'development_plane', jsonb_strip_nulls(jsonb_build_object(
+        'state', s.state#>>'{development_plane,state}',
+        'version', s.state#>>'{development_plane,version}',
+        'arbitrary_eval', s.state#>'{development_plane,arbitrary_eval}',
+        'browser_actuation_authority', s.state#>'{development_plane,browser_actuation_authority}',
+        'direct_promote_current', s.state#>'{development_plane,direct_promote_current}'
+      ))
+    )),
     'authority_effect', false
   )
   into v_browser
