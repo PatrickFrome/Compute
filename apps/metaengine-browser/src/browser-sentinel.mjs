@@ -4,7 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
-export const BROWSER_SENTINEL_VERSION = '1.3.0';
+export const BROWSER_SENTINEL_VERSION = '1.4.0';
+export const BROWSER_SENTINEL_WORKER_HEARTBEAT_MAX_AGE_MS = 8_000;
 
 async function readJson(file) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); }
@@ -30,6 +31,10 @@ function writeJsonSync(file, value) {
   fsSync.renameSync(temp, file);
 }
 
+export function browserSentinelWorkerHeartbeatPath(statePath) {
+  return `${String(statePath)}.worker-heartbeat-v1.json`;
+}
+
 function safeState(value) {
   const relaunchPid = Number(value.relaunch_pid || 0);
   const workerPid = Number(value.worker_pid || 0);
@@ -52,7 +57,7 @@ function safeState(value) {
     relaunch_pid: Number.isSafeInteger(relaunchPid) && relaunchPid > 0 ? relaunchPid : null,
     relaunch_result: value.relaunch_result || null,
     created_at: value.created_at || new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    updated_at: value.updated_at || new Date().toISOString(),
     authority_effect: false,
   };
 }
@@ -93,7 +98,47 @@ export class BrowserSentinelHost {
     this.#spawn = spawnImpl;
   }
 
-  snapshot() { return this.#state ? structuredClone(this.#state) : null; }
+  snapshot() {
+    if (!this.#state) return null;
+    const persisted = readJsonSync(this.#statePath);
+    if (persisted?.token === this.#state.token && Number(persisted.parent_pid) === Number(this.#state.parent_pid)) {
+      this.#state = { ...this.#state, ...persisted, authority_effect: false };
+    }
+    const heartbeat = readJsonSync(browserSentinelWorkerHeartbeatPath(this.#statePath));
+    const heartbeatAtMs = Date.parse(String(heartbeat?.heartbeat_at || ''));
+    const heartbeatAgeMs = Number.isFinite(heartbeatAtMs) ? Math.max(0, Date.now() - heartbeatAtMs) : null;
+    const heartbeatBound = Boolean(
+      heartbeat?.schema === 'metaengine.browser-sentinel.worker-heartbeat.v1'
+      && heartbeat?.token === this.#state.token
+      && Number(heartbeat?.parent_pid) === Number(this.#state.parent_pid)
+      && Number(heartbeat?.worker_pid) === Number(this.#state.worker_pid)
+      && heartbeat?.lifecycle === 'READY'
+      && heartbeat?.authority_effect === false
+    );
+    const workerHealthy = heartbeatBound
+      && heartbeatAgeMs != null
+      && heartbeatAgeMs <= BROWSER_SENTINEL_WORKER_HEARTBEAT_MAX_AGE_MS
+      && this.#state.worker_released !== true
+      && this.#state.installer_handoff !== true;
+    return structuredClone({
+      ...this.#state,
+      worker_ready: workerHealthy,
+      worker_heartbeat_at: heartbeatBound ? heartbeat.heartbeat_at : null,
+      worker_heartbeat_age_ms: heartbeatBound ? heartbeatAgeMs : null,
+      worker_health: workerHealthy ? 'HEALTHY' : 'STALE_OR_MISSING',
+      authority_effect: false,
+    });
+  }
+
+  async waitUntilHealthy(timeoutMs = 5_000) {
+    const deadline = Date.now() + Math.max(500, Number(timeoutMs) || 5_000);
+    while (Date.now() <= deadline) {
+      const snap = this.snapshot();
+      if (snap?.worker_ready === true) return snap;
+      await sleep(50);
+    }
+    throw new Error('browser_sentinel_worker_handshake_timeout');
+  }
 
   async start({ app = null } = {}) {
     const token = crypto.randomUUID();
@@ -135,7 +180,7 @@ export class BrowserSentinelHost {
   async #mutate(patch) {
     const current = await readJson(this.#statePath);
     if (!current || current.token !== this.#state?.token) return this.snapshot();
-    this.#state = safeState({ ...current, ...patch });
+    this.#state = safeState({ ...current, ...patch, updated_at: new Date().toISOString() });
     await writeJson(this.#statePath, this.#state);
     return this.snapshot();
   }
@@ -143,7 +188,7 @@ export class BrowserSentinelHost {
   #mutateSync(patch) {
     const current = readJsonSync(this.#statePath);
     if (!current || current.token !== this.#state?.token) return this.snapshot();
-    this.#state = safeState({ ...current, ...patch });
+    this.#state = safeState({ ...current, ...patch, updated_at: new Date().toISOString() });
     writeJsonSync(this.#statePath, this.#state);
     return this.snapshot();
   }
