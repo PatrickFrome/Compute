@@ -6,23 +6,23 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(here, '../src');
-
 async function read(name) { return fs.readFile(path.join(src, name), 'utf8'); }
 
-test('self-update continuity is persisted before lock release and restored before lifecycle starts', async () => {
-  const source = await read('native-supervisor-client.mjs');
+test('self-update continuity remains in exact base before lock release and before lifecycle start', async () => {
+  const source = await read('native-supervisor-client-base.mjs');
+  const publicClient = await read('native-supervisor-client.mjs');
   const persistAt = source.indexOf('await this.#persistSessionContinuity(app, receipt)');
   const stopAt = source.indexOf('this.stop();', persistAt);
   const releaseAt = source.indexOf('app.releaseSingleInstanceLock();', persistAt);
   assert.ok(persistAt >= 0 && stopAt > persistAt && releaseAt > stopAt);
-
   const restoreAt = source.indexOf('await this.#restoreSessionContinuity()');
   const lifecycleAt = source.indexOf('await this.#lifecycle.start()', restoreAt);
   assert.ok(restoreAt >= 0 && lifecycleAt > restoreAt);
+  assert.match(publicClient, /extends BaseNativeSupervisorClient/);
 });
 
 test('updater gate does not require ChatGPT/model quiescence', async () => {
-  const client = await read('native-supervisor-client.mjs');
+  const client = await read('native-supervisor-client-base.mjs');
   const gate = await read('self-update-restart-safety.mjs');
   assert.equal(client.includes('this.#lifecycle?.isQuiescent()'), false);
   assert.equal(gate.includes('chatGptControlMatches'), false);

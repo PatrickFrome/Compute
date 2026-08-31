@@ -5,26 +5,27 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const sourcePath = path.resolve(here, '../src/native-supervisor-client.mjs');
+const basePath = path.resolve(here, '../src/native-supervisor-client-base.mjs');
+const publicPath = path.resolve(here, '../src/native-supervisor-client.mjs');
+const source = (p) => fs.readFileSync(p, 'utf8');
 
-function source() {
-  return fs.readFileSync(sourcePath, 'utf8');
-}
-
-test('native supervisor heartbeat exports shell version and self-update state for live upgrade observation', () => {
-  const raw = source();
-  assert.match(raw, /shell_version:\s*this\.#version/);
-  assert.match(raw, /self_update:\s*this\.#selfUpdate\?\.snapshot\(\)\s*\|\|\s*null/);
-  assert.match(raw, /await this\.#heartbeat\(\)/);
-  assert.match(raw, /response\.status !== 202/);
+test('native supervisor heartbeat telemetry remains owned by exact base used by public client', () => {
+  const base = source(basePath);
+  const publicClient = source(publicPath);
+  assert.match(base, /shell_version:\s*this\.#version/);
+  assert.match(base, /self_update:\s*this\.#selfUpdate\?\.snapshot\(\)\s*\|\|\s*null/);
+  assert.match(base, /await this\.#heartbeat\(\)/);
+  assert.match(base, /response\.status !== 202/);
+  assert.match(publicClient, /extends BaseNativeSupervisorClient/);
+  assert.match(publicClient, /createBoundedSupervisorFetch/);
 });
 
-test('typed self-update status check and apply remain owned by native supervisor', () => {
-  const raw = source();
-  assert.match(raw, /action === 'SELF_UPDATE_STATUS'/);
-  assert.match(raw, /action === 'SELF_UPDATE_CHECK'/);
-  assert.match(raw, /action === 'SELF_UPDATE_APPLY'/);
-  assert.match(raw, /native_supervisor_control_required/);
-  assert.match(raw, /native_supervisor_disarmed/);
-  assert.match(raw, /applyWhenSafe\(\)/);
+test('typed self-update status/check/apply remain in the inherited authority path', () => {
+  const base = source(basePath);
+  assert.match(base, /action === 'SELF_UPDATE_STATUS'/);
+  assert.match(base, /action === 'SELF_UPDATE_CHECK'/);
+  assert.match(base, /action === 'SELF_UPDATE_APPLY'/);
+  assert.match(base, /native_supervisor_control_required/);
+  assert.match(base, /native_supervisor_disarmed/);
+  assert.match(base, /applyWhenSafe\(\)/);
 });
