@@ -8,10 +8,11 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../..');
 const forbiddenProvider = ['ne', 'on'].join('');
-const forbiddenWord = new RegExp(`\\b${forbiddenProvider}\\b`, 'i');
+const forbiddenWord = new RegExp(`\b${forbiddenProvider}\b`, 'i');
 const forbiddenSdk = `@${forbiddenProvider}database`;
 const forbiddenHost = `${forbiddenProvider}.tech`;
 const forbiddenEnv = `${forbiddenProvider.toUpperCase()}_`;
+const historicalSupabaseProject = ['jbztmeomxtp', 'skkvlhlcy'].join('');
 
 function trackedFiles() {
   const output = execFileSync('git', ['ls-files', '-z'], {
@@ -31,7 +32,7 @@ async function inspectTrackedText(relativePath) {
   return bytes.toString('utf8');
 }
 
-test('repository persistence and coordination remain Supabase-only', async () => {
+test('repository persistence and coordination remain Supabase-only and single-project', async () => {
   const violations = [];
   for (const relativePath of trackedFiles()) {
     const text = await inspectTrackedText(relativePath);
@@ -42,6 +43,7 @@ test('repository persistence and coordination remain Supabase-only', async () =>
       || lower.includes(forbiddenSdk)
       || lower.includes(forbiddenHost)
       || text.includes(forbiddenEnv)
+      || text.includes(historicalSupabaseProject)
     ) {
       violations.push(relativePath);
     }
@@ -50,6 +52,6 @@ test('repository persistence and coordination remain Supabase-only', async () =>
   assert.deepEqual(
     violations,
     [],
-    `alternate Postgres provider reference is forbidden; use Supabase only: ${violations.join(', ')}`,
+    `non-canonical persistence/runtime backend reference is forbidden; use the H205F22 Supabase backend only: ${violations.join(', ')}`,
   );
 });
