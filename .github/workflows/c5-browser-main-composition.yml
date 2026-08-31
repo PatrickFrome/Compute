@@ -1,0 +1,35 @@
+name: C5 Browser Main Composition Boundary
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/main.mjs'
+      - 'apps/metaengine-browser/src/fleet-browser-composition.mjs'
+      - 'apps/metaengine-browser/src/fleet-browser-main-transport.mjs'
+      - 'apps/metaengine-browser/src/fleet-browser-runtime-transport.mjs'
+      - 'apps/metaengine-browser/src/fleet-local-transport-observer.mjs'
+      - 'apps/metaengine-browser/src/fleet-provisioner.mjs'
+      - 'apps/metaengine-browser/src/preload-shell.cjs'
+      - 'apps/metaengine-browser/src/development-plane-worker.cjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
+      - 'apps/metaengine-browser/test/main-fleet-composition-boundary.test.mjs'
+      - '.github/workflows/c5-browser-main-composition.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  main-composition-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Main-process composition boundary
+        run: node --test apps/metaengine-browser/test/main-fleet-composition-boundary.test.mjs
