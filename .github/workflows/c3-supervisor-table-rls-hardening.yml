@@ -1,0 +1,30 @@
+name: C3 Supervisor Table RLS Hardening
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/test/supervisor-table-rls-hardening.test.mjs'
+      - 'supabase/migrations/20260831005000_h205f22_supervisor_table_rls_hardening_v1.sql'
+      - '.github/workflows/c3-supervisor-table-rls-hardening.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify supervisor storage least-authority contract
+        run: node --test apps/metaengine-browser/test/supervisor-table-rls-hardening.test.mjs
