@@ -3,6 +3,11 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const {
+  DEFAULT_PARENT_TERMINATION_CONFIRM_MS,
+  parentProgressPath,
+  evaluateParentProgress,
+} = require('./browser-sentinel-liveness.cjs');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const STATE_PATH = String(process.env.METAENGINE_SENTINEL_STATE_PATH || '');
@@ -13,11 +18,14 @@ const EXPECTED_RESTART_GRACE_MS = 45000;
 const RELAUNCH_ACK_TIMEOUT_MS = 5000;
 const RELAUNCH_RECEIPT_PATH = `${STATE_PATH}.relaunch-v1.json`;
 const WORKER_HEARTBEAT_PATH = `${STATE_PATH}.worker-heartbeat-v1.json`;
+const PARENT_PROGRESS_PATH = parentProgressPath(STATE_PATH);
 
-async function readState() {
-  try { return JSON.parse(await fs.readFile(STATE_PATH, 'utf8')); }
+async function readJson(target) {
+  try { return JSON.parse(await fs.readFile(target, 'utf8')); }
   catch (error) { if (error && error.code === 'ENOENT') return null; throw error; }
 }
+async function readState() { return readJson(STATE_PATH); }
+async function readParentProgress() { return readJson(PARENT_PROGRESS_PATH); }
 
 async function atomicWrite(target, value) {
   const temp = `${target}.tmp`;
@@ -93,6 +101,53 @@ async function awaitExpectedSuccessor() {
   return false;
 }
 
+async function terminateStalledParentOnce(state, decision) {
+  if (state.parent_liveness_termination_attempted === true) return false;
+  const intent = {
+    ...state,
+    lifecycle: 'PARENT_LIVENESS_TERMINATION_INTENT',
+    parent_liveness_termination_attempted: true,
+    parent_liveness_termination_intent_at: new Date().toISOString(),
+    parent_liveness_reason: String(decision?.state || 'PROGRESS_STALE'),
+    parent_liveness_progress_at: decision?.progress_at || null,
+    parent_liveness_result: null,
+    automatic_retry_allowed: false,
+  };
+  if (!(await writeStateIfBound(intent))) return false;
+
+  try {
+    process.kill(PARENT_PID, 'SIGTERM');
+  } catch (error) {
+    if (!parentAlive()) {
+      await writeStateIfBound({ ...intent, lifecycle: 'PARENT_TERMINATION_CONFIRMED', parent_liveness_result: 'parent_absent_after_signal_error' });
+      return true;
+    }
+    await writeStateIfBound({
+      ...intent,
+      lifecycle: 'PARENT_TERMINATION_AMBIGUOUS',
+      parent_liveness_result: String(error && error.message || error).slice(0, 240),
+      automatic_retry_allowed: false,
+    });
+    return false;
+  }
+
+  const deadline = Date.now() + DEFAULT_PARENT_TERMINATION_CONFIRM_MS;
+  while (Date.now() < deadline) {
+    await sleep(250);
+    if (!parentAlive()) {
+      await writeStateIfBound({ ...intent, lifecycle: 'PARENT_TERMINATION_CONFIRMED', parent_liveness_result: 'exact_parent_pid_absent' });
+      return true;
+    }
+  }
+  await writeStateIfBound({
+    ...intent,
+    lifecycle: 'PARENT_TERMINATION_AMBIGUOUS',
+    parent_liveness_result: 'exact_parent_pid_still_alive_after_signal',
+    automatic_retry_allowed: false,
+  });
+  return false;
+}
+
 async function relaunchOnce(state) {
   if (state.relaunch_attempted === true) return;
   const intent = {
@@ -113,13 +168,7 @@ async function relaunchOnce(state) {
 
   let child;
   try {
-    child = spawn(state.executable, [`--metaengine-sentinel-recovery=${TOKEN}`], {
-      detached: true,
-      stdio: 'ignore',
-      shell: false,
-      windowsHide: false,
-      env,
-    });
+    child = spawn(state.executable, [`--metaengine-sentinel-recovery=${TOKEN}`], { detached: true, stdio: 'ignore', shell: false, windowsHide: false, env });
   } catch (error) {
     const outcome = { lifecycle: 'RELAUNCH_FAILED', pid: null, result: String(error && error.message || error).slice(0, 240) };
     await writeRelaunchReceipt(state, outcome);
@@ -142,12 +191,7 @@ async function relaunchOnce(state) {
 
   if (outcome.lifecycle === 'RELAUNCH_DISPATCHED') child.unref && child.unref();
   await writeRelaunchReceipt(state, outcome);
-  await writeStateIfBound({
-    ...intent,
-    lifecycle: outcome.lifecycle,
-    relaunch_pid: outcome.pid,
-    relaunch_result: outcome.result,
-  });
+  await writeStateIfBound({ ...intent, lifecycle: outcome.lifecycle, relaunch_pid: outcome.pid, relaunch_result: outcome.result });
 }
 
 async function main() {
@@ -156,21 +200,35 @@ async function main() {
   if (!validBinding(initial)) process.exit(3);
 
   if (!(await writeWorkerHeartbeat())) process.exit(4);
-  while (parentAlive()) {
+  while (true) {
     await sleep(POLL_MS);
     if (!(await writeWorkerHeartbeat())) return;
+    let state = await readState();
+    if (!validBinding(state)) return;
+    if (state.lifecycle === 'PLANNED_SHUTDOWN') return;
+    if (!parentAlive()) break;
+
+    const progress = await readParentProgress().catch(() => null);
+    const decision = evaluateParentProgress({ state, progress });
+    if (decision.terminate_parent === true) {
+      const terminated = await terminateStalledParentOnce(state, decision);
+      if (terminated) break;
+    }
   }
 
   let state = await readState();
   if (!validBinding(state)) return;
   if (state.lifecycle === 'PLANNED_SHUTDOWN') return;
 
-  if (state.expected_restart === true || state.lifecycle === 'EXPECTED_RESTART') {
+  if (state.expected_restart === true || state.lifecycle === 'EXPECTED_RESTART' || state.lifecycle === 'INSTALLER_HANDOFF') {
     if (await awaitExpectedSuccessor()) return;
     state = await readState();
     if (!validBinding(state)) return;
   }
 
+  // Relaunch is authorized only after the exact old parent is positively absent.
+  // A live or ambiguously terminated parent can never cause a second Browser instance.
+  if (parentAlive()) return;
   await relaunchOnce(state);
 }
 
