@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { ComputeBridgeClient } from './compute-bridge-client.mjs';
 import { DevelopmentPlane } from './development-plane.mjs';
 import { FleetProvisioner } from './fleet-provisioner.mjs';
+import { createFleetTargetLocalObserver } from './fleet-target-local-observer.mjs';
 import { OwnerSafetyGateRegistry, bindGlobalOwnerSafetyGateRegistry } from './owner-safety-gate-registry.mjs';
 import { captureSemanticFrame, captureViewThumbnail, executeSemanticCommand } from './native-browser-control.mjs';
 import { NativeSupervisorClient } from './native-supervisor-client.mjs';
@@ -456,12 +457,17 @@ async function executeNativeSupervisorCommand(command) {
 async function initNativeSupervisor() {
   if (nativeSupervisor) return nativeSupervisor.snapshot();
   const identity = new SupervisorDeviceIdentity({ statePath: supervisorIdentityPath(), secureStorage: safeStorage });
+  const observeLocalTarget = createFleetTargetLocalObserver({
+    lookupView: (tabId) => views.get(String(tabId)) || null,
+  });
   nativeSupervisor = new NativeSupervisorClient({
     identity,
     version: app.getVersion(),
     intervalMs: 2000,
     getState: nativeSupervisorState,
     executeCommand: executeNativeSupervisorCommand,
+    observeLocalTarget,
+    workerObservationBudget: 4,
   });
   await nativeSupervisor.start();
   await publishSnapshot().catch(() => {});
