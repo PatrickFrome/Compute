@@ -35,7 +35,7 @@ test('round robin advances instead of rescanning the first workers', async () =>
 
 test('cached state is reusable only for the exact tab and generation incarnation', async () => {
   const observer = new BoundedWorkerObserver({ budget: 1 });
-  const rows = agents(2);
+  const rows = agents(3);
   await observer.observe(rows, {
     capture: async () => ({ semantic_targets: [] }),
     isGenerating: () => false,
