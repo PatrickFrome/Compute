@@ -5,6 +5,7 @@ import {
   persistUpdatedSuccessorReceipt,
   SUCCESSOR_STARTUP_PROBE_ONLY,
 } from './self-update-handoff.mjs';
+import { installSignedSupervisorHeartbeatQualificationHook } from './self-update-signed-heartbeat.mjs';
 import { qualifyUpdatedSuccessorWhenHealthy } from './self-update-successor-qualification.mjs';
 
 const bypassSingleInstance = process.argv.includes('--metaengine-smoke')
@@ -68,11 +69,6 @@ if (guard.primary) {
 
   if (updateHandoff?.successor_startup === SUCCESSOR_STARTUP_PROBE_ONLY) {
     console.log(JSON.stringify(updateHandoff.row));
-    // PROBE_ONLY is an evidence process, not the long-lived successor runtime.
-    // The durable receipt above proves that this exact process acquired primary
-    // authority. Release the lock explicitly before exit so the next normal
-    // Browser start cannot race the asynchronous Electron shutdown path and be
-    // misclassified as a secondary instance.
     if (typeof app.hasSingleInstanceLock === 'function'
       && app.hasSingleInstanceLock() === true
       && typeof app.releaseSingleInstanceLock === 'function') {
@@ -151,18 +147,19 @@ if (guard.primary) {
         authority_effect: false,
       })),
     });
+    globalThis.fetch = installSignedSupervisorHeartbeatQualificationHook({ app, fetchImpl: globalThis.fetch });
     await import('./main.mjs');
     if (updatedLaunch) {
       setImmediate(() => {
         qualifyUpdatedSuccessorWhenHealthy({ app })
           .then((result) => console.log(JSON.stringify({
-            schema: 'metaengine.browser.self-update-qualification.v1',
+            schema: 'metaengine.browser.self-update-qualification.v2',
             version: app.getVersion(),
             ...result,
             authority_effect: false,
           })))
           .catch((error) => console.error(JSON.stringify({
-            schema: 'metaengine.browser.self-update-qualification.v1',
+            schema: 'metaengine.browser.self-update-qualification.v2',
             version: app.getVersion(),
             state: 'QUALIFICATION_ERROR',
             error: String(error?.message || error).slice(0, 300),
