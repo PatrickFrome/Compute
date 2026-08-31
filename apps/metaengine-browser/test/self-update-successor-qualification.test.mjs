@@ -40,7 +40,7 @@ function receipt(target) {
   };
 }
 
-function healthyHeartbeat(version, continuityState = 'RESTORED') {
+function healthyHeartbeat(version, continuityState = 'RESTORED', sentinelHeartbeatAgeMs = 500) {
   return {
     shell_version: version,
     self_update_session_continuity: { state: continuityState, authority_effect: false },
@@ -48,7 +48,16 @@ function healthyHeartbeat(version, continuityState = 'RESTORED') {
       state: 'CURRENT',
       current_version: version,
       last_error: null,
-      host_resilience: { state: 'ACTIVE', sentinel: { lifecycle: 'ARMED' } },
+      host_resilience: {
+        state: 'ACTIVE',
+        sentinel_worker_healthy: true,
+        sentinel: {
+          lifecycle: 'ARMED',
+          worker_ready: true,
+          worker_heartbeat_age_ms: sentinelHeartbeatAgeMs,
+          authority_effect: false,
+        },
+      },
     },
   };
 }
@@ -89,6 +98,7 @@ test('exact successor requires singleton, uptime, continuity and a fresh signed 
 
   const heartbeat = await recordAcceptedSignedSupervisorHeartbeat({ app, state: healthyHeartbeat(target), acceptedAtMs: 10_000 });
   assert.equal(heartbeat.state, 'HEARTBEAT_HEALTHY');
+  assert.equal(heartbeat.sentinel_worker_healthy, true);
   const result = await probeUpdatedSuccessorQualification({
     app,
     uptimeMs: () => 5000,
@@ -105,6 +115,19 @@ test('exact successor requires singleton, uptime, continuity and a fresh signed 
   assert.equal(journal.evidence.signed_heartbeat_accepted, true);
   assert.equal(journal.evidence.self_update_runtime_healthy, true);
   assert.equal(journal.evidence.sentinel_armed, true);
+  assert.equal(journal.evidence.sentinel_worker_healthy, true);
+});
+
+test('signed heartbeat with stale or missing sentinel worker proof cannot qualify successor', async () => {
+  const { app } = await fixture();
+  const target = await bootSuccessor(app);
+  const stale = await recordAcceptedSignedSupervisorHeartbeat({
+    app,
+    state: healthyHeartbeat(target, 'RESTORED', 20_000),
+    acceptedAtMs: 10_000,
+  });
+  assert.equal(stale.state, 'HEARTBEAT_RESILIENCE_NOT_READY');
+  assert.equal((await probeUpdatedSuccessorQualification({ app, uptimeMs: () => 5000, nowMs: () => 10_500 })).state, 'PENDING_SIGNED_HEARTBEAT');
 });
 
 test('hard continuity failure in accepted heartbeat quarantines successor', async () => {
