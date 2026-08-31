@@ -8,7 +8,9 @@
 --   * ambiguous materialization/retirement freezes the binding; it never frees a fence;
 --   * page/model/worker text has no authority and no RPC accepts executable text.
 
-create table if not exists public.compute_fabric_a2_workspace_binding_h205f22 (
+-- Deliberately fail if this relation already exists. A migration collision must not silently
+-- adopt an unknown/pre-existing registry schema and weaken any fence below.
+create table public.compute_fabric_a2_workspace_binding_h205f22 (
   binding_id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null,
   workspace_generation bigint not null,
@@ -82,25 +84,25 @@ create table if not exists public.compute_fabric_a2_workspace_binding_h205f22 (
 );
 
 -- FROZEN remains active by design. Only a proven RETIRED transition releases these fences.
-create unique index if not exists compute_fabric_a2_workspace_binding_active_agent_uq
+create unique index compute_fabric_a2_workspace_binding_active_agent_uq
   on public.compute_fabric_a2_workspace_binding_h205f22(agent_id)
   where retired_at is null;
 
-create unique index if not exists compute_fabric_a2_workspace_binding_active_branch_uq
+create unique index compute_fabric_a2_workspace_binding_active_branch_uq
   on public.compute_fabric_a2_workspace_binding_h205f22(branch_name)
   where retired_at is null;
 
 -- lower(path) is intentionally conservative across Windows/Linux fleets: aliases that differ
 -- only by case fail closed instead of permitting two mutating workspaces on one physical path.
-create unique index if not exists compute_fabric_a2_workspace_binding_active_worktree_uq
+create unique index compute_fabric_a2_workspace_binding_active_worktree_uq
   on public.compute_fabric_a2_workspace_binding_h205f22(lower(worktree_path))
   where retired_at is null;
 
-create unique index if not exists compute_fabric_a2_workspace_binding_active_task_uq
+create unique index compute_fabric_a2_workspace_binding_active_task_uq
   on public.compute_fabric_a2_workspace_binding_h205f22(task_id)
   where retired_at is null;
 
-create index if not exists compute_fabric_a2_workspace_binding_identity_idx
+create index compute_fabric_a2_workspace_binding_identity_idx
   on public.compute_fabric_a2_workspace_binding_h205f22(workspace_id,task_id,agent_id,lease_generation);
 
 alter table public.compute_fabric_a2_workspace_binding_h205f22 enable row level security;
@@ -156,6 +158,11 @@ begin
     raise exception 'workspace_binding_branch_invalid';
   end if;
   if v_worktree = '' or length(v_worktree) > 4096 then raise exception 'workspace_binding_worktree_invalid'; end if;
+  if trim(coalesce(p_point_id,'')) = '' or trim(coalesce(p_repo_id,'')) = ''
+     or trim(coalesce(p_repo_root,'')) = '' or trim(coalesce(p_managed_root,'')) = ''
+     or trim(coalesce(p_tab_id,'')) = '' or trim(coalesce(p_target_id,'')) = '' then
+    raise exception 'workspace_binding_trusted_identity_incomplete';
+  end if;
 
   select * into v_row
     from public.compute_fabric_a2_workspace_binding_h205f22
@@ -168,6 +175,7 @@ begin
        or v_row.coordination_workspace_id <> p_coordination_workspace_id
        or v_row.task_id <> p_task_id
        or v_row.claim_id <> p_claim_id
+       or v_row.point_id <> lower(trim(coalesce(p_point_id,'')))
        or v_row.repo_id <> trim(coalesce(p_repo_id,''))
        or v_row.repo_root <> trim(coalesce(p_repo_root,''))
        or v_row.managed_root <> trim(coalesce(p_managed_root,''))
@@ -229,10 +237,16 @@ begin
        or v_row.coordination_workspace_id <> p_coordination_workspace_id
        or v_row.task_id <> p_task_id
        or v_row.claim_id <> p_claim_id
+       or v_row.point_id <> lower(trim(coalesce(p_point_id,'')))
+       or v_row.repo_id <> trim(coalesce(p_repo_id,''))
+       or v_row.repo_root <> trim(coalesce(p_repo_root,''))
+       or v_row.managed_root <> trim(coalesce(p_managed_root,''))
        or v_row.base_sha <> v_base
        or v_row.branch_name <> v_branch
        or v_row.agent_id <> v_agent
        or lower(v_row.worktree_path) <> lower(v_worktree)
+       or v_row.tab_id <> lower(trim(coalesce(p_tab_id,'')))
+       or v_row.target_id <> lower(trim(coalesce(p_target_id,'')))
        or v_row.agent_generation_epoch <> p_agent_generation_epoch
        or v_row.lease_generation <> p_lease_generation then
       raise exception 'workspace_binding_active_fence_conflict';
@@ -305,9 +319,14 @@ begin
        set state='FROZEN',ambiguity_code='LEASE_EXPIRED_BEFORE_READY',updated_at=v_now
      where binding_id=v_row.binding_id
      returning * into v_row;
+  elsif v_head !~ '^[0-9a-f]{40}$' then
+    update public.compute_fabric_a2_workspace_binding_h205f22
+       set state='FROZEN',initial_head_sha=null,ambiguity_code='INITIAL_HEAD_INVALID',updated_at=v_now
+     where binding_id=v_row.binding_id
+     returning * into v_row;
   elsif v_head <> v_row.base_sha then
     update public.compute_fabric_a2_workspace_binding_h205f22
-       set state='FROZEN',initial_head_sha=nullif(v_head,''),ambiguity_code='INITIAL_HEAD_MISMATCH',updated_at=v_now
+       set state='FROZEN',initial_head_sha=v_head,ambiguity_code='INITIAL_HEAD_MISMATCH',updated_at=v_now
      where binding_id=v_row.binding_id
      returning * into v_row;
   elsif v_realpath <> v_row.worktree_path then
