@@ -76,8 +76,14 @@ export function buildBootstrapHeartbeatPayload({ state = {}, version = '0.0.0', 
 export function supervisorHeartbeatIsStale(snapshot, {
   nowMs = Date.now(),
   staleMs = DEFAULT_SUPERVISOR_WATCHDOG_STALE_MS,
+  watchdogLastAt = null,
 } = {}) {
-  const lastMs = Date.parse(String(snapshot?.last_heartbeat_at || ''));
+  const primaryMs = Date.parse(String(snapshot?.last_heartbeat_at || ''));
+  const watchdogMs = Date.parse(String(watchdogLastAt || ''));
+  const lastMs = Math.max(
+    Number.isFinite(primaryMs) ? primaryMs : Number.NEGATIVE_INFINITY,
+    Number.isFinite(watchdogMs) ? watchdogMs : Number.NEGATIVE_INFINITY,
+  );
   return !Number.isFinite(lastMs) || nowMs - lastMs >= Math.max(1000, Number(staleMs) || DEFAULT_SUPERVISOR_WATCHDOG_STALE_MS);
 }
 
@@ -260,7 +266,10 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
   async #bootstrapPulse(startedAt) {
     if (this.#bootstrapInFlight) return;
     const supervisor = super.snapshot();
-    if (!supervisorHeartbeatIsStale(supervisor, { staleMs: this.#watchdogStaleMs })) return;
+    if (!supervisorHeartbeatIsStale(supervisor, {
+      staleMs: this.#watchdogStaleMs,
+      watchdogLastAt: this.#bootstrapLastAt,
+    })) return;
     this.#bootstrapInFlight = true;
     try {
       const state = await this.#getStateRef();
