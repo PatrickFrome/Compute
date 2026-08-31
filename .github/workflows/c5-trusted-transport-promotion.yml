@@ -1,0 +1,26 @@
+name: C5 Trusted Transport Promotion
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/fleet-transport-local-observer.mjs'
+      - 'apps/metaengine-browser/src/fleet-trusted-transport-promotion.mjs'
+      - 'apps/metaengine-browser/test/fleet-transport-local-observer.test.mjs'
+      - 'apps/metaengine-browser/test/fleet-trusted-transport-promotion.test.mjs'
+      - '.github/workflows/c5-trusted-transport-promotion.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  trusted-transport-promotion:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test apps/metaengine-browser/test/fleet-transport-local-observer.test.mjs apps/metaengine-browser/test/fleet-trusted-transport-promotion.test.mjs
