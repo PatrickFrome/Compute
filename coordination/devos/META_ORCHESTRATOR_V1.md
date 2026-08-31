@@ -1,6 +1,6 @@
 # METAENGINE Meta-Orchestrator V1
 
-Status: branch-local implementation contract. No production mutation, no main merge, no release authority.
+Status: branch-local convergence implementation. No production mutation, no main merge, no release authority.
 
 ## Purpose
 
@@ -24,7 +24,7 @@ The design selectively adopts mature patterns without importing another authorit
 
 ## Existing authority reused
 
-V1 does not add production DDL. It consumes existing durable sources and emits zero-authority proposals:
+V1 does not introduce a second production queue or scheduler. It consumes existing durable sources and emits zero-authority proposals:
 
 - `destruktion_meta.metaengine_devos_roadmap_authority_h205f22`
 - `destruktion_meta.compute_fabric_admission_plan_h205f22`
@@ -34,6 +34,7 @@ V1 does not add production DDL. It consumes existing durable sources and emits z
 - `destruktion_meta.devos_fleet_event_h205f22`
 - existing `public.devos_fleet_enqueue_v1(...)`
 - existing DevOS reconcile/lease/running/complete/ambiguous RPC family
+- native Browser supervisor state carrying the Browser-owned fleet snapshot
 
 Meta-Orchestrator never manufactures `agent_id`, `tab_id`, `target_id`, agent generation, lease generation, lease expiry, claim id, or workspace ownership. Those remain scheduler/runtime-owned fields.
 
@@ -58,14 +59,26 @@ existing devos_fleet   semantic reasoning
 single DevOS scheduler / admission
        |
        v
-lease + exact incarnation fencing
+exact task + claim + lease
+       |
+       v
+Workspace Binding Registry
+RESERVED -> proven readback -> READY
+       |
+       v
+exact Meta-to-Workspace mutation admission
        |
        v
 existing two-phase Browser/native task cycle
        |
        v
 transport/effect proof -> evidence ledger
+       |
+       v
+Meta-Orchestrator reconcile
 ```
+
+The Workspace Binding Registry is deliberately **after** scheduler lease/claim and **before** the first mutating workspace or Browser effect. A semantic meta proposal cannot prove a physical workspace before the scheduler has selected the exact incarnation.
 
 ## Core invariants
 
@@ -84,6 +97,10 @@ transport/effect proof -> evidence ledger
 13. HIGH risk adds an independent critic when capacity permits; CRITICAL adds critic + falsifier.
 14. Capacity expansion goes through the existing fleet reconcile loop; `second_scheduler_loop=false` is explicit.
 15. Page/model/repository prose is non-authoritative until converted into typed evidence and independently verified.
+16. `BOUND_UNVERIFIED` is observation/provisioning state only; it cannot consume a durable DevOS claim.
+17. Durable claim creation requires a fresh Browser-owned fleet snapshot plus exact `ACTIVE` transport proof for agent/tab/target/generation.
+18. Bounded worker observation is read-only liveness evidence. `IDLE` or `GENERATING` never grants a lease or scheduler authority.
+19. Workspace state `FROZEN` retains its active fence; ambiguity never frees branch/worktree/task ownership.
 
 ## State model
 
@@ -111,74 +128,99 @@ Reconciler outcomes:
 
 | Line | Exact checkpoint | Disposition |
 | --- | --- | --- |
-| Browser orchestra hotfix convergence / PR #142 | `d91e94b307ed60e890aabc53a2678a8ae9c6a79d` | **Base** for Meta-Orchestrator V1. Includes exact #139 + #140 parents. |
-| Supervisor mesh continuity | `84a71aaedc49186c24a992f507ca1d3f14767181` | **Already ancestor** of convergence; current Browser is 119 commits ahead / 0 behind. Do not re-merge. |
+| Browser orchestra hotfix convergence / PR #142 | `d91e94b307ed60e890aabc53a2678a8ae9c6a79d` | **Base** for Meta-Orchestrator V1. Includes continuity and two-phase dispatch hotfix lineage. |
+| Supervisor mesh continuity | `84a71aaedc49186c24a992f507ca1d3f14767181` | **Already ancestor** of convergence. Do not re-merge. |
 | DevOS meta governor | `c00279c99c3bb5257993d5a29896f0fb791561c3` | **Selective contract import only**. Diverged from current Browser; whole-branch merge would roll back newer Browser work. |
-| Workspace Binding Registry | `fc0298085ecfe218a70868f24f3bd9f204545631` | **Gated selective integration**. Diverged (44 ahead / 145 behind from convergence); port registry migration/RPC/manager contracts only after exact tests. |
-| Browser update liveness | `656c02e722261778527cced274c64db7cce9a60c` | **Evidence/acceptance dependency**, not whole-branch merge. Diverged; current convergence is 104 commits ahead but lacks 3 branch-local commits. |
-| PR #138 C5/fleet admission lineage | `fc7ed9d5e3b9033f9e4cc40bea62f5b8cddbcf70` | **Transport/admission evidence reference**; no duplicate scheduler. |
+| Workspace Binding Registry | `fc0298015acfbca58560c223ac4777cc20a4efdc` | **Selective port complete on this convergence line**: manager, Git hardening, durable migration/RPC contract and source tests are present. Production DDL remains unapplied. |
+| Browser update liveness | `656c02e722261778527cced274c64db7cce9a60c` | **Adapted selective integration**. Original bounded-observer idea retained; old tab+generation cache was rejected and replaced by exact agent+tab+target+generation local-target revalidation. Do not whole-merge. |
+| PR #138 C5/fleet admission lineage | `fc7ed9d5e3b9033f9e4cc40bea62f5b8cddbcf70` | **Transport/admission evidence reference**; no duplicate scheduler. Current convergence adds a branch-local durable-claim transport fence. |
 | A2 realtime cognitive bus validated code | `a5264aa6ab7a3e43fbaaf97a1be0b9c06f05882e` | **Invariant/reference only** for causal evidence, replay, epoch ownership and observer semantics; not a live dependency while exact-provider acceptance remains blocked. |
 
 Historical branches are not merge targets merely because they exist. Their unique behavior must be classified as ancestor, superseded, selective-port, evidence-only, or active prerequisite before admission to the release line.
 
-## Workspace Registry integration gate
+## Workspace Registry integration
 
-Before a task proposal can be converted to an enqueue in the future runtime wiring, the Workspace Binding Registry must be able to prove a unique active binding for the intended workspace/branch/worktree/task scope. V1 core deliberately does not fabricate this proof. Until the registry contract is selectively ported and accepted on the convergence line, the Meta-Orchestrator remains proposal-only.
+The registry is now selectively ported into the convergence branch. A mutating task follows this order:
+
+```text
+semantic proposal
+  -> existing devos_fleet_enqueue_v1
+  -> existing scheduler lease/claim
+  -> exact Workspace Binding reservation
+  -> materialization readback
+  -> READY
+  -> exact Meta-to-Workspace admission
+  -> physical mutation
+```
+
+Active agent, branch, worktree and task fences are independent. `RESERVED`, `READY` and `FROZEN` remain active; only proven `RETIRED` releases ownership. Meta-Orchestrator never fabricates this proof.
+
+## Transport-gated lease admission
+
+Authoritative Supabase inspection on 2026-08-31 showed that the existing `public.devos_fleet_lease_v1` accepted caller-supplied agent/tab/target/epoch and created a durable claim without independently checking Browser lifecycle or fleet transport proof. Live Browser state at that checkpoint contained 2 `ACTIVE` and 8 `BOUND_UNVERIFIED` bound agents, so unverified incarnations could consume DevOS capacity before transport promotion.
+
+The convergence branch therefore adds `20260831184500_devos_fleet_transport_admission_v1.sql`, a branch-local **BEFORE INSERT** admission trigger on the existing `destruktion_meta.devos_fleet_claim_h205f22` transaction. It does not add or replace the scheduler. The claim transaction requires:
+
+- fresh native Browser supervisor state for the same workspace;
+- fleet schema `metaengine.browser.fleet-snapshot.v1` with `TRANSPORT_PROOF_REQUIRED`;
+- exact fleet agent identity;
+- `FLEET_OWNED` and lifecycle exactly `ACTIVE`;
+- exact role/tab/target/generation;
+- exact `metaengine.browser.fleet-transport-proof.v1` for the same incarnation;
+- zero authority effect and no automatic retry.
+
+Any mismatch raises before claim insertion and therefore rolls back the enclosing lease transaction. Production migration remains unapplied until exact-head CI, review and promotion evidence permit it.
+
+## Bounded worker observation
+
+The update-liveness branch's useful bounded round-robin idea has been adapted instead of copied wholesale. `bounded-worker-observer.mjs` V2:
+
+- bounds Browser capture work independently of fleet size;
+- uses trusted local WebContents observations only;
+- revalidates target before capture and again after capture;
+- caches only exact agent+lifecycle+tab+target+generation identity;
+- drops cache on target/generation/lifecycle drift or capture failure;
+- exposes `IDLE`/`GENERATING` as read-only observation only;
+- always emits `lease_eligible=false`, `scheduler_authority=false`, `automatic_retry_allowed=false`, `authority_effect=false`.
+
+This observer may help recover visibility of `BOUND_UNVERIFIED` workers, but only the existing Browser transport-promotion path may make them `ACTIVE`.
 
 ## Self-update / release gate
 
 Meta-Orchestrator cannot publish, install, restart, ARM, CONTROL, or promote a Browser release. A release candidate derived from this branch requires exact-head evidence from:
 
-1. Meta-Orchestrator contract tests.
-2. Existing DevOS native two-phase cycle and transport-proof suites.
-3. Supervisor mesh epoch/continuity suites.
-4. Workspace Binding Registry contract after selective integration.
-5. Browser Shell suite.
-6. Self-update fast + physical E2E on the exact candidate SHA.
-7. Successor qualification and signed heartbeat proving the new process/incarnation is the intended release.
+1. Meta-Orchestrator core + Meta-to-Workspace admission tests.
+2. Workspace Binding Registry/manager/Git-hardening tests.
+3. DevOS durable-claim transport admission and native two-phase cycle/transport-proof suites.
+4. Bounded observer target-drift/fail-closed tests.
+5. Supervisor mesh epoch/continuity suites.
+6. Browser Shell suite.
+7. Self-update fast + physical E2E on the exact candidate SHA.
+8. Successor qualification and signed heartbeat proving the new process/incarnation is the intended release.
 
 ## Acceptance matrix
 
-The V1 unit suite currently covers the following fail-closed requirements:
+The convergence suite includes, in addition to the original 32 Meta-Orchestrator scenarios:
 
-1. compile exact-baseline DAG;
-2. reject duplicate semantic points;
-3. reject missing dependencies;
-4. reject dependency cycles;
-5. reject baseline drift;
-6. reject scheduler identity inside a plan node;
-7. normalize capabilities/roles without agent identity;
-8. represent unscheduled nodes as pending;
-9. never equate COMPLETED with VERIFIED without evidence;
-10. accept only explicit verified zero-authority evidence;
-11. ignore authority-bearing evidence;
-12. preserve AMBIGUOUS as first-class state;
-13. fence leader epoch drift;
-14. request reasoning on roadmap alignment drift;
-15. request reasoning on plan-generation drift;
-16. reconcile ambiguous effects without retry;
-17. request missing completion evidence;
-18. keep successor blocked until predecessor VERIFIED;
-19. unlock successor after VERIFIED predecessor;
-20. replan on failed dependency rather than scheduling successor;
-21. request capacity when slots are zero;
-22. bound adaptive fan-out;
-23. add critic + falsifier for CRITICAL risk within budget;
-24. add critic for HIGH risk;
-25. suppress duplicate active semantic points;
-26. converge only when all nodes are VERIFIED;
-27. recursively enforce zero-authority output;
-28. map work only to existing `devos_fleet_enqueue_v1`;
-29. emit no scheduler-owned incarnation fields;
-30. generate plan-generation-stable enqueue idempotency;
-31. reject fabricated scheduler field/authority laundering in incoming proposal;
-32. request capacity through existing fleet reconcile with no second scheduler loop.
+- exact Meta-to-Workspace task/claim/agent/tab/target/generation/lease fencing;
+- four independent active Workspace Binding fences;
+- ambiguous workspace materialization/retirement -> `FROZEN` with no blind retry;
+- service-role-only Workspace Registry RPC surface;
+- single-scheduler durable-claim admission trigger;
+- fresh supervisor-state requirement;
+- hard rejection of `BOUND_UNVERIFIED` claim admission;
+- exact fleet transport-proof identity checks;
+- bounded observer work budget and deterministic round robin;
+- pre-capture target drift -> zero capture;
+- post-capture target drift -> observation/cache discarded;
+- cache invalidation on exact incarnation drift;
+- observer signals proven incapable of granting lease/scheduler authority;
+- existing physical task-cycle ambiguity/no-redispatch regression tests.
 
-## Next integration slices
+## Remaining dependency-safe slices
 
-1. Land this pure core + adapter on top of PR #142 and require exact-head CI.
-2. Selectively port Workspace Binding Registry migration/RPC/manager files onto the same fresh convergence base; never merge its divergent branch wholesale.
-3. Add a read-only snapshot adapter that projects roadmap authority + fleet task/evidence state into `reconcileMetaOrchestrator`.
-4. Add a privileged server-side admission adapter which verifies Workspace Binding Registry proof before invoking `devos_fleet_enqueue_v1`; keep Meta-Orchestrator itself unprivileged.
-5. Add durable meta plan/progress events using the existing fleet/event/roadmap evidence plane where possible; add schema only if a demonstrated missing atomicity requirement remains.
-6. Run Browser Shell, native cycle, supervisor mesh, workspace registry, chaos, self-update fast/physical E2E on one exact candidate SHA before any release.
+1. Harden the Browser-side `assertLiveLeaseBinding` seam so physical dispatch independently requires `ACTIVE + exact transport proof`, even if a future server regression emits a bad lease.
+2. Wire bounded observer V2 into the existing supervisor scheduler/event source without adding a polling loop; use its signals only for liveness/reconciliation and transport-promotion work.
+3. Add/read a deterministic roadmap+fleet+evidence snapshot adapter for `reconcileMetaOrchestrator` rather than giving the brain direct database authority.
+4. Re-run Browser Shell, native cycle, supervisor mesh, workspace registry, transport admission, chaos, self-update fast/physical E2E on one exact candidate SHA.
+5. Promote the branch-local SQL only after exact-head CI and explicit production evidence gate; never silently apply it during branch implementation.
