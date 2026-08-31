@@ -1,12 +1,12 @@
-import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
+import { chatGptControlCount, chatGptControlMatches } from './chatgpt-ui-controls.mjs';
 
 const COMPOSER_NAMES = new Set(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
 
-function exact(frame, role, names) {
+function exact(frame, role, predicate) {
   const rows = (frame?.semantic_targets || []).filter((row) => {
     const rowRole = String(row?.role || '').toLowerCase();
     const rowName = String(row?.name || '');
-    return rowRole === role && names.has(rowName);
+    return rowRole === role && predicate(rowName);
   });
   return rows.length === 1 ? structuredClone(rows[0]) : null;
 }
@@ -41,11 +41,12 @@ export function evaluateFleetSubmitReadiness({
     return Object.freeze({ ready: false, reason: 'VIEWPORT_NOT_RENDERABLE', authority_effect: false });
   }
 
-  const composer = exact(frame, 'textbox', COMPOSER_NAMES);
+  const composer = exact(frame, 'textbox', (name) => COMPOSER_NAMES.has(name));
   if (!composer) {
     return Object.freeze({ ready: false, reason: 'COMPOSER_NOT_UNIQUE', authority_effect: false });
   }
-  if (chatGptControlCount(frame, 'SEND') !== 1) {
+  const sendControl = exact(frame, 'button', (name) => chatGptControlMatches('SEND', name));
+  if (!sendControl || chatGptControlCount(frame, 'SEND') !== 1) {
     return Object.freeze({ ready: false, reason: 'SEND_CONTROL_NOT_UNIQUE', authority_effect: false });
   }
 
@@ -53,6 +54,7 @@ export function evaluateFleetSubmitReadiness({
     ready: true,
     reason: 'READY_FOR_TWO_PHASE_SEND',
     composer,
+    send_control: sendControl,
     viewport: Object.freeze({ width, height }),
     submit_strategy: 'TYPE_WITHOUT_SUBMIT_THEN_TYPED_CLICK_SEND',
     automatic_retry_allowed: false,
