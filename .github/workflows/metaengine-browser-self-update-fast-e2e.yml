@@ -68,34 +68,17 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Contract gates before physical proof
         working-directory: apps/metaengine-browser
+        shell: powershell
         run: |
           npm run check
           npm test
+          $physical = Get-Content ./test/self-update-fast-physical.ps1 -Raw
+          if ($physical -notmatch '\$deployedBuildFloor\s*=\s*\[Int64\]20260831143001') { throw 'deployed_build_floor_contract_missing' }
+          if ($physical -notmatch '\[Math\]::Max\(\$timestampBuild,\s*\[Math\]::Max\(\$baselineBuild \+ 1,\s*\$deployedBuildFloor\)\)') { throw 'monotonic_build_selection_contract_missing' }
       - name: Published baseline to one-build target physical update
         working-directory: apps/metaengine-browser
         shell: powershell
-        run: |
-          $raw = (Get-Content ./test/self-update-fast-physical.ps1 -Raw) -replace "`r`n", "`n"
-          $oldVersionBlock = @'
-          $buildId = [DateTime]::UtcNow.ToString('yyyyMMddHHmmss')
-          $target = "0.6.3-dev.$buildId.1"
-          $baselineBuild = [Int64](($baseline -split '\.')[3].Replace('dev','').TrimStart('-'))
-          '@
-          $newVersionBlock = @'
-          $baselineBuild = [Int64](($baseline -split '\.')[3].Replace('dev','').TrimStart('-'))
-          $timestampBuild = [Int64]([DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))
-          $buildId = [Math]::Max($timestampBuild, [Math]::Max($baselineBuild + 1, [Int64]20260831143001)).ToString()
-          $target = "0.6.3-dev.$buildId.1"
-          '@
-          $raw = $raw.Replace($oldVersionBlock.Trim(), $newVersionBlock.Trim())
-          if ($raw -notmatch '\[Int64\]20260831143001') { throw 'target_build_floor_patch_missing' }
-          $raw = $raw.Replace('target_version_not_monotonic:$buildId:$baselineBuild','target_version_not_monotonic:${buildId}:${baselineBuild}')
-          $raw = $raw.Replace('$verified = [bool]($rows | Where-Object { $_.metadata_verified -eq $true -and [string]$_.available_version -eq $target })', '$verified = [bool]($rows | Where-Object { ($_.PSObject.Properties.Name -contains ''metadata_verified'') -and $_.metadata_verified -eq $true -and ($_.PSObject.Properties.Name -contains ''available_version'') -and [string]$_.available_version -eq $target })')
-          $raw = $raw.Replace('$feedActive = [bool]($rows | Where-Object { $_.ci_test_feed_active -eq $true })', '$feedActive = [bool]($rows | Where-Object { ($_.PSObject.Properties.Name -contains ''ci_test_feed_active'') -and $_.ci_test_feed_active -eq $true })')
-          $raw = $raw.Replace('$handoffPrepared = [bool]($rows | Where-Object { $_.label -eq ''INSTALLER_HANDOFF_PREPARED'' -and $_.singleton_lock_released -eq $true })', '$handoffPrepared = [bool]($rows | Where-Object { ($_.PSObject.Properties.Name -contains ''label'') -and $_.label -eq ''INSTALLER_HANDOFF_PREPARED'' -and ($_.PSObject.Properties.Name -contains ''singleton_lock_released'') -and $_.singleton_lock_released -eq $true })')
-          $fixed = Join-Path $env:RUNNER_TEMP 'self-update-fast-physical.fixed.ps1'
-          [System.IO.File]::WriteAllText($fixed, $raw, [System.Text.UTF8Encoding]::new($false))
-          & $fixed
+        run: ./test/self-update-fast-physical.ps1
       - name: Upload exact fast self-update evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
