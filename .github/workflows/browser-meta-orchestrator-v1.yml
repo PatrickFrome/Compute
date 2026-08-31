@@ -9,6 +9,7 @@ on:
       - 'apps/metaengine-browser/src/meta-orchestrator-authoritative-snapshot.mjs'
       - 'apps/metaengine-browser/src/meta-orchestrator-privileged-adapter.mjs'
       - 'apps/metaengine-browser/src/meta-orchestrator-native-provider.mjs'
+      - 'apps/metaengine-browser/src/meta-orchestrator-cycle-stage.mjs'
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs'
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts'
       - 'apps/metaengine-browser/src/workspace-manager.mjs'
@@ -26,6 +27,7 @@ on:
       - 'apps/metaengine-browser/test/meta-orchestrator-privileged-adapter.test.mjs'
       - 'apps/metaengine-browser/test/meta-orchestrator-native-provider.test.mjs'
       - 'apps/metaengine-browser/test/meta-orchestrator-native-provider-client.test.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-cycle-stage.test.mjs'
       - 'apps/metaengine-browser/test/workspace-manager.test.mjs'
       - 'apps/metaengine-browser/test/workspace-git-hardening.test.mjs'
       - 'apps/metaengine-browser/test/workspace-binding-registry.test.mjs'
@@ -79,6 +81,7 @@ jobs:
           node --check apps/metaengine-browser/src/meta-orchestrator-authoritative-snapshot.mjs
           node --check apps/metaengine-browser/src/meta-orchestrator-privileged-adapter.mjs
           node --check apps/metaengine-browser/src/meta-orchestrator-native-provider.mjs
+          node --check apps/metaengine-browser/src/meta-orchestrator-cycle-stage.mjs
           node --check apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs
           node --check apps/metaengine-browser/src/workspace-manager.mjs
           node --check apps/metaengine-browser/src/workspace-git-hardening.mjs
@@ -89,7 +92,7 @@ jobs:
           node --check apps/metaengine-browser/src/devos-native-task-cycle.mjs
           node --check apps/metaengine-browser/src/devos-native-task-cycle-core.mjs
       - name: Meta-Orchestrator fail-closed contract
-        run: node --test apps/metaengine-browser/test/meta-orchestrator-core.test.mjs apps/metaengine-browser/test/meta-orchestrator-authoritative-snapshot.test.mjs apps/metaengine-browser/test/meta-orchestrator-plan-state.test.mjs apps/metaengine-browser/test/meta-orchestrator-privileged-adapter.test.mjs apps/metaengine-browser/test/meta-orchestrator-native-provider.test.mjs apps/metaengine-browser/test/meta-orchestrator-native-provider-client.test.mjs
+        run: node --test apps/metaengine-browser/test/meta-orchestrator-core.test.mjs apps/metaengine-browser/test/meta-orchestrator-authoritative-snapshot.test.mjs apps/metaengine-browser/test/meta-orchestrator-plan-state.test.mjs apps/metaengine-browser/test/meta-orchestrator-privileged-adapter.test.mjs apps/metaengine-browser/test/meta-orchestrator-native-provider.test.mjs apps/metaengine-browser/test/meta-orchestrator-native-provider-client.test.mjs apps/metaengine-browser/test/meta-orchestrator-cycle-stage.test.mjs
       - name: Exact Meta-to-Workspace mutation admission
         run: node --test apps/metaengine-browser/test/meta-orchestrator-workspace-admission.test.mjs
       - name: Workspace binding and Git isolation contracts
