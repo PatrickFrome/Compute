@@ -1,18 +1,15 @@
 import crypto from 'node:crypto';
 import {
   DevOsNativeTaskCycle as CoreDevOsNativeTaskCycle,
-  assertLiveLeaseBinding,
+  assertLiveLeaseBinding as assertCoreLiveLeaseBinding,
   normalizeLease,
   planBacklogCapacity,
   renderDevosTaskPrompt,
 } from './devos-native-task-cycle-core.mjs';
-import {
-  fleetRuntimeRegistered,
-  markFleetTransportProvenFromNativeFrame,
-} from './fleet-runtime-bridge.mjs';
 
-export { assertLiveLeaseBinding, normalizeLease, planBacklogCapacity, renderDevosTaskPrompt };
+export { normalizeLease, planBacklogCapacity, renderDevosTaskPrompt };
 
+const HASH_RE = /^[a-f0-9]{64}$/;
 const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 
 function conversationUrl(value) {
@@ -27,15 +24,59 @@ function conversationUrl(value) {
   }
 }
 
+function exactTransportProof(agent) {
+  if (String(agent?.lifecycle_state || '') !== 'ACTIVE') return null;
+  if (agent?.authority_effect === true || agent?.automatic_retry_allowed === true) return null;
+  const proof = agent?.transport_proof;
+  if (!proof || proof.schema !== 'metaengine.browser.fleet-transport-proof.v1') return null;
+  if (proof.authority_effect !== false) return null;
+  if (String(proof.tab_id || '') !== String(agent.tab_id || '')) return null;
+  if (String(proof.target_id || '').toLowerCase() !== String(agent.target_id || '').toLowerCase()) return null;
+  if (Number(proof.generation_epoch) !== Number(agent.generation_epoch)) return null;
+  if (!HASH_RE.test(String(proof.conversation_url_sha256 || '').toLowerCase())) return null;
+  const provenAt = Date.parse(String(proof.proven_at || ''));
+  if (!Number.isFinite(provenAt)) return null;
+  return proof;
+}
+
+function transportAdmittedFleet(fleet) {
+  const cloned = structuredClone(fleet || {});
+  const schemaOk = cloned?.schema === 'metaengine.browser.fleet-snapshot.v1';
+  const readinessOk = cloned?.readiness_contract === 'TRANSPORT_PROOF_REQUIRED';
+  cloned.agents = Array.isArray(cloned?.agents) ? cloned.agents.map((agent) => {
+    const admitted = schemaOk && readinessOk && Boolean(exactTransportProof(agent));
+    return admitted ? agent : { ...agent, lifecycle_state: 'ADMISSION_FENCED', transport_admission: 'EXACT_ACTIVE_PROOF_REQUIRED' };
+  }) : [];
+  cloned.transport_admission = schemaOk && readinessOk ? 'EXACT_ACTIVE_PROOF_REQUIRED' : 'FLEET_CONTRACT_INVALID';
+  cloned.authority_effect = false;
+  return cloned;
+}
+
+function transportAdmittedState(state) {
+  const cloned = structuredClone(state || {});
+  cloned.fleet = transportAdmittedFleet(cloned.fleet);
+  return cloned;
+}
+
+export function assertLiveLeaseBinding(lease, fleetSnapshot) {
+  return assertCoreLiveLeaseBinding(lease, transportAdmittedFleet(fleetSnapshot));
+}
+
 function exactFleetAgent(state, payload) {
   const fleet = state?.fleet;
+  if (fleet?.schema !== 'metaengine.browser.fleet-snapshot.v1' || fleet?.readiness_contract !== 'TRANSPORT_PROOF_REQUIRED') {
+    throw new Error('devos_transport_fleet_contract_invalid');
+  }
   const agentId = String(payload?.agent_id || '').toLowerCase();
   const rows = (fleet?.agents || []).filter((row) => String(row?.agent_id || '').toLowerCase() === agentId);
   if (rows.length !== 1) throw new Error(rows.length ? 'devos_transport_agent_ambiguous' : 'devos_transport_agent_missing');
   const agent = rows[0];
+  if (String(agent.lifecycle_state || '') !== 'ACTIVE') throw new Error(`devos_transport_agent_state_invalid:${agent.lifecycle_state}`);
+  if (!exactTransportProof(agent)) throw new Error('devos_transport_active_proof_invalid');
   if (String(agent.tab_id || '') !== String(payload?.tab_id || '')) throw new Error('devos_transport_tab_binding_mismatch');
   if (String(agent.target_id || '').toLowerCase() !== String(payload?.target_id || '').toLowerCase()) throw new Error('devos_transport_target_binding_mismatch');
   if (Number(agent.generation_epoch) !== Number(payload?.agent_generation_epoch)) throw new Error('devos_transport_generation_binding_mismatch');
+  if (String(agent.role || '').toUpperCase() !== String(payload?.role || agent.role || '').toUpperCase()) throw new Error('devos_transport_role_binding_mismatch');
   return agent;
 }
 
@@ -54,6 +95,8 @@ export class DevOsNativeTaskCycle {
     }
     this.#getState = getState;
 
+    const strictGetState = async () => transportAdmittedState(await getState());
+
     const observedExecuteCommand = async (command) => {
       const result = await executeCommand(command);
       if (String(command?.action || '') === 'CAPTURE' && command?.payload?.tab_id) {
@@ -69,41 +112,34 @@ export class DevOsNativeTaskCycle {
         const frame = this.#lastFrames.get(String(payload.tab_id || '')) || null;
         const expectedHash = String(payload?.proof?.conversation_url_sha256 || '').toLowerCase();
         const normalizedUrl = conversationUrl(frame?.url);
+        const fleetProof = exactTransportProof(agent);
 
-        if (String(agent.lifecycle_state) === 'BOUND_UNVERIFIED') {
-          if (!fleetRuntimeRegistered()) throw new Error('devos_fleet_runtime_transport_proof_unavailable');
-          this.#lastFleetTransportProof = await markFleetTransportProvenFromNativeFrame({
-            binding: payload,
-            frame,
-            expected_conversation_url_sha256: expectedHash,
-          });
-        } else if (String(agent.lifecycle_state) === 'ACTIVE') {
-          if (frame?.target_id && String(frame.target_id).toLowerCase() !== String(payload.target_id || '').toLowerCase()) {
-            throw new Error('devos_transport_active_frame_target_mismatch');
-          }
-          if (normalizedUrl && /^[a-f0-9]{64}$/.test(expectedHash) && sha256(normalizedUrl) !== expectedHash) {
-            throw new Error('devos_transport_active_conversation_hash_mismatch');
-          }
-          this.#lastFleetTransportProof = {
-            schema: 'metaengine.browser.fleet-native-transport-proof.v1',
-            state: 'ALREADY_ACTIVE',
-            agent_id: agent.agent_id,
-            tab_id: agent.tab_id,
-            target_id: agent.target_id,
-            generation_epoch: agent.generation_epoch,
-            automatic_retry_allowed: false,
-            authority_effect: false,
-          };
-        } else {
-          throw new Error(`devos_transport_agent_state_invalid:${agent.lifecycle_state}`);
+        if (frame?.target_id && String(frame.target_id).toLowerCase() !== String(payload.target_id || '').toLowerCase()) {
+          throw new Error('devos_transport_active_frame_target_mismatch');
         }
+        if (!normalizedUrl || !HASH_RE.test(expectedHash) || sha256(normalizedUrl) !== expectedHash) {
+          throw new Error('devos_transport_active_conversation_hash_mismatch');
+        }
+
+        this.#lastFleetTransportProof = {
+          schema: 'metaengine.browser.fleet-native-transport-proof.v2',
+          state: 'PREEXISTING_ACTIVE_PROOF_REVALIDATED',
+          agent_id: agent.agent_id,
+          tab_id: agent.tab_id,
+          target_id: agent.target_id,
+          generation_epoch: agent.generation_epoch,
+          fleet_proven_at: fleetProof.proven_at,
+          conversation_url_sha256: expectedHash,
+          automatic_retry_allowed: false,
+          authority_effect: false,
+        };
       }
       return signedRequest(path, request);
     };
 
     this.#inner = new CoreDevOsNativeTaskCycle({
       ...options,
-      getState,
+      getState: strictGetState,
       executeCommand: observedExecuteCommand,
       signedRequest: proofGatedSignedRequest,
     });
@@ -113,7 +149,9 @@ export class DevOsNativeTaskCycle {
     return {
       ...this.#inner.snapshot(),
       fleet_transport_proof: this.#lastFleetTransportProof ? structuredClone(this.#lastFleetTransportProof) : null,
+      fleet_transport_proof_before_physical_dispatch: true,
       fleet_transport_proof_before_db_running: true,
+      bound_unverified_dispatch_allowed: false,
       authority_effect: this.#inner.snapshot()?.authority_effect === true,
     };
   }
