@@ -16,6 +16,7 @@ function fakeChat({ sendPresent = true, proveStop = true } = {}) {
   let attached = false;
   let url = 'https://chatgpt.com/';
   let axReads = 0;
+  let focusedBackendNodeId = null;
   const calls = [];
   const debuggerApi = {
     isAttached: () => attached,
@@ -37,9 +38,13 @@ function fakeChat({ sendPresent = true, proveStop = true } = {}) {
           ax('button', 'Остановить ответ', 9),
         ] : [ax('textbox', 'Чат с ChatGPT', 3), ax('button', 'Отправить промпт', 7)] };
       }
-      if (method === 'DOM.focus' || method === 'Input.insertText') return {};
+      if (method === 'DOM.focus') {
+        focusedBackendNodeId = Number(params.backendNodeId || 0);
+        return {};
+      }
+      if (method === 'Input.insertText') return {};
       if (method === 'Input.dispatchKeyEvent') {
-        if (params.key === 'Enter' && params.type === 'rawKeyDown' && proveStop) {
+        if (params.key === 'Enter' && params.type === 'rawKeyDown' && focusedBackendNodeId === 7 && proveStop) {
           url = 'https://chatgpt.com/c/11111111-2222-3333-4444-555555555555';
         }
         return {};
@@ -58,7 +63,7 @@ function fakeChat({ sendPresent = true, proveStop = true } = {}) {
   };
 }
 
-test('hidden fleet ChatGPT composer submits with Enter and no viewport or mouse geometry', async () => {
+test('hidden fleet ChatGPT composer focuses exact Send before Enter without viewport or mouse geometry', async () => {
   const h = fakeChat();
   const prompt = 'METAENGINE FLEET TEST TASK';
   const result = await executeSemanticCommand(h.webContents, {
@@ -74,6 +79,7 @@ test('hidden fleet ChatGPT composer submits with Enter and no viewport or mouse 
   });
 
   assert.equal(result.submit_after_type, true);
+  assert.equal(result.submit_method, 'EXACT_SEND_FOCUSED_ENTER');
   assert.equal(result.effect_state, 'PROVEN_GENERATING');
   assert.equal(result.stop_observed, true);
   assert.equal(result.new_conversation_observed, true);
@@ -81,8 +87,13 @@ test('hidden fleet ChatGPT composer submits with Enter and no viewport or mouse 
   assert.equal(result.prompt_included, false);
   assert.equal(result.prompt_sha256, crypto.createHash('sha256').update(prompt).digest('hex'));
   assert.equal('text' in result, false);
-  assert.ok(h.calls.some(([method, params]) => method === 'Input.dispatchKeyEvent' && params.key === 'Enter' && params.type === 'rawKeyDown'));
-  assert.ok(h.calls.some(([method, params]) => method === 'Input.dispatchKeyEvent' && params.key === 'Enter' && params.type === 'keyUp'));
+
+  const focusCalls = h.calls.filter(([method]) => method === 'DOM.focus');
+  assert.equal(focusCalls.length, 2);
+  assert.deepEqual(focusCalls.map(([, params]) => params.backendNodeId), [3, 7]);
+  const sendFocusIndex = h.calls.findIndex(([method, params]) => method === 'DOM.focus' && params.backendNodeId === 7);
+  const enterIndex = h.calls.findIndex(([method, params]) => method === 'Input.dispatchKeyEvent' && params.key === 'Enter' && params.type === 'rawKeyDown');
+  assert.ok(sendFocusIndex >= 0 && enterIndex > sendFocusIndex);
   assert.equal(h.calls.some(([method]) => method === 'DOM.getBoxModel'), false);
   assert.equal(h.calls.some(([method]) => method === 'Input.dispatchMouseEvent'), false);
   assert.equal(h.calls.some(([method]) => method === 'Page.getLayoutMetrics'), false);
@@ -102,7 +113,7 @@ test('submit-after-type fails closed outside exact ChatGPT composer', async () =
   }), /native_semantic_submit_requires_exact_chatgpt_composer/);
 });
 
-test('submit-after-type requires a unique visible semantic Send control before Enter', async () => {
+test('submit-after-type requires unique visible semantic Send before any submit keystroke', async () => {
   const h = fakeChat({ sendPresent: false });
   await assert.rejects(() => executeSemanticCommand(h.webContents, {
     action: 'SEMANTIC_TYPE',
@@ -115,4 +126,24 @@ test('submit-after-type requires a unique visible semantic Send control before E
     },
   }), /native_semantic_send_target_not_found/);
   assert.equal(h.calls.some(([method, params]) => method === 'Input.dispatchKeyEvent' && params.key === 'Enter'), false);
+  assert.equal(h.calls.some(([method, params]) => method === 'DOM.focus' && params.backendNodeId === 7), false);
+});
+
+test('ambiguous exact-Send activation is single-shot and never retries', async () => {
+  const h = fakeChat({ proveStop: false });
+  const result = await executeSemanticCommand(h.webContents, {
+    action: 'SEMANTIC_TYPE',
+    platform: 'CHATGPT',
+    payload: {
+      role: 'textbox',
+      accessible_name: 'Чат с ChatGPT',
+      text: 'task',
+      submit_after_type: true,
+    },
+  });
+  assert.equal(result.effect_state, 'AMBIGUOUS_AFTER_ENTER');
+  assert.equal(result.automatic_retry_allowed, false);
+  assert.equal(result.submit_method, 'EXACT_SEND_FOCUSED_ENTER');
+  assert.equal(h.calls.filter(([method, params]) => method === 'DOM.focus' && params.backendNodeId === 7).length, 1);
+  assert.equal(h.calls.filter(([method, params]) => method === 'Input.dispatchKeyEvent' && params.key === 'Enter' && params.type === 'rawKeyDown').length, 1);
 });
