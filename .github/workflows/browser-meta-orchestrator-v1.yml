@@ -10,19 +10,20 @@ on:
       - 'apps/metaengine-browser/src/workspace-git-hardening.mjs'
       - 'apps/metaengine-browser/src/fleet-target-local-observer.mjs'
       - 'apps/metaengine-browser/src/bounded-worker-observer.mjs'
+      - 'apps/metaengine-browser/src/devos-native-task-cycle.mjs'
+      - 'apps/metaengine-browser/src/devos-native-task-cycle-core.mjs'
       - 'apps/metaengine-browser/test/meta-orchestrator-core.test.mjs'
       - 'apps/metaengine-browser/test/meta-orchestrator-workspace-admission.test.mjs'
       - 'apps/metaengine-browser/test/workspace-manager.test.mjs'
       - 'apps/metaengine-browser/test/workspace-git-hardening.test.mjs'
       - 'apps/metaengine-browser/test/workspace-binding-registry.test.mjs'
       - 'apps/metaengine-browser/test/bounded-worker-observer-v2.test.mjs'
-      - 'supabase/migrations/20260831152000_a2_workspace_binding_registry_v1.sql'
-      - 'supabase/migrations/20260831184500_devos_fleet_transport_admission_v1.sql'
-      - 'apps/metaengine-browser/src/autonomy-governor.mjs'
-      - 'apps/metaengine-browser/src/devos-native-task-cycle-core.mjs'
       - 'apps/metaengine-browser/test/devos-native-task-cycle.test.mjs'
       - 'apps/metaengine-browser/test/devos-fleet-transport-proof-runtime.test.mjs'
       - 'apps/metaengine-browser/test/devos-fleet-transport-admission.test.mjs'
+      - 'supabase/migrations/20260831152000_a2_workspace_binding_registry_v1.sql'
+      - 'supabase/migrations/20260831184500_devos_fleet_transport_admission_v1.sql'
+      - 'apps/metaengine-browser/src/autonomy-governor.mjs'
       - 'coordination/devos/META_ORCHESTRATOR_V1.md'
       - '.github/workflows/browser-meta-orchestrator-v1.yml'
   push:
@@ -63,6 +64,8 @@ jobs:
           node --check apps/metaengine-browser/src/workspace-git-hardening.mjs
           node --check apps/metaengine-browser/src/fleet-target-local-observer.mjs
           node --check apps/metaengine-browser/src/bounded-worker-observer.mjs
+          node --check apps/metaengine-browser/src/devos-native-task-cycle.mjs
+          node --check apps/metaengine-browser/src/devos-native-task-cycle-core.mjs
       - name: Meta-Orchestrator fail-closed contract
         run: node --test apps/metaengine-browser/test/meta-orchestrator-core.test.mjs
       - name: Exact Meta-to-Workspace mutation admission
@@ -73,5 +76,5 @@ jobs:
         run: node --test apps/metaengine-browser/test/devos-fleet-transport-admission.test.mjs
       - name: Bounded worker liveness observation
         run: node --test apps/metaengine-browser/test/bounded-worker-observer-v2.test.mjs
-      - name: Existing physical task-cycle regression seam
+      - name: Physical task-cycle transport regression seam
         run: node --test apps/metaengine-browser/test/devos-native-task-cycle.test.mjs apps/metaengine-browser/test/devos-fleet-transport-proof-runtime.test.mjs
