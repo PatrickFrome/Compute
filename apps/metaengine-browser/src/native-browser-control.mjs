@@ -1,11 +1,27 @@
 import crypto from 'node:crypto';
 import { chatGptControlMatches } from './chatgpt-ui-controls.mjs';
+import {
+  assertNativeEffectBindingMatches,
+  nativeActionRequiresEffectBinding,
+} from './native-effect-binding.mjs';
 
 const SAFE_ROLES = new Set(['textbox','searchbox','combobox','button','checkbox','radio','switch','tab','menuitem','link']);
 const CHATGPT_COMPOSER_NAMES = new Set(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
+const NATIVE_BROWSER_PROCESS_INCARNATION_ID = crypto.randomUUID();
 const clip = (value, max) => String(value ?? '').slice(0, max);
 const axValue = (node, key) => String(node?.[key]?.value ?? '').trim();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export function nativeBrowserTargetIdentity(webContents) {
+  if (!webContents || webContents.isDestroyed?.()) throw new Error('native_control_webcontents_unavailable');
+  const id = Number(webContents.id);
+  if (!Number.isSafeInteger(id) || id < 1) throw new Error('native_control_webcontents_id_invalid');
+  return Object.freeze({
+    process_incarnation_id: NATIVE_BROWSER_PROCESS_INCARNATION_ID,
+    target_id: `webcontents:${id}`,
+    authority_effect: false,
+  });
+}
 
 async function withDebugger(webContents, fn) {
   if (!webContents || webContents.isDestroyed?.()) throw new Error('native_control_webcontents_unavailable');
@@ -107,6 +123,7 @@ async function observeChatGptSubmit(dbg, webContents, { preUrl, attempts = 20, i
 }
 
 export async function captureSemanticFrame(webContents) {
+  const identity = nativeBrowserTargetIdentity(webContents);
   return withDebugger(webContents, async (dbg) => {
     const [tree, metrics] = await Promise.all([
       dbg.sendCommand('Accessibility.getFullAXTree'),
@@ -117,6 +134,8 @@ export async function captureSemanticFrame(webContents) {
     return {
       schema: 'metaengine.native-browser.perception.v1',
       captured_at: new Date().toISOString(),
+      process_incarnation_id: identity.process_incarnation_id,
+      target_id: identity.target_id,
       url: clip(webContents.getURL?.() || '', 1200),
       title: clip(webContents.getTitle?.() || '', 240),
       semantic_targets: uniqueSemanticTargets(nodes),
@@ -159,6 +178,17 @@ async function clickBackendNode(dbg, backendNodeId) {
 
 export async function executeSemanticCommand(webContents, command) {
   const action = String(command?.action || '');
+  const localIdentity = nativeBrowserTargetIdentity(webContents);
+  if (command?.command_id && nativeActionRequiresEffectBinding(action)) {
+    assertNativeEffectBindingMatches({
+      command,
+      binding: command?.effect_binding,
+      clientId: command?.effect_binding?.client_id,
+      processIncarnationId: localIdentity.process_incarnation_id,
+      tabId: command?.payload?.tab_id,
+      targetId: localIdentity.target_id,
+    });
+  }
   return withDebugger(webContents, async (dbg) => {
     if (action === 'SCROLL') {
       const metrics = await dbg.sendCommand('Page.getLayoutMetrics');
