@@ -231,3 +231,27 @@ test('click without post-send proof is ambiguous and is never repeated', async (
   assert.equal(executeCalls.filter(([, command]) => command.action === 'TYPED_CLICK').length, 1);
   assert.equal(h.getMarked(), null);
 });
+
+test('existing conversation URL alone never proves a no-op click', async () => {
+  const h = harness({
+    captureFrames: [
+      frame({ url: CONVERSATION_URL, stop: false, send: true }),
+      frame({ url: CONVERSATION_URL, stop: false, send: true }),
+      frame({ url: CONVERSATION_URL, stop: false, send: true }),
+    ],
+  });
+  await assert.rejects(
+    () => dispatchFleetTask({ payload: payload(), ...h.deps }),
+    (error) => {
+      assert.equal(error.message, 'fleet_task_send_effect_ambiguous');
+      assert.equal(error.receipt.effect_state, 'AMBIGUOUS_AFTER_CLICK');
+      assert.equal(error.receipt.new_conversation_observed, false);
+      assert.equal(error.receipt.stop_observed, false);
+      assert.equal(error.receipt.automatic_retry_allowed, false);
+      return true;
+    },
+  );
+  const clickCalls = h.calls.filter(([kind, command]) => kind === 'execute' && command.action === 'TYPED_CLICK');
+  assert.equal(clickCalls.length, 1);
+  assert.equal(h.getMarked(), null);
+});
