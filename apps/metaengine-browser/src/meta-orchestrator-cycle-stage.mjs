@@ -1,5 +1,5 @@
 import { assertZeroAuthorityMetaOutput } from './meta-orchestrator-core.mjs';
-import { metaTaskProposalToDevosEnqueue } from './meta-orchestrator-devos-adapter.mjs';
+import { metaTaskProposalToDurableAdmission } from './meta-orchestrator-devos-adapter.mjs';
 
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ROADMAP_RE=/^[a-z0-9][a-z0-9._:-]{2,159}$/;
@@ -8,7 +8,7 @@ function workspaceId(value){const out=String(value||'').toLowerCase();if(!UUID_R
 function roadmapId(value){const out=String(value||'').trim().toLowerCase();if(!ROADMAP_RE.test(out))throw new Error('meta_cycle_roadmap_id_invalid');return out}
 function positive(value,name){const out=Number(value);if(!Number.isSafeInteger(out)||out<1)throw new Error(`meta_cycle_${name}_invalid`);return out}
 function classifyProviderError(error){const message=String(error?.message||error||'').toLowerCase();if(message.includes('device_not_enrolled'))return'DEVICE_NOT_ENROLLED';if(message.includes('active_plan_missing'))return'ACTIVE_PLAN_MISSING';if(message.includes('http_404'))return'PROVIDER_ROUTE_UNAVAILABLE';if(message.includes('http_401'))return'PROVIDER_AUTH_REJECTED';if(message.includes('authoritative_inputs'))return'AUTHORITATIVE_INPUTS_UNAVAILABLE';return'PROVIDER_UNAVAILABLE'}
-function baseState(extra={}){return{schema:'metaengine.meta-orchestrator.cycle-stage.v1',state:'IDLE',cycle_seq:0,provider_probe:false,next_provider_probe_cycle:1,reconcile:null,devos_enqueue_proposals:[],automatic_retry_allowed:false,task_content_authority:false,scheduler_authority:false,browser_authority:false,release_authority:false,second_scheduler_loop:false,authority_effect:false,...extra}}
+function baseState(extra={}){return{schema:'metaengine.meta-orchestrator.cycle-stage.v2',state:'IDLE',cycle_seq:0,provider_probe:false,next_provider_probe_cycle:1,reconcile:null,task_admission_proposals:[],devos_enqueue_proposals:[],direct_enqueue_disabled:true,automatic_retry_allowed:false,task_content_authority:false,scheduler_authority:false,browser_authority:false,release_authority:false,second_scheduler_loop:false,authority_effect:false,...extra}}
 
 export class MetaOrchestratorCycleStage{
   #adapter;
@@ -31,9 +31,7 @@ export class MetaOrchestratorCycleStage{
 
   async cycle({leader={},policy={},worker_observer=null}={}){
     this.#cycleSeq+=1;
-    if(this.#cycleSeq<this.#nextProviderProbeCycle){
-      return this.#record({state:'PROVIDER_BACKOFF',provider_probe:false,next_provider_probe_cycle:this.#nextProviderProbeCycle});
-    }
+    if(this.#cycleSeq<this.#nextProviderProbeCycle)return this.#record({state:'PROVIDER_BACKOFF',provider_probe:false,next_provider_probe_cycle:this.#nextProviderProbeCycle});
 
     let reconcile;
     try{
@@ -44,33 +42,18 @@ export class MetaOrchestratorCycleStage{
     }
 
     this.#nextProviderProbeCycle=this.#cycleSeq+1;
-    try{
-      assertZeroAuthorityMetaOutput(reconcile);
-    }catch{
-      return this.#record({state:'RECONCILE_FENCED',provider_probe:true,next_provider_probe_cycle:this.#nextProviderProbeCycle});
-    }
+    try{assertZeroAuthorityMetaOutput(reconcile)}catch{return this.#record({state:'RECONCILE_FENCED',provider_probe:true,next_provider_probe_cycle:this.#nextProviderProbeCycle})}
 
     const proposals=[];
     try{
       for(const action of Array.isArray(reconcile.actions)?reconcile.actions:[]){
         if(action?.type!=='PROPOSE_TASK')continue;
-        proposals.push(metaTaskProposalToDevosEnqueue(action,{workspace_id:this.#workspaceId}));
+        proposals.push(metaTaskProposalToDurableAdmission(action,{workspace_id:this.#workspaceId}));
       }
-    }catch{
-      return this.#record({state:'PROPOSAL_FENCED',provider_probe:true,next_provider_probe_cycle:this.#nextProviderProbeCycle,reconcile:structuredClone(reconcile)});
-    }
+    }catch{return this.#record({state:'PROPOSAL_FENCED',provider_probe:true,next_provider_probe_cycle:this.#nextProviderProbeCycle,reconcile:structuredClone(reconcile)})}
 
-    return this.#record({
-      state:String(reconcile.state||'UNKNOWN'),
-      provider_probe:true,
-      next_provider_probe_cycle:this.#nextProviderProbeCycle,
-      reconcile:structuredClone(reconcile),
-      devos_enqueue_proposals:proposals,
-    });
+    return this.#record({state:String(reconcile.state||'UNKNOWN'),provider_probe:true,next_provider_probe_cycle:this.#nextProviderProbeCycle,reconcile:structuredClone(reconcile),task_admission_proposals:proposals});
   }
 
-  #record(extra={}){
-    this.#last=Object.freeze(baseState({cycle_seq:this.#cycleSeq,...extra}));
-    return this.snapshot();
-  }
+  #record(extra={}){this.#last=Object.freeze(baseState({cycle_seq:this.#cycleSeq,...extra}));return this.snapshot()}
 }
