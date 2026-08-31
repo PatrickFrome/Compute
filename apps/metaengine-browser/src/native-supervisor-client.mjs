@@ -4,6 +4,7 @@ import {
   buildNativeEffectBinding,
   nativeActionRequiresEffectBinding,
 } from './native-effect-binding.mjs';
+import { buildSupervisorMeshWireProjectionV1 } from './supervisor-mesh-wire-projection.mjs';
 import {
   NativeSupervisorClient as BaseNativeSupervisorClient,
   NATIVE_SUPERVISOR_BASE,
@@ -117,6 +118,13 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
     const boundedFetch = createBoundedSupervisorFetch(rawFetch, { deadlineMs: options.requestDeadlineMs });
     let devosRef = null;
     let sealEffectRef = null;
+    let clientRef = null;
+    const getStateWithMeshProjection = async () => {
+      const state = await getState();
+      const localMeshRuntime = clientRef?.snapshot?.()?.supervisor_mesh || null;
+      const supervisorMesh = buildSupervisorMeshWireProjectionV1(localMeshRuntime);
+      return supervisorMesh ? { ...state, supervisor_mesh: supervisorMesh } : state;
+    };
     const executeCommandWithDevosLifecycle = async (command) => {
       if (String(command?.action || '') === 'FLEET_TASK_COMPLETE') {
         if (!devosRef) throw new Error('devos_task_cycle_not_initialized');
@@ -131,11 +139,12 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
       return executeCommand(command);
     };
 
-    super({ ...options, fetchImpl: boundedFetch, executeCommand: executeCommandWithDevosLifecycle });
+    super({ ...options, getState: getStateWithMeshProjection, fetchImpl: boundedFetch, executeCommand: executeCommandWithDevosLifecycle });
+    clientRef = this;
 
     this.#identityRef = identity;
     this.#boundedFetch = boundedFetch;
-    this.#getStateRef = getState;
+    this.#getStateRef = getStateWithMeshProjection;
     this.#versionRef = String(options.version || '0.0.0');
     this.#bootstrapHeartbeatMs = Math.max(1000, Number(options.bootstrapHeartbeatMs) || DEFAULT_BOOTSTRAP_HEARTBEAT_MS);
 
@@ -262,6 +271,7 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
       devos_scheduler_source: 'NATIVE_SUPERVISOR_HEARTBEAT',
       devos_second_polling_loop: false,
       generic_tab_effect_binding: 'SIGNED_DB_COMMAND_INTENT_V1',
+      supervisor_mesh_wire_projection: 'LOCAL_V2_TO_LIVE_V1_BOUNDED_16',
       bounded_read_deadline_ms: DEFAULT_REQUEST_DEADLINE_MS,
       command_result_timeout_disabled_until_ambiguous_receipt_readback: true,
       bootstrap_heartbeat: {
