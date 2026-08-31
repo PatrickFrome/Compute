@@ -45,7 +45,7 @@ function activeByNode(snapshot) {
 }
 
 function assertPoolInvariants(pool) {
-  const snapshot = pool.snapshot();
+  const snapshot = pool.activeSnapshot();
   const seenResources = new Set();
   for (const lease of active(snapshot)) {
     assert.equal(seenResources.has(lease.resource_id), false, `duplicate active resource ${lease.resource_id}`);
@@ -60,6 +60,7 @@ function assertPoolInvariants(pool) {
     assert.equal(row.context_isolation, true);
     assert.equal(row.raw_engine_exposed, false);
   }
+  assert.equal(snapshot.terminal_history_retained, true);
   assert.equal(snapshot.automatic_retry_allowed, false);
   assert.equal(snapshot.authority_effect, false);
   assert.equal(snapshot.raw_engine_transport_exposed, false);
@@ -80,7 +81,7 @@ test(`seeded Windows fleet chaos preserves placement/effect invariants (seed=${S
 
   for (let step = 0; step < STEPS; step += 1) {
     const op = random();
-    const snapshot = pool.snapshot();
+    const snapshot = pool.activeSnapshot();
     const live = active(snapshot);
 
     if (op < 0.42) {
@@ -119,11 +120,10 @@ test(`seeded Windows fleet chaos preserves placement/effect invariants (seed=${S
     } else if (op < 0.82) {
       const index = Math.floor(random() * NODE_COUNT);
       const n = node(index, epochs[index]);
-      const before = pool.snapshot().leases.filter((row) => row.node_id === n.node_id && ['RESERVED', 'IN_FLIGHT'].includes(row.state));
+      const before = pool.activeSnapshot().leases.filter((row) => row.node_id === n.node_id);
       pool.setNodeHealth({ node_id:n.node_id, node_epoch:n.node_epoch, process_incarnation_id:n.process_incarnation_id, health:'UNHEALTHY' });
-      const after = pool.snapshot().leases.filter((row) => row.node_id === n.node_id && row.node_epoch === n.node_epoch);
       for (const old of before) {
-        const terminal = after.find((row) => row.lease_id === old.lease_id);
+        const terminal = pool.getLease(old.lease_id);
         assert.equal(terminal.state, 'TERMINAL');
         assert.equal(terminal.automatic_retry_allowed, false);
         if (old.state === 'IN_FLIGHT') {
@@ -170,6 +170,16 @@ test(`seeded Windows fleet chaos preserves placement/effect invariants (seed=${S
   assert.ok(duplicateChecks > 0, 'duplicate resource path was not exercised');
   assert.ok(crashChecks > 0, 'node crash path was not exercised');
   assert.ok(ambiguousObserved > 0, 'post-effect crash ambiguity was not exercised');
+});
+
+test('operational snapshot excludes terminal history without deleting evidence', () => {
+  const pool=createRemoteBrowserPoolV1();
+  pool.registerNode(node(0,1));
+  const lease=pool.acquireLease({lease_id:'lease.snapshot.1',action_id:'action.snapshot.1',resource_id:'resource.snapshot.1',required_capabilities:['CLICK'],now_ms:1000,ttl_ms:10000});
+  pool.completeLease({lease_id:lease.lease_id,outcome:'NO_EFFECT',reason_code:'CANCELLED_BEFORE_EFFECT'});
+  assert.equal(pool.activeSnapshot().leases.length,0);
+  assert.equal(pool.snapshot().leases.length,1);
+  assert.equal(pool.getLease(lease.lease_id).terminal_outcome,'NO_EFFECT');
 });
 
 test('cross-layer placement and DevOS exact binding fail closed independently', () => {
