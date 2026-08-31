@@ -1,0 +1,40 @@
+name: Browser Meta Orchestrator V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/meta-orchestrator-core.mjs'
+      - 'apps/metaengine-browser/src/meta-orchestrator-devos-adapter.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-core.test.mjs'
+      - 'apps/metaengine-browser/src/autonomy-governor.mjs'
+      - 'apps/metaengine-browser/src/devos-native-task-cycle-core.mjs'
+      - 'coordination/devos/META_ORCHESTRATOR_V1.md'
+      - '.github/workflows/browser-meta-orchestrator-v1.yml'
+  push:
+    branches:
+      - 'work/browser-meta-orchestrator-v1'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Syntax check
+        run: |
+          node --check apps/metaengine-browser/src/meta-orchestrator-core.mjs
+          node --check apps/metaengine-browser/src/meta-orchestrator-devos-adapter.mjs
+      - name: Meta-Orchestrator fail-closed contract
+        run: node --test apps/metaengine-browser/test/meta-orchestrator-core.test.mjs
+      - name: Existing physical task-cycle regression seam
+        run: node --test apps/metaengine-browser/test/devos-native-task-cycle.test.mjs apps/metaengine-browser/test/devos-fleet-transport-proof-runtime.test.mjs
