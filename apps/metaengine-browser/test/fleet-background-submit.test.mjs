@@ -12,11 +12,13 @@ function ax(role, name, id) {
   };
 }
 
+let nextWebContentsId = 7000;
 function fakeChat({ sendPresent = true, proveStop = true } = {}) {
   let attached = false;
   let url = 'https://chatgpt.com/';
   let axReads = 0;
   const calls = [];
+  const webContentsId = nextWebContentsId++;
   const debuggerApi = {
     isAttached: () => attached,
     attach: () => { attached = true; },
@@ -50,6 +52,7 @@ function fakeChat({ sendPresent = true, proveStop = true } = {}) {
   return {
     calls,
     webContents: {
+      id: webContentsId,
       debugger: debuggerApi,
       isDestroyed: () => false,
       getURL: () => url,
