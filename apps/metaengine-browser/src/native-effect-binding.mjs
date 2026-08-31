@@ -10,12 +10,6 @@ export const NATIVE_TAB_EFFECT_ACTIONS = Object.freeze([
   'SEMANTIC_FOCUS',
   'SEMANTIC_TYPE',
   'TYPED_CLICK',
-  'SELECT_TAB',
-  'CLOSE_TAB',
-  'NAVIGATE',
-  'BACK',
-  'FORWARD',
-  'RELOAD',
 ]);
 
 const TAB_EFFECT_SET = new Set(NATIVE_TAB_EFFECT_ACTIONS);
