@@ -122,7 +122,9 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
         if (!devosRef) throw new Error('devos_task_cycle_not_initialized');
         return devosRef.completeFromTrustedCommand(command?.payload || {});
       }
-      if (nativeActionRequiresEffectBinding(command?.action)) {
+      // Only remote DB-leased commands carry command_id. Local supervisor lifecycle
+      // and DevOS have their own durable proof contracts and are audited separately.
+      if (command?.command_id && nativeActionRequiresEffectBinding(command?.action)) {
         if (!sealEffectRef) throw new Error('native_supervisor_effect_binding_not_initialized');
         return sealEffectRef(command);
       }
@@ -146,9 +148,27 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
       return boundedFetch(`${NATIVE_SUPERVISOR_BASE}${path}`, init);
     };
 
+    const observeEffectBinding = prepareEffectBinding || (async (command) => {
+      const tabId = String(command?.payload?.tab_id || '');
+      if (!tabId) throw new Error('native_supervisor_effect_binding_explicit_tab_required');
+      const frame = await executeCommand({
+        action: 'CAPTURE',
+        payload: { tab_id: tabId },
+        platform: command?.platform || null,
+      });
+      if (!frame?.process_incarnation_id || !frame?.target_id || String(frame?.tab_id || '') !== tabId) {
+        throw new Error('native_supervisor_effect_binding_local_observation_invalid');
+      }
+      return {
+        process_incarnation_id: frame.process_incarnation_id,
+        tab_id: tabId,
+        target_id: frame.target_id,
+        observed_at: frame.captured_at || new Date().toISOString(),
+      };
+    });
+
     sealEffectRef = async (command) => {
-      if (typeof prepareEffectBinding !== 'function') throw new Error('native_supervisor_effect_binding_provider_required');
-      const observed = await prepareEffectBinding(command);
+      const observed = await observeEffectBinding(command);
       const identityState = await identity.ensure();
       const binding = buildNativeEffectBinding({
         command,
