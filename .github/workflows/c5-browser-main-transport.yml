@@ -1,0 +1,32 @@
+name: C5 Browser Main Transport Boundary
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/fleet-browser-main-transport.mjs'
+      - 'apps/metaengine-browser/src/fleet-browser-runtime-transport.mjs'
+      - 'apps/metaengine-browser/src/fleet-transport-local-observer.mjs'
+      - 'apps/metaengine-browser/src/fleet-trusted-transport-promotion.mjs'
+      - 'apps/metaengine-browser/test/fleet-browser-main-transport.test.mjs'
+      - '.github/workflows/c5-browser-main-transport.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax
+        run: node --check apps/metaengine-browser/src/fleet-browser-main-transport.mjs
+      - name: Main-process authority boundary tests
+        run: node --test apps/metaengine-browser/test/fleet-browser-main-transport.test.mjs
