@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createFleetBrowserComposition } from '../src/fleet-browser-composition.mjs';
 
-function fixture() {
+function fixture({ leaseDecision } = {}) {
   const saved = [];
+  const leaseRequests = [];
   const state = {
     schema: 'metaengine.browser.fleet-state.v1',
     version: '1.4.0',
@@ -41,36 +42,58 @@ function fixture() {
         getURL: () => 'https://chatgpt.com/c/AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE',
       },
     } : null,
+    verifyActuationLease: async (request) => {
+      leaseRequests.push(structuredClone(request));
+      if (leaseDecision) return leaseDecision(request);
+      return {
+        valid: true,
+        lease_id: request.lease_id,
+        agent_id: request.agent_id,
+        effect: request.effect,
+        released_at: null,
+        authority_effect: false,
+      };
+    },
     policy: { profile: 'BALANCED', warm_agents: 0, desired_agents: 0, max_agents: 1 },
     clock: () => Date.parse('2026-08-31T12:00:00.000Z'),
     uuid: () => '00000000-0000-4000-8000-000000000001',
   });
-  return { composition, saved };
+  return { composition, saved, leaseRequests };
 }
 
-test('composition does not expose raw FleetProvisioner promotion or proof input', async () => {
+test('composition exposes only lease-gated supervisor promotion, never raw live promotion', async () => {
   const { composition } = fixture();
   await composition.init();
   assert.equal(Object.isFrozen(composition), true);
   assert.equal('markTransportProven' in composition, false);
+  assert.equal('promoteAgentFromLiveBrowser' in composition, false);
   assert.equal('fleet' in composition, false);
   assert.equal('provisioner' in composition, false);
   assert.equal(composition.raw_transport_promotion_exposed, false);
+  assert.equal(composition.live_browser_promotion_exposed, false);
   assert.equal(composition.proof_input_surface_exposed, false);
   assert.equal(composition.renderer_input_authority, false);
   assert.equal(composition.worker_browser_authority, false);
+  assert.equal(composition.automatic_retry_allowed, false);
 });
 
-test('promotion derives exact live proof and ignores forged proof-shaped fields', async () => {
-  const { composition } = fixture();
+test('valid exact lease gates Browser-local proof derivation and promotion', async () => {
+  const { composition, leaseRequests } = fixture();
   await composition.init();
-  const result = await composition.promoteAgentFromLiveBrowser({
+  const result = await composition.promoteAgentFromSupervisor({
     agent_id: 'agent_compose-12345678',
+    lease_id: 'lease_exact_1',
     tab_id: 'tab_attacker',
     target_id: 'webcontents:999',
     generation_epoch: 999,
     authority_effect: true,
   });
+  assert.deepEqual(leaseRequests, [{
+    agent_id: 'agent_compose-12345678',
+    lease_id: 'lease_exact_1',
+    effect: 'BROWSER_TRANSPORT_PROMOTION',
+    authority_effect: false,
+  }]);
   const agent = result.agents.find((row) => row.agent_id === 'agent_compose-12345678');
   assert.equal(agent.lifecycle_state, 'ACTIVE');
   assert.equal(agent.transport_proof.tab_id, 'tab_1');
@@ -80,11 +103,39 @@ test('promotion derives exact live proof and ignores forged proof-shaped fields'
   assert.equal(agent.automatic_retry_allowed, false);
 });
 
-test('composition keeps lifecycle operations but no arbitrary eval or execution surface', async () => {
-  const { composition } = fixture();
-  await composition.init();
-  for (const key of ['eval', 'execute', 'executeJavaScript', 'dispatchWorker', 'rawFleet']) {
-    assert.equal(key in composition, false);
+test('invalid, released, mismatched or wrong-effect lease cannot reach transport promotion', async () => {
+  const cases = [
+    () => ({ valid: false, reason: 'expired', authority_effect: false }),
+    (request) => ({ valid: true, lease_id: request.lease_id, agent_id: request.agent_id, effect: request.effect, released_at: '2026-08-31T12:00:00.000Z', authority_effect: false }),
+    (request) => ({ valid: true, lease_id: request.lease_id, agent_id: 'agent_other', effect: request.effect, released_at: null, authority_effect: false }),
+    (request) => ({ valid: true, lease_id: request.lease_id, agent_id: request.agent_id, effect: 'OTHER_EFFECT', released_at: null, authority_effect: false }),
+  ];
+  for (const leaseDecision of cases) {
+    const { composition, saved } = fixture({ leaseDecision });
+    await composition.init();
+    await assert.rejects(
+      composition.promoteAgentFromSupervisor({ agent_id: 'agent_compose-12345678', lease_id: 'lease_exact_1' }),
+      /fleet_supervisor_lease_/,
+    );
+    assert.equal(composition.snapshot().agents[0].lifecycle_state, 'BOUND_UNVERIFIED');
+    assert.equal(saved.length, 0);
   }
-  await assert.rejects(composition.promoteAgentFromLiveBrowser({}), /agent_id_required/);
+});
+
+test('composition without trusted lease verifier fails closed', async () => {
+  const base = fixture();
+  const composition = createFleetBrowserComposition({
+    createTab: async () => {},
+    loadTab: async () => {},
+    tabExists: () => true,
+    loadState: async () => base.composition.snapshot(),
+    saveState: async () => {},
+    lookupView: () => null,
+    policy: { profile: 'BALANCED', warm_agents: 0, desired_agents: 0, max_agents: 1 },
+  });
+  await composition.init();
+  await assert.rejects(
+    composition.promoteAgentFromSupervisor({ agent_id: 'agent_compose-12345678', lease_id: 'lease_exact_1' }),
+    /fleet_supervisor_lease_verifier_unavailable/,
+  );
 });
