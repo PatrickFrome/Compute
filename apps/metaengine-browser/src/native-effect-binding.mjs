@@ -55,7 +55,8 @@ export function buildNativeEffectBinding({ command, clientId, processIncarnation
   const payloadTab = clean(command?.payload?.tab_id);
   if (!payloadTab || payloadTab !== exactTab) throw new Error('native_effect_binding_explicit_tab_required');
   const target = requireTarget(targetId);
-  const expiresAt = Date.parse(String(command?.expires_at || ''));
+  const expiresText = clean(command?.expires_at);
+  const expiresAt = Date.parse(expiresText);
   if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) throw new Error('native_effect_binding_command_expired');
   const observed = new Date(observedAt);
   if (!Number.isFinite(observed.getTime())) throw new Error('native_effect_binding_observed_at_invalid');
@@ -68,7 +69,7 @@ export function buildNativeEffectBinding({ command, clientId, processIncarnation
     process_incarnation_id: processId,
     tab_id: exactTab,
     target_id: target,
-    command_expires_at: new Date(expiresAt).toISOString(),
+    command_expires_at: expiresText,
     observed_at: observed.toISOString(),
     page_data_authority: false,
     automatic_retry_allowed: false,
