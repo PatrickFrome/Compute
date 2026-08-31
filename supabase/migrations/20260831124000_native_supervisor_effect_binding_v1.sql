@@ -1,4 +1,4 @@
--- Native Supervisor C1 convergence: durable exact binding before tab effects.
+-- Native Supervisor C1 convergence: durable exact binding before semantic tab effects.
 -- The existing command lease remains the only authority source. This migration only
 -- records immutable pre-effect intent evidence while that exact lease is live.
 
@@ -41,8 +41,7 @@ declare
   v_digest text;
   v_replayed boolean := false;
   v_tab_actions constant text[] := array[
-    'STOP_GENERATION','SCROLL','SEMANTIC_FOCUS','SEMANTIC_TYPE','TYPED_CLICK',
-    'SELECT_TAB','CLOSE_TAB','NAVIGATE','BACK','FORWARD','RELOAD'
+    'STOP_GENERATION','SCROLL','SEMANTIC_FOCUS','SEMANTIC_TYPE','TYPED_CLICK'
   ];
 begin
   if p_authority_effect is distinct from false then raise exception 'native_effect_binding_authority_effect_invalid'; end if;
@@ -113,4 +112,4 @@ revoke all on function public.h205f22_a2_browser_supervisor_bind_effect_v1(uuid,
 grant execute on function public.h205f22_a2_browser_supervisor_bind_effect_v1(uuid,uuid,text,jsonb,boolean) to service_role;
 
 comment on function public.h205f22_a2_browser_supervisor_bind_effect_v1(uuid,uuid,text,jsonb,boolean) is
-  'Durably seals exact Browser process/tab/WebContents binding for an already-leased typed command. Evidence only; never mints authority and never retries an ambiguous effect.';
+  'Durably seals exact Browser process/tab/WebContents binding for an already-leased typed semantic command. Evidence only; never mints authority and never retries an ambiguous effect.';
