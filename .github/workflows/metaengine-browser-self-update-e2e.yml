@@ -299,11 +299,29 @@ jobs:
           $first = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $firstOut -RedirectStandardError $firstErr
           $null = $first.Handle
           $deadline = (Get-Date).AddSeconds(10)
-          while ((-not (Test-Path $firstOut) -or (Get-Item $firstOut -ErrorAction SilentlyContinue).Length -eq 0) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 100 }
-          $first.Refresh()
-          if ($first.HasExited) { Get-Content $firstErr -ErrorAction SilentlyContinue; throw 'singleton_primary_exited_early' }
-          $firstRow = (Get-Content $firstOut | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
-          if ($firstRow.primary_instance -ne $true) { throw 'singleton_primary_probe_invalid' }
+          $firstRow = $null
+          do {
+            $first.Refresh()
+            if ($first.HasExited) {
+              Get-Content $firstErr -ErrorAction SilentlyContinue
+              throw 'singleton_primary_exited_early'
+            }
+            if (Test-Path $firstOut) {
+              try {
+                $candidate = (Get-Content $firstOut | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
+                if ($candidate -and $candidate.primary_instance -eq $true -and [string]$candidate.version -eq $target -and [string]$candidate.app_id -eq 'com.metaengine.browser.test' -and $candidate.authority_effect -eq $false) {
+                  $firstRow = $candidate
+                  break
+                }
+              } catch {}
+            }
+            Start-Sleep -Milliseconds 100
+          } while ((Get-Date) -lt $deadline)
+          if (-not $firstRow) {
+            Get-Content $firstOut -ErrorAction SilentlyContinue
+            Get-Content $firstErr -ErrorAction SilentlyContinue
+            throw 'singleton_primary_probe_not_observed'
+          }
           $second = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\singleton-second.out" -RedirectStandardError "$env:RUNNER_TEMP\singleton-second.err"
           $null = $second.Handle
           if (-not $second.WaitForExit(5000)) { try { Stop-Process -Id $second.Id -Force } catch {}; try { Stop-Process -Id $first.Id -Force } catch {}; throw 'singleton_secondary_did_not_exit' }
