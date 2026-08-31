@@ -21,12 +21,12 @@ function fixture(){
   const task={task_id:TASK,workspace_id:COORD,point_id:action.point_id,role:action.role,base_sha:BASE,branch_name:action.target_branch,idempotency_key:enqueue.args.p_key,lease_agent_id:claim.agent_id,lease_tab_id:claim.tab_id,lease_target_id:claim.target_id,lease_agent_generation_epoch:claim.agent_generation_epoch,lease_generation:claim.lease_generation};
   const reserved=createWorkspaceReservation({claim,trusted_repo:{repo_id:'github:PatrickFrome/Compute',repo_root:'/trusted/compute'},workspace_root:'/managed/workspaces',workspace_id:WORKSPACE,worktree_id:WORKTREE,workspace_generation:5});
   const ready={...recordWorkspaceMaterializationReadback(reserved,{effect_state:'PROVEN',initial_head_sha:BASE,worktree_realpath:reserved.worktree_path}),binding_id:BINDING};
-  return {enqueue,task,claim,binding:ready};
+  return {enqueue_proposal:enqueue,task,claim,binding:ready};
 }
 function mutate(path,value){const f=fixture();const [root,key]=path.split('.');f[root]={...f[root],[key]:value};return f;}
 
 test('exact scheduler claim + READY binding admits mutation without creating authority',()=>{const proof=assertMetaWorkspaceMutationAdmission(fixture());assert.equal(proof.admitted,true);assert.equal(proof.exact_incarnation_verified,true);assert.equal(proof.scheduler_selection_verified_not_created,true);assert.equal(proof.mutation_executor_still_must_revalidate_lease,true);assert.equal(proof.authority_effect,false);assert.equal(proof.automatic_retry_allowed,false);});
-test('proposal must still route through the one existing DevOS enqueue RPC',()=>{const f=fixture();f.enqueue={...f.enqueue,rpc:'another_scheduler'};assert.throws(()=>assertMetaWorkspaceMutationAdmission(f),/proposal_route_invalid/);});
+test('proposal must still route through the one existing DevOS enqueue RPC',()=>{const f=fixture();f.enqueue_proposal={...f.enqueue_proposal,rpc:'another_scheduler'};assert.throws(()=>assertMetaWorkspaceMutationAdmission(f),/proposal_route_invalid/);});
 test('workspace binding must be READY',()=>assert.throws(()=>assertMetaWorkspaceMutationAdmission(mutate('binding.state','FROZEN')),/binding_not_ready/));
 test('binding with authority effect is rejected',()=>assert.throws(()=>assertMetaWorkspaceMutationAdmission(mutate('binding.authority_effect',true)),/binding_authority_effect_invalid/));
 test('task semantic point drift is rejected',()=>assert.throws(()=>assertMetaWorkspaceMutationAdmission(mutate('task.point_id','other.point')),/task_point_mismatch/));
