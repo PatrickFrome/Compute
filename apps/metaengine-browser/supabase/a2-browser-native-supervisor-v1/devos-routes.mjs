@@ -58,6 +58,14 @@ function taskStatusFromSnapshot(snapshot,taskId){
 export function createDevosSupervisorRoutes({rpc,workspaceId}={}){
   if(typeof rpc!=='function'||!UUID_RE.test(String(workspaceId||'')))throw new Error('devos_routes_dependencies_invalid');
   return async function handle({req,path,body,clientId}={}){
+    const effectMatch=String(path||'').match(/^\/v1\/commands\/([0-9a-f-]{36})\/effect-intent$/i);
+    if(req?.method==='POST'&&effectMatch){
+      if(!clientId)return json(401,{error:'device_auth_required'});
+      const commandId=effectMatch[1].toLowerCase();
+      if(!UUID_RE.test(commandId)||!body?.binding||typeof body.binding!=='object'||Array.isArray(body.binding))return json(400,{error:'native_effect_binding_invalid'});
+      const result=await rpc('h205f22_a2_browser_supervisor_bind_effect_v1',{p_workspace_id:workspaceId,p_command_id:commandId,p_client_id:clientId,p_binding:body.binding,p_authority_effect:false});
+      return json(result?.accepted===true?200:409,{...result,automatic_retry_allowed:false,authority_effect:false});
+    }
     if(!String(path||'').startsWith('/v1/devos/'))return null;
     if(!clientId)return json(401,{error:'device_auth_required'});
     if(req?.method==='POST'&&path==='/v1/devos/cycle'){
