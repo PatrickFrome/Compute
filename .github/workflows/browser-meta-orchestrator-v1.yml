@@ -8,6 +8,8 @@ on:
       - 'apps/metaengine-browser/src/meta-orchestrator-workspace-admission.mjs'
       - 'apps/metaengine-browser/src/meta-orchestrator-authoritative-snapshot.mjs'
       - 'apps/metaengine-browser/src/meta-orchestrator-privileged-adapter.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts'
       - 'apps/metaengine-browser/src/workspace-manager.mjs'
       - 'apps/metaengine-browser/src/workspace-git-hardening.mjs'
       - 'apps/metaengine-browser/src/fleet-target-local-observer.mjs'
@@ -21,6 +23,7 @@ on:
       - 'apps/metaengine-browser/test/meta-orchestrator-authoritative-snapshot.test.mjs'
       - 'apps/metaengine-browser/test/meta-orchestrator-plan-state.test.mjs'
       - 'apps/metaengine-browser/test/meta-orchestrator-privileged-adapter.test.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-native-provider.test.mjs'
       - 'apps/metaengine-browser/test/workspace-manager.test.mjs'
       - 'apps/metaengine-browser/test/workspace-git-hardening.test.mjs'
       - 'apps/metaengine-browser/test/workspace-binding-registry.test.mjs'
@@ -32,6 +35,7 @@ on:
       - 'supabase/migrations/20260831152000_a2_workspace_binding_registry_v1.sql'
       - 'supabase/migrations/20260831184500_devos_fleet_transport_admission_v1.sql'
       - 'supabase/migrations/20260831193000_meta_orchestrator_plan_state_v1.sql'
+      - 'supabase/migrations/20260831200500_meta_orchestrator_authoritative_inputs_v1.sql'
       - 'apps/metaengine-browser/src/autonomy-governor.mjs'
       - 'coordination/devos/META_ORCHESTRATOR_V1.md'
       - '.github/workflows/browser-meta-orchestrator-v1.yml'
@@ -71,6 +75,7 @@ jobs:
           node --check apps/metaengine-browser/src/meta-orchestrator-workspace-admission.mjs
           node --check apps/metaengine-browser/src/meta-orchestrator-authoritative-snapshot.mjs
           node --check apps/metaengine-browser/src/meta-orchestrator-privileged-adapter.mjs
+          node --check apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs
           node --check apps/metaengine-browser/src/workspace-manager.mjs
           node --check apps/metaengine-browser/src/workspace-git-hardening.mjs
           node --check apps/metaengine-browser/src/fleet-target-local-observer.mjs
@@ -80,7 +85,7 @@ jobs:
           node --check apps/metaengine-browser/src/devos-native-task-cycle.mjs
           node --check apps/metaengine-browser/src/devos-native-task-cycle-core.mjs
       - name: Meta-Orchestrator fail-closed contract
-        run: node --test apps/metaengine-browser/test/meta-orchestrator-core.test.mjs apps/metaengine-browser/test/meta-orchestrator-authoritative-snapshot.test.mjs apps/metaengine-browser/test/meta-orchestrator-plan-state.test.mjs apps/metaengine-browser/test/meta-orchestrator-privileged-adapter.test.mjs
+        run: node --test apps/metaengine-browser/test/meta-orchestrator-core.test.mjs apps/metaengine-browser/test/meta-orchestrator-authoritative-snapshot.test.mjs apps/metaengine-browser/test/meta-orchestrator-plan-state.test.mjs apps/metaengine-browser/test/meta-orchestrator-privileged-adapter.test.mjs apps/metaengine-browser/test/meta-orchestrator-native-provider.test.mjs
       - name: Exact Meta-to-Workspace mutation admission
         run: node --test apps/metaengine-browser/test/meta-orchestrator-workspace-admission.test.mjs
       - name: Workspace binding and Git isolation contracts
