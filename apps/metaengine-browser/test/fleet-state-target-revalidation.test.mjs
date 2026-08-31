@@ -69,7 +69,7 @@ test('destroyed WebContents fails closed before durable write', async () => {
       observeLocalTarget: observer(77, true),
       saveState: async () => { writes += 1; },
     }),
-    /fleet_revalidation_tab_missing/,
+    /fleet_revalidation_tab_not_live/,
   );
   assert.equal(writes, 0);
 });
