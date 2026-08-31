@@ -212,6 +212,11 @@ export async function executeSemanticCommand(webContents, command) {
       const readyTree = await dbg.sendCommand('Accessibility.getFullAXTree');
       const sendTargets = exactChatGptControls(readyTree?.nodes || [], 'SEND');
       if (sendTargets.length !== 1) throw new Error(sendTargets.length ? `native_semantic_send_target_ambiguous:${sendTargets.length}` : 'native_semantic_send_target_not_found');
+
+      // Activate the exact semantic Send control rather than sending Enter to the
+      // composer. This preserves background-tab operation without viewport/mouse
+      // geometry while binding the submit keystroke to the trusted SEND node.
+      await dbg.sendCommand('DOM.focus', { backendNodeId: sendTargets[0].backend_node_id });
       await dbg.sendCommand('Input.dispatchKeyEvent', {
         type:'rawKeyDown', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, nativeVirtualKeyCode:13,
       });
@@ -225,6 +230,7 @@ export async function executeSemanticCommand(webContents, command) {
         inserted_chars: text.length,
         replace_existing: command?.payload?.replace_existing !== false,
         submit_after_type: true,
+        submit_method: 'EXACT_SEND_FOCUSED_ENTER',
         prompt_sha256: crypto.createHash('sha256').update(text, 'utf8').digest('hex'),
         prompt_included: false,
         send_control: { role: sendTargets[0].role, name: sendTargets[0].name },
