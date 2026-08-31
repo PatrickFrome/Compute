@@ -1,0 +1,32 @@
+name: C5 Supervisor Lease Promotion Gate
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/fleet-supervisor-promotion-gate.mjs'
+      - 'apps/metaengine-browser/src/fleet-browser-composition.mjs'
+      - 'apps/metaengine-browser/src/fleet-browser-main-transport.mjs'
+      - 'apps/metaengine-browser/src/fleet-browser-runtime-transport.mjs'
+      - 'apps/metaengine-browser/src/fleet-local-transport-observer.mjs'
+      - 'apps/metaengine-browser/src/fleet-provisioner.mjs'
+      - 'apps/metaengine-browser/test/fleet-browser-composition.test.mjs'
+      - '.github/workflows/c5-supervisor-lease-promotion-gate.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  supervisor-lease-promotion:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Lease-gated supervisor promotion contract
+        run: node --test apps/metaengine-browser/test/fleet-browser-composition.test.mjs

@@ -1,7 +1,8 @@
 import { FleetProvisioner } from './fleet-provisioner.mjs';
 import { createFleetBrowserMainTransport } from './fleet-browser-main-transport.mjs';
+import { createFleetSupervisorPromotionGate } from './fleet-supervisor-promotion-gate.mjs';
 
-export const FLEET_BROWSER_COMPOSITION_VERSION = '1.0.0';
+export const FLEET_BROWSER_COMPOSITION_VERSION = '1.1.0';
 
 export function createFleetBrowserComposition({
   createTab,
@@ -10,6 +11,7 @@ export function createFleetBrowserComposition({
   loadState,
   saveState,
   lookupView,
+  verifyActuationLease,
   policy,
   clock,
   uuid,
@@ -25,6 +27,12 @@ export function createFleetBrowserComposition({
     uuid,
   });
   const transport = createFleetBrowserMainTransport({ fleet, lookupView });
+  const supervisorPromotion = typeof verifyActuationLease === 'function'
+    ? createFleetSupervisorPromotionGate({
+      verifyActuationLease,
+      promoteAgentFromLiveBrowser: ({ agent_id }) => transport.promoteAgentFromLiveBrowser({ agent_id }),
+    })
+    : null;
 
   return Object.freeze({
     schema: 'metaengine.browser.fleet-composition.v1',
@@ -36,11 +44,16 @@ export function createFleetBrowserComposition({
     revalidateTargetBinding: (input = {}) => fleet.revalidateTargetBinding(input),
     onTabClosed: (tabId, reason) => fleet.onTabClosed(tabId, reason),
     retire: (agentId) => fleet.retire(agentId),
-    promoteAgentFromLiveBrowser: ({ agent_id } = {}) => transport.promoteAgentFromLiveBrowser({ agent_id }),
+    promoteAgentFromSupervisor: async ({ agent_id, lease_id } = {}) => {
+      if (!supervisorPromotion) throw new Error('fleet_supervisor_lease_verifier_unavailable');
+      return supervisorPromotion.promote({ agent_id, lease_id });
+    },
     raw_transport_promotion_exposed: false,
+    live_browser_promotion_exposed: false,
     proof_input_surface_exposed: false,
     renderer_input_authority: false,
     worker_browser_authority: false,
+    automatic_retry_allowed: false,
     authority_effect: false,
   });
 }
