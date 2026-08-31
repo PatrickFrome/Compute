@@ -1,0 +1,135 @@
+name: METAENGINE Windows Fleet Chaos Convergence
+
+on:
+  push:
+    branches:
+      - work/windows-fleet-chaos-convergence-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-fleet-chaos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-chaos:
+    name: windows-chaos-${{ matrix.round }}
+    runs-on: windows-2022
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        round: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Install Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Static convergence boundaries
+        shell: pwsh
+        run: |
+          node --check coordination/browser-shared/remote-browser-pool-v1.mjs
+          node --check apps/metaengine-browser/src/supervisor-mesh-wire-projection.mjs
+          $pool = Get-Content coordination/browser-shared/remote-browser-pool-v1.mjs -Raw
+          if ($pool -match 'Runtime\.evaluate|child_process|\beval\s*\(') { throw 'remote_pool_authority_surface_detected' }
+          if ($pool -notmatch 'automatic_retry_allowed:false') { throw 'remote_pool_no_retry_contract_missing' }
+          if ($pool -notmatch 'pool_dispatch_incarnation_mismatch') { throw 'remote_pool_incarnation_fence_missing' }
+          $mesh = Get-Content apps/metaengine-browser/src/supervisor-mesh-wire-projection.mjs -Raw
+          if ($mesh -notmatch 'supervisor_mesh_wire_capacity_exceeded') { throw 'mesh_capacity_fail_closed_missing' }
+      - name: Run scale and chaos tests
+        working-directory: apps/metaengine-browser
+        env:
+          METAENGINE_CHAOS_ROUND: ${{ matrix.round }}
+        run: node --test test/windows-fleet-chaos-scale.test.mjs test/supervisor-mesh-wire-projection.test.mjs
+      - name: Run exact Browser contracts
+        working-directory: apps/metaengine-browser
+        run: |
+          npm run check
+          npm test
+
+  windows-electron-smoke:
+    needs: windows-chaos
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Install Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Electron shell process smoke
+        working-directory: apps/metaengine-browser
+        run: npm run smoke
+      - name: Development Plane Electron smoke
+        working-directory: apps/metaengine-browser
+        run: npm run devplane-smoke
+
+  windows-rebuild:
+    needs: windows-electron-smoke
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Install Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Pin chaos candidate version
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        run: npm version 0.6.3-dev.20260831133000.1 --no-git-tag-version
+      - name: Build fresh Windows NSIS candidate
+        working-directory: apps/metaengine-browser
+        run: npx electron-builder --win nsis --x64 --config electron-builder.test.json --publish never
+      - name: Record exact-head Windows evidence
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem 'apps/metaengine-browser/dist-test/*.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'installer_missing' }
+          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $sig = Get-AuthenticodeSignature $exe.FullName
+          $evidence = [ordered]@{
+            schema='metaengine.windows-fleet-chaos-build.v1'
+            git_sha='${{ github.sha }}'
+            version='0.6.3-dev.20260831133000.1'
+            installer=$exe.Name
+            sha256=$hash
+            authenticode_status=[string]$sig.Status
+            signer_subject=if($sig.SignerCertificate){$sig.SignerCertificate.Subject}else{$null}
+            test_environment='github-hosted-windows-2022'
+            chaos_rounds=4
+            scale_task_placements=1000
+            scale_supervisor_peers=1024
+            production_promotion_allowed=($sig.Status -eq 'Valid')
+            authority_effect=$false
+          }
+          $evidence | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 'windows-fleet-chaos-evidence.json'
+          Get-Content 'windows-fleet-chaos-evidence.json'
+      - name: Upload exact candidate and evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-windows-fleet-chaos-${{ github.sha }}
+          path: |
+            apps/metaengine-browser/dist-test/*.exe
+            apps/metaengine-browser/dist-test/*.blockmap
+            windows-fleet-chaos-evidence.json
+          if-no-files-found: error
+          retention-days: 30
