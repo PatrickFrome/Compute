@@ -1,5 +1,10 @@
 import { DevOsNativeTaskCycle } from './devos-native-task-cycle.mjs';
 import {
+  assertNativeEffectBindingMatches,
+  buildNativeEffectBinding,
+  nativeActionRequiresEffectBinding,
+} from './native-effect-binding.mjs';
+import {
   NativeSupervisorClient as BaseNativeSupervisorClient,
   NATIVE_SUPERVISOR_BASE,
   NATIVE_SUPERVISOR_RUNTIME_PATH,
@@ -102,17 +107,24 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
     const rawFetch = options.fetchImpl ?? globalThis.fetch;
     const getState = options.getState;
     const executeCommand = options.executeCommand;
+    const prepareEffectBinding = options.prepareEffectBinding;
     if (!identity) throw new Error('native_supervisor_identity_required');
     if (typeof rawFetch !== 'function') throw new Error('native_supervisor_fetch_required');
     if (typeof getState !== 'function') throw new Error('native_supervisor_state_provider_required');
     if (typeof executeCommand !== 'function') throw new Error('native_supervisor_command_executor_required');
+    if (prepareEffectBinding != null && typeof prepareEffectBinding !== 'function') throw new Error('native_supervisor_effect_binding_provider_invalid');
 
     const boundedFetch = createBoundedSupervisorFetch(rawFetch, { deadlineMs: options.requestDeadlineMs });
     let devosRef = null;
+    let sealEffectRef = null;
     const executeCommandWithDevosLifecycle = async (command) => {
       if (String(command?.action || '') === 'FLEET_TASK_COMPLETE') {
         if (!devosRef) throw new Error('devos_task_cycle_not_initialized');
         return devosRef.completeFromTrustedCommand(command?.payload || {});
+      }
+      if (nativeActionRequiresEffectBinding(command?.action)) {
+        if (!sealEffectRef) throw new Error('native_supervisor_effect_binding_not_initialized');
+        return sealEffectRef(command);
       }
       return executeCommand(command);
     };
@@ -132,6 +144,40 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
       const init = { method, headers, cache: 'no-store' };
       if (method !== 'GET') init.body = bodyText;
       return boundedFetch(`${NATIVE_SUPERVISOR_BASE}${path}`, init);
+    };
+
+    sealEffectRef = async (command) => {
+      if (typeof prepareEffectBinding !== 'function') throw new Error('native_supervisor_effect_binding_provider_required');
+      const observed = await prepareEffectBinding(command);
+      const identityState = await identity.ensure();
+      const binding = buildNativeEffectBinding({
+        command,
+        clientId: identityState.client_id,
+        processIncarnationId: observed?.process_incarnation_id,
+        tabId: observed?.tab_id,
+        targetId: observed?.target_id,
+        observedAt: observed?.observed_at,
+      });
+      const response = await signedRequest(`/v1/commands/${encodeURIComponent(command.command_id)}/effect-intent`, {
+        payload: { binding },
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body?.accepted !== true || !body?.effect_binding) {
+        throw new Error(`native_supervisor_effect_binding_http_${response.status}:${body?.reason || body?.error || 'rejected'}`);
+      }
+      const sealed = assertNativeEffectBindingMatches({
+        command,
+        binding: body.effect_binding,
+        clientId: identityState.client_id,
+        processIncarnationId: observed.process_incarnation_id,
+        tabId: observed.tab_id,
+        targetId: observed.target_id,
+      });
+      return executeCommand({
+        ...command,
+        effect_binding: sealed,
+        effect_binding_sha256: body.effect_binding_sha256 || null,
+      });
     };
 
     devosRef = new DevOsNativeTaskCycle({ getState, executeCommand, signedRequest });
@@ -195,6 +241,7 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
       devos_last_error: this.#lastDevosError,
       devos_scheduler_source: 'NATIVE_SUPERVISOR_HEARTBEAT',
       devos_second_polling_loop: false,
+      generic_tab_effect_binding: 'SIGNED_DB_COMMAND_INTENT_V1',
       bounded_read_deadline_ms: DEFAULT_REQUEST_DEADLINE_MS,
       command_result_timeout_disabled_until_ambiguous_receipt_readback: true,
       bootstrap_heartbeat: {
