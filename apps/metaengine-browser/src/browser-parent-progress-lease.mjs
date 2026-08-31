@@ -5,6 +5,10 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { parentProgressPath } = require('./browser-sentinel-liveness.cjs');
 
+async function readJson(file) {
+  try { return JSON.parse(await fs.readFile(file, 'utf8')); }
+  catch (error) { if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null; throw error; }
+}
 async function atomicWrite(target, value) {
   const temp = `${target}.tmp`;
   await fs.mkdir(path.dirname(target), { recursive: true });
@@ -18,8 +22,8 @@ export class BrowserParentProgressLease {
   #seq = 0;
   #last = null;
 
-  constructor({ statePath, getBinding } = {}) {
-    if (!statePath || typeof getBinding !== 'function') throw new Error('browser_parent_progress_dependencies_required');
+  constructor({ statePath, getBinding = null } = {}) {
+    if (!statePath || (getBinding != null && typeof getBinding !== 'function')) throw new Error('browser_parent_progress_dependencies_required');
     this.#statePath = String(statePath);
     this.#getBinding = getBinding;
   }
@@ -34,12 +38,20 @@ export class BrowserParentProgressLease {
     });
   }
 
+  async #binding() {
+    const supplied = this.#getBinding?.();
+    return supplied && typeof supplied.then === 'function' ? supplied : (supplied || readJson(this.#statePath));
+  }
+
   async mark({ kind = 'CONTROL_PLANE_CYCLE', detail = null } = {}) {
-    const binding = this.#getBinding();
+    const binding = await this.#binding();
     const token = String(binding?.token || '');
     const parentPid = Number(binding?.parent_pid || 0);
-    if (!token || !Number.isSafeInteger(parentPid) || parentPid !== process.pid) {
+    if (binding?.schema !== 'metaengine.browser-sentinel.state.v1' || !token || !Number.isSafeInteger(parentPid) || parentPid !== process.pid) {
       throw new Error('browser_parent_progress_binding_invalid');
+    }
+    if (binding?.lifecycle === 'PLANNED_SHUTDOWN' || binding?.expected_restart === true || binding?.installer_handoff === true) {
+      return this.snapshot();
     }
     this.#seq += 1;
     const row = {
