@@ -97,6 +97,7 @@ export async function dispatchFleetTask({
     selectedTabId: selectedAfterSelection,
     phase: 'PRE_TYPE',
   });
+  const preConversation = isConversationUrl(pre?.url);
 
   let typed = null;
   let click = null;
@@ -141,9 +142,10 @@ export async function dispatchFleetTask({
 
   const stopObserved = chatGptControlCount(post, 'STOP') === 1;
   const postConversation = isConversationUrl(post?.url);
-  const effectProven = stopObserved || postConversation;
+  const newConversationObserved = !preConversation && postConversation;
+  const effectProven = stopObserved || newConversationObserved;
   const effectState = effectProven
-    ? (stopObserved ? 'PROVEN_GENERATING' : 'PROVEN_CONVERSATION')
+    ? (stopObserved ? 'PROVEN_GENERATING' : 'PROVEN_NEW_CONVERSATION')
     : 'AMBIGUOUS_AFTER_CLICK';
 
   const receipt = {
@@ -162,7 +164,7 @@ export async function dispatchFleetTask({
     click_effect_observed: click?.authority_effect === true,
     effect_state: effectState,
     stop_observed: stopObserved,
-    new_conversation_observed: postConversation,
+    new_conversation_observed: newConversationObserved,
     post_url_sha256: post?.url ? sha256(post.url) : null,
     prompt_included: false,
     selected_tab_mutation: true,
