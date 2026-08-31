@@ -8,7 +8,8 @@ export class HostResilienceRuntime {
   #electron; #onResume; #platform; #blockerId = null; #resumeHandler = null; #sentinel = null;
   #state = {
     state: 'UNINITIALIZED', open_at_login: false, executable_will_launch_at_login: false,
-    prevent_app_suspension: false, sentinel: null, last_resume_at: null, last_error: null,
+    prevent_app_suspension: false, sentinel: null, sentinel_worker_healthy: false,
+    last_resume_at: null, last_error: null,
   };
 
   constructor({ electron = null, onResume = async () => {}, platform = process.platform } = {}) {
@@ -18,10 +19,12 @@ export class HostResilienceRuntime {
   }
 
   snapshot() {
+    const sentinel = this.#sentinel?.snapshot?.() || this.#state.sentinel;
     return structuredClone({
-      schema: 'metaengine.host-resilience-runtime.v2',
+      schema: 'metaengine.host-resilience-runtime.v3',
       ...this.#state,
-      sentinel: this.#sentinel?.snapshot?.() || this.#state.sentinel,
+      sentinel,
+      sentinel_worker_healthy: sentinel?.worker_ready === true,
       authority_effect: false,
     });
   }
@@ -44,6 +47,8 @@ export class HostResilienceRuntime {
           executable: process.execPath,
         });
         await this.#sentinel.start({ app });
+        await this.#sentinel.waitUntilHealthy(5_000);
+        this.#state.sentinel_worker_healthy = true;
       }
       if (process.env.METAENGINE_ALLOW_SUSPEND !== '1' && powerSaveBlocker) {
         this.#blockerId = powerSaveBlocker.start('prevent-app-suspension');
@@ -59,6 +64,7 @@ export class HostResilienceRuntime {
       this.#state.state = 'ACTIVE';
     } catch (e) {
       this.#state.state = 'ERROR';
+      this.#state.sentinel_worker_healthy = false;
       this.#state.last_error = String(e?.message || e).slice(0, 240);
     }
     return this.snapshot();
@@ -84,6 +90,7 @@ export class HostResilienceRuntime {
     this.#blockerId = null;
     this.#resumeHandler = null;
     this.#state.prevent_app_suspension = false;
+    this.#state.sentinel_worker_healthy = false;
     this.#state.state = 'STOPPED';
     return this.snapshot();
   }
