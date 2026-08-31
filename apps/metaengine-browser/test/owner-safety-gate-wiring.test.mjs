@@ -41,10 +41,15 @@ test('Browser runtime exposes typed gate command surface and durable readback', 
   assert.match(main, /bindGlobalOwnerSafetyGateRegistry\(ownerSafetyGates\)/);
 });
 
-test('fleet ambiguous compensating fanout is explicitly owner-gated', () => {
-  const source = fs.readFileSync(path.join(root, 'src', 'fleet-provisioner.mjs'), 'utf8');
-  assert.match(source, /globalOwnerGateDisabled\('fleet\.ambiguous_compensating_fanout'\)/);
-  assert.match(source, /PROVISIONING_AMBIGUOUS/);
+test('fleet ambiguous compensating fanout remains explicitly owner-gated through wrapper/core split', () => {
+  const wrapper = fs.readFileSync(path.join(root, 'src', 'fleet-provisioner.mjs'), 'utf8');
+  const core = fs.readFileSync(path.join(root, 'src', 'fleet-provisioner-core.mjs'), 'utf8');
+  assert.match(wrapper, /extends CoreFleetProvisioner/);
+  assert.match(wrapper, /registerFleetRuntime\(this\)/);
+  assert.doesNotMatch(wrapper, /async reconcile\s*\(/);
+  assert.doesNotMatch(wrapper, /PROVISIONING_AMBIGUOUS/);
+  assert.match(core, /globalOwnerGateDisabled\('fleet\.ambiguous_compensating_fanout'\)/);
+  assert.match(core, /PROVISIONING_AMBIGUOUS/);
 });
 
 test('server contract gives owner gate lane zero budget cost and emergency bypass', () => {
