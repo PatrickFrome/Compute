@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import path from 'node:path';
 import {
   DevOsNativeTaskCycle as CoreDevOsNativeTaskCycle,
   assertLiveLeaseBinding as assertCoreLiveLeaseBinding,
@@ -6,6 +7,11 @@ import {
   planBacklogCapacity,
   renderDevosTaskPrompt,
 } from './devos-native-task-cycle-core.mjs';
+import {
+  DevOsEffectDeliveryJournal,
+  DEVOS_EFFECT_DELIVERY_JOURNAL_FILE,
+} from './devos-effect-delivery-journal.mjs';
+import { supervisorDeviceStorageDirectory } from './supervisor-device-identity.mjs';
 
 export { normalizeLease, planBacklogCapacity, renderDevosTaskPrompt };
 
@@ -16,9 +22,9 @@ function conversationUrl(value) {
   try {
     const url = new URL(String(value || ''));
     if (url.protocol !== 'https:' || !['chatgpt.com', 'www.chatgpt.com'].includes(url.hostname.toLowerCase())) return null;
-    const path = url.pathname.replace(/\/+$/, '');
-    if (!/^\/c\/[a-z0-9-]+$/i.test(path)) return null;
-    return `https://chatgpt.com${path.toLowerCase()}`;
+    const pathName = url.pathname.replace(/\/+$/, '');
+    if (!/^\/c\/[a-z0-9-]+$/i.test(pathName)) return null;
+    return `https://chatgpt.com${pathName.toLowerCase()}`;
   } catch {
     return null;
   }
@@ -105,8 +111,8 @@ export class DevOsNativeTaskCycle {
       return result;
     };
 
-    const proofGatedSignedRequest = async (path, request = {}) => {
-      if (String(path) === '/v1/devos/mark-running') {
+    const proofGatedSignedRequest = async (requestPath, request = {}) => {
+      if (String(requestPath) === '/v1/devos/mark-running') {
         const payload = request?.payload || {};
         const agent = exactFleetAgent(await this.#getState(), payload);
         const frame = this.#lastFrames.get(String(payload.tab_id || '')) || null;
@@ -134,14 +140,20 @@ export class DevOsNativeTaskCycle {
           authority_effect: false,
         };
       }
-      return signedRequest(path, request);
+      return signedRequest(requestPath, request);
     };
+
+    const storageDir = supervisorDeviceStorageDirectory();
+    const effectJournal = options.effectJournal || (storageDir ? new DevOsEffectDeliveryJournal({
+      statePath: path.join(storageDir, DEVOS_EFFECT_DELIVERY_JOURNAL_FILE),
+    }) : null);
 
     this.#inner = new CoreDevOsNativeTaskCycle({
       ...options,
       getState: strictGetState,
       executeCommand: observedExecuteCommand,
       signedRequest: proofGatedSignedRequest,
+      effectJournal,
     });
   }
 
@@ -151,6 +163,7 @@ export class DevOsNativeTaskCycle {
       fleet_transport_proof: this.#lastFleetTransportProof ? structuredClone(this.#lastFleetTransportProof) : null,
       fleet_transport_proof_before_physical_dispatch: true,
       fleet_transport_proof_before_db_running: true,
+      durable_effect_delivery_journal: this.#inner.snapshot()?.durable_effect_delivery_journal === true,
       bound_unverified_dispatch_allowed: false,
       authority_effect: this.#inner.snapshot()?.authority_effect === true,
     };
