@@ -8,6 +8,7 @@ const HASH_RE = /^[a-f0-9]{64}$/;
 const AGENT_RE = /^agent_[a-z0-9-]{8,64}$/;
 const TERMINAL_STATES = new Set(['COMPLETED','FAILED','AMBIGUOUS']);
 const RECEIPT_CONFIRMED_STATES = new Set(['RUNNING','RESULT_READY','BLOCKED','COMPLETED','FAILED']);
+const WRITE_AHEAD_EFFECT_BARRIER = 'WRITE_AHEAD_V1';
 
 const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 const clip = (value, max = 500) => String(value ?? '').slice(0, max);
@@ -147,10 +148,18 @@ function journalBinding(lease, promptSha256) {
 function proofFromJournal(entry) {
   const promptSha = String(entry?.prompt_sha256 || '').toLowerCase();
   const conversationSha = String(entry?.evidence?.conversation_url_sha256 || '').toLowerCase();
-  const effectState = String(entry?.evidence?.effect_state || '');
+  const effectState = String(entry?.evidence?.effect_state || '').toUpperCase();
   if (!HASH_RE.test(promptSha) || !HASH_RE.test(conversationSha)) return null;
   if (!['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','PROVEN_CONVERSATION'].includes(effectState)) return null;
   return { prompt_sha256: promptSha, conversation_url_sha256: conversationSha, effect_state: effectState };
+}
+
+function safePreEffectCandidate(entry) {
+  const evidence = entry?.evidence || {};
+  return ['EXECUTION_STARTED','AMBIGUOUS'].includes(String(entry?.state || '').toUpperCase())
+    && evidence.effect_barrier_contract === WRITE_AHEAD_EFFECT_BARRIER
+    && evidence.physical_effect_attempted === false
+    && evidence.effect_barrier_crossed === false;
 }
 
 async function responseJson(response, errorCode) {
@@ -174,10 +183,13 @@ export class DevOsNativeTaskCycle {
     if (effectJournal != null && (
       typeof effectJournal.init !== 'function'
       || typeof effectJournal.find !== 'function'
+      || typeof effectJournal.recoveryCandidates !== 'function'
       || typeof effectJournal.beginExecution !== 'function'
+      || typeof effectJournal.markEffectAttempted !== 'function'
       || typeof effectJournal.markDeliveryPending !== 'function'
       || typeof effectJournal.markConfirmed !== 'function'
       || typeof effectJournal.markAmbiguous !== 'function'
+      || typeof effectJournal.markEffectAbsent !== 'function'
     )) throw new Error('devos_effect_journal_invalid');
     this.#getState = getState;
     this.#executeCommand = executeCommand;
@@ -206,10 +218,21 @@ export class DevOsNativeTaskCycle {
   }
 
   async cycle() {
-    await this.#ensureJournal();
+    const journal = await this.#ensureJournal();
     const state = await this.#getState();
     const fleetSnapshot = state?.fleet;
     if (!fleetSnapshot?.agents) return this.#record({ state: 'NO_FLEET' });
+
+    // Recovery is one bounded superstep of the same Browser heartbeat. It never clicks,
+    // types, creates a lease, or starts another timer. At most one durable tail is inspected.
+    const ambiguityRecovery = journal ? await this.#reconcileOneDurableEffect().catch((error) => ({
+      state: 'RECOVERY_PROVIDER_ERROR',
+      reason: clip(error?.message || error, 180),
+      physical_effect_replayed: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    })) : null;
+
     const planResponse = await this.#signedRequest('/v1/devos/cycle', {
       payload: {
         fleet: {
@@ -222,7 +245,7 @@ export class DevOsNativeTaskCycle {
         },
       },
     });
-    if (planResponse.status === 404) return this.#record({ state: 'SERVER_ROUTE_UNAVAILABLE' });
+    if (planResponse.status === 404) return this.#record({ state: 'SERVER_ROUTE_UNAVAILABLE', ambiguity_recovery: ambiguityRecovery });
     const plan = await responseJson(planResponse, 'devos_cycle_http');
     if (plan.schema !== 'metaengine.devos.browser-cycle.v1') throw new Error('devos_cycle_schema_invalid');
 
@@ -234,7 +257,7 @@ export class DevOsNativeTaskCycle {
     if (plan.lease) dispatch = await this.#dispatchLease(plan.lease, postState?.fleet);
     let resultReady = null;
     if (Array.isArray(plan.running) && plan.running.length) resultReady = await this.#observeRunning(plan.running[0], postState?.fleet);
-    return this.#record({ state: 'OK', backlog: structuredClone(plan.backlog || {}), capacity, dispatch, result_ready: resultReady });
+    return this.#record({ state: 'OK', backlog: structuredClone(plan.backlog || {}), capacity, ambiguity_recovery: ambiguityRecovery, dispatch, result_ready: resultReady });
   }
 
   async completeFromTrustedCommand(payload = {}) {
@@ -252,11 +275,112 @@ export class DevOsNativeTaskCycle {
       if (!response?.ok) return null;
       const body = await response.json().catch(() => ({}));
       const observedGeneration = Number(body?.lease_generation || 0);
-      if (observedGeneration !== lease.lease_generation) return { state: 'GENERATION_MISMATCH', body };
+      if (observedGeneration !== Number(lease.lease_generation)) return { state: 'GENERATION_MISMATCH', body };
       return { state: String(body?.state || '').toUpperCase(), body };
     } catch {
       return null;
     }
+  }
+
+  async #reconcileOneDurableEffect() {
+    const candidate = this.#effectJournal?.recoveryCandidates(1)?.[0] || null;
+    if (!candidate) return { state: 'NO_DURABLE_RECOVERY_DEBT', physical_effect_replayed: false, automatic_retry_allowed: false, authority_effect: false };
+    const binding = journalBinding(candidate, candidate.prompt_sha256);
+    const status = await this.#readTaskStatus(candidate);
+    const proof = proofFromJournal(candidate);
+
+    if (status && RECEIPT_CONFIRMED_STATES.has(status.state)) {
+      await this.#effectJournal.markConfirmed(binding, { db_state: status.state, reconciliation: 'RECOVERY_STATUS_READBACK' });
+      return { state: 'RECOVERY_ALREADY_CONFIRMED', task_id: candidate.task_id, lease_generation: candidate.lease_generation, db_state: status.state, physical_effect_replayed: false, automatic_retry_allowed: false, authority_effect: false };
+    }
+    if (status?.state === 'READY' && safePreEffectCandidate(candidate)) {
+      await this.#effectJournal.markEffectAbsent(binding, { reconciliation: 'SERVER_ALREADY_REQUEUED' });
+      return { state: 'EFFECT_ABSENT_READY_CONFIRMED', task_id: candidate.task_id, lease_generation: candidate.lease_generation, retry_via_scheduler: true, physical_effect_replayed: false, automatic_retry_allowed: false, authority_effect: false };
+    }
+
+    // A positive Browser proof may have outlived the ordinary mark-running receipt. If the
+    // task is still LEASED, redeliver only the DB receipt; never replay the Browser effect.
+    if (status?.state === 'LEASED' && proof) {
+      try {
+        const response = await this.#signedRequest('/v1/devos/mark-running', { payload: { ...bindingPayload(candidate), proof } });
+        const body = await responseJson(response, 'devos_mark_running_recovery_http');
+        await this.#effectJournal.markConfirmed(binding, { db_state: String(body?.state || 'RUNNING').toUpperCase(), reconciliation: 'RECOVERY_RECEIPT_REDELIVERY' });
+        return { state: 'RUNNING_RECEIPT_REDELIVERED', task_id: candidate.task_id, lease_generation: candidate.lease_generation, physical_effect_replayed: false, automatic_retry_allowed: false, authority_effect: false };
+      } catch {}
+    }
+
+    let recovery = null;
+    if (safePreEffectCandidate(candidate)) {
+      recovery = {
+        recovery_class: 'PRE_EFFECT_ABORTED',
+        prompt_sha256: candidate.prompt_sha256,
+        physical_effect_attempted: false,
+        effect_barrier_crossed: false,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      };
+    } else if (proof && candidate?.evidence?.physical_effect_attempted === true && candidate?.evidence?.effect_barrier_crossed === true) {
+      recovery = {
+        recovery_class: 'EFFECT_PROVEN',
+        prompt_sha256: candidate.prompt_sha256,
+        physical_effect_attempted: true,
+        effect_barrier_crossed: true,
+        proof,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      };
+    }
+
+    if (!recovery) {
+      if (String(candidate.state) !== 'AMBIGUOUS') {
+        await this.#effectJournal.markAmbiguous(binding, {
+          prior_state: String(candidate.state || ''),
+          reconciliation: candidate?.evidence?.effect_barrier_contract === WRITE_AHEAD_EFFECT_BARRIER ? 'EFFECT_UNKNOWN' : 'LEGACY_JOURNAL_NO_WRITE_AHEAD_PROOF',
+        }).catch(() => {});
+      }
+      return {
+        state: candidate?.evidence?.effect_barrier_contract === WRITE_AHEAD_EFFECT_BARRIER ? 'STILL_AMBIGUOUS_EFFECT_UNKNOWN' : 'STILL_AMBIGUOUS_LEGACY_JOURNAL',
+        task_id: candidate.task_id,
+        lease_generation: candidate.lease_generation,
+        physical_effect_replayed: false,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      };
+    }
+
+    const response = await this.#signedRequest('/v1/devos/reconcile-ambiguous', {
+      payload: { ...bindingPayload(candidate), recovery },
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return {
+        state: response.status === 409 ? 'RECOVERY_FENCED_OR_NOT_READY' : 'RECOVERY_REJECTED',
+        task_id: candidate.task_id,
+        lease_generation: candidate.lease_generation,
+        reason: clip(body?.error || body?.reason || `http_${response.status}`, 160),
+        physical_effect_replayed: false,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      };
+    }
+    if (body?.schema !== 'metaengine.devos.ambiguity-reconciliation.v1'
+        || String(body.task_id || '').toLowerCase() !== String(candidate.task_id).toLowerCase()
+        || Number(body.lease_generation) !== Number(candidate.lease_generation)
+        || body.physical_effect_replayed !== false
+        || body.new_lease_generation_allocated !== false
+        || body.automatic_retry_allowed !== false
+        || body.authority_effect !== false) {
+      throw new Error('devos_ambiguity_recovery_readback_invalid');
+    }
+    if (recovery.recovery_class === 'PRE_EFFECT_ABORTED' && body.state === 'READY' && body.retry_via_scheduler === true) {
+      await this.#effectJournal.markEffectAbsent(binding, { reconciliation: 'SERVER_EFFECT_ABSENT_REQUEUED' });
+      return { state: 'EFFECT_ABSENT_REQUEUED', task_id: candidate.task_id, lease_generation: candidate.lease_generation, retry_via_scheduler: true, physical_effect_replayed: false, automatic_retry_allowed: false, authority_effect: false };
+    }
+    if (recovery.recovery_class === 'EFFECT_PROVEN' && body.state === 'RUNNING') {
+      await this.#effectJournal.markConfirmed(binding, { db_state: 'RUNNING', reconciliation: 'SERVER_EFFECT_PROVEN_RECOVERY' });
+      return { state: 'EFFECT_PROVEN_RUNNING_RECOVERED', task_id: candidate.task_id, lease_generation: candidate.lease_generation, physical_effect_replayed: false, automatic_retry_allowed: false, authority_effect: false };
+    }
+    throw new Error('devos_ambiguity_recovery_state_invalid');
   }
 
   async #reconcileJournalEntry(lease, binding, entry) {
@@ -266,12 +390,10 @@ export class DevOsNativeTaskCycle {
       await this.#effectJournal?.markConfirmed(binding, { db_state: status.state, reconciliation: 'STATUS_READBACK' });
       return { state: 'NO_REDISPATCH_CONFIRMED', task_id: lease.task_id, lease_generation: lease.lease_generation, db_state: status.state, automatic_retry_allowed: false, authority_effect: false };
     }
+    const proof = proofFromJournal(entry);
     if (status?.state === 'AMBIGUOUS') {
-      await this.#effectJournal?.markAmbiguous(binding, { db_state: 'AMBIGUOUS', reconciliation: 'STATUS_READBACK' });
-      return { state: 'NO_REDISPATCH_AMBIGUOUS', task_id: lease.task_id, lease_generation: lease.lease_generation, automatic_retry_allowed: false, authority_effect: false };
+      return { state: 'NO_REDISPATCH_AMBIGUOUS', task_id: lease.task_id, lease_generation: lease.lease_generation, positive_effect_proof: Boolean(proof), physical_effect_replayed: false, automatic_retry_allowed: false, authority_effect: false };
     }
-
-    const proof = entry?.state === 'DELIVERY_PENDING' ? proofFromJournal(entry) : null;
     if (status?.state === 'LEASED' && proof) {
       try {
         const response = await this.#signedRequest('/v1/devos/mark-running', { payload: { ...bindingPayload(lease), proof } });
@@ -288,7 +410,6 @@ export class DevOsNativeTaskCycle {
         return { state: 'NO_REDISPATCH_AMBIGUOUS', task_id: lease.task_id, lease_generation: lease.lease_generation, physical_effect_replayed: false, automatic_retry_allowed: false, authority_effect: false };
       }
     }
-
     await this.#effectJournal?.markAmbiguous(binding, {
       prior_state: String(entry?.state || ''),
       db_state: status?.state || 'UNKNOWN',
@@ -327,6 +448,9 @@ export class DevOsNativeTaskCycle {
 
       await journal?.beginExecution(effectBinding, {
         phase: 'BEFORE_SEMANTIC_TYPE',
+        effect_barrier_contract: WRITE_AHEAD_EFFECT_BARRIER,
+        physical_effect_attempted: false,
+        effect_barrier_crossed: false,
         pre_conversation_url_sha256: preConversation ? sha256(preConversation) : null,
       });
 
@@ -343,7 +467,7 @@ export class DevOsNativeTaskCycle {
           },
         });
       } catch (error) {
-        await journal?.markAmbiguous(effectBinding, { reason: 'SEMANTIC_TYPE_EFFECT_AMBIGUOUS' }).catch(() => {});
+        await journal?.markAmbiguous(effectBinding, { reason: 'SEMANTIC_TYPE_EFFECT_AMBIGUOUS', physical_effect_attempted: false, effect_barrier_crossed: false }).catch(() => {});
         await this.#reportAmbiguous(lease, 'SEMANTIC_TYPE_EFFECT_AMBIGUOUS').catch(() => {});
         throw error;
       }
@@ -351,7 +475,7 @@ export class DevOsNativeTaskCycle {
       const beforeClickState = await this.#getState();
       const selectedBeforeClick = selectedTabId(beforeClickState);
       if (selectedBeforeClick !== lease.tab_id) {
-        await journal?.markAmbiguous(effectBinding, { reason: 'FOREGROUND_LOST_AFTER_TYPE' }).catch(() => {});
+        await journal?.markAmbiguous(effectBinding, { reason: 'FOREGROUND_LOST_AFTER_TYPE', physical_effect_attempted: false, effect_barrier_crossed: false }).catch(() => {});
         await this.#reportAmbiguous(lease, 'FOREGROUND_LOST_AFTER_TYPE').catch(() => {});
         throw new Error('devos_foreground_lost_after_type');
       }
@@ -362,8 +486,21 @@ export class DevOsNativeTaskCycle {
       try {
         typedReady = readinessOrThrow({ frame: typedFrame, lease, selected_tab_id: selectedBeforeClick, phase: 'PRE_CLICK' });
       } catch (error) {
-        await journal?.markAmbiguous(effectBinding, { reason: 'READINESS_LOST_AFTER_TYPE' }).catch(() => {});
+        await journal?.markAmbiguous(effectBinding, { reason: 'READINESS_LOST_AFTER_TYPE', physical_effect_attempted: false, effect_barrier_crossed: false }).catch(() => {});
         await this.#reportAmbiguous(lease, 'READINESS_LOST_AFTER_TYPE').catch(() => {});
+        throw error;
+      }
+
+      // Durable write-ahead barrier: once this fsync succeeds, any crash is conservatively
+      // treated as a possibly executed external effect. The Browser click happens only after it.
+      try {
+        await journal?.markEffectAttempted(effectBinding, {
+          phase: 'BEFORE_TYPED_CLICK',
+          effect_barrier_contract: WRITE_AHEAD_EFFECT_BARRIER,
+          send_click_returned: false,
+        });
+      } catch (error) {
+        await this.#reportAmbiguous(lease, 'EFFECT_BARRIER_PERSIST_FAILED').catch(() => {});
         throw error;
       }
 
@@ -377,9 +514,14 @@ export class DevOsNativeTaskCycle {
             accessible_name: typedReady.send_control.name,
           },
         });
-        await journal?.markDeliveryPending(effectBinding, { send_click_attempted: true, send_click_returned: true });
+        await journal?.markDeliveryPending(effectBinding, {
+          send_click_attempted: true,
+          send_click_returned: true,
+          physical_effect_attempted: true,
+          effect_barrier_crossed: true,
+        });
       } catch (error) {
-        await journal?.markAmbiguous(effectBinding, { reason: 'SEND_CLICK_EFFECT_AMBIGUOUS', send_click_attempted: clickIssued }).catch(() => {});
+        await journal?.markAmbiguous(effectBinding, { reason: 'SEND_CLICK_EFFECT_AMBIGUOUS', send_click_attempted: clickIssued, physical_effect_attempted: true, effect_barrier_crossed: true }).catch(() => {});
         await this.#reportAmbiguous(lease, 'SEND_CLICK_EFFECT_AMBIGUOUS').catch(() => {});
         throw error;
       }
@@ -390,7 +532,7 @@ export class DevOsNativeTaskCycle {
       const newConversationObserved = !preConversation && Boolean(normalizedUrl);
       const effectState = stopObserved ? 'PROVEN_GENERATING' : (newConversationObserved ? 'PROVEN_NEW_CONVERSATION' : null);
       if (!effectState || !normalizedUrl) {
-        await journal?.markAmbiguous(effectBinding, { reason: 'SEND_EFFECT_NOT_PROVEN', send_click_attempted: true }).catch(() => {});
+        await journal?.markAmbiguous(effectBinding, { reason: 'SEND_EFFECT_NOT_PROVEN', send_click_attempted: true, physical_effect_attempted: true, effect_barrier_crossed: true }).catch(() => {});
         await this.#reportAmbiguous(lease, 'SEND_EFFECT_NOT_PROVEN').catch(() => {});
         const error = new Error('devos_send_effect_ambiguous');
         error.automatic_retry_allowed = false;
@@ -406,6 +548,8 @@ export class DevOsNativeTaskCycle {
         conversation_url_sha256: proof.conversation_url_sha256,
         effect_state: proof.effect_state,
         browser_effect_proven: true,
+        physical_effect_attempted: true,
+        effect_barrier_crossed: true,
       });
 
       try {
@@ -436,7 +580,7 @@ export class DevOsNativeTaskCycle {
             physical_effect_replayed: false, automatic_retry_allowed: false, authority_effect: false,
           };
         }
-        await journal?.markAmbiguous(effectBinding, { reason: clip(writeError?.message || writeError, 180), db_state: status?.state || 'UNKNOWN' }).catch(() => {});
+        await journal?.markAmbiguous(effectBinding, { reason: clip(writeError?.message || writeError, 180), db_state: status?.state || 'UNKNOWN', physical_effect_attempted: true, effect_barrier_crossed: true }).catch(() => {});
         const error = new Error(`devos_running_receipt_ambiguous:${clip(writeError?.message || writeError, 200)}`);
         error.automatic_retry_allowed = false;
         throw error;
@@ -507,6 +651,8 @@ export class DevOsNativeTaskCycle {
       ...structuredClone(fields),
       attempted_lease_count: this.#attempted.size,
       durable_effect_delivery_journal: this.#effectJournal != null,
+      write_ahead_effect_barrier: this.#effectJournal != null ? WRITE_AHEAD_EFFECT_BARRIER : null,
+      ambiguity_recovery_fanout_per_cycle: this.#effectJournal != null ? 1 : 0,
       second_scheduler_loop: false,
       arbitrary_eval: false,
       page_model_text_authority: false,
