@@ -1,0 +1,69 @@
+name: Browser Self Update Durability Gate
+
+on:
+  push:
+    branches:
+      - 'work/browser-continuous-fleet-audit-v1'
+    paths:
+      - 'apps/metaengine-browser/src/self-update-transaction-journal.mjs'
+      - 'apps/metaengine-browser/src/durable-json-file.cjs'
+      - 'apps/metaengine-browser/test/self-update-transaction-journal.test.mjs'
+      - 'apps/metaengine-browser/test/self-update-install-effect-barrier.test.mjs'
+      - '.github/workflows/browser-self-update-durability-gate.yml'
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/self-update-transaction-journal.mjs'
+      - 'apps/metaengine-browser/src/durable-json-file.cjs'
+      - 'apps/metaengine-browser/test/self-update-transaction-journal.test.mjs'
+      - 'apps/metaengine-browser/test/self-update-install-effect-barrier.test.mjs'
+      - '.github/workflows/browser-self-update-durability-gate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  transaction-durability:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Transaction durability and write-ahead effect barrier
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check apps/metaengine-browser/src/self-update-transaction-journal.mjs
+          node --check apps/metaengine-browser/src/durable-json-file.cjs
+          node --test apps/metaengine-browser/test/self-update-transaction-journal.test.mjs
+          node --test apps/metaengine-browser/test/self-update-install-effect-barrier.test.mjs
+
+      - name: Prove tests did not mutate checkout
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
