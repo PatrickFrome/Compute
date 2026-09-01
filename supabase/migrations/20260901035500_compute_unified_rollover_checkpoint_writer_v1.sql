@@ -18,10 +18,11 @@ create table if not exists public.h205f22_compute_unified_rollover_checkpoints_v
   unique (workspace_id, evidence_fingerprint)
 );
 
-revoke all on table public.h205f22_compute_unified_rollover_checkpoints_v1 from public, anon, authenticated;
-revoke all on sequence public.h205f22_compute_unified_rollover_checkpoints_v1_checkpoint_id_seq from public, anon, authenticated;
-grant select, insert on table public.h205f22_compute_unified_rollover_checkpoints_v1 to service_role;
-grant usage, select on sequence public.h205f22_compute_unified_rollover_checkpoints_v1_checkpoint_id_seq to service_role;
+-- The writer is SECURITY DEFINER. Callers need EXECUTE only; they receive no
+-- direct table/identity-sequence capability. This also avoids depending on the
+-- implementation-generated identity sequence name, which PostgreSQL may
+-- truncate to NAMEDATALEN-1 bytes.
+revoke all on table public.h205f22_compute_unified_rollover_checkpoints_v1 from public, anon, authenticated, service_role;
 
 create or replace function public.h205f22_persist_compute_unified_rollover_checkpoint_v1(p_workspace uuid)
 returns jsonb
