@@ -24,6 +24,7 @@ on:
       - 'apps/metaengine-browser/src/main.mjs'
       - 'apps/metaengine-browser/src/devos-native-task-cycle.mjs'
       - 'apps/metaengine-browser/src/devos-native-task-cycle-core.mjs'
+      - 'apps/metaengine-browser/src/devos-effect-delivery-journal.mjs'
       - 'apps/metaengine-browser/test/meta-orchestrator-core.test.mjs'
       - 'apps/metaengine-browser/test/meta-orchestrator-continuous-reconcile.test.mjs'
       - 'apps/metaengine-browser/test/meta-orchestrator-capacity-pressure.test.mjs'
@@ -43,6 +44,10 @@ on:
       - 'apps/metaengine-browser/test/devos-native-task-cycle.test.mjs'
       - 'apps/metaengine-browser/test/devos-fleet-transport-proof-runtime.test.mjs'
       - 'apps/metaengine-browser/test/devos-fleet-transport-admission.test.mjs'
+      - 'apps/metaengine-browser/test/devos-effect-delivery-journal.test.mjs'
+      - 'apps/metaengine-browser/test/devos-effect-delivery-restart.test.mjs'
+      - 'apps/metaengine-browser/test/devos-effect-delivery-durability.test.mjs'
+      - 'apps/metaengine-browser/test/devos-ambiguity-client-fence.test.mjs'
       - 'supabase/migrations/20260831152000_a2_workspace_binding_registry_v1.sql'
       - 'supabase/migrations/20260831184500_devos_fleet_transport_admission_v1.sql'
       - 'supabase/migrations/20260831193000_meta_orchestrator_plan_state_v1.sql'
@@ -53,6 +58,9 @@ on:
       - 'supabase/migrations/20260901034000_meta_orchestrator_controller_lease_v1.sql'
       - 'supabase/migrations/20260901034500_meta_orchestrator_frontier_leader_fence_v2.sql'
       - 'supabase/migrations/20260901035000_devos_fleet_scheduler_pressure_snapshot_v2.sql'
+      - 'supabase/migrations/20260901042000_devos_fleet_ambiguity_reconciliation_v1.sql'
+      - 'supabase/migrations/20260901043000_devos_control_supervisor_authority_repair_v1.sql'
+      - 'supabase/migrations/20260901044000_devos_fleet_ambiguity_reconciliation_client_fence_v2.sql'
       - 'apps/metaengine-browser/src/autonomy-governor.mjs'
       - 'coordination/devos/META_ORCHESTRATOR_V1.md'
       - '.github/workflows/browser-meta-orchestrator-v1.yml'
@@ -108,6 +116,7 @@ jobs:
           node --check apps/metaengine-browser/src/main.mjs
           node --check apps/metaengine-browser/src/devos-native-task-cycle.mjs
           node --check apps/metaengine-browser/src/devos-native-task-cycle-core.mjs
+          node --check apps/metaengine-browser/src/devos-effect-delivery-journal.mjs
       - name: Meta-Orchestrator fail-closed contract
         run: node --test apps/metaengine-browser/test/meta-orchestrator-core.test.mjs apps/metaengine-browser/test/meta-orchestrator-authoritative-snapshot.test.mjs apps/metaengine-browser/test/meta-orchestrator-plan-state.test.mjs apps/metaengine-browser/test/meta-orchestrator-privileged-adapter.test.mjs apps/metaengine-browser/test/meta-orchestrator-native-provider.test.mjs apps/metaengine-browser/test/meta-orchestrator-native-provider-client.test.mjs apps/metaengine-browser/test/meta-orchestrator-cycle-stage.test.mjs
       - name: Continuous Meta heartbeat, pressure, and atomic frontier contract
@@ -120,5 +129,5 @@ jobs:
         run: node --test apps/metaengine-browser/test/devos-fleet-transport-admission.test.mjs
       - name: Bounded worker liveness observation
         run: node --test apps/metaengine-browser/test/bounded-worker-observer-v2.test.mjs apps/metaengine-browser/test/native-supervisor-bounded-worker-observer-wiring.test.mjs
-      - name: Physical task-cycle transport regression seam
-        run: node --test apps/metaengine-browser/test/devos-native-task-cycle.test.mjs apps/metaengine-browser/test/devos-fleet-transport-proof-runtime.test.mjs
+      - name: Physical task-cycle transport and crash-recovery seam
+        run: node --test apps/metaengine-browser/test/devos-native-task-cycle.test.mjs apps/metaengine-browser/test/devos-fleet-transport-proof-runtime.test.mjs apps/metaengine-browser/test/devos-effect-delivery-journal.test.mjs apps/metaengine-browser/test/devos-effect-delivery-restart.test.mjs apps/metaengine-browser/test/devos-effect-delivery-durability.test.mjs apps/metaengine-browser/test/devos-ambiguity-client-fence.test.mjs
