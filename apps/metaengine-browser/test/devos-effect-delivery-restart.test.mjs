@@ -5,7 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { DevOsNativeTaskCycle, renderDevosTaskPrompt } from '../src/devos-native-task-cycle.mjs';
-import { DevOsEffectDeliveryJournal } from '../src/devos-effect-delivery-journal.mjs';
+import {
+  DevOsEffectDeliveryJournal,
+  DEVOS_EFFECT_JOURNAL_PRE_EFFECT_BARRIER_CONTRACT,
+} from '../src/devos-effect-delivery-journal.mjs';
 
 const lease = {
   task_id: '09f2e414-5c31-4fc7-87a3-f5de1315cb81',
@@ -232,13 +235,12 @@ test('corrupt journal fails before scheduler request or Browser effect', async (
   assert.equal(commands, 0);
 });
 
-test('write-ahead crash before effect barrier proves absence and requeues only through scheduler', async () => {
+test('crash before effect barrier requeues only when the platform durability contract proves absence', async () => {
   const { statePath } = await journalFixture();
   const seed = new DevOsEffectDeliveryJournal({ statePath });
   await seed.init();
   await seed.beginExecution(journalBinding(), {
     phase: 'BEFORE_SEMANTIC_TYPE',
-    effect_barrier_contract: 'WRITE_AHEAD_V1',
     physical_effect_attempted: false,
     effect_barrier_crossed: false,
   });
@@ -277,27 +279,36 @@ test('write-ahead crash before effect barrier proves absence and requeues only t
   });
 
   const out = await cycle.cycle();
-  assert.equal(out.ambiguity_recovery.state, 'EFFECT_ABSENT_REQUEUED');
-  assert.equal(out.ambiguity_recovery.retry_via_scheduler, true);
+  const canProvePreEffectAbsence = DEVOS_EFFECT_JOURNAL_PRE_EFFECT_BARRIER_CONTRACT === 'WRITE_AHEAD_V1';
   assert.equal(out.ambiguity_recovery.physical_effect_replayed, false);
-  assert.equal(recoveryRequests.length, 1);
-  assert.deepEqual(recoveryRequests[0].recovery, {
-    recovery_class: 'PRE_EFFECT_ABORTED',
-    prompt_sha256: promptHash,
-    physical_effect_attempted: false,
-    effect_barrier_crossed: false,
-    automatic_retry_allowed: false,
-    authority_effect: false,
-  });
   assert.equal(calls.includes('SEMANTIC_TYPE'), false);
   assert.equal(calls.includes('TYPED_CLICK'), false);
 
   const readback = new DevOsEffectDeliveryJournal({ statePath });
   await readback.init();
   const entry = readback.find(journalBinding());
-  assert.equal(entry.state, 'EFFECT_ABSENT');
+  assert.equal(entry.evidence.effect_barrier_contract, DEVOS_EFFECT_JOURNAL_PRE_EFFECT_BARRIER_CONTRACT);
   assert.equal(entry.evidence.physical_effect_attempted, false);
   assert.equal(entry.evidence.effect_barrier_crossed, false);
+
+  if (canProvePreEffectAbsence) {
+    assert.equal(out.ambiguity_recovery.state, 'EFFECT_ABSENT_REQUEUED');
+    assert.equal(out.ambiguity_recovery.retry_via_scheduler, true);
+    assert.equal(recoveryRequests.length, 1);
+    assert.deepEqual(recoveryRequests[0].recovery, {
+      recovery_class: 'PRE_EFFECT_ABORTED',
+      prompt_sha256: promptHash,
+      physical_effect_attempted: false,
+      effect_barrier_crossed: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    assert.equal(entry.state, 'EFFECT_ABSENT');
+  } else {
+    assert.equal(out.ambiguity_recovery.state, 'STILL_AMBIGUOUS_LEGACY_JOURNAL');
+    assert.equal(recoveryRequests.length, 0);
+    assert.equal(entry.state, 'AMBIGUOUS');
+  }
 });
 
 test('crash after EFFECT_ATTEMPTED barrier stays ambiguous and never invokes recovery or Browser replay', async () => {
