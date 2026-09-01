@@ -1,4 +1,5 @@
 import { MetaOrchestratorPrivilegedAdapter } from '../../src/meta-orchestrator-privileged-adapter.mjs';
+import { projectMetaSchedulerPressure } from '../../src/meta-orchestrator-capacity-pressure.mjs';
 import { reconcileContinuousMetaOrchestrator } from '../../src/meta-orchestrator-continuous-reconcile.mjs';
 
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -16,6 +17,9 @@ function zero(extra={}){
     frontier_point_count:0,
     duplicate_count:0,
     atomic_frontier:false,
+    pressure_state:null,
+    available_slots:null,
+    new_frontier_slots:null,
     second_scheduler_loop:false,
     automatic_retry_allowed:false,
     task_content_authority:false,
@@ -40,7 +44,7 @@ function classify(error){
   if(message.includes('active_plan_missing')||message.includes('plan_state'))return'ACTIVE_PLAN_UNAVAILABLE';
   if(message.includes('roadmap_authority'))return'ROADMAP_AUTHORITY_UNAVAILABLE';
   if(message.includes('meta_frontier_')||message.includes('meta_admit_'))return'FRONTIER_ADMISSION_FENCED';
-  if(message.includes('devos_capacity')||message.includes('capacity'))return'CAPACITY_UNAVAILABLE';
+  if(message.includes('devos_capacity')||message.includes('capacity')||message.includes('meta_pressure_'))return'CAPACITY_UNAVAILABLE';
   return'PROVIDER_NOT_READY';
 }
 
@@ -94,12 +98,14 @@ export function createMetaDevosSuperstep({rpc,workspaceId,roadmapId='metaengine-
     }
 
     try{
+      let pressureRaw=null;
       const readAuthoritativeInputs=async()=>{
         const [inputs,capacity]=await Promise.all([
           rpc('meta_orchestrator_authoritative_inputs_v1',{p_workspace_id:fixedWorkspace,p_roadmap_id:fixedRoadmap}),
           rpc('devos_fleet_capacity_snapshot_v1',{p_workspace:fixedWorkspace}),
         ]);
-        return {...object(inputs,'authoritative_inputs'),capacity:object(capacity,'capacity')};
+        pressureRaw=object(capacity,'capacity');
+        return {...object(inputs,'authoritative_inputs'),capacity:pressureRaw};
       };
       const adapter=new MetaOrchestratorPrivilegedAdapter({
         readAuthoritativeInputs,
@@ -107,6 +113,7 @@ export function createMetaDevosSuperstep({rpc,workspaceId,roadmapId='metaengine-
       });
       const bundle=await adapter.readAuthoritativeBundle({workspace_id:fixedWorkspace,roadmap_id:fixedRoadmap});
       const snapshot=bundle.snapshot;
+      const pressure=projectMetaSchedulerPressure(pressureRaw,{expectedAvailableSlots:snapshot.capacity.available_slots});
       const reconcile=reconcileContinuousMetaOrchestrator({
         plan:bundle.plan,
         observed_alignment_epoch:snapshot.observed_alignment_epoch,
@@ -114,7 +121,7 @@ export function createMetaDevosSuperstep({rpc,workspaceId,roadmapId='metaengine-
         leader:{expected_epoch:leader.leader_epoch,observed_epoch:leader.leader_epoch},
         tasks:snapshot.tasks,
         evidence:snapshot.evidence,
-        capacity:snapshot.capacity,
+        capacity:pressure,
         policy:{max_parallel_proposals:maxParallel},
       });
       const proposals=(Array.isArray(reconcile.actions)?reconcile.actions:[]).filter((row)=>row?.type==='PROPOSE_TASK');
@@ -127,6 +134,9 @@ export function createMetaDevosSuperstep({rpc,workspaceId,roadmapId='metaengine-
           reason:clip(reconcile.reason||'NO_FRONTIER'),
           leader:true,
           leader_epoch:leader.leader_epoch,
+          pressure_state:pressure.pressure_state,
+          available_slots:pressure.available_slots,
+          new_frontier_slots:pressure.new_frontier_slots,
         });
       }
 
@@ -146,6 +156,9 @@ export function createMetaDevosSuperstep({rpc,workspaceId,roadmapId='metaengine-
           reason:classify(error),
           leader:true,
           leader_epoch:leader.leader_epoch,
+          pressure_state:pressure.pressure_state,
+          available_slots:pressure.available_slots,
+          new_frontier_slots:pressure.new_frontier_slots,
         });
       }
       const verified=exactFrontier(admitted,{workspaceId:fixedWorkspace,roadmapId:fixedRoadmap,generation:Number(bundle.plan.plan_generation),epoch:leader.leader_epoch,expectedPoints:pointIds});
@@ -157,6 +170,9 @@ export function createMetaDevosSuperstep({rpc,workspaceId,roadmapId='metaengine-
         frontier_point_count:pointIds.length,
         duplicate_count:verified.duplicates,
         atomic_frontier:true,
+        pressure_state:pressure.pressure_state,
+        available_slots:pressure.available_slots,
+        new_frontier_slots:pressure.new_frontier_slots,
       });
     }catch(error){
       return zero({
