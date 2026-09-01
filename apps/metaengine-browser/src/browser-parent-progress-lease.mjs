@@ -28,7 +28,10 @@ async function atomicWrite(target, value, sequence) {
     await handle.close();
   }
   await fs.rename(temp, target);
-  const committed = await fs.open(target, 'r');
+  // Windows requires a write-capable handle for FlushFileBuffers/fsync. Opening the
+  // already-committed file r+ does not alter its contents and preserves cross-platform
+  // post-rename durability without a second write.
+  const committed = await fs.open(target, 'r+');
   try { await committed.sync(); } finally { await committed.close(); }
   await syncDirectory(directory);
 }
