@@ -1,0 +1,123 @@
+name: Browser Windows Package Smoke
+
+on:
+  push:
+    branches:
+      - 'work/browser-continuous-fleet-audit-v1'
+    paths:
+      - 'apps/metaengine-browser/src/**'
+      - 'apps/metaengine-browser/ui/**'
+      - 'apps/metaengine-browser/package.json'
+      - 'apps/metaengine-browser/electron-builder.test.json'
+      - '.github/workflows/browser-windows-package-smoke.yml'
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/**'
+      - 'apps/metaengine-browser/ui/**'
+      - 'apps/metaengine-browser/package.json'
+      - 'apps/metaengine-browser/electron-builder.test.json'
+      - '.github/workflows/browser-windows-package-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-nsis-package-smoke:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Install test-package dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+
+      - name: Parse exact source before packaging
+        working-directory: apps/metaengine-browser
+        run: npm run check
+
+      - name: Build exact-head unsigned NSIS test package
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          $sourceHead = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $version = [string](node -p "require('./package.json').version")
+          if (-not $version) { throw 'package_version_missing' }
+          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
+          $blockmap = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe.blockmap" -File | Select-Object -First 1
+          if (-not $installer) { throw 'package_installer_missing' }
+          if (-not $blockmap) { throw 'package_blockmap_missing' }
+          $digest = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($digest -notmatch '^[0-9a-f]{64}$') { throw 'package_digest_invalid' }
+          @{
+            schema = 'metaengine.browser.windows-package-smoke.v1'
+            source_head = $sourceHead
+            package_version = $version
+            installer_name = $installer.Name
+            installer_sha256 = $digest
+            blockmap_name = $blockmap.Name
+            signed = $false
+            published = $false
+            promotion_authorized = $false
+            authority_effect = $false
+          } | ConvertTo-Json -Depth 4 | Set-Content "$env:RUNNER_TEMP\windows-package-proof.json" -Encoding utf8
+          Copy-Item $installer.FullName "$env:RUNNER_TEMP\candidate-setup.exe"
+
+      - name: Install exact-head package and probe identity
+        shell: powershell
+        run: |
+          $proof = Get-Content "$env:RUNNER_TEMP\windows-package-proof.json" -Raw | ConvertFrom-Json
+          $install = Start-Process -FilePath "$env:RUNNER_TEMP\candidate-setup.exe" -ArgumentList '/S' -PassThru -Wait
+          if ($install.ExitCode -ne 0) { throw "package_installer_exit_$($install.ExitCode)" }
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test\METAENGINE Browser Test.exe'
+          if (-not (Test-Path $app)) { throw "packaged_browser_missing:$app" }
+          $out = "$env:RUNNER_TEMP\package-version-probe.out"
+          $err = "$env:RUNNER_TEMP\package-version-probe.err"
+          $probe = Start-Process -FilePath $app -ArgumentList '--metaengine-version-probe' -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          $null = $probe.Handle
+          if (-not $probe.WaitForExit(15000)) {
+            try { Stop-Process -Id $probe.Id -Force -ErrorAction SilentlyContinue } catch {}
+            throw 'package_version_probe_timeout'
+          }
+          if ($probe.ExitCode -ne 0) {
+            Get-Content $err -ErrorAction SilentlyContinue
+            throw "package_version_probe_exit_$($probe.ExitCode)"
+          }
+          $row = (Get-Content $out | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
+          if ([string]$row.version -ne [string]$proof.package_version) { throw 'package_version_probe_mismatch' }
+          if ($row.primary_instance -ne $true) { throw 'package_primary_instance_unproven' }
+          if ($proof.signed -ne $false -or $proof.published -ne $false -or $proof.promotion_authorized -ne $false -or $proof.authority_effect -ne $false) {
+            throw 'package_zero_authority_contract_invalid'
+          }
+          Write-Host ($proof | ConvertTo-Json -Compress)
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/package.json apps/metaengine-browser/electron-builder.test.json)"
