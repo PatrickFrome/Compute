@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 export const BRANCH_LINEAGE_AUDIT_SCHEMA = 'metaengine.devos.branch-lineage-audit.v1';
-export const BRANCH_LINEAGE_AUDIT_VERSION = '1.0.0';
+export const BRANCH_LINEAGE_AUDIT_VERSION = '1.1.0';
 
 export const AUTHORITY_RULES = Object.freeze([
   ['CI_GOVERNANCE', (p) => p.startsWith('.github/workflows/')],
@@ -99,6 +99,95 @@ function riskRank(classification) {
   })[classification] ?? 5;
 }
 
+function sortRisk(a, b) {
+  return b.risk_rank - a.risk_rank || b.unique_commits - a.unique_commits || a.branch.localeCompare(b.branch);
+}
+
+function containingRefs(cwd, headSha, namespace) {
+  const raw = git(cwd, ['for-each-ref', '--format=%(refname)', '--contains', headSha, namespace]);
+  return raw ? raw.split('\n').filter(Boolean) : [];
+}
+
+function enrichLineageTips(cwd, branches, namespace) {
+  const byRef = new Map(branches.map((row) => [row.ref, row]));
+  const byFamily = new Map();
+  for (const row of branches) {
+    if (!byFamily.has(row.family)) byFamily.set(row.family, []);
+    byFamily.get(row.family).push(row);
+  }
+
+  const descendantsByBranch = new Map();
+  for (const row of branches) {
+    if (row.unique_commits === 0 || row.classification === 'BASE') {
+      descendantsByBranch.set(row.branch, []);
+      continue;
+    }
+    const descendants = containingRefs(cwd, row.head_sha, namespace)
+      .map((ref) => byRef.get(ref))
+      .filter((candidate) => candidate
+        && candidate.branch !== row.branch
+        && candidate.family === row.family
+        && candidate.unique_commits > 0
+        && candidate.head_sha !== row.head_sha);
+    descendants.sort(sortRisk);
+    descendantsByBranch.set(row.branch, descendants);
+  }
+
+  const canonicalByHead = new Map();
+  for (const [family, rows] of byFamily) {
+    const byHead = new Map();
+    for (const row of rows.filter((candidate) => candidate.unique_commits > 0)) {
+      if (!byHead.has(row.head_sha)) byHead.set(row.head_sha, []);
+      byHead.get(row.head_sha).push(row);
+    }
+    for (const [headSha, aliases] of byHead) {
+      aliases.sort((a, b) => a.branch.localeCompare(b.branch));
+      canonicalByHead.set(`${family}:${headSha}`, aliases[0].branch);
+    }
+  }
+
+  for (const row of branches) {
+    const canonical = canonicalByHead.get(`${row.family}:${row.head_sha}`) || row.branch;
+    const descendants = descendantsByBranch.get(row.branch) || [];
+    row.equivalent_to_branch = canonical !== row.branch ? canonical : null;
+    row.lineage_tip = row.unique_commits > 0
+      && row.classification !== 'BASE'
+      && row.equivalent_to_branch == null
+      && descendants.length === 0;
+  }
+
+  const tipsByFamily = new Map();
+  for (const row of branches.filter((candidate) => candidate.lineage_tip)) {
+    if (!tipsByFamily.has(row.family)) tipsByFamily.set(row.family, []);
+    tipsByFamily.get(row.family).push(row);
+  }
+  for (const tips of tipsByFamily.values()) tips.sort(sortRisk);
+
+  for (const row of branches) {
+    if (row.superseded_by_base) {
+      row.superseded_by_branch = null;
+      continue;
+    }
+    const descendants = descendantsByBranch.get(row.branch) || [];
+    const descendantBranches = new Set(descendants.map((candidate) => candidate.branch));
+    const terminalTips = (tipsByFamily.get(row.family) || []).filter((tip) => descendantBranches.has(tip.branch));
+    if (terminalTips.length) row.superseded_by_branch = terminalTips[0].branch;
+    else if (row.equivalent_to_branch) row.superseded_by_branch = row.equivalent_to_branch;
+    else row.superseded_by_branch = null;
+  }
+
+  const lineageTips = branches.filter((row) => row.lineage_tip).sort(sortRisk);
+  const familySummary = [...byFamily.entries()].map(([family, rows]) => ({
+    family,
+    branch_count: rows.length,
+    contained_count: rows.filter((row) => row.superseded_by_base).length,
+    lineage_tip_count: rows.filter((row) => row.lineage_tip).length,
+    authority_lineage_tip_count: rows.filter((row) => row.lineage_tip && row.authority_critical).length,
+  })).sort((a, b) => b.authority_lineage_tip_count - a.authority_lineage_tip_count || b.lineage_tip_count - a.lineage_tip_count || a.family.localeCompare(b.family));
+
+  return { lineageTips, familySummary };
+}
+
 export function listBranchRefs({ cwd = process.cwd(), namespace = 'refs/remotes/origin/' } = {}) {
   if (!String(namespace).startsWith('refs/')) throw new Error('branch_lineage_namespace_invalid');
   const raw = git(cwd, ['for-each-ref', '--format=%(refname)\t%(objectname)\t%(symref)', namespace]);
@@ -176,14 +265,19 @@ export function auditBranchLineage({
       unique_files_truncated: uniquePaths.length > fileLimit,
       unique_files: uniquePaths.slice(0, fileLimit),
       superseded_by_base: classification === 'CONTAINED',
+      superseded_by_branch: null,
+      equivalent_to_branch: null,
+      lineage_tip: false,
       read_only: true,
       authority_effect: false,
     };
   });
 
-  branches.sort((a, b) => b.risk_rank - a.risk_rank || b.unique_commits - a.unique_commits || a.branch.localeCompare(b.branch));
+  branches.sort(sortRisk);
+  const { lineageTips, familySummary } = enrichLineageTips(cwd, branches, namespace);
   const counts = {};
   for (const branch of branches) counts[branch.classification] = (counts[branch.classification] || 0) + 1;
+  const authorityLineageTips = lineageTips.filter((row) => row.authority_critical);
   return {
     schema: BRANCH_LINEAGE_AUDIT_SCHEMA,
     version: BRANCH_LINEAGE_AUDIT_VERSION,
@@ -193,6 +287,11 @@ export function auditBranchLineage({
     branch_count: branches.length,
     classification_counts: Object.fromEntries(Object.entries(counts).sort(([a], [b]) => a.localeCompare(b))),
     authority_branch_count: branches.filter((row) => row.authority_critical && row.unique_commits > 0).length,
+    lineage_tip_count: lineageTips.length,
+    authority_lineage_tip_count: authorityLineageTips.length,
+    family_summary: familySummary,
+    lineage_tips: lineageTips,
+    top_authority_lineage_tips: authorityLineageTips.slice(0, 25),
     branches,
     mutates_refs: false,
     mutates_worktree: false,
@@ -207,14 +306,15 @@ export function renderBranchLineageMarkdown(report) {
     '# Branch Lineage Audit V1',
     '',
     `Base: \`${report.base_ref}\` @ \`${report.base_sha}\``,
-    `Branches: ${report.branch_count}; authority-bearing unique lineages: ${report.authority_branch_count}.`,
+    `Branches: ${report.branch_count}; raw authority-bearing branches: ${report.authority_branch_count}; lineage tips: ${report.lineage_tip_count}; authority-bearing tips: ${report.authority_lineage_tip_count}.`,
     '',
-    '| Class | Branch | Unique | Base-only | Authority | Family |',
-    '|---|---|---:|---:|---|---|',
+    '| Tip | Class | Branch | Unique | Base-only | Superseded by | Authority | Family |',
+    '|---|---|---|---:|---:|---|---|---|',
   ];
   for (const row of report.branches) {
     const authority = row.authority_categories.length ? row.authority_categories.join(', ') : '—';
-    lines.push(`| ${row.classification} | \`${row.branch}\` | ${row.unique_commits} | ${row.base_only_commits} | ${authority} | \`${row.family}\` |`);
+    const superseded = row.superseded_by_base ? 'BASE' : (row.superseded_by_branch || row.equivalent_to_branch || '—');
+    lines.push(`| ${row.lineage_tip ? 'TIP' : '—'} | ${row.classification} | \`${row.branch}\` | ${row.unique_commits} | ${row.base_only_commits} | \`${superseded}\` | ${authority} | \`${row.family}\` |`);
   }
   lines.push('', '> Read-only audit: no ref mutation, worktree mutation, scheduler call, merge, cherry-pick, release, or Browser actuation is performed.');
   return `${lines.join('\n')}\n`;
@@ -261,6 +361,7 @@ function help() {
     '  --max-branches <n>     fail-closed branch cap (default 1000)',
     '  --max-files <n>        emitted file cap per branch (authority detection still scans all)',
     '',
+    'Lineage tips are derived only from exact Git ancestry inside the same branch family.',
     'The auditor is read-only and never runs git mutation commands.',
   ].join('\n');
 }
