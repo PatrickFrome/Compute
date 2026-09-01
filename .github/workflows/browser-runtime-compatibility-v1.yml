@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'work/browser-runtime-compatibility-v1'
+      - 'work/browser-runtime-compatibility-v2'
     paths:
       - 'apps/metaengine-browser/src/devos-runtime-compatibility.mjs'
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/runtime-capabilities.mjs'
