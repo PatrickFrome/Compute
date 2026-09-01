@@ -16,7 +16,7 @@ function pointId(value){const out=String(value||'').trim().toLowerCase();if(!POI
 function nonNegative(value,name){const out=Number(value);if(!Number.isSafeInteger(out)||out<0)throw new Error(`meta_native_${name}_invalid`);return out}
 function positive(value,name){const out=Number(value);if(!Number.isSafeInteger(out)||out<1)throw new Error(`meta_native_${name}_invalid`);return out}
 function stable(value){if(Array.isArray(value))return value.map(stable);if(value&&typeof value==='object'){const out={};for(const key of Object.keys(value).sort())out[key]=stable(value[key]);return out}return value}
-function samePlan(left,right){try{return JSON.stringify(stable(left))===JSON.stringify(stable(right))}catch{return false}}
+function boundedDeadline(value,fallback){const out=Number(value);return Math.max(1000,Math.min(30000,Number.isFinite(out)?out:fallback))}
 
 export class MetaOrchestratorActivationOutcomeError extends Error{
   constructor(message,{effectState='AMBIGUOUS',automaticRetryAllowed=false,cause=null}={}){super(message,{cause});this.name='MetaOrchestratorActivationOutcomeError';this.effect_state=effectState;this.automatic_retry_allowed=automaticRetryAllowed;this.authority_effect=false}
@@ -32,23 +32,31 @@ export class MetaOrchestratorNativeProvider{
   #workspaceId;
   #baseUrl;
   #runtimePath;
+  #readDeadlineMs;
+  #effectDeadlineMs;
   #lastReadAt=null;
   #lastActivation=null;
   #lastAdmission=null;
 
-  constructor({identity,fetchImpl=globalThis.fetch,workspace_id,baseUrl=NATIVE_SUPERVISOR_BASE,runtimePath=NATIVE_SUPERVISOR_RUNTIME_PATH,readDeadlineMs=8000}={}){
+  constructor({identity,fetchImpl=globalThis.fetch,workspace_id,baseUrl=NATIVE_SUPERVISOR_BASE,runtimePath=NATIVE_SUPERVISOR_RUNTIME_PATH,readDeadlineMs=8000,effectDeadlineMs=12000}={}){
     if(!identity||typeof identity.ensure!=='function'||typeof identity.deviceHeaders!=='function')throw new Error('meta_native_identity_required');
     if(typeof fetchImpl!=='function')throw new Error('meta_native_fetch_required');
     this.#identity=identity;
-    this.#readFetch=createBoundedSupervisorFetch(fetchImpl,{deadlineMs:readDeadlineMs});
-    this.#effectFetch=fetchImpl;
+    this.#readDeadlineMs=boundedDeadline(readDeadlineMs,8000);
+    this.#effectDeadlineMs=boundedDeadline(effectDeadlineMs,12000);
+    this.#readFetch=createBoundedSupervisorFetch(fetchImpl,{deadlineMs:this.#readDeadlineMs});
+    // Meta effects already have explicit ambiguous-outcome reconciliation below. A bounded
+    // transport deadline therefore cannot authorize a replay: timeout -> authoritative readback
+    // -> EFFECT_CONFIRMED / EFFECT_ABSENT / AMBIGUOUS. Leaving the socket unbounded would instead
+    // be able to freeze the sole supervisor heartbeat indefinitely.
+    this.#effectFetch=createBoundedSupervisorFetch(fetchImpl,{deadlineMs:this.#effectDeadlineMs});
     this.#workspaceId=workspaceId(workspace_id);
     this.#baseUrl=String(baseUrl||'').replace(/\/+$/,'');
     this.#runtimePath=String(runtimePath||'');
     if(!this.#baseUrl.startsWith('https://')||!this.#runtimePath.startsWith('/'))throw new Error('meta_native_endpoint_invalid');
   }
 
-  snapshot(){return Object.freeze({schema:'metaengine.meta-orchestrator.native-provider.v2',workspace_id:this.#workspaceId,last_read_at:this.#lastReadAt,last_activation:this.#lastActivation?structuredClone(this.#lastActivation):null,last_admission:this.#lastAdmission?structuredClone(this.#lastAdmission):null,automatic_retry:false,second_polling_loop:false,scheduler_authority:false,browser_authority:false,release_authority:false,authority_effect:false})}
+  snapshot(){return Object.freeze({schema:'metaengine.meta-orchestrator.native-provider.v2',workspace_id:this.#workspaceId,last_read_at:this.#lastReadAt,last_activation:this.#lastActivation?structuredClone(this.#lastActivation):null,last_admission:this.#lastAdmission?structuredClone(this.#lastAdmission):null,read_deadline_ms:this.#readDeadlineMs,effect_deadline_ms:this.#effectDeadlineMs,effect_timeout_requires_authoritative_readback:true,automatic_retry:false,second_polling_loop:false,scheduler_authority:false,browser_authority:false,release_authority:false,authority_effect:false})}
 
   async #signedPost(path,payload,{effectful=false}={}){
     const identity=await this.#identity.ensure();
