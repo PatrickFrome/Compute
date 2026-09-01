@@ -4,6 +4,19 @@ const HASH_RE=/^[a-f0-9]{64}$/;
 const TARGET_RE=/^webcontents:[1-9][0-9]*$/;
 const ROLE_RE=/^[A-Z][A-Z0-9_]{1,63}$/;
 const FINALISH=new Set(['RESULT_READY','BLOCKED','AMBIGUOUS','COMPLETED','FAILED']);
+const TRANSPORT_ADMISSION_FENCES=new Set([
+  'devos_transport_claim_state_invalid',
+  'devos_transport_supervisor_snapshot_missing',
+  'devos_transport_client_binding_changed',
+  'devos_transport_client_actuation_lease_active',
+  'devos_transport_supervisor_snapshot_stale',
+  'devos_transport_agent_missing',
+  'devos_transport_agent_not_active',
+  'devos_transport_agent_binding_mismatch',
+  'devos_transport_proof_mismatch',
+  'devos_transport_proof_time_invalid',
+  'devos_transport_proof_time_in_future',
+]);
 const json=(status,body)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
 
 function int(value,name){const n=Number(value);if(!Number.isSafeInteger(n)||n<1)throw new Error(`devos_${name}_invalid`);return n;}
@@ -109,6 +122,18 @@ function fencedRpcResponse(error){
     authority_effect:false,
   });
 }
+function transportAdmissionFence(error){
+  const message=String(error?.message||error||'').toLowerCase();
+  for(const reason of TRANSPORT_ADMISSION_FENCES){
+    if(message.includes(reason))return Object.freeze({
+      reason,
+      fenced:true,
+      automatic_retry_allowed:false,
+      authority_effect:false,
+    });
+  }
+  return null;
+}
 
 export function createDevosSupervisorRoutes({rpc,workspaceId}={}){
   if(typeof rpc!=='function'||!UUID_RE.test(String(workspaceId||'')))throw new Error('devos_routes_dependencies_invalid');
@@ -128,14 +153,20 @@ export function createDevosSupervisorRoutes({rpc,workspaceId}={}){
       const reconcile=await rpc('devos_fleet_reconcile_v1',{p_workspace:workspaceId});
       const snapshot=await rpc('devos_fleet_snapshot_v1',{p_workspace:workspaceId});
       const backlog=backlogOf(snapshot);
-      let lease=null,leaseAttempts=0;
+      let lease=null,leaseAttempts=0,leaseFence=null;
       const candidates=fairIdleLeaseCandidates(snapshot,agents,backlog);
       for(const agent of candidates.slice(0,8)){
         leaseAttempts+=1;
-        const result=await rpc('devos_fleet_lease_v1',{p_workspace:workspaceId,p_agent:agent.agent_id,p_role:agent.role,p_tab:agent.tab_id,p_target:agent.target_id,p_epoch:agent.generation_epoch,p_seconds:900});
-        if(result?.leased===true){lease=result;break;}
+        try{
+          const result=await rpc('devos_fleet_lease_v1',{p_workspace:workspaceId,p_agent:agent.agent_id,p_role:agent.role,p_tab:agent.tab_id,p_target:agent.target_id,p_epoch:agent.generation_epoch,p_seconds:900});
+          if(result?.leased===true){lease=result;break;}
+        }catch(error){
+          leaseFence=transportAdmissionFence(error);
+          if(!leaseFence)throw error;
+          break;
+        }
       }
-      return json(200,{schema:'metaengine.devos.browser-cycle.v1',reconcile,backlog,lease,running:runningForAgents(snapshot,agents),scheduler_source:'NATIVE_SUPERVISOR_HEARTBEAT',scheduler_policy:'IDLE_ROLE_FAIR_SHARE_V1',lease_attempts:leaseAttempts,second_scheduler_loop:false,automatic_retry_allowed:false,authority_effect:false});
+      return json(200,{schema:'metaengine.devos.browser-cycle.v1',reconcile,backlog,lease,lease_fenced:leaseFence?.fenced===true,lease_fence_reason:leaseFence?.reason||null,running:runningForAgents(snapshot,agents),scheduler_source:'NATIVE_SUPERVISOR_HEARTBEAT',scheduler_policy:'IDLE_ROLE_FAIR_SHARE_V1',lease_attempts:leaseAttempts,second_scheduler_loop:false,automatic_retry_allowed:false,authority_effect:false});
     }
     if(req?.method==='POST'&&path==='/v1/devos/mark-running'){
       const b=binding(body); const proof=body?.proof||{};
