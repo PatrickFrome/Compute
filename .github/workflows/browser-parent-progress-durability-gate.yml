@@ -8,14 +8,20 @@ on:
       - 'apps/metaengine-browser/src/browser-parent-progress-lease.mjs'
       - 'apps/metaengine-browser/src/browser-sentinel-liveness.cjs'
       - 'apps/metaengine-browser/src/browser-sentinel-worker.cjs'
+      - 'apps/metaengine-browser/src/browser-sentinel-action-journal.cjs'
+      - 'apps/metaengine-browser/src/durable-json-file.cjs'
       - 'apps/metaengine-browser/test/browser-sentinel-liveness.test.mjs'
+      - 'apps/metaengine-browser/test/browser-sentinel-action-journal.test.mjs'
       - '.github/workflows/browser-parent-progress-durability-gate.yml'
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/browser-parent-progress-lease.mjs'
       - 'apps/metaengine-browser/src/browser-sentinel-liveness.cjs'
       - 'apps/metaengine-browser/src/browser-sentinel-worker.cjs'
+      - 'apps/metaengine-browser/src/browser-sentinel-action-journal.cjs'
+      - 'apps/metaengine-browser/src/durable-json-file.cjs'
       - 'apps/metaengine-browser/test/browser-sentinel-liveness.test.mjs'
+      - 'apps/metaengine-browser/test/browser-sentinel-action-journal.test.mjs'
       - '.github/workflows/browser-parent-progress-durability-gate.yml'
 
 permissions:
@@ -56,7 +62,10 @@ jobs:
           set -euo pipefail
           node --check apps/metaengine-browser/src/browser-parent-progress-lease.mjs
           node --check apps/metaengine-browser/src/browser-sentinel-worker.cjs
+          node --check apps/metaengine-browser/src/browser-sentinel-action-journal.cjs
+          node --check apps/metaengine-browser/src/durable-json-file.cjs
           node --test apps/metaengine-browser/test/browser-sentinel-liveness.test.mjs
+          node --test apps/metaengine-browser/test/browser-sentinel-action-journal.test.mjs
 
       - name: Prove test did not mutate checkout
         shell: bash
