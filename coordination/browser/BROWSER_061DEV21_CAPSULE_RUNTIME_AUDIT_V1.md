@@ -1,8 +1,8 @@
 # METAENGINE Browser 0.6.1-dev.2.1 Capsule / Runtime Audit V1
 
 Date: 2026-09-01
-Audit base: `work/browser-continuous-fleet-audit-v1` @ `7b8fd39e322e3bf075d94e93f42144e9c33fadaf`
-Development branch: `work/browser-runtime-compatibility-v1`
+Audit base: `work/browser-continuous-fleet-audit-v1` @ `57e431ce1e5262ced0d3f6e72b567fb2451fd994`
+Development branch: `work/browser-runtime-compatibility-v2`
 Production mutation: **none**
 
 ## Capsule verdict
@@ -18,7 +18,7 @@ The capsule source SHA is no longer an accessible GitHub commit and `work/browse
 
 ## Current authoritative development state
 
-`work/browser-continuous-fleet-audit-v1` has exact-head and read-only lineage CI green. The lineage auditor sees 290 remote heads, 258 work/integration/release branches, 62 branches fully contained by the audit head, 112 independent same-family lineage tips, and 98 authority-bearing lineage tips. C0 collapses from 17 branches to one exact ancestry tip; C5 collapses from 17 branches to two tips.
+`work/browser-continuous-fleet-audit-v1` continued advancing concurrently during this audit. The compatibility slice was therefore rebuilt from exact current base `57e431ce1e5262ced0d3f6e72b567fb2451fd994` rather than rebasing/forcing a stale branch. Earlier lineage evidence showed 290 remote heads, 258 work/integration/release branches, 62 fully contained branches, 112 independent same-family lineage tips, and 98 authority-bearing lineage tips. C0 collapsed from 17 branches to one exact ancestry tip; C5 collapsed from 17 branches to two tips.
 
 The current source already contains the desired no-blind-retry Browser effect journal, write-ahead effect barrier, transport promotion route, ambiguity reconciliation v2 call path, post-lock transport revalidation, meta controller lease, atomic frontier admission and scheduler-capacity projection.
 
