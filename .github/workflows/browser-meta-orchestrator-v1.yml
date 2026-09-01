@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/meta-orchestrator-core.mjs'
+      - 'apps/metaengine-browser/src/meta-orchestrator-continuous-reconcile.mjs'
       - 'apps/metaengine-browser/src/meta-orchestrator-devos-adapter.mjs'
       - 'apps/metaengine-browser/src/meta-orchestrator-workspace-admission.mjs'
       - 'apps/metaengine-browser/src/meta-orchestrator-authoritative-snapshot.mjs'
@@ -11,6 +12,8 @@ on:
       - 'apps/metaengine-browser/src/meta-orchestrator-native-provider.mjs'
       - 'apps/metaengine-browser/src/meta-orchestrator-cycle-stage.mjs'
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-devos-superstep.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-routes.mjs'
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts'
       - 'apps/metaengine-browser/src/workspace-manager.mjs'
       - 'apps/metaengine-browser/src/workspace-git-hardening.mjs'
@@ -21,6 +24,8 @@ on:
       - 'apps/metaengine-browser/src/devos-native-task-cycle.mjs'
       - 'apps/metaengine-browser/src/devos-native-task-cycle-core.mjs'
       - 'apps/metaengine-browser/test/meta-orchestrator-core.test.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-continuous-reconcile.test.mjs'
+      - 'apps/metaengine-browser/test/meta-devos-superstep.test.mjs'
       - 'apps/metaengine-browser/test/meta-orchestrator-workspace-admission.test.mjs'
       - 'apps/metaengine-browser/test/meta-orchestrator-authoritative-snapshot.test.mjs'
       - 'apps/metaengine-browser/test/meta-orchestrator-plan-state.test.mjs'
@@ -42,12 +47,16 @@ on:
       - 'supabase/migrations/20260831200500_meta_orchestrator_authoritative_inputs_v1.sql'
       - 'supabase/migrations/20260831204000_devos_fleet_scheduler_capacity_snapshot_v1.sql'
       - 'supabase/migrations/20260901001500_meta_orchestrator_task_admission_v1.sql'
+      - 'supabase/migrations/20260901030000_meta_orchestrator_frontier_admission_v1.sql'
+      - 'supabase/migrations/20260901034000_meta_orchestrator_controller_lease_v1.sql'
+      - 'supabase/migrations/20260901034500_meta_orchestrator_frontier_leader_fence_v2.sql'
       - 'apps/metaengine-browser/src/autonomy-governor.mjs'
       - 'coordination/devos/META_ORCHESTRATOR_V1.md'
       - '.github/workflows/browser-meta-orchestrator-v1.yml'
   push:
     branches:
       - 'work/browser-meta-orchestrator-v1'
+      - 'work/browser-continuous-fleet-audit-v1'
 
 permissions:
   contents: read
@@ -77,6 +86,7 @@ jobs:
       - name: Syntax check convergence modules
         run: |
           node --check apps/metaengine-browser/src/meta-orchestrator-core.mjs
+          node --check apps/metaengine-browser/src/meta-orchestrator-continuous-reconcile.mjs
           node --check apps/metaengine-browser/src/meta-orchestrator-devos-adapter.mjs
           node --check apps/metaengine-browser/src/meta-orchestrator-workspace-admission.mjs
           node --check apps/metaengine-browser/src/meta-orchestrator-authoritative-snapshot.mjs
@@ -84,6 +94,8 @@ jobs:
           node --check apps/metaengine-browser/src/meta-orchestrator-native-provider.mjs
           node --check apps/metaengine-browser/src/meta-orchestrator-cycle-stage.mjs
           node --check apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs
+          node --check apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-devos-superstep.mjs
+          node --check apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-routes.mjs
           node --check apps/metaengine-browser/src/workspace-manager.mjs
           node --check apps/metaengine-browser/src/workspace-git-hardening.mjs
           node --check apps/metaengine-browser/src/fleet-target-local-observer.mjs
@@ -94,6 +106,8 @@ jobs:
           node --check apps/metaengine-browser/src/devos-native-task-cycle-core.mjs
       - name: Meta-Orchestrator fail-closed contract
         run: node --test apps/metaengine-browser/test/meta-orchestrator-core.test.mjs apps/metaengine-browser/test/meta-orchestrator-authoritative-snapshot.test.mjs apps/metaengine-browser/test/meta-orchestrator-plan-state.test.mjs apps/metaengine-browser/test/meta-orchestrator-privileged-adapter.test.mjs apps/metaengine-browser/test/meta-orchestrator-native-provider.test.mjs apps/metaengine-browser/test/meta-orchestrator-native-provider-client.test.mjs apps/metaengine-browser/test/meta-orchestrator-cycle-stage.test.mjs
+      - name: Continuous Meta heartbeat and atomic frontier contract
+        run: node --test apps/metaengine-browser/test/meta-orchestrator-continuous-reconcile.test.mjs apps/metaengine-browser/test/meta-devos-superstep.test.mjs
       - name: Exact Meta-to-Workspace mutation admission
         run: node --test apps/metaengine-browser/test/meta-orchestrator-workspace-admission.test.mjs
       - name: Workspace binding and Git isolation contracts
