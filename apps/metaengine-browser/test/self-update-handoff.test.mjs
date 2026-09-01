@@ -147,3 +147,15 @@ test('stale, wrong-version, invalid-mode and secondary successor states fail clo
 
   await clearSuccessorReceipt(app);
 });
+
+test('pre-install and successor receipts use the shared committed-file durability primitive', async () => {
+  const source = await fs.readFile(new URL('../src/self-update-handoff.mjs', import.meta.url), 'utf8');
+  const durable = await fs.readFile(new URL('../src/durable-json-file.cjs', import.meta.url), 'utf8');
+  assert.match(source, /durableWriteJson\(pre_install, receipt\)/);
+  assert.match(source, /durableWriteJson\(successor, row\)/);
+  assert.doesNotMatch(source, /async function atomicWriteJson/);
+  assert.doesNotMatch(source, /fs\.rename\(/);
+  assert.match(durable, /await committed\.sync\(\)/);
+  assert.match(durable, /await syncDirectory\(directory\)/);
+  assert.match(durable, /if \(process\.platform === 'win32'\) return false/);
+});
