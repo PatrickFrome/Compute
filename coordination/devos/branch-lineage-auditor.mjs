@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 export const BRANCH_LINEAGE_AUDIT_SCHEMA = 'metaengine.devos.branch-lineage-audit.v1';
-export const BRANCH_LINEAGE_AUDIT_VERSION = '1.2.0';
+export const BRANCH_LINEAGE_AUDIT_VERSION = '1.3.0';
 
 export const AUTHORITY_RULES = Object.freeze([
   ['CI_GOVERNANCE', (p) => p.startsWith('.github/workflows/')],
@@ -245,9 +245,15 @@ export function auditBranchLineage({
       uniquePaths = git(cwd, ['diff', '--name-only', '--diff-filter=ACDMRTUXB', `${mergeBaseSha}..${headSha}`, '--']).split('\n').filter(Boolean);
     }
 
-    const tipDeltaPaths = counts.unique_commits === 0
+    // Tip-to-tip diff is symmetric: it also contains files changed only on the base.
+    // A branch must never inherit authority debt from newer base-only files. Current
+    // branch debt is therefore limited to paths the branch itself changed historically
+    // and whose final blobs still differ from the integration root.
+    const allTipDeltaPaths = counts.unique_commits === 0
       ? []
       : git(cwd, ['diff', '--name-only', '--diff-filter=ACDMRTUXB', baseSha, headSha, '--']).split('\n').filter(Boolean);
+    const branchOwnedPaths = new Set(uniquePaths);
+    const tipDeltaPaths = allTipDeltaPaths.filter((path) => branchOwnedPaths.has(path));
     const historicalAuthority = classifyAuthority(uniquePaths);
     const authority = classifyAuthority(tipDeltaPaths);
     const classification = relationClass({
@@ -284,6 +290,7 @@ export function auditBranchLineage({
       tip_delta_file_count: tipDeltaPaths.length,
       tip_delta_files_truncated: tipDeltaPaths.length > fileLimit,
       tip_delta_files: tipDeltaPaths.slice(0, fileLimit),
+      base_only_tip_delta_file_count: Math.max(0, allTipDeltaPaths.length - tipDeltaPaths.length),
       superseded_by_base: classification === 'CONTAINED',
       superseded_by_branch: null,
       equivalent_to_branch: null,
@@ -330,7 +337,7 @@ export function renderBranchLineageMarkdown(report) {
     `Base: \`${report.base_ref}\` @ \`${report.base_sha}\``,
     `Branches: ${report.branch_count}; current authority-bearing branches: ${report.authority_branch_count}; historical authority-bearing branches: ${report.historical_authority_branch_count ?? report.authority_branch_count}; semantically converged histories: ${report.semantic_converged_branch_count ?? 0}; lineage tips: ${report.lineage_tip_count}; authority-bearing tips: ${report.authority_lineage_tip_count}.`,
     '',
-    '| Tip | Class | Branch | Unique | Base-only | Tip delta | Superseded by | Current authority | Historical authority | Family |',
+    '| Tip | Class | Branch | Unique | Base-only | Branch-owned tip delta | Superseded by | Current authority | Historical authority | Family |',
     '|---|---|---|---:|---:|---:|---|---|---|---|',
   ];
   for (const row of report.branches) {
@@ -339,7 +346,7 @@ export function renderBranchLineageMarkdown(report) {
     const superseded = row.superseded_by_base ? 'BASE' : (row.semantic_converged_to_base ? 'BASE_TREE' : (row.superseded_by_branch || row.equivalent_to_branch || '—'));
     lines.push(`| ${row.lineage_tip ? 'TIP' : '—'} | ${row.classification} | \`${row.branch}\` | ${row.unique_commits} | ${row.base_only_commits} | ${row.tip_delta_file_count ?? row.unique_file_count} | \`${superseded}\` | ${authority} | ${historicalAuthority} | \`${row.family}\` |`);
   }
-  lines.push('', '> Read-only audit: no ref mutation, worktree mutation, scheduler call, merge, cherry-pick, release, or Browser actuation is performed. Historical authority records provenance; current authority classification is derived from the final branch-tip delta against the integration root.');
+  lines.push('', '> Read-only audit: no ref mutation, worktree mutation, scheduler call, merge, cherry-pick, release, or Browser actuation is performed. Historical authority records provenance; current authority classification is derived only from branch-owned paths whose final blobs still differ from the integration root.');
   return `${lines.join('\n')}\n`;
 }
 
@@ -385,7 +392,7 @@ function help() {
     '  --max-files <n>        emitted file cap per branch (authority detection still scans all)',
     '',
     'Lineage tips are derived only from exact Git ancestry inside the same branch family.',
-    'Current authority classification uses final tip-to-tip file delta; historical authority provenance remains separately visible.',
+    'Current authority classification uses branch-owned final tip delta; historical authority provenance remains separately visible.',
     'The auditor is read-only and never runs git mutation commands.',
   ].join('\n');
 }
