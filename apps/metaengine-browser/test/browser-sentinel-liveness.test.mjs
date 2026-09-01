@@ -62,6 +62,32 @@ test('parent progress lease is exact-token exact-pid and contains no scheduling 
   assert.equal(disk.authority_effect,false);assert.equal(Object.hasOwn(disk,'task_id'),false);assert.equal(Object.hasOwn(disk,'lease_generation'),false);assert.equal(row.automatic_retry_allowed,false);
 });
 
+test('parent progress lease serializes concurrent writes and leaves only the committed durable record',async()=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-parent-progress-concurrent-'));
+  const statePath=path.join(dir,'metaengine-browser-sentinel-v1.json');
+  await fs.writeFile(statePath,JSON.stringify(state()),{mode:0o600});
+  const lease=new BrowserParentProgressLease({statePath});
+  const rows=await Promise.all(Array.from({length:16},(_,index)=>lease.mark({kind:'CONTROL_PLANE_CYCLE',detail:`step-${index}`})));
+  assert.deepEqual(rows.map((row)=>row.progress_seq),Array.from({length:16},(_,index)=>index+1));
+  const disk=JSON.parse(await fs.readFile(parentProgressPath(statePath),'utf8'));
+  assert.equal(disk.progress_seq,16);assert.equal(disk.detail,'step-15');assert.equal(disk.authority_effect,false);
+  const names=await fs.readdir(dir);
+  assert.equal(names.some((name)=>name.endsWith('.tmp')),false);
+  const source=await fs.readFile(new URL('../src/browser-parent-progress-lease.mjs',import.meta.url),'utf8');
+  assert.match(source,/await handle\.sync\(\)/);assert.match(source,/await committed\.sync\(\)/);assert.match(source,/await syncDirectory\(directory\)/);
+});
+
+test('failed progress mark does not poison the serialized write tail',async()=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-parent-progress-recovery-'));
+  const statePath=path.join(dir,'metaengine-browser-sentinel-v1.json');
+  let binding=state({token:''});
+  const lease=new BrowserParentProgressLease({statePath,getBinding:()=>binding});
+  await assert.rejects(()=>lease.mark({kind:'CONTROL_PLANE_CYCLE'}),/binding_invalid/);
+  binding=state();
+  const recovered=await lease.mark({kind:'CONTROL_PLANE_CYCLE',detail:'after-failure'});
+  assert.equal(recovered.progress_seq,1);assert.equal(recovered.detail,'after-failure');assert.equal(recovered.authority_effect,false);
+});
+
 test('worker cannot relaunch before exact old parent absence and never retries ambiguous termination blindly',async()=>{
   const source=await fs.readFile(new URL('../src/browser-sentinel-worker.cjs',import.meta.url),'utf8');
   const kill=source.indexOf("process.kill(PARENT_PID, 'SIGTERM')");
