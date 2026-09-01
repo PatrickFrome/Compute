@@ -1,39 +1,13 @@
 import fs from 'node:fs/promises';
-import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { parentProgressPath } = require('./browser-sentinel-liveness.cjs');
+const { durableWriteJson } = require('./durable-json-file.cjs');
 
 async function readJson(file) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); }
   catch (error) { if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null; throw error; }
-}
-
-async function syncDirectory(directory) {
-  if (process.platform === 'win32') return;
-  const handle = await fs.open(directory, 'r');
-  try { await handle.sync(); } finally { await handle.close(); }
-}
-
-async function atomicWrite(target, value, sequence) {
-  const directory = path.dirname(target);
-  const temp = `${target}.${process.pid}.${Number(sequence) || 0}.tmp`;
-  await fs.mkdir(directory, { recursive: true });
-  const handle = await fs.open(temp, 'w', 0o600);
-  try {
-    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  await fs.rename(temp, target);
-  // Windows requires a write-capable handle for FlushFileBuffers/fsync. Opening the
-  // already-committed file r+ does not alter its contents and preserves cross-platform
-  // post-rename durability without a second write.
-  const committed = await fs.open(target, 'r+');
-  try { await committed.sync(); } finally { await committed.close(); }
-  await syncDirectory(directory);
 }
 
 export class BrowserParentProgressLease {
@@ -86,7 +60,7 @@ export class BrowserParentProgressLease {
       automatic_retry_allowed: false,
       authority_effect: false,
     };
-    await atomicWrite(parentProgressPath(this.#statePath), row, this.#seq);
+    await durableWriteJson(parentProgressPath(this.#statePath), row, { sequence: this.#seq });
     this.#last = Object.freeze(row);
     return this.snapshot();
   }
