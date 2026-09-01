@@ -5,6 +5,8 @@ on:
     branches:
       - 'work/browser-continuous-fleet-audit-v1'
     paths:
+      - 'apps/metaengine-browser/src/restart-continuity-evidence.mjs'
+      - 'apps/metaengine-browser/test/restart-continuity-evidence.test.mjs'
       - 'supabase/migrations/20260901235500_compute_unified_restart_actuator_precondition_v2.sql'
       - 'supabase/migrations/20260901144500_compute_unified_restart_effect_receipt_v1.sql'
       - 'supabase/migrations/20260901154500_compute_unified_restart_effect_receipt_persistence_v1.sql'
@@ -13,6 +15,8 @@ on:
       - '.github/workflows/c0-restart-effect-receipt-audit-v1.yml'
   pull_request:
     paths:
+      - 'apps/metaengine-browser/src/restart-continuity-evidence.mjs'
+      - 'apps/metaengine-browser/test/restart-continuity-evidence.test.mjs'
       - 'supabase/migrations/20260901235500_compute_unified_restart_actuator_precondition_v2.sql'
       - 'supabase/migrations/20260901144500_compute_unified_restart_effect_receipt_v1.sql'
       - 'supabase/migrations/20260901154500_compute_unified_restart_effect_receipt_persistence_v1.sql'
@@ -60,6 +64,17 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
           printf 'exact_head=%s\n' "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Trusted native continuity evidence contract
+        run: |
+          set -euo pipefail
+          node --check apps/metaengine-browser/src/restart-continuity-evidence.mjs
+          node --test apps/metaengine-browser/test/restart-continuity-evidence.test.mjs
 
       - name: Reject legacy quiescence restart blockers in v2
         run: |
