@@ -106,14 +106,19 @@ test('non-updater launches never create successor evidence', async (t) => {
   assert.equal(result, null);
 });
 
-test('stale, wrong-version, invalid-mode and secondary successor states fail closed', async (t) => {
-  const userData = await tempUserData();
-  t.after(() => fs.rm(userData, { recursive: true, force: true }));
+test('stale, wrong-version, invalid-mode and secondary successor states fail closed independently', async (t) => {
+  const dirs = [];
+  t.after(async () => Promise.all(dirs.map((dir) => fs.rm(dir, { recursive: true, force: true }))));
+  const isolated = async (options = {}) => {
+    const userData = await tempUserData();
+    dirs.push(userData);
+    return fakeApp(userData, options);
+  };
 
-  const app = fakeApp(userData);
-  await persistPreInstallReceipt(app, receipt());
+  const staleApp = await isolated();
+  await persistPreInstallReceipt(staleApp, receipt());
   await assert.rejects(
-    persistUpdatedSuccessorReceipt(app, {
+    persistUpdatedSuccessorReceipt(staleApp, {
       argv: ['METAENGINE Browser Test.exe', '--updated'],
       clock: () => Date.parse('2026-08-29T19:00:00.000Z'),
       maxAgeMs: 60_000,
@@ -121,8 +126,9 @@ test('stale, wrong-version, invalid-mode and secondary successor states fail clo
     /receipt_stale/,
   );
 
-  await persistPreInstallReceipt(app, receipt());
-  const wrongVersion = fakeApp(userData, { version: '0.6.3-dev.50.2' });
+  const wrongBase = await isolated();
+  await persistPreInstallReceipt(wrongBase, receipt());
+  const wrongVersion = fakeApp(wrongBase.getPath('userData'), { version: '0.6.3-dev.50.2' });
   await assert.rejects(
     persistUpdatedSuccessorReceipt(wrongVersion, {
       argv: ['METAENGINE Browser Test.exe', '--updated'],
@@ -131,12 +137,15 @@ test('stale, wrong-version, invalid-mode and secondary successor states fail clo
     /version_binding_invalid/,
   );
 
+  const invalidModeApp = await isolated();
   await assert.rejects(
-    persistPreInstallReceipt(app, receipt({ successor_startup: 'REMOTE_EXECUTE' })),
+    persistPreInstallReceipt(invalidModeApp, receipt({ successor_startup: 'REMOTE_EXECUTE' })),
     /successor_startup_invalid/,
   );
 
-  const secondary = fakeApp(userData, { locked: false });
+  const secondaryBase = await isolated();
+  await persistPreInstallReceipt(secondaryBase, receipt());
+  const secondary = fakeApp(secondaryBase.getPath('userData'), { locked: false });
   await assert.rejects(
     persistUpdatedSuccessorReceipt(secondary, {
       argv: ['METAENGINE Browser Test.exe', '--updated'],
@@ -145,7 +154,18 @@ test('stale, wrong-version, invalid-mode and secondary successor states fail clo
     /primary_required/,
   );
 
-  await clearSuccessorReceipt(app);
+  await clearSuccessorReceipt(secondaryBase);
+});
+
+test('unresolved PREPARED transaction itself blocks a second pre-install attempt', async (t) => {
+  const userData = await tempUserData();
+  t.after(() => fs.rm(userData, { recursive: true, force: true }));
+  const app = fakeApp(userData);
+  await persistPreInstallReceipt(app, receipt());
+  await assert.rejects(
+    persistPreInstallReceipt(app, receipt()),
+    /self_update_transaction_unresolved_prior:PREPARED/,
+  );
 });
 
 test('pre-install and successor receipts use the shared committed-file durability primitive', async () => {
