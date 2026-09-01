@@ -129,21 +129,28 @@ test('lost DB receipt survives restart and redelivers receipt without replaying 
   const secondCalls = [];
   const secondSelected = { value: supervisorTab };
   let redelivery = 0;
+  let serverState = 'LEASED';
   const secondCycle = new DevOsNativeTaskCycle({
     effectJournal: secondJournal,
     getState: async () => state(secondSelected.value),
     executeCommand: commandHarness(secondCalls, secondSelected, { sentInitially: true }),
     signedRequest: async (requestPath) => {
       if (requestPath === '/v1/devos/cycle') return response(200, { schema: 'metaengine.devos.browser-cycle.v1', backlog: { ready: 1, running: 0 }, lease, running: [] });
-      if (requestPath.includes('/status')) return response(200, { task_id: lease.task_id, state: 'LEASED', lease_generation: 1 });
-      if (requestPath === '/v1/devos/mark-running') { redelivery += 1; return response(200, { state: 'RUNNING' }); }
+      if (requestPath.includes('/status')) return response(200, { task_id: lease.task_id, state: serverState, lease_generation: 1 });
+      if (requestPath === '/v1/devos/mark-running') {
+        redelivery += 1;
+        serverState = 'RUNNING';
+        return response(200, { state: 'RUNNING' });
+      }
       throw new Error(`unexpected:${requestPath}`);
     },
   });
 
   const second = await secondCycle.cycle();
-  assert.equal(second.dispatch.state, 'RUNNING_RECEIPT_REDELIVERED');
-  assert.equal(second.dispatch.physical_effect_replayed, false);
+  assert.equal(second.ambiguity_recovery.state, 'RUNNING_RECEIPT_REDELIVERED');
+  assert.equal(second.ambiguity_recovery.physical_effect_replayed, false);
+  assert.equal(second.dispatch.state, 'NO_REDISPATCH_CONFIRMED');
+  assert.equal(second.dispatch.physical_effect_replayed ?? false, false);
   assert.equal(redelivery, 1);
   assert.equal(secondCalls.filter((x) => x === 'SEMANTIC_TYPE').length, 0);
   assert.equal(secondCalls.filter((x) => x === 'TYPED_CLICK').length, 0);
@@ -188,6 +195,7 @@ test('stale lease-generation status cannot confirm a prior physical effect', asy
   const seed = new DevOsEffectDeliveryJournal({ statePath });
   await seed.init();
   await seed.beginExecution(journalBinding());
+  await seed.markEffectAttempted(journalBinding(), { effect_barrier_contract: 'WRITE_AHEAD_V1' });
   await seed.markDeliveryPending(journalBinding(), { conversation_url_sha256: conversationHash, effect_state: 'PROVEN_GENERATING' });
 
   const calls = [];
