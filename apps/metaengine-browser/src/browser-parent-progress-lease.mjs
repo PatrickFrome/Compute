@@ -9,11 +9,28 @@ async function readJson(file) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); }
   catch (error) { if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null; throw error; }
 }
-async function atomicWrite(target, value) {
-  const temp = `${target}.tmp`;
-  await fs.mkdir(path.dirname(target), { recursive: true });
-  await fs.writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+
+async function syncDirectory(directory) {
+  if (process.platform === 'win32') return;
+  const handle = await fs.open(directory, 'r');
+  try { await handle.sync(); } finally { await handle.close(); }
+}
+
+async function atomicWrite(target, value, sequence) {
+  const directory = path.dirname(target);
+  const temp = `${target}.${process.pid}.${Number(sequence) || 0}.tmp`;
+  await fs.mkdir(directory, { recursive: true });
+  const handle = await fs.open(temp, 'w', 0o600);
+  try {
+    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
   await fs.rename(temp, target);
+  const committed = await fs.open(target, 'r');
+  try { await committed.sync(); } finally { await committed.close(); }
+  await syncDirectory(directory);
 }
 
 export class BrowserParentProgressLease {
@@ -21,6 +38,7 @@ export class BrowserParentProgressLease {
   #getBinding;
   #seq = 0;
   #last = null;
+  #writeTail = Promise.resolve();
 
   constructor({ statePath, getBinding = null } = {}) {
     if (!statePath || (getBinding != null && typeof getBinding !== 'function')) throw new Error('browser_parent_progress_dependencies_required');
@@ -43,7 +61,7 @@ export class BrowserParentProgressLease {
     return supplied && typeof supplied.then === 'function' ? supplied : (supplied || readJson(this.#statePath));
   }
 
-  async mark({ kind = 'CONTROL_PLANE_CYCLE', detail = null } = {}) {
+  async #markOne({ kind = 'CONTROL_PLANE_CYCLE', detail = null } = {}) {
     const binding = await this.#binding();
     const token = String(binding?.token || '');
     const parentPid = Number(binding?.parent_pid || 0);
@@ -65,8 +83,14 @@ export class BrowserParentProgressLease {
       automatic_retry_allowed: false,
       authority_effect: false,
     };
-    await atomicWrite(parentProgressPath(this.#statePath), row);
+    await atomicWrite(parentProgressPath(this.#statePath), row, this.#seq);
     this.#last = Object.freeze(row);
     return this.snapshot();
+  }
+
+  mark({ kind = 'CONTROL_PLANE_CYCLE', detail = null } = {}) {
+    const operation = this.#writeTail.then(() => this.#markOne({ kind, detail }));
+    this.#writeTail = operation.catch(() => {});
+    return operation;
   }
 }
