@@ -11,7 +11,9 @@ const EFFECT_STATES=new Set(['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','PROV
 const TRANSPORT_ADMISSION_FENCES=new Set([
   'devos_transport_claim_state_invalid',
   'devos_transport_supervisor_snapshot_missing',
+  'devos_transport_client_binding_missing',
   'devos_transport_client_binding_changed',
+  'devos_transport_supervisor_snapshot_missing_after_lock',
   'devos_transport_client_actuation_lease_active',
   'devos_transport_supervisor_snapshot_stale',
   'devos_transport_agent_missing',
@@ -191,7 +193,7 @@ export function createDevosSupervisorRoutes({rpc,workspaceId}={}){
       let b,r;
       try{b=binding(body);r=recovery(body);}catch(error){return json(400,{error:String(error?.message||'devos_recovery_invalid').slice(0,120),automatic_retry_allowed:false,physical_effect_replayed:false,authority_effect:false});}
       try{
-        const result=await rpc('devos_fleet_reconcile_ambiguous_v1',{p_workspace:workspaceId,p_task:b.task_id,p_agent:b.agent_id,p_generation:b.lease_generation,p_tab:b.tab_id,p_target:b.target_id,p_epoch:b.agent_generation_epoch,p_recovery:r});
+        const result=await rpc('devos_fleet_reconcile_ambiguous_v2',{p_workspace:workspaceId,p_client:clientId,p_task:b.task_id,p_agent:b.agent_id,p_generation:b.lease_generation,p_tab:b.tab_id,p_target:b.target_id,p_epoch:b.agent_generation_epoch,p_recovery:r});
         return json(200,{...result,automatic_retry_allowed:false,physical_effect_replayed:false,authority_effect:false});
       }catch(error){const mapped=ambiguityRpcResponse(error);if(mapped)return mapped;throw error;}
     }
