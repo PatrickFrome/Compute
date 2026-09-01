@@ -35,10 +35,11 @@ async function fixture(maxEntries = 256) {
   return { dir, statePath, journal };
 }
 
-test('durably records execution -> delivery pending -> confirmed with retry disabled', async () => {
+test('durably records execution -> effect attempted -> delivery pending -> confirmed with retry disabled', async () => {
   const { statePath, journal } = await fixture();
   const b = binding();
   await journal.beginExecution(b, { phase: 'before_type' });
+  await journal.markEffectAttempted(b, { effect_barrier_contract: 'WRITE_AHEAD_V1', phase: 'before_click' });
   await journal.markDeliveryPending(b, { send_click_attempted: true });
   const confirmed = await journal.markConfirmed(b, { db_state: 'RUNNING' });
   assert.equal(confirmed.state, 'CONFIRMED');
@@ -56,6 +57,7 @@ test('restart restores DELIVERY_PENDING and forbids a second execution start', a
   const { statePath, journal } = await fixture();
   const b = binding();
   await journal.beginExecution(b);
+  await journal.markEffectAttempted(b, { effect_barrier_contract: 'WRITE_AHEAD_V1' });
   await journal.markDeliveryPending(b, { send_click_attempted: true });
 
   const restarted = new DevOsEffectDeliveryJournal({ statePath });
@@ -94,6 +96,7 @@ test('compaction never drops unresolved effect tails', async () => {
   const { journal } = await fixture(32);
   const pending = binding();
   await journal.beginExecution(pending);
+  await journal.markEffectAttempted(pending, { effect_barrier_contract: 'WRITE_AHEAD_V1' });
   await journal.markDeliveryPending(pending);
 
   for (let i = 0; i < 40; i += 1) {
