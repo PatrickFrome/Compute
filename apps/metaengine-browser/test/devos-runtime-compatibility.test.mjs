@@ -6,6 +6,8 @@ import {
 } from '../src/devos-runtime-compatibility.mjs';
 import {
   NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES,
+  probeNativeSupervisorRuntimeCapabilities,
+  validateDevosRecoveryDebtSnapshot,
 } from '../supabase/a2-browser-native-supervisor-v1/runtime-capabilities.mjs';
 
 const health = (capabilities = NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES) => ({
@@ -88,4 +90,49 @@ test('required feature list covers recovery, promotion, capacity, meta leader an
     'meta_atomic_frontier_v2',
     'post_lock_transport_revalidation_v1',
   ]) assert.equal(DEVOS_REQUIRED_SERVER_FEATURES.includes(feature), true, feature);
+});
+
+test('Edge source capability declaration is usable only after exact DB runtime attestation', async () => {
+  const calls = [];
+  const out = await probeNativeSupervisorRuntimeCapabilities({ rpc: async (name, args) => {
+    calls.push({ name, args });
+    return structuredClone(NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES);
+  } });
+  assert.equal(out, NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES);
+  assert.deepEqual(calls, [{ name: 'devos_runtime_capabilities_v1', args: {} }]);
+});
+
+test('source/DB capability drift is rejected instead of advertising a partial protocol', async () => {
+  const drift = structuredClone(NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES);
+  drift.features.meta_atomic_frontier_v2 = false;
+  await assert.rejects(
+    () => probeNativeSupervisorRuntimeCapabilities({ rpc: async () => drift }),
+    /native_runtime_capability_attestation_drift/,
+  );
+});
+
+test('recovery debt partitions exact effect proof from effect-unknown without granting retry', () => {
+  const out = validateDevosRecoveryDebtSnapshot({
+    schema: 'metaengine.devos.recovery-debt.v1',
+    workspace_id: '2de9f84b-7c0a-4091-911c-894ff1d6eaf4',
+    state: 'EFFECT_UNKNOWN_PRESENT',
+    ambiguous_total: 70,
+    effect_proven_count: 4,
+    effect_unknown_count: 66,
+    lease_expired_effect_unknown_count: 70,
+    ready_backlog: 5,
+    inflight_backlog: 0,
+    active_claims: 0,
+    task_content_returned: false,
+    physical_effect_replayed: false,
+    automatic_retry_allowed: false,
+    scheduler_authority: false,
+    browser_authority: false,
+    release_authority: false,
+    authority_effect: false,
+  }, { workspaceId: '2de9f84b-7c0a-4091-911c-894ff1d6eaf4' });
+  assert.equal(out.effect_proven_count, 4);
+  assert.equal(out.effect_unknown_count, 66);
+  assert.equal(out.automatic_retry_allowed, false);
+  assert.equal(out.scheduler_authority, false);
 });
