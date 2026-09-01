@@ -73,8 +73,10 @@ test('parent progress lease serializes concurrent writes and leaves only the com
   assert.equal(disk.progress_seq,16);assert.equal(disk.detail,'step-15');assert.equal(disk.authority_effect,false);
   const names=await fs.readdir(dir);
   assert.equal(names.some((name)=>name.endsWith('.tmp')),false);
-  const source=await fs.readFile(new URL('../src/browser-parent-progress-lease.mjs',import.meta.url),'utf8');
-  assert.match(source,/await handle\.sync\(\)/);assert.match(source,/await committed\.sync\(\)/);assert.match(source,/await syncDirectory\(directory\)/);
+  const leaseSource=await fs.readFile(new URL('../src/browser-parent-progress-lease.mjs',import.meta.url),'utf8');
+  const durableSource=await fs.readFile(new URL('../src/durable-json-file.cjs',import.meta.url),'utf8');
+  assert.match(leaseSource,/await durableWriteJson\(parentProgressPath\(this\.#statePath\), row/);
+  assert.match(durableSource,/await handle\.sync\(\)/);assert.match(durableSource,/await committed\.sync\(\)/);assert.match(durableSource,/await syncDirectory\(directory\)/);
 });
 
 test('failed progress mark does not poison the serialized write tail',async()=>{
@@ -90,11 +92,16 @@ test('failed progress mark does not poison the serialized write tail',async()=>{
 
 test('worker cannot relaunch before exact old parent absence and never retries ambiguous termination blindly',async()=>{
   const source=await fs.readFile(new URL('../src/browser-sentinel-worker.cjs',import.meta.url),'utf8');
+  const beginTermination=source.indexOf('await journal.beginTermination(state, decision)');
   const kill=source.indexOf("process.kill(PARENT_PID, 'SIGTERM')");
   const absentGuard=source.lastIndexOf('if (parentAlive()) return;');
-  const relaunch=source.lastIndexOf('await relaunchOnce(state)');
-  assert.ok(kill>=0&&absentGuard>kill&&relaunch>absentGuard);
-  assert.match(source,/parent_liveness_termination_attempted === true/);
+  const relaunch=source.lastIndexOf('await relaunchOnce(state, journal)');
+  const beginRelaunch=source.indexOf("await journal.beginRelaunch(state, 'EXACT_OLD_PARENT_ABSENT')");
+  const spawn=source.indexOf('child = spawn(state.executable');
+  assert.ok(beginTermination>=0&&kill>beginTermination);
+  assert.ok(absentGuard>kill&&relaunch>absentGuard);
+  assert.ok(beginRelaunch>=0&&spawn>beginRelaunch);
+  assert.match(source,/parent_liveness_termination_attempted: journal\.terminationAttempted\(\)/);
   assert.match(source,/PARENT_TERMINATION_AMBIGUOUS/);
   assert.match(source,/automatic_retry_allowed: false/);
   assert.equal(source.includes('devos_fleet_lease_v1'),false);
