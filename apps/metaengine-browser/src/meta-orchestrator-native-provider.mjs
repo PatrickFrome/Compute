@@ -17,6 +17,7 @@ function pointIds(value){if(!Array.isArray(value)||value.length<1||value.length>
 function nonNegative(value,name){const out=Number(value);if(!Number.isSafeInteger(out)||out<0)throw new Error(`meta_native_${name}_invalid`);return out}
 function positive(value,name){const out=Number(value);if(!Number.isSafeInteger(out)||out<1)throw new Error(`meta_native_${name}_invalid`);return out}
 function stable(value){if(Array.isArray(value))return value.map(stable);if(value&&typeof value==='object'){const out={};for(const key of Object.keys(value).sort())out[key]=stable(value[key]);return out}return value}
+function samePlan(left,right){try{return JSON.stringify(stable(left))===JSON.stringify(stable(right))}catch{return false}}
 function boundedDeadline(value,fallback){const out=Number(value);return Math.max(1000,Math.min(30000,Number.isFinite(out)?out:fallback))}
 function taskForPoint(inputs,point,generation){return(Array.isArray(inputs?.tasks)?inputs.tasks:[]).find(row=>String(row?.point_id||'').toLowerCase()===point&&Number(row?.task_spec?.meta_orchestrator?.plan_generation)===generation&&UUID_RE.test(String(row?.task_id||'')))||null}
 
