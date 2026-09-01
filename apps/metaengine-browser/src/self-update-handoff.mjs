@@ -117,14 +117,17 @@ export async function persistPreInstallReceipt(app, receipt) {
   }
   validatePreInstallReceipt(receipt);
   const { pre_install } = selfUpdateHandoffPaths(app);
-  await clearSuccessorReceipt(app);
-  await atomicWriteJson(pre_install, receipt);
+  // Admit against the existing durable ledger before touching prior receipt evidence.
+  // If receipt persistence fails after admission, the attempt becomes ambiguous rather
+  // than silently rolling back to a retryable state.
+  await beginSelfUpdateTransaction(app, receipt);
   try {
-    await beginSelfUpdateTransaction(app, receipt);
+    await clearSuccessorReceipt(app);
+    await atomicWriteJson(pre_install, receipt);
   } catch (error) {
-    // Do not leave a fresh receipt that could be mistaken for a newly admitted attempt
-    // when the durable transaction ledger rejected the begin operation.
-    try { await fs.unlink(pre_install); } catch (unlinkError) { if (unlinkError?.code !== 'ENOENT') throw unlinkError; }
+    await transitionIfPresent(app, 'AMBIGUOUS_INSTALL', {
+      evidence: { reason: `pre_install_receipt_persist_failed:${String(error?.message || error).slice(0, 140)}` },
+    }).catch(() => {});
     throw error;
   }
   return { path: pre_install, successor_startup: successorStartupMode(receipt) };
