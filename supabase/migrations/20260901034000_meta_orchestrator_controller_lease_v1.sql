@@ -39,7 +39,7 @@ declare
 begin
   if p_workspace_id is null then raise exception 'meta_controller_workspace_required' using errcode = '22023'; end if;
   if v_roadmap_id !~ '^[a-z0-9][a-z0-9._:-]{2,159}$' then raise exception 'meta_controller_roadmap_invalid' using errcode = '22023'; end if;
-  if v_client_id !~ '^[A-Za-z0-9._:@/-]{3,160}$' then raise exception 'meta_controller_client_invalid' using errcode = '22023'; end if;
+  if length(v_client_id) < 3 or length(v_client_id) > 160 or v_client_id ~ '[[:cntrl:]]' then raise exception 'meta_controller_client_invalid' using errcode = '22023'; end if;
 
   perform pg_advisory_xact_lock(hashtextextended('meta-controller-lease:' || p_workspace_id::text || ':' || v_roadmap_id,0));
 
