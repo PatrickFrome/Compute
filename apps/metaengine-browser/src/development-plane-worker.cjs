@@ -2,7 +2,8 @@
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { createCandidateCapsule, verifyCandidateCapsule } = require('./candidate-capsule.cjs');
+const { createCandidateCapsule } = require('./candidate-capsule.cjs');
+const { verifyCandidateCapsuleRemoteBound } = require('./candidate-remote-source.cjs');
 const { createVerificationSandboxPlan, verifyVerificationSandboxPlan } = require('./verification-sandbox-plan.cjs');
 const { verifyEnvelope: verifyAdvisoryEvidenceEnvelope } = require('./advisory-evidence-verifier.cjs');
 
@@ -21,6 +22,7 @@ const CAPABILITIES = Object.freeze([
 ]);
 const repoRoot = path.resolve(process.env.METAENGINE_REPO_ROOT || process.cwd());
 const repositoryName = String(process.env.METAENGINE_GIT_REPOSITORY || 'PatrickFrome/Compute');
+const repositoryRemote = String(process.env.METAENGINE_GIT_REMOTE || 'origin');
 
 function send(message) {
   if (!process.parentPort) throw new Error('development_plane_parent_port_missing');
@@ -57,6 +59,13 @@ async function requireCurrentSource() {
   return { repository: repo.repository, head: String(repo.head).toLowerCase(), ref: repo.ref };
 }
 
+function verifyRemoteBoundCandidate(capsule, source) {
+  return verifyCandidateCapsuleRemoteBound(capsule, source, {
+    cwd: repoRoot,
+    remote: repositoryRemote,
+  });
+}
+
 function requireObjectPayload(payload, name) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error(`${name}_payload_invalid`);
   return payload;
@@ -70,6 +79,9 @@ async function execute(capability, payload) {
     capabilities: [...CAPABILITIES],
     candidate_capsules: true,
     candidate_capsules_executable: false,
+    candidate_capsule_remote_source_binding_required: true,
+    candidate_capsule_remote_probe: 'GIT_LS_REMOTE_HEADS',
+    candidate_capsule_remote_ref_mutation: false,
     verification_sandbox_planning: true,
     verification_sandbox_prepare_only: true,
     verification_sandbox_execution: false,
@@ -88,13 +100,14 @@ async function execute(capability, payload) {
   if (capability === 'CANDIDATE_CAPSULE_VERIFY') {
     requireObjectPayload(payload, 'candidate_verify');
     if (!payload.capsule) throw new Error('candidate_verify_payload_invalid');
-    return verifyCandidateCapsule(payload.capsule, await requireCurrentSource());
+    const source = await requireCurrentSource();
+    return verifyRemoteBoundCandidate(payload.capsule, source);
   }
   if (capability === 'VERIFICATION_SANDBOX_PLAN_CREATE') {
     requireObjectPayload(payload, 'sandbox_plan_create');
     if (!payload.capsule) throw new Error('sandbox_plan_create_payload_invalid');
     const source = await requireCurrentSource();
-    const candidateVerification = verifyCandidateCapsule(payload.capsule, source);
+    const candidateVerification = verifyRemoteBoundCandidate(payload.capsule, source);
     return createVerificationSandboxPlan({
       capsule: payload.capsule,
       candidate_verification: candidateVerification,
@@ -106,7 +119,7 @@ async function execute(capability, payload) {
     requireObjectPayload(payload, 'sandbox_plan_verify');
     if (!payload.capsule || !payload.plan) throw new Error('sandbox_plan_verify_payload_invalid');
     const source = await requireCurrentSource();
-    const candidateVerification = verifyCandidateCapsule(payload.capsule, source);
+    const candidateVerification = verifyRemoteBoundCandidate(payload.capsule, source);
     return verifyVerificationSandboxPlan(payload.plan, payload.capsule, candidateVerification);
   }
   if (capability === 'ADVISORY_EVIDENCE_VERIFY') {
