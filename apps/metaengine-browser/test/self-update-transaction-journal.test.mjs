@@ -73,3 +73,14 @@ test('qualified transaction cannot regress into ambiguous install', async () => 
   await qualifySelfUpdateTransaction(app);
   await assert.rejects(() => transitionSelfUpdateTransaction(app, 'AMBIGUOUS_INSTALL'), /transition_invalid/);
 });
+
+test('transaction persistence is pinned to the shared committed-file durability primitive', async () => {
+  const source = await fs.readFile(new URL('../src/self-update-transaction-journal.mjs', import.meta.url), 'utf8');
+  const durable = await fs.readFile(new URL('../src/durable-json-file.cjs', import.meta.url), 'utf8');
+  assert.match(source, /durableWriteJson/);
+  assert.doesNotMatch(source, /fs\.rename\(|fsp\.rename\(|await fs\.rename\(/);
+  assert.match(durable, /await handle\.sync\(\)/);
+  assert.match(durable, /await committed\.sync\(\)/);
+  assert.match(durable, /syncDirectory\(directory\)/);
+  assert.match(durable, /if \(process\.platform === 'win32'\) return false/);
+});
