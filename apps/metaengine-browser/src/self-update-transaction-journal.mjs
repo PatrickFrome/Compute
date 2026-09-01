@@ -19,6 +19,7 @@ const STATES = new Set([
 ]);
 
 const TERMINAL = new Set(['QUALIFIED', 'QUARANTINED', 'SUPERSEDED']);
+const BEGIN_ALLOWED_PRIOR_STATES = new Set(['QUALIFIED', 'SUPERSEDED']);
 const TRANSITIONS = new Map([
   ['PREPARED', new Set(['INSTALLING','SUCCESSOR_BOOTED','AMBIGUOUS_INSTALL','SUPERSEDED'])],
   ['INSTALLING', new Set(['SUCCESSOR_BOOTED','AMBIGUOUS_INSTALL','SUPERSEDED'])],
@@ -98,10 +99,12 @@ export async function beginSelfUpdateTransaction(app, receipt, { clock = () => D
   if (receipt?.metadata_verified !== true || receipt?.restart_gate_safe !== true || receipt?.authority_effect !== false) {
     throw new Error('self_update_transaction_receipt_invalid');
   }
-  const prior = await readSelfUpdateTransaction(app).catch((error) => {
-    if (/json_invalid|schema_invalid|state_invalid|binding_invalid|retry_contract_invalid|authority_invalid/.test(String(error?.message || error))) return null;
-    throw error;
-  });
+  // Never erase an unreadable journal and never replace an unresolved/held attempt.
+  // A new transaction is admissible only after explicit prior convergence.
+  const prior = await readSelfUpdateTransaction(app);
+  if (prior && !BEGIN_ALLOWED_PRIOR_STATES.has(prior.state)) {
+    throw new Error(`self_update_transaction_unresolved_prior:${prior.state}`);
+  }
   const now = Number(clock());
   const sameTargetAttempts = prior?.target_version === targetVersion ? Number(prior.attempt_count || 0) : 0;
   const row = {
