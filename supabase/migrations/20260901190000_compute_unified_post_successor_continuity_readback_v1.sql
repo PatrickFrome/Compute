@@ -5,7 +5,7 @@ create or replace function public.h205f22_compute_unified_post_successor_continu
   p_successor_epoch bigint, p_expected_source_git_commit text,
   p_max_heartbeat_age interval default interval '120 seconds'
 ) returns jsonb language plpgsql stable security definer set search_path='' as $$
-declare v_continuity jsonb; v_state record; v_checkpoint record; v_keepalive jsonb; v_observed_process text; v_enrolled boolean:=false; v_ok boolean:=false; v_reason text:='UNSET'; v_now timestamptz:=statement_timestamp();
+declare v_continuity jsonb; v_state record; v_checkpoint record; v_keepalive jsonb; v_observed_process text; v_heartbeat_observed_at timestamptz; v_enrolled boolean:=false; v_ok boolean:=false; v_reason text:='UNSET'; v_now timestamptz:=statement_timestamp();
 begin
   if p_max_heartbeat_age<=interval '0 seconds' or p_max_heartbeat_age>interval '10 minutes' then
     return jsonb_build_object('verified',false,'reason','INVALID_HEARTBEAT_WINDOW','automatic_retry_allowed',false,'authority_effect',false);
@@ -17,7 +17,8 @@ begin
     select s.client_id,s.last_seen_at,s.supervisor_mode,s.armed,s.state into v_state from public.compute_fabric_a2_browser_supervisor_state_h205f22 s where s.client_id=p_successor_client_id and s.workspace_id=p_workspace_id limit 1;
     if v_state.client_id is null then v_reason:='SUCCESSOR_BROWSER_STATE_MISSING';
     else
-      v_observed_process:=coalesce(v_state.state->>'process_incarnation_id',v_state.state #>> '{perception,process_incarnation_id}');
+      v_heartbeat_observed_at:=v_state.last_seen_at;
+      v_observed_process:=coalesce(v_state.state #>> '{perception,process_incarnation_id}',v_state.state->>'process_incarnation_id');
       if v_state.last_seen_at<v_now-p_max_heartbeat_age then v_reason:='SUCCESSOR_HEARTBEAT_STALE';
       elsif v_observed_process is distinct from p_successor_process_incarnation_id then v_reason:='SUCCESSOR_PROCESS_MISMATCH';
       elsif v_state.supervisor_mode is distinct from 'CONTROL' or not coalesce(v_state.armed,false) then v_reason:='SUCCESSOR_CONTROL_NOT_ACTIVE';
@@ -37,7 +38,7 @@ begin
       end if;
     end if;
   end if;
-  return jsonb_build_object('schema','metaengine.compute-unified.post-successor-continuity-readback.v1','verified',v_ok,'reason',v_reason,'workspace_id',p_workspace_id,'successor_client_id',p_successor_client_id,'successor_process_incarnation_id',p_successor_process_incarnation_id,'successor_supervisor_epoch',p_successor_epoch,'expected_source_git_commit',p_expected_source_git_commit,'heartbeat_observed_at',case when v_state.client_id is null then null else v_state.last_seen_at end,'enrollment_active',v_enrolled,'automatic_retry_allowed',false,'restart_authorized',false,'wake_replay_authorized',false,'lease_mutation_authorized',false,'authority_effect',false);
+  return jsonb_build_object('schema','metaengine.compute-unified.post-successor-continuity-readback.v1','verified',v_ok,'reason',v_reason,'workspace_id',p_workspace_id,'successor_client_id',p_successor_client_id,'successor_process_incarnation_id',p_successor_process_incarnation_id,'successor_supervisor_epoch',p_successor_epoch,'expected_source_git_commit',p_expected_source_git_commit,'heartbeat_observed_at',v_heartbeat_observed_at,'enrollment_active',v_enrolled,'automatic_retry_allowed',false,'restart_authorized',false,'wake_replay_authorized',false,'lease_mutation_authorized',false,'authority_effect',false);
 end; $$;
 revoke all on function public.h205f22_compute_unified_post_successor_continuity_readback_v1(uuid,text,text,text,bigint,text,text,bigint,text,interval) from public,anon,authenticated;
 grant execute on function public.h205f22_compute_unified_post_successor_continuity_readback_v1(uuid,text,text,text,bigint,text,text,bigint,text,interval) to service_role;
