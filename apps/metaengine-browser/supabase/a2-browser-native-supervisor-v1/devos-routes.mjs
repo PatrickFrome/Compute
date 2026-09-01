@@ -1,3 +1,5 @@
+import { createMetaDevosSuperstep } from './meta-devos-superstep.mjs';
+
 const AGENT_RE=/^agent_[a-z0-9-]{8,64}$/;
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HASH_RE=/^[a-f0-9]{64}$/;
@@ -137,6 +139,7 @@ function transportAdmissionFence(error){
 
 export function createDevosSupervisorRoutes({rpc,workspaceId}={}){
   if(typeof rpc!=='function'||!UUID_RE.test(String(workspaceId||'')))throw new Error('devos_routes_dependencies_invalid');
+  const metaSuperstep=createMetaDevosSuperstep({rpc,workspaceId});
   return async function handle({req,path,body,clientId}={}){
     const effectMatch=String(path||'').match(/^\/v1\/commands\/([0-9a-f-]{36})\/effect-intent$/i);
     if(req?.method==='POST'&&effectMatch){
@@ -150,6 +153,9 @@ export function createDevosSupervisorRoutes({rpc,workspaceId}={}){
     if(!clientId)return json(401,{error:'device_auth_required'});
     if(req?.method==='POST'&&path==='/v1/devos/cycle'){
       const agents=boundedAgents(body?.fleet);
+      // Meta is a bounded semantic superstep of this existing heartbeat request. It has no
+      // task-lease or Browser authority and fails soft; DevOS below remains the single scheduler.
+      const metaOrchestrator=await metaSuperstep({clientId});
       const reconcile=await rpc('devos_fleet_reconcile_v1',{p_workspace:workspaceId});
       const snapshot=await rpc('devos_fleet_snapshot_v1',{p_workspace:workspaceId});
       const backlog=backlogOf(snapshot);
@@ -166,7 +172,7 @@ export function createDevosSupervisorRoutes({rpc,workspaceId}={}){
           break;
         }
       }
-      return json(200,{schema:'metaengine.devos.browser-cycle.v1',reconcile,backlog,lease,lease_fenced:leaseFence?.fenced===true,lease_fence_reason:leaseFence?.reason||null,running:runningForAgents(snapshot,agents),scheduler_source:'NATIVE_SUPERVISOR_HEARTBEAT',scheduler_policy:'IDLE_ROLE_FAIR_SHARE_V1',lease_attempts:leaseAttempts,second_scheduler_loop:false,automatic_retry_allowed:false,authority_effect:false});
+      return json(200,{schema:'metaengine.devos.browser-cycle.v1',meta_orchestrator:metaOrchestrator,reconcile,backlog,lease,lease_fenced:leaseFence?.fenced===true,lease_fence_reason:leaseFence?.reason||null,running:runningForAgents(snapshot,agents),scheduler_source:'NATIVE_SUPERVISOR_HEARTBEAT',scheduler_policy:'IDLE_ROLE_FAIR_SHARE_V1',lease_attempts:leaseAttempts,second_scheduler_loop:false,automatic_retry_allowed:false,authority_effect:false});
     }
     if(req?.method==='POST'&&path==='/v1/devos/mark-running'){
       const b=binding(body); const proof=body?.proof||{};
