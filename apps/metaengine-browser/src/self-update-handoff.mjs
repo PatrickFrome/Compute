@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -7,6 +8,9 @@ import {
   readSelfUpdateTransaction,
   transitionSelfUpdateTransaction,
 } from './self-update-transaction-journal.mjs';
+
+const require = createRequire(import.meta.url);
+const { durableWriteJson } = require('./durable-json-file.cjs');
 
 export const PRE_INSTALL_RECEIPT_FILE = 'metaengine-self-update-pre-install-receipt-v1.json';
 export const SUCCESSOR_RECEIPT_FILE = 'metaengine-self-update-successor-receipt-v1.json';
@@ -56,19 +60,6 @@ function compareVersions(left, right) {
     if (a[i] < b[i]) return -1;
   }
   return 0;
-}
-
-async function atomicWriteJson(target, value) {
-  await fs.mkdir(path.dirname(target), { recursive: true });
-  const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
-  const handle = await fs.open(temp, 'w', 0o600);
-  try {
-    await handle.write(`${JSON.stringify(value)}\n`);
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  await fs.rename(temp, target);
 }
 
 async function transitionIfPresent(app, state, options = {}) {
@@ -123,7 +114,7 @@ export async function persistPreInstallReceipt(app, receipt) {
   await beginSelfUpdateTransaction(app, receipt);
   try {
     await clearSuccessorReceipt(app);
-    await atomicWriteJson(pre_install, receipt);
+    await durableWriteJson(pre_install, receipt);
   } catch (error) {
     await transitionIfPresent(app, 'AMBIGUOUS_INSTALL', {
       evidence: { reason: `pre_install_receipt_persist_failed:${String(error?.message || error).slice(0, 140)}` },
@@ -262,7 +253,7 @@ export async function persistUpdatedSuccessorReceipt(app, {
     authority_effect: false,
   };
   const { successor } = selfUpdateHandoffPaths(app);
-  await atomicWriteJson(successor, row);
+  await durableWriteJson(successor, row);
   return { row, path: successor, successor_startup: expected.successor_startup };
 }
 
