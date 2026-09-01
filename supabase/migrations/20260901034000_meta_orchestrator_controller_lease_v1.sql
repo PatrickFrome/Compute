@@ -34,8 +34,10 @@ declare
   v_roadmap_id text := lower(trim(coalesce(p_roadmap_id,'')));
   v_client_id text := trim(coalesce(p_client_id,''));
   v_seconds integer := greatest(6, least(30, coalesce(p_seconds,12)));
+  v_renew_window integer := greatest(3, least(10, v_seconds / 2));
   v_now timestamptz := clock_timestamp();
   v_row destruktion_meta.meta_orchestrator_controller_lease_h205f22%rowtype;
+  v_renewed boolean := false;
 begin
   if p_workspace_id is null then raise exception 'meta_controller_workspace_required' using errcode = '22023'; end if;
   if v_roadmap_id !~ '^[a-z0-9][a-z0-9._:-]{2,159}$' then raise exception 'meta_controller_roadmap_invalid' using errcode = '22023'; end if;
@@ -54,11 +56,18 @@ begin
     ) values (
       p_workspace_id,v_roadmap_id,v_client_id,1,'ACTIVE',v_now,v_now,v_now + make_interval(secs => v_seconds),1,false
     ) returning * into v_row;
+    v_renewed := true;
   elsif v_row.state = 'ACTIVE' and v_row.holder_client_id = v_client_id and v_row.expires_at > v_now then
-    update destruktion_meta.meta_orchestrator_controller_lease_h205f22
-       set renewed_at=v_now, expires_at=v_now + make_interval(secs => v_seconds), authority_effect=false
-     where workspace_id=p_workspace_id and roadmap_id=v_roadmap_id
-    returning * into v_row;
+    -- Heartbeat is normally every ~2s while the lease is 12s. Return the same live epoch
+    -- without rewriting the row until the lease enters its bounded renewal window. This
+    -- preserves failover semantics while reducing hot-row WAL/update pressure by ~3x.
+    if v_row.expires_at <= v_now + make_interval(secs => v_renew_window) then
+      update destruktion_meta.meta_orchestrator_controller_lease_h205f22
+         set renewed_at=v_now, expires_at=v_now + make_interval(secs => v_seconds), authority_effect=false
+       where workspace_id=p_workspace_id and roadmap_id=v_roadmap_id
+      returning * into v_row;
+      v_renewed := true;
+    end if;
   elsif v_row.state <> 'ACTIVE' or v_row.expires_at is null or v_row.expires_at <= v_now then
     update destruktion_meta.meta_orchestrator_controller_lease_h205f22
        set holder_client_id=v_client_id,
@@ -68,10 +77,12 @@ begin
            transitions=v_row.transitions + 1, authority_effect=false
      where workspace_id=p_workspace_id and roadmap_id=v_roadmap_id
     returning * into v_row;
+    v_renewed := true;
   else
     return jsonb_build_object(
       'schema','metaengine.meta-orchestrator.controller-lease.v1','workspace_id',p_workspace_id,'roadmap_id',v_roadmap_id,
       'leased',false,'leader_epoch',v_row.leader_epoch,'holder_verified',false,'not_expired',v_row.expires_at > v_now,
+      'renewed',false,'renewal_window_seconds',v_renew_window,
       'expires_at',v_row.expires_at,'transitions',v_row.transitions,'lease_seconds',v_seconds,
       'scheduler_authority',false,'browser_authority',false,'release_authority',false,'authority_effect',false
     );
@@ -80,8 +91,9 @@ begin
   return jsonb_build_object(
     'schema','metaengine.meta-orchestrator.controller-lease.v1','workspace_id',p_workspace_id,'roadmap_id',v_roadmap_id,
     'leased',true,'leader_epoch',v_row.leader_epoch,'holder_verified',v_row.holder_client_id = v_client_id,
-    'not_expired',v_row.expires_at > clock_timestamp(),'expires_at',v_row.expires_at,'transitions',v_row.transitions,
-    'lease_seconds',v_seconds,'scheduler_authority',false,'browser_authority',false,'release_authority',false,'authority_effect',false
+    'not_expired',v_row.expires_at > clock_timestamp(),'renewed',v_renewed,'renewal_window_seconds',v_renew_window,
+    'expires_at',v_row.expires_at,'transitions',v_row.transitions,'lease_seconds',v_seconds,
+    'scheduler_authority',false,'browser_authority',false,'release_authority',false,'authority_effect',false
   );
 end;
 $$;
