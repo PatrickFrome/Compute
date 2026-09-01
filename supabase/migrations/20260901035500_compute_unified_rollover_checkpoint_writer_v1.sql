@@ -20,7 +20,6 @@ create table if not exists public.h205f22_compute_unified_rollover_checkpoints_v
 
 revoke all on table public.h205f22_compute_unified_rollover_checkpoints_v1 from public, anon, authenticated;
 revoke all on sequence public.h205f22_compute_unified_rollover_checkpoints_v1_checkpoint_id_seq from public, anon, authenticated;
-
 grant select, insert on table public.h205f22_compute_unified_rollover_checkpoints_v1 to service_role;
 grant usage, select on sequence public.h205f22_compute_unified_rollover_checkpoints_v1_checkpoint_id_seq to service_role;
 
@@ -35,6 +34,7 @@ declare
   v_envelope jsonb;
   v_fingerprint text;
   v_row public.h205f22_compute_unified_rollover_checkpoints_v1%rowtype;
+  v_inserted boolean := false;
 begin
   v_envelope := public.h205f22_compute_unified_rollover_checkpoint_envelope_v1(p_workspace);
 
@@ -62,9 +62,21 @@ begin
     v_fingerprint,
     v_envelope
   )
-  on conflict (workspace_id, evidence_fingerprint) do update
-    set evidence_fingerprint = excluded.evidence_fingerprint
+  on conflict (workspace_id, evidence_fingerprint) do nothing
   returning * into v_row;
+
+  v_inserted := found;
+
+  if not v_inserted then
+    select * into strict v_row
+    from public.h205f22_compute_unified_rollover_checkpoints_v1
+    where workspace_id = p_workspace
+      and evidence_fingerprint = v_fingerprint;
+
+    if v_row.envelope is distinct from v_envelope then
+      raise exception 'rollover checkpoint fingerprint collision';
+    end if;
+  end if;
 
   return jsonb_build_object(
     'schema','metaengine.compute-unified.rollover-checkpoint-write-result.v1',
@@ -73,7 +85,7 @@ begin
     'observed_at',v_row.observed_at,
     'evidence_fingerprint',v_row.evidence_fingerprint,
     'idempotent',true,
-    'persistence_effect',true,
+    'persistence_effect',v_inserted,
     'restart_authorized',false,
     'wake_replay_authorized',false,
     'lease_mutation_authorized',false,
