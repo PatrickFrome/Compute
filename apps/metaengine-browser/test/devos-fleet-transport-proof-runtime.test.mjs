@@ -14,24 +14,34 @@ const lease = {
   base_sha: '724612235eb7ceb4534c13d126425b274d876394',
   branch_name: 'work/devos-native-task-dispatch-v1',
   automatic_retry_allowed: false,
-  task_spec: { objective: 'Prove the local transport before DB RUNNING.' },
+  task_spec: { objective: 'Use an already transport-proven Browser incarnation.' },
 };
 const composer = { role: 'textbox', name: 'Message ChatGPT' };
 const send = { role: 'button', name: 'Send prompt' };
 const stop = { role: 'button', name: 'Stop generating' };
 const conversation = 'https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789abc';
 const supervisorTab = 'tab_supervisor';
+const fleetProof = {
+  schema: 'metaengine.browser.fleet-transport-proof.v1',
+  tab_id: lease.tab_id,
+  target_id: lease.target_id,
+  generation_epoch: lease.agent_generation_epoch,
+  conversation_url_sha256: 'b'.repeat(64),
+  proven_at: '2026-08-31T18:00:00.000Z',
+  authority_effect: false,
+};
 
 function response(status, body) {
   return { status, ok: status >= 200 && status < 300, async json() { return structuredClone(body); } };
 }
 
-function harness({ postTarget = lease.target_id } = {}) {
-  let lifecycle = 'BOUND_UNVERIFIED';
+function harness({ lifecycle = 'ACTIVE', proof = fleetProof, postTarget = lease.target_id } = {}) {
   let selectedTab = supervisorTab;
   const order = [];
+  const commands = [];
   const snapshot = () => ({
     schema: 'metaengine.browser.fleet-snapshot.v1',
+    readiness_contract: 'TRANSPORT_PROOF_REQUIRED',
     policy: { warm_agents: 1, spawn_burst_limit: 2 },
     agents: [{
       agent_id: lease.agent_id,
@@ -40,7 +50,9 @@ function harness({ postTarget = lease.target_id } = {}) {
       tab_id: lease.tab_id,
       target_id: lease.target_id,
       generation_epoch: lease.agent_generation_epoch,
-      transport_proof: lifecycle === 'ACTIVE' ? { schema: 'metaengine.browser.fleet-transport-proof.v1' } : null,
+      transport_proof: proof ? structuredClone(proof) : null,
+      automatic_retry_allowed: false,
+      authority_effect: false,
     }],
   });
   const state = () => ({
@@ -51,30 +63,18 @@ function harness({ postTarget = lease.target_id } = {}) {
       { tab_id: lease.tab_id, selected: selectedTab === lease.tab_id },
     ],
   });
+
   const runtime = {
     snapshot,
-    async markTransportProven(payload) {
-      order.push('fleet-proof');
-      assert.deepEqual({
-        agent_id: payload.agent_id,
-        tab_id: payload.tab_id,
-        target_id: payload.target_id,
-        generation_epoch: payload.generation_epoch,
-        conversation_url: payload.conversation_url,
-      }, {
-        agent_id: lease.agent_id,
-        tab_id: lease.tab_id,
-        target_id: lease.target_id,
-        generation_epoch: lease.agent_generation_epoch,
-        conversation_url: conversation,
-      });
-      lifecycle = 'ACTIVE';
-      return snapshot();
+    async markTransportProven() {
+      order.push('forbidden-late-fleet-proof');
+      throw new Error('late_transport_promotion_must_not_run');
     },
   };
 
   let captures = 0;
   const executeCommand = async (command) => {
+    commands.push(command.action);
     if (command.action === 'FLEET_RECONCILE') return snapshot();
     if (command.action === 'SELECT_TAB') {
       selectedTab = command.payload.tab_id;
@@ -109,39 +109,52 @@ function harness({ postTarget = lease.target_id } = {}) {
     }
     throw new Error(`unexpected_request:${path}`);
   };
-  return { runtime, snapshot, state, executeCommand, signedRequest, order, selected: () => selectedTab };
+  return { runtime, snapshot, state, executeCommand, signedRequest, order, commands, selected: () => selectedTab };
 }
 
-test('BOUND_UNVERIFIED native frame is durably proven before DB mark-running', async () => {
+test('BOUND_UNVERIFIED is rejected before Browser selection even if a local fleet runtime is registered', async () => {
+  const h = harness({ lifecycle: 'BOUND_UNVERIFIED', proof: null });
+  registerFleetRuntime(h.runtime);
+  const cycle = new DevOsNativeTaskCycle({ getState: h.state, executeCommand: h.executeCommand, signedRequest: h.signedRequest });
+  await assert.rejects(() => cycle.cycle(), /devos_agent_state_invalid:ADMISSION_FENCED/);
+  assert.deepEqual(h.order, []);
+  assert.deepEqual(h.commands, ['FLEET_RECONCILE']);
+  assert.equal(h.selected(), supervisorTab);
+  clearFleetRuntime(h.runtime);
+});
+
+test('ACTIVE exact fleet proof is revalidated before DB mark-running and late promotion is never invoked', async () => {
   const h = harness();
   registerFleetRuntime(h.runtime);
   const cycle = new DevOsNativeTaskCycle({ getState: h.state, executeCommand: h.executeCommand, signedRequest: h.signedRequest });
   const out = await cycle.cycle();
   assert.equal(out.dispatch.state, 'RUNNING');
-  assert.deepEqual(h.order, ['fleet-proof', 'db-running']);
-  assert.equal(h.snapshot().agents[0].lifecycle_state, 'ACTIVE');
-  assert.equal(out.fleet_transport_proof.state, 'PROVEN');
-  assert.equal(out.fleet_transport_proof_before_db_running, true);
+  assert.deepEqual(h.order, ['db-running']);
+  assert.equal(out.fleet_transport_proof.state, 'PREEXISTING_ACTIVE_PROOF_REVALIDATED');
+  assert.equal(out.fleet_transport_proof_before_physical_dispatch, true);
+  assert.equal(out.bound_unverified_dispatch_allowed, false);
   assert.equal(h.selected(), supervisorTab);
   clearFleetRuntime(h.runtime);
 });
 
-test('post-capture target replacement fails closed before fleet proof and DB running', async () => {
+test('ACTIVE with missing or drifted transport proof is fenced before Browser effect', async () => {
+  const missing = harness({ lifecycle: 'ACTIVE', proof: null });
+  const missingCycle = new DevOsNativeTaskCycle({ getState: missing.state, executeCommand: missing.executeCommand, signedRequest: missing.signedRequest });
+  await assert.rejects(() => missingCycle.cycle(), /devos_agent_state_invalid:ADMISSION_FENCED/);
+  assert.deepEqual(missing.commands, ['FLEET_RECONCILE']);
+
+  const drifted = structuredClone(fleetProof);
+  drifted.target_id = 'webcontents:11';
+  const h = harness({ lifecycle: 'ACTIVE', proof: drifted });
+  const cycle = new DevOsNativeTaskCycle({ getState: h.state, executeCommand: h.executeCommand, signedRequest: h.signedRequest });
+  await assert.rejects(() => cycle.cycle(), /devos_agent_state_invalid:ADMISSION_FENCED/);
+  assert.deepEqual(h.commands, ['FLEET_RECONCILE']);
+});
+
+test('post-send native target replacement still fails closed before DB running', async () => {
   const h = harness({ postTarget: 'webcontents:11' });
-  registerFleetRuntime(h.runtime);
   const cycle = new DevOsNativeTaskCycle({ getState: h.state, executeCommand: h.executeCommand, signedRequest: h.signedRequest });
-  await assert.rejects(cycle.cycle(), /fleet_runtime_frame_target_mismatch/);
-  assert.deepEqual(h.order, []);
-  assert.equal(h.snapshot().agents[0].lifecycle_state, 'BOUND_UNVERIFIED');
-  assert.equal(h.selected(), supervisorTab);
-  clearFleetRuntime(h.runtime);
-});
-
-test('BOUND_UNVERIFIED dispatch cannot claim DB running without registered local fleet runtime', async () => {
-  const h = harness();
-  clearFleetRuntime();
-  const cycle = new DevOsNativeTaskCycle({ getState: h.state, executeCommand: h.executeCommand, signedRequest: h.signedRequest });
-  await assert.rejects(cycle.cycle(), /devos_fleet_runtime_transport_proof_unavailable/);
+  await assert.rejects(() => cycle.cycle(), /devos_transport_active_frame_target_mismatch/);
   assert.deepEqual(h.order, []);
   assert.equal(h.selected(), supervisorTab);
 });

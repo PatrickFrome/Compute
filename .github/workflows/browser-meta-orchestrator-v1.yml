@@ -1,0 +1,106 @@
+name: Browser Meta Orchestrator V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/meta-orchestrator-core.mjs'
+      - 'apps/metaengine-browser/src/meta-orchestrator-devos-adapter.mjs'
+      - 'apps/metaengine-browser/src/meta-orchestrator-workspace-admission.mjs'
+      - 'apps/metaengine-browser/src/meta-orchestrator-authoritative-snapshot.mjs'
+      - 'apps/metaengine-browser/src/meta-orchestrator-privileged-adapter.mjs'
+      - 'apps/metaengine-browser/src/meta-orchestrator-native-provider.mjs'
+      - 'apps/metaengine-browser/src/meta-orchestrator-cycle-stage.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts'
+      - 'apps/metaengine-browser/src/workspace-manager.mjs'
+      - 'apps/metaengine-browser/src/workspace-git-hardening.mjs'
+      - 'apps/metaengine-browser/src/fleet-target-local-observer.mjs'
+      - 'apps/metaengine-browser/src/bounded-worker-observer.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
+      - 'apps/metaengine-browser/src/main.mjs'
+      - 'apps/metaengine-browser/src/devos-native-task-cycle.mjs'
+      - 'apps/metaengine-browser/src/devos-native-task-cycle-core.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-core.test.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-workspace-admission.test.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-authoritative-snapshot.test.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-plan-state.test.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-privileged-adapter.test.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-native-provider.test.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-native-provider-client.test.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-cycle-stage.test.mjs'
+      - 'apps/metaengine-browser/test/workspace-manager.test.mjs'
+      - 'apps/metaengine-browser/test/workspace-git-hardening.test.mjs'
+      - 'apps/metaengine-browser/test/workspace-binding-registry.test.mjs'
+      - 'apps/metaengine-browser/test/bounded-worker-observer-v2.test.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-bounded-worker-observer-wiring.test.mjs'
+      - 'apps/metaengine-browser/test/devos-native-task-cycle.test.mjs'
+      - 'apps/metaengine-browser/test/devos-fleet-transport-proof-runtime.test.mjs'
+      - 'apps/metaengine-browser/test/devos-fleet-transport-admission.test.mjs'
+      - 'supabase/migrations/20260831152000_a2_workspace_binding_registry_v1.sql'
+      - 'supabase/migrations/20260831184500_devos_fleet_transport_admission_v1.sql'
+      - 'supabase/migrations/20260831193000_meta_orchestrator_plan_state_v1.sql'
+      - 'supabase/migrations/20260831200500_meta_orchestrator_authoritative_inputs_v1.sql'
+      - 'supabase/migrations/20260831204000_devos_fleet_scheduler_capacity_snapshot_v1.sql'
+      - 'supabase/migrations/20260901001500_meta_orchestrator_task_admission_v1.sql'
+      - 'apps/metaengine-browser/src/autonomy-governor.mjs'
+      - 'coordination/devos/META_ORCHESTRATOR_V1.md'
+      - '.github/workflows/browser-meta-orchestrator-v1.yml'
+  push:
+    branches:
+      - 'work/browser-meta-orchestrator-v1'
+
+permissions:
+  contents: read
+
+jobs:
+  exact-head-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Prove exact candidate head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          ACTUAL_HEAD="$(git rev-parse HEAD)"
+          test "$ACTUAL_HEAD" = "$EXPECTED_HEAD"
+          printf 'exact_head=%s\n' "$ACTUAL_HEAD"
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Syntax check convergence modules
+        run: |
+          node --check apps/metaengine-browser/src/meta-orchestrator-core.mjs
+          node --check apps/metaengine-browser/src/meta-orchestrator-devos-adapter.mjs
+          node --check apps/metaengine-browser/src/meta-orchestrator-workspace-admission.mjs
+          node --check apps/metaengine-browser/src/meta-orchestrator-authoritative-snapshot.mjs
+          node --check apps/metaengine-browser/src/meta-orchestrator-privileged-adapter.mjs
+          node --check apps/metaengine-browser/src/meta-orchestrator-native-provider.mjs
+          node --check apps/metaengine-browser/src/meta-orchestrator-cycle-stage.mjs
+          node --check apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs
+          node --check apps/metaengine-browser/src/workspace-manager.mjs
+          node --check apps/metaengine-browser/src/workspace-git-hardening.mjs
+          node --check apps/metaengine-browser/src/fleet-target-local-observer.mjs
+          node --check apps/metaengine-browser/src/bounded-worker-observer.mjs
+          node --check apps/metaengine-browser/src/native-supervisor-client.mjs
+          node --check apps/metaengine-browser/src/main.mjs
+          node --check apps/metaengine-browser/src/devos-native-task-cycle.mjs
+          node --check apps/metaengine-browser/src/devos-native-task-cycle-core.mjs
+      - name: Meta-Orchestrator fail-closed contract
+        run: node --test apps/metaengine-browser/test/meta-orchestrator-core.test.mjs apps/metaengine-browser/test/meta-orchestrator-authoritative-snapshot.test.mjs apps/metaengine-browser/test/meta-orchestrator-plan-state.test.mjs apps/metaengine-browser/test/meta-orchestrator-privileged-adapter.test.mjs apps/metaengine-browser/test/meta-orchestrator-native-provider.test.mjs apps/metaengine-browser/test/meta-orchestrator-native-provider-client.test.mjs apps/metaengine-browser/test/meta-orchestrator-cycle-stage.test.mjs
+      - name: Exact Meta-to-Workspace mutation admission
+        run: node --test apps/metaengine-browser/test/meta-orchestrator-workspace-admission.test.mjs
+      - name: Workspace binding and Git isolation contracts
+        run: node --test apps/metaengine-browser/test/workspace-manager.test.mjs apps/metaengine-browser/test/workspace-git-hardening.test.mjs apps/metaengine-browser/test/workspace-binding-registry.test.mjs
+      - name: DevOS transport-gated lease admission
+        run: node --test apps/metaengine-browser/test/devos-fleet-transport-admission.test.mjs
+      - name: Bounded worker liveness observation
+        run: node --test apps/metaengine-browser/test/bounded-worker-observer-v2.test.mjs apps/metaengine-browser/test/native-supervisor-bounded-worker-observer-wiring.test.mjs
+      - name: Physical task-cycle transport regression seam
+        run: node --test apps/metaengine-browser/test/devos-native-task-cycle.test.mjs apps/metaengine-browser/test/devos-fleet-transport-proof-runtime.test.mjs

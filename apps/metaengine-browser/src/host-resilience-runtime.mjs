@@ -1,14 +1,17 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BrowserSentinelHost } from './browser-sentinel.mjs';
+import { BrowserParentProgressLease } from './browser-parent-progress-lease.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PARENT_PROGRESS_HEARTBEAT_MS = 5_000;
 
 export class HostResilienceRuntime {
-  #electron; #onResume; #platform; #blockerId = null; #resumeHandler = null; #sentinel = null;
+  #electron; #onResume; #platform; #blockerId = null; #resumeHandler = null; #sentinel = null; #progressLease = null; #progressTimer = null;
   #state = {
     state: 'UNINITIALIZED', open_at_login: false, executable_will_launch_at_login: false,
     prevent_app_suspension: false, sentinel: null, sentinel_worker_healthy: false,
+    parent_progress: null, parent_progress_heartbeat_ms: PARENT_PROGRESS_HEARTBEAT_MS,
     last_resume_at: null, last_error: null,
   };
 
@@ -20,11 +23,17 @@ export class HostResilienceRuntime {
 
   snapshot() {
     const sentinel = this.#sentinel?.snapshot?.() || this.#state.sentinel;
+    const parentProgress = this.#progressLease?.snapshot?.() || this.#state.parent_progress;
     return structuredClone({
-      schema: 'metaengine.host-resilience-runtime.v3',
+      schema: 'metaengine.host-resilience-runtime.v4',
       ...this.#state,
       sentinel,
+      parent_progress: parentProgress,
       sentinel_worker_healthy: sentinel?.worker_ready === true,
+      useful_progress_required: true,
+      pid_liveness_alone_sufficient: false,
+      watchdog_scheduler_authority: false,
+      watchdog_task_leasing: false,
       authority_effect: false,
     });
   }
@@ -41,13 +50,17 @@ export class HostResilienceRuntime {
         this.#state.executable_will_launch_at_login = settings?.executableWillLaunchAtLogin === true;
       }
       if (this.#platform === 'win32' && process.env.METAENGINE_DISABLE_CRASH_SENTINEL !== '1' && typeof app.getPath === 'function') {
-        this.#sentinel = new BrowserSentinelHost({
-          statePath: path.join(app.getPath('userData'), 'metaengine-browser-sentinel-v1.json'),
-          workerScript: path.join(__dirname, 'browser-sentinel-worker.cjs'),
-          executable: process.execPath,
-        });
+        const statePath = path.join(app.getPath('userData'), 'metaengine-browser-sentinel-v1.json');
+        this.#sentinel = new BrowserSentinelHost({ statePath, workerScript: path.join(__dirname, 'browser-sentinel-worker.cjs'), executable: process.execPath });
         await this.#sentinel.start({ app });
         await this.#sentinel.waitUntilHealthy(5_000);
+        this.#progressLease = new BrowserParentProgressLease({ statePath, getBinding: () => this.#sentinel?.snapshot?.() || null });
+        await this.#progressLease.mark({ kind: 'HOST_RESILIENCE_STARTED' });
+        this.#state.parent_progress = this.#progressLease.snapshot();
+        this.#progressTimer = setInterval(() => {
+          void this.markProgress({ kind: 'EVENT_LOOP_HEARTBEAT' }).catch(() => {});
+        }, PARENT_PROGRESS_HEARTBEAT_MS);
+        this.#progressTimer.unref?.();
         this.#state.sentinel_worker_healthy = true;
       }
       if (process.env.METAENGINE_ALLOW_SUSPEND !== '1' && powerSaveBlocker) {
@@ -57,7 +70,9 @@ export class HostResilienceRuntime {
       if (powerMonitor?.on) {
         this.#resumeHandler = () => {
           this.#state.last_resume_at = new Date().toISOString();
-          Promise.resolve(this.#onResume()).catch((e) => { this.#state.last_error = String(e?.message || e).slice(0, 240); });
+          Promise.resolve(this.#onResume())
+            .then(() => this.markProgress({ kind: 'POWER_RESUME' }))
+            .catch((e) => { this.#state.last_error = String(e?.message || e).slice(0, 240); });
         };
         powerMonitor.on('resume', this.#resumeHandler);
       }
@@ -70,8 +85,20 @@ export class HostResilienceRuntime {
     return this.snapshot();
   }
 
+  async markProgress({ kind = 'CONTROL_PLANE_CYCLE', detail = null } = {}) {
+    if (!this.#progressLease) return this.snapshot();
+    try {
+      await this.#progressLease.mark({ kind, detail });
+      this.#state.parent_progress = this.#progressLease.snapshot();
+    } catch (e) {
+      this.#state.last_error = `parent_progress:${String(e?.message || e).slice(0, 200)}`;
+      throw e;
+    }
+    return this.snapshot();
+  }
+
   async prepareExpectedRestart(reason = 'SELF_UPDATE') {
-    if (this.#sentinel) await this.#sentinel.prepareInstallerHandoff(reason);
+    if (this.#sentinel) await this.#sentinel.prepareExpectedRestart(reason);
     return this.snapshot();
   }
 
@@ -85,10 +112,13 @@ export class HostResilienceRuntime {
       const electron = this.#electron || await import('electron');
       if (this.#resumeHandler && electron.powerMonitor?.removeListener) electron.powerMonitor.removeListener('resume', this.#resumeHandler);
       if (this.#blockerId != null && electron.powerSaveBlocker?.isStarted?.(this.#blockerId)) electron.powerSaveBlocker.stop(this.#blockerId);
+      if (this.#progressTimer) clearInterval(this.#progressTimer);
       await this.#sentinel?.stop?.();
     } catch {}
     this.#blockerId = null;
     this.#resumeHandler = null;
+    this.#progressTimer = null;
+    this.#progressLease = null;
     this.#state.prevent_app_suspension = false;
     this.#state.sentinel_worker_healthy = false;
     this.#state.state = 'STOPPED';

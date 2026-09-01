@@ -1,6 +1,6 @@
 import { revalidateFleetTargetBinding } from './fleet-target-revalidation.mjs';
 
-export const FLEET_TARGET_LOCAL_OBSERVER_VERSION = '1.0.0';
+export const FLEET_TARGET_LOCAL_OBSERVER_VERSION = '1.1.0';
 export const FLEET_TARGET_LOCAL_SOURCE = 'METAENGINE_BROWSER_LOCAL_WEBCONTENTS';
 
 const trustedObservers = new WeakSet();
@@ -30,16 +30,22 @@ export function createFleetTargetLocalObserver({ lookupView } = {}) {
   return observe;
 }
 
-export function revalidateFleetTargetFromLocalBrowser({ agent, observeLocalTarget } = {}) {
-  if (!agent || typeof agent !== 'object') throw new Error('fleet_local_revalidation_agent_invalid');
+export function observeFleetTargetFromLocalBrowser({ tab_id, observeLocalTarget } = {}) {
   if (typeof observeLocalTarget !== 'function' || !trustedObservers.has(observeLocalTarget)) {
     throw new Error('fleet_local_revalidation_observer_untrusted');
   }
-
-  const observation = observeLocalTarget(agent.tab_id);
-  if (observation?.source !== FLEET_TARGET_LOCAL_SOURCE || observation?.authority_effect !== false) {
+  const observation = observeLocalTarget(String(tab_id || ''));
+  if (observation?.schema !== 'metaengine.browser.fleet-local-target-observation.v1'
+      || observation?.source !== FLEET_TARGET_LOCAL_SOURCE
+      || observation?.authority_effect !== false) {
     throw new Error('fleet_local_revalidation_observation_invalid');
   }
+  return observation;
+}
+
+export function revalidateFleetTargetFromLocalBrowser({ agent, observeLocalTarget } = {}) {
+  if (!agent || typeof agent !== 'object') throw new Error('fleet_local_revalidation_agent_invalid');
+  const observation = observeFleetTargetFromLocalBrowser({ tab_id: agent.tab_id, observeLocalTarget });
 
   return revalidateFleetTargetBinding({
     lifecycle_state: agent.lifecycle_state,

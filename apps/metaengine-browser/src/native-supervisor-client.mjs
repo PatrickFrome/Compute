@@ -1,3 +1,5 @@
+import { BoundedWorkerObserver } from './bounded-worker-observer.mjs';
+import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
 import { DevOsNativeTaskCycle } from './devos-native-task-cycle.mjs';
 import {
   assertNativeEffectBindingMatches,
@@ -107,6 +109,38 @@ export function buildSupervisorWatchdogHeartbeatPayload({ state = {}, supervisor
   });
 }
 
+export function buildWorkerObserverHeartbeatProjection({
+  observerSnapshot = null,
+  signals = [],
+  observedAt = null,
+  lastError = null,
+} = {}) {
+  const safeSignals = Array.isArray(signals) ? signals.map((row) => ({
+    agent_id: String(row?.agent_id || ''),
+    lifecycle_state: row?.lifecycle_state == null ? null : String(row.lifecycle_state),
+    generation_state: String(row?.generation_state || 'UNKNOWN'),
+    observation_state: String(row?.observation_state || 'UNKNOWN'),
+    lease_eligible: false,
+    scheduler_authority: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  })) : [];
+  return Object.freeze({
+    schema: 'metaengine.bounded-worker-observer.heartbeat.v1',
+    observer: observerSnapshot ? structuredClone(observerSnapshot) : null,
+    observed_at: observedAt || null,
+    signals: safeSignals,
+    last_error: lastError || null,
+    lease_eligible: false,
+    scheduler_authority: false,
+    control_authority: false,
+    command_leasing: false,
+    devos_leasing: false,
+    second_polling_loop: false,
+    authority_effect: false,
+  });
+}
+
 async function postStateHeartbeat({ identity, fetchImpl, payload } = {}) {
   const identityState = await identity.ensure();
   if (!identityState?.device_id) return Object.freeze({ sent: false, reason: 'DEVICE_NOT_ENROLLED', authority_effect: false });
@@ -145,6 +179,13 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
   #bootstrapLastAt = null;
   #bootstrapLastError = null;
   #startPromise = null;
+  #workerObserver = null;
+  #workerObserveLocalTarget = null;
+  #workerGetState = null;
+  #workerExecuteCommand = null;
+  #workerObservationSignals = [];
+  #workerObservationLastAt = null;
+  #workerObservationLastError = null;
 
   constructor(options = {}) {
     const identity = options.identity;
@@ -152,11 +193,13 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
     const getState = options.getState;
     const executeCommand = options.executeCommand;
     const prepareEffectBinding = options.prepareEffectBinding;
+    const observeLocalTarget = options.observeLocalTarget;
     if (!identity) throw new Error('native_supervisor_identity_required');
     if (typeof rawFetch !== 'function') throw new Error('native_supervisor_fetch_required');
     if (typeof getState !== 'function') throw new Error('native_supervisor_state_provider_required');
     if (typeof executeCommand !== 'function') throw new Error('native_supervisor_command_executor_required');
     if (prepareEffectBinding != null && typeof prepareEffectBinding !== 'function') throw new Error('native_supervisor_effect_binding_provider_invalid');
+    if (observeLocalTarget != null && typeof observeLocalTarget !== 'function') throw new Error('native_supervisor_worker_observer_invalid');
 
     const boundedFetch = createBoundedSupervisorFetch(rawFetch, { deadlineMs: options.requestDeadlineMs });
     let devosRef = null;
@@ -164,9 +207,15 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
     let clientRef = null;
     const getStateWithMeshProjection = async () => {
       const state = await getState();
-      const localMeshRuntime = clientRef?.snapshot?.()?.supervisor_mesh || null;
+      const localSnapshot = clientRef?.snapshot?.() || null;
+      const localMeshRuntime = localSnapshot?.supervisor_mesh || null;
       const supervisorMesh = buildSupervisorMeshWireProjectionV1(localMeshRuntime);
-      return supervisorMesh ? { ...state, supervisor_mesh: supervisorMesh } : state;
+      const workerObserver = localSnapshot?.worker_observer || null;
+      return {
+        ...state,
+        ...(supervisorMesh ? { supervisor_mesh: supervisorMesh } : {}),
+        ...(workerObserver ? { worker_observer: workerObserver } : {}),
+      };
     };
     const executeCommandWithDevosLifecycle = async (command) => {
       if (String(command?.action || '') === 'FLEET_TASK_COMPLETE') {
@@ -191,6 +240,12 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
     this.#versionRef = String(options.version || '0.0.0');
     this.#bootstrapHeartbeatMs = Math.max(1000, Number(options.bootstrapHeartbeatMs) || DEFAULT_BOOTSTRAP_HEARTBEAT_MS);
     this.#watchdogStaleMs = Math.max(this.#bootstrapHeartbeatMs * 2, Number(options.watchdogStaleMs) || DEFAULT_SUPERVISOR_WATCHDOG_STALE_MS);
+    if (observeLocalTarget) {
+      this.#workerObserver = new BoundedWorkerObserver({ budget: options.workerObservationBudget ?? 4 });
+      this.#workerObserveLocalTarget = observeLocalTarget;
+      this.#workerGetState = getState;
+      this.#workerExecuteCommand = executeCommand;
+    }
 
     const signedRequest = async (path, { method = 'POST', payload = null } = {}) => {
       const bodyText = method === 'GET' ? '' : JSON.stringify(payload ?? {});
@@ -257,6 +312,38 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
     this.#devosTaskCycle = devosRef;
   }
 
+  async #observeWorkers() {
+    if (!this.#workerObserver) return;
+    try {
+      const state = await this.#workerGetState();
+      const agents = Array.isArray(state?.fleet?.agents) ? state.fleet.agents : [];
+      const signals = await this.#workerObserver.observe(agents, {
+        capture: (tabId) => this.#workerExecuteCommand({ action: 'CAPTURE', platform: 'CHATGPT', payload: { tab_id: tabId } }),
+        isGenerating: (frame) => chatGptControlCount(frame, 'STOP') > 0,
+        observeLocalTarget: this.#workerObserveLocalTarget,
+      });
+      this.#workerObservationSignals = structuredClone(signals);
+      this.#workerObservationLastAt = new Date().toISOString();
+      this.#workerObservationLastError = null;
+    } catch (error) {
+      // Liveness telemetry is deliberately fail-soft and has no scheduling authority.
+      // Lease admission remains independently fail-closed on exact ACTIVE transport proof.
+      this.#workerObservationSignals = [];
+      this.#workerObservationLastAt = new Date().toISOString();
+      this.#workerObservationLastError = clipError(error);
+    }
+  }
+
+  #workerObserverProjection() {
+    if (!this.#workerObserver) return null;
+    return buildWorkerObserverHeartbeatProjection({
+      observerSnapshot: this.#workerObserver.snapshot(),
+      signals: this.#workerObservationSignals,
+      observedAt: this.#workerObservationLastAt,
+      lastError: this.#workerObservationLastError,
+    });
+  }
+
   async #bootstrapPulse(startedAt) {
     if (this.#bootstrapInFlight) return;
     const supervisor = super.snapshot();
@@ -315,6 +402,9 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
   snapshot() {
     return {
       ...super.snapshot(),
+      worker_observer: this.#workerObserverProjection(),
+      worker_observer_source: this.#workerObserver ? 'NATIVE_SUPERVISOR_HEARTBEAT' : null,
+      worker_observer_second_polling_loop: false,
       devos_task_cycle: this.#devosTaskCycle?.snapshot() || null,
       devos_last_error: this.#lastDevosError,
       devos_scheduler_source: 'NATIVE_SUPERVISOR_HEARTBEAT',
@@ -339,6 +429,9 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
   }
 
   async cycle() {
+    // Read-only worker observation is an additive stage of this existing scheduler
+    // heartbeat. It never starts a timer, issues a lease, or mutates fleet lifecycle.
+    await this.#observeWorkers();
     await super.cycle();
     const supervisor = super.snapshot();
     const identity = supervisor?.identity || {};

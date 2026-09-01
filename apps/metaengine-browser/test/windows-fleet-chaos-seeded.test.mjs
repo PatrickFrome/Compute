@@ -201,12 +201,40 @@ test('cross-layer placement and DevOS exact binding fail closed independently', 
     base_sha: 'a'.repeat(40), lease_generation: 7, tab_id: 'tab_001', target_id: 'webcontents:101',
     agent_generation_epoch: 3, automatic_retry_allowed: false, task_spec: { objective: 'test' },
   };
-  const fleet = { agents: [{
-    agent_id: lease.agent_id, role: lease.role, lifecycle_state: 'ACTIVE', tab_id: lease.tab_id,
-    target_id: lease.target_id, generation_epoch: lease.agent_generation_epoch,
-  }] };
+  const fleet = {
+    schema: 'metaengine.browser.fleet-snapshot.v1',
+    readiness_contract: 'TRANSPORT_PROOF_REQUIRED',
+    agents: [{
+      agent_id: lease.agent_id,
+      role: lease.role,
+      lifecycle_state: 'ACTIVE',
+      tab_id: lease.tab_id,
+      target_id: lease.target_id,
+      generation_epoch: lease.agent_generation_epoch,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+      transport_proof: {
+        schema: 'metaengine.browser.fleet-transport-proof.v1',
+        tab_id: lease.tab_id,
+        target_id: lease.target_id,
+        generation_epoch: lease.agent_generation_epoch,
+        conversation_url_sha256: 'b'.repeat(64),
+        proven_at: '2026-08-31T19:00:00.000Z',
+        authority_effect: false,
+      },
+    }],
+  };
   assert.equal(assertLiveLeaseBinding(lease, fleet).target_id, lease.target_id);
-  assert.throws(() => assertLiveLeaseBinding(lease, { agents: [{ ...fleet.agents[0], target_id:'webcontents:102', generation_epoch:4 }] }), /devos_target_binding_mismatch|devos_generation_binding_mismatch/);
+
+  const driftedFleet = structuredClone(fleet);
+  driftedFleet.agents[0].target_id = 'webcontents:102';
+  driftedFleet.agents[0].generation_epoch = 4;
+  driftedFleet.agents[0].transport_proof.target_id = 'webcontents:102';
+  driftedFleet.agents[0].transport_proof.generation_epoch = 4;
+  assert.throws(
+    () => assertLiveLeaseBinding(lease, driftedFleet),
+    /devos_target_binding_mismatch|devos_generation_binding_mismatch/,
+  );
 
   pool.registerNode(node(0, 2));
   const old = pool.getLease(placement.lease_id);
