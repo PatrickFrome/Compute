@@ -25,6 +25,11 @@ on:
       - 'apps/metaengine-browser/src/devos-native-task-cycle.mjs'
       - 'apps/metaengine-browser/src/devos-native-task-cycle-core.mjs'
       - 'apps/metaengine-browser/src/devos-effect-delivery-journal.mjs'
+      - 'apps/metaengine-browser/src/browser-parent-progress-lease.mjs'
+      - 'apps/metaengine-browser/src/browser-sentinel-liveness.cjs'
+      - 'apps/metaengine-browser/src/browser-sentinel-worker.cjs'
+      - 'apps/metaengine-browser/src/browser-sentinel-action-journal.cjs'
+      - 'apps/metaengine-browser/src/durable-json-file.cjs'
       - 'apps/metaengine-browser/src/self-update-runtime.mjs'
       - 'apps/metaengine-browser/src/self-update-runtime-v8.mjs'
       - 'apps/metaengine-browser/src/self-update-handoff.mjs'
@@ -52,6 +57,8 @@ on:
       - 'apps/metaengine-browser/test/devos-effect-delivery-restart.test.mjs'
       - 'apps/metaengine-browser/test/devos-effect-delivery-durability.test.mjs'
       - 'apps/metaengine-browser/test/devos-ambiguity-client-fence.test.mjs'
+      - 'apps/metaengine-browser/test/browser-sentinel-liveness.test.mjs'
+      - 'apps/metaengine-browser/test/browser-sentinel-action-journal.test.mjs'
       - 'apps/metaengine-browser/test/self-update-transaction-journal.test.mjs'
       - 'apps/metaengine-browser/test/self-update-transaction-wiring.test.mjs'
       - 'apps/metaengine-browser/test/self-update-install-effect-barrier.test.mjs'
@@ -126,6 +133,10 @@ jobs:
           node --check apps/metaengine-browser/src/devos-native-task-cycle.mjs
           node --check apps/metaengine-browser/src/devos-native-task-cycle-core.mjs
           node --check apps/metaengine-browser/src/devos-effect-delivery-journal.mjs
+          node --check apps/metaengine-browser/src/browser-parent-progress-lease.mjs
+          node --check apps/metaengine-browser/src/browser-sentinel-worker.cjs
+          node --check apps/metaengine-browser/src/browser-sentinel-action-journal.cjs
+          node --check apps/metaengine-browser/src/durable-json-file.cjs
           node --check apps/metaengine-browser/src/self-update-runtime.mjs
           node --check apps/metaengine-browser/src/self-update-runtime-v8.mjs
           node --check apps/metaengine-browser/src/self-update-handoff.mjs
@@ -144,5 +155,7 @@ jobs:
         run: node --test apps/metaengine-browser/test/bounded-worker-observer-v2.test.mjs apps/metaengine-browser/test/native-supervisor-bounded-worker-observer-wiring.test.mjs
       - name: Physical task-cycle transport and crash-recovery seam
         run: node --test apps/metaengine-browser/test/devos-native-task-cycle.test.mjs apps/metaengine-browser/test/devos-fleet-transport-proof-runtime.test.mjs apps/metaengine-browser/test/devos-effect-delivery-journal.test.mjs apps/metaengine-browser/test/devos-effect-delivery-restart.test.mjs apps/metaengine-browser/test/devos-effect-delivery-durability.test.mjs apps/metaengine-browser/test/devos-ambiguity-client-fence.test.mjs
+      - name: Parent sentinel write-ahead replay safety
+        run: node --test apps/metaengine-browser/test/browser-sentinel-liveness.test.mjs apps/metaengine-browser/test/browser-sentinel-action-journal.test.mjs
       - name: Self-update write-ahead restart barrier
         run: node --test apps/metaengine-browser/test/self-update-transaction-journal.test.mjs apps/metaengine-browser/test/self-update-transaction-wiring.test.mjs apps/metaengine-browser/test/self-update-install-effect-barrier.test.mjs apps/metaengine-browser/test/self-update-transaction-fail-closed.test.mjs apps/metaengine-browser/test/self-update-installer-handoff-order.test.mjs
