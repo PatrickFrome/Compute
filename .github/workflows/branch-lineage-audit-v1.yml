@@ -80,7 +80,27 @@ jobs:
           }
           const risky = report.branches.filter((row) => row.classification === 'DIVERGED_AUTHORITY').length;
           const contained = report.branches.filter((row) => row.classification === 'CONTAINED').length;
-          console.log(JSON.stringify({ branch_count: report.branch_count, authority_branch_count: report.authority_branch_count, diverged_authority: risky, contained }));
+          console.log('LINEAGE_SUMMARY ' + JSON.stringify({
+            branch_count: report.branch_count,
+            authority_branch_count: report.authority_branch_count,
+            diverged_authority: risky,
+            contained,
+            lineage_tip_count: report.lineage_tip_count,
+            authority_lineage_tip_count: report.authority_lineage_tip_count,
+          }));
+          for (const row of report.top_authority_lineage_tips || []) {
+            console.log('LINEAGE_TIP ' + JSON.stringify({
+              branch: row.branch,
+              family: row.family,
+              classification: row.classification,
+              unique_commits: row.unique_commits,
+              base_only_commits: row.base_only_commits,
+              authority_categories: row.authority_categories,
+            }));
+          }
+          for (const family of (report.family_summary || []).slice(0, 20)) {
+            console.log('LINEAGE_FAMILY ' + JSON.stringify(family));
+          }
           NODE
 
       - name: Prove audit did not mutate repository
