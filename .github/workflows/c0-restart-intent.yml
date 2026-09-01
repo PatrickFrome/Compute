@@ -1,0 +1,41 @@
+name: C0 Restart Intent
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/20260901105000_compute_unified_restart_intent_v1.sql'
+      - 'apps/metaengine-browser/test/c0-restart-intent-smoke.sql'
+      - '.github/workflows/c0-restart-intent.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  postgres-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Restart intent falsification
+        run: psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -f apps/metaengine-browser/test/c0-restart-intent-smoke.sql
