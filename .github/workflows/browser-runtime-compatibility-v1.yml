@@ -9,6 +9,7 @@ on:
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/runtime-capabilities.mjs'
       - 'apps/metaengine-browser/test/devos-runtime-compatibility.test.mjs'
       - 'supabase/migrations/20260901210000_devos_runtime_compatibility_and_recovery_debt_v1.sql'
+      - 'coordination/browser/BROWSER_061DEV21_CAPSULE_RUNTIME_AUDIT_V1.md'
       - '.github/workflows/browser-runtime-compatibility-v1.yml'
   pull_request:
     paths:
@@ -16,6 +17,7 @@ on:
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/runtime-capabilities.mjs'
       - 'apps/metaengine-browser/test/devos-runtime-compatibility.test.mjs'
       - 'supabase/migrations/20260901210000_devos_runtime_compatibility_and_recovery_debt_v1.sql'
+      - 'coordination/browser/BROWSER_061DEV21_CAPSULE_RUNTIME_AUDIT_V1.md'
       - '.github/workflows/browser-runtime-compatibility-v1.yml'
 
 permissions:
