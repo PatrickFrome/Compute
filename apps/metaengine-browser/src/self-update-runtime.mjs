@@ -11,6 +11,10 @@ import {
   validateCiTestFeedUrl,
 } from './self-update-runtime-v8.mjs';
 import {
+  markSelfUpdateInstallEffectAttempted,
+  SELF_UPDATE_INSTALL_EFFECT_BARRIER,
+} from './self-update-transaction-journal.mjs';
+import {
   DEFAULT_DEV_UPDATE_HINT_INTERVAL_MS,
   DEFAULT_DEV_UPDATE_HINT_URL,
   probeDevUpdateHint,
@@ -53,6 +57,13 @@ function compatInjectedUpdater(updater) {
 
 function clipHintError(error) { return String(error?.message || error || 'unknown_error').slice(0, 160); }
 
+async function durableInstallEffectBarrier(receipt) {
+  const targetVersion = String(receipt?.version || '');
+  if (!targetVersion) throw new Error('self_update_install_effect_target_invalid');
+  const { app } = await import('electron');
+  return markSelfUpdateInstallEffectAttempted(app, { targetVersion });
+}
+
 export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
   #hintIntervalMs;
   #hintRetryMs;
@@ -60,6 +71,7 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
   #hintFetch;
   #clock;
   #networkDeadlineMs;
+  #installEffectBarrierMode;
   #lastHintCheck = 0;
   #lastHintCheckAt = null;
   #lastHintVersion = null;
@@ -74,11 +86,38 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
       deadlineMs: networkDeadlineMs,
       label: 'self_update_discovery',
     });
+    const injectedUpdater = options?.updater != null;
+    const originalBeforeInstallerLaunch = options?.beforeInstallerLaunch;
+    if (originalBeforeInstallerLaunch != null && typeof originalBeforeInstallerLaunch !== 'function') {
+      throw new Error('self_update_before_installer_launch_invalid');
+    }
+    const explicitInstallEffectBarrier = options?.installEffectBarrier;
+    if (explicitInstallEffectBarrier != null && typeof explicitInstallEffectBarrier !== 'function') {
+      throw new Error('self_update_install_effect_barrier_invalid');
+    }
+    // Production never injects electron-updater. Preserve the old dependency-injected
+    // test surface without silently weakening production: injected updaters get a
+    // zero-effect compatibility barrier unless a test explicitly supplies one.
+    const installEffectBarrier = explicitInstallEffectBarrier
+      || (injectedUpdater
+        ? async () => ({ state: 'INJECTED_UPDATER_TEST_BYPASS', authority_effect: false })
+        : durableInstallEffectBarrier);
+    const installEffectBarrierMode = explicitInstallEffectBarrier
+      ? 'INJECTED_BARRIER'
+      : (injectedUpdater ? 'INJECTED_UPDATER_TEST_BYPASS' : SELF_UPDATE_INSTALL_EFFECT_BARRIER);
     const withDevCadence = {
       ...options,
       fetchImpl: boundedFetch,
       intervalMs: options?.intervalMs ?? DEFAULT_CONTINUOUS_DEV_UPDATE_INTERVAL_MS,
       restartGraceMs: options?.restartGraceMs ?? DEFAULT_CONTINUOUS_DEV_RESTART_GRACE_MS,
+      beforeInstallerLaunch: async (receipt) => {
+        // This is the write-ahead boundary. A failure here leaves the supervisor and
+        // singleton intact because the native final-launch hook has not run yet. Once
+        // it succeeds, any later crash/handoff failure is conservatively potentially
+        // effectful and may only converge through durable startup/readback evidence.
+        await installEffectBarrier(structuredClone(receipt));
+        await originalBeforeInstallerLaunch?.(structuredClone(receipt));
+      },
     };
     const injectedLegacyTest = options?.updater
       && options?.currentVersion == null
@@ -100,6 +139,7 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
     this.#hintFetch = boundedFetch;
     this.#networkDeadlineMs = networkDeadlineMs;
     this.#clock = options?.clock ?? (() => Date.now());
+    this.#installEffectBarrierMode = installEffectBarrierMode;
     if (typeof this.#hintProbe !== 'function') throw new Error('self_update_hint_probe_invalid');
   }
 
@@ -116,6 +156,9 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
       hint_last_triggered_at: this.#lastHintTriggeredAt > 0 ? new Date(this.#lastHintTriggeredAt).toISOString() : null,
       network_deadline_ms: this.#networkDeadlineMs,
       network_discovery_bounded: true,
+      install_effect_barrier_mode: this.#installEffectBarrierMode,
+      install_effect_barrier_before_final_handoff: true,
+      automatic_effect_retry: false,
       hint_authority_effect: false,
     };
   }
