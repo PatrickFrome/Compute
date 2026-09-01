@@ -7,11 +7,13 @@ on:
     paths:
       - 'coordination/devos/branch-lineage-auditor.mjs'
       - 'tests/branch_lineage_auditor.test.mjs'
+      - 'tests/branch_lineage_auditor_base_only.test.mjs'
       - '.github/workflows/branch-lineage-audit-v1.yml'
   pull_request:
     paths:
       - 'coordination/devos/branch-lineage-auditor.mjs'
       - 'tests/branch_lineage_auditor.test.mjs'
+      - 'tests/branch_lineage_auditor_base_only.test.mjs'
       - '.github/workflows/branch-lineage-audit-v1.yml'
 
 permissions:
@@ -47,7 +49,7 @@ jobs:
         run: |
           set -euo pipefail
           node --check coordination/devos/branch-lineage-auditor.mjs
-          node --test tests/branch_lineage_auditor.test.mjs
+          node --test tests/branch_lineage_auditor.test.mjs tests/branch_lineage_auditor_base_only.test.mjs
 
       - name: Fetch all public remote heads read-only
         run: |
@@ -83,6 +85,8 @@ jobs:
           console.log('LINEAGE_SUMMARY ' + JSON.stringify({
             branch_count: report.branch_count,
             authority_branch_count: report.authority_branch_count,
+            historical_authority_branch_count: report.historical_authority_branch_count,
+            semantic_converged_branch_count: report.semantic_converged_branch_count,
             diverged_authority: risky,
             contained,
             lineage_tip_count: report.lineage_tip_count,
@@ -95,6 +99,7 @@ jobs:
               classification: row.classification,
               unique_commits: row.unique_commits,
               base_only_commits: row.base_only_commits,
+              tip_delta_file_count: row.tip_delta_file_count,
               authority_categories: row.authority_categories,
             }));
           }
