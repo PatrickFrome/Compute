@@ -24,9 +24,21 @@ test('claim barrier and promotion acquire serialize on the same workspace/client
   const lockPrefix = /devos-transport-promotion:/i;
   assert.match(promotionSql, lockPrefix, 'promotion acquire lock namespace missing');
   expectSql(lockPrefix, 'claim barrier must use the same promotion lock namespace');
-  expectSql(/select\s+s\.client_id\s*,\s*s\.state\s*,\s*s\.last_seen_at\s+into\s+v_client_id/i,
-    'client identity must come from the authoritative supervisor row');
+  expectSql(/select\s+s\.client_id\s+into\s+v_client_id/i,
+    'client lock routing must come from a supervisor row rather than caller input');
   expectSql(/hashtextextended\('devos-transport-promotion:'\|\|new\.workspace_id::text\|\|':'\|\|v_client_id\s*,\s*0\)/i);
+});
+
+test('fleet authority is re-read after the shared promotion lock rather than trusted from pre-lock state', () => {
+  const lockAt = sql.indexOf('perform pg_advisory_xact_lock');
+  const stateReadAt = sql.indexOf('select s.state, s.last_seen_at');
+  assert.ok(lockAt >= 0, 'shared promotion lock missing');
+  assert.ok(stateReadAt > lockAt, 'authoritative fleet snapshot must be read after mutual exclusion');
+  expectSql(/s\.client_id\s*=\s*v_client_id/i);
+  expectSql(/v_now\s*:=\s*clock_timestamp\(\)/i, 'TTL clock must be sampled after waiting for the lock');
+  expectSql(/devos_transport_supervisor_snapshot_missing_after_lock/i);
+  assert.doesNotMatch(sql.slice(0, lockAt), /select\s+s\.state\s*,\s*s\.last_seen_at/i,
+    'pre-lock fleet state must have zero claim authority');
 });
 
 test('expired Browser actuation authority is reconciled before claim admission', () => {
