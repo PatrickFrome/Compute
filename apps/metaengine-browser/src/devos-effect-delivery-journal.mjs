@@ -10,13 +10,15 @@ const AGENT_RE = /^agent_[a-z0-9-]{8,64}$/;
 const TAB_RE = /^tab_[0-9a-f-]{36}$/i;
 const TARGET_RE = /^webcontents:[1-9][0-9]*$/;
 const HASH_RE = /^[a-f0-9]{64}$/;
-const STATES = new Set(['EXECUTION_STARTED', 'DELIVERY_PENDING', 'CONFIRMED', 'AMBIGUOUS']);
-const NON_TERMINAL = new Set(['EXECUTION_STARTED', 'DELIVERY_PENDING', 'AMBIGUOUS']);
+const STATES = new Set(['EXECUTION_STARTED', 'EFFECT_ATTEMPTED', 'DELIVERY_PENDING', 'CONFIRMED', 'AMBIGUOUS', 'EFFECT_ABSENT']);
+const NON_TERMINAL = new Set(['EXECUTION_STARTED', 'EFFECT_ATTEMPTED', 'DELIVERY_PENDING', 'AMBIGUOUS']);
 const TRANSITIONS = new Map([
-  ['EXECUTION_STARTED', new Set(['DELIVERY_PENDING', 'CONFIRMED', 'AMBIGUOUS'])],
+  ['EXECUTION_STARTED', new Set(['EFFECT_ATTEMPTED', 'CONFIRMED', 'AMBIGUOUS', 'EFFECT_ABSENT'])],
+  ['EFFECT_ATTEMPTED', new Set(['DELIVERY_PENDING', 'CONFIRMED', 'AMBIGUOUS'])],
   ['DELIVERY_PENDING', new Set(['CONFIRMED', 'AMBIGUOUS'])],
   ['CONFIRMED', new Set([])],
-  ['AMBIGUOUS', new Set(['CONFIRMED'])],
+  ['AMBIGUOUS', new Set(['CONFIRMED', 'EFFECT_ABSENT'])],
+  ['EFFECT_ABSENT', new Set([])],
 ]);
 
 function positiveInt(value, name) {
@@ -176,6 +178,16 @@ export class DevOsEffectDeliveryJournal {
     return structuredClone(this.#entries.find((entry) => entry.effect_key === key) || null);
   }
 
+  recoveryCandidates(limit = 1) {
+    this.#assertInitialized();
+    const boundedLimit = Math.max(1, Math.min(16, Number(limit) || 1));
+    return this.#entries
+      .filter((entry) => NON_TERMINAL.has(entry.state))
+      .sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at) || a.effect_key.localeCompare(b.effect_key))
+      .slice(0, boundedLimit)
+      .map((entry) => structuredClone(entry));
+  }
+
   async #mutate(binding, nextState, evidence = {}) {
     const b = normalizeBinding(binding);
     const key = exactKey(b);
@@ -228,7 +240,9 @@ export class DevOsEffectDeliveryJournal {
   }
 
   beginExecution(binding, evidence = {}) { return this.#mutate(binding, 'EXECUTION_STARTED', evidence); }
+  markEffectAttempted(binding, evidence = {}) { return this.#mutate(binding, 'EFFECT_ATTEMPTED', { physical_effect_attempted: true, effect_barrier_crossed: true, ...safeEvidence(evidence) }); }
   markDeliveryPending(binding, evidence = {}) { return this.#mutate(binding, 'DELIVERY_PENDING', evidence); }
   markConfirmed(binding, evidence = {}) { return this.#mutate(binding, 'CONFIRMED', evidence); }
   markAmbiguous(binding, evidence = {}) { return this.#mutate(binding, 'AMBIGUOUS', evidence); }
+  markEffectAbsent(binding, evidence = {}) { return this.#mutate(binding, 'EFFECT_ABSENT', { physical_effect_attempted: false, effect_barrier_crossed: false, ...safeEvidence(evidence) }); }
 }
