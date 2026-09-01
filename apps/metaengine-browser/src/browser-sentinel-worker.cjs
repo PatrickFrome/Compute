@@ -3,6 +3,8 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { durableWriteJson } = require('./durable-json-file.cjs');
+const { BrowserSentinelActionJournal } = require('./browser-sentinel-action-journal.cjs');
 const {
   DEFAULT_PARENT_TERMINATION_CONFIRM_MS,
   parentProgressPath,
@@ -27,29 +29,14 @@ async function readJson(target) {
 async function readState() { return readJson(STATE_PATH); }
 async function readParentProgress() { return readJson(PARENT_PROGRESS_PATH); }
 
-async function atomicWrite(target, value) {
-  const temp = `${target}.tmp`;
-  await fs.mkdir(path.dirname(target), { recursive: true });
-  await fs.writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-  await fs.rename(temp, target);
-}
-
-async function writeState(value) {
-  const next = { ...value, updated_at: new Date().toISOString(), authority_effect: false };
-  await atomicWrite(STATE_PATH, next);
-}
-
-async function writeStateIfBound(value) {
-  const current = await readState().catch(() => null);
-  if (!current || current.token !== TOKEN || Number(current.parent_pid) !== PARENT_PID) return false;
-  await writeState(value);
-  return true;
-}
-
+// Heartbeat is intentionally observational rather than an authority receipt. It uses
+// atomic replacement but does not force a disk flush every two seconds.
 async function writeWorkerHeartbeat() {
   const current = await readState().catch(() => null);
   if (!current || current.token !== TOKEN || Number(current.parent_pid) !== PARENT_PID) return false;
-  await atomicWrite(WORKER_HEARTBEAT_PATH, {
+  const temp = `${WORKER_HEARTBEAT_PATH}.${process.pid}.tmp`;
+  await fs.mkdir(path.dirname(WORKER_HEARTBEAT_PATH), { recursive: true });
+  await fs.writeFile(temp, `${JSON.stringify({
     schema: 'metaengine.browser-sentinel.worker-heartbeat.v1',
     token: TOKEN,
     parent_pid: PARENT_PID,
@@ -57,7 +44,8 @@ async function writeWorkerHeartbeat() {
     lifecycle: 'READY',
     heartbeat_at: new Date().toISOString(),
     authority_effect: false,
-  });
+  }, null, 2)}\n`, { mode: 0o600 });
+  await fs.rename(temp, WORKER_HEARTBEAT_PATH);
   return true;
 }
 
@@ -71,9 +59,10 @@ async function writeRelaunchReceipt(state, outcome) {
     relaunch_pid: Number.isSafeInteger(Number(outcome?.pid)) && Number(outcome.pid) > 0 ? Number(outcome.pid) : null,
     relaunch_result: String(outcome?.result || '').slice(0, 240),
     recorded_at: new Date().toISOString(),
+    automatic_retry_allowed: false,
     authority_effect: false,
   };
-  await atomicWrite(RELAUNCH_RECEIPT_PATH, receipt);
+  await durableWriteJson(RELAUNCH_RECEIPT_PATH, receipt, { sequence: Date.now() });
   return receipt;
 }
 
@@ -101,33 +90,18 @@ async function awaitExpectedSuccessor() {
   return false;
 }
 
-async function terminateStalledParentOnce(state, decision) {
-  if (state.parent_liveness_termination_attempted === true) return false;
-  const intent = {
-    ...state,
-    lifecycle: 'PARENT_LIVENESS_TERMINATION_INTENT',
-    parent_liveness_termination_attempted: true,
-    parent_liveness_termination_intent_at: new Date().toISOString(),
-    parent_liveness_reason: String(decision?.state || 'PROGRESS_STALE'),
-    parent_liveness_progress_at: decision?.progress_at || null,
-    parent_liveness_result: null,
-    automatic_retry_allowed: false,
-  };
-  if (!(await writeStateIfBound(intent))) return false;
+async function terminateStalledParentOnce(state, decision, journal) {
+  if (journal.terminationAttempted()) return false;
+  await journal.beginTermination(state, decision);
 
   try {
     process.kill(PARENT_PID, 'SIGTERM');
   } catch (error) {
     if (!parentAlive()) {
-      await writeStateIfBound({ ...intent, lifecycle: 'PARENT_TERMINATION_CONFIRMED', parent_liveness_result: 'parent_absent_after_signal_error' });
+      await journal.markTermination(state, 'PARENT_TERMINATION_CONFIRMED', 'parent_absent_after_signal_error');
       return true;
     }
-    await writeStateIfBound({
-      ...intent,
-      lifecycle: 'PARENT_TERMINATION_AMBIGUOUS',
-      parent_liveness_result: String(error && error.message || error).slice(0, 240),
-      automatic_retry_allowed: false,
-    });
+    await journal.markTermination(state, 'PARENT_TERMINATION_AMBIGUOUS', String(error && error.message || error).slice(0, 240));
     return false;
   }
 
@@ -135,30 +109,17 @@ async function terminateStalledParentOnce(state, decision) {
   while (Date.now() < deadline) {
     await sleep(250);
     if (!parentAlive()) {
-      await writeStateIfBound({ ...intent, lifecycle: 'PARENT_TERMINATION_CONFIRMED', parent_liveness_result: 'exact_parent_pid_absent' });
+      await journal.markTermination(state, 'PARENT_TERMINATION_CONFIRMED', 'exact_parent_pid_absent');
       return true;
     }
   }
-  await writeStateIfBound({
-    ...intent,
-    lifecycle: 'PARENT_TERMINATION_AMBIGUOUS',
-    parent_liveness_result: 'exact_parent_pid_still_alive_after_signal',
-    automatic_retry_allowed: false,
-  });
+  await journal.markTermination(state, 'PARENT_TERMINATION_AMBIGUOUS', 'exact_parent_pid_still_alive_after_signal');
   return false;
 }
 
-async function relaunchOnce(state) {
-  if (state.relaunch_attempted === true) return;
-  const intent = {
-    ...state,
-    lifecycle: 'RELAUNCH_INTENT',
-    relaunch_attempted: true,
-    relaunch_intent_at: new Date().toISOString(),
-    relaunch_pid: null,
-    relaunch_result: null,
-  };
-  await writeStateIfBound(intent);
+async function relaunchOnce(state, journal) {
+  if (journal.relaunchAttempted()) return;
+  await journal.beginRelaunch(state, 'EXACT_OLD_PARENT_ABSENT');
 
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
@@ -171,8 +132,8 @@ async function relaunchOnce(state) {
     child = spawn(state.executable, [`--metaengine-sentinel-recovery=${TOKEN}`], { detached: true, stdio: 'ignore', shell: false, windowsHide: false, env });
   } catch (error) {
     const outcome = { lifecycle: 'RELAUNCH_FAILED', pid: null, result: String(error && error.message || error).slice(0, 240) };
+    await journal.markRelaunch(state, outcome);
     await writeRelaunchReceipt(state, outcome);
-    await writeStateIfBound({ ...intent, lifecycle: outcome.lifecycle, relaunch_result: outcome.result });
     return;
   }
 
@@ -190,14 +151,18 @@ async function relaunchOnce(state) {
   });
 
   if (outcome.lifecycle === 'RELAUNCH_DISPATCHED') child.unref && child.unref();
+  // Commit outcome to the write-ahead journal before the secondary receipt. If this
+  // write is lost/ambiguous, RELAUNCH_INTENT remains durable and blocks any replay.
+  await journal.markRelaunch(state, outcome);
   await writeRelaunchReceipt(state, outcome);
-  await writeStateIfBound({ ...intent, lifecycle: outcome.lifecycle, relaunch_pid: outcome.pid, relaunch_result: outcome.result });
 }
 
 async function main() {
   if (!STATE_PATH || !TOKEN || !Number.isSafeInteger(PARENT_PID) || PARENT_PID <= 0) process.exit(2);
   const initial = await readState();
   if (!validBinding(initial)) process.exit(3);
+  const journal = new BrowserSentinelActionJournal({ statePath: STATE_PATH });
+  await journal.init(initial);
 
   if (!(await writeWorkerHeartbeat())) process.exit(4);
   while (true) {
@@ -209,9 +174,12 @@ async function main() {
     if (!parentAlive()) break;
 
     const progress = await readParentProgress().catch(() => null);
-    const decision = evaluateParentProgress({ state, progress });
+    const decision = evaluateParentProgress({
+      state: { ...state, parent_liveness_termination_attempted: journal.terminationAttempted() },
+      progress,
+    });
     if (decision.terminate_parent === true) {
-      const terminated = await terminateStalledParentOnce(state, decision);
+      const terminated = await terminateStalledParentOnce(state, decision, journal);
       if (terminated) break;
     }
   }
@@ -227,15 +195,20 @@ async function main() {
   }
 
   // Relaunch is authorized only after the exact old parent is positively absent.
-  // A live or ambiguously terminated parent can never cause a second Browser instance.
+  // The write-ahead RELAUNCH_INTENT is durable before spawn and makes crash recovery
+  // fail closed: a second worker can observe the intent but can never replay spawn.
   if (parentAlive()) return;
-  await relaunchOnce(state);
+  await relaunchOnce(state, journal);
 }
 
 main().then(() => process.exit(0)).catch(async (error) => {
   try {
     const state = await readState();
-    if (validBinding(state)) await writeStateIfBound({ ...state, lifecycle: 'SENTINEL_ERROR', relaunch_result: String(error && error.message || error).slice(0, 240) });
+    if (validBinding(state)) {
+      const journal = new BrowserSentinelActionJournal({ statePath: STATE_PATH });
+      await journal.init(state);
+      await journal.failClosed(state, String(error && error.message || error).slice(0, 240));
+    }
   } catch {}
   process.exit(1);
 });
