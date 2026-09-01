@@ -27,6 +27,7 @@ on:
       - 'apps/metaengine-browser/src/devos-effect-delivery-journal.mjs'
       - 'apps/metaengine-browser/src/self-update-runtime.mjs'
       - 'apps/metaengine-browser/src/self-update-runtime-v8.mjs'
+      - 'apps/metaengine-browser/src/self-update-handoff.mjs'
       - 'apps/metaengine-browser/src/self-update-transaction-journal.mjs'
       - 'apps/metaengine-browser/test/meta-orchestrator-core.test.mjs'
       - 'apps/metaengine-browser/test/meta-orchestrator-continuous-reconcile.test.mjs'
@@ -54,6 +55,7 @@ on:
       - 'apps/metaengine-browser/test/self-update-transaction-journal.test.mjs'
       - 'apps/metaengine-browser/test/self-update-transaction-wiring.test.mjs'
       - 'apps/metaengine-browser/test/self-update-install-effect-barrier.test.mjs'
+      - 'apps/metaengine-browser/test/self-update-transaction-fail-closed.test.mjs'
       - 'apps/metaengine-browser/test/self-update-installer-handoff-order.test.mjs'
       - 'supabase/migrations/20260831152000_a2_workspace_binding_registry_v1.sql'
       - 'supabase/migrations/20260831184500_devos_fleet_transport_admission_v1.sql'
@@ -126,6 +128,7 @@ jobs:
           node --check apps/metaengine-browser/src/devos-effect-delivery-journal.mjs
           node --check apps/metaengine-browser/src/self-update-runtime.mjs
           node --check apps/metaengine-browser/src/self-update-runtime-v8.mjs
+          node --check apps/metaengine-browser/src/self-update-handoff.mjs
           node --check apps/metaengine-browser/src/self-update-transaction-journal.mjs
       - name: Meta-Orchestrator fail-closed contract
         run: node --test apps/metaengine-browser/test/meta-orchestrator-core.test.mjs apps/metaengine-browser/test/meta-orchestrator-authoritative-snapshot.test.mjs apps/metaengine-browser/test/meta-orchestrator-plan-state.test.mjs apps/metaengine-browser/test/meta-orchestrator-privileged-adapter.test.mjs apps/metaengine-browser/test/meta-orchestrator-native-provider.test.mjs apps/metaengine-browser/test/meta-orchestrator-native-provider-client.test.mjs apps/metaengine-browser/test/meta-orchestrator-cycle-stage.test.mjs
@@ -142,4 +145,4 @@ jobs:
       - name: Physical task-cycle transport and crash-recovery seam
         run: node --test apps/metaengine-browser/test/devos-native-task-cycle.test.mjs apps/metaengine-browser/test/devos-fleet-transport-proof-runtime.test.mjs apps/metaengine-browser/test/devos-effect-delivery-journal.test.mjs apps/metaengine-browser/test/devos-effect-delivery-restart.test.mjs apps/metaengine-browser/test/devos-effect-delivery-durability.test.mjs apps/metaengine-browser/test/devos-ambiguity-client-fence.test.mjs
       - name: Self-update write-ahead restart barrier
-        run: node --test apps/metaengine-browser/test/self-update-transaction-journal.test.mjs apps/metaengine-browser/test/self-update-transaction-wiring.test.mjs apps/metaengine-browser/test/self-update-install-effect-barrier.test.mjs apps/metaengine-browser/test/self-update-installer-handoff-order.test.mjs
+        run: node --test apps/metaengine-browser/test/self-update-transaction-journal.test.mjs apps/metaengine-browser/test/self-update-transaction-wiring.test.mjs apps/metaengine-browser/test/self-update-install-effect-barrier.test.mjs apps/metaengine-browser/test/self-update-transaction-fail-closed.test.mjs apps/metaengine-browser/test/self-update-installer-handoff-order.test.mjs
