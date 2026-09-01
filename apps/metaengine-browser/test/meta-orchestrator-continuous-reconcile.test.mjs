@@ -53,9 +53,44 @@ test('normal independent nodes still fill available frontier slots',()=>{
   assert.deepEqual(r.actions.map((row)=>row.point_id),['meta.a','meta.b']);
 });
 
+test('ready saturation blocks new frontier while preserving physical slots',()=>{
+  const p=plan([node('meta.a',{priority:90}),node('meta.b',{priority:80})]);
+  const r=run(p,{capacity:{available_slots:4,new_frontier_slots:0,pressure_state:'READY_SATURATED'}});
+  assert.equal(r.state,'CAPACITY_WAIT');
+  assert.equal(r.reason,'NEW_FRONTIER_PRESSURE_BUDGET_REQUIRED');
+  assert.equal(r.actions[0].available_slots,4);
+  assert.equal(r.actions[0].new_frontier_slots,0);
+  assert.equal(r.actions[0].group_kind,'NEW_FRONTIER');
+});
+
+test('recovery debt can restrict growth to one normal point',()=>{
+  const p=plan([node('meta.a',{priority:90}),node('meta.b',{priority:80})]);
+  const r=run(p,{capacity:{available_slots:4,new_frontier_slots:1,pressure_state:'RECOVERY_DEBT_HIGH'}});
+  assert.deepEqual(r.actions.map((row)=>row.point_id),['meta.a']);
+  assert.equal(r.scheduler_pressure.available_slots,4);
+  assert.equal(r.scheduler_pressure.new_frontier_slots,1);
+});
+
+test('new critical group waits when soft pressure budget cannot fit the full safety group',()=>{
+  const r=run(plan([node('meta.core',{risk:'CRITICAL'})]),{capacity:{available_slots:4,new_frontier_slots:1,pressure_state:'RECOVERY_DEBT_HIGH'}});
+  assert.equal(r.state,'CAPACITY_WAIT');
+  assert.equal(r.reason,'NEW_FRONTIER_PRESSURE_BUDGET_REQUIRED');
+  assert.equal(r.actions[0].required_slots,3);
+});
+
 test('legacy partial high-risk admission is repaired before new work',()=>{
   const p=plan([node('meta.risky',{risk:'HIGH',priority:50}),node('meta.new',{priority:100})]);
   const r=run(p,{tasks:[{point_id:'meta.risky',state:'RUNNING',lease_generation:1}],capacity:{available_slots:1}});
+  assert.equal(r.state,'PROPOSING');
+  assert.deepEqual(r.actions.map((row)=>row.point_id),['meta.risky.critic']);
+});
+
+test('ready saturation does not block mandatory safety repair',()=>{
+  const p=plan([node('meta.risky',{risk:'HIGH',priority:50}),node('meta.new',{priority:100})]);
+  const r=run(p,{
+    tasks:[{point_id:'meta.risky',state:'RUNNING',lease_generation:1}],
+    capacity:{available_slots:1,new_frontier_slots:0,pressure_state:'READY_SATURATED'},
+  });
   assert.equal(r.state,'PROPOSING');
   assert.deepEqual(r.actions.map((row)=>row.point_id),['meta.risky.critic']);
 });
@@ -111,6 +146,6 @@ test('failed plan node cannot silently remain observing',()=>{
 });
 
 test('continuous reconcile remains recursively zero-authority',()=>{
-  const r=run(plan([node('meta.core',{risk:'CRITICAL'})]),{capacity:{available_slots:3}});
+  const r=run(plan([node('meta.core',{risk:'CRITICAL'})]),{capacity:{available_slots:3,new_frontier_slots:3,pressure_state:'NORMAL'}});
   assert.equal(assertZeroAuthorityMetaOutput(r),true);
 });
