@@ -97,7 +97,7 @@ function dependenciesVerified(node, byPoint) {
   return (node.dependencies || []).every((dependency) => byPoint.get(String(dependency).toLowerCase())?.state === 'VERIFIED');
 }
 
-function safetyState(plan, tasks, proposedParents) {
+function safetyState(plan, tasks) {
   const missingGroups = [];
   const active = [];
   const ambiguous = [];
@@ -108,8 +108,7 @@ function safetyState(plan, tasks, proposedParents) {
     if (!roles.length) continue;
     const parentPoint = String(node.point_id).toLowerCase();
     const parentState = taskState(tasks, parentPoint);
-    const enforce = parentState !== 'UNSCHEDULED' || proposedParents.has(parentPoint);
-    if (!enforce) continue;
+    if (parentState === 'UNSCHEDULED') continue;
 
     const missing = [];
     for (const role of roles) {
@@ -241,8 +240,7 @@ export function reconcileContinuousMetaOrchestrator(args = {}) {
   if (base.state === 'BLOCKED') return base;
 
   const eligibleGroups = newFrontierGroups(plan, tasks, byPoint);
-  const proposedParents = new Set(eligibleGroups.map((group) => String(group.node.point_id).toLowerCase()));
-  const safety = safetyState(plan, tasks, proposedParents);
+  const safety = safetyState(plan, tasks);
 
   if (safety.ambiguous.length) {
     const result = zeroEnvelope({
