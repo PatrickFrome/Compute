@@ -7,6 +7,7 @@ const SHA40_RE = /^[a-f0-9]{40}$/;
 const HASH_RE = /^[a-f0-9]{64}$/;
 const AGENT_RE = /^agent_[a-z0-9-]{8,64}$/;
 const TERMINAL_STATES = new Set(['COMPLETED','FAILED','AMBIGUOUS']);
+const RECEIPT_CONFIRMED_STATES = new Set(['RUNNING','RESULT_READY','BLOCKED','COMPLETED','FAILED']);
 
 const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 const clip = (value, max = 500) => String(value ?? '').slice(0, max);
@@ -136,6 +137,22 @@ function bindingPayload(lease) {
   };
 }
 
+function journalBinding(lease, promptSha256) {
+  return {
+    ...bindingPayload(lease),
+    prompt_sha256: String(promptSha256 || '').toLowerCase(),
+  };
+}
+
+function proofFromJournal(entry) {
+  const promptSha = String(entry?.prompt_sha256 || '').toLowerCase();
+  const conversationSha = String(entry?.evidence?.conversation_url_sha256 || '').toLowerCase();
+  const effectState = String(entry?.evidence?.effect_state || '');
+  if (!HASH_RE.test(promptSha) || !HASH_RE.test(conversationSha)) return null;
+  if (!['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','PROVEN_CONVERSATION'].includes(effectState)) return null;
+  return { prompt_sha256: promptSha, conversation_url_sha256: conversationSha, effect_state: effectState };
+}
+
 async function responseJson(response, errorCode) {
   const body = await response?.json?.().catch(() => ({}));
   if (!response?.ok) throw new Error(`${errorCode}:${response?.status || 0}:${clip(body?.error || body?.reason || 'unknown', 160)}`);
@@ -146,19 +163,50 @@ export class DevOsNativeTaskCycle {
   #getState;
   #executeCommand;
   #signedRequest;
+  #effectJournal;
+  #journalInitPromise = null;
+  #journalInitialized = false;
   #attempted = new Set();
   #last = { state: 'IDLE', authority_effect: false };
 
-  constructor({ getState, executeCommand, signedRequest } = {}) {
+  constructor({ getState, executeCommand, signedRequest, effectJournal = null } = {}) {
     if (typeof getState !== 'function' || typeof executeCommand !== 'function' || typeof signedRequest !== 'function') throw new Error('devos_cycle_dependencies_invalid');
+    if (effectJournal != null && (
+      typeof effectJournal.init !== 'function'
+      || typeof effectJournal.find !== 'function'
+      || typeof effectJournal.beginExecution !== 'function'
+      || typeof effectJournal.markDeliveryPending !== 'function'
+      || typeof effectJournal.markConfirmed !== 'function'
+      || typeof effectJournal.markAmbiguous !== 'function'
+    )) throw new Error('devos_effect_journal_invalid');
     this.#getState = getState;
     this.#executeCommand = executeCommand;
     this.#signedRequest = signedRequest;
+    this.#effectJournal = effectJournal;
   }
 
-  snapshot() { return structuredClone(this.#last); }
+  async #ensureJournal() {
+    if (!this.#effectJournal) return null;
+    if (this.#journalInitialized) return this.#effectJournal;
+    if (!this.#journalInitPromise) {
+      this.#journalInitPromise = Promise.resolve(this.#effectJournal.init()).then(() => {
+        this.#journalInitialized = true;
+        return this.#effectJournal;
+      });
+    }
+    return this.#journalInitPromise;
+  }
+
+  snapshot() {
+    let journal = null;
+    if (this.#effectJournal && this.#journalInitialized && typeof this.#effectJournal.snapshot === 'function') {
+      journal = this.#effectJournal.snapshot();
+    }
+    return structuredClone({ ...this.#last, effect_delivery_journal: journal });
+  }
 
   async cycle() {
+    await this.#ensureJournal();
     const state = await this.#getState();
     const fleetSnapshot = state?.fleet;
     if (!fleetSnapshot?.agents) return this.#record({ state: 'NO_FLEET' });
@@ -190,6 +238,7 @@ export class DevOsNativeTaskCycle {
   }
 
   async completeFromTrustedCommand(payload = {}) {
+    await this.#ensureJournal();
     const lease = assertLiveLeaseBinding(payload, (await this.#getState())?.fleet);
     const state = String(payload.state || '').toUpperCase();
     if (!['RESULT_READY','BLOCKED','FAILED','AMBIGUOUS','COMPLETED'].includes(state)) throw new Error('devos_completion_state_invalid');
@@ -197,8 +246,66 @@ export class DevOsNativeTaskCycle {
     return this.#postCompletionWithReadback(lease, state, summary, payload.error || null);
   }
 
+  async #readTaskStatus(lease) {
+    try {
+      const response = await this.#signedRequest(`/v1/devos/tasks/${encodeURIComponent(lease.task_id)}/status`, { method: 'GET' });
+      if (!response?.ok) return null;
+      const body = await response.json().catch(() => ({}));
+      const observedGeneration = Number(body?.lease_generation || 0);
+      if (observedGeneration !== lease.lease_generation) return { state: 'GENERATION_MISMATCH', body };
+      return { state: String(body?.state || '').toUpperCase(), body };
+    } catch {
+      return null;
+    }
+  }
+
+  async #reconcileJournalEntry(lease, binding, entry) {
+    this.#attempted.add(`${lease.task_id}:${lease.lease_generation}`);
+    const status = await this.#readTaskStatus(lease);
+    if (status && RECEIPT_CONFIRMED_STATES.has(status.state)) {
+      await this.#effectJournal?.markConfirmed(binding, { db_state: status.state, reconciliation: 'STATUS_READBACK' });
+      return { state: 'NO_REDISPATCH_CONFIRMED', task_id: lease.task_id, lease_generation: lease.lease_generation, db_state: status.state, automatic_retry_allowed: false, authority_effect: false };
+    }
+    if (status?.state === 'AMBIGUOUS') {
+      await this.#effectJournal?.markAmbiguous(binding, { db_state: 'AMBIGUOUS', reconciliation: 'STATUS_READBACK' });
+      return { state: 'NO_REDISPATCH_AMBIGUOUS', task_id: lease.task_id, lease_generation: lease.lease_generation, automatic_retry_allowed: false, authority_effect: false };
+    }
+
+    const proof = entry?.state === 'DELIVERY_PENDING' ? proofFromJournal(entry) : null;
+    if (status?.state === 'LEASED' && proof) {
+      try {
+        const response = await this.#signedRequest('/v1/devos/mark-running', { payload: { ...bindingPayload(lease), proof } });
+        const body = await responseJson(response, 'devos_mark_running_reconcile_http');
+        await this.#effectJournal?.markConfirmed(binding, { db_state: String(body?.state || 'RUNNING').toUpperCase(), reconciliation: 'DURABLE_RECEIPT_REDELIVERY' });
+        return { state: 'RUNNING_RECEIPT_REDELIVERED', task_id: lease.task_id, lease_generation: lease.lease_generation, proof, server: body, physical_effect_replayed: false, automatic_retry_allowed: false, authority_effect: false };
+      } catch (error) {
+        const after = await this.#readTaskStatus(lease);
+        if (after && RECEIPT_CONFIRMED_STATES.has(after.state)) {
+          await this.#effectJournal?.markConfirmed(binding, { db_state: after.state, reconciliation: 'POST_REDELIVERY_STATUS' });
+          return { state: 'NO_REDISPATCH_CONFIRMED', task_id: lease.task_id, lease_generation: lease.lease_generation, db_state: after.state, physical_effect_replayed: false, automatic_retry_allowed: false, authority_effect: false };
+        }
+        await this.#effectJournal?.markAmbiguous(binding, { reason: clip(error?.message || error, 180), reconciliation: 'RECEIPT_REDELIVERY_UNPROVEN' });
+        return { state: 'NO_REDISPATCH_AMBIGUOUS', task_id: lease.task_id, lease_generation: lease.lease_generation, physical_effect_replayed: false, automatic_retry_allowed: false, authority_effect: false };
+      }
+    }
+
+    await this.#effectJournal?.markAmbiguous(binding, {
+      prior_state: String(entry?.state || ''),
+      db_state: status?.state || 'UNKNOWN',
+      reconciliation: 'NO_POSITIVE_RECEIPT_PROOF',
+    });
+    return { state: 'NO_REDISPATCH_AMBIGUOUS', task_id: lease.task_id, lease_generation: lease.lease_generation, physical_effect_replayed: false, automatic_retry_allowed: false, authority_effect: false };
+  }
+
   async #dispatchLease(rawLease, fleetSnapshot) {
     const lease = assertLiveLeaseBinding(rawLease, fleetSnapshot);
+    const prompt = renderDevosTaskPrompt(lease);
+    const promptHash = sha256(prompt);
+    const effectBinding = journalBinding(lease, promptHash);
+    const journal = await this.#ensureJournal();
+    const priorEntry = journal?.find(effectBinding) || null;
+    if (priorEntry) return this.#reconcileJournalEntry(lease, effectBinding, priorEntry);
+
     const key = `${lease.task_id}:${lease.lease_generation}`;
     if (this.#attempted.has(key)) return { state: 'NO_REDISPATCH', task_id: lease.task_id, lease_generation: lease.lease_generation, authority_effect: false };
     this.#attempted.add(key);
@@ -207,7 +314,6 @@ export class DevOsNativeTaskCycle {
     const priorTabId = selectedTabId(beforeSelection);
     await this.#executeCommand({ action: 'SELECT_TAB', platform: null, payload: { tab_id: lease.tab_id } });
 
-    let promptHash = null;
     let clickIssued = false;
     try {
       const foregroundState = await this.#getState();
@@ -218,8 +324,11 @@ export class DevOsNativeTaskCycle {
       const pre = await this.#executeCommand({ action: 'CAPTURE', platform: 'CHATGPT', payload: { tab_id: lease.tab_id } });
       const preReady = readinessOrThrow({ frame: pre, lease, selected_tab_id: selected, phase: 'PRE_TYPE' });
       const preConversation = conversationUrl(pre?.url);
-      const prompt = renderDevosTaskPrompt(lease);
-      promptHash = sha256(prompt);
+
+      await journal?.beginExecution(effectBinding, {
+        phase: 'BEFORE_SEMANTIC_TYPE',
+        pre_conversation_url_sha256: preConversation ? sha256(preConversation) : null,
+      });
 
       try {
         await this.#executeCommand({
@@ -234,6 +343,7 @@ export class DevOsNativeTaskCycle {
           },
         });
       } catch (error) {
+        await journal?.markAmbiguous(effectBinding, { reason: 'SEMANTIC_TYPE_EFFECT_AMBIGUOUS' }).catch(() => {});
         await this.#reportAmbiguous(lease, 'SEMANTIC_TYPE_EFFECT_AMBIGUOUS').catch(() => {});
         throw error;
       }
@@ -241,6 +351,7 @@ export class DevOsNativeTaskCycle {
       const beforeClickState = await this.#getState();
       const selectedBeforeClick = selectedTabId(beforeClickState);
       if (selectedBeforeClick !== lease.tab_id) {
+        await journal?.markAmbiguous(effectBinding, { reason: 'FOREGROUND_LOST_AFTER_TYPE' }).catch(() => {});
         await this.#reportAmbiguous(lease, 'FOREGROUND_LOST_AFTER_TYPE').catch(() => {});
         throw new Error('devos_foreground_lost_after_type');
       }
@@ -251,6 +362,7 @@ export class DevOsNativeTaskCycle {
       try {
         typedReady = readinessOrThrow({ frame: typedFrame, lease, selected_tab_id: selectedBeforeClick, phase: 'PRE_CLICK' });
       } catch (error) {
+        await journal?.markAmbiguous(effectBinding, { reason: 'READINESS_LOST_AFTER_TYPE' }).catch(() => {});
         await this.#reportAmbiguous(lease, 'READINESS_LOST_AFTER_TYPE').catch(() => {});
         throw error;
       }
@@ -265,7 +377,9 @@ export class DevOsNativeTaskCycle {
             accessible_name: typedReady.send_control.name,
           },
         });
+        await journal?.markDeliveryPending(effectBinding, { send_click_attempted: true, send_click_returned: true });
       } catch (error) {
+        await journal?.markAmbiguous(effectBinding, { reason: 'SEND_CLICK_EFFECT_AMBIGUOUS', send_click_attempted: clickIssued }).catch(() => {});
         await this.#reportAmbiguous(lease, 'SEND_CLICK_EFFECT_AMBIGUOUS').catch(() => {});
         throw error;
       }
@@ -276,6 +390,7 @@ export class DevOsNativeTaskCycle {
       const newConversationObserved = !preConversation && Boolean(normalizedUrl);
       const effectState = stopObserved ? 'PROVEN_GENERATING' : (newConversationObserved ? 'PROVEN_NEW_CONVERSATION' : null);
       if (!effectState || !normalizedUrl) {
+        await journal?.markAmbiguous(effectBinding, { reason: 'SEND_EFFECT_NOT_PROVEN', send_click_attempted: true }).catch(() => {});
         await this.#reportAmbiguous(lease, 'SEND_EFFECT_NOT_PROVEN').catch(() => {});
         const error = new Error('devos_send_effect_ambiguous');
         error.automatic_retry_allowed = false;
@@ -287,15 +402,45 @@ export class DevOsNativeTaskCycle {
         conversation_url_sha256: sha256(normalizedUrl),
         effect_state: effectState,
       };
-      const response = await this.#signedRequest('/v1/devos/mark-running', { payload: { ...bindingPayload(lease), proof } });
-      const body = await responseJson(response, 'devos_mark_running_http');
-      return {
-        state: 'RUNNING', task_id: lease.task_id, lease_generation: lease.lease_generation,
-        tab_id: lease.tab_id, target_id: lease.target_id, agent_generation_epoch: lease.agent_generation_epoch,
-        proof, server: body, prompt_included: false, page_data_authority: false,
-        selected_tab_mutation: true, viewport_geometry_required: true, mouse_geometry_required: true,
-        click_issued: clickIssued, automatic_retry_allowed: false, authority_effect: true,
-      };
+      await journal?.markDeliveryPending(effectBinding, {
+        conversation_url_sha256: proof.conversation_url_sha256,
+        effect_state: proof.effect_state,
+        browser_effect_proven: true,
+      });
+
+      try {
+        const response = await this.#signedRequest('/v1/devos/mark-running', { payload: { ...bindingPayload(lease), proof } });
+        const body = await responseJson(response, 'devos_mark_running_http');
+        await journal?.markConfirmed(effectBinding, { db_state: String(body?.state || 'RUNNING').toUpperCase(), reconciliation: 'WRITE_ACK' });
+        return {
+          state: 'RUNNING', task_id: lease.task_id, lease_generation: lease.lease_generation,
+          tab_id: lease.tab_id, target_id: lease.target_id, agent_generation_epoch: lease.agent_generation_epoch,
+          proof, server: body, prompt_included: false, page_data_authority: false,
+          selected_tab_mutation: true, viewport_geometry_required: true, mouse_geometry_required: true,
+          click_issued: clickIssued, delivery_journal_state: 'CONFIRMED', automatic_retry_allowed: false, authority_effect: true,
+        };
+      } catch (writeError) {
+        const status = await this.#readTaskStatus(lease);
+        if (status && RECEIPT_CONFIRMED_STATES.has(status.state)) {
+          await journal?.markConfirmed(effectBinding, { db_state: status.state, reconciliation: 'STATUS_AFTER_AMBIGUOUS_WRITE' });
+          return {
+            state: status.state, task_id: lease.task_id, lease_generation: lease.lease_generation,
+            proof, readback: 'STATUS_PROVEN_AFTER_AMBIGUOUS_WRITE', delivery_journal_state: 'CONFIRMED',
+            physical_effect_replayed: false, automatic_retry_allowed: false, authority_effect: false,
+          };
+        }
+        if (status?.state === 'LEASED') {
+          return {
+            state: 'DELIVERY_PENDING', task_id: lease.task_id, lease_generation: lease.lease_generation,
+            proof, readback: 'DB_RECEIPT_ABSENT_AFTER_EFFECT_PROOF', delivery_journal_state: 'DELIVERY_PENDING',
+            physical_effect_replayed: false, automatic_retry_allowed: false, authority_effect: false,
+          };
+        }
+        await journal?.markAmbiguous(effectBinding, { reason: clip(writeError?.message || writeError, 180), db_state: status?.state || 'UNKNOWN' }).catch(() => {});
+        const error = new Error(`devos_running_receipt_ambiguous:${clip(writeError?.message || writeError, 200)}`);
+        error.automatic_retry_allowed = false;
+        throw error;
+      }
     } finally {
       if (priorTabId && priorTabId !== lease.tab_id) {
         try {
@@ -342,6 +487,11 @@ export class DevOsNativeTaskCycle {
       const response = await this.#signedRequest(`/v1/devos/tasks/${encodeURIComponent(lease.task_id)}/status`, { method: 'GET' });
       const body = await responseJson(response, 'devos_status_http');
       const observed = String(body?.state || '').toUpperCase();
+      if (Number(body?.lease_generation || 0) !== lease.lease_generation) {
+        const mismatch = new Error('devos_completion_status_generation_mismatch');
+        mismatch.automatic_retry_allowed = false;
+        throw mismatch;
+      }
       if (TERMINAL_STATES.has(observed) || observed === 'RESULT_READY' || observed === 'BLOCKED') {
         return { state: observed, task_id: lease.task_id, lease_generation: lease.lease_generation, readback: 'STATUS_PROVEN_AFTER_AMBIGUOUS_WRITE', automatic_retry_allowed: false, authority_effect: false };
       }
@@ -356,6 +506,7 @@ export class DevOsNativeTaskCycle {
       schema: 'metaengine.devos.native-task-cycle.v1',
       ...structuredClone(fields),
       attempted_lease_count: this.#attempted.size,
+      durable_effect_delivery_journal: this.#effectJournal != null,
       second_scheduler_loop: false,
       arbitrary_eval: false,
       page_model_text_authority: false,
