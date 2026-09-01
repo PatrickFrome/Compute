@@ -22,7 +22,9 @@ declare
 begin
   if p_workspace_id is null
      or v_roadmap_id !~ '^[a-z0-9][a-z0-9._:-]{2,159}$'
-     or v_client_id !~ '^[A-Za-z0-9._:@/-]{3,160}$'
+     or length(v_client_id) < 3
+     or length(v_client_id) > 160
+     or v_client_id ~ '[[:cntrl:]]'
      or coalesce(p_leader_epoch,0) < 1 then
     raise exception 'meta_frontier_leader_binding_invalid' using errcode = '22023';
   end if;
