@@ -20,14 +20,17 @@ declare
   v_proof jsonb;
   v_last_seen timestamptz;
   v_proven_at timestamptz;
-  v_now timestamptz := clock_timestamp();
+  v_now timestamptz;
 begin
   if new.state <> 'ACTIVE' then
     raise exception 'devos_transport_claim_state_invalid' using errcode = '23514';
   end if;
 
-  select s.client_id, s.state, s.last_seen_at
-    into v_client_id, v_supervisor_state, v_last_seen
+  -- Client identity is only a lock-routing hint here. No fleet state read before the shared
+  -- promotion lock is allowed to authorize the claim, because it could become stale while
+  -- waiting for a concurrent restart-promotion transaction to finish.
+  select s.client_id
+    into v_client_id
     from public.compute_fabric_a2_browser_supervisor_state_h205f22 s
    where s.workspace_id = new.workspace_id
      and s.authority_effect = false
@@ -47,6 +50,25 @@ begin
   perform pg_advisory_xact_lock(
     hashtextextended('devos-transport-promotion:'||new.workspace_id::text||':'||v_client_id,0)
   );
+  v_now := clock_timestamp();
+
+  -- Re-read the authoritative supervisor state only after mutual exclusion is established.
+  -- A pre-lock ACTIVE snapshot has zero authority after a concurrent restart/promotion change.
+  select s.state, s.last_seen_at
+    into v_supervisor_state, v_last_seen
+    from public.compute_fabric_a2_browser_supervisor_state_h205f22 s
+   where s.workspace_id = new.workspace_id
+     and s.client_id = v_client_id
+     and s.authority_effect = false
+     and s.state->>'schema' = 'metaengine.native-browser-supervisor.state.v1'
+     and s.state->'fleet'->>'schema' = 'metaengine.browser.fleet-snapshot.v1'
+     and s.state->'fleet'->>'readiness_contract' = 'TRANSPORT_PROOF_REQUIRED'
+   order by s.last_seen_at desc
+   limit 1;
+
+  if not found then
+    raise exception 'devos_transport_supervisor_snapshot_missing_after_lock' using errcode = '55000';
+  end if;
 
   -- TTL expiry is deterministic reconciliation, not a retry. A lost promotion-release response
   -- therefore stalls claims only until the already-bounded lease expires; it never authorizes a
