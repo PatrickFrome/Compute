@@ -5,6 +5,7 @@ on:
     branches:
       - 'work/browser-continuous-fleet-audit-v1'
     paths:
+      - 'supabase/migrations/20260901235500_compute_unified_restart_actuator_precondition_v2.sql'
       - 'supabase/migrations/20260901144500_compute_unified_restart_effect_receipt_v1.sql'
       - 'supabase/migrations/20260901154500_compute_unified_restart_effect_receipt_persistence_v1.sql'
       - 'supabase/migrations/20260901165000_compute_unified_restart_effect_receipt_readback_v1.sql'
@@ -12,6 +13,7 @@ on:
       - '.github/workflows/c0-restart-effect-receipt-audit-v1.yml'
   pull_request:
     paths:
+      - 'supabase/migrations/20260901235500_compute_unified_restart_actuator_precondition_v2.sql'
       - 'supabase/migrations/20260901144500_compute_unified_restart_effect_receipt_v1.sql'
       - 'supabase/migrations/20260901154500_compute_unified_restart_effect_receipt_persistence_v1.sql'
       - 'supabase/migrations/20260901165000_compute_unified_restart_effect_receipt_readback_v1.sql'
@@ -59,7 +61,17 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
           printf 'exact_head=%s\n' "$EXPECTED_HEAD"
 
-      - name: Durable restart receipt and no-retry falsification
+      - name: Reject legacy quiescence restart blockers in v2
+        run: |
+          set -euo pipefail
+          FILE=supabase/migrations/20260901235500_compute_unified_restart_actuator_precondition_v2.sql
+          ! grep -Eiq "supervisor_generation[^\n]*(IDLE)|NOT_QUIESCENT|pending_wakes[^\n]*= *0|queued_wakes[^\n]*= *0|active_request[^\n]*is null" "$FILE"
+          grep -q "verified_download_mutation_active" "$FILE"
+          grep -q "active_actuation_lease" "$FILE"
+          grep -q "effect_must_be_single_shot" "$FILE"
+          grep -q "automatic_retry_allowed', false" "$FILE"
+
+      - name: Continuity precondition, durable restart receipt, and no-retry falsification
         run: |
           set -euo pipefail
           psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 \
