@@ -4,6 +4,9 @@ import path from 'node:path';
 
 export const SELF_UPDATE_TRANSACTION_FILE = 'metaengine-self-update-transaction-v1.json';
 export const SELF_UPDATE_TRANSACTION_SCHEMA = 'metaengine.self-update.transaction.v1';
+export const SELF_UPDATE_INSTALL_EFFECT_BARRIER = 'WRITE_AHEAD_V1';
+export const SELF_UPDATE_INSTALL_EFFECT_SCOPE = 'BROWSER_RESTART';
+export const SELF_UPDATE_INSTALL_ACTUATOR = 'ELECTRON_UPDATER_QUIT_AND_INSTALL';
 
 const STATES = new Set([
   'PREPARED',
@@ -25,6 +28,8 @@ const TRANSITIONS = new Map([
   ['QUARANTINED', new Set(['SUPERSEDED'])],
   ['SUPERSEDED', new Set()],
 ]);
+
+let installEffectBarrierTail = Promise.resolve();
 
 function assertApp(app) {
   if (!app || typeof app.getPath !== 'function' || typeof app.getVersion !== 'function') {
@@ -64,8 +69,15 @@ function validate(row) {
   if (!row || row.schema !== SELF_UPDATE_TRANSACTION_SCHEMA) throw new Error('self_update_transaction_schema_invalid');
   if (!STATES.has(String(row.state || ''))) throw new Error('self_update_transaction_state_invalid');
   if (!row.transaction_id || !row.source_version || !row.target_version) throw new Error('self_update_transaction_binding_invalid');
+  if (row.automatic_retry_allowed !== false) throw new Error('self_update_transaction_retry_contract_invalid');
   if (row.authority_effect !== false) throw new Error('self_update_transaction_authority_invalid');
   return row;
+}
+
+function serializeInstallEffectBarrier(operation) {
+  const run = installEffectBarrierTail.then(operation, operation);
+  installEffectBarrierTail = run.then(() => undefined, () => undefined);
+  return run;
 }
 
 export async function readSelfUpdateTransaction(app) {
@@ -87,7 +99,7 @@ export async function beginSelfUpdateTransaction(app, receipt, { clock = () => D
     throw new Error('self_update_transaction_receipt_invalid');
   }
   const prior = await readSelfUpdateTransaction(app).catch((error) => {
-    if (/json_invalid|schema_invalid|state_invalid|binding_invalid|authority_invalid/.test(String(error?.message || error))) return null;
+    if (/json_invalid|schema_invalid|state_invalid|binding_invalid|retry_contract_invalid|authority_invalid/.test(String(error?.message || error))) return null;
     throw error;
   });
   const now = Number(clock());
@@ -143,6 +155,40 @@ export async function transitionSelfUpdateTransaction(app, nextState, {
   };
   await atomicWrite(transactionPath(app), row);
   return structuredClone(row);
+}
+
+export async function markSelfUpdateInstallEffectAttempted(app, {
+  targetVersion,
+  clock = () => Date.now(),
+} = {}) {
+  return serializeInstallEffectBarrier(async () => {
+    const expectedTarget = String(targetVersion || '');
+    if (!expectedTarget) throw new Error('self_update_install_effect_target_invalid');
+    const current = await readSelfUpdateTransaction(app);
+    if (!current) throw new Error('self_update_transaction_missing');
+    if (current.state !== 'PREPARED') {
+      throw new Error(`self_update_install_effect_barrier_state_invalid:${current.state}`);
+    }
+    if (current.target_version !== expectedTarget) {
+      throw new Error('self_update_transaction_target_binding_mismatch');
+    }
+    return transitionSelfUpdateTransaction(app, 'INSTALLING', {
+      requireTargetVersion: expectedTarget,
+      clock,
+      evidence: {
+        effect_barrier_contract: SELF_UPDATE_INSTALL_EFFECT_BARRIER,
+        effect_scope: SELF_UPDATE_INSTALL_EFFECT_SCOPE,
+        actuator_type: SELF_UPDATE_INSTALL_ACTUATOR,
+        physical_effect_attempted: true,
+        effect_barrier_crossed: true,
+        effect_must_be_single_shot: true,
+        post_effect_readback_required: true,
+        process_id: process.pid,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      },
+    });
+  });
 }
 
 export async function qualifySelfUpdateTransaction(app, evidence = {}) {
