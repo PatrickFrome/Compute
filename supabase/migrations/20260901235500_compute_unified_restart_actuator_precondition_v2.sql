@@ -57,8 +57,8 @@ begin
   end if;
 
   -- Generation/streaming/wake backlog are continuity state, not restart blockers.
-  -- We preserve them in the verified envelope so the successor can reconcile
-  -- them, but never require IDLE/quiescent/empty queues here.
+  -- Preserve them for successor reconciliation; do not require IDLE, quiescence,
+  -- empty wake queues, or absence of an active model request.
   if jsonb_typeof(p_actuator) <> 'object'
      or p_actuator->>'schema' <> 'metaengine.restart.actuator-evidence.v1'
      or coalesce((p_actuator->>'typed_actuator_verified')::boolean, false) is not true
@@ -79,15 +79,17 @@ begin
     raise exception 'restart_actuator_binding_mismatch' using errcode = '22023';
   end if;
 
+  -- Canonical field names deliberately match restart-effect-receipt.v1 so v2 can
+  -- be integrated without a lockstep terminal-receipt deployment.
   return jsonb_build_object(
     'schema', 'metaengine.restart.actuator-precondition.v2',
     'preconditions_verified', true,
     'workspace_id', v_workspace_id,
-    'client_id', v_client_id,
-    'process_incarnation_id', v_process_incarnation_id,
-    'supervisor_epoch', v_supervisor_epoch,
-    'source_git_sha', v_source_git_sha,
     'lease_id', v_lease_id,
+    'target_client_id', v_client_id,
+    'target_process_incarnation_id', v_process_incarnation_id,
+    'supervisor_epoch', v_supervisor_epoch,
+    'expected_source_git_commit', v_source_git_sha,
     'effect_scope', 'BROWSER_RESTART',
     'actuator_type', 'NATIVE_BROWSER_TYPED_ACTUATOR',
     'effect_must_be_single_shot', true,
@@ -95,6 +97,9 @@ begin
     'continuity_transfer_required', true,
     'supervisor_generation', v_generation_state,
     'queued_wakes', v_queued_wakes,
+    'restart_authorized', false,
+    'wake_replay_authorized', false,
+    'lease_mutation_authorized', false,
     'automatic_retry_allowed', false,
     'authority_effect', false
   );
