@@ -1,6 +1,9 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs/promises';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { durableWriteJson } = require('./durable-json-file.cjs');
 
 export const SELF_UPDATE_TRANSACTION_FILE = 'metaengine-self-update-transaction-v1.json';
 export const SELF_UPDATE_TRANSACTION_SCHEMA = 'metaengine.self-update.transaction.v1';
@@ -43,19 +46,6 @@ function transactionPath(app) {
   return path.join(app.getPath('userData'), SELF_UPDATE_TRANSACTION_FILE);
 }
 
-async function atomicWrite(target, row) {
-  await fs.mkdir(path.dirname(target), { recursive: true });
-  const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
-  const handle = await fs.open(temp, 'w', 0o600);
-  try {
-    await handle.write(`${JSON.stringify(row)}\n`);
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  await fs.rename(temp, target);
-}
-
 function safeEvidence(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const result = {};
@@ -84,7 +74,7 @@ function serializeInstallEffectBarrier(operation) {
 export async function readSelfUpdateTransaction(app) {
   const target = transactionPath(app);
   let raw;
-  try { raw = await fs.readFile(target, 'utf8'); }
+  try { raw = await import('node:fs/promises').then(({ readFile }) => readFile(target, 'utf8')); }
   catch (error) { if (error?.code === 'ENOENT') return null; throw error; }
   let row;
   try { row = JSON.parse(raw); }
@@ -124,7 +114,7 @@ export async function beginSelfUpdateTransaction(app, receipt, { clock = () => D
     evidence: {},
     authority_effect: false,
   };
-  await atomicWrite(transactionPath(app), row);
+  await durableWriteJson(transactionPath(app), row);
   return structuredClone(row);
 }
 
@@ -156,7 +146,7 @@ export async function transitionSelfUpdateTransaction(app, nextState, {
     evidence: { ...safeEvidence(current.evidence), ...safeEvidence(evidence) },
     authority_effect: false,
   };
-  await atomicWrite(transactionPath(app), row);
+  await durableWriteJson(transactionPath(app), row);
   return structuredClone(row);
 }
 
