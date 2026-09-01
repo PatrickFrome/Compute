@@ -1,0 +1,76 @@
+name: Browser Runtime Compatibility V1
+
+on:
+  push:
+    branches:
+      - 'work/browser-runtime-compatibility-v1'
+    paths:
+      - 'apps/metaengine-browser/src/devos-runtime-compatibility.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/runtime-capabilities.mjs'
+      - 'apps/metaengine-browser/test/devos-runtime-compatibility.test.mjs'
+      - 'supabase/migrations/20260901210000_devos_runtime_compatibility_and_recovery_debt_v1.sql'
+      - 'coordination/browser/BROWSER_061DEV21_CAPSULE_RUNTIME_AUDIT_V1.md'
+      - '.github/workflows/browser-runtime-compatibility-v1.yml'
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/devos-runtime-compatibility.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/runtime-capabilities.mjs'
+      - 'apps/metaengine-browser/test/devos-runtime-compatibility.test.mjs'
+      - 'supabase/migrations/20260901210000_devos_runtime_compatibility_and_recovery_debt_v1.sql'
+      - 'coordination/browser/BROWSER_061DEV21_CAPSULE_RUNTIME_AUDIT_V1.md'
+      - '.github/workflows/browser-runtime-compatibility-v1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exact-runtime-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          printf 'exact_head=%s\n' "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Runtime compatibility contract
+        run: |
+          set -euo pipefail
+          node --check apps/metaengine-browser/src/devos-runtime-compatibility.mjs
+          node --check apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/runtime-capabilities.mjs
+          node --test apps/metaengine-browser/test/devos-runtime-compatibility.test.mjs
+
+      - name: Recovery debt SQL is read-only at runtime and service-role scoped
+        run: |
+          set -euo pipefail
+          FILE='supabase/migrations/20260901210000_devos_runtime_compatibility_and_recovery_debt_v1.sql'
+          grep -q 'create or replace function public.devos_runtime_capabilities_v1' "$FILE"
+          grep -q 'create or replace function public.devos_recovery_debt_snapshot_v1' "$FILE"
+          grep -q "'automatic_retry_allowed', false" "$FILE"
+          grep -q "'physical_effect_replayed', false" "$FILE"
+          grep -q "'task_content_returned', false" "$FILE"
+          grep -q 'grant execute on function public.devos_runtime_capabilities_v1() to service_role' "$FILE"
+          grep -q 'grant execute on function public.devos_recovery_debt_snapshot_v1(uuid) to service_role' "$FILE"
+          ! grep -Eiq '^\s*(insert|update|delete|merge)\s+' "$FILE"
+
+      - name: Prove no second scheduler or blind retry contract
+        run: |
+          set -euo pipefail
+          grep -q "second_scheduler_loop: false" apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/runtime-capabilities.mjs
+          grep -q "automatic_retry_allowed: false" apps/metaengine-browser/src/devos-runtime-compatibility.mjs
+          grep -q "physical_dispatch_allowed: false" apps/metaengine-browser/src/devos-runtime-compatibility.mjs
