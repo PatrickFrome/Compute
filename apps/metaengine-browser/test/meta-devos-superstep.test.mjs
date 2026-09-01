@@ -144,7 +144,9 @@ test('leader migrations are RLS fenced, epoch-bound, write-coalesced, and never 
   assert.match(leaderSql,/enable row level security/i);
   assert.match(leaderSql,/leader_epoch=v_row\.leader_epoch \+ 1/);
   assert.match(leaderSql,/pg_advisory_xact_lock/);
-  assert.match(leaderSql,/v_remaining > \(v_seconds::double precision \/ 2\.0\)/);
+  assert.match(leaderSql,/v_renew_window integer := greatest\(3, least\(10, v_seconds \/ 2\)\)/);
+  assert.match(leaderSql,/v_row\.expires_at <= v_now \+ make_interval\(secs => v_renew_window\)/);
+  assert.match(leaderSql,/'renewed',v_renewed,'renewal_window_seconds',v_renew_window/);
   assert.match(frontierSql,/for update/i);
   assert.match(frontierSql,/v_lease\.leader_epoch <> p_leader_epoch/);
   assert.match(frontierSql,/interval '2 seconds'/);
