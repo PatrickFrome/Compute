@@ -115,11 +115,16 @@ export class DevOsNativeTaskCycle {
       if (String(requestPath) === '/v1/devos/mark-running') {
         const payload = request?.payload || {};
         const agent = exactFleetAgent(await this.#getState(), payload);
-        const frame = this.#lastFrames.get(String(payload.tab_id || '')) || null;
         const expectedHash = String(payload?.proof?.conversation_url_sha256 || '').toLowerCase();
-        const normalizedUrl = conversationUrl(frame?.url);
-        const fleetProof = exactTransportProof(agent);
+        let frame = this.#lastFrames.get(String(payload.tab_id || '')) || null;
+        let normalizedUrl = conversationUrl(frame?.url);
 
+        if (!frame || !normalizedUrl || !HASH_RE.test(expectedHash) || sha256(normalizedUrl) !== expectedHash) {
+          frame = await observedExecuteCommand({ action: 'CAPTURE', platform: 'CHATGPT', payload: { tab_id: String(payload.tab_id || '') } });
+          normalizedUrl = conversationUrl(frame?.url);
+        }
+
+        const fleetProof = exactTransportProof(agent);
         if (frame?.target_id && String(frame.target_id).toLowerCase() !== String(payload.target_id || '').toLowerCase()) {
           throw new Error('devos_transport_active_frame_target_mismatch');
         }
