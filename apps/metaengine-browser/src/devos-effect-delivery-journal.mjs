@@ -19,10 +19,6 @@ const TRANSITIONS = new Map([
   ['AMBIGUOUS', new Set(['CONFIRMED'])],
 ]);
 
-function clip(value, max = 240) {
-  return value == null ? null : String(value).slice(0, max);
-}
-
 function positiveInt(value, name) {
   const n = Number(value);
   if (!Number.isSafeInteger(n) || n < 1) throw new Error(`devos_effect_journal_${name}_invalid`);
@@ -186,7 +182,8 @@ export class DevOsEffectDeliveryJournal {
     const lk = leaseKey(b);
     const state = String(nextState || '').toUpperCase();
     if (!STATES.has(state)) throw new Error('devos_effect_journal_state_invalid');
-    this.#tail = this.#tail.then(async () => {
+
+    const operation = this.#tail.then(async () => {
       this.#assertInitialized();
       const drift = this.#entries.find((entry) => leaseKey(entry) === lk && entry.effect_key !== key);
       if (drift) throw new Error('devos_effect_journal_binding_drift');
@@ -225,7 +222,9 @@ export class DevOsEffectDeliveryJournal {
       await atomicWrite(this.#statePath, this.#document());
       return structuredClone(this.#entries.find((entry) => entry.effect_key === key));
     });
-    return this.#tail;
+
+    this.#tail = operation.catch(() => undefined);
+    return operation;
   }
 
   beginExecution(binding, evidence = {}) { return this.#mutate(binding, 'EXECUTION_STARTED', evidence); }
