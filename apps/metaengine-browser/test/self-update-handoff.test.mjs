@@ -42,6 +42,12 @@ async function tempUserData() {
   return fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-self-update-handoff-'));
 }
 
+async function isolatedApp(t, options = {}) {
+  const userData = await tempUserData();
+  t.after(() => fs.rm(userData, { recursive: true, force: true }));
+  return { userData, app: fakeApp(userData, options) };
+}
+
 test('pre-install receipt is durable and clears stale successor evidence', async (t) => {
   const userData = await tempUserData();
   t.after(() => fs.rm(userData, { recursive: true, force: true }));
@@ -107,22 +113,24 @@ test('non-updater launches never create successor evidence', async (t) => {
 });
 
 test('stale, wrong-version, invalid-mode and secondary successor states fail closed', async (t) => {
-  const userData = await tempUserData();
-  t.after(() => fs.rm(userData, { recursive: true, force: true }));
-
-  const app = fakeApp(userData);
-  await persistPreInstallReceipt(app, receipt());
+  const staleCase = await isolatedApp(t);
+  await persistPreInstallReceipt(staleCase.app, receipt());
   await assert.rejects(
-    persistUpdatedSuccessorReceipt(app, {
+    persistUpdatedSuccessorReceipt(staleCase.app, {
       argv: ['METAENGINE Browser Test.exe', '--updated'],
       clock: () => Date.parse('2026-08-29T19:00:00.000Z'),
       maxAgeMs: 60_000,
     }),
     /receipt_stale/,
   );
+  await assert.rejects(
+    persistPreInstallReceipt(staleCase.app, receipt()),
+    /self_update_transaction_unresolved_prior:PREPARED/,
+  );
 
-  await persistPreInstallReceipt(app, receipt());
-  const wrongVersion = fakeApp(userData, { version: '0.6.3-dev.50.2' });
+  const wrongVersionCase = await isolatedApp(t);
+  await persistPreInstallReceipt(wrongVersionCase.app, receipt());
+  const wrongVersion = fakeApp(wrongVersionCase.userData, { version: '0.6.3-dev.50.2' });
   await assert.rejects(
     persistUpdatedSuccessorReceipt(wrongVersion, {
       argv: ['METAENGINE Browser Test.exe', '--updated'],
@@ -131,12 +139,15 @@ test('stale, wrong-version, invalid-mode and secondary successor states fail clo
     /version_binding_invalid/,
   );
 
+  const invalidModeCase = await isolatedApp(t);
   await assert.rejects(
-    persistPreInstallReceipt(app, receipt({ successor_startup: 'REMOTE_EXECUTE' })),
+    persistPreInstallReceipt(invalidModeCase.app, receipt({ successor_startup: 'REMOTE_EXECUTE' })),
     /successor_startup_invalid/,
   );
 
-  const secondary = fakeApp(userData, { locked: false });
+  const secondaryCase = await isolatedApp(t);
+  await persistPreInstallReceipt(secondaryCase.app, receipt());
+  const secondary = fakeApp(secondaryCase.userData, { locked: false });
   await assert.rejects(
     persistUpdatedSuccessorReceipt(secondary, {
       argv: ['METAENGINE Browser Test.exe', '--updated'],
@@ -145,5 +156,5 @@ test('stale, wrong-version, invalid-mode and secondary successor states fail clo
     /primary_required/,
   );
 
-  await clearSuccessorReceipt(app);
+  await clearSuccessorReceipt(secondaryCase.app);
 });
