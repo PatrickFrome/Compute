@@ -1,10 +1,13 @@
 import crypto from 'node:crypto';
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
-import path from 'node:path';
+import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 
-export const BROWSER_SENTINEL_VERSION = '1.4.0';
+const require = createRequire(import.meta.url);
+const { durableWriteJson, durableWriteJsonSync } = require('./durable-json-file.cjs');
+
+export const BROWSER_SENTINEL_VERSION = '1.5.0';
 export const BROWSER_SENTINEL_WORKER_HEARTBEAT_MAX_AGE_MS = 8_000;
 
 async function readJson(file) {
@@ -18,17 +21,11 @@ function readJsonSync(file) {
 }
 
 async function writeJson(file, value) {
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  const temp = `${file}.tmp`;
-  await fs.writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-  await fs.rename(temp, file);
+  return durableWriteJson(file, value, { sequence: Number(value?.state_revision || 0) });
 }
 
 function writeJsonSync(file, value) {
-  fsSync.mkdirSync(path.dirname(file), { recursive: true });
-  const temp = `${file}.tmp`;
-  fsSync.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-  fsSync.renameSync(temp, file);
+  return durableWriteJsonSync(file, value, { sequence: Number(value?.state_revision || 0) });
 }
 
 export function browserSentinelWorkerHeartbeatPath(statePath) {
@@ -38,6 +35,7 @@ export function browserSentinelWorkerHeartbeatPath(statePath) {
 function safeState(value) {
   const relaunchPid = Number(value.relaunch_pid || 0);
   const workerPid = Number(value.worker_pid || 0);
+  const revision = Number(value.state_revision || 0);
   return {
     schema: 'metaengine.browser-sentinel.state.v1',
     version: BROWSER_SENTINEL_VERSION,
@@ -45,6 +43,7 @@ function safeState(value) {
     parent_pid: Number(value.parent_pid || 0),
     executable: String(value.executable || ''),
     worker_script: String(value.worker_script || ''),
+    state_revision: Number.isSafeInteger(revision) && revision >= 1 ? revision : 1,
     lifecycle: String(value.lifecycle || 'ARMED'),
     expected_restart: value.expected_restart === true,
     expected_restart_reason: value.expected_restart_reason ? String(value.expected_restart_reason).slice(0, 120) : null,
@@ -126,6 +125,7 @@ export class BrowserSentinelHost {
       worker_heartbeat_at: heartbeatBound ? heartbeat.heartbeat_at : null,
       worker_heartbeat_age_ms: heartbeatBound ? heartbeatAgeMs : null,
       worker_health: workerHealthy ? 'HEALTHY' : 'STALE_OR_MISSING',
+      single_writer_parent_state: true,
       authority_effect: false,
     });
   }
@@ -147,6 +147,7 @@ export class BrowserSentinelHost {
       parent_pid: process.pid,
       executable: this.#executable,
       worker_script: this.#workerScript,
+      state_revision: 1,
       lifecycle: 'ARMED',
       expected_restart: false,
       installer_handoff: false,
@@ -179,16 +180,26 @@ export class BrowserSentinelHost {
 
   async #mutate(patch) {
     const current = await readJson(this.#statePath);
-    if (!current || current.token !== this.#state?.token) return this.snapshot();
-    this.#state = safeState({ ...current, ...patch, updated_at: new Date().toISOString() });
+    if (!current || current.token !== this.#state?.token || Number(current.parent_pid) !== process.pid) return this.snapshot();
+    this.#state = safeState({
+      ...current,
+      ...patch,
+      state_revision: Number(current.state_revision || 0) + 1,
+      updated_at: new Date().toISOString(),
+    });
     await writeJson(this.#statePath, this.#state);
     return this.snapshot();
   }
 
   #mutateSync(patch) {
     const current = readJsonSync(this.#statePath);
-    if (!current || current.token !== this.#state?.token) return this.snapshot();
-    this.#state = safeState({ ...current, ...patch, updated_at: new Date().toISOString() });
+    if (!current || current.token !== this.#state?.token || Number(current.parent_pid) !== process.pid) return this.snapshot();
+    this.#state = safeState({
+      ...current,
+      ...patch,
+      state_revision: Number(current.state_revision || 0) + 1,
+      updated_at: new Date().toISOString(),
+    });
     writeJsonSync(this.#statePath, this.#state);
     return this.snapshot();
   }
@@ -244,4 +255,10 @@ export class BrowserSentinelHost {
 }
 
 export async function readSentinelState(statePath) { return readJson(statePath); }
-export async function writeSentinelState(statePath, value) { return writeJson(statePath, safeState(value)); }
+export async function writeSentinelState(statePath, value) {
+  const current = await readJson(statePath);
+  const revision = current?.token === value?.token && Number(current?.parent_pid) === Number(value?.parent_pid)
+    ? Number(current?.state_revision || 0) + 1
+    : 1;
+  return writeJson(statePath, safeState({ ...value, state_revision: revision }));
+}
