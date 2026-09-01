@@ -148,8 +148,19 @@ function repairGroupToProposals(group, plan) {
   };
 }
 
-function requestCapacity(base, group, availableSlots, proposalBudget, reason) {
+function capacityView(capacity = {}) {
+  const availableSlots = integer(capacity?.available_slots, 0, { min: 0, max: 4096 });
+  const newFrontierSlots = integer(capacity?.new_frontier_slots, availableSlots, { min: 0, max: 4096 });
+  return Object.freeze({
+    availableSlots,
+    newFrontierSlots: Math.min(newFrontierSlots, availableSlots),
+    pressureState: String(capacity?.pressure_state || 'LEGACY_UNSPECIFIED').toUpperCase(),
+  });
+}
+
+function requestCapacity(base, group, capacity, proposalBudget, reason) {
   const required = group?.proposals?.length || 1;
+  const view = capacityView(capacity);
   return zeroEnvelope({
     schema: 'metaengine.meta-orchestrator.reconcile.v1',
     state: 'CAPACITY_WAIT',
@@ -158,17 +169,20 @@ function requestCapacity(base, group, availableSlots, proposalBudget, reason) {
     atomic_frontier_required: true,
     actions: Object.freeze([zeroAction('REQUEST_CAPACITY', {
       required_slots: required,
-      available_slots: availableSlots,
+      available_slots: view.availableSlots,
+      new_frontier_slots: view.newFrontierSlots,
+      pressure_state: view.pressureState,
       required_parallel_proposals: required,
       proposal_budget: proposalBudget,
       parent_plan_point: group?.node?.point_id || null,
+      group_kind: group?.kind || null,
       reason,
     })]),
   });
 }
 
 function selectAtomicGroups(base, groups, capacity, policy) {
-  const availableSlots = integer(capacity?.available_slots, 0, { min: 0, max: 4096 });
+  const view = capacityView(capacity);
   const configuredParallel = integer(policy?.max_parallel_proposals, 8, { min: 1, max: 128 });
   const proposalBudget = Math.min(configuredParallel, MAX_ATOMIC_FRONTIER_POINTS);
   const sorted = [...groups].sort((left, right) => {
@@ -181,25 +195,31 @@ function selectAtomicGroups(base, groups, capacity, policy) {
   if (!sorted.length) return null;
   const first = sorted[0];
   if (first.proposals.length > proposalBudget) {
-    return requestCapacity(base, first, availableSlots, proposalBudget, 'SAFETY_GROUP_EXCEEDS_PROPOSAL_BUDGET');
+    return requestCapacity(base, first, capacity, proposalBudget, 'SAFETY_GROUP_EXCEEDS_PROPOSAL_BUDGET');
   }
-  if (first.proposals.length > availableSlots) {
-    return requestCapacity(base, first, availableSlots, proposalBudget, 'ATOMIC_SAFETY_GROUP_CAPACITY_REQUIRED');
+  if (first.proposals.length > view.availableSlots) {
+    return requestCapacity(base, first, capacity, proposalBudget, 'ATOMIC_SAFETY_GROUP_CAPACITY_REQUIRED');
+  }
+  if (first.kind === 'NEW_FRONTIER' && first.proposals.length > view.newFrontierSlots) {
+    return requestCapacity(base, first, capacity, proposalBudget, 'NEW_FRONTIER_PRESSURE_BUDGET_REQUIRED');
   }
 
-  let slotsLeft = availableSlots;
+  let physicalSlotsLeft = view.availableSlots;
+  let newFrontierSlotsLeft = view.newFrontierSlots;
   let proposalsLeft = proposalBudget;
   const selectedGroups = [];
   for (const group of sorted) {
     const size = group.proposals.length;
-    if (size > slotsLeft || size > proposalsLeft) break;
+    if (size > physicalSlotsLeft || size > proposalsLeft) break;
+    if (group.kind === 'NEW_FRONTIER' && size > newFrontierSlotsLeft) break;
     selectedGroups.push(group);
-    slotsLeft -= size;
+    physicalSlotsLeft -= size;
+    if (group.kind === 'NEW_FRONTIER') newFrontierSlotsLeft -= size;
     proposalsLeft -= size;
   }
 
   const actions = selectedGroups.flatMap((group) => group.proposals);
-  if (!actions.length) return requestCapacity(base, first, availableSlots, proposalBudget, 'ATOMIC_FRONTIER_CAPACITY_REQUIRED');
+  if (!actions.length) return requestCapacity(base, first, capacity, proposalBudget, 'ATOMIC_FRONTIER_CAPACITY_REQUIRED');
   return zeroEnvelope({
     schema: 'metaengine.meta-orchestrator.reconcile.v1',
     state: 'PROPOSING',
@@ -208,6 +228,11 @@ function selectAtomicGroups(base, groups, capacity, policy) {
     atomic_frontier_required: true,
     frontier_group_count: selectedGroups.length,
     frontier_point_count: actions.length,
+    scheduler_pressure: zeroEnvelope({
+      available_slots: view.availableSlots,
+      new_frontier_slots: view.newFrontierSlots,
+      pressure_state: view.pressureState,
+    }),
     actions: Object.freeze(actions),
   });
 }
