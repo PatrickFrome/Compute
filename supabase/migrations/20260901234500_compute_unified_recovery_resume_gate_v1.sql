@@ -22,6 +22,7 @@ declare
   v_reason text := 'UNSET';
   v_now timestamptz := statement_timestamp();
   v_durable_heartbeat timestamptz;
+  v_fresh_heartbeat timestamptz;
 begin
   if p_workspace_id is null
      or nullif(p_attempt_id,'') is null
@@ -70,12 +71,13 @@ begin
       from public.compute_fabric_a2_browser_supervisor_state_h205f22 s
      where s.client_id=p_expected_successor_client_id and s.workspace_id=p_workspace_id
      limit 1;
+    v_fresh_heartbeat := v_state.last_seen_at;
 
     if v_state.client_id is null then
       v_reason := 'SUCCESSOR_BROWSER_STATE_MISSING';
-    elsif v_state.last_seen_at is null or v_state.last_seen_at < v_now-p_max_heartbeat_age then
+    elsif v_fresh_heartbeat is null or v_fresh_heartbeat < v_now-p_max_heartbeat_age then
       v_reason := 'SUCCESSOR_HEARTBEAT_STALE';
-    elsif v_durable_heartbeat is null or v_state.last_seen_at < v_durable_heartbeat then
+    elsif v_durable_heartbeat is null or v_fresh_heartbeat < v_durable_heartbeat then
       v_reason := 'SUCCESSOR_HEARTBEAT_REGRESSED';
     else
       v_observed_process := coalesce(
@@ -133,7 +135,7 @@ begin
     'successor_supervisor_epoch',p_expected_successor_epoch,
     'expected_source_git_commit',p_expected_source_git_commit,
     'durable_proof_fingerprint_sha256',p_proof_fingerprint_sha256,
-    'fresh_heartbeat_observed_at',v_state.last_seen_at,
+    'fresh_heartbeat_observed_at',v_fresh_heartbeat,
     'enrollment_active',v_enrolled,
     'automatic_retry_allowed',false,
     'restart_authorized',false,
