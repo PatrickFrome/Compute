@@ -21,6 +21,18 @@ const TRANSITIONS = new Map([
   ['EFFECT_ABSENT', new Set([])],
 ]);
 
+// POSIX fsync(file) alone does not durably commit the directory entry created by rename.
+// These platforms support opening the parent directory and fsyncing it through Node/libuv.
+// Windows Node/libuv currently implements rename via MoveFileExW(..., MOVEFILE_REPLACE_EXISTING)
+// without MOVEFILE_WRITE_THROUGH, so a local journal entry must not prove effect absence there.
+const DIRECTORY_FSYNC_PLATFORMS = new Set(['linux', 'darwin', 'freebsd', 'openbsd', 'netbsd']);
+export const DEVOS_EFFECT_JOURNAL_STORAGE_DURABILITY_CONTRACT = DIRECTORY_FSYNC_PLATFORMS.has(process.platform)
+  ? 'FILE_FSYNC_RENAME_DIR_FSYNC_V1'
+  : 'FILE_FSYNC_RENAME_PLATFORM_UNVERIFIED_V1';
+export const DEVOS_EFFECT_JOURNAL_PRE_EFFECT_BARRIER_CONTRACT = DIRECTORY_FSYNC_PLATFORMS.has(process.platform)
+  ? 'WRITE_AHEAD_V1'
+  : 'WRITE_AHEAD_PLATFORM_UNVERIFIED_V1';
+
 function positiveInt(value, name) {
   const n = Number(value);
   if (!Number.isSafeInteger(n) || n < 1) throw new Error(`devos_effect_journal_${name}_invalid`);
@@ -108,17 +120,36 @@ function validateDocument(value) {
   return entries;
 }
 
+async function syncParentDirectory(target) {
+  if (!DIRECTORY_FSYNC_PLATFORMS.has(process.platform)) return false;
+  const directory = await fs.open(path.dirname(target), 'r');
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
+  }
+  return true;
+}
+
 async function atomicWrite(target, value) {
   await fs.mkdir(path.dirname(target), { recursive: true });
   const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
-  const handle = await fs.open(temp, 'w', 0o600);
+  let renamed = false;
   try {
-    await handle.write(`${JSON.stringify(value)}\n`);
-    await handle.sync();
-  } finally {
-    await handle.close();
+    const handle = await fs.open(temp, 'w', 0o600);
+    try {
+      await handle.write(`${JSON.stringify(value)}\n`);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await fs.rename(temp, target);
+    renamed = true;
+    await syncParentDirectory(target);
+  } catch (error) {
+    if (!renamed) await fs.unlink(temp).catch(() => {});
+    throw error;
   }
-  await fs.rename(temp, target);
 }
 
 export class DevOsEffectDeliveryJournal {
@@ -239,8 +270,24 @@ export class DevOsEffectDeliveryJournal {
     return operation;
   }
 
-  beginExecution(binding, evidence = {}) { return this.#mutate(binding, 'EXECUTION_STARTED', evidence); }
-  markEffectAttempted(binding, evidence = {}) { return this.#mutate(binding, 'EFFECT_ATTEMPTED', { physical_effect_attempted: true, effect_barrier_crossed: true, ...safeEvidence(evidence) }); }
+  beginExecution(binding, evidence = {}) {
+    const supplied = safeEvidence(evidence);
+    return this.#mutate(binding, 'EXECUTION_STARTED', {
+      ...supplied,
+      effect_barrier_contract: DEVOS_EFFECT_JOURNAL_PRE_EFFECT_BARRIER_CONTRACT,
+      storage_durability_contract: DEVOS_EFFECT_JOURNAL_STORAGE_DURABILITY_CONTRACT,
+      physical_effect_attempted: false,
+      effect_barrier_crossed: false,
+    });
+  }
+  markEffectAttempted(binding, evidence = {}) {
+    return this.#mutate(binding, 'EFFECT_ATTEMPTED', {
+      ...safeEvidence(evidence),
+      storage_durability_contract: DEVOS_EFFECT_JOURNAL_STORAGE_DURABILITY_CONTRACT,
+      physical_effect_attempted: true,
+      effect_barrier_crossed: true,
+    });
+  }
   markDeliveryPending(binding, evidence = {}) { return this.#mutate(binding, 'DELIVERY_PENDING', evidence); }
   markConfirmed(binding, evidence = {}) { return this.#mutate(binding, 'CONFIRMED', evidence); }
   markAmbiguous(binding, evidence = {}) { return this.#mutate(binding, 'AMBIGUOUS', evidence); }
