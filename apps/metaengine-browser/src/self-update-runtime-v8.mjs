@@ -309,6 +309,7 @@ export class SelfUpdateRuntime {
       this.#state.pre_install_receipt_persisted = true;
       await this.#host?.prepareExpectedRestart?.('SELF_UPDATE');
       await this.#beforeInstallerLaunch(structuredClone(receipt));
+      await this.#host?.prepareInstallerHandoff?.('SELF_UPDATE');
       this.#state.installer_handoff_prepared = true;
       this.#updater.quitAndInstall(true, true);
     } catch (e) {
