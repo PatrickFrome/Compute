@@ -56,22 +56,28 @@ BEGIN
     if sqlerrm='wrong fingerprint unexpectedly accepted' then raise; end if;
   end;
 
+  begin
+    update public.compute_unified_restart_effect_receipt_h205f22
+    set automatic_retry_allowed=true
+    where effect_receipt_id=(persisted->>'effect_receipt_id')::uuid;
+    raise exception 'durable no-retry constraint unexpectedly bypassed';
+  exception when check_violation then null;
+  end;
+
   update public.compute_unified_restart_effect_receipt_h205f22
-  set automatic_retry_allowed=true
+  set verified_receipt=jsonb_set(verified,'{authority_effect}','true'::jsonb)
   where effect_receipt_id=(persisted->>'effect_receipt_id')::uuid;
   begin
     perform public.h205f22_read_compute_unified_restart_effect_receipt_v1(
       (persisted->>'workspace_id')::uuid,persisted->>'attempt_id',persisted->>'effect_key',persisted->>'receipt_fingerprint_sha256');
-    raise exception 'retry-authorized durable row unexpectedly accepted';
+    raise exception 'authority-bearing durable envelope unexpectedly accepted';
   exception when others then
-    if sqlerrm='retry-authorized durable row unexpectedly accepted' then raise; end if;
+    if sqlerrm='authority-bearing durable envelope unexpectedly accepted' then raise; end if;
   end;
-  update public.compute_unified_restart_effect_receipt_h205f22
-  set automatic_retry_allowed=false
-  where effect_receipt_id=(persisted->>'effect_receipt_id')::uuid;
 
   update public.compute_unified_restart_effect_receipt_h205f22
-  set expected_source_git_commit=repeat('b',40)
+  set verified_receipt=verified,
+      expected_source_git_commit=repeat('b',40)
   where effect_receipt_id=(persisted->>'effect_receipt_id')::uuid;
   begin
     perform public.h205f22_read_compute_unified_restart_effect_receipt_v1(
