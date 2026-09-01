@@ -101,4 +101,7 @@ BEGIN
   if has_function_privilege('anon','public.h205f22_persist_compute_unified_rollover_checkpoint_v1(uuid)','EXECUTE') then raise exception 'anon execute leaked'; end if;
   if has_function_privilege('authenticated','public.h205f22_persist_compute_unified_rollover_checkpoint_v1(uuid)','EXECUTE') then raise exception 'authenticated execute leaked'; end if;
   if not has_function_privilege('service_role','public.h205f22_persist_compute_unified_rollover_checkpoint_v1(uuid)','EXECUTE') then raise exception 'service role execute missing'; end if;
+  if has_table_privilege('service_role','public.h205f22_compute_unified_rollover_checkpoints_v1','INSERT') then raise exception 'service role direct insert leaked'; end if;
+  if has_table_privilege('service_role','public.h205f22_compute_unified_rollover_checkpoints_v1','UPDATE') then raise exception 'service role direct update leaked'; end if;
+  if has_table_privilege('service_role','public.h205f22_compute_unified_rollover_checkpoints_v1','DELETE') then raise exception 'service role direct delete leaked'; end if;
 END $$;
