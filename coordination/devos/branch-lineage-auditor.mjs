@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 export const BRANCH_LINEAGE_AUDIT_SCHEMA = 'metaengine.devos.branch-lineage-audit.v1';
-export const BRANCH_LINEAGE_AUDIT_VERSION = '1.1.0';
+export const BRANCH_LINEAGE_AUDIT_VERSION = '1.2.0';
 
 export const AUTHORITY_RULES = Object.freeze([
   ['CI_GOVERNANCE', (p) => p.startsWith('.github/workflows/')],
@@ -81,10 +81,11 @@ function parseCounts(value) {
   return { base_only_commits: Number(match[1]), unique_commits: Number(match[2]) };
 }
 
-function relationClass({ baseSha, headSha, baseOnly, unique, authority }) {
+function relationClass({ baseSha, headSha, baseOnly, unique, authority, tipDeltaCount }) {
   if (headSha === baseSha) return 'BASE';
   if (unique === 0) return 'CONTAINED';
   const prefix = baseOnly === 0 ? 'AHEAD' : 'DIVERGED';
+  if (tipDeltaCount === 0) return `${prefix}_HISTORY_ONLY`;
   return `${prefix}_${authority ? 'AUTHORITY' : 'NONAUTHORITY'}`;
 }
 
@@ -92,6 +93,8 @@ function riskRank(classification) {
   return ({
     BASE: 0,
     CONTAINED: 0,
+    AHEAD_HISTORY_ONLY: 0,
+    DIVERGED_HISTORY_ONLY: 0,
     AHEAD_NONAUTHORITY: 1,
     DIVERGED_NONAUTHORITY: 2,
     AHEAD_AUTHORITY: 3,
@@ -118,7 +121,7 @@ function enrichLineageTips(cwd, branches, namespace) {
 
   const descendantsByBranch = new Map();
   for (const row of branches) {
-    if (row.unique_commits === 0 || row.classification === 'BASE') {
+    if (row.unique_commits === 0 || row.classification === 'BASE' || row.semantic_converged_to_base) {
       descendantsByBranch.set(row.branch, []);
       continue;
     }
@@ -128,6 +131,7 @@ function enrichLineageTips(cwd, branches, namespace) {
         && candidate.branch !== row.branch
         && candidate.family === row.family
         && candidate.unique_commits > 0
+        && !candidate.semantic_converged_to_base
         && candidate.head_sha !== row.head_sha);
     descendants.sort(sortRisk);
     descendantsByBranch.set(row.branch, descendants);
@@ -136,7 +140,7 @@ function enrichLineageTips(cwd, branches, namespace) {
   const canonicalByHead = new Map();
   for (const [family, rows] of byFamily) {
     const byHead = new Map();
-    for (const row of rows.filter((candidate) => candidate.unique_commits > 0)) {
+    for (const row of rows.filter((candidate) => candidate.unique_commits > 0 && !candidate.semantic_converged_to_base)) {
       if (!byHead.has(row.head_sha)) byHead.set(row.head_sha, []);
       byHead.get(row.head_sha).push(row);
     }
@@ -152,6 +156,7 @@ function enrichLineageTips(cwd, branches, namespace) {
     row.equivalent_to_branch = canonical !== row.branch ? canonical : null;
     row.lineage_tip = row.unique_commits > 0
       && row.classification !== 'BASE'
+      && !row.semantic_converged_to_base
       && row.equivalent_to_branch == null
       && descendants.length === 0;
   }
@@ -164,7 +169,7 @@ function enrichLineageTips(cwd, branches, namespace) {
   for (const tips of tipsByFamily.values()) tips.sort(sortRisk);
 
   for (const row of branches) {
-    if (row.superseded_by_base) {
+    if (row.superseded_by_base || row.semantic_converged_to_base) {
       row.superseded_by_branch = null;
       continue;
     }
@@ -181,6 +186,7 @@ function enrichLineageTips(cwd, branches, namespace) {
     family,
     branch_count: rows.length,
     contained_count: rows.filter((row) => row.superseded_by_base).length,
+    semantic_converged_count: rows.filter((row) => row.semantic_converged_to_base).length,
     lineage_tip_count: rows.filter((row) => row.lineage_tip).length,
     authority_lineage_tip_count: rows.filter((row) => row.lineage_tip && row.authority_critical).length,
   })).sort((a, b) => b.authority_lineage_tip_count - a.authority_lineage_tip_count || b.lineage_tip_count - a.lineage_tip_count || a.family.localeCompare(b.family));
@@ -239,14 +245,20 @@ export function auditBranchLineage({
       uniquePaths = git(cwd, ['diff', '--name-only', '--diff-filter=ACDMRTUXB', `${mergeBaseSha}..${headSha}`, '--']).split('\n').filter(Boolean);
     }
 
-    const authority = classifyAuthority(uniquePaths);
+    const tipDeltaPaths = counts.unique_commits === 0
+      ? []
+      : git(cwd, ['diff', '--name-only', '--diff-filter=ACDMRTUXB', baseSha, headSha, '--']).split('\n').filter(Boolean);
+    const historicalAuthority = classifyAuthority(uniquePaths);
+    const authority = classifyAuthority(tipDeltaPaths);
     const classification = relationClass({
       baseSha,
       headSha,
       baseOnly: counts.base_only_commits,
       unique: counts.unique_commits,
       authority: authority.authority_critical,
+      tipDeltaCount: tipDeltaPaths.length,
     });
+    const semanticConvergedToBase = counts.unique_commits > 0 && tipDeltaPaths.length === 0;
     return {
       branch: row.branch,
       ref: row.refname,
@@ -257,13 +269,21 @@ export function auditBranchLineage({
       unique_commits: counts.unique_commits,
       classification,
       risk_rank: riskRank(classification),
+      semantic_converged_to_base: semanticConvergedToBase,
       authority_critical: authority.authority_critical,
       authority_categories: authority.authority_categories,
       authority_match_count: authority.authority_matches.length,
       authority_matches: authority.authority_matches.slice(0, fileLimit),
+      historical_authority_critical: historicalAuthority.authority_critical,
+      historical_authority_categories: historicalAuthority.authority_categories,
+      historical_authority_match_count: historicalAuthority.authority_matches.length,
+      historical_authority_matches: historicalAuthority.authority_matches.slice(0, fileLimit),
       unique_file_count: uniquePaths.length,
       unique_files_truncated: uniquePaths.length > fileLimit,
       unique_files: uniquePaths.slice(0, fileLimit),
+      tip_delta_file_count: tipDeltaPaths.length,
+      tip_delta_files_truncated: tipDeltaPaths.length > fileLimit,
+      tip_delta_files: tipDeltaPaths.slice(0, fileLimit),
       superseded_by_base: classification === 'CONTAINED',
       superseded_by_branch: null,
       equivalent_to_branch: null,
@@ -287,6 +307,8 @@ export function auditBranchLineage({
     branch_count: branches.length,
     classification_counts: Object.fromEntries(Object.entries(counts).sort(([a], [b]) => a.localeCompare(b))),
     authority_branch_count: branches.filter((row) => row.authority_critical && row.unique_commits > 0).length,
+    historical_authority_branch_count: branches.filter((row) => row.historical_authority_critical && row.unique_commits > 0).length,
+    semantic_converged_branch_count: branches.filter((row) => row.semantic_converged_to_base).length,
     lineage_tip_count: lineageTips.length,
     authority_lineage_tip_count: authorityLineageTips.length,
     family_summary: familySummary,
@@ -306,17 +328,18 @@ export function renderBranchLineageMarkdown(report) {
     '# Branch Lineage Audit V1',
     '',
     `Base: \`${report.base_ref}\` @ \`${report.base_sha}\``,
-    `Branches: ${report.branch_count}; raw authority-bearing branches: ${report.authority_branch_count}; lineage tips: ${report.lineage_tip_count}; authority-bearing tips: ${report.authority_lineage_tip_count}.`,
+    `Branches: ${report.branch_count}; current authority-bearing branches: ${report.authority_branch_count}; historical authority-bearing branches: ${report.historical_authority_branch_count ?? report.authority_branch_count}; semantically converged histories: ${report.semantic_converged_branch_count ?? 0}; lineage tips: ${report.lineage_tip_count}; authority-bearing tips: ${report.authority_lineage_tip_count}.`,
     '',
-    '| Tip | Class | Branch | Unique | Base-only | Superseded by | Authority | Family |',
-    '|---|---|---|---:|---:|---|---|---|',
+    '| Tip | Class | Branch | Unique | Base-only | Tip delta | Superseded by | Current authority | Historical authority | Family |',
+    '|---|---|---|---:|---:|---:|---|---|---|---|',
   ];
   for (const row of report.branches) {
     const authority = row.authority_categories.length ? row.authority_categories.join(', ') : '—';
-    const superseded = row.superseded_by_base ? 'BASE' : (row.superseded_by_branch || row.equivalent_to_branch || '—');
-    lines.push(`| ${row.lineage_tip ? 'TIP' : '—'} | ${row.classification} | \`${row.branch}\` | ${row.unique_commits} | ${row.base_only_commits} | \`${superseded}\` | ${authority} | \`${row.family}\` |`);
+    const historicalAuthority = row.historical_authority_categories?.length ? row.historical_authority_categories.join(', ') : '—';
+    const superseded = row.superseded_by_base ? 'BASE' : (row.semantic_converged_to_base ? 'BASE_TREE' : (row.superseded_by_branch || row.equivalent_to_branch || '—'));
+    lines.push(`| ${row.lineage_tip ? 'TIP' : '—'} | ${row.classification} | \`${row.branch}\` | ${row.unique_commits} | ${row.base_only_commits} | ${row.tip_delta_file_count ?? row.unique_file_count} | \`${superseded}\` | ${authority} | ${historicalAuthority} | \`${row.family}\` |`);
   }
-  lines.push('', '> Read-only audit: no ref mutation, worktree mutation, scheduler call, merge, cherry-pick, release, or Browser actuation is performed.');
+  lines.push('', '> Read-only audit: no ref mutation, worktree mutation, scheduler call, merge, cherry-pick, release, or Browser actuation is performed. Historical authority records provenance; current authority classification is derived from the final branch-tip delta against the integration root.');
   return `${lines.join('\n')}\n`;
 }
 
@@ -362,6 +385,7 @@ function help() {
     '  --max-files <n>        emitted file cap per branch (authority detection still scans all)',
     '',
     'Lineage tips are derived only from exact Git ancestry inside the same branch family.',
+    'Current authority classification uses final tip-to-tip file delta; historical authority provenance remains separately visible.',
     'The auditor is read-only and never runs git mutation commands.',
   ].join('\n');
 }
