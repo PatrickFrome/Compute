@@ -86,6 +86,27 @@ function stackedFixture() {
   return cwd;
 }
 
+function historicalAuthorityConvergenceFixture() {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'metaengine-lineage-convergence-'));
+  git(cwd, 'init', '-b', 'main');
+  git(cwd, 'config', 'user.email', 'audit@example.invalid');
+  git(cwd, 'config', 'user.name', 'Lineage Audit Test');
+  write(cwd, 'README.md', 'root\n');
+  commitAll(cwd, 'root');
+
+  git(cwd, 'checkout', '-b', 'audit');
+  write(cwd, 'supabase/migrations/20990101000900_shared.sql', 'select 42;\n');
+  commitAll(cwd, 'integrate authority independently');
+
+  git(cwd, 'checkout', 'main');
+  git(cwd, 'checkout', '-b', 'work/c0-converged-authority');
+  write(cwd, 'supabase/migrations/20990101000900_shared.sql', 'select 42;\n');
+  commitAll(cwd, 'historical authority implementation');
+
+  git(cwd, 'checkout', 'audit');
+  return cwd;
+}
+
 function byBranch(report, name) {
   const row = report.branches.find((entry) => entry.branch === name);
   assert.ok(row, `missing branch ${name}`);
@@ -133,6 +154,31 @@ test('classifies contained, ahead and diverged lineages with authority risk', ()
   assert.equal(diverged.authority_categories.includes('SCHEDULER_CONTROL'), true);
 });
 
+test('historical authority commits do not remain current authority blockers after byte-identical tip convergence', () => {
+  const cwd = historicalAuthorityConvergenceFixture();
+  const report = auditBranchLineage({
+    cwd,
+    baseRef: 'audit',
+    namespace: 'refs/heads/',
+    include: /^work\/c0-converged-authority$/,
+  });
+  const row = byBranch(report, 'work/c0-converged-authority');
+
+  assert.equal(row.unique_commits, 1);
+  assert.equal(row.base_only_commits, 1);
+  assert.equal(row.classification, 'DIVERGED_HISTORY_ONLY');
+  assert.equal(row.semantic_converged_to_base, true);
+  assert.equal(row.tip_delta_file_count, 0);
+  assert.equal(row.authority_critical, false);
+  assert.equal(row.authority_categories.length, 0);
+  assert.equal(row.historical_authority_critical, true);
+  assert.equal(row.historical_authority_categories.includes('DATABASE_AUTHORITY'), true);
+  assert.equal(row.lineage_tip, false);
+  assert.equal(report.authority_branch_count, 0);
+  assert.equal(report.historical_authority_branch_count, 1);
+  assert.equal(report.semantic_converged_branch_count, 1);
+});
+
 test('exact ancestry collapses stacked same-family branches to independent lineage tips', () => {
   const cwd = stackedFixture();
   const report = auditBranchLineage({
@@ -169,6 +215,7 @@ test('exact ancestry collapses stacked same-family branches to independent linea
     family: 'work/c0',
     branch_count: 5,
     contained_count: 0,
+    semantic_converged_count: 0,
     lineage_tip_count: 2,
     authority_lineage_tip_count: 2,
   });
@@ -214,6 +261,7 @@ test('branch and file caps fail closed or truncate output without hiding authori
   assert.equal(row.authority_critical, true);
   assert.equal(row.authority_match_count, 1);
   assert.equal(row.unique_files.length, 1);
+  assert.equal(row.tip_delta_files.length, 1);
 });
 
 test('markdown projection is deterministic and explicitly read-only', () => {
@@ -225,6 +273,7 @@ test('markdown projection is deterministic and explicitly read-only', () => {
   assert.match(first, /DIVERGED_AUTHORITY/);
   assert.match(first, /AHEAD_NONAUTHORITY/);
   assert.match(first, /authority-bearing tips/);
+  assert.match(first, /Historical authority/);
   assert.match(first, /Read-only audit/);
   assert.doesNotMatch(first, new RegExp(cwd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
