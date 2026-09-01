@@ -13,10 +13,12 @@ function object(value,name){if(!value||typeof value!=='object'||Array.isArray(va
 function workspaceId(value){const out=String(value||'').toLowerCase();if(!UUID_RE.test(out))throw new Error('meta_native_workspace_id_invalid');return out}
 function roadmapId(value){const out=String(value||'').trim().toLowerCase();if(!ROADMAP_RE.test(out))throw new Error('meta_native_roadmap_id_invalid');return out}
 function pointId(value){const out=String(value||'').trim().toLowerCase();if(!POINT_RE.test(out))throw new Error('meta_native_point_id_invalid');return out}
+function pointIds(value){if(!Array.isArray(value)||value.length<1||value.length>8)throw new Error('meta_native_point_ids_invalid');const out=value.map(pointId);if(new Set(out).size!==out.length)throw new Error('meta_native_point_ids_duplicate');return Object.freeze(out)}
 function nonNegative(value,name){const out=Number(value);if(!Number.isSafeInteger(out)||out<0)throw new Error(`meta_native_${name}_invalid`);return out}
 function positive(value,name){const out=Number(value);if(!Number.isSafeInteger(out)||out<1)throw new Error(`meta_native_${name}_invalid`);return out}
 function stable(value){if(Array.isArray(value))return value.map(stable);if(value&&typeof value==='object'){const out={};for(const key of Object.keys(value).sort())out[key]=stable(value[key]);return out}return value}
 function boundedDeadline(value,fallback){const out=Number(value);return Math.max(1000,Math.min(30000,Number.isFinite(out)?out:fallback))}
+function taskForPoint(inputs,point,generation){return(Array.isArray(inputs?.tasks)?inputs.tasks:[]).find(row=>String(row?.point_id||'').toLowerCase()===point&&Number(row?.task_spec?.meta_orchestrator?.plan_generation)===generation&&UUID_RE.test(String(row?.task_id||'')))||null}
 
 export class MetaOrchestratorActivationOutcomeError extends Error{
   constructor(message,{effectState='AMBIGUOUS',automaticRetryAllowed=false,cause=null}={}){super(message,{cause});this.name='MetaOrchestratorActivationOutcomeError';this.effect_state=effectState;this.automatic_retry_allowed=automaticRetryAllowed;this.authority_effect=false}
@@ -37,6 +39,7 @@ export class MetaOrchestratorNativeProvider{
   #lastReadAt=null;
   #lastActivation=null;
   #lastAdmission=null;
+  #lastFrontier=null;
 
   constructor({identity,fetchImpl=globalThis.fetch,workspace_id,baseUrl=NATIVE_SUPERVISOR_BASE,runtimePath=NATIVE_SUPERVISOR_RUNTIME_PATH,readDeadlineMs=8000,effectDeadlineMs=12000}={}){
     if(!identity||typeof identity.ensure!=='function'||typeof identity.deviceHeaders!=='function')throw new Error('meta_native_identity_required');
@@ -56,7 +59,7 @@ export class MetaOrchestratorNativeProvider{
     if(!this.#baseUrl.startsWith('https://')||!this.#runtimePath.startsWith('/'))throw new Error('meta_native_endpoint_invalid');
   }
 
-  snapshot(){return Object.freeze({schema:'metaengine.meta-orchestrator.native-provider.v2',workspace_id:this.#workspaceId,last_read_at:this.#lastReadAt,last_activation:this.#lastActivation?structuredClone(this.#lastActivation):null,last_admission:this.#lastAdmission?structuredClone(this.#lastAdmission):null,read_deadline_ms:this.#readDeadlineMs,effect_deadline_ms:this.#effectDeadlineMs,effect_timeout_requires_authoritative_readback:true,automatic_retry:false,second_polling_loop:false,scheduler_authority:false,browser_authority:false,release_authority:false,authority_effect:false})}
+  snapshot(){return Object.freeze({schema:'metaengine.meta-orchestrator.native-provider.v3',workspace_id:this.#workspaceId,last_read_at:this.#lastReadAt,last_activation:this.#lastActivation?structuredClone(this.#lastActivation):null,last_admission:this.#lastAdmission?structuredClone(this.#lastAdmission):null,last_frontier:this.#lastFrontier?structuredClone(this.#lastFrontier):null,read_deadline_ms:this.#readDeadlineMs,effect_deadline_ms:this.#effectDeadlineMs,effect_timeout_requires_authoritative_readback:true,atomic_frontier_admission:true,automatic_retry:false,second_polling_loop:false,scheduler_authority:false,browser_authority:false,release_authority:false,authority_effect:false})}
 
   async #signedPost(path,payload,{effectful=false}={}){
     const identity=await this.#identity.ensure();
@@ -79,6 +82,57 @@ export class MetaOrchestratorNativeProvider{
     if(bundle.authority_effect!==false||bundle.scheduler_authority!==false||bundle.browser_authority!==false||bundle.release_authority!==false||bundle.task_content_authority!==false)throw new Error('meta_native_authoritative_inputs_authority_invalid');
     this.#lastReadAt=new Date().toISOString();
     return bundle;
+  }
+
+  async admitFrontier({roadmap_id,plan_generation,point_ids}={}){
+    const roadmap=roadmapId(roadmap_id);const generation=positive(plan_generation,'plan_generation');const points=pointIds(point_ids);
+    let response;let body={};
+    try{
+      response=await this.#signedPost('/v1/meta/admit-frontier',{roadmap_id:roadmap,plan_generation:generation,point_ids:points},{effectful:true});
+      body=await response.json().catch(()=>({}));
+    }catch(error){return this.#reconcileAmbiguousFrontier({roadmap,generation,points,cause:error})}
+    if(response.ok){
+      if(body?.schema!=='metaengine.meta-orchestrator.frontier-admission.v1'||Number(body.plan_generation)!==generation||body.atomic_transaction!==true||body.all_or_none_new_admission!==true||!Array.isArray(body.points)||body.points.length!==points.length)throw new Error('meta_native_frontier_readback_invalid');
+      const seen=new Set();
+      for(const row of body.points){const point=String(row?.point_id||'').toLowerCase();if(!points.includes(point)||seen.has(point)||!UUID_RE.test(String(row?.task_id||'')))throw new Error('meta_native_frontier_point_readback_invalid');seen.add(point)}
+      this.#lastFrontier={state:'EFFECT_CONFIRMED',plan_generation:generation,point_ids:[...points],task_ids:body.points.map(row=>row.task_id),at:new Date().toISOString(),automatic_retry_allowed:false,authority_effect:false};
+      return body;
+    }
+    if(response.status===409){
+      this.#lastFrontier={state:'FENCED',plan_generation:generation,point_ids:[...points],at:new Date().toISOString(),automatic_retry_allowed:false,authority_effect:false};
+      throw new MetaOrchestratorAdmissionOutcomeError(`meta_native_frontier_fenced:${body?.reason||body?.error||'conflict'}`,{effectState:'FENCED',automaticRetryAllowed:false});
+    }
+    if(response.status>=400&&response.status<500){
+      this.#lastFrontier={state:'REJECTED',plan_generation:generation,point_ids:[...points],at:new Date().toISOString(),automatic_retry_allowed:false,authority_effect:false};
+      throw new MetaOrchestratorAdmissionOutcomeError(`meta_native_frontier_rejected_${response.status}:${body?.reason||body?.error||'rejected'}`,{effectState:'EFFECT_ABSENT',automaticRetryAllowed:false});
+    }
+    return this.#reconcileAmbiguousFrontier({roadmap,generation,points,cause:new Error(`meta_native_frontier_http_${response.status}:${body?.reason||body?.error||'unknown'}`)});
+  }
+
+  async #reconcileAmbiguousFrontier({roadmap,generation,points,cause}){
+    let inputs;
+    try{inputs=await this.readAuthoritativeInputs({workspace_id:this.#workspaceId,roadmap_id:roadmap})}catch(readError){
+      this.#lastFrontier={state:'AMBIGUOUS',plan_generation:generation,point_ids:[...points],at:new Date().toISOString(),automatic_retry_allowed:false,authority_effect:false};
+      throw new MetaOrchestratorAdmissionOutcomeError('meta_native_frontier_ambiguous_readback_failed',{effectState:'AMBIGUOUS',automaticRetryAllowed:false,cause:readError});
+    }
+    const found=points.map(point=>taskForPoint(inputs,point,generation));
+    const foundCount=found.filter(Boolean).length;
+    if(foundCount===points.length){
+      const rows=found.map((task,index)=>({point_id:points[index],task_id:task.task_id,duplicate:true,authority_effect:false}));
+      this.#lastFrontier={state:'EFFECT_CONFIRMED',plan_generation:generation,point_ids:[...points],task_ids:rows.map(row=>row.task_id),at:new Date().toISOString(),automatic_retry_allowed:false,reconciled:true,authority_effect:false};
+      return{schema:'metaengine.meta-orchestrator.frontier-admission.v1',workspace_id:this.#workspaceId,roadmap_id:roadmap,plan_generation:generation,point_count:points.length,points:rows,atomic_transaction:true,all_or_none_new_admission:true,reconciled:true,task_payload_returned:false,scheduler_identity_returned:false,second_scheduler_loop:false,automatic_retry_allowed:false,task_content_authority:false,scheduler_authority:false,browser_authority:false,release_authority:false,authority_effect:false};
+    }
+    if(foundCount>0){
+      this.#lastFrontier={state:'AMBIGUOUS_PARTIAL_READBACK',plan_generation:generation,point_ids:[...points],found_point_ids:points.filter((_,index)=>found[index]),at:new Date().toISOString(),automatic_retry_allowed:false,reconciled:true,authority_effect:false};
+      throw new MetaOrchestratorAdmissionOutcomeError('meta_native_frontier_partial_readback_ambiguous',{effectState:'AMBIGUOUS',automaticRetryAllowed:false,cause});
+    }
+    const planState=object(inputs.plan_state,'frontier_plan_readback');
+    if(planState.found===true&&planState.state==='ACTIVE'&&Number(planState.plan_generation)===generation){
+      this.#lastFrontier={state:'EFFECT_ABSENT',plan_generation:generation,point_ids:[...points],at:new Date().toISOString(),automatic_retry_allowed:true,reconciled:true,authority_effect:false};
+      throw new MetaOrchestratorAdmissionOutcomeError('meta_native_frontier_effect_absent_after_readback',{effectState:'EFFECT_ABSENT',automaticRetryAllowed:true,cause});
+    }
+    this.#lastFrontier={state:'AMBIGUOUS',plan_generation:generation,point_ids:[...points],at:new Date().toISOString(),automatic_retry_allowed:false,reconciled:true,authority_effect:false};
+    throw new MetaOrchestratorAdmissionOutcomeError('meta_native_frontier_ambiguous_after_readback',{effectState:'AMBIGUOUS',automaticRetryAllowed:false,cause});
   }
 
   async admitTask({roadmap_id,plan_generation,point_id}={}){
@@ -110,8 +164,8 @@ export class MetaOrchestratorNativeProvider{
       this.#lastAdmission={state:'AMBIGUOUS',plan_generation:generation,point_id:point,at:new Date().toISOString(),automatic_retry_allowed:false,authority_effect:false};
       throw new MetaOrchestratorAdmissionOutcomeError('meta_native_admission_ambiguous_readback_failed',{effectState:'AMBIGUOUS',automaticRetryAllowed:false,cause:readError});
     }
-    const task=(Array.isArray(inputs.tasks)?inputs.tasks:[]).find(row=>String(row?.point_id||'').toLowerCase()===point&&Number(row?.task_spec?.meta_orchestrator?.plan_generation)===generation);
-    if(task&&UUID_RE.test(String(task.task_id||''))){
+    const task=taskForPoint(inputs,point,generation);
+    if(task){
       this.#lastAdmission={state:'EFFECT_CONFIRMED',plan_generation:generation,point_id:point,task_id:task.task_id,at:new Date().toISOString(),automatic_retry_allowed:false,reconciled:true,authority_effect:false};
       return {schema:'metaengine.meta-orchestrator.task-admission.v1',workspace_id:this.#workspaceId,roadmap_id:roadmap,plan_generation:generation,point_id:point,task_id:task.task_id,duplicate:true,reconciled:true,task_payload_returned:false,scheduler_identity_returned:false,automatic_retry_allowed:false,task_content_authority:false,scheduler_authority:false,browser_authority:false,release_authority:false,authority_effect:false};
     }
