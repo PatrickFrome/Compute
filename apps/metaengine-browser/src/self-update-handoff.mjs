@@ -16,6 +16,7 @@ const PRE_INSTALL_SCHEMA = 'metaengine.self-update.pre-install-receipt.v1';
 const SUCCESSOR_SCHEMA = 'metaengine.self-update.successor-receipt.v1';
 const DEFAULT_MAX_AGE_MS = 30 * 60 * 1000;
 const STARTUP_HOLD_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
+const UNRESOLVED_STARTUP_STATES = new Set(['PREPARED','INSTALLING','SUCCESSOR_BOOTED']);
 
 function assertApp(app) {
   if (!app || typeof app.getPath !== 'function' || typeof app.getVersion !== 'function') throw new Error('self_update_handoff_app_invalid');
@@ -80,6 +81,19 @@ async function transitionIfPresent(app, state, options = {}) {
   }
 }
 
+function startupHold({ app, journal = null, reason, transactionState = null } = {}) {
+  return {
+    schema: 'metaengine.self-update.startup-inspection.v1',
+    state: 'AMBIGUOUS_INSTALL',
+    transaction_state: transactionState || journal?.state || null,
+    current_version: String(app.getVersion() || ''),
+    target_version: journal?.target_version || null,
+    reason: String(reason || 'durable_transaction_hold').slice(0, 240),
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  };
+}
+
 export function selfUpdateHandoffPaths(app) {
   assertApp(app);
   const userData = app.getPath('userData');
@@ -105,7 +119,14 @@ export async function persistPreInstallReceipt(app, receipt) {
   const { pre_install } = selfUpdateHandoffPaths(app);
   await clearSuccessorReceipt(app);
   await atomicWriteJson(pre_install, receipt);
-  await beginSelfUpdateTransaction(app, receipt);
+  try {
+    await beginSelfUpdateTransaction(app, receipt);
+  } catch (error) {
+    // Do not leave a fresh receipt that could be mistaken for a newly admitted attempt
+    // when the durable transaction ledger rejected the begin operation.
+    try { await fs.unlink(pre_install); } catch (unlinkError) { if (unlinkError?.code !== 'ENOENT') throw unlinkError; }
+    throw error;
+  }
   return { path: pre_install, successor_startup: successorStartupMode(receipt) };
 }
 
@@ -133,17 +154,22 @@ export async function readExpectedPreInstallReceipt(app, { maxAgeMs = DEFAULT_MA
 
 export async function inspectSelfUpdateStartup(app, { clock = () => Date.now() } = {}) {
   assertApp(app);
-  const journal = await readSelfUpdateTransaction(app).catch(() => null);
+  let journal = null;
+  try {
+    journal = await readSelfUpdateTransaction(app);
+  } catch (error) {
+    return startupHold({
+      app,
+      reason: `transaction_journal_unreadable:${String(error?.message || error).slice(0, 180)}`,
+      transactionState: 'UNREADABLE',
+    });
+  }
   if (journal?.state === 'AMBIGUOUS_INSTALL' || journal?.state === 'QUARANTINED') {
-    return {
-      schema: 'metaengine.self-update.startup-inspection.v1',
-      state: journal.state,
-      current_version: String(app.getVersion() || ''),
-      target_version: journal.target_version,
+    return startupHold({
+      app,
+      journal,
       reason: journal.evidence?.reason || journal.evidence?.quarantine_reason || 'durable_transaction_hold',
-      automatic_retry_allowed: false,
-      authority_effect: false,
-    };
+    });
   }
 
   let expected;
@@ -151,17 +177,14 @@ export async function inspectSelfUpdateStartup(app, { clock = () => Date.now() }
     expected = await readExpectedPreInstallReceipt(app, { maxAgeMs: STARTUP_HOLD_MAX_AGE_MS, clock });
   } catch (error) {
     await transitionIfPresent(app, 'AMBIGUOUS_INSTALL', { evidence: { reason: String(error?.message || error).slice(0, 180) } }).catch(() => {});
-    return {
-      schema: 'metaengine.self-update.startup-inspection.v1',
-      state: 'AMBIGUOUS_INSTALL',
-      current_version: String(app.getVersion() || ''),
-      target_version: journal?.target_version || null,
-      reason: String(error?.message || error).slice(0, 240),
-      automatic_retry_allowed: false,
-      authority_effect: false,
-    };
+    return startupHold({ app, journal, reason: error?.message || error });
   }
   if (!expected) {
+    if (journal && UNRESOLVED_STARTUP_STATES.has(journal.state)) {
+      const reason = 'durable_transaction_present_but_pre_install_receipt_missing';
+      await transitionIfPresent(app, 'AMBIGUOUS_INSTALL', { evidence: { reason } }).catch(() => {});
+      return startupHold({ app, journal, reason, transactionState: journal.state });
+    }
     return {
       schema: 'metaengine.self-update.startup-inspection.v1',
       state: 'NONE', current_version: String(app.getVersion() || ''), target_version: null,
@@ -193,12 +216,11 @@ export async function inspectSelfUpdateStartup(app, { clock = () => Date.now() }
   await transitionIfPresent(app, 'AMBIGUOUS_INSTALL', {
     evidence: { reason: 'pre_install_receipt_present_but_target_not_installed' },
   }).catch(() => {});
-  return {
-    schema: 'metaengine.self-update.startup-inspection.v1',
-    state: 'AMBIGUOUS_INSTALL', current_version: current, target_version: target,
+  return startupHold({
+    app,
+    journal,
     reason: 'pre_install_receipt_present_but_target_not_installed',
-    automatic_retry_allowed: false, authority_effect: false,
-  };
+  });
 }
 
 export async function persistUpdatedSuccessorReceipt(app, {
