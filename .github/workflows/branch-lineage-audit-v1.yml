@@ -1,0 +1,90 @@
+name: Branch Lineage Audit V1
+
+on:
+  push:
+    branches:
+      - 'work/browser-continuous-fleet-audit-v1'
+    paths:
+      - 'coordination/devos/branch-lineage-auditor.mjs'
+      - 'tests/branch_lineage_auditor.test.mjs'
+      - '.github/workflows/branch-lineage-audit-v1.yml'
+  pull_request:
+    paths:
+      - 'coordination/devos/branch-lineage-auditor.mjs'
+      - 'tests/branch_lineage_auditor.test.mjs'
+      - '.github/workflows/branch-lineage-audit-v1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  read-only-lineage-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          ACTUAL_HEAD="$(git rev-parse HEAD)"
+          test "$ACTUAL_HEAD" = "$EXPECTED_HEAD"
+          printf 'exact_head=%s\n' "$ACTUAL_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Syntax and synthetic git-graph contract
+        run: |
+          set -euo pipefail
+          node --check coordination/devos/branch-lineage-auditor.mjs
+          node --test tests/branch_lineage_auditor.test.mjs
+
+      - name: Fetch all public remote heads read-only
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --force --prune origin '+refs/heads/*:refs/remotes/origin/*'
+          COUNT="$(git for-each-ref --format='%(refname)' refs/remotes/origin/ | wc -l | tr -d ' ')"
+          test "$COUNT" -gt 1
+          printf 'remote_head_count=%s\n' "$COUNT"
+
+      - name: Audit real repository branch lineages
+        env:
+          BASE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          OUT: ${{ runner.temp }}/branch-lineage-audit-v1.json
+        run: |
+          set -euo pipefail
+          node coordination/devos/branch-lineage-auditor.mjs \
+            --base "$BASE_SHA" \
+            --namespace refs/remotes/origin/ \
+            --include '^(work|integration|release)/' \
+            --max-branches 1000 \
+            --max-files 200 \
+            --format json > "$OUT"
+          node --input-type=module - "$OUT" <<'NODE'
+          import fs from 'node:fs';
+          const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (report.schema !== 'metaengine.devos.branch-lineage-audit.v1') throw new Error('schema');
+          if (report.branch_count < 1) throw new Error('empty_audit');
+          if (report.authority_effect !== false || report.mutates_refs !== false || report.mutates_worktree !== false || report.invokes_scheduler !== false) {
+            throw new Error('read_only_contract');
+          }
+          const risky = report.branches.filter((row) => row.classification === 'DIVERGED_AUTHORITY').length;
+          const contained = report.branches.filter((row) => row.classification === 'CONTAINED').length;
+          console.log(JSON.stringify({ branch_count: report.branch_count, authority_branch_count: report.authority_branch_count, diverged_authority: risky, contained }));
+          NODE
+
+      - name: Prove audit did not mutate repository
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
