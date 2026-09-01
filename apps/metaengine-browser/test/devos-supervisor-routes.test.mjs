@@ -8,7 +8,7 @@ const taskId='09f2e414-5c31-4fc7-87a3-f5de1315cb81';
 async function bodyOf(r){return JSON.parse(await r.text());}
 function fleetAgent(id,role='IMPLEMENTER',index=1){return{agent_id:id,role,lifecycle_state:'ACTIVE',tab_id:`tab_${id}`,target_id:`webcontents:${100+index}`,generation_epoch:1};}
 
-test('heartbeat cycle reconciles stale leases before snapshot and is the sole scheduler source',async()=>{
+test('heartbeat cycle acquires meta controller lease before reconcile/snapshot and keeps one scheduler',async()=>{
   const calls=[];
   const rpc=async(name,args)=>{
     calls.push([name,args]);
@@ -18,7 +18,7 @@ test('heartbeat cycle reconciles stale leases before snapshot and is the sole sc
   };
   const route=createDevosSupervisorRoutes({rpc,workspaceId});
   const out=await bodyOf(await route({req:{method:'POST'},path:'/v1/devos/cycle',body:{fleet:{agents:[agent]}},clientId:'device'}));
-  assert.deepEqual(calls.slice(0,2).map(c=>c[0]),['devos_fleet_reconcile_v1','devos_fleet_snapshot_v1']);
+  assert.deepEqual(calls.slice(0,3).map(c=>c[0]),['meta_orchestrator_controller_lease_v1','devos_fleet_reconcile_v1','devos_fleet_snapshot_v1']);
   assert.equal(out.reconcile.expired_tasks_fenced_ambiguous,16);
   assert.equal(out.scheduler_source,'NATIVE_SUPERVISOR_HEARTBEAT');
   assert.equal(out.scheduler_policy,'IDLE_ROLE_FAIR_SHARE_V1');

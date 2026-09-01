@@ -62,7 +62,7 @@ test('parent progress lease is exact-token exact-pid and contains no scheduling 
   assert.equal(disk.authority_effect,false);assert.equal(Object.hasOwn(disk,'task_id'),false);assert.equal(Object.hasOwn(disk,'lease_generation'),false);assert.equal(row.automatic_retry_allowed,false);
 });
 
-test('parent progress lease serializes concurrent writes and leaves only the committed durable record',async()=>{
+test('parent progress lease serializes concurrent writes and delegates fsync durability to the shared committed-record helper',async()=>{
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-parent-progress-concurrent-'));
   const statePath=path.join(dir,'metaengine-browser-sentinel-v1.json');
   await fs.writeFile(statePath,JSON.stringify(state()),{mode:0o600});
@@ -73,8 +73,12 @@ test('parent progress lease serializes concurrent writes and leaves only the com
   assert.equal(disk.progress_seq,16);assert.equal(disk.detail,'step-15');assert.equal(disk.authority_effect,false);
   const names=await fs.readdir(dir);
   assert.equal(names.some((name)=>name.endsWith('.tmp')),false);
-  const source=await fs.readFile(new URL('../src/browser-parent-progress-lease.mjs',import.meta.url),'utf8');
-  assert.match(source,/await handle\.sync\(\)/);assert.match(source,/await committed\.sync\(\)/);assert.match(source,/await syncDirectory\(directory\)/);
+  const leaseSource=await fs.readFile(new URL('../src/browser-parent-progress-lease.mjs',import.meta.url),'utf8');
+  const durableSource=await fs.readFile(new URL('../src/durable-json-file.cjs',import.meta.url),'utf8');
+  assert.match(leaseSource,/durableWriteJson\(parentProgressPath\(this\.#statePath\), row/);
+  assert.match(durableSource,/await handle\.sync\(\)/);
+  assert.match(durableSource,/await committed\.sync\(\)/);
+  assert.match(durableSource,/await syncDirectory\(directory\)/);
 });
 
 test('failed progress mark does not poison the serialized write tail',async()=>{
@@ -88,13 +92,28 @@ test('failed progress mark does not poison the serialized write tail',async()=>{
   assert.equal(recovered.progress_seq,1);assert.equal(recovered.detail,'after-failure');assert.equal(recovered.authority_effect,false);
 });
 
-test('worker cannot relaunch before exact old parent absence and never retries ambiguous termination blindly',async()=>{
+test('worker persists one-shot termination and relaunch intents around the exact-parent absence boundary',async()=>{
   const source=await fs.readFile(new URL('../src/browser-sentinel-worker.cjs',import.meta.url),'utf8');
-  const kill=source.indexOf("process.kill(PARENT_PID, 'SIGTERM')");
+  const terminateStart=source.indexOf('async function terminateStalledParentOnce');
+  const terminateEnd=source.indexOf('async function relaunchOnce');
+  const terminateSource=source.slice(terminateStart,terminateEnd);
+  const beginTermination=terminateSource.indexOf('await journal.beginTermination(state, decision)');
+  const kill=terminateSource.indexOf("process.kill(PARENT_PID, 'SIGTERM')");
+  const confirmed=terminateSource.indexOf("markTermination(state, 'PARENT_TERMINATION_CONFIRMED'");
+  assert.ok(beginTermination>=0&&kill>beginTermination&&confirmed>kill);
+
+  const relaunchStart=source.indexOf('async function relaunchOnce');
+  const relaunchEnd=source.indexOf('async function main');
+  const relaunchSource=source.slice(relaunchStart,relaunchEnd);
+  const beginRelaunch=relaunchSource.indexOf("await journal.beginRelaunch(state, 'EXACT_OLD_PARENT_ABSENT')");
+  const spawn=relaunchSource.indexOf('spawn(state.executable');
+  assert.ok(beginRelaunch>=0&&spawn>beginRelaunch);
+
   const absentGuard=source.lastIndexOf('if (parentAlive()) return;');
-  const relaunch=source.lastIndexOf('await relaunchOnce(state)');
-  assert.ok(kill>=0&&absentGuard>kill&&relaunch>absentGuard);
-  assert.match(source,/parent_liveness_termination_attempted === true/);
+  const relaunch=source.lastIndexOf('await relaunchOnce(state, journal)');
+  assert.ok(absentGuard>=0&&relaunch>absentGuard);
+  assert.match(source,/journal\.terminationAttempted\(\)/);
+  assert.match(source,/journal\.relaunchAttempted\(\)/);
   assert.match(source,/PARENT_TERMINATION_AMBIGUOUS/);
   assert.match(source,/automatic_retry_allowed: false/);
   assert.equal(source.includes('devos_fleet_lease_v1'),false);
