@@ -223,3 +223,124 @@ test('corrupt journal fails before scheduler request or Browser effect', async (
   assert.equal(requests, 0);
   assert.equal(commands, 0);
 });
+
+test('write-ahead crash before effect barrier proves absence and requeues only through scheduler', async () => {
+  const { statePath } = await journalFixture();
+  const seed = new DevOsEffectDeliveryJournal({ statePath });
+  await seed.init();
+  await seed.beginExecution(journalBinding(), {
+    phase: 'BEFORE_SEMANTIC_TYPE',
+    effect_barrier_contract: 'WRITE_AHEAD_V1',
+    physical_effect_attempted: false,
+    effect_barrier_crossed: false,
+  });
+
+  const calls = [];
+  const selected = { value: supervisorTab };
+  const recoveryRequests = [];
+  const cycle = new DevOsNativeTaskCycle({
+    effectJournal: new DevOsEffectDeliveryJournal({ statePath }),
+    getState: async () => state(selected.value),
+    executeCommand: commandHarness(calls, selected),
+    signedRequest: async (requestPath, request = {}) => {
+      if (requestPath.includes('/status')) {
+        return response(200, { task_id: lease.task_id, state: 'AMBIGUOUS', lease_generation: lease.lease_generation });
+      }
+      if (requestPath === '/v1/devos/reconcile-ambiguous') {
+        recoveryRequests.push(structuredClone(request.payload));
+        return response(200, {
+          schema: 'metaengine.devos.ambiguity-reconciliation.v1',
+          task_id: lease.task_id,
+          lease_generation: lease.lease_generation,
+          state: 'READY',
+          recovery_class: 'PRE_EFFECT_ABORTED',
+          retry_via_scheduler: true,
+          physical_effect_replayed: false,
+          new_lease_generation_allocated: false,
+          automatic_retry_allowed: false,
+          authority_effect: false,
+        });
+      }
+      if (requestPath === '/v1/devos/cycle') {
+        return response(200, { schema: 'metaengine.devos.browser-cycle.v1', backlog: { ready: 1, running: 0 }, lease: null, running: [] });
+      }
+      throw new Error(`unexpected:${requestPath}`);
+    },
+  });
+
+  const out = await cycle.cycle();
+  assert.equal(out.ambiguity_recovery.state, 'EFFECT_ABSENT_REQUEUED');
+  assert.equal(out.ambiguity_recovery.retry_via_scheduler, true);
+  assert.equal(out.ambiguity_recovery.physical_effect_replayed, false);
+  assert.equal(recoveryRequests.length, 1);
+  assert.deepEqual(recoveryRequests[0].recovery, {
+    recovery_class: 'PRE_EFFECT_ABORTED',
+    prompt_sha256: promptHash,
+    physical_effect_attempted: false,
+    effect_barrier_crossed: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  });
+  assert.equal(calls.includes('SEMANTIC_TYPE'), false);
+  assert.equal(calls.includes('TYPED_CLICK'), false);
+
+  const readback = new DevOsEffectDeliveryJournal({ statePath });
+  await readback.init();
+  const entry = readback.find(journalBinding());
+  assert.equal(entry.state, 'EFFECT_ABSENT');
+  assert.equal(entry.evidence.physical_effect_attempted, false);
+  assert.equal(entry.evidence.effect_barrier_crossed, false);
+});
+
+test('crash after EFFECT_ATTEMPTED barrier stays ambiguous and never invokes recovery or Browser replay', async () => {
+  const { statePath } = await journalFixture();
+  const seed = new DevOsEffectDeliveryJournal({ statePath });
+  await seed.init();
+  await seed.beginExecution(journalBinding(), {
+    phase: 'BEFORE_SEMANTIC_TYPE',
+    effect_barrier_contract: 'WRITE_AHEAD_V1',
+    physical_effect_attempted: false,
+    effect_barrier_crossed: false,
+  });
+  await seed.markEffectAttempted(journalBinding(), {
+    phase: 'BEFORE_TYPED_CLICK',
+    effect_barrier_contract: 'WRITE_AHEAD_V1',
+    send_click_returned: false,
+  });
+
+  const calls = [];
+  const selected = { value: supervisorTab };
+  let reconciliationCalls = 0;
+  const cycle = new DevOsNativeTaskCycle({
+    effectJournal: new DevOsEffectDeliveryJournal({ statePath }),
+    getState: async () => state(selected.value),
+    executeCommand: commandHarness(calls, selected),
+    signedRequest: async (requestPath) => {
+      if (requestPath.includes('/status')) {
+        return response(200, { task_id: lease.task_id, state: 'AMBIGUOUS', lease_generation: lease.lease_generation });
+      }
+      if (requestPath === '/v1/devos/reconcile-ambiguous') {
+        reconciliationCalls += 1;
+        return response(500, {});
+      }
+      if (requestPath === '/v1/devos/cycle') {
+        return response(200, { schema: 'metaengine.devos.browser-cycle.v1', backlog: { ready: 0, running: 0 }, lease: null, running: [] });
+      }
+      throw new Error(`unexpected:${requestPath}`);
+    },
+  });
+
+  const out = await cycle.cycle();
+  assert.equal(out.ambiguity_recovery.state, 'STILL_AMBIGUOUS_EFFECT_UNKNOWN');
+  assert.equal(out.ambiguity_recovery.physical_effect_replayed, false);
+  assert.equal(reconciliationCalls, 0);
+  assert.equal(calls.includes('SEMANTIC_TYPE'), false);
+  assert.equal(calls.includes('TYPED_CLICK'), false);
+
+  const readback = new DevOsEffectDeliveryJournal({ statePath });
+  await readback.init();
+  const entry = readback.find(journalBinding());
+  assert.equal(entry.state, 'AMBIGUOUS');
+  assert.equal(entry.evidence.physical_effect_attempted, true);
+  assert.equal(entry.evidence.effect_barrier_crossed, true);
+});
