@@ -1,6 +1,9 @@
 -- METAENGINE DevOS ambiguity reconciliation v2: authenticated CONTROL-client fence.
 -- Branch-local only. Do not apply to production from this audit task.
 -- Requires 20260901043000_devos_control_supervisor_authority_repair_v1.sql.
+-- The RPC implementation is v2, while the wire response remains the stable
+-- metaengine.devos.ambiguity-reconciliation.v1 contract because authorization
+-- hardening did not change the response shape. This keeps rolling native clients compatible.
 
 create or replace function public.devos_fleet_reconcile_ambiguous_v2(
   p_workspace uuid,
@@ -83,7 +86,7 @@ begin
     end if;
     if v_task.state='READY' and v_task.lease_generation=p_generation and v_task.lease_agent_id is null
        and v_task.lease_tab_id is null and v_task.lease_target_id is null and v_task.lease_agent_generation_epoch is null then
-      return jsonb_build_object('schema','metaengine.devos.ambiguity-reconciliation.v2','workspace_id',p_workspace,'task_id',p_task,'lease_generation',p_generation,'state','READY','recovery_class',v_class,'duplicate',true,'retry_via_scheduler',true,'physical_effect_replayed',false,'new_lease_generation_allocated',false,'automatic_retry_allowed',false,'authority_effect',false);
+      return jsonb_build_object('schema','metaengine.devos.ambiguity-reconciliation.v1','workspace_id',p_workspace,'task_id',p_task,'lease_generation',p_generation,'state','READY','recovery_class',v_class,'duplicate',true,'retry_via_scheduler',true,'physical_effect_replayed',false,'new_lease_generation_allocated',false,'automatic_retry_allowed',false,'authority_effect',false);
     end if;
     if v_task.state<>'AMBIGUOUS' then raise exception 'devos_ambiguity_state_fenced'; end if;
     update destruktion_meta.devos_fleet_claim_h205f22 set state='FENCED',updated_at=v_now
@@ -96,7 +99,7 @@ begin
     perform destruktion_meta.devos_emit_event_h205f22(p_workspace,'TASK_AMBIGUITY_EFFECT_ABSENT_REQUEUED',p_task,v_task.point_id,v_task.role,v_agent,p_generation,v_task.base_sha,
       jsonb_build_object('recovery_class',v_class,'client_id',v_client,'prompt_sha256',v_prompt_sha,'physical_effect_attempted',false,'effect_barrier_crossed',false,'retry_via_scheduler',true,'physical_effect_replayed',false,'new_lease_generation_allocated',false,'automatic_retry_allowed',false,'authority_effect',false),
       'devos:ambiguity:effect-absent:'||p_task::text||':'||p_generation::text);
-    return jsonb_build_object('schema','metaengine.devos.ambiguity-reconciliation.v2','workspace_id',p_workspace,'task_id',p_task,'lease_generation',p_generation,'state','READY','recovery_class',v_class,'duplicate',false,'retry_via_scheduler',true,'physical_effect_replayed',false,'new_lease_generation_allocated',false,'automatic_retry_allowed',false,'authority_effect',false);
+    return jsonb_build_object('schema','metaengine.devos.ambiguity-reconciliation.v1','workspace_id',p_workspace,'task_id',p_task,'lease_generation',p_generation,'state','READY','recovery_class',v_class,'duplicate',false,'retry_via_scheduler',true,'physical_effect_replayed',false,'new_lease_generation_allocated',false,'automatic_retry_allowed',false,'authority_effect',false);
   end if;
 
   if coalesce((p_recovery->>'physical_effect_attempted')::boolean,false)<>true
@@ -136,7 +139,7 @@ begin
      and exists(select 1 from destruktion_meta.devos_fleet_claim_h205f22 c where c.task_id=p_task and c.workspace_id=p_workspace
        and c.agent_id=v_agent and c.lease_generation=p_generation and c.tab_id=p_tab and lower(c.target_id)=v_target
        and c.agent_generation_epoch=p_epoch and c.state='ACTIVE' and c.expires_at>v_now) then
-    return jsonb_build_object('schema','metaengine.devos.ambiguity-reconciliation.v2','workspace_id',p_workspace,'task_id',p_task,'lease_generation',p_generation,'state','RUNNING','recovery_class',v_class,'duplicate',true,'retry_via_scheduler',false,'physical_effect_replayed',false,'new_lease_generation_allocated',false,'conversation_url_sha256',v_conversation_sha,'automatic_retry_allowed',false,'authority_effect',false);
+    return jsonb_build_object('schema','metaengine.devos.ambiguity-reconciliation.v1','workspace_id',p_workspace,'task_id',p_task,'lease_generation',p_generation,'state','RUNNING','recovery_class',v_class,'duplicate',true,'retry_via_scheduler',false,'physical_effect_replayed',false,'new_lease_generation_allocated',false,'conversation_url_sha256',v_conversation_sha,'automatic_retry_allowed',false,'authority_effect',false);
   end if;
   if v_task.state<>'AMBIGUOUS' then raise exception 'devos_ambiguity_state_fenced'; end if;
   if exists(select 1 from destruktion_meta.devos_fleet_claim_h205f22 c where c.workspace_id=p_workspace and c.state='ACTIVE' and c.expires_at>v_now
@@ -156,7 +159,7 @@ begin
   perform destruktion_meta.devos_emit_event_h205f22(p_workspace,'TASK_AMBIGUITY_EFFECT_PROVEN_RUNNING',p_task,v_task.point_id,v_task.role,v_agent,p_generation,v_task.base_sha,
     jsonb_build_object('recovery_class',v_class,'client_id',v_client,'prompt_sha256',v_prompt_sha,'conversation_url_sha256',v_conversation_sha,'effect_state',v_effect_state,'physical_effect_attempted',true,'effect_barrier_crossed',true,'physical_effect_replayed',false,'new_lease_generation_allocated',false,'automatic_retry_allowed',false,'authority_effect',false),
     'devos:ambiguity:effect-proven:'||p_task::text||':'||p_generation::text);
-  return jsonb_build_object('schema','metaengine.devos.ambiguity-reconciliation.v2','workspace_id',p_workspace,'task_id',p_task,'lease_generation',p_generation,'state','RUNNING','recovery_class',v_class,'duplicate',false,'retry_via_scheduler',false,'physical_effect_replayed',false,'new_lease_generation_allocated',false,'conversation_url_sha256',v_conversation_sha,'automatic_retry_allowed',false,'authority_effect',false);
+  return jsonb_build_object('schema','metaengine.devos.ambiguity-reconciliation.v1','workspace_id',p_workspace,'task_id',p_task,'lease_generation',p_generation,'state','RUNNING','recovery_class',v_class,'duplicate',false,'retry_via_scheduler',false,'physical_effect_replayed',false,'new_lease_generation_allocated',false,'conversation_url_sha256',v_conversation_sha,'automatic_retry_allowed',false,'authority_effect',false);
 end;
 $$;
 
