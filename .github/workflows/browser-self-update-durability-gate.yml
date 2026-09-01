@@ -6,15 +6,19 @@ on:
       - 'work/browser-continuous-fleet-audit-v1'
     paths:
       - 'apps/metaengine-browser/src/self-update-transaction-journal.mjs'
+      - 'apps/metaengine-browser/src/self-update-handoff.mjs'
       - 'apps/metaengine-browser/src/durable-json-file.cjs'
       - 'apps/metaengine-browser/test/self-update-transaction-journal.test.mjs'
+      - 'apps/metaengine-browser/test/self-update-handoff.test.mjs'
       - 'apps/metaengine-browser/test/self-update-install-effect-barrier.test.mjs'
       - '.github/workflows/browser-self-update-durability-gate.yml'
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/self-update-transaction-journal.mjs'
+      - 'apps/metaengine-browser/src/self-update-handoff.mjs'
       - 'apps/metaengine-browser/src/durable-json-file.cjs'
       - 'apps/metaengine-browser/test/self-update-transaction-journal.test.mjs'
+      - 'apps/metaengine-browser/test/self-update-handoff.test.mjs'
       - 'apps/metaengine-browser/test/self-update-install-effect-barrier.test.mjs'
       - '.github/workflows/browser-self-update-durability-gate.yml'
 
@@ -50,13 +54,15 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Transaction durability and write-ahead effect barrier
+      - name: Transaction, handoff, and write-ahead effect durability
         shell: bash
         run: |
           set -euo pipefail
           node --check apps/metaengine-browser/src/self-update-transaction-journal.mjs
+          node --check apps/metaengine-browser/src/self-update-handoff.mjs
           node --check apps/metaengine-browser/src/durable-json-file.cjs
           node --test apps/metaengine-browser/test/self-update-transaction-journal.test.mjs
+          node --test apps/metaengine-browser/test/self-update-handoff.test.mjs
           node --test apps/metaengine-browser/test/self-update-install-effect-barrier.test.mjs
 
       - name: Prove tests did not mutate checkout
