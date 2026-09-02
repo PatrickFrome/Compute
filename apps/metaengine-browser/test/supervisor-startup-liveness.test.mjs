@@ -9,12 +9,26 @@ const src = path.resolve(here, '../src');
 
 async function read(name) { return fs.readFile(path.join(src, name), 'utf8'); }
 
-test('continuity watchdog is armed before long-lived Browser runtime can block native supervisor startup', async () => {
+test('Browser runtime registers early but cannot start before host resilience bootstrap and watchdog fencing', async () => {
   const entry = await read('main-entry.mjs');
-  const watchdogAt = entry.indexOf('startSelfUpdateContinuityWatchdog({');
-  const mainAt = entry.indexOf("await import('./main.mjs')", watchdogAt);
-  assert.ok(watchdogAt >= 0);
-  assert.ok(mainAt > watchdogAt);
+  const main = await read('main.mjs');
+  const barrierAt = entry.indexOf('__METAENGINE_BROWSER_BOOTSTRAP_BARRIER__');
+  const mainImportAt = entry.indexOf("import('./main.mjs')", barrierAt);
+  const startupInspectionAt = entry.indexOf('inspectSelfUpdateStartup(app)', mainImportAt);
+  const watchdogAt = entry.indexOf('startSelfUpdateContinuityWatchdog({', mainImportAt);
+  const hostStartAt = entry.indexOf('hostResilience.start()', watchdogAt);
+  const releaseAt = entry.indexOf('resolveBrowserBootstrap?.(hostSnapshot)', hostStartAt);
+  const mainBarrierAt = main.indexOf('__METAENGINE_BROWSER_BOOTSTRAP_BARRIER__');
+  const mainAwaitAt = main.indexOf('await barrier', mainBarrierAt);
+  const startupAt = main.indexOf('return startAfterReady()', mainAwaitAt);
+  assert.ok(barrierAt >= 0);
+  assert.ok(mainImportAt > barrierAt, 'runtime module must see the barrier before it registers app.ready');
+  assert.ok(startupInspectionAt > mainImportAt, 'privileged protocol/runtime registration must not be delayed by startup inspection');
+  assert.ok(watchdogAt > mainImportAt);
+  assert.ok(hostStartAt > watchdogAt, 'continuity watchdog must be armed before host bootstrap can block');
+  assert.ok(releaseAt > hostStartAt, 'Browser start barrier may release only after host bootstrap returns');
+  assert.ok(mainBarrierAt >= 0 && mainAwaitAt > mainBarrierAt && startupAt > mainAwaitAt);
+  assert.match(main, /if \(app\.isReady\(\)\) queueMicrotask\(startBrowserRuntime\)/);
 });
 
 test('watchdog recovery quarantines durable continuity before relaunch and has no browser replay authority', async () => {
