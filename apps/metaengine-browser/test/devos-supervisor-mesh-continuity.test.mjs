@@ -22,7 +22,7 @@ function meshHarness() {
   return { mesh, state: () => structuredClone(stored) };
 }
 
-test('discovers two supervisor conversations while excluding fleet tabs', async () => {
+test('discovers every canonical conversation while fleet chats remain coordination-fenced', async () => {
   const h = meshHarness();
   await h.mesh.init();
   await h.mesh.reconcile({
@@ -34,8 +34,15 @@ test('discovers two supervisor conversations while excluding fleet tabs', async 
     fleetAgents: [{ agent_id: 'agentF', tab_id: 'tabF' }],
   });
   const snap = h.mesh.snapshot();
-  assert.equal(snap.counts.active, 2);
-  assert.equal(snap.supervisors.some((row) => row.conversation_url === F), false);
+  assert.equal(snap.counts.active, 3);
+  assert.equal(snap.counts.supervisor_capable, 3);
+  assert.equal(snap.counts.coordination_eligible, 2);
+  const fleet = snap.supervisors.find((row) => row.conversation_url === F);
+  assert.ok(fleet);
+  assert.equal(fleet.supervisor_capable, true);
+  assert.equal(fleet.fleet_bound, true);
+  assert.equal(fleet.coordination_blocked, true);
+  assert.equal(fleet.control_policy, 'SUPABASE_SHARED_LEASE_REQUIRED');
   assert.equal(snap.coordinator_supervisor_id, supervisorInstanceIdForUrl(A));
 });
 
