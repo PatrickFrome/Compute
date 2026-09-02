@@ -1,6 +1,6 @@
 {
   "name": "@metaengine/browser-shell",
-  "version": "0.6.6-dev.7.1",
+  "version": "0.6.6-dev.8.1",
   "private": true,
   "type": "module",
   "description": "METAENGINE Development Fabric browser shell with autonomous GPT fleet, embedded Development Plane, durable supervisor keepalive, crash sentinel, host resilience and self-update runtime",
