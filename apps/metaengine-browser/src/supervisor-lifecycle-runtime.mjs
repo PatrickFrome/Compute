@@ -1,10 +1,14 @@
 import crypto from 'node:crypto';
 import { chatGptControlMatches, uniqueChatGptControl } from './chatgpt-ui-controls.mjs';
+import { ChatGptServiceThrottleGate } from './chatgpt-service-throttle.mjs';
 import { SupervisorLifecycleRuntime as CoreSupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime-core.mjs';
 
 const NATIVE_FRAME_SCHEMA = 'metaengine.native-browser.perception.v1';
 const CHAT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/c\/[a-z0-9-]+/i;
 const CHAT_ROOT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/?$/i;
+const SERVICE_THROTTLE_BLOCKED_ACTIONS = new Set([
+  'NEW_TAB', 'NAVIGATE', 'RELOAD', 'SEMANTIC_TYPE', 'TYPED_CLICK', 'STOP_GENERATION',
+]);
 const clip = (value, max = 180) => String(value ?? '').slice(0, max);
 
 function isNativeFrame(frame) {
@@ -81,8 +85,11 @@ function positiveReadback(frame, fence) {
   return CHAT_ROOT_RE.test(String(fence.pre_url || '')) && CHAT_RE.test(String(frame?.url || ''));
 }
 
-export function createSupervisorSendBoundaryExecutor({ getState, executeCommand } = {}) {
+export function createSupervisorSendBoundaryExecutor({ getState, executeCommand, throttleGate = null } = {}) {
   if (typeof getState !== 'function' || typeof executeCommand !== 'function') throw new Error('supervisor_send_boundary_dependencies_required');
+  if (throttleGate != null && (typeof throttleGate.observe !== 'function' || typeof throttleGate.active !== 'function')) {
+    throw new Error('supervisor_service_throttle_gate_invalid');
+  }
   const lastNativeFrame = new Map();
   const promptFence = new Map();
   const readbackFence = new Map();
@@ -91,6 +98,7 @@ export function createSupervisorSendBoundaryExecutor({ getState, executeCommand 
     const id = String(tabId || frame?.tab_id || '');
     if (!id || !isNativeFrame(frame)) return;
     lastNativeFrame.set(id, frame);
+    throttleGate?.observe(id, frame);
     const fence = promptFence.get(id);
     if (positiveReadback(frame, fence)) {
       promptFence.delete(id);
@@ -124,6 +132,10 @@ export function createSupervisorSendBoundaryExecutor({ getState, executeCommand 
     const tabId = String(command?.payload?.tab_id || '');
 
     if (action === 'CAPTURE') return capture(command);
+
+    if (throttleGate?.active() && SERVICE_THROTTLE_BLOCKED_ACTIONS.has(action)) {
+      return suppressed(action, 'CHATGPT_SERVICE_THROTTLED', lastNativeFrame.get(tabId) || null);
+    }
 
     if (action === 'SEMANTIC_TYPE') {
       const baseline = lastNativeFrame.get(tabId);
@@ -181,6 +193,7 @@ export function createSupervisorSendBoundaryExecutor({ getState, executeCommand 
       // Non-native executors are test/model adapters and retain the proven core path.
       // The installed Electron path always exposes metaengine.native-browser.perception.v1.
       if (!isNativeFrame(before)) return executeCommand(command);
+      if (throttleGate?.active()) return block('CHATGPT_SERVICE_THROTTLED');
 
       await executeCommand({ action: 'SELECT_TAB', payload: { tab_id: tabId }, platform: command?.platform ?? null });
       const state = await getState();
@@ -189,6 +202,7 @@ export function createSupervisorSendBoundaryExecutor({ getState, executeCommand 
       activated = await executeCommand({ action: 'CAPTURE', payload: { tab_id: tabId }, platform: command?.platform ?? null });
       rememberFrame(tabId, activated);
       if (!isNativeFrame(activated)) return block('SUPERVISOR_NATIVE_FRAME_LOST');
+      if (throttleGate?.active()) return block('CHATGPT_SERVICE_THROTTLED');
       if (!exactIncarnation(before, activated, tabId)) return block('SUPERVISOR_TARGET_INCARNATION_CHANGED');
       if (!positiveViewport(activated)) return block('SUPERVISOR_VIEWPORT_NOT_VISIBLE');
 
@@ -214,11 +228,37 @@ export function createSupervisorSendBoundaryExecutor({ getState, executeCommand 
 // supervisor-lifecycle-runtime-core.mjs: CHATGPT_CONVERSATION_LIMIT_HINT and
 // reason.startsWith('MAX_CYCLES_PER_EPOCH'). The wrapper adds no page authority.
 export class SupervisorLifecycleRuntime extends CoreSupervisorLifecycleRuntime {
+  #serviceThrottleGate;
+
   constructor(options = {}) {
+    const serviceThrottleGate = options.serviceThrottleGate || new ChatGptServiceThrottleGate();
+    if (typeof serviceThrottleGate.active !== 'function' || typeof serviceThrottleGate.snapshot !== 'function') {
+      throw new Error('supervisor_service_throttle_gate_invalid');
+    }
+    const baseCanActuate = typeof options.canActuate === 'function' ? options.canActuate : () => true;
     const guardedExecute = createSupervisorSendBoundaryExecutor({
       getState: options.getState,
       executeCommand: options.executeCommand,
+      throttleGate: serviceThrottleGate,
     });
-    super({ ...options, executeCommand: guardedExecute });
+    super({
+      ...options,
+      canActuate: () => baseCanActuate() === true && serviceThrottleGate.active() !== true,
+      executeCommand: guardedExecute,
+    });
+    this.#serviceThrottleGate = serviceThrottleGate;
+  }
+
+  snapshot() {
+    const base = super.snapshot();
+    return {
+      ...base,
+      continuous_service: {
+        ...(base.continuous_service || {}),
+        service_throttle_backpressure: 'UI_READBACK_GATE_V1',
+      },
+      service_throttle: this.#serviceThrottleGate.snapshot(),
+      authority_effect: false,
+    };
   }
 }
