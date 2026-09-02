@@ -5,6 +5,7 @@ on:
     branches:
       - work/self-update-fast-loop-v1
       - work/devos-elastic-fleet-bootstrap-v1
+      - work/browser-devos-root-transport-bootstrap-v1
     paths:
       - 'apps/metaengine-browser/**'
       - '.github/workflows/metaengine-browser-self-update-fast-e2e.yml'

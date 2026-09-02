@@ -10,9 +10,10 @@ function isoMs(value) {
  * Decide whether an already-confirmed supervisor wake may be retired at an
  * observed terminal boundary without sending or retrying any effect.
  *
- * This deliberately rejects the normal just-sent IDLE race. Retirement while
- * previous_state is IDLE is allowed only for a durable restored request, or
- * after an exact supervisor-tab rebind and a bounded confirmed-wake age.
+ * The normal just-sent IDLE race remains fenced. Once the exact confirmed wake
+ * has remained terminal on the exact current supervisor tab past a bounded
+ * grace period, retirement is safe because it only clears durable coordination
+ * state; it never replays the prior send effect.
  */
 export function evaluateActiveWakeTerminalRetirement({
   active_request,
@@ -61,8 +62,12 @@ export function evaluateActiveWakeTerminalRetirement({
 
   const rebound = requestTab && requestTab !== observedTab;
   const grace = Math.max(10_000, Number(orphan_grace_ms) || 30_000);
-  if (rebound && ageMs != null && ageMs >= grace) {
-    return Object.freeze({ ...base, retire: true, reason: 'REBIND_ORPHAN_TERMINAL' });
+  if (ageMs != null && ageMs >= grace) {
+    return Object.freeze({
+      ...base,
+      retire: true,
+      reason: rebound ? 'REBIND_ORPHAN_TERMINAL' : 'STALE_CONFIRMED_WAKE_TERMINAL',
+    });
   }
 
   return Object.freeze({ ...base, reason: rebound ? 'REBIND_GRACE_NOT_ELAPSED' : 'JUST_SENT_IDLE_RACE' });

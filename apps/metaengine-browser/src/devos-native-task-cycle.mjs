@@ -21,16 +21,22 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 const clip = (value, max = 240) => String(value ?? '').slice(0, max);
 
-function conversationUrl(value) {
+function transportUrl(value) {
   try {
     const url = new URL(String(value || ''));
     if (url.protocol !== 'https:' || !['chatgpt.com', 'www.chatgpt.com'].includes(url.hostname.toLowerCase())) return null;
     const pathName = url.pathname.replace(/\/+$/, '');
+    if (pathName === '') return Object.freeze({ url: 'https://chatgpt.com/', stage: 'PRECONVERSATION_ROOT' });
     if (!/^\/c\/[a-z0-9-]+$/i.test(pathName)) return null;
-    return `https://chatgpt.com${pathName.toLowerCase()}`;
+    return Object.freeze({ url: `https://chatgpt.com${pathName.toLowerCase()}`, stage: 'CONVERSATION' });
   } catch {
     return null;
   }
+}
+
+function conversationUrl(value) {
+  const transport = transportUrl(value);
+  return transport?.stage === 'CONVERSATION' ? transport.url : null;
 }
 
 function exactTransportProof(agent) {
@@ -39,6 +45,8 @@ function exactTransportProof(agent) {
   const proof = agent?.transport_proof;
   if (!proof || proof.schema !== 'metaengine.browser.fleet-transport-proof.v1') return null;
   if (proof.authority_effect !== false) return null;
+  const stage = String(proof.transport_stage || 'CONVERSATION');
+  if (!['PRECONVERSATION_ROOT', 'CONVERSATION'].includes(stage)) return null;
   if (String(proof.tab_id || '') !== String(agent.tab_id || '')) return null;
   if (String(proof.target_id || '').toLowerCase() !== String(agent.target_id || '').toLowerCase()) return null;
   if (Number(proof.generation_epoch) !== Number(agent.generation_epoch)) return null;
@@ -100,9 +108,10 @@ function promotionCandidate(state) {
     if (!/^agent_[a-z0-9-]{8,64}$/.test(String(agent?.agent_id || '').toLowerCase())) return false;
     if (!String(agent?.tab_id || '') || !/^webcontents:[1-9][0-9]*$/.test(String(agent?.target_id || '').toLowerCase())) return false;
     if (!Number.isSafeInteger(Number(agent?.generation_epoch)) || Number(agent.generation_epoch) < 1) return false;
-    // Registry URL is only a read-only hint used to avoid leasing root tabs. Exact CAPTURE
-    // after promotion lease acquisition remains the authority for the local transport proof.
-    return Boolean(conversationUrl(tabs.get(String(agent.tab_id))?.url));
+    // Registry URL is a read-only hint only. Both a fresh ChatGPT root tab and an existing
+    // canonical conversation may enter the promotion lease. Exact CAPTURE after lease
+    // acquisition remains authoritative; no TYPE or CLICK occurs in this promotion stage.
+    return Boolean(transportUrl(tabs.get(String(agent.tab_id))?.url));
   });
   candidates.sort((a, b) => String(a.agent_id).localeCompare(String(b.agent_id)));
   return candidates[0] || null;
@@ -167,7 +176,7 @@ export class DevOsNativeTaskCycle {
     const proofGatedSignedRequest = async (requestPath, request = {}) => {
       if (String(requestPath) === '/v1/devos/mark-running') {
         const payload = request?.payload || {};
-        const agent = exactFleetAgent(await this.#getState(), payload);
+        let agent = exactFleetAgent(await this.#getState(), payload);
         const expectedHash = String(payload?.proof?.conversation_url_sha256 || '').toLowerCase();
         let frame = this.#lastFrames.get(String(payload.tab_id || '')) || null;
         let normalizedUrl = conversationUrl(frame?.url);
@@ -177,7 +186,6 @@ export class DevOsNativeTaskCycle {
           normalizedUrl = conversationUrl(frame?.url);
         }
 
-        const fleetProof = exactTransportProof(agent);
         if (frame?.target_id && String(frame.target_id).toLowerCase() !== String(payload.target_id || '').toLowerCase()) {
           throw new Error('devos_transport_active_frame_target_mismatch');
         }
@@ -185,9 +193,33 @@ export class DevOsNativeTaskCycle {
           throw new Error('devos_transport_active_conversation_hash_mismatch');
         }
 
+        let fleetProof = exactTransportProof(agent);
+        let proofState = 'PREEXISTING_ACTIVE_PROOF_REVALIDATED';
+        if (String(fleetProof?.transport_stage || 'CONVERSATION') === 'PRECONVERSATION_ROOT') {
+          const upgraded = await markFleetTransportProvenFromNativeFrame({
+            binding: {
+              agent_id: agent.agent_id,
+              tab_id: agent.tab_id,
+              target_id: agent.target_id,
+              agent_generation_epoch: agent.generation_epoch,
+            },
+            frame,
+            expected_conversation_url_sha256: expectedHash,
+          });
+          if (upgraded?.state !== 'UPGRADED_CONVERSATION') {
+            throw new Error('devos_transport_preconversation_upgrade_invalid');
+          }
+          agent = exactFleetAgent(await this.#getState(), payload);
+          fleetProof = exactTransportProof(agent);
+          if (String(fleetProof?.transport_stage || 'CONVERSATION') === 'PRECONVERSATION_ROOT') {
+            throw new Error('devos_transport_preconversation_upgrade_not_persisted');
+          }
+          proofState = 'PRECONVERSATION_PROOF_UPGRADED';
+        }
+
         this.#lastFleetTransportProof = {
           schema: 'metaengine.browser.fleet-native-transport-proof.v2',
-          state: 'PREEXISTING_ACTIVE_PROOF_REVALIDATED',
+          state: proofState,
           agent_id: agent.agent_id,
           tab_id: agent.tab_id,
           target_id: agent.target_id,
@@ -223,6 +255,7 @@ export class DevOsNativeTaskCycle {
       fleet_transport_proof_before_physical_dispatch: true,
       fleet_transport_proof_before_db_running: true,
       restart_transport_promotion_before_scheduler_cycle: true,
+      preconversation_transport_promotion_non_effect: true,
       promotion_fanout_per_cycle: 1,
       durable_effect_delivery_journal: this.#inner.snapshot()?.durable_effect_delivery_journal === true,
       bound_unverified_dispatch_allowed: false,
@@ -263,24 +296,26 @@ export class DevOsNativeTaskCycle {
       if (!lease) throw new Error('devos_transport_promotion_lease_readback_invalid');
 
       const frame = await this.#executeCommand({ action: 'CAPTURE', platform: 'CHATGPT', payload: { tab_id: binding.tab_id } });
-      const normalizedUrl = conversationUrl(frame?.url);
-      if (!normalizedUrl) throw new Error('devos_transport_promotion_conversation_not_ready');
+      const transport = transportUrl(frame?.url);
+      if (!transport) throw new Error('devos_transport_promotion_transport_not_ready');
       if (String(frame?.target_id || '').toLowerCase() !== binding.target_id) throw new Error('devos_transport_promotion_target_drift');
 
-      const expectedHash = sha256(normalizedUrl);
+      const expectedHash = sha256(transport.url);
       localProof = await markFleetTransportProvenFromNativeFrame({
         binding,
         frame,
-        expected_conversation_url_sha256: expectedHash,
+        expected_transport_url_sha256: expectedHash,
       });
-      if (localProof?.state !== 'PROVEN' && localProof?.state !== 'ALREADY_ACTIVE') {
+      if (!['PROVEN', 'PROVEN_PRECONVERSATION', 'ALREADY_ACTIVE', 'ALREADY_ACTIVE_PRECONVERSATION'].includes(String(localProof?.state || ''))) {
         throw new Error('devos_transport_promotion_local_proof_invalid');
       }
       result = {
         state: 'LOCAL_ACTIVE',
         ...binding,
         lease_id: lease.lease_id,
-        conversation_url_sha256: expectedHash,
+        transport_stage: transport.stage,
+        transport_url_sha256: expectedHash,
+        conversation_url_sha256: transport.stage === 'CONVERSATION' ? expectedHash : null,
         local_proof_state: localProof.state,
         automatic_retry_allowed: false,
         authority_effect: false,
