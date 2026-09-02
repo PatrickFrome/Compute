@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { shouldResumeSuccessorQualification } from '../src/self-update-successor-recovery.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const source = fs.readFileSync(path.resolve(here, '../src/main-entry.mjs'), 'utf8');
@@ -11,7 +12,19 @@ test('ambiguous updated successor boot stays live and cannot qualify', () => {
   assert.match(source, /METAENGINE_SELF_UPDATE_HOLD_REASON = 'SUCCESSOR_RECEIPT_AMBIGUOUS'/);
   assert.match(source, /recovery_state: 'LIVE_HOLD'/);
   assert.match(source, /automatic_retry_allowed: false/);
-  assert.match(source, /if \(updatedLaunch && updateHandoff\)/);
+  assert.match(source, /const resumeSuccessorQualification = shouldResumeSuccessorQualification/);
+  assert.match(source, /updatedLaunch,\s*updateHandoff,\s*startupInspection: startupUpdateInspection/);
+  assert.equal(shouldResumeSuccessorQualification({
+    updatedLaunch: true,
+    updateHandoff: null,
+    startupInspection: {
+      state: 'TARGET_INSTALLED',
+      current_version: '0.6.6-dev.8.1',
+      target_version: '0.6.6-dev.8.1',
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    },
+  }), false, 'ambiguous --updated handoff must not fall through to normal-restart recovery evidence');
   assert.doesNotMatch(source, /self-update-successor-boot-failure[\s\S]{0,900}app\.exit\(7\)/);
 });
 
