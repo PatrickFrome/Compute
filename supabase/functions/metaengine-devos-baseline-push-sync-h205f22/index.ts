@@ -1,9 +1,12 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createRemoteJWKSet, jwtVerify } from "npm:jose@6.1.0";
+import postgres from "npm:postgres@^3";
 
 const ISSUER = "https://token.actions.githubusercontent.com";
 const AUDIENCE = "metaengine-h205f22-devos-baseline-sync";
 const JWKS = createRemoteJWKSet(new URL("https://token.actions.githubusercontent.com/.well-known/jwks"));
+const DB_URL = Deno.env.get("SUPABASE_DB_URL") || "";
+const sql = DB_URL ? postgres(DB_URL, { prepare: false, max: 1, idle_timeout: 20, connect_timeout: 10 }) : null;
 const REPO = "PatrickFrome/Compute";
 const REPOSITORY_ID = "1341371143";
 const OWNER_ID = "20597814";
@@ -30,33 +33,20 @@ function boundedError(error: unknown) {
     .slice(0, 240);
 }
 
-function internalAuth() {
-  const url = Deno.env.get("SUPABASE_URL") || "";
-  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-  if (!url || !key) throw new Error("supabase_internal_auth_unavailable");
-  return { url, key };
+function db() {
+  if (!sql) throw new Error("direct_db_url_missing");
+  return sql;
 }
 
-async function callRpc(fn: string, body: Record<string, unknown>) {
-  const { url, key } = internalAuth();
-  const response = await fetch(`${url}/rest/v1/rpc/${fn}`, {
-    method: "POST",
-    headers: {
-      apikey: key,
-      authorization: `Bearer ${key}`,
-      "content-type": "application/json",
-      "cache-control": "no-store",
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(10_000),
-  });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`${fn}_failed:${response.status}:${text.slice(0, 220)}`);
-  return text ? JSON.parse(text) : null;
+async function first(query: any) {
+  const rows = await query;
+  return Array.isArray(rows) && rows.length ? rows[0] : null;
 }
 
 async function readAuthority() {
-  return await callRpc("devos_roadmap_baseline_sync_read_v1", {});
+  const q = db();
+  const row = await first(q`select public.devos_roadmap_baseline_sync_read_v1() as result`);
+  return row?.result ?? null;
 }
 
 async function githubCompare(expected: string, candidate: string) {
@@ -100,29 +90,33 @@ async function commitAdvance(expected: string, candidate: string, compare: Recor
     });
   }
 
-  const proof = {
-    schema: "metaengine.devos.github-baseline-proof.v1",
-    source_repo: REPO,
-    source_branch: BRANCH,
-    base_sha: expected,
-    merge_base_sha: mergeBase,
-    branch_head_sha: candidate,
-    head_sha: headSha,
-    compare_status: status,
-    observed_at: new Date().toISOString(),
-    proof_source: "GITHUB_OIDC_PUSH_SHA_PLUS_COMPARE_V1",
-    github_run_id: String(payload.run_id || ""),
-    github_run_attempt: Number(payload.run_attempt || 0),
-    github_actor_id: String(payload.actor_id || ""),
-    github_oidc_jti: String(payload.jti || "").slice(0, 512),
-    caller_candidate_ignored: true,
-    authority_effect: false,
-  };
-  const result = await callRpc("devos_roadmap_baseline_sync_commit_v1", {
-    p_expected_base: expected,
-    p_next_base: candidate,
-    p_github_proof: proof,
-  });
+  const observedAt = new Date().toISOString();
+  const q = db();
+  const row = await first(q`
+    select public.devos_roadmap_baseline_sync_commit_v1(
+      ${expected}::text,
+      ${candidate}::text,
+      jsonb_build_object(
+        'schema','metaengine.devos.github-baseline-proof.v1',
+        'source_repo',${REPO}::text,
+        'source_branch',${BRANCH}::text,
+        'base_sha',${expected}::text,
+        'merge_base_sha',${mergeBase}::text,
+        'branch_head_sha',${candidate}::text,
+        'head_sha',${headSha}::text,
+        'compare_status',${status}::text,
+        'observed_at',${observedAt}::text,
+        'proof_source','GITHUB_OIDC_PUSH_SHA_PLUS_COMPARE_V1',
+        'github_run_id',${String(payload.run_id || "")}::text,
+        'github_run_attempt',${Number(payload.run_attempt || 0)}::int,
+        'github_actor_id',${String(payload.actor_id || "")}::text,
+        'github_oidc_jti',${String(payload.jti || "").slice(0, 512)}::text,
+        'caller_candidate_ignored',true,
+        'authority_effect',false
+      )
+    ) as result
+  `);
+  const result = row?.result ?? null;
   return reply(200, {
     schema: "metaengine.devos.baseline-push-sync-observation.v1",
     ...(result && typeof result === "object" ? result : {}),
