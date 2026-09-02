@@ -17,6 +17,9 @@ export function projectWorkspaceWorkbench(snapshot={}){
   const groupedTabIds=new Set();
   const groups=[];
   const issues=[];
+  let ready=0;
+  let frozen=0;
+  let reserved=0;
 
   if(sourceState==='AVAILABLE'&&Array.isArray(observer?.bindings)){
     for(const binding of observer.bindings){
@@ -38,6 +41,7 @@ export function projectWorkspaceWorkbench(snapshot={}){
       if(Number(agent.generation_epoch)!==agentGeneration){issues.push(issue('AGENT_GENERATION_DRIFT',binding,tab));continue}
       const state=String(binding.state||'').toUpperCase();
       if(!['READY','FROZEN','RESERVED'].includes(state)){issues.push(issue('WORKSPACE_STATE_INVALID',binding,tab));continue}
+      if(state==='READY')ready+=1;else if(state==='FROZEN')frozen+=1;else reserved+=1;
       groupedTabIds.add(tabId);
       groups.push(Object.freeze({
         group_id:`workspace:${workspaceId}:${workspaceGeneration}`,
@@ -79,7 +83,7 @@ export function projectWorkspaceWorkbench(snapshot={}){
     groups,
     sessions,
     issues,
-    counts:{workspaces:groups.length,sessions:sessions.length,issues:issues.length,ready:groups.filter((g)=>g.state==='READY').length,frozen:groups.filter((g)=>g.state==='FROZEN').length,reserved:groups.filter((g)=>g.state==='RESERVED').length},
+    counts:{workspaces:groups.length,sessions:sessions.length,issues:issues.length,ready,frozen,reserved},
     grouping_authority:'DURABLE_WORKSPACE_BINDING_ONLY',
     url_heuristic_grouping:false,
     title_heuristic_grouping:false,
