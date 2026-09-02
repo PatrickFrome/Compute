@@ -31,6 +31,8 @@ test('full PR physical E2E reuses the shared published baseline harness and buil
   assert.match(source, /published_baseline_reused/);
   assert.match(source, /target_build_count/);
   assert.match(source, /physical_evidence_head_mismatch/);
+  assert.match(source, /candidate_head_mismatch:\$\{actual\}:\$\{expected\}/);
+  assert.doesNotMatch(source, /candidate_head_mismatch:\$actual:\$expected/);
   assert.doesNotMatch(source, /Build baseline N installer/);
   assert.doesNotMatch(source, /baseline-setup\.exe/);
   assert.doesNotMatch(source, /electron-builder@26\.15\.7/);
