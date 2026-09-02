@@ -34,6 +34,36 @@ function tabLiveness(state, tabId) {
     network_active: Number(network?.inflight_tracked || 0) > 0,
   };
 }
+function physicalTargetBinding(frame, tabId) {
+  const tab_id = String(frame?.tab_id || tabId || '');
+  const target_id = String(frame?.target_id || '');
+  const process_incarnation_id = String(frame?.process_incarnation_id || '');
+  const url = String(frame?.url || '');
+  if (!tab_id || !target_id || !process_incarnation_id || !url) return null;
+  if (tab_id !== String(tabId || '')) return null;
+  return { tab_id, target_id, process_incarnation_id, url };
+}
+function samePhysicalTarget(expected, observed) {
+  return Boolean(expected && observed
+    && expected.tab_id === observed.tab_id
+    && expected.target_id === observed.target_id
+    && expected.process_incarnation_id === observed.process_incarnation_id
+    && expected.url === observed.url);
+}
+function positiveViewport(frame) {
+  return Number(frame?.viewport?.width || 0) > 0 && Number(frame?.viewport?.height || 0) > 0;
+}
+function exactSelectedTab(state, tabId) {
+  const id = String(tabId || '');
+  const activeId = String(state?.active_tab?.tab_id || '');
+  if (activeId) return activeId === id;
+  const selected = (state?.tabs || []).filter((row) => row?.selected === true);
+  return selected.length === 1 && String(selected[0]?.tab_id || '') === id;
+}
+function ambiguousWakeMayHaveBeenSent(pendingWake) {
+  const reason = String(pendingWake?.ambiguous_reason || '').toUpperCase();
+  return ['SEND_WITHOUT_POSITIVE_READBACK','SEND_CLICK_AMBIGUOUS','SEND_PATH_AMBIGUOUS','SEND_READBACK_TARGET_CHANGED'].includes(reason);
+}
 async function readJson(file) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); }
   catch (e) { if (e?.code === 'ENOENT' || e instanceof SyntaxError) return null; throw e; }
@@ -102,10 +132,13 @@ export class SupervisorLifecycleRuntime {
         auto_rollover_cycles: AUTO_ROLLOVER_CYCLES,
         terminal_requires_user_message: false,
         restart_resumable: true,
+        restart_until_external_stop: true,
+        terminal_stops_service: false,
         orphaned_stall_stop_only: true,
         ambiguous_terminal_retirement: true,
         active_wake_terminal_retirement: 'EXACT_WAKE_TAB_GENERATION_V1',
         ambiguous_same_wake_retry: false,
+        foreground_send_preflight: 'EXACT_TAB_TARGET_PROCESS_VIEWPORT_V1',
         authority_effect: false,
       },
       active_request: this.#activeRequest ? {
@@ -178,7 +211,7 @@ export class SupervisorLifecycleRuntime {
     this.#lastSupervisorGeneration = row.state;
 
     const keepalive = this.#keepalive.snapshot();
-    if (row.terminal_ready === true && keepalive.pending_wake?.ambiguous_at) {
+    if (row.terminal_ready === true && keepalive.pending_wake?.ambiguous_at && ambiguousWakeMayHaveBeenSent(keepalive.pending_wake)) {
       const retiredWakeId = String(keepalive.pending_wake.wake_id || '');
       await this.#keepalive.retireAmbiguousAfterTerminal({
         tab_id: tab.tab_id,
@@ -263,21 +296,77 @@ export class SupervisorLifecycleRuntime {
 
   async #typeAndSend(tabId, message, positiveMarker) {
     let clicked = false;
+    let typed = false;
     const before = await this.#capture(tabId);
-    if (generating(before)) return { ok: false, reason: 'GENERATION_STILL_ACTIVE', clicked: false };
+    if (generating(before)) return { ok: false, reason: 'GENERATION_STILL_ACTIVE', clicked: false, typed: false };
     const box = unique(before, 'textbox');
     if (!box) throw new Error('supervisor_composer_not_unique');
-    await this.#execute({ action: 'SEMANTIC_TYPE', payload: { tab_id: tabId, role: 'textbox', accessible_name: box.name, text: message, replace_existing: true }, platform: null });
-    const send = uniqueChatGptControl(await this.#capture(tabId), 'SEND');
-    if (!send) throw new Error('supervisor_send_not_unique');
+
+    try {
+      await this.#execute({ action: 'SEMANTIC_TYPE', payload: { tab_id: tabId, role: 'textbox', accessible_name: box.name, text: message, replace_existing: true }, platform: null });
+      typed = true;
+    } catch {
+      // Input insertion is a physical effect. A transport error cannot prove that no
+      // characters reached the composer, so the same logical prompt must not be typed again.
+      return { ok: false, reason: 'TYPE_EFFECT_AMBIGUOUS', clicked: false, typed: true };
+    }
+
+    let typedFrame = null;
+    try {
+      typedFrame = await this.#capture(tabId);
+    } catch {
+      return { ok: false, reason: 'POST_TYPE_CAPTURE_UNAVAILABLE', clicked: false, typed };
+    }
+    const expectedBinding = physicalTargetBinding(typedFrame, tabId);
+    if (!expectedBinding) return { ok: false, reason: 'SEND_PREFLIGHT_IDENTITY_MISSING', clicked: false, typed };
+
+    try {
+      await this.#execute({ action: 'SELECT_TAB', payload: { tab_id: String(tabId) }, platform: null });
+    } catch {
+      return { ok: false, reason: 'SEND_PREFLIGHT_SELECT_AMBIGUOUS', clicked: false, typed };
+    }
+
+    let selectedState = null;
+    let ready = null;
+    try {
+      selectedState = await this.#getState();
+      ready = await this.#capture(tabId);
+    } catch {
+      return { ok: false, reason: 'SEND_PREFLIGHT_READBACK_UNAVAILABLE', clicked: false, typed };
+    }
+    if (!exactSelectedTab(selectedState, tabId)) return { ok: false, reason: 'SEND_PREFLIGHT_TAB_NOT_SELECTED', clicked: false, typed };
+    const readyBinding = physicalTargetBinding(ready, tabId);
+    if (!samePhysicalTarget(expectedBinding, readyBinding)) return { ok: false, reason: 'SEND_PREFLIGHT_TARGET_CHANGED', clicked: false, typed };
+    if (!positiveViewport(ready)) return { ok: false, reason: 'SEND_PREFLIGHT_ZERO_VIEWPORT', clicked: false, typed };
+    if (generating(ready)) return { ok: false, reason: 'GENERATION_STARTED_BEFORE_SEND', clicked: false, typed };
+    const send = uniqueChatGptControl(ready, 'SEND');
+    if (!send) return { ok: false, reason: 'SEND_PREFLIGHT_SEND_NOT_UNIQUE', clicked: false, typed };
+
     clicked = true;
-    await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: tabId, role: 'button', accessible_name: send.name }, platform: null });
+    try {
+      await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: tabId, role: 'button', accessible_name: send.name }, platform: null });
+    } catch {
+      // Once the click command is issued, the physical effect is ambiguous even if
+      // transport fails. Blind repetition is forbidden.
+      return { ok: false, reason: 'SEND_CLICK_AMBIGUOUS', clicked, typed };
+    }
+
+    const preClickUrl = String(ready?.url || '');
     for (let i = 0; i < 6; i += 1) {
       await sleep(700);
-      const observed = await this.#capture(tabId);
-      if (generating(observed) || (positiveMarker && String(observed?.text_excerpt || '').includes(positiveMarker))) return { ok: true, clicked, observed };
+      let observed = null;
+      try { observed = await this.#capture(tabId); }
+      catch { continue; }
+      const observedBinding = physicalTargetBinding(observed, tabId);
+      if (!samePhysicalTarget(expectedBinding, observedBinding)) {
+        return { ok: false, reason: 'SEND_READBACK_TARGET_CHANGED', clicked, typed, observed };
+      }
+      const conversationStarted = !CHAT_RE.test(preClickUrl) && CHAT_RE.test(String(observed?.url || ''));
+      if (generating(observed) || conversationStarted || (positiveMarker && String(observed?.text_excerpt || '').includes(positiveMarker))) {
+        return { ok: true, clicked, typed, observed };
+      }
     }
-    return { ok: false, reason: 'SEND_WITHOUT_POSITIVE_READBACK', clicked };
+    return { ok: false, reason: 'SEND_WITHOUT_POSITIVE_READBACK', clicked, typed };
   }
 
   async #sendWake(prepared) {
@@ -335,14 +424,14 @@ export class SupervisorLifecycleRuntime {
       const sent = await this.#typeAndSend(tabId, retryEnvelope(req.message, req.wake_id, nextAttempt), req.wake_id);
       req.retry_attempt = nextAttempt;
       req.same_chat_retry_attempt += 1;
-      if (!sent.ok && sent.clicked) req.blocked_ambiguous = true;
+      if (!sent.ok && (sent.clicked || sent.typed)) req.blocked_ambiguous = true;
       this.#lastRecovery = {
         action: 'STOP_AND_RETRY_SAME_CONVERSATION',
         tab_id: String(tabId),
         wake_id: req.wake_id,
         retry_attempt: req.retry_attempt,
         confirmed: sent.ok === true,
-        ambiguous: sent.ok !== true && sent.clicked === true,
+        ambiguous: sent.ok !== true && (sent.clicked === true || sent.typed === true),
         at: new Date().toISOString(),
         authority_effect: false,
       };
@@ -362,7 +451,7 @@ export class SupervisorLifecycleRuntime {
       const nextAttempt = req.retry_attempt + 1;
       const sent = await this.#typeAndSend(tab.tab_id, retryEnvelope(req.message, req.wake_id, nextAttempt), req.wake_id);
       req.retry_attempt = nextAttempt;
-      if (!sent.ok && sent.clicked) req.blocked_ambiguous = true;
+      if (!sent.ok && (sent.clicked || sent.typed)) req.blocked_ambiguous = true;
       if (!sent.ok) return false;
       const observed = sent.observed || await this.#capture(tab.tab_id);
       const url = String(observed?.url || tab?.url || '');
@@ -451,13 +540,18 @@ export class SupervisorLifecycleRuntime {
     let tab = null;
     try {
       tab = await this.#execute({ action: 'NEW_TAB', payload: { url: 'https://chatgpt.com/', select: false }, platform: null });
-      const sent = await this.#typeAndSend(tab.tab_id, buildSupervisorRolloverMessage({ previousUrl: s.conversation_url, supervisorEpoch: s.supervisor_epoch }), null);
+      const sent = await this.#typeAndSend(
+        tab.tab_id,
+        buildSupervisorRolloverMessage({ previousUrl: s.conversation_url, supervisorEpoch: s.supervisor_epoch }),
+        'METAENGINE_SUPERVISOR_ROLLOVER_V1',
+      );
       if (!sent.ok) {
         await this.#keepalive.markRolloverAmbiguous(sent.reason || 'ROLLOVER_WITHOUT_POSITIVE_READBACK');
         return false;
       }
       const observed = sent.observed || await this.#capture(tab.tab_id);
-      if (CHAT_RE.test(String(observed?.url || '')) && generating(observed)) {
+      const rolloverMarkerObserved = String(observed?.text_excerpt || '').includes('METAENGINE_SUPERVISOR_ROLLOVER_V1');
+      if (CHAT_RE.test(String(observed?.url || '')) && (generating(observed) || rolloverMarkerObserved)) {
         await this.#keepalive.bindRollover({ url: observed.url, tab_id: tab.tab_id });
         this.#activeRequest = null;
         this.#lastRecovery = {
