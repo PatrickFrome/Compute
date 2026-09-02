@@ -6,11 +6,13 @@ on:
       - 'work/browser-watchdog-heartbeat-coalescing-v2'
     paths:
       - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client-core.mjs'
       - 'apps/metaengine-browser/test/native-supervisor-heartbeat-watchdog.test.mjs'
       - '.github/workflows/browser-watchdog-heartbeat-coalescing-v2.yml'
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client-core.mjs'
       - 'apps/metaengine-browser/test/native-supervisor-heartbeat-watchdog.test.mjs'
       - '.github/workflows/browser-watchdog-heartbeat-coalescing-v2.yml'
 
@@ -43,7 +45,10 @@ jobs:
       - name: Static coalescing and authority contract
         run: |
           set -euo pipefail
-          FILE=apps/metaengine-browser/src/native-supervisor-client.mjs
+          WRAPPER=apps/metaengine-browser/src/native-supervisor-client.mjs
+          FILE=apps/metaengine-browser/src/native-supervisor-client-core.mjs
+          grep -q "native-supervisor-client-core.mjs" "$WRAPPER"
+          ! grep -Eq "setInterval\(|setTimeout\(" "$WRAPPER"
           grep -q "watchdogLastAt = null" "$FILE"
           grep -q "watchdogLastAt: this.#bootstrapLastAt" "$FILE"
           grep -q "Number.NEGATIVE_INFINITY" "$FILE"
@@ -55,6 +60,7 @@ jobs:
       - name: Syntax and regression test
         run: |
           set -euo pipefail
+          node --check apps/metaengine-browser/src/native-supervisor-client-core.mjs
           node --check apps/metaengine-browser/src/native-supervisor-client.mjs
           node --test apps/metaengine-browser/test/native-supervisor-heartbeat-watchdog.test.mjs
 

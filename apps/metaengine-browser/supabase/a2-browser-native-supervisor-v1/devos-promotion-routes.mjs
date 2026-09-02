@@ -1,9 +1,15 @@
-const AGENT_RE=/^agent_[a-z0-9-]{8,64}$/;
-const TAB_RE=/^tab_[0-9a-f-]{36}$/i;
-const TARGET_RE=/^webcontents:[1-9][0-9]*$/;
-const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const json=(status,body)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'}});
-function positive(v){const n=Number(v);return Number.isSafeInteger(n)&&n>0?n:null}
-function binding(body={}){const agent_id=String(body.agent_id||'').toLowerCase(),tab_id=String(body.tab_id||''),target_id=String(body.target_id||'').toLowerCase(),agent_generation_epoch=positive(body.agent_generation_epoch);if(!AGENT_RE.test(agent_id)||!TAB_RE.test(tab_id)||!TARGET_RE.test(target_id)||agent_generation_epoch==null)return null;return{agent_id,tab_id,target_id,agent_generation_epoch}}
-function leaseResult(value,b){const v=value&&typeof value==='object'&&!Array.isArray(value)?value:null;if(!v||v.schema!=='metaengine.devos.transport-promotion-lease.v1'||v.authority_effect!==false||v.automatic_retry_allowed!==false)return null;if(v.leased!==true)return v;const expires=Date.parse(String(v.expires_at||''));if(!UUID_RE.test(String(v.lease_id||''))||String(v.agent_id||'').toLowerCase()!==b.agent_id||String(v.tab_id||'')!==b.tab_id||String(v.target_id||'').toLowerCase()!==b.target_id||Number(v.agent_generation_epoch)!==b.agent_generation_epoch||v.status!=='ACTIVE'||v.effect_scope!=='BROWSER_CLIENT_ACTUATION'||v.effect_key!==`fleet.transport-promotion:${b.agent_id}`||v.not_expired!==true||v.holder_verified!==true||v.target_verified!==true||!Number.isFinite(expires)||expires<=Date.now())return null;return v}
-export function createDevosPromotionRoutes({rpc,workspaceId}={}){if(typeof rpc!=='function'||!UUID_RE.test(String(workspaceId||'')))throw new Error('devos_promotion_routes_dependencies_invalid');return async({req,path,body,clientId}={})=>{if(!String(path||'').startsWith('/v1/devos/promotion-'))return null;if(!clientId)return json(401,{error:'device_auth_required',automatic_retry_allowed:false,authority_effect:false});if(req?.method==='POST'&&path==='/v1/devos/promotion-lease'){const b=binding(body);if(!b)return json(400,{error:'promotion_binding_invalid',automatic_retry_allowed:false,authority_effect:false});try{const value=await rpc('devos_fleet_transport_promotion_lease_v1',{p_workspace:workspaceId,p_client:clientId,p_agent:b.agent_id,p_tab:b.tab_id,p_target:b.target_id,p_epoch:b.agent_generation_epoch,p_seconds:45});const checked=leaseResult(value,b);if(!checked)throw new Error('promotion_lease_readback_invalid');return json(checked.leased===true?200:409,checked)}catch(error){const message=String(error?.message||error||'promotion_lease_failed');if(/devos_transport_promotion_(supervisor_state_stale|control_required|agent_not_admissible|binding_drift|active_holder_missing|holder_registry_missing)/.test(message))return json(409,{error:'promotion_lease_fenced',reason:message.slice(0,240),automatic_retry_allowed:false,authority_effect:false});throw error}}if(req?.method==='POST'&&path==='/v1/devos/promotion-release'){const lease_id=String(body?.lease_id||'').toLowerCase(),agent_id=String(body?.agent_id||'').toLowerCase();if(!UUID_RE.test(lease_id)||!AGENT_RE.test(agent_id))return json(400,{error:'promotion_release_binding_invalid',automatic_retry_allowed:false,authority_effect:false});const value=await rpc('devos_fleet_transport_promotion_release_v1',{p_workspace:workspaceId,p_client:clientId,p_lease:lease_id,p_agent:agent_id});if(value?.schema!=='metaengine.devos.transport-promotion-release.v1'||value?.released!==true||value?.authority_effect!==false)return json(409,{error:'promotion_release_not_proven',automatic_retry_allowed:false,authority_effect:false});return json(200,value)}return json(404,{error:'devos_promotion_route_not_found',automatic_retry_allowed:false,authority_effect:false})}}
+import { createDevosPromotionRoutes as createCoreDevosPromotionRoutes } from './devos-promotion-routes-core.mjs';
+import { createWorkspaceObservationRoutes } from './workspace-observation-routes.mjs';
+
+// Compatibility composition point: the proven transport-promotion implementation
+// remains byte-identical in devos-promotion-routes-core.mjs. Typed Workspaces adds
+// only a device-authenticated, read-only observation route and no scheduler/lease path.
+export function createDevosPromotionRoutes(options={}){
+  const workspace=createWorkspaceObservationRoutes(options);
+  const promotion=createCoreDevosPromotionRoutes(options);
+  return async(context={})=>{
+    const observed=await workspace(context);
+    if(observed)return observed;
+    return promotion(context);
+  };
+}

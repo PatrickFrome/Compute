@@ -57,7 +57,9 @@ test('worker observer heartbeat projection strips authority-bearing signal field
 });
 
 test('worker observation is wired into the existing primary heartbeat before DevOS and has no timer', async () => {
-  const source = await fs.readFile(sourcePath('native-supervisor-client.mjs'), 'utf8');
+  const wrapper = await fs.readFile(sourcePath('native-supervisor-client.mjs'), 'utf8');
+  assert.match(wrapper, /export \* from '\.\/native-supervisor-client-core\.mjs'/, 'compatibility wrapper must preserve the proven core export surface');
+  const source = await fs.readFile(sourcePath('native-supervisor-client-core.mjs'), 'utf8');
   const observeIndex = source.indexOf('await this.#observeWorkers();');
   const heartbeatIndex = source.indexOf('await super.cycle();', observeIndex);
   const devosIndex = source.indexOf('await this.#devosTaskCycle.cycle();', heartbeatIndex);
@@ -71,6 +73,7 @@ test('worker observation is wired into the existing primary heartbeat before Dev
   const intervalMatches = source.match(/setInterval\s*\(/g) || [];
   assert.equal(intervalMatches.length, 1, 'observer must not add a second timer/polling loop');
   assert.match(source, /#startBootstrapPump[\s\S]*setInterval\s*\(\(\) => \{ void this\.#bootstrapPulse/);
+  assert.doesNotMatch(wrapper, /setInterval\s*\(/, 'workspace wrapper must not add another timer');
 });
 
 test('Browser root supplies a trusted local WebContents observer with bounded budget', async () => {

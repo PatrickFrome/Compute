@@ -6,6 +6,7 @@ test('mesh continuity is preserved in exact base and the public DevOS client can
   const mesh = await fs.readFile(new URL('../src/supervisor-mesh.mjs', import.meta.url), 'utf8');
   const runtime = await fs.readFile(new URL('../src/supervisor-mesh-runtime.mjs', import.meta.url), 'utf8');
   const base = await fs.readFile(new URL('../src/native-supervisor-client-base.mjs', import.meta.url), 'utf8');
+  const core = await fs.readFile(new URL('../src/native-supervisor-client-core.mjs', import.meta.url), 'utf8');
   const publicClient = await fs.readFile(new URL('../src/native-supervisor-client.mjs', import.meta.url), 'utf8');
   assert.match(runtime, /same_event_failover_retry: false/);
   assert.match(mesh, /shared trusted actuation lease/i);
@@ -13,7 +14,9 @@ test('mesh continuity is preserved in exact base and the public DevOS client can
   assert.match(base, /dispatchRecoveryIfNeeded/);
   assert.match(base, /confirmSelfUpdateRestartSafety/);
   assert.match(base, /Do not publish the new mesh projection to live Edge/);
-  assert.match(publicClient, /extends BaseNativeSupervisorClient/);
+  assert.match(core, /extends BaseNativeSupervisorClient/);
+  assert.match(publicClient, /NativeSupervisorClient as CoreNativeSupervisorClient/);
+  assert.match(publicClient, /extends CoreNativeSupervisorClient/);
   assert.match(publicClient, /await super\.cycle\(\)/);
   assert.doesNotMatch(runtime, /canRestart/);
   assert.doesNotMatch(base, /mesh.*isQuiescent.*canRestart|canRestart[\s\S]{0,300}mesh\.isQuiescent/i);

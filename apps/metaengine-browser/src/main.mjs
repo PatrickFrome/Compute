@@ -14,6 +14,7 @@ import { navigationDecision, newWindowDecision, REMOTE_WEB_PREFERENCES, SECURITY
 import { TabRegistry } from './tab-registry.mjs';
 import { VerifiedDownloadManager } from './verified-download-manager.mjs';
 import { normalizeShellLayoutState, planShellLayout, SHELL_TOP_HEIGHT } from './shell-layout.mjs';
+import { projectWorkspaceWorkbench } from './workspace-workbench-projection.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -120,15 +121,20 @@ function assertShellSender(event) {
 }
 
 async function shellSnapshot() {
+  const tabs = registry.snapshot();
+  const fleetSnapshot = fleet?.snapshot() || null;
+  const supervisor = nativeSupervisor?.snapshot() || null;
+  const workspaces = projectWorkspaceWorkbench({ tabs, fleet: fleetSnapshot, supervisor });
   return {
     schema: 'metaengine.browser-shell.snapshot.v3',
     version: app.getVersion(),
-    tabs: registry.snapshot(),
+    tabs,
     downloads: downloads?.snapshot() || null,
-    fleet: fleet?.snapshot() || null,
+    fleet: fleetSnapshot,
     owner_safety_gates: ownerSafetyGates?.snapshot() || null,
     development_plane: developmentPlane?.snapshot() || null,
-    supervisor: nativeSupervisor?.snapshot() || null,
+    supervisor,
+    workspaces,
     compute: await bridge.health(),
     layout: shellLayoutPlan ? structuredClone(shellLayoutPlan) : null,
     policy: SECURITY_POLICY,
