@@ -164,12 +164,19 @@ test('qualification refuses wrong target version', async () => {
   await assert.rejects(() => probeUpdatedSuccessorQualification({ app, uptimeMs: () => 5000 }), /target_mismatch/);
 });
 
-test('production entry schedules qualification only on --updated launches and installs signed hook before main', async () => {
+test('production entry installs signed hook before releasing the host-resilience bootstrap barrier', async () => {
   const source = await fs.readFile(new URL('../src/main-entry.mjs', import.meta.url), 'utf8');
-  assert.match(source, /installSignedSupervisorHeartbeatQualificationHook/);
+  const barrier = source.indexOf('__METAENGINE_BROWSER_BOOTSTRAP_BARRIER__');
+  const earlyImport = source.indexOf("import('./main.mjs')");
+  const watchdog = source.indexOf('startSelfUpdateContinuityWatchdog({');
+  const signedHook = source.indexOf('installSignedSupervisorHeartbeatQualificationHook');
+  const hostStart = source.indexOf('hostResilience.start()');
+  const releaseBarrier = source.indexOf('resolveBrowserBootstrap?.(hostSnapshot)');
+  const qualification = source.indexOf('if (resumeSuccessorQualification)');
+  assert.ok(barrier >= 0 && earlyImport > barrier);
+  assert.ok(watchdog > earlyImport && signedHook > watchdog);
+  assert.ok(hostStart > signedHook && releaseBarrier > hostStart);
+  assert.ok(qualification > releaseBarrier);
   assert.match(source, /qualifyUpdatedSuccessorWhenHealthy/);
-  assert.match(source, /if \(updatedLaunch\)/);
   assert.match(source, /SELF_UPDATE_AUTOMATIC_RETRY_HELD/);
-  assert.ok(source.indexOf('installSignedSupervisorHeartbeatQualificationHook') < source.indexOf("await import('./main.mjs')"));
-  assert.ok(source.indexOf('startSelfUpdateContinuityWatchdog({') < source.indexOf("await import('./main.mjs')"));
 });
