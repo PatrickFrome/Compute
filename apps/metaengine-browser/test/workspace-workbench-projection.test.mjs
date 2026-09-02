@@ -53,3 +53,25 @@ test('missing or not-deployed runtime creates sessions only and no inferred work
   assert.equal(out.source_state,'RUNTIME_NOT_DEPLOYED');
   assert.equal(out.runtime_deployed,false);
 });
+
+test('post-restart replacement tab never inherits predecessor workspace authority',()=>{
+  const successorTab='tab_55555555-5555-4555-8555-555555555555';
+  const s=snapshot({
+    tabs:{selected_tab_id:successorTab,tabs:[
+      {tab_id:successorTab,title:'Misleading Project Name',url:'https://chatgpt.com/c/abc',kind:'CHATGPT'},
+      {tab_id:'tab_other',title:'work/example',url:'https://example.com/work/example',kind:'WEB'},
+    ]},
+    fleet:{agents:[{
+      agent_id:'agent_12345678',role:'IMPLEMENTER',tab_id:successorTab,target_id:'webcontents:19',generation_epoch:4,lifecycle_state:'BOUND_UNVERIFIED',
+    }]},
+  });
+  const out=projectWorkspaceWorkbench(s);
+  assert.equal(out.counts.workspaces,0);
+  assert.equal(out.counts.sessions,2);
+  assert.equal(out.issues[0].reason,'TAB_NOT_LIVE');
+  assert.equal(out.grouping_authority,'DURABLE_WORKSPACE_BINDING_ONLY');
+  assert.equal(out.url_heuristic_grouping,false);
+  assert.equal(out.title_heuristic_grouping,false);
+  assert.equal(out.browser_actuation_authority,false);
+  assert.equal(out.automatic_retry_allowed,false);
+});
