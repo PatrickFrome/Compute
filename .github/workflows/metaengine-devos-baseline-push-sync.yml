@@ -26,7 +26,7 @@ jobs:
         run: |
           set -euo pipefail
           test "${GITHUB_REF}" = 'refs/heads/integration/metaengine-development-os-v1'
-          test "${GITHUB_SHA}" =~ ^[0-9a-f]{40}$
+          [[ "${GITHUB_SHA}" =~ ^[0-9a-f]{40}$ ]]
           test -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
           test -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
 
