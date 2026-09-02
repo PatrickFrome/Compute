@@ -7,7 +7,10 @@ import {
   SUCCESSOR_STARTUP_PROBE_ONLY,
 } from './self-update-handoff.mjs';
 import { installSignedSupervisorHeartbeatQualificationHook } from './self-update-signed-heartbeat.mjs';
-import { qualifyUpdatedSuccessorWhenHealthy } from './self-update-successor-qualification.mjs';
+import {
+  qualifyUpdatedSuccessorWhenHealthy,
+  shouldScheduleUpdatedSuccessorQualification,
+} from './self-update-successor-qualification.mjs';
 
 const bypassSingleInstance = process.argv.includes('--metaengine-smoke')
   || process.argv.includes('--metaengine-devplane-smoke');
@@ -67,6 +70,11 @@ if (guard.primary) {
       app.exit(7);
     }
   }
+
+  const qualificationRequired = shouldScheduleUpdatedSuccessorQualification({
+    updatedLaunch,
+    startupInspection: startupUpdateInspection,
+  });
 
   if (updateHandoff?.successor_startup === SUCCESSOR_STARTUP_PROBE_ONLY) {
     console.log(JSON.stringify(updateHandoff.row));
@@ -170,12 +178,13 @@ if (guard.primary) {
     });
     globalThis.fetch = installSignedSupervisorHeartbeatQualificationHook({ app, fetchImpl: globalThis.fetch });
     await import('./main.mjs');
-    if (updatedLaunch) {
+    if (qualificationRequired) {
       setImmediate(() => {
         qualifyUpdatedSuccessorWhenHealthy({ app })
           .then((result) => console.log(JSON.stringify({
             schema: 'metaengine.browser.self-update-qualification.v2',
             version: app.getVersion(),
+            recovery_source: updatedLaunch ? 'UPDATED_ARGV' : 'TARGET_INSTALLED_STARTUP',
             ...result,
             authority_effect: false,
           })))
