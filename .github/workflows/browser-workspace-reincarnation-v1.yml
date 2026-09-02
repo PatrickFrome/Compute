@@ -3,6 +3,7 @@ name: Browser Workspace Reincarnation V1
 on:
   pull_request:
     paths:
+      - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/src/workspace-reincarnation-proof.mjs'
       - 'apps/metaengine-browser/test/workspace-reincarnation-proof.test.mjs'
       - 'apps/metaengine-browser/test/workspace-reincarnation-transition-contract.test.mjs'
@@ -15,6 +16,7 @@ on:
     branches:
       - 'work/browser-workspace-reincarnation-v1'
     paths:
+      - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/src/workspace-reincarnation-proof.mjs'
       - 'apps/metaengine-browser/test/workspace-reincarnation-proof.test.mjs'
       - 'apps/metaengine-browser/test/workspace-reincarnation-transition-contract.test.mjs'
