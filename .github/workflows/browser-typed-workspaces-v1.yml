@@ -1,0 +1,104 @@
+name: Browser Typed Workspaces V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
+      - 'apps/metaengine-browser/src/workspace-binding-observer.mjs'
+      - 'apps/metaengine-browser/src/workspace-workbench-projection.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-promotion-routes.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/workspace-observation-routes.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-command-target-projection.test.mjs'
+      - 'apps/metaengine-browser/test/workspace-binding-observer.test.mjs'
+      - 'apps/metaengine-browser/test/workspace-observation-routes.test.mjs'
+      - 'apps/metaengine-browser/test/workspace-workbench-projection.test.mjs'
+      - 'apps/metaengine-browser/test/shell-workbench-ui.test.mjs'
+      - 'apps/metaengine-browser/ui/app.js'
+      - 'apps/metaengine-browser/ui/index.html'
+      - 'supabase/migrations/20260902090000_a2_workspace_binding_snapshot_v1.sql'
+      - '.github/workflows/browser-typed-workspaces-v1.yml'
+  push:
+    branches:
+      - 'work/browser-typed-workspaces-v1'
+    paths:
+      - 'apps/metaengine-browser/**'
+      - 'supabase/migrations/20260902090000_a2_workspace_binding_snapshot_v1.sql'
+      - '.github/workflows/browser-typed-workspaces-v1.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typed-workspaces-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          printf 'exact_head=%s\n' "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v6.0.0
+        with:
+          node-version: '24'
+
+      - name: Syntax gates
+        run: |
+          set -euo pipefail
+          node --check apps/metaengine-browser/src/native-supervisor-client.mjs
+          node --check apps/metaengine-browser/src/workspace-binding-observer.mjs
+          node --check apps/metaengine-browser/src/workspace-workbench-projection.mjs
+          node --check apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-promotion-routes.mjs
+          node --check apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/workspace-observation-routes.mjs
+          node --check apps/metaengine-browser/ui/app.js
+
+      - name: Typed Workspaces falsification suite
+        run: |
+          set -euo pipefail
+          node --test \
+            apps/metaengine-browser/test/native-supervisor-command-target-projection.test.mjs \
+            apps/metaengine-browser/test/workspace-binding-observer.test.mjs \
+            apps/metaengine-browser/test/workspace-observation-routes.test.mjs \
+            apps/metaengine-browser/test/workspace-workbench-projection.test.mjs \
+            apps/metaengine-browser/test/shell-workbench-ui.test.mjs
+
+      - name: Static privacy and authority gates
+        run: |
+          set -euo pipefail
+          RPC=supabase/migrations/20260902090000_a2_workspace_binding_snapshot_v1.sql
+          CLIENT=apps/metaengine-browser/src/native-supervisor-client.mjs
+          UI=apps/metaengine-browser/ui/app.js
+          grep -q "bounded_rows', 64" "$RPC"
+          grep -q "filesystem_paths_exposed', false" "$RPC"
+          grep -q "browser_actuation_authority', false" "$RPC"
+          grep -q "automatic_retry_allowed', false" "$RPC"
+          grep -q "grant execute on function public.h205f22_a2_workspace_binding_snapshot_v1(uuid) to service_role" "$RPC"
+          ! grep -Eq "repo_root|managed_root|worktree_path|worktree_realpath" "$RPC"
+          grep -q "current_command_payload_exposed: false" "$CLIENT"
+          grep -q "DB_LEASED_TYPED_COMMAND_ONLY" "$CLIENT"
+          grep -q "DURABLE_WORKSPACE_BINDING_ONLY" "$UI"
+          grep -q "url_heuristic_grouping: false" "$UI"
+          grep -q "title_heuristic_grouping: false" "$UI"
+          ! grep -Eq "automatic_retry_allowed:\s*true|browser_actuation_authority:\s*true" "$UI"
+
+      - name: Prove branch-local clean checkout
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          printf 'production_mutation=false\n'
+          printf 'second_scheduler_loop=false\n'
+          printf 'workspace_grouping_authority=DURABLE_WORKSPACE_BINDING_ONLY\n'
