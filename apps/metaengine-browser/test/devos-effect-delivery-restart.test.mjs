@@ -232,7 +232,7 @@ test('corrupt journal fails before scheduler request or Browser effect', async (
   assert.equal(commands, 0);
 });
 
-test('write-ahead crash before effect barrier proves absence and requeues only through scheduler', async () => {
+test('pre-effect write-ahead recovery requeues only when local journal durability can prove absence', async () => {
   const { statePath } = await journalFixture();
   const seed = new DevOsEffectDeliveryJournal({ statePath });
   await seed.init();
@@ -277,6 +277,26 @@ test('write-ahead crash before effect barrier proves absence and requeues only t
   });
 
   const out = await cycle.cycle();
+  assert.equal(calls.includes('SEMANTIC_TYPE'), false);
+  assert.equal(calls.includes('TYPED_CLICK'), false);
+
+  const readback = new DevOsEffectDeliveryJournal({ statePath });
+  await readback.init();
+  const entry = readback.find(journalBinding());
+
+  if (process.platform === 'win32') {
+    assert.equal(out.ambiguity_recovery.state, 'STILL_AMBIGUOUS_LEGACY_JOURNAL');
+    assert.equal(out.ambiguity_recovery.physical_effect_replayed, false);
+    assert.equal(out.ambiguity_recovery.automatic_retry_allowed, false);
+    assert.equal(out.ambiguity_recovery.authority_effect, false);
+    assert.equal(recoveryRequests.length, 0);
+    assert.equal(entry.state, 'AMBIGUOUS');
+    assert.equal(entry.evidence.effect_barrier_contract, 'WRITE_AHEAD_PLATFORM_UNVERIFIED_V1');
+    assert.equal(entry.evidence.physical_effect_attempted, false);
+    assert.equal(entry.evidence.effect_barrier_crossed, false);
+    return;
+  }
+
   assert.equal(out.ambiguity_recovery.state, 'EFFECT_ABSENT_REQUEUED');
   assert.equal(out.ambiguity_recovery.retry_via_scheduler, true);
   assert.equal(out.ambiguity_recovery.physical_effect_replayed, false);
@@ -289,12 +309,6 @@ test('write-ahead crash before effect barrier proves absence and requeues only t
     automatic_retry_allowed: false,
     authority_effect: false,
   });
-  assert.equal(calls.includes('SEMANTIC_TYPE'), false);
-  assert.equal(calls.includes('TYPED_CLICK'), false);
-
-  const readback = new DevOsEffectDeliveryJournal({ statePath });
-  await readback.init();
-  const entry = readback.find(journalBinding());
   assert.equal(entry.state, 'EFFECT_ABSENT');
   assert.equal(entry.evidence.physical_effect_attempted, false);
   assert.equal(entry.evidence.effect_barrier_crossed, false);
