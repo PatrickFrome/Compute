@@ -34,23 +34,24 @@ function setSystemStatus(element, { value, tone = 'neutral', title = '' } = {}) 
 
 function fleetStatus(next) {
   const fleet = next?.fleet;
-  const counts = fleet?.counts || {};
+  if (!fleet) return { value: 'unknown', tone: 'neutral', title: 'Fleet snapshot unavailable' };
+  const counts = fleet.counts || {};
   const active = Number(counts.ACTIVE || 0);
   const bound = Number(counts.BOUND_UNVERIFIED || 0);
   const ambiguous = Number(counts.PROVISIONING_AMBIGUOUS || 0);
   const lost = Number(counts.LOST || 0);
-  const total = Array.isArray(fleet?.agents) ? fleet.agents.length : Object.values(counts).reduce((sum, value) => sum + (Number(value) || 0), 0);
+  const total = Array.isArray(fleet.agents) ? fleet.agents.length : Object.values(counts).reduce((sum, value) => sum + (Number(value) || 0), 0);
   const tone = ambiguous > 0 ? 'bad' : (lost > 0 || bound > 0 ? 'warn' : (active > 0 ? 'good' : 'neutral'));
   return {
     value: `${active}/${total}`,
     tone,
-    title: `Fleet · ${active} active · ${bound} bound unverified · ${ambiguous} ambiguous · ${lost} lost · ${text(fleet?.readiness_contract, 'no readiness contract')}`,
+    title: `Fleet · ${active} active · ${bound} bound unverified · ${ambiguous} ambiguous · ${lost} lost · ${text(fleet.readiness_contract, 'no readiness contract')}`,
   };
 }
 
 function supervisorStatus(next) {
   const supervisor = next?.supervisor;
-  if (!supervisor) return { value: 'offline', tone: 'neutral', title: 'Supervisor snapshot unavailable' };
+  if (!supervisor) return { value: 'unknown', tone: 'neutral', title: 'Supervisor snapshot unavailable' };
   const mode = text(supervisor.supervisor_mode, 'OFF').toUpperCase();
   const armed = supervisor.armed === true;
   const running = supervisor.running === true;
@@ -66,7 +67,7 @@ function supervisorStatus(next) {
 
 function updateStatus(next) {
   const update = next?.supervisor?.self_update;
-  if (!update) return { value: '—', tone: 'neutral', title: 'Self-update snapshot unavailable' };
+  if (!update) return { value: 'unknown', tone: 'neutral', title: 'Self-update snapshot unavailable' };
   const state = text(update.state, 'UNKNOWN').toUpperCase();
   const badStates = new Set(['ERROR', 'REJECTED_METADATA', 'DISCOVERY_ERROR']);
   const activeStates = new Set(['APPROVED_DOWNLOAD', 'DOWNLOADING', 'READY_RESTART', 'RESTART_GRACE', 'RESTARTING']);
@@ -82,18 +83,20 @@ function updateStatus(next) {
 
 function developmentPlaneStatus(next) {
   const dev = next?.development_plane;
-  const state = text(dev?.state, 'OFFLINE').toUpperCase();
-  const tone = state === 'READY' ? 'good' : (['ERROR', 'FAILED', 'CRASHED'].includes(state) ? 'bad' : (state === 'OFFLINE' ? 'neutral' : 'warn'));
+  if (!dev) return { value: 'unknown', tone: 'neutral', title: 'Development Plane snapshot unavailable' };
+  const state = text(dev.state, 'UNKNOWN').toUpperCase();
+  const tone = state === 'READY' ? 'good' : (['ERROR', 'FAILED', 'CRASHED'].includes(state) ? 'bad' : 'warn');
   return {
     value: compact(state, 10),
     tone,
-    title: `Development Plane · ${state}${dev?.version ? ` · ${dev.version}` : ''}`,
+    title: `Development Plane · ${state}${dev.version ? ` · ${dev.version}` : ''}`,
   };
 }
 
 function computeStatus(next) {
   const compute = next?.compute;
-  const available = compute?.available === true;
+  if (!compute) return { value: 'unknown', tone: 'neutral', title: 'Compute snapshot unavailable' };
+  const available = compute.available === true;
   const runtime = compute?.result?.runtime || (available ? 'ready' : 'offline');
   return {
     value: compact(runtime, 12),
@@ -104,8 +107,9 @@ function computeStatus(next) {
 
 function gateStatus(next) {
   const gates = next?.owner_safety_gates;
-  const overrides = Array.isArray(gates?.overrides) ? gates.overrides.length : 0;
-  const wildcard = gates?.wildcard_disabled === true;
+  if (!gates) return { value: 'unknown', tone: 'neutral', title: 'Owner safety gate snapshot unavailable' };
+  const overrides = Array.isArray(gates.overrides) ? gates.overrides.length : 0;
+  const wildcard = gates.wildcard_disabled === true;
   return {
     value: wildcard ? 'ALL' : (overrides ? `${overrides} override${overrides === 1 ? '' : 's'}` : 'sealed'),
     tone: wildcard ? 'bad' : (overrides ? 'warn' : 'good'),
