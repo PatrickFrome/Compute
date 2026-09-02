@@ -16,6 +16,7 @@ const STATE_PATH = String(process.env.METAENGINE_SENTINEL_STATE_PATH || '');
 const TOKEN = String(process.env.METAENGINE_SENTINEL_TOKEN || '');
 const PARENT_PID = Number(process.env.METAENGINE_SENTINEL_PARENT_PID || 0);
 const POLL_MS = 2000;
+const WORKER_BINDING_GRACE_MS = 5000;
 const EXPECTED_RESTART_GRACE_MS = 45000;
 const RELAUNCH_ACK_TIMEOUT_MS = 5000;
 const RELAUNCH_RETRY_BASE_MS = 1000;
@@ -31,9 +32,36 @@ async function readJson(target) {
 async function readState() { return readJson(STATE_PATH); }
 async function readParentProgress() { return readJson(PARENT_PROGRESS_PATH); }
 
+function validCoreBinding(state) {
+  return Boolean(
+    STATE_PATH && TOKEN && state && state.schema === 'metaengine.browser-sentinel.state.v1'
+    && state.token === TOKEN && Number(state.parent_pid) === PARENT_PID
+    && typeof state.executable === 'string' && state.executable.length > 0
+  );
+}
+
+function validBinding(state) {
+  return validCoreBinding(state)
+    && Number(state.worker_pid) === process.pid
+    && state.worker_released !== true;
+}
+
+async function awaitWorkerBinding() {
+  const deadline = Date.now() + WORKER_BINDING_GRACE_MS;
+  while (Date.now() <= deadline) {
+    const current = await readState().catch(() => null);
+    if (!validCoreBinding(current)) return null;
+    if (Number(current.worker_pid) === process.pid && current.worker_released !== true) return current;
+    const boundPid = Number(current.worker_pid || 0);
+    if (Number.isSafeInteger(boundPid) && boundPid > 0 && boundPid !== process.pid) return null;
+    await sleep(50);
+  }
+  return null;
+}
+
 async function writeWorkerHeartbeat() {
   const current = await readState().catch(() => null);
-  if (!current || current.token !== TOKEN || Number(current.parent_pid) !== PARENT_PID) return false;
+  if (!validBinding(current)) return false;
   const temp = `${WORKER_HEARTBEAT_PATH}.${process.pid}.tmp`;
   await fs.mkdir(path.dirname(WORKER_HEARTBEAT_PATH), { recursive: true });
   await fs.writeFile(temp, `${JSON.stringify({
@@ -83,20 +111,13 @@ function processAlive(pid) {
 }
 function parentAlive() { return processAlive(PARENT_PID); }
 
-function validBinding(state) {
-  return Boolean(
-    STATE_PATH && TOKEN && state && state.schema === 'metaengine.browser-sentinel.state.v1'
-    && state.token === TOKEN && Number(state.parent_pid) === PARENT_PID
-    && typeof state.executable === 'string' && state.executable.length > 0
-  );
-}
-
 async function awaitExpectedSuccessor() {
   const deadline = Date.now() + EXPECTED_RESTART_GRACE_MS;
   while (Date.now() < deadline) {
     await sleep(POLL_MS);
     const current = await readState().catch(() => null);
     if (!current || current.token !== TOKEN) return true;
+    if (!validBinding(current)) return true;
   }
   return false;
 }
@@ -238,8 +259,8 @@ async function relaunchUntilResolved(state, journal) {
 
 async function main() {
   if (!STATE_PATH || !TOKEN || !Number.isSafeInteger(PARENT_PID) || PARENT_PID <= 0) process.exit(2);
-  const initial = await readState();
-  if (!validBinding(initial)) process.exit(3);
+  const initial = await awaitWorkerBinding();
+  if (!initial) process.exit(3);
   const journal = new BrowserSentinelActionJournal({ statePath: STATE_PATH });
   await journal.init(initial);
 
