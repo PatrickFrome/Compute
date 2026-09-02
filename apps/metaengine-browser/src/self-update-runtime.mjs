@@ -23,6 +23,7 @@ import {
   createBoundedNetworkFetch,
   DEFAULT_OPTIONAL_NETWORK_DEADLINE_MS,
 } from './bounded-network-fetch.mjs';
+import { startSelfUpdateOldParentHandoffWatchdog } from './self-update-old-parent-handoff.mjs';
 
 export {
   DEFAULT_TRUSTED_UPDATE_CHANNEL,
@@ -64,6 +65,27 @@ async function durableInstallEffectBarrier(receipt) {
   return markSelfUpdateInstallEffectAttempted(app, { targetVersion });
 }
 
+async function armProductionOldParentHandoffWatchdog() {
+  const { app } = await import('electron');
+  return startSelfUpdateOldParentHandoffWatchdog({
+    app,
+    relaunch: () => app.relaunch({ args: process.argv.slice(1).filter((arg) => arg !== '--updated') }),
+    exit: (code) => app.exit(code),
+    onObservation: (result) => console.log(JSON.stringify({
+      schema: 'metaengine.self-update.old-parent-handoff-observation.v1',
+      ...result,
+      authority_effect: false,
+    })),
+    onError: (error) => console.error(JSON.stringify({
+      schema: 'metaengine.self-update.old-parent-handoff-observation.v1',
+      state: 'WATCHDOG_ERROR',
+      error,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    })),
+  });
+}
+
 export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
   #hintIntervalMs;
   #hintRetryMs;
@@ -72,6 +94,7 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
   #clock;
   #networkDeadlineMs;
   #installEffectBarrierMode;
+  #oldParentHandoffWatchdogMode;
   #lastHintCheck = 0;
   #lastHintCheckAt = null;
   #lastHintVersion = null;
@@ -95,6 +118,10 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
     if (explicitInstallEffectBarrier != null && typeof explicitInstallEffectBarrier !== 'function') {
       throw new Error('self_update_install_effect_barrier_invalid');
     }
+    const explicitOldParentHandoffWatchdog = options?.oldParentHandoffWatchdog;
+    if (explicitOldParentHandoffWatchdog != null && typeof explicitOldParentHandoffWatchdog !== 'function') {
+      throw new Error('self_update_old_parent_handoff_watchdog_invalid');
+    }
     // Production never injects electron-updater. Preserve the old dependency-injected
     // test surface without silently weakening production: injected updaters get a
     // zero-effect compatibility barrier unless a test explicitly supplies one.
@@ -105,6 +132,11 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
     const installEffectBarrierMode = explicitInstallEffectBarrier
       ? 'INJECTED_BARRIER'
       : (injectedUpdater ? 'INJECTED_UPDATER_TEST_BYPASS' : SELF_UPDATE_INSTALL_EFFECT_BARRIER);
+    const oldParentHandoffWatchdog = explicitOldParentHandoffWatchdog
+      || (injectedUpdater ? null : armProductionOldParentHandoffWatchdog);
+    const oldParentHandoffWatchdogMode = explicitOldParentHandoffWatchdog
+      ? 'INJECTED_WATCHDOG'
+      : (injectedUpdater ? 'INJECTED_UPDATER_DISABLED' : 'DURABLE_SUCCESSOR_BOOTED_WATCHDOG_V1');
     const withDevCadence = {
       ...options,
       fetchImpl: boundedFetch,
@@ -116,6 +148,12 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
         // it succeeds, any later crash/handoff failure is conservatively potentially
         // effectful and may only converge through durable startup/readback evidence.
         await installEffectBarrier(structuredClone(receipt));
+        // Arm the no-replay parent watchdog before the final native handoff releases
+        // singleton/supervisor ownership and before electron-updater can dispatch the
+        // installer. The watchdog itself is read-only until the durable transaction
+        // proves SUCCESSOR_BOOTED; then it persists one relaunch intent before one
+        // process-level relaunch+exit and never repeats that effect for the transaction.
+        await oldParentHandoffWatchdog?.();
         await originalBeforeInstallerLaunch?.(structuredClone(receipt));
       },
     };
@@ -140,6 +178,7 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
     this.#networkDeadlineMs = networkDeadlineMs;
     this.#clock = options?.clock ?? (() => Date.now());
     this.#installEffectBarrierMode = installEffectBarrierMode;
+    this.#oldParentHandoffWatchdogMode = oldParentHandoffWatchdogMode;
     if (typeof this.#hintProbe !== 'function') throw new Error('self_update_hint_probe_invalid');
   }
 
@@ -158,6 +197,9 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
       network_discovery_bounded: true,
       install_effect_barrier_mode: this.#installEffectBarrierMode,
       install_effect_barrier_before_final_handoff: true,
+      old_parent_handoff_watchdog_mode: this.#oldParentHandoffWatchdogMode,
+      old_parent_handoff_requires_successor_booted: true,
+      old_parent_handoff_automatic_retry: false,
       automatic_effect_retry: false,
       hint_authority_effect: false,
     };
