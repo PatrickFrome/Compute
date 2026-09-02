@@ -268,12 +268,12 @@ jobs:
           if ($env:EXPECTED_REPOSITORY -ne $env:GITHUB_REPOSITORY) { throw "candidate_repository_mismatch" }
           $expectedRef = "refs/heads/$env:EXPECTED_BRANCH"
           $actualHead = (git rev-parse HEAD).Trim()
-          if ($actualHead -ne $env:EXPECTED_HEAD) { throw "candidate_head_mismatch:$actualHead:$env:EXPECTED_HEAD" }
+          if ($actualHead -ne $env:EXPECTED_HEAD) { throw ("candidate_head_mismatch:{0}:{1}" -f $actualHead, $env:EXPECTED_HEAD) }
           $actualRef = (git symbolic-ref -q HEAD).Trim()
-          if ($LASTEXITCODE -ne 0 -or $actualRef -ne $expectedRef) { throw "candidate_symbolic_ref_invalid:$actualRef:$expectedRef" }
+          if ($LASTEXITCODE -ne 0 -or $actualRef -ne $expectedRef) { throw ("candidate_symbolic_ref_invalid:{0}:{1}" -f $actualRef, $expectedRef) }
           $remoteLine = ((git ls-remote --heads origin $expectedRef) -join "`n").Trim()
           $expectedRemote = "$env:EXPECTED_HEAD`t$expectedRef"
-          if ($remoteLine -ne $expectedRemote) { throw "candidate_remote_head_mismatch:$remoteLine:$expectedRemote" }
+          if ($remoteLine -ne $expectedRemote) { throw ("candidate_remote_head_mismatch:{0}:{1}" -f $remoteLine, $expectedRemote) }
           if ((git status --porcelain=v1 --untracked-files=all)) { throw "candidate_checkout_dirty" }
           New-Item -ItemType Directory -Force -Path evidence-windows | Out-Null
           $env:EXPECTED_HEAD | Set-Content evidence-windows\candidate-head.txt
