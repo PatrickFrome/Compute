@@ -1,11 +1,12 @@
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TARGET_RE=/^webcontents:[1-9][0-9]*$/;
 
-const clone=(v)=>v==null?v:structuredClone(v);
 const text=(v,n=240)=>String(v??'').slice(0,n);
 
 function byId(rows,key){const out=new Map();for(const row of rows||[]){const id=String(row?.[key]||'');if(id&&!out.has(id))out.set(id,row)}return out}
 function issue(reason,binding,tab=null){return Object.freeze({reason,workspace_id:binding?.workspace_id||null,workspace_generation:Number(binding?.workspace_generation)||null,task_id:binding?.task_id||null,agent_id:binding?.agent_id||null,tab_id:binding?.tab_id||tab?.tab_id||null,target_id:binding?.target_id||null,lease_generation:Number(binding?.lease_generation)||null,authority_effect:false})}
+function tabProjection(tab){return Object.freeze({tab_id:String(tab?.tab_id||''),title:text(tab?.title,512),url:text(tab?.url,8192),kind:text(tab?.kind,32)})}
+function agentProjection(agent){return Object.freeze({agent_id:String(agent?.agent_id||''),role:text(agent?.role,64),tab_id:String(agent?.tab_id||''),target_id:String(agent?.target_id||'').toLowerCase(),generation_epoch:Number(agent?.generation_epoch)||0,lifecycle_state:text(agent?.lifecycle_state,64)})}
 
 export function projectWorkspaceWorkbench(snapshot={}){
   const tabs=Array.isArray(snapshot?.tabs?.tabs)?snapshot.tabs.tabs:[];
@@ -17,6 +18,9 @@ export function projectWorkspaceWorkbench(snapshot={}){
   const groupedTabIds=new Set();
   const groups=[];
   const issues=[];
+  let ready=0;
+  let frozen=0;
+  let reserved=0;
 
   if(sourceState==='AVAILABLE'&&Array.isArray(observer?.bindings)){
     for(const binding of observer.bindings){
@@ -38,6 +42,7 @@ export function projectWorkspaceWorkbench(snapshot={}){
       if(Number(agent.generation_epoch)!==agentGeneration){issues.push(issue('AGENT_GENERATION_DRIFT',binding,tab));continue}
       const state=String(binding.state||'').toUpperCase();
       if(!['READY','FROZEN','RESERVED'].includes(state)){issues.push(issue('WORKSPACE_STATE_INVALID',binding,tab));continue}
+      if(state==='READY')ready+=1;else if(state==='FROZEN')frozen+=1;else reserved+=1;
       groupedTabIds.add(tabId);
       groups.push(Object.freeze({
         group_id:`workspace:${workspaceId}:${workspaceGeneration}`,
@@ -59,8 +64,8 @@ export function projectWorkspaceWorkbench(snapshot={}){
         state,
         ambiguity_code:binding.ambiguity_code||null,
         dirty_hold:binding.dirty_hold===true,
-        tab:clone(tab),
-        agent:clone(agent),
+        tab:tabProjection(tab),
+        agent:agentProjection(agent),
         current_binding:true,
         automatic_retry_allowed:false,
         page_data_authority:false,
@@ -70,7 +75,8 @@ export function projectWorkspaceWorkbench(snapshot={}){
   }
 
   groups.sort((a,b)=>a.branch_name.localeCompare(b.branch_name)||a.group_id.localeCompare(b.group_id));
-  const sessions=tabs.filter((tab)=>!groupedTabIds.has(String(tab?.tab_id||''))).map((tab)=>clone(tab));
+  const sessions=[];
+  for(const tab of tabs){if(!groupedTabIds.has(String(tab?.tab_id||'')))sessions.push(tabProjection(tab))}
   return Object.freeze({
     schema:'metaengine.browser.workspace-workbench-projection.v1',
     source_state:sourceState,
@@ -79,7 +85,7 @@ export function projectWorkspaceWorkbench(snapshot={}){
     groups,
     sessions,
     issues,
-    counts:{workspaces:groups.length,sessions:sessions.length,issues:issues.length,ready:groups.filter((g)=>g.state==='READY').length,frozen:groups.filter((g)=>g.state==='FROZEN').length,reserved:groups.filter((g)=>g.state==='RESERVED').length},
+    counts:{workspaces:groups.length,sessions:sessions.length,issues:issues.length,ready,frozen,reserved},
     grouping_authority:'DURABLE_WORKSPACE_BINDING_ONLY',
     url_heuristic_grouping:false,
     title_heuristic_grouping:false,
