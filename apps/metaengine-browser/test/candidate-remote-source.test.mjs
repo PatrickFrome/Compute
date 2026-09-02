@@ -4,7 +4,12 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { createCandidateCapsule } = require('../src/candidate-capsule.cjs');
-const { proveRemoteSourceBinding, verifyCandidateCapsuleRemoteBound } = require('../src/candidate-remote-source.cjs');
+const {
+  gitExecutableCandidates,
+  probeGitWithCandidates,
+  proveRemoteSourceBinding,
+  verifyCandidateCapsuleRemoteBound,
+} = require('../src/candidate-remote-source.cjs');
 
 const SOURCE = Object.freeze({
   repository: 'PatrickFrome/Compute',
@@ -85,4 +90,37 @@ test('source ref must be an exact refs/heads branch and remote name is bounded',
   const { runGit } = runner();
   assert.throws(() => proveRemoteSourceBinding({ ...SOURCE, ref: 'refs/tags/v1' }, { runGit }), /remote_ref_invalid/);
   assert.throws(() => proveRemoteSourceBinding(SOURCE, { remote: 'origin;rm -rf', runGit }), /remote_name_invalid/);
+});
+
+test('Windows Git discovery retries only executable-not-found and reaches standard Git installation', () => {
+  const env = { ProgramFiles: 'C:\\Program Files' };
+  const calls = [];
+  const execFile = (executable) => {
+    calls.push(executable);
+    if (executable === 'C:\\Program Files\\Git\\cmd\\git.exe') return 'ok\n';
+    const error = new Error(`spawnSync ${executable} ENOENT`);
+    error.code = 'ENOENT';
+    throw error;
+  };
+
+  const output = probeGitWithCandidates('C:\\repo', ['--version'], { platform: 'win32', env, execFile });
+  assert.equal(output, 'ok');
+  assert.deepEqual(calls, ['git', 'git.exe', 'C:\\Program Files\\Git\\cmd\\git.exe']);
+  assert.deepEqual(gitExecutableCandidates({ platform: 'linux', env }), ['git']);
+});
+
+test('Git discovery fails closed on any non-ENOENT probe error', () => {
+  const calls = [];
+  const execFile = (executable) => {
+    calls.push(executable);
+    const error = new Error('permission denied');
+    error.code = 'EACCES';
+    throw error;
+  };
+
+  assert.throws(
+    () => probeGitWithCandidates('C:\\repo', ['--version'], { platform: 'win32', env: { ProgramFiles: 'C:\\Program Files' }, execFile }),
+    /candidate_remote_probe_failed:permission denied/,
+  );
+  assert.deepEqual(calls, ['git']);
 });
