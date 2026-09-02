@@ -8,12 +8,15 @@ test('mesh continuity is preserved in exact base and the public DevOS client can
   const base = await fs.readFile(new URL('../src/native-supervisor-client-base.mjs', import.meta.url), 'utf8');
   const core = await fs.readFile(new URL('../src/native-supervisor-client-core.mjs', import.meta.url), 'utf8');
   const publicClient = await fs.readFile(new URL('../src/native-supervisor-client.mjs', import.meta.url), 'utf8');
+  const heartbeat = base.match(/async #heartbeat\(\) \{[\s\S]*?\n  \}\n\n  async #nextCommand/)?.[0] || '';
   assert.match(runtime, /same_event_failover_retry: false/);
   assert.match(mesh, /shared trusted actuation lease/i);
   assert.match(base, /new SupervisorMeshRuntime/);
   assert.match(base, /dispatchRecoveryIfNeeded/);
   assert.match(base, /confirmSelfUpdateRestartSafety/);
-  assert.match(base, /Do not publish the new mesh projection to live Edge/);
+  assert.match(base, /supervisor_mesh: this\.#mesh\?\.snapshot\(\) \|\| null/);
+  assert.match(heartbeat, /supervisor_lifecycle:/);
+  assert.doesNotMatch(heartbeat, /supervisor_mesh:/);
   assert.match(core, /extends BaseNativeSupervisorClient/);
   assert.match(publicClient, /NativeSupervisorClient as CoreNativeSupervisorClient/);
   assert.match(publicClient, /extends CoreNativeSupervisorClient/);
