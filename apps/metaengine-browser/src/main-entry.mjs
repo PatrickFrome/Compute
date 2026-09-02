@@ -24,6 +24,22 @@ if (guard.primary) {
     app.setAppUserModelId(METAENGINE_BROWSER_APP_ID);
   }
 
+  // Load the Browser runtime before any slow startup awaits so it can register
+  // privileged protocol metadata and its ready handler in time. The handler is
+  // fenced on this promise and cannot create the Browser window until host
+  // resilience has completed its first bootstrap attempt.
+  const browserRuntimeNeeded = !selfUpdateSmoke && !versionProbe && !profileProbe && !instanceHoldProbe;
+  let resolveBrowserBootstrap = null;
+  let browserRuntimeLoadError = null;
+  let browserRuntimePromise = null;
+  if (browserRuntimeNeeded) {
+    globalThis.__METAENGINE_BROWSER_BOOTSTRAP_BARRIER__ = new Promise((resolve) => { resolveBrowserBootstrap = resolve; });
+    browserRuntimePromise = import('./main.mjs').catch((error) => {
+      browserRuntimeLoadError = error;
+      return null;
+    });
+  }
+
   let startupUpdateInspection = null;
   if (!selfUpdateSmoke && !versionProbe && !profileProbe && !instanceHoldProbe) {
     startupUpdateInspection = await inspectSelfUpdateStartup(app).catch((error) => ({
@@ -137,23 +153,6 @@ if (guard.primary) {
   } else {
     const hostResilience = new HostResilienceRuntime();
     globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__ = hostResilience;
-    app.once('ready', () => {
-      void hostResilience.start()
-        .then((snapshot) => console.log(JSON.stringify({
-          schema: 'metaengine.host-resilience-bootstrap.v1',
-          state: snapshot?.state || 'UNKNOWN',
-          login_start_verified: snapshot?.login_start_verified === true,
-          sentinel_worker_healthy: snapshot?.sentinel_worker_healthy === true,
-          authority_effect: false,
-        })))
-        .catch((error) => console.error(JSON.stringify({
-          schema: 'metaengine.host-resilience-bootstrap.v1',
-          state: 'ERROR',
-          error: String(error?.message || error).slice(0, 300),
-          terminal: false,
-          authority_effect: false,
-        })));
-    });
 
     const { startSelfUpdateContinuityWatchdog } = await import('./self-update-continuity-watchdog.mjs');
     startSelfUpdateContinuityWatchdog({
@@ -169,7 +168,39 @@ if (guard.primary) {
       })),
     });
     globalThis.fetch = installSignedSupervisorHeartbeatQualificationHook({ app, fetchImpl: globalThis.fetch });
-    await import('./main.mjs');
+
+    await browserRuntimePromise;
+    const hostSnapshot = await app.whenReady()
+      .then(() => hostResilience.start())
+      .catch((error) => ({
+        schema: 'metaengine.host-resilience-runtime.v6',
+        state: 'ERROR',
+        error: String(error?.message || error).slice(0, 300),
+        terminal: false,
+        authority_effect: false,
+      }));
+    console.log(JSON.stringify({
+      schema: 'metaengine.host-resilience-bootstrap.v2',
+      state: hostSnapshot?.state || 'UNKNOWN',
+      login_start_verified: hostSnapshot?.login_start_verified === true,
+      sentinel_worker_healthy: hostSnapshot?.sentinel_worker_healthy === true,
+      browser_runtime_loaded: browserRuntimeLoadError == null,
+      terminal: false,
+      authority_effect: false,
+    }));
+    resolveBrowserBootstrap?.(hostSnapshot);
+
+    if (browserRuntimeLoadError) {
+      console.error(JSON.stringify({
+        schema: 'metaengine.browser-runtime-load.v1',
+        state: 'ERROR',
+        error: String(browserRuntimeLoadError?.message || browserRuntimeLoadError).slice(0, 300),
+        host_resilience_bootstrapped: true,
+        authority_effect: false,
+      }));
+      app.exit(1);
+    }
+
     if (updatedLaunch) {
       setImmediate(() => {
         qualifyUpdatedSuccessorWhenHealthy({ app })
