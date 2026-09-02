@@ -1,3 +1,52 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><meta name="viewport" content="width=device-width,initial-scale=1"><title>METAENGINE Browser</title><link rel="stylesheet" href="metaengine://shell/app.css"></head>
-<body><header><div class="brand"><strong>METAENGINE</strong><span>Development Browser</span></div><nav><button data-cmd="BACK" title="Back">←</button><button data-cmd="FORWARD" title="Forward">→</button><button data-cmd="RELOAD" title="Reload">↻</button></nav><form id="addressForm"><input id="address" aria-label="Address" autocomplete="off" spellcheck="false"><button>Go</button></form><button id="newChat">+ ChatGPT</button><div id="compute" class="pill">Compute: …</div></header><section id="tabs" aria-label="Tabs"></section><script src="metaengine://shell/app.js"></script></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>METAENGINE Browser</title>
+  <link rel="stylesheet" href="metaengine://shell/app.css">
+</head>
+<body>
+  <header class="commandBar">
+    <div class="brand" aria-label="METAENGINE Development Browser">
+      <span class="brandMark" aria-hidden="true">M</span>
+      <span class="brandCopy">
+        <strong>METAENGINE</strong>
+        <span><b>Development</b><i id="version">Browser</i></span>
+      </span>
+    </div>
+
+    <nav class="navControls" aria-label="Navigation">
+      <button class="iconButton" data-cmd="BACK" title="Back" aria-label="Back"><span aria-hidden="true">‹</span></button>
+      <button class="iconButton" data-cmd="FORWARD" title="Forward" aria-label="Forward"><span aria-hidden="true">›</span></button>
+      <button class="iconButton" data-cmd="RELOAD" title="Reload" aria-label="Reload"><span aria-hidden="true">↻</span></button>
+    </nav>
+
+    <form id="addressForm" class="omnibox" aria-label="Address">
+      <span id="routeKind" class="routeKind" aria-hidden="true">WEB</span>
+      <input id="address" aria-label="Address" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Enter a trusted URL">
+      <button class="goButton" aria-label="Navigate" title="Navigate">Go</button>
+    </form>
+
+    <button id="newChat" class="primaryButton" title="Open a new ChatGPT tab">
+      <span aria-hidden="true">＋</span><span class="primaryLabel">New Chat</span>
+    </button>
+  </header>
+
+  <section class="contextBar">
+    <div id="tabs" class="tabStrip" aria-label="Open tabs"></div>
+    <aside id="systems" class="systems" aria-label="Browser systems" aria-live="polite">
+      <div id="fleetStatus" class="systemChip neutral" title="Fleet status"><span class="systemDot" aria-hidden="true"></span><b>Fleet</b><span class="systemValue">…</span></div>
+      <div id="supervisorStatus" class="systemChip neutral" title="Supervisor status"><span class="systemDot" aria-hidden="true"></span><b>Supervisor</b><span class="systemValue">…</span></div>
+      <div id="updateStatus" class="systemChip neutral" title="Self-update status"><span class="systemDot" aria-hidden="true"></span><b>Update</b><span class="systemValue">…</span></div>
+      <div id="devPlaneStatus" class="systemChip neutral" title="Development Plane status"><span class="systemDot" aria-hidden="true"></span><b>Dev</b><span class="systemValue">…</span></div>
+      <div id="computeStatus" class="systemChip neutral" title="Compute runtime status"><span class="systemDot" aria-hidden="true"></span><b>Compute</b><span class="systemValue">…</span></div>
+      <div id="gateStatus" class="systemChip neutral" title="Owner safety gate overrides"><span class="systemDot" aria-hidden="true"></span><b>Gates</b><span class="systemValue">…</span></div>
+    </aside>
+  </section>
+
+  <script src="metaengine://shell/app.js"></script>
+</body>
+</html>
