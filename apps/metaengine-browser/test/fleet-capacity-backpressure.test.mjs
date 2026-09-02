@@ -19,12 +19,14 @@ function makeProvisioner({ errorMessage = 'tab_capacity_exceeded', persisted = n
   return { p, attempts: () => createAttempts, state: () => structuredClone(state) };
 }
 
-test('tab capacity rejection becomes deterministic no-effect backpressure and does not spam createTab', async () => {
+test('tab capacity rejection stops at the first proven pre-effect failure and waits for physical capacity evidence', async () => {
   const h = makeProvisioner();
   await h.p.init();
   let snap = await h.p.reconcile({ active: true });
+  assert.equal(h.attempts(), 1, 'one deterministic capacity signal must stop the current provisioning pass');
   assert.equal(snap.counts.PROVISIONING_AMBIGUOUS, 0);
-  assert.equal(snap.counts.RETIRED, 2);
+  assert.equal(snap.counts.RETIRED, 1);
+  assert.equal(snap.counts.REGISTERED, 1);
   assert.equal(snap.capacity_backpressure.blocked, true);
   assert.equal(snap.capacity_backpressure.deterministic_no_effect, true);
   assert.equal(snap.capacity_backpressure.automatic_retry_allowed, false);
@@ -32,6 +34,12 @@ test('tab capacity rejection becomes deterministic no-effect backpressure and do
   snap = await h.p.reconcile({ active: true });
   assert.equal(h.attempts(), attempts, 'capacity backpressure must suppress repeated createTab attempts');
   assert.equal(snap.counts.PROVISIONING_AMBIGUOUS, 0);
+
+  await h.p.onTabClosed('unrelated-physical-tab');
+  assert.equal(h.p.snapshot().capacity_backpressure.blocked, false, 'a physical close is positive evidence that capacity may have changed');
+  snap = await h.p.reconcile({ active: true });
+  assert.equal(h.attempts(), attempts + 1, 'capacity release permits one new bounded provisioning observation');
+  assert.equal(snap.capacity_backpressure.blocked, true);
 });
 
 test('generic createTab failure remains ambiguous and fenced', async () => {
@@ -43,7 +51,7 @@ test('generic createTab failure remains ambiguous and fenced', async () => {
   assert.ok(snap.agents.filter((a) => a.lifecycle_state === 'PROVISIONING_AMBIGUOUS').every((a) => a.automatic_retry_allowed === false));
 });
 
-test('restart migrates legacy capacity ambiguity to retired no-effect attempts', async () => {
+test('restart migrates only the exact legacy capacity ambiguity to retired no-effect state', async () => {
   const now = new Date().toISOString();
   const persisted = {
     schema: 'metaengine.browser.fleet-state.v1',
@@ -64,4 +72,12 @@ test('restart migrates legacy capacity ambiguity to retired no-effect attempts',
   assert.equal(snap.counts.RETIRED, 1);
   assert.equal(snap.capacity_backpressure.blocked, true);
   assert.equal(h.attempts(), 0);
+});
+
+test('near-match capacity errors remain ambiguous and are never reclassified as proven no-effect', async () => {
+  const h = makeProvisioner({ errorMessage: 'tab_capacity_exceeded_after_dispatch' });
+  await h.p.init();
+  const snap = await h.p.reconcile({ active: true });
+  assert.equal(snap.capacity_backpressure.blocked, false);
+  assert.equal(snap.counts.PROVISIONING_AMBIGUOUS, 2);
 });
