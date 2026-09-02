@@ -20,6 +20,14 @@ test('physical dev E2E follows the forward integration line without cross-SHA ca
   assert.match(source, /physical_target_run_identity_lost/);
 });
 
+test('full physical self-update waits for parseable singleton proof, not redirected-file length', async () => {
+  const source = await workflow('metaengine-browser-self-update-e2e.yml');
+  assert.match(source, /\$firstRow = \$null[\s\S]*ConvertFrom-Json -ErrorAction Stop/);
+  assert.match(source, /singleton_primary_json_timeout/);
+  assert.match(source, /PSObject\.Properties\.Name -contains 'primary_instance'/);
+  assert.doesNotMatch(source, /Get-Item \$firstOut[^\n]*Length -eq 0/);
+});
+
 test('verified dev publisher is exact-SHA isolated and cannot regress the live hint', async () => {
   const source = await workflow('metaengine-browser-fast-autorelease.yml');
   assert.match(source, /integration\/metaengine-development-os-v1/);
