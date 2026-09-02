@@ -88,6 +88,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class BrowserSentinelHost {
   #statePath; #workerScript; #executable; #spawn; #state = null; #child = null; #beforeQuit = null; #app = null;
+  #workerRecoveryPromise = null; #workerRestartCount = 0; #lastWorkerRestartAt = null;
+  #workerRecoveryState = 'UNINITIALIZED'; #workerRecoveryError = null; #workerRecoveryAmbiguous = false;
 
   constructor({ statePath, workerScript, executable = process.execPath, spawnImpl = spawn } = {}) {
     if (!statePath || !workerScript || !executable) throw new Error('browser_sentinel_paths_required');
@@ -125,6 +127,15 @@ export class BrowserSentinelHost {
       worker_heartbeat_at: heartbeatBound ? heartbeat.heartbeat_at : null,
       worker_heartbeat_age_ms: heartbeatBound ? heartbeatAgeMs : null,
       worker_health: workerHealthy ? 'HEALTHY' : 'STALE_OR_MISSING',
+      worker_recovery: {
+        state: this.#workerRecoveryState,
+        restart_count: this.#workerRestartCount,
+        last_restart_at: this.#lastWorkerRestartAt,
+        error: this.#workerRecoveryError,
+        blocked_ambiguous: this.#workerRecoveryAmbiguous,
+        automatic_retry_allowed: this.#workerRecoveryAmbiguous !== true,
+        authority_effect: false,
+      },
       single_writer_parent_state: true,
       authority_effect: false,
     });
@@ -171,6 +182,9 @@ export class BrowserSentinelHost {
     }
     this.#child.unref?.();
     this.#app = app;
+    this.#workerRecoveryState = 'STARTED';
+    this.#workerRecoveryError = null;
+    this.#workerRecoveryAmbiguous = false;
     if (app?.on) {
       this.#beforeQuit = () => { this.markPlannedShutdownSync(); };
       app.on('before-quit', this.#beforeQuit);
@@ -202,6 +216,114 @@ export class BrowserSentinelHost {
     });
     writeJsonSync(this.#statePath, this.#state);
     return this.snapshot();
+  }
+
+  async reconcileWorker({ timeoutMs = 5_000 } = {}) {
+    if (this.#workerRecoveryPromise) return this.#workerRecoveryPromise;
+    this.#workerRecoveryPromise = (async () => {
+      const observed = this.snapshot();
+      if (!observed) return null;
+      if (observed.worker_ready === true) {
+        this.#workerRecoveryState = 'HEALTHY';
+        this.#workerRecoveryError = null;
+        return this.snapshot();
+      }
+      if (this.#workerRecoveryAmbiguous) {
+        this.#workerRecoveryState = 'AMBIGUOUS_BLOCKED';
+        return this.snapshot();
+      }
+
+      let current = await readJson(this.#statePath);
+      if (!current || current.token !== this.#state?.token || Number(current.parent_pid) !== process.pid) {
+        this.#workerRecoveryState = 'BINDING_CHANGED';
+        this.#workerRecoveryError = 'browser_sentinel_worker_recovery_binding_changed';
+        return this.snapshot();
+      }
+      if (current.expected_restart === true || current.installer_handoff === true || current.worker_released === true || ['EXPECTED_RESTART','INSTALLER_HANDOFF','PLANNED_SHUTDOWN'].includes(String(current.lifecycle || ''))) {
+        this.#workerRecoveryState = 'SUPPRESSED_EXPECTED_TRANSITION';
+        this.#workerRecoveryError = null;
+        return this.snapshot();
+      }
+
+      const priorPid = Number(current.worker_pid || 0);
+      if (processAlive(priorPid)) {
+        // A stale heartbeat does not prove the worker process is absent. Never create
+        // a second watchdog while the exact prior PID is still alive: two sentinels
+        // could race on one future Browser relaunch effect.
+        this.#workerRecoveryState = 'STALE_WORKER_PID_ALIVE';
+        this.#workerRecoveryError = null;
+        return this.snapshot();
+      }
+
+      // Exact prior worker absence is the positive terminal readback that authorizes
+      // a replacement. Re-read transition state immediately before the spawn effect.
+      current = await readJson(this.#statePath);
+      if (!current || current.token !== this.#state?.token || Number(current.parent_pid) !== process.pid) {
+        this.#workerRecoveryState = 'BINDING_CHANGED';
+        this.#workerRecoveryError = 'browser_sentinel_worker_recovery_binding_changed_before_spawn';
+        return this.snapshot();
+      }
+      if (current.expected_restart === true || current.installer_handoff === true || current.worker_released === true || ['EXPECTED_RESTART','INSTALLER_HANDOFF','PLANNED_SHUTDOWN'].includes(String(current.lifecycle || ''))) {
+        this.#workerRecoveryState = 'SUPPRESSED_EXPECTED_TRANSITION';
+        this.#workerRecoveryError = null;
+        return this.snapshot();
+      }
+
+      this.#workerRecoveryState = 'RESPAWNING_AFTER_CONFIRMED_EXIT';
+      const env = sentinelEnvironment(process.env, { statePath: this.#statePath, token: current.token, parentPid: process.pid });
+      let child;
+      try {
+        child = this.#spawn(this.#executable, [this.#workerScript], {
+          detached: true,
+          stdio: 'ignore',
+          shell: false,
+          windowsHide: true,
+          env,
+        });
+      } catch (error) {
+        // Synchronous spawn rejection is a proven no-child boundary; a later cycle may retry.
+        this.#workerRecoveryState = 'SPAWN_REJECTED_NO_EFFECT';
+        this.#workerRecoveryError = String(error?.message || error).slice(0, 240);
+        return this.snapshot();
+      }
+
+      this.#child = child;
+      const workerPid = Number(child?.pid || 0);
+      if (!Number.isSafeInteger(workerPid) || workerPid <= 0) {
+        // The process creation outcome is unknown. Do not issue another spawn.
+        this.#workerRecoveryState = 'SPAWN_AMBIGUOUS';
+        this.#workerRecoveryError = 'browser_sentinel_worker_spawn_without_pid';
+        this.#workerRecoveryAmbiguous = true;
+        return this.snapshot();
+      }
+      await this.#mutate({ worker_pid: workerPid, worker_released: false });
+      child.unref?.();
+
+      try {
+        await this.waitUntilHealthy(timeoutMs);
+      } catch (error) {
+        if (processAlive(workerPid)) {
+          // A live replacement without heartbeat is ambiguous. Never layer another
+          // watchdog on top of it automatically.
+          this.#workerRecoveryState = 'RESPAWN_HEARTBEAT_AMBIGUOUS';
+          this.#workerRecoveryError = String(error?.message || error).slice(0, 240);
+          this.#workerRecoveryAmbiguous = true;
+          return this.snapshot();
+        }
+        // The replacement is positively absent, so a later cycle may make a fresh,
+        // independently observed recovery attempt without duplicating a live worker.
+        this.#workerRecoveryState = 'RESPAWN_EXITED_BEFORE_HEALTH';
+        this.#workerRecoveryError = String(error?.message || error).slice(0, 240);
+        return this.snapshot();
+      }
+
+      this.#workerRestartCount += 1;
+      this.#lastWorkerRestartAt = new Date().toISOString();
+      this.#workerRecoveryState = 'RECOVERED';
+      this.#workerRecoveryError = null;
+      return this.snapshot();
+    })().finally(() => { this.#workerRecoveryPromise = null; });
+    return this.#workerRecoveryPromise;
   }
 
   async prepareExpectedRestart(reason = 'EXPECTED_RESTART') {
