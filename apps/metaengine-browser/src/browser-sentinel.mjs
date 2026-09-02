@@ -224,11 +224,11 @@ export class BrowserSentinelHost {
 
       this.#child = null;
       await this.#spawnWorker();
-      const healthy = await this.waitUntilHealthy(timeoutMs);
+      await this.waitUntilHealthy(timeoutMs);
       this.#workerRecoveryCount += 1;
       this.#lastWorkerRecoveryAt = new Date().toISOString();
       this.#lastWorkerRecoveryError = null;
-      return healthy;
+      return this.snapshot();
     })().catch((error) => {
       this.#lastWorkerRecoveryError = String(error?.message || error).slice(0, 240);
       throw error;
