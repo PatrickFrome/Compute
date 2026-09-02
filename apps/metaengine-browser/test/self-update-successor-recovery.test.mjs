@@ -12,6 +12,7 @@ function installedInspection(overrides = {}) {
   return {
     schema: 'metaengine.self-update.startup-inspection.v1',
     state: 'TARGET_INSTALLED',
+    transaction_state: 'SUCCESSOR_BOOTED',
     current_version: '0.6.6-dev.8.1',
     target_version: '0.6.6-dev.8.1',
     automatic_retry_allowed: false,
@@ -40,8 +41,13 @@ test('updated launch qualifies only after exact successor handoff is durably pro
   assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: true, updateHandoff: updatedHandoff({ authority_effect: true }) }), false);
 });
 
-test('normal restart resumes qualification only for exact durable TARGET_INSTALLED evidence', () => {
+test('normal restart resumes qualification only for exact unresolved SUCCESSOR_BOOTED evidence', () => {
   assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: false, startupInspection: installedInspection() }), true);
+  assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: false, startupInspection: installedInspection({ transaction_state: 'QUALIFIED' }) }), false);
+  assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: false, startupInspection: installedInspection({ transaction_state: 'SUPERSEDED' }) }), false);
+  assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: false, startupInspection: installedInspection({ transaction_state: 'PREPARED' }) }), false);
+  assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: false, startupInspection: installedInspection({ transaction_state: 'INSTALLING' }) }), false);
+  assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: false, startupInspection: installedInspection({ transaction_state: null }) }), false);
   assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: false, startupInspection: installedInspection({ state: 'NONE' }) }), false);
   assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: false, startupInspection: installedInspection({ state: 'AMBIGUOUS_INSTALL' }) }), false);
   assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: false, startupInspection: installedInspection({ target_version: '0.6.6-dev.9.1' }) }), false);
