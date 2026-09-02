@@ -203,6 +203,17 @@ test('production entry schedules qualification for updated argv or exact TARGET_
   assert.match(source, /if \(qualificationRequired\)/);
   assert.match(source, /TARGET_INSTALLED_STARTUP/);
   assert.match(source, /SELF_UPDATE_AUTOMATIC_RETRY_HELD/);
-  assert.ok(source.indexOf('installSignedSupervisorHeartbeatQualificationHook') < source.indexOf("await import('./main.mjs')"));
-  assert.ok(source.indexOf('startSelfUpdateContinuityWatchdog({') < source.indexOf("await import('./main.mjs')"));
+
+  const barrierAt = source.indexOf('__METAENGINE_BROWSER_BOOTSTRAP_BARRIER__');
+  const mainImportAt = source.indexOf("import('./main.mjs')", barrierAt);
+  const watchdogAt = source.indexOf('startSelfUpdateContinuityWatchdog({', mainImportAt);
+  const signedHookAt = source.indexOf('installSignedSupervisorHeartbeatQualificationHook', watchdogAt);
+  const hostStartAt = source.indexOf('hostResilience.start()', signedHookAt);
+  const barrierReleaseAt = source.indexOf('resolveBrowserBootstrap?.(hostSnapshot)', hostStartAt);
+  const qualificationAt = source.indexOf('if (qualificationRequired)', barrierReleaseAt);
+  assert.ok(barrierAt >= 0 && mainImportAt > barrierAt, 'runtime registration must be fenced by the bootstrap barrier');
+  assert.ok(watchdogAt > mainImportAt, 'continuity watchdog must be armed before releasing the runtime barrier');
+  assert.ok(signedHookAt > watchdogAt && signedHookAt < hostStartAt, 'signed heartbeat qualification must be installed before host bootstrap');
+  assert.ok(barrierReleaseAt > hostStartAt, 'runtime start remains gated on completed host-resilience bootstrap');
+  assert.ok(qualificationAt > barrierReleaseAt, 'successor qualification starts only after the runtime safety barrier is released');
 });
