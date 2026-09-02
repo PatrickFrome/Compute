@@ -108,9 +108,6 @@ function promotionCandidate(state) {
     if (!/^agent_[a-z0-9-]{8,64}$/.test(String(agent?.agent_id || '').toLowerCase())) return false;
     if (!String(agent?.tab_id || '') || !/^webcontents:[1-9][0-9]*$/.test(String(agent?.target_id || '').toLowerCase())) return false;
     if (!Number.isSafeInteger(Number(agent?.generation_epoch)) || Number(agent.generation_epoch) < 1) return false;
-    // Registry URL is a read-only hint only. Both a fresh ChatGPT root tab and an existing
-    // canonical conversation may enter the promotion lease. Exact CAPTURE after lease
-    // acquisition remains authoritative; no TYPE or CLICK occurs in this promotion stage.
     return Boolean(transportUrl(tabs.get(String(agent.tab_id))?.url));
   });
   candidates.sort((a, b) => String(a.agent_id).localeCompare(String(b.agent_id)));
@@ -143,6 +140,21 @@ function exactPromotionLease(body, binding) {
   return body;
 }
 
+function exactPreEffectRequeue(body, lease) {
+  return Boolean(
+    body?.schema === 'metaengine.devos.ambiguity-reconciliation.v1'
+    && String(body.task_id || '').toLowerCase() === lease.task_id
+    && Number(body.lease_generation) === lease.lease_generation
+    && String(body.state || '').toUpperCase() === 'READY'
+    && String(body.recovery_class || '').toUpperCase() === 'PRE_EFFECT_ABORTED'
+    && body.retry_via_scheduler === true
+    && body.physical_effect_replayed === false
+    && body.new_lease_generation_allocated === false
+    && body.automatic_retry_allowed === false
+    && body.authority_effect === false
+  );
+}
+
 export class DevOsNativeTaskCycle {
   #inner;
   #getState;
@@ -151,6 +163,9 @@ export class DevOsNativeTaskCycle {
   #lastFrames = new Map();
   #lastFleetTransportProof = null;
   #lastTransportPromotion = null;
+  #currentCycleLease = null;
+  #taskEffectAttempted = false;
+  #lastPreEffectReconciliation = null;
 
   constructor(options = {}) {
     const getState = options.getState;
@@ -165,9 +180,22 @@ export class DevOsNativeTaskCycle {
     const strictGetState = async () => transportAdmittedState(await getState());
 
     const observedExecuteCommand = async (command) => {
+      const action = String(command?.action || '');
+      const tabId = String(command?.payload?.tab_id || '');
+      if (this.#currentCycleLease && ['SEMANTIC_TYPE','TYPED_CLICK'].includes(action) && tabId === String(this.#currentCycleLease.tab_id || '')) {
+        // Mark before invoking the physical command. A thrown type/click is effect-ambiguous.
+        this.#taskEffectAttempted = true;
+      }
       const result = await executeCommand(command);
-      if (String(command?.action || '') === 'CAPTURE' && command?.payload?.tab_id) {
-        this.#lastFrames.set(String(command.payload.tab_id), structuredClone(result));
+      if (action === 'CAPTURE' && tabId) {
+        if (this.#currentCycleLease && !this.#taskEffectAttempted && tabId === String(this.#currentCycleLease.tab_id || '')) {
+          const observedTarget = String(result?.target_id || '').toLowerCase();
+          const expectedTarget = String(this.#currentCycleLease.target_id || '').toLowerCase();
+          if (observedTarget && expectedTarget && observedTarget !== expectedTarget) {
+            throw new Error('devos_pre_effect_frame_target_mismatch');
+          }
+        }
+        this.#lastFrames.set(tabId, structuredClone(result));
       }
       return result;
     };
@@ -230,7 +258,39 @@ export class DevOsNativeTaskCycle {
           authority_effect: false,
         };
       }
-      return signedRequest(requestPath, request);
+
+      const response = await signedRequest(requestPath, request);
+      if (String(requestPath) !== '/v1/devos/cycle' || typeof response?.json !== 'function') return response;
+      const originalJson = response.json.bind(response);
+      return {
+        status: response.status,
+        ok: response.ok,
+        async json() {
+          const body = await originalJson();
+          this;
+          return body;
+        },
+        __captureLease: async () => {},
+      };
+    };
+
+    // Replace the cycle-response wrapper with a closure that records the exact server lease
+    // only when Core consumes the JSON. Keeping this after declaration avoids mutating Response.
+    const cycleAwareSignedRequest = async (requestPath, request = {}) => {
+      if (String(requestPath) !== '/v1/devos/cycle') return proofGatedSignedRequest(requestPath, request);
+      const response = await signedRequest(requestPath, request);
+      if (typeof response?.json !== 'function') return response;
+      const originalJson = response.json.bind(response);
+      return {
+        status: response.status,
+        ok: response.ok,
+        json: async () => {
+          const body = await originalJson();
+          this.#currentCycleLease = body?.lease ? structuredClone(body.lease) : null;
+          this.#taskEffectAttempted = false;
+          return body;
+        },
+      };
     };
 
     const storageDir = supervisorDeviceStorageDirectory();
@@ -242,7 +302,7 @@ export class DevOsNativeTaskCycle {
       ...options,
       getState: strictGetState,
       executeCommand: observedExecuteCommand,
-      signedRequest: proofGatedSignedRequest,
+      signedRequest: cycleAwareSignedRequest,
       effectJournal,
     });
   }
@@ -252,6 +312,8 @@ export class DevOsNativeTaskCycle {
       ...this.#inner.snapshot(),
       fleet_transport_proof: this.#lastFleetTransportProof ? structuredClone(this.#lastFleetTransportProof) : null,
       fleet_transport_promotion: this.#lastTransportPromotion ? structuredClone(this.#lastTransportPromotion) : null,
+      pre_effect_reconciliation: this.#lastPreEffectReconciliation ? structuredClone(this.#lastPreEffectReconciliation) : null,
+      pre_effect_lease_stall_fast_requeue: true,
       fleet_transport_proof_before_physical_dispatch: true,
       fleet_transport_proof_before_db_running: true,
       restart_transport_promotion_before_scheduler_cycle: true,
@@ -359,13 +421,63 @@ export class DevOsNativeTaskCycle {
     return result;
   }
 
+  async #reconcileProvenPreEffect(error) {
+    if (!this.#currentCycleLease || this.#taskEffectAttempted) return null;
+    let lease;
+    try { lease = normalizeLease({ ...this.#currentCycleLease, automatic_retry_allowed: false }); }
+    catch { return null; }
+    const promptSha256 = sha256(renderDevosTaskPrompt(lease));
+    const payload = {
+      task_id: lease.task_id,
+      agent_id: lease.agent_id,
+      lease_generation: lease.lease_generation,
+      tab_id: lease.tab_id,
+      target_id: lease.target_id,
+      agent_generation_epoch: lease.agent_generation_epoch,
+      recovery: {
+        recovery_class: 'PRE_EFFECT_ABORTED',
+        prompt_sha256: promptSha256,
+        physical_effect_attempted: false,
+        effect_barrier_crossed: false,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      },
+    };
+    try {
+      const response = await this.#signedRequest('/v1/devos/reconcile-ambiguous', { payload });
+      const body = await readJson(response);
+      if (response?.ok && exactPreEffectRequeue(body, lease)) {
+        return {
+          state: 'PRE_EFFECT_REQUEUED', task_id: lease.task_id, lease_generation: lease.lease_generation,
+          original_error: clip(error?.message || error), readback: 'WRITE_ACK', retry_via_scheduler: true,
+          physical_effect_attempted: false, physical_effect_replayed: false, automatic_retry_allowed: false, authority_effect: false,
+        };
+      }
+    } catch {}
+
+    try {
+      const response = await this.#signedRequest(`/v1/devos/tasks/${encodeURIComponent(lease.task_id)}/status`, { method: 'GET' });
+      const body = await readJson(response);
+      if (response?.ok && Number(body?.lease_generation || 0) === lease.lease_generation && String(body?.state || '').toUpperCase() === 'READY') {
+        return {
+          state: 'PRE_EFFECT_REQUEUE_CONFIRMED_BY_STATUS', task_id: lease.task_id, lease_generation: lease.lease_generation,
+          original_error: clip(error?.message || error), readback: 'STATUS_AFTER_AMBIGUOUS_WRITE', retry_via_scheduler: true,
+          physical_effect_attempted: false, physical_effect_replayed: false, automatic_retry_allowed: false, authority_effect: false,
+        };
+      }
+    } catch {}
+
+    return {
+      state: 'PRE_EFFECT_REQUEUE_UNPROVEN', task_id: lease.task_id, lease_generation: lease.lease_generation,
+      original_error: clip(error?.message || error), retry_via_scheduler: false,
+      physical_effect_attempted: false, physical_effect_replayed: false, automatic_retry_allowed: false, authority_effect: false,
+    };
+  }
+
   async cycle() {
     try {
       await this.#promoteOneRestartTransport();
     } catch (error) {
-      // Promotion is a bounded pre-admission repair, not a second scheduler. Fail-soft here is
-      // safe because the database claim barrier independently rejects any overlapping actuation
-      // lease or non-ACTIVE transport identity.
       this.#lastTransportPromotion = {
         state: 'PRE_ADMISSION_REPAIR_FAILED',
         reason: clip(error?.message || error),
@@ -373,7 +485,19 @@ export class DevOsNativeTaskCycle {
         authority_effect: false,
       };
     }
-    await this.#inner.cycle();
+    this.#currentCycleLease = null;
+    this.#taskEffectAttempted = false;
+    this.#lastPreEffectReconciliation = null;
+    try {
+      await this.#inner.cycle();
+    } catch (error) {
+      const reconciliation = await this.#reconcileProvenPreEffect(error);
+      if (reconciliation) this.#lastPreEffectReconciliation = reconciliation;
+      if (reconciliation?.retry_via_scheduler === true) return this.snapshot();
+      error.automatic_retry_allowed = false;
+      if (reconciliation) error.pre_effect_reconciliation = structuredClone(reconciliation);
+      throw error;
+    }
     return this.snapshot();
   }
 
