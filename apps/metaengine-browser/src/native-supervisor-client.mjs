@@ -11,22 +11,51 @@ import {
 
 export * from './native-supervisor-client-core.mjs';
 
+const COMMAND_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const TAB_ID_RE = /^tab_[0-9a-f-]{36}$/i;
+
+export function exactCommandTargetProjection(command) {
+  const commandId = String(command?.command_id || '').toLowerCase();
+  const tabId = String(command?.payload?.tab_id || '');
+  if (!COMMAND_ID_RE.test(commandId)) return null;
+  return Object.freeze({
+    command_id: commandId,
+    target_tab_id: TAB_ID_RE.test(tabId) ? tabId : null,
+    payload_exposed: false,
+    page_data_authority: false,
+    authority_effect: false,
+  });
+}
+
 // Additive read-only wrapper. The proven Native Supervisor implementation remains
 // byte-identical in native-supervisor-client-core.mjs. Workspace observation runs
 // as one bounded stage of the same existing heartbeat cycle and creates no timer,
-// scheduler, command lease or Browser authority.
+// scheduler, command lease or Browser authority. Exact command target telemetry is
+// derived only from an already-executing DB-leased typed command and exposes no payload.
 export class NativeSupervisorClient extends CoreNativeSupervisorClient {
   #workspaceIdentity;
   #workspaceFetch;
   #workspaceObservation = unavailableWorkspaceBindingSnapshot('UNINITIALIZED');
   #workspaceObservationPromise = null;
+  #commandTargetProjection = null;
 
   constructor(options = {}) {
-    super(options);
+    const executeCommand = options.executeCommand;
+    let commandTargetProjection = null;
+    const trackedExecuteCommand = typeof executeCommand === 'function'
+      ? async (command) => {
+          const projected = exactCommandTargetProjection(command);
+          if (projected) commandTargetProjection = projected;
+          return executeCommand(command);
+        }
+      : executeCommand;
+
+    super({ ...options, executeCommand: trackedExecuteCommand });
     if (!options.identity) throw new Error('native_supervisor_identity_required');
     if (typeof (options.fetchImpl ?? globalThis.fetch) !== 'function') throw new Error('native_supervisor_fetch_required');
     this.#workspaceIdentity = options.identity;
     this.#workspaceFetch = createBoundedSupervisorFetch(options.fetchImpl ?? globalThis.fetch, { deadlineMs: options.requestDeadlineMs });
+    this.#commandTargetProjection = () => commandTargetProjection;
   }
 
   async #observeWorkspaceBindings() {
@@ -67,8 +96,16 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
   }
 
   snapshot() {
+    const base = super.snapshot();
+    const target = this.#commandTargetProjection?.() || null;
+    const currentCommand = base?.current_command && target?.command_id === String(base.current_command.command_id || '').toLowerCase()
+      ? { ...base.current_command, target_tab_id: target.target_tab_id }
+      : base?.current_command || null;
     return {
-      ...super.snapshot(),
+      ...base,
+      current_command: currentCommand,
+      current_command_payload_exposed: false,
+      current_command_target_authority: 'DB_LEASED_TYPED_COMMAND_ONLY',
       workspace_bindings: structuredClone(this.#workspaceObservation),
       workspace_binding_source: 'NATIVE_SUPERVISOR_HEARTBEAT',
       workspace_binding_second_polling_loop: false,
