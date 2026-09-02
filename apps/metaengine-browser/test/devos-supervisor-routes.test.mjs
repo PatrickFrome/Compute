@@ -18,7 +18,7 @@ test('heartbeat cycle reconciles stale leases before snapshot and is the sole sc
   };
   const route=createDevosSupervisorRoutes({rpc,workspaceId});
   const out=await bodyOf(await route({req:{method:'POST'},path:'/v1/devos/cycle',body:{fleet:{agents:[agent]}},clientId:'device'}));
-  assert.deepEqual(calls.slice(0,2).map(c=>c[0]),['devos_fleet_reconcile_v1','devos_fleet_snapshot_v1']);
+  assert.deepEqual(calls.slice(0,3).map(c=>c[0]),['meta_orchestrator_controller_lease_v1','devos_fleet_reconcile_v1','devos_fleet_snapshot_v1']);
   assert.equal(out.reconcile.expired_tasks_fenced_ambiguous,16);
   assert.equal(out.scheduler_source,'NATIVE_SUPERVISOR_HEARTBEAT');
   assert.equal(out.scheduler_policy,'IDLE_ROLE_FAIR_SHARE_V1');
