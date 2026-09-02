@@ -1,188 +1,29 @@
-const api = window.metaengineShell;
-const tabsEl = document.getElementById('tabs');
-const address = document.getElementById('address');
-const routeKind = document.getElementById('routeKind');
-const versionEl = document.getElementById('version');
-const statusEls = Object.freeze({
-  fleet: document.getElementById('fleetStatus'),
-  supervisor: document.getElementById('supervisorStatus'),
-  update: document.getElementById('updateStatus'),
-  dev: document.getElementById('devPlaneStatus'),
-  compute: document.getElementById('computeStatus'),
-  gates: document.getElementById('gateStatus'),
-});
-let snapshot = null;
-
-function text(value, fallback = '—') {
-  const out = String(value ?? '').trim();
-  return out || fallback;
-}
-
-function compact(value, max = 18) {
-  const out = text(value);
-  return out.length > max ? `${out.slice(0, Math.max(1, max - 1))}…` : out;
-}
-
-function setSystemStatus(element, { value, tone = 'neutral', title = '' } = {}) {
-  if (!element) return;
-  element.classList.remove('good', 'warn', 'bad', 'neutral');
-  element.classList.add(['good', 'warn', 'bad'].includes(tone) ? tone : 'neutral');
-  const valueEl = element.querySelector('.systemValue');
-  if (valueEl) valueEl.textContent = text(value);
-  if (title) element.title = title;
-}
-
-function fleetStatus(next) {
-  const fleet = next?.fleet;
-  if (!fleet) return { value: 'unknown', tone: 'neutral', title: 'Fleet snapshot unavailable' };
-  const counts = fleet.counts || {};
-  const active = Number(counts.ACTIVE || 0);
-  const bound = Number(counts.BOUND_UNVERIFIED || 0);
-  const ambiguous = Number(counts.PROVISIONING_AMBIGUOUS || 0);
-  const lost = Number(counts.LOST || 0);
-  const total = Array.isArray(fleet.agents) ? fleet.agents.length : Object.values(counts).reduce((sum, value) => sum + (Number(value) || 0), 0);
-  const tone = ambiguous > 0 ? 'bad' : (lost > 0 || bound > 0 ? 'warn' : (active > 0 ? 'good' : 'neutral'));
-  return {
-    value: `${active}/${total}`,
-    tone,
-    title: `Fleet · ${active} active · ${bound} bound unverified · ${ambiguous} ambiguous · ${lost} lost · ${text(fleet.readiness_contract, 'no readiness contract')}`,
-  };
-}
-
-function supervisorStatus(next) {
-  const supervisor = next?.supervisor;
-  if (!supervisor) return { value: 'unknown', tone: 'neutral', title: 'Supervisor snapshot unavailable' };
-  const mode = text(supervisor.supervisor_mode, 'OFF').toUpperCase();
-  const armed = supervisor.armed === true;
-  const running = supervisor.running === true;
-  const hasError = Boolean(supervisor.last_error || supervisor.devos_last_error);
-  const tone = hasError ? 'bad' : (running && mode === 'CONTROL' && armed ? 'good' : (running ? 'warn' : 'neutral'));
-  const value = mode === 'CONTROL' ? `${armed ? 'ARM' : 'SAFE'}` : compact(mode, 10);
-  return {
-    value,
-    tone,
-    title: `Supervisor · ${mode} · ${armed ? 'armed' : 'disarmed'} · ${running ? 'running' : 'stopped'}${hasError ? ` · ${text(supervisor.last_error || supervisor.devos_last_error)}` : ''}`,
-  };
-}
-
-function updateStatus(next) {
-  const update = next?.supervisor?.self_update;
-  if (!update) return { value: 'unknown', tone: 'neutral', title: 'Self-update snapshot unavailable' };
-  const state = text(update.state, 'UNKNOWN').toUpperCase();
-  const badStates = new Set(['ERROR', 'REJECTED_METADATA', 'DISCOVERY_ERROR']);
-  const activeStates = new Set(['APPROVED_DOWNLOAD', 'DOWNLOADING', 'READY_RESTART', 'RESTART_GRACE', 'RESTARTING']);
-  const goodStates = new Set(['CURRENT', 'IDLE', 'NO_UPDATE', 'READY']);
-  const tone = badStates.has(state) ? 'bad' : (activeStates.has(state) ? 'warn' : (goodStates.has(state) ? 'good' : 'neutral'));
-  const available = update.available_version || update.downloaded_version || null;
-  return {
-    value: available && available !== update.current_version ? compact(available, 12) : compact(state.replaceAll('_', ' '), 12),
-    tone,
-    title: `Self-update · ${state} · current ${text(update.current_version)}${available ? ` · target ${available}` : ''} · automatic effect retry disabled`,
-  };
-}
-
-function developmentPlaneStatus(next) {
-  const dev = next?.development_plane;
-  if (!dev) return { value: 'unknown', tone: 'neutral', title: 'Development Plane snapshot unavailable' };
-  const state = text(dev.state, 'UNKNOWN').toUpperCase();
-  const tone = state === 'READY' ? 'good' : (['ERROR', 'FAILED', 'CRASHED'].includes(state) ? 'bad' : 'warn');
-  return {
-    value: compact(state, 10),
-    tone,
-    title: `Development Plane · ${state}${dev.version ? ` · ${dev.version}` : ''}`,
-  };
-}
-
-function computeStatus(next) {
-  const compute = next?.compute;
-  if (!compute) return { value: 'unknown', tone: 'neutral', title: 'Compute snapshot unavailable' };
-  const available = compute.available === true;
-  const runtime = compute?.result?.runtime || (available ? 'ready' : 'offline');
-  return {
-    value: compact(runtime, 12),
-    tone: available ? 'good' : 'bad',
-    title: `Compute · ${available ? 'available' : 'offline'} · ${text(runtime)}`,
-  };
-}
-
-function gateStatus(next) {
-  const gates = next?.owner_safety_gates;
-  if (!gates) return { value: 'unknown', tone: 'neutral', title: 'Owner safety gate snapshot unavailable' };
-  const overrides = Array.isArray(gates.overrides) ? gates.overrides.length : 0;
-  const wildcard = gates.wildcard_disabled === true;
-  return {
-    value: wildcard ? 'ALL' : (overrides ? `${overrides} override${overrides === 1 ? '' : 's'}` : 'sealed'),
-    tone: wildcard ? 'bad' : (overrides ? 'warn' : 'good'),
-    title: wildcard
-      ? 'Owner safety gates · wildcard override active'
-      : `Owner safety gates · ${overrides ? `${overrides} explicit override(s) active` : 'no overrides active'}`,
-  };
-}
-
-function renderTabs(next) {
-  const tabState = next?.tabs || {};
-  const selectedId = tabState.selected_tab_id;
-  const tabs = Array.isArray(tabState.tabs) ? tabState.tabs : [];
-  const selected = tabs.find((tab) => tab.tab_id === selectedId) || null;
-  if (selected && document.activeElement !== address) address.value = selected.url || '';
-  routeKind.textContent = selected?.kind === 'CHATGPT' ? 'CHAT' : 'WEB';
-  routeKind.classList.toggle('chat', selected?.kind === 'CHATGPT');
-
-  tabsEl.replaceChildren(...tabs.map((tab) => {
-    const active = tab.tab_id === selectedId;
-    const wrap = document.createElement('div');
-    wrap.className = `tab ${active ? 'active' : ''} ${tab.kind === 'CHATGPT' ? 'chat' : 'web'}`;
-    wrap.dataset.tabId = tab.tab_id;
-
-    const select = document.createElement('button');
-    select.className = 'tabSelect';
-    select.textContent = tab.title || (tab.kind === 'CHATGPT' ? 'ChatGPT' : tab.url) || 'Untitled';
-    select.title = tab.url || select.textContent;
-    select.setAttribute('aria-label', `${active ? 'Current tab' : 'Select tab'}: ${select.textContent}`);
-    select.onclick = () => api.command('SELECT_TAB', { tab_id: tab.tab_id }).catch(() => {});
-
-    const close = document.createElement('button');
-    close.className = 'tabClose';
-    close.textContent = '×';
-    close.title = 'Close tab';
-    close.setAttribute('aria-label', `Close ${select.textContent}`);
-    close.onclick = (event) => {
-      event.stopPropagation();
-      api.command('CLOSE_TAB', { tab_id: tab.tab_id }).catch(() => {});
-    };
-
-    wrap.append(select, close);
-    return wrap;
-  }));
-}
-
-function render(next) {
-  snapshot = next || null;
-  versionEl.textContent = next?.version ? `v${next.version}` : 'Browser';
-  renderTabs(next);
-  setSystemStatus(statusEls.fleet, fleetStatus(next));
-  setSystemStatus(statusEls.supervisor, supervisorStatus(next));
-  setSystemStatus(statusEls.update, updateStatus(next));
-  setSystemStatus(statusEls.dev, developmentPlaneStatus(next));
-  setSystemStatus(statusEls.compute, computeStatus(next));
-  setSystemStatus(statusEls.gates, gateStatus(next));
-}
-
-document.querySelectorAll('[data-cmd]').forEach((button) => button.addEventListener('click', () => {
-  api.command(button.dataset.cmd, {}).catch(() => {});
-}));
-document.getElementById('newChat').addEventListener('click', () => api.command('NEW_CHATGPT', {}).catch(() => {}));
-document.getElementById('addressForm').addEventListener('submit', (event) => {
-  event.preventDefault();
-  api.command('NAVIGATE', { url: address.value }).catch(() => {});
-});
-document.addEventListener('keydown', (event) => {
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'l') {
-    event.preventDefault();
-    address.focus();
-    address.select();
-  }
-});
-
-api.onSnapshot(render);
-api.snapshot().then(render).catch(() => render(snapshot));
+const api=window.metaengineShell,body=document.body,address=document.getElementById('address'),routeKind=document.getElementById('routeKind'),versionEl=document.getElementById('version'),activeKind=document.getElementById('activeKind'),activeTitle=document.getElementById('activeTitle'),activeMeta=document.getElementById('activeMeta'),verticalTabs=document.getElementById('verticalTabs'),tabCount=document.getElementById('tabCount'),tabSearch=document.getElementById('tabSearch'),fleetProfile=document.getElementById('fleetProfile'),railGeometry=document.getElementById('railGeometry'),opsNav=document.getElementById('opsNav'),opsContent=document.getElementById('opsContent');
+const statusEls=Object.freeze({fleet:document.getElementById('fleetStatus'),supervisor:document.getElementById('supervisorStatus'),update:document.getElementById('updateStatus'),dev:document.getElementById('devPlaneStatus'),compute:document.getElementById('computeStatus'),gates:document.getElementById('gateStatus')});
+let snapshot=null,tabFilter='',opsSection='overview',requestedLayout={sidebar:'EXPANDED',operations:'OPEN'};
+function text(v,f='—'){const o=String(v??'').trim();return o||f}function compact(v,m=18){const o=text(v);return o.length>m?`${o.slice(0,Math.max(1,m-1))}…`:o}function shortId(v,m=10){const o=String(v||'');if(!o)return'—';return o.length>m?`${o.slice(0,Math.max(4,m-3))}…`:o}function hostFor(v){try{return new URL(String(v||'')).hostname||'web'}catch{return'web'}}
+function stateTone(v){const s=String(v||'').toUpperCase();if(['ACTIVE','READY','RUNNING','CURRENT','OK','RESTORED','PROVEN','CONFIRMED','AVAILABLE','COMPLETED'].includes(s))return'good';if(['BOUND_UNVERIFIED','PROVISIONING','REGISTERED','MONITOR','DOWNLOADING','READY_RESTART','RESTART_GRACE','PARTIAL','STALE','DEGRADED','PENDING','ARMED'].includes(s))return'warn';if(['AMBIGUOUS','PROVISIONING_AMBIGUOUS','LOST','FAILED','ERROR','REJECTED_METADATA','DISCOVERY_ERROR','CRASHED'].includes(s))return'bad';return'neutral'}
+function setSystemStatus(e,{value,tone='neutral',title=''}={}){if(!e)return;e.classList.remove('good','warn','bad','neutral');e.classList.add(['good','warn','bad'].includes(tone)?tone:'neutral');const ve=e.querySelector('.systemValue');if(ve)ve.textContent=text(value);e.title=title||''}
+function fleetStatus(n){const f=n?.fleet;if(!f)return{value:'unknown',tone:'neutral',title:'Fleet snapshot unavailable'};const c=f.counts||{},a=Number(c.ACTIVE||0),b=Number(c.BOUND_UNVERIFIED||0),x=Number(c.PROVISIONING_AMBIGUOUS||0),l=Number(c.LOST||0),t=Array.isArray(f.agents)?f.agents.length:Object.values(c).reduce((s,v)=>s+(Number(v)||0),0);return{value:`${a}/${t}`,tone:x>0?'bad':(l>0||b>0?'warn':(a>0?'good':'neutral')),title:`Fleet · ${a} active · ${b} bound unverified · ${x} ambiguous · ${l} lost · ${text(f.readiness_contract,'contract unknown')}`}}
+function supervisorStatus(n){const s=n?.supervisor;if(!s)return{value:'unknown',tone:'neutral',title:'Supervisor snapshot unavailable'};const m=text(s.supervisor_mode,'UNKNOWN').toUpperCase(),a=s.armed===true,r=s.running===true,e=Boolean(s.last_error||s.devos_last_error);return{value:m==='CONTROL'?(a?'ARM':'SAFE'):compact(m,10),tone:e?'bad':(r&&m==='CONTROL'&&a?'good':(r?'warn':'neutral')),title:`Supervisor · ${m} · ${a?'armed':'disarmed'} · ${r?'running':'stopped'}${e?` · ${text(s.last_error||s.devos_last_error)}`:''}`}}
+function updateStatus(n){const u=n?.supervisor?.self_update;if(!u)return{value:'unknown',tone:'neutral',title:'Self-update snapshot unavailable'};const s=text(u.state,'UNKNOWN').toUpperCase(),bad=new Set(['ERROR','REJECTED_METADATA','DISCOVERY_ERROR']),busy=new Set(['APPROVED_DOWNLOAD','DOWNLOADING','READY_RESTART','RESTART_GRACE','RESTARTING']),good=new Set(['CURRENT','IDLE','NO_UPDATE','READY']),av=u.available_version||u.downloaded_version||null;return{value:av&&av!==u.current_version?compact(av,12):compact(s.replaceAll('_',' '),12),tone:bad.has(s)?'bad':(busy.has(s)?'warn':(good.has(s)?'good':'neutral')),title:`Self-update · ${s} · current ${text(u.current_version)}${av?` · target ${av}`:''} · automatic effect retry disabled`}}
+function developmentPlaneStatus(n){const d=n?.development_plane;if(!d)return{value:'unknown',tone:'neutral',title:'Development Plane snapshot unavailable'};const s=text(d.state,'UNKNOWN').toUpperCase();return{value:compact(s,10),tone:s==='READY'?'good':(['ERROR','FAILED','CRASHED','LOST'].includes(s)?'bad':'warn'),title:`Development Plane · ${s}${d.version?` · ${d.version}`:''}`}}
+function computeStatus(n){const c=n?.compute;if(!c)return{value:'unknown',tone:'neutral',title:'Compute health unavailable'};const a=c.available===true,r=c?.result?.runtime||(a?'ready':'offline');return{value:compact(r,12),tone:a?'good':'bad',title:`Compute · ${a?'available':'offline'} · ${text(r)}`}}
+function gateStatus(n){const g=n?.owner_safety_gates;if(!g)return{value:'unknown',tone:'neutral',title:'Owner safety gate snapshot unavailable'};const o=Array.isArray(g.overrides)?g.overrides.length:0,w=g.wildcard_disabled===true;return{value:w?'ALL':(o?`${o} override${o===1?'':'s'}`:'sealed'),tone:w?'bad':(o?'warn':'good'),title:w?'Owner safety gates · wildcard override active':`Owner safety gates · ${o?`${o} explicit override(s) active`:'no overrides active'}`}}
+function selectedTab(n){const s=n?.tabs||{},r=Array.isArray(s.tabs)?s.tabs:[];return r.find(t=>t.tab_id===s.selected_tab_id)||null}function fleetAgentForTab(n,id){const r=Array.isArray(n?.fleet?.agents)?n.fleet.agents:[];return r.find(x=>String(x?.tab_id||'')===String(id||''))||null}
+function exactActuationForTab(n,id){const c=n?.supervisor?.current_command;if(!c)return null;const bound=String(c?.payload?.tab_id||'');if(!bound||bound!==String(id||''))return null;return Object.freeze({action:text(c.action,'COMMAND'),command_id:c.command_id||null})}
+function applyLayout(n){const l=n?.layout;if(!l)return;if(l.requested)requestedLayout={sidebar:text(l.requested.sidebar,requestedLayout.sidebar).toUpperCase(),operations:text(l.requested.operations,requestedLayout.operations).toUpperCase()};const sw=Math.max(0,Number(l?.sidebar_bounds?.width||0)),ow=Math.max(0,Number(l?.operations_bounds?.width||0));body.style.setProperty('--sidebar-width',`${sw}px`);body.style.setProperty('--ops-width',`${ow}px`);body.dataset.sidebar=text(l.effective_sidebar,'HIDDEN').toUpperCase();body.dataset.operations=text(l.effective_operations,'CLOSED').toUpperCase();railGeometry.textContent=l.overlay_remote_content===false?`Inset ${sw}px`:'Geometry unknown'}
+async function setLayout(p={}){requestedLayout={sidebar:p.sidebar||requestedLayout.sidebar,operations:p.operations||requestedLayout.operations};await api.command('SHELL_LAYOUT_SET',requestedLayout)}async function cycleSidebar(){const c={EXPANDED:'COMPACT',COMPACT:'HIDDEN',HIDDEN:'EXPANDED'};await setLayout({sidebar:c[requestedLayout.sidebar]||'EXPANDED'})}async function toggleOperations(f=null){await setLayout({operations:f||(requestedLayout.operations==='OPEN'?'CLOSED':'OPEN')})}
+function renderActive(n){const t=selectedTab(n),a=t?fleetAgentForTab(n,t.tab_id):null,act=t?exactActuationForTab(n,t.tab_id):null;if(!t){activeKind.textContent='—';activeTitle.textContent='No active tab';activeMeta.textContent='Awaiting browser state';return}const chat=t.kind==='CHATGPT';activeKind.textContent=chat?'C':'W';activeTitle.textContent=text(t.title,chat?'ChatGPT':hostFor(t.url));activeMeta.textContent=act?`ACTION · ${act.action}`:(a?`${text(a.role,'AGENT')} · ${text(a.lifecycle_state,'UNKNOWN')} · g${Number(a.generation_epoch||0)}`:hostFor(t.url));if(document.activeElement!==address)address.value=t.url||'';routeKind.textContent=chat?'CHAT':'WEB';routeKind.classList.toggle('chat',chat)}
+function makeTabRow(t,active,a,act){const row=document.createElement('div');row.className=`verticalTab ${active?'active':''} ${a?'agent':''}`;row.setAttribute('role','listitem');const select=document.createElement('button');select.type='button';select.className='verticalTabSelect';select.title=t.url||t.title||'Tab';select.setAttribute('aria-current',active?'page':'false');select.setAttribute('aria-label',`${active?'Current tab':'Select tab'}: ${text(t.title,t.kind==='CHATGPT'?'ChatGPT':hostFor(t.url))}`);select.onclick=()=>api.command('SELECT_TAB',{tab_id:t.tab_id}).catch(()=>{});const avatar=document.createElement('span');avatar.className='tabAvatar';avatar.textContent=a?text(a.role,'A').slice(0,1):(t.kind==='CHATGPT'?'C':'W');const dot=document.createElement('i');dot.className=`tabStateDot ${act?'warn':(a?stateTone(a.lifecycle_state):'neutral')}`;avatar.append(dot);const copy=document.createElement('span');copy.className='tabCopy';const title=document.createElement('strong');title.textContent=text(t.title,t.kind==='CHATGPT'?'ChatGPT':hostFor(t.url));const meta=document.createElement('small');meta.textContent=act?`ACTION · ${act.action}`:(a?`${text(a.role)} · ${text(a.lifecycle_state)}`:hostFor(t.url));copy.append(title,meta);select.append(avatar,copy);const close=document.createElement('button');close.type='button';close.className='tabClose';close.textContent='×';close.title=`Close ${title.textContent}`;close.setAttribute('aria-label',`Close ${title.textContent}`);close.onclick=()=>api.command('CLOSE_TAB',{tab_id:t.tab_id}).catch(()=>{});row.append(select,close);return row}
+function renderContextRail(n){const s=n?.tabs||{},tabs=Array.isArray(s.tabs)?s.tabs:[],f=tabFilter.trim().toLowerCase(),shown=tabs.filter(t=>{if(!f)return true;const a=fleetAgentForTab(n,t.tab_id);return[t.title,t.url,a?.role,a?.lifecycle_state].some(v=>String(v||'').toLowerCase().includes(f))});tabCount.textContent=String(tabs.length);verticalTabs.replaceChildren(...shown.map(t=>makeTabRow(t,t.tab_id===s.selected_tab_id,fleetAgentForTab(n,t.tab_id),exactActuationForTab(n,t.tab_id))));const p=n?.fleet?.policy?.profile,a=Number(n?.fleet?.counts?.ACTIVE||0),tot=Array.isArray(n?.fleet?.agents)?n.fleet.agents.length:0;fleetProfile.textContent=p?`${p} · ${a}/${tot} active`:'Fleet unknown'}
+function el(tag,c='',v=null){const n=document.createElement(tag);if(c)n.className=c;if(v!=null)n.textContent=String(v);return n}function metric(l,v,t='neutral'){const c=el('div',`metricCard ${t}`);c.append(el('span','',l),el('strong','',text(v)));return c}function kvRow(l,v,t='neutral'){const r=el('div','kvRow');r.append(el('span','',l),el('b',t,text(v)));return r}function section(t,s=''){const w=el('section','opsSection'),h=el('div','opsSectionTitle');h.append(el('strong','',t),el('span','',s));const l=el('div','kvList');w.append(h,l);return{wrap:w,list:l}}function hero(t,s,b){const w=el('div','opsHero'),top=el('div','opsHeroTop');top.append(el('strong','',t),el('span','heroBadge',b));w.append(top,el('small','',s));return w}function entityRow(t,s,tags=[]){const r=el('div','entityRow'),top=el('div','entityTop');top.append(el('strong','',t),el('span','',s));const m=el('div','entityMeta');for(const tag of tags)m.append(el('span',`tinyTag ${tag.tone||''}`.trim(),tag.value));r.append(top,m);return r}
+function renderOverview(n){const f=document.createDocumentFragment(),l=n?.layout;f.append(hero(`METAENGINE Browser ${text(n?.version,'')}`.trim(),'Native-inset workbench. Page/model content remains untrusted; operations telemetry is read-only in this surface.',l?.overlay_remote_content===false?'native geometry':'geometry unknown'));const g=el('div','opsGrid'),fs=fleetStatus(n),ss=supervisorStatus(n),d=n?.supervisor?.devos_task_cycle,u=updateStatus(n);g.append(metric('Fleet',fs.value,fs.tone),metric('Supervisor',ss.value,ss.tone),metric('DevOS cycle',d?text(d.state,'UNKNOWN'):'UNKNOWN',d?stateTone(d.state):'neutral'),metric('Self update',u.value,u.tone));f.append(g);const e=section('Authority & evidence','local projection');e.list.append(kvRow('Effect binding',n?.supervisor?.generic_tab_effect_binding||'UNKNOWN',n?.supervisor?.generic_tab_effect_binding?'good':'neutral'),kvRow('DevOS scheduler',n?.supervisor?.devos_scheduler_source||'UNKNOWN',n?.supervisor?.devos_scheduler_source?'good':'neutral'),kvRow('Second DevOS loop',n?.supervisor?.devos_second_polling_loop===false?'NO':'UNKNOWN',n?.supervisor?.devos_second_polling_loop===false?'good':'neutral'),kvRow('Arbitrary eval',n?.supervisor?.arbitrary_eval===false?'DISABLED':'UNKNOWN',n?.supervisor?.arbitrary_eval===false?'good':'neutral'),kvRow('OS shell authority',n?.supervisor?.os_shell_authority===false?'DISABLED':'UNKNOWN',n?.supervisor?.os_shell_authority===false?'good':'neutral'));f.append(e.wrap);const x=section('Runtime exposure','do not infer missing modules');x.list.append(kvRow('Fleet / transport',n?.fleet?'EXPOSED':'UNKNOWN',n?.fleet?'good':'neutral'),kvRow('Worker observer',n?.supervisor?.worker_observer?'EXPOSED':'UNKNOWN',n?.supervisor?.worker_observer?'good':'neutral'),kvRow('Crash sentinel','NOT EXPOSED','muted'),kvRow('Host resilience','NOT EXPOSED','muted'));f.append(x.wrap);return f}
+function renderFleet(n){const f=document.createDocumentFragment(),fl=n?.fleet;if(!fl){f.append(hero('Fleet unavailable','No local fleet snapshot is exposed. The UI does not infer fleet health from tabs.','unknown'));return f}f.append(hero('Fleet transport plane',`${text(fl.readiness_contract,'readiness unknown')} · ${text(fl.policy?.profile,'profile unknown')}`,'exact binding'));const g=el('div','opsGrid');g.append(metric('Active',Number(fl.counts?.ACTIVE||0),Number(fl.counts?.ACTIVE||0)?'good':'neutral'),metric('Bound',Number(fl.counts?.BOUND_UNVERIFIED||0),Number(fl.counts?.BOUND_UNVERIFIED||0)?'warn':'good'),metric('Ambiguous',Number(fl.counts?.PROVISIONING_AMBIGUOUS||0),Number(fl.counts?.PROVISIONING_AMBIGUOUS||0)?'bad':'good'),metric('Lost',Number(fl.counts?.LOST||0),Number(fl.counts?.LOST||0)?'bad':'good'));f.append(g);const list=section('Agents',`${Array.isArray(fl.agents)?fl.agents.length:0} registered`);list.list.className='entityList';for(const a of fl.agents||[]){const p=a.transport_proof;list.list.append(entityRow(`${text(a.role,'WORKER')} · ${shortId(a.agent_id,14)}`,text(a.lifecycle_state,'UNKNOWN'),[{value:`g${Number(a.generation_epoch||0)}`,tone:'neutral'},{value:a.tab_id?`tab ${shortId(a.tab_id,12)}`:'no tab',tone:a.tab_id?'neutral':'warn'},{value:p?'transport proven':'transport unproven',tone:p?'good':(a.lifecycle_state==='ACTIVE'?'bad':'warn')}]))}f.append(list.wrap);return f}
+function renderSupervisor(n){const f=document.createDocumentFragment(),s=n?.supervisor;if(!s){f.append(hero('Supervisor unavailable','No supervisor snapshot is exposed. This is UNKNOWN, not an offline proof.','unknown'));return f}f.append(hero('Native supervisor',`${text(s.supervisor_mode,'UNKNOWN')} · ${s.armed===true?'armed':'disarmed'} · ${s.running===true?'running':'stopped'}`,s.last_error||s.devos_last_error?'degraded':'local'));const c=section('Core state','heartbeat authority'),cmd=s.current_command,cmdTab=String(cmd?.payload?.tab_id||'');c.list.append(kvRow('Mode',s.supervisor_mode||'UNKNOWN',stateTone(s.supervisor_mode)),kvRow('Armed',s.armed===true?'TRUE':'FALSE',s.armed===true?'good':'warn'),kvRow('Enrollment',s.enrollment_status||'UNKNOWN',stateTone(s.enrollment_status)),kvRow('Heartbeat',s.last_heartbeat_at||'UNKNOWN',s.last_heartbeat_at?'good':'neutral'),kvRow('Current command',cmd?`${text(cmd.action,'COMMAND')}${cmdTab?` · ${shortId(cmdTab,12)}`:''}`:'NONE',cmd?'warn':'neutral'),kvRow('Last command',s.last_command_status||'NONE',stateTone(s.last_command_status)),kvRow('Error',s.last_error||s.devos_last_error||'NONE',s.last_error||s.devos_last_error?'bad':'good'));f.append(c.wrap);const w=s.bootstrap_heartbeat,ws=section('Heartbeat watchdog','no command leasing');ws.list.append(kvRow('Mode',w?.mode||'UNKNOWN',w?'good':'neutral'),kvRow('Last watchdog pulse',w?.last_at||'UNKNOWN',w?.last_at?'good':'neutral'),kvRow('Control authority',w?.control_authority===false?'NONE':'UNKNOWN',w?.control_authority===false?'good':'neutral'),kvRow('Command leasing',w?.command_leasing===false?'NONE':'UNKNOWN',w?.command_leasing===false?'good':'neutral'));f.append(ws.wrap);const rt=s.supervisor_mesh,d=rt?.mesh,ms=section('Supervisor mesh',s.supervisor_mesh_wire_projection||'projection unknown'),amb=Number(d?.counts?.ambiguous_incarnation||0);ms.list.append(kvRow('Runtime',rt?(rt.running===true?'RUNNING':'STOPPED'):'UNKNOWN',rt?stateTone(rt.running===true?'RUNNING':'STOPPED'):'neutral'),kvRow('Last reconcile',rt?.last_reconcile_at||'UNKNOWN',rt?.last_reconcile_at?'good':'neutral'),kvRow('Error',rt?.last_error||'NONE',rt?.last_error?'bad':'good'),kvRow('Supervisors',d?.counts?.total??'UNKNOWN','neutral'),kvRow('Active',d?.counts?.active??'UNKNOWN',Number(d?.counts?.active||0)?'good':'neutral'),kvRow('Ambiguous incarnation',d?.counts?.ambiguous_incarnation??'UNKNOWN',amb>0?'bad':(d?.counts?'good':'neutral')),kvRow('Actuation policy',d?.actuation_policy||'UNKNOWN',d?.actuation_policy?'good':'neutral'));f.append(ms.wrap);return f}
+function renderDevos(n){const f=document.createDocumentFragment(),s=n?.supervisor,c=s?.devos_task_cycle;if(!c){f.append(hero('DevOS cycle unavailable','DevOS is not exposed by the current local supervisor snapshot.','unknown'));return f}f.append(hero('DevOS fleet scheduler','One bounded stage of the native supervisor heartbeat; no second polling loop.',text(c.state,'UNKNOWN')));const g=el('div','opsGrid');g.append(metric('Cycle',c.state||'UNKNOWN',stateTone(c.state)),metric('Ready',c.backlog?.ready??'—',Number(c.backlog?.ready||0)?'warn':'neutral'),metric('Running',c.backlog?.running??'—',Number(c.backlog?.running||0)?'good':'neutral'),metric('Recovery',c.ambiguity_recovery?.state||'NONE',stateTone(c.ambiguity_recovery?.state)));f.append(g);const tr=section('Transport fencing','no blind retry');tr.list.append(kvRow('Bound-unverified dispatch',c.bound_unverified_dispatch_allowed===false?'FORBIDDEN':'UNKNOWN',c.bound_unverified_dispatch_allowed===false?'good':'neutral'),kvRow('Proof before dispatch',c.fleet_transport_proof_before_physical_dispatch===true?'REQUIRED':'UNKNOWN',c.fleet_transport_proof_before_physical_dispatch===true?'good':'neutral'),kvRow('Promotion',c.fleet_transport_promotion?.state||'NONE',stateTone(c.fleet_transport_promotion?.state)),kvRow('Durable effect journal',c.durable_effect_delivery_journal===true?'ACTIVE':'UNKNOWN',c.durable_effect_delivery_journal===true?'good':'neutral'),kvRow('Scheduler source',s?.devos_scheduler_source||'UNKNOWN',s?.devos_scheduler_source?'good':'neutral'),kvRow('Second loop',s?.devos_second_polling_loop===false?'NO':'UNKNOWN',s?.devos_second_polling_loop===false?'good':'neutral'));f.append(tr.wrap);return f}
+function renderRuntime(n){const f=document.createDocumentFragment();f.append(hero('Runtime surfaces','Local runtime evidence only. Missing state remains UNKNOWN.','read only'));const u=n?.supervisor?.self_update,ct=n?.supervisor?.session_continuity,d=n?.development_plane,c=n?.compute,dl=n?.downloads,o=n?.supervisor?.worker_observer,ds=dl?.active?.state||dl?.last?.state||(dl?'IDLE':'UNKNOWN');const r=section('Runtime health','process-local');r.list.append(kvRow('Development Plane',d?.state||'UNKNOWN',d?stateTone(d.state):'neutral'),kvRow('Dev browser authority',d?.browser_actuation_authority===false?'NONE':'UNKNOWN',d?.browser_actuation_authority===false?'good':'neutral'),kvRow('Direct promote',d?.direct_promote_current===false?'DISABLED':'UNKNOWN',d?.direct_promote_current===false?'good':'neutral'),kvRow('Compute',c?(c.available===true?'AVAILABLE':'OFFLINE'):'UNKNOWN',c?(c.available===true?'good':'bad'):'neutral'),kvRow('Downloads',ds,dl?stateTone(ds):'neutral'),kvRow('Download exec authority',dl?.arbitrary_execution===false?'NONE':'UNKNOWN',dl?.arbitrary_execution===false?'good':'neutral'),kvRow('Install authority',dl?.install_authority===false?'NONE':'UNKNOWN',dl?.install_authority===false?'good':'neutral'),kvRow('Worker observer',o?'EXPOSED':'UNKNOWN',o?'good':'neutral'),kvRow('Observer error',o?.last_error||'NONE',o?.last_error?'bad':'neutral'));f.append(r.wrap);const us=section('Self-update continuity','restart resumable');us.list.append(kvRow('Updater state',u?.state||'UNKNOWN',u?stateTone(u.state):'neutral'),kvRow('Current version',u?.current_version||n?.version||'UNKNOWN',u?.current_version||n?.version?'good':'neutral'),kvRow('Available version',u?.available_version||'NONE',u?.available_version?'warn':'neutral'),kvRow('Install barrier',u?.install_effect_barrier_mode||'UNKNOWN',u?.install_effect_barrier_mode?'good':'neutral'),kvRow('Automatic effect retry',u?.automatic_effect_retry===false?'DISABLED':'UNKNOWN',u?.automatic_effect_retry===false?'good':'neutral'),kvRow('Session continuity',ct?.state||'UNKNOWN',ct?stateTone(ct.state):'neutral'));f.append(us.wrap);return f}
+function renderSafety(n){const f=document.createDocumentFragment(),g=n?.owner_safety_gates;f.append(hero('Safety & trust boundaries','This panel reports contracts. It does not disable or enable gates.',g?'local policy':'unknown'));const q=section('Browser authority','fail closed');q.list.append(kvRow('Arbitrary eval',n?.supervisor?.arbitrary_eval===false?'DISABLED':'UNKNOWN',n?.supervisor?.arbitrary_eval===false?'good':'neutral'),kvRow('OS shell authority',n?.supervisor?.os_shell_authority===false?'DISABLED':'UNKNOWN',n?.supervisor?.os_shell_authority===false?'good':'neutral'),kvRow('Remote overlay',n?.layout?.overlay_remote_content===false?'NONE':'UNKNOWN',n?.layout?.overlay_remote_content===false?'good':'neutral'),kvRow('Renderer dimensions',n?.layout?.renderer_dimensions_authoritative===false?'NON-AUTHORITATIVE':'UNKNOWN',n?.layout?.renderer_dimensions_authoritative===false?'good':'neutral'),kvRow('Effect binding',n?.supervisor?.generic_tab_effect_binding||'UNKNOWN',n?.supervisor?.generic_tab_effect_binding?'good':'neutral'));f.append(q.wrap);const gs=section('Owner safety gates',g?`${Array.isArray(g.overrides)?g.overrides.length:0} override(s)`:'snapshot unavailable');gs.list.append(kvRow('Wildcard override',g?(g.wildcard_disabled===true?'ACTIVE':'NONE'):'UNKNOWN',g?(g.wildcard_disabled===true?'bad':'good'):'neutral'),kvRow('External platform gates',g?.external_platform_gates_overridable===false?'NOT OVERRIDABLE':'UNKNOWN',g?.external_platform_gates_overridable===false?'good':'neutral'),kvRow('Navigation policy',n?.policy?'EXPOSED':'UNKNOWN',n?.policy?'good':'neutral'));f.append(gs.wrap);if(Array.isArray(g?.overrides)&&g.overrides.length){const list=section('Active overrides','owner initiated');list.list.className='entityList';for(const row of g.overrides)list.list.append(entityRow(text(row.gate_id,'gate'),row.expires_at?'TTL':'persistent',[{value:compact(row.reason,30),tone:'warn'}]));f.append(list.wrap)}const x=section('Unexposed mechanisms','source presence is not runtime proof');x.list.append(kvRow('Browser sentinel','NOT EXPOSED','muted'),kvRow('Host resilience','NOT EXPOSED','muted'),kvRow('Parent progress lease','NOT EXPOSED','muted'));f.append(x.wrap);return f}
+function commandButton(l,h,a){const b=el('button','commandButton');b.type='button';b.append(el('strong','',l),el('span','',h));b.onclick=()=>Promise.resolve(a()).catch(()=>{});return b}function renderCommands(){const f=document.createDocumentFragment();f.append(hero('Command surface','Only local navigation and workbench layout commands are exposed here.','bounded'));const l=el('div','commandList');l.append(commandButton('New ChatGPT tab','Local tab action',()=>api.command('NEW_CHATGPT',{})),commandButton('Focus address','Ctrl+L',()=>{address.focus();address.select()}),commandButton('Back','Navigation history',()=>api.command('BACK',{})),commandButton('Forward','Navigation history',()=>api.command('FORWARD',{})),commandButton('Reload','Current tab only',()=>api.command('RELOAD',{})),commandButton('Cycle Context Rail','Ctrl+B',cycleSidebar),commandButton('Toggle Operations','Ctrl+Shift+O',toggleOperations),commandButton('Open Safety contracts','Read only',()=>{opsSection='safety';renderOps(snapshot)}),commandButton('Open DevOS evidence','Read only',()=>{opsSection='devos';renderOps(snapshot)}));f.append(l);return f}
+function renderOps(n){for(const b of opsNav.querySelectorAll('button[data-section]'))b.classList.toggle('active',b.dataset.section===opsSection);let c;if(opsSection==='fleet')c=renderFleet(n);else if(opsSection==='supervisor')c=renderSupervisor(n);else if(opsSection==='devos')c=renderDevos(n);else if(opsSection==='runtime')c=renderRuntime(n);else if(opsSection==='safety')c=renderSafety(n);else if(opsSection==='commands')c=renderCommands();else c=renderOverview(n);opsContent.replaceChildren(c)}function render(n){snapshot=n||null;versionEl.textContent=n?.version?`v${n.version}`:'Browser';applyLayout(n);renderActive(n);renderContextRail(n);setSystemStatus(statusEls.fleet,fleetStatus(n));setSystemStatus(statusEls.supervisor,supervisorStatus(n));setSystemStatus(statusEls.update,updateStatus(n));setSystemStatus(statusEls.dev,developmentPlaneStatus(n));setSystemStatus(statusEls.compute,computeStatus(n));setSystemStatus(statusEls.gates,gateStatus(n));renderOps(n)}
+document.querySelectorAll('[data-cmd]').forEach(b=>b.addEventListener('click',()=>api.command(b.dataset.cmd,{}).catch(()=>{})));document.getElementById('newChat').addEventListener('click',()=>api.command('NEW_CHATGPT',{}).catch(()=>{}));document.getElementById('sidebarToggle').addEventListener('click',()=>cycleSidebar().catch(()=>{}));document.getElementById('railCollapse').addEventListener('click',()=>cycleSidebar().catch(()=>{}));document.getElementById('operationsToggle').addEventListener('click',()=>toggleOperations().catch(()=>{}));document.getElementById('operationsClose').addEventListener('click',()=>toggleOperations('CLOSED').catch(()=>{}));opsNav.addEventListener('click',e=>{const b=e.target.closest('button[data-section]');if(!b)return;opsSection=b.dataset.section;renderOps(snapshot)});tabSearch.addEventListener('input',()=>{tabFilter=tabSearch.value||'';renderContextRail(snapshot)});document.getElementById('addressForm').addEventListener('submit',e=>{e.preventDefault();api.command('NAVIGATE',{url:address.value}).catch(()=>{})});document.addEventListener('keydown',e=>{const c=e.ctrlKey||e.metaKey;if(c&&e.key.toLowerCase()==='l'){e.preventDefault();address.focus();address.select();return}if(c&&!e.shiftKey&&e.key.toLowerCase()==='b'){e.preventDefault();cycleSidebar().catch(()=>{});return}if(c&&e.shiftKey&&e.key.toLowerCase()==='o'){e.preventDefault();toggleOperations().catch(()=>{});return}if(c&&e.shiftKey&&e.key.toLowerCase()==='p'){e.preventDefault();opsSection='commands';toggleOperations('OPEN').then(()=>renderOps(snapshot)).catch(()=>{})}});api.onSnapshot(render);api.snapshot().then(render).catch(()=>render(snapshot));

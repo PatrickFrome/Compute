@@ -13,11 +13,12 @@ import { SupervisorDeviceIdentity } from './supervisor-device-identity.mjs';
 import { navigationDecision, newWindowDecision, REMOTE_WEB_PREFERENCES, SECURITY_POLICY } from './browser-policy.mjs';
 import { TabRegistry } from './tab-registry.mjs';
 import { VerifiedDownloadManager } from './verified-download-manager.mjs';
+import { normalizeShellLayoutState, planShellLayout, SHELL_TOP_HEIGHT } from './shell-layout.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
 const UI_ROOT = path.join(APP_ROOT, 'ui');
-const TOOLBAR_HEIGHT = 92;
+const TOOLBAR_HEIGHT = SHELL_TOP_HEIGHT;
 const PERCEPTION_CACHE_MS = 4000;
 const isSmoke = process.argv.includes('--metaengine-smoke');
 const isDevelopmentPlaneSmoke = process.argv.includes('--metaengine-devplane-smoke');
@@ -36,6 +37,8 @@ let fleet = null;
 let ownerSafetyGates = null;
 let developmentPlane = null;
 let nativeSupervisor = null;
+let shellLayoutState = normalizeShellLayoutState();
+let shellLayoutPlan = null;
 let perceptionCache = { tab_id: null, captured_ms: 0, frame: null, error: null };
 
 function mimeFor(filePath) {
@@ -127,6 +130,7 @@ async function shellSnapshot() {
     development_plane: developmentPlane?.snapshot() || null,
     supervisor: nativeSupervisor?.snapshot() || null,
     compute: await bridge.health(),
+    layout: shellLayoutPlan ? structuredClone(shellLayoutPlan) : null,
     policy: SECURITY_POLICY,
     authority_effect: false,
   };
@@ -140,15 +144,22 @@ async function publishSnapshot() {
 function layout() {
   if (!windowRef || windowRef.isDestroyed()) return;
   const { width, height } = windowRef.getContentBounds();
-  shellView?.setBounds({ x: 0, y: 0, width, height: TOOLBAR_HEIGHT });
+  shellLayoutPlan = planShellLayout({ width, height, state: shellLayoutState });
+  shellView?.setBounds(shellLayoutPlan.shell_bounds);
   const selected = registry.selected();
   for (const [tabId, view] of views) {
-    if (tabId === selected?.tab_id) view.setBounds({ x: 0, y: TOOLBAR_HEIGHT, width, height: Math.max(0, height - TOOLBAR_HEIGHT) });
+    if (tabId === selected?.tab_id) view.setBounds(shellLayoutPlan.remote_bounds);
   }
 }
 
 function attachSelected() {
   if (!windowRef) return;
+  // The shell is a full-window underlay; the selected remote WebContentsView is added
+  // after it and receives a real inset rectangle. This makes the rails interactive
+  // without overlaying or intercepting any remote-page pixels.
+  if (shellView) {
+    try { windowRef.contentView.addChildView(shellView); } catch {}
+  }
   const selected = registry.selected();
   for (const [tabId, view] of views) {
     if (tabId === selected?.tab_id) {
@@ -156,9 +167,6 @@ function attachSelected() {
     } else {
       try { windowRef.contentView.removeChildView(view); } catch {}
     }
-  }
-  if (shellView) {
-    try { windowRef.contentView.addChildView(shellView); } catch {}
   }
   layout();
 }
@@ -312,6 +320,12 @@ async function runDevelopmentPlaneSmoke() {
 async function handleCommand(command, payload = {}) {
   const selected = registry.selected();
   const selectedView = selected ? views.get(selected.tab_id) : null;
+  if (command === 'SHELL_LAYOUT_SET') {
+    shellLayoutState = normalizeShellLayoutState(payload);
+    layout();
+    await publishSnapshot();
+    return shellLayoutPlan ? structuredClone(shellLayoutPlan) : null;
+  }
   if (command === 'NEW_CHATGPT') return createTab('https://chatgpt.com/', { select: true, load: true });
   if (command === 'NEW_TAB') return createTab(payload?.url || 'https://chatgpt.com/', { select: payload?.select !== false, load: true });
   if (command === 'SELECT_TAB') { registry.select(payload?.tab_id); attachSelected(); invalidatePerception(); await publishSnapshot(); return { ok: true, tab_id: String(payload?.tab_id) }; }
@@ -491,6 +505,7 @@ async function runSmoke() {
   smokeWindow.contentView.addChildView(remoteView);
   remoteView.setBounds({ x: 0, y: 0, width: 320, height: 240 });
   await remoteView.webContents.loadURL('about:blank');
+  const smokeLayout = planShellLayout({ width: 900, height: 640, state: normalizeShellLayoutState() });
   const invariant = userSession.isPersistent()
     && remoteView.webContents.session === userSession
     && protocol.isProtocolHandled('metaengine')
@@ -498,7 +513,10 @@ async function runSmoke() {
     && REMOTE_WEB_PREFERENCES.contextIsolation === true
     && REMOTE_WEB_PREFERENCES.sandbox === true
     && SECURITY_POLICY.cookie_transfer_to_compute_space === false
-    && downloads?.snapshot()?.arbitrary_execution === false;
+    && downloads?.snapshot()?.arbitrary_execution === false
+    && smokeLayout.overlay_remote_content === false
+    && smokeLayout.renderer_dimensions_authoritative === false
+    && smokeLayout.remote_bounds.y === TOOLBAR_HEIGHT;
   console.log(JSON.stringify({
     schema: 'metaengine.browser-shell.smoke.v3',
     ok: invariant,
@@ -511,6 +529,8 @@ async function runSmoke() {
     compute_bridge_read_only: true,
     native_supervisor_arbitrary_eval: false,
     verified_download_arbitrary_execution: false,
+    workbench_overlay_remote_content: smokeLayout.overlay_remote_content,
+    renderer_dimensions_authoritative: smokeLayout.renderer_dimensions_authoritative,
     authority_effect: false,
   }));
   remoteView.webContents.close();
@@ -524,6 +544,7 @@ async function createWindow() {
   windowRef.contentView.addChildView(shellView);
   windowRef.on('resize', layout);
   windowRef.on('closed', () => { destroyWindowContents(); windowRef = null; });
+  layout();
   await shellView.webContents.loadURL('metaengine://shell/');
   await initOwnerSafetyGates();
   await createTab('https://chatgpt.com/', { select: true, load: true });
