@@ -27,17 +27,47 @@ export function exactCommandTargetProjection(command) {
   });
 }
 
-// Additive read-only wrapper. The proven Native Supervisor implementation remains
-// byte-identical in native-supervisor-client-core.mjs. Workspace observation runs
-// as one bounded stage of the same existing heartbeat cycle and creates no timer,
-// scheduler, command lease or Browser authority. Exact command target telemetry is
-// derived only from an already-executing DB-leased typed command and exposes no payload.
+export async function runSupervisorEnrollmentBootstrap(supervisor) {
+  if (!supervisor || typeof supervisor.ensureEnrollment !== 'function') {
+    throw new Error('native_supervisor_enrollment_bootstrap_required');
+  }
+  const row = await supervisor.ensureEnrollment();
+  return Object.freeze({
+    status: String(row?.status || 'UNKNOWN').slice(0, 80),
+    device_id: row?.device_id ? String(row.device_id) : null,
+    request_id: row?.request_id ? String(row.request_id) : null,
+    command_leasing: false,
+    browser_authority: false,
+    automatic_retry_allowed: false,
+    second_polling_loop: false,
+    authority_effect: false,
+  });
+}
+
+// Additive wrapper. The proven Native Supervisor implementation remains in
+// native-supervisor-client-core.mjs. Workspace observation and enrollment recovery
+// run as bounded stages of the same existing supervisor cycle and create no timer,
+// scheduler, command lease or Browser authority. Enrollment is never auto-approved.
+// Exact command target telemetry is derived only from an already-executing DB-leased
+// typed command and exposes no payload.
 export class NativeSupervisorClient extends CoreNativeSupervisorClient {
   #workspaceIdentity;
   #workspaceFetch;
   #workspaceObservation = unavailableWorkspaceBindingSnapshot('UNINITIALIZED');
   #workspaceObservationPromise = null;
   #commandTargetProjection = null;
+  #enrollmentBootstrapPromise = null;
+  #enrollmentBootstrapStatus = Object.freeze({
+    status: 'UNINITIALIZED',
+    device_id: null,
+    request_id: null,
+    command_leasing: false,
+    browser_authority: false,
+    automatic_retry_allowed: false,
+    second_polling_loop: false,
+    authority_effect: false,
+  });
+  #enrollmentBootstrapError = null;
 
   constructor(options = {}) {
     const executeCommand = options.executeCommand;
@@ -56,6 +86,32 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     this.#workspaceIdentity = options.identity;
     this.#workspaceFetch = createBoundedSupervisorFetch(options.fetchImpl ?? globalThis.fetch, { deadlineMs: options.requestDeadlineMs });
     this.#commandTargetProjection = () => commandTargetProjection;
+  }
+
+  async #bootstrapEnrollment() {
+    if (this.#enrollmentBootstrapPromise) return this.#enrollmentBootstrapPromise;
+    this.#enrollmentBootstrapPromise = (async () => {
+      try {
+        const result = await runSupervisorEnrollmentBootstrap(this);
+        this.#enrollmentBootstrapStatus = result;
+        this.#enrollmentBootstrapError = null;
+        return result;
+      } catch (error) {
+        this.#enrollmentBootstrapError = String(error?.message || error).slice(0, 240);
+        this.#enrollmentBootstrapStatus = Object.freeze({
+          status: 'ERROR',
+          device_id: null,
+          request_id: null,
+          command_leasing: false,
+          browser_authority: false,
+          automatic_retry_allowed: false,
+          second_polling_loop: false,
+          authority_effect: false,
+        });
+        return this.#enrollmentBootstrapStatus;
+      }
+    })().finally(() => { this.#enrollmentBootstrapPromise = null; });
+    return this.#enrollmentBootstrapPromise;
   }
 
   async #observeWorkspaceBindings() {
@@ -106,13 +162,29 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       current_command: currentCommand,
       current_command_payload_exposed: false,
       current_command_target_authority: 'DB_LEASED_TYPED_COMMAND_ONLY',
+      enrollment_bootstrap: structuredClone(this.#enrollmentBootstrapStatus),
+      enrollment_bootstrap_error: this.#enrollmentBootstrapError,
+      enrollment_bootstrap_same_cycle: true,
+      enrollment_bootstrap_auto_approval: false,
       workspace_bindings: structuredClone(this.#workspaceObservation),
       workspace_binding_source: 'NATIVE_SUPERVISOR_HEARTBEAT',
       workspace_binding_second_polling_loop: false,
     };
   }
 
+  async start() {
+    // Enrollment must be attempted before dependent mesh/lifecycle startup so a
+    // fresh installation cannot remain visually alive but permanently transport-dead.
+    // Failure is fail-soft here: super.start() still brings up the existing watchdog,
+    // and the normal cycle below re-attempts the bounded enrollment handshake.
+    await this.#bootstrapEnrollment();
+    return super.start();
+  }
+
   async cycle() {
+    // Piggyback enrollment recovery on the one existing supervisor cycle. No second
+    // interval is introduced and PENDING_APPROVAL never grants command authority.
+    await this.#bootstrapEnrollment();
     try {
       await super.cycle();
     } finally {
