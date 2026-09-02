@@ -3,6 +3,7 @@ name: METAENGINE Browser Fast Verified Dev Release
 on:
   push:
     branches:
+      - integration/metaengine-development-os-v1
       - work/self-update-fast-loop-v1
       - work/devos-elastic-fleet-bootstrap-v1
       - work/browser-devos-root-transport-bootstrap-v1
@@ -11,8 +12,12 @@ on:
       - '.github/workflows/metaengine-browser-self-update-fast-e2e.yml'
       - '.github/workflows/metaengine-browser-fast-autorelease.yml'
 
+# Publishers are isolated by exact source SHA. A newer integration push must not
+# cancel an older publisher after its physical evidence exists. The monotonic
+# release/version checks and dev-hint CAS below prevent older candidates from
+# moving the live pointer backwards.
 concurrency:
-  group: metaengine-browser-fast-verified-release
+  group: metaengine-browser-fast-verified-release-${{ github.sha }}
   cancel-in-progress: true
 
 permissions:
@@ -22,7 +27,7 @@ permissions:
 jobs:
   publish-exact-verified-target:
     runs-on: ubuntu-24.04
-    timeout-minutes: 38
+    timeout-minutes: 55
     env:
       GH_TOKEN: ${{ github.token }}
       EXPECTED_SHA: ${{ github.sha }}
@@ -32,7 +37,7 @@ jobs:
         run: |
           set -euo pipefail
           : > run-id.txt
-          for attempt in $(seq 1 120); do
+          for attempt in $(seq 1 180); do
             gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/workflows/metaengine-browser-self-update-fast-e2e.yml/runs" \
               -f head_sha="$EXPECTED_SHA" -f per_page=20 > runs.json
             python3 - <<'PY'
@@ -81,7 +86,7 @@ jobs:
           import hashlib, json, os, pathlib, re, shlex
           root=pathlib.Path('evidence')
           manifests=list(root.rglob('verified-self-update-manifest.json'))
-          if len(manifests)!=1: raise SystemExit(f'manifest_cardinality_invalid:{len(manifests)}')
+          if len(manifests)!=1: raise SystemExit('manifest_cardinality_invalid:'+str(len(manifests)))
           mp=manifests[0]; m=json.loads(mp.read_text(encoding='utf-8'))
           if m.get('schema')!='metaengine.browser.self-update-e2e-manifest.v2': raise SystemExit('manifest_schema_invalid')
           if m.get('git_sha')!=os.environ['EXPECTED_SHA']: raise SystemExit('manifest_git_sha_mismatch')
@@ -151,28 +156,59 @@ jobs:
           if r.get('target_commitish')!=os.environ['EXPECTED_SHA']: raise SystemExit('publish_source_invalid')
           PY
 
-      - name: Advance non-authority 15-second hint after release readback
+      - name: Advance monotonic non-authority dev hint after release readback
         shell: bash
         run: |
           set -euo pipefail
-          gh api "repos/${GITHUB_REPOSITORY}/contents/dev-hint.json?ref=update%2Fbrowser-dev-channel" > pointer.json
-          python3 - <<'PY'
-          import base64, json, os, pathlib
+          for attempt in $(seq 1 8); do
+            gh api "repos/${GITHUB_REPOSITORY}/contents/dev-hint.json?ref=update%2Fbrowser-dev-channel" > pointer.json
+            action="$(python3 - <<'PY'
+          import base64, json, os, pathlib, re
           p=json.load(open('pointer.json','r',encoding='utf-8'))
+          current=json.loads(base64.b64decode(p['content']).decode('utf-8'))
+          def parse(v):
+              m=re.fullmatch(r'(\d+)\.(\d+)\.(\d+)-dev\.(\d+)\.1',str(v or ''))
+              if not m: raise SystemExit('hint_version_invalid:'+str(v))
+              return tuple(map(int,m.groups()))
+          target=parse(os.environ['VERSION']); existing=parse(current.get('version'))
+          if current.get('authority_effect') is not False: raise SystemExit('hint_authority_invalid')
+          if existing>target:
+              print('SKIP_NEWER'); raise SystemExit(0)
+          if existing==target:
+              if current.get('git_sha')!=os.environ['EXPECTED_SHA']: raise SystemExit('hint_version_collision')
+              print('SKIP_EQUAL'); raise SystemExit(0)
           pathlib.Path('pointer-sha.txt').write_text(str(p['sha']),encoding='utf-8')
           row={'schema':'metaengine.browser.dev-update-hint.v1','version':os.environ['VERSION'],'tag':os.environ['TAG'],'git_sha':os.environ['EXPECTED_SHA'],'updated_at':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat().replace('+00:00','Z'),'authority_effect':False}
           raw=(json.dumps(row,indent=2,separators=(',', ': '))+'\n').encode()
           pathlib.Path('pointer-content.txt').write_text(base64.b64encode(raw).decode(),encoding='utf-8')
+          print('WRITE')
           PY
-          gh api -X PUT "repos/${GITHUB_REPOSITORY}/contents/dev-hint.json" \
-            -f message="chore(browser): advance verified dev update hint to ${VERSION}" \
-            -f content="$(cat pointer-content.txt)" -f sha="$(cat pointer-sha.txt)" -f branch='update/browser-dev-channel' > pointer-write.json
-          gh api "repos/${GITHUB_REPOSITORY}/contents/dev-hint.json?ref=update%2Fbrowser-dev-channel" > pointer-readback.json
-          python3 - <<'PY'
-          import base64, json, os
+            )"
+            if [ "$action" = "SKIP_NEWER" ] || [ "$action" = "SKIP_EQUAL" ]; then
+              echo "dev_hint_monotonic_noop:${action}:${VERSION}"
+              exit 0
+            fi
+            if gh api -X PUT "repos/${GITHUB_REPOSITORY}/contents/dev-hint.json" \
+              -f message="chore(browser): advance verified dev update hint to ${VERSION}" \
+              -f content="$(cat pointer-content.txt)" -f sha="$(cat pointer-sha.txt)" -f branch='update/browser-dev-channel' > pointer-write.json; then
+              gh api "repos/${GITHUB_REPOSITORY}/contents/dev-hint.json?ref=update%2Fbrowser-dev-channel" > pointer-readback.json
+              python3 - <<'PY'
+          import base64, json, os, re
           p=json.load(open('pointer-readback.json','r',encoding='utf-8'))
           row=json.loads(base64.b64decode(p['content']).decode('utf-8'))
-          if row.get('version')!=os.environ['VERSION'] or row.get('tag')!=os.environ['TAG'] or row.get('git_sha')!=os.environ['EXPECTED_SHA']: raise SystemExit('pointer_readback_binding_invalid')
+          def parse(v):
+              m=re.fullmatch(r'(\d+)\.(\d+)\.(\d+)-dev\.(\d+)\.1',str(v or ''))
+              if not m: raise SystemExit('pointer_readback_version_invalid')
+              return tuple(map(int,m.groups()))
           if row.get('authority_effect') is not False: raise SystemExit('pointer_authority_invalid')
+          actual=parse(row.get('version')); expected=parse(os.environ['VERSION'])
+          if actual<expected: raise SystemExit('pointer_readback_regressed')
+          if actual==expected and (row.get('tag')!=os.environ['TAG'] or row.get('git_sha')!=os.environ['EXPECTED_SHA']): raise SystemExit('pointer_readback_binding_invalid')
           print(f"continuous_update_ready version={row['version']} source={row['git_sha']}")
           PY
+              exit 0
+            fi
+            sleep $((attempt * 2))
+          done
+          echo 'dev_hint_cas_exhausted' >&2
+          exit 1
