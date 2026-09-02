@@ -23,9 +23,13 @@ function keepaliveHarness() {
 
 function idleFrame(text = '') {
   return {
+    tab_id: 'tab1',
+    process_incarnation_id: 'process-test-1',
+    target_id: 'webcontents:1',
     url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
     title: 'ChatGPT',
     text_excerpt: text,
+    viewport: { width: 1280, height: 720 },
     semantic_targets: [
       { role: 'textbox', name: 'Message ChatGPT' },
       { role: 'button', name: 'Send' },
@@ -115,6 +119,7 @@ test('lifecycle automatically sends the next supervisor development cycle after 
   });
   const executeCommand = async (command) => {
     if (command.action === 'CAPTURE') return isGenerating ? generatingFrame(typed) : idleFrame(typed);
+    if (command.action === 'SELECT_TAB') return { ok: true, authority_effect: true };
     if (command.action === 'SEMANTIC_TYPE') { typed = String(command.payload?.text || ''); return { ok: true, authority_effect: true }; }
     if (command.action === 'TYPED_CLICK') { sendCount += 1; isGenerating = true; return { ok: true, authority_effect: true }; }
     throw new Error(`unexpected_action:${command.action}`);
