@@ -299,10 +299,26 @@ jobs:
           $first = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $firstOut -RedirectStandardError $firstErr
           $null = $first.Handle
           $deadline = (Get-Date).AddSeconds(10)
-          while ((-not (Test-Path $firstOut) -or (Get-Item $firstOut -ErrorAction SilentlyContinue).Length -eq 0) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 100 }
-          $first.Refresh()
-          if ($first.HasExited) { Get-Content $firstErr -ErrorAction SilentlyContinue; throw 'singleton_primary_exited_early' }
-          $firstRow = (Get-Content $firstOut | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
+          $firstRow = $null
+          do {
+            $first.Refresh()
+            if ($first.HasExited) { Get-Content $firstErr -ErrorAction SilentlyContinue; throw 'singleton_primary_exited_early' }
+            if (Test-Path $firstOut) {
+              $lines = @(Get-Content $firstOut -ErrorAction SilentlyContinue | Where-Object { $_.Trim() })
+              for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+                try {
+                  $candidate = $lines[$i] | ConvertFrom-Json -ErrorAction Stop
+                  if ($candidate -and ($candidate.PSObject.Properties.Name -contains 'primary_instance')) {
+                    $firstRow = $candidate
+                    break
+                  }
+                } catch {}
+              }
+            }
+            if ($firstRow) { break }
+            Start-Sleep -Milliseconds 100
+          } while ((Get-Date) -lt $deadline)
+          if (-not $firstRow) { Get-Content $firstErr -ErrorAction SilentlyContinue; throw 'singleton_primary_json_timeout' }
           if ($firstRow.primary_instance -ne $true) { throw 'singleton_primary_probe_invalid' }
           $second = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\singleton-second.out" -RedirectStandardError "$env:RUNNER_TEMP\singleton-second.err"
           $null = $second.Handle
