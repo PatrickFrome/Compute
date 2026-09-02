@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { globalOwnerGateDisabled } from './owner-safety-gate-registry.mjs';
 import { persistFleetStateTargetRevalidation } from './fleet-state-target-revalidation.mjs';
 
-export const FLEET_PROVISIONER_VERSION = '1.4.1';
+export const FLEET_PROVISIONER_VERSION = '1.4.2';
 export const FLEET_STATES = Object.freeze([
   'REGISTERED',
   'PROVISIONING',
@@ -24,6 +24,8 @@ const DEFAULT_SEED_AGENTS = 6;
 const DEFAULT_WARM_AGENTS = 2;
 const DEFAULT_SPAWN_BURST_LIMIT = 8;
 const MAX_SPAWN_BURST_LIMIT = 256;
+const LEGACY_CAPACITY_AMBIGUITY = 'CREATE_TAB_AMBIGUOUS:tab_capacity_exceeded';
+const CAPACITY_BACKPRESSURE_REASON = 'TAB_CAPACITY_EXCEEDED_PRE_EFFECT';
 
 function clone(value) { return value == null ? value : structuredClone(value); }
 function iso(clock) {
@@ -40,6 +42,9 @@ function burstLimit(value, fallback = DEFAULT_SPAWN_BURST_LIMIT) {
   const out = value == null ? fallback : Number(value);
   if (!Number.isSafeInteger(out) || out < 1 || out > MAX_SPAWN_BURST_LIMIT) throw new Error('fleet_spawn_burst_limit_invalid');
   return out;
+}
+function isDeterministicPreEffectCapacityError(error) {
+  return String(error?.message || error) === 'tab_capacity_exceeded';
 }
 function normalizePolicy(policy = {}) {
   const profile = String(policy.profile || 'BALANCED').toUpperCase();
@@ -156,6 +161,8 @@ export class FleetProvisioner {
   #state;
   #ready = false;
   #mutex = Promise.resolve();
+  #capacityBackpressure = false;
+  #capacityRetiredAttempts = 0;
 
   constructor({ createTab, loadTab, tabExists, loadState, saveState, policy, clock = () => Date.now(), uuid = () => crypto.randomUUID() } = {}) {
     if (![createTab, loadTab, tabExists, loadState, saveState].every((fn) => typeof fn === 'function')) throw new Error('fleet_dependency_invalid');
@@ -172,7 +179,22 @@ export class FleetProvisioner {
   async init() {
     const loaded = await this.#loadState();
     this.#state = sanitizeLoadedState(loaded, this.#state.policy);
+    this.#capacityBackpressure = false;
+    this.#capacityRetiredAttempts = 0;
     for (const agent of this.#state.agents) {
+      if (agent.lifecycle_state === 'PROVISIONING_AMBIGUOUS' && agent.ambiguous_reason === LEGACY_CAPACITY_AMBIGUITY) {
+        agent.lifecycle_state = 'RETIRED';
+        agent.tab_id = null;
+        agent.target_id = null;
+        agent.transport_proof = null;
+        agent.generation_epoch += 1;
+        agent.lost_reason = CAPACITY_BACKPRESSURE_REASON;
+        agent.ambiguous_reason = null;
+        agent.updated_at = iso(this.#clock);
+        this.#capacityBackpressure = true;
+        this.#capacityRetiredAttempts += 1;
+        continue;
+      }
       if (agent.tab_id && !this.#tabExists(agent.tab_id) && !['RETIRED', 'PROVISIONING_AMBIGUOUS'].includes(agent.lifecycle_state)) {
         agent.lifecycle_state = 'LOST';
         agent.lost_reason = 'PHYSICAL_TAB_MISSING_ON_RESTART';
@@ -203,6 +225,15 @@ export class FleetProvisioner {
       agents: this.#state.agents.map(clone),
       counts: Object.fromEntries(FLEET_STATES.map((state) => [state, this.#state.agents.filter((a) => a.lifecycle_state === state).length])),
       owner_override_ambiguous_compensating_fanout: globalOwnerGateDisabled('fleet.ambiguous_compensating_fanout'),
+      capacity_backpressure: {
+        blocked: this.#capacityBackpressure,
+        retired_no_effect_attempts: this.#capacityRetiredAttempts,
+        reason: this.#capacityBackpressure ? CAPACITY_BACKPRESSURE_REASON : null,
+        deterministic_no_effect: true,
+        automatic_retry_allowed: false,
+        release_signal: 'PHYSICAL_TAB_CLOSED',
+        authority_effect: false,
+      },
       authority_effect: false,
     });
   }
@@ -274,6 +305,7 @@ export class FleetProvisioner {
   async reconcile({ active = false, target_agents = null, spawn_burst_limit = null } = {}) {
     return this.#serial(async () => {
       this.#assertReady();
+      if (active && this.#capacityBackpressure) return this.snapshot();
       const desired = active
         ? nonNegativeInteger(target_agents, this.#state.policy.desired_agents, 'desired_agents')
         : this.#state.policy.warm_agents;
@@ -297,13 +329,13 @@ export class FleetProvisioner {
       let provisionedThisCycle = 0;
       const activatable = this.#state.agents.filter((agent) => ['REGISTERED', 'LOST'].includes(agent.lifecycle_state));
       for (const agent of activatable) {
-        if (this.#liveCount() >= desired || provisionedThisCycle >= burst) break;
+        if (this.#liveCount() >= desired || provisionedThisCycle >= burst || this.#capacityBackpressure) break;
         await this.#provision(agent, { isRecovery: agent.lifecycle_state === 'LOST' });
         provisionedThisCycle += 1;
       }
 
       if (globalOwnerGateDisabled('fleet.ambiguous_compensating_fanout')) {
-        while (this.#liveCount() < desired && createdThisCycle < burst && provisionedThisCycle < burst) {
+        while (!this.#capacityBackpressure && this.#liveCount() < desired && createdThisCycle < burst && provisionedThisCycle < burst) {
           const agent = this.#newRegisteredAgent();
           this.#state.agents.push(agent);
           createdThisCycle += 1;
@@ -319,6 +351,7 @@ export class FleetProvisioner {
 
   async onTabClosed(tabId, reason = 'PHYSICAL_TAB_CLOSED') {
     return this.#serial(async () => {
+      if (this.#capacityBackpressure) this.#capacityBackpressure = false;
       const agent = this.#state.agents.find((row) => row.tab_id === String(tabId));
       if (!agent || ['RETIRED', 'PROVISIONING_AMBIGUOUS'].includes(agent.lifecycle_state)) return this.snapshot();
       agent.lifecycle_state = 'LOST';
@@ -405,6 +438,20 @@ export class FleetProvisioner {
         agent_id: agent.agent_id,
       });
     } catch (error) {
+      if (isDeterministicPreEffectCapacityError(error)) {
+        agent.lifecycle_state = 'RETIRED';
+        agent.tab_id = null;
+        agent.target_id = null;
+        agent.transport_proof = null;
+        agent.generation_epoch += 1;
+        agent.lost_reason = CAPACITY_BACKPRESSURE_REASON;
+        agent.ambiguous_reason = null;
+        agent.updated_at = iso(this.#clock);
+        this.#capacityBackpressure = true;
+        this.#capacityRetiredAttempts += 1;
+        await this.#persist();
+        return;
+      }
       agent.lifecycle_state = 'PROVISIONING_AMBIGUOUS';
       agent.ambiguous_reason = `CREATE_TAB_AMBIGUOUS:${String(error?.message || error)}`.slice(0, 240);
       agent.updated_at = iso(this.#clock);
