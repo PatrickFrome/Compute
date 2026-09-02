@@ -6,11 +6,14 @@ import {
 } from './native-effect-binding.mjs';
 
 const SAFE_ROLES = new Set(['textbox','searchbox','combobox','button','checkbox','radio','switch','tab','menuitem','link']);
+const TEXT_INPUT_ROLES = new Set(['textbox','searchbox','combobox']);
 const CHATGPT_COMPOSER_NAMES = new Set(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
 const NATIVE_BROWSER_PROCESS_INCARNATION_ID = crypto.randomUUID();
 const clip = (value, max) => String(value ?? '').slice(0, max);
-const axValue = (node, key) => String(node?.[key]?.value ?? '').trim();
+const axRawValue = (node, key) => String(node?.[key]?.value ?? '');
+const axValue = (node, key) => axRawValue(node, key).trim();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const sha256 = (value) => crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
 
 export function nativeBrowserTargetIdentity(webContents) {
   if (!webContents || webContents.isDestroyed?.()) throw new Error('native_control_webcontents_unavailable');
@@ -50,7 +53,14 @@ function uniqueSemanticTargets(nodes = []) {
     if (!SAFE_ROLES.has(role) || !name || !Number.isInteger(backendNodeId) || backendNodeId <= 0) continue;
     const key = `${role}\u0000${name}`;
     counts.set(key, Number(counts.get(key) || 0) + 1);
-    candidates.push({ role, name: clip(name, 240), backend_node_id: backendNodeId });
+    const row = { role, name: clip(name, 240), backend_node_id: backendNodeId };
+    if (TEXT_INPUT_ROLES.has(role)) {
+      const value = axRawValue(node, 'value');
+      row.value_length = value.length;
+      row.value_sha256 = value ? sha256(value) : null;
+      row.value_exposed = false;
+    }
+    candidates.push(row);
   }
   return candidates.filter((row) => counts.get(`${row.role}\u0000${row.name}`) === 1).slice(0, 120);
 }
@@ -105,7 +115,7 @@ async function observeChatGptSubmit(dbg, webContents, { preUrl, attempts = 20, i
         effect_state: stopCount === 1 ? 'PROVEN_GENERATING' : 'PROVEN_NEW_CONVERSATION',
         stop_observed: stopCount === 1,
         new_conversation_observed: rootToConversation,
-        post_url_sha256: url ? crypto.createHash('sha256').update(url, 'utf8').digest('hex') : null,
+        post_url_sha256: url ? sha256(url) : null,
         automatic_retry_allowed: false,
         authority_effect: false,
       };
@@ -116,7 +126,7 @@ async function observeChatGptSubmit(dbg, webContents, { preUrl, attempts = 20, i
     stop_observed: last.stop_count === 1,
     new_conversation_observed: false,
     send_control_remaining: last.send_count > 0,
-    post_url_sha256: last.url ? crypto.createHash('sha256').update(last.url, 'utf8').digest('hex') : null,
+    post_url_sha256: last.url ? sha256(last.url) : null,
     automatic_retry_allowed: false,
     authority_effect: false,
   };
@@ -139,6 +149,8 @@ export async function captureSemanticFrame(webContents) {
       url: clip(webContents.getURL?.() || '', 1200),
       title: clip(webContents.getTitle?.() || '', 240),
       semantic_targets: uniqueSemanticTargets(nodes),
+      semantic_input_values_exposed: false,
+      semantic_input_value_hashes: true,
       text_excerpt: textExcerpt(nodes),
       viewport: viewport ? {
         width: Number(viewport.clientWidth || viewport.width || 0),
@@ -236,7 +248,7 @@ export async function executeSemanticCommand(webContents, command) {
       }
       await dbg.sendCommand('Input.insertText', { text });
       if (!submitAfterType) {
-        return { action, target, inserted_chars: text.length, replace_existing: command?.payload?.replace_existing !== false, authority_effect: true };
+        return { action, target, inserted_chars: text.length, replace_existing: command?.payload?.replace_existing !== false, prompt_sha256: sha256(text), prompt_included: false, authority_effect: true };
       }
 
       const readyTree = await dbg.sendCommand('Accessibility.getFullAXTree');
@@ -255,7 +267,7 @@ export async function executeSemanticCommand(webContents, command) {
         inserted_chars: text.length,
         replace_existing: command?.payload?.replace_existing !== false,
         submit_after_type: true,
-        prompt_sha256: crypto.createHash('sha256').update(text, 'utf8').digest('hex'),
+        prompt_sha256: sha256(text),
         prompt_included: false,
         send_control: { role: sendTargets[0].role, name: sendTargets[0].name },
         ...observation,

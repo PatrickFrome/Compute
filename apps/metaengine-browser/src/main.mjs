@@ -41,6 +41,7 @@ let nativeSupervisor = null;
 let shellLayoutState = normalizeShellLayoutState();
 let shellLayoutPlan = null;
 let perceptionCache = { tab_id: null, captured_ms: 0, frame: null, error: null };
+let shutdownRequested = false;
 
 function mimeFor(filePath) {
   if (filePath.endsWith('.html')) return 'text/html; charset=utf-8';
@@ -137,6 +138,12 @@ async function shellSnapshot() {
     workspaces,
     compute: await bridge.health(),
     layout: shellLayoutPlan ? structuredClone(shellLayoutPlan) : null,
+    background_service: {
+      close_to_background: !shutdownRequested,
+      shutdown_requested: shutdownRequested,
+      terminal_requires_external_stop: true,
+      authority_effect: false,
+    },
     policy: SECURITY_POLICY,
     authority_effect: false,
   };
@@ -160,9 +167,6 @@ function layout() {
 
 function attachSelected() {
   if (!windowRef) return;
-  // The shell is a full-window underlay; the selected remote WebContentsView is added
-  // after it and receives a real inset rectangle. This makes the rails interactive
-  // without overlaying or intercepting any remote-page pixels.
   if (shellView) {
     try { windowRef.contentView.addChildView(shellView); } catch {}
   }
@@ -549,6 +553,11 @@ async function createWindow() {
   shellView = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-shell.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true } });
   windowRef.contentView.addChildView(shellView);
   windowRef.on('resize', layout);
+  windowRef.on('close', (event) => {
+    if (shutdownRequested || isSmoke || isDevelopmentPlaneSmoke) return;
+    event.preventDefault();
+    windowRef.hide();
+  });
   windowRef.on('closed', () => { destroyWindowContents(); windowRef = null; });
   layout();
   await shellView.webContents.loadURL('metaengine://shell/');
@@ -590,8 +599,16 @@ async function startAfterReady() {
   await createWindow();
 }
 
-app.on('activate', () => { if (app.isReady() && !windowRef) createWindow().catch((error) => { console.error(error); app.exit(1); }); });
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.on('before-quit', () => { shutdownRequested = true; });
+app.on('activate', () => {
+  if (!app.isReady()) return;
+  if (windowRef && !windowRef.isDestroyed()) {
+    windowRef.show();
+    return;
+  }
+  createWindow().catch((error) => { console.error(error); app.exit(1); });
+});
+app.on('window-all-closed', () => {});
 app.once('ready', () => {
   startAfterReady().catch((error) => {
     console.error('browser-start-failed', error);

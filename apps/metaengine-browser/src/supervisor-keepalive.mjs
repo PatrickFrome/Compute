@@ -1,10 +1,10 @@
 import crypto from 'node:crypto';
 
-export const SUPERVISOR_KEEPALIVE_VERSION = '1.3.0';
+export const SUPERVISOR_KEEPALIVE_VERSION = '1.3.1';
 export const SUPERVISOR_ID = 'METAENGINE_SUPERVISOR';
 export const KEEPALIVE_STATES = Object.freeze([
   'ACTIVE','WAITING','WAKE_PENDING','WAKE_AMBIGUOUS',
-  'ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_AMBIGUOUS',
+  'ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS',
   'PAUSED','RECOVERING',
 ]);
 
@@ -52,6 +52,7 @@ function freshState() {
     conversation_url: null,
     tab_id: null,
     paused: false,
+    paused_from_state: null,
     queued_wakes: [],
     pending_wake: null,
     active_wake: null,
@@ -63,6 +64,7 @@ function freshState() {
     previous_worker_generation: {},
     rollover_reason: null,
     rollover_release_at: null,
+    rollover_attempt: null,
     updated_at: null,
     authority_effect: false,
   };
@@ -87,6 +89,7 @@ function sanitize(input) {
     conversation_url: conversationUrl,
     tab_id: input.tab_id ? String(input.tab_id) : null,
     paused: input.paused === true,
+    paused_from_state: KEEPALIVE_STATES.includes(input.paused_from_state) ? input.paused_from_state : null,
     queued_wakes: queued,
     pending_wake: input.pending_wake && typeof input.pending_wake === 'object' ? clone(input.pending_wake) : null,
     active_wake: sanitizeActiveWake(input.active_wake),
@@ -99,6 +102,7 @@ function sanitize(input) {
       ? clone(input.previous_worker_generation) : {},
     rollover_reason: input.rollover_reason ? String(input.rollover_reason).slice(0, 160) : null,
     rollover_release_at: input.rollover_release_at || null,
+    rollover_attempt: input.rollover_attempt && typeof input.rollover_attempt === 'object' ? clone(input.rollover_attempt) : null,
     updated_at: input.updated_at || null,
   };
 }
@@ -127,12 +131,13 @@ export function buildSupervisorWakeMessage({ supervisorEpoch, cycleSeq, wakeId, 
   ].join('\n');
 }
 
-export function buildSupervisorRolloverMessage({ previousUrl, supervisorEpoch }) {
+export function buildSupervisorRolloverMessage({ previousUrl, supervisorEpoch, rolloverAttemptId = null }) {
   return [
     'METAENGINE_SUPERVISOR_ROLLOVER_V1',
     `supervisor_id=${SUPERVISOR_ID}`,
     `supervisor_epoch=${Number(supervisorEpoch) + 1}`,
     `previous_conversation=${String(previousUrl || '')}`,
+    ...(rolloverAttemptId ? [`rollover_attempt_id=${String(rolloverAttemptId)}`] : []),
     'integration_line=integration/metaengine-development-os-v1',
     'legacy_convergence_line=integration/compute-unified-v1',
     '',
@@ -159,8 +164,24 @@ export class SupervisorKeepalive {
 
   async init() {
     this.#state = sanitize(await this.#load());
-    if (this.#state.pending_wake) this.#state.state = this.#state.pending_wake.ambiguous_at ? 'WAKE_AMBIGUOUS' : 'WAKE_PENDING';
-    else if (this.#state.paused) this.#state.state = 'PAUSED';
+    const recoveredAt = iso(this.#clock);
+    if (this.#state.pending_wake && !this.#state.pending_wake.ambiguous_at) {
+      this.#state.pending_wake.ambiguous_at = recoveredAt;
+      this.#state.pending_wake.ambiguous_reason = 'PROCESS_RESTART_WITH_UNRESOLVED_WAKE_EFFECT';
+      this.#state.pending_wake.restart_recovered_at = recoveredAt;
+      this.#state.pending_wake.automatic_retry_allowed = false;
+    }
+    if (this.#state.state === 'ROLLOVER_PENDING') {
+      this.#state.state = 'ROLLOVER_AMBIGUOUS';
+      this.#state.rollover_reason = 'PROCESS_RESTART_WITH_UNRESOLVED_ROLLOVER_EFFECT';
+      this.#state.rollover_attempt = {
+        ...(this.#state.rollover_attempt || {}),
+        restart_recovered_at: recoveredAt,
+        automatic_retry_allowed: false,
+      };
+    }
+    if (this.#state.paused) this.#state.state = 'PAUSED';
+    else if (this.#state.pending_wake) this.#state.state = 'WAKE_AMBIGUOUS';
     else if (['ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) {}
     else if (this.#state.active_wake) this.#state.state = 'ACTIVE';
     else this.#state.state = this.#state.conversation_url ? 'WAITING' : 'RECOVERING';
@@ -178,6 +199,7 @@ export class SupervisorKeepalive {
     this.#state.state = this.#state.paused ? 'PAUSED' : (this.#state.active_wake ? 'ACTIVE' : 'WAITING');
     this.#state.rollover_reason = null;
     this.#state.rollover_release_at = null;
+    this.#state.rollover_attempt = null;
     await this.#persist();
     return this.snapshot();
   }
@@ -185,16 +207,15 @@ export class SupervisorKeepalive {
   async rebindTab(tabId) {
     if (!this.#state.conversation_url) throw new Error('keepalive_supervisor_unbound');
     this.#state.tab_id = tabId ? String(tabId) : null;
-    if (this.#state.pending_wake) {
-      this.#state.state = this.#state.pending_wake.ambiguous_at ? 'WAKE_AMBIGUOUS' : 'WAKE_PENDING';
-    } else if (!['ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) {
-      this.#state.state = this.#state.paused ? 'PAUSED' : (this.#state.active_wake ? 'ACTIVE' : 'WAITING');
-    }
+    if (this.#state.paused) this.#state.state = 'PAUSED';
+    else if (this.#state.pending_wake) this.#state.state = this.#state.pending_wake.ambiguous_at ? 'WAKE_AMBIGUOUS' : 'WAKE_PENDING';
+    else if (!['ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) this.#state.state = this.#state.active_wake ? 'ACTIVE' : 'WAITING';
     await this.#persist();
     return this.snapshot();
   }
 
   async pause() {
+    if (!this.#state.paused) this.#state.paused_from_state = this.#state.state;
     this.#state.paused = true;
     this.#state.state = 'PAUSED';
     await this.#persist();
@@ -202,9 +223,13 @@ export class SupervisorKeepalive {
   }
 
   async resume() {
+    const prior = this.#state.paused_from_state;
     this.#state.paused = false;
-    if (this.#state.rollover_reason && !this.#state.rollover_release_at) this.#state.state = 'ROLLOVER_DEFERRED';
-    else if (this.#state.pending_wake) this.#state.state = this.#state.pending_wake.ambiguous_at ? 'WAKE_AMBIGUOUS' : 'WAKE_PENDING';
+    this.#state.paused_from_state = null;
+    if (this.#state.pending_wake) this.#state.state = this.#state.pending_wake.ambiguous_at ? 'WAKE_AMBIGUOUS' : 'WAKE_PENDING';
+    else if (this.#state.rollover_attempt && ['ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(String(prior || ''))) this.#state.state = 'ROLLOVER_AMBIGUOUS';
+    else if (this.#state.rollover_reason && !this.#state.rollover_release_at) this.#state.state = 'ROLLOVER_DEFERRED';
+    else if (this.#state.rollover_reason && this.#state.rollover_release_at) this.#state.state = this.#state.rollover_attempt ? 'ROLLOVER_AMBIGUOUS' : 'ROLLOVER_REQUIRED';
     else if (this.#state.active_wake) this.#state.state = 'ACTIVE';
     else this.#state.state = this.#state.conversation_url ? 'WAITING' : 'RECOVERING';
     await this.#persist();
@@ -238,12 +263,14 @@ export class SupervisorKeepalive {
     if (!this.#state.conversation_url) {
       this.#state.state = 'RECOVERING';
       this.#state.rollover_reason = String(reason).slice(0, 160);
+      this.#state.rollover_attempt = null;
       await this.#persist();
       return this.snapshot();
     }
     this.#state.state = 'ROLLOVER_DEFERRED';
     this.#state.rollover_reason = String(reason).slice(0, 160);
     this.#state.rollover_release_at = null;
+    this.#state.rollover_attempt = null;
     await this.#persist();
     return this.snapshot();
   }
@@ -254,20 +281,50 @@ export class SupervisorKeepalive {
     this.#state.state = 'ROLLOVER_REQUIRED';
     this.#state.rollover_release_at = iso(this.#clock);
     this.#state.rollover_reason = `${String(this.#state.rollover_reason || 'ROLLOVER')}:${String(reason)}`.slice(0, 160);
+    this.#state.rollover_attempt = null;
     await this.#persist();
     return this.snapshot();
   }
 
+  async beginRolloverAttempt() {
+    if (this.#state.state !== 'ROLLOVER_REQUIRED') throw new Error('keepalive_rollover_not_released');
+    const attemptId = `rollover_${String(this.#uuid()).replace(/[^a-z0-9-]/gi, '').toLowerCase()}`;
+    this.#state.rollover_attempt = {
+      attempt_id: attemptId,
+      supervisor_epoch: this.#state.supervisor_epoch,
+      previous_conversation: this.#state.conversation_url,
+      started_at: iso(this.#clock),
+      tab_id: null,
+      automatic_retry_allowed: false,
+    };
+    this.#state.state = 'ROLLOVER_PENDING';
+    await this.#persist();
+    return clone(this.#state.rollover_attempt);
+  }
+
+  async bindRolloverAttemptTab(tabId) {
+    if (!['ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state) || !this.#state.rollover_attempt) throw new Error('keepalive_rollover_attempt_missing');
+    this.#state.rollover_attempt.tab_id = String(tabId || '');
+    this.#state.rollover_attempt.tab_bound_at = iso(this.#clock);
+    await this.#persist();
+    return clone(this.#state.rollover_attempt);
+  }
+
   async markRolloverAmbiguous(reason = 'ROLLOVER_SEND_EFFECT_UNKNOWN') {
-    if (!['ROLLOVER_REQUIRED','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) throw new Error('keepalive_rollover_not_released');
+    if (!['ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) throw new Error('keepalive_rollover_not_released');
     this.#state.state = 'ROLLOVER_AMBIGUOUS';
     this.#state.rollover_reason = String(reason).slice(0, 160);
+    if (this.#state.rollover_attempt) {
+      this.#state.rollover_attempt.ambiguous_at = iso(this.#clock);
+      this.#state.rollover_attempt.ambiguous_reason = String(reason).slice(0, 200);
+      this.#state.rollover_attempt.automatic_retry_allowed = false;
+    }
     await this.#persist();
     return this.snapshot();
   }
 
   async bindRollover({ url, tab_id = null } = {}) {
-    if (this.#state.state !== 'ROLLOVER_REQUIRED') throw new Error('keepalive_rollover_not_released');
+    if (!['ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) throw new Error('keepalive_rollover_not_released');
     this.#state.supervisor_epoch += 1;
     this.#state.cycle_seq = 0;
     this.#state.previous_worker_generation = {};
@@ -277,6 +334,7 @@ export class SupervisorKeepalive {
     this.#state.last_wake_reason = null;
     this.#state.rollover_reason = null;
     this.#state.rollover_release_at = null;
+    this.#state.rollover_attempt = null;
     this.#state.conversation_url = normalizeUrl(url);
     this.#state.tab_id = tab_id ? String(tab_id) : null;
     this.#state.state = this.#state.paused ? 'PAUSED' : 'WAITING';
@@ -300,9 +358,7 @@ export class SupervisorKeepalive {
     }
     this.#state.previous_worker_generation = next;
     await this.#persist();
-    for (const event of events.filter((row) => row.reason === 'WORKER_RESULT_READY')) {
-      await this.enqueueWake(event.reason, { agent_id: event.agent_id });
-    }
+    for (const event of events.filter((row) => row.reason === 'WORKER_RESULT_READY')) await this.enqueueWake(event.reason, { agent_id: event.agent_id });
     for (const reason of ['WORKER_LOST','WORKER_FAILED']) {
       const agentIds = events.filter((row) => row.reason === reason).map((row) => row.agent_id);
       if (agentIds.length) await this.enqueueWake(reason, { key: 'fleet-terminal-burst', agent_ids: agentIds });
@@ -311,7 +367,7 @@ export class SupervisorKeepalive {
   }
 
   canWake() {
-    if (this.#state.paused || ['WAKE_AMBIGUOUS','ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) return false;
+    if (this.#state.paused || ['WAKE_AMBIGUOUS','ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) return false;
     if (!this.#state.conversation_url || this.#state.pending_wake || this.#state.active_wake || this.#state.queued_wakes.length === 0) return false;
     if (this.#state.cycle_seq >= this.#maxCyclesPerEpoch) return false;
     if (!this.#state.last_wake_at) return true;
@@ -334,6 +390,7 @@ export class SupervisorKeepalive {
       prepared_at: iso(this.#clock),
       supervisor_epoch: this.#state.supervisor_epoch,
       cycle_seq: this.#state.cycle_seq + 1,
+      automatic_retry_allowed: false,
     };
     this.#state.pending_wake = pending;
     this.#state.state = 'WAKE_PENDING';
@@ -362,6 +419,7 @@ export class SupervisorKeepalive {
     this.#state.queued_wakes = this.#state.queued_wakes.filter((row) => row.key !== pending.queue_key);
     this.#state.pending_wake = null;
     this.#state.active_wake = { ...clone(pending), confirmed_at: iso(this.#clock) };
+    delete this.#state.active_wake.automatic_retry_allowed;
     this.#state.state = 'ACTIVE';
     await this.#persist();
     return this.snapshot();
@@ -370,7 +428,7 @@ export class SupervisorKeepalive {
   async markCycleComplete() {
     this.#state.last_completed_cycle_at = iso(this.#clock);
     this.#state.active_wake = null;
-    if (!this.#state.paused && !['ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) this.#state.state = 'WAITING';
+    if (!this.#state.paused && !['ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) this.#state.state = 'WAITING';
     await this.#persist();
     return this.snapshot();
   }
@@ -380,6 +438,7 @@ export class SupervisorKeepalive {
     if (!pending || pending.wake_id !== String(wakeId)) throw new Error('keepalive_wake_binding_mismatch');
     pending.ambiguous_at = iso(this.#clock);
     pending.ambiguous_reason = String(reason).slice(0, 200);
+    pending.automatic_retry_allowed = false;
     this.#state.state = 'WAKE_AMBIGUOUS';
     await this.#persist();
     return this.snapshot();
@@ -388,9 +447,7 @@ export class SupervisorKeepalive {
   async retireAmbiguousAfterTerminal({ tab_id = null, generation_epoch = null, reason = 'TERMINAL_BOUNDARY_CONFIRMED' } = {}) {
     const pending = this.#state.pending_wake;
     if (!pending || !pending.ambiguous_at) throw new Error('keepalive_no_ambiguous_wake');
-    if (tab_id != null && this.#state.tab_id != null && String(tab_id) !== String(this.#state.tab_id)) {
-      throw new Error('keepalive_terminal_tab_binding_mismatch');
-    }
+    if (tab_id != null && this.#state.tab_id != null && String(tab_id) !== String(this.#state.tab_id)) throw new Error('keepalive_terminal_tab_binding_mismatch');
     const epoch = generation_epoch == null ? null : Number(generation_epoch);
     if (epoch != null && (!Number.isSafeInteger(epoch) || epoch < 0)) throw new Error('keepalive_terminal_generation_invalid');
     const retiredAt = iso(this.#clock);
@@ -426,6 +483,7 @@ export class SupervisorKeepalive {
   }
 
   async #persist() {
+    this.#state.version = SUPERVISOR_KEEPALIVE_VERSION;
     this.#state.updated_at = iso(this.#clock);
     await this.#save(clone(this.#state));
   }

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ChatGptSessionMonitor } from './chatgpt-session-monitor.mjs';
@@ -7,10 +8,12 @@ import { SupervisorKeepalive, buildSupervisorRolloverMessage, buildSupervisorWak
 import { evaluateActiveWakeTerminalRetirement } from './supervisor-terminal-retirement.mjs';
 
 const CHAT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/c\/[a-z0-9-]+/i;
+const CHAT_ROOT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/?$/i;
 const LIMIT_RE = /(maximum conversation length|conversation is too long|start a new chat|диалог.{0,20}слишком длин|начните новый чат)/i;
 const CONTINUOUS_WAKE_REASON = 'CONTINUE_DEVELOPMENT';
 const AUTO_ROLLOVER_CYCLES = 24;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const sha256 = (value) => crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
 
 function generating(frame) {
   return Boolean(frame?.semantic_targets?.some((x) => x?.role === 'button' && chatGptControlMatches('STOP', x?.name)));
@@ -18,6 +21,10 @@ function generating(frame) {
 function unique(frame, role) {
   const rows = (frame?.semantic_targets || []).filter((x) => x?.role === role);
   return rows.length === 1 ? rows[0] : null;
+}
+function composerMatches(frame, message) {
+  const box = unique(frame, 'textbox');
+  return Boolean(box?.value_sha256 && box.value_sha256 === sha256(message));
 }
 function retryEnvelope(message, wakeId, retryAttempt) {
   return `${String(message)}\n\nMETAENGINE_SAME_WAKE_RETRY_V1\nwake_id=${String(wakeId)}\nretry_attempt=${Number(retryAttempt)}\nThis is the same logical supervisor wake, not authority for a duplicate effect. Before any write, deployment, merge or external actuation, re-read authoritative GitHub/Supabase/receipt state and reconcile whether the prior attempt already produced that effect. Never repeat an observed or ambiguous effect. Continue only missing work.`;
@@ -69,30 +76,34 @@ export class SupervisorLifecycleRuntime {
     });
     await this.#keepalive.init();
     const active = this.#keepalive.activeWake();
-    if (active) {
-      this.#activeRequest = {
-        wake_id: active.wake_id,
-        tab_id: String(this.#keepalive.snapshot().tab_id || ''),
-        message: buildSupervisorWakeMessage({
-          supervisorEpoch: active.supervisor_epoch,
-          cycleSeq: active.cycle_seq,
-          wakeId: active.wake_id,
-          reason: active.reason,
-        }),
-        retry_attempt: 0,
-        same_chat_retry_attempt: 0,
-        blocked_ambiguous: false,
-        effect_class: REQUEST_EFFECT_CLASS.IDEMPOTENT_WRITE,
-        restored_from_durable_keepalive: true,
-      };
-    }
+    if (active) this.#activateRequest(active, this.#keepalive.snapshot().tab_id, true);
     await this.cycle({ force: true });
     return this.snapshot();
   }
 
+  #activateRequest(wake, tabId, restored) {
+    const message = buildSupervisorWakeMessage({
+      supervisorEpoch: wake.supervisor_epoch,
+      cycleSeq: wake.cycle_seq,
+      wakeId: wake.wake_id,
+      reason: wake.reason,
+    });
+    this.#activeRequest = {
+      wake_id: wake.wake_id,
+      tab_id: String(tabId || ''),
+      message,
+      retry_attempt: 0,
+      same_chat_retry_attempt: 0,
+      blocked_ambiguous: false,
+      effect_class: REQUEST_EFFECT_CLASS.IDEMPOTENT_WRITE,
+      restored_from_durable_keepalive: restored === true,
+    };
+    return this.#activeRequest;
+  }
+
   snapshot() {
     return {
-      schema: 'metaengine.supervisor-lifecycle-runtime.v3',
+      schema: 'metaengine.supervisor-lifecycle-runtime.v4',
       keepalive: this.#keepalive?.snapshot() || null,
       supervisor_generation: this.#lastSupervisorGeneration,
       supervisor_session: this.#sessionMonitor?.snapshot() || null,
@@ -102,6 +113,9 @@ export class SupervisorLifecycleRuntime {
         auto_rollover_cycles: AUTO_ROLLOVER_CYCLES,
         terminal_requires_user_message: false,
         restart_resumable: true,
+        restart_pending_wake_reconciliation: 'COMPOSER_HASH_OR_TRANSCRIPT_PROOF_V1',
+        restart_rollover_reconciliation: 'ROLLOVER_ATTEMPT_COMPOSER_HASH_OR_TRANSCRIPT_PROOF_V1',
+        prompt_plaintext_persisted: false,
         orphaned_stall_stop_only: true,
         ambiguous_terminal_retirement: true,
         active_wake_terminal_retirement: 'EXACT_WAKE_TAB_GENERATION_V1',
@@ -134,7 +148,7 @@ export class SupervisorLifecycleRuntime {
     if (ks.pending_wake) return false;
     const blockingQueued = (ks.queued_wakes || []).filter((wake) => String(wake?.reason || '') !== CONTINUOUS_WAKE_REASON);
     if (blockingQueued.length > 0) return false;
-    if (['WAKE_PENDING','WAKE_AMBIGUOUS','ROLLOVER_REQUIRED','ROLLOVER_AMBIGUOUS','RECOVERING','ACTIVE'].includes(ks.state)) return false;
+    if (['WAKE_PENDING','WAKE_AMBIGUOUS','ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS','RECOVERING','ACTIVE'].includes(ks.state)) return false;
     return this.#lastWorkerSignals.every((s) => ['IDLE','TERMINAL'].includes(String(s?.generation_state || 'UNKNOWN')));
   }
 
@@ -170,6 +184,60 @@ export class SupervisorLifecycleRuntime {
     await this.#keepalive.observeWorkers(signals);
   }
 
+  async #observeSendReadback(tabId, marker, attempts = 6) {
+    for (let i = 0; i < attempts; i += 1) {
+      if (i > 0) await sleep(700);
+      const observed = await this.#capture(tabId);
+      if (generating(observed) || (marker && String(observed?.text_excerpt || '').includes(marker))) return { ok: true, observed };
+    }
+    return { ok: false, observed: null };
+  }
+
+  async #recoverAmbiguousWakeFromFrame(tab, frame, row, keepalive) {
+    const pending = keepalive.pending_wake;
+    if (!pending?.ambiguous_at) return false;
+    const message = buildSupervisorWakeMessage({
+      supervisorEpoch: pending.supervisor_epoch,
+      cycleSeq: pending.cycle_seq,
+      wakeId: pending.wake_id,
+      reason: pending.reason,
+    });
+    const markerObserved = String(frame?.text_excerpt || '').includes(String(pending.wake_id || ''));
+    if (markerObserved) {
+      await this.#keepalive.resolveAmbiguous({ observed_sent: true });
+      this.#activateRequest(pending, tab.tab_id, true);
+      this.#lastRecovery = {
+        action: 'AMBIGUOUS_WAKE_POSITIVELY_REBOUND', wake_id: pending.wake_id, tab_id: String(tab.tab_id),
+        proof: 'WAKE_MARKER_IN_TRANSCRIPT', confirmed: true, ambiguous: false,
+        automatic_retry_allowed: false, at: new Date().toISOString(), authority_effect: false,
+      };
+      return true;
+    }
+    if (row.terminal_ready === true && composerMatches(frame, message) && this.#canActuate() === true) {
+      const send = uniqueChatGptControl(frame, 'SEND');
+      if (!send) return false;
+      await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: String(tab.tab_id), role: 'button', accessible_name: send.name }, platform: null });
+      const readback = await this.#observeSendReadback(tab.tab_id, pending.wake_id);
+      if (readback.ok) {
+        await this.#keepalive.resolveAmbiguous({ observed_sent: true });
+        this.#activateRequest(pending, tab.tab_id, true);
+        this.#lastRecovery = {
+          action: 'RESTART_TYPED_WAKE_SEND_RECOVERED', wake_id: pending.wake_id, tab_id: String(tab.tab_id),
+          proof: 'EXACT_COMPOSER_SHA256_THEN_POSITIVE_SEND_READBACK', confirmed: true, ambiguous: false,
+          prompt_retyped: false, automatic_retry_allowed: false, at: new Date().toISOString(), authority_effect: false,
+        };
+        return true;
+      }
+      this.#lastRecovery = {
+        action: 'RESTART_TYPED_WAKE_SEND_AMBIGUOUS', wake_id: pending.wake_id, tab_id: String(tab.tab_id),
+        proof: 'EXACT_COMPOSER_SHA256_BEFORE_SINGLE_CLICK', confirmed: false, ambiguous: true,
+        prompt_retyped: false, automatic_retry_allowed: false, at: new Date().toISOString(), authority_effect: false,
+      };
+      return true;
+    }
+    return false;
+  }
+
   async #observeSupervisor(tab, state) {
     const frame = await this.#capture(tab.tab_id);
     const live = tabLiveness(state, tab.tab_id);
@@ -177,7 +245,12 @@ export class SupervisorLifecycleRuntime {
     const previous = this.#lastSupervisorGeneration;
     this.#lastSupervisorGeneration = row.state;
 
-    const keepalive = this.#keepalive.snapshot();
+    let keepalive = this.#keepalive.snapshot();
+    if (keepalive.pending_wake?.ambiguous_at) {
+      const recovered = await this.#recoverAmbiguousWakeFromFrame(tab, frame, row, keepalive);
+      keepalive = this.#keepalive.snapshot();
+      if (recovered) return { frame, row };
+    }
     if (row.terminal_ready === true && keepalive.pending_wake?.ambiguous_at) {
       const retiredWakeId = String(keepalive.pending_wake.wake_id || '');
       await this.#keepalive.retireAmbiguousAfterTerminal({
@@ -196,6 +269,7 @@ export class SupervisorLifecycleRuntime {
         at: new Date().toISOString(),
         authority_effect: false,
       };
+      keepalive = this.#keepalive.snapshot();
     }
 
     const activeRetirement = this.#activeRequest ? evaluateActiveWakeTerminalRetirement({
@@ -224,15 +298,8 @@ export class SupervisorLifecycleRuntime {
         authority_effect: false,
       };
     } else if (row.terminal_ready === true && this.#lastRecovery?.action === 'STOP_ORPHANED_GENERATION') {
-      this.#lastRecovery = {
-        ...this.#lastRecovery,
-        confirmed: true,
-        ambiguous: false,
-        terminal_confirmed_at: new Date().toISOString(),
-      };
+      this.#lastRecovery = { ...this.#lastRecovery, confirmed: true, ambiguous: false, terminal_confirmed_at: new Date().toISOString() };
     }
-    // Page/model text is only a non-authoritative hint. It may defer the current
-    // conversation but never auto-authorizes a new supervisor conversation.
     if (LIMIT_RE.test(String(frame?.text_excerpt || ''))) await this.#keepalive.requestRollover('CHATGPT_CONVERSATION_LIMIT_HINT');
     return { frame, row };
   }
@@ -246,7 +313,7 @@ export class SupervisorLifecycleRuntime {
   async #ensureContinuousWake() {
     const s = this.#keepalive.snapshot();
     if (s.paused || s.pending_wake || s.active_wake) return false;
-    if (['WAKE_AMBIGUOUS','ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_AMBIGUOUS','RECOVERING'].includes(s.state)) return false;
+    if (['WAKE_AMBIGUOUS','ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS','RECOVERING'].includes(s.state)) return false;
     if ((s.queued_wakes || []).some((wake) => String(wake?.reason || '') === CONTINUOUS_WAKE_REASON)) return false;
     await this.#keepalive.enqueueWake(CONTINUOUS_WAKE_REASON, { key: `epoch-${s.supervisor_epoch}-cycle-${s.cycle_seq}` });
     return true;
@@ -272,12 +339,8 @@ export class SupervisorLifecycleRuntime {
     if (!send) throw new Error('supervisor_send_not_unique');
     clicked = true;
     await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: tabId, role: 'button', accessible_name: send.name }, platform: null });
-    for (let i = 0; i < 6; i += 1) {
-      await sleep(700);
-      const observed = await this.#capture(tabId);
-      if (generating(observed) || (positiveMarker && String(observed?.text_excerpt || '').includes(positiveMarker))) return { ok: true, clicked, observed };
-    }
-    return { ok: false, reason: 'SEND_WITHOUT_POSITIVE_READBACK', clicked };
+    const readback = await this.#observeSendReadback(tabId, positiveMarker);
+    return readback.ok ? { ok: true, clicked, observed: readback.observed } : { ok: false, reason: 'SEND_WITHOUT_POSITIVE_READBACK', clicked };
   }
 
   async #sendWake(prepared) {
@@ -288,16 +351,7 @@ export class SupervisorLifecycleRuntime {
       clicked = sent.clicked === true;
       if (sent.ok) {
         await this.#keepalive.confirmWakeSent(prepared.pending.wake_id);
-        this.#activeRequest = {
-          wake_id: prepared.pending.wake_id,
-          tab_id: String(prepared.tab_id),
-          message: prepared.message,
-          retry_attempt: 0,
-          same_chat_retry_attempt: 0,
-          blocked_ambiguous: false,
-          effect_class: REQUEST_EFFECT_CLASS.IDEMPOTENT_WRITE,
-          restored_from_durable_keepalive: false,
-        };
+        this.#activateRequest(prepared.pending, prepared.tab_id, false);
         return true;
       }
       await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, sent.reason || 'SEND_WITHOUT_POSITIVE_READBACK');
@@ -337,14 +391,9 @@ export class SupervisorLifecycleRuntime {
       req.same_chat_retry_attempt += 1;
       if (!sent.ok && sent.clicked) req.blocked_ambiguous = true;
       this.#lastRecovery = {
-        action: 'STOP_AND_RETRY_SAME_CONVERSATION',
-        tab_id: String(tabId),
-        wake_id: req.wake_id,
-        retry_attempt: req.retry_attempt,
-        confirmed: sent.ok === true,
-        ambiguous: sent.ok !== true && sent.clicked === true,
-        at: new Date().toISOString(),
-        authority_effect: false,
+        action: 'STOP_AND_RETRY_SAME_CONVERSATION', tab_id: String(tabId), wake_id: req.wake_id, retry_attempt: req.retry_attempt,
+        confirmed: sent.ok === true, ambiguous: sent.ok !== true && sent.clicked === true,
+        at: new Date().toISOString(), authority_effect: false,
       };
       return sent.ok === true;
     } catch (e) {
@@ -370,14 +419,8 @@ export class SupervisorLifecycleRuntime {
       await this.#keepalive.bindConversation({ url, tab_id: tab.tab_id });
       req.tab_id = String(tab.tab_id);
       this.#lastRecovery = {
-        action: 'NEW_CONVERSATION_RETRY',
-        tab_id: String(tab.tab_id),
-        wake_id: req.wake_id,
-        retry_attempt: req.retry_attempt,
-        confirmed: true,
-        ambiguous: false,
-        at: new Date().toISOString(),
-        authority_effect: false,
+        action: 'NEW_CONVERSATION_RETRY', tab_id: String(tab.tab_id), wake_id: req.wake_id, retry_attempt: req.retry_attempt,
+        confirmed: true, ambiguous: false, at: new Date().toISOString(), authority_effect: false,
       };
       return true;
     } catch (e) {
@@ -405,9 +448,7 @@ export class SupervisorLifecycleRuntime {
     });
     if (decision.action === 'STOP_AND_RETRY_SAME_CONVERSATION') return this.#stopAndRetrySameConversation(tab.tab_id, frame);
     if (decision.action === 'NEW_CONVERSATION_RETRY') return this.#retryInNewConversation();
-    if (decision.action === 'ESCALATE') {
-      this.#lastRecovery = { action: 'ESCALATE', reason: decision.reason, wake_id: this.#activeRequest.wake_id, at: new Date().toISOString(), authority_effect: false };
-    }
+    if (decision.action === 'ESCALATE') this.#lastRecovery = { action: 'ESCALATE', reason: decision.reason, wake_id: this.#activeRequest.wake_id, at: new Date().toISOString(), authority_effect: false };
     return false;
   }
 
@@ -417,14 +458,9 @@ export class SupervisorLifecycleRuntime {
     if (recovery.action !== 'STOP_GENERATION') return false;
     this.#sessionMonitor.markRecovery(tab.tab_id, 'STOP_GENERATION');
     const record = {
-      action: 'STOP_ORPHANED_GENERATION',
-      tab_id: String(tab.tab_id),
-      generation_epoch: row.generation_epoch,
-      confirmed: false,
-      ambiguous: false,
-      automatic_retry_allowed: false,
-      at: new Date().toISOString(),
-      authority_effect: false,
+      action: 'STOP_ORPHANED_GENERATION', tab_id: String(tab.tab_id), generation_epoch: row.generation_epoch,
+      confirmed: false, ambiguous: false, automatic_retry_allowed: false,
+      at: new Date().toISOString(), authority_effect: false,
     };
     this.#lastRecovery = record;
     try {
@@ -445,35 +481,98 @@ export class SupervisorLifecycleRuntime {
     }
   }
 
+  #rolloverMessage(snapshot) {
+    const attempt = snapshot?.rollover_attempt || null;
+    return buildSupervisorRolloverMessage({
+      previousUrl: attempt?.previous_conversation || snapshot?.conversation_url,
+      supervisorEpoch: attempt?.supervisor_epoch ?? snapshot?.supervisor_epoch,
+      rolloverAttemptId: attempt?.attempt_id || null,
+    });
+  }
+
+  async #bindRecoveredRollover(tabId, frame) {
+    const url = String(frame?.url || '');
+    if (!CHAT_RE.test(url)) return false;
+    await this.#keepalive.bindRollover({ url, tab_id: String(tabId) });
+    this.#activeRequest = null;
+    this.#lastRecovery = {
+      action: 'AMBIGUOUS_ROLLOVER_POSITIVELY_REBOUND', tab_id: String(tabId),
+      supervisor_epoch: this.#keepalive.snapshot().supervisor_epoch,
+      confirmed: true, ambiguous: false, automatic_retry_allowed: false,
+      at: new Date().toISOString(), authority_effect: false,
+    };
+    return true;
+  }
+
+  async #reconcileAmbiguousRollover(state) {
+    const s = this.#keepalive.snapshot();
+    const attempt = s.rollover_attempt;
+    if (s.state !== 'ROLLOVER_AMBIGUOUS' || !attempt?.attempt_id) return false;
+    const message = this.#rolloverMessage(s);
+    const fleetTabs = new Set((state?.fleet?.agents || []).map((a) => String(a?.tab_id || '')).filter(Boolean));
+    const candidates = (state?.tabs || []).filter((tab) => !fleetTabs.has(String(tab?.tab_id || '')) && String(tab?.tab_id || '') !== String(s.tab_id || ''));
+    const ordered = [...candidates].sort((a, b) => Number(String(b?.tab_id || '') === String(attempt.tab_id || '')) - Number(String(a?.tab_id || '') === String(attempt.tab_id || '')));
+    const composerMatchesRows = [];
+    for (const tab of ordered) {
+      let frame;
+      try { frame = await this.#capture(tab.tab_id); } catch { continue; }
+      const marker = String(frame?.text_excerpt || '').includes(String(attempt.attempt_id));
+      if (CHAT_RE.test(String(frame?.url || '')) && marker) return this.#bindRecoveredRollover(tab.tab_id, frame);
+      if ((CHAT_ROOT_RE.test(String(frame?.url || '')) || CHAT_RE.test(String(frame?.url || ''))) && composerMatches(frame, message)) composerMatchesRows.push({ tab, frame });
+    }
+    if (composerMatchesRows.length !== 1 || this.#canActuate() !== true) return false;
+    const { tab, frame } = composerMatchesRows[0];
+    if (!attempt.tab_id) await this.#keepalive.bindRolloverAttemptTab(tab.tab_id).catch(() => {});
+    const send = uniqueChatGptControl(frame, 'SEND');
+    if (!send) return false;
+    await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: String(tab.tab_id), role: 'button', accessible_name: send.name }, platform: null });
+    const readback = await this.#observeSendReadback(tab.tab_id, attempt.attempt_id);
+    if (readback.ok) return this.#bindRecoveredRollover(tab.tab_id, readback.observed);
+    this.#lastRecovery = {
+      action: 'RESTART_TYPED_ROLLOVER_SEND_AMBIGUOUS', tab_id: String(tab.tab_id), rollover_attempt_id: attempt.attempt_id,
+      proof: 'EXACT_COMPOSER_SHA256_BEFORE_SINGLE_CLICK', prompt_retyped: false,
+      confirmed: false, ambiguous: true, automatic_retry_allowed: false,
+      at: new Date().toISOString(), authority_effect: false,
+    };
+    return true;
+  }
+
   async #rollover() {
     if (this.#canActuate() !== true) return false;
-    const s = this.#keepalive.snapshot();
+    const before = this.#keepalive.snapshot();
     let tab = null;
+    let attempt = null;
     try {
+      attempt = await this.#keepalive.beginRolloverAttempt();
+      const message = buildSupervisorRolloverMessage({
+        previousUrl: before.conversation_url,
+        supervisorEpoch: before.supervisor_epoch,
+        rolloverAttemptId: attempt.attempt_id,
+      });
       tab = await this.#execute({ action: 'NEW_TAB', payload: { url: 'https://chatgpt.com/', select: false }, platform: null });
-      const sent = await this.#typeAndSend(tab.tab_id, buildSupervisorRolloverMessage({ previousUrl: s.conversation_url, supervisorEpoch: s.supervisor_epoch }), null);
+      if (!tab?.tab_id) throw new Error('rollover_tab_creation_no_readback');
+      await this.#keepalive.bindRolloverAttemptTab(tab.tab_id);
+      const sent = await this.#typeAndSend(tab.tab_id, message, attempt.attempt_id);
       if (!sent.ok) {
         await this.#keepalive.markRolloverAmbiguous(sent.reason || 'ROLLOVER_WITHOUT_POSITIVE_READBACK');
         return false;
       }
       const observed = sent.observed || await this.#capture(tab.tab_id);
-      if (CHAT_RE.test(String(observed?.url || '')) && generating(observed)) {
+      const markerObserved = String(observed?.text_excerpt || '').includes(String(attempt.attempt_id));
+      if (CHAT_RE.test(String(observed?.url || '')) && (generating(observed) || markerObserved)) {
         await this.#keepalive.bindRollover({ url: observed.url, tab_id: tab.tab_id });
         this.#activeRequest = null;
         this.#lastRecovery = {
-          action: 'SUPERVISOR_ROLLOVER_BOUND',
-          tab_id: String(tab.tab_id),
+          action: 'SUPERVISOR_ROLLOVER_BOUND', tab_id: String(tab.tab_id),
           supervisor_epoch: this.#keepalive.snapshot().supervisor_epoch,
-          confirmed: true,
-          ambiguous: false,
-          at: new Date().toISOString(),
-          authority_effect: false,
+          rollover_attempt_id: attempt.attempt_id, confirmed: true, ambiguous: false,
+          at: new Date().toISOString(), authority_effect: false,
         };
         return true;
       }
       await this.#keepalive.markRolloverAmbiguous('ROLLOVER_WITHOUT_POSITIVE_READBACK');
     } catch (e) {
-      if (tab) await this.#keepalive.markRolloverAmbiguous(`ROLLOVER_ERROR:${String(e?.message || e)}`).catch(() => {});
+      if (attempt) await this.#keepalive.markRolloverAmbiguous(`ROLLOVER_ERROR:${String(e?.message || e)}`).catch(() => {});
       this.#lastError = String(e?.message || e).slice(0, 240);
     }
     return false;
@@ -485,10 +584,14 @@ export class SupervisorLifecycleRuntime {
     if (!force && now - this.#lastRun < this.#monitorMs) return this.snapshot();
     this.#lastRun = now;
     try {
-      const state = await this.#getState();
-      const supervisor = await this.#supervisorTab(state);
+      let state = await this.#getState();
       await this.#observeWorkers(state);
       await this.#queueResearch();
+      if (this.#keepalive.snapshot().state === 'ROLLOVER_AMBIGUOUS') {
+        const reconciled = await this.#reconcileAmbiguousRollover(state);
+        if (reconciled && this.#keepalive.snapshot().state !== 'ROLLOVER_AMBIGUOUS') state = await this.#getState();
+      }
+      const supervisor = await this.#supervisorTab(state);
       if (supervisor) {
         const observed = await this.#observeSupervisor(supervisor, state);
         if (this.#canActuate() === true) {
@@ -499,11 +602,8 @@ export class SupervisorLifecycleRuntime {
           }
           if (ks.state === 'ROLLOVER_REQUIRED') await this.#rollover();
           else if (['STALLED','INTERRUPTED'].includes(observed.row.state)) {
-            if (this.#activeRequest && this.#activeRequest.blocked_ambiguous !== true) {
-              await this.#recoverSupervisor(supervisor, observed.frame, observed.row);
-            } else if (observed.row.state === 'STALLED') {
-              await this.#recoverOrphanedSupervisor(supervisor, observed.frame, observed.row);
-            }
+            if (this.#activeRequest && this.#activeRequest.blocked_ambiguous !== true) await this.#recoverSupervisor(supervisor, observed.frame, observed.row);
+            else if (observed.row.state === 'STALLED') await this.#recoverOrphanedSupervisor(supervisor, observed.frame, observed.row);
           } else if (observed.row.terminal_ready === true) {
             await this.#ensureContinuousWake();
             const prepared = await this.#keepalive.prepareNextWake();
