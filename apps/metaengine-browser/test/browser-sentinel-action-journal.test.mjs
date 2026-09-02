@@ -79,6 +79,67 @@ test('relaunch intent is durable before dispatch and blocks replay after restart
   await assert.rejects(() => restarted.beginRelaunch(binding(), 'EXACT_OLD_PARENT_ABSENT'), /already_attempted/);
 });
 
+test('proven spawn failure is the only relaunch outcome that can retry indefinitely', async () => {
+  const { statePath, journal } = await journalFixture();
+  await journal.beginRelaunch(binding(), 'EXACT_OLD_PARENT_ABSENT');
+  const failed = await journal.markRelaunch(binding(), {
+    lifecycle: 'RELAUNCH_FAILED',
+    pid: null,
+    result: 'spawn ENOENT',
+    relaunch_effect_absent: true,
+    relaunch_pid_confirmed_absent: false,
+  });
+  assert.equal(failed.state, 'RELAUNCH_FAILED');
+  assert.equal(failed.relaunch_effect_absent, true);
+  assert.equal(failed.automatic_retry_allowed, true);
+  assert.equal(journal.relaunchAttempted(), false);
+  assert.equal(journal.relaunchRetryAllowed(), true);
+
+  const restarted = new BrowserSentinelActionJournal({ statePath });
+  await restarted.init(binding());
+  assert.equal(restarted.relaunchRetryAllowed(), true, 'positive no-effect proof survives worker restart');
+  const next = await restarted.beginRelaunch(binding(), 'EXACT_OLD_PARENT_ABSENT');
+  assert.equal(next.state, 'RELAUNCH_INTENT');
+  assert.equal(next.relaunch_attempt, 2);
+  assert.equal(next.automatic_retry_allowed, false, 'new effect barrier is fail-closed until this attempt resolves');
+});
+
+test('failed relaunch without positive no-effect proof remains non-retryable', async () => {
+  const { journal } = await journalFixture();
+  await journal.beginRelaunch(binding(), 'EXACT_OLD_PARENT_ABSENT');
+  const failed = await journal.markRelaunch(binding(), {
+    lifecycle: 'RELAUNCH_FAILED',
+    pid: null,
+    result: 'unknown failure',
+    relaunch_effect_absent: false,
+  });
+  assert.equal(failed.automatic_retry_allowed, false);
+  assert.equal(journal.relaunchAttempted(), true);
+  assert.equal(journal.relaunchRetryAllowed(), false);
+  await assert.rejects(() => journal.beginRelaunch(binding(), 'EXACT_OLD_PARENT_ABSENT'), /already_attempted/);
+});
+
+test('a dispatched relaunch may retry only after the exact relaunch pid is positively absent', async () => {
+  const { journal } = await journalFixture();
+  await journal.beginRelaunch(binding(), 'EXACT_OLD_PARENT_ABSENT');
+  const dispatched = await journal.markRelaunch(binding(), {
+    lifecycle: 'RELAUNCH_DISPATCHED',
+    pid: 424242,
+    result: 'pid:424242',
+  });
+  assert.equal(dispatched.automatic_retry_allowed, false);
+  assert.equal(journal.relaunchAttempted(), true);
+  await assert.rejects(() => journal.confirmDispatchedRelaunchAbsent(binding(), 424243), /pid_binding_mismatch/);
+
+  const absent = await journal.confirmDispatchedRelaunchAbsent(binding(), 424242);
+  assert.equal(absent.state, 'RELAUNCH_FAILED');
+  assert.equal(absent.relaunch_pid, 424242);
+  assert.equal(absent.relaunch_pid_confirmed_absent, true);
+  assert.equal(absent.relaunch_effect_absent, true);
+  assert.equal(absent.automatic_retry_allowed, true);
+  assert.equal(journal.relaunchRetryAllowed(), true);
+});
+
 test('journal rejects exact binding drift across token pid and executable', async () => {
   const { statePath, journal } = await journalFixture();
   await journal.beginTermination(binding(), { state: 'PROGRESS_STALE' });
