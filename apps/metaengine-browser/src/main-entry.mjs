@@ -8,7 +8,6 @@ import {
 } from './self-update-handoff.mjs';
 import { installSignedSupervisorHeartbeatQualificationHook } from './self-update-signed-heartbeat.mjs';
 import { qualifyUpdatedSuccessorWhenHealthy } from './self-update-successor-qualification.mjs';
-import { shouldResumeSuccessorQualification } from './self-update-successor-recovery.mjs';
 
 const bypassSingleInstance = process.argv.includes('--metaengine-smoke')
   || process.argv.includes('--metaengine-devplane-smoke');
@@ -64,10 +63,6 @@ if (guard.primary) {
       }));
     }
   }
-  const resumeSuccessorQualification = shouldResumeSuccessorQualification({
-    updatedLaunch,
-    startupInspection: startupUpdateInspection,
-  });
 
   let updateHandoff = null;
   if (updatedLaunch) {
@@ -77,15 +72,24 @@ if (guard.primary) {
         appId: METAENGINE_BROWSER_APP_ID,
       });
     } catch (error) {
+      // A successor-receipt failure can occur after the install effect and/or
+      // transaction transition. Never turn that ambiguity into a blind process
+      // retry. Keep the primary process alive, hold self-update authority, and
+      // allow host resilience to preserve recovery surfaces. Qualification is
+      // gated on updateHandoff below, so this boot cannot be promoted.
+      process.env.METAENGINE_DISABLE_SELF_UPDATE = '1';
+      process.env.METAENGINE_SELF_UPDATE_HOLD_REASON = 'SUCCESSOR_RECEIPT_AMBIGUOUS';
       console.error(JSON.stringify({
         schema: 'metaengine.browser.self-update-successor-boot-failure.v1',
         version: app.getVersion(),
         pid: process.pid,
         primary_instance: true,
         error: String(error?.message || error).slice(0, 300),
+        recovery_state: 'LIVE_HOLD',
+        automatic_retry_allowed: false,
+        terminal: false,
         authority_effect: false,
       }));
-      app.exit(7);
     }
   }
 
@@ -196,30 +200,33 @@ if (guard.primary) {
     resolveBrowserBootstrap?.(hostSnapshot);
 
     if (browserRuntimeLoadError) {
+      // The host/sentinel plane is already bootstrapped. Keep it alive so a
+      // trusted external recovery/update can repair the Browser runtime instead
+      // of converting a local import failure into a terminal stop.
+      process.env.METAENGINE_BROWSER_RUNTIME_HOLD_REASON = 'RUNTIME_LOAD_ERROR';
       console.error(JSON.stringify({
         schema: 'metaengine.browser-runtime-load.v1',
         state: 'ERROR',
         error: String(browserRuntimeLoadError?.message || browserRuntimeLoadError).slice(0, 300),
         host_resilience_bootstrapped: true,
+        recovery_state: 'HOST_ALIVE',
+        terminal: false,
         authority_effect: false,
       }));
-      app.exit(1);
     }
 
-    if (resumeSuccessorQualification) {
+    if (updatedLaunch && updateHandoff) {
       setImmediate(() => {
         qualifyUpdatedSuccessorWhenHealthy({ app })
           .then((result) => console.log(JSON.stringify({
             schema: 'metaengine.browser.self-update-qualification.v2',
             version: app.getVersion(),
-            recovery_startup: updatedLaunch !== true,
             ...result,
             authority_effect: false,
           })))
           .catch((error) => console.error(JSON.stringify({
             schema: 'metaengine.browser.self-update-qualification.v2',
             version: app.getVersion(),
-            recovery_startup: updatedLaunch !== true,
             state: 'QUALIFICATION_ERROR',
             error: String(error?.message || error).slice(0, 300),
             authority_effect: false,
