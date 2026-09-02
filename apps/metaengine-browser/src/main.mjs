@@ -21,6 +21,8 @@ const APP_ROOT = path.resolve(__dirname, '..');
 const UI_ROOT = path.join(APP_ROOT, 'ui');
 const TOOLBAR_HEIGHT = SHELL_TOP_HEIGHT;
 const PERCEPTION_CACHE_MS = 4000;
+const STARTUP_RETRY_BASE_MS = 1000;
+const STARTUP_RETRY_MAX_MS = 30000;
 const isSmoke = process.argv.includes('--metaengine-smoke');
 const isDevelopmentPlaneSmoke = process.argv.includes('--metaengine-devplane-smoke');
 
@@ -42,6 +44,12 @@ let shellLayoutState = normalizeShellLayoutState();
 let shellLayoutPlan = null;
 let perceptionCache = { tab_id: null, captured_ms: 0, frame: null, error: null };
 let shutdownRequested = false;
+let shellProtocolHandlerReady = false;
+let userSessionConfigured = false;
+let startupRetryTimer = null;
+let startupRetryAttempt = 0;
+let startupInFlight = false;
+let browserRuntimeReady = false;
 
 function mimeFor(filePath) {
   if (filePath.endsWith('.html')) return 'text/html; charset=utf-8';
@@ -51,7 +59,11 @@ function mimeFor(filePath) {
 }
 
 async function registerShellProtocol() {
-  protocol.handle('metaengine', async (request) => {
+  if (shellProtocolHandlerReady || protocol.isProtocolHandled('metaengine')) {
+    shellProtocolHandlerReady = true;
+    return;
+  }
+  await protocol.handle('metaengine', async (request) => {
     const url = new URL(request.url);
     if (url.hostname !== 'shell') return new Response('not found', { status: 404 });
     const rel = url.pathname === '/' ? 'index.html' : url.pathname.replace(/^\/+/, '');
@@ -59,9 +71,11 @@ async function registerShellProtocol() {
     const body = await fs.readFile(path.join(UI_ROOT, rel));
     return new Response(body, { status: 200, headers: { 'content-type': mimeFor(rel), 'cache-control': 'no-store' } });
   });
+  shellProtocolHandlerReady = true;
 }
 
 function configureUserSession() {
+  if (userSessionConfigured && userSession) return;
   userSession = session.fromPartition(SECURITY_POLICY.user_space_partition, { cache: true });
   userSession.setPermissionCheckHandler(() => false);
   userSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
@@ -69,6 +83,7 @@ function configureUserSession() {
     session: userSession,
     rootPath: path.join(app.getPath('downloads'), 'METAENGINE'),
   });
+  userSessionConfigured = true;
 }
 
 function fleetStatePath() {
@@ -142,6 +157,9 @@ async function shellSnapshot() {
       close_to_background: !shutdownRequested,
       shutdown_requested: shutdownRequested,
       terminal_requires_external_stop: true,
+      startup_retry_pending: startupRetryTimer != null,
+      startup_retry_attempt: startupRetryAttempt,
+      browser_runtime_ready: browserRuntimeReady,
       authority_effect: false,
     },
     policy: SECURITY_POLICY,
@@ -479,21 +497,22 @@ async function executeNativeSupervisorCommand(command) {
 }
 
 async function initNativeSupervisor() {
-  if (nativeSupervisor) return nativeSupervisor.snapshot();
-  const identity = new SupervisorDeviceIdentity({ statePath: supervisorIdentityPath(), secureStorage: safeStorage });
-  const observeLocalTarget = createFleetTargetLocalObserver({
-    lookupView: (tabId) => views.get(String(tabId)) || null,
-  });
-  nativeSupervisor = new NativeSupervisorClient({
-    identity,
-    version: app.getVersion(),
-    intervalMs: 2000,
-    getState: nativeSupervisorState,
-    executeCommand: executeNativeSupervisorCommand,
-    observeLocalTarget,
-    workerObservationBudget: 4,
-  });
-  await nativeSupervisor.start();
+  if (!nativeSupervisor) {
+    const identity = new SupervisorDeviceIdentity({ statePath: supervisorIdentityPath(), secureStorage: safeStorage });
+    const observeLocalTarget = createFleetTargetLocalObserver({
+      lookupView: (tabId) => views.get(String(tabId)) || null,
+    });
+    nativeSupervisor = new NativeSupervisorClient({
+      identity,
+      version: app.getVersion(),
+      intervalMs: 2000,
+      getState: nativeSupervisorState,
+      executeCommand: executeNativeSupervisorCommand,
+      observeLocalTarget,
+      workerObservationBudget: 4,
+    });
+  }
+  if (nativeSupervisor.snapshot()?.running !== true) await nativeSupervisor.start();
   await publishSnapshot().catch(() => {});
   return nativeSupervisor.snapshot();
 }
@@ -502,10 +521,12 @@ function destroyWindowContents() {
   nativeSupervisor?.stop();
   downloads?.close?.().catch(() => {});
   downloads = null;
+  userSessionConfigured = false;
   for (const view of views.values()) if (!view.webContents.isDestroyed()) view.webContents.close();
   views.clear();
   if (shellView && !shellView.webContents.isDestroyed()) shellView.webContents.close();
   shellView = null;
+  fleet = null;
   developmentPlane?.stop();
 }
 
@@ -548,7 +569,39 @@ async function runSmoke() {
   app.exit(invariant ? 0 : 1);
 }
 
+function scheduleBrowserRuntimeRetry(error) {
+  if (shutdownRequested || isSmoke || isDevelopmentPlaneSmoke || startupRetryTimer) return;
+  startupRetryAttempt += 1;
+  const delay = Math.min(STARTUP_RETRY_MAX_MS, STARTUP_RETRY_BASE_MS * (2 ** Math.min(8, startupRetryAttempt - 1)));
+  console.error(JSON.stringify({
+    schema: 'metaengine.browser-startup-recovery.v1',
+    state: 'RETRY_PENDING',
+    attempt: startupRetryAttempt,
+    delay_ms: delay,
+    error: String(error?.message || error).slice(0, 240),
+    terminal: false,
+    external_stop_required_for_terminal: true,
+    authority_effect: false,
+  }));
+  startupRetryTimer = setTimeout(() => {
+    startupRetryTimer = null;
+    void startBrowserRuntime();
+  }, delay);
+  startupRetryTimer.unref?.();
+}
+
+function resetFailedWindow() {
+  const current = windowRef;
+  if (current && !current.isDestroyed()) {
+    try { current.destroy(); } catch {}
+  } else {
+    destroyWindowContents();
+    windowRef = null;
+  }
+}
+
 async function createWindow() {
+  if (windowRef && !windowRef.isDestroyed()) return;
   windowRef = new BaseWindow({ width: 1440, height: 960, minWidth: 900, minHeight: 640, title: 'METAENGINE Browser', backgroundColor: '#101216' });
   shellView = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-shell.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true } });
   windowRef.contentView.addChildView(shellView);
@@ -558,7 +611,13 @@ async function createWindow() {
     event.preventDefault();
     windowRef.hide();
   });
-  windowRef.on('closed', () => { destroyWindowContents(); windowRef = null; });
+  windowRef.on('closed', () => {
+    const recover = !shutdownRequested && !isSmoke && !isDevelopmentPlaneSmoke;
+    destroyWindowContents();
+    windowRef = null;
+    browserRuntimeReady = false;
+    if (recover) scheduleBrowserRuntimeRetry(new Error('browser_window_closed_unexpectedly'));
+  });
   layout();
   await shellView.webContents.loadURL('metaengine://shell/');
   await initOwnerSafetyGates();
@@ -605,22 +664,37 @@ async function startAfterHostResilience() {
   return startAfterReady();
 }
 
-function startBrowserRuntime() {
-  startAfterHostResilience().catch((error) => {
+async function startBrowserRuntime() {
+  if (shutdownRequested || startupInFlight || browserRuntimeReady) return;
+  startupInFlight = true;
+  try {
+    await startAfterHostResilience();
+    browserRuntimeReady = true;
+    startupRetryAttempt = 0;
+  } catch (error) {
     console.error('browser-start-failed', error);
-    app.exit(1);
-  });
+    resetFailedWindow();
+    if (isSmoke || isDevelopmentPlaneSmoke) app.exit(1);
+    else scheduleBrowserRuntimeRetry(error);
+  } finally {
+    startupInFlight = false;
+  }
 }
 
-app.on('before-quit', () => { shutdownRequested = true; });
+app.on('before-quit', () => {
+  shutdownRequested = true;
+  if (startupRetryTimer) clearTimeout(startupRetryTimer);
+  startupRetryTimer = null;
+});
 app.on('activate', () => {
   if (!app.isReady()) return;
   if (windowRef && !windowRef.isDestroyed()) {
     windowRef.show();
     return;
   }
-  createWindow().catch((error) => { console.error(error); app.exit(1); });
+  browserRuntimeReady = false;
+  void startBrowserRuntime();
 });
 app.on('window-all-closed', () => {});
-if (app.isReady()) queueMicrotask(startBrowserRuntime);
-else app.once('ready', startBrowserRuntime);
+if (app.isReady()) queueMicrotask(() => { void startBrowserRuntime(); });
+else app.once('ready', () => { void startBrowserRuntime(); });
