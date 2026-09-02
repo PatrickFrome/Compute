@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { verifyCandidateCapsule } = require('./candidate-capsule.cjs');
 
@@ -35,25 +36,61 @@ function githubRepositoryFromRemoteUrl(value) {
   return `${match[1]}/${match[2]}`;
 }
 
-function defaultRunGit(cwd, args) {
-  try {
-    return execFileSync('git', args, {
-      cwd,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 5_000,
-      maxBuffer: 1024 * 1024,
-      env: {
-        ...process.env,
-        GIT_TERMINAL_PROMPT: '0',
-        GCM_INTERACTIVE: 'Never',
-        LC_ALL: 'C',
-      },
-    }).trim();
-  } catch (error) {
-    const detail = String(error?.stderr || error?.message || error).trim().slice(0, 240);
-    throw new Error(`candidate_remote_probe_failed:${detail || 'unknown'}`);
+function gitExecutableCandidates({ platform = process.platform, env = process.env } = {}) {
+  const candidates = ['git'];
+  if (platform !== 'win32') return candidates;
+
+  candidates.push('git.exe');
+  const roots = [
+    env?.ProgramFiles,
+    env?.ProgramW6432,
+    env?.['ProgramFiles(x86)'],
+    'C:\\Program Files',
+  ].filter((value) => typeof value === 'string' && value.trim());
+  for (const root of roots) candidates.push(path.win32.join(root, 'Git', 'cmd', 'git.exe'));
+  return [...new Set(candidates)];
+}
+
+function gitProbeOptions(cwd, env = process.env) {
+  return {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 5_000,
+    maxBuffer: 1024 * 1024,
+    env: {
+      ...env,
+      GIT_TERMINAL_PROMPT: '0',
+      GCM_INTERACTIVE: 'Never',
+      LC_ALL: 'C',
+    },
+  };
+}
+
+function probeGitWithCandidates(cwd, args, {
+  platform = process.platform,
+  env = process.env,
+  execFile = execFileSync,
+} = {}) {
+  let missingError = null;
+  for (const executable of gitExecutableCandidates({ platform, env })) {
+    try {
+      return String(execFile(executable, args, gitProbeOptions(cwd, env))).trim();
+    } catch (error) {
+      if (error?.code === 'ENOENT') {
+        missingError = error;
+        continue;
+      }
+      const detail = String(error?.stderr || error?.message || error).trim().slice(0, 240);
+      throw new Error(`candidate_remote_probe_failed:${detail || 'unknown'}`);
+    }
   }
+  const detail = String(missingError?.stderr || missingError?.message || missingError || 'git_executable_not_found').trim().slice(0, 240);
+  throw new Error(`candidate_remote_probe_failed:${detail || 'git_executable_not_found'}`);
+}
+
+function defaultRunGit(cwd, args) {
+  return probeGitWithCandidates(cwd, args);
 }
 
 function parseLsRemote(raw, expectedRef) {
@@ -116,6 +153,8 @@ function verifyCandidateCapsuleRemoteBound(capsule, currentSource, options = {})
 
 module.exports = Object.freeze({
   REMOTE_SOURCE_PROOF_SCHEMA,
+  gitExecutableCandidates,
+  probeGitWithCandidates,
   proveRemoteSourceBinding,
   verifyCandidateCapsuleRemoteBound,
 });
