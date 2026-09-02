@@ -1,4 +1,5 @@
 name: METAENGINE Browser Shell V1
+
 on:
   push:
     branches: ['work/metaengine-browser-shell-v1']
@@ -7,29 +8,35 @@ on:
       - 'apps/metaengine-browser/**'
       - 'coordination/browser-compute/**'
       - '.github/workflows/metaengine-browser-shell-v1.yml'
+
 permissions:
   contents: read
+
 jobs:
   shell-contract:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - name: Checkout immutable source
+      - name: Checkout merge-compatibility source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+
       - name: Setup Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
+
       - name: Install shell dependencies
         working-directory: apps/metaengine-browser
         run: npm install --no-audit --no-fund
+
       - name: Materialize Electron binary without launching Chromium
         working-directory: apps/metaengine-browser
         env:
           ELECTRON_GET_NO_PROGRESS: '1'
         run: npx install-electron --no
+
       - name: Configure Chromium sandbox on Ubuntu CI
         working-directory: apps/metaengine-browser
         run: |
@@ -41,18 +48,22 @@ jobs:
           sudo chown root:root node_modules/electron/dist/chrome-sandbox
           sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
           test "$(stat -c '%U:%G %a' node_modules/electron/dist/chrome-sandbox)" = 'root:root 4755'
+
       - name: Electron binary gate
         working-directory: apps/metaengine-browser
         run: |
           set -euo pipefail
           test -x node_modules/electron/dist/electron
           node -e "const fs=require('node:fs'); const p=require('electron'); if(!fs.existsSync(p)) process.exit(2); console.log(p)"
+
       - name: Parse gate
         working-directory: apps/metaengine-browser
         run: npm run check
+
       - name: Contract tests
         working-directory: apps/metaengine-browser
         run: npm test
+
       - name: Security static gate
         run: |
           grep -q 'app.enableSandbox()' apps/metaengine-browser/src/main.mjs
@@ -78,30 +89,11 @@ jobs:
           ! grep -E 'child_process|exec\(|eval\(|new Function' apps/metaengine-browser/src/development-plane-worker.cjs apps/metaengine-browser/smoke/dp/main.cjs
           ! grep -R -E 'executeJavaScript|Runtime\.evaluate|--remote-debugging-port|--no-sandbox|chat\.z\.ai|GLM_ZAI|STRICT_GLM_FIRST' apps/metaengine-browser --exclude-dir=node_modules
           ! grep -R -E 'nodeIntegration:[[:space:]]*true|sandbox:[[:space:]]*false' apps/metaengine-browser --exclude-dir=node_modules
+
       - name: Preserve B-line contracts
         working-directory: coordination/browser-compute
         run: node --test tests/*.test.mjs
-      - name: Linux Development Plane physical smoke
-        working-directory: apps/metaengine-browser
-        shell: bash
-        env:
-          METAENGINE_SMOKE_TRACE: /tmp/metaengine-dp-trace.jsonl
-        run: |
-          set -euo pipefail
-          rm -f /tmp/metaengine-dp-trace.jsonl /tmp/metaengine-devplane-smoke.jsonl
-          timeout 20s xvfb-run -a npm run devplane-smoke | tee /tmp/metaengine-devplane-smoke.jsonl
-          test -f /tmp/metaengine-dp-trace.jsonl
-          grep -q '"stage":"APP_READY"' /tmp/metaengine-dp-trace.jsonl
-          grep -q '"stage":"DP_READY"' /tmp/metaengine-dp-trace.jsonl
-          grep -q '"stage":"DP_SANDBOX_PLAN_VERIFIED"' /tmp/metaengine-dp-trace.jsonl
-          grep -q '"stage":"COMPLETE"' /tmp/metaengine-dp-trace.jsonl
-          grep -q '"sandbox_plan_verified":true' /tmp/metaengine-dp-trace.jsonl
-          grep -q '"sandbox_backend_bound":false' /tmp/metaengine-dp-trace.jsonl
-          grep -q '"sandbox_execution_authorized":false' /tmp/metaengine-dp-trace.jsonl
-          grep -q '"promotion_authorized":false' /tmp/metaengine-dp-trace.jsonl
-          grep -q '"ok":true' /tmp/metaengine-dp-trace.jsonl
-          grep -q '"shutdown_state":"STOPPED"' /tmp/metaengine-dp-trace.jsonl
-          grep -q '"cooperative_shutdown_ack":true' /tmp/metaengine-dp-trace.jsonl
+
       - name: Electron renderer diagnostic
         id: renderer_smoke
         continue-on-error: true
@@ -110,22 +102,21 @@ jobs:
         run: |
           set -euo pipefail
           timeout 20s xvfb-run -a npm run smoke | tee /tmp/metaengine-browser-smoke.jsonl
-      - name: Record Linux diagnostics
+
+      - name: Record merge-contract diagnostics
         if: always()
         run: |
           mkdir -p evidence-out
-          if grep -q '"stage":"DP_SANDBOX_PLAN_VERIFIED"' /tmp/metaengine-dp-trace.jsonl 2>/dev/null && grep -q '"stage":"COMPLETE"' /tmp/metaengine-dp-trace.jsonl 2>/dev/null && grep -q '"sandbox_plan_verified":true' /tmp/metaengine-dp-trace.jsonl 2>/dev/null && grep -q '"sandbox_execution_authorized":false' /tmp/metaengine-dp-trace.jsonl 2>/dev/null && grep -q '"promotion_authorized":false' /tmp/metaengine-dp-trace.jsonl 2>/dev/null && grep -q '"shutdown_state":"STOPPED"' /tmp/metaengine-dp-trace.jsonl 2>/dev/null && grep -q '"cooperative_shutdown_ack":true' /tmp/metaengine-dp-trace.jsonl 2>/dev/null; then
-            echo 'linux_devplane_smoke=PASS_WITH_DP2_PREPARE_ONLY_AND_VERIFIED_COOPERATIVE_SHUTDOWN' | tee evidence-out/linux-devplane-smoke-status.txt
-          else
-            echo 'linux_devplane_smoke=FAILED' | tee evidence-out/linux-devplane-smoke-status.txt
-          fi
           if grep -q '"ok":true' /tmp/metaengine-browser-smoke.jsonl 2>/dev/null; then
             echo 'renderer_smoke=PASS' | tee evidence-out/renderer-smoke-status.txt
           else
             echo 'renderer_smoke=NOT_PROVED_ON_HOSTED_UBUNTU' | tee evidence-out/renderer-smoke-status.txt
             sudo dmesg | tail -n 120 > evidence-out/kernel-diagnostics.txt 2>&1 || true
           fi
-      - name: Evidence bundle
+          git rev-parse HEAD > evidence-out/merge-contract-git-head.txt
+          git symbolic-ref -q HEAD > evidence-out/merge-contract-symbolic-ref.txt 2>/dev/null || true
+
+      - name: Merge-contract evidence bundle
         if: always()
         run: |
           cp research/METAENGINE_BROWSER_SHELL_STEP1_RESEARCH_2026-08-29.md evidence-out/
@@ -141,16 +132,113 @@ jobs:
           cp research/METAENGINE_BROWSER_DP2_VERIFICATION_SANDBOX_PLAN_2026-08-29.md evidence-out/
           cp research/METAENGINE_BROWSER_DP2_TYPED_SANDBOX_PLAN_PROTOCOL_2026-08-29.md evidence-out/
           test ! -f /tmp/metaengine-browser-smoke.jsonl || cp /tmp/metaengine-browser-smoke.jsonl evidence-out/
-          test ! -f /tmp/metaengine-devplane-smoke.jsonl || cp /tmp/metaengine-devplane-smoke.jsonl evidence-out/
-          test ! -f /tmp/metaengine-dp-trace.jsonl || cp /tmp/metaengine-dp-trace.jsonl evidence-out/
-          git rev-parse HEAD > evidence-out/git-head.txt
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: metaengine-browser-shell-linux-${{ github.sha }}
+          name: metaengine-browser-shell-merge-contract-${{ github.sha }}
           path: evidence-out/
 
+  development-plane-linux:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout authoritative candidate branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prove exact authoritative branch source
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          EXPECTED_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+        run: |
+          set -euo pipefail
+          test "$EXPECTED_REPOSITORY" = "$GITHUB_REPOSITORY"
+          EXPECTED_REF="refs/heads/$EXPECTED_BRANCH"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git symbolic-ref -q HEAD)" = "$EXPECTED_REF"
+          REMOTE_LINE="$(git ls-remote --heads origin "$EXPECTED_REF")"
+          test "$REMOTE_LINE" = "$(printf '%s\t%s' "$EXPECTED_HEAD" "$EXPECTED_REF")"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          mkdir -p evidence-linux-dp
+          printf '%s\n' "$EXPECTED_HEAD" > evidence-linux-dp/candidate-head.txt
+          printf '%s\n' "$EXPECTED_REF" > evidence-linux-dp/candidate-ref.txt
+          printf '%s\n' "$REMOTE_LINE" > evidence-linux-dp/remote-head-proof.txt
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Install shell dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+
+      - name: Materialize Electron binary
+        working-directory: apps/metaengine-browser
+        env:
+          ELECTRON_GET_NO_PROGRESS: '1'
+        run: npx install-electron --no
+
+      - name: Configure Chromium sandbox on Ubuntu CI
+        working-directory: apps/metaengine-browser
+        run: |
+          set -euo pipefail
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          fi
+          test -f node_modules/electron/dist/chrome-sandbox
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+          test "$(stat -c '%U:%G %a' node_modules/electron/dist/chrome-sandbox)" = 'root:root 4755'
+
+      - name: Linux physical Development Plane gate
+        working-directory: apps/metaengine-browser
+        shell: bash
+        env:
+          METAENGINE_SMOKE_TRACE: /tmp/metaengine-dp-trace.jsonl
+        run: |
+          set -euo pipefail
+          rm -f /tmp/metaengine-dp-trace.jsonl /tmp/metaengine-devplane-smoke.jsonl
+          timeout 20s xvfb-run -a npm run devplane-smoke | tee /tmp/metaengine-devplane-smoke.jsonl
+          test -f /tmp/metaengine-dp-trace.jsonl
+          grep -q '"stage":"APP_READY"' /tmp/metaengine-dp-trace.jsonl
+          grep -q '"stage":"DP_READY"' /tmp/metaengine-dp-trace.jsonl
+          grep -q '"stage":"DP_CANDIDATE_VERIFIED"' /tmp/metaengine-dp-trace.jsonl
+          grep -q '"stage":"DP_SANDBOX_PLAN_VERIFIED"' /tmp/metaengine-dp-trace.jsonl
+          grep -q '"stage":"COMPLETE"' /tmp/metaengine-dp-trace.jsonl
+          grep -q '"candidate_verified":true' /tmp/metaengine-dp-trace.jsonl
+          grep -q '"sandbox_plan_verified":true' /tmp/metaengine-dp-trace.jsonl
+          grep -q '"sandbox_backend_bound":false' /tmp/metaengine-dp-trace.jsonl
+          grep -q '"sandbox_execution_authorized":false' /tmp/metaengine-dp-trace.jsonl
+          grep -q '"promotion_authorized":false' /tmp/metaengine-dp-trace.jsonl
+          grep -q '"ok":true' /tmp/metaengine-dp-trace.jsonl
+          grep -q '"shutdown_state":"STOPPED"' /tmp/metaengine-dp-trace.jsonl
+          grep -q '"cooperative_shutdown_ack":true' /tmp/metaengine-dp-trace.jsonl
+
+      - name: Linux physical DP evidence
+        if: always()
+        run: |
+          mkdir -p evidence-linux-dp
+          test ! -f /tmp/metaengine-devplane-smoke.jsonl || cp /tmp/metaengine-devplane-smoke.jsonl evidence-linux-dp/
+          test ! -f /tmp/metaengine-dp-trace.jsonl || cp /tmp/metaengine-dp-trace.jsonl evidence-linux-dp/
+          git rev-parse HEAD > evidence-linux-dp/git-head.txt
+          git symbolic-ref -q HEAD > evidence-linux-dp/symbolic-ref.txt
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: metaengine-browser-devplane-linux-${{ github.event.pull_request.head.sha || github.sha }}
+          path: evidence-linux-dp/
+
   development-plane-windows:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     strategy:
       fail-fast: false
       matrix:
@@ -163,10 +251,35 @@ jobs:
     continue-on-error: ${{ matrix.experimental }}
     timeout-minutes: 10
     steps:
-      - name: Checkout immutable source
+      - name: Checkout authoritative candidate branch
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Prove exact authoritative branch source
+        shell: powershell
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          EXPECTED_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+        run: |
+          if ($env:EXPECTED_REPOSITORY -ne $env:GITHUB_REPOSITORY) { throw "candidate_repository_mismatch" }
+          $expectedRef = "refs/heads/$env:EXPECTED_BRANCH"
+          $actualHead = (git rev-parse HEAD).Trim()
+          if ($actualHead -ne $env:EXPECTED_HEAD) { throw "candidate_head_mismatch:$actualHead:$env:EXPECTED_HEAD" }
+          $actualRef = (git symbolic-ref -q HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actualRef -ne $expectedRef) { throw "candidate_symbolic_ref_invalid:$actualRef:$expectedRef" }
+          $remoteLine = ((git ls-remote --heads origin $expectedRef) -join "`n").Trim()
+          $expectedRemote = "$env:EXPECTED_HEAD`t$expectedRef"
+          if ($remoteLine -ne $expectedRemote) { throw "candidate_remote_head_mismatch:$remoteLine:$expectedRemote" }
+          if ((git status --porcelain=v1 --untracked-files=all)) { throw "candidate_checkout_dirty" }
+          New-Item -ItemType Directory -Force -Path evidence-windows | Out-Null
+          $env:EXPECTED_HEAD | Set-Content evidence-windows\candidate-head.txt
+          $expectedRef | Set-Content evidence-windows\candidate-ref.txt
+          $remoteLine | Set-Content evidence-windows\remote-head-proof.txt
+
       - name: Record runner identity
         shell: powershell
         run: |
@@ -176,18 +289,22 @@ jobs:
           "image_version=$env:ImageVersion" | Add-Content evidence-windows\runner-image.txt
           "matrix_os=${{ matrix.os }}" | Add-Content evidence-windows\runner-image.txt
           "experimental=${{ matrix.experimental }}" | Add-Content evidence-windows\runner-image.txt
+
       - name: Setup Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
+
       - name: Install shell dependencies
         working-directory: apps/metaengine-browser
         run: npm install --no-audit --no-fund
+
       - name: Materialize Electron binary
         working-directory: apps/metaengine-browser
         env:
           ELECTRON_GET_NO_PROGRESS: '1'
         run: npx install-electron --no
+
       - name: Windows physical Development Plane gate
         working-directory: apps/metaengine-browser
         shell: powershell
@@ -215,7 +332,9 @@ jobs:
           if ($exitCode -ne 0) { throw "development_plane_windows_exit_$exitCode" }
           if (-not (Select-String -Path $trace -Pattern '"stage":"APP_READY"' -Quiet)) { throw "development_plane_windows_app_ready_missing" }
           if (-not (Select-String -Path $trace -Pattern '"stage":"DP_READY"' -Quiet)) { throw "development_plane_windows_dp_ready_missing" }
+          if (-not (Select-String -Path $trace -Pattern '"stage":"DP_CANDIDATE_VERIFIED"' -Quiet)) { throw "development_plane_windows_candidate_proof_missing" }
           if (-not (Select-String -Path $trace -Pattern '"stage":"DP_SANDBOX_PLAN_VERIFIED"' -Quiet)) { throw "development_plane_windows_dp2_receipt_missing" }
+          if (-not (Select-String -Path $trace -Pattern '"candidate_verified":true' -Quiet)) { throw "development_plane_windows_candidate_verify_missing" }
           if (-not (Select-String -Path $trace -Pattern '"sandbox_plan_verified":true' -Quiet)) { throw "development_plane_windows_dp2_verify_missing" }
           if (-not (Select-String -Path $trace -Pattern '"sandbox_backend_bound":false' -Quiet)) { throw "development_plane_windows_backend_boundary_invalid" }
           if (-not (Select-String -Path $trace -Pattern '"sandbox_execution_authorized":false' -Quiet)) { throw "development_plane_windows_execution_authority_invalid" }
@@ -224,17 +343,20 @@ jobs:
           if (-not (Select-String -Path $trace -Pattern '"ok":true' -Quiet)) { throw "development_plane_windows_receipt_missing" }
           if (-not (Select-String -Path $trace -Pattern '"shutdown_state":"STOPPED"' -Quiet)) { throw "development_plane_windows_shutdown_receipt_missing" }
           if (-not (Select-String -Path $trace -Pattern '"cooperative_shutdown_ack":true' -Quiet)) { throw "development_plane_windows_shutdown_ack_missing" }
+
       - name: Windows evidence
         if: always()
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force -Path evidence-windows | Out-Null
           git rev-parse HEAD | Set-Content evidence-windows\git-head.txt
+          git symbolic-ref -q HEAD | Set-Content evidence-windows\symbolic-ref.txt
           if (Test-Path "$env:RUNNER_TEMP\metaengine-dp-trace.jsonl") { Copy-Item "$env:RUNNER_TEMP\metaengine-dp-trace.jsonl" evidence-windows\ }
           if (Test-Path "$env:RUNNER_TEMP\metaengine-dp-out.txt") { Copy-Item "$env:RUNNER_TEMP\metaengine-dp-out.txt" evidence-windows\ }
           if (Test-Path "$env:RUNNER_TEMP\metaengine-dp-err.txt") { Copy-Item "$env:RUNNER_TEMP\metaengine-dp-err.txt" evidence-windows\ }
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: metaengine-browser-devplane-${{ matrix.os }}-${{ github.sha }}
+          name: metaengine-browser-devplane-${{ matrix.os }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: evidence-windows/
