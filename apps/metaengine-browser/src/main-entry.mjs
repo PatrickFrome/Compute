@@ -8,6 +8,7 @@ import {
 } from './self-update-handoff.mjs';
 import { installSignedSupervisorHeartbeatQualificationHook } from './self-update-signed-heartbeat.mjs';
 import { qualifyUpdatedSuccessorWhenHealthy } from './self-update-successor-qualification.mjs';
+import { shouldResumeSuccessorQualification } from './self-update-successor-recovery.mjs';
 
 const bypassSingleInstance = process.argv.includes('--metaengine-smoke')
   || process.argv.includes('--metaengine-devplane-smoke');
@@ -63,6 +64,10 @@ if (guard.primary) {
       }));
     }
   }
+  const resumeSuccessorQualification = shouldResumeSuccessorQualification({
+    updatedLaunch,
+    startupInspection: startupUpdateInspection,
+  });
 
   let updateHandoff = null;
   if (updatedLaunch) {
@@ -215,18 +220,22 @@ if (guard.primary) {
       }));
     }
 
-    if (updatedLaunch && updateHandoff) {
+    const qualificationRequested = (updatedLaunch && Boolean(updateHandoff))
+      || (!updatedLaunch && resumeSuccessorQualification);
+    if (qualificationRequested) {
       setImmediate(() => {
         qualifyUpdatedSuccessorWhenHealthy({ app })
           .then((result) => console.log(JSON.stringify({
             schema: 'metaengine.browser.self-update-qualification.v2',
             version: app.getVersion(),
+            recovery_startup: updatedLaunch !== true,
             ...result,
             authority_effect: false,
           })))
           .catch((error) => console.error(JSON.stringify({
             schema: 'metaengine.browser.self-update-qualification.v2',
             version: app.getVersion(),
+            recovery_startup: updatedLaunch !== true,
             state: 'QUALIFICATION_ERROR',
             error: String(error?.message || error).slice(0, 300),
             authority_effect: false,
