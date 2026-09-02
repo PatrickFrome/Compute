@@ -8,6 +8,7 @@ on:
       - 'apps/metaengine-browser/test/workspace-reincarnation-proof.test.mjs'
       - 'apps/metaengine-browser/test/workspace-reincarnation-transition-contract.test.mjs'
       - 'apps/metaengine-browser/test/workspace-reincarnation-transition-smoke.sql'
+      - 'apps/metaengine-browser/test/workspace-workbench-projection-performance.test.mjs'
       - 'supabase/migrations/20260902103000_a2_workspace_reincarnation_transition_v1.sql'
       - 'supabase/migrations/20260902111500_a2_workspace_reincarnation_exact_replay_v2.sql'
       - 'coordination/browser/WORKSPACE_REINCARNATION_CONTRACT_V1.md'
@@ -21,6 +22,7 @@ on:
       - 'apps/metaengine-browser/test/workspace-reincarnation-proof.test.mjs'
       - 'apps/metaengine-browser/test/workspace-reincarnation-transition-contract.test.mjs'
       - 'apps/metaengine-browser/test/workspace-reincarnation-transition-smoke.sql'
+      - 'apps/metaengine-browser/test/workspace-workbench-projection-performance.test.mjs'
       - 'supabase/migrations/20260902103000_a2_workspace_reincarnation_transition_v1.sql'
       - 'supabase/migrations/20260902111500_a2_workspace_reincarnation_exact_replay_v2.sql'
       - 'coordination/browser/WORKSPACE_REINCARNATION_CONTRACT_V1.md'
@@ -72,7 +74,8 @@ jobs:
           node --check apps/metaengine-browser/src/workspace-reincarnation-proof.mjs
           node --test \
             apps/metaengine-browser/test/workspace-reincarnation-proof.test.mjs \
-            apps/metaengine-browser/test/workspace-reincarnation-transition-contract.test.mjs
+            apps/metaengine-browser/test/workspace-reincarnation-transition-contract.test.mjs \
+            apps/metaengine-browser/test/workspace-workbench-projection-performance.test.mjs
 
       - name: PostgreSQL 17 exact-CAS smoke
         env:
