@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { chatGptControlMatches, uniqueChatGptControl } from './chatgpt-ui-controls.mjs';
 import { SupervisorLifecycleRuntime as CoreSupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime-core.mjs';
+import { createExistingSupervisorRolloverGate } from './supervisor-existing-successor-gate.mjs';
 
 const NATIVE_FRAME_SCHEMA = 'metaengine.native-browser.perception.v1';
 const CHAT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/c\/[a-z0-9-]+/i;
@@ -215,9 +216,13 @@ export function createSupervisorSendBoundaryExecutor({ getState, executeCommand 
 // reason.startsWith('MAX_CYCLES_PER_EPOCH'). The wrapper adds no page authority.
 export class SupervisorLifecycleRuntime extends CoreSupervisorLifecycleRuntime {
   constructor(options = {}) {
+    const existingSuccessorGate = createExistingSupervisorRolloverGate({
+      executeCommand: options.executeCommand,
+      ...(options.loadExistingSuccessorProof ? { loadProof: options.loadExistingSuccessorProof } : {}),
+    });
     const guardedExecute = createSupervisorSendBoundaryExecutor({
       getState: options.getState,
-      executeCommand: options.executeCommand,
+      executeCommand: existingSuccessorGate,
     });
     super({ ...options, executeCommand: guardedExecute });
   }
