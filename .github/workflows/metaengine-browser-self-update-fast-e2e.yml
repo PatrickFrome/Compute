@@ -82,7 +82,6 @@ jobs:
         shell: powershell
         run: |
           $path = './test/self-update-fast-physical.ps1'
-          $candidate = './test/self-update-fast-physical-candidate.ps1'
           $raw = Get-Content $path -Raw
           $pattern = '(?ms)# Build exactly one new target\..*?npm pkg set version=\$target'
           $replacement = @'
@@ -92,8 +91,12 @@ jobs:
           if ($target -notmatch '^0\.6\.6-dev\.[0-9]+\.1$') { throw "target_version_invalid:$target" }
           npm pkg set version=$target
           '@
-          $next = [regex]::Replace($raw, $pattern, $replacement, 1)
+          # .NET replacement syntax treats $name as a substitution token. Escape every
+          # dollar so PowerShell variables remain literal in the generated candidate.
+          $replacementLiteral = $replacement.Replace('$', '$$')
+          $next = [regex]::Replace($raw, $pattern, $replacementLiteral, 1)
           if ($next -eq $raw) { throw 'physical_target_patch_not_applied' }
+          if ($next -notmatch '\$target\s*=\s*\[string\]\(node -p') { throw 'physical_target_variable_lost' }
           [System.IO.File]::WriteAllText((Join-Path (Get-Location) 'test/self-update-fast-physical-candidate.ps1'), $next, [System.Text.UTF8Encoding]::new($false))
       - name: Published baseline to exact candidate physical update
         working-directory: apps/metaengine-browser
