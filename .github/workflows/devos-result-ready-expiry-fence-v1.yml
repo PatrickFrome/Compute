@@ -1,0 +1,31 @@
+name: DevOS Result Ready Expiry Fence V1
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Verify expiry fencing contract
+        run: python3 tests/test_devos_result_ready_expiry_contract.py
+      - name: Verify rollback SQL evidence exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s supabase/tests/devos_result_ready_expiry_fence_v1.sql
+          grep -F "LEASE_EXPIRED_RESULT_UNADOPTED" supabase/migrations/20260902103500_devos_result_ready_expiry_fence_v1.sql
+          grep -F "LEASE_EXPIRED_BLOCKED_UNRESOLVED" supabase/migrations/20260902103500_devos_result_ready_expiry_fence_v1.sql
+          grep -F "automatic_retry_allowed" supabase/tests/devos_result_ready_expiry_fence_v1.sql
+          grep -F "rollback;" supabase/tests/devos_result_ready_expiry_fence_v1.sql
