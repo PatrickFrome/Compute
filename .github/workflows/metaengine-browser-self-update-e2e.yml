@@ -299,11 +299,33 @@ jobs:
           $first = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $firstOut -RedirectStandardError $firstErr
           $null = $first.Handle
           $deadline = (Get-Date).AddSeconds(10)
-          while ((-not (Test-Path $firstOut) -or (Get-Item $firstOut -ErrorAction SilentlyContinue).Length -eq 0) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 100 }
-          $first.Refresh()
-          if ($first.HasExited) { Get-Content $firstErr -ErrorAction SilentlyContinue; throw 'singleton_primary_exited_early' }
-          $firstRow = (Get-Content $firstOut | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
-          if ($firstRow.primary_instance -ne $true) { throw 'singleton_primary_probe_invalid' }
+          $firstRow = $null
+          do {
+            if (Test-Path $firstOut) {
+              $candidateLine = Get-Content $firstOut -ErrorAction SilentlyContinue | Where-Object { $_.Trim() } | Select-Object -Last 1
+              if ($candidateLine) {
+                try { $candidateRow = $candidateLine | ConvertFrom-Json -ErrorAction Stop } catch { $candidateRow = $null }
+                if ($candidateRow -and $candidateRow.schema -eq 'metaengine.browser.single-instance-probe.v1' -and [string]$candidateRow.version -eq $target -and $candidateRow.primary_instance -eq $true) {
+                  $firstRow = $candidateRow
+                  break
+                }
+              }
+            }
+            $first.Refresh()
+            if ($first.HasExited) {
+              Get-Content $firstOut -ErrorAction SilentlyContinue
+              Get-Content $firstErr -ErrorAction SilentlyContinue
+              throw 'singleton_primary_exited_before_positive_readback'
+            }
+            Start-Sleep -Milliseconds 100
+          } while ((Get-Date) -lt $deadline)
+          if (-not $firstRow) {
+            Get-Content $firstOut -ErrorAction SilentlyContinue
+            Get-Content $firstErr -ErrorAction SilentlyContinue
+            try { Stop-Process -Id $first.Id -Force -ErrorAction SilentlyContinue } catch {}
+            throw 'singleton_primary_positive_readback_timeout'
+          }
+
           $second = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\singleton-second.out" -RedirectStandardError "$env:RUNNER_TEMP\singleton-second.err"
           $null = $second.Handle
           if (-not $second.WaitForExit(5000)) { try { Stop-Process -Id $second.Id -Force } catch {}; try { Stop-Process -Id $first.Id -Force } catch {}; throw 'singleton_secondary_did_not_exit' }
