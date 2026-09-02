@@ -5,6 +5,8 @@ on:
     paths:
       - 'apps/metaengine-browser/src/workspace-reincarnation-proof.mjs'
       - 'apps/metaengine-browser/test/workspace-reincarnation-proof.test.mjs'
+      - 'apps/metaengine-browser/test/workspace-reincarnation-transition-contract.test.mjs'
+      - 'supabase/migrations/20260902103000_a2_workspace_reincarnation_transition_v1.sql'
       - 'coordination/browser/WORKSPACE_REINCARNATION_CONTRACT_V1.md'
       - '.github/workflows/browser-workspace-reincarnation-v1.yml'
   push:
@@ -13,6 +15,8 @@ on:
     paths:
       - 'apps/metaengine-browser/src/workspace-reincarnation-proof.mjs'
       - 'apps/metaengine-browser/test/workspace-reincarnation-proof.test.mjs'
+      - 'apps/metaengine-browser/test/workspace-reincarnation-transition-contract.test.mjs'
+      - 'supabase/migrations/20260902103000_a2_workspace_reincarnation_transition_v1.sql'
       - 'coordination/browser/WORKSPACE_REINCARNATION_CONTRACT_V1.md'
       - '.github/workflows/browser-workspace-reincarnation-v1.yml'
 
@@ -47,30 +51,41 @@ jobs:
         run: |
           set -euo pipefail
           node --check apps/metaengine-browser/src/workspace-reincarnation-proof.mjs
-          node --test apps/metaengine-browser/test/workspace-reincarnation-proof.test.mjs
+          node --test \
+            apps/metaengine-browser/test/workspace-reincarnation-proof.test.mjs \
+            apps/metaengine-browser/test/workspace-reincarnation-transition-contract.test.mjs
 
       - name: Zero-authority static contract
         run: |
           set -euo pipefail
           FILE=apps/metaengine-browser/src/workspace-reincarnation-proof.mjs
+          SQL=supabase/migrations/20260902103000_a2_workspace_reincarnation_transition_v1.sql
           grep -q "eligible_for_db_transition: true" "$FILE"
           grep -q "transition_rpc_required: true" "$FILE"
           grep -q "transition_already_performed: false" "$FILE"
-          grep -q "fleet_transport_promoted: false" "$FILE"
+          grep -q "preexisting_transport_proof_verified: true" "$FILE"
+          grep -q "fleet_transport_promoted_by_this_proof: false" "$FILE"
+          grep -q "scheduler_claim_created_by_this_proof: false" "$FILE"
           grep -q "url_authority: false" "$FILE"
           grep -q "continuity_receipt_authority: false" "$FILE"
           grep -q "automatic_retry_allowed: false" "$FILE"
           grep -q "scheduler_authority: false" "$FILE"
           grep -q "browser_actuation_authority: false" "$FILE"
           grep -q "authority_effect: false" "$FILE"
+          grep -q "for update" "$SQL"
+          grep -q "for share" "$SQL"
+          grep -q "compute_fabric_a2_workspace_reincarnation_receipt_h205f22" "$SQL"
+          grep -q "reconciled_from_durable_receipt" "$SQL"
+          grep -q "grant execute on function public.h205f22_a2_workspace_reincarnation_transition_v1" "$SQL"
           ! grep -Eq "setInterval\s*\(|setTimeout\s*\(|fetch\s*\(|ipcRenderer|webContents\.(click|sendInputEvent)|child_process|exec\s*\(|spawn\s*\(" "$FILE"
           ! grep -Eq "\burl\s*:|\btitle\s*:|page_text|model_text|prompt\s*:" "$FILE"
+          ! grep -Eqi "execute[[:space:]]+format|task_spec|page_text|model_text|prompt_text" "$SQL"
 
       - name: Clean checkout
         run: |
           set -euo pipefail
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
-          printf 'db_mutation=false\n'
+          printf 'production_db_mutation=false\n'
           printf 'browser_actuation=false\n'
-          printf 'transport_promotion=false\n'
+          printf 'transport_promotion_by_reincarnation=false\n'
           printf 'second_scheduler=false\n'
