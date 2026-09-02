@@ -303,10 +303,11 @@ export async function persistUpdatedSuccessorReceipt(app, {
   // to reconcile receipt durability, but any other admissible state is advanced
   // to SUCCESSOR_BOOTED before the receipt is created.
   const journal = await readSelfUpdateTransaction(app);
-  if (journal?.state === 'SUCCESSOR_BOOTED') {
+  if (!journal) throw new Error('self_update_transaction_missing');
+  if (journal.state === 'SUCCESSOR_BOOTED') {
     if (journal.target_version !== version) throw new Error('self_update_transaction_target_binding_mismatch');
   } else {
-    await transitionIfPresent(app, 'SUCCESSOR_BOOTED', {
+    await transitionSelfUpdateTransaction(app, 'SUCCESSOR_BOOTED', {
       requireTargetVersion: version,
       evidence: { updated_argv: true, primary_instance: true, boot_version_match: true },
     });
