@@ -1,0 +1,66 @@
+name: Browser Watchdog Heartbeat Coalescing V2
+
+on:
+  push:
+    branches:
+      - 'work/browser-watchdog-heartbeat-coalescing-v2'
+    paths:
+      - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-heartbeat-watchdog.test.mjs'
+      - '.github/workflows/browser-watchdog-heartbeat-coalescing-v2.yml'
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-heartbeat-watchdog.test.mjs'
+      - '.github/workflows/browser-watchdog-heartbeat-coalescing-v2.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  watchdog-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          printf 'exact_head=%s\n' "$EXPECTED_HEAD"
+
+      - name: Static coalescing and authority contract
+        run: |
+          set -euo pipefail
+          FILE=apps/metaengine-browser/src/native-supervisor-client.mjs
+          grep -q "watchdogLastAt = null" "$FILE"
+          grep -q "watchdogLastAt: this.#bootstrapLastAt" "$FILE"
+          grep -q "Number.NEGATIVE_INFINITY" "$FILE"
+          grep -q "command_leasing: false" "$FILE"
+          grep -q "devos_leasing: false" "$FILE"
+          grep -q "authority_effect: false" "$FILE"
+          ! grep -Eq "setInterval\(.*postStateHeartbeat|automatic_retry_allowed: true|authority_effect: true" apps/metaengine-browser/test/native-supervisor-heartbeat-watchdog.test.mjs
+
+      - name: Syntax and regression test
+        run: |
+          set -euo pipefail
+          node --check apps/metaengine-browser/src/native-supervisor-client.mjs
+          node --test apps/metaengine-browser/test/native-supervisor-heartbeat-watchdog.test.mjs
+
+      - name: Prove branch-local clean checkout
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          printf 'second_scheduler=false\n'
+          printf 'production_mutation=false\n'
