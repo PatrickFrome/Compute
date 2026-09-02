@@ -4,6 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { inspectSelfUpdateStartup, persistPreInstallReceipt } from '../src/self-update-handoff.mjs';
+import {
+  qualifySelfUpdateTransaction,
+  readSelfUpdateTransaction,
+  transitionSelfUpdateTransaction,
+} from '../src/self-update-transaction-journal.mjs';
 
 async function fixture(version) {
   const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-update-loop-'));
@@ -45,12 +50,33 @@ test('old version after installer handoff is held as ambiguous and cannot blind 
   assert.equal(row.authority_effect, false);
 });
 
-test('installed target is recognized and does not enter ambiguous retry hold', async () => {
+test('installed target is recognized with exact unresolved successor phase', async () => {
   const { app } = await fixture('0.6.3-dev.149.1');
   await persistPreInstallReceipt(app, receipt('0.6.3-dev.149.1'));
   const row = await inspectSelfUpdateStartup(app);
   assert.equal(row.state, 'TARGET_INSTALLED');
+  assert.equal(row.transaction_state, 'SUCCESSOR_BOOTED');
   assert.equal(row.automatic_retry_allowed, false);
+});
+
+test('already qualified target stays terminal and does not regress into recovery phase', async () => {
+  const target = '0.6.3-dev.149.1';
+  const { app } = await fixture(target);
+  await persistPreInstallReceipt(app, receipt(target));
+  await transitionSelfUpdateTransaction(app, 'SUCCESSOR_BOOTED', {
+    requireTargetVersion: target,
+    evidence: { boot_version_match: true },
+  });
+  await qualifySelfUpdateTransaction(app, { test_qualified: true });
+  const before = await readSelfUpdateTransaction(app);
+  assert.equal(before.state, 'QUALIFIED');
+
+  const row = await inspectSelfUpdateStartup(app);
+  const after = await readSelfUpdateTransaction(app);
+  assert.equal(row.state, 'TARGET_INSTALLED');
+  assert.equal(row.transaction_state, 'QUALIFIED');
+  assert.equal(after.state, 'QUALIFIED');
+  assert.equal(after.updated_at, before.updated_at);
 });
 
 test('a manually repaired newer version supersedes an older failed transaction', async () => {
