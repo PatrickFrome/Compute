@@ -1,0 +1,99 @@
+name: Browser Live Control Recovery V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
+      - 'apps/metaengine-browser/src/supervisor-mesh.mjs'
+      - 'apps/metaengine-browser/src/supervisor-mesh-runtime.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-*.test.mjs'
+      - 'apps/metaengine-browser/test/*supervisor-mesh*.test.mjs'
+      - '.github/workflows/browser-live-control-recovery-v1.yml'
+  push:
+    branches:
+      - 'work/browser-live-control-recovery-v1'
+    paths:
+      - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
+      - 'apps/metaengine-browser/src/supervisor-mesh.mjs'
+      - 'apps/metaengine-browser/src/supervisor-mesh-runtime.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-*.test.mjs'
+      - 'apps/metaengine-browser/test/*supervisor-mesh*.test.mjs'
+      - '.github/workflows/browser-live-control-recovery-v1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  live-control-recovery:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact head and clean checkout
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain)"
+
+      - name: Syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check apps/metaengine-browser/src/native-supervisor-client.mjs
+          node --check apps/metaengine-browser/src/supervisor-mesh.mjs
+
+      - name: Enrollment and heartbeat recovery tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            apps/metaengine-browser/test/native-supervisor-live-control-recovery.test.mjs \
+            apps/metaengine-browser/test/native-supervisor-bootstrap-heartbeat.test.mjs \
+            apps/metaengine-browser/test/native-supervisor-heartbeat-watchdog.test.mjs
+
+      - name: Supervisor mesh continuity and all-chat tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            apps/metaengine-browser/test/supervisor-mesh-all-chat-capability.test.mjs \
+            apps/metaengine-browser/test/devos-supervisor-mesh-continuity.test.mjs \
+            apps/metaengine-browser/test/devos-supervisor-mesh-coordinator-transition.test.mjs \
+            apps/metaengine-browser/test/devos-supervisor-mesh-epoch-fence.test.mjs \
+            apps/metaengine-browser/test/devos-supervisor-mesh-fenced-reservation.test.mjs \
+            apps/metaengine-browser/test/devos-supervisor-mesh-native-contract.test.mjs \
+            apps/metaengine-browser/test/devos-supervisor-mesh-no-blind-retry.test.mjs \
+            apps/metaengine-browser/test/devos-supervisor-mesh-primary-loss.test.mjs \
+            apps/metaengine-browser/test/devos-supervisor-mesh-reservation-epoch.test.mjs \
+            apps/metaengine-browser/test/devos-supervisor-mesh-runtime-fence-wiring.test.mjs \
+            apps/metaengine-browser/test/supervisor-mesh-wire-projection.test.mjs
+
+      - name: Static authority and scheduler fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const client = fs.readFileSync('apps/metaengine-browser/src/native-supervisor-client.mjs','utf8');
+          const mesh = fs.readFileSync('apps/metaengine-browser/src/supervisor-mesh.mjs','utf8');
+          if (/setInterval\s*\(|setTimeout\s*\(/.test(client)) throw new Error('second_polling_loop_detected');
+          if (!/await this\.#bootstrapEnrollment\(\)/.test(client)) throw new Error('enrollment_bootstrap_not_wired');
+          if (!/enrollment_bootstrap_auto_approval:\s*false/.test(client)) throw new Error('auto_approval_fence_missing');
+          if (/fleetTabs\.has\(/.test(mesh)) throw new Error('fleet_chat_still_excluded_from_mesh');
+          if (!/supervisor_capable:\s*true/.test(mesh)) throw new Error('all_chat_capability_missing');
+          if (!/coordination_blocked:\s*fleetBound/.test(mesh)) throw new Error('fleet_coordination_fence_missing');
+          if (!/SUPABASE_SHARED_LEASE_REQUIRED/.test(mesh)) throw new Error('shared_lease_policy_missing');
+          if (!/direct_parallel_actuation:\s*false/.test(mesh)) throw new Error('parallel_actuation_fence_missing');
+          NODE
+
+      - name: Checkout remains clean
+        shell: bash
+        run: test -z "$(git status --porcelain)"
