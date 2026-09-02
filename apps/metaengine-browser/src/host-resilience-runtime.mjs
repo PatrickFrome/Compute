@@ -57,6 +57,7 @@ export class HostResilienceRuntime {
         this.#progressLease = new BrowserParentProgressLease({ statePath, getBinding: () => this.#sentinel?.snapshot?.() || null });
         await this.#progressLease.mark({ kind: 'HOST_RESILIENCE_STARTED' });
         this.#state.parent_progress = this.#progressLease.snapshot();
+        this.#state.sentinel = this.#sentinel.snapshot();
         this.#progressTimer = setInterval(() => {
           void this.markProgress({ kind: 'EVENT_LOOP_HEARTBEAT' }).catch(() => {});
         }, PARENT_PROGRESS_HEARTBEAT_MS);
@@ -93,6 +94,28 @@ export class HostResilienceRuntime {
     } catch (e) {
       this.#state.last_error = `parent_progress:${String(e?.message || e).slice(0, 200)}`;
       throw e;
+    }
+
+    // Parent progress must remain independent from watchdog recovery. After the
+    // durable progress write, opportunistically repair a missing worker. The host
+    // method itself requires positive old-PID absence before any replacement spawn
+    // and permanently blocks automatic retry after an ambiguous spawn/readback.
+    if (this.#sentinel?.snapshot?.()?.worker_ready !== true) {
+      try {
+        const recovered = await this.#sentinel.reconcileWorker({ timeoutMs: 5_000 });
+        this.#state.sentinel = recovered;
+        this.#state.sentinel_worker_healthy = recovered?.worker_ready === true;
+        if (recovered?.worker_recovery?.error) {
+          this.#state.last_error = `sentinel_worker_recovery:${String(recovered.worker_recovery.error).slice(0, 200)}`;
+        } else if (this.#state.last_error?.startsWith('sentinel_worker_recovery:')) {
+          this.#state.last_error = null;
+        }
+      } catch (e) {
+        this.#state.last_error = `sentinel_worker_recovery:${String(e?.message || e).slice(0, 200)}`;
+      }
+    } else {
+      this.#state.sentinel = this.#sentinel.snapshot();
+      this.#state.sentinel_worker_healthy = true;
     }
     return this.snapshot();
   }
