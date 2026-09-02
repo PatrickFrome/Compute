@@ -109,17 +109,20 @@ test('Windows login-start evidence self-heals on the existing resilience path', 
   assert.equal(runtime.snapshot().external_stop_requested, true);
 });
 
-test('autonomy source invariants prevent UI-close shutdown and plaintext composer exposure', async () => {
-  const [main, lifecycle, nativeControl, hostResilience] = await Promise.all([
+test('autonomy source invariants close UI, restart, host wiring and self-update gaps', async () => {
+  const [main, mainEntry, lifecycle, nativeControl, nativeSupervisor, hostResilience] = await Promise.all([
     fs.readFile(path.join(src, 'main.mjs'), 'utf8'),
+    fs.readFile(path.join(src, 'main-entry.mjs'), 'utf8'),
     fs.readFile(path.join(src, 'supervisor-lifecycle-runtime-core.mjs'), 'utf8'),
     fs.readFile(path.join(src, 'native-browser-control.mjs'), 'utf8'),
+    fs.readFile(path.join(src, 'native-supervisor-client.mjs'), 'utf8'),
     fs.readFile(path.join(src, 'host-resilience-runtime.mjs'), 'utf8'),
   ]);
   assert.match(main, /event\.preventDefault\(\)/);
   assert.match(main, /windowRef\.hide\(\)/);
   const allClosed = main.slice(main.indexOf("app.on('window-all-closed'"), main.indexOf("app.once('ready'"));
   assert.doesNotMatch(allClosed, /app\.quit\(\)/);
+
   const rolloverAt = lifecycle.indexOf('await this.#keepalive.beginRolloverAttempt()');
   const newTabAt = lifecycle.indexOf("action: 'NEW_TAB'", rolloverAt);
   assert.ok(rolloverAt >= 0 && newTabAt > rolloverAt, 'durable rollover barrier must precede NEW_TAB');
@@ -128,7 +131,17 @@ test('autonomy source invariants prevent UI-close shutdown and plaintext compose
   assert.match(nativeControl, /value_sha256/);
   assert.match(nativeControl, /semantic_input_values_exposed: false/);
   assert.doesNotMatch(nativeControl, /row\.value\s*=/);
+
   assert.match(hostResilience, /sentinel_recovery_uses_existing_progress_tick:\s*true/);
   assert.match(hostResilience, /login_start_recovery_uses_existing_progress_tick:\s*true/);
   assert.equal((hostResilience.match(/setInterval\s*\(/g) || []).length, 1);
+
+  assert.match(mainEntry, /new HostResilienceRuntime\(\)/);
+  assert.match(mainEntry, /__METAENGINE_HOST_RESILIENCE_RUNTIME__/);
+  assert.match(mainEntry, /app\.once\('ready',[\s\S]*hostResilience\.start\(\)/);
+  assert.match(nativeSupervisor, /host_resilience:\s*hostResilienceSnapshot\(\)/);
+  const prepareAt = nativeSupervisor.indexOf("prepareInstallerHandoff('SELF_UPDATE')");
+  const priorHookAt = nativeSupervisor.indexOf('sourceBeforeSelfUpdateInstall?.(receipt)', prepareAt);
+  assert.ok(prepareAt >= 0 && priorHookAt > prepareAt, 'sentinel installer handoff must precede external self-update hook');
+  assert.match(nativeSupervisor, /host_resilience_second_polling_loop:\s*false/);
 });

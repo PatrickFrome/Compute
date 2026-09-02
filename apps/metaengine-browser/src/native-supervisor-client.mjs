@@ -13,6 +13,8 @@ export * from './native-supervisor-client-core.mjs';
 
 const COMMAND_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TAB_ID_RE = /^tab_[0-9a-f-]{36}$/i;
+const hostResilienceRuntime = () => globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__ || null;
+const hostResilienceSnapshot = () => hostResilienceRuntime()?.snapshot?.() || null;
 
 export function exactCommandTargetProjection(command) {
   const commandId = String(command?.command_id || '').toLowerCase();
@@ -71,6 +73,8 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
 
   constructor(options = {}) {
     const executeCommand = options.executeCommand;
+    const sourceGetState = options.getState;
+    const sourceBeforeSelfUpdateInstall = options.beforeSelfUpdateInstall;
     let commandTargetProjection = null;
     const trackedExecuteCommand = typeof executeCommand === 'function'
       ? async (command) => {
@@ -79,8 +83,24 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
           return executeCommand(command);
         }
       : executeCommand;
+    const getStateWithHostResilience = typeof sourceGetState === 'function'
+      ? async () => ({
+          ...(await sourceGetState()),
+          host_resilience: hostResilienceSnapshot(),
+        })
+      : sourceGetState;
+    const beforeSelfUpdateInstall = async (receipt) => {
+      const host = hostResilienceRuntime();
+      if (host?.prepareInstallerHandoff) await host.prepareInstallerHandoff('SELF_UPDATE');
+      await sourceBeforeSelfUpdateInstall?.(receipt);
+    };
 
-    super({ ...options, executeCommand: trackedExecuteCommand });
+    super({
+      ...options,
+      getState: getStateWithHostResilience,
+      executeCommand: trackedExecuteCommand,
+      beforeSelfUpdateInstall,
+    });
     if (!options.identity) throw new Error('native_supervisor_identity_required');
     if (typeof (options.fetchImpl ?? globalThis.fetch) !== 'function') throw new Error('native_supervisor_fetch_required');
     this.#workspaceIdentity = options.identity;
@@ -169,6 +189,9 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       workspace_bindings: structuredClone(this.#workspaceObservation),
       workspace_binding_source: 'NATIVE_SUPERVISOR_HEARTBEAT',
       workspace_binding_second_polling_loop: false,
+      host_resilience: hostResilienceSnapshot(),
+      host_resilience_source: 'PRIMARY_BROWSER_PROCESS',
+      host_resilience_second_polling_loop: false,
     };
   }
 

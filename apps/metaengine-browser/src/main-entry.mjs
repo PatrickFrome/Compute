@@ -1,5 +1,6 @@
 import { app } from 'electron';
 import { acquirePrimaryInstance, METAENGINE_BROWSER_APP_ID } from './single-instance-guard.mjs';
+import { HostResilienceRuntime } from './host-resilience-runtime.mjs';
 import {
   inspectSelfUpdateStartup,
   persistUpdatedSuccessorReceipt,
@@ -134,6 +135,26 @@ if (guard.primary) {
       else setTimeout(() => app.exit(0), 15_000);
     });
   } else {
+    const hostResilience = new HostResilienceRuntime();
+    globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__ = hostResilience;
+    app.once('ready', () => {
+      void hostResilience.start()
+        .then((snapshot) => console.log(JSON.stringify({
+          schema: 'metaengine.host-resilience-bootstrap.v1',
+          state: snapshot?.state || 'UNKNOWN',
+          login_start_verified: snapshot?.login_start_verified === true,
+          sentinel_worker_healthy: snapshot?.sentinel_worker_healthy === true,
+          authority_effect: false,
+        })))
+        .catch((error) => console.error(JSON.stringify({
+          schema: 'metaengine.host-resilience-bootstrap.v1',
+          state: 'ERROR',
+          error: String(error?.message || error).slice(0, 300),
+          terminal: false,
+          authority_effect: false,
+        })));
+    });
+
     const { startSelfUpdateContinuityWatchdog } = await import('./self-update-continuity-watchdog.mjs');
     startSelfUpdateContinuityWatchdog({
       userDataPath: app.getPath('userData'),
