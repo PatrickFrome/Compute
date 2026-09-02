@@ -1,0 +1,59 @@
+name: DevOS Dispatch Admission Runtime V2
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/20260902190500_devos_dispatch_admission_runtime_v2.sql'
+      - 'apps/metaengine-browser/test/devos-dispatch-admission-runtime-v2-smoke.sql'
+      - '.github/workflows/devos-dispatch-admission-runtime-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: devos-dispatch-admission-runtime-v2-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  postgres-17-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: postgres
+    steps:
+      - name: Checkout exact PR source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client
+
+      - name: Run admission falsification smoke
+        run: psql -v ON_ERROR_STOP=1 -f apps/metaengine-browser/test/devos-dispatch-admission-runtime-v2-smoke.sql
+
+      - name: Assert terminal proof marker
+        run: |
+          out="$(psql -Atqc "select 'postgres17-ready'")"
+          test "$out" = "postgres17-ready"
