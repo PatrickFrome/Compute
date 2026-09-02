@@ -99,14 +99,19 @@ test('native supervisor client completes approval enrollment then executes lease
     executeCommand: async () => { throw new Error('external executor must not handle DISARM'); },
   });
   await client.cycle();
-  assert.equal(client.snapshot().enrollment_status, 'PENDING');
-  await client.cycle();
+  assert.equal(client.snapshot().enrollment_status, 'ENROLLED');
   assert.equal(statusCalls, 1);
   assert.equal(client.snapshot().identity.device_id, deviceId);
   assert.equal(client.snapshot().armed, false);
   assert.equal(client.snapshot().last_command_status, 'COMPLETED');
-  assert.ok(seen.some((row) => row.pathname.endsWith('/v1/state')));
-  assert.ok(seen.some((row) => row.pathname.endsWith('/v1/commands/next')));
+  const requestIndex = seen.findIndex((row) => row.pathname.endsWith('/v1/device/enrollment/request'));
+  const statusIndex = seen.findIndex((row) => row.pathname.endsWith('/v1/device/enrollment/status'));
+  const stateIndex = seen.findIndex((row) => row.pathname.endsWith('/v1/state'));
+  const leaseIndex = seen.findIndex((row) => row.pathname.endsWith('/v1/commands/next'));
+  assert.ok(requestIndex >= 0 && statusIndex > requestIndex);
+  assert.ok(stateIndex > statusIndex);
+  assert.ok(leaseIndex > stateIndex);
+  await fs.rm(dir, { recursive:true, force:true });
 });
 
 test('CONTROL_CAPABILITIES is handled locally as read-only and never delegated to page executor', async () => {
