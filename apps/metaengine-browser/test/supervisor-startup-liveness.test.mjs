@@ -28,7 +28,7 @@ test('Browser runtime registers early but cannot start before host resilience bo
   assert.ok(hostStartAt > watchdogAt, 'continuity watchdog must be armed before host bootstrap can block');
   assert.ok(releaseAt > hostStartAt, 'Browser start barrier may release only after host bootstrap returns');
   assert.ok(mainBarrierAt >= 0 && mainAwaitAt > mainBarrierAt && startupAt > mainAwaitAt);
-  assert.match(main, /if \(app\.isReady\(\)\) queueMicrotask\(startBrowserRuntime\)/);
+  assert.match(main, /if \(app\.isReady\(\)\) queueMicrotask\(\(\) => \{ void startBrowserRuntime\(\); \}\);/);
 });
 
 test('watchdog recovery quarantines durable continuity before relaunch and has no browser replay authority', async () => {
