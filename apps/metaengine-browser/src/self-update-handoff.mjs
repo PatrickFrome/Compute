@@ -85,6 +85,58 @@ function startupHold({ app, journal = null, reason, transactionState = null } = 
   };
 }
 
+function successorBinding({ version, appId, successorStartup, preInstallSha256, preInstallRecordedAt }) {
+  return {
+    schema: SUCCESSOR_SCHEMA,
+    version: String(version || ''),
+    pid: process.pid,
+    primary_instance: true,
+    app_id: appId ? String(appId) : null,
+    successor_startup: successorStartup,
+    qualification_state: 'BOOT_VERIFIED',
+    pre_install_receipt_sha256: String(preInstallSha256 || ''),
+    pre_install_recorded_at: String(preInstallRecordedAt || ''),
+    authority_effect: false,
+  };
+}
+
+function validateSuccessorReceiptBinding(row, binding) {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error('self_update_successor_receipt_invalid');
+  if (row.schema !== SUCCESSOR_SCHEMA) throw new Error('self_update_successor_receipt_schema_invalid');
+  const exactFields = [
+    'version',
+    'pid',
+    'primary_instance',
+    'app_id',
+    'successor_startup',
+    'qualification_state',
+    'pre_install_receipt_sha256',
+    'pre_install_recorded_at',
+    'authority_effect',
+  ];
+  for (const field of exactFields) {
+    if (row[field] !== binding[field]) throw new Error(`self_update_successor_receipt_binding_mismatch:${field}`);
+  }
+  const recordedMs = Date.parse(String(row.recorded_at || ''));
+  if (!Number.isFinite(recordedMs)) throw new Error('self_update_successor_receipt_time_invalid');
+  return row;
+}
+
+async function readBoundSuccessorReceipt(app, binding) {
+  const { successor } = selfUpdateHandoffPaths(app);
+  let raw;
+  try { raw = await fs.readFile(successor, 'utf8'); }
+  catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  }
+  let row;
+  try { row = JSON.parse(raw); }
+  catch { throw new Error('self_update_successor_receipt_json_invalid'); }
+  validateSuccessorReceiptBinding(row, binding);
+  return { row, path: successor, successor_startup: binding.successor_startup };
+}
+
 export function selfUpdateHandoffPaths(app) {
   assertApp(app);
   const userData = app.getPath('userData');
@@ -223,6 +275,7 @@ export async function persistUpdatedSuccessorReceipt(app, {
   appId = null,
   clock = () => Date.now(),
   maxAgeMs = DEFAULT_MAX_AGE_MS,
+  writeJson = durableWriteJson,
 } = {}) {
   assertApp(app);
   if (!Array.isArray(argv) || !argv.includes('--updated')) return null;
@@ -231,30 +284,61 @@ export async function persistUpdatedSuccessorReceipt(app, {
   if (typeof app.hasSingleInstanceLock === 'function' && app.hasSingleInstanceLock() !== true) {
     throw new Error('self_update_successor_primary_lock_required');
   }
+  if (typeof writeJson !== 'function') throw new Error('self_update_successor_writer_invalid');
   const expected = await readExpectedPreInstallReceipt(app, { maxAgeMs, clock });
   if (!expected) return null;
   const version = String(app.getVersion() || '');
   if (!version || expected.receipt.version !== version) throw new Error('self_update_successor_version_binding_invalid');
-  await transitionIfPresent(app, 'SUCCESSOR_BOOTED', {
-    requireTargetVersion: version,
-    evidence: { updated_argv: true, primary_instance: true, boot_version_match: true },
-  });
-  const row = {
-    schema: SUCCESSOR_SCHEMA,
+
+  const binding = successorBinding({
     version,
-    pid: process.pid,
-    primary_instance: true,
-    app_id: appId ? String(appId) : null,
-    successor_startup: expected.successor_startup,
-    qualification_state: 'BOOT_VERIFIED',
-    pre_install_receipt_sha256: expected.sha256,
-    pre_install_recorded_at: expected.receipt.recorded_at,
+    appId,
+    successorStartup: expected.successor_startup,
+    preInstallSha256: expected.sha256,
+    preInstallRecordedAt: expected.receipt.recorded_at,
+  });
+
+  // The write-ahead transaction remains authoritative for the installer effect.
+  // Re-entering an already-booted successor must not rewrite its journal merely
+  // to reconcile receipt durability, but any other admissible state is advanced
+  // to SUCCESSOR_BOOTED before the receipt is created.
+  const journal = await readSelfUpdateTransaction(app);
+  if (journal?.state === 'SUCCESSOR_BOOTED') {
+    if (journal.target_version !== version) throw new Error('self_update_transaction_target_binding_mismatch');
+  } else {
+    await transitionIfPresent(app, 'SUCCESSOR_BOOTED', {
+      requireTargetVersion: version,
+      evidence: { updated_argv: true, primary_instance: true, boot_version_match: true },
+    });
+  }
+
+  // A prior exact receipt is positive evidence that this same successor process
+  // already committed the effect. Preserve its recorded_at and never overwrite it.
+  // Malformed or mismatched evidence fails closed rather than being replaced.
+  const existing = await readBoundSuccessorReceipt(app, binding);
+  if (existing) return existing;
+
+  const row = {
+    ...binding,
     recorded_at: new Date(Number(clock())).toISOString(),
-    authority_effect: false,
   };
   const { successor } = selfUpdateHandoffPaths(app);
-  await durableWriteJson(successor, row);
-  return { row, path: successor, successor_startup: expected.successor_startup };
+  try {
+    await writeJson(successor, row);
+  } catch (error) {
+    // durableWriteJson can fail after rename (for example during committed-file or
+    // directory fsync). Re-read the final path before declaring ambiguity. Exact
+    // bytes/binding are success; absence remains a hold and is never retried here;
+    // malformed/mismatched content is an explicit fail-closed conflict.
+    const recovered = await readBoundSuccessorReceipt(app, binding);
+    if (recovered) return recovered;
+    throw error;
+  }
+
+  // Positive final-path readback is required even after the writer returned success.
+  const committed = await readBoundSuccessorReceipt(app, binding);
+  if (!committed) throw new Error('self_update_successor_receipt_readback_missing');
+  return committed;
 }
 
 export async function qualifyUpdatedSuccessor(app, evidence = {}) {
