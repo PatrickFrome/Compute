@@ -169,7 +169,7 @@ test('production entry installs signed hook before releasing the host-resilience
   const barrier = source.indexOf('__METAENGINE_BROWSER_BOOTSTRAP_BARRIER__');
   const earlyImport = source.indexOf("import('./main.mjs')");
   const watchdog = source.indexOf('startSelfUpdateContinuityWatchdog({');
-  const signedHook = source.indexOf('installSignedSupervisorHeartbeatQualificationHook');
+  const signedHook = source.indexOf('globalThis.fetch = installSignedSupervisorHeartbeatQualificationHook');
   const hostStart = source.indexOf('hostResilience.start()');
   const releaseBarrier = source.indexOf('resolveBrowserBootstrap?.(hostSnapshot)');
   const qualification = source.indexOf('if (resumeSuccessorQualification)');
