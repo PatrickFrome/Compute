@@ -36,10 +36,7 @@ test('normal generating-to-terminal transition retires the exact active wake', (
 });
 
 test('restored durable active wake may retire from an already-idle exact terminal readback', () => {
-  const result = evaluate({
-    active_request: { tab_id: 'tab_new', restored_from_durable_keepalive: true },
-    previous_state: 'IDLE',
-  });
+  const result = evaluate({ active_request: { tab_id: 'tab_new', restored_from_durable_keepalive: true }, previous_state: 'IDLE' });
   assert.equal(result.retire, true);
   assert.equal(result.reason, 'RESTORED_ACTIVE_WAKE_TERMINAL');
 });
@@ -48,19 +45,23 @@ test('stale request tab may retire only after exact rebind and grace period', ()
   const result = evaluate();
   assert.equal(result.retire, true);
   assert.equal(result.reason, 'REBIND_ORPHAN_TERMINAL');
-
   const early = evaluate({ now_ms: Date.parse('2026-08-31T14:33:30Z') });
   assert.equal(early.retire, false);
   assert.equal(early.reason, 'REBIND_GRACE_NOT_ELAPSED');
 });
 
-test('just-sent request cannot be retired merely because the first observation is idle', () => {
-  const result = evaluate({
-    active_request: { tab_id: 'tab_new', restored_from_durable_keepalive: false },
-    previous_state: 'IDLE',
-  });
+test('same-tab just-sent idle race remains fenced during the bounded grace period', () => {
+  const result = evaluate({ active_request: { tab_id: 'tab_new', restored_from_durable_keepalive: false }, previous_state: 'IDLE', now_ms: Date.parse('2026-08-31T14:33:30Z') });
   assert.equal(result.retire, false);
   assert.equal(result.reason, 'JUST_SENT_IDLE_RACE');
+});
+
+test('same-tab confirmed wake cannot block continuity forever after proven terminal grace', () => {
+  const result = evaluate({ active_request: { tab_id: 'tab_new', restored_from_durable_keepalive: false }, previous_state: 'IDLE', now_ms: Date.parse('2026-08-31T14:34:00Z') });
+  assert.equal(result.retire, true);
+  assert.equal(result.reason, 'STALE_CONFIRMED_WAKE_TERMINAL');
+  assert.equal(result.automatic_retry_allowed, false);
+  assert.equal(result.authority_effect, false);
 });
 
 test('wake, current tab and terminal generation bindings fail closed', () => {

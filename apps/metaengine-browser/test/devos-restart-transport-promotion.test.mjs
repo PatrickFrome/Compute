@@ -38,26 +38,39 @@ function harness({ tabUrl = CONVERSATION, releaseThrows = false } = {}) {
     },
   };
 
+  const activate = ({ stage, hash }) => {
+    const agent = state.fleet.agents[0];
+    agent.lifecycle_state = 'ACTIVE';
+    agent.transport_proof = {
+      schema: 'metaengine.browser.fleet-transport-proof.v1',
+      ...(stage === 'PRECONVERSATION_ROOT' ? { transport_stage: stage } : {}),
+      tab_id: TAB_ID,
+      target_id: TARGET_ID,
+      generation_epoch: 7,
+      conversation_url_sha256: hash,
+      proven_at: new Date().toISOString(),
+      authority_effect: false,
+    };
+    return structuredClone(state.fleet);
+  };
+
   const fleetRuntime = {
     snapshot: () => structuredClone(state.fleet),
+    markTransportPreconversationProven: async ({ agent_id, tab_id, target_id, generation_epoch, transport_url }) => {
+      assert.equal(agent_id, AGENT_ID);
+      assert.equal(tab_id, TAB_ID);
+      assert.equal(target_id, TARGET_ID);
+      assert.equal(generation_epoch, 7);
+      assert.equal(transport_url, 'https://chatgpt.com/');
+      return activate({ stage: 'PRECONVERSATION_ROOT', hash: '2'.repeat(64) });
+    },
     markTransportProven: async ({ agent_id, tab_id, target_id, generation_epoch, conversation_url }) => {
-      const agent = state.fleet.agents[0];
       assert.equal(agent_id, AGENT_ID);
       assert.equal(tab_id, TAB_ID);
       assert.equal(target_id, TARGET_ID);
       assert.equal(generation_epoch, 7);
       assert.equal(conversation_url, CONVERSATION);
-      agent.lifecycle_state = 'ACTIVE';
-      agent.transport_proof = {
-        schema: 'metaengine.browser.fleet-transport-proof.v1',
-        tab_id: TAB_ID,
-        target_id: TARGET_ID,
-        generation_epoch: 7,
-        conversation_url_sha256: '1'.repeat(64),
-        proven_at: new Date().toISOString(),
-        authority_effect: false,
-      };
-      return structuredClone(state.fleet);
+      return activate({ stage: 'CONVERSATION', hash: '1'.repeat(64) });
     },
   };
   registerFleetRuntime(fleetRuntime);
@@ -148,15 +161,25 @@ test('one restored conversation is promoted locally before the normal scheduler 
   }
 });
 
-test('root ChatGPT tabs are never promoted merely to manufacture readiness', async () => {
+test('root ChatGPT tabs gain preconversation transport proof without TYPE or CLICK', async () => {
   const h = harness({ tabUrl: 'https://chatgpt.com/' });
   try {
     const snapshot = await h.cycle.cycle();
-    assert.equal(h.state.fleet.agents[0].lifecycle_state, 'BOUND_UNVERIFIED');
-    assert.equal(snapshot.fleet_transport_promotion.state, 'NO_ELIGIBLE_CONVERSATION');
-    assert.equal(h.calls.some((row) => row[1] === '/v1/devos/promotion-lease'), false);
-    assert.equal(h.calls.some((row) => row[1] === 'CAPTURE'), false);
-    assert.equal(h.calls.some((row) => row[1] === '/v1/devos/cycle'), true);
+    assert.equal(h.state.fleet.agents[0].lifecycle_state, 'ACTIVE');
+    assert.equal(h.state.fleet.agents[0].transport_proof.transport_stage, 'PRECONVERSATION_ROOT');
+    assert.equal(snapshot.fleet_transport_promotion.state, 'LOCAL_ACTIVE');
+    assert.equal(snapshot.fleet_transport_promotion.transport_stage, 'PRECONVERSATION_ROOT');
+    assert.equal(snapshot.fleet_transport_promotion.local_proof_state, 'PROVEN_PRECONVERSATION');
+    assert.equal(snapshot.fleet_transport_promotion.conversation_url_sha256, null);
+    assert.equal(snapshot.preconversation_transport_promotion_non_effect, true);
+    assert.equal(h.calls.some((row) => row[1] === 'SEMANTIC_TYPE'), false);
+    assert.equal(h.calls.some((row) => row[1] === 'TYPED_CLICK'), false);
+    assert.deepEqual(h.calls.slice(0, 4), [
+      ['http', '/v1/devos/promotion-lease'],
+      ['command', 'CAPTURE'],
+      ['http', '/v1/devos/promotion-release'],
+      ['http', '/v1/devos/cycle'],
+    ]);
   } finally {
     h.cleanup();
   }

@@ -4,13 +4,14 @@ let fleetRuntime = null;
 
 const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 
-function conversationUrl(value) {
+function transportUrl(value) {
   try {
     const url = new URL(String(value || ''));
     if (url.protocol !== 'https:' || !['chatgpt.com', 'www.chatgpt.com'].includes(url.hostname.toLowerCase())) return null;
     const path = url.pathname.replace(/\/+$/, '');
+    if (path === '') return Object.freeze({ url: 'https://chatgpt.com/', stage: 'PRECONVERSATION_ROOT' });
     if (!/^\/c\/[a-z0-9-]+$/i.test(path)) return null;
-    return `https://chatgpt.com${path.toLowerCase()}`;
+    return Object.freeze({ url: `https://chatgpt.com${path.toLowerCase()}`, stage: 'CONVERSATION' });
   } catch {
     return null;
   }
@@ -53,21 +54,14 @@ export function assertFleetRuntimeBinding(binding) {
   return structuredClone(exactAgent(fleetRuntime.snapshot(), binding));
 }
 
-export async function markFleetTransportProvenFromNativeFrame({ binding, frame, expected_conversation_url_sha256 } = {}) {
+export async function markFleetTransportProvenFromNativeFrame({
+  binding,
+  frame,
+  expected_conversation_url_sha256,
+  expected_transport_url_sha256,
+} = {}) {
   if (!fleetRuntime) throw new Error('fleet_runtime_unavailable');
   const agent = exactAgent(fleetRuntime.snapshot(), binding);
-  if (String(agent.lifecycle_state) !== 'BOUND_UNVERIFIED') {
-    return Object.freeze({
-      schema: 'metaengine.browser.fleet-native-transport-proof.v1',
-      state: 'ALREADY_ACTIVE',
-      agent_id: agent.agent_id,
-      tab_id: agent.tab_id,
-      target_id: agent.target_id,
-      generation_epoch: agent.generation_epoch,
-      automatic_retry_allowed: false,
-      authority_effect: false,
-    });
-  }
 
   if (!frame || frame.schema !== 'metaengine.native-browser.perception.v1' || frame.authority_effect !== false) {
     throw new Error('fleet_runtime_native_frame_invalid');
@@ -76,30 +70,101 @@ export async function markFleetTransportProvenFromNativeFrame({ binding, frame, 
   if (String(frame.target_id || '').toLowerCase() !== String(agent.target_id).toLowerCase()) throw new Error('fleet_runtime_frame_target_mismatch');
   const processIncarnation = String(frame.process_incarnation_id || '');
   if (!processIncarnation || processIncarnation.length > 160) throw new Error('fleet_runtime_process_incarnation_invalid');
-  const normalizedUrl = conversationUrl(frame.url);
-  if (!normalizedUrl) throw new Error('fleet_runtime_conversation_url_invalid');
-  const expectedHash = String(expected_conversation_url_sha256 || '').toLowerCase();
-  if (!/^[a-f0-9]{64}$/.test(expectedHash) || sha256(normalizedUrl) !== expectedHash) {
-    throw new Error('fleet_runtime_conversation_hash_mismatch');
+  const transport = transportUrl(frame.url);
+  if (!transport) throw new Error('fleet_runtime_transport_url_invalid');
+  const expectedHash = String(expected_transport_url_sha256 || expected_conversation_url_sha256 || '').toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(expectedHash) || sha256(transport.url) !== expectedHash) {
+    throw new Error('fleet_runtime_transport_hash_mismatch');
   }
 
-  const next = await fleetRuntime.markTransportProven({
-    agent_id: agent.agent_id,
-    tab_id: agent.tab_id,
-    target_id: agent.target_id,
-    generation_epoch: agent.generation_epoch,
-    conversation_url: normalizedUrl,
-  });
+  if (String(agent.lifecycle_state) === 'ACTIVE') {
+    const currentStage = String(agent?.transport_proof?.transport_stage || 'CONVERSATION');
+    if (currentStage !== 'PRECONVERSATION_ROOT') {
+      return Object.freeze({
+        schema: 'metaengine.browser.fleet-native-transport-proof.v1',
+        state: 'ALREADY_ACTIVE',
+        agent_id: agent.agent_id,
+        tab_id: agent.tab_id,
+        target_id: agent.target_id,
+        generation_epoch: agent.generation_epoch,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      });
+    }
+    if (transport.stage !== 'CONVERSATION') {
+      return Object.freeze({
+        schema: 'metaengine.browser.fleet-native-transport-proof.v1',
+        state: 'ALREADY_ACTIVE_PRECONVERSATION',
+        agent_id: agent.agent_id,
+        tab_id: agent.tab_id,
+        target_id: agent.target_id,
+        generation_epoch: agent.generation_epoch,
+        transport_stage: 'PRECONVERSATION_ROOT',
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      });
+    }
+    const next = await fleetRuntime.markTransportProven({
+      agent_id: agent.agent_id,
+      tab_id: agent.tab_id,
+      target_id: agent.target_id,
+      generation_epoch: agent.generation_epoch,
+      conversation_url: transport.url,
+    });
+    const upgraded = exactAgent(next, binding);
+    if (String(upgraded.lifecycle_state) !== 'ACTIVE' || !upgraded.transport_proof) throw new Error('fleet_runtime_transport_proof_not_persisted');
+    return Object.freeze({
+      schema: 'metaengine.browser.fleet-native-transport-proof.v1',
+      state: 'UPGRADED_CONVERSATION',
+      agent_id: upgraded.agent_id,
+      tab_id: upgraded.tab_id,
+      target_id: upgraded.target_id,
+      generation_epoch: upgraded.generation_epoch,
+      conversation_url_sha256: expectedHash,
+      process_incarnation_sha256: sha256(processIncarnation),
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+
+  let next;
+  let state;
+  if (transport.stage === 'PRECONVERSATION_ROOT') {
+    if (typeof fleetRuntime.markTransportPreconversationProven !== 'function') {
+      throw new Error('fleet_runtime_preconversation_promotion_unsupported');
+    }
+    next = await fleetRuntime.markTransportPreconversationProven({
+      agent_id: agent.agent_id,
+      tab_id: agent.tab_id,
+      target_id: agent.target_id,
+      generation_epoch: agent.generation_epoch,
+      transport_url: transport.url,
+    });
+    state = 'PROVEN_PRECONVERSATION';
+  } else {
+    next = await fleetRuntime.markTransportProven({
+      agent_id: agent.agent_id,
+      tab_id: agent.tab_id,
+      target_id: agent.target_id,
+      generation_epoch: agent.generation_epoch,
+      conversation_url: transport.url,
+    });
+    state = 'PROVEN';
+  }
   const active = exactAgent(next, binding);
   if (String(active.lifecycle_state) !== 'ACTIVE' || !active.transport_proof) throw new Error('fleet_runtime_transport_proof_not_persisted');
+  if (transport.stage === 'PRECONVERSATION_ROOT' && active.transport_proof.transport_stage !== 'PRECONVERSATION_ROOT') {
+    throw new Error('fleet_runtime_preconversation_proof_stage_invalid');
+  }
 
   return Object.freeze({
     schema: 'metaengine.browser.fleet-native-transport-proof.v1',
-    state: 'PROVEN',
+    state,
     agent_id: active.agent_id,
     tab_id: active.tab_id,
     target_id: active.target_id,
     generation_epoch: active.generation_epoch,
+    transport_stage: transport.stage,
     conversation_url_sha256: expectedHash,
     process_incarnation_sha256: sha256(processIncarnation),
     automatic_retry_allowed: false,
