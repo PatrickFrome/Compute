@@ -90,16 +90,22 @@ test('failed progress mark does not poison the serialized write tail',async()=>{
   assert.equal(recovered.progress_seq,1);assert.equal(recovered.detail,'after-failure');assert.equal(recovered.authority_effect,false);
 });
 
-test('worker cannot relaunch before exact old parent absence and never retries ambiguous termination blindly',async()=>{
+test('worker requires exact old-parent absence before relaunch and never retries ambiguous termination blindly',async()=>{
   const source=await fs.readFile(new URL('../src/browser-sentinel-worker.cjs',import.meta.url),'utf8');
   const beginTermination=source.indexOf('await journal.beginTermination(state, decision)');
   const kill=source.indexOf("process.kill(PARENT_PID, 'SIGTERM')");
-  const absentGuard=source.lastIndexOf('if (parentAlive()) return;');
-  const relaunch=source.lastIndexOf('await relaunchOnce(state, journal)');
+  const confirmedAbsent=source.indexOf("await journal.markTermination(state, 'PARENT_TERMINATION_CONFIRMED'",kill);
+  assert.ok(beginTermination>=0&&kill>beginTermination&&confirmedAbsent>kill,'termination must be journaled before signal and positively confirmed before recovery');
+
+  const loopStart=source.indexOf('async function relaunchUntilResolved');
+  const loopEnd=source.indexOf('async function main',loopStart);
+  const relaunchLoop=source.slice(loopStart,loopEnd);
+  const parentStillAliveFence=relaunchLoop.indexOf('|| parentAlive()) return;');
+  const relaunch=relaunchLoop.indexOf('await relaunchOnce(state, journal)');
+  assert.ok(loopStart>=0&&loopEnd>loopStart&&parentStillAliveFence>=0&&relaunch>parentStillAliveFence,'every relaunch pass must re-observe exact parent absence immediately before actuation');
+
   const beginRelaunch=source.indexOf("await journal.beginRelaunch(state, 'EXACT_OLD_PARENT_ABSENT')");
   const spawn=source.indexOf('child = spawn(state.executable');
-  assert.ok(beginTermination>=0&&kill>beginTermination);
-  assert.ok(absentGuard>kill&&relaunch>absentGuard);
   assert.ok(beginRelaunch>=0&&spawn>beginRelaunch);
   assert.match(source,/parent_liveness_termination_attempted: journal\.terminationAttempted\(\)/);
   assert.match(source,/PARENT_TERMINATION_AMBIGUOUS/);
