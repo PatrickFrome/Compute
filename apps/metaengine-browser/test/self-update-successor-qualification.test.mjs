@@ -164,12 +164,21 @@ test('qualification refuses wrong target version', async () => {
   await assert.rejects(() => probeUpdatedSuccessorQualification({ app, uptimeMs: () => 5000 }), /target_mismatch/);
 });
 
-test('production entry schedules qualification only on --updated launches and installs signed hook before main', async () => {
+test('production entry gates qualification through durable handoff or exact recovery and installs signed hook before host start', async () => {
   const source = await fs.readFile(new URL('../src/main-entry.mjs', import.meta.url), 'utf8');
   assert.match(source, /installSignedSupervisorHeartbeatQualificationHook/);
   assert.match(source, /qualifyUpdatedSuccessorWhenHealthy/);
-  assert.match(source, /if \(updatedLaunch\)/);
+  assert.match(source, /shouldResumeSuccessorQualification/);
+  assert.match(source, /const qualificationRequested = \(updatedLaunch && Boolean\(updateHandoff\)\)/);
+  assert.match(source, /\|\| \(!updatedLaunch && resumeSuccessorQualification\)/);
   assert.match(source, /SELF_UPDATE_AUTOMATIC_RETRY_HELD/);
-  assert.ok(source.indexOf('installSignedSupervisorHeartbeatQualificationHook') < source.indexOf("await import('./main.mjs')"));
-  assert.ok(source.indexOf('startSelfUpdateContinuityWatchdog({') < source.indexOf("await import('./main.mjs')"));
+  const barrierAt = source.indexOf('__METAENGINE_BROWSER_BOOTSTRAP_BARRIER__');
+  const mainImportAt = source.indexOf("import('./main.mjs')", barrierAt);
+  const watchdogAt = source.indexOf('startSelfUpdateContinuityWatchdog({', mainImportAt);
+  const hookAt = source.indexOf('installSignedSupervisorHeartbeatQualificationHook', watchdogAt);
+  const hostStartAt = source.indexOf('hostResilience.start()', hookAt);
+  const releaseAt = source.indexOf('resolveBrowserBootstrap?.(hostSnapshot)', hostStartAt);
+  assert.ok(barrierAt >= 0 && mainImportAt > barrierAt, 'Browser module registration must remain behind a preinstalled startup barrier');
+  assert.ok(watchdogAt > mainImportAt && hookAt > watchdogAt, 'continuity watchdog and signed heartbeat hook must be armed before host start');
+  assert.ok(hostStartAt > hookAt && releaseAt > hostStartAt, 'host bootstrap must complete before Browser runtime barrier release');
 });
