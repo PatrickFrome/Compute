@@ -1,0 +1,54 @@
+name: Supervisor Control Plane Contract
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/*supervisor*.sql'
+      - 'supabase/migrations/*browser_global_resilience*.sql'
+      - 'tests/test_supervisor_*.py'
+      - '.github/workflows/supervisor-control-plane-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supervisor-control-plane-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact candidate head
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='${{ github.event.pull_request.head.sha || github.sha }}'
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$expected"
+
+      - name: Supervisor control-plane contracts
+        run: python3 -m unittest -v tests.test_supervisor_mesh_terminal_freshness
+
+      - name: Fail-closed migration invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          file='supabase/migrations/20260902205500_supervisor_mesh_terminal_freshness_v1.sql'
+          test -s "$file"
+          grep -Fq 'terminal_freshness_preserved' "$file"
+          grep -Fq 'supervisor_mesh_sync_preferred_not_live' "$file"
+          grep -Fq "'actuation_leases_expired'" "$file"
+          grep -Fq "'automatic_retry_allowed',false" "$file"
+          grep -Fq "'authority_effect',false" "$file"
+          ! grep -Fq 'delete from public.compute_fabric_a2_supervisor_mesh_instance_h205f22' "$file"
+          ! grep -Fq 'insert into public.compute_fabric_a2_supervisor_actuation_lease_h205f22' "$file"
+          ! grep -Fq 'insert into public.compute_fabric_a2_browser_supervisor_command_h205f22' "$file"
