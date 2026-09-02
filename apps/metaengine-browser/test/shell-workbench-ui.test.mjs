@@ -38,9 +38,9 @@ test('workbench renderer exposes layout and navigation but no authority actuatio
 });
 
 test('tab selection and close are independent interactive controls', () => {
-  assert.match(js, /const row = document\.createElement\('div'\)/);
-  assert.match(js, /select\.className = 'verticalTabSelect'/);
-  assert.match(js, /close\.className = 'tabClose'/);
+  assert.match(js, /const\s+row\s*=\s*document\.createElement\('div'\)/);
+  assert.match(js, /select\.className\s*=\s*'verticalTabSelect'/);
+  assert.match(js, /close\.className\s*=\s*'tabClose'/);
   assert.match(css, /\.verticalTabSelect\{/);
 });
 
@@ -52,8 +52,8 @@ test('untrusted snapshot strings are never injected through HTML parsing', () =>
 });
 
 test('source-only mechanisms remain explicitly unexposed in the UI', () => {
-  assert.match(js, /Browser sentinel', 'NOT EXPOSED'/);
-  assert.match(js, /Host resilience', 'NOT EXPOSED'/);
-  assert.match(js, /Parent progress lease', 'NOT EXPOSED'/);
+  assert.match(js, /Browser sentinel','NOT EXPOSED'/);
+  assert.match(js, /Host resilience','NOT EXPOSED'/);
+  assert.match(js, /Parent progress lease','NOT EXPOSED'/);
   assert.match(js, /source presence is not runtime proof/);
 });
