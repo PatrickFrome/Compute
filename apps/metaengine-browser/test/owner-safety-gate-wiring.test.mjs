@@ -41,19 +41,13 @@ test('Browser runtime exposes typed gate command surface and durable readback', 
   assert.match(main, /bindGlobalOwnerSafetyGateRegistry\(ownerSafetyGates\)/);
 });
 
-test('fleet ambiguous compensating fanout remains explicitly owner-gated while wrapper handles no-effect capacity backpressure', () => {
+test('fleet ambiguous compensating fanout remains explicitly owner-gated through wrapper/core split', () => {
   const wrapper = fs.readFileSync(path.join(root, 'src', 'fleet-provisioner.mjs'), 'utf8');
   const core = fs.readFileSync(path.join(root, 'src', 'fleet-provisioner-core.mjs'), 'utf8');
   assert.match(wrapper, /extends CoreFleetProvisioner/);
   assert.match(wrapper, /registerFleetRuntime\(this\)/);
-  assert.match(wrapper, /async reconcile\s*\(/);
-  assert.match(wrapper, /CAPACITY_AMBIGUITY_PREFIX\s*=\s*'CREATE_TAB_AMBIGUOUS:tab_capacity_exceeded'/);
-  assert.match(wrapper, /automatic_retry_allowed:\s*false/);
-  assert.match(wrapper, /super\.reconcile\(\{\s*active,\s*target_agents:\s*targetAgents,\s*spawn_burst_limit:\s*spawnBurstLimit\s*\}\)/);
-  assert.doesNotMatch(wrapper, /globalOwnerGateDisabled/);
-  assert.doesNotMatch(wrapper, /fleet\.ambiguous_compensating_fanout/);
-
-  assert.match(core, /async reconcile\s*\(\{\s*active\s*=\s*false,\s*target_agents\s*=\s*null,\s*spawn_burst_limit\s*=\s*null\s*\}\s*=\s*\{\}\)/);
+  assert.doesNotMatch(wrapper, /async reconcile\s*\(/);
+  assert.doesNotMatch(wrapper, /PROVISIONING_AMBIGUOUS/);
   assert.match(core, /globalOwnerGateDisabled\('fleet\.ambiguous_compensating_fanout'\)/);
   assert.match(core, /PROVISIONING_AMBIGUOUS/);
 });
