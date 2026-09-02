@@ -57,6 +57,7 @@ test('planned user quit suppresses crash relaunch authority', async () => {
   const disk = await readSentinelState(statePath);
   assert.equal(disk.lifecycle, 'PLANNED_SHUTDOWN');
   assert.equal(disk.expected_restart, false);
+  assert.equal(sentinel.snapshot().transition_latched, 'PLANNED_SHUTDOWN');
 });
 
 test('self-update arms expected-restart grace instead of planned shutdown', async () => {
@@ -72,6 +73,7 @@ test('self-update arms expected-restart grace instead of planned shutdown', asyn
   assert.equal(disk.expected_restart, true);
   assert.equal(disk.expected_restart_reason, 'SELF_UPDATE');
   assert.equal(disk.relaunch_attempted, false);
+  assert.equal(sentinel.snapshot().transition_latched, 'EXPECTED_RESTART');
 });
 
 test('stale heartbeat never authorizes duplicate worker while exact old pid is still alive', async () => {
@@ -90,6 +92,56 @@ test('stale heartbeat never authorizes duplicate worker while exact old pid is s
   assert.equal(recovery.recovered, false);
   assert.equal(recovery.automatic_retry_allowed, false);
   assert.equal(calls.length, 1);
+});
+
+test('exact child exit proof defeats numeric pid reuse without trusting unrelated process liveness', async () => {
+  const { dir, statePath } = await tempState();
+  const calls = [];
+  const children = [];
+  let spawnIndex = 0;
+  const spawnImpl = (executable, args, options) => {
+    spawnIndex += 1;
+    const pid = spawnIndex === 1 ? 45001 : 45002;
+    const child = new EventEmitter();
+    child.pid = pid;
+    child.unref = () => {};
+    child.kill = () => true;
+    children.push(child);
+    calls.push({ executable, args, options, pid });
+    if (spawnIndex > 1) {
+      setImmediate(() => {
+        child.emit('spawn');
+        setTimeout(async () => {
+          await fs.writeFile(browserSentinelWorkerHeartbeatPath(statePath), `${JSON.stringify({
+            schema: 'metaengine.browser-sentinel.worker-heartbeat.v1',
+            token: options.env.METAENGINE_SENTINEL_TOKEN,
+            parent_pid: Number(options.env.METAENGINE_SENTINEL_PARENT_PID),
+            worker_pid: pid,
+            lifecycle: 'READY',
+            heartbeat_at: new Date().toISOString(),
+            authority_effect: false,
+          })}\n`, { mode: 0o600 });
+        }, 20);
+      });
+    }
+    return child;
+  };
+  const sentinel = new BrowserSentinelHost({
+    statePath,
+    workerScript: path.join(dir, 'worker.cjs'),
+    executable: 'browser.exe',
+    spawnImpl,
+    // Simulate Windows PID reuse: numeric probes report both old and new PIDs alive.
+    processAliveImpl: () => true,
+  });
+  await sentinel.start();
+  children[0].emit('exit', 0, null);
+  assert.equal(sentinel.snapshot().exact_child_exit_observed, true);
+  const recovery = await sentinel.recoverWorkerIfProvenAbsent({ timeoutMs: 800 });
+  assert.equal(recovery.state, 'RECOVERED');
+  assert.equal(recovery.worker_pid, 45002);
+  assert.equal(calls.length, 2);
+  assert.equal(sentinel.snapshot().worker_ready, true);
 });
 
 test('proven absent exact worker pid is replaced once and candidate must earn exact heartbeat binding', async () => {
@@ -147,6 +199,19 @@ test('proven absent exact worker pid is replaced once and candidate must earn ex
   assert.equal(disk.worker_recovery_candidate_pid, 44002);
   assert.equal(disk.worker_recovery_state, 'RECOVERED');
   assert.equal(sentinel.snapshot().worker_ready, true);
+});
+
+test('recovery requires exact durable intent readback and local transition latch before spawn', async () => {
+  const source = await fs.readFile(new URL('../src/browser-sentinel.mjs', import.meta.url), 'utf8');
+  const intent = source.indexOf('const intent = await this.#mutate({');
+  const exactIntent = source.indexOf("intent?.worker_recovery_state !== 'INTENT_PROVEN_OLD_PID_ABSENT'");
+  const spawn = source.indexOf('child = this.#spawnWorker(snap.token, process.pid)', intent);
+  assert.ok(intent >= 0 && exactIntent > intent && spawn > exactIntent);
+  assert.match(source, /this\.\#transitionSuppressed\(\)/);
+  assert.match(source, /RECOVERY_INTENT_NOT_EXACT/);
+  assert.match(source, /CANDIDATE_UNBOUND_TRANSITION/);
+  assert.match(source, /CANDIDATE_UNBOUND_BINDING_DRIFT/);
+  assert.match(source, /exact_child_exit_observed/);
 });
 
 test('sentinel worker source requires exact durable worker pid before heartbeat or liveness actuation', async () => {
