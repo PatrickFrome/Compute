@@ -50,8 +50,8 @@ export async function runSupervisorEnrollmentBootstrap(supervisor) {
 // run as bounded stages of the same existing supervisor cycle and create no timer,
 // scheduler, command lease or Browser authority. Enrollment is never auto-approved.
 // Exact command target telemetry is derived only from an already-executing DB-leased
-// typed command and exposes no payload. Local supervisor coordinate clicks are
-// activated/revalidated by an additive exact-tab guard before the single click.
+// typed command and exposes no payload. Local supervisor coordinate effects are
+// activated/revalidated by an additive exact-tab guard before execution.
 export class NativeSupervisorClient extends CoreNativeSupervisorClient {
   #workspaceIdentity;
   #workspaceFetch;
@@ -79,7 +79,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       ? async (command) => {
           const projected = exactCommandTargetProjection(command);
           if (projected) commandTargetProjection = projected;
-          if (typeof getState === 'function' && String(command?.action || '') === 'TYPED_CLICK' && !command?.command_id) {
+          if (typeof getState === 'function') {
             const guarded = await executeGuardedSupervisorLocalClick({ command, getState, executeCommand });
             if (guarded.handled) return guarded.result;
           }
