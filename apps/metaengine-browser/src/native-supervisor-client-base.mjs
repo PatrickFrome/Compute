@@ -139,9 +139,6 @@ export class NativeSupervisorClient {
         if (!controlModeAllows(this.#supervisorMode)) return false;
         if (!armedAllows(this.#armed)) return false;
         if (this.#currentCommand != null && !globalOwnerGateDisabled('self_update.current_command')) return false;
-        // Mesh coordination is restart-resumable durable state. Do not restore the
-        // old model/mesh quiescence gate: the exact-green updater persists tab and
-        // lifecycle continuity before releasing the singleton.
         return confirmSelfUpdateRestartSafety({ getState: this.#getState });
       },
       beforeInstall: async (receipt) => {
@@ -179,6 +176,12 @@ export class NativeSupervisorClient {
       supervisor_mesh: this.#mesh?.snapshot() || null,
       self_update: this.#selfUpdate?.snapshot() || null,
       session_continuity: structuredClone(this.#continuityStatus),
+      continuous_service: {
+        terminal_requires_external_stop: true,
+        startup_scheduler_armed_before_enrollment: true,
+        cycle_errors_terminal: false,
+        authority_effect: false,
+      },
       arbitrary_eval: false,
       os_shell_authority: false,
     };
@@ -187,28 +190,11 @@ export class NativeSupervisorClient {
   async #persistSessionContinuity(app, receipt) {
     const state = await this.#getState();
     const lifecycle = this.#lifecycle?.snapshot() || null;
-    const tabs = (state?.tabs || []).map((tab) => ({
-      ...tab,
-      generation_state: generationStateForTab(lifecycle, tab?.tab_id),
-    }));
-    const selectedTabId = state?.active_tab?.tab_id
-      || tabs.find((tab) => tab?.selected === true)?.tab_id
-      || null;
-    const row = buildSelfUpdateSessionContinuity({
-      currentVersion: this.#version,
-      targetVersion: receipt?.version,
-      tabsSnapshot: { tabs, selected_tab_id: selectedTabId },
-      lifecycleSnapshot: lifecycle,
-    });
+    const tabs = (state?.tabs || []).map((tab) => ({ ...tab, generation_state: generationStateForTab(lifecycle, tab?.tab_id) }));
+    const selectedTabId = state?.active_tab?.tab_id || tabs.find((tab) => tab?.selected === true)?.tab_id || null;
+    const row = buildSelfUpdateSessionContinuity({ currentVersion: this.#version, targetVersion: receipt?.version, tabsSnapshot: { tabs, selected_tab_id: selectedTabId }, lifecycleSnapshot: lifecycle });
     await persistSelfUpdateSessionContinuity(app.getPath('userData'), row);
-    this.#continuityStatus = {
-      state: 'PERSISTED',
-      restored_tabs: 0,
-      tab_count: row.tabs.length,
-      target_version: row.target_version,
-      had_generating_tabs: row.tabs.some((tab) => tab?.generation_state === 'GENERATING'),
-      authority_effect: false,
-    };
+    this.#continuityStatus = { state: 'PERSISTED', restored_tabs: 0, tab_count: row.tabs.length, target_version: row.target_version, had_generating_tabs: row.tabs.some((tab) => tab?.generation_state === 'GENERATING'), authority_effect: false };
   }
 
   async #restoreSessionContinuity() {
@@ -216,13 +202,7 @@ export class NativeSupervisorClient {
     const userData = app.getPath('userData');
     const row = await loadSelfUpdateSessionContinuity(userData);
     if (!row) return null;
-    this.#continuityStatus = {
-      state: 'FOUND',
-      restored_tabs: 0,
-      tab_count: row.tabs.length,
-      target_version: row.target_version || null,
-      authority_effect: false,
-    };
+    this.#continuityStatus = { state: 'FOUND', restored_tabs: 0, tab_count: row.tabs.length, target_version: row.target_version || null, authority_effect: false };
     if (row.target_version && String(row.target_version) !== this.#version) {
       this.#continuityStatus.state = 'TARGET_VERSION_MISMATCH';
       return row;
@@ -246,106 +226,73 @@ export class NativeSupervisorClient {
       let current = byUrl.get(url) || null;
       if (!current) {
         try {
-          current = await this.#executeCommand({
-            action: 'NEW_TAB',
-            payload: { url, select: false },
-            platform: null,
-          });
-          if (current?.tab_id) {
-            byUrl.set(url, current);
-            restoredTabs += 1;
-          } else failedTabs += 1;
-        } catch {
-          failedTabs += 1;
-          continue;
-        }
+          current = await this.#executeCommand({ action: 'NEW_TAB', payload: { url, select: false }, platform: null });
+          if (current?.tab_id) { byUrl.set(url, current); restoredTabs += 1; } else failedTabs += 1;
+        } catch { failedTabs += 1; continue; }
       }
-      if (current?.tab_id) {
-        bindings.push({
-          prior_tab_id: String(prior?.prior_tab_id || ''),
-          tab_id: String(current.tab_id),
-          generation_state: String(prior?.generation_state || 'UNKNOWN').toUpperCase(),
-        });
-      }
+      if (current?.tab_id) bindings.push({ prior_tab_id: String(prior?.prior_tab_id || ''), tab_id: String(current.tab_id), generation_state: String(prior?.generation_state || 'UNKNOWN').toUpperCase() });
       if (prior?.selected === true && current?.tab_id) selectedTabId = String(current.tab_id);
     }
     if (selectedTabId) {
-      try {
-        await this.#executeCommand({ action: 'SELECT_TAB', payload: { tab_id: selectedTabId }, platform: null });
-      } catch {
-        failedTabs += 1;
-      }
+      try { await this.#executeCommand({ action: 'SELECT_TAB', payload: { tab_id: selectedTabId }, platform: null }); }
+      catch { failedTabs += 1; }
     }
 
     if (failedTabs === 0) {
       try {
         const postRestoreState = await this.#getState();
-        const cleanup = planPostRestoreBlankTabCleanup({
-          continuityRow: row,
-          bindings,
-          currentTabs: postRestoreState?.tabs || [],
-        });
+        const cleanup = planPostRestoreBlankTabCleanup({ continuityRow: row, bindings, currentTabs: postRestoreState?.tabs || [] });
         for (const tabId of cleanup.close_tab_ids) {
           await this.#executeCommand({ action: 'CLOSE_TAB', payload: { tab_id: tabId }, platform: null });
           closedExtraTabs += 1;
         }
-      } catch {
-        failedTabs += 1;
-      }
+      } catch { failedTabs += 1; }
     }
 
-    let reconcile = {
-      schema: 'metaengine.self-update-chat-reconcile.v1',
-      tabs: [], ambiguous_count: 0, unresolved_count: 0, authority_effect: false,
-    };
+    let reconcile = { schema: 'metaengine.self-update-chat-reconcile.v1', tabs: [], ambiguous_count: 0, unresolved_count: 0, authority_effect: false };
     if (failedTabs === 0 && bindings.some((binding) => binding.generation_state === 'GENERATING')) {
       reconcile = await reconcileRestoredGeneratingChats({
         bindings,
-        captureTab: async (tabId) => this.#executeCommand({
-          action: 'CAPTURE', payload: { tab_id: String(tabId) }, platform: 'CHATGPT',
-        }),
-        clickControl: async (tabId, accessibleName) => this.#executeCommand({
-          action: 'TYPED_CLICK',
-          payload: { tab_id: String(tabId), role: 'button', accessible_name: String(accessibleName) },
-          platform: 'CHATGPT',
-        }),
+        captureTab: async (tabId) => this.#executeCommand({ action: 'CAPTURE', payload: { tab_id: String(tabId) }, platform: 'CHATGPT' }),
+        clickControl: async (tabId, accessibleName) => this.#executeCommand({ action: 'TYPED_CLICK', payload: { tab_id: String(tabId), role: 'button', accessible_name: String(accessibleName) }, platform: 'CHATGPT' }),
       });
       failedTabs += Number(reconcile.unresolved_count || 0);
     }
 
     this.#continuityStatus = {
-      state: failedTabs === 0 ? 'RESTORED' : 'PARTIAL',
-      restored_tabs: restoredTabs,
-      closed_extra_tabs: closedExtraTabs,
-      failed_tabs: failedTabs,
-      tab_count: row.tabs.length,
-      target_version: row.target_version || null,
-      had_generating_tabs: row.tabs.some((tab) => tab?.generation_state === 'GENERATING'),
-      lifecycle_resume_present: Boolean(row.lifecycle?.active_request),
-      reconciled_generating_tabs: reconcile.tabs.length,
-      reconcile_ambiguous_count: reconcile.ambiguous_count,
-      reconcile_unresolved_count: reconcile.unresolved_count,
-      reconcile_authority_effect: reconcile.authority_effect === true,
-      authority_effect: false,
+      state: failedTabs === 0 ? 'RESTORED' : 'PARTIAL', restored_tabs: restoredTabs, closed_extra_tabs: closedExtraTabs, failed_tabs: failedTabs,
+      tab_count: row.tabs.length, target_version: row.target_version || null, had_generating_tabs: row.tabs.some((tab) => tab?.generation_state === 'GENERATING'),
+      lifecycle_resume_present: Boolean(row.lifecycle?.active_request), reconciled_generating_tabs: reconcile.tabs.length,
+      reconcile_ambiguous_count: reconcile.ambiguous_count, reconcile_unresolved_count: reconcile.unresolved_count,
+      reconcile_authority_effect: reconcile.authority_effect === true, authority_effect: false,
     };
     if (failedTabs === 0) await clearSelfUpdateSessionContinuity(userData);
     return row;
   }
 
   async start() {
-    if (this.#running) return this.snapshot();
+    if (this.#running) { this.#schedule(); return this.snapshot(); }
     this.#running = true;
     this.#startedAt = new Date().toISOString();
-    await this.#identity.ensure();
-    await this.#restoreSessionContinuity().catch((error) => {
-      this.#lastError = `continuity_restore:${clipError(error)}`;
-      this.#continuityStatus = { ...this.#continuityStatus, state: 'ERROR', error: clipError(error), authority_effect: false };
-    });
-    await this.#mesh.start().catch((error) => { this.#lastError = `mesh_start:${clipError(error)}`; });
-    await this.#lifecycle.start().catch((error) => { this.#lastError = `lifecycle_start:${clipError(error)}`; });
-    await this.#selfUpdate.start().catch((error) => { this.#lastError = `self_update_start:${clipError(error)}`; });
-    await this.cycle().catch(() => {});
+    // Arm the scheduler before any network/enrollment/bootstrap await. A transient
+    // startup failure must degrade one cycle, never terminate the supervisor service.
     this.#schedule();
+    try {
+      await this.#identity.ensure();
+      await this.#restoreSessionContinuity().catch((error) => {
+        this.#lastError = `continuity_restore:${clipError(error)}`;
+        this.#continuityStatus = { ...this.#continuityStatus, state: 'ERROR', error: clipError(error), authority_effect: false };
+      });
+      await this.#mesh.start().catch((error) => { this.#lastError = `mesh_start:${clipError(error)}`; });
+      await this.#lifecycle.start().catch((error) => { this.#lastError = `lifecycle_start:${clipError(error)}`; });
+      await this.#selfUpdate.start().catch((error) => { this.#lastError = `self_update_start:${clipError(error)}`; });
+      await this.cycle().catch(() => {});
+    } catch (error) {
+      this.#lastError = `startup:${clipError(error)}`;
+      throw error;
+    } finally {
+      if (this.#running) this.#schedule();
+    }
     return this.snapshot();
   }
 
@@ -393,48 +340,26 @@ export class NativeSupervisorClient {
 
   async ensureEnrollment() {
     const identity = await this.#identity.ensure();
-    if (identity.device_id) {
-      this.#enrollmentStatus = 'ENROLLED';
-      return identity;
-    }
+    if (identity.device_id) { this.#enrollmentStatus = 'ENROLLED'; return identity; }
     if (!identity.enrollment_request_id) {
-      const payload = {
-        profile: SUPERVISOR_DEVICE_PROFILE,
-        public_jwk: identity.public_jwk,
-        key_fingerprint_sha256: identity.key_fingerprint_sha256,
-        metadata: { shell_version: this.#version },
-      };
+      const payload = { profile: SUPERVISOR_DEVICE_PROFILE, public_jwk: identity.public_jwk, key_fingerprint_sha256: identity.key_fingerprint_sha256, metadata: { shell_version: this.#version } };
       const response = await this.#enrollmentRequest('/v1/device/enrollment/request', payload);
       const body = await response.json().catch(() => ({}));
-      if (![200, 202].includes(response.status) || !body?.request_id) {
-        throw new Error(`native_supervisor_enrollment_request_http_${response.status}:${body?.reason || body?.error || 'unknown'}`);
-      }
+      if (![200, 202].includes(response.status) || !body?.request_id) throw new Error(`native_supervisor_enrollment_request_http_${response.status}:${body?.reason || body?.error || 'unknown'}`);
       await this.#identity.bindEnrollmentRequest(body.request_id);
       this.#enrollmentStatus = String(body.status || 'PENDING');
       return this.#identity.snapshot();
     }
-    const payload = {
-      request_id: identity.enrollment_request_id,
-      profile: SUPERVISOR_DEVICE_PROFILE,
-      public_jwk: identity.public_jwk,
-      key_fingerprint_sha256: identity.key_fingerprint_sha256,
-    };
+    const payload = { request_id: identity.enrollment_request_id, profile: SUPERVISOR_DEVICE_PROFILE, public_jwk: identity.public_jwk, key_fingerprint_sha256: identity.key_fingerprint_sha256 };
     const response = await this.#enrollmentRequest('/v1/device/enrollment/status', payload);
     const body = await response.json().catch(() => ({}));
     if (response.status === 200 && body?.accepted === true && body?.device_id) {
-      await this.#identity.bindDevice(body.device_id);
-      this.#enrollmentStatus = 'ENROLLED';
-      return this.#identity.snapshot();
+      await this.#identity.bindDevice(body.device_id); this.#enrollmentStatus = 'ENROLLED'; return this.#identity.snapshot();
     }
-    if (response.status === 202) {
-      this.#enrollmentStatus = 'PENDING_APPROVAL';
-      return this.#identity.snapshot();
-    }
+    if (response.status === 202) { this.#enrollmentStatus = 'PENDING_APPROVAL'; return this.#identity.snapshot(); }
     const reason = String(body?.reason || body?.error || 'unknown');
     if (response.status === 409 && /EXPIRED|REJECTED|NOT_FOUND/.test(reason.toUpperCase())) {
-      await this.#identity.clearEnrollmentRequest();
-      this.#enrollmentStatus = 'RETRY_REQUIRED';
-      return this.#identity.snapshot();
+      await this.#identity.clearEnrollmentRequest(); this.#enrollmentStatus = 'RETRY_REQUIRED'; return this.#identity.snapshot();
     }
     throw new Error(`native_supervisor_enrollment_status_http_${response.status}:${reason}`);
   }
@@ -443,23 +368,13 @@ export class NativeSupervisorClient {
     const state = await this.#getState();
     const payload = {
       state: {
-        ...state,
-        shell_version: this.#version,
-        supervisor_mode: this.#supervisorMode,
-        armed: this.#armed,
-        operator_mode: this.#supervisorMode === 'CONTROL' ? 'CONTROL' : 'OBSERVE',
-        started_at: this.#startedAt,
-        last_error: this.#lastError,
-        supervisor_lifecycle: this.#lifecycle?.snapshot() || null,
-        self_update: this.#selfUpdate?.snapshot() || null,
+        ...state, shell_version: this.#version, supervisor_mode: this.#supervisorMode, armed: this.#armed,
+        operator_mode: this.#supervisorMode === 'CONTROL' ? 'CONTROL' : 'OBSERVE', started_at: this.#startedAt, last_error: this.#lastError,
+        supervisor_lifecycle: this.#lifecycle?.snapshot() || null, self_update: this.#selfUpdate?.snapshot() || null,
         self_update_session_continuity: structuredClone(this.#continuityStatus),
       },
-      last_command_id: this.#lastCommandId,
-      last_command_status: this.#lastCommandStatus,
+      last_command_id: this.#lastCommandId, last_command_status: this.#lastCommandStatus,
     };
-    // Do not publish the new mesh projection to live Edge until its bounded schema
-    // and Supabase/RLS path are rejoined on this DevOS line. Local failover is active
-    // now; DB-native mesh sync remains an evidence-gated next slice.
     const response = await this.#signedRequest('/v1/state', { payload });
     if (response.status !== 202) throw new Error(`native_supervisor_state_http_${response.status}`);
     this.#lastHeartbeatAt = new Date().toISOString();
@@ -473,19 +388,7 @@ export class NativeSupervisorClient {
   }
 
   async #postResult(command, ok, result, error = null) {
-    const payload = {
-      ok,
-      receipt: {
-        schema: 'metaengine.native-supervisor.command-receipt.v1',
-        command_id: command.command_id,
-        action: command.action,
-        platform: command.platform || null,
-        result: result ?? null,
-        recorded_at: new Date().toISOString(),
-        authority_effect: false,
-      },
-      error,
-    };
+    const payload = { ok, receipt: { schema: 'metaengine.native-supervisor.command-receipt.v1', command_id: command.command_id, action: command.action, platform: command.platform || null, result: result ?? null, recorded_at: new Date().toISOString(), authority_effect: false }, error };
     const response = await this.#signedRequest(`/v1/commands/${encodeURIComponent(command.command_id)}/result`, { payload });
     if (!response.ok) throw new Error(`native_supervisor_result_http_${response.status}`);
   }
@@ -493,14 +396,8 @@ export class NativeSupervisorClient {
   async #executeLocalOrRemote(command) {
     const action = String(command?.action || '');
     if (ROOT_POLICY_ACTIONS.has(action)) return this.#executeCommand(command);
-    if (action === 'ARM') {
-      this.#armed = true;
-      return { armed: true, supervisor_mode: this.#supervisorMode, authority_effect: true };
-    }
-    if (action === 'DISARM') {
-      this.#armed = false;
-      return { armed: false, supervisor_mode: this.#supervisorMode, authority_effect: true };
-    }
+    if (action === 'ARM') { this.#armed = true; return { armed: true, supervisor_mode: this.#supervisorMode, authority_effect: true }; }
+    if (action === 'DISARM') { this.#armed = false; return { armed: false, supervisor_mode: this.#supervisorMode, authority_effect: true }; }
     if (action === 'SET_SUPERVISOR_MODE') {
       const next = String(command?.payload?.mode || '').toUpperCase();
       if (!['OFF','MONITOR','CONTROL'].includes(next)) throw new Error('native_supervisor_mode_invalid');
@@ -519,37 +416,23 @@ export class NativeSupervisorClient {
       if (!armedAllows(this.#armed)) throw new Error('native_supervisor_disarmed');
       return this.#selfUpdate?.applyWhenSafe();
     }
-    if (!controlModeAllows(this.#supervisorMode) && !READ_ONLY_ACTIONS.has(action)) {
-      throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
-    }
+    if (!controlModeAllows(this.#supervisorMode) && !READ_ONLY_ACTIONS.has(action)) throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
     if (!armedAllows(this.#armed) && !READ_ONLY_ACTIONS.has(action)) throw new Error('native_supervisor_disarmed');
     return this.#executeCommand(command);
   }
 
   async #runCommand(command) {
-    this.#currentCommand = {
-      command_id: command.command_id,
-      action: command.action,
-      platform: command.platform || null,
-      issued_at: command.issued_at || null,
-      expires_at: command.expires_at || null,
-    };
+    this.#currentCommand = { command_id: command.command_id, action: command.action, platform: command.platform || null, issued_at: command.issued_at || null, expires_at: command.expires_at || null };
     let result = null;
     try {
       result = await this.#executeLocalOrRemote(command);
       await this.#postResult(command, true, result, null);
-      this.#lastCommandId = command.command_id;
-      this.#lastCommandStatus = 'COMPLETED';
-      return result;
+      this.#lastCommandId = command.command_id; this.#lastCommandStatus = 'COMPLETED'; return result;
     } catch (error) {
       const message = clipError(error);
       await this.#postResult(command, false, result, message).catch(() => {});
-      this.#lastCommandId = command.command_id;
-      this.#lastCommandStatus = 'FAILED';
-      throw error;
-    } finally {
-      this.#currentCommand = null;
-    }
+      this.#lastCommandId = command.command_id; this.#lastCommandStatus = 'FAILED'; throw error;
+    } finally { this.#currentCommand = null; }
   }
 
   async cycle() {

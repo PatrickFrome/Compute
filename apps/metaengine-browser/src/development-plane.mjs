@@ -22,6 +22,8 @@ const PAYLOAD_CAPABILITIES = new Set([
   'ADVISORY_EVIDENCE_VERIFY',
 ]);
 const MAX_REQUEST_PAYLOAD_BYTES = 256 * 1024;
+const DEFAULT_RESTART_BASE_MS = 250;
+const DEFAULT_RESTART_MAX_MS = 10_000;
 
 function clone(value) { return value == null ? value : structuredClone(value); }
 function plainObject(value) {
@@ -35,6 +37,8 @@ export class DevelopmentPlane {
   #clock;
   #uuid;
   #timeoutMs;
+  #restartBaseMs;
+  #restartMaxMs;
   #child = null;
   #state = 'STOPPED';
   #startedAt = null;
@@ -43,14 +47,28 @@ export class DevelopmentPlane {
   #readyWait = null;
   #stopWait = null;
   #shutdownAck = false;
+  #restartTimer = null;
+  #restartAttempt = 0;
+  #stopRequested = true;
 
-  constructor({ spawnWorker, clock = () => Date.now(), uuid = () => crypto.randomUUID(), timeout_ms = 5000 } = {}) {
+  constructor({
+    spawnWorker,
+    clock = () => Date.now(),
+    uuid = () => crypto.randomUUID(),
+    timeout_ms = 5000,
+    restart_base_ms = DEFAULT_RESTART_BASE_MS,
+    restart_max_ms = DEFAULT_RESTART_MAX_MS,
+  } = {}) {
     if (typeof spawnWorker !== 'function') throw new Error('development_plane_spawn_invalid');
     if (!Number.isSafeInteger(timeout_ms) || timeout_ms < 100 || timeout_ms > 60000) throw new Error('development_plane_timeout_invalid');
+    if (!Number.isSafeInteger(restart_base_ms) || restart_base_ms < 10 || restart_base_ms > 60000) throw new Error('development_plane_restart_base_invalid');
+    if (!Number.isSafeInteger(restart_max_ms) || restart_max_ms < restart_base_ms || restart_max_ms > 300000) throw new Error('development_plane_restart_max_invalid');
     this.#spawn = spawnWorker;
     this.#clock = clock;
     this.#uuid = uuid;
     this.#timeoutMs = timeout_ms;
+    this.#restartBaseMs = restart_base_ms;
+    this.#restartMaxMs = restart_max_ms;
   }
 
   snapshot() {
@@ -78,40 +96,80 @@ export class DevelopmentPlane {
       arbitrary_eval: false,
       page_command_authority: false,
       browser_actuation_authority: false,
-      automatic_restart: false,
+      automatic_restart: true,
+      restart_pending: this.#restartTimer != null,
+      restart_attempt: this.#restartAttempt,
+      restart_backoff_max_ms: this.#restartMaxMs,
+      terminal_requires_external_stop: true,
+      external_stop_requested: this.#stopRequested,
       verified_shutdown_required: true,
       cooperative_shutdown: true,
       authority_effect: false,
     });
   }
 
-  async start() {
+  #clearRestartTimer() {
+    if (this.#restartTimer) clearTimeout(this.#restartTimer);
+    this.#restartTimer = null;
+  }
+
+  #scheduleRestart() {
+    if (this.#stopRequested || this.#restartTimer || this.#child) return false;
+    const exponent = Math.min(this.#restartAttempt, 10);
+    const delay = Math.min(this.#restartMaxMs, this.#restartBaseMs * (2 ** exponent));
+    this.#restartAttempt += 1;
+    this.#state = 'RESTART_PENDING';
+    this.#restartTimer = setTimeout(() => {
+      this.#restartTimer = null;
+      if (this.#stopRequested || this.#child) return;
+      void this.#startChild().catch(() => { this.#scheduleRestart(); });
+    }, delay);
+    this.#restartTimer.unref?.();
+    return true;
+  }
+
+  async #startChild() {
+    if (this.#stopRequested) return this.snapshot();
     if (this.#state === 'READY') return this.snapshot();
     if (this.#state === 'STARTING' && this.#readyWait) return this.#readyWait;
     if (this.#child) throw new Error('development_plane_child_already_present');
+    this.#clearRestartTimer();
     this.#state = 'STARTING';
-    this.#lastExitCode = null;
     this.#shutdownAck = false;
-    const child = this.#spawn();
+    let child;
+    try {
+      child = this.#spawn();
+    } catch (error) {
+      this.#state = 'LOST';
+      this.#scheduleRestart();
+      throw error;
+    }
     if (!child || typeof child.on !== 'function' || typeof child.postMessage !== 'function' || typeof child.kill !== 'function') {
       this.#state = 'LOST';
+      this.#scheduleRestart();
       throw new Error('development_plane_child_invalid');
     }
     this.#child = child;
-    child.on('message', (message) => this.#onMessage(message));
-    child.on('exit', (code) => this.#onExit(code));
+    child.on('message', (message) => this.#onMessage(child, message));
+    child.on('exit', (code) => this.#onExit(child, code));
     child.on('error', () => {});
     this.#readyWait = new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        if (this.#state === 'STARTING') {
+        if (this.#state === 'STARTING' && this.#child === child) {
           this.#state = 'LOST';
-          try { this.#child?.kill(); } catch {}
+          try { child.kill(); } catch {}
+          this.#scheduleRestart();
           reject(new Error('development_plane_ready_timeout'));
         }
       }, this.#timeoutMs);
       this.#pending.set('__READY__', { resolve: (value) => { clearTimeout(timer); resolve(value); }, reject: (error) => { clearTimeout(timer); reject(error); } });
     }).finally(() => { this.#readyWait = null; });
     return this.#readyWait;
+  }
+
+  async start() {
+    this.#stopRequested = false;
+    return this.#startChild();
   }
 
   async request(capability, payload = null) {
@@ -149,6 +207,8 @@ export class DevelopmentPlane {
   }
 
   stop() {
+    this.#stopRequested = true;
+    this.#clearRestartTimer();
     if (!this.#child) {
       this.#state = 'STOPPED';
       return false;
@@ -162,6 +222,8 @@ export class DevelopmentPlane {
 
   async stopAndWait(timeout_ms = this.#timeoutMs) {
     if (!Number.isSafeInteger(timeout_ms) || timeout_ms < 100 || timeout_ms > 60000) throw new Error('development_plane_stop_timeout_invalid');
+    this.#stopRequested = true;
+    this.#clearRestartTimer();
     if (!this.#child) {
       this.#state = 'STOPPED';
       return Object.freeze({ ok: true, state: 'STOPPED', last_exit_code: this.#lastExitCode, already_stopped: true, cooperative_shutdown_ack: this.#shutdownAck, authority_effect: false });
@@ -213,8 +275,8 @@ export class DevelopmentPlane {
     return this.#stopWait;
   }
 
-  #onMessage(message) {
-    if (!message || message.protocol !== DEVELOPMENT_PLANE_PROTOCOL) return;
+  #onMessage(child, message) {
+    if (this.#child !== child || !message || message.protocol !== DEVELOPMENT_PLANE_PROTOCOL) return;
     if (message.type === 'SHUTDOWN_ACK') {
       if (this.#state === 'STOPPING') this.#shutdownAck = true;
       return;
@@ -227,12 +289,14 @@ export class DevelopmentPlane {
         const waiter = this.#pending.get('__READY__');
         this.#pending.delete('__READY__');
         this.#state = 'LOST';
-        try { this.#child?.kill(); } catch {}
+        try { child.kill(); } catch {}
         waiter?.reject(new Error('development_plane_capability_handshake_mismatch'));
+        this.#scheduleRestart();
         return;
       }
       this.#state = 'READY';
       this.#startedAt = new Date(this.#clock()).toISOString();
+      this.#restartAttempt = 0;
       const waiter = this.#pending.get('__READY__');
       this.#pending.delete('__READY__');
       waiter?.resolve(this.snapshot());
@@ -246,14 +310,16 @@ export class DevelopmentPlane {
     else pending.reject(new Error(`development_plane_remote_error:${String(message.error || 'UNKNOWN')}`));
   }
 
-  #onExit(code) {
+  #onExit(child, code) {
+    if (this.#child !== child) return;
     this.#lastExitCode = Number.isInteger(code) ? code : null;
     this.#child = null;
-    if (this.#state === 'STOPPING') this.#state = 'STOPPED';
-    else this.#state = 'LOST';
+    const planned = this.#stopRequested || this.#state === 'STOPPING';
+    this.#state = planned ? 'STOPPED' : 'LOST';
     for (const [id, pending] of this.#pending) {
       this.#pending.delete(id);
       pending.reject(new Error('development_plane_process_lost'));
     }
+    if (!planned) this.#scheduleRestart();
   }
 }
