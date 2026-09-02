@@ -1,0 +1,76 @@
+name: Browser Workspace Reincarnation V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/workspace-reincarnation-proof.mjs'
+      - 'apps/metaengine-browser/test/workspace-reincarnation-proof.test.mjs'
+      - 'coordination/browser/WORKSPACE_REINCARNATION_CONTRACT_V1.md'
+      - '.github/workflows/browser-workspace-reincarnation-v1.yml'
+  push:
+    branches:
+      - 'work/browser-workspace-reincarnation-v1'
+    paths:
+      - 'apps/metaengine-browser/src/workspace-reincarnation-proof.mjs'
+      - 'apps/metaengine-browser/test/workspace-reincarnation-proof.test.mjs'
+      - 'coordination/browser/WORKSPACE_REINCARNATION_CONTRACT_V1.md'
+      - '.github/workflows/browser-workspace-reincarnation-v1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  reincarnation-proof-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          printf 'exact_head=%s\n' "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v6.0.0
+        with:
+          node-version: '24'
+
+      - name: Syntax and falsification suite
+        run: |
+          set -euo pipefail
+          node --check apps/metaengine-browser/src/workspace-reincarnation-proof.mjs
+          node --test apps/metaengine-browser/test/workspace-reincarnation-proof.test.mjs
+
+      - name: Zero-authority static contract
+        run: |
+          set -euo pipefail
+          FILE=apps/metaengine-browser/src/workspace-reincarnation-proof.mjs
+          grep -q "eligible_for_db_transition: true" "$FILE"
+          grep -q "transition_rpc_required: true" "$FILE"
+          grep -q "transition_already_performed: false" "$FILE"
+          grep -q "fleet_transport_promoted: false" "$FILE"
+          grep -q "url_authority: false" "$FILE"
+          grep -q "continuity_receipt_authority: false" "$FILE"
+          grep -q "automatic_retry_allowed: false" "$FILE"
+          grep -q "scheduler_authority: false" "$FILE"
+          grep -q "browser_actuation_authority: false" "$FILE"
+          grep -q "authority_effect: false" "$FILE"
+          ! grep -Eq "setInterval\s*\(|setTimeout\s*\(|fetch\s*\(|ipcRenderer|webContents\.(click|sendInputEvent)|child_process|exec\s*\(|spawn\s*\(" "$FILE"
+          ! grep -Eq "\burl\s*:|\btitle\s*:|page_text|model_text|prompt\s*:" "$FILE"
+
+      - name: Clean checkout
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          printf 'db_mutation=false\n'
+          printf 'browser_actuation=false\n'
+          printf 'transport_promotion=false\n'
+          printf 'second_scheduler=false\n'
