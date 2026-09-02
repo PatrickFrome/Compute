@@ -42,10 +42,13 @@ function exactControl(frame, command) {
   return rows.length === 1 ? rows[0] : null;
 }
 
-function isLocalSupervisorClick(command, state) {
-  if (String(command?.action || '') !== 'TYPED_CLICK' || command?.command_id) return false;
+function localClickShape(command) {
+  if (String(command?.action || '') !== 'TYPED_CLICK' || command?.command_id) return null;
   const tabId = String(command?.payload?.tab_id || '');
-  if (!tabId) return false;
+  return tabId ? { tab_id: tabId } : null;
+}
+
+function isSupervisorTab(tabId, state) {
   const fleetTabs = new Set((state?.fleet?.agents || []).map((agent) => String(agent?.tab_id || '')).filter(Boolean));
   if (fleetTabs.has(tabId)) return false;
   const tab = (state?.tabs || []).find((row) => String(row?.tab_id || '') === tabId) || null;
@@ -72,10 +75,12 @@ function noClick(reason) {
  */
 export async function executeGuardedSupervisorLocalClick({ command, getState, executeCommand } = {}) {
   if (typeof getState !== 'function' || typeof executeCommand !== 'function') throw new Error('supervisor_local_click_guard_dependencies_required');
+  const shape = localClickShape(command);
+  if (!shape) return Object.freeze({ handled: false, result: null });
   const initialState = await getState();
-  if (!isLocalSupervisorClick(command, initialState)) return Object.freeze({ handled: false, result: null });
+  if (!isSupervisorTab(shape.tab_id, initialState)) return Object.freeze({ handled: false, result: null });
 
-  const tabId = String(command.payload.tab_id);
+  const tabId = shape.tab_id;
   let beforeFrame;
   try {
     beforeFrame = await executeCommand({ action: 'CAPTURE', payload: { tab_id: tabId }, platform: command?.platform || null });
