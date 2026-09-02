@@ -3,6 +3,7 @@ name: METAENGINE Browser Fast Self Update E2E
 on:
   push:
     branches:
+      - integration/metaengine-development-os-v1
       - work/self-update-fast-loop-v1
       - work/devos-elastic-fleet-bootstrap-v1
       - work/browser-devos-root-transport-bootstrap-v1
@@ -15,8 +16,11 @@ on:
 permissions:
   contents: read
 
+# Exact SHAs may verify concurrently. Only a duplicate/rerun of the same source SHA
+# may supersede an in-flight attempt; a newer integration commit must never starve
+# an older exact-source physical proof by cancelling it.
 concurrency:
-  group: metaengine-browser-fast-self-update-${{ github.ref }}
+  group: metaengine-browser-fast-self-update-${{ github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -73,11 +77,11 @@ jobs:
         run: |
           npm run check
           npm test
-          $packageVersion = [string](node -p "require('./package.json').version")
-          if ($packageVersion -notmatch '^0\.6\.6-dev\.[0-9]+\.1$') { throw "candidate_version_not_trusted_dev_shape:$packageVersion" }
+          $sourcePackageVersion = [string](node -p "require('./package.json').version")
+          if ($sourcePackageVersion -notmatch '^0\.6\.6-dev\.[0-9]+\.1$') { throw "source_package_version_not_trusted_dev_shape:$sourcePackageVersion" }
           $physical = Get-Content ./test/self-update-fast-physical.ps1 -Raw
           if ($physical -notmatch '\$target\s*=\s*"0\.6\.3-dev\.\$buildId\.1"') { throw 'physical_target_source_contract_missing' }
-      - name: Bind physical target to exact package version
+      - name: Bind physical target to immutable workflow run identity
         working-directory: apps/metaengine-browser
         shell: powershell
         run: |
@@ -85,9 +89,11 @@ jobs:
           $raw = Get-Content $path -Raw
           $pattern = '(?ms)# Build exactly one new target\..*?npm pkg set version=\$target'
           $replacement = @'
-          # Build exactly one new target bound to the exact candidate package version.
-          # Published baseline reuse and every downstream physical proof remain unchanged.
-          $target = [string](node -p "require('./package.json').version")
+          # Build exactly one target from the exact checked-out source. The dev build
+          # identity is derived from immutable GITHUB_RUN_ID, so parallel integration
+          # commits never contend on a manually edited package version and reruns of
+          # the same workflow run preserve the same target identity.
+          $target = "0.6.6-dev.$env:GITHUB_RUN_ID.1"
           if ($target -notmatch '^0\.6\.6-dev\.[0-9]+\.1$') { throw "target_version_invalid:$target" }
           npm pkg set version=$target
           '@
@@ -96,7 +102,7 @@ jobs:
           $replacementLiteral = $replacement.Replace('$', '$$')
           $next = [regex]::Replace($raw, $pattern, $replacementLiteral, 1)
           if ($next -eq $raw) { throw 'physical_target_patch_not_applied' }
-          if ($next -notmatch '\$target\s*=\s*\[string\]\(node -p') { throw 'physical_target_variable_lost' }
+          if ($next -notmatch 'GITHUB_RUN_ID') { throw 'physical_target_run_identity_lost' }
           [System.IO.File]::WriteAllText((Join-Path (Get-Location) 'test/self-update-fast-physical-candidate.ps1'), $next, [System.Text.UTF8Encoding]::new($false))
       - name: Published baseline to exact candidate physical update
         working-directory: apps/metaengine-browser
