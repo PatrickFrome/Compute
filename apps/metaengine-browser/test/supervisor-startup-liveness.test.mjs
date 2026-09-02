@@ -9,7 +9,7 @@ const src = path.resolve(here, '../src');
 
 async function read(name) { return fs.readFile(path.join(src, name), 'utf8'); }
 
-test('Browser runtime registers early but cannot start before host resilience bootstrap and watchdog fencing', async () => {
+test('Browser runtime registers early, waits for host resilience, and retries startup until external stop', async () => {
   const entry = await read('main-entry.mjs');
   const main = await read('main.mjs');
   const barrierAt = entry.indexOf('__METAENGINE_BROWSER_BOOTSTRAP_BARRIER__');
@@ -28,7 +28,17 @@ test('Browser runtime registers early but cannot start before host resilience bo
   assert.ok(hostStartAt > watchdogAt, 'continuity watchdog must be armed before host bootstrap can block');
   assert.ok(releaseAt > hostStartAt, 'Browser start barrier may release only after host bootstrap returns');
   assert.ok(mainBarrierAt >= 0 && mainAwaitAt > mainBarrierAt && startupAt > mainAwaitAt);
-  assert.match(main, /if \(app\.isReady\(\)\) queueMicrotask\(startBrowserRuntime\)/);
+
+  assert.match(main, /const STARTUP_RETRY_BASE_MS = 1000/);
+  assert.match(main, /const STARTUP_RETRY_MAX_MS = 30000/);
+  assert.match(main, /function scheduleBrowserRuntimeRetry\(error\)/);
+  assert.match(main, /if \(shutdownRequested \|\| isSmoke \|\| isDevelopmentPlaneSmoke \|\| startupRetryTimer\) return/);
+  assert.match(main, /Math\.min\(STARTUP_RETRY_MAX_MS, STARTUP_RETRY_BASE_MS \* \(2 \*\* Math\.min\(8, startupRetryAttempt - 1\)\)\)/);
+  assert.match(main, /else scheduleBrowserRuntimeRetry\(error\)/);
+  assert.match(main, /if \(recover\) scheduleBrowserRuntimeRetry\(new Error\('browser_window_closed_unexpectedly'\)\)/);
+  assert.match(main, /if \(app\.isReady\(\)\) queueMicrotask\(\(\) => \{ void startBrowserRuntime\(\); \}\)/);
+  assert.match(main, /else app\.once\('ready', \(\) => \{ void startBrowserRuntime\(\); \}\)/);
+  assert.match(main, /terminal_requires_external_stop: true/);
 });
 
 test('watchdog recovery quarantines durable continuity before relaunch and has no browser replay authority', async () => {
