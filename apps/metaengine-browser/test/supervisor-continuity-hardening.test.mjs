@@ -25,9 +25,13 @@ function keepaliveHarness() {
 
 function idleFrame(text = '') {
   return {
+    tab_id: 'tab1',
+    process_incarnation_id: 'process-test-1',
+    target_id: 'webcontents:1',
     url: CONVERSATION,
     title: 'ChatGPT',
     text_excerpt: text,
+    viewport: { width: 1280, height: 720 },
     semantic_targets: [
       { role: 'textbox', name: 'Message ChatGPT' },
       { role: 'button', name: 'Send' },
@@ -37,9 +41,7 @@ function idleFrame(text = '') {
 
 function generatingFrame(text = '') {
   return {
-    url: CONVERSATION,
-    title: 'ChatGPT',
-    text_excerpt: text,
+    ...idleFrame(text),
     semantic_targets: [
       { role: 'textbox', name: 'Message ChatGPT' },
       { role: 'button', name: 'Stop generating' },
@@ -139,6 +141,7 @@ test('restart with ambiguous wake and orphaned hard stall performs STOP-only the
     actions.push(command.action);
     if (command.action === 'CAPTURE') return isGenerating ? generatingFrame(typed) : idleFrame(typed);
     if (command.action === 'STOP_GENERATION') { isGenerating = false; return { ok: true, authority_effect: true }; }
+    if (command.action === 'SELECT_TAB') return { ok: true, authority_effect: true };
     if (command.action === 'SEMANTIC_TYPE') { typed = String(command.payload?.text || ''); return { ok: true, authority_effect: true }; }
     if (command.action === 'TYPED_CLICK') { isGenerating = true; return { ok: true, authority_effect: true }; }
     throw new Error(`unexpected_action:${command.action}`);
