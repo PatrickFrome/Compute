@@ -173,6 +173,7 @@ export class SupervisorMeshRuntime {
     const lifecycle = this.#primaryLifecycle() || null;
     const keepalive = lifecycle?.keepalive || null;
     const state = String(keepalive?.state || '');
+    const rolloverAttemptId = keepalive?.rollover_attempt?.attempt_id ? String(keepalive.rollover_attempt.attempt_id) : null;
     const meshSnapshot = this.#mesh.snapshot();
     const primary = meshSnapshot.supervisors.find((row) => row.conversation_url === keepalive?.conversation_url) || null;
     const primaryId = primary?.supervisor_id || null;
@@ -190,8 +191,10 @@ export class SupervisorMeshRuntime {
       priorAmbiguousEventId = wakeId;
     } else if (state === 'ROLLOVER_DEFERRED' || state === 'ROLLOVER_REQUIRED' || state === 'ROLLOVER_AMBIGUOUS') {
       reason = 'PRIMARY_ROLLOVER_COORDINATION';
-      eventKey = `rollover:${keepalive?.supervisor_epoch || 0}:${String(keepalive?.rollover_reason || state)}`;
-      priorAmbiguousEventId = state === 'ROLLOVER_AMBIGUOUS' ? String(keepalive?.rollover_reason || '') : null;
+      eventKey = `rollover:${keepalive?.supervisor_epoch || 0}:${rolloverAttemptId || String(keepalive?.rollover_reason || state)}`;
+      priorAmbiguousEventId = state === 'ROLLOVER_AMBIGUOUS'
+        ? (rolloverAttemptId || String(keepalive?.rollover_reason || ''))
+        : null;
     } else {
       return { ok: false, suppressed: true, reason: 'PRIMARY_HEALTHY', authority_effect: false };
     }
@@ -201,7 +204,11 @@ export class SupervisorMeshRuntime {
       reason,
       excludeSupervisorIds: primaryId ? [primaryId] : [],
       priorAmbiguousEventId,
-      metadata: { primary_state: state, supervisor_epoch: keepalive?.supervisor_epoch || null },
+      metadata: {
+        primary_state: state,
+        supervisor_epoch: keepalive?.supervisor_epoch || null,
+        rollover_attempt_id: rolloverAttemptId,
+      },
     });
     if (!reservation.ok) return reservation;
 
@@ -231,7 +238,14 @@ export class SupervisorMeshRuntime {
     }
     if (sent.ok) {
       await this.#mesh.confirmDelivery(delivery.supervisor_id, delivery.pending.delivery_id);
-      this.#lastDelivery = { event_id: reservation.event_id, status: 'SENT', supervisor_id: delivery.supervisor_id, at: new Date(this.#clock()).toISOString(), authority_effect: false };
+      this.#lastDelivery = {
+        event_id: reservation.event_id,
+        status: 'SENT',
+        supervisor_id: delivery.supervisor_id,
+        rollover_attempt_id: rolloverAttemptId,
+        at: new Date(this.#clock()).toISOString(),
+        authority_effect: false,
+      };
       return { ok: true, event_id: reservation.event_id, supervisor_id: delivery.supervisor_id, authority_effect: false };
     }
     if (sent.clicked || sent.typed) {
