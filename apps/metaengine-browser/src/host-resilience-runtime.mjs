@@ -7,10 +7,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PARENT_PROGRESS_HEARTBEAT_MS = 5_000;
 
 export class HostResilienceRuntime {
-  #electron; #onResume; #platform; #blockerId = null; #resumeHandler = null; #sentinel = null; #progressLease = null; #progressTimer = null;
+  #electron; #onResume; #platform; #blockerId = null; #resumeHandler = null; #sentinel = null; #progressLease = null; #progressTimer = null; #resilienceTickPromise = null;
   #state = {
     state: 'UNINITIALIZED', open_at_login: false, executable_will_launch_at_login: false,
     prevent_app_suspension: false, sentinel: null, sentinel_worker_healthy: false,
+    sentinel_worker_recovery: null,
     parent_progress: null, parent_progress_heartbeat_ms: PARENT_PROGRESS_HEARTBEAT_MS,
     last_resume_at: null, last_error: null,
   };
@@ -25,17 +26,49 @@ export class HostResilienceRuntime {
     const sentinel = this.#sentinel?.snapshot?.() || this.#state.sentinel;
     const parentProgress = this.#progressLease?.snapshot?.() || this.#state.parent_progress;
     return structuredClone({
-      schema: 'metaengine.host-resilience-runtime.v4',
+      schema: 'metaengine.host-resilience-runtime.v5',
       ...this.#state,
       sentinel,
       parent_progress: parentProgress,
       sentinel_worker_healthy: sentinel?.worker_ready === true,
       useful_progress_required: true,
       pid_liveness_alone_sufficient: false,
+      sentinel_recovery_requires_exact_old_pid_absence: true,
+      sentinel_recovery_uses_existing_progress_tick: true,
       watchdog_scheduler_authority: false,
       watchdog_task_leasing: false,
       authority_effect: false,
     });
+  }
+
+  async #resilienceTick({ kind = 'EVENT_LOOP_HEARTBEAT', detail = null } = {}) {
+    if (this.#resilienceTickPromise) return this.#resilienceTickPromise;
+    this.#resilienceTickPromise = (async () => {
+      // Keep the parent-progress lease fresh independently of worker recovery. A dead
+      // sentinel must never make the healthy parent look wedged while we repair it.
+      if (this.#progressLease) {
+        await this.#progressLease.mark({ kind, detail });
+        this.#state.parent_progress = this.#progressLease.snapshot();
+      }
+
+      if (this.#sentinel?.recoverWorkerIfProvenAbsent) {
+        try {
+          const recovery = await this.#sentinel.recoverWorkerIfProvenAbsent();
+          this.#state.sentinel_worker_recovery = recovery ? structuredClone(recovery) : null;
+          this.#state.sentinel_worker_healthy = this.#sentinel.snapshot()?.worker_ready === true;
+          if (recovery?.state === 'RECOVERED' || recovery?.state === 'HEALTHY') {
+            if (String(this.#state.last_error || '').startsWith('sentinel_worker:')) this.#state.last_error = null;
+          } else if (['STALE_WORKER_PID_ALIVE','WORKER_PID_MISSING_AMBIGUOUS','SPAWN_AMBIGUOUS','CANDIDATE_ALIVE_HEARTBEAT_AMBIGUOUS'].includes(String(recovery?.state || ''))) {
+            this.#state.last_error = `sentinel_worker:${String(recovery.state).slice(0, 180)}`;
+          }
+        } catch (error) {
+          this.#state.sentinel_worker_healthy = false;
+          this.#state.last_error = `sentinel_worker:${String(error?.message || error).slice(0, 200)}`;
+        }
+      }
+      return this.snapshot();
+    })().finally(() => { this.#resilienceTickPromise = null; });
+    return this.#resilienceTickPromise;
   }
 
   async start() {
@@ -58,7 +91,9 @@ export class HostResilienceRuntime {
         await this.#progressLease.mark({ kind: 'HOST_RESILIENCE_STARTED' });
         this.#state.parent_progress = this.#progressLease.snapshot();
         this.#progressTimer = setInterval(() => {
-          void this.markProgress({ kind: 'EVENT_LOOP_HEARTBEAT' }).catch(() => {});
+          void this.#resilienceTick({ kind: 'EVENT_LOOP_HEARTBEAT' }).catch((error) => {
+            this.#state.last_error = `resilience_tick:${String(error?.message || error).slice(0, 200)}`;
+          });
         }, PARENT_PROGRESS_HEARTBEAT_MS);
         this.#progressTimer.unref?.();
         this.#state.sentinel_worker_healthy = true;
@@ -71,7 +106,7 @@ export class HostResilienceRuntime {
         this.#resumeHandler = () => {
           this.#state.last_resume_at = new Date().toISOString();
           Promise.resolve(this.#onResume())
-            .then(() => this.markProgress({ kind: 'POWER_RESUME' }))
+            .then(() => this.#resilienceTick({ kind: 'POWER_RESUME' }))
             .catch((e) => { this.#state.last_error = String(e?.message || e).slice(0, 240); });
         };
         powerMonitor.on('resume', this.#resumeHandler);
@@ -119,6 +154,7 @@ export class HostResilienceRuntime {
     this.#resumeHandler = null;
     this.#progressTimer = null;
     this.#progressLease = null;
+    this.#resilienceTickPromise = null;
     this.#state.prevent_app_suspension = false;
     this.#state.sentinel_worker_healthy = false;
     this.#state.state = 'STOPPED';

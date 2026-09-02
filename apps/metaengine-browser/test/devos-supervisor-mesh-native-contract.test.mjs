@@ -13,7 +13,8 @@ test('mesh continuity is preserved in exact base and the public DevOS client can
   assert.match(base, /new SupervisorMeshRuntime/);
   assert.match(base, /dispatchRecoveryIfNeeded/);
   assert.match(base, /confirmSelfUpdateRestartSafety/);
-  assert.match(base, /Do not publish the new mesh projection to live Edge/);
+  assert.match(base, /supervisor_mesh:\s*this\.\#mesh\?\.snapshot\(\)\s*\|\|\s*null/);
+  assert.match(base, /await this\.\#mesh\?\.reconcile\(\)/);
   assert.match(core, /extends BaseNativeSupervisorClient/);
   assert.match(publicClient, /NativeSupervisorClient as CoreNativeSupervisorClient/);
   assert.match(publicClient, /extends CoreNativeSupervisorClient/);

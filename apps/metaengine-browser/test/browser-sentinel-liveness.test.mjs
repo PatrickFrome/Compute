@@ -95,12 +95,14 @@ test('worker cannot relaunch before exact old parent absence and never retries a
   const beginTermination=source.indexOf('await journal.beginTermination(state, decision)');
   const kill=source.indexOf("process.kill(PARENT_PID, 'SIGTERM')");
   const absentGuard=source.lastIndexOf('if (parentAlive()) return;');
-  const relaunch=source.lastIndexOf('await relaunchOnce(state, journal)');
+  const relaunchLoop=source.lastIndexOf('await relaunchUntilResolved(state, journal)');
   const beginRelaunch=source.indexOf("await journal.beginRelaunch(state, 'EXACT_OLD_PARENT_ABSENT')");
   const spawn=source.indexOf('child = spawn(state.executable');
   assert.ok(beginTermination>=0&&kill>beginTermination);
-  assert.ok(absentGuard>kill&&relaunch>absentGuard);
+  assert.ok(absentGuard>kill&&relaunchLoop>absentGuard);
   assert.ok(beginRelaunch>=0&&spawn>beginRelaunch);
+  assert.match(source,/awaitDispatchedRelaunchResolution/);
+  assert.match(source,/exact_relaunch_pid_absent_without_successor_binding/);
   assert.match(source,/parent_liveness_termination_attempted: journal\.terminationAttempted\(\)/);
   assert.match(source,/PARENT_TERMINATION_AMBIGUOUS/);
   assert.match(source,/automatic_retry_allowed: false/);

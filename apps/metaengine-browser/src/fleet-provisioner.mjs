@@ -96,8 +96,14 @@ export class FleetProvisioner extends CoreFleetProvisioner {
   }
 
   async reconcile(args = {}) {
-    if (args?.active === true && this.#capacityBackpressure) return this.snapshot();
-    await super.reconcile(args);
+    const active = args?.active === true;
+    if (active && this.#capacityBackpressure) return this.snapshot();
+    // Keep this wrapper least-authority. Capacity backpressure is handled here, but
+    // only the core's documented scheduler inputs may cross the inheritance boundary.
+    // Future wrapper fields can therefore never become owner-gate or fanout authority.
+    const targetAgents = args?.target_agents ?? null;
+    const spawnBurstLimit = args?.spawn_burst_limit ?? null;
+    await super.reconcile({ active, target_agents: targetAgents, spawn_burst_limit: spawnBurstLimit });
     await this.#retireDeterministicCapacityAttempts();
     return this.snapshot();
   }

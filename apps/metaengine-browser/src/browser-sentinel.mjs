@@ -7,8 +7,9 @@ import { spawn } from 'node:child_process';
 const require = createRequire(import.meta.url);
 const { durableWriteJson, durableWriteJsonSync } = require('./durable-json-file.cjs');
 
-export const BROWSER_SENTINEL_VERSION = '1.5.0';
+export const BROWSER_SENTINEL_VERSION = '1.6.0';
 export const BROWSER_SENTINEL_WORKER_HEARTBEAT_MAX_AGE_MS = 8_000;
+const WORKER_RECOVERY_ACK_TIMEOUT_MS = 2_000;
 
 async function readJson(file) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); }
@@ -35,7 +36,10 @@ export function browserSentinelWorkerHeartbeatPath(statePath) {
 function safeState(value) {
   const relaunchPid = Number(value.relaunch_pid || 0);
   const workerPid = Number(value.worker_pid || 0);
+  const recoveryOldPid = Number(value.worker_recovery_old_pid || 0);
+  const recoveryCandidatePid = Number(value.worker_recovery_candidate_pid || 0);
   const revision = Number(value.state_revision || 0);
+  const recoveryGeneration = Number(value.worker_recovery_generation || 0);
   return {
     schema: 'metaengine.browser-sentinel.state.v1',
     version: BROWSER_SENTINEL_VERSION,
@@ -51,6 +55,12 @@ function safeState(value) {
     worker_pid: Number.isSafeInteger(workerPid) && workerPid > 0 ? workerPid : null,
     worker_released: value.worker_released === true,
     worker_released_at: value.worker_released_at || null,
+    worker_recovery_generation: Number.isSafeInteger(recoveryGeneration) && recoveryGeneration >= 0 ? recoveryGeneration : 0,
+    worker_recovery_state: value.worker_recovery_state ? String(value.worker_recovery_state).slice(0, 80) : null,
+    worker_recovery_old_pid: Number.isSafeInteger(recoveryOldPid) && recoveryOldPid > 0 ? recoveryOldPid : null,
+    worker_recovery_candidate_pid: Number.isSafeInteger(recoveryCandidatePid) && recoveryCandidatePid > 0 ? recoveryCandidatePid : null,
+    worker_recovery_at: value.worker_recovery_at || null,
+    worker_recovery_result: value.worker_recovery_result ? String(value.worker_recovery_result).slice(0, 240) : null,
     relaunch_attempted: value.relaunch_attempted === true,
     relaunch_intent_at: value.relaunch_intent_at || null,
     relaunch_pid: Number.isSafeInteger(relaunchPid) && relaunchPid > 0 ? relaunchPid : null,
@@ -87,14 +97,16 @@ function processAlive(pid) {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class BrowserSentinelHost {
-  #statePath; #workerScript; #executable; #spawn; #state = null; #child = null; #beforeQuit = null; #app = null;
+  #statePath; #workerScript; #executable; #spawn; #processAlive; #state = null; #child = null; #beforeQuit = null; #app = null; #workerRecoveryPromise = null;
 
-  constructor({ statePath, workerScript, executable = process.execPath, spawnImpl = spawn } = {}) {
+  constructor({ statePath, workerScript, executable = process.execPath, spawnImpl = spawn, processAliveImpl = processAlive } = {}) {
     if (!statePath || !workerScript || !executable) throw new Error('browser_sentinel_paths_required');
+    if (typeof processAliveImpl !== 'function') throw new Error('browser_sentinel_process_probe_required');
     this.#statePath = String(statePath);
     this.#workerScript = String(workerScript);
     this.#executable = String(executable);
     this.#spawn = spawnImpl;
+    this.#processAlive = processAliveImpl;
   }
 
   snapshot() {
@@ -140,6 +152,17 @@ export class BrowserSentinelHost {
     throw new Error('browser_sentinel_worker_handshake_timeout');
   }
 
+  #spawnWorker(token, parentPid) {
+    const env = sentinelEnvironment(process.env, { statePath: this.#statePath, token, parentPid });
+    return this.#spawn(this.#executable, [this.#workerScript], {
+      detached: true,
+      stdio: 'ignore',
+      shell: false,
+      windowsHide: true,
+      env,
+    });
+  }
+
   async start({ app = null } = {}) {
     const token = crypto.randomUUID();
     this.#state = safeState({
@@ -153,18 +176,12 @@ export class BrowserSentinelHost {
       installer_handoff: false,
       worker_pid: null,
       worker_released: false,
+      worker_recovery_generation: 0,
       relaunch_attempted: false,
       relaunch_pid: null,
     });
     await writeJson(this.#statePath, this.#state);
-    const env = sentinelEnvironment(process.env, { statePath: this.#statePath, token, parentPid: process.pid });
-    this.#child = this.#spawn(this.#executable, [this.#workerScript], {
-      detached: true,
-      stdio: 'ignore',
-      shell: false,
-      windowsHide: true,
-      env,
-    });
+    this.#child = this.#spawnWorker(token, process.pid);
     const workerPid = Number(this.#child?.pid || 0);
     if (Number.isSafeInteger(workerPid) && workerPid > 0) {
       await this.#mutate({ worker_pid: workerPid, worker_released: false });
@@ -204,6 +221,128 @@ export class BrowserSentinelHost {
     return this.snapshot();
   }
 
+  async recoverWorkerIfProvenAbsent({ timeoutMs = WORKER_RECOVERY_ACK_TIMEOUT_MS } = {}) {
+    if (this.#workerRecoveryPromise) return this.#workerRecoveryPromise;
+    this.#workerRecoveryPromise = (async () => {
+      const snap = this.snapshot();
+      if (!snap) return { state: 'UNBOUND', recovered: false, automatic_retry_allowed: false, authority_effect: false };
+      if (snap.worker_ready === true) return { state: 'HEALTHY', recovered: false, automatic_retry_allowed: false, authority_effect: false };
+      if (snap.lifecycle !== 'ARMED' || snap.expected_restart === true || snap.installer_handoff === true || snap.worker_released === true) {
+        return { state: 'SUPPRESSED_TRANSITION', recovered: false, automatic_retry_allowed: false, authority_effect: false };
+      }
+
+      const oldPid = Number(snap.worker_pid || 0);
+      if (!Number.isSafeInteger(oldPid) || oldPid <= 0) {
+        return { state: 'WORKER_PID_MISSING_AMBIGUOUS', recovered: false, automatic_retry_allowed: false, authority_effect: false };
+      }
+      if (this.#processAlive(oldPid)) {
+        return { state: 'STALE_WORKER_PID_ALIVE', recovered: false, automatic_retry_allowed: false, authority_effect: false };
+      }
+
+      const current = await readJson(this.#statePath);
+      if (!current || current.token !== snap.token || Number(current.parent_pid) !== process.pid || Number(current.worker_pid) !== oldPid) {
+        return { state: 'BINDING_DRIFT', recovered: false, automatic_retry_allowed: false, authority_effect: false };
+      }
+      if (current.lifecycle !== 'ARMED' || current.expected_restart === true || current.installer_handoff === true || current.worker_released === true) {
+        return { state: 'SUPPRESSED_TRANSITION', recovered: false, automatic_retry_allowed: false, authority_effect: false };
+      }
+
+      const generation = Number(current.worker_recovery_generation || 0) + 1;
+      await this.#mutate({
+        worker_recovery_generation: generation,
+        worker_recovery_state: 'INTENT_PROVEN_OLD_PID_ABSENT',
+        worker_recovery_old_pid: oldPid,
+        worker_recovery_candidate_pid: null,
+        worker_recovery_at: new Date().toISOString(),
+        worker_recovery_result: 'exact_old_worker_pid_absent',
+      });
+
+      let child;
+      try {
+        child = this.#spawnWorker(snap.token, process.pid);
+      } catch (error) {
+        await this.#mutate({
+          worker_recovery_state: 'SPAWN_FAILED_NO_EFFECT',
+          worker_recovery_result: String(error?.message || error).slice(0, 240),
+        });
+        return { state: 'SPAWN_FAILED_NO_EFFECT', recovered: false, automatic_retry_allowed: true, authority_effect: false };
+      }
+
+      const outcome = await new Promise((resolve) => {
+        const immediatePid = Number(child?.pid || 0);
+        if (typeof child?.once !== 'function') {
+          resolve(Number.isSafeInteger(immediatePid) && immediatePid > 0
+            ? { state: 'SPAWNED', pid: immediatePid }
+            : { state: 'SPAWN_AMBIGUOUS', pid: null });
+          return;
+        }
+        let settled = false;
+        const finish = (value) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(value);
+        };
+        const timer = setTimeout(() => finish({ state: 'SPAWN_AMBIGUOUS', pid: Number(child?.pid || 0) || null }), Math.max(250, Number(timeoutMs) || WORKER_RECOVERY_ACK_TIMEOUT_MS));
+        child.once('spawn', () => finish({ state: 'SPAWNED', pid: Number(child.pid || 0) || null }));
+        child.once('error', (error) => finish({ state: 'SPAWN_FAILED_NO_EFFECT', pid: null, error }));
+      });
+
+      if (outcome.state === 'SPAWN_FAILED_NO_EFFECT') {
+        await this.#mutate({
+          worker_recovery_state: 'SPAWN_FAILED_NO_EFFECT',
+          worker_recovery_result: String(outcome.error?.message || outcome.error || 'spawn_error').slice(0, 240),
+        });
+        return { state: 'SPAWN_FAILED_NO_EFFECT', recovered: false, automatic_retry_allowed: true, authority_effect: false };
+      }
+
+      const candidatePid = Number(outcome.pid || 0);
+      if (outcome.state !== 'SPAWNED' || !Number.isSafeInteger(candidatePid) || candidatePid <= 0) {
+        await this.#mutate({
+          worker_recovery_state: 'SPAWN_AMBIGUOUS',
+          worker_recovery_candidate_pid: Number.isSafeInteger(candidatePid) && candidatePid > 0 ? candidatePid : null,
+          worker_recovery_result: 'spawn_ack_missing',
+        });
+        return { state: 'SPAWN_AMBIGUOUS', recovered: false, automatic_retry_allowed: false, authority_effect: false };
+      }
+
+      // The candidate worker waits for this exact durable PID binding before it can
+      // heartbeat or perform liveness actuation. This write is the single-writer fence.
+      await this.#mutate({
+        worker_pid: candidatePid,
+        worker_released: false,
+        worker_recovery_state: 'CANDIDATE_BOUND_PENDING_HEARTBEAT',
+        worker_recovery_candidate_pid: candidatePid,
+        worker_recovery_result: `candidate_pid:${candidatePid}`,
+      });
+      this.#child = child;
+      child.unref?.();
+
+      try {
+        const healthy = await this.waitUntilHealthy(Math.max(500, Number(timeoutMs) || WORKER_RECOVERY_ACK_TIMEOUT_MS));
+        await this.#mutate({
+          worker_recovery_state: 'RECOVERED',
+          worker_recovery_result: `heartbeat_pid:${candidatePid}`,
+        });
+        return { state: 'RECOVERED', recovered: true, worker_pid: candidatePid, heartbeat_at: healthy.worker_heartbeat_at, automatic_retry_allowed: false, authority_effect: false };
+      } catch {
+        if (this.#processAlive(candidatePid)) {
+          await this.#mutate({
+            worker_recovery_state: 'CANDIDATE_ALIVE_HEARTBEAT_AMBIGUOUS',
+            worker_recovery_result: `candidate_pid_alive_without_fresh_heartbeat:${candidatePid}`,
+          });
+          return { state: 'CANDIDATE_ALIVE_HEARTBEAT_AMBIGUOUS', recovered: false, worker_pid: candidatePid, automatic_retry_allowed: false, authority_effect: false };
+        }
+        await this.#mutate({
+          worker_recovery_state: 'CANDIDATE_CONFIRMED_ABSENT',
+          worker_recovery_result: `candidate_pid_absent:${candidatePid}`,
+        });
+        return { state: 'CANDIDATE_CONFIRMED_ABSENT', recovered: false, worker_pid: candidatePid, automatic_retry_allowed: true, authority_effect: false };
+      }
+    })().finally(() => { this.#workerRecoveryPromise = null; });
+    return this.#workerRecoveryPromise;
+  }
+
   async prepareExpectedRestart(reason = 'EXPECTED_RESTART') {
     return this.#mutate({ expected_restart: true, expected_restart_reason: reason, lifecycle: 'EXPECTED_RESTART' });
   }
@@ -220,12 +359,12 @@ export class BrowserSentinelHost {
     const child = this.#child;
     const pid = Number(child?.pid || this.#state?.worker_pid || 0);
     if (child && typeof child.kill !== 'function') throw new Error('browser_sentinel_installer_release_unavailable');
-    if (child && processAlive(pid)) {
+    if (child && this.#processAlive(pid)) {
       const dispatched = child.kill();
-      if (dispatched === false && processAlive(pid)) throw new Error('browser_sentinel_installer_release_failed');
+      if (dispatched === false && this.#processAlive(pid)) throw new Error('browser_sentinel_installer_release_failed');
       const deadline = Date.now() + Math.max(500, Number(timeoutMs) || 5000);
-      while (processAlive(pid) && Date.now() < deadline) await sleep(50);
-      if (processAlive(pid)) throw new Error('browser_sentinel_installer_release_timeout');
+      while (this.#processAlive(pid) && Date.now() < deadline) await sleep(50);
+      if (this.#processAlive(pid)) throw new Error('browser_sentinel_installer_release_timeout');
     }
     this.#child = null;
     return this.#mutate({
