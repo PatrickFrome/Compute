@@ -27,6 +27,16 @@ test('push baseline sync uses exact GitHub OIDC identity and no repository secre
   assert.match(workflow, /cancel-in-progress:\s*false/);
 });
 
+test('push baseline sync preserves bounded HTTP failure readback without exposing credentials', async () => {
+  const workflow = await read('.github/workflows/metaengine-devos-baseline-push-sync.yml');
+  assert.match(workflow, /-o "\$response_file" -w '%\{http_code\}'/);
+  assert.match(workflow, /HTTP_STATUS="\$http_status"/);
+  assert.match(workflow, /push_sync_http_\$\{status\}:\$\{diagnostic\}/);
+  assert.match(workflow, /String\(row\.diagnostic \|\| row\.reason \|\| row\.error \|\| 'unknown'\)\.slice\(0, 240\)/);
+  const postBlock = workflow.slice(workflow.indexOf('http_status="$(curl'));
+  assert.doesNotMatch(postBlock, /--fail-with-body/);
+});
+
 test('push sync endpoint pins repository ref workflow subject and GitHub-hosted push claims', async () => {
   const source = await read('supabase/functions/metaengine-devos-baseline-push-sync-h205f22/index.ts');
   assert.match(source, /createRemoteJWKSet/);
