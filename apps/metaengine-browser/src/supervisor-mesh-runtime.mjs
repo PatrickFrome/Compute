@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { chatGptControlMatches, uniqueChatGptControl } from './chatgpt-ui-controls.mjs';
+import { createSupervisorSendBoundaryExecutor } from './supervisor-lifecycle-runtime.mjs';
 import { SupervisorMesh } from './supervisor-mesh.mjs';
 import {
   fenceReservedCoordination,
@@ -50,7 +51,7 @@ export class SupervisorMeshRuntime {
     if (typeof getState !== 'function' || typeof executeCommand !== 'function') throw new Error('supervisor_mesh_runtime_dependencies_required');
     if (typeof canActuate !== 'function' || typeof primaryLifecycle !== 'function') throw new Error('supervisor_mesh_runtime_policy_required');
     this.#getState = getState;
-    this.#execute = executeCommand;
+    this.#execute = createSupervisorSendBoundaryExecutor({ getState, executeCommand });
     this.#canActuate = canActuate;
     this.#primaryLifecycle = primaryLifecycle;
     this.#statePath = statePath;
@@ -90,6 +91,7 @@ export class SupervisorMeshRuntime {
       mesh: this.#mesh?.snapshot() || null,
       continuous_failover_enabled: true,
       same_event_failover_retry: false,
+      foreground_send_boundary: 'EXACT_TAB_TARGET_PROCESS_VIEWPORT_V1',
       authority_effect: false,
     });
   }
@@ -126,17 +128,22 @@ export class SupervisorMeshRuntime {
     const tabId = String(delivery?.tab_id || '');
     if (!tabId) throw new Error('supervisor_mesh_delivery_tab_missing');
     let clicked = false;
+    let typed = false;
     try {
       const before = await this.#capture(tabId);
-      if (generating(before)) return { ok: false, busy: true, clicked: false, reason: 'TARGET_GENERATING' };
+      if (generating(before)) return { ok: false, busy: true, clicked: false, typed: false, reason: 'TARGET_GENERATING' };
       const textbox = uniqueTextbox(before);
       if (!textbox) throw new Error('supervisor_mesh_composer_not_unique');
       this.#assertDeliveryFenceCurrent(delivery);
-      await this.#execute({
+      const typedResult = await this.#execute({
         action: 'SEMANTIC_TYPE',
         payload: { tab_id: tabId, role: 'textbox', accessible_name: textbox.name, text: delivery.message, replace_existing: true },
         platform: 'CHATGPT',
       });
+      typed = true;
+      if (typedResult?.suppressed === true) {
+        return { ok: false, clicked: false, typed: true, reason: String(typedResult.reason || 'TYPE_EFFECT_AMBIGUOUS') };
+      }
       const afterType = await this.#capture(tabId);
       const send = uniqueChatGptControl(afterType, 'SEND');
       if (!send) throw new Error('supervisor_mesh_send_not_unique');
@@ -147,12 +154,12 @@ export class SupervisorMeshRuntime {
         await sleep(500);
         const observed = await this.#capture(tabId);
         if (generating(observed) || String(observed?.text_excerpt || '').includes(String(delivery?.pending?.delivery_id || ''))) {
-          return { ok: true, clicked: true, observed };
+          return { ok: true, clicked: true, typed: true, observed };
         }
       }
-      return { ok: false, clicked: true, reason: 'SEND_WITHOUT_POSITIVE_READBACK' };
+      return { ok: false, clicked: true, typed: true, reason: 'SEND_WITHOUT_POSITIVE_READBACK' };
     } catch (error) {
-      return { ok: false, clicked, reason: String(error?.message || error).slice(0, 240) };
+      return { ok: false, clicked, typed, reason: String(error?.message || error).slice(0, 240) };
     }
   }
 
@@ -217,7 +224,7 @@ export class SupervisorMeshRuntime {
 
     const delivery = fencedReservation.deliveries[0];
     const sent = await this.#send(delivery);
-    if (sent.busy === true && sent.clicked === false) {
+    if (sent.busy === true && sent.clicked === false && sent.typed !== true) {
       await this.#settleNoEffect(delivery, sent.reason);
       this.#lastDelivery = { event_id: reservation.event_id, status: 'TARGET_BUSY_NO_EFFECT', supervisor_id: delivery.supervisor_id, authority_effect: false };
       return { ok: false, busy: true, authority_effect: false };
@@ -227,9 +234,9 @@ export class SupervisorMeshRuntime {
       this.#lastDelivery = { event_id: reservation.event_id, status: 'SENT', supervisor_id: delivery.supervisor_id, at: new Date(this.#clock()).toISOString(), authority_effect: false };
       return { ok: true, event_id: reservation.event_id, supervisor_id: delivery.supervisor_id, authority_effect: false };
     }
-    if (sent.clicked) {
+    if (sent.clicked || sent.typed) {
       await this.#mesh.markDeliveryAmbiguous(delivery.supervisor_id, delivery.pending.delivery_id, sent.reason);
-      this.#lastDelivery = { event_id: reservation.event_id, status: 'AMBIGUOUS', supervisor_id: delivery.supervisor_id, reason: sent.reason, authority_effect: false };
+      this.#lastDelivery = { event_id: reservation.event_id, status: 'AMBIGUOUS', supervisor_id: delivery.supervisor_id, reason: sent.reason, typed: sent.typed === true, clicked: sent.clicked === true, authority_effect: false };
       return { ok: false, ambiguous: true, authority_effect: false };
     }
     await this.#settleNoEffect(delivery, sent.reason);
