@@ -47,348 +47,60 @@ jobs:
           grep -q 'persistUpdatedSuccessorReceipt' apps/metaengine-browser/src/main-entry.mjs
           grep -q 'SUCCESSOR_STARTUP_PROBE_ONLY' apps/metaengine-browser/src/self-update-smoke.mjs
           grep -q 'pre_install_receipt_sha256' apps/metaengine-browser/src/self-update-handoff.mjs
+          grep -q 'published_baseline_reused=PASS' apps/metaengine-browser/test/self-update-fast-physical.ps1
+          grep -q 'target_build_count=1' apps/metaengine-browser/test/self-update-fast-physical.ps1
           ! grep -q 'NEON' apps/metaengine-browser/src/self-update-runtime.mjs
 
-  windows-n-to-n-plus-1:
+  windows-published-n-to-one-build-target:
+    needs: contract
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 32
+    env:
+      GITHUB_ACTIONS: 'true'
+      METAENGINE_SELF_UPDATE_TEST_MODE: '1'
+      METAENGINE_DISABLE_CRASH_SENTINEL: '1'
     steps:
       - name: Checkout exact source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prove exact candidate head
+        shell: powershell
+        run: |
+          $expected = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $expected) { throw "candidate_head_mismatch:$actual:$expected" }
       - name: Setup Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
-      - name: Install dependencies
+      - name: Install physical-test dependencies
         working-directory: apps/metaengine-browser
         run: npm install --no-audit --no-fund
-      - name: Contract gates before packaging
-        working-directory: apps/metaengine-browser
-        run: |
-          npm run check
-          npm test
-
-      - name: Build baseline N installer
+      - name: Published baseline to one-built exact candidate
         working-directory: apps/metaengine-browser
         shell: powershell
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: |
-          $baseline = "0.6.3-dev.${{ github.run_number }}.0"
-          npm pkg set version=$baseline
-          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
-          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
-          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$baseline-x64.exe" -File | Select-Object -First 1
-          if (-not $installer) { throw 'baseline_installer_missing' }
-          Copy-Item $installer.FullName "$env:RUNNER_TEMP\baseline-setup.exe"
-          $baseline | Set-Content "$env:RUNNER_TEMP\baseline-version.txt"
-          (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content "$env:RUNNER_TEMP\baseline-sha256.txt"
-
-      - name: Install N and seal real profile continuity marker
-        shell: powershell
-        run: |
-          $install = Start-Process -FilePath "$env:RUNNER_TEMP\baseline-setup.exe" -ArgumentList '/S' -PassThru -Wait
-          if ($install.ExitCode -ne 0) { throw "baseline_installer_exit_$($install.ExitCode)" }
-          $app = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test\METAENGINE Browser Test.exe'
-          if (-not (Test-Path $app)) { throw "baseline_browser_missing:$app" }
-          $app | Set-Content "$env:RUNNER_TEMP\installed-app-path.txt"
-          $baseline = (Get-Content "$env:RUNNER_TEMP\baseline-version.txt").Trim()
-
-          $probeOut = "$env:RUNNER_TEMP\baseline-version-probe.out"
-          $probeErr = "$env:RUNNER_TEMP\baseline-version-probe.err"
-          $p = Start-Process -FilePath $app -ArgumentList '--metaengine-version-probe' -PassThru -RedirectStandardOutput $probeOut -RedirectStandardError $probeErr
-          $null = $p.Handle
-          if (-not $p.WaitForExit(15000)) { try { Stop-Process -Id $p.Id -Force } catch {}; throw 'baseline_version_probe_timeout' }
-          if ($p.ExitCode -ne 0) { Get-Content $probeErr -ErrorAction SilentlyContinue; throw "baseline_version_probe_exit_$($p.ExitCode)" }
-          $versionRow = (Get-Content $probeOut | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
-          if ([string]$versionRow.version -ne $baseline -or $versionRow.primary_instance -ne $true) { throw 'baseline_version_probe_invalid' }
-
-          $env:METAENGINE_PROFILE_PROBE_WRITE = '1'
-          $profileOut = "$env:RUNNER_TEMP\baseline-profile-probe.out"
-          $profileErr = "$env:RUNNER_TEMP\baseline-profile-probe.err"
-          $profile = Start-Process -FilePath $app -ArgumentList '--metaengine-profile-probe' -PassThru -RedirectStandardOutput $profileOut -RedirectStandardError $profileErr
-          $null = $profile.Handle
-          if (-not $profile.WaitForExit(15000)) { try { Stop-Process -Id $profile.Id -Force } catch {}; throw 'baseline_profile_probe_timeout' }
-          $profileExit = $profile.ExitCode
-          Remove-Item Env:METAENGINE_PROFILE_PROBE_WRITE -ErrorAction SilentlyContinue
-          if ($profileExit -ne 0) { Get-Content $profileErr -ErrorAction SilentlyContinue; throw "baseline_profile_probe_exit_$profileExit" }
-          $profileRow = (Get-Content $profileOut | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
-          if ($profileRow.marker_present -ne $true -or -not $profileRow.user_data_path) { throw 'baseline_profile_probe_invalid' }
-          [string]$profileRow.user_data_path | Set-Content "$env:RUNNER_TEMP\baseline-user-data-path.txt"
-
-      - name: Build exact target N plus 1 and feed metadata
+        run: ./test/self-update-fast-physical.ps1
+      - name: Prove exact physical evidence contract
         working-directory: apps/metaengine-browser
         shell: powershell
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: |
-          $target = "0.6.3-dev.${{ github.run_number }}.1"
-          npm pkg set version=$target
-          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
-          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
-          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$target-x64.exe" -File | Select-Object -First 1
-          $blockmap = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$target-x64.exe.blockmap" -File | Select-Object -First 1
-          if (-not $installer) { throw 'target_installer_missing' }
-          if (-not $blockmap) { throw 'target_blockmap_missing' }
-          $feed = "$env:RUNNER_TEMP\self-update-feed"
-          Remove-Item $feed -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path $feed | Out-Null
-          Copy-Item $installer.FullName (Join-Path $feed $installer.Name)
-          Copy-Item $blockmap.FullName (Join-Path $feed $blockmap.Name)
-          $sha512Provider = [System.Security.Cryptography.SHA512]::Create()
-          try { $sha512 = [Convert]::ToBase64String($sha512Provider.ComputeHash([System.IO.File]::ReadAllBytes($installer.FullName))) }
-          finally { $sha512Provider.Dispose() }
-          $releaseDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
-          $devYmlPath = Join-Path $feed 'dev.yml'
-          $devYmlLines = @(
-            "version: $target",
-            'files:',
-            "  - url: $($installer.Name)",
-            "    sha512: $sha512",
-            "    size: $($installer.Length)",
-            "path: $($installer.Name)",
-            "sha512: $sha512",
-            "releaseDate: '$releaseDate'",
-            'stagingPercentage: 100'
-          )
-          [System.IO.File]::WriteAllLines($devYmlPath, $devYmlLines, [System.Text.UTF8Encoding]::new($false))
-          $devYmlBytes = [System.IO.File]::ReadAllBytes($devYmlPath)
-          if ($devYmlBytes.Length -ge 3 -and $devYmlBytes[0] -eq 0xEF -and $devYmlBytes[1] -eq 0xBB -and $devYmlBytes[2] -eq 0xBF) {
-            throw 'target_dev_yml_utf8_bom_present'
-          }
-          $target | Set-Content "$env:RUNNER_TEMP\target-version.txt"
-          $installer.FullName | Set-Content "$env:RUNNER_TEMP\target-installer-path.txt"
-          $blockmap.FullName | Set-Content "$env:RUNNER_TEMP\target-blockmap-path.txt"
-          $devYmlPath | Set-Content "$env:RUNNER_TEMP\target-dev-yml-path.txt"
-          (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content "$env:RUNNER_TEMP\target-sha256.txt"
-
-      - name: Run one physical update transaction N to N plus 1
-        working-directory: apps/metaengine-browser
-        shell: powershell
-        env:
-          GITHUB_ACTIONS: 'true'
-          METAENGINE_SELF_UPDATE_TEST_MODE: '1'
-          METAENGINE_DISABLE_CRASH_SENTINEL: '1'
-        run: |
-          $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
-          $listener.Start()
-          $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
-          $listener.Stop()
-          $env:METAENGINE_UPDATE_FEED_ROOT = "$env:RUNNER_TEMP\self-update-feed"
-          $env:METAENGINE_UPDATE_FEED_PORT = "$port"
-          $env:METAENGINE_UPDATE_FEED_READY = "$env:RUNNER_TEMP\self-update-feed.ready"
-          Remove-Item $env:METAENGINE_UPDATE_FEED_READY -Force -ErrorAction SilentlyContinue
-          $server = $null
-          try {
-            $server = Start-Process -FilePath (Get-Command node).Source -ArgumentList 'test/self-update-feed-server.cjs' -WorkingDirectory (Get-Location) -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\self-update-feed.out" -RedirectStandardError "$env:RUNNER_TEMP\self-update-feed.err"
-            $null = $server.Handle
-            $deadline = (Get-Date).AddSeconds(10)
-            while (-not (Test-Path $env:METAENGINE_UPDATE_FEED_READY) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 100 }
-            if (-not (Test-Path $env:METAENGINE_UPDATE_FEED_READY)) { Get-Content "$env:RUNNER_TEMP\self-update-feed.err" -ErrorAction SilentlyContinue; throw 'self_update_feed_not_ready' }
-
-            $app = (Get-Content "$env:RUNNER_TEMP\installed-app-path.txt").Trim()
-            $target = (Get-Content "$env:RUNNER_TEMP\target-version.txt").Trim()
-            $userData = (Get-Content "$env:RUNNER_TEMP\baseline-user-data-path.txt").Trim()
-            $preInstallPath = Join-Path $userData 'metaengine-self-update-pre-install-receipt-v1.json'
-            $successorPath = Join-Path $userData 'metaengine-self-update-successor-receipt-v1.json'
-            Remove-Item $preInstallPath -Force -ErrorAction SilentlyContinue
-            Remove-Item $successorPath -Force -ErrorAction SilentlyContinue
-            $env:METAENGINE_SELF_UPDATE_TEST_FEED_URL = "http://127.0.0.1:$port/"
-            $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE = "$env:RUNNER_TEMP\self-update-smoke.jsonl"
-            Remove-Item $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE -Force -ErrorAction SilentlyContinue
-
-            $source = Start-Process -FilePath $app -ArgumentList '--metaengine-self-update-smoke' -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\self-update-smoke.out" -RedirectStandardError "$env:RUNNER_TEMP\self-update-smoke.err"
-            $null = $source.Handle
-            $sourcePid = $source.Id
-            if (-not $source.WaitForExit(150000)) {
-              try { Stop-Process -Id $source.Id -Force } catch {}
-              Get-Content $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE -ErrorAction SilentlyContinue
-              Get-Content "$env:RUNNER_TEMP\self-update-smoke.err" -ErrorAction SilentlyContinue
-              throw 'self_update_source_timeout'
-            }
-
-            $traceDeadline = (Get-Date).AddSeconds(10)
-            $verified = $false
-            $feedActive = $false
-            $handoffPrepared = $false
-            do {
-              $rows = @()
-              if (Test-Path $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE) {
-                try { $rows = @(Get-Content $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json }) } catch { $rows = @() }
-              }
-              $verified = [bool]($rows | Where-Object { $_.metadata_verified -eq $true -and [string]$_.available_version -eq $target })
-              $feedActive = [bool]($rows | Where-Object { $_.ci_test_feed_active -eq $true })
-              $handoffPrepared = [bool]($rows | Where-Object { $_.label -eq 'INSTALLER_HANDOFF_PREPARED' -and $_.singleton_lock_released -eq $true })
-              if ($verified -and $feedActive -and $handoffPrepared) { break }
-              Start-Sleep -Milliseconds 200
-            } while ((Get-Date) -lt $traceDeadline)
-            if (-not $verified) { throw 'self_update_verified_target_not_observed' }
-            if (-not $feedActive) { throw 'self_update_ci_feed_not_active' }
-            if (-not $handoffPrepared) { throw 'self_update_installer_handoff_not_observed' }
-            if (-not (Test-Path $preInstallPath)) { throw 'self_update_pre_install_receipt_missing' }
-
-            $deadline = (Get-Date).AddSeconds(90)
-            while (-not (Test-Path $successorPath) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
-            if (-not (Test-Path $successorPath)) {
-              Get-Content $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE -ErrorAction SilentlyContinue
-              Get-Content "$env:RUNNER_TEMP\self-update-smoke.out" -ErrorAction SilentlyContinue
-              Get-Content "$env:RUNNER_TEMP\self-update-smoke.err" -ErrorAction SilentlyContinue
-              throw 'self_update_durable_successor_receipt_missing'
-            }
-
-            $successor = Get-Content $successorPath -Raw | ConvertFrom-Json
-            if ($successor.schema -ne 'metaengine.self-update.successor-receipt.v1') { throw 'self_update_successor_schema_invalid' }
-            if ([string]$successor.version -ne $target) { throw "self_update_successor_version_mismatch:$($successor.version):$target" }
-            if ($successor.primary_instance -ne $true) { throw 'self_update_successor_not_primary' }
-            if ([string]$successor.app_id -ne 'com.metaengine.browser.test') { throw 'self_update_successor_app_id_invalid' }
-            if ([string]$successor.successor_startup -ne 'PROBE_ONLY') { throw 'self_update_successor_mode_invalid' }
-            if ($successor.authority_effect -ne $false) { throw 'self_update_successor_authority_invalid' }
-            $preInstallSha = (Get-FileHash $preInstallPath -Algorithm SHA256).Hash.ToLowerInvariant()
-            if ([string]$successor.pre_install_receipt_sha256 -ne $preInstallSha) { throw 'self_update_successor_receipt_digest_mismatch' }
-
-            Copy-Item $preInstallPath "$env:RUNNER_TEMP\self-update-pre-install-receipt.json"
-            Copy-Item $successorPath "$env:RUNNER_TEMP\self-update-successor-receipt.json"
-            "source_pid=$sourcePid" | Set-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
-            "target_version=$target" | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
-            "successor_pid=$($successor.pid)" | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
-            "pre_install_receipt_sha256=$preInstallSha" | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
-            'metadata_verified=PASS' | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
-            'restart_state_durable=PASS' | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
-            'durable_successor_binding=PASS' | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
-            'forced_relaunch=PASS' | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
-          } finally {
-            if ($server -and -not $server.HasExited) { try { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue } catch {} }
-          }
-
-      - name: Verify N plus 1 profile continuity and singleton
-        shell: powershell
-        run: |
-          $app = (Get-Content "$env:RUNNER_TEMP\installed-app-path.txt").Trim()
-          $target = (Get-Content "$env:RUNNER_TEMP\target-version.txt").Trim()
-
-          $probeOut = "$env:RUNNER_TEMP\target-version-probe.out"
-          $probeErr = "$env:RUNNER_TEMP\target-version-probe.err"
-          $probe = Start-Process -FilePath $app -ArgumentList '--metaengine-version-probe' -PassThru -RedirectStandardOutput $probeOut -RedirectStandardError $probeErr
-          $null = $probe.Handle
-          if (-not $probe.WaitForExit(15000)) { try { Stop-Process -Id $probe.Id -Force } catch {}; throw 'target_version_probe_timeout' }
-          if ($probe.ExitCode -ne 0) { Get-Content $probeErr -ErrorAction SilentlyContinue; throw "target_version_probe_exit_$($probe.ExitCode)" }
-          $versionRow = (Get-Content $probeOut | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
-          if ([string]$versionRow.version -ne $target) { throw "target_version_probe_mismatch:$($versionRow.version):$target" }
-
-          $profileOut = "$env:RUNNER_TEMP\target-profile-probe.out"
-          $profileErr = "$env:RUNNER_TEMP\target-profile-probe.err"
-          $profile = Start-Process -FilePath $app -ArgumentList '--metaengine-profile-probe' -PassThru -RedirectStandardOutput $profileOut -RedirectStandardError $profileErr
-          $null = $profile.Handle
-          if (-not $profile.WaitForExit(15000)) { try { Stop-Process -Id $profile.Id -Force } catch {}; throw 'target_profile_probe_timeout' }
-          if ($profile.ExitCode -ne 0) { Get-Content $profileErr -ErrorAction SilentlyContinue; throw "target_profile_probe_exit_$($profile.ExitCode)" }
-          $profileRow = (Get-Content $profileOut | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
-          $baselinePath = (Get-Content "$env:RUNNER_TEMP\baseline-user-data-path.txt").Trim()
-          if ($profileRow.marker_present -ne $true) { throw 'target_profile_marker_missing' }
-          if ([string]$profileRow.user_data_path -ne $baselinePath) { throw "user_data_path_changed:$($profileRow.user_data_path):$baselinePath" }
-          $folders = @(Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Directory | Where-Object { $_.Name -eq 'METAENGINE Browser Test' })
-          if ($folders.Count -ne 1) { throw "in_place_install_directory_count_invalid:$($folders.Count)" }
-          'target_version_probe=PASS' | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
-          'real_user_data_continuity=PASS' | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
-          'in_place_install_directory=PASS' | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
-
-          $firstOut = "$env:RUNNER_TEMP\singleton-first.out"
-          $firstErr = "$env:RUNNER_TEMP\singleton-first.err"
-          $first = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $firstOut -RedirectStandardError $firstErr
-          $null = $first.Handle
-          $deadline = (Get-Date).AddSeconds(10)
-          $firstRow = $null
-          do {
-            $first.Refresh()
-            if ($first.HasExited) { Get-Content $firstErr -ErrorAction SilentlyContinue; throw 'singleton_primary_exited_early' }
-            if (Test-Path $firstOut) {
-              $lines = @(Get-Content $firstOut -ErrorAction SilentlyContinue | Where-Object { $_.Trim() })
-              for ($i = $lines.Count - 1; $i -ge 0; $i--) {
-                try {
-                  $candidate = $lines[$i] | ConvertFrom-Json -ErrorAction Stop
-                  if ($candidate -and ($candidate.PSObject.Properties.Name -contains 'primary_instance')) {
-                    $firstRow = $candidate
-                    break
-                  }
-                } catch {}
-              }
-            }
-            if ($firstRow) { break }
-            Start-Sleep -Milliseconds 100
-          } while ((Get-Date) -lt $deadline)
-          if (-not $firstRow) { Get-Content $firstErr -ErrorAction SilentlyContinue; throw 'singleton_primary_json_timeout' }
-          if ($firstRow.primary_instance -ne $true) { throw 'singleton_primary_probe_invalid' }
-          $second = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\singleton-second.out" -RedirectStandardError "$env:RUNNER_TEMP\singleton-second.err"
-          $null = $second.Handle
-          if (-not $second.WaitForExit(5000)) { try { Stop-Process -Id $second.Id -Force } catch {}; try { Stop-Process -Id $first.Id -Force } catch {}; throw 'singleton_secondary_did_not_exit' }
-          $first.Refresh()
-          if ($first.HasExited) { throw 'singleton_secondary_displaced_primary' }
-          try { Stop-Process -Id $first.Id -Force -ErrorAction SilentlyContinue } catch {}
-          'physical_singleton=PASS' | Add-Content "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
-
-      - name: Stage E2E evidence
-        if: always()
-        shell: powershell
-        run: |
-          New-Item -ItemType Directory -Force -Path self-update-evidence | Out-Null
-          foreach ($file in @(
-            'baseline-version.txt','target-version.txt','baseline-sha256.txt','target-sha256.txt','baseline-user-data-path.txt',
-            'baseline-version-probe.out','baseline-profile-probe.out','target-version-probe.out','target-profile-probe.out',
-            'self-update-smoke.jsonl','self-update-smoke.out','self-update-smoke.err',
-            'self-update-pre-install-receipt.json','self-update-successor-receipt.json','self-update-e2e-proof.txt',
-            'singleton-first.out','singleton-second.out','self-update-feed.out','self-update-feed.err'
-          )) {
-            $source = Join-Path $env:RUNNER_TEMP $file
-            if (Test-Path $source) { Copy-Item $source self-update-evidence\ }
-          }
-          $head = (git rev-parse HEAD).Trim()
-          $head | Set-Content self-update-evidence\git-head.txt
-
-          $proofPath = "$env:RUNNER_TEMP\self-update-e2e-proof.txt"
-          if (Test-Path $proofPath) {
-            $proof = Get-Content $proofPath -Raw
-            if ($proof -match 'physical_singleton=PASS' -and $proof -match 'durable_successor_binding=PASS') {
-              $installer = Get-Item ((Get-Content "$env:RUNNER_TEMP\target-installer-path.txt").Trim())
-              $blockmap = Get-Item ((Get-Content "$env:RUNNER_TEMP\target-blockmap-path.txt").Trim())
-              $devYml = Get-Item ((Get-Content "$env:RUNNER_TEMP\target-dev-yml-path.txt").Trim())
-              $expected = (Get-Content "$env:RUNNER_TEMP\target-sha256.txt").Trim()
-              $actual = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-              if ($actual -ne $expected) { throw 'verified_target_digest_changed_before_staging' }
-              Copy-Item $installer.FullName self-update-evidence\
-              Copy-Item $blockmap.FullName self-update-evidence\
-              Copy-Item $devYml.FullName self-update-evidence\dev.yml
-              $target = (Get-Content "$env:RUNNER_TEMP\target-version.txt").Trim()
-              $manifest = [ordered]@{
-                schema = 'metaengine.browser.self-update-e2e-manifest.v2'
-                version = $target
-                git_sha = $head
-                run_id = '${{ github.run_id }}'
-                run_attempt = '${{ github.run_attempt }}'
-                installer_name = $installer.Name
-                installer_sha256 = $actual
-                blockmap_name = $blockmap.Name
-                update_channel = 'dev'
-                update_metadata = 'dev.yml'
-                physical_n_to_n_plus_1 = $true
-                durable_successor_binding = $true
-                forced_successor = $true
-                profile_continuity = $true
-                single_install_directory = $true
-                physical_singleton = $true
-                development_channel = $true
-                production_safe = $false
-              } | ConvertTo-Json -Depth 4
-              $manifest | Set-Content self-update-evidence\verified-self-update-manifest.json
-            }
-          }
-
+          $manifestPath = './self-update-fast-evidence/verified-self-update-manifest.json'
+          if (-not (Test-Path $manifestPath)) { throw 'verified_self_update_manifest_missing' }
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          $expectedHead = '${{ github.event.pull_request.head.sha || github.sha }}'
+          if ([string]$manifest.git_sha -ne $expectedHead) { throw "physical_evidence_head_mismatch:$($manifest.git_sha):$expectedHead" }
+          if ($manifest.physical_n_to_n_plus_1 -ne $true) { throw 'physical_update_not_proven' }
+          if ($manifest.durable_successor_binding -ne $true) { throw 'durable_successor_not_proven' }
+          if ($manifest.profile_continuity -ne $true -or $manifest.physical_singleton -ne $true) { throw 'continuity_or_singleton_not_proven' }
+          if ($manifest.published_baseline_reused -ne $true) { throw 'published_baseline_reuse_not_proven' }
+          if ([int]$manifest.target_build_count -ne 1) { throw 'target_build_count_invalid' }
       - name: Upload self-update evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: metaengine-browser-self-update-e2e-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
-          path: self-update-evidence/
+          path: apps/metaengine-browser/self-update-fast-evidence/
           if-no-files-found: error
           compression-level: 0
