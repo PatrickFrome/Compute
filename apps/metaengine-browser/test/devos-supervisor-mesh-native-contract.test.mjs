@@ -13,7 +13,15 @@ test('mesh continuity is preserved in exact base and the public DevOS client can
   assert.match(base, /new SupervisorMeshRuntime/);
   assert.match(base, /dispatchRecoveryIfNeeded/);
   assert.match(base, /confirmSelfUpdateRestartSafety/);
-  assert.match(base, /Do not publish the new mesh projection to live Edge/);
+
+  const heartbeatStart = base.indexOf('async #heartbeat()');
+  const heartbeatEnd = base.indexOf('async #nextCommand()', heartbeatStart);
+  const heartbeat = base.slice(heartbeatStart, heartbeatEnd);
+  assert.ok(heartbeatStart >= 0 && heartbeatEnd > heartbeatStart, 'native supervisor heartbeat implementation must remain inspectable');
+  assert.match(heartbeat, /supervisor_lifecycle:/);
+  assert.match(heartbeat, /self_update:/);
+  assert.doesNotMatch(heartbeat, /supervisor_mesh:/, 'mesh projection must not be published to the live Edge state schema before its remote contract is deployed');
+
   assert.match(core, /extends BaseNativeSupervisorClient/);
   assert.match(publicClient, /NativeSupervisorClient as CoreNativeSupervisorClient/);
   assert.match(publicClient, /extends CoreNativeSupervisorClient/);
