@@ -20,6 +20,8 @@ test('push baseline sync uses exact GitHub OIDC identity and no repository secre
   assert.match(workflow, /metaengine-devos-baseline-push-sync-h205f22/);
   assert.match(workflow, /ACTIONS_ID_TOKEN_REQUEST_TOKEN/);
   assert.match(workflow, /ACTIONS_ID_TOKEN_REQUEST_URL/);
+  assert.match(workflow, /\[\[ "\$\{GITHUB_SHA\}" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
+  assert.doesNotMatch(workflow, /test "\$\{GITHUB_SHA\}" =~/);
   assert.doesNotMatch(workflow, /secrets\./);
   assert.doesNotMatch(workflow, /SUPABASE_SERVICE_ROLE_KEY|SUPABASE_ANON_KEY/);
   assert.match(workflow, /cancel-in-progress:\s*false/);
