@@ -4,10 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { persistSelfUpdateSessionContinuity } from '../src/self-update-session-continuity.mjs';
-import { persistPreInstallReceipt, persistUpdatedSuccessorReceipt } from '../src/self-update-handoff.mjs';
+import { inspectSelfUpdateStartup, persistPreInstallReceipt, persistUpdatedSuccessorReceipt } from '../src/self-update-handoff.mjs';
 import {
   probeUpdatedSuccessorQualification,
   recordAcceptedSignedSupervisorHeartbeat,
+  shouldScheduleUpdatedSuccessorQualification,
 } from '../src/self-update-successor-qualification.mjs';
 import { readSelfUpdateTransaction } from '../src/self-update-transaction-journal.mjs';
 
@@ -118,6 +119,35 @@ test('exact successor requires singleton, uptime, continuity and a fresh signed 
   assert.equal(journal.evidence.sentinel_worker_healthy, true);
 });
 
+test('normal launch of exact installed target resumes SUCCESSOR_BOOTED qualification without installer replay', async () => {
+  const { app } = await fixture();
+  const target = '0.6.3-dev.152.1';
+  await persistPreInstallReceipt(app, receipt(target));
+  app.setVersion(target);
+
+  const inspection = await inspectSelfUpdateStartup(app);
+  assert.equal(inspection.state, 'TARGET_INSTALLED');
+  assert.equal(shouldScheduleUpdatedSuccessorQualification({ updatedLaunch: false, startupInspection: inspection }), true);
+  assert.equal((await readSelfUpdateTransaction(app)).state, 'SUCCESSOR_BOOTED');
+
+  await recordAcceptedSignedSupervisorHeartbeat({ app, state: healthyHeartbeat(target), acceptedAtMs: 10_000 });
+  const result = await probeUpdatedSuccessorQualification({
+    app,
+    uptimeMs: () => 5000,
+    minUptimeMs: 3000,
+    nowMs: () => 10_500,
+  });
+  assert.equal(result.state, 'QUALIFIED');
+  assert.equal((await readSelfUpdateTransaction(app)).state, 'QUALIFIED');
+});
+
+test('qualification scheduling is limited to updated argv or exact TARGET_INSTALLED startup proof', () => {
+  assert.equal(shouldScheduleUpdatedSuccessorQualification({ updatedLaunch: true, startupInspection: null }), true);
+  assert.equal(shouldScheduleUpdatedSuccessorQualification({ updatedLaunch: false, startupInspection: { state: 'TARGET_INSTALLED' } }), true);
+  assert.equal(shouldScheduleUpdatedSuccessorQualification({ updatedLaunch: false, startupInspection: { state: 'NONE' } }), false);
+  assert.equal(shouldScheduleUpdatedSuccessorQualification({ updatedLaunch: false, startupInspection: { state: 'AMBIGUOUS_INSTALL' } }), false);
+});
+
 test('signed heartbeat with stale or missing sentinel worker proof cannot qualify successor', async () => {
   const { app } = await fixture();
   const target = await bootSuccessor(app);
@@ -164,11 +194,14 @@ test('qualification refuses wrong target version', async () => {
   await assert.rejects(() => probeUpdatedSuccessorQualification({ app, uptimeMs: () => 5000 }), /target_mismatch/);
 });
 
-test('production entry schedules qualification only on --updated launches and installs signed hook before main', async () => {
+test('production entry schedules qualification for updated argv or exact TARGET_INSTALLED normal launch', async () => {
   const source = await fs.readFile(new URL('../src/main-entry.mjs', import.meta.url), 'utf8');
   assert.match(source, /installSignedSupervisorHeartbeatQualificationHook/);
   assert.match(source, /qualifyUpdatedSuccessorWhenHealthy/);
-  assert.match(source, /if \(updatedLaunch\)/);
+  assert.match(source, /shouldScheduleUpdatedSuccessorQualification/);
+  assert.match(source, /startupInspection: startupUpdateInspection/);
+  assert.match(source, /if \(qualificationRequired\)/);
+  assert.match(source, /TARGET_INSTALLED_STARTUP/);
   assert.match(source, /SELF_UPDATE_AUTOMATIC_RETRY_HELD/);
   assert.ok(source.indexOf('installSignedSupervisorHeartbeatQualificationHook') < source.indexOf("await import('./main.mjs')"));
   assert.ok(source.indexOf('startSelfUpdateContinuityWatchdog({') < source.indexOf("await import('./main.mjs')"));
