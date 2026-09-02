@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-export const SUPERVISOR_MESH_VERSION = '1.1.0-devos';
+export const SUPERVISOR_MESH_VERSION = '1.2.0-devos';
 export const SUPERVISOR_MESH_SCHEMA = 'metaengine.supervisor-mesh.state.v2';
 export const SUPERVISOR_MESH_MAX_DEFAULT = 16;
 
@@ -44,6 +44,7 @@ function sanitizeSupervisor(row) {
     const conversationUrl = normalizeSupervisorConversationUrl(row?.conversation_url);
     const supervisorId = supervisorInstanceIdForUrl(conversationUrl);
     if (row?.supervisor_id && String(row.supervisor_id) !== supervisorId) return null;
+    const fleetBound = row?.fleet_bound === true;
     return {
       supervisor_id: supervisorId,
       conversation_url: conversationUrl,
@@ -52,6 +53,10 @@ function sanitizeSupervisor(row) {
       tab_id: row?.tab_id ? String(row.tab_id) : null,
       tab_incarnations: Array.isArray(row?.tab_incarnations) ? [...new Set(row.tab_incarnations.map(String))].slice(0, 8) : [],
       selected: row?.selected === true,
+      supervisor_capable: row?.supervisor_capable !== false,
+      fleet_bound: fleetBound,
+      coordination_blocked: row?.coordination_blocked === true || fleetBound,
+      control_policy: 'SUPABASE_SHARED_LEASE_REQUIRED',
       first_seen_at: row?.first_seen_at || null,
       last_seen_at: row?.last_seen_at || null,
       dispatch_count: Math.max(0, Number(row?.dispatch_count) || 0),
@@ -99,6 +104,8 @@ function sanitizeState(input) {
 
 function isEligible(row, excluded = new Set()) {
   return row?.status === 'ACTIVE'
+    && row?.supervisor_capable !== false
+    && row?.coordination_blocked !== true
     && Boolean(row?.tab_id)
     && !row?.pending_delivery
     && !row?.ambiguous_delivery
@@ -161,10 +168,15 @@ export class SupervisorMesh {
       counts: {
         total: this.#state.supervisors.length,
         active: this.#state.supervisors.filter((row) => row.status === 'ACTIVE').length,
+        supervisor_capable: this.#state.supervisors.filter((row) => row.supervisor_capable !== false).length,
+        coordination_eligible: this.#state.supervisors.filter((row) => isEligible(row)).length,
+        fleet_bound: this.#state.supervisors.filter((row) => row.fleet_bound === true).length,
         lost: this.#state.supervisors.filter((row) => row.status === 'LOST').length,
         paused: this.#state.supervisors.filter((row) => row.status === 'PAUSED').length,
         ambiguous_incarnation: this.#state.supervisors.filter((row) => row.status === 'AMBIGUOUS_INCARNATION').length,
       },
+      all_canonical_chats_supervisor_capable: true,
+      fleet_chat_auto_coordination: false,
       continuous_coordination: true,
       default_fanout: 1,
       direct_parallel_actuation: false,
@@ -188,15 +200,15 @@ export class SupervisorMesh {
 
   async reconcile({ tabs = [], fleetAgents = [] } = {}) {
     const at = nowIso(this.#clock);
-    const fleetTabs = new Set((fleetAgents || []).map((row) => row?.tab_id).filter(Boolean).map(String));
+    const fleetByTab = new Map((fleetAgents || []).map((row) => [String(row?.tab_id || ''), row]).filter(([tabId]) => Boolean(tabId)));
     const groups = new Map();
     for (const tab of tabs || []) {
       const tabId = String(tab?.tab_id || '');
-      if (!tabId || fleetTabs.has(tabId)) continue;
+      if (!tabId) continue;
       let conversationUrl;
       try { conversationUrl = normalizeSupervisorConversationUrl(tab?.url); } catch { continue; }
       const list = groups.get(conversationUrl) || [];
-      list.push({ tab_id: tabId, selected: tab?.selected === true });
+      list.push({ tab_id: tabId, selected: tab?.selected === true, fleet_bound: fleetByTab.has(tabId) });
       groups.set(conversationUrl, list);
     }
     const previous = new Map(this.#state.supervisors.map((row) => [row.supervisor_id, row]));
@@ -207,6 +219,7 @@ export class SupervisorMesh {
       const old = previous.get(supervisorId);
       previous.delete(supervisorId);
       const ambiguous = incarnations.length !== 1;
+      const fleetBound = incarnations.some((row) => row.fleet_bound === true);
       next.push({
         supervisor_id: supervisorId,
         conversation_url: conversationUrl,
@@ -215,6 +228,10 @@ export class SupervisorMesh {
         tab_id: ambiguous ? null : incarnations[0].tab_id,
         tab_incarnations: incarnations.map((row) => row.tab_id),
         selected: incarnations.some((row) => row.selected),
+        supervisor_capable: true,
+        fleet_bound: fleetBound,
+        coordination_blocked: fleetBound,
+        control_policy: 'SUPABASE_SHARED_LEASE_REQUIRED',
         first_seen_at: old?.first_seen_at || at,
         last_seen_at: at,
         dispatch_count: Math.max(0, Number(old?.dispatch_count) || 0),
