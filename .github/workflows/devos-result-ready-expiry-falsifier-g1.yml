@@ -1,0 +1,39 @@
+name: DevOS result-ready expiry falsifier g1
+
+on:
+  push:
+    branches:
+      - work/devos-result-ready-expiry-falsifier-g1
+  pull_request:
+    branches:
+      - work/devbrowser-workspace-git-hardening-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  falsify-expiry-race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: falsifier
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d falsifier"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/falsifier
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify PostgreSQL client
+        run: psql --version
+      - name: Falsify concurrent expiry/reconcile invariant
+        run: bash tests/devos_result_ready_expiry_falsifier_g1.sh
