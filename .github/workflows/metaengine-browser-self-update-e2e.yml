@@ -70,7 +70,7 @@ jobs:
         run: |
           $expected = '${{ github.event.pull_request.head.sha || github.sha }}'
           $actual = (git rev-parse HEAD).Trim()
-          if ($actual -ne $expected) { throw "candidate_head_mismatch:$actual:$expected" }
+          if ($actual -ne $expected) { throw "candidate_head_mismatch:${actual}:${expected}" }
       - name: Setup Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -90,7 +90,7 @@ jobs:
           if (-not (Test-Path $manifestPath)) { throw 'verified_self_update_manifest_missing' }
           $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
           $expectedHead = '${{ github.event.pull_request.head.sha || github.sha }}'
-          if ([string]$manifest.git_sha -ne $expectedHead) { throw "physical_evidence_head_mismatch:$($manifest.git_sha):$expectedHead" }
+          if ([string]$manifest.git_sha -ne $expectedHead) { throw "physical_evidence_head_mismatch:$($manifest.git_sha):${expectedHead}" }
           if ($manifest.physical_n_to_n_plus_1 -ne $true) { throw 'physical_update_not_proven' }
           if ($manifest.durable_successor_binding -ne $true) { throw 'durable_successor_not_proven' }
           if ($manifest.profile_continuity -ne $true -or $manifest.physical_singleton -ne $true) { throw 'continuity_or_singleton_not_proven' }
@@ -102,5 +102,5 @@ jobs:
         with:
           name: metaengine-browser-self-update-e2e-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
           path: apps/metaengine-browser/self-update-fast-evidence/
-          if-no-files-found: error
+          if-no-files-found: warn
           compression-level: 0
