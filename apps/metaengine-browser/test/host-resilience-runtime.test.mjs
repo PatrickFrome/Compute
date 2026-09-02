@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs/promises';
 import test from 'node:test';
 import { HostResilienceRuntime } from '../src/host-resilience-runtime.mjs';
 
@@ -44,4 +45,14 @@ test('resume event triggers recovery callback without page authority', async () 
   assert.equal(resumed, 1);
   assert.ok(runtime.snapshot().last_resume_at);
   assert.equal(runtime.snapshot().authority_effect, false);
+});
+
+test('sentinel self-heal reuses the one parent-progress tick and creates no second scheduler', async () => {
+  const source = await fs.readFile(new URL('../src/host-resilience-runtime.mjs', import.meta.url), 'utf8');
+  assert.match(source, /recoverWorkerIfProvenAbsent/);
+  assert.match(source, /sentinel_recovery_requires_exact_old_pid_absence:\s*true/);
+  assert.match(source, /sentinel_recovery_uses_existing_progress_tick:\s*true/);
+  assert.equal((source.match(/setInterval\s*\(/g) || []).length, 1);
+  assert.match(source, /await this\.\#progressLease\.mark\(\{ kind, detail \}\)[\s\S]*recoverWorkerIfProvenAbsent/);
+  assert.doesNotMatch(source, /watchdog_task_leasing:\s*true|watchdog_scheduler_authority:\s*true/);
 });
