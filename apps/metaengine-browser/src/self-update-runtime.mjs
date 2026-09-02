@@ -39,6 +39,7 @@ export {
 export const DEFAULT_CONTINUOUS_DEV_UPDATE_INTERVAL_MS = 15 * 60 * 1000;
 export const DEFAULT_DEV_UPDATE_HINT_RETRY_MS = 5 * 60 * 1000;
 export const DEFAULT_CONTINUOUS_DEV_RESTART_GRACE_MS = 1 * 1000;
+export const DEFAULT_EXACT_UPDATE_DISCOVERY_DEADLINE_MS = 8 * 1000;
 
 const HINT_BUSY_STATES = new Set(['APPROVED_DOWNLOAD','DOWNLOADING','READY_RESTART','RESTART_GRACE','RESTARTING']);
 const HINT_LATCHED_FAILURE_STATES = new Set(['ERROR','REJECTED_METADATA']);
@@ -71,6 +72,10 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
   #hintFetch;
   #clock;
   #networkDeadlineMs;
+  #exactDiscoveryDeadlineMs;
+  #exactDiscoveryPromise = null;
+  #exactDiscoveryStartedAt = null;
+  #exactDiscoveryCompletedAt = null;
   #installEffectBarrierMode;
   #lastHintCheck = 0;
   #lastHintCheckAt = null;
@@ -82,9 +87,17 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
   constructor(options = {}) {
     const rawFetch = options?.fetchImpl ?? globalThis.fetch;
     const networkDeadlineMs = Math.max(500, Math.min(30_000, Number(options?.networkDeadlineMs) || DEFAULT_OPTIONAL_NETWORK_DEADLINE_MS));
-    const boundedFetch = createBoundedNetworkFetch(rawFetch, {
+    const exactDiscoveryDeadlineMs = Math.max(
+      networkDeadlineMs,
+      Math.min(30_000, Number(options?.exactDiscoveryDeadlineMs) || DEFAULT_EXACT_UPDATE_DISCOVERY_DEADLINE_MS),
+    );
+    const hintFetch = createBoundedNetworkFetch(rawFetch, {
       deadlineMs: networkDeadlineMs,
-      label: 'self_update_discovery',
+      label: 'self_update_hint',
+    });
+    const exactDiscoveryFetch = createBoundedNetworkFetch(rawFetch, {
+      deadlineMs: exactDiscoveryDeadlineMs,
+      label: 'self_update_exact_discovery',
     });
     const injectedUpdater = options?.updater != null;
     const originalBeforeInstallerLaunch = options?.beforeInstallerLaunch;
@@ -107,7 +120,7 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
       : (injectedUpdater ? 'INJECTED_UPDATER_TEST_BYPASS' : SELF_UPDATE_INSTALL_EFFECT_BARRIER);
     const withDevCadence = {
       ...options,
-      fetchImpl: boundedFetch,
+      fetchImpl: exactDiscoveryFetch,
       intervalMs: options?.intervalMs ?? DEFAULT_CONTINUOUS_DEV_UPDATE_INTERVAL_MS,
       restartGraceMs: options?.restartGraceMs ?? DEFAULT_CONTINUOUS_DEV_RESTART_GRACE_MS,
       beforeInstallerLaunch: async (receipt) => {
@@ -136,8 +149,9 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
     this.#hintIntervalMs = Math.max(1000, Number(options?.hintIntervalMs ?? DEFAULT_DEV_UPDATE_HINT_INTERVAL_MS));
     this.#hintRetryMs = Math.max(this.#hintIntervalMs, Number(options?.hintRetryMs ?? DEFAULT_DEV_UPDATE_HINT_RETRY_MS));
     this.#hintProbe = options?.hintProbe ?? probeDevUpdateHint;
-    this.#hintFetch = boundedFetch;
+    this.#hintFetch = hintFetch;
     this.#networkDeadlineMs = networkDeadlineMs;
+    this.#exactDiscoveryDeadlineMs = exactDiscoveryDeadlineMs;
     this.#clock = options?.clock ?? (() => Date.now());
     this.#installEffectBarrierMode = installEffectBarrierMode;
     if (typeof this.#hintProbe !== 'function') throw new Error('self_update_hint_probe_invalid');
@@ -155,6 +169,12 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
       hint_triggered_version: this.#lastHintTriggeredVersion,
       hint_last_triggered_at: this.#lastHintTriggeredAt > 0 ? new Date(this.#lastHintTriggeredAt).toISOString() : null,
       network_deadline_ms: this.#networkDeadlineMs,
+      hint_network_deadline_ms: this.#networkDeadlineMs,
+      exact_discovery_deadline_ms: this.#exactDiscoveryDeadlineMs,
+      exact_discovery_in_flight: this.#exactDiscoveryPromise != null,
+      exact_discovery_started_at: this.#exactDiscoveryStartedAt,
+      exact_discovery_completed_at: this.#exactDiscoveryCompletedAt,
+      hint_triggered_exact_discovery_background: true,
       network_discovery_bounded: true,
       install_effect_barrier_mode: this.#installEffectBarrierMode,
       install_effect_barrier_before_final_handoff: true,
@@ -187,15 +207,39 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
       this.#lastHintTriggeredAt = now;
       return true;
     } catch (error) {
-      // Hint failure has zero authority over the updater. Exact release discovery uses
-      // the same bounded network transport; neither path may stall supervisor liveness.
+      // The hint is a cheap zero-authority signal. Failure neither changes updater
+      // authority nor consumes the longer exact publisher-verification budget.
       this.#lastHintError = clipHintError(error);
       return false;
     }
   }
 
+  #startExactDiscoverySingleflight() {
+    if (this.#exactDiscoveryPromise) return false;
+    this.#exactDiscoveryStartedAt = new Date(this.#clock()).toISOString();
+    this.#exactDiscoveryCompletedAt = null;
+    this.#exactDiscoveryPromise = super.cycle({ force: true })
+      .catch(() => this.snapshot())
+      .finally(() => {
+        this.#exactDiscoveryCompletedAt = new Date(this.#clock()).toISOString();
+        this.#exactDiscoveryPromise = null;
+      });
+    return true;
+  }
+
   async cycle({ force = false } = {}) {
+    if (force && this.#exactDiscoveryPromise) {
+      await this.#exactDiscoveryPromise;
+      return this.snapshot();
+    }
     const hintTriggered = force ? false : await this.#hintRequestsExactCheck();
-    return super.cycle({ force: force || hintTriggered });
+    if (hintTriggered) {
+      this.#startExactDiscoverySingleflight();
+      // Exact GitHub publisher verification is read-only and singleflight. Do not
+      // await it on the NativeSupervisor heartbeat-critical path. The parent runtime
+      // owns all verification/download/install state and the next normal cycle reads it.
+      return this.snapshot();
+    }
+    return super.cycle({ force });
   }
 }
