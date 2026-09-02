@@ -6,6 +6,8 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 
 const DURABLE_JSON_FILE_CONTRACT = 'METAENGINE_DURABLE_JSON_V1';
+const TRANSIENT_RENAME_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
+const RENAME_RETRY_DELAYS_MS = Object.freeze([0, 25, 50, 100, 200, 400]);
 
 function jsonPayload(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
@@ -13,6 +15,63 @@ function jsonPayload(value) {
 
 function tempPath(target, sequence = 0) {
   return `${target}.${process.pid}.${Number(sequence) || 0}.${crypto.randomUUID()}.tmp`;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function sleepSync(ms) {
+  if (!(Number(ms) > 0)) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(ms));
+}
+
+function transientRenameError(error) {
+  return TRANSIENT_RENAME_CODES.has(String(error?.code || '').toUpperCase());
+}
+
+async function targetMatchesPayload(file, payload) {
+  try { return await fsp.readFile(file, 'utf8') === payload; }
+  catch { return false; }
+}
+
+function targetMatchesPayloadSync(file, payload) {
+  try { return fs.readFileSync(file, 'utf8') === payload; }
+  catch { return false; }
+}
+
+async function renameWithReadback(temp, file, payload) {
+  let lastError = null;
+  for (let attempt = 0; attempt < RENAME_RETRY_DELAYS_MS.length; attempt += 1) {
+    if (attempt > 0) await sleep(RENAME_RETRY_DELAYS_MS[attempt]);
+    try {
+      await fsp.rename(temp, file);
+      return Object.freeze({ attempts: attempt + 1, recovered_via_readback: false });
+    } catch (error) {
+      lastError = error;
+      if (await targetMatchesPayload(file, payload)) {
+        return Object.freeze({ attempts: attempt + 1, recovered_via_readback: true });
+      }
+      if (!transientRenameError(error) || attempt === RENAME_RETRY_DELAYS_MS.length - 1) throw error;
+    }
+  }
+  throw lastError || new Error('durable_json_rename_failed');
+}
+
+function renameWithReadbackSync(temp, file, payload) {
+  let lastError = null;
+  for (let attempt = 0; attempt < RENAME_RETRY_DELAYS_MS.length; attempt += 1) {
+    if (attempt > 0) sleepSync(RENAME_RETRY_DELAYS_MS[attempt]);
+    try {
+      fs.renameSync(temp, file);
+      return Object.freeze({ attempts: attempt + 1, recovered_via_readback: false });
+    } catch (error) {
+      lastError = error;
+      if (targetMatchesPayloadSync(file, payload)) {
+        return Object.freeze({ attempts: attempt + 1, recovered_via_readback: true });
+      }
+      if (!transientRenameError(error) || attempt === RENAME_RETRY_DELAYS_MS.length - 1) throw error;
+    }
+  }
+  throw lastError || new Error('durable_json_rename_failed');
 }
 
 async function syncDirectory(directory) {
@@ -34,20 +93,21 @@ async function durableWriteJson(target, value, { mode = 0o600, sequence = 0 } = 
   if (!file) throw new Error('durable_json_target_required');
   const directory = path.dirname(file);
   const temp = tempPath(file, sequence);
+  const payload = jsonPayload(value);
   let renamed = false;
+  let renameOutcome = null;
   await fsp.mkdir(directory, { recursive: true });
   try {
     const handle = await fsp.open(temp, 'wx', mode);
     try {
-      await handle.writeFile(jsonPayload(value), 'utf8');
+      await handle.writeFile(payload, 'utf8');
       await handle.sync();
     } finally {
       await handle.close();
     }
-    await fsp.rename(temp, file);
+    renameOutcome = await renameWithReadback(temp, file, payload);
     renamed = true;
-    // On Windows fsync/FlushFileBuffers requires a write-capable handle. r+ does not
-    // alter existing bytes; it only opens the committed file for the durability flush.
+    if (renameOutcome.recovered_via_readback) await fsp.unlink(temp).catch(() => {});
     const committed = await fsp.open(file, 'r+');
     try { await committed.sync(); } finally { await committed.close(); }
     const directorySynced = await syncDirectory(directory);
@@ -57,6 +117,8 @@ async function durableWriteJson(target, value, { mode = 0o600, sequence = 0 } = 
       file_synced: true,
       directory_synced: directorySynced,
       rename_committed: true,
+      rename_attempts: renameOutcome.attempts,
+      rename_recovered_via_readback: renameOutcome.recovered_via_readback,
       platform: process.platform,
       authority_effect: false,
     });
@@ -71,18 +133,23 @@ function durableWriteJsonSync(target, value, { mode = 0o600, sequence = 0 } = {}
   if (!file) throw new Error('durable_json_target_required');
   const directory = path.dirname(file);
   const temp = tempPath(file, sequence);
+  const payload = jsonPayload(value);
   let renamed = false;
+  let renameOutcome = null;
   fs.mkdirSync(directory, { recursive: true });
   try {
     const fd = fs.openSync(temp, 'wx', mode);
     try {
-      fs.writeFileSync(fd, jsonPayload(value), 'utf8');
+      fs.writeFileSync(fd, payload, 'utf8');
       fs.fsyncSync(fd);
     } finally {
       fs.closeSync(fd);
     }
-    fs.renameSync(temp, file);
+    renameOutcome = renameWithReadbackSync(temp, file, payload);
     renamed = true;
+    if (renameOutcome.recovered_via_readback) {
+      try { fs.unlinkSync(temp); } catch {}
+    }
     const committedFd = fs.openSync(file, 'r+');
     try { fs.fsyncSync(committedFd); } finally { fs.closeSync(committedFd); }
     const directorySynced = syncDirectorySync(directory);
@@ -92,6 +159,8 @@ function durableWriteJsonSync(target, value, { mode = 0o600, sequence = 0 } = {}
       file_synced: true,
       directory_synced: directorySynced,
       rename_committed: true,
+      rename_attempts: renameOutcome.attempts,
+      rename_recovered_via_readback: renameOutcome.recovered_via_readback,
       platform: process.platform,
       authority_effect: false,
     });
