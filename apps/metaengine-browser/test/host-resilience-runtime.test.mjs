@@ -56,3 +56,21 @@ test('sentinel self-heal reuses the one parent-progress tick and creates no seco
   assert.match(source, /await this\.\#progressLease\.mark\(\{ kind, detail \}\)[\s\S]*recoverWorkerIfProvenAbsent/);
   assert.doesNotMatch(source, /watchdog_task_leasing:\s*true|watchdog_scheduler_authority:\s*true/);
 });
+
+test('initial sentinel bootstrap retries only when spawn effect is proven absent', async () => {
+  const source = await fs.readFile(new URL('../src/host-resilience-runtime.mjs', import.meta.url), 'utf8');
+  const spawnInvokeAt = source.indexOf('spawnInvoked = true');
+  const spawnReturnAt = source.indexOf('spawnReturned = true', spawnInvokeAt);
+  const retryProofAt = source.indexOf('const retrySafe = spawnReturned !== true', spawnReturnAt);
+  const retryStateAt = source.indexOf("'PROVEN_NO_SPAWN_EFFECT'", retryProofAt);
+  const retryTickAt = source.indexOf('this.#sentinelBootstrapRetrySafe) await this.#bootstrapSentinel()', retryStateAt);
+  assert.ok(spawnInvokeAt >= 0 && spawnReturnAt > spawnInvokeAt);
+  assert.ok(retryProofAt > spawnReturnAt);
+  assert.ok(retryStateAt > retryProofAt);
+  assert.ok(retryTickAt > retryStateAt);
+  assert.match(source, /sentinel_bootstrap_retry_requires_proven_no_spawn_effect:\s*true/);
+  assert.match(source, /sentinel_bootstrap_recovery_uses_existing_progress_tick:\s*true/);
+  assert.match(source, /automatic_retry_allowed:\s*retrySafe/);
+  assert.match(source, /host_resilience_sentinel_not_ready_for_installer_handoff/);
+  assert.equal((source.match(/setInterval\s*\(/g) || []).length, 1, 'bootstrap recovery must reuse the existing resilience scheduler');
+});
