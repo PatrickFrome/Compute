@@ -14,6 +14,7 @@ on:
       - 'apps/metaengine-browser/test/workspace-binding-observer.test.mjs'
       - 'apps/metaengine-browser/test/workspace-observation-routes.test.mjs'
       - 'apps/metaengine-browser/test/workspace-workbench-projection.test.mjs'
+      - 'apps/metaengine-browser/test/workspace-workbench-projection-performance.test.mjs'
       - 'apps/metaengine-browser/test/shell-workbench-ui.test.mjs'
       - 'apps/metaengine-browser/ui/app.js'
       - 'apps/metaengine-browser/ui/index.html'
@@ -22,6 +23,7 @@ on:
   push:
     branches:
       - 'work/browser-typed-workspaces-v1'
+      - 'work/browser-final-optimization-v1'
     paths:
       - 'apps/metaengine-browser/**'
       - 'supabase/migrations/20260902090000_a2_workspace_binding_snapshot_v1.sql'
@@ -78,6 +80,7 @@ jobs:
             apps/metaengine-browser/test/workspace-binding-observer.test.mjs \
             apps/metaengine-browser/test/workspace-observation-routes.test.mjs \
             apps/metaengine-browser/test/workspace-workbench-projection.test.mjs \
+            apps/metaengine-browser/test/workspace-workbench-projection-performance.test.mjs \
             apps/metaengine-browser/test/shell-workbench-ui.test.mjs
 
       - name: Static privacy and authority gates
@@ -87,6 +90,7 @@ jobs:
           CLIENT=apps/metaengine-browser/src/native-supervisor-client.mjs
           MAIN=apps/metaengine-browser/src/main.mjs
           UI=apps/metaengine-browser/ui/app.js
+          PROJECTION=apps/metaengine-browser/src/workspace-workbench-projection.mjs
           grep -q "bounded_rows', 64" "$RPC"
           grep -q "filesystem_paths_exposed', false" "$RPC"
           grep -q "browser_actuation_authority', false" "$RPC"
@@ -102,6 +106,9 @@ jobs:
           ! grep -q "lease_current" "$UI"
           ! grep -Eq "current_command\?\.payload|command\?\.payload" "$UI"
           ! grep -Eq "automatic_retry_allowed:\s*true|browser_actuation_authority:\s*true" "$UI"
+          grep -q "const tabMap=byId(tabs,'tab_id')" "$PROJECTION"
+          grep -q "const agentMap=byId(fleet,'agent_id')" "$PROJECTION"
+          ! grep -q "groups.filter(" "$PROJECTION"
 
       - name: Prove branch-local clean checkout
         run: |
@@ -110,3 +117,4 @@ jobs:
           printf 'production_mutation=false\n'
           printf 'second_scheduler_loop=false\n'
           printf 'workspace_grouping_authority=DURABLE_WORKSPACE_BINDING_ONLY\n'
+          printf 'projection_count_passes=1\n'
