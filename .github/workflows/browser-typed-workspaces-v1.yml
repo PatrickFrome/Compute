@@ -3,12 +3,14 @@ name: Browser Typed Workspaces V1
 on:
   pull_request:
     paths:
+      - 'apps/metaengine-browser/src/main.mjs'
       - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
       - 'apps/metaengine-browser/src/workspace-binding-observer.mjs'
       - 'apps/metaengine-browser/src/workspace-workbench-projection.mjs'
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-promotion-routes.mjs'
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/workspace-observation-routes.mjs'
       - 'apps/metaengine-browser/test/native-supervisor-command-target-projection.test.mjs'
+      - 'apps/metaengine-browser/test/shell-workspace-projection-wiring.test.mjs'
       - 'apps/metaengine-browser/test/workspace-binding-observer.test.mjs'
       - 'apps/metaengine-browser/test/workspace-observation-routes.test.mjs'
       - 'apps/metaengine-browser/test/workspace-workbench-projection.test.mjs'
@@ -59,6 +61,7 @@ jobs:
       - name: Syntax gates
         run: |
           set -euo pipefail
+          node --check apps/metaengine-browser/src/main.mjs
           node --check apps/metaengine-browser/src/native-supervisor-client.mjs
           node --check apps/metaengine-browser/src/workspace-binding-observer.mjs
           node --check apps/metaengine-browser/src/workspace-workbench-projection.mjs
@@ -71,6 +74,7 @@ jobs:
           set -euo pipefail
           node --test \
             apps/metaengine-browser/test/native-supervisor-command-target-projection.test.mjs \
+            apps/metaengine-browser/test/shell-workspace-projection-wiring.test.mjs \
             apps/metaengine-browser/test/workspace-binding-observer.test.mjs \
             apps/metaengine-browser/test/workspace-observation-routes.test.mjs \
             apps/metaengine-browser/test/workspace-workbench-projection.test.mjs \
@@ -81,18 +85,22 @@ jobs:
           set -euo pipefail
           RPC=supabase/migrations/20260902090000_a2_workspace_binding_snapshot_v1.sql
           CLIENT=apps/metaengine-browser/src/native-supervisor-client.mjs
+          MAIN=apps/metaengine-browser/src/main.mjs
           UI=apps/metaengine-browser/ui/app.js
           grep -q "bounded_rows', 64" "$RPC"
           grep -q "filesystem_paths_exposed', false" "$RPC"
           grep -q "browser_actuation_authority', false" "$RPC"
           grep -q "automatic_retry_allowed', false" "$RPC"
           grep -q "grant execute on function public.h205f22_a2_workspace_binding_snapshot_v1(uuid) to service_role" "$RPC"
-          ! grep -Eq "repo_root|managed_root|worktree_path|worktree_realpath" "$RPC"
+          ! grep -Eq "'(repo_root|managed_root|worktree_path|worktree_realpath)'" "$RPC"
           grep -q "current_command_payload_exposed: false" "$CLIENT"
           grep -q "DB_LEASED_TYPED_COMMAND_ONLY" "$CLIENT"
+          grep -q "projectWorkspaceWorkbench" "$MAIN"
+          grep -q "const projection = next?.workspaces" "$UI"
           grep -q "DURABLE_WORKSPACE_BINDING_ONLY" "$UI"
-          grep -q "url_heuristic_grouping: false" "$UI"
-          grep -q "title_heuristic_grouping: false" "$UI"
+          ! grep -q "workspace_bindings" "$UI"
+          ! grep -q "lease_current" "$UI"
+          ! grep -Eq "current_command\?\.payload|command\?\.payload" "$UI"
           ! grep -Eq "automatic_retry_allowed:\s*true|browser_actuation_authority:\s*true" "$UI"
 
       - name: Prove branch-local clean checkout
