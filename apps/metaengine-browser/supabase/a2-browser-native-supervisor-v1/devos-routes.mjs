@@ -66,6 +66,10 @@ function backlogOf(snapshot){
   for(const t of tasks){const state=String(t?.state||'').toUpperCase();const role=String(t?.role||'').toUpperCase();if(state==='READY'){ready++;if(ROLE_RE.test(role))by_role[role]=(by_role[role]||0)+1;}if(['LEASED','RUNNING'].includes(state))running++;}
   return {ready,running,by_role,authority_effect:false};
 }
+function deferredBacklog(backlog,backpressure){
+  if(!backpressure?.active)return backlog;
+  return {...backlog,deferred_ready:Number(backlog?.ready||0),deferred_by_role:{...(backlog?.by_role||{})},ready:0,by_role:{},scheduler_backpressure:true,authority_effect:false};
+}
 function roleSchedulingStats(snapshot){
   const out=new Map();
   for(const task of Array.isArray(snapshot?.active_tasks)?snapshot.active_tasks:[]){
@@ -149,6 +153,10 @@ function transportAdmissionFence(error){
   }
   return null;
 }
+function schedulerBackpressure(result){
+  if(result?.backpressure!==true)return null;
+  return Object.freeze({active:true,reason:String(result?.reason||'SCHEDULER_BACKPRESSURE').slice(0,120),retry_after_ms:Math.max(1000,Math.min(300000,Number(result?.retry_after_ms)||60000)),page_signal_authority:false,automatic_retry_allowed:false,authority_effect:false});
+}
 
 export function createDevosSupervisorRoutes({rpc,workspaceId}={}){
   if(typeof rpc!=='function'||!UUID_RE.test(String(workspaceId||'')))throw new Error('devos_routes_dependencies_invalid');
@@ -169,17 +177,20 @@ export function createDevosSupervisorRoutes({rpc,workspaceId}={}){
       const metaOrchestrator=await metaSuperstep({clientId});
       const reconcile=await rpc('devos_fleet_reconcile_v1',{p_workspace:workspaceId});
       const snapshot=await rpc('devos_fleet_snapshot_v1',{p_workspace:workspaceId});
-      const backlog=backlogOf(snapshot);
-      let lease=null,leaseAttempts=0,leaseFence=null;
-      const candidates=fairIdleLeaseCandidates(snapshot,agents,backlog);
+      const rawBacklog=backlogOf(snapshot);
+      let lease=null,leaseAttempts=0,leaseFence=null,backpressure=null;
+      const candidates=fairIdleLeaseCandidates(snapshot,agents,rawBacklog);
       for(const agent of candidates.slice(0,8)){
         leaseAttempts+=1;
         try{
           const result=await rpc('devos_fleet_lease_v1',{p_workspace:workspaceId,p_agent:agent.agent_id,p_role:agent.role,p_tab:agent.tab_id,p_target:agent.target_id,p_epoch:agent.generation_epoch,p_seconds:900});
           if(result?.leased===true){lease=result;break;}
+          backpressure=schedulerBackpressure(result);
+          if(backpressure)break;
         }catch(error){leaseFence=transportAdmissionFence(error);if(!leaseFence)throw error;break;}
       }
-      return json(200,{schema:'metaengine.devos.browser-cycle.v1',meta_orchestrator:metaOrchestrator,reconcile,backlog,lease,lease_fenced:leaseFence?.fenced===true,lease_fence_reason:leaseFence?.reason||null,running:runningForAgents(snapshot,agents),scheduler_source:'NATIVE_SUPERVISOR_HEARTBEAT',scheduler_policy:'IDLE_ROLE_FAIR_SHARE_V1',lease_attempts:leaseAttempts,second_scheduler_loop:false,automatic_retry_allowed:false,authority_effect:false});
+      const backlog=deferredBacklog(rawBacklog,backpressure);
+      return json(200,{schema:'metaengine.devos.browser-cycle.v1',meta_orchestrator:metaOrchestrator,reconcile,backlog,lease,scheduler_backpressure:backpressure,lease_fenced:leaseFence?.fenced===true,lease_fence_reason:leaseFence?.reason||null,running:runningForAgents(snapshot,agents),scheduler_source:'NATIVE_SUPERVISOR_HEARTBEAT',scheduler_policy:'IDLE_ROLE_FAIR_SHARE_V1',lease_attempts:leaseAttempts,second_scheduler_loop:false,automatic_retry_allowed:false,authority_effect:false});
     }
     if(req?.method==='POST'&&path==='/v1/devos/mark-running'){
       const b=binding(body); const proof=body?.proof||{};
