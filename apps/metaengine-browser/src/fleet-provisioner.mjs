@@ -10,7 +10,6 @@ import { registerFleetRuntime } from './fleet-runtime-bridge.mjs';
 export { FLEET_PROFILES, FLEET_PROVISIONER_VERSION, FLEET_STATES };
 
 const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
-const CAPACITY_AMBIGUITY_PREFIX = 'CREATE_TAB_AMBIGUOUS:tab_capacity_exceeded';
 
 function normalizeRootChatGptUrl(value) {
   const url = new URL(String(value || '').trim());
@@ -33,35 +32,12 @@ function exactOverlayProof(agent, proof) {
     && Number.isFinite(Date.parse(String(proof.proven_at || '')));
 }
 
-function deterministicCapacityAttempts(snapshot) {
-  return (snapshot?.agents || []).filter((agent) =>
-    String(agent?.lifecycle_state || '') === 'PROVISIONING_AMBIGUOUS'
-    && String(agent?.ambiguous_reason || '').startsWith(CAPACITY_AMBIGUITY_PREFIX));
-}
-
 export class FleetProvisioner extends CoreFleetProvisioner {
   #preconversationProofs = new Map();
-  #capacityBackpressure = false;
-  #capacityRetiredAttempts = 0;
-
-  async #retireDeterministicCapacityAttempts() {
-    const rows = deterministicCapacityAttempts(super.snapshot());
-    if (rows.length === 0) return false;
-    for (const agent of rows) await super.retire(agent.agent_id);
-    this.#capacityRetiredAttempts += rows.length;
-    this.#capacityBackpressure = true;
-    return true;
-  }
 
   async init(...args) {
     this.#preconversationProofs.clear();
-    this.#capacityBackpressure = false;
-    this.#capacityRetiredAttempts = 0;
     await super.init(...args);
-    // Older 1.4.1 state classified tab_capacity_exceeded as ambiguous even though
-    // TabRegistry rejects it before creating a physical WebContents. Retire only
-    // those exact no-effect logical attempts; every other ambiguity remains fenced.
-    await this.#retireDeterministicCapacityAttempts();
     registerFleetRuntime(this);
     return this.snapshot();
   }
@@ -83,32 +59,7 @@ export class FleetProvisioner extends CoreFleetProvisioner {
       out.counts.BOUND_UNVERIFIED = Math.max(0, Number(out.counts.BOUND_UNVERIFIED || 0) - promoted);
       out.counts.ACTIVE = Number(out.counts.ACTIVE || 0) + promoted;
     }
-    out.capacity_backpressure = {
-      blocked: this.#capacityBackpressure,
-      retired_no_effect_attempts: this.#capacityRetiredAttempts,
-      reason: this.#capacityBackpressure ? 'TAB_CAPACITY_EXCEEDED_PRE_EFFECT' : null,
-      deterministic_no_effect: true,
-      automatic_retry_allowed: false,
-      release_signal: 'PHYSICAL_TAB_CLOSED',
-      authority_effect: false,
-    };
     return Object.freeze(out);
-  }
-
-  async reconcile(args = {}) {
-    if (args?.active === true && this.#capacityBackpressure) return this.snapshot();
-    await super.reconcile(args);
-    await this.#retireDeterministicCapacityAttempts();
-    return this.snapshot();
-  }
-
-  async onTabClosed(tabId, reason = 'PHYSICAL_TAB_CLOSED') {
-    const out = await super.onTabClosed(tabId, reason);
-    // A physical close is the only local evidence that capacity may have changed.
-    // It permits a later reconcile to make one normal bounded provisioning pass;
-    // no failed createTab effect itself is replayed.
-    if (this.#capacityBackpressure) this.#capacityBackpressure = false;
-    return out ? this.snapshot() : this.snapshot();
   }
 
   async markTransportPreconversationProven({ agent_id, tab_id, target_id, generation_epoch, transport_url } = {}) {
