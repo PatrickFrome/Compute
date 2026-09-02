@@ -37,6 +37,13 @@ test('workbench renderer exposes layout and navigation but no authority actuatio
   for (const command of authorityCommands) assert.doesNotMatch(js, new RegExp(`['\"]${command}['\"]`));
 });
 
+test('tab selection and close are independent interactive controls', () => {
+  assert.match(js, /const row = document\.createElement\('div'\)/);
+  assert.match(js, /select\.className = 'verticalTabSelect'/);
+  assert.match(js, /close\.className = 'tabClose'/);
+  assert.match(css, /\.verticalTabSelect\{/);
+});
+
 test('untrusted snapshot strings are never injected through HTML parsing', () => {
   assert.doesNotMatch(js, /\.innerHTML\s*=/);
   assert.doesNotMatch(js, /insertAdjacentHTML/);
