@@ -57,6 +57,16 @@ test('push sync endpoint pins repository ref workflow subject and GitHub-hosted 
   assert.match(source, /payload\.repository_visibility !== "public"/);
 });
 
+test('push sync uses the proven direct DB transport and never service-role REST JWT auth', async () => {
+  const source = await read('supabase/functions/metaengine-devos-baseline-push-sync-h205f22/index.ts');
+  assert.match(source, /import postgres from "npm:postgres@\^3"/);
+  assert.match(source, /SUPABASE_DB_URL/);
+  assert.match(source, /select public\.devos_roadmap_baseline_sync_read_v1\(\) as result/);
+  assert.match(source, /select public\.devos_roadmap_baseline_sync_commit_v1\(/);
+  assert.doesNotMatch(source, /SUPABASE_SERVICE_ROLE_KEY/);
+  assert.doesNotMatch(source, /\/rest\/v1\/rpc\//);
+});
+
 test('push sync candidate comes only from verified OIDC SHA and remains fast-forward CAS fenced', async () => {
   const source = await read('supabase/functions/metaengine-devos-baseline-push-sync-h205f22/index.ts');
   const candidateAt = source.indexOf('const candidate = String(payload.sha');
@@ -64,7 +74,7 @@ test('push sync candidate comes only from verified OIDC SHA and remains fast-for
   const compareAt = source.indexOf('const compare = await githubCompare(expected, candidate)', authorityAt);
   const dispatchAt = source.indexOf('return await commitAdvance(expected, candidate, compare', compareAt);
   const proofGuardAt = source.indexOf('if (status !== "ahead" || mergeBase !== expected || baseSha !== expected || headSha !== candidate)');
-  const casAt = source.indexOf('callRpc("devos_roadmap_baseline_sync_commit_v1"', proofGuardAt);
+  const casAt = source.indexOf('select public.devos_roadmap_baseline_sync_commit_v1(', proofGuardAt);
   assert.ok(candidateAt >= 0, 'candidate must come from signed GitHub OIDC sha');
   assert.ok(authorityAt > candidateAt, 'current DB authority must be reread after OIDC verification');
   assert.ok(compareAt > authorityAt, 'fast-forward proof must compare current authority to OIDC candidate');
@@ -75,8 +85,8 @@ test('push sync candidate comes only from verified OIDC SHA and remains fast-for
   assert.match(source, /mergeBase !== expected/);
   assert.match(source, /baseSha !== expected/);
   assert.match(source, /headSha !== candidate/);
-  assert.match(source, /p_expected_base:\s*expected/);
-  assert.match(source, /p_next_base:\s*candidate/);
+  assert.match(source, /\$\{expected\}::text/);
+  assert.match(source, /\$\{candidate\}::text/);
   assert.doesNotMatch(source, /await req\.json|input\.candidate|body\.candidate/);
   assert.match(source, /caller_candidate_ignored:\s*true/);
   assert.match(source, /polling_fallback_preserved:\s*true/);
