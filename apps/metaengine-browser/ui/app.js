@@ -164,98 +164,39 @@ function fleetAgentForTab(next, tabId) {
 function exactActuationForTab(next, tabId) {
   const command = next?.supervisor?.current_command;
   if (!command) return null;
-  const bound = String(command?.target_tab_id || command?.payload?.tab_id || '');
+  const bound = String(command?.target_tab_id || '');
   if (!bound || bound !== String(tabId || '')) return null;
   return Object.freeze({ action: text(command.action, 'COMMAND'), command_id: command.command_id || null });
 }
 
-function workspaceProjection(next) {
-  const tabs = Array.isArray(next?.tabs?.tabs) ? next.tabs.tabs : [];
-  const agents = Array.isArray(next?.fleet?.agents) ? next.fleet.agents : [];
-  const observer = next?.supervisor?.workspace_bindings || null;
-  const sourceState = text(observer?.state, 'NOT_EXPOSED').toUpperCase();
-  const tabMap = new Map(tabs.map((tab) => [String(tab?.tab_id || ''), tab]));
-  const agentMap = new Map(agents.map((agent) => [String(agent?.agent_id || '').toLowerCase(), agent]));
-  const grouped = new Set();
-  const groups = [];
-  const issues = [];
-
-  const fail = (reason, binding) => issues.push({
-    reason,
-    workspace_id: binding?.workspace_id || null,
-    task_id: binding?.task_id || null,
-    agent_id: binding?.agent_id || null,
-    tab_id: binding?.tab_id || null,
-    lease_generation: Number(binding?.lease_generation) || null,
-  });
-
-  if (sourceState === 'AVAILABLE' && Array.isArray(observer?.bindings)) {
-    for (const binding of observer.bindings) {
-      const tabId = String(binding?.tab_id || '');
-      const targetId = String(binding?.target_id || '').toLowerCase();
-      const agentId = String(binding?.agent_id || '').toLowerCase();
-      const agentGeneration = Number(binding?.agent_generation_epoch);
-      const workspaceGeneration = Number(binding?.workspace_generation);
-      const leaseGeneration = Number(binding?.lease_generation);
-      const state = String(binding?.state || '').toUpperCase();
-      const tab = tabMap.get(tabId) || null;
-      if (!tab) { fail('TAB_NOT_LIVE', binding); continue; }
-      if (binding?.lease_current !== true) { fail('LEASE_STALE', binding); continue; }
-      const agent = agentMap.get(agentId) || null;
-      if (!agent) { fail('FLEET_AGENT_NOT_LIVE', binding); continue; }
-      if (String(agent?.tab_id || '') !== tabId) { fail('TAB_BINDING_DRIFT', binding); continue; }
-      if (String(agent?.target_id || '').toLowerCase() !== targetId) { fail('TARGET_BINDING_DRIFT', binding); continue; }
-      if (Number(agent?.generation_epoch) !== agentGeneration) { fail('AGENT_GENERATION_DRIFT', binding); continue; }
-      if (!Number.isSafeInteger(workspaceGeneration) || workspaceGeneration < 1 || !Number.isSafeInteger(leaseGeneration) || leaseGeneration < 1) { fail('BINDING_SCHEMA_INVALID', binding); continue; }
-      if (!['READY', 'FROZEN', 'RESERVED'].includes(state)) { fail('WORKSPACE_STATE_INVALID', binding); continue; }
-      grouped.add(tabId);
-      groups.push({
-        group_id: `workspace:${String(binding.workspace_id || '').toLowerCase()}:${workspaceGeneration}`,
-        workspace_id: String(binding.workspace_id || '').toLowerCase(),
-        workspace_generation: workspaceGeneration,
-        task_id: String(binding.task_id || '').toLowerCase(),
-        point_id: text(binding.point_id, ''),
-        repo_id: text(binding.repo_id, ''),
-        branch_name: text(binding.branch_name, ''),
-        base_sha: String(binding.base_sha || '').toLowerCase(),
-        agent_id: agentId,
-        role: text(agent.role, 'AGENT').toUpperCase(),
-        tab_id: tabId,
-        target_id: targetId,
-        agent_generation_epoch: agentGeneration,
-        lease_generation: leaseGeneration,
-        lease_expires_at: binding.lease_expires_at || null,
-        state,
-        ambiguity_code: binding.ambiguity_code || null,
-        dirty_hold: binding.dirty_hold === true,
-        tab,
-        agent,
-      });
-    }
-  }
-
-  groups.sort((a, b) => a.branch_name.localeCompare(b.branch_name) || a.group_id.localeCompare(b.group_id));
-  return {
+function unavailableWorkspaceProjection(next, sourceState = 'NOT_EXPOSED') {
+  const sessions = Array.isArray(next?.tabs?.tabs) ? next.tabs.tabs : [];
+  return Object.freeze({
+    schema: 'metaengine.browser.workspace-workbench-projection.v1',
     source_state: sourceState,
-    source_implemented: observer?.source_implemented === true,
-    runtime_deployed: observer?.runtime_deployed === true ? true : (observer?.runtime_deployed === false ? false : null),
-    groups,
-    sessions: tabs.filter((tab) => !grouped.has(String(tab?.tab_id || ''))),
-    issues,
-    counts: {
-      workspaces: groups.length,
-      sessions: tabs.length - grouped.size,
-      issues: issues.length,
-      ready: groups.filter((group) => group.state === 'READY').length,
-      frozen: groups.filter((group) => group.state === 'FROZEN').length,
-      reserved: groups.filter((group) => group.state === 'RESERVED').length,
-    },
+    source_implemented: false,
+    runtime_deployed: null,
+    groups: [],
+    sessions,
+    issues: [],
+    counts: { workspaces: 0, sessions: sessions.length, issues: 0, ready: 0, frozen: 0, reserved: 0 },
     grouping_authority: 'DURABLE_WORKSPACE_BINDING_ONLY',
     url_heuristic_grouping: false,
     title_heuristic_grouping: false,
     automatic_retry_allowed: false,
     browser_actuation_authority: false,
-  };
+    authority_effect: false,
+  });
+}
+
+function workspaceProjection(next) {
+  const projection = next?.workspaces;
+  if (!projection || projection.schema !== 'metaengine.browser.workspace-workbench-projection.v1') return unavailableWorkspaceProjection(next);
+  if (projection.grouping_authority !== 'DURABLE_WORKSPACE_BINDING_ONLY') return unavailableWorkspaceProjection(next, 'INVALID_PROJECTION');
+  if (projection.url_heuristic_grouping !== false || projection.title_heuristic_grouping !== false) return unavailableWorkspaceProjection(next, 'INVALID_PROJECTION');
+  if (projection.automatic_retry_allowed !== false || projection.browser_actuation_authority !== false || projection.authority_effect !== false) return unavailableWorkspaceProjection(next, 'INVALID_PROJECTION');
+  if (!Array.isArray(projection.groups) || !Array.isArray(projection.sessions) || !Array.isArray(projection.issues) || !projection.counts || typeof projection.counts !== 'object') return unavailableWorkspaceProjection(next, 'INVALID_PROJECTION');
+  return projection;
 }
 
 function applyLayout(next) {
@@ -473,7 +414,7 @@ function renderOverview(next) {
     metric('DevOS cycle', devos ? text(devos.state, 'UNKNOWN') : 'UNKNOWN', devos ? stateTone(devos.state) : 'neutral'),
   );
   fragment.append(grid);
-  const evidence = section('Authority & evidence', 'local projection');
+  const evidence = section('Authority & evidence', 'trusted main-process projection');
   evidence.list.append(
     kvRow('Workspace grouping', workspaces.grouping_authority, 'good'),
     kvRow('URL/title grouping', 'DISABLED', 'good'),
@@ -500,7 +441,7 @@ function renderWorkspaces(next) {
   const deployed = projection.runtime_deployed === true ? 'runtime deployed' : (projection.runtime_deployed === false ? 'runtime not deployed' : 'deployment unknown');
   const subtitle = projection.source_state === 'RUNTIME_NOT_DEPLOYED'
     ? 'Workspace Binding exists in source but the live readback RPC is not deployed. All browser tabs remain Sessions; no URL/title inference is allowed.'
-    : 'Groups are admitted only from current durable Workspace Binding evidence that matches the live Fleet tab, target and agent generation.';
+    : 'Groups are admitted only by the trusted main-process projection from current durable Workspace Binding evidence.';
   fragment.append(hero('Typed Workspaces', subtitle, `${projection.source_state} · ${deployed}`));
 
   const grid = el('div', 'opsGrid');
@@ -512,7 +453,7 @@ function renderWorkspaces(next) {
   );
   fragment.append(grid);
 
-  const contract = section('Grouping contract', 'fail closed');
+  const contract = section('Grouping contract', 'renderer is presentation only');
   contract.list.append(
     kvRow('Authority source', projection.grouping_authority, 'good'),
     kvRow('URL heuristic', projection.url_heuristic_grouping === false ? 'DISABLED' : 'UNKNOWN', 'good'),
@@ -608,7 +549,7 @@ function renderSupervisor(next) {
   ));
   const core = section('Core state', 'heartbeat authority');
   const command = supervisor.current_command;
-  const commandTab = String(command?.target_tab_id || command?.payload?.tab_id || '');
+  const commandTab = String(command?.target_tab_id || '');
   core.list.append(
     kvRow('Mode', supervisor.supervisor_mode || 'UNKNOWN', stateTone(supervisor.supervisor_mode)),
     kvRow('Armed', supervisor.armed === true ? 'TRUE' : 'FALSE', supervisor.armed === true ? 'good' : 'warn'),
@@ -686,11 +627,11 @@ function renderRuntime(next) {
   const compute = next?.compute;
   const downloads = next?.downloads;
   const observer = next?.supervisor?.worker_observer;
-  const workspace = next?.supervisor?.workspace_bindings;
+  const workspace = workspaceProjection(next);
   const downloadState = downloads?.active?.state || downloads?.last?.state || (downloads ? 'IDLE' : 'UNKNOWN');
   const runtime = section('Runtime health', 'process-local');
   runtime.list.append(
-    kvRow('Workspace observer', workspace?.state || 'UNKNOWN', stateTone(workspace?.state)),
+    kvRow('Workspace observer', workspace.source_state || 'UNKNOWN', stateTone(workspace.source_state)),
     kvRow('Development Plane', plane?.state || 'UNKNOWN', plane ? stateTone(plane.state) : 'neutral'),
     kvRow('Dev browser authority', plane?.browser_actuation_authority === false ? 'NONE' : 'UNKNOWN', plane?.browser_actuation_authority === false ? 'good' : 'neutral'),
     kvRow('Direct promote', plane?.direct_promote_current === false ? 'DISABLED' : 'UNKNOWN', plane?.direct_promote_current === false ? 'good' : 'neutral'),
@@ -718,6 +659,7 @@ function renderRuntime(next) {
 function renderSafety(next) {
   const fragment = document.createDocumentFragment();
   const gates = next?.owner_safety_gates;
+  const workspaces = workspaceProjection(next);
   fragment.append(hero('Safety & trust boundaries', 'This panel reports contracts. It does not disable or enable gates.', gates ? 'local policy' : 'unknown'));
   const authority = section('Browser authority', 'fail closed');
   authority.list.append(
@@ -725,7 +667,7 @@ function renderSafety(next) {
     kvRow('OS shell authority', next?.supervisor?.os_shell_authority === false ? 'DISABLED' : 'UNKNOWN', next?.supervisor?.os_shell_authority === false ? 'good' : 'neutral'),
     kvRow('Remote overlay', next?.layout?.overlay_remote_content === false ? 'NONE' : 'UNKNOWN', next?.layout?.overlay_remote_content === false ? 'good' : 'neutral'),
     kvRow('Renderer dimensions', next?.layout?.renderer_dimensions_authoritative === false ? 'NON-AUTHORITATIVE' : 'UNKNOWN', next?.layout?.renderer_dimensions_authoritative === false ? 'good' : 'neutral'),
-    kvRow('Workspace grouping', 'DURABLE BINDING ONLY', 'good'),
+    kvRow('Workspace grouping', workspaces.grouping_authority, 'good'),
     kvRow('Effect binding', next?.supervisor?.generic_tab_effect_binding || 'UNKNOWN', next?.supervisor?.generic_tab_effect_binding ? 'good' : 'neutral'),
   );
   fragment.append(authority.wrap);
