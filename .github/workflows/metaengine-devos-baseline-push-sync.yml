@@ -1,0 +1,59 @@
+name: METAENGINE DevOS Baseline Push Sync
+
+on:
+  push:
+    branches:
+      - integration/metaengine-development-os-v1
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: metaengine-devos-baseline-push-sync
+  cancel-in-progress: false
+
+jobs:
+  sync-authoritative-baseline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Exchange exact push identity and trigger bounded sync
+        shell: bash
+        env:
+          AUDIENCE: metaengine-h205f22-devos-baseline-sync
+          ENDPOINT: https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/metaengine-devos-baseline-push-sync-h205f22
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF}" = 'refs/heads/integration/metaengine-development-os-v1'
+          test "${GITHUB_SHA}" =~ ^[0-9a-f]{40}$
+          test -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          test -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
+
+          oidc_json="$(curl --fail-with-body --silent --show-error \
+            --retry 2 --retry-all-errors --connect-timeout 10 --max-time 20 \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUDIENCE}")"
+          oidc_token="$(OIDC_JSON="$oidc_json" node -e "const x=JSON.parse(process.env.OIDC_JSON||'{}'); if(typeof x.value!=='string'||x.value.split('.').length!==3) process.exit(2); process.stdout.write(x.value)")"
+          unset oidc_json
+          test -n "$oidc_token"
+
+          response="$(curl --fail-with-body --silent --show-error \
+            --connect-timeout 10 --max-time 30 \
+            -X POST \
+            -H "Authorization: Bearer ${oidc_token}" \
+            -H 'Content-Type: application/json' \
+            --data '{}' \
+            "$ENDPOINT")"
+          unset oidc_token
+          printf '%s\n' "$response"
+
+          SYNC_JSON="$response" EXPECTED_SHA="$GITHUB_SHA" node <<'NODE'
+          const row = JSON.parse(process.env.SYNC_JSON || '{}');
+          const expected = process.env.EXPECTED_SHA;
+          if (row.schema !== 'metaengine.devos.baseline-push-sync-observation.v1') throw new Error('push_sync_schema_invalid');
+          if (row.caller_candidate_ignored !== true) throw new Error('push_sync_caller_candidate_contract_invalid');
+          if (row.polling_fallback_preserved !== true) throw new Error('push_sync_fallback_contract_invalid');
+          if (row.authority_effect === true && row.baseline_sha !== expected) throw new Error('push_sync_advanced_wrong_sha');
+          if (row.reason === 'OIDC_OR_FAST_FORWARD_PROOF_REJECTED' || row.reason === 'NON_FAST_FORWARD_OR_UNPROVEN') throw new Error(`push_sync_rejected:${row.reason}`);
+          NODE
