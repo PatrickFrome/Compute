@@ -11,6 +11,10 @@ function normalized(value) {
   return String(value || '').trim().toUpperCase();
 }
 
+export function shouldScheduleUpdatedSuccessorQualification({ updatedLaunch = false, startupInspection = null } = {}) {
+  return updatedLaunch === true || normalized(startupInspection?.state) === 'TARGET_INSTALLED';
+}
+
 export async function recordAcceptedSignedSupervisorHeartbeat({ app, state, acceptedAtMs = Date.now() } = {}) {
   if (!app || typeof app.getVersion !== 'function') throw new Error('self_update_heartbeat_app_invalid');
   const version = String(app.getVersion() || '');
