@@ -189,14 +189,21 @@ export async function inspectSelfUpdateStartup(app, { clock = () => Date.now() }
   const target = String(expected.receipt.version || '');
   const cmp = compareVersions(current, target);
   if (current === target || cmp === 0) {
-    await transitionIfPresent(app, 'SUCCESSOR_BOOTED', {
-      requireTargetVersion: target,
-      evidence: { boot_version_match: true },
-    }).catch(() => {});
+    let observedTransaction = journal;
+    if (!journal || UNRESOLVED_STARTUP_STATES.has(journal.state)) {
+      observedTransaction = await transitionIfPresent(app, 'SUCCESSOR_BOOTED', {
+        requireTargetVersion: target,
+        evidence: { boot_version_match: true },
+      }).catch(() => journal);
+    }
     return {
       schema: 'metaengine.self-update.startup-inspection.v1',
-      state: 'TARGET_INSTALLED', current_version: current, target_version: target,
-      automatic_retry_allowed: false, authority_effect: false,
+      state: 'TARGET_INSTALLED',
+      transaction_state: observedTransaction?.state || journal?.state || null,
+      current_version: current,
+      target_version: target,
+      automatic_retry_allowed: false,
+      authority_effect: false,
     };
   }
   if (cmp != null && cmp > 0) {
