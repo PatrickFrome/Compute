@@ -46,8 +46,10 @@ test('fleet ambiguous compensating fanout remains explicitly owner-gated through
   const core = fs.readFileSync(path.join(root, 'src', 'fleet-provisioner-core.mjs'), 'utf8');
   assert.match(wrapper, /extends CoreFleetProvisioner/);
   assert.match(wrapper, /registerFleetRuntime\(this\)/);
-  assert.doesNotMatch(wrapper, /async reconcile\s*\(/);
-  assert.doesNotMatch(wrapper, /PROVISIONING_AMBIGUOUS/);
+  assert.match(wrapper, /CAPACITY_AMBIGUITY_PREFIX = 'CREATE_TAB_AMBIGUOUS:tab_capacity_exceeded'/);
+  assert.match(wrapper, /async reconcile\s*\(args = \{\}\)/);
+  assert.match(wrapper, /await super\.reconcile\(args\)/);
+  assert.doesNotMatch(wrapper, /globalOwnerGateDisabled\('fleet\.ambiguous_compensating_fanout'\)/);
   assert.match(core, /globalOwnerGateDisabled\('fleet\.ambiguous_compensating_fanout'\)/);
   assert.match(core, /PROVISIONING_AMBIGUOUS/);
 });
