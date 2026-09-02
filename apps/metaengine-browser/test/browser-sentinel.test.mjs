@@ -4,7 +4,11 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { BrowserSentinelHost, readSentinelState } from '../src/browser-sentinel.mjs';
+import {
+  BrowserSentinelHost,
+  browserSentinelWorkerHeartbeatPath,
+  readSentinelState,
+} from '../src/browser-sentinel.mjs';
 
 async function tempState() {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-sentinel-'));
@@ -41,6 +45,46 @@ test('sentinel seals exact parent incarnation before detached worker launch', as
   assert.equal(calls[0].options.env.METAENGINE_SENTINEL_TOKEN, snap.token);
   assert.equal(calls[0].unref, true);
   assert.equal(snap.authority_effect, false);
+});
+
+test('stale absent sentinel worker is replaced once and must prove exact heartbeat binding', async () => {
+  const { dir, statePath } = await tempState();
+  const calls = [];
+  let nextPid = 43210;
+  const spawnImpl = (executable, args, options) => {
+    const pid = nextPid++;
+    calls.push({ executable, args, options, pid });
+    if (calls.length === 2) {
+      setImmediate(() => {
+        void fs.writeFile(browserSentinelWorkerHeartbeatPath(statePath), `${JSON.stringify({
+          schema: 'metaengine.browser-sentinel.worker-heartbeat.v1',
+          token: options.env.METAENGINE_SENTINEL_TOKEN,
+          parent_pid: Number(options.env.METAENGINE_SENTINEL_PARENT_PID),
+          worker_pid: pid,
+          lifecycle: 'READY',
+          heartbeat_at: new Date().toISOString(),
+          authority_effect: false,
+        })}\n`, 'utf8');
+      });
+    }
+    return { pid, unref() { calls[calls.length - 1].unref = true; } };
+  };
+  const sentinel = new BrowserSentinelHost({
+    statePath,
+    workerScript: path.join(dir, 'worker.cjs'),
+    executable: 'browser.exe',
+    spawnImpl,
+    processAliveImpl: () => false,
+  });
+  await sentinel.start({ app: new EventEmitter() });
+  assert.equal(sentinel.snapshot().worker_ready, false);
+  const recovered = await sentinel.ensureHealthy({ timeoutMs: 1000 });
+  assert.equal(calls.length, 2);
+  assert.equal(recovered.worker_ready, true);
+  assert.equal(recovered.worker_pid, 43211);
+  assert.equal(recovered.worker_recovery_count, 1);
+  assert.ok(recovered.last_worker_recovery_at);
+  assert.equal(recovered.last_worker_recovery_error, null);
 });
 
 test('planned user quit suppresses crash relaunch authority', async () => {

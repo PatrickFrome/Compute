@@ -8,10 +8,12 @@ const PARENT_PROGRESS_HEARTBEAT_MS = 5_000;
 
 export class HostResilienceRuntime {
   #electron; #onResume; #platform; #blockerId = null; #resumeHandler = null; #sentinel = null; #progressLease = null; #progressTimer = null;
+  #heartbeatPromise = null;
   #state = {
     state: 'UNINITIALIZED', open_at_login: false, executable_will_launch_at_login: false,
     prevent_app_suspension: false, sentinel: null, sentinel_worker_healthy: false,
     parent_progress: null, parent_progress_heartbeat_ms: PARENT_PROGRESS_HEARTBEAT_MS,
+    sentinel_worker_self_healing: true,
     last_resume_at: null, last_error: null,
   };
 
@@ -30,12 +32,35 @@ export class HostResilienceRuntime {
       sentinel,
       parent_progress: parentProgress,
       sentinel_worker_healthy: sentinel?.worker_ready === true,
+      sentinel_worker_self_healing: true,
       useful_progress_required: true,
       pid_liveness_alone_sufficient: false,
       watchdog_scheduler_authority: false,
       watchdog_task_leasing: false,
       authority_effect: false,
     });
+  }
+
+  async #heartbeatTick() {
+    if (this.#heartbeatPromise) return this.#heartbeatPromise;
+    this.#heartbeatPromise = (async () => {
+      try {
+        if (this.#sentinel) {
+          const before = this.#sentinel.snapshot();
+          if (before?.lifecycle === 'ARMED' && before?.worker_ready !== true) {
+            await this.#sentinel.ensureHealthy({ timeoutMs: PARENT_PROGRESS_HEARTBEAT_MS });
+          }
+          this.#state.sentinel_worker_healthy = this.#sentinel.snapshot()?.worker_ready === true;
+        }
+        await this.markProgress({ kind: 'EVENT_LOOP_HEARTBEAT' });
+        if (this.#state.last_error?.startsWith('sentinel_worker:')) this.#state.last_error = null;
+      } catch (e) {
+        this.#state.sentinel_worker_healthy = false;
+        this.#state.last_error = `sentinel_worker:${String(e?.message || e).slice(0, 200)}`;
+      }
+      return this.snapshot();
+    })().finally(() => { this.#heartbeatPromise = null; });
+    return this.#heartbeatPromise;
   }
 
   async start() {
@@ -57,9 +82,7 @@ export class HostResilienceRuntime {
         this.#progressLease = new BrowserParentProgressLease({ statePath, getBinding: () => this.#sentinel?.snapshot?.() || null });
         await this.#progressLease.mark({ kind: 'HOST_RESILIENCE_STARTED' });
         this.#state.parent_progress = this.#progressLease.snapshot();
-        this.#progressTimer = setInterval(() => {
-          void this.markProgress({ kind: 'EVENT_LOOP_HEARTBEAT' }).catch(() => {});
-        }, PARENT_PROGRESS_HEARTBEAT_MS);
+        this.#progressTimer = setInterval(() => { void this.#heartbeatTick(); }, PARENT_PROGRESS_HEARTBEAT_MS);
         this.#progressTimer.unref?.();
         this.#state.sentinel_worker_healthy = true;
       }
@@ -71,7 +94,7 @@ export class HostResilienceRuntime {
         this.#resumeHandler = () => {
           this.#state.last_resume_at = new Date().toISOString();
           Promise.resolve(this.#onResume())
-            .then(() => this.markProgress({ kind: 'POWER_RESUME' }))
+            .then(() => this.#heartbeatTick())
             .catch((e) => { this.#state.last_error = String(e?.message || e).slice(0, 240); });
         };
         powerMonitor.on('resume', this.#resumeHandler);
@@ -113,11 +136,13 @@ export class HostResilienceRuntime {
       if (this.#resumeHandler && electron.powerMonitor?.removeListener) electron.powerMonitor.removeListener('resume', this.#resumeHandler);
       if (this.#blockerId != null && electron.powerSaveBlocker?.isStarted?.(this.#blockerId)) electron.powerSaveBlocker.stop(this.#blockerId);
       if (this.#progressTimer) clearInterval(this.#progressTimer);
+      if (this.#heartbeatPromise) await this.#heartbeatPromise.catch(() => {});
       await this.#sentinel?.stop?.();
     } catch {}
     this.#blockerId = null;
     this.#resumeHandler = null;
     this.#progressTimer = null;
+    this.#heartbeatPromise = null;
     this.#progressLease = null;
     this.#state.prevent_app_suspension = false;
     this.#state.sentinel_worker_healthy = false;
