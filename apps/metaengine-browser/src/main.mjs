@@ -599,6 +599,19 @@ async function startAfterReady() {
   await createWindow();
 }
 
+async function startAfterHostResilience() {
+  const barrier = globalThis.__METAENGINE_BROWSER_BOOTSTRAP_BARRIER__;
+  if (barrier && typeof barrier.then === 'function') await barrier;
+  return startAfterReady();
+}
+
+function startBrowserRuntime() {
+  startAfterHostResilience().catch((error) => {
+    console.error('browser-start-failed', error);
+    app.exit(1);
+  });
+}
+
 app.on('before-quit', () => { shutdownRequested = true; });
 app.on('activate', () => {
   if (!app.isReady()) return;
@@ -609,9 +622,5 @@ app.on('activate', () => {
   createWindow().catch((error) => { console.error(error); app.exit(1); });
 });
 app.on('window-all-closed', () => {});
-app.once('ready', () => {
-  startAfterReady().catch((error) => {
-    console.error('browser-start-failed', error);
-    app.exit(1);
-  });
-});
+if (app.isReady()) queueMicrotask(startBrowserRuntime);
+else app.once('ready', startBrowserRuntime);
