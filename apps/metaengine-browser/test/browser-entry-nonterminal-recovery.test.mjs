@@ -11,7 +11,8 @@ test('ambiguous updated successor boot stays live and cannot qualify', () => {
   assert.match(source, /METAENGINE_SELF_UPDATE_HOLD_REASON = 'SUCCESSOR_RECEIPT_AMBIGUOUS'/);
   assert.match(source, /recovery_state: 'LIVE_HOLD'/);
   assert.match(source, /automatic_retry_allowed: false/);
-  assert.match(source, /if \(updatedLaunch && updateHandoff\)/);
+  assert.match(source, /const qualificationRequested = \(updatedLaunch && Boolean\(updateHandoff\)\)/);
+  assert.match(source, /\|\| \(!updatedLaunch && resumeSuccessorQualification\)/);
   assert.doesNotMatch(source, /self-update-successor-boot-failure[\s\S]{0,900}app\.exit\(7\)/);
 });
 
