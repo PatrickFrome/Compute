@@ -6,6 +6,68 @@ import { spawn } from 'node:child_process';
 
 export const BROWSER_SENTINEL_VERSION = '1.2.0';
 
+const TRANSIENT_RENAME_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
+const RENAME_RETRY_DELAYS_MS = Object.freeze([0, 25, 50, 100, 200, 400]);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function sleepSync(ms) {
+  if (!(Number(ms) > 0)) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(ms));
+}
+
+function transientRenameError(error) {
+  return TRANSIENT_RENAME_CODES.has(String(error?.code || '').toUpperCase());
+}
+
+async function targetMatchesPayload(file, payload) {
+  try { return await fs.readFile(file, 'utf8') === payload; }
+  catch { return false; }
+}
+
+function targetMatchesPayloadSync(file, payload) {
+  try { return fsSync.readFileSync(file, 'utf8') === payload; }
+  catch { return false; }
+}
+
+async function renameWithReadback(temp, file, payload) {
+  let lastError = null;
+  for (let attempt = 0; attempt < RENAME_RETRY_DELAYS_MS.length; attempt += 1) {
+    if (attempt > 0) await sleep(RENAME_RETRY_DELAYS_MS[attempt]);
+    try {
+      await fs.rename(temp, file);
+      return { attempts: attempt + 1, recoveredViaReadback: false };
+    } catch (error) {
+      lastError = error;
+      // Windows file-system filters can report a transient rename failure after the
+      // replacement committed. Prove the exact payload before any retry so an
+      // ambiguous already-committed replace is never replayed.
+      if (await targetMatchesPayload(file, payload)) {
+        return { attempts: attempt + 1, recoveredViaReadback: true };
+      }
+      if (!transientRenameError(error) || attempt === RENAME_RETRY_DELAYS_MS.length - 1) throw error;
+    }
+  }
+  throw lastError || new Error('browser_sentinel_rename_failed');
+}
+
+function renameWithReadbackSync(temp, file, payload) {
+  let lastError = null;
+  for (let attempt = 0; attempt < RENAME_RETRY_DELAYS_MS.length; attempt += 1) {
+    if (attempt > 0) sleepSync(RENAME_RETRY_DELAYS_MS[attempt]);
+    try {
+      fsSync.renameSync(temp, file);
+      return { attempts: attempt + 1, recoveredViaReadback: false };
+    } catch (error) {
+      lastError = error;
+      if (targetMatchesPayloadSync(file, payload)) {
+        return { attempts: attempt + 1, recoveredViaReadback: true };
+      }
+      if (!transientRenameError(error) || attempt === RENAME_RETRY_DELAYS_MS.length - 1) throw error;
+    }
+  }
+  throw lastError || new Error('browser_sentinel_rename_failed');
+}
+
 async function readJson(file) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); }
   catch (error) { if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null; throw error; }
@@ -19,15 +81,21 @@ function readJsonSync(file) {
 async function writeJson(file, value) {
   await fs.mkdir(path.dirname(file), { recursive: true });
   const temp = `${file}.tmp`;
-  await fs.writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-  await fs.rename(temp, file);
+  const payload = `${JSON.stringify(value, null, 2)}\n`;
+  await fs.writeFile(temp, payload, { mode: 0o600 });
+  const outcome = await renameWithReadback(temp, file, payload);
+  if (outcome.recoveredViaReadback) await fs.unlink(temp).catch(() => {});
 }
 
 function writeJsonSync(file, value) {
   fsSync.mkdirSync(path.dirname(file), { recursive: true });
   const temp = `${file}.tmp`;
-  fsSync.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-  fsSync.renameSync(temp, file);
+  const payload = `${JSON.stringify(value, null, 2)}\n`;
+  fsSync.writeFileSync(temp, payload, { mode: 0o600 });
+  const outcome = renameWithReadbackSync(temp, file, payload);
+  if (outcome.recoveredViaReadback) {
+    try { fsSync.unlinkSync(temp); } catch {}
+  }
 }
 
 function safeState(value) {
