@@ -1,120 +1,151 @@
-# METAENGINE Browser — Agentic Workbench V1
+# METAENGINE Browser — Agentic Workbench benchmark and adoption plan
 
 Date: 2026-09-03
 
-## Why this exists
+## Executive finding
 
-METAENGINE Browser already has stronger actuation authority controls than mainstream AI browsers: typed native commands, exact target binding, durable supervisor/fleet state, no blind retry, and explicit zero-authority page/model projections. The largest product gap is therefore not “more autonomy”. It is the operator experience around context, routing, repeatable workflows, and explainable agent state.
+The strongest 2026 AI-browser products are converging on five product primitives:
 
-This document records the product benchmark that led to Agentic Workbench V1.
+1. browser-native multi-tab context;
+2. reusable prompt/workflow shortcuts;
+3. visible agent activity with immediate human takeover;
+4. a standard external agent interface (MCP and/or CLI);
+5. low-latency structured observation with strong prompt-injection boundaries.
 
-## Analog benchmark
+METAENGINE already exceeds mainstream products on a different axis: typed native effects, exact target/incarnation binding, durable leases, ambiguity as a terminal no-replay state, explicit authority projections, and evidence-gated release/update. Therefore the correct product strategy is not to widen autonomous authority. It is to add the operator ergonomics and developer surfaces from the best analogs while preserving the existing effect boundary.
 
-### Dia
-
-Dia's 2026 product direction combines chat-with-tabs, Memory, Skills, tab groups, a command bar, connected work context, Profiles, Splits, and proactive work surfaces such as Morning Brief / Live Work. The useful pattern for METAENGINE is explicit multi-tab context and a browser-native work command surface, not cloud memory authority.
-
-Sources:
-- https://www.diabrowser.com/
-- https://www.diabrowser.com/release-notes/1-13-1-new-year-new-polish
-- https://www.diabrowser.com/students
-
-### Arc
-
-Arc established a keyboard-first command bar, Spaces, vertical tabs, Split View, and fast switching among work contexts. The key transferable pattern is one command surface that can route to navigation, tabs, workspaces, and browser tools.
-
-Sources:
-- https://start.arc.net/command-bar-actions
-- https://resources.arc.net/hc/en-us/articles/19228064149143-Spaces-Distinct-Browsing-Areas
+## 2026 analog benchmark
 
 ### Perplexity Comet
 
-Comet exposes an always-available assistant beside the page, can reference current or named tabs, reasons across open tabs, and can run multiple errands in parallel. The relevant METAENGINE pattern is explicit context selection and a persistent side workbench, while keeping task execution behind the existing typed command and lease model.
+Comet's Assistant is a persistent sidecar that can use the current tab or explicitly named tabs as context. Its Shortcuts feature turns repeatable workflows into reusable mini-agents. A particularly valuable safety/UX detail is that entering a shortcut does not execute it: the shortcut expands into a prompt that the user can still inspect or extend before submission.
 
 Sources:
 - https://www.perplexity.ai/help-center/comet/en/articles/11734688-assistant-panel
-- https://www.perplexity.ai/help-center/comet/en/articles/11583745-getting-started-with-comet-set-up
+- https://www.perplexity.ai/help-center/en/articles/11897890-comet-shortcuts
+- https://www.perplexity.ai/help-center/comet/en/articles/11906981-comet-query-shortcuts
 
-### Google Chrome + Gemini
-
-Chrome in 2026 has multi-tab context, remembered conversation context, Auto Browse, and reusable Skills. Google also explicitly keeps confirmation in front of sensitive actions and trains against prompt injection. METAENGINE should adopt repeatable browser workflows and context ergonomics while preserving its stricter authority/effect barriers.
-
-Sources:
-- https://blog.google/products-and-platforms/products/chrome/gemini-3-auto-browse/
-- https://blog.google/products-and-platforms/products/chrome/skills-in-chrome/
+Transfer to METAENGINE:
+- keep explicit bounded tab context;
+- add reusable workflow/shortcut composition;
+- retain a no-auto-execute boundary for shortcut expansion.
 
 ### Microsoft Edge + Copilot
 
-Browse with Copilot emphasizes visible step-by-step browser actions and immediate takeover. METAENGINE already has the stronger execution proof model, but needs a clearer operator-facing activity/attention surface.
+Browse with Copilot exposes browser actions visibly and lets the user interrupt/take control at any time. Microsoft also exposes enterprise allow/block domain policy for agentic browsing, and the feature is explicitly invoked rather than automatically activated.
 
-Source:
+Sources:
 - https://support.microsoft.com/en-us/microsoft-copilot/browse-with-copilot
+- https://learn.microsoft.com/en-us/deployedge/microsoft-edge-policies/allowbrowsingwithcopilot
+
+Transfer to METAENGINE:
+- make current activity/evidence visible in one operator surface;
+- add an explicit human takeover control that blocks future leases/effects without claiming to cancel an already attempted physical effect;
+- evaluate domain-scoped capability policy as a separate control-plane slice.
+
+### Google Chrome / Gemini Spark
+
+Chrome-integrated agentic browsing can operate inside logged-in sessions while explicitly handing sensitive actions back to the user. Google describes prompt-injection protection as part of the design.
+
+Sources:
+- https://blog.google/innovation-and-ai/products/gemini-app/gemini-spark-updates-july-2026/
+- https://blog.google/products-and-platforms/products/chrome/bringing-chrome-ai-to-android/
+
+Transfer to METAENGINE:
+- keep high-risk/sensitive transitions behind explicit human/evidence boundaries;
+- do not let web content acquire instruction authority.
 
 ### Opera Neon
 
-Neon exposes the live browser session to external agents over MCP/CLI and can recommend an appropriate agent mode from user intent. The transferable pattern is browser-native routing and live context access. METAENGINE must not copy Neon's broad external actuation surface because its authority model deliberately requires typed/fenced effects.
+Opera Neon exposes the live logged-in browser to external agents through MCP. Opera also ships a local browser CLI; Opera describes the CLI as lower overhead and broader in tool coverage than the MCP connector, while MCP is better for external/cloud clients.
 
 Sources:
-- https://press.opera.com/2026/03/31/opera-neon-adds-mcp-connector/
-- https://blogs.opera.com/news/2026/02/opera-neon-ai-browser-intelligent-mode/
+- https://blogs.opera.com/news/2026/03/opera-neon-adds-mcp-connector-to-the-browser/
+- https://blogs.opera.com/news/2026/05/opera-browser-cli/
 
-### Browserbase / Stagehand
+Transfer to METAENGINE:
+- define a typed tool manifest now;
+- do not expose a broad network listener or mutation tools until every effectful tool can reuse the existing lease/exact-target/effect-intent contracts;
+- prefer a future local read-only stdio/CLI surface before a network-accessible actuator.
 
-Stagehand v4 moves browser-agent target/state handling close to the browser, emphasizes lower-latency context, self-healing observation/action primitives, iframe support, caching and observability. Browserbase also frames identity, persistence and observability as core browser-agent infrastructure. METAENGINE already has identity/persistence/fencing; the missing user-facing layer is concise context and explainable state.
+### Browserbase / Stagehand v4
+
+Stagehand v4 moves target/state handling close to the browser and exposes observe/act/extract/agent primitives. Browserbase emphasizes inspectable sessions, persistence and agent observability. Its agent-harness guidance treats page content as untrusted and recommends structured, schema-validated projections rather than raw DOM-to-model promotion. Stagehand also uses caching to reduce repeated inference.
 
 Sources:
 - https://www.browserbase.com/blog/stagehand-v4
-- https://www.browserbase.com/blog/what-is-a-browserbase-browser
+- https://www.browserbase.com/blog/what-is-a-browser-agent-harness
+- https://www.browserbase.com/changelog/caching-configurable
+- https://www.browserbase.com/solutions/browser-agents
 
-## Gap analysis
+Transfer to METAENGINE:
+- continue using semantic/accessibility perception instead of raw DOM authority;
+- preserve the existing UNTRUSTED_DATA_ONLY boundary for page-derived context;
+- if observation caching is added later, key it to exact target + process incarnation + URL/content provenance and never reuse an effect decision from cache.
 
-| Capability | Strong analogs | METAENGINE before V1 | V1 decision |
+### Dia
+
+Dia combines chat-with-tabs, Skills, Memory, sidebar workspaces and tab groups. The valuable pattern is continuity of work context and reusable skills. Persistent model memory, however, is a separate privacy/authority decision and should not be smuggled into browser context state.
+
+Source:
+- https://www.diabrowser.com/release-notes/1-13-1-new-year-new-polish
+
+## METAENGINE gap map
+
+| Capability | Market leaders | METAENGINE status before this slice | Decision |
 | --- | --- | --- | --- |
-| Keyboard-first universal routing | Arc, Dia | Address bar + separate Commands panel | Add smart workbench routing grammar to omnibox |
-| Explicit multi-tab context | Dia, Comet, Chrome | Tabs/workspaces visible, but no operator context set | Add local Context Set (bounded, explicit, non-authoritative) |
-| Repeatable workflows / Skills | Chrome, Dia, Neon | Commands exist but are not packaged as workflows | Add bounded Workbench Skills that only compose shell/read-only surfaces or explicit local tab actions |
-| Proactive attention | Dia Morning Brief, browser-agent observability | Rich telemetry exists but operator must hunt across sections | Add Attention queue derived only from trusted shell snapshot |
-| Visible agent activity | Edge Copilot, Browserbase | Evidence exists in Supervisor/Fleet/DevOS panels | Add compact Activity projection |
-| Split View | Arc, Dia | Single remote view | Separate native PR: changes WebContentsView geometry and target-binding blast radius |
-| Browser as external MCP server | Opera Neon | Deliberately absent | Do not add: conflicts with typed authority boundary unless a separately fenced MCP actuator is designed |
-| Broad autonomous page action | Chrome, Comet, Edge | Already available only through stronger typed/fenced plane | Keep existing authority architecture |
+| Multi-tab context | Comet, Dia, Chrome | Provenance-safe Context Pack core now exists | Keep explicit/bounded; surface it in Workbench |
+| Keyboard-first browser command surface | Arc/Dia/Comet-style products | Separate address/operations interactions | Add smart Workbench routing |
+| Reusable workflows | Comet Shortcuts, Dia Skills | Commands exist but not packaged as operator workflows | Add bounded Workbench Skills now; add no-auto-execute prompt shortcuts in a control-plane-safe follow-up |
+| Attention / activity | Edge, Browserbase | Evidence exists but is scattered | Add read-only Attention + Activity projections |
+| Human takeover | Edge Copilot | Supervisor can already change CONTROL/MONITOR + armed state but shell UX is absent | Separate control-plane PR with positive state readback and no retroactive-effect claim |
+| External MCP/CLI | Opera Neon | Deliberately absent | Define sealed typed manifest first; no external listener in this slice |
+| Domain allow/block policy | Edge | Existing global authority gates, no agentic domain policy | Separate policy PR; deny by default for effectful external tools |
+| Prompt-injection boundary | Chrome, Stagehand | Strong semantic/untrusted-data contracts already exist | Preserve; do not promote page text to instruction authority |
+| Observation caching | Stagehand | Small local perception cache already exists | Future read-only optimization only; never cache/replay effects |
+| Persistent AI memory | Dia | Not a browser authority primitive | Defer pending explicit privacy/product design |
 
-## Agentic Workbench V1 contract
+## Implemented in Agentic Workbench V1
 
-V1 is a renderer/workbench capability only. It MUST NOT create a second scheduler, command lease path, page/model authority path, arbitrary eval path, or automatic retry path.
+This renderer-only slice deliberately has no new authority surface.
 
-### Smart omnibox routing
+### Smart omnibox
 
-- `>attention`, `>activity`, `>context`, `>skills`, `>fleet`, `>workspaces`, `>supervisor`, `>devos`, `>runtime`, `>safety`, `>commands` open trusted local workbench sections.
-- `@query` targets open tabs/workspaces. A unique match selects exactly that tab. Multiple matches only filter/reveal the context rail; they do not guess a target.
-- `/research`, `/triage`, `/authority`, `/context`, `/new` are bounded Workbench Skills.
-- Normal URL input keeps the existing navigation path.
+- `Ctrl+K` opens command routing.
+- `>section` routes to trusted Operations/Agentic sections.
+- `@query` searches tabs/workspaces; only a unique match can select a tab. Ambiguous matches reveal/filter rather than guess.
+- `/skill` invokes only bounded local Workbench workflows.
+- ordinary URLs continue through the existing `NAVIGATE` command.
 
 ### Context Set
 
-- Explicitly operator-selected open tab IDs only.
-- Stored locally in renderer storage; no page content is persisted.
-- Bounded to 8 tabs.
-- Missing/closed tabs are pruned on snapshot refresh.
-- It has no scheduling, model, browser-actuation, or authority semantics.
+- explicit local tab IDs only;
+- maximum 8 tabs;
+- no page-text persistence;
+- closed tabs are pruned;
+- no scheduler/model/browser-actuation authority.
 
 ### Attention
 
-Attention items may be derived from trusted shell projections only, including:
-- fleet ambiguous/lost/bound-unverified counts;
-- workspace binding drift/frozen holds;
-- supervisor errors;
-- self-update errors/holds;
-- Development Plane not-ready state;
-- Compute offline state;
-- wildcard owner-gate override.
-
-Untrusted page text is never promoted into control authority or an automatic action.
+Derived only from trusted shell projections: Fleet, typed Workspaces, Supervisor, updater, Development Plane, Compute and owner safety gates. Page content is intentionally excluded and no remediation is automatic.
 
 ### Activity
 
-Activity is a read-only compact view of already-exposed current/last command, fleet state, mesh state, DevOS cycle, update state and worker-observer evidence.
+A compact read-only projection over already exposed command, Mesh, Fleet, DevOS and observer evidence.
 
-## Deliberately separate: Native Split View
+### Workbench Skills
 
-Split View is valuable, but it changes how multiple `WebContentsView` instances are attached and sized simultaneously. That affects exact tab/target perception and must be implemented with explicit target-incarnation tests in a separate native branch. It should not be smuggled into a renderer UX patch.
+Bounded navigation among trusted browser work surfaces plus explicit local tab actions. No arbitrary script, page/model instruction path, scheduler, or automatic effect retry is introduced.
+
+## Follow-up sequence
+
+1. **Human Takeover** — trusted-shell Pause/Resume backed by the existing Native Supervisor `setControlState`, blocking future DevOS leases while never claiming to cancel an in-flight physical effect.
+2. **Reusable prompt shortcuts** — no-auto-execute expansion, explicit Context Pack provenance, custom bounded definitions.
+3. **External tool manifest + local read-only CLI/stdio** — browser/context/status first; no effectful tools until lease/effect-intent reuse is proven.
+4. **Domain-scoped agentic policy** — deny-by-default effect allowlist for any future external actuator.
+5. **Observation cache hardening** — exact target/incarnation/URL/provenance key; read-only only.
+6. **Native Split View** — separate native geometry/target-binding PR with exact reincarnation tests.
+
+## Non-negotiable invariant
+
+No feature in this product roadmap may turn page/model text, convenience UI state, an external client, or cached observation into authority to replay or bypass an ambiguous physical effect. Existing lease, exact-target/incarnation, ambiguity and evidence contracts remain the authority boundary.
