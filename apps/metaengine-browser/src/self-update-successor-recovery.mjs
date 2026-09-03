@@ -1,4 +1,4 @@
-export const SELF_UPDATE_SUCCESSOR_RECOVERY_VERSION = '1.5.0';
+export const SELF_UPDATE_SUCCESSOR_RECOVERY_VERSION = '1.6.0';
 export const SELF_UPDATE_RECOVERY_DIAGNOSTIC_VERSION = '1.0.0';
 
 const RECOVERY_SCHEMA = 'metaengine.self-update.recovery-diagnostic.v1';
@@ -60,6 +60,9 @@ export function buildSelfUpdateRecoveryDiagnostic(startupInspection = null) {
   if (startupState === 'SUPERSEDED') {
     return baseDiagnostic(startupInspection, 'SUPERSEDED');
   }
+  if (startupState === 'AMBIGUOUS_INSTALL' && transactionState === 'QUARANTINED') {
+    return baseDiagnostic(startupInspection, 'QUARANTINED');
+  }
   if (startupState === 'AMBIGUOUS_INSTALL') {
     return baseDiagnostic(startupInspection, 'AMBIGUOUS_INSTALL');
   }
@@ -106,6 +109,32 @@ export function recordSelfUpdateRecoveryQualificationResult(result = null) {
     state: 'QUALIFIED',
     transaction_state: 'QUALIFIED',
     reason: null,
+    qualification_resume_allowed: false,
+    recovery_installer_effect_allowed: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  });
+  return selfUpdateRecoveryDiagnosticSnapshot();
+}
+
+export function recordSelfUpdateRecoveryQuarantineResult(transaction = null) {
+  const current = latestRecoveryDiagnostic;
+  if (!current || current.state !== 'TARGET_INSTALLED_PENDING_QUALIFICATION') return selfUpdateRecoveryDiagnosticSnapshot();
+  const exactQuarantine = transaction?.schema === TRANSACTION_SCHEMA
+    && transaction?.state === 'QUARANTINED'
+    && transaction?.quarantined === true
+    && transaction?.qualified === false
+    && transaction?.automatic_retry_allowed === false
+    && transaction?.authority_effect === false
+    && String(transaction?.target_version || '') === String(current.target_version || '')
+    && String(current.current_version || '') === String(current.target_version || '');
+  if (!exactQuarantine) return selfUpdateRecoveryDiagnosticSnapshot();
+
+  latestRecoveryDiagnostic = Object.freeze({
+    ...current,
+    state: 'QUARANTINED',
+    transaction_state: 'QUARANTINED',
+    reason: clip(transaction?.evidence?.quarantine_reason || current.reason || 'qualification_quarantined', 240),
     qualification_resume_allowed: false,
     recovery_installer_effect_allowed: false,
     automatic_retry_allowed: false,
