@@ -254,6 +254,8 @@ function validateRow(row, binding = null) {
   if (!Number.isSafeInteger(Number(row.sequence)) || Number(row.sequence) < 1) throw new Error('guardian_effect_journal_sequence_invalid');
   if (!Number.isSafeInteger(Number(row.effect_generation)) || Number(row.effect_generation) < 1) throw new Error('guardian_effect_generation_invalid');
   if (!SHA256.test(String(row.plan_digest || ''))) throw new Error('guardian_effect_plan_digest_invalid');
+  if (!row.plan || typeof row.plan !== 'object' || Array.isArray(row.plan)) throw new Error('guardian_effect_plan_invalid');
+  if (sha256Json(row.plan) !== row.plan_digest) throw new Error('guardian_effect_plan_digest_drift');
   if (row.automatic_retry_allowed !== false || row.browser_authority !== false || row.task_authority !== false || row.scheduler_authority !== false || row.release_authority !== false || row.authority_effect !== false) throw new Error('guardian_effect_journal_authority_invalid');
   const rowBinding = bindingFrom(row);
   const effectDomain = rowDomain(row);
@@ -334,13 +336,10 @@ class BrowserGuardianEffectJournal {
     return this.snapshot();
   }
 
-  #beginTypedEffect(bindingSource, effectDomain, identityFactory, legacyDigest = false) {
+  #beginTypedEffect(bindingSource, effectDomain, identityFactory) {
     return this.#enqueue(async () => {
       const identity = identityFactory();
-      // PROCESS preserves the exact historical digest payload. Typed machine
-      // identities already include their effect_domain and therefore cannot
-      // collide with a legacy process intent.
-      const digest = sha256Json(legacyDigest ? identity : identity);
+      const digest = sha256Json(identity);
       if (this.resumableIntent()) {
         if (this.#row.effect_domain !== effectDomain || this.#row.plan_digest !== digest) throw new Error('guardian_effect_unresolved_intent_plan_drift');
         return this.snapshot();
@@ -367,7 +366,6 @@ class BrowserGuardianEffectJournal {
       bindingSource,
       BROWSER_GUARDIAN_EFFECT_DOMAINS.PROCESS,
       () => planIdentity(plan),
-      true,
     );
   }
 
