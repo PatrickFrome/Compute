@@ -100,4 +100,7 @@ $proof = [ordered]@{
   automatic_retry_allowed = $false
   authority_effect = $false
 }
-Write-Host ($proof | ConvertTo-Json -Depth 6 -Compress)
+# Machine-readable contract: emit the final JSON object on PowerShell's success
+# stream so callers may capture/parse it. Write-Host is intentionally forbidden
+# here because host/information output is not a reliable pipeline return value.
+Write-Output ($proof | ConvertTo-Json -Depth 6 -Compress)
