@@ -51,7 +51,7 @@ const MAX_RETIRE_PER_CYCLE = 4;
 const RETIRE_ELIGIBLE_STATES = Object.freeze(['PROVISIONING', 'BOUND_UNVERIFIED', 'ADMISSION_FENCED']);
 const LIVE_STATES = Object.freeze(['REGISTERED', 'PROVISIONING', 'BOUND_UNVERIFIED', 'ACTIVE', 'ADMISSION_FENCED']);
 
-export const FLEET_ELASTIC_GOVERNOR_VERSION = '1.0.0';
+export const FLEET_ELASTIC_GOVERNOR_VERSION = '1.1.0';
 
 export const ELASTIC_FLEET_CONTRACT = Object.freeze({
   schema: 'metaengine.browser.fleet-elastic-governor.v1',
@@ -66,6 +66,7 @@ export const ELASTIC_FLEET_CONTRACT = Object.freeze({
   warm_floor_enforced: true,
   second_scheduler_loop: false,
   worker_telemetry_capacity_authority: false,
+  tab_census_capacity_authority: true,
   authority_effect: false,
 });
 
@@ -110,7 +111,19 @@ function workerTabPoolCount(fleetSnapshot = {}) {
   }).length;
 }
 
-export function planElasticFleetCapacity({ backlog = {}, fleetSnapshot = {}, idleCycles = 0, maxTargetAgents = null } = {}) {
+// Normalize a read-only tab census for governor grounding. Returns null when
+// the census is absent or malformed — the governor then keeps its purely
+// logical projection semantics (all pre-v1.1.0 behavior).
+function normalizeTabCensus(tabCensus) {
+  if (!tabCensus || typeof tabCensus !== 'object') return null;
+  const fleetTabs = Number(tabCensus.by_role?.FLEET ?? tabCensus.fleet_tabs);
+  const ceiling = Number(tabCensus.fleet_tab_ceiling);
+  if (!Number.isSafeInteger(fleetTabs) || fleetTabs < 0) return null;
+  if (!Number.isSafeInteger(ceiling) || ceiling < 0) return null;
+  return Object.freeze({ fleet_tabs: fleetTabs, fleet_tab_ceiling: ceiling });
+}
+
+export function planElasticFleetCapacity({ backlog = {}, fleetSnapshot = {}, idleCycles = 0, maxTargetAgents = null, tabCensus = null } = {}) {
   const ready = nonNegative(backlog?.ready);
   const running = nonNegative(backlog?.running);
   const policy = fleetSnapshot?.policy || {};
@@ -119,6 +132,14 @@ export function planElasticFleetCapacity({ backlog = {}, fleetSnapshot = {}, idl
   const ceiling = Math.max(warm, nonNegative(maxTargetAgents ?? policy.elastic_max_target_agents ?? DEFAULT_MAX_TARGET_AGENTS));
   const live = liveFleetAgents(fleetSnapshot).length;
   const pool = workerTabPoolCount(fleetSnapshot);
+  const census = normalizeTabCensus(tabCensus);
+  // Physical grounding (W3): when a read-only census is available, the shrink
+  // inventory uses the TRUE count of fleet-role physical tabs (never lower
+  // than the logical count — orphan and ambiguous tabs occupy slots too). The
+  // execution boundary still re-validates every retire against the TRUE
+  // provisioner snapshot, so a census defect can only ever under-shrink, never
+  // over-retire an agent that holds a tab.
+  const physicalPool = census ? Math.max(pool, census.fleet_tabs) : pool;
   const demand = ready + running;
   const previousIdleCycles = Math.max(0, nonNegative(idleCycles));
 
@@ -133,7 +154,7 @@ export function planElasticFleetCapacity({ backlog = {}, fleetSnapshot = {}, idl
     nextIdleCycles = previousIdleCycles + 1;
     if (nextIdleCycles >= IDLE_CYCLES_REQUIRED) {
       target = warm;
-      const surplus = Math.max(0, pool - target);
+      const surplus = Math.max(0, physicalPool - target);
       if (surplus > 0) {
         retireAgentIds = retireEligibleFleetAgents(fleetSnapshot, { limit: Math.min(surplus, MAX_RETIRE_PER_CYCLE) })
           .map((row) => String(row.agent_id));
@@ -155,6 +176,9 @@ export function planElasticFleetCapacity({ backlog = {}, fleetSnapshot = {}, idl
     idle_cycles_required: IDLE_CYCLES_REQUIRED,
     max_target_agents: ceiling,
     worker_tab_pool: pool,
+    physical_worker_tabs: census ? census.fleet_tabs : null,
+    fleet_tab_ceiling: census ? census.fleet_tab_ceiling : null,
+    tab_census_grounded: census != null,
     retire_agent_ids: Object.freeze(retireAgentIds),
     retire_count: retireAgentIds.length,
     scale_down: retireAgentIds.length > 0,
