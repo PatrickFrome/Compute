@@ -8,6 +8,14 @@ import { FleetProvisioner } from './fleet-provisioner.mjs';
 import { createFleetTargetLocalObserver } from './fleet-target-local-observer.mjs';
 import { OwnerSafetyGateRegistry, bindGlobalOwnerSafetyGateRegistry } from './owner-safety-gate-registry.mjs';
 import { captureSemanticFrame, captureViewThumbnail, executeSemanticCommand } from './native-browser-control.mjs';
+import {
+  clearNativeSplit,
+  normalizeNativeSplitState,
+  planNativeSplitView,
+  reconcileNativeSplitSelection,
+  reconcileNativeSplitTabClosed,
+  setNativeSplitSecondary,
+} from './native-split-view.mjs';
 import { NativeSupervisorClient } from './native-supervisor-client.mjs';
 import { SupervisorDeviceIdentity } from './supervisor-device-identity.mjs';
 import { navigationDecision, newWindowDecision, REMOTE_WEB_PREFERENCES, SECURITY_POLICY } from './browser-policy.mjs';
@@ -42,6 +50,8 @@ let developmentPlane = null;
 let nativeSupervisor = null;
 let shellLayoutState = normalizeShellLayoutState();
 let shellLayoutPlan = null;
+let nativeSplitState = normalizeNativeSplitState();
+let nativeSplitPlan = null;
 let perceptionCache = { tab_id: null, captured_ms: 0, frame: null, error: null };
 let shutdownRequested = false;
 let shellProtocolHandlerReady = false;
@@ -136,6 +146,11 @@ function assertShellSender(event) {
   if (!shellView || event.sender.id !== shellView.webContents.id) throw new Error('shell_sender_not_trusted');
 }
 
+function tabExistsForNativeSplit(tabId) {
+  const view = views.get(String(tabId || ''));
+  return Boolean(registry.get(tabId) && view && !view.webContents.isDestroyed());
+}
+
 async function shellSnapshot() {
   const tabs = registry.snapshot();
   const fleetSnapshot = fleet?.snapshot() || null;
@@ -153,6 +168,7 @@ async function shellSnapshot() {
     workspaces,
     compute: await bridge.health(),
     layout: shellLayoutPlan ? structuredClone(shellLayoutPlan) : null,
+    split_view: nativeSplitPlan ? structuredClone(nativeSplitPlan) : null,
     background_service: {
       close_to_background: !shutdownRequested,
       shutdown_requested: shutdownRequested,
@@ -178,8 +194,23 @@ function layout() {
   shellLayoutPlan = planShellLayout({ width, height, state: shellLayoutState });
   shellView?.setBounds(shellLayoutPlan.shell_bounds);
   const selected = registry.selected();
+  nativeSplitPlan = planNativeSplitView({
+    remote_bounds: shellLayoutPlan.remote_bounds,
+    state: nativeSplitState,
+    selected_tab_id: selected?.tab_id || null,
+    tab_exists: tabExistsForNativeSplit,
+  });
+
+  const visible = new Set(nativeSplitPlan.visible_tab_ids || []);
   for (const [tabId, view] of views) {
-    if (tabId === selected?.tab_id) view.setBounds(shellLayoutPlan.remote_bounds);
+    if (tabId === nativeSplitPlan.active_tab_id) view.setBounds(nativeSplitPlan.primary_bounds);
+    else if (nativeSplitPlan.effective_enabled && tabId === nativeSplitPlan.secondary_tab_id) view.setBounds(nativeSplitPlan.secondary_bounds);
+
+    if (visible.has(tabId)) {
+      try { windowRef.contentView.addChildView(view); } catch {}
+    } else {
+      try { windowRef.contentView.removeChildView(view); } catch {}
+    }
   }
 }
 
@@ -188,15 +219,20 @@ function attachSelected() {
   if (shellView) {
     try { windowRef.contentView.addChildView(shellView); } catch {}
   }
-  const selected = registry.selected();
-  for (const [tabId, view] of views) {
-    if (tabId === selected?.tab_id) {
-      try { windowRef.contentView.addChildView(view); } catch {}
-    } else {
-      try { windowRef.contentView.removeChildView(view); } catch {}
-    }
-  }
   layout();
+}
+
+function selectTabForShell(tabId) {
+  const previous = registry.selected();
+  const next = registry.select(tabId);
+  nativeSplitState = reconcileNativeSplitSelection(nativeSplitState, {
+    previous_selected_tab_id: previous?.tab_id || null,
+    selected_tab_id: next.tab_id,
+    tab_exists: tabExistsForNativeSplit,
+  });
+  attachSelected();
+  invalidatePerception();
+  return next;
 }
 
 function invalidatePerception(tabId = null) {
@@ -238,7 +274,15 @@ async function createTab(input = 'https://chatgpt.com/', { select = true, load =
   const view = new WebContentsView({ webPreferences: { ...REMOTE_WEB_PREFERENCES, session: userSession } });
   views.set(tab.tab_id, view);
   wireRemoteView(tab, view);
-  if (select) registry.select(tab.tab_id);
+  if (select) {
+    const previous = registry.selected();
+    registry.select(tab.tab_id);
+    nativeSplitState = reconcileNativeSplitSelection(nativeSplitState, {
+      previous_selected_tab_id: previous?.tab_id || null,
+      selected_tab_id: tab.tab_id,
+      tab_exists: tabExistsForNativeSplit,
+    });
+  }
   attachSelected();
   if (load) await view.webContents.loadURL(d.normalized_url);
   invalidatePerception();
@@ -267,6 +311,11 @@ async function closeTab(tabId) {
     if (!view.webContents.isDestroyed()) view.webContents.close();
   }
   registry.close(id);
+  nativeSplitState = reconcileNativeSplitTabClosed(nativeSplitState, {
+    closed_tab_id: id,
+    selected_tab_id: registry.selected()?.tab_id || null,
+    tab_exists: tabExistsForNativeSplit,
+  });
   await fleet?.onTabClosed(id, 'PHYSICAL_TAB_CLOSED_BY_SHELL');
   if (!registry.selected()) await createTab('https://chatgpt.com/', { select: true, load: true });
   invalidatePerception(id);
@@ -354,9 +403,30 @@ async function handleCommand(command, payload = {}) {
     await publishSnapshot();
     return shellLayoutPlan ? structuredClone(shellLayoutPlan) : null;
   }
+  if (command === 'SPLIT_VIEW_STATUS') {
+    return nativeSplitPlan ? structuredClone(nativeSplitPlan) : null;
+  }
+  if (command === 'SPLIT_VIEW_SET') {
+    if (!selected) throw new Error('native_split_selected_tab_required');
+    nativeSplitState = setNativeSplitSecondary(nativeSplitState, {
+      selected_tab_id: selected.tab_id,
+      secondary_tab_id: payload?.secondary_tab_id,
+      ratio: payload?.ratio ?? null,
+      tab_exists: tabExistsForNativeSplit,
+    });
+    attachSelected();
+    await publishSnapshot();
+    return structuredClone(nativeSplitPlan);
+  }
+  if (command === 'SPLIT_VIEW_CLEAR') {
+    nativeSplitState = clearNativeSplit();
+    attachSelected();
+    await publishSnapshot();
+    return structuredClone(nativeSplitPlan);
+  }
   if (command === 'NEW_CHATGPT') return createTab('https://chatgpt.com/', { select: true, load: true });
   if (command === 'NEW_TAB') return createTab(payload?.url || 'https://chatgpt.com/', { select: payload?.select !== false, load: true });
-  if (command === 'SELECT_TAB') { registry.select(payload?.tab_id); attachSelected(); invalidatePerception(); await publishSnapshot(); return { ok: true, tab_id: String(payload?.tab_id) }; }
+  if (command === 'SELECT_TAB') { const tab = selectTabForShell(payload?.tab_id); await publishSnapshot(); return { ok: true, tab_id: tab.tab_id }; }
   if (command === 'CLOSE_TAB') { await closeTab(payload?.tab_id); return { ok: true }; }
   if (command === 'NAVIGATE') {
     if (payload?.tab_id) return loadTab(payload.tab_id, payload?.url);
@@ -454,6 +524,7 @@ async function nativeSupervisorState() {
   return {
     tabs: snap.tabs.map((tab) => ({ ...tab, selected: tab.tab_id === snap.selected_tab_id })),
     active_tab: selected,
+    split_view: nativeSplitPlan ? structuredClone(nativeSplitPlan) : null,
     downloads: downloads?.snapshot() || null,
     development_plane: developmentPlane?.snapshot() || null,
     fleet: fleet?.snapshot() || null,
@@ -472,6 +543,9 @@ async function executeNativeSupervisorCommand(command) {
     if (requested === 'CONTROL' || requested === 'GATE_SEND') return nativeSupervisor.setControlState({ mode: 'CONTROL' });
     throw new Error('native_operator_mode_invalid');
   }
+  // Split view commands are intentionally absent from this remote whitelist.
+  // They are local presentation controls and cannot become a second Browser
+  // actuation path for supervisors or workers.
   if (['NEW_TAB','SELECT_TAB','CLOSE_TAB','NAVIGATE','BACK','FORWARD','RELOAD','DOWNLOAD_STATUS','DOWNLOAD_FILE','DOWNLOAD_CANCEL','FLEET_RECONCILE','FLEET_SET_PROFILE','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD','GATE_STATUS','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL'].includes(action)) {
     if (['BACK','FORWARD','RELOAD'].includes(action) && payload?.tab_id) {
       const tab = registry.get(payload.tab_id);
@@ -537,6 +611,12 @@ async function runSmoke() {
   remoteView.setBounds({ x: 0, y: 0, width: 320, height: 240 });
   await remoteView.webContents.loadURL('about:blank');
   const smokeLayout = planShellLayout({ width: 900, height: 640, state: normalizeShellLayoutState() });
+  const smokeSplit = planNativeSplitView({
+    remote_bounds: smokeLayout.remote_bounds,
+    state: normalizeNativeSplitState(),
+    selected_tab_id: 'smoke_primary',
+    tab_exists: () => false,
+  });
   const invariant = userSession.isPersistent()
     && remoteView.webContents.session === userSession
     && protocol.isProtocolHandled('metaengine')
@@ -547,7 +627,10 @@ async function runSmoke() {
     && downloads?.snapshot()?.arbitrary_execution === false
     && smokeLayout.overlay_remote_content === false
     && smokeLayout.renderer_dimensions_authoritative === false
-    && smokeLayout.remote_bounds.y === TOOLBAR_HEIGHT;
+    && smokeLayout.remote_bounds.y === TOOLBAR_HEIGHT
+    && smokeSplit.selection_authority === 'PRIMARY_SELECTED_TAB_ONLY'
+    && smokeSplit.secondary_selection_authority === false
+    && smokeSplit.supervisor_implicit_target_uses_secondary === false;
   console.log(JSON.stringify({
     schema: 'metaengine.browser-shell.smoke.v3',
     ok: invariant,
@@ -562,6 +645,8 @@ async function runSmoke() {
     verified_download_arbitrary_execution: false,
     workbench_overlay_remote_content: smokeLayout.overlay_remote_content,
     renderer_dimensions_authoritative: smokeLayout.renderer_dimensions_authoritative,
+    split_selection_authority: smokeSplit.selection_authority,
+    split_secondary_selection_authority: smokeSplit.secondary_selection_authority,
     authority_effect: false,
   }));
   remoteView.webContents.close();
