@@ -6,6 +6,7 @@ import { ComputeBridgeClient } from './compute-bridge-client.mjs';
 import { DevelopmentPlane } from './development-plane.mjs';
 import { FleetProvisioner } from './fleet-provisioner.mjs';
 import { createFleetTargetLocalObserver } from './fleet-target-local-observer.mjs';
+import { retireEligibleFleetAgents } from './fleet-elastic-governor.mjs';
 import { OwnerSafetyGateRegistry, bindGlobalOwnerSafetyGateRegistry } from './owner-safety-gate-registry.mjs';
 import { captureSemanticFrame, captureViewThumbnail, executeSemanticCommand } from './native-browser-control.mjs';
 import { NativeSupervisorClient } from './native-supervisor-client.mjs';
@@ -274,6 +275,36 @@ async function closeTab(tabId) {
   await publishSnapshot();
 }
 
+// Elastic fleet scale-down execution. The governor only proposes claim-ineligible
+// surplus agents (PROVISIONING / BOUND_UNVERIFIED — they can never hold a lease);
+// this boundary re-validates that at execution time, retires the logical agent
+// first, then closes its physical tab through the normal shell path (which
+// surfaces capacity backpressure release and snapshot publication). Bounded to
+// four agents per call. ACTIVE and PROVISIONING_AMBIGUOUS agents are never
+// auto-retired: ACTIVE agents may hold server-side leases, ambiguous agents are
+// fenced no-retry evidence.
+async function retireFleetSurplus(retireAgentIds) {
+  if (!Array.isArray(retireAgentIds) || retireAgentIds.length === 0 || !fleet) return [];
+  const ids = retireAgentIds
+    .map((value) => String(value || '').toLowerCase())
+    .filter((value) => /^agent_[a-z0-9-]{8,64}$/.test(value))
+    .slice(0, 4);
+  const retired = [];
+  for (const agentId of ids) {
+    const snapshot = fleet.snapshot();
+    const agent = (snapshot?.agents || []).find((row) => String(row.agent_id || '') === agentId);
+    if (!agent) continue; // already gone — idempotent no-op
+    if (!['PROVISIONING', 'BOUND_UNVERIFIED'].includes(String(agent.lifecycle_state || ''))) continue;
+    const tabId = agent.tab_id ? String(agent.tab_id) : null;
+    await fleet.retire(agentId);
+    if (tabId) {
+      try { await closeTab(tabId); } catch { /* tab already closed — retire is still recorded */ }
+    }
+    retired.push(Object.freeze({ agent_id: agentId, tab_id: tabId, lifecycle_state: 'RETIRED', automatic_retry_allowed: false, authority_effect: false }));
+  }
+  return retired;
+}
+
 async function initOwnerSafetyGates() {
   if (ownerSafetyGates) return ownerSafetyGates.snapshot();
   ownerSafetyGates = new OwnerSafetyGateRegistry({
@@ -388,8 +419,9 @@ async function handleCommand(command, payload = {}) {
       target_agents: payload?.target_agents ?? null,
       spawn_burst_limit: payload?.spawn_burst_limit ?? null,
     });
-    await publishSnapshot();
-    return result;
+    const retired = await retireFleetSurplus(payload?.retire_agent_ids);
+    if (retired.length) await publishSnapshot();
+    return retired.length ? { ...result, elastic_retired: retired, authority_effect: false } : result;
   }
   if (command === 'FLEET_SET_PROFILE') { const result = await fleet?.setProfile(payload?.profile); await publishSnapshot(); return result; }
   if (command === 'GATE_STATUS') return ownerSafetyGates?.snapshot() || null;
