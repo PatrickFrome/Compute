@@ -5,6 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   buildSelfUpdateRecoveryDiagnostic,
+  recordSelfUpdateRecoveryQuarantineResult,
+  selfUpdateRecoveryDiagnosticSnapshot,
   shouldResumeSuccessorQualification,
 } from '../src/self-update-successor-recovery.mjs';
 
@@ -84,6 +86,33 @@ test('recovery diagnostic classifies qualified, superseded, quarantine and ambig
     assert.equal(row.automatic_retry_allowed, false);
     assert.equal(row.authority_effect, false);
   }
+});
+
+test('forged quarantine row cannot clear exact pending recovery telemetry', () => {
+  assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: false, startupInspection: installedInspection() }), true);
+  const before = selfUpdateRecoveryDiagnosticSnapshot();
+  const wrongTarget = recordSelfUpdateRecoveryQuarantineResult({
+    schema: 'metaengine.self-update.transaction.v1',
+    state: 'QUARANTINED',
+    target_version: '0.6.6-dev.9.1',
+    quarantined: true,
+    qualified: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+    evidence: { quarantine_reason: 'forged_wrong_target' },
+  });
+  assert.deepEqual(wrongTarget, before);
+  const notQuarantined = recordSelfUpdateRecoveryQuarantineResult({
+    schema: 'metaengine.self-update.transaction.v1',
+    state: 'QUARANTINED',
+    target_version: '0.6.6-dev.8.1',
+    quarantined: false,
+    qualified: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  });
+  assert.deepEqual(notQuarantined, before);
+  assert.equal(selfUpdateRecoveryDiagnosticSnapshot().state, 'TARGET_INSTALLED_PENDING_QUALIFICATION');
 });
 
 test('recovery diagnostic preserves normal no-transaction retry semantics and fails closed on unknown evidence', () => {
