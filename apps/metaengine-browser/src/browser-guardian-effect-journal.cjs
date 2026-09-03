@@ -210,13 +210,14 @@ class BrowserGuardianEffectJournal {
   confirmEffect(bindingSource, effectId, proof = {}) {
     return this.#enqueue(async () => {
       const state = String(this.#row?.state || '');
-      if (!['EFFECT_ATTEMPTED','EFFECT_DISPATCHED'].includes(state) || String(effectId || '') !== this.#row.effect_id) throw new Error('guardian_effect_confirm_transition_invalid');
+      if (!['EFFECT_ATTEMPTED','EFFECT_DISPATCHED','AMBIGUOUS'].includes(state) || String(effectId || '') !== this.#row.effect_id) throw new Error('guardian_effect_confirm_transition_invalid');
       const release = releaseFrom(proof.release);
       if (release.release_id !== this.#row.plan.target_release.release_id || release.artifact_sha256 !== this.#row.plan.target_release.artifact_sha256) throw new Error('guardian_effect_confirm_release_drift');
       const pid = Number(proof.pid || 0);
       const incarnation = String(proof.process_incarnation_id || '').trim();
       if (!Number.isSafeInteger(pid) || pid < 1 || !incarnation || proof.exact_ready_binding !== true) throw new Error('guardian_effect_confirm_proof_invalid');
-      if (state === 'EFFECT_DISPATCHED' && Number(this.#row.dispatched_pid) !== pid) throw new Error('guardian_effect_confirm_pid_drift');
+      const priorDispatchedPid = Number(this.#row.dispatched_pid || 0);
+      if (Number.isSafeInteger(priorDispatchedPid) && priorDispatchedPid > 0 && priorDispatchedPid !== pid) throw new Error('guardian_effect_confirm_pid_drift');
       return this.#commit(bindingSource, 'CONFIRMED', {
         effect_id: this.#row.effect_id,
         effect_generation: this.#row.effect_generation,
@@ -224,9 +225,9 @@ class BrowserGuardianEffectJournal {
         plan: this.#row.plan,
         physical_effect_attempted: true,
         effect_barrier_crossed: true,
-        dispatched_pid: state === 'EFFECT_DISPATCHED' ? this.#row.dispatched_pid : pid,
+        dispatched_pid: priorDispatchedPid > 0 ? priorDispatchedPid : pid,
         dispatched_process_incarnation_id: incarnation,
-        result: 'exact_ready_successor_binding',
+        result: state === 'AMBIGUOUS' ? 'late_exact_ready_reconciliation' : 'exact_ready_successor_binding',
       });
     });
   }
