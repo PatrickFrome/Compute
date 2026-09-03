@@ -29,11 +29,26 @@ test('SCM host uses the real Windows service dispatcher and status protocol', ()
   expect(/WaitForSingleObject\s*\(g_stop_event,\s*INFINITE\)/, 'service lifetime is fenced by the SCM stop event');
 });
 
+test('SCM host publishes a versioned read-only compatibility handshake', () => {
+  expect(/\\\"schema\\\":\\\"metaengine\.browser-guardian\.scm-host\.v1\\\"/, 'SCM contract schema must be explicit');
+  expect(/\\\"protocol_generation\\\":1/, 'SCM protocol generation must be explicit and monotonic');
+  for (const feature of [
+    'scm_service_dispatcher_v1',
+    'scm_status_handshake_v1',
+    'bounded_stop_shutdown_controls_v1',
+    'read_only_contract_probe_v1',
+  ]) {
+    expect(new RegExp(`\\\\\\\"${feature}\\\\\\\":true`), `${feature} must be advertised only because it is implemented`);
+  }
+  expect(/\\\"second_scheduler_loop\\\":false/, 'SCM host must not advertise or introduce a second scheduler loop');
+});
+
 test('first SCM host slice has zero Browser/process/release effect authority', () => {
   for (const field of [
     'browser_authority',
     'task_authority',
     'scheduler_authority',
+    'second_scheduler_loop',
     'page_model_text_authority',
     'release_authority',
     'process_effect_authority',
