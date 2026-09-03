@@ -69,10 +69,11 @@ test('recovery diagnostic exposes exact pending qualification without reopening 
   assert.equal(row.authority_effect, false);
 });
 
-test('recovery diagnostic classifies qualified, superseded and ambiguous transactions without retry authority', () => {
+test('recovery diagnostic classifies qualified, superseded, quarantine and ambiguous transactions without retry authority', () => {
   const cases = [
     [installedInspection({ transaction_state: 'QUALIFIED' }), 'QUALIFIED'],
     [installedInspection({ state: 'SUPERSEDED', current_version: '0.6.6-dev.9.1', target_version: '0.6.6-dev.8.1' }), 'SUPERSEDED'],
+    [installedInspection({ state: 'AMBIGUOUS_INSTALL', transaction_state: 'QUARANTINED', reason: 'session_continuity_partial' }), 'QUARANTINED'],
     [installedInspection({ state: 'AMBIGUOUS_INSTALL', current_version: '0.6.6-dev.7.1', target_version: '0.6.6-dev.8.1', reason: 'target_not_installed' }), 'AMBIGUOUS_INSTALL'],
   ];
   for (const [inspection, expected] of cases) {
