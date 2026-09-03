@@ -25,6 +25,11 @@ const configuratorSha = 'd'.repeat(64);
 const version = '0.6.6-dev.123.1';
 const slotId = `${sourceHead.slice(0,16)}-${guardianSha.slice(0,16)}`;
 const slotPath = `%ProgramFiles%\\METAENGINE\\Guardian\\slots\\${slotId}`;
+const requiredPrivileges = Object.freeze([
+  'SeTcbPrivilege',
+  'SeAssignPrimaryTokenPrivilege',
+  'SeIncreaseQuotaPrivilege',
+]);
 
 function processPlan() {
   return {
@@ -136,6 +141,9 @@ function scmProof(overrides = {}) {
     binary_path: `${slotPath}\\METAENGINEBrowserGuardian.exe`,
     binary_sha256: serviceSha,
     machine_secure_binary_path: true,
+    required_privileges: [...requiredPrivileges],
+    service_sid_type: 'SERVICE_SID_TYPE_UNRESTRICTED',
+    least_privilege_readback_proven: true,
     failure_reset_period: 'INFINITE',
     failure_actions: [
       { type: 'RESTART', delay_ms: 5000 },
@@ -261,7 +269,7 @@ test('ambiguous MACHINE_COPY cannot replay and converges only by late exact type
   } finally { await cleanup(f.root); }
 });
 
-test('SCM_CONFIG intent binds exact LocalSystem image and perpetual native recovery policy', async () => {
+test('SCM_CONFIG intent binds LocalSystem path, least-privilege identity and perpetual recovery policy into the digest', async () => {
   const f = await fixture();
   try {
     const journal = new BrowserGuardianEffectJournal({ statePath: f.statePath });
@@ -273,13 +281,23 @@ test('SCM_CONFIG intent binds exact LocalSystem image and perpetual native recov
       { type: 'RESTART', delay_ms: 15000 },
       { type: 'RESTART', delay_ms: 60000 },
     ]);
+    assert.deepEqual(intent.plan.scm_contract.required_privileges, requiredPrivileges);
+    assert.equal(intent.plan.scm_contract.service_sid_type, 'SERVICE_SID_TYPE_UNRESTRICTED');
+    assert.equal(intent.plan.scm_contract.least_privilege_readback_required, true);
     assert.equal(intent.plan.scm_contract.last_failure_action_repeats, true);
     assert.equal(intent.plan.scm_contract.account, 'LocalSystem');
     assert.equal(intent.plan.scm_contract.binary_path, `${slotPath}\\METAENGINEBrowserGuardian.exe`);
+
+    const file = journalPath(f.statePath);
+    const persisted = JSON.parse(await fs.readFile(file, 'utf8'));
+    persisted.plan.scm_contract.required_privileges = ['SeTcbPrivilege'];
+    await fs.writeFile(file, JSON.stringify(persisted), 'utf8');
+    const restored = new BrowserGuardianEffectJournal({ statePath: f.statePath });
+    await assert.rejects(() => restored.init(binding), /guardian_effect_plan_digest_drift/);
   } finally { await cleanup(f.root); }
 });
 
-test('SCM_CONFIG rejects path/account/recovery drift and generic success before exact readback confirmation', async () => {
+test('SCM_CONFIG rejects path/account/recovery and least-privilege proof drift before exact confirmation', async () => {
   const f = await fixture();
   try {
     const journal = new BrowserGuardianEffectJournal({ statePath: f.statePath });
@@ -288,11 +306,31 @@ test('SCM_CONFIG rejects path/account/recovery drift and generic success before 
     await journal.markEffectAttempted(binding, intent.effect_id);
     await assert.rejects(() => journal.confirmScmConfigEffect(binding, intent.effect_id, { success: true }), /guardian_scm_config_confirm_proof_invalid/);
     await assert.rejects(
+      () => journal.confirmScmConfigEffect(binding, intent.effect_id, scmProof({ readback_proven: false })),
+      /guardian_scm_config_confirm_proof_invalid/,
+    );
+    await assert.rejects(
       () => journal.confirmScmConfigEffect(binding, intent.effect_id, scmProof({ account: 'User' })),
       /guardian_scm_config_confirm_proof_invalid/,
     );
     await assert.rejects(
       () => journal.confirmScmConfigEffect(binding, intent.effect_id, scmProof({ binary_path: 'C:\\Users\\x\\METAENGINEBrowserGuardian.exe' })),
+      /guardian_scm_config_confirm_proof_invalid/,
+    );
+    await assert.rejects(
+      () => journal.confirmScmConfigEffect(binding, intent.effect_id, scmProof({ required_privileges: requiredPrivileges.slice(0, 2) })),
+      /guardian_scm_config_confirm_proof_invalid/,
+    );
+    await assert.rejects(
+      () => journal.confirmScmConfigEffect(binding, intent.effect_id, scmProof({ required_privileges: [...requiredPrivileges, 'SeDebugPrivilege'] })),
+      /guardian_scm_config_confirm_proof_invalid/,
+    );
+    await assert.rejects(
+      () => journal.confirmScmConfigEffect(binding, intent.effect_id, scmProof({ service_sid_type: 'SERVICE_SID_TYPE_RESTRICTED' })),
+      /guardian_scm_config_confirm_proof_invalid/,
+    );
+    await assert.rejects(
+      () => journal.confirmScmConfigEffect(binding, intent.effect_id, scmProof({ least_privilege_readback_proven: false })),
       /guardian_scm_config_confirm_proof_invalid/,
     );
     await assert.rejects(

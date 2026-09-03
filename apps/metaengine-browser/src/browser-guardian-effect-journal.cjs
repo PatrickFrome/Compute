@@ -28,6 +28,12 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const GIT_SHA = /^[0-9a-f]{40}$/;
 const DEV_VERSION = /^\d+\.\d+\.\d+-dev\.\d+\.1$/;
 
+const SCM_REQUIRED_PRIVILEGES = Object.freeze([
+  'SeTcbPrivilege',
+  'SeAssignPrimaryTokenPrivilege',
+  'SeIncreaseQuotaPrivilege',
+]);
+const SCM_SERVICE_SID_TYPE = 'SERVICE_SID_TYPE_UNRESTRICTED';
 const SCM_FAILURE_ACTIONS = Object.freeze([
   Object.freeze({ type: 'RESTART', delay_ms: 5_000 }),
   Object.freeze({ type: 'RESTART', delay_ms: 15_000 }),
@@ -207,6 +213,9 @@ function scmContractFor(target) {
     binary_path: `${target.slot_path}\\${SERVICE_BINARY}`,
     binary_sha256: target.service_binary_sha256,
     machine_secure_binary_path_required: true,
+    required_privileges: SCM_REQUIRED_PRIVILEGES,
+    service_sid_type: SCM_SERVICE_SID_TYPE,
+    least_privilege_readback_required: true,
     failure_reset_period: 'INFINITE',
     failure_actions: SCM_FAILURE_ACTIONS,
     last_failure_action_repeats: true,
@@ -280,6 +289,16 @@ function exactFailureActions(value) {
     const actual = value[index];
     return actual?.type === expected.type && Number(actual?.delay_ms) === expected.delay_ms;
   });
+}
+
+function exactRequiredPrivileges(value, expected = SCM_REQUIRED_PRIVILEGES) {
+  if (!Array.isArray(value) || value.length !== expected.length) return false;
+  const actualValues = value.map((item) => String(item || '').trim().toLowerCase());
+  const expectedValues = expected.map((item) => String(item || '').trim().toLowerCase());
+  if (actualValues.some((item) => !item) || expectedValues.some((item) => !item)) return false;
+  actualValues.sort();
+  expectedValues.sort();
+  return actualValues.every((item, index) => item === expectedValues[index]);
 }
 
 class BrowserGuardianEffectJournal {
@@ -515,6 +534,9 @@ class BrowserGuardianEffectJournal {
       const contract = this.#row.plan?.scm_contract;
       const target = this.#row.plan?.target;
       const exactConfig = proof.readback_proven === true
+        && contract?.least_privilege_readback_required === true
+        && exactRequiredPrivileges(contract?.required_privileges)
+        && String(contract?.service_sid_type || '') === SCM_SERVICE_SID_TYPE
         && String(proof.service_name || '') === contract.service_name
         && String(proof.service_type || '') === contract.service_type
         && String(proof.start_type || '') === contract.start_type
@@ -522,6 +544,9 @@ class BrowserGuardianEffectJournal {
         && String(proof.binary_path || '') === contract.binary_path
         && String(proof.binary_sha256 || '').toLowerCase() === target.service_binary_sha256
         && proof.machine_secure_binary_path === true
+        && exactRequiredPrivileges(proof.required_privileges, contract.required_privileges)
+        && String(proof.service_sid_type || '') === contract.service_sid_type
+        && proof.least_privilege_readback_proven === true
         && String(proof.failure_reset_period || '') === contract.failure_reset_period
         && exactFailureActions(proof.failure_actions)
         && proof.last_failure_action_repeats === true
