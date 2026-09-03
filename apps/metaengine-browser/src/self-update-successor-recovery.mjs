@@ -1,7 +1,8 @@
-export const SELF_UPDATE_SUCCESSOR_RECOVERY_VERSION = '1.4.0';
+export const SELF_UPDATE_SUCCESSOR_RECOVERY_VERSION = '1.5.0';
 export const SELF_UPDATE_RECOVERY_DIAGNOSTIC_VERSION = '1.0.0';
 
 const RECOVERY_SCHEMA = 'metaengine.self-update.recovery-diagnostic.v1';
+const TRANSACTION_SCHEMA = 'metaengine.self-update.transaction.v1';
 let latestRecoveryDiagnostic = null;
 
 function clip(value, max = 240) {
@@ -83,6 +84,34 @@ export function buildSelfUpdateRecoveryDiagnostic(startupInspection = null) {
 
 export function selfUpdateRecoveryDiagnosticSnapshot() {
   return latestRecoveryDiagnostic == null ? null : structuredClone(latestRecoveryDiagnostic);
+}
+
+export function recordSelfUpdateRecoveryQualificationResult(result = null) {
+  const current = latestRecoveryDiagnostic;
+  if (!current || current.state !== 'TARGET_INSTALLED_PENDING_QUALIFICATION') return selfUpdateRecoveryDiagnosticSnapshot();
+  const transaction = result?.transaction;
+  const exactQualified = result?.state === 'QUALIFIED'
+    && result?.authority_effect === false
+    && transaction?.schema === TRANSACTION_SCHEMA
+    && transaction?.state === 'QUALIFIED'
+    && transaction?.qualified === true
+    && transaction?.automatic_retry_allowed === false
+    && transaction?.authority_effect === false
+    && String(transaction?.target_version || '') === String(current.target_version || '')
+    && String(current.current_version || '') === String(current.target_version || '');
+  if (!exactQualified) return selfUpdateRecoveryDiagnosticSnapshot();
+
+  latestRecoveryDiagnostic = Object.freeze({
+    ...current,
+    state: 'QUALIFIED',
+    transaction_state: 'QUALIFIED',
+    reason: null,
+    qualification_resume_allowed: false,
+    recovery_installer_effect_allowed: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  });
+  return selfUpdateRecoveryDiagnosticSnapshot();
 }
 
 export function shouldResumeSuccessorQualification({
