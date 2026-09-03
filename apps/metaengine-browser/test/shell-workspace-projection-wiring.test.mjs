@@ -11,7 +11,12 @@ test('trusted main process owns workspace admission projection exactly once', as
   assert.match(main, /const fleetSnapshot = fleet\?\.snapshot\(\) \|\| null/);
   assert.match(main, /const supervisor = nativeSupervisor\?\.snapshot\(\) \|\| null/);
   assert.match(main, /const workspaces = projectWorkspaceWorkbench\(\{ tabs, fleet: fleetSnapshot, supervisor \}\)/);
-  assert.match(main, /\r?\n\s{4}workspaces,\r?\n\s{4}compute:/);
+  // Workspace projection must be surfaced directly from the one trusted main-process
+  // call site. It need not remain adjacent to any unrelated additive read-only shell
+  // field (for example context_packs), because object field adjacency carries no
+  // authority semantics.
+  assert.match(main, /\r?\n\s{4}workspaces,\r?\n/);
+  assert.match(main, /\r?\n\s{4}compute: await bridge\.health\(\),\r?\n/);
   assert.equal((main.match(/projectWorkspaceWorkbench\(/g) || []).length, 1, 'workspace projection must have one trusted shell call site');
 });
 
