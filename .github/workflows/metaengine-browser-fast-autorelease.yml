@@ -77,7 +77,7 @@ jobs:
           mkdir evidence
           unzip -q e2e.zip -d evidence
 
-      - name: Verify physical proof and monotonic release identity
+      - name: Verify physical proof, Guardian staging, and monotonic release identity
         shell: bash
         run: |
           set -euo pipefail
@@ -90,27 +90,82 @@ jobs:
           mp=manifests[0]; m=json.loads(mp.read_text(encoding='utf-8'))
           if m.get('schema')!='metaengine.browser.self-update-e2e-manifest.v2': raise SystemExit('manifest_schema_invalid')
           if m.get('git_sha')!=os.environ['EXPECTED_SHA']: raise SystemExit('manifest_git_sha_mismatch')
-          required=['physical_n_to_n_plus_1','durable_successor_binding','forced_successor','profile_continuity','single_install_directory','physical_singleton','development_channel','published_baseline_reused']
+          required=[
+              'physical_n_to_n_plus_1','durable_successor_binding','forced_successor','profile_continuity',
+              'single_install_directory','physical_singleton','development_channel','published_baseline_reused',
+              'guardian_native_staging_present','guardian_native_staging_verified','guardian_native_no_activation',
+              'guardian_native_requires_machine_secure_copy','guardian_native_release_assets_verified',
+          ]
           if any(m.get(k) is not True for k in required): raise SystemExit('physical_gate_incomplete')
           if m.get('target_build_count')!=1: raise SystemExit('target_build_count_invalid')
           if m.get('update_channel')!='dev' or m.get('production_safe') is not False: raise SystemExit('channel_boundary_invalid')
+
+          guardian=list(root.rglob('guardian-native-staging-manifest.json'))
+          if len(guardian)!=1: raise SystemExit('guardian_manifest_cardinality_invalid:'+str(len(guardian)))
+          gp=guardian[0]
+          gdigest=hashlib.sha256(gp.read_bytes()).hexdigest()
+          if gdigest!=str(m.get('guardian_native_manifest_sha256') or '').lower(): raise SystemExit('guardian_manifest_digest_mismatch')
+          g=json.loads(gp.read_text(encoding='utf-8'))
+          if g.get('schema')!='metaengine.browser.guardian-native-staging-manifest.v1': raise SystemExit('guardian_manifest_schema_invalid')
+          if g.get('source_head')!=os.environ['EXPECTED_SHA']: raise SystemExit('guardian_manifest_source_head_mismatch')
+          if g.get('staging_only') is not True or g.get('requires_machine_secure_copy') is not True: raise SystemExit('guardian_staging_boundary_missing')
+          for key in ('service_activation_authorized','service_installation_authorized','service_start_authorized','authority_effect'):
+              if g.get(key) is not False: raise SystemExit('guardian_forbidden_authority:'+key)
+          if g.get('user_writable_service_activation_forbidden') is not True: raise SystemExit('guardian_user_writable_activation_fence_missing')
+          if g.get('required_machine_root')!='%ProgramFiles%\\METAENGINE\\Guardian': raise SystemExit('guardian_machine_root_drift')
+          if g.get('exact_service_binary_name')!='METAENGINEBrowserGuardian.exe': raise SystemExit('guardian_service_binary_name_drift')
+          binaries=g.get('binaries') or []
+          expected_names={'METAENGINEBrowserGuardian.exe','METAENGINEBrowserGuardianConfigure.exe'}
+          if len(binaries)!=2 or {str(x.get('name')) for x in binaries}!=expected_names: raise SystemExit('guardian_binary_set_invalid')
+          binary_paths={}
+          binary_rows={}
+          for row in binaries:
+              name=str(row.get('name') or '')
+              expected_sha=str(row.get('sha256') or '').lower()
+              expected_size=int(row.get('size') or 0)
+              if not re.fullmatch(r'[0-9a-f]{64}',expected_sha): raise SystemExit('guardian_binary_digest_invalid')
+              if expected_size<=0: raise SystemExit('guardian_binary_size_invalid')
+              if row.get('staged_only') is not True: raise SystemExit('guardian_binary_not_staged_only')
+              paths=list(root.rglob(name))
+              if len(paths)!=1: raise SystemExit(f'guardian_release_binary_cardinality_invalid:{name}:{len(paths)}')
+              path=paths[0]
+              actual_sha=hashlib.sha256(path.read_bytes()).hexdigest()
+              actual_size=path.stat().st_size
+              if actual_sha!=expected_sha: raise SystemExit('guardian_release_binary_digest_mismatch:'+name)
+              if actual_size!=expected_size: raise SystemExit('guardian_release_binary_size_mismatch:'+name)
+              binary_paths[name]=path
+              binary_rows[name]=(expected_sha,expected_size)
+
           version=str(m.get('version') or '')
           vm=re.fullmatch(r'(\d+)\.(\d+)\.(\d+)-dev\.(\d+)\.1',version)
           if not vm: raise SystemExit('target_version_invalid')
-          installer=list(root.rglob(str(m.get('installer_name') or ''))); blockmap=list(root.rglob(str(m.get('blockmap_name') or ''))); dev=list(root.rglob('dev.yml'))
+          installer=list(root.rglob(str(m.get('installer_name') or '')))
+          blockmap=list(root.rglob(str(m.get('blockmap_name') or '')))
+          dev=list(root.rglob('dev.yml'))
           if len(installer)!=1 or len(blockmap)!=1 or len(dev)!=1: raise SystemExit('asset_cardinality_invalid')
           digest=hashlib.sha256(installer[0].read_bytes()).hexdigest()
           if digest!=str(m.get('installer_sha256') or '').lower(): raise SystemExit('installer_digest_mismatch')
+
           releases=json.load(open('releases.json','r',encoding='utf-8'))
           def parse(tag):
               x=re.fullmatch(r'v(\d+)\.(\d+)\.(\d+)-dev\.(\d+)\.1',str(tag or ''))
               return tuple(map(int,x.groups())) if x else None
           target=tuple(map(int,vm.groups())); prior=[parse(r.get('tag_name')) for r in releases]; prior=[x for x in prior if x]
           if prior and target<=max(prior): raise SystemExit(f'dev_version_not_monotonic:{target}<={max(prior)}')
-          env={'VERSION':version,'TAG':'v'+version,'INSTALLER':str(installer[0]),'BLOCKMAP':str(blockmap[0]),'DEV_YML':str(dev[0]),'MANIFEST':str(mp),'INSTALLER_SHA256':digest}
+          service_path=binary_paths['METAENGINEBrowserGuardian.exe']
+          configurator_path=binary_paths['METAENGINEBrowserGuardianConfigure.exe']
+          service_sha,service_size=binary_rows['METAENGINEBrowserGuardian.exe']
+          configurator_sha,configurator_size=binary_rows['METAENGINEBrowserGuardianConfigure.exe']
+          env={
+              'VERSION':version,'TAG':'v'+version,'INSTALLER':str(installer[0]),'BLOCKMAP':str(blockmap[0]),
+              'DEV_YML':str(dev[0]),'MANIFEST':str(mp),'INSTALLER_SHA256':digest,
+              'GUARDIAN_MANIFEST':str(gp),'GUARDIAN_MANIFEST_SHA256':gdigest,
+              'GUARDIAN_SERVICE_BINARY':str(service_path),'GUARDIAN_SERVICE_SHA256':service_sha,'GUARDIAN_SERVICE_SIZE':str(service_size),
+              'GUARDIAN_CONFIGURATOR_BINARY':str(configurator_path),'GUARDIAN_CONFIGURATOR_SHA256':configurator_sha,'GUARDIAN_CONFIGURATOR_SIZE':str(configurator_size),
+          }
           with open('release.env','w',encoding='utf-8') as f:
               for k,v in env.items(): f.write(f'{k}={shlex.quote(v)}\n')
-          print(f"verified version={version} sha256={digest}")
+          print(f"verified version={version} sha256={digest} guardian_manifest_sha256={gdigest} guardian_release_binaries=2")
           PY
           cat release.env >> "$GITHUB_ENV"
 
@@ -121,10 +176,11 @@ jobs:
           if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" >/dev/null 2>&1; then
             echo "release_tag_already_exists:${TAG}" >&2; exit 1
           fi
-          gh release create "$TAG" "$INSTALLER" "$BLOCKMAP" "$DEV_YML" "$MANIFEST" \
+          gh release create "$TAG" "$INSTALLER" "$BLOCKMAP" "$DEV_YML" "$MANIFEST" "$GUARDIAN_MANIFEST" \
+            "$GUARDIAN_SERVICE_BINARY" "$GUARDIAN_CONFIGURATOR_BINARY" \
             --repo "$GITHUB_REPOSITORY" --target "$EXPECTED_SHA" \
             --title "METAENGINE Browser ${TAG}" \
-            --notes "Continuous verified dev release. Published baseline reused; target built once; exact bytes physically passed N-to-N+1 for ${EXPECTED_SHA}. production-safe=false." \
+            --notes "Continuous verified dev release. Published baseline reused; target built once; exact bytes physically passed N-to-N+1 for ${EXPECTED_SHA}. Guardian native manifest and both exact native binaries are release assets, staged-only, and require a separate machine-secure activation boundary. production-safe=false." \
             --prerelease --draft
 
       - name: Validate draft collection and publish
@@ -141,10 +197,24 @@ jobs:
           if r.get('name')!=f"METAENGINE Browser {os.environ['TAG']}": raise SystemExit('release_name_invalid')
           if r.get('target_commitish')!=os.environ['EXPECTED_SHA'] or r.get('prerelease') is not True: raise SystemExit('draft_binding_invalid')
           assets={a.get('name'):a for a in r.get('assets',[])}
-          expected={os.path.basename(os.environ['INSTALLER']),os.path.basename(os.environ['BLOCKMAP']),'dev.yml','verified-self-update-manifest.json'}
+          expected={
+              os.path.basename(os.environ['INSTALLER']),os.path.basename(os.environ['BLOCKMAP']),'dev.yml',
+              'verified-self-update-manifest.json','guardian-native-staging-manifest.json',
+              'METAENGINEBrowserGuardian.exe','METAENGINEBrowserGuardianConfigure.exe',
+          }
           if set(assets)!=expected: raise SystemExit(f'draft_asset_set_invalid:{sorted(assets)}')
           digest=assets[os.path.basename(os.environ['INSTALLER'])].get('digest')
           if digest and digest!=f"sha256:{os.environ['INSTALLER_SHA256']}": raise SystemExit('github_asset_digest_mismatch')
+          guardian_digest=assets['guardian-native-staging-manifest.json'].get('digest')
+          if guardian_digest and guardian_digest!=f"sha256:{os.environ['GUARDIAN_MANIFEST_SHA256']}": raise SystemExit('github_guardian_manifest_digest_mismatch')
+          for name,sha_key,size_key in (
+              ('METAENGINEBrowserGuardian.exe','GUARDIAN_SERVICE_SHA256','GUARDIAN_SERVICE_SIZE'),
+              ('METAENGINEBrowserGuardianConfigure.exe','GUARDIAN_CONFIGURATOR_SHA256','GUARDIAN_CONFIGURATOR_SIZE'),
+          ):
+              asset=assets[name]
+              digest=asset.get('digest')
+              if digest and digest!=f"sha256:{os.environ[sha_key]}": raise SystemExit('github_guardian_binary_digest_mismatch:'+name)
+              if int(asset.get('size') or 0)!=int(os.environ[size_key]): raise SystemExit('github_guardian_binary_size_mismatch:'+name)
           pathlib.Path('release-id.txt').write_text(str(r['id']),encoding='utf-8')
           PY
           gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/$(cat release-id.txt)" -F draft=false -F prerelease=true -f make_latest=false > published.json
