@@ -11,6 +11,8 @@ const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 
 const builder = JSON.parse(read('electron-builder.test.json'));
 const hookPath = path.join(root, 'scripts/electron-builder-before-pack.cjs');
+const buildPath = path.join(root, 'scripts/build-guardian-native-staging.ps1');
+const verifyPath = path.join(root, 'scripts/verify-installed-guardian-native-staging.ps1');
 const hook = read('scripts/electron-builder-before-pack.cjs');
 const build = read('scripts/build-guardian-native-staging.ps1');
 const verify = read('scripts/verify-installed-guardian-native-staging.ps1');
@@ -18,6 +20,12 @@ const packageSmoke = read('../../.github/workflows/browser-windows-package-smoke
 const fastE2e = read('../../.github/workflows/metaengine-browser-self-update-fast-e2e.yml');
 const fullE2e = read('../../.github/workflows/metaengine-browser-self-update-e2e.yml');
 const publisher = read('../../.github/workflows/metaengine-browser-fast-autorelease.yml');
+
+function parsePowerShellFile(file) {
+  const escaped = file.replaceAll("'", "''");
+  const command = `$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile('${escaped}',[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{$_.ToString()}|Write-Error;exit 2}`;
+  return spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { encoding: 'utf8' });
+}
 
 test('electron-builder owns the single Guardian native staging build boundary', () => {
   assert.equal(builder.beforePack, './scripts/electron-builder-before-pack.cjs');
@@ -40,6 +48,16 @@ test('native staging package identity is read without JavaScript Windows path in
   assert.match(build, /Get-Content\s+\$packageJsonPath\s+-Raw\s+\|\s+ConvertFrom-Json/);
   assert.doesNotMatch(build, /node\s+-p\s+.*require\s*\(/i);
   assert.match(build, /git\s+-C\s+\$root\s+rev-parse\s+HEAD/);
+});
+
+test('Guardian staging PowerShell remains parse-safe on Windows', { skip: process.platform !== 'win32' }, () => {
+  for (const file of [buildPath, verifyPath]) {
+    const parsed = parsePowerShellFile(file);
+    assert.equal(parsed.status, 0, parsed.stderr || parsed.stdout);
+  }
+  assert.doesNotMatch(verify, /^\s+-or\b/m, 'continuation operators must not begin unescaped PowerShell lines');
+  assert.doesNotMatch(verify, /\$ExpectedPackageVersion:\$/m, 'PowerShell variable followed by colon requires ${} delimiting');
+  assert.match(verify, /\$\{ExpectedPackageVersion\}:\$verifiedVersion/);
 });
 
 test('staging manifest grants no LocalSystem activation authority', () => {
@@ -68,6 +86,7 @@ test('installed verifier requires exact source, digests, and absence of Guardian
   assert.match(verify, /guardian_native_staging_verified/);
   assert.match(verify, /guardian_native_no_activation/);
   assert.match(verify, /guardian_native_requires_machine_secure_copy/);
+  assert.match(verify, /guardian_native_release_assets_verified/);
 });
 
 test('package and both physical self-update lanes require the reusable staging verifier', () => {
