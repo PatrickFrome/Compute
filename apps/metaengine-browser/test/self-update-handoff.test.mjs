@@ -172,7 +172,8 @@ test('pre-install and successor receipts use the shared committed-file durabilit
   const source = await fs.readFile(new URL('../src/self-update-handoff.mjs', import.meta.url), 'utf8');
   const durable = await fs.readFile(new URL('../src/durable-json-file.cjs', import.meta.url), 'utf8');
   assert.match(source, /durableWriteJson\(pre_install, receipt\)/);
-  assert.match(source, /durableWriteJson\(successor, row\)/);
+  assert.match(source, /writeJson = durableWriteJson/);
+  assert.match(source, /await writeJson\(successor, row\)/);
   assert.doesNotMatch(source, /async function atomicWriteJson/);
   assert.doesNotMatch(source, /fs\.rename\(/);
   assert.match(durable, /await committed\.sync\(\)/);
