@@ -24,6 +24,7 @@ import {
   DEFAULT_OPTIONAL_NETWORK_DEADLINE_MS,
 } from './bounded-network-fetch.mjs';
 import { startSelfUpdateOldParentHandoffWatchdog } from './self-update-old-parent-handoff.mjs';
+import { selfUpdateRecoveryDiagnosticSnapshot } from './self-update-successor-recovery.mjs';
 
 export {
   DEFAULT_TRUSTED_UPDATE_CHANNEL,
@@ -186,6 +187,7 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
     const base = super.snapshot();
     return {
       ...base,
+      startup_recovery: selfUpdateRecoveryDiagnosticSnapshot(),
       hint_interval_ms: this.#hintIntervalMs,
       hint_retry_ms: this.#hintRetryMs,
       hint_last_check_at: this.#lastHintCheckAt,
