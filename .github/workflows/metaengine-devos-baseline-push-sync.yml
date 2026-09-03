@@ -64,9 +64,13 @@ jobs:
             const diagnostic = String(row.diagnostic || row.reason || row.error || 'unknown').slice(0, 240);
             throw new Error(`push_sync_http_${status}:${diagnostic}`);
           }
-          if (row.schema !== 'metaengine.devos.baseline-push-sync-observation.v1') throw new Error('push_sync_schema_invalid');
+          const acceptedSchemas = new Set([
+            'metaengine.devos.baseline-push-sync-observation.v1',
+            'metaengine.devos.roadmap-baseline-sync-result.v1',
+          ]);
+          if (!acceptedSchemas.has(row.schema)) throw new Error('push_sync_schema_invalid');
           if (row.caller_candidate_ignored !== true) throw new Error('push_sync_caller_candidate_contract_invalid');
           if (row.polling_fallback_preserved !== true) throw new Error('push_sync_fallback_contract_invalid');
-          if (row.authority_effect === true && row.baseline_sha !== expected) throw new Error('push_sync_advanced_wrong_sha');
+          if ((row.authority_effect === true || row.advanced === true) && row.baseline_sha !== expected) throw new Error('push_sync_advanced_wrong_sha');
           if (row.reason === 'OIDC_OR_FAST_FORWARD_PROOF_REJECTED' || row.reason === 'NON_FAST_FORWARD_OR_UNPROVEN') throw new Error(`push_sync_rejected:${row.reason}`);
           NODE
