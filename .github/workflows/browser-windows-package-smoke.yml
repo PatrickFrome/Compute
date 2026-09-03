@@ -7,6 +7,10 @@ on:
     paths:
       - 'apps/metaengine-browser/src/**'
       - 'apps/metaengine-browser/ui/**'
+      - 'apps/metaengine-browser/native/**'
+      - 'apps/metaengine-browser/scripts/build-guardian-native-staging.ps1'
+      - 'apps/metaengine-browser/scripts/electron-builder-before-pack.cjs'
+      - 'apps/metaengine-browser/scripts/verify-installed-guardian-native-staging.ps1'
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/electron-builder.test.json'
       - '.github/workflows/browser-windows-package-smoke.yml'
@@ -14,6 +18,10 @@ on:
     paths:
       - 'apps/metaengine-browser/src/**'
       - 'apps/metaengine-browser/ui/**'
+      - 'apps/metaengine-browser/native/**'
+      - 'apps/metaengine-browser/scripts/build-guardian-native-staging.ps1'
+      - 'apps/metaengine-browser/scripts/electron-builder-before-pack.cjs'
+      - 'apps/metaengine-browser/scripts/verify-installed-guardian-native-staging.ps1'
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/electron-builder.test.json'
       - '.github/workflows/browser-windows-package-smoke.yml'
@@ -24,7 +32,7 @@ permissions:
 jobs:
   windows-nsis-package-smoke:
     runs-on: windows-2025
-    timeout-minutes: 20
+    timeout-minutes: 24
     steps:
       - name: Checkout exact candidate head
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -54,7 +62,7 @@ jobs:
         working-directory: apps/metaengine-browser
         run: npm run check
 
-      - name: Build exact-head unsigned NSIS test package
+      - name: Build exact-head unsigned NSIS package through native staging hook
         working-directory: apps/metaengine-browser
         shell: powershell
         env:
@@ -64,35 +72,51 @@ jobs:
           $version = [string](node -p "require('./package.json').version")
           if (-not $version) { throw 'package_version_missing' }
           Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item native-dist\guardian -Recurse -Force -ErrorAction SilentlyContinue
           npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
           $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
           $blockmap = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe.blockmap" -File | Select-Object -First 1
-          if (-not $installer) { throw 'package_installer_missing' }
-          if (-not $blockmap) { throw 'package_blockmap_missing' }
+          if (-not $installer -or -not $blockmap) { throw 'package_assets_missing' }
+          $stagedManifest = Join-Path (Get-Location) 'native-dist\guardian\guardian-native-manifest.json'
+          if (-not (Test-Path $stagedManifest -PathType Leaf)) { throw 'before_pack_guardian_staging_not_materialized' }
           $digest = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($digest -notmatch '^[0-9a-f]{64}$') { throw 'package_digest_invalid' }
           @{
-            schema = 'metaengine.browser.windows-package-smoke.v1'
-            source_head = $sourceHead
-            package_version = $version
-            installer_name = $installer.Name
-            installer_sha256 = $digest
-            blockmap_name = $blockmap.Name
-            signed = $false
-            published = $false
-            promotion_authorized = $false
-            authority_effect = $false
+            schema='metaengine.browser.windows-package-smoke.v2'
+            source_head=$sourceHead
+            package_version=$version
+            installer_name=$installer.Name
+            installer_sha256=$digest
+            blockmap_name=$blockmap.Name
+            guardian_native_staging_required=$true
+            guardian_native_built_by_before_pack=$true
+            signed=$false
+            published=$false
+            promotion_authorized=$false
+            authority_effect=$false
           } | ConvertTo-Json -Depth 4 | Set-Content "$env:RUNNER_TEMP\windows-package-proof.json" -Encoding utf8
-          Copy-Item $installer.FullName (Join-Path $env:RUNNER_TEMP $installer.Name)
           Copy-Item $installer.FullName "$env:RUNNER_TEMP\candidate-setup.exe"
+          Copy-Item $installer.FullName (Join-Path $env:RUNNER_TEMP $installer.Name)
 
-      - name: Install exact-head package and probe identity
+      - name: Install exact-head package and prove Browser plus inert Guardian payload
+        working-directory: apps/metaengine-browser
         shell: powershell
         run: |
           $proof = Get-Content "$env:RUNNER_TEMP\windows-package-proof.json" -Raw | ConvertFrom-Json
+          if (Get-Service -Name 'METAENGINEBrowserGuardian' -ErrorAction SilentlyContinue) { throw 'guardian_service_preexists_before_package_install' }
           $install = Start-Process -FilePath "$env:RUNNER_TEMP\candidate-setup.exe" -ArgumentList '/S' -PassThru -Wait
           if ($install.ExitCode -ne 0) { throw "package_installer_exit_$($install.ExitCode)" }
-          $app = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test\METAENGINE Browser Test.exe'
+
+          $guardianLine = (& ./scripts/verify-installed-guardian-native-staging.ps1 `
+            -ExpectedSourceHead ([string]$proof.source_head) `
+            -ExpectedPackageVersion ([string]$proof.package_version) | Where-Object { $_.Trim() } | Select-Object -Last 1)
+          if (-not $guardianLine) { throw 'guardian_installed_staging_proof_missing' }
+          $guardian = $guardianLine | ConvertFrom-Json
+          if ($guardian.schema -ne 'metaengine.browser.guardian-native-installed-staging-proof.v1') { throw 'guardian_installed_staging_proof_schema_invalid' }
+          if ([string]$guardian.package_version -ne [string]$proof.package_version) { throw 'guardian_installed_staging_version_drift' }
+          if ($guardian.guardian_service_absent -ne $true -or $guardian.staging_only -ne $true -or $guardian.service_activation_authorized -ne $false) { throw 'guardian_installed_staging_proof_invalid' }
+
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
+          $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
           if (-not (Test-Path $app)) { throw "packaged_browser_missing:$app" }
           $out = "$env:RUNNER_TEMP\package-version-probe.out"
           $err = "$env:RUNNER_TEMP\package-version-probe.err"
@@ -107,11 +131,11 @@ jobs:
             throw "package_version_probe_exit_$($probe.ExitCode)"
           }
           $row = (Get-Content $out | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
-          if ([string]$row.version -ne [string]$proof.package_version) { throw 'package_version_probe_mismatch' }
-          if ($row.primary_instance -ne $true) { throw 'package_primary_instance_unproven' }
-          if ($proof.signed -ne $false -or $proof.published -ne $false -or $proof.promotion_authorized -ne $false -or $proof.authority_effect -ne $false) {
-            throw 'package_zero_authority_contract_invalid'
-          }
+          if ([string]$row.version -ne [string]$proof.package_version -or $row.primary_instance -ne $true) { throw 'package_version_probe_mismatch' }
+          if ($proof.guardian_native_built_by_before_pack -ne $true) { throw 'guardian_before_pack_proof_missing' }
+          if ($proof.signed -ne $false -or $proof.published -ne $false -or $proof.promotion_authorized -ne $false -or $proof.authority_effect -ne $false) { throw 'package_zero_authority_contract_invalid' }
+          $proof | Add-Member -NotePropertyName guardian_native_manifest_sha256 -NotePropertyValue ([string]$guardian.manifest_sha256) -Force
+          $proof | Add-Member -NotePropertyName guardian_native_staging_verified -NotePropertyValue $true -Force
           Write-Host ($proof | ConvertTo-Json -Compress)
 
       - name: Prove source checkout unchanged
@@ -121,7 +145,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/package.json apps/metaengine-browser/electron-builder.test.json)"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/native apps/metaengine-browser/scripts apps/metaengine-browser/package.json apps/metaengine-browser/electron-builder.test.json)"
 
       - name: Upload exact-head Windows candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

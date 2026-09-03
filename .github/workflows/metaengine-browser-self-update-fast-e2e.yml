@@ -50,10 +50,13 @@ jobs:
           grep -q 'DEFAULT_CONTINUOUS_DEV_RESTART_GRACE_MS = 1 \* 1000' src/self-update-runtime.mjs
           grep -q 'DEFAULT_DEV_UPDATE_HINT_INTERVAL_MS = 2 \* 1000' src/dev-update-hint.mjs
           grep -q 'authority_effect: false' src/dev-update-hint.mjs
+          grep -q '"beforePack": "./scripts/electron-builder-before-pack.cjs"' electron-builder.test.json
+          grep -q 'service_activation_authorized = \$false' scripts/build-guardian-native-staging.ps1
+          grep -q 'guardian_native_staging_verified' scripts/verify-installed-guardian-native-staging.ps1
 
   windows-published-n-to-one-build-target:
     runs-on: windows-2022
-    timeout-minutes: 32
+    timeout-minutes: 36
     env:
       GITHUB_ACTIONS: 'true'
       METAENGINE_SELF_UPDATE_TEST_MODE: '1'
@@ -108,6 +111,17 @@ jobs:
         working-directory: apps/metaengine-browser
         shell: powershell
         run: ./test/self-update-fast-physical-candidate.ps1
+      - name: Prove installed Guardian staging after physical update
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          ./scripts/verify-installed-guardian-native-staging.ps1 `
+            -ExpectedSourceHead '${{ github.sha }}' `
+            -EvidenceDir './self-update-fast-evidence'
+          $manifest = Get-Content './self-update-fast-evidence/verified-self-update-manifest.json' -Raw | ConvertFrom-Json
+          if ($manifest.guardian_native_staging_present -ne $true -or $manifest.guardian_native_staging_verified -ne $true) { throw 'guardian_native_staging_physical_proof_missing' }
+          if ($manifest.guardian_native_no_activation -ne $true -or $manifest.guardian_native_requires_machine_secure_copy -ne $true) { throw 'guardian_native_activation_boundary_invalid' }
+          if ([string]$manifest.guardian_native_manifest_sha256 -notmatch '^[0-9a-f]{64}$') { throw 'guardian_native_manifest_digest_missing' }
       - name: Upload exact fast self-update evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
