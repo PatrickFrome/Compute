@@ -9,6 +9,11 @@ import {
   probeUpdatedSuccessorQualification,
   recordAcceptedSignedSupervisorHeartbeat,
 } from '../src/self-update-successor-qualification.mjs';
+import {
+  recordSelfUpdateRecoveryQualificationResult,
+  selfUpdateRecoveryDiagnosticSnapshot,
+  shouldResumeSuccessorQualification,
+} from '../src/self-update-successor-recovery.mjs';
 import { readSelfUpdateTransaction } from '../src/self-update-transaction-journal.mjs';
 
 async function fixture() {
@@ -62,6 +67,28 @@ function healthyHeartbeat(version, continuityState = 'RESTORED', sentinelHeartbe
   };
 }
 
+function seedPendingRecovery(target) {
+  const resume = shouldResumeSuccessorQualification({
+    updatedLaunch: false,
+    startupInspection: {
+      schema: 'metaengine.self-update.startup-inspection.v1',
+      state: 'TARGET_INSTALLED',
+      transaction_state: 'SUCCESSOR_BOOTED',
+      current_version: target,
+      target_version: target,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    },
+  });
+  assert.equal(resume, true);
+  const pending = selfUpdateRecoveryDiagnosticSnapshot();
+  assert.equal(pending.state, 'TARGET_INSTALLED_PENDING_QUALIFICATION');
+  assert.equal(pending.qualification_resume_allowed, true);
+  assert.equal(pending.recovery_installer_effect_allowed, false);
+  assert.equal(pending.automatic_retry_allowed, false);
+  return pending;
+}
+
 async function bootSuccessor(app, target = '0.6.3-dev.152.1') {
   await persistPreInstallReceipt(app, receipt(target));
   app.setVersion(target);
@@ -90,6 +117,8 @@ test('successor is not qualified while restored-session capsule still exists', a
 test('exact successor requires singleton, uptime, continuity and a fresh signed heartbeat', async () => {
   const { app } = await fixture();
   const target = await bootSuccessor(app);
+  seedPendingRecovery(target);
+
   app.setLocked(false);
   assert.equal((await probeUpdatedSuccessorQualification({ app, uptimeMs: () => 5000 })).state, 'PENDING_SINGLETON');
   app.setLocked(true);
@@ -116,6 +145,48 @@ test('exact successor requires singleton, uptime, continuity and a fresh signed 
   assert.equal(journal.evidence.self_update_runtime_healthy, true);
   assert.equal(journal.evidence.sentinel_armed, true);
   assert.equal(journal.evidence.sentinel_worker_healthy, true);
+
+  const recovery = selfUpdateRecoveryDiagnosticSnapshot();
+  assert.equal(recovery.state, 'QUALIFIED');
+  assert.equal(recovery.transaction_state, 'QUALIFIED');
+  assert.equal(recovery.qualification_resume_allowed, false);
+  assert.equal(recovery.recovery_installer_effect_allowed, false);
+  assert.equal(recovery.automatic_retry_allowed, false);
+  assert.equal(recovery.authority_effect, false);
+});
+
+test('forged or mismatched qualification result cannot clear pending recovery telemetry', () => {
+  const target = '0.6.3-dev.152.7';
+  const before = seedPendingRecovery(target);
+  const forged = recordSelfUpdateRecoveryQualificationResult({
+    state: 'QUALIFIED',
+    authority_effect: false,
+    transaction: {
+      schema: 'metaengine.self-update.transaction.v1',
+      state: 'QUALIFIED',
+      target_version: '0.6.3-dev.999.1',
+      qualified: true,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    },
+  });
+  assert.deepEqual(forged, before);
+  assert.deepEqual(selfUpdateRecoveryDiagnosticSnapshot(), before);
+
+  const effectful = recordSelfUpdateRecoveryQualificationResult({
+    state: 'QUALIFIED',
+    authority_effect: true,
+    transaction: {
+      schema: 'metaengine.self-update.transaction.v1',
+      state: 'QUALIFIED',
+      target_version: target,
+      qualified: true,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    },
+  });
+  assert.deepEqual(effectful, before);
+  assert.equal(effectful.state, 'TARGET_INSTALLED_PENDING_QUALIFICATION');
 });
 
 test('signed heartbeat with stale or missing sentinel worker proof cannot qualify successor', async () => {
