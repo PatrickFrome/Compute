@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES } from '../supabase/a2-browser-native-supervisor-v1/runtime-capabilities.mjs';
-import { projectNativeSupervisorRuntimeCapabilityHealth } from '../supabase/a2-browser-native-supervisor-v1/runtime-capability-health.mjs';
+import {
+  projectNativeSupervisorRuntimeCapabilityHealth,
+  runtimeCapabilityHealthResponseFields,
+} from '../supabase/a2-browser-native-supervisor-v1/runtime-capability-health.mjs';
 
 function assertZeroAuthority(out) {
   assert.equal(out.physical_dispatch_allowed, false);
@@ -61,4 +64,28 @@ test('only exact DB/source match may expose capabilities and it still grants no 
   assert.deepEqual(out.capabilities, NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES);
   assert.equal(out.readiness_eligible, true);
   assertZeroAuthority(out);
+});
+
+test('public health fields omit capability envelope entirely while unattested', async () => {
+  const projection = await projectNativeSupervisorRuntimeCapabilityHealth({ rpc: async () => {
+    const error = new Error('deadline exceeded');
+    error.name = 'TimeoutError';
+    throw error;
+  } });
+  const fields = runtimeCapabilityHealthResponseFields(projection);
+  assert.equal(fields.runtime_ready, false);
+  assert.equal(Object.hasOwn(fields, 'capabilities'), false);
+  assert.equal(Object.hasOwn(fields.capability_health, 'capabilities'), false);
+  assert.equal(fields.capability_health.state, 'UNATTESTED');
+  assertZeroAuthority(fields.capability_health);
+});
+
+test('public health fields expose exact capability envelope only after attestation', async () => {
+  const projection = await projectNativeSupervisorRuntimeCapabilityHealth({ rpc: async () => structuredClone(NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES) });
+  const fields = runtimeCapabilityHealthResponseFields(projection);
+  assert.equal(fields.runtime_ready, true);
+  assert.deepEqual(fields.capabilities, NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES);
+  assert.equal(Object.hasOwn(fields.capability_health, 'capabilities'), false);
+  assert.equal(fields.capability_health.state, 'ATTESTED');
+  assertZeroAuthority(fields.capability_health);
 });

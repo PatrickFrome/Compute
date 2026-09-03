@@ -39,3 +39,21 @@ export async function projectNativeSupervisorRuntimeCapabilityHealth({ rpc } = {
     return zero('UNATTESTED', classifyFailure(error));
   }
 }
+
+/**
+ * Convert the projection into public health fields. The attested envelope is
+ * omitted entirely when unavailable so liveness can remain HTTP 200 without
+ * accidentally advertising local source constants as live runtime readiness.
+ */
+export function runtimeCapabilityHealthResponseFields(projection) {
+  if (!projection || projection.schema !== 'metaengine.native-browser-supervisor.capability-health.v1') {
+    throw new Error('runtime_capability_health_projection_invalid');
+  }
+  const { capabilities, ...capabilityHealth } = projection;
+  const fields = {
+    runtime_ready: projection.readiness_eligible === true && capabilities != null,
+    capability_health: Object.freeze({ ...capabilityHealth }),
+  };
+  if (capabilities != null) fields.capabilities = capabilities;
+  return Object.freeze(fields);
+}
