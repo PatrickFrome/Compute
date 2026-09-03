@@ -1,7 +1,8 @@
-export const SELF_UPDATE_SUCCESSOR_RECOVERY_VERSION = '1.3.0';
+export const SELF_UPDATE_SUCCESSOR_RECOVERY_VERSION = '1.4.0';
 export const SELF_UPDATE_RECOVERY_DIAGNOSTIC_VERSION = '1.0.0';
 
 const RECOVERY_SCHEMA = 'metaengine.self-update.recovery-diagnostic.v1';
+let latestRecoveryDiagnostic = null;
 
 function clip(value, max = 240) {
   return value == null ? null : String(value).slice(0, max);
@@ -80,14 +81,20 @@ export function buildSelfUpdateRecoveryDiagnostic(startupInspection = null) {
   });
 }
 
+export function selfUpdateRecoveryDiagnosticSnapshot() {
+  return latestRecoveryDiagnostic == null ? null : structuredClone(latestRecoveryDiagnostic);
+}
+
 export function shouldResumeSuccessorQualification({
   updatedLaunch = false,
   updateHandoff = null,
   startupInspection = null,
 } = {}) {
+  const diagnostic = buildSelfUpdateRecoveryDiagnostic(startupInspection);
+  latestRecoveryDiagnostic = diagnostic;
+
   if (updatedLaunch === true) return exactUpdatedHandoff(updateHandoff);
 
-  const diagnostic = buildSelfUpdateRecoveryDiagnostic(startupInspection);
   return diagnostic.state === 'TARGET_INSTALLED_PENDING_QUALIFICATION'
     && diagnostic.qualification_resume_allowed === true
     && diagnostic.recovery_installer_effect_allowed === false
