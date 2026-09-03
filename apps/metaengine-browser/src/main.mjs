@@ -15,6 +15,7 @@ import { TabRegistry } from './tab-registry.mjs';
 import { VerifiedDownloadManager } from './verified-download-manager.mjs';
 import { normalizeShellLayoutState, planShellLayout, SHELL_TOP_HEIGHT } from './shell-layout.mjs';
 import { projectWorkspaceWorkbench } from './workspace-workbench-projection.mjs';
+import { BrowserContextPackRuntime } from './browser-context-pack-runtime.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -31,6 +32,7 @@ protocol.registerSchemesAsPrivileged([{ scheme: 'metaengine', privileges: { stan
 
 const registry = new TabRegistry();
 const views = new Map();
+const contextPacks = new BrowserContextPackRuntime({ registry, views });
 const bridge = new ComputeBridgeClient();
 let windowRef = null;
 let shellView = null;
@@ -67,7 +69,7 @@ async function registerShellProtocol() {
     const url = new URL(request.url);
     if (url.hostname !== 'shell') return new Response('not found', { status: 404 });
     const rel = url.pathname === '/' ? 'index.html' : url.pathname.replace(/^\/+/, '');
-    if (!['index.html', 'app.js', 'app.css'].includes(rel)) return new Response('not found', { status: 404 });
+    if (!['index.html', 'app.js', 'app.css', 'context-packs.js', 'context-packs.css'].includes(rel)) return new Response('not found', { status: 404 });
     const body = await fs.readFile(path.join(UI_ROOT, rel));
     return new Response(body, { status: 200, headers: { 'content-type': mimeFor(rel), 'cache-control': 'no-store' } });
   });
@@ -151,6 +153,7 @@ async function shellSnapshot() {
     development_plane: developmentPlane?.snapshot() || null,
     supervisor,
     workspaces,
+    context_packs: contextPacks.snapshot(),
     compute: await bridge.health(),
     layout: shellLayoutPlan ? structuredClone(shellLayoutPlan) : null,
     background_service: {
@@ -372,6 +375,7 @@ async function handleCommand(command, payload = {}) {
   if (command === 'BACK') { if (selectedView?.webContents.navigationHistory.canGoBack()) selectedView.webContents.navigationHistory.goBack(); return { ok: true }; }
   if (command === 'FORWARD') { if (selectedView?.webContents.navigationHistory.canGoForward()) selectedView.webContents.navigationHistory.goForward(); return { ok: true }; }
   if (command === 'RELOAD') { selectedView?.webContents.reload(); invalidatePerception(selected?.tab_id); return { ok: true }; }
+  if (command === 'CONTEXT_PACK_CAPTURE') return contextPacks.capture(payload?.tab_ids);
   if (command === 'COMPUTE_HEALTH') return bridge.health();
   if (command === 'DOWNLOAD_STATUS') return downloads?.snapshot() || null;
   if (command === 'DOWNLOAD_FILE') { const result = await downloads?.download(payload); await publishSnapshot(); return result; }
