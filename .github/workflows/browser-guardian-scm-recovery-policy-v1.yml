@@ -1,0 +1,170 @@
+name: METAENGINE Browser Guardian SCM Recovery Policy V2
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/native/browser-guardian-scm/**'
+      - 'apps/metaengine-browser/test/browser-guardian-scm-configurator-contract.test.mjs'
+      - '.github/workflows/browser-guardian-scm-recovery-policy-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scm-recovery-policy:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Run SCM configurator security contract
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: node --test test/browser-guardian-scm-configurator-contract.test.mjs
+
+      - name: Compile native SCM host and secure configurator
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path $vswhere)) { throw 'vswhere_missing' }
+          $vsRoot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+          if (-not $vsRoot) { throw 'visual_studio_cpp_toolchain_missing' }
+          $vcvars = Join-Path $vsRoot 'VC\Auxiliary\Build\vcvars64.bat'
+          if (-not (Test-Path $vcvars)) { throw 'vcvars64_missing' }
+          $sourceDir = (Resolve-Path 'apps/metaengine-browser/native/browser-guardian-scm').Path
+          $outDir = Join-Path $env:RUNNER_TEMP 'metaengine-guardian-scm-recovery'
+          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+          $service = Join-Path $outDir 'METAENGINEBrowserGuardian.exe'
+          $configure = Join-Path $outDir 'METAENGINEBrowserGuardianConfigure.exe'
+
+          $serviceCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE "{1}" /Fe:"{2}" /link advapi32.lib' -f $vcvars, (Join-Path $sourceDir 'browser-guardian-scm-service.cpp'), $service
+          & $env:ComSpec /d /s /c $serviceCmd
+          if ($LASTEXITCODE -ne 0) { throw "guardian_service_compile_exit_$LASTEXITCODE" }
+
+          $configureCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE "{1}" /Fe:"{2}" /link advapi32.lib shell32.lib ole32.lib' -f $vcvars, (Join-Path $sourceDir 'browser-guardian-scm-configure.cpp'), $configure
+          & $env:ComSpec /d /s /c $configureCmd
+          if ($LASTEXITCODE -ne 0) { throw "guardian_configure_compile_exit_$LASTEXITCODE" }
+          foreach ($binary in @($service,$configure)) {
+            if (-not (Test-Path $binary)) { throw "native_binary_missing:$binary" }
+            if ((Get-FileHash $binary -Algorithm SHA256).Hash.ToLowerInvariant() -notmatch '^[0-9a-f]{64}$') { throw "native_binary_digest_invalid:$binary" }
+          }
+          "GUARDIAN_SERVICE_EXE=$service" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GUARDIAN_CONFIGURE_EXE=$configure" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Prove secure-path contract and reject runner-temp service binary
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $line = (& $env:GUARDIAN_CONFIGURE_EXE --contract-json | Where-Object { $_.Trim() } | Select-Object -Last 1)
+          if (-not $line) { throw 'configurator_contract_output_missing' }
+          $row = $line | ConvertFrom-Json
+          if ($row.schema -ne 'metaengine.browser-guardian.scm-configurator.v1') { throw 'configurator_contract_schema_invalid' }
+          foreach ($field in @('machine_secure_service_path_required','final_path_reparse_escape_forbidden','low_privilege_write_acl_forbidden','user_writable_service_binary_forbidden')) {
+            if ($row.$field -ne $true) { throw "configurator_security_contract_missing_$field" }
+          }
+          if ($row.service_binary_basename -ne 'METAENGINEBrowserGuardian.exe') { throw 'configurator_service_basename_invalid' }
+          if ($row.service_start_stop_authority -ne $false -or $row.automatic_retry_allowed -ne $false) { throw 'configurator_authority_invalid' }
+
+          $badOut = Join-Path $env:RUNNER_TEMP 'insecure-config.out'
+          $badErr = Join-Path $env:RUNNER_TEMP 'insecure-config.err'
+          $bad = Start-Process -FilePath $env:GUARDIAN_CONFIGURE_EXE -ArgumentList @('--apply','--service-binary',$env:GUARDIAN_SERVICE_EXE) -PassThru -Wait -RedirectStandardOutput $badOut -RedirectStandardError $badErr
+          if ($bad.ExitCode -eq 0) { throw 'user_writable_service_binary_unexpectedly_accepted' }
+          $errorText = (Get-Content $badErr -Raw -ErrorAction SilentlyContinue)
+          if ($errorText -notmatch 'SERVICE_BINARY_MACHINE_TRUST_INVALID') { throw "unexpected_insecure_path_rejection:$errorText" }
+          if (Get-Service -Name 'METAENGINEBrowserGuardian' -ErrorAction SilentlyContinue) { throw 'insecure_path_created_service' }
+
+      - name: Prepare machine-owned exact Guardian binary
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:ProgramFiles 'METAENGINE\Guardian'
+          $slot = Join-Path $root "ci-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          New-Item -ItemType Directory -Force -Path $slot | Out-Null
+          $secureService = Join-Path $slot 'METAENGINEBrowserGuardian.exe'
+          Copy-Item $env:GUARDIAN_SERVICE_EXE $secureService -Force
+
+          # Explicit machine-owned ACL: SYSTEM/Admins full control, ordinary Users read/execute.
+          & icacls.exe $root /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' | Write-Host
+          if ($LASTEXITCODE -ne 0) { throw "guardian_root_acl_exit_$LASTEXITCODE" }
+          & icacls.exe $slot /inheritance:e | Write-Host
+          if ($LASTEXITCODE -ne 0) { throw "guardian_slot_acl_exit_$LASTEXITCODE" }
+          & icacls.exe $secureService /inheritance:e | Write-Host
+          if ($LASTEXITCODE -ne 0) { throw "guardian_binary_acl_exit_$LASTEXITCODE" }
+
+          "GUARDIAN_SECURE_ROOT=$root" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GUARDIAN_SECURE_SLOT=$slot" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GUARDIAN_SECURE_SERVICE_EXE=$secureService" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Apply and independently prove perpetual SCM recovery policy
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $serviceName = 'METAENGINEBrowserGuardian'
+          if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) { throw 'guardian_test_service_preexists' }
+          try {
+            $firstLine = (& $env:GUARDIAN_CONFIGURE_EXE --apply --service-binary $env:GUARDIAN_SECURE_SERVICE_EXE | Where-Object { $_.Trim() } | Select-Object -Last 1)
+            if (-not $firstLine) { throw 'configurator_apply_output_missing' }
+            $first = $firstLine | ConvertFrom-Json
+            if ($first.schema -ne 'metaengine.browser-guardian.scm-configurator-result.v1' -or $first.created -ne $true) { throw 'configurator_first_apply_invalid' }
+            if ($first.machine_secure_binary_path -ne $true -or $first.start_type -ne 'SERVICE_AUTO_START') { throw 'configurator_secure_auto_start_not_proven' }
+            if ($first.failure_reset_period -ne 'INFINITE' -or $first.last_failure_action_repeats -ne $true -or $first.non_crash_failure_actions -ne $true) { throw 'configurator_perpetual_recovery_not_proven' }
+            if (($first.failure_actions.delay_ms -join ',') -ne '5000,15000,60000') { throw 'configurator_failure_delays_invalid' }
+            foreach ($action in @($first.failure_actions)) { if ($action.type -ne 'RESTART') { throw 'configurator_non_restart_action_present' } }
+            if ($first.reboot_action -ne $false -or $first.run_command_action -ne $false -or $first.service_start_stop_effect -ne $false) { throw 'configurator_forbidden_action_present' }
+
+            $service = Get-CimInstance Win32_Service -Filter "Name='$serviceName'"
+            if (-not $service) { throw 'guardian_service_readback_missing' }
+            if ($service.StartMode -ne 'Auto' -or $service.ServiceType -notmatch 'Own Process' -or $service.StartName -notmatch '(?i)(LocalSystem|NT AUTHORITY\\SYSTEM)') { throw 'guardian_service_identity_drift' }
+            $expectedPath = '"' + (Resolve-Path $env:GUARDIAN_SECURE_SERVICE_EXE).Path + '"'
+            if ([string]$service.PathName -ne $expectedPath) { throw "guardian_service_path_drift:$($service.PathName)" }
+
+            $secondLine = (& $env:GUARDIAN_CONFIGURE_EXE --apply --service-binary $env:GUARDIAN_SECURE_SERVICE_EXE | Where-Object { $_.Trim() } | Select-Object -Last 1)
+            $second = $secondLine | ConvertFrom-Json
+            if ($second.created -ne $false -or $second.readback_proven -ne $true) { throw 'configurator_idempotent_reapply_invalid' }
+
+            & sc.exe start $serviceName | Write-Host
+            if ($LASTEXITCODE -ne 0) { throw "guardian_sc_start_exit_$LASTEXITCODE" }
+            $running = $false
+            for ($i=0; $i -lt 30; $i++) { $s=Get-CimInstance Win32_Service -Filter "Name='$serviceName'"; if ($s.State -eq 'Running') { $running=$true; break }; Start-Sleep -Milliseconds 250 }
+            if (-not $running) { throw 'guardian_scm_running_readback_timeout' }
+            & sc.exe stop $serviceName | Write-Host
+            if ($LASTEXITCODE -ne 0) { throw "guardian_sc_stop_exit_$LASTEXITCODE" }
+            $stopped = $false
+            for ($i=0; $i -lt 30; $i++) { $s=Get-CimInstance Win32_Service -Filter "Name='$serviceName'"; if ($s.State -eq 'Stopped') { $stopped=$true; break }; Start-Sleep -Milliseconds 250 }
+            if (-not $stopped) { throw 'guardian_scm_stopped_readback_timeout' }
+
+            @{schema='metaengine.browser-guardian.scm-recovery-policy-ci-proof.v2';source_head='${{ github.event.pull_request.head.sha || github.sha }}';machine_secure_binary=$true;user_writable_binary_rejected=$true;auto_start=$true;failure_reset_period='INFINITE';restart_delays_ms=@(5000,15000,60000);repeated_last_restart_action=$true;service_running_readback=$running;service_stopped_readback=$stopped;browser_authority=$false;task_authority=$false;authority_effect=$false} | ConvertTo-Json -Depth 5 | Write-Host
+          } finally {
+            & sc.exe stop $serviceName 2>$null | Out-Null
+            & sc.exe delete $serviceName 2>$null | Out-Null
+            Remove-Item $env:GUARDIAN_SECURE_SLOT -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/native/browser-guardian-scm apps/metaengine-browser/test/browser-guardian-scm-configurator-contract.test.mjs .github/workflows/browser-guardian-scm-recovery-policy-v1.yml)"
