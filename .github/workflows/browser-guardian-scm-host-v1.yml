@@ -91,7 +91,13 @@ jobs:
           if ($existing) { throw 'guardian_test_service_preexists' }
 
           try {
-            $createArgs = @('create', $serviceName, "binPath= `"$env:GUARDIAN_EXE`"", 'start= demand', 'obj= LocalSystem', 'DisplayName= METAENGINE Browser Guardian CI')
+            $createArgs = @(
+              'create', $serviceName,
+              'binPath=', "`"$env:GUARDIAN_EXE`"",
+              'start=', 'demand',
+              'obj=', 'LocalSystem',
+              'DisplayName=', 'METAENGINE Browser Guardian CI'
+            )
             & sc.exe @createArgs | Write-Host
             if ($LASTEXITCODE -ne 0) { throw "guardian_sc_create_exit_$LASTEXITCODE" }
 
