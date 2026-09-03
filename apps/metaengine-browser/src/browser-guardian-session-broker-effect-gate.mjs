@@ -1,9 +1,22 @@
+import crypto from 'node:crypto';
+
 export const BROWSER_GUARDIAN_SESSION_BROKER_EFFECT_GATE_SCHEMA = 'metaengine.browser-guardian.session-broker-effect-gate.v1';
-export const BROWSER_GUARDIAN_SESSION_BROKER_EFFECT_GATE_VERSION = '1.0.0';
+export const BROWSER_GUARDIAN_SESSION_BROKER_EFFECT_GATE_VERSION = '1.1.0';
 
 const PLAN_SCHEMA = 'metaengine.browser-guardian.session-broker-plan.v1';
 const JOURNAL_SCHEMA = 'metaengine.browser-guardian.session-broker-effect-journal.v1';
+const JOURNAL_VERSION = '1.0.0';
 const SID_RE = /^S-\d-\d+(?:-\d+)+$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SHA256_RE = /^[0-9a-f]{64}$/;
+const JOURNAL_STATES = new Set([
+  'INTENT_RECORDED',
+  'EFFECT_ATTEMPTED',
+  'EFFECT_DISPATCHED',
+  'AMBIGUOUS',
+  'CONFIRMED',
+  'NO_EFFECT_PROVEN',
+]);
 
 function text(value) {
   const out = String(value ?? '').trim();
@@ -18,6 +31,16 @@ function sid(value) {
 function int(value, fallback = -1) {
   const n = Number(value);
   return Number.isSafeInteger(n) ? n : fallback;
+}
+
+function stable(value) {
+  if (Array.isArray(value)) return value.map(stable);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])]));
+}
+
+function sha256Json(value) {
+  return crypto.createHash('sha256').update(JSON.stringify(stable(value))).digest('hex');
 }
 
 function bindingFrom(value) {
@@ -89,6 +112,80 @@ function samePlanIdentity(journalPlan, identity) {
     && String(journalPlan.selected_session?.state || '').toUpperCase() === 'ACTIVE';
 }
 
+function exactDispatchIdentity(snapshot) {
+  return int(snapshot?.dispatched_pid, 0) > 0 && Boolean(text(snapshot?.dispatched_process_incarnation_id));
+}
+
+function journalSnapshotIntegrity(snapshot, binding) {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)
+      || snapshot.schema !== JOURNAL_SCHEMA || snapshot.version !== JOURNAL_VERSION) {
+    return Object.freeze({ ok: false, reason: 'durable_journal_schema_untrusted' });
+  }
+  if (!sameBinding(snapshot, binding)) {
+    return Object.freeze({ ok: false, reason: 'durable_journal_binding_drift' });
+  }
+  for (const field of [
+    'automatic_retry_allowed',
+    'browser_authority',
+    'task_authority',
+    'scheduler_authority',
+    'page_model_text_authority',
+    'release_authority',
+    'session_token_authority',
+    'process_effect_authority',
+    'authority_effect',
+  ]) {
+    if (snapshot[field] !== false) {
+      return Object.freeze({ ok: false, reason: `durable_journal_authority_invalid:${field}` });
+    }
+  }
+
+  const state = String(snapshot.state || '').trim().toUpperCase();
+  if (!JOURNAL_STATES.has(state)) return Object.freeze({ ok: false, reason: 'durable_journal_state_untrusted' });
+  const effectId = text(snapshot.effect_id);
+  const generation = int(snapshot.effect_generation, 0);
+  if (!effectId || !UUID_RE.test(effectId) || generation < 1) {
+    return Object.freeze({ ok: false, reason: 'durable_effect_identity_invalid' });
+  }
+  const digest = String(snapshot.plan_digest || '').trim().toLowerCase();
+  if (!SHA256_RE.test(digest) || !snapshot.plan || typeof snapshot.plan !== 'object' || Array.isArray(snapshot.plan)
+      || sha256Json(snapshot.plan) !== digest) {
+    return Object.freeze({ ok: false, reason: 'durable_plan_digest_invalid' });
+  }
+
+  const attempted = snapshot.physical_effect_attempted;
+  const crossed = snapshot.effect_barrier_crossed;
+  const dispatched = exactDispatchIdentity(snapshot);
+  const hasPartialDispatch = snapshot.dispatched_pid != null || snapshot.dispatched_process_incarnation_id != null;
+  if (typeof attempted !== 'boolean' || typeof crossed !== 'boolean' || attempted !== crossed) {
+    return Object.freeze({ ok: false, reason: 'durable_effect_barrier_invalid' });
+  }
+  if (hasPartialDispatch && !dispatched) {
+    return Object.freeze({ ok: false, reason: 'durable_dispatch_identity_invalid' });
+  }
+
+  if (state === 'INTENT_RECORDED' && (attempted || crossed || hasPartialDispatch)) {
+    return Object.freeze({ ok: false, reason: 'durable_intent_barrier_invalid' });
+  }
+  if (state === 'EFFECT_ATTEMPTED' && (!attempted || hasPartialDispatch)) {
+    return Object.freeze({ ok: false, reason: 'durable_attempt_state_invalid' });
+  }
+  if (state === 'EFFECT_DISPATCHED' && (!attempted || !dispatched)) {
+    return Object.freeze({ ok: false, reason: 'durable_dispatch_state_invalid' });
+  }
+  if (state === 'AMBIGUOUS' && !attempted) {
+    return Object.freeze({ ok: false, reason: 'durable_ambiguous_state_invalid' });
+  }
+  if (state === 'CONFIRMED' && (!attempted || !dispatched)) {
+    return Object.freeze({ ok: false, reason: 'durable_confirmed_state_invalid' });
+  }
+  if (state === 'NO_EFFECT_PROVEN' && !attempted && hasPartialDispatch) {
+    return Object.freeze({ ok: false, reason: 'durable_no_effect_state_invalid' });
+  }
+
+  return Object.freeze({ ok: true, state, effect_id: effectId, effect_generation: generation });
+}
+
 function decision(step, reason, extra = {}) {
   return Object.freeze({
     schema: BROWSER_GUARDIAN_SESSION_BROKER_EFFECT_GATE_SCHEMA,
@@ -125,38 +222,40 @@ export function gateBrowserGuardianSessionBrokerEffect({ plan, journal_snapshot 
   if (journal_snapshot == null) {
     return decision('RECORD_INTENT', 'durable_start_intent_required_before_effect', { selected_session: identity.selected_session });
   }
-  if (!journal_snapshot || journal_snapshot.schema !== JOURNAL_SCHEMA || typeof journal_snapshot !== 'object' || Array.isArray(journal_snapshot)) {
-    return decision('HOLD_JOURNAL_INVALID', 'durable_journal_schema_untrusted');
-  }
-  if (!sameBinding(journal_snapshot, exactBinding)) {
-    return decision('HOLD_JOURNAL_BINDING_DRIFT', 'durable_journal_binding_drift');
+
+  const integrity = journalSnapshotIntegrity(journal_snapshot, exactBinding);
+  if (!integrity.ok) {
+    const step = integrity.reason === 'durable_journal_binding_drift'
+      ? 'HOLD_JOURNAL_BINDING_DRIFT'
+      : 'HOLD_JOURNAL_INVALID';
+    return decision(step, integrity.reason);
   }
 
-  const state = String(journal_snapshot.state || '').trim().toUpperCase();
+  const state = integrity.state;
   if (state === 'NO_EFFECT_PROVEN') {
     return decision('RECORD_INTENT', 'previous_generation_proven_no_effect', {
-      previous_effect_generation: int(journal_snapshot.effect_generation, 0),
+      previous_effect_generation: integrity.effect_generation,
       selected_session: identity.selected_session,
     });
   }
   if (!samePlanIdentity(journal_snapshot.plan, identity)) {
     return decision('HOLD_JOURNAL_PLAN_DRIFT', 'planner_and_durable_intent_identity_differ', {
-      journal_state: state || null,
+      journal_state: state,
     });
   }
 
   if (state === 'INTENT_RECORDED') {
     return decision('ATTEMPT_EXACT_START', 'exact_durable_intent_precedes_single_attempt', {
-      effect_id: text(journal_snapshot.effect_id),
-      effect_generation: int(journal_snapshot.effect_generation, 0),
+      effect_id: integrity.effect_id,
+      effect_generation: integrity.effect_generation,
       selected_session: identity.selected_session,
     });
   }
   if (['EFFECT_ATTEMPTED', 'EFFECT_DISPATCHED', 'AMBIGUOUS'].includes(state)) {
     return decision('RECONCILE_ONLY', 'effect_barrier_already_crossed_no_replay', {
       journal_state: state,
-      effect_id: text(journal_snapshot.effect_id),
-      effect_generation: int(journal_snapshot.effect_generation, 0),
+      effect_id: integrity.effect_id,
+      effect_generation: integrity.effect_generation,
     });
   }
   if (state === 'CONFIRMED') {
