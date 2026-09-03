@@ -325,6 +325,8 @@ export class DevOsNativeTaskCycle {
       restart_transport_promotion_before_scheduler_cycle: true,
       preconversation_transport_promotion_non_effect: true,
       promotion_fanout_per_cycle: 1,
+      running_observation_fanout_per_cycle: 4,
+      tab_census_capacity_grounding: 'READ_ONLY_TAB_REGISTRY_CENSUS',
       elastic_fleet_governor: ELASTIC_FLEET_CONTRACT.capacity_model,
       elastic_scale_down_retire_states: 'PROVISIONING_AND_BOUND_UNVERIFIED_ONLY',
       elastic_idle_cycles_required: ELASTIC_FLEET_CONTRACT.idle_cycles_required,
