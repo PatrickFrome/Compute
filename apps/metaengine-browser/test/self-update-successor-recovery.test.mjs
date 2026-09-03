@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { shouldResumeSuccessorQualification } from '../src/self-update-successor-recovery.mjs';
+import {
+  buildSelfUpdateRecoveryDiagnostic,
+  shouldResumeSuccessorQualification,
+} from '../src/self-update-successor-recovery.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(__dirname, '../src');
@@ -53,6 +56,60 @@ test('normal restart resumes qualification only for exact unresolved SUCCESSOR_B
   assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: false, startupInspection: installedInspection({ target_version: '0.6.6-dev.9.1' }) }), false);
   assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: false, startupInspection: installedInspection({ authority_effect: true }) }), false);
   assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: false, startupInspection: installedInspection({ automatic_retry_allowed: true }) }), false);
+});
+
+test('recovery diagnostic exposes exact pending qualification without reopening installer authority', () => {
+  const row = buildSelfUpdateRecoveryDiagnostic(installedInspection());
+  assert.equal(row.schema, 'metaengine.self-update.recovery-diagnostic.v1');
+  assert.equal(row.state, 'TARGET_INSTALLED_PENDING_QUALIFICATION');
+  assert.equal(row.recovery_active, true);
+  assert.equal(row.qualification_resume_allowed, true);
+  assert.equal(row.recovery_installer_effect_allowed, false);
+  assert.equal(row.automatic_retry_allowed, false);
+  assert.equal(row.authority_effect, false);
+});
+
+test('recovery diagnostic classifies qualified, superseded and ambiguous transactions without retry authority', () => {
+  const cases = [
+    [installedInspection({ transaction_state: 'QUALIFIED' }), 'QUALIFIED'],
+    [installedInspection({ state: 'SUPERSEDED', current_version: '0.6.6-dev.9.1', target_version: '0.6.6-dev.8.1' }), 'SUPERSEDED'],
+    [installedInspection({ state: 'AMBIGUOUS_INSTALL', current_version: '0.6.6-dev.7.1', target_version: '0.6.6-dev.8.1', reason: 'target_not_installed' }), 'AMBIGUOUS_INSTALL'],
+  ];
+  for (const [inspection, expected] of cases) {
+    const row = buildSelfUpdateRecoveryDiagnostic(inspection);
+    assert.equal(row.state, expected);
+    assert.equal(row.qualification_resume_allowed, false);
+    assert.equal(row.recovery_installer_effect_allowed, false);
+    assert.equal(row.automatic_retry_allowed, false);
+    assert.equal(row.authority_effect, false);
+  }
+});
+
+test('recovery diagnostic preserves normal no-transaction retry semantics and fails closed on unknown evidence', () => {
+  const none = buildSelfUpdateRecoveryDiagnostic(installedInspection({
+    state: 'NONE',
+    transaction_state: null,
+    target_version: null,
+    automatic_retry_allowed: true,
+  }));
+  assert.equal(none.state, 'NO_TRANSACTION');
+  assert.equal(none.recovery_active, false);
+  assert.equal(none.recovery_installer_effect_allowed, null);
+  assert.equal(none.automatic_retry_allowed, true);
+
+  const unknown = buildSelfUpdateRecoveryDiagnostic(installedInspection({
+    state: 'TARGET_INSTALLED',
+    transaction_state: 'PREPARED',
+  }));
+  assert.equal(unknown.state, 'BLOCKED_NONTERMINAL');
+  assert.equal(unknown.recovery_installer_effect_allowed, false);
+  assert.equal(unknown.automatic_retry_allowed, false);
+  assert.equal(unknown.qualification_resume_allowed, false);
+
+  const invalid = buildSelfUpdateRecoveryDiagnostic(null);
+  assert.equal(invalid.state, 'INSPECTION_UNAVAILABLE');
+  assert.equal(invalid.recovery_installer_effect_allowed, false);
+  assert.equal(invalid.automatic_retry_allowed, false);
 });
 
 test('main entry does not recreate successor receipt on recovery startup and preserves ambiguous updated-launch hold', async () => {
