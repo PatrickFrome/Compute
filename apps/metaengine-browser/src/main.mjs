@@ -7,6 +7,7 @@ import { DevelopmentPlane } from './development-plane.mjs';
 import { FleetProvisioner } from './fleet-provisioner.mjs';
 import { createFleetTargetLocalObserver } from './fleet-target-local-observer.mjs';
 import { retireEligibleFleetAgents } from './fleet-elastic-governor.mjs';
+import { HumanTakeoverController } from './human-takeover.mjs';
 import { OwnerSafetyGateRegistry, bindGlobalOwnerSafetyGateRegistry } from './owner-safety-gate-registry.mjs';
 import { captureSemanticFrame, captureViewThumbnail, executeSemanticCommand } from './native-browser-control.mjs';
 import { NativeSupervisorClient } from './native-supervisor-client.mjs';
@@ -41,6 +42,7 @@ let fleet = null;
 let ownerSafetyGates = null;
 let developmentPlane = null;
 let nativeSupervisor = null;
+const humanTakeover = new HumanTakeoverController({ getSupervisor: () => nativeSupervisor });
 let shellLayoutState = normalizeShellLayoutState();
 let shellLayoutPlan = null;
 let perceptionCache = { tab_id: null, captured_ms: 0, frame: null, error: null };
@@ -151,6 +153,7 @@ async function shellSnapshot() {
     owner_safety_gates: ownerSafetyGates?.snapshot() || null,
     development_plane: developmentPlane?.snapshot() || null,
     supervisor,
+    human_takeover: supervisor ? humanTakeover.snapshot() : null,
     workspaces,
     compute: await bridge.health(),
     layout: shellLayoutPlan ? structuredClone(shellLayoutPlan) : null,
@@ -171,6 +174,27 @@ async function shellSnapshot() {
 async function publishSnapshot() {
   if (!shellView || shellView.webContents.isDestroyed()) return;
   shellView.webContents.send('metaengine:shell:snapshot', await shellSnapshot());
+}
+
+async function executeHumanTakeover(action) {
+  if (!nativeSupervisor) throw new Error('human_takeover_supervisor_unavailable');
+  const result = humanTakeover.execute(action);
+  await publishSnapshot();
+  return result;
+}
+
+function installHumanTakeoverAccelerator(webContents) {
+  if (!webContents || webContents.isDestroyed()) return;
+  webContents.on('before-input-event', (event, input) => {
+    if (input?.type !== 'keyDown' || input?.isAutoRepeat === true) return;
+    const control = input?.control === true || input?.meta === true;
+    if (!control || input?.shift !== true || String(input?.key || '').toLowerCase() !== 'h') return;
+    event.preventDefault();
+    if (!nativeSupervisor) return;
+    const state = humanTakeover.snapshot();
+    const action = state.state === 'PAUSED' ? 'RESUME' : 'PAUSE';
+    void executeHumanTakeover(action).catch(() => {});
+  });
 }
 
 function layout() {
@@ -205,6 +229,7 @@ function invalidatePerception(tabId = null) {
 }
 
 function wireRemoteView(tab, view) {
+  installHumanTakeoverAccelerator(view.webContents);
   view.webContents.setWindowOpenHandler(({ url }) => {
     const d = newWindowDecision(url);
     if (d.allow) setImmediate(() => createTab(d.normalized_url, { select: true }).catch(() => {}));
@@ -424,6 +449,12 @@ async function handleCommand(command, payload = {}) {
     await publishSnapshot();
     return shellLayoutPlan ? structuredClone(shellLayoutPlan) : null;
   }
+  if (command === 'TAKEOVER_STATUS') {
+    if (!nativeSupervisor) throw new Error('human_takeover_supervisor_unavailable');
+    return humanTakeover.snapshot();
+  }
+  if (command === 'TAKEOVER_PAUSE') return executeHumanTakeover('PAUSE');
+  if (command === 'TAKEOVER_RESUME') return executeHumanTakeover('RESUME');
   if (command === 'NEW_CHATGPT') return createTab('https://chatgpt.com/', { select: true, load: true });
   if (command === 'NEW_TAB') return createTab(payload?.url || 'https://chatgpt.com/', { select: payload?.select !== false, load: true });
   if (command === 'SELECT_TAB') { registry.select(payload?.tab_id); attachSelected(); invalidatePerception(); await publishSnapshot(); return { ok: true, tab_id: String(payload?.tab_id) }; }
@@ -691,6 +722,7 @@ async function createWindow() {
   if (windowRef && !windowRef.isDestroyed()) return;
   windowRef = new BaseWindow({ width: 1440, height: 960, minWidth: 900, minHeight: 640, title: 'METAENGINE Browser', backgroundColor: '#101216' });
   shellView = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-shell.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true } });
+  installHumanTakeoverAccelerator(shellView.webContents);
   windowRef.contentView.addChildView(shellView);
   windowRef.on('resize', layout);
   windowRef.on('close', (event) => {
