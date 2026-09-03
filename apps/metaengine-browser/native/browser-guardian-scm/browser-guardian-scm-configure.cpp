@@ -19,6 +19,14 @@ constexpr wchar_t kServiceDisplayName[] = L"METAENGINE Browser Guardian";
 constexpr wchar_t kGuardianRelativeRoot[] = L"METAENGINE\\Guardian";
 constexpr wchar_t kServiceDescription[] =
     L"METAENGINE Browser lifecycle Guardian. Owns only external process/release supervision; no page or task authority.";
+constexpr wchar_t kRequiredPrivilegeTcb[] = L"SeTcbPrivilege";
+constexpr wchar_t kRequiredPrivilegeAssignPrimary[] = L"SeAssignPrimaryTokenPrivilege";
+constexpr wchar_t kRequiredPrivilegeIncreaseQuota[] = L"SeIncreaseQuotaPrivilege";
+constexpr std::wstring_view kRequiredPrivileges[] = {
+    kRequiredPrivilegeTcb,
+    kRequiredPrivilegeAssignPrimary,
+    kRequiredPrivilegeIncreaseQuota,
+};
 constexpr DWORD kRestartDelaysMs[] = {5'000, 15'000, 60'000};
 constexpr DWORD kRecoveryConfigServiceAccess = SERVICE_QUERY_CONFIG | SERVICE_CHANGE_CONFIG | SERVICE_START;
 constexpr ACCESS_MASK kLowPrivilegeForbiddenWriteMask =
@@ -26,7 +34,7 @@ constexpr ACCESS_MASK kLowPrivilegeForbiddenWriteMask =
     DELETE | WRITE_DAC | WRITE_OWNER | GENERIC_WRITE | GENERIC_ALL;
 constexpr char kContractJson[] =
     "{\"schema\":\"metaengine.browser-guardian.scm-configurator.v1\","
-    "\"version\":\"1.1.0\","
+    "\"version\":\"1.2.0\","
     "\"service_name\":\"METAENGINEBrowserGuardian\","
     "\"apply_requires_explicit_flag\":true,"
     "\"service_configuration_authority\":true,"
@@ -38,6 +46,9 @@ constexpr char kContractJson[] =
     "\"final_path_reparse_escape_forbidden\":true,"
     "\"low_privilege_write_acl_forbidden\":true,"
     "\"user_writable_service_binary_forbidden\":true,"
+    "\"required_privileges\":[\"SeTcbPrivilege\",\"SeAssignPrimaryTokenPrivilege\",\"SeIncreaseQuotaPrivilege\"],"
+    "\"service_sid_type\":\"SERVICE_SID_TYPE_UNRESTRICTED\","
+    "\"least_privilege_readback_required\":true,"
     "\"browser_authority\":false,"
     "\"task_authority\":false,"
     "\"scheduler_authority\":false,"
@@ -263,6 +274,40 @@ bool localSystemAccount(const wchar_t* value) {
     return normalized == L"localsystem" || normalized == L".\\localsystem" || normalized == L"nt authority\\system";
 }
 
+std::vector<wchar_t> requiredPrivilegeMultiSz() {
+    std::vector<wchar_t> out;
+    for (const std::wstring_view privilege : kRequiredPrivileges) {
+        out.insert(out.end(), privilege.begin(), privilege.end());
+        out.push_back(L'\0');
+    }
+    out.push_back(L'\0');
+    return out;
+}
+
+std::vector<std::wstring> parseMultiSz(const wchar_t* raw) {
+    std::vector<std::wstring> values;
+    if (raw == nullptr) return values;
+    const wchar_t* cursor = raw;
+    while (*cursor != L'\0') {
+        std::wstring value(cursor);
+        if (value.empty()) return {};
+        values.push_back(lower(std::move(value)));
+        cursor += std::wcslen(cursor) + 1;
+    }
+    return values;
+}
+
+bool requiredPrivilegesMatch(const wchar_t* raw) {
+    std::vector<std::wstring> actual = parseMultiSz(raw);
+    if (actual.size() != std::size(kRequiredPrivileges)) return false;
+    std::vector<std::wstring> expected;
+    expected.reserve(std::size(kRequiredPrivileges));
+    for (const std::wstring_view privilege : kRequiredPrivileges) expected.push_back(lower(std::wstring(privilege)));
+    std::sort(actual.begin(), actual.end());
+    std::sort(expected.begin(), expected.end());
+    return actual == expected;
+}
+
 int fail(const char* reason, DWORD error = ERROR_SUCCESS) {
     std::cerr << "{\"schema\":\"metaengine.browser-guardian.scm-configurator-error.v1\","
               << "\"reason\":\"" << reason << "\","
@@ -328,6 +373,19 @@ int applyConfiguration(const std::wstring& rawBinaryPath) {
         return fail("SERVICE_DESCRIPTION_CONFIG_FAILED", GetLastError());
     }
 
+    std::vector<wchar_t> privilegeMultiSz = requiredPrivilegeMultiSz();
+    SERVICE_REQUIRED_PRIVILEGES_INFOW requiredPrivileges{};
+    requiredPrivileges.pmszRequiredPrivileges = privilegeMultiSz.data();
+    if (!ChangeServiceConfig2W(service.value, SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO, &requiredPrivileges)) {
+        return fail("SERVICE_REQUIRED_PRIVILEGES_CONFIG_FAILED", GetLastError());
+    }
+
+    SERVICE_SID_INFO sidInfo{};
+    sidInfo.dwServiceSidType = SERVICE_SID_TYPE_UNRESTRICTED;
+    if (!ChangeServiceConfig2W(service.value, SERVICE_CONFIG_SERVICE_SID_INFO, &sidInfo)) {
+        return fail("SERVICE_SID_CONFIG_FAILED", GetLastError());
+    }
+
     SC_ACTION actions[3] = {
         {SC_ACTION_RESTART, kRestartDelaysMs[0]},
         {SC_ACTION_RESTART, kRestartDelaysMs[1]},
@@ -354,6 +412,20 @@ int applyConfiguration(const std::wstring& rawBinaryPath) {
     if (config->dwStartType != SERVICE_AUTO_START) return fail("SERVICE_START_MODE_READBACK_MISMATCH");
     if (!localSystemAccount(config->lpServiceStartName)) return fail("SERVICE_ACCOUNT_READBACK_MISMATCH");
     if (!imagePathMatches(config->lpBinaryPathName, binaryPath)) return fail("SERVICE_BINARY_READBACK_MISMATCH");
+
+    const std::vector<BYTE> privilegeBuffer = queryConfig2(service.value, SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO);
+    if (privilegeBuffer.size() < sizeof(SERVICE_REQUIRED_PRIVILEGES_INFOW)) {
+        return fail("SERVICE_REQUIRED_PRIVILEGES_READBACK_FAILED", GetLastError());
+    }
+    const auto* privilegeReadback = reinterpret_cast<const SERVICE_REQUIRED_PRIVILEGES_INFOW*>(privilegeBuffer.data());
+    if (!requiredPrivilegesMatch(privilegeReadback->pmszRequiredPrivileges)) {
+        return fail("SERVICE_REQUIRED_PRIVILEGES_READBACK_MISMATCH");
+    }
+
+    const std::vector<BYTE> sidBuffer = queryConfig2(service.value, SERVICE_CONFIG_SERVICE_SID_INFO);
+    if (sidBuffer.size() < sizeof(SERVICE_SID_INFO)) return fail("SERVICE_SID_READBACK_FAILED", GetLastError());
+    const auto* sidReadback = reinterpret_cast<const SERVICE_SID_INFO*>(sidBuffer.data());
+    if (sidReadback->dwServiceSidType != SERVICE_SID_TYPE_UNRESTRICTED) return fail("SERVICE_SID_READBACK_MISMATCH");
 
     const std::vector<BYTE> failureBuffer = queryConfig2(service.value, SERVICE_CONFIG_FAILURE_ACTIONS);
     if (failureBuffer.empty()) return fail("SERVICE_FAILURE_ACTIONS_READBACK_FAILED", GetLastError());
@@ -382,6 +454,9 @@ int applyConfiguration(const std::wstring& rawBinaryPath) {
               << "\"service_type\":\"SERVICE_WIN32_OWN_PROCESS\","
               << "\"start_type\":\"SERVICE_AUTO_START\","
               << "\"account\":\"LocalSystem\","
+              << "\"required_privileges\":[\"SeTcbPrivilege\",\"SeAssignPrimaryTokenPrivilege\",\"SeIncreaseQuotaPrivilege\"],"
+              << "\"service_sid_type\":\"SERVICE_SID_TYPE_UNRESTRICTED\","
+              << "\"least_privilege_readback_proven\":true,"
               << "\"machine_secure_binary_path\":true,"
               << "\"failure_reset_period\":\"INFINITE\","
               << "\"failure_actions\":["
