@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
 import { evaluateFleetSubmitReadiness } from './fleet-submit-readiness.mjs';
 import { planElasticFleetCapacity } from './fleet-elastic-governor.mjs';
+import { FLEET_TAB_CEILING } from './tab-registry.mjs';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA40_RE = /^[a-f0-9]{40}$/;
@@ -10,6 +11,13 @@ const AGENT_RE = /^agent_[a-z0-9-]{8,64}$/;
 const TERMINAL_STATES = new Set(['COMPLETED','FAILED','AMBIGUOUS']);
 const RECEIPT_CONFIRMED_STATES = new Set(['RUNNING','RESULT_READY','BLOCKED','COMPLETED','FAILED']);
 const WRITE_AHEAD_EFFECT_BARRIER = 'WRITE_AHEAD_V1';
+// Bounded running-observation fan-out (W4): how many running tasks the cycle
+// observes per heartbeat. Each observation is an independent read-back
+// (CAPTURE the bound tab + post a fenced completion); none of them touches
+// foreground focus, so raising this only harvests results faster — it never
+// introduces parallel physical effects. The server-side plan remains the
+// authority on which tasks exist.
+const RUNNING_OBSERVATION_BUDGET = 4;
 
 const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 const clip = (value, max = 500) => String(value ?? '').slice(0, max);
@@ -37,6 +45,21 @@ function selectedTabId(state = {}) {
   if (active) return active;
   const selected = (state?.tabs || []).filter((row) => row?.selected === true);
   return selected.length === 1 ? String(selected[0]?.tab_id || '') : '';
+}
+// Read-only tab census projection from supervisor state (W3): prefers the
+// shell's authoritative census object; falls back to counting FLEET-role tabs
+// (using the registry's exported per-kind ceiling); returns null when the
+// shell state carries neither (older shells), so the governor keeps
+// logical-only semantics there.
+function tabCensusFromState(state = {}) {
+  const census = state?.tab_census;
+  if (census && typeof census === 'object' && Number.isSafeInteger(Number(census.by_role?.FLEET)) && Number.isSafeInteger(Number(census.fleet_tab_ceiling))) {
+    return { by_role: { FLEET: Number(census.by_role.FLEET), USER: Number(census.by_role?.USER ?? 0) }, fleet_tab_ceiling: Number(census.fleet_tab_ceiling) };
+  }
+  const tabs = Array.isArray(state?.tabs) ? state.tabs : null;
+  if (!tabs) return null;
+  const fleetTabs = tabs.filter((row) => String(row?.role || 'USER').toUpperCase() === 'FLEET').length;
+  return { by_role: { FLEET: fleetTabs, USER: tabs.length - fleetTabs }, fleet_tab_ceiling: FLEET_TAB_CEILING };
 }
 function readinessOrThrow({ frame, lease, selected_tab_id, phase }) {
   const readiness = evaluateFleetSubmitReadiness({
@@ -253,7 +276,7 @@ export class DevOsNativeTaskCycle {
     const plan = await responseJson(planResponse, 'devos_cycle_http');
     if (plan.schema !== 'metaengine.devos.browser-cycle.v1') throw new Error('devos_cycle_schema_invalid');
 
-    const capacity = planElasticFleetCapacity({ backlog: plan.backlog, fleetSnapshot, idleCycles: this.#elasticIdleCycles });
+    const capacity = planElasticFleetCapacity({ backlog: plan.backlog, fleetSnapshot, idleCycles: this.#elasticIdleCycles, tabCensus: tabCensusFromState(state) });
     this.#elasticIdleCycles = capacity.idle_cycles;
     await this.#executeCommand({ action: 'FLEET_RECONCILE', platform: null, payload: capacity });
 
@@ -261,8 +284,43 @@ export class DevOsNativeTaskCycle {
     let dispatch = null;
     if (plan.lease) dispatch = await this.#dispatchLease(plan.lease, postState?.fleet);
     let resultReady = null;
-    if (Array.isArray(plan.running) && plan.running.length) resultReady = await this.#observeRunning(plan.running[0], postState?.fleet);
-    return this.#record({ state: 'OK', backlog: structuredClone(plan.backlog || {}), capacity, ambiguity_recovery: ambiguityRecovery, dispatch, result_ready: resultReady });
+    let resultReadyBatch = null;
+    if (Array.isArray(plan.running) && plan.running.length) {
+      const batch = plan.running.slice(0, RUNNING_OBSERVATION_BUDGET);
+      const observations = [];
+      const failures = [];
+      for (const running of batch) {
+        try {
+          observations.push(await this.#observeRunning(running, postState?.fleet));
+        } catch (error) {
+          error.automatic_retry_allowed = false;
+          failures.push(error);
+          observations.push({
+            state: 'OBSERVATION_FAILED',
+            task_id: String(running?.task_id || ''),
+            reason: clip(error?.message || error, 180),
+            automatic_retry_allowed: false,
+            authority_effect: false,
+          });
+        }
+      }
+      // Preserve the single-observation error surface exactly: when every
+      // observed task failed (including the 1-task case), the first error is
+      // rethrown so the heartbeat's ambiguity path stays identical. When at
+      // least one observation succeeded, per-task failures are recorded in the
+      // batch and the cycle completes — one flaky tab no longer starves the
+      // other running observations.
+      if (failures.length === batch.length) throw failures[0];
+      resultReady = observations[0] ?? null;
+      resultReadyBatch = Object.freeze({
+        budget: RUNNING_OBSERVATION_BUDGET,
+        observed: observations.length,
+        failed: failures.length,
+        results: Object.freeze(observations),
+        authority_effect: false,
+      });
+    }
+    return this.#record({ state: 'OK', backlog: structuredClone(plan.backlog || {}), capacity, ambiguity_recovery: ambiguityRecovery, dispatch, result_ready: resultReady, result_ready_batch: resultReadyBatch });
   }
 
   async completeFromTrustedCommand(payload = {}) {
@@ -658,6 +716,7 @@ export class DevOsNativeTaskCycle {
       durable_effect_delivery_journal: this.#effectJournal != null,
       write_ahead_effect_barrier: this.#effectJournal != null ? WRITE_AHEAD_EFFECT_BARRIER : null,
       ambiguity_recovery_fanout_per_cycle: this.#effectJournal != null ? 1 : 0,
+      running_observation_fanout_per_cycle: RUNNING_OBSERVATION_BUDGET,
       elastic_fleet_governor: 'ELASTIC_BACKLOG_DRIVEN_WITH_IDLE_SHRINK',
       elastic_idle_cycles: this.#elasticIdleCycles,
       second_scheduler_loop: false,

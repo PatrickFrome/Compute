@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { globalOwnerGateDisabled } from './owner-safety-gate-registry.mjs';
 import { persistFleetStateTargetRevalidation } from './fleet-state-target-revalidation.mjs';
 
-export const FLEET_PROVISIONER_VERSION = '1.4.2';
+export const FLEET_PROVISIONER_VERSION = '1.5.0';
 export const FLEET_STATES = Object.freeze([
   'REGISTERED',
   'PROVISIONING',
@@ -24,6 +24,11 @@ const DEFAULT_SEED_AGENTS = 6;
 const DEFAULT_WARM_AGENTS = 2;
 const DEFAULT_SPAWN_BURST_LIMIT = 8;
 const MAX_SPAWN_BURST_LIMIT = 256;
+// Bound on RETIRED evidence rows kept in the persisted state file. RETIRED
+// rows carry no live slot and no tab binding; their forensic value decays, so
+// only the newest RETIRED_HISTORY_LIMIT rows survive a restart (the state file
+// is otherwise grow-only across capacity events).
+const RETIRED_HISTORY_LIMIT = 64;
 const LEGACY_CAPACITY_AMBIGUITY = 'CREATE_TAB_AMBIGUOUS:tab_capacity_exceeded';
 const CAPACITY_BACKPRESSURE_REASON = 'TAB_CAPACITY_EXCEEDED_PRE_EFFECT';
 
@@ -141,6 +146,19 @@ function sanitizeLoadedState(input, policy) {
       authority_effect: false,
     });
   }
+  // Bounded RETIRED history: RETIRED rows hold no slot and no tab, so only the
+  // newest RETIRED_HISTORY_LIMIT survive a restart. Everything else is kept
+  // verbatim (AMBIGUOUS rows are fenced evidence and are never pruned here).
+  const retiredRows = agents.filter((a) => a.lifecycle_state === 'RETIRED');
+  if (retiredRows.length > RETIRED_HISTORY_LIMIT) {
+    const drop = new Set(retiredRows
+      .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))
+      .slice(RETIRED_HISTORY_LIMIT)
+      .map((a) => a.agent_id));
+    for (let i = agents.length - 1; i >= 0; i -= 1) {
+      if (drop.has(agents[i].agent_id)) agents.splice(i, 1);
+    }
+  }
   return {
     schema: 'metaengine.browser.fleet-state.v1',
     version: FLEET_PROVISIONER_VERSION,
@@ -156,6 +174,7 @@ export class FleetProvisioner {
   #tabExists;
   #loadState;
   #saveState;
+  #census;
   #clock;
   #uuid;
   #state;
@@ -164,13 +183,15 @@ export class FleetProvisioner {
   #capacityBackpressure = false;
   #capacityRetiredAttempts = 0;
 
-  constructor({ createTab, loadTab, tabExists, loadState, saveState, policy, clock = () => Date.now(), uuid = () => crypto.randomUUID() } = {}) {
+  constructor({ createTab, loadTab, tabExists, loadState, saveState, census = null, policy, clock = () => Date.now(), uuid = () => crypto.randomUUID() } = {}) {
     if (![createTab, loadTab, tabExists, loadState, saveState].every((fn) => typeof fn === 'function')) throw new Error('fleet_dependency_invalid');
+    if (census != null && typeof census !== 'function') throw new Error('fleet_census_dependency_invalid');
     this.#createTab = createTab;
     this.#loadTab = loadTab;
     this.#tabExists = tabExists;
     this.#loadState = loadState;
     this.#saveState = saveState;
+    this.#census = typeof census === 'function' ? census : null;
     this.#clock = clock;
     this.#uuid = uuid;
     this.#state = freshState(normalizePolicy(policy));
@@ -232,6 +253,7 @@ export class FleetProvisioner {
         deterministic_no_effect: true,
         automatic_retry_allowed: false,
         release_signal: 'PHYSICAL_TAB_CLOSED',
+        census_probe: this.#readCensus(),
         authority_effect: false,
       },
       authority_effect: false,
@@ -327,6 +349,16 @@ export class FleetProvisioner {
       if (!active) return this.snapshot();
 
       let provisionedThisCycle = 0;
+      // Census gate (W3): when a read-only capacity probe is available and it
+      // proves the fleet is at its per-kind ceiling (or the shared wall), the
+      // pass adopts the identical deterministic pre-effect no-op posture as a
+      // failed createTab — WITHOUT attempting the doomed create. The signal,
+      // ambiguity semantics, and release contract (physical tab close) are all
+      // unchanged; only the evidence source improves (read vs side effect).
+      const censusProbe = this.#readCensus();
+      if (censusProbe && (censusProbe.fleet_at_ceiling || censusProbe.total_at_wall) && !this.#capacityBackpressure) {
+        this.#capacityBackpressure = true;
+      }
       const activatable = this.#state.agents.filter((agent) => ['REGISTERED', 'LOST'].includes(agent.lifecycle_state));
       for (const agent of activatable) {
         if (this.#liveCount() >= desired || provisionedThisCycle >= burst || this.#capacityBackpressure) break;
@@ -403,6 +435,35 @@ export class FleetProvisioner {
   }
 
   #assertReady() { if (!this.#ready) throw new Error('fleet_not_initialized'); }
+  // Read-only census probe (W3). Never throws: an unavailable or malformed
+  // census degrades to null and the provisioner falls back to the existing
+  // learn-by-failed-attempt posture (which remains deterministic).
+  #readCensus() {
+    if (typeof this.#census !== 'function') return null;
+    try {
+      const value = this.#census();
+      if (!value || typeof value !== 'object') return null;
+      const fleetTabs = Number(value.by_role?.FLEET);
+      const totalTabs = Number(value.total_tabs);
+      const fleetCeiling = Number(value.fleet_tab_ceiling);
+      const maxTabs = Number(value.max_tabs);
+      if (![fleetTabs, totalTabs, fleetCeiling, maxTabs].every((n) => Number.isSafeInteger(n) && n >= 0)) return null;
+      if (fleetCeiling > maxTabs) return null;
+      return Object.freeze({
+        schema: 'metaengine.browser.tab-census.v1',
+        fleet_tabs: fleetTabs,
+        total_tabs: totalTabs,
+        user_tabs: totalTabs - fleetTabs,
+        fleet_tab_ceiling: fleetCeiling,
+        max_tabs: maxTabs,
+        fleet_at_ceiling: fleetTabs >= fleetCeiling,
+        total_at_wall: totalTabs >= maxTabs,
+        authority_effect: false,
+      });
+    } catch {
+      return null;
+    }
+  }
   #requireAgent(agentId) {
     const agent = this.#state.agents.find((row) => row.agent_id === String(agentId).toLowerCase());
     if (!agent) throw new Error('fleet_agent_not_found');

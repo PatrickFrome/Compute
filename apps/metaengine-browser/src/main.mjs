@@ -232,10 +232,14 @@ function wireRemoteView(tab, view) {
   view.webContents.on('render-process-gone', () => { invalidatePerception(tab.tab_id); publishSnapshot().catch(() => {}); });
 }
 
-async function createTab(input = 'https://chatgpt.com/', { select = true, load = true } = {}) {
+async function createTab(input = 'https://chatgpt.com/', { select = true, load = true, role = 'USER' } = {}) {
   const d = navigationDecision(input);
   if (!d.allow) throw new Error(`navigation_blocked:${d.reason}`);
-  const tab = registry.create({ url: d.normalized_url, kind: d.kind, title: d.kind === 'CHATGPT' ? 'ChatGPT' : '' });
+  // role tags physical ownership at creation: 'FLEET' tabs are provisioned
+  // exclusively by the fleet provisioner and draw from their own 16-slot
+  // ceiling; 'USER' tabs keep the full 32-slot wall with a guaranteed 16-slot
+  // reservation the fleet can never invade.
+  const tab = registry.create({ url: d.normalized_url, kind: d.kind, role, title: d.kind === 'CHATGPT' ? 'ChatGPT' : '' });
   const view = new WebContentsView({ webPreferences: { ...REMOTE_WEB_PREFERENCES, session: userSession } });
   views.set(tab.tab_id, view);
   wireRemoteView(tab, view);
@@ -305,6 +309,32 @@ async function retireFleetSurplus(retireAgentIds) {
   return retired;
 }
 
+// Bounded orphan sweep (W3): a FLEET-role tab with no live binding in the
+// provisioner's TRUE snapshot is physical capacity held by nobody (crash
+// between createTab and persist, a retired agent whose close failed, or a
+// pre-reconcile create that never bound). Closing it through the normal shell
+// path releases capacity backpressure evidence and publishes the snapshot.
+// USER tabs are never touched. Ambiguous agents still holding a tab binding
+// are never swept (fenced no-retry evidence invariant).
+async function sweepOrphanFleetTabs() {
+  if (!fleet) return [];
+  const boundTabIds = new Set((fleet.snapshot()?.agents || [])
+    .map((row) => (row?.tab_id ? String(row.tab_id) : null))
+    .filter(Boolean));
+  const census = registry.census();
+  const orphanIds = census.fleet_tab_ids.filter((tabId) => !boundTabIds.has(tabId)).slice(0, 4);
+  const swept = [];
+  for (const tabId of orphanIds) {
+    try {
+      await closeTab(tabId);
+      swept.push(Object.freeze({ tab_id: tabId, swept: 'ORPHAN_FLEET_TAB_CLOSED', authority_effect: false }));
+    } catch {
+      // bounded best-effort: a failed close is retried by a later sweep cycle
+    }
+  }
+  return swept;
+}
+
 async function initOwnerSafetyGates() {
   if (ownerSafetyGates) return ownerSafetyGates.snapshot();
   ownerSafetyGates = new OwnerSafetyGateRegistry({
@@ -318,11 +348,20 @@ async function initOwnerSafetyGates() {
 
 async function initFleet() {
   fleet = new FleetProvisioner({
-    createTab: async ({ url, select, load }) => createTab(url, { select, load }),
+    createTab: async ({ url, select, load, ownership }) => createTab(url, {
+      select,
+      load,
+      role: ownership === 'FLEET_OWNED' ? 'FLEET' : 'USER',
+    }),
     loadTab,
     tabExists: (tabId) => views.has(String(tabId)) && !views.get(String(tabId)).webContents.isDestroyed(),
     loadState: loadFleetState,
     saveState: saveFleetState,
+    // Read-only capacity census (W3): grounds backpressure in the TRUE physical
+    // tab state so provisioning halts before a doomed createTab attempt and
+    // restarts (which miss tab-close events) re-learn capacity without probing
+    // by side effect.
+    census: () => registry.census(),
     policy: { profile: 'BALANCED', warm_agents: 2, desired_agents: 6 },
   });
   await fleet.init();
@@ -420,10 +459,23 @@ async function handleCommand(command, payload = {}) {
       spawn_burst_limit: payload?.spawn_burst_limit ?? null,
     });
     const retired = await retireFleetSurplus(payload?.retire_agent_ids);
-    if (retired.length) await publishSnapshot();
-    return retired.length ? { ...result, elastic_retired: retired, authority_effect: false } : result;
+    const sweptOrphans = await sweepOrphanFleetTabs();
+    if (retired.length || sweptOrphans.length) await publishSnapshot();
+    return retired.length || sweptOrphans.length
+      ? { ...result, elastic_retired: retired, orphan_fleet_tabs_swept: sweptOrphans, authority_effect: false }
+      : result;
   }
   if (command === 'FLEET_SET_PROFILE') { const result = await fleet?.setProfile(payload?.profile); await publishSnapshot(); return result; }
+  // Read-only capacity census probe (W3): pure registry projection, never
+  // creates a tab, never retries provisioning. Consumed by the DevOS cycle
+  // and by any trusted operator surface that needs TRUE physical capacity.
+  if (command === 'TAB_CENSUS') {
+    return {
+      ...registry.census(),
+      fleet_backpressure: fleet?.snapshot()?.capacity_backpressure || null,
+      authority_effect: false,
+    };
+  }
   if (command === 'GATE_STATUS') return ownerSafetyGates?.snapshot() || null;
   if (command === 'GATE_DISABLE') { const result = await ownerSafetyGates?.disable(payload); await publishSnapshot(); return result; }
   if (command === 'GATE_DISABLE_ALL') { const result = await ownerSafetyGates?.disable({ ...payload, gate_id: '*' }); await publishSnapshot(); return result; }
@@ -485,6 +537,9 @@ async function nativeSupervisorState() {
   const perception = await perceptionForSelected();
   return {
     tabs: snap.tabs.map((tab) => ({ ...tab, selected: tab.tab_id === snap.selected_tab_id })),
+    // Read-only capacity census (W3): grounds the DevOS cycle's elastic plan
+    // and every backpressure decision in the TRUE physical tab occupancy.
+    tab_census: snap.census,
     active_tab: selected,
     downloads: downloads?.snapshot() || null,
     development_plane: developmentPlane?.snapshot() || null,
@@ -504,7 +559,7 @@ async function executeNativeSupervisorCommand(command) {
     if (requested === 'CONTROL' || requested === 'GATE_SEND') return nativeSupervisor.setControlState({ mode: 'CONTROL' });
     throw new Error('native_operator_mode_invalid');
   }
-  if (['NEW_TAB','SELECT_TAB','CLOSE_TAB','NAVIGATE','BACK','FORWARD','RELOAD','DOWNLOAD_STATUS','DOWNLOAD_FILE','DOWNLOAD_CANCEL','FLEET_RECONCILE','FLEET_SET_PROFILE','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD','GATE_STATUS','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL'].includes(action)) {
+  if (['NEW_TAB','SELECT_TAB','CLOSE_TAB','NAVIGATE','BACK','FORWARD','RELOAD','TAB_CENSUS','DOWNLOAD_STATUS','DOWNLOAD_FILE','DOWNLOAD_CANCEL','FLEET_RECONCILE','FLEET_SET_PROFILE','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD','GATE_STATUS','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL'].includes(action)) {
     if (['BACK','FORWARD','RELOAD'].includes(action) && payload?.tab_id) {
       const tab = registry.get(payload.tab_id);
       const view = tab ? views.get(tab.tab_id) : null;
