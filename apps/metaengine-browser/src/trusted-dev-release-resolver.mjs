@@ -9,6 +9,17 @@ const SHA256_RE = /^sha256:([0-9a-f]{64})$/;
 const SHA512_B64_RE = /^[A-Za-z0-9+/]{86}==$/;
 const MAX_RELEASES_BYTES = 2 * 1024 * 1024;
 const MAX_SMALL_ASSET_BYTES = 128 * 1024;
+// The newest dev releases can push an older immutable baseline (for example the
+// 0.6.3-dev line used by the physical self-update E2E) beyond the first listing
+// page. Resolution therefore scans a bounded number of newest-first pages and
+// stops as soon as the newest same-family candidate is found. Fail-closed: if
+// no candidate exists within the window, resolution returns null.
+const RELEASES_PAGE_SIZE = 30;
+const MAX_RELEASE_PAGES = 10;
+// Read-only GET retry for shared-IP anonymous rate limits (GitHub-hosted runner
+// IPs are pooled). Only 403/429 responses are retried, with bounded backoff.
+const LIST_RETRY_ATTEMPTS = 2;
+const LIST_RETRY_DELAYS_MS = [1000, 3000];
 
 function clip(value, max = 300) { return String(value ?? '').slice(0, max); }
 function sha256Bytes(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
@@ -113,6 +124,41 @@ async function fetchJson(fetchImpl, url, maxBytes, label) {
   catch { throw new Error(`${label}_json_invalid`); }
 }
 
+function sleep(ms, label) {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    if (typeof t?.unref === 'function') t.unref();
+    void label;
+  });
+}
+
+async function fetchReleaseListPage(fetchImpl, page) {
+  const url = page === 1
+    ? `${API_ROOT}/releases?per_page=${RELEASES_PAGE_SIZE}`
+    : `${API_ROOT}/releases?per_page=${RELEASES_PAGE_SIZE}&page=${page}`;
+  for (let attempt = 0; attempt <= LIST_RETRY_ATTEMPTS; attempt += 1) {
+    const response = await fetchImpl(url, {
+      method: 'GET',
+      cache: 'no-store',
+      redirect: 'follow',
+      headers: {
+        accept: 'application/vnd.github+json',
+        'x-github-api-version': '2022-11-28',
+      },
+    });
+    if (response && (response.status === 403 || response.status === 429)) {
+      if (attempt < LIST_RETRY_ATTEMPTS) {
+        await sleep(LIST_RETRY_DELAYS_MS[attempt], 'trusted_release_list_rate_limited');
+        continue;
+      }
+    }
+    const text = await readBoundedText(response, MAX_RELEASES_BYTES, 'trusted_release_list');
+    try { return JSON.parse(text); }
+    catch { throw new Error('trusted_release_list_json_invalid'); }
+  }
+  throw new Error('trusted_release_list_unreachable');
+}
+
 async function fetchVerifiedAssetText(fetchImpl, asset, label) {
   const response = await fetchImpl(asset.url, { method: 'GET', cache: 'no-store', redirect: 'follow' });
   const bytes = await readBoundedBytes(response, MAX_SMALL_ASSET_BYTES, label);
@@ -162,8 +208,16 @@ export async function resolveTrustedMetaengineDevRelease({
   const current = parseMetaengineDevVersion(currentVersion);
   if (!current) throw new Error('trusted_release_current_version_invalid');
 
-  const releases = await fetchJson(fetchImpl, `${API_ROOT}/releases?per_page=30`, MAX_RELEASES_BYTES, 'trusted_release_list');
-  const selected = pickNewestRelease(releases, current.version);
+  let selected = null;
+  for (let page = 1; page <= MAX_RELEASE_PAGES; page += 1) {
+    const releases = await fetchReleaseListPage(fetchImpl, page);
+    if (!Array.isArray(releases)) throw new Error('trusted_release_list_invalid');
+    const candidate = pickNewestRelease(releases, current.version);
+    if (candidate) { selected = candidate; break; }
+    // Releases are listed newest-first: an empty or short page means the
+    // listing is exhausted, so scanning deeper cannot find a newer candidate.
+    if (releases.length < RELEASES_PAGE_SIZE) break;
+  }
   if (!selected) return null;
 
   const { release, parsed, tag } = selected;
