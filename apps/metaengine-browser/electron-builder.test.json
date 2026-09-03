@@ -10,6 +10,14 @@
     "ui/**/*",
     "package.json"
   ],
+  "beforePack": "./scripts/electron-builder-before-pack.cjs",
+  "extraResources": [
+    {
+      "from": "native-dist/guardian",
+      "to": "guardian-native",
+      "filter": ["**/*"]
+    }
+  ],
   "publish": [
     {
       "provider": "github",
