@@ -61,6 +61,27 @@ test('configurator installs or converges only the intended own-process LocalSyst
   expect(/SERVICE_EXISTING_BINARY_DRIFT/, 'binary path drift must fail closed');
 });
 
+test('LocalSystem token is reduced to the exact WTS broker privilege set and independently read back', () => {
+  const required = ['SeTcbPrivilege', 'SeAssignPrimaryTokenPrivilege', 'SeIncreaseQuotaPrivilege'];
+  for (const privilege of required) expect(new RegExp(`L"${privilege}"`), `${privilege} must be explicit`);
+  expect(/SERVICE_REQUIRED_PRIVILEGES_INFOW/, 'typed required-privilege config must be used');
+  expect(/SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO/, 'SCM required-privilege configuration must be explicit');
+  expect(/requiredPrivilegeMultiSz\s*\(/, 'required privileges must be encoded as a bounded MULTI_SZ');
+  expect(/requiredPrivilegesMatch\s*\(/, 'privilege readback must reject missing or extra privileges');
+  expect(/SERVICE_REQUIRED_PRIVILEGES_READBACK_MISMATCH/, 'privilege drift must fail closed');
+  expect(/required_privileges\\\":\[\\\"SeTcbPrivilege\\\",\\\"SeAssignPrimaryTokenPrivilege\\\",\\\"SeIncreaseQuotaPrivilege\\\"\]/,
+    'read-only contract must advertise the exact allowlist');
+});
+
+test('Guardian receives a stable unrestricted service SID and exact SID-type readback', () => {
+  expect(/SERVICE_SID_INFO/, 'typed service SID configuration must be used');
+  expect(/SERVICE_CONFIG_SERVICE_SID_INFO/, 'service SID configuration level must be explicit');
+  expect(/SERVICE_SID_TYPE_UNRESTRICTED/, 'service SID must be enabled without prematurely applying a restricted token');
+  expect(/SERVICE_SID_READBACK_MISMATCH/, 'service SID drift must fail closed');
+  expect(/service_sid_type\\\":\\\"SERVICE_SID_TYPE_UNRESTRICTED\\\"/, 'contract must publish the exact SID type');
+  expect(/least_privilege_readback_proven/, 'effect result must prove least-privilege readback');
+});
+
 test('recovery policy is restart-only, non-resetting, and independently read back', () => {
   expect(/SC_ACTION_RESTART/, 'recovery actions must restart the Guardian service');
   expect(/kRestartDelaysMs\[\]\s*=\s*\{5'000,\s*15'000,\s*60'000\}/, 'bounded restart backoff sequence is fixed');
@@ -69,7 +90,7 @@ test('recovery policy is restart-only, non-resetting, and independently read bac
   expect(/SERVICE_CONFIG_FAILURE_ACTIONS_FLAG/, 'non-crash service failure handling must be explicit');
   expect(/fFailureActionsOnNonCrashFailures\s*=\s*TRUE/, 'non-crash failure actions must be enabled');
   expect(/QueryServiceConfigW\s*\(/, 'base service config needs exact readback');
-  expect(/QueryServiceConfig2W\s*\(/, 'failure policy needs exact readback');
+  expect(/QueryServiceConfig2W\s*\(/, 'extended service policy needs exact readback');
   expect(/SERVICE_RESTART_SEQUENCE_READBACK_MISMATCH/, 'restart action drift must fail closed');
   expect(/SERVICE_FORBIDDEN_FAILURE_ACTION_READBACK/, 'forbidden recovery actions must fail readback');
   expect(/last_failure_action_repeats/, 'result documents native repeated-last-action semantics');
