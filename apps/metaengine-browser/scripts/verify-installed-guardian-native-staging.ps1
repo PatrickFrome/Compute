@@ -22,15 +22,16 @@ if ([string]$manifest.source_head -ne $ExpectedSourceHead) { throw "installed_gu
 if ($ExpectedPackageVersion -and [string]$manifest.package_version -ne $ExpectedPackageVersion) {
   throw "installed_guardian_package_version_mismatch:$($manifest.package_version):$ExpectedPackageVersion"
 }
-if ($manifest.staging_only -ne $true
-    -or $manifest.service_activation_authorized -ne $false
-    -or $manifest.service_installation_authorized -ne $false
-    -or $manifest.service_start_authorized -ne $false
-    -or $manifest.user_writable_service_activation_forbidden -ne $true
-    -or $manifest.requires_machine_secure_copy -ne $true
-    -or $manifest.authority_effect -ne $false) {
-  throw 'installed_guardian_staging_authority_invalid'
-}
+$authorityBoundaryValid = @(
+  $manifest.staging_only -eq $true
+  $manifest.service_activation_authorized -eq $false
+  $manifest.service_installation_authorized -eq $false
+  $manifest.service_start_authorized -eq $false
+  $manifest.user_writable_service_activation_forbidden -eq $true
+  $manifest.requires_machine_secure_copy -eq $true
+  $manifest.authority_effect -eq $false
+) -notcontains $false
+if (-not $authorityBoundaryValid) { throw 'installed_guardian_staging_authority_invalid' }
 if ([string]$manifest.required_machine_root -ne '%ProgramFiles%\METAENGINE\Guardian') { throw 'installed_guardian_machine_root_contract_drift' }
 if ([string]$manifest.exact_service_binary_name -ne 'METAENGINEBrowserGuardian.exe') { throw 'installed_guardian_service_name_contract_drift' }
 if (@($manifest.binaries).Count -ne 2) { throw 'installed_guardian_binary_cardinality_invalid' }
@@ -72,7 +73,7 @@ if ($EvidenceDir) {
     throw "guardian_staging_verified_target_version_mismatch:$($manifest.package_version):$verifiedVersion"
   }
   if ($ExpectedPackageVersion -and $ExpectedPackageVersion -ne $verifiedVersion) {
-    throw "guardian_expected_package_version_evidence_drift:$ExpectedPackageVersion:$verifiedVersion"
+    throw "guardian_expected_package_version_evidence_drift:${ExpectedPackageVersion}:$verifiedVersion"
   }
   $verified | Add-Member -NotePropertyName guardian_native_staging_present -NotePropertyValue $true -Force
   $verified | Add-Member -NotePropertyName guardian_native_staging_verified -NotePropertyValue $true -Force
