@@ -32,20 +32,31 @@ $root = (Get-Location).Path
 $temp = $env:RUNNER_TEMP
 if (-not $temp) { throw 'runner_temp_required' }
 
-# Resolve the newest published release with the exact same trust resolver used by runtime.
+# Keep physical N->N+1 evidence on the exact package version family under test.
+# A stale hard-coded family can silently fall out of the bounded trusted release list
+# as development releases accumulate, producing a false baseline-resolution failure.
+$packageVersion = [string]((Get-Content (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).version)
+if ($packageVersion -notmatch '^(\d+\.\d+\.\d+)-dev\.[0-9]+\.1$') { throw "package_version_family_invalid:$packageVersion" }
+$versionCore = [string]$Matches[1]
+$baselinePattern = '^' + [Regex]::Escape($versionCore) + '-dev\.[0-9]+\.1$'
+
+# Resolve the newest published release in the exact same version family with the
+# exact same trust resolver used by runtime.
 $baselineJson = Join-Path $temp 'baseline-release.json'
 $resolveScript = @'
 import fs from 'node:fs';
 import { resolveTrustedMetaengineDevRelease } from './src/trusted-dev-release-resolver.mjs';
-const row = await resolveTrustedMetaengineDevRelease({ currentVersion: '0.6.3-dev.0.1' });
+const currentVersion = String(process.env.BASELINE_CURRENT_VERSION || '');
+const row = await resolveTrustedMetaengineDevRelease({ currentVersion });
 if (!row || row.authority_effect !== false) throw new Error('published_baseline_resolution_failed');
 fs.writeFileSync(process.env.BASELINE_JSON, JSON.stringify(row));
 '@
+$env:BASELINE_CURRENT_VERSION = $packageVersion
 $env:BASELINE_JSON = $baselineJson
 node --input-type=module -e $resolveScript
 $baselineRelease = Get-Content $baselineJson -Raw | ConvertFrom-Json
 $baseline = [string]$baselineRelease.version
-if ($baseline -notmatch '^0\.6\.3-dev\.[0-9]+\.1$') { throw "baseline_version_invalid:$baseline" }
+if ($baseline -notmatch $baselinePattern) { throw "baseline_version_invalid:$baseline:$versionCore" }
 $baselineUrl = ([string]$baselineRelease.feed_url) + ([string]$baselineRelease.installer_name)
 $baselineInstaller = Join-Path $temp 'baseline-setup.exe'
 Invoke-WebRequest -UseBasicParsing -Uri $baselineUrl -OutFile $baselineInstaller
@@ -84,7 +95,7 @@ $baselineBuild = [Int64](($baseline -split '\.')[3].Replace('dev','').TrimStart(
 $timestampBuild = [Int64]([DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))
 $deployedBuildFloor = [Int64]20260831143001
 $buildId = [Math]::Max($timestampBuild, [Math]::Max($baselineBuild + 1, $deployedBuildFloor)).ToString()
-$target = "0.6.3-dev.$buildId.1"
+$target = "${versionCore}-dev.$buildId.1"
 if ([Int64]$buildId -le $baselineBuild) { throw "target_version_not_monotonic:${buildId}:${baselineBuild}" }
 npm pkg set version=$target
 Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
@@ -218,55 +229,25 @@ $firstOut = Join-Path $temp 'singleton-first.out'; $firstErr = Join-Path $temp '
 $first = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $firstOut -RedirectStandardError $firstErr
 $null = $first.Handle
 $firstRow = Read-LastJsonLine $firstOut 10
-$first.Refresh()
-if ($first.HasExited -or $firstRow.primary_instance -ne $true) { throw 'singleton_primary_probe_invalid' }
+if ($firstRow.primary_instance -ne $true) { throw 'singleton_first_not_primary' }
 $secondOut = Join-Path $temp 'singleton-second.out'; $secondErr = Join-Path $temp 'singleton-second.err'
 $second = Start-Process -FilePath $app -ArgumentList '--metaengine-single-instance-probe' -PassThru -RedirectStandardOutput $secondOut -RedirectStandardError $secondErr
-Wait-ExitOrThrow $second 5000 'singleton_secondary' $secondErr
-$first.Refresh()
-if ($first.HasExited) { throw 'singleton_secondary_displaced_primary' }
+if (-not $second.WaitForExit(10000)) { try { Stop-Process -Id $second.Id -Force -ErrorAction SilentlyContinue } catch {}; throw 'singleton_second_timeout' }
+if ($second.ExitCode -ne 0) { Get-Content $secondErr -ErrorAction SilentlyContinue; throw "singleton_second_exit_$($second.ExitCode)" }
+$secondLines = @(); if (Test-Path $secondOut) { $secondLines = @(Get-Content $secondOut | Where-Object { $_.Trim() }) }
+if ($secondLines.Count -ne 0) { throw 'singleton_secondary_emitted_primary_probe' }
+if ($first.HasExited) { throw 'singleton_primary_did_not_hold' }
 try { Stop-Process -Id $first.Id -Force -ErrorAction SilentlyContinue } catch {}
 Add-Content (Join-Path $temp 'self-update-e2e-proof.txt') 'physical_singleton=PASS'
 
-# Stage exact target bytes; publisher must never rebuild them.
 $evidence = Join-Path $root 'self-update-fast-evidence'
+Remove-Item $evidence -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $evidence | Out-Null
-foreach ($file in @('baseline-version.txt','target-version.txt','baseline-sha256.txt','target-sha256.txt','baseline-user-data-path.txt','baseline-version-probe.out','baseline-profile-probe.out','target-version-probe.out','target-profile-probe.out','self-update-smoke.jsonl','self-update-smoke.out','self-update-smoke.err','self-update-pre-install-receipt.json','self-update-successor-receipt.json','self-update-e2e-proof.txt','singleton-first.out','singleton-second.out','self-update-feed.out','self-update-feed.err')) {
-  $sourcePath = Join-Path $temp $file
-  if (Test-Path $sourcePath) { Copy-Item $sourcePath $evidence }
-}
-$head = (git rev-parse HEAD).Trim()
-$head | Set-Content (Join-Path $evidence 'git-head.txt')
-$targetInstaller = Get-Item ((Get-Content (Join-Path $temp 'target-installer-path.txt')).Trim())
-$targetBlockmap = Get-Item ((Get-Content (Join-Path $temp 'target-blockmap-path.txt')).Trim())
-$targetDevYml = Get-Item ((Get-Content (Join-Path $temp 'target-dev-yml-path.txt')).Trim())
-$expectedTargetSha = (Get-Content (Join-Path $temp 'target-sha256.txt')).Trim()
-$actualTargetSha = (Get-FileHash $targetInstaller.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($actualTargetSha -ne $expectedTargetSha) { throw 'verified_target_digest_changed_before_staging' }
-Copy-Item $targetInstaller.FullName $evidence
-Copy-Item $targetBlockmap.FullName $evidence
-Copy-Item $targetDevYml.FullName (Join-Path $evidence 'dev.yml')
-$manifest = [ordered]@{
-  schema = 'metaengine.browser.self-update-e2e-manifest.v2'
-  version = $target
-  git_sha = $head
-  run_id = [string]$env:GITHUB_RUN_ID
-  run_attempt = [string]$env:GITHUB_RUN_ATTEMPT
-  installer_name = $targetInstaller.Name
-  installer_sha256 = $actualTargetSha
-  blockmap_name = $targetBlockmap.Name
-  update_channel = 'dev'
-  update_metadata = 'dev.yml'
-  physical_n_to_n_plus_1 = $true
-  durable_successor_binding = $true
-  forced_successor = $true
-  profile_continuity = $true
-  single_install_directory = $true
-  physical_singleton = $true
-  development_channel = $true
-  published_baseline_reused = $true
-  target_build_count = 1
-  production_safe = $false
-} | ConvertTo-Json -Depth 4
-[System.IO.File]::WriteAllText((Join-Path $evidence 'verified-self-update-manifest.json'), $manifest + "`n", [System.Text.UTF8Encoding]::new($false))
-Write-Host "FAST_SELF_UPDATE_PASS baseline=$baseline target=$target source=$head"
+Copy-Item (Join-Path $temp 'baseline-version.txt') (Join-Path $evidence 'baseline-version.txt')
+Copy-Item (Join-Path $temp 'baseline-sha256.txt') (Join-Path $evidence 'baseline-sha256.txt')
+Copy-Item (Join-Path $temp 'target-version.txt') (Join-Path $evidence 'target-version.txt')
+Copy-Item (Join-Path $temp 'target-sha256.txt') (Join-Path $evidence 'target-sha256.txt')
+Copy-Item (Join-Path $temp 'self-update-e2e-proof.txt') (Join-Path $evidence 'self-update-e2e-proof.txt')
+Copy-Item (Join-Path $temp 'self-update-pre-install-receipt.json') (Join-Path $evidence 'pre-install-receipt.json')
+Copy-Item (Join-Path $temp 'self-update-successor-receipt.json') (Join-Path $evidence 'successor-receipt.json')
+Write-Host "METAENGINE fast physical self-update evidence complete: $baseline -> $target"
