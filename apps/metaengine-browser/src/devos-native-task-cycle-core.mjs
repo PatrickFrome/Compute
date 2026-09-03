@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
 import { evaluateFleetSubmitReadiness } from './fleet-submit-readiness.mjs';
+import { planElasticFleetCapacity } from './fleet-elastic-governor.mjs';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA40_RE = /^[a-f0-9]{40}$/;
@@ -177,6 +178,9 @@ export class DevOsNativeTaskCycle {
   #journalInitialized = false;
   #attempted = new Set();
   #last = { state: 'IDLE', authority_effect: false };
+  // Elastic fleet governor hysteresis state: consecutive zero-demand cycles.
+  // Restart resets it to zero, which only delays shrink (fail-safe direction).
+  #elasticIdleCycles = 0;
 
   constructor({ getState, executeCommand, signedRequest, effectJournal = null } = {}) {
     if (typeof getState !== 'function' || typeof executeCommand !== 'function' || typeof signedRequest !== 'function') throw new Error('devos_cycle_dependencies_invalid');
@@ -249,7 +253,8 @@ export class DevOsNativeTaskCycle {
     const plan = await responseJson(planResponse, 'devos_cycle_http');
     if (plan.schema !== 'metaengine.devos.browser-cycle.v1') throw new Error('devos_cycle_schema_invalid');
 
-    const capacity = planBacklogCapacity({ backlog: plan.backlog, fleetSnapshot });
+    const capacity = planElasticFleetCapacity({ backlog: plan.backlog, fleetSnapshot, idleCycles: this.#elasticIdleCycles });
+    this.#elasticIdleCycles = capacity.idle_cycles;
     await this.#executeCommand({ action: 'FLEET_RECONCILE', platform: null, payload: capacity });
 
     const postState = await this.#getState();
@@ -653,6 +658,8 @@ export class DevOsNativeTaskCycle {
       durable_effect_delivery_journal: this.#effectJournal != null,
       write_ahead_effect_barrier: this.#effectJournal != null ? WRITE_AHEAD_EFFECT_BARRIER : null,
       ambiguity_recovery_fanout_per_cycle: this.#effectJournal != null ? 1 : 0,
+      elastic_fleet_governor: 'ELASTIC_BACKLOG_DRIVEN_WITH_IDLE_SHRINK',
+      elastic_idle_cycles: this.#elasticIdleCycles,
       second_scheduler_loop: false,
       arbitrary_eval: false,
       page_model_text_authority: false,

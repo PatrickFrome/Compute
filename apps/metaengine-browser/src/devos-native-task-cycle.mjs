@@ -13,8 +13,14 @@ import {
 } from './devos-effect-delivery-journal.mjs';
 import { markFleetTransportProvenFromNativeFrame } from './fleet-runtime-bridge.mjs';
 import { supervisorDeviceStorageDirectory } from './supervisor-device-identity.mjs';
+import {
+  ELASTIC_FLEET_CONTRACT,
+  planElasticFleetCapacity,
+  retireEligibleFleetAgents,
+} from './fleet-elastic-governor.mjs';
 
 export { normalizeLease, planBacklogCapacity, renderDevosTaskPrompt };
+export { ELASTIC_FLEET_CONTRACT, planElasticFleetCapacity, retireEligibleFleetAgents };
 
 const HASH_RE = /^[a-f0-9]{64}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -319,6 +325,10 @@ export class DevOsNativeTaskCycle {
       restart_transport_promotion_before_scheduler_cycle: true,
       preconversation_transport_promotion_non_effect: true,
       promotion_fanout_per_cycle: 1,
+      elastic_fleet_governor: ELASTIC_FLEET_CONTRACT.capacity_model,
+      elastic_scale_down_retire_states: 'PROVISIONING_AND_BOUND_UNVERIFIED_ONLY',
+      elastic_idle_cycles_required: ELASTIC_FLEET_CONTRACT.idle_cycles_required,
+      elastic_max_retire_per_cycle: ELASTIC_FLEET_CONTRACT.max_retire_per_cycle,
       durable_effect_delivery_journal: this.#inner.snapshot()?.durable_effect_delivery_journal === true,
       bound_unverified_dispatch_allowed: false,
       authority_effect: this.#inner.snapshot()?.authority_effect === true,
