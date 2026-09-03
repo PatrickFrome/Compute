@@ -77,7 +77,7 @@ test('staging manifest grants no LocalSystem activation authority', () => {
   assert.doesNotMatch(build, /\b(?:sc\.exe|Start-Service|New-Service)\b/i);
 });
 
-test('installed verifier requires exact source, digests, and absence of Guardian service', () => {
+test('installed verifier requires exact source, digests, absence of Guardian service, and capturable JSON proof', () => {
   assert.match(verify, /ExpectedSourceHead/);
   assert.match(verify, /Get-Service\s+-Name\s+'METAENGINEBrowserGuardian'/);
   assert.match(verify, /guardian_service_must_not_be_activated_by_per_user_browser_update/);
@@ -87,6 +87,8 @@ test('installed verifier requires exact source, digests, and absence of Guardian
   assert.match(verify, /guardian_native_no_activation/);
   assert.match(verify, /guardian_native_requires_machine_secure_copy/);
   assert.match(verify, /guardian_native_release_assets_verified/);
+  assert.match(verify, /Write-Output\s*\(\$proof\s*\|\s*ConvertTo-Json\s+-Depth\s+6\s+-Compress\)/);
+  assert.doesNotMatch(verify, /Write-Host\s*\(\$proof\s*\|\s*ConvertTo-Json/);
 });
 
 test('package and both physical self-update lanes require the reusable staging verifier', () => {
