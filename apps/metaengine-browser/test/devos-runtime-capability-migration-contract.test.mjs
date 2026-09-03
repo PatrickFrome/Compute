@@ -41,7 +41,11 @@ test('capability and debt RPCs are service-role only', () => {
   must(/grant execute on function public\.devos_runtime_capabilities_v1\(\) to service_role;/i, 'capability service role grant required');
   must(/revoke all on function public\.devos_recovery_debt_snapshot_v1\(uuid\) from public, anon, authenticated;/i, 'debt public grants revoked');
   must(/grant execute on function public\.devos_recovery_debt_snapshot_v1\(uuid\) to service_role;/i, 'debt service role grant required');
-  assert.doesNotMatch(sql, /grant\s+(?:all|execute).*\b(?:anon|authenticated|public)\b/i, 'no public/anon/authenticated execute grant');
+  assert.doesNotMatch(
+    sql,
+    /grant\s+(?:all|execute)\s+on\s+function\s+[^;]+\s+to\s+(?:anon|authenticated|public)\b/i,
+    'no public/anon/authenticated execute grant',
+  );
 });
 
 test('recovery debt classifies effect proof only from exact durable transport evidence', () => {
