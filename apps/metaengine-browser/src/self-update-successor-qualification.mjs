@@ -1,6 +1,7 @@
 import { loadSelfUpdateSessionContinuity } from './self-update-session-continuity.mjs';
 import { qualifyUpdatedSuccessor } from './self-update-handoff.mjs';
 import { quarantineSelfUpdateTransaction, readSelfUpdateTransaction } from './self-update-transaction-journal.mjs';
+import { recordSelfUpdateRecoveryQualificationResult } from './self-update-successor-recovery.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const HARD_CONTINUITY_FAILURES = new Set(['PARTIAL', 'ERROR', 'TARGET_VERSION_MISMATCH']);
@@ -139,7 +140,9 @@ export async function probeUpdatedSuccessorQualification({
     heartbeat_age_ms: heartbeatAge,
   });
   acceptedHeartbeatHealth = null;
-  return { state: 'QUALIFIED', transaction: qualified, authority_effect: false };
+  const result = { state: 'QUALIFIED', transaction: qualified, authority_effect: false };
+  recordSelfUpdateRecoveryQualificationResult(result);
+  return result;
 }
 
 export async function qualifyUpdatedSuccessorWhenHealthy({
