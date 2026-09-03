@@ -147,6 +147,34 @@ test('ambiguous process effect is terminal for automatic replay of that journal 
   } finally { await cleanup(f.root); }
 });
 
+test('ambiguous process effect may converge only from late exact-ready proof and never replays', async () => {
+  const f = await fixture();
+  try {
+    const journal = new BrowserGuardianEffectJournal({ statePath: f.statePath });
+    await journal.init(binding);
+    const intent = await journal.beginEffect(binding, startPlan());
+    await journal.markEffectAttempted(binding, intent.effect_id);
+    await journal.markAmbiguous(binding, intent.effect_id, 'spawn_ack_lost');
+    await assert.rejects(() => journal.confirmEffect(binding, intent.effect_id, {
+      release: { ...release, artifact_sha256: 'b'.repeat(64) },
+      pid: 7001,
+      process_incarnation_id: 'proc-late-ready',
+      exact_ready_binding: true,
+    }), /guardian_effect_confirm_release_drift/);
+    const confirmed = await journal.confirmEffect(binding, intent.effect_id, {
+      release,
+      pid: 7001,
+      process_incarnation_id: 'proc-late-ready',
+      exact_ready_binding: true,
+    });
+    assert.equal(confirmed.state, 'CONFIRMED');
+    assert.equal(confirmed.effect_generation, 1);
+    assert.equal(confirmed.dispatched_pid, 7001);
+    assert.equal(confirmed.result, 'late_exact_ready_reconciliation');
+    assertZeroAuthority(confirmed);
+  } finally { await cleanup(f.root); }
+});
+
 test('restart plan is bound to exact old pid and process incarnation before journaling', async () => {
   const f = await fixture();
   try {
