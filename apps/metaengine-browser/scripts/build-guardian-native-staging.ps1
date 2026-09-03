@@ -35,7 +35,9 @@ if ($LASTEXITCODE -ne 0) { throw "guardian_configurator_compile_exit_$LASTEXITCO
 
 $sourceHead = (git -C $root rev-parse HEAD).Trim()
 if ($sourceHead -notmatch '^[0-9a-f]{40}$') { throw "guardian_staging_source_head_invalid:$sourceHead" }
-$packageVersion = [string](node -p "require('$($root.Replace("'","''"))\\package.json').version")
+$packageJsonPath = Join-Path $root 'package.json'
+if (-not (Test-Path $packageJsonPath -PathType Leaf)) { throw 'guardian_staging_package_json_missing' }
+$packageVersion = [string]((Get-Content $packageJsonPath -Raw | ConvertFrom-Json).version)
 if (-not $packageVersion) { throw 'guardian_staging_package_version_missing' }
 
 $binaries = @()
