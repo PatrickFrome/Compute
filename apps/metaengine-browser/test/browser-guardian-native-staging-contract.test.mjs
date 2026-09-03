@@ -100,17 +100,26 @@ test('package and both physical self-update lanes require the reusable staging v
   assert.match(fullE2e, /guardian_native_evidence_digest_mismatch/);
 });
 
-test('verified publisher refuses releases without staged-only Guardian evidence', () => {
+test('verified publisher refuses releases without staged-only Guardian evidence and publishes exact native assets', () => {
   for (const token of [
     'guardian_native_staging_present',
     'guardian_native_staging_verified',
     'guardian_native_no_activation',
     'guardian_native_requires_machine_secure_copy',
+    'guardian_native_release_assets_verified',
     'guardian-native-staging-manifest.json',
+    'METAENGINEBrowserGuardian.exe',
+    'METAENGINEBrowserGuardianConfigure.exe',
     'guardian_manifest_digest_mismatch',
+    'guardian_release_binary_digest_mismatch',
+    'guardian_release_binary_size_mismatch',
+    'github_guardian_binary_digest_mismatch',
+    'github_guardian_binary_size_mismatch',
     'guardian_forbidden_authority',
     'guardian_user_writable_activation_fence_missing',
   ]) assert.match(publisher, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(publisher, /GUARDIAN_MANIFEST_SHA256/);
-  assert.match(publisher, /staged-only and requires a separate machine-secure activation boundary/);
+  assert.match(publisher, /GUARDIAN_SERVICE_SHA256/);
+  assert.match(publisher, /GUARDIAN_CONFIGURATOR_SHA256/);
+  assert.match(publisher, /both exact native binaries are release assets/);
 });
