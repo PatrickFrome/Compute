@@ -46,6 +46,25 @@ test('pause is idempotent', () => {
   assert.equal(f.calls.length, 0);
 });
 
+test('OFF remains OFF and keyboard-toggle state is not resumable PAUSED', () => {
+  const alreadyOff = fixture({ supervisor_mode: 'OFF', armed: false });
+  const a = new HumanTakeoverController({ getSupervisor: () => alreadyOff.supervisor });
+  assert.equal(a.snapshot().state, 'DISABLED');
+  const unchanged = a.pause();
+  assert.equal(unchanged.state, 'DISABLED');
+  assert.equal(unchanged.supervisor_mode, 'OFF');
+  assert.equal(unchanged.changed, false);
+  assert.equal(alreadyOff.calls.length, 0);
+
+  const armedOff = fixture({ supervisor_mode: 'OFF', armed: true });
+  const b = new HumanTakeoverController({ getSupervisor: () => armedOff.supervisor });
+  const disarmed = b.pause();
+  assert.deepEqual(armedOff.calls, [{ armed: false }]);
+  assert.equal(disarmed.state, 'DISABLED');
+  assert.equal(disarmed.supervisor_mode, 'OFF');
+  assert.equal(disarmed.armed, false);
+});
+
 test('resume is fail-closed while a command remains active', () => {
   const f = fixture({ supervisor_mode: 'MONITOR', armed: false, current_command: { command_id: 'cmd-2', action: 'SEMANTIC_TYPE' } });
   const controller = new HumanTakeoverController({ getSupervisor: () => f.supervisor });
@@ -77,6 +96,7 @@ test('main wires takeover only through trusted shell/local keyboard and not remo
   assert.match(source, /toLowerCase\(\) !== 'h'/);
   assert.match(source, /input\?\.type !== 'keyDown'/);
   assert.match(source, /input\?\.isAutoRepeat === true/);
+  assert.match(source, /state\.state === 'PAUSED' \? 'RESUME' : 'PAUSE'/);
   const start = source.indexOf('async function executeNativeSupervisorCommand');
   const end = source.indexOf('async function initNativeSupervisor', start);
   assert.notEqual(start, -1);

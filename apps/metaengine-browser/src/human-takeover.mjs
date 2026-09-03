@@ -1,5 +1,5 @@
 export const HUMAN_TAKEOVER_SCHEMA = 'metaengine.browser.human-takeover.v1';
-export const HUMAN_TAKEOVER_VERSION = '1.0.0';
+export const HUMAN_TAKEOVER_VERSION = '1.1.0';
 
 function supervisorSnapshot(supervisor) {
   if (!supervisor || typeof supervisor.snapshot !== 'function') throw new Error('human_takeover_supervisor_snapshot_required');
@@ -37,11 +37,19 @@ function result({ state, mode, armed, reason = null, changed = false }) {
   });
 }
 
+function observedState(state) {
+  if (state.mode === 'OFF') return 'DISABLED';
+  if (state.mode === 'MONITOR' && state.armed === false) return 'PAUSED';
+  return 'OBSERVED';
+}
+
 /**
  * User-initiated control-plane takeover. It only changes the existing Native
  * Supervisor mode/armed state; it creates no scheduler, timer or retry loop.
  * PAUSE prevents future DevOS leasing because the existing scheduler requires
  * CONTROL + armed. It never claims to cancel a physical effect already in flight.
+ * OFF is fail-closed: pause never promotes OFF to MONITOR, and the keyboard
+ * toggle never interprets OFF as a resumable PAUSED state.
  */
 export class HumanTakeoverController {
   #getSupervisor;
@@ -54,7 +62,7 @@ export class HumanTakeoverController {
   snapshot() {
     const state = controlState(supervisorSnapshot(this.#getSupervisor()));
     return result({
-      state: state.mode === 'MONITOR' && state.armed === false ? 'PAUSED' : 'OBSERVED',
+      state: observedState(state),
       mode: state.mode,
       armed: state.armed,
       reason: state.current_command ? 'COMMAND_IN_FLIGHT_NOT_CANCELLED' : null,
@@ -66,6 +74,20 @@ export class HumanTakeoverController {
     const supervisor = this.#getSupervisor();
     if (!supervisor || typeof supervisor.setControlState !== 'function') throw new Error('human_takeover_control_state_required');
     const before = controlState(supervisorSnapshot(supervisor));
+
+    if (before.mode === 'OFF') {
+      if (before.armed !== false) supervisor.setControlState({ armed: false });
+      const after = controlState(supervisorSnapshot(supervisor));
+      if (after.mode !== 'OFF' || after.armed !== false) throw new Error('human_takeover_off_pause_readback_invalid');
+      return result({
+        state: 'DISABLED',
+        mode: after.mode,
+        armed: after.armed,
+        reason: after.current_command ? 'COMMAND_IN_FLIGHT_NOT_CANCELLED' : (before.armed === false ? 'ALREADY_DISABLED' : null),
+        changed: before.armed !== false,
+      });
+    }
+
     if (before.mode === 'MONITOR' && before.armed === false) {
       return result({ state: 'PAUSED', mode: before.mode, armed: before.armed, reason: before.current_command ? 'COMMAND_IN_FLIGHT_NOT_CANCELLED' : 'ALREADY_PAUSED', changed: false });
     }
