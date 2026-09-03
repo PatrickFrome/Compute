@@ -201,9 +201,10 @@ test('signed heartbeat with stale or missing sentinel worker proof cannot qualif
   assert.equal((await probeUpdatedSuccessorQualification({ app, uptimeMs: () => 5000, nowMs: () => 10_500 })).state, 'PENDING_SIGNED_HEARTBEAT');
 });
 
-test('hard continuity failure in accepted heartbeat quarantines successor', async () => {
+test('hard continuity failure in accepted heartbeat quarantines successor and converges recovery telemetry', async () => {
   const { app } = await fixture();
   const target = await bootSuccessor(app);
+  seedPendingRecovery(target);
   const result = await recordAcceptedSignedSupervisorHeartbeat({
     app,
     state: healthyHeartbeat(target, 'PARTIAL'),
@@ -212,7 +213,19 @@ test('hard continuity failure in accepted heartbeat quarantines successor', asyn
   assert.equal(result.state, 'QUARANTINED');
   const journal = await readSelfUpdateTransaction(app);
   assert.equal(journal.state, 'QUARANTINED');
+  assert.equal(journal.quarantined, true);
+  assert.equal(journal.qualified, false);
   assert.equal(journal.automatic_retry_allowed, false);
+  assert.equal(journal.authority_effect, false);
+
+  const recovery = selfUpdateRecoveryDiagnosticSnapshot();
+  assert.equal(recovery.state, 'QUARANTINED');
+  assert.equal(recovery.transaction_state, 'QUARANTINED');
+  assert.equal(recovery.reason, 'session_continuity_partial');
+  assert.equal(recovery.qualification_resume_allowed, false);
+  assert.equal(recovery.recovery_installer_effect_allowed, false);
+  assert.equal(recovery.automatic_retry_allowed, false);
+  assert.equal(recovery.authority_effect, false);
 });
 
 test('stale heartbeat cannot qualify a successor', async () => {
