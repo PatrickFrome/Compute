@@ -1,10 +1,12 @@
-name: DevOS Dispatch Admission Runtime V2
+name: DevOS Dispatch Admission Runtime V3
 
 on:
   pull_request:
     paths:
       - 'supabase/migrations/20260902190500_devos_dispatch_admission_runtime_v2.sql'
+      - 'supabase/migrations/20260903052200_devos_dispatch_admission_signed_native_v3.sql'
       - 'apps/metaengine-browser/test/devos-dispatch-admission-runtime-v2-smoke.sql'
+      - 'apps/metaengine-browser/test/devos-dispatch-admission-signed-native-v3-smoke.sql'
       - '.github/workflows/devos-dispatch-admission-runtime-v2.yml'
   workflow_dispatch:
 
@@ -12,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: devos-dispatch-admission-runtime-v2-${{ github.event.pull_request.number || github.ref }}
+  group: devos-dispatch-admission-runtime-v3-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -50,8 +52,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y postgresql-client
 
-      - name: Run admission falsification smoke
-        run: psql -v ON_ERROR_STOP=1 -f apps/metaengine-browser/test/devos-dispatch-admission-runtime-v2-smoke.sql
+      - name: Run signed-native admission falsification smoke
+        run: psql -v ON_ERROR_STOP=1 -f apps/metaengine-browser/test/devos-dispatch-admission-signed-native-v3-smoke.sql
 
       - name: Assert terminal proof marker
         run: |
