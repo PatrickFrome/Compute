@@ -35,6 +35,13 @@ test('electron-builder owns the single Guardian native staging build boundary', 
   assert.doesNotMatch(hook, /\b(?:sc\.exe|Start-Service|New-Service|CreateServiceW|StartServiceW)\b/i);
 });
 
+test('native staging package identity is read without JavaScript Windows path interpolation', () => {
+  assert.match(build, /\$packageJsonPath\s*=\s*Join-Path\s+\$root\s+'package\.json'/);
+  assert.match(build, /Get-Content\s+\$packageJsonPath\s+-Raw\s+\|\s+ConvertFrom-Json/);
+  assert.doesNotMatch(build, /node\s+-p\s+.*require\s*\(/i);
+  assert.match(build, /git\s+-C\s+\$root\s+rev-parse\s+HEAD/);
+});
+
 test('staging manifest grants no LocalSystem activation authority', () => {
   for (const expected of [
     /staging_only\s*=\s*\$true/,
