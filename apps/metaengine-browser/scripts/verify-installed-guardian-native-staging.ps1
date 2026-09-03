@@ -36,6 +36,7 @@ if ([string]$manifest.exact_service_binary_name -ne 'METAENGINEBrowserGuardian.e
 if (@($manifest.binaries).Count -ne 2) { throw 'installed_guardian_binary_cardinality_invalid' }
 
 $binaryProof = @()
+$verifiedBinaries = @{}
 foreach ($row in @($manifest.binaries)) {
   $name = [string]$row.name
   if ($name -notin @('METAENGINEBrowserGuardian.exe','METAENGINEBrowserGuardianConfigure.exe')) { throw "installed_guardian_binary_name_untrusted:$name" }
@@ -44,6 +45,7 @@ foreach ($row in @($manifest.binaries)) {
   $actual = (Get-FileHash $binary -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($actual -ne [string]$row.sha256) { throw "installed_guardian_binary_digest_mismatch:$name" }
   if ([int64](Get-Item $binary).Length -ne [int64]$row.size) { throw "installed_guardian_binary_size_mismatch:$name" }
+  $verifiedBinaries[$name] = [ordered]@{ path=$binary; sha256=$actual; size=[int64]$row.size }
   $binaryProof += [ordered]@{name=$name;sha256=$actual;size=[int64]$row.size}
 }
 $manifestSha = (Get-FileHash $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -52,6 +54,15 @@ if ($EvidenceDir) {
   $evidence = [System.IO.Path]::GetFullPath($EvidenceDir)
   New-Item -ItemType Directory -Force -Path $evidence | Out-Null
   Copy-Item $manifestPath (Join-Path $evidence 'guardian-native-staging-manifest.json') -Force
+  foreach ($name in @('METAENGINEBrowserGuardian.exe','METAENGINEBrowserGuardianConfigure.exe')) {
+    $source = [string]$verifiedBinaries[$name].path
+    $destination = Join-Path $evidence $name
+    Copy-Item $source $destination -Force
+    $evidenceSha = (Get-FileHash $destination -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($evidenceSha -ne [string]$verifiedBinaries[$name].sha256) { throw "guardian_release_asset_digest_mismatch:$name" }
+    if ([int64](Get-Item $destination).Length -ne [int64]$verifiedBinaries[$name].size) { throw "guardian_release_asset_size_mismatch:$name" }
+  }
+
   $verifiedPath = Join-Path $evidence 'verified-self-update-manifest.json'
   if (-not (Test-Path $verifiedPath -PathType Leaf)) { throw 'verified_self_update_manifest_missing_for_guardian_extension' }
   $verified = Get-Content $verifiedPath -Raw | ConvertFrom-Json
@@ -69,6 +80,7 @@ if ($EvidenceDir) {
   $verified | Add-Member -NotePropertyName guardian_native_requires_machine_secure_copy -NotePropertyValue $true -Force
   $verified | Add-Member -NotePropertyName guardian_native_manifest_sha256 -NotePropertyValue $manifestSha -Force
   $verified | Add-Member -NotePropertyName guardian_native_package_version -NotePropertyValue ([string]$manifest.package_version) -Force
+  $verified | Add-Member -NotePropertyName guardian_native_release_assets_verified -NotePropertyValue $true -Force
   [System.IO.File]::WriteAllText($verifiedPath, (($verified | ConvertTo-Json -Depth 8) + "`n"), [System.Text.UTF8Encoding]::new($false))
 }
 
@@ -81,6 +93,7 @@ $proof = [ordered]@{
   binaries = $binaryProof
   guardian_service_absent = $true
   staging_only = $true
+  release_assets_verified = [bool]$EvidenceDir
   requires_machine_secure_copy = $true
   service_activation_authorized = $false
   automatic_retry_allowed = $false
