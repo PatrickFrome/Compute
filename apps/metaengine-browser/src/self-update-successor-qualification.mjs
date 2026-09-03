@@ -1,7 +1,10 @@
 import { loadSelfUpdateSessionContinuity } from './self-update-session-continuity.mjs';
 import { qualifyUpdatedSuccessor } from './self-update-handoff.mjs';
 import { quarantineSelfUpdateTransaction, readSelfUpdateTransaction } from './self-update-transaction-journal.mjs';
-import { recordSelfUpdateRecoveryQualificationResult } from './self-update-successor-recovery.mjs';
+import {
+  recordSelfUpdateRecoveryQualificationResult,
+  recordSelfUpdateRecoveryQuarantineResult,
+} from './self-update-successor-recovery.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const HARD_CONTINUITY_FAILURES = new Set(['PARTIAL', 'ERROR', 'TARGET_VERSION_MISMATCH']);
@@ -28,8 +31,10 @@ export async function recordAcceptedSignedSupervisorHeartbeat({ app, state, acce
   const continuityState = normalized(state.self_update_session_continuity?.state);
   if (HARD_CONTINUITY_FAILURES.has(continuityState)) {
     acceptedHeartbeatHealth = null;
-    await quarantineSelfUpdateTransaction(app, `session_continuity_${continuityState.toLowerCase()}`);
-    return { state: 'QUARANTINED', reason: `session_continuity_${continuityState.toLowerCase()}`, authority_effect: false };
+    const quarantineReason = `session_continuity_${continuityState.toLowerCase()}`;
+    const quarantined = await quarantineSelfUpdateTransaction(app, quarantineReason);
+    recordSelfUpdateRecoveryQuarantineResult(quarantined);
+    return { state: 'QUARANTINED', reason: quarantineReason, authority_effect: false };
   }
   if (continuityState !== 'RESTORED') {
     acceptedHeartbeatHealth = null;
