@@ -798,3 +798,371 @@ document.addEventListener('keydown', (event) => {
 
 api.onSnapshot(render);
 api.snapshot().then(render).catch(() => render(snapshot));
+
+// Agentic Workbench V1 is a renderer-only ergonomics layer. It does not add a
+// scheduler, command lease path, page/model authority, arbitrary eval, or retry
+// mechanism. All physical effects continue through the existing explicit shell
+// commands and native supervisor contracts above.
+const AGENTIC_CONTEXT_STORAGE_KEY = 'metaengine.browser.agentic-context-set.v1';
+const AGENTIC_CONTEXT_MAX_TABS = 8;
+const AGENTIC_SECTIONS = Object.freeze(['attention', 'activity', 'context', 'skills']);
+let agenticSection = null;
+let agenticContextTabIds = loadAgenticContextTabIds();
+
+function loadAgenticContextTabIds() {
+  try {
+    const value = JSON.parse(localStorage.getItem(AGENTIC_CONTEXT_STORAGE_KEY) || '[]');
+    if (!Array.isArray(value)) return [];
+    return [...new Set(value.map((item) => String(item || '')).filter(Boolean))].slice(0, AGENTIC_CONTEXT_MAX_TABS);
+  } catch {
+    return [];
+  }
+}
+
+function persistAgenticContextTabIds() {
+  try { localStorage.setItem(AGENTIC_CONTEXT_STORAGE_KEY, JSON.stringify(agenticContextTabIds)); }
+  catch { /* Renderer context is convenience only; storage failure has no authority consequence. */ }
+}
+
+function pruneAgenticContext(next) {
+  const live = new Set((next?.tabs?.tabs || []).map((tab) => String(tab.tab_id || '')).filter(Boolean));
+  const filtered = agenticContextTabIds.filter((tabId) => live.has(tabId)).slice(0, AGENTIC_CONTEXT_MAX_TABS);
+  if (filtered.length === agenticContextTabIds.length && filtered.every((value, index) => value === agenticContextTabIds[index])) return;
+  agenticContextTabIds = filtered;
+  persistAgenticContextTabIds();
+}
+
+function toggleAgenticContextTab(tabId) {
+  const id = String(tabId || '');
+  if (!id) return false;
+  if (agenticContextTabIds.includes(id)) agenticContextTabIds = agenticContextTabIds.filter((value) => value !== id);
+  else agenticContextTabIds = [...agenticContextTabIds, id].slice(-AGENTIC_CONTEXT_MAX_TABS);
+  persistAgenticContextTabIds();
+  return agenticContextTabIds.includes(id);
+}
+
+function agenticContextRows(next) {
+  const tabs = Array.isArray(next?.tabs?.tabs) ? next.tabs.tabs : [];
+  const groups = workspaceProjection(next).groups;
+  return agenticContextTabIds.map((tabId) => {
+    const tab = tabs.find((row) => String(row.tab_id) === tabId);
+    if (!tab) return null;
+    const agent = fleetAgentForTab(next, tabId);
+    const workspace = groups.find((row) => String(row.tab_id) === tabId) || null;
+    return Object.freeze({ tab, agent, workspace, authority_effect: false });
+  }).filter(Boolean);
+}
+
+function attentionQueue(next) {
+  const items = [];
+  const counts = next?.fleet?.counts || {};
+  const ambiguous = Number(counts.PROVISIONING_AMBIGUOUS || 0);
+  const lost = Number(counts.LOST || 0);
+  const bound = Number(counts.BOUND_UNVERIFIED || 0);
+  if (ambiguous > 0) items.push({ tone: 'bad', title: 'Fleet ambiguity', detail: `${ambiguous} provisioning ambiguous`, target: 'fleet' });
+  if (lost > 0) items.push({ tone: 'bad', title: 'Lost fleet agents', detail: `${lost} lost`, target: 'fleet' });
+  if (bound > 0) items.push({ tone: 'warn', title: 'Transport proof pending', detail: `${bound} bound unverified`, target: 'fleet' });
+
+  const workspaces = workspaceProjection(next);
+  if (Number(workspaces.counts?.frozen || 0) > 0) items.push({ tone: 'bad', title: 'Frozen workspaces', detail: `${workspaces.counts.frozen} frozen`, target: 'workspaces' });
+  if (Number(workspaces.counts?.issues || 0) > 0) items.push({ tone: 'warn', title: 'Workspace binding drift', detail: `${workspaces.counts.issues} issue(s)`, target: 'workspaces' });
+
+  const supervisorError = next?.supervisor?.last_error || next?.supervisor?.devos_last_error || next?.supervisor?.supervisor_mesh?.last_error;
+  if (supervisorError) items.push({ tone: 'bad', title: 'Supervisor degraded', detail: compact(supervisorError, 72), target: 'supervisor' });
+
+  const updater = next?.supervisor?.self_update;
+  if (['ERROR', 'REJECTED_METADATA', 'DISCOVERY_ERROR'].includes(String(updater?.state || '').toUpperCase())) {
+    items.push({ tone: 'bad', title: 'Self-update hold', detail: compact(updater?.last_error || updater?.state, 72), target: 'runtime' });
+  }
+
+  if (next?.development_plane && String(next.development_plane.state || '').toUpperCase() !== 'READY') {
+    items.push({ tone: 'warn', title: 'Development Plane not ready', detail: text(next.development_plane.state, 'UNKNOWN'), target: 'runtime' });
+  }
+  if (next?.compute && next.compute.available !== true) items.push({ tone: 'bad', title: 'Compute offline', detail: 'Compute health reports unavailable', target: 'runtime' });
+  if (next?.owner_safety_gates?.wildcard_disabled === true) items.push({ tone: 'bad', title: 'Wildcard gate override', detail: 'Owner safety wildcard override is active', target: 'safety' });
+
+  return Object.freeze(items.map((item) => Object.freeze({ ...item, authority_effect: false })));
+}
+
+function installAgenticNav() {
+  for (const name of AGENTIC_SECTIONS) {
+    if (opsNav.querySelector(`button[data-agentic-section="${name}"]`)) continue;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.agenticSection = name;
+    button.textContent = name[0].toUpperCase() + name.slice(1);
+    opsNav.append(button);
+  }
+}
+
+function markAgenticNavActive(name) {
+  for (const button of opsNav.querySelectorAll('button[data-section], button[data-agentic-section]')) {
+    button.classList.toggle('active', button.dataset.agenticSection === name);
+  }
+}
+
+function openCoreOpsSection(name) {
+  agenticSection = null;
+  opsSection = name;
+  return setLayout({ operations: 'OPEN' }).then(() => renderOps(snapshot));
+}
+
+function openAgenticSection(name) {
+  if (!AGENTIC_SECTIONS.includes(name)) return Promise.resolve();
+  agenticSection = name;
+  return setLayout({ operations: 'OPEN' }).then(() => renderAgenticSection(snapshot));
+}
+
+function renderAttention(next) {
+  const fragment = document.createDocumentFragment();
+  const items = attentionQueue(next);
+  fragment.append(hero('Attention', 'Trusted shell projections only. Untrusted page text never becomes control authority.', items.length ? `${items.length} item${items.length === 1 ? '' : 's'}` : 'clear'));
+  const grid = el('div', 'opsGrid');
+  grid.append(
+    metric('Critical', items.filter((item) => item.tone === 'bad').length, items.some((item) => item.tone === 'bad') ? 'bad' : 'good'),
+    metric('Warnings', items.filter((item) => item.tone === 'warn').length, items.some((item) => item.tone === 'warn') ? 'warn' : 'good'),
+    metric('Context tabs', agenticContextRows(next).length, agenticContextRows(next).length ? 'good' : 'neutral'),
+    metric('Authority effect', 'NONE', 'good'),
+  );
+  fragment.append(grid);
+  if (!items.length) {
+    const clear = section('Current readback', 'no derived attention items');
+    clear.list.append(kvRow('State', 'CLEAR', 'good'));
+    fragment.append(clear.wrap);
+    return fragment;
+  }
+  const list = section('Derived queue', 'read only; no automatic remediation');
+  list.list.className = 'entityList';
+  for (const item of items) list.list.append(entityRow(item.title, item.detail, [{ value: item.target, tone: item.tone }, { value: 'no auto action', tone: 'neutral' }]));
+  fragment.append(list.wrap);
+  return fragment;
+}
+
+function renderActivity(next) {
+  const fragment = document.createDocumentFragment();
+  const supervisor = next?.supervisor;
+  const command = supervisor?.current_command;
+  const cycle = supervisor?.devos_task_cycle;
+  const mesh = supervisor?.supervisor_mesh?.mesh;
+  const observer = supervisor?.worker_observer;
+  fragment.append(hero('Activity', 'Compact evidence from existing Supervisor, Fleet, Mesh and DevOS state.', command ? 'command in flight' : 'read only'));
+  const current = section('Current execution', 'exact already-exposed state');
+  current.list.append(
+    kvRow('Current command', command ? text(command.action, 'COMMAND') : 'NONE', command ? 'warn' : 'good'),
+    kvRow('Target tab', command?.target_tab_id || 'NONE', command?.target_tab_id ? 'warn' : 'neutral'),
+    kvRow('Last command', supervisor?.last_command_status || 'NONE', stateTone(supervisor?.last_command_status)),
+    kvRow('DevOS cycle', cycle?.state || 'UNKNOWN', cycle ? stateTone(cycle.state) : 'neutral'),
+    kvRow('Worker observer', observer ? (observer.last_error ? 'DEGRADED' : 'EXPOSED') : 'UNKNOWN', observer?.last_error ? 'bad' : (observer ? 'good' : 'neutral')),
+  );
+  fragment.append(current.wrap);
+  const meshState = section('Parallel control context', 'routing preference is not actuation authority');
+  meshState.list.append(
+    kvRow('Mesh epoch', mesh?.mesh_epoch ?? 'UNKNOWN', mesh ? 'good' : 'neutral'),
+    kvRow('Active supervisors', mesh?.counts?.active ?? 'UNKNOWN', Number(mesh?.counts?.active || 0) ? 'good' : 'neutral'),
+    kvRow('Ambiguous incarnation', mesh?.counts?.ambiguous_incarnation ?? 'UNKNOWN', Number(mesh?.counts?.ambiguous_incarnation || 0) ? 'bad' : (mesh?.counts ? 'good' : 'neutral')),
+    kvRow('Fleet active', next?.fleet?.counts?.ACTIVE ?? 'UNKNOWN', Number(next?.fleet?.counts?.ACTIVE || 0) ? 'good' : 'neutral'),
+    kvRow('Fleet ambiguous', next?.fleet?.counts?.PROVISIONING_AMBIGUOUS ?? 'UNKNOWN', Number(next?.fleet?.counts?.PROVISIONING_AMBIGUOUS || 0) ? 'bad' : (next?.fleet ? 'good' : 'neutral')),
+  );
+  fragment.append(meshState.wrap);
+  return fragment;
+}
+
+function renderContextSet(next) {
+  const fragment = document.createDocumentFragment();
+  const rows = agenticContextRows(next);
+  const current = selectedTab(next);
+  const currentPinned = current ? agenticContextTabIds.includes(String(current.tab_id)) : false;
+  fragment.append(hero('Context Set', 'Explicit operator-selected open tabs. Titles/URLs stay local; no page text is persisted by this feature.', `${rows.length}/${AGENTIC_CONTEXT_MAX_TABS}`));
+  const actions = el('div', 'commandList');
+  actions.append(
+    commandButton(currentPinned ? 'Remove current tab' : 'Add current tab', current ? compact(current.title || hostFor(current.url), 36) : 'No active tab', () => {
+      if (!current) return;
+      toggleAgenticContextTab(current.tab_id);
+      renderAgenticSection(snapshot);
+    }),
+    commandButton('Clear Context Set', 'Local renderer state only', () => {
+      agenticContextTabIds = [];
+      persistAgenticContextTabIds();
+      renderAgenticSection(snapshot);
+    }),
+    commandButton('Reveal Context Rail', 'Expanded native-inset rail', () => setLayout({ sidebar: 'EXPANDED', operations: 'OPEN' })),
+  );
+  fragment.append(actions);
+  const list = section('Selected tabs', rows.length ? `${rows.length} explicit binding(s)` : 'empty');
+  list.list.className = 'commandList';
+  for (const row of rows) {
+    const label = text(row.tab.title, row.tab.kind === 'CHATGPT' ? 'ChatGPT' : hostFor(row.tab.url));
+    const hint = row.workspace
+      ? `${compact(row.workspace.branch_name, 26)} · ${row.workspace.state}`
+      : (row.agent ? `${text(row.agent.role)} · ${text(row.agent.lifecycle_state)}` : hostFor(row.tab.url));
+    list.list.append(commandButton(label, hint, () => api.command('SELECT_TAB', { tab_id: row.tab.tab_id })));
+  }
+  fragment.append(list.wrap);
+  const contract = section('Context contract', 'non-authoritative convenience state');
+  contract.list.append(
+    kvRow('Persistence', 'LOCAL RENDERER STORAGE', 'good'),
+    kvRow('Page text persistence', 'NONE', 'good'),
+    kvRow('Maximum tabs', AGENTIC_CONTEXT_MAX_TABS, 'good'),
+    kvRow('Scheduler authority', 'NONE', 'good'),
+    kvRow('Browser actuation authority', 'NONE', 'good'),
+  );
+  fragment.append(contract.wrap);
+  return fragment;
+}
+
+function renderSkills(next) {
+  const fragment = document.createDocumentFragment();
+  fragment.append(hero('Workbench Skills', 'Reusable bounded workflows. No arbitrary scripts, model commands, or automatic page actions.', 'bounded'));
+  const list = el('div', 'commandList');
+  list.append(
+    commandButton('Research Focus', 'Expand Context Rail + open Context Set', () => setLayout({ sidebar: 'EXPANDED', operations: 'OPEN' }).then(() => openAgenticSection('context'))),
+    commandButton('Triage Attention', 'Open derived read-only attention queue', () => openAgenticSection('attention')),
+    commandButton('Activity Trace', 'Open compact execution evidence', () => openAgenticSection('activity')),
+    commandButton('Fleet Transport Review', 'Open existing trusted Fleet panel', () => openCoreOpsSection('fleet')),
+    commandButton('Workspace Binding Review', 'Open existing typed Workspace panel', () => openCoreOpsSection('workspaces')),
+    commandButton('Authority Review', 'Open existing Safety contracts', () => openCoreOpsSection('safety')),
+    commandButton('Toggle current Context tab', 'Explicit local context selection', () => {
+      const current = selectedTab(next);
+      if (!current) return;
+      toggleAgenticContextTab(current.tab_id);
+      renderAgenticSection(snapshot);
+    }),
+    commandButton('New ChatGPT tab', 'Explicit local tab action', () => api.command('NEW_CHATGPT', {})),
+  );
+  fragment.append(list);
+  const contract = section('Skill contract', 'what these workflows cannot do');
+  contract.list.append(
+    kvRow('Arbitrary eval', 'FORBIDDEN', 'good'),
+    kvRow('Direct page/model authority', 'NONE', 'good'),
+    kvRow('Automatic effect retry', 'NONE', 'good'),
+    kvRow('Second scheduler', 'NONE', 'good'),
+  );
+  fragment.append(contract.wrap);
+  return fragment;
+}
+
+function renderAgenticSection(next) {
+  if (!agenticSection) return;
+  pruneAgenticContext(next);
+  markAgenticNavActive(agenticSection);
+  let content;
+  if (agenticSection === 'attention') content = renderAttention(next);
+  else if (agenticSection === 'activity') content = renderActivity(next);
+  else if (agenticSection === 'context') content = renderContextSet(next);
+  else content = renderSkills(next);
+  opsContent.replaceChildren(content);
+}
+
+function tabSearchMatches(next, query) {
+  const needle = String(query || '').trim().toLowerCase();
+  if (!needle) return [];
+  const groups = workspaceProjection(next).groups;
+  return (next?.tabs?.tabs || []).filter((tab) => {
+    const agent = fleetAgentForTab(next, tab.tab_id);
+    const group = groups.find((row) => String(row.tab_id) === String(tab.tab_id));
+    return [tab.title, tab.url, agent?.role, agent?.lifecycle_state, group?.branch_name, group?.point_id, group?.state]
+      .some((value) => String(value || '').toLowerCase().includes(needle));
+  });
+}
+
+function workbenchCommandTarget(token) {
+  const normalized = String(token || '').trim().toLowerCase();
+  const aliases = Object.freeze({
+    attention: ['agentic', 'attention'], activity: ['agentic', 'activity'], context: ['agentic', 'context'], skills: ['agentic', 'skills'],
+    fleet: ['core', 'fleet'], workspaces: ['core', 'workspaces'], supervisor: ['core', 'supervisor'], devos: ['core', 'devos'],
+    runtime: ['core', 'runtime'], safety: ['core', 'safety'], commands: ['core', 'commands'], overview: ['core', 'overview'],
+  });
+  return aliases[normalized] || null;
+}
+
+function runWorkbenchSkill(token) {
+  const normalized = String(token || '').trim().toLowerCase();
+  if (normalized === 'research') return setLayout({ sidebar: 'EXPANDED', operations: 'OPEN' }).then(() => openAgenticSection('context'));
+  if (normalized === 'triage') return openAgenticSection('attention');
+  if (normalized === 'activity') return openAgenticSection('activity');
+  if (normalized === 'authority') return openCoreOpsSection('safety');
+  if (normalized === 'context') return openAgenticSection('context');
+  if (normalized === 'new') return api.command('NEW_CHATGPT', {});
+  return openAgenticSection('skills');
+}
+
+function executeWorkbenchAddress(value) {
+  const input = String(value || '').trim();
+  if (!input) return false;
+  if (input.startsWith('>')) {
+    const target = workbenchCommandTarget(input.slice(1));
+    if (!target) return openAgenticSection('skills').then(() => true);
+    return (target[0] === 'agentic' ? openAgenticSection(target[1]) : openCoreOpsSection(target[1])).then(() => true);
+  }
+  if (input.startsWith('/')) return Promise.resolve(runWorkbenchSkill(input.slice(1))).then(() => true);
+  if (input.startsWith('@')) {
+    const query = input.slice(1).trim();
+    if (query === '+') {
+      const current = selectedTab(snapshot);
+      if (current) toggleAgenticContextTab(current.tab_id);
+      return openAgenticSection('context').then(() => true);
+    }
+    const matches = tabSearchMatches(snapshot, query);
+    if (matches.length === 1) return api.command('SELECT_TAB', { tab_id: matches[0].tab_id }).then(() => true);
+    tabFilter = query;
+    tabSearch.value = query;
+    return setLayout({ sidebar: 'EXPANDED' }).then(() => {
+      renderContextRail(snapshot);
+      return true;
+    });
+  }
+  return false;
+}
+
+function updateWorkbenchRouteKind() {
+  if (document.activeElement !== address) return;
+  const value = String(address.value || '').trim();
+  if (value.startsWith('>')) routeKind.textContent = 'CMD';
+  else if (value.startsWith('@')) routeKind.textContent = 'TAB';
+  else if (value.startsWith('/')) routeKind.textContent = 'SKILL';
+}
+
+installAgenticNav();
+opsNav.addEventListener('click', (event) => {
+  const agentic = event.target.closest('button[data-agentic-section]');
+  if (agentic) {
+    event.preventDefault();
+    agenticSection = agentic.dataset.agenticSection;
+    renderAgenticSection(snapshot);
+    return;
+  }
+  if (event.target.closest('button[data-section]')) agenticSection = null;
+});
+
+address.addEventListener('input', updateWorkbenchRouteKind);
+document.addEventListener('keydown', (event) => {
+  const control = event.ctrlKey || event.metaKey;
+  if (control && !event.shiftKey && event.key.toLowerCase() === 'k') {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    address.focus();
+    address.value = '>';
+    address.setSelectionRange(address.value.length, address.value.length);
+    routeKind.textContent = 'CMD';
+    return;
+  }
+  if (document.activeElement === address && event.key === 'Enter' && /^[>@/]/.test(String(address.value || '').trim())) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    Promise.resolve(executeWorkbenchAddress(address.value)).catch(() => {});
+  }
+}, true);
+
+document.addEventListener('click', (event) => {
+  const go = event.target.closest('.goButton');
+  if (!go || !/^[>@/]/.test(String(address.value || '').trim())) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  Promise.resolve(executeWorkbenchAddress(address.value)).catch(() => {});
+}, true);
+
+api.onSnapshot((next) => {
+  pruneAgenticContext(next);
+  if (agenticSection) renderAgenticSection(next);
+  updateWorkbenchRouteKind();
+});
