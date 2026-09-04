@@ -225,7 +225,7 @@ bool readBounded(HANDLE h, std::string* out, DWORD* error) {
         DWORD got = 0;
         const DWORD remaining = static_cast<DWORD>(out->size() - total);
         if (!ReadFile(h, out->data() + total, remaining, &got, nullptr) || got == 0) {
-            if (error) *error = GetLastError();
+            if (error) *error = got == 0 ? ERROR_HANDLE_EOF : GetLastError();
             return false;
         }
         total += got;
@@ -318,14 +318,24 @@ OwnerEnrollmentStoreResult OwnerEnrollmentStore::createIfAbsent(const OwnerEnrol
     const std::wstring stage = stagePath(root_path_);
     if (stage.empty()) { out.reason = "OWNER_STORE_STAGE_PATH_FAILED"; out.win32_error = ERROR_INVALID_NAME; return out; }
 
+    DWORD stageError = ERROR_SUCCESS;
     {
         Handle h(CreateFileW(stage.c_str(), GENERIC_READ | GENERIC_WRITE, 0, &security, CREATE_NEW,
             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr));
-        if (h.value == INVALID_HANDLE_VALUE) { out.reason = "OWNER_STORE_STAGE_CREATE_FAILED"; out.win32_error = GetLastError(); return out; }
-        if (!writeAll(h.value, payload) || !FlushFileBuffers(h.value)) {
-            out.reason = "OWNER_STORE_STAGE_FLUSH_FAILED"; out.win32_error = GetLastError(); DeleteFileW(stage.c_str()); return out;
+        if (h.value == INVALID_HANDLE_VALUE) {
+            out.reason = "OWNER_STORE_STAGE_CREATE_FAILED";
+            out.win32_error = GetLastError();
+            return out;
         }
-        out.staging_flushed = true;
+        if (!writeAll(h.value, payload)) stageError = GetLastError();
+        else if (!FlushFileBuffers(h.value)) stageError = GetLastError();
+        else out.staging_flushed = true;
+    }
+    if (!out.staging_flushed) {
+        DeleteFileW(stage.c_str());
+        out.reason = "OWNER_STORE_STAGE_FLUSH_FAILED";
+        out.win32_error = stageError == ERROR_SUCCESS ? ERROR_WRITE_FAULT : stageError;
+        return out;
     }
 
     if (!MoveFileExW(stage.c_str(), final.c_str(), MOVEFILE_WRITE_THROUGH)) {
