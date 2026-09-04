@@ -37,7 +37,7 @@ function asset(name, bytes = Buffer.from(name), overrides = {}) {
   };
 }
 
-function makeFixture({ installedDigest = INSTALLED_SHA256, mutateAssets } = {}) {
+function makeFixture({ installedDigest = INSTALLED_SHA256, includeInstalledDigest = true, mutateAssets } = {}) {
   const installerName = `METAENGINE-Browser-Test-Setup-${TARGET}-x64.exe`;
   const installerBytes = Buffer.from('exact-installer-bytes');
   const installer = asset(installerName, installerBytes);
@@ -69,7 +69,7 @@ function makeFixture({ installedDigest = INSTALLED_SHA256, mutateAssets } = {}) 
     installer_name: installerName,
     installer_sha256: installer.digest.slice('sha256:'.length),
   };
-  if (installedDigest !== undefined) manifest.installed_executable_sha256 = installedDigest;
+  if (includeInstalledDigest) manifest.installed_executable_sha256 = installedDigest;
   const manifestBytes = Buffer.from(`${JSON.stringify(manifest)}\n`);
 
   let assets = [
@@ -117,7 +117,7 @@ test('trusted resolver accepts the exact seven-asset current release and exports
 test('legacy manifest without installed executable digest remains discoverable but cannot prove target presence', async () => {
   const result = await resolveTrustedMetaengineDevRelease({
     currentVersion: CURRENT,
-    fetchImpl: makeFixture({ installedDigest: undefined }).fetchImpl,
+    fetchImpl: makeFixture({ includeInstalledDigest: false }).fetchImpl,
   });
   assert.equal(result.version, TARGET);
   assert.equal(result.installed_executable_sha256, null);
