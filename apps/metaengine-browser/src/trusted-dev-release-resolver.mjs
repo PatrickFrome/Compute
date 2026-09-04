@@ -10,15 +10,8 @@ const HEX_SHA256_RE = /^[0-9a-f]{64}$/;
 const SHA512_B64_RE = /^[A-Za-z0-9+/]{86}==$/;
 const MAX_RELEASES_BYTES = 2 * 1024 * 1024;
 const MAX_SMALL_ASSET_BYTES = 128 * 1024;
-// The newest dev releases can push an older immutable baseline (for example the
-// 0.6.3-dev line used by the physical self-update E2E) beyond the first listing
-// page. Resolution therefore scans a bounded number of newest-first pages and
-// stops as soon as the newest same-family candidate is found. Fail-closed: if
-// no candidate exists within the window, resolution returns null.
 const RELEASES_PAGE_SIZE = 30;
 const MAX_RELEASE_PAGES = 10;
-// Read-only GET retry for shared-IP anonymous rate limits (GitHub-hosted runner
-// IPs are pooled). Only 403/429 responses are retried, with bounded backoff.
 const LIST_RETRY_ATTEMPTS = 2;
 const LIST_RETRY_DELAYS_MS = [1000, 3000];
 
@@ -223,8 +216,6 @@ export async function resolveTrustedMetaengineDevRelease({
     if (!Array.isArray(releases)) throw new Error('trusted_release_list_invalid');
     const candidate = pickNewestRelease(releases, current.version);
     if (candidate) { selected = candidate; break; }
-    // Releases are listed newest-first: an empty or short page means the
-    // listing is exhausted, so scanning deeper cannot find a newer candidate.
     if (releases.length < RELEASES_PAGE_SIZE) break;
   }
   if (!selected) return null;
@@ -233,8 +224,17 @@ export async function resolveTrustedMetaengineDevRelease({
   if (String(release.name || '') !== `METAENGINE Browser v${parsed.version}`) throw new Error('trusted_release_name_invalid');
   const rawAssets = Array.isArray(release.assets) ? release.assets : [];
   const names = expectedAssetNames(parsed.version);
-  const expectedNames = Object.values(names);
-  if (rawAssets.length !== expectedNames.length) throw new Error('trusted_release_asset_count_invalid');
+  const legacyNames = [names.metadata, names.installer, names.blockmap, names.manifest];
+  const currentNames = [...legacyNames, names.guardian_manifest, names.guardian_service, names.guardian_configurator];
+  let expectedNames = null;
+  let currentGuardianProfile = false;
+  if (rawAssets.length === legacyNames.length) expectedNames = legacyNames;
+  else if (rawAssets.length === currentNames.length) {
+    expectedNames = currentNames;
+    currentGuardianProfile = true;
+  } else {
+    throw new Error('trusted_release_asset_count_invalid');
+  }
   const byName = new Map(rawAssets.map((asset) => [String(asset?.name || ''), normalizeAsset(asset, tag)]));
   if (byName.size !== expectedNames.length || expectedNames.some((name) => !byName.has(name))) throw new Error('trusted_release_asset_set_invalid');
   const assets = {
@@ -242,9 +242,9 @@ export async function resolveTrustedMetaengineDevRelease({
     installer: byName.get(names.installer),
     blockmap: byName.get(names.blockmap),
     manifest: byName.get(names.manifest),
-    guardian_manifest: byName.get(names.guardian_manifest),
-    guardian_service: byName.get(names.guardian_service),
-    guardian_configurator: byName.get(names.guardian_configurator),
+    guardian_manifest: currentGuardianProfile ? byName.get(names.guardian_manifest) : null,
+    guardian_service: currentGuardianProfile ? byName.get(names.guardian_service) : null,
+    guardian_configurator: currentGuardianProfile ? byName.get(names.guardian_configurator) : null,
   };
 
   const tagRef = await fetchJson(fetchImpl, `${API_ROOT}/git/ref/tags/${encodeURIComponent(tag)}`, MAX_SMALL_ASSET_BYTES, 'trusted_release_tag_ref');
@@ -256,6 +256,9 @@ export async function resolveTrustedMetaengineDevRelease({
   try { manifest = JSON.parse(manifestText); }
   catch { throw new Error('trusted_release_manifest_json_invalid'); }
   const manifestEvidence = verifyManifest(manifest, { version: parsed.version, gitSha, assets });
+  if (!currentGuardianProfile && manifestEvidence.installed_executable_sha256) {
+    throw new Error('trusted_release_manifest_installed_executable_sha256_unbound');
+  }
 
   const devYmlText = await fetchVerifiedAssetText(fetchImpl, assets.metadata, 'trusted_release_dev_yml');
   const devYml = parseStrictDevYml(devYmlText);
@@ -264,6 +267,7 @@ export async function resolveTrustedMetaengineDevRelease({
   }
   if (devYml.size !== assets.installer.size) throw new Error('trusted_release_dev_yml_installer_size_mismatch');
 
+  const installedExecutableSha256 = currentGuardianProfile ? manifestEvidence.installed_executable_sha256 : null;
   return {
     schema: 'metaengine.trusted-dev-release.v1',
     version: parsed.version,
@@ -275,8 +279,8 @@ export async function resolveTrustedMetaengineDevRelease({
     installer_sha512: devYml.sha512,
     manifest_sha256: assets.manifest.sha256,
     dev_yml_sha256: assets.metadata.sha256,
-    installed_executable_sha256: manifestEvidence.installed_executable_sha256,
-    target_present_proof_supported: Boolean(manifestEvidence.installed_executable_sha256),
+    installed_executable_sha256: installedExecutableSha256,
+    target_present_proof_supported: Boolean(installedExecutableSha256),
     authority_effect: false,
   };
 }
