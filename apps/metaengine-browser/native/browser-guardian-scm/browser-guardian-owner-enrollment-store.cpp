@@ -48,6 +48,7 @@ struct Handle {
 };
 struct Local {
     HLOCAL value = nullptr;
+    Local() = default;
     ~Local() { if (value != nullptr) LocalFree(value); }
     Local(const Local&) = delete;
     Local& operator=(const Local&) = delete;
