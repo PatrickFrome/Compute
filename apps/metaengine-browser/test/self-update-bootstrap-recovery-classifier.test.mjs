@@ -145,15 +145,19 @@ test('target absence alone never proves no installer effect', () => {
   assert.equal(result.install_effect_absent_proven, false);
 });
 
-test('NO_INSTALL_EFFECT_PROVEN requires exact PREPARED transaction and proof bound before effect barrier', () => {
+test('NO_INSTALL_EFFECT_PROVEN remains evidence-only even for exact PREPARED transaction', () => {
   const result = classifySelfUpdateBootstrapRecovery({
     expected_target: expected(),
     evidence: { transaction: transaction('PREPARED'), no_effect_proof: noEffectProof() },
   });
   assert.equal(result.state, 'NO_INSTALL_EFFECT_PROVEN');
   assert.equal(result.install_effect_absent_proven, true);
-  assert.equal(result.new_install_transaction_admissible, true);
+  assert.equal(result.new_install_transaction_admissible, false);
   assert.equal(result.installer_effect_allowed, false);
+  assert.equal(result.relaunch_effect_allowed, false);
+  assert.equal(result.journal_mutation_allowed, false);
+  assert.equal(result.automatic_retry_allowed, false);
+  assert.equal(result.authority_effect, false);
 });
 
 test('no-effect proof is rejected at or after install effect barrier and for ambiguous state', () => {
@@ -176,6 +180,7 @@ test('no-effect proof requires exact transaction id, exact git binding, and barr
     const result = classifySelfUpdateBootstrapRecovery({ expected_target: expected(), evidence: { transaction: tx, no_effect_proof: proof } });
     assert.equal(result.state, 'AMBIGUOUS');
     assert.equal(result.install_effect_absent_proven, false);
+    assert.equal(result.new_install_transaction_admissible, false);
   }
 });
 
