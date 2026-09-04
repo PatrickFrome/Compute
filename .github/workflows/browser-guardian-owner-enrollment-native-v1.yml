@@ -1,0 +1,104 @@
+name: METAENGINE Browser Guardian Owner Enrollment Native V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-observer.*'
+      - 'apps/metaengine-browser/src/browser-guardian-owner-enrollment-evidence.mjs'
+      - 'apps/metaengine-browser/test/browser-guardian-owner-enrollment-*.test.mjs'
+      - '.github/workflows/browser-guardian-owner-enrollment-native-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-owner-enrollment-contract:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Run enrollment evidence adversarial contracts
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          node --test test/browser-guardian-owner-enrollment-evidence.test.mjs test/browser-guardian-owner-enrollment-native-contract.test.mjs
+
+      - name: Compile exact-head native owner observer
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path $vswhere)) { throw 'vswhere_missing' }
+          $vsRoot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+          if (-not $vsRoot) { throw 'visual_studio_cpp_toolchain_missing' }
+          $vcvars = Join-Path $vsRoot 'VC\Auxiliary\Build\vcvars64.bat'
+          if (-not (Test-Path $vcvars)) { throw 'vcvars64_missing' }
+
+          $sourceDir = (Resolve-Path 'apps/metaengine-browser/native/browser-guardian-scm').Path
+          $outDir = Join-Path $env:RUNNER_TEMP 'metaengine-guardian-owner-enrollment'
+          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+          $probeSource = Join-Path $outDir 'owner-enrollment-contract-probe.cpp'
+          $probeExe = Join-Path $outDir 'METAENGINEBrowserGuardianOwnerEnrollmentContractProbe.exe'
+
+          @'
+          #include "browser-guardian-owner-enrollment-observer.hpp"
+          #include <iostream>
+          int main() {
+              std::cout << metaengine::guardian::browserGuardianOwnerEnrollmentObserverContractJson() << '\n';
+              std::cout << metaengine::guardian::browserGuardianOwnerEnrollmentClientAccessMask() << '\n';
+              return 0;
+          }
+          '@ | Set-Content -Path $probeSource -Encoding utf8
+
+          $module = Join-Path $sourceDir 'browser-guardian-owner-enrollment-observer.cpp'
+          $compileCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE /I"{1}" "{2}" "{3}" /Fe:"{4}" /link advapi32.lib' -f $vcvars, $sourceDir, $module, $probeSource, $probeExe
+          & $env:ComSpec /d /s /c $compileCmd
+          if ($LASTEXITCODE -ne 0) { throw "guardian_owner_observer_compile_exit_$LASTEXITCODE" }
+          if (-not (Test-Path $probeExe)) { throw 'guardian_owner_observer_probe_missing' }
+          "OWNER_ENROLLMENT_PROBE=$probeExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Prove native read-only contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lines = @(& $env:OWNER_ENROLLMENT_PROBE | Where-Object { $_.Trim() })
+          if ($lines.Count -lt 2) { throw 'owner_enrollment_probe_output_missing' }
+          $row = $lines[0] | ConvertFrom-Json
+          if ($row.schema -ne 'metaengine.browser-guardian.owner-enrollment-native-observer.v1') { throw 'owner_enrollment_schema_invalid' }
+          foreach ($field in @('pipe_reject_remote_clients','first_pipe_instance','overlapped_io','explicit_dacl','client_message_required_before_impersonation','token_user_readback','token_session_id_readback','client_pid_readback','revert_to_self_required','revert_failure_requires_service_stop')) {
+            if ($row.$field -ne $true) { throw "owner_enrollment_required_contract_missing_$field" }
+          }
+          foreach ($field in @('pipe_nowait_used','default_dacl_used','generic_write_granted','client_create_pipe_instance_allowed','durable_enrollment_implemented','device_challenge_verification_implemented','wts_execution_allowed','process_effect_allowed','scm_effect_allowed','automatic_retry_allowed','second_scheduler_loop','authority_effect')) {
+            if ($row.$field -ne $false) { throw "owner_enrollment_authority_drift_$field" }
+          }
+          $mask = [uint32]$lines[1]
+          if (($mask -band 4) -ne 0) { throw 'owner_enrollment_client_create_pipe_instance_exposed' }
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-observer.cpp apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-observer.hpp apps/metaengine-browser/src/browser-guardian-owner-enrollment-evidence.mjs apps/metaengine-browser/test/browser-guardian-owner-enrollment-evidence.test.mjs apps/metaengine-browser/test/browser-guardian-owner-enrollment-native-contract.test.mjs .github/workflows/browser-guardian-owner-enrollment-native-v1.yml)"
