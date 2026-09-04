@@ -66,10 +66,56 @@ jobs:
           #include "browser-guardian-owner-enrollment-observer.hpp"
           #include "browser-guardian-owner-enrollment-store.hpp"
           #include <iostream>
-          int main() {
-              std::cout << metaengine::guardian::browserGuardianOwnerEnrollmentObserverContractJson() << '\n';
-              std::cout << metaengine::guardian::browserGuardianOwnerEnrollmentClientAccessMask() << '\n';
-              std::cout << metaengine::guardian::browserGuardianOwnerEnrollmentStoreContractJson() << '\n';
+          #include <string>
+          #include <string_view>
+
+          int main(int argc, char** argv) {
+              using namespace metaengine::guardian;
+              if (argc == 2 && std::string_view(argv[1]) == "--store-smoke") {
+                  OwnerEnrollmentStore store(browserGuardianOwnerEnrollmentStoreDefaultRoot());
+                  const auto before = store.read();
+                  if (!before.root_trusted || before.present || before.corrupt || before.win32_error != ERROR_SUCCESS) {
+                      std::cerr << "owner_store_runtime_expected_absence:" << before.reason << ':' << before.win32_error << '\n';
+                      return 10;
+                  }
+
+                  OwnerEnrollmentDurableRecord candidate{
+                      L"S-1-5-18",
+                      std::string(64, 'a'),
+                      std::string(64, 'b'),
+                  };
+                  const auto created = store.createIfAbsent(candidate);
+                  if (!created.root_trusted || !created.present || !created.committed || !created.exact
+                      || !created.provenance_exact || created.owner_mismatch || created.corrupt
+                      || !created.staging_flushed || !created.move_committed || !created.post_commit_readback) {
+                      std::cerr << "owner_store_runtime_first_commit_failed:" << created.reason << ':' << created.win32_error << '\n';
+                      return 11;
+                  }
+
+                  const auto same = store.createIfAbsent(candidate);
+                  if (!same.root_trusted || !same.present || !same.exact || !same.provenance_exact
+                      || same.owner_mismatch || same.corrupt || same.committed) {
+                      std::cerr << "owner_store_runtime_same_owner_not_level_triggered:" << same.reason << ':' << same.win32_error << '\n';
+                      return 12;
+                  }
+
+                  auto different = candidate;
+                  different.expected_owner_sid = L"S-1-5-32-544";
+                  const auto mismatch = store.createIfAbsent(different);
+                  if (!mismatch.root_trusted || !mismatch.present || !mismatch.owner_mismatch
+                      || mismatch.exact || mismatch.provenance_exact || mismatch.corrupt || mismatch.committed
+                      || mismatch.reason != "OWNER_STORE_OWNER_MISMATCH") {
+                      std::cerr << "owner_store_runtime_mismatch_not_fail_closed:" << mismatch.reason << ':' << mismatch.win32_error << '\n';
+                      return 13;
+                  }
+
+                  std::cout << "OWNER_STORE_RUNTIME_OK\n";
+                  return 0;
+              }
+
+              std::cout << browserGuardianOwnerEnrollmentObserverContractJson() << '\n';
+              std::cout << browserGuardianOwnerEnrollmentClientAccessMask() << '\n';
+              std::cout << browserGuardianOwnerEnrollmentStoreContractJson() << '\n';
               return 0;
           }
           '@ | Set-Content -Path $probeSource -Encoding utf8
@@ -107,6 +153,35 @@ jobs:
           }
           foreach ($field in @('root_creation_implemented','root_repair_implemented','owner_replacement_allowed','token_session_id_persisted','journal_mutation_allowed','wts_execution_allowed','process_effect_allowed','scm_effect_allowed','browser_authority','task_authority','scheduler_authority','automatic_retry_allowed','second_scheduler_loop','authority_effect')) {
             if ($store.$field -ne $false) { throw "owner_store_authority_drift_$field" }
+          }
+
+      - name: Execute native create-if-absent CAS against machine-secure ProgramData root
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:ProgramData 'METAENGINE\Guardian'
+          if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
+          New-Item -ItemType Directory -Path $root -Force | Out-Null
+
+          & icacls.exe $root /inheritance:r | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "guardian_owner_store_runtime_inheritance_exit_$LASTEXITCODE" }
+          & icacls.exe $root /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "guardian_owner_store_runtime_acl_exit_$LASTEXITCODE" }
+          & icacls.exe $root /setowner '*S-1-5-32-544' | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "guardian_owner_store_runtime_owner_exit_$LASTEXITCODE" }
+
+          try {
+            $output = & $env:OWNER_ENROLLMENT_PROBE --store-smoke
+            if ($LASTEXITCODE -ne 0) { throw "guardian_owner_store_runtime_exit_$LASTEXITCODE" }
+            if (($output | Select-Object -Last 1) -ne 'OWNER_STORE_RUNTIME_OK') { throw 'guardian_owner_store_runtime_proof_missing' }
+
+            $record = Join-Path $root 'owner-enrollment-v1.record'
+            if (-not (Test-Path -LiteralPath $record -PathType Leaf)) { throw 'guardian_owner_store_runtime_record_missing' }
+            $payload = Get-Content -LiteralPath $record -Raw
+            if ($payload -notmatch 'expected_owner_sid=S-1-5-18') { throw 'guardian_owner_store_runtime_sid_drift' }
+            if ($payload -match 'S-1-5-32-544') { throw 'guardian_owner_store_runtime_mismatch_overwrote_winner' }
+          } finally {
+            if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
           }
 
       - name: Prove source checkout unchanged
