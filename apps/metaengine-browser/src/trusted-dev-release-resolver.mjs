@@ -6,6 +6,7 @@ const API_ROOT = `https://api.github.com/repos/${OWNER}/${REPO}`;
 const DOWNLOAD_ROOT = `https://github.com/${OWNER}/${REPO}/releases/download`;
 const DEV_VERSION_RE = /^(\d+)\.(\d+)\.(\d+)-dev\.(\d+)\.1$/;
 const SHA256_RE = /^sha256:([0-9a-f]{64})$/;
+const HEX_SHA256_RE = /^[0-9a-f]{64}$/;
 const SHA512_B64_RE = /^[A-Za-z0-9+/]{86}==$/;
 const MAX_RELEASES_BYTES = 2 * 1024 * 1024;
 const MAX_SMALL_ASSET_BYTES = 128 * 1024;
@@ -42,6 +43,9 @@ function expectedAssetNames(version) {
     installer,
     blockmap: `${installer}.blockmap`,
     manifest: 'verified-self-update-manifest.json',
+    guardian_manifest: 'guardian-native-staging-manifest.json',
+    guardian_service: 'METAENGINEBrowserGuardian.exe',
+    guardian_configurator: 'METAENGINEBrowserGuardianConfigure.exe',
   };
 }
 
@@ -178,6 +182,11 @@ function verifyManifest(manifest, { version, gitSha, assets }) {
   }
   if (String(manifest.installer_name || '') !== assets.installer.name) throw new Error('trusted_release_manifest_installer_name_mismatch');
   if (String(manifest.installer_sha256 || '').toLowerCase() !== assets.installer.sha256) throw new Error('trusted_release_manifest_installer_sha256_mismatch');
+  const installedExecutableSha256 = String(manifest.installed_executable_sha256 || '').trim().toLowerCase();
+  if (installedExecutableSha256 && !HEX_SHA256_RE.test(installedExecutableSha256)) {
+    throw new Error('trusted_release_manifest_installed_executable_sha256_invalid');
+  }
+  return { installed_executable_sha256: installedExecutableSha256 || null };
 }
 
 export function parseStrictDevYml(text) {
@@ -224,14 +233,18 @@ export async function resolveTrustedMetaengineDevRelease({
   if (String(release.name || '') !== `METAENGINE Browser v${parsed.version}`) throw new Error('trusted_release_name_invalid');
   const rawAssets = Array.isArray(release.assets) ? release.assets : [];
   const names = expectedAssetNames(parsed.version);
-  if (rawAssets.length !== 4) throw new Error('trusted_release_asset_count_invalid');
+  const expectedNames = Object.values(names);
+  if (rawAssets.length !== expectedNames.length) throw new Error('trusted_release_asset_count_invalid');
   const byName = new Map(rawAssets.map((asset) => [String(asset?.name || ''), normalizeAsset(asset, tag)]));
-  if (byName.size !== 4 || Object.values(names).some((name) => !byName.has(name))) throw new Error('trusted_release_asset_set_invalid');
+  if (byName.size !== expectedNames.length || expectedNames.some((name) => !byName.has(name))) throw new Error('trusted_release_asset_set_invalid');
   const assets = {
     metadata: byName.get(names.metadata),
     installer: byName.get(names.installer),
     blockmap: byName.get(names.blockmap),
     manifest: byName.get(names.manifest),
+    guardian_manifest: byName.get(names.guardian_manifest),
+    guardian_service: byName.get(names.guardian_service),
+    guardian_configurator: byName.get(names.guardian_configurator),
   };
 
   const tagRef = await fetchJson(fetchImpl, `${API_ROOT}/git/ref/tags/${encodeURIComponent(tag)}`, MAX_SMALL_ASSET_BYTES, 'trusted_release_tag_ref');
@@ -242,7 +255,7 @@ export async function resolveTrustedMetaengineDevRelease({
   let manifest;
   try { manifest = JSON.parse(manifestText); }
   catch { throw new Error('trusted_release_manifest_json_invalid'); }
-  verifyManifest(manifest, { version: parsed.version, gitSha, assets });
+  const manifestEvidence = verifyManifest(manifest, { version: parsed.version, gitSha, assets });
 
   const devYmlText = await fetchVerifiedAssetText(fetchImpl, assets.metadata, 'trusted_release_dev_yml');
   const devYml = parseStrictDevYml(devYmlText);
@@ -262,6 +275,8 @@ export async function resolveTrustedMetaengineDevRelease({
     installer_sha512: devYml.sha512,
     manifest_sha256: assets.manifest.sha256,
     dev_yml_sha256: assets.metadata.sha256,
+    installed_executable_sha256: manifestEvidence.installed_executable_sha256,
+    target_present_proof_supported: Boolean(manifestEvidence.installed_executable_sha256),
     authority_effect: false,
   };
 }
