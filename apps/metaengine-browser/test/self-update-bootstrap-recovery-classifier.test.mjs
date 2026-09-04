@@ -89,16 +89,26 @@ function evidence(overrides = {}) {
   };
 }
 
-test('exact durable successor plus exact disk and release binding yields TARGET_PRESENT but no automatic relaunch', () => {
-  const result = classifySelfUpdateBootstrapRecovery({ expected_target: expected(), evidence: evidence() });
-  assert.equal(result.state, 'TARGET_PRESENT');
-  assert.equal(result.target_present_proven, true);
-  assert.equal(result.relaunch_effect_candidate, true);
-  assert.equal(result.relaunch_effect_allowed, false);
-  assert.equal(result.installer_effect_allowed, false);
-  assert.equal(result.journal_mutation_allowed, false);
-  assert.equal(result.automatic_retry_allowed, false);
-  assert.equal(result.authority_effect, false);
+test('exact target proof only leaves unfinished SUCCESSOR_BOOTED as a relaunch candidate', () => {
+  for (const [state, candidate] of [
+    ['SUCCESSOR_BOOTED', true],
+    ['QUALIFIED', false],
+    ['QUARANTINED', false],
+  ]) {
+    const result = classifySelfUpdateBootstrapRecovery({
+      expected_target: expected(),
+      evidence: evidence({ transaction: transaction(state) }),
+    });
+    assert.equal(result.state, 'TARGET_PRESENT', state);
+    assert.equal(result.transaction_state, state, state);
+    assert.equal(result.target_present_proven, true, state);
+    assert.equal(result.relaunch_effect_candidate, candidate, state);
+    assert.equal(result.relaunch_effect_allowed, false, state);
+    assert.equal(result.installer_effect_allowed, false, state);
+    assert.equal(result.journal_mutation_allowed, false, state);
+    assert.equal(result.automatic_retry_allowed, false, state);
+    assert.equal(result.authority_effect, false, state);
+  }
 });
 
 test('prior SUCCESSOR_BOOTED can never be downgraded to no-effect when current target bytes are absent or drifted', () => {

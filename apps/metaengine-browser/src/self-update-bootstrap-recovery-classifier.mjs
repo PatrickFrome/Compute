@@ -1,5 +1,5 @@
 export const SELF_UPDATE_BOOTSTRAP_RECOVERY_SCHEMA = 'metaengine.self-update.bootstrap-recovery.v1';
-export const SELF_UPDATE_BOOTSTRAP_RECOVERY_VERSION = '1.0.3';
+export const SELF_UPDATE_BOOTSTRAP_RECOVERY_VERSION = '1.0.4';
 
 const HASH64 = /^[a-f0-9]{64}$/;
 const SHA40 = /^[a-f0-9]{40}$/;
@@ -154,7 +154,7 @@ export function classifySelfUpdateBootstrapRecovery({ expected_target = null, ev
       target_present_proven: true,
       installed_executable_sha256: expected.installed_executable_sha256,
       pre_install_receipt_sha256: preInstallSha256,
-      relaunch_effect_candidate: true,
+      relaunch_effect_candidate: installState === 'SUCCESSOR_BOOTED',
     });
   }
 
