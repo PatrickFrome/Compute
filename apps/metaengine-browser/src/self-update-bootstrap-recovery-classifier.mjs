@@ -1,10 +1,11 @@
 export const SELF_UPDATE_BOOTSTRAP_RECOVERY_SCHEMA = 'metaengine.self-update.bootstrap-recovery.v1';
-export const SELF_UPDATE_BOOTSTRAP_RECOVERY_VERSION = '1.0.0';
+export const SELF_UPDATE_BOOTSTRAP_RECOVERY_VERSION = '1.0.1';
 
 const HASH64 = /^[a-f0-9]{64}$/;
 const SHA40 = /^[a-f0-9]{40}$/;
 const VERSION = /^\d+\.\d+\.\d+-dev\.\d+\.1$/;
 const POSITIVE_INSTALL_STATES = new Set(['SUCCESSOR_BOOTED', 'QUALIFIED', 'QUARANTINED']);
+const EFFECT_BOUNDARY_OR_UNKNOWN_STATES = new Set(['INSTALLING', 'SUCCESSOR_BOOTED', 'AMBIGUOUS_INSTALL', 'QUALIFIED', 'QUARANTINED']);
 
 function objectOrNull(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
@@ -100,13 +101,19 @@ function exactReleaseBinding(release, expected) {
     && lowerHash(release?.installed_executable_sha256) === expected.installed_executable_sha256;
 }
 
-function explicitNoEffectProof(noEffect, expected) {
+function explicitNoEffectProof(noEffect, expected, transaction) {
+  // PREPARED is the only journal state before the write-ahead install-effect barrier.
+  // INSTALLING and every later/ambiguous state may already represent a physical
+  // installer effect and must never be downgraded by caller-supplied booleans.
+  if (!exactTransaction(transaction, expected) || String(transaction?.state || '') !== 'PREPARED') return false;
   return noEffect?.schema === 'metaengine.self-update.bootstrap-no-effect-proof.v1'
     && noEffect?.installed_path_absent_proven === true
     && noEffect?.uninstall_registration_absent_proven === true
     && noEffect?.successor_receipt_absent_proven === true
     && noEffect?.installer_effect_absent_proven === true
+    && noEffect?.effect_barrier_not_crossed_proven === true
     && String(noEffect?.target_version || '') === expected.version
+    && String(noEffect?.transaction_id || '') === String(transaction?.transaction_id || '')
     && noEffect?.automatic_retry_allowed === false
     && noEffect?.authority_effect === false;
 }
@@ -152,8 +159,12 @@ export function classifySelfUpdateBootstrapRecovery({ expected_target = null, ev
     return base('AMBIGUOUS', expected, observed, 'PRIOR_INSTALL_EFFECT_POSITIVELY_OBSERVED_CURRENT_TARGET_NOT_EXACT');
   }
 
-  if (explicitNoEffectProof(noEffect, expected)) {
-    return base('NO_INSTALL_EFFECT_PROVEN', expected, observed, 'INDEPENDENT_EXACT_NO_EFFECT_PROOF', {
+  if (transactionExact && EFFECT_BOUNDARY_OR_UNKNOWN_STATES.has(installState)) {
+    return base('AMBIGUOUS', expected, observed, 'INSTALL_EFFECT_BOUNDARY_CROSSED_OR_UNKNOWN');
+  }
+
+  if (explicitNoEffectProof(noEffect, expected, transaction)) {
+    return base('NO_INSTALL_EFFECT_PROVEN', expected, observed, 'INDEPENDENT_EXACT_NO_EFFECT_PROOF_BEFORE_EFFECT_BARRIER', {
       install_effect_absent_proven: true,
       new_install_transaction_admissible: true,
     });
