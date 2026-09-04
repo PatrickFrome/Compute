@@ -111,6 +111,22 @@ jobs:
         working-directory: apps/metaengine-browser
         shell: powershell
         run: ./test/self-update-fast-physical-candidate.ps1
+      - name: Seal installed executable digest into physical evidence
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test\METAENGINE Browser Test.exe'
+          if (-not (Test-Path -LiteralPath $app)) { throw 'installed_target_executable_missing' }
+          $manifestPath = './self-update-fast-evidence/verified-self-update-manifest.json'
+          if (-not (Test-Path -LiteralPath $manifestPath)) { throw 'verified_self_update_manifest_missing' }
+          $digest = (Get-FileHash -LiteralPath $app -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($digest -notmatch '^[0-9a-f]{64}$') { throw 'installed_target_executable_sha256_invalid' }
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          $manifest | Add-Member -NotePropertyName installed_executable_sha256 -NotePropertyValue $digest -Force
+          [System.IO.File]::WriteAllText((Resolve-Path -LiteralPath $manifestPath), (($manifest | ConvertTo-Json -Depth 20) + "`n"), [System.Text.UTF8Encoding]::new($false))
+          $readback = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          if ([string]$readback.installed_executable_sha256 -ne $digest) { throw 'installed_target_executable_sha256_readback_mismatch' }
       - name: Prove installed Guardian staging after physical update
         working-directory: apps/metaengine-browser
         shell: powershell
@@ -122,6 +138,7 @@ jobs:
           if ($manifest.guardian_native_staging_present -ne $true -or $manifest.guardian_native_staging_verified -ne $true) { throw 'guardian_native_staging_physical_proof_missing' }
           if ($manifest.guardian_native_no_activation -ne $true -or $manifest.guardian_native_requires_machine_secure_copy -ne $true) { throw 'guardian_native_activation_boundary_invalid' }
           if ([string]$manifest.guardian_native_manifest_sha256 -notmatch '^[0-9a-f]{64}$') { throw 'guardian_native_manifest_digest_missing' }
+          if ([string]$manifest.installed_executable_sha256 -notmatch '^[0-9a-f]{64}$') { throw 'installed_target_executable_digest_missing' }
       - name: Upload exact fast self-update evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
