@@ -1,5 +1,5 @@
 export const SELF_UPDATE_BOOTSTRAP_RECOVERY_SCHEMA = 'metaengine.self-update.bootstrap-recovery.v1';
-export const SELF_UPDATE_BOOTSTRAP_RECOVERY_VERSION = '1.0.2';
+export const SELF_UPDATE_BOOTSTRAP_RECOVERY_VERSION = '1.0.3';
 
 const HASH64 = /^[a-f0-9]{64}$/;
 const SHA40 = /^[a-f0-9]{40}$/;
@@ -158,9 +158,6 @@ export function classifySelfUpdateBootstrapRecovery({ expected_target = null, ev
     });
   }
 
-  // A durable SUCCESSOR_BOOTED/QUALIFIED/QUARANTINED binding proves that an install
-  // effect was observed in the past. Missing or drifted current evidence can therefore
-  // never be downgraded to "no effect" and never authorizes replaying the installer.
   if (positiveInstallEvidence) {
     return base('AMBIGUOUS', expected, observed, 'PRIOR_INSTALL_EFFECT_POSITIVELY_OBSERVED_CURRENT_TARGET_NOT_EXACT');
   }
@@ -170,9 +167,11 @@ export function classifySelfUpdateBootstrapRecovery({ expected_target = null, ev
   }
 
   if (explicitNoEffectProof(noEffect, expected, transaction)) {
+    // Classification is evidence-only. Even positive no-effect evidence does not grant
+    // install authority; a future effectful controller must independently validate the
+    // trusted proof origin and acquire its own single-shot effect fence.
     return base('NO_INSTALL_EFFECT_PROVEN', expected, observed, 'INDEPENDENT_EXACT_NO_EFFECT_PROOF_BEFORE_EFFECT_BARRIER', {
       install_effect_absent_proven: true,
-      new_install_transaction_admissible: true,
     });
   }
 
