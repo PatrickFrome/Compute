@@ -4,6 +4,7 @@ import { classifySelfUpdateBootstrapRecovery } from '../src/self-update-bootstra
 
 const targetVersion = '0.6.6-dev.33774085931.1';
 const targetGitSha = '40de5272e4a511e3f8f586e36686e4239a316cb0';
+const transactionId = '11111111-2222-4333-8444-555555555555';
 const installedSha = 'a'.repeat(64);
 const installedPath = 'C:\\Users\\User\\AppData\\Local\\Programs\\METAENGINE Browser Test\\METAENGINE Browser Test.exe';
 
@@ -18,16 +19,38 @@ function expected(overrides = {}) {
   };
 }
 
+function transaction(state = 'SUCCESSOR_BOOTED', overrides = {}) {
+  return {
+    schema: 'metaengine.self-update.transaction.v1',
+    transaction_id: transactionId,
+    state,
+    source_version: '0.6.6-dev.4.1',
+    target_version: targetVersion,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+    ...overrides,
+  };
+}
+
+function noEffectProof(overrides = {}) {
+  return {
+    schema: 'metaengine.self-update.bootstrap-no-effect-proof.v1',
+    target_version: targetVersion,
+    transaction_id: transactionId,
+    installed_path_absent_proven: true,
+    uninstall_registration_absent_proven: true,
+    successor_receipt_absent_proven: true,
+    installer_effect_absent_proven: true,
+    effect_barrier_not_crossed_proven: true,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+    ...overrides,
+  };
+}
+
 function evidence(overrides = {}) {
   return {
-    transaction: {
-      schema: 'metaengine.self-update.transaction.v1',
-      state: 'SUCCESSOR_BOOTED',
-      source_version: '0.6.6-dev.4.1',
-      target_version: targetVersion,
-      automatic_retry_allowed: false,
-      authority_effect: false,
-    },
+    transaction: transaction(),
     pre_install_receipt: {
       schema: 'metaengine.self-update.pre-install-receipt.v1',
       version: targetVersion,
@@ -111,14 +134,7 @@ test('target absence alone never proves no installer effect', () => {
   const result = classifySelfUpdateBootstrapRecovery({
     expected_target: expected(),
     evidence: {
-      transaction: {
-        schema: 'metaengine.self-update.transaction.v1',
-        state: 'PREPARED',
-        source_version: '0.6.6-dev.4.1',
-        target_version: targetVersion,
-        automatic_retry_allowed: false,
-        authority_effect: false,
-      },
+      transaction: transaction('PREPARED'),
       installed_executable: { readback_proven: true, exists: false, path: installedPath },
     },
   });
@@ -127,35 +143,49 @@ test('target absence alone never proves no installer effect', () => {
   assert.equal(result.new_install_transaction_admissible, false);
 });
 
-test('NO_INSTALL_EFFECT_PROVEN requires an independent exact negative proof and still does not perform an installer effect', () => {
+test('NO_INSTALL_EFFECT_PROVEN requires exact PREPARED transaction and independent proof bound before the effect barrier', () => {
   const result = classifySelfUpdateBootstrapRecovery({
     expected_target: expected(),
     evidence: {
-      transaction: {
-        schema: 'metaengine.self-update.transaction.v1',
-        state: 'PREPARED',
-        source_version: '0.6.6-dev.4.1',
-        target_version: targetVersion,
-        automatic_retry_allowed: false,
-        authority_effect: false,
-      },
-      no_effect_proof: {
-        schema: 'metaengine.self-update.bootstrap-no-effect-proof.v1',
-        target_version: targetVersion,
-        installed_path_absent_proven: true,
-        uninstall_registration_absent_proven: true,
-        successor_receipt_absent_proven: true,
-        installer_effect_absent_proven: true,
-        automatic_retry_allowed: false,
-        authority_effect: false,
-      },
+      transaction: transaction('PREPARED'),
+      no_effect_proof: noEffectProof(),
     },
   });
   assert.equal(result.state, 'NO_INSTALL_EFFECT_PROVEN');
+  assert.equal(result.reason, 'INDEPENDENT_EXACT_NO_EFFECT_PROOF_BEFORE_EFFECT_BARRIER');
   assert.equal(result.install_effect_absent_proven, true);
   assert.equal(result.new_install_transaction_admissible, true);
   assert.equal(result.installer_effect_allowed, false);
   assert.equal(result.automatic_retry_allowed, false);
+});
+
+test('no-effect proof is rejected at or after install effect barrier and for ambiguous transaction state', () => {
+  for (const state of ['INSTALLING', 'SUCCESSOR_BOOTED', 'AMBIGUOUS_INSTALL', 'QUALIFIED', 'QUARANTINED']) {
+    const result = classifySelfUpdateBootstrapRecovery({
+      expected_target: expected(),
+      evidence: {
+        transaction: transaction(state),
+        no_effect_proof: noEffectProof(),
+      },
+    });
+    assert.equal(result.state, 'AMBIGUOUS', state);
+    assert.equal(result.new_install_transaction_admissible, false, state);
+    assert.equal(result.installer_effect_allowed, false, state);
+  }
+});
+
+test('no-effect proof requires exact transaction id and explicit barrier-not-crossed proof', () => {
+  for (const proof of [
+    noEffectProof({ transaction_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' }),
+    noEffectProof({ effect_barrier_not_crossed_proven: false }),
+  ]) {
+    const result = classifySelfUpdateBootstrapRecovery({
+      expected_target: expected(),
+      evidence: { transaction: transaction('PREPARED'), no_effect_proof: proof },
+    });
+    assert.equal(result.state, 'AMBIGUOUS');
+    assert.equal(result.install_effect_absent_proven, false);
+  }
 });
 
 test('malformed target binding or unverified manifest fails closed', () => {
