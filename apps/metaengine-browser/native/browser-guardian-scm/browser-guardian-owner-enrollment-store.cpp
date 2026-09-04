@@ -29,14 +29,15 @@ constexpr std::size_t kMaxBytes = 2048;
 
 constexpr char kContract[] =
     "{\"schema\":\"metaengine.browser-guardian.owner-enrollment-native-store.v1\","
-    "\"version\":\"1.0.1\","
+    "\"version\":\"1.0.2\","
     "\"machine_secure_root_required\":true,\"root_creation_implemented\":false,"
     "\"root_repair_implemented\":false,\"final_path_reparse_escape_forbidden\":true,"
     "\"low_privilege_write_acl_forbidden\":true,\"non_machine_write_acl_forbidden\":true,"
     "\"machine_trusted_owner_required\":true,\"root_delete_share_fenced\":true,"
     "\"same_directory_staging\":true,\"staging_create_new\":true,"
     "\"staging_flush_file_buffers\":true,\"commit_move_fail_if_exists\":true,"
-    "\"commit_move_write_through\":true,\"commit_handle_relative_rename\":true,"
+    "\"commit_move_write_through\":true,\"commit_source_handle_rename\":true,"
+    "\"commit_under_fenced_root\":true,\"commit_handle_relative_rename\":false,"
     "\"post_commit_readback_required\":true,"
     "\"owner_replacement_allowed\":false,\"token_session_id_persisted\":false,"
     "\"journal_mutation_allowed\":false,\"wts_execution_allowed\":false,"
@@ -299,18 +300,23 @@ bool writeAll(HANDLE h, std::string_view payload) {
     }
     return true;
 }
-bool renameIntoRootFailIfExists(HANDLE file, HANDLE root, std::wstring_view name, DWORD* error) {
-    if (file == nullptr || file == INVALID_HANDLE_VALUE || root == nullptr || root == INVALID_HANDLE_VALUE || name.empty()) {
+bool renameUnderFencedRootFailIfExists(HANDLE file, const std::wstring& absolute_name, DWORD* error) {
+    if (file == nullptr || file == INVALID_HANDLE_VALUE || absolute_name.empty()) {
         if (error) *error = ERROR_INVALID_PARAMETER;
+        return false;
+    }
+    const std::wstring target = fullPath(absolute_name);
+    if (target.empty()) {
+        if (error) *error = ERROR_INVALID_NAME;
         return false;
     }
     constexpr std::size_t baseBytes = offsetof(FILE_RENAME_INFO, FileName);
     const std::size_t maxNameBytes = static_cast<std::size_t>(MAXDWORD) - baseBytes;
-    if (name.size() > (maxNameBytes / sizeof(wchar_t))) {
+    if (target.size() > (maxNameBytes / sizeof(wchar_t))) {
         if (error) *error = ERROR_FILENAME_EXCED_RANGE;
         return false;
     }
-    const std::size_t nameBytes = name.size() * sizeof(wchar_t);
+    const std::size_t nameBytes = target.size() * sizeof(wchar_t);
     const std::size_t bytes = baseBytes + nameBytes;
     Local buffer;
     buffer.value = LocalAlloc(LPTR, bytes);
@@ -320,9 +326,9 @@ bool renameIntoRootFailIfExists(HANDLE file, HANDLE root, std::wstring_view name
     }
     auto* info = reinterpret_cast<FILE_RENAME_INFO*>(buffer.value);
     info->ReplaceIfExists = FALSE;
-    info->RootDirectory = root;
+    info->RootDirectory = nullptr;
     info->FileNameLength = static_cast<DWORD>(nameBytes);
-    std::memcpy(info->FileName, name.data(), nameBytes);
+    std::memcpy(info->FileName, target.data(), nameBytes);
     if (!SetFileInformationByHandle(file, FileRenameInfo, info, static_cast<DWORD>(bytes))) {
         if (error) *error = GetLastError();
         return false;
@@ -375,7 +381,7 @@ OwnerEnrollmentStoreResult OwnerEnrollmentStore::createIfAbsent(const OwnerEnrol
         else if (!FlushFileBuffers(h.value)) stageError = GetLastError();
         else {
             out.staging_flushed = true;
-            renameCommitted = renameIntoRootFailIfExists(h.value, rootGuard.value, kRecordName, &commitError);
+            renameCommitted = renameUnderFencedRootFailIfExists(h.value, final, &commitError);
             out.move_committed = renameCommitted;
         }
     }
