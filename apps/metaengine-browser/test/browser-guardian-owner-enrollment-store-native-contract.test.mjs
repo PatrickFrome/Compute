@@ -8,14 +8,13 @@ const cpp = fs.readFileSync(path.join(root, 'native/browser-guardian-scm/browser
 const header = fs.readFileSync(path.join(root, 'native/browser-guardian-scm/browser-guardian-owner-enrollment-store.hpp'), 'utf8');
 const source = `${header}\n${cpp}`;
 
-test('durable owner store uses bounded same-directory stage -> flush -> handle-relative fail-if-exists rename -> readback', () => {
+test('durable owner store uses bounded same-directory stage -> flush -> source-handle fail-if-exists rename -> readback', () => {
   for (const token of [
     'CREATE_NEW',
     'FILE_FLAG_WRITE_THROUGH',
     'FlushFileBuffers',
     'SetFileInformationByHandle',
     'FileRenameInfo',
-    'RootDirectory',
     'ReplaceIfExists = FALSE',
     'GetFinalPathNameByHandleW',
     'GetSecurityInfo',
@@ -44,24 +43,27 @@ test('trusted root is held without delete sharing across the create-if-absent co
   assert.match(opener, /FILE_SHARE_READ \| FILE_SHARE_WRITE/);
   assert.doesNotMatch(opener, /FILE_SHARE_DELETE/);
   assert.match(cpp, /"root_delete_share_fenced\\":true/);
+  assert.match(cpp, /"commit_under_fenced_root\\":true/);
 
   const create = cpp.match(/OwnerEnrollmentStoreResult OwnerEnrollmentStore::createIfAbsent\([\s\S]*?\n\}/)?.[0] || '';
   const guard = create.indexOf('Handle rootGuard = openSecureRoot');
   const before = create.indexOf('const auto before = classify');
-  const rename = create.indexOf('renameIntoRootFailIfExists');
+  const rename = create.indexOf('renameUnderFencedRootFailIfExists');
   const readback = create.indexOf('auto readback = classify');
   assert.ok(guard >= 0, 'trusted root guard missing');
   assert.ok(before > guard, 'root guard must precede absence classification');
-  assert.ok(rename > before, 'handle-relative rename must follow absence classification');
+  assert.ok(rename > before, 'source-handle rename must follow absence classification');
   assert.ok(readback > rename, 'root guard must remain in scope through exact readback');
 });
 
-test('commit rename is bound to the verified root handle and never replaces an existing winner', () => {
-  const rename = cpp.match(/bool renameIntoRootFailIfExists\([\s\S]*?\n\}/)?.[0] || '';
+test('commit renames the exclusive source handle under the fenced root and never replaces an existing winner', () => {
+  const rename = cpp.match(/bool renameUnderFencedRootFailIfExists\([\s\S]*?\n\}/)?.[0] || '';
+  assert.match(rename, /const std::wstring target = fullPath\(absolute_name\)/);
   assert.match(rename, /info->ReplaceIfExists = FALSE/);
-  assert.match(rename, /info->RootDirectory = root/);
+  assert.match(rename, /info->RootDirectory = nullptr/);
   assert.match(rename, /SetFileInformationByHandle\(file, FileRenameInfo/);
-  assert.match(cpp, /"commit_handle_relative_rename\\":true/);
+  assert.match(cpp, /"commit_source_handle_rename\\":true/);
+  assert.match(cpp, /"commit_handle_relative_rename\\":false/);
   assert.doesNotMatch(rename, /ReplaceIfExists = TRUE/);
 });
 
