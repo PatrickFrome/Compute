@@ -99,6 +99,9 @@ jobs:
           if any(m.get(k) is not True for k in required): raise SystemExit('physical_gate_incomplete')
           if m.get('target_build_count')!=1: raise SystemExit('target_build_count_invalid')
           if m.get('update_channel')!='dev' or m.get('production_safe') is not False: raise SystemExit('channel_boundary_invalid')
+          installed_digest=str(m.get('installed_executable_sha256') or '').strip().lower()
+          if not re.fullmatch(r'[0-9a-f]{64}',installed_digest): raise SystemExit('installed_executable_sha256_invalid')
+          manifest_digest=hashlib.sha256(mp.read_bytes()).hexdigest()
 
           guardian=list(root.rglob('guardian-native-staging-manifest.json'))
           if len(guardian)!=1: raise SystemExit('guardian_manifest_cardinality_invalid:'+str(len(guardian)))
@@ -158,14 +161,15 @@ jobs:
           configurator_sha,configurator_size=binary_rows['METAENGINEBrowserGuardianConfigure.exe']
           env={
               'VERSION':version,'TAG':'v'+version,'INSTALLER':str(installer[0]),'BLOCKMAP':str(blockmap[0]),
-              'DEV_YML':str(dev[0]),'MANIFEST':str(mp),'INSTALLER_SHA256':digest,
+              'DEV_YML':str(dev[0]),'MANIFEST':str(mp),'MANIFEST_SHA256':manifest_digest,
+              'INSTALLER_SHA256':digest,'INSTALLED_EXECUTABLE_SHA256':installed_digest,
               'GUARDIAN_MANIFEST':str(gp),'GUARDIAN_MANIFEST_SHA256':gdigest,
               'GUARDIAN_SERVICE_BINARY':str(service_path),'GUARDIAN_SERVICE_SHA256':service_sha,'GUARDIAN_SERVICE_SIZE':str(service_size),
               'GUARDIAN_CONFIGURATOR_BINARY':str(configurator_path),'GUARDIAN_CONFIGURATOR_SHA256':configurator_sha,'GUARDIAN_CONFIGURATOR_SIZE':str(configurator_size),
           }
           with open('release.env','w',encoding='utf-8') as f:
               for k,v in env.items(): f.write(f'{k}={shlex.quote(v)}\n')
-          print(f"verified version={version} sha256={digest} guardian_manifest_sha256={gdigest} guardian_release_binaries=2")
+          print(f"verified version={version} installer_sha256={digest} installed_executable_sha256={installed_digest} manifest_sha256={manifest_digest} guardian_manifest_sha256={gdigest} guardian_release_binaries=2")
           PY
           cat release.env >> "$GITHUB_ENV"
 
@@ -205,6 +209,8 @@ jobs:
           if set(assets)!=expected: raise SystemExit(f'draft_asset_set_invalid:{sorted(assets)}')
           digest=assets[os.path.basename(os.environ['INSTALLER'])].get('digest')
           if digest and digest!=f"sha256:{os.environ['INSTALLER_SHA256']}": raise SystemExit('github_asset_digest_mismatch')
+          manifest_digest=assets['verified-self-update-manifest.json'].get('digest')
+          if manifest_digest and manifest_digest!=f"sha256:{os.environ['MANIFEST_SHA256']}": raise SystemExit('github_manifest_digest_mismatch')
           guardian_digest=assets['guardian-native-staging-manifest.json'].get('digest')
           if guardian_digest and guardian_digest!=f"sha256:{os.environ['GUARDIAN_MANIFEST_SHA256']}": raise SystemExit('github_guardian_manifest_digest_mismatch')
           for name,sha_key,size_key in (
