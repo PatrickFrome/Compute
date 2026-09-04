@@ -83,6 +83,35 @@ function Invoke-ProbeCreate {
     return $line | ConvertFrom-Json
 }
 
+function Start-ProbeCreateProcess {
+    param([string]$Sid, [string]$Evidence, [string]$Device)
+    $start = New-Object System.Diagnostics.ProcessStartInfo
+    $start.FileName = $ProbeExe
+    $start.Arguments = "create $Sid $Evidence $Device"
+    $start.UseShellExecute = $false
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $start.CreateNoWindow = $true
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $start
+    if (-not $process.Start()) { throw 'owner_store_race_process_start_failed' }
+    return $process
+}
+
+function Complete-ProbeCreateProcess {
+    param([System.Diagnostics.Process]$Process, [string]$Label)
+    $Process.WaitForExit()
+    $stdout = $Process.StandardOutput.ReadToEnd()
+    $stderr = $Process.StandardError.ReadToEnd()
+    $exitCode = $Process.ExitCode
+    $Process.Dispose()
+    if ($exitCode -ne 0) {
+        throw "${Label}_exit_${exitCode}:$stderr"
+    }
+    if (-not $stdout.Trim()) { throw "${Label}_output_missing" }
+    return $stdout | ConvertFrom-Json
+}
+
 function Assert-ExactRecord {
     param($Result, [string]$Sid, [string]$Evidence, [string]$Device, [string]$Prefix)
     Assert-True $Result.present "${Prefix}_not_present"
@@ -165,21 +194,11 @@ try {
 
     # 9. Conflicting concurrent creators have exactly one durable winner.
     Reset-SecureRoot
-    $stdoutA = Join-Path $env:RUNNER_TEMP 'owner-store-race-a.json'
-    $stdoutB = Join-Path $env:RUNNER_TEMP 'owner-store-race-b.json'
-    $stderrA = Join-Path $env:RUNNER_TEMP 'owner-store-race-a.err'
-    $stderrB = Join-Path $env:RUNNER_TEMP 'owner-store-race-b.err'
-    foreach ($path in @($stdoutA, $stdoutB, $stderrA, $stderrB)) { Remove-PathSafely -Path $path }
+    $processA = Start-ProbeCreateProcess -Sid $sidA -Evidence $evidenceA -Device $deviceA
+    $processB = Start-ProbeCreateProcess -Sid $sidB -Evidence $evidenceB -Device $deviceB
+    $raceA = Complete-ProbeCreateProcess -Process $processA -Label 'race_a'
+    $raceB = Complete-ProbeCreateProcess -Process $processB -Label 'race_b'
 
-    $processA = Start-Process -FilePath $ProbeExe -ArgumentList @('create', $sidA, $evidenceA, $deviceA) -PassThru -RedirectStandardOutput $stdoutA -RedirectStandardError $stderrA
-    $processB = Start-Process -FilePath $ProbeExe -ArgumentList @('create', $sidB, $evidenceB, $deviceB) -PassThru -RedirectStandardOutput $stdoutB -RedirectStandardError $stderrB
-    $processA.WaitForExit()
-    $processB.WaitForExit()
-    Assert-True ($processA.ExitCode -eq 0) "race_a_exit_$($processA.ExitCode)"
-    Assert-True ($processB.ExitCode -eq 0) "race_b_exit_$($processB.ExitCode)"
-
-    $raceA = (Get-Content -LiteralPath $stdoutA -Raw | ConvertFrom-Json)
-    $raceB = (Get-Content -LiteralPath $stdoutB -Raw | ConvertFrom-Json)
     $commitCount = 0
     foreach ($raceResult in @($raceA, $raceB)) {
         if ($raceResult.committed) { $commitCount += 1 }
