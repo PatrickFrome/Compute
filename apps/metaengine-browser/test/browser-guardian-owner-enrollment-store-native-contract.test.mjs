@@ -8,20 +8,22 @@ const cpp = fs.readFileSync(path.join(root, 'native/browser-guardian-scm/browser
 const header = fs.readFileSync(path.join(root, 'native/browser-guardian-scm/browser-guardian-owner-enrollment-store.hpp'), 'utf8');
 const source = `${header}\n${cpp}`;
 
-test('durable owner store uses bounded same-directory stage -> flush -> fail-if-exists move -> readback', () => {
+test('durable owner store uses bounded same-directory stage -> flush -> handle-relative fail-if-exists rename -> readback', () => {
   for (const token of [
     'CREATE_NEW',
     'FILE_FLAG_WRITE_THROUGH',
     'FlushFileBuffers',
-    'MoveFileExW',
-    'MOVEFILE_WRITE_THROUGH',
+    'SetFileInformationByHandle',
+    'FileRenameInfo',
+    'RootDirectory',
+    'ReplaceIfExists = FALSE',
     'GetFinalPathNameByHandleW',
     'GetSecurityInfo',
     'FILE_ATTRIBUTE_REPARSE_POINT',
     'OWNER_STORE_CREATE_IF_ABSENT_COMMITTED',
-  ]) assert.match(source, new RegExp(token), `${token} missing`);
+  ]) assert.match(source, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `${token} missing`);
 
-  assert.doesNotMatch(source, /MOVEFILE_REPLACE_EXISTING|ReplaceFileW|CreateFileTransactedW|CommitTransaction/);
+  assert.doesNotMatch(source, /MOVEFILE_REPLACE_EXISTING|ReplaceFileW|CreateFileTransactedW|CommitTransaction|MoveFileExW/);
 });
 
 test('machine store ACL allowlists write authority to SYSTEM and Administrators only', () => {
@@ -35,6 +37,32 @@ test('machine store ACL allowlists write authority to SYSTEM and Administrators 
   assert.doesNotMatch(cpp, /WinWorldSid|WinBuiltinUsersSid|WinAuthenticatedUserSid/);
   assert.match(cpp, /"non_machine_write_acl_forbidden\\":true/);
   assert.match(cpp, /D:P\(A;;FA;;;SY\)\(A;;FA;;;BA\)/);
+});
+
+test('trusted root is held without delete sharing across the create-if-absent commit boundary', () => {
+  const opener = cpp.match(/Handle openSecureRoot\([\s\S]*?\n\}/)?.[0] || '';
+  assert.match(opener, /FILE_SHARE_READ \| FILE_SHARE_WRITE/);
+  assert.doesNotMatch(opener, /FILE_SHARE_DELETE/);
+  assert.match(cpp, /"root_delete_share_fenced\\":true/);
+
+  const create = cpp.match(/OwnerEnrollmentStoreResult OwnerEnrollmentStore::createIfAbsent\([\s\S]*?\n\}/)?.[0] || '';
+  const guard = create.indexOf('Handle rootGuard = openSecureRoot');
+  const before = create.indexOf('const auto before = classify');
+  const rename = create.indexOf('renameIntoRootFailIfExists');
+  const readback = create.indexOf('auto readback = classify');
+  assert.ok(guard >= 0, 'trusted root guard missing');
+  assert.ok(before > guard, 'root guard must precede absence classification');
+  assert.ok(rename > before, 'handle-relative rename must follow absence classification');
+  assert.ok(readback > rename, 'root guard must remain in scope through exact readback');
+});
+
+test('commit rename is bound to the verified root handle and never replaces an existing winner', () => {
+  const rename = cpp.match(/bool renameIntoRootFailIfExists\([\s\S]*?\n\}/)?.[0] || '';
+  assert.match(rename, /info->ReplaceIfExists = FALSE/);
+  assert.match(rename, /info->RootDirectory = root/);
+  assert.match(rename, /SetFileInformationByHandle\(file, FileRenameInfo/);
+  assert.match(cpp, /"commit_handle_relative_rename\\":true/);
+  assert.doesNotMatch(rename, /ReplaceIfExists = TRUE/);
 });
 
 test('durable record binds SID and immutable evidence hashes, never transient session id', () => {
@@ -71,22 +99,21 @@ test('store cannot become WTS, process, SCM, scheduler, retry, or Browser author
 });
 
 test('existing record is classified; no overwrite/replacement path exists', () => {
-  assert.ok(cpp.includes('error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS'));
+  assert.ok(cpp.includes('commitError == ERROR_ALREADY_EXISTS || commitError == ERROR_FILE_EXISTS'));
   assert.match(cpp, /OWNER_STORE_OWNER_MISMATCH/);
   assert.match(cpp, /OWNER_STORE_OWNER_EXACT_DIFFERENT_PROVENANCE/);
   assert.match(cpp, /readback\.exact && readback\.provenance_exact/);
   assert.match(cpp, /OWNER_STORE_POST_COMMIT_READBACK_MISMATCH/);
-  assert.doesNotMatch(cpp, /DeleteFileW\(final\.c_str\(\)\)|MoveFileExW\([^\n]*MOVEFILE_REPLACE_EXISTING/);
+  assert.doesNotMatch(cpp, /DeleteFileW\(final\.c_str\(\)\)|ReplaceIfExists = TRUE/);
 });
 
-test('stage cleanup happens after the exclusive file handle leaves scope', () => {
-  const create = cpp.match(/DWORD stageError = ERROR_SUCCESS;([\s\S]*?)if \(!MoveFileExW/)?.[1] || '';
+test('stage cleanup happens only after the exclusive stage handle leaves scope', () => {
+  const create = cpp.match(/DWORD stageError = ERROR_SUCCESS;([\s\S]*?)auto readback = classify/)?.[1] || '';
   const handleStart = create.indexOf('Handle h(CreateFileW');
-  const cleanupGuard = create.indexOf('if (!out.staging_flushed)');
+  const scopeClose = create.indexOf('}\n    if (!out.staging_flushed)');
   const cleanup = create.indexOf('DeleteFileW(stage.c_str())');
   assert.ok(handleStart >= 0, 'exclusive stage handle missing');
-  assert.ok(cleanupGuard > handleStart, 'cleanup guard must follow the handle scope');
-  assert.ok(cleanup > cleanupGuard, 'DeleteFileW must execute only after the cleanup guard');
-  assert.match(create, /\}\s*if \(!out\.staging_flushed\)/);
-  assert.match(create, /ERROR_HANDLE_EOF|ERROR_WRITE_FAULT/);
+  assert.ok(scopeClose > handleStart, 'stage handle scope must close before cleanup');
+  assert.ok(cleanup > scopeClose, 'DeleteFileW must execute only after stage handle closes');
+  assert.match(create, /ERROR_WRITE_FAULT/);
 });
