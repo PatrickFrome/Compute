@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstring>
 #include <cwctype>
 #include <string_view>
@@ -303,16 +304,14 @@ bool renameIntoRootFailIfExists(HANDLE file, HANDLE root, std::wstring_view name
         if (error) *error = ERROR_INVALID_PARAMETER;
         return false;
     }
-    if (name.size() > (MAXDWORD / sizeof(wchar_t))) {
+    constexpr std::size_t baseBytes = offsetof(FILE_RENAME_INFO, FileName);
+    const std::size_t maxNameBytes = static_cast<std::size_t>(MAXDWORD) - baseBytes;
+    if (name.size() > (maxNameBytes / sizeof(wchar_t))) {
         if (error) *error = ERROR_FILENAME_EXCED_RANGE;
         return false;
     }
-    const DWORD nameBytes = static_cast<DWORD>(name.size() * sizeof(wchar_t));
-    const std::size_t bytes = FIELD_OFFSET(FILE_RENAME_INFO, FileName) + nameBytes;
-    if (bytes > MAXDWORD) {
-        if (error) *error = ERROR_INSUFFICIENT_BUFFER;
-        return false;
-    }
+    const std::size_t nameBytes = name.size() * sizeof(wchar_t);
+    const std::size_t bytes = baseBytes + nameBytes;
     Local buffer;
     buffer.value = LocalAlloc(LPTR, bytes);
     if (buffer.value == nullptr) {
@@ -322,7 +321,7 @@ bool renameIntoRootFailIfExists(HANDLE file, HANDLE root, std::wstring_view name
     auto* info = reinterpret_cast<FILE_RENAME_INFO*>(buffer.value);
     info->ReplaceIfExists = FALSE;
     info->RootDirectory = root;
-    info->FileNameLength = nameBytes;
+    info->FileNameLength = static_cast<DWORD>(nameBytes);
     std::memcpy(info->FileName, name.data(), nameBytes);
     if (!SetFileInformationByHandle(file, FileRenameInfo, info, static_cast<DWORD>(bytes))) {
         if (error) *error = GetLastError();
