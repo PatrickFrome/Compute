@@ -1,5 +1,5 @@
 export const SELF_UPDATE_BOOTSTRAP_RECOVERY_SCHEMA = 'metaengine.self-update.bootstrap-recovery.v1';
-export const SELF_UPDATE_BOOTSTRAP_RECOVERY_VERSION = '1.0.1';
+export const SELF_UPDATE_BOOTSTRAP_RECOVERY_VERSION = '1.0.2';
 
 const HASH64 = /^[a-f0-9]{64}$/;
 const SHA40 = /^[a-f0-9]{40}$/;
@@ -63,6 +63,7 @@ function base(state, expected, evidence, reason, overrides = {}) {
 function exactTransaction(transaction, expected) {
   return transaction?.schema === 'metaengine.self-update.transaction.v1'
     && String(transaction?.target_version || '') === expected.version
+    && String(transaction?.resolved_git_sha || '').trim().toLowerCase() === expected.git_sha
     && transaction?.automatic_retry_allowed === false
     && transaction?.authority_effect === false;
 }
@@ -72,15 +73,17 @@ function exactPreInstallReceipt(receipt, expected) {
     && String(receipt?.version || '') === expected.version
     && String(receipt?.available_version || '') === expected.version
     && receipt?.metadata_verified === true
+    && receipt?.publisher_verified === true
+    && String(receipt?.resolved_git_sha || '').trim().toLowerCase() === expected.git_sha
     && receipt?.restart_gate_safe === true
     && receipt?.authority_effect === false;
 }
 
-function exactSuccessorReceipt(receipt, expected) {
+function exactSuccessorReceipt(receipt, expected, preInstallSha256) {
   return receipt?.schema === 'metaengine.self-update.successor-receipt.v1'
     && String(receipt?.version || '') === expected.version
     && receipt?.primary_instance === true
-    && Boolean(String(receipt?.pre_install_receipt_sha256 || '').match(HASH64))
+    && lowerHash(receipt?.pre_install_receipt_sha256) === preInstallSha256
     && receipt?.authority_effect === false;
 }
 
@@ -135,26 +138,29 @@ export function classifySelfUpdateBootstrapRecovery({ expected_target = null, ev
   const installed = objectOrNull(observed.installed_executable);
   const release = objectOrNull(observed.release_binding);
   const noEffect = objectOrNull(observed.no_effect_proof);
+  const preInstallSha256 = lowerHash(observed.pre_install_receipt_sha256);
 
   const transactionExact = exactTransaction(transaction, expected);
   const installState = String(transaction?.state || '');
   const positiveInstallEvidence = transactionExact && POSITIVE_INSTALL_STATES.has(installState);
 
   if (positiveInstallEvidence
+      && preInstallSha256
       && exactPreInstallReceipt(preInstall, expected)
-      && exactSuccessorReceipt(successor, expected)
+      && exactSuccessorReceipt(successor, expected, preInstallSha256)
       && exactInstalledExecutable(installed, expected)
       && exactReleaseBinding(release, expected)) {
     return base('TARGET_PRESENT', expected, observed, 'EXACT_TARGET_PRESENT_WITH_DURABLE_SUCCESSOR_PROOF', {
       target_present_proven: true,
       installed_executable_sha256: expected.installed_executable_sha256,
+      pre_install_receipt_sha256: preInstallSha256,
       relaunch_effect_candidate: true,
     });
   }
 
   // A durable SUCCESSOR_BOOTED/QUALIFIED/QUARANTINED binding proves that an install
-  // effect was observed in the past. Missing current disk bytes can therefore never
-  // be downgraded to "no effect" and never authorizes replaying the installer.
+  // effect was observed in the past. Missing or drifted current evidence can therefore
+  // never be downgraded to "no effect" and never authorizes replaying the installer.
   if (positiveInstallEvidence) {
     return base('AMBIGUOUS', expected, observed, 'PRIOR_INSTALL_EFFECT_POSITIVELY_OBSERVED_CURRENT_TARGET_NOT_EXACT');
   }
