@@ -4,7 +4,9 @@ on:
   pull_request:
     paths:
       - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-observer.*'
+      - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-store.*'
       - 'apps/metaengine-browser/src/browser-guardian-owner-enrollment-evidence.mjs'
+      - 'apps/metaengine-browser/src/browser-guardian-owner-enrollment-plan.mjs'
       - 'apps/metaengine-browser/test/browser-guardian-owner-enrollment-*.test.mjs'
       - '.github/workflows/browser-guardian-owner-enrollment-native-v1.yml'
   workflow_dispatch:
@@ -37,13 +39,13 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Run enrollment evidence adversarial contracts
+      - name: Run enrollment planner, evidence, observer, and durable-store contracts
         working-directory: apps/metaengine-browser
         shell: powershell
         run: |
-          node --test test/browser-guardian-owner-enrollment-evidence.test.mjs test/browser-guardian-owner-enrollment-native-contract.test.mjs
+          node --test test/browser-guardian-owner-enrollment-evidence.test.mjs test/browser-guardian-owner-enrollment-plan.test.mjs test/browser-guardian-owner-enrollment-native-contract.test.mjs test/browser-guardian-owner-enrollment-store-native-contract.test.mjs
 
-      - name: Compile exact-head native owner observer
+      - name: Compile exact-head native owner observer and durable store
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -62,37 +64,50 @@ jobs:
 
           @'
           #include "browser-guardian-owner-enrollment-observer.hpp"
+          #include "browser-guardian-owner-enrollment-store.hpp"
           #include <iostream>
           int main() {
               std::cout << metaengine::guardian::browserGuardianOwnerEnrollmentObserverContractJson() << '\n';
               std::cout << metaengine::guardian::browserGuardianOwnerEnrollmentClientAccessMask() << '\n';
+              std::cout << metaengine::guardian::browserGuardianOwnerEnrollmentStoreContractJson() << '\n';
               return 0;
           }
           '@ | Set-Content -Path $probeSource -Encoding utf8
 
-          $module = Join-Path $sourceDir 'browser-guardian-owner-enrollment-observer.cpp'
-          $compileCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE /I"{1}" "{2}" "{3}" /Fe:"{4}" /link advapi32.lib' -f $vcvars, $sourceDir, $module, $probeSource, $probeExe
+          $observer = Join-Path $sourceDir 'browser-guardian-owner-enrollment-observer.cpp'
+          $store = Join-Path $sourceDir 'browser-guardian-owner-enrollment-store.cpp'
+          $compileCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE /I"{1}" "{2}" "{3}" "{4}" /Fe:"{5}" /link advapi32.lib shell32.lib ole32.lib' -f $vcvars, $sourceDir, $observer, $store, $probeSource, $probeExe
           & $env:ComSpec /d /s /c $compileCmd
-          if ($LASTEXITCODE -ne 0) { throw "guardian_owner_observer_compile_exit_$LASTEXITCODE" }
-          if (-not (Test-Path $probeExe)) { throw 'guardian_owner_observer_probe_missing' }
+          if ($LASTEXITCODE -ne 0) { throw "guardian_owner_store_compile_exit_$LASTEXITCODE" }
+          if (-not (Test-Path $probeExe)) { throw 'guardian_owner_store_probe_missing' }
           "OWNER_ENROLLMENT_PROBE=$probeExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Prove native read-only contract
+      - name: Prove native read-only observer and fail-if-exists durable-store contracts
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           $lines = @(& $env:OWNER_ENROLLMENT_PROBE | Where-Object { $_.Trim() })
-          if ($lines.Count -lt 2) { throw 'owner_enrollment_probe_output_missing' }
-          $row = $lines[0] | ConvertFrom-Json
-          if ($row.schema -ne 'metaengine.browser-guardian.owner-enrollment-native-observer.v1') { throw 'owner_enrollment_schema_invalid' }
+          if ($lines.Count -lt 3) { throw 'owner_enrollment_probe_output_missing' }
+
+          $observer = $lines[0] | ConvertFrom-Json
+          if ($observer.schema -ne 'metaengine.browser-guardian.owner-enrollment-native-observer.v1') { throw 'owner_enrollment_schema_invalid' }
           foreach ($field in @('pipe_reject_remote_clients','first_pipe_instance','overlapped_io','explicit_dacl','client_message_required_before_impersonation','token_user_readback','token_session_id_readback','client_pid_readback','revert_to_self_required','revert_failure_requires_service_stop')) {
-            if ($row.$field -ne $true) { throw "owner_enrollment_required_contract_missing_$field" }
+            if ($observer.$field -ne $true) { throw "owner_enrollment_required_contract_missing_$field" }
           }
           foreach ($field in @('pipe_nowait_used','default_dacl_used','generic_write_granted','client_create_pipe_instance_allowed','durable_enrollment_implemented','device_challenge_verification_implemented','wts_execution_allowed','process_effect_allowed','scm_effect_allowed','automatic_retry_allowed','second_scheduler_loop','authority_effect')) {
-            if ($row.$field -ne $false) { throw "owner_enrollment_authority_drift_$field" }
+            if ($observer.$field -ne $false) { throw "owner_enrollment_authority_drift_$field" }
           }
           $mask = [uint32]$lines[1]
           if (($mask -band 4) -ne 0) { throw 'owner_enrollment_client_create_pipe_instance_exposed' }
+
+          $store = $lines[2] | ConvertFrom-Json
+          if ($store.schema -ne 'metaengine.browser-guardian.owner-enrollment-native-store.v1') { throw 'owner_store_schema_invalid' }
+          foreach ($field in @('machine_secure_root_required','final_path_reparse_escape_forbidden','low_privilege_write_acl_forbidden','machine_trusted_owner_required','same_directory_staging','staging_create_new','staging_flush_file_buffers','commit_move_fail_if_exists','commit_move_write_through','post_commit_readback_required')) {
+            if ($store.$field -ne $true) { throw "owner_store_required_contract_missing_$field" }
+          }
+          foreach ($field in @('root_creation_implemented','root_repair_implemented','owner_replacement_allowed','token_session_id_persisted','journal_mutation_allowed','wts_execution_allowed','process_effect_allowed','scm_effect_allowed','browser_authority','task_authority','scheduler_authority','automatic_retry_allowed','second_scheduler_loop','authority_effect')) {
+            if ($store.$field -ne $false) { throw "owner_store_authority_drift_$field" }
+          }
 
       - name: Prove source checkout unchanged
         shell: bash
@@ -101,4 +116,4 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-observer.cpp apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-observer.hpp apps/metaengine-browser/src/browser-guardian-owner-enrollment-evidence.mjs apps/metaengine-browser/test/browser-guardian-owner-enrollment-evidence.test.mjs apps/metaengine-browser/test/browser-guardian-owner-enrollment-native-contract.test.mjs .github/workflows/browser-guardian-owner-enrollment-native-v1.yml)"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-observer.cpp apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-observer.hpp apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-store.cpp apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-store.hpp apps/metaengine-browser/src/browser-guardian-owner-enrollment-evidence.mjs apps/metaengine-browser/src/browser-guardian-owner-enrollment-plan.mjs apps/metaengine-browser/test/browser-guardian-owner-enrollment-evidence.test.mjs apps/metaengine-browser/test/browser-guardian-owner-enrollment-plan.test.mjs apps/metaengine-browser/test/browser-guardian-owner-enrollment-native-contract.test.mjs apps/metaengine-browser/test/browser-guardian-owner-enrollment-store-native-contract.test.mjs .github/workflows/browser-guardian-owner-enrollment-native-v1.yml)"
