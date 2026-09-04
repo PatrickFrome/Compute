@@ -22,14 +22,15 @@ if ($expectedHash -and $expectedHash -notmatch '^[a-f0-9]{64}$') {
 
 function Read-JsonEvidence([string]$Path) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-    return [ordered]@{ read_state = 'ABSENT'; row = $null; error = $null }
+    return [ordered]@{ read_state = 'ABSENT'; row = $null; sha256 = $null; error = $null }
   }
   try {
     $raw = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
     $row = $raw | ConvertFrom-Json -ErrorAction Stop
-    return [ordered]@{ read_state = 'READ'; row = $row; error = $null }
+    $sha256 = (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+    return [ordered]@{ read_state = 'READ'; row = $row; sha256 = $sha256; error = $null }
   } catch {
-    return [ordered]@{ read_state = 'INVALID'; row = $null; error = ([string]$_.Exception.Message).Substring(0, [Math]::Min(200, ([string]$_.Exception.Message).Length)) }
+    return [ordered]@{ read_state = 'INVALID'; row = $null; sha256 = $null; error = ([string]$_.Exception.Message).Substring(0, [Math]::Min(200, ([string]$_.Exception.Message).Length)) }
   }
 }
 
@@ -70,17 +71,20 @@ if (Test-Path -LiteralPath $InstalledExePath -PathType Leaf) {
 
 $result = [ordered]@{
   schema = 'metaengine.self-update.bootstrap-probe.v1'
-  version = '1.0.0'
+  version = '1.0.1'
   captured_at = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
   expected_target_version = $ExpectedTargetVersion
   expected_installed_executable_sha256 = if ($expectedHash) { $expectedHash } else { $null }
   transaction_read_state = $transaction.read_state
+  transaction_sha256 = $transaction.sha256
   transaction = $transaction.row
   transaction_error = $transaction.error
   pre_install_receipt_read_state = $preInstall.read_state
+  pre_install_receipt_sha256 = $preInstall.sha256
   pre_install_receipt = $preInstall.row
   pre_install_receipt_error = $preInstall.error
   successor_receipt_read_state = $successor.read_state
+  successor_receipt_sha256 = $successor.sha256
   successor_receipt = $successor.row
   successor_receipt_error = $successor.error
   installed_executable = $installed
