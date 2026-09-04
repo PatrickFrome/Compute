@@ -28,6 +28,25 @@ test('verified dev publisher is exact-SHA isolated and cannot regress the live h
   assert.match(source, /manifest_git_sha_mismatch/);
   assert.match(source, /SKIP_NEWER/);
   assert.match(source, /hint_version_collision/);
-  assert.match(source, /pointer_readback_regressed/);
+  assert.match(source, /pointer_write_blob_mismatch/);
+  assert.match(source, /dev_hint_write_accepted/);
+  assert.match(source, /WAIT_REGRESSED/);
+  assert.match(source, /dev_hint_readback_pending/);
+  assert.match(source, /dev_hint_readback_exhausted_after_accepted_write/);
   assert.match(source, /dev_hint_cas_exhausted/);
+});
+
+test('verified dev publisher never repeats an accepted hint write while branch readback converges', async () => {
+  const source = await workflow('metaengine-browser-fast-autorelease.yml');
+  const acceptedWrite = source.indexOf('dev_hint_write_accepted');
+  const readbackLoop = source.indexOf('for readback_attempt in $(seq 1 8)');
+  const readbackExhausted = source.indexOf('dev_hint_readback_exhausted_after_accepted_write');
+  const outerCasSleep = source.indexOf('sleep $((attempt * 2))');
+  assert.ok(acceptedWrite > 0);
+  assert.ok(readbackLoop > acceptedWrite);
+  assert.ok(readbackExhausted > readbackLoop);
+  assert.ok(outerCasSleep > readbackExhausted);
+  const acceptedPath = source.slice(acceptedWrite, outerCasSleep);
+  assert.doesNotMatch(acceptedPath, /gh api -X PUT/);
+  assert.match(acceptedPath, /exit 1/);
 });
