@@ -81,9 +81,12 @@ test('existing record is classified; no overwrite/replacement path exists', () =
 
 test('stage cleanup happens after the exclusive file handle leaves scope', () => {
   const create = cpp.match(/DWORD stageError = ERROR_SUCCESS;([\s\S]*?)if \(!MoveFileExW/)?.[1] || '';
-  const scopeEnd = create.indexOf('\n    }\n    if (!out.staging_flushed)');
+  const handleStart = create.indexOf('Handle h(CreateFileW');
+  const cleanupGuard = create.indexOf('if (!out.staging_flushed)');
   const cleanup = create.indexOf('DeleteFileW(stage.c_str())');
-  assert.ok(scopeEnd >= 0, 'stage handle scope boundary missing');
-  assert.ok(cleanup > scopeEnd, 'stage cleanup must happen after handle destruction');
+  assert.ok(handleStart >= 0, 'exclusive stage handle missing');
+  assert.ok(cleanupGuard > handleStart, 'cleanup guard must follow the handle scope');
+  assert.ok(cleanup > cleanupGuard, 'DeleteFileW must execute only after the cleanup guard');
+  assert.match(create, /\}\s*if \(!out\.staging_flushed\)/);
   assert.match(create, /ERROR_HANDLE_EOF|ERROR_WRITE_FAULT/);
 });
