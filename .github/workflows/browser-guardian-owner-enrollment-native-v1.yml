@@ -148,10 +148,10 @@ jobs:
 
           $store = $lines[2] | ConvertFrom-Json
           if ($store.schema -ne 'metaengine.browser-guardian.owner-enrollment-native-store.v1') { throw 'owner_store_schema_invalid' }
-          foreach ($field in @('machine_secure_root_required','final_path_reparse_escape_forbidden','low_privilege_write_acl_forbidden','non_machine_write_acl_forbidden','machine_trusted_owner_required','root_delete_share_fenced','same_directory_staging','staging_create_new','staging_flush_file_buffers','commit_move_fail_if_exists','commit_move_write_through','commit_handle_relative_rename','post_commit_readback_required')) {
+          foreach ($field in @('machine_secure_root_required','final_path_reparse_escape_forbidden','low_privilege_write_acl_forbidden','non_machine_write_acl_forbidden','machine_trusted_owner_required','root_delete_share_fenced','same_directory_staging','staging_create_new','staging_flush_file_buffers','commit_move_fail_if_exists','commit_move_write_through','commit_source_handle_rename','commit_under_fenced_root','post_commit_readback_required')) {
             if ($store.$field -ne $true) { throw "owner_store_required_contract_missing_$field" }
           }
-          foreach ($field in @('root_creation_implemented','root_repair_implemented','owner_replacement_allowed','token_session_id_persisted','journal_mutation_allowed','wts_execution_allowed','process_effect_allowed','scm_effect_allowed','browser_authority','task_authority','scheduler_authority','automatic_retry_allowed','second_scheduler_loop','authority_effect')) {
+          foreach ($field in @('root_creation_implemented','root_repair_implemented','commit_handle_relative_rename','owner_replacement_allowed','token_session_id_persisted','journal_mutation_allowed','wts_execution_allowed','process_effect_allowed','scm_effect_allowed','browser_authority','task_authority','scheduler_authority','automatic_retry_allowed','second_scheduler_loop','authority_effect')) {
             if ($store.$field -ne $false) { throw "owner_store_authority_drift_$field" }
           }
 
