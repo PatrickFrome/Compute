@@ -24,14 +24,16 @@ test('durable owner store uses bounded same-directory stage -> flush -> fail-if-
   assert.doesNotMatch(source, /MOVEFILE_REPLACE_EXISTING|ReplaceFileW|CreateFileTransactedW|CommitTransaction/);
 });
 
-test('machine store root and staged record forbid low-privilege writers', () => {
+test('machine store ACL allowlists write authority to SYSTEM and Administrators only', () => {
   assert.match(cpp, /FOLDERID_ProgramData/);
   assert.match(cpp, /METAENGINE\\\\Guardian/);
   assert.match(cpp, /WinLocalSystemSid/);
   assert.match(cpp, /WinBuiltinAdministratorsSid/);
-  assert.match(cpp, /WinWorldSid/);
-  assert.match(cpp, /WinBuiltinUsersSid/);
-  assert.match(cpp, /WinAuthenticatedUserSid/);
+  assert.match(cpp, /FILE_DELETE_CHILD/);
+  assert.match(cpp, /\(ace->Mask & kForbiddenWrite\) != 0 && !machineOwner\(sid\)/);
+  assert.match(cpp, /header->AceType != ACCESS_ALLOWED_ACE_TYPE\) return false/);
+  assert.doesNotMatch(cpp, /WinWorldSid|WinBuiltinUsersSid|WinAuthenticatedUserSid/);
+  assert.match(cpp, /"non_machine_write_acl_forbidden\\":true/);
   assert.match(cpp, /D:P\(A;;FA;;;SY\)\(A;;FA;;;BA\)/);
 });
 
@@ -75,4 +77,13 @@ test('existing record is classified; no overwrite/replacement path exists', () =
   assert.match(cpp, /readback\.exact && readback\.provenance_exact/);
   assert.match(cpp, /OWNER_STORE_POST_COMMIT_READBACK_MISMATCH/);
   assert.doesNotMatch(cpp, /DeleteFileW\(final\.c_str\(\)\)|MoveFileExW\([^\n]*MOVEFILE_REPLACE_EXISTING/);
+});
+
+test('stage cleanup happens after the exclusive file handle leaves scope', () => {
+  const create = cpp.match(/DWORD stageError = ERROR_SUCCESS;([\s\S]*?)if \(!MoveFileExW/)?.[1] || '';
+  const scopeEnd = create.indexOf('\n    }\n    if (!out.staging_flushed)');
+  const cleanup = create.indexOf('DeleteFileW(stage.c_str())');
+  assert.ok(scopeEnd >= 0, 'stage handle scope boundary missing');
+  assert.ok(cleanup > scopeEnd, 'stage cleanup must happen after handle destruction');
+  assert.match(create, /ERROR_HANDLE_EOF|ERROR_WRITE_FAULT/);
 });
