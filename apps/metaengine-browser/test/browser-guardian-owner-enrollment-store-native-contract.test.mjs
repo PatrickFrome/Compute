@@ -109,11 +109,12 @@ test('existing record is classified; no overwrite/replacement path exists', () =
 
 test('stage cleanup happens only after the exclusive stage handle leaves scope', () => {
   const create = cpp.match(/DWORD stageError = ERROR_SUCCESS;([\s\S]*?)auto readback = classify/)?.[1] || '';
-  const handleStart = create.indexOf('Handle h(CreateFileW');
-  const scopeClose = create.indexOf('}\n    if (!out.staging_flushed)');
-  const cleanup = create.indexOf('DeleteFileW(stage.c_str())');
+  const normalizedCreate = create.replace(/\r\n/g, '\n');
+  const handleStart = normalizedCreate.indexOf('Handle h(CreateFileW');
+  const scopeClose = normalizedCreate.indexOf('}\n    if (!out.staging_flushed)');
+  const cleanup = normalizedCreate.indexOf('DeleteFileW(stage.c_str())');
   assert.ok(handleStart >= 0, 'exclusive stage handle missing');
   assert.ok(scopeClose > handleStart, 'stage handle scope must close before cleanup');
   assert.ok(cleanup > scopeClose, 'DeleteFileW must execute only after stage handle closes');
-  assert.match(create, /ERROR_WRITE_FAULT/);
+  assert.match(normalizedCreate, /ERROR_WRITE_FAULT/);
 });
