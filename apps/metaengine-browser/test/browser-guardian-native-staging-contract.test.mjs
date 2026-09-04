@@ -113,8 +113,8 @@ test('verified publisher refuses releases without staged-only Guardian evidence 
     'guardian_manifest_digest_mismatch',
     'guardian_release_binary_digest_mismatch',
     'guardian_release_binary_size_mismatch',
-    'github_guardian_binary_digest_mismatch',
-    'github_guardian_binary_size_mismatch',
+    'github_asset_digest_missing_or_mismatch',
+    'github_asset_size_mismatch',
     'guardian_forbidden_authority',
     'guardian_user_writable_activation_fence_missing',
   ]) assert.match(publisher, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));

@@ -36,17 +36,24 @@ test('publisher verifies installed digest and immutable manifest bytes before dr
   );
   assert.match(publisher, /installed_executable_sha256_invalid/);
   assert.match(publisher, /MANIFEST_SHA256/);
-  assert.match(publisher, /github_manifest_digest_mismatch/);
+  assert.match(publisher, /github_asset_digest_missing_or_mismatch/);
   assert.match(publisher, /draft_asset_set_invalid/);
 });
 
-test('publisher release allowlist remains the exact current seven artifacts', () => {
+test('publisher requires exact identity, state, digest, and size for every current release asset', () => {
   const required = [
+    'dev.yml',
     'verified-self-update-manifest.json',
     'guardian-native-staging-manifest.json',
     'METAENGINEBrowserGuardian.exe',
     'METAENGINEBrowserGuardianConfigure.exe',
   ];
   for (const name of required) assert.ok(publisher.includes(name), `missing_release_asset:${name}`);
+  assert.match(publisher, /if len\(raw_assets\)!=len\(expected_assets\):/);
+  assert.match(publisher, /draft_asset_name_duplicate/);
   assert.match(publisher, /if set\(assets\)!=expected:/);
+  assert.match(publisher, /if asset\.get\('state'\)!='uploaded':/);
+  assert.match(publisher, /if asset\.get\('digest'\)!=f"sha256:\{os\.environ\[sha_key\]\}":/);
+  assert.match(publisher, /github_asset_size_mismatch/);
+  assert.doesNotMatch(publisher, /if\s+\w*digest\s+and\s+\w*digest\s*!=/);
 });
