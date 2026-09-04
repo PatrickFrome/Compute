@@ -21,7 +21,8 @@ constexpr wchar_t kStageDacl[] = L"D:P(A;;FA;;;SY)(A;;FA;;;BA)";
 constexpr char kLogicalSchema[] = "metaengine.browser-guardian.owner-enrollment-record.v1";
 constexpr char kWireSchema[] = "metaengine.browser-guardian.owner-enrollment-store-record.v1";
 constexpr DWORD kForbiddenWrite = FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_WRITE_EA |
-    FILE_WRITE_ATTRIBUTES | DELETE | WRITE_DAC | WRITE_OWNER | GENERIC_WRITE | GENERIC_ALL;
+    FILE_WRITE_ATTRIBUTES | FILE_DELETE_CHILD | DELETE | WRITE_DAC | WRITE_OWNER |
+    GENERIC_WRITE | GENERIC_ALL;
 constexpr std::size_t kMaxBytes = 2048;
 
 constexpr char kContract[] =
@@ -29,7 +30,8 @@ constexpr char kContract[] =
     "\"version\":\"1.0.0\","
     "\"machine_secure_root_required\":true,\"root_creation_implemented\":false,"
     "\"root_repair_implemented\":false,\"final_path_reparse_escape_forbidden\":true,"
-    "\"low_privilege_write_acl_forbidden\":true,\"machine_trusted_owner_required\":true,"
+    "\"low_privilege_write_acl_forbidden\":true,\"non_machine_write_acl_forbidden\":true,"
+    "\"machine_trusted_owner_required\":true,"
     "\"same_directory_staging\":true,\"staging_create_new\":true,"
     "\"staging_flush_file_buffers\":true,\"commit_move_fail_if_exists\":true,"
     "\"commit_move_write_through\":true,\"post_commit_readback_required\":true,"
@@ -104,14 +106,6 @@ bool machineOwner(PSID sid) {
     return wellKnown(WinLocalSystemSid, &system) && wellKnown(WinBuiltinAdministratorsSid, &admins)
         && (EqualSid(sid, system.data()) || EqualSid(sid, admins.data()));
 }
-bool lowPrivilege(PSID sid) {
-    if (sid == nullptr || !IsValidSid(sid)) return false;
-    for (auto type : {WinWorldSid, WinBuiltinUsersSid, WinAuthenticatedUserSid}) {
-        std::vector<BYTE> candidate;
-        if (!wellKnown(type, &candidate) || EqualSid(sid, candidate.data())) return true;
-    }
-    return false;
-}
 bool secureAcl(HANDLE h) {
     PSID owner = nullptr;
     PACL dacl = nullptr;
@@ -126,10 +120,12 @@ bool secureAcl(HANDLE h) {
         LPVOID rawAce = nullptr;
         if (!GetAce(dacl, i, &rawAce) || rawAce == nullptr) return false;
         const auto* header = static_cast<const ACE_HEADER*>(rawAce);
-        if (header->AceType != ACCESS_ALLOWED_ACE_TYPE) continue;
+        if (header->AceType == ACCESS_DENIED_ACE_TYPE) continue;
+        if (header->AceType != ACCESS_ALLOWED_ACE_TYPE) return false;
         const auto* ace = reinterpret_cast<const ACCESS_ALLOWED_ACE*>(rawAce);
         PSID sid = const_cast<PSID>(reinterpret_cast<const void*>(&ace->SidStart));
-        if (lowPrivilege(sid) && (ace->Mask & kForbiddenWrite) != 0) return false;
+        if (!IsValidSid(sid)) return false;
+        if ((ace->Mask & kForbiddenWrite) != 0 && !machineOwner(sid)) return false;
     }
     return true;
 }
