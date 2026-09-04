@@ -23,14 +23,25 @@ test('bootstrap recovery probe source contains no mutation, installer or Browser
     /Remove-Item/i,
     /Set-Content/i,
     /Add-Content/i,
+    /Clear-Content/i,
     /Out-File/i,
     /New-Item/i,
-    /Set-ItemProperty/i,
+    /Set-Item(?:Property)?/i,
     /New-ItemProperty/i,
     /Remove-ItemProperty/i,
     /Move-Item/i,
     /Copy-Item/i,
     /Invoke-WebRequest/i,
+    /Invoke-RestMethod/i,
+    /Invoke-Expression/i,
+    /Start-Service/i,
+    /Stop-Service/i,
+    /Restart-Service/i,
+    /Set-Service/i,
+    /New-Service/i,
+    /sc\.exe/i,
+    /reg\.exe/i,
+    /\[System\.IO\.File\]::Write/i,
     /quitAndInstall/i,
   ]) {
     assert.equal(forbidden.test(raw), false, `forbidden bootstrap probe primitive: ${forbidden}`);
@@ -46,32 +57,40 @@ test('bootstrap recovery probe source contains no mutation, installer or Browser
   assert.match(raw, /authority_effect\s*=\s*\$false/);
 });
 
-test('Windows bootstrap probe reads exact local evidence without changing any input byte', { skip: process.platform !== 'win32' }, async () => {
+test('Windows bootstrap probe reads exact local evidence and durable receipt hashes without changing input bytes', { skip: process.platform !== 'win32' }, async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'metaengine-bootstrap-probe-'));
   try {
     const userData = path.join(root, 'user-data');
     await fsp.mkdir(userData, { recursive: true });
     const target = '0.6.6-dev.33774085931.1';
+    const gitSha = '40de5272e4a511e3f8f586e36686e4239a316cb0';
     const app = path.join(root, 'METAENGINE Browser Test.exe');
     await fsp.writeFile(app, Buffer.from('read-only-probe-fixture'));
     const appSha = digest(app);
     const rows = {
       'metaengine-self-update-transaction-v1.json': {
-        schema: 'metaengine.self-update.transaction.v1', state: 'SUCCESSOR_BOOTED', source_version: '0.6.6-dev.4.1', target_version: target,
+        schema: 'metaengine.self-update.transaction.v1', transaction_id: '11111111-2222-4333-8444-555555555555',
+        state: 'SUCCESSOR_BOOTED', source_version: '0.6.6-dev.4.1', target_version: target, resolved_git_sha: gitSha,
         automatic_retry_allowed: false, authority_effect: false,
       },
       'metaengine-self-update-pre-install-receipt-v1.json': {
         schema: 'metaengine.self-update.pre-install-receipt.v1', version: target, available_version: target,
-        metadata_verified: true, restart_gate_safe: true, authority_effect: false,
+        metadata_verified: true, publisher_verified: true, resolved_git_sha: gitSha, restart_gate_safe: true, authority_effect: false,
       },
       'metaengine-self-update-successor-receipt-v1.json': {
         schema: 'metaengine.self-update.successor-receipt.v1', version: target, primary_instance: true,
-        pre_install_receipt_sha256: 'b'.repeat(64), authority_effect: false,
+        pre_install_receipt_sha256: 'placeholder', authority_effect: false,
       },
     };
     for (const [name, row] of Object.entries(rows)) {
       await fsp.writeFile(path.join(userData, name), `${JSON.stringify(row)}\n`, 'utf8');
     }
+    const preInstallPath = path.join(userData, 'metaengine-self-update-pre-install-receipt-v1.json');
+    const preInstallSha = digest(preInstallPath);
+    const successorPath = path.join(userData, 'metaengine-self-update-successor-receipt-v1.json');
+    rows['metaengine-self-update-successor-receipt-v1.json'].pre_install_receipt_sha256 = preInstallSha;
+    await fsp.writeFile(successorPath, `${JSON.stringify(rows['metaengine-self-update-successor-receipt-v1.json'])}\n`, 'utf8');
+
     const files = [app, ...Object.keys(rows).map((name) => path.join(userData, name))];
     const before = Object.fromEntries(files.map((file) => [file, digest(file)]));
 
@@ -86,8 +105,11 @@ test('Windows bootstrap probe reads exact local evidence without changing any in
     const output = JSON.parse(String(result.stdout || '').trim().split(/\r?\n/).filter(Boolean).at(-1));
     assert.equal(output.schema, 'metaengine.self-update.bootstrap-probe.v1');
     assert.equal(output.transaction_read_state, 'READ');
+    assert.equal(output.transaction_sha256, before[path.join(userData, 'metaengine-self-update-transaction-v1.json')]);
     assert.equal(output.pre_install_receipt_read_state, 'READ');
+    assert.equal(output.pre_install_receipt_sha256, preInstallSha);
     assert.equal(output.successor_receipt_read_state, 'READ');
+    assert.equal(output.successor_receipt_sha256, before[successorPath]);
     assert.equal(output.installed_executable.exists, true);
     assert.equal(output.installed_executable.sha256, appSha);
     assert.equal(output.installed_executable.hash_matches_expected, true);
