@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <cwctype>
 #include <string_view>
 #include <utility>
@@ -27,14 +28,15 @@ constexpr std::size_t kMaxBytes = 2048;
 
 constexpr char kContract[] =
     "{\"schema\":\"metaengine.browser-guardian.owner-enrollment-native-store.v1\","
-    "\"version\":\"1.0.0\","
+    "\"version\":\"1.0.1\","
     "\"machine_secure_root_required\":true,\"root_creation_implemented\":false,"
     "\"root_repair_implemented\":false,\"final_path_reparse_escape_forbidden\":true,"
     "\"low_privilege_write_acl_forbidden\":true,\"non_machine_write_acl_forbidden\":true,"
-    "\"machine_trusted_owner_required\":true,"
+    "\"machine_trusted_owner_required\":true,\"root_delete_share_fenced\":true,"
     "\"same_directory_staging\":true,\"staging_create_new\":true,"
     "\"staging_flush_file_buffers\":true,\"commit_move_fail_if_exists\":true,"
-    "\"commit_move_write_through\":true,\"post_commit_readback_required\":true,"
+    "\"commit_move_write_through\":true,\"commit_handle_relative_rename\":true,"
+    "\"post_commit_readback_required\":true,"
     "\"owner_replacement_allowed\":false,\"token_session_id_persisted\":false,"
     "\"journal_mutation_allowed\":false,\"wts_execution_allowed\":false,"
     "\"process_effect_allowed\":false,\"scm_effect_allowed\":false,"
@@ -47,6 +49,14 @@ struct Handle {
     ~Handle() { if (value != nullptr && value != INVALID_HANDLE_VALUE) CloseHandle(value); }
     Handle(const Handle&) = delete;
     Handle& operator=(const Handle&) = delete;
+    Handle(Handle&& other) noexcept : value(std::exchange(other.value, INVALID_HANDLE_VALUE)) {}
+    Handle& operator=(Handle&& other) noexcept {
+        if (this == &other) return *this;
+        if (value != nullptr && value != INVALID_HANDLE_VALUE) CloseHandle(value);
+        value = std::exchange(other.value, INVALID_HANDLE_VALUE);
+        return *this;
+    }
+    bool valid() const noexcept { return value != nullptr && value != INVALID_HANDLE_VALUE; }
 };
 struct Local {
     HLOCAL value = nullptr;
@@ -134,17 +144,19 @@ bool noReparse(HANDLE h) {
     return GetFileInformationByHandleEx(h, FileAttributeTagInfo, &info, sizeof(info))
         && (info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0;
 }
-bool secureRoot(const std::wstring& root) {
+Handle openSecureRoot(const std::wstring& root, DWORD extraAccess = 0) {
     const std::wstring pd = programData();
     const std::wstring expected = pd.empty() ? std::wstring{} : fullPath(pd + L"\\" + kRelativeRoot);
     const std::wstring actual = fullPath(root);
-    if (expected.empty() || actual.empty() || lower(expected) != lower(actual)) return false;
-    Handle h(CreateFileW(actual.c_str(), FILE_READ_ATTRIBUTES | READ_CONTROL,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+    if (expected.empty() || actual.empty() || lower(expected) != lower(actual)) return Handle{};
+
+    Handle h(CreateFileW(actual.c_str(), FILE_READ_ATTRIBUTES | READ_CONTROL | extraAccess,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
         FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
-    if (h.value == INVALID_HANDLE_VALUE || !noReparse(h.value)) return false;
+    if (!h.valid() || !noReparse(h.value)) return Handle{};
     const std::wstring resolved = finalPath(h.value);
-    return !resolved.empty() && lower(resolved) == lower(actual) && secureAcl(h.value);
+    if (resolved.empty() || lower(resolved) != lower(actual) || !secureAcl(h.value)) return Handle{};
+    return h;
 }
 
 bool hash64(std::string_view s) {
@@ -233,12 +245,13 @@ bool readBounded(HANDLE h, std::string* out, DWORD* error) {
 OwnerEnrollmentStoreResult classify(const std::wstring& root, const std::wstring& file,
     const OwnerEnrollmentDurableRecord* expected = nullptr) {
     OwnerEnrollmentStoreResult out;
-    out.root_trusted = secureRoot(root);
+    Handle rootGuard = openSecureRoot(root);
+    out.root_trusted = rootGuard.valid();
     if (!out.root_trusted) { out.reason = "OWNER_STORE_ROOT_NOT_MACHINE_TRUSTED"; out.win32_error = ERROR_ACCESS_DENIED; return out; }
 
     Handle h(CreateFileW(file.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ, nullptr,
         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
-    if (h.value == INVALID_HANDLE_VALUE) {
+    if (!h.valid()) {
         const DWORD error = GetLastError();
         if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) { out.reason = "OWNER_STORE_RECORD_ABSENT"; return out; }
         out.reason = "OWNER_STORE_RECORD_OPEN_FAILED"; out.win32_error = error; return out;
@@ -285,6 +298,39 @@ bool writeAll(HANDLE h, std::string_view payload) {
     }
     return true;
 }
+bool renameIntoRootFailIfExists(HANDLE file, HANDLE root, std::wstring_view name, DWORD* error) {
+    if (file == nullptr || file == INVALID_HANDLE_VALUE || root == nullptr || root == INVALID_HANDLE_VALUE || name.empty()) {
+        if (error) *error = ERROR_INVALID_PARAMETER;
+        return false;
+    }
+    if (name.size() > (MAXDWORD / sizeof(wchar_t))) {
+        if (error) *error = ERROR_FILENAME_EXCED_RANGE;
+        return false;
+    }
+    const DWORD nameBytes = static_cast<DWORD>(name.size() * sizeof(wchar_t));
+    const std::size_t bytes = FIELD_OFFSET(FILE_RENAME_INFO, FileName) + nameBytes;
+    if (bytes > MAXDWORD) {
+        if (error) *error = ERROR_INSUFFICIENT_BUFFER;
+        return false;
+    }
+    Local buffer;
+    buffer.value = LocalAlloc(LPTR, bytes);
+    if (buffer.value == nullptr) {
+        if (error) *error = ERROR_NOT_ENOUGH_MEMORY;
+        return false;
+    }
+    auto* info = reinterpret_cast<FILE_RENAME_INFO*>(buffer.value);
+    info->ReplaceIfExists = FALSE;
+    info->RootDirectory = root;
+    info->FileNameLength = nameBytes;
+    std::memcpy(info->FileName, name.data(), nameBytes);
+    if (!SetFileInformationByHandle(file, FileRenameInfo, info, static_cast<DWORD>(bytes))) {
+        if (error) *error = GetLastError();
+        return false;
+    }
+    if (error) *error = ERROR_SUCCESS;
+    return true;
+}
 
 }  // namespace
 
@@ -294,7 +340,8 @@ OwnerEnrollmentStoreResult OwnerEnrollmentStore::read() const { return classify(
 
 OwnerEnrollmentStoreResult OwnerEnrollmentStore::createIfAbsent(const OwnerEnrollmentDurableRecord& candidate) const {
     OwnerEnrollmentStoreResult out;
-    out.root_trusted = secureRoot(root_path_);
+    Handle rootGuard = openSecureRoot(root_path_, FILE_ADD_FILE);
+    out.root_trusted = rootGuard.valid();
     if (!out.root_trusted) { out.reason = "OWNER_STORE_ROOT_NOT_MACHINE_TRUSTED"; out.win32_error = ERROR_ACCESS_DENIED; return out; }
     OwnerEnrollmentDurableRecord normalized;
     if (!normalize(candidate, &normalized)) { out.reason = "OWNER_STORE_CANDIDATE_INVALID"; out.win32_error = ERROR_INVALID_DATA; return out; }
@@ -315,17 +362,23 @@ OwnerEnrollmentStoreResult OwnerEnrollmentStore::createIfAbsent(const OwnerEnrol
     if (stage.empty()) { out.reason = "OWNER_STORE_STAGE_PATH_FAILED"; out.win32_error = ERROR_INVALID_NAME; return out; }
 
     DWORD stageError = ERROR_SUCCESS;
+    DWORD commitError = ERROR_SUCCESS;
+    bool renameCommitted = false;
     {
-        Handle h(CreateFileW(stage.c_str(), GENERIC_READ | GENERIC_WRITE, 0, &security, CREATE_NEW,
+        Handle h(CreateFileW(stage.c_str(), GENERIC_READ | GENERIC_WRITE | DELETE, 0, &security, CREATE_NEW,
             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr));
-        if (h.value == INVALID_HANDLE_VALUE) {
+        if (!h.valid()) {
             out.reason = "OWNER_STORE_STAGE_CREATE_FAILED";
             out.win32_error = GetLastError();
             return out;
         }
         if (!writeAll(h.value, payload)) stageError = GetLastError();
         else if (!FlushFileBuffers(h.value)) stageError = GetLastError();
-        else out.staging_flushed = true;
+        else {
+            out.staging_flushed = true;
+            renameCommitted = renameIntoRootFailIfExists(h.value, rootGuard.value, kRecordName, &commitError);
+            out.move_committed = renameCommitted;
+        }
     }
     if (!out.staging_flushed) {
         DeleteFileW(stage.c_str());
@@ -334,12 +387,11 @@ OwnerEnrollmentStoreResult OwnerEnrollmentStore::createIfAbsent(const OwnerEnrol
         return out;
     }
 
-    if (!MoveFileExW(stage.c_str(), final.c_str(), MOVEFILE_WRITE_THROUGH)) {
-        const DWORD error = GetLastError(); DeleteFileW(stage.c_str());
-        if (error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS) return classify(root_path_, final, &normalized);
-        out.reason = "OWNER_STORE_COMMIT_MOVE_FAILED"; out.win32_error = error; return out;
+    if (!renameCommitted) {
+        DeleteFileW(stage.c_str());
+        if (commitError == ERROR_ALREADY_EXISTS || commitError == ERROR_FILE_EXISTS) return classify(root_path_, final, &normalized);
+        out.reason = "OWNER_STORE_COMMIT_RENAME_FAILED"; out.win32_error = commitError; return out;
     }
-    out.move_committed = true;
 
     auto readback = classify(root_path_, final, &normalized);
     readback.staging_flushed = out.staging_flushed;
