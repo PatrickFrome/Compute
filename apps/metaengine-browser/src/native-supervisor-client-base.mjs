@@ -1,10 +1,11 @@
 import { browserControlCapabilities } from './browser-control-capabilities.mjs';
 import { globalOwnerGateDisabled } from './owner-safety-gate-registry.mjs';
-import { NativeSupervisorCommandLaneScheduler, classifyNativeSupervisorCommand, COMMAND_LANES } from './native-supervisor-command-lanes.mjs';
+import { NativeSupervisorCommandLaneScheduler, classifyNativeSupervisorCommand } from './native-supervisor-command-lanes.mjs';
 import { SUPERVISOR_DEVICE_PROFILE } from './supervisor-device-identity.mjs';
 import { SupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime.mjs';
 import { SupervisorMeshRuntime } from './supervisor-mesh-runtime.mjs';
 import { SelfUpdateRuntime } from './self-update-runtime.mjs';
+import { NativeSupervisorCommandFastlane } from './native-supervisor-command-fastlane.mjs';
 import { confirmSelfUpdateRestartSafety } from './self-update-restart-safety.mjs';
 import { persistPreInstallReceipt } from './self-update-handoff.mjs';
 import { reconcileRestoredGeneratingChats } from './self-update-chat-reconcile.mjs';
@@ -125,6 +126,11 @@ export class NativeSupervisorClient {
   #maintenancePromise = null;
   #lastMaintenanceAtMs = 0;
   #maintenanceIntervalMs;
+  // Preserve the already released 750ms transport accelerator only as a fallback.
+  // Once wait-batch is proven supported, the held request becomes the sole lease path
+  // and this helper is stopped so steady-state never has two competing lease loops.
+  #commandFastlane = null;
+  #legacyFastlaneBusy = false;
 
   constructor({
     identity,
@@ -140,6 +146,8 @@ export class NativeSupervisorClient {
     commandMutationConcurrency = 8,
     commandBatchWaitMs = DEFAULT_BATCH_WAIT_MS,
     maintenanceIntervalMs = DEFAULT_MAINTENANCE_INTERVAL_MS,
+    commandFastlane = false,
+    commandFastlaneIntervalMs = 750,
   }) {
     if (!identity) throw new Error('native_supervisor_identity_required');
     if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
@@ -161,6 +169,18 @@ export class NativeSupervisorClient {
       mutationConcurrency: commandMutationConcurrency,
       maxBatch: this.#maxBatch,
     });
+    this.#commandFastlane = commandFastlane === true
+      ? new NativeSupervisorCommandFastlane({
+        intervalMs: Math.max(250, Number(commandFastlaneIntervalMs) || 750),
+        isRunning: () => this.#running,
+        isSlotBusy: () => this.#legacyFastlaneBusy
+          || this.#cyclePromise != null
+          || this.#currentCommands.size > 0
+          || this.#batchTransport === 'SUPPORTED',
+        identitySnapshot: () => this.#identity.snapshot?.() || null,
+        pickupAndRun: () => this.#pickupAndRunLegacyFastlaneCommand(),
+      })
+      : null;
 
     const executeSupervisorCommand = async (command) => {
       const action = String(command?.action || '');
@@ -222,6 +242,8 @@ export class NativeSupervisorClient {
       identity: this.#identity.snapshot(),
       supervisor_mode: this.#supervisorMode,
       armed: this.#armed,
+      command_fastlane: this.#commandFastlane?.snapshot()
+        || Object.freeze({ enabled: false, scheduler_authority: false, command_pickup_transport_only: false, authority_effect: false }),
       lifecycle: this.#lifecycle?.snapshot() || null,
       supervisor_mesh: this.#mesh?.snapshot() || null,
       self_update: this.#selfUpdate?.snapshot() || null,
@@ -237,6 +259,9 @@ export class NativeSupervisorClient {
         heartbeat_in_flight: this.#heartbeatPromise != null,
         command_lane_precedes_maintenance: true,
         long_poll_replaces_idle_timer_latency: this.#batchTransport === 'SUPPORTED',
+        legacy_750ms_fallback_configured: this.#commandFastlane != null,
+        legacy_fallback_suppressed_by_batch_transport: this.#batchTransport === 'SUPPORTED',
+        one_steady_state_lease_loop: true,
         transport_delivery_is_authority: false,
         automatic_effect_retry_allowed: false,
         authority_effect: false,
@@ -340,6 +365,7 @@ export class NativeSupervisorClient {
     this.#running = true;
     this.#startedAt = new Date().toISOString();
     this.#schedule();
+    this.#commandFastlane?.start();
     try {
       await this.#identity.ensure();
       await this.#restoreSessionContinuity().catch((error) => {
@@ -363,6 +389,7 @@ export class NativeSupervisorClient {
     this.#running = false;
     this.#mesh?.stop?.();
     this.#lifecycle?.stop?.();
+    this.#commandFastlane?.stop();
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
   }
@@ -474,6 +501,18 @@ export class NativeSupervisorClient {
     return body?.command || null;
   }
 
+  async #pickupAndRunLegacyFastlaneCommand() {
+    if (this.#batchTransport === 'SUPPORTED' || this.#legacyFastlaneBusy || this.#cyclePromise) return null;
+    this.#legacyFastlaneBusy = true;
+    try {
+      const command = await this.#nextCommand();
+      if (command) await this.#runCommand(command);
+      return command || null;
+    } finally {
+      this.#legacyFastlaneBusy = false;
+    }
+  }
+
   async #nextCommands() {
     if (this.#batchTransport !== 'UNAVAILABLE') {
       const response = await this.#signedRequest('/v1/commands/wait-batch', {
@@ -484,14 +523,16 @@ export class NativeSupervisorClient {
           wait_ms: this.#batchWaitMs,
         },
       });
-      if (response.status === 404) {
+      if ([404, 405, 501].includes(response.status)) {
         this.#batchTransport = 'UNAVAILABLE';
+        this.#commandFastlane?.start();
       } else {
         const body = await response.json().catch(() => ({}));
         if (!response.ok || !Array.isArray(body?.commands)) {
           throw new Error(`native_supervisor_batch_next_http_${response.status}:${body?.error || 'invalid_batch'}`);
         }
         this.#batchTransport = 'SUPPORTED';
+        this.#commandFastlane?.stop();
         this.#lastBatchCount = body.commands.length;
         return body.commands;
       }
@@ -642,12 +683,13 @@ export class NativeSupervisorClient {
     });
     const rows = execution.map((row, index) => {
       const nested = row.result || {};
+      const descriptor = classifyNativeSupervisorCommand(commands[index]);
       return {
         command: commands[index],
-        descriptor: classifyNativeSupervisorCommand(commands[index]),
+        descriptor,
         ok: row.ok,
         result: row.ok ? nested.result ?? null : null,
-        effect_outcome: row.ok ? nested.effect_outcome ?? null : (row.descriptor === COMMAND_LANES.READ_ONLY ? null : 'AMBIGUOUS'),
+        effect_outcome: row.ok ? nested.effect_outcome ?? null : (descriptor.read_only ? null : 'AMBIGUOUS'),
         execution_ms: row.ok ? nested.execution_ms ?? row.execution_ms : row.execution_ms,
         error: row.error,
       };
@@ -664,6 +706,7 @@ export class NativeSupervisorClient {
   }
 
   async cycle() {
+    if (this.#legacyFastlaneBusy) return this.snapshot();
     if (this.#cyclePromise) return this.#cyclePromise;
     this.#cyclePromise = (async () => {
       try {
