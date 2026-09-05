@@ -56,24 +56,32 @@ test('worker observer heartbeat projection strips authority-bearing signal field
   assert.equal('page_text' in projection.signals[0], false);
 });
 
-test('worker observation is wired into the existing primary heartbeat before DevOS and has no timer', async () => {
+test('worker observation and DevOS run only as idle work after remote command admission', async () => {
   const wrapper = await fs.readFile(sourcePath('native-supervisor-client.mjs'), 'utf8');
   assert.match(wrapper, /export \* from '\.\/native-supervisor-client-core\.mjs'/, 'compatibility wrapper must preserve the proven core export surface');
   const source = await fs.readFile(sourcePath('native-supervisor-client-core.mjs'), 'utf8');
-  const observeIndex = source.indexOf('await this.#observeWorkers();');
-  const heartbeatIndex = source.indexOf('await super.cycle();', observeIndex);
-  const devosIndex = source.indexOf('await this.#devosTaskCycle.cycle();', heartbeatIndex);
+  const cycleStart = source.indexOf('async cycle()');
+  const commandAdmission = source.indexOf('await super.cycle();', cycleStart);
+  const idleKick = source.indexOf('this.#kickIdleWork()', commandAdmission);
+  const idleMethod = source.indexOf('#kickIdleWork()');
+  const observeIndex = source.indexOf('await this.#observeWorkers();', idleMethod);
+  const waitMaintenanceIndex = source.indexOf('await this.#waitForBaseMaintenanceIdle();', observeIndex);
+  const devosIndex = source.indexOf('await this.#devosTaskCycle.cycle();', waitMaintenanceIndex);
 
-  assert.ok(observeIndex > 0, 'worker observer stage missing');
-  assert.ok(heartbeatIndex > observeIndex, 'worker observer must run before the primary heartbeat');
-  assert.ok(devosIndex > heartbeatIndex, 'DevOS must remain the post-heartbeat scheduling stage');
+  assert.ok(commandAdmission > cycleStart, 'remote command lane must be admitted first');
+  assert.ok(idleKick > commandAdmission, 'idle observation/DevOS must be kicked only after command admission');
+  assert.ok(observeIndex > idleMethod, 'worker observation must remain inside idle work');
+  assert.ok(waitMaintenanceIndex > observeIndex, 'idle work must wait for existing base maintenance before DevOS');
+  assert.ok(devosIndex > waitMaintenanceIndex, 'DevOS must remain behind idle observation and maintenance fences');
+  assert.match(source, /if \(Number\(supervisor\?\.control_fast_lane\?\.last_batch_count \|\| 0\) === 0\) this\.#kickIdleWork\(\)/);
   assert.match(source, /worker_observer_source:\s*this\.#workerObserver\s*\?\s*'NATIVE_SUPERVISOR_HEARTBEAT'/);
   assert.match(source, /worker_observer_second_polling_loop:\s*false/);
+  assert.match(source, /command_lease_precedes_idle_work:\s*true/);
 
   const intervalMatches = source.match(/setInterval\s*\(/g) || [];
   assert.equal(intervalMatches.length, 1, 'observer must not add a second timer/polling loop');
   assert.match(source, /#startBootstrapPump[\s\S]*setInterval\s*\(\(\) => \{ void this\.#bootstrapPulse/);
-  assert.doesNotMatch(wrapper, /setInterval\s*\(/, 'workspace wrapper must not add another timer');
+  assert.doesNotMatch(wrapper, /setInterval\s*\(/, 'public wrapper must not add another periodic command loop');
 });
 
 test('Browser root supplies a trusted local WebContents observer with bounded budget', async () => {
