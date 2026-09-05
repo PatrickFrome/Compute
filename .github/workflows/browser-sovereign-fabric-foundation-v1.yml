@@ -1,0 +1,67 @@
+name: METAENGINE Browser Sovereign Fabric Foundation V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/browser-fabric-*.mjs'
+      - 'apps/metaengine-browser/test/browser-sovereign-fabric-*.test.mjs'
+      - 'sql/browser_fabric_*.sql'
+      - 'docs/browser-sovereign-compute-fabric-foundation-v1.md'
+      - '.github/workflows/browser-sovereign-fabric-foundation-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fabric-foundation-contract:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Execute fabric ledger capability cell release recovery SLO governance contracts
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test test/browser-sovereign-fabric-foundation.test.mjs test/browser-sovereign-fabric-isolation-governance.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw "browser_fabric_contract_exit_$LASTEXITCODE" }
+
+      - name: Prove source-only SQL cannot auto-apply production remediation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f sql/browser_fabric_transport_promotion_acl_dry_run_v1.sql
+          test -f sql/browser_fabric_event_effect_ledger_pilot_v1.sql
+          test ! -e supabase/migrations/browser_fabric_transport_promotion_acl_dry_run_v1.sql
+          test ! -e supabase/migrations/browser_fabric_event_effect_ledger_pilot_v1.sql
+          grep -Eiq '^rollback;[[:space:]]*$' sql/browser_fabric_transport_promotion_acl_dry_run_v1.sql
+          ! grep -Eiq '^[[:space:]]*commit;[[:space:]]*$' sql/browser_fabric_transport_promotion_acl_dry_run_v1.sql
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src/browser-fabric-effect-ledger.mjs apps/metaengine-browser/src/browser-fabric-capability.mjs apps/metaengine-browser/src/browser-fabric-browser-cell.mjs apps/metaengine-browser/src/browser-fabric-cell-fleet.mjs apps/metaengine-browser/src/browser-fabric-release-authority-gate.mjs apps/metaengine-browser/src/browser-fabric-guardian-recovery-plan.mjs apps/metaengine-browser/src/browser-fabric-slo.mjs apps/metaengine-browser/src/browser-fabric-governance.mjs apps/metaengine-browser/src/browser-fabric-trace-context.mjs apps/metaengine-browser/test/browser-sovereign-fabric-foundation.test.mjs apps/metaengine-browser/test/browser-sovereign-fabric-isolation-governance.test.mjs sql/browser_fabric_transport_promotion_acl_dry_run_v1.sql sql/browser_fabric_event_effect_ledger_pilot_v1.sql docs/browser-sovereign-compute-fabric-foundation-v1.md .github/workflows/browser-sovereign-fabric-foundation-v1.yml)"
