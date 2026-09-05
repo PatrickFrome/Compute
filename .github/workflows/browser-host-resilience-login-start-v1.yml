@@ -1,0 +1,57 @@
+name: METAENGINE Browser Host Resilience Login Start V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/host-resilience-runtime.mjs'
+      - 'apps/metaengine-browser/test/host-resilience-runtime.test.mjs'
+      - 'apps/metaengine-browser/package.json'
+      - '.github/workflows/browser-host-resilience-login-start-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  login-start-policy-boundary:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Prove login-start registration and Startup Approval policy boundary
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --check src/host-resilience-runtime.mjs
+          if ($LASTEXITCODE -ne 0) { throw "host_resilience_syntax_exit_$LASTEXITCODE" }
+          node --test test/host-resilience-runtime.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw "host_resilience_test_exit_$LASTEXITCODE" }
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src/host-resilience-runtime.mjs apps/metaengine-browser/test/host-resilience-runtime.test.mjs .github/workflows/browser-host-resilience-login-start-v1.yml)"

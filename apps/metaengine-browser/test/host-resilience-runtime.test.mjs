@@ -30,9 +30,102 @@ test('enables Windows login start and prevent-app-suspension', async () => {
   assert.equal(state.state, 'ACTIVE');
   assert.equal(state.open_at_login, true);
   assert.equal(state.executable_will_launch_at_login, true);
+  assert.equal(state.login_start_verified, true);
+  assert.equal(state.login_start_policy_hold, false);
+  assert.equal(state.login_start_repair_attempts, 1);
   assert.equal(state.prevent_app_suspension, true);
   await runtime.stop();
   assert.equal(runtime.snapshot().prevent_app_suspension, false);
+});
+
+test('Windows Startup Approval hold is advisory and never grants registration repair authority', async () => {
+  const monitor = new EventEmitter();
+  let writes = 0;
+  const electron = {
+    app: {
+      isPackaged: true,
+      setLoginItemSettings: () => { writes += 1; },
+      getLoginItemSettings: () => ({ openAtLogin: true, executableWillLaunchAtLogin: false }),
+    },
+    powerMonitor: monitor,
+  };
+  const runtime = new HostResilienceRuntime({ electron, platform: 'win32' });
+  const state = await runtime.start();
+  assert.equal(state.state, 'ACTIVE');
+  assert.equal(state.open_at_login, true);
+  assert.equal(state.executable_will_launch_at_login, false);
+  assert.equal(state.login_start_verified, true);
+  assert.equal(state.login_start_policy_hold, true);
+  assert.equal(state.login_start_repair_attempts, 0);
+  assert.equal(state.login_start_retry_pending, false);
+  assert.equal(state.login_start_policy_hold_is_advisory, true);
+  assert.equal(state.login_start_policy_hold_grants_repair_authority, false);
+  assert.equal(writes, 0);
+
+  monitor.emit('resume');
+  await new Promise((resolve) => setImmediate(resolve));
+  const resumed = runtime.snapshot();
+  assert.ok(resumed.login_start_attempts >= 2, 'resume must refresh policy readback');
+  assert.equal(resumed.login_start_policy_hold, true);
+  assert.equal(resumed.login_start_repair_attempts, 0);
+  assert.equal(resumed.login_start_retry_pending, false);
+  assert.equal(writes, 0, 'policy hold must not rewrite login registration');
+  await runtime.stop();
+});
+
+test('proven absent login registration receives one repair before readback verification', async () => {
+  const monitor = new EventEmitter();
+  let registered = false;
+  let writes = 0;
+  const electron = {
+    app: {
+      isPackaged: true,
+      setLoginItemSettings: ({ openAtLogin }) => {
+        writes += 1;
+        registered = openAtLogin === true;
+      },
+      getLoginItemSettings: () => ({
+        openAtLogin: registered,
+        executableWillLaunchAtLogin: registered,
+      }),
+    },
+    powerMonitor: monitor,
+  };
+  const runtime = new HostResilienceRuntime({ electron, platform: 'win32' });
+  const state = await runtime.start();
+  assert.equal(state.state, 'ACTIVE');
+  assert.equal(state.login_start_verified, true);
+  assert.equal(state.login_start_policy_hold, false);
+  assert.equal(state.login_start_repair_attempts, 1);
+  assert.equal(state.login_start_repair_requires_fresh_absence_readback, true);
+  assert.equal(writes, 1);
+
+  await runtime.markProgress({ kind: 'TEST_HEARTBEAT' });
+  assert.equal(runtime.snapshot().login_start_repair_attempts, 1);
+  assert.equal(writes, 1, 'healthy registration must not be rewritten by resilience ticks');
+  await runtime.stop();
+});
+
+test('ambiguous login-start readback degrades without invoking repair', async () => {
+  let writes = 0;
+  const electron = {
+    app: {
+      isPackaged: true,
+      setLoginItemSettings: () => { writes += 1; },
+      getLoginItemSettings: () => { throw new Error('startup_approval_read_denied'); },
+    },
+    powerMonitor: new EventEmitter(),
+  };
+  const runtime = new HostResilienceRuntime({ electron, platform: 'win32' });
+  const state = await runtime.start();
+  assert.equal(state.state, 'DEGRADED_LOGIN_START');
+  assert.equal(state.login_start_verified, false);
+  assert.equal(state.login_start_policy_hold, false);
+  assert.equal(state.login_start_repair_attempts, 0);
+  assert.equal(state.login_start_retry_pending, true);
+  assert.match(state.last_error, /startup_approval_read_denied/);
+  assert.equal(writes, 0, 'failed readback must not grant write authority');
+  await runtime.stop();
 });
 
 test('resume event triggers recovery callback without page authority', async () => {
@@ -45,6 +138,7 @@ test('resume event triggers recovery callback without page authority', async () 
   assert.equal(resumed, 1);
   assert.ok(runtime.snapshot().last_resume_at);
   assert.equal(runtime.snapshot().authority_effect, false);
+  await runtime.stop();
 });
 
 test('sentinel self-heal reuses the one parent-progress tick and creates no second scheduler', async () => {

@@ -122,11 +122,12 @@ async function fetchJson(fetchImpl, url, maxBytes, label) {
 }
 
 function sleep(ms, label) {
-  return new Promise((resolve) => {
-    const t = setTimeout(resolve, ms);
-    if (typeof t?.unref === 'function') t.unref();
-    void label;
-  });
+  // This delay is part of an explicitly awaited release-list transaction.
+  // Unref'ing it lets a standalone Node resolver exit while top-level await is
+  // still pending (for example the physical self-update baseline resolver after
+  // a GitHub 403/429). Awaited retry work must therefore keep the process alive.
+  void label;
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function fetchReleaseListPage(fetchImpl, page) {

@@ -14,7 +14,8 @@ export class HostResilienceRuntime {
   #app = null; #stopRequested = true; #lastLoginCheckMs = 0; #sentinelStatePath = null; #sentinelBootstrapRetrySafe = false; #sentinelBootstrapAttempts = 0;
   #state = {
     state: 'UNINITIALIZED', open_at_login: false, executable_will_launch_at_login: false,
-    login_start_required: false, login_start_verified: false, login_start_attempts: 0,
+    login_start_required: false, login_start_verified: false, login_start_policy_hold: false,
+    login_start_attempts: 0, login_start_repair_attempts: 0,
     login_start_recheck_ms: LOGIN_START_RECHECK_MS, last_login_start_check_at: null,
     prevent_app_suspension: false, sentinel: null, sentinel_worker_healthy: false,
     sentinel_worker_recovery: null, sentinel_bootstrap: null,
@@ -42,7 +43,7 @@ export class HostResilienceRuntime {
       parent_progress: parentProgress,
       sentinel_worker_healthy: sentinel?.worker_ready === true,
       sentinel_bootstrap_retry_pending: this.#sentinelBootstrapRetrySafe === true && this.#stopRequested !== true,
-      login_start_retry_pending: this.#state.login_start_required === true && this.#state.login_start_verified !== true && this.#stopRequested !== true,
+      login_start_retry_pending: this.#state.login_start_required === true && this.#state.open_at_login !== true && this.#stopRequested !== true,
       useful_progress_required: true,
       pid_liveness_alone_sufficient: false,
       terminal_requires_external_stop: true,
@@ -52,6 +53,9 @@ export class HostResilienceRuntime {
       sentinel_recovery_uses_existing_progress_tick: true,
       sentinel_bootstrap_recovery_uses_existing_progress_tick: true,
       login_start_recovery_uses_existing_progress_tick: true,
+      login_start_repair_requires_fresh_absence_readback: true,
+      login_start_policy_hold_is_advisory: true,
+      login_start_policy_hold_grants_repair_authority: false,
       watchdog_scheduler_authority: false,
       watchdog_task_leasing: false,
       authority_effect: false,
@@ -69,6 +73,7 @@ export class HostResilienceRuntime {
     this.#state.login_start_required = required;
     if (!required) {
       this.#state.login_start_verified = false;
+      this.#state.login_start_policy_hold = false;
       return true;
     }
     const now = Date.now();
@@ -78,28 +83,57 @@ export class HostResilienceRuntime {
     this.#state.last_login_start_check_at = new Date(now).toISOString();
     this.#state.login_start_attempts += 1;
     const app = this.#app;
-    if (!app || typeof app.setLoginItemSettings !== 'function' || typeof app.getLoginItemSettings !== 'function') {
+    if (!app || typeof app.getLoginItemSettings !== 'function') {
       this.#state.login_start_verified = false;
+      this.#state.login_start_policy_hold = false;
       this.#state.last_error = 'login_start:API_UNAVAILABLE';
       this.#state.state = 'DEGRADED_LOGIN_START';
       return false;
     }
     try {
-      app.setLoginItemSettings({ openAtLogin: true, enabled: true });
-      const settings = app.getLoginItemSettings();
-      this.#state.open_at_login = settings?.openAtLogin === true;
-      this.#state.executable_will_launch_at_login = settings?.executableWillLaunchAtLogin === true;
-      this.#state.login_start_verified = this.#state.open_at_login && this.#state.executable_will_launch_at_login;
+      const observed = app.getLoginItemSettings();
+      this.#state.open_at_login = observed?.openAtLogin === true;
+      this.#state.executable_will_launch_at_login = observed?.executableWillLaunchAtLogin === true;
+      this.#state.login_start_policy_hold = this.#state.open_at_login && observed?.executableWillLaunchAtLogin === false;
+      this.#state.login_start_verified = this.#state.open_at_login;
+
       if (this.#state.login_start_verified) {
         if (String(this.#state.last_error || '').startsWith('login_start:')) this.#state.last_error = null;
         if (this.#state.state === 'DEGRADED_LOGIN_START') this.#state.state = 'ACTIVE';
         return true;
       }
-      this.#state.last_error = 'login_start:NOT_VERIFIED';
+
+      // Repair authority exists only after a fresh readback proves registration absent.
+      // Startup Approval is an OS-owned policy layer: when openAtLogin is already true,
+      // executableWillLaunchAtLogin=false is advisory and must never trigger a rewrite.
+      if (typeof app.setLoginItemSettings !== 'function') {
+        this.#state.last_error = 'login_start:API_UNAVAILABLE';
+        this.#state.state = 'DEGRADED_LOGIN_START';
+        return false;
+      }
+      this.#state.login_start_repair_attempts += 1;
+      app.setLoginItemSettings({ openAtLogin: true, enabled: true });
+
+      const repaired = app.getLoginItemSettings();
+      this.#state.open_at_login = repaired?.openAtLogin === true;
+      this.#state.executable_will_launch_at_login = repaired?.executableWillLaunchAtLogin === true;
+      this.#state.login_start_policy_hold = this.#state.open_at_login && repaired?.executableWillLaunchAtLogin === false;
+      this.#state.login_start_verified = this.#state.open_at_login;
+      if (this.#state.login_start_verified) {
+        if (String(this.#state.last_error || '').startsWith('login_start:')) this.#state.last_error = null;
+        if (this.#state.state === 'DEGRADED_LOGIN_START') this.#state.state = 'ACTIVE';
+        return true;
+      }
+      this.#state.login_start_policy_hold = false;
+      this.#state.last_error = 'login_start:REGISTRATION_ABSENT_AFTER_REPAIR';
       this.#state.state = 'DEGRADED_LOGIN_START';
       return false;
     } catch (error) {
+      // A failed or ambiguous readback never grants write authority. The next recovery
+      // pass always starts with a fresh getLoginItemSettings() observation before any
+      // further repair attempt.
       this.#state.login_start_verified = false;
+      this.#state.login_start_policy_hold = false;
       this.#state.last_error = `login_start:${String(error?.message || error).slice(0, 180)}`;
       this.#state.state = 'DEGRADED_LOGIN_START';
       return false;
