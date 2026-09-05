@@ -106,8 +106,8 @@ order by effect_id, ledger_sequence desc;
 revoke all on public.devos_effect_projection_v1 from public, anon, authenticated;
 grant select on public.devos_effect_projection_v1 to service_role;
 
--- No PUBLIC RPC, no SECURITY DEFINER authority surface, and no queue payload beyond
--- effect_id/correlation metadata. Physical execution still requires exact capability
--- verification plus current readback at the actuator boundary.
+-- No PUBLIC RPC and no queue payload beyond effect_id/correlation metadata.
+-- Physical execution still requires exact capability verification plus current
+-- readback at the actuator boundary.
 
 commit;
