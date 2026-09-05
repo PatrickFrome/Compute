@@ -11,9 +11,12 @@ namespace {
 
 constexpr char kContractJson[] =
     "{\"schema\":\"metaengine.browser-guardian.owner-enrollment-reconciler.v1\","
-    "\"version\":\"1.0.0\","
+    "\"version\":\"1.0.1\","
     "\"level_triggered_readback_required\":true,"
     "\"commit_result_inference_allowed\":false,"
+    "\"store_effect_outcome_algebra_consumed\":true,"
+    "\"store_reason_string_authority\":false,"
+    "\"commit_api_error_authority\":false,"
     "\"durable_absence_can_prove_no_effect\":true,"
     "\"exact_owner_readback_can_prove_binding\":true,"
     "\"same_owner_different_provenance_is_immutable_noop\":true,"
@@ -70,6 +73,20 @@ OwnerEnrollmentReconcileResult result(OwnerEnrollmentReconcileState state, const
     return out;
 }
 
+OwnerEnrollmentReconcileResult ambiguous(const char* reason) {
+    auto out = result(OwnerEnrollmentReconcileState::AmbiguousReadback, reason);
+    out.ambiguous = true;
+    return out;
+}
+
+OwnerEnrollmentReconcileResult noEffect() {
+    auto out = result(
+        OwnerEnrollmentReconcileState::NoDurableOwnerEffectProven,
+        "OWNER_ENROLLMENT_DURABLE_ABSENCE_PROVES_NO_EFFECT");
+    out.no_durable_owner_effect_proven = true;
+    return out;
+}
+
 }  // namespace
 
 OwnerEnrollmentReconcileResult reconcileOwnerEnrollmentReadback(
@@ -80,26 +97,34 @@ OwnerEnrollmentReconcileResult reconcileOwnerEnrollmentReadback(
         return result(OwnerEnrollmentReconcileState::Hold, "OWNER_ENROLLMENT_CANDIDATE_INVALID");
     }
 
+    // The typed store outcome is the semantic boundary.  `reason` and the original
+    // Win32 commit error are diagnostic only and must not re-open a physical effect.
+    if (readback.outcome == OwnerEnrollmentStoreOutcome::Ambiguous) {
+        return ambiguous("OWNER_ENROLLMENT_DURABLE_READBACK_AMBIGUOUS");
+    }
+    if (readback.outcome == OwnerEnrollmentStoreOutcome::Corrupt) {
+        return result(OwnerEnrollmentReconcileState::Hold, "OWNER_ENROLLMENT_DURABLE_STATE_CORRUPT");
+    }
+    if (readback.outcome == OwnerEnrollmentStoreOutcome::NoEffectProven) {
+        if (!readback.present && readback.win32_error == ERROR_SUCCESS) return noEffect();
+        return ambiguous("OWNER_ENROLLMENT_NO_EFFECT_OUTCOME_INCONSISTENT");
+    }
+
+    // Legacy/defensive compatibility for synthetic readbacks that predate the
+    // typed outcome.  Physical store reads in v1.0.4 populate outcome explicitly.
     if (!readback.root_trusted) {
         return result(OwnerEnrollmentReconcileState::Hold, "OWNER_ENROLLMENT_ROOT_UNTRUSTED");
     }
     if (readback.corrupt) {
         return result(OwnerEnrollmentReconcileState::Hold, "OWNER_ENROLLMENT_DURABLE_STATE_CORRUPT");
     }
-
     if (!readback.present) {
-        if (readback.win32_error == ERROR_SUCCESS && readback.reason == "OWNER_STORE_RECORD_ABSENT") {
-            auto out = result(
-                OwnerEnrollmentReconcileState::NoDurableOwnerEffectProven,
-                "OWNER_ENROLLMENT_DURABLE_ABSENCE_PROVES_NO_EFFECT");
-            out.no_durable_owner_effect_proven = true;
-            return out;
+        if (readback.outcome == OwnerEnrollmentStoreOutcome::None
+            && readback.win32_error == ERROR_SUCCESS
+            && readback.reason == "OWNER_STORE_RECORD_ABSENT") {
+            return noEffect();
         }
-        auto out = result(
-            OwnerEnrollmentReconcileState::AmbiguousReadback,
-            "OWNER_ENROLLMENT_DURABLE_ABSENCE_NOT_PROVEN");
-        out.ambiguous = true;
-        return out;
+        return ambiguous("OWNER_ENROLLMENT_DURABLE_ABSENCE_NOT_PROVEN");
     }
 
     OwnerEnrollmentDurableRecord normalizedDurable;
