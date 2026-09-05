@@ -7,6 +7,7 @@
 
 using metaengine::guardian::OwnerEnrollmentDurableRecord;
 using metaengine::guardian::OwnerEnrollmentReconcileState;
+using metaengine::guardian::OwnerEnrollmentStoreOutcome;
 using metaengine::guardian::OwnerEnrollmentStoreResult;
 using metaengine::guardian::browserGuardianOwnerEnrollmentReconcilerContractJson;
 using metaengine::guardian::reconcileOwnerEnrollmentReadback;
@@ -24,6 +25,7 @@ OwnerEnrollmentDurableRecord candidate() {
 OwnerEnrollmentStoreResult absent() {
     OwnerEnrollmentStoreResult out;
     out.root_trusted = true;
+    out.outcome = OwnerEnrollmentStoreOutcome::NoEffectProven;
     out.reason = "OWNER_STORE_RECORD_ABSENT";
     out.win32_error = ERROR_SUCCESS;
     return out;
@@ -33,6 +35,7 @@ OwnerEnrollmentStoreResult presentExact() {
     OwnerEnrollmentStoreResult out;
     out.root_trusted = true;
     out.present = true;
+    out.outcome = OwnerEnrollmentStoreOutcome::EffectExact;
     out.reason = "OWNER_STORE_RECORD_VALID";
     out.record = candidate();
     return out;
@@ -57,7 +60,10 @@ int main() {
     const auto desired = candidate();
 
     {
-        const auto out = reconcileOwnerEnrollmentReadback(absent(), desired);
+        auto current = absent();
+        current.reason = "OWNER_STORE_COMMIT_NO_EFFECT_PROVEN";
+        current.commit_win32_error = ERROR_ACCESS_DENIED;
+        const auto out = reconcileOwnerEnrollmentReadback(current, desired);
         assert(out.state == OwnerEnrollmentReconcileState::NoDurableOwnerEffectProven);
         assert(out.no_durable_owner_effect_proven);
         assert(!out.ambiguous);
@@ -65,7 +71,11 @@ int main() {
     }
 
     {
-        const auto out = reconcileOwnerEnrollmentReadback(presentExact(), desired);
+        auto current = presentExact();
+        current.reason = "OWNER_STORE_COMMIT_RESULT_EXACT_AFTER_ERROR";
+        current.commit_win32_error = ERROR_ACCESS_DENIED;
+        current.committed = false;
+        const auto out = reconcileOwnerEnrollmentReadback(current, desired);
         assert(out.state == OwnerEnrollmentReconcileState::DurableOwnerExact);
         assert(out.durable_owner_present_proven);
         assert(out.durable_candidate_exact);
@@ -75,6 +85,7 @@ int main() {
 
     {
         auto current = presentExact();
+        current.outcome = OwnerEnrollmentStoreOutcome::Conflict;
         current.record.enrollment_evidence_sha256 = std::string(64, 'c');
         const auto out = reconcileOwnerEnrollmentReadback(current, desired);
         assert(out.state == OwnerEnrollmentReconcileState::DurableOwnerExactDifferentProvenance);
@@ -86,6 +97,7 @@ int main() {
 
     {
         auto current = presentExact();
+        current.outcome = OwnerEnrollmentStoreOutcome::Conflict;
         current.record.expected_owner_sid = L"S-1-5-21-999-888-777-1002";
         const auto out = reconcileOwnerEnrollmentReadback(current, desired);
         assert(out.state == OwnerEnrollmentReconcileState::DurableOwnerMismatch);
@@ -97,7 +109,8 @@ int main() {
 
     {
         auto current = absent();
-        current.reason = "OWNER_STORE_RECORD_OPEN_FAILED";
+        current.outcome = OwnerEnrollmentStoreOutcome::Ambiguous;
+        current.reason = "misleading-diagnostic-only";
         current.win32_error = ERROR_ACCESS_DENIED;
         const auto out = reconcileOwnerEnrollmentReadback(current, desired);
         assert(out.state == OwnerEnrollmentReconcileState::AmbiguousReadback);
@@ -108,6 +121,7 @@ int main() {
 
     {
         auto current = presentExact();
+        current.outcome = OwnerEnrollmentStoreOutcome::Corrupt;
         current.corrupt = true;
         const auto out = reconcileOwnerEnrollmentReadback(current, desired);
         assert(out.state == OwnerEnrollmentReconcileState::Hold);
@@ -117,10 +131,23 @@ int main() {
 
     {
         auto current = presentExact();
+        current.outcome = OwnerEnrollmentStoreOutcome::None;
         current.root_trusted = false;
         const auto out = reconcileOwnerEnrollmentReadback(current, desired);
         assert(out.state == OwnerEnrollmentReconcileState::Hold);
         assert(out.reason == "OWNER_ENROLLMENT_ROOT_UNTRUSTED");
+        proveZeroAuthority(out);
+    }
+
+    {
+        OwnerEnrollmentStoreResult legacy;
+        legacy.root_trusted = true;
+        legacy.outcome = OwnerEnrollmentStoreOutcome::None;
+        legacy.reason = "OWNER_STORE_RECORD_ABSENT";
+        legacy.win32_error = ERROR_SUCCESS;
+        const auto out = reconcileOwnerEnrollmentReadback(legacy, desired);
+        assert(out.state == OwnerEnrollmentReconcileState::NoDurableOwnerEffectProven);
+        assert(out.no_durable_owner_effect_proven);
         proveZeroAuthority(out);
     }
 
@@ -134,6 +161,9 @@ int main() {
     }
 
     const std::string contract = browserGuardianOwnerEnrollmentReconcilerContractJson();
+    assert(contract.find("\"store_effect_outcome_algebra_consumed\":true") != std::string::npos);
+    assert(contract.find("\"store_reason_string_authority\":false") != std::string::npos);
+    assert(contract.find("\"commit_api_error_authority\":false") != std::string::npos);
     assert(contract.find("\"commit_result_inference_allowed\":false") != std::string::npos);
     assert(contract.find("\"ambiguous_readback_retry_allowed\":false") != std::string::npos);
     assert(contract.find("\"automatic_retry_allowed\":false") != std::string::npos);
