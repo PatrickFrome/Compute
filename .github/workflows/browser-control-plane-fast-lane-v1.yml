@@ -5,12 +5,18 @@ on:
     paths:
       - 'apps/metaengine-browser/src/native-supervisor-client-base.mjs'
       - 'apps/metaengine-browser/src/native-supervisor-client-core.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
       - 'apps/metaengine-browser/src/native-supervisor-command-lanes.mjs'
+      - 'apps/metaengine-browser/src/browser-control-capabilities.mjs'
       - 'apps/metaengine-browser/src/browser-realtime-process-plane.mjs'
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/realtime-command-wake.mjs'
+      - 'apps/metaengine-browser/test/browser-realtime-process-plane.test.mjs'
+      - 'apps/metaengine-browser/test/realtime-command-wake.test.mjs'
       - 'apps/metaengine-browser/test/native-supervisor-command-lanes.test.mjs'
       - 'apps/metaengine-browser/test/native-supervisor-fast-lane-contract.test.mjs'
       - 'sql/browser_control_plane_fast_lane_v1.sql'
+      - 'sql/browser_control_plane_realtime_wake_v1.sql'
       - '.github/workflows/browser-control-plane-fast-lane-v1.yml'
   workflow_dispatch:
 
@@ -54,35 +60,52 @@ jobs:
           node --check src/native-supervisor-command-lanes.mjs
           node --check src/native-supervisor-client-base.mjs
           node --check src/native-supervisor-client-core.mjs
+          node --check src/native-supervisor-client.mjs
+          node --check src/browser-control-capabilities.mjs
           node --check src/browser-realtime-process-plane.mjs
+          node --check supabase/a2-browser-native-supervisor-v1/realtime-command-wake.mjs
 
-      - name: Execute adversarial concurrency and latency contracts
+      - name: Execute adversarial concurrency, wake, and process contracts
         working-directory: apps/metaengine-browser
         shell: bash
         run: |
           set -euo pipefail
-          node --test test/native-supervisor-command-lanes.test.mjs test/native-supervisor-fast-lane-contract.test.mjs
+          node --test \
+            test/native-supervisor-command-lanes.test.mjs \
+            test/native-supervisor-fast-lane-contract.test.mjs \
+            test/browser-realtime-process-plane.test.mjs \
+            test/realtime-command-wake.test.mjs
 
-      - name: Prove Edge batch surface is typed and source only
+      - name: Prove Edge realtime batch surface is typed and non-authoritative
         shell: bash
         run: |
           set -euo pipefail
           edge='apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts'
           grep -Fq "'/v1/commands/wait-batch'" "$edge"
           grep -Fq "'/v1/commands/result-batch'" "$edge"
+          grep -Fq 'openRealtimeCommandWake' "$edge"
+          grep -Fq "wake_reason:'SUBSCRIBED_RECHECK'" "$edge"
+          grep -Fq 'const wake=await subscription.wake' "$edge"
           grep -Fq 'transport_delivery_is_authority:false' "$edge"
+          grep -Fq 'realtime_process_plane:boundedObject' "$edge"
+          grep -Fq 'control_latency:boundedObject' "$edge"
+          ! grep -Eq "finish\(['\"]SUBSCRIBED_RECHECK['\"]\)" "$edge"
           ! grep -Eq 'eval[[:space:]]*\(|new[[:space:]]+Function[[:space:]]*\(' "$edge"
 
       - name: Prove SQL cannot auto-apply live control authority
         shell: bash
         run: |
           set -euo pipefail
-          sql='sql/browser_control_plane_fast_lane_v1.sql'
-          test -f "$sql"
+          for sql in sql/browser_control_plane_fast_lane_v1.sql sql/browser_control_plane_realtime_wake_v1.sql; do
+            test -f "$sql"
+            grep -Eiq '^rollback;[[:space:]]*$' "$sql"
+            ! grep -Eiq '^[[:space:]]*commit;[[:space:]]*$' "$sql"
+            ! grep -Eiq 'grant[[:space:]]+execute[^;]+[[:space:]]+to[[:space:]]+(public|anon|authenticated)[[:space:]]*;' "$sql"
+          done
           test ! -e 'supabase/migrations/browser_control_plane_fast_lane_v1.sql'
-          grep -Eiq '^rollback;[[:space:]]*$' "$sql"
-          ! grep -Eiq '^[[:space:]]*commit;[[:space:]]*$' "$sql"
-          ! grep -Eiq 'grant[[:space:]]+execute[^;]+[[:space:]]+to[[:space:]]+(public|anon|authenticated)[[:space:]]*;' "$sql"
+          test ! -e 'supabase/migrations/browser_control_plane_realtime_wake_v1.sql'
+          grep -Fq 'realtime.send(' sql/browser_control_plane_realtime_wake_v1.sql
+          ! grep -Eq 'new[.]payload' sql/browser_control_plane_realtime_wake_v1.sql
 
       - name: Prove source checkout unchanged
         shell: bash
@@ -95,9 +118,15 @@ jobs:
             apps/metaengine-browser/src/native-supervisor-command-lanes.mjs \
             apps/metaengine-browser/src/native-supervisor-client-base.mjs \
             apps/metaengine-browser/src/native-supervisor-client-core.mjs \
+            apps/metaengine-browser/src/native-supervisor-client.mjs \
+            apps/metaengine-browser/src/browser-control-capabilities.mjs \
             apps/metaengine-browser/src/browser-realtime-process-plane.mjs \
             apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts \
+            apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/realtime-command-wake.mjs \
+            apps/metaengine-browser/test/browser-realtime-process-plane.test.mjs \
+            apps/metaengine-browser/test/realtime-command-wake.test.mjs \
             apps/metaengine-browser/test/native-supervisor-command-lanes.test.mjs \
             apps/metaengine-browser/test/native-supervisor-fast-lane-contract.test.mjs \
             sql/browser_control_plane_fast_lane_v1.sql \
+            sql/browser_control_plane_realtime_wake_v1.sql \
             .github/workflows/browser-control-plane-fast-lane-v1.yml)"
