@@ -209,8 +209,16 @@ export class NativeSupervisorCommandLaneScheduler {
       causal_pending_lookup: 'O(1)',
       repeated_pending_causal_scan: false,
       pending_scan_bounded_by_max_batch: true,
+      live_concurrency_tuning: true,
+      live_concurrency_tuning_changes_authority: false,
       authority_effect: false,
     });
+  }
+
+  setConcurrencyBudget({ read_concurrency, mutation_concurrency } = {}) {
+    this.#readConcurrency = int(read_concurrency, this.#readConcurrency, 1, 128);
+    this.#mutationConcurrency = int(mutation_concurrency, this.#mutationConcurrency, 1, 32);
+    return this.snapshot();
   }
 
   async drain(commands = [], execute) {
@@ -373,6 +381,8 @@ export const NATIVE_SUPERVISOR_COMMAND_LANE_CONTRACT = Object.freeze({
   causal_dependency_precompute: 'O(n)',
   causal_pending_lookup: 'O(1)',
   repeated_pending_causal_scan: false,
+  live_concurrency_tuning: true,
+  live_concurrency_tuning_changes_authority: false,
   automatic_effect_retry_allowed: false,
   authority_effect: false,
 });
