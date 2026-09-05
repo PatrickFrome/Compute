@@ -9,6 +9,7 @@
 -- Core invariants:
 --   * DB lease remains authority; wake/push delivery never is authority.
 --   * READ_ONLY commands have zero action-budget cost.
+--   * JS and DB action classifiers must remain exact-parity for READ_ONLY actions.
 --   * multiple READ_ONLY commands may be leased together.
 --   * explicit distinct-tab mutations may be leased concurrently.
 --   * same-tab mutations remain one leased effect at a time.
@@ -21,10 +22,11 @@ alter table public.compute_fabric_a2_browser_supervisor_command_h205f22
   add column if not exists command_lane text generated always as (
     case
       when action in (
-        'POLL','CAPTURE','CAPTURE_VIEW',
+        'POLL','CAPTURE','CAPTURE_VIEW','CONTROL_CAPABILITIES',
+        'PROCESS_CENSUS','PROCESS_EVENTS','CONTROL_LATENCY_STATUS',
         'DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES',
         'DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD',
-        'DOWNLOAD_STATUS','SELF_UPDATE_STATUS'
+        'DOWNLOAD_STATUS','SELF_UPDATE_STATUS','GATE_STATUS','TAB_CENSUS','FLEET_STATUS'
       ) then 'READ_ONLY'
       when action='DISARM'
         or (action='SET_SUPERVISOR_MODE' and upper(coalesce(payload->>'mode',''))='OFF')
@@ -40,10 +42,11 @@ alter table public.compute_fabric_a2_browser_supervisor_command_h205f22
   add column if not exists effect_key text generated always as (
     case
       when action in (
-        'POLL','CAPTURE','CAPTURE_VIEW',
+        'POLL','CAPTURE','CAPTURE_VIEW','CONTROL_CAPABILITIES',
+        'PROCESS_CENSUS','PROCESS_EVENTS','CONTROL_LATENCY_STATUS',
         'DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES',
         'DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD',
-        'DOWNLOAD_STATUS','SELF_UPDATE_STATUS'
+        'DOWNLOAD_STATUS','SELF_UPDATE_STATUS','GATE_STATUS','TAB_CENSUS','FLEET_STATUS'
       ) then null
       when action='DISARM'
         or (action='SET_SUPERVISOR_MODE' and upper(coalesce(payload->>'mode',''))='OFF')
@@ -338,6 +341,7 @@ revoke all on function public.h205f22_a2_browser_supervisor_complete_batch_v1(uu
 -- 5. READ_ONLY can complete without effect_outcome; mutation cannot complete without CONFIRMED readback.
 -- 6. dropped/duplicated wakeups cannot grant authority or duplicate a physical effect.
 -- 7. replay by idempotency key preserves one logical command identity.
--- 8. old single-command endpoints remain compatible during the strangler cutover.
+-- 8. JS/DB read-only classifier parity includes process census/events/latency telemetry.
+-- 9. old single-command endpoints remain compatible during the strangler cutover.
 
 rollback;
