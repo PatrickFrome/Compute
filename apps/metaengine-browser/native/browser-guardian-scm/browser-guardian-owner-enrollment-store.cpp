@@ -29,7 +29,7 @@ constexpr std::size_t kMaxBytes = 2048;
 
 constexpr char kContract[] =
     "{\"schema\":\"metaengine.browser-guardian.owner-enrollment-native-store.v1\","
-    "\"version\":\"1.0.2\","
+    "\"version\":\"1.0.3\","
     "\"machine_secure_root_required\":true,\"root_creation_implemented\":false,"
     "\"root_repair_implemented\":false,\"final_path_reparse_escape_forbidden\":true,"
     "\"low_privilege_write_acl_forbidden\":true,\"non_machine_write_acl_forbidden\":true,"
@@ -38,7 +38,10 @@ constexpr char kContract[] =
     "\"staging_flush_file_buffers\":true,\"commit_move_fail_if_exists\":true,"
     "\"commit_move_write_through\":true,\"commit_source_handle_rename\":true,"
     "\"commit_under_fenced_root\":true,\"commit_handle_relative_rename\":false,"
-    "\"post_commit_readback_required\":true,"
+    "\"post_commit_readback_required\":true,\"commit_failure_readback_required\":true,"
+    "\"ambiguous_commit_outcome_fail_closed\":true,"
+    "\"commit_unknown_result_automatic_retry_allowed\":false,"
+    "\"effect_outcome_algebra\":\"NO_EFFECT_PROVEN|EFFECT_EXACT|CONFLICT|CORRUPT|AMBIGUOUS\","
     "\"owner_replacement_allowed\":false,\"token_session_id_persisted\":false,"
     "\"journal_mutation_allowed\":false,\"wts_execution_allowed\":false,"
     "\"process_effect_allowed\":false,\"scm_effect_allowed\":false,"
@@ -249,33 +252,54 @@ OwnerEnrollmentStoreResult classify(const std::wstring& root, const std::wstring
     OwnerEnrollmentStoreResult out;
     Handle rootGuard = openSecureRoot(root);
     out.root_trusted = rootGuard.valid();
-    if (!out.root_trusted) { out.reason = "OWNER_STORE_ROOT_NOT_MACHINE_TRUSTED"; out.win32_error = ERROR_ACCESS_DENIED; return out; }
+    if (!out.root_trusted) {
+        out.outcome = OwnerEnrollmentStoreOutcome::Ambiguous;
+        out.reason = "OWNER_STORE_ROOT_NOT_MACHINE_TRUSTED";
+        out.win32_error = ERROR_ACCESS_DENIED;
+        return out;
+    }
 
     Handle h(CreateFileW(file.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ, nullptr,
         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
     if (!h.valid()) {
         const DWORD error = GetLastError();
-        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) { out.reason = "OWNER_STORE_RECORD_ABSENT"; return out; }
-        out.reason = "OWNER_STORE_RECORD_OPEN_FAILED"; out.win32_error = error; return out;
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
+            out.outcome = OwnerEnrollmentStoreOutcome::NoEffectProven;
+            out.reason = "OWNER_STORE_RECORD_ABSENT";
+            return out;
+        }
+        out.outcome = OwnerEnrollmentStoreOutcome::Ambiguous;
+        out.reason = "OWNER_STORE_RECORD_OPEN_FAILED";
+        out.win32_error = error;
+        return out;
     }
     out.present = true;
     const std::wstring resolved = finalPath(h.value);
     const std::wstring wanted = fullPath(file);
     if (!noReparse(h.value) || resolved.empty() || wanted.empty() || lower(resolved) != lower(wanted)) {
+        out.outcome = OwnerEnrollmentStoreOutcome::Corrupt;
         out.corrupt = true; out.reason = "OWNER_STORE_FINAL_PATH_ESCAPE"; out.win32_error = ERROR_ACCESS_DENIED; return out;
     }
-    if (!secureAcl(h.value)) { out.corrupt = true; out.reason = "OWNER_STORE_RECORD_SECURITY_INVALID"; out.win32_error = ERROR_ACCESS_DENIED; return out; }
+    if (!secureAcl(h.value)) {
+        out.outcome = OwnerEnrollmentStoreOutcome::Corrupt;
+        out.corrupt = true; out.reason = "OWNER_STORE_RECORD_SECURITY_INVALID"; out.win32_error = ERROR_ACCESS_DENIED; return out;
+    }
     std::string payload; DWORD error = ERROR_SUCCESS;
     if (!readBounded(h.value, &payload, &error) || !parseRecord(payload, &out.record)) {
+        out.outcome = OwnerEnrollmentStoreOutcome::Corrupt;
         out.corrupt = true; out.reason = "OWNER_STORE_RECORD_INVALID"; out.win32_error = error == ERROR_SUCCESS ? ERROR_INVALID_DATA : error; return out;
     }
     if (expected != nullptr) {
         OwnerEnrollmentDurableRecord normalized;
-        if (!normalize(*expected, &normalized)) { out.corrupt = true; out.reason = "OWNER_STORE_EXPECTED_RECORD_INVALID"; out.win32_error = ERROR_INVALID_DATA; return out; }
+        if (!normalize(*expected, &normalized)) {
+            out.outcome = OwnerEnrollmentStoreOutcome::Corrupt;
+            out.corrupt = true; out.reason = "OWNER_STORE_EXPECTED_RECORD_INVALID"; out.win32_error = ERROR_INVALID_DATA; return out;
+        }
         out.exact = out.record.expected_owner_sid == normalized.expected_owner_sid;
         out.provenance_exact = out.exact && out.record.enrollment_evidence_sha256 == normalized.enrollment_evidence_sha256
             && out.record.device_key_fingerprint_sha256 == normalized.device_key_fingerprint_sha256;
         out.owner_mismatch = !out.exact;
+        out.outcome = out.provenance_exact ? OwnerEnrollmentStoreOutcome::EffectExact : OwnerEnrollmentStoreOutcome::Conflict;
         out.reason = out.owner_mismatch ? "OWNER_STORE_OWNER_MISMATCH"
             : (out.provenance_exact ? "OWNER_STORE_RECORD_EXACT" : "OWNER_STORE_OWNER_EXACT_DIFFERENT_PROVENANCE");
     } else out.reason = "OWNER_STORE_RECORD_VALID";
@@ -347,11 +371,26 @@ OwnerEnrollmentStoreResult OwnerEnrollmentStore::createIfAbsent(const OwnerEnrol
     OwnerEnrollmentStoreResult out;
     Handle rootGuard = openSecureRoot(root_path_, FILE_ADD_FILE);
     out.root_trusted = rootGuard.valid();
-    if (!out.root_trusted) { out.reason = "OWNER_STORE_ROOT_NOT_MACHINE_TRUSTED"; out.win32_error = ERROR_ACCESS_DENIED; return out; }
+    if (!out.root_trusted) {
+        out.outcome = OwnerEnrollmentStoreOutcome::Ambiguous;
+        out.reason = "OWNER_STORE_ROOT_NOT_MACHINE_TRUSTED";
+        out.win32_error = ERROR_ACCESS_DENIED;
+        return out;
+    }
     OwnerEnrollmentDurableRecord normalized;
-    if (!normalize(candidate, &normalized)) { out.reason = "OWNER_STORE_CANDIDATE_INVALID"; out.win32_error = ERROR_INVALID_DATA; return out; }
+    if (!normalize(candidate, &normalized)) {
+        out.outcome = OwnerEnrollmentStoreOutcome::Corrupt;
+        out.reason = "OWNER_STORE_CANDIDATE_INVALID";
+        out.win32_error = ERROR_INVALID_DATA;
+        return out;
+    }
     const std::string payload = serializeRecord(normalized);
-    if (payload.empty() || payload.size() > kMaxBytes) { out.reason = "OWNER_STORE_SERIALIZATION_INVALID"; out.win32_error = ERROR_INVALID_DATA; return out; }
+    if (payload.empty() || payload.size() > kMaxBytes) {
+        out.outcome = OwnerEnrollmentStoreOutcome::Corrupt;
+        out.reason = "OWNER_STORE_SERIALIZATION_INVALID";
+        out.win32_error = ERROR_INVALID_DATA;
+        return out;
+    }
 
     const std::wstring final = recordPath();
     const auto before = classify(root_path_, final, &normalized);
@@ -359,12 +398,16 @@ OwnerEnrollmentStoreResult OwnerEnrollmentStore::createIfAbsent(const OwnerEnrol
 
     PSECURITY_DESCRIPTOR raw = nullptr;
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(kStageDacl, SDDL_REVISION_1, &raw, nullptr)) {
+        out.outcome = OwnerEnrollmentStoreOutcome::NoEffectProven;
         out.reason = "OWNER_STORE_STAGE_SECURITY_DESCRIPTOR_FAILED"; out.win32_error = GetLastError(); return out;
     }
     Local descriptor; descriptor.value = reinterpret_cast<HLOCAL>(raw);
     SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), raw, FALSE};
     const std::wstring stage = stagePath(root_path_);
-    if (stage.empty()) { out.reason = "OWNER_STORE_STAGE_PATH_FAILED"; out.win32_error = ERROR_INVALID_NAME; return out; }
+    if (stage.empty()) {
+        out.outcome = OwnerEnrollmentStoreOutcome::NoEffectProven;
+        out.reason = "OWNER_STORE_STAGE_PATH_FAILED"; out.win32_error = ERROR_INVALID_NAME; return out;
+    }
 
     DWORD stageError = ERROR_SUCCESS;
     DWORD commitError = ERROR_SUCCESS;
@@ -373,6 +416,7 @@ OwnerEnrollmentStoreResult OwnerEnrollmentStore::createIfAbsent(const OwnerEnrol
         Handle h(CreateFileW(stage.c_str(), GENERIC_READ | GENERIC_WRITE | DELETE, 0, &security, CREATE_NEW,
             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr));
         if (!h.valid()) {
+            out.outcome = OwnerEnrollmentStoreOutcome::NoEffectProven;
             out.reason = "OWNER_STORE_STAGE_CREATE_FAILED";
             out.win32_error = GetLastError();
             return out;
@@ -387,22 +431,52 @@ OwnerEnrollmentStoreResult OwnerEnrollmentStore::createIfAbsent(const OwnerEnrol
     }
     if (!out.staging_flushed) {
         DeleteFileW(stage.c_str());
+        out.outcome = OwnerEnrollmentStoreOutcome::NoEffectProven;
         out.reason = "OWNER_STORE_STAGE_FLUSH_FAILED";
         out.win32_error = stageError == ERROR_SUCCESS ? ERROR_WRITE_FAULT : stageError;
         return out;
     }
 
     if (!renameCommitted) {
+        // SetFileInformationByHandle is the physical commit barrier.  Its failure
+        // does not prove absence of effect.  Read the authoritative target state
+        // for every error code before deciding whether retry is even semantically
+        // possible.  This deliberately does not special-case ERROR_ALREADY_EXISTS.
+        auto failureReadback = classify(root_path_, final, &normalized);
+        failureReadback.staging_flushed = true;
+        failureReadback.move_committed = false;
+        failureReadback.commit_win32_error = commitError;
+        failureReadback.post_commit_readback = failureReadback.outcome != OwnerEnrollmentStoreOutcome::Ambiguous;
         DeleteFileW(stage.c_str());
-        if (commitError == ERROR_ALREADY_EXISTS || commitError == ERROR_FILE_EXISTS) return classify(root_path_, final, &normalized);
-        out.reason = "OWNER_STORE_COMMIT_RENAME_FAILED"; out.win32_error = commitError; return out;
+
+        if (failureReadback.outcome == OwnerEnrollmentStoreOutcome::NoEffectProven) {
+            failureReadback.reason = "OWNER_STORE_COMMIT_NO_EFFECT_PROVEN";
+            return failureReadback;
+        }
+        if (failureReadback.outcome == OwnerEnrollmentStoreOutcome::EffectExact) {
+            // Current durable state is exact, but origin is intentionally unknown:
+            // this invocation must not claim another concurrent writer's commit.
+            failureReadback.committed = false;
+            failureReadback.reason = "OWNER_STORE_COMMIT_RESULT_EXACT_AFTER_ERROR";
+            return failureReadback;
+        }
+        if (failureReadback.outcome == OwnerEnrollmentStoreOutcome::Conflict
+            || failureReadback.outcome == OwnerEnrollmentStoreOutcome::Corrupt) {
+            return failureReadback;
+        }
+
+        failureReadback.outcome = OwnerEnrollmentStoreOutcome::Ambiguous;
+        failureReadback.committed = false;
+        failureReadback.reason = "OWNER_STORE_COMMIT_RESULT_AMBIGUOUS";
+        return failureReadback;
     }
 
     auto readback = classify(root_path_, final, &normalized);
     readback.staging_flushed = out.staging_flushed;
     readback.move_committed = true;
-    readback.post_commit_readback = readback.present && !readback.corrupt;
-    readback.committed = readback.exact && readback.provenance_exact;
+    readback.post_commit_readback = readback.outcome != OwnerEnrollmentStoreOutcome::Ambiguous;
+    readback.committed = readback.outcome == OwnerEnrollmentStoreOutcome::EffectExact
+        && readback.exact && readback.provenance_exact;
     if (!readback.committed) { readback.reason = "OWNER_STORE_POST_COMMIT_READBACK_MISMATCH"; return readback; }
     readback.reason = "OWNER_STORE_CREATE_IF_ABSENT_COMMITTED";
     return readback;
@@ -411,6 +485,17 @@ OwnerEnrollmentStoreResult OwnerEnrollmentStore::createIfAbsent(const OwnerEnrol
 std::wstring browserGuardianOwnerEnrollmentStoreDefaultRoot() {
     const std::wstring pd = programData();
     return pd.empty() ? std::wstring{} : pd + L"\\" + kRelativeRoot;
+}
+const char* browserGuardianOwnerEnrollmentStoreOutcomeName(OwnerEnrollmentStoreOutcome outcome) noexcept {
+    switch (outcome) {
+        case OwnerEnrollmentStoreOutcome::NoEffectProven: return "NO_EFFECT_PROVEN";
+        case OwnerEnrollmentStoreOutcome::EffectExact: return "EFFECT_EXACT";
+        case OwnerEnrollmentStoreOutcome::Conflict: return "CONFLICT";
+        case OwnerEnrollmentStoreOutcome::Corrupt: return "CORRUPT";
+        case OwnerEnrollmentStoreOutcome::Ambiguous: return "AMBIGUOUS";
+        case OwnerEnrollmentStoreOutcome::None: return "NONE";
+    }
+    return "NONE";
 }
 const char* browserGuardianOwnerEnrollmentStoreContractJson() noexcept { return kContract; }
 
