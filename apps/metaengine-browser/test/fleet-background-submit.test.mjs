@@ -3,67 +3,78 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { executeSemanticCommand } from '../src/native-browser-control.mjs';
 
-function ax(role, name, id) {
-  return {
-    ignored: false,
-    role: { value: role },
-    name: { value: name },
-    backendDOMNodeId: id,
-  };
-}
-
-let nextWebContentsId = 7000;
-function fakeChat({ sendPresent = true, proveStop = true } = {}) {
-  let attached = false;
-  let url = 'https://chatgpt.com/';
-  let axReads = 0;
+function fakeChat({
+  composerName = 'Чат с ChatGPT',
+  sendPresent = true,
+  stopAfterEnter = true,
+  urlAfterEnter = 'https://chatgpt.com/c/11111111-1111-4111-8111-111111111111',
+} = {}) {
   const calls = [];
-  const webContentsId = nextWebContentsId++;
-  const debuggerApi = {
-    isAttached: () => attached,
-    attach: () => { attached = true; },
-    detach: () => { attached = false; },
-    async sendCommand(method, params = {}) {
-      calls.push([method, structuredClone(params)]);
-      if (method === 'Accessibility.getFullAXTree') {
-        axReads += 1;
-        if (axReads === 1) return { nodes: [ax('textbox', 'Чат с ChatGPT', 3)] };
-        if (axReads === 2) {
-          return { nodes: [
-            ax('textbox', 'Чат с ChatGPT', 3),
-            ...(sendPresent ? [ax('button', 'Отправить промпт', 7)] : []),
-          ] };
+  let attached = false;
+  let entered = false;
+  let url = 'https://chatgpt.com/';
+  const composer = {
+    ignored: false,
+    backendDOMNodeId: 101,
+    role: { value: 'textbox' },
+    name: { value: composerName },
+    value: { value: '' },
+  };
+  const send = {
+    ignored: false,
+    backendDOMNodeId: 202,
+    role: { value: 'button' },
+    name: { value: 'Send prompt' },
+  };
+  const stop = {
+    ignored: false,
+    backendDOMNodeId: 303,
+    role: { value: 'button' },
+    name: { value: 'Stop response' },
+  };
+  const webContents = {
+    id: 55,
+    isDestroyed: () => false,
+    getURL: () => url,
+    getTitle: () => 'ChatGPT',
+    debugger: {
+      isAttached: () => attached,
+      attach: () => { attached = true; },
+      detach: () => { attached = false; },
+      sendCommand: async (method, params = {}) => {
+        calls.push([method, params]);
+        if (method === 'Accessibility.getFullAXTree') {
+          const nodes = [composer];
+          if (!entered && sendPresent) nodes.push(send);
+          if (entered && stopAfterEnter) nodes.push(stop);
+          return { nodes };
         }
-        return { nodes: proveStop ? [
-          ax('textbox', 'Чат с ChatGPT', 3),
-          ax('button', 'Остановить ответ', 9),
-        ] : [ax('textbox', 'Чат с ChatGPT', 3), ax('button', 'Отправить промпт', 7)] };
-      }
-      if (method === 'DOM.focus' || method === 'Input.insertText') return {};
-      if (method === 'Input.dispatchKeyEvent') {
-        if (params.key === 'Enter' && params.type === 'rawKeyDown' && proveStop) {
-          url = 'https://chatgpt.com/c/11111111-2222-3333-4444-555555555555';
+        if (method === 'DOM.focus') return {};
+        if (method === 'Input.insertText') {
+          composer.value.value = String(params.text || '');
+          return {};
         }
-        return {};
-      }
-      throw new Error(`unexpected_debugger_command:${method}`);
+        if (method === 'Input.dispatchKeyEvent') {
+          if (params.key === 'Enter' && params.type === 'rawKeyDown') {
+            entered = true;
+            url = urlAfterEnter;
+            composer.value.value = '';
+          }
+          return {};
+        }
+        if (method === 'DOM.getBoxModel') return { model: { content: [0,0,100,0,100,30,0,30] } };
+        if (method === 'Input.dispatchMouseEvent') return {};
+        if (method === 'Page.getLayoutMetrics') return { cssVisualViewport: { clientWidth: 1280, clientHeight: 720 } };
+        throw new Error(`unexpected_debugger_command:${method}`);
+      },
     },
   };
-  return {
-    calls,
-    webContents: {
-      id: webContentsId,
-      debugger: debuggerApi,
-      isDestroyed: () => false,
-      getURL: () => url,
-      getTitle: () => 'ChatGPT',
-    },
-  };
+  return { webContents, calls };
 }
 
 test('hidden fleet ChatGPT composer submits with Enter and no viewport or mouse geometry', async () => {
   const h = fakeChat();
-  const prompt = 'METAENGINE FLEET TEST TASK';
+  const prompt = 'continue development';
   const result = await executeSemanticCommand(h.webContents, {
     action: 'SEMANTIC_TYPE',
     platform: 'CHATGPT',
@@ -91,7 +102,7 @@ test('hidden fleet ChatGPT composer submits with Enter and no viewport or mouse 
   assert.equal(h.calls.some(([method]) => method === 'Page.getLayoutMetrics'), false);
 });
 
-test('submit-after-type fails closed outside exact ChatGPT composer', async () => {
+test('GLM submit fails closed when routed to a ChatGPT WebContents target', async () => {
   const h = fakeChat();
   await assert.rejects(() => executeSemanticCommand(h.webContents, {
     action: 'SEMANTIC_TYPE',
@@ -102,7 +113,8 @@ test('submit-after-type fails closed outside exact ChatGPT composer', async () =
       text: 'task',
       submit_after_type: true,
     },
-  }), /native_semantic_submit_requires_exact_chatgpt_composer/);
+  }), /native_semantic_submit_requires_exact_glm_backend_target/);
+  assert.equal(h.calls.some(([method, params]) => method === 'Input.dispatchKeyEvent' && params.key === 'Enter'), false);
 });
 
 test('submit-after-type requires a unique visible semantic Send control before Enter', async () => {
