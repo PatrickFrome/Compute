@@ -1,8 +1,8 @@
-export const SHELL_TOP_HEIGHT = 52;
-export const SHELL_SIDEBAR_EXPANDED_WIDTH = 288;
-export const SHELL_SIDEBAR_COMPACT_WIDTH = 64;
-export const SHELL_OPERATIONS_WIDTH = 368;
-export const SHELL_MIN_REMOTE_WIDTH = 680;
+export const SHELL_TOP_HEIGHT = 48;
+export const SHELL_SIDEBAR_EXPANDED_WIDTH = 272;
+export const SHELL_SIDEBAR_COMPACT_WIDTH = 56;
+export const SHELL_OPERATIONS_WIDTH = 352;
+export const SHELL_MIN_REMOTE_WIDTH = 720;
 
 const SIDEBAR_MODES = new Set(['EXPANDED', 'COMPACT', 'HIDDEN']);
 const OPERATIONS_MODES = new Set(['OPEN', 'CLOSED']);
@@ -18,7 +18,7 @@ export function normalizeShellLayoutState(input = null) {
     return Object.freeze({
       schema: 'metaengine.browser-shell.layout-state.v1',
       sidebar: 'EXPANDED',
-      operations: 'OPEN',
+      operations: 'CLOSED',
       authority_effect: false,
     });
   }
@@ -55,8 +55,8 @@ export function planShellLayout({ width, height, state } = {}) {
 
   const remoteWidth = () => Math.max(0, windowWidth - left - right);
 
-  // Degrade presentation only. Requested state is retained and no hidden actuation is
-  // performed. The remote page always gets a real, non-overlapped rectangle.
+  // Presentation degrades before page space. The renderer never owns geometry and
+  // remote WebContents pixels are never overlaid by shell UI.
   if (remoteWidth() < SHELL_MIN_REMOTE_WIDTH && effectiveSidebar === 'EXPANDED') {
     effectiveSidebar = 'COMPACT';
     left = SHELL_SIDEBAR_COMPACT_WIDTH;
