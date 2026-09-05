@@ -88,6 +88,9 @@ test('realtime process plane joins Electron process metrics to webContents and e
   assert.equal(snapshot.control_authority, false);
   assert.equal(snapshot.command_leasing, false);
   assert.equal(snapshot.second_scheduler, false);
+  assert.equal(snapshot.cognitive_delta_second_scheduler, false);
+  assert.equal(snapshot.cognitive_delta_bus.control_authority, false);
+  assert.equal(snapshot.cognitive_delta_bus.command_leasing, false);
   const renderer = snapshot.processes.find((row) => row.pid === 200);
   assert.equal(renderer.creation_time_ms, 1725520000100);
   assert.equal(renderer.process_key, '200:1725520000100');
@@ -140,6 +143,7 @@ test('renderer and child process lifecycle changes are pushed into ordered delta
   });
   plane.start();
   const before = plane.snapshot({ eventLimit: 0 }).sequence;
+  const cognitiveBefore = plane.cognitiveSnapshot({ eventLimit: 1 }).sequence;
 
   remote.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 9 });
   app.emit('child-process-gone', {}, { type: 'Utility', reason: 'abnormal-exit', exitCode: 17, serviceName: 'METAENGINE Development Plane', name: 'utility' });
@@ -150,6 +154,26 @@ test('renderer and child process lifecycle changes are pushed into ordered delta
   assert.ok(delta.events.some((row) => row.type === 'CHILD_PROCESS_GONE' && row.service_name === 'METAENGINE Development Plane' && row.exit_code === 17));
   const ordered = delta.events.map((row) => row.seq);
   assert.deepEqual(ordered, [...ordered].sort((a, b) => a - b));
+
+  const cognitive = plane.cognitiveSnapshot({ eventsSince: cognitiveBefore, eventLimit: 32 });
+  assert.equal(cognitive.gap, false);
+  assert.ok(cognitive.events.some((row) => row.type === 'RENDER_PROCESS_GONE' && row.priority === 'P0'));
+  assert.ok(cognitive.events.some((row) => row.type === 'CHILD_PROCESS_GONE' && row.priority === 'P0'));
+  assert.ok(cognitive.events.every((row) => row.authority_effect === false && row.raw_payload_exposed === false));
+  plane.stop();
+});
+
+test('metrics enter the cognitive bus as lowest-priority replaceable pressure', () => {
+  const app = new FakeApp(metrics());
+  const remote = new FakeContents({ id: 19, pid: 200 });
+  const plane = new BrowserRealtimeProcessPlane({ app, getWebContents: () => [remote], sampleMs: 5000 });
+  plane.start();
+  const before = plane.cognitiveSnapshot({ eventLimit: 1 }).sequence;
+  plane.refresh('METRICS_SAMPLE');
+  const cognitive = plane.cognitiveSnapshot({ eventsSince: before, eventLimit: 16 });
+  assert.ok(cognitive.events.some((row) => row.type === 'METRICS_SAMPLE' && row.priority === 'P3'));
+  assert.equal(cognitive.delta_is_execution_authority, false);
+  assert.equal(cognitive.snapshot_is_recovery_authority, true);
   plane.stop();
 });
 
@@ -183,4 +207,5 @@ test('stop removes app/webContents listeners and has no hidden command scheduler
   assert.equal(app.listenerCount('child-process-gone'), 0);
   assert.equal(remote.listenerCount('render-process-gone'), 0);
   assert.equal(plane.snapshot().second_scheduler, false);
+  assert.equal(plane.snapshot().cognitive_delta_second_scheduler, false);
 });
