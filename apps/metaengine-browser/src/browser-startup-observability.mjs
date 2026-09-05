@@ -11,10 +11,12 @@ export const BROWSER_STARTUP_JOURNAL_FILE = 'metaengine-browser-startup-journal-
 export const BROWSER_STARTUP_JOURNAL_MAX_EVENTS = 128;
 export const PRIMARY_WINDOW_STABLE_MS = 1_500;
 export const PRIMARY_WINDOW_OBSERVE_TIMEOUT_MS = 30_000;
+export const PRIMARY_ACTIVATION_ACK_TIMEOUT_MS = 15_000;
 
 const SAFE_STATE = /^[A-Z][A-Z0-9_]{1,63}$/;
 const SAFE_REASON = /^[A-Z0-9][A-Z0-9_.:-]{0,127}$/;
 const SAFE_DETAIL_KEY = /^[a-z][a-z0-9_]{0,63}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 let journalTail = Promise.resolve();
 
 function assertApp(app) {
@@ -229,6 +231,71 @@ export async function readBrowserStartupJournal(app) {
   return row == null ? null : structuredClone(row);
 }
 
+/**
+ * A losing secondary never writes the primary journal. It only waits for the
+ * current primary to durably prove that it handled this exact launch nonce and
+ * made an existing window visible. Old versions cannot manufacture that ACK, so
+ * the caller can distinguish a compatible primary from a stale/hidden one.
+ */
+export async function waitForPrimaryActivationAck(app, {
+  launch_id,
+  timeout_ms = PRIMARY_ACTIVATION_ACK_TIMEOUT_MS,
+  poll_ms = 100,
+  clock = () => Date.now(),
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+} = {}) {
+  if (typeof launch_id !== 'string' || !UUID.test(launch_id)) {
+    return Object.freeze({ ok: false, reason: 'PRIMARY_ACTIVATION_ACK_LAUNCH_ID_INVALID', authority_effect: false });
+  }
+  if (![timeout_ms, poll_ms].every((value) => Number.isFinite(value) && value > 0)) {
+    return Object.freeze({ ok: false, reason: 'PRIMARY_ACTIVATION_ACK_CONFIG_INVALID', authority_effect: false });
+  }
+  const startedAt = Number(clock());
+  if (!Number.isFinite(startedAt)) {
+    return Object.freeze({ ok: false, reason: 'PRIMARY_ACTIVATION_ACK_CLOCK_INVALID', authority_effect: false });
+  }
+  let lastReadError = null;
+
+  while (Number(clock()) - startedAt <= timeout_ms) {
+    try {
+      const row = await readJournalFile(app);
+      const ack = row?.events?.findLast?.((event) => event
+        && event.boot_id === row.current_boot_id
+        && event.state === 'PRIMARY_WINDOW_ACTIVATED'
+        && event.details?.launch_id === launch_id
+        && event.details?.visible === true);
+      if (ack) {
+        return Object.freeze({
+          ok: true,
+          reason: 'PRIMARY_ACTIVATION_ACK_EXACT',
+          launch_id,
+          primary_boot_id: row.current_boot_id,
+          event_sequence: ack.sequence,
+          primary_version: ack.version,
+          primary_pid: ack.pid,
+          authority_effect: false,
+        });
+      }
+      lastReadError = null;
+    } catch (error) {
+      // Read ambiguity is not permission to mutate or quarantine the primary's
+      // journal from the secondary process. Keep waiting within the same bound.
+      lastReadError = String(error?.message || error).slice(0, 160);
+    }
+    await sleep(poll_ms);
+  }
+
+  return Object.freeze({
+    ok: false,
+    reason: lastReadError == null
+      ? 'PRIMARY_ACTIVATION_ACK_TIMEOUT'
+      : 'PRIMARY_ACTIVATION_ACK_READ_AMBIGUOUS',
+    launch_id,
+    last_read_error: lastReadError,
+    authority_effect: false,
+  });
+}
+
 function liveWindows(BaseWindow) {
   if (!BaseWindow || typeof BaseWindow.getAllWindows !== 'function') return [];
   const rows = BaseWindow.getAllWindows();
@@ -335,9 +402,13 @@ export function browserStartupObservabilityContract() {
     runtime_import_failure_must_be_durable: true,
     gui_stderr_is_diagnostic_authority: false,
     second_instance_must_activate_primary_window: true,
+    second_instance_activation_ack_must_match_launch_id: true,
+    mixed_version_primary_without_ack_must_surface_error: true,
+    secondary_must_not_mutate_primary_journal: true,
     hidden_window_must_be_shown: true,
     minimized_window_must_be_restored: true,
     normal_ui_boot_requires_stable_window_readback: true,
+    primary_activation_ack_timeout_ms: PRIMARY_ACTIVATION_ACK_TIMEOUT_MS,
     startup_journal_max_events: BROWSER_STARTUP_JOURNAL_MAX_EVENTS,
     authority_effect: false,
   });
