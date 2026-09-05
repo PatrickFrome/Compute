@@ -205,12 +205,14 @@ try {
     Assert-True (-not $reparse.present) 'reparse_root_read_record'
 
     # 9. Holding the verified Guardian root without FILE_SHARE_DELETE must fence
-    # rename of its ancestor. The production store relies on this NTFS/Win32
-    # property while using an absolute FILE_RENAME_INFO target under the fenced root.
+    # rename of its ancestor. MS-FSA specifies STATUS_ACCESS_DENIED when a
+    # directory rename discovers open descendants; related share-mode conflicts
+    # can surface ERROR_SHARING_VIOLATION. No other error is accepted as proof.
     Reset-SecureRoot
     $ancestorFence = Invoke-ProbeAncestorRenameFence
     Assert-True $ancestorFence.blocked 'ancestor_parent_rename_not_fenced'
-    Assert-True ($ancestorFence.win32_error -eq 32) "ancestor_parent_rename_unexpected_error_$($ancestorFence.win32_error)"
+    Assert-True ($ancestorFence.classification -eq 'OPEN_DESCENDANT_RENAME_FENCE') "ancestor_parent_rename_classification_$($ancestorFence.classification)"
+    Assert-True (@(5, 32) -contains [int]$ancestorFence.win32_error) "ancestor_parent_rename_unexpected_error_$($ancestorFence.win32_error)"
 
     # 10. Conflicting concurrent creators have exactly one durable winner.
     Reset-SecureRoot
