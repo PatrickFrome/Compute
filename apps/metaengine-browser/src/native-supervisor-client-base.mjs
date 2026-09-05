@@ -20,10 +20,9 @@ export const NATIVE_SUPERVISOR_BASE = 'https://xpeibufgzjknrhbhpffp.supabase.co/
 export const NATIVE_SUPERVISOR_RUNTIME_PATH = '/a2-browser-native-supervisor-v1';
 
 const clipError = (error) => String(error?.message || error || 'unknown_error').slice(0, 500);
-const READ_ONLY_ACTIONS = new Set([
-  'POLL','CAPTURE','CAPTURE_VIEW','CONTROL_CAPABILITIES','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD',
-  'DOWNLOAD_STATUS','SELF_UPDATE_STATUS','GATE_STATUS','TAB_CENSUS','FLEET_STATUS',
-]);
+const READ_ONLY_ACTIONS = Object.freeze({
+  has: (action) => classifyNativeSupervisorCommand({ action }).read_only,
+});
 const ROOT_POLICY_ACTIONS = new Set(['GATE_STATUS','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL']);
 const PROVEN_EFFECT_STATES = new Set(['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','CONFIRMED']);
 const TERMINAL_EFFECT_OUTCOMES = new Set(['CONFIRMED','NO_EFFECT_PROVEN','AMBIGUOUS']);
