@@ -209,6 +209,7 @@ if (!guard.primary) {
 
   let startupUpdateInspection = null;
   if (!selfUpdateSmoke && !versionProbe && !profileProbe && !instanceHoldProbe) {
+    void recordStartup('SELF_UPDATE_INSPECTION_STARTED', 'STARTUP_INSPECTION_BEGIN');
     startupUpdateInspection = await inspectSelfUpdateStartup(app).catch((error) => ({
       schema: 'metaengine.self-update.startup-inspection.v1',
       state: 'AMBIGUOUS_INSTALL',
@@ -218,6 +219,14 @@ if (!guard.primary) {
       automatic_retry_allowed: false,
       authority_effect: false,
     }));
+    void recordStartup(
+      'SELF_UPDATE_INSPECTION_COMPLETED',
+      'STARTUP_INSPECTION_SETTLED',
+      {
+        inspection_state: startupUpdateInspection?.state || 'UNKNOWN',
+        target_version: startupUpdateInspection?.target_version || null,
+      },
+    );
     if (startupUpdateInspection?.state === 'AMBIGUOUS_INSTALL') {
       process.env.METAENGINE_DISABLE_SELF_UPDATE = '1';
       process.env.METAENGINE_SELF_UPDATE_HOLD_REASON = 'AMBIGUOUS_INSTALL';
@@ -347,7 +356,9 @@ if (!guard.primary) {
     const hostResilience = new HostResilienceRuntime();
     globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__ = hostResilience;
 
+    void recordStartup('CONTINUITY_WATCHDOG_IMPORT_STARTED', 'CONTINUITY_WATCHDOG_MODULE_IMPORT_BEGIN');
     const { startSelfUpdateContinuityWatchdog } = await import('./self-update-continuity-watchdog.mjs');
+    void recordStartup('CONTINUITY_WATCHDOG_MODULE_IMPORTED', 'CONTINUITY_WATCHDOG_MODULE_IMPORT_COMPLETED');
     startSelfUpdateContinuityWatchdog({
       userDataPath: app.getPath('userData'),
       currentVersion: app.getVersion(),
@@ -360,11 +371,16 @@ if (!guard.primary) {
         authority_effect: false,
       })),
     });
+    void recordStartup('CONTINUITY_WATCHDOG_INSTALLED', 'CONTINUITY_WATCHDOG_STARTED');
     globalThis.fetch = installSignedSupervisorHeartbeatQualificationHook({ app, fetchImpl: globalThis.fetch });
+    void recordStartup('SIGNED_HEARTBEAT_HOOK_INSTALLED', 'SUPERVISOR_HEARTBEAT_QUALIFICATION_HOOK_READY');
 
     await browserRuntimePromise;
-    const hostSnapshot = await app.whenReady()
-      .then(() => hostResilience.start())
+    void recordStartup('APP_READY_WAIT_STARTED', 'ELECTRON_APP_READY_WAIT_BEGIN');
+    await app.whenReady();
+    void recordStartup('APP_READY', 'ELECTRON_APP_READY');
+    void recordStartup('HOST_RESILIENCE_BOOTSTRAP_STARTED', 'HOST_BOOTSTRAP_ATTEMPT_BEGIN');
+    const hostSnapshot = await hostResilience.start()
       .catch((error) => ({
         schema: 'metaengine.host-resilience-runtime.v6',
         state: 'ERROR',
@@ -372,6 +388,15 @@ if (!guard.primary) {
         terminal: false,
         authority_effect: false,
       }));
+    void recordStartup(
+      'HOST_RESILIENCE_BOOTSTRAP_SETTLED',
+      'HOST_BOOTSTRAP_ATTEMPT_COMPLETED',
+      {
+        host_state: hostSnapshot?.state || 'UNKNOWN',
+        login_start_verified: hostSnapshot?.login_start_verified === true,
+        sentinel_worker_healthy: hostSnapshot?.sentinel_worker_healthy === true,
+      },
+    );
     console.log(JSON.stringify({
       schema: 'metaengine.host-resilience-bootstrap.v2',
       state: hostSnapshot?.state || 'UNKNOWN',
@@ -386,6 +411,11 @@ if (!guard.primary) {
     // never wait on observability I/O; the journal records the already-observed
     // host state asynchronously after the UI is allowed to proceed.
     resolveBrowserBootstrap?.(hostSnapshot);
+    void recordStartup(
+      'BROWSER_BOOTSTRAP_BARRIER_RELEASED',
+      'HOST_BOOTSTRAP_ATTEMPT_SETTLED',
+      { host_state: hostSnapshot?.state || 'UNKNOWN' },
+    );
     void recordStartup(
       'HOST_RESILIENCE_BOOTSTRAPPED',
       'HOST_BOOTSTRAP_ATTEMPT_COMPLETED',
