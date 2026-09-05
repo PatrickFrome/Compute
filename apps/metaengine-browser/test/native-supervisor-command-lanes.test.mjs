@@ -14,11 +14,13 @@ function command(action, payload = {}, id = crypto.randomUUID()) {
   return { command_id: id, action, payload };
 }
 
-test('all current Dev Plane observations are zero-authority READ_ONLY lane commands', () => {
+test('all current Browser observations are zero-authority READ_ONLY lane commands', () => {
   for (const action of [
     'DEV_PLANE_STATUS', 'DEV_PLANE_HEALTH', 'DEV_PLANE_CAPABILITIES',
     'DEV_PLANE_PROCESS_METRICS', 'DEV_PLANE_REPO_HEAD', 'CAPTURE', 'CAPTURE_VIEW',
-    'POLL', 'DOWNLOAD_STATUS', 'SELF_UPDATE_STATUS', 'GATE_STATUS', 'TAB_CENSUS',
+    'POLL', 'CONTROL_CAPABILITIES', 'PROCESS_CENSUS', 'PROCESS_EVENTS',
+    'CONTROL_LATENCY_STATUS', 'DOWNLOAD_STATUS', 'SELF_UPDATE_STATUS', 'GATE_STATUS',
+    'TAB_CENSUS', 'FLEET_STATUS',
   ]) {
     const out = classifyNativeSupervisorCommand(command(action));
     assert.equal(out.lane, COMMAND_LANES.READ_ONLY, action);
@@ -56,7 +58,7 @@ test('read-only batch fans out to configured concurrency instead of serial execu
   const scheduler = new NativeSupervisorCommandLaneScheduler({ readConcurrency: 8, mutationConcurrency: 2, maxBatch: 32 });
   let active = 0;
   let peak = 0;
-  const rows = Array.from({ length: 16 }, (_, i) => command('DEV_PLANE_STATUS', {}, `read-${i}`));
+  const rows = Array.from({ length: 16 }, (_, i) => command(i % 2 ? 'PROCESS_CENSUS' : 'PROCESS_EVENTS', {}, `read-${i}`));
   const result = await scheduler.drain(rows, async () => {
     active += 1;
     peak = Math.max(peak, active);
@@ -101,7 +103,7 @@ test('global mutation is an ordering barrier for later tab mutations while reads
     command('SCROLL', { tab_id: tab(1) }, 'before'),
     command('FLEET_RECONCILE', { active: false }, 'global'),
     command('SCROLL', { tab_id: tab(2) }, 'after'),
-    command('DEV_PLANE_HEALTH', {}, 'read'),
+    command('PROCESS_CENSUS', {}, 'read'),
   ];
   await scheduler.drain(rows, async (row) => {
     events.push(`start:${row.command_id}`);
@@ -127,7 +129,7 @@ test('batch and concurrency limits are bounded to protect event-loop memory', as
   assert.equal(snap.read_concurrency, 128);
   assert.equal(snap.mutation_concurrency, 32);
   await assert.rejects(
-    () => scheduler.drain([command('POLL'), command('POLL'), command('POLL')], async () => null),
+    () => scheduler.drain([command('POLL'), command('PROCESS_CENSUS'), command('PROCESS_EVENTS')], async () => null),
     /native_supervisor_command_batch_too_large/,
   );
 });
