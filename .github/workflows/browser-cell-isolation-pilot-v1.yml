@@ -1,0 +1,76 @@
+name: METAENGINE BrowserCell Isolation Pilot V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/test/browser-cell-isolation-smoke.cjs'
+      - '.github/workflows/browser-cell-isolation-pilot-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  physical-two-cell-isolation:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Install exact Browser shell dependencies without mutating lock state
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm install --no-package-lock --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw "browser_cell_dependency_install_exit_$LASTEXITCODE" }
+
+      - name: Execute physical two-Cell isolation and crash-blast-radius proof
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $electron = Join-Path (Resolve-Path 'node_modules/.bin').Path 'electron.cmd'
+          if (-not (Test-Path -LiteralPath $electron)) { throw 'browser_cell_electron_missing' }
+          $output = @(& $electron test/browser-cell-isolation-smoke.cjs)
+          if ($LASTEXITCODE -ne 0) { throw "browser_cell_isolation_exit_$LASTEXITCODE" }
+          $proofLine = $output | Where-Object { $_ -match '^\{' } | Select-Object -Last 1
+          if (-not $proofLine) { throw 'browser_cell_isolation_proof_missing' }
+          $proof = $proofLine | ConvertFrom-Json
+          if ($proof.schema -ne 'metaengine.browser-cell.physical-isolation-proof.v1') { throw 'browser_cell_isolation_schema_invalid' }
+          foreach ($field in @('distinct_partitions','distinct_sessions','distinct_target_ids','local_storage_isolated','cookies_isolated','distinct_renderer_processes','peer_cell_survived_renderer_crash')) {
+            if ($proof.$field -ne $true) { throw "browser_cell_isolation_required_proof_missing_$field" }
+          }
+          if ([int]$proof.single_cell_crash_blast_radius_max_claims -gt 1) { throw 'browser_cell_blast_radius_exceeded' }
+          foreach ($field in @('prompt_material_used','send_authority_used','task_claim_used','external_network_used','authority_effect')) {
+            if ($proof.$field -ne $false) { throw "browser_cell_authority_drift_$field" }
+          }
+          if (($output | Select-Object -Last 1) -ne 'BROWSER_CELL_ISOLATION_OK') { throw 'browser_cell_isolation_terminal_marker_missing' }
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/test/browser-cell-isolation-smoke.cjs .github/workflows/browser-cell-isolation-pilot-v1.yml)"
+          test ! -e apps/metaengine-browser/package-lock.json
