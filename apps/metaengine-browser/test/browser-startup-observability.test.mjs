@@ -266,3 +266,21 @@ test('observability contract rejects stderr-only and mixed-version singleton sil
   assert.equal(contract.normal_ui_boot_requires_stable_window_readback, true);
   assert.equal(contract.authority_effect, false);
 });
+
+test('ESM primary arms Electron ready continuation instead of awaiting app.whenReady', async () => {
+  const source = await fs.readFile(new URL('../src/main-entry.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /await\s+app\.whenReady\s*\(/);
+  assert.match(source, /APP_READY_CONTINUATION_ARMED/);
+  assert.match(source, /typeof app\.isReady === 'function' && app\.isReady\(\)/);
+  assert.match(source, /app\.once\('ready', runReadyContinuation\)/);
+
+  const importSettled = source.indexOf('await browserRuntimePromise;');
+  const continuation = source.indexOf('const continueStartupAfterReady = async () =>');
+  const hostStart = source.indexOf('await hostResilience.start()', continuation);
+  const barrierRelease = source.indexOf('resolveBrowserBootstrap?.(hostSnapshot)', hostStart);
+  const listener = source.indexOf("app.once('ready', runReadyContinuation)", continuation);
+  assert.ok(importSettled >= 0 && continuation > importSettled);
+  assert.ok(hostStart > continuation);
+  assert.ok(barrierRelease > hostStart, 'host bootstrap must settle before Browser window barrier release');
+  assert.ok(listener > continuation, 'ready listener must be armed after continuation definition');
+});

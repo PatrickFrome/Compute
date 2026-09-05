@@ -376,145 +376,195 @@ if (!guard.primary) {
     void recordStartup('SIGNED_HEARTBEAT_HOOK_INSTALLED', 'SUPERVISOR_HEARTBEAT_QUALIFICATION_HOOK_READY');
 
     await browserRuntimePromise;
-    void recordStartup('APP_READY_WAIT_STARTED', 'ELECTRON_APP_READY_WAIT_BEGIN');
-    await app.whenReady();
-    void recordStartup('APP_READY', 'ELECTRON_APP_READY');
-    void recordStartup('HOST_RESILIENCE_BOOTSTRAP_STARTED', 'HOST_BOOTSTRAP_ATTEMPT_BEGIN');
-    const hostSnapshot = await hostResilience.start()
-      .catch((error) => ({
-        schema: 'metaengine.host-resilience-runtime.v6',
-        state: 'ERROR',
-        error: String(error?.message || error).slice(0, 300),
-        terminal: false,
-        authority_effect: false,
-      }));
-    void recordStartup(
-      'HOST_RESILIENCE_BOOTSTRAP_SETTLED',
-      'HOST_BOOTSTRAP_ATTEMPT_COMPLETED',
-      {
-        host_state: hostSnapshot?.state || 'UNKNOWN',
-        login_start_verified: hostSnapshot?.login_start_verified === true,
-        sentinel_worker_healthy: hostSnapshot?.sentinel_worker_healthy === true,
-      },
-    );
-    console.log(JSON.stringify({
-      schema: 'metaengine.host-resilience-bootstrap.v2',
-      state: hostSnapshot?.state || 'UNKNOWN',
-      login_start_verified: hostSnapshot?.login_start_verified === true,
-      sentinel_worker_healthy: hostSnapshot?.sentinel_worker_healthy === true,
-      browser_runtime_loaded: browserRuntimeLoadError == null,
-      terminal: false,
-      authority_effect: false,
-    }));
 
-    // Window creation in main.mjs is fenced on this barrier. Releasing it must
-    // never wait on observability I/O; the journal records the already-observed
-    // host state asynchronously after the UI is allowed to proceed.
-    resolveBrowserBootstrap?.(hostSnapshot);
-    void recordStartup(
-      'BROWSER_BOOTSTRAP_BARRIER_RELEASED',
-      'HOST_BOOTSTRAP_ATTEMPT_SETTLED',
-      { host_state: hostSnapshot?.state || 'UNKNOWN' },
-    );
-    void recordStartup(
-      'HOST_RESILIENCE_BOOTSTRAPPED',
-      'HOST_BOOTSTRAP_ATTEMPT_COMPLETED',
-      {
-        host_state: hostSnapshot?.state || 'UNKNOWN',
+    // Electron emits `ready` only after the main process reaches its first event
+    // loop tick. Awaiting app.whenReady() from this ESM entrypoint can therefore
+    // keep module evaluation open and deadlock the exact event we are waiting for.
+    // Arm the continuation and finish top-level evaluation instead. The existing
+    // Browser bootstrap barrier still prevents main.mjs from creating a window
+    // until this same one-shot host bootstrap settles.
+    let readyContinuationStarted = false;
+    const continueStartupAfterReady = async () => {
+      void recordStartup('APP_READY', 'ELECTRON_APP_READY');
+      void recordStartup('HOST_RESILIENCE_BOOTSTRAP_STARTED', 'HOST_BOOTSTRAP_ATTEMPT_BEGIN');
+      const hostSnapshot = await hostResilience.start()
+        .catch((error) => ({
+          schema: 'metaengine.host-resilience-runtime.v7',
+          state: 'ERROR',
+          error: String(error?.message || error).slice(0, 300),
+          terminal: false,
+          authority_effect: false,
+        }));
+      void recordStartup(
+        'HOST_RESILIENCE_BOOTSTRAP_SETTLED',
+        'HOST_BOOTSTRAP_ATTEMPT_COMPLETED',
+        {
+          host_state: hostSnapshot?.state || 'UNKNOWN',
+          login_start_verified: hostSnapshot?.login_start_verified === true,
+          sentinel_worker_healthy: hostSnapshot?.sentinel_worker_healthy === true,
+        },
+      );
+      console.log(JSON.stringify({
+        schema: 'metaengine.host-resilience-bootstrap.v2',
+        state: hostSnapshot?.state || 'UNKNOWN',
         login_start_verified: hostSnapshot?.login_start_verified === true,
         sentinel_worker_healthy: hostSnapshot?.sentinel_worker_healthy === true,
         browser_runtime_loaded: browserRuntimeLoadError == null,
-      },
-    );
-
-    if (browserRuntimeLoadError) {
-      // The host/sentinel plane is already bootstrapped. Keep it alive so a
-      // trusted external recovery/update can repair the Browser runtime instead
-      // of converting a local import failure into a terminal stop. Unlike the
-      // old behavior, persist the failure and make it visible to the user.
-      process.env.METAENGINE_BROWSER_RUNTIME_HOLD_REASON = 'RUNTIME_LOAD_ERROR';
-      const startupContext = await startupContextPromise;
-      console.error(JSON.stringify({
-        schema: 'metaengine.browser-runtime-load.v1',
-        state: 'ERROR',
-        error: String(browserRuntimeLoadError?.message || browserRuntimeLoadError).slice(0, 300),
-        host_resilience_bootstrapped: true,
-        recovery_state: 'HOST_ALIVE',
         terminal: false,
         authority_effect: false,
       }));
-      await recordStartup(
-        'RUNTIME_HOLD_NO_WINDOW',
-        'RUNTIME_IMPORT_FAILED_HOST_ALIVE',
-        { host_resilience_bootstrapped: true },
-        browserRuntimeLoadError,
-      );
-      try {
-        await dialog.showMessageBox({
-          type: 'error',
-          title: 'METAENGINE Browser — startup error',
-          message: 'The Browser UI could not be loaded.',
-          detail: [
-            String(browserRuntimeLoadError?.message || browserRuntimeLoadError).slice(0, 500),
-            '',
-            'The recovery host is still running and automatic effect retry is held.',
-            startupContext?.journal_path ? `Startup diagnostics: ${startupContext.journal_path}` : null,
-          ].filter(Boolean).join('\n'),
-          buttons: ['OK'],
-          defaultId: 0,
-          noLink: true,
-        });
-        await recordStartup('RUNTIME_FAILURE_PRESENTED', 'STARTUP_ERROR_DIALOG_SHOWN');
-      } catch (dialogError) {
-        await recordStartup(
-          'RUNTIME_FAILURE_PRESENTATION_FAILED',
-          'STARTUP_ERROR_DIALOG_FAILED',
-          {},
-          dialogError,
-        );
-      }
-    } else {
-      // A successful import is still not a usable Browser. Require independent
-      // readback that a visible BaseWindow survived for a bounded stability
-      // interval. CI consumes the same durable event on a normal no-flag boot.
-      void waitForStablePrimaryWindow(BaseWindow)
-        .then((windowReadback) => recordStartup(
-          windowReadback.ok ? 'PRIMARY_WINDOW_STABLE' : 'PRIMARY_WINDOW_STABLE_TIMEOUT',
-          windowReadback.reason,
-          {
-            window_count: windowReadback.window_count ?? 0,
-            stable_ms: windowReadback.stable_ms ?? 0,
-            visible: windowReadback.visible === true,
-            focused: windowReadback.focused === true,
-          },
-        ))
-        .catch((error) => recordStartup(
-          'PRIMARY_WINDOW_OBSERVER_FAILED',
-          'PRIMARY_WINDOW_READBACK_ERROR',
-          {},
-          error,
-        ));
-    }
 
-    if (resumeSuccessorQualification) {
-      setImmediate(() => {
-        qualifyUpdatedSuccessorWhenHealthy({ app })
-          .then((result) => console.log(JSON.stringify({
-            schema: 'metaengine.browser.self-update-qualification.v2',
-            version: app.getVersion(),
-            recovery_startup: updatedLaunch !== true,
-            ...result,
-            authority_effect: false,
-          })))
-          .catch((error) => console.error(JSON.stringify({
-            schema: 'metaengine.browser.self-update-qualification.v2',
-            version: app.getVersion(),
-            recovery_startup: updatedLaunch !== true,
-            state: 'QUALIFICATION_ERROR',
-            error: String(error?.message || error).slice(0, 300),
-            authority_effect: false,
-          })));
+      // Window creation in main.mjs is fenced on this barrier. Releasing it must
+      // never wait on observability I/O; the journal records the already-observed
+      // host state asynchronously after the UI is allowed to proceed.
+      resolveBrowserBootstrap?.(hostSnapshot);
+      void recordStartup(
+        'BROWSER_BOOTSTRAP_BARRIER_RELEASED',
+        'HOST_BOOTSTRAP_ATTEMPT_SETTLED',
+        { host_state: hostSnapshot?.state || 'UNKNOWN' },
+      );
+      void recordStartup(
+        'HOST_RESILIENCE_BOOTSTRAPPED',
+        'HOST_BOOTSTRAP_ATTEMPT_COMPLETED',
+        {
+          host_state: hostSnapshot?.state || 'UNKNOWN',
+          login_start_verified: hostSnapshot?.login_start_verified === true,
+          sentinel_worker_healthy: hostSnapshot?.sentinel_worker_healthy === true,
+          browser_runtime_loaded: browserRuntimeLoadError == null,
+        },
+      );
+
+      if (browserRuntimeLoadError) {
+        // The host/sentinel plane is already bootstrapped. Keep it alive so a
+        // trusted external recovery/update can repair the Browser runtime instead
+        // of converting a local import failure into a terminal stop. Unlike the
+        // old behavior, persist the failure and make it visible to the user.
+        process.env.METAENGINE_BROWSER_RUNTIME_HOLD_REASON = 'RUNTIME_LOAD_ERROR';
+        const startupContext = await startupContextPromise;
+        console.error(JSON.stringify({
+          schema: 'metaengine.browser-runtime-load.v1',
+          state: 'ERROR',
+          error: String(browserRuntimeLoadError?.message || browserRuntimeLoadError).slice(0, 300),
+          host_resilience_bootstrapped: true,
+          recovery_state: 'HOST_ALIVE',
+          terminal: false,
+          authority_effect: false,
+        }));
+        await recordStartup(
+          'RUNTIME_HOLD_NO_WINDOW',
+          'RUNTIME_IMPORT_FAILED_HOST_ALIVE',
+          { host_resilience_bootstrapped: true },
+          browserRuntimeLoadError,
+        );
+        try {
+          await dialog.showMessageBox({
+            type: 'error',
+            title: 'METAENGINE Browser — startup error',
+            message: 'The Browser UI could not be loaded.',
+            detail: [
+              String(browserRuntimeLoadError?.message || browserRuntimeLoadError).slice(0, 500),
+              '',
+              'The recovery host is still running and automatic effect retry is held.',
+              startupContext?.journal_path ? `Startup diagnostics: ${startupContext.journal_path}` : null,
+            ].filter(Boolean).join('\n'),
+            buttons: ['OK'],
+            defaultId: 0,
+            noLink: true,
+          });
+          await recordStartup('RUNTIME_FAILURE_PRESENTED', 'STARTUP_ERROR_DIALOG_SHOWN');
+        } catch (dialogError) {
+          await recordStartup(
+            'RUNTIME_FAILURE_PRESENTATION_FAILED',
+            'STARTUP_ERROR_DIALOG_FAILED',
+            {},
+            dialogError,
+          );
+        }
+      } else {
+        // A successful import is still not a usable Browser. Require independent
+        // readback that a visible BaseWindow survived for a bounded stability
+        // interval. CI consumes the same durable event on a normal no-flag boot.
+        void waitForStablePrimaryWindow(BaseWindow)
+          .then((windowReadback) => recordStartup(
+            windowReadback.ok ? 'PRIMARY_WINDOW_STABLE' : 'PRIMARY_WINDOW_STABLE_TIMEOUT',
+            windowReadback.reason,
+            {
+              window_count: windowReadback.window_count ?? 0,
+              stable_ms: windowReadback.stable_ms ?? 0,
+              visible: windowReadback.visible === true,
+              focused: windowReadback.focused === true,
+            },
+          ))
+          .catch((error) => recordStartup(
+            'PRIMARY_WINDOW_OBSERVER_FAILED',
+            'PRIMARY_WINDOW_READBACK_ERROR',
+            {},
+            error,
+          ));
+      }
+
+      if (resumeSuccessorQualification) {
+        setImmediate(() => {
+          qualifyUpdatedSuccessorWhenHealthy({ app })
+            .then((result) => console.log(JSON.stringify({
+              schema: 'metaengine.browser.self-update-qualification.v2',
+              version: app.getVersion(),
+              recovery_startup: updatedLaunch !== true,
+              ...result,
+              authority_effect: false,
+            })))
+            .catch((error) => console.error(JSON.stringify({
+              schema: 'metaengine.browser.self-update-qualification.v2',
+              version: app.getVersion(),
+              recovery_startup: updatedLaunch !== true,
+              state: 'QUALIFICATION_ERROR',
+              error: String(error?.message || error).slice(0, 300),
+              authority_effect: false,
+            })));
+        });
+      }
+    };
+
+    const runReadyContinuation = () => {
+      if (readyContinuationStarted) return;
+      readyContinuationStarted = true;
+      void continueStartupAfterReady().catch((error) => {
+        console.error(JSON.stringify({
+          schema: 'metaengine.browser.ready-continuation.v1',
+          state: 'ERROR',
+          error: String(error?.message || error).slice(0, 300),
+          browser_bootstrap_barrier_released: false,
+          terminal: false,
+          authority_effect: false,
+        }));
+        void recordStartup(
+          'APP_READY_CONTINUATION_FAILED',
+          'ELECTRON_READY_CONTINUATION_ERROR',
+          { browser_bootstrap_barrier_released: false },
+          error,
+        );
+        try {
+          dialog.showErrorBox(
+            'METAENGINE Browser — startup bootstrap error',
+            [
+              'Electron became ready, but the Browser bootstrap continuation failed.',
+              'The Browser window was not released because host bootstrap did not settle safely.',
+              '',
+              `Diagnostic: ${String(error?.message || error).slice(0, 300)}`,
+            ].join('\n'),
+          );
+        } catch {}
       });
+    };
+
+    void recordStartup('APP_READY_CONTINUATION_ARMED', 'ELECTRON_READY_EVENT_LISTENER_ARMED');
+    if (typeof app.isReady === 'function' && app.isReady()) {
+      // Preserve one-shot ordering even if readiness raced with the earlier local
+      // startup inspection. Never invoke the continuation inline during ESM
+      // evaluation.
+      setImmediate(runReadyContinuation);
+    } else {
+      app.once('ready', runReadyContinuation);
     }
   }
 }
