@@ -142,6 +142,7 @@ export class BrowserBrainRuntimeControlPlane {
     const commandId = exactCommandId(command?.command_id);
     const tabId = exactTabId(command?.payload?.tab_id);
     const context = this.#memory.context(tabId);
+    if (context?.ambiguous_effect) throw new Error('browser_runtime_fence_ambiguous_effect_reconciliation_required');
     if (context?.status === 'NEEDS_ATTENTION') throw new Error('browser_runtime_fence_reconciliation_required');
     if (context?.status === 'GONE') throw new Error('browser_runtime_fence_target_not_live');
 
@@ -178,6 +179,7 @@ export class BrowserBrainRuntimeControlPlane {
     if (fence.tab_id !== tabId) throw new Error('browser_runtime_fence_tab_id_mismatch');
 
     const context = this.#memory.context(tabId);
+    if (context?.ambiguous_effect) throw new Error('browser_runtime_fence_ambiguous_effect_reconciliation_required');
     if (context?.status === 'NEEDS_ATTENTION') throw new Error('browser_runtime_fence_reconciliation_required');
 
     const current = this.#bindings.assertExactRuntimeTarget({
@@ -202,6 +204,10 @@ export class BrowserBrainRuntimeControlPlane {
 
   recordCommandOutcome(outcome = {}) {
     return this.#memory.rememberCommandOutcome(outcome);
+  }
+
+  reconcileAmbiguousOutcome(proof = {}) {
+    return this.#memory.reconcileAmbiguousOutcome(proof);
   }
 
   observePressure(sample = {}) {
@@ -232,6 +238,7 @@ export class BrowserBrainRuntimeControlPlane {
       platform_fallback_allowed_for_mutation: false,
       stale_binding_execution_allowed: false,
       ambiguous_effect_blocks_same_cell_mutation: true,
+      ambiguity_reconciliation_requires_evidence_hash: true,
       periodic_census_is_execution_authority: false,
       execution_authority: false,
       scheduler_authority: false,
