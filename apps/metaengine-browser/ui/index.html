@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-AI+PCezv12SbcM7iVjv5R94hG5Rb9Ds/f/lQJm+DGaU='; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>METAENGINE Browser</title>
@@ -82,5 +82,83 @@
 
   <div id="shellBackdrop" class="shellBackdrop" aria-hidden="true"></div>
   <script src="metaengine://shell/app.js"></script>
+  <script data-adaptive-context-rail>(() => {
+  const rail = document.getElementById('verticalTabs');
+  const search = document.getElementById('tabSearch');
+  if (!rail || !search) return;
+
+  const ADAPTIVE_AGENT_THRESHOLD = 8;
+  const ADAPTIVE_AGENT_VISIBLE = 5;
+  const DISCLOSURE_SELECTOR = '[data-adaptive-agent-disclosure]';
+  let expanded = false;
+  let applying = false;
+
+  function disclosure(total, hidden) {
+    const row = document.createElement('div');
+    row.className = 'railSectionHead';
+    row.dataset.adaptiveAgentDisclosure = 'true';
+
+    const label = document.createElement('span');
+    label.textContent = `Agents · ${total}`;
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'miniButton';
+    toggle.textContent = expanded ? '−' : `+${hidden}`;
+    toggle.title = expanded ? 'Collapse agent tabs' : `Show ${hidden} more agent tabs`;
+    toggle.setAttribute('aria-label', toggle.title);
+    toggle.addEventListener('click', () => {
+      expanded = !expanded;
+      applyAdaptiveDensity();
+    });
+
+    row.append(label, toggle);
+    return row;
+  }
+
+  function collapsedKeepSet(rows) {
+    const keep = new Set();
+    for (const row of rows) {
+      if (row.classList.contains('active') || row.querySelector('.tabStateDot.bad,.tabStateDot.warn')) keep.add(row);
+    }
+    for (const row of rows) {
+      if (keep.size >= ADAPTIVE_AGENT_VISIBLE) break;
+      keep.add(row);
+    }
+    return keep;
+  }
+
+  function applyAdaptiveDensity() {
+    if (applying) return;
+    applying = true;
+    observer.disconnect();
+    try {
+      rail.querySelector(DISCLOSURE_SELECTOR)?.remove();
+      const rows = [...rail.querySelectorAll('.verticalTab.agent')];
+      for (const row of rows) row.hidden = false;
+
+      const searching = search.value.trim().length > 0;
+      if (searching || rows.length <= ADAPTIVE_AGENT_THRESHOLD) {
+        if (rows.length <= ADAPTIVE_AGENT_THRESHOLD) expanded = false;
+        return;
+      }
+
+      const keep = expanded ? new Set(rows) : collapsedKeepSet(rows);
+      const hiddenRows = rows.filter((row) => !keep.has(row));
+      for (const row of hiddenRows) row.hidden = true;
+
+      const anchor = rows[0];
+      if (anchor) anchor.before(disclosure(rows.length, hiddenRows.length));
+    } finally {
+      observer.observe(rail, { childList: true });
+      applying = false;
+    }
+  }
+
+  const observer = new MutationObserver(() => queueMicrotask(applyAdaptiveDensity));
+  observer.observe(rail, { childList: true });
+  search.addEventListener('input', () => queueMicrotask(applyAdaptiveDensity));
+  queueMicrotask(applyAdaptiveDensity);
+})();</script>
 </body>
 </html>
