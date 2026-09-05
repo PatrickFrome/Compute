@@ -4,7 +4,9 @@ export const BROWSER_BRAIN_WORKING_MEMORY_SCHEMA = 'metaengine.browser.brain-wor
 export const BROWSER_BRAIN_CHECKPOINT_SCHEMA = 'metaengine.browser.brain-working-memory-checkpoint.v1';
 
 const TAB_ID_RE = /^tab_[0-9a-f-]{36}$/i;
+const HASH_RE = /^[a-f0-9]{64}$/;
 const SAFE_STATUS = new Set(['UNKNOWN','READY','WORKING','NEEDS_ATTENTION','DEGRADED','GONE']);
+const SAFE_RECONCILIATION = new Set(['CONFIRMED_EFFECT','CONFIRMED_NO_EFFECT','TARGET_GONE']);
 const CRITICAL_TYPES = new Set(['RENDER_PROCESS_GONE','WEB_CONTENTS_DESTROYED','WEB_CONTENTS_UNRESPONSIVE','CHILD_PROCESS_GONE']);
 
 function boundedInt(value, fallback, min, max) {
@@ -85,6 +87,39 @@ function commandProjection(outcome = {}) {
   });
 }
 
+function ambiguousEffectProjection(command) {
+  if (!command) return null;
+  return Object.freeze({
+    command_id: text(command?.command_id, 128),
+    action: text(command?.action, 96),
+    recorded_at: text(command?.recorded_at, 64),
+    effect_outcome: 'AMBIGUOUS',
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  });
+}
+
+function reconciliationProjection(proof = {}) {
+  const tabId = String(proof?.tab_id || '').toLowerCase();
+  const resolution = String(proof?.resolution || '').toUpperCase();
+  const evidenceSha256 = String(proof?.evidence_sha256 || '').toLowerCase();
+  if (!TAB_ID_RE.test(tabId)) throw new Error('browser_brain_memory_reconciliation_tab_invalid');
+  if (!SAFE_RECONCILIATION.has(resolution)) throw new Error('browser_brain_memory_reconciliation_resolution_invalid');
+  if (!HASH_RE.test(evidenceSha256)) throw new Error('browser_brain_memory_reconciliation_evidence_hash_invalid');
+  return Object.freeze({
+    tab_id: tabId,
+    command_id: text(proof?.command_id, 128),
+    resolution,
+    evidence_sha256: evidenceSha256,
+    reconciled_at: text(proof?.reconciled_at, 64) || new Date().toISOString(),
+    evidence_payload_exposed: false,
+    page_text_exposed: false,
+    input_values_exposed: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  });
+}
+
 function defaultCell(tabId, now) {
   return {
     tab_id: tabId,
@@ -92,6 +127,8 @@ function defaultCell(tabId, now) {
     binding: null,
     last_event: null,
     last_command: null,
+    ambiguous_effect: null,
+    last_reconciliation: null,
     last_semantic_sequence: null,
     last_observed_at: now,
     attention_reason: null,
@@ -141,8 +178,13 @@ export class BrowserBrainWorkingMemory {
     if (!projected || !TAB_ID_RE.test(String(projected.tab_id || ''))) return null;
     const cell = this.#ensureCell(projected.tab_id);
     cell.binding = projected;
-    cell.status = cell.status === 'NEEDS_ATTENTION' ? cell.status : 'READY';
-    cell.attention_reason = cell.status === 'NEEDS_ATTENTION' ? cell.attention_reason : null;
+    if (cell.ambiguous_effect) {
+      cell.status = 'NEEDS_ATTENTION';
+      cell.attention_reason = 'COMMAND_OUTCOME_AMBIGUOUS';
+    } else {
+      cell.status = cell.status === 'NEEDS_ATTENTION' ? cell.status : 'READY';
+      cell.attention_reason = cell.status === 'NEEDS_ATTENTION' ? cell.attention_reason : null;
+    }
     cell.last_observed_at = this.#now();
     this.#global.process_revision += 1;
     return this.context(projected.tab_id);
@@ -188,6 +230,10 @@ export class BrowserBrainWorkingMemory {
       } else if (projected.type === 'WEB_CONTENTS_LOADING_STOPPED' && cell.status !== 'NEEDS_ATTENTION') {
         cell.status = cell.binding ? 'READY' : 'UNKNOWN';
       }
+      if (cell.ambiguous_effect && cell.status !== 'GONE') {
+        cell.status = 'NEEDS_ATTENTION';
+        cell.attention_reason = 'COMMAND_OUTCOME_AMBIGUOUS';
+      }
     }
     return projected;
   }
@@ -200,8 +246,12 @@ export class BrowserBrainWorkingMemory {
     cell.last_command = projected;
     cell.last_observed_at = projected.recorded_at;
     if (projected.status === 'AMBIGUOUS' || projected.effect_outcome === 'AMBIGUOUS') {
+      cell.ambiguous_effect = ambiguousEffectProjection(projected);
       cell.status = 'NEEDS_ATTENTION';
       cell.attention_reason = 'COMMAND_OUTCOME_AMBIGUOUS';
+    } else if (cell.ambiguous_effect) {
+      cell.status = cell.status === 'GONE' ? 'GONE' : 'NEEDS_ATTENTION';
+      if (cell.status !== 'GONE') cell.attention_reason = 'COMMAND_OUTCOME_AMBIGUOUS';
     } else if (projected.status === 'FAILED') {
       cell.status = 'DEGRADED';
       cell.attention_reason = 'COMMAND_FAILED';
@@ -210,6 +260,30 @@ export class BrowserBrainWorkingMemory {
       cell.attention_reason = null;
     }
     return projected;
+  }
+
+  reconcileAmbiguousOutcome(proof = {}) {
+    const projected = reconciliationProjection(proof);
+    const cell = this.#cells.get(projected.tab_id);
+    if (!cell?.ambiguous_effect) throw new Error('browser_brain_memory_reconciliation_not_required');
+    if (projected.command_id && projected.command_id !== cell.ambiguous_effect.command_id) {
+      throw new Error('browser_brain_memory_reconciliation_command_mismatch');
+    }
+    cell.last_reconciliation = Object.freeze({
+      ...projected,
+      command_id: cell.ambiguous_effect.command_id,
+    });
+    cell.ambiguous_effect = null;
+    cell.last_observed_at = projected.reconciled_at;
+    if (projected.resolution === 'TARGET_GONE') {
+      cell.binding = null;
+      cell.status = 'GONE';
+      cell.attention_reason = 'RECONCILED_TARGET_GONE';
+    } else {
+      cell.status = cell.binding ? 'READY' : 'UNKNOWN';
+      cell.attention_reason = null;
+    }
+    return this.context(projected.tab_id);
   }
 
   reconcileBindings(bindingSnapshot = {}) {
@@ -236,12 +310,15 @@ export class BrowserBrainWorkingMemory {
       binding: cell.binding ? { ...cell.binding } : null,
       last_event: cell.last_event ? { ...cell.last_event } : null,
       last_command: cell.last_command ? { ...cell.last_command } : null,
+      ambiguous_effect: cell.ambiguous_effect ? { ...cell.ambiguous_effect } : null,
+      last_reconciliation: cell.last_reconciliation ? { ...cell.last_reconciliation } : null,
       last_semantic_sequence: cell.last_semantic_sequence,
       last_observed_at: cell.last_observed_at,
       attention_reason: cell.attention_reason,
       page_text_exposed: false,
       input_values_exposed: false,
       command_payload_exposed: false,
+      reconciliation_evidence_payload_exposed: false,
       execution_authority: false,
       authority_effect: false,
     });
@@ -259,6 +336,8 @@ export class BrowserBrainWorkingMemory {
         binding: row.binding ? { ...row.binding } : null,
         last_event: row.last_event ? { ...row.last_event } : null,
         last_command: row.last_command ? { ...row.last_command } : null,
+        ambiguous_effect: row.ambiguous_effect ? { ...row.ambiguous_effect } : null,
+        last_reconciliation: row.last_reconciliation ? { ...row.last_reconciliation } : null,
         last_semantic_sequence: row.last_semantic_sequence,
         last_observed_at: row.last_observed_at,
         attention_reason: row.attention_reason,
@@ -266,6 +345,7 @@ export class BrowserBrainWorkingMemory {
       page_text_exposed: false,
       input_values_exposed: false,
       command_payload_exposed: false,
+      reconciliation_evidence_payload_exposed: false,
       execution_authority: false,
       authority_effect: false,
     };
@@ -285,6 +365,7 @@ export class BrowserBrainWorkingMemory {
     if (checkpoint.page_text_exposed !== false || checkpoint.input_values_exposed !== false || checkpoint.command_payload_exposed !== false) {
       throw new Error('browser_brain_memory_checkpoint_privacy_invalid');
     }
+    if (checkpoint.reconciliation_evidence_payload_exposed === true) throw new Error('browser_brain_memory_checkpoint_reconciliation_privacy_invalid');
     const rows = Array.isArray(checkpoint.cells) ? checkpoint.cells : [];
     if (rows.length > this.#maxCells) throw new Error('browser_brain_memory_checkpoint_too_large');
     this.#cells.clear();
@@ -292,15 +373,19 @@ export class BrowserBrainWorkingMemory {
       const tabId = String(row?.tab_id || '').toLowerCase();
       if (!TAB_ID_RE.test(tabId)) throw new Error('browser_brain_memory_checkpoint_tab_invalid');
       const status = SAFE_STATUS.has(String(row?.status || '').toUpperCase()) ? String(row.status).toUpperCase() : 'UNKNOWN';
+      const ambiguousEffect = row.ambiguous_effect ? ambiguousEffectProjection(row.ambiguous_effect) : null;
+      const lastReconciliation = row.last_reconciliation ? reconciliationProjection(row.last_reconciliation) : null;
       this.#cells.set(tabId, {
         tab_id: tabId,
-        status,
+        status: ambiguousEffect && status !== 'GONE' ? 'NEEDS_ATTENTION' : status,
         binding: row.binding ? publicBinding(row.binding) : null,
         last_event: row.last_event ? eventProjection(row.last_event) : null,
         last_command: row.last_command ? commandProjection(row.last_command) : null,
+        ambiguous_effect: ambiguousEffect,
+        last_reconciliation: lastReconciliation,
         last_semantic_sequence: Number.isSafeInteger(Number(row.last_semantic_sequence)) ? Number(row.last_semantic_sequence) : null,
         last_observed_at: text(row.last_observed_at, 64) || this.#now(),
-        attention_reason: text(row.attention_reason, 160),
+        attention_reason: ambiguousEffect ? 'COMMAND_OUTCOME_AMBIGUOUS' : text(row.attention_reason, 160),
       });
     }
     this.#global = {
@@ -329,6 +414,8 @@ export class BrowserBrainWorkingMemory {
       page_text_stored: false,
       input_values_stored: false,
       command_payload_stored: false,
+      reconciliation_evidence_payload_stored: false,
+      ambiguous_effect_requires_explicit_reconciliation: true,
       poll_timer_required: false,
       execution_authority: false,
       command_leasing: false,
