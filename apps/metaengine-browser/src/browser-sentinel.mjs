@@ -290,13 +290,18 @@ export class BrowserSentinelHost {
       }
 
       const generation = Number(current.worker_recovery_generation || 0) + 1;
+      const oldExitProof = this.#childExitProof?.child === this.#child && Number(this.#childExitProof?.pid || 0) === oldPid
+        ? this.#childExitProof
+        : null;
       const intent = await this.#mutate({
         worker_recovery_generation: generation,
         worker_recovery_state: 'INTENT_PROVEN_OLD_PID_ABSENT',
         worker_recovery_old_pid: oldPid,
         worker_recovery_candidate_pid: null,
         worker_recovery_at: new Date().toISOString(),
-        worker_recovery_result: this.#childExitProof?.child === this.#child ? 'exact_child_exit_observed' : 'exact_old_worker_pid_absent',
+        worker_recovery_result: oldExitProof
+          ? `exact_child_exit_observed:exit_code:${oldExitProof.code ?? 'null'}:signal:${oldExitProof.signal || 'none'}`
+          : 'exact_old_worker_pid_absent',
       });
       if (this.#transitionSuppressed()
         || intent?.token !== snap.token
@@ -422,7 +427,10 @@ export class BrowserSentinelHost {
         }
         await this.#mutate({
           worker_recovery_state: 'CANDIDATE_CONFIRMED_ABSENT',
-          worker_recovery_result: `candidate_exact_process_absent:${candidatePid}`,
+          worker_recovery_result: `candidate_exact_process_absent:${candidatePid}`
+            + (this.#childExitProof?.child === this.#child && Number(this.#childExitProof?.pid || 0) === candidatePid
+              ? `:exit_code:${this.#childExitProof.code ?? 'null'}:signal:${this.#childExitProof.signal || 'none'}`
+              : ''),
         });
         return { state: 'CANDIDATE_CONFIRMED_ABSENT', recovered: false, worker_pid: candidatePid, automatic_retry_allowed: true, authority_effect: false };
       }
