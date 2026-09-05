@@ -116,7 +116,7 @@ test('native supervisor client completes approval enrollment then executes lease
   const leaseIndex = seen.findIndex((row) => row.pathname.endsWith('/v1/commands/wait-batch'));
   assert.ok(requestIndex >= 0 && statusIndex > requestIndex);
   assert.ok(stateIndex > statusIndex);
-  assert.ok(leaseIndex > stateIndex);
+  assert.ok(leaseIndex > statusIndex);
   await fs.rm(dir, { recursive:true, force:true });
 });
 
@@ -257,7 +257,7 @@ test('rejected DB effect-intent prevents physical semantic execution', async () 
   await client.cycle();
   assert.equal(physicalEffects,0);
   assert.match(postedReceipt?.error || '',/effect_binding_http_409/);
-  assert.equal(postedReceipt?.effect_outcome,'AMBIGUOUS');
+  assert.equal(postedReceipt?.receipt?.effect_outcome,'AMBIGUOUS');
   assert.equal(client.snapshot().last_command_status,'FAILED');
   await fs.rm(dir,{recursive:true,force:true});
 });
