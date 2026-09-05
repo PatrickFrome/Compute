@@ -1,0 +1,103 @@
+name: METAENGINE Browser Control Plane Fast Lane V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/native-supervisor-client-base.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client-core.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-command-lanes.mjs'
+      - 'apps/metaengine-browser/src/browser-realtime-process-plane.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts'
+      - 'apps/metaengine-browser/test/native-supervisor-command-lanes.test.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-fast-lane-contract.test.mjs'
+      - 'sql/browser_control_plane_fast_lane_v1.sql'
+      - '.github/workflows/browser-control-plane-fast-lane-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fast-lane-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Static parse fast-lane runtime
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/native-supervisor-command-lanes.mjs
+          node --check src/native-supervisor-client-base.mjs
+          node --check src/native-supervisor-client-core.mjs
+          node --check src/browser-realtime-process-plane.mjs
+
+      - name: Execute adversarial concurrency and latency contracts
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test test/native-supervisor-command-lanes.test.mjs test/native-supervisor-fast-lane-contract.test.mjs
+
+      - name: Prove Edge batch surface is typed and source only
+        shell: bash
+        run: |
+          set -euo pipefail
+          edge='apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts'
+          grep -Fq "'/v1/commands/wait-batch'" "$edge"
+          grep -Fq "'/v1/commands/result-batch'" "$edge"
+          grep -Fq 'transport_delivery_is_authority:false' "$edge"
+          ! grep -Eq 'eval[[:space:]]*\(|new[[:space:]]+Function[[:space:]]*\(' "$edge"
+
+      - name: Prove SQL cannot auto-apply live control authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          sql='sql/browser_control_plane_fast_lane_v1.sql'
+          test -f "$sql"
+          test ! -e 'supabase/migrations/browser_control_plane_fast_lane_v1.sql'
+          grep -Eiq '^rollback;[[:space:]]*$' "$sql"
+          ! grep -Eiq '^[[:space:]]*commit;[[:space:]]*$' "$sql"
+          ! grep -Eiq 'grant[[:space:]]+execute[^;]+[[:space:]]+to[[:space:]]+(public|anon|authenticated)[[:space:]]*;' "$sql"
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git diff --name-only HEAD -- \
+            apps/metaengine-browser/src/native-supervisor-command-lanes.mjs \
+            apps/metaengine-browser/src/native-supervisor-client-base.mjs \
+            apps/metaengine-browser/src/native-supervisor-client-core.mjs \
+            apps/metaengine-browser/src/browser-realtime-process-plane.mjs \
+            apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts \
+            apps/metaengine-browser/test/native-supervisor-command-lanes.test.mjs \
+            apps/metaengine-browser/test/native-supervisor-fast-lane-contract.test.mjs \
+            sql/browser_control_plane_fast_lane_v1.sql \
+            .github/workflows/browser-control-plane-fast-lane-v1.yml)"
