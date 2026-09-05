@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 export const BROWSER_COGNITIVE_DELTA_BUS_SCHEMA = 'metaengine.browser.cognitive-delta-bus.v1';
 export const BROWSER_COGNITIVE_DELTA_SCHEMA = 'metaengine.browser.cognitive-delta.v1';
 
@@ -6,6 +8,7 @@ const DEFAULT_MAX_EVENTS = 4096;
 const HARD_MAX_EVENTS = 16384;
 const DEFAULT_READ_LIMIT = 256;
 const HARD_READ_LIMIT = 1024;
+const STREAM_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const clip = (value, max = 240) => value == null ? null : String(value).slice(0, max);
 
@@ -13,6 +16,12 @@ function boundedInt(value, fallback, min, max) {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed)) return fallback;
   return Math.max(min, Math.min(max, parsed));
+}
+
+function normalizeStreamId(value) {
+  const streamId = value == null ? randomUUID() : String(value).trim().toLowerCase();
+  if (!STREAM_ID_RE.test(streamId)) throw new Error('cognitive_delta_stream_id_invalid');
+  return streamId;
 }
 
 function semanticPriority(methodRaw) {
@@ -90,6 +99,7 @@ export class BrowserCognitiveDeltaBus {
   #clock;
   #maxEvents;
   #onDelta;
+  #streamId;
   #events = [];
   #sequence = 0;
   #droppedTotal = 0;
@@ -101,12 +111,14 @@ export class BrowserCognitiveDeltaBus {
     clock = () => Date.now(),
     maxEvents = DEFAULT_MAX_EVENTS,
     onDelta = null,
+    streamId = null,
   } = {}) {
     if (typeof clock !== 'function') throw new Error('cognitive_delta_clock_required');
     if (onDelta != null && typeof onDelta !== 'function') throw new Error('cognitive_delta_onchange_invalid');
     this.#clock = clock;
     this.#maxEvents = boundedInt(maxEvents, DEFAULT_MAX_EVENTS, 8, HARD_MAX_EVENTS);
     this.#onDelta = onDelta;
+    this.#streamId = normalizeStreamId(streamId);
   }
 
   publish(input = {}) {
@@ -115,6 +127,7 @@ export class BrowserCognitiveDeltaBus {
     const projected = safeDeltaProjection(input);
     const event = Object.freeze({
       schema: BROWSER_COGNITIVE_DELTA_SCHEMA,
+      stream_id: this.#streamId,
       sequence: this.#sequence,
       priority,
       recorded_at: new Date(this.#clock()).toISOString(),
@@ -129,6 +142,7 @@ export class BrowserCognitiveDeltaBus {
         this.#droppedThroughSequence = Math.max(this.#droppedThroughSequence, event.sequence);
         return Object.freeze({
           accepted: false,
+          stream_id: this.#streamId,
           sequence: event.sequence,
           priority,
           reason: 'LOWER_PRIORITY_DROPPED_UNDER_PRESSURE',
@@ -143,7 +157,7 @@ export class BrowserCognitiveDeltaBus {
 
     this.#events.push(event);
     try { this.#onDelta?.(event); } catch {}
-    return Object.freeze({ accepted: true, event, authority_effect: false });
+    return Object.freeze({ accepted: true, stream_id: this.#streamId, event, authority_effect: false });
   }
 
   readSince(sequence = 0, limit = DEFAULT_READ_LIMIT) {
@@ -156,6 +170,7 @@ export class BrowserCognitiveDeltaBus {
     const lastReturned = events.length ? events[events.length - 1].sequence : after;
     return Object.freeze({
       schema: 'metaengine.browser.cognitive-delta-read.v1',
+      stream_id: this.#streamId,
       after_sequence: after,
       earliest_sequence: earliest,
       latest_sequence: this.#sequence,
@@ -166,6 +181,7 @@ export class BrowserCognitiveDeltaBus {
       events,
       dropped_total: this.#droppedTotal,
       dropped_through_sequence: this.#droppedThroughSequence,
+      dedupe_key: 'stream_id+sequence',
       snapshot_is_recovery_authority: true,
       delta_is_execution_authority: false,
       control_authority: false,
@@ -179,6 +195,7 @@ export class BrowserCognitiveDeltaBus {
     for (const event of this.#events) counts[event.priority] += 1;
     return Object.freeze({
       schema: BROWSER_COGNITIVE_DELTA_BUS_SCHEMA,
+      stream_id: this.#streamId,
       sequence: this.#sequence,
       earliest_sequence: this.#events.length ? this.#events[0].sequence : this.#sequence + 1,
       retained_events: this.#events.length,
@@ -188,6 +205,8 @@ export class BrowserCognitiveDeltaBus {
       dropped_incoming: this.#droppedIncoming,
       dropped_retained: this.#droppedRetained,
       dropped_through_sequence: this.#droppedThroughSequence,
+      dedupe_key: 'stream_id+sequence',
+      stream_scope: 'BROWSER_PROCESS_INCARNATION',
       gap_recovery: 'FULL_PROCESS_AND_SEMANTIC_SNAPSHOT',
       raw_payload_exposed: false,
       page_text_exposed: false,
