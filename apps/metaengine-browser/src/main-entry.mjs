@@ -1,6 +1,12 @@
-import { app } from 'electron';
+import { app, BaseWindow, dialog } from 'electron';
 import { acquirePrimaryInstance, METAENGINE_BROWSER_APP_ID } from './single-instance-guard.mjs';
 import { HostResilienceRuntime } from './host-resilience-runtime.mjs';
+import {
+  activateExistingPrimaryWindow,
+  beginBrowserStartupJournal,
+  recordBrowserStartupEvent,
+  waitForStablePrimaryWindow,
+} from './browser-startup-observability.mjs';
 import {
   inspectSelfUpdateStartup,
   persistUpdatedSuccessorReceipt,
@@ -17,6 +23,7 @@ const versionProbe = process.argv.includes('--metaengine-version-probe');
 const profileProbe = process.argv.includes('--metaengine-profile-probe');
 const selfUpdateSmoke = process.argv.includes('--metaengine-self-update-smoke');
 const updatedLaunch = process.argv.includes('--updated');
+const browserRuntimeNeeded = !selfUpdateSmoke && !versionProbe && !profileProbe && !instanceHoldProbe;
 
 const guard = acquirePrimaryInstance(app, { bypass: bypassSingleInstance });
 
@@ -25,20 +32,104 @@ if (guard.primary) {
     app.setAppUserModelId(METAENGINE_BROWSER_APP_ID);
   }
 
+  let startupJournalFailureLogged = false;
+  const startupContextPromise = browserRuntimeNeeded
+    ? beginBrowserStartupJournal(app, {
+      launch_kind: updatedLaunch ? 'UPDATED_SUCCESSOR' : 'NORMAL',
+    }).catch((error) => {
+      if (!startupJournalFailureLogged) {
+        startupJournalFailureLogged = true;
+        console.error(JSON.stringify({
+          schema: 'metaengine.browser.startup-observability.v1',
+          state: 'STARTUP_JOURNAL_UNAVAILABLE',
+          error: String(error?.message || error).slice(0, 300),
+          authority_effect: false,
+        }));
+      }
+      return null;
+    })
+    : Promise.resolve(null);
+
+  const recordStartup = async (state, reason, details = {}, error = null) => {
+    const context = await startupContextPromise;
+    if (!context) return null;
+    try {
+      return await recordBrowserStartupEvent(app, {
+        boot_id: context.boot_id,
+        state,
+        reason,
+        details,
+        error,
+      });
+    } catch (journalError) {
+      if (!startupJournalFailureLogged) {
+        startupJournalFailureLogged = true;
+        console.error(JSON.stringify({
+          schema: 'metaengine.browser.startup-observability.v1',
+          state: 'STARTUP_JOURNAL_WRITE_FAILED',
+          error: String(journalError?.message || journalError).slice(0, 300),
+          authority_effect: false,
+        }));
+      }
+      return null;
+    }
+  };
+
+  if (browserRuntimeNeeded) {
+    // Electron emits second-instance in the primary process after a later launch
+    // loses requestSingleInstanceLock(). The old behavior silently terminated
+    // that launch even when the only primary window was hidden by close-to-hide.
+    // Keep the singleton invariant, but explicitly reactivate the existing UI.
+    app.on('second-instance', () => {
+      void (async () => {
+        await recordStartup('SECOND_INSTANCE_RECEIVED', 'SINGLE_INSTANCE_LOCK_REUSED');
+        let activation = activateExistingPrimaryWindow(BaseWindow);
+        if (!activation.ok && activation.reason === 'PRIMARY_WINDOW_NOT_READY') {
+          const observed = await waitForStablePrimaryWindow(BaseWindow, {
+            timeout_ms: 8_000,
+            stable_ms: 250,
+            poll_ms: 100,
+          });
+          if (observed.ok) activation = activateExistingPrimaryWindow(BaseWindow);
+        }
+        await recordStartup(
+          activation.ok ? 'PRIMARY_WINDOW_ACTIVATED' : 'PRIMARY_WINDOW_ACTIVATION_UNAVAILABLE',
+          activation.reason,
+          {
+            window_count: activation.window_count ?? 0,
+            restored: activation.restored === true,
+            visible: activation.visible === true,
+            focused: activation.focused === true,
+          },
+        );
+      })();
+    });
+  }
+
   // Load the Browser runtime before any slow startup awaits so it can register
   // privileged protocol metadata and its ready handler in time. The handler is
   // fenced on this promise and cannot create the Browser window until host
   // resilience has completed its first bootstrap attempt.
-  const browserRuntimeNeeded = !selfUpdateSmoke && !versionProbe && !profileProbe && !instanceHoldProbe;
   let resolveBrowserBootstrap = null;
   let browserRuntimeLoadError = null;
   let browserRuntimePromise = null;
   if (browserRuntimeNeeded) {
     globalThis.__METAENGINE_BROWSER_BOOTSTRAP_BARRIER__ = new Promise((resolve) => { resolveBrowserBootstrap = resolve; });
-    browserRuntimePromise = import('./main.mjs').catch((error) => {
-      browserRuntimeLoadError = error;
-      return null;
-    });
+    browserRuntimePromise = import('./main.mjs')
+      .then((runtime) => {
+        void recordStartup('RUNTIME_IMPORT_OK', 'MAIN_MODULE_IMPORTED');
+        return runtime;
+      })
+      .catch((error) => {
+        browserRuntimeLoadError = error;
+        void recordStartup(
+          'RUNTIME_IMPORT_FAILED',
+          'MAIN_MODULE_IMPORT_REJECTED',
+          { host_process_kept_alive: true },
+          error,
+        );
+        return null;
+      });
   }
 
   let startupUpdateInspection = null;
@@ -62,6 +153,11 @@ if (guard.primary) {
         ...startupUpdateInspection,
         label: 'SELF_UPDATE_AUTOMATIC_RETRY_HELD',
       }));
+      void recordStartup(
+        'SELF_UPDATE_AMBIGUOUS_INSTALL_HOLD',
+        'SELF_UPDATE_AUTOMATIC_RETRY_HELD',
+        { target_version: startupUpdateInspection.target_version },
+      );
     }
   }
 
@@ -91,6 +187,12 @@ if (guard.primary) {
         terminal: false,
         authority_effect: false,
       }));
+      void recordStartup(
+        'SUCCESSOR_RECEIPT_AMBIGUOUS',
+        'UPDATED_SUCCESSOR_RECEIPT_FAILED',
+        { host_process_kept_alive: true },
+        error,
+      );
     }
   }
 
@@ -204,13 +306,25 @@ if (guard.primary) {
       terminal: false,
       authority_effect: false,
     }));
+    await recordStartup(
+      'HOST_RESILIENCE_BOOTSTRAPPED',
+      'HOST_BOOTSTRAP_ATTEMPT_COMPLETED',
+      {
+        host_state: hostSnapshot?.state || 'UNKNOWN',
+        login_start_verified: hostSnapshot?.login_start_verified === true,
+        sentinel_worker_healthy: hostSnapshot?.sentinel_worker_healthy === true,
+        browser_runtime_loaded: browserRuntimeLoadError == null,
+      },
+    );
     resolveBrowserBootstrap?.(hostSnapshot);
 
     if (browserRuntimeLoadError) {
       // The host/sentinel plane is already bootstrapped. Keep it alive so a
       // trusted external recovery/update can repair the Browser runtime instead
-      // of converting a local import failure into a terminal stop.
+      // of converting a local import failure into a terminal stop. Unlike the
+      // old behavior, persist the failure and make it visible to the user.
       process.env.METAENGINE_BROWSER_RUNTIME_HOLD_REASON = 'RUNTIME_LOAD_ERROR';
+      const startupContext = await startupContextPromise;
       console.error(JSON.stringify({
         schema: 'metaengine.browser-runtime-load.v1',
         state: 'ERROR',
@@ -220,6 +334,57 @@ if (guard.primary) {
         terminal: false,
         authority_effect: false,
       }));
+      await recordStartup(
+        'RUNTIME_HOLD_NO_WINDOW',
+        'RUNTIME_IMPORT_FAILED_HOST_ALIVE',
+        { host_resilience_bootstrapped: true },
+        browserRuntimeLoadError,
+      );
+      try {
+        await dialog.showMessageBox({
+          type: 'error',
+          title: 'METAENGINE Browser — startup error',
+          message: 'The Browser UI could not be loaded.',
+          detail: [
+            String(browserRuntimeLoadError?.message || browserRuntimeLoadError).slice(0, 500),
+            '',
+            'The recovery host is still running and automatic effect retry is held.',
+            startupContext?.journal_path ? `Startup diagnostics: ${startupContext.journal_path}` : null,
+          ].filter(Boolean).join('\n'),
+          buttons: ['OK'],
+          defaultId: 0,
+          noLink: true,
+        });
+        await recordStartup('RUNTIME_FAILURE_PRESENTED', 'STARTUP_ERROR_DIALOG_SHOWN');
+      } catch (dialogError) {
+        await recordStartup(
+          'RUNTIME_FAILURE_PRESENTATION_FAILED',
+          'STARTUP_ERROR_DIALOG_FAILED',
+          {},
+          dialogError,
+        );
+      }
+    } else {
+      // A successful import is still not a usable Browser. Require independent
+      // readback that a visible BaseWindow survived for a bounded stability
+      // interval. CI consumes the same durable event on a normal no-flag boot.
+      void waitForStablePrimaryWindow(BaseWindow)
+        .then((windowReadback) => recordStartup(
+          windowReadback.ok ? 'PRIMARY_WINDOW_STABLE' : 'PRIMARY_WINDOW_STABLE_TIMEOUT',
+          windowReadback.reason,
+          {
+            window_count: windowReadback.window_count ?? 0,
+            stable_ms: windowReadback.stable_ms ?? 0,
+            visible: windowReadback.visible === true,
+            focused: windowReadback.focused === true,
+          },
+        ))
+        .catch((error) => recordStartup(
+          'PRIMARY_WINDOW_OBSERVER_FAILED',
+          'PRIMARY_WINDOW_READBACK_ERROR',
+          {},
+          error,
+        ));
     }
 
     if (resumeSuccessorQualification) {
