@@ -38,22 +38,29 @@ test('machine store ACL allowlists write authority to SYSTEM and Administrators 
   assert.match(cpp, /D:P\(A;;FA;;;SY\)\(A;;FA;;;BA\)/);
 });
 
-test('trusted root is held without delete sharing across the create-if-absent commit boundary', () => {
-  const opener = cpp.match(/Handle openSecureRoot\([\s\S]*?\n\}/)?.[0] || '';
+test('absolute target ancestor chain is held without delete sharing across the create-if-absent commit boundary', () => {
+  const opener = cpp.match(/Handle openDirectoryFence\([\s\S]*?\n\}/)?.[0] || '';
   assert.match(opener, /FILE_SHARE_READ \| FILE_SHARE_WRITE/);
   assert.doesNotMatch(opener, /FILE_SHARE_DELETE/);
+
+  const fence = cpp.match(/RootFence openSecureRootFence\([\s\S]*?\n\}/)?.[0] || '';
+  assert.match(fence, /fence\.program_data = openDirectoryFence\(pd\)/);
+  assert.match(fence, /fence\.metaengine = openDirectoryFence\(metaengine\)/);
+  assert.match(fence, /fence\.root = openDirectoryFence\(actual, extraAccess, true\)/);
   assert.match(cpp, /"root_delete_share_fenced\\":true/);
+  assert.match(cpp, /"ancestor_delete_share_fenced\\":true/);
+  assert.match(cpp, /"absolute_target_ancestor_chain_fenced\\":true/);
   assert.match(cpp, /"commit_under_fenced_root\\":true/);
 
   const create = cpp.match(/OwnerEnrollmentStoreResult OwnerEnrollmentStore::createIfAbsent\([\s\S]*?\n\}/)?.[0] || '';
-  const guard = create.indexOf('Handle rootGuard = openSecureRoot');
+  const guard = create.indexOf('RootFence rootFence = openSecureRootFence');
   const before = create.indexOf('const auto before = classify');
   const rename = create.indexOf('renameUnderFencedRootFailIfExists');
   const readback = create.indexOf('auto readback = classify');
-  assert.ok(guard >= 0, 'trusted root guard missing');
-  assert.ok(before > guard, 'root guard must precede absence classification');
+  assert.ok(guard >= 0, 'trusted absolute-target ancestor fence missing');
+  assert.ok(before > guard, 'ancestor fence must precede absence classification');
   assert.ok(rename > before, 'source-handle rename must follow absence classification');
-  assert.ok(readback > rename, 'root guard must remain in scope through exact readback');
+  assert.ok(readback > rename, 'ancestor fence must remain in scope through exact readback');
 });
 
 test('commit renames the exclusive source handle under the fenced root and never replaces an existing winner', () => {
