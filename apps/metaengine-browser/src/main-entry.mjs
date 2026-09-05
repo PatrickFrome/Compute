@@ -1,10 +1,15 @@
 import { app, BaseWindow, dialog } from 'electron';
-import { acquirePrimaryInstance, METAENGINE_BROWSER_APP_ID } from './single-instance-guard.mjs';
+import {
+  acquirePrimaryInstance,
+  METAENGINE_BROWSER_APP_ID,
+  validSingleInstanceLaunchData,
+} from './single-instance-guard.mjs';
 import { HostResilienceRuntime } from './host-resilience-runtime.mjs';
 import {
   activateExistingPrimaryWindow,
   beginBrowserStartupJournal,
   recordBrowserStartupEvent,
+  waitForPrimaryActivationAck,
   waitForStablePrimaryWindow,
 } from './browser-startup-observability.mjs';
 import {
@@ -24,10 +29,72 @@ const profileProbe = process.argv.includes('--metaengine-profile-probe');
 const selfUpdateSmoke = process.argv.includes('--metaengine-self-update-smoke');
 const updatedLaunch = process.argv.includes('--updated');
 const browserRuntimeNeeded = !selfUpdateSmoke && !versionProbe && !profileProbe && !instanceHoldProbe;
+const interactiveNormalLaunch = browserRuntimeNeeded && !updatedLaunch;
 
 const guard = acquirePrimaryInstance(app, { bypass: bypassSingleInstance });
 
-if (guard.primary) {
+if (!guard.primary) {
+  // The old guard called app.quit() immediately. That made a hidden/stale old
+  // primary indistinguishable from a successful "focus the existing window"
+  // handoff. A normal user launch now waits only for a durable ACK tied to its
+  // unique launch nonce. It never starts a second Browser runtime or kills the
+  // current primary.
+  if (interactiveNormalLaunch) {
+    const ack = await waitForPrimaryActivationAck(app, { launch_id: guard.launch_id })
+      .catch((error) => ({
+        ok: false,
+        reason: 'PRIMARY_ACTIVATION_ACK_OBSERVER_ERROR',
+        last_read_error: String(error?.message || error).slice(0, 160),
+        authority_effect: false,
+      }));
+    if (!ack.ok) {
+      const reason = String(ack.reason || 'PRIMARY_ACTIVATION_ACK_MISSING');
+      console.error(JSON.stringify({
+        schema: 'metaengine.browser.secondary-launch.v1',
+        state: 'PRIMARY_UI_ACTIVATION_UNPROVEN',
+        launch_id: guard.launch_id,
+        reason,
+        last_read_error: ack.last_read_error || null,
+        second_browser_runtime_started: false,
+        primary_terminated: false,
+        authority_effect: false,
+      }));
+      // Electron documents showErrorBox as safe before app.ready on Windows;
+      // this is intentionally a local diagnostic surface, not execution
+      // authority. Never auto-kill a potentially live old primary here.
+      dialog.showErrorBox(
+        'METAENGINE Browser — existing instance did not open',
+        [
+          'Another METAENGINE Browser process already owns the single-instance lock,',
+          'but it did not confirm that an existing Browser window was shown.',
+          '',
+          'This usually means an older or hidden Browser process is still running.',
+          'Close the old METAENGINE Browser process and start the Browser again.',
+          '',
+          `Diagnostic: ${reason}`,
+        ].join('\n'),
+      );
+      app.exit(2);
+    } else {
+      console.log(JSON.stringify({
+        schema: 'metaengine.browser.secondary-launch.v1',
+        state: 'PRIMARY_UI_ACTIVATION_ACKNOWLEDGED',
+        launch_id: guard.launch_id,
+        primary_version: ack.primary_version,
+        primary_pid: ack.primary_pid,
+        event_sequence: ack.event_sequence,
+        second_browser_runtime_started: false,
+        authority_effect: false,
+      }));
+      app.exit(0);
+    }
+  } else {
+    // Probe/smoke and updater-successor launches preserve the existing
+    // fail-closed singleton behavior. They are not interactive user launches
+    // and must not manufacture a second process authority path.
+    app.exit(0);
+  }
+} else {
   if (process.platform === 'win32' && typeof app.setAppUserModelId === 'function') {
     app.setAppUserModelId(METAENGINE_BROWSER_APP_ID);
   }
@@ -77,12 +144,19 @@ if (guard.primary) {
 
   if (browserRuntimeNeeded) {
     // Electron emits second-instance in the primary process after a later launch
-    // loses requestSingleInstanceLock(). The old behavior silently terminated
-    // that launch even when the only primary window was hidden by close-to-hide.
-    // Keep the singleton invariant, but explicitly reactivate the existing UI.
-    app.on('second-instance', () => {
+    // loses requestSingleInstanceLock(). Reactivate first; journal I/O must never
+    // sit in front of the user-visible show/restore/focus operation. V2
+    // additionalData carries a launch nonce, and only a visible activation event
+    // with that exact nonce can acknowledge the losing secondary.
+    app.on('second-instance', (_event, _argv, _workingDirectory, additionalData) => {
       void (async () => {
-        await recordStartup('SECOND_INSTANCE_RECEIVED', 'SINGLE_INSTANCE_LOCK_REUSED');
+        const launchData = validSingleInstanceLaunchData(additionalData) ? additionalData : null;
+        void recordStartup(
+          'SECOND_INSTANCE_RECEIVED',
+          launchData ? 'SINGLE_INSTANCE_LAUNCH_NONCE_RECEIVED' : 'SINGLE_INSTANCE_LEGACY_LAUNCH_RECEIVED',
+          { launch_id: launchData?.launch_id ?? null },
+        );
+
         let activation = activateExistingPrimaryWindow(BaseWindow);
         if (!activation.ok && activation.reason === 'PRIMARY_WINDOW_NOT_READY') {
           const observed = await waitForStablePrimaryWindow(BaseWindow, {
@@ -96,6 +170,7 @@ if (guard.primary) {
           activation.ok ? 'PRIMARY_WINDOW_ACTIVATED' : 'PRIMARY_WINDOW_ACTIVATION_UNAVAILABLE',
           activation.reason,
           {
+            launch_id: launchData?.launch_id ?? null,
             window_count: activation.window_count ?? 0,
             restored: activation.restored === true,
             visible: activation.visible === true,
@@ -306,7 +381,12 @@ if (guard.primary) {
       terminal: false,
       authority_effect: false,
     }));
-    await recordStartup(
+
+    // Window creation in main.mjs is fenced on this barrier. Releasing it must
+    // never wait on observability I/O; the journal records the already-observed
+    // host state asynchronously after the UI is allowed to proceed.
+    resolveBrowserBootstrap?.(hostSnapshot);
+    void recordStartup(
       'HOST_RESILIENCE_BOOTSTRAPPED',
       'HOST_BOOTSTRAP_ATTEMPT_COMPLETED',
       {
@@ -316,7 +396,6 @@ if (guard.primary) {
         browser_runtime_loaded: browserRuntimeLoadError == null,
       },
     );
-    resolveBrowserBootstrap?.(hostSnapshot);
 
     if (browserRuntimeLoadError) {
       // The host/sentinel plane is already bootstrapped. Keep it alive so a
