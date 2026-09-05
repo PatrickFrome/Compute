@@ -74,7 +74,8 @@ jobs:
               if (argc == 2 && std::string_view(argv[1]) == "--store-smoke") {
                   OwnerEnrollmentStore store(browserGuardianOwnerEnrollmentStoreDefaultRoot());
                   const auto before = store.read();
-                  if (!before.root_trusted || before.present || before.corrupt || before.win32_error != ERROR_SUCCESS) {
+                  if (!before.root_trusted || before.present || before.corrupt || before.win32_error != ERROR_SUCCESS
+                      || before.outcome != OwnerEnrollmentStoreOutcome::NoEffectProven) {
                       std::cerr << "owner_store_runtime_expected_absence:" << before.reason << ':' << before.win32_error << '\n';
                       return 10;
                   }
@@ -87,14 +88,17 @@ jobs:
                   const auto created = store.createIfAbsent(candidate);
                   if (!created.root_trusted || !created.present || !created.committed || !created.exact
                       || !created.provenance_exact || created.owner_mismatch || created.corrupt
-                      || !created.staging_flushed || !created.move_committed || !created.post_commit_readback) {
+                      || !created.staging_flushed || !created.move_committed || !created.post_commit_readback
+                      || created.outcome != OwnerEnrollmentStoreOutcome::EffectExact
+                      || created.commit_win32_error != ERROR_SUCCESS) {
                       std::cerr << "owner_store_runtime_first_commit_failed:" << created.reason << ':' << created.win32_error << '\n';
                       return 11;
                   }
 
                   const auto same = store.createIfAbsent(candidate);
                   if (!same.root_trusted || !same.present || !same.exact || !same.provenance_exact
-                      || same.owner_mismatch || same.corrupt || same.committed) {
+                      || same.owner_mismatch || same.corrupt || same.committed
+                      || same.outcome != OwnerEnrollmentStoreOutcome::EffectExact) {
                       std::cerr << "owner_store_runtime_same_owner_not_level_triggered:" << same.reason << ':' << same.win32_error << '\n';
                       return 12;
                   }
@@ -104,9 +108,15 @@ jobs:
                   const auto mismatch = store.createIfAbsent(different);
                   if (!mismatch.root_trusted || !mismatch.present || !mismatch.owner_mismatch
                       || mismatch.exact || mismatch.provenance_exact || mismatch.corrupt || mismatch.committed
-                      || mismatch.reason != "OWNER_STORE_OWNER_MISMATCH") {
+                      || mismatch.reason != "OWNER_STORE_OWNER_MISMATCH"
+                      || mismatch.outcome != OwnerEnrollmentStoreOutcome::Conflict) {
                       std::cerr << "owner_store_runtime_mismatch_not_fail_closed:" << mismatch.reason << ':' << mismatch.win32_error << '\n';
                       return 13;
+                  }
+
+                  if (std::string_view(browserGuardianOwnerEnrollmentStoreOutcomeName(OwnerEnrollmentStoreOutcome::Ambiguous)) != "AMBIGUOUS") {
+                      std::cerr << "owner_store_runtime_outcome_wire_drift\n";
+                      return 14;
                   }
 
                   std::cout << "OWNER_STORE_RUNTIME_OK\n";
@@ -148,12 +158,14 @@ jobs:
 
           $store = $lines[2] | ConvertFrom-Json
           if ($store.schema -ne 'metaengine.browser-guardian.owner-enrollment-native-store.v1') { throw 'owner_store_schema_invalid' }
-          foreach ($field in @('machine_secure_root_required','final_path_reparse_escape_forbidden','low_privilege_write_acl_forbidden','non_machine_write_acl_forbidden','machine_trusted_owner_required','root_delete_share_fenced','same_directory_staging','staging_create_new','staging_flush_file_buffers','commit_move_fail_if_exists','commit_move_write_through','commit_source_handle_rename','commit_under_fenced_root','post_commit_readback_required')) {
+          if ($store.version -ne '1.0.3') { throw 'owner_store_version_invalid' }
+          foreach ($field in @('machine_secure_root_required','final_path_reparse_escape_forbidden','low_privilege_write_acl_forbidden','non_machine_write_acl_forbidden','machine_trusted_owner_required','root_delete_share_fenced','same_directory_staging','staging_create_new','staging_flush_file_buffers','commit_move_fail_if_exists','commit_move_write_through','commit_source_handle_rename','commit_under_fenced_root','post_commit_readback_required','commit_failure_readback_required','ambiguous_commit_outcome_fail_closed')) {
             if ($store.$field -ne $true) { throw "owner_store_required_contract_missing_$field" }
           }
-          foreach ($field in @('root_creation_implemented','root_repair_implemented','commit_handle_relative_rename','owner_replacement_allowed','token_session_id_persisted','journal_mutation_allowed','wts_execution_allowed','process_effect_allowed','scm_effect_allowed','browser_authority','task_authority','scheduler_authority','automatic_retry_allowed','second_scheduler_loop','authority_effect')) {
+          foreach ($field in @('root_creation_implemented','root_repair_implemented','commit_handle_relative_rename','commit_unknown_result_automatic_retry_allowed','owner_replacement_allowed','token_session_id_persisted','journal_mutation_allowed','wts_execution_allowed','process_effect_allowed','scm_effect_allowed','browser_authority','task_authority','scheduler_authority','automatic_retry_allowed','second_scheduler_loop','authority_effect')) {
             if ($store.$field -ne $false) { throw "owner_store_authority_drift_$field" }
           }
+          if ($store.effect_outcome_algebra -ne 'NO_EFFECT_PROVEN|EFFECT_EXACT|CONFLICT|CORRUPT|AMBIGUOUS') { throw 'owner_store_effect_outcome_algebra_drift' }
 
       - name: Execute native create-if-absent CAS against machine-secure ProgramData root
         shell: powershell
