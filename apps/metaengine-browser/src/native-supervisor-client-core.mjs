@@ -6,6 +6,7 @@ import {
   buildNativeEffectBinding,
   nativeActionRequiresEffectBinding,
 } from './native-effect-binding.mjs';
+import { classifyNativeSupervisorCommand } from './native-supervisor-command-lanes.mjs';
 import { buildSupervisorMeshWireProjectionV1 } from './supervisor-mesh-wire-projection.mjs';
 import {
   NativeSupervisorClient as BaseNativeSupervisorClient,
@@ -19,12 +20,15 @@ export { NATIVE_SUPERVISOR_BASE, NATIVE_SUPERVISOR_RUNTIME_PATH, planPostRestore
 const clipError = (error) => String(error?.message || error || 'unknown_error').slice(0, 500);
 const DEFAULT_REQUEST_DEADLINE_MS = 8000;
 const DEFAULT_BOOTSTRAP_HEARTBEAT_MS = 2000;
+const IDLE_MAINTENANCE_POLL_MS = 10;
+const IDLE_MAINTENANCE_WAIT_MAX_MS = 15000;
 export const DEFAULT_SUPERVISOR_WATCHDOG_STALE_MS = 5000;
 
 function isCommandResultUrl(value) {
   try {
     const pathname = new URL(String(value)).pathname;
-    return /\/v1\/commands\/[^/]+\/result$/.test(pathname);
+    return /\/v1\/commands\/[^/]+\/result$/.test(pathname)
+      || /\/v1\/commands\/result-batch$/.test(pathname);
   } catch {
     return false;
   }
@@ -34,10 +38,10 @@ export function createBoundedSupervisorFetch(fetchImpl, { deadlineMs = DEFAULT_R
   if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
   const boundedMs = Math.max(1000, Math.min(30000, Number(deadlineMs) || DEFAULT_REQUEST_DEADLINE_MS));
   return async (url, init = {}) => {
-    // Result posting follows an effectful command. A local timeout there would turn
-    // an unknown receipt outcome into a misleading FAILED path in the legacy base
-    // client. Leave result delivery un-aborted until the receipt state machine is
-    // upgraded to explicit ambiguous-result readback.
+    // Completion posting follows an effectful command. A local timeout here would
+    // turn an unknown receipt outcome into a misleading FAILED path. Both legacy
+    // single receipt and the fast-lane batch receipt therefore remain un-aborted;
+    // the DB completion state/readback is the reconciliation boundary.
     if (isCommandResultUrl(url) || init.signal) return fetchImpl(url, init);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('native_supervisor_request_deadline')), boundedMs);
@@ -171,6 +175,13 @@ export async function sendBootstrapHeartbeat({ identity, fetchImpl, getState, ve
   });
 }
 
+function delay(ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
+}
+
 export class NativeSupervisorClient extends BaseNativeSupervisorClient {
   #devosTaskCycle;
   #lastDevosError = null;
@@ -192,6 +203,9 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
   #workerObservationSignals = [];
   #workerObservationLastAt = null;
   #workerObservationLastError = null;
+  #idleWorkPromise = null;
+  #idleWorkLastAt = null;
+  #idleWorkLastError = null;
 
   constructor(options = {}) {
     const identity = options.identity;
@@ -224,6 +238,13 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
       };
     };
     const executeCommandWithDevosLifecycle = async (command) => {
+      // Read-only remote observations may execute while idle DevOS work is running.
+      // A remote mutation waits for the already-started idle work, preventing two
+      // Browser mutation authorities from racing while keeping the observation lane hot.
+      if (command?.command_id && clientRef) {
+        const descriptor = classifyNativeSupervisorCommand(command);
+        if (!descriptor.read_only && clientRef.#idleWorkPromise) await clientRef.#idleWorkPromise;
+      }
       if (String(command?.action || '') === 'FLEET_TASK_COMPLETE') {
         if (!devosRef) throw new Error('devos_task_cycle_not_initialized');
         return devosRef.completeFromTrustedCommand(command?.payload || {});
@@ -389,6 +410,46 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
     this.#bootstrapTimer = null;
   }
 
+  async #waitForBaseMaintenanceIdle() {
+    const deadline = Date.now() + IDLE_MAINTENANCE_WAIT_MAX_MS;
+    while (super.snapshot()?.control_fast_lane?.maintenance_in_flight === true) {
+      if (Date.now() >= deadline) throw new Error('native_supervisor_idle_maintenance_wait_timeout');
+      await delay(IDLE_MAINTENANCE_POLL_MS);
+    }
+  }
+
+  #kickIdleWork() {
+    if (this.#idleWorkPromise) return this.#idleWorkPromise;
+    this.#idleWorkPromise = (async () => {
+      // Observation is read-only and may overlap the next command wait.
+      await this.#observeWorkers();
+      await this.#waitForBaseMaintenanceIdle();
+
+      // If a remote command became active while maintenance drained, yield DevOS.
+      // The hot command lane wins admission over background work.
+      let supervisor = super.snapshot();
+      if (Array.isArray(supervisor?.current_commands) && supervisor.current_commands.length > 0) return;
+      const identity = supervisor?.identity || {};
+      if (!(identity.device_id && supervisor.supervisor_mode === 'CONTROL' && supervisor.armed === true)) return;
+
+      try {
+        await this.#devosTaskCycle.cycle();
+        this.#lastDevosError = null;
+      } catch (error) {
+        this.#lastDevosError = clipError(error);
+      }
+      supervisor = super.snapshot();
+    })()
+      .catch((error) => {
+        this.#idleWorkLastError = clipError(error);
+      })
+      .finally(() => {
+        this.#idleWorkLastAt = new Date().toISOString();
+        this.#idleWorkPromise = null;
+      });
+    return this.#idleWorkPromise;
+  }
+
   async start() {
     if (this.#startPromise) return this.#startPromise;
     const startedAt = new Date().toISOString();
@@ -416,12 +477,22 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
       worker_observer_second_polling_loop: false,
       devos_task_cycle: this.#devosTaskCycle?.snapshot() || null,
       devos_last_error: this.#lastDevosError,
-      devos_scheduler_source: 'NATIVE_SUPERVISOR_HEARTBEAT',
+      devos_scheduler_source: 'NATIVE_SUPERVISOR_IDLE_FAST_LANE',
       devos_second_polling_loop: false,
+      idle_background_work: {
+        in_flight: this.#idleWorkPromise != null,
+        last_at: this.#idleWorkLastAt,
+        last_error: this.#idleWorkLastError,
+        read_only_can_overlap: true,
+        mutating_remote_waits_for_existing_idle_work: true,
+        command_lease_precedes_idle_work: true,
+        authority_effect: false,
+      },
       generic_tab_effect_binding: 'SIGNED_DB_COMMAND_INTENT_V1',
       supervisor_mesh_wire_projection: 'LOCAL_V2_TO_LIVE_V1_BOUNDED_16',
       bounded_read_deadline_ms: DEFAULT_REQUEST_DEADLINE_MS,
       command_result_timeout_disabled_until_ambiguous_receipt_readback: true,
+      command_batch_result_timeout_disabled_until_ambiguous_receipt_readback: true,
       bootstrap_heartbeat: {
         active: this.#bootstrapTimer != null,
         mode: 'STALE_HEARTBEAT_WATCHDOG',
@@ -438,22 +509,12 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
   }
 
   async cycle() {
-    // Read-only worker observation is an additive stage of this existing scheduler
-    // heartbeat. It never starts a timer, issues a lease, or mutates fleet lifecycle.
-    await this.#observeWorkers();
+    // The remote command lane always gets first admission. Idle worker observation
+    // and DevOS work run after an empty batch and are intentionally not awaited,
+    // allowing the next long-poll lease to be active while background work proceeds.
     await super.cycle();
     const supervisor = super.snapshot();
-    const identity = supervisor?.identity || {};
-    if (identity.device_id && supervisor.supervisor_mode === 'CONTROL' && supervisor.armed === true) {
-      try {
-        await this.#devosTaskCycle.cycle();
-        this.#lastDevosError = null;
-      } catch (error) {
-        // DevOS is an additive stage of the existing heartbeat scheduler. A DB or
-        // route fault never creates a second poll loop and never authorizes replay.
-        this.#lastDevosError = clipError(error);
-      }
-    }
+    if (Number(supervisor?.control_fast_lane?.last_batch_count || 0) === 0) this.#kickIdleWork();
     return this.snapshot();
   }
 }
