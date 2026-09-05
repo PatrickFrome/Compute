@@ -75,6 +75,14 @@ function routeFor(rpc) {
   });
 }
 
+function acceptedRpc(through = 1) {
+  return async () => ({
+    accepted: true,
+    stream_id: STREAM_ID,
+    accepted_through_sequence: through,
+  });
+}
+
 async function invoke(route, body, { bodyText = JSON.stringify(body), method = 'POST', path = COGNITIVE_DELTA_ROUTE_PATH } = {}) {
   return route({ req: { method }, path, body, bodyText, identity });
 }
@@ -160,10 +168,13 @@ test('stream identity and sequence continuity are strict', async () => {
 });
 
 test('PID and WebContents identities must be positive safe integers when present', async () => {
-  const route = routeFor(async () => { throw new Error('must_not_call'); });
-  assert.equal((await invoke(route, batch([event(1, { os_pid: 0 })], { through_sequence: 1 }))).status, 400);
-  assert.equal((await invoke(route, batch([event(1, { web_contents_id: -4 })], { through_sequence: 1 }))).status, 400);
-  assert.equal((await invoke(route, batch([event(1, { os_pid: null, web_contents_id: null })], { through_sequence: 1 }))).status, 202);
+  const rejectingRoute = routeFor(async () => { throw new Error('must_not_call'); });
+  assert.equal((await invoke(rejectingRoute, batch([event(1, { os_pid: 0 })], { through_sequence: 1 }))).status, 400);
+  assert.equal((await invoke(rejectingRoute, batch([event(1, { web_contents_id: -4 })], { through_sequence: 1 }))).status, 400);
+
+  const nullableRoute = routeFor(acceptedRpc(1));
+  const nullable = await invoke(nullableRoute, batch([event(1, { os_pid: null, web_contents_id: null })], { through_sequence: 1 }));
+  assert.equal(nullable.status, 202);
 });
 
 test('missing DB acceptor is an explicit 501 capability miss', async () => {
