@@ -53,6 +53,8 @@ let startupRetryTimer = null;
 let startupRetryAttempt = 0;
 let startupInFlight = false;
 let browserRuntimeReady = false;
+let startupFailurePresented = false;
+const degradedStartupSubsystems = new Map();
 
 function mimeFor(filePath) {
   if (filePath.endsWith('.html')) return 'text/html; charset=utf-8';
@@ -139,6 +141,42 @@ function assertShellSender(event) {
   if (!shellView || event.sender.id !== shellView.webContents.id) throw new Error('shell_sender_not_trusted');
 }
 
+function startupDegradedSnapshot() {
+  return [...degradedStartupSubsystems.entries()].map(([subsystem, value]) => ({
+    subsystem,
+    reason: value.reason,
+    observed_at: value.observed_at,
+    authority_effect: false,
+  }));
+}
+
+function recordStartupSubsystemDegraded(subsystem, error) {
+  const name = String(subsystem || 'UNKNOWN').toUpperCase().replace(/[^A-Z0-9_]/g, '_').slice(0, 64) || 'UNKNOWN';
+  const reason = String(error?.message || error || 'unknown').slice(0, 240);
+  degradedStartupSubsystems.set(name, { reason, observed_at: new Date().toISOString() });
+  console.error(JSON.stringify({
+    schema: 'metaengine.browser-startup-subsystem.v1',
+    state: 'SUBSYSTEM_DEGRADED',
+    subsystem: name,
+    reason,
+    local_shell_kept_alive: true,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  }));
+}
+
+function recordStartupSubsystemReady(subsystem) {
+  const name = String(subsystem || 'UNKNOWN').toUpperCase().replace(/[^A-Z0-9_]/g, '_').slice(0, 64) || 'UNKNOWN';
+  degradedStartupSubsystems.delete(name);
+  console.log(JSON.stringify({
+    schema: 'metaengine.browser-startup-subsystem.v1',
+    state: 'SUBSYSTEM_READY',
+    subsystem: name,
+    local_shell_kept_alive: true,
+    authority_effect: false,
+  }));
+}
+
 async function shellSnapshot() {
   const tabs = registry.snapshot();
   const fleetSnapshot = fleet?.snapshot() || null;
@@ -164,6 +202,10 @@ async function shellSnapshot() {
       startup_retry_pending: startupRetryTimer != null,
       startup_retry_attempt: startupRetryAttempt,
       browser_runtime_ready: browserRuntimeReady,
+      startup_degraded_subsystems: startupDegradedSnapshot(),
+      local_shell_is_startup_boundary: true,
+      remote_network_is_startup_boundary: false,
+      fleet_state_is_startup_boundary: false,
       authority_effect: false,
     },
     policy: SECURITY_POLICY,
@@ -258,12 +300,9 @@ function wireRemoteView(tab, view) {
 }
 
 async function createTab(input = 'https://chatgpt.com/', { select = true, load = true, role = 'USER' } = {}) {
+  if (!userSession) configureUserSession();
   const d = navigationDecision(input);
   if (!d.allow) throw new Error(`navigation_blocked:${d.reason}`);
-  // role tags physical ownership at creation: 'FLEET' tabs are provisioned
-  // exclusively by the fleet provisioner and draw from their own 16-slot
-  // ceiling; 'USER' tabs keep the full 32-slot wall with a guaranteed 16-slot
-  // reservation the fleet can never invade.
   const tab = registry.create({ url: d.normalized_url, kind: d.kind, role, title: d.kind === 'CHATGPT' ? 'ChatGPT' : '' });
   const view = new WebContentsView({ webPreferences: { ...REMOTE_WEB_PREFERENCES, session: userSession } });
   views.set(tab.tab_id, view);
@@ -304,14 +343,6 @@ async function closeTab(tabId) {
   await publishSnapshot();
 }
 
-// Elastic fleet scale-down execution. The governor only proposes claim-ineligible
-// surplus agents (PROVISIONING / BOUND_UNVERIFIED — they can never hold a lease);
-// this boundary re-validates that at execution time, retires the logical agent
-// first, then closes its physical tab through the normal shell path (which
-// surfaces capacity backpressure release and snapshot publication). Bounded to
-// four agents per call. ACTIVE and PROVISIONING_AMBIGUOUS agents are never
-// auto-retired: ACTIVE agents may hold server-side leases, ambiguous agents are
-// fenced no-retry evidence.
 async function retireFleetSurplus(retireAgentIds) {
   if (!Array.isArray(retireAgentIds) || retireAgentIds.length === 0 || !fleet) return [];
   const ids = retireAgentIds
@@ -321,26 +352,19 @@ async function retireFleetSurplus(retireAgentIds) {
   const retired = [];
   for (const agentId of ids) {
     const snapshot = fleet.snapshot();
-    const agent = (snapshot?.agents || []).find((row) => String(row.agent_id || '') === agentId);
-    if (!agent) continue; // already gone — idempotent no-op
+    const agent = (snapshot?.agents || []).find((row) => String(row.agent_id || '').toLowerCase() === agentId);
+    if (!agent) continue;
     if (!['PROVISIONING', 'BOUND_UNVERIFIED'].includes(String(agent.lifecycle_state || ''))) continue;
     const tabId = agent.tab_id ? String(agent.tab_id) : null;
     await fleet.retire(agentId);
     if (tabId) {
-      try { await closeTab(tabId); } catch { /* tab already closed — retire is still recorded */ }
+      try { await closeTab(tabId); } catch {}
     }
     retired.push(Object.freeze({ agent_id: agentId, tab_id: tabId, lifecycle_state: 'RETIRED', automatic_retry_allowed: false, authority_effect: false }));
   }
   return retired;
 }
 
-// Bounded orphan sweep (W3): a FLEET-role tab with no live binding in the
-// provisioner's TRUE snapshot is physical capacity held by nobody (crash
-// between createTab and persist, a retired agent whose close failed, or a
-// pre-reconcile create that never bound). Closing it through the normal shell
-// path releases capacity backpressure evidence and publishes the snapshot.
-// USER tabs are never touched. Ambiguous agents still holding a tab binding
-// are never swept (fenced no-retry evidence invariant).
 async function sweepOrphanFleetTabs() {
   if (!fleet) return [];
   const boundTabIds = new Set((fleet.snapshot()?.agents || [])
@@ -353,9 +377,7 @@ async function sweepOrphanFleetTabs() {
     try {
       await closeTab(tabId);
       swept.push(Object.freeze({ tab_id: tabId, swept: 'ORPHAN_FLEET_TAB_CLOSED', authority_effect: false }));
-    } catch {
-      // bounded best-effort: a failed close is retried by a later sweep cycle
-    }
+    } catch {}
   }
   return swept;
 }
@@ -382,10 +404,6 @@ async function initFleet() {
     tabExists: (tabId) => views.has(String(tabId)) && !views.get(String(tabId)).webContents.isDestroyed(),
     loadState: loadFleetState,
     saveState: saveFleetState,
-    // Read-only capacity census (W3): grounds backpressure in the TRUE physical
-    // tab state so provisioning halts before a doomed createTab attempt and
-    // restarts (which miss tab-close events) re-learn capacity without probing
-    // by side effect.
     census: () => registry.census(),
     policy: { profile: 'BALANCED', warm_agents: 2, desired_agents: 6 },
   });
@@ -497,9 +515,6 @@ async function handleCommand(command, payload = {}) {
       : result;
   }
   if (command === 'FLEET_SET_PROFILE') { const result = await fleet?.setProfile(payload?.profile); await publishSnapshot(); return result; }
-  // Read-only capacity census probe (W3): pure registry projection, never
-  // creates a tab, never retries provisioning. Consumed by the DevOS cycle
-  // and by any trusted operator surface that needs TRUE physical capacity.
   if (command === 'TAB_CENSUS') {
     return {
       ...registry.census(),
@@ -568,8 +583,6 @@ async function nativeSupervisorState() {
   const perception = await perceptionForSelected();
   return {
     tabs: snap.tabs.map((tab) => ({ ...tab, selected: tab.tab_id === snap.selected_tab_id })),
-    // Read-only capacity census (W3): grounds the DevOS cycle's elastic plan
-    // and every backpressure decision in the TRUE physical tab occupancy.
     tab_census: snap.census,
     active_tab: selected,
     downloads: downloads?.snapshot() || null,
@@ -692,11 +705,12 @@ function scheduleBrowserRuntimeRetry(error) {
   startupRetryAttempt += 1;
   const delay = Math.min(STARTUP_RETRY_MAX_MS, STARTUP_RETRY_BASE_MS * (2 ** Math.min(8, startupRetryAttempt - 1)));
   console.error(JSON.stringify({
-    schema: 'metaengine.browser-startup-recovery.v1',
-    state: 'RETRY_PENDING',
+    schema: 'metaengine.browser-startup-recovery.v2',
+    state: 'LOCAL_SHELL_RETRY_PENDING',
     attempt: startupRetryAttempt,
     delay_ms: delay,
     error: String(error?.message || error).slice(0, 240),
+    timer_keeps_process_alive: true,
     terminal: false,
     external_stop_required_for_terminal: true,
     authority_effect: false,
@@ -705,7 +719,6 @@ function scheduleBrowserRuntimeRetry(error) {
     startupRetryTimer = null;
     void startBrowserRuntime();
   }, delay);
-  startupRetryTimer.unref?.();
 }
 
 function resetFailedWindow() {
@@ -718,9 +731,110 @@ function resetFailedWindow() {
   }
 }
 
+async function presentBrowserStartupFailure(error) {
+  if (startupFailurePresented || isSmoke || isDevelopmentPlaneSmoke) return;
+  startupFailurePresented = true;
+  const reason = String(error?.message || error).slice(0, 500);
+  const journalPath = path.join(app.getPath('userData'), 'metaengine-browser-startup-journal-v1.json');
+  console.error(JSON.stringify({
+    schema: 'metaengine.browser-startup-failure.v1',
+    state: 'LOCAL_SHELL_START_FAILED',
+    reason,
+    startup_journal_path: journalPath,
+    retry_pending: true,
+    authority_effect: false,
+  }));
+  try {
+    const { dialog } = await import('electron');
+    dialog.showErrorBox(
+      'METAENGINE Browser — startup error',
+      [
+        'The local Browser shell could not be opened.',
+        'Network, Fleet, supervisor and DevOS failures are no longer allowed to close this shell,',
+        'so this indicates a local shell/session/bootstrap failure.',
+        '',
+        `Diagnostic: ${reason}`,
+        `Startup journal: ${journalPath}`,
+        '',
+        'The recovery host will keep one bounded startup retry path alive.',
+      ].join('\n'),
+    );
+  } catch {}
+}
+
+async function runDegradableStartupStep(subsystem, operation) {
+  try {
+    const result = await operation();
+    recordStartupSubsystemReady(subsystem);
+    return result;
+  } catch (error) {
+    recordStartupSubsystemDegraded(subsystem, error);
+    return null;
+  }
+}
+
+async function bootstrapDegradableSubsystems() {
+  await runDegradableStartupStep('OWNER_SAFETY_GATES', async () => {
+    try {
+      return await initOwnerSafetyGates();
+    } catch (error) {
+      ownerSafetyGates = null;
+      throw error;
+    }
+  });
+
+  const sessionReady = await runDegradableStartupStep('USER_SESSION', async () => {
+    configureUserSession();
+    return true;
+  });
+
+  let initialTab = null;
+  if (sessionReady) {
+    initialTab = await runDegradableStartupStep('INITIAL_TAB_CREATE', () => createTab('https://chatgpt.com/', { select: true, load: false }));
+    if (initialTab?.tab_id) {
+      setImmediate(() => {
+        void loadTab(initialTab.tab_id, 'https://chatgpt.com/')
+          .then(() => recordStartupSubsystemReady('INITIAL_REMOTE_LOAD'))
+          .catch((error) => recordStartupSubsystemDegraded('INITIAL_REMOTE_LOAD', error));
+      });
+    }
+  }
+
+  await runDegradableStartupStep('FLEET', async () => {
+    try {
+      return await initFleet();
+    } catch (error) {
+      fleet = null;
+      throw error;
+    }
+  });
+
+  setImmediate(() => {
+    void runDegradableStartupStep('DEVELOPMENT_PLANE', () => initDevelopmentPlane());
+  });
+
+  await runDegradableStartupStep('SHELL_SNAPSHOT', () => publishSnapshot());
+
+  setImmediate(() => {
+    void runDegradableStartupStep('NATIVE_SUPERVISOR', () => initNativeSupervisor());
+  });
+}
+
 async function createWindow() {
-  if (windowRef && !windowRef.isDestroyed()) return;
-  windowRef = new BaseWindow({ width: 1440, height: 960, minWidth: 900, minHeight: 640, title: 'METAENGINE Browser', backgroundColor: '#101216' });
+  if (windowRef && !windowRef.isDestroyed()) {
+    windowRef.show();
+    windowRef.focus();
+    return;
+  }
+  windowRef = new BaseWindow({
+    width: 1440,
+    height: 960,
+    minWidth: 900,
+    minHeight: 640,
+    title: 'METAENGINE Browser',
+    backgroundColor: '#101216',
+    show: false,
+  });
   shellView = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-shell.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true } });
   installHumanTakeoverAccelerator(shellView.webContents);
   windowRef.contentView.addChildView(shellView);
@@ -738,14 +852,29 @@ async function createWindow() {
     if (recover) scheduleBrowserRuntimeRetry(new Error('browser_window_closed_unexpectedly'));
   });
   layout();
+
+  // The only user-visible startup boundary is the local packaged shell. Remote
+  // navigation, persisted Fleet state, supervisor identity, DevOS and local
+  // bridge availability are degradable subsystems and must never destroy the UI.
   await shellView.webContents.loadURL('metaengine://shell/');
-  await initOwnerSafetyGates();
-  await createTab('https://chatgpt.com/', { select: true, load: true });
-  await initFleet();
-  await initDevelopmentPlane().catch((error) => console.error('development-plane-start-failed', error));
   layout();
-  await publishSnapshot();
-  setImmediate(() => initNativeSupervisor().catch((error) => console.error('native-supervisor-start-failed', error)));
+  windowRef.show();
+  windowRef.focus();
+  console.log(JSON.stringify({
+    schema: 'metaengine.browser-local-shell.v1',
+    state: 'LOCAL_SHELL_VISIBLE',
+    version: app.getVersion(),
+    pid: process.pid,
+    remote_network_required: false,
+    fleet_state_required: false,
+    authority_effect: false,
+  }));
+
+  // Do not await the degradable plane in the startup critical path. It gets one
+  // bootstrap pass and later subsystem-specific paths may recover independently.
+  setImmediate(() => {
+    void bootstrapDegradableSubsystems().catch((error) => recordStartupSubsystemDegraded('BACKGROUND_BOOTSTRAP', error));
+  });
 }
 
 ipcMain.handle('metaengine:shell:snapshot', async (event) => { assertShellSender(event); return shellSnapshot(); });
@@ -753,7 +882,7 @@ ipcMain.handle('metaengine:shell:command', async (event, message) => { assertShe
 
 async function startAfterReady() {
   await registerShellProtocol();
-  configureUserSession();
+  if (isDevelopmentPlaneSmoke || isSmoke) configureUserSession();
   if (isDevelopmentPlaneSmoke) {
     try {
       await runDevelopmentPlaneSmoke();
@@ -794,7 +923,10 @@ async function startBrowserRuntime() {
     console.error('browser-start-failed', error);
     resetFailedWindow();
     if (isSmoke || isDevelopmentPlaneSmoke) app.exit(1);
-    else scheduleBrowserRuntimeRetry(error);
+    else {
+      void presentBrowserStartupFailure(error);
+      scheduleBrowserRuntimeRetry(error);
+    }
   } finally {
     startupInFlight = false;
   }
@@ -809,6 +941,7 @@ app.on('activate', () => {
   if (!app.isReady()) return;
   if (windowRef && !windowRef.isDestroyed()) {
     windowRef.show();
+    windowRef.focus();
     return;
   }
   browserRuntimeReady = false;
