@@ -29,11 +29,12 @@ constexpr std::size_t kMaxBytes = 2048;
 
 constexpr char kContract[] =
     "{\"schema\":\"metaengine.browser-guardian.owner-enrollment-native-store.v1\","
-    "\"version\":\"1.0.2\","
+    "\"version\":\"1.0.3\","
     "\"machine_secure_root_required\":true,\"root_creation_implemented\":false,"
     "\"root_repair_implemented\":false,\"final_path_reparse_escape_forbidden\":true,"
     "\"low_privilege_write_acl_forbidden\":true,\"non_machine_write_acl_forbidden\":true,"
     "\"machine_trusted_owner_required\":true,\"root_delete_share_fenced\":true,"
+    "\"ancestor_delete_share_fenced\":true,\"absolute_target_ancestor_chain_fenced\":true,"
     "\"same_directory_staging\":true,\"staging_create_new\":true,"
     "\"staging_flush_file_buffers\":true,\"commit_move_fail_if_exists\":true,"
     "\"commit_move_write_through\":true,\"commit_source_handle_rename\":true,"
@@ -66,6 +67,14 @@ struct Local {
     ~Local() { if (value != nullptr) LocalFree(value); }
     Local(const Local&) = delete;
     Local& operator=(const Local&) = delete;
+};
+struct RootFence {
+    Handle program_data;
+    Handle metaengine;
+    Handle root;
+    bool valid() const noexcept {
+        return program_data.valid() && metaengine.valid() && root.valid();
+    }
 };
 
 std::wstring lower(std::wstring v) {
@@ -146,19 +155,38 @@ bool noReparse(HANDLE h) {
     return GetFileInformationByHandleEx(h, FileAttributeTagInfo, &info, sizeof(info))
         && (info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0;
 }
-Handle openSecureRoot(const std::wstring& root, DWORD extraAccess = 0) {
-    const std::wstring pd = programData();
-    const std::wstring expected = pd.empty() ? std::wstring{} : fullPath(pd + L"\\" + kRelativeRoot);
-    const std::wstring actual = fullPath(root);
-    if (expected.empty() || actual.empty() || lower(expected) != lower(actual)) return Handle{};
-
+Handle openDirectoryFence(const std::wstring& path, DWORD extraAccess = 0, bool requireSecureAcl = false) {
+    const std::wstring actual = fullPath(path);
+    if (actual.empty()) return Handle{};
     Handle h(CreateFileW(actual.c_str(), FILE_READ_ATTRIBUTES | READ_CONTROL | extraAccess,
         FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
         FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
     if (!h.valid() || !noReparse(h.value)) return Handle{};
     const std::wstring resolved = finalPath(h.value);
-    if (resolved.empty() || lower(resolved) != lower(actual) || !secureAcl(h.value)) return Handle{};
+    if (resolved.empty() || lower(resolved) != lower(actual)) return Handle{};
+    if (requireSecureAcl && !secureAcl(h.value)) return Handle{};
     return h;
+}
+RootFence openSecureRootFence(const std::wstring& root, DWORD extraAccess = 0) {
+    RootFence fence;
+    const std::wstring pd = fullPath(programData());
+    const std::wstring metaengine = pd.empty() ? std::wstring{} : fullPath(pd + L"\\METAENGINE");
+    const std::wstring expected = pd.empty() ? std::wstring{} : fullPath(pd + L"\\" + kRelativeRoot);
+    const std::wstring actual = fullPath(root);
+    if (pd.empty() || metaengine.empty() || expected.empty() || actual.empty() || lower(expected) != lower(actual)) return fence;
+
+    // The commit uses an absolute path because FILE_RENAME_INFO.RootDirectory with a
+    // relative target failed at runtime on Windows Server 2025. Therefore every mutable
+    // directory component below the volume root is kept open without FILE_SHARE_DELETE
+    // until the transaction and post-commit readback finish. Paths remain labels; these
+    // handles fence the object identities used by the absolute target resolution.
+    fence.program_data = openDirectoryFence(pd);
+    if (!fence.program_data.valid()) return RootFence{};
+    fence.metaengine = openDirectoryFence(metaengine);
+    if (!fence.metaengine.valid()) return RootFence{};
+    fence.root = openDirectoryFence(actual, extraAccess, true);
+    if (!fence.root.valid()) return RootFence{};
+    return fence;
 }
 
 bool hash64(std::string_view s) {
@@ -247,8 +275,8 @@ bool readBounded(HANDLE h, std::string* out, DWORD* error) {
 OwnerEnrollmentStoreResult classify(const std::wstring& root, const std::wstring& file,
     const OwnerEnrollmentDurableRecord* expected = nullptr) {
     OwnerEnrollmentStoreResult out;
-    Handle rootGuard = openSecureRoot(root);
-    out.root_trusted = rootGuard.valid();
+    RootFence rootFence = openSecureRootFence(root);
+    out.root_trusted = rootFence.valid();
     if (!out.root_trusted) { out.reason = "OWNER_STORE_ROOT_NOT_MACHINE_TRUSTED"; out.win32_error = ERROR_ACCESS_DENIED; return out; }
 
     Handle h(CreateFileW(file.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ, nullptr,
@@ -345,8 +373,8 @@ OwnerEnrollmentStoreResult OwnerEnrollmentStore::read() const { return classify(
 
 OwnerEnrollmentStoreResult OwnerEnrollmentStore::createIfAbsent(const OwnerEnrollmentDurableRecord& candidate) const {
     OwnerEnrollmentStoreResult out;
-    Handle rootGuard = openSecureRoot(root_path_, FILE_ADD_FILE);
-    out.root_trusted = rootGuard.valid();
+    RootFence rootFence = openSecureRootFence(root_path_, FILE_ADD_FILE);
+    out.root_trusted = rootFence.valid();
     if (!out.root_trusted) { out.reason = "OWNER_STORE_ROOT_NOT_MACHINE_TRUSTED"; out.win32_error = ERROR_ACCESS_DENIED; return out; }
     OwnerEnrollmentDurableRecord normalized;
     if (!normalize(candidate, &normalized)) { out.reason = "OWNER_STORE_CANDIDATE_INVALID"; out.win32_error = ERROR_INVALID_DATA; return out; }
