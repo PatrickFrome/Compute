@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 import { chatGptControlMatches } from './chatgpt-ui-controls.mjs';
+import { openCdpOutcomeLatch } from './browser-cdp-outcome-latch.mjs';
+import { nativeBrowserCdpPool, withPersistentBrowserDebugger } from './browser-persistent-cdp-session.mjs';
 import {
   assertNativeEffectBindingMatches,
   nativeActionRequiresEffectBinding,
@@ -8,11 +10,18 @@ import {
 const SAFE_ROLES = new Set(['textbox','searchbox','combobox','button','checkbox','radio','switch','tab','menuitem','link']);
 const TEXT_INPUT_ROLES = new Set(['textbox','searchbox','combobox']);
 const CHATGPT_COMPOSER_NAMES = new Set(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
+const CHATGPT_SUBMIT_OUTCOME_METHODS = new Set([
+  'Accessibility.nodesUpdated',
+  'DOM.documentUpdated',
+  'Page.frameNavigated',
+  'Page.navigatedWithinDocument',
+  'Page.lifecycleEvent',
+  'Runtime.executionContextCreated',
+]);
 const NATIVE_BROWSER_PROCESS_INCARNATION_ID = crypto.randomUUID();
 const clip = (value, max) => String(value ?? '').slice(0, max);
 const axRawValue = (node, key) => String(node?.[key]?.value ?? '');
 const axValue = (node, key) => axRawValue(node, key).trim();
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const sha256 = (value) => crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
 
 export function nativeBrowserTargetIdentity(webContents) {
@@ -28,18 +37,7 @@ export function nativeBrowserTargetIdentity(webContents) {
 
 async function withDebugger(webContents, fn) {
   if (!webContents || webContents.isDestroyed?.()) throw new Error('native_control_webcontents_unavailable');
-  const dbg = webContents.debugger;
-  let attachedHere = false;
-  if (!dbg.isAttached()) {
-    dbg.attach('1.3');
-    attachedHere = true;
-  }
-  try { return await fn(dbg); }
-  finally {
-    if (attachedHere && dbg.isAttached()) {
-      try { dbg.detach(); } catch {}
-    }
-  }
+  return withPersistentBrowserDebugger(webContents, fn);
 }
 
 function uniqueSemanticTargets(nodes = []) {
@@ -99,37 +97,56 @@ function isExactChatGptComposer(target, command) {
     && CHATGPT_COMPOSER_NAMES.has(String(target?.name || ''));
 }
 
-async function observeChatGptSubmit(dbg, webContents, { preUrl, attempts = 20, intervalMs = 100 } = {}) {
-  let last = { stop_count: 0, send_count: 0, url: clip(webContents.getURL?.() || '', 1200) };
-  for (let i = 0; i < attempts; i += 1) {
-    if (i > 0) await sleep(intervalMs);
-    const tree = await dbg.sendCommand('Accessibility.getFullAXTree');
-    const nodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
-    const stopCount = exactChatGptControls(nodes, 'STOP').length;
-    const sendCount = exactChatGptControls(nodes, 'SEND').length;
-    const url = clip(webContents.getURL?.() || '', 1200);
-    last = { stop_count: stopCount, send_count: sendCount, url };
-    const rootToConversation = !isChatGptConversationUrl(preUrl) && isChatGptConversationUrl(url);
-    if (stopCount === 1 || rootToConversation) {
-      return {
-        effect_state: stopCount === 1 ? 'PROVEN_GENERATING' : 'PROVEN_NEW_CONVERSATION',
-        stop_observed: stopCount === 1,
-        new_conversation_observed: rootToConversation,
-        post_url_sha256: url ? sha256(url) : null,
-        automatic_retry_allowed: false,
-        authority_effect: false,
-      };
-    }
+async function inspectChatGptSubmit(dbg, webContents, { preUrl } = {}) {
+  const tree = await dbg.sendCommand('Accessibility.getFullAXTree');
+  const nodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
+  const stopCount = exactChatGptControls(nodes, 'STOP').length;
+  const sendCount = exactChatGptControls(nodes, 'SEND').length;
+  const url = clip(webContents.getURL?.() || '', 1200);
+  const rootToConversation = !isChatGptConversationUrl(preUrl) && isChatGptConversationUrl(url);
+  if (stopCount === 1 || rootToConversation) {
+    return {
+      resolved: true,
+      effect_state: stopCount === 1 ? 'PROVEN_GENERATING' : 'PROVEN_NEW_CONVERSATION',
+      stop_observed: stopCount === 1,
+      new_conversation_observed: rootToConversation,
+      send_control_remaining: sendCount > 0,
+      post_url_sha256: url ? sha256(url) : null,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    };
   }
   return {
-    effect_state: 'AMBIGUOUS_AFTER_ENTER',
-    stop_observed: last.stop_count === 1,
+    resolved: false,
+    effect_state: 'PENDING_AFTER_ENTER',
+    stop_observed: false,
     new_conversation_observed: false,
-    send_control_remaining: last.send_count > 0,
-    post_url_sha256: last.url ? sha256(last.url) : null,
+    send_control_remaining: sendCount > 0,
+    post_url_sha256: url ? sha256(url) : null,
     automatic_retry_allowed: false,
     authority_effect: false,
   };
+}
+
+function openChatGptSubmitOutcomeLatch(dbg, webContents, { preUrl, timeoutMs = 2000 } = {}) {
+  return openCdpOutcomeLatch({
+    subscribe: (listener) => nativeBrowserCdpPool.subscribe(webContents, listener),
+    inspect: () => inspectChatGptSubmit(dbg, webContents, { preUrl }),
+    isResolved: (row) => row?.resolved === true,
+    onDeadline: (last, lastError) => ({
+      resolved: false,
+      effect_state: 'AMBIGUOUS_AFTER_ENTER',
+      stop_observed: last?.stop_observed === true,
+      new_conversation_observed: last?.new_conversation_observed === true,
+      send_control_remaining: last?.send_control_remaining === true,
+      post_url_sha256: last?.post_url_sha256 || null,
+      observation_error: lastError || null,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    }),
+    eventFilter: (event) => CHATGPT_SUBMIT_OUTCOME_METHODS.has(String(event?.method || '')),
+    timeoutMs,
+  });
 }
 
 export async function captureSemanticFrame(webContents) {
@@ -254,25 +271,33 @@ export async function executeSemanticCommand(webContents, command) {
       const readyTree = await dbg.sendCommand('Accessibility.getFullAXTree');
       const sendTargets = exactChatGptControls(readyTree?.nodes || [], 'SEND');
       if (sendTargets.length !== 1) throw new Error(sendTargets.length ? `native_semantic_send_target_ambiguous:${sendTargets.length}` : 'native_semantic_send_target_not_found');
-      await dbg.sendCommand('Input.dispatchKeyEvent', {
-        type:'rawKeyDown', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, nativeVirtualKeyCode:13,
-      });
-      await dbg.sendCommand('Input.dispatchKeyEvent', {
-        type:'keyUp', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, nativeVirtualKeyCode:13,
-      });
-      const observation = await observeChatGptSubmit(dbg, webContents, { preUrl });
-      return {
-        action,
-        target,
-        inserted_chars: text.length,
-        replace_existing: command?.payload?.replace_existing !== false,
-        submit_after_type: true,
-        prompt_sha256: sha256(text),
-        prompt_included: false,
-        send_control: { role: sendTargets[0].role, name: sendTargets[0].name },
-        ...observation,
-        authority_effect: true,
-      };
+      const outcomeLatch = openChatGptSubmitOutcomeLatch(dbg, webContents, { preUrl });
+      try {
+        await dbg.sendCommand('Input.dispatchKeyEvent', {
+          type:'rawKeyDown', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, nativeVirtualKeyCode:13,
+        });
+        await dbg.sendCommand('Input.dispatchKeyEvent', {
+          type:'keyUp', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, nativeVirtualKeyCode:13,
+        });
+        const observed = await outcomeLatch.wait();
+        const { resolved: _resolved, ...observation } = observed || {};
+        return {
+          action,
+          target,
+          inserted_chars: text.length,
+          replace_existing: command?.payload?.replace_existing !== false,
+          submit_after_type: true,
+          prompt_sha256: sha256(text),
+          prompt_included: false,
+          send_control: { role: sendTargets[0].role, name: sendTargets[0].name },
+          ...observation,
+          event_driven_readback: true,
+          readback_poll_timer_required: false,
+          authority_effect: true,
+        };
+      } finally {
+        outcomeLatch.close();
+      }
     }
 
     throw new Error('native_semantic_action_not_supported');
