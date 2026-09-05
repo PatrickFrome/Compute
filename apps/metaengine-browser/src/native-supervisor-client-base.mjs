@@ -1,5 +1,6 @@
 import { browserControlCapabilities } from './browser-control-capabilities.mjs';
 import { globalOwnerGateDisabled } from './owner-safety-gate-registry.mjs';
+import { NativeSupervisorCommandLaneScheduler, classifyNativeSupervisorCommand, COMMAND_LANES } from './native-supervisor-command-lanes.mjs';
 import { SUPERVISOR_DEVICE_PROFILE } from './supervisor-device-identity.mjs';
 import { SupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime.mjs';
 import { SupervisorMeshRuntime } from './supervisor-mesh-runtime.mjs';
@@ -20,9 +21,13 @@ export const NATIVE_SUPERVISOR_RUNTIME_PATH = '/a2-browser-native-supervisor-v1'
 const clipError = (error) => String(error?.message || error || 'unknown_error').slice(0, 500);
 const READ_ONLY_ACTIONS = new Set([
   'POLL','CAPTURE','CAPTURE_VIEW','CONTROL_CAPABILITIES','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD',
-  'DOWNLOAD_STATUS','SELF_UPDATE_STATUS','GATE_STATUS',
+  'DOWNLOAD_STATUS','SELF_UPDATE_STATUS','GATE_STATUS','TAB_CENSUS','FLEET_STATUS',
 ]);
 const ROOT_POLICY_ACTIONS = new Set(['GATE_STATUS','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL']);
+const PROVEN_EFFECT_STATES = new Set(['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','CONFIRMED']);
+const TERMINAL_EFFECT_OUTCOMES = new Set(['CONFIRMED','NO_EFFECT_PROVEN','AMBIGUOUS']);
+const DEFAULT_BATCH_WAIT_MS = 4000;
+const DEFAULT_MAINTENANCE_INTERVAL_MS = 10000;
 
 function controlModeAllows(supervisorMode) {
   return supervisorMode === 'CONTROL' || globalOwnerGateDisabled('authority.control_mode');
@@ -76,6 +81,16 @@ export function planPostRestoreBlankTabCleanup({ continuityRow, bindings = [], c
   });
 }
 
+function stableCurrentCommand(command) {
+  return command ? Object.freeze({
+    command_id: command.command_id,
+    action: command.action,
+    platform: command.platform || null,
+    issued_at: command.issued_at || null,
+    expires_at: command.expires_at || null,
+  }) : null;
+}
+
 export class NativeSupervisorClient {
   #identity;
   #fetch;
@@ -92,6 +107,7 @@ export class NativeSupervisorClient {
   #lastCommandId = null;
   #lastCommandStatus = null;
   #currentCommand = null;
+  #currentCommands = new Map();
   #enrollmentStatus = 'UNINITIALIZED';
   #supervisorMode = 'CONTROL';
   #armed = true;
@@ -99,8 +115,32 @@ export class NativeSupervisorClient {
   #mesh = null;
   #selfUpdate = null;
   #continuityStatus = { state: 'NONE', restored_tabs: 0, target_version: null, authority_effect: false };
+  #commandLane;
+  #batchTransport = 'UNKNOWN';
+  #batchWaitMs;
+  #maxBatch;
+  #maxTabMutations;
+  #lastBatchCount = 0;
+  #heartbeatPromise = null;
+  #maintenancePromise = null;
+  #lastMaintenanceAtMs = 0;
+  #maintenanceIntervalMs;
 
-  constructor({ identity, fetchImpl = globalThis.fetch, getState, executeCommand, version, intervalMs = 2000, beforeSelfUpdateInstall = null, meshStatePath = null }) {
+  constructor({
+    identity,
+    fetchImpl = globalThis.fetch,
+    getState,
+    executeCommand,
+    version,
+    intervalMs = 2000,
+    beforeSelfUpdateInstall = null,
+    meshStatePath = null,
+    commandBatchSize = 64,
+    commandReadConcurrency = 32,
+    commandMutationConcurrency = 8,
+    commandBatchWaitMs = DEFAULT_BATCH_WAIT_MS,
+    maintenanceIntervalMs = DEFAULT_MAINTENANCE_INTERVAL_MS,
+  }) {
     if (!identity) throw new Error('native_supervisor_identity_required');
     if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
     if (typeof getState !== 'function') throw new Error('native_supervisor_state_provider_required');
@@ -111,7 +151,16 @@ export class NativeSupervisorClient {
     this.#getState = getState;
     this.#executeCommand = executeCommand;
     this.#version = String(version || '0.0.0');
-    this.#intervalMs = Math.max(1000, Number(intervalMs || 2000));
+    this.#intervalMs = Math.max(250, Math.min(5000, Number(intervalMs || 2000)));
+    this.#batchWaitMs = Math.max(250, Math.min(15000, Number(commandBatchWaitMs) || DEFAULT_BATCH_WAIT_MS));
+    this.#maxBatch = Math.max(1, Math.min(64, Number(commandBatchSize) || 64));
+    this.#maxTabMutations = Math.max(1, Math.min(16, Number(commandMutationConcurrency) || 8));
+    this.#maintenanceIntervalMs = Math.max(1000, Math.min(60000, Number(maintenanceIntervalMs) || DEFAULT_MAINTENANCE_INTERVAL_MS));
+    this.#commandLane = new NativeSupervisorCommandLaneScheduler({
+      readConcurrency: commandReadConcurrency,
+      mutationConcurrency: commandMutationConcurrency,
+      maxBatch: this.#maxBatch,
+    });
 
     const executeSupervisorCommand = async (command) => {
       const action = String(command?.action || '');
@@ -138,7 +187,7 @@ export class NativeSupervisorClient {
       canRestart: async () => {
         if (!controlModeAllows(this.#supervisorMode)) return false;
         if (!armedAllows(this.#armed)) return false;
-        if (this.#currentCommand != null && !globalOwnerGateDisabled('self_update.current_command')) return false;
+        if (this.#currentCommands.size > 0 && !globalOwnerGateDisabled('self_update.current_command')) return false;
         return confirmSelfUpdateRestartSafety({ getState: this.#getState });
       },
       beforeInstall: async (receipt) => {
@@ -168,6 +217,7 @@ export class NativeSupervisorClient {
       last_command_id: this.#lastCommandId,
       last_command_status: this.#lastCommandStatus,
       current_command: this.#currentCommand,
+      current_commands: [...this.#currentCommands.values()].map((row) => structuredClone(row)),
       enrollment_status: this.#enrollmentStatus,
       identity: this.#identity.snapshot(),
       supervisor_mode: this.#supervisorMode,
@@ -176,6 +226,21 @@ export class NativeSupervisorClient {
       supervisor_mesh: this.#mesh?.snapshot() || null,
       self_update: this.#selfUpdate?.snapshot() || null,
       session_continuity: structuredClone(this.#continuityStatus),
+      control_fast_lane: {
+        schema: 'metaengine.native-supervisor.control-fast-lane.v1',
+        transport: this.#batchTransport,
+        wait_batch_ms: this.#batchWaitMs,
+        last_batch_count: this.#lastBatchCount,
+        scheduler: this.#commandLane.snapshot(),
+        maintenance_interval_ms: this.#maintenanceIntervalMs,
+        maintenance_in_flight: this.#maintenancePromise != null,
+        heartbeat_in_flight: this.#heartbeatPromise != null,
+        command_lane_precedes_maintenance: true,
+        long_poll_replaces_idle_timer_latency: this.#batchTransport === 'SUPPORTED',
+        transport_delivery_is_authority: false,
+        automatic_effect_retry_allowed: false,
+        authority_effect: false,
+      },
       continuous_service: {
         terminal_requires_external_stop: true,
         startup_scheduler_armed_before_enrollment: true,
@@ -274,8 +339,6 @@ export class NativeSupervisorClient {
     if (this.#running) { this.#schedule(); return this.snapshot(); }
     this.#running = true;
     this.#startedAt = new Date().toISOString();
-    // Arm the scheduler before any network/enrollment/bootstrap await. A transient
-    // startup failure must degrade one cycle, never terminate the supervisor service.
     this.#schedule();
     try {
       await this.#identity.ensure();
@@ -316,10 +379,13 @@ export class NativeSupervisorClient {
 
   #schedule() {
     if (!this.#running || this.#timer) return;
+    // A supported wait-batch request is itself the idle wait. Schedule the next
+    // cycle immediately so there is no extra client timer after the held request.
+    const delay = this.#batchTransport === 'SUPPORTED' ? 0 : this.#intervalMs;
     this.#timer = setTimeout(() => {
       this.#timer = null;
       this.cycle().catch(() => {}).finally(() => this.#schedule());
-    }, this.#intervalMs);
+    }, delay);
     this.#timer.unref?.();
   }
 
@@ -380,6 +446,27 @@ export class NativeSupervisorClient {
     this.#lastHeartbeatAt = new Date().toISOString();
   }
 
+  #kickHeartbeat() {
+    if (this.#heartbeatPromise) return this.#heartbeatPromise;
+    this.#heartbeatPromise = this.#heartbeat()
+      .catch((error) => { this.#lastError = `heartbeat:${clipError(error)}`; })
+      .finally(() => { this.#heartbeatPromise = null; });
+    return this.#heartbeatPromise;
+  }
+
+  #kickMaintenance() {
+    const now = Date.now();
+    if (this.#maintenancePromise || now - this.#lastMaintenanceAtMs < this.#maintenanceIntervalMs) return this.#maintenancePromise;
+    this.#lastMaintenanceAtMs = now;
+    this.#maintenancePromise = (async () => {
+      await this.#mesh?.reconcile().catch((error) => { this.#lastError = `mesh:${clipError(error)}`; });
+      await this.#lifecycle?.cycle().catch((error) => { this.#lastError = `lifecycle:${clipError(error)}`; });
+      await this.#mesh?.dispatchRecoveryIfNeeded().catch((error) => { this.#lastError = `mesh_recovery:${clipError(error)}`; });
+      await this.#selfUpdate?.cycle().catch((error) => { this.#lastError = `self_update:${clipError(error)}`; });
+    })().finally(() => { this.#maintenancePromise = null; });
+    return this.#maintenancePromise;
+  }
+
   async #nextCommand() {
     const response = await this.#signedRequest('/v1/commands/next', { payload: { supervisor_mode: this.#supervisorMode } });
     const body = await response.json().catch(() => ({}));
@@ -387,10 +474,62 @@ export class NativeSupervisorClient {
     return body?.command || null;
   }
 
-  async #postResult(command, ok, result, error = null) {
-    const payload = { ok, receipt: { schema: 'metaengine.native-supervisor.command-receipt.v1', command_id: command.command_id, action: command.action, platform: command.platform || null, result: result ?? null, recorded_at: new Date().toISOString(), authority_effect: false }, error };
+  async #nextCommands() {
+    if (this.#batchTransport !== 'UNAVAILABLE') {
+      const response = await this.#signedRequest('/v1/commands/wait-batch', {
+        payload: {
+          supervisor_mode: this.#supervisorMode,
+          max_batch: this.#maxBatch,
+          max_tab_mutations: this.#maxTabMutations,
+          wait_ms: this.#batchWaitMs,
+        },
+      });
+      if (response.status === 404) {
+        this.#batchTransport = 'UNAVAILABLE';
+      } else {
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || !Array.isArray(body?.commands)) {
+          throw new Error(`native_supervisor_batch_next_http_${response.status}:${body?.error || 'invalid_batch'}`);
+        }
+        this.#batchTransport = 'SUPPORTED';
+        this.#lastBatchCount = body.commands.length;
+        return body.commands;
+      }
+    }
+    const command = await this.#nextCommand();
+    this.#lastBatchCount = command ? 1 : 0;
+    return command ? [command] : [];
+  }
+
+  async #postResult(command, ok, result, error = null, effectOutcome = null) {
+    const payload = { ok, receipt: { schema: 'metaengine.native-supervisor.command-receipt.v2', command_id: command.command_id, action: command.action, platform: command.platform || null, result: result ?? null, effect_outcome: effectOutcome, recorded_at: new Date().toISOString(), authority_effect: false }, error };
     const response = await this.#signedRequest(`/v1/commands/${encodeURIComponent(command.command_id)}/result`, { payload });
     if (!response.ok) throw new Error(`native_supervisor_result_http_${response.status}`);
+  }
+
+  async #postBatchResults(rows) {
+    const results = rows.map((row) => ({
+      command_id: row.command.command_id,
+      ok: row.ok,
+      receipt: {
+        schema: 'metaengine.native-supervisor.command-receipt.v2',
+        command_id: row.command.command_id,
+        action: row.command.action,
+        platform: row.command.platform || null,
+        result: row.result ?? null,
+        effect_outcome: row.effect_outcome,
+        lane: row.descriptor.lane,
+        effect_key: row.descriptor.effect_key,
+        execution_ms: row.execution_ms,
+        recorded_at: new Date().toISOString(),
+        authority_effect: false,
+      },
+      error: row.ok ? null : row.error,
+    }));
+    const response = await this.#signedRequest('/v1/commands/result-batch', { payload: { results } });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(`native_supervisor_batch_result_http_${response.status}:${body?.error || 'unknown'}`);
+    return body;
   }
 
   async #executeLocalOrRemote(command) {
@@ -421,37 +560,130 @@ export class NativeSupervisorClient {
     return this.#executeCommand(command);
   }
 
-  async #runCommand(command) {
-    this.#currentCommand = { command_id: command.command_id, action: command.action, platform: command.platform || null, issued_at: command.issued_at || null, expires_at: command.expires_at || null };
-    let result = null;
+  #trackCommandStart(command) {
+    const projection = stableCurrentCommand(command);
+    this.#currentCommands.set(String(command.command_id), projection);
+    if (!this.#currentCommand) this.#currentCommand = projection;
+  }
+
+  #trackCommandEnd(command) {
+    this.#currentCommands.delete(String(command.command_id));
+    this.#currentCommand = this.#currentCommands.values().next().value || null;
+  }
+
+  async #effectOutcome(command, result, descriptor) {
+    if (descriptor.read_only) return null;
+    const explicit = String(result?.effect_outcome || '').toUpperCase();
+    if (TERMINAL_EFFECT_OUTCOMES.has(explicit)) return explicit;
+    const state = String(result?.effect_state || '').toUpperCase();
+    if (PROVEN_EFFECT_STATES.has(state)) return 'CONFIRMED';
+    if (state.startsWith('AMBIGUOUS')) return 'AMBIGUOUS';
+
+    const action = String(command?.action || '').toUpperCase();
+    if (['ARM','DISARM','SET_SUPERVISOR_MODE','SET_MODE'].includes(action)) return 'CONFIRMED';
+    if (action === 'NEW_TAB' && result?.tab_id) return 'CONFIRMED';
+    if (['FLEET_SET_PROFILE','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL'].includes(action) && result) return 'CONFIRMED';
+
+    if (['CLOSE_TAB','SELECT_TAB','NAVIGATE'].includes(action)) {
+      const stateReadback = await this.#getState().catch(() => null);
+      const tabId = String(command?.payload?.tab_id || result?.tab_id || '');
+      const tabs = Array.isArray(stateReadback?.tabs) ? stateReadback.tabs : [];
+      if (action === 'CLOSE_TAB') return tabId && !tabs.some((tab) => String(tab?.tab_id || '') === tabId) ? 'CONFIRMED' : 'AMBIGUOUS';
+      if (action === 'SELECT_TAB') return tabId && String(stateReadback?.active_tab?.tab_id || '') === tabId ? 'CONFIRMED' : 'AMBIGUOUS';
+      if (action === 'NAVIGATE') {
+        const row = tabs.find((tab) => String(tab?.tab_id || '') === tabId);
+        return row && result?.url && String(row.url || '') === String(result.url) ? 'CONFIRMED' : 'AMBIGUOUS';
+      }
+    }
+
+    // Dispatch success is not post-condition proof. Unsupported effect types are
+    // quarantined instead of being mislabeled COMPLETED and are never auto-retried.
+    return 'AMBIGUOUS';
+  }
+
+  async #executeForLane(command, descriptor) {
+    if (!descriptor.read_only && this.#maintenancePromise) await this.#maintenancePromise;
+    this.#trackCommandStart(command);
+    const started = Date.now();
     try {
-      result = await this.#executeLocalOrRemote(command);
-      await this.#postResult(command, true, result, null);
-      this.#lastCommandId = command.command_id; this.#lastCommandStatus = 'COMPLETED'; return result;
+      const result = await this.#executeLocalOrRemote(command);
+      const effectOutcome = await this.#effectOutcome(command, result, descriptor);
+      return { result, effect_outcome: effectOutcome, execution_ms: Date.now() - started };
+    } finally {
+      this.#trackCommandEnd(command);
+    }
+  }
+
+  async #runCommand(command) {
+    const descriptor = classifyNativeSupervisorCommand(command);
+    let result = null;
+    let effectOutcome = descriptor.read_only ? null : 'AMBIGUOUS';
+    try {
+      const execution = await this.#executeForLane(command, descriptor);
+      result = execution.result;
+      effectOutcome = execution.effect_outcome;
+      await this.#postResult(command, true, result, null, effectOutcome);
+      this.#lastCommandId = command.command_id;
+      this.#lastCommandStatus = descriptor.read_only || effectOutcome === 'CONFIRMED' ? 'COMPLETED' : 'AMBIGUOUS';
+      return result;
     } catch (error) {
       const message = clipError(error);
-      await this.#postResult(command, false, result, message).catch(() => {});
-      this.#lastCommandId = command.command_id; this.#lastCommandStatus = 'FAILED'; throw error;
-    } finally { this.#currentCommand = null; }
+      await this.#postResult(command, false, result, message, effectOutcome).catch(() => {});
+      this.#lastCommandId = command.command_id;
+      this.#lastCommandStatus = 'FAILED';
+      throw error;
+    }
+  }
+
+  async #runCommandBatch(commands) {
+    const execution = await this.#commandLane.drain(commands, async (command, descriptor) => {
+      const out = await this.#executeForLane(command, descriptor);
+      return { command, descriptor, ...out };
+    });
+    const rows = execution.map((row, index) => {
+      const nested = row.result || {};
+      return {
+        command: commands[index],
+        descriptor: classifyNativeSupervisorCommand(commands[index]),
+        ok: row.ok,
+        result: row.ok ? nested.result ?? null : null,
+        effect_outcome: row.ok ? nested.effect_outcome ?? null : (row.descriptor === COMMAND_LANES.READ_ONLY ? null : 'AMBIGUOUS'),
+        execution_ms: row.ok ? nested.execution_ms ?? row.execution_ms : row.execution_ms,
+        error: row.error,
+      };
+    });
+    await this.#postBatchResults(rows);
+    const last = rows.at(-1) || null;
+    if (last) {
+      this.#lastCommandId = last.command.command_id;
+      this.#lastCommandStatus = last.ok
+        ? (last.descriptor.read_only || last.effect_outcome === 'CONFIRMED' ? 'COMPLETED' : 'AMBIGUOUS')
+        : 'FAILED';
+    }
+    return rows;
   }
 
   async cycle() {
     if (this.#cyclePromise) return this.#cyclePromise;
     this.#cyclePromise = (async () => {
       try {
-        await this.#mesh?.reconcile().catch((error) => { this.#lastError = `mesh:${clipError(error)}`; });
-        await this.#lifecycle?.cycle().catch((error) => { this.#lastError = `lifecycle:${clipError(error)}`; });
-        await this.#mesh?.dispatchRecoveryIfNeeded().catch((error) => { this.#lastError = `mesh_recovery:${clipError(error)}`; });
-        await this.#selfUpdate?.cycle().catch((error) => { this.#lastError = `self_update:${clipError(error)}`; });
         const identity = await this.ensureEnrollment();
         if (!identity?.device_id) return this.snapshot();
-        await this.#heartbeat();
-        const command = await this.#nextCommand();
-        if (command) await this.#runCommand(command);
-        await this.#mesh?.reconcile().catch(() => {});
-        await this.#lifecycle?.cycle().catch(() => {});
-        await this.#mesh?.dispatchRecoveryIfNeeded().catch(() => {});
-        await this.#selfUpdate?.cycle().catch(() => {});
+
+        // Heartbeat is kept alive independently, but it never sits in front of the
+        // command lease. Its state collection may be expensive (perception, fleet,
+        // mesh), so the fast lane is allowed to proceed while the heartbeat is sent.
+        this.#kickHeartbeat();
+
+        const commands = await this.#nextCommands();
+        if (commands.length > 0) {
+          if (this.#batchTransport === 'SUPPORTED') await this.#runCommandBatch(commands);
+          else await this.#runCommand(commands[0]);
+        } else {
+          // Heavy reconciler work only starts in an idle window. A later mutation
+          // waits for an already-running maintenance pass instead of racing it.
+          this.#kickMaintenance();
+        }
         this.#lastError = null;
         return this.snapshot();
       } catch (error) {
