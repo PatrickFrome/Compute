@@ -53,6 +53,29 @@ export async function runSupervisorEnrollmentBootstrap(supervisor) {
   });
 }
 
+function unavailableSemanticPlane(reason = 'UNAVAILABLE') {
+  return Object.freeze({
+    schema: 'metaengine.browser.realtime-semantic-plane.v1',
+    running: false,
+    state: String(reason || 'UNAVAILABLE').slice(0, 120),
+    sequence: 0,
+    target_count: 0,
+    ready_count: 0,
+    dirty_count: 0,
+    targets: [],
+    events: [],
+    dropped_events: 0,
+    event_driven: true,
+    persistent_cdp_sessions: true,
+    attach_per_command: false,
+    raw_cdp_passthrough: false,
+    control_authority: false,
+    command_leasing: false,
+    second_scheduler: false,
+    authority_effect: false,
+  });
+}
+
 function unavailableProcessPlane(reason = 'UNAVAILABLE') {
   return Object.freeze({
     schema: 'metaengine.browser.realtime-process-plane.v1',
@@ -64,6 +87,7 @@ function unavailableProcessPlane(reason = 'UNAVAILABLE') {
     web_contents_count: 0,
     processes: [],
     web_contents: [],
+    semantic_plane: unavailableSemanticPlane(reason),
     events: [],
     dropped_events: 0,
     event_driven_lifecycle: true,
@@ -77,10 +101,9 @@ function unavailableProcessPlane(reason = 'UNAVAILABLE') {
 
 // Additive wrapper. The proven Native Supervisor implementation remains in
 // native-supervisor-client-core.mjs. Workspace observation, enrollment recovery and
-// the realtime process plane remain observation-only additions to the same trusted
-// client. The process plane has no command lease or mutation authority: it samples
-// Electron process metrics and emits lifecycle deltas, while DB-leased typed commands
-// continue to be the only remote Browser actuation path.
+// realtime process/semantic planes remain observation-only additions to the same
+// trusted client. They never lease commands or grant mutation authority: DB-leased
+// typed commands remain the only remote Browser actuation path.
 export class NativeSupervisorClient extends CoreNativeSupervisorClient {
   #workspaceIdentity;
   #workspaceFetch;
@@ -148,6 +171,29 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
               authority_effect: false,
             });
           }
+          if (action === 'SEMANTIC_CENSUS') {
+            return realtimeProcessPlane?.semanticSnapshot({
+              includeText: command?.payload?.include_text !== false,
+              eventLimit: boundedInt(command?.payload?.event_limit, 32, 0, 256),
+            }) || unavailableSemanticPlane('SEMANTIC_PLANE_NOT_READY');
+          }
+          if (action === 'SEMANTIC_EVENTS') {
+            const snapshot = realtimeProcessPlane?.semanticSnapshot({
+              includeText: false,
+              eventsSince: boundedInt(command?.payload?.after_sequence, 0, 0, Number.MAX_SAFE_INTEGER),
+              eventLimit: boundedInt(command?.payload?.limit, 256, 1, 1024),
+            }) || unavailableSemanticPlane('SEMANTIC_PLANE_NOT_READY');
+            return Object.freeze({
+              schema: 'metaengine.browser.realtime-semantic-events.v1',
+              running: snapshot.running === true,
+              sequence: snapshot.sequence || 0,
+              events: Array.isArray(snapshot.events) ? structuredClone(snapshot.events) : [],
+              dropped_events: Number(snapshot.dropped_events || 0),
+              raw_cdp_passthrough: false,
+              control_authority: false,
+              authority_effect: false,
+            });
+          }
           if (action === 'CONTROL_LATENCY_STATUS') return controlLatencySnapshot();
           const projected = exactCommandTargetProjection(command);
           if (projected) commandTargetProjection = projected;
@@ -189,12 +235,18 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     controlLatencySnapshot = () => {
       const base = super.snapshot();
       const plane = realtimeProcessPlane?.snapshot({ eventLimit: 0 }) || unavailableProcessPlane('PROCESS_PLANE_NOT_READY');
+      const semantic = realtimeProcessPlane?.semanticSnapshot({ includeText: false, eventLimit: 0 }) || unavailableSemanticPlane('SEMANTIC_PLANE_NOT_READY');
       return Object.freeze({
         schema: 'metaengine.browser.control-latency-status.v1',
         fast_lane: base?.control_fast_lane ? structuredClone(base.control_fast_lane) : null,
         current_command_count: Array.isArray(base?.current_commands) ? base.current_commands.length : 0,
         process_sample_interval_ms: plane.sample_interval_ms || null,
         process_event_sequence: plane.sequence || 0,
+        semantic_event_sequence: semantic.sequence || 0,
+        semantic_target_count: semantic.target_count || 0,
+        semantic_ready_count: semantic.ready_count || 0,
+        persistent_cdp_sessions: semantic.persistent_cdp_sessions === true,
+        cdp_attach_per_command: semantic.attach_per_command === true,
         process_push_last_at: this.#processPushLastAt,
         process_push_last_error: this.#processPushLastError,
         process_push_in_flight: this.#processPushPromise != null,
@@ -314,9 +366,9 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
         sampleMs: 250,
         eventLimit: 512,
         onChange: (event) => {
-          // Lifecycle deltas should leave the process quickly. Resource samples are
-          // bounded to the 250 ms metrics cadence; this is observation push only,
-          // never a second command scheduler or an actuation authority.
+          // Lifecycle/semantic deltas leave the process quickly. Resource samples are
+          // bounded to the metrics cadence; this is observation push only, never a
+          // second command scheduler or an actuation authority.
           this.#scheduleRealtimeStatePush(event?.type === 'METRICS_SAMPLE' ? 100 : 10);
         },
       });
@@ -387,9 +439,13 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       workspace_binding_source: 'NATIVE_SUPERVISOR_HEARTBEAT',
       workspace_binding_second_polling_loop: false,
       realtime_process_plane: this.#processPlaneRef?.()?.snapshot({ eventLimit: 32 }) || unavailableProcessPlane(this.#processPlaneError || 'PROCESS_PLANE_NOT_READY'),
+      realtime_semantic_plane: this.#processPlaneRef?.()?.semanticSnapshot({ includeText: false, eventLimit: 32 }) || unavailableSemanticPlane(this.#processPlaneError || 'SEMANTIC_PLANE_NOT_READY'),
       realtime_process_plane_source: 'ELECTRON_MAIN_PROCESS',
+      realtime_semantic_plane_source: 'PERSISTENT_CDP_PAGE_DOM_ACCESSIBILITY_RUNTIME_NETWORK',
       realtime_process_plane_command_authority: false,
+      realtime_semantic_plane_command_authority: false,
       realtime_process_plane_second_scheduler: false,
+      realtime_semantic_plane_second_scheduler: false,
       realtime_process_push: {
         last_at: this.#processPushLastAt,
         last_error: this.#processPushLastError,
@@ -397,6 +453,9 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
         pending: this.#processPushPending,
         event_driven: true,
         metrics_sample_ms: 250,
+        semantic_event_driven: true,
+        persistent_cdp_sessions: true,
+        cdp_attach_per_command: false,
         command_leasing: false,
         authority_effect: false,
       },
