@@ -30,8 +30,14 @@ function safeCall(target, method, fallback = null) {
 function metricProjection(metric = {}) {
   const memory = metric.memory && typeof metric.memory === 'object' ? metric.memory : {};
   const cpu = metric.cpu && typeof metric.cpu === 'object' ? metric.cpu : {};
+  const pid = Number.isSafeInteger(Number(metric.pid)) ? Number(metric.pid) : null;
+  const creationTimeMs = number(metric.creationTime ?? metric.creation_time_ms);
+  const processKey = pid != null && creationTimeMs != null ? `${pid}:${creationTimeMs}` : null;
   return Object.freeze({
-    pid: Number.isSafeInteger(Number(metric.pid)) ? Number(metric.pid) : null,
+    pid,
+    creation_time_ms: creationTimeMs,
+    process_key: processKey,
+    process_identity_complete: processKey != null,
     type: text(metric.type, 80),
     name: text(metric.name, 160),
     service_name: text(metric.serviceName ?? metric.service_name, 160),
@@ -270,10 +276,19 @@ export class BrowserRealtimeProcessPlane {
       ? this.#events.slice(-boundedInt(eventLimit, 128, 0, 1024))
       : this.eventsSince(eventsSince, eventLimit);
     const byPid = new Map();
+    const processKeyByPid = new Map();
+    for (const processRow of this.#processes) {
+      if (processRow.pid && processRow.process_key) processKeyByPid.set(processRow.pid, processRow.process_key);
+    }
     for (const row of this.#webContents) {
       if (!row.os_pid) continue;
       const list = byPid.get(row.os_pid) || [];
-      list.push({ web_contents_id: row.web_contents_id, tab_id: row.tab_id, type: row.type });
+      list.push({
+        web_contents_id: row.web_contents_id,
+        tab_id: row.tab_id,
+        type: row.type,
+        process_key: processKeyByPid.get(row.os_pid) || null,
+      });
       byPid.set(row.os_pid, list);
     }
     return Object.freeze({
@@ -285,13 +300,18 @@ export class BrowserRealtimeProcessPlane {
       process_count: this.#processes.length,
       web_contents_count: this.#webContents.length,
       processes: this.#processes.map((row) => ({ ...row, web_contents: byPid.get(row.pid) || [] })),
-      web_contents: this.#webContents.map((row) => ({ ...row })),
+      web_contents: this.#webContents.map((row) => ({
+        ...row,
+        process_key: row.os_pid ? processKeyByPid.get(row.os_pid) || null : null,
+      })),
       events: events.map((row) => ({ ...row })),
       dropped_events: this.#droppedEvents,
       event_driven_lifecycle: true,
       periodic_resource_sampling: true,
       process_metrics_source: 'ELECTRON_APP_GET_APP_METRICS',
-      renderer_identity_source: 'ELECTRON_WEB_CONTENTS_OS_PID',
+      process_identity_source: 'ELECTRON_PROCESS_METRIC_PID_PLUS_CREATION_TIME',
+      process_identity_pid_reuse_safe: true,
+      renderer_identity_source: 'ELECTRON_WEB_CONTENTS_OS_PID_PLUS_PROCESS_METRIC_CREATION_TIME',
       page_content_exposed: false,
       control_authority: false,
       command_leasing: false,
