@@ -70,9 +70,11 @@ test('rollover has a durable pre-effect barrier and restart never replays the sa
   assert.equal(restarted.snapshot().rollover_attempt, null);
 });
 
-test('Windows login-start evidence self-heals on the existing resilience path', async () => {
+test('Windows login-start registration self-heals while Startup Approval remains advisory', async () => {
   const monitor = new EventEmitter();
-  let settingsReads = 0;
+  let registered = false;
+  let policyAllowsLaunch = false;
+  let registrationWrites = 0;
   let blocker = false;
   const electron = {
     app: {
@@ -80,11 +82,13 @@ test('Windows login-start evidence self-heals on the existing resilience path', 
       setLoginItemSettings: ({ openAtLogin, enabled }) => {
         assert.equal(openAtLogin, true);
         assert.equal(enabled, true);
+        registrationWrites += 1;
+        registered = true;
       },
-      getLoginItemSettings: () => {
-        settingsReads += 1;
-        return { openAtLogin: true, executableWillLaunchAtLogin: settingsReads >= 2 };
-      },
+      getLoginItemSettings: () => ({
+        openAtLogin: registered,
+        executableWillLaunchAtLogin: registered && policyAllowsLaunch,
+      }),
     },
     powerSaveBlocker: {
       start: () => { blocker = true; return 7; },
@@ -95,16 +99,24 @@ test('Windows login-start evidence self-heals on the existing resilience path', 
   };
   const runtime = new HostResilienceRuntime({ electron, platform: 'win32' });
   const first = await runtime.start();
-  assert.equal(first.state, 'DEGRADED_LOGIN_START');
-  assert.equal(first.login_start_verified, false);
-  assert.equal(first.login_start_retry_pending, true);
+  assert.equal(first.state, 'ACTIVE');
+  assert.equal(first.login_start_verified, true);
+  assert.equal(first.login_start_policy_hold, true);
+  assert.equal(first.login_start_retry_pending, false);
+  assert.equal(first.login_start_repair_attempts, 1);
+  assert.equal(registrationWrites, 1, 'fresh proven registration absence may authorize exactly one repair');
+
+  policyAllowsLaunch = true;
   monitor.emit('resume');
   await new Promise((resolve) => setImmediate(resolve));
-  const healed = runtime.snapshot();
-  assert.equal(healed.state, 'ACTIVE');
-  assert.equal(healed.login_start_verified, true);
-  assert.equal(healed.executable_will_launch_at_login, true);
-  assert.ok(healed.login_start_attempts >= 2);
+  const healedPolicy = runtime.snapshot();
+  assert.equal(healedPolicy.state, 'ACTIVE');
+  assert.equal(healedPolicy.login_start_verified, true);
+  assert.equal(healedPolicy.login_start_policy_hold, false);
+  assert.equal(healedPolicy.executable_will_launch_at_login, true);
+  assert.equal(healedPolicy.login_start_retry_pending, false);
+  assert.equal(registrationWrites, 1, 'policy readback changes must not rewrite an already-present registration');
+  assert.ok(healedPolicy.login_start_attempts >= 2);
   await runtime.stop();
   assert.equal(runtime.snapshot().external_stop_requested, true);
 });
@@ -134,6 +146,9 @@ test('autonomy source invariants close UI, restart, host wiring and self-update 
 
   assert.match(hostResilience, /sentinel_recovery_uses_existing_progress_tick:\s*true/);
   assert.match(hostResilience, /login_start_recovery_uses_existing_progress_tick:\s*true/);
+  assert.match(hostResilience, /login_start_repair_requires_fresh_absence_readback:\s*true/);
+  assert.match(hostResilience, /login_start_policy_hold_is_advisory:\s*true/);
+  assert.match(hostResilience, /login_start_policy_hold_grants_repair_authority:\s*false/);
   assert.equal((hostResilience.match(/setInterval\s*\(/g) || []).length, 1);
 
   assert.match(mainEntry, /new HostResilienceRuntime\(\)/);
