@@ -31,7 +31,7 @@ test('batch and legacy effect receipts are never locally aborted after physical 
 
   assert.equal(calls[0].signal, null);
   assert.equal(calls[1].signal, null);
-  assert.ok(calls[2].signal instanceof AbortSignal, 'ordinary transport request must remain bounded');
+  assert.ok(calls[2].signal instanceof AbortSignal, 'held transport remains bounded above the current 4s Edge wait');
 });
 
 test('core scheduler admits remote command lane before worker observation and DevOS idle work', () => {
@@ -44,7 +44,7 @@ test('core scheduler admits remote command lane before worker observation and De
   assert.match(source, /if \(!descriptor\.read_only && clientRef\.#idleWorkPromise\) await clientRef\.#idleWorkPromise/);
 });
 
-test('base command lane precedes heavy maintenance and supports held batch transport', () => {
+test('base command lane precedes heavy maintenance, preserves 750ms fallback, and hands off to held batch transport', () => {
   const source = fs.readFileSync(path.join(appRoot, 'src', 'native-supervisor-client-base.mjs'), 'utf8');
   const cycle = between(source, '  async cycle() {', '\n  }\n}');
   const next = cycle.indexOf('const commands = await this.#nextCommands()');
@@ -54,9 +54,15 @@ test('base command lane precedes heavy maintenance and supports held batch trans
   assert.match(source, /\/v1\/commands\/wait-batch/);
   assert.match(source, /\/v1\/commands\/result-batch/);
   assert.match(source, /long_poll_replaces_idle_timer_latency/);
+  assert.match(source, /commandFastlane === true\s*\?\s*new NativeSupervisorCommandFastlane/);
+  assert.match(source, /this\.#batchTransport = 'SUPPORTED';\s*\n\s*this\.#commandFastlane\?\.stop\(\)/);
+  assert.match(source, /legacy_fallback_suppressed_by_batch_transport:\s*this\.#batchTransport === 'SUPPORTED'/);
+  assert.match(source, /one_steady_state_lease_loop:\s*true/);
+  assert.doesNotMatch(source, /row\.descriptor === COMMAND_LANES\.READ_ONLY/);
+  assert.match(source, /descriptor\.read_only \? null : 'AMBIGUOUS'/);
 });
 
-test('Edge realtime wait is race-free and delivery never grants authority', () => {
+test('Edge realtime wait is race-free, uses a non-secret URL key, and delivery never grants authority', () => {
   const source = fs.readFileSync(path.join(appRoot, 'supabase', 'a2-browser-native-supervisor-v1', 'index.ts'), 'utf8');
   for (const token of [
     "'/v1/commands/next-batch'",
@@ -70,9 +76,24 @@ test('Edge realtime wait is race-free and delivery never grants authority', () =
     'transport_delivery_is_authority:false',
     'realtime_process_plane:boundedObject',
     'control_latency:boundedObject',
+    "Deno.env.get('SUPABASE_PUBLISHABLE_KEY')",
+    "Deno.env.get('SUPABASE_ANON_KEY')",
+    'apikey=${encodeURIComponent(REALTIME_API_KEY)}',
+    'accessToken:SERVICE_ROLE',
+    'realtime_url_uses_service_role:false',
   ]) assert.ok(source.includes(token), `${token} missing from Edge fast lane`);
+  assert.doesNotMatch(source, /apikey=\$\{encodeURIComponent\(SERVICE_ROLE\)\}/, 'service role must never enter a websocket URL/query');
   assert.doesNotMatch(source, /finish\(['"]SUBSCRIBED_RECHECK['"]\)/, 'subscription acknowledgement must not itself wake the lease loop');
   assert.doesNotMatch(source, /eval\s*\(|new\s+Function\s*\(/);
+});
+
+test('Realtime wake helper fails join errors fast without inventing authority', () => {
+  const source = fs.readFileSync(path.join(appRoot, 'supabase', 'a2-browser-native-supervisor-v1', 'realtime-command-wake.mjs'), 'utf8');
+  assert.match(source, /JOIN_REJECTED/);
+  assert.match(source, /JOIN_SEND_FAILED/);
+  assert.match(source, /finishWake\(reason\)/);
+  assert.match(source, /transport_delivery_is_authority:\s*false/);
+  assert.match(source, /authority_effect:\s*false/);
 });
 
 test('Realtime wake trigger is source-only, advisory, private and payload-minimal', () => {
