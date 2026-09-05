@@ -29,16 +29,20 @@ constexpr std::size_t kMaxBytes = 2048;
 
 constexpr char kContract[] =
     "{\"schema\":\"metaengine.browser-guardian.owner-enrollment-native-store.v1\","
-    "\"version\":\"1.0.2\","
+    "\"version\":\"1.0.4\","
     "\"machine_secure_root_required\":true,\"root_creation_implemented\":false,"
     "\"root_repair_implemented\":false,\"final_path_reparse_escape_forbidden\":true,"
     "\"low_privilege_write_acl_forbidden\":true,\"non_machine_write_acl_forbidden\":true,"
     "\"machine_trusted_owner_required\":true,\"root_delete_share_fenced\":true,"
+    "\"ancestor_delete_share_fenced\":true,\"absolute_target_ancestor_chain_fenced\":true,"
     "\"same_directory_staging\":true,\"staging_create_new\":true,"
     "\"staging_flush_file_buffers\":true,\"commit_move_fail_if_exists\":true,"
     "\"commit_move_write_through\":true,\"commit_source_handle_rename\":true,"
     "\"commit_under_fenced_root\":true,\"commit_handle_relative_rename\":false,"
-    "\"post_commit_readback_required\":true,"
+    "\"post_commit_readback_required\":true,\"commit_failure_readback_required\":true,"
+    "\"ambiguous_commit_outcome_fail_closed\":true,"
+    "\"commit_unknown_result_automatic_retry_allowed\":false,"
+    "\"effect_outcome_algebra\":\"NO_EFFECT_PROVEN|EFFECT_EXACT|CONFLICT|CORRUPT|AMBIGUOUS\","
     "\"owner_replacement_allowed\":false,\"token_session_id_persisted\":false,"
     "\"journal_mutation_allowed\":false,\"wts_execution_allowed\":false,"
     "\"process_effect_allowed\":false,\"scm_effect_allowed\":false,"
@@ -66,6 +70,15 @@ struct Local {
     ~Local() { if (value != nullptr) LocalFree(value); }
     Local(const Local&) = delete;
     Local& operator=(const Local&) = delete;
+};
+struct RootFence {
+    RootFence() : program_data(), metaengine(), root() {}
+    Handle program_data;
+    Handle metaengine;
+    Handle root;
+    bool valid() const noexcept {
+        return program_data.valid() && metaengine.valid() && root.valid();
+    }
 };
 
 std::wstring lower(std::wstring v) {
@@ -146,19 +159,38 @@ bool noReparse(HANDLE h) {
     return GetFileInformationByHandleEx(h, FileAttributeTagInfo, &info, sizeof(info))
         && (info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0;
 }
-Handle openSecureRoot(const std::wstring& root, DWORD extraAccess = 0) {
-    const std::wstring pd = programData();
-    const std::wstring expected = pd.empty() ? std::wstring{} : fullPath(pd + L"\\" + kRelativeRoot);
-    const std::wstring actual = fullPath(root);
-    if (expected.empty() || actual.empty() || lower(expected) != lower(actual)) return Handle{};
-
+Handle openDirectoryFence(const std::wstring& path, DWORD extraAccess = 0, bool requireSecureAcl = false) {
+    const std::wstring actual = fullPath(path);
+    if (actual.empty()) return Handle{};
     Handle h(CreateFileW(actual.c_str(), FILE_READ_ATTRIBUTES | READ_CONTROL | extraAccess,
         FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
         FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
     if (!h.valid() || !noReparse(h.value)) return Handle{};
     const std::wstring resolved = finalPath(h.value);
-    if (resolved.empty() || lower(resolved) != lower(actual) || !secureAcl(h.value)) return Handle{};
+    if (resolved.empty() || lower(resolved) != lower(actual)) return Handle{};
+    if (requireSecureAcl && !secureAcl(h.value)) return Handle{};
     return h;
+}
+RootFence openSecureRootFence(const std::wstring& root, DWORD extraAccess = 0) {
+    RootFence fence;
+    const std::wstring pd = fullPath(programData());
+    const std::wstring metaengine = pd.empty() ? std::wstring{} : fullPath(pd + L"\\METAENGINE");
+    const std::wstring expected = pd.empty() ? std::wstring{} : fullPath(pd + L"\\" + kRelativeRoot);
+    const std::wstring actual = fullPath(root);
+    if (pd.empty() || metaengine.empty() || expected.empty() || actual.empty() || lower(expected) != lower(actual)) return fence;
+
+    // The commit uses an absolute path because FILE_RENAME_INFO.RootDirectory with a
+    // relative target failed at runtime on Windows Server 2025. Therefore every mutable
+    // directory component below the volume root is kept open without FILE_SHARE_DELETE
+    // until the transaction and post-commit readback finish. Paths remain labels; these
+    // handles fence the object identities used by the absolute target resolution.
+    fence.program_data = openDirectoryFence(pd);
+    if (!fence.program_data.valid()) return RootFence{};
+    fence.metaengine = openDirectoryFence(metaengine);
+    if (!fence.metaengine.valid()) return RootFence{};
+    fence.root = openDirectoryFence(actual, extraAccess, true);
+    if (!fence.root.valid()) return RootFence{};
+    return fence;
 }
 
 bool hash64(std::string_view s) {
@@ -247,54 +279,58 @@ bool readBounded(HANDLE h, std::string* out, DWORD* error) {
 OwnerEnrollmentStoreResult classify(const std::wstring& root, const std::wstring& file,
     const OwnerEnrollmentDurableRecord* expected = nullptr) {
     OwnerEnrollmentStoreResult out;
-    Handle rootGuard = openSecureRoot(root);
-    out.root_trusted = rootGuard.valid();
+    RootFence rootFence = openSecureRootFence(root);
+    out.root_trusted = rootFence.valid();
     if (!out.root_trusted) { out.reason = "OWNER_STORE_ROOT_NOT_MACHINE_TRUSTED"; out.win32_error = ERROR_ACCESS_DENIED; return out; }
 
     Handle h(CreateFileW(file.c_str(), GENERIC_READ | READ_CONTROL, FILE_SHARE_READ, nullptr,
         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
     if (!h.valid()) {
         const DWORD error = GetLastError();
-        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) { out.reason = "OWNER_STORE_RECORD_ABSENT"; return out; }
-        out.reason = "OWNER_STORE_RECORD_OPEN_FAILED"; out.win32_error = error; return out;
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) { out.reason = "OWNER_STORE_RECORD_ABSENT"; out.outcome = OwnerEnrollmentStoreOutcome::NoEffectProven; return out; }
+        out.reason = "OWNER_STORE_RECORD_OPEN_FAILED"; out.win32_error = error; out.outcome = OwnerEnrollmentStoreOutcome::Ambiguous; return out;
     }
     out.present = true;
     const std::wstring resolved = finalPath(h.value);
     const std::wstring wanted = fullPath(file);
     if (!noReparse(h.value) || resolved.empty() || wanted.empty() || lower(resolved) != lower(wanted)) {
-        out.corrupt = true; out.reason = "OWNER_STORE_FINAL_PATH_ESCAPE"; out.win32_error = ERROR_ACCESS_DENIED; return out;
+        out.corrupt = true; out.reason = "OWNER_STORE_FINAL_PATH_ESCAPE"; out.win32_error = ERROR_ACCESS_DENIED; out.outcome = OwnerEnrollmentStoreOutcome::Corrupt; return out;
     }
-    if (!secureAcl(h.value)) { out.corrupt = true; out.reason = "OWNER_STORE_RECORD_SECURITY_INVALID"; out.win32_error = ERROR_ACCESS_DENIED; return out; }
+    if (!secureAcl(h.value)) { out.corrupt = true; out.reason = "OWNER_STORE_RECORD_SECURITY_INVALID"; out.win32_error = ERROR_ACCESS_DENIED; out.outcome = OwnerEnrollmentStoreOutcome::Corrupt; return out; }
     std::string payload; DWORD error = ERROR_SUCCESS;
     if (!readBounded(h.value, &payload, &error) || !parseRecord(payload, &out.record)) {
-        out.corrupt = true; out.reason = "OWNER_STORE_RECORD_INVALID"; out.win32_error = error == ERROR_SUCCESS ? ERROR_INVALID_DATA : error; return out;
+        out.corrupt = true; out.reason = "OWNER_STORE_RECORD_INVALID"; out.win32_error = error == ERROR_SUCCESS ? ERROR_INVALID_DATA : error; out.outcome = OwnerEnrollmentStoreOutcome::Corrupt; return out;
     }
     if (expected != nullptr) {
         OwnerEnrollmentDurableRecord normalized;
-        if (!normalize(*expected, &normalized)) { out.corrupt = true; out.reason = "OWNER_STORE_EXPECTED_RECORD_INVALID"; out.win32_error = ERROR_INVALID_DATA; return out; }
+        if (!normalize(*expected, &normalized)) { out.corrupt = true; out.reason = "OWNER_STORE_EXPECTED_RECORD_INVALID"; out.win32_error = ERROR_INVALID_DATA; out.outcome = OwnerEnrollmentStoreOutcome::Corrupt; return out; }
         out.exact = out.record.expected_owner_sid == normalized.expected_owner_sid;
         out.provenance_exact = out.exact && out.record.enrollment_evidence_sha256 == normalized.enrollment_evidence_sha256
             && out.record.device_key_fingerprint_sha256 == normalized.device_key_fingerprint_sha256;
         out.owner_mismatch = !out.exact;
+        out.outcome = out.owner_mismatch ? OwnerEnrollmentStoreOutcome::Conflict
+            : (out.provenance_exact ? OwnerEnrollmentStoreOutcome::EffectExact : OwnerEnrollmentStoreOutcome::Conflict);
         out.reason = out.owner_mismatch ? "OWNER_STORE_OWNER_MISMATCH"
             : (out.provenance_exact ? "OWNER_STORE_RECORD_EXACT" : "OWNER_STORE_OWNER_EXACT_DIFFERENT_PROVENANCE");
-    } else out.reason = "OWNER_STORE_RECORD_VALID";
+    } else { out.reason = "OWNER_STORE_RECORD_VALID"; out.outcome = OwnerEnrollmentStoreOutcome::EffectExact; }
     return out;
 }
 
 std::wstring stagePath(const std::wstring& root) {
-    GUID id{}; if (FAILED(CoCreateGuid(&id))) return {};
-    std::array<wchar_t, 64> raw{}; if (StringFromGUID2(id, raw.data(), static_cast<int>(raw.size())) <= 0) return {};
-    std::wstring value(raw.data());
-    value.erase(std::remove(value.begin(), value.end(), L'{'), value.end());
-    value.erase(std::remove(value.begin(), value.end(), L'}'), value.end());
-    return root + L"\\owner-enrollment-v1." + value + L".tmp";
+    GUID guid{};
+    if (FAILED(CoCreateGuid(&guid))) return {};
+    wchar_t buffer[64]{};
+    if (StringFromGUID2(guid, buffer, static_cast<int>(std::size(buffer))) == 0) return {};
+    std::wstring id(buffer);
+    std::replace(id.begin(), id.end(), L'{', L'_');
+    std::replace(id.begin(), id.end(), L'}', L'_');
+    return root + L"\\.owner-enrollment-stage-" + id + L".tmp";
 }
-bool writeAll(HANDLE h, std::string_view payload) {
+bool writeAll(HANDLE h, const std::string& payload) {
     std::size_t offset = 0;
     while (offset < payload.size()) {
-        DWORD written = 0;
         const DWORD n = static_cast<DWORD>(std::min<std::size_t>(payload.size() - offset, MAXDWORD));
+        DWORD written = 0;
         if (!WriteFile(h, payload.data() + offset, n, &written, nullptr) || written == 0) return false;
         offset += written;
     }
@@ -306,20 +342,18 @@ bool renameUnderFencedRootFailIfExists(HANDLE file, const std::wstring& absolute
         return false;
     }
     const std::wstring target = fullPath(absolute_name);
-    if (target.empty()) {
-        if (error) *error = ERROR_INVALID_NAME;
-        return false;
-    }
-    constexpr std::size_t baseBytes = offsetof(FILE_RENAME_INFO, FileName);
-    const std::size_t maxNameBytes = static_cast<std::size_t>(MAXDWORD) - baseBytes;
-    if (target.size() > (maxNameBytes / sizeof(wchar_t))) {
+    if (target.empty() || target.size() > (MAXDWORD / sizeof(wchar_t))) {
         if (error) *error = ERROR_FILENAME_EXCED_RANGE;
         return false;
     }
-    const std::size_t nameBytes = target.size() * sizeof(wchar_t);
-    const std::size_t bytes = baseBytes + nameBytes;
-    Local buffer;
-    buffer.value = LocalAlloc(LPTR, bytes);
+    const DWORD nameBytes = static_cast<DWORD>(target.size() * sizeof(wchar_t));
+    const std::size_t headerBytes = offsetof(FILE_RENAME_INFO, FileName);
+    if (nameBytes > MAXDWORD || headerBytes > (static_cast<std::size_t>(MAXDWORD) - nameBytes)) {
+        if (error) *error = ERROR_INSUFFICIENT_BUFFER;
+        return false;
+    }
+    const DWORD bytes = static_cast<DWORD>(headerBytes + nameBytes);
+    Local buffer; buffer.value = LocalAlloc(LPTR, bytes);
     if (buffer.value == nullptr) {
         if (error) *error = ERROR_NOT_ENOUGH_MEMORY;
         return false;
@@ -327,9 +361,9 @@ bool renameUnderFencedRootFailIfExists(HANDLE file, const std::wstring& absolute
     auto* info = reinterpret_cast<FILE_RENAME_INFO*>(buffer.value);
     info->ReplaceIfExists = FALSE;
     info->RootDirectory = nullptr;
-    info->FileNameLength = static_cast<DWORD>(nameBytes);
+    info->FileNameLength = nameBytes;
     std::memcpy(info->FileName, target.data(), nameBytes);
-    if (!SetFileInformationByHandle(file, FileRenameInfo, info, static_cast<DWORD>(bytes))) {
+    if (!SetFileInformationByHandle(file, FileRenameInfo, info, bytes)) {
         if (error) *error = GetLastError();
         return false;
     }
@@ -345,27 +379,24 @@ OwnerEnrollmentStoreResult OwnerEnrollmentStore::read() const { return classify(
 
 OwnerEnrollmentStoreResult OwnerEnrollmentStore::createIfAbsent(const OwnerEnrollmentDurableRecord& candidate) const {
     OwnerEnrollmentStoreResult out;
-    Handle rootGuard = openSecureRoot(root_path_, FILE_ADD_FILE);
-    out.root_trusted = rootGuard.valid();
-    if (!out.root_trusted) { out.reason = "OWNER_STORE_ROOT_NOT_MACHINE_TRUSTED"; out.win32_error = ERROR_ACCESS_DENIED; return out; }
+    RootFence rootFence = openSecureRootFence(root_path_, FILE_ADD_FILE);
+    out.root_trusted = rootFence.valid();
+    if (!out.root_trusted) { out.reason = "OWNER_STORE_ROOT_NOT_MACHINE_TRUSTED"; out.win32_error = ERROR_ACCESS_DENIED; out.outcome = OwnerEnrollmentStoreOutcome::Corrupt; return out; }
     OwnerEnrollmentDurableRecord normalized;
-    if (!normalize(candidate, &normalized)) { out.reason = "OWNER_STORE_CANDIDATE_INVALID"; out.win32_error = ERROR_INVALID_DATA; return out; }
-    const std::string payload = serializeRecord(normalized);
-    if (payload.empty() || payload.size() > kMaxBytes) { out.reason = "OWNER_STORE_SERIALIZATION_INVALID"; out.win32_error = ERROR_INVALID_DATA; return out; }
-
+    if (!normalize(candidate, &normalized)) { out.reason = "OWNER_STORE_CANDIDATE_INVALID"; out.win32_error = ERROR_INVALID_DATA; out.outcome = OwnerEnrollmentStoreOutcome::Corrupt; return out; }
     const std::wstring final = recordPath();
     const auto before = classify(root_path_, final, &normalized);
     if (before.present || before.corrupt || before.win32_error != ERROR_SUCCESS) return before;
-
-    PSECURITY_DESCRIPTOR raw = nullptr;
-    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(kStageDacl, SDDL_REVISION_1, &raw, nullptr)) {
-        out.reason = "OWNER_STORE_STAGE_SECURITY_DESCRIPTOR_FAILED"; out.win32_error = GetLastError(); return out;
-    }
-    Local descriptor; descriptor.value = reinterpret_cast<HLOCAL>(raw);
-    SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), raw, FALSE};
+    const std::string payload = serializeRecord(normalized);
     const std::wstring stage = stagePath(root_path_);
-    if (stage.empty()) { out.reason = "OWNER_STORE_STAGE_PATH_FAILED"; out.win32_error = ERROR_INVALID_NAME; return out; }
+    if (payload.empty() || stage.empty()) { out.reason = "OWNER_STORE_STAGE_PREPARE_FAILED"; out.win32_error = ERROR_INVALID_DATA; out.outcome = OwnerEnrollmentStoreOutcome::Corrupt; return out; }
 
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(kStageDacl, SDDL_REVISION_1, &descriptor, nullptr)) {
+        out.reason = "OWNER_STORE_STAGE_SECURITY_DESCRIPTOR_FAILED"; out.win32_error = GetLastError(); out.outcome = OwnerEnrollmentStoreOutcome::Corrupt; return out;
+    }
+    Local descriptorHolder; descriptorHolder.value = reinterpret_cast<HLOCAL>(descriptor);
+    SECURITY_ATTRIBUTES security{}; security.nLength = sizeof(security); security.lpSecurityDescriptor = descriptor; security.bInheritHandle = FALSE;
     DWORD stageError = ERROR_SUCCESS;
     DWORD commitError = ERROR_SUCCESS;
     bool renameCommitted = false;
@@ -375,6 +406,7 @@ OwnerEnrollmentStoreResult OwnerEnrollmentStore::createIfAbsent(const OwnerEnrol
         if (!h.valid()) {
             out.reason = "OWNER_STORE_STAGE_CREATE_FAILED";
             out.win32_error = GetLastError();
+            out.outcome = OwnerEnrollmentStoreOutcome::NoEffectProven;
             return out;
         }
         if (!writeAll(h.value, payload)) stageError = GetLastError();
@@ -389,20 +421,38 @@ OwnerEnrollmentStoreResult OwnerEnrollmentStore::createIfAbsent(const OwnerEnrol
         DeleteFileW(stage.c_str());
         out.reason = "OWNER_STORE_STAGE_FLUSH_FAILED";
         out.win32_error = stageError == ERROR_SUCCESS ? ERROR_WRITE_FAULT : stageError;
+        out.outcome = OwnerEnrollmentStoreOutcome::NoEffectProven;
         return out;
     }
-
+    DeleteFileW(stage.c_str());
     if (!renameCommitted) {
-        DeleteFileW(stage.c_str());
-        if (commitError == ERROR_ALREADY_EXISTS || commitError == ERROR_FILE_EXISTS) return classify(root_path_, final, &normalized);
-        out.reason = "OWNER_STORE_COMMIT_RENAME_FAILED"; out.win32_error = commitError; return out;
+        auto failureReadback = classify(root_path_, final, &normalized);
+        failureReadback.staging_flushed = true;
+        failureReadback.move_committed = false;
+        failureReadback.post_commit_readback = failureReadback.root_trusted;
+        failureReadback.commit_win32_error = commitError;
+        if (failureReadback.outcome == OwnerEnrollmentStoreOutcome::NoEffectProven) {
+            failureReadback.reason = "OWNER_STORE_COMMIT_NO_EFFECT_PROVEN";
+            return failureReadback;
+        }
+        if (failureReadback.outcome == OwnerEnrollmentStoreOutcome::EffectExact) {
+            failureReadback.committed = false;
+            failureReadback.reason = "OWNER_STORE_COMMIT_RESULT_EXACT_AFTER_ERROR";
+            return failureReadback;
+        }
+        if (failureReadback.outcome == OwnerEnrollmentStoreOutcome::Conflict
+            || failureReadback.outcome == OwnerEnrollmentStoreOutcome::Corrupt) return failureReadback;
+        failureReadback.outcome = OwnerEnrollmentStoreOutcome::Ambiguous;
+        failureReadback.reason = "OWNER_STORE_COMMIT_RESULT_AMBIGUOUS";
+        return failureReadback;
     }
 
     auto readback = classify(root_path_, final, &normalized);
     readback.staging_flushed = out.staging_flushed;
     readback.move_committed = true;
     readback.post_commit_readback = readback.present && !readback.corrupt;
-    readback.committed = readback.exact && readback.provenance_exact;
+    readback.committed = readback.outcome == OwnerEnrollmentStoreOutcome::EffectExact
+        && readback.exact && readback.provenance_exact;
     if (!readback.committed) { readback.reason = "OWNER_STORE_POST_COMMIT_READBACK_MISMATCH"; return readback; }
     readback.reason = "OWNER_STORE_CREATE_IF_ABSENT_COMMITTED";
     return readback;
@@ -412,6 +462,19 @@ std::wstring browserGuardianOwnerEnrollmentStoreDefaultRoot() {
     const std::wstring pd = programData();
     return pd.empty() ? std::wstring{} : pd + L"\\" + kRelativeRoot;
 }
+
+const char* browserGuardianOwnerEnrollmentStoreOutcomeName(OwnerEnrollmentStoreOutcome outcome) noexcept {
+    switch (outcome) {
+        case OwnerEnrollmentStoreOutcome::NoEffectProven: return "NO_EFFECT_PROVEN";
+        case OwnerEnrollmentStoreOutcome::EffectExact: return "EFFECT_EXACT";
+        case OwnerEnrollmentStoreOutcome::Conflict: return "CONFLICT";
+        case OwnerEnrollmentStoreOutcome::Corrupt: return "CORRUPT";
+        case OwnerEnrollmentStoreOutcome::Ambiguous: return "AMBIGUOUS";
+        case OwnerEnrollmentStoreOutcome::None: break;
+    }
+    return "NONE";
+}
+
 const char* browserGuardianOwnerEnrollmentStoreContractJson() noexcept { return kContract; }
 
 }  // namespace metaengine::guardian
