@@ -1,6 +1,6 @@
 const freezeRows = (rows) => Object.freeze(rows.map((row) => Object.freeze({ ...row })));
 
-export const BROWSER_CONTROL_PLANE_VERSION = '2.3.0-dev.1';
+export const BROWSER_CONTROL_PLANE_VERSION = '2.4.0-dev.1';
 
 export const CONTROL_ACTIONS = freezeRows([
   { action: 'POLL', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'SHELL' },
@@ -9,6 +9,8 @@ export const CONTROL_ACTIONS = freezeRows([
   { action: 'CONTROL_CAPABILITIES', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'CONTROL_PLANE' },
   { action: 'PROCESS_CENSUS', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'ELECTRON_PROCESS_PLANE' },
   { action: 'PROCESS_EVENTS', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'ELECTRON_PROCESS_PLANE' },
+  { action: 'SEMANTIC_CENSUS', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'PERSISTENT_CDP_SEMANTIC_PLANE' },
+  { action: 'SEMANTIC_EVENTS', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'PERSISTENT_CDP_SEMANTIC_PLANE' },
   { action: 'CONTROL_LATENCY_STATUS', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'CONTROL_FAST_LANE' },
   { action: 'NEW_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS' },
   { action: 'SELECT_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'SHELL_REGISTRY' },
@@ -85,6 +87,9 @@ export const CONTROL_INVARIANTS = Object.freeze({
   process_observation_requires_no_actuation_authority: true,
   process_observation_must_not_create_second_command_scheduler: true,
   process_lifecycle_events_are_event_driven: true,
+  semantic_observation_is_event_driven: true,
+  semantic_observation_uses_persistent_cdp_sessions: true,
+  semantic_read_does_not_require_cdp_reattach: true,
   remote_observation_push_is_not_command_authority: true,
   project_internal_safety_gates_owner_overridable: true,
   owner_gate_override_is_durable_and_audited: true,
