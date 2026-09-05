@@ -126,7 +126,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
   #processPlaneRef = null;
   #processPlaneSet = null;
   #processPlaneError = null;
-  #processPushTimer = null;
+  #processPushScheduled = false;
   #processPushPromise = null;
   #processPushPending = false;
   #processPushLastAt = null;
@@ -250,8 +250,10 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
         process_push_last_at: this.#processPushLastAt,
         process_push_last_error: this.#processPushLastError,
         process_push_in_flight: this.#processPushPromise != null,
+        process_push_scheduled: this.#processPushScheduled,
         command_transport_authority: 'DB_LEASE_ONLY',
         observation_push_authority: false,
+        observation_push_timer_ms: 0,
         target_zero_polling_delay: true,
         authority_effect: false,
       });
@@ -285,14 +287,13 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     return this.#enrollmentBootstrapPromise;
   }
 
-  #scheduleRealtimeStatePush(delayMs = 15) {
-    if (this.#processPushTimer) return;
-    const delay = Math.max(0, Math.min(250, Number(delayMs) || 0));
-    this.#processPushTimer = setTimeout(() => {
-      this.#processPushTimer = null;
+  #scheduleRealtimeStatePush() {
+    if (this.#processPushScheduled) return;
+    this.#processPushScheduled = true;
+    queueMicrotask(() => {
+      this.#processPushScheduled = false;
       void this.#pushRealtimeState();
-    }, delay);
-    this.#processPushTimer.unref?.();
+    });
   }
 
   async #pushRealtimeState() {
@@ -344,7 +345,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       this.#processPushPromise = null;
       if (this.#processPushPending) {
         this.#processPushPending = false;
-        this.#scheduleRealtimeStatePush(15);
+        this.#scheduleRealtimeStatePush();
       }
     });
     return this.#processPushPromise;
@@ -365,17 +366,17 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
         getWebContents: () => webContents.getAllWebContents(),
         sampleMs: 250,
         eventLimit: 512,
-        onChange: (event) => {
-          // Lifecycle/semantic deltas leave the process quickly. Resource samples are
-          // bounded to the metrics cadence; this is observation push only, never a
-          // second command scheduler or an actuation authority.
-          this.#scheduleRealtimeStatePush(event?.type === 'METRICS_SAMPLE' ? 100 : 10);
+        onChange: () => {
+          // The source planes already bound resource cadence and semantic burst
+          // coalescing. Do not add another debounce: the push edge is immediate,
+          // coalesced to one microtask and carries no command authority.
+          this.#scheduleRealtimeStatePush();
         },
       });
       this.#processPlaneSet?.(plane);
       const snapshot = plane.start();
       this.#processPlaneError = null;
-      this.#scheduleRealtimeStatePush(0);
+      this.#scheduleRealtimeStatePush();
       return snapshot;
     } catch (error) {
       this.#processPlaneError = String(error?.message || error).slice(0, 240);
@@ -450,8 +451,10 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
         last_at: this.#processPushLastAt,
         last_error: this.#processPushLastError,
         in_flight: this.#processPushPromise != null,
+        scheduled: this.#processPushScheduled,
         pending: this.#processPushPending,
         event_driven: true,
+        timer_delay_ms: 0,
         metrics_sample_ms: 250,
         semantic_event_driven: true,
         persistent_cdp_sessions: true,
@@ -476,13 +479,12 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     // and the normal cycle below re-attempts the bounded enrollment handshake.
     await this.#bootstrapEnrollment();
     const result = await super.start();
-    this.#scheduleRealtimeStatePush(0);
+    this.#scheduleRealtimeStatePush();
     return result;
   }
 
   stop() {
-    if (this.#processPushTimer) clearTimeout(this.#processPushTimer);
-    this.#processPushTimer = null;
+    this.#processPushScheduled = false;
     this.#processPushPending = false;
     try { this.#processPlaneRef?.()?.stop?.(); } catch {}
     return super.stop();
