@@ -83,6 +83,18 @@ function Invoke-ProbeCreate {
     return $line | ConvertFrom-Json
 }
 
+function Invoke-ProbeAncestorRenameFence {
+    $raw = @(& $ProbeExe fence-parent-rename)
+    $exitCode = $LASTEXITCODE
+    $line = ($raw | Where-Object { $_.Trim() } | Select-Object -Last 1)
+    if (-not $line) { throw "owner_store_probe_ancestor_fence_output_missing_exit_$exitCode" }
+    $result = $line | ConvertFrom-Json
+    if ($exitCode -ne 0) {
+        throw "owner_store_probe_ancestor_fence_exit_${exitCode}:$line"
+    }
+    return $result
+}
+
 function Start-ProbeCreateProcess {
     param([string]$Sid, [string]$Evidence, [string]$Device)
     $start = New-Object System.Diagnostics.ProcessStartInfo
@@ -192,7 +204,15 @@ try {
     Assert-True (-not $reparse.root_trusted) 'reparse_root_accepted'
     Assert-True (-not $reparse.present) 'reparse_root_read_record'
 
-    # 9. Conflicting concurrent creators have exactly one durable winner.
+    # 9. Holding the verified Guardian root without FILE_SHARE_DELETE must fence
+    # rename of its ancestor. The production store relies on this NTFS/Win32
+    # property while using an absolute FILE_RENAME_INFO target under the fenced root.
+    Reset-SecureRoot
+    $ancestorFence = Invoke-ProbeAncestorRenameFence
+    Assert-True $ancestorFence.blocked 'ancestor_parent_rename_not_fenced'
+    Assert-True ($ancestorFence.win32_error -eq 32) "ancestor_parent_rename_unexpected_error_$($ancestorFence.win32_error)"
+
+    # 10. Conflicting concurrent creators have exactly one durable winner.
     Reset-SecureRoot
     $processA = Start-ProbeCreateProcess -Sid $sidA -Evidence $evidenceA -Device $deviceA
     $processB = Start-ProbeCreateProcess -Sid $sidB -Evidence $evidenceB -Device $deviceB
