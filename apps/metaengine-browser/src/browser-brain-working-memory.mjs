@@ -42,6 +42,7 @@ function publicBinding(binding) {
     semantic_revision: binding.semantic_revision || 0,
     provider: binding.provider || null,
     role: binding.role || null,
+    valid: true,
     authority_effect: false,
   });
 }
