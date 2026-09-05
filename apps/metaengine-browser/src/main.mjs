@@ -637,6 +637,8 @@ async function initNativeSupervisor() {
       identity,
       version: app.getVersion(),
       intervalMs: 2000,
+      commandFastlane: true,
+      commandFastlaneIntervalMs: 750,
       getState: nativeSupervisorState,
       executeCommand: executeNativeSupervisorCommand,
       observeLocalTarget,
