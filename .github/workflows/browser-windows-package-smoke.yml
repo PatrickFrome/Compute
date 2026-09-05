@@ -164,8 +164,48 @@ jobs:
           $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
           if (-not (Test-Path $app -PathType Leaf)) { throw "packaged_browser_missing:$app" }
 
-          $userData = Join-Path $env:APPDATA 'METAENGINE Browser Test'
+          # Never guess Electron's packaged userData directory from productName.
+          # Ask the exact installed binary for app.getPath('userData') through
+          # the existing read-only profile probe, then bind every journal read
+          # to that exact path. The write flag creates only the probe marker that
+          # this pre-existing contract requires; it does not bypass normal boot.
+          $profileOut = "$env:RUNNER_TEMP\package-profile-probe.out"
+          $profileErr = "$env:RUNNER_TEMP\package-profile-probe.err"
+          Remove-Item $profileOut,$profileErr -Force -ErrorAction SilentlyContinue
+          $priorProfileWrite = $env:METAENGINE_PROFILE_PROBE_WRITE
+          $env:METAENGINE_PROFILE_PROBE_WRITE = '1'
+          try {
+            $profileProcess = Start-Process -FilePath $app -ArgumentList '--metaengine-profile-probe' -PassThru -RedirectStandardOutput $profileOut -RedirectStandardError $profileErr
+            $null = $profileProcess.Handle
+            if (-not $profileProcess.WaitForExit(15000)) {
+              try { Stop-Process -Id $profileProcess.Id -Force -ErrorAction SilentlyContinue } catch {}
+              throw 'package_profile_probe_timeout'
+            }
+            if ($profileProcess.ExitCode -ne 0) {
+              Get-Content $profileErr -ErrorAction SilentlyContinue
+              throw "package_profile_probe_exit_$($profileProcess.ExitCode)"
+            }
+          } finally {
+            $env:METAENGINE_PROFILE_PROBE_WRITE = $priorProfileWrite
+          }
+          $profileLine = Get-Content $profileOut | Where-Object { $_.Trim() } | Select-Object -Last 1
+          if (-not $profileLine) { throw 'package_profile_probe_output_missing' }
+          $profile = $profileLine | ConvertFrom-Json
+          if ($profile.schema -ne 'metaengine.browser.profile-probe.v1' `
+              -or [string]$profile.version -ne [string]$proof.package_version `
+              -or $profile.primary_instance -ne $true `
+              -or $profile.marker_present -ne $true `
+              -or -not [string]$profile.user_data_path) {
+            $profile | ConvertTo-Json -Depth 6 | Write-Host
+            throw 'package_profile_probe_contract_invalid'
+          }
+          $userData = [string]$profile.user_data_path
+          if (-not [System.IO.Path]::IsPathRooted($userData)) { throw 'package_profile_user_data_not_absolute' }
           $journal = Join-Path $userData 'metaengine-browser-startup-journal-v1.json'
+          $proof | Add-Member -NotePropertyName user_data_path -NotePropertyValue $userData -Force
+          $proof | Add-Member -NotePropertyName user_data_path_source -NotePropertyValue 'PACKAGED_PROFILE_PROBE' -Force
+          $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
+
           $normalOut = "$env:RUNNER_TEMP\package-normal-ui.out"
           $normalErr = "$env:RUNNER_TEMP\package-normal-ui.err"
           $secondOut = "$env:RUNNER_TEMP\package-second-instance.out"
@@ -215,16 +255,32 @@ jobs:
             $startup = Get-Content $journal -Raw | ConvertFrom-Json
             $runtimeImport = $startup.events | Where-Object { $_.boot_id -eq $startup.current_boot_id -and $_.state -eq 'RUNTIME_IMPORT_OK' } | Select-Object -Last 1
             if (-not $runtimeImport) { throw 'normal_ui_runtime_import_success_evidence_missing' }
+            if ($stableEvent.details.visible -ne $true) { throw 'normal_ui_stable_window_not_visible' }
             $stableSequence = [int64]$stableEvent.sequence
 
             # A second ordinary launch must not create a second fleet/runtime.
             # Electron forwards it to the primary, which must show/restore/focus
-            # the already-created BaseWindow and record that activation durably.
+            # the already-created BaseWindow and record exact-nonce activation.
             $second = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $secondOut -RedirectStandardError $secondErr
             $null = $second.Handle
-            if (-not $second.WaitForExit(15000)) {
+            if (-not $second.WaitForExit(18000)) {
               try { Stop-Process -Id $second.Id -Force -ErrorAction SilentlyContinue } catch {}
               throw 'normal_ui_second_instance_did_not_exit'
+            }
+            if ($second.ExitCode -ne 0) {
+              Get-Content $secondErr -ErrorAction SilentlyContinue
+              throw "normal_ui_second_instance_exit_$($second.ExitCode)"
+            }
+            $secondaryLine = Get-Content $secondOut | Where-Object { $_.Trim() } | Select-Object -Last 1
+            if (-not $secondaryLine) { throw 'normal_ui_second_instance_ack_output_missing' }
+            $secondaryAck = $secondaryLine | ConvertFrom-Json
+            if ($secondaryAck.schema -ne 'metaengine.browser.secondary-launch.v1' `
+                -or $secondaryAck.state -ne 'PRIMARY_UI_ACTIVATION_ACKNOWLEDGED' `
+                -or -not [string]$secondaryAck.launch_id `
+                -or $secondaryAck.second_browser_runtime_started -ne $false `
+                -or $secondaryAck.authority_effect -ne $false) {
+              $secondaryAck | ConvertTo-Json -Depth 6 | Write-Host
+              throw 'normal_ui_second_instance_ack_contract_invalid'
             }
 
             $activationDeadline = [DateTime]::UtcNow.AddSeconds(12)
@@ -234,17 +290,22 @@ jobs:
               $activation = $startup.events | Where-Object {
                 $_.boot_id -eq $startup.current_boot_id `
                   -and $_.state -eq 'PRIMARY_WINDOW_ACTIVATED' `
-                  -and [int64]$_.sequence -gt $stableSequence
+                  -and [int64]$_.sequence -gt $stableSequence `
+                  -and $_.details.launch_id -eq [string]$secondaryAck.launch_id
               } | Select-Object -Last 1
               if ($activation) { break }
               Start-Sleep -Milliseconds 200
             }
             if (-not $activation) {
               Get-Content $journal -Raw | Write-Host
+              Get-Content $secondOut -ErrorAction SilentlyContinue
               Get-Content $secondErr -ErrorAction SilentlyContinue
               throw 'normal_ui_second_instance_activation_missing'
             }
             if ($activation.details.visible -ne $true) { throw 'normal_ui_second_instance_window_not_visible' }
+            if ([int64]$secondaryAck.event_sequence -ne [int64]$activation.sequence) { throw 'normal_ui_second_instance_ack_sequence_drift' }
+            if ([int64]$secondaryAck.primary_pid -ne [int64]$activation.pid) { throw 'normal_ui_second_instance_ack_pid_drift' }
+            if ([string]$secondaryAck.primary_version -ne [string]$activation.version) { throw 'normal_ui_second_instance_ack_version_drift' }
 
             $normal.Refresh()
             if ($normal.HasExited) { throw 'normal_ui_primary_died_after_second_instance' }
@@ -256,6 +317,7 @@ jobs:
             $proof | Add-Member -NotePropertyName startup_journal_schema -NotePropertyValue 'metaengine.browser.startup-journal.v1' -Force
             $proof | Add-Member -NotePropertyName normal_ui_stable_event_sequence -NotePropertyValue ([int64]$stableEvent.sequence) -Force
             $proof | Add-Member -NotePropertyName second_instance_activation_event_sequence -NotePropertyValue ([int64]$activation.sequence) -Force
+            $proof | Add-Member -NotePropertyName second_instance_launch_id -NotePropertyValue ([string]$secondaryAck.launch_id) -Force
             $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
             Write-Host ($proof | ConvertTo-Json -Compress)
           } finally {
@@ -282,6 +344,8 @@ jobs:
             ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
             ${{ runner.temp }}/windows-package-proof.json
             ${{ runner.temp }}/browser-startup-journal-v1.json
+            ${{ runner.temp }}/package-profile-probe.out
+            ${{ runner.temp }}/package-profile-probe.err
             ${{ runner.temp }}/package-normal-ui.out
             ${{ runner.temp }}/package-normal-ui.err
             ${{ runner.temp }}/package-second-instance.out
