@@ -1,4 +1,4 @@
-export const NATIVE_SUPERVISOR_COMMAND_LANES_SCHEMA = 'metaengine.native-supervisor.command-lanes.v1';
+export const NATIVE_SUPERVISOR_COMMAND_LANES_SCHEMA = 'metaengine.native-supervisor.command-lanes.v2';
 
 export const COMMAND_LANES = Object.freeze({
   EMERGENCY: 'EMERGENCY',
@@ -57,6 +57,11 @@ function explicitTabId(command) {
   return TAB_ID.test(value) ? value.toLowerCase() : null;
 }
 
+function tabCausalKey(command) {
+  const tabId = explicitTabId(command);
+  return tabId ? `tab:${tabId}` : null;
+}
+
 export function classifyNativeSupervisorCommand(command = {}) {
   const action = actionOf(command);
   if (!action) throw new Error('native_supervisor_command_action_required');
@@ -67,6 +72,7 @@ export function classifyNativeSupervisorCommand(command = {}) {
       action,
       lane: COMMAND_LANES.EMERGENCY,
       effect_key: 'global:emergency',
+      causal_key: null,
       read_only: false,
       exclusive: true,
       priority: 0,
@@ -75,11 +81,16 @@ export function classifyNativeSupervisorCommand(command = {}) {
   }
 
   if (READ_ONLY_ACTIONS.has(action)) {
+    // Explicit target reads participate in per-tab causal ordering without
+    // consuming a mutation slot. A CAPTURE(tab_A) issued after NAVIGATE(tab_A)
+    // must not observe the old document, while CAPTURE(tab_B) remains parallel.
+    const causalKey = tabCausalKey(command);
     return Object.freeze({
       schema: NATIVE_SUPERVISOR_COMMAND_LANES_SCHEMA,
       action,
       lane: COMMAND_LANES.READ_ONLY,
       effect_key: null,
+      causal_key: causalKey,
       read_only: true,
       exclusive: false,
       priority: 10,
@@ -91,11 +102,13 @@ export function classifyNativeSupervisorCommand(command = {}) {
     const tabId = explicitTabId(command);
     // An implicit selected-tab target is mutable global state. It cannot safely
     // run beside another mutation because selection may change underneath it.
+    const key = tabId ? `tab:${tabId}` : 'global:selected-tab';
     return Object.freeze({
       schema: NATIVE_SUPERVISOR_COMMAND_LANES_SCHEMA,
       action,
       lane: tabId ? COMMAND_LANES.TAB_MUTATION : COMMAND_LANES.GLOBAL_MUTATION,
-      effect_key: tabId ? `tab:${tabId}` : 'global:selected-tab',
+      effect_key: key,
+      causal_key: tabId ? key : null,
       read_only: false,
       exclusive: !tabId,
       priority: tabId ? 20 : 15,
@@ -109,6 +122,7 @@ export function classifyNativeSupervisorCommand(command = {}) {
       action,
       lane: COMMAND_LANES.GLOBAL_MUTATION,
       effect_key: 'global:control-plane',
+      causal_key: null,
       read_only: false,
       exclusive: true,
       priority: 15,
@@ -123,6 +137,7 @@ export function classifyNativeSupervisorCommand(command = {}) {
     action,
     lane: COMMAND_LANES.GLOBAL_MUTATION,
     effect_key: 'global:unknown-action',
+    causal_key: null,
     read_only: false,
     exclusive: true,
     priority: 15,
@@ -139,8 +154,8 @@ function serializeError(error) {
  *
  * READ_ONLY commands may fan out. TAB_MUTATION commands may run concurrently only
  * when they bind distinct explicit tab ids. GLOBAL/EMERGENCY mutations are an
- * exclusive barrier against every other mutation. Read-only observations may run
- * beside mutations, but never grant or carry mutation authority.
+ * exclusive barrier against every other mutation. Explicit per-tab reads preserve
+ * causal order with mutations on the same exact tab but may overlap unrelated tabs.
  */
 export class NativeSupervisorCommandLaneScheduler {
   #readConcurrency;
@@ -162,6 +177,9 @@ export class NativeSupervisorCommandLaneScheduler {
       unknown_actions_exclusive: true,
       implicit_selected_tab_exclusive: true,
       same_tab_mutations_serialized: true,
+      same_tab_read_after_write_causal: true,
+      same_tab_write_after_read_causal: true,
+      cross_tab_reads_parallel: true,
       global_mutations_exclusive: true,
       read_only_parallel: true,
       immutable_original_order_barriers: true,
@@ -183,14 +201,36 @@ export class NativeSupervisorCommandLaneScheduler {
     const results = new Array(pending.length);
     const active = new Set();
     const activeMutationKeys = new Set();
+    const activeReadKeys = new Map();
     let activeReads = 0;
     let activeMutations = 0;
     let exclusiveMutation = false;
 
+    const incrementReadKey = (key) => {
+      if (!key) return;
+      activeReadKeys.set(key, Number(activeReadKeys.get(key) || 0) + 1);
+    };
+    const decrementReadKey = (key) => {
+      if (!key) return;
+      const next = Number(activeReadKeys.get(key) || 0) - 1;
+      if (next > 0) activeReadKeys.set(key, next);
+      else activeReadKeys.delete(key);
+    };
+    const hasEarlierPendingMutationForRead = (item) => Boolean(item.descriptor.causal_key)
+      && pending.some((candidate) => candidate.index < item.index
+        && !candidate.descriptor.read_only
+        && candidate.descriptor.effect_key === item.descriptor.causal_key);
+    const hasEarlierPendingReadForMutation = (item) => Boolean(item.descriptor.causal_key)
+      && pending.some((candidate) => candidate.index < item.index
+        && candidate.descriptor.read_only
+        && candidate.descriptor.causal_key === item.descriptor.causal_key);
+
     const launch = (item) => {
       const { descriptor } = item;
-      if (descriptor.read_only) activeReads += 1;
-      else {
+      if (descriptor.read_only) {
+        activeReads += 1;
+        incrementReadKey(descriptor.causal_key);
+      } else {
         activeMutations += 1;
         activeMutationKeys.add(descriptor.effect_key);
         if (descriptor.exclusive) exclusiveMutation = true;
@@ -206,6 +246,7 @@ export class NativeSupervisorCommandLaneScheduler {
             action: descriptor.action,
             lane: descriptor.lane,
             effect_key: descriptor.effect_key,
+            causal_key: descriptor.causal_key,
             ok: true,
             result,
             error: null,
@@ -219,6 +260,7 @@ export class NativeSupervisorCommandLaneScheduler {
             action: descriptor.action,
             lane: descriptor.lane,
             effect_key: descriptor.effect_key,
+            causal_key: descriptor.causal_key,
             ok: false,
             result: null,
             error: serializeError(error),
@@ -229,8 +271,10 @@ export class NativeSupervisorCommandLaneScheduler {
         })
         .finally(() => {
           active.delete(promise);
-          if (descriptor.read_only) activeReads -= 1;
-          else {
+          if (descriptor.read_only) {
+            activeReads -= 1;
+            decrementReadKey(descriptor.causal_key);
+          } else {
             activeMutations -= 1;
             activeMutationKeys.delete(descriptor.effect_key);
             if (descriptor.exclusive) exclusiveMutation = false;
@@ -253,15 +297,21 @@ export class NativeSupervisorCommandLaneScheduler {
         let runnable = false;
 
         if (descriptor.read_only) {
-          runnable = activeReads < this.#readConcurrency;
+          const sameTargetMutationActive = descriptor.causal_key && activeMutationKeys.has(descriptor.causal_key);
+          runnable = activeReads < this.#readConcurrency
+            && !sameTargetMutationActive
+            && !hasEarlierPendingMutationForRead(item);
         } else if (descriptor.exclusive) {
           runnable = activeMutations === 0;
         } else {
           const behindExclusiveBarrier = firstExclusiveOrder != null && item.index > firstExclusiveOrder;
+          const sameTargetReadActive = descriptor.causal_key && Number(activeReadKeys.get(descriptor.causal_key) || 0) > 0;
           runnable = !behindExclusiveBarrier
             && !exclusiveMutation
             && activeMutations < this.#mutationConcurrency
-            && !activeMutationKeys.has(descriptor.effect_key);
+            && !activeMutationKeys.has(descriptor.effect_key)
+            && !sameTargetReadActive
+            && !hasEarlierPendingReadForMutation(item);
         }
 
         if (!runnable) {
@@ -288,6 +338,9 @@ export const NATIVE_SUPERVISOR_COMMAND_LANE_CONTRACT = Object.freeze({
   read_only_parallelism_allowed: true,
   distinct_tab_mutation_parallelism_allowed: true,
   same_tab_mutation_parallelism_allowed: false,
+  same_tab_read_after_write_causal: true,
+  same_tab_write_after_read_causal: true,
+  cross_tab_read_parallelism_allowed: true,
   global_mutation_parallelism_allowed: false,
   emergency_is_exclusive: true,
   unknown_action_parallelism_allowed: false,
