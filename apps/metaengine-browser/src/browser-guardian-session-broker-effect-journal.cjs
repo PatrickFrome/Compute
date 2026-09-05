@@ -7,8 +7,18 @@ const { durableWriteJson } = require('./durable-json-file.cjs');
 const BROWSER_GUARDIAN_SESSION_BROKER_EFFECT_JOURNAL_SCHEMA = 'metaengine.browser-guardian.session-broker-effect-journal.v1';
 const BROWSER_GUARDIAN_SESSION_BROKER_EFFECT_JOURNAL_VERSION = '1.0.0';
 const PLAN_SCHEMA = 'metaengine.browser-guardian.session-broker-plan.v1';
+const STATES = new Set([
+  'INTENT_RECORDED',
+  'EFFECT_ATTEMPTED',
+  'EFFECT_DISPATCHED',
+  'AMBIGUOUS',
+  'CONFIRMED',
+  'NO_EFFECT_PROVEN',
+]);
 const UNRESOLVED_EFFECT_STATES = new Set(['EFFECT_ATTEMPTED', 'EFFECT_DISPATCHED', 'AMBIGUOUS']);
 const SID_RE = /^S-\d-\d+(?:-\d+)+$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SHA256_RE = /^[0-9a-f]{64}$/;
 
 function journalPath(statePath) {
   const base = String(statePath || '').trim();
@@ -58,7 +68,7 @@ function bindingFrom(value) {
 function sameBinding(row, binding) {
   return row?.service_name === binding.service_name
     && row?.broker_executable === binding.broker_executable
-    && row?.expected_owner_sid === binding.expected_owner_sid;
+    && normalizedSid(row?.expected_owner_sid) === binding.expected_owner_sid;
 }
 
 function sessionFrom(value) {
@@ -119,6 +129,20 @@ async function readJson(file) {
   }
 }
 
+function dispatchIdentity(row) {
+  const hasPid = row?.dispatched_pid != null;
+  const hasIncarnation = row?.dispatched_process_incarnation_id != null;
+  if (!hasPid && !hasIncarnation) return Object.freeze({ present: false, complete: true });
+  const pid = finiteInt(row?.dispatched_pid, 0);
+  const incarnation = nonEmpty(row?.dispatched_process_incarnation_id);
+  return Object.freeze({
+    present: true,
+    complete: pid > 0 && Boolean(incarnation),
+    pid,
+    process_incarnation_id: incarnation,
+  });
+}
+
 function validateRow(row, binding = null) {
   if (!row
       || row.schema !== BROWSER_GUARDIAN_SESSION_BROKER_EFFECT_JOURNAL_SCHEMA
@@ -128,10 +152,16 @@ function validateRow(row, binding = null) {
   if (!Number.isSafeInteger(Number(row.sequence)) || Number(row.sequence) < 1) {
     throw new Error('guardian_session_broker_effect_journal_sequence_invalid');
   }
-  if (!Number.isSafeInteger(Number(row.effect_generation)) || Number(row.effect_generation) < 1) {
-    throw new Error('guardian_session_broker_effect_generation_invalid');
+  if (!UUID_RE.test(String(row.effect_id || ''))
+      || !Number.isSafeInteger(Number(row.effect_generation))
+      || Number(row.effect_generation) < 1) {
+    throw new Error('guardian_session_broker_effect_identity_invalid');
   }
-  if (!/^[0-9a-f]{64}$/.test(String(row.plan_digest || ''))) {
+  if (!SHA256_RE.test(String(row.plan_digest || ''))
+      || !row.plan
+      || typeof row.plan !== 'object'
+      || Array.isArray(row.plan)
+      || sha256Json(row.plan) !== row.plan_digest) {
     throw new Error('guardian_session_broker_effect_plan_digest_invalid');
   }
   for (const field of [
@@ -151,7 +181,68 @@ function validateRow(row, binding = null) {
   if (binding && !sameBinding(row, binding)) {
     throw new Error('guardian_session_broker_effect_journal_binding_drift');
   }
-  return Object.freeze({ ...row, ...rowBinding });
+
+  const state = String(row.state || '').trim().toUpperCase();
+  if (!STATES.has(state)) throw new Error('guardian_session_broker_effect_state_invalid');
+  if (typeof row.physical_effect_attempted !== 'boolean'
+      || typeof row.effect_barrier_crossed !== 'boolean'
+      || row.physical_effect_attempted !== row.effect_barrier_crossed) {
+    throw new Error('guardian_session_broker_effect_barrier_invalid');
+  }
+
+  const dispatch = dispatchIdentity(row);
+  if (!dispatch.complete) throw new Error('guardian_session_broker_effect_dispatch_identity_invalid');
+  const actuatorId = nonEmpty(row.actuator_id);
+  const readbackObserverId = nonEmpty(row.readback?.observer_id);
+
+  if (state === 'INTENT_RECORDED') {
+    if (row.physical_effect_attempted || dispatch.present || actuatorId) {
+      throw new Error('guardian_session_broker_effect_intent_state_invalid');
+    }
+  }
+  if (state === 'EFFECT_ATTEMPTED') {
+    if (!row.physical_effect_attempted || dispatch.present || !actuatorId) {
+      throw new Error('guardian_session_broker_effect_attempt_state_invalid');
+    }
+  }
+  if (state === 'EFFECT_DISPATCHED') {
+    if (!row.physical_effect_attempted || !dispatch.present || !actuatorId) {
+      throw new Error('guardian_session_broker_effect_dispatched_state_invalid');
+    }
+  }
+  if (state === 'AMBIGUOUS') {
+    if (!row.physical_effect_attempted || !actuatorId) {
+      throw new Error('guardian_session_broker_effect_ambiguous_state_invalid');
+    }
+  }
+  if (state === 'CONFIRMED') {
+    if (!row.physical_effect_attempted || !dispatch.present || !actuatorId || !readbackObserverId
+        || readbackObserverId === actuatorId) {
+      throw new Error('guardian_session_broker_effect_confirmed_state_invalid');
+    }
+  }
+  if (state === 'NO_EFFECT_PROVEN' && row.physical_effect_attempted) {
+    if (!actuatorId || !readbackObserverId || readbackObserverId === actuatorId) {
+      throw new Error('guardian_session_broker_effect_no_effect_state_invalid');
+    }
+  }
+
+  return Object.freeze({ ...row, ...rowBinding, state });
+}
+
+function immutableReadback(proof, observerId, pid, incarnation) {
+  return Object.freeze({
+    observer_id: observerId,
+    pid,
+    process_incarnation_id: incarnation,
+    session_id: finiteInt(proof.session_id, -1),
+    user_sid: normalizedSid(proof.user_sid),
+    executable: nonEmpty(proof.executable),
+    exact_session_binding: proof.exact_session_binding === true,
+    exact_process_binding: proof.exact_process_binding === true,
+    kill_on_close_job_binding: proof.kill_on_close_job_binding === true,
+    broker_ready: proof.broker_ready === true,
+  });
 }
 
 class BrowserGuardianSessionBrokerEffectJournal {
@@ -216,8 +307,9 @@ class BrowserGuardianSessionBrokerEffectJournal {
       process_effect_authority: false,
       authority_effect: false,
     };
-    await durableWriteJson(this.#path, next, { sequence });
-    this.#row = validateRow(next, binding);
+    const validated = validateRow(next, binding);
+    await durableWriteJson(this.#path, validated, { sequence });
+    this.#row = validated;
     return this.snapshot();
   }
 
@@ -225,13 +317,13 @@ class BrowserGuardianSessionBrokerEffectJournal {
     return this.#enqueue(async () => {
       const binding = bindingFrom(bindingSource);
       const identity = planIdentity(plan, binding);
-      const digest = sha256Json(identity);
+      const planDigest = sha256Json(identity);
 
       if (this.confirmed()) {
         throw new Error('guardian_session_broker_effect_confirmed_requires_restart_protocol');
       }
       if (this.resumableIntent()) {
-        if (this.#row.plan_digest !== digest) {
+        if (this.#row.plan_digest !== planDigest) {
           throw new Error('guardian_session_broker_effect_unresolved_intent_plan_drift');
         }
         return this.snapshot();
@@ -244,22 +336,26 @@ class BrowserGuardianSessionBrokerEffectJournal {
       return this.#commit(binding, 'INTENT_RECORDED', {
         effect_id: crypto.randomUUID(),
         effect_generation: effectGeneration,
-        plan_digest: digest,
+        plan_digest: planDigest,
         plan: identity,
         physical_effect_attempted: false,
         effect_barrier_crossed: false,
+        actuator_id: null,
         dispatched_pid: null,
         dispatched_process_incarnation_id: null,
+        readback: null,
         result: null,
       });
     });
   }
 
-  markEffectAttempted(bindingSource, effectId) {
+  markEffectAttempted(bindingSource, effectId, { actuator_id } = {}) {
     return this.#enqueue(async () => {
       if (!this.resumableIntent() || String(effectId || '') !== this.#row.effect_id) {
         throw new Error('guardian_session_broker_effect_attempt_transition_invalid');
       }
+      const actuatorId = nonEmpty(actuator_id);
+      if (!actuatorId) throw new Error('guardian_session_broker_effect_actuator_id_required');
       return this.#commit(bindingSource, 'EFFECT_ATTEMPTED', {
         effect_id: this.#row.effect_id,
         effect_generation: this.#row.effect_generation,
@@ -267,18 +363,23 @@ class BrowserGuardianSessionBrokerEffectJournal {
         plan: this.#row.plan,
         physical_effect_attempted: true,
         effect_barrier_crossed: true,
+        actuator_id: actuatorId,
         dispatched_pid: null,
         dispatched_process_incarnation_id: null,
-        result: null,
+        readback: null,
+        result: 'one_attempt_barrier_crossed',
       });
     });
   }
 
-  markDispatched(bindingSource, effectId, { pid, process_incarnation_id } = {}) {
+  markDispatched(bindingSource, effectId, { pid, process_incarnation_id, actuator_id = null } = {}) {
     return this.#enqueue(async () => {
       if (String(this.#row?.state || '') !== 'EFFECT_ATTEMPTED'
           || String(effectId || '') !== this.#row.effect_id) {
         throw new Error('guardian_session_broker_effect_dispatch_transition_invalid');
+      }
+      if (actuator_id != null && nonEmpty(actuator_id) !== this.#row.actuator_id) {
+        throw new Error('guardian_session_broker_effect_dispatch_actuator_drift');
       }
       const exactPid = finiteInt(pid, 0);
       const incarnation = nonEmpty(process_incarnation_id);
@@ -292,8 +393,10 @@ class BrowserGuardianSessionBrokerEffectJournal {
         plan: this.#row.plan,
         physical_effect_attempted: true,
         effect_barrier_crossed: true,
+        actuator_id: this.#row.actuator_id,
         dispatched_pid: exactPid,
         dispatched_process_incarnation_id: incarnation,
+        readback: null,
         result: 'broker_spawn_dispatched_suspended',
       });
     });
@@ -306,22 +409,38 @@ class BrowserGuardianSessionBrokerEffectJournal {
           || String(effectId || '') !== this.#row.effect_id) {
         throw new Error('guardian_session_broker_effect_confirm_transition_invalid');
       }
+
+      const observerId = nonEmpty(proof.observer_id);
+      if (!observerId) throw new Error('guardian_session_broker_effect_observer_id_required');
+      if (observerId === this.#row.actuator_id) {
+        throw new Error('guardian_session_broker_effect_self_attestation_forbidden');
+      }
+
       const pid = finiteInt(proof.pid, 0);
       const incarnation = nonEmpty(proof.process_incarnation_id);
       const sessionId = finiteInt(proof.session_id, -1);
       const userSid = normalizedSid(proof.user_sid);
+      const executable = nonEmpty(proof.executable);
       const plannedSession = this.#row.plan?.selected_session;
       if (pid < 1 || !incarnation
-          || pid !== Number(this.#row.dispatched_pid)
-          || incarnation !== this.#row.dispatched_process_incarnation_id
           || sessionId !== Number(plannedSession?.session_id)
           || userSid !== plannedSession?.user_sid
+          || executable !== this.#row.plan?.broker_executable
           || proof.exact_session_binding !== true
           || proof.exact_process_binding !== true
           || proof.kill_on_close_job_binding !== true
           || proof.broker_ready !== true) {
         throw new Error('guardian_session_broker_effect_confirm_proof_invalid');
       }
+
+      const durableDispatch = dispatchIdentity(this.#row);
+      if (durableDispatch.present
+          && (durableDispatch.pid !== pid || durableDispatch.process_incarnation_id !== incarnation)) {
+        throw new Error('guardian_session_broker_effect_confirm_dispatch_drift');
+      }
+
+      const recoveredDispatchReceipt = !durableDispatch.present;
+      const readback = immutableReadback(proof, observerId, pid, incarnation);
       return this.#commit(bindingSource, 'CONFIRMED', {
         effect_id: this.#row.effect_id,
         effect_generation: this.#row.effect_generation,
@@ -329,11 +448,15 @@ class BrowserGuardianSessionBrokerEffectJournal {
         plan: this.#row.plan,
         physical_effect_attempted: true,
         effect_barrier_crossed: true,
+        actuator_id: this.#row.actuator_id,
         dispatched_pid: pid,
         dispatched_process_incarnation_id: incarnation,
-        result: state === 'AMBIGUOUS'
-          ? 'late_exact_broker_binding_reconciliation'
-          : 'exact_broker_binding_confirmed',
+        readback,
+        result: recoveredDispatchReceipt
+          ? 'late_exact_broker_binding_recovered_dispatch'
+          : (state === 'AMBIGUOUS'
+            ? 'late_exact_broker_binding_reconciliation'
+            : 'exact_broker_binding_confirmed'),
       });
     });
   }
@@ -348,6 +471,17 @@ class BrowserGuardianSessionBrokerEffectJournal {
       if (evidence.effect_absent_proven !== true || evidence.selected_session_inventory_complete !== true) {
         throw new Error('guardian_session_broker_effect_absence_proof_required');
       }
+
+      const observerId = nonEmpty(evidence.observer_id);
+      if (!observerId) throw new Error('guardian_session_broker_effect_observer_id_required');
+      if (this.#row.actuator_id && observerId === this.#row.actuator_id) {
+        throw new Error('guardian_session_broker_effect_self_attestation_forbidden');
+      }
+      if (finiteInt(evidence.session_id, -1) !== Number(this.#row.plan?.selected_session?.session_id)
+          || normalizedSid(evidence.user_sid) !== this.#row.plan?.selected_session?.user_sid) {
+        throw new Error('guardian_session_broker_effect_absence_session_drift');
+      }
+
       if (state === 'EFFECT_DISPATCHED') {
         const pid = finiteInt(evidence.pid, 0);
         const incarnation = nonEmpty(evidence.process_incarnation_id);
@@ -358,15 +492,26 @@ class BrowserGuardianSessionBrokerEffectJournal {
           throw new Error('guardian_session_broker_effect_dispatched_absence_proof_invalid');
         }
       }
+
+      const attempted = state !== 'INTENT_RECORDED';
       return this.#commit(bindingSource, 'NO_EFFECT_PROVEN', {
         effect_id: this.#row.effect_id,
         effect_generation: this.#row.effect_generation,
         plan_digest: this.#row.plan_digest,
         plan: this.#row.plan,
-        physical_effect_attempted: state !== 'INTENT_RECORDED',
-        effect_barrier_crossed: state !== 'INTENT_RECORDED',
+        physical_effect_attempted: attempted,
+        effect_barrier_crossed: attempted,
+        actuator_id: this.#row.actuator_id || null,
         dispatched_pid: this.#row.dispatched_pid || null,
         dispatched_process_incarnation_id: this.#row.dispatched_process_incarnation_id || null,
+        readback: Object.freeze({
+          observer_id: observerId,
+          effect_absent_proven: true,
+          selected_session_inventory_complete: true,
+          session_id: Number(this.#row.plan.selected_session.session_id),
+          user_sid: this.#row.plan.selected_session.user_sid,
+          exact_process_absent: evidence.exact_process_absent === true,
+        }),
         result: String(evidence.reason || 'exact_broker_process_effect_absent').slice(0, 240),
       });
     });
@@ -386,8 +531,10 @@ class BrowserGuardianSessionBrokerEffectJournal {
         plan: this.#row.plan,
         physical_effect_attempted: true,
         effect_barrier_crossed: true,
+        actuator_id: this.#row.actuator_id,
         dispatched_pid: this.#row.dispatched_pid || null,
         dispatched_process_incarnation_id: this.#row.dispatched_process_incarnation_id || null,
+        readback: null,
         result: String(detail || 'broker_process_effect_outcome_unknown').slice(0, 240),
       });
     });
