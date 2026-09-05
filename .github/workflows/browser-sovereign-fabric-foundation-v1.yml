@@ -43,7 +43,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          node --test test/browser-sovereign-fabric-foundation.test.mjs test/browser-sovereign-fabric-isolation-governance.test.mjs
+          node --test test/browser-sovereign-fabric-foundation.test.mjs test/browser-sovereign-fabric-isolation-governance.test.mjs test/browser-sovereign-fabric-domain-policy.test.mjs
           if ($LASTEXITCODE -ne 0) { throw "browser_fabric_contract_exit_$LASTEXITCODE" }
 
       - name: Prove source-only SQL cannot auto-apply production remediation
@@ -64,4 +64,4 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src/browser-fabric-effect-ledger.mjs apps/metaengine-browser/src/browser-fabric-capability.mjs apps/metaengine-browser/src/browser-fabric-browser-cell.mjs apps/metaengine-browser/src/browser-fabric-cell-fleet.mjs apps/metaengine-browser/src/browser-fabric-release-authority-gate.mjs apps/metaengine-browser/src/browser-fabric-guardian-recovery-plan.mjs apps/metaengine-browser/src/browser-fabric-slo.mjs apps/metaengine-browser/src/browser-fabric-governance.mjs apps/metaengine-browser/src/browser-fabric-trace-context.mjs apps/metaengine-browser/test/browser-sovereign-fabric-foundation.test.mjs apps/metaengine-browser/test/browser-sovereign-fabric-isolation-governance.test.mjs sql/browser_fabric_transport_promotion_acl_dry_run_v1.sql sql/browser_fabric_event_effect_ledger_pilot_v1.sql docs/browser-sovereign-compute-fabric-foundation-v1.md .github/workflows/browser-sovereign-fabric-foundation-v1.yml)"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src/browser-fabric-effect-ledger.mjs apps/metaengine-browser/src/browser-fabric-capability.mjs apps/metaengine-browser/src/browser-fabric-browser-cell.mjs apps/metaengine-browser/src/browser-fabric-cell-fleet.mjs apps/metaengine-browser/src/browser-fabric-effect-domain-policy.mjs apps/metaengine-browser/src/browser-fabric-release-authority-gate.mjs apps/metaengine-browser/src/browser-fabric-guardian-recovery-plan.mjs apps/metaengine-browser/src/browser-fabric-slo.mjs apps/metaengine-browser/src/browser-fabric-governance.mjs apps/metaengine-browser/src/browser-fabric-trace-context.mjs apps/metaengine-browser/test/browser-sovereign-fabric-foundation.test.mjs apps/metaengine-browser/test/browser-sovereign-fabric-isolation-governance.test.mjs apps/metaengine-browser/test/browser-sovereign-fabric-domain-policy.test.mjs sql/browser_fabric_transport_promotion_acl_dry_run_v1.sql sql/browser_fabric_event_effect_ledger_pilot_v1.sql docs/browser-sovereign-compute-fabric-foundation-v1.md .github/workflows/browser-sovereign-fabric-foundation-v1.yml)"
