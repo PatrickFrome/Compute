@@ -1,8 +1,9 @@
 import crypto from 'node:crypto';
+import { BROWSER_FABRIC_EXISTING_EFFECT_DOMAINS } from './browser-fabric-effect-domain-policy.mjs';
 
 export const BROWSER_FABRIC_LEDGER_SCHEMA = 'metaengine.browser-fabric.effect-ledger.v1';
 export const BROWSER_FABRIC_LEDGER_EVENT_SCHEMA = 'metaengine.browser-fabric.effect-event.v1';
-export const BROWSER_FABRIC_REDUCER_VERSION = '1.0.0';
+export const BROWSER_FABRIC_REDUCER_VERSION = '1.1.0';
 
 export const FABRIC_EVENT_TYPES = Object.freeze([
   'INTENT',
@@ -16,18 +17,26 @@ export const FABRIC_OUTCOMES = Object.freeze([
   'CONFIRMED',
   'ABSENT_PROVEN',
   'AMBIGUOUS',
-  'RECONCILE',
+  'CONFLICT',
+  'CORRUPT',
 ]);
 
+const TERMINAL_OUTCOMES = new Set(['CONFIRMED', 'ABSENT_PROVEN', 'CONFLICT', 'CORRUPT']);
 const SHA256 = /^[0-9a-f]{64}$/;
 const EFFECT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,191}$/;
 const DOMAIN = /^[A-Z][A-Z0-9_]{1,63}$/;
+const KNOWN_EFFECT_DOMAINS = new Set(BROWSER_FABRIC_EXISTING_EFFECT_DOMAINS);
 const UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
+const EVENT_KEYS = new Set([
+  'schema', 'sequence', 'effect_id', 'domain', 'type', 'occurred_at',
+  'previous_event_sha256', 'material', 'event_sha256',
+]);
 
 function deepCanonical(value) {
   if (Array.isArray(value)) return value.map(deepCanonical);
   if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, deepCanonical(value[key])]));
+    const keys = Object.keys(value).sort((left, right) => left.localeCompare(right));
+    return Object.fromEntries(keys.map((key) => [key, deepCanonical(value[key])]));
   }
   return value;
 }
@@ -50,7 +59,18 @@ function positiveInteger(value) {
 
 function exactKeys(value, allowed) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  return Object.keys(value).every((key) => allowed.has(key));
+  const keys = Object.keys(value);
+  return keys.length <= allowed.size && keys.every((key) => allowed.has(key));
+}
+
+function exactEventKeys(event) {
+  return exactKeys(event, EVENT_KEYS) && Object.keys(event).length === EVENT_KEYS.size;
+}
+
+function utcMillis(value) {
+  if (typeof value !== 'string' || !UTC.test(value)) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function eventDigestMaterial(event) {
@@ -110,26 +130,39 @@ function validCapability(material, intent) {
     'capability_id', 'capability_digest', 'verified', 'audience', 'subject_device',
     'task_id', 'claim_generation', 'browser_context_id', 'target_id',
     'target_incarnation', 'action', 'deadline', 'idempotency_key', 'policy_hash',
-    'effect_id', 'issuer', 'key_id',
+    'plan_digest', 'nonce', 'max_uses', 'retry_budget', 'delegation_depth',
+    'parent_capability_digest', 'effect_id', 'issuer', 'key_id',
   ]);
   if (!exactKeys(material, allowed) || material.verified !== true) return false;
   if (typeof material.capability_id !== 'string' || material.capability_id.length < 8) return false;
-  if (!hash(material.capability_digest) || !hash(material.policy_hash)) return false;
-  if (material.policy_hash !== intent.policy_hash || material.idempotency_key !== intent.idempotency_key) return false;
-  if (!positiveInteger(material.claim_generation) || !UTC.test(String(material.deadline || ''))) return false;
-  for (const key of ['audience', 'subject_device', 'task_id', 'browser_context_id', 'target_id', 'target_incarnation', 'action', 'issuer', 'key_id']) {
-    if (typeof material[key] !== 'string' || material[key].length === 0) return false;
-  }
-  return true;
+  if (!hash(material.capability_digest) || !hash(material.policy_hash) || !hash(material.plan_digest)) return false;
+  if (material.policy_hash !== intent.policy_hash
+      || material.plan_digest !== intent.plan_digest
+      || material.idempotency_key !== intent.idempotency_key) return false;
+  if (!positiveInteger(material.claim_generation) || utcMillis(material.deadline) == null) return false;
+  if (typeof material.nonce !== 'string' || material.nonce.length < 8
+      || material.max_uses !== 1
+      || material.retry_budget !== 0
+      || material.delegation_depth !== 0
+      || material.parent_capability_digest !== null) return false;
+  const requiredStrings = [
+    'audience', 'subject_device', 'task_id', 'browser_context_id', 'target_id',
+    'target_incarnation', 'action', 'issuer', 'key_id',
+  ];
+  return requiredStrings.every((key) => typeof material[key] === 'string' && material[key].length > 0);
 }
 
 function validAttempt(material) {
-  const allowed = new Set(['attempt_id', 'actuator_id', 'dispatched_at', 'capability_digest', 'target_incarnation']);
+  const allowed = new Set([
+    'attempt_id', 'actuator_id', 'dispatched_at', 'capability_digest', 'nonce',
+    'target_incarnation',
+  ]);
   return exactKeys(material, allowed)
     && typeof material.attempt_id === 'string' && material.attempt_id.length >= 8
     && typeof material.actuator_id === 'string' && material.actuator_id.length > 0
-    && UTC.test(String(material.dispatched_at || ''))
+    && utcMillis(material.dispatched_at) != null
     && hash(material.capability_digest)
+    && typeof material.nonce === 'string' && material.nonce.length >= 8
     && typeof material.target_incarnation === 'string' && material.target_incarnation.length > 0;
 }
 
@@ -142,7 +175,7 @@ function validReadback(material, attempt) {
     && typeof material.observer_id === 'string' && material.observer_id.length > 0
     && material.observer_independent === true
     && material.observer_id !== attempt.actuator_id
-    && UTC.test(String(material.observed_at || ''))
+    && utcMillis(material.observed_at) != null
     && hash(material.evidence_digest)
     && typeof material.observed_state === 'string' && material.observed_state.length > 0
     && material.target_incarnation === attempt.target_incarnation;
@@ -161,109 +194,188 @@ function violation(reason, index, effectId = null) {
   return Object.freeze({ ok: false, reason, event_index: index, effect_id: effectId, authority_effect: false });
 }
 
-function freshProjection() {
+function freshProjection(domain) {
   return {
+    domain,
+    next_sequence: 1,
+    last_event_sha256: null,
+    last_event_ms: null,
     intent: null,
     capability: null,
+    capability_recorded_ms: null,
     attempt: null,
     readbacks: [],
     outcome: null,
-    terminal_ambiguous: false,
-    queue_delivery_authority: false,
-    automatic_retry_allowed: false,
+    outcomes: [],
+    ambiguous_event_sequence: null,
+    ambiguity_reconciled: false,
   };
 }
 
-/**
- * Deterministic, side-effect-free reducer for the engine-neutral causal ledger.
- * The reducer deliberately does not execute effects, fetch policy, read a queue,
- * or infer success from delivery. A queue wake-up can carry effect_id only.
- */
-export function reduceFabricEffectLedger(events = []) {
-  if (!Array.isArray(events)) return violation('LEDGER_EVENTS_NOT_ARRAY', -1);
+function validateEventEnvelope(event, state) {
+  if (!event || event.schema !== BROWSER_FABRIC_LEDGER_EVENT_SCHEMA || !exactEventKeys(event)) return 'EVENT_SCHEMA_INVALID';
+  if (event.sequence !== state.next_sequence) return 'EVENT_SEQUENCE_GAP';
+  if (!EFFECT_ID.test(String(event.effect_id || ''))) return 'EFFECT_ID_INVALID';
+  if (!DOMAIN.test(String(event.domain || ''))) return 'EFFECT_DOMAIN_INVALID';
+  if (!KNOWN_EFFECT_DOMAINS.has(event.domain)) return 'EFFECT_DOMAIN_NOT_REGISTERED';
+  if (!FABRIC_EVENT_TYPES.includes(event.type)) return 'EVENT_TYPE_INVALID';
+  const eventMs = utcMillis(event.occurred_at);
+  if (eventMs == null) return 'EVENT_TIME_INVALID';
+  if (state.last_event_ms != null && eventMs < state.last_event_ms) return 'EVENT_TIME_REGRESSION';
+  if (event.previous_event_sha256 !== state.last_event_sha256) return 'EVENT_CHAIN_PREVIOUS_DIGEST_MISMATCH';
+  const calculated = fabricSha256(canonicalFabricJson(eventDigestMaterial(event)));
+  return event.event_sha256 === calculated ? null : 'EVENT_DIGEST_MISMATCH';
+}
 
-  const effects = new Map();
-  let expectedSequence = 1;
-  let previousDigest = null;
+function applyIntent(state, event) {
+  if (state.intent) return 'DUPLICATE_INTENT';
+  if (!validIntent(event.material)) return 'INTENT_INVALID';
+  state.intent = Object.freeze({ ...event.material, domain: event.domain });
+  return null;
+}
 
-  for (let i = 0; i < events.length; i += 1) {
-    const event = events[i];
-    if (!event || event.schema !== BROWSER_FABRIC_LEDGER_EVENT_SCHEMA) return violation('EVENT_SCHEMA_INVALID', i);
-    if (event.sequence !== expectedSequence) return violation('EVENT_SEQUENCE_GAP', i, event.effect_id);
-    if (!EFFECT_ID.test(String(event.effect_id || ''))) return violation('EFFECT_ID_INVALID', i, event.effect_id);
-    if (!DOMAIN.test(String(event.domain || ''))) return violation('EFFECT_DOMAIN_INVALID', i, event.effect_id);
-    if (!FABRIC_EVENT_TYPES.includes(event.type)) return violation('EVENT_TYPE_INVALID', i, event.effect_id);
-    if (!UTC.test(String(event.occurred_at || ''))) return violation('EVENT_TIME_INVALID', i, event.effect_id);
-    if (event.previous_event_sha256 !== previousDigest) return violation('EVENT_CHAIN_PREVIOUS_DIGEST_MISMATCH', i, event.effect_id);
-    const calculated = fabricSha256(canonicalFabricJson(eventDigestMaterial(event)));
-    if (event.event_sha256 !== calculated) return violation('EVENT_DIGEST_MISMATCH', i, event.effect_id);
+function applyCapability(state, event, eventMs) {
+  if (!state.intent) return 'CAPABILITY_WITHOUT_INTENT';
+  if (state.capability) return 'DUPLICATE_CAPABILITY';
+  if (event.material == null
+      || event.material.effect_id !== event.effect_id
+      || !validCapability(event.material, state.intent)) return 'CAPABILITY_INVALID_OR_UNBOUND';
+  if (eventMs >= utcMillis(event.material.deadline)) return 'CAPABILITY_RECORDED_AFTER_DEADLINE';
+  state.capability = Object.freeze({ ...event.material });
+  state.capability_recorded_ms = eventMs;
+  return null;
+}
 
-    const state = effects.get(event.effect_id) || freshProjection();
-    if (state.outcome && event.type !== 'READBACK') return violation('EFFECT_ALREADY_OUTCOME_CLASSIFIED', i, event.effect_id);
+function applyAttempt(state, event, eventMs) {
+  if (!state.intent || !state.capability) return 'ATTEMPT_WITHOUT_VERIFIED_CAPABILITY';
+  if (state.attempt) return 'SECOND_ATTEMPT_FORBIDDEN';
+  if (!validAttempt(event.material)) return 'ATTEMPT_INVALID';
+  if (event.material.capability_digest !== state.capability.capability_digest
+      || event.material.nonce !== state.capability.nonce
+      || event.material.target_incarnation !== state.capability.target_incarnation) {
+    return 'ATTEMPT_CAPABILITY_BINDING_MISMATCH';
+  }
+  const dispatchedMs = utcMillis(event.material.dispatched_at);
+  if (dispatchedMs < state.capability_recorded_ms || dispatchedMs > eventMs) return 'ATTEMPT_TIME_ORDER_INVALID';
+  if (dispatchedMs >= utcMillis(state.capability.deadline)) return 'ATTEMPT_CAPABILITY_EXPIRED';
+  state.attempt = Object.freeze({ ...event.material, event_sequence: event.sequence });
+  return null;
+}
 
-    if (event.type === 'INTENT') {
-      if (state.intent) return violation('DUPLICATE_INTENT', i, event.effect_id);
-      if (!validIntent(event.material)) return violation('INTENT_INVALID', i, event.effect_id);
-      state.intent = Object.freeze({ ...event.material, domain: event.domain });
-    } else if (event.type === 'CAPABILITY') {
-      if (!state.intent) return violation('CAPABILITY_WITHOUT_INTENT', i, event.effect_id);
-      if (state.capability) return violation('DUPLICATE_CAPABILITY', i, event.effect_id);
-      if (event.material?.effect_id !== event.effect_id || !validCapability(event.material, state.intent)) {
-        return violation('CAPABILITY_INVALID_OR_UNBOUND', i, event.effect_id);
-      }
-      state.capability = Object.freeze({ ...event.material });
-    } else if (event.type === 'ATTEMPT') {
-      if (!state.intent || !state.capability) return violation('ATTEMPT_WITHOUT_VERIFIED_CAPABILITY', i, event.effect_id);
-      if (state.attempt) return violation('SECOND_ATTEMPT_FORBIDDEN', i, event.effect_id);
-      if (!validAttempt(event.material)) return violation('ATTEMPT_INVALID', i, event.effect_id);
-      if (event.material.capability_digest !== state.capability.capability_digest
-          || event.material.target_incarnation !== state.capability.target_incarnation) {
-        return violation('ATTEMPT_CAPABILITY_BINDING_MISMATCH', i, event.effect_id);
-      }
-      state.attempt = Object.freeze({ ...event.material });
-    } else if (event.type === 'READBACK') {
-      if (!state.attempt) return violation('READBACK_WITHOUT_ATTEMPT', i, event.effect_id);
-      if (!validReadback(event.material, state.attempt)) return violation('READBACK_NOT_INDEPENDENT_OR_INVALID', i, event.effect_id);
-      state.readbacks.push(Object.freeze({ ...event.material }));
-    } else if (event.type === 'OUTCOME') {
-      if (!state.intent) return violation('OUTCOME_WITHOUT_INTENT', i, event.effect_id);
-      if (!validOutcome(event.material)) return violation('OUTCOME_INVALID', i, event.effect_id);
-      if (['CONFIRMED', 'ABSENT_PROVEN'].includes(event.material.state)) {
-        const evidence = event.material.readback_evidence_digest;
-        if (!evidence || !state.readbacks.some((row) => row.evidence_digest === evidence)) {
-          return violation('POSITIVE_OUTCOME_WITHOUT_EXACT_READBACK', i, event.effect_id);
-        }
-      }
-      if (event.material.state === 'AMBIGUOUS' && event.material.automatic_retry_allowed !== false) {
-        return violation('AMBIGUOUS_RETRY_FORBIDDEN', i, event.effect_id);
-      }
-      state.outcome = Object.freeze({ ...event.material });
-      state.terminal_ambiguous = event.material.state === 'AMBIGUOUS';
+function applyReadback(state, event, eventMs) {
+  if (!state.attempt) return 'READBACK_WITHOUT_ATTEMPT';
+  if (!validReadback(event.material, state.attempt)) return 'READBACK_NOT_INDEPENDENT_OR_INVALID';
+  const observedMs = utcMillis(event.material.observed_at);
+  if (observedMs < utcMillis(state.attempt.dispatched_at) || observedMs > eventMs) return 'READBACK_TIME_ORDER_INVALID';
+  state.readbacks.push(Object.freeze({ ...event.material, event_sequence: event.sequence }));
+  return null;
+}
+
+function exactReadback(state, evidenceDigest, afterSequence = 0) {
+  return state.readbacks.some((row) => row.evidence_digest === evidenceDigest
+    && row.event_sequence > afterSequence);
+}
+
+function applyOutcome(state, event) {
+  if (!state.intent) return 'OUTCOME_WITHOUT_INTENT';
+  if (!state.attempt) return 'OUTCOME_WITHOUT_ATTEMPT';
+  if (!validOutcome(event.material)) return 'OUTCOME_INVALID';
+  const outcomeState = event.material.state;
+  const evidence = event.material.readback_evidence_digest;
+
+  if (state.outcome && state.outcome.state !== 'AMBIGUOUS') return 'EFFECT_ALREADY_TERMINAL';
+  if (state.outcome && outcomeState === 'AMBIGUOUS') return 'DUPLICATE_AMBIGUOUS_OUTCOME';
+  if (outcomeState === 'AMBIGUOUS') {
+    if (evidence != null && !exactReadback(state, evidence)) return 'AMBIGUOUS_EVIDENCE_UNBOUND';
+    state.ambiguous_event_sequence = event.sequence;
+  } else {
+    const afterSequence = state.outcome == null ? 0 : state.ambiguous_event_sequence;
+    if (!evidence || !exactReadback(state, evidence, afterSequence)) {
+      if (state.outcome != null) return 'RECONCILIATION_WITHOUT_NEW_EXACT_READBACK';
+      return ['CONFIRMED', 'ABSENT_PROVEN'].includes(outcomeState)
+        ? 'POSITIVE_OUTCOME_WITHOUT_EXACT_READBACK'
+        : 'TERMINAL_OUTCOME_WITHOUT_EXACT_READBACK';
     }
-
-    effects.set(event.effect_id, state);
-    previousDigest = event.event_sha256;
-    expectedSequence += 1;
+    state.ambiguity_reconciled = state.outcome != null;
   }
 
-  const projection = Object.fromEntries([...effects.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([effectId, state]) => [effectId, Object.freeze({
+  const recorded = Object.freeze({ ...event.material, event_sequence: event.sequence });
+  state.outcomes.push(recorded);
+  state.outcome = recorded;
+  return null;
+}
+
+function applyEvent(state, event, eventMs) {
+  if (state.domain !== event.domain) return 'EFFECT_DOMAIN_DRIFT';
+  if (state.outcome && TERMINAL_OUTCOMES.has(state.outcome.state)) return 'EFFECT_ALREADY_TERMINAL';
+  if (state.outcome && state.outcome.state === 'AMBIGUOUS' && !['READBACK', 'OUTCOME'].includes(event.type)) {
+    return 'AMBIGUOUS_EFFECT_RECONCILIATION_ONLY';
+  }
+  if (event.type === 'INTENT') return applyIntent(state, event);
+  if (event.type === 'CAPABILITY') return applyCapability(state, event, eventMs);
+  if (event.type === 'ATTEMPT') return applyAttempt(state, event, eventMs);
+  if (event.type === 'READBACK') return applyReadback(state, event, eventMs);
+  if (event.type === 'OUTCOME') return applyOutcome(state, event);
+  return 'EVENT_TYPE_UNREACHABLE';
+}
+
+function publicProjection(state) {
+  const terminal = state.outcome != null && TERMINAL_OUTCOMES.has(state.outcome.state);
+  return Object.freeze({
+    domain: state.domain,
     intent: state.intent,
     capability: state.capability,
     attempt: state.attempt,
     readbacks: Object.freeze([...state.readbacks]),
+    outcomes: Object.freeze([...state.outcomes]),
     outcome: state.outcome,
-    terminal_ambiguous: state.terminal_ambiguous,
+    terminal,
+    terminal_ambiguous: state.outcome != null && state.outcome.state === 'AMBIGUOUS',
+    ambiguity_reconciled: state.ambiguity_reconciled,
+    reconciliation_required: state.outcome != null && state.outcome.state === 'AMBIGUOUS',
     queue_delivery_authority: false,
     automatic_retry_allowed: false,
-  })]));
-  const projectionDigest = fabricSha256(canonicalFabricJson(projection));
+  });
+}
 
+/**
+ * Deterministic, side-effect-free reducer for the engine-neutral causal ledger.
+ * The reducer never executes effects or infers success from delivery. An
+ * ambiguous attempt can only converge through a new independent readback and
+ * one terminal classification; it can never authorize another attempt.
+ */
+export function reduceFabricEffectLedger(events = []) {
+  if (!Array.isArray(events)) return violation('LEDGER_EVENTS_NOT_ARRAY', -1);
+  const effects = new Map();
+  let lastInputDigest = null;
+
+  for (let index = 0; index < events.length; index += 1) {
+    const event = events[index];
+    const effectId = event && typeof event.effect_id === 'string' ? event.effect_id : '';
+    const state = effects.get(effectId) || freshProjection(event && event.domain);
+    const envelopeViolation = validateEventEnvelope(event, state);
+    if (envelopeViolation) return violation(envelopeViolation, index, event == null ? null : event.effect_id);
+    const eventMs = utcMillis(event.occurred_at);
+    const applyViolation = applyEvent(state, event, eventMs);
+    if (applyViolation) return violation(applyViolation, index, event.effect_id);
+    state.next_sequence += 1;
+    state.last_event_sha256 = event.event_sha256;
+    state.last_event_ms = eventMs;
+    effects.set(event.effect_id, state);
+    lastInputDigest = event.event_sha256;
+  }
+
+  const ordered = [...effects.entries()].sort(([left], [right]) => left.localeCompare(right));
+  const projection = Object.fromEntries(ordered.map(([effectId, state]) => [effectId, publicProjection(state)]));
+  const chainHeads = Object.fromEntries(ordered.map(([effectId, state]) => [effectId, state.last_event_sha256]));
+  const projectionDigest = fabricSha256(canonicalFabricJson(projection));
   return Object.freeze({
     ok: true,
     schema: BROWSER_FABRIC_LEDGER_SCHEMA,
     reducer_version: BROWSER_FABRIC_REDUCER_VERSION,
     event_count: events.length,
-    last_event_sha256: previousDigest,
+    last_input_event_sha256: lastInputDigest,
+    per_effect_chain_heads: Object.freeze(chainHeads),
     projection: Object.freeze(projection),
     projection_sha256: projectionDigest,
     queue_delivery_authority: false,
@@ -279,11 +391,18 @@ export function browserFabricLedgerContract() {
     version: BROWSER_FABRIC_REDUCER_VERSION,
     append_only: true,
     deterministic_reducer: true,
-    hash_chained_events: true,
+    per_effect_hash_chained_events: true,
+    globally_serialized_hash_chain: false,
+    monotonic_event_time_required: true,
+    effect_domain_immutable: true,
     intent_before_authority: true,
+    signed_plan_digest_bound_to_intent: true,
     verified_capability_before_attempt: true,
+    capability_deadline_bounds_attempt: true,
     one_attempt_per_effect: true,
-    independent_readback_required_for_positive_outcome: true,
+    independent_readback_required_for_terminal_outcome: true,
+    ambiguity_reconciliation_requires_new_readback: true,
+    explicit_conflict_and_corrupt_outcomes: true,
     ambiguous_retry_allowed: false,
     queue_delivery_authority: false,
     realtime_event_authority: false,

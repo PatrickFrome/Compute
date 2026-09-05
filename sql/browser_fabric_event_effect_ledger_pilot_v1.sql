@@ -33,14 +33,27 @@ create table if not exists destruktion_meta.browser_fabric_effect_event_v1 (
   constraint browser_fabric_previous_sha_shape check (previous_event_sha256 is null or previous_event_sha256 ~ '^[0-9a-f]{64}$'),
   constraint browser_fabric_effect_id_shape check (effect_id ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{7,191}$'),
   constraint browser_fabric_domain_shape check (effect_domain ~ '^[A-Z][A-Z0-9_]{1,63}$'),
+  constraint browser_fabric_domain_registered check (
+    effect_domain in (
+      'PROCESS','MACHINE_COPY','SCM_CONFIG','SESSION_BROKER','SELF_UPDATE',
+      'BROWSER_SEND','TAB_CREATE','RELEASE_PROMOTION','TRANSPORT_PROMOTION'
+    )
+  ),
   constraint browser_fabric_event_type check (event_type in ('INTENT','CAPABILITY','ATTEMPT','READBACK','OUTCOME')),
+  constraint browser_fabric_outcome_state check (
+    event_type <> 'OUTCOME'
+    or material->>'state' in ('CONFIRMED','ABSENT_PROVEN','AMBIGUOUS','CONFLICT','CORRUPT')
+  ),
   constraint browser_fabric_effect_sequence_positive check (effect_sequence > 0),
   constraint browser_fabric_authority_effect_false check (authority_effect = false),
   constraint browser_fabric_material_object check (jsonb_typeof(material) = 'object')
 );
 
--- One causal intent/capability/attempt/outcome per effect. Multiple independent
--- readbacks are allowed so ambiguity can be reconciled without replay.
+-- sequence/previous_event_sha256 form one chain per effect_id. event_seq is
+-- only the database append order, avoiding a fleet-wide serialization point.
+-- One causal intent/capability/attempt, at most one AMBIGUOUS classification,
+-- and at most one terminal outcome are allowed per effect. Multiple independent
+-- readbacks reconcile ambiguity without a second physical attempt.
 create unique index if not exists browser_fabric_one_intent_v1
   on destruktion_meta.browser_fabric_effect_event_v1(effect_id)
   where event_type = 'INTENT';
@@ -50,9 +63,13 @@ create unique index if not exists browser_fabric_one_capability_v1
 create unique index if not exists browser_fabric_one_attempt_v1
   on destruktion_meta.browser_fabric_effect_event_v1(effect_id)
   where event_type = 'ATTEMPT';
-create unique index if not exists browser_fabric_one_outcome_v1
+drop index if exists destruktion_meta.browser_fabric_one_outcome_v1;
+create unique index if not exists browser_fabric_one_ambiguous_outcome_v1
   on destruktion_meta.browser_fabric_effect_event_v1(effect_id)
-  where event_type = 'OUTCOME';
+  where event_type = 'OUTCOME' and material->>'state' = 'AMBIGUOUS';
+create unique index if not exists browser_fabric_one_terminal_outcome_v1
+  on destruktion_meta.browser_fabric_effect_event_v1(effect_id)
+  where event_type = 'OUTCOME' and material->>'state' in ('CONFIRMED','ABSENT_PROVEN','CONFLICT','CORRUPT');
 create index if not exists browser_fabric_effect_readback_v1
   on destruktion_meta.browser_fabric_effect_event_v1(effect_id, event_seq)
   where event_type = 'READBACK';
@@ -114,24 +131,31 @@ for each row execute function destruktion_meta.browser_fabric_effect_event_outbo
 -- Default privileges are fail-closed. The future append RPC should validate the
 -- event digest/chain/capability in one transaction. Direct Data API mutation is
 -- intentionally not part of this pilot contract.
-revoke all on table destruktion_meta.browser_fabric_effect_event_v1 from public, anon, authenticated;
-revoke all on table destruktion_meta.browser_fabric_effect_outbox_v1 from public, anon, authenticated;
-revoke all on function destruktion_meta.browser_fabric_effect_event_append_only_v1() from public, anon, authenticated;
-revoke all on function destruktion_meta.browser_fabric_effect_event_outbox_v1() from public, anon, authenticated;
+revoke all on table destruktion_meta.browser_fabric_effect_event_v1 from public, anon, authenticated, service_role;
+revoke all on table destruktion_meta.browser_fabric_effect_outbox_v1 from public, anon, authenticated, service_role;
+revoke all on sequence destruktion_meta.browser_fabric_effect_event_v1_event_seq_seq from public, anon, authenticated, service_role;
+revoke all on sequence destruktion_meta.browser_fabric_effect_outbox_v1_outbox_seq_seq from public, anon, authenticated, service_role;
+revoke all on function destruktion_meta.browser_fabric_effect_event_append_only_v1() from public, anon, authenticated, service_role;
+revoke all on function destruktion_meta.browser_fabric_effect_event_outbox_v1() from public, anon, authenticated, service_role;
 
--- Staging operator may uncomment only after creating a dedicated least-privilege
--- ledger writer role. Do NOT make service_role a general ledger writer by default.
+-- Staging operator may uncomment only after creating dedicated least-privilege
+-- roles. Do NOT make service_role a general ledger writer by default, and never
+-- grant direct INSERT: the future append RPC must serialize and verify the
+-- per-effect sequence/hash/domain/time transition inside one transaction.
 -- grant select on destruktion_meta.browser_fabric_effect_event_v1 to browser_fabric_reader;
--- grant insert,select on destruktion_meta.browser_fabric_effect_event_v1 to browser_fabric_ledger_writer;
+-- grant execute on function destruktion_meta.browser_fabric_effect_append_v1(...) to browser_fabric_ledger_writer;
 -- grant select,update on destruktion_meta.browser_fabric_effect_outbox_v1 to browser_fabric_outbox_publisher;
 
 -- Invariants for the staging harness to prove after applying on a dev branch:
 -- 1. UPDATE/DELETE of event rows always fails.
--- 2. duplicate INTENT/CAPABILITY/ATTEMPT/OUTCOME for one effect fails.
+-- 2. duplicate INTENT/CAPABILITY/ATTEMPT, AMBIGUOUS, or terminal outcome for
+--    one effect fails; AMBIGUOUS + one terminal reconciliation is admissible.
 -- 3. event + outbox row commit atomically or neither commits.
 -- 4. queue publisher payload contains only effect_id/event_id/event_sha256.
 -- 5. losing queue/realtime delivery cannot create execution authority.
 -- 6. reducer can rebuild projection from event rows alone.
 -- 7. existing domain journal remains authoritative for physical effect until cutover.
+-- 8. per-effect sequence/domain/time/digest and AMBIGUOUS->READBACK->terminal
+--    ordering are enforced by the future append RPC and reducer parity harness.
 
 commit;

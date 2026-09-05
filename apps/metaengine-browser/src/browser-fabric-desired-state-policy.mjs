@@ -1,11 +1,18 @@
+import crypto from 'node:crypto';
 import { canonicalFabricJson, fabricSha256 } from './browser-fabric-effect-ledger.mjs';
 
 export const BROWSER_FABRIC_DESIRED_STATE_POLICY_SCHEMA = 'metaengine.browser-fabric.desired-state-policy.v1';
 export const BROWSER_FABRIC_DESIRED_STATE_DECISION_SCHEMA = 'metaengine.browser-fabric.desired-state-decision.v1';
+export const BROWSER_FABRIC_DESIRED_STATE_SIGNATURE_SCHEMA = 'metaengine.browser-fabric.desired-state-signature.v1';
 
 const GIT_SHA = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const SAFE_CHANNEL = /^[a-z][a-z0-9._-]{1,31}$/;
+const SAFE_RELEASE_TAG = /^v\d+\.\d+\.\d+-dev\.\d+\.1$/;
+const SAFE_KEY_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$/;
+const ED25519_SIGNATURE_BASE64URL = /^[A-Za-z0-9_-]{86}$/;
+const UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
+const SIGNATURE_KEYS = new Set(['schema', 'alg', 'key_id', 'policy_sha256', 'signature']);
 
 function hold(reason, extra = {}) {
   return Object.freeze({
@@ -49,13 +56,39 @@ function normalizedPolicy(policy) {
   if (!/^\d+\.\d+\.\d+$/.test(out.policy_version)) return null;
   if (!Number.isSafeInteger(out.generation) || out.generation <= 0) return null;
   if (!GIT_SHA.test(out.desired_integration_sha) || !SAFE_CHANNEL.test(out.release_channel)) return null;
-  if (!out.required_release_tag || !SHA256.test(out.required_release_manifest_sha256)
+  if (!SAFE_RELEASE_TAG.test(out.required_release_tag) || !SHA256.test(out.required_release_manifest_sha256)
       || !SHA256.test(out.required_installed_executable_sha256)) return null;
   if (!Number.isSafeInteger(out.minimum_guardian_protocol_generation) || out.minimum_guardian_protocol_generation <= 0) return null;
   if (out.new_effect_domains_frozen !== true) return null;
+  if (!UTC.test(out.policy_effective_at)) return null;
   const at = Date.parse(out.policy_effective_at);
   if (!Number.isFinite(at)) return null;
   return Object.freeze(out);
+}
+
+function verifyPolicySignature(policyHash, normalized, envelope, trustedPublicKeys) {
+  if (!envelope
+      || Object.keys(envelope).length !== SIGNATURE_KEYS.size
+      || !Object.keys(envelope).every((key) => SIGNATURE_KEYS.has(key))
+      || envelope.schema !== BROWSER_FABRIC_DESIRED_STATE_SIGNATURE_SCHEMA
+      || envelope.alg !== 'EdDSA'
+      || !SAFE_KEY_ID.test(String(envelope.key_id || ''))
+      || envelope.policy_sha256 !== policyHash
+      || typeof envelope.signature !== 'string'
+      || !ED25519_SIGNATURE_BASE64URL.test(envelope.signature)) return null;
+  const signature = Buffer.from(envelope.signature, 'base64url');
+  if (signature.length !== 64 || signature.toString('base64url') !== envelope.signature) return null;
+  const key = trustedPublicKeys
+    && Object.hasOwn(trustedPublicKeys, envelope.key_id)
+    && trustedPublicKeys[envelope.key_id];
+  if (!key) return null;
+  try {
+    return crypto.verify(null, Buffer.from(canonicalFabricJson(normalized), 'utf8'), key, signature)
+      ? envelope.key_id
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 export function browserFabricDesiredStatePolicyDigest(policy) {
@@ -74,15 +107,30 @@ export function evaluateBrowserFabricDesiredStatePolicy({
   current_policy_generation = 0,
   release_gate,
   observed_guardian_protocol_generation,
+  policy_signature,
+  trusted_policy_public_keys = {},
+  now = new Date(),
 } = {}) {
   const normalized = normalizedPolicy(policy);
   if (!normalized) return hold('DESIRED_STATE_POLICY_INVALID');
+  const nowMs = now instanceof Date ? now.getTime() : Number(now);
+  if (!Number.isFinite(nowMs)) return hold('DESIRED_STATE_POLICY_NOW_INVALID');
+  if (Date.parse(normalized.policy_effective_at) > nowMs) return hold('DESIRED_STATE_POLICY_NOT_EFFECTIVE');
   if (!Number.isSafeInteger(current_policy_generation) || current_policy_generation < 0) {
     return hold('CURRENT_POLICY_GENERATION_INVALID');
   }
   if (normalized.generation <= current_policy_generation) {
     return hold('DESIRED_STATE_POLICY_STALE_GENERATION', { policy_generation: normalized.generation });
   }
+
+  const policyHash = fabricSha256(canonicalFabricJson(normalized));
+  const signatureKeyId = verifyPolicySignature(
+    policyHash,
+    normalized,
+    policy_signature,
+    trusted_policy_public_keys,
+  );
+  if (!signatureKeyId) return hold('DESIRED_STATE_POLICY_SIGNATURE_INVALID');
 
   if (!release_gate
       || release_gate.action !== 'AUTHORITY_ADVANCE_CANDIDATE'
@@ -110,7 +158,6 @@ export function evaluateBrowserFabricDesiredStatePolicy({
     return hold('GUARDIAN_PROTOCOL_TOO_OLD_FOR_DESIRED_STATE');
   }
 
-  const policyHash = fabricSha256(canonicalFabricJson(normalized));
   return Object.freeze({
     schema: BROWSER_FABRIC_DESIRED_STATE_DECISION_SCHEMA,
     action: 'DESIRED_STATE_AUTHORITY_CANDIDATE',
@@ -118,6 +165,7 @@ export function evaluateBrowserFabricDesiredStatePolicy({
     policy_version: normalized.policy_version,
     policy_generation: normalized.generation,
     policy_hash: policyHash,
+    policy_signature_key_id: signatureKeyId,
     desired_integration_sha: normalized.desired_integration_sha,
     release_channel: normalized.release_channel,
     release_tag: normalized.required_release_tag,
@@ -136,6 +184,8 @@ export function browserFabricDesiredStatePolicyContract() {
     schema: BROWSER_FABRIC_DESIRED_STATE_POLICY_SCHEMA,
     versioned_policy_required: true,
     monotonic_generation_required: true,
+    effective_time_enforced: true,
+    trusted_ed25519_signature_required: true,
     git_sha_alone_is_authority: false,
     verified_immutable_release_gate_required: true,
     installed_executable_binding_required: true,

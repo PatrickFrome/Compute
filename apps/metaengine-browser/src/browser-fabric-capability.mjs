@@ -8,6 +8,18 @@ export const BROWSER_FABRIC_CAPABILITY_MAX_TTL_MS = 5 * 60 * 1000;
 const SHA256 = /^[0-9a-f]{64}$/;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$/;
 const UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
+const ED25519_SIGNATURE_BASE64URL = /^[A-Za-z0-9_-]{86}$/;
+const ENVELOPE_KEYS = Object.freeze(['alg', 'key_id', 'claims', 'signature']);
+const REQUIRED_SAFE_FIELDS = Object.freeze([
+  'capability_id', 'issuer', 'audience', 'subject_device', 'effect_id', 'task_id',
+  'browser_context_id', 'target_id', 'target_incarnation', 'action', 'idempotency_key', 'nonce',
+]);
+const EXACT_BINDING_FIELDS = Object.freeze([
+  'audience', 'subject_device', 'effect_id', 'task_id', 'claim_generation',
+  'browser_context_id', 'target_id', 'target_incarnation', 'action',
+  'idempotency_key', 'policy_hash', 'plan_digest', 'nonce', 'max_uses',
+  'retry_budget', 'delegation_depth', 'parent_capability_digest',
+]);
 
 function fail(reason) {
   return Object.freeze({
@@ -32,7 +44,8 @@ function exactClaimKeys(claims) {
     'schema', 'capability_id', 'issuer', 'audience', 'subject_device', 'effect_id',
     'task_id', 'claim_generation', 'browser_context_id', 'target_id',
     'target_incarnation', 'action', 'issued_at', 'not_before', 'deadline',
-    'idempotency_key', 'policy_hash', 'plan_digest',
+    'idempotency_key', 'policy_hash', 'plan_digest', 'nonce', 'max_uses',
+    'retry_budget', 'delegation_depth', 'parent_capability_digest',
   ]);
   return claims && typeof claims === 'object' && !Array.isArray(claims)
     && Object.keys(claims).length === expected.size
@@ -58,79 +71,61 @@ function normalizeTime(value) {
   return Number.isFinite(ms) ? ms : null;
 }
 
-/**
- * Verify a detached, audience-bound Ed25519 capability. The verifier is pure
- * policy enforcement: it performs no queue, Browser, WTS, SCM, filesystem, or
- * network effect and cannot mint capabilities.
- */
-export function verifyBrowserFabricCapability({
-  envelope,
-  trusted_public_keys = {},
-  expected = {},
-  now = new Date(),
-  max_ttl_ms = BROWSER_FABRIC_CAPABILITY_MAX_TTL_MS,
-} = {}) {
-  if (!envelope || envelope.alg !== BROWSER_FABRIC_CAPABILITY_ALG) return fail('CAPABILITY_ALGORITHM_INVALID');
-  if (!safe(envelope.key_id) || typeof envelope.signature !== 'string' || envelope.signature.length < 32) {
-    return fail('CAPABILITY_ENVELOPE_INVALID');
-  }
-  const claims = envelope.claims;
-  if (!exactClaimKeys(claims) || claims.schema !== BROWSER_FABRIC_CAPABILITY_SCHEMA) return fail('CAPABILITY_SCHEMA_INVALID');
+function decodeEd25519Signature(value) {
+  if (typeof value !== 'string' || !ED25519_SIGNATURE_BASE64URL.test(value)) return null;
+  const decoded = Buffer.from(value, 'base64url');
+  if (decoded.length !== 64 || decoded.toString('base64url') !== value) return null;
+  return decoded;
+}
 
-  for (const key of [
-    'capability_id', 'issuer', 'audience', 'subject_device', 'effect_id', 'task_id',
-    'browser_context_id', 'target_id', 'target_incarnation', 'action', 'idempotency_key',
-  ]) {
-    if (!safe(claims[key])) return fail(`CAPABILITY_FIELD_INVALID:${key}`);
+function claimViolation(claims) {
+  if (!exactClaimKeys(claims) || claims.schema !== BROWSER_FABRIC_CAPABILITY_SCHEMA) return 'CAPABILITY_SCHEMA_INVALID';
+  const invalidField = REQUIRED_SAFE_FIELDS.find((key) => !safe(claims[key]));
+  if (invalidField) return `CAPABILITY_FIELD_INVALID:${invalidField}`;
+  if (!Number.isSafeInteger(claims.claim_generation) || claims.claim_generation <= 0) {
+    return 'CAPABILITY_CLAIM_GENERATION_INVALID';
   }
-  if (!Number.isSafeInteger(claims.claim_generation) || claims.claim_generation <= 0) return fail('CAPABILITY_CLAIM_GENERATION_INVALID');
-  if (!hash(claims.policy_hash) || !hash(claims.plan_digest)) return fail('CAPABILITY_DIGEST_BINDING_INVALID');
-  if (claims.action === '*' || claims.audience === '*' || claims.target_id === '*') return fail('CAPABILITY_WILDCARD_FORBIDDEN');
+  if (!hash(claims.policy_hash) || !hash(claims.plan_digest)) return 'CAPABILITY_DIGEST_BINDING_INVALID';
+  if (claims.max_uses !== 1 || claims.retry_budget !== 0) return 'CAPABILITY_USE_OR_RETRY_BUDGET_INVALID';
+  if (claims.delegation_depth !== 0 || claims.parent_capability_digest !== null) {
+    return 'CAPABILITY_DELEGATION_NOT_SUPPORTED';
+  }
+  return [claims.action, claims.audience, claims.target_id].includes('*')
+    ? 'CAPABILITY_WILDCARD_FORBIDDEN'
+    : null;
+}
 
+function timeViolation(claims, now, maxTtlMs) {
   const issued = normalizeTime(claims.issued_at);
   const notBefore = normalizeTime(claims.not_before);
   const deadline = normalizeTime(claims.deadline);
   const nowMs = now instanceof Date ? now.getTime() : Number(now);
-  if (![issued, notBefore, deadline, nowMs].every(Number.isFinite)) return fail('CAPABILITY_TIME_INVALID');
-  if (notBefore < issued || deadline <= notBefore) return fail('CAPABILITY_TIME_ORDER_INVALID');
-  if (deadline - issued > max_ttl_ms || max_ttl_ms <= 0) return fail('CAPABILITY_TTL_EXCEEDED');
-  if (nowMs < notBefore) return fail('CAPABILITY_NOT_YET_VALID');
-  if (nowMs > deadline) return fail('CAPABILITY_EXPIRED');
+  if (![issued, notBefore, deadline, nowMs].every(Number.isFinite)) return 'CAPABILITY_TIME_INVALID';
+  if (!Number.isSafeInteger(maxTtlMs)
+      || maxTtlMs <= 0
+      || maxTtlMs > BROWSER_FABRIC_CAPABILITY_MAX_TTL_MS) return 'CAPABILITY_MAX_TTL_POLICY_INVALID';
+  if (notBefore < issued || deadline <= notBefore) return 'CAPABILITY_TIME_ORDER_INVALID';
+  if (deadline - issued > maxTtlMs) return 'CAPABILITY_TTL_EXCEEDED';
+  if (nowMs < notBefore) return 'CAPABILITY_NOT_YET_VALID';
+  return nowMs >= deadline ? 'CAPABILITY_EXPIRED' : null;
+}
 
-  const exactBindings = [
-    ['audience', expected.audience],
-    ['subject_device', expected.subject_device],
-    ['effect_id', expected.effect_id],
-    ['task_id', expected.task_id],
-    ['claim_generation', expected.claim_generation],
-    ['browser_context_id', expected.browser_context_id],
-    ['target_id', expected.target_id],
-    ['target_incarnation', expected.target_incarnation],
-    ['action', expected.action],
-    ['idempotency_key', expected.idempotency_key],
-    ['policy_hash', expected.policy_hash],
-    ['plan_digest', expected.plan_digest],
-  ];
-  for (const [key, value] of exactBindings) {
-    if (value == null || claims[key] !== value) return fail(`CAPABILITY_BINDING_MISMATCH:${key}`);
-  }
+function bindingViolation(claims, expected) {
+  const mismatch = EXACT_BINDING_FIELDS.find((key) => !Object.hasOwn(expected, key) || claims[key] !== expected[key]);
+  return mismatch ? `CAPABILITY_BINDING_MISMATCH:${mismatch}` : null;
+}
 
-  const key = trusted_public_keys?.[envelope.key_id];
-  if (!key) return fail('CAPABILITY_KEY_UNTRUSTED');
-  let signature;
+function signatureVerification(claims, key, signature) {
   try {
-    signature = Buffer.from(envelope.signature, 'base64url');
+    return crypto.verify(null, fabricCapabilitySigningBytes(claims), key, signature)
+      ? null
+      : 'CAPABILITY_SIGNATURE_INVALID';
   } catch {
-    return fail('CAPABILITY_SIGNATURE_ENCODING_INVALID');
+    return 'CAPABILITY_SIGNATURE_VERIFICATION_ERROR';
   }
-  let verified = false;
-  try {
-    verified = crypto.verify(null, fabricCapabilitySigningBytes(claims), key, signature);
-  } catch {
-    return fail('CAPABILITY_SIGNATURE_VERIFICATION_ERROR');
-  }
-  if (!verified) return fail('CAPABILITY_SIGNATURE_INVALID');
+}
 
+function verifiedCapability(envelope, claims) {
   const capabilityDigest = fabricCapabilityDigest(envelope);
   return Object.freeze({
     ok: true,
@@ -151,6 +146,12 @@ export function verifyBrowserFabricCapability({
       deadline: claims.deadline,
       idempotency_key: claims.idempotency_key,
       policy_hash: claims.policy_hash,
+      plan_digest: claims.plan_digest,
+      nonce: claims.nonce,
+      max_uses: claims.max_uses,
+      retry_budget: claims.retry_budget,
+      delegation_depth: claims.delegation_depth,
+      parent_capability_digest: claims.parent_capability_digest,
       effect_id: claims.effect_id,
       issuer: claims.issuer,
       key_id: envelope.key_id,
@@ -160,9 +161,47 @@ export function verifyBrowserFabricCapability({
     subject_and_device_bound: true,
     exact_target_bound: true,
     short_lived: true,
+    single_use_ledger_reservation_required: true,
     automatic_retry_allowed: false,
     authority_effect: false,
   });
+}
+
+/**
+ * Verify a detached, audience-bound Ed25519 capability. The verifier is pure
+ * policy enforcement: it performs no queue, Browser, WTS, SCM, filesystem, or
+ * network effect and cannot mint capabilities.
+ */
+export function verifyBrowserFabricCapability({
+  envelope,
+  trusted_public_keys = {},
+  expected = {},
+  now = new Date(),
+  max_ttl_ms = BROWSER_FABRIC_CAPABILITY_MAX_TTL_MS,
+} = {}) {
+  if (!envelope || envelope.alg !== BROWSER_FABRIC_CAPABILITY_ALG) return fail('CAPABILITY_ALGORITHM_INVALID');
+  const envelopeKeys = Object.keys(envelope);
+  if (envelopeKeys.length !== ENVELOPE_KEYS.length
+      || !envelopeKeys.every((key) => ENVELOPE_KEYS.includes(key))) return fail('CAPABILITY_ENVELOPE_INVALID');
+  if (!safe(envelope.key_id)) {
+    return fail('CAPABILITY_ENVELOPE_INVALID');
+  }
+  const signature = decodeEd25519Signature(envelope.signature);
+  if (!signature) return fail('CAPABILITY_SIGNATURE_ENCODING_INVALID');
+  const claims = envelope.claims;
+  const claimsInvalid = claimViolation(claims);
+  if (claimsInvalid) return fail(claimsInvalid);
+  const timeInvalid = timeViolation(claims, now, max_ttl_ms);
+  if (timeInvalid) return fail(timeInvalid);
+  const bindingInvalid = bindingViolation(claims, expected);
+  if (bindingInvalid) return fail(bindingInvalid);
+
+  const key = trusted_public_keys
+    && Object.hasOwn(trusted_public_keys, envelope.key_id)
+    && trusted_public_keys[envelope.key_id];
+  if (!key) return fail('CAPABILITY_KEY_UNTRUSTED');
+  const signatureInvalid = signatureVerification(claims, key, signature);
+  return signatureInvalid ? fail(signatureInvalid) : verifiedCapability(envelope, claims);
 }
 
 export function browserFabricCapabilityContract() {
@@ -181,7 +220,15 @@ export function browserFabricCapabilityContract() {
     binds_idempotency_key: true,
     binds_policy_hash: true,
     binds_plan_digest: true,
+    binds_nonce: true,
+    maximum_uses: 1,
+    retry_budget: 0,
+    delegated_capabilities_allowed: false,
     wildcard_authority_forbidden: true,
+    strict_ed25519_signature_encoding_required: true,
+    caller_cannot_expand_max_ttl: true,
+    exact_deadline_is_expired: true,
+    single_use_ledger_reservation_required: true,
     queue_delivery_authority: false,
     signer_private_key_runtime_required: false,
     automatic_retry_allowed: false,

@@ -82,7 +82,10 @@ export function classifyBrowserFabricSecurityAdvisorFindings(findings = []) {
     schema: BROWSER_FABRIC_SECURITY_ADVISOR_POLICY_SCHEMA,
     findings: Object.freeze(classified),
     p0_count: p0.length,
-    p0_entities: Object.freeze([...new Set(p0.map((finding) => finding.entity))].sort()),
+    p0_entities: Object.freeze(
+      [...new Set(p0.map((finding) => finding.entity))]
+        .sort((left, right) => left.localeCompare(right)),
+    ),
     automatic_ddl_allowed: false,
     automatic_rls_policy_generation_allowed: false,
     security_advisor_is_authority: false,
