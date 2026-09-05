@@ -151,10 +151,11 @@ export class NativeSupervisorCommandFastlane {
 
   snapshot() {
     return Object.freeze({
-      schema: 'metaengine.native-supervisor.command-fastlane.v2',
+      schema: 'metaengine.native-supervisor.command-fastlane.v1',
       enabled: true,
       running: this.#isRunning(),
       active: this.active,
+      interval_ms: this.#intervalMs,
       fallback_interval_ms: this.#intervalMs,
       current_backoff_ms: this.#backoffMs,
       max_drain: this.#maxDrain,
@@ -166,6 +167,7 @@ export class NativeSupervisorCommandFastlane {
       commands_executed: this.#executed,
       drain_bursts: this.#drainBursts,
       max_observed_drain: this.#maxObservedDrain,
+      last_error: this.#lastError,
       trusted_wake_transport_hint_only: true,
       command_pickup_transport_only: true,
       command_execution_exclusive: 'local_slot_plus_db_lease_transactional',
