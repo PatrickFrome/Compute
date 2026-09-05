@@ -5,11 +5,15 @@ import { openRealtimeCommandWake } from '../supabase/a2-browser-native-superviso
 class FakeSocket {
   sent = [];
   closed = false;
+  failSend = false;
   onopen = null;
   onmessage = null;
   onerror = null;
   onclose = null;
-  send(value) { this.sent.push(JSON.parse(String(value))); }
+  send(value) {
+    if (this.failSend) throw new Error('fake_send_failed');
+    this.sent.push(JSON.parse(String(value)));
+  }
   close() { this.closed = true; this.onclose?.(); }
   open() { this.onopen?.(); }
   message(row) { this.onmessage?.({ data: JSON.stringify(row) }); }
@@ -17,6 +21,10 @@ class FakeSocket {
 
 function ack(socket, topic, ref) {
   socket.message({ topic: `realtime:${topic}`, event: 'phx_reply', payload: { status: 'ok' }, ref, join_ref: ref });
+}
+
+function reject(socket, topic, ref) {
+  socket.message({ topic: `realtime:${topic}`, event: 'phx_reply', payload: { status: 'error', response: { reason: 'denied' } }, ref, join_ref: ref });
 }
 
 test('joining all channels resolves subscribed but does not resolve wake', async () => {
@@ -63,6 +71,50 @@ test('broadcast received after subscription remains observable while caller perf
   await new Promise((resolve) => setImmediate(resolve));
   const wake = await pending.wake;
   assert.equal(wake.reason, 'BROADCAST');
+  pending.close();
+});
+
+test('private-channel join rejection fails immediately instead of burning the held wait budget', async () => {
+  const socket = new FakeSocket();
+  let timerFired = false;
+  const pending = openRealtimeCommandWake({
+    createSocket: () => socket,
+    topics: ['client-topic', 'all-topic'],
+    accessToken: 'service-token',
+    timeoutMs: 5000,
+    setTimer: (fn) => ({ unref() {}, fn }),
+    clearTimer: () => {},
+  });
+  socket.open();
+  reject(socket, 'client-topic', '1');
+  const subscribed = await pending.subscribed;
+  const wake = await pending.wake;
+  assert.equal(subscribed.ok, false);
+  assert.equal(subscribed.reason, 'JOIN_REJECTED');
+  assert.equal(wake.reason, 'JOIN_REJECTED');
+  assert.equal(wake.broadcast_received, false);
+  assert.equal(wake.authority_effect, false);
+  assert.equal(timerFired, false);
+  pending.close();
+});
+
+test('socket join send failure fails immediately and remains zero-authority', async () => {
+  const socket = new FakeSocket();
+  socket.failSend = true;
+  const pending = openRealtimeCommandWake({
+    createSocket: () => socket,
+    topics: ['client-topic'],
+    accessToken: 'service-token',
+    timeoutMs: 5000,
+  });
+  socket.open();
+  const subscribed = await pending.subscribed;
+  const wake = await pending.wake;
+  assert.equal(subscribed.ok, false);
+  assert.equal(subscribed.reason, 'JOIN_SEND_FAILED');
+  assert.equal(wake.reason, 'JOIN_SEND_FAILED');
+  assert.equal(wake.transport_delivery_is_authority, false);
+  assert.equal(wake.authority_effect, false);
   pending.close();
 });
 
