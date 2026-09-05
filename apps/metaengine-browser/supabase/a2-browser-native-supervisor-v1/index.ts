@@ -20,15 +20,13 @@ const BATCH_COMPLETE_RPC='h205f22_a2_browser_supervisor_complete_batch_v1';
 const ACTIVATE_RPC='h205f22_a2_browser_device_activate_approved_v1';
 const MESH_SYNC_RPC='h205f22_a2_supervisor_mesh_sync_v1';
 const HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS=1500;
-const MAX_BATCH_WAIT_MS=15000;
 const cors={'access-control-allow-origin':'*','access-control-allow-methods':'GET,POST,OPTIONS','access-control-allow-headers':'content-type,x-a2-chat-bridge-client,x-a2-device-profile,x-a2-device-id,x-a2-device-timestamp,x-a2-device-nonce,x-a2-device-body-sha256,x-a2-device-signature,x-metaengine-enroll-timestamp,x-metaengine-enroll-nonce,x-metaengine-enroll-signature','cache-control':'no-store','x-content-type-options':'nosniff'};
 const json=(status:number,body:any)=>new Response(JSON.stringify(body),{status,headers:{...cors,'content-type':'application/json; charset=utf-8'}});
-const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 function restHeaders(extra:Record<string,string>={}){if(!SERVICE_ROLE)throw new Error('service_role_missing');return{apikey:SERVICE_ROLE,authorization:`Bearer ${SERVICE_ROLE}`,'content-type':'application/json',...extra}}
 async function rest(path:string,init:RequestInit={}){const r=await fetch(`${SUPABASE_URL}/rest/v1/${path}`,{...init,headers:restHeaders((init.headers||{}) as Record<string,string>)});const t=await r.text();if(!r.ok)throw new Error(`rest_${r.status}:${t.slice(0,200)}`);return t?JSON.parse(t):null}
 const rpc=(name:string,args:any)=>rest(`rpc/${encodeURIComponent(name)}`,{method:'POST',body:JSON.stringify(args)});
 const healthCapabilityRpc=(name:string,args:any)=>{if(name!=='devos_runtime_capabilities_v1')throw new Error('health_capability_rpc_not_allowed');return rest(`rpc/${encodeURIComponent(name)}`,{method:'POST',body:JSON.stringify(args),signal:AbortSignal.timeout(HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS)})};
-async function health(){const capability=await projectNativeSupervisorRuntimeCapabilityHealth({rpc:healthCapabilityRpc});return{ok:true,schema:'metaengine.native-browser-supervisor.health.v1',profile:PROFILE,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:true,command_wait_delivery_is_authority:false,...runtimeCapabilityHealthResponseFields(capability)}}
+async function health(){const capability=await projectNativeSupervisorRuntimeCapabilityHealth({rpc:healthCapabilityRpc});return{ok:true,schema:'metaengine.native-browser-supervisor.health.v1',profile:PROFILE,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:'REALTIME_BROADCAST_PROXY',command_wake_delivery_is_authority:false,...runtimeCapabilityHealthResponseFields(capability)}}
 async function sha256(v:string){const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v));return[...new Uint8Array(d)].map(b=>b.toString(16).padStart(2,'0')).join('')}
 function b64urlBytes(v:string){if(!/^[A-Za-z0-9_-]+$/.test(v))throw new Error('signature_encoding_invalid');const pad='='.repeat((4-v.length%4)%4);const bin=atob(v.replace(/-/g,'+').replace(/_/g,'/')+pad);return Uint8Array.from(bin,c=>c.charCodeAt(0))}
 function canonicalJwk(value:any){if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('jwk_invalid');const jwk={crv:String(value.crv||''),ext:value.ext===true,key_ops:Array.isArray(value.key_ops)?value.key_ops.map(String):[],kty:String(value.kty||''),x:String(value.x||''),y:String(value.y||'')};if(jwk.kty!=='EC'||jwk.crv!=='P-256'||!jwk.ext||jwk.key_ops.length!==1||jwk.key_ops[0]!=='verify'||!/^[A-Za-z0-9_-]{43}$/.test(jwk.x)||!/^[A-Za-z0-9_-]{43}$/.test(jwk.y))throw new Error('jwk_invalid');return jwk}
@@ -52,10 +50,47 @@ function boundedState(value:any){const s=value&&typeof value==='object'?value:{}
 async function upsertState(req:Request,body:any,identity:any){const id=clientId(req);const s=boundedState(body?.state);if(s.supervisor_mesh)await rpc(MESH_SYNC_RPC,{p_client_id:id,p_mesh:s.supervisor_mesh});const row={client_id:id,workspace_id:WORKSPACE_ID,last_seen_at:new Date().toISOString(),extension_version:s.shell_version||null,operator_runtime:'native-electron-supervisor-v1',supervisor_mode:s.supervisor_mode,armed:s.armed,operator_mode:s.operator_mode,ordering_policy:'NATIVE_TYPED_COMMAND_LANES_V1',last_command_id:body?.last_command_id||null,last_command_status:body?.last_command_status||null,state:{...s,transport_identity:{profile:identity.profile,device_id:identity.device_id,key_fingerprint_sha256:identity.key_fingerprint_sha256}},authority_effect:s.supervisor_mode==='CONTROL'||s.armed===true};await rest(`${STATE_TABLE}?on_conflict=client_id`,{method:'POST',headers:{prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(row)});return row}
 async function lease(req:Request,body:any){return rpc(LEASE_RPC,{p_workspace_id:WORKSPACE_ID,p_client_id:clientId(req),p_supervisor_mode:modeOf(body?.supervisor_mode),p_lease_timeout_seconds:120})}
 async function leaseBatch(req:Request,body:any){return rpc(BATCH_LEASE_RPC,{p_workspace_id:WORKSPACE_ID,p_client_id:clientId(req),p_supervisor_mode:modeOf(body?.supervisor_mode),p_lease_timeout_seconds:120,p_max_batch:Math.max(1,Math.min(64,Number(body?.max_batch)||64)),p_max_tab_mutations:Math.max(1,Math.min(16,Number(body?.max_tab_mutations)||8))})}
-async function waitBatch(req:Request,body:any){const waitMs=Math.max(0,Math.min(MAX_BATCH_WAIT_MS,Number(body?.wait_ms)||10000));const deadline=Date.now()+waitMs;let delay=25;let batch=await leaseBatch(req,body);while((!Array.isArray(batch?.commands)||batch.commands.length===0)&&Date.now()<deadline){await sleep(Math.min(delay,Math.max(1,deadline-Date.now())));delay=Math.min(250,Math.ceil(delay*1.6));batch=await leaseBatch(req,body)}return{...batch,waited:true,max_wait_ms:waitMs,transport_delivery_is_authority:false,authority_effect:false}}
+function realtimeTopic(client:string){return `metaengine-control:${WORKSPACE_ID}:${client}`}
+function realtimeAllTopic(){return `metaengine-control:${WORKSPACE_ID}:all`}
+function realtimeSocketUrl(){if(!SUPABASE_URL||!SERVICE_ROLE)throw new Error('realtime_wake_config_missing');return `${SUPABASE_URL.replace(/^https:/,'wss:')}/realtime/v1/websocket?apikey=${encodeURIComponent(SERVICE_ROLE)}&vsn=1.0.0`}
+async function waitForCommandWake(client:string){
+  const topics=[realtimeTopic(client),realtimeAllTopic()];
+  return await new Promise<string>((resolve)=>{
+    const socket=new WebSocket(realtimeSocketUrl());
+    let settled=false;
+    const joined=new Set<string>();
+    const finish=(reason:string)=>{if(settled)return;settled=true;try{socket.close()}catch{}resolve(reason)};
+    socket.onopen=()=>{
+      topics.forEach((topic,index)=>{
+        const ref=String(index+1);
+        socket.send(JSON.stringify({topic:`realtime:${topic}`,event:'phx_join',payload:{config:{broadcast:{ack:false,self:false},presence:{enabled:false},private:true},access_token:SERVICE_ROLE},ref,join_ref:ref}));
+      });
+    };
+    socket.onmessage=(event)=>{
+      let row:any;try{row=JSON.parse(String(event.data||''))}catch{return}
+      if(row?.event==='phx_reply'&&row?.payload?.status==='ok'&&topics.some((topic)=>row?.topic===`realtime:${topic}`)){
+        joined.add(String(row.topic));
+        if(joined.size===topics.length)finish('SUBSCRIBED_RECHECK');
+        return;
+      }
+      if(row?.event==='broadcast'&&topics.some((topic)=>row?.topic===`realtime:${topic}`)){finish('BROADCAST');return}
+      if(row?.event==='phx_error'||row?.event==='phx_close')finish('CHANNEL_CLOSED');
+    };
+    socket.onerror=()=>finish('CHANNEL_ERROR');
+    socket.onclose=()=>finish('CHANNEL_CLOSED');
+  });
+}
+async function waitBatch(req:Request,body:any){
+  const initial=await leaseBatch(req,body);
+  if(Array.isArray(initial?.commands)&&initial.commands.length>0)return{...initial,wake_reason:'IMMEDIATE',transport_delivery_is_authority:false,authority_effect:false};
+  const client=clientId(req);
+  const reason=await waitForCommandWake(client);
+  const after=await leaseBatch(req,body);
+  return{...after,wake_reason:reason,transport_delivery_is_authority:false,authority_effect:false};
+}
 async function complete(req:Request,commandId:string,body:any){const rows=await rest(`${COMMAND_TABLE}?workspace_id=eq.${WORKSPACE_ID}&command_id=eq.${encodeURIComponent(commandId)}&select=command_id,action&limit=1`);const row=Array.isArray(rows)?rows[0]:null;if(!row)return json(404,{error:'command_not_found'});const r=await rpc(COMPLETE_RPC,{p_workspace_id:WORKSPACE_ID,p_command_id:commandId,p_client_id:clientId(req),p_ok:body?.ok===true,p_receipt:body?.receipt&&typeof body.receipt==='object'?body.receipt:{},p_error:body?.ok===true?null:String(body?.error||'command_failed').slice(0,500),p_authority_effect:false});return json(r?.accepted===true?200:409,r)}
 async function completeBatch(req:Request,body:any){if(!Array.isArray(body?.results)||body.results.length>64)return json(400,{error:'command_batch_results_invalid'});const r=await rpc(BATCH_COMPLETE_RPC,{p_workspace_id:WORKSPACE_ID,p_client_id:clientId(req),p_results:body.results});return json(200,r)}
-async function status(){const states=await rest(`${STATE_TABLE}?workspace_id=eq.${WORKSPACE_ID}&select=*&order=last_seen_at.desc&limit=8`);const commands=await rest(`${COMMAND_TABLE}?workspace_id=eq.${WORKSPACE_ID}&select=command_id,idempotency_key,action,platform,status,issued_by,issued_at,expires_at,leased_by,leased_at,completed_at,authority_effect,receipt,error&order=issued_at.desc&limit=40`);return{schema:'metaengine.native-browser-supervisor.status.v1',workspace_id:WORKSPACE_ID,device_auth_required:true,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:true,states,commands}}
+async function status(){const states=await rest(`${STATE_TABLE}?workspace_id=eq.${WORKSPACE_ID}&select=*&order=last_seen_at.desc&limit=8`);const commands=await rest(`${COMMAND_TABLE}?workspace_id=eq.${WORKSPACE_ID}&select=command_id,idempotency_key,action,platform,status,issued_by,issued_at,expires_at,leased_by,leased_at,completed_at,authority_effect,receipt,error&order=issued_at.desc&limit=40`);return{schema:'metaengine.native-browser-supervisor.status.v1',workspace_id:WORKSPACE_ID,device_auth_required:true,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:'REALTIME_BROADCAST_PROXY',states,commands}}
 const devosRoutes=createDevosSupervisorRoutes({rpc,workspaceId:WORKSPACE_ID});
 const devosPromotionRoutes=createDevosPromotionRoutes({rpc,workspaceId:WORKSPACE_ID});
 const metaRoutes=createMetaSupervisorRoutes({rpc,workspaceId:WORKSPACE_ID});
