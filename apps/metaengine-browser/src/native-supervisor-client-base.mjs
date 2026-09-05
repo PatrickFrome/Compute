@@ -4,6 +4,7 @@ import { SUPERVISOR_DEVICE_PROFILE } from './supervisor-device-identity.mjs';
 import { SupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime.mjs';
 import { SupervisorMeshRuntime } from './supervisor-mesh-runtime.mjs';
 import { SelfUpdateRuntime } from './self-update-runtime.mjs';
+import { NativeSupervisorCommandFastlane } from './native-supervisor-command-fastlane.mjs';
 import { confirmSelfUpdateRestartSafety } from './self-update-restart-safety.mjs';
 import { persistPreInstallReceipt } from './self-update-handoff.mjs';
 import { reconcileRestoredGeneratingChats } from './self-update-chat-reconcile.mjs';
@@ -99,8 +100,14 @@ export class NativeSupervisorClient {
   #mesh = null;
   #selfUpdate = null;
   #continuityStatus = { state: 'NONE', restored_tabs: 0, target_version: null, authority_effect: false };
+  // Command pickup fastlane (transport accelerator only, see
+  // native-supervisor-command-fastlane.mjs). The single supervisor cycle remains
+  // the only scheduler for lifecycle/mesh/self-update/heartbeat. Mutual exclusion
+  // of command execution: local slot + transactional DB lease.
+  #commandSlotBusy = false;
+  #commandFastlane = null;
 
-  constructor({ identity, fetchImpl = globalThis.fetch, getState, executeCommand, version, intervalMs = 2000, beforeSelfUpdateInstall = null, meshStatePath = null }) {
+  constructor({ identity, fetchImpl = globalThis.fetch, getState, executeCommand, version, intervalMs = 2000, beforeSelfUpdateInstall = null, meshStatePath = null, commandFastlane = false, commandFastlaneIntervalMs = 750 }) {
     if (!identity) throw new Error('native_supervisor_identity_required');
     if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
     if (typeof getState !== 'function') throw new Error('native_supervisor_state_provider_required');
@@ -112,6 +119,15 @@ export class NativeSupervisorClient {
     this.#executeCommand = executeCommand;
     this.#version = String(version || '0.0.0');
     this.#intervalMs = Math.max(1000, Number(intervalMs || 2000));
+    this.#commandFastlane = commandFastlane === true
+      ? new NativeSupervisorCommandFastlane({
+        intervalMs: Math.max(250, Number(commandFastlaneIntervalMs) || 750),
+        isRunning: () => this.#running,
+        isSlotBusy: () => this.#commandSlotBusy,
+        identitySnapshot: () => this.#identity.snapshot?.() || null,
+        pickupAndRun: () => this.#pickupAndRunCommand(),
+      })
+      : null;
 
     const executeSupervisorCommand = async (command) => {
       const action = String(command?.action || '');
@@ -172,6 +188,8 @@ export class NativeSupervisorClient {
       identity: this.#identity.snapshot(),
       supervisor_mode: this.#supervisorMode,
       armed: this.#armed,
+      command_fastlane: this.#commandFastlane?.snapshot()
+        || Object.freeze({ enabled: false, scheduler_authority: false, command_pickup_transport_only: false, authority_effect: false }),
       lifecycle: this.#lifecycle?.snapshot() || null,
       supervisor_mesh: this.#mesh?.snapshot() || null,
       self_update: this.#selfUpdate?.snapshot() || null,
@@ -277,6 +295,7 @@ export class NativeSupervisorClient {
     // Arm the scheduler before any network/enrollment/bootstrap await. A transient
     // startup failure must degrade one cycle, never terminate the supervisor service.
     this.#schedule();
+    this.#commandFastlane?.start();
     try {
       await this.#identity.ensure();
       await this.#restoreSessionContinuity().catch((error) => {
@@ -300,6 +319,7 @@ export class NativeSupervisorClient {
     this.#running = false;
     this.#mesh?.stop?.();
     this.#lifecycle?.stop?.();
+    this.#commandFastlane?.stop();
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
   }
@@ -380,6 +400,31 @@ export class NativeSupervisorClient {
     this.#lastHeartbeatAt = new Date().toISOString();
   }
 
+  #tryAcquireCommandSlot() {
+    if (this.#commandSlotBusy) return false;
+    this.#commandSlotBusy = true;
+    return true;
+  }
+
+  #releaseCommandSlot() {
+    this.#commandSlotBusy = false;
+  }
+
+  // Single guarded path for command pickup + execution. Both the supervisor
+  // cycle and the fastlane route through here; the local slot guarantees at
+  // most one command executes at a time, and the DB lease guarantees at most
+  // one client wins each PENDING command regardless of poll frequency.
+  async #pickupAndRunCommand() {
+    if (!this.#tryAcquireCommandSlot()) return null;
+    try {
+      const command = await this.#nextCommand();
+      if (command) await this.#runCommand(command);
+      return command || null;
+    } finally {
+      this.#releaseCommandSlot();
+    }
+  }
+
   async #nextCommand() {
     const response = await this.#signedRequest('/v1/commands/next', { payload: { supervisor_mode: this.#supervisorMode } });
     const body = await response.json().catch(() => ({}));
@@ -446,8 +491,7 @@ export class NativeSupervisorClient {
         const identity = await this.ensureEnrollment();
         if (!identity?.device_id) return this.snapshot();
         await this.#heartbeat();
-        const command = await this.#nextCommand();
-        if (command) await this.#runCommand(command);
+        await this.#pickupAndRunCommand();
         await this.#mesh?.reconcile().catch(() => {});
         await this.#lifecycle?.cycle().catch(() => {});
         await this.#mesh?.dispatchRecoveryIfNeeded().catch(() => {});
