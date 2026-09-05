@@ -15,7 +15,11 @@ permissions:
 
 jobs:
   fabric-foundation-contract:
-    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
       - name: Checkout exact candidate head
@@ -38,13 +42,16 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Execute fabric ledger capability cell release recovery SLO governance contracts
-        working-directory: apps/metaengine-browser
-        shell: powershell
+      - name: Execute fabric ledger capability cell release recovery update-trust SLO governance contracts
+        shell: bash
         run: |
-          $ErrorActionPreference = 'Stop'
-          node --test test/browser-sovereign-fabric-foundation.test.mjs test/browser-sovereign-fabric-isolation-governance.test.mjs test/browser-sovereign-fabric-domain-policy.test.mjs
-          if ($LASTEXITCODE -ne 0) { throw "browser_fabric_contract_exit_$LASTEXITCODE" }
+          set -euo pipefail
+          cd apps/metaengine-browser
+          node --test \
+            test/browser-sovereign-fabric-foundation.test.mjs \
+            test/browser-sovereign-fabric-isolation-governance.test.mjs \
+            test/browser-sovereign-fabric-domain-policy.test.mjs \
+            test/browser-sovereign-fabric-update-trust.test.mjs
 
       - name: Prove source-only SQL cannot auto-apply production remediation
         shell: bash
@@ -64,4 +71,4 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src/browser-fabric-effect-ledger.mjs apps/metaengine-browser/src/browser-fabric-capability.mjs apps/metaengine-browser/src/browser-fabric-browser-cell.mjs apps/metaengine-browser/src/browser-fabric-cell-fleet.mjs apps/metaengine-browser/src/browser-fabric-effect-domain-policy.mjs apps/metaengine-browser/src/browser-fabric-release-authority-gate.mjs apps/metaengine-browser/src/browser-fabric-guardian-recovery-plan.mjs apps/metaengine-browser/src/browser-fabric-slo.mjs apps/metaengine-browser/src/browser-fabric-governance.mjs apps/metaengine-browser/src/browser-fabric-trace-context.mjs apps/metaengine-browser/test/browser-sovereign-fabric-foundation.test.mjs apps/metaengine-browser/test/browser-sovereign-fabric-isolation-governance.test.mjs apps/metaengine-browser/test/browser-sovereign-fabric-domain-policy.test.mjs sql/browser_fabric_transport_promotion_acl_dry_run_v1.sql sql/browser_fabric_event_effect_ledger_pilot_v1.sql docs/browser-sovereign-compute-fabric-foundation-v1.md .github/workflows/browser-sovereign-fabric-foundation-v1.yml)"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src/browser-fabric-effect-ledger.mjs apps/metaengine-browser/src/browser-fabric-capability.mjs apps/metaengine-browser/src/browser-fabric-browser-cell.mjs apps/metaengine-browser/src/browser-fabric-cell-fleet.mjs apps/metaengine-browser/src/browser-fabric-effect-domain-policy.mjs apps/metaengine-browser/src/browser-fabric-release-authority-gate.mjs apps/metaengine-browser/src/browser-fabric-guardian-recovery-plan.mjs apps/metaengine-browser/src/browser-fabric-update-trust.mjs apps/metaengine-browser/src/browser-fabric-slo.mjs apps/metaengine-browser/src/browser-fabric-governance.mjs apps/metaengine-browser/src/browser-fabric-trace-context.mjs apps/metaengine-browser/test/browser-sovereign-fabric-foundation.test.mjs apps/metaengine-browser/test/browser-sovereign-fabric-isolation-governance.test.mjs apps/metaengine-browser/test/browser-sovereign-fabric-domain-policy.test.mjs apps/metaengine-browser/test/browser-sovereign-fabric-update-trust.test.mjs sql/browser_fabric_transport_promotion_acl_dry_run_v1.sql sql/browser_fabric_event_effect_ledger_pilot_v1.sql docs/browser-sovereign-compute-fabric-foundation-v1.md .github/workflows/browser-sovereign-fabric-foundation-v1.yml)"
