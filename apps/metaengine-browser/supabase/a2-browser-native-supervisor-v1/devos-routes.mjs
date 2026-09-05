@@ -1,4 +1,5 @@
 import { createMetaDevosSuperstep } from './meta-devos-superstep.mjs';
+import { createWorkspaceObservationRoutes } from './workspace-observation-routes.mjs';
 
 const AGENT_RE=/^agent_[a-z0-9-]{8,64}$/;
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -16,6 +17,13 @@ const TRANSPORT_ADMISSION_FENCES=new Set([
   'devos_transport_supervisor_snapshot_missing_after_lock',
   'devos_transport_client_actuation_lease_active',
   'devos_transport_supervisor_snapshot_stale',
+  'devos_transport_supervisor_schema_invalid',
+  'devos_transport_supervisor_client_kind_invalid',
+  'devos_transport_identity_invalid',
+  'devos_transport_device_binding_invalid',
+  'devos_dispatch_runtime_not_ready',
+  'devos_dispatch_continuity_degraded',
+  'devos_transport_fleet_contract_invalid',
   'devos_transport_agent_missing',
   'devos_transport_agent_not_active',
   'devos_transport_agent_binding_mismatch',
@@ -27,7 +35,7 @@ const json=(status,body)=>new Response(JSON.stringify(body),{status,headers:{'co
 
 function int(value,name){const n=Number(value);if(!Number.isSafeInteger(n)||n<1)throw new Error(`devos_${name}_invalid`);return n;}
 function binding(body={}){
-  const out={task_id:String(body.task_id||'').toLowerCase(),agent_id:String(body.agent_id||'').toLowerCase(),lease_generation:int(body.lease_generation,'lease_generation'),tab_id:String(body.tab_id||''),target_id:String(body.target_id||'').toLowerCase(),agent_generation_epoch:int(body.agent_generation_epoch,'agent_generation_epoch')};
+  const out={task_id:String(body.task_id||'').toLowerCase(),agent_id:String(body.agent_id||'').toLowerCase(),lease_generation:int(body.lease_generation,'lease_generation'),tab_id:String(body.tab_id||''),target_id:String(body.target_id||'').toLowerCase(),agent_generation_epoch:int(body.agent_generation_epoch||0)};
   if(!UUID_RE.test(out.task_id)||!AGENT_RE.test(out.agent_id)||!out.tab_id||out.tab_id.length>160||!TARGET_RE.test(out.target_id))throw new Error('devos_binding_invalid');
   return out;
 }
@@ -161,6 +169,7 @@ function schedulerBackpressure(result){
 export function createDevosSupervisorRoutes({rpc,workspaceId}={}){
   if(typeof rpc!=='function'||!UUID_RE.test(String(workspaceId||'')))throw new Error('devos_routes_dependencies_invalid');
   const metaSuperstep=createMetaDevosSuperstep({rpc,workspaceId});
+  const workspaceObservation=createWorkspaceObservationRoutes({rpc,workspaceId});
   return async function handle({req,path,body,clientId}={}){
     const effectMatch=String(path||'').match(/^\/v1\/commands\/([0-9a-f-]{36})\/effect-intent$/i);
     if(req?.method==='POST'&&effectMatch){
@@ -172,6 +181,8 @@ export function createDevosSupervisorRoutes({rpc,workspaceId}={}){
     }
     if(!String(path||'').startsWith('/v1/devos/'))return null;
     if(!clientId)return json(401,{error:'device_auth_required'});
+    const workspaceReadback=await workspaceObservation({req,path,clientId});
+    if(workspaceReadback)return workspaceReadback;
     if(req?.method==='POST'&&path==='/v1/devos/cycle'){
       const agents=boundedAgents(body?.fleet);
       const metaOrchestrator=await metaSuperstep({clientId});
