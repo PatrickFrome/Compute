@@ -77,26 +77,35 @@ export function openRealtimeCommandWake({
   timer?.unref?.();
 
   socket.onopen = () => {
-    topics.forEach((topic, index) => {
-      const ref = String(index + 1);
-      socket.send(JSON.stringify({
-        topic: `realtime:${topic}`,
-        event: 'phx_join',
-        payload: {
-          config: { broadcast: { ack: false, self: false }, presence: { enabled: false }, private: true },
-          access_token: accessToken,
-        },
-        ref,
-        join_ref: ref,
-      }));
-    });
+    try {
+      topics.forEach((topic, index) => {
+        const ref = String(index + 1);
+        socket.send(JSON.stringify({
+          topic: `realtime:${topic}`,
+          event: 'phx_join',
+          payload: {
+            config: { broadcast: { ack: false, self: false }, presence: { enabled: false }, private: true },
+            access_token: accessToken,
+          },
+          ref,
+          join_ref: ref,
+        }));
+      });
+    } catch {
+      fail('JOIN_SEND_FAILED');
+    }
   };
 
   socket.onmessage = (event) => {
     let row;
     try { row = JSON.parse(String(event?.data || '')); } catch { return; }
-    if (row?.event === 'phx_reply' && row?.payload?.status === 'ok' && expectedTopics.has(String(row?.topic || ''))) {
-      joined.add(String(row.topic));
+    const topic = String(row?.topic || '');
+    if (row?.event === 'phx_reply' && expectedTopics.has(topic)) {
+      if (row?.payload?.status !== 'ok') {
+        fail('JOIN_REJECTED');
+        return;
+      }
+      joined.add(topic);
       if (joined.size === expectedTopics.size) {
         finishSubscribed({
           schema: REALTIME_COMMAND_WAKE_SCHEMA,
@@ -108,7 +117,7 @@ export function openRealtimeCommandWake({
       }
       return;
     }
-    if (row?.event === 'broadcast' && expectedTopics.has(String(row?.topic || ''))) {
+    if (row?.event === 'broadcast' && expectedTopics.has(topic)) {
       finishWake('BROADCAST');
       return;
     }
