@@ -9,7 +9,6 @@ export const COMMAND_LANES = Object.freeze({
 
 const READ_ONLY_ACTIONS = new Set([
   'POLL', 'CAPTURE', 'CAPTURE_VIEW', 'CONTROL_CAPABILITIES',
-  'PROCESS_CENSUS', 'PROCESS_EVENTS', 'CONTROL_LATENCY_STATUS',
   'DEV_PLANE_STATUS', 'DEV_PLANE_HEALTH', 'DEV_PLANE_CAPABILITIES',
   'DEV_PLANE_PROCESS_METRICS', 'DEV_PLANE_REPO_HEAD',
   'DOWNLOAD_STATUS', 'SELF_UPDATE_STATUS', 'GATE_STATUS',
@@ -161,6 +160,7 @@ export class NativeSupervisorCommandLaneScheduler {
       same_tab_mutations_serialized: true,
       global_mutations_exclusive: true,
       read_only_parallel: true,
+      immutable_original_order_barriers: true,
       authority_effect: false,
     });
   }
@@ -237,7 +237,11 @@ export class NativeSupervisorCommandLaneScheduler {
 
     while (pending.length > 0 || active.size > 0) {
       let launched = false;
-      const firstExclusiveIndex = pending.findIndex((item) => !item.descriptor.read_only && item.descriptor.exclusive);
+      // Use immutable input order, never the mutable pending array position. When
+      // an earlier command is removed from pending, later commands must not jump
+      // across a still-pending global/emergency mutation barrier.
+      const firstExclusive = pending.find((item) => !item.descriptor.read_only && item.descriptor.exclusive) || null;
+      const firstExclusiveOrder = firstExclusive?.index ?? null;
 
       for (let i = 0; i < pending.length;) {
         const item = pending[i];
@@ -249,7 +253,7 @@ export class NativeSupervisorCommandLaneScheduler {
         } else if (descriptor.exclusive) {
           runnable = activeMutations === 0;
         } else {
-          const behindExclusiveBarrier = firstExclusiveIndex >= 0 && i > firstExclusiveIndex;
+          const behindExclusiveBarrier = firstExclusiveOrder != null && item.index > firstExclusiveOrder;
           runnable = !behindExclusiveBarrier
             && !exclusiveMutation
             && activeMutations < this.#mutationConcurrency
@@ -284,6 +288,7 @@ export const NATIVE_SUPERVISOR_COMMAND_LANE_CONTRACT = Object.freeze({
   emergency_is_exclusive: true,
   unknown_action_parallelism_allowed: false,
   bounded_backpressure_required: true,
+  immutable_original_order_barriers: true,
   automatic_effect_retry_allowed: false,
   authority_effect: false,
 });
