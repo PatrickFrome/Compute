@@ -16,7 +16,13 @@ test('native supervisor heartbeat telemetry remains owned by exact base used by 
   const publicClient = source(publicPath);
   assert.match(base, /shell_version:\s*this\.#version/);
   assert.match(base, /self_update:\s*this\.#selfUpdate\?\.snapshot\(\)\s*\|\|\s*null/);
-  assert.match(base, /await this\.#heartbeat\(\)/);
+  // Heartbeat collection/network work must never sit in front of command admission.
+  // The base owns one coalesced in-flight heartbeat promise and the cycle only kicks
+  // it before immediately entering the command fast lane.
+  assert.match(base, /#heartbeatPromise/);
+  assert.match(base, /#kickHeartbeat\(\)/);
+  assert.match(base, /this\.#heartbeatPromise\s*=\s*this\.#heartbeat\(\)/);
+  assert.doesNotMatch(base, /await\s+this\.#heartbeat\(\)/);
   assert.match(base, /response\.status !== 202/);
   assert.match(core, /extends BaseNativeSupervisorClient/);
   assert.match(publicClient, /NativeSupervisorClient as CoreNativeSupervisorClient/);
