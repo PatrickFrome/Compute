@@ -6,6 +6,10 @@ import {
 } from './native-supervisor-client-core.mjs';
 import { BrowserRealtimeProcessPlane } from './browser-realtime-process-plane.mjs';
 import {
+  BROWSER_COGNITIVE_BATCH_SCHEMA,
+  BrowserCognitiveDeltaTransport,
+} from './browser-cognitive-delta-transport.mjs';
+import {
   normalizeWorkspaceBindingSnapshot,
   unavailableWorkspaceBindingSnapshot,
 } from './workspace-binding-observer.mjs';
@@ -14,6 +18,7 @@ export * from './native-supervisor-client-core.mjs';
 
 const COMMAND_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TAB_ID_RE = /^tab_[0-9a-f-]{36}$/i;
+export const NATIVE_SUPERVISOR_COGNITIVE_DELTA_PATH = '/v1/cognitive/deltas';
 const hostResilienceRuntime = () => globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__ || null;
 const hostResilienceSnapshot = () => hostResilienceRuntime()?.snapshot?.() || null;
 
@@ -21,6 +26,77 @@ function boundedInt(value, fallback, min, max) {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed)) return fallback;
   return Math.max(min, Math.min(max, parsed));
+}
+
+export async function sendNativeSupervisorCognitiveBatch({ identity, fetchImpl, batch } = {}) {
+  if (!identity || typeof identity.ensure !== 'function' || typeof identity.deviceHeaders !== 'function') {
+    throw new Error('native_supervisor_cognitive_identity_required');
+  }
+  if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_cognitive_fetch_required');
+  if (
+    !batch
+    || batch.schema !== BROWSER_COGNITIVE_BATCH_SCHEMA
+    || batch.raw_payload_exposed !== false
+    || batch.page_text_exposed !== false
+    || batch.input_values_exposed !== false
+    || batch.delivery_is_authority !== false
+    || batch.control_authority !== false
+    || batch.command_leasing !== false
+    || batch.authority_effect !== false
+  ) {
+    throw new Error('native_supervisor_cognitive_batch_invalid');
+  }
+  const identityState = await identity.ensure();
+  if (!identityState?.device_id) throw new Error('native_supervisor_cognitive_device_not_enrolled');
+  const bodyText = JSON.stringify(batch);
+  const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${NATIVE_SUPERVISOR_COGNITIVE_DELTA_PATH}`;
+  const headers = await identity.deviceHeaders('POST', requestPath, bodyText);
+  const response = await fetchImpl(`${NATIVE_SUPERVISOR_BASE}${NATIVE_SUPERVISOR_COGNITIVE_DELTA_PATH}`, {
+    method: 'POST',
+    headers,
+    body: bodyText,
+    cache: 'no-store',
+  });
+  return Object.freeze({
+    status: Number(response?.status || 0),
+    body: await response?.json?.().catch(() => null) || null,
+  });
+}
+
+export function createNativeSupervisorCognitiveTransport({
+  identity,
+  fetchImpl,
+  readDeltas,
+  resync,
+  onFallbackRequired,
+  batchSize = 128,
+} = {}) {
+  return new BrowserCognitiveDeltaTransport({
+    readDeltas,
+    sendBatch: (batch) => sendNativeSupervisorCognitiveBatch({ identity, fetchImpl, batch }),
+    resync,
+    onFallbackRequired,
+    batchSize,
+  });
+}
+
+export function dispatchRealtimeObservationEdge({ cognitiveTransport, scheduleFullState, baselineReady = true } = {}) {
+  if (typeof scheduleFullState !== 'function') throw new Error('native_supervisor_full_state_scheduler_required');
+  if (baselineReady !== true) {
+    scheduleFullState();
+    return Object.freeze({ transport: 'FULL_STATE', reason: 'BASELINE_REQUIRED', authority_effect: false });
+  }
+  const state = cognitiveTransport?.snapshot?.()?.state || 'UNAVAILABLE';
+  if (!cognitiveTransport || state === 'UNAVAILABLE') {
+    scheduleFullState();
+    return Object.freeze({ transport: 'FULL_STATE', reason: state, authority_effect: false });
+  }
+  const scheduled = cognitiveTransport.notify?.() === true;
+  if (!scheduled) {
+    scheduleFullState();
+    return Object.freeze({ transport: 'FULL_STATE', reason: 'COGNITIVE_NOTIFY_REJECTED', authority_effect: false });
+  }
+  return Object.freeze({ transport: 'COGNITIVE_DELTA', reason: state, authority_effect: false });
 }
 
 export function exactCommandTargetProjection(command) {
@@ -131,6 +207,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
   #processPushPending = false;
   #processPushLastAt = null;
   #processPushLastError = null;
+  #cognitiveTransport = null;
   #version = '0.0.0';
   #controlLatencySnapshot = null;
 
@@ -232,6 +309,20 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     this.#processPlaneRef = () => realtimeProcessPlane;
     this.#processPlaneSet = (value) => { realtimeProcessPlane = value; };
     this.#version = String(options.version || '0.0.0');
+    this.#cognitiveTransport = createNativeSupervisorCognitiveTransport({
+      identity: this.#workspaceIdentity,
+      fetchImpl: this.#workspaceFetch,
+      readDeltas: (after, limit) => {
+        const plane = this.#processPlaneRef?.();
+        if (!plane || typeof plane.cognitiveSnapshot !== 'function') {
+          throw new Error('native_supervisor_cognitive_plane_not_ready');
+        }
+        return plane.cognitiveSnapshot({ eventsSince: after, eventLimit: limit });
+      },
+      resync: () => this.#pushRealtimeState(),
+      onFallbackRequired: () => this.#scheduleRealtimeStatePush(),
+      batchSize: options.cognitiveBatchSize,
+    });
     controlLatencySnapshot = () => {
       const base = super.snapshot();
       const plane = realtimeProcessPlane?.snapshot({ eventLimit: 0 }) || unavailableProcessPlane('PROCESS_PLANE_NOT_READY');
@@ -251,6 +342,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
         process_push_last_error: this.#processPushLastError,
         process_push_in_flight: this.#processPushPromise != null,
         process_push_scheduled: this.#processPushScheduled,
+        cognitive_delta_transport: this.#cognitiveTransport?.snapshot() || null,
         command_transport_authority: 'DB_LEASE_ONLY',
         observation_push_authority: false,
         observation_push_timer_ms: 0,
@@ -293,6 +385,14 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     queueMicrotask(() => {
       this.#processPushScheduled = false;
       void this.#pushRealtimeState();
+    });
+  }
+
+  #dispatchRealtimeObservationEdge() {
+    return dispatchRealtimeObservationEdge({
+      cognitiveTransport: this.#cognitiveTransport,
+      scheduleFullState: () => this.#scheduleRealtimeStatePush(),
+      baselineReady: this.#processPushLastAt != null,
     });
   }
 
@@ -368,9 +468,10 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
         eventLimit: 512,
         onChange: () => {
           // The source planes already bound resource cadence and semantic burst
-          // coalescing. Do not add another debounce: the push edge is immediate,
-          // coalesced to one microtask and carries no command authority.
-          this.#scheduleRealtimeStatePush();
+          // coalescing. The cognitive route is an observation-only replacement for
+          // per-event full snapshots. Unsupported or ambiguous delivery immediately
+          // falls back to the existing durable /v1/state path.
+          this.#dispatchRealtimeObservationEdge();
         },
       });
       this.#processPlaneSet?.(plane);
@@ -462,6 +563,11 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
         command_leasing: false,
         authority_effect: false,
       },
+      cognitive_delta_transport: this.#cognitiveTransport?.snapshot() || null,
+      cognitive_delta_route: NATIVE_SUPERVISOR_COGNITIVE_DELTA_PATH,
+      cognitive_delta_full_state_fallback: true,
+      cognitive_delta_second_polling_loop: false,
+      cognitive_delta_command_authority: false,
       host_resilience: hostResilienceSnapshot(),
       host_resilience_source: 'PRIMARY_BROWSER_PROCESS',
       host_resilience_second_polling_loop: false,

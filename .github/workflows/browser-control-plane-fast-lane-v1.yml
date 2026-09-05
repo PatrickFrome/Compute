@@ -9,11 +9,17 @@ on:
       - 'apps/metaengine-browser/src/native-supervisor-command-lanes.mjs'
       - 'apps/metaengine-browser/src/browser-control-capabilities.mjs'
       - 'apps/metaengine-browser/src/browser-realtime-process-plane.mjs'
+      - 'apps/metaengine-browser/src/browser-cognitive-delta-bus.mjs'
+      - 'apps/metaengine-browser/src/browser-cognitive-delta-transport.mjs'
       - 'apps/metaengine-browser/src/browser-persistent-cdp-session.mjs'
       - 'apps/metaengine-browser/src/browser-realtime-semantic-plane.mjs'
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts'
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/realtime-command-wake.mjs'
       - 'apps/metaengine-browser/test/browser-realtime-process-plane.test.mjs'
+      - 'apps/metaengine-browser/test/browser-cognitive-delta-bus.test.mjs'
+      - 'apps/metaengine-browser/test/browser-cognitive-delta-transport.test.mjs'
+      - 'apps/metaengine-browser/test/browser-cognitive-delta-fallback.test.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-cognitive-transport-wiring.test.mjs'
       - 'apps/metaengine-browser/test/browser-persistent-cdp-semantic-plane.test.mjs'
       - 'apps/metaengine-browser/test/realtime-command-wake.test.mjs'
       - 'apps/metaengine-browser/test/native-supervisor-command-lanes.test.mjs'
@@ -66,6 +72,8 @@ jobs:
           node --check src/native-supervisor-client.mjs
           node --check src/browser-control-capabilities.mjs
           node --check src/browser-realtime-process-plane.mjs
+          node --check src/browser-cognitive-delta-bus.mjs
+          node --check src/browser-cognitive-delta-transport.mjs
           node --check src/browser-persistent-cdp-session.mjs
           node --check src/browser-realtime-semantic-plane.mjs
           node --check supabase/a2-browser-native-supervisor-v1/realtime-command-wake.mjs
@@ -90,6 +98,13 @@ jobs:
         run: |
           set -euo pipefail
           node --test test/browser-realtime-process-plane.test.mjs test/browser-persistent-cdp-semantic-plane.test.mjs
+
+      - name: Prove zero-timer cognitive delivery and durable fallback
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test test/browser-cognitive-delta-bus.test.mjs test/browser-cognitive-delta-transport.test.mjs test/browser-cognitive-delta-fallback.test.mjs test/native-supervisor-cognitive-transport-wiring.test.mjs
 
       - name: Prove race-free Realtime command wake
         working-directory: apps/metaengine-browser
@@ -143,11 +158,17 @@ jobs:
             apps/metaengine-browser/src/native-supervisor-client.mjs \
             apps/metaengine-browser/src/browser-control-capabilities.mjs \
             apps/metaengine-browser/src/browser-realtime-process-plane.mjs \
+            apps/metaengine-browser/src/browser-cognitive-delta-bus.mjs \
+            apps/metaengine-browser/src/browser-cognitive-delta-transport.mjs \
             apps/metaengine-browser/src/browser-persistent-cdp-session.mjs \
             apps/metaengine-browser/src/browser-realtime-semantic-plane.mjs \
             apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts \
             apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/realtime-command-wake.mjs \
             apps/metaengine-browser/test/browser-realtime-process-plane.test.mjs \
+            apps/metaengine-browser/test/browser-cognitive-delta-bus.test.mjs \
+            apps/metaengine-browser/test/browser-cognitive-delta-transport.test.mjs \
+            apps/metaengine-browser/test/browser-cognitive-delta-fallback.test.mjs \
+            apps/metaengine-browser/test/native-supervisor-cognitive-transport-wiring.test.mjs \
             apps/metaengine-browser/test/browser-persistent-cdp-semantic-plane.test.mjs \
             apps/metaengine-browser/test/realtime-command-wake.test.mjs \
             apps/metaengine-browser/test/native-supervisor-command-lanes.test.mjs \
