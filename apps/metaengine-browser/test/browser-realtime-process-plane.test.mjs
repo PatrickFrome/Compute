@@ -39,6 +39,7 @@ class FakeContents extends EventEmitter {
 const metrics = () => [
   {
     pid: 100,
+    creationTime: 1725520000000,
     type: 'Browser',
     name: 'METAENGINE Browser',
     cpu: { percentCPUUsage: 3.5, idleWakeupsPerSecond: 1 },
@@ -47,6 +48,7 @@ const metrics = () => [
   },
   {
     pid: 200,
+    creationTime: 1725520000100,
     type: 'Tab',
     name: 'Renderer',
     cpu: { percentCPUUsage: 4.25, idleWakeupsPerSecond: 2 },
@@ -55,6 +57,7 @@ const metrics = () => [
   },
   {
     pid: 300,
+    creationTime: 1725520000200,
     type: 'GPU',
     name: 'GPU Process',
     cpu: { percentCPUUsage: 1.25, idleWakeupsPerSecond: 0 },
@@ -86,10 +89,41 @@ test('realtime process plane joins Electron process metrics to webContents and e
   assert.equal(snapshot.command_leasing, false);
   assert.equal(snapshot.second_scheduler, false);
   const renderer = snapshot.processes.find((row) => row.pid === 200);
+  assert.equal(renderer.creation_time_ms, 1725520000100);
+  assert.equal(renderer.process_key, '200:1725520000100');
+  assert.equal(renderer.process_identity_complete, true);
   assert.equal(renderer.web_contents[0].web_contents_id, 7);
   assert.equal(renderer.web_contents[0].tab_id, 'tab_00000000-0000-4000-8000-000000000001');
-  assert.equal(snapshot.web_contents.find((row) => row.web_contents_id === 7).url, 'https://chatgpt.com/');
+  assert.equal(renderer.web_contents[0].process_key, renderer.process_key);
+  const remoteRow = snapshot.web_contents.find((row) => row.web_contents_id === 7);
+  assert.equal(remoteRow.url, 'https://chatgpt.com/');
+  assert.equal(remoteRow.process_key, renderer.process_key);
+  assert.equal(snapshot.process_identity_pid_reuse_safe, true);
   assert.ok(changes.some((row) => row.type === 'PROCESS_CENSUS_REFRESHED'));
+  plane.stop();
+});
+
+test('process identity changes when the OS reuses a PID for a new process incarnation', () => {
+  const app = new FakeApp(metrics());
+  const remote = new FakeContents({ id: 11, pid: 200 });
+  const plane = new BrowserRealtimeProcessPlane({
+    app,
+    getWebContents: () => [remote],
+    resolveTabId: () => 'tab_00000000-0000-4000-8000-000000000011',
+    sampleMs: 5000,
+  });
+  const first = plane.start();
+  const firstRenderer = first.processes.find((row) => row.pid === 200);
+  assert.equal(firstRenderer.process_key, '200:1725520000100');
+
+  app.metrics = app.metrics.map((row) => row.pid === 200
+    ? { ...row, creationTime: 1725529999999, name: 'Replacement Renderer' }
+    : row);
+  const second = plane.refresh('PID_REUSE_TEST');
+  const secondRenderer = second.processes.find((row) => row.pid === 200);
+  assert.equal(secondRenderer.process_key, '200:1725529999999');
+  assert.notEqual(secondRenderer.process_key, firstRenderer.process_key);
+  assert.equal(second.web_contents.find((row) => row.web_contents_id === 11).process_key, secondRenderer.process_key);
   plane.stop();
 });
 
