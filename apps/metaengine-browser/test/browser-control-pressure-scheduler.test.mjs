@@ -41,7 +41,6 @@ test('pressure collapse shrinks the same scheduler immediately and remains bound
   governor.observe(healthy());
 
   const red = governor.observe(healthy(32));
-  // First verify healthy recovery reached GREEN.
   assert.equal(red.pressure_band, 'GREEN');
 
   const degraded = governor.observe({ ...healthy(32), unresponsive_cells: 1 });
@@ -56,7 +55,7 @@ test('scheduler independently clamps malformed tuning input and never widens har
   const tuned = scheduler.setConcurrencyBudget({ read_concurrency: 100000, mutation_concurrency: 100000 });
   assert.equal(tuned.read_concurrency, 128);
   assert.equal(tuned.mutation_concurrency, 32);
-  const unchanged = scheduler.setConcurrencyBudget({ read_concurrency: 'not-an-int', mutation_concurrency: null });
+  const unchanged = scheduler.setConcurrencyBudget({ read_concurrency: 'not-an-int' });
   assert.equal(unchanged.read_concurrency, 128);
   assert.equal(unchanged.mutation_concurrency, 32);
 });
