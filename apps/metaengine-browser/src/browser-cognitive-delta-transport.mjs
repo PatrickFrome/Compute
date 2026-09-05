@@ -27,6 +27,7 @@ export class BrowserCognitiveDeltaTransport {
   #readDeltas;
   #sendBatch;
   #resync;
+  #onFallbackRequired;
   #batchSize;
   #state = 'UNKNOWN';
   #streamId = null;
@@ -41,15 +42,35 @@ export class BrowserCognitiveDeltaTransport {
   #sentEvents = 0;
   #duplicateSafeRetries = 0;
   #resyncCount = 0;
+  #fallbackEdges = 0;
 
-  constructor({ readDeltas, sendBatch, resync, batchSize = 128 } = {}) {
+  constructor({ readDeltas, sendBatch, resync, onFallbackRequired = null, batchSize = 128 } = {}) {
     if (typeof readDeltas !== 'function') throw new Error('cognitive_transport_reader_required');
     if (typeof sendBatch !== 'function') throw new Error('cognitive_transport_sender_required');
     if (typeof resync !== 'function') throw new Error('cognitive_transport_resync_required');
+    if (onFallbackRequired != null && typeof onFallbackRequired !== 'function') throw new Error('cognitive_transport_fallback_callback_invalid');
     this.#readDeltas = readDeltas;
     this.#sendBatch = sendBatch;
     this.#resync = resync;
+    this.#onFallbackRequired = onFallbackRequired;
     this.#batchSize = boundedInt(batchSize, 128, 1, 256);
+  }
+
+  #requireFallback(reason) {
+    this.#fallbackEdges += 1;
+    try {
+      this.#onFallbackRequired?.(Object.freeze({
+        schema: 'metaengine.browser.cognitive-fallback-edge.v1',
+        state: this.#state,
+        stream_id: this.#streamId,
+        acknowledged_through_sequence: this.#cursor,
+        reason: clip(reason, 240),
+        full_state_required: true,
+        delivery_is_authority: false,
+        command_leasing: false,
+        authority_effect: false,
+      }));
+    } catch {}
   }
 
   #scheduleContinuation() {
@@ -131,6 +152,7 @@ export class BrowserCognitiveDeltaTransport {
     if (UNSUPPORTED_HTTP.has(result.status)) {
       this.#state = 'UNAVAILABLE';
       this.#lastError = `COGNITIVE_ROUTE_HTTP_${result.status}`;
+      this.#requireFallback(this.#lastError);
       return false;
     }
     if (result.status !== 202) throw new Error(`cognitive_transport_http_${result.status || 'unknown'}`);
@@ -167,12 +189,13 @@ export class BrowserCognitiveDeltaTransport {
         if (ok !== true && this.#state !== 'UNAVAILABLE' && this.#cursor === priorCursor) this.#duplicateSafeRetries += 1;
         return ok;
       } catch (error) {
-        // Observation delivery is non-authoritative. Do not advance the cursor on
-        // an unknown network outcome. A later event may resend the same
-        // stream_id+sequence batch and consumers can deterministically dedupe it.
-        this.#state = 'DEGRADED';
+        // Observation delivery is non-authoritative. Never advance the cursor on
+        // an unknown outcome. Drop immediately back to durable full-state fallback;
+        // a later event may resend the same stream_id+sequence deterministically.
+        if (this.#state !== 'UNAVAILABLE') this.#state = 'DEGRADED';
         this.#lastError = clip(error?.message || error, 240);
         this.#duplicateSafeRetries += 1;
+        this.#requireFallback(this.#lastError);
         return false;
       } finally {
         this.#inFlight = null;
@@ -202,6 +225,7 @@ export class BrowserCognitiveDeltaTransport {
       sent_events: this.#sentEvents,
       duplicate_safe_retries: this.#duplicateSafeRetries,
       resync_count: this.#resyncCount,
+      fallback_edges: this.#fallbackEdges,
       dedupe_key: 'stream_id+sequence',
       timer_delay_ms: 0,
       event_driven: true,
