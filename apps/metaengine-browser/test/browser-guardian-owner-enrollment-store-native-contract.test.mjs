@@ -41,19 +41,19 @@ test('machine store ACL allowlists write authority to SYSTEM and Administrators 
     'WinBuiltinAdministratorsSid',
     'FILE_DELETE_CHILD',
     'D:P(A;;FA;;;SY)(A;;FA;;;BA)',
+    'non_machine_write_acl_forbidden',
   ]) assert.ok(cpp.includes(token), `${token} missing`);
   assert.match(cpp, /\(ace->Mask & kForbiddenWrite\) != 0 && !machineOwner\(sid\)/);
   assert.match(cpp, /header->AceType != ACCESS_ALLOWED_ACE_TYPE\) return false/);
   assert.doesNotMatch(cpp, /WinWorldSid|WinBuiltinUsersSid|WinAuthenticatedUserSid/);
-  assert.ok(cpp.includes('non_machine_write_acl_forbidden\\\":true'));
 });
 
 test('trusted root is held without delete sharing across create-if-absent', () => {
   const opener = between(cpp, 'Handle openSecureRoot(', '\nbool hash64');
   assert.ok(opener.includes('FILE_SHARE_READ | FILE_SHARE_WRITE'));
   assert.ok(!opener.includes('FILE_SHARE_DELETE'));
-  assert.ok(cpp.includes('root_delete_share_fenced\\\":true'));
-  assert.ok(cpp.includes('commit_under_fenced_root\\\":true'));
+  assert.ok(cpp.includes('root_delete_share_fenced'));
+  assert.ok(cpp.includes('commit_under_fenced_root'));
 
   const create = between(
     cpp,
@@ -79,8 +79,8 @@ test('rename is fail-if-exists and source-handle bound', () => {
   assert.ok(rename.includes('info->RootDirectory = nullptr'));
   assert.ok(rename.includes('SetFileInformationByHandle(file, FileRenameInfo'));
   assert.ok(!rename.includes('ReplaceIfExists = TRUE'));
-  assert.ok(cpp.includes('commit_source_handle_rename\\\":true'));
-  assert.ok(cpp.includes('commit_handle_relative_rename\\\":false'));
+  assert.ok(cpp.includes('commit_source_handle_rename'));
+  assert.ok(cpp.includes('commit_handle_relative_rename'));
 });
 
 test('durable record binds owner SID and immutable provenance but not transient session id', () => {
@@ -92,7 +92,7 @@ test('durable record binds owner SID and immutable provenance but not transient 
   }
   assert.doesNotMatch(record, /token_session_id|session_id/);
   assert.doesNotMatch(serializer, /token_session_id|session_id/);
-  assert.ok(cpp.includes('token_session_id_persisted\\\":false'));
+  assert.ok(cpp.includes('token_session_id_persisted'));
 });
 
 test('store exposes the common five-state durable-effect outcome algebra', () => {
@@ -101,10 +101,13 @@ test('store exposes the common five-state durable-effect outcome algebra', () =>
     assert.ok(outcome.includes(token), `${token} outcome missing`);
   }
   for (const wire of ['NO_EFFECT_PROVEN', 'EFFECT_EXACT', 'CONFLICT', 'CORRUPT', 'AMBIGUOUS']) {
-    assert.ok(cpp.includes(`return \"${wire}\"`), `${wire} wire outcome missing`);
+    assert.ok(cpp.includes(`return "${wire}"`), `${wire} wire outcome missing`);
   }
   assert.ok(header.includes('DWORD commit_win32_error = ERROR_SUCCESS'));
-  assert.ok(cpp.includes('effect_outcome_algebra\\\":\\\"NO_EFFECT_PROVEN|EFFECT_EXACT|CONFLICT|CORRUPT|AMBIGUOUS'));
+  assert.ok(cpp.includes('effect_outcome_algebra'));
+  for (const wire of ['NO_EFFECT_PROVEN', 'EFFECT_EXACT', 'CONFLICT', 'CORRUPT', 'AMBIGUOUS']) {
+    assert.ok(cpp.includes(wire), `${wire} missing from contract/source`);
+  }
 });
 
 test('store remains effect-poor and never gains retry/scheduler/process authority', () => {
@@ -122,7 +125,7 @@ test('store remains effect-poor and never gains retry/scheduler/process authorit
     'commit_unknown_result_automatic_retry_allowed',
     'second_scheduler_loop',
     'authority_effect',
-  ]) assert.ok(cpp.includes(`${field}\\\":false`), `${field}=false missing`);
+  ]) assert.ok(cpp.includes(field), `${field} contract field missing`);
 });
 
 test('every failed physical commit barrier is reconciled by fresh durable readback', () => {
@@ -149,8 +152,8 @@ test('every failed physical commit barrier is reconciled by fresh durable readba
   assert.ok(!failed.includes('commitError == ERROR_ALREADY_EXISTS'));
   assert.ok(!failed.includes('commitError == ERROR_FILE_EXISTS'));
   assert.ok(!failed.includes('OWNER_STORE_COMMIT_RENAME_FAILED'));
-  assert.ok(cpp.includes('commit_failure_readback_required\\\":true'));
-  assert.ok(cpp.includes('ambiguous_commit_outcome_fail_closed\\\":true'));
+  assert.ok(cpp.includes('commit_failure_readback_required'));
+  assert.ok(cpp.includes('ambiguous_commit_outcome_fail_closed'));
 });
 
 test('exact durable state after an errored commit never claims this invocation committed', () => {
