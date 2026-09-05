@@ -60,6 +60,51 @@ std::string narrowAscii(const wchar_t* value) {
     return ascii(value);
 }
 
+int proveAncestorRenameFence() {
+    using metaengine::guardian::browserGuardianOwnerEnrollmentStoreDefaultRoot;
+
+    const std::wstring root = browserGuardianOwnerEnrollmentStoreDefaultRoot();
+    const std::size_t slash = root.find_last_of(L"\\/");
+    if (slash == std::wstring::npos || slash == 0) {
+        std::cerr << "ancestor_fence_parent_invalid\n";
+        return 70;
+    }
+    const std::wstring parent = root.substr(0, slash);
+    const std::wstring alternate = parent + L".owner-store-fence-" + std::to_wstring(GetCurrentProcessId());
+    if (GetFileAttributesW(alternate.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        std::cerr << "ancestor_fence_alternate_exists\n";
+        return 71;
+    }
+
+    HANDLE rootHandle = CreateFileW(
+        root.c_str(),
+        FILE_READ_ATTRIBUTES | READ_CONTROL | FILE_ADD_FILE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+        nullptr);
+    if (rootHandle == INVALID_HANDLE_VALUE) {
+        std::cerr << "ancestor_fence_root_open_failed:" << GetLastError() << '\n';
+        return 72;
+    }
+
+    if (MoveFileExW(parent.c_str(), alternate.c_str(), MOVEFILE_WRITE_THROUGH)) {
+        CloseHandle(rootHandle);
+        const BOOL restored = MoveFileExW(alternate.c_str(), parent.c_str(), MOVEFILE_WRITE_THROUGH);
+        std::cout << "{\"blocked\":false,\"unexpected_rename_succeeded\":true,\"restored\":"
+                  << (restored ? "true" : "false") << "}\n";
+        return restored ? 73 : 74;
+    }
+
+    const DWORD error = GetLastError();
+    CloseHandle(rootHandle);
+    const bool sharingFence = error == ERROR_SHARING_VIOLATION;
+    std::cout << "{\"blocked\":" << (sharingFence ? "true" : "false")
+              << ",\"win32_error\":" << error << "}\n";
+    return sharingFence ? 0 : 75;
+}
+
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
@@ -68,12 +113,17 @@ int wmain(int argc, wchar_t** argv) {
     using metaengine::guardian::browserGuardianOwnerEnrollmentStoreDefaultRoot;
 
     if (argc < 2) {
-        std::cerr << "usage: probe read | probe create <sid> <evidence_sha256> <device_sha256>\n";
+        std::cerr << "usage: probe read | probe create <sid> <evidence_sha256> <device_sha256> | probe fence-parent-rename\n";
         return 64;
     }
 
-    OwnerEnrollmentStore store(browserGuardianOwnerEnrollmentStoreDefaultRoot());
     const std::wstring command = argv[1];
+    if (command == L"fence-parent-rename") {
+        if (argc != 2) return 64;
+        return proveAncestorRenameFence();
+    }
+
+    OwnerEnrollmentStore store(browserGuardianOwnerEnrollmentStoreDefaultRoot());
     if (command == L"read") {
         if (argc != 2) return 64;
         emit(store.read());
