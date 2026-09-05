@@ -49,11 +49,13 @@ test('trusted root is held without delete sharing across the create-if-absent co
   const guard = create.indexOf('Handle rootGuard = openSecureRoot');
   const before = create.indexOf('const auto before = classify');
   const rename = create.indexOf('renameUnderFencedRootFailIfExists');
-  const readback = create.indexOf('auto readback = classify');
+  const failureReadback = create.indexOf('auto failureReadback = classify');
+  const successReadback = create.indexOf('auto readback = classify');
   assert.ok(guard >= 0, 'trusted root guard missing');
   assert.ok(before > guard, 'root guard must precede absence classification');
   assert.ok(rename > before, 'source-handle rename must follow absence classification');
-  assert.ok(readback > rename, 'root guard must remain in scope through exact readback');
+  assert.ok(failureReadback > rename, 'failed commit barrier must be followed by exact readback');
+  assert.ok(successReadback > failureReadback, 'root guard must remain in scope through success readback');
 });
 
 test('commit renames the exclusive source handle under the fenced root and never replaces an existing winner', () => {
@@ -83,6 +85,18 @@ test('durable record binds SID and immutable evidence hashes, never transient se
   assert.match(cpp, /"token_session_id_persisted\\":false/);
 });
 
+test('store exposes the common five-state effect outcome algebra', () => {
+  const outcome = header.match(/enum class OwnerEnrollmentStoreOutcome[\s\S]*?\};/)?.[0] || '';
+  for (const token of ['NoEffectProven', 'EffectExact', 'Conflict', 'Corrupt', 'Ambiguous']) {
+    assert.match(outcome, new RegExp(token), `${token} outcome missing`);
+  }
+  for (const wire of ['NO_EFFECT_PROVEN', 'EFFECT_EXACT', 'CONFLICT', 'CORRUPT', 'AMBIGUOUS']) {
+    assert.ok(cpp.includes(`return "${wire}"`), `${wire} wire outcome missing`);
+  }
+  assert.match(header, /DWORD commit_win32_error = ERROR_SUCCESS/);
+  assert.match(cpp, /"effect_outcome_algebra\\":\"NO_EFFECT_PROVEN\|EFFECT_EXACT\|CONFLICT\|CORRUPT\|AMBIGUOUS\"/);
+});
+
 test('store cannot become WTS, process, SCM, scheduler, retry, or Browser authority', () => {
   assert.doesNotMatch(source, /WTSQueryUserToken|CreateProcessAsUserW|CreateProcessWithTokenW|StartServiceW|ChangeServiceConfigW/);
   assert.doesNotMatch(source, /SetTimer|CreateTimerQueueTimer|sleep_for|Sleep\s*\(/);
@@ -95,22 +109,47 @@ test('store cannot become WTS, process, SCM, scheduler, retry, or Browser author
     '"browser_authority\\":false',
     '"scheduler_authority\\":false',
     '"automatic_retry_allowed\\":false',
+    '"commit_unknown_result_automatic_retry_allowed\\":false',
     '"second_scheduler_loop\\":false',
     '"authority_effect\\":false',
   ]) assert.ok(cpp.includes(fragment), `${fragment} missing`);
 });
 
-test('existing record is classified; no overwrite/replacement path exists', () => {
-  assert.ok(cpp.includes('commitError == ERROR_ALREADY_EXISTS || commitError == ERROR_FILE_EXISTS'));
-  assert.match(cpp, /OWNER_STORE_OWNER_MISMATCH/);
-  assert.match(cpp, /OWNER_STORE_OWNER_EXACT_DIFFERENT_PROVENANCE/);
+test('every failed physical commit barrier is read back before outcome classification', () => {
+  const create = cpp.match(/OwnerEnrollmentStoreResult OwnerEnrollmentStore::createIfAbsent\([\s\S]*?\n\}/)?.[0] || '';
+  const failedCommit = create.match(/if \(!renameCommitted\) \{([\s\S]*?)\n    \}\n\n    auto readback/)?.[1] || '';
+  assert.match(failedCommit, /auto failureReadback = classify\(root_path_, final, &normalized\)/);
+  assert.match(failedCommit, /failureReadback\.commit_win32_error = commitError/);
+  assert.match(failedCommit, /OwnerEnrollmentStoreOutcome::NoEffectProven/);
+  assert.match(failedCommit, /OWNER_STORE_COMMIT_NO_EFFECT_PROVEN/);
+  assert.match(failedCommit, /OwnerEnrollmentStoreOutcome::EffectExact/);
+  assert.match(failedCommit, /OWNER_STORE_COMMIT_RESULT_EXACT_AFTER_ERROR/);
+  assert.match(failedCommit, /OwnerEnrollmentStoreOutcome::Conflict/);
+  assert.match(failedCommit, /OwnerEnrollmentStoreOutcome::Corrupt/);
+  assert.match(failedCommit, /OwnerEnrollmentStoreOutcome::Ambiguous/);
+  assert.match(failedCommit, /OWNER_STORE_COMMIT_RESULT_AMBIGUOUS/);
+  assert.doesNotMatch(failedCommit, /commitError == ERROR_ALREADY_EXISTS|commitError == ERROR_FILE_EXISTS/);
+  assert.doesNotMatch(failedCommit, /OWNER_STORE_COMMIT_RENAME_FAILED/);
+  assert.match(cpp, /"commit_failure_readback_required\\":true/);
+  assert.match(cpp, /"ambiguous_commit_outcome_fail_closed\\":true/);
+});
+
+test('exact state observed after a failed commit does not claim this invocation committed', () => {
+  const create = cpp.match(/OwnerEnrollmentStoreResult OwnerEnrollmentStore::createIfAbsent\([\s\S]*?\n\}/)?.[0] || '';
+  const exactAfterError = create.match(/if \(failureReadback\.outcome == OwnerEnrollmentStoreOutcome::EffectExact\) \{([\s\S]*?)\n        \}/)?.[1] || '';
+  assert.match(exactAfterError, /failureReadback\.committed = false/);
+  assert.match(exactAfterError, /OWNER_STORE_COMMIT_RESULT_EXACT_AFTER_ERROR/);
+});
+
+test('successful rename requires exact durable readback before committed=true', () => {
+  assert.match(cpp, /readback\.committed = readback\.outcome == OwnerEnrollmentStoreOutcome::EffectExact/);
   assert.match(cpp, /readback\.exact && readback\.provenance_exact/);
   assert.match(cpp, /OWNER_STORE_POST_COMMIT_READBACK_MISMATCH/);
   assert.doesNotMatch(cpp, /DeleteFileW\(final\.c_str\(\)\)|ReplaceIfExists = TRUE/);
 });
 
 test('stage cleanup happens only after the exclusive stage handle leaves scope', () => {
-  const create = cpp.match(/DWORD stageError = ERROR_SUCCESS;([\s\S]*?)auto readback = classify/)?.[1] || '';
+  const create = cpp.match(/DWORD stageError = ERROR_SUCCESS;([\s\S]*?)auto failureReadback = classify/)?.[1] || '';
   const normalizedCreate = create.replace(/\r\n/g, '\n');
   const handleStart = normalizedCreate.indexOf('Handle h(CreateFileW');
   const scopeClose = normalizedCreate.indexOf('}\n    if (!out.staging_flushed)');
