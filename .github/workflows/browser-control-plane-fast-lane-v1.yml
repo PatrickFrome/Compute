@@ -65,16 +65,33 @@ jobs:
           node --check src/browser-realtime-process-plane.mjs
           node --check supabase/a2-browser-native-supervisor-v1/realtime-command-wake.mjs
 
-      - name: Execute adversarial concurrency, wake, and process contracts
+      - name: Prove adversarial command-lane scheduler
         working-directory: apps/metaengine-browser
         shell: bash
         run: |
           set -euo pipefail
-          node --test \
-            test/native-supervisor-command-lanes.test.mjs \
-            test/native-supervisor-fast-lane-contract.test.mjs \
-            test/browser-realtime-process-plane.test.mjs \
-            test/realtime-command-wake.test.mjs
+          node --test test/native-supervisor-command-lanes.test.mjs
+
+      - name: Prove base fast-lane authority and latency contract
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test test/native-supervisor-fast-lane-contract.test.mjs
+
+      - name: Prove realtime process plane
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test test/browser-realtime-process-plane.test.mjs
+
+      - name: Prove race-free Realtime command wake
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test test/realtime-command-wake.test.mjs
 
       - name: Prove Edge realtime batch surface is typed and non-authoritative
         shell: bash
