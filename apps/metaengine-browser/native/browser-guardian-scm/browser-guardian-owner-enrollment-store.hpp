@@ -13,6 +13,20 @@ struct OwnerEnrollmentDurableRecord {
     std::string device_key_fingerprint_sha256;
 };
 
+// Common effect-state algebra for the durable owner CAS boundary.  `committed`
+// remains narrower: it means this invocation observed its successful rename and
+// exact readback.  EFFECT_EXACT after a failed OS call may have been produced by
+// this invocation or by a concurrent identical winner and must never be treated
+// as proof that this invocation performed the effect.
+enum class OwnerEnrollmentStoreOutcome : unsigned char {
+    None = 0,
+    NoEffectProven,
+    EffectExact,
+    Conflict,
+    Corrupt,
+    Ambiguous,
+};
+
 struct OwnerEnrollmentStoreResult {
     bool present = false;
     bool committed = false;
@@ -24,7 +38,13 @@ struct OwnerEnrollmentStoreResult {
     bool staging_flushed = false;
     bool move_committed = false;
     bool post_commit_readback = false;
+    OwnerEnrollmentStoreOutcome outcome = OwnerEnrollmentStoreOutcome::None;
+    // Error from state observation/classification.  A conclusive readback can
+    // therefore have ERROR_SUCCESS even when the attempted commit API failed.
     DWORD win32_error = ERROR_SUCCESS;
+    // Original SetFileInformationByHandle error.  Kept separately so callers do
+    // not confuse an OS-call failure with the independently observed durable state.
+    DWORD commit_win32_error = ERROR_SUCCESS;
     std::string reason;
     OwnerEnrollmentDurableRecord record;
 };
@@ -46,6 +66,8 @@ private:
 // Default machine-wide mutable state root. The store never creates or repairs this
 // directory; machine bootstrap must provision it with a machine-trusted owner/DACL.
 std::wstring browserGuardianOwnerEnrollmentStoreDefaultRoot();
+
+const char* browserGuardianOwnerEnrollmentStoreOutcomeName(OwnerEnrollmentStoreOutcome outcome) noexcept;
 
 // Read-only contract probe. The store is a bounded persistence primitive only: it
 // does not observe sessions, acquire tokens, launch processes, mutate SCM, schedule
