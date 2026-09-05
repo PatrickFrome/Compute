@@ -322,7 +322,11 @@ jobs:
             Write-Host ($proof | ConvertTo-Json -Compress)
           } finally {
             if ($normal -and -not $normal.HasExited) {
-              try { taskkill.exe /PID $normal.Id /T /F | Out-Null } catch {}
+              # Cleanup is not evidence. Native taskkill can return 1 when a child
+              # exits between enumeration and termination even after the primary
+              # was terminated. Preserve /T tree cleanup but force cleanup-only
+              # exit status to zero so it cannot invalidate completed UI proof.
+              cmd.exe /d /c "taskkill.exe /PID $($normal.Id) /T /F >nul 2>&1 & exit /b 0" | Out-Null
             }
           }
 
