@@ -1,12 +1,15 @@
 const freezeRows = (rows) => Object.freeze(rows.map((row) => Object.freeze({ ...row })));
 
-export const BROWSER_CONTROL_PLANE_VERSION = '2.2.0-dev.1';
+export const BROWSER_CONTROL_PLANE_VERSION = '2.3.0-dev.1';
 
 export const CONTROL_ACTIONS = freezeRows([
   { action: 'POLL', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'SHELL' },
   { action: 'CAPTURE', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'CDP_ACCESSIBILITY' },
   { action: 'CAPTURE_VIEW', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'ELECTRON_CAPTURE' },
   { action: 'CONTROL_CAPABILITIES', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'CONTROL_PLANE' },
+  { action: 'PROCESS_CENSUS', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'ELECTRON_PROCESS_PLANE' },
+  { action: 'PROCESS_EVENTS', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'ELECTRON_PROCESS_PLANE' },
+  { action: 'CONTROL_LATENCY_STATUS', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'CONTROL_FAST_LANE' },
   { action: 'NEW_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS' },
   { action: 'SELECT_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'SHELL_REGISTRY' },
   { action: 'CLOSE_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS' },
@@ -79,6 +82,10 @@ export const CONTROL_INVARIANTS = Object.freeze({
   account_setting_changes_require_readback: true,
   destructive_account_actions_require_explicit_user_intent: true,
   secrets_must_not_be_extracted_from_page: true,
+  process_observation_requires_no_actuation_authority: true,
+  process_observation_must_not_create_second_command_scheduler: true,
+  process_lifecycle_events_are_event_driven: true,
+  remote_observation_push_is_not_command_authority: true,
   project_internal_safety_gates_owner_overridable: true,
   owner_gate_override_is_durable_and_audited: true,
   external_platform_safety_gates_controlled_by_metaengine: false,
