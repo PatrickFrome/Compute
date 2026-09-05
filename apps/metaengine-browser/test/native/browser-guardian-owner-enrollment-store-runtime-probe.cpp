@@ -93,16 +93,25 @@ int proveAncestorRenameFence() {
         CloseHandle(rootHandle);
         const BOOL restored = MoveFileExW(alternate.c_str(), parent.c_str(), MOVEFILE_WRITE_THROUGH);
         std::cout << "{\"blocked\":false,\"unexpected_rename_succeeded\":true,\"restored\":"
-                  << (restored ? "true" : "false") << "}\n";
+                  << (restored ? "true" : "false")
+                  << ",\"classification\":\"ANCESTOR_RENAME_UNEXPECTEDLY_SUCCEEDED\"}\n";
         return restored ? 73 : 74;
     }
 
     const DWORD error = GetLastError();
     CloseHandle(rootHandle);
-    const bool sharingFence = error == ERROR_SHARING_VIOLATION;
-    std::cout << "{\"blocked\":" << (sharingFence ? "true" : "false")
-              << ",\"win32_error\":" << error << "}\n";
-    return sharingFence ? 0 : 75;
+
+    // MS-FSA specifies STATUS_ACCESS_DENIED when a directory rename discovers
+    // open descendants. Related Win32 share-mode implementations may surface a
+    // sharing violation instead. Accept only those two documented fence classes;
+    // an arbitrary rename failure is not proof of the production invariant.
+    const bool descendantFence = error == ERROR_ACCESS_DENIED || error == ERROR_SHARING_VIOLATION;
+    std::cout << "{\"blocked\":" << (descendantFence ? "true" : "false")
+              << ",\"win32_error\":" << error
+              << ",\"classification\":\""
+              << (descendantFence ? "OPEN_DESCENDANT_RENAME_FENCE" : "UNEXPECTED_RENAME_FAILURE")
+              << "\"}\n";
+    return descendantFence ? 0 : 75;
 }
 
 }  // namespace
