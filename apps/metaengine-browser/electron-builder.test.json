@@ -2,6 +2,12 @@
   "appId": "com.metaengine.browser.test",
   "productName": "METAENGINE Browser Test",
   "asar": true,
+  "asarUnpack": [
+    "src/browser-sentinel-worker.cjs",
+    "src/browser-sentinel-liveness.cjs",
+    "src/browser-sentinel-action-journal.cjs",
+    "src/durable-json-file.cjs"
+  ],
   "directories": {
     "output": "dist-test"
   },

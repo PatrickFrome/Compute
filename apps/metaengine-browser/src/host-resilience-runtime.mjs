@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BrowserSentinelHost } from './browser-sentinel.mjs';
@@ -7,6 +8,27 @@ import { BrowserParentProgressLease } from './browser-parent-progress-lease.mjs'
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PARENT_PROGRESS_HEARTBEAT_MS = 5_000;
 const LOGIN_START_RECHECK_MS = 30_000;
+
+// In the packaged app, __dirname points INSIDE app.asar. ELECTRON_RUN_AS_NODE runs
+// the Electron binary as vanilla Node, which cannot load modules from an asar
+// archive: the sentinel worker spawned from the asar path dies at require time
+// (observed on the live Windows host as ~1 worker recovery generation every few
+// seconds, each ending in CANDIDATE_CONFIRMED_ABSENT, blocking self-update restart
+// with host_resilience_sentinel_not_ready_for_expected_restart). The worker closure
+// is unpacked by electron-builder (asarUnpack in electron-builder.test.json); this
+// resolver maps the asar path onto app.asar.unpacked and falls back to the original
+// path (dev mode / unpacked layout missing) without inventing any new authority.
+export function resolveSentinelWorkerScript(candidatePath, existsSyncImpl = ((p) => fsSync.existsSync(p))) {
+  const candidate = String(candidatePath || '');
+  for (const sep of [path.sep, '/']) {
+    const marker = `${sep}app.asar${sep}`;
+    if (candidate.includes(marker)) {
+      const unpacked = candidate.split(marker).join(`${sep}app.asar.unpacked${sep}`);
+      if (existsSyncImpl(unpacked)) return unpacked;
+    }
+  }
+  return candidate;
+}
 
 export class HostResilienceRuntime {
   #electron; #onResume; #platform; #spawn; #sentinelFactory;
@@ -160,7 +182,7 @@ export class HostResilienceRuntime {
     };
     const candidate = this.#sentinelFactory({
       statePath: this.#sentinelStatePath,
-      workerScript: path.join(__dirname, 'browser-sentinel-worker.cjs'),
+      workerScript: resolveSentinelWorkerScript(path.join(__dirname, 'browser-sentinel-worker.cjs')),
       executable: process.execPath,
       spawnImpl: trackedSpawn,
     });
