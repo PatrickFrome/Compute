@@ -9,13 +9,12 @@
   <link rel="stylesheet" href="metaengine://shell/app.css">
 </head>
 <body data-sidebar="EXPANDED" data-operations="OPEN">
-  <header class="commandBar">
-    <div class="brand" aria-label="METAENGINE Development Browser">
+  <header class="commandBar" aria-label="Browser command bar">
+    <button id="sidebarToggle" class="railToggle" title="Cycle Context Rail (Ctrl+B)" aria-label="Cycle Context Rail"><span aria-hidden="true">☰</span></button>
+
+    <div class="brand" aria-label="METAENGINE Browser">
       <span class="brandMark" aria-hidden="true">M</span>
-      <span class="brandCopy">
-        <strong>METAENGINE</strong>
-        <span><b>Workbench</b><i id="version">Browser</i></span>
-      </span>
+      <span class="brandCopy"><strong>METAENGINE</strong><i id="version">Browser</i></span>
     </div>
 
     <nav class="navControls" aria-label="Navigation">
@@ -24,24 +23,19 @@
       <button class="iconButton" data-cmd="RELOAD" title="Reload" aria-label="Reload"><span aria-hidden="true">↻</span></button>
     </nav>
 
-    <form id="addressForm" class="omnibox" aria-label="Address">
+    <form id="addressForm" class="omnibox" aria-label="Address and Browser command">
       <span id="routeKind" class="routeKind" aria-hidden="true">WEB</span>
-      <input id="address" aria-label="Address" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Enter a trusted URL">
-      <button class="goButton" aria-label="Navigate" title="Navigate">Go</button>
+      <input id="address" aria-label="Search, address, or command" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search, URL, >command, @tab, /skill">
+      <span class="shortcutHint" aria-hidden="true">Ctrl K</span>
+      <button class="goButton" aria-label="Open" title="Open">↵</button>
     </form>
 
-    <button id="newChat" class="primaryButton" title="Open a new ChatGPT tab">
-      <span aria-hidden="true">＋</span><span class="primaryLabel">New Chat</span>
-    </button>
-  </header>
-
-  <section class="contextBar" aria-label="Current browser context">
-    <button id="sidebarToggle" class="railToggle" title="Cycle context rail (Ctrl+B)" aria-label="Cycle context rail">☰</button>
-    <div class="activeContext">
+    <div class="activeContext" aria-label="Current context">
       <span id="activeKind" class="contextGlyph" aria-hidden="true">W</span>
       <span class="activeCopy"><b id="activeTitle">No active tab</b><small id="activeMeta">Awaiting browser state</small></span>
     </div>
-    <div id="systems" class="systems" aria-label="Browser systems" aria-live="polite">
+
+    <div id="systems" class="systems" aria-label="Realtime browser health" aria-live="polite">
       <div id="fleetStatus" class="systemChip neutral" title="Fleet status"><span class="systemDot" aria-hidden="true"></span><b>Fleet</b><span class="systemValue">…</span></div>
       <div id="supervisorStatus" class="systemChip neutral" title="Supervisor status"><span class="systemDot" aria-hidden="true"></span><b>Supervisor</b><span class="systemValue">…</span></div>
       <div id="updateStatus" class="systemChip neutral" title="Self-update status"><span class="systemDot" aria-hidden="true"></span><b>Update</b><span class="systemValue">…</span></div>
@@ -49,52 +43,50 @@
       <div id="computeStatus" class="systemChip neutral" title="Compute runtime status"><span class="systemDot" aria-hidden="true"></span><b>Compute</b><span class="systemValue">…</span></div>
       <div id="gateStatus" class="systemChip neutral" title="Owner safety gate overrides"><span class="systemDot" aria-hidden="true"></span><b>Gates</b><span class="systemValue">…</span></div>
     </div>
-    <button id="operationsToggle" class="operationsToggle" title="Toggle Operations (Ctrl+Shift+O)" aria-label="Toggle Operations"><span aria-hidden="true">◇</span><span>Operations</span></button>
-  </section>
 
-  <aside id="contextRail" class="contextRail" aria-label="Context rail">
+    <button id="operationsToggle" class="operationsToggle" title="Toggle Brain Inspector (Ctrl+Shift+O)" aria-label="Toggle Brain Inspector"><span class="brainGlyph" aria-hidden="true">●</span><span>Brain</span></button>
+    <button id="newChat" class="primaryButton" title="Open a new ChatGPT tab" aria-label="Open a new ChatGPT tab"><span aria-hidden="true">＋</span><span class="primaryLabel">New</span></button>
+  </header>
+
+  <aside id="contextRail" class="contextRail" aria-label="Contexts">
     <div class="railHeader">
-      <div class="railTitle"><span class="railEyebrow">Context</span><strong>Workspaces</strong></div>
-      <button id="railCollapse" class="miniButton" title="Cycle context rail" aria-label="Cycle context rail">‹</button>
+      <div class="railTitle"><span class="railEyebrow">Browser memory</span><strong>Contexts</strong></div>
+      <button id="railCollapse" class="miniButton" title="Cycle Context Rail" aria-label="Cycle Context Rail">‹</button>
     </div>
     <div class="tabSearchWrap">
       <span aria-hidden="true">⌕</span>
-      <input id="tabSearch" class="tabSearch" autocomplete="off" spellcheck="false" placeholder="Filter workspaces & tabs" aria-label="Filter workspaces and open tabs">
+      <input id="tabSearch" class="tabSearch" autocomplete="off" spellcheck="false" placeholder="Find context" aria-label="Filter workspaces and open tabs">
     </div>
-    <div class="railSectionHead"><span>Bound context</span><b id="tabCount">0</b></div>
+    <div class="railSectionHead"><span>Workspaces & tabs</span><b id="tabCount">0</b></div>
     <div id="verticalTabs" class="verticalTabs" role="list"></div>
     <div class="railFooter">
-      <span id="fleetProfile" class="railFooterValue">Workspace source —</span>
+      <span id="fleetProfile" class="railFooterValue">Context source —</span>
       <small id="railGeometry">Native inset</small>
     </div>
   </aside>
 
-  <aside id="operationsPanel" class="operationsPanel" aria-label="Operations workbench">
+  <aside id="operationsPanel" class="operationsPanel" aria-label="Brain inspector">
     <header class="opsHeader">
-      <div><span class="opsEyebrow">METAENGINE</span><strong>Operations</strong></div>
-      <button id="operationsClose" class="miniButton" title="Close Operations" aria-label="Close Operations">×</button>
+      <div class="brainTitle"><span class="opsEyebrow">Realtime</span><strong>Brain</strong></div>
+      <div class="brainHeaderActions">
+        <span class="brainPresence"><i aria-hidden="true"></i>Live</span>
+        <button id="operationsClose" class="miniButton" title="Close Brain Inspector" aria-label="Close Brain Inspector">×</button>
+      </div>
     </header>
-    <nav id="opsNav" class="opsNav" aria-label="Operations sections">
-      <button data-section="overview" class="active">Overview</button>
-      <button data-section="workspaces">Workspaces</button>
-      <button data-section="fleet">Fleet</button>
-      <button data-section="supervisor">Supervisor</button>
-      <button data-section="devos">DevOS</button>
-      <button data-section="runtime">Runtime</button>
-      <button data-section="safety">Safety</button>
+    <nav id="opsNav" class="opsNav" aria-label="Brain sections">
+      <button data-section="overview" class="active">Systems</button>
       <button data-section="commands">Commands</button>
     </nav>
     <div id="opsContent" class="opsContent"></div>
-    <footer class="opsLegend" aria-label="Status legend">
-      <span><i class="legendDot good"></i>active</span>
-      <span><i class="legendDot warn"></i>degraded</span>
-      <span><i class="legendDot neutral"></i>unknown</span>
-      <span><i class="legendDot muted"></i>not exposed</span>
+    <footer class="opsLegend" aria-label="Brain command hints">
+      <span><i class="legendDot good"></i>live</span>
+      <span><b>Ctrl K</b> command</span>
+      <span><b>@</b> tab</span>
+      <span><b>/</b> skill</span>
     </footer>
   </aside>
 
   <div id="shellBackdrop" class="shellBackdrop" aria-hidden="true"></div>
-
   <script src="metaengine://shell/app.js"></script>
 </body>
 </html>
