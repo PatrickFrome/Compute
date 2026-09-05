@@ -23,7 +23,7 @@ alter table public.compute_fabric_a2_browser_supervisor_command_h205f22
     case
       when action in (
         'POLL','CAPTURE','CAPTURE_VIEW','CONTROL_CAPABILITIES',
-        'PROCESS_CENSUS','PROCESS_EVENTS','CONTROL_LATENCY_STATUS',
+        'PROCESS_CENSUS','PROCESS_EVENTS','SEMANTIC_CENSUS','SEMANTIC_EVENTS','CONTROL_LATENCY_STATUS',
         'DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES',
         'DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD',
         'DOWNLOAD_STATUS','SELF_UPDATE_STATUS','GATE_STATUS','TAB_CENSUS','FLEET_STATUS'
@@ -43,7 +43,7 @@ alter table public.compute_fabric_a2_browser_supervisor_command_h205f22
     case
       when action in (
         'POLL','CAPTURE','CAPTURE_VIEW','CONTROL_CAPABILITIES',
-        'PROCESS_CENSUS','PROCESS_EVENTS','CONTROL_LATENCY_STATUS',
+        'PROCESS_CENSUS','PROCESS_EVENTS','SEMANTIC_CENSUS','SEMANTIC_EVENTS','CONTROL_LATENCY_STATUS',
         'DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES',
         'DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD',
         'DOWNLOAD_STATUS','SELF_UPDATE_STATUS','GATE_STATUS','TAB_CENSUS','FLEET_STATUS'
@@ -341,7 +341,7 @@ revoke all on function public.h205f22_a2_browser_supervisor_complete_batch_v1(uu
 -- 5. READ_ONLY can complete without effect_outcome; mutation cannot complete without CONFIRMED readback.
 -- 6. dropped/duplicated wakeups cannot grant authority or duplicate a physical effect.
 -- 7. replay by idempotency key preserves one logical command identity.
--- 8. JS/DB read-only classifier parity includes process census/events/latency telemetry.
+-- 8. JS/DB read-only classifier parity includes process + semantic census/events and latency telemetry.
 -- 9. old single-command endpoints remain compatible during the strangler cutover.
 
 rollback;
