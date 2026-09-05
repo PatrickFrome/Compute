@@ -1,3 +1,5 @@
+import { BrowserRealtimeSemanticPlane } from './browser-realtime-semantic-plane.mjs';
+
 export const BROWSER_REALTIME_PROCESS_PLANE_SCHEMA = 'metaengine.browser.realtime-process-plane.v1';
 
 const DEFAULT_SAMPLE_MS = 250;
@@ -65,6 +67,7 @@ function webContentsProjection(contents, resolveTabId) {
     os_pid: Number.isSafeInteger(osPid) && osPid > 0 ? osPid : null,
     type: text(safeCall(contents, 'getType', null), 80),
     tab_id: tabId ? text(tabId, 96) : null,
+    semantic_key: tabId ? text(tabId, 96) : (Number.isSafeInteger(id) ? `webcontents:${id}` : null),
     url: text(url, 1200),
     title: text(title, 240),
     destroyed,
@@ -84,8 +87,11 @@ function normalizeEventDetails(details = {}) {
     web_contents_id: Number.isSafeInteger(Number(value.web_contents_id)) ? Number(value.web_contents_id) : null,
     os_pid: Number.isSafeInteger(Number(value.os_pid)) && Number(value.os_pid) > 0 ? Number(value.os_pid) : null,
     tab_id: text(value.tab_id, 96),
+    target_id: text(value.target_id, 160),
     process_type: text(value.process_type ?? value.type, 80),
     reason: text(value.reason, 160),
+    semantic_method: text(value.semantic_method, 160),
+    semantic_sequence: Number.isSafeInteger(Number(value.semantic_sequence)) ? Number(value.semantic_sequence) : null,
     exit_code: Number.isInteger(Number(value.exit_code ?? value.exitCode)) ? Number(value.exit_code ?? value.exitCode) : null,
     service_name: text(value.service_name ?? value.serviceName, 160),
     name: text(value.name, 160),
@@ -111,6 +117,9 @@ export class BrowserRealtimeProcessPlane {
   #droppedEvents = 0;
   #wired = new Map();
   #appListeners = [];
+  #semanticPlane = null;
+  #semanticStartPromise = null;
+  #semanticLastError = null;
 
   constructor({
     app,
@@ -156,6 +165,62 @@ export class BrowserRealtimeProcessPlane {
 
   #tabIdFor(contents) {
     try { return this.#resolveTabId?.(Number(contents?.id)) || null; } catch { return null; }
+  }
+
+  #semanticTargets() {
+    let contents = [];
+    try { contents = this.#getWebContents() || []; } catch {}
+    return contents.slice(0, 64)
+      .filter((row) => safeCall(row, 'isDestroyed', true) !== true)
+      .map((row) => {
+        const id = Number(row?.id);
+        const tabId = this.#tabIdFor(row);
+        return {
+          tab_id: tabId || (Number.isSafeInteger(id) ? `webcontents:${id}` : ''),
+          webContents: row,
+        };
+      })
+      .filter((row) => row.tab_id);
+  }
+
+  #startSemanticPlane() {
+    if (this.#semanticStartPromise) return this.#semanticStartPromise;
+    if (!this.#semanticPlane) {
+      this.#semanticPlane = new BrowserRealtimeSemanticPlane({
+        getTargets: () => this.#semanticTargets(),
+        eventLimit: 4096,
+        onChange: (event) => {
+          this.#emit('SEMANTIC_EVENT', {
+            web_contents_id: event?.web_contents_id,
+            tab_id: event?.tab_id,
+            target_id: event?.target_id,
+            semantic_method: event?.method,
+            semantic_sequence: event?.seq,
+          });
+        },
+      });
+    }
+    this.#semanticStartPromise = this.#semanticPlane.start()
+      .then((snapshot) => {
+        this.#semanticLastError = null;
+        return snapshot;
+      })
+      .catch((error) => {
+        this.#semanticLastError = text(error?.message || error, 300);
+        return null;
+      })
+      .finally(() => { this.#semanticStartPromise = null; });
+    return this.#semanticStartPromise;
+  }
+
+  #syncSemanticTargets() {
+    if (!this.#semanticPlane) {
+      void this.#startSemanticPlane();
+      return;
+    }
+    void this.#semanticPlane.syncTargets().catch((error) => {
+      this.#semanticLastError = text(error?.message || error, 300);
+    });
   }
 
   #wireContents(contents) {
@@ -208,8 +273,10 @@ export class BrowserRealtimeProcessPlane {
     this.#processes = Object.freeze(metrics.slice(0, 512).map(metricProjection));
     this.#webContents = Object.freeze(contents.slice(0, 512).map((wc) => webContentsProjection(wc, this.#resolveTabId)));
     this.#observedAt = new Date(this.#clock()).toISOString();
-    if (reason !== 'METRICS_SAMPLE') this.#emit('PROCESS_CENSUS_REFRESHED', { reason });
-    else {
+    if (reason !== 'METRICS_SAMPLE') {
+      this.#emit('PROCESS_CENSUS_REFRESHED', { reason });
+      this.#syncSemanticTargets();
+    } else {
       try { this.#onChange?.(Object.freeze({ seq: this.#sequence, type: 'METRICS_SAMPLE', observed_at: this.#observedAt, authority_effect: false })); } catch {}
     }
     return this.snapshot();
@@ -247,6 +314,7 @@ export class BrowserRealtimeProcessPlane {
       this.refresh('BROWSER_WINDOW_CREATED');
     });
     this.refresh('START');
+    void this.#startSemanticPlane();
     this.#timer = setInterval(() => this.refresh('METRICS_SAMPLE'), this.#sampleMs);
     this.#timer.unref?.();
     return this.snapshot();
@@ -257,6 +325,9 @@ export class BrowserRealtimeProcessPlane {
     this.#started = false;
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = null;
+    try { this.#semanticPlane?.stop?.(); } catch {}
+    this.#semanticPlane = null;
+    this.#semanticStartPromise = null;
     for (const [name, handler] of this.#appListeners) {
       try { this.#app.off?.(name, handler); } catch {}
     }
@@ -269,6 +340,22 @@ export class BrowserRealtimeProcessPlane {
     const after = Number.isSafeInteger(Number(sequence)) ? Number(sequence) : 0;
     const bounded = boundedInt(limit, 256, 1, 1024);
     return Object.freeze(this.#events.filter((row) => row.seq > after).slice(-bounded).map((row) => ({ ...row })));
+  }
+
+  semanticSnapshot({ includeText = true, eventsSince = null, eventLimit = 128 } = {}) {
+    return this.#semanticPlane?.snapshot({ includeText, eventsSince, eventLimit }) || Object.freeze({
+      schema: 'metaengine.browser.realtime-semantic-plane.v1',
+      running: false,
+      state: this.#semanticLastError || 'STARTING',
+      target_count: 0,
+      targets: [],
+      events: [],
+      persistent_cdp_sessions: true,
+      attach_per_command: false,
+      control_authority: false,
+      command_leasing: false,
+      authority_effect: false,
+    });
   }
 
   snapshot({ eventsSince = null, eventLimit = 128 } = {}) {
@@ -286,6 +373,7 @@ export class BrowserRealtimeProcessPlane {
       list.push({
         web_contents_id: row.web_contents_id,
         tab_id: row.tab_id,
+        semantic_key: row.semantic_key,
         type: row.type,
         process_key: processKeyByPid.get(row.os_pid) || null,
       });
@@ -304,6 +392,8 @@ export class BrowserRealtimeProcessPlane {
         ...row,
         process_key: row.os_pid ? processKeyByPid.get(row.os_pid) || null : null,
       })),
+      semantic_plane: this.semanticSnapshot({ includeText: false, eventLimit: 64 }),
+      semantic_plane_last_error: this.#semanticLastError,
       events: events.map((row) => ({ ...row })),
       dropped_events: this.#droppedEvents,
       event_driven_lifecycle: true,
@@ -312,7 +402,11 @@ export class BrowserRealtimeProcessPlane {
       process_identity_source: 'ELECTRON_PROCESS_METRIC_PID_PLUS_CREATION_TIME',
       process_identity_pid_reuse_safe: true,
       renderer_identity_source: 'ELECTRON_WEB_CONTENTS_OS_PID_PLUS_PROCESS_METRIC_CREATION_TIME',
+      semantic_source: 'PERSISTENT_CDP_PAGE_DOM_ACCESSIBILITY_RUNTIME_NETWORK',
+      persistent_cdp_sessions: true,
+      cdp_attach_per_command: false,
       page_content_exposed: false,
+      semantic_page_text_available_on_explicit_read: true,
       control_authority: false,
       command_leasing: false,
       second_scheduler: false,
