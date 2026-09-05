@@ -1,0 +1,90 @@
+name: METAENGINE Browser Sovereign Fabric Foundation V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/sovereign-effect-ledger.mjs'
+      - 'apps/metaengine-browser/src/effect-capability.mjs'
+      - 'apps/metaengine-browser/src/browser-cell-model.mjs'
+      - 'apps/metaengine-browser/src/guardian-ab-slot-plan.mjs'
+      - 'apps/metaengine-browser/src/sovereign-slo.mjs'
+      - 'apps/metaengine-browser/src/verified-release-authority-gate.mjs'
+      - 'apps/metaengine-browser/test/sovereign-browser-fabric-foundation.test.mjs'
+      - 'supabase/migrations/20260905041000_sovereign_effect_ledger_pilot_v1.sql'
+      - 'supabase/ops/security/devos_transport_promotion_public_*.sql'
+      - 'docs/sovereign-browser-compute-fabric-foundation-v1.md'
+      - '.github/workflows/browser-sovereign-fabric-foundation-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Run Sovereign Fabric foundation contracts
+        working-directory: apps/metaengine-browser
+        run: node --test test/sovereign-browser-fabric-foundation.test.mjs
+
+      - name: Prove no live-actuation primitives entered foundation modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            apps/metaengine-browser/src/sovereign-effect-ledger.mjs
+            apps/metaengine-browser/src/effect-capability.mjs
+            apps/metaengine-browser/src/browser-cell-model.mjs
+            apps/metaengine-browser/src/guardian-ab-slot-plan.mjs
+            apps/metaengine-browser/src/sovereign-slo.mjs
+            apps/metaengine-browser/src/verified-release-authority-gate.mjs
+          )
+          forbidden='child_process|spawn\(|exec\(|WTSQueryUserToken|CreateProcessAsUser|StartService|ChangeServiceConfig|page\.click|page\.fill|page\.press|SendInput|fetch\(|axios|supabase\.rpc'
+          if grep -En "$forbidden" "${files[@]}"; then
+            echo 'foundation_authority_drift' >&2
+            exit 1
+          fi
+
+      - name: Prove ledger SQL is source-only and fail-closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          sql=supabase/migrations/20260905041000_sovereign_effect_ledger_pilot_v1.sql
+          grep -qi 'force row level security' "$sql"
+          grep -qi 'before update or delete' "$sql"
+          grep -qi 'revoke all on table public.devos_effect_event_v1 from public, anon, authenticated' "$sql"
+          grep -qi 'grant select, insert on table public.devos_effect_event_v1 to service_role' "$sql"
+          if grep -Eqi 'security[[:space:]]+definer' "$sql"; then
+            echo 'ledger_security_definer_forbidden' >&2
+            exit 1
+          fi
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain --untracked-files=all)"
