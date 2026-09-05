@@ -96,7 +96,7 @@ test('fast-lane SQL stays source-only, rollback-only, and requires mutation post
   const sql = fs.readFileSync(sqlPath, 'utf8');
   assert.match(sql, /h205f22_a2_browser_supervisor_lease_batch_v1/i);
   assert.match(sql, /h205f22_a2_browser_supervisor_complete_batch_v1/i);
-  for (const action of ['PROCESS_CENSUS','PROCESS_EVENTS','CONTROL_LATENCY_STATUS','GATE_STATUS','TAB_CENSUS','FLEET_STATUS']) assert.match(sql, new RegExp(action));
+  for (const action of ['PROCESS_CENSUS','PROCESS_EVENTS','SEMANTIC_CENSUS','SEMANTIC_EVENTS','CONTROL_LATENCY_STATUS','GATE_STATUS','TAB_CENSUS','FLEET_STATUS']) assert.match(sql, new RegExp(action));
   assert.match(sql, /command_lane\s*<>\s*'READ_ONLY'\s+and\s+v_ok\s+and\s+v_outcome\s*<>\s*'CONFIRMED'/i);
   assert.match(sql, /postcondition_readback_required/i);
   assert.match(sql, /transport_delivery_is_authority[^\n]*false/i);
