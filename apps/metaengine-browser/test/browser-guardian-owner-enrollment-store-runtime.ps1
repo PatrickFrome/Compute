@@ -212,7 +212,8 @@ try {
     $ancestorFence = Invoke-ProbeAncestorRenameFence
     Assert-True $ancestorFence.blocked 'ancestor_parent_rename_not_fenced'
     Assert-True ($ancestorFence.classification -eq 'OPEN_DESCENDANT_RENAME_FENCE') "ancestor_parent_rename_classification_$($ancestorFence.classification)"
-    Assert-True (@(5, 32) -contains [int]$ancestorFence.win32_error) "ancestor_parent_rename_unexpected_error_$($ancestorFence.win32_error)"
+    $ancestorError = [int]$ancestorFence.win32_error
+    Assert-True (($ancestorError -eq 5) -or ($ancestorError -eq 32)) "ancestor_parent_rename_unexpected_error_$ancestorError"
 
     # 10. Conflicting concurrent creators have exactly one durable winner.
     Reset-SecureRoot
