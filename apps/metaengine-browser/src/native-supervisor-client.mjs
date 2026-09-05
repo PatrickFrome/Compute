@@ -8,6 +8,10 @@ import {
   normalizeWorkspaceBindingSnapshot,
   unavailableWorkspaceBindingSnapshot,
 } from './workspace-binding-observer.mjs';
+import {
+  BrowserLiveProcessPlane,
+  bindBrowserLiveProcessPlaneEvents,
+} from './browser-live-process-plane.mjs';
 
 export * from './native-supervisor-client-core.mjs';
 
@@ -15,6 +19,25 @@ const COMMAND_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{
 const TAB_ID_RE = /^tab_[0-9a-f-]{36}$/i;
 const hostResilienceRuntime = () => globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__ || null;
 const hostResilienceSnapshot = () => hostResilienceRuntime()?.snapshot?.() || null;
+let browserLiveProcessPlanePromise = null;
+
+async function browserLiveProcessPlane() {
+  if (!process?.versions?.electron) return null;
+  if (!browserLiveProcessPlanePromise) {
+    browserLiveProcessPlanePromise = import('electron')
+      .then(({ app, webContents }) => {
+        if (!app || !webContents) return null;
+        const plane = new BrowserLiveProcessPlane({
+          getAppMetrics: () => app.getAppMetrics(),
+          getWebContents: () => webContents.getAllWebContents(),
+        });
+        bindBrowserLiveProcessPlaneEvents({ app, webContentsModule: webContents, plane });
+        return plane;
+      })
+      .catch(() => null);
+  }
+  return browserLiveProcessPlanePromise;
+}
 
 export function exactCommandTargetProjection(command) {
   const commandId = String(command?.command_id || '').toLowerCase();
@@ -47,17 +70,17 @@ export async function runSupervisorEnrollmentBootstrap(supervisor) {
 }
 
 // Additive wrapper. The proven Native Supervisor implementation remains in
-// native-supervisor-client-core.mjs. Workspace observation and enrollment recovery
-// run as bounded stages of the same existing supervisor cycle and create no timer,
-// scheduler, command lease or Browser authority. Enrollment is never auto-approved.
-// Exact command target telemetry is derived only from an already-executing DB-leased
-// typed command and exposes no payload.
+// native-supervisor-client-core.mjs. Workspace observation, process observation
+// and enrollment recovery create no new scheduler or Browser authority. The
+// process plane is event-driven inside Electron and is projected into the same
+// signed supervisor state heartbeat used by the existing control plane.
 export class NativeSupervisorClient extends CoreNativeSupervisorClient {
   #workspaceIdentity;
   #workspaceFetch;
   #workspaceObservation = unavailableWorkspaceBindingSnapshot('UNINITIALIZED');
   #workspaceObservationPromise = null;
   #commandTargetProjection = null;
+  #liveProcessProjection = null;
   #enrollmentBootstrapPromise = null;
   #enrollmentBootstrapStatus = Object.freeze({
     status: 'UNINITIALIZED',
@@ -76,6 +99,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     const sourceGetState = options.getState;
     const sourceBeforeSelfUpdateInstall = options.beforeSelfUpdateInstall;
     let commandTargetProjection = null;
+    let liveProcessProjection = null;
     const trackedExecuteCommand = typeof executeCommand === 'function'
       ? async (command) => {
           const projected = exactCommandTargetProjection(command);
@@ -84,10 +108,15 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
         }
       : executeCommand;
     const getStateWithHostResilience = typeof sourceGetState === 'function'
-      ? async () => ({
-          ...(await sourceGetState()),
-          host_resilience: hostResilienceSnapshot(),
-        })
+      ? async () => {
+          const plane = await browserLiveProcessPlane();
+          if (plane) liveProcessProjection = plane.refresh('SUPERVISOR_STATE');
+          return {
+            ...(await sourceGetState()),
+            host_resilience: hostResilienceSnapshot(),
+            live_process_plane: liveProcessProjection ? structuredClone(liveProcessProjection) : null,
+          };
+        }
       : sourceGetState;
     const beforeSelfUpdateInstall = async (receipt) => {
       const host = hostResilienceRuntime();
@@ -106,6 +135,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     this.#workspaceIdentity = options.identity;
     this.#workspaceFetch = createBoundedSupervisorFetch(options.fetchImpl ?? globalThis.fetch, { deadlineMs: options.requestDeadlineMs });
     this.#commandTargetProjection = () => commandTargetProjection;
+    this.#liveProcessProjection = () => liveProcessProjection;
   }
 
   async #bootstrapEnrollment() {
@@ -189,6 +219,9 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       workspace_bindings: structuredClone(this.#workspaceObservation),
       workspace_binding_source: 'NATIVE_SUPERVISOR_HEARTBEAT',
       workspace_binding_second_polling_loop: false,
+      live_process_plane: this.#liveProcessProjection?.() ? structuredClone(this.#liveProcessProjection()) : null,
+      live_process_plane_source: 'ELECTRON_EVENT_DRIVEN_APP_METRICS_AND_WEBCONTENTS',
+      live_process_plane_second_polling_loop: false,
       host_resilience: hostResilienceSnapshot(),
       host_resilience_source: 'PRIMARY_BROWSER_PROCESS',
       host_resilience_second_polling_loop: false,
