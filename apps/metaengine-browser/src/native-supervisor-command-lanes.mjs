@@ -13,6 +13,10 @@ const READ_ONLY_ACTIONS = new Set([
   'DEV_PLANE_PROCESS_METRICS', 'DEV_PLANE_REPO_HEAD',
   'DOWNLOAD_STATUS', 'SELF_UPDATE_STATUS', 'GATE_STATUS',
   'TAB_CENSUS', 'FLEET_STATUS',
+  // Realtime process/perception observations are deliberately zero-authority.
+  // Keeping them off the mutation lanes is what lets the chat continuously observe
+  // the Browser while unrelated tab-local mutations are executing.
+  'PROCESS_CENSUS', 'PROCESS_EVENTS', 'CONTROL_LATENCY_STATUS',
 ]);
 
 const TAB_MUTATION_ACTIONS = new Set([
