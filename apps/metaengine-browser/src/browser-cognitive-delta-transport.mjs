@@ -170,7 +170,7 @@ export class BrowserCognitiveDeltaTransport {
         // Observation delivery is non-authoritative. Do not advance the cursor on
         // an unknown network outcome. A later event may resend the same
         // stream_id+sequence batch and consumers can deterministically dedupe it.
-        this.#state = this.#state === 'UNKNOWN' ? 'DEGRADED' : this.#state;
+        this.#state = 'DEGRADED';
         this.#lastError = clip(error?.message || error, 240);
         this.#duplicateSafeRetries += 1;
         return false;
