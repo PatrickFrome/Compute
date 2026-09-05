@@ -26,7 +26,9 @@ function Assert-True {
 function Invoke-Icacls {
     param([string[]]$Arguments)
     & icacls.exe @Arguments | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw "icacls_failed_$LASTEXITCODE arguments=$($Arguments -join ' ')" }
+    if ($LASTEXITCODE -ne 0) {
+        throw "icacls_failed_$LASTEXITCODE arguments=$($Arguments -join ' ')"
+    }
 }
 
 function Remove-PathSafely {
@@ -43,12 +45,24 @@ function Remove-PathSafely {
 function Reset-SecureRoot {
     Remove-PathSafely -Path $root
     New-Item -ItemType Directory -Path $root -Force | Out-Null
-    Invoke-Icacls -Arguments @($root, '/inheritance:r', '/grant:r', '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
+    Invoke-Icacls -Arguments @(
+        $root,
+        '/inheritance:r',
+        '/grant:r',
+        '*S-1-5-18:(OI)(CI)F',
+        '*S-1-5-32-544:(OI)(CI)F'
+    )
     Invoke-Icacls -Arguments @($root, '/setowner', '*S-1-5-32-544')
 }
 
 function Secure-RecordAcl {
-    Invoke-Icacls -Arguments @($recordPath, '/inheritance:r', '/grant:r', '*S-1-5-18:F', '*S-1-5-32-544:F')
+    Invoke-Icacls -Arguments @(
+        $recordPath,
+        '/inheritance:r',
+        '/grant:r',
+        '*S-1-5-18:F',
+        '*S-1-5-32-544:F'
+    )
     Invoke-Icacls -Arguments @($recordPath, '/setowner', '*S-1-5-32-544')
 }
 
@@ -67,6 +81,18 @@ function Invoke-ProbeCreate {
     $line = ($raw | Where-Object { $_.Trim() } | Select-Object -Last 1)
     if (-not $line) { throw 'owner_store_probe_create_output_missing' }
     return $line | ConvertFrom-Json
+}
+
+function Invoke-ProbeAncestorRenameFence {
+    $raw = @(& $ProbeExe fence-parent-rename)
+    $exitCode = $LASTEXITCODE
+    $line = ($raw | Where-Object { $_.Trim() } | Select-Object -Last 1)
+    if (-not $line) { throw "owner_store_probe_ancestor_fence_output_missing_exit_$exitCode" }
+    $result = $line | ConvertFrom-Json
+    if ($exitCode -ne 0) {
+        throw "owner_store_probe_ancestor_fence_exit_${exitCode}:$line"
+    }
+    return $result
 }
 
 function Start-ProbeCreateProcess {
@@ -91,7 +117,9 @@ function Complete-ProbeCreateProcess {
     $stderr = $Process.StandardError.ReadToEnd()
     $exitCode = $Process.ExitCode
     $Process.Dispose()
-    if ($exitCode -ne 0) { throw "${Label}_exit_${exitCode}:$stderr" }
+    if ($exitCode -ne 0) {
+        throw "${Label}_exit_${exitCode}:$stderr"
+    }
     if (-not $stdout.Trim()) { throw "${Label}_output_missing" }
     return $stdout | ConvertFrom-Json
 }
@@ -107,8 +135,11 @@ function Assert-ExactRecord {
 }
 
 try {
-    if (-not (Test-Path -LiteralPath $ProbeExe -PathType Leaf)) { throw 'owner_store_runtime_probe_missing' }
+    if (-not (Test-Path -LiteralPath $ProbeExe -PathType Leaf)) {
+        throw 'owner_store_runtime_probe_missing'
+    }
 
+    # 1. Absent -> durable create with flush, atomic publish, and post-write readback.
     Reset-SecureRoot
     $created = Invoke-ProbeCreate -Sid $sidA -Evidence $evidenceA -Device $deviceA
     Assert-ExactRecord -Result $created -Sid $sidA -Evidence $evidenceA -Device $deviceA -Prefix 'create'
@@ -119,23 +150,27 @@ try {
     Assert-True $created.move_committed 'create_move_not_committed'
     Assert-True $created.post_commit_readback 'create_post_commit_readback_missing'
 
+    # 2. Same exact candidate is level-triggered NOOP, not a second write.
     $identical = Invoke-ProbeCreate -Sid $sidA -Evidence $evidenceA -Device $deviceA
     Assert-ExactRecord -Result $identical -Sid $sidA -Evidence $evidenceA -Device $deviceA -Prefix 'identical'
     Assert-True (-not $identical.committed) 'identical_candidate_recommitted'
     Assert-True $identical.exact 'identical_candidate_not_exact'
     Assert-True $identical.provenance_exact 'identical_candidate_provenance_not_exact'
 
+    # 3. Same SID with different provenance cannot rewrite the durable identity.
     $sameOwnerDifferentProof = Invoke-ProbeCreate -Sid $sidA -Evidence $evidenceB -Device $deviceB
     Assert-ExactRecord -Result $sameOwnerDifferentProof -Sid $sidA -Evidence $evidenceA -Device $deviceA -Prefix 'same_owner_different_proof'
     Assert-True (-not $sameOwnerDifferentProof.committed) 'same_owner_different_proof_recommitted'
     Assert-True $sameOwnerDifferentProof.exact 'same_owner_different_proof_owner_not_exact'
     Assert-True (-not $sameOwnerDifferentProof.provenance_exact) 'same_owner_different_proof_unexpectedly_exact'
 
+    # 4. Different SID fails closed and cannot replace the enrolled owner.
     $mismatch = Invoke-ProbeCreate -Sid $sidB -Evidence $evidenceB -Device $deviceB
     Assert-ExactRecord -Result $mismatch -Sid $sidA -Evidence $evidenceA -Device $deviceA -Prefix 'owner_mismatch'
     Assert-True (-not $mismatch.committed) 'owner_mismatch_recommitted'
     Assert-True $mismatch.owner_mismatch 'owner_mismatch_not_reported'
 
+    # 5. Malformed durable bytes are surfaced as corruption, never absence.
     Reset-SecureRoot
     [IO.File]::WriteAllText($recordPath, "malformed`n", [Text.Encoding]::ASCII)
     Secure-RecordAcl
@@ -144,6 +179,7 @@ try {
     Assert-True $malformed.corrupt 'malformed_record_not_corrupt'
     Assert-True $malformed.root_trusted 'malformed_record_root_untrusted'
 
+    # 6. Oversized durable bytes fail the bounded-read contract.
     Reset-SecureRoot
     [IO.File]::WriteAllText($recordPath, ('x' * 4096), [Text.Encoding]::ASCII)
     Secure-RecordAcl
@@ -151,12 +187,14 @@ try {
     Assert-True $oversized.present 'oversized_record_not_present'
     Assert-True $oversized.corrupt 'oversized_record_not_corrupt'
 
+    # 7. A low-privilege write ACE on the machine root is rejected.
     Reset-SecureRoot
     Invoke-Icacls -Arguments @($root, '/grant', '*S-1-5-32-545:(OI)(CI)M')
     $writableRoot = Invoke-ProbeRead
     Assert-True (-not $writableRoot.root_trusted) 'low_privilege_writable_root_accepted'
     Assert-True (-not $writableRoot.present) 'low_privilege_writable_root_read_record'
 
+    # 8. An exact-path junction is rejected before durable state is trusted.
     Reset-SecureRoot
     Remove-PathSafely -Path $root
     Remove-PathSafely -Path $reparseTarget
@@ -166,13 +204,25 @@ try {
     Assert-True (-not $reparse.root_trusted) 'reparse_root_accepted'
     Assert-True (-not $reparse.present) 'reparse_root_read_record'
 
+    # 9. Holding the verified Guardian root without FILE_SHARE_DELETE must fence
+    # rename of its ancestor. The production store relies on this NTFS/Win32
+    # property while using an absolute FILE_RENAME_INFO target under the fenced root.
+    Reset-SecureRoot
+    $ancestorFence = Invoke-ProbeAncestorRenameFence
+    Assert-True $ancestorFence.blocked 'ancestor_parent_rename_not_fenced'
+    Assert-True ($ancestorFence.win32_error -eq 32) "ancestor_parent_rename_unexpected_error_$($ancestorFence.win32_error)"
+
+    # 10. Conflicting concurrent creators have exactly one durable winner.
     Reset-SecureRoot
     $processA = Start-ProbeCreateProcess -Sid $sidA -Evidence $evidenceA -Device $deviceA
     $processB = Start-ProbeCreateProcess -Sid $sidB -Evidence $evidenceB -Device $deviceB
     $raceA = Complete-ProbeCreateProcess -Process $processA -Label 'race_a'
     $raceB = Complete-ProbeCreateProcess -Process $processB -Label 'race_b'
+
     $commitCount = 0
-    foreach ($raceResult in @($raceA, $raceB)) { if ($raceResult.committed) { $commitCount += 1 } }
+    foreach ($raceResult in @($raceA, $raceB)) {
+        if ($raceResult.committed) { $commitCount += 1 }
+    }
     Assert-True ($commitCount -eq 1) "race_commit_count_$commitCount"
 
     $final = Invoke-ProbeRead
@@ -180,6 +230,7 @@ try {
     Assert-True (-not $final.corrupt) 'race_final_record_corrupt'
     Assert-True $final.root_trusted 'race_final_root_untrusted'
     Assert-True (@($sidA, $sidB) -contains $final.record.expected_owner_sid) 'race_final_sid_unknown'
+
     if ($final.record.expected_owner_sid -eq $sidA) {
         Assert-True ($final.record.enrollment_evidence_sha256 -eq $evidenceA) 'race_final_a_evidence_mismatch'
         Assert-True ($final.record.device_key_fingerprint_sha256 -eq $deviceA) 'race_final_a_device_mismatch'
