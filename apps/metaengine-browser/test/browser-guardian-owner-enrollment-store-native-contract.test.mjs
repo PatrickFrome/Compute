@@ -9,11 +9,12 @@ const header = fs.readFileSync(path.join(root, 'native/browser-guardian-scm/brow
 const source = `${header}\n${cpp}`;
 
 function between(text, start, end) {
-  const from = text.indexOf(start);
+  const normalized = text.replace(/\r\n/g, '\n');
+  const from = normalized.indexOf(start);
   assert.ok(from >= 0, `${start} missing`);
-  const to = text.indexOf(end, from + start.length);
+  const to = normalized.indexOf(end, from + start.length);
   assert.ok(to > from, `${end} missing after ${start}`);
-  return text.slice(from, to);
+  return normalized.slice(from, to);
 }
 
 test('durable owner store uses stage -> flush -> fail-if-exists source-handle rename -> readback', () => {
