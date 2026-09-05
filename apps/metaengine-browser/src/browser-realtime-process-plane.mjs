@@ -1,9 +1,11 @@
 import { BrowserRealtimeSemanticPlane } from './browser-realtime-semantic-plane.mjs';
+import { BrowserCognitiveDeltaBus } from './browser-cognitive-delta-bus.mjs';
 
 export const BROWSER_REALTIME_PROCESS_PLANE_SCHEMA = 'metaengine.browser.realtime-process-plane.v1';
 
 const DEFAULT_SAMPLE_MS = 250;
 const DEFAULT_EVENT_LIMIT = 512;
+const DEFAULT_COGNITIVE_EVENT_LIMIT = 4096;
 
 function boundedInt(value, fallback, min, max) {
   const parsed = Number(value);
@@ -120,6 +122,7 @@ export class BrowserRealtimeProcessPlane {
   #semanticPlane = null;
   #semanticStartPromise = null;
   #semanticLastError = null;
+  #cognitiveBus;
 
   constructor({
     app,
@@ -128,6 +131,7 @@ export class BrowserRealtimeProcessPlane {
     clock = () => Date.now(),
     sampleMs = DEFAULT_SAMPLE_MS,
     eventLimit = DEFAULT_EVENT_LIMIT,
+    cognitiveEventLimit = DEFAULT_COGNITIVE_EVENT_LIMIT,
     onChange = null,
   } = {}) {
     if (!app || typeof app.getAppMetrics !== 'function' || typeof app.on !== 'function') {
@@ -143,6 +147,10 @@ export class BrowserRealtimeProcessPlane {
     this.#sampleMs = boundedInt(sampleMs, DEFAULT_SAMPLE_MS, 50, 5000);
     this.#eventLimit = boundedInt(eventLimit, DEFAULT_EVENT_LIMIT, 32, 4096);
     this.#onChange = onChange;
+    this.#cognitiveBus = new BrowserCognitiveDeltaBus({
+      clock,
+      maxEvents: boundedInt(cognitiveEventLimit, DEFAULT_COGNITIVE_EVENT_LIMIT, 64, 16384),
+    });
   }
 
   #emit(type, details = {}) {
@@ -159,6 +167,7 @@ export class BrowserRealtimeProcessPlane {
       this.#events.splice(0, drop);
       this.#droppedEvents += drop;
     }
+    this.#cognitiveBus.publish(event);
     try { this.#onChange?.(event); } catch {}
     return event;
   }
@@ -277,7 +286,9 @@ export class BrowserRealtimeProcessPlane {
       this.#emit('PROCESS_CENSUS_REFRESHED', { reason });
       this.#syncSemanticTargets();
     } else {
-      try { this.#onChange?.(Object.freeze({ seq: this.#sequence, type: 'METRICS_SAMPLE', observed_at: this.#observedAt, authority_effect: false })); } catch {}
+      const sample = Object.freeze({ seq: this.#sequence, type: 'METRICS_SAMPLE', observed_at: this.#observedAt, authority_effect: false });
+      this.#cognitiveBus.publish(sample);
+      try { this.#onChange?.(sample); } catch {}
     }
     return this.snapshot();
   }
@@ -342,6 +353,23 @@ export class BrowserRealtimeProcessPlane {
     return Object.freeze(this.#events.filter((row) => row.seq > after).slice(-bounded).map((row) => ({ ...row })));
   }
 
+  cognitiveSnapshot({ eventsSince = 0, eventLimit = 256 } = {}) {
+    const bus = this.#cognitiveBus.snapshot();
+    const read = this.#cognitiveBus.readSince(eventsSince, eventLimit);
+    return Object.freeze({
+      ...bus,
+      events: read.events,
+      after_sequence: read.after_sequence,
+      returned_through_sequence: read.returned_through_sequence,
+      has_more: read.has_more,
+      gap: read.gap,
+      resync_required: read.resync_required,
+      snapshot_is_recovery_authority: read.snapshot_is_recovery_authority,
+      delta_is_execution_authority: false,
+      authority_effect: false,
+    });
+  }
+
   semanticSnapshot({ includeText = true, eventsSince = null, eventLimit = 128 } = {}) {
     return this.#semanticPlane?.snapshot({ includeText, eventsSince, eventLimit }) || Object.freeze({
       schema: 'metaengine.browser.realtime-semantic-plane.v1',
@@ -394,6 +422,7 @@ export class BrowserRealtimeProcessPlane {
       })),
       semantic_plane: this.semanticSnapshot({ includeText: false, eventLimit: 64 }),
       semantic_plane_last_error: this.#semanticLastError,
+      cognitive_delta_bus: this.#cognitiveBus.snapshot(),
       events: events.map((row) => ({ ...row })),
       dropped_events: this.#droppedEvents,
       event_driven_lifecycle: true,
@@ -403,6 +432,8 @@ export class BrowserRealtimeProcessPlane {
       process_identity_pid_reuse_safe: true,
       renderer_identity_source: 'ELECTRON_WEB_CONTENTS_OS_PID_PLUS_PROCESS_METRIC_CREATION_TIME',
       semantic_source: 'PERSISTENT_CDP_PAGE_DOM_ACCESSIBILITY_RUNTIME_NETWORK',
+      cognitive_delta_source: 'EXISTING_PROCESS_AND_SEMANTIC_EVENTS',
+      cognitive_delta_second_scheduler: false,
       persistent_cdp_sessions: true,
       cdp_attach_per_command: false,
       page_content_exposed: false,
