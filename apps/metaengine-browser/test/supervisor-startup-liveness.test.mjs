@@ -34,11 +34,15 @@ test('Browser runtime registers early, waits for host resilience, and retries st
   assert.match(main, /function scheduleBrowserRuntimeRetry\(error\)/);
   assert.match(main, /if \(shutdownRequested \|\| isSmoke \|\| isDevelopmentPlaneSmoke \|\| startupRetryTimer\) return/);
   assert.match(main, /Math\.min\(STARTUP_RETRY_MAX_MS, STARTUP_RETRY_BASE_MS \* \(2 \*\* Math\.min\(8, startupRetryAttempt - 1\)\)\)/);
-  assert.match(main, /else scheduleBrowserRuntimeRetry\(error\)/);
+  assert.match(main, /void presentBrowserStartupFailure\(error\);[\s\S]*scheduleBrowserRuntimeRetry\(error\)/);
+  assert.doesNotMatch(main, /startupRetryTimer\.unref/);
+  assert.match(main, /timer_keeps_process_alive: true/);
   assert.match(main, /if \(recover\) scheduleBrowserRuntimeRetry\(new Error\('browser_window_closed_unexpectedly'\)\)/);
   assert.match(main, /if \(app\.isReady\(\)\) queueMicrotask\(\(\) => \{ void startBrowserRuntime\(\); \}\)/);
   assert.match(main, /else app\.once\('ready', \(\) => \{ void startBrowserRuntime\(\); \}\)/);
   assert.match(main, /terminal_requires_external_stop: true/);
+  assert.match(main, /local_shell_is_startup_boundary: true/);
+  assert.match(main, /remote_network_is_startup_boundary: false/);
 });
 
 test('watchdog recovery quarantines durable continuity before relaunch and has no browser replay authority', async () => {
