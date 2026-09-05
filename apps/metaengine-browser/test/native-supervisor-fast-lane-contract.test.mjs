@@ -9,11 +9,12 @@ const appRoot = path.resolve(import.meta.dirname, '..');
 const repoRoot = path.resolve(appRoot, '..', '..');
 
 function between(text, start, end) {
-  const from = text.indexOf(start);
+  const source = String(text).replace(/\r\n?/g, '\n');
+  const from = source.indexOf(start);
   assert.ok(from >= 0, `${start} missing`);
-  const to = text.indexOf(end, from + start.length);
+  const to = source.indexOf(end, from + start.length);
   assert.ok(to > from, `${end} missing after ${start}`);
-  return text.slice(from, to);
+  return source.slice(from, to);
 }
 
 test('batch and legacy effect receipts are never locally aborted after physical execution', async () => {
@@ -112,6 +113,8 @@ test('realtime process plane is observation-only and cannot become a second comm
   assert.match(source, /WEB_CONTENTS_CREATED/);
   assert.match(source, /CHILD_PROCESS_GONE/);
   assert.match(source, /RENDER_PROCESS_GONE/);
+  assert.match(source, /persistent_cdp_sessions:\s*true/);
+  assert.match(source, /cdp_attach_per_command:\s*false/);
   assert.match(source, /second_scheduler:\s*false/);
   assert.match(source, /command_leasing:\s*false/);
   assert.match(source, /control_authority:\s*false/);
@@ -121,9 +124,10 @@ test('realtime process plane is observation-only and cannot become a second comm
 test('fast lane keeps bounded admission even under very large command bursts', async () => {
   const { NativeSupervisorCommandLaneScheduler } = await import('../src/native-supervisor-command-lanes.mjs');
   const scheduler = new NativeSupervisorCommandLaneScheduler({ readConcurrency: 128, mutationConcurrency: 32, maxBatch: 256 });
+  const observationActions = ['PROCESS_CENSUS','PROCESS_EVENTS','SEMANTIC_CENSUS','SEMANTIC_EVENTS','CONTROL_LATENCY_STATUS'];
   const commands = Array.from({ length: 256 }, (_, index) => ({
     command_id: `read-${index}`,
-    action: index % 3 === 0 ? 'PROCESS_CENSUS' : index % 3 === 1 ? 'PROCESS_EVENTS' : 'CONTROL_LATENCY_STATUS',
+    action: observationActions[index % observationActions.length],
     payload: {},
   }));
   let active = 0;
