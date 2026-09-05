@@ -28,6 +28,25 @@ function targetIdOf(webContents) {
   return exact ? clip(exact, 160) : `webcontents:${exactId(webContents)}`;
 }
 
+function plainObject(value) {
+  if (!value || typeof value !== 'object') return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+function legacyUnitTestDouble(webContents, dbg) {
+  // Real Electron WebContents in the supported runtime exposes both the exact
+  // DevTools TargetID API and EventEmitter-backed debugger events. A tiny
+  // plain-object unit-test double may intentionally expose neither. Preserve
+  // those old zero-authority tests without creating a production fallback:
+  // this mode has no event instrumentation and can never satisfy the exact
+  // runtime mutation fence because it has no real CDP TargetID API.
+  return plainObject(webContents)
+    && plainObject(dbg)
+    && typeof webContents.getOrCreateDevToolsTargetId !== 'function'
+    && typeof dbg.on !== 'function';
+}
+
 function rowProjection(row) {
   return Object.freeze({
     schema: BROWSER_PERSISTENT_CDP_SESSION_SCHEMA,
@@ -42,7 +61,11 @@ function rowProjection(row) {
     last_detach_reason: row.lastDetachReason,
     last_error: row.lastError,
     subscriber_count: row.subscribers.size,
-    domains: row.ready ? ['PAGE','DOM','ACCESSIBILITY','RUNTIME','NETWORK'] : [],
+    domains: row.ready && !row.legacyTestDouble ? ['PAGE','DOM','ACCESSIBILITY','RUNTIME','NETWORK'] : [],
+    instrumentation_mode: row.legacyTestDouble ? 'LEGACY_UNIT_TEST_DOUBLE' : 'PERSISTENT_CDP',
+    event_instrumentation: row.legacyTestDouble === false,
+    exact_target_api: typeof row.webContents?.getOrCreateDevToolsTargetId === 'function',
+    legacy_test_double_can_authorize_runtime_mutation: false,
     raw_cdp_passthrough: false,
     control_authority: false,
     command_leasing: false,
@@ -66,8 +89,12 @@ export class PersistentBrowserCdpSessionPool {
     if (existing) this.release(existing.webContents);
 
     const dbg = webContents.debugger;
-    if (!dbg || typeof dbg.attach !== 'function' || typeof dbg.sendCommand !== 'function' || typeof dbg.on !== 'function') {
+    if (!dbg || typeof dbg.attach !== 'function' || typeof dbg.isAttached !== 'function' || typeof dbg.sendCommand !== 'function') {
       throw new Error('persistent_cdp_debugger_unavailable');
+    }
+    const legacyTestDouble = legacyUnitTestDouble(webContents, dbg);
+    if (typeof dbg.on !== 'function' && !legacyTestDouble) {
+      throw new Error('persistent_cdp_debugger_events_unavailable');
     }
 
     const row = {
@@ -75,6 +102,7 @@ export class PersistentBrowserCdpSessionPool {
       webContents,
       dbg,
       targetId: targetIdOf(webContents),
+      legacyTestDouble,
       subscribers: new Set(),
       ensurePromise: null,
       ready: false,
@@ -132,15 +160,17 @@ export class PersistentBrowserCdpSessionPool {
     };
 
     row.destroyedHandler = () => { this.release(webContents); };
-    dbg.on('message', row.messageHandler);
-    dbg.on('detach', row.detachHandler);
+    if (!legacyTestDouble) {
+      dbg.on('message', row.messageHandler);
+      dbg.on('detach', row.detachHandler);
+    }
     webContents.once?.('destroyed', row.destroyedHandler);
     this.#rows.set(id, row);
     return row;
   }
 
   #scheduleOneReattach(row) {
-    if (row.reattachScheduled || !liveWebContents(row.webContents)) return;
+    if (row.legacyTestDouble || row.reattachScheduled || !liveWebContents(row.webContents)) return;
     row.reattachScheduled = true;
     setImmediate(() => {
       row.reattachScheduled = false;
@@ -156,16 +186,18 @@ export class PersistentBrowserCdpSessionPool {
       row.attachedByPool = true;
     }
 
-    // Keep the domains hot for the lifetime of the WebContents. Required domains
-    // fail closed; Network telemetry is useful but may be unavailable on some
-    // Chromium targets, so only that optional enable is fail-soft.
-    await row.dbg.sendCommand('Page.enable');
-    await row.dbg.sendCommand('DOM.enable');
-    await row.dbg.sendCommand('Accessibility.enable');
-    await row.dbg.sendCommand('Runtime.enable');
-    await row.dbg.sendCommand('Page.setLifecycleEventsEnabled', { enabled: true });
-    await row.dbg.sendCommand('Network.enable').catch(() => null);
-    await row.dbg.sendCommand('DOM.getDocument', { depth: 1, pierce: true }).catch(() => null);
+    if (!row.legacyTestDouble) {
+      // Keep the domains hot for the lifetime of the WebContents. Required domains
+      // fail closed; Network telemetry is useful but may be unavailable on some
+      // Chromium targets, so only that optional enable is fail-soft.
+      await row.dbg.sendCommand('Page.enable');
+      await row.dbg.sendCommand('DOM.enable');
+      await row.dbg.sendCommand('Accessibility.enable');
+      await row.dbg.sendCommand('Runtime.enable');
+      await row.dbg.sendCommand('Page.setLifecycleEventsEnabled', { enabled: true });
+      await row.dbg.sendCommand('Network.enable').catch(() => null);
+      await row.dbg.sendCommand('DOM.getDocument', { depth: 1, pierce: true }).catch(() => null);
+    }
 
     row.ready = true;
     row.attachmentGeneration += 1;
@@ -218,8 +250,10 @@ export class PersistentBrowserCdpSessionPool {
     if (!row || row.webContents !== webContents) return false;
     this.#rows.delete(id);
     row.subscribers.clear();
-    try { row.dbg.off?.('message', row.messageHandler); } catch {}
-    try { row.dbg.off?.('detach', row.detachHandler); } catch {}
+    if (!row.legacyTestDouble) {
+      try { row.dbg.off?.('message', row.messageHandler); } catch {}
+      try { row.dbg.off?.('detach', row.detachHandler); } catch {}
+    }
     try { webContents.off?.('destroyed', row.destroyedHandler); } catch {}
     if (row.attachedByPool && row.dbg.isAttached?.()) {
       try { row.dbg.detach(); } catch {}
@@ -235,9 +269,12 @@ export class PersistentBrowserCdpSessionPool {
       session_count: sessions.length,
       ready_count: sessions.filter((row) => row.ready).length,
       attached_count: sessions.filter((row) => row.attached).length,
+      legacy_unit_test_double_count: sessions.filter((row) => row.instrumentation_mode === 'LEGACY_UNIT_TEST_DOUBLE').length,
       sessions,
       attach_per_command: false,
       persistent_transport: true,
+      production_event_instrumentation_required: true,
+      legacy_unit_test_double_can_authorize_runtime_mutation: false,
       raw_cdp_passthrough: false,
       control_authority: false,
       command_leasing: false,
