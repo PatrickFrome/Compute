@@ -37,12 +37,27 @@ test('enrollment bootstrap reports an already-approved device without granting c
   assert.equal(result.browser_authority, false);
 });
 
-test('public wrapper recovers enrollment through startup and the one existing cycle only', async () => {
+test('public wrapper recovers enrollment through startup and the one existing command cycle only', async () => {
   const source = await readFile(new URL('../src/native-supervisor-client.mjs', import.meta.url), 'utf8');
-  assert.match(source, /async start\(\)\s*\{[\s\S]*?await this\.#bootstrapEnrollment\(\);[\s\S]*?return super\.start\(\);/);
-  assert.match(source, /async cycle\(\)\s*\{[\s\S]*?await this\.#bootstrapEnrollment\(\);[\s\S]*?await super\.cycle\(\);/);
+  const startIndex = source.indexOf('async start()');
+  const processIndex = source.indexOf('await this.#startRealtimeProcessPlane()', startIndex);
+  const enrollIndex = source.indexOf('await this.#bootstrapEnrollment()', startIndex);
+  const baseStartIndex = source.indexOf('await super.start()', startIndex);
+  assert.ok(startIndex >= 0 && processIndex > startIndex, 'startup must initialize observation plane');
+  assert.ok(enrollIndex > processIndex, 'enrollment must follow local observation bootstrap');
+  assert.ok(baseStartIndex > enrollIndex, 'existing supervisor runtime must start only after bounded enrollment bootstrap');
+
+  const cycleIndex = source.indexOf('async cycle()');
+  const cycleEnrollIndex = source.indexOf('await this.#bootstrapEnrollment()', cycleIndex);
+  const baseCycleIndex = source.indexOf('await super.cycle()', cycleIndex);
+  assert.ok(cycleIndex >= 0 && cycleEnrollIndex > cycleIndex && baseCycleIndex > cycleEnrollIndex);
+
+  // Observation may debounce state pushes, but it must never create another command
+  // lease/poll loop. Only the inherited supervisor cycle is command authority.
   assert.doesNotMatch(source, /setInterval\s*\(/);
-  assert.doesNotMatch(source, /setTimeout\s*\(/);
+  assert.doesNotMatch(source, /commands\/next|commands\/wait-batch|lease_batch|executeCommandBatch/);
+  assert.match(source, /realtime_process_plane_second_scheduler:\s*false/);
+  assert.match(source, /command_leasing:\s*false/);
   assert.match(source, /enrollment_bootstrap_auto_approval:\s*false/);
   assert.match(source, /automatic_retry_allowed:\s*false/);
 });

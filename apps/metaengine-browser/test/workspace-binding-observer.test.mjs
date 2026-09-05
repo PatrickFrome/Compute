@@ -48,11 +48,18 @@ test('snapshot migration is bounded service-role-only and omits filesystem topol
   assert.doesNotMatch(migration,/\bdelete\s+from\s+public\.compute_fabric_a2_workspace_binding_h205f22/i);
 });
 
-test('native wrapper adds observation to existing cycle and creates no polling loop',()=>{
+test('native wrapper adds workspace observation to the inherited cycle without another command scheduler',()=>{
   assert.match(wrapper,/await super\.cycle\(\)/);
   assert.match(wrapper,/await this\.#observeWorkspaceBindings\(\)/);
   assert.match(wrapper,/workspace_binding_second_polling_loop:\s*false/);
-  assert.doesNotMatch(wrapper,/setInterval\s*\(/);
-  assert.doesNotMatch(wrapper,/setTimeout\s*\(/);
-  assert.doesNotMatch(wrapper,/FLEET_RECONCILE|GATE_DISABLE|TYPED_CLICK|SEMANTIC_TYPE/);
+  // Observation push is event-driven and must never reintroduce a timer/poll loop.
+  // One microtask edge is allowed to coalesce synchronous event bursts; it carries
+  // no command lease or Browser actuation authority.
+  assert.match(wrapper,/#scheduleRealtimeStatePush[\s\S]*queueMicrotask\s*\(/);
+  assert.doesNotMatch(wrapper,/setInterval\s*\(|setTimeout\s*\(/);
+  assert.doesNotMatch(wrapper,/commands\/next|commands\/wait-batch|lease_batch|FLEET_RECONCILE|GATE_DISABLE|TYPED_CLICK|SEMANTIC_TYPE/);
+  assert.match(wrapper,/realtime_process_plane_command_authority:\s*false/);
+  assert.match(wrapper,/realtime_process_plane_second_scheduler:\s*false/);
+  assert.match(wrapper,/realtime_semantic_plane_command_authority:\s*false/);
+  assert.match(wrapper,/realtime_semantic_plane_second_scheduler:\s*false/);
 });

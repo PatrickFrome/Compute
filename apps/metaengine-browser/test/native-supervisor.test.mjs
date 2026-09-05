@@ -75,8 +75,10 @@ test('native supervisor client completes approval enrollment then executes lease
   const identity = new SupervisorDeviceIdentity({ statePath: path.join(dir, 'device.json'), secureStorage });
   const requestId = crypto.randomUUID();
   const deviceId = crypto.randomUUID();
+  const commandId = crypto.randomUUID();
   const seen = [];
   let statusCalls = 0;
+  let issued = false;
   const fetchImpl = async (url, init = {}) => {
     const pathname = new URL(url).pathname;
     seen.push({ pathname, method: init.method, body: init.body || '' });
@@ -86,8 +88,12 @@ test('native supervisor client completes approval enrollment then executes lease
       return new Response(JSON.stringify({ accepted:true, request_id:requestId, device_id:deviceId, status:'CLAIMED' }), { status:200, headers:{'content-type':'application/json'} });
     }
     if (pathname.endsWith('/v1/state')) return new Response(JSON.stringify({ accepted:true }), { status:202, headers:{'content-type':'application/json'} });
-    if (pathname.endsWith('/v1/commands/next')) return new Response(JSON.stringify({ command:{ command_id:crypto.randomUUID(), action:'DISARM', payload:{}, issued_at:new Date().toISOString(), expires_at:new Date(Date.now()+60000).toISOString() } }), { status:200, headers:{'content-type':'application/json'} });
-    if (/\/v1\/commands\/[^/]+\/result$/.test(pathname)) return new Response(JSON.stringify({ accepted:true }), { status:200, headers:{'content-type':'application/json'} });
+    if (pathname.endsWith('/v1/commands/wait-batch')) {
+      if (issued) return new Response(JSON.stringify({ commands:[], transport_delivery_is_authority:false }), { status:200, headers:{'content-type':'application/json'} });
+      issued = true;
+      return new Response(JSON.stringify({ commands:[{ command_id:commandId, action:'DISARM', payload:{}, issued_at:new Date().toISOString(), expires_at:new Date(Date.now()+60000).toISOString(), command_lane:'EMERGENCY', effect_key:'global:emergency', authority_effect:false }], transport_delivery_is_authority:false, authority_effect:false }), { status:200, headers:{'content-type':'application/json'} });
+    }
+    if (pathname.endsWith('/v1/commands/result-batch')) return new Response(JSON.stringify({ accepted:true, results:[{ command_id:commandId, accepted:true, status:'COMPLETED' }], authority_effect:false }), { status:200, headers:{'content-type':'application/json'} });
     throw new Error(`unexpected_fetch:${pathname}`);
   };
   const client = new NativeSupervisorClient({
@@ -107,10 +113,10 @@ test('native supervisor client completes approval enrollment then executes lease
   const requestIndex = seen.findIndex((row) => row.pathname.endsWith('/v1/device/enrollment/request'));
   const statusIndex = seen.findIndex((row) => row.pathname.endsWith('/v1/device/enrollment/status'));
   const stateIndex = seen.findIndex((row) => row.pathname.endsWith('/v1/state'));
-  const leaseIndex = seen.findIndex((row) => row.pathname.endsWith('/v1/commands/next'));
+  const leaseIndex = seen.findIndex((row) => row.pathname.endsWith('/v1/commands/wait-batch'));
   assert.ok(requestIndex >= 0 && statusIndex > requestIndex);
   assert.ok(stateIndex > statusIndex);
-  assert.ok(leaseIndex > stateIndex);
+  assert.ok(leaseIndex > statusIndex);
   await fs.rm(dir, { recursive:true, force:true });
 });
 
@@ -125,14 +131,14 @@ test('CONTROL_CAPABILITIES is handled locally as read-only and never delegated t
   const fetchImpl = async (url, init = {}) => {
     const pathname = new URL(url).pathname;
     if (pathname.endsWith('/v1/state')) return new Response('{}', { status:202, headers:{'content-type':'application/json'} });
-    if (pathname.endsWith('/v1/commands/next')) {
-      if (commandIssued) return new Response(JSON.stringify({ command:null }), { status:200, headers:{'content-type':'application/json'} });
+    if (pathname.endsWith('/v1/commands/wait-batch')) {
+      if (commandIssued) return new Response(JSON.stringify({ commands:[], transport_delivery_is_authority:false }), { status:200, headers:{'content-type':'application/json'} });
       commandIssued = true;
-      return new Response(JSON.stringify({ command:{ command_id:commandId, action:'CONTROL_CAPABILITIES', payload:{}, issued_at:new Date().toISOString(), expires_at:new Date(Date.now()+60000).toISOString() } }), { status:200, headers:{'content-type':'application/json'} });
+      return new Response(JSON.stringify({ commands:[{ command_id:commandId, action:'CONTROL_CAPABILITIES', payload:{}, issued_at:new Date().toISOString(), expires_at:new Date(Date.now()+60000).toISOString(), command_lane:'READ_ONLY', effect_key:null, authority_effect:false }], transport_delivery_is_authority:false, authority_effect:false }), { status:200, headers:{'content-type':'application/json'} });
     }
-    if (/\/v1\/commands\/[^/]+\/result$/.test(pathname)) {
-      postedReceipt = JSON.parse(init.body || '{}');
-      return new Response('{}', { status:200, headers:{'content-type':'application/json'} });
+    if (pathname.endsWith('/v1/commands/result-batch')) {
+      postedReceipt = JSON.parse(init.body || '{}')?.results?.[0] || null;
+      return new Response(JSON.stringify({ accepted:true, results:[{ command_id:commandId, accepted:true, status:'COMPLETED' }], authority_effect:false }), { status:200, headers:{'content-type':'application/json'} });
     }
     throw new Error(`unexpected_fetch:${pathname}`);
   };
@@ -167,20 +173,22 @@ test('DB-leased semantic command seals exact local intent before physical execut
   const events = [];
   let issued = false;
   let physicalEffects = 0;
+  let postedReceipt = null;
   const fetchImpl = async (url, init={}) => {
     const pathname = new URL(url).pathname;
     if (pathname.endsWith('/v1/state')) return new Response('{}',{status:202,headers:{'content-type':'application/json'}});
-    if (pathname.endsWith('/v1/commands/next')) {
-      if (issued) return new Response(JSON.stringify({command:null}),{status:200,headers:{'content-type':'application/json'}});
+    if (pathname.endsWith('/v1/commands/wait-batch')) {
+      if (issued) return new Response(JSON.stringify({commands:[],transport_delivery_is_authority:false}),{status:200,headers:{'content-type':'application/json'}});
       issued = true;
-      return new Response(JSON.stringify({command:{
+      return new Response(JSON.stringify({commands:[{
         command_id:commandId,
         idempotency_key:'native.effect.intent.integration.1',
         action:'TYPED_CLICK',
         platform:'CHATGPT',
         payload:{tab_id:tabId,role:'button',accessible_name:'Send'},
         issued_at:new Date().toISOString(),expires_at:expiresAt,
-      }}),{status:200,headers:{'content-type':'application/json'}});
+        command_lane:'TAB_MUTATION',effect_key:`tab:${tabId.toLowerCase()}`,authority_effect:false,
+      }],transport_delivery_is_authority:false,authority_effect:false}),{status:200,headers:{'content-type':'application/json'}});
     }
     if (pathname.endsWith(`/v1/commands/${commandId}/effect-intent`)) {
       events.push('seal');
@@ -191,7 +199,10 @@ test('DB-leased semantic command seals exact local intent before physical execut
       assert.equal(request.binding.target_id, 'webcontents:77');
       return new Response(JSON.stringify({accepted:true,effect_binding:request.binding,effect_binding_sha256:'a'.repeat(64)}),{status:200,headers:{'content-type':'application/json'}});
     }
-    if (/\/result$/.test(pathname)) return new Response(JSON.stringify({accepted:true}),{status:200,headers:{'content-type':'application/json'}});
+    if (pathname.endsWith('/v1/commands/result-batch')) {
+      postedReceipt = JSON.parse(init.body || '{}')?.results?.[0] || null;
+      return new Response(JSON.stringify({accepted:true,results:[{command_id:commandId,accepted:true,status:'COMPLETED'}],authority_effect:false}),{status:200,headers:{'content-type':'application/json'}});
+    }
     if (pathname.endsWith('/v1/devos/cycle')) return new Response(JSON.stringify({backlog:{ready:0},lease:null,running:[]}),{status:200,headers:{'content-type':'application/json'}});
     throw new Error(`unexpected_fetch:${pathname}`);
   };
@@ -204,7 +215,7 @@ test('DB-leased semantic command seals exact local intent before physical execut
         events.push('effect'); physicalEffects+=1;
         assert.equal(command.effect_binding?.command_id,commandId);
         assert.equal(command.effect_binding_sha256,'a'.repeat(64));
-        return {ok:true,authority_effect:true};
+        return {ok:true,effect_outcome:'CONFIRMED',authority_effect:true};
       }
       throw new Error(`unexpected_execute:${command.action}`);
     },
@@ -212,6 +223,7 @@ test('DB-leased semantic command seals exact local intent before physical execut
   await client.cycle();
   assert.deepEqual(events.slice(0,2),['seal','effect']);
   assert.equal(physicalEffects,1);
+  assert.equal(postedReceipt?.receipt?.effect_outcome,'CONFIRMED');
   assert.equal(client.snapshot().last_command_status,'COMPLETED');
   await fs.rm(dir,{recursive:true,force:true});
 });
@@ -221,16 +233,19 @@ test('rejected DB effect-intent prevents physical semantic execution', async () 
   const identity = new SupervisorDeviceIdentity({ statePath:path.join(dir,'device.json'), secureStorage });
   await identity.ensure(); await identity.bindDevice(crypto.randomUUID());
   const commandId=crypto.randomUUID(); const tabId=`tab_${crypto.randomUUID()}`; const processId=crypto.randomUUID();
-  let issued=false; let physicalEffects=0;
-  const fetchImpl=async(url)=>{
+  let issued=false; let physicalEffects=0; let postedReceipt=null;
+  const fetchImpl=async(url,init={})=>{
     const pathname=new URL(url).pathname;
     if(pathname.endsWith('/v1/state'))return new Response('{}',{status:202,headers:{'content-type':'application/json'}});
-    if(pathname.endsWith('/v1/commands/next')){
-      if(issued)return new Response(JSON.stringify({command:null}),{status:200,headers:{'content-type':'application/json'}});
-      issued=true; return new Response(JSON.stringify({command:{command_id:commandId,idempotency_key:'native.effect.intent.reject.1',action:'TYPED_CLICK',platform:'CHATGPT',payload:{tab_id:tabId,role:'button',accessible_name:'Send'},issued_at:new Date().toISOString(),expires_at:new Date(Date.now()+120000).toISOString()}}),{status:200,headers:{'content-type':'application/json'}});
+    if(pathname.endsWith('/v1/commands/wait-batch')){
+      if(issued)return new Response(JSON.stringify({commands:[],transport_delivery_is_authority:false}),{status:200,headers:{'content-type':'application/json'}});
+      issued=true; return new Response(JSON.stringify({commands:[{command_id:commandId,idempotency_key:'native.effect.intent.reject.1',action:'TYPED_CLICK',platform:'CHATGPT',payload:{tab_id:tabId,role:'button',accessible_name:'Send'},issued_at:new Date().toISOString(),expires_at:new Date(Date.now()+120000).toISOString(),command_lane:'TAB_MUTATION',effect_key:`tab:${tabId.toLowerCase()}`,authority_effect:false}],transport_delivery_is_authority:false,authority_effect:false}),{status:200,headers:{'content-type':'application/json'}});
     }
     if(pathname.endsWith(`/v1/commands/${commandId}/effect-intent`))return new Response(JSON.stringify({accepted:false,reason:'binding_conflict'}),{status:409,headers:{'content-type':'application/json'}});
-    if(/\/result$/.test(pathname))return new Response(JSON.stringify({accepted:true}),{status:200,headers:{'content-type':'application/json'}});
+    if(pathname.endsWith('/v1/commands/result-batch')){
+      postedReceipt=JSON.parse(init.body||'{}')?.results?.[0]||null;
+      return new Response(JSON.stringify({accepted:true,results:[{command_id:commandId,accepted:true,status:'FAILED'}],authority_effect:false}),{status:200,headers:{'content-type':'application/json'}});
+    }
     throw new Error(`unexpected_fetch:${pathname}`);
   };
   const client=new NativeSupervisorClient({
@@ -239,8 +254,10 @@ test('rejected DB effect-intent prevents physical semantic execution', async () 
     prepareEffectBinding:async()=>({process_incarnation_id:processId,tab_id:tabId,target_id:'webcontents:77',observed_at:new Date().toISOString()}),
     executeCommand:async()=>{physicalEffects+=1;return {authority_effect:true};},
   });
-  await assert.rejects(()=>client.cycle(),/effect_binding_http_409/);
+  await client.cycle();
   assert.equal(physicalEffects,0);
+  assert.match(postedReceipt?.error || '',/effect_binding_http_409/);
+  assert.equal(postedReceipt?.receipt?.effect_outcome,'AMBIGUOUS');
   assert.equal(client.snapshot().last_command_status,'FAILED');
   await fs.rm(dir,{recursive:true,force:true});
 });

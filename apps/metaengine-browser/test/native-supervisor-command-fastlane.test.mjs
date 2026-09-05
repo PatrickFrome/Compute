@@ -101,11 +101,10 @@ test('fastlane backs off exponentially on pickup failure and resets after succes
   const { fastlane, state } = buildFastlane();
   state.commands.push({ __throw: 'native_supervisor_next_http_502' });
   fastlane.start();
-  await sleep(450); // first tick fires at intervalMs=250, fails, backoff doubles
+  await sleep(450);
   let snap = fastlane.snapshot();
   assert.equal(snap.current_backoff_ms, 500, 'first failure doubles the interval');
   assert.match(String(snap.last_error), /native_supervisor_next_http_502/);
-  // next poll happens after backoff; make it succeed
   state.commands.push(null);
   await sleep(700);
   snap = fastlane.snapshot();
@@ -132,9 +131,10 @@ test('base client exposes fastlane telemetry and keeps cycle pickup intact witho
   const fetchImpl = async (url, init = {}) => {
     const pathname = new URL(url).pathname;
     if (pathname.endsWith('/v1/state')) return new Response(JSON.stringify({ accepted: true }), { status: 202, headers: { 'content-type': 'application/json' } });
+    if (pathname.endsWith('/v1/commands/wait-batch')) return new Response('', { status: 404 });
     if (pathname.endsWith('/v1/commands/next')) return new Response(JSON.stringify({ command: { command_id: crypto.randomUUID(), action: 'POLL', payload: {}, issued_at: new Date().toISOString(), expires_at: new Date(Date.now() + 60000).toISOString() } }), { status: 200, headers: { 'content-type': 'application/json' } });
     if (/\/v1\/commands\/[^/]+\/result$/.test(pathname)) return new Response(JSON.stringify({ accepted: true }), { status: 200, headers: { 'content-type': 'application/json' } });
-    throw new Error(`unexpected_fetch:${pathname}`);
+    throw new Error(`unexpected_fetch:${pathname}:${init.method || 'GET'}`);
   };
   let executed = 0;
   const client = new NativeSupervisorClient({
@@ -150,17 +150,21 @@ test('base client exposes fastlane telemetry and keeps cycle pickup intact witho
   assert.equal(disabled.scheduler_authority, false);
   assert.equal(disabled.authority_effect, false);
   await client.cycle();
-  assert.equal(executed, 1, 'legacy cycle pickup must keep working through the shared command slot');
+  assert.equal(executed, 1, 'legacy cycle pickup must remain the fallback when wait-batch is unavailable');
   assert.equal(client.snapshot().last_command_status, 'COMPLETED');
 });
 
-test('base client constructs the fastlane only when explicitly opted in', async () => {
+test('base client preserves the 750ms fastlane only as a fallback and suppresses it after batch support', async () => {
   const source = await readFile(new URL('../src/native-supervisor-client-base.mjs', import.meta.url), 'utf8');
   assert.match(source, /commandFastlane === true\s*\?\s*new NativeSupervisorCommandFastlane/);
   assert.match(source, /this\.#commandFastlane\?\.start\(\)/);
   assert.match(source, /this\.#commandFastlane\?\.stop\(\)/);
   assert.match(source, /command_fastlane: this\.#commandFastlane\?\.snapshot\(\)/);
-  assert.match(source, /await this\.#pickupAndRunCommand\(\);\s*\n\s*await this\.#mesh\?\.reconcile\(\)\.catch\(\(\) => \{\}\);/);
+  assert.match(source, /pickupAndRun:\s*\(\)\s*=>\s*this\.#pickupAndRunLegacyFastlaneCommand\(\)/);
+  assert.match(source, /this\.#batchTransport = 'SUPPORTED';\s*\n\s*this\.#commandFastlane\?\.stop\(\)/);
+  assert.match(source, /legacy_fallback_suppressed_by_batch_transport:\s*this\.#batchTransport === 'SUPPORTED'/);
+  assert.match(source, /one_steady_state_lease_loop:\s*true/);
+  assert.match(source, /command_lane_precedes_maintenance:\s*true/);
   const fastlaneSource = await readFile(new URL('../src/native-supervisor-command-fastlane.mjs', import.meta.url), 'utf8');
   assert.match(fastlaneSource, /command_pickup_transport_only: true/);
   assert.match(fastlaneSource, /scheduler_authority: false/);

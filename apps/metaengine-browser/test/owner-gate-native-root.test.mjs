@@ -26,22 +26,27 @@ test('signed owner GATE_DISABLE_ALL executes while native supervisor is OFF and 
   const fetchImpl = async (url, init = {}) => {
     const pathname = new URL(url).pathname;
     if (pathname.endsWith('/v1/state')) return new Response('{}', { status:202, headers:{'content-type':'application/json'} });
-    if (pathname.endsWith('/v1/commands/next')) {
-      if (issued) return new Response(JSON.stringify({ command:null }), { status:200, headers:{'content-type':'application/json'} });
+    if (pathname.endsWith('/v1/commands/wait-batch')) {
+      if (issued) return new Response(JSON.stringify({ commands:[], transport_delivery_is_authority:false }), { status:200, headers:{'content-type':'application/json'} });
       issued = true;
       return new Response(JSON.stringify({
-        command:{
+        commands:[{
           command_id:commandId,
           action:'GATE_DISABLE_ALL',
           payload:{ reason:'OWNER_BREAK_GLASS_TEST', override_id:'owner.override.root01', ttl_seconds:60 },
           issued_at:new Date().toISOString(),
           expires_at:new Date(Date.now()+60000).toISOString(),
-        },
+          command_lane:'GLOBAL_MUTATION',
+          effect_key:'global:control-plane',
+          authority_effect:false,
+        }],
+        transport_delivery_is_authority:false,
+        authority_effect:false,
       }), { status:200, headers:{'content-type':'application/json'} });
     }
-    if (/\/v1\/commands\/[^/]+\/result$/.test(pathname)) {
-      posted = JSON.parse(init.body || '{}');
-      return new Response('{}', { status:200, headers:{'content-type':'application/json'} });
+    if (pathname.endsWith('/v1/commands/result-batch')) {
+      posted = JSON.parse(init.body || '{}')?.results?.[0] || null;
+      return new Response(JSON.stringify({ accepted:true, results:[{ command_id:commandId, accepted:true, status:'COMPLETED' }], authority_effect:false }), { status:200, headers:{'content-type':'application/json'} });
     }
     throw new Error(`unexpected_fetch:${pathname}`);
   };
@@ -65,6 +70,7 @@ test('signed owner GATE_DISABLE_ALL executes while native supervisor is OFF and 
   assert.equal(executed?.action, 'GATE_DISABLE_ALL');
   assert.equal(posted?.ok, true);
   assert.equal(posted?.receipt?.result?.all_internal_gates_disabled, true);
+  assert.equal(posted?.receipt?.effect_outcome, 'CONFIRMED');
   assert.equal(client.snapshot().last_command_status, 'COMPLETED');
   await fs.rm(dir, { recursive:true, force:true });
 });
