@@ -4,6 +4,7 @@ import { BrowserBrainRuntimeControlPlane } from '../src/browser-brain-runtime-co
 
 const TAB_A = 'tab_00000000-0000-4000-8000-000000000001';
 const COMMAND_A = '00000000-0000-4000-8000-000000000111';
+const COMMAND_READ = '00000000-0000-4000-8000-000000000222';
 
 function processSnapshot({ processKey = '200:1788640000100', targetId = 'A1B2C3D4E5', observedAt = '2026-09-06T00:00:00.000Z' } = {}) {
   return {
@@ -73,7 +74,7 @@ test('a synthetic webcontents fallback is observation identity only and cannot a
   assert.throws(() => plane.prepareMutation(command()), /exact_cdp_target_not_ready/);
 });
 
-test('AMBIGUOUS outcome becomes a same-cell mutation barrier until reconciliation', () => {
+test('AMBIGUOUS effect survives ordinary completed reads and clears only through hash-backed reconciliation', () => {
   const plane = readyPlane();
   plane.recordCommandOutcome({
     command_id: COMMAND_A,
@@ -84,7 +85,33 @@ test('AMBIGUOUS outcome becomes a same-cell mutation barrier until reconciliatio
     recorded_at: '2026-09-06T00:00:01.000Z',
   });
   assert.equal(plane.contextForTab(TAB_A).status, 'NEEDS_ATTENTION');
-  assert.throws(() => plane.prepareMutation(command()), /reconciliation_required/);
+  assert.equal(plane.contextForTab(TAB_A).ambiguous_effect.command_id, COMMAND_A);
+  assert.throws(() => plane.prepareMutation(command()), /ambiguous_effect_reconciliation_required/);
+
+  plane.recordCommandOutcome({
+    command_id: COMMAND_READ,
+    action: 'CAPTURE',
+    tab_id: TAB_A,
+    status: 'COMPLETED',
+    effect_outcome: 'CONFIRMED',
+    recorded_at: '2026-09-06T00:00:01.500Z',
+  });
+  assert.equal(plane.contextForTab(TAB_A).status, 'NEEDS_ATTENTION');
+  assert.equal(plane.contextForTab(TAB_A).ambiguous_effect.command_id, COMMAND_A);
+  assert.throws(() => plane.prepareMutation(command()), /ambiguous_effect_reconciliation_required/);
+
+  const reconciled = plane.reconcileAmbiguousOutcome({
+    tab_id: TAB_A,
+    command_id: COMMAND_A,
+    resolution: 'CONFIRMED_EFFECT',
+    evidence_sha256: 'a'.repeat(64),
+    reconciled_at: '2026-09-06T00:00:02.000Z',
+  });
+  assert.equal(reconciled.ambiguous_effect, null);
+  assert.equal(reconciled.last_reconciliation.resolution, 'CONFIRMED_EFFECT');
+  assert.equal(reconciled.last_reconciliation.evidence_payload_exposed, false);
+  assert.equal(reconciled.status, 'READY');
+  assert.doesNotThrow(() => plane.prepareMutation(command()));
 });
 
 test('renderer death invalidates the runtime binding synchronously before the next census', () => {
@@ -135,5 +162,6 @@ test('pressure governor can reduce capacity but never becomes scheduler or execu
   assert.equal(pressure.command_leasing, false);
   const snapshot = plane.snapshot();
   assert.equal(snapshot.ambiguous_effect_blocks_same_cell_mutation, true);
+  assert.equal(snapshot.ambiguity_reconciliation_requires_evidence_hash, true);
   assert.equal(snapshot.periodic_census_is_execution_authority, false);
 });
