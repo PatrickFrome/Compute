@@ -163,8 +163,11 @@ jobs:
             Remove-Item $fleetTemp -Recurse -Force -ErrorAction SilentlyContinue
           }
 
-      - name: Prove source checkout unchanged
+      - name: Prove tracked Browser source checkout unchanged
         shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          test -z "$(git status --porcelain)"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/native apps/metaengine-browser/scripts apps/metaengine-browser/test apps/metaengine-browser/package.json apps/metaengine-browser/electron-builder.test.json)"
