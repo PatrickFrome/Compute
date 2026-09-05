@@ -1,0 +1,99 @@
+name: METAENGINE Browser Cognitive Ingest V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/browser-cognitive-delta-bus.mjs'
+      - 'apps/metaengine-browser/src/browser-cognitive-delta-transport.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/cognitive-delta-routes.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts'
+      - 'apps/metaengine-browser/test/browser-cognitive-delta-bus.test.mjs'
+      - 'apps/metaengine-browser/test/browser-cognitive-delta-transport.test.mjs'
+      - 'apps/metaengine-browser/test/browser-cognitive-delta-ingest-contract.test.mjs'
+      - 'apps/metaengine-browser/test/cognitive-delta-edge-route.test.mjs'
+      - 'sql/browser_cognitive_delta_ingest_v1.sql'
+      - '.github/workflows/browser-cognitive-ingest-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cognitive-ingest-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Static parse cognitive runtime and Edge route
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/browser-cognitive-delta-bus.mjs
+          node --check src/browser-cognitive-delta-transport.mjs
+          node --check src/native-supervisor-client.mjs
+          node --check supabase/a2-browser-native-supervisor-v1/cognitive-delta-routes.mjs
+
+      - name: Prove stream, ACK and ingest contracts
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            test/browser-cognitive-delta-bus.test.mjs \
+            test/browser-cognitive-delta-transport.test.mjs \
+            test/browser-cognitive-delta-ingest-contract.test.mjs \
+            test/cognitive-delta-edge-route.test.mjs
+
+      - name: Prove ingest SQL stays bounded and rollback-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          sql='sql/browser_cognitive_delta_ingest_v1.sql'
+          test -f "$sql"
+          grep -Eiq '^begin;[[:space:]]*$' "$sql"
+          grep -Eiq '^rollback;[[:space:]]*$' "$sql"
+          ! grep -Eiq '^[[:space:]]*commit;[[:space:]]*$' "$sql"
+          ! grep -Eiq 'grant[[:space:]]+execute[^;]+[[:space:]]+to[[:space:]]+(public|anon|authenticated)[[:space:]]*;' "$sql"
+          grep -Fq 'compute_fabric_a2_browser_cognitive_cursor_h205f22' "$sql"
+          grep -Fq 'h205f22_a2_browser_cognitive_accept_v1' "$sql"
+          grep -Fq 'for update;' "$sql"
+          grep -Fq 'perform realtime.send(' "$sql"
+          grep -Fq "'COGNITIVE_DELTA'" "$sql"
+          grep -Fq "'delivery_is_authority', false" "$sql"
+          grep -Fq "'authority_effect', false" "$sql"
+          ! grep -Fq 'jsonb_array_elements' "$sql"
+          test ! -e 'supabase/migrations/browser_cognitive_delta_ingest_v1.sql'
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain)"
