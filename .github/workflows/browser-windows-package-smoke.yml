@@ -11,6 +11,7 @@ on:
       - 'apps/metaengine-browser/scripts/build-guardian-native-staging.ps1'
       - 'apps/metaengine-browser/scripts/electron-builder-before-pack.cjs'
       - 'apps/metaengine-browser/scripts/verify-installed-guardian-native-staging.ps1'
+      - 'apps/metaengine-browser/test/browser-startup-observability.test.mjs'
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/electron-builder.test.json'
       - '.github/workflows/browser-windows-package-smoke.yml'
@@ -22,6 +23,7 @@ on:
       - 'apps/metaengine-browser/scripts/build-guardian-native-staging.ps1'
       - 'apps/metaengine-browser/scripts/electron-builder-before-pack.cjs'
       - 'apps/metaengine-browser/scripts/verify-installed-guardian-native-staging.ps1'
+      - 'apps/metaengine-browser/test/browser-startup-observability.test.mjs'
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/electron-builder.test.json'
       - '.github/workflows/browser-windows-package-smoke.yml'
@@ -32,7 +34,7 @@ permissions:
 jobs:
   windows-nsis-package-smoke:
     runs-on: windows-2025
-    timeout-minutes: 24
+    timeout-minutes: 28
     steps:
       - name: Checkout exact candidate head
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -62,6 +64,10 @@ jobs:
         working-directory: apps/metaengine-browser
         run: npm run check
 
+      - name: Prove startup observability reducer before packaging
+        working-directory: apps/metaengine-browser
+        run: node --test test/browser-startup-observability.test.mjs
+
       - name: Build exact-head unsigned NSIS package through native staging hook
         working-directory: apps/metaengine-browser
         shell: powershell
@@ -81,7 +87,7 @@ jobs:
           if (-not (Test-Path $stagedManifest -PathType Leaf)) { throw 'before_pack_guardian_staging_not_materialized' }
           $digest = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           @{
-            schema='metaengine.browser.windows-package-smoke.v2'
+            schema='metaengine.browser.windows-package-smoke.v3'
             source_head=$sourceHead
             package_version=$version
             installer_name=$installer.Name
@@ -89,6 +95,10 @@ jobs:
             blockmap_name=$blockmap.Name
             guardian_native_staging_required=$true
             guardian_native_built_by_before_pack=$true
+            version_probe_verified=$false
+            normal_ui_boot_verified=$false
+            runtime_import_observability_verified=$false
+            second_instance_activation_verified=$false
             signed=$false
             published=$false
             promotion_authorized=$false
@@ -101,7 +111,9 @@ jobs:
         working-directory: apps/metaengine-browser
         shell: powershell
         run: |
-          $proof = Get-Content "$env:RUNNER_TEMP\windows-package-proof.json" -Raw | ConvertFrom-Json
+          $ErrorActionPreference = 'Stop'
+          $proofPath = "$env:RUNNER_TEMP\windows-package-proof.json"
+          $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
           if (Get-Service -Name 'METAENGINEBrowserGuardian' -ErrorAction SilentlyContinue) { throw 'guardian_service_preexists_before_package_install' }
           $install = Start-Process -FilePath "$env:RUNNER_TEMP\candidate-setup.exe" -ArgumentList '/S' -PassThru -Wait
           if ($install.ExitCode -ne 0) { throw "package_installer_exit_$($install.ExitCode)" }
@@ -132,11 +144,125 @@ jobs:
           }
           $row = (Get-Content $out | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
           if ([string]$row.version -ne [string]$proof.package_version -or $row.primary_instance -ne $true) { throw 'package_version_probe_mismatch' }
+          $proof.version_probe_verified = $true
+
           if ($proof.guardian_native_built_by_before_pack -ne $true) { throw 'guardian_before_pack_proof_missing' }
           if ($proof.signed -ne $false -or $proof.published -ne $false -or $proof.promotion_authorized -ne $false -or $proof.authority_effect -ne $false) { throw 'package_zero_authority_contract_invalid' }
           $proof | Add-Member -NotePropertyName guardian_native_manifest_sha256 -NotePropertyValue ([string]$guardian.manifest_sha256) -Force
           $proof | Add-Member -NotePropertyName guardian_native_staging_verified -NotePropertyValue $true -Force
+          $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
           Write-Host ($proof | ConvertTo-Json -Compress)
+
+      - name: Prove normal packaged UI boot and second-instance activation
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $proofPath = "$env:RUNNER_TEMP\windows-package-proof.json"
+          $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
+          $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
+          if (-not (Test-Path $app -PathType Leaf)) { throw "packaged_browser_missing:$app" }
+
+          $userData = Join-Path $env:APPDATA 'METAENGINE Browser Test'
+          $journal = Join-Path $userData 'metaengine-browser-startup-journal-v1.json'
+          $normalOut = "$env:RUNNER_TEMP\package-normal-ui.out"
+          $normalErr = "$env:RUNNER_TEMP\package-normal-ui.err"
+          $secondOut = "$env:RUNNER_TEMP\package-second-instance.out"
+          $secondErr = "$env:RUNNER_TEMP\package-second-instance.err"
+          Remove-Item $journal -Force -ErrorAction SilentlyContinue
+          Remove-Item "$journal.corrupt-*" -Force -ErrorAction SilentlyContinue
+          Remove-Item $normalOut,$normalErr,$secondOut,$secondErr -Force -ErrorAction SilentlyContinue
+
+          $normal = $null
+          try {
+            # No probe/smoke flag is allowed here. This must exercise the same
+            # main-entry path a user launches from Explorer/Start Menu.
+            $normal = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $normalOut -RedirectStandardError $normalErr
+            $null = $normal.Handle
+            $deadline = [DateTime]::UtcNow.AddSeconds(55)
+            $stableEvent = $null
+            while ([DateTime]::UtcNow -lt $deadline) {
+              if ($normal.HasExited) {
+                Get-Content $normalErr -ErrorAction SilentlyContinue
+                throw "normal_ui_primary_exited_early:$($normal.ExitCode)"
+              }
+              if (Test-Path $journal -PathType Leaf) {
+                try {
+                  $startup = Get-Content $journal -Raw | ConvertFrom-Json
+                  if ($startup.schema -ne 'metaengine.browser.startup-journal.v1') { throw 'normal_ui_startup_journal_schema_invalid' }
+                  $importFailure = @($startup.events | Where-Object { $_.boot_id -eq $startup.current_boot_id -and $_.state -eq 'RUNTIME_IMPORT_FAILED' } | Select-Object -Last 1)
+                  if ($importFailure.Count -gt 0) {
+                    $importFailure | ConvertTo-Json -Depth 8 | Write-Host
+                    Get-Content $normalErr -ErrorAction SilentlyContinue
+                    throw 'normal_ui_runtime_import_failed'
+                  }
+                  $stableEvent = $startup.events | Where-Object { $_.boot_id -eq $startup.current_boot_id -and $_.state -eq 'PRIMARY_WINDOW_STABLE' } | Select-Object -Last 1
+                  if ($stableEvent) { break }
+                } catch {
+                  if ($_.Exception.Message -eq 'normal_ui_runtime_import_failed') { throw }
+                }
+              }
+              Start-Sleep -Milliseconds 250
+              $normal.Refresh()
+            }
+            if (-not $stableEvent) {
+              Get-Content $normalErr -ErrorAction SilentlyContinue
+              if (Test-Path $journal) { Get-Content $journal -Raw -ErrorAction SilentlyContinue | Write-Host }
+              throw 'normal_ui_stable_window_timeout'
+            }
+
+            $startup = Get-Content $journal -Raw | ConvertFrom-Json
+            $runtimeImport = $startup.events | Where-Object { $_.boot_id -eq $startup.current_boot_id -and $_.state -eq 'RUNTIME_IMPORT_OK' } | Select-Object -Last 1
+            if (-not $runtimeImport) { throw 'normal_ui_runtime_import_success_evidence_missing' }
+            $stableSequence = [int64]$stableEvent.sequence
+
+            # A second ordinary launch must not create a second fleet/runtime.
+            # Electron forwards it to the primary, which must show/restore/focus
+            # the already-created BaseWindow and record that activation durably.
+            $second = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $secondOut -RedirectStandardError $secondErr
+            $null = $second.Handle
+            if (-not $second.WaitForExit(15000)) {
+              try { Stop-Process -Id $second.Id -Force -ErrorAction SilentlyContinue } catch {}
+              throw 'normal_ui_second_instance_did_not_exit'
+            }
+
+            $activationDeadline = [DateTime]::UtcNow.AddSeconds(12)
+            $activation = $null
+            while ([DateTime]::UtcNow -lt $activationDeadline) {
+              $startup = Get-Content $journal -Raw | ConvertFrom-Json
+              $activation = $startup.events | Where-Object {
+                $_.boot_id -eq $startup.current_boot_id `
+                  -and $_.state -eq 'PRIMARY_WINDOW_ACTIVATED' `
+                  -and [int64]$_.sequence -gt $stableSequence
+              } | Select-Object -Last 1
+              if ($activation) { break }
+              Start-Sleep -Milliseconds 200
+            }
+            if (-not $activation) {
+              Get-Content $journal -Raw | Write-Host
+              Get-Content $secondErr -ErrorAction SilentlyContinue
+              throw 'normal_ui_second_instance_activation_missing'
+            }
+            if ($activation.details.visible -ne $true) { throw 'normal_ui_second_instance_window_not_visible' }
+
+            $normal.Refresh()
+            if ($normal.HasExited) { throw 'normal_ui_primary_died_after_second_instance' }
+
+            Copy-Item $journal "$env:RUNNER_TEMP\browser-startup-journal-v1.json" -Force
+            $proof.normal_ui_boot_verified = $true
+            $proof.runtime_import_observability_verified = $true
+            $proof.second_instance_activation_verified = $true
+            $proof | Add-Member -NotePropertyName startup_journal_schema -NotePropertyValue 'metaengine.browser.startup-journal.v1' -Force
+            $proof | Add-Member -NotePropertyName normal_ui_stable_event_sequence -NotePropertyValue ([int64]$stableEvent.sequence) -Force
+            $proof | Add-Member -NotePropertyName second_instance_activation_event_sequence -NotePropertyValue ([int64]$activation.sequence) -Force
+            $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
+            Write-Host ($proof | ConvertTo-Json -Compress)
+          } finally {
+            if ($normal -and -not $normal.HasExited) {
+              try { taskkill.exe /PID $normal.Id /T /F | Out-Null } catch {}
+            }
+          }
 
       - name: Prove source checkout unchanged
         shell: bash
@@ -145,14 +271,20 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/native apps/metaengine-browser/scripts apps/metaengine-browser/package.json apps/metaengine-browser/electron-builder.test.json)"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/native apps/metaengine-browser/scripts apps/metaengine-browser/test/browser-startup-observability.test.mjs apps/metaengine-browser/package.json apps/metaengine-browser/electron-builder.test.json)"
 
-      - name: Upload exact-head Windows candidate
+      - name: Upload exact-head Windows candidate and startup evidence
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: metaengine-browser-windows-candidate-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
             ${{ runner.temp }}/windows-package-proof.json
-          if-no-files-found: error
+            ${{ runner.temp }}/browser-startup-journal-v1.json
+            ${{ runner.temp }}/package-normal-ui.out
+            ${{ runner.temp }}/package-normal-ui.err
+            ${{ runner.temp }}/package-second-instance.out
+            ${{ runner.temp }}/package-second-instance.err
+          if-no-files-found: warn
           retention-days: 30
