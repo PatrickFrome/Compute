@@ -35,7 +35,7 @@ const json=(status,body)=>new Response(JSON.stringify(body),{status,headers:{'co
 
 function int(value,name){const n=Number(value);if(!Number.isSafeInteger(n)||n<1)throw new Error(`devos_${name}_invalid`);return n;}
 function binding(body={}){
-  const out={task_id:String(body.task_id||'').toLowerCase(),agent_id:String(body.agent_id||'').toLowerCase(),lease_generation:int(body.lease_generation,'lease_generation'),tab_id:String(body.tab_id||''),target_id:String(body.target_id||'').toLowerCase(),agent_generation_epoch:int(body.agent_generation_epoch||0)};
+  const out={task_id:String(body.task_id||'').toLowerCase(),agent_id:String(body.agent_id||'').toLowerCase(),lease_generation:int(body.lease_generation,'lease_generation'),tab_id:String(body.tab_id||''),target_id:String(body.target_id||'').toLowerCase(),agent_generation_epoch:int(body.agent_generation_epoch,'agent_generation_epoch')};
   if(!UUID_RE.test(out.task_id)||!AGENT_RE.test(out.agent_id)||!out.tab_id||out.tab_id.length>160||!TARGET_RE.test(out.target_id))throw new Error('devos_binding_invalid');
   return out;
 }
