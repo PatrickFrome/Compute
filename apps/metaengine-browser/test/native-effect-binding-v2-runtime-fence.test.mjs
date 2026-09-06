@@ -17,6 +17,7 @@ function fakeWebContents() {
   const listeners = new Map();
   let attached = false;
   let url = 'https://chatgpt.com/';
+  let commandHook = null;
   const commands = [];
   const dbg = {
     isAttached: () => attached,
@@ -30,6 +31,7 @@ function fakeWebContents() {
     off(name, fn) { listeners.get(name)?.delete(fn); },
     async sendCommand(method, params = {}) {
       commands.push({ method, params });
+      commandHook?.(method, params);
       if (method === 'Accessibility.getFullAXTree') return { nodes: [] };
       if (method === 'Page.getLayoutMetrics') return { cssVisualViewport: { clientWidth: 1200, clientHeight: 800 } };
       if (method === 'DOM.getDocument') return { root: { nodeId: 1 } };
@@ -59,7 +61,13 @@ function fakeWebContents() {
     },
     off(name, fn) { wcListeners.get(name)?.delete(fn); },
   };
-  return { webContents, dbg, commands, setUrl: (value) => { url = value; } };
+  return {
+    webContents,
+    dbg,
+    commands,
+    setUrl: (value) => { url = value; },
+    setCommandHook: (fn) => { commandHook = fn; },
+  };
 }
 
 function leasedCommand() {
@@ -149,6 +157,33 @@ test('document generation change after seal rejects the mutation before input di
       executeSemanticCommand(webContents, { ...command, effect_binding: binding }),
       /native_effect_runtime_(document_generation|binding_generation)_mismatch/,
     );
+    assert.equal(commands.filter((row) => row.method === 'Input.dispatchMouseEvent' && row.params.type === 'mouseWheel').length, 0);
+  } finally {
+    releasePersistentBrowserDebugger(webContents);
+    clearNativeEffectRuntimeObservationsForTest();
+  }
+});
+
+test('document change during the final layout read is fenced again before input dispatch', async () => {
+  clearNativeEffectRuntimeObservationsForTest();
+  const { webContents, dbg, commands, setCommandHook } = fakeWebContents();
+  try {
+    const frame = await captureSemanticFrame(webContents);
+    const command = leasedCommand();
+    const binding = bindingFromFrame(command, frame);
+    let injected = false;
+    setCommandHook((method) => {
+      if (!injected && method === 'Page.getLayoutMetrics') {
+        injected = true;
+        dbg.emitMessage('DOM.documentUpdated', {});
+      }
+    });
+
+    await assert.rejects(
+      executeSemanticCommand(webContents, { ...command, effect_binding: binding }),
+      /native_effect_runtime_(document_generation|binding_generation)_mismatch/,
+    );
+    assert.equal(injected, true);
     assert.equal(commands.filter((row) => row.method === 'Input.dispatchMouseEvent' && row.params.type === 'mouseWheel').length, 0);
   } finally {
     releasePersistentBrowserDebugger(webContents);
