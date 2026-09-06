@@ -3,6 +3,7 @@ import { lookupNativeEffectRuntimeObservation } from './native-effect-runtime-ob
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TAB_RE = /^tab_[0-9a-f-]{36}$/i;
 const TARGET_RE = /^webcontents:[1-9][0-9]*$/;
+const OBSERVATION_ID_RE = /^obs_[a-f0-9]{32}$/;
 const IDEMPOTENCY_RE = /^[A-Za-z0-9._:-]{16,160}$/;
 
 export const NATIVE_EFFECT_BINDING_SCHEMA = 'metaengine.native-supervisor.effect-binding.v1';
@@ -77,6 +78,7 @@ export function buildNativeEffectBinding({
   tabId,
   targetId,
   observedAt = new Date().toISOString(),
+  runtimeObservationId = null,
   schema = null,
 } = {}) {
   const common = commonBinding({ command, clientId, processIncarnationId, tabId, targetId, observedAt });
@@ -84,7 +86,10 @@ export function buildNativeEffectBinding({
   if (requestedSchema && ![NATIVE_EFFECT_BINDING_SCHEMA, NATIVE_EFFECT_BINDING_SCHEMA_V2].includes(requestedSchema)) {
     throw new Error('native_effect_binding_schema_invalid');
   }
-  const runtime = lookupNativeEffectRuntimeObservation({
+  const observationId = runtimeObservationId == null ? null : clean(runtimeObservationId).toLowerCase();
+  if (observationId != null && !OBSERVATION_ID_RE.test(observationId)) throw new Error('native_effect_binding_runtime_observation_id_invalid');
+  const runtime = observationId == null ? null : lookupNativeEffectRuntimeObservation({
+    observation_id: observationId,
     process_incarnation_id: common.process_incarnation_id,
     target_id: common.target_id,
     observed_at: common.observed_at,
@@ -98,6 +103,7 @@ export function buildNativeEffectBinding({
   };
   if (useV2) {
     Object.assign(binding, {
+      runtime_observation_id: runtime.observation_id,
       web_contents_id: runtime.runtime_binding.web_contents_id,
       renderer_pid: runtime.runtime_binding.renderer_pid,
       runtime_target_id: runtime.runtime_binding.runtime_target_id,
@@ -131,11 +137,12 @@ export function assertNativeEffectBindingMatches({ command, binding, clientId, p
     tabId,
     targetId,
     observedAt: binding.observed_at,
+    runtimeObservationId: schema === NATIVE_EFFECT_BINDING_SCHEMA_V2 ? binding.runtime_observation_id : null,
     schema,
   });
   const keys = ['command_id','idempotency_key','action','client_id','process_incarnation_id','tab_id','target_id','command_expires_at'];
   if (schema === NATIVE_EFFECT_BINDING_SCHEMA_V2) {
-    keys.push('web_contents_id','renderer_pid','runtime_target_id','attachment_generation','document_generation','binding_generation','document_url_sha256','runtime_observation_schema');
+    keys.push('runtime_observation_id','web_contents_id','renderer_pid','runtime_target_id','attachment_generation','document_generation','binding_generation','document_url_sha256','runtime_observation_schema');
   }
   for (const key of keys) {
     if (binding[key] !== expected[key]) throw new Error(`native_effect_binding_${key}_mismatch`);
