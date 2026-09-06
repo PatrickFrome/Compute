@@ -2,6 +2,7 @@ import { BrowserBrainRealtimeObservationBridge } from './browser-brain-realtime-
 import { BrowserBrainAdaptiveFanoutRuntime } from './browser-brain-adaptive-fanout-runtime.mjs';
 import { BrowserBrainRealtimePressureBridge } from './browser-brain-realtime-pressure-bridge.mjs';
 import { BrowserControlPressureGovernor } from './browser-control-pressure-governor.mjs';
+import { applyNativeSupervisorCommandPressureBudget } from './native-supervisor-command-lanes.mjs';
 
 export const BROWSER_BRAIN_CONTINUOUS_COORDINATOR_SCHEMA = 'metaengine.browser-brain.continuous-coordinator.v1';
 
@@ -42,7 +43,7 @@ function unboundAdaptiveSnapshot() {
   return Object.freeze({
     schema: 'metaengine.browser-brain.adaptive-fanout-unbound.v1',
     bound: false,
-    reason: 'EXISTING_CORE_SCHEDULER_NOT_EXPORTED',
+    reason: 'EXISTING_CORE_SCHEDULER_USED_VIA_PRESSURE_REGISTER',
     second_scheduler_created: false,
     hidden_queue: false,
     command_leasing: false,
@@ -70,6 +71,14 @@ function pressureBudgetProjection(result) {
   });
 }
 
+function sameCommandBudget(a, b) {
+  return Boolean(a && b
+    && a.pressure_band === b.pressure_band
+    && a.read_concurrency === b.read_concurrency
+    && a.mutation_concurrency === b.mutation_concurrency
+    && a.live_cells === b.live_cells);
+}
+
 /**
  * Zero-scheduler composition layer for the always-on Browser Brain.
  *
@@ -77,8 +86,10 @@ function pressureBudgetProjection(result) {
  * command scheduler. This class only connects those proven surfaces:
  *   realtime process/semantic edge -> exact binding + bounded memory
  *   resource/lifecycle edge         -> adaptive pressure state
- *   already leased mutation batch  -> independent BrowserCell fan-out, but only
- *                                       when the EXISTING scheduler/executor are bound
+ *   pressure state                  -> numeric admission register consumed by the
+ *                                      ONE existing command-lane scheduler
+ *   already leased mutation batch   -> independent BrowserCell fan-out, but only
+ *                                      when an explicit test/runtime adapter is bound
  *
  * It intentionally owns no timer, DB lease, hidden queue, retry loop, or
  * physical Browser implementation. Observation runs on every edge. Pressure is
@@ -93,9 +104,11 @@ export class BrowserBrainContinuousCoordinator {
   #lastProcessSnapshot = null;
   #lastCoverage = coverage();
   #lastPressureResult = null;
+  #lastAppliedCommandBudget = null;
   #edgeCount = 0;
   #pressureEvaluationCount = 0;
   #pressureReuseCount = 0;
+  #commandBudgetApplyCount = 0;
   #reconcileCount = 0;
   #lastEvent = null;
 
@@ -145,6 +158,11 @@ export class BrowserBrainContinuousCoordinator {
   #evaluatePressure(processSnapshot) {
     this.#lastPressureResult = this.#pressure.observe(processSnapshot);
     this.#pressureEvaluationCount += 1;
+    const budget = pressureBudgetProjection(this.#lastPressureResult);
+    if (budget && !sameCommandBudget(this.#lastAppliedCommandBudget, budget)) {
+      this.#lastAppliedCommandBudget = applyNativeSupervisorCommandPressureBudget(budget);
+      this.#commandBudgetApplyCount += 1;
+    }
     return this.#lastPressureResult;
   }
 
@@ -191,6 +209,7 @@ export class BrowserBrainContinuousCoordinator {
       observation: observed,
       pressure,
       pressure_evaluated: pressureEvaluated,
+      command_lane_pressure_budget: this.#lastAppliedCommandBudget,
       coverage: this.#lastCoverage,
       mutation_runtime_bound: this.#adaptive != null,
       scheduler_authority: false,
@@ -231,6 +250,7 @@ export class BrowserBrainContinuousCoordinator {
       reconcile_count: this.#reconcileCount,
       pressure_evaluation_count: this.#pressureEvaluationCount,
       pressure_reuse_count: this.#pressureReuseCount,
+      command_budget_apply_count: this.#commandBudgetApplyCount,
       semantic_edges_reuse_pressure: true,
       last_event: this.#lastEvent,
       coverage: this.#lastCoverage,
@@ -238,10 +258,12 @@ export class BrowserBrainContinuousCoordinator {
       adaptive_fanout: this.#adaptive?.snapshot?.() || unboundAdaptiveSnapshot(),
       pressure: this.#pressure.snapshot(),
       pressure_budget: this.pressureBudget(),
-      hot_path: 'REALTIME_EDGE_TO_MEMORY_AND_PRESSURE_TO_EXISTING_SCHEDULER_WHEN_BOUND',
+      command_lane_pressure_budget: this.#lastAppliedCommandBudget,
+      command_lane_pressure_register_bound: this.#lastAppliedCommandBudget != null,
+      hot_path: 'REALTIME_EDGE_TO_MEMORY_AND_PRESSURE_TO_EXISTING_COMMAND_LANES',
       mutation_path: this.#adaptive
         ? 'DB_LEASED_BATCH_TO_RUNTIME_FENCED_INDEPENDENT_BROWSER_CELLS'
-        : 'FAIL_CLOSED_UNTIL_EXISTING_CORE_SCHEDULER_IS_BOUND',
+        : 'EXISTING_NATIVE_SUPERVISOR_COMMAND_LANES_ONLY',
       mutation_runtime_bound: this.#adaptive != null,
       exact_tab_binding_required_for_mutation: true,
       full_electron_process_visibility: true,
