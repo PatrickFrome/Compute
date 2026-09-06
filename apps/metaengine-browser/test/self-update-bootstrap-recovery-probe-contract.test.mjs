@@ -104,11 +104,17 @@ test('Windows bootstrap probe reads exact local evidence and durable receipt has
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const output = JSON.parse(String(result.stdout || '').trim().split(/\r?\n/).filter(Boolean).at(-1));
     assert.equal(output.schema, 'metaengine.self-update.bootstrap-probe.v1');
-    assert.equal(output.transaction_read_state, 'READ');
+    const readError = JSON.stringify({
+      transaction_error: output.transaction_error,
+      pre_install_receipt_error: output.pre_install_receipt_error,
+      successor_receipt_error: output.successor_receipt_error,
+      stderr: String(result.stderr || ''),
+    });
+    assert.equal(output.transaction_read_state, 'READ', readError);
     assert.equal(output.transaction_sha256, before[path.join(userData, 'metaengine-self-update-transaction-v1.json')]);
-    assert.equal(output.pre_install_receipt_read_state, 'READ');
+    assert.equal(output.pre_install_receipt_read_state, 'READ', readError);
     assert.equal(output.pre_install_receipt_sha256, preInstallSha);
-    assert.equal(output.successor_receipt_read_state, 'READ');
+    assert.equal(output.successor_receipt_read_state, 'READ', readError);
     assert.equal(output.successor_receipt_sha256, before[successorPath]);
     assert.equal(output.installed_executable.exists, true);
     assert.equal(output.installed_executable.sha256, appSha);
