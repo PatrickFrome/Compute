@@ -104,6 +104,8 @@ export class BrowserBrainWorkingMemory {
   #maxEvents;
   #cells = new Map();
   #events = [];
+  #eventHead = 0;
+  #eventCount = 0;
   #global = {
     process_revision: 0,
     cognitive_sequence: 0,
@@ -136,6 +138,17 @@ export class BrowserBrainWorkingMemory {
     return this.#cells.get(tabId);
   }
 
+  #rememberRecentEvent(projected) {
+    if (this.#eventCount < this.#maxEvents) {
+      this.#events.push(projected);
+      this.#eventCount += 1;
+      return;
+    }
+    this.#events[this.#eventHead] = projected;
+    this.#eventHead = (this.#eventHead + 1) % this.#maxEvents;
+    this.#global.dropped_events += 1;
+  }
+
   rememberBinding(binding) {
     const projected = publicBinding(binding);
     if (!projected || !TAB_ID_RE.test(String(projected.tab_id || ''))) return null;
@@ -162,12 +175,7 @@ export class BrowserBrainWorkingMemory {
 
   ingestEvent(event = {}) {
     const projected = eventProjection(event);
-    this.#events.push(projected);
-    if (this.#events.length > this.#maxEvents) {
-      const drop = this.#events.length - this.#maxEvents;
-      this.#events.splice(0, drop);
-      this.#global.dropped_events += drop;
-    }
+    this.#rememberRecentEvent(projected);
     if (projected.sequence != null) this.#global.cognitive_sequence = Math.max(this.#global.cognitive_sequence, projected.sequence);
     this.#global.last_event_at = projected.observed_at || this.#now();
 
@@ -311,6 +319,8 @@ export class BrowserBrainWorkingMemory {
       dropped_events: Math.max(0, Number(checkpoint?.global?.dropped_events) || 0),
     };
     this.#events = [];
+    this.#eventHead = 0;
+    this.#eventCount = 0;
     return this.snapshot();
   }
 
@@ -321,7 +331,9 @@ export class BrowserBrainWorkingMemory {
       global: Object.freeze({ ...this.#global }),
       cell_count: contexts.length,
       cells: Object.freeze(contexts),
-      recent_event_count: this.#events.length,
+      recent_event_count: this.#eventCount,
+      recent_event_storage: 'FIXED_CIRCULAR_BUFFER',
+      recent_event_append_complexity: 'O(1)',
       hot_memory_model: 'BOUNDED_IN_MEMORY_CAUSAL_FACTS',
       durable_checkpoint_available: true,
       raw_dom_stored: false,
