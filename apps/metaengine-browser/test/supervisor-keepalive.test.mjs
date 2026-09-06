@@ -114,6 +114,40 @@ test('rollover stays deferred until the current authoritative supervisor is expl
   assert.equal(h.keepalive.snapshot().state, 'WAITING');
 });
 
+test('invalid successor binding preserves the durable rollover attempt before ambiguity is persisted', async () => {
+  const h = harness();
+  const priorUrl = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  await h.keepalive.init();
+  await h.keepalive.bindConversation({ url: priorUrl, tab_id: 'tab_old' });
+  await h.keepalive.requestRollover('MAX_CYCLES_PER_EPOCH');
+  await h.keepalive.approveRollover('TRUSTED_CONTINUOUS_SERVICE');
+  const attempt = await h.keepalive.beginRolloverAttempt();
+  await h.keepalive.bindRolloverAttemptTab('tab_new');
+  const before = h.state();
+
+  await assert.rejects(
+    () => h.keepalive.bindRollover({ url: 'https://chatgpt.com/', tab_id: 'tab_new' }),
+    /keepalive_supervisor_conversation_invalid/,
+  );
+  const afterFailure = h.keepalive.snapshot();
+  assert.equal(afterFailure.supervisor_epoch, before.supervisor_epoch);
+  assert.equal(afterFailure.cycle_seq, before.cycle_seq);
+  assert.equal(afterFailure.state, 'ROLLOVER_PENDING');
+  assert.equal(afterFailure.conversation_url, priorUrl);
+  assert.equal(afterFailure.tab_id, 'tab_old');
+  assert.equal(afterFailure.rollover_attempt?.attempt_id, attempt.attempt_id);
+  assert.equal(afterFailure.rollover_attempt?.tab_id, 'tab_new');
+
+  await h.keepalive.markRolloverAmbiguous('ROLLOVER_ERROR:keepalive_supervisor_conversation_invalid');
+  const ambiguous = h.state();
+  assert.equal(ambiguous.supervisor_epoch, before.supervisor_epoch);
+  assert.equal(ambiguous.state, 'ROLLOVER_AMBIGUOUS');
+  assert.equal(ambiguous.conversation_url, priorUrl);
+  assert.equal(ambiguous.rollover_attempt?.attempt_id, attempt.attempt_id);
+  assert.equal(ambiguous.rollover_attempt?.automatic_retry_allowed, false);
+  assert.match(ambiguous.rollover_attempt?.ambiguous_reason || '', /keepalive_supervisor_conversation_invalid/);
+});
+
 test('max-cycle rollover is deferred rather than automatically authorizing a replacement chat', async () => {
   const h = harness();
   await h.keepalive.init();

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-export const SUPERVISOR_KEEPALIVE_VERSION = '1.3.1';
+export const SUPERVISOR_KEEPALIVE_VERSION = '1.3.2';
 export const SUPERVISOR_ID = 'METAENGINE_SUPERVISOR';
 export const KEEPALIVE_STATES = Object.freeze([
   'ACTIVE','WAITING','WAKE_PENDING','WAKE_AMBIGUOUS',
@@ -325,6 +325,11 @@ export class SupervisorKeepalive {
 
   async bindRollover({ url, tab_id = null } = {}) {
     if (!['ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) throw new Error('keepalive_rollover_not_released');
+    // Validate every fallible input before mutating epoch or clearing the durable
+    // attempt. A failed successor readback must leave enough state to reconcile
+    // the already-attempted physical rollover without ever sending it again.
+    const normalizedUrl = normalizeUrl(url);
+    const normalizedTabId = tab_id ? String(tab_id) : null;
     this.#state.supervisor_epoch += 1;
     this.#state.cycle_seq = 0;
     this.#state.previous_worker_generation = {};
@@ -335,8 +340,8 @@ export class SupervisorKeepalive {
     this.#state.rollover_reason = null;
     this.#state.rollover_release_at = null;
     this.#state.rollover_attempt = null;
-    this.#state.conversation_url = normalizeUrl(url);
-    this.#state.tab_id = tab_id ? String(tab_id) : null;
+    this.#state.conversation_url = normalizedUrl;
+    this.#state.tab_id = normalizedTabId;
     this.#state.state = this.#state.paused ? 'PAUSED' : 'WAITING';
     await this.#persist();
     return this.snapshot();
