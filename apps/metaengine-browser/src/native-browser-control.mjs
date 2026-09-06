@@ -176,6 +176,7 @@ export async function captureSemanticFrame(webContents) {
         scale: Number(viewport.scale || 1),
       } : null,
       runtime_binding_observed: runtimeObservation != null,
+      runtime_observation_id: runtimeObservation?.observation_id || null,
       runtime_binding_generation: runtimeObservation?.runtime_binding?.binding_generation || null,
       runtime_document_generation: runtimeObservation?.runtime_binding?.document_generation || null,
       authority_effect: false,
