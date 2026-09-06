@@ -8,7 +8,8 @@ const migrationSource = fs.readFileSync(new URL('../../../supabase/migrations/20
 
 test('leased semantic effects have an authenticated HTTP bridge to the durable binding seal', () => {
   assert.match(edgeSource, /BIND_EFFECT_RPC='h205f22_a2_browser_supervisor_bind_effect_v1'/);
-  assert.match(edgeSource, /EFFECT_BINDING_SCHEMA='metaengine\.native-supervisor\.effect-binding\.v1'/);
+  assert.match(edgeSource, /EFFECT_BINDING_SCHEMAS=new Set\(\['metaengine\.native-supervisor\.effect-binding\.v1','metaengine\.native-supervisor\.effect-binding\.v2'\]\)/);
+  assert.match(edgeSource, /effect_intent_binding_schemas:\['v1','v2'\]/);
   assert.match(edgeSource, /\/effect-intent\$\/\)/);
   assert.match(edgeSource, /rpc\(BIND_EFFECT_RPC,\{p_workspace_id:WORKSPACE_ID,p_command_id:commandId,p_client_id:clientId\(req\),p_binding:binding,p_authority_effect:false\}\)/);
   assert.match(edgeSource, /result\.accepted!==true\|\|!result\.effect_binding/);
