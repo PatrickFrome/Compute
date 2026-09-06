@@ -1,6 +1,7 @@
 import { BrowserBrainRealtimeObservationBridge } from './browser-brain-realtime-observation-bridge.mjs';
 import { BrowserBrainAdaptiveFanoutRuntime } from './browser-brain-adaptive-fanout-runtime.mjs';
 import { BrowserBrainRealtimePressureBridge } from './browser-brain-realtime-pressure-bridge.mjs';
+import { BrowserControlPressureGovernor } from './browser-control-pressure-governor.mjs';
 
 export const BROWSER_BRAIN_CONTINUOUS_COORDINATOR_SCHEMA = 'metaengine.browser-brain.continuous-coordinator.v1';
 
@@ -26,17 +27,34 @@ function coverage(snapshot = {}) {
   });
 }
 
+function unboundAdaptiveSnapshot() {
+  return Object.freeze({
+    schema: 'metaengine.browser-brain.adaptive-fanout-unbound.v1',
+    bound: false,
+    reason: 'EXISTING_CORE_SCHEDULER_NOT_EXPORTED',
+    second_scheduler_created: false,
+    hidden_queue: false,
+    command_leasing: false,
+    execution_authority: false,
+    automatic_effect_retry_allowed: false,
+    authority_effect: false,
+  });
+}
+
 /**
  * Zero-scheduler composition layer for the always-on Browser Brain.
  *
  * The caller owns the existing process/semantic event source and the existing
  * command scheduler. This class only connects those proven surfaces:
  *   realtime process/semantic edge -> exact binding + bounded memory
- *   same process snapshot            -> adaptive pressure budget
- *   already leased mutation batch    -> independent BrowserCell fan-out
+ *   same process snapshot            -> adaptive pressure state
+ *   already leased mutation batch    -> independent BrowserCell fan-out, but only
+ *                                        when the EXISTING scheduler/executor are bound
  *
  * It intentionally owns no timer, DB lease, hidden queue, retry loop, or
- * physical Browser implementation.
+ * physical Browser implementation. Observation/pressure may run continuously even
+ * before the existing scheduler is explicitly exported; mutation dispatch then
+ * fails closed instead of manufacturing a second scheduler.
  */
 export class BrowserBrainContinuousCoordinator {
   #observation;
@@ -49,32 +67,41 @@ export class BrowserBrainContinuousCoordinator {
   #lastEvent = null;
 
   constructor({
-    scheduler,
-    executeRuntimeFenced,
+    scheduler = null,
+    executeRuntimeFenced = null,
     observationBridge = null,
     adaptiveRuntime = null,
     pressureBridge = null,
-    pressureGovernor = undefined,
+    pressureGovernor = null,
     getExtraPressureSample = null,
     clock = () => Date.now(),
     hardBatchLimit = 128,
   } = {}) {
     this.#observation = observationBridge || new BrowserBrainRealtimeObservationBridge();
-    this.#adaptive = adaptiveRuntime || new BrowserBrainAdaptiveFanoutRuntime({
-      scheduler,
-      executeRuntimeFenced,
-      ...(pressureGovernor ? { governor: pressureGovernor } : {}),
-      hardBatchLimit,
+    const canBindAdaptive = adaptiveRuntime != null
+      || (scheduler != null && typeof executeRuntimeFenced === 'function');
+    this.#adaptive = adaptiveRuntime || (canBindAdaptive
+      ? new BrowserBrainAdaptiveFanoutRuntime({
+          scheduler,
+          executeRuntimeFenced,
+          ...(pressureGovernor ? { governor: pressureGovernor } : {}),
+          hardBatchLimit,
+        })
+      : null);
+
+    const governor = pressureGovernor || new BrowserControlPressureGovernor();
+    const pressureTarget = this.#adaptive || Object.freeze({
+      observePressure: (sample) => governor.observe(sample),
     });
     this.#pressure = pressureBridge || new BrowserBrainRealtimePressureBridge({
-      adaptiveRuntime: this.#adaptive,
+      adaptiveRuntime: pressureTarget,
       getExtraSample: getExtraPressureSample,
       clock,
     });
     if (typeof this.#observation.observe !== 'function' || typeof this.#observation.reconcile !== 'function') {
       throw new Error('browser_brain_continuous_observation_invalid');
     }
-    if (typeof this.#adaptive.dispatchMutations !== 'function') {
+    if (this.#adaptive != null && typeof this.#adaptive.dispatchMutations !== 'function') {
       throw new Error('browser_brain_continuous_adaptive_runtime_invalid');
     }
     if (typeof this.#pressure.observe !== 'function') {
@@ -120,6 +147,7 @@ export class BrowserBrainContinuousCoordinator {
       observation: observed,
       pressure,
       coverage: this.#lastCoverage,
+      mutation_runtime_bound: this.#adaptive != null,
       scheduler_authority: false,
       command_leasing: false,
       authority_effect: false,
@@ -127,6 +155,7 @@ export class BrowserBrainContinuousCoordinator {
   }
 
   dispatchMutations(commands, options = {}) {
+    if (!this.#adaptive) throw new Error('browser_brain_continuous_mutation_runtime_unbound');
     return this.#adaptive.dispatchMutations(commands, options);
   }
 
@@ -154,10 +183,13 @@ export class BrowserBrainContinuousCoordinator {
       last_event: this.#lastEvent,
       coverage: this.#lastCoverage,
       observation: this.#observation.snapshot(),
-      adaptive_fanout: this.#adaptive.snapshot(),
+      adaptive_fanout: this.#adaptive?.snapshot?.() || unboundAdaptiveSnapshot(),
       pressure: this.#pressure.snapshot(),
-      hot_path: 'REALTIME_EDGE_TO_MEMORY_PRESSURE_TO_EXISTING_SCHEDULER',
-      mutation_path: 'DB_LEASED_BATCH_TO_RUNTIME_FENCED_INDEPENDENT_BROWSER_CELLS',
+      hot_path: 'REALTIME_EDGE_TO_MEMORY_AND_PRESSURE_TO_EXISTING_SCHEDULER_WHEN_BOUND',
+      mutation_path: this.#adaptive
+        ? 'DB_LEASED_BATCH_TO_RUNTIME_FENCED_INDEPENDENT_BROWSER_CELLS'
+        : 'FAIL_CLOSED_UNTIL_EXISTING_CORE_SCHEDULER_IS_BOUND',
+      mutation_runtime_bound: this.#adaptive != null,
       exact_tab_binding_required_for_mutation: true,
       full_electron_process_visibility: true,
       os_global_process_visibility: false,
