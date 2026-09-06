@@ -121,7 +121,7 @@ test('global, read-only, implicit-tab and same-cell mutations fail closed before
   );
   await assert.rejects(
     runtime.dispatchMutations([{ command_id: 'm1', action: 'TYPED_CLICK', payload: { role: 'button', accessible_name: 'x' } }]),
-    /explicit_cell_required:TYPED_CLICK/,
+    /tab_mutation_required:TYPED_CLICK/,
   );
   await assert.rejects(
     runtime.dispatchMutations([command('c1', tab('1')), command('c2', tab('1'))]),
