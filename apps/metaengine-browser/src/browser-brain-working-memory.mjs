@@ -51,7 +51,7 @@ function eventProjection(event = {}) {
   const tabId = String(event?.tab_id || '').toLowerCase();
   return Object.freeze({
     sequence: Number.isSafeInteger(Number(event?.sequence ?? event?.seq)) ? Number(event.sequence ?? event.seq) : null,
-    type: text(event?.type, 96) || 'UNKNOWN',
+    type: (text(event?.type, 96) || 'UNKNOWN').toUpperCase(),
     priority: text(event?.priority, 8),
     tab_id: TAB_ID_RE.test(tabId) ? tabId : null,
     web_contents_id: Number.isSafeInteger(Number(event?.web_contents_id)) ? Number(event.web_contents_id) : null,
@@ -334,6 +334,7 @@ export class BrowserBrainWorkingMemory {
       recent_event_count: this.#eventCount,
       recent_event_storage: 'FIXED_CIRCULAR_BUFFER',
       recent_event_append_complexity: 'O(1)',
+      lifecycle_event_type_normalized: true,
       hot_memory_model: 'BOUNDED_IN_MEMORY_CAUSAL_FACTS',
       durable_checkpoint_available: true,
       raw_dom_stored: false,
