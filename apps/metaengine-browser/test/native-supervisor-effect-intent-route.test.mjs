@@ -15,7 +15,7 @@ test('leased semantic effects have an authenticated HTTP bridge to the durable b
   assert.match(edgeSource, /result\.accepted!==true\|\|!result\.effect_binding/);
   assert.match(edgeSource, /return json\(200,\{\.\.\.result,authority_effect:false\}\)/);
 
-  assert.match(clientSource, /\/v1\/commands\/\$\{encodeURIComponent\(leasedCommand\.command_id\)\}\/effect-intent/);
+  assert.match(clientSource, /\/v1\/commands\/\$\{encodeURIComponent\(command\.command_id\)\}\/effect-intent/);
   assert.match(clientSource, /effectIntent\.payload\?\.effect_binding/);
   assert.match(clientSource, /native_effect_intent_\$\{key\}_mismatch/);
 
