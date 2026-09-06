@@ -3,6 +3,7 @@ export const BROWSER_WEBCONTENTS_TAB_INDEX_SCHEMA = 'metaengine.browser.webconte
 const tabByWebContents = new WeakMap();
 const tabByWebContentsId = new Map();
 const webContentsIdByTab = new Map();
+const destroyedHandlerByWebContents = new WeakMap();
 
 function validTabId(value) {
   const tabId = String(value || '');
@@ -89,6 +90,50 @@ export function clearWebContentsTabIndex() {
   webContentsIdByTab.clear();
 }
 
+/**
+ * Canonical tab_id -> WebContentsView map with an exact O(1) reverse index.
+ * Existing shell code can keep using normal Map set/delete/clear calls while the
+ * Brain process plane resolves every live WebContents through one identity table.
+ */
+export class ExactBrowserTabViewMap extends Map {
+  set(tabIdRaw, view) {
+    const tabId = validTabId(tabIdRaw);
+    const prior = super.get(tabId);
+    if (prior?.webContents && prior !== view) unbindWebContentsFromTab(prior.webContents, tabId);
+    const result = super.set(tabId, view);
+    const webContents = view?.webContents;
+    if (!webContents || typeof webContents !== 'object') {
+      super.delete(tabId);
+      throw new Error('browser_webcontents_tab_index_view_invalid');
+    }
+    bindWebContentsToTab(tabId, webContents);
+    if (!destroyedHandlerByWebContents.has(webContents) && typeof webContents.once === 'function') {
+      const handler = () => {
+        unbindWebContentsFromTab(webContents, tabId);
+        if (super.get(tabId) === view) super.delete(tabId);
+      };
+      destroyedHandlerByWebContents.set(webContents, handler);
+      webContents.once('destroyed', handler);
+    }
+    return result;
+  }
+
+  delete(tabIdRaw) {
+    const tabId = String(tabIdRaw || '');
+    const view = super.get(tabId);
+    if (view?.webContents) unbindWebContentsFromTab(view.webContents, tabId);
+    return super.delete(tabId);
+  }
+
+  clear() {
+    for (const [tabId, view] of this.entries()) {
+      if (view?.webContents) unbindWebContentsFromTab(view.webContents, tabId);
+    }
+    super.clear();
+    clearWebContentsTabIndex();
+  }
+}
+
 export function webContentsTabIndexSnapshot() {
   return Object.freeze({
     schema: BROWSER_WEBCONTENTS_TAB_INDEX_SCHEMA,
@@ -102,6 +147,7 @@ export function webContentsTabIndexSnapshot() {
     selected_tab_fallback: false,
     url_fallback: false,
     title_fallback: false,
+    automatic_destroy_cleanup: true,
     authority_effect: false,
   });
 }
