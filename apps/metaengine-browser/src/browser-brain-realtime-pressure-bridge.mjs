@@ -87,7 +87,7 @@ export class BrowserBrainRealtimePressureBridge {
       if ((event.type === 'WEB_CONTENTS_RESPONSIVE' || event.type === 'WEB_CONTENTS_DESTROYED') && key) {
         this.#unresponsive.delete(key);
       }
-      if (event.type === 'RENDER_PROCESS_GONE' || event.type === 'CHILD_PROCESS_GONE') {
+      if (event.type === 'RENDER_PROCESS_GONE') {
         const at = Date.parse(event.observed_at || '') || this.#clock();
         this.#crashes.push(at);
         if (key) this.#unresponsive.delete(key);
