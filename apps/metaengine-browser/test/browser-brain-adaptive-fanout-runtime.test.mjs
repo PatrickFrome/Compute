@@ -30,8 +30,10 @@ test('one pressure sample tunes existing scheduler and fanout budget without new
   const scheduler = new NativeSupervisorCommandLaneScheduler({ readConcurrency: 1, mutationConcurrency: 1 });
   const runtime = new BrowserBrainAdaptiveFanoutRuntime({ scheduler, executeRuntimeFenced: async () => ({ ok: true }) });
 
-  runtime.observePressure(greenSample(32));
-  runtime.observePressure(greenSample(32));
+  // Default recovery hysteresis advances at most one band after three consecutive
+  // healthy samples. Starting from ORANGE therefore needs six GREEN samples to
+  // reach GREEN without weakening the production governor contract.
+  for (let i = 0; i < 5; i += 1) runtime.observePressure(greenSample(32));
   const snapshot = runtime.observePressure(greenSample(32));
 
   assert.equal(snapshot.pressure_band, 'GREEN');
@@ -103,6 +105,11 @@ test('global, read-only, implicit-tab and same-cell mutations fail closed before
     scheduler,
     executeRuntimeFenced: async () => { effects += 1; },
   });
+
+  // Admit a real multi-cell budget before testing same-cell overlap so the
+  // overlap invariant, rather than the bootstrap liveCells=1 pressure fence,
+  // is the rejecting boundary under test.
+  runtime.observePressure(greenSample(32));
 
   await assert.rejects(
     runtime.dispatchMutations([{ command_id: 'g1', action: 'NEW_TAB', payload: { url: 'https://example.com' } }]),
