@@ -10,6 +10,7 @@ on:
       - 'apps/metaengine-browser/ui/**'
       - 'apps/metaengine-browser/test/**'
       - 'apps/metaengine-browser/native/**'
+      - 'apps/metaengine-browser/scripts/windows-autonomous-session-soak.ps1'
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/electron-builder.test.json'
       - '.github/workflows/browser-windows-autonomous-soak-v1.yml'
@@ -145,6 +146,14 @@ jobs:
       - name: Install package dependencies
         working-directory: apps/metaengine-browser
         run: npm install --no-audit --no-fund --no-package-lock
+      - name: Parse packaged session soak harness before expensive build
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Get-Content './scripts/windows-autonomous-session-soak.ps1' -Raw
+          $null = [ScriptBlock]::Create($source)
+          Write-Host 'windows_autonomous_session_soak_parse_ok'
       - name: Build exact-head Windows NSIS candidate
         working-directory: apps/metaengine-browser
         shell: powershell
@@ -200,147 +209,25 @@ jobs:
 
       - name: Open normal UI and prove twelve exact primary activations
         working-directory: apps/metaengine-browser
-        shell: powershell
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $proofPath = "$env:RUNNER_TEMP\windows-autonomous-soak-proof.json"
-          $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
           $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
           $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
-          if (-not (Test-Path $app -PathType Leaf)) { throw "soak_packaged_browser_missing:$app" }
-
-          # Resolve the exact packaged userData path through the Browser's existing
-          # read-only probe; do not guess from productName.
-          $profileOut = "$env:RUNNER_TEMP\soak-profile.out"
-          $profileErr = "$env:RUNNER_TEMP\soak-profile.err"
-          $priorProfileWrite = $env:METAENGINE_PROFILE_PROBE_WRITE
-          $env:METAENGINE_PROFILE_PROBE_WRITE = '1'
-          try {
-            $profileProcess = Start-Process -FilePath $app -ArgumentList '--metaengine-profile-probe' -PassThru -RedirectStandardOutput $profileOut -RedirectStandardError $profileErr
-            $null = $profileProcess.Handle
-            if (-not $profileProcess.WaitForExit(15000)) { throw 'soak_profile_probe_timeout' }
-            if ($profileProcess.ExitCode -ne 0) { throw "soak_profile_probe_exit_$($profileProcess.ExitCode)" }
-          } finally {
-            $env:METAENGINE_PROFILE_PROBE_WRITE = $priorProfileWrite
-          }
-          $profileLine = Get-Content $profileOut | Where-Object { $_.Trim() } | Select-Object -Last 1
-          if (-not $profileLine) { throw 'soak_profile_probe_output_missing' }
-          $profile = $profileLine | ConvertFrom-Json
-          if ($profile.schema -ne 'metaengine.browser.profile-probe.v1' -or $profile.primary_instance -ne $true -or -not [string]$profile.user_data_path) {
-            throw 'soak_profile_probe_contract_invalid'
-          }
-          $journal = Join-Path ([string]$profile.user_data_path) 'metaengine-browser-startup-journal-v1.json'
-          Remove-Item $journal -Force -ErrorAction SilentlyContinue
-          Remove-Item "$journal.corrupt-*" -Force -ErrorAction SilentlyContinue
-
-          $normalOut = "$env:RUNNER_TEMP\soak-normal-ui.out"
-          $normalErr = "$env:RUNNER_TEMP\soak-normal-ui.err"
-          $normal = $null
-          try {
-            # Ordinary Explorer/Start Menu path: no smoke/probe flag.
-            $normal = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $normalOut -RedirectStandardError $normalErr
-            $null = $normal.Handle
-            $deadline = [DateTime]::UtcNow.AddSeconds(55)
-            $stable = $null
-            while ([DateTime]::UtcNow -lt $deadline) {
-              $normal.Refresh()
-              if ($normal.HasExited) { throw "soak_normal_ui_exited_early:$($normal.ExitCode)" }
-              if (Test-Path $journal -PathType Leaf) {
-                try {
-                  $startup = Get-Content $journal -Raw | ConvertFrom-Json
-                  $failed = @($startup.events | Where-Object { $_.boot_id -eq $startup.current_boot_id -and $_.state -eq 'RUNTIME_IMPORT_FAILED' })
-                  if ($failed.Count -gt 0) { throw 'soak_runtime_import_failed' }
-                  $stable = $startup.events | Where-Object { $_.boot_id -eq $startup.current_boot_id -and $_.state -eq 'PRIMARY_WINDOW_STABLE' } | Select-Object -Last 1
-                  if ($stable) { break }
-                } catch {
-                  if ($_.Exception.Message -eq 'soak_runtime_import_failed') { throw }
-                }
-              }
-              Start-Sleep -Milliseconds 250
-            }
-            if (-not $stable -or $stable.details.visible -ne $true) { throw 'soak_normal_ui_not_stable_visible' }
-            $startup = Get-Content $journal -Raw | ConvertFrom-Json
-            $runtimeImport = $startup.events | Where-Object { $_.boot_id -eq $startup.current_boot_id -and $_.state -eq 'RUNTIME_IMPORT_OK' } | Select-Object -Last 1
-            if (-not $runtimeImport) { throw 'soak_runtime_import_success_missing' }
-
-            $normal.Refresh()
-            $primaryPid = [int64]$normal.Id
-            $procBefore = Get-Process -Id $normal.Id
-            $workingSetBefore = [int64]$procBefore.WorkingSet64
-            $handlesBefore = [int64]$procBefore.HandleCount
-            $launchIds = New-Object 'System.Collections.Generic.HashSet[string]'
-            $lastActivationSequence = [int64]$stable.sequence
-
-            for ($i = 1; $i -le 12; $i++) {
-              $secondOut = "$env:RUNNER_TEMP\soak-secondary-$i.out"
-              $secondErr = "$env:RUNNER_TEMP\soak-secondary-$i.err"
-              Remove-Item $secondOut,$secondErr -Force -ErrorAction SilentlyContinue
-              $second = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $secondOut -RedirectStandardError $secondErr
-              $null = $second.Handle
-              if (-not $second.WaitForExit(18000)) {
-                try { Stop-Process -Id $second.Id -Force -ErrorAction SilentlyContinue } catch {}
-                throw "soak_secondary_timeout:$i"
-              }
-              if ($second.ExitCode -ne 0) { throw "soak_secondary_exit:$i:$($second.ExitCode)" }
-              $line = Get-Content $secondOut | Where-Object { $_.Trim() } | Select-Object -Last 1
-              if (-not $line) { throw "soak_secondary_ack_missing:$i" }
-              $ack = $line | ConvertFrom-Json
-              if ($ack.schema -ne 'metaengine.browser.secondary-launch.v1' `
-                  -or $ack.state -ne 'PRIMARY_UI_ACTIVATION_ACKNOWLEDGED' `
-                  -or $ack.second_browser_runtime_started -ne $false `
-                  -or $ack.authority_effect -ne $false `
-                  -or [int64]$ack.primary_pid -ne $primaryPid) {
-                throw "soak_secondary_ack_invalid:$i"
-              }
-              if (-not $launchIds.Add([string]$ack.launch_id)) { throw "soak_duplicate_launch_id:$i" }
-
-              $activationDeadline = [DateTime]::UtcNow.AddSeconds(12)
-              $activation = $null
-              while ([DateTime]::UtcNow -lt $activationDeadline) {
-                $startup = Get-Content $journal -Raw | ConvertFrom-Json
-                $activation = $startup.events | Where-Object {
-                  $_.boot_id -eq $startup.current_boot_id `
-                    -and $_.state -eq 'PRIMARY_WINDOW_ACTIVATED' `
-                    -and $_.details.launch_id -eq [string]$ack.launch_id
-                } | Select-Object -Last 1
-                if ($activation) { break }
-                Start-Sleep -Milliseconds 150
-              }
-              if (-not $activation -or $activation.details.visible -ne $true) { throw "soak_primary_activation_missing:$i" }
-              if ([int64]$activation.sequence -le $lastActivationSequence) { throw "soak_activation_sequence_not_monotonic:$i" }
-              if ([int64]$activation.sequence -ne [int64]$ack.event_sequence) { throw "soak_activation_ack_sequence_drift:$i" }
-              $lastActivationSequence = [int64]$activation.sequence
-              $normal.Refresh()
-              if ($normal.HasExited) { throw "soak_primary_died_after_activation:$i" }
-            }
-
-            $procAfter = Get-Process -Id $normal.Id
-            $proof.normal_ui_boot_verified = $true
-            $proof.second_instance_activations_verified = $launchIds.Count
-            $proof | Add-Member -NotePropertyName primary_pid -NotePropertyValue $primaryPid -Force
-            $proof | Add-Member -NotePropertyName startup_stable_sequence -NotePropertyValue ([int64]$stable.sequence) -Force
-            $proof | Add-Member -NotePropertyName final_activation_sequence -NotePropertyValue $lastActivationSequence -Force
-            $proof | Add-Member -NotePropertyName working_set_before_bytes -NotePropertyValue $workingSetBefore -Force
-            $proof | Add-Member -NotePropertyName working_set_after_bytes -NotePropertyValue ([int64]$procAfter.WorkingSet64) -Force
-            $proof | Add-Member -NotePropertyName handle_count_before -NotePropertyValue $handlesBefore -Force
-            $proof | Add-Member -NotePropertyName handle_count_after -NotePropertyValue ([int64]$procAfter.HandleCount) -Force
-            $proof | Add-Member -NotePropertyName duplicate_browser_runtime_observed -NotePropertyValue $false -Force
-            if ($proof.second_instance_activations_verified -ne 12) { throw 'soak_activation_count_mismatch' }
-            $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
-            Copy-Item $journal "$env:RUNNER_TEMP\browser-startup-journal-soak.json" -Force
-            Write-Host ($proof | ConvertTo-Json -Compress)
-          } finally {
-            if ($normal -and -not $normal.HasExited) {
-              cmd.exe /d /c "taskkill.exe /PID $($normal.Id) /T /F >nul 2>&1 & exit /b 0" | Out-Null
-            }
-          }
+          ./scripts/windows-autonomous-session-soak.ps1 `
+            -AppPath $app `
+            -ProofPath $proofPath `
+            -RunnerTemp $env:RUNNER_TEMP `
+            -ActivationCount 12 `
+            -PostActivationHoldSeconds 15
 
       - name: Prove source checkout unchanged
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
-          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/native apps/metaengine-browser/test apps/metaengine-browser/package.json)"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/native apps/metaengine-browser/test apps/metaengine-browser/scripts apps/metaengine-browser/package.json)"
 
       - name: Upload optimized exact-head installer and soak evidence
         if: always()
