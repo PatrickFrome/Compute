@@ -16,15 +16,17 @@ test('leased semantic effects have an authenticated HTTP bridge to the durable b
   assert.match(edgeSource, /return json\(200,\{\.\.\.result,authority_effect:false\}\)/);
 
   assert.match(clientSource, /\/v1\/commands\/\$\{encodeURIComponent\(command\.command_id\)\}\/effect-intent/);
-  assert.match(clientSource, /effectIntent\.payload\?\.effect_binding/);
-  assert.match(clientSource, /native_effect_intent_\$\{key\}_mismatch/);
+  assert.match(clientSource, /binding: body\.effect_binding/);
+  assert.match(clientSource, /assertNativeEffectBindingMatches\(\{/);
+  assert.match(clientSource, /effect_binding: sealed/);
+  assert.match(clientSource, /effect_binding_sha256: body\.effect_binding_sha256 \|\| null/);
 
   assert.match(migrationSource, /h205f22_a2_browser_supervisor_bind_effect_v1\(/);
   assert.match(migrationSource, /p_workspace_id uuid/);
   assert.match(migrationSource, /p_client_id text/);
   assert.match(migrationSource, /effect_binding_sha256/);
   assert.match(migrationSource, /status <> 'LEASED'/);
-  assert.match(migrationSource, /leased_by is distinct from p_client_id/);
+  assert.match(migrationSource, /leased_by is distinct from v_client/);
 });
 
 test('effect intent route rejects unsealed or cross-command/client bindings before the RPC', () => {
