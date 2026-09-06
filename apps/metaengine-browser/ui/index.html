@@ -2,13 +2,192 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-AI+PCezv12SbcM7iVjv5R94hG5Rb9Ds/f/lQJm+DGaU='; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-AI+PCezv12SbcM7iVjv5R94hG5Rb9Ds/f/lQJm+DGaU='; style-src 'self' 'sha256-wH3t78rwwTqPMzDidIjtNuvPsmYz6di2Nj7WZxThySE='; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>METAENGINE Browser</title>
   <link rel="stylesheet" href="metaengine://shell/app.css">
+  <style data-final-shell>/* METAENGINE FINAL SHELL V1
+   Presentation-only convergence: Telegram-like hierarchy + vertical-tab browser ergonomics.
+   No command, IPC, scheduler, lease, retry or Browser authority is introduced here. */
+:root{
+  --final-accent:#3390ec;
+  --final-accent-strong:#2784dc;
+  --final-accent-soft:#e9f4ff;
+  --final-panel:#fff;
+  --final-soft:#f5f7f9;
+  --final-hover:#f0f4f7;
+  --final-line:#e2e8ee;
+  --final-text:#1b2a38;
+  --final-muted:#758392;
+  --final-subtle:#98a5b2;
+}
+body[data-final-shell="telegram-browser-v1"]{background:#fff;color:var(--final-text)}
+body[data-final-shell="telegram-browser-v1"] .commandBar{
+  gap:4px;padding:5px 8px;background:rgba(255,255,255,.97);
+  border-bottom:1px solid var(--final-line);box-shadow:none;backdrop-filter:blur(14px) saturate(1.05)
+}
+body[data-final-shell="telegram-browser-v1"] .brand{width:32px;flex-basis:32px}
+body[data-final-shell="telegram-browser-v1"] .brandMark{
+  width:28px;height:28px;border-radius:50%;
+  background:linear-gradient(145deg,#45a8f5,#2a86df);
+  box-shadow:0 2px 8px rgba(51,144,236,.22);font-size:10px
+}
+body[data-final-shell="telegram-browser-v1"] .railToggle,
+body[data-final-shell="telegram-browser-v1"] .iconButton,
+body[data-final-shell="telegram-browser-v1"] .miniButton{border-radius:8px;color:#7d8a98}
+body[data-final-shell="telegram-browser-v1"] .railToggle:hover,
+body[data-final-shell="telegram-browser-v1"] .iconButton:hover,
+body[data-final-shell="telegram-browser-v1"] .miniButton:hover{background:#edf2f6;color:#344657}
+body[data-final-shell="telegram-browser-v1"] .omnibox{
+  height:36px;max-width:900px;margin:0 5px;padding:3px 4px 3px 9px;
+  border:1px solid #dde5ec;border-radius:10px;background:#f6f8fa;box-shadow:none
+}
+body[data-final-shell="telegram-browser-v1"] .omnibox:hover{background:#fff;border-color:#d0dae4}
+body[data-final-shell="telegram-browser-v1"] .omnibox:focus-within{
+  background:#fff;border-color:#9fc9f2;box-shadow:0 0 0 2px rgba(51,144,236,.09)
+}
+body[data-final-shell="telegram-browser-v1"] .routeKind{border-radius:6px;background:#e8edf2;color:#718190}
+body[data-final-shell="telegram-browser-v1"] .routeKind.chat{background:#e2f1ff;color:#237bcf}
+body[data-final-shell="telegram-browser-v1"] .goButton{border-radius:7px;background:transparent}
+body[data-final-shell="telegram-browser-v1"] .goButton:hover{background:#e8f3fd;color:var(--final-accent-strong)}
+body[data-final-shell="telegram-browser-v1"] .activeContext{
+  min-width:0;max-width:190px;height:34px;display:grid;grid-template-columns:26px minmax(0,1fr);
+  grid-template-rows:17px 13px;align-items:center;column-gap:7px;padding:3px 9px 3px 5px;
+  border:1px solid #e1e7ed;border-radius:9px;background:#fff
+}
+body[data-final-shell="telegram-browser-v1"] #activeKind{
+  grid-row:1/3;width:26px;height:26px;display:grid;place-items:center;border-radius:50%;
+  background:var(--final-accent-soft);color:var(--final-accent-strong);font-size:8px;font-weight:800
+}
+body[data-final-shell="telegram-browser-v1"] #activeTitle,
+body[data-final-shell="telegram-browser-v1"] #activeMeta{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body[data-final-shell="telegram-browser-v1"] #activeTitle{font-size:9px;font-weight:680;color:#304252}
+body[data-final-shell="telegram-browser-v1"] #activeMeta{font-size:7px;color:#8a97a4}
+body[data-final-shell="telegram-browser-v1"] .systems{height:28px;gap:3px;padding:0 7px;border-color:#e1e7ed;box-shadow:none}
+body[data-final-shell="telegram-browser-v1"] .operationsToggle,
+body[data-final-shell="telegram-browser-v1"] .primaryButton{height:34px;border-radius:9px;box-shadow:none}
+body[data-final-shell="telegram-browser-v1"] .operationsToggle{border-color:#dce4eb;background:#fff}
+body[data-final-shell="telegram-browser-v1"] .operationsToggle:hover{background:#f1f6fa;border-color:#cbd8e3}
+body[data-final-shell="telegram-browser-v1"] .primaryButton{background:var(--final-accent)}
+body[data-final-shell="telegram-browser-v1"] .primaryButton:hover{background:var(--final-accent-strong)}
+
+/* Flush context rail: exact native inset, Telegram-like chat density. */
+body[data-final-shell="telegram-browser-v1"] .contextRail{
+  left:0;top:var(--top-height);bottom:0;width:var(--sidebar-width);
+  border:0;border-right:1px solid var(--final-line);border-radius:0;background:#fff;box-shadow:none
+}
+body[data-final-shell="telegram-browser-v1"] .railHeader{
+  height:48px;flex-basis:48px;padding:7px 9px 4px 14px
+}
+body[data-final-shell="telegram-browser-v1"] .railHeader strong{font-size:14px;font-weight:720;color:var(--final-text)}
+body[data-final-shell="telegram-browser-v1"] .tabSearchWrap{
+  height:34px;flex-basis:34px;margin:3px 9px 7px;padding:0 11px;
+  border:1px solid transparent;border-radius:17px;background:#f1f4f6;color:#8996a3
+}
+body[data-final-shell="telegram-browser-v1"] .tabSearchWrap:focus-within{
+  border-color:#c0d9ef;background:#fff;box-shadow:0 0 0 2px rgba(51,144,236,.07)
+}
+body[data-final-shell="telegram-browser-v1"] .tabSearch{font-size:10.5px}
+body[data-final-shell="telegram-browser-v1"] .railSectionHead{
+  height:24px;flex-basis:24px;padding:0 13px;color:#8d99a5;font-size:7.5px;font-weight:700
+}
+body[data-final-shell="telegram-browser-v1"] .verticalTabs{padding:0 5px 7px}
+body[data-final-shell="telegram-browser-v1"] .verticalTab{
+  min-height:52px;padding:3px 4px;border-radius:9px;color:#526272
+}
+body[data-final-shell="telegram-browser-v1"] .verticalTab:hover{background:var(--final-hover)}
+body[data-final-shell="telegram-browser-v1"] .verticalTab.active{background:var(--final-accent);color:#fff}
+body[data-final-shell="telegram-browser-v1"] .verticalTab.active::before{display:none}
+body[data-final-shell="telegram-browser-v1"] .verticalTabSelect{min-height:46px;gap:9px;padding:2px}
+body[data-final-shell="telegram-browser-v1"] .tabAvatar{
+  width:38px;height:38px;flex-basis:38px;border-radius:50%;background:#edf1f5;color:#718090;font-size:9px
+}
+body[data-final-shell="telegram-browser-v1"] .verticalTab.agent .tabAvatar{background:#eeeaff;color:#6c5fc2}
+body[data-final-shell="telegram-browser-v1"] .verticalTab.active .tabAvatar{
+  background:rgba(255,255,255,.18);color:#fff
+}
+body[data-final-shell="telegram-browser-v1"] .tabStateDot{right:0;bottom:0;border-color:#fff}
+body[data-final-shell="telegram-browser-v1"] .verticalTab.active .tabStateDot{border-color:var(--final-accent)}
+body[data-final-shell="telegram-browser-v1"] .tabCopy{gap:2px}
+body[data-final-shell="telegram-browser-v1"] .tabCopy strong{font-size:10.5px;font-weight:680}
+body[data-final-shell="telegram-browser-v1"] .tabCopy small{font-size:8px;color:#8e9aa6}
+body[data-final-shell="telegram-browser-v1"] .verticalTab.active .tabCopy small{color:rgba(255,255,255,.78)}
+body[data-final-shell="telegram-browser-v1"] .tabClose{border-radius:50%}
+body[data-final-shell="telegram-browser-v1"] .verticalTab.active .tabClose{color:rgba(255,255,255,.84)}
+body[data-final-shell="telegram-browser-v1"] .verticalTab.active .tabClose:hover{background:rgba(255,255,255,.16);color:#fff}
+body[data-final-shell="telegram-browser-v1"] .railFooter{
+  height:36px;flex-basis:36px;padding:0 12px;border-top:1px solid #edf1f4;background:#fbfcfd
+}
+
+/* Brain is a first-class coordination inspector, not a hidden debug panel. */
+body[data-final-shell="telegram-browser-v1"] .operationsPanel{
+  right:0;top:var(--top-height);bottom:0;width:var(--ops-width);
+  border:0;border-left:1px solid var(--final-line);border-radius:0;background:#fff;box-shadow:none
+}
+body[data-final-shell="telegram-browser-v1"] .opsHeader{
+  height:50px;flex-basis:50px;padding:7px 9px 5px 14px;border-bottom:1px solid #edf1f4
+}
+body[data-final-shell="telegram-browser-v1"] .opsEyebrow{font-size:7px;color:#8896a3}
+body[data-final-shell="telegram-browser-v1"] .brainTitle strong{font-size:14px;color:var(--final-text)}
+body[data-final-shell="telegram-browser-v1"] .brainPresence{
+  height:23px;border-radius:12px;background:#eaf7f0;color:#39815d
+}
+body[data-final-shell="telegram-browser-v1"] .opsNav{
+  min-height:40px;padding:5px 8px;border-bottom:1px solid #e9eef2;background:#fbfcfd
+}
+body[data-final-shell="telegram-browser-v1"] .opsNav button{
+  height:28px;padding:0 9px;border-radius:7px;color:#748391;font-size:8px
+}
+body[data-final-shell="telegram-browser-v1"] .opsNav button:hover{background:#eef3f7;color:#415465}
+body[data-final-shell="telegram-browser-v1"] .opsNav button.active{background:var(--final-accent-soft);color:#237dcc}
+body[data-final-shell="telegram-browser-v1"] .opsNav button[data-agentic-section="attention"],
+body[data-final-shell="telegram-browser-v1"] .opsNav button[data-agentic-section="activity"],
+body[data-final-shell="telegram-browser-v1"] .opsNav button[data-agentic-section="skills"]{display:block}
+body[data-final-shell="telegram-browser-v1"] .opsNav button[data-agentic-section="attention"]{order:1}
+body[data-final-shell="telegram-browser-v1"] .opsNav button[data-agentic-section="activity"]{order:2}
+body[data-final-shell="telegram-browser-v1"] .opsNav button[data-agentic-section="context"]{order:3}
+body[data-final-shell="telegram-browser-v1"] .opsNav button[data-agentic-section="skills"]{order:4}
+body[data-final-shell="telegram-browser-v1"] .opsNav button[data-section="overview"]{order:5}
+body[data-final-shell="telegram-browser-v1"] .opsNav button[data-section="commands"]{order:6}
+body[data-final-shell="telegram-browser-v1"] .opsContent{padding:0 11px 14px}
+body[data-final-shell="telegram-browser-v1"] .opsHero{
+  padding:13px 2px 11px;margin-bottom:7px;border-bottom:1px solid #edf1f4
+}
+body[data-final-shell="telegram-browser-v1"] .opsGrid{gap:6px;margin:7px 0 10px}
+body[data-final-shell="telegram-browser-v1"] .metricCard,
+body[data-final-shell="telegram-browser-v1"] .entityRow,
+body[data-final-shell="telegram-browser-v1"] .commandButton,
+body[data-final-shell="telegram-browser-v1"] .kvList{
+  border-color:#e8edf1;border-radius:9px;box-shadow:none
+}
+body[data-final-shell="telegram-browser-v1"] .metricCard{padding:9px 10px;background:#fafcfd}
+body[data-final-shell="telegram-browser-v1"] .commandButton{min-height:46px}
+body[data-final-shell="telegram-browser-v1"] .commandButton:hover{
+  border-color:#bfd7ee;background:#f4f9fd;transform:none;box-shadow:none
+}
+body[data-final-shell="telegram-browser-v1"] .opsLegend{height:32px;flex-basis:32px;background:#fbfcfd}
+
+/* Compact mode remains a real vertical-tab rail, not a shrunken card. */
+body[data-final-shell="telegram-browser-v1"][data-sidebar="COMPACT"] .contextRail{
+  left:0;width:var(--sidebar-width);border-radius:0
+}
+body[data-final-shell="telegram-browser-v1"][data-sidebar="COMPACT"] .verticalTabs{padding:3px 4px}
+body[data-final-shell="telegram-browser-v1"][data-sidebar="COMPACT"] .verticalTab{min-height:48px;border-radius:8px}
+body[data-final-shell="telegram-browser-v1"][data-sidebar="COMPACT"] .tabAvatar{
+  width:36px;height:36px;flex-basis:36px
+}
+@media(max-width:1400px){
+  body[data-final-shell="telegram-browser-v1"] .activeContext{display:none}
+}
+@media(max-width:1180px){
+  body[data-final-shell="telegram-browser-v1"] .systems{display:none}
+}
+@media(prefers-reduced-motion:reduce){
+  body[data-final-shell="telegram-browser-v1"] *{transition:none!important}
+}</style>
 </head>
-<body data-sidebar="EXPANDED" data-operations="CLOSED">
+<body data-sidebar="EXPANDED" data-operations="CLOSED" data-final-shell="telegram-browser-v1">
   <header class="commandBar" aria-label="Browser command bar">
     <button id="sidebarToggle" class="railToggle" title="Toggle contexts (Ctrl+B)" aria-label="Toggle contexts"><span aria-hidden="true">☰</span></button>
 
@@ -25,12 +204,12 @@
 
     <form id="addressForm" class="omnibox" aria-label="Search, address, or Browser command">
       <span id="routeKind" class="routeKind" aria-hidden="true">WEB</span>
-      <input id="address" aria-label="Search, address, or command" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search or ask Browser">
+      <input id="address" aria-label="Search, address, or command" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search · > command · @ agent · / skill">
       <span class="shortcutHint" aria-hidden="true">Ctrl K</span>
       <button class="goButton" aria-label="Open" title="Open">↵</button>
     </form>
 
-    <div class="activeContext srOnly" aria-live="polite">
+    <div class="activeContext" aria-live="polite" aria-label="Exact active BrowserCell">
       <span id="activeKind">W</span><b id="activeTitle">No active tab</b><small id="activeMeta">Awaiting browser state</small>
     </div>
 
@@ -44,29 +223,29 @@
     </div>
 
     <button id="operationsToggle" class="operationsToggle" title="Open Brain (Ctrl+Shift+O)" aria-label="Open Brain"><span class="brainGlyph" aria-hidden="true">●</span><span>Brain</span></button>
-    <button id="newChat" class="primaryButton" title="New ChatGPT tab" aria-label="New ChatGPT tab"><span aria-hidden="true">＋</span><span class="primaryLabel">New</span></button>
+    <button id="newChat" class="primaryButton" title="New ChatGPT tab" aria-label="New ChatGPT tab"><span aria-hidden="true">＋</span><span class="primaryLabel">New Chat</span></button>
   </header>
 
-  <aside id="contextRail" class="contextRail" aria-label="Contexts">
+  <aside id="contextRail" class="contextRail" aria-label="Chats, agents, workspaces and BrowserCells">
     <div class="railHeader">
-      <strong>Contexts</strong>
+      <strong>Chats & Agents</strong>
       <button id="railCollapse" class="miniButton" title="Collapse contexts" aria-label="Collapse contexts">‹</button>
     </div>
     <div class="tabSearchWrap">
       <span aria-hidden="true">⌕</span>
-      <input id="tabSearch" class="tabSearch" autocomplete="off" spellcheck="false" placeholder="Search tabs" aria-label="Filter workspaces and open tabs">
+      <input id="tabSearch" class="tabSearch" autocomplete="off" spellcheck="false" placeholder="Search BrowserCells" aria-label="Filter workspaces and open tabs">
     </div>
-    <div class="railSectionHead"><span>Open</span><b id="tabCount">0</b></div>
+    <div class="railSectionHead"><span>BrowserCells</span><b id="tabCount">0</b></div>
     <div id="verticalTabs" class="verticalTabs" role="list"></div>
     <div class="railFooter">
-      <span id="fleetProfile" class="railFooterValue">Ready</span>
+      <span id="fleetProfile" class="railFooterValue">Fleet ready</span>
       <small id="railGeometry" class="srOnly">Native inset</small>
     </div>
   </aside>
 
-  <aside id="operationsPanel" class="operationsPanel" aria-label="Brain inspector">
+  <aside id="operationsPanel" class="operationsPanel" aria-label="Brain coordination inspector">
     <header class="opsHeader">
-      <div class="brainTitle"><span class="opsEyebrow">Context aware</span><strong>Brain</strong></div>
+      <div class="brainTitle"><span class="opsEyebrow">Always-on coordination</span><strong>Brain</strong></div>
       <div class="brainHeaderActions">
         <span class="brainPresence"><i aria-hidden="true"></i>Live</span>
         <button id="operationsClose" class="miniButton" title="Close Brain" aria-label="Close Brain">×</button>
@@ -77,7 +256,7 @@
       <button data-section="commands">Actions</button>
     </nav>
     <div id="opsContent" class="opsContent"></div>
-    <footer class="opsLegend" aria-label="Brain command hint"><span><b>Ctrl K</b> all actions</span></footer>
+    <footer class="opsLegend" aria-label="Brain command hint"><span><b>Ctrl K</b> command · @ agent · / skill</span></footer>
   </aside>
 
   <div id="shellBackdrop" class="shellBackdrop" aria-hidden="true"></div>

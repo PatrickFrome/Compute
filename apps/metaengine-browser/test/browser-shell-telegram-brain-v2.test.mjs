@@ -18,7 +18,7 @@ const html = fs.readFileSync(path.join(appRoot, 'ui', 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(appRoot, 'ui', 'app.css'), 'utf8');
 const renderer = fs.readFileSync(path.join(appRoot, 'ui', 'app.js'), 'utf8');
 
-test('Brain Shell V3 protects page space and keeps Brain closed until requested', () => {
+test('Brain Shell V4 protects page space and keeps Brain closed until requested', () => {
   assert.equal(SHELL_TOP_HEIGHT, 48);
   assert.equal(SHELL_SIDEBAR_EXPANDED_WIDTH, 272);
   assert.equal(SHELL_SIDEBAR_COMPACT_WIDTH, 56);
@@ -50,14 +50,16 @@ test('Brain Shell V3 protects page space and keeps Brain closed until requested'
   assert.ok(narrow.remote_bounds.width >= SHELL_MIN_REMOTE_WIDTH);
 });
 
-test('Brain Shell V3 is light, rounded and deliberately low-noise', () => {
+test('Brain Shell V4 is light, chat-first and deliberately low-noise', () => {
   assert.match(html, /color-scheme" content="light"/);
   assert.match(html, /data-operations="CLOSED"/);
-  assert.match(html, /placeholder="Search or ask Browser"/);
-  assert.match(html, /aria-label="Contexts"/);
-  assert.match(html, /aria-label="Brain inspector"/);
+  assert.match(html, /placeholder="Search · > command · @ agent · \/ skill"/);
+  assert.match(html, /aria-label="Chats, agents, workspaces and BrowserCells"/);
+  assert.match(html, /aria-label="Brain coordination inspector"/);
   assert.match(html, /data-section="overview"[^>]*>Status</);
   assert.match(html, /data-section="commands"[^>]*>Actions</);
+  assert.match(html, /data-final-shell="telegram-browser-v1"/);
+  assert.match(html, /class="activeContext"/);
 
   assert.match(css, /color-scheme:light/);
   assert.match(css, /--top-height:48px/);
@@ -70,7 +72,7 @@ test('Brain Shell V3 is light, rounded and deliberately low-noise', () => {
   assert.match(css, /data-agentic-section="skills"/);
 });
 
-test('Brain Shell V3 keeps one bounded command surface instead of adding UI authority', () => {
+test('Brain Shell V4 keeps one bounded command surface instead of adding UI authority', () => {
   for (const token of [
     "input.startsWith('>')",
     "input.startsWith('/')",
@@ -84,7 +86,7 @@ test('Brain Shell V3 keeps one bounded command surface instead of adding UI auth
   assert.doesNotMatch(renderer, /\.innerHTML\s*=|insertAdjacentHTML|document\.write/);
 });
 
-test('Brain Shell V3 preserves strict CSP and native WebContents separation', () => {
+test('Brain Shell V4 preserves strict CSP and native WebContents separation', () => {
   assert.match(html, /default-src 'self'/);
   assert.match(html, /script-src 'self'/);
   assert.match(html, /style-src 'self'/);
@@ -94,7 +96,7 @@ test('Brain Shell V3 preserves strict CSP and native WebContents separation', ()
   assert.doesNotMatch(html, /<iframe|<webview/i);
 });
 
-test('Brain Shell V3 remains event-oriented with no decorative perpetual animation loop', () => {
+test('Brain Shell V4 remains event-oriented with no decorative perpetual animation loop', () => {
   assert.match(css, /prefers-reduced-motion/);
   assert.doesNotMatch(css, /@keyframes|\banimation\s*:/i);
   assert.match(renderer, /api\.onSnapshot\(render\)/);
