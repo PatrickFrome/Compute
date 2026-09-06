@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const css = await readFile(new URL('../ui/app.css', import.meta.url), 'utf8');
+const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
 
 test('health labels remain available to assistive technology while staying visually compact', () => {
   const hardening = css.lastIndexOf('.systemChip b,.systemChip .systemValue{');
@@ -12,6 +13,12 @@ test('health labels remain available to assistive technology while staying visua
   assert.match(rule, /position:absolute!important/);
   assert.match(rule, /clip-path:inset\(50%\)!important/);
   assert.doesNotMatch(rule, /display:none/);
+});
+
+test('frequent health snapshots remain readable without becoming repetitive live announcements', () => {
+  assert.match(html, /id="systems" class="systems" aria-label="Browser health" aria-live="off"/);
+  assert.match(html, /id="fleetStatus"[\s\S]*?<b>Fleet<\/b><span class="systemValue">…<\/span>/);
+  assert.match(html, /id="gateStatus"[\s\S]*?<b>Gates<\/b><span class="systemValue">…<\/span>/);
 });
 
 test('Brain evidence is selectable without making command controls selectable text', () => {
