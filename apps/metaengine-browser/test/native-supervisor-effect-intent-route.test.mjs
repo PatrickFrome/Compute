@@ -16,7 +16,9 @@ test('leased semantic effects have an authenticated HTTP bridge to the durable b
   assert.match(edgeSource, /return json\(200,\{\.\.\.result,authority_effect:false\}\)/);
 
   assert.match(clientSource, /\/v1\/commands\/\$\{encodeURIComponent\(command\.command_id\)\}\/effect-intent/);
-  assert.match(clientSource, /effectIntent\.payload\?\.effect_binding/);
+  assert.match(clientSource, /payload: \{ binding \}/);
+  assert.match(clientSource, /body\?\.accepted !== true \|\| !body\?\.effect_binding/);
+  assert.match(clientSource, /binding: body\.effect_binding/);
   assert.match(clientSource, /native_effect_intent_\$\{key\}_mismatch/);
 
   assert.match(migrationSource, /h205f22_a2_browser_supervisor_bind_effect_v1\(/);
