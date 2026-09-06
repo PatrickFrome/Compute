@@ -17,7 +17,7 @@ export const PRIMARY_ACTIVATION_ACK_POLL_MS = 25;
 const SAFE_STATE = /^[A-Z][A-Z0-9_]{1,63}$/;
 const SAFE_REASON = /^[A-Z0-9][A-Z0-9_.:-]{0,127}$/;
 const SAFE_DETAIL_KEY = /^[a-z][a-z0-9_]{0,63}$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{12}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ADVISORY_ONLY_STATES = new Set(['SECOND_INSTANCE_RECEIVED']);
 let journalTail = Promise.resolve();
 
