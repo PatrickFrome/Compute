@@ -33,6 +33,8 @@ function subtargetProjection(row) {
   return Object.freeze({
     target_id: row.targetId,
     session_id: row.sessionId,
+    parent_session_id: row.parentSessionId,
+    parent_target_id: row.parentTargetId,
     type: row.type,
     subtype: row.subtype,
     url: row.url,
@@ -127,15 +129,19 @@ function targetInfoProjection(info = {}) {
   });
 }
 
-function upsertSubtarget(row, targetInfo = {}, sessionId = null) {
+function upsertSubtarget(row, targetInfo = {}, sessionId = null, parentSessionId = null) {
   const info = targetInfoProjection(targetInfo);
   const targetId = info.target_id;
   if (!targetId || targetId === row.targetId) return null;
   const now = new Date().toISOString();
   const prior = row.subtargets.get(targetId) || null;
+  const parentSession = parentSessionId ? clip(parentSessionId, 160) : null;
+  const parentTargetId = parentSession ? row.subtargetBySession.get(parentSession) || null : null;
   const next = {
     targetId,
     sessionId: sessionId ? clip(sessionId, 160) : (prior?.sessionId || null),
+    parentSessionId: parentSession || prior?.parentSessionId || null,
+    parentTargetId: parentTargetId || prior?.parentTargetId || null,
     type: info.type || prior?.type || null,
     subtype: info.subtype || prior?.subtype || null,
     url: info.url || prior?.url || null,
@@ -259,20 +265,21 @@ export class PersistentBrowserCdpSessionPool {
         row.bindingGeneration += 1;
       }
 
-      if (!sessionId && name === 'Target.attachedToTarget') {
+      if (name === 'Target.attachedToTarget') {
         const attachedSessionId = clip(params?.sessionId, 160);
-        const subtarget = upsertSubtarget(row, params?.targetInfo || {}, attachedSessionId || null);
+        const subtarget = upsertSubtarget(row, params?.targetInfo || {}, attachedSessionId || null, sessionId || null);
         if (subtarget) {
           emitEnvelope(row, 'METAENGINE.SubtargetAttached', subtargetProjection(subtarget), attachedSessionId || null, {
             subtarget_event: true,
             subtarget_target_id: subtarget.targetId,
+            parent_session_id: sessionId ? clip(sessionId, 160) : null,
           });
           if (attachedSessionId) void this.#armAutoAttach(row, attachedSessionId);
         }
         return;
       }
 
-      if (!sessionId && name === 'Target.detachedFromTarget') {
+      if (name === 'Target.detachedFromTarget') {
         const detachedSessionId = clip(params?.sessionId, 160);
         const targetId = clip(params?.targetId, 192) || row.subtargetBySession.get(detachedSessionId) || null;
         const prior = removeSubtarget(row, targetId, detachedSessionId);
@@ -284,20 +291,22 @@ export class PersistentBrowserCdpSessionPool {
         }, detachedSessionId || null, {
           subtarget_event: true,
           subtarget_target_id: targetId,
+          parent_session_id: sessionId ? clip(sessionId, 160) : null,
         });
         return;
       }
 
-      if (!sessionId && (name === 'Target.targetCrashed' || name === 'Inspector.targetCrashed')) {
-        const targetId = clip(params?.targetId, 192) || null;
-        const prior = removeSubtarget(row, targetId, null);
+      if (name === 'Target.targetCrashed' || (sessionId && name === 'Inspector.targetCrashed')) {
+        const targetId = clip(params?.targetId, 192)
+          || (sessionId ? row.subtargetBySession.get(String(sessionId)) || null : null);
+        const prior = removeSubtarget(row, targetId, sessionId || null);
         emitEnvelope(row, 'METAENGINE.SubtargetCrashed', {
           target_id: targetId,
           type: prior?.type || null,
           status: clip(params?.status, 120) || null,
           error_code: Number.isFinite(Number(params?.errorCode)) ? Number(params.errorCode) : null,
           raw_event_payload_exposed: false,
-        }, null, {
+        }, sessionId || null, {
           subtarget_event: true,
           subtarget_target_id: targetId,
         });
@@ -313,9 +322,9 @@ export class PersistentBrowserCdpSessionPool {
           subtarget.lastEventAt = new Date().toISOString();
         }
         // Subtarget payloads are intentionally not replayed into the root semantic
-        // state. Their lifecycle/identity is already represented by bounded attach,
-        // detach and crash envelopes above. This prevents worker/iframe DOM events
-        // from invalidating the root document-generation fence or flooding cognition.
+        // state. Their lifecycle/identity is represented by bounded attach, detach
+        // and crash envelopes. This prevents worker/iframe DOM events from
+        // invalidating the root generation fence or flooding cognition.
         return;
       }
 
