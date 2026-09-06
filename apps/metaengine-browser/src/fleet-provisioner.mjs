@@ -4,7 +4,7 @@ import {
   FLEET_PROFILES,
   FLEET_PROVISIONER_VERSION,
   FLEET_STATES,
-} from './fleet-provisioner-core.mjs';
+} from './fleet-capacity-backpressure-core.mjs';
 import { registerFleetRuntime } from './fleet-runtime-bridge.mjs';
 
 export { FLEET_PROFILES, FLEET_PROVISIONER_VERSION, FLEET_STATES };
