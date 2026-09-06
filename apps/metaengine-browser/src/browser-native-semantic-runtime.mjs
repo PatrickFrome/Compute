@@ -15,16 +15,11 @@ export function invalidateNativeSemanticRuntime(webContentsId) {
 }
 
 export function nativeSemanticRuntimeSnapshot() {
-  const snapshot = sharedHotPath.snapshot();
+  const hotPath = sharedHotPath.snapshot();
   return Object.freeze({
+    ...hotPath,
     schema: 'metaengine.browser-native-semantic-runtime.v1',
-    hot_path: snapshot,
+    hot_path: hotPath,
     shared_capture_resolution_cache: true,
-    authority_effect: false,
-    scheduler_authority: false,
-    lease_authority: false,
-    effect_execution_authority: false,
-    automatic_retry_allowed: false,
-    final_effect_fence_required: true,
   });
 }
