@@ -1,0 +1,361 @@
+name: METAENGINE Browser Windows Autonomous Soak V1
+
+on:
+  push:
+    branches:
+      - work/browser-windows-soak-optimization-v1
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/**'
+      - 'apps/metaengine-browser/ui/**'
+      - 'apps/metaengine-browser/test/**'
+      - 'apps/metaengine-browser/native/**'
+      - 'apps/metaengine-browser/package.json'
+      - 'apps/metaengine-browser/electron-builder.test.json'
+      - '.github/workflows/browser-windows-autonomous-soak-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-windows-autonomous-soak-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  continuous-brain:
+    name: continuous-brain-50k
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prove exact head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+      - name: Parse exact source
+        working-directory: apps/metaengine-browser
+        run: npm run check
+      - name: Run continuous Brain, cognition and scheduler soak
+        working-directory: apps/metaengine-browser
+        env:
+          METAENGINE_BRAIN_SOAK_STEPS: '50000'
+        run: >-
+          node --test
+          test/browser-windows-continuous-brain-soak.test.mjs
+          test/browser-brain-continuous-coordinator.test.mjs
+          test/browser-brain-cognition-fabric.test.mjs
+          test/native-supervisor-command-lanes.test.mjs
+
+  seeded-fleet-chaos:
+    name: fleet-chaos-seed-${{ matrix.seed }}
+    runs-on: windows-2022
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [17, 113, 509, 20260906]
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prove exact head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+      - name: Run seeded autonomous fleet chaos
+        working-directory: apps/metaengine-browser
+        env:
+          METAENGINE_CHAOS_SEED: ${{ matrix.seed }}
+          METAENGINE_CHAOS_STEPS: '16000'
+        run: node --test test/windows-fleet-chaos-seeded.test.mjs
+
+  fleet-scale:
+    name: fleet-scale-1000-tasks-1024-peers
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prove exact head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+      - name: Run fleet scale and mesh convergence contracts
+        working-directory: apps/metaengine-browser
+        run: >-
+          node --test
+          test/windows-fleet-chaos-scale.test.mjs
+          test/supervisor-mesh-wire-projection.test.mjs
+          test/browser-brain-parallel-fanout.test.mjs
+          test/browser-brain-adaptive-fanout-runtime.test.mjs
+
+  package-session-soak:
+    name: installed-ui-12-activation-soak
+    needs: [continuous-brain, seeded-fleet-chaos, fleet-scale]
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prove exact head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install package dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+      - name: Build exact-head Windows NSIS candidate
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = [string](node -p "require('./package.json').version")
+          if (-not $version) { throw 'package_version_missing' }
+          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item native-dist\guardian -Recurse -Force -ErrorAction SilentlyContinue
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
+          if (-not $installer) { throw 'soak_installer_missing' }
+          $digest = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          Copy-Item $installer.FullName "$env:RUNNER_TEMP\autonomous-soak-setup.exe" -Force
+          Copy-Item $installer.FullName (Join-Path $env:RUNNER_TEMP $installer.Name) -Force
+          @{
+            schema='metaengine.browser.windows-autonomous-soak.v1'
+            source_head=$env:EXACT_HEAD
+            package_version=$version
+            installer_name=$installer.Name
+            installer_sha256=$digest
+            semantic_edges=50000
+            fleet_chaos_seeds=4
+            fleet_chaos_steps_per_seed=16000
+            scale_tasks=1000
+            scale_supervisor_peers=1024
+            second_instance_activations_required=12
+            normal_ui_boot_verified=$false
+            second_instance_activations_verified=0
+            signed=$false
+            published=$false
+            promotion_authorized=$false
+            authority_effect=$false
+          } | ConvertTo-Json -Depth 5 | Set-Content "$env:RUNNER_TEMP\windows-autonomous-soak-proof.json" -Encoding utf8
+
+      - name: Install exact-head package
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Get-Service -Name 'METAENGINEBrowserGuardian' -ErrorAction SilentlyContinue) { throw 'guardian_service_preexists_before_soak_install' }
+          $install = Start-Process -FilePath "$env:RUNNER_TEMP\autonomous-soak-setup.exe" -ArgumentList '/S' -PassThru -Wait
+          if ($install.ExitCode -ne 0) { throw "soak_installer_exit_$($install.ExitCode)" }
+          $proof = Get-Content "$env:RUNNER_TEMP\windows-autonomous-soak-proof.json" -Raw | ConvertFrom-Json
+          $guardianLine = (& ./scripts/verify-installed-guardian-native-staging.ps1 `
+            -ExpectedSourceHead ([string]$proof.source_head) `
+            -ExpectedPackageVersion ([string]$proof.package_version) | Where-Object { $_.Trim() } | Select-Object -Last 1)
+          if (-not $guardianLine) { throw 'soak_guardian_staging_proof_missing' }
+          $guardian = $guardianLine | ConvertFrom-Json
+          if ($guardian.staging_only -ne $true -or $guardian.service_activation_authorized -ne $false) { throw 'soak_guardian_staging_not_inert' }
+
+      - name: Open normal UI and prove twelve exact primary activations
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $proofPath = "$env:RUNNER_TEMP\windows-autonomous-soak-proof.json"
+          $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
+          $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
+          if (-not (Test-Path $app -PathType Leaf)) { throw "soak_packaged_browser_missing:$app" }
+
+          # Resolve the exact packaged userData path through the Browser's existing
+          # read-only probe; do not guess from productName.
+          $profileOut = "$env:RUNNER_TEMP\soak-profile.out"
+          $profileErr = "$env:RUNNER_TEMP\soak-profile.err"
+          $priorProfileWrite = $env:METAENGINE_PROFILE_PROBE_WRITE
+          $env:METAENGINE_PROFILE_PROBE_WRITE = '1'
+          try {
+            $profileProcess = Start-Process -FilePath $app -ArgumentList '--metaengine-profile-probe' -PassThru -RedirectStandardOutput $profileOut -RedirectStandardError $profileErr
+            $null = $profileProcess.Handle
+            if (-not $profileProcess.WaitForExit(15000)) { throw 'soak_profile_probe_timeout' }
+            if ($profileProcess.ExitCode -ne 0) { throw "soak_profile_probe_exit_$($profileProcess.ExitCode)" }
+          } finally {
+            $env:METAENGINE_PROFILE_PROBE_WRITE = $priorProfileWrite
+          }
+          $profileLine = Get-Content $profileOut | Where-Object { $_.Trim() } | Select-Object -Last 1
+          if (-not $profileLine) { throw 'soak_profile_probe_output_missing' }
+          $profile = $profileLine | ConvertFrom-Json
+          if ($profile.schema -ne 'metaengine.browser.profile-probe.v1' -or $profile.primary_instance -ne $true -or -not [string]$profile.user_data_path) {
+            throw 'soak_profile_probe_contract_invalid'
+          }
+          $journal = Join-Path ([string]$profile.user_data_path) 'metaengine-browser-startup-journal-v1.json'
+          Remove-Item $journal -Force -ErrorAction SilentlyContinue
+          Remove-Item "$journal.corrupt-*" -Force -ErrorAction SilentlyContinue
+
+          $normalOut = "$env:RUNNER_TEMP\soak-normal-ui.out"
+          $normalErr = "$env:RUNNER_TEMP\soak-normal-ui.err"
+          $normal = $null
+          try {
+            # Ordinary Explorer/Start Menu path: no smoke/probe flag.
+            $normal = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $normalOut -RedirectStandardError $normalErr
+            $null = $normal.Handle
+            $deadline = [DateTime]::UtcNow.AddSeconds(55)
+            $stable = $null
+            while ([DateTime]::UtcNow -lt $deadline) {
+              $normal.Refresh()
+              if ($normal.HasExited) { throw "soak_normal_ui_exited_early:$($normal.ExitCode)" }
+              if (Test-Path $journal -PathType Leaf) {
+                try {
+                  $startup = Get-Content $journal -Raw | ConvertFrom-Json
+                  $failed = @($startup.events | Where-Object { $_.boot_id -eq $startup.current_boot_id -and $_.state -eq 'RUNTIME_IMPORT_FAILED' })
+                  if ($failed.Count -gt 0) { throw 'soak_runtime_import_failed' }
+                  $stable = $startup.events | Where-Object { $_.boot_id -eq $startup.current_boot_id -and $_.state -eq 'PRIMARY_WINDOW_STABLE' } | Select-Object -Last 1
+                  if ($stable) { break }
+                } catch {
+                  if ($_.Exception.Message -eq 'soak_runtime_import_failed') { throw }
+                }
+              }
+              Start-Sleep -Milliseconds 250
+            }
+            if (-not $stable -or $stable.details.visible -ne $true) { throw 'soak_normal_ui_not_stable_visible' }
+            $startup = Get-Content $journal -Raw | ConvertFrom-Json
+            $runtimeImport = $startup.events | Where-Object { $_.boot_id -eq $startup.current_boot_id -and $_.state -eq 'RUNTIME_IMPORT_OK' } | Select-Object -Last 1
+            if (-not $runtimeImport) { throw 'soak_runtime_import_success_missing' }
+
+            $normal.Refresh()
+            $primaryPid = [int64]$normal.Id
+            $procBefore = Get-Process -Id $normal.Id
+            $workingSetBefore = [int64]$procBefore.WorkingSet64
+            $handlesBefore = [int64]$procBefore.HandleCount
+            $launchIds = New-Object 'System.Collections.Generic.HashSet[string]'
+            $lastActivationSequence = [int64]$stable.sequence
+
+            for ($i = 1; $i -le 12; $i++) {
+              $secondOut = "$env:RUNNER_TEMP\soak-secondary-$i.out"
+              $secondErr = "$env:RUNNER_TEMP\soak-secondary-$i.err"
+              Remove-Item $secondOut,$secondErr -Force -ErrorAction SilentlyContinue
+              $second = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $secondOut -RedirectStandardError $secondErr
+              $null = $second.Handle
+              if (-not $second.WaitForExit(18000)) {
+                try { Stop-Process -Id $second.Id -Force -ErrorAction SilentlyContinue } catch {}
+                throw "soak_secondary_timeout:$i"
+              }
+              if ($second.ExitCode -ne 0) { throw "soak_secondary_exit:$i:$($second.ExitCode)" }
+              $line = Get-Content $secondOut | Where-Object { $_.Trim() } | Select-Object -Last 1
+              if (-not $line) { throw "soak_secondary_ack_missing:$i" }
+              $ack = $line | ConvertFrom-Json
+              if ($ack.schema -ne 'metaengine.browser.secondary-launch.v1' `
+                  -or $ack.state -ne 'PRIMARY_UI_ACTIVATION_ACKNOWLEDGED' `
+                  -or $ack.second_browser_runtime_started -ne $false `
+                  -or $ack.authority_effect -ne $false `
+                  -or [int64]$ack.primary_pid -ne $primaryPid) {
+                throw "soak_secondary_ack_invalid:$i"
+              }
+              if (-not $launchIds.Add([string]$ack.launch_id)) { throw "soak_duplicate_launch_id:$i" }
+
+              $activationDeadline = [DateTime]::UtcNow.AddSeconds(12)
+              $activation = $null
+              while ([DateTime]::UtcNow -lt $activationDeadline) {
+                $startup = Get-Content $journal -Raw | ConvertFrom-Json
+                $activation = $startup.events | Where-Object {
+                  $_.boot_id -eq $startup.current_boot_id `
+                    -and $_.state -eq 'PRIMARY_WINDOW_ACTIVATED' `
+                    -and $_.details.launch_id -eq [string]$ack.launch_id
+                } | Select-Object -Last 1
+                if ($activation) { break }
+                Start-Sleep -Milliseconds 150
+              }
+              if (-not $activation -or $activation.details.visible -ne $true) { throw "soak_primary_activation_missing:$i" }
+              if ([int64]$activation.sequence -le $lastActivationSequence) { throw "soak_activation_sequence_not_monotonic:$i" }
+              if ([int64]$activation.sequence -ne [int64]$ack.event_sequence) { throw "soak_activation_ack_sequence_drift:$i" }
+              $lastActivationSequence = [int64]$activation.sequence
+              $normal.Refresh()
+              if ($normal.HasExited) { throw "soak_primary_died_after_activation:$i" }
+            }
+
+            $procAfter = Get-Process -Id $normal.Id
+            $proof.normal_ui_boot_verified = $true
+            $proof.second_instance_activations_verified = $launchIds.Count
+            $proof | Add-Member -NotePropertyName primary_pid -NotePropertyValue $primaryPid -Force
+            $proof | Add-Member -NotePropertyName startup_stable_sequence -NotePropertyValue ([int64]$stable.sequence) -Force
+            $proof | Add-Member -NotePropertyName final_activation_sequence -NotePropertyValue $lastActivationSequence -Force
+            $proof | Add-Member -NotePropertyName working_set_before_bytes -NotePropertyValue $workingSetBefore -Force
+            $proof | Add-Member -NotePropertyName working_set_after_bytes -NotePropertyValue ([int64]$procAfter.WorkingSet64) -Force
+            $proof | Add-Member -NotePropertyName handle_count_before -NotePropertyValue $handlesBefore -Force
+            $proof | Add-Member -NotePropertyName handle_count_after -NotePropertyValue ([int64]$procAfter.HandleCount) -Force
+            $proof | Add-Member -NotePropertyName duplicate_browser_runtime_observed -NotePropertyValue $false -Force
+            if ($proof.second_instance_activations_verified -ne 12) { throw 'soak_activation_count_mismatch' }
+            $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
+            Copy-Item $journal "$env:RUNNER_TEMP\browser-startup-journal-soak.json" -Force
+            Write-Host ($proof | ConvertTo-Json -Compress)
+          } finally {
+            if ($normal -and -not $normal.HasExited) {
+              cmd.exe /d /c "taskkill.exe /PID $($normal.Id) /T /F >nul 2>&1 & exit /b 0" | Out-Null
+            }
+          }
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/native apps/metaengine-browser/test apps/metaengine-browser/package.json)"
+
+      - name: Upload optimized exact-head installer and soak evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-windows-autonomous-soak-${{ env.EXACT_HEAD }}
+          path: |
+            ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
+            ${{ runner.temp }}/windows-autonomous-soak-proof.json
+            ${{ runner.temp }}/browser-startup-journal-soak.json
+            ${{ runner.temp }}/soak-profile.out
+            ${{ runner.temp }}/soak-profile.err
+            ${{ runner.temp }}/soak-normal-ui.out
+            ${{ runner.temp }}/soak-normal-ui.err
+            ${{ runner.temp }}/soak-secondary-*.out
+            ${{ runner.temp }}/soak-secondary-*.err
+          if-no-files-found: warn
+          retention-days: 30
