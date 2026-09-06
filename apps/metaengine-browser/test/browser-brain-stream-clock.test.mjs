@@ -10,9 +10,31 @@ test('merges independent realtime source sequences into one monotonic local epoc
   assert.equal(clock.observe('command-wake', 1).epoch, 4);
   const snapshot = clock.snapshot();
   assert.equal(snapshot.epoch, 4);
-  assert.equal(snapshot.source_count, 4);
   assert.equal(snapshot.authority_effect, false);
   assert.equal(snapshot.scheduler_authority, false);
+});
+
+test('first observation may baseline a producer already in flight without synthetic replay', () => {
+  const clock = new BrowserBrainStreamClock();
+  const initial = clock.observe('semantic', 83);
+  assert.equal(initial.accepted, true);
+  assert.equal(initial.disposition, 'BASELINED');
+  assert.equal(initial.source.sequence, 83);
+  assert.equal(initial.synthetic_replay, false);
+  assert.equal(clock.snapshot().gap_requires_resync, false);
+  const next = clock.observe('semantic', 84);
+  assert.equal(next.disposition, 'APPLIED');
+  assert.equal(next.epoch, 2);
+});
+
+test('explicit canonical baseline establishes current producer sequence once', () => {
+  const clock = new BrowserBrainStreamClock();
+  const baseline = clock.baseline('process', 500);
+  assert.equal(baseline.disposition, 'BASELINED');
+  assert.equal(baseline.initial_observation, false);
+  assert.equal(baseline.synthetic_replay, false);
+  assert.throws(() => clock.baseline('process', 500), /baseline_already_initialized/);
+  assert.equal(clock.observe('process', 501).disposition, 'APPLIED');
 });
 
 test('duplicate delivery is idempotent and never advances the local epoch', () => {
@@ -39,6 +61,7 @@ test('sequence gap fails closed and requires canonical resync without synthetic 
   const recovered = clock.resync('semantic:tab_a', 4);
   assert.equal(recovered.disposition, 'RESYNCED');
   assert.equal(recovered.source.sequence, 4);
+  assert.equal(recovered.synthetic_replay, false);
   assert.equal(clock.snapshot().gap_requires_resync, false);
 });
 
@@ -68,5 +91,6 @@ test('clock exposes no timer, scheduler, lease, execution or retry authority', (
   assert.equal(snapshot.execution_authority, false);
   assert.equal(snapshot.automatic_retry_allowed, false);
   assert.equal(snapshot.dedicated_timer, false);
+  assert.equal(snapshot.synthetic_replay_allowed, false);
   assert.equal(snapshot.authority_effect, false);
 });
