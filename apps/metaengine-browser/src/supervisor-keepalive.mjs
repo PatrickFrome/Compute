@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-export const SUPERVISOR_KEEPALIVE_VERSION = '1.3.2';
+export const SUPERVISOR_KEEPALIVE_VERSION = '1.3.3';
 export const SUPERVISOR_ID = 'METAENGINE_SUPERVISOR';
 export const KEEPALIVE_STATES = Object.freeze([
   'ACTIVE','WAITING','WAKE_PENDING','WAKE_AMBIGUOUS',
@@ -15,7 +15,6 @@ const WAKE_REASONS = new Set([
   'INTEGRATION_HEAD_CHANGED','MILESTONE_READY_FOR_REVIEW',
   'SUPERVISOR_RECOVERY_REQUIRED','WATCHDOG_DEADLINE','RESEARCH_ACCELERATOR_DUE',
 ]);
-const AUTO_RELEASE_ROLLOVER_REASONS = new Set(['CHATGPT_CONVERSATION_LIMIT_HINT', 'CONVERSATION_LIMIT']);
 
 const clone = (value) => value == null ? value : structuredClone(value);
 const iso = (clock) => new Date(clock()).toISOString();
@@ -277,10 +276,11 @@ export class SupervisorKeepalive {
       await this.#persist();
       return this.snapshot();
     }
-    const autoRelease = AUTO_RELEASE_ROLLOVER_REASONS.has(normalizedReason);
-    this.#state.state = autoRelease ? 'ROLLOVER_REQUIRED' : 'ROLLOVER_DEFERRED';
-    this.#state.rollover_reason = autoRelease ? `${normalizedReason}:TRUSTED_ENVIRONMENT_LIMIT` : normalizedReason;
-    this.#state.rollover_release_at = autoRelease ? iso(this.#clock) : null;
+    // A rollover reason can originate from page/model observation. It may ask the
+    // trusted lifecycle to replan, but it never authorizes replacement actuation.
+    this.#state.state = 'ROLLOVER_DEFERRED';
+    this.#state.rollover_reason = normalizedReason;
+    this.#state.rollover_release_at = null;
     this.#state.rollover_attempt = null;
     await this.#persist();
     return this.snapshot();
