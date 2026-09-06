@@ -226,6 +226,10 @@ function buildPending(commands) {
   const seenReadsByKey = new Map();
   const seenMutationsByKey = new Map();
   return commands.map((command, index) => {
+    const action = actionOf(command);
+    if (TAB_MUTATION_ACTIONS.has(action) && !explicitTabId(command)) {
+      throw new Error(`native_supervisor_command_exact_tab_required:${action}`);
+    }
     const descriptor = classifyNativeSupervisorCommand(command);
     const key = descriptor.causal_key;
     const priorReadCount = key ? Number(seenReadsByKey.get(key) || 0) : 0;
@@ -283,6 +287,8 @@ export class NativeSupervisorCommandLaneScheduler {
       max_batch: this.#maxBatch,
       unknown_actions_exclusive: true,
       implicit_selected_tab_exclusive: true,
+      implicit_selected_tab_scheduler_admission: 'REJECTED',
+      exact_tab_mutation_admission_required: true,
       same_tab_mutations_serialized: true,
       same_tab_read_after_write_causal: true,
       same_tab_write_after_read_causal: true,
@@ -465,6 +471,8 @@ export const NATIVE_SUPERVISOR_COMMAND_LANE_CONTRACT = Object.freeze({
   emergency_is_exclusive: true,
   unknown_action_parallelism_allowed: false,
   bounded_backpressure_required: true,
+  exact_tab_mutation_admission_required: true,
+  implicit_selected_tab_scheduler_admission: 'REJECTED',
   immutable_original_order_barriers: true,
   causal_dependency_precompute: 'O(n)',
   causal_pending_lookup: 'O(1)',
