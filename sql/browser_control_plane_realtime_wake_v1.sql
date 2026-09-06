@@ -97,7 +97,7 @@ begin
 end;
 $$;
 
--- No CREATE TRIGGER appears here. Existing canonical triggers remain:
+-- This source proof deliberately declares no additional trigger. Existing canonical triggers remain:
 --   glm_pulse_command -> command table
 --   glm_pulse_state   -> state table
 --   glm_pulse_mesh    -> mesh table
