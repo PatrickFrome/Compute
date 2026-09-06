@@ -137,18 +137,22 @@ export class BrowserRuntimeBindingIndex {
     if (cellId != null && !CELL_ID_RE.test(cellId)) throw new Error('browser_runtime_binding_cell_id_invalid');
     const cellGeneration = cell_generation == null ? null : positiveInt(cell_generation);
     if (cell_generation != null && !cellGeneration) throw new Error('browser_runtime_binding_cell_generation_invalid');
+    const documentGeneration = Math.max(0, Number(document_generation) || 0);
 
     const conflictTabId = this.#tabByWebContents.get(webContentsId);
     if (conflictTabId && conflictTabId !== tabId) this.invalidateTab(conflictTabId, 'WEB_CONTENTS_REBOUND');
 
     const current = this.#byTab.get(tabId) || null;
-    const runtimeIdentityChanged = Boolean(current)
-      && (current.web_contents_id !== webContentsId
+    const bindingIdentityChanged = Boolean(current)
+      && (current.cell_id !== cellId
+        || current.cell_generation !== cellGeneration
+        || current.web_contents_id !== webContentsId
         || current.renderer_pid !== rendererPid
         || current.renderer_process_key !== processKey
-        || current.target_id !== exactTargetId(target_id, webContentsId));
+        || current.target_id !== exactTargetId(target_id, webContentsId)
+        || current.document_generation !== documentGeneration);
     let generation = Number(this.#generationByTab.get(tabId) || 0);
-    if (!current || runtimeIdentityChanged || current.valid !== true) generation += 1;
+    if (!current || bindingIdentityChanged || current.valid !== true) generation += 1;
     if (generation < 1) generation = 1;
     this.#generationByTab.set(tabId, generation);
 
@@ -164,13 +168,13 @@ export class BrowserRuntimeBindingIndex {
       renderer_process_key: processKey,
       renderer_process_identity_complete: Boolean(rendererPid && processKey),
       target_id: exactTargetId(target_id, webContentsId),
-      document_generation: Math.max(0, Number(document_generation) || 0),
+      document_generation: documentGeneration,
       semantic_revision: Math.max(0, Number(semantic_revision) || 0),
       provider: text(provider, 64),
       role: text(role, 64),
       valid: true,
       invalid_reason: null,
-      bound_at: current && !runtimeIdentityChanged && current.valid === true ? current.bound_at : now,
+      bound_at: current && !bindingIdentityChanged && current.valid === true ? current.bound_at : now,
       observed_at: observed_at ? String(observed_at) : now,
     };
     this.#byTab.set(tabId, row);

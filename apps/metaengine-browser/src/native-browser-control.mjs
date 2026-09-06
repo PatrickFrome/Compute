@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { chatGptControlMatches } from './chatgpt-ui-controls.mjs';
+import { withPersistentBrowserDebugger } from './browser-persistent-cdp-session.mjs';
 import {
   assertNativeEffectBindingMatches,
   nativeActionRequiresEffectBinding,
@@ -28,18 +29,7 @@ export function nativeBrowserTargetIdentity(webContents) {
 
 async function withDebugger(webContents, fn) {
   if (!webContents || webContents.isDestroyed?.()) throw new Error('native_control_webcontents_unavailable');
-  const dbg = webContents.debugger;
-  let attachedHere = false;
-  if (!dbg.isAttached()) {
-    dbg.attach('1.3');
-    attachedHere = true;
-  }
-  try { return await fn(dbg); }
-  finally {
-    if (attachedHere && dbg.isAttached()) {
-      try { dbg.detach(); } catch {}
-    }
-  }
+  return withPersistentBrowserDebugger(webContents, fn);
 }
 
 function uniqueSemanticTargets(nodes = []) {
