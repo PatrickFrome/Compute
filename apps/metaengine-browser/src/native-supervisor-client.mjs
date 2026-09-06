@@ -9,6 +9,7 @@ import {
   BROWSER_COGNITIVE_BATCH_SCHEMA,
   BrowserCognitiveDeltaTransport,
 } from './browser-cognitive-delta-transport.mjs';
+import { BrowserCognitiveMessagePortHub } from './browser-cognitive-message-port-hub.mjs';
 import {
   normalizeWorkspaceBindingSnapshot,
   unavailableWorkspaceBindingSnapshot,
@@ -208,6 +209,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
   #processPushLastAt = null;
   #processPushLastError = null;
   #cognitiveTransport = null;
+  #cognitivePortHub = null;
   #version = '0.0.0';
   #controlLatencySnapshot = null;
 
@@ -322,6 +324,17 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       resync: () => this.#pushRealtimeState(),
       onFallbackRequired: () => this.#scheduleRealtimeStatePush(),
       batchSize: options.cognitiveBatchSize,
+    });
+    this.#cognitivePortHub = new BrowserCognitiveMessagePortHub({
+      readDeltas: (after, limit) => {
+        const plane = this.#processPlaneRef?.();
+        if (!plane || typeof plane.cognitiveSnapshot !== 'function') {
+          throw new Error('native_supervisor_cognitive_plane_not_ready');
+        }
+        return plane.cognitiveSnapshot({ eventsSince: after, eventLimit: limit });
+      },
+      batchSize: options.cognitivePortBatchSize,
+      maxConsumers: options.cognitivePortMaxConsumers,
     });
     controlLatencySnapshot = () => {
       const base = super.snapshot();
@@ -472,6 +485,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
           // per-event full snapshots. Unsupported or ambiguous delivery immediately
           // falls back to the existing durable /v1/state path.
           this.#dispatchRealtimeObservationEdge();
+          this.#cognitivePortHub?.notify();
         },
       });
       this.#processPlaneSet?.(plane);
@@ -564,6 +578,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
         authority_effect: false,
       },
       cognitive_delta_transport: this.#cognitiveTransport?.snapshot() || null,
+      cognitive_message_port_hub: this.#cognitivePortHub?.snapshot() || null,
       cognitive_delta_route: NATIVE_SUPERVISOR_COGNITIVE_DELTA_PATH,
       cognitive_delta_full_state_fallback: true,
       cognitive_delta_second_polling_loop: false,
@@ -589,10 +604,19 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     return result;
   }
 
+  attachCognitiveMessagePort(port) {
+    return this.#cognitivePortHub.attach(port);
+  }
+
+  detachCognitiveMessagePort(consumerId) {
+    return this.#cognitivePortHub.detach(consumerId);
+  }
+
   stop() {
     this.#processPushScheduled = false;
     this.#processPushPending = false;
     try { this.#processPlaneRef?.()?.stop?.(); } catch {}
+    this.#cognitivePortHub?.closeAll();
     return super.stop();
   }
 

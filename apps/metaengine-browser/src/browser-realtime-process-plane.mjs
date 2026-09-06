@@ -1,11 +1,15 @@
 import { BrowserRealtimeSemanticPlane } from './browser-realtime-semantic-plane.mjs';
 import { BrowserCognitiveDeltaBus } from './browser-cognitive-delta-bus.mjs';
+import { BrowserBrainContinuousCoordinator } from './browser-brain-continuous-coordinator.mjs';
+import { BrowserMainEventLoopPressure } from './browser-main-event-loop-pressure.mjs';
+import { resolveTabIdForWebContents } from './browser-webcontents-tab-index.mjs';
 
 export const BROWSER_REALTIME_PROCESS_PLANE_SCHEMA = 'metaengine.browser.realtime-process-plane.v1';
 
 const DEFAULT_SAMPLE_MS = 250;
 const DEFAULT_EVENT_LIMIT = 512;
 const DEFAULT_COGNITIVE_EVENT_LIMIT = 4096;
+const MAX_SEMANTIC_ROOT_TARGETS = 128;
 
 function boundedInt(value, fallback, min, max) {
   const parsed = Number(value);
@@ -123,11 +127,16 @@ export class BrowserRealtimeProcessPlane {
   #semanticStartPromise = null;
   #semanticLastError = null;
   #cognitiveBus;
+  #brain;
+  #brainLastError = null;
+  #mainLoopPressure;
 
   constructor({
     app,
     getWebContents,
-    resolveTabId = null,
+    resolveTabId = resolveTabIdForWebContents,
+    brainCoordinator = null,
+    mainLoopPressure = null,
     clock = () => Date.now(),
     sampleMs = DEFAULT_SAMPLE_MS,
     eventLimit = DEFAULT_EVENT_LIMIT,
@@ -151,6 +160,48 @@ export class BrowserRealtimeProcessPlane {
       clock,
       maxEvents: boundedInt(cognitiveEventLimit, DEFAULT_COGNITIVE_EVENT_LIMIT, 64, 16384),
     });
+    this.#mainLoopPressure = mainLoopPressure || new BrowserMainEventLoopPressure({ expectedIntervalMs: this.#sampleMs });
+    if (typeof this.#mainLoopPressure.sample !== 'function' || typeof this.#mainLoopPressure.snapshot !== 'function') {
+      throw new Error('browser_realtime_process_plane_loop_pressure_invalid');
+    }
+    this.#brain = brainCoordinator || new BrowserBrainContinuousCoordinator({
+      clock,
+      getExtraPressureSample: () => this.#mainLoopPressure.snapshot(),
+    });
+    if (
+      typeof this.#brain.observeEdge !== 'function'
+      || typeof this.#brain.snapshot !== 'function'
+      || typeof this.#brain.pressureBudget !== 'function'
+    ) {
+      throw new Error('browser_realtime_process_plane_brain_invalid');
+    }
+  }
+
+  #brainProcessSnapshot(eventLimit = 64) {
+    return Object.freeze({
+      schema: BROWSER_REALTIME_PROCESS_PLANE_SCHEMA,
+      running: this.#started,
+      sequence: this.#sequence,
+      observed_at: this.#observedAt,
+      event_driven_lifecycle: true,
+      processes: this.#processes,
+      web_contents: this.#webContents,
+      semantic_plane: this.semanticSnapshot({ includeText: false, eventLimit: 0 }),
+      events: this.#events.slice(-boundedInt(eventLimit, 64, 0, 256)),
+      main_event_loop_pressure: this.#mainLoopPressure.snapshot(),
+      authority_effect: false,
+    });
+  }
+
+  #dispatchBrainEdge(event) {
+    try {
+      const result = this.#brain.observeEdge(event, { process_snapshot: this.#brainProcessSnapshot() });
+      this.#brainLastError = null;
+      return result;
+    } catch (error) {
+      this.#brainLastError = text(error?.message || error, 300);
+      return null;
+    }
   }
 
   #emit(type, details = {}) {
@@ -168,6 +219,7 @@ export class BrowserRealtimeProcessPlane {
       this.#droppedEvents += drop;
     }
     this.#cognitiveBus.publish(event);
+    this.#dispatchBrainEdge(event);
     try { this.#onChange?.(event); } catch {}
     return event;
   }
@@ -179,7 +231,7 @@ export class BrowserRealtimeProcessPlane {
   #semanticTargets() {
     let contents = [];
     try { contents = this.#getWebContents() || []; } catch {}
-    return contents.slice(0, 64)
+    return contents.slice(0, MAX_SEMANTIC_ROOT_TARGETS)
       .filter((row) => safeCall(row, 'isDestroyed', true) !== true)
       .map((row) => {
         const id = Number(row?.id);
@@ -282,12 +334,16 @@ export class BrowserRealtimeProcessPlane {
     this.#processes = Object.freeze(metrics.slice(0, 512).map(metricProjection));
     this.#webContents = Object.freeze(contents.slice(0, 512).map((wc) => webContentsProjection(wc, this.#resolveTabId)));
     this.#observedAt = new Date(this.#clock()).toISOString();
+    if (reason === 'START' || reason === 'METRICS_SAMPLE') {
+      try { this.#mainLoopPressure.sample({ expectedIntervalMs: this.#sampleMs }); } catch {}
+    }
     if (reason !== 'METRICS_SAMPLE') {
       this.#emit('PROCESS_CENSUS_REFRESHED', { reason });
       this.#syncSemanticTargets();
     } else {
       const sample = Object.freeze({ seq: this.#sequence, type: 'METRICS_SAMPLE', observed_at: this.#observedAt, authority_effect: false });
       this.#cognitiveBus.publish(sample);
+      this.#dispatchBrainEdge(sample);
       try { this.#onChange?.(sample); } catch {}
     }
     return this.snapshot();
@@ -376,6 +432,7 @@ export class BrowserRealtimeProcessPlane {
       running: false,
       state: this.#semanticLastError || 'STARTING',
       target_count: 0,
+      target_capacity: MAX_SEMANTIC_ROOT_TARGETS,
       targets: [],
       events: [],
       persistent_cdp_sessions: true,
@@ -384,6 +441,21 @@ export class BrowserRealtimeProcessPlane {
       command_leasing: false,
       authority_effect: false,
     });
+  }
+
+  brainSnapshot() {
+    return Object.freeze({
+      ...this.#brain.snapshot(),
+      process_plane_integrated: true,
+      process_plane_last_error: this.#brainLastError,
+      same_event_stream: true,
+      second_process_observer: false,
+      authority_effect: false,
+    });
+  }
+
+  brainPressureBudget() {
+    return this.#brain.pressureBudget();
   }
 
   snapshot({ eventsSince = null, eventLimit = 128 } = {}) {
@@ -407,6 +479,9 @@ export class BrowserRealtimeProcessPlane {
       });
       byPid.set(row.os_pid, list);
     }
+    const exactBound = this.#webContents.filter((row) => row.tab_id != null).length;
+    const liveRemote = this.#webContents.filter((row) => row.destroyed !== true).length;
+    const semantic = this.semanticSnapshot({ includeText: false, eventLimit: 64 });
     return Object.freeze({
       schema: BROWSER_REALTIME_PROCESS_PLANE_SCHEMA,
       running: this.#started,
@@ -415,13 +490,20 @@ export class BrowserRealtimeProcessPlane {
       sample_interval_ms: this.#sampleMs,
       process_count: this.#processes.length,
       web_contents_count: this.#webContents.length,
+      exact_tab_bound_web_contents_count: exactBound,
+      unbound_live_web_contents_count: Math.max(0, liveRemote - exactBound),
+      semantic_root_target_capacity: MAX_SEMANTIC_ROOT_TARGETS,
+      chromium_subtarget_count: Number(semantic?.chromium_subtarget_count || 0),
+      chromium_attached_subtarget_count: Number(semantic?.chromium_attached_subtarget_count || 0),
       processes: this.#processes.map((row) => ({ ...row, web_contents: byPid.get(row.pid) || [] })),
       web_contents: this.#webContents.map((row) => ({
         ...row,
         process_key: row.os_pid ? processKeyByPid.get(row.os_pid) || null : null,
       })),
-      semantic_plane: this.semanticSnapshot({ includeText: false, eventLimit: 64 }),
+      semantic_plane: semantic,
       semantic_plane_last_error: this.#semanticLastError,
+      main_event_loop_pressure: this.#mainLoopPressure.snapshot(),
+      browser_brain: this.brainSnapshot(),
       cognitive_delta_bus: this.#cognitiveBus.snapshot(),
       events: events.map((row) => ({ ...row })),
       dropped_events: this.#droppedEvents,
@@ -431,8 +513,15 @@ export class BrowserRealtimeProcessPlane {
       process_identity_source: 'ELECTRON_PROCESS_METRIC_PID_PLUS_CREATION_TIME',
       process_identity_pid_reuse_safe: true,
       renderer_identity_source: 'ELECTRON_WEB_CONTENTS_OS_PID_PLUS_PROCESS_METRIC_CREATION_TIME',
-      semantic_source: 'PERSISTENT_CDP_PAGE_DOM_ACCESSIBILITY_RUNTIME_NETWORK',
+      tab_identity_source: 'EXACT_WEBCONTENTS_TAB_INDEX_O1',
+      tab_identity_selected_fallback: false,
+      tab_identity_url_fallback: false,
+      semantic_source: 'PERSISTENT_CDP_PAGE_DOM_ACCESSIBILITY_RUNTIME_NETWORK_TARGET_AUTOATTACH',
       cognitive_delta_source: 'EXISTING_PROCESS_AND_SEMANTIC_EVENTS',
+      browser_brain_source: 'SAME_PROCESS_AND_SEMANTIC_EVENT_STREAM',
+      browser_brain_second_process_observer: false,
+      event_loop_pressure_source: 'NODE_ELU_PLUS_EXISTING_PROCESS_SAMPLER_DRIFT',
+      event_loop_pressure_dedicated_timer: false,
       cognitive_delta_second_scheduler: false,
       persistent_cdp_sessions: true,
       cdp_attach_per_command: false,

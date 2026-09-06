@@ -1,4 +1,5 @@
 export const NATIVE_SUPERVISOR_COMMAND_LANES_SCHEMA = 'metaengine.native-supervisor.command-lanes.v3';
+export const NATIVE_SUPERVISOR_COMMAND_PRESSURE_BUDGET_SCHEMA = 'metaengine.native-supervisor.command-pressure-budget.v1';
 
 export const COMMAND_LANES = Object.freeze({
   EMERGENCY: 'EMERGENCY',
@@ -32,6 +33,8 @@ const GLOBAL_MUTATION_ACTIONS = new Set([
 ]);
 
 const TAB_ID = /^tab_[0-9a-f-]{36}$/i;
+let processPressureBudget = null;
+let processPressureBudgetRevision = 0;
 
 function int(value, fallback, min, max) {
   const parsed = Number(value);
@@ -41,6 +44,10 @@ function int(value, fallback, min, max) {
 
 function actionOf(command) {
   return String(command?.action || '').trim().toUpperCase();
+}
+
+export function nativeActionRequiresExactTabTarget(action) {
+  return TAB_MUTATION_ACTIONS.has(String(action || '').trim().toUpperCase());
 }
 
 function emergency(command) {
@@ -58,6 +65,74 @@ function explicitTabId(command) {
 function tabCausalKey(command) {
   const tabId = explicitTabId(command);
   return tabId ? `tab:${tabId}` : null;
+}
+
+export function applyNativeSupervisorCommandPressureBudget({
+  read_concurrency,
+  mutation_concurrency,
+  pressure_band = 'UNKNOWN',
+  live_cells = null,
+} = {}) {
+  const readConcurrency = int(read_concurrency, 0, 1, 128);
+  const mutationConcurrency = int(mutation_concurrency, 0, 1, 32);
+  if (readConcurrency < 1 || mutationConcurrency < 1) {
+    throw new Error('native_supervisor_command_pressure_budget_invalid');
+  }
+  processPressureBudgetRevision += 1;
+  processPressureBudget = Object.freeze({
+    schema: NATIVE_SUPERVISOR_COMMAND_PRESSURE_BUDGET_SCHEMA,
+    revision: processPressureBudgetRevision,
+    pressure_band: String(pressure_band || 'UNKNOWN').slice(0, 32),
+    read_concurrency: readConcurrency,
+    mutation_concurrency: mutationConcurrency,
+    live_cells: Number.isSafeInteger(Number(live_cells)) ? Math.max(1, Math.min(512, Number(live_cells))) : null,
+    applied_at: new Date().toISOString(),
+    process_local: true,
+    contains_commands: false,
+    contains_leases: false,
+    scheduler_authority: false,
+    execution_authority: false,
+    authority_effect: false,
+  });
+  return processPressureBudget;
+}
+
+export function clearNativeSupervisorCommandPressureBudget() {
+  if (processPressureBudget == null) return false;
+  processPressureBudget = null;
+  processPressureBudgetRevision += 1;
+  return true;
+}
+
+export function nativeSupervisorCommandPressureBudgetSnapshot() {
+  return processPressureBudget
+    ? Object.freeze({ ...processPressureBudget })
+    : Object.freeze({
+        schema: NATIVE_SUPERVISOR_COMMAND_PRESSURE_BUDGET_SCHEMA,
+        revision: processPressureBudgetRevision,
+        pressure_band: null,
+        read_concurrency: null,
+        mutation_concurrency: null,
+        live_cells: null,
+        applied_at: null,
+        process_local: true,
+        contains_commands: false,
+        contains_leases: false,
+        scheduler_authority: false,
+        execution_authority: false,
+        authority_effect: false,
+      });
+}
+
+function effectiveConcurrency(configuredRead, configuredMutation) {
+  const pressure = processPressureBudget;
+  return Object.freeze({
+    read_concurrency: pressure?.read_concurrency ?? configuredRead,
+    mutation_concurrency: pressure?.mutation_concurrency ?? configuredMutation,
+    pressure_budget_revision: pressure?.revision ?? processPressureBudgetRevision,
+    pressure_band: pressure?.pressure_band ?? null,
+    pressure_budget_bound: pressure != null,
+  });
 }
 
 export function classifyNativeSupervisorCommand(command = {}) {
@@ -178,6 +253,10 @@ function buildPending(commands) {
  * immutable prefix ordinal with launched counters for that exact causal key.
  * This removes repeated full-batch scans from the command hot path while retaining
  * the proven read/mutation/global barrier semantics.
+ *
+ * The process-local pressure register contains only concurrency numbers. It is
+ * read at scheduling decisions so the one existing scheduler can adapt between
+ * batches without exposing the scheduler instance or creating a second queue.
  */
 export class NativeSupervisorCommandLaneScheduler {
   #readConcurrency;
@@ -191,10 +270,16 @@ export class NativeSupervisorCommandLaneScheduler {
   }
 
   snapshot() {
+    const effective = effectiveConcurrency(this.#readConcurrency, this.#mutationConcurrency);
     return Object.freeze({
       schema: NATIVE_SUPERVISOR_COMMAND_LANES_SCHEMA,
-      read_concurrency: this.#readConcurrency,
-      mutation_concurrency: this.#mutationConcurrency,
+      read_concurrency: effective.read_concurrency,
+      mutation_concurrency: effective.mutation_concurrency,
+      configured_read_concurrency: this.#readConcurrency,
+      configured_mutation_concurrency: this.#mutationConcurrency,
+      pressure_budget_bound: effective.pressure_budget_bound,
+      pressure_budget_revision: effective.pressure_budget_revision,
+      pressure_band: effective.pressure_band,
       max_batch: this.#maxBatch,
       unknown_actions_exclusive: true,
       implicit_selected_tab_exclusive: true,
@@ -210,6 +295,8 @@ export class NativeSupervisorCommandLaneScheduler {
       repeated_pending_causal_scan: false,
       pending_scan_bounded_by_max_batch: true,
       live_concurrency_tuning: true,
+      process_pressure_budget_register: true,
+      pressure_register_contains_commands: false,
       live_concurrency_tuning_changes_authority: false,
       authority_effect: false,
     });
@@ -322,6 +409,7 @@ export class NativeSupervisorCommandLaneScheduler {
       let launched = false;
       const firstExclusive = pending.find((item) => !item.descriptor.read_only && item.descriptor.exclusive) || null;
       const firstExclusiveOrder = firstExclusive?.index ?? null;
+      const effective = effectiveConcurrency(this.#readConcurrency, this.#mutationConcurrency);
 
       for (let i = 0; i < pending.length;) {
         const item = pending[i];
@@ -330,7 +418,7 @@ export class NativeSupervisorCommandLaneScheduler {
 
         if (descriptor.read_only) {
           const sameTargetMutationActive = descriptor.causal_key && activeMutationKeys.has(descriptor.causal_key);
-          runnable = activeReads < this.#readConcurrency
+          runnable = activeReads < effective.read_concurrency
             && !sameTargetMutationActive
             && !hasEarlierPendingMutationForRead(item);
         } else if (descriptor.exclusive) {
@@ -340,7 +428,7 @@ export class NativeSupervisorCommandLaneScheduler {
           const sameTargetReadActive = descriptor.causal_key && Number(activeReadKeys.get(descriptor.causal_key) || 0) > 0;
           runnable = !behindExclusiveBarrier
             && !exclusiveMutation
-            && activeMutations < this.#mutationConcurrency
+            && activeMutations < effective.mutation_concurrency
             && !activeMutationKeys.has(descriptor.effect_key)
             && !sameTargetReadActive
             && !hasEarlierPendingReadForMutation(item);
@@ -382,6 +470,8 @@ export const NATIVE_SUPERVISOR_COMMAND_LANE_CONTRACT = Object.freeze({
   causal_pending_lookup: 'O(1)',
   repeated_pending_causal_scan: false,
   live_concurrency_tuning: true,
+  process_pressure_budget_register: true,
+  pressure_register_contains_commands: false,
   live_concurrency_tuning_changes_authority: false,
   automatic_effect_retry_allowed: false,
   authority_effect: false,
