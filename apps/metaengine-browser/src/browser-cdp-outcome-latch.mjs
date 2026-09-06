@@ -84,7 +84,9 @@ export function openCdpOutcomeLatch({
   };
 
   const signal = (event) => {
-    if (settled || eventFilter(event) !== true) return false;
+    const syntheticPostDispatch = event?.method === 'METAENGINE.PostDispatch'
+      && event?.synthetic_post_dispatch === true;
+    if (settled || (!syntheticPostDispatch && eventFilter(event) !== true)) return false;
     signals += 1;
     if (inspectInFlight) inspectPending = true;
     else schedule(() => { void runInspection(); });
@@ -110,6 +112,8 @@ export function openCdpOutcomeLatch({
 
   // One race-closing observation after subscription. Further inspections are
   // exclusively event-triggered; the only timer is the bounded terminal deadline.
+  // Eventless test/local debugger shims may emit exactly one synthetic post-dispatch
+  // signal after a successful Input command; that is a readback edge, never polling.
   schedule(() => { void runInspection(); });
 
   return Object.freeze({
@@ -132,6 +136,7 @@ export function openCdpOutcomeLatch({
         last_error: lastError,
         event_driven: true,
         initial_race_closing_read: true,
+        synthetic_post_dispatch_signal_allowed: true,
         poll_timer_required: false,
         deadline_timer_only: true,
         command_leasing: false,
@@ -141,6 +146,7 @@ export function openCdpOutcomeLatch({
       });
     },
     event_driven: true,
+    synthetic_post_dispatch_signal_allowed: true,
     poll_timer_required: false,
     deadline_timer_only: true,
     execution_authority: false,
