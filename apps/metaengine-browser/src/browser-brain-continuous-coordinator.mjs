@@ -2,9 +2,10 @@ import { BrowserBrainRealtimeObservationBridge } from './browser-brain-realtime-
 import { BrowserBrainAdaptiveFanoutRuntime } from './browser-brain-adaptive-fanout-runtime.mjs';
 import { BrowserBrainRealtimePressureBridge } from './browser-brain-realtime-pressure-bridge.mjs';
 import { BrowserControlPressureGovernor } from './browser-control-pressure-governor.mjs';
+import { BrowserBrainCognitionFabric } from './browser-brain-cognition-fabric.mjs';
 import { applyNativeSupervisorCommandPressureBudget } from './native-supervisor-command-lanes.mjs';
 
-export const BROWSER_BRAIN_CONTINUOUS_COORDINATOR_SCHEMA = 'metaengine.browser-brain.continuous-coordinator.v1';
+export const BROWSER_BRAIN_CONTINUOUS_COORDINATOR_SCHEMA = 'metaengine.browser-brain.continuous-coordinator.v2';
 
 const PRESSURE_RELEVANT_EVENTS = new Set([
   'METRICS_SAMPLE',
@@ -16,6 +17,7 @@ const PRESSURE_RELEVANT_EVENTS = new Set([
   'RENDER_PROCESS_GONE',
   'CHILD_PROCESS_GONE',
 ]);
+const CANONICAL_RESYNC_EVENTS = new Set(['METRICS_SAMPLE', 'PROCESS_CENSUS_REFRESHED']);
 
 function validProcessSnapshot(snapshot) {
   return snapshot?.schema === 'metaengine.browser.realtime-process-plane.v1';
@@ -36,6 +38,15 @@ function coverage(snapshot = {}) {
     lifecycle_event_driven: snapshot.event_driven_lifecycle === true,
     resource_sampling_is_authority: false,
     authority_effect: false,
+  });
+}
+
+function producerSequences(snapshot = {}) {
+  const process = Number(snapshot?.sequence);
+  const semantic = Number(snapshot?.semantic_plane?.sequence);
+  return Object.freeze({
+    process_sequence: Number.isSafeInteger(process) && process >= 0 ? process : null,
+    semantic_sequence: Number.isSafeInteger(semantic) && semantic >= 0 ? semantic : null,
   });
 }
 
@@ -84,32 +95,38 @@ function sameCommandBudget(a, b) {
  *
  * The caller owns the existing process/semantic event source and the existing
  * command scheduler. This class only connects those proven surfaces:
- *   realtime process/semantic edge -> exact binding + bounded memory
+ *   realtime process/semantic edge -> causal clock + bounded cognition + exact binding + bounded memory
  *   resource/lifecycle edge         -> adaptive pressure state
- *   pressure state                  -> numeric admission register consumed by the
- *                                      ONE existing command-lane scheduler
- *   already leased mutation batch   -> independent BrowserCell fan-out, but only
- *                                      when an explicit test/runtime adapter is bound
+ *   pressure state                  -> numeric admission register consumed by the ONE existing command-lane scheduler
+ *   already leased mutation batch   -> independent BrowserCell fan-out, but only when an explicit test/runtime adapter is bound
  *
- * It intentionally owns no timer, DB lease, hidden queue, retry loop, or
- * physical Browser implementation. Observation runs on every edge. Pressure is
- * deliberately not recomputed for each semantic/CDP burst because those events do
- * not change the resource/liveness sample; this keeps the hottest cognition path
- * allocation-light while crash/unresponsive/process changes remain immediate.
+ * Cognition remains advisory. Cached semantic plans carry no payload or Browser
+ * authority, are generation-scoped, and must be freshly revalidated before use.
+ * Gaps in a producer sequence disable cache reuse until a canonical process /
+ * semantic snapshot supplies an explicit resync point.
+ *
+ * It intentionally owns no timer, DB lease, hidden queue, retry loop, or physical
+ * Browser implementation. Observation runs on every edge. Pressure is deliberately
+ * not recomputed for each semantic/CDP burst because those events do not change the
+ * resource/liveness sample; this keeps the hottest cognition path allocation-light
+ * while crash/unresponsive/process changes remain immediate.
  */
 export class BrowserBrainContinuousCoordinator {
   #observation;
   #adaptive;
   #pressure;
+  #cognition;
   #lastProcessSnapshot = null;
   #lastCoverage = coverage();
   #lastPressureResult = null;
   #lastAppliedCommandBudget = null;
+  #lastCognitionResult = null;
   #edgeCount = 0;
   #pressureEvaluationCount = 0;
   #pressureReuseCount = 0;
   #commandBudgetApplyCount = 0;
   #reconcileCount = 0;
+  #cognitionResyncCount = 0;
   #lastEvent = null;
 
   constructor({
@@ -119,11 +136,13 @@ export class BrowserBrainContinuousCoordinator {
     adaptiveRuntime = null,
     pressureBridge = null,
     pressureGovernor = null,
+    cognitionFabric = null,
     getExtraPressureSample = null,
     clock = () => Date.now(),
     hardBatchLimit = 128,
   } = {}) {
     this.#observation = observationBridge || new BrowserBrainRealtimeObservationBridge();
+    this.#cognition = cognitionFabric || new BrowserBrainCognitionFabric({ clock });
     const canBindAdaptive = adaptiveRuntime != null
       || (scheduler != null && typeof executeRuntimeFenced === 'function');
     this.#adaptive = adaptiveRuntime || (canBindAdaptive
@@ -153,6 +172,13 @@ export class BrowserBrainContinuousCoordinator {
     if (typeof this.#pressure.observe !== 'function') {
       throw new Error('browser_brain_continuous_pressure_bridge_invalid');
     }
+    if (
+      typeof this.#cognition.observeEdge !== 'function'
+      || typeof this.#cognition.reconcileProducerSequences !== 'function'
+      || typeof this.#cognition.snapshot !== 'function'
+    ) {
+      throw new Error('browser_brain_continuous_cognition_fabric_invalid');
+    }
   }
 
   #evaluatePressure(processSnapshot) {
@@ -166,6 +192,12 @@ export class BrowserBrainContinuousCoordinator {
     return this.#lastPressureResult;
   }
 
+  #resyncCognition(processSnapshot) {
+    const result = this.#cognition.reconcileProducerSequences(producerSequences(processSnapshot));
+    if (result.length > 0) this.#cognitionResyncCount += 1;
+    return result;
+  }
+
   reconcile(processSnapshot, { tabs = [], cell_by_tab = null } = {}) {
     if (!validProcessSnapshot(processSnapshot)) {
       throw new Error('browser_brain_continuous_process_snapshot_invalid');
@@ -173,6 +205,7 @@ export class BrowserBrainContinuousCoordinator {
     this.#lastProcessSnapshot = processSnapshot;
     this.#lastCoverage = coverage(processSnapshot);
     this.#observation.reconcile(processSnapshot, { tabs, cell_by_tab });
+    this.#resyncCognition(processSnapshot);
     this.#evaluatePressure(processSnapshot);
     this.#reconcileCount += 1;
     return this.snapshot();
@@ -185,12 +218,21 @@ export class BrowserBrainContinuousCoordinator {
     }
     this.#lastProcessSnapshot = snapshot;
     this.#lastCoverage = coverage(snapshot);
+    this.#lastCognitionResult = this.#cognition.observeEdge(event);
     const observed = this.#observation.observe(event, {
       process_snapshot: snapshot,
       tabs,
       cell_by_tab,
     });
     const type = String(event?.type || 'UNKNOWN').toUpperCase();
+    if (this.#lastCognitionResult?.resync_required === true && CANONICAL_RESYNC_EVENTS.has(type)) {
+      this.#resyncCognition(snapshot);
+      this.#lastCognitionResult = Object.freeze({
+        ...this.#lastCognitionResult,
+        canonical_resync_applied: true,
+        authority_effect: false,
+      });
+    }
     const pressureEvaluated = this.#lastPressureResult == null || PRESSURE_RELEVANT_EVENTS.has(type);
     const pressure = pressureEvaluated
       ? this.#evaluatePressure(snapshot)
@@ -205,7 +247,8 @@ export class BrowserBrainContinuousCoordinator {
       authority_effect: false,
     });
     return Object.freeze({
-      schema: 'metaengine.browser-brain.continuous-edge-result.v1',
+      schema: 'metaengine.browser-brain.continuous-edge-result.v2',
+      cognition: this.#lastCognitionResult,
       observation: observed,
       pressure,
       pressure_evaluated: pressureEvaluated,
@@ -243,6 +286,30 @@ export class BrowserBrainContinuousCoordinator {
     return this.#observation.checkpoint();
   }
 
+  rememberAdvisoryPlan(plan) {
+    return this.#cognition.rememberPlan(plan);
+  }
+
+  resolveAdvisoryPlan(query) {
+    return this.#cognition.resolvePlan(query);
+  }
+
+  observeAgent(agent) {
+    return this.#cognition.observeAgent(agent);
+  }
+
+  routeAgents(query) {
+    return this.#cognition.routeAgents(query);
+  }
+
+  recordEvidence(evidence) {
+    return this.#cognition.recordEvidence(evidence);
+  }
+
+  cognitionSnapshot() {
+    return this.#cognition.snapshot();
+  }
+
   snapshot() {
     return Object.freeze({
       schema: BROWSER_BRAIN_CONTINUOUS_COORDINATOR_SCHEMA,
@@ -251,21 +318,26 @@ export class BrowserBrainContinuousCoordinator {
       pressure_evaluation_count: this.#pressureEvaluationCount,
       pressure_reuse_count: this.#pressureReuseCount,
       command_budget_apply_count: this.#commandBudgetApplyCount,
+      cognition_resync_count: this.#cognitionResyncCount,
       semantic_edges_reuse_pressure: true,
       last_event: this.#lastEvent,
       coverage: this.#lastCoverage,
+      cognition_fabric: this.#cognition.snapshot(),
       observation: this.#observation.snapshot(),
       adaptive_fanout: this.#adaptive?.snapshot?.() || unboundAdaptiveSnapshot(),
       pressure: this.#pressure.snapshot(),
       pressure_budget: this.pressureBudget(),
       command_lane_pressure_budget: this.#lastAppliedCommandBudget,
       command_lane_pressure_register_bound: this.#lastAppliedCommandBudget != null,
-      hot_path: 'REALTIME_EDGE_TO_MEMORY_AND_PRESSURE_TO_EXISTING_COMMAND_LANES',
+      hot_path: 'REALTIME_EDGE_TO_CAUSAL_COGNITION_MEMORY_AND_PRESSURE_TO_EXISTING_COMMAND_LANES',
       mutation_path: this.#adaptive
         ? 'DB_LEASED_BATCH_TO_RUNTIME_FENCED_INDEPENDENT_BROWSER_CELLS'
         : 'EXISTING_NATIVE_SUPERVISOR_COMMAND_LANES_ONLY',
+      cognition_path: 'REAL_PRODUCER_SEQUENCE_TO_BOUNDED_ADVISORY_FABRIC',
       mutation_runtime_bound: this.#adaptive != null,
       exact_tab_binding_required_for_mutation: true,
+      semantic_plan_revalidation_required: true,
+      page_model_data_grants_authority: false,
       full_electron_process_visibility: true,
       os_global_process_visibility: false,
       bounded_memory: true,
