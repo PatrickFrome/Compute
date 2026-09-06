@@ -5,6 +5,17 @@ import { BrowserControlPressureGovernor } from './browser-control-pressure-gover
 
 export const BROWSER_BRAIN_CONTINUOUS_COORDINATOR_SCHEMA = 'metaengine.browser-brain.continuous-coordinator.v1';
 
+const PRESSURE_RELEVANT_EVENTS = new Set([
+  'METRICS_SAMPLE',
+  'PROCESS_CENSUS_REFRESHED',
+  'WEB_CONTENTS_CREATED',
+  'WEB_CONTENTS_DESTROYED',
+  'WEB_CONTENTS_UNRESPONSIVE',
+  'WEB_CONTENTS_RESPONSIVE',
+  'RENDER_PROCESS_GONE',
+  'CHILD_PROCESS_GONE',
+]);
+
 function validProcessSnapshot(snapshot) {
   return snapshot?.schema === 'metaengine.browser.realtime-process-plane.v1';
 }
@@ -41,20 +52,39 @@ function unboundAdaptiveSnapshot() {
   });
 }
 
+function pressureBudgetProjection(result) {
+  const budget = result?.budget;
+  if (!budget || typeof budget !== 'object') return null;
+  const read = Number(budget.read_concurrency);
+  const mutation = Number(budget.mutation_concurrency);
+  if (!Number.isSafeInteger(read) || read < 1 || !Number.isSafeInteger(mutation) || mutation < 1) return null;
+  return Object.freeze({
+    pressure_band: String(budget.pressure_band || 'UNKNOWN').slice(0, 32),
+    read_concurrency: read,
+    mutation_concurrency: mutation,
+    resource_sample_ms: Number.isSafeInteger(Number(budget.resource_sample_ms)) ? Number(budget.resource_sample_ms) : null,
+    live_cells: Number.isSafeInteger(Number(budget.live_cells)) ? Number(budget.live_cells) : null,
+    scheduler_authority: false,
+    execution_authority: false,
+    authority_effect: false,
+  });
+}
+
 /**
  * Zero-scheduler composition layer for the always-on Browser Brain.
  *
  * The caller owns the existing process/semantic event source and the existing
  * command scheduler. This class only connects those proven surfaces:
  *   realtime process/semantic edge -> exact binding + bounded memory
- *   same process snapshot            -> adaptive pressure state
- *   already leased mutation batch    -> independent BrowserCell fan-out, but only
- *                                        when the EXISTING scheduler/executor are bound
+ *   resource/lifecycle edge         -> adaptive pressure state
+ *   already leased mutation batch  -> independent BrowserCell fan-out, but only
+ *                                       when the EXISTING scheduler/executor are bound
  *
  * It intentionally owns no timer, DB lease, hidden queue, retry loop, or
- * physical Browser implementation. Observation/pressure may run continuously even
- * before the existing scheduler is explicitly exported; mutation dispatch then
- * fails closed instead of manufacturing a second scheduler.
+ * physical Browser implementation. Observation runs on every edge. Pressure is
+ * deliberately not recomputed for each semantic/CDP burst because those events do
+ * not change the resource/liveness sample; this keeps the hottest cognition path
+ * allocation-light while crash/unresponsive/process changes remain immediate.
  */
 export class BrowserBrainContinuousCoordinator {
   #observation;
@@ -62,7 +92,10 @@ export class BrowserBrainContinuousCoordinator {
   #pressure;
   #lastProcessSnapshot = null;
   #lastCoverage = coverage();
+  #lastPressureResult = null;
   #edgeCount = 0;
+  #pressureEvaluationCount = 0;
+  #pressureReuseCount = 0;
   #reconcileCount = 0;
   #lastEvent = null;
 
@@ -109,6 +142,12 @@ export class BrowserBrainContinuousCoordinator {
     }
   }
 
+  #evaluatePressure(processSnapshot) {
+    this.#lastPressureResult = this.#pressure.observe(processSnapshot);
+    this.#pressureEvaluationCount += 1;
+    return this.#lastPressureResult;
+  }
+
   reconcile(processSnapshot, { tabs = [], cell_by_tab = null } = {}) {
     if (!validProcessSnapshot(processSnapshot)) {
       throw new Error('browser_brain_continuous_process_snapshot_invalid');
@@ -116,7 +155,7 @@ export class BrowserBrainContinuousCoordinator {
     this.#lastProcessSnapshot = processSnapshot;
     this.#lastCoverage = coverage(processSnapshot);
     this.#observation.reconcile(processSnapshot, { tabs, cell_by_tab });
-    this.#pressure.observe(processSnapshot);
+    this.#evaluatePressure(processSnapshot);
     this.#reconcileCount += 1;
     return this.snapshot();
   }
@@ -133,11 +172,16 @@ export class BrowserBrainContinuousCoordinator {
       tabs,
       cell_by_tab,
     });
-    const pressure = this.#pressure.observe(snapshot);
+    const type = String(event?.type || 'UNKNOWN').toUpperCase();
+    const pressureEvaluated = this.#lastPressureResult == null || PRESSURE_RELEVANT_EVENTS.has(type);
+    const pressure = pressureEvaluated
+      ? this.#evaluatePressure(snapshot)
+      : this.#lastPressureResult;
+    if (!pressureEvaluated) this.#pressureReuseCount += 1;
     this.#edgeCount += 1;
     this.#lastEvent = Object.freeze({
       seq: Number.isSafeInteger(Number(event?.seq)) ? Number(event.seq) : null,
-      type: String(event?.type || 'UNKNOWN').slice(0, 96),
+      type: type.slice(0, 96),
       tab_id: event?.tab_id ? String(event.tab_id).slice(0, 96) : null,
       observed_at: event?.observed_at ? String(event.observed_at).slice(0, 64) : null,
       authority_effect: false,
@@ -146,12 +190,17 @@ export class BrowserBrainContinuousCoordinator {
       schema: 'metaengine.browser-brain.continuous-edge-result.v1',
       observation: observed,
       pressure,
+      pressure_evaluated: pressureEvaluated,
       coverage: this.#lastCoverage,
       mutation_runtime_bound: this.#adaptive != null,
       scheduler_authority: false,
       command_leasing: false,
       authority_effect: false,
     });
+  }
+
+  pressureBudget() {
+    return pressureBudgetProjection(this.#lastPressureResult);
   }
 
   dispatchMutations(commands, options = {}) {
@@ -180,11 +229,15 @@ export class BrowserBrainContinuousCoordinator {
       schema: BROWSER_BRAIN_CONTINUOUS_COORDINATOR_SCHEMA,
       edge_count: this.#edgeCount,
       reconcile_count: this.#reconcileCount,
+      pressure_evaluation_count: this.#pressureEvaluationCount,
+      pressure_reuse_count: this.#pressureReuseCount,
+      semantic_edges_reuse_pressure: true,
       last_event: this.#lastEvent,
       coverage: this.#lastCoverage,
       observation: this.#observation.snapshot(),
       adaptive_fanout: this.#adaptive?.snapshot?.() || unboundAdaptiveSnapshot(),
       pressure: this.#pressure.snapshot(),
+      pressure_budget: this.pressureBudget(),
       hot_path: 'REALTIME_EDGE_TO_MEMORY_AND_PRESSURE_TO_EXISTING_SCHEDULER_WHEN_BOUND',
       mutation_path: this.#adaptive
         ? 'DB_LEASED_BATCH_TO_RUNTIME_FENCED_INDEPENDENT_BROWSER_CELLS'
