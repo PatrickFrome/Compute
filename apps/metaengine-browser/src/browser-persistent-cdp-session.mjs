@@ -37,6 +37,8 @@ function rowProjection(row) {
     attached: row.dbg?.isAttached?.() === true,
     ready: row.ready === true,
     attachment_generation: row.attachmentGeneration,
+    document_generation: row.documentGeneration,
+    binding_generation: row.bindingGeneration,
     attached_at: row.attachedAt,
     last_event_at: row.lastEventAt,
     last_detach_reason: row.lastDetachReason,
@@ -80,6 +82,8 @@ export class PersistentBrowserCdpSessionPool {
       ready: false,
       attachedByPool: false,
       attachmentGeneration: 0,
+      documentGeneration: 1,
+      bindingGeneration: 0,
       attachedAt: null,
       lastEventAt: null,
       lastDetachReason: null,
@@ -91,13 +95,20 @@ export class PersistentBrowserCdpSessionPool {
     };
 
     row.messageHandler = (_event, method, params = {}, sessionId = null) => {
+      const name = clip(method, 160);
       row.lastEventAt = new Date().toISOString();
+      if (name === 'DOM.documentUpdated' || (name === 'Page.frameNavigated' && !params?.frame?.parentId)) {
+        row.documentGeneration += 1;
+        row.bindingGeneration += 1;
+      }
       const envelope = Object.freeze({
         schema: 'metaengine.browser.cdp-event.v1',
         web_contents_id: row.id,
         target_id: row.targetId,
         attachment_generation: row.attachmentGeneration,
-        method: clip(method, 160),
+        document_generation: row.documentGeneration,
+        binding_generation: row.bindingGeneration,
+        method: name,
         params,
         session_id: sessionId ? clip(sessionId, 160) : null,
         observed_at: row.lastEventAt,
@@ -111,6 +122,7 @@ export class PersistentBrowserCdpSessionPool {
     row.detachHandler = (_event, reason) => {
       row.ready = false;
       row.attachedByPool = false;
+      row.bindingGeneration += 1;
       row.lastDetachReason = clip(reason || 'UNKNOWN', 160);
       row.lastEventAt = new Date().toISOString();
       for (const subscriber of [...row.subscribers]) {
@@ -120,6 +132,8 @@ export class PersistentBrowserCdpSessionPool {
             web_contents_id: row.id,
             target_id: row.targetId,
             attachment_generation: row.attachmentGeneration,
+            document_generation: row.documentGeneration,
+            binding_generation: row.bindingGeneration,
             method: 'METAENGINE.DebuggerDetached',
             params: { reason: row.lastDetachReason },
             session_id: null,
@@ -156,9 +170,6 @@ export class PersistentBrowserCdpSessionPool {
       row.attachedByPool = true;
     }
 
-    // Keep the domains hot for the lifetime of the WebContents. Required domains
-    // fail closed; Network telemetry is useful but may be unavailable on some
-    // Chromium targets, so only that optional enable is fail-soft.
     await row.dbg.sendCommand('Page.enable');
     await row.dbg.sendCommand('DOM.enable');
     await row.dbg.sendCommand('Accessibility.enable');
@@ -167,8 +178,10 @@ export class PersistentBrowserCdpSessionPool {
     await row.dbg.sendCommand('Network.enable').catch(() => null);
     await row.dbg.sendCommand('DOM.getDocument', { depth: 1, pierce: true }).catch(() => null);
 
+    row.targetId = targetIdOf(row.webContents);
     row.ready = true;
     row.attachmentGeneration += 1;
+    row.bindingGeneration += 1;
     row.attachedAt = new Date().toISOString();
     row.lastDetachReason = null;
     row.lastError = null;
@@ -187,6 +200,17 @@ export class PersistentBrowserCdpSessionPool {
       })
       .finally(() => { row.ensurePromise = null; });
     return row.ensurePromise;
+  }
+
+  identity(webContents, { require_ready = true } = {}) {
+    if (!liveWebContents(webContents)) return null;
+    let id;
+    try { id = exactId(webContents); } catch { return null; }
+    const row = this.#rows.get(id);
+    if (!row || row.webContents !== webContents) return null;
+    const projection = rowProjection(row);
+    if (require_ready && (projection.ready !== true || projection.attached !== true)) return null;
+    return projection;
   }
 
   subscribe(webContents, listener) {
@@ -238,6 +262,8 @@ export class PersistentBrowserCdpSessionPool {
       sessions,
       attach_per_command: false,
       persistent_transport: true,
+      binding_generation_event_driven: true,
+      document_generation_event_driven: true,
       raw_cdp_passthrough: false,
       control_authority: false,
       command_leasing: false,
@@ -254,8 +280,16 @@ export async function withPersistentBrowserDebugger(webContents, fn) {
   await nativeBrowserCdpPool.ensure(webContents);
   const adapter = Object.freeze({
     sendCommand: (method, params = {}, sessionId = null) => nativeBrowserCdpPool.send(webContents, method, params, sessionId),
+    bindingIdentity: () => nativeBrowserCdpPool.identity(webContents, { require_ready: true }),
   });
   return fn(adapter);
+}
+
+export async function persistentBrowserDebuggerBinding(webContents) {
+  await nativeBrowserCdpPool.ensure(webContents);
+  const identity = nativeBrowserCdpPool.identity(webContents, { require_ready: true });
+  if (!identity) throw new Error('persistent_cdp_binding_identity_unavailable');
+  return identity;
 }
 
 export function releasePersistentBrowserDebugger(webContents) {
