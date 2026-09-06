@@ -299,6 +299,7 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
         tab_id: tabId,
         target_id: frame.target_id,
         observed_at: frame.captured_at || new Date().toISOString(),
+        runtime_observation_id: frame.runtime_observation_id || null,
       };
     });
 
@@ -312,6 +313,7 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
         tabId: observed?.tab_id,
         targetId: observed?.target_id,
         observedAt: observed?.observed_at,
+        runtimeObservationId: observed?.runtime_observation_id || null,
       });
       const response = await signedRequest(`/v1/commands/${encodeURIComponent(command.command_id)}/effect-intent`, {
         payload: { binding },
@@ -488,7 +490,7 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
         command_lease_precedes_idle_work: true,
         authority_effect: false,
       },
-      generic_tab_effect_binding: 'SIGNED_DB_COMMAND_INTENT_V1',
+      generic_tab_effect_binding: 'SIGNED_DB_COMMAND_INTENT_V1_V2_RUNTIME_FENCE',
       supervisor_mesh_wire_projection: 'LOCAL_V2_TO_LIVE_V1_BOUNDED_16',
       bounded_read_deadline_ms: DEFAULT_REQUEST_DEADLINE_MS,
       command_result_timeout_disabled_until_ambiguous_receipt_readback: true,

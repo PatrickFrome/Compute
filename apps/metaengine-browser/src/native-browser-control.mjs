@@ -5,6 +5,10 @@ import {
   assertNativeEffectBindingMatches,
   nativeActionRequiresEffectBinding,
 } from './native-effect-binding.mjs';
+import {
+  assertNativeEffectRuntimeBindingCurrent,
+  recordNativeEffectRuntimeObservation,
+} from './native-effect-runtime-observation.mjs';
 
 const SAFE_ROLES = new Set(['textbox','searchbox','combobox','button','checkbox','radio','switch','tab','menuitem','link']);
 const TEXT_INPUT_ROLES = new Set(['textbox','searchbox','combobox']);
@@ -131,12 +135,34 @@ export async function captureSemanticFrame(webContents) {
     ]);
     const nodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
     const viewport = metrics?.cssVisualViewport || metrics?.visualViewport || null;
+    const capturedAt = new Date().toISOString();
+    const url = clip(webContents.getURL?.() || '', 1200);
+    const runtime = dbg.bindingIdentity?.() || null;
+    let runtimeObservation = null;
+    if (runtime) {
+      try {
+        runtimeObservation = recordNativeEffectRuntimeObservation({
+          process_incarnation_id: identity.process_incarnation_id,
+          target_id: identity.target_id,
+          observed_at: capturedAt,
+          document_url_sha256: sha256(url),
+          runtime_binding: {
+            web_contents_id: runtime.web_contents_id,
+            renderer_pid: runtime.os_pid,
+            runtime_target_id: runtime.target_id,
+            attachment_generation: runtime.attachment_generation,
+            document_generation: runtime.document_generation,
+            binding_generation: runtime.binding_generation,
+          },
+        });
+      } catch {}
+    }
     return {
       schema: 'metaengine.native-browser.perception.v1',
-      captured_at: new Date().toISOString(),
+      captured_at: capturedAt,
       process_incarnation_id: identity.process_incarnation_id,
       target_id: identity.target_id,
-      url: clip(webContents.getURL?.() || '', 1200),
+      url,
       title: clip(webContents.getTitle?.() || '', 240),
       semantic_targets: uniqueSemanticTargets(nodes),
       semantic_input_values_exposed: false,
@@ -149,6 +175,10 @@ export async function captureSemanticFrame(webContents) {
         page_y: Number(viewport.pageY || 0),
         scale: Number(viewport.scale || 1),
       } : null,
+      runtime_binding_observed: runtimeObservation != null,
+      runtime_observation_id: runtimeObservation?.observation_id || null,
+      runtime_binding_generation: runtimeObservation?.runtime_binding?.binding_generation || null,
+      runtime_document_generation: runtimeObservation?.runtime_binding?.document_generation || null,
       authority_effect: false,
     };
   });
@@ -164,7 +194,7 @@ async function exactTarget(dbg, roleRaw, nameRaw) {
   return matches[0];
 }
 
-async function clickBackendNode(dbg, backendNodeId) {
+async function clickBackendNode(dbg, backendNodeId, beforeDispatch = null) {
   const model = await dbg.sendCommand('DOM.getBoxModel', { backendNodeId });
   const quad = model?.model?.content || model?.model?.border;
   if (!Array.isArray(quad) || quad.length < 8) throw new Error('native_semantic_box_unavailable');
@@ -172,26 +202,48 @@ async function clickBackendNode(dbg, backendNodeId) {
   const ys = [quad[1],quad[3],quad[5],quad[7]].map(Number);
   const x = xs.reduce((a,b)=>a+b,0) / xs.length;
   const y = ys.reduce((a,b)=>a+b,0) / ys.length;
+  beforeDispatch?.();
   await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mouseMoved', x, y, button:'none' });
   await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mousePressed', x, y, button:'left', clickCount:1 });
   await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mouseReleased', x, y, button:'left', clickCount:1 });
   return { x, y };
 }
 
+function assertCurrentEffectRuntime(webContents, dbg, binding) {
+  if (binding?.schema !== 'metaengine.native-supervisor.effect-binding.v2') return;
+  const runtime = dbg.bindingIdentity?.();
+  if (!runtime) throw new Error('native_effect_runtime_binding_current_unavailable');
+  assertNativeEffectRuntimeBindingCurrent({
+    binding,
+    document_url_sha256: sha256(clip(webContents.getURL?.() || '', 1200)),
+    runtime_binding: {
+      web_contents_id: runtime.web_contents_id,
+      renderer_pid: runtime.os_pid,
+      runtime_target_id: runtime.target_id,
+      attachment_generation: runtime.attachment_generation,
+      document_generation: runtime.document_generation,
+      binding_generation: runtime.binding_generation,
+    },
+  });
+}
+
 export async function executeSemanticCommand(webContents, command) {
   const action = String(command?.action || '');
   const localIdentity = nativeBrowserTargetIdentity(webContents);
-  if (command?.command_id && nativeActionRequiresEffectBinding(action)) {
-    assertNativeEffectBindingMatches({
-      command,
-      binding: command?.effect_binding,
-      clientId: command?.effect_binding?.client_id,
-      processIncarnationId: localIdentity.process_incarnation_id,
-      tabId: command?.payload?.tab_id,
-      targetId: localIdentity.target_id,
-    });
-  }
   return withDebugger(webContents, async (dbg) => {
+    let effectBinding = null;
+    if (command?.command_id && nativeActionRequiresEffectBinding(action)) {
+      effectBinding = assertNativeEffectBindingMatches({
+        command,
+        binding: command?.effect_binding,
+        clientId: command?.effect_binding?.client_id,
+        processIncarnationId: localIdentity.process_incarnation_id,
+        tabId: command?.payload?.tab_id,
+        targetId: localIdentity.target_id,
+      });
+      assertCurrentEffectRuntime(webContents, dbg, effectBinding);
+    }
+
     if (action === 'SCROLL') {
       const metrics = await dbg.sendCommand('Page.getLayoutMetrics');
       const vp = metrics?.cssVisualViewport || metrics?.visualViewport || {};
@@ -199,6 +251,7 @@ export async function executeSemanticCommand(webContents, command) {
       const y = Math.max(1, Number(vp.clientHeight || vp.height || 600) / 2);
       const deltaY = Math.max(-4000, Math.min(4000, Number(command?.payload?.delta_y || 0)));
       if (!deltaY) throw new Error('native_scroll_delta_invalid');
+      assertCurrentEffectRuntime(webContents, dbg, effectBinding);
       await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mouseWheel', x, y, deltaX:0, deltaY });
       return { action, delta_y: deltaY, authority_effect: true };
     }
@@ -207,7 +260,7 @@ export async function executeSemanticCommand(webContents, command) {
       const tree = await dbg.sendCommand('Accessibility.getFullAXTree');
       const targets = exactChatGptControls(tree?.nodes || [], 'STOP');
       if (targets.length !== 1) throw new Error(targets.length ? `native_stop_target_ambiguous:${targets.length}` : 'native_stop_target_not_found');
-      const point = await clickBackendNode(dbg, targets[0].backend_node_id);
+      const point = await clickBackendNode(dbg, targets[0].backend_node_id, () => assertCurrentEffectRuntime(webContents, dbg, effectBinding));
       return { action, target: targets[0], point, authority_effect: true };
     }
 
@@ -216,12 +269,13 @@ export async function executeSemanticCommand(webContents, command) {
     const target = await exactTarget(dbg, role, name);
 
     if (action === 'SEMANTIC_FOCUS') {
+      assertCurrentEffectRuntime(webContents, dbg, effectBinding);
       await dbg.sendCommand('DOM.focus', { backendNodeId: target.backend_node_id });
       return { action, target, authority_effect: true };
     }
 
     if (action === 'TYPED_CLICK') {
-      const point = await clickBackendNode(dbg, target.backend_node_id);
+      const point = await clickBackendNode(dbg, target.backend_node_id, () => assertCurrentEffectRuntime(webContents, dbg, effectBinding));
       return { action, target, point, authority_effect: true };
     }
 
@@ -231,11 +285,14 @@ export async function executeSemanticCommand(webContents, command) {
       const submitAfterType = command?.payload?.submit_after_type === true;
       if (submitAfterType && !isExactChatGptComposer(target, command)) throw new Error('native_semantic_submit_requires_exact_chatgpt_composer');
       const preUrl = clip(webContents.getURL?.() || '', 1200);
+      assertCurrentEffectRuntime(webContents, dbg, effectBinding);
       await dbg.sendCommand('DOM.focus', { backendNodeId: target.backend_node_id });
       if (command?.payload?.replace_existing !== false) {
+        assertCurrentEffectRuntime(webContents, dbg, effectBinding);
         await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'a', code:'KeyA', modifiers:2 });
         await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'a', code:'KeyA', modifiers:2 });
       }
+      assertCurrentEffectRuntime(webContents, dbg, effectBinding);
       await dbg.sendCommand('Input.insertText', { text });
       if (!submitAfterType) {
         return { action, target, inserted_chars: text.length, replace_existing: command?.payload?.replace_existing !== false, prompt_sha256: sha256(text), prompt_included: false, authority_effect: true };
@@ -244,6 +301,7 @@ export async function executeSemanticCommand(webContents, command) {
       const readyTree = await dbg.sendCommand('Accessibility.getFullAXTree');
       const sendTargets = exactChatGptControls(readyTree?.nodes || [], 'SEND');
       if (sendTargets.length !== 1) throw new Error(sendTargets.length ? `native_semantic_send_target_ambiguous:${sendTargets.length}` : 'native_semantic_send_target_not_found');
+      assertCurrentEffectRuntime(webContents, dbg, effectBinding);
       await dbg.sendCommand('Input.dispatchKeyEvent', {
         type:'rawKeyDown', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, nativeVirtualKeyCode:13,
       });
