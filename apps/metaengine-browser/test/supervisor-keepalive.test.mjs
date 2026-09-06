@@ -132,17 +132,23 @@ test('fixed cycle budgets are ignored and useful supervisor work remains uncappe
   assert.equal(h.keepalive.snapshot().automatic_rollover_cycle_limit_enabled, false);
 });
 
-test('observed conversation limit automatically releases rollover so continuity does not wait for a user', async () => {
+test('page-observed conversation limit only defers rollover; trusted machine release proceeds without a user', async () => {
   const h = harness();
   await h.keepalive.init();
   await h.keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
   await h.keepalive.requestRollover('CHATGPT_CONVERSATION_LIMIT_HINT');
-  const snapshot = h.keepalive.snapshot();
+  let snapshot = h.keepalive.snapshot();
+  assert.equal(snapshot.state, 'ROLLOVER_DEFERRED');
+  assert.equal(snapshot.rollover_release_at, null);
+  await assert.rejects(() => h.keepalive.beginRolloverAttempt(), /keepalive_rollover_not_released/);
+
+  await h.keepalive.approveRollover('TRUSTED_CONTINUOUS_SERVICE');
+  snapshot = h.keepalive.snapshot();
   assert.equal(snapshot.state, 'ROLLOVER_REQUIRED');
-  assert.match(snapshot.rollover_reason, /TRUSTED_ENVIRONMENT_LIMIT/);
   assert.ok(snapshot.rollover_release_at);
   const attempt = await h.keepalive.beginRolloverAttempt();
   assert.match(attempt.attempt_id, /^rollover_/);
+  assert.equal(snapshot.external_confirmation_required_for_continuation, false);
 });
 
 test('wake and rollover messages carry continuity but not worker instructions', () => {
