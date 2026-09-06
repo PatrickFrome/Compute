@@ -46,6 +46,10 @@ function actionOf(command) {
   return String(command?.action || '').trim().toUpperCase();
 }
 
+export function nativeActionRequiresExactTabTarget(action) {
+  return TAB_MUTATION_ACTIONS.has(String(action || '').trim().toUpperCase());
+}
+
 function emergency(command) {
   const action = actionOf(command);
   if (action === 'DISARM') return true;

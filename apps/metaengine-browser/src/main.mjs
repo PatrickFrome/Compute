@@ -1,4 +1,4 @@
-import { app, BaseWindow, WebContentsView, ipcMain, protocol, safeStorage, session, utilityProcess } from 'electron';
+import { app, BaseWindow, MessageChannelMain, WebContentsView, ipcMain, protocol, safeStorage, session, utilityProcess } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +15,10 @@ import { SupervisorDeviceIdentity } from './supervisor-device-identity.mjs';
 import { navigationDecision, newWindowDecision, REMOTE_WEB_PREFERENCES, SECURITY_POLICY } from './browser-policy.mjs';
 import { TabRegistry } from './tab-registry.mjs';
 import { ExactBrowserTabViewMap } from './browser-webcontents-tab-index.mjs';
+import {
+  assertExactNativeSupervisorMutationTargetCurrent,
+  resolveExactNativeSupervisorMutationTarget,
+} from './native-supervisor-exact-target.mjs';
 import { VerifiedDownloadManager } from './verified-download-manager.mjs';
 import { normalizeShellLayoutState, planShellLayout, SHELL_TOP_HEIGHT } from './shell-layout.mjs';
 import { projectWorkspaceWorkbench } from './workspace-workbench-projection.mjs';
@@ -43,6 +47,7 @@ let fleet = null;
 let ownerSafetyGates = null;
 let developmentPlane = null;
 let nativeSupervisor = null;
+let shellBrainPortConsumerId = null;
 const humanTakeover = new HumanTakeoverController({ getSupervisor: () => nativeSupervisor });
 let shellLayoutState = normalizeShellLayoutState();
 let shellLayoutPlan = null;
@@ -547,15 +552,15 @@ function tabForPlatform(platform) {
   return rows.find(match) || null;
 }
 
-function targetTabForSupervisor(command) {
-  const explicit = command?.payload?.tab_id ? registry.get(command.payload.tab_id) : null;
-  if (explicit) return explicit;
+function targetTabForSupervisorRead(command) {
+  const requestedTabId = command?.payload?.tab_id ? String(command.payload.tab_id) : null;
+  if (requestedTabId) return registry.get(requestedTabId) || null;
   const byPlatform = tabForPlatform(command?.platform);
   return byPlatform || registry.selected();
 }
 
-function targetViewForSupervisor(command) {
-  const tab = targetTabForSupervisor(command);
+function targetViewForSupervisorRead(command) {
+  const tab = targetTabForSupervisorRead(command);
   const view = tab ? views.get(tab.tab_id) : null;
   if (!tab || !view || view.webContents.isDestroyed()) throw new Error('native_supervisor_target_view_unavailable');
   return { tab, view };
@@ -597,6 +602,7 @@ async function nativeSupervisorState() {
 async function executeNativeSupervisorCommand(command) {
   const action = String(command?.action || '');
   const payload = command?.payload || {};
+  const exactMutationTarget = resolveExactNativeSupervisorMutationTarget(command, { registry, views });
   if (action === 'POLL') return { ok: true, snapshot: await nativeSupervisorState(), authority_effect: false };
   if (action === 'SET_MODE') {
     const requested = String(payload?.mode || '').toUpperCase();
@@ -605,27 +611,68 @@ async function executeNativeSupervisorCommand(command) {
     throw new Error('native_operator_mode_invalid');
   }
   if (['NEW_TAB','SELECT_TAB','CLOSE_TAB','NAVIGATE','BACK','FORWARD','RELOAD','TAB_CENSUS','DOWNLOAD_STATUS','DOWNLOAD_FILE','DOWNLOAD_CANCEL','FLEET_RECONCILE','FLEET_SET_PROFILE','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD','GATE_STATUS','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL'].includes(action)) {
-    if (['BACK','FORWARD','RELOAD'].includes(action) && payload?.tab_id) {
-      const tab = registry.get(payload.tab_id);
-      const view = tab ? views.get(tab.tab_id) : null;
-      if (!view || view.webContents.isDestroyed()) throw new Error('native_supervisor_target_view_unavailable');
+    if (['BACK','FORWARD','RELOAD'].includes(action)) {
+      const { tab, view } = assertExactNativeSupervisorMutationTargetCurrent(exactMutationTarget, { views });
       if (action === 'BACK' && view.webContents.navigationHistory.canGoBack()) view.webContents.navigationHistory.goBack();
       if (action === 'FORWARD' && view.webContents.navigationHistory.canGoForward()) view.webContents.navigationHistory.goForward();
       if (action === 'RELOAD') view.webContents.reload();
       invalidatePerception(tab.tab_id);
       return { ok: true, tab_id: tab.tab_id, authority_effect: true };
     }
+    if (['SELECT_TAB','CLOSE_TAB','NAVIGATE'].includes(action)) {
+      const target = assertExactNativeSupervisorMutationTargetCurrent(exactMutationTarget, { views });
+      return handleCommand(action, { ...payload, tab_id: target.tab_id });
+    }
     return handleCommand(action, payload);
   }
-  const { tab, view } = targetViewForSupervisor(command);
+  const { tab, view } = exactMutationTarget
+    ? assertExactNativeSupervisorMutationTargetCurrent(exactMutationTarget, { views })
+    : targetViewForSupervisorRead(command);
   if (action === 'CAPTURE') return { ...(await captureSemanticFrame(view.webContents)), tab_id: tab.tab_id };
   if (action === 'CAPTURE_VIEW') return { ...(await captureViewThumbnail(view.webContents)), tab_id: tab.tab_id };
   if (['STOP_GENERATION','SCROLL','SEMANTIC_FOCUS','SEMANTIC_TYPE','TYPED_CLICK'].includes(action)) {
+    assertExactNativeSupervisorMutationTargetCurrent(exactMutationTarget, { views });
     const result = await executeSemanticCommand(view.webContents, command);
     invalidatePerception(tab.tab_id);
     return { ...result, tab_id: tab.tab_id };
   }
   throw new Error('native_supervisor_command_unknown');
+}
+
+function detachShellBrainPort() {
+  if (!shellBrainPortConsumerId) return false;
+  const consumerId = shellBrainPortConsumerId;
+  shellBrainPortConsumerId = null;
+  try { return nativeSupervisor?.detachCognitiveMessagePort?.(consumerId) === true; } catch { return false; }
+}
+
+function attachShellBrainPort() {
+  detachShellBrainPort();
+  if (!nativeSupervisor || !shellView || shellView.webContents.isDestroyed()) return null;
+  const { port1, port2 } = new MessageChannelMain();
+  let attached = null;
+  try {
+    attached = nativeSupervisor.attachCognitiveMessagePort(port1);
+    shellView.webContents.postMessage('metaengine:brain:port', {
+      schema: 'metaengine.browser.cognitive-port-transfer.v1',
+      consumer_id: attached.consumer_id,
+      raw_payload_exposed: false,
+      page_text_exposed: false,
+      input_values_exposed: false,
+      control_authority: false,
+      command_leasing: false,
+      authority_effect: false,
+    }, [port2]);
+    shellBrainPortConsumerId = attached.consumer_id;
+    return attached;
+  } catch (error) {
+    if (attached?.consumer_id) {
+      try { nativeSupervisor.detachCognitiveMessagePort(attached.consumer_id); } catch {}
+    }
+    try { port1.close(); } catch {}
+    try { port2.close(); } catch {}
+    throw error;
+  }
 }
 
 async function initNativeSupervisor() {
@@ -647,11 +694,13 @@ async function initNativeSupervisor() {
     });
   }
   if (nativeSupervisor.snapshot()?.running !== true) await nativeSupervisor.start();
+  if (!shellBrainPortConsumerId) attachShellBrainPort();
   await publishSnapshot().catch(() => {});
   return nativeSupervisor.snapshot();
 }
 
 function destroyWindowContents() {
+  detachShellBrainPort();
   nativeSupervisor?.stop();
   downloads?.close?.().catch(() => {});
   downloads = null;

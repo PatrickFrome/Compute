@@ -3,7 +3,9 @@ export const BROWSER_WEBCONTENTS_TAB_INDEX_SCHEMA = 'metaengine.browser.webconte
 const tabByWebContents = new WeakMap();
 const tabByWebContentsId = new Map();
 const webContentsIdByTab = new Map();
+const bindingGenerationByTab = new Map();
 const destroyedHandlerByWebContents = new WeakMap();
+let bindingSequence = 0;
 
 function validTabId(value) {
   const tabId = String(value || '');
@@ -27,18 +29,29 @@ export function bindWebContentsToTab(tabIdRaw, webContents) {
   const webContentsId = exactWebContentsId(webContents);
 
   const priorTab = tabByWebContentsId.get(webContentsId) || null;
-  if (priorTab && priorTab !== tabId) webContentsIdByTab.delete(priorTab);
+  if (priorTab && priorTab !== tabId) {
+    webContentsIdByTab.delete(priorTab);
+    bindingGenerationByTab.delete(priorTab);
+  }
   const priorId = webContentsIdByTab.get(tabId) || null;
   if (priorId && priorId !== webContentsId) tabByWebContentsId.delete(priorId);
+
+  let bindingGeneration = bindingGenerationByTab.get(tabId) || null;
+  if (priorId !== webContentsId || priorTab !== tabId || bindingGeneration == null) {
+    bindingSequence += 1;
+    bindingGeneration = bindingSequence;
+  }
 
   tabByWebContents.set(webContents, tabId);
   tabByWebContentsId.set(webContentsId, tabId);
   webContentsIdByTab.set(tabId, webContentsId);
+  bindingGenerationByTab.set(tabId, bindingGeneration);
 
   return Object.freeze({
     schema: BROWSER_WEBCONTENTS_TAB_INDEX_SCHEMA,
     tab_id: tabId,
     web_contents_id: webContentsId,
+    binding_generation: bindingGeneration,
     exact_identity: true,
     selected_tab_fallback: false,
     url_fallback: false,
@@ -54,7 +67,10 @@ export function unbindWebContentsFromTab(webContentsOrId, expectedTabId = null) 
   if (expectedTabId != null && current !== String(expectedTabId)) return false;
 
   tabByWebContentsId.delete(webContentsId);
-  if (webContentsIdByTab.get(current) === webContentsId) webContentsIdByTab.delete(current);
+  if (webContentsIdByTab.get(current) === webContentsId) {
+    webContentsIdByTab.delete(current);
+    bindingGenerationByTab.delete(current);
+  }
   if (webContentsOrId && typeof webContentsOrId === 'object') tabByWebContents.delete(webContentsOrId);
   return true;
 }
@@ -65,6 +81,7 @@ export function unbindTab(tabIdRaw) {
   const webContentsId = webContentsIdByTab.get(tabId);
   if (!webContentsId) return false;
   webContentsIdByTab.delete(tabId);
+  bindingGenerationByTab.delete(tabId);
   if (tabByWebContentsId.get(webContentsId) === tabId) tabByWebContentsId.delete(webContentsId);
   return true;
 }
@@ -85,9 +102,29 @@ export function resolveWebContentsIdForTab(tabIdRaw) {
   return webContentsIdByTab.get(tabId) || null;
 }
 
+export function resolveExactWebContentsTabBinding(tabIdRaw) {
+  let tabId;
+  try { tabId = validTabId(tabIdRaw); } catch { return null; }
+  const webContentsId = webContentsIdByTab.get(tabId) || null;
+  const bindingGeneration = bindingGenerationByTab.get(tabId) || null;
+  if (!webContentsId || !bindingGeneration || tabByWebContentsId.get(webContentsId) !== tabId) return null;
+  return Object.freeze({
+    schema: BROWSER_WEBCONTENTS_TAB_INDEX_SCHEMA,
+    tab_id: tabId,
+    web_contents_id: webContentsId,
+    binding_generation: bindingGeneration,
+    exact_identity: true,
+    selected_tab_fallback: false,
+    url_fallback: false,
+    title_fallback: false,
+    authority_effect: false,
+  });
+}
+
 export function clearWebContentsTabIndex() {
   tabByWebContentsId.clear();
   webContentsIdByTab.clear();
+  bindingGenerationByTab.clear();
 }
 
 /**
@@ -141,6 +178,7 @@ export function webContentsTabIndexSnapshot() {
     bindings: [...tabByWebContentsId.entries()].map(([webContentsId, tabId]) => Object.freeze({
       web_contents_id: webContentsId,
       tab_id: tabId,
+      binding_generation: bindingGenerationByTab.get(tabId) || null,
     })),
     lookup_complexity: 'O(1)',
     exact_identity_only: true,
@@ -148,6 +186,7 @@ export function webContentsTabIndexSnapshot() {
     url_fallback: false,
     title_fallback: false,
     automatic_destroy_cleanup: true,
+    binding_generation_monotonic_within_process: true,
     authority_effect: false,
   });
 }

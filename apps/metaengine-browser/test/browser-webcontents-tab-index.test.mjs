@@ -5,6 +5,7 @@ import test from 'node:test';
 
 import {
   ExactBrowserTabViewMap,
+  resolveExactWebContentsTabBinding,
   resolveTabIdForWebContents,
   resolveWebContentsIdForTab,
   webContentsTabIndexSnapshot,
@@ -30,6 +31,7 @@ test('tab view map maintains exact O(1) reverse identity across set/delete/clear
   assert.equal(resolveTabIdForWebContents(a), TAB_A);
   assert.equal(resolveTabIdForWebContents(202), TAB_B);
   assert.equal(resolveWebContentsIdForTab(TAB_A), 201);
+  assert.ok(resolveExactWebContentsTabBinding(TAB_A).binding_generation > 0);
   assert.equal(webContentsTabIndexSnapshot().lookup_complexity, 'O(1)');
   assert.equal(webContentsTabIndexSnapshot().binding_count, 2);
 
@@ -57,10 +59,12 @@ test('replacing a tab view fences the old WebContents id', () => {
   const oldWc = fakeWebContents(204);
   const newWc = fakeWebContents(205);
   views.set(TAB_A, { webContents: oldWc });
+  const oldGeneration = resolveExactWebContentsTabBinding(TAB_A).binding_generation;
   views.set(TAB_A, { webContents: newWc });
   assert.equal(resolveTabIdForWebContents(204), null);
   assert.equal(resolveTabIdForWebContents(205), TAB_A);
   assert.equal(resolveWebContentsIdForTab(TAB_A), 205);
+  assert.ok(resolveExactWebContentsTabBinding(TAB_A).binding_generation > oldGeneration);
   views.clear();
 });
 
