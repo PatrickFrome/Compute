@@ -136,8 +136,6 @@ test(`continuous Browser Brain soak stays bounded and coordinated (${CELL_COUNT}
     assert.equal(routed.assignment_created, false);
     assert.equal(routed.scheduler_authority, false);
 
-    // Governor starts conservative. Six proven healthy samples lift the same scheduler
-    // to GREEN without creating a second timer or scheduler.
     for (let i = 0; i < 6; i += 1) {
       nowMs += 250;
       processSeq += 1;
@@ -195,8 +193,6 @@ test(`continuous Browser Brain soak stays bounded and coordinated (${CELL_COUNT}
     assert.equal(afterBurst.hidden_queue, false);
     assert.equal(afterBurst.command_leasing, false);
 
-    // A gap in the semantic producer blocks reusable cognition globally until a
-    // canonical process snapshot supplies the durable resync point.
     const planTab = tabs[1];
     const planBinding = coordinator.binding(planTab);
     coordinator.rememberAdvisoryPlan({
@@ -213,7 +209,7 @@ test(`continuous Browser Brain soak stays bounded and coordinated (${CELL_COUNT}
 
     nowMs += 1;
     processSeq += 1;
-    semanticSeq += 2; // intentional one-event gap
+    semanticSeq += 2;
     const gap = {
       seq: processSeq,
       type: 'SEMANTIC_EVENT',
@@ -257,7 +253,6 @@ test(`continuous Browser Brain soak stays bounded and coordinated (${CELL_COUNT}
     assert.equal(recovered.hit, true);
     assert.equal(recovered.actuation_eligible, false);
 
-    // Degrade immediately under event-loop pressure, then recover hysteretically.
     resourceSample = {
       ...resourceSample,
       event_loop_utilization: 0.94,
@@ -288,10 +283,31 @@ test(`continuous Browser Brain soak stays bounded and coordinated (${CELL_COUNT}
     assert.equal(coordinator.snapshot().pressure_budget.pressure_band, 'GREEN');
     assert.equal(scheduler.snapshot().mutation_concurrency, CELL_COUNT);
 
-    await assert.rejects(
-      () => scheduler.drain([{ command_id: 'missing-target', action: 'SCROLL', payload: {} }], async () => ({ ok: true })),
-      /native_supervisor_command_exact_tab_required:SCROLL/,
-    );
+    // Malformed remote tab mutation is isolated into a nonexclusive fenced lane.
+    // It may reach the canonical policy/exact-target executor to preserve error
+    // ordering, but it cannot become a fleet-wide barrier for 32 valid cells.
+    let validActive = 0;
+    let validPeak = 0;
+    const fencedBatch = [
+      { command_id: 'missing-target', action: 'SCROLL', payload: {} },
+      ...tabs.map((tabId, i) => mutation(`fenced-parallel-${i + 1}`, tabId)),
+    ];
+    const fencedRows = await scheduler.drain(fencedBatch, async (command, descriptor) => {
+      if (command.command_id === 'missing-target') {
+        assert.equal(descriptor.scheduler_target_fenced, true);
+        assert.equal(descriptor.exclusive, false);
+        throw new Error('native_supervisor_exact_target_required');
+      }
+      validActive += 1;
+      validPeak = Math.max(validPeak, validActive);
+      await new Promise((resolve) => setImmediate(resolve));
+      validActive -= 1;
+      return { ok: true };
+    });
+    assert.equal(fencedRows[0].ok, false);
+    assert.match(fencedRows[0].error, /native_supervisor_exact_target_required/);
+    assert.equal(fencedRows.slice(1).every((row) => row.ok), true);
+    assert.equal(validPeak, CELL_COUNT, `malformed mutation reduced valid cell fanout to ${validPeak}`);
 
     const evidence = {
       schema: 'metaengine.browser.windows-continuous-brain-soak.v1',
@@ -301,12 +317,14 @@ test(`continuous Browser Brain soak stays bounded and coordinated (${CELL_COUNT}
       elapsed_ms: Math.round(elapsedMs * 100) / 100,
       semantic_edges_per_second: Math.round((STEPS / Math.max(1, elapsedMs)) * 1000),
       peak_parallel_mutations: peakMutations,
+      fenced_batch_peak_parallel_mutations: validPeak,
       pressure_evaluations: coordinator.snapshot().pressure_evaluation_count,
       pressure_reuses: coordinator.snapshot().pressure_reuse_count,
       bounded_cell_facts: cognition.cell_fact_count,
       causal_gap_exercised: true,
       red_pressure_exercised: true,
       exact_target_admission_exercised: true,
+      malformed_target_global_barrier: false,
       second_scheduler: false,
       automatic_effect_retry_allowed: false,
       authority_effect: false,
