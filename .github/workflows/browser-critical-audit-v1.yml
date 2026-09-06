@@ -1,0 +1,99 @@
+name: METAENGINE Browser Critical Audit V1
+
+on:
+  push:
+    branches:
+      - work/browser-windows-soak-optimization-v1
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/**'
+      - 'sql/browser_control_plane_realtime_wake_v1.sql'
+      - 'supabase/migrations/**'
+      - '.github/workflows/browser-critical-audit-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-critical-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  focused-critical-contracts:
+    name: focused-authority-causal-wake-contracts
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prove exact head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+      - name: Parse exact critical sources
+        working-directory: apps/metaengine-browser
+        run: >-
+          node --check src/browser-brain-stream-clock.mjs &&
+          node --check src/browser-brain-working-memory.mjs &&
+          node --check src/browser-runtime-binding-index.mjs &&
+          node --check src/native-effect-binding.mjs &&
+          node --check src/native-effect-runtime-observation.mjs &&
+          node --check supabase/a2-browser-native-supervisor-v1/realtime-command-wake.mjs
+      - name: Run authority, causal, wake and DB integrity regressions
+        working-directory: apps/metaengine-browser
+        run: >-
+          node --test
+          test/browser-brain-stream-clock.test.mjs
+          test/browser-brain-working-memory-ring.test.mjs
+          test/browser-brain-coverage-hotpath.test.mjs
+          test/browser-runtime-binding-process-key-consistency.test.mjs
+          test/native-effect-binding-v2-no-downgrade.test.mjs
+          test/native-effect-binding-v2-runtime-fence.test.mjs
+          test/native-effect-runtime-observation-clock.test.mjs
+          test/realtime-command-wake.test.mjs
+          test/browser-realtime-wake-single-trigger.test.mjs
+          test/browser-db-effect-integrity-contract.test.mjs
+          test/native-supervisor-command-lanes.test.mjs
+          test/browser-brain-continuous-coordinator.test.mjs
+
+  full-browser-regression:
+    name: full-browser-node-test-suite
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prove exact head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+      - name: Parse Browser source
+        working-directory: apps/metaengine-browser
+        run: npm run check
+      - name: Run complete Browser Node regression suite
+        working-directory: apps/metaengine-browser
+        run: npm test
