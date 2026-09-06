@@ -3,6 +3,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 export const BROWSER_BRAIN_DURABLE_PERSISTENCE_SCHEMA = 'metaengine.browser-brain.durable-persistence.v1';
+export const BROWSER_BRAIN_DURABLE_FILE_NAME = 'metaengine-browser-brain-collaboration-v1.json';
 const DEFAULT_MAX_BYTES = 32 * 1024 * 1024;
 
 function boundedBytes(value) {
@@ -89,4 +90,11 @@ export class BrowserBrainDurablePersistence {
       authority_effect: false,
     });
   }
+}
+
+export function createBrowserBrainDurablePersistenceForApp(app, { fileName = BROWSER_BRAIN_DURABLE_FILE_NAME, maxBytes = DEFAULT_MAX_BYTES } = {}) {
+  if (!app || typeof app.getPath !== 'function') throw new Error('browser_brain_persistence_app_required');
+  const userData = String(app.getPath('userData') || '');
+  if (!userData) throw new Error('browser_brain_persistence_user_data_unavailable');
+  return new BrowserBrainDurablePersistence({ filePath: path.join(userData, String(fileName)), maxBytes });
 }
