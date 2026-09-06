@@ -3,7 +3,7 @@ import { BrowserBrainAdaptiveFanoutRuntime } from './browser-brain-adaptive-fano
 import { BrowserBrainRealtimePressureBridge } from './browser-brain-realtime-pressure-bridge.mjs';
 import { BrowserControlPressureGovernor } from './browser-control-pressure-governor.mjs';
 import { BrowserBrainCognitionFabric } from './browser-brain-cognition-fabric.mjs';
-import { BrowserBrainCollaborationFabric } from './browser-brain-collaboration-fabric.mjs';
+import { BrowserBrainCollaborationRuntimeV2 } from './browser-brain-collaboration-runtime-v2.mjs';
 import { applyNativeSupervisorCommandPressureBudget } from './native-supervisor-command-lanes.mjs';
 
 export const BROWSER_BRAIN_CONTINUOUS_COORDINATOR_SCHEMA = 'metaengine.browser-brain.continuous-coordinator.v1';
@@ -131,13 +131,23 @@ export class BrowserBrainContinuousCoordinator {
     pressureGovernor = null,
     cognitionFabric = null,
     collaborationFabric = null,
+    collaborationLoadState = null,
+    collaborationSaveState = null,
+    collaborationCheckpoint = null,
     getExtraPressureSample = null,
     clock = () => Date.now(),
     hardBatchLimit = 128,
   } = {}) {
     this.#observation = observationBridge || new BrowserBrainRealtimeObservationBridge();
     this.#cognition = cognitionFabric || new BrowserBrainCognitionFabric({ clock });
-    this.#collaboration = collaborationFabric || new BrowserBrainCollaborationFabric({ clock });
+    this.#collaboration = collaborationFabric || new BrowserBrainCollaborationRuntimeV2({
+      clock,
+      loadState: collaborationLoadState,
+      saveState: collaborationSaveState,
+    });
+    if (collaborationCheckpoint != null && typeof this.#collaboration.restore === 'function') {
+      this.#collaboration.restore(collaborationCheckpoint);
+    }
     const canBindAdaptive = adaptiveRuntime != null
       || (scheduler != null && typeof executeRuntimeFenced === 'function');
     this.#adaptive = adaptiveRuntime || (canBindAdaptive
@@ -181,6 +191,10 @@ export class BrowserBrainContinuousCoordinator {
     ) {
       throw new Error('browser_brain_continuous_collaboration_fabric_invalid');
     }
+  }
+
+  async initCollaboration() {
+    return typeof this.#collaboration.init === 'function' ? this.#collaboration.init() : this.#collaboration.snapshot();
   }
 
   #evaluatePressure(processSnapshot) {
@@ -309,11 +323,21 @@ export class BrowserBrainContinuousCoordinator {
   }
 
   observeAgent(agent) {
-    return this.#cognition.observeAgent(agent);
+    const observed = this.#cognition.observeAgent(agent);
+    if (typeof this.#collaboration.observeRoutingAgent === 'function') {
+      this.#collaboration.observeRoutingAgent({ ...agent, generation: agent?.generation ?? 1 });
+    }
+    return observed;
   }
 
   routeAgents(query) {
     return this.#cognition.routeAgents(query);
+  }
+
+  routeAgentsV2(query) {
+    return typeof this.#collaboration.routeAgentsV2 === 'function'
+      ? this.#collaboration.routeAgentsV2(query)
+      : this.#cognition.routeAgents(query);
   }
 
   recordEvidence(evidence) {
@@ -364,6 +388,54 @@ export class BrowserBrainContinuousCoordinator {
     return this.#collaboration.decideAutonomousContinuation(query);
   }
 
+  collaborationCheckpoint() {
+    return typeof this.#collaboration.checkpoint === 'function' ? this.#collaboration.checkpoint() : null;
+  }
+
+  restoreCollaborationCheckpoint(checkpoint) {
+    if (typeof this.#collaboration.restore !== 'function') throw new Error('browser_brain_collaboration_restore_unavailable');
+    return this.#collaboration.restore(checkpoint);
+  }
+
+  flushCollaborationPersistence() {
+    return typeof this.#collaboration.flush === 'function'
+      ? this.#collaboration.flush()
+      : Promise.resolve(Object.freeze({ ok: true, authority_effect: false }));
+  }
+
+  retrieveCollaborationMemory(query) {
+    if (typeof this.#collaboration.retrieveMemory !== 'function') throw new Error('browser_brain_collaboration_memory_unavailable');
+    return this.#collaboration.retrieveMemory(query);
+  }
+
+  collaborationSemanticFacts() {
+    return typeof this.#collaboration.semanticFacts === 'function' ? this.#collaboration.semanticFacts() : Object.freeze([]);
+  }
+
+  collaborationPlaybooks() {
+    return typeof this.#collaboration.playbooks === 'function' ? this.#collaboration.playbooks() : Object.freeze([]);
+  }
+
+  planCollaborationFanout(query) {
+    if (typeof this.#collaboration.planFanout !== 'function') throw new Error('browser_brain_collaboration_fanout_unavailable');
+    return this.#collaboration.planFanout(query);
+  }
+
+  a2aTask(input) {
+    if (typeof this.#collaboration.a2aTask !== 'function') throw new Error('browser_brain_a2a_adapter_unavailable');
+    return this.#collaboration.a2aTask(input);
+  }
+
+  a2aIngressMessage(message, options) {
+    if (typeof this.#collaboration.a2aIngressMessage !== 'function') throw new Error('browser_brain_a2a_adapter_unavailable');
+    return this.#collaboration.a2aIngressMessage(message, options);
+  }
+
+  a2aIngressTask(task) {
+    if (typeof this.#collaboration.a2aIngressTask !== 'function') throw new Error('browser_brain_a2a_adapter_unavailable');
+    return this.#collaboration.a2aIngressTask(task);
+  }
+
   collaborationSnapshot() {
     return this.#collaboration.snapshot();
   }
@@ -397,12 +469,17 @@ export class BrowserBrainContinuousCoordinator {
         ? 'DB_LEASED_BATCH_TO_RUNTIME_FENCED_INDEPENDENT_BROWSER_CELLS'
         : 'EXISTING_NATIVE_SUPERVISOR_COMMAND_LANES_ONLY',
       cognition_path: 'REAL_PRODUCER_SEQUENCE_TO_BOUNDED_ADVISORY_FABRIC',
-      collaboration_path: 'TYPED_CAUSAL_MESSAGES_TO_TASK_PROGRESS_LEDGER_HANDOFF_AND_AUTONOMOUS_CONTINUATION',
+      collaboration_path: 'TYPED_CAUSAL_MESSAGES_TO_DURABLE_EPISODIC_MEMORY_ROUTING_REPLAN_AND_AUTONOMOUS_CONTINUATION',
       mutation_runtime_bound: this.#adaptive != null,
       exact_tab_binding_required_for_mutation: true,
       semantic_plan_revalidation_required: true,
       page_model_data_grants_authority: false,
       continuous_autonomous_work: collaboration.continuous_autonomous_work === true,
+      durable_collaboration_memory: collaboration.journal?.hash_verified_checkpoint === true,
+      episodic_collaboration_memory: collaboration.episodic_memory?.immutable_provenance === true,
+      routing_v2: collaboration.routing_v2_enabled === true,
+      adaptive_sparse_fanout: collaboration.adaptive_sparse_fanout === true,
+      a2a_boundary_only: collaboration.a2a_boundary_only === true,
       external_confirmation_gate: false,
       external_prompt_required_for_continuation: false,
       idle_wait_allowed: false,
