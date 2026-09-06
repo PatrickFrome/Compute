@@ -46,6 +46,7 @@ begin
   if coalesce(p_binding->>'target_id','') !~ '^webcontents:[1-9][0-9]*$' then raise exception 'native_effect_binding_target_invalid'; end if;
 
   if v_schema = 'metaengine.native-supervisor.effect-binding.v2' then
+    if coalesce(p_binding->>'runtime_observation_id','') !~ '^obs_[0-9a-f]{32}$' then raise exception 'native_effect_binding_runtime_observation_id_invalid'; end if;
     if coalesce(p_binding->>'web_contents_id','') !~ '^[1-9][0-9]{0,15}$' then raise exception 'native_effect_binding_webcontents_invalid'; end if;
     if coalesce(p_binding->>'renderer_pid','') !~ '^[1-9][0-9]{0,15}$' then raise exception 'native_effect_binding_renderer_pid_invalid'; end if;
     if coalesce(p_binding->>'runtime_target_id','') !~ '^[A-Za-z0-9._:-]{1,192}$' then raise exception 'native_effect_binding_runtime_target_invalid'; end if;
@@ -110,4 +111,4 @@ revoke all on function public.h205f22_a2_browser_supervisor_bind_effect_v1(uuid,
 grant execute on function public.h205f22_a2_browser_supervisor_bind_effect_v1(uuid,uuid,text,jsonb,boolean) to service_role;
 
 comment on function public.h205f22_a2_browser_supervisor_bind_effect_v1(uuid,uuid,text,jsonb,boolean) is
-  'Durably seals leased Browser semantic effect intent. v2 adds WebContents/CDP/document generation evidence; DB lease remains sole authority and ambiguous effects are never retried.';
+  'Durably seals leased Browser semantic effect intent. v2 adds one-shot observation/WebContents/CDP/document generation evidence; DB lease remains sole authority and ambiguous effects are never retried.';
