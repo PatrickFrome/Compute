@@ -28,7 +28,7 @@ env:
 
 jobs:
   continuous-brain:
-    name: continuous-brain-50k
+    name: continuous-brain-100k
     runs-on: windows-2025
     timeout-minutes: 20
     steps:
@@ -51,16 +51,17 @@ jobs:
       - name: Parse exact source
         working-directory: apps/metaengine-browser
         run: npm run check
-      - name: Run continuous Brain, cognition and scheduler soak
+      - name: Run continuous Brain, cognition, scheduler and activation hot-path soak
         working-directory: apps/metaengine-browser
         env:
-          METAENGINE_BRAIN_SOAK_STEPS: '50000'
+          METAENGINE_BRAIN_SOAK_STEPS: '100000'
         run: >-
           node --test
           test/browser-windows-continuous-brain-soak.test.mjs
           test/browser-brain-continuous-coordinator.test.mjs
           test/browser-brain-cognition-fabric.test.mjs
           test/native-supervisor-command-lanes.test.mjs
+          test/browser-startup-activation-hotpath.test.mjs
 
   seeded-fleet-chaos:
     name: fleet-chaos-seed-${{ matrix.seed }}
@@ -69,7 +70,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        seed: [17, 113, 509, 20260906]
+        seed: [17, 73, 113, 509, 997, 4099, 65521, 20260906]
     steps:
       - name: Checkout exact candidate head
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -91,11 +92,11 @@ jobs:
         working-directory: apps/metaengine-browser
         env:
           METAENGINE_CHAOS_SEED: ${{ matrix.seed }}
-          METAENGINE_CHAOS_STEPS: '16000'
+          METAENGINE_CHAOS_STEPS: '24000'
         run: node --test test/windows-fleet-chaos-seeded.test.mjs
 
   fleet-scale:
-    name: fleet-scale-1000-tasks-1024-peers
+    name: fleet-scale-2000-tasks-2048-peers
     runs-on: windows-2025
     timeout-minutes: 20
     steps:
@@ -117,6 +118,12 @@ jobs:
         run: npm install --no-audit --no-fund --no-package-lock
       - name: Run fleet scale and mesh convergence contracts
         working-directory: apps/metaengine-browser
+        env:
+          METAENGINE_SCALE_NODES: '96'
+          METAENGINE_SCALE_NODE_CAPACITY: '32'
+          METAENGINE_SCALE_TASKS: '2000'
+          METAENGINE_SCALE_MESH_GROUPS: '128'
+          METAENGINE_SCALE_PEERS_PER_MESH: '16'
         run: >-
           node --test
           test/windows-fleet-chaos-scale.test.mjs
@@ -125,10 +132,10 @@ jobs:
           test/browser-brain-adaptive-fanout-runtime.test.mjs
 
   package-session-soak:
-    name: installed-ui-12-activation-soak
+    name: installed-ui-72-activation-race-soak
     needs: [continuous-brain, seeded-fleet-chaos, fleet-scale]
     runs-on: windows-2025
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - name: Checkout exact candidate head
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -172,17 +179,20 @@ jobs:
           Copy-Item $installer.FullName "$env:RUNNER_TEMP\autonomous-soak-setup.exe" -Force
           Copy-Item $installer.FullName (Join-Path $env:RUNNER_TEMP $installer.Name) -Force
           @{
-            schema='metaengine.browser.windows-autonomous-soak.v1'
+            schema='metaengine.browser.windows-autonomous-soak.v2'
             source_head=$env:EXACT_HEAD
             package_version=$version
             installer_name=$installer.Name
             installer_sha256=$digest
-            semantic_edges=50000
-            fleet_chaos_seeds=4
-            fleet_chaos_steps_per_seed=16000
-            scale_tasks=1000
-            scale_supervisor_peers=1024
-            second_instance_activations_required=12
+            semantic_edges=100000
+            fleet_chaos_seeds=8
+            fleet_chaos_steps_per_seed=24000
+            scale_tasks=2000
+            scale_supervisor_peers=2048
+            scale_browser_nodes=96
+            second_instance_activations_required=72
+            sequential_activations_required=64
+            concurrent_activation_burst_required=8
             normal_ui_boot_verified=$false
             second_instance_activations_verified=0
             signed=$false
@@ -207,7 +217,7 @@ jobs:
           $guardian = $guardianLine | ConvertFrom-Json
           if ($guardian.staging_only -ne $true -or $guardian.service_activation_authorized -ne $false) { throw 'soak_guardian_staging_not_inert' }
 
-      - name: Open normal UI and prove twelve exact primary activations
+      - name: Open normal UI and prove 64 sequential plus 8 concurrent exact activations
         working-directory: apps/metaengine-browser
         shell: pwsh
         run: |
@@ -219,8 +229,12 @@ jobs:
             -AppPath $app `
             -ProofPath $proofPath `
             -RunnerTemp $env:RUNNER_TEMP `
-            -ActivationCount 12 `
-            -PostActivationHoldSeconds 15
+            -ActivationCount 64 `
+            -ConcurrentBurstSize 8 `
+            -PostActivationHoldSeconds 30 `
+            -ActivationP95BudgetMs 1000 `
+            -MaxWorkingSetGrowthBytes 67108864 `
+            -MaxHandleGrowth 24
 
       - name: Prove source checkout unchanged
         shell: bash
@@ -244,5 +258,7 @@ jobs:
             ${{ runner.temp }}/soak-normal-ui.err
             ${{ runner.temp }}/soak-secondary-*.out
             ${{ runner.temp }}/soak-secondary-*.err
+            ${{ runner.temp }}/soak-burst-*.out
+            ${{ runner.temp }}/soak-burst-*.err
           if-no-files-found: warn
           retention-days: 30
