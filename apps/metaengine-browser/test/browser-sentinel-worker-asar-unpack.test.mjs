@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { resolveSentinelWorkerScript } from '../src/host-resilience-runtime.mjs';
 
 const WORKER_CLOSURE = [
@@ -53,7 +54,7 @@ test('sentinel worker closure is loadable by vanilla node from an app.asar.unpac
   // a placeholder asar file proves we are NOT reading from the archive
   await fs.writeFile(path.join(root, 'resources', 'app.asar'), 'not-a-real-archive');
   for (const file of WORKER_CLOSURE) {
-    await fs.copyFile(new URL(`../src/${file}`, import.meta.url).pathname, path.join(unpackedSrc, file));
+    await fs.copyFile(fileURLToPath(new URL(`../src/${file}`, import.meta.url)), path.join(unpackedSrc, file));
   }
 
   const statePath = path.join(root, 'sentinel-state.json');

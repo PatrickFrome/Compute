@@ -12,11 +12,13 @@ export const BROWSER_STARTUP_JOURNAL_MAX_EVENTS = 128;
 export const PRIMARY_WINDOW_STABLE_MS = 1_500;
 export const PRIMARY_WINDOW_OBSERVE_TIMEOUT_MS = 30_000;
 export const PRIMARY_ACTIVATION_ACK_TIMEOUT_MS = 15_000;
+export const PRIMARY_ACTIVATION_ACK_POLL_MS = 25;
 
 const SAFE_STATE = /^[A-Z][A-Z0-9_]{1,63}$/;
 const SAFE_REASON = /^[A-Z0-9][A-Z0-9_.:-]{0,127}$/;
 const SAFE_DETAIL_KEY = /^[a-z][a-z0-9_]{0,63}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const ADVISORY_ONLY_STATES = new Set(['SECOND_INSTANCE_RECEIVED']);
 let journalTail = Promise.resolve();
 
 function assertApp(app) {
@@ -223,6 +225,16 @@ export async function beginBrowserStartupJournal(app, {
 }
 
 export async function recordBrowserStartupEvent(app, input = {}) {
+  const state = String(input?.state || '');
+  if (ADVISORY_ONLY_STATES.has(state)) {
+    return Object.freeze({
+      schema: 'metaengine.browser.startup-advisory-event.v1',
+      state,
+      durable: false,
+      represented_by_exact_activation_ack: state === 'SECOND_INSTANCE_RECEIVED',
+      authority_effect: false,
+    });
+  }
   return serializeJournal(() => appendEventUnlocked(app, input));
 }
 
@@ -240,7 +252,7 @@ export async function readBrowserStartupJournal(app) {
 export async function waitForPrimaryActivationAck(app, {
   launch_id,
   timeout_ms = PRIMARY_ACTIVATION_ACK_TIMEOUT_MS,
-  poll_ms = 100,
+  poll_ms = PRIMARY_ACTIVATION_ACK_POLL_MS,
   clock = () => Date.now(),
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 } = {}) {
@@ -402,6 +414,8 @@ export function browserStartupObservabilityContract() {
     runtime_import_failure_must_be_durable: true,
     gui_stderr_is_diagnostic_authority: false,
     second_instance_must_activate_primary_window: true,
+    second_instance_receive_marker_is_advisory_only: true,
+    second_instance_activation_ack_is_single_durable_write: true,
     second_instance_activation_ack_must_match_launch_id: true,
     mixed_version_primary_without_ack_must_surface_error: true,
     secondary_must_not_mutate_primary_journal: true,
@@ -409,6 +423,7 @@ export function browserStartupObservabilityContract() {
     minimized_window_must_be_restored: true,
     normal_ui_boot_requires_stable_window_readback: true,
     primary_activation_ack_timeout_ms: PRIMARY_ACTIVATION_ACK_TIMEOUT_MS,
+    primary_activation_ack_poll_ms: PRIMARY_ACTIVATION_ACK_POLL_MS,
     startup_journal_max_events: BROWSER_STARTUP_JOURNAL_MAX_EVENTS,
     authority_effect: false,
   });

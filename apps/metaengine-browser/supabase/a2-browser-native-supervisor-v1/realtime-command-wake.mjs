@@ -13,10 +13,11 @@ function safeClose(socket) {
 /**
  * Opens one Realtime subscription without granting any Browser authority.
  *
- * `subscribed` resolves only after every private channel join is acknowledged.
- * `wake` resolves on the first broadcast, timeout, or channel failure. Successful
- * subscription does NOT resolve `wake`; callers must re-read durable queue state
- * after subscription to close the lease-before-subscribe race window.
+ * `subscribed` resolves only after every private channel join is acknowledged, or
+ * resolves fail-closed when the same bounded wait expires. `wake` resolves on the
+ * first broadcast, timeout, or channel failure. Successful subscription does NOT
+ * resolve `wake`; callers must re-read durable queue state after subscription to
+ * close the lease-before-subscribe race window.
  */
 export function openRealtimeCommandWake({
   createSocket,
@@ -68,12 +69,28 @@ export function openRealtimeCommandWake({
       ok: false,
       reason,
       topic_count: expectedTopics.size,
+      joined_topic_count: joined.size,
       transport_delivery_is_authority: false,
     });
     finishWake(reason);
   };
 
-  const timer = setTimer(() => finishWake('TIMEOUT'), waitMs);
+  const timer = setTimer(() => {
+    // waitBatch awaits `subscribed` before it awaits `wake`; therefore the join
+    // acknowledgement itself must be bounded. Otherwise a half-open WebSocket can
+    // strand the HTTP request forever even though the wake timer has expired.
+    if (!subscribedSettled) {
+      finishSubscribed({
+        schema: REALTIME_COMMAND_WAKE_SCHEMA,
+        ok: false,
+        reason: 'SUBSCRIBE_TIMEOUT',
+        topic_count: expectedTopics.size,
+        joined_topic_count: joined.size,
+        transport_delivery_is_authority: false,
+      });
+    }
+    finishWake('TIMEOUT');
+  }, waitMs);
   timer?.unref?.();
 
   socket.onopen = () => {
@@ -112,6 +129,7 @@ export function openRealtimeCommandWake({
           ok: true,
           reason: 'SUBSCRIBED',
           topic_count: joined.size,
+          joined_topic_count: joined.size,
           transport_delivery_is_authority: false,
         });
       }
@@ -141,7 +159,8 @@ export function openRealtimeCommandWake({
         schema: REALTIME_COMMAND_WAKE_SCHEMA,
         ok: false,
         reason: 'CLOSED',
-        topic_count: joined.size,
+        topic_count: expectedTopics.size,
+        joined_topic_count: joined.size,
         transport_delivery_is_authority: false,
       });
       finishWake('CLOSED');

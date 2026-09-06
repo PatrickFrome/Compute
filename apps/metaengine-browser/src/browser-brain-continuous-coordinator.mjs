@@ -17,6 +17,11 @@ const PRESSURE_RELEVANT_EVENTS = new Set([
   'RENDER_PROCESS_GONE',
   'CHILD_PROCESS_GONE',
 ]);
+// Coverage is a diagnostic topology projection, not authority. Reuse it for
+// semantic/CDP bursts and refresh it only on the same sparse resource/lifecycle
+// boundaries that may change process or WebContents census. This keeps the
+// semantic hot path O(1) with respect to live BrowserCell count.
+const COVERAGE_RELEVANT_EVENTS = PRESSURE_RELEVANT_EVENTS;
 const CANONICAL_RESYNC_EVENTS = new Set(['METRICS_SAMPLE', 'PROCESS_CENSUS_REFRESHED']);
 
 function validProcessSnapshot(snapshot) {
@@ -106,10 +111,10 @@ function sameCommandBudget(a, b) {
  * semantic snapshot supplies an explicit resync point.
  *
  * It intentionally owns no timer, DB lease, hidden queue, retry loop, or physical
- * Browser implementation. Observation runs on every edge. Pressure is deliberately
- * not recomputed for each semantic/CDP burst because those events do not change the
- * resource/liveness sample; this keeps the hottest cognition path allocation-light
- * while crash/unresponsive/process changes remain immediate.
+ * Browser implementation. Observation runs on every edge. Pressure and diagnostic
+ * topology coverage are deliberately not recomputed for each semantic/CDP burst
+ * because those events do not change the resource/liveness census; crash,
+ * unresponsive, process and WebContents changes remain immediate.
  */
 export class BrowserBrainContinuousCoordinator {
   #observation;
@@ -124,6 +129,8 @@ export class BrowserBrainContinuousCoordinator {
   #edgeCount = 0;
   #pressureEvaluationCount = 0;
   #pressureReuseCount = 0;
+  #coverageEvaluationCount = 0;
+  #coverageReuseCount = 0;
   #commandBudgetApplyCount = 0;
   #reconcileCount = 0;
   #cognitionResyncCount = 0;
@@ -192,6 +199,12 @@ export class BrowserBrainContinuousCoordinator {
     return this.#lastPressureResult;
   }
 
+  #evaluateCoverage(processSnapshot) {
+    this.#lastCoverage = coverage(processSnapshot);
+    this.#coverageEvaluationCount += 1;
+    return this.#lastCoverage;
+  }
+
   #resyncCognition(processSnapshot) {
     const result = this.#cognition.reconcileProducerSequences(producerSequences(processSnapshot));
     if (result.length > 0) this.#cognitionResyncCount += 1;
@@ -203,7 +216,7 @@ export class BrowserBrainContinuousCoordinator {
       throw new Error('browser_brain_continuous_process_snapshot_invalid');
     }
     this.#lastProcessSnapshot = processSnapshot;
-    this.#lastCoverage = coverage(processSnapshot);
+    this.#evaluateCoverage(processSnapshot);
     this.#observation.reconcile(processSnapshot, { tabs, cell_by_tab });
     this.#resyncCognition(processSnapshot);
     this.#evaluatePressure(processSnapshot);
@@ -216,15 +229,18 @@ export class BrowserBrainContinuousCoordinator {
     if (!validProcessSnapshot(snapshot)) {
       throw new Error('browser_brain_continuous_process_snapshot_required');
     }
+    const type = String(event?.type || 'UNKNOWN').toUpperCase();
+    const hadProcessSnapshot = this.#lastProcessSnapshot != null;
     this.#lastProcessSnapshot = snapshot;
-    this.#lastCoverage = coverage(snapshot);
+    const coverageEvaluated = !hadProcessSnapshot || COVERAGE_RELEVANT_EVENTS.has(type);
+    if (coverageEvaluated) this.#evaluateCoverage(snapshot);
+    else this.#coverageReuseCount += 1;
     this.#lastCognitionResult = this.#cognition.observeEdge(event);
     const observed = this.#observation.observe(event, {
       process_snapshot: snapshot,
       tabs,
       cell_by_tab,
     });
-    const type = String(event?.type || 'UNKNOWN').toUpperCase();
     if (this.#lastCognitionResult?.resync_required === true && CANONICAL_RESYNC_EVENTS.has(type)) {
       this.#resyncCognition(snapshot);
       this.#lastCognitionResult = Object.freeze({
@@ -252,6 +268,7 @@ export class BrowserBrainContinuousCoordinator {
       observation: observed,
       pressure,
       pressure_evaluated: pressureEvaluated,
+      coverage_evaluated: coverageEvaluated,
       command_lane_pressure_budget: this.#lastAppliedCommandBudget,
       coverage: this.#lastCoverage,
       mutation_runtime_bound: this.#adaptive != null,
@@ -317,9 +334,12 @@ export class BrowserBrainContinuousCoordinator {
       reconcile_count: this.#reconcileCount,
       pressure_evaluation_count: this.#pressureEvaluationCount,
       pressure_reuse_count: this.#pressureReuseCount,
+      coverage_evaluation_count: this.#coverageEvaluationCount,
+      coverage_reuse_count: this.#coverageReuseCount,
       command_budget_apply_count: this.#commandBudgetApplyCount,
       cognition_resync_count: this.#cognitionResyncCount,
       semantic_edges_reuse_pressure: true,
+      semantic_edges_reuse_coverage: true,
       last_event: this.#lastEvent,
       coverage: this.#lastCoverage,
       cognition_fabric: this.#cognition.snapshot(),

@@ -1,12 +1,9 @@
--- METAENGINE Browser Control Plane Realtime Wake V1
+-- Advisory Realtime wake for Browser command availability.
 --
--- SOURCE CONTRACT / ROLLBACK PROOF.
--- Realtime Broadcast is advisory delivery only. The durable command row and DB
--- lease remain the sole execution authority. The existing shared
--- glm_browser_pulse_notify_v1 trigger boundary is intentionally reused so command
--- issuance has one publisher boundary rather than a second command-only trigger.
-
-begin;
+-- DB command rows and leases remain the sole authority. This migration deliberately
+-- reuses the existing shared glm_browser_pulse_notify_v1() trigger function instead
+-- of installing a second trigger on the command table. Legacy pg_notify behavior is
+-- preserved for command, supervisor-state and mesh triggers.
 
 create or replace function public.glm_browser_pulse_notify_v1()
 returns trigger
@@ -25,7 +22,6 @@ declare
   v_wake_target text := null;
   v_should_wake boolean := false;
 begin
-  -- Preserve the legacy generic pulse projection for all three canonical tables.
   begin v_client := new.client_id::text; exception when others then v_client := null; end;
   begin v_target := new.target_client_id::text; exception when others then v_target := null; end;
   begin v_supervisor := new.supervisor_instance_id::text; exception when others then v_supervisor := null; end;
@@ -52,9 +48,6 @@ begin
     null;
   end;
 
-  -- Broadcast only from the canonical command trigger. The same function is also
-  -- attached to state and mesh tables, so direct access to command-only columns
-  -- must remain inside this table gate.
   if TG_TABLE_SCHEMA = 'public'
      and TG_TABLE_NAME = 'compute_fabric_a2_browser_supervisor_command_h205f22' then
     if TG_OP = 'INSERT' then
@@ -85,8 +78,6 @@ begin
             true
           );
         exception when others then
-          -- Broadcast availability must never invalidate the durable command write
-          -- or the legacy pg_notify pulse. wait-batch always performs a DB re-lease.
           null;
         end;
       end if;
@@ -97,10 +88,5 @@ begin
 end;
 $$;
 
--- This source proof deliberately declares no additional trigger. Existing canonical triggers remain:
---   glm_pulse_command -> command table
---   glm_pulse_state   -> state table
---   glm_pulse_mesh    -> mesh table
--- and all continue to call glm_browser_pulse_notify_v1().
-
-rollback;
+comment on function public.glm_browser_pulse_notify_v1() is
+  'Shared Browser pulse trigger. Preserves legacy pg_notify for command/state/mesh and emits one fail-soft private COMMAND_AVAILABLE Broadcast only when a durable Browser command enters PENDING. Broadcast never grants lease or execution authority.';

@@ -1,10 +1,23 @@
--- METAENGINE Browser Control Plane Fast Lane V1
---
--- SOURCE-ONLY / DEVELOPMENT-STAGING CONTRACT.
--- This file is a rollback proof of the release migration. DB lease remains the
--- sole authority; transport delivery never grants execution authority.
+-- Browser Control Plane Fast Lane release V1.
+-- DB lease remains the only execution authority. This migration only changes
+-- bounded lease admission/completion transport and preserves fail-closed effects.
 
-begin;
+alter table public.compute_fabric_a2_browser_supervisor_command_h205f22
+  drop constraint if exists a2_browser_supervisor_command_action_ck;
+
+alter table public.compute_fabric_a2_browser_supervisor_command_h205f22
+  add constraint a2_browser_supervisor_command_action_ck check (action = any(array[
+    'ARM','DISARM','SET_SUPERVISOR_MODE','SET_MODE',
+    'POLL','CAPTURE','CAPTURE_VIEW','CONTROL_CAPABILITIES',
+    'PROCESS_CENSUS','PROCESS_EVENTS','SEMANTIC_CENSUS','SEMANTIC_EVENTS','CONTROL_LATENCY_STATUS',
+    'STOP_GENERATION','SCROLL','SEMANTIC_FOCUS','SEMANTIC_TYPE','RESOLVE_PROMPT','TYPED_CLICK',
+    'NEW_TAB','SELECT_TAB','CLOSE_TAB','NAVIGATE','BACK','FORWARD','RELOAD',
+    'FLEET_RECONCILE','FLEET_SET_PROFILE','FLEET_STATUS','TAB_CENSUS',
+    'DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD',
+    'DOWNLOAD_STATUS','DOWNLOAD_FILE','DOWNLOAD_CANCEL',
+    'SELF_UPDATE_STATUS','SELF_UPDATE_CHECK','SELF_UPDATE_APPLY',
+    'GATE_STATUS','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL'
+  ]::text[]));
 
 alter table public.compute_fabric_a2_browser_supervisor_command_h205f22
   add column if not exists command_lane text generated always as (
@@ -48,9 +61,10 @@ alter table public.compute_fabric_a2_browser_supervisor_command_h205f22
   add constraint browser_control_command_lane_v1_ck
   check (command_lane in ('READ_ONLY','TAB_MUTATION','GLOBAL_MUTATION','EMERGENCY'));
 
+-- Install the new execution fence before removing the legacy fleet-wide one.
 create unique index if not exists a2_browser_supervisor_one_leased_effect_key_uq
   on public.compute_fabric_a2_browser_supervisor_command_h205f22(
-    workspace_id,coalesce(target_client_id,'*'),effect_key
+    workspace_id, coalesce(target_client_id,'*'), effect_key
   ) where status='LEASED' and command_lane<>'READ_ONLY';
 
 drop index if exists public.a2_browser_supervisor_one_mutating_inflight_uq;
@@ -87,10 +101,10 @@ begin
   if p_workspace_id is null or v_client='' then raise exception 'supervisor_batch_lease_identity_invalid'; end if;
   if v_mode not in ('OFF','MONITOR','CONTROL') then raise exception 'supervisor_batch_lease_mode_invalid'; end if;
 
-  -- Lease allocation for one Browser client is serialized transactionally. This
-  -- closes the GLOBAL-vs-TAB race while physical exact-tab lanes stay concurrent.
+  -- Serialize lease allocation for one Browser client only. This closes the
+  -- global-vs-tab admission race without serializing the physical mutation lanes.
   perform pg_catalog.pg_advisory_xact_lock(
-    pg_catalog.hashtextextended(p_workspace_id::text || ':' || v_client,0)
+    pg_catalog.hashtextextended(p_workspace_id::text || ':' || v_client, 0)
   );
   v_now := clock_timestamp();
 
@@ -126,8 +140,8 @@ begin
       and (c.target_client_id is null or c.target_client_id=v_client)
       and (v_mode='CONTROL' or c.command_lane='READ_ONLY' or c.command_lane='EMERGENCY')
   ), first_mutation as (
-    select e.command_id,e.command_lane,e.issued_at from eligible e
-     where e.command_lane<>'READ_ONLY'
+    select e.command_id,e.command_lane,e.issued_at
+      from eligible e where e.command_lane<>'READ_ONLY'
      order by e.lane_priority,e.issued_at,e.command_id limit 1
   ), reads as (
     select e.command_id from eligible e where e.command_lane='READ_ONLY'
@@ -150,25 +164,35 @@ begin
        )
      order by e.issued_at,e.command_id limit v_mutations
   ), picked as (
-    select command_id from reads union select command_id from mutation_candidates limit v_batch
+    select command_id from reads
+    union
+    select command_id from mutation_candidates
+    limit v_batch
   ), locked as (
     select c.command_id
-      from public.compute_fabric_a2_browser_supervisor_command_h205f22 c join picked p using(command_id)
-     where c.status='PENDING' order by c.issued_at,c.command_id for update of c skip locked
+      from public.compute_fabric_a2_browser_supervisor_command_h205f22 c
+      join picked p using(command_id)
+     where c.status='PENDING'
+     order by c.issued_at,c.command_id
+     for update of c skip locked
   ), leased as (
     update public.compute_fabric_a2_browser_supervisor_command_h205f22 c
        set status='LEASED',leased_by=v_client,leased_at=v_now
-      from locked l where c.command_id=l.command_id and c.status='PENDING' returning c.*
+      from locked l
+     where c.command_id=l.command_id and c.status='PENDING'
+     returning c.*
   )
   select coalesce(jsonb_agg(jsonb_build_object(
-    'command_id',command_id,'idempotency_key',idempotency_key,'action',action,'platform',platform,
-    'payload',payload,'issued_at',issued_at,'expires_at',expires_at,'issued_by',issued_by,
-    'command_lane',command_lane,'effect_key',effect_key,'authority_effect',false
+    'command_id',command_id,'idempotency_key',idempotency_key,'action',action,
+    'platform',platform,'payload',payload,'issued_at',issued_at,'expires_at',expires_at,
+    'issued_by',issued_by,'command_lane',command_lane,'effect_key',effect_key,
+    'authority_effect',false
   ) order by issued_at,command_id),'[]'::jsonb) into v_rows from leased;
 
   return jsonb_build_object(
-    'schema','metaengine.native-supervisor.command-batch.v1','commands',v_rows,
-    'leased_count',jsonb_array_length(v_rows),'max_batch',v_batch,'max_tab_mutations',v_mutations,
+    'schema','metaengine.native-supervisor.command-batch.v1',
+    'commands',v_rows,'leased_count',jsonb_array_length(v_rows),
+    'max_batch',v_batch,'max_tab_mutations',v_mutations,
     'transport_delivery_is_authority',false,'automatic_retry_allowed',false,'authority_effect',false
   );
 end;
@@ -218,30 +242,38 @@ begin
 
     select * into v_row
       from public.compute_fabric_a2_browser_supervisor_command_h205f22
-     where workspace_id=p_workspace_id and command_id=v_command_id for update;
+     where workspace_id=p_workspace_id and command_id=v_command_id
+     for update;
     if not found then
-      v_out := v_out || jsonb_build_array(jsonb_build_object('command_id',v_command_id,'accepted',false,'status','NOT_FOUND','authority_effect',false));
+      v_out := v_out || jsonb_build_array(jsonb_build_object(
+        'command_id',v_command_id,'accepted',false,'status','NOT_FOUND','authority_effect',false));
       continue;
     end if;
     if v_row.status<>'LEASED' or v_row.leased_by is distinct from v_client then
-      v_out := v_out || jsonb_build_array(jsonb_build_object('command_id',v_command_id,'accepted',false,'status',v_row.status,'error','supervisor_lease_not_current','authority_effect',false));
+      v_out := v_out || jsonb_build_array(jsonb_build_object(
+        'command_id',v_command_id,'accepted',false,'status',v_row.status,
+        'error','supervisor_lease_not_current','authority_effect',false));
       continue;
     end if;
     if v_row.expires_at<=clock_timestamp() or v_row.leased_at is null
        or v_row.leased_at<=clock_timestamp()-interval '10 minutes' then
-      v_out := v_out || jsonb_build_array(jsonb_build_object('command_id',v_command_id,'accepted',false,'status','EXPIRED','error','supervisor_lease_expired','authority_effect',false));
+      v_out := v_out || jsonb_build_array(jsonb_build_object(
+        'command_id',v_command_id,'accepted',false,'status','EXPIRED',
+        'error','supervisor_lease_expired','authority_effect',false));
       continue;
     end if;
 
     v_outcome := upper(coalesce(v_receipt->>'effect_outcome',''));
     if v_row.command_lane<>'READ_ONLY' and v_ok and v_outcome<>'CONFIRMED' then
       v_ok := false;
-      v_error := case when v_outcome='' then 'postcondition_readback_required' else 'postcondition_not_confirmed:'||left(v_outcome,80) end;
+      v_error := case when v_outcome='' then 'postcondition_readback_required'
+        else 'postcondition_not_confirmed:'||left(v_outcome,80) end;
     end if;
 
     if v_ok and v_row.action=any(v_semantic_effects) then
       if v_row.effect_binding is null
-         or coalesce(v_row.effect_binding->>'schema','') not in ('metaengine.native-supervisor.effect-binding.v1','metaengine.native-supervisor.effect-binding.v2')
+         or coalesce(v_row.effect_binding->>'schema','') not in (
+           'metaengine.native-supervisor.effect-binding.v1','metaengine.native-supervisor.effect-binding.v2')
          or coalesce((v_row.effect_binding->>'authority_effect')::boolean,true) is distinct from false
          or coalesce((v_row.effect_binding->>'page_data_authority')::boolean,true) is distinct from false
          or coalesce((v_row.effect_binding->>'automatic_retry_allowed')::boolean,true) is distinct from false
@@ -267,30 +299,31 @@ begin
        and expires_at>clock_timestamp() and leased_at is not null
        and leased_at>clock_timestamp()-interval '10 minutes';
     if not found then
-      v_out := v_out || jsonb_build_array(jsonb_build_object('command_id',v_command_id,'accepted',false,'status','EXPIRED','error','supervisor_lease_expired_during_completion','authority_effect',false));
+      v_out := v_out || jsonb_build_array(jsonb_build_object(
+        'command_id',v_command_id,'accepted',false,'status','EXPIRED',
+        'error','supervisor_lease_expired_during_completion','authority_effect',false));
       continue;
     end if;
 
     v_out := v_out || jsonb_build_array(jsonb_build_object(
-      'command_id',v_command_id,'accepted',true,'status',case when v_ok then 'COMPLETED' else 'FAILED' end,
+      'command_id',v_command_id,'accepted',true,
+      'status',case when v_ok then 'COMPLETED' else 'FAILED' end,
       'effect_outcome',nullif(v_outcome,''),'authority_effect',v_effect));
   end loop;
 
-  return jsonb_build_object('schema','metaengine.native-supervisor.command-batch-completion.v1','results',v_out,'authority_effect',false);
+  return jsonb_build_object(
+    'schema','metaengine.native-supervisor.command-batch-completion.v1',
+    'results',v_out,'authority_effect',false
+  );
 end;
 $$;
 
 revoke all on function public.h205f22_a2_browser_supervisor_lease_batch_v1(uuid,text,text,integer,integer,integer) from public,anon,authenticated;
 revoke all on function public.h205f22_a2_browser_supervisor_complete_batch_v1(uuid,text,jsonb) from public,anon,authenticated;
--- Production grants belong only in the reviewed release migration.
+grant execute on function public.h205f22_a2_browser_supervisor_lease_batch_v1(uuid,text,text,integer,integer,integer) to service_role;
+grant execute on function public.h205f22_a2_browser_supervisor_complete_batch_v1(uuid,text,jsonb) to service_role;
 
--- Staging proofs:
--- 1. allocator advisory fence prevents GLOBAL-vs-TAB split-brain leasing.
--- 2. distinct exact-tab effects may still execute concurrently after one batch lease.
--- 3. stale/expired leases cannot complete, including completion-time TOCTOU.
--- 4. every successful mutation requires CONFIRMED postcondition readback.
--- 5. semantic effects additionally require immutable sealed effect binding v1/v2.
--- 6. dropped/duplicated wakeups never grant execution authority.
--- 7. no automatic retry follows an ambiguous physical effect.
-
-rollback;
+comment on function public.h205f22_a2_browser_supervisor_lease_batch_v1(uuid,text,text,integer,integer,integer) is
+  'Bounded Browser command batch leasing. Per-client allocation is transaction-fenced; DB lease is sole authority and independent exact-tab effects may execute concurrently after lease.';
+comment on function public.h205f22_a2_browser_supervisor_complete_batch_v1(uuid,text,jsonb) is
+  'Completes a current unexpired Browser lease batch. Mutations require CONFIRMED readback; semantic effects additionally require the exact durable sealed effect binding.';

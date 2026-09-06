@@ -161,7 +161,7 @@ export class BrowserBrainCognitionFabric {
     maxCells = 128,
     factsPerCell = 16,
     maxPlans = 1024,
-    maxAgents = 64,
+    maxAgents = 128,
     maxEvidence = 1024,
     planMaxAgeMs = 60_000,
   } = {}) {
@@ -174,7 +174,7 @@ export class BrowserBrainCognitionFabric {
     this.#maxCells = boundedInt(maxCells, 128, 1, 512);
     this.#factsPerCell = boundedInt(factsPerCell, 16, 1, 64);
     this.#maxPlans = boundedInt(maxPlans, 1024, 1, 8192);
-    this.#maxAgents = boundedInt(maxAgents, 64, 1, 256);
+    this.#maxAgents = boundedInt(maxAgents, 128, 1, 256);
     this.#maxEvidence = boundedInt(maxEvidence, 1024, 1, 8192);
     this.#planMaxAgeMs = boundedInt(planMaxAgeMs, 60_000, 1_000, 10 * 60_000);
   }

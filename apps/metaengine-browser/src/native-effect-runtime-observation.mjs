@@ -9,6 +9,7 @@ const OBSERVATION_ID_RE = /^obs_[a-f0-9]{32}$/;
 const SHA256_RE = /^[a-f0-9]{64}$/;
 const MAX_OBSERVATIONS = 128;
 const MAX_AGE_MS = 180000;
+const MAX_FUTURE_SKEW_MS = 5000;
 const observations = new Map();
 
 const clean = (value) => String(value ?? '').trim();
@@ -43,9 +44,12 @@ function normalizeRuntimeBinding(value = {}) {
 }
 
 function prune(now = Date.now()) {
+  const current = Number(now);
   for (const [key, row] of observations) {
     const observedMs = Date.parse(row.observed_at);
-    if (!Number.isFinite(observedMs) || now - observedMs > MAX_AGE_MS) observations.delete(key);
+    if (!Number.isFinite(observedMs)
+      || current - observedMs > MAX_AGE_MS
+      || observedMs - current > MAX_FUTURE_SKEW_MS) observations.delete(key);
   }
   while (observations.size > MAX_OBSERVATIONS) observations.delete(observations.keys().next().value);
 }
@@ -64,6 +68,7 @@ export function recordNativeEffectRuntimeObservation({
   if (!PROCESS_ID_RE.test(processId)) throw new Error('native_effect_runtime_process_incarnation_invalid');
   if (!TARGET_RE.test(targetId)) throw new Error('native_effect_runtime_target_invalid');
   if (!Number.isFinite(observed.getTime())) throw new Error('native_effect_runtime_observed_at_invalid');
+  if (observed.getTime() - Date.now() > MAX_FUTURE_SKEW_MS) throw new Error('native_effect_runtime_observed_at_future');
   if (!SHA256_RE.test(urlHash)) throw new Error('native_effect_runtime_document_url_hash_invalid');
   const binding = normalizeRuntimeBinding(runtime_binding);
   if (targetId !== `webcontents:${binding.web_contents_id}`) throw new Error('native_effect_runtime_webcontents_target_mismatch');
@@ -94,13 +99,17 @@ export function lookupNativeEffectRuntimeObservation({
   observed_at = null,
   now = Date.now(),
 } = {}) {
-  prune(Number(now));
+  const current = Number(now);
+  if (!Number.isFinite(current)) return null;
+  prune(current);
   const observationId = clean(observation_id).toLowerCase();
   if (!OBSERVATION_ID_RE.test(observationId)) return null;
   const row = observations.get(observationId) || null;
   if (!row) return null;
   const observedMs = Date.parse(row.observed_at);
-  if (!Number.isFinite(observedMs) || Number(now) - observedMs > MAX_AGE_MS) return null;
+  if (!Number.isFinite(observedMs)
+    || current - observedMs > MAX_AGE_MS
+    || observedMs - current > MAX_FUTURE_SKEW_MS) return null;
   if (process_incarnation_id != null && row.process_incarnation_id !== clean(process_incarnation_id).toLowerCase()) return null;
   if (target_id != null && row.target_id !== clean(target_id).toLowerCase()) return null;
   if (observed_at != null) {

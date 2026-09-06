@@ -211,6 +211,21 @@ export function classifyNativeSupervisorCommand(command = {}) {
   });
 }
 
+function schedulerDescriptor(command) {
+  const descriptor = classifyNativeSupervisorCommand(command);
+  if (!TAB_MUTATION_ACTIONS.has(descriptor.action) || explicitTabId(command)) return descriptor;
+  return Object.freeze({
+    ...descriptor,
+    lane: COMMAND_LANES.TAB_MUTATION,
+    effect_key: 'fenced:missing-exact-tab',
+    causal_key: null,
+    exclusive: false,
+    priority: 20,
+    scheduler_target_fenced: true,
+    authority_effect: false,
+  });
+}
+
 function serializeError(error) {
   return String(error?.message || error || 'unknown_error').slice(0, 500);
 }
@@ -226,7 +241,7 @@ function buildPending(commands) {
   const seenReadsByKey = new Map();
   const seenMutationsByKey = new Map();
   return commands.map((command, index) => {
-    const descriptor = classifyNativeSupervisorCommand(command);
+    const descriptor = schedulerDescriptor(command);
     const key = descriptor.causal_key;
     const priorReadCount = key ? Number(seenReadsByKey.get(key) || 0) : 0;
     const priorMutationCount = key ? Number(seenMutationsByKey.get(key) || 0) : 0;
@@ -245,19 +260,6 @@ function buildPending(commands) {
   });
 }
 
-/**
- * Bounded conflict-aware execution pump.
- *
- * Causal predecessor metadata is computed once in O(n). During drain, checking
- * whether a same-tab predecessor is still pending is O(1): compare the item's
- * immutable prefix ordinal with launched counters for that exact causal key.
- * This removes repeated full-batch scans from the command hot path while retaining
- * the proven read/mutation/global barrier semantics.
- *
- * The process-local pressure register contains only concurrency numbers. It is
- * read at scheduling decisions so the one existing scheduler can adapt between
- * batches without exposing the scheduler instance or creating a second queue.
- */
 export class NativeSupervisorCommandLaneScheduler {
   #readConcurrency;
   #mutationConcurrency;
@@ -283,6 +285,8 @@ export class NativeSupervisorCommandLaneScheduler {
       max_batch: this.#maxBatch,
       unknown_actions_exclusive: true,
       implicit_selected_tab_exclusive: true,
+      implicit_selected_tab_scheduler_admission: 'FENCED_NONEXCLUSIVE',
+      exact_tab_mutation_execution_required: true,
       same_tab_mutations_serialized: true,
       same_tab_read_after_write_causal: true,
       same_tab_write_after_read_causal: true,
@@ -465,6 +469,8 @@ export const NATIVE_SUPERVISOR_COMMAND_LANE_CONTRACT = Object.freeze({
   emergency_is_exclusive: true,
   unknown_action_parallelism_allowed: false,
   bounded_backpressure_required: true,
+  exact_tab_mutation_execution_required: true,
+  implicit_selected_tab_scheduler_admission: 'FENCED_NONEXCLUSIVE',
   immutable_original_order_barriers: true,
   causal_dependency_precompute: 'O(n)',
   causal_pending_lookup: 'O(1)',
