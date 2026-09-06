@@ -14,6 +14,7 @@ import { NativeSupervisorClient } from './native-supervisor-client.mjs';
 import { SupervisorDeviceIdentity } from './supervisor-device-identity.mjs';
 import { navigationDecision, newWindowDecision, REMOTE_WEB_PREFERENCES, SECURITY_POLICY } from './browser-policy.mjs';
 import { TabRegistry } from './tab-registry.mjs';
+import { ExactBrowserTabViewMap } from './browser-webcontents-tab-index.mjs';
 import { VerifiedDownloadManager } from './verified-download-manager.mjs';
 import { normalizeShellLayoutState, planShellLayout, SHELL_TOP_HEIGHT } from './shell-layout.mjs';
 import { projectWorkspaceWorkbench } from './workspace-workbench-projection.mjs';
@@ -32,7 +33,7 @@ app.enableSandbox();
 protocol.registerSchemesAsPrivileged([{ scheme: 'metaengine', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: false } }]);
 
 const registry = new TabRegistry();
-const views = new Map();
+const views = new ExactBrowserTabViewMap();
 const bridge = new ComputeBridgeClient();
 let windowRef = null;
 let shellView = null;
