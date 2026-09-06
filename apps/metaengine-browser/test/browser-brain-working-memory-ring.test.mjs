@@ -43,3 +43,33 @@ test('checkpoint restore intentionally clears transient ring while preserving bo
   assert.equal(snapshot.command_leasing, false);
   assert.equal(snapshot.authority_effect, false);
 });
+
+test('mixed-case critical lifecycle events are normalized before state transition checks', () => {
+  const memory = new BrowserBrainWorkingMemory({ maxEvents: 64, maxCells: 8 });
+  memory.rememberBinding({
+    valid: true,
+    tab_id: TAB,
+    binding_generation: 1,
+    web_contents_id: 7,
+    renderer_pid: 77,
+    renderer_process_key: '77:1234',
+    target_id: 'target-7',
+    document_generation: 1,
+    semantic_revision: 1,
+  });
+  assert.equal(memory.context(TAB).status, 'READY');
+
+  const projected = memory.ingestEvent({
+    seq: 2,
+    type: 'web_contents_destroyed',
+    tab_id: TAB,
+    web_contents_id: 7,
+    reason: 'closed',
+  });
+  const context = memory.context(TAB);
+  assert.equal(projected.type, 'WEB_CONTENTS_DESTROYED');
+  assert.equal(context.status, 'GONE');
+  assert.equal(context.binding, null);
+  assert.equal(memory.snapshot().lifecycle_event_type_normalized, true);
+  assert.equal(memory.snapshot().authority_effect, false);
+});
