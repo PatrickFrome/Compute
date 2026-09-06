@@ -25,7 +25,9 @@ function Read-JsonEvidence([string]$Path) {
     return [ordered]@{ read_state = 'ABSENT'; row = $null; sha256 = $null; error = $null }
   }
   try {
-    $raw = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+    # Windows PowerShell 5.1 otherwise applies its legacy default text encoding.
+    # Every durable Browser JSON receipt is UTF-8, so make the decoding explicit.
+    $raw = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 -ErrorAction Stop
     $row = $raw | ConvertFrom-Json -ErrorAction Stop
     $sha256 = (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
     return [ordered]@{ read_state = 'READ'; row = $row; sha256 = $sha256; error = $null }
