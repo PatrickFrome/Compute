@@ -9,6 +9,7 @@ export const BROWSER_REALTIME_PROCESS_PLANE_SCHEMA = 'metaengine.browser.realtim
 const DEFAULT_SAMPLE_MS = 250;
 const DEFAULT_EVENT_LIMIT = 512;
 const DEFAULT_COGNITIVE_EVENT_LIMIT = 4096;
+const MAX_SEMANTIC_ROOT_TARGETS = 128;
 
 function boundedInt(value, fallback, min, max) {
   const parsed = Number(value);
@@ -230,7 +231,7 @@ export class BrowserRealtimeProcessPlane {
   #semanticTargets() {
     let contents = [];
     try { contents = this.#getWebContents() || []; } catch {}
-    return contents.slice(0, 64)
+    return contents.slice(0, MAX_SEMANTIC_ROOT_TARGETS)
       .filter((row) => safeCall(row, 'isDestroyed', true) !== true)
       .map((row) => {
         const id = Number(row?.id);
@@ -431,6 +432,7 @@ export class BrowserRealtimeProcessPlane {
       running: false,
       state: this.#semanticLastError || 'STARTING',
       target_count: 0,
+      target_capacity: MAX_SEMANTIC_ROOT_TARGETS,
       targets: [],
       events: [],
       persistent_cdp_sessions: true,
@@ -479,6 +481,7 @@ export class BrowserRealtimeProcessPlane {
     }
     const exactBound = this.#webContents.filter((row) => row.tab_id != null).length;
     const liveRemote = this.#webContents.filter((row) => row.destroyed !== true).length;
+    const semantic = this.semanticSnapshot({ includeText: false, eventLimit: 64 });
     return Object.freeze({
       schema: BROWSER_REALTIME_PROCESS_PLANE_SCHEMA,
       running: this.#started,
@@ -489,12 +492,15 @@ export class BrowserRealtimeProcessPlane {
       web_contents_count: this.#webContents.length,
       exact_tab_bound_web_contents_count: exactBound,
       unbound_live_web_contents_count: Math.max(0, liveRemote - exactBound),
+      semantic_root_target_capacity: MAX_SEMANTIC_ROOT_TARGETS,
+      chromium_subtarget_count: Number(semantic?.chromium_subtarget_count || 0),
+      chromium_attached_subtarget_count: Number(semantic?.chromium_attached_subtarget_count || 0),
       processes: this.#processes.map((row) => ({ ...row, web_contents: byPid.get(row.pid) || [] })),
       web_contents: this.#webContents.map((row) => ({
         ...row,
         process_key: row.os_pid ? processKeyByPid.get(row.os_pid) || null : null,
       })),
-      semantic_plane: this.semanticSnapshot({ includeText: false, eventLimit: 64 }),
+      semantic_plane: semantic,
       semantic_plane_last_error: this.#semanticLastError,
       main_event_loop_pressure: this.#mainLoopPressure.snapshot(),
       browser_brain: this.brainSnapshot(),
@@ -510,7 +516,7 @@ export class BrowserRealtimeProcessPlane {
       tab_identity_source: 'EXACT_WEBCONTENTS_TAB_INDEX_O1',
       tab_identity_selected_fallback: false,
       tab_identity_url_fallback: false,
-      semantic_source: 'PERSISTENT_CDP_PAGE_DOM_ACCESSIBILITY_RUNTIME_NETWORK',
+      semantic_source: 'PERSISTENT_CDP_PAGE_DOM_ACCESSIBILITY_RUNTIME_NETWORK_TARGET_AUTOATTACH',
       cognitive_delta_source: 'EXISTING_PROCESS_AND_SEMANTIC_EVENTS',
       browser_brain_source: 'SAME_PROCESS_AND_SEMANTIC_EVENT_STREAM',
       browser_brain_second_process_observer: false,
