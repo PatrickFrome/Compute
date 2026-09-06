@@ -37,20 +37,27 @@ export class BrowserBrainStreamClock {
     this.#maxSources = bounded;
   }
 
-  observe(sourceValue, sequenceValue) {
+  #validate(sourceValue, sequenceValue) {
     const source = String(sourceValue || '').trim();
     const sequence = Number(sequenceValue);
     if (!SOURCE_RE.test(source)) throw new TypeError('browser_brain_stream_clock_source_invalid');
     if (!validSequence(sequence)) throw new TypeError('browser_brain_stream_clock_sequence_invalid');
+    return { source, sequence };
+  }
 
-    let state = this.#sources.get(source);
-    if (!state) {
-      if (this.#sources.size >= this.#maxSources) {
-        throw new Error('browser_brain_stream_clock_source_capacity_exceeded');
-      }
-      state = { sequence: 0, resyncRequired: false, gapFrom: null, gapTo: null };
-      this.#sources.set(source, state);
+  #newSource(source, sequence = 0) {
+    if (this.#sources.size >= this.#maxSources) {
+      throw new Error('browser_brain_stream_clock_source_capacity_exceeded');
     }
+    const state = { sequence, resyncRequired: false, gapFrom: null, gapTo: null };
+    this.#sources.set(source, state);
+    return state;
+  }
+
+  observe(sourceValue, sequenceValue) {
+    const { source, sequence } = this.#validate(sourceValue, sequenceValue);
+    let state = this.#sources.get(source);
+    if (!state) state = this.#newSource(source, 0);
 
     if (sequence < state.sequence) {
       return Object.freeze({
@@ -99,11 +106,29 @@ export class BrowserBrainStreamClock {
     });
   }
 
+  /**
+   * Establish one source from an explicit canonical snapshot without replaying
+   * the events that preceded Browser Brain attachment/restart. This is valid only
+   * for a previously unseen source. It advances the local epoch once because the
+   * canonical snapshot itself is one accepted causal observation.
+   */
+  baseline(sourceValue, sequenceValue) {
+    const { source, sequence } = this.#validate(sourceValue, sequenceValue);
+    if (this.#sources.has(source)) throw new Error('browser_brain_stream_clock_baseline_already_initialized');
+    const state = this.#newSource(source, sequence);
+    this.#epoch += 1;
+    return Object.freeze({
+      accepted: true,
+      disposition: 'BASELINED',
+      epoch: this.#epoch,
+      source: freezeRow(source, state),
+      synthetic_replay: false,
+      authority_effect: false,
+    });
+  }
+
   resync(sourceValue, sequenceValue) {
-    const source = String(sourceValue || '').trim();
-    const sequence = Number(sequenceValue);
-    if (!SOURCE_RE.test(source)) throw new TypeError('browser_brain_stream_clock_source_invalid');
-    if (!validSequence(sequence)) throw new TypeError('browser_brain_stream_clock_sequence_invalid');
+    const { source, sequence } = this.#validate(sourceValue, sequenceValue);
     const state = this.#sources.get(source);
     if (!state) throw new Error('browser_brain_stream_clock_source_unknown');
     if (!state.resyncRequired) throw new Error('browser_brain_stream_clock_resync_not_required');
@@ -119,6 +144,7 @@ export class BrowserBrainStreamClock {
       disposition: 'RESYNCED',
       epoch: this.#epoch,
       source: freezeRow(source, state),
+      synthetic_replay: false,
       authority_effect: false,
     });
   }
@@ -134,6 +160,8 @@ export class BrowserBrainStreamClock {
       max_sources: this.#maxSources,
       sources: Object.freeze(sources),
       gap_requires_resync: sources.some((row) => row.resync_required),
+      canonical_baseline_supported: true,
+      synthetic_replay_allowed: false,
       command_leasing: false,
       scheduler_authority: false,
       execution_authority: false,
