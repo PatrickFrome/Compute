@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildNativeEffectBinding, NATIVE_EFFECT_BINDING_SCHEMA_V2 } from '../src/native-effect-binding.mjs';
+import {
+  buildNativeEffectBinding,
+  NATIVE_EFFECT_BINDING_SCHEMA,
+  NATIVE_EFFECT_BINDING_SCHEMA_V2,
+} from '../src/native-effect-binding.mjs';
 import { captureSemanticFrame, executeSemanticCommand } from '../src/native-browser-control.mjs';
 import { releasePersistentBrowserDebugger } from '../src/browser-persistent-cdp-session.mjs';
 import { clearNativeEffectRuntimeObservationsForTest } from '../src/native-effect-runtime-observation.mjs';
@@ -34,6 +38,10 @@ function fakeWebContents() {
     emitMessage(method, params = {}) {
       for (const fn of listeners.get('message') || []) fn({}, method, params, null);
     },
+    emitDetach(reason = 'target_closed') {
+      attached = false;
+      for (const fn of listeners.get('detach') || []) fn({}, reason);
+    },
   };
   const wcListeners = new Map();
   const webContents = {
@@ -65,22 +73,30 @@ function leasedCommand() {
   };
 }
 
-test('v2 effect binding seals the exact hot CDP generation and executes while unchanged', async () => {
+function bindingFromFrame(command, frame, options = {}) {
+  return buildNativeEffectBinding({
+    command,
+    clientId: CLIENT,
+    processIncarnationId: frame.process_incarnation_id,
+    tabId: TAB,
+    targetId: frame.target_id,
+    observedAt: frame.captured_at,
+    runtimeObservationId: frame.runtime_observation_id,
+    ...options,
+  });
+}
+
+test('v2 effect binding seals one exact hot CDP observation and executes while unchanged', async () => {
   clearNativeEffectRuntimeObservationsForTest();
   const { webContents, commands } = fakeWebContents();
   try {
     const frame = await captureSemanticFrame(webContents);
     assert.equal(frame.runtime_binding_observed, true);
+    assert.match(frame.runtime_observation_id, /^obs_[a-f0-9]{32}$/);
     const command = leasedCommand();
-    const binding = buildNativeEffectBinding({
-      command,
-      clientId: CLIENT,
-      processIncarnationId: frame.process_incarnation_id,
-      tabId: TAB,
-      targetId: frame.target_id,
-      observedAt: frame.captured_at,
-    });
+    const binding = bindingFromFrame(command, frame);
     assert.equal(binding.schema, NATIVE_EFFECT_BINDING_SCHEMA_V2);
+    assert.equal(binding.runtime_observation_id, frame.runtime_observation_id);
     assert.equal(binding.web_contents_id, 77);
     assert.equal(binding.renderer_pid, 9001);
     assert.equal(binding.runtime_target_id, 'target-77');
@@ -97,9 +113,9 @@ test('v2 effect binding seals the exact hot CDP generation and executes while un
   }
 });
 
-test('document generation change after seal rejects the mutation before input dispatch', async () => {
+test('missing explicit observation id preserves v1 compatibility instead of guessing a runtime sample', async () => {
   clearNativeEffectRuntimeObservationsForTest();
-  const { webContents, dbg, commands } = fakeWebContents();
+  const { webContents } = fakeWebContents();
   try {
     const frame = await captureSemanticFrame(webContents);
     const command = leasedCommand();
@@ -111,11 +127,47 @@ test('document generation change after seal rejects the mutation before input di
       targetId: frame.target_id,
       observedAt: frame.captured_at,
     });
+    assert.equal(binding.schema, NATIVE_EFFECT_BINDING_SCHEMA);
+    assert.equal('runtime_observation_id' in binding, false);
+    assert.equal('binding_generation' in binding, false);
+  } finally {
+    releasePersistentBrowserDebugger(webContents);
+    clearNativeEffectRuntimeObservationsForTest();
+  }
+});
+
+test('document generation change after seal rejects the mutation before input dispatch', async () => {
+  clearNativeEffectRuntimeObservationsForTest();
+  const { webContents, dbg, commands } = fakeWebContents();
+  try {
+    const frame = await captureSemanticFrame(webContents);
+    const command = leasedCommand();
+    const binding = bindingFromFrame(command, frame);
     dbg.emitMessage('DOM.documentUpdated', {});
 
     await assert.rejects(
       executeSemanticCommand(webContents, { ...command, effect_binding: binding }),
       /native_effect_runtime_(document_generation|binding_generation)_mismatch/,
+    );
+    assert.equal(commands.filter((row) => row.method === 'Input.dispatchMouseEvent' && row.params.type === 'mouseWheel').length, 0);
+  } finally {
+    releasePersistentBrowserDebugger(webContents);
+    clearNativeEffectRuntimeObservationsForTest();
+  }
+});
+
+test('debugger detach and reattach after seal rejects the mutation before input dispatch', async () => {
+  clearNativeEffectRuntimeObservationsForTest();
+  const { webContents, dbg, commands } = fakeWebContents();
+  try {
+    const frame = await captureSemanticFrame(webContents);
+    const command = leasedCommand();
+    const binding = bindingFromFrame(command, frame);
+    dbg.emitDetach('replaced_with_devtools');
+
+    await assert.rejects(
+      executeSemanticCommand(webContents, { ...command, effect_binding: binding }),
+      /native_effect_runtime_(attachment_generation|binding_generation)_mismatch/,
     );
     assert.equal(commands.filter((row) => row.method === 'Input.dispatchMouseEvent' && row.params.type === 'mouseWheel').length, 0);
   } finally {
@@ -130,14 +182,7 @@ test('URL change after seal rejects the mutation even when the CDP generation ha
   try {
     const frame = await captureSemanticFrame(webContents);
     const command = leasedCommand();
-    const binding = buildNativeEffectBinding({
-      command,
-      clientId: CLIENT,
-      processIncarnationId: frame.process_incarnation_id,
-      tabId: TAB,
-      targetId: frame.target_id,
-      observedAt: frame.captured_at,
-    });
+    const binding = bindingFromFrame(command, frame);
     setUrl('https://chatgpt.com/c/new-document');
 
     await assert.rejects(
