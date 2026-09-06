@@ -21,8 +21,8 @@ function freezeRow(source, state) {
  *
  * It provides one monotonic local epoch across independent process, semantic,
  * CDP and command-wake streams while retaining each producer's own sequence.
- * Delivery is never authority: a gap marks that source for canonical resync and
- * does not synthesize or replay missing observations.
+ * Delivery is never authority: after a source is baselined, a gap marks that
+ * source for canonical resync and does not synthesize/replay missing observations.
  */
 export class BrowserBrainStreamClock {
   #sources = new Map();
@@ -57,7 +57,19 @@ export class BrowserBrainStreamClock {
   observe(sourceValue, sequenceValue) {
     const { source, sequence } = this.#validate(sourceValue, sequenceValue);
     let state = this.#sources.get(source);
-    if (!state) state = this.#newSource(source, 0);
+    if (!state) {
+      state = this.#newSource(source, sequence);
+      this.#epoch += 1;
+      return Object.freeze({
+        accepted: true,
+        disposition: 'BASELINED',
+        epoch: this.#epoch,
+        source: freezeRow(source, state),
+        initial_observation: true,
+        synthetic_replay: false,
+        authority_effect: false,
+      });
+    }
 
     if (sequence < state.sequence) {
       return Object.freeze({
@@ -122,6 +134,7 @@ export class BrowserBrainStreamClock {
       disposition: 'BASELINED',
       epoch: this.#epoch,
       source: freezeRow(source, state),
+      initial_observation: false,
       synthetic_replay: false,
       authority_effect: false,
     });
@@ -160,6 +173,7 @@ export class BrowserBrainStreamClock {
       max_sources: this.#maxSources,
       sources: Object.freeze(sources),
       gap_requires_resync: sources.some((row) => row.resync_required),
+      first_observation_establishes_baseline: true,
       canonical_baseline_supported: true,
       synthetic_replay_allowed: false,
       command_leasing: false,
