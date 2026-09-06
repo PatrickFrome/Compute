@@ -120,8 +120,38 @@ test('lifecycle edge immediately invalidates exact memory while pressure consume
   assert.equal(coordinator.binding(TAB_A), null);
   assert.equal(coordinator.context(TAB_A).status, 'GONE');
   assert.equal(result.pressure.projection.recent_crashes, 1);
+  assert.equal(result.pressure_evaluated, true);
   assert.equal(result.command_leasing, false);
   assert.equal(result.authority_effect, false);
+});
+
+test('semantic burst updates memory but reuses the last resource pressure evaluation', () => {
+  const coordinator = new BrowserBrainContinuousCoordinator({
+    scheduler: new NativeSupervisorCommandLaneScheduler(),
+    executeRuntimeFenced: async () => ({ ok: true }),
+  });
+  coordinator.reconcile(processSnapshot());
+  const before = coordinator.snapshot();
+  const semantic = {
+    seq: 11,
+    type: 'SEMANTIC_EVENT',
+    tab_id: TAB_A,
+    web_contents_id: 101,
+    target_id: 'target-a',
+    semantic_method: 'Accessibility.nodesUpdated',
+    semantic_sequence: 8,
+    observed_at: '2026-09-06T10:30:00.010Z',
+  };
+  const result = coordinator.observeEdge(semantic, {
+    process_snapshot: processSnapshot({ sequence: 11, events: [semantic] }),
+  });
+  const after = coordinator.snapshot();
+
+  assert.equal(result.pressure_evaluated, false);
+  assert.equal(after.pressure_evaluation_count, before.pressure_evaluation_count);
+  assert.equal(after.pressure_reuse_count, before.pressure_reuse_count + 1);
+  assert.equal(coordinator.binding(TAB_A).semantic_revision, 8);
+  assert.deepEqual(after.pressure_budget, before.pressure_budget);
 });
 
 test('ambiguous physical failure is surfaced exactly once with no coordinator retry', async () => {
