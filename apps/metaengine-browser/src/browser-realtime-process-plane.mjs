@@ -1,5 +1,6 @@
 import { BrowserRealtimeSemanticPlane } from './browser-realtime-semantic-plane.mjs';
 import { BrowserCognitiveDeltaBus } from './browser-cognitive-delta-bus.mjs';
+import { resolveTabIdForWebContents } from './browser-webcontents-tab-index.mjs';
 
 export const BROWSER_REALTIME_PROCESS_PLANE_SCHEMA = 'metaengine.browser.realtime-process-plane.v1';
 
@@ -127,7 +128,7 @@ export class BrowserRealtimeProcessPlane {
   constructor({
     app,
     getWebContents,
-    resolveTabId = null,
+    resolveTabId = resolveTabIdForWebContents,
     clock = () => Date.now(),
     sampleMs = DEFAULT_SAMPLE_MS,
     eventLimit = DEFAULT_EVENT_LIMIT,
@@ -407,6 +408,8 @@ export class BrowserRealtimeProcessPlane {
       });
       byPid.set(row.os_pid, list);
     }
+    const exactBound = this.#webContents.filter((row) => row.tab_id != null).length;
+    const liveRemote = this.#webContents.filter((row) => row.destroyed !== true).length;
     return Object.freeze({
       schema: BROWSER_REALTIME_PROCESS_PLANE_SCHEMA,
       running: this.#started,
@@ -415,6 +418,8 @@ export class BrowserRealtimeProcessPlane {
       sample_interval_ms: this.#sampleMs,
       process_count: this.#processes.length,
       web_contents_count: this.#webContents.length,
+      exact_tab_bound_web_contents_count: exactBound,
+      unbound_live_web_contents_count: Math.max(0, liveRemote - exactBound),
       processes: this.#processes.map((row) => ({ ...row, web_contents: byPid.get(row.pid) || [] })),
       web_contents: this.#webContents.map((row) => ({
         ...row,
@@ -431,6 +436,9 @@ export class BrowserRealtimeProcessPlane {
       process_identity_source: 'ELECTRON_PROCESS_METRIC_PID_PLUS_CREATION_TIME',
       process_identity_pid_reuse_safe: true,
       renderer_identity_source: 'ELECTRON_WEB_CONTENTS_OS_PID_PLUS_PROCESS_METRIC_CREATION_TIME',
+      tab_identity_source: 'EXACT_WEBCONTENTS_TAB_INDEX_O1',
+      tab_identity_selected_fallback: false,
+      tab_identity_url_fallback: false,
       semantic_source: 'PERSISTENT_CDP_PAGE_DOM_ACCESSIBILITY_RUNTIME_NETWORK',
       cognitive_delta_source: 'EXISTING_PROCESS_AND_SEMANTIC_EVENTS',
       cognitive_delta_second_scheduler: false,
