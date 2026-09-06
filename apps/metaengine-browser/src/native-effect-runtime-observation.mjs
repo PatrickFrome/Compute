@@ -4,7 +4,6 @@ export const NATIVE_EFFECT_RUNTIME_OBSERVATION_SCHEMA = 'metaengine.native-super
 
 const PROCESS_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TARGET_RE = /^webcontents:[1-9][0-9]*$/;
-const RUNTIME_TARGET_RE = /^[A-Za-z0-9._:-]{1,192}$/;
 const OBSERVATION_ID_RE = /^obs_[a-f0-9]{32}$/;
 const SHA256_RE = /^[a-f0-9]{64}$/;
 const MAX_OBSERVATIONS = 128;
@@ -31,7 +30,7 @@ function normalizeRuntimeBinding(value = {}) {
   if (!webContentsId || !rendererPid || !attachmentGeneration || !documentGeneration || !bindingGeneration) {
     throw new Error('native_effect_runtime_binding_generation_invalid');
   }
-  if (!RUNTIME_TARGET_RE.test(runtimeTargetId)) throw new Error('native_effect_runtime_target_id_invalid');
+  if (!runtimeTargetId || runtimeTargetId.length > 192) throw new Error('native_effect_runtime_target_id_invalid');
   return Object.freeze({
     web_contents_id: webContentsId,
     renderer_pid: rendererPid,
