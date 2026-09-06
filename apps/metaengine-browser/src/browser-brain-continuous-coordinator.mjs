@@ -5,7 +5,7 @@ import { BrowserControlPressureGovernor } from './browser-control-pressure-gover
 import { BrowserBrainCognitionFabric } from './browser-brain-cognition-fabric.mjs';
 import { applyNativeSupervisorCommandPressureBudget } from './native-supervisor-command-lanes.mjs';
 
-export const BROWSER_BRAIN_CONTINUOUS_COORDINATOR_SCHEMA = 'metaengine.browser-brain.continuous-coordinator.v2';
+export const BROWSER_BRAIN_CONTINUOUS_COORDINATOR_SCHEMA = 'metaengine.browser-brain.continuous-coordinator.v1';
 
 const PRESSURE_RELEVANT_EVENTS = new Set([
   'METRICS_SAMPLE',
@@ -247,7 +247,7 @@ export class BrowserBrainContinuousCoordinator {
       authority_effect: false,
     });
     return Object.freeze({
-      schema: 'metaengine.browser-brain.continuous-edge-result.v2',
+      schema: 'metaengine.browser-brain.continuous-edge-result.v1',
       cognition: this.#lastCognitionResult,
       observation: observed,
       pressure,
