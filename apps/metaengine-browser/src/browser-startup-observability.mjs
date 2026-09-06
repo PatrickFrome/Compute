@@ -330,16 +330,8 @@ export function activateExistingPrimaryWindow(BaseWindow) {
     const target = focused && windows.includes(focused) ? focused : windows[0];
     const wasMinimized = typeof target.isMinimized === 'function' && target.isMinimized() === true;
     if (wasMinimized && typeof target.restore === 'function') target.restore();
-
-    // Keep secondary activation idempotent once the primary window has already
-    // reached the requested visible/focused state. Avoiding redundant native
-    // show/focus transitions reduces Windows handle churn during activation
-    // bursts while preserving the fail-safe behavior for unknown window state.
-    const visibleNow = typeof target.isVisible === 'function' ? target.isVisible() === true : null;
-    if (visibleNow !== true && typeof target.show === 'function') target.show();
-    const focusedNow = typeof target.isFocused === 'function' ? target.isFocused() === true : false;
-    if (!focusedNow && typeof target.focus === 'function') target.focus();
-
+    if (typeof target.show === 'function') target.show();
+    if (typeof target.focus === 'function') target.focus();
     return Object.freeze({
       ok: true,
       reason: 'PRIMARY_WINDOW_ACTIVATED',
