@@ -19,6 +19,12 @@ function positiveInt(value) {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+function processKeyPid(value) {
+  const key = String(value || '');
+  if (!PROCESS_KEY_RE.test(key)) return null;
+  return positiveInt(key.slice(0, key.indexOf(':')));
+}
+
 function exactTargetId(value, webContentsId) {
   const raw = text(value, 192);
   if (raw) return raw;
@@ -59,7 +65,7 @@ function processKeyByPid(snapshot) {
   for (const row of Array.isArray(snapshot?.processes) ? snapshot.processes : []) {
     const pid = positiveInt(row?.pid);
     const key = text(row?.process_key, 128);
-    if (pid && key && PROCESS_KEY_RE.test(key)) map.set(pid, key);
+    if (pid && key && PROCESS_KEY_RE.test(key) && processKeyPid(key) === pid) map.set(pid, key);
   }
   return map;
 }
@@ -133,6 +139,9 @@ export class BrowserRuntimeBindingIndex {
     const rendererPid = positiveInt(renderer_pid);
     const processKey = text(renderer_process_key, 128);
     if (processKey && !PROCESS_KEY_RE.test(processKey)) throw new Error('browser_runtime_binding_process_key_invalid');
+    if (rendererPid && processKey && processKeyPid(processKey) !== rendererPid) {
+      throw new Error('browser_runtime_binding_process_key_pid_mismatch');
+    }
     const cellId = cell_id == null ? null : String(cell_id);
     if (cellId != null && !CELL_ID_RE.test(cellId)) throw new Error('browser_runtime_binding_cell_id_invalid');
     const cellGeneration = cell_generation == null ? null : positiveInt(cell_generation);
@@ -304,6 +313,7 @@ export class BrowserRuntimeBindingIndex {
       live_binding_count: rows.filter((row) => row.valid).length,
       exact_lookup_complexity: 'O(1)',
       pid_reuse_protection: 'PID_PLUS_PROCESS_CREATION_TIME',
+      process_key_pid_consistency_required: true,
       stale_binding_execution_allowed: false,
       incomplete_process_identity_execution_allowed: false,
       bindings: rows,
