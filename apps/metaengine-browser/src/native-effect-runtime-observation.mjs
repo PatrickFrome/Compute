@@ -1,11 +1,14 @@
+import crypto from 'node:crypto';
+
 export const NATIVE_EFFECT_RUNTIME_OBSERVATION_SCHEMA = 'metaengine.native-supervisor.effect-runtime-observation.v1';
 
 const PROCESS_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TARGET_RE = /^webcontents:[1-9][0-9]*$/;
 const RUNTIME_TARGET_RE = /^[A-Za-z0-9._:-]{1,192}$/;
+const OBSERVATION_ID_RE = /^obs_[a-f0-9]{32}$/;
 const SHA256_RE = /^[a-f0-9]{64}$/;
 const MAX_OBSERVATIONS = 128;
-const MAX_AGE_MS = 120000;
+const MAX_AGE_MS = 180000;
 const observations = new Map();
 
 const clean = (value) => String(value ?? '').trim();
@@ -14,8 +17,8 @@ const positiveInt = (value) => {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 };
 
-function keyOf(processIncarnationId, targetId, observedAt) {
-  return `${clean(processIncarnationId).toLowerCase()}\u0000${clean(targetId).toLowerCase()}\u0000${clean(observedAt)}`;
+function newObservationId() {
+  return `obs_${crypto.randomUUID().replaceAll('-', '').toLowerCase()}`;
 }
 
 function normalizeRuntimeBinding(value = {}) {
@@ -65,8 +68,10 @@ export function recordNativeEffectRuntimeObservation({
   const binding = normalizeRuntimeBinding(runtime_binding);
   if (targetId !== `webcontents:${binding.web_contents_id}`) throw new Error('native_effect_runtime_webcontents_target_mismatch');
 
+  const observationId = newObservationId();
   const row = Object.freeze({
     schema: NATIVE_EFFECT_RUNTIME_OBSERVATION_SCHEMA,
+    observation_id: observationId,
     process_incarnation_id: processId,
     target_id: targetId,
     observed_at: observed.toISOString(),
@@ -77,17 +82,31 @@ export function recordNativeEffectRuntimeObservation({
     authority_effect: false,
   });
   prune();
-  observations.set(keyOf(processId, targetId, row.observed_at), row);
+  observations.set(observationId, row);
   prune();
   return row;
 }
 
-export function lookupNativeEffectRuntimeObservation({ process_incarnation_id, target_id, observed_at, now = Date.now() } = {}) {
+export function lookupNativeEffectRuntimeObservation({
+  observation_id,
+  process_incarnation_id = null,
+  target_id = null,
+  observed_at = null,
+  now = Date.now(),
+} = {}) {
   prune(Number(now));
-  const row = observations.get(keyOf(process_incarnation_id, target_id, observed_at)) || null;
+  const observationId = clean(observation_id).toLowerCase();
+  if (!OBSERVATION_ID_RE.test(observationId)) return null;
+  const row = observations.get(observationId) || null;
   if (!row) return null;
   const observedMs = Date.parse(row.observed_at);
   if (!Number.isFinite(observedMs) || Number(now) - observedMs > MAX_AGE_MS) return null;
+  if (process_incarnation_id != null && row.process_incarnation_id !== clean(process_incarnation_id).toLowerCase()) return null;
+  if (target_id != null && row.target_id !== clean(target_id).toLowerCase()) return null;
+  if (observed_at != null) {
+    const exactObserved = new Date(observed_at);
+    if (!Number.isFinite(exactObserved.getTime()) || row.observed_at !== exactObserved.toISOString()) return null;
+  }
   return row;
 }
 
