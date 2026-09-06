@@ -15,6 +15,16 @@ function normalizeTargetError(error) {
   throw error;
 }
 
+function nativeTarget(resolved) {
+  const role = String(resolved?.role || '').trim().toLowerCase();
+  const name = String(resolved?.name || '').trim();
+  const backendNodeId = Number(resolved?.backend_node_id || 0);
+  if (!role || !name || !Number.isSafeInteger(backendNodeId) || backendNodeId < 1) {
+    throw new Error('native_semantic_target_invalid');
+  }
+  return Object.freeze({ role, name, backend_node_id: backendNodeId });
+}
+
 export class BrowserNativeSemanticHotPath {
   #adapter;
 
@@ -38,10 +48,11 @@ export class BrowserNativeSemanticHotPath {
     assertProjectTargets(projectTargets);
     try {
       const resolved = await this.#adapter.resolve({ dbg, role, name, projectTargets });
+      const source = String(resolved?.resolution || '');
       return Object.freeze({
-        target: resolved.target,
-        source: resolved.source,
-        revalidated: resolved.revalidated === true,
+        target: nativeTarget(resolved),
+        source,
+        revalidated: source === 'CACHE_REVALIDATED',
         authority_effect: false,
       });
     } catch (error) {
