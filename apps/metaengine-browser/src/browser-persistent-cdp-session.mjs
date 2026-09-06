@@ -36,6 +36,7 @@ function rowProjection(row) {
     os_pid: Number(safeCall(row.webContents, 'getOSProcessId', 0)) || null,
     attached: row.dbg?.isAttached?.() === true,
     ready: row.ready === true,
+    event_stream_capable: row.eventCapable === true,
     attachment_generation: row.attachmentGeneration,
     document_generation: row.documentGeneration,
     binding_generation: row.bindingGeneration,
@@ -44,7 +45,7 @@ function rowProjection(row) {
     last_detach_reason: row.lastDetachReason,
     last_error: row.lastError,
     subscriber_count: row.subscribers.size,
-    domains: row.ready ? ['PAGE','DOM','ACCESSIBILITY','RUNTIME','NETWORK'] : [],
+    domains: row.ready && row.eventCapable ? ['PAGE','DOM','ACCESSIBILITY','RUNTIME','NETWORK'] : [],
     raw_cdp_passthrough: false,
     control_authority: false,
     command_leasing: false,
@@ -68,14 +69,16 @@ export class PersistentBrowserCdpSessionPool {
     if (existing) this.release(existing.webContents);
 
     const dbg = webContents.debugger;
-    if (!dbg || typeof dbg.attach !== 'function' || typeof dbg.sendCommand !== 'function' || typeof dbg.on !== 'function') {
+    if (!dbg || typeof dbg.attach !== 'function' || typeof dbg.sendCommand !== 'function') {
       throw new Error('persistent_cdp_debugger_unavailable');
     }
+    const eventCapable = typeof dbg.on === 'function';
 
     const row = {
       id,
       webContents,
       dbg,
+      eventCapable,
       targetId: targetIdOf(webContents),
       subscribers: new Set(),
       ensurePromise: null,
@@ -146,8 +149,10 @@ export class PersistentBrowserCdpSessionPool {
     };
 
     row.destroyedHandler = () => { this.release(webContents); };
-    dbg.on('message', row.messageHandler);
-    dbg.on('detach', row.detachHandler);
+    if (eventCapable) {
+      dbg.on('message', row.messageHandler);
+      dbg.on('detach', row.detachHandler);
+    }
     webContents.once?.('destroyed', row.destroyedHandler);
     this.#rows.set(id, row);
     return row;
@@ -170,13 +175,15 @@ export class PersistentBrowserCdpSessionPool {
       row.attachedByPool = true;
     }
 
-    await row.dbg.sendCommand('Page.enable');
-    await row.dbg.sendCommand('DOM.enable');
-    await row.dbg.sendCommand('Accessibility.enable');
-    await row.dbg.sendCommand('Runtime.enable');
-    await row.dbg.sendCommand('Page.setLifecycleEventsEnabled', { enabled: true });
-    await row.dbg.sendCommand('Network.enable').catch(() => null);
-    await row.dbg.sendCommand('DOM.getDocument', { depth: 1, pierce: true }).catch(() => null);
+    if (row.eventCapable) {
+      await row.dbg.sendCommand('Page.enable');
+      await row.dbg.sendCommand('DOM.enable');
+      await row.dbg.sendCommand('Accessibility.enable');
+      await row.dbg.sendCommand('Runtime.enable');
+      await row.dbg.sendCommand('Page.setLifecycleEventsEnabled', { enabled: true });
+      await row.dbg.sendCommand('Network.enable').catch(() => null);
+      await row.dbg.sendCommand('DOM.getDocument', { depth: 1, pierce: true }).catch(() => null);
+    }
 
     row.targetId = targetIdOf(row.webContents);
     row.ready = true;
@@ -202,7 +209,7 @@ export class PersistentBrowserCdpSessionPool {
     return row.ensurePromise;
   }
 
-  identity(webContents, { require_ready = true } = {}) {
+  identity(webContents, { require_ready = true, require_event_stream = true } = {}) {
     if (!liveWebContents(webContents)) return null;
     let id;
     try { id = exactId(webContents); } catch { return null; }
@@ -210,12 +217,14 @@ export class PersistentBrowserCdpSessionPool {
     if (!row || row.webContents !== webContents) return null;
     const projection = rowProjection(row);
     if (require_ready && (projection.ready !== true || projection.attached !== true)) return null;
+    if (require_event_stream && projection.event_stream_capable !== true) return null;
     return projection;
   }
 
   subscribe(webContents, listener) {
     if (typeof listener !== 'function') throw new Error('persistent_cdp_listener_required');
     const row = this.#row(webContents);
+    if (!row.eventCapable) throw new Error('persistent_cdp_event_stream_unavailable');
     row.subscribers.add(listener);
     return () => { row.subscribers.delete(listener); };
   }
@@ -259,6 +268,7 @@ export class PersistentBrowserCdpSessionPool {
       session_count: sessions.length,
       ready_count: sessions.filter((row) => row.ready).length,
       attached_count: sessions.filter((row) => row.attached).length,
+      event_stream_count: sessions.filter((row) => row.event_stream_capable).length,
       sessions,
       attach_per_command: false,
       persistent_transport: true,
@@ -280,14 +290,14 @@ export async function withPersistentBrowserDebugger(webContents, fn) {
   await nativeBrowserCdpPool.ensure(webContents);
   const adapter = Object.freeze({
     sendCommand: (method, params = {}, sessionId = null) => nativeBrowserCdpPool.send(webContents, method, params, sessionId),
-    bindingIdentity: () => nativeBrowserCdpPool.identity(webContents, { require_ready: true }),
+    bindingIdentity: () => nativeBrowserCdpPool.identity(webContents, { require_ready: true, require_event_stream: true }),
   });
   return fn(adapter);
 }
 
 export async function persistentBrowserDebuggerBinding(webContents) {
   await nativeBrowserCdpPool.ensure(webContents);
-  const identity = nativeBrowserCdpPool.identity(webContents, { require_ready: true });
+  const identity = nativeBrowserCdpPool.identity(webContents, { require_ready: true, require_event_stream: true });
   if (!identity) throw new Error('persistent_cdp_binding_identity_unavailable');
   return identity;
 }
