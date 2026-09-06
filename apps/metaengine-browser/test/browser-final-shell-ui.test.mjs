@@ -8,6 +8,7 @@ const app = await readFile(new URL('../ui/app.js', import.meta.url), 'utf8');
 const styleMatch = html.match(/<style data-final-shell>([\s\S]*?)<\/style>/);
 assert.ok(styleMatch, 'final shell style must exist');
 const style = styleMatch[1];
+const executableStyle = style.replace(/\/\*[\s\S]*?\*\//g, '');
 const csp = html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/)?.[1] || '';
 
 function escapeRegex(value) {
@@ -19,7 +20,7 @@ test('final shell presentation is cryptographically pinned and introduces no exe
   assert.match(csp, new RegExp(`style-src 'self' 'sha256-${escapeRegex(digest)}'`));
   assert.doesNotMatch(csp, /unsafe-inline|unsafe-eval/i);
   assert.equal((html.match(/<script\b/g) || []).length, 2, 'final shell must not add another script/control path');
-  assert.doesNotMatch(style, /url\s*\(|@import|javascript:|expression\s*\(/i);
+  assert.doesNotMatch(executableStyle, /url\s*\(|@import|javascript:|expression\s*\(/i);
 });
 
 test('shell exposes the exact active BrowserCell and keyboard-first command grammar', () => {
@@ -52,8 +53,8 @@ test('Telegram-like rail and browser inspector remain inside canonical native in
 });
 
 test('final UI does not create scheduling, lease, retry or page-model authority', () => {
-  assert.doesNotMatch(style, /scheduler|lease|retry|command_id|tab_id|agent_id|workspace_id/i);
-  assert.doesNotMatch(html.match(/<style data-final-shell>[\s\S]*?<\/style>/)?.[0] || '', /api\.command|metaengineShell|fetch\s*\(|WebSocket|EventSource/);
+  assert.doesNotMatch(executableStyle, /scheduler|lease|retry|command_id|tab_id|agent_id|workspace_id/i);
+  assert.doesNotMatch(executableStyle, /api\.command|metaengineShell|fetch\s*\(|WebSocket|EventSource/);
   assert.match(app, /Browser actuation authority', 'NONE'/);
   assert.match(app, /Scheduler authority', 'NONE'/);
   assert.match(app, /Automatic effect retry', 'NONE'/);
