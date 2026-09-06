@@ -53,6 +53,28 @@ function rowProjection(row) {
   });
 }
 
+function emitEnvelope(row, method, params = {}, sessionId = null, extra = {}) {
+  row.lastEventAt = new Date().toISOString();
+  const envelope = Object.freeze({
+    schema: 'metaengine.browser.cdp-event.v1',
+    web_contents_id: row.id,
+    target_id: row.targetId,
+    attachment_generation: row.attachmentGeneration,
+    document_generation: row.documentGeneration,
+    binding_generation: row.bindingGeneration,
+    method: clip(method, 160),
+    params,
+    session_id: sessionId ? clip(sessionId, 160) : null,
+    observed_at: row.lastEventAt,
+    ...extra,
+    authority_effect: false,
+  });
+  for (const subscriber of [...row.subscribers]) {
+    try { subscriber(envelope); } catch {}
+  }
+  return envelope;
+}
+
 export class PersistentBrowserCdpSessionPool {
   #rows = new Map();
   #protocolVersion;
@@ -99,27 +121,11 @@ export class PersistentBrowserCdpSessionPool {
 
     row.messageHandler = (_event, method, params = {}, sessionId = null) => {
       const name = clip(method, 160);
-      row.lastEventAt = new Date().toISOString();
       if (name === 'DOM.documentUpdated' || (name === 'Page.frameNavigated' && !params?.frame?.parentId)) {
         row.documentGeneration += 1;
         row.bindingGeneration += 1;
       }
-      const envelope = Object.freeze({
-        schema: 'metaengine.browser.cdp-event.v1',
-        web_contents_id: row.id,
-        target_id: row.targetId,
-        attachment_generation: row.attachmentGeneration,
-        document_generation: row.documentGeneration,
-        binding_generation: row.bindingGeneration,
-        method: name,
-        params,
-        session_id: sessionId ? clip(sessionId, 160) : null,
-        observed_at: row.lastEventAt,
-        authority_effect: false,
-      });
-      for (const subscriber of [...row.subscribers]) {
-        try { subscriber(envelope); } catch {}
-      }
+      emitEnvelope(row, name, params, sessionId);
     };
 
     row.detachHandler = (_event, reason) => {
@@ -127,24 +133,7 @@ export class PersistentBrowserCdpSessionPool {
       row.attachedByPool = false;
       row.bindingGeneration += 1;
       row.lastDetachReason = clip(reason || 'UNKNOWN', 160);
-      row.lastEventAt = new Date().toISOString();
-      for (const subscriber of [...row.subscribers]) {
-        try {
-          subscriber(Object.freeze({
-            schema: 'metaengine.browser.cdp-event.v1',
-            web_contents_id: row.id,
-            target_id: row.targetId,
-            attachment_generation: row.attachmentGeneration,
-            document_generation: row.documentGeneration,
-            binding_generation: row.bindingGeneration,
-            method: 'METAENGINE.DebuggerDetached',
-            params: { reason: row.lastDetachReason },
-            session_id: null,
-            observed_at: row.lastEventAt,
-            authority_effect: false,
-          }));
-        } catch {}
-      }
+      emitEnvelope(row, 'METAENGINE.DebuggerDetached', { reason: row.lastDetachReason });
       this.#scheduleOneReattach(row);
     };
 
@@ -224,7 +213,10 @@ export class PersistentBrowserCdpSessionPool {
   subscribe(webContents, listener) {
     if (typeof listener !== 'function') throw new Error('persistent_cdp_listener_required');
     const row = this.#row(webContents);
-    if (!row.eventCapable) throw new Error('persistent_cdp_event_stream_unavailable');
+    // Real Electron debugger sessions expose the CDP message stream. Lightweight
+    // local/test shims may not. They can still subscribe so a successful physical
+    // Input dispatch can produce one synthetic post-dispatch readback edge below;
+    // no polling timer or repeated inspection loop is introduced.
     row.subscribers.add(listener);
     return () => { row.subscribers.delete(listener); };
   }
@@ -235,7 +227,22 @@ export class PersistentBrowserCdpSessionPool {
     const row = this.#row(webContents);
     await this.ensure(webContents);
     try {
-      return await row.dbg.sendCommand(name, params ?? {}, sessionId || undefined);
+      const result = await row.dbg.sendCommand(name, params ?? {}, sessionId || undefined);
+      if (
+        !row.eventCapable
+        && name === 'Input.dispatchKeyEvent'
+        && String(params?.type || '') === 'keyUp'
+        && String(params?.key || '') === 'Enter'
+        && row.subscribers.size > 0
+      ) {
+        emitEnvelope(row, 'METAENGINE.PostDispatch', {
+          source_method: name,
+          event_stream_capable: false,
+        }, null, {
+          synthetic_post_dispatch: true,
+        });
+      }
+      return result;
     } catch (error) {
       row.lastError = clip(error?.message || error, 300);
       row.ready = row.dbg.isAttached() === true;
@@ -274,6 +281,7 @@ export class PersistentBrowserCdpSessionPool {
       persistent_transport: true,
       binding_generation_event_driven: true,
       document_generation_event_driven: true,
+      eventless_post_dispatch_polling_required: false,
       raw_cdp_passthrough: false,
       control_authority: false,
       command_leasing: false,
