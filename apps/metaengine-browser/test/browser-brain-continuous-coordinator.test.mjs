@@ -100,6 +100,7 @@ test('lifecycle edge immediately invalidates exact memory while pressure consume
   const coordinator = new BrowserBrainContinuousCoordinator({
     scheduler,
     executeRuntimeFenced: async () => ({ ok: true }),
+    clock: () => Date.parse('2026-09-06T10:30:00.020Z'),
   });
   coordinator.reconcile(processSnapshot());
 
