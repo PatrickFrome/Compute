@@ -19,10 +19,35 @@ function command(commandId, tabId, extra = {}) {
   };
 }
 
+function coordinator(overrides = {}) {
+  return new BrowserBrainParallelFanoutCoordinator({
+    readMutationBudget: () => 8,
+    execute: async () => undefined,
+    ...overrides,
+  });
+}
+
+async function expectPlanReject({ commands, code, overrides = {}, signal }) {
+  let effects = 0;
+  const instance = coordinator({
+    ...overrides,
+    execute: async (...args) => {
+      effects += 1;
+      return overrides.execute?.(...args);
+    },
+  });
+
+  await assert.rejects(
+    instance.dispatch(commands, { signal }),
+    (error) => error instanceof BrowserBrainFanoutPlanError && error.code === code,
+  );
+  assert.equal(effects, 0);
+}
+
 test('starts independent BrowserCell effects concurrently after one-shot admission', async () => {
   const started = [];
   const releases = new Map();
-  const coordinator = new BrowserBrainParallelFanoutCoordinator({
+  const instance = coordinator({
     readMutationBudget: () => 2,
     execute: async (_command, context) => {
       started.push(context.browserCell);
@@ -31,7 +56,7 @@ test('starts independent BrowserCell effects concurrently after one-shot admissi
     },
   });
 
-  const dispatchPromise = coordinator.dispatch([
+  const dispatchPromise = instance.dispatch([
     command('cmd-a', 'tab-a'),
     command('cmd-b', 'tab-b'),
   ]);
@@ -42,56 +67,32 @@ test('starts independent BrowserCell effects concurrently after one-shot admissi
   releases.get('tab-a')();
   releases.get('tab-b')();
   const result = await dispatchPromise;
-
   assert.deepEqual(result.map((entry) => entry.status), ['fulfilled', 'fulfilled']);
 });
 
-test('rejects pressure overflow before any physical effect', async () => {
-  let effects = 0;
-  const coordinator = new BrowserBrainParallelFanoutCoordinator({
-    readMutationBudget: () => 1,
-    execute: async () => {
-      effects += 1;
+test('admission failures reject before any physical effect', async (t) => {
+  const cases = [
+    {
+      name: 'pressure overflow',
+      commands: [command('cmd-a', 'tab-a'), command('cmd-b', 'tab-b')],
+      code: 'pressure_budget_exceeded',
+      overrides: { readMutationBudget: () => 1 },
     },
-  });
-
-  await assert.rejects(
-    coordinator.dispatch([command('cmd-a', 'tab-a'), command('cmd-b', 'tab-b')]),
-    (error) => error instanceof BrowserBrainFanoutPlanError && error.code === 'pressure_budget_exceeded',
-  );
-  assert.equal(effects, 0);
-});
-
-test('rejects same-cell overlap before any effect instead of hiding a queue', async () => {
-  let effects = 0;
-  const coordinator = new BrowserBrainParallelFanoutCoordinator({
-    readMutationBudget: () => 8,
-    execute: async () => {
-      effects += 1;
+    {
+      name: 'same-cell overlap',
+      commands: [command('cmd-a', 'tab-a'), command('cmd-b', 'tab-a')],
+      code: 'same_cell_overlap',
     },
-  });
-
-  await assert.rejects(
-    coordinator.dispatch([command('cmd-a', 'tab-a'), command('cmd-b', 'tab-a')]),
-    (error) => error instanceof BrowserBrainFanoutPlanError && error.code === 'same_cell_overlap',
-  );
-  assert.equal(effects, 0);
-});
-
-test('requires explicit BrowserCell binding and never falls back to selection/platform', async () => {
-  let effects = 0;
-  const coordinator = new BrowserBrainParallelFanoutCoordinator({
-    readMutationBudget: () => 8,
-    execute: async () => {
-      effects += 1;
+    {
+      name: 'missing explicit BrowserCell',
+      commands: [command('cmd-a', '')],
+      code: 'missing_browser_cell',
     },
-  });
+  ];
 
-  await assert.rejects(
-    coordinator.dispatch([command('cmd-a', '')]),
-    (error) => error instanceof BrowserBrainFanoutPlanError && error.code === 'missing_browser_cell',
-  );
-  assert.equal(effects, 0);
+  for (const entry of cases) {
+    await t.test(entry.name, () => expectPlanReject(entry));
+  }
 });
 
 test('keeps provider-neutral command object opaque and unchanged', async () => {
@@ -100,7 +101,7 @@ test('keeps provider-neutral command object opaque and unchanged', async () => {
     action: { kind: 'custom', nested: { value: 42 } },
   });
   let observed = null;
-  const coordinator = new BrowserBrainParallelFanoutCoordinator({
+  const instance = coordinator({
     readMutationBudget: () => 1,
     execute: async (received) => {
       observed = received;
@@ -108,14 +109,14 @@ test('keeps provider-neutral command object opaque and unchanged', async () => {
     },
   });
 
-  const result = await coordinator.dispatch([original]);
+  const result = await instance.dispatch([original]);
   assert.equal(observed, original);
   assert.equal(result[0].value, 'ok');
 });
 
 test('executor rejection is reported once with no blind retry and peers still settle', async () => {
   const calls = new Map();
-  const coordinator = new BrowserBrainParallelFanoutCoordinator({
+  const instance = coordinator({
     readMutationBudget: () => 2,
     execute: async (_command, context) => {
       calls.set(context.commandId, (calls.get(context.commandId) ?? 0) + 1);
@@ -124,7 +125,7 @@ test('executor rejection is reported once with no blind retry and peers still se
     },
   });
 
-  const result = await coordinator.dispatch([
+  const result = await instance.dispatch([
     command('cmd-a', 'tab-a'),
     command('cmd-b', 'tab-b'),
   ]);
@@ -137,24 +138,19 @@ test('executor rejection is reported once with no blind retry and peers still se
 
 test('pre-aborted signal rejects before budget read or execution', async () => {
   let budgetReads = 0;
-  let effects = 0;
   const controller = new AbortController();
   controller.abort();
 
-  const coordinator = new BrowserBrainParallelFanoutCoordinator({
-    readMutationBudget: () => {
-      budgetReads += 1;
-      return 8;
-    },
-    execute: async () => {
-      effects += 1;
+  await expectPlanReject({
+    commands: [command('cmd-a', 'tab-a')],
+    code: 'aborted',
+    signal: controller.signal,
+    overrides: {
+      readMutationBudget: () => {
+        budgetReads += 1;
+        return 8;
+      },
     },
   });
-
-  await assert.rejects(
-    coordinator.dispatch([command('cmd-a', 'tab-a')], { signal: controller.signal }),
-    (error) => error instanceof BrowserBrainFanoutPlanError && error.code === 'aborted',
-  );
   assert.equal(budgetReads, 0);
-  assert.equal(effects, 0);
 });
