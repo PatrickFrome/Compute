@@ -95,6 +95,18 @@ test('counts renderer crashes in a bounded recent window without replaying old e
   assert.equal(samples.at(-1).recent_crashes, 0);
 });
 
+test('does not throttle BrowserCell fanout for unrelated child-process exits', () => {
+  const samples = [];
+  const bridge = new BrowserBrainRealtimePressureBridge({
+    adaptiveRuntime: { observePressure(sample) { samples.push(sample); return {}; } },
+  });
+  bridge.observe(baseSnapshot({
+    sequence: 12,
+    events: [{ seq: 12, type: 'CHILD_PROCESS_GONE', process_type: 'GPU', observed_at: '2026-09-06T07:00:12.000Z' }],
+  }));
+  assert.equal(samples.at(-1).recent_crashes, 0);
+});
+
 test('rejects snapshots outside the realtime process-plane contract before governor effects', () => {
   let calls = 0;
   const bridge = new BrowserBrainRealtimePressureBridge({
