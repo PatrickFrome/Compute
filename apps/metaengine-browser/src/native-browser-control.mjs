@@ -5,6 +5,10 @@ import {
   assertNativeEffectBindingMatches,
   nativeActionRequiresEffectBinding,
 } from './native-effect-binding.mjs';
+import {
+  assertNativeEffectRuntimeBindingCurrent,
+  recordNativeEffectRuntimeObservation,
+} from './native-effect-runtime-observation.mjs';
 
 const SAFE_ROLES = new Set(['textbox','searchbox','combobox','button','checkbox','radio','switch','tab','menuitem','link']);
 const TEXT_INPUT_ROLES = new Set(['textbox','searchbox','combobox']);
@@ -131,12 +135,34 @@ export async function captureSemanticFrame(webContents) {
     ]);
     const nodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
     const viewport = metrics?.cssVisualViewport || metrics?.visualViewport || null;
+    const capturedAt = new Date().toISOString();
+    const url = clip(webContents.getURL?.() || '', 1200);
+    const runtime = dbg.bindingIdentity?.() || null;
+    let runtimeObservation = null;
+    if (runtime) {
+      try {
+        runtimeObservation = recordNativeEffectRuntimeObservation({
+          process_incarnation_id: identity.process_incarnation_id,
+          target_id: identity.target_id,
+          observed_at: capturedAt,
+          document_url_sha256: sha256(url),
+          runtime_binding: {
+            web_contents_id: runtime.web_contents_id,
+            renderer_pid: runtime.os_pid,
+            runtime_target_id: runtime.target_id,
+            attachment_generation: runtime.attachment_generation,
+            document_generation: runtime.document_generation,
+            binding_generation: runtime.binding_generation,
+          },
+        });
+      } catch {}
+    }
     return {
       schema: 'metaengine.native-browser.perception.v1',
-      captured_at: new Date().toISOString(),
+      captured_at: capturedAt,
       process_incarnation_id: identity.process_incarnation_id,
       target_id: identity.target_id,
-      url: clip(webContents.getURL?.() || '', 1200),
+      url,
       title: clip(webContents.getTitle?.() || '', 240),
       semantic_targets: uniqueSemanticTargets(nodes),
       semantic_input_values_exposed: false,
@@ -149,6 +175,9 @@ export async function captureSemanticFrame(webContents) {
         page_y: Number(viewport.pageY || 0),
         scale: Number(viewport.scale || 1),
       } : null,
+      runtime_binding_observed: runtimeObservation != null,
+      runtime_binding_generation: runtimeObservation?.runtime_binding?.binding_generation || null,
+      runtime_document_generation: runtimeObservation?.runtime_binding?.document_generation || null,
       authority_effect: false,
     };
   });
@@ -181,17 +210,34 @@ async function clickBackendNode(dbg, backendNodeId) {
 export async function executeSemanticCommand(webContents, command) {
   const action = String(command?.action || '');
   const localIdentity = nativeBrowserTargetIdentity(webContents);
-  if (command?.command_id && nativeActionRequiresEffectBinding(action)) {
-    assertNativeEffectBindingMatches({
-      command,
-      binding: command?.effect_binding,
-      clientId: command?.effect_binding?.client_id,
-      processIncarnationId: localIdentity.process_incarnation_id,
-      tabId: command?.payload?.tab_id,
-      targetId: localIdentity.target_id,
-    });
-  }
   return withDebugger(webContents, async (dbg) => {
+    if (command?.command_id && nativeActionRequiresEffectBinding(action)) {
+      const binding = assertNativeEffectBindingMatches({
+        command,
+        binding: command?.effect_binding,
+        clientId: command?.effect_binding?.client_id,
+        processIncarnationId: localIdentity.process_incarnation_id,
+        tabId: command?.payload?.tab_id,
+        targetId: localIdentity.target_id,
+      });
+      if (binding.schema === 'metaengine.native-supervisor.effect-binding.v2') {
+        const runtime = dbg.bindingIdentity?.();
+        if (!runtime) throw new Error('native_effect_runtime_binding_current_unavailable');
+        assertNativeEffectRuntimeBindingCurrent({
+          binding,
+          document_url_sha256: sha256(clip(webContents.getURL?.() || '', 1200)),
+          runtime_binding: {
+            web_contents_id: runtime.web_contents_id,
+            renderer_pid: runtime.os_pid,
+            runtime_target_id: runtime.target_id,
+            attachment_generation: runtime.attachment_generation,
+            document_generation: runtime.document_generation,
+            binding_generation: runtime.binding_generation,
+          },
+        });
+      }
+    }
+
     if (action === 'SCROLL') {
       const metrics = await dbg.sendCommand('Page.getLayoutMetrics');
       const vp = metrics?.cssVisualViewport || metrics?.visualViewport || {};
