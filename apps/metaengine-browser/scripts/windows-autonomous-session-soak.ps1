@@ -76,6 +76,44 @@ try {
   $runtimeImport = $startup.events | Where-Object { $_.boot_id -eq $startup.current_boot_id -and $_.state -eq 'RUNTIME_IMPORT_OK' } | Select-Object -Last 1
   if (-not $runtimeImport) { throw 'soak_runtime_import_success_missing' }
 
+  # PRIMARY_WINDOW_STABLE intentionally precedes degradable startup so the local
+  # shell never waits on Fleet, the Development Plane, Native Supervisor or the
+  # initial remote load. Resource growth must therefore not use that early shell
+  # marker as its baseline. Wait until every known background startup subsystem
+  # has reached either READY or DEGRADED, then measure only growth caused after
+  # that settled point. This tightens attribution without widening any budget.
+  $requiredStartupSubsystems = @(
+    'OWNER_SAFETY_GATES',
+    'USER_SESSION',
+    'INITIAL_TAB_CREATE',
+    'FLEET',
+    'SHELL_SNAPSHOT',
+    'DEVELOPMENT_PLANE',
+    'NATIVE_SUPERVISOR',
+    'INITIAL_REMOTE_LOAD'
+  )
+  $settledStartupSubsystems = New-Object 'System.Collections.Generic.HashSet[string]'
+  $settleDeadline = [DateTime]::UtcNow.AddSeconds(35)
+  while ([DateTime]::UtcNow -lt $settleDeadline -and $settledStartupSubsystems.Count -lt $requiredStartupSubsystems.Count) {
+    $normal.Refresh()
+    if ($normal.HasExited) { throw "soak_normal_ui_exited_before_resource_baseline:$($normal.ExitCode)" }
+    if (Test-Path $normalOut -PathType Leaf) {
+      foreach ($startupLine in @(Get-Content $normalOut -ErrorAction SilentlyContinue)) {
+        if (-not [string]$startupLine -or -not ([string]$startupLine).Trim().StartsWith('{')) { continue }
+        try { $startupRow = $startupLine | ConvertFrom-Json } catch { continue }
+        if ($startupRow.schema -ne 'metaengine.browser-startup-subsystem.v1') { continue }
+        if (@('SUBSYSTEM_READY','SUBSYSTEM_DEGRADED') -notcontains [string]$startupRow.state) { continue }
+        $subsystem = [string]$startupRow.subsystem
+        if ($requiredStartupSubsystems -contains $subsystem) { $null = $settledStartupSubsystems.Add($subsystem) }
+      }
+    }
+    if ($settledStartupSubsystems.Count -lt $requiredStartupSubsystems.Count) { Start-Sleep -Milliseconds 100 }
+  }
+  if ($settledStartupSubsystems.Count -ne $requiredStartupSubsystems.Count) {
+    $missing = @($requiredStartupSubsystems | Where-Object { -not $settledStartupSubsystems.Contains($_) })
+    throw "soak_startup_resource_baseline_unsettled:$($missing -join ',')"
+  }
+
   $normal.Refresh()
   $primaryPid = [int64]$normal.Id
   $procBefore = Get-Process -Id $normal.Id
@@ -211,15 +249,14 @@ try {
   $handleGrowth = [Math]::Max([int64]0, $handlesAfter - $handlesBefore)
   $expectedActivationCount = $ActivationCount + $ConcurrentBurstSize
 
-  if ($p95Ms -gt $ActivationP95BudgetMs) { throw "soak_activation_p95_budget_exceeded:$([Math]::Round($p95Ms,2))" }
-  if ($workingSetGrowth -gt $MaxWorkingSetGrowthBytes) { throw "soak_working_set_growth_budget_exceeded:$workingSetGrowth" }
-  if ($handleGrowth -gt $MaxHandleGrowth) { throw "soak_handle_growth_budget_exceeded:$handleGrowth" }
-  if ($ConcurrentBurstSize -gt 0 -and $burstElapsedMs -gt 8000) { throw "soak_concurrent_burst_budget_exceeded:$([Math]::Round($burstElapsedMs,2))" }
-
+  # Persist all measured evidence before enforcing budgets so a failing artifact
+  # still explains whether latency, memory or handles caused the red gate.
   $proof.normal_ui_boot_verified = $true
   $proof.second_instance_activations_verified = $launchIds.Count
   $proof | Add-Member -NotePropertyName primary_pid -NotePropertyValue $primaryPid -Force
   $proof | Add-Member -NotePropertyName startup_stable_sequence -NotePropertyValue ([int64]$stable.sequence) -Force
+  $proof | Add-Member -NotePropertyName startup_resource_baseline_settled -NotePropertyValue $true -Force
+  $proof | Add-Member -NotePropertyName startup_resource_baseline_subsystems -NotePropertyValue @($requiredStartupSubsystems) -Force
   $proof | Add-Member -NotePropertyName final_activation_sequence -NotePropertyValue $lastActivationSequence -Force
   $proof | Add-Member -NotePropertyName activation_latency_p95_ms -NotePropertyValue ([Math]::Round($p95Ms, 2)) -Force
   $proof | Add-Member -NotePropertyName activation_latency_p95_budget_ms -NotePropertyValue $ActivationP95BudgetMs -Force
@@ -236,9 +273,15 @@ try {
   $proof | Add-Member -NotePropertyName handle_growth_budget -NotePropertyValue $MaxHandleGrowth -Force
   $proof | Add-Member -NotePropertyName redundant_durable_second_instance_markers -NotePropertyValue $receiveMarkers.Count -Force
   $proof | Add-Member -NotePropertyName duplicate_browser_runtime_observed -NotePropertyValue $false -Force
-  if ($proof.second_instance_activations_verified -ne $expectedActivationCount) { throw 'soak_activation_count_mismatch' }
+  $proof | Add-Member -NotePropertyName resource_budget_evidence_captured -NotePropertyValue $true -Force
   $proof | ConvertTo-Json -Depth 6 | Set-Content $ProofPath -Encoding utf8
   Copy-Item $journal (Join-Path $RunnerTemp 'browser-startup-journal-soak.json') -Force
+
+  if ($p95Ms -gt $ActivationP95BudgetMs) { throw "soak_activation_p95_budget_exceeded:$([Math]::Round($p95Ms,2))" }
+  if ($workingSetGrowth -gt $MaxWorkingSetGrowthBytes) { throw "soak_working_set_growth_budget_exceeded:$workingSetGrowth" }
+  if ($handleGrowth -gt $MaxHandleGrowth) { throw "soak_handle_growth_budget_exceeded:$handleGrowth" }
+  if ($ConcurrentBurstSize -gt 0 -and $burstElapsedMs -gt 8000) { throw "soak_concurrent_burst_budget_exceeded:$([Math]::Round($burstElapsedMs,2))" }
+  if ($proof.second_instance_activations_verified -ne $expectedActivationCount) { throw 'soak_activation_count_mismatch' }
   Write-Host ($proof | ConvertTo-Json -Compress)
 } finally {
   if ($normal -and -not $normal.HasExited) {
