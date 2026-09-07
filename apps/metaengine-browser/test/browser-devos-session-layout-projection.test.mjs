@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createDevOSSessionLayoutRegistry } from '../src/metaengine-devos-session-layout.mjs';
 import {
+  METAENGINE_DEVOS_INVALID_LAYOUT_ATTACHMENT_SCHEMA,
+  METAENGINE_DEVOS_SESSION_LAYOUT_PREFERENCE_SCHEMA,
   METAENGINE_DEVOS_SESSION_LAYOUT_PROJECTION_SCHEMA,
   attachDevOSSessionLayout,
   projectDevOSSessionLayout,
@@ -28,6 +30,10 @@ function devos({ selectedSession = 'session:a', selectedSurface = 'browser:tab-a
       Object.freeze({ session_id: 'session:a', title: 'A', ...zeroAuthority() }),
       Object.freeze({ session_id: 'session:b', title: 'B', ...zeroAuthority() }),
     ]),
+    surfaces: Object.freeze([
+      Object.freeze({ surface_id: selectedSurface, session_id: selectedSession, type: 'BROWSER', ...zeroAuthority() }),
+      Object.freeze({ surface_id: 'browser:tab-b', session_id: 'session:b', type: 'BROWSER', ...zeroAuthority() }),
+    ]),
     selected: Object.freeze({ session_id: selectedSession, surface_id: selectedSurface }),
     ...zeroAuthority(),
   });
@@ -49,6 +55,7 @@ test('missing registry yields default preference without inventing selection aut
   assert.equal(projection.source_state, 'NOT_EXPOSED');
   assert.equal(projection.selected_session_id, 'session:a');
   assert.equal(projection.selected_surface_id, 'browser:tab-a');
+  assert.equal(projection.active.schema, METAENGINE_DEVOS_SESSION_LAYOUT_PREFERENCE_SCHEMA);
   assert.equal(projection.active.requested_sidebar, 'EXPANDED');
   assert.equal(projection.active.requested_inspector, 'CLOSED');
   assert.equal(projection.active.source, 'DEFAULT_SESSION_PREFERENCE');
@@ -74,6 +81,7 @@ test('valid registry attaches requested layout for the canonical DevOS-selected 
   assert.equal(projection.active.selected_surface_id, 'browser:tab-a');
   assert.equal(projection.active.stored_surface_is_selection_authority, false);
   assert.equal(projection.entries.length, 2);
+  assert.equal(projection.entries[0].schema, METAENGINE_DEVOS_SESSION_LAYOUT_PREFERENCE_SCHEMA);
   assertZeroAuthority(projection.active);
 });
 
@@ -90,6 +98,16 @@ test('stale registry active session never overrides canonical DevOS selection', 
   assert.equal(projection.active.session_id, 'session:a');
   assert.equal(projection.active.requested_sidebar, 'HIDDEN');
   assert.equal(projection.registry_active_session_is_selection_authority, false);
+});
+
+test('registry without active marker cannot claim the selected session', () => {
+  const registry = createDevOSSessionLayoutRegistry();
+  registry.setRequested('session:a', { sidebar: 'COMPACT' });
+  const projection = projectDevOSSessionLayout(devos(), registry.snapshot());
+  assert.equal(projection.registry_active_session_id, null);
+  assert.equal(projection.selection_alignment, 'REGISTRY_ACTIVE_SESSION_NOT_SET');
+  assert.equal(projection.active.session_id, 'session:a');
+  assert.equal(projection.active.requested_sidebar, 'COMPACT');
 });
 
 test('stored surface focus never overrides currently selected DevOS surface', () => {
@@ -134,14 +152,29 @@ test('authority-bearing or malformed registry fails closed instead of being sani
   }
 });
 
-test('invalid DevOS projection cannot gain credibility from a valid layout registry', () => {
+test('invalid DevOS projection cannot leak selected ids or gain credibility from a valid registry', () => {
   const registry = createDevOSSessionLayoutRegistry();
   registry.activate('session:a');
-  const invalid = { ...devos(), scheduler_authority: true };
-  const projection = projectDevOSSessionLayout(invalid, registry.snapshot());
-  assert.equal(projection.source_state, 'INVALID_DEVOS');
-  assert.equal(projection.registry_reason, 'DEVOS_PROJECTION_INVALID');
-  assertZeroAuthority(projection);
+  for (const invalid of [
+    { ...devos(), scheduler_authority: true },
+    { ...devos(), selected: { session_id: 'session:missing', surface_id: 'browser:tab-a' } },
+    { ...devos(), selected: { session_id: 'session:a', surface_id: 'browser:missing' } },
+  ]) {
+    const projection = projectDevOSSessionLayout(invalid, registry.snapshot());
+    assert.equal(projection.source_state, 'INVALID_DEVOS');
+    assert.equal(projection.registry_reason, 'DEVOS_PROJECTION_INVALID');
+    assert.equal(projection.selected_session_id, null);
+    assert.equal(projection.selected_surface_id, null);
+    assert.equal(projection.active, null);
+    assertZeroAuthority(projection);
+
+    const attached = attachDevOSSessionLayout(invalid, registry.snapshot());
+    assert.equal(attached.schema, METAENGINE_DEVOS_INVALID_LAYOUT_ATTACHMENT_SCHEMA);
+    assert.equal(attached.valid, false);
+    assert.equal(attached.reason, 'INVALID_DEVOS');
+    assert.equal(attached.selected, undefined);
+    assertZeroAuthority(attached);
+  }
 });
 
 test('attachment is additive read-only data and preserves DevOS selection as source of truth', () => {
