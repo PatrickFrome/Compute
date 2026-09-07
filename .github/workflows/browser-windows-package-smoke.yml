@@ -12,6 +12,7 @@ on:
       - 'apps/metaengine-browser/scripts/electron-builder-before-pack.cjs'
       - 'apps/metaengine-browser/scripts/verify-installed-guardian-native-staging.ps1'
       - 'apps/metaengine-browser/test/browser-startup-observability.test.mjs'
+      - 'apps/metaengine-browser/test/browser-shell-visual-evidence.mjs'
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/electron-builder.test.json'
       - '.github/workflows/browser-windows-package-smoke.yml'
@@ -24,6 +25,7 @@ on:
       - 'apps/metaengine-browser/scripts/electron-builder-before-pack.cjs'
       - 'apps/metaengine-browser/scripts/verify-installed-guardian-native-staging.ps1'
       - 'apps/metaengine-browser/test/browser-startup-observability.test.mjs'
+      - 'apps/metaengine-browser/test/browser-shell-visual-evidence.mjs'
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/electron-builder.test.json'
       - '.github/workflows/browser-windows-package-smoke.yml'
@@ -67,6 +69,33 @@ jobs:
       - name: Prove startup observability reducer before packaging
         working-directory: apps/metaengine-browser
         run: node --test test/browser-startup-observability.test.mjs
+
+      - name: Capture deterministic shell-only visual evidence
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          METAENGINE_VISUAL_EVIDENCE_DIR: ${{ runner.temp }}\browser-shell-visual
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --check test/browser-shell-visual-evidence.mjs
+          New-Item -ItemType Directory -Force -Path $env:METAENGINE_VISUAL_EVIDENCE_DIR | Out-Null
+          & .\node_modules\.bin\electron.cmd .\test\browser-shell-visual-evidence.mjs
+          if ($LASTEXITCODE -ne 0) { throw "visual_evidence_electron_exit_$LASTEXITCODE" }
+          $evidencePath = Join-Path $env:METAENGINE_VISUAL_EVIDENCE_DIR 'visual-evidence.json'
+          if (-not (Test-Path $evidencePath -PathType Leaf)) { throw 'visual_evidence_json_missing' }
+          $evidence = Get-Content $evidencePath -Raw | ConvertFrom-Json
+          if ($evidence.schema -ne 'metaengine.browser-shell.visual-evidence.v1') { throw 'visual_evidence_schema_invalid' }
+          if ($evidence.shell_only_capture -ne $true -or $evidence.remote_browser_content_captured -ne $false) { throw 'visual_evidence_scope_invalid' }
+          if ($evidence.golden_comparison_enabled -ne $false -or $evidence.authority_effect -ne $false) { throw 'visual_evidence_authority_invalid' }
+          if ($evidence.route_reset.command_mode -ne 'CMD' -or $evidence.route_reset.restored_mode -ne 'CHAT' -or $evidence.route_reset.restored_chat_class -ne $true) { throw 'visual_evidence_route_reset_invalid' }
+          if (@($evidence.captures).Count -ne 2) { throw 'visual_evidence_capture_count_invalid' }
+          foreach ($capture in @($evidence.captures)) {
+            if ($capture.metrics.systems_visible -ne $true) { throw "visual_evidence_health_hidden:$($capture.name)" }
+            if ([int64]$capture.bytes -lt 4096 -or -not [string]$capture.sha256) { throw "visual_evidence_png_invalid:$($capture.name)" }
+            $pngPath = Join-Path $env:METAENGINE_VISUAL_EVIDENCE_DIR ([string]$capture.file)
+            if (-not (Test-Path $pngPath -PathType Leaf)) { throw "visual_evidence_png_missing:$($capture.name)" }
+          }
+          Write-Host ($evidence | ConvertTo-Json -Compress -Depth 8)
 
       - name: Build exact-head unsigned NSIS package through native staging hook
         working-directory: apps/metaengine-browser
@@ -337,7 +366,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/native apps/metaengine-browser/scripts apps/metaengine-browser/test/browser-startup-observability.test.mjs apps/metaengine-browser/package.json apps/metaengine-browser/electron-builder.test.json)"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/native apps/metaengine-browser/scripts apps/metaengine-browser/test/browser-startup-observability.test.mjs apps/metaengine-browser/test/browser-shell-visual-evidence.mjs apps/metaengine-browser/package.json apps/metaengine-browser/electron-builder.test.json)"
 
       - name: Upload exact-head Windows candidate and startup evidence
         if: always()
@@ -354,5 +383,7 @@ jobs:
             ${{ runner.temp }}/package-normal-ui.err
             ${{ runner.temp }}/package-second-instance.out
             ${{ runner.temp }}/package-second-instance.err
+            ${{ runner.temp }}/browser-shell-visual/visual-evidence.json
+            ${{ runner.temp }}/browser-shell-visual/*.png
           if-no-files-found: warn
           retention-days: 30
