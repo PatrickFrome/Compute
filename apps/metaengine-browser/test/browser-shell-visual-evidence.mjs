@@ -130,11 +130,7 @@ function snapshotFor(width, height) {
   return Object.freeze({
     schema: 'metaengine.browser-shell.snapshot.v3',
     version: 'visual-evidence',
-    tabs: Object.freeze({
-      selected_tab_id: 'tab_visual_chat',
-      tabs: TABS,
-      census: Object.freeze({ total: TABS.length, fleet_tabs: 3, user_tabs: 3 }),
-    }),
+    tabs: Object.freeze({ selected_tab_id: 'tab_visual_chat', tabs: TABS, census: Object.freeze({ total: TABS.length, fleet_tabs: 3, user_tabs: 3 }) }),
     downloads: Object.freeze({ active: null, last: null, arbitrary_execution: false, install_authority: false }),
     fleet: Object.freeze({
       counts: Object.freeze({ ACTIVE: 2, BOUND_UNVERIFIED: 1, PROVISIONING_AMBIGUOUS: 0, LOST: 0 }),
@@ -301,25 +297,30 @@ async function main() {
       throw new Error(`visual_evidence_route_reset_invalid:${JSON.stringify(routeReset)}`);
     }
 
-    const captures = [
+    const allCaptures = [
       await capture(shellView, windowRef, 'shell-1920x1080', 1920, 1080),
       await capture(shellView, windowRef, 'shell-1440x960', 1440, 960),
       await capture(shellView, windowRef, 'shell-1100x760', 1100, 760),
       await capture(shellView, windowRef, 'shell-1024x720', 1024, 720),
     ];
-    if (!captures.every((row) => row.metrics.systems_visible === true)) throw new Error('visual_evidence_health_hidden');
-    if (!captures.every((row) => row.metrics.health_summary.length > 0)) throw new Error('visual_evidence_health_summary_missing');
-    if (!captures.every((row) => row.metrics.now_visible === true && row.metrics.now_active === true)) throw new Error('visual_evidence_now_not_primary');
-    if (!captures.every((row) => row.metrics.task_first_sections === true && row.metrics.task_objective_visible === true && row.metrics.blocker_visible === true)) throw new Error('visual_evidence_task_first_brain_missing');
-    if (!captures.every((row) => row.metrics.ops_text_length > 400)) throw new Error('visual_evidence_brain_not_rendered');
+    if (!allCaptures.every((row) => row.metrics.systems_visible === true)) throw new Error('visual_evidence_health_hidden');
+    if (!allCaptures.every((row) => row.metrics.health_summary.length > 0)) throw new Error('visual_evidence_health_summary_missing');
+    if (!allCaptures.every((row) => row.metrics.now_visible === true && row.metrics.now_active === true)) throw new Error('visual_evidence_now_not_primary');
+    if (!allCaptures.every((row) => row.metrics.task_first_sections === true && row.metrics.task_objective_visible === true && row.metrics.blocker_visible === true)) throw new Error('visual_evidence_task_first_brain_missing');
+    if (!allCaptures.every((row) => row.metrics.ops_text_length > 400)) throw new Error('visual_evidence_brain_not_rendered');
 
+    const captures = allCaptures.filter((row) => row.name === 'shell-1440x960' || row.name === 'shell-1100x760');
+    if (captures.length !== 2) throw new Error('visual_evidence_legacy_capture_projection_invalid');
     const evidence = Object.freeze({
-      schema: 'metaengine.browser-shell.visual-evidence.v2',
+      schema: 'metaengine.browser-shell.visual-evidence.v1',
+      visual_evidence_version: 2,
       electron: process.versions.electron,
       platform: process.platform,
       arch: process.arch,
       route_reset: routeReset,
       captures,
+      extended_captures: allCaptures,
+      extended_viewport_count: allCaptures.length,
       task_first_brain_proven: true,
       textual_health_summary_proven: true,
       shell_only_capture: true,
@@ -338,6 +339,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(JSON.stringify({ schema: 'metaengine.browser-shell.visual-evidence.v2', ok: false, error: String(error?.stack || error), authority_effect: false }));
+  console.error(JSON.stringify({ schema: 'metaengine.browser-shell.visual-evidence.v1', visual_evidence_version: 2, ok: false, error: String(error?.stack || error), authority_effect: false }));
   app.exit(1);
 });
