@@ -222,3 +222,115 @@ test('progress ledger separates coordination state from execution authority', ()
   assert.equal(progress.external_confirmation_required, false);
   assert.equal(progress.authority_effect, false);
 });
+
+test('context eviction removes all task-linked and context-only children instead of leaving Fabric orphans', () => {
+  const fabric = new BrowserBrainCollaborationFabric({
+    clock: () => 4_000_000,
+    maxContexts: 1,
+    maxTasks: 4,
+    maxMessages: 64,
+    maxArtifacts: 4,
+    maxClaims: 4,
+    maxHandoffs: 4,
+  });
+  fabric.recordTask({ context_id: 'ctx.evict-old', task_id: 'task.evict-old', objective: 'terminal context to evict' });
+  fabric.recordMessage({
+    message_id: 'msg.evict-task', context_id: 'ctx.evict-old', task_id: 'task.evict-old', source_agent_id: 'agent_evict',
+    target: 'topic:eviction', kind: 'FACT', body_digest: DIGEST_A,
+  });
+  fabric.recordMessage({
+    message_id: 'msg.evict-context', context_id: 'ctx.evict-old', source_agent_id: 'agent_evict',
+    target: 'topic:eviction', kind: 'FACT', body_digest: DIGEST_A,
+  });
+  fabric.recordArtifact({
+    artifact_id: 'artifact.evict-task', context_id: 'ctx.evict-old', task_id: 'task.evict-old', kind: 'proof', content_digest: DIGEST_A,
+  });
+  fabric.recordArtifact({
+    artifact_id: 'artifact.evict-context', context_id: 'ctx.evict-old', kind: 'proof', content_digest: DIGEST_A,
+  });
+  fabric.claimWork({
+    claim_id: 'claim.evict-task', context_id: 'ctx.evict-old', task_id: 'task.evict-old', agent_id: 'agent_evict', scope: 'eviction',
+  });
+  fabric.recordHandoff({
+    handoff_id: 'handoff.evict-task', context_id: 'ctx.evict-old', task_id: 'task.evict-old', from_agent_id: 'agent_evict', objective: 'evict task handoff',
+  });
+  fabric.recordHandoff({
+    handoff_id: 'handoff.evict-context', context_id: 'ctx.evict-old', from_agent_id: 'agent_evict', objective: 'evict context handoff',
+  });
+  fabric.advanceTask({ task_id: 'task.evict-old', progress_revision: 3, status: 'COMPLETED' });
+
+  fabric.recordTask({ context_id: 'ctx.evict-new', task_id: 'task.evict-new', objective: 'replacement context' });
+  const snapshot = fabric.snapshot();
+  assert.equal(snapshot.context_count, 1);
+  assert.equal(snapshot.task_count, 1);
+  assert.equal(snapshot.message_count, 0);
+  assert.equal(snapshot.artifact_count, 0);
+  assert.equal(snapshot.active_claim_count, 0);
+  assert.equal(snapshot.handoff_count, 0);
+  assert.equal(fabric.taskLedger('ctx.evict-old').tasks.length, 0);
+  assert.equal(fabric.taskLedger('ctx.evict-new').tasks[0].task_id, 'task.evict-new');
+});
+
+test('task eviction removes task-linked children while preserving unrelated context records', () => {
+  const fabric = new BrowserBrainCollaborationFabric({
+    clock: () => 5_000_000,
+    maxContexts: 2,
+    maxTasks: 1,
+    maxMessages: 64,
+    maxArtifacts: 4,
+    maxClaims: 4,
+    maxHandoffs: 4,
+  });
+  fabric.recordTask({ context_id: 'ctx.task-eviction', task_id: 'task.evict-victim', objective: 'terminal task victim' });
+  fabric.recordMessage({
+    message_id: 'msg.task-victim', context_id: 'ctx.task-eviction', task_id: 'task.evict-victim', source_agent_id: 'agent_evict',
+    target: 'topic:eviction', kind: 'FACT', body_digest: DIGEST_A,
+  });
+  fabric.recordMessage({
+    message_id: 'msg.context-survivor', context_id: 'ctx.task-eviction', source_agent_id: 'agent_evict',
+    target: 'topic:eviction', kind: 'FACT', body_digest: DIGEST_A,
+  });
+  fabric.recordArtifact({
+    artifact_id: 'artifact.task-victim', context_id: 'ctx.task-eviction', task_id: 'task.evict-victim', kind: 'proof', content_digest: DIGEST_A,
+  });
+  fabric.recordHandoff({
+    handoff_id: 'handoff.task-victim', context_id: 'ctx.task-eviction', task_id: 'task.evict-victim', from_agent_id: 'agent_evict', objective: 'task-linked handoff',
+  });
+  fabric.advanceTask({ task_id: 'task.evict-victim', progress_revision: 2, status: 'COMPLETED' });
+
+  fabric.recordTask({ context_id: 'ctx.task-replacement', task_id: 'task.evict-replacement', objective: 'replacement task' });
+  const snapshot = fabric.snapshot();
+  assert.equal(snapshot.task_count, 1);
+  assert.equal(snapshot.message_count, 1);
+  assert.equal(snapshot.artifact_count, 0);
+  assert.equal(snapshot.handoff_count, 0);
+  assert.equal(fabric.taskLedger('ctx.task-eviction').verified_fact_messages[0].message_id, 'msg.context-survivor');
+});
+
+test('immutable Fabric identifiers accept exact duplicates and reject changed material', () => {
+  const fabric = new BrowserBrainCollaborationFabric({ clock: () => 6_000_000 });
+  fabric.recordTask({ context_id: 'ctx.immutable', task_id: 'task.immutable', objective: 'prove immutable identifiers' });
+  const artifact = {
+    artifact_id: 'artifact.immutable', context_id: 'ctx.immutable', task_id: 'task.immutable', kind: 'proof',
+    content_digest: DIGEST_A, refs: ['ref.immutable'], base_sha: BASE_SHA, branch: 'work/immutable',
+  };
+  assert.equal(fabric.recordArtifact(artifact).duplicate, false);
+  assert.equal(fabric.recordArtifact(artifact).duplicate, true);
+  assert.throws(() => fabric.recordArtifact({ ...artifact, refs: ['ref.changed'] }), /artifact_immutable_conflict/);
+
+  const handoff = {
+    handoff_id: 'handoff.immutable', context_id: 'ctx.immutable', task_id: 'task.immutable', from_agent_id: 'agent_immutable',
+    objective: 'preserve exact handoff material', verified_facts: ['immutable identifiers fail closed'], confidence: 0.9,
+  };
+  assert.equal(fabric.recordHandoff(handoff).duplicate, false);
+  assert.equal(fabric.recordHandoff(handoff).duplicate, true);
+  assert.throws(() => fabric.recordHandoff({ ...handoff, objective: 'changed objective' }), /handoff_id_collision/);
+
+  const claim = {
+    claim_id: 'claim.immutable', context_id: 'ctx.immutable', task_id: 'task.immutable', agent_id: 'agent_immutable',
+    agent_generation: 2, scope: 'immutable-scope', ttl_ms: 30_000,
+  };
+  assert.equal(fabric.claimWork(claim).duplicate, false);
+  assert.equal(fabric.claimWork(claim).duplicate, true);
+  assert.throws(() => fabric.claimWork({ ...claim, scope: 'changed-scope' }), /claim_id_collision/);
+});

@@ -149,3 +149,78 @@ test('journal compaction remains replayable and keeps active task creation befor
   assert.ok(kinds.includes('TASK_ADVANCED'));
   assert.ok(journal.snapshot().entry_count <= 64);
 });
+
+test('claim-induced READY to ACTIVE state is materialized before the claim and survives bounded compaction after expiry', () => {
+  let now = 60_000;
+  const journal = new BrowserBrainCollaborationJournal({ clock: () => now, maxEntries: 64 });
+  const runtime = new BrowserBrainCollaborationRuntimeV2({ clock: () => now, journal });
+  runtime.recordTask({ context_id: 'ctx.claim-materialized', task_id: 'task.claim-materialized', objective: 'survive claim compaction' });
+  const claimed = runtime.claimWork({
+    claim_id: 'claim.materialized',
+    context_id: 'ctx.claim-materialized',
+    task_id: 'task.claim-materialized',
+    agent_id: 'agent_materializer',
+    scope: 'claim-materialization',
+    ttl_ms: 10_000,
+  });
+
+  assert.equal(claimed.task_materialized, true);
+  assert.equal(claimed.materialized_task.status, 'ACTIVE');
+  assert.deepEqual(runtime.checkpoint().entries.slice(0, 3).map((row) => row.kind), [
+    'TASK_RECORDED',
+    'TASK_MATERIALIZED',
+    'CLAIM_RECORDED',
+  ]);
+
+  for (let index = 0; index < 100; index += 1) runtime.recordMessage({
+    message_id: `msg.materialized.${index}`,
+    context_id: 'ctx.claim-materialized',
+    task_id: 'task.claim-materialized',
+    source_agent_id: 'agent_materializer',
+    target: 'topic:claim-materialization',
+    kind: 'FACT',
+    body_digest: DIGEST,
+  });
+  const compacted = runtime.checkpoint();
+  assert.ok(compacted.entries.length <= 64);
+  assert.ok(compacted.entries.some((row) => row.kind === 'TASK_MATERIALIZED'));
+
+  now += 20_000;
+  const restored = new BrowserBrainCollaborationRuntimeV2({ clock: () => now });
+  restored.restore(compacted);
+  const task = restored.taskLedger('ctx.claim-materialized').tasks[0];
+  assert.equal(task.status, 'ACTIVE');
+  assert.equal(task.owner_agent_id, 'agent_materializer');
+  assert.equal(task.progress_revision, 2);
+  assert.equal(restored.progressLedger('ctx.claim-materialized').advisory_work_claim_count, 0);
+  assert.equal(restored.snapshot().active_claim_count, 0);
+});
+
+test('legacy checkpoints without TASK_MATERIALIZED retain expired claim-induced task state on replay', () => {
+  let now = 80_000;
+  const legacy = new BrowserBrainCollaborationJournal({ clock: () => now });
+  legacy.append('TASK_RECORDED', {
+    context_id: 'ctx.legacy-claim',
+    task_id: 'task.legacy-claim',
+    objective: 'restore legacy expired claim state',
+  });
+  legacy.append('CLAIM_RECORDED', {
+    claim_id: 'claim.legacy-expired',
+    context_id: 'ctx.legacy-claim',
+    task_id: 'task.legacy-claim',
+    agent_id: 'agent_legacy',
+    scope: 'legacy-replay',
+    ttl_ms: 5_000,
+  });
+  const checkpoint = legacy.checkpoint();
+
+  now += 10_000;
+  const restored = new BrowserBrainCollaborationRuntimeV2({ clock: () => now });
+  restored.restore(checkpoint);
+  const task = restored.taskLedger('ctx.legacy-claim').tasks[0];
+  assert.equal(task.status, 'ACTIVE');
+  assert.equal(task.owner_agent_id, 'agent_legacy');
+  assert.equal(task.progress_revision, 2);
+  assert.equal(restored.snapshot().active_claim_count, 0);
+  assert.equal(restored.progressLedger('ctx.legacy-claim').advisory_work_claim_count, 0);
+});

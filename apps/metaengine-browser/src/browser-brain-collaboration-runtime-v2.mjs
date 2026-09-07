@@ -136,7 +136,26 @@ export class BrowserBrainCollaborationRuntimeV2 {
   }
   recordMessage(payload) { const result = this.#fabric.recordMessage(payload); if (result.duplicate !== true) { this.#journal.append('MESSAGE_RECORDED', payload); this.#invalidateWorkbench(); this.#persistSoon(); } return result; }
   recordArtifact(payload) { const result = this.#fabric.recordArtifact(payload); if (result.duplicate !== true) { this.#journal.append('ARTIFACT_RECORDED', payload); this.#invalidateWorkbench(); this.#persistSoon(); } return result; }
-  claimWork(payload) { const result = this.#fabric.claimWork(payload); if (result.claimed === true && result.duplicate !== true) { this.#journal.append('CLAIM_RECORDED', payload); this.#invalidateWorkbench(); this.#persistSoon(); } return result; }
+  claimWork(payload) {
+    const result = this.#fabric.claimWork(payload);
+    if (result.claimed === true && result.duplicate !== true) {
+      if (result.task_materialized === true && result.materialized_task) {
+        const task = result.materialized_task;
+        this.#journal.append('TASK_MATERIALIZED', {
+          context_id: task.context_id,
+          task_id: task.task_id,
+          progress_revision: task.progress_revision,
+          status: task.status,
+          owner_agent_id: task.owner_agent_id,
+          blocker: task.blocker,
+        });
+      }
+      this.#journal.append('CLAIM_RECORDED', payload);
+      this.#invalidateWorkbench();
+      this.#persistSoon();
+    }
+    return result;
+  }
   releaseClaim(claimId, reason) { const result = this.#fabric.releaseClaim(claimId, reason); if (result.released === true) { this.#journal.append('CLAIM_RELEASED', { claim_id: claimId, reason }); this.#invalidateWorkbench(); this.#persistSoon(); } return result; }
   recordHandoff(payload) { const result = this.#fabric.recordHandoff(payload); if (result.duplicate !== true) { this.#journal.append('HANDOFF_RECORDED', payload); this.#invalidateWorkbench(); this.#persistSoon(); } return result; }
   taskLedger(contextId) { return this.#fabric.taskLedger(contextId); }

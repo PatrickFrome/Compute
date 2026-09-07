@@ -207,6 +207,48 @@ export class BrowserBrainCollaborationFabric {
     return new Date(this.#nowMs()).toISOString();
   }
 
+  #evictTask(taskId) {
+    this.#tasks.delete(taskId);
+    for (const [messageId, row] of this.#messages) {
+      if (row.taskId === taskId) this.#messages.delete(messageId);
+    }
+    this.#messageOrder = this.#messageOrder.filter((messageId) => this.#messages.has(messageId));
+    for (const [artifactId, row] of this.#artifacts) {
+      if (row.taskId === taskId) this.#artifacts.delete(artifactId);
+    }
+    this.#artifactOrder = this.#artifactOrder.filter((artifactId) => this.#artifacts.has(artifactId));
+    for (const [claimId, row] of this.#claims) {
+      if (row.taskId === taskId) this.#claims.delete(claimId);
+    }
+    for (const [handoffId, row] of this.#handoffs) {
+      if (row.task_id === taskId) this.#handoffs.delete(handoffId);
+    }
+    this.#handoffOrder = this.#handoffOrder.filter((handoffId) => this.#handoffs.has(handoffId));
+  }
+
+  #evictContext(contextId) {
+    const taskIds = [...this.#tasks.values()]
+      .filter((row) => row.contextId === contextId)
+      .map((row) => row.taskId);
+    for (const taskId of taskIds) this.#evictTask(taskId);
+    for (const [messageId, row] of this.#messages) {
+      if (row.contextId === contextId) this.#messages.delete(messageId);
+    }
+    this.#messageOrder = this.#messageOrder.filter((messageId) => this.#messages.has(messageId));
+    for (const [artifactId, row] of this.#artifacts) {
+      if (row.contextId === contextId) this.#artifacts.delete(artifactId);
+    }
+    this.#artifactOrder = this.#artifactOrder.filter((artifactId) => this.#artifacts.has(artifactId));
+    for (const [claimId, row] of this.#claims) {
+      if (row.contextId === contextId) this.#claims.delete(claimId);
+    }
+    for (const [handoffId, row] of this.#handoffs) {
+      if (row.context_id === contextId) this.#handoffs.delete(handoffId);
+    }
+    this.#handoffOrder = this.#handoffOrder.filter((handoffId) => this.#handoffs.has(handoffId));
+    this.#contexts.delete(contextId);
+  }
+
   #ensureContext(contextIdRaw) {
     const contextId = safeId(contextIdRaw, 'browser_brain_collaboration_context_invalid', { lower: true });
     let row = this.#contexts.get(contextId);
@@ -214,10 +256,10 @@ export class BrowserBrainCollaborationFabric {
     if (this.#contexts.size >= this.#maxContexts) {
       const terminal = [...this.#contexts.values()].find((candidate) => {
         const tasks = [...this.#tasks.values()].filter((task) => task.contextId === candidate.contextId);
-        return tasks.length > 0 && tasks.every((task) => TERMINAL_TASK_STATES.has(task.status));
+        return tasks.length === 0 || tasks.every((task) => TERMINAL_TASK_STATES.has(task.status));
       });
       if (!terminal) throw new Error('browser_brain_collaboration_context_capacity_exceeded');
-      this.#contexts.delete(terminal.contextId);
+      this.#evictContext(terminal.contextId);
     }
     row = { contextId, createdAt: this.#nowIso(), revision: 0 };
     this.#contexts.set(contextId, row);
@@ -252,7 +294,7 @@ export class BrowserBrainCollaborationFabric {
     if (this.#tasks.size >= this.#maxTasks) {
       const victim = [...this.#tasks.values()].find((row) => TERMINAL_TASK_STATES.has(row.status));
       if (!victim) throw new Error('browser_brain_collaboration_task_capacity_exceeded');
-      this.#tasks.delete(victim.taskId);
+      this.#evictTask(victim.taskId);
     }
     const normalizedStatus = String(status || 'READY').toUpperCase();
     if (!TASK_STATES.has(normalizedStatus)) throw new Error('browser_brain_collaboration_task_status_invalid');
@@ -324,17 +366,17 @@ export class BrowserBrainCollaborationFabric {
     body_digest,
     causal_epoch = 0,
   } = {}) {
-    const context = this.#ensureContext(context_id);
+    const contextId = safeId(context_id, 'browser_brain_collaboration_context_invalid', { lower: true });
     const messageId = safeId(message_id, 'browser_brain_collaboration_message_invalid', { lower: true });
     const taskId = task_id == null ? null : safeId(task_id, 'browser_brain_collaboration_task_invalid', { lower: true });
-    if (taskId && this.#tasks.get(taskId)?.contextId !== context.contextId) {
+    if (taskId && this.#tasks.get(taskId)?.contextId !== contextId) {
       throw new Error('browser_brain_collaboration_message_task_context_mismatch');
     }
     const normalizedKind = String(kind || '').toUpperCase();
     if (!MESSAGE_KINDS.has(normalizedKind)) throw new Error('browser_brain_collaboration_message_kind_invalid');
     const material = {
       messageId,
-      contextId: context.contextId,
+      contextId,
       taskId,
       sourceAgentId: safeId(source_agent_id, 'browser_brain_collaboration_agent_invalid', { lower: true, max: 128 }),
       sourceGeneration: positiveInt(source_generation, 'browser_brain_collaboration_agent_generation_invalid'),
@@ -355,6 +397,7 @@ export class BrowserBrainCollaborationFabric {
       this.#messageDuplicates += 1;
       return Object.freeze({ ...publicMessage(prior), duplicate: true });
     }
+    const context = this.#ensureContext(contextId);
     const row = { ...material, createdAt: this.#nowIso() };
     this.#messages.set(messageId, row);
     this.#messageOrder.push(messageId);
@@ -376,10 +419,10 @@ export class BrowserBrainCollaborationFabric {
     base_sha = null,
     branch = null,
   } = {}) {
-    const context = this.#ensureContext(context_id);
+    const contextId = safeId(context_id, 'browser_brain_collaboration_context_invalid', { lower: true });
     const artifactId = safeId(artifact_id, 'browser_brain_collaboration_artifact_invalid', { lower: true });
     const taskId = task_id == null ? null : safeId(task_id, 'browser_brain_collaboration_task_invalid', { lower: true });
-    if (taskId && this.#tasks.get(taskId)?.contextId !== context.contextId) {
+    if (taskId && this.#tasks.get(taskId)?.contextId !== contextId) {
       throw new Error('browser_brain_collaboration_artifact_task_context_mismatch');
     }
     const normalizedKind = safeId(kind, 'browser_brain_collaboration_artifact_kind_invalid', { lower: true, max: 64 });
@@ -390,24 +433,26 @@ export class BrowserBrainCollaborationFabric {
       throw new Error('browser_brain_collaboration_artifact_base_sha_invalid');
     }
     const normalizedBranch = branch == null ? null : shortText(branch, 192);
-    const prior = this.#artifacts.get(artifactId);
-    if (prior) {
-      if (
-        prior.contentDigest !== normalizedDigest
-        || prior.contextId !== context.contextId
-        || prior.taskId !== taskId
-      ) throw new Error('browser_brain_collaboration_artifact_immutable_conflict');
-      return Object.freeze({ ...publicArtifact(prior), duplicate: true });
-    }
-    const row = {
+    const material = {
       artifactId,
-      contextId: context.contextId,
+      contextId,
       taskId,
       kind: normalizedKind,
       contentDigest: normalizedDigest,
       refs: normalizedRefs,
       baseSha: normalizedBaseSha,
       branch: normalizedBranch,
+    };
+    const prior = this.#artifacts.get(artifactId);
+    if (prior) {
+      if (contentHash({ ...prior, recordedAt: null }) !== contentHash({ ...material, recordedAt: null })) {
+        throw new Error('browser_brain_collaboration_artifact_immutable_conflict');
+      }
+      return Object.freeze({ ...publicArtifact(prior), duplicate: true });
+    }
+    const context = this.#ensureContext(contextId);
+    const row = {
+      ...material,
       recordedAt: this.#nowIso(),
     };
     this.#artifacts.set(artifactId, row);
@@ -430,9 +475,9 @@ export class BrowserBrainCollaborationFabric {
     mode = 'PRIMARY',
     ttl_ms = 15 * 60_000,
   } = {}) {
-    const context = this.#ensureContext(context_id);
+    const contextId = safeId(context_id, 'browser_brain_collaboration_context_invalid', { lower: true });
     const task = this.#task(task_id);
-    if (!task || task.contextId !== context.contextId) throw new Error('browser_brain_collaboration_claim_task_invalid');
+    if (!task || task.contextId !== contextId) throw new Error('browser_brain_collaboration_claim_task_invalid');
     const claimId = safeId(claim_id, 'browser_brain_collaboration_claim_invalid', { lower: true });
     const agentId = safeId(agent_id, 'browser_brain_collaboration_agent_invalid', { lower: true, max: 128 });
     const agentGeneration = positiveInt(agent_generation, 'browser_brain_collaboration_agent_generation_invalid');
@@ -443,11 +488,23 @@ export class BrowserBrainCollaborationFabric {
     const now = this.#nowMs();
 
     const existingById = this.#claims.get(claimId);
-    if (existingById) return Object.freeze({ claimed: true, duplicate: true, claim: publicClaim(existingById), authority_effect: false });
+    if (existingById) {
+      const existingTtl = existingById.expiresAtMs - existingById.claimedAtMs;
+      if (
+        existingById.contextId !== contextId
+        || existingById.taskId !== task.taskId
+        || existingById.agentId !== agentId
+        || existingById.agentGeneration !== agentGeneration
+        || existingById.scope !== normalizedScope
+        || existingById.mode !== normalizedMode
+        || existingTtl !== ttl
+      ) throw new Error('browser_brain_collaboration_claim_id_collision');
+      return Object.freeze({ claimed: true, duplicate: true, claim: publicClaim(existingById), task_materialized: false, authority_effect: false });
+    }
 
     if (normalizedMode === 'PRIMARY') {
       const conflict = [...this.#claims.values()].find((row) =>
-        row.contextId === context.contextId
+        row.contextId === contextId
         && row.taskId === task.taskId
         && row.scope === normalizedScope
         && row.mode === 'PRIMARY'
@@ -473,9 +530,10 @@ export class BrowserBrainCollaborationFabric {
       if (!expired) throw new Error('browser_brain_collaboration_claim_capacity_exceeded');
       this.#claims.delete(expired.claimId);
     }
+    const context = this.#ensureContext(contextId);
     const row = {
       claimId,
-      contextId: context.contextId,
+      contextId,
       taskId: task.taskId,
       agentId,
       agentGeneration,
@@ -485,14 +543,23 @@ export class BrowserBrainCollaborationFabric {
       expiresAtMs: now + ttl,
     };
     this.#claims.set(claimId, row);
+    let materializedTask = null;
     if (task.status === 'READY') {
       task.status = 'ACTIVE';
       task.ownerAgentId = agentId;
       task.progressRevision += 1;
       task.updatedAt = this.#nowIso();
+      materializedTask = publicTask(task);
     }
     context.revision += 1;
-    return Object.freeze({ claimed: true, duplicate: false, claim: publicClaim(row), authority_effect: false });
+    return Object.freeze({
+      claimed: true,
+      duplicate: false,
+      claim: publicClaim(row),
+      task_materialized: materializedTask != null,
+      materialized_task: materializedTask,
+      authority_effect: false,
+    });
   }
 
   releaseClaim(claim_id, reason = 'WORK_SCOPE_FINISHED') {
@@ -528,13 +595,10 @@ export class BrowserBrainCollaborationFabric {
     branch = null,
     confidence = 0.5,
   } = {}) {
-    const context = this.#ensureContext(context_id);
     const handoffId = safeId(handoff_id, 'browser_brain_collaboration_handoff_invalid', { lower: true });
-    if (this.#handoffs.has(handoffId)) {
-      return Object.freeze({ ...this.#handoffs.get(handoffId), duplicate: true });
-    }
+    const contextId = safeId(context_id, 'browser_brain_collaboration_context_invalid', { lower: true });
     const taskId = task_id == null ? null : safeId(task_id, 'browser_brain_collaboration_task_invalid', { lower: true });
-    if (taskId && this.#tasks.get(taskId)?.contextId !== context.contextId) {
+    if (taskId && this.#tasks.get(taskId)?.contextId !== contextId) {
       throw new Error('browser_brain_collaboration_handoff_task_context_mismatch');
     }
     const normalizedBaseSha = base_sha == null ? null : String(base_sha).trim().toLowerCase();
@@ -545,10 +609,10 @@ export class BrowserBrainCollaborationFabric {
     if (!Number.isFinite(normalizedConfidence) || normalizedConfidence < 0 || normalizedConfidence > 1) {
       throw new Error('browser_brain_collaboration_handoff_confidence_invalid');
     }
-    const row = Object.freeze({
+    const material = {
       schema: BROWSER_BRAIN_HANDOFF_SCHEMA,
       handoff_id: handoffId,
-      context_id: context.contextId,
+      context_id: contextId,
       task_id: taskId,
       from_agent_id: safeId(from_agent_id, 'browser_brain_collaboration_agent_invalid', { lower: true, max: 128 }),
       to_agent_id: to_agent_id == null ? null : safeId(to_agent_id, 'browser_brain_collaboration_agent_invalid', { lower: true, max: 128 }),
@@ -564,11 +628,22 @@ export class BrowserBrainCollaborationFabric {
       base_sha: normalizedBaseSha,
       branch: branch == null ? null : shortText(branch, 192),
       confidence: normalizedConfidence,
-      recorded_at: this.#nowIso(),
       full_transcript_stored: false,
       external_confirmation_required: false,
       execution_authority: false,
       authority_effect: false,
+    };
+    const prior = this.#handoffs.get(handoffId);
+    if (prior) {
+      if (contentHash({ ...prior, recorded_at: null }) !== contentHash({ ...material, recorded_at: null })) {
+        throw new Error('browser_brain_collaboration_handoff_id_collision');
+      }
+      return Object.freeze({ ...prior, duplicate: true });
+    }
+    const context = this.#ensureContext(contextId);
+    const row = Object.freeze({
+      ...material,
+      recorded_at: this.#nowIso(),
     });
     if (!row.objective) throw new Error('browser_brain_collaboration_handoff_objective_required');
     this.#handoffs.set(handoffId, row);
