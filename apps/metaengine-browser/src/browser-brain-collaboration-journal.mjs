@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 export const BROWSER_BRAIN_COLLABORATION_JOURNAL_SCHEMA = 'metaengine.browser-brain.collaboration-journal.v1';
 export const BROWSER_BRAIN_COLLABORATION_CHECKPOINT_SCHEMA = 'metaengine.browser-brain.collaboration-checkpoint.v1';
 
-const SAFE_KIND = new Set(['TASK_RECORDED','TASK_ADVANCED','MESSAGE_RECORDED','ARTIFACT_RECORDED','CLAIM_RECORDED','CLAIM_RELEASED','HANDOFF_RECORDED']);
+const SAFE_KIND = new Set(['TASK_RECORDED','TASK_ADVANCED','TASK_MATERIALIZED','MESSAGE_RECORDED','ARTIFACT_RECORDED','CLAIM_RECORDED','CLAIM_RELEASED','HANDOFF_RECORDED']);
 
 function boundedInt(value, fallback, min, max) {
   const parsed = Number(value);
@@ -64,18 +64,18 @@ export class BrowserBrainCollaborationJournal {
 
   #compact() {
     const taskCreate = new Map();
-    const taskAdvance = new Map();
+    const taskState = new Map();
     const claimState = new Map();
     const retained = [];
     for (const row of this.#entries) {
       const taskId = row.payload?.task_id ? String(row.payload.task_id) : null;
       if (row.kind === 'TASK_RECORDED' && taskId) taskCreate.set(taskId, row);
-      else if (row.kind === 'TASK_ADVANCED' && taskId) taskAdvance.set(taskId, row);
+      else if ((row.kind === 'TASK_ADVANCED' || row.kind === 'TASK_MATERIALIZED') && taskId) taskState.set(taskId, row);
       else if (row.kind === 'CLAIM_RECORDED') claimState.set(String(row.payload?.claim_id || ''), row);
       else if (row.kind === 'CLAIM_RELEASED') claimState.delete(String(row.payload?.claim_id || ''));
       else retained.push(row);
     }
-    const essential = [...taskCreate.values(), ...taskAdvance.values(), ...claimState.values()];
+    const essential = [...taskCreate.values(), ...taskState.values(), ...claimState.values()];
     essential.sort((a, b) => a.seq - b.seq);
     retained.sort((a, b) => a.seq - b.seq);
     const available = Math.max(0, this.#maxEntries - essential.length);
@@ -170,7 +170,7 @@ export class BrowserBrainCollaborationJournal {
     for (const row of this.#entries) {
       const payload = clone(row.payload);
       if (row.kind === 'TASK_RECORDED') fabric.recordTask(payload);
-      else if (row.kind === 'TASK_ADVANCED') fabric.advanceTask(payload);
+      else if (row.kind === 'TASK_ADVANCED' || row.kind === 'TASK_MATERIALIZED') fabric.advanceTask(payload);
       else if (row.kind === 'MESSAGE_RECORDED') fabric.recordMessage(payload);
       else if (row.kind === 'ARTIFACT_RECORDED') fabric.recordArtifact(payload);
       else if (row.kind === 'CLAIM_RECORDED') {
@@ -178,7 +178,12 @@ export class BrowserBrainCollaborationJournal {
         const originalTtl = Number(payload.ttl_ms) || 15 * 60_000;
         const age = Math.max(0, Number(this.#clock()) - recordedAt);
         const remaining = originalTtl - age;
-        if (remaining > 0) fabric.claimWork({ ...payload, ttl_ms: remaining });
+        if (remaining > 0) {
+          fabric.claimWork({ ...payload, ttl_ms: remaining });
+        } else {
+          const replayed = fabric.claimWork({ ...payload, ttl_ms: 1_000 });
+          if (replayed?.claimed === true && replayed?.claim?.claim_id) fabric.releaseClaim(replayed.claim.claim_id, 'EXPIRED_DURING_REPLAY');
+        }
       }
       else if (row.kind === 'CLAIM_RELEASED') fabric.releaseClaim(payload.claim_id, payload.reason);
       else if (row.kind === 'HANDOFF_RECORDED') fabric.recordHandoff(payload);
@@ -196,6 +201,8 @@ export class BrowserBrainCollaborationJournal {
       evictions: this.#evictions,
       hash_verified_checkpoint: true,
       replay_is_information_only: true,
+      materialized_task_state: true,
+      expired_claim_replay_preserves_task_state: true,
       work_cycle_limit: null,
       external_confirmation_required: false,
       scheduler_authority: false,
