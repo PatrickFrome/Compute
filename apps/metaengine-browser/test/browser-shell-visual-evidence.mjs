@@ -33,6 +33,97 @@ const TABS = Object.freeze([
   tab('tab_visual_agent_c', 'Implementation agent', 'https://chatgpt.com/c/implementation-agent', 'CHATGPT'),
 ]);
 
+function task(task_id, objective, status, owner_agent_id, progress_revision, extra = {}) {
+  return Object.freeze({
+    context_id: 'ctx.visual.integration',
+    task_id,
+    objective,
+    status,
+    owner_agent_id,
+    progress_revision,
+    dependencies: Object.freeze(extra.dependencies || []),
+    required_capabilities: Object.freeze(extra.required_capabilities || []),
+    blocker: extra.blocker || null,
+    created_at: '2026-09-07T04:00:00.000Z',
+    updated_at: extra.updated_at || '2026-09-07T04:20:00.000Z',
+    assignment_is_advisory: true,
+    execution_authority: false,
+    scheduler_authority: false,
+    authority_effect: false,
+  });
+}
+
+function brainProjection() {
+  const tasks = Object.freeze([
+    task('task.visual.active', 'Converge Browser Brain around task-first Now view', 'ACTIVE', 'agent_visual_impl', 4, { required_capabilities: ['implementation', 'ui'] }),
+    task('task.visual.blocked', 'Validate the integrated shell on Windows package smoke', 'BLOCKED', 'agent_visual_verify', 3, { blocker: 'Physical package evidence pending', dependencies: ['task.visual.active'], required_capabilities: ['verification'] }),
+    task('task.visual.ready', 'Review task-first information hierarchy and accessibility evidence', 'READY', 'agent_visual_research', 2, { dependencies: ['task.visual.active'], required_capabilities: ['research', 'accessibility'] }),
+  ]);
+  const workbench = Object.freeze({
+    schema: 'metaengine.browser-brain.collaboration-workbench.v1',
+    contexts: Object.freeze([Object.freeze({
+      context_id: 'ctx.visual.integration',
+      context_revision: 9,
+      last_activity_seq: 27,
+      last_activity_at: '2026-09-07T04:22:00.000Z',
+      progress: Object.freeze({ ready: 1, active: 1, blocked: 1, completed: 2, failed: 0, active_agents: Object.freeze(['agent_visual_impl', 'agent_visual_verify']), advisory_work_claim_count: 2 }),
+      blockers: Object.freeze([Object.freeze({ task_id: 'task.visual.blocked', blocker: 'Physical package evidence pending', progress_revision: 3 })]),
+      artifact_refs: Object.freeze(['artifact:visual-shell-png', 'artifact:critical-audit', 'artifact:windows-soak']),
+      tasks,
+      task_count: tasks.length,
+      tasks_truncated: false,
+      authority_effect: false,
+    })]),
+    context_count: 1,
+    visible_context_count: 1,
+    total_task_count: 5,
+    visible_task_count: 3,
+    contexts_truncated: false,
+    bounded: true,
+    message_bodies_exposed: false,
+    raw_page_content_exposed: false,
+    projection_is_authority: false,
+    advisory_only: true,
+    scheduler_authority: false,
+    execution_authority: false,
+    command_leasing: false,
+    work_cycle_limit: null,
+    authority_effect: false,
+  });
+  return Object.freeze({
+    schema: 'metaengine.browser-brain.continuous-coordinator.v1',
+    collaboration_fabric: Object.freeze({
+      schema: 'metaengine.browser-brain.collaboration-runtime.v2',
+      workbench,
+      episodic_memory: Object.freeze({
+        schema: 'metaengine.browser-brain.episodic-memory.v1',
+        episode_count: 18,
+        semantic_fact_count: 6,
+        procedural_playbook_count: 4,
+        immutable_provenance: true,
+        bounded_memory: true,
+        scheduler_authority: false,
+        execution_authority: false,
+        authority_effect: false,
+      }),
+      continuous_autonomous_work: true,
+      work_cycle_limit: null,
+      second_scheduler: false,
+      command_leasing: false,
+      scheduler_authority: false,
+      execution_authority: false,
+      authority_effect: false,
+    }),
+    continuous_autonomous_work: true,
+    work_cycle_limit: null,
+    second_scheduler: false,
+    command_leasing: false,
+    scheduler_authority: false,
+    execution_authority: false,
+    authority_effect: false,
+  });
+}
+
 function snapshotFor(width, height) {
   const sidebarWidth = 272;
   const operationsWidth = 352;
@@ -67,6 +158,7 @@ function snapshotFor(width, height) {
       supervisor_mesh: Object.freeze({ running: true, last_error: null, mesh: Object.freeze({ mesh_epoch: 12, counts: Object.freeze({ total: 3, active: 3, ambiguous_incarnation: 0 }), actuation_policy: 'EXACT_BINDING_ONLY' }) }),
       worker_observer: Object.freeze({ last_error: null }),
       current_command: null,
+      realtime_process_plane: Object.freeze({ schema: 'metaengine.browser.realtime-process-plane.v1', browser_brain: brainProjection(), authority_effect: false }),
     }),
     workspaces: Object.freeze({
       schema: 'metaengine.browser.workspace-workbench-projection.v1', source_state: 'AVAILABLE', source_implemented: true, runtime_deployed: true,
@@ -148,15 +240,26 @@ async function shellMetrics(contents) {
     const systems = document.getElementById('systems');
     const route = document.getElementById('routeKind');
     const ops = document.getElementById('opsContent');
+    const now = document.querySelector('button[data-brain-now="true"]');
+    const health = document.querySelector('[data-health-summary]');
+    const presence = document.querySelector('.brainPresence');
     const rect = systems.getBoundingClientRect();
     const style = getComputedStyle(systems);
+    const opsText = (ops.textContent || '').trim();
     return {
       systems_display: style.display,
       systems_width: rect.width,
       systems_height: rect.height,
       systems_visible: style.display !== 'none' && rect.width > 0 && rect.height > 0,
+      health_summary: (health?.textContent || '').trim(),
+      brain_presence: (presence?.textContent || '').trim(),
+      now_visible: Boolean(now && !now.hidden),
+      now_active: now?.classList.contains('active') === true,
+      task_first_sections: ['Current work', 'Why / current binding', 'Blockers', 'Team', 'Artifacts', 'Timeline', 'Memory'].every((label) => opsText.includes(label)),
+      task_objective_visible: opsText.includes('Converge Browser Brain around task-first Now view'),
+      blocker_visible: opsText.includes('Physical package evidence pending'),
       route_mode: route.textContent,
-      ops_text_length: (ops.textContent || '').trim().length,
+      ops_text_length: opsText.length,
       body_sidebar: document.body.dataset.sidebar || null,
       body_operations: document.body.dataset.operations || null,
     };
@@ -199,19 +302,26 @@ async function main() {
     }
 
     const captures = [
+      await capture(shellView, windowRef, 'shell-1920x1080', 1920, 1080),
       await capture(shellView, windowRef, 'shell-1440x960', 1440, 960),
       await capture(shellView, windowRef, 'shell-1100x760', 1100, 760),
+      await capture(shellView, windowRef, 'shell-1024x720', 1024, 720),
     ];
     if (!captures.every((row) => row.metrics.systems_visible === true)) throw new Error('visual_evidence_health_hidden');
-    if (!captures.every((row) => row.metrics.ops_text_length > 100)) throw new Error('visual_evidence_brain_not_rendered');
+    if (!captures.every((row) => row.metrics.health_summary.length > 0)) throw new Error('visual_evidence_health_summary_missing');
+    if (!captures.every((row) => row.metrics.now_visible === true && row.metrics.now_active === true)) throw new Error('visual_evidence_now_not_primary');
+    if (!captures.every((row) => row.metrics.task_first_sections === true && row.metrics.task_objective_visible === true && row.metrics.blocker_visible === true)) throw new Error('visual_evidence_task_first_brain_missing');
+    if (!captures.every((row) => row.metrics.ops_text_length > 400)) throw new Error('visual_evidence_brain_not_rendered');
 
     const evidence = Object.freeze({
-      schema: 'metaengine.browser-shell.visual-evidence.v1',
+      schema: 'metaengine.browser-shell.visual-evidence.v2',
       electron: process.versions.electron,
       platform: process.platform,
       arch: process.arch,
       route_reset: routeReset,
       captures,
+      task_first_brain_proven: true,
+      textual_health_summary_proven: true,
       shell_only_capture: true,
       remote_browser_content_captured: false,
       golden_comparison_enabled: false,
@@ -228,6 +338,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(JSON.stringify({ schema: 'metaengine.browser-shell.visual-evidence.v1', ok: false, error: String(error?.stack || error), authority_effect: false }));
+  console.error(JSON.stringify({ schema: 'metaengine.browser-shell.visual-evidence.v2', ok: false, error: String(error?.stack || error), authority_effect: false }));
   app.exit(1);
 });
