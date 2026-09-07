@@ -34,6 +34,33 @@ test('durable collaboration checkpoint restores causal work state without user c
   assert.throws(() => restored.restore(tampered), /checkpoint_hash_mismatch/);
 });
 
+test('durable persistence coalesces a synchronous mutation burst and flush preserves the latest journal state', async () => {
+  const saves = [];
+  const runtime = new BrowserBrainCollaborationRuntimeV2({
+    clock: () => 15_000,
+    saveState: async (checkpoint) => { saves.push(checkpoint); },
+  });
+
+  runtime.recordTask({ context_id: 'ctx.coalesce', task_id: 'task.coalesce', objective: 'persist latest burst state', required_capabilities: ['memory'] });
+  runtime.recordArtifact({ artifact_id: 'artifact.coalesce', context_id: 'ctx.coalesce', task_id: 'task.coalesce', kind: 'proof', content_digest: DIGEST, base_sha: SHA, branch: 'work/coalesce' });
+  runtime.recordHandoff({ handoff_id: 'handoff.coalesce', context_id: 'ctx.coalesce', task_id: 'task.coalesce', from_agent_id: 'agent_alpha', objective: 'preserve causal burst', verified_facts: ['latest checkpoint contains the whole burst'], next_actions: ['restore latest checkpoint'], base_sha: SHA, branch: 'work/coalesce' });
+  runtime.claimWork({ claim_id: 'claim.coalesce', context_id: 'ctx.coalesce', task_id: 'task.coalesce', agent_id: 'agent_alpha', scope: 'coalesced-persistence', ttl_ms: 60_000 });
+
+  const flushed = await runtime.flush();
+  assert.equal(flushed.ok, true);
+  assert.equal(saves.length, 1);
+  assert.equal(runtime.snapshot().persistence_coalescing, 'LATEST_CHECKPOINT_BURST_V1');
+
+  const restored = new BrowserBrainCollaborationRuntimeV2({ clock: () => 16_000 });
+  restored.restore(saves[0]);
+  assert.equal(restored.taskLedger('ctx.coalesce').tasks.length, 1);
+  assert.equal(restored.progressLedger('ctx.coalesce').active, 1);
+  assert.deepEqual(restored.taskLedger('ctx.coalesce').artifact_refs, ['artifact.coalesce']);
+  const kinds = restored.checkpoint().entries.map((row) => row.kind);
+  assert.ok(kinds.includes('HANDOFF_RECORDED'));
+  assert.ok(kinds.includes('CLAIM_RECORDED'));
+});
+
 test('terminal tasks become compact immutable episodes and retrieval stays under token budget', () => {
   const runtime = new BrowserBrainCollaborationRuntimeV2({ clock: () => 20_000 });
   runtime.recordTask({ context_id: 'ctx.memory', task_id: 'task.memory', objective: 'implement hybrid episodic memory', required_capabilities: ['memory', 'research'] });
