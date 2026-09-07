@@ -6,6 +6,7 @@ const METAENGINE_DEVOS_SURFACE_TYPES = Object.freeze([
   'BROWSER', 'CODE', 'TERMINAL', 'DIFF', 'TESTS', 'LOGS', 'ARTIFACT', 'TIMELINE', 'MEMORY', 'GRAPH', 'CANVAS', 'DATABASE',
 ]);
 const TASK_PRIORITY = Object.freeze({ ACTIVE: 0, BLOCKED: 1, READY: 2, FAILED: 3, COMPLETED: 4, CANCELLED: 5 });
+const UNBOUND_BROWSER_SESSION_ID = 'session:browser-unbound';
 
 function boundedInt(value, fallback, min, max) {
   const parsed = Number(value);
@@ -43,7 +44,7 @@ function normalizeTask(task = {}) {
     ...zeroAuthorityContract(),
   });
 }
-function deriveAttention(contexts, system = {}) {
+function deriveAttention(contexts, system = {}, workspaceIssues = []) {
   const rows = [];
   for (const context of contexts) {
     for (const task of context.tasks) {
@@ -60,6 +61,20 @@ function deriveAttention(contexts, system = {}) {
       }));
     }
   }
+  for (const issue of safeArray(workspaceIssues).slice(0, 128)) {
+    rows.push(Object.freeze({
+      kind: 'WORKSPACE_BINDING_ISSUE',
+      severity: 'WARNING',
+      objective_id: null,
+      session_id: null,
+      task_id: text(issue?.task_id, 160),
+      title: 'Workspace binding requires attention',
+      reason: text(issue?.reason, 600) || 'WORKSPACE_BINDING_ISSUE',
+      workspace_id: text(issue?.workspace_id, 200),
+      tab_id: text(issue?.tab_id, 160),
+      ...zeroAuthorityContract(),
+    }));
+  }
   if (system.owner_safety_wildcard_disabled === true) {
     rows.push(Object.freeze({ kind: 'SAFETY_OVERRIDE', severity: 'ERROR', title: 'Owner safety wildcard override active', reason: 'Safety state requires operator attention', ...zeroAuthorityContract() }));
   }
@@ -68,34 +83,39 @@ function deriveAttention(contexts, system = {}) {
   }
   return rows;
 }
-function browserSurfaces(snapshot, sessionId, maxSurfaces) {
+function browserSurfaces(snapshot, sessionOwnership, maxSurfaces) {
   const tabs = safeArray(snapshot?.tabs?.tabs);
   const selectedId = text(snapshot?.tabs?.selected_tab_id, 160);
-  return tabs.slice(0, maxSurfaces).map((tab) => Object.freeze({
-    surface_id: `browser:${text(tab?.tab_id, 160) || 'unknown'}`,
-    session_id: sessionId,
-    type: 'BROWSER',
-    title: text(tab?.title, 240) || 'Browser',
-    tab_id: text(tab?.tab_id, 160),
-    url: text(tab?.url, 1400),
-    selected: text(tab?.tab_id, 160) === selectedId,
-    state: text(tab?.state ?? tab?.kind, 64)?.toUpperCase() || 'AVAILABLE',
-    source: 'BROWSER_TAB_REGISTRY',
-    browsercell_identity: text(tab?.tab_id, 160),
-    ...zeroAuthorityContract(),
-  }));
+  return tabs.slice(0, maxSurfaces).map((tab) => {
+    const tabId = text(tab?.tab_id, 160);
+    const sessionId = sessionOwnership.get(tabId) || UNBOUND_BROWSER_SESSION_ID;
+    return Object.freeze({
+      surface_id: `browser:${tabId || 'unknown'}`,
+      session_id: sessionId,
+      type: 'BROWSER',
+      title: text(tab?.title, 240) || 'Browser',
+      tab_id: tabId,
+      url: text(tab?.url, 1400),
+      selected: tabId === selectedId,
+      state: text(tab?.state ?? tab?.kind, 64)?.toUpperCase() || 'AVAILABLE',
+      source: sessionId === UNBOUND_BROWSER_SESSION_ID ? 'BROWSER_TAB_REGISTRY' : 'DURABLE_WORKSPACE_BINDING',
+      ownership: sessionId === UNBOUND_BROWSER_SESSION_ID ? 'UNBOUND_BROWSER_SURFACE' : 'EXACT_SESSION_BINDING',
+      browsercell_identity: tabId,
+      ...zeroAuthorityContract(),
+    });
+  });
 }
-function existingWorkspaceGroups(snapshot) {
+function existingWorkspaceProjection(snapshot) {
   const projection = snapshot?.workspaces;
-  if (!projection || projection.schema !== 'metaengine.browser.workspace-workbench-projection.v1') return [];
+  if (!projection || projection.schema !== 'metaengine.browser.workspace-workbench-projection.v1') return null;
   if (
     projection.grouping_authority !== 'DURABLE_WORKSPACE_BINDING_ONLY'
     || projection.url_heuristic_grouping !== false
     || projection.title_heuristic_grouping !== false
     || projection.browser_actuation_authority !== false
     || projection.authority_effect !== false
-  ) return [];
-  return safeArray(projection.groups);
+  ) return null;
+  return projection;
 }
 function objectiveContexts(snapshot, maxObjectives, maxTasksPerSession) {
   const workbench = snapshot?.supervisor?.realtime_process_plane?.browser_brain?.collaboration_fabric?.workbench;
@@ -139,6 +159,29 @@ function objectiveContexts(snapshot, maxObjectives, maxTasksPerSession) {
     });
   });
 }
+function contextForDurableGroup(group, contexts) {
+  const taskId = text(group?.task_id, 160);
+  if (!taskId) return null;
+  const matches = contexts.filter((context) => context.tasks.some((task) => task.task_id === taskId));
+  return matches.length === 1 ? matches[0] : null;
+}
+function buildSurfaceOwnership(durableGroups, contexts) {
+  const ownership = new Map();
+  const ambiguous = new Set();
+  for (const group of durableGroups) {
+    const tabId = text(group?.tab_id, 160);
+    const context = contextForDurableGroup(group, contexts);
+    if (!tabId || !context) continue;
+    const prior = ownership.get(tabId);
+    if (prior && prior !== context.session_id) {
+      ownership.delete(tabId);
+      ambiguous.add(tabId);
+      continue;
+    }
+    if (!ambiguous.has(tabId)) ownership.set(tabId, context.session_id);
+  }
+  return ownership;
+}
 function createMetaengineDevOSSurfaceRegistry() {
   return Object.freeze({
     schema: METAENGINE_DEVOS_SURFACE_REGISTRY_SCHEMA,
@@ -157,11 +200,10 @@ function projectMetaengineDevOS(snapshot = {}, options = {}) {
   const maxTasksPerSession = boundedInt(options.max_tasks_per_session, 64, 1, 256);
   const maxSurfaces = boundedInt(options.max_surfaces, 64, 1, 256);
   const contexts = objectiveContexts(snapshot, maxObjectives, maxTasksPerSession);
-  const durableGroups = existingWorkspaceGroups(snapshot);
+  const workspaceProjection = existingWorkspaceProjection(snapshot);
+  const durableGroups = safeArray(workspaceProjection?.groups);
   const workspaces = contexts.map((context) => {
-    const durable = durableGroups.find((group) => text(group?.context_id, 160) === context.context_id
-      || text(group?.session_id, 160) === context.session_id
-      || safeArray(group?.task_ids).some((taskId) => context.tasks.some((task) => task.task_id === String(taskId))));
+    const durable = durableGroups.find((group) => contextForDurableGroup(group, [context]) != null);
     return Object.freeze({
       workspace_id: text(durable?.workspace_id ?? durable?.workspace_key, 200) || `workspace:${context.context_id}`,
       objective_id: context.objective_id, session_id: context.session_id,
@@ -171,8 +213,8 @@ function projectMetaengineDevOS(snapshot = {}, options = {}) {
       state: text(durable?.state, 64)?.toUpperCase() || 'AVAILABLE', ...zeroAuthorityContract(),
     });
   });
-  const primarySessionId = contexts[0]?.session_id || 'session:browser';
-  const browser = browserSurfaces(snapshot, primarySessionId, maxSurfaces);
+  const sessionOwnership = buildSurfaceOwnership(durableGroups, contexts);
+  const browser = browserSurfaces(snapshot, sessionOwnership, maxSurfaces);
   const artifacts = [];
   for (const context of contexts) {
     for (const ref of context.artifact_refs) {
@@ -187,17 +229,40 @@ function projectMetaengineDevOS(snapshot = {}, options = {}) {
     surface_ids: Object.freeze(browser.filter((surface) => surface.session_id === context.session_id).map((surface) => surface.surface_id)),
     ...zeroAuthorityContract(),
   }));
+  const unboundSurfaceIds = browser.filter((surface) => surface.session_id === UNBOUND_BROWSER_SESSION_ID).map((surface) => surface.surface_id);
+  if (unboundSurfaceIds.length > 0) {
+    sessions.push(Object.freeze({
+      session_id: UNBOUND_BROWSER_SESSION_ID,
+      objective_id: null,
+      workspace_id: null,
+      title: 'Unbound Browser',
+      status: 'AVAILABLE',
+      task_count: 0,
+      tasks: Object.freeze([]),
+      progress: Object.freeze({ ready: 0, active: 0, blocked: 0, completed: 0, failed: 0, active_agents: Object.freeze([]) }),
+      artifact_count: 0,
+      last_activity_at: null,
+      surface_ids: Object.freeze(unboundSurfaceIds),
+      browser_only: true,
+      ...zeroAuthorityContract(),
+    }));
+  }
   const attention = deriveAttention(contexts, {
     owner_safety_wildcard_disabled: snapshot?.owner_safety_gates?.wildcard_disabled === true,
     supervisor_error: snapshot?.supervisor?.last_error || snapshot?.supervisor?.devos_last_error || null,
-  });
+  }, workspaceProjection?.issues);
   const selectedSurface = browser.find((surface) => surface.selected) || browser[0] || null;
+  const selectedSessionId = selectedSurface?.session_id || contexts[0]?.session_id || sessions[0]?.session_id || null;
+  const selectedSession = sessions.find((session) => session.session_id === selectedSessionId) || sessions[0] || null;
+  const selectedObjective = selectedSession?.objective_id ? contexts.find((context) => context.objective_id === selectedSession.objective_id) || null : null;
+  const selectedWorkspace = selectedSession?.workspace_id ? workspaces.find((workspace) => workspace.workspace_id === selectedSession.workspace_id) || null : null;
   return Object.freeze({
     schema: METAENGINE_DEVOS_PROJECTION_SCHEMA, mode: 'DEVELOPMENT_OS', primary_object: 'SESSION',
     hierarchy: Object.freeze(['OBJECTIVE', 'WORKSPACE', 'SESSION', 'TASK', 'SURFACE', 'ARTIFACT']),
     objectives: freezeRows(contexts.map((context) => ({ objective_id: context.objective_id, context_id: context.context_id, title: context.title, status: context.status, session_ids: Object.freeze([context.session_id]), attention_count: attention.filter((row) => row.objective_id === context.objective_id).length, ...zeroAuthorityContract() }))),
     workspaces: freezeRows(workspaces), sessions: freezeRows(sessions), surfaces: freezeRows(browser), artifacts: freezeRows(artifacts.slice(0, 512)), attention: freezeRows(attention.slice(0, 256)),
-    selected: Object.freeze({ objective_id: contexts[0]?.objective_id || null, workspace_id: workspaces[0]?.workspace_id || null, session_id: contexts[0]?.session_id || primarySessionId, surface_id: selectedSurface?.surface_id || null }),
+    selected: Object.freeze({ objective_id: selectedObjective?.objective_id || null, workspace_id: selectedWorkspace?.workspace_id || null, session_id: selectedSession?.session_id || null, surface_id: selectedSurface?.surface_id || null }),
+    active_session: selectedSession ? Object.freeze({ session_id: selectedSession.session_id, objective_id: selectedSession.objective_id, workspace_id: selectedSession.workspace_id, title: selectedSession.title, status: selectedSession.status, surface_count: selectedSession.surface_ids.length, task_count: selectedSession.task_count, attention_count: attention.filter((row) => row.session_id === selectedSession.session_id).length, ...zeroAuthorityContract() }) : null,
     surface_registry: createMetaengineDevOSSurfaceRegistry(),
     counts: Object.freeze({ objectives: contexts.length, workspaces: workspaces.length, sessions: sessions.length, tasks: sessions.reduce((sum, session) => sum + session.task_count, 0), surfaces: browser.length, artifacts: Math.min(artifacts.length, 512), attention: Math.min(attention.length, 256) }),
     bounded: true, max_objectives: maxObjectives, max_tasks_per_session: maxTasksPerSession, max_surfaces: maxSurfaces,
