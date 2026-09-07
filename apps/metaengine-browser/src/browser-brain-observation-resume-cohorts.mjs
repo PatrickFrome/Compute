@@ -15,9 +15,13 @@ function epoch(value, code) {
 }
 
 function consumer(value) {
-  const normalized = String(value || '').trim();
+  const normalized = String(value ?? '').trim();
   if (!CONSUMER_RE.test(normalized)) throw new TypeError('browser_brain_resume_consumer_invalid');
   return normalized;
+}
+
+function compareConsumers(left, right) {
+  return left.localeCompare(right);
 }
 
 export function buildBrowserBrainObservationResumeCohorts({ oldest_epoch, latest_epoch, cursors } = {}) {
@@ -45,7 +49,7 @@ export function buildBrowserBrainObservationResumeCohorts({ oldest_epoch, latest
       continue;
     }
 
-    const members = cohorts.get(from) || [];
+    const members = cohorts.get(from) ?? [];
     members.push(name);
     cohorts.set(from, members);
   }
@@ -54,7 +58,7 @@ export function buildBrowserBrainObservationResumeCohorts({ oldest_epoch, latest
     .sort(([a], [b]) => a - b)
     .map(([from, members]) => Object.freeze({
       from_epoch: from,
-      consumers: Object.freeze([...members].sort()),
+      consumers: Object.freeze([...members].sort(compareConsumers)),
       consumer_count: members.length,
       replay_required: from < latest,
     }));
@@ -66,7 +70,7 @@ export function buildBrowserBrainObservationResumeCohorts({ oldest_epoch, latest
     consumer_count: cursors.length,
     cohort_count: replayCohorts.length,
     cohorts: Object.freeze(replayCohorts),
-    canonical_resync: Object.freeze(resync.sort((a, b) => a.consumer.localeCompare(b.consumer))),
+    canonical_resync: Object.freeze(resync.sort((a, b) => compareConsumers(a.consumer, b.consumer))),
     canonical_resync_count: resync.length,
     shared_window_read: true,
     payload_persisted: false,
