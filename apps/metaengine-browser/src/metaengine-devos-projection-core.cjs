@@ -182,6 +182,66 @@ function buildSurfaceOwnership(durableGroups, contexts) {
   }
   return ownership;
 }
+function memoryReadModel(snapshot) {
+  const memory = snapshot?.supervisor?.realtime_process_plane?.browser_brain?.collaboration_fabric?.episodic_memory;
+  const valid = memory
+    && memory.schema === 'metaengine.browser-brain.episodic-memory.v1'
+    && memory.bounded_memory === true
+    && memory.scheduler_authority === false
+    && memory.execution_authority === false
+    && memory.authority_effect === false;
+  if (!valid) return Object.freeze({ source_state: 'NOT_EXPOSED', episode_count: 0, semantic_fact_count: 0, procedural_playbook_count: 0, ...zeroAuthorityContract() });
+  return Object.freeze({
+    source_state: 'AVAILABLE',
+    episode_count: Math.max(0, Number(memory.episode_count || 0)),
+    semantic_fact_count: Math.max(0, Number(memory.semantic_fact_count || 0)),
+    procedural_playbook_count: Math.max(0, Number(memory.procedural_playbook_count || 0)),
+    ...zeroAuthorityContract(),
+  });
+}
+function buildNavigation(sessions, attention, workspaces, snapshot) {
+  const attentionSessionIds = new Set(attention.map((row) => row.session_id).filter(Boolean));
+  const assigned = new Set();
+  const group = (groupId, predicate) => {
+    const sessionIds = [];
+    for (const session of sessions) {
+      if (assigned.has(session.session_id) || !predicate(session)) continue;
+      assigned.add(session.session_id);
+      sessionIds.push(session.session_id);
+    }
+    return Object.freeze({ group_id: groupId, session_ids: Object.freeze(sessionIds), count: sessionIds.length, ...zeroAuthorityContract() });
+  };
+  const sessionGroups = Object.freeze([
+    group('NEEDS_ATTENTION', (session) => session.browser_only !== true && attentionSessionIds.has(session.session_id)),
+    group('ACTIVE', (session) => session.browser_only !== true && session.status === 'ACTIVE'),
+    group('BACKGROUND', (session) => session.browser_only !== true && !['COMPLETED', 'CANCELLED'].includes(session.status)),
+    group('COMPLETED', (session) => session.browser_only !== true && ['COMPLETED', 'CANCELLED'].includes(session.status)),
+    group('UNBOUND', (session) => session.browser_only === true),
+  ]);
+  const workSessions = sessions.filter((session) => session.browser_only !== true);
+  const memory = memoryReadModel(snapshot);
+  const systemAttention = attention.filter((row) => !row.session_id).length;
+  const roots = freezeRows([
+    { root_id: 'NOW', label: 'Now', source_state: 'AVAILABLE', count: attention.length, state: attention.length ? 'ATTENTION' : 'CLEAR', ...zeroAuthorityContract() },
+    { root_id: 'WORKSPACES', label: 'Workspaces', source_state: 'AVAILABLE', count: workspaces.length, state: 'AVAILABLE', ...zeroAuthorityContract() },
+    { root_id: 'SESSIONS', label: 'Sessions', source_state: 'AVAILABLE', count: workSessions.length, state: workSessions.length ? 'AVAILABLE' : 'EMPTY', ...zeroAuthorityContract() },
+    { root_id: 'AUTOMATIONS', label: 'Automations', source_state: 'NOT_EXPOSED', count: 0, state: 'UNAVAILABLE', ...zeroAuthorityContract() },
+    { root_id: 'MEMORY', label: 'Memory', source_state: memory.source_state, count: memory.episode_count, state: memory.source_state, ...zeroAuthorityContract() },
+    { root_id: 'SYSTEM', label: 'System', source_state: 'AVAILABLE', count: systemAttention, state: systemAttention ? 'ATTENTION' : 'CLEAR', ...zeroAuthorityContract() },
+  ]);
+  return Object.freeze({
+    schema: 'metaengine.devos.navigation.v1',
+    default_root: 'NOW',
+    roots,
+    session_groups: sessionGroups,
+    memory,
+    attention_outside_normal_workflow: true,
+    unbound_is_work_session: false,
+    automations_source_state: 'NOT_EXPOSED',
+    grouping_is_execution_authority: false,
+    ...zeroAuthorityContract(),
+  });
+}
 function createMetaengineDevOSSurfaceRegistry() {
   return Object.freeze({
     schema: METAENGINE_DEVOS_SURFACE_REGISTRY_SCHEMA,
@@ -256,6 +316,7 @@ function projectMetaengineDevOS(snapshot = {}, options = {}) {
   const selectedSession = sessions.find((session) => session.session_id === selectedSessionId) || sessions[0] || null;
   const selectedObjective = selectedSession?.objective_id ? contexts.find((context) => context.objective_id === selectedSession.objective_id) || null : null;
   const selectedWorkspace = selectedSession?.workspace_id ? workspaces.find((workspace) => workspace.workspace_id === selectedSession.workspace_id) || null : null;
+  const navigation = buildNavigation(sessions, attention, workspaces, snapshot);
   return Object.freeze({
     schema: METAENGINE_DEVOS_PROJECTION_SCHEMA, mode: 'DEVELOPMENT_OS', primary_object: 'SESSION',
     hierarchy: Object.freeze(['OBJECTIVE', 'WORKSPACE', 'SESSION', 'TASK', 'SURFACE', 'ARTIFACT']),
@@ -263,6 +324,7 @@ function projectMetaengineDevOS(snapshot = {}, options = {}) {
     workspaces: freezeRows(workspaces), sessions: freezeRows(sessions), surfaces: freezeRows(browser), artifacts: freezeRows(artifacts.slice(0, 512)), attention: freezeRows(attention.slice(0, 256)),
     selected: Object.freeze({ objective_id: selectedObjective?.objective_id || null, workspace_id: selectedWorkspace?.workspace_id || null, session_id: selectedSession?.session_id || null, surface_id: selectedSurface?.surface_id || null }),
     active_session: selectedSession ? Object.freeze({ session_id: selectedSession.session_id, objective_id: selectedSession.objective_id, workspace_id: selectedSession.workspace_id, title: selectedSession.title, status: selectedSession.status, surface_count: selectedSession.surface_ids.length, task_count: selectedSession.task_count, attention_count: attention.filter((row) => row.session_id === selectedSession.session_id).length, ...zeroAuthorityContract() }) : null,
+    navigation,
     surface_registry: createMetaengineDevOSSurfaceRegistry(),
     counts: Object.freeze({ objectives: contexts.length, workspaces: workspaces.length, sessions: sessions.length, tasks: sessions.reduce((sum, session) => sum + session.task_count, 0), surfaces: browser.length, artifacts: Math.min(artifacts.length, 512), attention: Math.min(attention.length, 256) }),
     bounded: true, max_objectives: maxObjectives, max_tasks_per_session: maxTasksPerSession, max_surfaces: maxSurfaces,
