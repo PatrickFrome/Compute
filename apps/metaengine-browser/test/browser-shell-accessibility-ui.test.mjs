@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const css = await readFile(new URL('../ui/app.css', import.meta.url), 'utf8');
 const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
+const app = await readFile(new URL('../ui/app.js', import.meta.url), 'utf8');
 
 test('health labels remain available to assistive technology while staying visually compact', () => {
   const hardening = css.lastIndexOf('.systemChip b,.systemChip .systemValue{');
@@ -19,6 +20,28 @@ test('frequent health snapshots remain readable without becoming repetitive live
   assert.match(html, /id="systems" class="systems" aria-label="Browser health" aria-live="off"/);
   assert.match(html, /id="fleetStatus"[\s\S]*?<b>Fleet<\/b><span class="systemValue">…<\/span>/);
   assert.match(html, /id="gateStatus"[\s\S]*?<b>Gates<\/b><span class="systemValue">…<\/span>/);
+});
+
+test('narrow final shell keeps compact health state visible instead of hiding it', () => {
+  const hardening = css.indexOf('Accessibility/readability hardening');
+  assert.notEqual(hardening, -1);
+  const tail = css.slice(hardening);
+  assert.match(tail, /@media\(max-width:1180px\)\{[\s\S]*?body\[data-final-shell="telegram-browser-v1"\] \.systems\{display:flex!important/);
+});
+
+test('omnibox route mode returns to the selected tab after command prefixes are removed', () => {
+  const start = app.indexOf('function updateWorkbenchRouteKind()');
+  assert.notEqual(start, -1);
+  const end = app.indexOf('\n}\n\ninstallAgenticNav();', start);
+  assert.notEqual(end, -1);
+  const fn = app.slice(start, end);
+  assert.match(fn, /routeKind\.textContent = 'CMD'/);
+  assert.match(fn, /routeKind\.textContent = 'TAB'/);
+  assert.match(fn, /routeKind\.textContent = 'SKILL'/);
+  assert.match(fn, /const tab = selectedTab\(snapshot\)/);
+  assert.match(fn, /routeKind\.textContent = chat \? 'CHAT' : 'WEB'/);
+  assert.match(fn, /routeKind\.classList\.toggle\('chat', chat\)/);
+  assert.match(app, /address\.value = '>';[\s\S]*?routeKind\.classList\.remove\('chat'\)/);
 });
 
 test('Brain evidence is selectable without making command controls selectable text', () => {
