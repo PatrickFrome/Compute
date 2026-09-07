@@ -9,6 +9,7 @@ export const BROWSER_BRAIN_COLLABORATION_RUNTIME_V2_SCHEMA = 'metaengine.browser
 export const BROWSER_BRAIN_COLLABORATION_WORKBENCH_SCHEMA = 'metaengine.browser-brain.collaboration-workbench.v1';
 const TERMINAL = new Set(['COMPLETED', 'CANCELLED']);
 const TASK_PRIORITY = Object.freeze({ ACTIVE: 0, BLOCKED: 1, READY: 2, FAILED: 3, COMPLETED: 4, CANCELLED: 5 });
+const WORKBENCH_CACHE_MS = 1000;
 
 function boundedProjectionLimit(value, fallback, max) {
   const parsed = Number(value);
@@ -18,6 +19,7 @@ function boundedProjectionLimit(value, fallback, max) {
 
 export class BrowserBrainCollaborationRuntimeV2 {
   #clock; #fabric; #journal; #memory; #routing; #stall; #a2a; #loadState; #saveState; #persistChain = Promise.resolve(); #lastPersistError = null;
+  #workbenchCache = null; #workbenchCacheAt = 0;
   constructor({ clock = () => Date.now(), fabric = null, journal = null, memory = null, routing = null, stallDetector = null, a2aAdapter = null, loadState = null, saveState = null } = {}) {
     this.#clock = clock;
     this.#fabric = fabric || new BrowserBrainCollaborationFabric({ clock });
@@ -40,6 +42,7 @@ export class BrowserBrainCollaborationRuntimeV2 {
         this.#fabric = new BrowserBrainCollaborationFabric({ clock: this.#clock });
         this.#journal.replayInto(this.#fabric);
         this.#rebuildEpisodesFromJournal();
+        this.#invalidateWorkbench();
       }
     }
     return this.snapshot();
@@ -49,6 +52,11 @@ export class BrowserBrainCollaborationRuntimeV2 {
     const checkpoint = this.#journal.checkpoint();
     this.#persistChain = this.#persistChain.then(() => this.#saveState(checkpoint)).then(() => { this.#lastPersistError = null; }).catch((error) => { this.#lastPersistError = String(error?.message || error).slice(0, 240); });
   }
+  #invalidateWorkbench() { this.#workbenchCache = null; this.#workbenchCacheAt = 0; }
+  #nowMs() {
+    const value = Number(this.#clock());
+    return Number.isFinite(value) && value >= 0 ? value : Date.now();
+  }
   async flush() { await this.#persistChain; return Object.freeze({ ok: this.#lastPersistError == null, error: this.#lastPersistError, authority_effect: false }); }
   checkpoint() { return this.#journal.checkpoint(); }
   restore(checkpoint) {
@@ -56,14 +64,16 @@ export class BrowserBrainCollaborationRuntimeV2 {
     this.#fabric = new BrowserBrainCollaborationFabric({ clock: this.#clock });
     const replay = this.#journal.replayInto(this.#fabric);
     this.#rebuildEpisodesFromJournal();
+    this.#invalidateWorkbench();
     return Object.freeze({ ...replay, checkpoint_restored: true, episodic_memory_rebuilt: true, authority_effect: false });
   }
 
-  recordTask(payload) { const result = this.#fabric.recordTask(payload); this.#journal.append('TASK_RECORDED', payload); this.#persistSoon(); return result; }
+  recordTask(payload) { const result = this.#fabric.recordTask(payload); this.#journal.append('TASK_RECORDED', payload); this.#invalidateWorkbench(); this.#persistSoon(); return result; }
   advanceTask(payload) {
     const result = this.#fabric.advanceTask(payload);
     this.#journal.append('TASK_ADVANCED', payload);
     if (TERMINAL.has(result.status)) this.#recordTerminalEpisode(result);
+    this.#invalidateWorkbench();
     this.#persistSoon();
     return result;
   }
@@ -97,11 +107,11 @@ export class BrowserBrainCollaborationRuntimeV2 {
       branch: provenance.branch,
     });
   }
-  recordMessage(payload) { const result = this.#fabric.recordMessage(payload); if (result.duplicate !== true) { this.#journal.append('MESSAGE_RECORDED', payload); this.#persistSoon(); } return result; }
-  recordArtifact(payload) { const result = this.#fabric.recordArtifact(payload); if (result.duplicate !== true) { this.#journal.append('ARTIFACT_RECORDED', payload); this.#persistSoon(); } return result; }
-  claimWork(payload) { const result = this.#fabric.claimWork(payload); if (result.claimed === true && result.duplicate !== true) { this.#journal.append('CLAIM_RECORDED', payload); this.#persistSoon(); } return result; }
-  releaseClaim(claimId, reason) { const result = this.#fabric.releaseClaim(claimId, reason); if (result.released === true) { this.#journal.append('CLAIM_RELEASED', { claim_id: claimId, reason }); this.#persistSoon(); } return result; }
-  recordHandoff(payload) { const result = this.#fabric.recordHandoff(payload); if (result.duplicate !== true) { this.#journal.append('HANDOFF_RECORDED', payload); this.#persistSoon(); } return result; }
+  recordMessage(payload) { const result = this.#fabric.recordMessage(payload); if (result.duplicate !== true) { this.#journal.append('MESSAGE_RECORDED', payload); this.#invalidateWorkbench(); this.#persistSoon(); } return result; }
+  recordArtifact(payload) { const result = this.#fabric.recordArtifact(payload); if (result.duplicate !== true) { this.#journal.append('ARTIFACT_RECORDED', payload); this.#invalidateWorkbench(); this.#persistSoon(); } return result; }
+  claimWork(payload) { const result = this.#fabric.claimWork(payload); if (result.claimed === true && result.duplicate !== true) { this.#journal.append('CLAIM_RECORDED', payload); this.#invalidateWorkbench(); this.#persistSoon(); } return result; }
+  releaseClaim(claimId, reason) { const result = this.#fabric.releaseClaim(claimId, reason); if (result.released === true) { this.#journal.append('CLAIM_RELEASED', { claim_id: claimId, reason }); this.#invalidateWorkbench(); this.#persistSoon(); } return result; }
+  recordHandoff(payload) { const result = this.#fabric.recordHandoff(payload); if (result.duplicate !== true) { this.#journal.append('HANDOFF_RECORDED', payload); this.#invalidateWorkbench(); this.#persistSoon(); } return result; }
   taskLedger(contextId) { return this.#fabric.taskLedger(contextId); }
   progressLedger(contextId) { return this.#fabric.progressLedger(contextId); }
   decideAutonomousContinuation(query) {
@@ -118,6 +128,10 @@ export class BrowserBrainCollaborationRuntimeV2 {
   workbenchProjection({ max_contexts = 32, max_tasks_per_context = 64 } = {}) {
     const contextLimit = boundedProjectionLimit(max_contexts, 32, 128);
     const taskLimit = boundedProjectionLimit(max_tasks_per_context, 64, 256);
+    const cacheable = contextLimit === 32 && taskLimit === 64;
+    const now = this.#nowMs();
+    if (cacheable && this.#workbenchCache && now - this.#workbenchCacheAt <= WORKBENCH_CACHE_MS) return this.#workbenchCache;
+
     const entries = this.#journal.entries();
     const contextActivity = new Map();
     for (const row of entries) {
@@ -129,7 +143,6 @@ export class BrowserBrainCollaborationRuntimeV2 {
     const orderedContexts = [...contextActivity.values()].sort((a, b) => b.seq - a.seq);
     const selectedContexts = orderedContexts.slice(0, contextLimit);
     let visibleTasks = 0;
-    let totalTasks = 0;
     const contexts = selectedContexts.map((activity) => {
       const ledger = this.#fabric.taskLedger(activity.context_id);
       const progress = this.#fabric.progressLedger(activity.context_id);
@@ -137,7 +150,6 @@ export class BrowserBrainCollaborationRuntimeV2 {
         const priority = (TASK_PRIORITY[a.status] ?? 99) - (TASK_PRIORITY[b.status] ?? 99);
         return priority || String(b.updated_at || '').localeCompare(String(a.updated_at || '')) || String(a.task_id).localeCompare(String(b.task_id));
       });
-      totalTasks += tasks.length;
       const visible = tasks.slice(0, taskLimit);
       visibleTasks += visible.length;
       return Object.freeze({
@@ -162,15 +174,16 @@ export class BrowserBrainCollaborationRuntimeV2 {
         authority_effect: false,
       });
     });
-    return Object.freeze({
+    const result = Object.freeze({
       schema: BROWSER_BRAIN_COLLABORATION_WORKBENCH_SCHEMA,
       contexts: Object.freeze(contexts),
       context_count: contextActivity.size,
       visible_context_count: contexts.length,
-      total_task_count: totalTasks,
+      total_task_count: this.#fabric.snapshot().task_count,
       visible_task_count: visibleTasks,
       contexts_truncated: contexts.length < contextActivity.size,
       bounded: true,
+      cache_max_age_ms: WORKBENCH_CACHE_MS,
       message_bodies_exposed: false,
       raw_page_content_exposed: false,
       projection_is_authority: false,
@@ -181,6 +194,8 @@ export class BrowserBrainCollaborationRuntimeV2 {
       work_cycle_limit: null,
       authority_effect: false,
     });
+    if (cacheable) { this.#workbenchCache = result; this.#workbenchCacheAt = now; }
+    return result;
   }
 
   observeRoutingAgent(profile) { return this.#routing.observeAgent(profile); }
