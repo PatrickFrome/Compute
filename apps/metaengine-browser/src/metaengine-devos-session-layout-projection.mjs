@@ -1,10 +1,11 @@
 import {
-  METAENGINE_DEVOS_SESSION_LAYOUT_ENTRY_SCHEMA,
   METAENGINE_DEVOS_SESSION_LAYOUT_SCHEMA,
   createDevOSSessionLayoutRegistry,
 } from './metaengine-devos-session-layout.mjs';
 
 export const METAENGINE_DEVOS_SESSION_LAYOUT_PROJECTION_SCHEMA = 'metaengine.devos.session-layout-projection.v1';
+export const METAENGINE_DEVOS_SESSION_LAYOUT_PREFERENCE_SCHEMA = 'metaengine.devos.session-layout-preference.v1';
+export const METAENGINE_DEVOS_INVALID_LAYOUT_ATTACHMENT_SCHEMA = 'metaengine.devos.layout-attachment.invalid.v1';
 
 function zeroAuthorityContract() {
   return Object.freeze({
@@ -34,9 +35,27 @@ function text(value, max = 240) {
   return out ? out.slice(0, max) : null;
 }
 
+function validDevOS(devos) {
+  if (!devos
+    || devos.schema !== 'metaengine.devos.projection.v1'
+    || devos.primary_object !== 'SESSION'
+    || !Array.isArray(devos.sessions)
+    || !Array.isArray(devos.surfaces)
+    || !devos.selected
+    || typeof devos.selected !== 'object'
+    || !hasZeroAuthorityContract(devos)) return false;
+  const sessionIds = new Set(devos.sessions.map((session) => text(session?.session_id, 200)).filter(Boolean));
+  const surfaceIds = new Set(devos.surfaces.map((surface) => text(surface?.surface_id, 240)).filter(Boolean));
+  const selectedSessionId = text(devos.selected.session_id, 200);
+  const selectedSurfaceId = text(devos.selected.surface_id, 240);
+  if (selectedSessionId && !sessionIds.has(selectedSessionId)) return false;
+  if (selectedSurfaceId && !surfaceIds.has(selectedSurfaceId)) return false;
+  return true;
+}
+
 function unavailableProjection(devos, sourceState, registryReason = null) {
-  const selectedSessionId = text(devos?.selected?.session_id, 200);
-  const selectedSurfaceId = text(devos?.selected?.surface_id, 240);
+  const selectedSessionId = validDevOS(devos) ? text(devos.selected.session_id, 200) : null;
+  const selectedSurfaceId = validDevOS(devos) ? text(devos.selected.surface_id, 240) : null;
   return Object.freeze({
     schema: METAENGINE_DEVOS_SESSION_LAYOUT_PROJECTION_SCHEMA,
     source_state: sourceState,
@@ -47,6 +66,7 @@ function unavailableProjection(devos, sourceState, registryReason = null) {
     selection_alignment: selectedSessionId ? 'REGISTRY_NOT_AVAILABLE' : 'NO_SELECTED_SESSION',
     entries: Object.freeze([]),
     active: selectedSessionId ? Object.freeze({
+      schema: METAENGINE_DEVOS_SESSION_LAYOUT_PREFERENCE_SCHEMA,
       session_id: selectedSessionId,
       requested_sidebar: 'EXPANDED',
       requested_inspector: 'CLOSED',
@@ -65,19 +85,9 @@ function unavailableProjection(devos, sourceState, registryReason = null) {
   });
 }
 
-function validDevOS(devos) {
-  return devos
-    && devos.schema === 'metaengine.devos.projection.v1'
-    && devos.primary_object === 'SESSION'
-    && Array.isArray(devos.sessions)
-    && devos.selected
-    && typeof devos.selected === 'object'
-    && hasZeroAuthorityContract(devos);
-}
-
 function projectEntry(entry) {
   return Object.freeze({
-    schema: METAENGINE_DEVOS_SESSION_LAYOUT_ENTRY_SCHEMA,
+    schema: METAENGINE_DEVOS_SESSION_LAYOUT_PREFERENCE_SCHEMA,
     session_id: entry.session_id,
     requested_sidebar: entry.requested_sidebar,
     requested_inspector: entry.requested_inspector,
@@ -91,7 +101,7 @@ function projectEntry(entry) {
 }
 
 export function projectDevOSSessionLayout(devos, registrySnapshot = null) {
-  if (!validDevOS(devos)) return unavailableProjection(devos, 'INVALID_DEVOS', 'DEVOS_PROJECTION_INVALID');
+  if (!validDevOS(devos)) return unavailableProjection(null, 'INVALID_DEVOS', 'DEVOS_PROJECTION_INVALID');
   if (registrySnapshot == null) return unavailableProjection(devos, 'NOT_EXPOSED');
 
   let validated;
@@ -114,7 +124,9 @@ export function projectDevOSSessionLayout(devos, registrySnapshot = null) {
   const registryActive = text(validated.active_session_id, 200);
   const selectionAlignment = !selectedSessionId
     ? 'NO_SELECTED_SESSION'
-    : (registryActive === selectedSessionId ? 'ALIGNED' : 'STALE_REGISTRY_ACTIVE_SESSION');
+    : (!registryActive
+      ? 'REGISTRY_ACTIVE_SESSION_NOT_SET'
+      : (registryActive === selectedSessionId ? 'ALIGNED' : 'STALE_REGISTRY_ACTIVE_SESSION'));
 
   return Object.freeze({
     schema: METAENGINE_DEVOS_SESSION_LAYOUT_PROJECTION_SCHEMA,
@@ -126,6 +138,7 @@ export function projectDevOSSessionLayout(devos, registrySnapshot = null) {
     selection_alignment: selectionAlignment,
     entries: Object.freeze(entries),
     active: selectedSessionId ? Object.freeze({
+      schema: METAENGINE_DEVOS_SESSION_LAYOUT_PREFERENCE_SCHEMA,
       session_id: selectedSessionId,
       requested_sidebar: activeEntry?.requested_sidebar || 'EXPANDED',
       requested_inspector: activeEntry?.requested_inspector || 'CLOSED',
@@ -146,8 +159,14 @@ export function projectDevOSSessionLayout(devos, registrySnapshot = null) {
 
 export function attachDevOSSessionLayout(devos, registrySnapshot = null) {
   const layoutPreferences = projectDevOSSessionLayout(devos, registrySnapshot);
-  if (!devos || typeof devos !== 'object') {
-    return Object.freeze({ layout_preferences: layoutPreferences, ...zeroAuthorityContract() });
+  if (!validDevOS(devos)) {
+    return Object.freeze({
+      schema: METAENGINE_DEVOS_INVALID_LAYOUT_ATTACHMENT_SCHEMA,
+      valid: false,
+      reason: 'INVALID_DEVOS',
+      layout_preferences: layoutPreferences,
+      ...zeroAuthorityContract(),
+    });
   }
   return Object.freeze({ ...devos, layout_preferences: layoutPreferences });
 }
