@@ -6,7 +6,15 @@ import { BrowserBrainStallDetector } from './browser-brain-stall-detector.mjs';
 import { BrowserBrainA2AAdapter } from './browser-brain-a2a-adapter.mjs';
 
 export const BROWSER_BRAIN_COLLABORATION_RUNTIME_V2_SCHEMA = 'metaengine.browser-brain.collaboration-runtime.v2';
+export const BROWSER_BRAIN_COLLABORATION_WORKBENCH_SCHEMA = 'metaengine.browser-brain.collaboration-workbench.v1';
 const TERMINAL = new Set(['COMPLETED', 'CANCELLED']);
+const TASK_PRIORITY = Object.freeze({ ACTIVE: 0, BLOCKED: 1, READY: 2, FAILED: 3, COMPLETED: 4, CANCELLED: 5 });
+
+function boundedProjectionLimit(value, fallback, max) {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) return fallback;
+  return Math.max(1, Math.min(max, parsed));
+}
 
 export class BrowserBrainCollaborationRuntimeV2 {
   #clock; #fabric; #journal; #memory; #routing; #stall; #a2a; #loadState; #saveState; #persistChain = Promise.resolve(); #lastPersistError = null;
@@ -107,6 +115,74 @@ export class BrowserBrainCollaborationRuntimeV2 {
     return Object.freeze({ ...base, stall });
   }
 
+  workbenchProjection({ max_contexts = 32, max_tasks_per_context = 64 } = {}) {
+    const contextLimit = boundedProjectionLimit(max_contexts, 32, 128);
+    const taskLimit = boundedProjectionLimit(max_tasks_per_context, 64, 256);
+    const entries = this.#journal.entries();
+    const contextActivity = new Map();
+    for (const row of entries) {
+      const contextId = String(row?.payload?.context_id || '').trim().toLowerCase();
+      if (!contextId) continue;
+      const prior = contextActivity.get(contextId);
+      if (!prior || row.seq > prior.seq) contextActivity.set(contextId, { context_id: contextId, seq: row.seq, recorded_at: row.recorded_at });
+    }
+    const orderedContexts = [...contextActivity.values()].sort((a, b) => b.seq - a.seq);
+    const selectedContexts = orderedContexts.slice(0, contextLimit);
+    let visibleTasks = 0;
+    let totalTasks = 0;
+    const contexts = selectedContexts.map((activity) => {
+      const ledger = this.#fabric.taskLedger(activity.context_id);
+      const progress = this.#fabric.progressLedger(activity.context_id);
+      const tasks = [...ledger.tasks].sort((a, b) => {
+        const priority = (TASK_PRIORITY[a.status] ?? 99) - (TASK_PRIORITY[b.status] ?? 99);
+        return priority || String(b.updated_at || '').localeCompare(String(a.updated_at || '')) || String(a.task_id).localeCompare(String(b.task_id));
+      });
+      totalTasks += tasks.length;
+      const visible = tasks.slice(0, taskLimit);
+      visibleTasks += visible.length;
+      return Object.freeze({
+        context_id: activity.context_id,
+        context_revision: ledger.context_revision,
+        last_activity_seq: activity.seq,
+        last_activity_at: activity.recorded_at,
+        progress: Object.freeze({
+          ready: progress.ready,
+          active: progress.active,
+          blocked: progress.blocked,
+          completed: progress.completed,
+          failed: progress.failed,
+          active_agents: Object.freeze([...progress.active_agents]),
+          advisory_work_claim_count: progress.advisory_work_claim_count,
+        }),
+        blockers: Object.freeze(progress.blockers.map((row) => Object.freeze({ ...row }))),
+        artifact_refs: Object.freeze([...ledger.artifact_refs].slice(-64)),
+        tasks: Object.freeze(visible.map((row) => Object.freeze({ ...row }))),
+        task_count: tasks.length,
+        tasks_truncated: visible.length < tasks.length,
+        authority_effect: false,
+      });
+    });
+    return Object.freeze({
+      schema: BROWSER_BRAIN_COLLABORATION_WORKBENCH_SCHEMA,
+      contexts: Object.freeze(contexts),
+      context_count: contextActivity.size,
+      visible_context_count: contexts.length,
+      total_task_count: totalTasks,
+      visible_task_count: visibleTasks,
+      contexts_truncated: contexts.length < contextActivity.size,
+      bounded: true,
+      message_bodies_exposed: false,
+      raw_page_content_exposed: false,
+      projection_is_authority: false,
+      advisory_only: true,
+      scheduler_authority: false,
+      execution_authority: false,
+      command_leasing: false,
+      work_cycle_limit: null,
+      authority_effect: false,
+    });
+  }
+
   observeRoutingAgent(profile) { return this.#routing.observeAgent(profile); }
   routeAgentsV2(query) { return this.#routing.route(query); }
   planFanout(query) { return planAdaptiveSparseFanout(query); }
@@ -129,6 +205,7 @@ export class BrowserBrainCollaborationRuntimeV2 {
       routing_v2: this.#routing.snapshot(),
       stall_detector: this.#stall.snapshot(),
       a2a_adapter: this.#a2a.snapshot(),
+      workbench: this.workbenchProjection(),
       durable_persistence_bound: this.#loadState != null || this.#saveState != null,
       last_persist_error: this.#lastPersistError,
       terminal_task_to_episode: true,
