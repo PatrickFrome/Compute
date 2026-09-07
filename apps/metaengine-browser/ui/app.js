@@ -1117,9 +1117,25 @@ function executeWorkbenchAddress(value) {
 function updateWorkbenchRouteKind() {
   if (document.activeElement !== address) return;
   const value = String(address.value || '').trim();
-  if (value.startsWith('>')) routeKind.textContent = 'CMD';
-  else if (value.startsWith('@')) routeKind.textContent = 'TAB';
-  else if (value.startsWith('/')) routeKind.textContent = 'SKILL';
+  if (value.startsWith('>')) {
+    routeKind.textContent = 'CMD';
+    routeKind.classList.remove('chat');
+    return;
+  }
+  if (value.startsWith('@')) {
+    routeKind.textContent = 'TAB';
+    routeKind.classList.remove('chat');
+    return;
+  }
+  if (value.startsWith('/')) {
+    routeKind.textContent = 'SKILL';
+    routeKind.classList.remove('chat');
+    return;
+  }
+  const tab = selectedTab(snapshot);
+  const chat = tab?.kind === 'CHATGPT';
+  routeKind.textContent = chat ? 'CHAT' : 'WEB';
+  routeKind.classList.toggle('chat', chat);
 }
 
 installAgenticNav();
@@ -1144,6 +1160,7 @@ document.addEventListener('keydown', (event) => {
     address.value = '>';
     address.setSelectionRange(address.value.length, address.value.length);
     routeKind.textContent = 'CMD';
+    routeKind.classList.remove('chat');
     return;
   }
   if (document.activeElement === address && event.key === 'Enter' && /^[>@/]/.test(String(address.value || '').trim())) {
