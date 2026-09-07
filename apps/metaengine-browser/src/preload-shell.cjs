@@ -34,6 +34,33 @@ function unavailableDevOSProjection(reason = 'NOT_EXPOSED') {
   });
 }
 
+function unavailableDevOSShellViewModel(reason = 'NOT_EXPOSED') {
+  return Object.freeze({
+    schema: 'metaengine.devos.shell-view-model.v1',
+    valid: false,
+    reason: String(reason || 'NOT_EXPOSED').slice(0, 160),
+    primary_object: 'SESSION',
+    roots: Object.freeze([]),
+    session_groups: Object.freeze([]),
+    now: Object.freeze([]),
+    selected_session: null,
+    selected_surface: null,
+    layout_preferences: null,
+    counts: Object.freeze({ sessions: 0, surfaces: 0, attention: 0, visible_groups: 0 }),
+    browser_is_shell: false,
+    browser_is_surface: true,
+    renderer_selection_authority: false,
+    renderer_routing_authority: false,
+    projection_is_authority: false,
+    scheduler_authority: false,
+    execution_authority: false,
+    command_leasing: false,
+    automatic_effect_retry_allowed: false,
+    page_model_authority: false,
+    authority_effect: false,
+  });
+}
+
 function decorateSnapshot(value) {
   if (!value || typeof value !== 'object') return value;
   const candidate = value?.workspaces?.devos;
@@ -45,7 +72,27 @@ function decorateSnapshot(value) {
     && candidate?.authority_effect === false
     ? candidate
     : unavailableDevOSProjection(candidate ? 'INVALID_PROJECTION' : 'NOT_EXPOSED');
-  return Object.freeze({ ...value, devos });
+  const shellCandidate = value?.workspaces?.devos_shell;
+  const devos_shell = shellCandidate?.schema === 'metaengine.devos.shell-view-model.v1'
+    && (shellCandidate?.valid === true || shellCandidate?.valid === false)
+    && shellCandidate?.primary_object === 'SESSION'
+    && Array.isArray(shellCandidate?.roots)
+    && Array.isArray(shellCandidate?.session_groups)
+    && Array.isArray(shellCandidate?.now)
+    && shellCandidate?.browser_is_shell === false
+    && shellCandidate?.browser_is_surface === true
+    && shellCandidate?.renderer_selection_authority === false
+    && shellCandidate?.renderer_routing_authority === false
+    && shellCandidate?.projection_is_authority === false
+    && shellCandidate?.scheduler_authority === false
+    && shellCandidate?.execution_authority === false
+    && shellCandidate?.command_leasing === false
+    && shellCandidate?.automatic_effect_retry_allowed === false
+    && shellCandidate?.page_model_authority === false
+    && shellCandidate?.authority_effect === false
+    ? shellCandidate
+    : unavailableDevOSShellViewModel(shellCandidate ? 'INVALID_VIEW_MODEL' : 'NOT_EXPOSED');
+  return Object.freeze({ ...value, devos, devos_shell });
 }
 
 function emitSnapshot(value) {
