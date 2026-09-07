@@ -58,6 +58,27 @@ test('session sidebar hides last and gives the active surface the full viewport 
   assert.equal(view.active_surface_target_satisfied, true);
 });
 
+test('responsive adaptation preserves manual requested state instead of mutating workspace preference', () => {
+  const manual = normalizeShellLayoutState({ sidebar: 'HIDDEN', operations: 'CLOSED' });
+  const narrow = planShellLayout({ width: 900, height: 700, state: manual });
+  const wide = planShellLayout({ width: 1800, height: 1000, state: manual });
+  for (const view of [narrow, wide]) {
+    assert.deepEqual(view.requested, manual);
+    assert.equal(view.effective_sidebar, 'HIDDEN');
+    assert.equal(view.effective_operations, 'CLOSED');
+    assert.deepEqual(view.adaptations, []);
+    assert.equal(view.adapted, false);
+  }
+});
+
+test('auto-adaptation does not overwrite requested expanded/open state', () => {
+  const view = plan(1000);
+  assert.equal(view.requested.sidebar, 'EXPANDED');
+  assert.equal(view.requested.operations, 'OPEN');
+  assert.equal(view.effective_sidebar, 'COMPACT');
+  assert.equal(view.effective_operations, 'CLOSED');
+});
+
 test('responsive adaptation remains geometry-only and never creates renderer or execution authority', () => {
   for (const width of [1600, 1400, 1300, 1180, 1000, 800, 700, 480]) {
     const view = plan(width);
