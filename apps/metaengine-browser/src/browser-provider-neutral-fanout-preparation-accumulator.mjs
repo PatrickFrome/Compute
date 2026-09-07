@@ -51,7 +51,7 @@ export class ProviderNeutralFanoutPreparationAccumulator {
       throw new Error('fanout_preparation_accumulator_target_mismatch');
     }
     const issuanceEntryDigest = normalizeDigest(input.issuance_entry_digest);
-    if (issuanceEntryDigest !== expected.entry.issuance_entry_digest) {
+    if (issuanceEntryDigest !== expected.entry.entry_digest) {
       throw new Error('fanout_preparation_accumulator_issuance_mismatch');
     }
     const preparedCommandDigest = normalizeDigest(input.prepared_command_digest);
