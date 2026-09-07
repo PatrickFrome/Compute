@@ -212,6 +212,11 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
   #cognitivePortHub = null;
   #version = '0.0.0';
   #controlLatencySnapshot = null;
+  #quitBarrierApp = null;
+  #quitBarrierHandler = null;
+  #quitDurabilityApproved = false;
+  #quitDurabilityPromise = null;
+  #selfUpdateDurabilityReadyRef = () => false;
 
   constructor(options = {}) {
     const executeCommand = options.executeCommand;
@@ -219,6 +224,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     const sourceBeforeSelfUpdateInstall = options.beforeSelfUpdateInstall;
     let commandTargetProjection = null;
     let realtimeProcessPlane = null;
+    let selfUpdateDurabilityReady = false;
     let controlLatencySnapshot = () => Object.freeze({
       schema: 'metaengine.browser.control-latency-status.v1',
       state: 'UNINITIALIZED',
@@ -292,7 +298,10 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     const beforeSelfUpdateInstall = async (receipt) => {
       const host = hostResilienceRuntime();
       if (host?.prepareInstallerHandoff) await host.prepareInstallerHandoff('SELF_UPDATE');
+      if (typeof realtimeProcessPlane?.stopAndWait === 'function') await realtimeProcessPlane.stopAndWait();
+      else realtimeProcessPlane?.stop?.();
       await sourceBeforeSelfUpdateInstall?.(receipt);
+      selfUpdateDurabilityReady = true;
     };
 
     super({
@@ -310,6 +319,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     this.#sourceGetState = sourceGetState;
     this.#processPlaneRef = () => realtimeProcessPlane;
     this.#processPlaneSet = (value) => { realtimeProcessPlane = value; };
+    this.#selfUpdateDurabilityReadyRef = () => selfUpdateDurabilityReady;
     this.#version = String(options.version || '0.0.0');
     this.#cognitiveTransport = createNativeSupervisorCognitiveTransport({
       identity: this.#workspaceIdentity,
@@ -364,6 +374,31 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       });
     };
     this.#controlLatencySnapshot = controlLatencySnapshot;
+  }
+
+  #installQuitDurabilityBarrier(app) {
+    if (this.#quitBarrierHandler || !app || typeof app.on !== 'function') return;
+    this.#quitBarrierApp = app;
+    this.#quitBarrierHandler = (event) => {
+      if (this.#quitDurabilityApproved || this.#selfUpdateDurabilityReadyRef?.() === true) return;
+      event?.preventDefault?.();
+      if (this.#quitDurabilityPromise) return;
+      this.#quitDurabilityPromise = this.stopAndWait()
+        .catch((error) => {
+          console.error(JSON.stringify({
+            schema: 'metaengine.browser.shutdown-durability.v1',
+            state: 'BRAIN_PERSISTENCE_FLUSH_FAILED',
+            error: String(error?.message || error).slice(0, 300),
+            automatic_retry_allowed: false,
+            authority_effect: false,
+          }));
+        })
+        .finally(() => {
+          this.#quitDurabilityApproved = true;
+          this.#quitBarrierApp?.quit?.();
+        });
+    };
+    app.on('before-quit', this.#quitBarrierHandler);
   }
 
   async #bootstrapEnrollment() {
@@ -474,6 +509,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       if (!app || typeof app.getAppMetrics !== 'function' || !webContents || typeof webContents.getAllWebContents !== 'function') {
         throw new Error('electron_process_metrics_unavailable');
       }
+      this.#installQuitDurabilityBarrier(app);
       const plane = new BrowserRealtimeProcessPlane({
         app,
         getWebContents: () => webContents.getAllWebContents(),
@@ -583,6 +619,13 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       cognitive_delta_full_state_fallback: true,
       cognitive_delta_second_polling_loop: false,
       cognitive_delta_command_authority: false,
+      shutdown_durability: {
+        barrier_installed: this.#quitBarrierHandler != null,
+        flush_in_flight: this.#quitDurabilityPromise != null && this.#quitDurabilityApproved !== true,
+        self_update_preflushed: this.#selfUpdateDurabilityReadyRef?.() === true,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      },
       host_resilience: hostResilienceSnapshot(),
       host_resilience_source: 'PRIMARY_BROWSER_PROCESS',
       host_resilience_second_polling_loop: false,
@@ -615,9 +658,21 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
   stop() {
     this.#processPushScheduled = false;
     this.#processPushPending = false;
-    try { this.#processPlaneRef?.()?.stop?.(); } catch {}
+    const result = super.stop();
     this.#cognitivePortHub?.closeAll();
-    return super.stop();
+    try { this.#processPlaneRef?.()?.stop?.(); } catch {}
+    return result;
+  }
+
+  async stopAndWait() {
+    this.#processPushScheduled = false;
+    this.#processPushPending = false;
+    super.stop();
+    this.#cognitivePortHub?.closeAll();
+    const plane = this.#processPlaneRef?.();
+    if (typeof plane?.stopAndWait === 'function') await plane.stopAndWait();
+    else plane?.stop?.();
+    return this.snapshot();
   }
 
   async cycle() {
