@@ -3,6 +3,7 @@ export const METAENGINE_DEVOS_SESSION_LAYOUT_ENTRY_SCHEMA = 'metaengine.devos.se
 
 const SIDEBAR_MODES = new Set(['EXPANDED', 'COMPACT', 'HIDDEN']);
 const INSPECTOR_MODES = new Set(['OPEN', 'CLOSED']);
+const MAX_SESSION_LAYOUT_ENTRIES = 512;
 
 function zeroAuthorityContract() {
   return Object.freeze({
@@ -22,6 +23,14 @@ function boundedInt(value, fallback, min, max) {
   return Math.max(min, Math.min(max, parsed));
 }
 
+function requiredBoundedInt(value, name, min, max) {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
+    throw new Error(`devos_session_layout_${name}_invalid`);
+  }
+  return parsed;
+}
+
 function boundedId(value, name, max = 200) {
   const out = String(value ?? '').trim();
   if (!out || out.length > max || /[\u0000-\u001f\u007f]/.test(out)) throw new Error(`devos_session_layout_${name}_invalid`);
@@ -38,6 +47,19 @@ function normalizeInspector(value, fallback = 'CLOSED') {
   const out = String(value || fallback).trim().toUpperCase();
   if (!INSPECTOR_MODES.has(out)) throw new Error('devos_session_layout_inspector_invalid');
   return out;
+}
+
+function assertZeroAuthorityContract(source, name) {
+  if (!source
+    || source.projection_is_authority !== false
+    || source.scheduler_authority !== false
+    || source.execution_authority !== false
+    || source.command_leasing !== false
+    || source.automatic_effect_retry_allowed !== false
+    || source.page_model_authority !== false
+    || source.authority_effect !== false) {
+    throw new Error(`devos_session_layout_${name}_authority_invalid`);
+  }
 }
 
 function freezeEntry(entry) {
@@ -71,7 +93,7 @@ export class DevOSSessionLayoutRegistry {
   #sequence = 0;
 
   constructor({ max_sessions = 128 } = {}) {
-    this.#maxSessions = boundedInt(max_sessions, 128, 1, 512);
+    this.#maxSessions = boundedInt(max_sessions, 128, 1, MAX_SESSION_LAYOUT_ENTRIES);
   }
 
   get maxSessions() { return this.#maxSessions; }
@@ -199,25 +221,34 @@ export class DevOSSessionLayoutRegistry {
   restore(snapshot) {
     if (!snapshot || snapshot.schema !== METAENGINE_DEVOS_SESSION_LAYOUT_SCHEMA
       || snapshot.bounded !== true
-      || snapshot.projection_is_authority !== false
-      || snapshot.scheduler_authority !== false
-      || snapshot.execution_authority !== false
-      || snapshot.command_leasing !== false
-      || snapshot.authority_effect !== false
-      || !Array.isArray(snapshot.entries)) throw new Error('devos_session_layout_restore_invalid');
-    const next = new Map();
-    let latest = 0;
-    for (const source of snapshot.entries.slice(0, this.#maxSessions)) {
-      if (!source || source.schema !== METAENGINE_DEVOS_SESSION_LAYOUT_ENTRY_SCHEMA
-        || source.projection_is_authority !== false
-        || source.scheduler_authority !== false
-        || source.execution_authority !== false
-        || source.command_leasing !== false
-        || source.authority_effect !== false) throw new Error('devos_session_layout_restore_entry_invalid');
+      || snapshot.requested_state_is_user_preference !== true
+      || snapshot.effective_responsive_state_persisted !== false
+      || snapshot.session_layout_is_execution_authority !== false
+      || !Array.isArray(snapshot.entries)
+      || snapshot.entries.length > MAX_SESSION_LAYOUT_ENTRIES) {
+      throw new Error('devos_session_layout_restore_invalid');
+    }
+    assertZeroAuthorityContract(snapshot, 'restore');
+    requiredBoundedInt(snapshot.max_sessions, 'restore_max_sessions', 1, MAX_SESSION_LAYOUT_ENTRIES);
+    const latestSequence = requiredBoundedInt(snapshot.latest_sequence, 'restore_latest_sequence', 0, Number.MAX_SAFE_INTEGER);
+    const declaredCount = requiredBoundedInt(snapshot.session_count, 'restore_session_count', 0, MAX_SESSION_LAYOUT_ENTRIES);
+    if (declaredCount !== snapshot.entries.length) throw new Error('devos_session_layout_restore_session_count_mismatch');
+
+    const validated = [];
+    const seenSessionIds = new Set();
+    let maxEntrySequence = 0;
+    for (const source of snapshot.entries) {
+      if (!source || source.schema !== METAENGINE_DEVOS_SESSION_LAYOUT_ENTRY_SCHEMA) {
+        throw new Error('devos_session_layout_restore_entry_invalid');
+      }
+      assertZeroAuthorityContract(source, 'restore_entry');
       const sessionId = boundedId(source.session_id, 'session_id');
-      const revision = boundedInt(source.revision, 1, 1, Number.MAX_SAFE_INTEGER);
-      const updatedSequence = boundedInt(source.updated_sequence, 0, 0, Number.MAX_SAFE_INTEGER);
-      next.set(sessionId, {
+      if (seenSessionIds.has(sessionId)) throw new Error('devos_session_layout_restore_duplicate_session');
+      seenSessionIds.add(sessionId);
+      const revision = requiredBoundedInt(source.revision, 'restore_revision', 1, Number.MAX_SAFE_INTEGER);
+      const updatedSequence = requiredBoundedInt(source.updated_sequence, 'restore_updated_sequence', 0, Number.MAX_SAFE_INTEGER);
+      maxEntrySequence = Math.max(maxEntrySequence, updatedSequence);
+      validated.push({
         session_id: sessionId,
         requested_sidebar: normalizeSidebar(source.requested_sidebar),
         requested_inspector: normalizeInspector(source.requested_inspector),
@@ -225,12 +256,27 @@ export class DevOSSessionLayoutRegistry {
         revision,
         updated_sequence: updatedSequence,
       });
-      latest = Math.max(latest, updatedSequence);
     }
+    if (latestSequence < maxEntrySequence) throw new Error('devos_session_layout_restore_sequence_regression');
+
     const active = snapshot.active_session_id == null ? null : boundedId(snapshot.active_session_id, 'active_session_id');
-    this.#entries = next;
-    this.#activeSessionId = active && next.has(active) ? active : null;
-    this.#sequence = Math.max(latest, boundedInt(snapshot.latest_sequence, latest, 0, Number.MAX_SAFE_INTEGER));
+    if (active && !seenSessionIds.has(active)) throw new Error('devos_session_layout_restore_active_session_missing');
+
+    validated.sort((a, b) => b.updated_sequence - a.updated_sequence || a.session_id.localeCompare(b.session_id));
+    const selected = [];
+    if (active) {
+      const activeEntry = validated.find((entry) => entry.session_id === active);
+      if (activeEntry) selected.push(activeEntry);
+    }
+    for (const entry of validated) {
+      if (selected.length >= this.#maxSessions) break;
+      if (entry.session_id === active) continue;
+      selected.push(entry);
+    }
+
+    this.#entries = new Map(selected.map((entry) => [entry.session_id, entry]));
+    this.#activeSessionId = active && this.#entries.has(active) ? active : null;
+    this.#sequence = latestSequence;
     this.#evictIfNeeded();
     return this.snapshot();
   }
