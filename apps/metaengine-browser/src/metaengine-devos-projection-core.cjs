@@ -6,6 +6,7 @@ const METAENGINE_DEVOS_SURFACE_TYPES = Object.freeze([
   'BROWSER', 'CODE', 'TERMINAL', 'DIFF', 'TESTS', 'LOGS', 'ARTIFACT', 'TIMELINE', 'MEMORY', 'GRAPH', 'CANVAS', 'DATABASE',
 ]);
 const TASK_PRIORITY = Object.freeze({ ACTIVE: 0, BLOCKED: 1, READY: 2, FAILED: 3, COMPLETED: 4, CANCELLED: 5 });
+const ATTENTION_PRIORITY = Object.freeze({ SAFETY_OVERRIDE: 0, SUPERVISOR_ERROR: 1, TASK_FAILED: 2, TASK_BLOCKED: 3, WORKSPACE_BINDING_ISSUE: 4 });
 const UNBOUND_BROWSER_SESSION_ID = 'session:browser-unbound';
 
 function boundedInt(value, fallback, min, max) {
@@ -52,6 +53,7 @@ function deriveAttention(contexts, system = {}, workspaceIssues = []) {
       rows.push(Object.freeze({
         kind: task.status === 'FAILED' ? 'TASK_FAILED' : 'TASK_BLOCKED',
         severity: task.status === 'FAILED' ? 'ERROR' : 'WARNING',
+        priority: 'HIGH',
         objective_id: context.objective_id,
         session_id: context.session_id,
         task_id: task.task_id,
@@ -65,6 +67,7 @@ function deriveAttention(contexts, system = {}, workspaceIssues = []) {
     rows.push(Object.freeze({
       kind: 'WORKSPACE_BINDING_ISSUE',
       severity: 'WARNING',
+      priority: 'MEDIUM',
       objective_id: null,
       session_id: null,
       task_id: text(issue?.task_id, 160),
@@ -76,11 +79,15 @@ function deriveAttention(contexts, system = {}, workspaceIssues = []) {
     }));
   }
   if (system.owner_safety_wildcard_disabled === true) {
-    rows.push(Object.freeze({ kind: 'SAFETY_OVERRIDE', severity: 'ERROR', title: 'Owner safety wildcard override active', reason: 'Safety state requires operator attention', ...zeroAuthorityContract() }));
+    rows.push(Object.freeze({ kind: 'SAFETY_OVERRIDE', severity: 'ERROR', priority: 'CRITICAL', title: 'Owner safety wildcard override active', reason: 'Safety state requires operator attention', ...zeroAuthorityContract() }));
   }
   if (system.supervisor_error) {
-    rows.push(Object.freeze({ kind: 'SUPERVISOR_ERROR', severity: 'ERROR', title: 'Supervisor degraded', reason: text(system.supervisor_error, 600), ...zeroAuthorityContract() }));
+    rows.push(Object.freeze({ kind: 'SUPERVISOR_ERROR', severity: 'ERROR', priority: 'CRITICAL', title: 'Supervisor degraded', reason: text(system.supervisor_error, 600), ...zeroAuthorityContract() }));
   }
+  rows.sort((a, b) => (ATTENTION_PRIORITY[a.kind] ?? 99) - (ATTENTION_PRIORITY[b.kind] ?? 99)
+    || String(a.session_id || '').localeCompare(String(b.session_id || ''))
+    || String(a.task_id || '').localeCompare(String(b.task_id || ''))
+    || String(a.reason || '').localeCompare(String(b.reason || '')));
   return rows;
 }
 function browserSurfaces(snapshot, sessionOwnership, maxSurfaces) {
