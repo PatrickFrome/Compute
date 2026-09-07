@@ -11,6 +11,7 @@ function boundedInt(v, fallback, min, max) { const n = Number(v); return Number.
 function safeId(v, code) { const s = String(v || '').trim().toLowerCase(); if (!SAFE_ID_RE.test(s)) throw new Error(code); return s; }
 function text(v, max = 768) { const s = String(v ?? '').trim(); return s ? s.slice(0, max) : null; }
 function uniq(values = [], max = 64) { if (!Array.isArray(values)) return []; return [...new Set(values.map((v) => text(v, 240)).filter(Boolean))].slice(0, max); }
+function uniqLower(values = [], max = 64) { return uniq(values, max).map((value) => value.toLowerCase()); }
 function tokens(value) { return [...new Set(String(value || '').toLowerCase().match(/[a-z0-9_:-]{3,}/g) || [])].slice(0, 256); }
 function hashVector(value, dims = 64) {
   const out = new Float64Array(dims);
@@ -56,6 +57,7 @@ export class BrowserBrainEpisodicMemory {
   #facts = new Map(); #playbooks = new Map(); #episodeDuplicates = 0; #retrievals = 0; #consolidations = 0;
 
   constructor({ clock = () => Date.now(), maxEpisodes = 4096, maxFacts = 2048, maxPlaybooks = 1024 } = {}) {
+    if (typeof clock !== 'function') throw new Error('browser_brain_episodic_clock_invalid');
     this.#clock = clock;
     this.#maxEpisodes = boundedInt(maxEpisodes, 4096, 64, 32768);
     this.#maxFacts = boundedInt(maxFacts, 2048, 16, 16384);
@@ -63,10 +65,32 @@ export class BrowserBrainEpisodicMemory {
   }
   #now() { const n = Number(this.#clock()); if (!Number.isFinite(n) || n < 0) throw new Error('browser_brain_episodic_clock_invalid'); return new Date(n).toISOString(); }
 
+  reset() {
+    this.#episodes.clear();
+    this.#order = [];
+    this.#facts.clear();
+    this.#playbooks.clear();
+    this.#episodeDuplicates = 0;
+    this.#retrievals = 0;
+    this.#consolidations = 0;
+    return this.snapshot();
+  }
+
+  #removeEpisode(episodeId) {
+    this.#episodes.delete(episodeId);
+    for (const map of [this.#facts, this.#playbooks]) {
+      for (const [key, support] of map.entries()) {
+        if (!support.episodeIds.includes(episodeId)) continue;
+        support.episodeIds = support.episodeIds.filter((id) => id !== episodeId);
+        if (support.episodeIds.length === 0) map.delete(key);
+      }
+    }
+  }
+
   recordEpisode({ episode_id, context_id, task_id, objective, outcome = 'COMPLETED', required_capabilities = [], artifact_refs = [], evidence_refs = [], verified_facts = [], rejected_paths = [], next_actions = [], base_sha = null, branch = null, supersedes = [] } = {}) {
     const episodeId = safeId(episode_id, 'browser_brain_episode_id_invalid');
     const prior = this.#episodes.get(episodeId);
-    const baseSha = base_sha == null ? null : String(base_sha).toLowerCase();
+    const baseSha = base_sha == null ? null : String(base_sha).trim().toLowerCase();
     if (baseSha != null && !SHA40_RE.test(baseSha)) throw new Error('browser_brain_episode_base_sha_invalid');
     const material = {
       episodeId,
@@ -74,7 +98,7 @@ export class BrowserBrainEpisodicMemory {
       taskId: safeId(task_id, 'browser_brain_episode_task_invalid'),
       objective: text(objective, 1024),
       outcome: String(outcome || '').toUpperCase().slice(0, 32),
-      requiredCapabilities: uniq(required_capabilities),
+      requiredCapabilities: uniqLower(required_capabilities),
       artifactRefs: uniq(artifact_refs),
       evidenceRefs: uniq(evidence_refs),
       verifiedFacts: uniq(verified_facts, 32),
@@ -95,7 +119,10 @@ export class BrowserBrainEpisodicMemory {
     const document = [material.objective, ...material.requiredCapabilities, ...material.verifiedFacts, ...material.rejectedPaths, ...material.nextActions].join(' ');
     const row = { ...material, docTokens: tokens(document), vector: hashVector(document), recordedAt: this.#now() };
     this.#episodes.set(episodeId, row); this.#order.push(episodeId);
-    while (this.#order.length > this.#maxEpisodes) { const victim = this.#order.shift(); if (victim) this.#episodes.delete(victim); }
+    while (this.#order.length > this.#maxEpisodes) {
+      const victim = this.#order.shift();
+      if (victim) this.#removeEpisode(victim);
+    }
     this.#consolidateEpisode(row);
     return Object.freeze({ ...publicEpisode(row), duplicate: false });
   }
@@ -117,18 +144,21 @@ export class BrowserBrainEpisodicMemory {
   retrieve({ query = '', context_id = null, base_sha = null, required_capabilities = [], token_budget = 1200, max_results = 8 } = {}) {
     const budget = boundedInt(token_budget, 1200, 128, 8192);
     const limit = boundedInt(max_results, 8, 1, 32);
+    const requestedContext = context_id == null ? null : String(context_id).trim().toLowerCase();
+    const requestedBaseSha = base_sha == null ? null : String(base_sha).trim().toLowerCase();
+    if (requestedBaseSha != null && !SHA40_RE.test(requestedBaseSha)) throw new Error('browser_brain_memory_retrieval_base_sha_invalid');
     const queryTokens = tokens(query);
     const qVector = hashVector(query);
-    const required = new Set(uniq(required_capabilities));
+    const required = new Set(uniqLower(required_capabilities));
     const rows = [];
     for (const row of this.#episodes.values()) {
-      if (context_id != null && row.contextId !== String(context_id).toLowerCase()) continue;
-      if (base_sha != null && row.baseSha != null && row.baseSha !== String(base_sha).toLowerCase()) continue;
+      if (requestedContext != null && row.contextId !== requestedContext) continue;
+      if (requestedBaseSha != null && row.baseSha !== requestedBaseSha) continue;
       if ([...required].some((cap) => !row.requiredCapabilities.includes(cap))) continue;
       const lexical = lexicalScore(queryTokens, row.docTokens);
       const vector = (cosine(qVector, row.vector) + 1) / 2;
       const graph = row.supersedes.length > 0 ? 0.08 : 0;
-      const provenance = row.baseSha && base_sha && row.baseSha === String(base_sha).toLowerCase() ? 0.12 : 0;
+      const provenance = row.baseSha && requestedBaseSha && row.baseSha === requestedBaseSha ? 0.12 : 0;
       const score = 0.5 * lexical + 0.3 * vector + graph + provenance;
       rows.push({ row, score, lexical, vector, graph, provenance });
     }
@@ -136,7 +166,7 @@ export class BrowserBrainEpisodicMemory {
     let used = 0; const results = [];
     for (const item of rows.slice(0, limit * 3)) {
       const cost = Math.max(24, Math.ceil((item.row.objective.length + item.row.verifiedFacts.join(' ').length + item.row.nextActions.join(' ').length) / 4));
-      if (results.length > 0 && used + cost > budget) continue;
+      if (used + cost > budget) continue;
       used += cost;
       results.push(Object.freeze({
         episode: publicEpisode(item.row),
@@ -153,6 +183,7 @@ export class BrowserBrainEpisodicMemory {
       token_budget: budget,
       estimated_tokens_used: used,
       pipeline: 'METADATA_FILTER_TO_LEXICAL_AND_LOCAL_VECTOR_TO_GRAPH_PROVENANCE_RERANK',
+      exact_base_sha_required_when_filtered: requestedBaseSha != null,
       external_confirmation_required: false,
       execution_authority: false,
       authority_effect: false,
@@ -194,6 +225,8 @@ export class BrowserBrainEpisodicMemory {
       supersession_graph: true,
       hybrid_retrieval: true,
       bounded_memory: true,
+      strict_retrieval_token_budget: true,
+      strict_base_sha_filtering: true,
       consolidation_on_terminal_write_path_only: true,
       semantic_hot_path_writes: false,
       scheduler_authority: false,
