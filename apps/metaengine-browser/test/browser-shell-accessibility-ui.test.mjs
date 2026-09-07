@@ -32,7 +32,7 @@ test('narrow final shell keeps compact health state visible instead of hiding it
 test('omnibox route mode returns to the selected tab after command prefixes are removed', () => {
   const start = app.indexOf('function updateWorkbenchRouteKind()');
   assert.notEqual(start, -1);
-  const end = app.indexOf('\n}\n\ninstallAgenticNav();', start);
+  const end = app.indexOf('installAgenticNav();', start);
   assert.notEqual(end, -1);
   const fn = app.slice(start, end);
   assert.match(fn, /routeKind\.textContent = 'CMD'/);
