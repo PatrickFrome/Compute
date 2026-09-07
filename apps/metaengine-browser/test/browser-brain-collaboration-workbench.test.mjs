@@ -24,6 +24,8 @@ test('collaboration runtime exposes bounded task-first workbench metadata withou
   assert.equal(projection.context_count, 2);
   assert.equal(projection.visible_context_count, 1);
   assert.equal(projection.contexts_truncated, true);
+  assert.equal(projection.total_task_count, 4);
+  assert.equal(projection.visible_task_count, 1);
   assert.equal(projection.bounded, true);
   assert.equal(projection.message_bodies_exposed, false);
   assert.equal(projection.raw_page_content_exposed, false);
@@ -51,6 +53,28 @@ test('collaboration runtime exposes bounded task-first workbench metadata withou
   assert.equal(alphaOnly.blockers[0].blocker, 'Windows evidence pending');
 });
 
+test('default workbench projection is cached briefly and invalidated by collaboration mutations', () => {
+  let now = Date.parse('2026-09-07T00:00:00.000Z');
+  const runtime = new BrowserBrainCollaborationRuntimeV2({ clock: () => now });
+  runtime.recordTask({ context_id: 'ctx.cache', task_id: 'task.one', objective: 'First task' });
+
+  const first = runtime.workbenchProjection();
+  const second = runtime.workbenchProjection();
+  assert.equal(first, second);
+  assert.equal(first.cache_max_age_ms, 1000);
+  assert.equal(first.total_task_count, 1);
+
+  runtime.recordTask({ context_id: 'ctx.cache', task_id: 'task.two', objective: 'Second task' });
+  const afterMutation = runtime.workbenchProjection();
+  assert.notEqual(afterMutation, first);
+  assert.equal(afterMutation.total_task_count, 2);
+
+  now += 1001;
+  const afterExpiry = runtime.workbenchProjection();
+  assert.notEqual(afterExpiry, afterMutation);
+  assert.equal(afterExpiry.total_task_count, 2);
+});
+
 test('collaboration snapshot carries the same bounded workbench projection for shell readback', () => {
   const runtime = new BrowserBrainCollaborationRuntimeV2({ clock: () => Date.parse('2026-09-07T00:00:00.000Z') });
   runtime.recordTask({ context_id: 'ctx.shell', task_id: 'task.shell', objective: 'Expose current work to the shell' });
@@ -58,5 +82,6 @@ test('collaboration snapshot carries the same bounded workbench projection for s
   assert.equal(snapshot.workbench.schema, BROWSER_BRAIN_COLLABORATION_WORKBENCH_SCHEMA);
   assert.equal(snapshot.workbench.contexts[0].tasks[0].objective, 'Expose current work to the shell');
   assert.equal(snapshot.workbench.advisory_only, true);
+  assert.equal(snapshot.workbench.cache_max_age_ms, 1000);
   assert.equal(snapshot.workbench.authority_effect, false);
 });
