@@ -44,25 +44,31 @@ function inputFor(index, byte = 'b') {
   };
 }
 
-test('accepts preparation results incrementally and exposes shard readiness as soon as complete', () => {
+test('accepts preparation results incrementally and emits exact evidence when a shard completes', () => {
   const acc = accumulator();
-  assert.equal(acc.accept(inputFor(0, 'b')).shard_ready, false);
-  assert.equal(acc.accept(inputFor(2, 'c')).shard_ready, true);
+  assert.equal(acc.accept(inputFor(0, 'b')).ready_shard_evidence, null);
+  const shardZero = acc.accept(inputFor(2, 'c'));
+  assert.equal(shardZero.shard_ready, true);
+  assert.equal(shardZero.ready_shard_evidence.shard_index, 0);
+  assert.deepEqual(shardZero.ready_shard_evidence.entries.map((entry) => entry.fanout_index), [0, 2]);
+  assert.match(shardZero.ready_shard_evidence.ready_shard_evidence_digest, /^[0-9a-f]{64}$/);
   assert.deepEqual(acc.snapshot().ready_shard_indexes, [0]);
+
   assert.equal(acc.accept(inputFor(1, 'd')).shard_ready, false);
-  assert.equal(acc.accept(inputFor(3, 'e')).shard_ready, true);
-  const snapshot = acc.snapshot();
-  assert.equal(snapshot.prepared_count, 4);
-  assert.deepEqual(snapshot.ready_shard_indexes, [0, 1]);
+  const shardOne = acc.accept(inputFor(3, 'e'));
+  assert.deepEqual(shardOne.ready_shard_evidence.entries.map((entry) => entry.fanout_index), [1, 3]);
+  assert.equal(acc.snapshot().prepared_count, 4);
 });
 
-test('duplicate delivery is idempotent while conflicting preparation fails closed', () => {
+test('duplicate delivery replays identical ready-shard evidence while conflicting preparation fails closed', () => {
   const acc = accumulator();
-  const input = inputFor(0);
-  assert.equal(acc.accept(input).accepted, true);
-  assert.equal(acc.accept(input).duplicate, true);
-  assert.throws(() => acc.accept({ ...input, prepared_command_digest: 'c'.repeat(64) }), /collision/);
-  assert.equal(acc.snapshot().prepared_count, 1);
+  acc.accept(inputFor(0));
+  const ready = acc.accept(inputFor(2, 'c')).ready_shard_evidence;
+  const duplicate = acc.accept(inputFor(2, 'c'));
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(duplicate.ready_shard_evidence, ready);
+  assert.throws(() => acc.accept({ ...inputFor(2, 'c'), prepared_command_digest: 'd'.repeat(64) }), /collision/);
+  assert.equal(acc.snapshot().prepared_count, 2);
 });
 
 test('wrong shard, target, issuance identity, index, or digest fails before state mutation', () => {
@@ -86,6 +92,8 @@ test('contract stays bounded provider-neutral preparation evidence with zero aut
   assert.equal(contract.duplicate_idempotency, true);
   assert.equal(contract.collision_fenced, true);
   assert.equal(contract.shard_readiness_streamable, true);
+  assert.equal(contract.ready_shard_evidence_streamable, true);
+  assert.equal(contract.exact_shard_membership_proven, true);
   assert.equal(contract.prepared_command_digest_only, true);
   assert.equal(contract.preparation_only, true);
   assert.equal(contract.provider_neutral, true);
