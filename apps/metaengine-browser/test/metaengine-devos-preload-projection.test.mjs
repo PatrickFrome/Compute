@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { projectMetaengineDevOS as projectEsm } from '../src/metaengine-devos-projection.mjs';
+import { projectWorkspaceWorkbench } from '../src/workspace-workbench-projection.mjs';
 
 const require = createRequire(import.meta.url);
 const projectionCore = require('../src/metaengine-devos-projection-core.cjs');
@@ -16,6 +17,7 @@ function sampleSnapshot() {
       tabs: [{ tab_id: 'tab.1', title: 'Build proof', url: 'https://example.com', kind: 'WEB' }],
     },
     owner_safety_gates: { wildcard_disabled: false },
+    fleet: { agents: [] },
     supervisor: {
       realtime_process_plane: {
         browser_brain: {
@@ -52,24 +54,37 @@ function sampleSnapshot() {
   };
 }
 
-test('ESM and preload CJS projection surfaces share one canonical implementation contract', () => {
+test('ESM and CJS projection surfaces share one canonical implementation contract', () => {
   const input = sampleSnapshot();
   assert.deepEqual(projectEsm(input), projectionCore.projectMetaengineDevOS(input));
   assert.equal(projectionCore.projectMetaengineDevOS(input).primary_object, 'SESSION');
   assert.equal(projectionCore.projectMetaengineDevOS(input).surfaces[0].type, 'BROWSER');
 });
 
-test('preload decorates snapshot data without exposing raw Electron IPC primitives', () => {
-  assert.match(preload, /require\('\.\/metaengine-devos-projection-core\.cjs'\)/);
+test('main-process workspace read model embeds the bounded DevOS projection', () => {
+  const input = sampleSnapshot();
+  const workspaces = projectWorkspaceWorkbench({ tabs: input.tabs, fleet: input.fleet, supervisor: input.supervisor });
+  assert.equal(workspaces.devos.schema, 'metaengine.devos.projection.v1');
+  assert.equal(workspaces.devos.primary_object, 'SESSION');
+  assert.equal(workspaces.devos.sessions.length, 1);
+  assert.equal(workspaces.devos.surfaces[0].type, 'BROWSER');
+  assert.equal(workspaces.devos.scheduler_authority, false);
+  assert.equal(workspaces.devos.execution_authority, false);
+  assert.equal(workspaces.devos.authority_effect, false);
+});
+
+test('sandboxed preload promotes precomputed DevOS data without local module loading or raw Electron IPC exposure', () => {
+  assert.doesNotMatch(preload, /require\(['"]\.\//);
   assert.match(preload, /function decorateSnapshot\(value\)/);
-  assert.match(preload, /devos: projectMetaengineDevOS\(value\)/);
+  assert.match(preload, /const candidate = value\?\.workspaces\?\.devos/);
+  assert.match(preload, /return Object\.freeze\(\{ \.\.\.value, devos \}\)/);
   assert.match(preload, /snapshot: \(\) => ipcRenderer\.invoke\('metaengine:shell:snapshot'\)\.then\(decorateSnapshot\)/);
   assert.doesNotMatch(preload, /exposeInMainWorld\([^)]*ipcRenderer/s);
   assert.doesNotMatch(preload, /\bon:\s*ipcRenderer\.on\b/);
   assert.doesNotMatch(preload, /\bsend:\s*ipcRenderer\.send\b/);
 });
 
-test('preload projection failure is fail-soft and zero-authority', () => {
+test('preload rejects invalid projection and falls back to zero-authority unavailable state', () => {
   const start = preload.indexOf('function unavailableDevOSProjection');
   const end = preload.indexOf('function decorateSnapshot', start);
   assert.notEqual(start, -1);
@@ -84,4 +99,9 @@ test('preload projection failure is fail-soft and zero-authority', () => {
     'page_model_authority: false',
     'authority_effect: false',
   ]) assert.match(source, new RegExp(invariant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(preload, /candidate\?\.projection_is_authority === false/);
+  assert.match(preload, /candidate\?\.scheduler_authority === false/);
+  assert.match(preload, /candidate\?\.execution_authority === false/);
+  assert.match(preload, /candidate\?\.command_leasing === false/);
+  assert.match(preload, /candidate\?\.authority_effect === false/);
 });
