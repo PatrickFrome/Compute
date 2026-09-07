@@ -116,6 +116,8 @@ export class BrowserRealtimeProcessPlane {
   #onChange;
   #timer = null;
   #started = false;
+  #stopPromise = null;
+  #stopSettled = true;
   #sequence = 0;
   #observedAt = null;
   #processes = [];
@@ -375,8 +377,43 @@ export class BrowserRealtimeProcessPlane {
     return this.snapshot();
   }
 
+  #beginStop() {
+    const wasStarted = this.#started;
+    if (wasStarted) {
+      this.#started = false;
+      if (this.#timer) clearInterval(this.#timer);
+      this.#timer = null;
+      try { this.#semanticPlane?.stop?.(); } catch {}
+      this.#semanticPlane = null;
+      this.#semanticStartPromise = null;
+      for (const [name, handler] of this.#appListeners) {
+        try { this.#app.off?.(name, handler); } catch {}
+      }
+      this.#appListeners = [];
+      for (const id of [...this.#wired.keys()]) this.#unwireContents(id);
+    }
+    if (!this.#stopPromise && wasStarted) {
+      this.#stopSettled = false;
+      let flushResult;
+      try {
+        flushResult = this.#brain.flushCollaborationPersistence?.();
+      } catch (error) {
+        flushResult = Promise.reject(error);
+      }
+      const pending = Promise.resolve(flushResult).then(() => true);
+      this.#stopPromise = pending;
+      void pending.finally(() => {
+        if (this.#stopPromise === pending) this.#stopSettled = true;
+      }).catch(() => {});
+    }
+    return Object.freeze({ stopped: wasStarted, promise: this.#stopPromise });
+  }
+
   start() {
     if (this.#started) return this.snapshot();
+    if (this.#stopPromise && !this.#stopSettled) throw new Error('browser_realtime_process_plane_stop_in_flight');
+    this.#stopPromise = null;
+    this.#stopSettled = true;
     this.#started = true;
     const bindApp = (name, handler) => {
       this.#app.on(name, handler);
@@ -414,19 +451,17 @@ export class BrowserRealtimeProcessPlane {
   }
 
   stop() {
-    if (!this.#started) return false;
-    this.#started = false;
-    if (this.#timer) clearInterval(this.#timer);
-    this.#timer = null;
-    try { this.#semanticPlane?.stop?.(); } catch {}
-    this.#semanticPlane = null;
-    this.#semanticStartPromise = null;
-    for (const [name, handler] of this.#appListeners) {
-      try { this.#app.off?.(name, handler); } catch {}
-    }
-    this.#appListeners = [];
-    for (const id of [...this.#wired.keys()]) this.#unwireContents(id);
-    try { void this.#brain.flushCollaborationPersistence?.().catch(() => {}); } catch {}
+    const result = this.#beginStop();
+    if (!result.stopped) return false;
+    void result.promise?.catch(() => {});
+    return true;
+  }
+
+  async stopAndWait() {
+    if (!this.#started && !this.#stopPromise) return false;
+    const result = this.#beginStop();
+    if (!result.promise) return result.stopped;
+    await result.promise;
     return true;
   }
 
@@ -478,6 +513,8 @@ export class BrowserRealtimeProcessPlane {
       process_plane_last_error: this.#brainLastError,
       same_event_stream: true,
       second_process_observer: false,
+      shutdown_persistence_flush_awaitable: true,
+      shutdown_persistence_flush_in_flight: this.#stopPromise != null && !this.#stopSettled,
       authority_effect: false,
     });
   }
