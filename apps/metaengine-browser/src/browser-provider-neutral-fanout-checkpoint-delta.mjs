@@ -2,6 +2,17 @@ import { restoreProviderNeutralFanoutDurableCheckpoint } from './browser-provide
 
 const SCHEMA = 'metaengine.browser.provider-neutral-fanout-checkpoint-delta.v1';
 const MAX_FANOUT = 128;
+const ZERO_AUTHORITY = Object.freeze({
+  payload_persisted: false,
+  semantic_payload_persisted: false,
+  scheduler_authority: false,
+  dispatch_authority: false,
+  lease_authority: false,
+  effect_execution_authority: false,
+  automatic_retry_allowed: false,
+  ambiguous_retry_allowed: false,
+  authority_effect: false,
+});
 
 function requiredString(value, name, max = 160) {
   const out = String(value ?? '').slice(0, max).trim();
@@ -52,15 +63,7 @@ export function createProviderNeutralFanoutCheckpointDelta(baseInput, nextInput)
     next_checkpoint_digest: next.checkpoint_digest,
     added_receipts: Object.freeze(added.sort((a, b) => a.fanout_index - b.fanout_index)),
     added_count: added.length,
-    payload_persisted: false,
-    semantic_payload_persisted: false,
-    scheduler_authority: false,
-    dispatch_authority: false,
-    lease_authority: false,
-    effect_execution_authority: false,
-    automatic_retry_allowed: false,
-    ambiguous_retry_allowed: false,
-    authority_effect: false,
+    ...ZERO_AUTHORITY,
   });
 }
 
@@ -105,14 +108,6 @@ export function providerNeutralFanoutCheckpointDeltaContract() {
     base_digest_fenced: true,
     next_digest_verified: true,
     receipt_collision_fence_preserved: true,
-    payload_persisted: false,
-    semantic_payload_persisted: false,
-    scheduler_authority: false,
-    dispatch_authority: false,
-    lease_authority: false,
-    effect_execution_authority: false,
-    automatic_retry_allowed: false,
-    ambiguous_retry_allowed: false,
-    authority_effect: false,
+    ...ZERO_AUTHORITY,
   });
 }
