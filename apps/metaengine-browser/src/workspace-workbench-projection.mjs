@@ -1,5 +1,6 @@
 import { projectMetaengineDevOS } from './metaengine-devos-projection.mjs';
 import { attachDevOSSessionLayout } from './metaengine-devos-session-layout-projection.mjs';
+import { projectDevOSShellViewModel } from './metaengine-devos-shell-view-model.mjs';
 
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TARGET_RE=/^webcontents:[1-9][0-9]*$/;
@@ -98,5 +99,6 @@ export function projectWorkspaceWorkbench(snapshot={}){
   });
   const devosBase=projectMetaengineDevOS({tabs:snapshot?.tabs||{tabs:[]},supervisor:snapshot?.supervisor||null,workspaces:base});
   const devos=attachDevOSSessionLayout(devosBase,snapshot?.session_layouts??null);
-  return Object.freeze({...base,devos});
+  const devos_shell=projectDevOSShellViewModel(devos);
+  return Object.freeze({...base,devos,devos_shell});
 }
