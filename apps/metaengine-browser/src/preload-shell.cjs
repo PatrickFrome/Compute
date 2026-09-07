@@ -1,4 +1,5 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const { projectMetaengineDevOS } = require('./metaengine-devos-projection-core.cjs');
 
 const snapshotListeners = new Set();
 const brainDeltaListeners = new Set();
@@ -7,9 +8,49 @@ let brainStreamId = null;
 let brainSequence = 0;
 let brainBaselinePromise = null;
 
+function unavailableDevOSProjection(reason = 'PROJECTION_FAILED') {
+  return Object.freeze({
+    schema: 'metaengine.devos.projection.v1',
+    mode: 'DEVELOPMENT_OS',
+    valid: false,
+    reason: String(reason || 'PROJECTION_FAILED').slice(0, 160),
+    primary_object: 'SESSION',
+    hierarchy: Object.freeze(['OBJECTIVE', 'WORKSPACE', 'SESSION', 'TASK', 'SURFACE', 'ARTIFACT']),
+    objectives: Object.freeze([]),
+    workspaces: Object.freeze([]),
+    sessions: Object.freeze([]),
+    surfaces: Object.freeze([]),
+    artifacts: Object.freeze([]),
+    attention: Object.freeze([]),
+    bounded: true,
+    browser_is_shell: false,
+    browser_is_surface: true,
+    projection_is_authority: false,
+    scheduler_authority: false,
+    execution_authority: false,
+    command_leasing: false,
+    automatic_effect_retry_allowed: false,
+    page_model_authority: false,
+    authority_effect: false,
+  });
+}
+
+function decorateSnapshot(value) {
+  if (!value || typeof value !== 'object') return value;
+  try {
+    return Object.freeze({ ...value, devos: projectMetaengineDevOS(value) });
+  } catch (error) {
+    return Object.freeze({
+      ...value,
+      devos: unavailableDevOSProjection(error?.message || 'PROJECTION_FAILED'),
+    });
+  }
+}
+
 function emitSnapshot(value) {
+  const decorated = decorateSnapshot(value);
   for (const listener of snapshotListeners) {
-    try { listener(value); } catch {}
+    try { listener(decorated); } catch {}
   }
 }
 
@@ -23,8 +64,9 @@ async function refreshBrainBaseline() {
   if (brainBaselinePromise) return brainBaselinePromise;
   brainBaselinePromise = ipcRenderer.invoke('metaengine:shell:snapshot')
     .then((value) => {
-      emitSnapshot(value);
-      return value;
+      const decorated = decorateSnapshot(value);
+      emitSnapshot(decorated);
+      return decorated;
     })
     .finally(() => { brainBaselinePromise = null; });
   return brainBaselinePromise;
@@ -124,7 +166,7 @@ ipcRenderer.on('metaengine:brain:port', (event, transfer = {}) => {
 });
 
 contextBridge.exposeInMainWorld('metaengineShell', Object.freeze({
-  snapshot: () => ipcRenderer.invoke('metaengine:shell:snapshot'),
+  snapshot: () => ipcRenderer.invoke('metaengine:shell:snapshot').then(decorateSnapshot),
   command: (command, payload) => ipcRenderer.invoke('metaengine:shell:command', { command, payload }),
   onSnapshot: (listener) => {
     if (typeof listener !== 'function') return () => {};
