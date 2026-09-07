@@ -1,5 +1,4 @@
 const { contextBridge, ipcRenderer } = require('electron');
-const { projectMetaengineDevOS } = require('./metaengine-devos-projection-core.cjs');
 
 const snapshotListeners = new Set();
 const brainDeltaListeners = new Set();
@@ -8,12 +7,12 @@ let brainStreamId = null;
 let brainSequence = 0;
 let brainBaselinePromise = null;
 
-function unavailableDevOSProjection(reason = 'PROJECTION_FAILED') {
+function unavailableDevOSProjection(reason = 'NOT_EXPOSED') {
   return Object.freeze({
     schema: 'metaengine.devos.projection.v1',
     mode: 'DEVELOPMENT_OS',
     valid: false,
-    reason: String(reason || 'PROJECTION_FAILED').slice(0, 160),
+    reason: String(reason || 'NOT_EXPOSED').slice(0, 160),
     primary_object: 'SESSION',
     hierarchy: Object.freeze(['OBJECTIVE', 'WORKSPACE', 'SESSION', 'TASK', 'SURFACE', 'ARTIFACT']),
     objectives: Object.freeze([]),
@@ -37,14 +36,16 @@ function unavailableDevOSProjection(reason = 'PROJECTION_FAILED') {
 
 function decorateSnapshot(value) {
   if (!value || typeof value !== 'object') return value;
-  try {
-    return Object.freeze({ ...value, devos: projectMetaengineDevOS(value) });
-  } catch (error) {
-    return Object.freeze({
-      ...value,
-      devos: unavailableDevOSProjection(error?.message || 'PROJECTION_FAILED'),
-    });
-  }
+  const candidate = value?.workspaces?.devos;
+  const devos = candidate?.schema === 'metaengine.devos.projection.v1'
+    && candidate?.projection_is_authority === false
+    && candidate?.scheduler_authority === false
+    && candidate?.execution_authority === false
+    && candidate?.command_leasing === false
+    && candidate?.authority_effect === false
+    ? candidate
+    : unavailableDevOSProjection(candidate ? 'INVALID_PROJECTION' : 'NOT_EXPOSED');
+  return Object.freeze({ ...value, devos });
 }
 
 function emitSnapshot(value) {
