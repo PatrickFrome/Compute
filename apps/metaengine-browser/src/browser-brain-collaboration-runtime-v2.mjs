@@ -18,7 +18,7 @@ function boundedProjectionLimit(value, fallback, max) {
 }
 
 export class BrowserBrainCollaborationRuntimeV2 {
-  #clock; #fabric; #journal; #memory; #routing; #stall; #a2a; #loadState; #saveState; #persistChain = Promise.resolve(); #lastPersistError = null;
+  #clock; #fabric; #journal; #memory; #routing; #stall; #a2a; #loadState; #saveState; #persistChain = Promise.resolve(); #persistScheduled = false; #persistDirty = false; #lastPersistError = null;
   #workbenchCache = null; #workbenchCacheAt = 0;
   constructor({ clock = () => Date.now(), fabric = null, journal = null, memory = null, routing = null, stallDetector = null, a2aAdapter = null, loadState = null, saveState = null } = {}) {
     this.#clock = clock;
@@ -49,15 +49,38 @@ export class BrowserBrainCollaborationRuntimeV2 {
   }
   #persistSoon() {
     if (!this.#saveState) return;
-    const checkpoint = this.#journal.checkpoint();
-    this.#persistChain = this.#persistChain.then(() => this.#saveState(checkpoint)).then(() => { this.#lastPersistError = null; }).catch((error) => { this.#lastPersistError = String(error?.message || error).slice(0, 240); });
+    this.#persistDirty = true;
+    if (this.#persistScheduled) return;
+    this.#persistScheduled = true;
+    this.#persistChain = this.#persistChain.then(async () => {
+      while (this.#persistDirty) {
+        this.#persistDirty = false;
+        const checkpoint = this.#journal.checkpoint();
+        try {
+          await this.#saveState(checkpoint);
+          this.#lastPersistError = null;
+        } catch (error) {
+          this.#lastPersistError = String(error?.message || error).slice(0, 240);
+        }
+      }
+    }).finally(() => {
+      this.#persistScheduled = false;
+      if (this.#persistDirty) this.#persistSoon();
+    });
   }
   #invalidateWorkbench() { this.#workbenchCache = null; this.#workbenchCacheAt = 0; }
   #nowMs() {
     const value = Number(this.#clock());
     return Number.isFinite(value) && value >= 0 ? value : Date.now();
   }
-  async flush() { await this.#persistChain; return Object.freeze({ ok: this.#lastPersistError == null, error: this.#lastPersistError, authority_effect: false }); }
+  async flush() {
+    while (true) {
+      const chain = this.#persistChain;
+      await chain;
+      if (chain === this.#persistChain && !this.#persistScheduled && !this.#persistDirty) break;
+    }
+    return Object.freeze({ ok: this.#lastPersistError == null, error: this.#lastPersistError, authority_effect: false });
+  }
   checkpoint() { return this.#journal.checkpoint(); }
   restore(checkpoint) {
     this.#journal.restore(checkpoint);
@@ -223,6 +246,7 @@ export class BrowserBrainCollaborationRuntimeV2 {
       workbench: this.workbenchProjection(),
       durable_persistence_bound: this.#loadState != null || this.#saveState != null,
       last_persist_error: this.#lastPersistError,
+      persistence_coalescing: this.#saveState ? 'LATEST_CHECKPOINT_BURST_V1' : 'UNBOUND',
       terminal_task_to_episode: true,
       hybrid_retrieval: true,
       semantic_procedural_consolidation: true,
