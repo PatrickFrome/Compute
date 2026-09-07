@@ -32,6 +32,7 @@ export class BrowserBrainCollaborationRuntimeV2 {
     this.#saveState = saveState;
     if (loadState != null && typeof loadState !== 'function') throw new Error('browser_brain_collaboration_runtime_load_invalid');
     if (saveState != null && typeof saveState !== 'function') throw new Error('browser_brain_collaboration_runtime_save_invalid');
+    if (typeof this.#memory.reset !== 'function') throw new Error('browser_brain_collaboration_memory_reset_invalid');
   }
 
   async init() {
@@ -41,6 +42,7 @@ export class BrowserBrainCollaborationRuntimeV2 {
         this.#journal.restore(checkpoint);
         this.#fabric = new BrowserBrainCollaborationFabric({ clock: this.#clock });
         this.#journal.replayInto(this.#fabric);
+        this.#resetMemoryForReplay();
         this.#rebuildEpisodesFromJournal();
         this.#invalidateWorkbench();
       }
@@ -69,6 +71,7 @@ export class BrowserBrainCollaborationRuntimeV2 {
     });
   }
   #invalidateWorkbench() { this.#workbenchCache = null; this.#workbenchCacheAt = 0; }
+  #resetMemoryForReplay() { this.#memory.reset(); }
   #nowMs() {
     const value = Number(this.#clock());
     return Number.isFinite(value) && value >= 0 ? value : Date.now();
@@ -86,6 +89,7 @@ export class BrowserBrainCollaborationRuntimeV2 {
     this.#journal.restore(checkpoint);
     this.#fabric = new BrowserBrainCollaborationFabric({ clock: this.#clock });
     const replay = this.#journal.replayInto(this.#fabric);
+    this.#resetMemoryForReplay();
     this.#rebuildEpisodesFromJournal();
     this.#invalidateWorkbench();
     return Object.freeze({ ...replay, checkpoint_restored: true, episodic_memory_rebuilt: true, authority_effect: false });
