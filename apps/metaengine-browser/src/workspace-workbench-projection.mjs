@@ -1,3 +1,5 @@
+import { projectMetaengineDevOS } from './metaengine-devos-projection.mjs';
+
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TARGET_RE=/^webcontents:[1-9][0-9]*$/;
 
@@ -77,7 +79,7 @@ export function projectWorkspaceWorkbench(snapshot={}){
   groups.sort((a,b)=>a.branch_name.localeCompare(b.branch_name)||a.group_id.localeCompare(b.group_id));
   const sessions=[];
   for(const tab of tabs){if(!groupedTabIds.has(String(tab?.tab_id||'')))sessions.push(tabProjection(tab))}
-  return Object.freeze({
+  const base=Object.freeze({
     schema:'metaengine.browser.workspace-workbench-projection.v1',
     source_state:sourceState,
     source_implemented:observer?.source_implemented===true,
@@ -93,4 +95,6 @@ export function projectWorkspaceWorkbench(snapshot={}){
     browser_actuation_authority:false,
     authority_effect:false,
   });
+  const devos=projectMetaengineDevOS({tabs:snapshot?.tabs||{tabs:[]},supervisor:snapshot?.supervisor||null,workspaces:base});
+  return Object.freeze({...base,devos});
 }
