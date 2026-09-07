@@ -3,6 +3,7 @@ import { BrowserBrainAdaptiveFanoutRuntime } from './browser-brain-adaptive-fano
 import { BrowserBrainRealtimePressureBridge } from './browser-brain-realtime-pressure-bridge.mjs';
 import { BrowserControlPressureGovernor } from './browser-control-pressure-governor.mjs';
 import { BrowserBrainCognitionFabric } from './browser-brain-cognition-fabric.mjs';
+import { BrowserBrainCollaborationRuntimeV2 } from './browser-brain-collaboration-runtime-v2.mjs';
 import { applyNativeSupervisorCommandPressureBudget } from './native-supervisor-command-lanes.mjs';
 
 export const BROWSER_BRAIN_CONTINUOUS_COORDINATOR_SCHEMA = 'metaengine.browser-brain.continuous-coordinator.v1';
@@ -17,10 +18,6 @@ const PRESSURE_RELEVANT_EVENTS = new Set([
   'RENDER_PROCESS_GONE',
   'CHILD_PROCESS_GONE',
 ]);
-// Coverage is a diagnostic topology projection, not authority. Reuse it for
-// semantic/CDP bursts and refresh it only on the same sparse resource/lifecycle
-// boundaries that may change process or WebContents census. This keeps the
-// semantic hot path O(1) with respect to live BrowserCell count.
 const COVERAGE_RELEVANT_EVENTS = PRESSURE_RELEVANT_EVENTS;
 const CANONICAL_RESYNC_EVENTS = new Set(['METRICS_SAMPLE', 'PROCESS_CENSUS_REFRESHED']);
 
@@ -98,29 +95,18 @@ function sameCommandBudget(a, b) {
 /**
  * Zero-scheduler composition layer for the always-on Browser Brain.
  *
- * The caller owns the existing process/semantic event source and the existing
- * command scheduler. This class only connects those proven surfaces:
- *   realtime process/semantic edge -> causal clock + bounded cognition + exact binding + bounded memory
- *   resource/lifecycle edge         -> adaptive pressure state
- *   pressure state                  -> numeric admission register consumed by the ONE existing command-lane scheduler
- *   already leased mutation batch   -> independent BrowserCell fan-out, but only when an explicit test/runtime adapter is bound
- *
- * Cognition remains advisory. Cached semantic plans carry no payload or Browser
- * authority, are generation-scoped, and must be freshly revalidated before use.
- * Gaps in a producer sequence disable cache reuse until a canonical process /
- * semantic snapshot supplies an explicit resync point.
- *
- * It intentionally owns no timer, DB lease, hidden queue, retry loop, or physical
- * Browser implementation. Observation runs on every edge. Pressure and diagnostic
- * topology coverage are deliberately not recomputed for each semantic/CDP burst
- * because those events do not change the resource/liveness census; crash,
- * unresponsive, process and WebContents changes remain immediate.
+ * Observation, cognition and collaboration are advisory. This coordinator owns no
+ * DB lease, hidden queue, effect retry loop or second scheduler. Collaboration
+ * records let agents keep useful work moving continuously without a user-prompt
+ * boundary, while all physical effects remain fenced by the existing authority
+ * path outside this information plane.
  */
 export class BrowserBrainContinuousCoordinator {
   #observation;
   #adaptive;
   #pressure;
   #cognition;
+  #collaboration;
   #lastProcessSnapshot = null;
   #lastCoverage = coverage();
   #lastPressureResult = null;
@@ -144,12 +130,24 @@ export class BrowserBrainContinuousCoordinator {
     pressureBridge = null,
     pressureGovernor = null,
     cognitionFabric = null,
+    collaborationFabric = null,
+    collaborationLoadState = null,
+    collaborationSaveState = null,
+    collaborationCheckpoint = null,
     getExtraPressureSample = null,
     clock = () => Date.now(),
     hardBatchLimit = 128,
   } = {}) {
     this.#observation = observationBridge || new BrowserBrainRealtimeObservationBridge();
     this.#cognition = cognitionFabric || new BrowserBrainCognitionFabric({ clock });
+    this.#collaboration = collaborationFabric || new BrowserBrainCollaborationRuntimeV2({
+      clock,
+      loadState: collaborationLoadState,
+      saveState: collaborationSaveState,
+    });
+    if (collaborationCheckpoint != null && typeof this.#collaboration.restore === 'function') {
+      this.#collaboration.restore(collaborationCheckpoint);
+    }
     const canBindAdaptive = adaptiveRuntime != null
       || (scheduler != null && typeof executeRuntimeFenced === 'function');
     this.#adaptive = adaptiveRuntime || (canBindAdaptive
@@ -186,6 +184,17 @@ export class BrowserBrainContinuousCoordinator {
     ) {
       throw new Error('browser_brain_continuous_cognition_fabric_invalid');
     }
+    if (
+      typeof this.#collaboration.recordTask !== 'function'
+      || typeof this.#collaboration.decideAutonomousContinuation !== 'function'
+      || typeof this.#collaboration.snapshot !== 'function'
+    ) {
+      throw new Error('browser_brain_continuous_collaboration_fabric_invalid');
+    }
+  }
+
+  async initCollaboration() {
+    return typeof this.#collaboration.init === 'function' ? this.#collaboration.init() : this.#collaboration.snapshot();
   }
 
   #evaluatePressure(processSnapshot) {
@@ -272,6 +281,8 @@ export class BrowserBrainContinuousCoordinator {
       command_lane_pressure_budget: this.#lastAppliedCommandBudget,
       coverage: this.#lastCoverage,
       mutation_runtime_bound: this.#adaptive != null,
+      continuous_autonomous_work: true,
+      external_confirmation_gate: false,
       scheduler_authority: false,
       command_leasing: false,
       authority_effect: false,
@@ -312,11 +323,21 @@ export class BrowserBrainContinuousCoordinator {
   }
 
   observeAgent(agent) {
-    return this.#cognition.observeAgent(agent);
+    const observed = this.#cognition.observeAgent(agent);
+    if (typeof this.#collaboration.observeRoutingAgent === 'function') {
+      this.#collaboration.observeRoutingAgent({ ...agent, generation: agent?.generation ?? 1 });
+    }
+    return observed;
   }
 
   routeAgents(query) {
     return this.#cognition.routeAgents(query);
+  }
+
+  routeAgentsV2(query) {
+    return typeof this.#collaboration.routeAgentsV2 === 'function'
+      ? this.#collaboration.routeAgentsV2(query)
+      : this.#cognition.routeAgents(query);
   }
 
   recordEvidence(evidence) {
@@ -327,7 +348,100 @@ export class BrowserBrainContinuousCoordinator {
     return this.#cognition.snapshot();
   }
 
+  recordCollaborationTask(task) {
+    return this.#collaboration.recordTask(task);
+  }
+
+  advanceCollaborationTask(progress) {
+    return this.#collaboration.advanceTask(progress);
+  }
+
+  recordAgentMessage(message) {
+    return this.#collaboration.recordMessage(message);
+  }
+
+  recordCollaborationArtifact(artifact) {
+    return this.#collaboration.recordArtifact(artifact);
+  }
+
+  claimCollaborationWork(claim) {
+    return this.#collaboration.claimWork(claim);
+  }
+
+  releaseCollaborationClaim(claimId, reason) {
+    return this.#collaboration.releaseClaim(claimId, reason);
+  }
+
+  recordHandoffCapsule(handoff) {
+    return this.#collaboration.recordHandoff(handoff);
+  }
+
+  collaborationTaskLedger(contextId) {
+    return this.#collaboration.taskLedger(contextId);
+  }
+
+  collaborationProgressLedger(contextId) {
+    return this.#collaboration.progressLedger(contextId);
+  }
+
+  autonomousContinuation(query) {
+    return this.#collaboration.decideAutonomousContinuation(query);
+  }
+
+  collaborationCheckpoint() {
+    return typeof this.#collaboration.checkpoint === 'function' ? this.#collaboration.checkpoint() : null;
+  }
+
+  restoreCollaborationCheckpoint(checkpoint) {
+    if (typeof this.#collaboration.restore !== 'function') throw new Error('browser_brain_collaboration_restore_unavailable');
+    return this.#collaboration.restore(checkpoint);
+  }
+
+  flushCollaborationPersistence() {
+    return typeof this.#collaboration.flush === 'function'
+      ? this.#collaboration.flush()
+      : Promise.resolve(Object.freeze({ ok: true, authority_effect: false }));
+  }
+
+  retrieveCollaborationMemory(query) {
+    if (typeof this.#collaboration.retrieveMemory !== 'function') throw new Error('browser_brain_collaboration_memory_unavailable');
+    return this.#collaboration.retrieveMemory(query);
+  }
+
+  collaborationSemanticFacts() {
+    return typeof this.#collaboration.semanticFacts === 'function' ? this.#collaboration.semanticFacts() : Object.freeze([]);
+  }
+
+  collaborationPlaybooks() {
+    return typeof this.#collaboration.playbooks === 'function' ? this.#collaboration.playbooks() : Object.freeze([]);
+  }
+
+  planCollaborationFanout(query) {
+    if (typeof this.#collaboration.planFanout !== 'function') throw new Error('browser_brain_collaboration_fanout_unavailable');
+    return this.#collaboration.planFanout(query);
+  }
+
+  a2aTask(input) {
+    if (typeof this.#collaboration.a2aTask !== 'function') throw new Error('browser_brain_a2a_adapter_unavailable');
+    return this.#collaboration.a2aTask(input);
+  }
+
+  a2aIngressMessage(message, options) {
+    if (typeof this.#collaboration.a2aIngressMessage !== 'function') throw new Error('browser_brain_a2a_adapter_unavailable');
+    return this.#collaboration.a2aIngressMessage(message, options);
+  }
+
+  a2aIngressTask(task) {
+    if (typeof this.#collaboration.a2aIngressTask !== 'function') throw new Error('browser_brain_a2a_adapter_unavailable');
+    return this.#collaboration.a2aIngressTask(task);
+  }
+
+  collaborationSnapshot() {
+    return this.#collaboration.snapshot();
+  }
+
   snapshot() {
+    const collaboration = this.#collaboration.snapshot();
     return Object.freeze({
       schema: BROWSER_BRAIN_CONTINUOUS_COORDINATOR_SCHEMA,
       edge_count: this.#edgeCount,
@@ -343,6 +457,7 @@ export class BrowserBrainContinuousCoordinator {
       last_event: this.#lastEvent,
       coverage: this.#lastCoverage,
       cognition_fabric: this.#cognition.snapshot(),
+      collaboration_fabric: collaboration,
       observation: this.#observation.snapshot(),
       adaptive_fanout: this.#adaptive?.snapshot?.() || unboundAdaptiveSnapshot(),
       pressure: this.#pressure.snapshot(),
@@ -354,10 +469,21 @@ export class BrowserBrainContinuousCoordinator {
         ? 'DB_LEASED_BATCH_TO_RUNTIME_FENCED_INDEPENDENT_BROWSER_CELLS'
         : 'EXISTING_NATIVE_SUPERVISOR_COMMAND_LANES_ONLY',
       cognition_path: 'REAL_PRODUCER_SEQUENCE_TO_BOUNDED_ADVISORY_FABRIC',
+      collaboration_path: 'TYPED_CAUSAL_MESSAGES_TO_DURABLE_EPISODIC_MEMORY_ROUTING_REPLAN_AND_AUTONOMOUS_CONTINUATION',
       mutation_runtime_bound: this.#adaptive != null,
       exact_tab_binding_required_for_mutation: true,
       semantic_plan_revalidation_required: true,
       page_model_data_grants_authority: false,
+      continuous_autonomous_work: collaboration.continuous_autonomous_work === true,
+      durable_collaboration_memory: collaboration.journal?.hash_verified_checkpoint === true,
+      episodic_collaboration_memory: collaboration.episodic_memory?.immutable_provenance === true,
+      routing_v2: collaboration.routing_v2_enabled === true,
+      adaptive_sparse_fanout: collaboration.adaptive_sparse_fanout === true,
+      a2a_boundary_only: collaboration.a2a_boundary_only === true,
+      external_confirmation_gate: false,
+      external_prompt_required_for_continuation: false,
+      idle_wait_allowed: false,
+      work_cycle_limit: null,
       full_electron_process_visibility: true,
       os_global_process_visibility: false,
       bounded_memory: true,
