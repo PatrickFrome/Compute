@@ -84,6 +84,9 @@ body[data-final-shell="telegram-browser-v1"] .opsNav button,
 body[data-final-shell="telegram-browser-v1"] .kvRow span,
 body[data-final-shell="telegram-browser-v1"] .kvRow b,
 body[data-final-shell="telegram-browser-v1"] .commandButton strong{font-size:10px!important}
+@media(max-width:1180px){
+  body[data-final-shell="telegram-browser-v1"] .systems{display:flex!important;flex:0 0 auto;gap:2px;padding:0 5px}
+}
 @media(forced-colors:active){
   .systemDot,.tabStateDot,.brainPresence i{forced-color-adjust:auto;border:1px solid CanvasText}
   button:focus-visible,input:focus-visible{outline:2px solid Highlight}
