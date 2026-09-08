@@ -34,6 +34,7 @@ jobs:
           set -euo pipefail
           node apps/metaengine-browser/scripts/patch-security-workflow-temp.mjs
           node apps/metaengine-browser/scripts/security-static-gate.mjs
+          node --check apps/metaengine-browser/src/main.mjs
           node --test apps/metaengine-browser/test/browser-security-static-gate.test.mjs
           git diff --check
 
@@ -43,9 +44,9 @@ jobs:
           set -euo pipefail
           rm .github/workflows/security-negative-gate-wire-temp.yml
           rm apps/metaengine-browser/scripts/patch-security-workflow-temp.mjs
-          test "$(git status --porcelain | wc -l)" -eq 3
+          test "$(git status --porcelain | wc -l)" -eq 4
           git config user.name 'METAENGINE CI'
           git config user.email 'actions@github.com'
-          git add .github/workflows/metaengine-browser-shell-v1.yml .github/workflows/security-negative-gate-wire-temp.yml apps/metaengine-browser/scripts/patch-security-workflow-temp.mjs
+          git add .github/workflows/metaengine-browser-shell-v1.yml apps/metaengine-browser/src/main.mjs .github/workflows/security-negative-gate-wire-temp.yml apps/metaengine-browser/scripts/patch-security-workflow-temp.mjs
           git commit -m 'ci(browser): enforce executable security negative gate'
           git push origin HEAD:work/metaengine-browser-security-negative-gate-v1
