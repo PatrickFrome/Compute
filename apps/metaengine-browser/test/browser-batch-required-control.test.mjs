@@ -38,11 +38,27 @@ test('command lane scheduler keeps distinct-tab mutation parallelism while seria
   assert.match(lanes, /exact_tab_mutation_execution_required:\s*true/);
 });
 
-test('clean product head contains no finalizer authority and bounded deadlines remain live until settlement', async () => {
+test('clean product head contains no finalizer authority and bounded abort deadlines remain live until settlement', async () => {
   const supervisorFetch = await source('src/native-supervisor-client-core.mjs');
   const optionalFetch = await source('src/bounded-network-fetch.mjs');
-  assert.doesNotMatch(supervisorFetch, /timer\.unref\?\.\(\)/);
-  assert.doesNotMatch(optionalFetch, /timer\.unref\?\.\(\)/);
+
+  assert.match(
+    supervisorFetch,
+    /const timer = setTimeout\(\(\) => controller\.abort\(new Error\('native_supervisor_request_deadline'\)\), boundedMs\);\s*\/\/ This timer is the liveness boundary[\s\S]*?try \{/,
+  );
+  assert.doesNotMatch(
+    supervisorFetch,
+    /native_supervisor_request_deadline'\)\), boundedMs\);\s*timer\.unref/,
+  );
+
+  assert.match(
+    optionalFetch,
+    /const timer = setTimeout\(\(\) => controller\.abort\(new Error\(`\$\{boundedLabel\}_deadline_exceeded`\)\), boundedMs\);\s*\/\/ This timer is the liveness boundary[\s\S]*?try \{/,
+  );
+  assert.doesNotMatch(
+    optionalFetch,
+    /boundedLabel\}_deadline_exceeded`\)\), boundedMs\);\s*timer\.unref/,
+  );
 
   await assert.rejects(
     fs.stat(path.join(REPO_ROOT, '.github/workflows/devos-clean-genesis-batch-temp.yml')),
