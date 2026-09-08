@@ -169,6 +169,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sandbox=node_modules/electron/dist/chrome-sandbox
+          test -f "$sandbox"
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+          test "$(stat -c '%U:%G %a' "$sandbox")" = "root:root 4755"
           xvfb-run -a npx electron test/browser-devos-multisurface-physical.electron.mjs | tee /tmp/devos-physical-e2e.log
           grep -F '"schema":"metaengine.devos.multisurface-physical-e2e.v1"' /tmp/devos-physical-e2e.log
           grep -F '"ok":true' /tmp/devos-physical-e2e.log
