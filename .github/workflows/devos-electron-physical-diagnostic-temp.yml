@@ -29,15 +29,28 @@ jobs:
       - name: Install Browser dependencies
         working-directory: apps/metaengine-browser
         shell: bash
-        run: npm install --no-audit --no-fund
+        run: |
+          set -euo pipefail
+          npm config get ignore-scripts
+          env | grep -E '^ELECTRON|^NODE_ENV|^NPM_CONFIG' || true
+          npm install --no-audit --no-fund
 
-      - name: Prove Electron launcher and sandbox prerequisites
+      - name: Inspect Electron payload and sandbox prerequisites
         working-directory: apps/metaengine-browser
         shell: bash
         run: |
           set -euo pipefail
+          echo "electron_pkg=$(node -p \"require('./node_modules/electron/package.json').version\")"
+          find node_modules/electron -maxdepth 2 -type f -printf '%P %m %u:%g\n' | sort | head -80
+          node - <<'NODE'
+          try { console.log('electron_binary=' + require('electron')); }
+          catch (error) { console.error(error.stack || error); process.exitCode = 3; }
+          NODE
           sandbox=node_modules/electron/dist/chrome-sandbox
-          test -f "$sandbox"
+          if [[ ! -f "$sandbox" ]]; then
+            echo "chrome_sandbox_missing=true"
+            exit 42
+          fi
           echo "before=$(stat -c '%u:%g %a %A' "$sandbox")"
           findmnt -no TARGET,FSTYPE,OPTIONS -T "$sandbox" || true
           sysctl kernel.unprivileged_userns_clone 2>/dev/null || true
