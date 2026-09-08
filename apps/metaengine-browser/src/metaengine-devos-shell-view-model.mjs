@@ -44,12 +44,13 @@ function invalidView(reason) {
     primary_object: 'SESSION',
     roots: Object.freeze([]),
     session_groups: Object.freeze([]),
+    surfaces: Object.freeze([]),
     now: Object.freeze([]),
     selected_session: null,
     selected_surface: null,
     presentation_focus: null,
     layout_preferences: null,
-    counts: Object.freeze({ sessions: 0, surfaces: 0, attention: 0, visible_groups: 0 }),
+    counts: Object.freeze({ sessions: 0, surfaces: 0, attention: 0, visible_groups: 0, visible_surfaces: 0 }),
     browser_is_shell: false,
     browser_is_surface: true,
     renderer_selection_authority: false,
@@ -112,11 +113,13 @@ export function projectDevOSShellViewModel(devos, presentationFocusState = null)
     sessions.set(sessionId, source);
   }
   const surfaces = new Map();
+  const surfaceCountBySession = new Map();
   for (const source of devos.surfaces) {
     const surfaceId = text(source?.surface_id, 240);
     const sessionId = text(source?.session_id, 200);
     if (!surfaceId || surfaces.has(surfaceId) || !sessionId || !sessions.has(sessionId) || !hasZeroAuthorityContract(source)) return invalidView('SURFACE_SET_INVALID');
     surfaces.set(surfaceId, source);
+    surfaceCountBySession.set(sessionId, (surfaceCountBySession.get(sessionId) || 0) + 1);
   }
 
   // Canonical Browser selection remains part of the read model and is validated,
@@ -165,7 +168,7 @@ export function projectDevOSShellViewModel(devos, presentationFocusState = null)
         status: text(session.status, 48) || 'UNKNOWN',
         browser_only: session.browser_only === true,
         task_count: Math.max(0, Number(session.task_count || 0)),
-        surface_count: Array.isArray(session.surface_ids) ? session.surface_ids.length : 0,
+        surface_count: surfaceCountBySession.get(sessionId) || 0,
         selected: sessionId === selectedSessionId,
       }));
     }
@@ -190,13 +193,30 @@ export function projectDevOSShellViewModel(devos, presentationFocusState = null)
     }));
   }
 
+  const visibleSurfaces = [];
+  if (selectedSessionId) {
+    for (const source of devos.surfaces) {
+      if (text(source.session_id, 200) !== selectedSessionId) continue;
+      const surfaceId = text(source.surface_id, 240);
+      visibleSurfaces.push(freezeRow({
+        surface_id: surfaceId,
+        session_id: selectedSessionId,
+        type: text(source.type, 48) || 'UNKNOWN',
+        title: text(source.title, 300) || surfaceId,
+        state: text(source.state, 48) || 'UNKNOWN',
+        tab_id: text(source.tab_id, 200),
+        selected: surfaceId === selectedSurfaceId,
+      }));
+    }
+  }
+
   const selectedSessionView = selectedSession ? freezeRow({
     session_id: selectedSessionId,
     title: text(selectedSession.title, 300) || selectedSessionId,
     status: text(selectedSession.status, 48) || 'UNKNOWN',
     browser_only: selectedSession.browser_only === true,
     task_count: Math.max(0, Number(selectedSession.task_count || 0)),
-    surface_ids: Object.freeze(Array.isArray(selectedSession.surface_ids) ? selectedSession.surface_ids.map((id) => text(id, 240)).filter(Boolean) : []),
+    surface_ids: Object.freeze(visibleSurfaces.map((surface) => surface.surface_id)),
   }) : null;
   const selectedSurfaceView = selectedSurface ? freezeRow({
     surface_id: selectedSurfaceId,
@@ -215,12 +235,13 @@ export function projectDevOSShellViewModel(devos, presentationFocusState = null)
     default_root: text(devos.navigation.default_root, 64) || 'NOW',
     roots: Object.freeze(roots),
     session_groups: Object.freeze(sessionGroups),
+    surfaces: Object.freeze(visibleSurfaces),
     now: Object.freeze(now),
     selected_session: selectedSessionView,
     selected_surface: selectedSurfaceView,
     presentation_focus: presentationFocus,
     layout_preferences: selectedLayout(devos, selectedSessionId),
-    counts: Object.freeze({ sessions: sessions.size, surfaces: surfaces.size, attention: now.length, visible_groups: sessionGroups.filter((group) => group.count > 0).length }),
+    counts: Object.freeze({ sessions: sessions.size, surfaces: surfaces.size, attention: now.length, visible_groups: sessionGroups.filter((group) => group.count > 0).length, visible_surfaces: visibleSurfaces.length }),
     browser_is_shell: false,
     browser_is_surface: true,
     renderer_selection_authority: false,
