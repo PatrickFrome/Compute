@@ -25,6 +25,7 @@ const CAPABILITIES = Object.freeze([
 const repoRoot = path.resolve(process.env.METAENGINE_REPO_ROOT || process.cwd());
 const repositoryName = String(process.env.METAENGINE_GIT_REPOSITORY || 'PatrickFrome/Compute');
 const repositoryRemote = String(process.env.METAENGINE_GIT_REMOTE || 'origin');
+const sourceProvenancePath = path.resolve(process.env.METAENGINE_SOURCE_PROVENANCE || path.join(repoRoot, '.metaengine-source-provenance.json'));
 
 function send(message) {
   if (!process.parentPort) throw new Error('development_plane_parent_port_missing');
@@ -42,7 +43,19 @@ async function readRepoHead() {
       gitDir = path.resolve(repoRoot, marker.slice('gitdir: '.length).trim());
     }
   } catch (error) {
-    if (error?.code === 'ENOENT') return { repository_present: false, repository: repositoryName, head: null, ref: null };
+    if (error?.code === 'ENOENT') {
+      try {
+        const provenance = JSON.parse(await fs.readFile(sourceProvenancePath, 'utf8'));
+        const repository = String(provenance?.repository || repositoryName);
+        const head = String(provenance?.head || '').toLowerCase();
+        const ref = provenance?.ref == null ? null : String(provenance.ref);
+        if (provenance?.schema !== 'metaengine.devos.packaged-source-snapshot.v1' || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository) || !/^[0-9a-f]{40}$/.test(head)) throw new Error('repo_packaged_provenance_invalid');
+        return { repository_present: true, repository, head, ref, packaged_source_snapshot: true };
+      } catch (provenanceError) {
+        if (provenanceError?.code !== 'ENOENT') throw provenanceError;
+        return { repository_present: false, repository: repositoryName, head: null, ref: null };
+      }
+    }
     throw error;
   }
   const head = (await fs.readFile(path.join(gitDir, 'HEAD'), 'utf8')).trim();

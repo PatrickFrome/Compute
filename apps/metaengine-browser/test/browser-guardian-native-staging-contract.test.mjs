@@ -33,7 +33,13 @@ test('electron-builder owns the single Guardian native staging build boundary', 
     from: 'native-dist/guardian',
     to: 'guardian-native',
     filter: ['**/*'],
+  }, {
+    from: 'devos-source-snapshot',
+    to: 'devos-source-snapshot',
+    filter: ['**/*'],
   }]);
+  assert.match(hook, /buildDevOSSourceSnapshot/);
+  assert.match(hook, /devos-source-snapshot/);
   const parsed = spawnSync(process.execPath, ['--check', hookPath], { encoding: 'utf8' });
   assert.equal(parsed.status, 0, parsed.stderr || parsed.stdout);
   assert.match(hook, /electronPlatformName\s*!==\s*'win32'/);

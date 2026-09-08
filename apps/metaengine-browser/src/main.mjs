@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ComputeBridgeClient } from './compute-bridge-client.mjs';
 import { DevelopmentPlane } from './development-plane.mjs';
+import { loadNativeSupervisorControlState } from './native-supervisor-control-state.mjs';
 import { FleetProvisioner } from './fleet-provisioner.mjs';
 import { createFleetTargetLocalObserver } from './fleet-target-local-observer.mjs';
 import { retireEligibleFleetAgents } from './fleet-elastic-governor.mjs';
@@ -71,6 +72,7 @@ let startupRetryAttempt = 0;
 let startupInFlight = false;
 let browserRuntimeReady = false;
 let startupFailurePresented = false;
+let startupControlState = null;
 const degradedStartupSubsystems = new Map();
 
 function mimeFor(filePath) {
@@ -122,7 +124,7 @@ function configureUserSession() {
 }
 
 function fleetStatePath() {
-  return path.join(app.getPath('userData'), 'metaengine-fleet-state-v1.json');
+  return path.join(app.getPath('userData'), 'metaengine-fleet-state-v2.json');
 }
 
 function ownerSafetyGateStatePath() {
@@ -131,6 +133,10 @@ function ownerSafetyGateStatePath() {
 
 function supervisorIdentityPath() {
   return path.join(app.getPath('userData'), 'metaengine-native-supervisor-device-v1.json');
+}
+
+function supervisorControlStatePath() {
+  return path.join(app.getPath('userData'), 'metaengine-native-supervisor-control-state-v1.json');
 }
 
 function devosSessionLayoutStatePath() {
@@ -502,7 +508,6 @@ async function closeTab(tabId) {
   }
   registry.close(id);
   await fleet?.onTabClosed(id, 'PHYSICAL_TAB_CLOSED_BY_SHELL');
-  if (!registry.selected()) await createTab('https://chatgpt.com/', { select: true, load: true });
   invalidatePerception(id);
   attachSelected();
   await publishSnapshot();
@@ -570,14 +575,14 @@ async function initFleet() {
     loadState: loadFleetState,
     saveState: saveFleetState,
     census: () => registry.census(),
-    policy: { profile: 'BALANCED', warm_agents: 2, desired_agents: 6 },
+    policy: { profile: 'BALANCED', warm_agents: 0, desired_agents: 0, spawn_burst_limit: 8 },
   });
   await fleet.init();
   await fleet.reconcile({ active: false });
 }
 
 function developmentPlaneRepoRoot() {
-  return app.isPackaged ? process.resourcesPath : path.resolve(APP_ROOT, '../..');
+  return app.isPackaged ? path.join(process.resourcesPath, 'devos-source-snapshot') : path.resolve(APP_ROOT, '../..');
 }
 
 async function initDevelopmentPlane() {
@@ -586,7 +591,11 @@ async function initDevelopmentPlane() {
     developmentPlane = new DevelopmentPlane({
       spawnWorker: () => utilityProcess.fork(path.join(__dirname, 'development-plane-worker.cjs'), [], {
         cwd: repoRoot,
-        env: { METAENGINE_REPO_ROOT: repoRoot },
+        env: {
+          METAENGINE_REPO_ROOT: repoRoot,
+          METAENGINE_SOURCE_PROVENANCE: path.join(repoRoot, '.metaengine-source-provenance.json'),
+          METAENGINE_GIT_REPOSITORY: 'PatrickFrome/Compute',
+        },
         stdio: 'inherit',
         serviceName: 'METAENGINE Development Plane',
       }),
@@ -853,6 +862,7 @@ async function initNativeSupervisor() {
       executeCommand: executeNativeSupervisorCommand,
       observeLocalTarget,
       workerObservationBudget: 4,
+      controlStatePath: supervisorControlStatePath(),
     });
   }
   if (nativeSupervisor.snapshot()?.running !== true) await nativeSupervisor.start();
@@ -988,6 +998,7 @@ async function runDegradableStartupStep(subsystem, operation) {
 }
 
 async function bootstrapDegradableSubsystems() {
+  const quiescentStartup = startupControlState?.supervisor_mode === 'OFF' && startupControlState?.armed === false;
   await runDegradableStartupStep('OWNER_SAFETY_GATES', async () => {
     try {
       return await initOwnerSafetyGates();
@@ -1003,7 +1014,7 @@ async function bootstrapDegradableSubsystems() {
   });
 
   let initialTab = null;
-  if (sessionReady) {
+  if (sessionReady && !quiescentStartup) {
     initialTab = await runDegradableStartupStep('INITIAL_TAB_CREATE', () => createTab('https://chatgpt.com/', { select: true, load: false }));
     if (initialTab?.tab_id) {
       setImmediate(() => {
@@ -1141,6 +1152,7 @@ ipcMain.handle('metaengine:shell:presentation-focus:clear', async (event) => {
 
 async function startAfterReady() {
   await registerShellProtocol();
+  startupControlState = await loadNativeSupervisorControlState(supervisorControlStatePath());
   await initDevOSSessionLayouts();
   if (isDevelopmentPlaneSmoke || isSmoke) configureUserSession();
   if (isDevelopmentPlaneSmoke) {

@@ -21,7 +21,16 @@
     {
       "from": "native-dist/guardian",
       "to": "guardian-native",
-      "filter": ["**/*"]
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "devos-source-snapshot",
+      "to": "devos-source-snapshot",
+      "filter": [
+        "**/*"
+      ]
     }
   ],
   "publish": [
@@ -38,7 +47,9 @@
     "target": [
       {
         "target": "nsis",
-        "arch": ["x64"]
+        "arch": [
+          "x64"
+        ]
       }
     ],
     "artifactName": "METAENGINE-Browser-Test-Setup-${version}-${arch}.${ext}"
