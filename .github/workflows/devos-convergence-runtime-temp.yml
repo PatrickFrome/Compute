@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/devos-convergence-runtime-temp.yml
       - apps/metaengine-browser/scripts/patch-devos-convergence-runtime-temp.mjs
+      - apps/metaengine-browser/scripts/patch-devos-convergence-contracts-temp.mjs
 
 permissions:
   contents: write
@@ -39,6 +40,7 @@ jobs:
         run: |
           set -euo pipefail
           node apps/metaengine-browser/scripts/patch-devos-convergence-runtime-temp.mjs
+          node apps/metaengine-browser/scripts/patch-devos-convergence-contracts-temp.mjs
           node --check apps/metaengine-browser/src/main.mjs
           node --check apps/metaengine-browser/src/native-supervisor-client-base.mjs
           node --check apps/metaengine-browser/src/native-supervisor-control-state.mjs
@@ -58,9 +60,11 @@ jobs:
             test/browser-devos-multisurface-session-layout.test.mjs \
             test/browser-devos-surface-grid.test.mjs \
             test/browser-devos-source-backed-surfaces.test.mjs \
+            test/browser-brain-fanout-causal-bridge.test.mjs \
             test/browser-brain-observation-cursors.test.mjs \
             test/browser-brain-realtime-observation-window.test.mjs \
             test/browser-native-semantic-hot-path.test.mjs \
+            test/browser-guardian-native-staging-contract.test.mjs \
             test/browser-security-static-gate.test.mjs
           node scripts/security-static-gate.mjs
 
@@ -77,13 +81,15 @@ jobs:
           set -euo pipefail
           git rm .github/workflows/devos-convergence-runtime-temp.yml
           git rm apps/metaengine-browser/scripts/patch-devos-convergence-runtime-temp.mjs
+          git rm apps/metaengine-browser/scripts/patch-devos-convergence-contracts-temp.mjs
           git add \
             apps/metaengine-browser/src/main.mjs \
             apps/metaengine-browser/src/native-supervisor-client-base.mjs \
             apps/metaengine-browser/src/development-plane-worker.cjs \
             apps/metaengine-browser/scripts/electron-builder-before-pack.cjs \
             apps/metaengine-browser/electron-builder.test.json \
-            apps/metaengine-browser/package.json
+            apps/metaengine-browser/package.json \
+            apps/metaengine-browser/test/browser-guardian-native-staging-contract.test.mjs
           git diff --cached --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
