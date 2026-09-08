@@ -32,10 +32,6 @@ function requireDigest(value, name) {
   return normalized;
 }
 
-function zeroAuthorityFlags() {
-  return Object.fromEntries('payload_persisted semantic_payload_persisted scheduler_authority dispatch_authority lease_authority reservation_authority effect_execution_authority automatic_retry_allowed ambiguous_retry_allowed authority_effect'.split(' ').map((field) => [field, false]));
-}
-
 export function createProviderNeutralFanoutPreparationCheckpointDelta(checkpointInput, options, baseSaved, nextSaved) {
   const { checkpoint: base } = validated(checkpointInput, options, baseSaved);
   const { checkpoint: next } = validated(checkpointInput, options, nextSaved);
@@ -66,7 +62,6 @@ export function createProviderNeutralFanoutPreparationCheckpointDelta(checkpoint
     next_preparation_checkpoint_digest: next.preparation_checkpoint_digest,
     added_entries: Object.freeze(added.sort((left, right) => left.fanout_index - right.fanout_index)),
     added_count: added.length,
-    ...zeroAuthorityFlags(),
   });
 }
 
