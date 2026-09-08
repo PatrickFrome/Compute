@@ -589,7 +589,6 @@ function tabForPlatform(platform) {
     try {
       const host = new URL(tab.url).hostname.toLowerCase();
       if (p === 'CHATGPT') return host === 'chatgpt.com' || host === 'www.chatgpt.com' || host === 'chat.openai.com';
-      if (p === 'GLM_ZAI') return host === 'chat.z.ai';
     } catch {}
     return false;
   };
