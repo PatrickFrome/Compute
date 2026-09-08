@@ -67,6 +67,7 @@ function toResume(cursor) {
 export class BrowserBrainObservationCursorLedger {
   #capacity;
   #cursors = new Map();
+  #revision = 0;
 
   constructor({ capacity = 64 } = {}) {
     const bounded = Number(capacity);
@@ -91,6 +92,12 @@ export class BrowserBrainObservationCursorLedger {
     if (snapshot.consumer_count !== snapshot.cursors.length) {
       throw new Error('browser_brain_cursor_snapshot_count_invalid');
     }
+    const revision = snapshot.revision === undefined
+      ? snapshot.consumer_count
+      : normalizeEpoch(snapshot.revision, 'browser_brain_cursor_snapshot_revision_invalid');
+    if (revision < snapshot.consumer_count) {
+      throw new Error('browser_brain_cursor_snapshot_revision_invalid');
+    }
 
     const ledger = new BrowserBrainObservationCursorLedger({ capacity: snapshot.capacity });
     for (let offset = 0; offset < snapshot.cursors.length; offset += MAX_BATCH) {
@@ -99,11 +106,14 @@ export class BrowserBrainObservationCursorLedger {
         throw new Error('browser_brain_cursor_snapshot_duplicate_invalid');
       }
     }
+    ledger.#revision = revision;
     return ledger;
   }
 
   checkpoint(input) {
-    return applyCheckpoint(this.#cursors, this.#capacity, input);
+    const result = applyCheckpoint(this.#cursors, this.#capacity, input);
+    if (result.disposition === 'APPLIED') this.#revision += 1;
+    return result;
   }
 
   checkpointBatch(inputs = []) {
@@ -113,6 +123,7 @@ export class BrowserBrainObservationCursorLedger {
     const staged = new Map(this.#cursors);
     const results = inputs.map((input) => applyCheckpoint(staged, this.#capacity, input));
     this.#cursors = staged;
+    this.#revision += results.filter((result) => result.disposition === 'APPLIED').length;
     return Object.freeze(results);
   }
 
@@ -143,11 +154,28 @@ export class BrowserBrainObservationCursorLedger {
     );
   }
 
+  resumeAllIfChanged(knownRevisionValue) {
+    const knownRevision = normalizeEpoch(knownRevisionValue, 'browser_brain_cursor_resume_revision_invalid');
+    if (knownRevision > this.#revision) {
+      throw new Error('browser_brain_cursor_resume_revision_ahead');
+    }
+    const changed = knownRevision !== this.#revision;
+    return Object.freeze({
+      schema: 'metaengine.browser-brain.observation-conditional-resume.v1',
+      changed,
+      revision: this.#revision,
+      resumes: changed ? this.resumeAll() : Object.freeze([]),
+      payload_persisted: false,
+      ...ZERO_AUTHORITY,
+    });
+  }
+
   snapshot() {
     const cursors = [...this.#cursors.values()].sort((a, b) => a.consumer.localeCompare(b.consumer));
     return Object.freeze({
       schema: 'metaengine.browser-brain.observation-cursor-ledger.v1',
       capacity: this.#capacity,
+      revision: this.#revision,
       consumer_count: cursors.length,
       cursors: Object.freeze(cursors),
       payload_persisted: false,
@@ -166,6 +194,7 @@ export function browserBrainObservationCursorContract() {
     max_full_capacity_resumes: MAX_CONSUMERS,
     max_snapshot_restore_consumers: MAX_CONSUMERS,
     monotonic_epoch: true,
+    monotonic_ledger_revision: true,
     duplicate_idempotent: true,
     collision_fail_closed: true,
     transactional_batch_checkpoint: true,
@@ -173,6 +202,8 @@ export function browserBrainObservationCursorContract() {
     chunked_full_capacity_snapshot_restore: true,
     bounded_batch_resume: true,
     bounded_full_capacity_resume: true,
+    revision_gated_conditional_resume: true,
+    unchanged_conditional_resume_is_empty: true,
     durable_checkpoint_only: true,
     payload_persisted: false,
     provider_neutral: true,
