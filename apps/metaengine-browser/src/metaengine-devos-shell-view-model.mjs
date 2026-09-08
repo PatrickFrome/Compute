@@ -4,6 +4,7 @@ export const METAENGINE_DEVOS_SHELL_VIEW_MODEL_SCHEMA = 'metaengine.devos.shell-
 
 const SESSION_GROUP_ORDER = Object.freeze(['NEEDS_ATTENTION', 'ACTIVE', 'BACKGROUND', 'COMPLETED', 'UNBOUND']);
 const SELECTED_SESSION_SURFACE_LIMIT = 256;
+const TIMELINE_ENTRY_LIMIT = 32;
 
 function zeroAuthorityContract() {
   return Object.freeze({
@@ -37,16 +38,50 @@ function freezeRow(row) {
   return Object.freeze({ ...row, ...zeroAuthorityContract() });
 }
 
+function timelinePayload(surface) {
+  const source = Array.isArray(surface?.timeline_entries) ? surface.timeline_entries.slice(0, TIMELINE_ENTRY_LIMIT) : [];
+  const rows = [];
+  for (const row of source) {
+    if (!hasZeroAuthorityContract(row)) return null;
+    rows.push(freezeRow({
+      task_id: text(row.task_id, 160),
+      title: text(row.title, 320) || text(row.task_id, 160) || 'Task',
+      status: text(row.status, 48) || 'UNKNOWN',
+      updated_at: text(row.updated_at, 80),
+      blocker: text(row.blocker, 320),
+    }));
+  }
+  return Object.freeze(rows);
+}
+
 function surfaceView(surface, surfaceId = null) {
   const id = surfaceId || text(surface?.surface_id, 240);
-  return freezeRow({
+  const type = text(surface?.type, 48) || 'UNKNOWN';
+  const base = {
     surface_id: id,
     session_id: text(surface?.session_id, 200),
-    type: text(surface?.type, 48) || 'UNKNOWN',
+    type,
     title: text(surface?.title, 300) || id,
     state: text(surface?.state, 48) || 'UNKNOWN',
     tab_id: text(surface?.tab_id, 200),
-  });
+    runtime_bound: type === 'BROWSER' && Boolean(text(surface?.tab_id, 200)),
+    presentation_only: type !== 'BROWSER',
+  };
+  if (type === 'ARTIFACT') {
+    base.artifact_id = text(surface?.artifact_id, 240);
+    base.artifact_ref = text(surface?.artifact_ref, 500);
+    base.immutable_reference = surface?.immutable_reference === true;
+  } else if (type === 'TIMELINE') {
+    const timeline = timelinePayload(surface);
+    if (!timeline) return null;
+    base.timeline_entries = timeline;
+    base.timeline_entry_count = Math.max(timeline.length, Number(surface?.timeline_entry_count || 0));
+  } else if (type === 'MEMORY') {
+    base.episode_count = Math.max(0, Number(surface?.episode_count || 0));
+    base.semantic_fact_count = Math.max(0, Number(surface?.semantic_fact_count || 0));
+    base.procedural_playbook_count = Math.max(0, Number(surface?.procedural_playbook_count || 0));
+  }
+  return freezeRow(base);
 }
 
 function invalidView(reason) {
@@ -95,6 +130,7 @@ function selectedLayout(devos, selectedSessionId) {
     selection_alignment: text(prefs.selection_alignment, 80) || 'UNKNOWN',
     requested_sidebar: text(active.requested_sidebar, 32) || 'EXPANDED',
     requested_inspector: text(active.requested_inspector, 32) || 'CLOSED',
+    requested_surface_layout: text(active.requested_surface_layout, 40) || 'AUTO',
     stored_surface_id: text(active.stored_surface_id, 240),
     stored_surface_is_focus_preference: active.stored_surface_is_focus_preference === true,
     stored_surface_is_selection_authority: false,
@@ -135,8 +171,6 @@ export function projectDevOSShellViewModel(devos, presentationFocusState = null)
     surfaces.set(surfaceId, source);
   }
 
-  // Canonical Browser selection remains part of the read model and is validated,
-  // but it is never used as presentation-focus authority.
   const canonicalSessionId = text(devos.selected.session_id, 200);
   const canonicalSurfaceId = text(devos.selected.surface_id, 240);
   const canonicalSession = canonicalSessionId ? sessions.get(canonicalSessionId) : null;
@@ -215,6 +249,7 @@ export function projectDevOSShellViewModel(devos, presentationFocusState = null)
     surface_ids: Object.freeze(Array.isArray(selectedSession.surface_ids) ? selectedSession.surface_ids.map((id) => text(id, 240)).filter(Boolean) : []),
   }) : null;
   const selectedSurfaceView = selectedSurface ? surfaceView(selectedSurface, selectedSurfaceId) : null;
+  if (selectedSurface && !selectedSurfaceView) return invalidView('SELECTED_SURFACE_PAYLOAD_INVALID');
 
   const selectedSessionSurfaces = [];
   let selectedSessionSurfaceCount = 0;
@@ -230,7 +265,11 @@ export function projectDevOSShellViewModel(devos, presentationFocusState = null)
       }
       seenSurfaceIds.add(surfaceId);
       selectedSessionSurfaceCount += 1;
-      if (selectedSessionSurfaces.length < SELECTED_SESSION_SURFACE_LIMIT) selectedSessionSurfaces.push(surfaceView(surface, surfaceId));
+      if (selectedSessionSurfaces.length < SELECTED_SESSION_SURFACE_LIMIT) {
+        const projected = surfaceView(surface, surfaceId);
+        if (!projected) return invalidView('SELECTED_SESSION_SURFACE_PAYLOAD_INVALID');
+        selectedSessionSurfaces.push(projected);
+      }
     }
     selectedSessionSurfacesTruncated = selectedSessionSurfaceCount > selectedSessionSurfaces.length;
   }
