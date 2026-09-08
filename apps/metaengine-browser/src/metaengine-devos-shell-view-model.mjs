@@ -3,6 +3,7 @@ import { reconcileDevOSPresentationFocus } from './metaengine-devos-presentation
 export const METAENGINE_DEVOS_SHELL_VIEW_MODEL_SCHEMA = 'metaengine.devos.shell-view-model.v1';
 
 const SESSION_GROUP_ORDER = Object.freeze(['NEEDS_ATTENTION', 'ACTIVE', 'BACKGROUND', 'COMPLETED', 'UNBOUND']);
+const SELECTED_SESSION_SURFACE_LIMIT = 256;
 
 function zeroAuthorityContract() {
   return Object.freeze({
@@ -36,6 +37,18 @@ function freezeRow(row) {
   return Object.freeze({ ...row, ...zeroAuthorityContract() });
 }
 
+function surfaceView(surface, surfaceId = null) {
+  const id = surfaceId || text(surface?.surface_id, 240);
+  return freezeRow({
+    surface_id: id,
+    session_id: text(surface?.session_id, 200),
+    type: text(surface?.type, 48) || 'UNKNOWN',
+    title: text(surface?.title, 300) || id,
+    state: text(surface?.state, 48) || 'UNKNOWN',
+    tab_id: text(surface?.tab_id, 200),
+  });
+}
+
 function invalidView(reason) {
   return Object.freeze({
     schema: METAENGINE_DEVOS_SHELL_VIEW_MODEL_SCHEMA,
@@ -47,6 +60,9 @@ function invalidView(reason) {
     now: Object.freeze([]),
     selected_session: null,
     selected_surface: null,
+    selected_session_surfaces: Object.freeze([]),
+    selected_session_surface_count: 0,
+    selected_session_surfaces_truncated: false,
     presentation_focus: null,
     layout_preferences: null,
     counts: Object.freeze({ sessions: 0, surfaces: 0, attention: 0, visible_groups: 0 }),
@@ -198,14 +214,26 @@ export function projectDevOSShellViewModel(devos, presentationFocusState = null)
     task_count: Math.max(0, Number(selectedSession.task_count || 0)),
     surface_ids: Object.freeze(Array.isArray(selectedSession.surface_ids) ? selectedSession.surface_ids.map((id) => text(id, 240)).filter(Boolean) : []),
   }) : null;
-  const selectedSurfaceView = selectedSurface ? freezeRow({
-    surface_id: selectedSurfaceId,
-    session_id: text(selectedSurface.session_id, 200),
-    type: text(selectedSurface.type, 48) || 'UNKNOWN',
-    title: text(selectedSurface.title, 300) || selectedSurfaceId,
-    state: text(selectedSurface.state, 48) || 'UNKNOWN',
-    tab_id: text(selectedSurface.tab_id, 200),
-  }) : null;
+  const selectedSurfaceView = selectedSurface ? surfaceView(selectedSurface, selectedSurfaceId) : null;
+
+  const selectedSessionSurfaces = [];
+  let selectedSessionSurfaceCount = 0;
+  let selectedSessionSurfacesTruncated = false;
+  if (selectedSession) {
+    if (!Array.isArray(selectedSession.surface_ids)) return invalidView('SELECTED_SESSION_SURFACE_MEMBERSHIP_INVALID');
+    const seenSurfaceIds = new Set();
+    for (const rawSurfaceId of selectedSession.surface_ids) {
+      const surfaceId = text(rawSurfaceId, 240);
+      const surface = surfaceId ? surfaces.get(surfaceId) : null;
+      if (!surfaceId || !surface || seenSurfaceIds.has(surfaceId) || text(surface.session_id, 200) !== selectedSessionId) {
+        return invalidView('SELECTED_SESSION_SURFACE_MEMBERSHIP_INVALID');
+      }
+      seenSurfaceIds.add(surfaceId);
+      selectedSessionSurfaceCount += 1;
+      if (selectedSessionSurfaces.length < SELECTED_SESSION_SURFACE_LIMIT) selectedSessionSurfaces.push(surfaceView(surface, surfaceId));
+    }
+    selectedSessionSurfacesTruncated = selectedSessionSurfaceCount > selectedSessionSurfaces.length;
+  }
 
   return Object.freeze({
     schema: METAENGINE_DEVOS_SHELL_VIEW_MODEL_SCHEMA,
@@ -218,6 +246,9 @@ export function projectDevOSShellViewModel(devos, presentationFocusState = null)
     now: Object.freeze(now),
     selected_session: selectedSessionView,
     selected_surface: selectedSurfaceView,
+    selected_session_surfaces: Object.freeze(selectedSessionSurfaces),
+    selected_session_surface_count: selectedSessionSurfaceCount,
+    selected_session_surfaces_truncated: selectedSessionSurfacesTruncated,
     presentation_focus: presentationFocus,
     layout_preferences: selectedLayout(devos, selectedSessionId),
     counts: Object.freeze({ sessions: sessions.size, surfaces: surfaces.size, attention: now.length, visible_groups: sessionGroups.filter((group) => group.count > 0).length }),
