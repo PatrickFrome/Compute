@@ -19,7 +19,9 @@ jobs:
         with:
           node-version: '24'
       - name: Apply exact dark workspace patch and repair stale proof contracts
-        run: node .github/scripts/dark-workspace-v2-repair.mjs
+        run: |
+          node .github/scripts/dark-workspace-v2-repair.mjs
+          node .github/scripts/dark-workspace-v2-finalize.mjs
       - name: Parse changed runtime and harness
         working-directory: apps/metaengine-browser
         run: |
@@ -34,7 +36,7 @@ jobs:
         working-directory: apps/metaengine-browser
         run: node --test test/browser-final-shell-ui.test.mjs test/browser-shell-accessibility-ui.test.mjs test/browser-chatgpt-fast-open.test.mjs test/browser-devos-layout-adaptation.test.mjs test/browser-devos-session-surface-ui.test.mjs test/browser-security-static-gate.test.mjs
       - name: Remove one-shot patch machinery
-        run: git rm .github/scripts/dark-workspace-v2-patch.mjs .github/scripts/dark-workspace-v2-runner.mjs .github/scripts/dark-workspace-v2-repair.mjs .github/workflows/dark-workspace-v2-patch-temp.yml
+        run: git rm .github/scripts/dark-workspace-v2-patch.mjs .github/scripts/dark-workspace-v2-runner.mjs .github/scripts/dark-workspace-v2-repair.mjs .github/scripts/dark-workspace-v2-finalize.mjs .github/workflows/dark-workspace-v2-patch-temp.yml
       - name: Commit exact patch
         shell: bash
         run: |
