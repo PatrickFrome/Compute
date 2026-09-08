@@ -1,6 +1,7 @@
 import { BrowserRealtimeSemanticPlane } from './browser-realtime-semantic-plane.mjs';
 import { BrowserCognitiveDeltaBus } from './browser-cognitive-delta-bus.mjs';
 import { BrowserBrainContinuousCoordinator } from './browser-brain-continuous-coordinator.mjs';
+import { createBrowserBrainDurablePersistenceForApp } from './browser-brain-durable-persistence.mjs';
 import { BrowserMainEventLoopPressure } from './browser-main-event-loop-pressure.mjs';
 import { resolveTabIdForWebContents } from './browser-webcontents-tab-index.mjs';
 
@@ -115,6 +116,8 @@ export class BrowserRealtimeProcessPlane {
   #onChange;
   #timer = null;
   #started = false;
+  #stopPromise = null;
+  #stopSettled = true;
   #sequence = 0;
   #observedAt = null;
   #processes = [];
@@ -128,6 +131,7 @@ export class BrowserRealtimeProcessPlane {
   #semanticLastError = null;
   #cognitiveBus;
   #brain;
+  #brainPersistence = null;
   #brainLastError = null;
   #mainLoopPressure;
 
@@ -164,10 +168,34 @@ export class BrowserRealtimeProcessPlane {
     if (typeof this.#mainLoopPressure.sample !== 'function' || typeof this.#mainLoopPressure.snapshot !== 'function') {
       throw new Error('browser_realtime_process_plane_loop_pressure_invalid');
     }
-    this.#brain = brainCoordinator || new BrowserBrainContinuousCoordinator({
-      clock,
-      getExtraPressureSample: () => this.#mainLoopPressure.snapshot(),
-    });
+
+    if (brainCoordinator) {
+      this.#brain = brainCoordinator;
+    } else {
+      let checkpoint = null;
+      try {
+        this.#brainPersistence = createBrowserBrainDurablePersistenceForApp(app);
+        checkpoint = this.#brainPersistence.loadSync();
+      } catch (error) {
+        this.#brainLastError = `DURABLE_PERSISTENCE_INIT:${text(error?.message || error, 240)}`;
+        this.#brainPersistence = null;
+      }
+      const options = {
+        clock,
+        getExtraPressureSample: () => this.#mainLoopPressure.snapshot(),
+        collaborationSaveState: this.#brainPersistence ? (value) => this.#brainPersistence.save(value) : null,
+        collaborationCheckpoint: checkpoint,
+      };
+      try {
+        this.#brain = new BrowserBrainContinuousCoordinator(options);
+      } catch (error) {
+        this.#brainLastError = `DURABLE_CHECKPOINT_REJECTED:${text(error?.message || error, 240)}`;
+        this.#brain = new BrowserBrainContinuousCoordinator({
+          ...options,
+          collaborationCheckpoint: null,
+        });
+      }
+    }
     if (
       typeof this.#brain.observeEdge !== 'function'
       || typeof this.#brain.snapshot !== 'function'
@@ -196,7 +224,7 @@ export class BrowserRealtimeProcessPlane {
   #dispatchBrainEdge(event) {
     try {
       const result = this.#brain.observeEdge(event, { process_snapshot: this.#brainProcessSnapshot() });
-      this.#brainLastError = null;
+      if (!this.#brainLastError?.startsWith('DURABLE_')) this.#brainLastError = null;
       return result;
     } catch (error) {
       this.#brainLastError = text(error?.message || error, 300);
@@ -349,8 +377,43 @@ export class BrowserRealtimeProcessPlane {
     return this.snapshot();
   }
 
+  #beginStop() {
+    const wasStarted = this.#started;
+    if (wasStarted) {
+      this.#started = false;
+      if (this.#timer) clearInterval(this.#timer);
+      this.#timer = null;
+      try { this.#semanticPlane?.stop?.(); } catch {}
+      this.#semanticPlane = null;
+      this.#semanticStartPromise = null;
+      for (const [name, handler] of this.#appListeners) {
+        try { this.#app.off?.(name, handler); } catch {}
+      }
+      this.#appListeners = [];
+      for (const id of [...this.#wired.keys()]) this.#unwireContents(id);
+    }
+    if (!this.#stopPromise && wasStarted) {
+      this.#stopSettled = false;
+      let flushResult;
+      try {
+        flushResult = this.#brain.flushCollaborationPersistence?.();
+      } catch (error) {
+        flushResult = Promise.reject(error);
+      }
+      const pending = Promise.resolve(flushResult).then(() => true);
+      this.#stopPromise = pending;
+      void pending.finally(() => {
+        if (this.#stopPromise === pending) this.#stopSettled = true;
+      }).catch(() => {});
+    }
+    return Object.freeze({ stopped: wasStarted, promise: this.#stopPromise });
+  }
+
   start() {
     if (this.#started) return this.snapshot();
+    if (this.#stopPromise && !this.#stopSettled) throw new Error('browser_realtime_process_plane_stop_in_flight');
+    this.#stopPromise = null;
+    this.#stopSettled = true;
     this.#started = true;
     const bindApp = (name, handler) => {
       this.#app.on(name, handler);
@@ -388,18 +451,17 @@ export class BrowserRealtimeProcessPlane {
   }
 
   stop() {
-    if (!this.#started) return false;
-    this.#started = false;
-    if (this.#timer) clearInterval(this.#timer);
-    this.#timer = null;
-    try { this.#semanticPlane?.stop?.(); } catch {}
-    this.#semanticPlane = null;
-    this.#semanticStartPromise = null;
-    for (const [name, handler] of this.#appListeners) {
-      try { this.#app.off?.(name, handler); } catch {}
-    }
-    this.#appListeners = [];
-    for (const id of [...this.#wired.keys()]) this.#unwireContents(id);
+    const result = this.#beginStop();
+    if (!result.stopped) return false;
+    void result.promise?.catch(() => {});
+    return true;
+  }
+
+  async stopAndWait() {
+    if (!this.#started && !this.#stopPromise) return false;
+    const result = this.#beginStop();
+    if (!result.promise) return result.stopped;
+    await result.promise;
     return true;
   }
 
@@ -446,10 +508,13 @@ export class BrowserRealtimeProcessPlane {
   brainSnapshot() {
     return Object.freeze({
       ...this.#brain.snapshot(),
+      durable_persistence: this.#brainPersistence?.snapshot() || null,
       process_plane_integrated: true,
       process_plane_last_error: this.#brainLastError,
       same_event_stream: true,
       second_process_observer: false,
+      shutdown_persistence_flush_awaitable: true,
+      shutdown_persistence_flush_in_flight: this.#stopPromise != null && !this.#stopSettled,
       authority_effect: false,
     });
   }
@@ -520,6 +585,7 @@ export class BrowserRealtimeProcessPlane {
       cognitive_delta_source: 'EXISTING_PROCESS_AND_SEMANTIC_EVENTS',
       browser_brain_source: 'SAME_PROCESS_AND_SEMANTIC_EVENT_STREAM',
       browser_brain_second_process_observer: false,
+      browser_brain_durable_persistence: this.#brainPersistence != null,
       event_loop_pressure_source: 'NODE_ELU_PLUS_EXISTING_PROCESS_SAMPLER_DRIFT',
       event_loop_pressure_dedicated_timer: false,
       cognitive_delta_second_scheduler: false,

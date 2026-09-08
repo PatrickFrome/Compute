@@ -14,9 +14,27 @@ const RELEASES_PAGE_SIZE = 30;
 const MAX_RELEASE_PAGES = 10;
 const LIST_RETRY_ATTEMPTS = 2;
 const LIST_RETRY_DELAYS_MS = [1000, 3000];
+const MAX_GITHUB_API_TOKEN_LENGTH = 4096;
 
 function clip(value, max = 300) { return String(value ?? '').slice(0, max); }
 function sha256Bytes(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
+
+function githubApiHeaders(githubApiToken) {
+  const headers = {
+    accept: 'application/vnd.github+json',
+    'x-github-api-version': '2022-11-28',
+  };
+  if (githubApiToken == null || githubApiToken === '') return headers;
+  if (
+    typeof githubApiToken !== 'string'
+    || githubApiToken.length > MAX_GITHUB_API_TOKEN_LENGTH
+    || githubApiToken.trim() !== githubApiToken
+    || /[\r\n]/.test(githubApiToken)
+  ) {
+    throw new Error('trusted_release_github_api_token_invalid');
+  }
+  return { ...headers, authorization: `Bearer ${githubApiToken}` };
+}
 
 export function parseMetaengineDevVersion(value) {
   const text = String(value || '').trim();
@@ -106,15 +124,12 @@ function decodeUtf8Strict(bytes, label) {
   }
 }
 
-async function fetchJson(fetchImpl, url, maxBytes, label) {
+async function fetchJson(fetchImpl, url, maxBytes, label, githubApiToken) {
   const response = await fetchImpl(url, {
     method: 'GET',
     cache: 'no-store',
     redirect: 'follow',
-    headers: {
-      accept: 'application/vnd.github+json',
-      'x-github-api-version': '2022-11-28',
-    },
+    headers: githubApiHeaders(githubApiToken),
   });
   const text = await readBoundedText(response, maxBytes, label);
   try { return JSON.parse(text); }
@@ -130,7 +145,7 @@ function sleep(ms, label) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchReleaseListPage(fetchImpl, page) {
+async function fetchReleaseListPage(fetchImpl, page, githubApiToken) {
   const url = page === 1
     ? `${API_ROOT}/releases?per_page=${RELEASES_PAGE_SIZE}`
     : `${API_ROOT}/releases?per_page=${RELEASES_PAGE_SIZE}&page=${page}`;
@@ -139,10 +154,7 @@ async function fetchReleaseListPage(fetchImpl, page) {
       method: 'GET',
       cache: 'no-store',
       redirect: 'follow',
-      headers: {
-        accept: 'application/vnd.github+json',
-        'x-github-api-version': '2022-11-28',
-      },
+      headers: githubApiHeaders(githubApiToken),
     });
     if (response && (response.status === 403 || response.status === 429)) {
       if (attempt < LIST_RETRY_ATTEMPTS) {
@@ -206,6 +218,7 @@ export function parseStrictDevYml(text) {
 export async function resolveTrustedMetaengineDevRelease({
   currentVersion,
   fetchImpl = globalThis.fetch,
+  githubApiToken = null,
 } = {}) {
   if (typeof fetchImpl !== 'function') throw new Error('trusted_release_fetch_required');
   const current = parseMetaengineDevVersion(currentVersion);
@@ -213,7 +226,7 @@ export async function resolveTrustedMetaengineDevRelease({
 
   let selected = null;
   for (let page = 1; page <= MAX_RELEASE_PAGES; page += 1) {
-    const releases = await fetchReleaseListPage(fetchImpl, page);
+    const releases = await fetchReleaseListPage(fetchImpl, page, githubApiToken);
     if (!Array.isArray(releases)) throw new Error('trusted_release_list_invalid');
     const candidate = pickNewestRelease(releases, current.version);
     if (candidate) { selected = candidate; break; }
@@ -248,7 +261,7 @@ export async function resolveTrustedMetaengineDevRelease({
     guardian_configurator: currentGuardianProfile ? byName.get(names.guardian_configurator) : null,
   };
 
-  const tagRef = await fetchJson(fetchImpl, `${API_ROOT}/git/ref/tags/${encodeURIComponent(tag)}`, MAX_SMALL_ASSET_BYTES, 'trusted_release_tag_ref');
+  const tagRef = await fetchJson(fetchImpl, `${API_ROOT}/git/ref/tags/${encodeURIComponent(tag)}`, MAX_SMALL_ASSET_BYTES, 'trusted_release_tag_ref', githubApiToken);
   const gitSha = String(tagRef?.object?.sha || '').toLowerCase();
   if (tagRef?.object?.type !== 'commit' || !/^[0-9a-f]{40}$/.test(gitSha)) throw new Error('trusted_release_tag_target_invalid');
 

@@ -93,7 +93,7 @@ test('positive send confirmation consumes exactly one queued wake', async () => 
   assert.equal(h.keepalive.snapshot().queued_wakes.length, 1);
 });
 
-test('rollover stays deferred until the current authoritative supervisor is explicitly released', async () => {
+test('non-environmental rollover stays deferred until the current authoritative supervisor is released', async () => {
   const h = harness();
   await h.keepalive.init();
   await h.keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
@@ -114,22 +114,41 @@ test('rollover stays deferred until the current authoritative supervisor is expl
   assert.equal(h.keepalive.snapshot().state, 'WAITING');
 });
 
-test('max-cycle rollover is deferred rather than automatically authorizing a replacement chat', async () => {
+test('fixed cycle budgets are ignored and useful supervisor work remains uncapped', async () => {
   const h = harness();
   await h.keepalive.init();
   await h.keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
-  for (let i = 0; i < 4; i += 1) {
+  for (let i = 0; i < 12; i += 1) {
     await h.keepalive.enqueueWake('CI_TERMINAL', { key: `ci-${i}` });
     const wake = await h.keepalive.prepareNextWake();
+    assert.equal(wake.ok, true);
     await h.keepalive.confirmWakeSent(wake.pending.wake_id);
     await h.keepalive.markCycleComplete();
     h.advance(31_000);
   }
-  await h.keepalive.enqueueWake('WATCHDOG_DEADLINE', { key: 'after-budget' });
-  const blocked = await h.keepalive.prepareNextWake();
-  assert.equal(blocked.ok, false);
-  assert.equal(blocked.rollover_deferred, true);
-  assert.equal(h.keepalive.snapshot().state, 'ROLLOVER_DEFERRED');
+  assert.equal(h.keepalive.snapshot().cycle_seq, 12);
+  assert.equal(h.keepalive.snapshot().state, 'WAITING');
+  assert.equal(h.keepalive.snapshot().work_cycle_limit, null);
+  assert.equal(h.keepalive.snapshot().automatic_rollover_cycle_limit_enabled, false);
+});
+
+test('page-observed conversation limit only defers rollover; trusted machine release proceeds without a user', async () => {
+  const h = harness();
+  await h.keepalive.init();
+  await h.keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+  await h.keepalive.requestRollover('CHATGPT_CONVERSATION_LIMIT_HINT');
+  let snapshot = h.keepalive.snapshot();
+  assert.equal(snapshot.state, 'ROLLOVER_DEFERRED');
+  assert.equal(snapshot.rollover_release_at, null);
+  await assert.rejects(() => h.keepalive.beginRolloverAttempt(), /keepalive_rollover_not_released/);
+
+  await h.keepalive.approveRollover('TRUSTED_CONTINUOUS_SERVICE');
+  snapshot = h.keepalive.snapshot();
+  assert.equal(snapshot.state, 'ROLLOVER_REQUIRED');
+  assert.ok(snapshot.rollover_release_at);
+  const attempt = await h.keepalive.beginRolloverAttempt();
+  assert.match(attempt.attempt_id, /^rollover_/);
+  assert.equal(snapshot.external_confirmation_required_for_continuation, false);
 });
 
 test('wake and rollover messages carry continuity but not worker instructions', () => {

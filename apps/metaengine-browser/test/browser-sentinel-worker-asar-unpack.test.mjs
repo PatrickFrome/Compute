@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { resolveSentinelWorkerScript } from '../src/host-resilience-runtime.mjs';
 
 const WORKER_CLOSURE = [
@@ -53,7 +54,7 @@ test('sentinel worker closure is loadable by vanilla node from an app.asar.unpac
   // a placeholder asar file proves we are NOT reading from the archive
   await fs.writeFile(path.join(root, 'resources', 'app.asar'), 'not-a-real-archive');
   for (const file of WORKER_CLOSURE) {
-    await fs.copyFile(new URL(`../src/${file}`, import.meta.url).pathname, path.join(unpackedSrc, file));
+    await fs.copyFile(fileURLToPath(new URL(`../src/${file}`, import.meta.url)), path.join(unpackedSrc, file));
   }
 
   const statePath = path.join(root, 'sentinel-state.json');
@@ -149,7 +150,13 @@ test('worker recovery telemetry records the exact child exit code for instantly-
     alive.add(child.pid);
     children.push(child);
     nextPid += 1;
-    setImmediate(() => child.emit('spawn'));
+    setImmediate(() => {
+      child.emit('spawn');
+      if (child.pid === 555001) {
+        alive.delete(child.pid);
+        child.emit('exit', 7, null);
+      }
+    });
     return child;
   };
   const sentinel = new BrowserSentinelHost({
@@ -167,14 +174,8 @@ test('worker recovery telemetry records the exact child exit code for instantly-
   alive.delete(555000);
   children[0].emit('exit', 1, null);
 
-  // the replacement candidate acks spawn, then also dies with a distinct exit code
-  setTimeout(() => {
-    if (children[1]) {
-      alive.delete(children[1].pid);
-      children[1].emit('exit', 7, null);
-    }
-  }, 100);
-
+  // the replacement candidate acknowledges spawn and then dies in the same event turn,
+  // so the fixture is ordered by child lifecycle rather than hosted-runner wall-clock timing.
   const recovery = await sentinel.recoverWorkerIfProvenAbsent({ timeoutMs: 600 });
   assert.equal(recovery.state, 'CANDIDATE_CONFIRMED_ABSENT');
   assert.equal(recovery.automatic_retry_allowed, true);

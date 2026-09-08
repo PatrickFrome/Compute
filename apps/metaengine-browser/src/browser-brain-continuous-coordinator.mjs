@@ -2,6 +2,8 @@ import { BrowserBrainRealtimeObservationBridge } from './browser-brain-realtime-
 import { BrowserBrainAdaptiveFanoutRuntime } from './browser-brain-adaptive-fanout-runtime.mjs';
 import { BrowserBrainRealtimePressureBridge } from './browser-brain-realtime-pressure-bridge.mjs';
 import { BrowserControlPressureGovernor } from './browser-control-pressure-governor.mjs';
+import { BrowserBrainCognitionFabric } from './browser-brain-cognition-fabric.mjs';
+import { BrowserBrainCollaborationRuntimeV2 } from './browser-brain-collaboration-runtime-v2.mjs';
 import { applyNativeSupervisorCommandPressureBudget } from './native-supervisor-command-lanes.mjs';
 
 export const BROWSER_BRAIN_CONTINUOUS_COORDINATOR_SCHEMA = 'metaengine.browser-brain.continuous-coordinator.v1';
@@ -16,6 +18,8 @@ const PRESSURE_RELEVANT_EVENTS = new Set([
   'RENDER_PROCESS_GONE',
   'CHILD_PROCESS_GONE',
 ]);
+const COVERAGE_RELEVANT_EVENTS = PRESSURE_RELEVANT_EVENTS;
+const CANONICAL_RESYNC_EVENTS = new Set(['METRICS_SAMPLE', 'PROCESS_CENSUS_REFRESHED']);
 
 function validProcessSnapshot(snapshot) {
   return snapshot?.schema === 'metaengine.browser.realtime-process-plane.v1';
@@ -36,6 +40,15 @@ function coverage(snapshot = {}) {
     lifecycle_event_driven: snapshot.event_driven_lifecycle === true,
     resource_sampling_is_authority: false,
     authority_effect: false,
+  });
+}
+
+function producerSequences(snapshot = {}) {
+  const process = Number(snapshot?.sequence);
+  const semantic = Number(snapshot?.semantic_plane?.sequence);
+  return Object.freeze({
+    process_sequence: Number.isSafeInteger(process) && process >= 0 ? process : null,
+    semantic_sequence: Number.isSafeInteger(semantic) && semantic >= 0 ? semantic : null,
   });
 }
 
@@ -82,34 +95,31 @@ function sameCommandBudget(a, b) {
 /**
  * Zero-scheduler composition layer for the always-on Browser Brain.
  *
- * The caller owns the existing process/semantic event source and the existing
- * command scheduler. This class only connects those proven surfaces:
- *   realtime process/semantic edge -> exact binding + bounded memory
- *   resource/lifecycle edge         -> adaptive pressure state
- *   pressure state                  -> numeric admission register consumed by the
- *                                      ONE existing command-lane scheduler
- *   already leased mutation batch   -> independent BrowserCell fan-out, but only
- *                                      when an explicit test/runtime adapter is bound
- *
- * It intentionally owns no timer, DB lease, hidden queue, retry loop, or
- * physical Browser implementation. Observation runs on every edge. Pressure is
- * deliberately not recomputed for each semantic/CDP burst because those events do
- * not change the resource/liveness sample; this keeps the hottest cognition path
- * allocation-light while crash/unresponsive/process changes remain immediate.
+ * Observation, cognition and collaboration are advisory. This coordinator owns no
+ * DB lease, hidden queue, effect retry loop or second scheduler. Collaboration
+ * records let agents keep useful work moving continuously without a user-prompt
+ * boundary, while all physical effects remain fenced by the existing authority
+ * path outside this information plane.
  */
 export class BrowserBrainContinuousCoordinator {
   #observation;
   #adaptive;
   #pressure;
+  #cognition;
+  #collaboration;
   #lastProcessSnapshot = null;
   #lastCoverage = coverage();
   #lastPressureResult = null;
   #lastAppliedCommandBudget = null;
+  #lastCognitionResult = null;
   #edgeCount = 0;
   #pressureEvaluationCount = 0;
   #pressureReuseCount = 0;
+  #coverageEvaluationCount = 0;
+  #coverageReuseCount = 0;
   #commandBudgetApplyCount = 0;
   #reconcileCount = 0;
+  #cognitionResyncCount = 0;
   #lastEvent = null;
 
   constructor({
@@ -119,11 +129,25 @@ export class BrowserBrainContinuousCoordinator {
     adaptiveRuntime = null,
     pressureBridge = null,
     pressureGovernor = null,
+    cognitionFabric = null,
+    collaborationFabric = null,
+    collaborationLoadState = null,
+    collaborationSaveState = null,
+    collaborationCheckpoint = null,
     getExtraPressureSample = null,
     clock = () => Date.now(),
     hardBatchLimit = 128,
   } = {}) {
     this.#observation = observationBridge || new BrowserBrainRealtimeObservationBridge();
+    this.#cognition = cognitionFabric || new BrowserBrainCognitionFabric({ clock });
+    this.#collaboration = collaborationFabric || new BrowserBrainCollaborationRuntimeV2({
+      clock,
+      loadState: collaborationLoadState,
+      saveState: collaborationSaveState,
+    });
+    if (collaborationCheckpoint != null && typeof this.#collaboration.restore === 'function') {
+      this.#collaboration.restore(collaborationCheckpoint);
+    }
     const canBindAdaptive = adaptiveRuntime != null
       || (scheduler != null && typeof executeRuntimeFenced === 'function');
     this.#adaptive = adaptiveRuntime || (canBindAdaptive
@@ -153,6 +177,24 @@ export class BrowserBrainContinuousCoordinator {
     if (typeof this.#pressure.observe !== 'function') {
       throw new Error('browser_brain_continuous_pressure_bridge_invalid');
     }
+    if (
+      typeof this.#cognition.observeEdge !== 'function'
+      || typeof this.#cognition.reconcileProducerSequences !== 'function'
+      || typeof this.#cognition.snapshot !== 'function'
+    ) {
+      throw new Error('browser_brain_continuous_cognition_fabric_invalid');
+    }
+    if (
+      typeof this.#collaboration.recordTask !== 'function'
+      || typeof this.#collaboration.decideAutonomousContinuation !== 'function'
+      || typeof this.#collaboration.snapshot !== 'function'
+    ) {
+      throw new Error('browser_brain_continuous_collaboration_fabric_invalid');
+    }
+  }
+
+  async initCollaboration() {
+    return typeof this.#collaboration.init === 'function' ? this.#collaboration.init() : this.#collaboration.snapshot();
   }
 
   #evaluatePressure(processSnapshot) {
@@ -166,13 +208,26 @@ export class BrowserBrainContinuousCoordinator {
     return this.#lastPressureResult;
   }
 
+  #evaluateCoverage(processSnapshot) {
+    this.#lastCoverage = coverage(processSnapshot);
+    this.#coverageEvaluationCount += 1;
+    return this.#lastCoverage;
+  }
+
+  #resyncCognition(processSnapshot) {
+    const result = this.#cognition.reconcileProducerSequences(producerSequences(processSnapshot));
+    if (result.length > 0) this.#cognitionResyncCount += 1;
+    return result;
+  }
+
   reconcile(processSnapshot, { tabs = [], cell_by_tab = null } = {}) {
     if (!validProcessSnapshot(processSnapshot)) {
       throw new Error('browser_brain_continuous_process_snapshot_invalid');
     }
     this.#lastProcessSnapshot = processSnapshot;
-    this.#lastCoverage = coverage(processSnapshot);
+    this.#evaluateCoverage(processSnapshot);
     this.#observation.reconcile(processSnapshot, { tabs, cell_by_tab });
+    this.#resyncCognition(processSnapshot);
     this.#evaluatePressure(processSnapshot);
     this.#reconcileCount += 1;
     return this.snapshot();
@@ -183,14 +238,26 @@ export class BrowserBrainContinuousCoordinator {
     if (!validProcessSnapshot(snapshot)) {
       throw new Error('browser_brain_continuous_process_snapshot_required');
     }
+    const type = String(event?.type || 'UNKNOWN').toUpperCase();
+    const hadProcessSnapshot = this.#lastProcessSnapshot != null;
     this.#lastProcessSnapshot = snapshot;
-    this.#lastCoverage = coverage(snapshot);
+    const coverageEvaluated = !hadProcessSnapshot || COVERAGE_RELEVANT_EVENTS.has(type);
+    if (coverageEvaluated) this.#evaluateCoverage(snapshot);
+    else this.#coverageReuseCount += 1;
+    this.#lastCognitionResult = this.#cognition.observeEdge(event);
     const observed = this.#observation.observe(event, {
       process_snapshot: snapshot,
       tabs,
       cell_by_tab,
     });
-    const type = String(event?.type || 'UNKNOWN').toUpperCase();
+    if (this.#lastCognitionResult?.resync_required === true && CANONICAL_RESYNC_EVENTS.has(type)) {
+      this.#resyncCognition(snapshot);
+      this.#lastCognitionResult = Object.freeze({
+        ...this.#lastCognitionResult,
+        canonical_resync_applied: true,
+        authority_effect: false,
+      });
+    }
     const pressureEvaluated = this.#lastPressureResult == null || PRESSURE_RELEVANT_EVENTS.has(type);
     const pressure = pressureEvaluated
       ? this.#evaluatePressure(snapshot)
@@ -206,12 +273,16 @@ export class BrowserBrainContinuousCoordinator {
     });
     return Object.freeze({
       schema: 'metaengine.browser-brain.continuous-edge-result.v1',
+      cognition: this.#lastCognitionResult,
       observation: observed,
       pressure,
       pressure_evaluated: pressureEvaluated,
+      coverage_evaluated: coverageEvaluated,
       command_lane_pressure_budget: this.#lastAppliedCommandBudget,
       coverage: this.#lastCoverage,
       mutation_runtime_bound: this.#adaptive != null,
+      continuous_autonomous_work: true,
+      external_confirmation_gate: false,
       scheduler_authority: false,
       command_leasing: false,
       authority_effect: false,
@@ -243,29 +314,176 @@ export class BrowserBrainContinuousCoordinator {
     return this.#observation.checkpoint();
   }
 
+  rememberAdvisoryPlan(plan) {
+    return this.#cognition.rememberPlan(plan);
+  }
+
+  resolveAdvisoryPlan(query) {
+    return this.#cognition.resolvePlan(query);
+  }
+
+  observeAgent(agent) {
+    const observed = this.#cognition.observeAgent(agent);
+    if (typeof this.#collaboration.observeRoutingAgent === 'function') {
+      this.#collaboration.observeRoutingAgent({ ...agent, generation: agent?.generation ?? 1 });
+    }
+    return observed;
+  }
+
+  routeAgents(query) {
+    return this.#cognition.routeAgents(query);
+  }
+
+  routeAgentsV2(query) {
+    return typeof this.#collaboration.routeAgentsV2 === 'function'
+      ? this.#collaboration.routeAgentsV2(query)
+      : this.#cognition.routeAgents(query);
+  }
+
+  recordEvidence(evidence) {
+    return this.#cognition.recordEvidence(evidence);
+  }
+
+  cognitionSnapshot() {
+    return this.#cognition.snapshot();
+  }
+
+  recordCollaborationTask(task) {
+    return this.#collaboration.recordTask(task);
+  }
+
+  advanceCollaborationTask(progress) {
+    return this.#collaboration.advanceTask(progress);
+  }
+
+  recordAgentMessage(message) {
+    return this.#collaboration.recordMessage(message);
+  }
+
+  recordCollaborationArtifact(artifact) {
+    return this.#collaboration.recordArtifact(artifact);
+  }
+
+  claimCollaborationWork(claim) {
+    return this.#collaboration.claimWork(claim);
+  }
+
+  releaseCollaborationClaim(claimId, reason) {
+    return this.#collaboration.releaseClaim(claimId, reason);
+  }
+
+  recordHandoffCapsule(handoff) {
+    return this.#collaboration.recordHandoff(handoff);
+  }
+
+  collaborationTaskLedger(contextId) {
+    return this.#collaboration.taskLedger(contextId);
+  }
+
+  collaborationProgressLedger(contextId) {
+    return this.#collaboration.progressLedger(contextId);
+  }
+
+  autonomousContinuation(query) {
+    return this.#collaboration.decideAutonomousContinuation(query);
+  }
+
+  collaborationCheckpoint() {
+    return typeof this.#collaboration.checkpoint === 'function' ? this.#collaboration.checkpoint() : null;
+  }
+
+  restoreCollaborationCheckpoint(checkpoint) {
+    if (typeof this.#collaboration.restore !== 'function') throw new Error('browser_brain_collaboration_restore_unavailable');
+    return this.#collaboration.restore(checkpoint);
+  }
+
+  flushCollaborationPersistence() {
+    return typeof this.#collaboration.flush === 'function'
+      ? this.#collaboration.flush()
+      : Promise.resolve(Object.freeze({ ok: true, authority_effect: false }));
+  }
+
+  retrieveCollaborationMemory(query) {
+    if (typeof this.#collaboration.retrieveMemory !== 'function') throw new Error('browser_brain_collaboration_memory_unavailable');
+    return this.#collaboration.retrieveMemory(query);
+  }
+
+  collaborationSemanticFacts() {
+    return typeof this.#collaboration.semanticFacts === 'function' ? this.#collaboration.semanticFacts() : Object.freeze([]);
+  }
+
+  collaborationPlaybooks() {
+    return typeof this.#collaboration.playbooks === 'function' ? this.#collaboration.playbooks() : Object.freeze([]);
+  }
+
+  planCollaborationFanout(query) {
+    if (typeof this.#collaboration.planFanout !== 'function') throw new Error('browser_brain_collaboration_fanout_unavailable');
+    return this.#collaboration.planFanout(query);
+  }
+
+  a2aTask(input) {
+    if (typeof this.#collaboration.a2aTask !== 'function') throw new Error('browser_brain_a2a_adapter_unavailable');
+    return this.#collaboration.a2aTask(input);
+  }
+
+  a2aIngressMessage(message, options) {
+    if (typeof this.#collaboration.a2aIngressMessage !== 'function') throw new Error('browser_brain_a2a_adapter_unavailable');
+    return this.#collaboration.a2aIngressMessage(message, options);
+  }
+
+  a2aIngressTask(task) {
+    if (typeof this.#collaboration.a2aIngressTask !== 'function') throw new Error('browser_brain_a2a_adapter_unavailable');
+    return this.#collaboration.a2aIngressTask(task);
+  }
+
+  collaborationSnapshot() {
+    return this.#collaboration.snapshot();
+  }
+
   snapshot() {
+    const collaboration = this.#collaboration.snapshot();
     return Object.freeze({
       schema: BROWSER_BRAIN_CONTINUOUS_COORDINATOR_SCHEMA,
       edge_count: this.#edgeCount,
       reconcile_count: this.#reconcileCount,
       pressure_evaluation_count: this.#pressureEvaluationCount,
       pressure_reuse_count: this.#pressureReuseCount,
+      coverage_evaluation_count: this.#coverageEvaluationCount,
+      coverage_reuse_count: this.#coverageReuseCount,
       command_budget_apply_count: this.#commandBudgetApplyCount,
+      cognition_resync_count: this.#cognitionResyncCount,
       semantic_edges_reuse_pressure: true,
+      semantic_edges_reuse_coverage: true,
       last_event: this.#lastEvent,
       coverage: this.#lastCoverage,
+      cognition_fabric: this.#cognition.snapshot(),
+      collaboration_fabric: collaboration,
       observation: this.#observation.snapshot(),
       adaptive_fanout: this.#adaptive?.snapshot?.() || unboundAdaptiveSnapshot(),
       pressure: this.#pressure.snapshot(),
       pressure_budget: this.pressureBudget(),
       command_lane_pressure_budget: this.#lastAppliedCommandBudget,
       command_lane_pressure_register_bound: this.#lastAppliedCommandBudget != null,
-      hot_path: 'REALTIME_EDGE_TO_MEMORY_AND_PRESSURE_TO_EXISTING_COMMAND_LANES',
+      hot_path: 'REALTIME_EDGE_TO_CAUSAL_COGNITION_MEMORY_AND_PRESSURE_TO_EXISTING_COMMAND_LANES',
       mutation_path: this.#adaptive
         ? 'DB_LEASED_BATCH_TO_RUNTIME_FENCED_INDEPENDENT_BROWSER_CELLS'
         : 'EXISTING_NATIVE_SUPERVISOR_COMMAND_LANES_ONLY',
+      cognition_path: 'REAL_PRODUCER_SEQUENCE_TO_BOUNDED_ADVISORY_FABRIC',
+      collaboration_path: 'TYPED_CAUSAL_MESSAGES_TO_DURABLE_EPISODIC_MEMORY_ROUTING_REPLAN_AND_AUTONOMOUS_CONTINUATION',
       mutation_runtime_bound: this.#adaptive != null,
       exact_tab_binding_required_for_mutation: true,
+      semantic_plan_revalidation_required: true,
+      page_model_data_grants_authority: false,
+      continuous_autonomous_work: collaboration.continuous_autonomous_work === true,
+      durable_collaboration_memory: collaboration.journal?.hash_verified_checkpoint === true,
+      episodic_collaboration_memory: collaboration.episodic_memory?.immutable_provenance === true,
+      routing_v2: collaboration.routing_v2_enabled === true,
+      adaptive_sparse_fanout: collaboration.adaptive_sparse_fanout === true,
+      a2a_boundary_only: collaboration.a2a_boundary_only === true,
+      external_confirmation_gate: false,
+      external_prompt_required_for_continuation: false,
+      idle_wait_allowed: false,
+      work_cycle_limit: null,
       full_electron_process_visibility: true,
       os_global_process_visibility: false,
       bounded_memory: true,

@@ -94,7 +94,11 @@ export function buildNativeEffectBinding({
     target_id: common.target_id,
     observed_at: common.observed_at,
   });
-  const useV2 = requestedSchema === NATIVE_EFFECT_BINDING_SCHEMA_V2 || (requestedSchema == null && runtime != null);
+  // Explicit runtime identity is a request for the v2 fence, not an optional
+  // hint. Never silently downgrade to v1 when that exact observation cannot be
+  // recovered (expired, cleared, wrong process/target/time, or otherwise stale).
+  if (observationId != null && !runtime) throw new Error('native_effect_binding_runtime_observation_missing');
+  const useV2 = requestedSchema === NATIVE_EFFECT_BINDING_SCHEMA_V2 || runtime != null;
   if (useV2 && !runtime) throw new Error('native_effect_binding_runtime_observation_missing');
 
   const binding = {

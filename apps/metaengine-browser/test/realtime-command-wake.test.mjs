@@ -74,9 +74,36 @@ test('broadcast received after subscription remains observable while caller perf
   pending.close();
 });
 
+test('subscription acknowledgement timeout resolves both waits so wait-batch can perform durable fallback', async () => {
+  const socket = new FakeSocket();
+  let timerCallback = null;
+  const pending = openRealtimeCommandWake({
+    createSocket: () => socket,
+    topics: ['client-topic', 'all-topic'],
+    accessToken: 'service-token',
+    timeoutMs: 5000,
+    setTimer: (fn) => { timerCallback = fn; return { unref() {} }; },
+    clearTimer: () => {},
+  });
+  socket.open();
+  ack(socket, 'client-topic', '1');
+  assert.equal(socket.sent.length, 2);
+  assert.equal(typeof timerCallback, 'function');
+  timerCallback();
+
+  const subscribed = await pending.subscribed;
+  const wake = await pending.wake;
+  assert.equal(subscribed.ok, false);
+  assert.equal(subscribed.reason, 'SUBSCRIBE_TIMEOUT');
+  assert.equal(subscribed.joined_topic_count, 1);
+  assert.equal(wake.reason, 'TIMEOUT');
+  assert.equal(wake.broadcast_received, false);
+  assert.equal(wake.authority_effect, false);
+  pending.close();
+});
+
 test('private-channel join rejection fails immediately instead of burning the held wait budget', async () => {
   const socket = new FakeSocket();
-  let timerFired = false;
   const pending = openRealtimeCommandWake({
     createSocket: () => socket,
     topics: ['client-topic', 'all-topic'],
@@ -94,7 +121,6 @@ test('private-channel join rejection fails immediately instead of burning the he
   assert.equal(wake.reason, 'JOIN_REJECTED');
   assert.equal(wake.broadcast_received, false);
   assert.equal(wake.authority_effect, false);
-  assert.equal(timerFired, false);
   pending.close();
 });
 

@@ -10,9 +10,33 @@ test('merges independent realtime source sequences into one monotonic local epoc
   assert.equal(clock.observe('command-wake', 1).epoch, 4);
   const snapshot = clock.snapshot();
   assert.equal(snapshot.epoch, 4);
-  assert.equal(snapshot.source_count, 4);
+  assert.equal(clock.currentEpoch(), 4);
+  assert.equal(clock.requiresResync(), false);
   assert.equal(snapshot.authority_effect, false);
   assert.equal(snapshot.scheduler_authority, false);
+});
+
+test('first observation may baseline a producer already in flight without synthetic replay', () => {
+  const clock = new BrowserBrainStreamClock();
+  const initial = clock.observe('semantic', 83);
+  assert.equal(initial.accepted, true);
+  assert.equal(initial.disposition, 'BASELINED');
+  assert.equal(initial.source.sequence, 83);
+  assert.equal(initial.synthetic_replay, false);
+  assert.equal(clock.snapshot().gap_requires_resync, false);
+  const next = clock.observe('semantic', 84);
+  assert.equal(next.disposition, 'APPLIED');
+  assert.equal(next.epoch, 2);
+});
+
+test('explicit canonical baseline establishes current producer sequence once', () => {
+  const clock = new BrowserBrainStreamClock();
+  const baseline = clock.baseline('process', 500);
+  assert.equal(baseline.disposition, 'BASELINED');
+  assert.equal(baseline.initial_observation, false);
+  assert.equal(baseline.synthetic_replay, false);
+  assert.throws(() => clock.baseline('process', 500), /baseline_already_initialized/);
+  assert.equal(clock.observe('process', 501).disposition, 'APPLIED');
 });
 
 test('duplicate delivery is idempotent and never advances the local epoch', () => {
@@ -34,12 +58,52 @@ test('sequence gap fails closed and requires canonical resync without synthetic 
   assert.equal(gap.source.sequence, 1);
   assert.equal(gap.source.gap_from, 2);
   assert.equal(gap.source.gap_to, 3);
+  assert.equal(gap.source.resync_minimum_sequence, 4);
   assert.equal(clock.snapshot().gap_requires_resync, true);
+
+  const stale = clock.resync('semantic:tab_a', 1);
+  assert.equal(stale.accepted, false);
+  assert.equal(stale.disposition, 'RESYNC_BELOW_REQUIRED_FLOOR');
+  assert.equal(stale.required_sequence, 4);
+  assert.equal(clock.requiresResync(), true);
 
   const recovered = clock.resync('semantic:tab_a', 4);
   assert.equal(recovered.disposition, 'RESYNCED');
   assert.equal(recovered.source.sequence, 4);
+  assert.equal(recovered.synthetic_replay, false);
   assert.equal(clock.snapshot().gap_requires_resync, false);
+});
+
+test('ordinary contiguous delivery cannot clear a previously latched gap', () => {
+  const clock = new BrowserBrainStreamClock();
+  clock.observe('semantic', 1);
+  clock.observe('semantic', 4);
+  const late = clock.observe('semantic', 2);
+  assert.equal(late.accepted, false);
+  assert.equal(late.disposition, 'RESYNC_REQUIRED');
+  assert.equal(late.source.sequence, 1);
+  assert.equal(late.source.resync_required, true);
+  assert.equal(clock.requiresResync(), true);
+  assert.equal(clock.currentEpoch(), 1);
+  assert.equal(clock.snapshot().ordinary_delivery_clears_resync, false);
+  clock.resync('semantic', 4);
+  assert.equal(clock.observe('semantic', 5).disposition, 'APPLIED');
+});
+
+test('regression latch also remains fail closed until explicit canonical resync at trusted floor', () => {
+  const clock = new BrowserBrainStreamClock();
+  clock.observe('cdp', 10);
+  const regression = clock.observe('cdp', 9);
+  assert.equal(regression.disposition, 'REGRESSION');
+  assert.equal(regression.source.resync_minimum_sequence, 10);
+  const tooLow = clock.resync('cdp', 9);
+  assert.equal(tooLow.disposition, 'RESYNC_BELOW_REQUIRED_FLOOR');
+  const next = clock.observe('cdp', 11);
+  assert.equal(next.accepted, false);
+  assert.equal(next.disposition, 'RESYNC_REQUIRED');
+  assert.equal(clock.snapshot().resync_required_source_count, 1);
+  clock.resync('cdp', 11);
+  assert.equal(clock.requiresResync(), false);
 });
 
 test('regression is rejected and cannot roll a source clock backward', () => {
@@ -68,5 +132,7 @@ test('clock exposes no timer, scheduler, lease, execution or retry authority', (
   assert.equal(snapshot.execution_authority, false);
   assert.equal(snapshot.automatic_retry_allowed, false);
   assert.equal(snapshot.dedicated_timer, false);
+  assert.equal(snapshot.synthetic_replay_allowed, false);
+  assert.equal(snapshot.canonical_resync_must_reach_high_water, true);
   assert.equal(snapshot.authority_effect, false);
 });

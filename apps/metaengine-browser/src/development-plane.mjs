@@ -7,6 +7,7 @@ export const DEVELOPMENT_PLANE_CAPABILITIES = Object.freeze([
   'CAPABILITIES',
   'PROCESS_METRICS',
   'REPO_HEAD_READ',
+  'DEVOS_REPO_READ_MODEL',
   'CANDIDATE_CAPSULE_CREATE',
   'CANDIDATE_CAPSULE_VERIFY',
   'VERIFICATION_SANDBOX_PLAN_CREATE',
@@ -50,6 +51,9 @@ export class DevelopmentPlane {
   #restartTimer = null;
   #restartAttempt = 0;
   #stopRequested = true;
+  #transcript = [];
+  #transcriptTotal = 0;
+  #lastResults = new Map();
 
   constructor({
     spawnWorker,
@@ -92,6 +96,10 @@ export class DevelopmentPlane {
       advisory_evidence_network_dispatch: false,
       advisory_evidence_browser_authority: false,
       advisory_evidence_promotion_authority: false,
+      devos_repo_read_model: clone(this.#lastResults.get('DEVOS_REPO_READ_MODEL') || null),
+      transcript: Object.freeze(this.#transcript.map((row) => Object.freeze({ ...row }))),
+      transcript_total_count: this.#transcriptTotal,
+      last_results: Object.freeze(Object.fromEntries([...this.#lastResults.entries()].map(([key, value]) => [key, clone(value)]))),
       direct_promote_current: false,
       arbitrary_eval: false,
       page_command_authority: false,
@@ -106,6 +114,21 @@ export class DevelopmentPlane {
       cooperative_shutdown: true,
       authority_effect: false,
     });
+  }
+
+  #appendTranscript(capability, state, summary = null) {
+    this.#transcriptTotal += 1;
+    this.#transcript.push(Object.freeze({ seq: this.#transcriptTotal, at: new Date(this.#clock()).toISOString(), capability: String(capability || 'UNKNOWN'), state: String(state || 'UNKNOWN'), summary: summary == null ? null : String(summary).slice(0, 800), authority_effect: false }));
+    if (this.#transcript.length > 64) this.#transcript.splice(0, this.#transcript.length - 64);
+  }
+
+  #retainResult(capability, result) {
+    let retained = null;
+    if (capability === 'DEVOS_REPO_READ_MODEL' || capability === 'CANDIDATE_CAPSULE_VERIFY' || capability === 'VERIFICATION_SANDBOX_PLAN_VERIFY' || capability === 'ADVISORY_EVIDENCE_VERIFY') retained = clone(result);
+    if (capability === 'CANDIDATE_CAPSULE_CREATE' && result && typeof result === 'object') retained = { schema: result.schema, candidate_id: result.candidate_id, source: clone(result.source), components: clone(result.components), verification_plan: clone(result.verification_plan), authority_effect: false };
+    if (retained) this.#lastResults.set(capability, retained);
+    const summary = capability === 'DEVOS_REPO_READ_MODEL' ? `${Number(result?.code_file_count || 0)} source files` : (result?.candidate_id || result?.evidence_id || result?.schema || 'success');
+    this.#appendTranscript(capability, 'SUCCESS', summary);
   }
 
   #clearRestartTimer() {
@@ -186,12 +209,14 @@ export class DevelopmentPlane {
       throw new Error('development_plane_payload_denied');
     }
     const requestId = `req_${String(this.#uuid()).replace(/[^a-z0-9-]/gi, '').toLowerCase()}`;
+    this.#appendTranscript(cap, 'REQUESTED');
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(requestId);
         reject(new Error('development_plane_request_timeout'));
       }, this.#timeoutMs);
       this.#pending.set(requestId, {
+        capability: cap,
         resolve: (value) => { clearTimeout(timer); resolve(clone(value)); },
         reject: (error) => { clearTimeout(timer); reject(error); },
       });
@@ -306,8 +331,13 @@ export class DevelopmentPlane {
     const pending = this.#pending.get(message.request_id);
     if (!pending) return;
     this.#pending.delete(message.request_id);
-    if (message.ok === true) pending.resolve(message.result);
-    else pending.reject(new Error(`development_plane_remote_error:${String(message.error || 'UNKNOWN')}`));
+    if (message.ok === true) {
+      this.#retainResult(pending.capability, message.result);
+      pending.resolve(message.result);
+    } else {
+      this.#appendTranscript(pending.capability, 'ERROR', String(message.error || 'UNKNOWN'));
+      pending.reject(new Error(`development_plane_remote_error:${String(message.error || 'UNKNOWN')}`));
+    }
   }
 
   #onExit(child, code) {

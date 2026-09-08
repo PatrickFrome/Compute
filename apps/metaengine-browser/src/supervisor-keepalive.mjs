@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-export const SUPERVISOR_KEEPALIVE_VERSION = '1.3.1';
+export const SUPERVISOR_KEEPALIVE_VERSION = '1.3.3';
 export const SUPERVISOR_ID = 'METAENGINE_SUPERVISOR';
 export const KEEPALIVE_STATES = Object.freeze([
   'ACTIVE','WAITING','WAKE_PENDING','WAKE_AMBIGUOUS',
@@ -151,14 +151,15 @@ export function buildSupervisorRolloverMessage({ previousUrl, supervisorEpoch, r
 export class SupervisorKeepalive {
   #load; #save; #clock; #uuid; #state; #minWakeIntervalMs; #maxCyclesPerEpoch;
 
-  constructor({ loadState, saveState, clock = () => Date.now(), uuid = () => crypto.randomUUID(), minWakeIntervalMs = 60000, maxCyclesPerEpoch = 48 } = {}) {
+  constructor({ loadState, saveState, clock = () => Date.now(), uuid = () => crypto.randomUUID(), minWakeIntervalMs = 60000, maxCyclesPerEpoch = null } = {}) {
     if (typeof loadState !== 'function' || typeof saveState !== 'function') throw new Error('keepalive_persistence_required');
     this.#load = loadState;
     this.#save = saveState;
     this.#clock = clock;
     this.#uuid = uuid;
     this.#minWakeIntervalMs = Math.max(30000, Number(minWakeIntervalMs) || 60000);
-    this.#maxCyclesPerEpoch = Math.max(4, Number(maxCyclesPerEpoch) || 48);
+    void maxCyclesPerEpoch;
+    this.#maxCyclesPerEpoch = null;
     this.#state = freshState();
   }
 
@@ -189,7 +190,14 @@ export class SupervisorKeepalive {
     return this.snapshot();
   }
 
-  snapshot() { return Object.freeze(clone(this.#state)); }
+  snapshot() {
+    return Object.freeze({
+      ...clone(this.#state),
+      work_cycle_limit: this.#maxCyclesPerEpoch,
+      automatic_rollover_cycle_limit_enabled: false,
+      external_confirmation_required_for_continuation: false,
+    });
+  }
   activeWake() { return clone(this.#state.active_wake); }
 
   async bindConversation({ url, tab_id = null } = {}) {
@@ -260,15 +268,18 @@ export class SupervisorKeepalive {
   nextQueuedWake() { return clone(this.#state.queued_wakes[0] || null); }
 
   async requestRollover(reason = 'CONVERSATION_LIMIT') {
+    const normalizedReason = String(reason || 'CONVERSATION_LIMIT').slice(0, 160);
     if (!this.#state.conversation_url) {
       this.#state.state = 'RECOVERING';
-      this.#state.rollover_reason = String(reason).slice(0, 160);
+      this.#state.rollover_reason = normalizedReason;
       this.#state.rollover_attempt = null;
       await this.#persist();
       return this.snapshot();
     }
+    // A rollover reason can originate from page/model observation. It may ask the
+    // trusted lifecycle to replan, but it never authorizes replacement actuation.
     this.#state.state = 'ROLLOVER_DEFERRED';
-    this.#state.rollover_reason = String(reason).slice(0, 160);
+    this.#state.rollover_reason = normalizedReason;
     this.#state.rollover_release_at = null;
     this.#state.rollover_attempt = null;
     await this.#persist();
@@ -369,17 +380,12 @@ export class SupervisorKeepalive {
   canWake() {
     if (this.#state.paused || ['WAKE_AMBIGUOUS','ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) return false;
     if (!this.#state.conversation_url || this.#state.pending_wake || this.#state.active_wake || this.#state.queued_wakes.length === 0) return false;
-    if (this.#state.cycle_seq >= this.#maxCyclesPerEpoch) return false;
     if (!this.#state.last_wake_at) return true;
     if (String(this.#state.queued_wakes[0]?.reason || '') === 'CONTINUE_DEVELOPMENT') return true;
     return this.#clock() - new Date(this.#state.last_wake_at).getTime() >= this.#minWakeIntervalMs;
   }
 
   async prepareNextWake() {
-    if (this.#state.cycle_seq >= this.#maxCyclesPerEpoch) {
-      await this.requestRollover('MAX_CYCLES_PER_EPOCH');
-      return { ok: false, rollover_deferred: true, authority_effect: false };
-    }
     if (!this.canWake()) return { ok: false, suppressed: true, state: this.#state.state, authority_effect: false };
     const queued = this.#state.queued_wakes[0];
     const wakeId = `wake_${String(this.#uuid()).replace(/[^a-z0-9-]/gi, '').toLowerCase()}`;
