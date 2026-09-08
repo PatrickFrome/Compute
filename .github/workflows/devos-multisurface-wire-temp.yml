@@ -8,6 +8,7 @@ on:
       - '.github/workflows/devos-multisurface-wire-temp.yml'
       - '.github/scripts/patch-devos-multisurface-temp.mjs'
       - '.github/scripts/patch-devos-multisurface-narrow-ipc-temp.mjs'
+      - '.github/scripts/patch-devos-source-finalize-temp.mjs'
 
 permissions:
   contents: write
@@ -15,7 +16,7 @@ permissions:
 jobs:
   wire:
     runs-on: ubuntu-24.04
-    timeout-minutes: 18
+    timeout-minutes: 24
     steps:
       - name: Checkout exact branch
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -35,20 +36,43 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Apply physical multi-surface wiring
+      - name: Apply complete multi-surface product wiring
         shell: bash
         run: |
           set -euo pipefail
           node .github/scripts/patch-devos-multisurface-temp.mjs
           node .github/scripts/patch-devos-multisurface-narrow-ipc-temp.mjs
+          node .github/scripts/patch-devos-source-finalize-temp.mjs
           git diff --check
           node --check apps/metaengine-browser/src/main.mjs
           node --check apps/metaengine-browser/src/metaengine-devos-surface-grid.mjs
           node --check apps/metaengine-browser/src/metaengine-devos-native-surfaces.mjs
+          node --check apps/metaengine-browser/src/metaengine-devos-source-surfaces.mjs
+          node --check apps/metaengine-browser/src/metaengine-devos-surface-registry.mjs
+          node --check apps/metaengine-browser/src/metaengine-devos-development-sources.mjs
+          node --check apps/metaengine-browser/src/devos-repo-read-model.cjs
+          node --check apps/metaengine-browser/src/development-plane.mjs
+          node --check apps/metaengine-browser/src/development-plane-worker.cjs
+          node --check apps/metaengine-browser/src/workspace-workbench-projection.mjs
           node --check apps/metaengine-browser/src/metaengine-devos-shell-view-model.mjs
           node --check apps/metaengine-browser/src/preload-shell.cjs
           node --check apps/metaengine-browser/ui/app.js
-          test "$(git diff --name-only | sort | tr '\n' ' ')" = "apps/metaengine-browser/src/main.mjs apps/metaengine-browser/src/metaengine-devos-shell-view-model.mjs apps/metaengine-browser/src/preload-shell.cjs apps/metaengine-browser/ui/app.js apps/metaengine-browser/ui/dark-workspace.css "
+          cat > /tmp/expected-product-diff <<'EOF'
+          apps/metaengine-browser/src/development-plane-worker.cjs
+          apps/metaengine-browser/src/development-plane.mjs
+          apps/metaengine-browser/src/main.mjs
+          apps/metaengine-browser/src/metaengine-devos-shell-view-model.mjs
+          apps/metaengine-browser/src/preload-shell.cjs
+          apps/metaengine-browser/src/workspace-workbench-projection.mjs
+          apps/metaengine-browser/test/browser-devos-presentation-activation-wire.test.mjs
+          apps/metaengine-browser/test/browser-devos-selected-session-surfaces.test.mjs
+          apps/metaengine-browser/test/shell-workspace-projection-wiring.test.mjs
+          apps/metaengine-browser/ui/app.js
+          apps/metaengine-browser/ui/dark-workspace.css
+          EOF
+          sed -i 's/^          //' /tmp/expected-product-diff
+          git diff --name-only | sort > /tmp/actual-product-diff
+          diff -u /tmp/expected-product-diff /tmp/actual-product-diff
 
       - name: Full Browser regression
         working-directory: apps/metaengine-browser
@@ -57,19 +81,72 @@ jobs:
           set -euo pipefail
           npm install --no-audit --no-fund
           npm run check
-          node --test test/browser-devos-surface-grid.test.mjs test/browser-devos-native-surfaces.test.mjs test/browser-devos-multisurface-session-layout.test.mjs test/browser-devos-session-layout.test.mjs test/browser-devos-shell-view-model.test.mjs test/browser-devos-session-surface-ui.test.mjs
+          node scripts/security-static-gate.mjs
+          node --test \
+            test/browser-devos-surface-grid.test.mjs \
+            test/browser-devos-native-surfaces.test.mjs \
+            test/browser-devos-source-backed-surfaces.test.mjs \
+            test/browser-devos-multisurface-session-layout.test.mjs \
+            test/browser-devos-session-layout.test.mjs \
+            test/browser-devos-shell-view-model.test.mjs \
+            test/browser-devos-session-surface-ui.test.mjs
           npm test
+
+      - name: Physical Electron multi-WebContentsView E2E
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          xvfb-run -a npx electron test/browser-devos-multisurface-physical.electron.mjs | tee /tmp/devos-physical-e2e.log
+          grep -F '"schema":"metaengine.devos.multisurface-physical-e2e.v1"' /tmp/devos-physical-e2e.log
+          grep -F '"ok":true' /tmp/devos-physical-e2e.log
+          grep -F '"simultaneously_attached_webcontents_views":3' /tmp/devos-physical-e2e.log
+          grep -F '"layout_persisted":true' /tmp/devos-physical-e2e.log
+          grep -F '"resize_reflow_proven":true' /tmp/devos-physical-e2e.log
 
       - name: Self-clean and push exact product commit
         shell: bash
         run: |
           set -euo pipefail
-          git rm .github/scripts/patch-devos-multisurface-temp.mjs .github/scripts/patch-devos-multisurface-narrow-ipc-temp.mjs .github/workflows/devos-multisurface-wire-temp.yml
+          git rm \
+            .github/scripts/patch-devos-multisurface-temp.mjs \
+            .github/scripts/patch-devos-multisurface-narrow-ipc-temp.mjs \
+            .github/scripts/patch-devos-source-finalize-temp.mjs \
+            .github/workflows/devos-multisurface-wire-temp.yml
           git diff --check
-          CHANGED="$( { git diff --name-only; git diff --cached --name-only; } | sort -u | tr '\n' ' ')"
-          test "$CHANGED" = ".github/scripts/patch-devos-multisurface-narrow-ipc-temp.mjs .github/scripts/patch-devos-multisurface-temp.mjs .github/workflows/devos-multisurface-wire-temp.yml apps/metaengine-browser/src/main.mjs apps/metaengine-browser/src/metaengine-devos-shell-view-model.mjs apps/metaengine-browser/src/preload-shell.cjs apps/metaengine-browser/ui/app.js apps/metaengine-browser/ui/dark-workspace.css "
+          cat > /tmp/allowed <<'EOF'
+          .github/scripts/patch-devos-multisurface-narrow-ipc-temp.mjs
+          .github/scripts/patch-devos-multisurface-temp.mjs
+          .github/scripts/patch-devos-source-finalize-temp.mjs
+          .github/workflows/devos-multisurface-wire-temp.yml
+          apps/metaengine-browser/src/development-plane-worker.cjs
+          apps/metaengine-browser/src/development-plane.mjs
+          apps/metaengine-browser/src/main.mjs
+          apps/metaengine-browser/src/metaengine-devos-shell-view-model.mjs
+          apps/metaengine-browser/src/preload-shell.cjs
+          apps/metaengine-browser/src/workspace-workbench-projection.mjs
+          apps/metaengine-browser/test/browser-devos-presentation-activation-wire.test.mjs
+          apps/metaengine-browser/test/browser-devos-selected-session-surfaces.test.mjs
+          apps/metaengine-browser/test/shell-workspace-projection-wiring.test.mjs
+          apps/metaengine-browser/ui/app.js
+          apps/metaengine-browser/ui/dark-workspace.css
+          EOF
+          sed -i 's/^          //' /tmp/allowed
+          { git diff --name-only; git diff --cached --name-only; } | sort -u > /tmp/changed
+          diff -u /tmp/allowed /tmp/changed
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add apps/metaengine-browser/src/main.mjs apps/metaengine-browser/src/metaengine-devos-shell-view-model.mjs apps/metaengine-browser/src/preload-shell.cjs apps/metaengine-browser/ui/app.js apps/metaengine-browser/ui/dark-workspace.css
-          git commit -m "feat(devos): wire physical multi-surface workbench"
+          git add \
+            apps/metaengine-browser/src/development-plane-worker.cjs \
+            apps/metaengine-browser/src/development-plane.mjs \
+            apps/metaengine-browser/src/main.mjs \
+            apps/metaengine-browser/src/metaengine-devos-shell-view-model.mjs \
+            apps/metaengine-browser/src/preload-shell.cjs \
+            apps/metaengine-browser/src/workspace-workbench-projection.mjs \
+            apps/metaengine-browser/test/browser-devos-presentation-activation-wire.test.mjs \
+            apps/metaengine-browser/test/browser-devos-selected-session-surfaces.test.mjs \
+            apps/metaengine-browser/test/shell-workspace-projection-wiring.test.mjs \
+            apps/metaengine-browser/ui/app.js \
+            apps/metaengine-browser/ui/dark-workspace.css
+          git commit -m "feat(devos): complete multi-surface workbench"
           git push origin HEAD:refs/heads/work/metaengine-devos-multisurface-v1
