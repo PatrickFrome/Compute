@@ -30,6 +30,43 @@ test('batch checkpoints independent realtime consumers with one transactional co
   assert.equal(ledger.resumeFrom('semantic-reader').from_epoch, 21);
 });
 
+test('batch resumes BrowserCell process semantic and fleet-memory consumers from one bounded read', () => {
+  const ledger = new BrowserBrainObservationCursorLedger({ capacity: 4 });
+  ledger.checkpointBatch([
+    { consumer: 'browsercell-reader', epoch: 17, observation_digest: digest('a') },
+    { consumer: 'process-reader', epoch: 12, observation_digest: digest('b') },
+    { consumer: 'semantic-reader', epoch: 21, observation_digest: digest('c') },
+    { consumer: 'fleet-memory', epoch: 8, observation_digest: digest('d') },
+  ]);
+  const resumes = ledger.resumeBatch([
+    'browsercell-reader',
+    'process-reader',
+    'semantic-reader',
+    'fleet-memory',
+    'new-reader',
+  ]);
+  assert.deepEqual(resumes.map((resume) => resume.from_epoch), [17, 12, 21, 8, 0]);
+  assert.deepEqual(resumes.map((resume) => resume.consumer), [
+    'browsercell-reader',
+    'process-reader',
+    'semantic-reader',
+    'fleet-memory',
+    'new-reader',
+  ]);
+  assert.equal(resumes.every((resume) => resume.payload_persisted === false), true);
+  assert.equal(resumes.every((resume) => resume.effect_execution_authority === false), true);
+});
+
+test('batch resume is identity for empty input and fails closed before oversized reads', () => {
+  const ledger = new BrowserBrainObservationCursorLedger();
+  assert.deepEqual(ledger.resumeBatch([]), []);
+  assert.throws(
+    () => ledger.resumeBatch(Array.from({ length: 129 }, (_, index) => `reader-${index}`)),
+    /resume_batch_invalid/,
+  );
+  assert.equal(ledger.snapshot().consumer_count, 0);
+});
+
 test('restores a durable multi-stream cursor snapshot with one transactional replay', () => {
   const source = new BrowserBrainObservationCursorLedger({ capacity: 4 });
   source.checkpointBatch([
@@ -142,7 +179,9 @@ test('contract is provider-neutral and zero-authority with no retry synthesis', 
   assert.equal(contract.monotonic_epoch, true);
   assert.equal(contract.transactional_batch_checkpoint, true);
   assert.equal(contract.transactional_snapshot_restore, true);
+  assert.equal(contract.bounded_batch_resume, true);
   assert.equal(contract.max_batch_checkpoints, 128);
+  assert.equal(contract.max_batch_resumes, 128);
   assert.equal(contract.durable_checkpoint_only, true);
   for (const key of [
     'payload_persisted',

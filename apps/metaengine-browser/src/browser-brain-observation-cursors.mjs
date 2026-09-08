@@ -120,6 +120,13 @@ export class BrowserBrainObservationCursorLedger {
     });
   }
 
+  resumeBatch(consumerValues = []) {
+    if (!Array.isArray(consumerValues) || consumerValues.length > MAX_BATCH) {
+      throw new TypeError('browser_brain_cursor_resume_batch_invalid');
+    }
+    return Object.freeze(consumerValues.map((consumer) => this.resumeFrom(consumer)));
+  }
+
   snapshot() {
     const cursors = [...this.#cursors.values()].sort((a, b) => a.consumer.localeCompare(b.consumer));
     return Object.freeze({
@@ -139,11 +146,13 @@ export function browserBrainObservationCursorContract() {
     schema: 'metaengine.browser-brain.observation-cursor-contract.v1',
     max_consumers: 256,
     max_batch_checkpoints: MAX_BATCH,
+    max_batch_resumes: MAX_BATCH,
     monotonic_epoch: true,
     duplicate_idempotent: true,
     collision_fail_closed: true,
     transactional_batch_checkpoint: true,
     transactional_snapshot_restore: true,
+    bounded_batch_resume: true,
     durable_checkpoint_only: true,
     payload_persisted: false,
     provider_neutral: true,
