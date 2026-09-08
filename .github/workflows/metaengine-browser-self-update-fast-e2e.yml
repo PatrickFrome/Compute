@@ -10,10 +10,12 @@ on:
     paths:
       - 'apps/metaengine-browser/**'
       - '.github/workflows/metaengine-browser-self-update-fast-e2e.yml'
+      - '.github/workflows/metaengine-browser-bootstrap-autostart-e2e.yml'
       - '.github/workflows/metaengine-browser-fast-autorelease.yml'
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 # Exact SHAs may verify concurrently. Only a duplicate/rerun of the same source SHA
@@ -150,3 +152,40 @@ jobs:
           path: apps/metaengine-browser/self-update-fast-evidence/
           if-no-files-found: error
           compression-level: 0
+
+  exact-bootstrap-autostart-gate:
+    needs:
+      - contract
+      - windows-published-n-to-one-build-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 48
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_SHA: ${{ github.sha }}
+    steps:
+      - name: Wait for exact bootstrap autostart physical success
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > bootstrap-run-id.txt
+          for attempt in $(seq 1 180); do
+            gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/workflows/metaengine-browser-bootstrap-autostart-e2e.yml/runs" \
+              -f head_sha="$EXPECTED_SHA" -f per_page=20 > bootstrap-runs.json
+            python3 - <<'PY'
+          import json, os, pathlib
+          sha=os.environ['EXPECTED_SHA']
+          rows=json.load(open('bootstrap-runs.json','r',encoding='utf-8')).get('workflow_runs',[])
+          rows=[r for r in rows if r.get('head_sha')==sha]
+          rows.sort(key=lambda r:(r.get('run_attempt',0),r.get('id',0)), reverse=True)
+          if rows:
+              r=rows[0]
+              print(f"bootstrap_autostart id={r.get('id')} status={r.get('status')} conclusion={r.get('conclusion')}")
+              if r.get('status')=='completed' and r.get('conclusion')=='success':
+                  pathlib.Path('bootstrap-run-id.txt').write_text(str(r['id']),encoding='utf-8')
+              elif r.get('status')=='completed' and r.get('conclusion') not in (None,'success'):
+                  raise SystemExit(f"exact_bootstrap_autostart_failed:{r.get('conclusion')}")
+          PY
+            if [ -s bootstrap-run-id.txt ]; then break; fi
+            sleep 15
+          done
+          test -s bootstrap-run-id.txt || { echo exact_bootstrap_autostart_success_missing >&2; exit 1; }
