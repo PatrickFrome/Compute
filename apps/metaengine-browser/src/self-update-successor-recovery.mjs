@@ -1,5 +1,5 @@
-export const SELF_UPDATE_SUCCESSOR_RECOVERY_VERSION = '1.6.0';
-export const SELF_UPDATE_RECOVERY_DIAGNOSTIC_VERSION = '1.0.0';
+export const SELF_UPDATE_SUCCESSOR_RECOVERY_VERSION = '1.7.0';
+export const SELF_UPDATE_RECOVERY_DIAGNOSTIC_VERSION = '1.1.0';
 
 const RECOVERY_SCHEMA = 'metaengine.self-update.recovery-diagnostic.v1';
 const TRANSACTION_SCHEMA = 'metaengine.self-update.transaction.v1';
@@ -7,6 +7,11 @@ let latestRecoveryDiagnostic = null;
 
 function clip(value, max = 240) {
   return value == null ? null : String(value).slice(0, max);
+}
+
+function normalizedGitSha(value) {
+  const sha = String(value || '').trim().toLowerCase();
+  return sha || null;
 }
 
 function exactUpdatedHandoff(updateHandoff) {
@@ -17,6 +22,15 @@ function exactUpdatedHandoff(updateHandoff) {
   return Boolean(version && String(updateHandoff?.successor_startup || ''));
 }
 
+function exactRecoveryTransaction(transaction, current) {
+  const expectedTransactionId = String(current?.transaction_id || '');
+  const observedTransactionId = String(transaction?.transaction_id || '');
+  if (!expectedTransactionId || observedTransactionId !== expectedTransactionId) return false;
+  const expectedGitSha = normalizedGitSha(current?.target_git_sha);
+  if (expectedGitSha && normalizedGitSha(transaction?.resolved_git_sha) !== expectedGitSha) return false;
+  return true;
+}
+
 function baseDiagnostic(inspection, state, overrides = {}) {
   return Object.freeze({
     schema: RECOVERY_SCHEMA,
@@ -25,6 +39,8 @@ function baseDiagnostic(inspection, state, overrides = {}) {
     recovery_active: state !== 'NO_TRANSACTION',
     startup_state: clip(inspection?.state, 80),
     transaction_state: clip(inspection?.transaction_state, 80),
+    transaction_id: clip(inspection?.transaction_id, 160),
+    target_git_sha: normalizedGitSha(inspection?.target_git_sha),
     current_version: clip(inspection?.current_version, 120),
     target_version: clip(inspection?.target_version, 120),
     reason: clip(inspection?.reason, 240),
@@ -47,6 +63,7 @@ export function buildSelfUpdateRecoveryDiagnostic(startupInspection = null) {
 
   const startupState = String(startupInspection.state || '');
   const transactionState = String(startupInspection.transaction_state || '');
+  const transactionId = String(startupInspection.transaction_id || '');
   const currentVersion = String(startupInspection.current_version || '');
   const targetVersion = String(startupInspection.target_version || '');
 
@@ -71,6 +88,7 @@ export function buildSelfUpdateRecoveryDiagnostic(startupInspection = null) {
   }
   if (startupState === 'TARGET_INSTALLED'
     && transactionState === 'SUCCESSOR_BOOTED'
+    && transactionId
     && currentVersion
     && targetVersion
     && currentVersion === targetVersion
@@ -100,6 +118,7 @@ export function recordSelfUpdateRecoveryQualificationResult(result = null) {
     && transaction?.qualified === true
     && transaction?.automatic_retry_allowed === false
     && transaction?.authority_effect === false
+    && exactRecoveryTransaction(transaction, current)
     && String(transaction?.target_version || '') === String(current.target_version || '')
     && String(current.current_version || '') === String(current.target_version || '');
   if (!exactQualified) return selfUpdateRecoveryDiagnosticSnapshot();
@@ -126,6 +145,7 @@ export function recordSelfUpdateRecoveryQuarantineResult(transaction = null) {
     && transaction?.qualified === false
     && transaction?.automatic_retry_allowed === false
     && transaction?.authority_effect === false
+    && exactRecoveryTransaction(transaction, current)
     && String(transaction?.target_version || '') === String(current.target_version || '')
     && String(current.current_version || '') === String(current.target_version || '');
   if (!exactQuarantine) return selfUpdateRecoveryDiagnosticSnapshot();
