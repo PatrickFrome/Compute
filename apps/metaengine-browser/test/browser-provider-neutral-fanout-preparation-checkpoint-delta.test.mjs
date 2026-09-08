@@ -1,47 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ProviderNeutralFanoutDurableCheckpoint } from '../src/browser-provider-neutral-fanout-durable-checkpoint.mjs';
-import { ProviderNeutralFanoutPreparationDurableCheckpoint } from '../src/browser-provider-neutral-fanout-preparation-durable-checkpoint.mjs';
-import { projectProviderNeutralFanoutPreparationShards } from '../src/browser-provider-neutral-fanout-preparation-shards.mjs';
 import {
   applyProviderNeutralFanoutPreparationCheckpointDelta,
   createProviderNeutralFanoutPreparationCheckpointDelta,
   providerNeutralFanoutPreparationCheckpointDeltaContract,
 } from '../src/browser-provider-neutral-fanout-preparation-checkpoint-delta.mjs';
-
-const actionId = 'fanout-preparation-delta-1';
-const actionDigest = 'a'.repeat(64);
-const options = Object.freeze({
-  issued_count: 0,
-  requested_count: 4,
-  max_parallel: 4,
-  target_binding_digests: ['1', '2', '3', '4'].map((value) => value.repeat(64)),
-  shard_count: 2,
-});
-
-function upstream() {
-  return new ProviderNeutralFanoutDurableCheckpoint({ actionId, actionDigest, expectedCount: 4 }).checkpoint();
-}
-
-function preparedInput(checkpoint, index, byte) {
-  const projection = projectProviderNeutralFanoutPreparationShards(checkpoint, options);
-  const found = projection.shards
-    .flatMap((shard) => shard.entries.map((entry) => ({ shard, entry })))
-    .find(({ entry }) => entry.fanout_index === index);
-  return {
-    fanout_index: index,
-    shard_index: found.shard.shard_index,
-    target_binding_digest: found.entry.target_binding_digest,
-    issuance_entry_digest: found.entry.entry_digest,
-    prepared_command_digest: byte.repeat(64),
-  };
-}
-
-function saved(checkpoint, entries = []) {
-  const state = new ProviderNeutralFanoutPreparationDurableCheckpoint(checkpoint, options);
-  for (const [index, byte] of entries) state.accept(preparedInput(checkpoint, index, byte));
-  return state.checkpoint();
-}
+import {
+  preparationOptions as options,
+  savedPreparationCheckpoint as saved,
+  upstreamPreparationCheckpoint as upstream,
+} from './helpers/browser-provider-neutral-fanout-preparation-fixture.mjs';
 
 test('persists only append-only preparation progress and replays to exact next digest', () => {
   const checkpoint = upstream();
