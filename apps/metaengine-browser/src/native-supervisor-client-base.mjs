@@ -9,6 +9,7 @@ import { NativeSupervisorCommandFastlane } from './native-supervisor-command-fas
 import { confirmSelfUpdateRestartSafety } from './self-update-restart-safety.mjs';
 import { persistPreInstallReceipt } from './self-update-handoff.mjs';
 import { reconcileRestoredGeneratingChats } from './self-update-chat-reconcile.mjs';
+import { loadNativeSupervisorControlState, persistNativeSupervisorControlState } from './native-supervisor-control-state.mjs';
 import {
   buildSelfUpdateSessionContinuity,
   clearSelfUpdateSessionContinuity,
@@ -130,6 +131,9 @@ export class NativeSupervisorClient {
   // and this helper is stopped so steady-state never has two competing lease loops.
   #commandFastlane = null;
   #legacyFastlaneBusy = false;
+  #controlStatePath = null;
+  #controlStateLoaded = false;
+  #controlStatePersistenceError = null;
 
   constructor({
     identity,
@@ -147,6 +151,7 @@ export class NativeSupervisorClient {
     maintenanceIntervalMs = DEFAULT_MAINTENANCE_INTERVAL_MS,
     commandFastlane = false,
     commandFastlaneIntervalMs = 750,
+    controlStatePath = null,
   }) {
     if (!identity) throw new Error('native_supervisor_identity_required');
     if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
@@ -163,6 +168,7 @@ export class NativeSupervisorClient {
     this.#maxBatch = Math.max(1, Math.min(64, Number(commandBatchSize) || 64));
     this.#maxTabMutations = Math.max(1, Math.min(16, Number(commandMutationConcurrency) || 8));
     this.#maintenanceIntervalMs = Math.max(1000, Math.min(60000, Number(maintenanceIntervalMs) || DEFAULT_MAINTENANCE_INTERVAL_MS));
+    this.#controlStatePath = controlStatePath ? String(controlStatePath) : null;
     this.#commandLane = new NativeSupervisorCommandLaneScheduler({
       readConcurrency: commandReadConcurrency,
       mutationConcurrency: commandMutationConcurrency,
@@ -247,6 +253,14 @@ export class NativeSupervisorClient {
       supervisor_mesh: this.#mesh?.snapshot() || null,
       self_update: this.#selfUpdate?.snapshot() || null,
       session_continuity: structuredClone(this.#continuityStatus),
+      control_state: {
+        schema: 'metaengine.native-supervisor.control-state-runtime.v1',
+        path_configured: Boolean(this.#controlStatePath),
+        loaded: this.#controlStateLoaded,
+        persistence_error: this.#controlStatePersistenceError,
+        quiescent: this.#supervisorMode === 'OFF' && this.#armed === false,
+        authority_effect: false,
+      },
       control_fast_lane: {
         schema: 'metaengine.native-supervisor.control-fast-lane.v1',
         transport: this.#batchTransport,
@@ -359,8 +373,34 @@ export class NativeSupervisorClient {
     return row;
   }
 
+  async #restoreControlState() {
+    if (this.#controlStateLoaded) return this.snapshot();
+    this.#controlStateLoaded = true;
+    if (!this.#controlStatePath) return this.snapshot();
+    const restored = await loadNativeSupervisorControlState(this.#controlStatePath);
+    if (restored) {
+      this.#supervisorMode = restored.supervisor_mode;
+      this.#armed = restored.supervisor_mode === 'OFF' ? false : restored.armed === true;
+      if (restored.recovered_fail_closed === true) this.#controlStatePersistenceError = restored.recovery_reason || 'CONTROL_STATE_RECOVERED_FAIL_CLOSED';
+    }
+    return this.snapshot();
+  }
+
+  async #persistControlState() {
+    if (!this.#controlStatePath) return null;
+    try {
+      const saved = await persistNativeSupervisorControlState(this.#controlStatePath, { supervisor_mode: this.#supervisorMode, armed: this.#armed });
+      this.#controlStatePersistenceError = null;
+      return saved;
+    } catch (error) {
+      this.#controlStatePersistenceError = `control_state_persistence:${clipError(error)}`;
+      throw error;
+    }
+  }
+
   async start() {
     if (this.#running) { this.#schedule(); return this.snapshot(); }
+    await this.#restoreControlState();
     this.#running = true;
     this.#startedAt = new Date().toISOString();
     this.#schedule();
@@ -398,8 +438,10 @@ export class NativeSupervisorClient {
       const next = String(mode).toUpperCase();
       if (!['OFF','MONITOR','CONTROL'].includes(next)) throw new Error('native_supervisor_mode_invalid');
       this.#supervisorMode = next;
+      if (next === 'OFF') this.#armed = false;
     }
-    if (armed !== undefined) this.#armed = armed === true;
+    if (armed !== undefined && this.#supervisorMode !== 'OFF') this.#armed = armed === true;
+    void this.#persistControlState().catch(() => {});
     return this.snapshot();
   }
 
@@ -481,6 +523,7 @@ export class NativeSupervisorClient {
   }
 
   #kickMaintenance() {
+    if (this.#supervisorMode === 'OFF' || this.#armed !== true) return this.#maintenancePromise;
     const now = Date.now();
     if (this.#maintenancePromise || now - this.#lastMaintenanceAtMs < this.#maintenanceIntervalMs) return this.#maintenancePromise;
     this.#lastMaintenanceAtMs = now;
@@ -575,12 +618,23 @@ export class NativeSupervisorClient {
   async #executeLocalOrRemote(command) {
     const action = String(command?.action || '');
     if (ROOT_POLICY_ACTIONS.has(action)) return this.#executeCommand(command);
-    if (action === 'ARM') { this.#armed = true; return { armed: true, supervisor_mode: this.#supervisorMode, authority_effect: true }; }
-    if (action === 'DISARM') { this.#armed = false; return { armed: false, supervisor_mode: this.#supervisorMode, authority_effect: true }; }
+    if (action === 'ARM') {
+      if (this.#supervisorMode === 'OFF') throw new Error('native_supervisor_off_requires_mode_change');
+      this.#armed = true;
+      await this.#persistControlState();
+      return { armed: true, supervisor_mode: this.#supervisorMode, authority_effect: true };
+    }
+    if (action === 'DISARM') {
+      this.#armed = false;
+      await this.#persistControlState();
+      return { armed: false, supervisor_mode: this.#supervisorMode, authority_effect: true };
+    }
     if (action === 'SET_SUPERVISOR_MODE') {
       const next = String(command?.payload?.mode || '').toUpperCase();
       if (!['OFF','MONITOR','CONTROL'].includes(next)) throw new Error('native_supervisor_mode_invalid');
       this.#supervisorMode = next;
+      if (next === 'OFF') this.#armed = false;
+      await this.#persistControlState();
       return { supervisor_mode: next, armed: this.#armed, authority_effect: true };
     }
     if (action === 'CONTROL_CAPABILITIES') return browserControlCapabilities();
