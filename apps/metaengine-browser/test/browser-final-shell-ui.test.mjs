@@ -34,7 +34,7 @@ test('shell exposes the exact active BrowserCell and keyboard-first command gram
 });
 
 test('all existing Brain coordination surfaces are first-class rather than CSS-hidden', () => {
-  assert.match(app, /AGENTIC_SECTIONS = Object\.freeze\(\['attention', 'activity', 'context', 'skills'\]\)/);
+  assert.match(app, /AGENTIC_SECTIONS = Object\.freeze\(\['attention', 'activity', 'context', 'sessions', 'skills'\]\)/);
   for (const section of ['attention', 'activity', 'skills']) {
     assert.match(style, new RegExp(`data-agentic-section="${section}"`));
   }
