@@ -3,6 +3,7 @@ export const METAENGINE_DEVOS_SESSION_LAYOUT_ENTRY_SCHEMA = 'metaengine.devos.se
 
 const SIDEBAR_MODES = new Set(['EXPANDED', 'COMPACT', 'HIDDEN']);
 const INSPECTOR_MODES = new Set(['OPEN', 'CLOSED']);
+const SURFACE_LAYOUT_MODES = new Set(['AUTO', 'SINGLE', 'SPLIT_VERTICAL', 'SPLIT_HORIZONTAL', 'TRIPLE_RIGHT', 'GRID_2X2']);
 const MAX_SESSION_LAYOUT_ENTRIES = 512;
 
 function zeroAuthorityContract() {
@@ -49,6 +50,12 @@ function normalizeInspector(value, fallback = 'CLOSED') {
   return out;
 }
 
+function normalizeSurfaceLayout(value, fallback = 'AUTO') {
+  const out = String(value || fallback).trim().toUpperCase();
+  if (!SURFACE_LAYOUT_MODES.has(out)) throw new Error('devos_session_layout_surface_layout_invalid');
+  return out;
+}
+
 function assertZeroAuthorityContract(source, name) {
   if (!source
     || source.projection_is_authority !== false
@@ -68,6 +75,7 @@ function freezeEntry(entry) {
     session_id: entry.session_id,
     requested_sidebar: entry.requested_sidebar,
     requested_inspector: entry.requested_inspector,
+    requested_surface_layout: entry.requested_surface_layout,
     active_surface_id: entry.active_surface_id,
     revision: entry.revision,
     updated_sequence: entry.updated_sequence,
@@ -80,6 +88,7 @@ function defaultEntry(sessionId, sequence) {
     session_id: sessionId,
     requested_sidebar: 'EXPANDED',
     requested_inspector: 'CLOSED',
+    requested_surface_layout: 'AUTO',
     active_surface_id: null,
     revision: 1,
     updated_sequence: sequence,
@@ -149,7 +158,8 @@ export class DevOSSessionLayoutRegistry {
     const current = this.#entries.get(id) || defaultEntry(id, this.#nextSequence());
     const nextSidebar = patch.sidebar == null ? current.requested_sidebar : normalizeSidebar(patch.sidebar, current.requested_sidebar);
     const nextInspector = patch.inspector == null ? current.requested_inspector : normalizeInspector(patch.inspector, current.requested_inspector);
-    if (nextSidebar === current.requested_sidebar && nextInspector === current.requested_inspector) {
+    const nextSurfaceLayout = patch.surface_layout == null ? current.requested_surface_layout : normalizeSurfaceLayout(patch.surface_layout, current.requested_surface_layout);
+    if (nextSidebar === current.requested_sidebar && nextInspector === current.requested_inspector && nextSurfaceLayout === current.requested_surface_layout) {
       this.#entries.set(id, current);
       this.#evictIfNeeded();
       return freezeEntry(current);
@@ -158,12 +168,17 @@ export class DevOSSessionLayoutRegistry {
       ...current,
       requested_sidebar: nextSidebar,
       requested_inspector: nextInspector,
+      requested_surface_layout: nextSurfaceLayout,
       revision: current.revision + 1,
       updated_sequence: this.#nextSequence(),
     };
     this.#entries.set(id, next);
     this.#evictIfNeeded();
     return freezeEntry(next);
+  }
+
+  setSurfaceLayout(sessionId, mode) {
+    return this.setRequested(sessionId, { surface_layout: mode });
   }
 
   setActiveSurface(sessionId, surfaceId = null) {
@@ -252,6 +267,7 @@ export class DevOSSessionLayoutRegistry {
         session_id: sessionId,
         requested_sidebar: normalizeSidebar(source.requested_sidebar),
         requested_inspector: normalizeInspector(source.requested_inspector),
+        requested_surface_layout: normalizeSurfaceLayout(source.requested_surface_layout, 'AUTO'),
         active_surface_id: source.active_surface_id == null ? null : boundedId(source.active_surface_id, 'surface_id', 240),
         revision,
         updated_sequence: updatedSequence,

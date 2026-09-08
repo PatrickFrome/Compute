@@ -13,6 +13,10 @@ const fleetProfile = document.getElementById('fleetProfile');
 const railGeometry = document.getElementById('railGeometry');
 const opsNav = document.getElementById('opsNav');
 const opsContent = document.getElementById('opsContent');
+const devosSurfaceGrid = document.createElement('div');
+devosSurfaceGrid.id = 'devosSurfaceGrid';
+devosSurfaceGrid.setAttribute('aria-label', 'DevOS Surface Grid');
+body.append(devosSurfaceGrid);
 
 const statusEls = Object.freeze({
   fleet: document.getElementById('fleetStatus'),
@@ -235,10 +239,33 @@ async function toggleOperations(force = null) {
 }
 
 function renderActive(next) {
+  const focusedView = devosShellView(next);
+  const focusedSurface = focusedView?.selected_surface || null;
+  const focusedSession = focusedView?.selected_session || null;
   const tab = selectedTab(next);
   const agent = tab ? fleetAgentForTab(next, tab.tab_id) : null;
   const actuation = tab ? exactActuationForTab(next, tab.tab_id) : null;
   const workspace = workspaceProjection(next).groups.find((group) => group.tab_id === tab?.tab_id) || null;
+  if (focusedSurface) {
+    activeKind.textContent = text(focusedSurface.type, 'S').slice(0, 1);
+    activeTitle.textContent = text(focusedSurface.title, focusedSurface.surface_id);
+    activeMeta.textContent = text(focusedSurface.type, 'SURFACE') + ' · DevOS Surface';
+    if (focusedSurface.type === 'BROWSER' && focusedSurface.tab_id) {
+      const focusedTab = (next?.tabs?.tabs || []).find((row) => String(row.tab_id) === String(focusedSurface.tab_id));
+      if (focusedTab && document.activeElement !== address) address.value = focusedTab.url || '';
+      routeKind.textContent = focusedTab?.kind === 'CHATGPT' ? 'CHAT' : 'WEB';
+      routeKind.classList.toggle('chat', focusedTab?.kind === 'CHATGPT');
+    } else {
+      routeKind.textContent = 'SURFACE';
+      routeKind.classList.remove('chat');
+    }
+    return;
+  }
+  if (focusedSession) {
+    activeKind.textContent = 'S';
+    activeTitle.textContent = text(focusedSession.title, focusedSession.session_id);
+    activeMeta.textContent = String(focusedSession.surface_ids?.length || 0) + ' surfaces · Session focus';
+  }
   if (!tab) {
     activeKind.textContent = '—';
     activeTitle.textContent = 'No active tab';
@@ -742,6 +769,7 @@ function render(next) {
   applyLayout(next);
   renderActive(next);
   renderContextRail(next);
+  renderDevOSSurfaceGrid(next);
   setSystemStatus(statusEls.fleet, fleetStatus(next));
   setSystemStatus(statusEls.supervisor, supervisorStatus(next));
   setSystemStatus(statusEls.update, updateStatus(next));
@@ -1091,10 +1119,97 @@ function devosSelectedSurfaceRows(next) {
       title: text(row.title, String(row.surface_id)),
       state: text(row.state, 'UNKNOWN'),
       tab_id: row.tab_id ? String(row.tab_id) : null,
+      runtime_bound: row.runtime_bound === true,
+      presentation_only: row.presentation_only === true,
+      artifact_id: row.artifact_id ? String(row.artifact_id) : null,
+      artifact_ref: row.artifact_ref ? String(row.artifact_ref) : null,
+      immutable_reference: row.immutable_reference === true,
+      timeline_entries: Array.isArray(row.timeline_entries) ? row.timeline_entries.slice(0, 32) : [],
+      timeline_entry_count: Math.max(0, Number(row.timeline_entry_count || 0)),
+      episode_count: Math.max(0, Number(row.episode_count || 0)),
+      semantic_fact_count: Math.max(0, Number(row.semantic_fact_count || 0)),
+      procedural_playbook_count: Math.max(0, Number(row.procedural_playbook_count || 0)),
+      source_backed: row.source_backed === true,
+      source: row.source ? String(row.source) : null,
+      source_ref: row.source_ref ? String(row.source_ref) : null,
+      source_sha256: row.source_sha256 ? String(row.source_sha256) : null,
+      code_text: typeof row.code_text === 'string' ? row.code_text.slice(0, 24576) : '',
+      terminal_entries: Array.isArray(row.terminal_entries) ? row.terminal_entries.slice(-48) : [],
+      diff_components: Array.isArray(row.diff_components) ? row.diff_components.slice(0, 64) : [],
+      test_receipts: Array.isArray(row.test_receipts) ? row.test_receipts.slice(-32) : [],
+      log_entries: Array.isArray(row.log_entries) ? row.log_entries.slice(-64) : [],
       authority_effect: false,
     }));
   }
   return Object.freeze(rows);
+}
+
+function validSurfaceGrid(next) {
+  const grid = next?.surface_grid;
+  if (!grid || grid.schema !== 'metaengine.devos.surface-grid.v1' || grid.authority_effect !== false
+    || grid.execution_authority !== false || grid.scheduler_authority !== false
+    || grid.renderer_dimensions_authoritative !== false || grid.browser_views_owned_by_main !== true
+    || !Array.isArray(grid.panes)) return null;
+  return grid;
+}
+
+function renderNativeSurfaceBody(surface) {
+  const bodyNode = el('div', 'devosSurfaceBody');
+  if (!surface) { bodyNode.append(el('span', 'surfaceEmpty', 'Surface payload unavailable')); return bodyNode; }
+  if (surface.type === 'TIMELINE') {
+    const list = el('div', 'surfaceTimeline');
+    for (const row of surface.timeline_entries || []) list.append(entityRow(text(row.title, row.task_id || 'Task'), text(row.status, 'UNKNOWN'), row.blocker ? [{ value: compact(row.blocker, 36), tone: 'warn' }] : []));
+    if (!list.childNodes.length) list.append(el('span', 'surfaceEmpty', 'No task timeline entries'));
+    bodyNode.append(list);
+  } else if (surface.type === 'ARTIFACT') {
+    bodyNode.append(kvRow('Reference', surface.artifact_ref || surface.artifact_id || 'UNKNOWN', surface.immutable_reference ? 'good' : 'neutral'));
+    bodyNode.append(kvRow('Mutation authority', 'NONE', 'good'));
+  } else if (surface.type === 'MEMORY') {
+    bodyNode.append(kvRow('Episodes', surface.episode_count, 'neutral'));
+    bodyNode.append(kvRow('Semantic facts', surface.semantic_fact_count, 'neutral'));
+    bodyNode.append(kvRow('Playbooks', surface.procedural_playbook_count, 'neutral'));
+  } else if (surface.type === 'CODE') {
+    bodyNode.append(kvRow('Source', surface.source_ref || surface.source || 'repository', 'good'));
+    const pre = el('pre', 'surfaceCode'); pre.textContent = surface.code_text || 'Source content unavailable'; bodyNode.append(pre);
+  } else if (surface.type === 'TERMINAL') {
+    const pre = el('pre', 'surfaceCode'); pre.textContent = (surface.terminal_entries || []).map((row) => '[' + text(row.state, 'STATE') + '] ' + text(row.capability, 'CAPABILITY') + (row.summary ? ' · ' + row.summary : '')).join('\n') || 'No Development Plane transcript'; bodyNode.append(pre);
+  } else if (surface.type === 'DIFF') {
+    for (const row of surface.diff_components || []) bodyNode.append(kvRow(text(row.change, 'CHANGE'), row.path || 'unknown', 'neutral'));
+  } else if (surface.type === 'TESTS') {
+    for (const row of surface.test_receipts || []) bodyNode.append(kvRow(text(row.capability, 'VERIFY'), row.valid ? 'PASS' : text(row.state, 'AVAILABLE'), row.valid ? 'good' : 'warn'));
+  } else if (surface.type === 'LOGS') {
+    const pre = el('pre', 'surfaceCode'); pre.textContent = (surface.log_entries || []).map((row) => '[' + text(row.level, 'INFO') + '] ' + text(row.source, 'DEVOS') + ' · ' + text(row.message, '')).join('\n') || 'No runtime log entries'; bodyNode.append(pre);
+  } else {
+    bodyNode.append(kvRow('Type', surface.type, 'neutral'));
+    bodyNode.append(kvRow('Runtime source', 'NOT EXPOSED', 'neutral'));
+  }
+  return bodyNode;
+}
+
+function renderDevOSSurfaceGrid(next) {
+  const grid = validSurfaceGrid(next);
+  devosSurfaceGrid.replaceChildren();
+  devosSurfaceGrid.hidden = !grid;
+  if (!grid) return;
+  const surfaces = new Map(devosSelectedSurfaceRows(next).map((row) => [row.surface_id, row]));
+  for (const pane of grid.panes) {
+    const className = ('devosSurfacePane ' + String(pane.type || '').toLowerCase() + ' ' + (pane.focused ? 'focused' : '')).trim();
+    const node = el('section', className);
+    const b = pane.pane_bounds || {};
+    node.style.left = String(Math.max(0, Number(b.x || 0))) + 'px';
+    node.style.top = String(Math.max(0, Number(b.y || 0))) + 'px';
+    node.style.width = String(Math.max(0, Number(b.width || 0))) + 'px';
+    node.style.height = String(Math.max(0, Number(b.height || 0))) + 'px';
+    const header = el('button', 'devosSurfaceHeader');
+    header.type = 'button';
+    header.append(el('strong', '', text(pane.title, pane.surface_id)), el('span', '', text(pane.type, 'SURFACE') + (pane.focused ? ' · focused' : '')));
+    const exact = surfaces.get(String(pane.surface_id));
+    if (exact?.session_id) header.onclick = () => api.presentationFocus.selectSurface(exact.session_id, exact.surface_id).catch(() => {});
+    node.append(header);
+    if (pane.renderer_content_required === true) node.append(renderNativeSurfaceBody(exact));
+    else node.append(el('div', 'devosSurfaceBody browserNative', 'Native Browser Surface'));
+    devosSurfaceGrid.append(node);
+  }
 }
 
 function renderSessions(next) {
@@ -1125,6 +1240,14 @@ function renderSessions(next) {
     const focusActions = el('div', 'commandList');
     focusActions.append(commandButton('Clear Session focus', 'Presentation focus only', () => api.presentationFocus.clear()));
     fragment.append(focusActions);
+    const requestedSurfaceLayout = view.layout_preferences?.requested_surface_layout || 'AUTO';
+    const effectiveSurfaceLayout = next?.surface_grid?.effective_layout || 'UNKNOWN';
+    const layoutActions = section('Surface layout', 'requested ' + requestedSurfaceLayout + ' · effective ' + effectiveSurfaceLayout);
+    layoutActions.list.className = 'commandList surfaceLayoutCommands';
+    for (const mode of ['AUTO', 'SINGLE', 'SPLIT_VERTICAL', 'SPLIT_HORIZONTAL', 'TRIPLE_RIGHT', 'GRID_2X2']) {
+      layoutActions.list.append(commandButton(mode.replaceAll('_', ' '), mode === requestedSurfaceLayout ? 'requested' : 'layout preference', () => api.presentationFocus.setLayout(selectedSession.session_id, mode)));
+    }
+    fragment.append(layoutActions.wrap);
   }
 
   const sessionList = section('Session focus', 'Explicit operator selection · Browser selection is not focus authority');

@@ -6,6 +6,7 @@ const { createCandidateCapsule } = require('./candidate-capsule.cjs');
 const { verifyCandidateCapsuleRemoteBound } = require('./candidate-remote-source.cjs');
 const { createVerificationSandboxPlan, verifyVerificationSandboxPlan } = require('./verification-sandbox-plan.cjs');
 const { verifyEnvelope: verifyAdvisoryEvidenceEnvelope } = require('./advisory-evidence-verifier.cjs');
+const { createDevOSRepoReadModel } = require('./devos-repo-read-model.cjs');
 
 const PROTOCOL = 'metaengine.development-plane.v1';
 const VERSION = '0.4.0';
@@ -14,6 +15,7 @@ const CAPABILITIES = Object.freeze([
   'CAPABILITIES',
   'PROCESS_METRICS',
   'REPO_HEAD_READ',
+  'DEVOS_REPO_READ_MODEL',
   'CANDIDATE_CAPSULE_CREATE',
   'CANDIDATE_CAPSULE_VERIFY',
   'VERIFICATION_SANDBOX_PLAN_CREATE',
@@ -90,12 +92,15 @@ async function execute(capability, payload) {
     advisory_evidence_network_dispatch: false,
     advisory_evidence_browser_authority: false,
     advisory_evidence_promotion_authority: false,
+    devos_repo_read_model: true,
+    devos_repo_arbitrary_path_read: false,
     direct_promote_current: false,
     arbitrary_eval: false,
     signed_attestation_required_before_promotion: true,
   };
   if (capability === 'PROCESS_METRICS') return { memory: process.memoryUsage(), cpu: process.cpuUsage(), pid: process.pid };
   if (capability === 'REPO_HEAD_READ') return readRepoHead();
+  if (capability === 'DEVOS_REPO_READ_MODEL') return createDevOSRepoReadModel({ repoRoot, source: await requireCurrentSource() });
   if (capability === 'CANDIDATE_CAPSULE_CREATE') return createCandidateCapsule(payload, await requireCurrentSource());
   if (capability === 'CANDIDATE_CAPSULE_VERIFY') {
     requireObjectPayload(payload, 'candidate_verify');

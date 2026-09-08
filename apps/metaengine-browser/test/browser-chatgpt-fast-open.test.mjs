@@ -7,6 +7,9 @@ const main = await readFile(new URL('../src/main.mjs', import.meta.url), 'utf8')
 // Interactive latency may improve only inside the existing exact WebContents/session boundary.
 test('ChatGPT interactive open preconnects the persistent authenticated session', () => {
   assert.match(main, /userSession\.preconnect\(\{ url: 'https:\/\/chatgpt\.com\/', numSockets: 2 \}\)/);
+  assert.match(main, /schema: 'metaengine\.browser\.chat-preconnect\.v1'/);
+  assert.match(main, /state: chatgptPreconnectArmed \? 'ARMED' : 'UNAVAILABLE'/);
+  assert.match(main, /initialTab = await runDegradableStartupStep\('INITIAL_TAB_CREATE', \(\) => createTab\('https:\/\/chatgpt\.com\/', \{ select: true, load: false \}\)\)/);
   assert.match(main, /user_space_partition/);
   assert.doesNotMatch(main, /preconnect[\s\S]{0,220}(setInterval|setTimeout|retry)/i);
 });
