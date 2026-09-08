@@ -45,25 +45,22 @@ jobs:
           grep -F "chatgpt_preconnect_armed" .github/workflows/browser-windows-package-smoke.yml
           grep -F "installed_chatgpt_preconnect_not_armed" .github/workflows/browser-windows-package-smoke.yml
 
-      - name: Self-clean and push release fix
+      - name: Push proven non-workflow release fix
         shell: bash
         run: |
           set -euo pipefail
-          git rm -f .github/workflows/devos-release-finalize-temp.yml .github/scripts/devos-release-finalize-temp.mjs
+          git restore .github/workflows/browser-windows-package-smoke.yml
           git diff --check
           cat > /tmp/expected <<'EOF'
-          .github/scripts/devos-release-finalize-temp.mjs
-          .github/workflows/browser-windows-package-smoke.yml
-          .github/workflows/devos-release-finalize-temp.yml
           apps/metaengine-browser/src/main.mjs
           apps/metaengine-browser/test/browser-chatgpt-fast-open.test.mjs
           apps/metaengine-browser/test/browser-devos-multisurface-release-contract.test.mjs
           EOF
           sed -i 's/^          //' /tmp/expected
-          { git diff --name-only; git diff --cached --name-only; } | sort -u > /tmp/actual
+          git diff --name-only | sort -u > /tmp/actual
           diff -u /tmp/expected /tmp/actual
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add .github/workflows/browser-windows-package-smoke.yml apps/metaengine-browser/src/main.mjs apps/metaengine-browser/test/browser-chatgpt-fast-open.test.mjs apps/metaengine-browser/test/browser-devos-multisurface-release-contract.test.mjs
-          git commit -m "fix(release): prove installed ChatGPT fast connect"
+          git add apps/metaengine-browser/src/main.mjs apps/metaengine-browser/test/browser-chatgpt-fast-open.test.mjs apps/metaengine-browser/test/browser-devos-multisurface-release-contract.test.mjs
+          git commit -m "fix(release): prove ChatGPT fast connect runtime"
           git push origin HEAD:refs/heads/work/metaengine-devos-multisurface-v1
