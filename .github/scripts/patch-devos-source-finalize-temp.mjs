@@ -111,8 +111,8 @@ main = replaceExactCount(main,
   2,
   'main_intent_sources');
 main = replaceOne(main,
-  "    presentation_focus: presentationFocus,\n    session_layouts: devosSessionLayouts.snapshot(),",
-  "    presentation_focus: presentationFocus,\n    session_layouts: devosSessionLayouts.snapshot(),\n    devos_sources: projectDevOSDevelopmentSources({ development_plane: developmentPlaneSnapshot, startup_logs: startupDegradedSnapshot() }),",
+  "    presentation_focus: presentationFocus,\n    session_layouts: sessionLayouts,",
+  "    presentation_focus: presentationFocus,\n    session_layouts: sessionLayouts,\n    devos_sources: projectDevOSDevelopmentSources({ development_plane: developmentPlaneSnapshot, startup_logs: startupDegradedSnapshot() }),",
   'main_shell_sources');
 main = replaceOne(main,
   "  if (developmentPlane.snapshot().state !== 'READY') await developmentPlane.start();\n  return developmentPlane.snapshot();",
@@ -147,7 +147,7 @@ await fs.writeFile(files.selectedTest, selectedTest);
 let wiringTest = await fs.readFile(files.wiringTest, 'utf8');
 wiringTest = replaceOne(wiringTest,
   "  assert.match(shell, /const workspaces = projectWorkspaceWorkbench\\(\\{\\s*tabs,\\s*fleet: fleetSnapshot,\\s*owner_safety_gates: ownerSafetyGatesSnapshot,\\s*development_plane: developmentPlaneSnapshot,\\s*supervisor,\\s*compute,\\s*presentation_focus: presentationFocus,\\s*\\}\\)/s);",
-  "  assert.match(shell, /session_layouts: devosSessionLayouts\\.snapshot\\(\\)/);\n  assert.match(shell, /devos_sources: projectDevOSDevelopmentSources\\(/);",
+  "  assert.match(shell, /session_layouts: devosSessionLayouts\\.snapshot\\(\\)|session_layouts: sessionLayouts/);\n  assert.match(shell, /devos_sources: projectDevOSDevelopmentSources\\(/);",
   'wiring_shell_projection');
 wiringTest = replaceOne(wiringTest,
   "  assert.match(source, /attachDevOSSystemAttention\\(devosBase,\\{\\.\\.\\.snapshot,workspaces:base\\}\\)/);",
