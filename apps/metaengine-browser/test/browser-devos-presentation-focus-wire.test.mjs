@@ -15,11 +15,17 @@ async function sources() {
   return { main, preload, workbench };
 }
 
-test('main process owns the only DevOS presentation focus state and injects its snapshot into the shell projection', async () => {
+test('main process owns the only DevOS presentation focus state and injects one snapshot into the shell projection', async () => {
   const { main, workbench } = await sources();
   assert.match(main, /import \{ createDevOSPresentationFocusState \} from '\.\/metaengine-devos-presentation-focus\.mjs';/);
   assert.match(main, /const devosPresentationFocus = createDevOSPresentationFocusState\(\);/);
-  assert.match(main, /presentation_focus: devosPresentationFocus\.snapshot\(\)/);
+  const shellStart = main.indexOf('async function shellSnapshot() {');
+  const shellEnd = main.indexOf('async function publishSnapshot()', shellStart);
+  assert.ok(shellStart >= 0 && shellEnd > shellStart, 'shellSnapshot must remain a bounded main-process projection boundary');
+  const shell = main.slice(shellStart, shellEnd);
+  assert.equal((shell.match(/devosPresentationFocus\.snapshot\(\)/g) || []).length, 1, 'shellSnapshot must read presentation focus exactly once');
+  assert.match(shell, /const presentationFocus = devosPresentationFocus\.snapshot\(\);/);
+  assert.match(shell, /presentation_focus: presentationFocus/);
   assert.match(workbench, /projectDevOSShellViewModel\(devos,snapshot\?\.presentation_focus\?\?null\)/);
   assert.doesNotMatch(workbench, /selected_tab_id.*presentation_focus/s);
 });
