@@ -1,5 +1,6 @@
 const CONSUMER_RE = /^[a-z][a-z0-9_.:-]{0,95}$/i;
 const MAX_BATCH = 128;
+const MAX_CONSUMERS = 256;
 const ZERO_AUTHORITY = Object.freeze({
   scheduler_authority: false,
   dispatch_authority: false,
@@ -58,7 +59,7 @@ export class BrowserBrainObservationCursorLedger {
 
   constructor({ capacity = 64 } = {}) {
     const bounded = Number(capacity);
-    if (!Number.isSafeInteger(bounded) || bounded < 1 || bounded > 256) {
+    if (!Number.isSafeInteger(bounded) || bounded < 1 || bounded > MAX_CONSUMERS) {
       throw new TypeError('browser_brain_cursor_capacity_invalid');
     }
     this.#capacity = bounded;
@@ -73,7 +74,7 @@ export class BrowserBrainObservationCursorLedger {
       throw new Error('browser_brain_cursor_snapshot_contract_invalid');
     }
     assertZeroAuthority(snapshot);
-    if (!Array.isArray(snapshot.cursors) || snapshot.cursors.length > MAX_BATCH) {
+    if (!Array.isArray(snapshot.cursors) || snapshot.cursors.length > MAX_CONSUMERS) {
       throw new TypeError('browser_brain_cursor_snapshot_cursors_invalid');
     }
     if (snapshot.consumer_count !== snapshot.cursors.length) {
@@ -81,9 +82,11 @@ export class BrowserBrainObservationCursorLedger {
     }
 
     const ledger = new BrowserBrainObservationCursorLedger({ capacity: snapshot.capacity });
-    const results = ledger.checkpointBatch(snapshot.cursors);
-    if (results.some((result) => result.disposition !== 'APPLIED')) {
-      throw new Error('browser_brain_cursor_snapshot_duplicate_invalid');
+    for (let offset = 0; offset < snapshot.cursors.length; offset += MAX_BATCH) {
+      const results = ledger.checkpointBatch(snapshot.cursors.slice(offset, offset + MAX_BATCH));
+      if (results.some((result) => result.disposition !== 'APPLIED')) {
+        throw new Error('browser_brain_cursor_snapshot_duplicate_invalid');
+      }
     }
     return ledger;
   }
@@ -144,14 +147,16 @@ export class BrowserBrainObservationCursorLedger {
 export function browserBrainObservationCursorContract() {
   return Object.freeze({
     schema: 'metaengine.browser-brain.observation-cursor-contract.v1',
-    max_consumers: 256,
+    max_consumers: MAX_CONSUMERS,
     max_batch_checkpoints: MAX_BATCH,
     max_batch_resumes: MAX_BATCH,
+    max_snapshot_restore_consumers: MAX_CONSUMERS,
     monotonic_epoch: true,
     duplicate_idempotent: true,
     collision_fail_closed: true,
     transactional_batch_checkpoint: true,
     transactional_snapshot_restore: true,
+    chunked_full_capacity_snapshot_restore: true,
     bounded_batch_resume: true,
     durable_checkpoint_only: true,
     payload_persisted: false,
