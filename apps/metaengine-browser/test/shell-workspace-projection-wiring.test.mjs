@@ -4,7 +4,15 @@ import test from 'node:test';
 
 const read = (relative) => fs.readFile(new URL(relative, import.meta.url), 'utf8');
 
-test('trusted main process owns workspace and DevOS system projection exactly once', async () => {
+function functionSlice(source, name, nextName) {
+  const start = source.indexOf(`function ${name}(`);
+  assert.notEqual(start, -1, `${name} must exist`);
+  const end = source.indexOf(`${nextName.startsWith('async ') ? '' : 'function '}${nextName}`, start + 1);
+  assert.notEqual(end, -1, `${nextName} must exist after ${name}`);
+  return source.slice(start, end);
+}
+
+test('trusted main process owns one full shell projection plus one identity-only intent projection', async () => {
   const main = await read('../src/main.mjs');
   assert.match(main, /import \{ projectWorkspaceWorkbench \} from '\.\/workspace-workbench-projection\.mjs'/);
   assert.match(main, /const tabs = registry\.snapshot\(\)/);
@@ -15,12 +23,26 @@ test('trusted main process owns workspace and DevOS system projection exactly on
   assert.match(main, /const compute = await bridge\.health\(\)/);
   assert.match(main, /const presentationFocus = devosPresentationFocus\.snapshot\(\)/);
   assert.match(main, /const devosPresentationFocus = createDevOSPresentationFocusState\(\)/);
-  assert.match(main, /const workspaces = projectWorkspaceWorkbench\(\{\s*tabs,\s*fleet: fleetSnapshot,\s*owner_safety_gates: ownerSafetyGatesSnapshot,\s*development_plane: developmentPlaneSnapshot,\s*supervisor,\s*compute,\s*presentation_focus: presentationFocus,\s*\}\)/s);
-  assert.match(main, /fleet: fleetSnapshot,\s*owner_safety_gates: ownerSafetyGatesSnapshot,\s*development_plane: developmentPlaneSnapshot,\s*supervisor,/s);
-  assert.match(main, /\r?\n\s{4}workspaces,\r?\n\s{4}compute,\r?\n/);
-  assert.equal((main.match(/projectWorkspaceWorkbench\(/g) || []).length, 1, 'workspace projection must have one trusted shell call site');
+
+  const shellStart = main.indexOf('async function shellSnapshot()');
+  const shellEnd = main.indexOf('async function publishSnapshot()', shellStart);
+  assert.ok(shellStart >= 0 && shellEnd > shellStart, 'shellSnapshot must remain bounded');
+  const shell = main.slice(shellStart, shellEnd);
+  assert.match(shell, /const workspaces = projectWorkspaceWorkbench\(\{\s*tabs,\s*fleet: fleetSnapshot,\s*owner_safety_gates: ownerSafetyGatesSnapshot,\s*development_plane: developmentPlaneSnapshot,\s*supervisor,\s*compute,\s*presentation_focus: presentationFocus,\s*\}\)/s);
+  assert.match(shell, /fleet: fleetSnapshot,\s*owner_safety_gates: ownerSafetyGatesSnapshot,\s*development_plane: developmentPlaneSnapshot,\s*supervisor,/s);
+  assert.match(shell, /\r?\n\s{4}workspaces,\r?\n\s{4}compute,\r?\n/);
+  assert.equal((shell.match(/projectWorkspaceWorkbench\(/g) || []).length, 1, 'shell snapshot must have exactly one full trusted workspace projection');
+  assert.equal((shell.match(/await bridge\.health\(\)/g) || []).length, 1, 'shell snapshot must perform one Compute health read and reuse it');
+
+  const intent = functionSlice(main, 'currentDevOSPresentationProjection', 'selectBrowserTabForPresentation');
+  assert.equal((intent.match(/projectWorkspaceWorkbench\(/g) || []).length, 1, 'intent planning may use one separate identity-only projection');
+  assert.match(intent, /tabs: registry\.snapshot\(\)/);
+  assert.match(intent, /fleet: fleet\?\.snapshot\(\) \|\| null/);
+  assert.match(intent, /supervisor: nativeSupervisor\?\.snapshot\(\) \|\| null/);
+  assert.match(intent, /presentation_focus: devosPresentationFocus\.snapshot\(\)/);
+  assert.doesNotMatch(intent, /await bridge\.health|compute|developmentPlane|ownerSafetyGates/);
+  assert.equal((main.match(/projectWorkspaceWorkbench\(/g) || []).length, 2, 'main process may expose only the full shell projection and the identity-only intent projection');
   assert.equal((main.match(/createDevOSPresentationFocusState\(\)/g) || []).length, 1, 'presentation focus must have one main-process owner');
-  assert.equal((main.match(/await bridge\.health\(\)/g) || []).length, 1, 'shell snapshot must perform one Compute health read and reuse it');
 });
 
 test('renderer is presentation-only and cannot reconstruct durable binding authority', async () => {
