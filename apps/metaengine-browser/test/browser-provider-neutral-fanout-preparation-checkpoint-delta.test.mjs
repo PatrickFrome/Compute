@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  appendProviderNeutralFanoutPreparationCheckpointDelta,
   applyProviderNeutralFanoutPreparationCheckpointDelta,
   applyProviderNeutralFanoutPreparationCheckpointDeltas,
   createProviderNeutralFanoutPreparationCheckpointDelta,
@@ -23,6 +24,37 @@ test('persists only append-only preparation progress and replays to exact next d
   assert.equal(delta.added_entries.every((entry) => !('payload' in entry)), true);
   assert.equal('effect_execution_authority' in delta, false);
   assert.deepEqual(applyProviderNeutralFanoutPreparationCheckpointDelta(checkpoint, options, base, delta), next);
+});
+
+test('builds an exact append delta and next checkpoint from one durable restore', () => {
+  const checkpoint = upstream();
+  const base = saved(checkpoint, [[0, 'b']]);
+  const next = saved(checkpoint, [[0, 'b'], [1, 'c'], [2, 'd']]);
+  const expected = createProviderNeutralFanoutPreparationCheckpointDelta(checkpoint, options, base, next);
+  const { delta, checkpoint: appended } = appendProviderNeutralFanoutPreparationCheckpointDelta(
+    checkpoint,
+    options,
+    base,
+    expected.added_entries,
+  );
+
+  assert.deepEqual(appended, next);
+  assert.deepEqual(delta, expected);
+  assert.equal(delta.added_entries.every((entry) => !('payload' in entry)), true);
+});
+
+test('single-restore append remains idempotent for already prepared entries and fail-closed on collisions', () => {
+  const checkpoint = upstream();
+  const base = saved(checkpoint, [[0, 'b']]);
+  const same = appendProviderNeutralFanoutPreparationCheckpointDelta(checkpoint, options, base, base.entries);
+  assert.equal(same.delta.added_count, 0);
+  assert.deepEqual(same.checkpoint, base);
+
+  const collision = saved(checkpoint, [[0, 'e']]).entries[0];
+  assert.throws(
+    () => appendProviderNeutralFanoutPreparationCheckpointDelta(checkpoint, options, base, [collision]),
+    /collision/,
+  );
 });
 
 test('replays a contiguous delta chain from one durable restore', () => {
@@ -87,6 +119,7 @@ test('contract exposes the delta-specific restart-safe persistence boundary', ()
   assert.equal(contract.prepared_entry_collision_fence_preserved, true);
   assert.equal(contract.compact_incremental_persistence, true);
   assert.equal(contract.batched_replay_single_restore, true);
+  assert.equal(contract.append_builder_single_restore, true);
   assert.equal(contract.restart_restore_supported, true);
   assert.equal(contract.effect_execution_authority, false);
 });
