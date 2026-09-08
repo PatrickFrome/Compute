@@ -99,7 +99,19 @@ async function registerShellProtocol() {
 function configureUserSession() {
   if (userSessionConfigured && userSession) return;
   userSession = session.fromPartition(SECURITY_POLICY.user_space_partition, { cache: true });
-  try { userSession.preconnect({ url: 'https://chatgpt.com/', numSockets: 2 }); } catch {}
+  let chatgptPreconnectArmed = false;
+  try {
+    userSession.preconnect({ url: 'https://chatgpt.com/', numSockets: 2 });
+    chatgptPreconnectArmed = true;
+  } catch {}
+  console.log(JSON.stringify({
+    schema: 'metaengine.browser.chat-preconnect.v1',
+    state: chatgptPreconnectArmed ? 'ARMED' : 'UNAVAILABLE',
+    origin: 'https://chatgpt.com/',
+    sockets: 2,
+    persistent_partition: SECURITY_POLICY.user_space_partition,
+    authority_effect: false,
+  }));
   userSession.setPermissionCheckHandler(() => false);
   userSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
   downloads = new VerifiedDownloadManager({
@@ -277,7 +289,6 @@ async function shellSnapshot() {
     presentation_focus: presentationFocus,
     session_layouts: sessionLayouts,
     devos_sources: devosSourceSnapshot,
-    devos_sources: projectDevOSDevelopmentSources({ development_plane: developmentPlaneSnapshot, startup_logs: startupDegradedSnapshot() }),
   });
   return {
     schema: 'metaengine.browser-shell.snapshot.v3',

@@ -40,9 +40,10 @@ test('physical multi-surface proof requires live renderer identity, native bound
 test('presentation hot paths consume the bounded cached DevOS source projection instead of reading Development Plane directly', () => {
   const source = read('apps/metaengine-browser/src/main.mjs');
   assert.equal((source.match(/devos_sources: devosSourceSnapshot,/g) || []).length, 3);
+  assert.equal((source.match(/devos_sources: projectDevOSDevelopmentSources/g) || []).length, 0);
   assert.match(source, /devosSourceSnapshot = projectDevOSDevelopmentSources\(\{/);
-  const presentationIntent = source.slice(source.indexOf('function currentDevOSPresentationProjection'), source.indexOf('function currentDevOSPresentationShellView'));
-  const presentationShell = source.slice(source.indexOf('function currentDevOSPresentationShellView'), source.indexOf('function currentWorkspaceWorkbenchSnapshot'));
+  const presentationIntent = source.slice(source.indexOf('function currentDevOSPresentationProjection'), source.indexOf('function selectBrowserTabForPresentation'));
+  const presentationShell = source.slice(source.indexOf('function currentDevOSPresentationShellView'), source.indexOf('function fallbackSelectedSurface'));
   for (const block of [presentationIntent, presentationShell]) {
     assert.doesNotMatch(block, /developmentPlane\?\.snapshot|developmentPlane\.snapshot|projectDevOSDevelopmentSources/);
     assert.match(block, /devosSourceSnapshot/);
