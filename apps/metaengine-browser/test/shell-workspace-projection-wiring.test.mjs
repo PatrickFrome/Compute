@@ -29,10 +29,13 @@ test('trusted main process owns one full shell projection plus two bounded prese
   assert.ok(shellStart >= 0 && shellEnd > shellStart, 'shellSnapshot must remain bounded');
   const shell = main.slice(shellStart, shellEnd);
   assert.match(shell, /session_layouts: devosSessionLayouts\.snapshot\(\)|session_layouts: sessionLayouts/);
-  assert.match(shell, /devos_sources: projectDevOSDevelopmentSources\(/);
+  assert.match(shell, /devosSourceSnapshot = projectDevOSDevelopmentSources\(\{/);
+  assert.match(shell, /devos_sources: devosSourceSnapshot/);
+  assert.doesNotMatch(shell, /devos_sources: projectDevOSDevelopmentSources\(/);
   assert.match(shell, /fleet: fleetSnapshot,\s*owner_safety_gates: ownerSafetyGatesSnapshot,\s*development_plane: developmentPlaneSnapshot,\s*supervisor,/s);
   assert.match(shell, /\r?\n\s{4}workspaces,\r?\n\s{4}compute,\r?\n/);
   assert.equal((shell.match(/projectWorkspaceWorkbench\(/g) || []).length, 1, 'shell snapshot must have exactly one full trusted workspace projection');
+  assert.equal((shell.match(/projectDevOSDevelopmentSources\(/g) || []).length, 1, 'shell snapshot must refresh the bounded source cache exactly once');
   assert.equal((shell.match(/await bridge\.health\(\)/g) || []).length, 1, 'shell snapshot must perform one Compute health read and reuse it');
 
   const intent = functionSlice(main, 'currentDevOSPresentationProjection', 'selectBrowserTabForPresentation');
@@ -42,7 +45,7 @@ test('trusted main process owns one full shell projection plus two bounded prese
   assert.match(intent, /supervisor: nativeSupervisor\?\.snapshot\(\) \|\| null/);
   assert.match(intent, /presentation_focus: devosPresentationFocus\.snapshot\(\)/);
   assert.match(intent, /devos_sources: devosSourceSnapshot/);
-  assert.doesNotMatch(intent, /await bridge\.health|developmentPlane|ownerSafetyGates|\bcompute\b/);
+  assert.doesNotMatch(intent, /await bridge\.health|developmentPlane|ownerSafetyGates|\bcompute\b|projectDevOSDevelopmentSources/);
 
   const presentationShell = functionSlice(main, 'currentDevOSPresentationShellView', 'fallbackSelectedSurface');
   assert.equal((presentationShell.match(/projectWorkspaceWorkbench\(/g) || []).length, 1, 'surface-grid planning may use one separate presentation-shell projection');
@@ -52,7 +55,7 @@ test('trusted main process owns one full shell projection plus two bounded prese
   assert.match(presentationShell, /presentation_focus: devosPresentationFocus\.snapshot\(\)/);
   assert.match(presentationShell, /session_layouts: devosSessionLayouts\.snapshot\(\)/);
   assert.match(presentationShell, /devos_sources: devosSourceSnapshot/);
-  assert.doesNotMatch(presentationShell, /await bridge\.health|developmentPlane|ownerSafetyGates|\bcompute\b/);
+  assert.doesNotMatch(presentationShell, /await bridge\.health|developmentPlane|ownerSafetyGates|\bcompute\b|projectDevOSDevelopmentSources/);
 
   assert.equal((main.match(/projectWorkspaceWorkbench\(/g) || []).length, 3, 'main process may expose only the full shell, identity-only intent, and presentation-shell grid projections');
   assert.equal((main.match(/createDevOSPresentationFocusState\(\)/g) || []).length, 1, 'presentation focus must have one main-process owner');
