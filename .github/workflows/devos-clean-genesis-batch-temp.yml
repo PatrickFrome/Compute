@@ -47,13 +47,7 @@ jobs:
             apps/metaengine-browser/test/browser-quiescent-zero-tab-contract.test.mjs \
             apps/metaengine-browser/test/browser-native-supervisor-command-lanes.test.mjs
 
-      - name: Full Browser node regression
-        shell: bash
-        run: |
-          set -euo pipefail
-          node --test apps/metaengine-browser/test/*.test.mjs
-
-      - name: Self-clean and fast-forward push
+      - name: Prepare clean product tree
         shell: bash
         run: |
           set -euo pipefail
@@ -61,7 +55,23 @@ jobs:
           rm -f .github/workflows/devos-clean-genesis-batch-temp.yml
           git add -A
           test -n "$(git status --porcelain)"
+          test ! -e apps/metaengine-browser/scripts/patch-clean-genesis-batch-temp.mjs
+          test ! -e .github/workflows/devos-clean-genesis-batch-temp.yml
+
+      - name: Full Browser node regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test apps/metaengine-browser/test/*.test.mjs
+
+      - name: Commit and fast-forward push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --cached --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "feat(devos): enforce clean genesis batch control"
+          git fetch origin work/devos-clean-genesis-batch-v1
+          test "$(git rev-parse HEAD^)" = "$(git rev-parse origin/work/devos-clean-genesis-batch-v1)"
           git push origin HEAD:work/devos-clean-genesis-batch-v1
