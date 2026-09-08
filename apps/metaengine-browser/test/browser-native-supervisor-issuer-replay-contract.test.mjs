@@ -34,5 +34,7 @@ test('native issuer preserves deployed state transport repairs and rejects unsup
   assert.match(sql, /jsonb_typeof\(v_state_json\)='string'/);
   assert.match(sql, /native_supervisor_state_transport_invalid/);
   assert.match(sql, /char_length\(v_url\)>4096/);
+  assert.match(sql, /last_seen_at < clock_timestamp\(\)-interval '45 seconds'/);
+  assert.doesNotMatch(sql, /last_seen_at < clock_timestamp\(\)-interval '15 seconds'/);
   assert.doesNotMatch(actionAllowlist, /RESOLVE_PROMPT/);
 });

@@ -57,7 +57,7 @@ begin
     from public.compute_fabric_a2_browser_supervisor_state_h205f22
    where client_id=v_client and workspace_id=v_workspace;
   if not found then raise exception 'native_supervisor_client_not_seen'; end if;
-  if v_state.last_seen_at < clock_timestamp()-interval '15 seconds' then raise exception 'native_supervisor_client_stale'; end if;
+  if v_state.last_seen_at < clock_timestamp()-interval '45 seconds' then raise exception 'native_supervisor_client_stale'; end if;
   v_state_json := v_state.state;
   if jsonb_typeof(v_state_json)='string' then
     begin
