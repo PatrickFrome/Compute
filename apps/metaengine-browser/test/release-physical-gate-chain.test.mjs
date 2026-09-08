@@ -9,8 +9,15 @@ const repoRoot = path.resolve(here, '../../..');
 const readWorkflow = (name) => fs.readFileSync(path.join(repoRoot, '.github', 'workflows', name), 'utf8');
 
 test('verified dev release is transitively fenced by exact-SHA bootstrap autostart physical proof', () => {
+  const bootstrap = readWorkflow('metaengine-browser-bootstrap-autostart-e2e.yml');
   const fast = readWorkflow('metaengine-browser-self-update-fast-e2e.yml');
   const publisher = readWorkflow('metaengine-browser-fast-autorelease.yml');
+
+  // Any release-chain workflow mutation must produce a bootstrap run for the same
+  // exact SHA. App/test mutations already trigger this workflow through apps/**.
+  assert.match(bootstrap, /metaengine-browser-bootstrap-autostart-e2e\.yml/);
+  assert.match(bootstrap, /metaengine-browser-self-update-fast-e2e\.yml/);
+  assert.match(bootstrap, /metaengine-browser-fast-autorelease\.yml/);
 
   assert.match(fast, /actions:\s*read/);
   assert.match(fast, /metaengine-browser-bootstrap-autostart-e2e\.yml/);
