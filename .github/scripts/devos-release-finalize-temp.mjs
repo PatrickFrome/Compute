@@ -41,6 +41,9 @@ const releasePath = 'apps/metaengine-browser/test/browser-devos-multisurface-rel
 let release = fs.readFileSync(releasePath, 'utf8');
 const releaseAnchor = "  assert.equal((source.match(/devos_sources: devosSourceSnapshot,/g) || []).length, 3);\n";
 release = replaceExact(release, releaseAnchor, releaseAnchor + "  assert.equal((source.match(/devos_sources: projectDevOSDevelopmentSources/g) || []).length, 0);\n", 'release_source');
+const staleSlices = "  const presentationIntent = source.slice(source.indexOf('function currentDevOSPresentationProjection'), source.indexOf('function currentDevOSPresentationShellView'));\n  const presentationShell = source.slice(source.indexOf('function currentDevOSPresentationShellView'), source.indexOf('function currentWorkspaceWorkbenchSnapshot'));\n";
+const exactSlices = "  const presentationIntent = source.slice(source.indexOf('function currentDevOSPresentationProjection'), source.indexOf('function selectBrowserTabForPresentation'));\n  const presentationShell = source.slice(source.indexOf('function currentDevOSPresentationShellView'), source.indexOf('function fallbackSelectedSurface'));\n";
+release = replaceExact(release, staleSlices, exactSlices, 'release_projection_slices');
 fs.writeFileSync(releasePath, release);
 
 const workflowPath = '.github/workflows/browser-windows-package-smoke.yml';
@@ -70,17 +73,10 @@ const installedProof = `            $normalLines = @(Get-Content $normalOut -Err
               $line = [string]$normalLines[$i]
               if (-not $line.Trim().StartsWith('{')) { continue }
               try { $runtimeEvent = $line | ConvertFrom-Json } catch { continue }
-              if ($runtimeEvent.schema -eq 'metaengine.browser.chat-preconnect.v1' \
-                  -and $runtimeEvent.state -eq 'ARMED' \
-                  -and $runtimeEvent.origin -eq 'https://chatgpt.com/' \
-                  -and [int]$runtimeEvent.sockets -eq 2 \
-                  -and $runtimeEvent.authority_effect -eq $false) {
+              if ($runtimeEvent.schema -eq 'metaengine.browser.chat-preconnect.v1' -and $runtimeEvent.state -eq 'ARMED' -and $runtimeEvent.origin -eq 'https://chatgpt.com/' -and [int]$runtimeEvent.sockets -eq 2 -and $runtimeEvent.authority_effect -eq $false) {
                 $preconnectIndex = $i
               }
-              if ($runtimeEvent.schema -eq 'metaengine.browser-startup-subsystem.v1' \
-                  -and $runtimeEvent.state -eq 'SUBSYSTEM_READY' \
-                  -and $runtimeEvent.subsystem -eq 'INITIAL_TAB_CREATE' \
-                  -and $runtimeEvent.authority_effect -eq $false) {
+              if ($runtimeEvent.schema -eq 'metaengine.browser-startup-subsystem.v1' -and $runtimeEvent.state -eq 'SUBSYSTEM_READY' -and $runtimeEvent.subsystem -eq 'INITIAL_TAB_CREATE' -and $runtimeEvent.authority_effect -eq $false) {
                 $initialChatIndex = $i
               }
             }
@@ -104,4 +100,4 @@ const unchangedAnchor = 'apps/metaengine-browser/test/browser-startup-observabil
 workflow = replaceExact(workflow, unchangedAnchor, 'apps/metaengine-browser/test/browser-startup-observability.test.mjs apps/metaengine-browser/test/browser-chatgpt-fast-open.test.mjs apps/metaengine-browser/test/browser-shell-visual-evidence.mjs', 'package_unchanged');
 fs.writeFileSync(workflowPath, workflow);
 
-console.log(JSON.stringify({ schema: 'metaengine.devos.release-finalize-patch.v1', ok: true, authority_effect: false }));
+console.log(JSON.stringify({ schema: 'metaengine.devos.release-finalize-patch.v2', ok: true, authority_effect: false }));
