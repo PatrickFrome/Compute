@@ -40,6 +40,36 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.github/scripts/patch-devos-source-finalize-temp.mjs')
+          source = p.read_text()
+          helper_anchor = """function replaceOne(source, before, after, label) {
+            const count = source.split(before).length - 1;
+            if (count !== 1) throw new Error(`${label}_anchor_count:${count}`);
+            return source.replace(before, after);
+          }
+          """
+          helper_replacement = helper_anchor + """
+          function replaceTwo(source, before, after, label) {
+            const count = source.split(before).length - 1;
+            if (count !== 2) throw new Error(`${label}_anchor_count:${count}`);
+            return source.replaceAll(before, after);
+          }
+          """
+          if source.count(helper_anchor) != 1:
+              raise SystemExit(f'replace_helper_anchor_count:{source.count(helper_anchor)}')
+          source = source.replace(helper_anchor, helper_replacement, 1)
+          label = "  'main_intent_sources');"
+          index = source.find(label)
+          if index < 0:
+              raise SystemExit('main_intent_sources_label_missing')
+          start = source.rfind('main = replaceOne(main,', 0, index)
+          if start < 0:
+              raise SystemExit('main_intent_sources_call_missing')
+          source = source[:start] + source[start:].replace('main = replaceOne(main,', 'main = replaceTwo(main,', 1)
+          p.write_text(source)
+          PY
           node .github/scripts/patch-devos-multisurface-temp.mjs
           node .github/scripts/patch-devos-multisurface-narrow-ipc-temp.mjs
           node .github/scripts/patch-devos-source-finalize-temp.mjs
@@ -71,7 +101,7 @@ jobs:
           apps/metaengine-browser/ui/dark-workspace.css
           EOF
           sed -i 's/^          //' /tmp/expected-product-diff
-          git diff --name-only | sort > /tmp/actual-product-diff
+          git diff --name-only -- apps/metaengine-browser | sort > /tmp/actual-product-diff
           diff -u /tmp/expected-product-diff /tmp/actual-product-diff
 
       - name: Full Browser regression
