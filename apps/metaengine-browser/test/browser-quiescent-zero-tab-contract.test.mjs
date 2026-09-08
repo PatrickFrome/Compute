@@ -5,6 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const REPO_ROOT = path.resolve(ROOT, '../..');
 
 async function source(rel) {
   return fs.readFile(path.join(ROOT, rel), 'utf8');
@@ -29,4 +30,20 @@ test('remote OFF is durable, disarms, and is restored before supervisor scheduli
   assert.match(client, /if \(next === 'OFF'\) this\.#armed = false;/);
   assert.match(client, /await this\.#persistControlState\(\);/);
   assert.match(client, /control_state_persistence:/);
+});
+
+test('convergence product head contains no temporary patch authority and packages only fixed source evidence', async () => {
+  for (const relative of [
+    '.github/workflows/devos-convergence-runtime-temp.yml',
+    'apps/metaengine-browser/scripts/patch-devos-convergence-runtime-temp.mjs',
+    'apps/metaengine-browser/scripts/patch-devos-convergence-contracts-temp.mjs',
+  ]) {
+    await assert.rejects(fs.access(path.join(REPO_ROOT, relative)), (error) => error?.code === 'ENOENT');
+  }
+
+  const builder = JSON.parse(await source('electron-builder.test.json'));
+  assert.deepEqual(builder.extraResources, [
+    { from: 'native-dist/guardian', to: 'guardian-native', filter: ['**/*'] },
+    { from: 'devos-source-snapshot', to: 'devos-source-snapshot', filter: ['**/*'] },
+  ]);
 });
