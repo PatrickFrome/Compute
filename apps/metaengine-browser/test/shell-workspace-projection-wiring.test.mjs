@@ -10,9 +10,11 @@ test('trusted main process owns workspace admission projection exactly once', as
   assert.match(main, /const tabs = registry\.snapshot\(\)/);
   assert.match(main, /const fleetSnapshot = fleet\?\.snapshot\(\) \|\| null/);
   assert.match(main, /const supervisor = nativeSupervisor\?\.snapshot\(\) \|\| null/);
-  assert.match(main, /const workspaces = projectWorkspaceWorkbench\(\{ tabs, fleet: fleetSnapshot, supervisor \}\)/);
+  assert.match(main, /const devosPresentationFocus = createDevOSPresentationFocusState\(\)/);
+  assert.match(main, /const workspaces = projectWorkspaceWorkbench\(\{\s*tabs,\s*fleet: fleetSnapshot,\s*supervisor,\s*presentation_focus: devosPresentationFocus\.snapshot\(\),\s*\}\)/s);
   assert.match(main, /\r?\n\s{4}workspaces,\r?\n\s{4}compute:/);
   assert.equal((main.match(/projectWorkspaceWorkbench\(/g) || []).length, 1, 'workspace projection must have one trusted shell call site');
+  assert.equal((main.match(/createDevOSPresentationFocusState\(\)/g) || []).length, 1, 'presentation focus must have one main-process owner');
 });
 
 test('renderer is presentation-only and cannot reconstruct durable binding authority', async () => {

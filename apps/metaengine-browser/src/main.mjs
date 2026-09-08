@@ -21,6 +21,7 @@ import {
 } from './native-supervisor-exact-target.mjs';
 import { VerifiedDownloadManager } from './verified-download-manager.mjs';
 import { normalizeShellLayoutState, planShellLayout, SHELL_TOP_HEIGHT } from './shell-layout.mjs';
+import { createDevOSPresentationFocusState } from './metaengine-devos-presentation-focus.mjs';
 import { projectWorkspaceWorkbench } from './workspace-workbench-projection.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -49,6 +50,7 @@ let developmentPlane = null;
 let nativeSupervisor = null;
 let shellBrainPortConsumerId = null;
 const humanTakeover = new HumanTakeoverController({ getSupervisor: () => nativeSupervisor });
+const devosPresentationFocus = createDevOSPresentationFocusState();
 let shellLayoutState = normalizeShellLayoutState();
 let shellLayoutPlan = null;
 let perceptionCache = { tab_id: null, captured_ms: 0, frame: null, error: null };
@@ -187,7 +189,12 @@ async function shellSnapshot() {
   const tabs = registry.snapshot();
   const fleetSnapshot = fleet?.snapshot() || null;
   const supervisor = nativeSupervisor?.snapshot() || null;
-  const workspaces = projectWorkspaceWorkbench({ tabs, fleet: fleetSnapshot, supervisor });
+  const workspaces = projectWorkspaceWorkbench({
+    tabs,
+    fleet: fleetSnapshot,
+    supervisor,
+    presentation_focus: devosPresentationFocus.snapshot(),
+  });
   return {
     schema: 'metaengine.browser-shell.snapshot.v3',
     version: app.getVersion(),
@@ -931,6 +938,28 @@ async function createWindow() {
 
 ipcMain.handle('metaengine:shell:snapshot', async (event) => { assertShellSender(event); return shellSnapshot(); });
 ipcMain.handle('metaengine:shell:command', async (event, message) => { assertShellSender(event); return handleCommand(String(message?.command || ''), message?.payload || {}); });
+ipcMain.handle('metaengine:shell:presentation-focus:snapshot', async (event) => {
+  assertShellSender(event);
+  return devosPresentationFocus.snapshot();
+});
+ipcMain.handle('metaengine:shell:presentation-focus:select-session', async (event, sessionId) => {
+  assertShellSender(event);
+  const state = devosPresentationFocus.selectSession(sessionId);
+  await publishSnapshot();
+  return state;
+});
+ipcMain.handle('metaengine:shell:presentation-focus:select-surface', async (event, sessionId, surfaceId) => {
+  assertShellSender(event);
+  const state = devosPresentationFocus.selectSurface(sessionId, surfaceId);
+  await publishSnapshot();
+  return state;
+});
+ipcMain.handle('metaengine:shell:presentation-focus:clear', async (event) => {
+  assertShellSender(event);
+  const state = devosPresentationFocus.clear();
+  await publishSnapshot();
+  return state;
+});
 
 async function startAfterReady() {
   await registerShellProtocol();

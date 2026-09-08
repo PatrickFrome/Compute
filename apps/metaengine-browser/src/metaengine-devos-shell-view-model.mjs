@@ -1,3 +1,5 @@
+import { reconcileDevOSPresentationFocus } from './metaengine-devos-presentation-focus.mjs';
+
 export const METAENGINE_DEVOS_SHELL_VIEW_MODEL_SCHEMA = 'metaengine.devos.shell-view-model.v1';
 
 const SESSION_GROUP_ORDER = Object.freeze(['NEEDS_ATTENTION', 'ACTIVE', 'BACKGROUND', 'COMPLETED', 'UNBOUND']);
@@ -45,6 +47,7 @@ function invalidView(reason) {
     now: Object.freeze([]),
     selected_session: null,
     selected_surface: null,
+    presentation_focus: null,
     layout_preferences: null,
     counts: Object.freeze({ sessions: 0, surfaces: 0, attention: 0, visible_groups: 0 }),
     browser_is_shell: false,
@@ -65,7 +68,7 @@ function validateRoot(root) {
 
 function selectedLayout(devos, selectedSessionId) {
   const prefs = devos?.layout_preferences;
-  if (!prefs) return null;
+  if (!prefs || !selectedSessionId) return null;
   if (prefs.schema !== 'metaengine.devos.session-layout-projection.v1' || !hasZeroAuthorityContract(prefs)) return null;
   if (text(prefs.selected_session_id, 200) !== selectedSessionId) return null;
   const active = prefs.active;
@@ -82,7 +85,7 @@ function selectedLayout(devos, selectedSessionId) {
   });
 }
 
-export function projectDevOSShellViewModel(devos) {
+export function projectDevOSShellViewModel(devos, presentationFocusState = null) {
   if (!devos
     || devos.schema !== 'metaengine.devos.projection.v1'
     || devos.primary_object !== 'SESSION'
@@ -116,12 +119,23 @@ export function projectDevOSShellViewModel(devos) {
     surfaces.set(surfaceId, source);
   }
 
-  const selectedSessionId = text(devos.selected.session_id, 200);
-  const selectedSurfaceId = text(devos.selected.surface_id, 240);
+  // Canonical Browser selection remains part of the read model and is validated,
+  // but it is never used as presentation-focus authority.
+  const canonicalSessionId = text(devos.selected.session_id, 200);
+  const canonicalSurfaceId = text(devos.selected.surface_id, 240);
+  const canonicalSession = canonicalSessionId ? sessions.get(canonicalSessionId) : null;
+  const canonicalSurface = canonicalSurfaceId ? surfaces.get(canonicalSurfaceId) : null;
+  if ((canonicalSessionId && !canonicalSession) || (canonicalSurfaceId && !canonicalSurface)) return invalidView('SELECTION_NOT_FOUND');
+  if (canonicalSurface && canonicalSurface.session_id !== canonicalSessionId) return invalidView('SELECTION_OWNERSHIP_MISMATCH');
+
+  const presentationFocus = reconcileDevOSPresentationFocus(presentationFocusState, devos);
+  if (!presentationFocus.valid) return invalidView(presentationFocus.reason || 'PRESENTATION_FOCUS_INVALID');
+  const selectedSessionId = text(presentationFocus.effective_session_id, 200);
+  const selectedSurfaceId = text(presentationFocus.effective_surface_id, 240);
   const selectedSession = selectedSessionId ? sessions.get(selectedSessionId) : null;
   const selectedSurface = selectedSurfaceId ? surfaces.get(selectedSurfaceId) : null;
-  if ((selectedSessionId && !selectedSession) || (selectedSurfaceId && !selectedSurface)) return invalidView('SELECTION_NOT_FOUND');
-  if (selectedSurface && selectedSurface.session_id !== selectedSessionId) return invalidView('SELECTION_OWNERSHIP_MISMATCH');
+  if ((selectedSessionId && !selectedSession) || (selectedSurfaceId && !selectedSurface)) return invalidView('PRESENTATION_FOCUS_NOT_FOUND');
+  if (selectedSurface && selectedSurface.session_id !== selectedSessionId) return invalidView('PRESENTATION_FOCUS_OWNERSHIP_MISMATCH');
 
   const roots = [];
   const rootIds = new Set();
@@ -204,6 +218,7 @@ export function projectDevOSShellViewModel(devos) {
     now: Object.freeze(now),
     selected_session: selectedSessionView,
     selected_surface: selectedSurfaceView,
+    presentation_focus: presentationFocus,
     layout_preferences: selectedLayout(devos, selectedSessionId),
     counts: Object.freeze({ sessions: sessions.size, surfaces: surfaces.size, attention: now.length, visible_groups: sessionGroups.filter((group) => group.count > 0).length }),
     browser_is_shell: false,
