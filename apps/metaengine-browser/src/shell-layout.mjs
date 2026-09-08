@@ -52,6 +52,7 @@ export function planShellLayout({ width, height, state } = {}) {
   let effectiveOperations = requested.operations;
   let left = sidebarWidth(effectiveSidebar);
   let right = effectiveOperations === 'OPEN' ? SHELL_OPERATIONS_WIDTH : 0;
+  const adaptations = [];
 
   const remoteWidth = () => Math.max(0, windowWidth - left - right);
 
@@ -60,19 +61,23 @@ export function planShellLayout({ width, height, state } = {}) {
   if (remoteWidth() < SHELL_MIN_REMOTE_WIDTH && effectiveSidebar === 'EXPANDED') {
     effectiveSidebar = 'COMPACT';
     left = SHELL_SIDEBAR_COMPACT_WIDTH;
+    adaptations.push('SIDEBAR_COMPACTED_FOR_ACTIVE_SURFACE');
   }
   if (remoteWidth() < SHELL_MIN_REMOTE_WIDTH && effectiveOperations === 'OPEN') {
     effectiveOperations = 'CLOSED';
     right = 0;
+    adaptations.push('INSPECTOR_CLOSED_FOR_ACTIVE_SURFACE');
   }
   if (remoteWidth() < SHELL_MIN_REMOTE_WIDTH && effectiveSidebar === 'COMPACT') {
     effectiveSidebar = 'HIDDEN';
     left = 0;
+    adaptations.push('SIDEBAR_HIDDEN_FOR_ACTIVE_SURFACE');
   }
 
   const top = Math.min(SHELL_TOP_HEIGHT, windowHeight);
   const remoteHeight = Math.max(0, windowHeight - top);
   const contentWidth = Math.max(0, windowWidth - left - right);
+  const activeSurfaceWidthTarget = Math.min(SHELL_MIN_REMOTE_WIDTH, windowWidth);
 
   return Object.freeze({
     schema: 'metaengine.browser-shell.layout-plan.v1',
@@ -84,6 +89,12 @@ export function planShellLayout({ width, height, state } = {}) {
     sidebar_bounds: Object.freeze({ x: 0, y: top, width: left, height: remoteHeight }),
     operations_bounds: Object.freeze({ x: Math.max(0, windowWidth - right), y: top, width: right, height: remoteHeight }),
     remote_min_width: SHELL_MIN_REMOTE_WIDTH,
+    active_surface_width_target: activeSurfaceWidthTarget,
+    active_surface_target_satisfied: contentWidth >= activeSurfaceWidthTarget,
+    active_surface_priority: true,
+    chrome_degrades_before_active_surface: true,
+    adaptations: Object.freeze(adaptations),
+    adapted: adaptations.length > 0,
     overlay_remote_content: false,
     renderer_dimensions_authoritative: false,
     authority_effect: false,
