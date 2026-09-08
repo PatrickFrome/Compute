@@ -52,6 +52,7 @@ test('persists only append-only preparation progress and replays to exact next d
   assert.equal(delta.added_count, 2);
   assert.deepEqual(delta.added_entries.map((entry) => entry.fanout_index), [1, 2]);
   assert.equal(delta.added_entries.every((entry) => !('payload' in entry)), true);
+  assert.equal('effect_execution_authority' in delta, false);
   assert.deepEqual(applyProviderNeutralFanoutPreparationCheckpointDelta(checkpoint, options, base, delta), next);
 });
 
