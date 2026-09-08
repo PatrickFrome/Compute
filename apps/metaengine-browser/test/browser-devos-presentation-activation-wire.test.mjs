@@ -28,7 +28,7 @@ test('presentation intent projection is synchronous and identity-only', () => {
   assert.match(block, /fleet: fleet\?\.snapshot\(\) \|\| null/);
   assert.match(block, /supervisor: nativeSupervisor\?\.snapshot\(\) \|\| null/);
   assert.match(block, /presentation_focus: devosPresentationFocus\.snapshot\(\)/);
-  assert.match(block, /\}\.devos;/);
+  assert.match(block, /\}\)\.devos;/);
   assert.doesNotMatch(block, /bridge\.health|await|compute|developmentPlane|ownerSafetyGates/);
   assert.doesNotMatch(block, /title|url|location|hostname|heuristic/i);
 });
