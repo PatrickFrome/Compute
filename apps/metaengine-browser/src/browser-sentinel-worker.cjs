@@ -46,6 +46,22 @@ function validBinding(state) {
     && state.worker_released !== true;
 }
 
+function exactRecoveryHandoffPending(state, boundPid) {
+  const generation = Number(state?.worker_recovery_generation || 0);
+  const candidatePid = Number(state?.worker_recovery_candidate_pid || 0);
+  return Boolean(
+    Number.isSafeInteger(boundPid) && boundPid > 0
+    && Number.isSafeInteger(generation) && generation >= 1
+    && state?.worker_recovery_state === 'INTENT_PROVEN_OLD_PID_ABSENT'
+    && Number(state?.worker_recovery_old_pid) === boundPid
+    && (!(Number.isSafeInteger(candidatePid) && candidatePid > 0) || candidatePid === process.pid)
+    && state?.lifecycle === 'ARMED'
+    && state?.expected_restart !== true
+    && state?.installer_handoff !== true
+    && state?.worker_released !== true
+  );
+}
+
 async function awaitWorkerBinding() {
   const deadline = Date.now() + WORKER_BINDING_GRACE_MS;
   while (Date.now() <= deadline) {
@@ -53,7 +69,8 @@ async function awaitWorkerBinding() {
     if (!validCoreBinding(current)) return null;
     if (Number(current.worker_pid) === process.pid && current.worker_released !== true) return current;
     const boundPid = Number(current.worker_pid || 0);
-    if (Number.isSafeInteger(boundPid) && boundPid > 0 && boundPid !== process.pid) return null;
+    if (Number.isSafeInteger(boundPid) && boundPid > 0 && boundPid !== process.pid
+      && !exactRecoveryHandoffPending(current, boundPid)) return null;
     await sleep(50);
   }
   return null;
