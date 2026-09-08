@@ -1005,7 +1005,6 @@ async function runDegradableStartupStep(subsystem, operation) {
 }
 
 async function bootstrapDegradableSubsystems() {
-  const quiescentStartup = startupControlState?.supervisor_mode === 'OFF' && startupControlState?.armed === false;
   await runDegradableStartupStep('OWNER_SAFETY_GATES', async () => {
     try {
       return await initOwnerSafetyGates();
@@ -1021,7 +1020,7 @@ async function bootstrapDegradableSubsystems() {
   });
 
   let initialTab = null;
-  if (sessionReady && !quiescentStartup) {
+  if (sessionReady) {
     initialTab = await runDegradableStartupStep('INITIAL_TAB_CREATE', () => createTab('https://chatgpt.com/', { select: true, load: false }));
     if (initialTab?.tab_id) {
       setImmediate(() => {
