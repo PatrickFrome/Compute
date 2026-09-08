@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   appendProviderNeutralFanoutPreparationCheckpointDelta,
+  appendProviderNeutralFanoutPreparationCheckpointDeltas,
   applyProviderNeutralFanoutPreparationCheckpointDelta,
   applyProviderNeutralFanoutPreparationCheckpointDeltas,
   createProviderNeutralFanoutPreparationCheckpointDelta,
@@ -43,6 +44,25 @@ test('builds an exact append delta and next checkpoint from one durable restore'
   assert.equal(delta.added_entries.every((entry) => !('payload' in entry)), true);
 });
 
+test('builds a contiguous append-delta chain from one durable restore', () => {
+  const checkpoint = upstream();
+  const base = saved(checkpoint, [[0, 'b']]);
+  const middle = saved(checkpoint, [[0, 'b'], [1, 'c']]);
+  const next = saved(checkpoint, [[0, 'b'], [1, 'c'], [2, 'd']]);
+  const first = createProviderNeutralFanoutPreparationCheckpointDelta(checkpoint, options, base, middle);
+  const second = createProviderNeutralFanoutPreparationCheckpointDelta(checkpoint, options, middle, next);
+  const appended = appendProviderNeutralFanoutPreparationCheckpointDeltas(
+    checkpoint,
+    options,
+    base,
+    [first.added_entries, second.added_entries],
+  );
+
+  assert.deepEqual(appended.deltas, [first, second]);
+  assert.deepEqual(appended.checkpoint, next);
+  assert.deepEqual(applyProviderNeutralFanoutPreparationCheckpointDeltas(checkpoint, options, base, appended.deltas), next);
+});
+
 test('single-restore append remains idempotent for already prepared entries and fail-closed on collisions', () => {
   const checkpoint = upstream();
   const base = saved(checkpoint, [[0, 'b']]);
@@ -54,6 +74,18 @@ test('single-restore append remains idempotent for already prepared entries and 
   assert.throws(
     () => appendProviderNeutralFanoutPreparationCheckpointDelta(checkpoint, options, base, [collision]),
     /collision/,
+  );
+});
+
+test('batched append is bounded and preserves empty-batch identity', () => {
+  const checkpoint = upstream();
+  const base = saved(checkpoint, [[0, 'b']]);
+  const empty = appendProviderNeutralFanoutPreparationCheckpointDeltas(checkpoint, options, base, []);
+  assert.deepEqual(empty.deltas, []);
+  assert.deepEqual(empty.checkpoint, base);
+  assert.throws(
+    () => appendProviderNeutralFanoutPreparationCheckpointDeltas(checkpoint, options, base, Array(129).fill([])),
+    /batch_invalid/,
   );
 });
 
@@ -120,6 +152,7 @@ test('contract exposes the delta-specific restart-safe persistence boundary', ()
   assert.equal(contract.compact_incremental_persistence, true);
   assert.equal(contract.batched_replay_single_restore, true);
   assert.equal(contract.append_builder_single_restore, true);
+  assert.equal(contract.batched_append_single_restore, true);
   assert.equal(contract.restart_restore_supported, true);
   assert.equal(contract.effect_execution_authority, false);
 });
