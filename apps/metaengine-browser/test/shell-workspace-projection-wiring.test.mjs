@@ -25,7 +25,7 @@ test('trusted main process owns one full shell projection plus one identity-only
   assert.match(main, /const devosPresentationFocus = createDevOSPresentationFocusState\(\)/);
 
   const shellStart = main.indexOf('async function shellSnapshot()');
-  const shellEnd = main.indexOf('function shellProcessPressureSample', shellStart);
+  const shellEnd = main.indexOf('async function publishSnapshot()', shellStart);
   assert.ok(shellStart >= 0 && shellEnd > shellStart, 'shellSnapshot must remain bounded');
   const shell = main.slice(shellStart, shellEnd);
   assert.match(shell, /const workspaces = projectWorkspaceWorkbench\(\{\s*tabs,\s*fleet: fleetSnapshot,\s*owner_safety_gates: ownerSafetyGatesSnapshot,\s*development_plane: developmentPlaneSnapshot,\s*supervisor,\s*compute,\s*presentation_focus: presentationFocus,\s*\}\)/s);
