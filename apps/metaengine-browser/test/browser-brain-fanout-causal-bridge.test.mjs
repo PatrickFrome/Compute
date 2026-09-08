@@ -17,8 +17,8 @@ function progress(sequence, overrides = {}) {
     outcome: 'APPLIED',
     effect_proof_digest: 'c'.repeat(64),
     received_count: sequence,
-    pending_count: 3 - sequence,
-    complete: sequence === 3,
+    pending_count: Math.max(0, 3 - sequence),
+    complete: sequence >= 3,
     payload_persisted: false,
     retry_candidates: [],
     scheduler_authority: false,
@@ -32,13 +32,16 @@ function progress(sequence, overrides = {}) {
   };
 }
 
-test('projects monotonic fanout progress into one causal Brain epoch', () => {
+test('baselines first fanout observation then projects only contiguous progress into Brain', () => {
   const bridge = new BrowserBrainFanoutCausalBridge();
   const first = bridge.observe(progress(1));
   const second = bridge.observe(progress(2));
 
-  assert.equal(first.disposition, 'APPLIED');
+  assert.equal(first.accepted, true);
+  assert.equal(first.disposition, 'BASELINED');
   assert.equal(first.brain_epoch, 1);
+  assert.equal(first.progress, null, 'initial observation cannot fabricate missed progress history');
+  assert.equal(second.disposition, 'APPLIED');
   assert.equal(second.brain_epoch, 2);
   assert.equal(second.progress.received_count, 2);
   assert.equal(second.progress.action_digest, 'a'.repeat(64));
@@ -68,14 +71,19 @@ test('gap fails closed and requires canonical resync', () => {
   assert.equal(bridge.snapshot().gap_requires_resync, true);
 });
 
-test('independent action digests keep independent causal sequences', () => {
+test('independent action digests baseline and advance independent causal sequences', () => {
   const bridge = new BrowserBrainFanoutCausalBridge();
   const first = bridge.observe(progress(1));
   const other = bridge.observe(progress(1, { action_id: 'act_2', action_digest: 'd'.repeat(64) }));
+  const firstNext = bridge.observe(progress(2));
+  const otherNext = bridge.observe(progress(2, { action_id: 'act_2', action_digest: 'd'.repeat(64) }));
 
   assert.notEqual(first.source, other.source);
-  assert.equal(other.disposition, 'APPLIED');
-  assert.equal(other.brain_epoch, 2);
+  assert.equal(first.disposition, 'BASELINED');
+  assert.equal(other.disposition, 'BASELINED');
+  assert.equal(firstNext.disposition, 'APPLIED');
+  assert.equal(otherNext.disposition, 'APPLIED');
+  assert.equal(otherNext.brain_epoch, 4);
   assert.equal(bridge.snapshot().source_count, 2);
 });
 
