@@ -17,6 +17,47 @@ test('checkpoints independent consumer cursors for restart-safe realtime resume'
   assert.equal(ledger.resumeFrom('new-consumer').from_epoch, 0);
 });
 
+test('batch checkpoints independent realtime consumers with one transactional commit', () => {
+  const ledger = new BrowserBrainObservationCursorLedger({ capacity: 4 });
+  const results = ledger.checkpointBatch([
+    { consumer: 'browsercell-reader', epoch: 17, observation_digest: digest('a') },
+    { consumer: 'process-reader', epoch: 12, observation_digest: digest('b') },
+    { consumer: 'semantic-reader', epoch: 21, observation_digest: digest('c') },
+  ]);
+  assert.deepEqual(results.map((result) => result.disposition), ['APPLIED', 'APPLIED', 'APPLIED']);
+  assert.equal(ledger.resumeFrom('browsercell-reader').from_epoch, 17);
+  assert.equal(ledger.resumeFrom('process-reader').from_epoch, 12);
+  assert.equal(ledger.resumeFrom('semantic-reader').from_epoch, 21);
+});
+
+test('failed batch rolls back every staged cursor mutation', () => {
+  const ledger = new BrowserBrainObservationCursorLedger({ capacity: 4 });
+  ledger.checkpoint({ consumer: 'semantic-reader', epoch: 3, observation_digest: digest('a') });
+  assert.throws(
+    () => ledger.checkpointBatch([
+      { consumer: 'process-reader', epoch: 4, observation_digest: digest('b') },
+      { consumer: 'semantic-reader', epoch: 3, observation_digest: digest('c') },
+    ]),
+    /epoch_collision/,
+  );
+  assert.equal(ledger.get('process-reader'), null);
+  assert.equal(ledger.get('semantic-reader').observation_digest, digest('a'));
+});
+
+test('empty batch is identity and oversized batches fail before mutation', () => {
+  const ledger = new BrowserBrainObservationCursorLedger();
+  assert.deepEqual(ledger.checkpointBatch([]), []);
+  assert.throws(
+    () => ledger.checkpointBatch(Array.from({ length: 129 }, (_, index) => ({
+      consumer: `reader-${index}`,
+      epoch: 1,
+      observation_digest: digest('a'),
+    }))),
+    /batch_invalid/,
+  );
+  assert.equal(ledger.snapshot().consumer_count, 0);
+});
+
 test('duplicate checkpoint is idempotent while same-epoch digest collision fails closed', () => {
   const ledger = new BrowserBrainObservationCursorLedger();
   const row = { consumer: 'brain-reader', epoch: 7, observation_digest: digest('c') };
@@ -67,6 +108,8 @@ test('contract is provider-neutral and zero-authority with no retry synthesis', 
   const contract = browserBrainObservationCursorContract();
   assert.equal(contract.provider_neutral, true);
   assert.equal(contract.monotonic_epoch, true);
+  assert.equal(contract.transactional_batch_checkpoint, true);
+  assert.equal(contract.max_batch_checkpoints, 128);
   assert.equal(contract.durable_checkpoint_only, true);
   for (const key of [
     'payload_persisted',
