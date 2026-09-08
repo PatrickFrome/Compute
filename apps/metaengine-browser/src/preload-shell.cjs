@@ -42,12 +42,13 @@ function unavailableDevOSShellViewModel(reason = 'NOT_EXPOSED') {
     primary_object: 'SESSION',
     roots: Object.freeze([]),
     session_groups: Object.freeze([]),
+    surfaces: Object.freeze([]),
     now: Object.freeze([]),
     selected_session: null,
     selected_surface: null,
     presentation_focus: null,
     layout_preferences: null,
-    counts: Object.freeze({ sessions: 0, surfaces: 0, attention: 0, visible_groups: 0 }),
+    counts: Object.freeze({ sessions: 0, surfaces: 0, attention: 0, visible_groups: 0, visible_surfaces: 0 }),
     browser_is_shell: false,
     browser_is_surface: true,
     renderer_selection_authority: false,
@@ -79,6 +80,7 @@ function decorateSnapshot(value) {
     && shellCandidate?.primary_object === 'SESSION'
     && Array.isArray(shellCandidate?.roots)
     && Array.isArray(shellCandidate?.session_groups)
+    && Array.isArray(shellCandidate?.surfaces)
     && Array.isArray(shellCandidate?.now)
     && shellCandidate?.browser_is_shell === false
     && shellCandidate?.browser_is_surface === true
