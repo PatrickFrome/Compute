@@ -169,17 +169,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          node - <<'NODE'
+          console.log('electron_binary=' + require('electron'));
+          NODE
           sandbox=node_modules/electron/dist/chrome-sandbox
           test -f "$sandbox"
           sudo chown root:root "$sandbox"
           sudo chmod 4755 "$sandbox"
-          test "$(stat -c '%U:%G %a' "$sandbox")" = "root:root 4755"
-          xvfb-run -a npx electron test/browser-devos-multisurface-physical.electron.mjs | tee /tmp/devos-physical-e2e.log
+          test "$(stat -c '%u:%g %a' "$sandbox")" = "0:0 4755"
+          set +e
+          xvfb-run -a npx electron test/browser-devos-multisurface-physical.electron.mjs > /tmp/devos-physical-e2e.log 2>&1
+          rc=$?
+          set -e
+          cat /tmp/devos-physical-e2e.log
+          test "$rc" -eq 0
           grep -F '"schema":"metaengine.devos.multisurface-physical-e2e.v1"' /tmp/devos-physical-e2e.log
           grep -F '"ok":true' /tmp/devos-physical-e2e.log
           grep -F '"simultaneously_attached_webcontents_views":3' /tmp/devos-physical-e2e.log
           grep -F '"layout_persisted":true' /tmp/devos-physical-e2e.log
           grep -F '"resize_reflow_proven":true' /tmp/devos-physical-e2e.log
+          grep -F '"renderer_load_proven":true' /tmp/devos-physical-e2e.log
+          grep -F '"renderer_process_proven":true' /tmp/devos-physical-e2e.log
 
       - name: Self-clean and push exact product commit
         shell: bash
@@ -189,12 +199,14 @@ jobs:
             .github/scripts/patch-devos-multisurface-temp.mjs \
             .github/scripts/patch-devos-multisurface-narrow-ipc-temp.mjs \
             .github/scripts/patch-devos-source-finalize-temp.mjs \
+            .github/workflows/devos-electron-physical-diagnostic-temp.yml \
             .github/workflows/devos-multisurface-wire-temp.yml
           git diff --check
           cat > /tmp/allowed <<'EOF'
           .github/scripts/patch-devos-multisurface-narrow-ipc-temp.mjs
           .github/scripts/patch-devos-multisurface-temp.mjs
           .github/scripts/patch-devos-source-finalize-temp.mjs
+          .github/workflows/devos-electron-physical-diagnostic-temp.yml
           .github/workflows/devos-multisurface-wire-temp.yml
           apps/metaengine-browser/src/development-plane-worker.cjs
           apps/metaengine-browser/src/development-plane.mjs
