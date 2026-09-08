@@ -87,7 +87,8 @@ test('sandboxed preload promotes precomputed DevOS data without local module loa
   assert.doesNotMatch(preload, /require\(['"]\.\//);
   assert.match(preload, /function decorateSnapshot\(value\)/);
   assert.match(preload, /const candidate = value\?\.workspaces\?\.devos/);
-  assert.match(preload, /return Object\.freeze\(\{ \.\.\.value, devos \}\)/);
+  assert.match(preload, /const shellCandidate = value\?\.workspaces\?\.devos_shell/);
+  assert.match(preload, /return Object\.freeze\(\{ \.\.\.value, devos, devos_shell \}\)/);
   assert.match(preload, /snapshot: \(\) => ipcRenderer\.invoke\('metaengine:shell:snapshot'\)\.then\(decorateSnapshot\)/);
   assert.doesNotMatch(preload, /exposeInMainWorld\([^)]*ipcRenderer/s);
   assert.doesNotMatch(preload, /\bon:\s*ipcRenderer\.on\b/);
