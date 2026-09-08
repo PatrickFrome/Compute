@@ -67,6 +67,36 @@ test('batch resume is identity for empty input and fails closed before oversized
   assert.equal(ledger.snapshot().consumer_count, 0);
 });
 
+test('resumes the full durable consumer capacity from one bounded read', () => {
+  const ledger = new BrowserBrainObservationCursorLedger({ capacity: 256 });
+  for (let offset = 0; offset < 256; offset += 128) {
+    ledger.checkpointBatch(Array.from({ length: 128 }, (_, index) => ({
+      consumer: `reader-${String(offset + index).padStart(3, '0')}`,
+      epoch: offset + index + 1,
+      observation_digest: digest('a'),
+    })));
+  }
+
+  const resumes = ledger.resumeAll();
+  assert.equal(resumes.length, 256);
+  assert.equal(resumes[0].consumer, 'reader-000');
+  assert.equal(resumes[0].from_epoch, 1);
+  assert.equal(resumes[255].consumer, 'reader-255');
+  assert.equal(resumes[255].from_epoch, 256);
+  assert.equal(resumes.every((resume) => resume.payload_persisted === false), true);
+  assert.equal(resumes.every((resume) => resume.effect_execution_authority === false), true);
+});
+
+test('full-capacity resume is deterministic and does not synthesize unseen consumers', () => {
+  const ledger = new BrowserBrainObservationCursorLedger({ capacity: 4 });
+  ledger.checkpointBatch([
+    { consumer: 'z-reader', epoch: 3, observation_digest: digest('a') },
+    { consumer: 'a-reader', epoch: 2, observation_digest: digest('b') },
+  ]);
+  assert.deepEqual(ledger.resumeAll().map((resume) => resume.consumer), ['a-reader', 'z-reader']);
+  assert.equal(ledger.resumeAll().some((resume) => resume.consumer === 'new-reader'), false);
+});
+
 test('restores a durable multi-stream cursor snapshot with one transactional replay', () => {
   const source = new BrowserBrainObservationCursorLedger({ capacity: 4 });
   source.checkpointBatch([
@@ -218,9 +248,11 @@ test('contract is provider-neutral and zero-authority with no retry synthesis', 
   assert.equal(contract.transactional_snapshot_restore, true);
   assert.equal(contract.chunked_full_capacity_snapshot_restore, true);
   assert.equal(contract.bounded_batch_resume, true);
+  assert.equal(contract.bounded_full_capacity_resume, true);
   assert.equal(contract.max_consumers, 256);
   assert.equal(contract.max_batch_checkpoints, 128);
   assert.equal(contract.max_batch_resumes, 128);
+  assert.equal(contract.max_full_capacity_resumes, 256);
   assert.equal(contract.max_snapshot_restore_consumers, 256);
   assert.equal(contract.durable_checkpoint_only, true);
   for (const key of [
