@@ -32,6 +32,7 @@ test('Session controls use only narrow presentationFocus methods and never gener
   const block = functionSlice('renderSessions', 'renderSkills');
   assert.match(block, /api\.presentationFocus\.selectSession\(row\.session_id\)/);
   assert.match(block, /api\.presentationFocus\.selectSurface\(row\.session_id, row\.surface_id\)/);
+  assert.match(block, /api\.presentationFocus\.setLayout\(selectedSession\.session_id, mode\)/);
   assert.match(block, /api\.presentationFocus\.clear\(\)/);
   assert.doesNotMatch(block, /api\.command|SELECT_TAB|NEW_TAB|NAVIGATE|loadURL|executeJavaScript/);
   assert.doesNotMatch(block, /devos\.surfaces|next\?\.workspaces\?\.devos|\.surface_ids/);
@@ -44,10 +45,11 @@ test('Browser tab controls remain physically independent from Session focus', ()
   assert.doesNotMatch(block, /presentationFocus|selectSession|selectSurface/);
 });
 
-test('preload remains the only narrow renderer bridge for Session and Surface focus', () => {
+test('preload remains the only narrow renderer bridge for Session Surface focus and layout preference', () => {
   assert.match(preload, /presentationFocus: Object\.freeze\(\{/);
   assert.match(preload, /selectSession: \(sessionId\) => ipcRenderer\.invoke\('metaengine:shell:presentation-focus:select-session'/);
   assert.match(preload, /selectSurface: \(sessionId, surfaceId\) => ipcRenderer\.invoke\('metaengine:shell:presentation-focus:select-surface'/);
+  assert.match(preload, /setLayout: \(sessionId, layoutMode\) => ipcRenderer\.invoke\('metaengine:shell:presentation-layout:set'/);
   assert.match(preload, /clear: \(\) => ipcRenderer\.invoke\('metaengine:shell:presentation-focus:clear'\)/);
   assert.doesNotMatch(preload, /contextBridge\.exposeInMainWorld\([^\n]+ipcRenderer/);
 });
