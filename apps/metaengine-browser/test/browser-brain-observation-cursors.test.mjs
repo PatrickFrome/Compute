@@ -30,6 +30,38 @@ test('batch checkpoints independent realtime consumers with one transactional co
   assert.equal(ledger.resumeFrom('semantic-reader').from_epoch, 21);
 });
 
+test('restores a durable multi-stream cursor snapshot with one transactional replay', () => {
+  const source = new BrowserBrainObservationCursorLedger({ capacity: 4 });
+  source.checkpointBatch([
+    { consumer: 'browsercell-reader', epoch: 17, observation_digest: digest('a') },
+    { consumer: 'process-reader', epoch: 12, observation_digest: digest('b') },
+    { consumer: 'semantic-reader', epoch: 21, observation_digest: digest('c') },
+  ]);
+  const restored = BrowserBrainObservationCursorLedger.restore(source.snapshot());
+  assert.deepEqual(restored.snapshot(), source.snapshot());
+  assert.equal(restored.resumeFrom('browsercell-reader').from_epoch, 17);
+  assert.equal(restored.resumeFrom('process-reader').from_epoch, 12);
+  assert.equal(restored.resumeFrom('semantic-reader').from_epoch, 21);
+});
+
+test('snapshot restore fails closed on forged authority or duplicate consumers', () => {
+  const source = new BrowserBrainObservationCursorLedger({ capacity: 4 });
+  source.checkpoint({ consumer: 'semantic-reader', epoch: 3, observation_digest: digest('a') });
+  const snapshot = source.snapshot();
+  assert.throws(
+    () => BrowserBrainObservationCursorLedger.restore({ ...snapshot, dispatch_authority: true }),
+    /snapshot_authority_invalid/,
+  );
+  assert.throws(
+    () => BrowserBrainObservationCursorLedger.restore({
+      ...snapshot,
+      consumer_count: 2,
+      cursors: [snapshot.cursors[0], snapshot.cursors[0]],
+    }),
+    /snapshot_duplicate_invalid/,
+  );
+});
+
 test('failed batch rolls back every staged cursor mutation', () => {
   const ledger = new BrowserBrainObservationCursorLedger({ capacity: 4 });
   ledger.checkpoint({ consumer: 'semantic-reader', epoch: 3, observation_digest: digest('a') });
@@ -109,6 +141,7 @@ test('contract is provider-neutral and zero-authority with no retry synthesis', 
   assert.equal(contract.provider_neutral, true);
   assert.equal(contract.monotonic_epoch, true);
   assert.equal(contract.transactional_batch_checkpoint, true);
+  assert.equal(contract.transactional_snapshot_restore, true);
   assert.equal(contract.max_batch_checkpoints, 128);
   assert.equal(contract.durable_checkpoint_only, true);
   for (const key of [
