@@ -188,12 +188,19 @@ function recordStartupSubsystemReady(subsystem) {
 async function shellSnapshot() {
   const tabs = registry.snapshot();
   const fleetSnapshot = fleet?.snapshot() || null;
+  const ownerSafetyGatesSnapshot = ownerSafetyGates?.snapshot() || null;
+  const developmentPlaneSnapshot = developmentPlane?.snapshot() || null;
   const supervisor = nativeSupervisor?.snapshot() || null;
+  const compute = await bridge.health();
+  const presentationFocus = devosPresentationFocus.snapshot();
   const workspaces = projectWorkspaceWorkbench({
     tabs,
     fleet: fleetSnapshot,
+    owner_safety_gates: ownerSafetyGatesSnapshot,
+    development_plane: developmentPlaneSnapshot,
     supervisor,
-    presentation_focus: devosPresentationFocus.snapshot(),
+    compute,
+    presentation_focus: presentationFocus,
   });
   return {
     schema: 'metaengine.browser-shell.snapshot.v3',
@@ -201,12 +208,12 @@ async function shellSnapshot() {
     tabs,
     downloads: downloads?.snapshot() || null,
     fleet: fleetSnapshot,
-    owner_safety_gates: ownerSafetyGates?.snapshot() || null,
-    development_plane: developmentPlane?.snapshot() || null,
+    owner_safety_gates: ownerSafetyGatesSnapshot,
+    development_plane: developmentPlaneSnapshot,
     supervisor,
     human_takeover: supervisor ? humanTakeover.snapshot() : null,
     workspaces,
-    compute: await bridge.health(),
+    compute,
     layout: shellLayoutPlan ? structuredClone(shellLayoutPlan) : null,
     background_service: {
       close_to_background: !shutdownRequested,

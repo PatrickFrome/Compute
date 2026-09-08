@@ -31,14 +31,26 @@ test('tab routing is ambiguity-safe: only one match selects a tab', () => {
   assert.doesNotMatch(route, /matches\[0\].*matches\.length > 1/s);
 });
 
-test('Attention derives only from trusted shell projections and has no actuator', () => {
-  const attention = functionSlice('attentionQueue', 'installAgenticNav');
-  assert.match(attention, /fleet/);
-  assert.match(attention, /workspaceProjection/);
-  assert.match(attention, /supervisor/);
-  assert.match(attention, /self_update/);
-  assert.doesNotMatch(attention, /perception|text_excerpt|semantic_targets|page_content/i);
-  assert.doesNotMatch(attention, /api\.command|executeSemantic|TYPED_CLICK|SEMANTIC_TYPE|STOP_GENERATION/);
+test('Attention consumes canonical zero-authority DevOS Now and has no actuator', () => {
+  const view = functionSlice('devosShellView', 'attentionTone');
+  const now = functionSlice('devosNowItems', 'installAgenticNav');
+  assert.match(view, /metaengine\.devos\.shell-view-model\.v1/);
+  assert.match(view, /view\.now/);
+  for (const fence of [
+    'renderer_selection_authority',
+    'renderer_routing_authority',
+    'projection_is_authority',
+    'scheduler_authority',
+    'execution_authority',
+    'command_leasing',
+    'automatic_effect_retry_allowed',
+    'page_model_authority',
+    'authority_effect',
+  ]) assert.match(view, new RegExp(`${fence} !== false`));
+  assert.match(now, /view\.now\.slice\(0, 256\)/);
+  assert.doesNotMatch(now, /fleet|workspaceProjection|supervisor|self_update|development_plane|compute|owner_safety_gates/);
+  assert.doesNotMatch(now, /perception|text_excerpt|semantic_targets|page_content/i);
+  assert.doesNotMatch(now, /api\.command|executeSemantic|TYPED_CLICK|SEMANTIC_TYPE|STOP_GENERATION/);
 });
 
 test('Workbench Skills remain bounded and do not create a page/model authority path', () => {
@@ -54,7 +66,7 @@ test('Workbench Skills remain bounded and do not create a page/model authority p
 
 test('Context Set stores bounded tab identities rather than page content', () => {
   const load = functionSlice('loadAgenticContextTabIds', 'persistAgenticContextTabIds');
-  const rows = functionSlice('agenticContextRows', 'attentionQueue');
+  const rows = functionSlice('agenticContextRows', 'devosShellView');
   assert.match(load, /slice\(0, AGENTIC_CONTEXT_MAX_TABS\)/);
   assert.match(rows, /tab_id/);
   assert.doesNotMatch(rows, /text_excerpt|semantic_targets|page_content|document\.body/i);
