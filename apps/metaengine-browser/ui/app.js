@@ -199,6 +199,59 @@ function workspaceProjection(next) {
   return projection;
 }
 
+function unavailableDevOSShell(reason = 'NOT_EXPOSED') {
+  return Object.freeze({
+    schema: 'metaengine.devos.shell-view-model.v1',
+    valid: false,
+    reason: String(reason || 'NOT_EXPOSED').slice(0, 160),
+    primary_object: 'SESSION',
+    roots: Object.freeze([]),
+    session_groups: Object.freeze([]),
+    surfaces: Object.freeze([]),
+    now: Object.freeze([]),
+    selected_session: null,
+    selected_surface: null,
+    presentation_focus: null,
+    counts: Object.freeze({ sessions: 0, surfaces: 0, attention: 0, visible_groups: 0, visible_surfaces: 0 }),
+    browser_is_shell: false,
+    browser_is_surface: true,
+    renderer_selection_authority: false,
+    renderer_routing_authority: false,
+    projection_is_authority: false,
+    scheduler_authority: false,
+    execution_authority: false,
+    command_leasing: false,
+    automatic_effect_retry_allowed: false,
+    page_model_authority: false,
+    authority_effect: false,
+  });
+}
+
+function devosShell(next) {
+  const candidate = next?.devos_shell;
+  if (!candidate || candidate.schema !== 'metaengine.devos.shell-view-model.v1') return unavailableDevOSShell('NOT_EXPOSED');
+  if (candidate.valid !== true
+    || candidate.primary_object !== 'SESSION'
+    || !Array.isArray(candidate.roots)
+    || !Array.isArray(candidate.session_groups)
+    || !Array.isArray(candidate.surfaces)
+    || !Array.isArray(candidate.now)
+    || candidate.browser_is_shell !== false
+    || candidate.browser_is_surface !== true
+    || candidate.renderer_selection_authority !== false
+    || candidate.renderer_routing_authority !== false
+    || candidate.projection_is_authority !== false
+    || candidate.scheduler_authority !== false
+    || candidate.execution_authority !== false
+    || candidate.command_leasing !== false
+    || candidate.automatic_effect_retry_allowed !== false
+    || candidate.page_model_authority !== false
+    || candidate.authority_effect !== false) {
+    return unavailableDevOSShell(candidate.reason || 'INVALID_VIEW_MODEL');
+  }
+  return candidate;
+}
+
 function applyLayout(next) {
   const layout = next?.layout;
   if (!layout) return;
@@ -235,69 +288,88 @@ async function toggleOperations(force = null) {
 }
 
 function renderActive(next) {
-  const tab = selectedTab(next);
-  const agent = tab ? fleetAgentForTab(next, tab.tab_id) : null;
-  const actuation = tab ? exactActuationForTab(next, tab.tab_id) : null;
-  const workspace = workspaceProjection(next).groups.find((group) => group.tab_id === tab?.tab_id) || null;
-  if (!tab) {
-    activeKind.textContent = '—';
-    activeTitle.textContent = 'No active tab';
-    activeMeta.textContent = 'Awaiting browser state';
-    return;
-  }
-  const chat = tab.kind === 'CHATGPT';
-  activeKind.textContent = workspace ? 'P' : (chat ? 'C' : 'W');
-  activeTitle.textContent = text(tab.title, chat ? 'ChatGPT' : hostFor(tab.url));
-  activeMeta.textContent = actuation
-    ? `ACTION · ${actuation.action}`
-    : (workspace
-      ? `${compact(workspace.branch_name, 34)} · ${workspace.state} · lease ${workspace.lease_generation}`
-      : (agent ? `${text(agent.role, 'AGENT')} · ${text(agent.lifecycle_state, 'UNKNOWN')} · g${Number(agent.generation_epoch || 0)}` : hostFor(tab.url)));
-  if (document.activeElement !== address) address.value = tab.url || '';
+  const shell = devosShell(next);
+  const session = shell.selected_session;
+  const surface = shell.selected_surface;
+  const browserTab = selectedTab(next);
+
+  activeKind.textContent = session ? 'S' : '—';
+  activeTitle.textContent = session ? text(session.title, session.session_id) : 'No active Session';
+  activeMeta.textContent = surface
+    ? `${text(surface.type, 'SURFACE')} · ${text(surface.state, 'UNKNOWN')}`
+    : (session ? `${text(session.status, 'UNKNOWN')} · ${shell.surfaces.length} Surface${shell.surfaces.length === 1 ? '' : 's'}` : 'Select a Session');
+
+  if (browserTab && document.activeElement !== address) address.value = browserTab.url || '';
+  const chat = browserTab?.kind === 'CHATGPT';
   routeKind.textContent = chat ? 'CHAT' : 'WEB';
   routeKind.classList.toggle('chat', chat);
 }
 
-function makeTabRow(tab, active, agent, actuation, workspace = null) {
+function makeSessionRow(session, groupId) {
   const row = document.createElement('div');
-  row.className = `verticalTab ${active ? 'active' : ''} ${agent ? 'agent' : ''}`;
+  row.className = `verticalTab ${session.selected ? 'active' : ''}`;
   row.setAttribute('role', 'listitem');
 
   const select = document.createElement('button');
   select.type = 'button';
   select.className = 'verticalTabSelect';
-  select.title = tab.url || tab.title || 'Tab';
-  select.setAttribute('aria-current', active ? 'page' : 'false');
-  select.setAttribute('aria-label', `${active ? 'Current tab' : 'Select tab'}: ${text(tab.title, tab.kind === 'CHATGPT' ? 'ChatGPT' : hostFor(tab.url))}`);
-  select.onclick = () => api.command('SELECT_TAB', { tab_id: tab.tab_id }).catch(() => {});
+  select.title = session.title || session.session_id || 'Session';
+  select.setAttribute('aria-current', session.selected ? 'page' : 'false');
+  select.setAttribute('aria-label', `${session.selected ? 'Current Session' : 'Select Session'}: ${text(session.title, session.session_id)}`);
+  select.onclick = () => api.presentationFocus.selectSession(session.session_id).catch(() => {});
 
   const avatar = document.createElement('span');
   avatar.className = 'tabAvatar';
-  avatar.textContent = workspace ? 'P' : (agent ? text(agent.role, 'A').slice(0, 1) : (tab.kind === 'CHATGPT' ? 'C' : 'W'));
+  avatar.textContent = 'S';
   const dot = document.createElement('i');
-  dot.className = `tabStateDot ${actuation ? 'warn' : (workspace ? stateTone(workspace.state) : (agent ? stateTone(agent.lifecycle_state) : 'neutral'))}`;
+  dot.className = `tabStateDot ${stateTone(session.status)}`;
   avatar.append(dot);
 
   const copy = document.createElement('span');
   copy.className = 'tabCopy';
   const title = document.createElement('strong');
-  title.textContent = text(tab.title, tab.kind === 'CHATGPT' ? 'ChatGPT' : hostFor(tab.url));
+  title.textContent = text(session.title, session.session_id);
   const meta = document.createElement('small');
-  meta.textContent = actuation
-    ? `ACTION · ${actuation.action}`
-    : (workspace ? `${workspace.state} · lease ${workspace.lease_generation}` : (agent ? `${text(agent.role)} · ${text(agent.lifecycle_state)}` : hostFor(tab.url)));
+  const group = text(groupId, 'SESSION').replaceAll('_', ' ');
+  meta.textContent = `${group} · ${text(session.status, 'UNKNOWN')} · ${Number(session.surface_count || 0)} surface${Number(session.surface_count || 0) === 1 ? '' : 's'}`;
   copy.append(title, meta);
   select.append(avatar, copy);
+  row.append(select);
+  return row;
+}
 
-  const close = document.createElement('button');
-  close.type = 'button';
-  close.className = 'tabClose';
-  close.textContent = '×';
-  close.title = `Close ${title.textContent}`;
-  close.setAttribute('aria-label', `Close ${title.textContent}`);
-  close.onclick = () => api.command('CLOSE_TAB', { tab_id: tab.tab_id }).catch(() => {});
+function makeSurfaceRow(surface) {
+  const row = document.createElement('div');
+  row.className = `verticalTab ${surface.selected ? 'active' : ''}`;
+  row.setAttribute('role', 'listitem');
 
-  row.append(select, close);
+  const select = document.createElement('button');
+  select.type = 'button';
+  select.className = 'verticalTabSelect';
+  select.title = surface.title || surface.surface_id || 'Surface';
+  select.setAttribute('aria-current', surface.selected ? 'page' : 'false');
+  select.setAttribute('aria-label', `${surface.selected ? 'Current Surface' : 'Select Surface'}: ${text(surface.title, surface.surface_id)}`);
+  select.onclick = async () => {
+    await api.presentationFocus.selectSurface(surface.session_id, surface.surface_id);
+    if (surface.type === 'BROWSER' && surface.tab_id) await api.command('SELECT_TAB', { tab_id: surface.tab_id });
+  };
+
+  const avatar = document.createElement('span');
+  avatar.className = 'tabAvatar';
+  avatar.textContent = text(surface.type, 'S').slice(0, 1);
+  const dot = document.createElement('i');
+  dot.className = `tabStateDot ${stateTone(surface.state)}`;
+  avatar.append(dot);
+
+  const copy = document.createElement('span');
+  copy.className = 'tabCopy';
+  const title = document.createElement('strong');
+  title.textContent = text(surface.title, surface.surface_id);
+  const meta = document.createElement('small');
+  meta.textContent = `${text(surface.type, 'SURFACE')} · ${text(surface.state, 'UNKNOWN')}`;
+  copy.append(title, meta);
+  select.append(avatar, copy);
+  row.append(select);
   return row;
 }
 
@@ -313,39 +385,39 @@ function railHeader(label, value = '') {
 }
 
 function renderContextRail(next) {
-  const state = next?.tabs || {};
-  const projection = workspaceProjection(next);
+  const shell = devosShell(next);
   const filter = tabFilter.trim().toLowerCase();
   const nodes = [];
 
-  for (const group of projection.groups) {
-    const haystack = [group.branch_name, group.point_id, group.repo_id, group.role, group.state, group.tab?.title, group.tab?.url].join(' ').toLowerCase();
-    if (filter && !haystack.includes(filter)) continue;
-    nodes.push(railHeader(compact(group.branch_name || group.point_id || 'Workspace', 28), `${group.state} · l${group.lease_generation}`));
-    nodes.push(makeTabRow(group.tab, group.tab_id === state.selected_tab_id, group.agent, exactActuationForTab(next, group.tab_id), group));
+  for (const group of shell.session_groups) {
+    const sessions = (group.sessions || []).filter((session) => {
+      if (!filter) return true;
+      return [session.title, session.session_id, session.status, group.group_id]
+        .some((value) => String(value || '').toLowerCase().includes(filter));
+    });
+    if (!sessions.length && filter) continue;
+    nodes.push(railHeader(text(group.group_id, 'Sessions').replaceAll('_', ' '), String(group.count || sessions.length)));
+    for (const session of sessions) nodes.push(makeSessionRow(session, group.group_id));
   }
 
-  const sessions = projection.sessions.filter((tab) => {
-    if (!filter) return true;
-    const agent = fleetAgentForTab(next, tab.tab_id);
-    return [tab.title, tab.url, agent?.role, agent?.lifecycle_state].some((value) => String(value || '').toLowerCase().includes(filter));
-  });
-  if (sessions.length || projection.groups.length === 0) {
-    nodes.push(railHeader('Sessions', String(projection.sessions.length)));
-    for (const tab of sessions) {
-      nodes.push(makeTabRow(tab, tab.tab_id === state.selected_tab_id, fleetAgentForTab(next, tab.tab_id), exactActuationForTab(next, tab.tab_id)));
+  if (shell.selected_session) {
+    const surfaces = shell.surfaces.filter((surface) => {
+      if (!filter) return true;
+      return [surface.title, surface.surface_id, surface.type, surface.state]
+        .some((value) => String(value || '').toLowerCase().includes(filter));
+    });
+    if (surfaces.length || !filter) {
+      nodes.push(railHeader('Surfaces', String(shell.surfaces.length)));
+      for (const surface of surfaces) nodes.push(makeSurfaceRow(surface));
     }
   }
 
-  tabCount.textContent = String((state.tabs || []).length);
+  if (!nodes.length) nodes.push(railHeader(shell.valid ? 'Sessions' : 'DevOS unavailable', '0'));
+  tabCount.textContent = String(Number(shell.counts?.sessions || 0));
   verticalTabs.replaceChildren(...nodes);
-  if (projection.source_state === 'AVAILABLE') {
-    fleetProfile.textContent = `${projection.counts.workspaces} workspace${projection.counts.workspaces === 1 ? '' : 's'} · ${projection.counts.issues} drift`;
-  } else if (projection.source_state === 'RUNTIME_NOT_DEPLOYED') {
-    fleetProfile.textContent = 'Workspaces · runtime not deployed';
-  } else {
-    fleetProfile.textContent = `Workspaces · ${compact(projection.source_state, 22)}`;
-  }
+  fleetProfile.textContent = shell.valid
+    ? `${Number(shell.counts?.sessions || 0)} sessions · ${Number(shell.counts?.surfaces || 0)} surfaces`
+    : `DevOS · ${compact(shell.reason, 22)}`;
 }
 
 function el(tag, className = '', value = null) {
@@ -853,35 +925,12 @@ function agenticContextRows(next) {
   }).filter(Boolean);
 }
 
-function attentionQueue(next) {
-  const items = [];
-  const counts = next?.fleet?.counts || {};
-  const ambiguous = Number(counts.PROVISIONING_AMBIGUOUS || 0);
-  const lost = Number(counts.LOST || 0);
-  const bound = Number(counts.BOUND_UNVERIFIED || 0);
-  if (ambiguous > 0) items.push({ tone: 'bad', title: 'Fleet ambiguity', detail: `${ambiguous} provisioning ambiguous`, target: 'fleet' });
-  if (lost > 0) items.push({ tone: 'bad', title: 'Lost fleet agents', detail: `${lost} lost`, target: 'fleet' });
-  if (bound > 0) items.push({ tone: 'warn', title: 'Transport proof pending', detail: `${bound} bound unverified`, target: 'fleet' });
-
-  const workspaces = workspaceProjection(next);
-  if (Number(workspaces.counts?.frozen || 0) > 0) items.push({ tone: 'bad', title: 'Frozen workspaces', detail: `${workspaces.counts.frozen} frozen`, target: 'workspaces' });
-  if (Number(workspaces.counts?.issues || 0) > 0) items.push({ tone: 'warn', title: 'Workspace binding drift', detail: `${workspaces.counts.issues} issue(s)`, target: 'workspaces' });
-
-  const supervisorError = next?.supervisor?.last_error || next?.supervisor?.devos_last_error || next?.supervisor?.supervisor_mesh?.last_error;
-  if (supervisorError) items.push({ tone: 'bad', title: 'Supervisor degraded', detail: compact(supervisorError, 72), target: 'supervisor' });
-
-  const updater = next?.supervisor?.self_update;
-  if (['ERROR', 'REJECTED_METADATA', 'DISCOVERY_ERROR'].includes(String(updater?.state || '').toUpperCase())) {
-    items.push({ tone: 'bad', title: 'Self-update hold', detail: compact(updater?.last_error || updater?.state, 72), target: 'runtime' });
-  }
-
-  if (next?.development_plane && String(next.development_plane.state || '').toUpperCase() !== 'READY') {
-    items.push({ tone: 'warn', title: 'Development Plane not ready', detail: text(next.development_plane.state, 'UNKNOWN'), target: 'runtime' });
-  }
-  if (next?.compute && next.compute.available !== true) items.push({ tone: 'bad', title: 'Compute offline', detail: 'Compute health reports unavailable', target: 'runtime' });
-  if (next?.owner_safety_gates?.wildcard_disabled === true) items.push({ tone: 'bad', title: 'Wildcard gate override', detail: 'Owner safety wildcard override is active', target: 'safety' });
-
-  return Object.freeze(items.map((item) => Object.freeze({ ...item, authority_effect: false })));
+function attentionTone(item) {
+  const severity = String(item?.severity || '').toUpperCase();
+  const priority = String(item?.priority || '').toUpperCase();
+  if (['CRITICAL', 'ERROR', 'FAILED'].includes(severity) || priority === 'CRITICAL') return 'bad';
+  if (['WARNING', 'WARN'].includes(severity) || ['HIGH', 'URGENT'].includes(priority)) return 'warn';
+  return 'neutral';
 }
 
 function installAgenticNav() {
@@ -915,25 +964,46 @@ function openAgenticSection(name) {
 
 function renderAttention(next) {
   const fragment = document.createDocumentFragment();
-  const items = attentionQueue(next);
-  fragment.append(hero('Attention', 'Trusted shell projections only. Untrusted page text never becomes control authority.', items.length ? `${items.length} item${items.length === 1 ? '' : 's'}` : 'clear'));
+  const shell = devosShell(next);
+  const items = shell.now;
+  const bad = items.filter((item) => attentionTone(item) === 'bad').length;
+  const warn = items.filter((item) => attentionTone(item) === 'warn').length;
+  fragment.append(hero('Now', 'Canonical DevOS shell attention only; the renderer does not reconstruct runtime attention.', shell.valid ? (items.length ? `${items.length} item${items.length === 1 ? '' : 's'}` : 'clear') : 'unavailable'));
   const grid = el('div', 'opsGrid');
   grid.append(
-    metric('Critical', items.filter((item) => item.tone === 'bad').length, items.some((item) => item.tone === 'bad') ? 'bad' : 'good'),
-    metric('Warnings', items.filter((item) => item.tone === 'warn').length, items.some((item) => item.tone === 'warn') ? 'warn' : 'good'),
-    metric('Context tabs', agenticContextRows(next).length, agenticContextRows(next).length ? 'good' : 'neutral'),
+    metric('Critical', bad, bad ? 'bad' : 'good'),
+    metric('Warnings', warn, warn ? 'warn' : 'good'),
+    metric('Sessions', Number(shell.counts?.sessions || 0), Number(shell.counts?.sessions || 0) ? 'good' : 'neutral'),
     metric('Authority effect', 'NONE', 'good'),
   );
   fragment.append(grid);
+  if (!shell.valid) {
+    const unavailable = section('Canonical Now', 'fail closed; no renderer fallback');
+    unavailable.list.append(kvRow('State', shell.reason || 'INVALID_VIEW_MODEL', 'warn'));
+    fragment.append(unavailable.wrap);
+    return fragment;
+  }
   if (!items.length) {
-    const clear = section('Current readback', 'no derived attention items');
+    const clear = section('Canonical Now', 'no canonical attention rows');
     clear.list.append(kvRow('State', 'CLEAR', 'good'));
     fragment.append(clear.wrap);
     return fragment;
   }
-  const list = section('Derived queue', 'read only; no automatic remediation');
+  const list = section('Canonical Now', 'read only; no automatic remediation');
   list.list.className = 'entityList';
-  for (const item of items) list.list.append(entityRow(item.title, item.detail, [{ value: item.target, tone: item.tone }, { value: 'no auto action', tone: 'neutral' }]));
+  for (const item of items) {
+    const tone = attentionTone(item);
+    list.list.append(entityRow(
+      text(item.title, 'Attention required'),
+      text(item.reason, 'No additional reason'),
+      [
+        { value: text(item.kind, 'ATTENTION'), tone },
+        { value: text(item.priority, item.severity || 'UNKNOWN'), tone },
+        ...(item.session_id ? [{ value: shortId(item.session_id, 18), tone: 'neutral' }] : []),
+        { value: 'no auto action', tone: 'neutral' },
+      ],
+    ));
+  }
   fragment.append(list.wrap);
   return fragment;
 }
@@ -1016,7 +1086,7 @@ function renderSkills(next) {
   const list = el('div', 'commandList');
   list.append(
     commandButton('Research Focus', 'Expand Context Rail + open Context Set', () => setLayout({ sidebar: 'EXPANDED', operations: 'OPEN' }).then(() => openAgenticSection('context'))),
-    commandButton('Triage Attention', 'Open derived read-only attention queue', () => openAgenticSection('attention')),
+    commandButton('Triage Now', 'Open canonical DevOS Now', () => openAgenticSection('attention')),
     commandButton('Activity Trace', 'Open compact execution evidence', () => openAgenticSection('activity')),
     commandButton('Fleet Transport Review', 'Open existing trusted Fleet panel', () => openCoreOpsSection('fleet')),
     commandButton('Workspace Binding Review', 'Open existing typed Workspace panel', () => openCoreOpsSection('workspaces')),
