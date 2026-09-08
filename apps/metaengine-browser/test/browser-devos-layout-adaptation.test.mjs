@@ -12,27 +12,27 @@ function plan(width) {
   return planShellLayout({ width, height: 900, state: requested });
 }
 
-test('wide DevOS layout preserves requested chrome when active surface already meets its target', () => {
+test('wide dark workspace preserves requested chrome while expanding the active surface', () => {
   const view = plan(1400);
   assert.equal(view.effective_sidebar, 'EXPANDED');
   assert.equal(view.effective_operations, 'OPEN');
   assert.deepEqual(view.adaptations, []);
   assert.equal(view.adapted, false);
-  assert.equal(view.remote_bounds.width, 776);
+  assert.equal(view.remote_bounds.width, 840);
   assert.equal(view.active_surface_width_target, SHELL_MIN_REMOTE_WIDTH);
   assert.equal(view.active_surface_target_satisfied, true);
 });
 
-test('session sidebar compacts before the active surface is allowed below 720px', () => {
-  const view = plan(1300);
+test('dark workspace compacts the sidebar at the exact active-surface threshold', () => {
+  const view = plan(1279);
   assert.equal(view.effective_sidebar, 'COMPACT');
   assert.equal(view.effective_operations, 'OPEN');
   assert.deepEqual(view.adaptations, ['SIDEBAR_COMPACTED_FOR_ACTIVE_SURFACE']);
-  assert.equal(view.remote_bounds.width, 892);
+  assert.equal(view.remote_bounds.width, 907);
   assert.equal(view.active_surface_target_satisfied, true);
 });
 
-test('Inspector closes after sidebar compaction when more room is required for active surface', () => {
+test('Brain inspector closes only when compact rail still cannot preserve 720px active surface', () => {
   const view = plan(1000);
   assert.equal(view.effective_sidebar, 'COMPACT');
   assert.equal(view.effective_operations, 'CLOSED');
@@ -40,11 +40,11 @@ test('Inspector closes after sidebar compaction when more room is required for a
     'SIDEBAR_COMPACTED_FOR_ACTIVE_SURFACE',
     'INSPECTOR_CLOSED_FOR_ACTIVE_SURFACE',
   ]);
-  assert.equal(view.remote_bounds.width, 944);
+  assert.equal(view.remote_bounds.width, 948);
   assert.equal(view.active_surface_target_satisfied, true);
 });
 
-test('session sidebar hides last and gives the active surface the full viewport when necessary', () => {
+test('sidebar hides last and gives a sub-720 window fully to the active surface', () => {
   const view = plan(700);
   assert.equal(view.effective_sidebar, 'HIDDEN');
   assert.equal(view.effective_operations, 'CLOSED');
@@ -54,15 +54,14 @@ test('session sidebar hides last and gives the active surface the full viewport 
     'SIDEBAR_HIDDEN_FOR_ACTIVE_SURFACE',
   ]);
   assert.equal(view.remote_bounds.width, 700);
-  assert.equal(view.active_surface_width_target, 700, 'target cannot exceed the physical window width');
+  assert.equal(view.active_surface_width_target, 700);
   assert.equal(view.active_surface_target_satisfied, true);
 });
 
-test('responsive adaptation preserves manual requested state instead of mutating workspace preference', () => {
+test('responsive adaptation preserves requested workspace preference', () => {
   const manual = normalizeShellLayoutState({ sidebar: 'HIDDEN', operations: 'CLOSED' });
-  const narrow = planShellLayout({ width: 900, height: 700, state: manual });
-  const wide = planShellLayout({ width: 1800, height: 1000, state: manual });
-  for (const view of [narrow, wide]) {
+  for (const [width, height] of [[900, 700], [1800, 1000]]) {
+    const view = planShellLayout({ width, height, state: manual });
     assert.deepEqual(view.requested, manual);
     assert.equal(view.effective_sidebar, 'HIDDEN');
     assert.equal(view.effective_operations, 'CLOSED');
@@ -71,7 +70,7 @@ test('responsive adaptation preserves manual requested state instead of mutating
   }
 });
 
-test('auto-adaptation does not overwrite requested expanded/open state', () => {
+test('auto-adaptation never rewrites requested expanded/open state', () => {
   const view = plan(1000);
   assert.equal(view.requested.sidebar, 'EXPANDED');
   assert.equal(view.requested.operations, 'OPEN');
@@ -79,8 +78,8 @@ test('auto-adaptation does not overwrite requested expanded/open state', () => {
   assert.equal(view.effective_operations, 'CLOSED');
 });
 
-test('responsive adaptation remains geometry-only and never creates renderer or execution authority', () => {
-  for (const width of [1600, 1400, 1300, 1180, 1000, 800, 700, 480]) {
+test('dark responsive adaptation stays geometry-only and zero-authority', () => {
+  for (const width of [1600, 1400, 1279, 1180, 1100, 1024, 1000, 800, 700, 480]) {
     const view = plan(width);
     assert.equal(view.active_surface_priority, true);
     assert.equal(view.chrome_degrades_before_active_surface, true);

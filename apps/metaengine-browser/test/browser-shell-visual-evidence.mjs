@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { normalizeShellLayoutState, planShellLayout } from '../src/shell-layout.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -125,8 +126,11 @@ function brainProjection() {
 }
 
 function snapshotFor(width, height) {
-  const sidebarWidth = 272;
-  const operationsWidth = 352;
+  const layout = planShellLayout({
+    width,
+    height,
+    state: normalizeShellLayoutState({ sidebar: 'EXPANDED', operations: 'OPEN' }),
+  });
   return Object.freeze({
     schema: 'metaengine.browser-shell.snapshot.v3',
     version: 'visual-evidence',
@@ -164,14 +168,7 @@ function snapshotFor(width, height) {
       automatic_retry_allowed: false, browser_actuation_authority: false, authority_effect: false,
     }),
     compute: Object.freeze({ available: true, result: Object.freeze({ runtime: 'ready' }) }),
-    layout: Object.freeze({
-      requested: Object.freeze({ sidebar: 'EXPANDED', operations: 'OPEN' }),
-      effective_sidebar: 'EXPANDED', effective_operations: 'OPEN', overlay_remote_content: false, renderer_dimensions_authoritative: false,
-      shell_bounds: Object.freeze({ x: 0, y: 0, width, height }),
-      sidebar_bounds: Object.freeze({ x: 0, y: 48, width: sidebarWidth, height: Math.max(0, height - 48) }),
-      operations_bounds: Object.freeze({ x: Math.max(0, width - operationsWidth), y: 48, width: operationsWidth, height: Math.max(0, height - 48) }),
-      remote_bounds: Object.freeze({ x: sidebarWidth, y: 48, width: Math.max(0, width - sidebarWidth - operationsWidth), height: Math.max(0, height - 48) }),
-    }),
+    layout,
     policy: Object.freeze({}),
     authority_effect: false,
   });
@@ -202,7 +199,7 @@ async function registerShellProtocol() {
     const url = new URL(request.url);
     if (url.hostname !== 'shell') return new Response('not found', { status: 404 });
     const rel = url.pathname === '/' ? 'index.html' : url.pathname.replace(/^\/+/, '');
-    if (!['index.html', 'app.js', 'app.css'].includes(rel)) return new Response('not found', { status: 404 });
+    if (!['index.html', 'app.js', 'app.css', 'dark-workspace.css'].includes(rel)) return new Response('not found', { status: 404 });
     const body = await fs.readFile(path.join(UI_ROOT, rel));
     return new Response(body, { status: 200, headers: { 'content-type': mimeFor(rel), 'cache-control': 'no-store' } });
   });
@@ -281,7 +278,7 @@ async function main() {
   await registerShellProtocol();
   await fs.mkdir(OUTPUT_ROOT, { recursive: true });
 
-  const windowRef = new BaseWindow({ width: 1440, height: 960, show: false, backgroundColor: '#ffffff', title: 'METAENGINE Browser Visual Evidence' });
+  const windowRef = new BaseWindow({ width: 1440, height: 960, show: false, backgroundColor: '#090c11', title: 'METAENGINE Browser Visual Evidence' });
   const shellView = new WebContentsView({ webPreferences: { preload: PRELOAD, nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true } });
   windowRef.contentView.addChildView(shellView);
   shellView.setBounds({ x: 0, y: 0, width: 1440, height: 960 });
@@ -308,6 +305,10 @@ async function main() {
     if (!allCaptures.every((row) => row.metrics.now_visible === true && row.metrics.now_active === true)) throw new Error('visual_evidence_now_not_primary');
     if (!allCaptures.every((row) => row.metrics.task_first_sections === true && row.metrics.task_objective_visible === true && row.metrics.blocker_visible === true)) throw new Error('visual_evidence_task_first_brain_missing');
     if (!allCaptures.every((row) => row.metrics.ops_text_length > 400)) throw new Error('visual_evidence_brain_not_rendered');
+    const byName = Object.fromEntries(allCaptures.map((row) => [row.name, row]));
+    if (byName['shell-1920x1080']?.metrics.body_sidebar !== 'EXPANDED' || byName['shell-1920x1080']?.metrics.body_operations !== 'OPEN') throw new Error('visual_evidence_wide_layout_not_exact');
+    if (byName['shell-1100x760']?.metrics.body_sidebar !== 'COMPACT' || byName['shell-1100x760']?.metrics.body_operations !== 'OPEN') throw new Error('visual_evidence_1100_layout_not_exact');
+    if (byName['shell-1024x720']?.metrics.body_sidebar !== 'COMPACT' || byName['shell-1024x720']?.metrics.body_operations !== 'CLOSED') throw new Error('visual_evidence_1024_layout_not_exact');
 
     const captures = allCaptures.filter((row) => row.name === 'shell-1440x960' || row.name === 'shell-1100x760');
     if (captures.length !== 2) throw new Error('visual_evidence_legacy_capture_projection_invalid');

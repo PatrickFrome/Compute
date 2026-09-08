@@ -36,7 +36,8 @@ test('DevOS presentation migration preserves explicit focus and minimum pointer 
 
 test('canonical shell remains the only presentation surface until pinned DevOS HTML migration lands', () => {
   assert.equal((html.match(/<script\b/g) || []).length, 2);
-  assert.equal((html.match(/<style\b/g) || []).length, 1);
+  assert.equal((html.match(/<style\b/g) || []).length, 0);
+  assert.match(html, /<link rel="stylesheet" href="metaengine:\/\/shell\/dark-workspace\.css">/);
   assert.match(html, /data-adaptive-context-rail/);
   assert.doesNotMatch(html, /data-devos-overlay|devos-shadow-root|unsafe-inline|unsafe-eval/i);
 });

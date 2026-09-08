@@ -1,4 +1,4 @@
-import { app, BaseWindow, MessageChannelMain, WebContentsView, ipcMain, protocol, safeStorage, session, utilityProcess } from 'electron';
+import { app, BaseWindow, MessageChannelMain, WebContentsView, ipcMain, nativeTheme, protocol, safeStorage, session, utilityProcess } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,6 +36,7 @@ const isSmoke = process.argv.includes('--metaengine-smoke');
 const isDevelopmentPlaneSmoke = process.argv.includes('--metaengine-devplane-smoke');
 
 app.enableSandbox();
+nativeTheme.themeSource = 'dark';
 protocol.registerSchemesAsPrivileged([{ scheme: 'metaengine', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: false } }]);
 
 const registry = new TabRegistry();
@@ -81,7 +82,7 @@ async function registerShellProtocol() {
     const url = new URL(request.url);
     if (url.hostname !== 'shell') return new Response('not found', { status: 404 });
     const rel = url.pathname === '/' ? 'index.html' : url.pathname.replace(/^\/+/, '');
-    if (!['index.html', 'app.js', 'app.css'].includes(rel)) return new Response('not found', { status: 404 });
+    if (!['index.html', 'app.js', 'app.css', 'dark-workspace.css'].includes(rel)) return new Response('not found', { status: 404 });
     const body = await fs.readFile(path.join(UI_ROOT, rel));
     return new Response(body, { status: 200, headers: { 'content-type': mimeFor(rel), 'cache-control': 'no-store' } });
   });
@@ -91,6 +92,7 @@ async function registerShellProtocol() {
 function configureUserSession() {
   if (userSessionConfigured && userSession) return;
   userSession = session.fromPartition(SECURITY_POLICY.user_space_partition, { cache: true });
+  try { userSession.preconnect({ url: 'https://chatgpt.com/', numSockets: 2 }); } catch {}
   userSession.setPermissionCheckHandler(() => false);
   userSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
   downloads = new VerifiedDownloadManager({
@@ -350,7 +352,7 @@ function wireRemoteView(tab, view) {
   view.webContents.on('render-process-gone', () => { invalidatePerception(tab.tab_id); publishSnapshot().catch(() => {}); });
 }
 
-async function createTab(input = 'https://chatgpt.com/', { select = true, load = true, role = 'USER' } = {}) {
+async function createTab(input = 'https://chatgpt.com/', { select = true, load = true, awaitLoad = true, role = 'USER' } = {}) {
   if (!userSession) configureUserSession();
   const d = navigationDecision(input);
   if (!d.allow) throw new Error(`navigation_blocked:${d.reason}`);
@@ -360,10 +362,14 @@ async function createTab(input = 'https://chatgpt.com/', { select = true, load =
   wireRemoteView(tab, view);
   if (select) registry.select(tab.tab_id);
   attachSelected();
-  if (load) await view.webContents.loadURL(d.normalized_url);
+  if (load) {
+    const pendingLoad = view.webContents.loadURL(d.normalized_url);
+    if (awaitLoad) await pendingLoad;
+    else void pendingLoad.catch(() => publishSnapshot().catch(() => {}));
+  }
   invalidatePerception();
   await publishSnapshot();
-  return { ...tab, webcontents_id: view.webContents.id };
+  return { ...tab, webcontents_id: view.webContents.id, load_pending: load && !awaitLoad };
 }
 
 async function loadTab(tabId, input) {
@@ -524,7 +530,7 @@ async function handleCommand(command, payload = {}) {
   }
   if (command === 'TAKEOVER_PAUSE') return executeHumanTakeover('PAUSE');
   if (command === 'TAKEOVER_RESUME') return executeHumanTakeover('RESUME');
-  if (command === 'NEW_CHATGPT') return createTab('https://chatgpt.com/', { select: true, load: true });
+  if (command === 'NEW_CHATGPT') return createTab('https://chatgpt.com/', { select: true, load: true, awaitLoad: false });
   if (command === 'NEW_TAB') return createTab(payload?.url || 'https://chatgpt.com/', { select: payload?.select !== false, load: true });
   if (command === 'SELECT_TAB') { registry.select(payload?.tab_id); attachSelected(); invalidatePerception(); await publishSnapshot(); return { ok: true, tab_id: String(payload?.tab_id) }; }
   if (command === 'CLOSE_TAB') { await closeTab(payload?.tab_id); return { ok: true }; }

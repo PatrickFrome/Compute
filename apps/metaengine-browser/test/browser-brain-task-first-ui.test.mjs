@@ -60,8 +60,8 @@ test('Brain information architecture converges around work outcomes before syste
   }
   assert.match(source, /now\.dataset\.brainNow = 'true'/);
   assert.match(source, /coreStatus\.textContent = 'System'/);
-  assert.match(source, /Sessions & Agents/);
-  assert.match(source, /Search sessions, agents, workspaces/);
+  assert.match(html, /<strong>Workspace<\/strong>/);
+  assert.match(html, /placeholder="Search BrowserCells"/);
 });
 
 test('top health has a textual non-color-only aggregate without becoming a live region', () => {
