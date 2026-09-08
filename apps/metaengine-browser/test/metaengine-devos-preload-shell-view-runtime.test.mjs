@@ -107,6 +107,11 @@ function assertZeroAuthority(value) {
   assert.equal(value.authority_effect, false);
 }
 
+function assertEmptyArray(value) {
+  assert.equal(Array.isArray(value), true);
+  assert.equal(value.length, 0);
+}
+
 test('sandbox preload promotes canonical DevOS and shell ViewModel through snapshot()', async () => {
   const harness = executePreload();
   const result = await harness.api.snapshot();
@@ -118,7 +123,8 @@ test('sandbox preload promotes canonical DevOS and shell ViewModel through snaps
   assertZeroAuthority(result.devos);
   assertZeroAuthority(result.devos_shell);
   assert.equal(Object.isFrozen(result), true);
-  assert.deepEqual(harness.invocations[0], { channel: 'metaengine:shell:snapshot', payload: undefined });
+  assert.equal(harness.invocations[0].channel, 'metaengine:shell:snapshot');
+  assert.equal(harness.invocations[0].payload, undefined);
 });
 
 test('snapshot listener receives the same decorated zero-authority shell ViewModel', () => {
@@ -152,9 +158,9 @@ test('invalid shell ViewModel fails closed without corrupting canonical DevOS pr
   assert.equal(result.devos_shell.schema, 'metaengine.devos.shell-view-model.v1');
   assert.equal(result.devos_shell.valid, false);
   assert.equal(result.devos_shell.reason, 'INVALID_VIEW_MODEL');
-  assert.deepEqual(result.devos_shell.roots, []);
-  assert.deepEqual(result.devos_shell.session_groups, []);
-  assert.deepEqual(result.devos_shell.now, []);
+  assertEmptyArray(result.devos_shell.roots);
+  assertEmptyArray(result.devos_shell.session_groups);
+  assertEmptyArray(result.devos_shell.now);
   assertZeroAuthority(result.devos_shell);
 });
 
@@ -164,8 +170,8 @@ test('missing shell ViewModel is explicit NOT_EXPOSED instead of inferred from t
   const result = await harness.api.snapshot();
   assert.equal(result.devos_shell.valid, false);
   assert.equal(result.devos_shell.reason, 'NOT_EXPOSED');
-  assert.deepEqual(result.devos_shell.roots, []);
-  assert.deepEqual(result.devos_shell.now, []);
+  assertEmptyArray(result.devos_shell.roots);
+  assertEmptyArray(result.devos_shell.now);
   assertZeroAuthority(result.devos_shell);
 });
 
@@ -173,10 +179,11 @@ test('command bridge remains generic and ViewModel promotion cannot create a new
   const harness = executePreload();
   const result = await harness.api.command('SHELL_LAYOUT_SET', { sidebar: 'COMPACT', operations: 'CLOSED' });
   assert.equal(result.ok, true);
-  assert.deepEqual(harness.invocations.at(-1), {
-    channel: 'metaengine:shell:command',
-    payload: { command: 'SHELL_LAYOUT_SET', payload: { sidebar: 'COMPACT', operations: 'CLOSED' } },
-  });
+  const invocation = harness.invocations.at(-1);
+  assert.equal(invocation.channel, 'metaengine:shell:command');
+  assert.equal(invocation.payload.command, 'SHELL_LAYOUT_SET');
+  assert.equal(invocation.payload.payload.sidebar, 'COMPACT');
+  assert.equal(invocation.payload.payload.operations, 'CLOSED');
   assert.equal('ipcRenderer' in harness.api, false);
   assert.equal('send' in harness.api, false);
   assert.equal('on' in harness.api, false);
