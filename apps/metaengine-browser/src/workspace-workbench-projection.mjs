@@ -99,6 +99,6 @@ export function projectWorkspaceWorkbench(snapshot={}){
   });
   const devosBase=projectMetaengineDevOS({tabs:snapshot?.tabs||{tabs:[]},supervisor:snapshot?.supervisor||null,workspaces:base});
   const devos=attachDevOSSessionLayout(devosBase,snapshot?.session_layouts??null);
-  const devos_shell=projectDevOSShellViewModel(devos);
+  const devos_shell=projectDevOSShellViewModel(devos,snapshot?.presentation_focus??null);
   return Object.freeze({...base,devos,devos_shell});
 }
