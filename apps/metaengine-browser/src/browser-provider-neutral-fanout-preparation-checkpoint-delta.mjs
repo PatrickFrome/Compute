@@ -85,15 +85,7 @@ export function applyProviderNeutralFanoutPreparationCheckpointDelta(checkpointI
     throw new Error('fanout_preparation_delta_entries_invalid');
   }
 
-  for (const entry of delta.added_entries) {
-    restored.accept({
-      fanout_index: entry.fanout_index,
-      shard_index: entry.shard_index,
-      target_binding_digest: entry.target_binding_digest,
-      issuance_entry_digest: entry.issuance_entry_digest,
-      prepared_command_digest: entry.prepared_command_digest,
-    });
-  }
+  for (const entry of delta.added_entries) restored.accept(entry);
   const next = restored.checkpoint();
   if (next.preparation_checkpoint_digest !== requireDigest(delta.next_preparation_checkpoint_digest, 'next_digest')) {
     throw new Error('fanout_preparation_delta_next_digest_mismatch');
