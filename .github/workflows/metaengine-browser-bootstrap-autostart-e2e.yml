@@ -1,0 +1,115 @@
+name: METAENGINE Browser Bootstrap Autostart E2E
+
+on:
+  push:
+    branches:
+      - work/self-update-fast-loop-v1
+    paths:
+      - 'apps/metaengine-browser/**'
+      - '.github/workflows/metaengine-browser-bootstrap-autostart-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: metaengine-browser-bootstrap-autostart-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  windows-bootstrap-autostart:
+    runs-on: windows-2022
+    timeout-minutes: 34
+    env:
+      GITHUB_ACTIONS: 'true'
+      METAENGINE_DISABLE_CRASH_SENTINEL: '1'
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Install dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+
+      - name: Autostart contract gates
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm run check
+          npm test
+          $builder = Get-Content ./electron-builder.test.json -Raw | ConvertFrom-Json
+          if ($builder.nsis.runAfterFinish -ne $true) { throw 'nsis_run_after_finish_not_enabled' }
+          $runtime = Get-Content ./src/self-update-runtime-v8.mjs -Raw
+          if ($runtime -notmatch 'quitAndInstall\(true,\s*true\)') { throw 'self_update_force_run_after_install_contract_missing' }
+          $handoff = Get-Content ./src/self-update-handoff.mjs -Raw
+          if ($handoff -notmatch "receipt\?\.successor_startup\s*\|\|\s*SUCCESSOR_STARTUP_NORMAL") { throw 'self_update_normal_successor_default_missing' }
+          $bootstrap = Get-Content ./scripts/bootstrap-install-and-launch.ps1 -Raw
+          if ($bootstrap -notmatch "bootstrap_launch_kind = 'POST_INSTALL_NORMAL'") { throw 'bootstrap_post_install_normal_launch_contract_missing' }
+          if ($bootstrap -notmatch 'PRIMARY_WINDOW_STABLE') { throw 'bootstrap_visible_window_physical_gate_missing' }
+
+      - name: Build exact Windows NSIS candidate
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = [string](node -p "require('./package.json').version")
+          if ($version -notmatch '^\d+\.\d+\.\d+-dev\.\d+\.1$') { throw "package_version_not_trusted_dev_shape:$version" }
+          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
+          $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
+          if (-not $installer) { throw 'bootstrap_candidate_installer_missing' }
+          $hash = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -notmatch '^[a-f0-9]{64}$') { throw 'bootstrap_candidate_installer_sha256_invalid' }
+          "METAENGINE_BOOTSTRAP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "METAENGINE_BOOTSTRAP_INSTALLER=$($installer.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "METAENGINE_BOOTSTRAP_INSTALLER_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install exact candidate and prove automatic visible Browser launch
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $proofPath = Join-Path $env:RUNNER_TEMP 'bootstrap-autostart-proof.json'
+          ./scripts/bootstrap-install-and-launch.ps1 `
+            -InstallerPath $env:METAENGINE_BOOTSTRAP_INSTALLER `
+            -ExpectedInstallerSha256 $env:METAENGINE_BOOTSTRAP_INSTALLER_SHA256 `
+            -ExpectedVersion $env:METAENGINE_BOOTSTRAP_VERSION `
+            -ProofPath $proofPath `
+            -PhysicalProof
+          if (-not (Test-Path -LiteralPath $proofPath -PathType Leaf)) { throw 'bootstrap_autostart_proof_missing' }
+          $proof = Get-Content -LiteralPath $proofPath -Raw | ConvertFrom-Json
+          if ($proof.schema -ne 'metaengine.browser.bootstrap-install-autostart-proof.v1') { throw 'bootstrap_autostart_proof_schema_invalid' }
+          if ([string]$proof.expected_version -ne $env:METAENGINE_BOOTSTRAP_VERSION) { throw 'bootstrap_autostart_version_drift' }
+          if ([string]$proof.installer_sha256 -ne $env:METAENGINE_BOOTSTRAP_INSTALLER_SHA256) { throw 'bootstrap_autostart_installer_digest_drift' }
+          if ($proof.install_exit_code -ne 0 -or $proof.automatic_browser_launch_performed -ne $true -or $proof.browser_visible -ne $true) { throw 'bootstrap_autostart_effect_not_proven' }
+          if ($proof.runtime_import_verified -ne $true -or $proof.version_probe_verified -ne $true) { throw 'bootstrap_autostart_runtime_binding_not_proven' }
+          if ([string]$proof.bootstrap_launch_kind -ne 'POST_INSTALL_NORMAL' -or $proof.authority_effect -ne $false) { throw 'bootstrap_autostart_launch_contract_invalid' }
+          $proof | ConvertTo-Json -Depth 8 | Write-Host
+
+      - name: Upload bootstrap autostart evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: metaengine-browser-bootstrap-autostart-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bootstrap-autostart-proof.json
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Cleanup Browser process
+        if: always()
+        shell: powershell
+        run: |
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test\METAENGINE Browser Test.exe'
+          Get-Process -ErrorAction SilentlyContinue | Where-Object {
+            try { [System.IO.Path]::GetFullPath([string]$_.Path) -eq [System.IO.Path]::GetFullPath($app) } catch { $false }
+          } | Stop-Process -Force -ErrorAction SilentlyContinue
