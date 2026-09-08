@@ -112,6 +112,67 @@ async function patchClient() {
   await write(file, text);
 }
 
+async function patchBoundedDeadlineReliability() {
+  for (const [file, label] of [
+    ['apps/metaengine-browser/src/native-supervisor-client-core.mjs', 'supervisor_bounded_deadline_ref'],
+    ['apps/metaengine-browser/src/bounded-network-fetch.mjs', 'optional_network_deadline_ref'],
+  ]) {
+    let text = await read(file);
+    text = replaceOnce(
+      text,
+      '    timer.unref?.();\n    try {',
+      '    // This timer is the liveness boundary for a hanging transport promise. Keep it referenced\n    // until the request settles so the bounded operation cannot disappear with the event loop.\n    try {',
+      label,
+    );
+    await write(file, text);
+  }
+}
+
+async function patchBatchContracts() {
+  {
+    const file = 'apps/metaengine-browser/test/native-supervisor-command-fastlane.test.mjs';
+    let text = await read(file);
+    text = replaceOnce(
+      text,
+      "test('base client preserves the 750ms fastlane only as a fallback and suppresses it after batch support', async () => {",
+      "test('base client keeps the legacy fastlane only behind explicit fallback and suppresses it after batch support', async () => {",
+      'fastlane_test_name',
+    );
+    text = replaceOnce(
+      text,
+      '  assert.match(source, /commandFastlane === true\\s*\\?\\s*new NativeSupervisorCommandFastlane/);',
+      '  assert.match(source, /commandFastlane === true && this\\.#legacySingleLeaseFallback\\s*\\?\\s*new NativeSupervisorCommandFastlane/);',
+      'fastlane_fallback_gate_contract',
+    );
+    text = replaceOnce(
+      text,
+      "test('shell opts the native supervisor into the command fastlane with a bounded cadence', async () => {\n  const main = await readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');\n  assert.match(main, /commandFastlane:\\s*true/);\n  assert.match(main, /commandFastlaneIntervalMs:\\s*750/);\n});",
+      "test('clean genesis shell requires held batch transport and disables the single-command fastlane', async () => {\n  const main = await readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');\n  assert.match(main, /commandBatchSize:\\s*64/);\n  assert.match(main, /commandReadConcurrency:\\s*32/);\n  assert.match(main, /commandMutationConcurrency:\\s*16/);\n  assert.match(main, /legacySingleLeaseFallback:\\s*false/);\n  assert.match(main, /commandFastlane:\\s*false/);\n  assert.doesNotMatch(main, /commandFastlaneIntervalMs:\\s*750/);\n});",
+      'shell_batch_required_contract',
+    );
+    await write(file, text);
+  }
+  {
+    const file = 'apps/metaengine-browser/test/native-supervisor-fast-lane-contract.test.mjs';
+    let text = await read(file);
+    text = replaceOnce(
+      text,
+      "test('base command lane precedes heavy maintenance, preserves 750ms fallback, and hands off to held batch transport', () => {",
+      "test('base command lane precedes heavy maintenance, gates legacy fallback explicitly, and hands off to held batch transport', () => {",
+      'fast_lane_contract_name',
+    );
+    text = replaceOnce(
+      text,
+      '  assert.match(source, /commandFastlane === true\\s*\\?\\s*new NativeSupervisorCommandFastlane/);',
+      '  assert.match(source, /commandFastlane === true && this\\.#legacySingleLeaseFallback\\s*\\?\\s*new NativeSupervisorCommandFastlane/);',
+      'fast_lane_fallback_gate_contract',
+    );
+    await write(file, text);
+  }
+}
+
 await patchPackage();
 await patchMain();
 await patchClient();
+await patchBoundedDeadlineReliability();
+await patchBatchContracts();

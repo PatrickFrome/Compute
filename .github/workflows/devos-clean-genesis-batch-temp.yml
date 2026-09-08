@@ -34,9 +34,11 @@ jobs:
           node --check apps/metaengine-browser/src/runtime-genesis.mjs
           node --check apps/metaengine-browser/src/main.mjs
           node --check apps/metaengine-browser/src/native-supervisor-client-base.mjs
+          node --check apps/metaengine-browser/src/native-supervisor-client-core.mjs
+          node --check apps/metaengine-browser/src/bounded-network-fetch.mjs
           node --check apps/metaengine-browser/scripts/patch-clean-genesis-batch-temp.mjs
 
-      - name: Targeted clean genesis and batch contracts
+      - name: Targeted clean genesis, batch and deadline contracts
         shell: bash
         run: |
           set -euo pipefail
@@ -45,7 +47,11 @@ jobs:
             apps/metaengine-browser/test/browser-batch-required-control.test.mjs \
             apps/metaengine-browser/test/browser-native-supervisor-batch-issue-contract.test.mjs \
             apps/metaengine-browser/test/browser-quiescent-zero-tab-contract.test.mjs \
-            apps/metaengine-browser/test/browser-native-supervisor-command-lanes.test.mjs
+            apps/metaengine-browser/test/browser-native-supervisor-command-lanes.test.mjs \
+            apps/metaengine-browser/test/native-supervisor-bounded-fetch.test.mjs \
+            apps/metaengine-browser/test/native-supervisor-command-fastlane.test.mjs \
+            apps/metaengine-browser/test/native-supervisor-fast-lane-contract.test.mjs \
+            apps/metaengine-browser/test/self-update-network-deadline.test.mjs
 
       - name: Prepare clean product tree
         shell: bash
@@ -53,9 +59,11 @@ jobs:
           set -euo pipefail
           rm -f apps/metaengine-browser/scripts/patch-clean-genesis-batch-temp.mjs
           rm -f .github/workflows/devos-clean-genesis-batch-temp.yml
+          git add -A
           test -n "$(git status --porcelain)"
           test ! -e apps/metaengine-browser/scripts/patch-clean-genesis-batch-temp.mjs
           test ! -e .github/workflows/devos-clean-genesis-batch-temp.yml
+          git diff --cached --check
 
       - name: Full Browser node regression
         id: full_regression
@@ -78,8 +86,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git add -A
-          git diff --cached --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "feat(devos): enforce clean genesis batch control"
