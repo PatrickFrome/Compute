@@ -36,9 +36,12 @@ export function resumeObservationCursorCohorts(ledger, knownRevisionValues = [])
   const uniqueRevisions = [...new Set(normalized)].sort((a, b) => a - b);
   ledger.preflightResumeRevisions(uniqueRevisions);
 
-  const cohorts = uniqueRevisions.map((knownRevision) => {
+  const cohortIndexByRevision = new Map();
+  const cohorts = uniqueRevisions.map((knownRevision, cohortIndex) => {
+    cohortIndexByRevision.set(knownRevision, cohortIndex);
     const delta = ledger.resumeChangedSince(knownRevision);
     return Object.freeze({
+      cohort_index: cohortIndex,
       known_revision: knownRevision,
       revision: delta.revision,
       changed: delta.changed,
@@ -47,11 +50,13 @@ export function resumeObservationCursorCohorts(ledger, knownRevisionValues = [])
       ...ZERO_AUTHORITY,
     });
   });
+  const requestCohortIndexes = normalized.map((knownRevision) => cohortIndexByRevision.get(knownRevision));
 
   return Object.freeze({
     schema: 'metaengine.browser-brain.observation-delta-resume-cohorts.v1',
     request_count: normalized.length,
     cohort_count: cohorts.length,
+    request_cohort_indexes: Object.freeze(requestCohortIndexes),
     cohorts: Object.freeze(cohorts),
     payload_persisted: false,
     ...ZERO_AUTHORITY,
@@ -65,6 +70,7 @@ export function browserBrainObservationCursorCohortContract() {
     equal_revision_requests_share_one_materialization: true,
     deterministic_revision_order: true,
     duplicate_revision_idempotent: true,
+    request_order_cohort_routing: true,
     all_revision_requests_preflight_before_delta_materialization: true,
     provider_neutral: true,
     payload_persisted: false,
