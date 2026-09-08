@@ -42,6 +42,7 @@ if ($profile.schema -ne 'metaengine.browser.profile-probe.v1' -or $profile.prima
 }
 
 $journal = Join-Path ([string]$profile.user_data_path) 'metaengine-browser-startup-journal-v1.json'
+$controlStatePath = Join-Path ([string]$profile.user_data_path) 'metaengine-native-supervisor-control-state-v1.json'
 Remove-Item $journal -Force -ErrorAction SilentlyContinue
 Remove-Item "$journal.corrupt-*" -Force -ErrorAction SilentlyContinue
 
@@ -76,22 +77,45 @@ try {
   $runtimeImport = $startup.events | Where-Object { $_.boot_id -eq $startup.current_boot_id -and $_.state -eq 'RUNTIME_IMPORT_OK' } | Select-Object -Last 1
   if (-not $runtimeImport) { throw 'soak_runtime_import_success_missing' }
 
-  # PRIMARY_WINDOW_STABLE intentionally precedes degradable startup so the local
-  # shell never waits on Fleet, the Development Plane, Native Supervisor or the
-  # initial remote load. Resource growth must therefore not use that early shell
-  # marker as its baseline. Wait until every known background startup subsystem
-  # has reached either READY or DEGRADED, then measure only growth caused after
-  # that settled point. This tightens attribution without widening any budget.
+  # PRIMARY_WINDOW_STABLE intentionally precedes degradable startup. Read the
+  # exact durable control state before deciding whether initial remote topology is
+  # expected. Clean Genesis is deliberately OFF + disarmed and must remain a
+  # zero-tab, zero-automatic-navigation startup; other modes retain the old gates.
+  $controlState = $null
+  $controlDeadline = [DateTime]::UtcNow.AddSeconds(15)
+  while ([DateTime]::UtcNow -lt $controlDeadline) {
+    if (Test-Path $controlStatePath -PathType Leaf) {
+      try { $controlState = Get-Content $controlStatePath -Raw | ConvertFrom-Json } catch { $controlState = $null }
+      if ($controlState) { break }
+    }
+    Start-Sleep -Milliseconds 100
+  }
+  if (-not $controlState `
+      -or $controlState.schema -ne 'metaengine.native-supervisor.control-state.v1' `
+      -or @('OFF','MONITOR','CONTROL') -notcontains [string]$controlState.supervisor_mode `
+      -or -not ($controlState.armed -is [bool]) `
+      -or $controlState.authority_effect -ne $false) {
+    throw 'soak_startup_control_state_invalid'
+  }
+  if ($controlState.supervisor_mode -eq 'OFF' -and $controlState.armed -ne $false) {
+    throw 'soak_off_control_state_armed'
+  }
+  $quiescentStartup = $controlState.supervisor_mode -eq 'OFF' `
+    -and $controlState.armed -eq $false `
+    -and $controlState.recovered_fail_closed -ne $true
+
   $requiredStartupSubsystems = @(
     'OWNER_SAFETY_GATES',
-    'USER_SESSION',
-    'INITIAL_TAB_CREATE',
+    'USER_SESSION'
+  )
+  if (-not $quiescentStartup) { $requiredStartupSubsystems += 'INITIAL_TAB_CREATE' }
+  $requiredStartupSubsystems += @(
     'FLEET',
     'SHELL_SNAPSHOT',
     'DEVELOPMENT_PLANE',
-    'NATIVE_SUPERVISOR',
-    'INITIAL_REMOTE_LOAD'
+    'NATIVE_SUPERVISOR'
   )
+  if (-not $quiescentStartup) { $requiredStartupSubsystems += 'INITIAL_REMOTE_LOAD' }
   $settledStartupSubsystems = New-Object 'System.Collections.Generic.HashSet[string]'
   $settleDeadline = [DateTime]::UtcNow.AddSeconds(35)
   while ([DateTime]::UtcNow -lt $settleDeadline -and $settledStartupSubsystems.Count -lt $requiredStartupSubsystems.Count) {
@@ -112,6 +136,20 @@ try {
   if ($settledStartupSubsystems.Count -ne $requiredStartupSubsystems.Count) {
     $missing = @($requiredStartupSubsystems | Where-Object { -not $settledStartupSubsystems.Contains($_) })
     throw "soak_startup_resource_baseline_unsettled:$($missing -join ',')"
+  }
+
+  if ($quiescentStartup -and (Test-Path $normalOut -PathType Leaf)) {
+    $quiescentInitialTabRows = 0
+    $quiescentInitialRemoteRows = 0
+    foreach ($startupLine in @(Get-Content $normalOut -ErrorAction SilentlyContinue)) {
+      if (-not [string]$startupLine -or -not ([string]$startupLine).Trim().StartsWith('{')) { continue }
+      try { $startupRow = $startupLine | ConvertFrom-Json } catch { continue }
+      if ($startupRow.schema -ne 'metaengine.browser-startup-subsystem.v1') { continue }
+      if ([string]$startupRow.subsystem -eq 'INITIAL_TAB_CREATE') { $quiescentInitialTabRows += 1 }
+      if ([string]$startupRow.subsystem -eq 'INITIAL_REMOTE_LOAD') { $quiescentInitialRemoteRows += 1 }
+    }
+    if ($quiescentInitialTabRows -gt 0) { throw 'soak_quiescent_startup_created_initial_tab' }
+    if ($quiescentInitialRemoteRows -gt 0) { throw 'soak_quiescent_startup_started_initial_remote_load' }
   }
 
   $normal.Refresh()
@@ -257,6 +295,11 @@ try {
   $proof | Add-Member -NotePropertyName startup_stable_sequence -NotePropertyValue ([int64]$stable.sequence) -Force
   $proof | Add-Member -NotePropertyName startup_resource_baseline_settled -NotePropertyValue $true -Force
   $proof | Add-Member -NotePropertyName startup_resource_baseline_subsystems -NotePropertyValue @($requiredStartupSubsystems) -Force
+  $proof | Add-Member -NotePropertyName startup_control_mode -NotePropertyValue ([string]$controlState.supervisor_mode) -Force
+  $proof | Add-Member -NotePropertyName startup_control_armed -NotePropertyValue ([bool]$controlState.armed) -Force
+  $proof | Add-Member -NotePropertyName quiescent_startup_verified -NotePropertyValue ([bool]$quiescentStartup) -Force
+  $proof | Add-Member -NotePropertyName automatic_initial_tab_suppressed -NotePropertyValue ([bool]$quiescentStartup) -Force
+  $proof | Add-Member -NotePropertyName automatic_initial_remote_load_suppressed -NotePropertyValue ([bool]$quiescentStartup) -Force
   $proof | Add-Member -NotePropertyName final_activation_sequence -NotePropertyValue $lastActivationSequence -Force
   $proof | Add-Member -NotePropertyName activation_latency_p95_ms -NotePropertyValue ([Math]::Round($p95Ms, 2)) -Force
   $proof | Add-Member -NotePropertyName activation_latency_p95_budget_ms -NotePropertyValue $ActivationP95BudgetMs -Force
