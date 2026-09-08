@@ -9,7 +9,7 @@ const workflow = fs.readFileSync(
 );
 
 test('physical self-update stabilizes Windows process exit observation', () => {
-  const wait = /function Wait-ExitOrThrow[\s\S]*?\n}\n\n\$root/.exec(physicalScript)?.[0] || '';
+  const wait = /function Wait-ExitOrThrow[\s\S]*?\r?\n}\r?\n\r?\n\$root/.exec(physicalScript)?.[0] || '';
   assert.match(wait, /WaitForExit\(\$TimeoutMs\)/);
   assert.match(wait, /\$Process\.WaitForExit\(\)/);
   assert.match(wait, /\$Process\.Refresh\(\)/);
