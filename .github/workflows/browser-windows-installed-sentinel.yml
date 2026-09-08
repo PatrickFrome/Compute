@@ -1,0 +1,126 @@
+name: Browser Windows Installed Sentinel
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/browser-sentinel.mjs'
+      - 'apps/metaengine-browser/src/browser-sentinel-worker.cjs'
+      - 'apps/metaengine-browser/src/browser-sentinel-liveness.cjs'
+      - 'apps/metaengine-browser/src/browser-sentinel-action-journal.cjs'
+      - 'apps/metaengine-browser/src/durable-json-file.cjs'
+      - 'apps/metaengine-browser/src/host-resilience-runtime.mjs'
+      - 'apps/metaengine-browser/test/browser-sentinel-**'
+      - 'apps/metaengine-browser/electron-builder.test.json'
+      - 'apps/metaengine-browser/package.json'
+      - '.github/workflows/browser-windows-installed-sentinel.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  installed-electron-sentinel-heartbeat:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+      - name: Prove recovery contracts
+        working-directory: apps/metaengine-browser
+        run: >-
+          node --test
+          test/browser-sentinel-recovery-binding-handoff.test.mjs
+          test/browser-sentinel-recovery-policy.test.mjs
+          test/browser-sentinel-worker-asar-unpack.test.mjs
+          test/browser-sentinel-installed-electron-contract.test.mjs
+      - name: Build exact-head NSIS
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = [string](node -p "require('./package.json').version")
+          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
+          if (-not $installer) { throw 'installed_sentinel_installer_missing' }
+          Copy-Item $installer.FullName "$env:RUNNER_TEMP\sentinel-candidate-setup.exe"
+      - name: Install and prove exact Electron sentinel heartbeat
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = Start-Process -FilePath "$env:RUNNER_TEMP\sentinel-candidate-setup.exe" -ArgumentList '/S' -PassThru -Wait
+          if ($setup.ExitCode -ne 0) { throw "installed_sentinel_installer_exit_$($setup.ExitCode)" }
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test\METAENGINE Browser Test.exe'
+          if (-not (Test-Path $app -PathType Leaf)) { throw 'installed_sentinel_browser_missing' }
+          $profileOut = "$env:RUNNER_TEMP\sentinel-profile.out"
+          $profileErr = "$env:RUNNER_TEMP\sentinel-profile.err"
+          $prior = $env:METAENGINE_PROFILE_PROBE_WRITE
+          $env:METAENGINE_PROFILE_PROBE_WRITE = '1'
+          try {
+            $probe = Start-Process -FilePath $app -ArgumentList '--metaengine-profile-probe' -PassThru -RedirectStandardOutput $profileOut -RedirectStandardError $profileErr
+            $null = $probe.Handle
+            if (-not $probe.WaitForExit(15000)) { Stop-Process -Id $probe.Id -Force -ErrorAction SilentlyContinue; throw 'installed_sentinel_profile_probe_timeout' }
+            if ($probe.ExitCode -ne 0) { throw "installed_sentinel_profile_probe_exit_$($probe.ExitCode)" }
+          } finally { $env:METAENGINE_PROFILE_PROBE_WRITE = $prior }
+          $profile = (Get-Content $profileOut | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
+          if ($profile.schema -ne 'metaengine.browser.profile-probe.v1' -or -not [string]$profile.user_data_path) { throw 'installed_sentinel_profile_probe_invalid' }
+          $statePath = Join-Path ([string]$profile.user_data_path) 'metaengine-browser-sentinel-v1.json'
+          $heartbeatPath = "$statePath.worker-heartbeat-v1.json"
+          Remove-Item $statePath,$heartbeatPath,"$statePath.action-journal-v1.json","$statePath.parent-progress-v1.json" -Force -ErrorAction SilentlyContinue
+          $normal = $null
+          try {
+            $normal = Start-Process -FilePath $app -PassThru
+            $null = $normal.Handle
+            $deadline = [DateTime]::UtcNow.AddSeconds(45)
+            $state = $null; $heartbeat = $null
+            while ([DateTime]::UtcNow -lt $deadline) {
+              if ($normal.HasExited) { throw "installed_sentinel_normal_ui_exited_early:$($normal.ExitCode)" }
+              if (Test-Path $statePath) { try { $state = Get-Content $statePath -Raw | ConvertFrom-Json } catch {} }
+              if (Test-Path $heartbeatPath) { try { $heartbeat = Get-Content $heartbeatPath -Raw | ConvertFrom-Json } catch {} }
+              if ($state -and $heartbeat -and $state.lifecycle -eq 'ARMED' -and [int64]$state.worker_pid -gt 0 -and [string]$heartbeat.token -eq [string]$state.token -and [int64]$heartbeat.parent_pid -eq [int64]$state.parent_pid -and [int64]$heartbeat.worker_pid -eq [int64]$state.worker_pid -and $heartbeat.lifecycle -eq 'READY' -and $heartbeat.authority_effect -eq $false) { break }
+              Start-Sleep -Milliseconds 250
+            }
+            if (-not $state -or -not $heartbeat) { throw 'installed_sentinel_worker_heartbeat_missing' }
+            if ([string]$state.worker_script -notmatch 'app\.asar\.unpacked') { throw 'installed_sentinel_worker_not_unpacked' }
+            if ($heartbeat.schema -ne 'metaengine.browser-sentinel.worker-heartbeat.v1') { throw 'installed_sentinel_heartbeat_schema_invalid' }
+            if ([string]$heartbeat.token -ne [string]$state.token -or [int64]$heartbeat.parent_pid -ne [int64]$state.parent_pid -or [int64]$heartbeat.worker_pid -ne [int64]$state.worker_pid) { throw 'installed_sentinel_binding_drift' }
+            if ($heartbeat.lifecycle -ne 'READY' -or $heartbeat.authority_effect -ne $false) { throw 'installed_sentinel_heartbeat_not_ready' }
+            $proof = @{
+              schema='metaengine.browser.installed-sentinel-proof.v1'
+              source_head='${{ github.event.pull_request.head.sha }}'
+              worker_script=[string]$state.worker_script
+              worker_pid=[int64]$state.worker_pid
+              parent_pid=[int64]$state.parent_pid
+              lifecycle=[string]$heartbeat.lifecycle
+              authority_effect=$false
+            }
+            $proof | ConvertTo-Json -Depth 5 | Set-Content "$env:RUNNER_TEMP\installed-sentinel-proof.json" -Encoding utf8
+          } finally {
+            if ($normal -and -not $normal.HasExited) { Stop-Process -Id $normal.Id -Force -ErrorAction SilentlyContinue }
+          }
+      - name: Upload installed sentinel proof
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: browser-installed-sentinel-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}\installed-sentinel-proof.json
+          if-no-files-found: error
