@@ -1,5 +1,5 @@
 name: DevOS Electron Physical Diagnostic Temp
-# physical proof v4: live renderer/process/bounds evidence, no hosted Viz screenshot dependency
+# physical proof v5: resolved navigation + live renderer PID + bounds + focus; no transient isLoading/Viz dependency
 
 on:
   push:
@@ -43,16 +43,12 @@ jobs:
           set -euo pipefail
           electron_pkg=$(node -p "require('./node_modules/electron/package.json').version")
           echo "electron_pkg=$electron_pkg"
-          find node_modules/electron -maxdepth 2 -type f -printf '%P %m %u:%g\n' | sort | head -80
           node - <<'NODE'
           try { console.log('electron_binary=' + require('electron')); }
           catch (error) { console.error(error.stack || error); process.exitCode = 3; }
           NODE
           sandbox=node_modules/electron/dist/chrome-sandbox
-          if [[ ! -f "$sandbox" ]]; then
-            echo "chrome_sandbox_missing=true"
-            exit 42
-          fi
+          test -f "$sandbox"
           echo "before=$(stat -c '%u:%g %a %A' "$sandbox")"
           findmnt -no TARGET,FSTYPE,OPTIONS -T "$sandbox" || true
           sysctl kernel.unprivileged_userns_clone 2>/dev/null || true
