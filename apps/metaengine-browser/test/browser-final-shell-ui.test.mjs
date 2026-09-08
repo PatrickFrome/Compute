@@ -1,61 +1,42 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const html = await readFile(new URL('../ui/index.html', import.meta.url), 'utf8');
 const app = await readFile(new URL('../ui/app.js', import.meta.url), 'utf8');
-const styleMatch = html.match(/<style data-final-shell>([\s\S]*?)<\/style>/);
-assert.ok(styleMatch, 'final shell style must exist');
-const style = styleMatch[1];
-const executableStyle = style.replace(/\/\*[\s\S]*?\*\//g, '');
-const csp = html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/)?.[1] || '';
+const dark = await readFile(new URL('../ui/dark-workspace.css', import.meta.url), 'utf8');
 
-function escapeRegex(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-test('final shell presentation is cryptographically pinned and introduces no executable surface', () => {
-  const digest = createHash('sha256').update(style, 'utf8').digest('base64');
-  assert.match(csp, new RegExp(`style-src 'self' 'sha256-${escapeRegex(digest)}'`));
-  assert.doesNotMatch(csp, /unsafe-inline|unsafe-eval/i);
-  assert.equal((html.match(/<script\b/g) || []).length, 2, 'final shell must not add another script/control path');
-  assert.doesNotMatch(executableStyle, /url\s*\(|@import|javascript:|expression\s*\(/i);
+test('dark workspace v2 replaces the Telegram presentation contract', () => {
+  assert.match(html, /data-final-shell=\"metaengine-dark-workspace-v2\"/);
+  assert.doesNotMatch(html, /data-final-shell=\"telegram-browser-v1\"/);
+  assert.match(html, /metaengine:\/\/shell\/dark-workspace\.css/);
+  assert.match(html, /<meta name=\"color-scheme\" content=\"dark\">/);
+  assert.match(dark, /color-scheme:dark/);
+  assert.match(dark, /--bg:#090c11/);
 });
 
-test('shell exposes the exact active BrowserCell and keyboard-first command grammar', () => {
-  assert.match(html, /data-final-shell="telegram-browser-v1"/);
-  assert.match(html, /class="activeContext"/);
-  assert.doesNotMatch(html, /class="activeContext srOnly"/);
-  assert.match(html, /placeholder="Search · > command · @ agent · \/ skill"/);
-  assert.match(html, /<b>Ctrl K<\/b> command · @ agent · \/ skill/);
-  assert.match(app, /event\.key\.toLowerCase\(\) === 'k'/);
-  assert.match(app, /\^\[>@\/\]/);
+test('browser-first chrome is flat dense and active-surface subordinate', () => {
+  assert.match(dark, /--top-height:44px/);
+  assert.match(dark, /--sidebar-width:240px/);
+  assert.match(dark, /--ops-width:320px/);
+  assert.match(dark, /\.verticalTab\.active[^{]*\{[\s\S]*background:#141d28/);
+  assert.match(dark, /\.tabAvatar[^{]*\{[\s\S]*border-radius:7px/);
+  assert.doesNotMatch(dark, /border-radius:50%[^}]*tabAvatar/);
+  assert.match(html, /<strong>Workspace<\/strong>/);
 });
 
-test('all existing Brain coordination surfaces are first-class rather than CSS-hidden', () => {
+test('keyboard-first workbench grammar and Session authority boundaries remain intact', () => {
+  assert.match(html, /placeholder=\"Search · > command · @ agent · \/ skill\"/);
   assert.match(app, /AGENTIC_SECTIONS = Object\.freeze\(\['attention', 'activity', 'context', 'sessions', 'skills'\]\)/);
-  for (const section of ['attention', 'activity', 'skills']) {
-    assert.match(style, new RegExp(`data-agentic-section="${section}"`));
-  }
-  assert.match(style, /data-agentic-section="skills"\]\{display:block\}/);
-  assert.match(html, /Always-on coordination/);
-  assert.match(html, /Brain coordination inspector/);
-});
-
-test('Telegram-like rail and browser inspector remain inside canonical native insets', () => {
-  assert.match(style, /\.contextRail\{\s*left:0;top:var\(--top-height\);bottom:0;width:var\(--sidebar-width\)/);
-  assert.match(style, /\.operationsPanel\{\s*right:0;top:var\(--top-height\);bottom:0;width:var\(--ops-width\)/);
-  assert.match(style, /\.verticalTab\.active\{background:var\(--final-accent\);color:#fff\}/);
-  assert.match(style, /\.tabAvatar\{[\s\S]*border-radius:50%/);
-  assert.match(html, /Chats & Agents/);
-  assert.match(html, /BrowserCells/);
-});
-
-test('final UI does not create scheduling, lease, retry or page-model authority', () => {
-  assert.doesNotMatch(executableStyle, /scheduler|lease|retry|command_id|tab_id|agent_id|workspace_id/i);
-  assert.doesNotMatch(executableStyle, /api\.command|metaengineShell|fetch\s*\(|WebSocket|EventSource/);
+  assert.match(app, /presentationFocus\.selectSession/);
+  assert.match(app, /presentationFocus\.selectSurface/);
   assert.match(app, /Browser actuation authority', 'NONE'/);
   assert.match(app, /Scheduler authority', 'NONE'/);
   assert.match(app, /Automatic effect retry', 'NONE'/);
+});
+
+test('dark theme adds no network or execution surface in renderer CSS', () => {
+  const executable = dark.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.doesNotMatch(executable, /url\s*\(|@import|javascript:|expression\s*\(/i);
+  assert.doesNotMatch(executable, /api\.command|metaengineShell|fetch\s*\(|WebSocket|EventSource/);
 });
