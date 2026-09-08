@@ -1,4 +1,5 @@
 import { projectMetaengineDevOS } from './metaengine-devos-projection.mjs';
+import { attachDevOSNativeSurfaces } from './metaengine-devos-native-surfaces.mjs';
 import { attachDevOSSessionLayout } from './metaengine-devos-session-layout-projection.mjs';
 import { projectDevOSShellViewModel } from './metaengine-devos-shell-view-model.mjs';
 import { attachDevOSSystemAttention } from './metaengine-devos-system-attention.mjs';
@@ -58,7 +59,8 @@ export function projectWorkspaceWorkbench(snapshot={}){
   for(const tab of tabs){if(!groupedTabIds.has(String(tab?.tab_id||'')))sessions.push(tabProjection(tab))}
   const base=Object.freeze({schema:'metaengine.browser.workspace-workbench-projection.v1',source_state:sourceState,source_implemented:observer?.source_implemented===true,runtime_deployed:observer?.runtime_deployed===true?true:(observer?.runtime_deployed===false?false:null),groups,sessions,issues,counts:{workspaces:groups.length,sessions:sessions.length,issues:issues.length,ready,frozen,reserved},grouping_authority:'DURABLE_WORKSPACE_BINDING_ONLY',url_heuristic_grouping:false,title_heuristic_grouping:false,automatic_retry_allowed:false,browser_actuation_authority:false,authority_effect:false});
   const devosBase=projectMetaengineDevOS({tabs:snapshot?.tabs||{tabs:[]},supervisor:snapshot?.supervisor||null,owner_safety_gates:snapshot?.owner_safety_gates||null,workspaces:base});
-  const devosAttention=attachDevOSSystemAttention(devosBase,{...snapshot,workspaces:base});
+  const devosNative=attachDevOSNativeSurfaces(devosBase);
+  const devosAttention=attachDevOSSystemAttention(devosNative,{...snapshot,workspaces:base});
   const devos=attachDevOSSessionLayout(devosAttention,snapshot?.session_layouts??null);
   const devos_shell=projectDevOSShellViewModel(devos,snapshot?.presentation_focus??null);
   return Object.freeze({...base,devos,devos_shell});
