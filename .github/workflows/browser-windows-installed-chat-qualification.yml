@@ -1,0 +1,207 @@
+name: Browser Windows Installed Chat Qualification
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/**'
+      - '.github/workflows/browser-windows-installed-chat-qualification.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-installed-chat-qualification:
+    runs-on: windows-2025
+    timeout-minutes: 28
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+
+      - name: Install exact package dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+
+      - name: Prove source and release contracts
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run check
+          node --test test/browser-chatgpt-fast-open.test.mjs test/browser-devos-multisurface-release-contract.test.mjs
+
+      - name: Build exact-head unsigned NSIS installer
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sourceHead = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $version = [string](node -p "require('./package.json').version")
+          if (-not $version) { throw 'package_version_missing' }
+          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item native-dist\guardian -Recurse -Force -ErrorAction SilentlyContinue
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
+          if (-not $installer) { throw 'installed_chat_qualification_installer_missing' }
+          $digest = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          Copy-Item $installer.FullName (Join-Path $env:RUNNER_TEMP $installer.Name) -Force
+          @{
+            schema='metaengine.browser.windows-installed-chat-qualification.v1'
+            source_head=$sourceHead
+            package_version=$version
+            installer_name=$installer.Name
+            installer_sha256=$digest
+            preconnect_armed=$false
+            initial_chatgpt_surface_exposed=$false
+            initial_remote_load_verified=$false
+            persistent_session=$true
+            signed=$false
+            published=$false
+            promotion_authorized=$false
+            authority_effect=$false
+          } | ConvertTo-Json -Depth 5 | Set-Content "$env:RUNNER_TEMP\installed-chat-proof.json" -Encoding utf8
+
+      - name: Install exact installer and prove immediate ChatGPT connection
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $proofPath = "$env:RUNNER_TEMP\installed-chat-proof.json"
+          $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
+          $installer = Join-Path $env:RUNNER_TEMP ([string]$proof.installer_name)
+          if (-not (Test-Path $installer -PathType Leaf)) { throw 'qualified_installer_missing_before_install' }
+
+          $install = Start-Process -FilePath $installer -ArgumentList '/S' -PassThru -Wait
+          if ($install.ExitCode -ne 0) { throw "qualified_installer_exit_$($install.ExitCode)" }
+
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
+          $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
+          if (-not (Test-Path $app -PathType Leaf)) { throw "qualified_installed_browser_missing:$app" }
+
+          $normalOut = "$env:RUNNER_TEMP\installed-chat-normal.out"
+          $normalErr = "$env:RUNNER_TEMP\installed-chat-normal.err"
+          Remove-Item $normalOut,$normalErr -Force -ErrorAction SilentlyContinue
+          $normal = $null
+          try {
+            $normal = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $normalOut -RedirectStandardError $normalErr
+            $null = $normal.Handle
+            $deadline = [DateTime]::UtcNow.AddSeconds(55)
+            $preconnectIndex = -1
+            $initialTabIndex = -1
+            $remoteLoadIndex = -1
+            while ([DateTime]::UtcNow -lt $deadline) {
+              $normal.Refresh()
+              if ($normal.HasExited) {
+                Get-Content $normalOut -ErrorAction SilentlyContinue
+                Get-Content $normalErr -ErrorAction SilentlyContinue
+                throw "qualified_installed_browser_exited_early:$($normal.ExitCode)"
+              }
+              if (Test-Path $normalOut -PathType Leaf) {
+                $normalLines = @(Get-Content $normalOut -ErrorAction SilentlyContinue)
+                $preconnectIndex = -1
+                $initialTabIndex = -1
+                $remoteLoadIndex = -1
+                for ($i = 0; $i -lt $normalLines.Count; $i++) {
+                  $line = [string]$normalLines[$i]
+                  if (-not $line.Trim().StartsWith('{')) { continue }
+                  try { $runtimeEvent = $line | ConvertFrom-Json } catch { continue }
+                  if ($runtimeEvent.schema -eq 'metaengine.browser.chat-preconnect.v1' `
+                      -and $runtimeEvent.state -eq 'ARMED' `
+                      -and $runtimeEvent.origin -eq 'https://chatgpt.com/' `
+                      -and [int]$runtimeEvent.sockets -eq 2 `
+                      -and $runtimeEvent.authority_effect -eq $false) {
+                    $preconnectIndex = $i
+                  }
+                  if ($runtimeEvent.schema -eq 'metaengine.browser-startup-subsystem.v1' `
+                      -and $runtimeEvent.state -eq 'SUBSYSTEM_READY' `
+                      -and $runtimeEvent.subsystem -eq 'INITIAL_TAB_CREATE' `
+                      -and $runtimeEvent.authority_effect -eq $false) {
+                    $initialTabIndex = $i
+                  }
+                  if ($runtimeEvent.schema -eq 'metaengine.browser-startup-subsystem.v1' `
+                      -and $runtimeEvent.state -eq 'SUBSYSTEM_READY' `
+                      -and $runtimeEvent.subsystem -eq 'INITIAL_REMOTE_LOAD' `
+                      -and $runtimeEvent.authority_effect -eq $false) {
+                    $remoteLoadIndex = $i
+                  }
+                }
+                if ($preconnectIndex -ge 0 -and $initialTabIndex -ge 0 -and $remoteLoadIndex -ge 0) { break }
+              }
+              Start-Sleep -Milliseconds 250
+            }
+
+            if ($preconnectIndex -lt 0) { throw 'installed_chatgpt_preconnect_not_armed' }
+            if ($initialTabIndex -lt 0) { throw 'installed_initial_chatgpt_surface_not_exposed' }
+            if ($remoteLoadIndex -lt 0) {
+              Get-Content $normalOut -ErrorAction SilentlyContinue
+              Get-Content $normalErr -ErrorAction SilentlyContinue
+              throw 'installed_initial_chatgpt_remote_load_not_ready'
+            }
+            if (-not ($preconnectIndex -lt $initialTabIndex -and $initialTabIndex -lt $remoteLoadIndex)) {
+              throw 'installed_chatgpt_connection_order_invalid'
+            }
+
+            $proof.preconnect_armed = $true
+            $proof.initial_chatgpt_surface_exposed = $true
+            $proof.initial_remote_load_verified = $true
+            $proof | Add-Member -NotePropertyName chatgpt_origin -NotePropertyValue 'https://chatgpt.com/' -Force
+            $proof | Add-Member -NotePropertyName evidence_source -NotePropertyValue 'INSTALLED_NORMAL_UI_STDOUT' -Force
+            $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
+            Write-Host ($proof | ConvertTo-Json -Compress)
+          } finally {
+            if ($normal -and -not $normal.HasExited) {
+              cmd.exe /d /c "taskkill.exe /PID $($normal.Id) /T /F >nul 2>&1 & exit /b 0" | Out-Null
+            }
+          }
+
+      - name: Prove exact source checkout unchanged
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser)"
+
+      - name: Upload qualified installer and proof
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-installed-chat-qualified-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
+            ${{ runner.temp }}/installed-chat-proof.json
+            ${{ runner.temp }}/installed-chat-normal.out
+            ${{ runner.temp }}/installed-chat-normal.err
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-installed-chat-diagnostics-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/installed-chat-proof.json
+            ${{ runner.temp }}/installed-chat-normal.out
+            ${{ runner.temp }}/installed-chat-normal.err
+          if-no-files-found: ignore
+          retention-days: 7
