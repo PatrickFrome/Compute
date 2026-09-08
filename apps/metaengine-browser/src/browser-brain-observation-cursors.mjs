@@ -53,6 +53,17 @@ function assertZeroAuthority(input) {
   }
 }
 
+function assertNoDuplicateSnapshotConsumers(cursors) {
+  const seen = new Set();
+  for (const cursor of cursors) {
+    if (!cursor || typeof cursor !== 'object') continue;
+    const consumer = String(cursor.consumer || '').trim();
+    if (!CONSUMER_RE.test(consumer)) continue;
+    if (seen.has(consumer)) throw new Error('browser_brain_cursor_snapshot_duplicate_invalid');
+    seen.add(consumer);
+  }
+}
+
 function toResume(cursor) {
   return Object.freeze({
     schema: 'metaengine.browser-brain.observation-resume.v1',
@@ -92,6 +103,7 @@ export class BrowserBrainObservationCursorLedger {
     if (snapshot.consumer_count !== snapshot.cursors.length) {
       throw new Error('browser_brain_cursor_snapshot_count_invalid');
     }
+    assertNoDuplicateSnapshotConsumers(snapshot.cursors);
     const revision = snapshot.revision === undefined
       ? snapshot.consumer_count
       : normalizeEpoch(snapshot.revision, 'browser_brain_cursor_snapshot_revision_invalid');
