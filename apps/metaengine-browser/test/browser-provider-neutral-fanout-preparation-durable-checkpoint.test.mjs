@@ -1,40 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ProviderNeutralFanoutDurableCheckpoint } from '../src/browser-provider-neutral-fanout-durable-checkpoint.mjs';
 import {
   ProviderNeutralFanoutPreparationDurableCheckpoint,
   providerNeutralFanoutPreparationDurableCheckpointContract,
   restoreProviderNeutralFanoutPreparationDurableCheckpoint,
 } from '../src/browser-provider-neutral-fanout-preparation-durable-checkpoint.mjs';
-import { projectProviderNeutralFanoutPreparationShards } from '../src/browser-provider-neutral-fanout-preparation-shards.mjs';
-
-const actionId = 'fanout-preparation-checkpoint-1';
-const actionDigest = 'a'.repeat(64);
-const options = Object.freeze({
-  issued_count: 0,
-  requested_count: 4,
-  max_parallel: 4,
-  target_binding_digests: ['1', '2', '3', '4'].map((value) => value.repeat(64)),
-  shard_count: 2,
-});
-
-function upstreamCheckpoint() {
-  return new ProviderNeutralFanoutDurableCheckpoint({ actionId, actionDigest, expectedCount: 4 }).checkpoint();
-}
-
-function inputFor(checkpoint, index, byte) {
-  const projection = projectProviderNeutralFanoutPreparationShards(checkpoint, options);
-  const found = projection.shards
-    .flatMap((shard) => shard.entries.map((entry) => ({ shard, entry })))
-    .find(({ entry }) => entry.fanout_index === index);
-  return {
-    fanout_index: index,
-    shard_index: found.shard.shard_index,
-    target_binding_digest: found.entry.target_binding_digest,
-    issuance_entry_digest: found.entry.entry_digest,
-    prepared_command_digest: byte.repeat(64),
-  };
-}
+import {
+  preparationOptions as options,
+  preparedInputFor as inputFor,
+  upstreamPreparationCheckpoint as upstreamCheckpoint,
+} from './helpers/browser-provider-neutral-fanout-preparation-fixture.mjs';
 
 test('persists deterministic digest-only preparation state and reconstructs ready shards', () => {
   const upstream = upstreamCheckpoint();
