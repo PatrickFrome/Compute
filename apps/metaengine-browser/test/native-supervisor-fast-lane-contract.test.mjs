@@ -44,7 +44,7 @@ test('core scheduler admits remote command lane before worker observation and De
   assert.match(source, /if \(!descriptor\.read_only && clientRef\.#idleWorkPromise\) await clientRef\.#idleWorkPromise/);
 });
 
-test('base command lane precedes heavy maintenance, preserves 750ms fallback, and hands off to held batch transport', () => {
+test('base command lane precedes heavy maintenance, gates legacy fallback explicitly, and hands off to held batch transport', () => {
   const source = fs.readFileSync(path.join(appRoot, 'src', 'native-supervisor-client-base.mjs'), 'utf8');
   const cycle = between(source, '  async cycle() {', '\n  }\n}');
   const next = cycle.indexOf('const commands = await this.#nextCommands()');
@@ -54,7 +54,7 @@ test('base command lane precedes heavy maintenance, preserves 750ms fallback, an
   assert.match(source, /\/v1\/commands\/wait-batch/);
   assert.match(source, /\/v1\/commands\/result-batch/);
   assert.match(source, /long_poll_replaces_idle_timer_latency/);
-  assert.match(source, /commandFastlane === true\s*\?\s*new NativeSupervisorCommandFastlane/);
+  assert.match(source, /commandFastlane === true && this\.#legacySingleLeaseFallback\s*\?\s*new NativeSupervisorCommandFastlane/);
   assert.match(source, /this\.#batchTransport = 'SUPPORTED';\s*\n\s*this\.#commandFastlane\?\.stop\(\)/);
   assert.match(source, /legacy_fallback_suppressed_by_batch_transport:\s*this\.#batchTransport === 'SUPPORTED'/);
   assert.match(source, /one_steady_state_lease_loop:\s*true/);

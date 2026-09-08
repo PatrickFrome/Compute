@@ -45,7 +45,8 @@ export function createBoundedSupervisorFetch(fetchImpl, { deadlineMs = DEFAULT_R
     if (isCommandResultUrl(url) || init.signal) return fetchImpl(url, init);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('native_supervisor_request_deadline')), boundedMs);
-    timer.unref?.();
+    // This timer is the liveness boundary for a hanging transport promise. Keep it referenced
+    // until the request settles so the bounded operation cannot disappear with the event loop.
     try {
       return await fetchImpl(url, { ...init, signal: controller.signal });
     } finally {
