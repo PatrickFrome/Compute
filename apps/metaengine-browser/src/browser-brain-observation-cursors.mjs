@@ -216,6 +216,13 @@ export class BrowserBrainObservationCursorLedger {
     return knownRevision;
   }
 
+  preflightResumeRevisions(knownRevisionValues = []) {
+    if (!Array.isArray(knownRevisionValues) || knownRevisionValues.length > MAX_BATCH) {
+      throw new TypeError('browser_brain_cursor_resume_revision_batch_invalid');
+    }
+    return Object.freeze(knownRevisionValues.map((value) => this.#normalizeKnownRevision(value)));
+  }
+
   resumeAllIfChanged(knownRevisionValue) {
     const knownRevision = this.#normalizeKnownRevision(knownRevisionValue);
     const changed = knownRevision !== this.#revision;
@@ -283,6 +290,7 @@ export function browserBrainObservationCursorContract() {
     chunked_full_capacity_snapshot_restore: true,
     bounded_batch_resume: true,
     bounded_full_capacity_resume: true,
+    bounded_resume_revision_preflight: true,
     revision_gated_conditional_resume: true,
     revision_gated_delta_resume: true,
     unchanged_conditional_resume_is_empty: true,
