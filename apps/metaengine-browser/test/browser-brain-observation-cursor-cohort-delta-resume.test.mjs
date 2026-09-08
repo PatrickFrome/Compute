@@ -46,6 +46,9 @@ test('cohort planner validates every revision before materializing any delta', (
   const revision = ledger.snapshot().revision;
   let calls = 0;
   const wrapped = {
+    preflightResumeRevisions(values) {
+      return ledger.preflightResumeRevisions(values);
+    },
     resumeChangedSince(value) {
       calls += 1;
       return ledger.resumeChangedSince(value);
@@ -55,6 +58,27 @@ test('cohort planner validates every revision before materializing any delta', (
   assert.throws(
     () => resumeObservationCursorCohorts(wrapped, [revision, -1, revision]),
     /cohort_revision_invalid/,
+  );
+  assert.equal(calls, 0);
+});
+
+test('ahead revision anywhere in cohort batch fails before any delta materialization', () => {
+  const ledger = seededLedger();
+  const revision = ledger.snapshot().revision;
+  let calls = 0;
+  const wrapped = {
+    preflightResumeRevisions(values) {
+      return ledger.preflightResumeRevisions(values);
+    },
+    resumeChangedSince(value) {
+      calls += 1;
+      return ledger.resumeChangedSince(value);
+    },
+  };
+
+  assert.throws(
+    () => resumeObservationCursorCohorts(wrapped, [revision - 1, revision + 1, revision]),
+    /resume_revision_ahead/,
   );
   assert.equal(calls, 0);
 });
@@ -89,6 +113,7 @@ test('cohort contract stays provider-neutral, payload-free and zero-authority', 
   const contract = browserBrainObservationCursorCohortContract();
   assert.equal(contract.max_revision_requests, 128);
   assert.equal(contract.equal_revision_requests_share_one_materialization, true);
+  assert.equal(contract.all_revision_requests_preflight_before_delta_materialization, true);
   assert.equal(contract.provider_neutral, true);
   assert.equal(contract.authority_effect, false);
 });
