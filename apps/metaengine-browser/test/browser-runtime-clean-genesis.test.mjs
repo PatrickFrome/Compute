@@ -21,8 +21,9 @@ test('clean genesis quarantines stale runtime topology but preserves auth identi
       await fs.writeFile(path.join(root, relative), JSON.stringify({ stale: true }));
     }
     await fs.writeFile(path.join(root, 'metaengine-native-supervisor-device-v1.json'), '{"identity":"keep"}\n');
-    await fs.mkdir(path.join(root, 'Partitions', 'persist:metaengine-user'), { recursive: true });
-    await fs.writeFile(path.join(root, 'Partitions', 'persist:metaengine-user', 'Cookies'), 'keep-session');
+    const persistentSessionRoot = path.join(root, 'chromium-persistent-user-session');
+    await fs.mkdir(persistentSessionRoot, { recursive: true });
+    await fs.writeFile(path.join(persistentSessionRoot, 'Cookies'), 'keep-session');
 
     const result = await ensureRuntimeGenesis({
       userDataPath: root,
@@ -48,7 +49,7 @@ test('clean genesis quarantines stale runtime topology but preserves auth identi
       assert.equal(await exists(path.join(root, relative)), false, relative);
     }
     assert.equal(await fs.readFile(path.join(root, 'metaengine-native-supervisor-device-v1.json'), 'utf8'), '{"identity":"keep"}\n');
-    assert.equal(await fs.readFile(path.join(root, 'Partitions', 'persist:metaengine-user', 'Cookies'), 'utf8'), 'keep-session');
+    assert.equal(await fs.readFile(path.join(persistentSessionRoot, 'Cookies'), 'utf8'), 'keep-session');
     assert.equal(await exists(path.join(root, RUNTIME_GENESIS_MARKER)), true);
     assert.ok(result.quarantined_files.includes('metaengine-fleet-state-v2.json'));
     assert.ok(result.quarantined_files.includes('metaengine-self-update-session-continuity-v1.json'));
