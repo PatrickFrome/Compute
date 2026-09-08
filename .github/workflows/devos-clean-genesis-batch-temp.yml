@@ -53,21 +53,32 @@ jobs:
           set -euo pipefail
           rm -f apps/metaengine-browser/scripts/patch-clean-genesis-batch-temp.mjs
           rm -f .github/workflows/devos-clean-genesis-batch-temp.yml
-          git add -A
           test -n "$(git status --porcelain)"
           test ! -e apps/metaengine-browser/scripts/patch-clean-genesis-batch-temp.mjs
           test ! -e .github/workflows/devos-clean-genesis-batch-temp.yml
 
       - name: Full Browser node regression
+        id: full_regression
         shell: bash
         run: |
-          set -euo pipefail
-          node --test apps/metaengine-browser/test/*.test.mjs
+          set -o pipefail
+          node --test apps/metaengine-browser/test/*.test.mjs 2>&1 | tee /tmp/devos-clean-genesis-full-regression.log
+
+      - name: Upload full regression failure
+        if: failure() && steps.full_regression.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: devos-clean-genesis-full-regression
+          path: /tmp/devos-clean-genesis-full-regression.log
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Commit and fast-forward push
+        if: success()
         shell: bash
         run: |
           set -euo pipefail
+          git add -A
           git diff --cached --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
