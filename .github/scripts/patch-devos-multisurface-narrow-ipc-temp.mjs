@@ -35,4 +35,5 @@ preload = replaceOne(preload,
   'preload_narrow_layout_method');
 await writeFile(preloadPath, preload);
 
+// Exact-head proof trigger; this temporary patcher is deleted by the self-clean commit.
 console.log(JSON.stringify({ schema: 'metaengine.devos.multisurface-narrow-ipc-patcher.v1', authority_effect: false }));
