@@ -54,9 +54,9 @@ test('explicit Session focus projects exact owned Surface rows without renderer 
   assert.equal(view.valid, true);
   assert.equal(view.selected_session.session_id, 'session:browser-unbound');
   assert.equal(view.selected_surface, null);
-  assert.equal(view.selected_session_surface_count, 1);
+  assert.equal(view.selected_session_surface_count, 2);
   assert.equal(view.selected_session_surfaces_truncated, false);
-  assert.equal(view.selected_session_surfaces.length, 1);
+  assert.equal(view.selected_session_surfaces.length, 2);
   assert.deepEqual(
     Object.fromEntries(Object.entries(view.selected_session_surfaces[0]).filter(([key]) => !key.endsWith('_authority') && !['projection_is_authority', 'command_leasing', 'automatic_effect_retry_allowed', 'authority_effect'].includes(key))),
     {
@@ -66,6 +66,8 @@ test('explicit Session focus projects exact owned Surface rows without renderer 
       title: 'One',
       state: 'WEB',
       tab_id: 'tab.one',
+      runtime_bound: true,
+      presentation_only: false,
     },
   );
   assertZeroAuthority(view.selected_session_surfaces[0]);
@@ -107,7 +109,7 @@ test('selected Session surface projection is bounded at 256 while preserving the
   focus.selectSession(session.session_id);
   const view = projectDevOSShellViewModel(model, focus.snapshot());
   assert.equal(view.valid, true);
-  assert.equal(view.selected_session_surface_count, 301);
+  assert.equal(view.selected_session_surface_count, 302);
   assert.equal(view.selected_session_surfaces.length, 256);
   assert.equal(view.selected_session_surfaces_truncated, true);
   for (const row of view.selected_session_surfaces) {

@@ -120,19 +120,17 @@ function validateRoot(root) {
 function selectedLayout(devos, selectedSessionId) {
   const prefs = devos?.layout_preferences;
   if (!prefs || !selectedSessionId) return null;
-  if (prefs.schema !== 'metaengine.devos.session-layout-projection.v1' || !hasZeroAuthorityContract(prefs)) return null;
-  if (text(prefs.selected_session_id, 200) !== selectedSessionId) return null;
-  const active = prefs.active;
-  if (!active || active.schema !== 'metaengine.devos.session-layout-preference.v1' || !hasZeroAuthorityContract(active)) return null;
-  if (text(active.session_id, 200) !== selectedSessionId || active.stored_surface_is_selection_authority !== false) return null;
+  if (prefs.schema !== 'metaengine.devos.session-layout-projection.v1' || !hasZeroAuthorityContract(prefs) || !Array.isArray(prefs.entries)) return null;
+  const active = prefs.entries.find((entry) => text(entry?.session_id, 200) === selectedSessionId) || null;
+  if (active && (active.schema !== 'metaengine.devos.session-layout-preference.v1' || !hasZeroAuthorityContract(active) || active.stored_surface_is_selection_authority !== false)) return null;
   return freezeRow({
     source_state: text(prefs.source_state, 48) || 'UNKNOWN',
     selection_alignment: text(prefs.selection_alignment, 80) || 'UNKNOWN',
-    requested_sidebar: text(active.requested_sidebar, 32) || 'EXPANDED',
-    requested_inspector: text(active.requested_inspector, 32) || 'CLOSED',
-    requested_surface_layout: text(active.requested_surface_layout, 40) || 'AUTO',
-    stored_surface_id: text(active.stored_surface_id, 240),
-    stored_surface_is_focus_preference: active.stored_surface_is_focus_preference === true,
+    requested_sidebar: text(active?.requested_sidebar, 32) || 'EXPANDED',
+    requested_inspector: text(active?.requested_inspector, 32) || 'CLOSED',
+    requested_surface_layout: text(active?.requested_surface_layout, 40) || 'AUTO',
+    stored_surface_id: text(active?.stored_surface_id, 240),
+    stored_surface_is_focus_preference: active ? active.stored_surface_is_focus_preference === true : true,
     stored_surface_is_selection_authority: false,
   });
 }

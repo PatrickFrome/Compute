@@ -28,7 +28,8 @@ test('trusted main process owns one full shell projection plus two bounded prese
   const shellEnd = main.indexOf('async function publishSnapshot()', shellStart);
   assert.ok(shellStart >= 0 && shellEnd > shellStart, 'shellSnapshot must remain bounded');
   const shell = main.slice(shellStart, shellEnd);
-  assert.match(shell, /const workspaces = projectWorkspaceWorkbench\(\{\s*tabs,\s*fleet: fleetSnapshot,\s*owner_safety_gates: ownerSafetyGatesSnapshot,\s*development_plane: developmentPlaneSnapshot,\s*supervisor,\s*compute,\s*presentation_focus: presentationFocus,\s*\}\)/s);
+  assert.match(shell, /session_layouts: devosSessionLayouts\.snapshot\(\)|session_layouts: sessionLayouts/);
+  assert.match(shell, /devos_sources: projectDevOSDevelopmentSources\(/);
   assert.match(shell, /fleet: fleetSnapshot,\s*owner_safety_gates: ownerSafetyGatesSnapshot,\s*development_plane: developmentPlaneSnapshot,\s*supervisor,/s);
   assert.match(shell, /\r?\n\s{4}workspaces,\r?\n\s{4}compute,\r?\n/);
   assert.equal((shell.match(/projectWorkspaceWorkbench\(/g) || []).length, 1, 'shell snapshot must have exactly one full trusted workspace projection');
@@ -76,7 +77,9 @@ test('pure workspace projection remains zero-authority and exact-fenced', async 
   assert.match(source, /TARGET_BINDING_DRIFT/);
   assert.match(source, /AGENT_GENERATION_DRIFT/);
   assert.match(source, /grouping_authority:'DURABLE_WORKSPACE_BINDING_ONLY'/);
-  assert.match(source, /attachDevOSSystemAttention\(devosBase,\{\.\.\.snapshot,workspaces:base\}\)/);
+  assert.match(source, /composeDevOSSurfaceRegistry\(devosBase,\{source_snapshot:snapshot\?\.devos_sources\?\?null\}\)/);
+  assert.match(source, /attachDevOSSystemAttention\(devosSurfaces,\{\.\.\.snapshot,workspaces:base\}\)/);
+  assert.match(source, /attachDevOSSessionLayout\(devosAttention,snapshot\?\.session_layouts\?\?null\)/);
   assert.match(source, /automatic_retry_allowed:false/);
   assert.match(source, /browser_actuation_authority:false/);
   assert.match(source, /authority_effect:false/);

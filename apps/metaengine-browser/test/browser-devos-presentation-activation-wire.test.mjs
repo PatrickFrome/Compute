@@ -40,7 +40,7 @@ test('Browser presentation activation requires one exact live tab binding and re
   assert.match(block, /if \(!tab\) throw new Error\('tab_not_found'\)/);
   assert.match(block, /if \(!view \|\| view\.webContents\.isDestroyed\(\)\) throw new Error\('tab_binding_not_live'\)/);
   assert.equal((block.match(/registry\.select\(id\)/g) || []).length, 1);
-  assert.equal((block.match(/attachSelected\(\)/g) || []).length, 1);
+  assert.equal((block.match(/attachSelected\(\{ force_single_selected: true \}\)/g) || []).length, 1);
   assert.equal((block.match(/invalidatePerception\(\)/g) || []).length, 1);
   assert.doesNotMatch(block, /loadURL|NAVIGATE|title|url|retry|setTimeout|setInterval/i);
 });

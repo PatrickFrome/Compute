@@ -21,9 +21,12 @@ import {
 } from './native-supervisor-exact-target.mjs';
 import { VerifiedDownloadManager } from './verified-download-manager.mjs';
 import { normalizeShellLayoutState, planShellLayout, SHELL_TOP_HEIGHT } from './shell-layout.mjs';
+import { createDevOSSessionLayoutRegistry } from './metaengine-devos-session-layout.mjs';
+import { planDevOSSurfaceGrid } from './metaengine-devos-surface-grid.mjs';
 import { createDevOSPresentationFocusState } from './metaengine-devos-presentation-focus.mjs';
 import { applyDevOSPresentationActivation } from './metaengine-devos-presentation-activation-runtime.mjs';
 import { projectWorkspaceWorkbench } from './workspace-workbench-projection.mjs';
+import { projectDevOSDevelopmentSources } from './metaengine-devos-development-sources.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -53,8 +56,12 @@ let nativeSupervisor = null;
 let shellBrainPortConsumerId = null;
 const humanTakeover = new HumanTakeoverController({ getSupervisor: () => nativeSupervisor });
 const devosPresentationFocus = createDevOSPresentationFocusState();
+const devosSessionLayouts = createDevOSSessionLayoutRegistry({ max_sessions: 128 });
 let shellLayoutState = normalizeShellLayoutState();
 let shellLayoutPlan = null;
+let devosSurfaceGridPlan = null;
+let devosSourceSnapshot = null;
+let devosSessionLayoutsLoaded = false;
 let perceptionCache = { tab_id: null, captured_ms: 0, frame: null, error: null };
 let shutdownRequested = false;
 let shellProtocolHandlerReady = false;
@@ -112,6 +119,33 @@ function ownerSafetyGateStatePath() {
 
 function supervisorIdentityPath() {
   return path.join(app.getPath('userData'), 'metaengine-native-supervisor-device-v1.json');
+}
+
+function devosSessionLayoutStatePath() {
+  return path.join(app.getPath('userData'), 'metaengine-devos-session-layout-registry-v1.json');
+}
+
+async function initDevOSSessionLayouts() {
+  if (devosSessionLayoutsLoaded) return devosSessionLayouts.snapshot();
+  devosSessionLayoutsLoaded = true;
+  try {
+    const snapshot = JSON.parse(await fs.readFile(devosSessionLayoutStatePath(), 'utf8'));
+    devosSessionLayouts.restore(snapshot);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      console.error(JSON.stringify({ schema: 'metaengine.devos.session-layout-load.v1', state: 'DEGRADED', reason: String(error?.message || error).slice(0, 240), fallback: 'IN_MEMORY_DEFAULTS', authority_effect: false }));
+    }
+  }
+  return devosSessionLayouts.snapshot();
+}
+
+async function saveDevOSSessionLayouts() {
+  const target = devosSessionLayoutStatePath();
+  const temp = target + '.tmp';
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(temp, JSON.stringify(devosSessionLayouts.snapshot(), null, 2) + '\n', { mode: 0o600 });
+  await fs.rename(temp, target);
+  return devosSessionLayouts.snapshot();
 }
 
 async function loadFleetState() {
@@ -194,6 +228,8 @@ function currentDevOSPresentationProjection() {
     fleet: fleet?.snapshot() || null,
     supervisor: nativeSupervisor?.snapshot() || null,
     presentation_focus: devosPresentationFocus.snapshot(),
+    session_layouts: devosSessionLayouts.snapshot(),
+    devos_sources: devosSourceSnapshot,
   }).devos;
 }
 
@@ -204,7 +240,7 @@ function selectBrowserTabForPresentation(tabId) {
   if (!tab) throw new Error('tab_not_found');
   if (!view || view.webContents.isDestroyed()) throw new Error('tab_binding_not_live');
   registry.select(id);
-  attachSelected();
+  attachSelected({ force_single_selected: true });
   invalidatePerception();
   return tab;
 }
@@ -226,6 +262,11 @@ async function shellSnapshot() {
   const supervisor = nativeSupervisor?.snapshot() || null;
   const compute = await bridge.health();
   const presentationFocus = devosPresentationFocus.snapshot();
+  const sessionLayouts = devosSessionLayouts.snapshot();
+  devosSourceSnapshot = projectDevOSDevelopmentSources({
+    development_plane: developmentPlaneSnapshot,
+    startup_logs: startupDegradedSnapshot(),
+  });
   const workspaces = projectWorkspaceWorkbench({
     tabs,
     fleet: fleetSnapshot,
@@ -234,6 +275,9 @@ async function shellSnapshot() {
     supervisor,
     compute,
     presentation_focus: presentationFocus,
+    session_layouts: sessionLayouts,
+    devos_sources: devosSourceSnapshot,
+    devos_sources: projectDevOSDevelopmentSources({ development_plane: developmentPlaneSnapshot, startup_logs: startupDegradedSnapshot() }),
   });
   return {
     schema: 'metaengine.browser-shell.snapshot.v3',
@@ -248,6 +292,8 @@ async function shellSnapshot() {
     workspaces,
     compute,
     layout: shellLayoutPlan ? structuredClone(shellLayoutPlan) : null,
+    surface_grid: devosSurfaceGridPlan ? structuredClone(devosSurfaceGridPlan) : null,
+    session_layouts: structuredClone(sessionLayouts),
     background_service: {
       close_to_background: !shutdownRequested,
       shutdown_requested: shutdownRequested,
@@ -292,29 +338,80 @@ function installHumanTakeoverAccelerator(webContents) {
   });
 }
 
+function currentDevOSPresentationShellView() {
+  return projectWorkspaceWorkbench({
+    tabs: registry.snapshot(),
+    fleet: fleet?.snapshot() || null,
+    supervisor: nativeSupervisor?.snapshot() || null,
+    presentation_focus: devosPresentationFocus.snapshot(),
+    session_layouts: devosSessionLayouts.snapshot(),
+    devos_sources: devosSourceSnapshot,
+  }).devos_shell;
+}
+
+function fallbackSelectedSurface() {
+  const selected = registry.selected();
+  if (!selected) return [];
+  return [{
+    surface_id: 'browser:' + selected.tab_id,
+    session_id: 'session:browser-fallback',
+    type: 'BROWSER',
+    title: selected.title || 'Browser',
+    tab_id: selected.tab_id,
+    projection_is_authority: false, scheduler_authority: false, execution_authority: false, command_leasing: false,
+    automatic_effect_retry_allowed: false, page_model_authority: false, authority_effect: false,
+  }];
+}
+
+function computeDevOSSurfaceGrid() {
+  if (!shellLayoutPlan) return null;
+  const shell = currentDevOSPresentationShellView();
+  const focusedSession = shell?.valid === true && shell.selected_session ? shell.selected_session : null;
+  const surfaces = focusedSession ? shell.selected_session_surfaces : fallbackSelectedSurface();
+  const preferredSurfaceId = focusedSession ? (shell.selected_surface?.surface_id || shell.layout_preferences?.stored_surface_id || null) : null;
+  const focusedSurfaceId = preferredSurfaceId && surfaces.some((row) => row.surface_id === preferredSurfaceId) ? preferredSurfaceId : null;
+  const requestedLayout = focusedSession ? (shell.layout_preferences?.requested_surface_layout || 'AUTO') : 'SINGLE';
+  return planDevOSSurfaceGrid({ bounds: shellLayoutPlan.remote_bounds, surfaces, focused_surface_id: focusedSurfaceId, requested_layout: requestedLayout });
+}
+
 function layout() {
   if (!windowRef || windowRef.isDestroyed()) return;
   const { width, height } = windowRef.getContentBounds();
   shellLayoutPlan = planShellLayout({ width, height, state: shellLayoutState });
   shellView?.setBounds(shellLayoutPlan.shell_bounds);
-  const selected = registry.selected();
+  if (shellView) { try { windowRef.contentView.addChildView(shellView); } catch {} }
+  devosSurfaceGridPlan = computeDevOSSurfaceGrid();
+  const browserPaneByTab = new Map((devosSurfaceGridPlan?.browser_panes || []).map((pane) => [String(pane.tab_id || ''), pane]));
   for (const [tabId, view] of views) {
-    if (tabId === selected?.tab_id) view.setBounds(shellLayoutPlan.remote_bounds);
-  }
-}
-
-function attachSelected() {
-  if (!windowRef) return;
-  if (shellView) {
-    try { windowRef.contentView.addChildView(shellView); } catch {}
-  }
-  const selected = registry.selected();
-  for (const [tabId, view] of views) {
-    if (tabId === selected?.tab_id) {
+    const pane = browserPaneByTab.get(String(tabId));
+    if (pane && !view.webContents.isDestroyed()) {
       try { windowRef.contentView.addChildView(view); } catch {}
+      view.setBounds(pane.content_bounds);
     } else {
       try { windowRef.contentView.removeChildView(view); } catch {}
     }
+  }
+}
+
+function attachSelected({ force_single_selected = false } = {}) {
+  if (!windowRef) return;
+  if (shellView) { try { windowRef.contentView.addChildView(shellView); } catch {} }
+  if (!shellLayoutPlan) {
+    const { width, height } = windowRef.getContentBounds();
+    shellLayoutPlan = planShellLayout({ width, height, state: shellLayoutState });
+    shellView?.setBounds(shellLayoutPlan.shell_bounds);
+  }
+  if (force_single_selected) {
+    const selected = registry.selected();
+    for (const [tabId, view] of views) {
+      if (tabId === selected?.tab_id && !view.webContents.isDestroyed()) {
+        try { windowRef.contentView.addChildView(view); } catch {}
+        view.setBounds(shellLayoutPlan.remote_bounds);
+      } else {
+        try { windowRef.contentView.removeChildView(view); } catch {}
+      }
+    }
+    return;
   }
   layout();
 }
@@ -485,6 +582,10 @@ async function initDevelopmentPlane() {
     });
   }
   if (developmentPlane.snapshot().state !== 'READY') await developmentPlane.start();
+  if (!developmentPlane.snapshot().devos_repo_read_model) {
+    try { await developmentPlane.request('DEVOS_REPO_READ_MODEL'); recordStartupSubsystemReady('DEVOS_REPO_READ_MODEL'); }
+    catch (error) { recordStartupSubsystemDegraded('DEVOS_REPO_READ_MODEL', error); }
+  }
   return developmentPlane.snapshot();
 }
 
@@ -985,27 +1086,51 @@ ipcMain.handle('metaengine:shell:presentation-focus:snapshot', async (event) => 
   assertShellSender(event);
   return devosPresentationFocus.snapshot();
 });
+ipcMain.handle('metaengine:shell:presentation-layout:set', async (event, sessionId, layoutMode) => {
+  assertShellSender(event);
+  const id = String(sessionId || '');
+  const devos = currentDevOSPresentationProjection();
+  if (!devos.sessions.some((row) => String(row.session_id) === id)) throw new Error('devos_surface_layout_session_not_found');
+  const entry = devosSessionLayouts.setSurfaceLayout(id, layoutMode);
+  await saveDevOSSessionLayouts();
+  layout();
+  await publishSnapshot();
+  return entry;
+});
 ipcMain.handle('metaengine:shell:presentation-focus:select-session', async (event, sessionId) => {
   assertShellSender(event);
   const result = applyPresentationFocusIntent({ intent: 'SESSION', session_id: sessionId });
+  if (result.applied) {
+    devosSessionLayouts.activate(String(sessionId));
+    await saveDevOSSessionLayouts();
+    layout();
+  }
   if (result.applied || result.browser_activation_performed) await publishSnapshot();
   return result;
 });
 ipcMain.handle('metaengine:shell:presentation-focus:select-surface', async (event, sessionId, surfaceId) => {
   assertShellSender(event);
   const result = applyPresentationFocusIntent({ intent: 'SURFACE', session_id: sessionId, surface_id: surfaceId });
+  if (result.applied) {
+    devosSessionLayouts.activate(String(sessionId));
+    devosSessionLayouts.setActiveSurface(String(sessionId), String(surfaceId));
+    await saveDevOSSessionLayouts();
+    layout();
+  }
   if (result.applied || result.browser_activation_performed) await publishSnapshot();
   return result;
 });
 ipcMain.handle('metaengine:shell:presentation-focus:clear', async (event) => {
   assertShellSender(event);
   const state = devosPresentationFocus.clear();
+  layout();
   await publishSnapshot();
   return state;
 });
 
 async function startAfterReady() {
   await registerShellProtocol();
+  await initDevOSSessionLayouts();
   if (isDevelopmentPlaneSmoke || isSmoke) configureUserSession();
   if (isDevelopmentPlaneSmoke) {
     try {

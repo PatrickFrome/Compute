@@ -221,6 +221,7 @@ contextBridge.exposeInMainWorld('metaengineShell', Object.freeze({
     snapshot: () => ipcRenderer.invoke('metaengine:shell:presentation-focus:snapshot'),
     selectSession: (sessionId) => ipcRenderer.invoke('metaengine:shell:presentation-focus:select-session', String(sessionId ?? '')),
     selectSurface: (sessionId, surfaceId) => ipcRenderer.invoke('metaengine:shell:presentation-focus:select-surface', String(sessionId ?? ''), String(surfaceId ?? '')),
+    setLayout: (sessionId, layoutMode) => ipcRenderer.invoke('metaengine:shell:presentation-layout:set', String(sessionId ?? ''), String(layoutMode ?? '')),
     clear: () => ipcRenderer.invoke('metaengine:shell:presentation-focus:clear'),
   }),
   onSnapshot: (listener) => {
