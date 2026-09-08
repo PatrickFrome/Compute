@@ -67,20 +67,53 @@ jobs:
           node .github/scripts/patch-devos-source-finalize-temp.mjs
           python3 - <<'PY'
           from pathlib import Path
-          p = Path('apps/metaengine-browser/src/main.mjs')
-          source = p.read_text()
-          before = "    session_layouts: sessionLayouts,"
-          after = "\n".join([
-              before,
-              "    devos_sources: projectDevOSDevelopmentSources({",
-              "      development_plane: developmentPlaneSnapshot,",
-              "      startup_logs: startupDegradedSnapshot(),",
-              "    }),",
+
+          main_path = Path('apps/metaengine-browser/src/main.mjs')
+          main = main_path.read_text()
+
+          state_anchor = 'let devosSurfaceGridPlan = null;'
+          if main.count(state_anchor) != 1:
+              raise SystemExit(f'devos_source_cache_state_anchor_count:{main.count(state_anchor)}')
+          main = main.replace(state_anchor, state_anchor + '\nlet devosSourceSnapshot = null;', 1)
+
+          direct = "    devos_sources: projectDevOSDevelopmentSources({ development_plane: developmentPlane?.snapshot() || null, startup_logs: startupDegradedSnapshot() }),"
+          if main.count(direct) != 2:
+              raise SystemExit(f'presentation_direct_source_anchor_count:{main.count(direct)}')
+          main = main.replace(direct, '    devos_sources: devosSourceSnapshot,')
+
+          refresh_anchor = '  const sessionLayouts = devosSessionLayouts.snapshot();'
+          if main.count(refresh_anchor) != 1:
+              raise SystemExit(f'devos_source_refresh_anchor_count:{main.count(refresh_anchor)}')
+          refresh = "\n".join([
+              refresh_anchor,
+              '  devosSourceSnapshot = projectDevOSDevelopmentSources({',
+              '    development_plane: developmentPlaneSnapshot,',
+              '    startup_logs: startupDegradedSnapshot(),',
+              '  });',
           ])
-          count = source.count(before)
-          if count != 1:
-              raise SystemExit(f'post_transform_shell_session_layout_anchor_count:{count}')
-          p.write_text(source.replace(before, after, 1))
+          main = main.replace(refresh_anchor, refresh, 1)
+
+          shell_anchor = '    session_layouts: sessionLayouts,'
+          if main.count(shell_anchor) != 1:
+              raise SystemExit(f'post_transform_shell_session_layout_anchor_count:{main.count(shell_anchor)}')
+          main = main.replace(shell_anchor, shell_anchor + '\n    devos_sources: devosSourceSnapshot,', 1)
+          main_path.write_text(main)
+
+          selected_path = Path('apps/metaengine-browser/test/browser-devos-selected-session-surfaces.test.mjs')
+          selected = selected_path.read_text()
+          dto_before = "\n".join([
+              "      title: 'One',",
+              "      state: 'WEB',",
+              "      tab_id: 'tab.one',",
+          ])
+          dto_after = "\n".join([
+              dto_before,
+              '      runtime_bound: true,',
+              '      presentation_only: false,',
+          ])
+          if selected.count(dto_before) != 1:
+              raise SystemExit(f'selected_browser_dto_anchor_count:{selected.count(dto_before)}')
+          selected_path.write_text(selected.replace(dto_before, dto_after, 1))
           PY
           git diff --check
           node --check apps/metaengine-browser/src/main.mjs
