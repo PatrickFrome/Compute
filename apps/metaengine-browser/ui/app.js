@@ -805,7 +805,7 @@ api.snapshot().then(render).catch(() => render(snapshot));
 // commands and native supervisor contracts above.
 const AGENTIC_CONTEXT_STORAGE_KEY = 'metaengine.browser.agentic-context-set.v1';
 const AGENTIC_CONTEXT_MAX_TABS = 8;
-const AGENTIC_SECTIONS = Object.freeze(['attention', 'activity', 'context', 'skills']);
+const AGENTIC_SECTIONS = Object.freeze(['attention', 'activity', 'context', 'sessions', 'skills']);
 let agenticSection = null;
 let agenticContextTabIds = loadAgenticContextTabIds();
 
@@ -870,7 +870,12 @@ function devosShellView(next) {
     || view.automatic_effect_retry_allowed !== false
     || view.page_model_authority !== false
     || view.authority_effect !== false
-    || !Array.isArray(view.now)) return null;
+    || !Array.isArray(view.now)
+    || !Array.isArray(view.session_groups)
+    || !Array.isArray(view.selected_session_surfaces)
+    || !Number.isSafeInteger(view.selected_session_surface_count)
+    || view.selected_session_surface_count < 0
+    || typeof view.selected_session_surfaces_truncated !== 'boolean') return null;
   return view;
 }
 
@@ -1035,6 +1040,135 @@ function renderContextSet(next) {
   return fragment;
 }
 
+function devosZeroAuthorityRow(row) {
+  return row
+    && row.projection_is_authority === false
+    && row.scheduler_authority === false
+    && row.execution_authority === false
+    && row.command_leasing === false
+    && row.automatic_effect_retry_allowed === false
+    && row.page_model_authority === false
+    && row.authority_effect === false;
+}
+
+function devosSessionRows(next) {
+  const view = devosShellView(next);
+  if (!view) return Object.freeze([]);
+  const rows = [];
+  for (const group of view.session_groups.slice(0, 5)) {
+    if (!devosZeroAuthorityRow(group) || !Array.isArray(group.sessions)) return Object.freeze([]);
+    const groupId = String(group.group_id || 'UNKNOWN');
+    for (const row of group.sessions.slice(0, 256)) {
+      if (!devosZeroAuthorityRow(row) || !row.session_id) return Object.freeze([]);
+      rows.push(Object.freeze({
+        session_id: String(row.session_id),
+        title: text(row.title, String(row.session_id)),
+        status: text(row.status, 'UNKNOWN'),
+        browser_only: row.browser_only === true,
+        task_count: Math.max(0, Number(row.task_count || 0)),
+        surface_count: Math.max(0, Number(row.surface_count || 0)),
+        selected: row.selected === true,
+        group_id: groupId,
+        authority_effect: false,
+      }));
+      if (rows.length >= 256) return Object.freeze(rows);
+    }
+  }
+  return Object.freeze(rows);
+}
+
+function devosSelectedSurfaceRows(next) {
+  const view = devosShellView(next);
+  const sessionId = view?.selected_session?.session_id ? String(view.selected_session.session_id) : null;
+  if (!view || !sessionId) return Object.freeze([]);
+  const rows = [];
+  for (const row of view.selected_session_surfaces.slice(0, 256)) {
+    if (!devosZeroAuthorityRow(row) || String(row.session_id || '') !== sessionId || !row.surface_id) return Object.freeze([]);
+    rows.push(Object.freeze({
+      surface_id: String(row.surface_id),
+      session_id: sessionId,
+      type: text(row.type, 'UNKNOWN'),
+      title: text(row.title, String(row.surface_id)),
+      state: text(row.state, 'UNKNOWN'),
+      tab_id: row.tab_id ? String(row.tab_id) : null,
+      authority_effect: false,
+    }));
+  }
+  return Object.freeze(rows);
+}
+
+function renderSessions(next) {
+  const fragment = document.createDocumentFragment();
+  const view = devosShellView(next);
+  const sessions = devosSessionRows(next);
+  const surfaces = devosSelectedSurfaceRows(next);
+  const selectedSession = view?.selected_session || null;
+  const selectedSurfaceId = view?.selected_surface?.surface_id ? String(view.selected_surface.surface_id) : null;
+  fragment.append(hero('Sessions', 'Canonical DevOS Session focus. Browser tabs remain separate Surfaces and cannot create Session focus.', view ? `${sessions.length} session${sessions.length === 1 ? '' : 's'}` : 'unavailable'));
+  if (!view) {
+    const unavailable = section('Session focus', 'DevOS shell ViewModel unavailable or invalid');
+    unavailable.list.append(kvRow('State', 'UNKNOWN', 'neutral'));
+    fragment.append(unavailable.wrap);
+    return fragment;
+  }
+
+  const grid = el('div', 'opsGrid');
+  grid.append(
+    metric('Sessions', sessions.length, sessions.length ? 'good' : 'neutral'),
+    metric('Focused', selectedSession ? 'YES' : 'NO', selectedSession ? 'good' : 'neutral'),
+    metric('Surfaces', selectedSession ? view.selected_session_surface_count : 0, surfaces.length ? 'good' : 'neutral'),
+    metric('Authority effect', 'NONE', 'good'),
+  );
+  fragment.append(grid);
+
+  if (selectedSession) {
+    const focusActions = el('div', 'commandList');
+    focusActions.append(commandButton('Clear Session focus', 'Presentation focus only', () => api.presentationFocus.clear()));
+    fragment.append(focusActions);
+  }
+
+  const sessionList = section('Session focus', 'Explicit operator selection · Browser selection is not focus authority');
+  sessionList.list.className = 'commandList';
+  for (const row of sessions) {
+    const hint = `${row.group_id} · ${row.status} · ${row.surface_count} surface${row.surface_count === 1 ? '' : 's'}${row.selected ? ' · focused' : ''}`;
+    sessionList.list.append(commandButton(row.title, hint, () => api.presentationFocus.selectSession(row.session_id)));
+  }
+  if (!sessions.length) sessionList.list.append(kvRow('State', 'NO SESSIONS', 'neutral'));
+  fragment.append(sessionList.wrap);
+
+  const surfaceList = section('Selected Session surfaces', selectedSession ? `${surfaces.length}/${view.selected_session_surface_count} projected` : 'select a Session first');
+  if (!selectedSession) {
+    surfaceList.list.append(kvRow('Surface choice', 'SELECT SESSION', 'neutral'));
+  } else if (!surfaces.length) {
+    surfaceList.list.append(kvRow('Surface choice', 'SESSION ONLY', 'good'));
+  } else {
+    surfaceList.list.className = 'commandList';
+    const browserSurfaces = surfaces.filter((row) => String(row.type).toUpperCase() === 'BROWSER');
+    if (!selectedSurfaceId && browserSurfaces.length > 1) {
+      surfaceList.list.append(kvRow('Browser Surface choice', 'EXPLICIT SELECTION REQUIRED', 'warn'));
+    }
+    for (const row of surfaces) {
+      const selected = row.surface_id === selectedSurfaceId;
+      const hint = `${row.type} · ${row.state}${selected ? ' · focused' : ''}`;
+      surfaceList.list.append(commandButton(row.title, hint, () => api.presentationFocus.selectSurface(row.session_id, row.surface_id)));
+    }
+    if (view.selected_session_surfaces_truncated) {
+      surfaceList.list.append(kvRow('Projection', `TRUNCATED ${surfaces.length}/${view.selected_session_surface_count}`, 'warn'));
+    }
+  }
+  fragment.append(surfaceList.wrap);
+
+  const contract = section('Session contract', 'presentation focus only');
+  contract.list.append(
+    kvRow('Primary object', 'SESSION', 'good'),
+    kvRow('Browser selection authority', 'NONE', 'good'),
+    kvRow('Renderer routing authority', 'NONE', 'good'),
+    kvRow('Automatic effect retry', 'NONE', 'good'),
+  );
+  fragment.append(contract.wrap);
+  return fragment;
+}
+
 function renderSkills(next) {
   const fragment = document.createDocumentFragment();
   fragment.append(hero('Workbench Skills', 'Reusable bounded workflows. No arbitrary scripts, model commands, or automatic page actions.', 'bounded'));
@@ -1043,6 +1177,7 @@ function renderSkills(next) {
     commandButton('Research Focus', 'Expand Context Rail + open Context Set', () => setLayout({ sidebar: 'EXPANDED', operations: 'OPEN' }).then(() => openAgenticSection('context'))),
     commandButton('Triage Attention', 'Open canonical DevOS Now', () => openAgenticSection('attention')),
     commandButton('Activity Trace', 'Open compact execution evidence', () => openAgenticSection('activity')),
+    commandButton('Session Surface Focus', 'Open canonical Session / Surface presentation controls', () => openAgenticSection('sessions')),
     commandButton('Fleet Transport Review', 'Open existing trusted Fleet panel', () => openCoreOpsSection('fleet')),
     commandButton('Workspace Binding Review', 'Open existing typed Workspace panel', () => openCoreOpsSection('workspaces')),
     commandButton('Authority Review', 'Open existing Safety contracts', () => openCoreOpsSection('safety')),
@@ -1074,6 +1209,7 @@ function renderAgenticSection(next) {
   if (agenticSection === 'attention') content = renderAttention(next);
   else if (agenticSection === 'activity') content = renderActivity(next);
   else if (agenticSection === 'context') content = renderContextSet(next);
+  else if (agenticSection === 'sessions') content = renderSessions(next);
   else content = renderSkills(next);
   opsContent.replaceChildren(content);
 }
@@ -1093,7 +1229,7 @@ function tabSearchMatches(next, query) {
 function workbenchCommandTarget(token) {
   const normalized = String(token || '').trim().toLowerCase();
   const aliases = Object.freeze({
-    attention: ['agentic', 'attention'], activity: ['agentic', 'activity'], context: ['agentic', 'context'], skills: ['agentic', 'skills'],
+    attention: ['agentic', 'attention'], activity: ['agentic', 'activity'], context: ['agentic', 'context'], sessions: ['agentic', 'sessions'], skills: ['agentic', 'skills'],
     fleet: ['core', 'fleet'], workspaces: ['core', 'workspaces'], supervisor: ['core', 'supervisor'], devos: ['core', 'devos'],
     runtime: ['core', 'runtime'], safety: ['core', 'safety'], commands: ['core', 'commands'], overview: ['core', 'overview'],
   });
@@ -1107,6 +1243,7 @@ function runWorkbenchSkill(token) {
   if (normalized === 'activity') return openAgenticSection('activity');
   if (normalized === 'authority') return openCoreOpsSection('safety');
   if (normalized === 'context') return openAgenticSection('context');
+  if (normalized === 'sessions' || normalized === 'session') return openAgenticSection('sessions');
   if (normalized === 'new') return api.command('NEW_CHATGPT', {});
   return openAgenticSection('skills');
 }
