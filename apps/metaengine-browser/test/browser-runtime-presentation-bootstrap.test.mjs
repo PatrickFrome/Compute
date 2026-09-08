@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
 
+// Presentation bootstrap is intentionally independent from supervisor actuation authority.
 test('OFF/unarmed clean genesis still bootstraps the initial browser presentation surface', async () => {
   const main = await fs.readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
   const genesis = await fs.readFile(new URL('../src/runtime-genesis.mjs', import.meta.url), 'utf8');
