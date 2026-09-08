@@ -48,9 +48,7 @@ function requireDeltaForCheckpoint(delta, checkpoint) {
   }
 }
 
-export function createProviderNeutralFanoutPreparationCheckpointDelta(checkpointInput, options, baseSaved, nextSaved) {
-  const { checkpoint: base } = validated(checkpointInput, options, baseSaved);
-  const { checkpoint: next } = validated(checkpointInput, options, nextSaved);
+function deltaFromCheckpoints(base, next) {
   if (identity(base) !== identity(next)) throw new Error('fanout_preparation_delta_identity_mismatch');
 
   const before = entryMap(base);
@@ -78,6 +76,25 @@ export function createProviderNeutralFanoutPreparationCheckpointDelta(checkpoint
     next_preparation_checkpoint_digest: next.preparation_checkpoint_digest,
     added_entries: Object.freeze(added.sort((left, right) => left.fanout_index - right.fanout_index)),
     added_count: added.length,
+  });
+}
+
+export function createProviderNeutralFanoutPreparationCheckpointDelta(checkpointInput, options, baseSaved, nextSaved) {
+  const { checkpoint: base } = validated(checkpointInput, options, baseSaved);
+  const { checkpoint: next } = validated(checkpointInput, options, nextSaved);
+  return deltaFromCheckpoints(base, next);
+}
+
+export function appendProviderNeutralFanoutPreparationCheckpointDelta(checkpointInput, options, baseSaved, addedEntries = []) {
+  if (!Array.isArray(addedEntries) || addedEntries.length > MAX_FANOUT) {
+    throw new Error('fanout_preparation_delta_entries_invalid');
+  }
+  const { restored, checkpoint: base } = validated(checkpointInput, options, baseSaved);
+  for (const entry of addedEntries) restored.accept(entry);
+  const next = restored.checkpoint();
+  return Object.freeze({
+    delta: deltaFromCheckpoints(base, next),
+    checkpoint: next,
   });
 }
 
@@ -115,5 +132,6 @@ export function providerNeutralFanoutPreparationCheckpointDeltaContract() {
     prepared_entry_collision_fence_preserved: true,
     compact_incremental_persistence: true,
     batched_replay_single_restore: true,
+    append_builder_single_restore: true,
   });
 }
