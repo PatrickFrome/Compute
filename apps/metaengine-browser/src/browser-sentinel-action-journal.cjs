@@ -83,12 +83,18 @@ class BrowserSentinelActionJournal {
       this.#row = validateRow(validated, binding);
       return this.snapshot();
     }
-    if (allowSuccessorBinding !== true) throw new Error('sentinel_action_journal_binding_drift');
 
-    // The caller may opt into successor reconciliation only after proving that the
-    // current worker is durably bound to the new parent/token. Preserve the entire
-    // predecessor row before replacing the active journal. No predecessor action is
-    // replayed and no retry authority crosses the incarnation boundary.
+    const boundWorkerPid = Number(bindingSource?.worker_pid || 0);
+    const workerBindingProven = Number.isSafeInteger(boundWorkerPid)
+      && boundWorkerPid === process.pid
+      && bindingSource?.worker_released !== true;
+    if (allowSuccessorBinding !== true && !workerBindingProven) throw new Error('sentinel_action_journal_binding_drift');
+
+    // A successor may reconcile only after the current process is durably recorded as
+    // the exact worker for the new parent/token (or a narrowly-scoped caller supplies
+    // an equivalent proof explicitly). Preserve the entire predecessor row before
+    // replacing the active journal. No predecessor effect or retry authority crosses
+    // the incarnation boundary.
     const archivePath = predecessorJournalPath(this.#statePath, validated);
     await durableWriteJson(archivePath, validated, { sequence: Number(validated.sequence) });
     const next = {
