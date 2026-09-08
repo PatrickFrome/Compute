@@ -1,6 +1,6 @@
 {
   "name": "@metaengine/browser-shell",
-  "version": "0.7.0-dev.1",
+  "version": "0.7.0-dev.2.1",
   "private": true,
   "type": "module",
   "description": "METAENGINE Development OS shell with autonomous agent sessions, Browser surfaces, embedded Development Plane, durable supervisor keepalive, crash sentinel, host resilience and self-update runtime",

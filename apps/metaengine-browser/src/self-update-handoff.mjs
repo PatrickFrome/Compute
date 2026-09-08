@@ -218,11 +218,79 @@ export async function inspectSelfUpdateStartup(app, { clock = () => Date.now() }
       transactionState: 'UNREADABLE',
     });
   }
-  if (journal?.state === 'AMBIGUOUS_INSTALL' || journal?.state === 'QUARANTINED') {
+  if (journal?.state === 'QUARANTINED') {
     return startupHold({
       app,
       journal,
       reason: journal.evidence?.reason || journal.evidence?.quarantine_reason || 'durable_transaction_hold',
+    });
+  }
+
+  // An older executable can durably classify a failed installer handoff as
+  // AMBIGUOUS_INSTALL before a later manual repair installs a newer build. The
+  // held journal must remain fail-closed unless both pieces of durable evidence
+  // agree on the exact predecessor target: the validated transaction and the
+  // validated pre-install receipt. Only a strictly newer installed version may
+  // retire that predecessor attempt; an equal, older, malformed, missing, or
+  // mismatched version remains held without reopening installer authority.
+  if (journal?.state === 'AMBIGUOUS_INSTALL') {
+    let heldExpected = null;
+    try {
+      heldExpected = await readExpectedPreInstallReceipt(app, {
+        maxAgeMs: STARTUP_HOLD_MAX_AGE_MS,
+        clock,
+      });
+    } catch {
+      return startupHold({
+        app,
+        journal,
+        reason: journal.evidence?.reason || 'durable_transaction_hold',
+      });
+    }
+    const current = String(app.getVersion() || '');
+    const target = String(heldExpected?.receipt?.version || '');
+    const exactTargetBinding = Boolean(
+      target
+      && journal.target_version === target
+      && heldExpected.receipt.available_version === target,
+    );
+    if (exactTargetBinding && compareVersions(current, target) > 0) {
+      let superseded;
+      try {
+        superseded = await transitionSelfUpdateTransaction(app, 'SUPERSEDED', {
+          requireTargetVersion: target,
+          evidence: {
+            superseding_version: current,
+            superseded_from_state: 'AMBIGUOUS_INSTALL',
+            predecessor_receipt_verified: true,
+          },
+        });
+      } catch (error) {
+        return startupHold({
+          app,
+          journal,
+          reason: `supersede_reconciliation_failed:${String(error?.message || error).slice(0, 180)}`,
+        });
+      }
+      if (superseded?.state === 'SUPERSEDED'
+        && superseded.target_version === target
+        && superseded.evidence?.superseding_version === current) {
+        return {
+          schema: 'metaengine.self-update.startup-inspection.v1',
+          state: 'SUPERSEDED',
+          transaction_state: superseded.state,
+          ...transactionIdentity(superseded),
+          current_version: current,
+          target_version: target,
+          automatic_retry_allowed: false,
+          authority_effect: false,
+        };
+      }
+    }
+    return startupHold({
+      app,
+      journal,
+      reason: journal.evidence?.reason || 'durable_transaction_hold',
     });
   }
 
