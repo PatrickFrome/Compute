@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   patch-and-self-delete:
-    if: github.repository == 'PatrickFrome/Compute'
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout exact branch
@@ -20,7 +19,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Prove exact remote head and patch deterministically
+      - name: Prove exact remote head
         shell: bash
         env:
           EXPECTED_TRIGGER_SHA: ${{ github.sha }}
@@ -28,34 +27,25 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_TRIGGER_SHA"
           test "$(git ls-remote origin refs/heads/work/metaengine-browser-security-negative-gate-v1 | cut -f1)" = "$EXPECTED_TRIGGER_SHA"
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('.github/workflows/metaengine-browser-shell-v1.yml')
-          s = p.read_text()
-          old = """          ! grep -E 'child_process|exec\\(|spawn\\(|eval\\(|new Function' apps/metaengine-browser/src/verification-sandbox-plan.cjs
-          ! grep -E 'child_process|exec\\(|eval\\(|new Function' apps/metaengine-browser/src/development-plane-worker.cjs apps/metaengine-browser/smoke/dp/main.cjs
-          ! grep -R -E 'executeJavaScript|Runtime\\.evaluate|--remote-debugging-port|--no-sandbox|chat\\.z\\.ai|GLM_ZAI|STRICT_GLM_FIRST' apps/metaengine-browser --exclude-dir=node_modules
-          ! grep -R -E 'nodeIntegration:[[:space:]]*true|sandbox:[[:space:]]*false' apps/metaengine-browser --exclude-dir=node_modules
-"""
-          new = """          node apps/metaengine-browser/scripts/security-static-gate.mjs
-"""
-          if s.count(old) != 1:
-              raise SystemExit(f'expected exactly one legacy negative-grep block, found {s.count(old)}')
-          p.write_text(s.replace(old, new))
-          PY
+
+      - name: Patch and prove executable gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node apps/metaengine-browser/scripts/patch-security-workflow-temp.mjs
           node apps/metaengine-browser/scripts/security-static-gate.mjs
           node --test apps/metaengine-browser/test/browser-security-static-gate.test.mjs
-          python - <<'PY'
-          from pathlib import Path
-          text = Path('.github/workflows/metaengine-browser-shell-v1.yml').read_text()
-          if '\n          ! grep' in text:
-              raise SystemExit('bare_negative_grep_still_present')
-          PY
-          rm .github/workflows/security-negative-gate-wire-temp.yml
           git diff --check
-          test "$(git status --porcelain | wc -l)" -eq 2
+
+      - name: Self-delete and fast-forward push
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/security-negative-gate-wire-temp.yml
+          rm apps/metaengine-browser/scripts/patch-security-workflow-temp.mjs
+          test "$(git status --porcelain | wc -l)" -eq 3
           git config user.name 'METAENGINE CI'
           git config user.email 'actions@github.com'
-          git add .github/workflows/metaengine-browser-shell-v1.yml .github/workflows/security-negative-gate-wire-temp.yml
+          git add .github/workflows/metaengine-browser-shell-v1.yml .github/workflows/security-negative-gate-wire-temp.yml apps/metaengine-browser/scripts/patch-security-workflow-temp.mjs
           git commit -m 'ci(browser): enforce executable security negative gate'
           git push origin HEAD:work/metaengine-browser-security-negative-gate-v1
