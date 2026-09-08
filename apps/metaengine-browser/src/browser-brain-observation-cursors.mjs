@@ -53,6 +53,17 @@ function assertZeroAuthority(input) {
   }
 }
 
+function toResume(cursor) {
+  return Object.freeze({
+    schema: 'metaengine.browser-brain.observation-resume.v1',
+    consumer: cursor.consumer,
+    from_epoch: cursor.epoch,
+    canonical_resync_required: false,
+    payload_persisted: false,
+    ...ZERO_AUTHORITY,
+  });
+}
+
 export class BrowserBrainObservationCursorLedger {
   #capacity;
   #cursors = new Map();
@@ -112,15 +123,9 @@ export class BrowserBrainObservationCursorLedger {
   }
 
   resumeFrom(consumerValue) {
-    const cursor = this.get(consumerValue);
-    return Object.freeze({
-      schema: 'metaengine.browser-brain.observation-resume.v1',
-      consumer: String(consumerValue).trim(),
-      from_epoch: cursor?.epoch ?? 0,
-      canonical_resync_required: false,
-      payload_persisted: false,
-      ...ZERO_AUTHORITY,
-    });
+    const consumer = String(consumerValue || '').trim();
+    const cursor = this.get(consumer);
+    return toResume(cursor || { consumer, epoch: 0 });
   }
 
   resumeBatch(consumerValues = []) {
@@ -128,6 +133,14 @@ export class BrowserBrainObservationCursorLedger {
       throw new TypeError('browser_brain_cursor_resume_batch_invalid');
     }
     return Object.freeze(consumerValues.map((consumer) => this.resumeFrom(consumer)));
+  }
+
+  resumeAll() {
+    return Object.freeze(
+      [...this.#cursors.values()]
+        .sort((a, b) => a.consumer.localeCompare(b.consumer))
+        .map((cursor) => toResume(cursor)),
+    );
   }
 
   snapshot() {
@@ -150,6 +163,7 @@ export function browserBrainObservationCursorContract() {
     max_consumers: MAX_CONSUMERS,
     max_batch_checkpoints: MAX_BATCH,
     max_batch_resumes: MAX_BATCH,
+    max_full_capacity_resumes: MAX_CONSUMERS,
     max_snapshot_restore_consumers: MAX_CONSUMERS,
     monotonic_epoch: true,
     duplicate_idempotent: true,
@@ -158,6 +172,7 @@ export function browserBrainObservationCursorContract() {
     transactional_snapshot_restore: true,
     chunked_full_capacity_snapshot_restore: true,
     bounded_batch_resume: true,
+    bounded_full_capacity_resume: true,
     durable_checkpoint_only: true,
     payload_persisted: false,
     provider_neutral: true,
