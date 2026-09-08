@@ -1,0 +1,65 @@
+name: Finalize Dark Workspace V2 Temp
+
+on:
+  push:
+    branches:
+      - 'work/metaengine-browser-dark-workspace-v2'
+    paths:
+      - '.github/workflows/finalize-dark-workspace-v2-temp.yml'
+      - '.github/scripts/finalize-dark-workspace-v2-temp.mjs'
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: work/metaengine-browser-dark-workspace-v2
+          fetch-depth: 0
+
+      - name: Prove exact remote head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "$(git ls-remote origin refs/heads/work/metaengine-browser-dark-workspace-v2 | cut -f1)" = "${GITHUB_SHA}"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Finalize CSP and dark presentation contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .github/scripts/finalize-dark-workspace-v2-temp.mjs
+          git diff --check
+          test "$(git diff --name-only | sort | tr '\n' ' ')" = "apps/metaengine-browser/test/browser-brain-task-first-ui.test.mjs apps/metaengine-browser/test/browser-devos-shell-ui.test.mjs apps/metaengine-browser/test/browser-shell-telegram-brain-v2.test.mjs apps/metaengine-browser/ui/index.html "
+
+      - name: Full Browser parse and contract proof
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run check
+          npm test
+
+      - name: Self-clean and push exact product commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/scripts/finalize-dark-workspace-v2-temp.mjs .github/workflows/finalize-dark-workspace-v2-temp.yml
+          git diff --check
+          test "$(git diff --name-only | sort | tr '\n' ' ')" = ".github/scripts/finalize-dark-workspace-v2-temp.mjs .github/workflows/finalize-dark-workspace-v2-temp.yml apps/metaengine-browser/test/browser-brain-task-first-ui.test.mjs apps/metaengine-browser/test/browser-devos-shell-ui.test.mjs apps/metaengine-browser/test/browser-shell-telegram-brain-v2.test.mjs apps/metaengine-browser/ui/index.html "
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add apps/metaengine-browser/ui/index.html apps/metaengine-browser/test/browser-brain-task-first-ui.test.mjs apps/metaengine-browser/test/browser-devos-shell-ui.test.mjs apps/metaengine-browser/test/browser-shell-telegram-brain-v2.test.mjs
+          git commit -m "fix(browser): finalize dark workspace contracts"
+          git push origin HEAD:refs/heads/work/metaengine-browser-dark-workspace-v2
