@@ -1,4 +1,5 @@
 const CONSUMER_RE = /^[a-z][a-z0-9_.:-]{0,95}$/i;
+const MAX_BATCH = 128;
 const ZERO_AUTHORITY = Object.freeze({
   scheduler_authority: false,
   dispatch_authority: false,
@@ -20,6 +21,31 @@ function normalizeEpoch(value, code) {
   return epoch;
 }
 
+function applyCheckpoint(cursors, capacity, input) {
+  if (!input || typeof input !== 'object') throw new TypeError('browser_brain_cursor_invalid');
+  const consumer = String(input.consumer || '').trim();
+  if (!CONSUMER_RE.test(consumer)) throw new TypeError('browser_brain_cursor_consumer_invalid');
+  const epoch = normalizeEpoch(input.epoch, 'browser_brain_cursor_epoch_invalid');
+  const observationDigest = normalizeDigest(input.observation_digest, 'browser_brain_cursor_digest_invalid');
+  const existing = cursors.get(consumer);
+
+  if (!existing && cursors.size >= capacity) {
+    throw new Error('browser_brain_cursor_capacity_exceeded');
+  }
+  if (existing && epoch < existing.epoch) {
+    return Object.freeze({ accepted: false, disposition: 'REGRESSION', consumer, epoch: existing.epoch, ...ZERO_AUTHORITY });
+  }
+  if (existing && epoch === existing.epoch) {
+    if (existing.observation_digest !== observationDigest) {
+      throw new Error('browser_brain_cursor_epoch_collision');
+    }
+    return Object.freeze({ accepted: true, disposition: 'DUPLICATE', consumer, epoch, ...ZERO_AUTHORITY });
+  }
+
+  cursors.set(consumer, Object.freeze({ consumer, epoch, observation_digest: observationDigest }));
+  return Object.freeze({ accepted: true, disposition: 'APPLIED', consumer, epoch, ...ZERO_AUTHORITY });
+}
+
 export class BrowserBrainObservationCursorLedger {
   #capacity;
   #cursors = new Map();
@@ -33,28 +59,17 @@ export class BrowserBrainObservationCursorLedger {
   }
 
   checkpoint(input) {
-    if (!input || typeof input !== 'object') throw new TypeError('browser_brain_cursor_invalid');
-    const consumer = String(input.consumer || '').trim();
-    if (!CONSUMER_RE.test(consumer)) throw new TypeError('browser_brain_cursor_consumer_invalid');
-    const epoch = normalizeEpoch(input.epoch, 'browser_brain_cursor_epoch_invalid');
-    const observationDigest = normalizeDigest(input.observation_digest, 'browser_brain_cursor_digest_invalid');
-    const existing = this.#cursors.get(consumer);
+    return applyCheckpoint(this.#cursors, this.#capacity, input);
+  }
 
-    if (!existing && this.#cursors.size >= this.#capacity) {
-      throw new Error('browser_brain_cursor_capacity_exceeded');
+  checkpointBatch(inputs = []) {
+    if (!Array.isArray(inputs) || inputs.length > MAX_BATCH) {
+      throw new TypeError('browser_brain_cursor_batch_invalid');
     }
-    if (existing && epoch < existing.epoch) {
-      return Object.freeze({ accepted: false, disposition: 'REGRESSION', consumer, epoch: existing.epoch, ...ZERO_AUTHORITY });
-    }
-    if (existing && epoch === existing.epoch) {
-      if (existing.observation_digest !== observationDigest) {
-        throw new Error('browser_brain_cursor_epoch_collision');
-      }
-      return Object.freeze({ accepted: true, disposition: 'DUPLICATE', consumer, epoch, ...ZERO_AUTHORITY });
-    }
-
-    this.#cursors.set(consumer, Object.freeze({ consumer, epoch, observation_digest: observationDigest }));
-    return Object.freeze({ accepted: true, disposition: 'APPLIED', consumer, epoch, ...ZERO_AUTHORITY });
+    const staged = new Map(this.#cursors);
+    const results = inputs.map((input) => applyCheckpoint(staged, this.#capacity, input));
+    this.#cursors = staged;
+    return Object.freeze(results);
   }
 
   get(consumerValue) {
@@ -93,9 +108,11 @@ export function browserBrainObservationCursorContract() {
   return Object.freeze({
     schema: 'metaengine.browser-brain.observation-cursor-contract.v1',
     max_consumers: 256,
+    max_batch_checkpoints: MAX_BATCH,
     monotonic_epoch: true,
     duplicate_idempotent: true,
     collision_fail_closed: true,
+    transactional_batch_checkpoint: true,
     durable_checkpoint_only: true,
     payload_persisted: false,
     provider_neutral: true,
