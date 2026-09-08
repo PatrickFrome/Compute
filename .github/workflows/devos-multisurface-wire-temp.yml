@@ -69,16 +69,20 @@ jobs:
           from pathlib import Path
           p = Path('apps/metaengine-browser/src/main.mjs')
           source = p.read_text()
-          before = """    presentation_focus: presentationFocus,
-            session_layouts: sessionLayouts,
-          });"""
-          after = """    presentation_focus: presentationFocus,
-            session_layouts: sessionLayouts,
-            devos_sources: projectDevOSDevelopmentSources({
-              development_plane: developmentPlaneSnapshot,
-              startup_logs: startupDegradedSnapshot(),
-            }),
-          });"""
+          before = "\n".join([
+              "    presentation_focus: presentationFocus,",
+              "    session_layouts: sessionLayouts,",
+              "  });",
+          ])
+          after = "\n".join([
+              "    presentation_focus: presentationFocus,",
+              "    session_layouts: sessionLayouts,",
+              "    devos_sources: projectDevOSDevelopmentSources({",
+              "      development_plane: developmentPlaneSnapshot,",
+              "      startup_logs: startupDegradedSnapshot(),",
+              "    }),",
+              "  });",
+          ])
           count = source.count(before)
           if count != 1:
               raise SystemExit(f'post_transform_shell_source_anchor_count:{count}')
