@@ -22,6 +22,7 @@ import {
 import { VerifiedDownloadManager } from './verified-download-manager.mjs';
 import { normalizeShellLayoutState, planShellLayout, SHELL_TOP_HEIGHT } from './shell-layout.mjs';
 import { createDevOSPresentationFocusState } from './metaengine-devos-presentation-focus.mjs';
+import { applyDevOSPresentationActivation } from './metaengine-devos-presentation-activation-runtime.mjs';
 import { projectWorkspaceWorkbench } from './workspace-workbench-projection.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -183,6 +184,36 @@ function recordStartupSubsystemReady(subsystem) {
     local_shell_kept_alive: true,
     authority_effect: false,
   }));
+}
+
+function currentDevOSPresentationProjection() {
+  return projectWorkspaceWorkbench({
+    tabs: registry.snapshot(),
+    fleet: fleet?.snapshot() || null,
+    supervisor: nativeSupervisor?.snapshot() || null,
+    presentation_focus: devosPresentationFocus.snapshot(),
+  }).devos;
+}
+
+function selectBrowserTabForPresentation(tabId) {
+  const id = String(tabId || '');
+  const tab = registry.get(id);
+  const view = views.get(id);
+  if (!tab) throw new Error('tab_not_found');
+  if (!view || view.webContents.isDestroyed()) throw new Error('tab_binding_not_live');
+  registry.select(id);
+  attachSelected();
+  invalidatePerception();
+  return tab;
+}
+
+function applyPresentationFocusIntent(request) {
+  return applyDevOSPresentationActivation({
+    devos: currentDevOSPresentationProjection(),
+    request,
+    presentationFocus: devosPresentationFocus,
+    selectBrowserTab: selectBrowserTabForPresentation,
+  });
 }
 
 async function shellSnapshot() {
@@ -951,15 +982,15 @@ ipcMain.handle('metaengine:shell:presentation-focus:snapshot', async (event) => 
 });
 ipcMain.handle('metaengine:shell:presentation-focus:select-session', async (event, sessionId) => {
   assertShellSender(event);
-  const state = devosPresentationFocus.selectSession(sessionId);
-  await publishSnapshot();
-  return state;
+  const result = applyPresentationFocusIntent({ intent: 'SESSION', session_id: sessionId });
+  if (result.applied || result.browser_activation_performed) await publishSnapshot();
+  return result;
 });
 ipcMain.handle('metaengine:shell:presentation-focus:select-surface', async (event, sessionId, surfaceId) => {
   assertShellSender(event);
-  const state = devosPresentationFocus.selectSurface(sessionId, surfaceId);
-  await publishSnapshot();
-  return state;
+  const result = applyPresentationFocusIntent({ intent: 'SURFACE', session_id: sessionId, surface_id: surfaceId });
+  if (result.applied || result.browser_activation_performed) await publishSnapshot();
+  return result;
 });
 ipcMain.handle('metaengine:shell:presentation-focus:clear', async (event) => {
   assertShellSender(event);
