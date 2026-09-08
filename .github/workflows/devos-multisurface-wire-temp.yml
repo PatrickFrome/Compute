@@ -44,31 +44,22 @@ jobs:
           from pathlib import Path
           p = Path('.github/scripts/patch-devos-source-finalize-temp.mjs')
           source = p.read_text()
-          helper_anchor = """function replaceOne(source, before, after, label) {
+          before = """function replaceOne(source, before, after, label) {
             const count = source.split(before).length - 1;
             if (count !== 1) throw new Error(`${label}_anchor_count:${count}`);
             return source.replace(before, after);
           }
           """
-          helper_replacement = helper_anchor + """
-          function replaceTwo(source, before, after, label) {
+          after = """function replaceOne(source, before, after, label) {
             const count = source.split(before).length - 1;
-            if (count !== 2) throw new Error(`${label}_anchor_count:${count}`);
-            return source.replaceAll(before, after);
+            const expected = label === 'main_intent_sources' ? 2 : 1;
+            if (count !== expected) throw new Error(`${label}_anchor_count:${count}`);
+            return expected === 2 ? source.replaceAll(before, after) : source.replace(before, after);
           }
           """
-          if source.count(helper_anchor) != 1:
-              raise SystemExit(f'replace_helper_anchor_count:{source.count(helper_anchor)}')
-          source = source.replace(helper_anchor, helper_replacement, 1)
-          label = "  'main_intent_sources');"
-          index = source.find(label)
-          if index < 0:
-              raise SystemExit('main_intent_sources_label_missing')
-          start = source.rfind('main = replaceOne(main,', 0, index)
-          if start < 0:
-              raise SystemExit('main_intent_sources_call_missing')
-          source = source[:start] + source[start:].replace('main = replaceOne(main,', 'main = replaceTwo(main,', 1)
-          p.write_text(source)
+          if source.count(before) != 1:
+              raise SystemExit(f'replace_helper_anchor_count:{source.count(before)}')
+          p.write_text(source.replace(before, after, 1))
           PY
           node .github/scripts/patch-devos-multisurface-temp.mjs
           node .github/scripts/patch-devos-multisurface-narrow-ipc-temp.mjs
