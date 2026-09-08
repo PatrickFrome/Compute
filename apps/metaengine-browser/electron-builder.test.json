@@ -61,7 +61,7 @@
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
     "shortcutName": "METAENGINE Browser Test",
-    "runAfterFinish": false,
+    "runAfterFinish": true,
     "deleteAppDataOnUninstall": false
   }
 }
