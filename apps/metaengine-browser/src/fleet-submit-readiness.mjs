@@ -20,15 +20,17 @@ export function evaluateFleetSubmitReadiness({
   selected_tab_id,
 } = {}) {
   const expectedTab = String(expected_tab_id || '');
+  const frameTab = String(frame?.tab_id || '');
   const observedTab = String(observed_tab_id || '');
   const expectedTarget = String(expected_target_id || '').toLowerCase();
+  const frameTarget = String(frame?.target_id || '').toLowerCase();
   const observedTarget = String(observed_target_id || '').toLowerCase();
   const selectedTab = String(selected_tab_id || '');
 
-  if (!expectedTab || observedTab !== expectedTab || selectedTab !== expectedTab) {
+  if (!expectedTab || !frameTab || frameTab !== expectedTab || observedTab !== expectedTab || selectedTab !== expectedTab) {
     return Object.freeze({ ready: false, reason: 'TAB_NOT_FOREGROUND_EXACT', authority_effect: false });
   }
-  if (!expectedTarget || observedTarget !== expectedTarget) {
+  if (!expectedTarget || !frameTarget || frameTarget !== expectedTarget || observedTarget !== expectedTarget) {
     return Object.freeze({ ready: false, reason: 'TARGET_INCARNATION_MISMATCH', authority_effect: false });
   }
   if (chatGptControlCount(frame, 'STOP') > 0) {
