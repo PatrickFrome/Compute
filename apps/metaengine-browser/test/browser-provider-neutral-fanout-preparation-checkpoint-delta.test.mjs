@@ -80,23 +80,12 @@ test('fails closed on stale base, entry collision, regression and tampered next 
 
 test('contract exposes the delta-specific restart-safe persistence boundary', () => {
   const contract = providerNeutralFanoutPreparationCheckpointDeltaContract();
-  assert.deepEqual({
-    max_fanout: contract.max_fanout,
-    append_only: contract.append_only,
-    base_digest_fenced: contract.base_digest_fenced,
-    next_digest_verified: contract.next_digest_verified,
-    collision_fence: contract.prepared_entry_collision_fence_preserved,
-    compact: contract.compact_incremental_persistence,
-    inherited_restart_restore: contract.restart_restore_supported,
-    inherited_effect_authority: contract.effect_execution_authority,
-  }, {
-    max_fanout: 128,
-    append_only: true,
-    base_digest_fenced: true,
-    next_digest_verified: true,
-    collision_fence: true,
-    compact: true,
-    inherited_restart_restore: true,
-    inherited_effect_authority: false,
-  });
+  assert.equal(contract.max_fanout, 128);
+  assert.equal(contract.append_only, true);
+  assert.equal(contract.base_digest_fenced, true);
+  assert.equal(contract.next_digest_verified, true);
+  assert.equal(contract.prepared_entry_collision_fence_preserved, true);
+  assert.equal(contract.compact_incremental_persistence, true);
+  assert.equal(contract.restart_restore_supported, true);
+  assert.equal(contract.effect_execution_authority, false);
 });
