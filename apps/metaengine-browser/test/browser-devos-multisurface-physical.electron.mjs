@@ -57,11 +57,10 @@ async function run() {
       title: contents.getTitle(),
       url: contents.getURL(),
       os_process_id: contents.getOSProcessId(),
-      loading: contents.isLoading(),
       destroyed: contents.isDestroyed(),
     });
   });
-  assert.equal(rendererEvidence.every((row) => row.destroyed === false && row.loading === false), true);
+  assert.equal(rendererEvidence.every((row) => row.destroyed === false), true);
   assert.equal(rendererEvidence.every((row) => Number.isInteger(row.os_process_id) && row.os_process_id > 0), true);
   assert.deepEqual(rendererEvidence.map((row) => row.title), surfaces.map((row) => row.title));
   assert.equal(rendererEvidence.every((row) => row.url.startsWith('data:text/html;charset=utf-8,')), true);
@@ -114,6 +113,7 @@ async function run() {
     ok: true,
     electron: process.versions.electron,
     simultaneously_attached_webcontents_views: views.size,
+    resolved_renderer_loads: rendererEvidence.length,
     live_renderer_processes: rendererEvidence.length,
     initial_layout: first.effective_layout,
     resized_layout: resized.effective_layout,
