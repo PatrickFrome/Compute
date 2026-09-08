@@ -45,6 +45,7 @@ function unavailableDevOSShellViewModel(reason = 'NOT_EXPOSED') {
     now: Object.freeze([]),
     selected_session: null,
     selected_surface: null,
+    presentation_focus: null,
     layout_preferences: null,
     counts: Object.freeze({ sessions: 0, surfaces: 0, attention: 0, visible_groups: 0 }),
     browser_is_shell: false,
@@ -216,6 +217,12 @@ ipcRenderer.on('metaengine:brain:port', (event, transfer = {}) => {
 contextBridge.exposeInMainWorld('metaengineShell', Object.freeze({
   snapshot: () => ipcRenderer.invoke('metaengine:shell:snapshot').then(decorateSnapshot),
   command: (command, payload) => ipcRenderer.invoke('metaengine:shell:command', { command, payload }),
+  presentationFocus: Object.freeze({
+    snapshot: () => ipcRenderer.invoke('metaengine:shell:presentation-focus:snapshot'),
+    selectSession: (sessionId) => ipcRenderer.invoke('metaengine:shell:presentation-focus:select-session', String(sessionId ?? '')),
+    selectSurface: (sessionId, surfaceId) => ipcRenderer.invoke('metaengine:shell:presentation-focus:select-surface', String(sessionId ?? ''), String(surfaceId ?? '')),
+    clear: () => ipcRenderer.invoke('metaengine:shell:presentation-focus:clear'),
+  }),
   onSnapshot: (listener) => {
     if (typeof listener !== 'function') return () => {};
     snapshotListeners.add(listener);
