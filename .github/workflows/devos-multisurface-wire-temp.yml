@@ -43,8 +43,9 @@ jobs:
           node --check apps/metaengine-browser/src/main.mjs
           node --check apps/metaengine-browser/src/metaengine-devos-surface-grid.mjs
           node --check apps/metaengine-browser/src/metaengine-devos-native-surfaces.mjs
+          node --check apps/metaengine-browser/src/metaengine-devos-shell-view-model.mjs
           node --check apps/metaengine-browser/ui/app.js
-          test "$(git diff --name-only | sort | tr '\n' ' ')" = "apps/metaengine-browser/src/main.mjs apps/metaengine-browser/ui/app.js apps/metaengine-browser/ui/dark-workspace.css "
+          test "$(git diff --name-only | sort | tr '\n' ' ')" = "apps/metaengine-browser/src/main.mjs apps/metaengine-browser/src/metaengine-devos-shell-view-model.mjs apps/metaengine-browser/ui/app.js apps/metaengine-browser/ui/dark-workspace.css "
 
       - name: Full Browser regression
         working-directory: apps/metaengine-browser
@@ -63,9 +64,9 @@ jobs:
           git rm .github/scripts/patch-devos-multisurface-temp.mjs .github/workflows/devos-multisurface-wire-temp.yml
           git diff --check
           CHANGED="$( { git diff --name-only; git diff --cached --name-only; } | sort -u | tr '\n' ' ')"
-          test "$CHANGED" = ".github/scripts/patch-devos-multisurface-temp.mjs .github/workflows/devos-multisurface-wire-temp.yml apps/metaengine-browser/src/main.mjs apps/metaengine-browser/ui/app.js apps/metaengine-browser/ui/dark-workspace.css "
+          test "$CHANGED" = ".github/scripts/patch-devos-multisurface-temp.mjs .github/workflows/devos-multisurface-wire-temp.yml apps/metaengine-browser/src/main.mjs apps/metaengine-browser/src/metaengine-devos-shell-view-model.mjs apps/metaengine-browser/ui/app.js apps/metaengine-browser/ui/dark-workspace.css "
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add apps/metaengine-browser/src/main.mjs apps/metaengine-browser/ui/app.js apps/metaengine-browser/ui/dark-workspace.css
+          git add apps/metaengine-browser/src/main.mjs apps/metaengine-browser/src/metaengine-devos-shell-view-model.mjs apps/metaengine-browser/ui/app.js apps/metaengine-browser/ui/dark-workspace.css
           git commit -m "feat(devos): wire physical multi-surface workbench"
           git push origin HEAD:refs/heads/work/metaengine-devos-multisurface-v1
