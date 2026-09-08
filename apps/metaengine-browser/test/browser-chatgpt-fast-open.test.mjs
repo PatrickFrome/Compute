@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const main = await readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
 
+// Interactive latency may improve only inside the existing exact WebContents/session boundary.
 test('ChatGPT interactive open preconnects the persistent authenticated session', () => {
   assert.match(main, /userSession\.preconnect\(\{ url: 'https:\/\/chatgpt\.com\/', numSockets: 2 \}\)/);
   assert.match(main, /user_space_partition/);
