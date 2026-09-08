@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const { durableWriteJson } = require('./durable-json-file.cjs');
 
@@ -18,6 +19,14 @@ function bindingFrom(value) {
   const executable = String(value?.executable || '');
   if (!token || !Number.isSafeInteger(parentPid) || parentPid < 1 || !executable) throw new Error('sentinel_action_binding_invalid');
   return Object.freeze({ token, parent_pid: parentPid, executable });
+}
+
+function incarnationActionJournalPath(statePath, bindingSource) {
+  const binding = bindingFrom(bindingSource);
+  const digest = crypto.createHash('sha256')
+    .update(JSON.stringify([binding.token, binding.parent_pid, binding.executable]), 'utf8')
+    .digest('hex');
+  return `${String(statePath)}.action-journal-v1.${digest}.json`;
 }
 
 function sameBinding(row, binding) {
@@ -52,6 +61,7 @@ function validateRow(row, binding = null) {
 class BrowserSentinelActionJournal {
   #statePath;
   #path;
+  #binding = null;
   #row = null;
   #writeTail = Promise.resolve();
 
@@ -63,8 +73,23 @@ class BrowserSentinelActionJournal {
 
   async init(bindingSource) {
     const binding = bindingFrom(bindingSource);
-    const existing = await readJson(this.#path);
-    if (existing) this.#row = validateRow(existing, binding);
+    const legacyPath = actionJournalPath(this.#statePath);
+    const scopedPath = incarnationActionJournalPath(this.#statePath, binding);
+    const legacy = await readJson(legacyPath);
+
+    if (legacy && sameBinding(legacy, binding)) {
+      this.#path = legacyPath;
+      this.#row = validateRow(legacy, binding);
+    } else if (legacy) {
+      this.#path = scopedPath;
+      const scoped = await readJson(scopedPath);
+      this.#row = scoped ? validateRow(scoped, binding) : null;
+    } else {
+      const scoped = await readJson(scopedPath);
+      this.#path = scoped ? scopedPath : legacyPath;
+      this.#row = scoped ? validateRow(scoped, binding) : null;
+    }
+    this.#binding = binding;
     return this.snapshot();
   }
 
@@ -84,6 +109,7 @@ class BrowserSentinelActionJournal {
 
   async #commit(bindingSource, state, fields = {}) {
     const binding = bindingFrom(bindingSource);
+    if (!this.#binding || !sameBinding(this.#binding, binding)) throw new Error('sentinel_action_journal_binding_drift');
     if (this.#row && !sameBinding(this.#row, binding)) throw new Error('sentinel_action_journal_binding_drift');
     const sequence = Number(this.#row?.sequence || 0) + 1;
     const pid = Number(fields?.relaunch_pid || 0);
@@ -230,5 +256,6 @@ module.exports = Object.freeze({
   SENTINEL_ACTION_JOURNAL_SCHEMA,
   SENTINEL_ACTION_JOURNAL_VERSION,
   actionJournalPath,
+  incarnationActionJournalPath,
   BrowserSentinelActionJournal,
 });
