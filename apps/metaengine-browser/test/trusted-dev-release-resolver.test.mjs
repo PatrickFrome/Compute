@@ -56,15 +56,20 @@ function response(body, status = 200) {
 
 function fetchFor({ releases, selected }) {
   const calls = [];
-  const fetchImpl = async (url) => {
+  const requests = [];
+  const fetchImpl = async (url, init = {}) => {
     calls.push(String(url));
+    requests.push({
+      url: String(url),
+      authorization: init?.headers?.authorization || null,
+    });
     if (url === `${API}/releases?per_page=30`) return response(releases);
     if (url === `${API}/git/ref/tags/${encodeURIComponent(selected.tag)}`) return response({ ref:`refs/tags/${selected.tag}`, object:{ type:'commit', sha:selected.gitSha } });
     if (url === `${DL}/${selected.tag}/verified-self-update-manifest.json`) return response(selected.manifest);
     if (url === `${DL}/${selected.tag}/dev.yml`) return response(selected.devYml);
     return response({ error:'unexpected' }, 404);
   };
-  return { fetchImpl, calls };
+  return { fetchImpl, calls, requests };
 }
 
 test('METAENGINE dev versions are strict and expose a monotonic build number', () => {
@@ -231,4 +236,35 @@ test('resolver retries a rate-limited release list once and then succeeds', asyn
   const result = await resolveTrustedMetaengineDevRelease({ currentVersion:'0.6.3-dev.64.1', fetchImpl });
   assert.equal(result.version, '0.6.3-dev.66.1');
   assert.equal(listCalls, 2, 'exactly one bounded retry for a pooled-IP rate limit');
+});
+
+test('resolver scopes an optional GitHub token to API calls and never release assets', async () => {
+  const r66 = fixture('0.6.3-dev.66.1', '2'.repeat(40));
+  const { fetchImpl, requests } = fetchFor({ releases:[r66.release], selected:r66 });
+  const token = 'ghs_read_only_fixture_token';
+  const result = await resolveTrustedMetaengineDevRelease({
+    currentVersion:'0.6.3-dev.64.1',
+    fetchImpl,
+    githubApiToken:token,
+  });
+  assert.equal(result.version, r66.version);
+  const apiRequests = requests.filter(({ url }) => url.startsWith(`${API}/`));
+  const assetRequests = requests.filter(({ url }) => url.startsWith(`${DL}/`));
+  assert.ok(apiRequests.length >= 2, 'release discovery and immutable tag binding must use the API');
+  assert.ok(apiRequests.every(({ authorization }) => authorization === `Bearer ${token}`));
+  assert.ok(assetRequests.length >= 2, 'manifest and dev.yml must still be fetched');
+  assert.ok(assetRequests.every(({ authorization }) => authorization === null), 'API credentials must never cross into release asset downloads');
+});
+
+test('resolver rejects malformed GitHub API tokens before the first network effect', async () => {
+  let calls = 0;
+  await assert.rejects(
+    resolveTrustedMetaengineDevRelease({
+      currentVersion:'0.6.3-dev.64.1',
+      githubApiToken:'ghs_fixture\r\nInjected: true',
+      fetchImpl:async () => { calls += 1; return response([]); },
+    }),
+    /trusted_release_github_api_token_invalid/,
+  );
+  assert.equal(calls, 0);
 });
