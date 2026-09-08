@@ -18,6 +18,12 @@ function replaceOne(source, before, after, label) {
   return source.replace(before, after);
 }
 
+function replaceExactCount(source, before, after, expected, label) {
+  const count = source.split(before).length - 1;
+  if (count !== expected) throw new Error(`${label}_anchor_count:${count}:expected:${expected}`);
+  return source.split(before).join(after);
+}
+
 let worker = await fs.readFile(files.worker, 'utf8');
 worker = replaceOne(worker,
   "const { verifyEnvelope: verifyAdvisoryEvidenceEnvelope } = require('./advisory-evidence-verifier.cjs');",
@@ -99,9 +105,10 @@ main = replaceOne(main,
   "import { projectWorkspaceWorkbench } from './workspace-workbench-projection.mjs';",
   "import { projectWorkspaceWorkbench } from './workspace-workbench-projection.mjs';\nimport { projectDevOSDevelopmentSources } from './metaengine-devos-development-sources.mjs';",
   'main_sources_import');
-main = replaceOne(main,
+main = replaceExactCount(main,
   "    presentation_focus: devosPresentationFocus.snapshot(),\n    session_layouts: devosSessionLayouts.snapshot(),",
   "    presentation_focus: devosPresentationFocus.snapshot(),\n    session_layouts: devosSessionLayouts.snapshot(),\n    devos_sources: projectDevOSDevelopmentSources({ development_plane: developmentPlane?.snapshot() || null, startup_logs: startupDegradedSnapshot() }),",
+  2,
   'main_intent_sources');
 main = replaceOne(main,
   "    presentation_focus: presentationFocus,\n    session_layouts: devosSessionLayouts.snapshot(),",
