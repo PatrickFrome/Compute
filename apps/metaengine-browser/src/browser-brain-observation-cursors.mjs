@@ -64,6 +64,35 @@ function assertNoDuplicateSnapshotConsumers(cursors) {
   }
 }
 
+function restoreChangedAt(snapshot, cursors, revision) {
+  if (snapshot.change_revisions === undefined) {
+    return new Map([...cursors.keys()].map((consumer) => [consumer, revision]));
+  }
+  if (!Array.isArray(snapshot.change_revisions) || snapshot.change_revisions.length !== cursors.size) {
+    throw new Error('browser_brain_cursor_snapshot_change_revisions_invalid');
+  }
+
+  const changedAt = new Map();
+  for (const row of snapshot.change_revisions) {
+    if (!row || typeof row !== 'object') {
+      throw new Error('browser_brain_cursor_snapshot_change_revisions_invalid');
+    }
+    const consumer = String(row.consumer || '').trim();
+    if (!CONSUMER_RE.test(consumer) || !cursors.has(consumer) || changedAt.has(consumer)) {
+      throw new Error('browser_brain_cursor_snapshot_change_revisions_invalid');
+    }
+    const changedRevision = normalizeEpoch(
+      row.revision,
+      'browser_brain_cursor_snapshot_change_revisions_invalid',
+    );
+    if (changedRevision < 1 || changedRevision > revision) {
+      throw new Error('browser_brain_cursor_snapshot_change_revisions_invalid');
+    }
+    changedAt.set(consumer, changedRevision);
+  }
+  return changedAt;
+}
+
 function toResume(cursor) {
   return Object.freeze({
     schema: 'metaengine.browser-brain.observation-resume.v1',
@@ -79,6 +108,7 @@ export class BrowserBrainObservationCursorLedger {
   #capacity;
   #cursors = new Map();
   #revision = 0;
+  #changedAt = new Map();
 
   constructor({ capacity = 64 } = {}) {
     const bounded = Number(capacity);
@@ -119,12 +149,16 @@ export class BrowserBrainObservationCursorLedger {
       }
     }
     ledger.#revision = revision;
+    ledger.#changedAt = restoreChangedAt(snapshot, ledger.#cursors, revision);
     return ledger;
   }
 
   checkpoint(input) {
     const result = applyCheckpoint(this.#cursors, this.#capacity, input);
-    if (result.disposition === 'APPLIED') this.#revision += 1;
+    if (result.disposition === 'APPLIED') {
+      this.#revision += 1;
+      this.#changedAt.set(result.consumer, this.#revision);
+    }
     return result;
   }
 
@@ -134,8 +168,16 @@ export class BrowserBrainObservationCursorLedger {
     }
     const staged = new Map(this.#cursors);
     const results = inputs.map((input) => applyCheckpoint(staged, this.#capacity, input));
+    const stagedChangedAt = new Map(this.#changedAt);
+    let nextRevision = this.#revision;
+    for (const result of results) {
+      if (result.disposition !== 'APPLIED') continue;
+      nextRevision += 1;
+      stagedChangedAt.set(result.consumer, nextRevision);
+    }
     this.#cursors = staged;
-    this.#revision += results.filter((result) => result.disposition === 'APPLIED').length;
+    this.#changedAt = stagedChangedAt;
+    this.#revision = nextRevision;
     return Object.freeze(results);
   }
 
@@ -166,11 +208,16 @@ export class BrowserBrainObservationCursorLedger {
     );
   }
 
-  resumeAllIfChanged(knownRevisionValue) {
+  #normalizeKnownRevision(knownRevisionValue) {
     const knownRevision = normalizeEpoch(knownRevisionValue, 'browser_brain_cursor_resume_revision_invalid');
     if (knownRevision > this.#revision) {
       throw new Error('browser_brain_cursor_resume_revision_ahead');
     }
+    return knownRevision;
+  }
+
+  resumeAllIfChanged(knownRevisionValue) {
+    const knownRevision = this.#normalizeKnownRevision(knownRevisionValue);
     const changed = knownRevision !== this.#revision;
     return Object.freeze({
       schema: 'metaengine.browser-brain.observation-conditional-resume.v1',
@@ -182,14 +229,35 @@ export class BrowserBrainObservationCursorLedger {
     });
   }
 
+  resumeChangedSince(knownRevisionValue) {
+    const knownRevision = this.#normalizeKnownRevision(knownRevisionValue);
+    const resumes = [...this.#cursors.values()]
+      .filter((cursor) => (this.#changedAt.get(cursor.consumer) || 0) > knownRevision)
+      .sort((a, b) => a.consumer.localeCompare(b.consumer))
+      .map((cursor) => toResume(cursor));
+    return Object.freeze({
+      schema: 'metaengine.browser-brain.observation-delta-resume.v1',
+      changed: resumes.length > 0,
+      revision: this.#revision,
+      resumes: Object.freeze(resumes),
+      payload_persisted: false,
+      ...ZERO_AUTHORITY,
+    });
+  }
+
   snapshot() {
     const cursors = [...this.#cursors.values()].sort((a, b) => a.consumer.localeCompare(b.consumer));
+    const changeRevisions = cursors.map((cursor) => Object.freeze({
+      consumer: cursor.consumer,
+      revision: this.#changedAt.get(cursor.consumer),
+    }));
     return Object.freeze({
       schema: 'metaengine.browser-brain.observation-cursor-ledger.v1',
       capacity: this.#capacity,
       revision: this.#revision,
       consumer_count: cursors.length,
       cursors: Object.freeze(cursors),
+      change_revisions: Object.freeze(changeRevisions),
       payload_persisted: false,
       durable_checkpoint_only: true,
       ...ZERO_AUTHORITY,
@@ -204,6 +272,7 @@ export function browserBrainObservationCursorContract() {
     max_batch_checkpoints: MAX_BATCH,
     max_batch_resumes: MAX_BATCH,
     max_full_capacity_resumes: MAX_CONSUMERS,
+    max_delta_resumes: MAX_CONSUMERS,
     max_snapshot_restore_consumers: MAX_CONSUMERS,
     monotonic_epoch: true,
     monotonic_ledger_revision: true,
@@ -215,7 +284,9 @@ export function browserBrainObservationCursorContract() {
     bounded_batch_resume: true,
     bounded_full_capacity_resume: true,
     revision_gated_conditional_resume: true,
+    revision_gated_delta_resume: true,
     unchanged_conditional_resume_is_empty: true,
+    durable_change_revision_index: true,
     durable_checkpoint_only: true,
     payload_persisted: false,
     provider_neutral: true,
