@@ -1,0 +1,91 @@
+name: DevOS Convergence Runtime Temp
+
+on:
+  push:
+    branches:
+      - work/devos-convergence-live-opt-v1
+    paths:
+      - .github/workflows/devos-convergence-runtime-temp.yml
+      - apps/metaengine-browser/scripts/patch-devos-convergence-runtime-temp.mjs
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@v4
+        with:
+          ref: work/devos-convergence-live-opt-v1
+          fetch-depth: 0
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Prove exact remote head
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin work/devos-convergence-live-opt-v1
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/work/devos-convergence-live-opt-v1)"
+
+      - name: Apply convergence patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          node apps/metaengine-browser/scripts/patch-devos-convergence-runtime-temp.mjs
+          node --check apps/metaengine-browser/src/main.mjs
+          node --check apps/metaengine-browser/src/native-supervisor-client-base.mjs
+          node --check apps/metaengine-browser/src/native-supervisor-control-state.mjs
+          node --check apps/metaengine-browser/src/development-plane-worker.cjs
+          node --check apps/metaengine-browser/scripts/devos-source-snapshot-builder.cjs
+          node -e "JSON.parse(require('fs').readFileSync('apps/metaengine-browser/electron-builder.test.json','utf8'));JSON.parse(require('fs').readFileSync('apps/metaengine-browser/package.json','utf8'))"
+
+      - name: Targeted falsification
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            test/native-supervisor-control-state.test.mjs \
+            test/browser-quiescent-zero-tab-contract.test.mjs \
+            test/browser-devos-packaged-source-snapshot.test.mjs \
+            test/browser-devos-multisurface-session-layout.test.mjs \
+            test/browser-devos-surface-grid.test.mjs \
+            test/browser-devos-source-backed-surfaces.test.mjs \
+            test/browser-brain-observation-cursors.test.mjs \
+            test/browser-brain-realtime-observation-window.test.mjs \
+            test/browser-native-semantic-hot-path.test.mjs \
+            test/browser-security-static-gate.test.mjs
+          node scripts/security-static-gate.mjs
+
+      - name: Full Browser regression
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test
+
+      - name: Self-clean and push product commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/devos-convergence-runtime-temp.yml
+          git rm apps/metaengine-browser/scripts/patch-devos-convergence-runtime-temp.mjs
+          git add \
+            apps/metaengine-browser/src/main.mjs \
+            apps/metaengine-browser/src/native-supervisor-client-base.mjs \
+            apps/metaengine-browser/src/development-plane-worker.cjs \
+            apps/metaengine-browser/scripts/electron-builder-before-pack.cjs \
+            apps/metaengine-browser/electron-builder.test.json \
+            apps/metaengine-browser/package.json
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "feat(devos): converge quiescent runtime and packaged sources"
+          git push origin HEAD:work/devos-convergence-live-opt-v1
