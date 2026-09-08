@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { ComputeBridgeClient } from './compute-bridge-client.mjs';
 import { DevelopmentPlane } from './development-plane.mjs';
 import { loadNativeSupervisorControlState } from './native-supervisor-control-state.mjs';
+import { ensureRuntimeGenesis } from './runtime-genesis.mjs';
 import { FleetProvisioner } from './fleet-provisioner.mjs';
 import { createFleetTargetLocalObserver } from './fleet-target-local-observer.mjs';
 import { retireEligibleFleetAgents } from './fleet-elastic-governor.mjs';
@@ -73,6 +74,7 @@ let startupInFlight = false;
 let browserRuntimeReady = false;
 let startupFailurePresented = false;
 let startupControlState = null;
+let runtimeGenesisState = null;
 const degradedStartupSubsystems = new Map();
 
 function mimeFor(filePath) {
@@ -318,6 +320,7 @@ async function shellSnapshot() {
       startup_retry_pending: startupRetryTimer != null,
       startup_retry_attempt: startupRetryAttempt,
       browser_runtime_ready: browserRuntimeReady,
+      runtime_genesis: runtimeGenesisState ? structuredClone(runtimeGenesisState) : null,
       startup_degraded_subsystems: startupDegradedSnapshot(),
       local_shell_is_startup_boundary: true,
       remote_network_is_startup_boundary: false,
@@ -856,8 +859,12 @@ async function initNativeSupervisor() {
       identity,
       version: app.getVersion(),
       intervalMs: 2000,
-      commandFastlane: true,
-      commandFastlaneIntervalMs: 750,
+      commandBatchSize: 64,
+      commandReadConcurrency: 32,
+      commandMutationConcurrency: 16,
+      commandBatchWaitMs: 15000,
+      legacySingleLeaseFallback: false,
+      commandFastlane: false,
       getState: nativeSupervisorState,
       executeCommand: executeNativeSupervisorCommand,
       observeLocalTarget,
@@ -1152,6 +1159,7 @@ ipcMain.handle('metaengine:shell:presentation-focus:clear', async (event) => {
 
 async function startAfterReady() {
   await registerShellProtocol();
+  runtimeGenesisState = await ensureRuntimeGenesis({ userDataPath: app.getPath('userData') });
   startupControlState = await loadNativeSupervisorControlState(supervisorControlStatePath());
   await initDevOSSessionLayouts();
   if (isDevelopmentPlaneSmoke || isSmoke) configureUserSession();

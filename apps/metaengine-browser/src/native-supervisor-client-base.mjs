@@ -134,6 +134,7 @@ export class NativeSupervisorClient {
   #controlStatePath = null;
   #controlStateLoaded = false;
   #controlStatePersistenceError = null;
+  #legacySingleLeaseFallback = true;
 
   constructor({
     identity,
@@ -149,6 +150,7 @@ export class NativeSupervisorClient {
     commandMutationConcurrency = 8,
     commandBatchWaitMs = DEFAULT_BATCH_WAIT_MS,
     maintenanceIntervalMs = DEFAULT_MAINTENANCE_INTERVAL_MS,
+    legacySingleLeaseFallback = true,
     commandFastlane = false,
     commandFastlaneIntervalMs = 750,
     controlStatePath = null,
@@ -169,12 +171,13 @@ export class NativeSupervisorClient {
     this.#maxTabMutations = Math.max(1, Math.min(16, Number(commandMutationConcurrency) || 8));
     this.#maintenanceIntervalMs = Math.max(1000, Math.min(60000, Number(maintenanceIntervalMs) || DEFAULT_MAINTENANCE_INTERVAL_MS));
     this.#controlStatePath = controlStatePath ? String(controlStatePath) : null;
+    this.#legacySingleLeaseFallback = legacySingleLeaseFallback !== false;
     this.#commandLane = new NativeSupervisorCommandLaneScheduler({
       readConcurrency: commandReadConcurrency,
       mutationConcurrency: commandMutationConcurrency,
       maxBatch: this.#maxBatch,
     });
-    this.#commandFastlane = commandFastlane === true
+    this.#commandFastlane = commandFastlane === true && this.#legacySingleLeaseFallback
       ? new NativeSupervisorCommandFastlane({
         intervalMs: Math.max(250, Number(commandFastlaneIntervalMs) || 750),
         isRunning: () => this.#running,
@@ -264,6 +267,8 @@ export class NativeSupervisorClient {
       control_fast_lane: {
         schema: 'metaengine.native-supervisor.control-fast-lane.v1',
         transport: this.#batchTransport,
+        batch_transport_required: this.#legacySingleLeaseFallback === false,
+        legacy_single_lease_fallback_enabled: this.#legacySingleLeaseFallback,
         wait_batch_ms: this.#batchWaitMs,
         last_batch_count: this.#lastBatchCount,
         scheduler: this.#commandLane.snapshot(),
@@ -544,7 +549,7 @@ export class NativeSupervisorClient {
   }
 
   async #pickupAndRunLegacyFastlaneCommand() {
-    if (this.#batchTransport === 'SUPPORTED' || this.#legacyFastlaneBusy || this.#cyclePromise) return null;
+    if (!this.#legacySingleLeaseFallback || this.#batchTransport === 'SUPPORTED' || this.#legacyFastlaneBusy || this.#cyclePromise) return null;
     this.#legacyFastlaneBusy = true;
     try {
       const command = await this.#nextCommand();
@@ -566,8 +571,15 @@ export class NativeSupervisorClient {
         },
       });
       if ([404, 405, 501].includes(response.status)) {
-        this.#batchTransport = 'UNAVAILABLE';
-        this.#commandFastlane?.start();
+        if (this.#legacySingleLeaseFallback) {
+          this.#batchTransport = 'UNAVAILABLE';
+          this.#commandFastlane?.start();
+        } else {
+          this.#batchTransport = 'REQUIRED_UNAVAILABLE';
+          this.#commandFastlane?.stop();
+          this.#lastBatchCount = 0;
+          throw new Error(`native_supervisor_batch_transport_required:http_${response.status}`);
+        }
       } else {
         const body = await response.json().catch(() => ({}));
         if (!response.ok || !Array.isArray(body?.commands)) {
@@ -578,6 +590,11 @@ export class NativeSupervisorClient {
         this.#lastBatchCount = body.commands.length;
         return body.commands;
       }
+    }
+    if (!this.#legacySingleLeaseFallback) {
+      this.#batchTransport = 'REQUIRED_UNAVAILABLE';
+      this.#lastBatchCount = 0;
+      throw new Error('native_supervisor_batch_transport_required');
     }
     const command = await this.#nextCommand();
     this.#lastBatchCount = command ? 1 : 0;
