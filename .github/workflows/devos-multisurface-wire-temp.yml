@@ -52,6 +52,7 @@ jobs:
           """
           after = """function replaceOne(source, before, after, label) {
             const count = source.split(before).length - 1;
+            if (label === 'main_shell_sources' && count === 0) return source;
             const expected = label === 'main_intent_sources' ? 2 : 1;
             if (count !== expected) throw new Error(`${label}_anchor_count:${count}`);
             return expected === 2 ? source.replaceAll(before, after) : source.replace(before, after);
@@ -59,17 +60,30 @@ jobs:
           """
           if source.count(before) != 1:
               raise SystemExit(f'replace_helper_anchor_count:{source.count(before)}')
-          source = source.replace(before, after, 1)
-          stale = "presentation_focus: presentationFocus,\\n    session_layouts: devosSessionLayouts.snapshot(),"
-          current = "presentation_focus: presentationFocus,\\n    session_layouts: sessionLayouts,"
-          if source.count(stale) != 2:
-              raise SystemExit(f'main_shell_sources_literal_count:{source.count(stale)}')
-          source = source.replace(stale, current)
-          p.write_text(source)
+          p.write_text(source.replace(before, after, 1))
           PY
           node .github/scripts/patch-devos-multisurface-temp.mjs
           node .github/scripts/patch-devos-multisurface-narrow-ipc-temp.mjs
           node .github/scripts/patch-devos-source-finalize-temp.mjs
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('apps/metaengine-browser/src/main.mjs')
+          source = p.read_text()
+          before = """    presentation_focus: presentationFocus,
+            session_layouts: sessionLayouts,
+          });"""
+          after = """    presentation_focus: presentationFocus,
+            session_layouts: sessionLayouts,
+            devos_sources: projectDevOSDevelopmentSources({
+              development_plane: developmentPlaneSnapshot,
+              startup_logs: startupDegradedSnapshot(),
+            }),
+          });"""
+          count = source.count(before)
+          if count != 1:
+              raise SystemExit(f'post_transform_shell_source_anchor_count:{count}')
+          p.write_text(source.replace(before, after, 1))
+          PY
           git diff --check
           node --check apps/metaengine-browser/src/main.mjs
           node --check apps/metaengine-browser/src/metaengine-devos-surface-grid.mjs
