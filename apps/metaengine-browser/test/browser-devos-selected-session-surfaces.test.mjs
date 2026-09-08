@@ -64,7 +64,7 @@ test('explicit Session focus projects exact owned Surface rows without renderer 
       session_id: 'session:browser-unbound',
       type: 'BROWSER',
       title: 'One',
-      state: 'AVAILABLE',
+      state: 'WEB',
       tab_id: 'tab.one',
     },
   );
