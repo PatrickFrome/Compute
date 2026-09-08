@@ -1,0 +1,182 @@
+name: DevOS Release Finalize Temp
+
+on:
+  push:
+    branches:
+      - 'work/metaengine-devos-multisurface-v1'
+    paths:
+      - '.github/workflows/devos-release-finalize-temp.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: work/metaengine-devos-multisurface-v1
+          fetch-depth: 0
+
+      - name: Prove exact remote head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test "$(git ls-remote origin refs/heads/work/metaengine-devos-multisurface-v1 | cut -f1)" = "${GITHUB_SHA}"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+
+      - name: Patch exact release contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          main_path = Path('apps/metaengine-browser/src/main.mjs')
+          main = main_path.read_text()
+          old_preconnect = "  try { userSession.preconnect({ url: 'https://chatgpt.com/', numSockets: 2 }); } catch {}"
+          new_preconnect = """  let chatgptPreconnectArmed = false;
+            try {
+              userSession.preconnect({ url: 'https://chatgpt.com/', numSockets: 2 });
+              chatgptPreconnectArmed = true;
+            } catch {}
+            console.log(JSON.stringify({
+              schema: 'metaengine.browser.chat-preconnect.v1',
+              state: chatgptPreconnectArmed ? 'ARMED' : 'UNAVAILABLE',
+              origin: 'https://chatgpt.com/',
+              sockets: 2,
+              persistent_partition: SECURITY_POLICY.user_space_partition,
+              authority_effect: false,
+            }));"""
+          if main.count(old_preconnect) != 1:
+              raise SystemExit(f'preconnect_anchor_count:{main.count(old_preconnect)}')
+          main = main.replace(old_preconnect, new_preconnect, 1)
+
+          stale_direct = "    devos_sources: projectDevOSDevelopmentSources({ development_plane: developmentPlaneSnapshot, startup_logs: startupDegradedSnapshot() }),\n"
+          if main.count(stale_direct) != 1:
+              raise SystemExit(f'stale_direct_source_anchor_count:{main.count(stale_direct)}')
+          main = main.replace(stale_direct, '', 1)
+          main_path.write_text(main)
+
+          fast_path = Path('apps/metaengine-browser/test/browser-chatgpt-fast-open.test.mjs')
+          fast = fast_path.read_text()
+          anchor = "  assert.match(main, /userSession\\.preconnect\\(\\{ url: 'https:\\/\\/chatgpt\\.com\\/', numSockets: 2 \\}\\)/);\n"
+          insert = anchor + "  assert.match(main, /schema: 'metaengine\\.browser\\.chat-preconnect\\.v1'/);\n  assert.match(main, /state: chatgptPreconnectArmed \\? 'ARMED' : 'UNAVAILABLE'/);\n  assert.match(main, /initialTab = await runDegradableStartupStep\\('INITIAL_TAB_CREATE', \\(\\) => createTab\\('https:\\/\\/chatgpt\\.com\\/', \\{ select: true, load: false \\}\\)\\)/);\n"
+          if fast.count(anchor) != 1:
+              raise SystemExit(f'fast_open_anchor_count:{fast.count(anchor)}')
+          fast_path.write_text(fast.replace(anchor, insert, 1))
+
+          release_path = Path('apps/metaengine-browser/test/browser-devos-multisurface-release-contract.test.mjs')
+          release = release_path.read_text()
+          release_anchor = "  assert.equal((source.match(/devos_sources: devosSourceSnapshot,/g) || []).length, 3);\n"
+          release_insert = release_anchor + "  assert.equal((source.match(/devos_sources: projectDevOSDevelopmentSources/g) || []).length, 0);\n"
+          if release.count(release_anchor) != 1:
+              raise SystemExit(f'release_source_anchor_count:{release.count(release_anchor)}')
+          release_path.write_text(release.replace(release_anchor, release_insert, 1))
+
+          workflow_path = Path('.github/workflows/browser-windows-package-smoke.yml')
+          workflow = workflow_path.read_text()
+          path_anchor = "      - 'apps/metaengine-browser/test/browser-startup-observability.test.mjs'\n"
+          if workflow.count(path_anchor) != 2:
+              raise SystemExit(f'package_path_anchor_count:{workflow.count(path_anchor)}')
+          workflow = workflow.replace(path_anchor, path_anchor + "      - 'apps/metaengine-browser/test/browser-chatgpt-fast-open.test.mjs'\n")
+
+          test_anchor = """      - name: Prove startup observability reducer before packaging
+                working-directory: apps/metaengine-browser
+                run: node --test test/browser-startup-observability.test.mjs
+          """
+          test_insert = test_anchor + """
+                - name: Prove immediate ChatGPT connection source contract before packaging
+                  working-directory: apps/metaengine-browser
+                  run: node --test test/browser-chatgpt-fast-open.test.mjs
+          """
+          if workflow.count(test_anchor) != 1:
+              raise SystemExit(f'package_test_anchor_count:{workflow.count(test_anchor)}')
+          workflow = workflow.replace(test_anchor, test_insert, 1)
+
+          proof_anchor = "            runtime_import_observability_verified=$false\n"
+          if workflow.count(proof_anchor) != 1:
+              raise SystemExit(f'package_proof_anchor_count:{workflow.count(proof_anchor)}')
+          workflow = workflow.replace(proof_anchor, proof_anchor + "            chatgpt_preconnect_armed=$false\n            initial_chatgpt_surface_exposed=$false\n", 1)
+
+          stable_anchor = "            $stableSequence = [int64]$stableEvent.sequence\n"
+          installed_proof = r'''            $normalLines = @(Get-Content $normalOut -ErrorAction Stop)
+            $preconnectIndex = -1
+            $initialChatIndex = -1
+            for ($i = 0; $i -lt $normalLines.Count; $i++) {
+              $line = [string]$normalLines[$i]
+              if (-not $line.Trim().StartsWith('{')) { continue }
+              try { $runtimeEvent = $line | ConvertFrom-Json } catch { continue }
+              if ($runtimeEvent.schema -eq 'metaengine.browser.chat-preconnect.v1' `
+                  -and $runtimeEvent.state -eq 'ARMED' `
+                  -and $runtimeEvent.origin -eq 'https://chatgpt.com/' `
+                  -and [int]$runtimeEvent.sockets -eq 2 `
+                  -and $runtimeEvent.authority_effect -eq $false) {
+                $preconnectIndex = $i
+              }
+              if ($runtimeEvent.schema -eq 'metaengine.browser-startup-subsystem.v1' `
+                  -and $runtimeEvent.state -eq 'SUBSYSTEM_READY' `
+                  -and $runtimeEvent.subsystem -eq 'INITIAL_TAB_CREATE' `
+                  -and $runtimeEvent.authority_effect -eq $false) {
+                $initialChatIndex = $i
+              }
+            }
+            if ($preconnectIndex -lt 0) {
+              Get-Content $normalOut -ErrorAction SilentlyContinue
+              throw 'installed_chatgpt_preconnect_not_armed'
+            }
+            if ($initialChatIndex -lt 0) {
+              Get-Content $normalOut -ErrorAction SilentlyContinue
+              throw 'installed_initial_chatgpt_surface_not_exposed'
+            }
+            if ($preconnectIndex -ge $initialChatIndex) { throw 'installed_chatgpt_connection_order_invalid' }
+            $proof.chatgpt_preconnect_armed = $true
+            $proof.initial_chatgpt_surface_exposed = $true
+            $proof | Add-Member -NotePropertyName chatgpt_connect_origin -NotePropertyValue 'https://chatgpt.com/' -Force
+            $proof | Add-Member -NotePropertyName chatgpt_connect_evidence_source -NotePropertyValue 'INSTALLED_NORMAL_UI_STDOUT' -Force
+'''
+          if workflow.count(stable_anchor) != 1:
+              raise SystemExit(f'package_stable_anchor_count:{workflow.count(stable_anchor)}')
+          workflow = workflow.replace(stable_anchor, stable_anchor + installed_proof, 1)
+
+          unchanged_anchor = "apps/metaengine-browser/test/browser-startup-observability.test.mjs apps/metaengine-browser/test/browser-shell-visual-evidence.mjs"
+          if workflow.count(unchanged_anchor) != 1:
+              raise SystemExit(f'package_unchanged_anchor_count:{workflow.count(unchanged_anchor)}')
+          workflow = workflow.replace(unchanged_anchor, "apps/metaengine-browser/test/browser-startup-observability.test.mjs apps/metaengine-browser/test/browser-chatgpt-fast-open.test.mjs apps/metaengine-browser/test/browser-shell-visual-evidence.mjs", 1)
+          workflow_path.write_text(workflow)
+          PY
+          git diff --check
+          node --check apps/metaengine-browser/src/main.mjs
+          node --test apps/metaengine-browser/test/browser-chatgpt-fast-open.test.mjs apps/metaengine-browser/test/browser-devos-multisurface-release-contract.test.mjs
+          grep -F "chatgpt_preconnect_armed" .github/workflows/browser-windows-package-smoke.yml
+          grep -F "installed_chatgpt_preconnect_not_armed" .github/workflows/browser-windows-package-smoke.yml
+
+      - name: Self-clean and push release fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm -f .github/workflows/devos-release-finalize-temp.yml
+          git diff --check
+          cat > /tmp/expected <<'EOF'
+          .github/workflows/browser-windows-package-smoke.yml
+          .github/workflows/devos-release-finalize-temp.yml
+          apps/metaengine-browser/src/main.mjs
+          apps/metaengine-browser/test/browser-chatgpt-fast-open.test.mjs
+          apps/metaengine-browser/test/browser-devos-multisurface-release-contract.test.mjs
+          EOF
+          sed -i 's/^          //' /tmp/expected
+          { git diff --name-only; git diff --cached --name-only; } | sort -u > /tmp/actual
+          diff -u /tmp/expected /tmp/actual
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/workflows/browser-windows-package-smoke.yml apps/metaengine-browser/src/main.mjs apps/metaengine-browser/test/browser-chatgpt-fast-open.test.mjs apps/metaengine-browser/test/browser-devos-multisurface-release-contract.test.mjs
+          git commit -m "fix(release): prove installed ChatGPT fast connect"
+          git push origin HEAD:refs/heads/work/metaengine-devos-multisurface-v1
