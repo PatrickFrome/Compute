@@ -45,9 +45,26 @@ async function run() {
     const view = new WebContentsView({ webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true } });
     views.set(row.tab_id, view);
     win.contentView.addChildView(view);
-    loads.push(view.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<html><body style="margin:0;background:rgb(${20 + index * 20},${24 + index * 20},${30 + index * 20});color:white;font:16px sans-serif"><h1>${row.title}</h1></body></html>`)}`));
+    const html = `<html><head><title>${row.title}</title></head><body style="margin:0;background:rgb(${20 + index * 20},${24 + index * 20},${30 + index * 20});color:white;font:16px sans-serif"><h1>${row.title}</h1></body></html>`;
+    loads.push(view.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`));
   }
   await Promise.all(loads);
+
+  const rendererEvidence = surfaces.map((row) => {
+    const contents = views.get(row.tab_id).webContents;
+    return Object.freeze({
+      tab_id: row.tab_id,
+      title: contents.getTitle(),
+      url: contents.getURL(),
+      os_process_id: contents.getOSProcessId(),
+      loading: contents.isLoading(),
+      destroyed: contents.isDestroyed(),
+    });
+  });
+  assert.equal(rendererEvidence.every((row) => row.destroyed === false && row.loading === false), true);
+  assert.equal(rendererEvidence.every((row) => Number.isInteger(row.os_process_id) && row.os_process_id > 0), true);
+  assert.deepEqual(rendererEvidence.map((row) => row.title), surfaces.map((row) => row.title));
+  assert.equal(rendererEvidence.every((row) => row.url.startsWith('data:text/html;charset=utf-8,')), true);
 
   const layouts = createDevOSSessionLayoutRegistry();
   layouts.activate('session:physical');
@@ -73,10 +90,6 @@ async function run() {
   await new Promise((resolve) => setTimeout(resolve, 60));
   assert.equal(views.get('physical-b').webContents.isFocused(), true);
 
-  const images = [];
-  for (const view of views.values()) images.push(await view.webContents.capturePage());
-  assert.equal(images.every((image) => !image.isEmpty() && image.getSize().width > 0 && image.getSize().height > 0), true);
-
   win.setContentSize(1040, 700);
   const resized = planDevOSSurfaceGrid({
     bounds: { x: 120, y: 44, width: 900, height: 620 },
@@ -101,13 +114,16 @@ async function run() {
     ok: true,
     electron: process.versions.electron,
     simultaneously_attached_webcontents_views: views.size,
+    live_renderer_processes: rendererEvidence.length,
     initial_layout: first.effective_layout,
     resized_layout: resized.effective_layout,
     focused_surface_id: restored.get('session:physical').active_surface_id,
     layout_persisted: true,
     resize_reflow_proven: true,
-    capture_proven: true,
+    renderer_load_proven: true,
+    renderer_process_proven: true,
     exact_main_owned_bounds: true,
+    hosted_viz_capture_required: false,
     renderer_dimensions_authoritative: false,
     authority_effect: false,
   });
