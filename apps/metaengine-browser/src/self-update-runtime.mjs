@@ -25,6 +25,10 @@ import {
 } from './bounded-network-fetch.mjs';
 import { startSelfUpdateOldParentHandoffWatchdog } from './self-update-old-parent-handoff.mjs';
 import { selfUpdateRecoveryDiagnosticSnapshot } from './self-update-successor-recovery.mjs';
+import {
+  reconcileAmbiguousSelfUpdateWithProvenNewerInstall,
+  SELF_UPDATE_SUPERSEDED_REASON,
+} from './self-update-ambiguous-reconciliation.mjs';
 
 export {
   DEFAULT_TRUSTED_UPDATE_CHANNEL,
@@ -96,6 +100,7 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
   #networkDeadlineMs;
   #installEffectBarrierMode;
   #oldParentHandoffWatchdogMode;
+  #startupReconciliation = null;
   #lastHintCheck = 0;
   #lastHintCheckAt = null;
   #lastHintVersion = null;
@@ -183,11 +188,44 @@ export class SelfUpdateRuntime extends SelfUpdateRuntimeV8 {
     if (typeof this.#hintProbe !== 'function') throw new Error('self_update_hint_probe_invalid');
   }
 
+  async start() {
+    if (process.env.METAENGINE_DISABLE_SELF_UPDATE === '1'
+      && process.env.METAENGINE_SELF_UPDATE_HOLD_REASON === 'AMBIGUOUS_INSTALL') {
+      try {
+        const { app } = await import('electron');
+        this.#startupReconciliation = await reconcileAmbiguousSelfUpdateWithProvenNewerInstall(app, {
+          clock: this.#clock,
+        });
+        if (this.#startupReconciliation?.state === SELF_UPDATE_SUPERSEDED_REASON
+          && this.#startupReconciliation?.transaction_state === 'SUPERSEDED'
+          && this.#startupReconciliation?.new_install_transaction_admissible === true
+          && this.#startupReconciliation?.installer_effect_allowed === false
+          && this.#startupReconciliation?.automatic_retry_allowed === false
+          && this.#startupReconciliation?.authority_effect === false) {
+          delete process.env.METAENGINE_DISABLE_SELF_UPDATE;
+          delete process.env.METAENGINE_SELF_UPDATE_HOLD_REASON;
+          delete process.env.METAENGINE_SELF_UPDATE_HOLD_TARGET;
+        }
+      } catch (error) {
+        this.#startupReconciliation = {
+          schema: 'metaengine.self-update.ambiguous-reconciliation.v1',
+          state: 'HELD',
+          reason: `reconciliation_error:${String(error?.message || error).slice(0, 160)}`,
+          automatic_retry_allowed: false,
+          installer_effect_allowed: false,
+          authority_effect: false,
+        };
+      }
+    }
+    return super.start();
+  }
+
   snapshot() {
     const base = super.snapshot();
     return {
       ...base,
       startup_recovery: selfUpdateRecoveryDiagnosticSnapshot(),
+      startup_reconciliation: this.#startupReconciliation == null ? null : structuredClone(this.#startupReconciliation),
       hint_interval_ms: this.#hintIntervalMs,
       hint_retry_ms: this.#hintRetryMs,
       hint_last_check_at: this.#lastHintCheckAt,

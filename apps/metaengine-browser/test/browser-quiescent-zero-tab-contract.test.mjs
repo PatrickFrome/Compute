@@ -17,10 +17,11 @@ test('closing the last Browser tab is allowed to reach a true zero-tab workspace
   assert.match(main, /registry\.close\(id\);[\s\S]{0,400}invalidatePerception\(id\);/);
 });
 
-test('persisted OFF state suppresses automatic initial remote tab creation', async () => {
+test('persisted OFF state remains authority-only and does not suppress initial Browser presentation bootstrap', async () => {
   const main = await source('src/main.mjs');
   assert.match(main, /loadNativeSupervisorControlState\(supervisorControlStatePath\(\)\)/);
-  assert.match(main, /quiescentStartup[\s\S]{0,500}sessionReady && !quiescentStartup/);
+  assert.match(main, /if \(sessionReady\) \{[\s\S]{0,500}INITIAL_TAB_CREATE/);
+  assert.doesNotMatch(main, /sessionReady\s*&&\s*!quiescentStartup/);
   assert.match(main, /controlStatePath:\s*supervisorControlStatePath\(\)/);
 });
 
