@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   applyProviderNeutralFanoutPreparationCheckpointDelta,
+  applyProviderNeutralFanoutPreparationCheckpointDeltas,
   createProviderNeutralFanoutPreparationCheckpointDelta,
   providerNeutralFanoutPreparationCheckpointDeltaContract,
 } from '../src/browser-provider-neutral-fanout-preparation-checkpoint-delta.mjs';
@@ -22,6 +23,35 @@ test('persists only append-only preparation progress and replays to exact next d
   assert.equal(delta.added_entries.every((entry) => !('payload' in entry)), true);
   assert.equal('effect_execution_authority' in delta, false);
   assert.deepEqual(applyProviderNeutralFanoutPreparationCheckpointDelta(checkpoint, options, base, delta), next);
+});
+
+test('replays a contiguous delta chain from one durable restore', () => {
+  const checkpoint = upstream();
+  const base = saved(checkpoint, [[0, 'b']]);
+  const middle = saved(checkpoint, [[0, 'b'], [1, 'c']]);
+  const next = saved(checkpoint, [[0, 'b'], [1, 'c'], [2, 'd']]);
+  const first = createProviderNeutralFanoutPreparationCheckpointDelta(checkpoint, options, base, middle);
+  const second = createProviderNeutralFanoutPreparationCheckpointDelta(checkpoint, options, middle, next);
+
+  assert.deepEqual(
+    applyProviderNeutralFanoutPreparationCheckpointDeltas(checkpoint, options, base, [first, second]),
+    next,
+  );
+  assert.deepEqual(applyProviderNeutralFanoutPreparationCheckpointDeltas(checkpoint, options, base, []), base);
+});
+
+test('batched replay fails closed on a broken intermediate digest fence', () => {
+  const checkpoint = upstream();
+  const base = saved(checkpoint, [[0, 'b']]);
+  const middle = saved(checkpoint, [[0, 'b'], [1, 'c']]);
+  const next = saved(checkpoint, [[0, 'b'], [1, 'c'], [2, 'd']]);
+  const first = createProviderNeutralFanoutPreparationCheckpointDelta(checkpoint, options, base, middle);
+  const second = createProviderNeutralFanoutPreparationCheckpointDelta(checkpoint, options, middle, next);
+
+  assert.throws(() => applyProviderNeutralFanoutPreparationCheckpointDeltas(checkpoint, options, base, [
+    first,
+    { ...second, base_preparation_checkpoint_digest: '0'.repeat(64) },
+  ]), /base_digest_mismatch/);
 });
 
 test('fails closed on stale base, entry collision, regression and tampered next digest', () => {
@@ -50,11 +80,13 @@ test('fails closed on stale base, entry collision, regression and tampered next 
 test('contract exposes the delta-specific restart-safe persistence boundary', () => {
   const contract = providerNeutralFanoutPreparationCheckpointDeltaContract();
   assert.equal(contract.max_fanout, 128);
+  assert.equal(contract.max_deltas_per_replay, 128);
   assert.equal(contract.append_only, true);
   assert.equal(contract.base_digest_fenced, true);
   assert.equal(contract.next_digest_verified, true);
   assert.equal(contract.prepared_entry_collision_fence_preserved, true);
   assert.equal(contract.compact_incremental_persistence, true);
+  assert.equal(contract.batched_replay_single_restore, true);
   assert.equal(contract.restart_restore_supported, true);
   assert.equal(contract.effect_execution_authority, false);
 });
