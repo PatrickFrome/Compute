@@ -12,7 +12,7 @@ function functionSlice(source, name, nextName) {
   return source.slice(start, end);
 }
 
-test('trusted main process owns one full shell projection plus one identity-only intent projection', async () => {
+test('trusted main process owns one full shell projection plus two bounded presentation projections', async () => {
   const main = await read('../src/main.mjs');
   assert.match(main, /import \{ projectWorkspaceWorkbench \} from '\.\/workspace-workbench-projection\.mjs'/);
   assert.match(main, /const tabs = registry\.snapshot\(\)/);
@@ -40,8 +40,20 @@ test('trusted main process owns one full shell projection plus one identity-only
   assert.match(intent, /fleet: fleet\?\.snapshot\(\) \|\| null/);
   assert.match(intent, /supervisor: nativeSupervisor\?\.snapshot\(\) \|\| null/);
   assert.match(intent, /presentation_focus: devosPresentationFocus\.snapshot\(\)/);
-  assert.doesNotMatch(intent, /await bridge\.health|compute|developmentPlane|ownerSafetyGates/);
-  assert.equal((main.match(/projectWorkspaceWorkbench\(/g) || []).length, 2, 'main process may expose only the full shell projection and the identity-only intent projection');
+  assert.match(intent, /devos_sources: devosSourceSnapshot/);
+  assert.doesNotMatch(intent, /await bridge\.health|developmentPlane|ownerSafetyGates|\bcompute\b/);
+
+  const presentationShell = functionSlice(main, 'currentDevOSPresentationShellView', 'fallbackSelectedSurface');
+  assert.equal((presentationShell.match(/projectWorkspaceWorkbench\(/g) || []).length, 1, 'surface-grid planning may use one separate presentation-shell projection');
+  assert.match(presentationShell, /tabs: registry\.snapshot\(\)/);
+  assert.match(presentationShell, /fleet: fleet\?\.snapshot\(\) \|\| null/);
+  assert.match(presentationShell, /supervisor: nativeSupervisor\?\.snapshot\(\) \|\| null/);
+  assert.match(presentationShell, /presentation_focus: devosPresentationFocus\.snapshot\(\)/);
+  assert.match(presentationShell, /session_layouts: devosSessionLayouts\.snapshot\(\)/);
+  assert.match(presentationShell, /devos_sources: devosSourceSnapshot/);
+  assert.doesNotMatch(presentationShell, /await bridge\.health|developmentPlane|ownerSafetyGates|\bcompute\b/);
+
+  assert.equal((main.match(/projectWorkspaceWorkbench\(/g) || []).length, 3, 'main process may expose only the full shell, identity-only intent, and presentation-shell grid projections');
   assert.equal((main.match(/createDevOSPresentationFocusState\(\)/g) || []).length, 1, 'presentation focus must have one main-process owner');
 });
 
