@@ -366,12 +366,17 @@ export async function captureViewThumbnail(webContents) {
   if (!webContents || webContents.isDestroyed?.()) throw new Error('native_capture_webcontents_unavailable');
   let image = await webContents.capturePage();
   const size = image.getSize();
+  if (!Number.isSafeInteger(size?.width) || size.width <= 0
+    || !Number.isSafeInteger(size?.height) || size.height <= 0) {
+    throw new Error('native_capture_surface_unavailable');
+  }
   if (size.width > 720) image = image.resize({ width: 720, quality: 'good' });
   let jpeg = image.toJPEG(55);
   if (jpeg.byteLength > 120000) {
     image = image.resize({ width: Math.min(520, image.getSize().width), quality: 'good' });
     jpeg = image.toJPEG(45);
   }
+  if (!Buffer.isBuffer(jpeg) || jpeg.byteLength === 0) throw new Error('native_capture_thumbnail_empty');
   if (jpeg.byteLength > 150000) throw new Error('native_capture_thumbnail_too_large');
   return {
     schema: 'metaengine.native-browser.capture-thumbnail.v1',
