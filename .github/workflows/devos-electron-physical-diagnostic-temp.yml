@@ -40,7 +40,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "electron_pkg=$(node -p \"require('./node_modules/electron/package.json').version\")"
+          electron_pkg=$(node -p "require('./node_modules/electron/package.json').version")
+          echo "electron_pkg=$electron_pkg"
           find node_modules/electron -maxdepth 2 -type f -printf '%P %m %u:%g\n' | sort | head -80
           node - <<'NODE'
           try { console.log('electron_binary=' + require('electron')); }
