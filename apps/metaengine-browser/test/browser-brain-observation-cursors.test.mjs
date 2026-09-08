@@ -81,6 +81,24 @@ test('restores a durable multi-stream cursor snapshot with one transactional rep
   assert.equal(restored.resumeFrom('semantic-reader').from_epoch, 21);
 });
 
+test('restores the full 256-consumer durable cursor capacity through bounded chunks', () => {
+  const source = new BrowserBrainObservationCursorLedger({ capacity: 256 });
+  for (let offset = 0; offset < 256; offset += 128) {
+    source.checkpointBatch(Array.from({ length: 128 }, (_, index) => ({
+      consumer: `reader-${offset + index}`,
+      epoch: offset + index + 1,
+      observation_digest: digest('a'),
+    })));
+  }
+  const snapshot = source.snapshot();
+  assert.equal(snapshot.consumer_count, 256);
+
+  const restored = BrowserBrainObservationCursorLedger.restore(snapshot);
+  assert.deepEqual(restored.snapshot(), snapshot);
+  assert.equal(restored.resumeFrom('reader-0').from_epoch, 1);
+  assert.equal(restored.resumeFrom('reader-255').from_epoch, 256);
+});
+
 test('snapshot restore fails closed on forged authority or duplicate consumers', () => {
   const source = new BrowserBrainObservationCursorLedger({ capacity: 4 });
   source.checkpoint({ consumer: 'semantic-reader', epoch: 3, observation_digest: digest('a') });
@@ -96,6 +114,25 @@ test('snapshot restore fails closed on forged authority or duplicate consumers',
       cursors: [snapshot.cursors[0], snapshot.cursors[0]],
     }),
     /snapshot_duplicate_invalid/,
+  );
+});
+
+test('snapshot restore rejects state above the declared consumer ceiling', () => {
+  const source = new BrowserBrainObservationCursorLedger();
+  const snapshot = source.snapshot();
+  const cursors = Array.from({ length: 257 }, (_, index) => ({
+    consumer: `reader-${index}`,
+    epoch: index + 1,
+    observation_digest: digest('a'),
+  }));
+  assert.throws(
+    () => BrowserBrainObservationCursorLedger.restore({
+      ...snapshot,
+      capacity: 256,
+      consumer_count: cursors.length,
+      cursors,
+    }),
+    /snapshot_cursors_invalid/,
   );
 });
 
@@ -179,9 +216,12 @@ test('contract is provider-neutral and zero-authority with no retry synthesis', 
   assert.equal(contract.monotonic_epoch, true);
   assert.equal(contract.transactional_batch_checkpoint, true);
   assert.equal(contract.transactional_snapshot_restore, true);
+  assert.equal(contract.chunked_full_capacity_snapshot_restore, true);
   assert.equal(contract.bounded_batch_resume, true);
+  assert.equal(contract.max_consumers, 256);
   assert.equal(contract.max_batch_checkpoints, 128);
   assert.equal(contract.max_batch_resumes, 128);
+  assert.equal(contract.max_snapshot_restore_consumers, 256);
   assert.equal(contract.durable_checkpoint_only, true);
   for (const key of [
     'payload_persisted',
