@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const source = await readFile(new URL('../ui/app.js', import.meta.url), 'utf8');
 const preload = await readFile(new URL('../src/preload-shell.cjs', import.meta.url), 'utf8');
+// Keep this contract renderer-local: Session ownership is projected by main, never reconstructed here.
 
 function functionSlice(name, nextName) {
   const start = source.indexOf(`function ${name}(`);
