@@ -31,14 +31,36 @@ test('equal known revisions share one deterministic delta-resume cohort', () => 
   assert.deepEqual(result.cohorts[1].resumes.map((resume) => resume.consumer), ['semantic-reader']);
 });
 
+test('request-order routing maps duplicate callers directly to materialized cohorts', () => {
+  const ledger = seededLedger();
+  const revision = ledger.snapshot().revision;
+  ledger.checkpoint({ consumer: 'semantic-reader', epoch: 2, observation_digest: digest('d') });
+
+  const result = resumeObservationCursorCohorts(ledger, [revision, revision - 1, revision, revision - 1]);
+  assert.deepEqual(result.cohorts.map((cohort) => cohort.cohort_index), [0, 1]);
+  assert.deepEqual(result.request_cohort_indexes, [1, 0, 1, 0]);
+  assert.equal(result.cohorts[result.request_cohort_indexes[0]].known_revision, revision);
+  assert.equal(result.cohorts[result.request_cohort_indexes[1]].known_revision, revision - 1);
+});
+
 test('current revisions produce an empty cohort without synthesizing consumers', () => {
   const ledger = seededLedger();
   const revision = ledger.snapshot().revision;
   const result = resumeObservationCursorCohorts(ledger, [revision, revision]);
 
   assert.equal(result.cohort_count, 1);
+  assert.deepEqual(result.request_cohort_indexes, [0, 0]);
   assert.equal(result.cohorts[0].changed, false);
   assert.deepEqual(result.cohorts[0].resumes, []);
+});
+
+test('empty request list produces empty routing without synthetic cohorts', () => {
+  const ledger = seededLedger();
+  const result = resumeObservationCursorCohorts(ledger, []);
+  assert.equal(result.request_count, 0);
+  assert.equal(result.cohort_count, 0);
+  assert.deepEqual(result.request_cohort_indexes, []);
+  assert.deepEqual(result.cohorts, []);
 });
 
 test('cohort planner validates every revision before materializing any delta', () => {
@@ -113,6 +135,7 @@ test('cohort contract stays provider-neutral, payload-free and zero-authority', 
   const contract = browserBrainObservationCursorCohortContract();
   assert.equal(contract.max_revision_requests, 128);
   assert.equal(contract.equal_revision_requests_share_one_materialization, true);
+  assert.equal(contract.request_order_cohort_routing, true);
   assert.equal(contract.all_revision_requests_preflight_before_delta_materialization, true);
   assert.equal(contract.provider_neutral, true);
   assert.equal(contract.authority_effect, false);
