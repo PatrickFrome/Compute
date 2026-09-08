@@ -73,7 +73,7 @@ class BrowserSentinelActionJournal {
     this.#path = actionJournalPath(this.#statePath);
   }
 
-  async init(bindingSource, { allowSuccessorBinding = false } = {}) {
+  async init(bindingSource) {
     const binding = bindingFrom(bindingSource);
     const existing = await readJson(this.#path);
     if (!existing) return this.snapshot();
@@ -88,13 +88,12 @@ class BrowserSentinelActionJournal {
     const workerBindingProven = Number.isSafeInteger(boundWorkerPid)
       && boundWorkerPid === process.pid
       && bindingSource?.worker_released !== true;
-    if (allowSuccessorBinding !== true && !workerBindingProven) throw new Error('sentinel_action_journal_binding_drift');
+    if (!workerBindingProven) throw new Error('sentinel_action_journal_binding_drift');
 
     // A successor may reconcile only after the current process is durably recorded as
-    // the exact worker for the new parent/token (or a narrowly-scoped caller supplies
-    // an equivalent proof explicitly). Preserve the entire predecessor row before
-    // replacing the active journal. No predecessor effect or retry authority crosses
-    // the incarnation boundary.
+    // the exact worker for the new parent/token. Preserve the entire predecessor row
+    // before replacing the active journal. No predecessor effect or retry authority
+    // crosses the incarnation boundary.
     const archivePath = predecessorJournalPath(this.#statePath, validated);
     await durableWriteJson(archivePath, validated, { sequence: Number(validated.sequence) });
     const next = {
