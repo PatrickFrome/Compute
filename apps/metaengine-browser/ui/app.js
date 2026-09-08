@@ -853,35 +853,47 @@ function agenticContextRows(next) {
   }).filter(Boolean);
 }
 
-function attentionQueue(next) {
-  const items = [];
-  const counts = next?.fleet?.counts || {};
-  const ambiguous = Number(counts.PROVISIONING_AMBIGUOUS || 0);
-  const lost = Number(counts.LOST || 0);
-  const bound = Number(counts.BOUND_UNVERIFIED || 0);
-  if (ambiguous > 0) items.push({ tone: 'bad', title: 'Fleet ambiguity', detail: `${ambiguous} provisioning ambiguous`, target: 'fleet' });
-  if (lost > 0) items.push({ tone: 'bad', title: 'Lost fleet agents', detail: `${lost} lost`, target: 'fleet' });
-  if (bound > 0) items.push({ tone: 'warn', title: 'Transport proof pending', detail: `${bound} bound unverified`, target: 'fleet' });
+function devosShellView(next) {
+  const view = next?.devos_shell;
+  if (!view
+    || view.schema !== 'metaengine.devos.shell-view-model.v1'
+    || view.valid !== true
+    || view.primary_object !== 'SESSION'
+    || view.browser_is_shell !== false
+    || view.browser_is_surface !== true
+    || view.renderer_selection_authority !== false
+    || view.renderer_routing_authority !== false
+    || view.projection_is_authority !== false
+    || view.scheduler_authority !== false
+    || view.execution_authority !== false
+    || view.command_leasing !== false
+    || view.automatic_effect_retry_allowed !== false
+    || view.page_model_authority !== false
+    || view.authority_effect !== false
+    || !Array.isArray(view.now)) return null;
+  return view;
+}
 
-  const workspaces = workspaceProjection(next);
-  if (Number(workspaces.counts?.frozen || 0) > 0) items.push({ tone: 'bad', title: 'Frozen workspaces', detail: `${workspaces.counts.frozen} frozen`, target: 'workspaces' });
-  if (Number(workspaces.counts?.issues || 0) > 0) items.push({ tone: 'warn', title: 'Workspace binding drift', detail: `${workspaces.counts.issues} issue(s)`, target: 'workspaces' });
+function attentionTone(row) {
+  const severity = String(row?.severity || '').toUpperCase();
+  const priority = String(row?.priority || '').toUpperCase();
+  if (severity === 'ERROR' || severity === 'CRITICAL') return 'bad';
+  if (severity === 'WARNING' || severity === 'WARN' || priority === 'CRITICAL' || priority === 'HIGH') return 'warn';
+  return 'neutral';
+}
 
-  const supervisorError = next?.supervisor?.last_error || next?.supervisor?.devos_last_error || next?.supervisor?.supervisor_mesh?.last_error;
-  if (supervisorError) items.push({ tone: 'bad', title: 'Supervisor degraded', detail: compact(supervisorError, 72), target: 'supervisor' });
-
-  const updater = next?.supervisor?.self_update;
-  if (['ERROR', 'REJECTED_METADATA', 'DISCOVERY_ERROR'].includes(String(updater?.state || '').toUpperCase())) {
-    items.push({ tone: 'bad', title: 'Self-update hold', detail: compact(updater?.last_error || updater?.state, 72), target: 'runtime' });
-  }
-
-  if (next?.development_plane && String(next.development_plane.state || '').toUpperCase() !== 'READY') {
-    items.push({ tone: 'warn', title: 'Development Plane not ready', detail: text(next.development_plane.state, 'UNKNOWN'), target: 'runtime' });
-  }
-  if (next?.compute && next.compute.available !== true) items.push({ tone: 'bad', title: 'Compute offline', detail: 'Compute health reports unavailable', target: 'runtime' });
-  if (next?.owner_safety_gates?.wildcard_disabled === true) items.push({ tone: 'bad', title: 'Wildcard gate override', detail: 'Owner safety wildcard override is active', target: 'safety' });
-
-  return Object.freeze(items.map((item) => Object.freeze({ ...item, authority_effect: false })));
+function devosNowItems(next) {
+  const view = devosShellView(next);
+  if (!view) return Object.freeze([]);
+  return Object.freeze(view.now.slice(0, 256).map((row) => Object.freeze({
+    kind: text(row?.kind, 'ATTENTION'),
+    tone: attentionTone(row),
+    title: text(row?.title, 'Attention required'),
+    detail: compact(row?.reason || row?.kind || 'Attention required', 72),
+    session_id: row?.session_id ? String(row.session_id) : null,
+    task_id: row?.task_id ? String(row.task_id) : null,
+    authority_effect: false,
+  })));
 }
 
 function installAgenticNav() {
@@ -915,8 +927,10 @@ function openAgenticSection(name) {
 
 function renderAttention(next) {
   const fragment = document.createDocumentFragment();
-  const items = attentionQueue(next);
-  fragment.append(hero('Attention', 'Trusted shell projections only. Untrusted page text never becomes control authority.', items.length ? `${items.length} item${items.length === 1 ? '' : 's'}` : 'clear'));
+  const view = devosShellView(next);
+  const items = devosNowItems(next);
+  const badge = view ? (items.length ? `${items.length} item${items.length === 1 ? '' : 's'}` : 'clear') : 'unavailable';
+  fragment.append(hero('Attention', 'Canonical snapshot.devos_shell.now only. Renderer does not reconstruct Fleet, Workspace, Supervisor, Update, Safety, Development or Compute alerts.', badge));
   const grid = el('div', 'opsGrid');
   grid.append(
     metric('Critical', items.filter((item) => item.tone === 'bad').length, items.some((item) => item.tone === 'bad') ? 'bad' : 'good'),
@@ -925,15 +939,26 @@ function renderAttention(next) {
     metric('Authority effect', 'NONE', 'good'),
   );
   fragment.append(grid);
+  if (!view) {
+    const unavailable = section('Canonical Now', 'DevOS shell ViewModel unavailable or invalid');
+    unavailable.list.append(kvRow('State', 'UNKNOWN', 'neutral'));
+    fragment.append(unavailable.wrap);
+    return fragment;
+  }
   if (!items.length) {
-    const clear = section('Current readback', 'no derived attention items');
+    const clear = section('Canonical Now', 'no attention rows in snapshot.devos_shell.now');
     clear.list.append(kvRow('State', 'CLEAR', 'good'));
     fragment.append(clear.wrap);
     return fragment;
   }
-  const list = section('Derived queue', 'read only; no automatic remediation');
+  const list = section('Canonical Now', 'snapshot.devos_shell.now · read only · no automatic remediation');
   list.list.className = 'entityList';
-  for (const item of items) list.list.append(entityRow(item.title, item.detail, [{ value: item.target, tone: item.tone }, { value: 'no auto action', tone: 'neutral' }]));
+  for (const item of items) {
+    const tags = [{ value: item.kind, tone: item.tone }];
+    if (item.session_id) tags.push({ value: shortId(item.session_id, 18), tone: 'neutral' });
+    tags.push({ value: 'no auto action', tone: 'neutral' });
+    list.list.append(entityRow(item.title, item.detail, tags));
+  }
   fragment.append(list.wrap);
   return fragment;
 }
@@ -1016,7 +1041,7 @@ function renderSkills(next) {
   const list = el('div', 'commandList');
   list.append(
     commandButton('Research Focus', 'Expand Context Rail + open Context Set', () => setLayout({ sidebar: 'EXPANDED', operations: 'OPEN' }).then(() => openAgenticSection('context'))),
-    commandButton('Triage Attention', 'Open derived read-only attention queue', () => openAgenticSection('attention')),
+    commandButton('Triage Attention', 'Open canonical DevOS Now', () => openAgenticSection('attention')),
     commandButton('Activity Trace', 'Open compact execution evidence', () => openAgenticSection('activity')),
     commandButton('Fleet Transport Review', 'Open existing trusted Fleet panel', () => openCoreOpsSection('fleet')),
     commandButton('Workspace Binding Review', 'Open existing typed Workspace panel', () => openCoreOpsSection('workspaces')),
