@@ -38,6 +38,8 @@ test('shell ViewModel never falls back to canonical Browser selection when expli
   assert.equal(devos.selected.surface_id, 'browser:tab.loose');
   assert.equal(view.selected_session, null);
   assert.equal(view.selected_surface, null);
+  assert.deepEqual(view.surfaces, []);
+  assert.equal(view.counts.visible_surfaces, 0);
   assert.equal(view.presentation_focus.source_state, 'EMPTY');
   assert.equal(view.presentation_focus.replacement_selected_automatically, false);
   assert.equal(view.layout_preferences, null);
@@ -47,6 +49,7 @@ test('shell ViewModel never falls back to canonical Browser selection when expli
   assert.ok(unbound);
   assert.equal(unbound.count, 1);
   assert.equal(unbound.sessions[0].browser_only, true);
+  assert.equal(unbound.sessions[0].surface_count, 1);
   assert.equal(unbound.sessions[0].selected, false);
   assert.equal(view.renderer_selection_authority, false);
   assert.equal(view.renderer_routing_authority, false);
@@ -54,7 +57,7 @@ test('shell ViewModel never falls back to canonical Browser selection when expli
   assertZeroAuthority(view);
 });
 
-test('explicit Session focus selects the Session while canonical Browser Surface remains non-authoritative', () => {
+test('explicit Session focus selects the Session and reveals owned Surfaces without selecting one', () => {
   const devos = projectWorkspaceWorkbench(source()).devos;
   const focus = createDevOSPresentationFocusState();
   focus.selectSession('session:browser-unbound');
@@ -66,8 +69,15 @@ test('explicit Session focus selects the Session while canonical Browser Surface
   assert.equal(view.presentation_focus.effective_surface_id, null);
   assert.equal(view.presentation_focus.replacement_selected_automatically, false);
   assert.equal(devos.selected.surface_id, 'browser:tab.loose');
+  assert.equal(view.surfaces.length, 1);
+  assert.equal(view.surfaces[0].surface_id, 'browser:tab.loose');
+  assert.equal(view.surfaces[0].session_id, 'session:browser-unbound');
+  assert.equal(view.surfaces[0].selected, false);
+  assert.equal(view.counts.visible_surfaces, 1);
+  assert.deepEqual(view.selected_session.surface_ids, ['browser:tab.loose']);
   const unbound = view.session_groups.find((group) => group.group_id === 'UNBOUND');
   assert.equal(unbound.sessions[0].selected, true);
+  assertZeroAuthority(view.surfaces[0]);
   assertZeroAuthority(view.presentation_focus);
   assertZeroAuthority(view);
 });
@@ -81,8 +91,12 @@ test('explicit exact Surface focus selects only the Surface owned by the focused
   assert.equal(view.selected_session.session_id, 'session:browser-unbound');
   assert.equal(view.selected_surface.surface_id, 'browser:tab.loose');
   assert.equal(view.selected_surface.session_id, 'session:browser-unbound');
+  assert.equal(view.surfaces.length, 1);
+  assert.equal(view.surfaces[0].surface_id, 'browser:tab.loose');
+  assert.equal(view.surfaces[0].selected, true);
   assert.equal(view.presentation_focus.source_state, 'AVAILABLE');
   assert.equal(view.presentation_focus.surface_focus_valid, true);
+  assertZeroAuthority(view.surfaces[0]);
   assertZeroAuthority(view.presentation_focus);
   assertZeroAuthority(view);
 });
@@ -103,6 +117,7 @@ test('renderer DTO carries per-session requested layout but never treats stored 
   assert.equal(view.layout_preferences.stored_surface_is_focus_preference, true);
   assert.equal(view.layout_preferences.stored_surface_is_selection_authority, false);
   assert.equal(view.selected_surface, null);
+  assert.equal(view.surfaces[0].selected, false);
   assertZeroAuthority(view.layout_preferences);
 });
 
@@ -114,6 +129,9 @@ test('stale explicit Surface degrades to Session-only focus and never falls back
   assert.equal(view.valid, true);
   assert.equal(view.selected_session.session_id, 'session:browser-unbound');
   assert.equal(view.selected_surface, null);
+  assert.equal(view.surfaces.length, 1);
+  assert.equal(view.surfaces[0].surface_id, 'browser:tab.loose');
+  assert.equal(view.surfaces[0].selected, false);
   assert.equal(view.presentation_focus.source_state, 'STALE_SURFACE');
   assert.equal(view.presentation_focus.stale_focus_detected, true);
   assert.equal(view.presentation_focus.replacement_selected_automatically, false);
@@ -138,6 +156,7 @@ test('canonical selection ownership mismatch still fails closed without becoming
   assert.equal(view.reason, 'SELECTION_OWNERSHIP_MISMATCH');
   assert.equal(view.selected_session, null);
   assert.equal(view.selected_surface, null);
+  assert.deepEqual(view.surfaces, []);
   assertZeroAuthority(view);
 });
 
@@ -179,6 +198,7 @@ test('authority-bearing attention rows invalidate Now instead of being rendered 
   assert.equal(view.valid, false);
   assert.equal(view.reason, 'ATTENTION_ROW_INVALID');
   assert.deepEqual(view.now, []);
+  assert.deepEqual(view.surfaces, []);
   assertZeroAuthority(view);
 });
 
@@ -191,6 +211,7 @@ test('authority-bearing presentation focus state invalidates the shell ViewModel
   assert.equal(view.reason, 'PRESENTATION_FOCUS_STATE_INVALID');
   assert.equal(view.selected_session, null);
   assert.equal(view.selected_surface, null);
+  assert.deepEqual(view.surfaces, []);
   assertZeroAuthority(view);
 });
 
@@ -202,6 +223,7 @@ test('invalid DevOS projection produces a sanitized empty view model', () => {
   assert.equal(view.reason, 'DEVOS_PROJECTION_INVALID');
   assert.deepEqual(view.roots, []);
   assert.deepEqual(view.session_groups, []);
+  assert.deepEqual(view.surfaces, []);
   assert.equal(view.selected_session, null);
   assert.equal(view.selected_surface, null);
   assert.equal(view.presentation_focus, null);
