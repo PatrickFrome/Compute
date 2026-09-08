@@ -30,7 +30,9 @@ function Get-BrowserProcesses([string]$ExactExePath) {
   })
 }
 
-$preexisting = Get-BrowserProcesses $InstalledExePath
+# PowerShell unwraps a function's single pipeline result. Materialize the caller-side
+# collection so StrictMode sees a stable .Count for zero, one, or many processes.
+$preexisting = @(Get-BrowserProcesses $InstalledExePath)
 if ($preexisting.Count -gt 0) { throw 'bootstrap_preexisting_browser_process' }
 
 $install = Start-Process -FilePath $InstallerPath -ArgumentList '/S' -PassThru -Wait
@@ -127,7 +129,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
       if ($_.Exception.Message -eq 'bootstrap_startup_journal_schema_invalid') { throw }
     }
   } else {
-    $processes = Get-BrowserProcesses $InstalledExePath
+    $processes = @(Get-BrowserProcesses $InstalledExePath)
     if ($processes | Where-Object { $_.MainWindowHandle -ne 0 }) {
       $visible = $true
       break
