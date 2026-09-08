@@ -85,17 +85,33 @@ export function createProviderNeutralFanoutPreparationCheckpointDelta(checkpoint
   return deltaFromCheckpoints(base, next);
 }
 
-export function appendProviderNeutralFanoutPreparationCheckpointDelta(checkpointInput, options, baseSaved, addedEntries = []) {
-  if (!Array.isArray(addedEntries) || addedEntries.length > MAX_FANOUT) {
-    throw new Error('fanout_preparation_delta_entries_invalid');
+export function appendProviderNeutralFanoutPreparationCheckpointDeltas(checkpointInput, options, baseSaved, entryBatches = []) {
+  if (!Array.isArray(entryBatches) || entryBatches.length > MAX_DELTAS) {
+    throw new Error('fanout_preparation_delta_batch_invalid');
   }
-  const { restored, checkpoint: base } = validated(checkpointInput, options, baseSaved);
-  for (const entry of addedEntries) restored.accept(entry);
-  const next = restored.checkpoint();
-  return Object.freeze({
-    delta: deltaFromCheckpoints(base, next),
-    checkpoint: next,
-  });
+  const { restored } = validated(checkpointInput, options, baseSaved);
+  let current = restored.checkpoint();
+  const deltas = [];
+  for (const entries of entryBatches) {
+    if (!Array.isArray(entries) || entries.length > MAX_FANOUT) {
+      throw new Error('fanout_preparation_delta_entries_invalid');
+    }
+    const base = current;
+    for (const entry of entries) restored.accept(entry);
+    current = restored.checkpoint();
+    deltas.push(deltaFromCheckpoints(base, current));
+  }
+  return Object.freeze({ deltas: Object.freeze(deltas), checkpoint: current });
+}
+
+export function appendProviderNeutralFanoutPreparationCheckpointDelta(checkpointInput, options, baseSaved, addedEntries = []) {
+  const appended = appendProviderNeutralFanoutPreparationCheckpointDeltas(
+    checkpointInput,
+    options,
+    baseSaved,
+    [addedEntries],
+  );
+  return Object.freeze({ delta: appended.deltas[0], checkpoint: appended.checkpoint });
 }
 
 export function applyProviderNeutralFanoutPreparationCheckpointDeltas(checkpointInput, options, baseSaved, deltas = []) {
@@ -133,5 +149,6 @@ export function providerNeutralFanoutPreparationCheckpointDeltaContract() {
     compact_incremental_persistence: true,
     batched_replay_single_restore: true,
     append_builder_single_restore: true,
+    batched_append_single_restore: true,
   });
 }
