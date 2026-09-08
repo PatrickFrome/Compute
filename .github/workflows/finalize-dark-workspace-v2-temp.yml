@@ -57,7 +57,8 @@ jobs:
           set -euo pipefail
           git rm .github/scripts/finalize-dark-workspace-v2-temp.mjs .github/workflows/finalize-dark-workspace-v2-temp.yml
           git diff --check
-          test "$(git diff --name-only | sort | tr '\n' ' ')" = ".github/scripts/finalize-dark-workspace-v2-temp.mjs .github/workflows/finalize-dark-workspace-v2-temp.yml apps/metaengine-browser/test/browser-brain-task-first-ui.test.mjs apps/metaengine-browser/test/browser-devos-shell-ui.test.mjs apps/metaengine-browser/test/browser-shell-telegram-brain-v2.test.mjs apps/metaengine-browser/ui/index.html "
+          CHANGED="$( { git diff --name-only; git diff --cached --name-only; } | sort -u | tr '\n' ' ')"
+          test "$CHANGED" = ".github/scripts/finalize-dark-workspace-v2-temp.mjs .github/workflows/finalize-dark-workspace-v2-temp.yml apps/metaengine-browser/test/browser-brain-task-first-ui.test.mjs apps/metaengine-browser/test/browser-devos-shell-ui.test.mjs apps/metaengine-browser/test/browser-shell-telegram-brain-v2.test.mjs apps/metaengine-browser/ui/index.html "
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add apps/metaengine-browser/ui/index.html apps/metaengine-browser/test/browser-brain-task-first-ui.test.mjs apps/metaengine-browser/test/browser-devos-shell-ui.test.mjs apps/metaengine-browser/test/browser-shell-telegram-brain-v2.test.mjs
