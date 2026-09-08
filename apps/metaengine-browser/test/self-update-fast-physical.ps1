@@ -22,9 +22,19 @@ function Wait-ExitOrThrow($Process, [int]$TimeoutMs, [string]$Label, [string]$Er
     Get-Content $ErrPath -ErrorAction SilentlyContinue
     throw "${Label}_timeout"
   }
-  if ($Process.ExitCode -ne 0) {
+  # Complete redirected-stream drains before reading ExitCode. The timed overload
+  # alone can report HasExited while asynchronous output handling is still settling.
+  $Process.WaitForExit()
+  $Process.Refresh()
+  if (-not $Process.HasExited) { throw "${Label}_exit_state_unstable" }
+  $exitCode = $Process.ExitCode
+  if ($null -eq $exitCode -or [string]$exitCode -notmatch '^-?[0-9]+$') {
     Get-Content $ErrPath -ErrorAction SilentlyContinue
-    throw "${Label}_exit_$($Process.ExitCode)"
+    throw "${Label}_exit_code_unavailable"
+  }
+  if ([int]$exitCode -ne 0) {
+    Get-Content $ErrPath -ErrorAction SilentlyContinue
+    throw "${Label}_exit_$exitCode"
   }
 }
 
@@ -37,7 +47,10 @@ $baselineJson = Join-Path $temp 'baseline-release.json'
 $resolveScript = @'
 import fs from 'node:fs';
 import { resolveTrustedMetaengineDevRelease } from './src/trusted-dev-release-resolver.mjs';
-const row = await resolveTrustedMetaengineDevRelease({ currentVersion: '0.6.3-dev.0.1' });
+const row = await resolveTrustedMetaengineDevRelease({
+  currentVersion: '0.6.3-dev.0.1',
+  githubApiToken: process.env.METAENGINE_GITHUB_API_TOKEN || null,
+});
 if (!row || row.authority_effect !== false) throw new Error('published_baseline_resolution_failed');
 fs.writeFileSync(process.env.BASELINE_JSON, JSON.stringify(row));
 '@
