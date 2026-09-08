@@ -67,13 +67,19 @@ function healthyHeartbeat(version, continuityState = 'RESTORED', sentinelHeartbe
   };
 }
 
-function seedPendingRecovery(target) {
+async function seedPendingRecovery(app, target) {
+  const transaction = await readSelfUpdateTransaction(app);
+  assert.equal(transaction?.state, 'SUCCESSOR_BOOTED');
+  assert.equal(transaction?.target_version, target);
+  assert.ok(transaction?.transaction_id);
   const resume = shouldResumeSuccessorQualification({
     updatedLaunch: false,
     startupInspection: {
       schema: 'metaengine.self-update.startup-inspection.v1',
       state: 'TARGET_INSTALLED',
       transaction_state: 'SUCCESSOR_BOOTED',
+      transaction_id: transaction.transaction_id,
+      target_git_sha: transaction.resolved_git_sha || null,
       current_version: target,
       target_version: target,
       automatic_retry_allowed: false,
@@ -83,6 +89,8 @@ function seedPendingRecovery(target) {
   assert.equal(resume, true);
   const pending = selfUpdateRecoveryDiagnosticSnapshot();
   assert.equal(pending.state, 'TARGET_INSTALLED_PENDING_QUALIFICATION');
+  assert.equal(pending.transaction_id, transaction.transaction_id);
+  assert.equal(pending.target_git_sha, transaction.resolved_git_sha || null);
   assert.equal(pending.qualification_resume_allowed, true);
   assert.equal(pending.recovery_installer_effect_allowed, false);
   assert.equal(pending.automatic_retry_allowed, false);
@@ -99,6 +107,7 @@ async function bootSuccessor(app, target = '0.6.3-dev.152.1') {
 test('successor is not qualified while restored-session capsule still exists', async () => {
   const { app, userData } = await fixture();
   const target = await bootSuccessor(app);
+  await seedPendingRecovery(app, target);
   await persistSelfUpdateSessionContinuity(userData, {
     schema: 'metaengine.self-update-session-continuity.v1',
     current_version: '0.6.3-dev.152.0',
@@ -117,7 +126,7 @@ test('successor is not qualified while restored-session capsule still exists', a
 test('exact successor requires singleton, uptime, continuity and a fresh signed heartbeat', async () => {
   const { app } = await fixture();
   const target = await bootSuccessor(app);
-  seedPendingRecovery(target);
+  await seedPendingRecovery(app, target);
 
   app.setLocked(false);
   assert.equal((await probeUpdatedSuccessorQualification({ app, uptimeMs: () => 5000 })).state, 'PENDING_SINGLETON');
@@ -155,9 +164,10 @@ test('exact successor requires singleton, uptime, continuity and a fresh signed 
   assert.equal(recovery.authority_effect, false);
 });
 
-test('forged or mismatched qualification result cannot clear pending recovery telemetry', () => {
-  const target = '0.6.3-dev.152.7';
-  const before = seedPendingRecovery(target);
+test('forged or mismatched qualification result cannot clear pending recovery telemetry', async () => {
+  const { app } = await fixture();
+  const target = await bootSuccessor(app, '0.6.3-dev.152.7');
+  const before = await seedPendingRecovery(app, target);
   const forged = recordSelfUpdateRecoveryQualificationResult({
     state: 'QUALIFIED',
     authority_effect: false,
@@ -192,6 +202,7 @@ test('forged or mismatched qualification result cannot clear pending recovery te
 test('signed heartbeat with stale or missing sentinel worker proof cannot qualify successor', async () => {
   const { app } = await fixture();
   const target = await bootSuccessor(app);
+  await seedPendingRecovery(app, target);
   const stale = await recordAcceptedSignedSupervisorHeartbeat({
     app,
     state: healthyHeartbeat(target, 'RESTORED', 20_000),
@@ -204,7 +215,7 @@ test('signed heartbeat with stale or missing sentinel worker proof cannot qualif
 test('hard continuity failure in accepted heartbeat quarantines successor and converges recovery telemetry', async () => {
   const { app } = await fixture();
   const target = await bootSuccessor(app);
-  seedPendingRecovery(target);
+  await seedPendingRecovery(app, target);
   const result = await recordAcceptedSignedSupervisorHeartbeat({
     app,
     state: healthyHeartbeat(target, 'PARTIAL'),
@@ -231,6 +242,7 @@ test('hard continuity failure in accepted heartbeat quarantines successor and co
 test('stale heartbeat cannot qualify a successor', async () => {
   const { app } = await fixture();
   const target = await bootSuccessor(app);
+  await seedPendingRecovery(app, target);
   await recordAcceptedSignedSupervisorHeartbeat({ app, state: healthyHeartbeat(target), acceptedAtMs: 1000 });
   const result = await probeUpdatedSuccessorQualification({
     app,
@@ -243,7 +255,8 @@ test('stale heartbeat cannot qualify a successor', async () => {
 
 test('qualification refuses wrong target version', async () => {
   const { app } = await fixture();
-  await bootSuccessor(app);
+  const target = await bootSuccessor(app);
+  await seedPendingRecovery(app, target);
   app.setVersion('0.6.3-dev.999.1');
   await assert.rejects(() => probeUpdatedSuccessorQualification({ app, uptimeMs: () => 5000 }), /target_mismatch/);
 });
