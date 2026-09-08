@@ -46,6 +46,12 @@ function applyCheckpoint(cursors, capacity, input) {
   return Object.freeze({ accepted: true, disposition: 'APPLIED', consumer, epoch, ...ZERO_AUTHORITY });
 }
 
+function assertZeroAuthority(input) {
+  for (const [key, expected] of Object.entries(ZERO_AUTHORITY)) {
+    if (input[key] !== expected) throw new Error('browser_brain_cursor_snapshot_authority_invalid');
+  }
+}
+
 export class BrowserBrainObservationCursorLedger {
   #capacity;
   #cursors = new Map();
@@ -56,6 +62,30 @@ export class BrowserBrainObservationCursorLedger {
       throw new TypeError('browser_brain_cursor_capacity_invalid');
     }
     this.#capacity = bounded;
+  }
+
+  static restore(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') throw new TypeError('browser_brain_cursor_snapshot_invalid');
+    if (snapshot.schema !== 'metaengine.browser-brain.observation-cursor-ledger.v1') {
+      throw new Error('browser_brain_cursor_snapshot_schema_invalid');
+    }
+    if (snapshot.payload_persisted !== false || snapshot.durable_checkpoint_only !== true) {
+      throw new Error('browser_brain_cursor_snapshot_contract_invalid');
+    }
+    assertZeroAuthority(snapshot);
+    if (!Array.isArray(snapshot.cursors) || snapshot.cursors.length > MAX_BATCH) {
+      throw new TypeError('browser_brain_cursor_snapshot_cursors_invalid');
+    }
+    if (snapshot.consumer_count !== snapshot.cursors.length) {
+      throw new Error('browser_brain_cursor_snapshot_count_invalid');
+    }
+
+    const ledger = new BrowserBrainObservationCursorLedger({ capacity: snapshot.capacity });
+    const results = ledger.checkpointBatch(snapshot.cursors);
+    if (results.some((result) => result.disposition !== 'APPLIED')) {
+      throw new Error('browser_brain_cursor_snapshot_duplicate_invalid');
+    }
+    return ledger;
   }
 
   checkpoint(input) {
@@ -113,6 +143,7 @@ export function browserBrainObservationCursorContract() {
     duplicate_idempotent: true,
     collision_fail_closed: true,
     transactional_batch_checkpoint: true,
+    transactional_snapshot_restore: true,
     durable_checkpoint_only: true,
     payload_persisted: false,
     provider_neutral: true,
