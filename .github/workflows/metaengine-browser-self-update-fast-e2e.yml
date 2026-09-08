@@ -81,7 +81,7 @@ jobs:
           npm run check
           npm test
           $sourcePackageVersion = [string](node -p "require('./package.json').version")
-          if ($sourcePackageVersion -notmatch '^0\.6\.6-dev\.[0-9]+\.1$') { throw "source_package_version_not_trusted_dev_shape:$sourcePackageVersion" }
+          if ($sourcePackageVersion -notmatch '^\d+\.\d+\.\d+-dev\.[0-9]+\.1$') { throw "source_package_version_not_trusted_dev_shape:$sourcePackageVersion" }
           $physical = Get-Content ./test/self-update-fast-physical.ps1 -Raw
           if ($physical -notmatch '\$target\s*=\s*"0\.6\.3-dev\.\$buildId\.1"') { throw 'physical_target_source_contract_missing' }
       - name: Bind physical target to immutable workflow run identity
@@ -96,8 +96,11 @@ jobs:
           # identity is derived from immutable GITHUB_RUN_ID, so parallel integration
           # commits never contend on a manually edited package version and reruns of
           # the same workflow run preserve the same target identity.
-          $target = "0.6.6-dev.$env:GITHUB_RUN_ID.1"
-          if ($target -notmatch '^0\.6\.6-dev\.[0-9]+\.1$') { throw "target_version_invalid:$target" }
+          $sourcePackageVersion = [string](node -p "require('./package.json').version")
+          if ($sourcePackageVersion -notmatch '^\d+\.\d+\.\d+-dev\.[0-9]+\.1$') { throw "source_package_version_not_trusted_dev_shape:$sourcePackageVersion" }
+          $sourceCore = $sourcePackageVersion -replace '-dev\.[0-9]+\.1$',''
+          $target = "$sourceCore-dev.$env:GITHUB_RUN_ID.1"
+          if ($target -notmatch '^\d+\.\d+\.\d+-dev\.[0-9]+\.1$') { throw "target_version_invalid:$target" }
           npm pkg set version=$target
           '@
           # .NET replacement syntax treats $name as a substitution token. Escape every
