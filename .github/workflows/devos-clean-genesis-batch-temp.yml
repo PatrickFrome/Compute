@@ -1,0 +1,67 @@
+name: DevOS Clean Genesis Batch Temp
+
+on:
+  push:
+    branches:
+      - work/devos-clean-genesis-batch-v1
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: work/devos-clean-genesis-batch-v1
+          fetch-depth: 0
+
+      - name: Prove exact remote head
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin work/devos-clean-genesis-batch-v1
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/work/devos-clean-genesis-batch-v1)"
+
+      - name: Apply clean genesis batch wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          node apps/metaengine-browser/scripts/patch-clean-genesis-batch-temp.mjs
+          node --check apps/metaengine-browser/src/runtime-genesis.mjs
+          node --check apps/metaengine-browser/src/main.mjs
+          node --check apps/metaengine-browser/src/native-supervisor-client-base.mjs
+          node --check apps/metaengine-browser/scripts/patch-clean-genesis-batch-temp.mjs
+
+      - name: Targeted clean genesis and batch contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            apps/metaengine-browser/test/browser-runtime-clean-genesis.test.mjs \
+            apps/metaengine-browser/test/browser-batch-required-control.test.mjs \
+            apps/metaengine-browser/test/browser-native-supervisor-batch-issue-contract.test.mjs \
+            apps/metaengine-browser/test/browser-quiescent-zero-tab-contract.test.mjs \
+            apps/metaengine-browser/test/browser-native-supervisor-command-lanes.test.mjs
+
+      - name: Full Browser node regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test apps/metaengine-browser/test/*.test.mjs
+
+      - name: Self-clean and fast-forward push
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f apps/metaengine-browser/scripts/patch-clean-genesis-batch-temp.mjs
+          rm -f .github/workflows/devos-clean-genesis-batch-temp.yml
+          git add -A
+          test -n "$(git status --porcelain)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "feat(devos): enforce clean genesis batch control"
+          git push origin HEAD:work/devos-clean-genesis-batch-v1
