@@ -195,7 +195,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git rm \
+          git rm -f \
             .github/scripts/patch-devos-multisurface-temp.mjs \
             .github/scripts/patch-devos-multisurface-narrow-ipc-temp.mjs \
             .github/scripts/patch-devos-source-finalize-temp.mjs \
