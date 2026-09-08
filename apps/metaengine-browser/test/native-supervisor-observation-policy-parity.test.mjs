@@ -30,8 +30,18 @@ function clientFor(command, { executeCommand, receipts }) {
     if (path.endsWith('/v1/state')) return response(202, { accepted: true });
     if (path.endsWith('/v1/commands/wait-batch')) return response(200, { commands: [structuredClone(command)] });
     if (path.endsWith('/v1/commands/result-batch')) {
-      receipts.push(JSON.parse(init.body || '{}'));
-      return response(202, { accepted: true });
+      const posted = JSON.parse(init.body || '{}');
+      receipts.push(posted);
+      return response(202, {
+        schema: 'metaengine.native-browser-supervisor.complete-batch.v1',
+        results: (posted.results || []).map((row) => ({
+          command_id: row.command_id,
+          accepted: true,
+          status: row.ok === true ? 'COMPLETED' : 'FAILED',
+          authority_effect: false,
+        })),
+        authority_effect: false,
+      });
     }
     throw new Error(`unexpected_fetch:${path}`);
   };
@@ -60,7 +70,7 @@ test('MONITOR plus disarmed still admits semantic observation through the real b
   const receipts = [];
   const executed = [];
   const client = clientFor(
-    { command_id: 'cmd_semantic_read', action: 'SEMANTIC_CENSUS', payload: {}, platform: null },
+    { command_id: '11111111-1111-4111-8111-111111111111', action: 'SEMANTIC_CENSUS', payload: {}, platform: null },
     {
       receipts,
       executeCommand: async (command) => {
@@ -83,7 +93,7 @@ test('MONITOR plus disarmed still rejects a tab mutation before the physical exe
   const receipts = [];
   let physicalEffects = 0;
   const client = clientFor(
-    { command_id: 'cmd_mutation', action: 'NAVIGATE', payload: { tab_id: 'tab_a', url: 'https://example.com/' }, platform: null },
+    { command_id: '22222222-2222-4222-8222-222222222222', action: 'NAVIGATE', payload: { tab_id: 'tab_a', url: 'https://example.com/' }, platform: null },
     {
       receipts,
       executeCommand: async () => {

@@ -1,6 +1,7 @@
 import { browserControlCapabilities } from './browser-control-capabilities.mjs';
 import { globalOwnerGateDisabled } from './owner-safety-gate-registry.mjs';
 import { NativeSupervisorCommandLaneScheduler, classifyNativeSupervisorCommand } from './native-supervisor-command-lanes.mjs';
+import { assertNativeSupervisorBatchCompletion, partitionNativeSupervisorBatchResults } from './native-supervisor-result-batch.mjs';
 import { SUPERVISOR_DEVICE_PROFILE } from './supervisor-device-identity.mjs';
 import { SupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime.mjs';
 import { SupervisorMeshRuntime } from './supervisor-mesh-runtime.mjs';
@@ -608,29 +609,43 @@ export class NativeSupervisorClient {
   }
 
   async #postBatchResults(rows) {
-    const results = rows.map((row) => ({
+  const results = rows.map((row) => ({
+    command_id: row.command.command_id,
+    ok: row.ok,
+    receipt: {
+      schema: 'metaengine.native-supervisor.command-receipt.v2',
       command_id: row.command.command_id,
-      ok: row.ok,
-      receipt: {
-        schema: 'metaengine.native-supervisor.command-receipt.v2',
-        command_id: row.command.command_id,
-        action: row.command.action,
-        platform: row.command.platform || null,
-        result: row.result ?? null,
-        effect_outcome: row.effect_outcome,
-        lane: row.descriptor.lane,
-        effect_key: row.descriptor.effect_key,
-        execution_ms: row.execution_ms,
-        recorded_at: new Date().toISOString(),
-        authority_effect: false,
-      },
-      error: row.ok ? null : row.error,
-    }));
-    const response = await this.#signedRequest('/v1/commands/result-batch', { payload: { results } });
+      action: row.command.action,
+      platform: row.command.platform || null,
+      result: row.result ?? null,
+      effect_outcome: row.effect_outcome,
+      lane: row.descriptor.lane,
+      effect_key: row.descriptor.effect_key,
+      execution_ms: row.execution_ms,
+      recorded_at: new Date().toISOString(),
+      authority_effect: false,
+    },
+    error: row.ok ? null : row.error,
+    authority_effect: false,
+  }));
+  const chunks = partitionNativeSupervisorBatchResults(results);
+  const acknowledgements = [];
+  for (const chunk of chunks) {
+    const response = await this.#signedRequest('/v1/commands/result-batch', { payload: { results: chunk } });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(`native_supervisor_batch_result_http_${response.status}:${body?.error || 'unknown'}`);
-    return body;
+    acknowledgements.push(...assertNativeSupervisorBatchCompletion(body, chunk));
   }
+  return Object.freeze({
+    schema: 'metaengine.native-supervisor.batch-result-delivery.v1',
+    chunk_count: chunks.length,
+    result_count: acknowledgements.length,
+    results: Object.freeze(acknowledgements),
+    transport_delivery_is_authority: false,
+    automatic_effect_retry_allowed: false,
+    authority_effect: false,
+  });
+}
 
   async #executeLocalOrRemote(command) {
     const action = String(command?.action || '');
