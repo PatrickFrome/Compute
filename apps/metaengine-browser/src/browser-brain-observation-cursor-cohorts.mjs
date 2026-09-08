@@ -17,7 +17,11 @@ function normalizeRevision(value) {
 }
 
 function assertLedger(ledger) {
-  if (!ledger || typeof ledger.resumeChangedSince !== 'function') {
+  if (
+    !ledger
+    || typeof ledger.preflightResumeRevisions !== 'function'
+    || typeof ledger.resumeChangedSince !== 'function'
+  ) {
     throw new TypeError('browser_brain_cursor_cohort_ledger_invalid');
   }
 }
@@ -30,6 +34,8 @@ export function resumeObservationCursorCohorts(ledger, knownRevisionValues = [])
 
   const normalized = knownRevisionValues.map((value) => normalizeRevision(value));
   const uniqueRevisions = [...new Set(normalized)].sort((a, b) => a - b);
+  ledger.preflightResumeRevisions(uniqueRevisions);
+
   const cohorts = uniqueRevisions.map((knownRevision) => {
     const delta = ledger.resumeChangedSince(knownRevision);
     return Object.freeze({
@@ -59,6 +65,7 @@ export function browserBrainObservationCursorCohortContract() {
     equal_revision_requests_share_one_materialization: true,
     deterministic_revision_order: true,
     duplicate_revision_idempotent: true,
+    all_revision_requests_preflight_before_delta_materialization: true,
     provider_neutral: true,
     payload_persisted: false,
     ...ZERO_AUTHORITY,
