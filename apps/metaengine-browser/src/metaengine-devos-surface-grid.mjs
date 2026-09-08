@@ -68,7 +68,7 @@ function normalizeSurface(source = {}) {
     || source.page_model_authority !== false) {
     throw new Error('devos_surface_grid_surface_authority_invalid');
   }
-  return Object.freeze({ surface_id: surfaceId, session_id: sessionId, type, tab_id, title: String(source.title || surfaceId).slice(0, 300) });
+  return Object.freeze({ surface_id: surfaceId, session_id: sessionId, type, tab_id: tabId, title: String(source.title || surfaceId).slice(0, 300) });
 }
 
 function effectiveMode(requested, count, bounds) {
