@@ -60,3 +60,39 @@ test('abort fails fast while provider-backed read-only preflight is still pendin
   await Promise.resolve();
   assert.deepEqual(effects, []);
 });
+
+test('flat preflight aggregation preserves exact BrowserCell routing when lanes settle out of order', async () => {
+  const releases = new Map();
+  const effects = [];
+  const coordinator = new BrowserBrainParallelFanoutCoordinator({
+    readMutationBudget: () => Promise.resolve(3),
+    resolveCellKey: (entry) => new Promise((resolve) => {
+      releases.set(entry.command_id, () => resolve(entry.payload.tab_id));
+    }),
+    execute: (_entry, context) => {
+      effects.push([context.commandId, context.browserCell]);
+      return `ok:${context.commandId}`;
+    },
+  });
+
+  const dispatchPromise = coordinator.dispatch([
+    command('cmd-a', 'tab-a'),
+    command('cmd-b', 'tab-b'),
+    command('cmd-c', 'tab-c'),
+  ]);
+
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(effects, []);
+  releases.get('cmd-c')();
+  releases.get('cmd-a')();
+  releases.get('cmd-b')();
+
+  const results = await dispatchPromise;
+  assert.deepEqual(effects, [
+    ['cmd-a', 'tab-a'],
+    ['cmd-b', 'tab-b'],
+    ['cmd-c', 'tab-c'],
+  ]);
+  assert.deepEqual(results.map((entry) => entry.browser_cell), ['tab-a', 'tab-b', 'tab-c']);
+});
