@@ -118,10 +118,11 @@ test('process restart fences predecessor wake and backlog before emitting one fr
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-lifecycle-active-retire-'));
   const statePath = path.join(dir, 'keepalive.json');
   const oldWake = 'wake_66af3fcf-849c-4d7f-b7e9-7b7f60ddcae2';
+  const predecessorProcess = 'process_predecessor_20260831';
   const url = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
   await fs.writeFile(statePath, JSON.stringify({
     schema: 'metaengine.supervisor-keepalive.state.v1',
-    version: '1.3.0',
+    version: '1.4.0',
     supervisor_id: 'METAENGINE_SUPERVISOR',
     supervisor_epoch: 1,
     cycle_seq: 13,
@@ -129,11 +130,14 @@ test('process restart fences predecessor wake and backlog before emitting one fr
     conversation_url: url,
     tab_id: 'tab_old',
     paused: false,
+    process_incarnation_id: predecessorProcess,
+    process_incarnation_started_at: '2026-08-31T14:00:00Z',
     queued_wakes: [{
       key: 'CONTINUE_DEVELOPMENT:recovery',
       reason: 'CONTINUE_DEVELOPMENT',
       metadata: { key: 'recovery' },
       queued_at: '2026-08-31T14:40:00Z',
+      process_incarnation_id: predecessorProcess,
     }],
     pending_wake: null,
     active_wake: {
@@ -144,6 +148,8 @@ test('process restart fences predecessor wake and backlog before emitting one fr
       confirmed_at: '2026-08-31T14:33:23Z',
       supervisor_epoch: 1,
       cycle_seq: 13,
+      process_incarnation_id: predecessorProcess,
+      origin_process_incarnation_id: predecessorProcess,
     },
     ambiguous_history: [],
     last_wake_at: '2026-08-31T14:33:23Z',
@@ -188,6 +194,7 @@ test('process restart fences predecessor wake and backlog before emitting one fr
   assert.equal(snap.keepalive.state, 'ACTIVE');
   assert.equal(snap.keepalive.tab_id, 'tab_new');
   assert.equal(snap.active_request?.restored_from_durable_keepalive, false);
+  assert.equal(snap.keepalive.predecessor_process_incarnation_id, predecessorProcess);
   assert.equal(snap.keepalive.predecessor_queued_wake_count, 1);
   assert.equal(snap.keepalive.predecessor_wake_history?.[0]?.wake_id, oldWake);
   assert.equal(snap.keepalive.predecessor_wake_history?.[0]?.automatic_retry_allowed, false);
