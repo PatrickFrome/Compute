@@ -33,12 +33,21 @@ export function failClosedNativeSupervisorControlState(reason = 'CONTROL_STATE_I
   });
 }
 
+export function deriveStartupNativeSupervisorControlState(value) {
+  if (!value) return null;
+  if (value.supervisor_mode === 'CONTROL' || value.armed === true) {
+    return failClosedNativeSupervisorControlState('PROCESS_BOUNDARY_REQUIRES_FRESH_AUTHORITY');
+  }
+  return value;
+}
+
 export async function loadNativeSupervisorControlState(filePath) {
   if (!filePath) return null;
   try {
     const parsed = JSON.parse(await fs.readFile(String(filePath), 'utf8'));
-    return normalizeNativeSupervisorControlState(parsed)
+    const normalized = normalizeNativeSupervisorControlState(parsed)
       || failClosedNativeSupervisorControlState('CONTROL_STATE_SCHEMA_INVALID');
+    return deriveStartupNativeSupervisorControlState(normalized);
   } catch (error) {
     if (error?.code === 'ENOENT') return null;
     if (error instanceof SyntaxError) return failClosedNativeSupervisorControlState('CONTROL_STATE_JSON_INVALID');
