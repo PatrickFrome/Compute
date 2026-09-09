@@ -39,6 +39,7 @@ test('request-order routing maps duplicate callers directly to materialized coho
   const result = resumeObservationCursorCohorts(ledger, [revision, revision - 1, revision, revision - 1]);
   assert.deepEqual(result.cohorts.map((cohort) => cohort.cohort_index), [0, 1]);
   assert.deepEqual(result.request_cohort_indexes, [1, 0, 1, 0]);
+  assert.deepEqual(result.cohorts.map((cohort) => cohort.request_indexes), [[1, 3], [0, 2]]);
   assert.equal(result.cohorts[result.request_cohort_indexes[0]].known_revision, revision);
   assert.equal(result.cohorts[result.request_cohort_indexes[1]].known_revision, revision - 1);
 });
@@ -204,6 +205,7 @@ test('cohort contract stays provider-neutral, payload-free and zero-authority', 
   assert.equal(contract.equal_revision_requests_share_one_materialization, true);
   assert.equal(contract.request_order_cohort_routing, true);
   assert.equal(contract.cohort_request_fanout_indexes, true);
+  assert.equal(contract.request_routing_and_fanout_indexing_single_pass, true);
   assert.equal(contract.changed_work_indexes, true);
   assert.equal(contract.changed_cohort_collection_single_pass, true);
   assert.equal(contract.changed_request_order_single_pass, true);
