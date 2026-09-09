@@ -72,15 +72,6 @@ export class BrowserBrainParallelFanoutCoordinator {
       throw new BrowserBrainFanoutPlanError('aborted', 'fanout aborted before any effect');
     }
 
-    const budget = finitePositiveInteger(await this.readMutationBudget(), 1);
-    if (commands.length > budget) {
-      throw new BrowserBrainFanoutPlanError(
-        'pressure_budget_exceeded',
-        `batch size ${commands.length} exceeds current mutation budget ${budget}`,
-        { batch_size: commands.length, mutation_budget: budget },
-      );
-    }
-
     const seenCommandIds = new Set();
     const plan = [];
 
@@ -96,12 +87,24 @@ export class BrowserBrainParallelFanoutCoordinator {
       plan.push({ command, commandId, cellKey: null });
     }
 
-    // BrowserCell resolution is a read-only preflight seam and may be provider-backed.
-    // Start every independent lookup together, then validate the complete plan before
-    // any physical executor is invoked.
-    const rawCellKeys = await Promise.all(plan.map(({ command }) => this.resolveCellKey(command)));
+    // Pressure admission and BrowserCell resolution are both read-only preflight
+    // seams and may independently be provider-backed. Start them together so the
+    // fan-out critical path is bounded by the slower preflight instead of their sum.
+    const [rawBudget, rawCellKeys] = await Promise.all([
+      this.readMutationBudget(),
+      Promise.all(plan.map(({ command }) => this.resolveCellKey(command))),
+    ]);
     if (signal?.aborted) {
       throw new BrowserBrainFanoutPlanError('aborted', 'fanout aborted before any effect');
+    }
+
+    const budget = finitePositiveInteger(rawBudget, 1);
+    if (commands.length > budget) {
+      throw new BrowserBrainFanoutPlanError(
+        'pressure_budget_exceeded',
+        `batch size ${commands.length} exceeds current mutation budget ${budget}`,
+        { batch_size: commands.length, mutation_budget: budget },
+      );
     }
 
     const seenCells = new Set();
