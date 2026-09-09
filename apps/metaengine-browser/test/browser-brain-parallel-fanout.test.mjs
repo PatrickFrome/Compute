@@ -210,6 +210,28 @@ test('executor rejection is reported once with no blind retry and peers still se
   assert.equal(result[1].status, 'fulfilled');
 });
 
+test('synchronous executor throw is isolated and does not suppress independent peers', async () => {
+  const calls = [];
+  const instance = coordinator({
+    readMutationBudget: () => 3,
+    execute: (_command, context) => {
+      calls.push(context.commandId);
+      if (context.commandId === 'cmd-a') throw new Error('sync adapter failure');
+      return `ok:${context.commandId}`;
+    },
+  });
+
+  const result = await instance.dispatch([
+    command('cmd-a', 'tab-a'),
+    command('cmd-b', 'tab-b'),
+    command('cmd-c', 'tab-c'),
+  ]);
+
+  assert.deepEqual(calls, ['cmd-a', 'cmd-b', 'cmd-c']);
+  assert.deepEqual(result.map((entry) => entry.status), ['rejected', 'fulfilled', 'fulfilled']);
+  assert.deepEqual(result.slice(1).map((entry) => entry.value), ['ok:cmd-b', 'ok:cmd-c']);
+});
+
 test('pre-aborted signal rejects before budget read or execution', async () => {
   let budgetReads = 0;
   const controller = new AbortController();
