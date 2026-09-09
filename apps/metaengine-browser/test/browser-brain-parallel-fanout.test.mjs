@@ -109,6 +109,35 @@ test('runs pressure budget and provider-backed BrowserCell preflight concurrentl
   assert.deepEqual(result.map((entry) => entry.browser_cell), ['tab-a', 'tab-b']);
 });
 
+test('synchronous preflight throw cannot suppress independent read-only preflight lanes', async () => {
+  const started = [];
+  let effects = 0;
+  const instance = coordinator({
+    readMutationBudget: () => {
+      started.push('budget');
+      throw new Error('sync budget failure');
+    },
+    resolveCellKey: (entry) => {
+      started.push(entry.command_id);
+      return entry.payload.tab_id;
+    },
+    execute: async () => {
+      effects += 1;
+    },
+  });
+
+  await assert.rejects(
+    instance.dispatch([
+      command('cmd-a', 'tab-a'),
+      command('cmd-b', 'tab-b'),
+    ]),
+    /sync budget failure/,
+  );
+
+  assert.deepEqual(new Set(started), new Set(['budget', 'cmd-a', 'cmd-b']));
+  assert.equal(effects, 0);
+});
+
 test('resolves provider-backed BrowserCell bindings concurrently before any effect', async () => {
   const resolverStarted = [];
   const resolverReleases = new Map();

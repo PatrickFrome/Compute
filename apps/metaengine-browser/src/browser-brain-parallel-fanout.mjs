@@ -88,11 +88,17 @@ export class BrowserBrainParallelFanoutCoordinator {
     }
 
     // Pressure admission and BrowserCell resolution are both read-only preflight
-    // seams and may independently be provider-backed. Start them together so the
-    // fan-out critical path is bounded by the slower preflight instead of their sum.
+    // seams and may independently be provider-backed. Defer every invocation into
+    // its own microtask so a synchronous throw from one adapter cannot prevent the
+    // remaining read-only preflight work from starting. Promise.all still fails
+    // closed before any physical effect if any preflight lane rejects.
+    const budgetPromise = Promise.resolve().then(() => this.readMutationBudget());
+    const cellKeyPromises = plan.map(({ command }) =>
+      Promise.resolve().then(() => this.resolveCellKey(command)),
+    );
     const [rawBudget, rawCellKeys] = await Promise.all([
-      this.readMutationBudget(),
-      Promise.all(plan.map(({ command }) => this.resolveCellKey(command))),
+      budgetPromise,
+      Promise.all(cellKeyPromises),
     ]);
     if (signal?.aborted) {
       throw new BrowserBrainFanoutPlanError('aborted', 'fanout aborted before any effect');
