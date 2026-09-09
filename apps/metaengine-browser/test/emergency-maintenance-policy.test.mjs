@@ -125,18 +125,20 @@ test('tampering, wrong build, wrong key and expired grants fail closed', () => {
 });
 
 test('grant TTL is capped and unknown or duplicate scopes are rejected before signature authority', () => {
-  const tooLong = fixture({
-    expires_at: new Date(Date.parse('2026-09-09T11:59:30.000Z') + EMERGENCY_MAINTENANCE_MAX_TTL_MS + 1).toISOString(),
-  });
-  assert.throws(() => canonicalEmergencyMaintenancePayload(tooLong.grant), /ttl_invalid/);
+  const { grant: validGrant } = fixture();
+  const tooLongGrant = {
+    ...validGrant,
+    expires_at: new Date(Date.parse(validGrant.issued_at) + EMERGENCY_MAINTENANCE_MAX_TTL_MS + 1).toISOString(),
+  };
+  assert.throws(() => canonicalEmergencyMaintenancePayload(tooLongGrant), /ttl_invalid/);
 
   assert.throws(() => canonicalEmergencyMaintenancePayload({
-    ...fixture().grant,
+    ...validGrant,
     scopes: ['SELF_UPDATE_HOLD_OVERRIDE', 'SELF_UPDATE_HOLD_OVERRIDE'],
   }), /scope_not_allowed/);
 
   assert.throws(() => canonicalEmergencyMaintenancePayload({
-    ...fixture().grant,
+    ...validGrant,
     scopes: ['ARBITRARY_EXECUTION_FORBIDDEN'],
   }), /scope_not_allowed/);
 });
