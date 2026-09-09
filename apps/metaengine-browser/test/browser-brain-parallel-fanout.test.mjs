@@ -70,6 +70,45 @@ test('starts independent BrowserCell effects concurrently after one-shot admissi
   assert.deepEqual(result.map((entry) => entry.status), ['fulfilled', 'fulfilled']);
 });
 
+test('runs pressure budget and provider-backed BrowserCell preflight concurrently before any effect', async () => {
+  const preflightStarted = [];
+  let releaseBudget;
+  const resolverReleases = new Map();
+  let effects = 0;
+  const instance = coordinator({
+    readMutationBudget: async () => {
+      preflightStarted.push('budget');
+      await new Promise((resolve) => { releaseBudget = resolve; });
+      return 2;
+    },
+    resolveCellKey: async (entry) => {
+      preflightStarted.push(entry.command_id);
+      await new Promise((resolve) => resolverReleases.set(entry.command_id, resolve));
+      return entry.payload.tab_id;
+    },
+    execute: async () => {
+      effects += 1;
+      return 'ok';
+    },
+  });
+
+  const dispatchPromise = instance.dispatch([
+    command('cmd-a', 'tab-a'),
+    command('cmd-b', 'tab-b'),
+  ]);
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(new Set(preflightStarted), new Set(['budget', 'cmd-a', 'cmd-b']));
+  assert.equal(effects, 0);
+
+  releaseBudget();
+  resolverReleases.get('cmd-a')();
+  resolverReleases.get('cmd-b')();
+  const result = await dispatchPromise;
+  assert.equal(effects, 2);
+  assert.deepEqual(result.map((entry) => entry.browser_cell), ['tab-a', 'tab-b']);
+});
+
 test('resolves provider-backed BrowserCell bindings concurrently before any effect', async () => {
   const resolverStarted = [];
   const resolverReleases = new Map();
