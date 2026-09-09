@@ -70,6 +70,41 @@ test('starts independent BrowserCell effects concurrently after one-shot admissi
   assert.deepEqual(result.map((entry) => entry.status), ['fulfilled', 'fulfilled']);
 });
 
+test('resolves provider-backed BrowserCell bindings concurrently before any effect', async () => {
+  const resolverStarted = [];
+  const resolverReleases = new Map();
+  let effects = 0;
+  const instance = coordinator({
+    readMutationBudget: () => 3,
+    resolveCellKey: async (entry) => {
+      resolverStarted.push(entry.command_id);
+      await new Promise((resolve) => resolverReleases.set(entry.command_id, resolve));
+      return entry.payload.tab_id;
+    },
+    execute: async () => {
+      effects += 1;
+      return 'ok';
+    },
+  });
+
+  const dispatchPromise = instance.dispatch([
+    command('cmd-a', 'tab-a'),
+    command('cmd-b', 'tab-b'),
+    command('cmd-c', 'tab-c'),
+  ]);
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(new Set(resolverStarted), new Set(['cmd-a', 'cmd-b', 'cmd-c']));
+  assert.equal(effects, 0);
+
+  resolverReleases.get('cmd-a')();
+  resolverReleases.get('cmd-b')();
+  resolverReleases.get('cmd-c')();
+  const result = await dispatchPromise;
+  assert.equal(effects, 3);
+  assert.deepEqual(result.map((entry) => entry.browser_cell), ['tab-a', 'tab-b', 'tab-c']);
+});
+
 test('admission failures reject before any physical effect', async (t) => {
   const cases = [
     {
@@ -153,4 +188,38 @@ test('pre-aborted signal rejects before budget read or execution', async () => {
     },
   });
   assert.equal(budgetReads, 0);
+});
+
+test('abort during asynchronous BrowserCell resolution fails closed before any effect', async () => {
+  const controller = new AbortController();
+  const resolverReleases = [];
+  let resolverStarts = 0;
+  let effects = 0;
+  const instance = coordinator({
+    readMutationBudget: () => 2,
+    resolveCellKey: async (entry) => {
+      resolverStarts += 1;
+      await new Promise((resolve) => resolverReleases.push(resolve));
+      return entry.payload.tab_id;
+    },
+    execute: async () => {
+      effects += 1;
+    },
+  });
+
+  const dispatchPromise = instance.dispatch([
+    command('cmd-a', 'tab-a'),
+    command('cmd-b', 'tab-b'),
+  ], { signal: controller.signal });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(resolverStarts, 2);
+  controller.abort();
+  for (const release of resolverReleases) release();
+
+  await assert.rejects(
+    dispatchPromise,
+    (error) => error instanceof BrowserBrainFanoutPlanError && error.code === 'aborted',
+  );
+  assert.equal(effects, 0);
 });

@@ -82,7 +82,6 @@ export class BrowserBrainParallelFanoutCoordinator {
     }
 
     const seenCommandIds = new Set();
-    const seenCells = new Set();
     const plan = [];
 
     for (const command of commands) {
@@ -94,14 +93,27 @@ export class BrowserBrainParallelFanoutCoordinator {
         throw new BrowserBrainFanoutPlanError('duplicate_command_id', `duplicate command_id ${commandId}`);
       }
       seenCommandIds.add(commandId);
+      plan.push({ command, commandId, cellKey: null });
+    }
 
-      const rawCellKey = await this.resolveCellKey(command);
+    // BrowserCell resolution is a read-only preflight seam and may be provider-backed.
+    // Start every independent lookup together, then validate the complete plan before
+    // any physical executor is invoked.
+    const rawCellKeys = await Promise.all(plan.map(({ command }) => this.resolveCellKey(command)));
+    if (signal?.aborted) {
+      throw new BrowserBrainFanoutPlanError('aborted', 'fanout aborted before any effect');
+    }
+
+    const seenCells = new Set();
+    for (let index = 0; index < plan.length; index += 1) {
+      const entry = plan[index];
+      const rawCellKey = rawCellKeys[index];
       const cellKey = typeof rawCellKey === 'string' ? rawCellKey.trim() : '';
       if (!cellKey) {
         throw new BrowserBrainFanoutPlanError(
           'missing_browser_cell',
-          `command ${commandId} has no explicit BrowserCell binding`,
-          { command_id: commandId },
+          `command ${entry.commandId} has no explicit BrowserCell binding`,
+          { command_id: entry.commandId },
         );
       }
       if (seenCells.has(cellKey)) {
@@ -112,7 +124,7 @@ export class BrowserBrainParallelFanoutCoordinator {
         );
       }
       seenCells.add(cellKey);
-      plan.push({ command, commandId, cellKey });
+      entry.cellKey = cellKey;
     }
 
     // Do not add a semaphore or internal queue here. The batch was admitted as a
