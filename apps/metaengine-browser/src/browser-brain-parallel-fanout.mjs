@@ -141,13 +141,25 @@ export class BrowserBrainParallelFanoutCoordinator {
     // Defer each executor invocation into its own microtask so a synchronous throw
     // from one provider adapter is captured as that command's rejection instead of
     // aborting array construction and suppressing later independent BrowserCells.
+    // Re-check abort at each execution-start boundary as well: an earlier adapter
+    // may synchronously abort the shared signal after an effect starts, and later
+    // peers must then fail closed rather than begin new physical effects.
     const settled = await Promise.allSettled(
       plan.map(({ command, commandId, cellKey }) =>
-        Promise.resolve().then(() => this.execute(command, {
-          commandId,
-          browserCell: cellKey,
-          signal,
-        })),
+        Promise.resolve().then(() => {
+          if (signal?.aborted) {
+            throw new BrowserBrainFanoutPlanError(
+              'aborted',
+              `fanout aborted before command ${commandId} effect started`,
+              { command_id: commandId, browser_cell: cellKey },
+            );
+          }
+          return this.execute(command, {
+            commandId,
+            browserCell: cellKey,
+            signal,
+          });
+        }),
       ),
     );
 
