@@ -53,6 +53,8 @@ jobs:
           grep -q 'pre_install_receipt_sha256' apps/metaengine-browser/src/self-update-handoff.mjs
           grep -q 'published_baseline_reused=PASS' apps/metaengine-browser/test/self-update-fast-physical.ps1
           grep -q 'target_build_count=1' apps/metaengine-browser/test/self-update-fast-physical.ps1
+          grep -q 'automatic_retry_allowed = \$false' apps/metaengine-browser/test/self-update-fast-physical-ci.ps1
+          grep -q 'self-update-diagnostic-failure.json' apps/metaengine-browser/test/self-update-fast-physical-ci.ps1
           ! grep -q 'NEON' apps/metaengine-browser/src/self-update-runtime.mjs
 
   windows-published-n-to-one-build-target:
@@ -87,7 +89,7 @@ jobs:
         shell: powershell
         env:
           METAENGINE_GITHUB_API_TOKEN: ${{ github.token }}
-        run: ./test/self-update-fast-physical.ps1
+        run: ./test/self-update-fast-physical-ci.ps1
       - name: Prove installed Guardian staging after physical update
         working-directory: apps/metaengine-browser
         shell: powershell
