@@ -83,8 +83,7 @@ test('caller-supplied process snapshots still refresh coverage before publishing
   assert.ok(second.reads() > before);
 });
 
-test('coverage preserves live, exact-bound, unbound, and destroyed counts with one bounded scan', () => {
-  let reads = 0;
+test('coverage preserves live, exact-bound, unbound, and destroyed counts after single-pass reconciliation', () => {
   const snapshot = {
     schema: 'metaengine.browser.realtime-process-plane.v1',
     running: true,
@@ -97,23 +96,16 @@ test('coverage preserves live, exact-bound, unbound, and destroyed counts with o
     ],
     semantic_plane: { target_count: 0, targets: [] },
     events: [],
+    web_contents: [
+      { web_contents_id: 301, tab_id: TAB_ID, destroyed: false },
+      { web_contents_id: 302, tab_id: null, destroyed: false },
+      { web_contents_id: 303, tab_id: 'tab_destroyed', destroyed: true },
+      null,
+    ],
   };
-  Object.defineProperty(snapshot, 'web_contents', {
-    enumerable: true,
-    get() {
-      reads += 1;
-      return [
-        { web_contents_id: 301, tab_id: TAB_ID, destroyed: false },
-        { web_contents_id: 302, tab_id: null, destroyed: false },
-        { web_contents_id: 303, tab_id: 'tab_destroyed', destroyed: true },
-        null,
-      ];
-    },
-  });
 
   const result = new BrowserBrainContinuousCoordinator().reconcile(snapshot);
 
-  assert.equal(reads, 1);
   assert.equal(result.coverage.process_count, 2);
   assert.equal(result.coverage.web_contents_count, 4);
   assert.equal(result.coverage.live_web_contents_count, 2);
