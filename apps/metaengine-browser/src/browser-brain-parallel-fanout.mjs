@@ -132,13 +132,16 @@ export class BrowserBrainParallelFanoutCoordinator {
 
     // Do not add a semaphore or internal queue here. The batch was admitted as a
     // whole against the pressure budget, so all independent cells can start now.
+    // Defer each executor invocation into its own microtask so a synchronous throw
+    // from one provider adapter is captured as that command's rejection instead of
+    // aborting array construction and suppressing later independent BrowserCells.
     const settled = await Promise.allSettled(
       plan.map(({ command, commandId, cellKey }) =>
-        this.execute(command, {
+        Promise.resolve().then(() => this.execute(command, {
           commandId,
           browserCell: cellKey,
           signal,
-        }),
+        })),
       ),
     );
 
