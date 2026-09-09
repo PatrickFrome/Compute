@@ -60,16 +60,14 @@ export function resumeObservationCursorCohorts(ledger, knownRevisionValues = [])
   });
   const changedCohorts = [];
   const changedCohortIndexes = [];
-  const changedCohortFlags = Array.from({ length: cohorts.length }, () => false);
   cohorts.forEach((cohort) => {
     if (!cohort.changed) return;
     changedCohorts.push(cohort);
     changedCohortIndexes.push(cohort.cohort_index);
-    changedCohortFlags[cohort.cohort_index] = true;
   });
   const changedRequestIndexes = [];
   requestCohortIndexes.forEach((cohortIndex, requestIndex) => {
-    if (changedCohortFlags[cohortIndex]) changedRequestIndexes.push(requestIndex);
+    if (cohorts[cohortIndex].changed) changedRequestIndexes.push(requestIndex);
   });
 
   return Object.freeze({
@@ -99,6 +97,7 @@ export function browserBrainObservationCursorCohortContract() {
     cohort_request_fanout_indexes: true,
     changed_work_indexes: true,
     changed_request_order_single_pass: true,
+    direct_changed_request_membership_lookup: true,
     direct_changed_cohort_iteration: true,
     all_revision_requests_preflight_before_delta_materialization: true,
     provider_neutral: true,
