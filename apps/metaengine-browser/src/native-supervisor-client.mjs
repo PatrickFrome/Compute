@@ -296,8 +296,6 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       : sourceGetState;
 
     const beforeSelfUpdateInstall = async (receipt) => {
-      const host = hostResilienceRuntime();
-      if (host?.prepareInstallerHandoff) await host.prepareInstallerHandoff('SELF_UPDATE');
       if (typeof realtimeProcessPlane?.stopAndWait === 'function') await realtimeProcessPlane.stopAndWait();
       else realtimeProcessPlane?.stop?.();
       await sourceBeforeSelfUpdateInstall?.(receipt);
