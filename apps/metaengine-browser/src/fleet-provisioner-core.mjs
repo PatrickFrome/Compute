@@ -31,6 +31,7 @@ const MAX_SPAWN_BURST_LIMIT = 256;
 const RETIRED_HISTORY_LIMIT = 64;
 const LEGACY_CAPACITY_AMBIGUITY = 'CREATE_TAB_AMBIGUOUS:tab_capacity_exceeded';
 const CAPACITY_BACKPRESSURE_REASON = 'TAB_CAPACITY_EXCEEDED_PRE_EFFECT';
+const RESTART_STALE_LOST_REASON = 'PHYSICAL_TAB_MISSING_ON_RESTART';
 
 function clone(value) { return value == null ? value : structuredClone(value); }
 function iso(clock) {
@@ -50,6 +51,11 @@ function burstLimit(value, fallback = DEFAULT_SPAWN_BURST_LIMIT) {
 }
 function isDeterministicPreEffectCapacityError(error) {
   return String(error?.message || error) === 'tab_capacity_exceeded';
+}
+function isRestartStaleLost(agent) {
+  return agent?.lifecycle_state === 'LOST'
+    && agent?.automatic_retry_allowed !== true
+    && agent?.lost_reason === RESTART_STALE_LOST_REASON;
 }
 function normalizePolicy(policy = {}) {
   const profile = String(policy.profile || 'BALANCED').toUpperCase();
@@ -218,7 +224,7 @@ export class FleetProvisioner {
       }
       if (agent.tab_id && !this.#tabExists(agent.tab_id) && !['RETIRED', 'PROVISIONING_AMBIGUOUS'].includes(agent.lifecycle_state)) {
         agent.lifecycle_state = 'LOST';
-        agent.lost_reason = 'PHYSICAL_TAB_MISSING_ON_RESTART';
+        agent.lost_reason = RESTART_STALE_LOST_REASON;
         agent.tab_id = null;
         agent.target_id = null;
         agent.transport_proof = null;
@@ -359,7 +365,10 @@ export class FleetProvisioner {
       if (censusProbe && (censusProbe.fleet_at_ceiling || censusProbe.total_at_wall) && !this.#capacityBackpressure) {
         this.#capacityBackpressure = true;
       }
-      const activatable = this.#state.agents.filter((agent) => ['REGISTERED', 'LOST'].includes(agent.lifecycle_state));
+      const activatable = this.#state.agents.filter((agent) => (
+        agent.lifecycle_state === 'REGISTERED'
+        || (agent.lifecycle_state === 'LOST' && !isRestartStaleLost(agent))
+      ));
       for (const agent of activatable) {
         if (this.#liveCount() >= desired || provisionedThisCycle >= burst || this.#capacityBackpressure) break;
         await this.#provision(agent, { isRecovery: agent.lifecycle_state === 'LOST' });
@@ -471,7 +480,11 @@ export class FleetProvisioner {
   }
   #slotCount() {
     const ignoreAmbiguous = globalOwnerGateDisabled('fleet.ambiguous_compensating_fanout');
-    return this.#state.agents.filter((a) => a.lifecycle_state !== 'RETIRED' && !(ignoreAmbiguous && a.lifecycle_state === 'PROVISIONING_AMBIGUOUS')).length;
+    return this.#state.agents.filter((a) => (
+      a.lifecycle_state !== 'RETIRED'
+      && !isRestartStaleLost(a)
+      && !(ignoreAmbiguous && a.lifecycle_state === 'PROVISIONING_AMBIGUOUS')
+    )).length;
   }
   #liveCount() { return this.#state.agents.filter((a) => ['PROVISIONING', 'BOUND_UNVERIFIED', 'ACTIVE'].includes(a.lifecycle_state)).length; }
   #nextRole() {
