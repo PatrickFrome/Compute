@@ -142,9 +142,10 @@ test('semantic burst updates memory but reuses the last resource pressure evalua
     semantic_sequence: 8,
     observed_at: '2026-09-06T10:30:00.010Z',
   };
-  const result = coordinator.observeEdge(semantic, {
-    process_snapshot: processSnapshot({ sequence: 11, events: [semantic] }),
-  });
+  // Omitting process_snapshot is deliberate: this is the hot-path reuse case.
+  // A caller-supplied process snapshot is fresh process evidence and must refresh
+  // pressure, which is covered independently by the fresh-snapshot regression.
+  const result = coordinator.observeEdge(semantic);
   const after = coordinator.snapshot();
 
   assert.equal(result.pressure_evaluated, false);
