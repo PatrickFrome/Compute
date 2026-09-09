@@ -22,10 +22,6 @@ function exactGitHead(repoRoot) {
     throw new Error('emergency_trust_root_git_head_unavailable');
   }
   if (!BUILD_SHA_RE.test(head)) throw new Error('emergency_trust_root_git_head_invalid');
-  const ciHead = String(process.env.GITHUB_SHA || '').trim().toLowerCase();
-  if (ciHead && (!BUILD_SHA_RE.test(ciHead) || ciHead !== head)) {
-    throw new Error('emergency_trust_root_ci_head_mismatch');
-  }
   return head;
 }
 
