@@ -130,19 +130,19 @@ export class BrowserBrainParallelFanoutCoordinator {
 
     // Pressure admission and BrowserCell resolution are independent read-only
     // preflight seams. Start every lane before awaiting any one of them; no
-    // physical effect is possible until the aggregate has passed.
-    const budgetPromise = Promise.resolve().then(() => this.readMutationBudget());
+    // physical effect is possible until the aggregate has passed. Validate the
+    // pressure lane as it settles so malformed authority evidence can reject the
+    // batch immediately without waiting for unrelated slow/wedged resolvers.
+    const budgetPromise = Promise.resolve()
+      .then(() => this.readMutationBudget())
+      .then(strictMutationBudget);
     const cellKeyPromises = plan.map(({ command }) =>
       Promise.resolve().then(() => this.resolveCellKey(command)),
     );
     const preflightPromise = Promise.all([budgetPromise, ...cellKeyPromises]);
-    const [rawBudget, ...rawCellKeys] = await awaitPreflight(preflightPromise, signal);
+    const [budget, ...rawCellKeys] = await awaitPreflight(preflightPromise, signal);
     if (signal?.aborted) throw preflightAbortError();
 
-    // Provider-backed pressure is an admission authority input. Invalid, zero or
-    // fractional values must fail closed rather than silently widening to one
-    // mutation lane through a fallback normalization.
-    const budget = strictMutationBudget(rawBudget);
     if (commands.length > budget) {
       throw new BrowserBrainFanoutPlanError(
         'pressure_budget_exceeded',
