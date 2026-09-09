@@ -27,14 +27,19 @@ function validProcessSnapshot(snapshot) {
 
 function coverage(snapshot = {}) {
   const webContents = Array.isArray(snapshot.web_contents) ? snapshot.web_contents : [];
-  const live = webContents.filter((row) => row && row.destroyed !== true);
-  const exact = live.filter((row) => String(row?.tab_id || '').startsWith('tab_'));
+  let liveWebContentsCount = 0;
+  let exactTabBoundWebContentsCount = 0;
+  for (const row of webContents) {
+    if (!row || row.destroyed === true) continue;
+    liveWebContentsCount += 1;
+    if (String(row.tab_id || '').startsWith('tab_')) exactTabBoundWebContentsCount += 1;
+  }
   return Object.freeze({
     process_count: Array.isArray(snapshot.processes) ? snapshot.processes.length : 0,
     web_contents_count: webContents.length,
-    live_web_contents_count: live.length,
-    exact_tab_bound_web_contents_count: exact.length,
-    unbound_live_web_contents_count: Math.max(0, live.length - exact.length),
+    live_web_contents_count: liveWebContentsCount,
+    exact_tab_bound_web_contents_count: exactTabBoundWebContentsCount,
+    unbound_live_web_contents_count: Math.max(0, liveWebContentsCount - exactTabBoundWebContentsCount),
     process_source: 'ELECTRON_APP_METRICS',
     web_contents_source: 'ELECTRON_GET_ALL_WEBCONTENTS',
     lifecycle_event_driven: snapshot.event_driven_lifecycle === true,
@@ -234,6 +239,7 @@ export class BrowserBrainContinuousCoordinator {
   }
 
   observeEdge(event = {}, { process_snapshot = null, tabs = [], cell_by_tab = null } = {}) {
+    const hasFreshProcessSnapshot = process_snapshot != null;
     const snapshot = process_snapshot || this.#lastProcessSnapshot;
     if (!validProcessSnapshot(snapshot)) {
       throw new Error('browser_brain_continuous_process_snapshot_required');
@@ -241,7 +247,9 @@ export class BrowserBrainContinuousCoordinator {
     const type = String(event?.type || 'UNKNOWN').toUpperCase();
     const hadProcessSnapshot = this.#lastProcessSnapshot != null;
     this.#lastProcessSnapshot = snapshot;
-    const coverageEvaluated = !hadProcessSnapshot || COVERAGE_RELEVANT_EVENTS.has(type);
+    const coverageEvaluated = !hadProcessSnapshot
+      || hasFreshProcessSnapshot
+      || COVERAGE_RELEVANT_EVENTS.has(type);
     if (coverageEvaluated) this.#evaluateCoverage(snapshot);
     else this.#coverageReuseCount += 1;
     this.#lastCognitionResult = this.#cognition.observeEdge(event);
@@ -258,7 +266,9 @@ export class BrowserBrainContinuousCoordinator {
         authority_effect: false,
       });
     }
-    const pressureEvaluated = this.#lastPressureResult == null || PRESSURE_RELEVANT_EVENTS.has(type);
+    const pressureEvaluated = this.#lastPressureResult == null
+      || hasFreshProcessSnapshot
+      || PRESSURE_RELEVANT_EVENTS.has(type);
     const pressure = pressureEvaluated
       ? this.#evaluatePressure(snapshot)
       : this.#lastPressureResult;
