@@ -122,13 +122,14 @@ test('Windows login-start registration self-heals while Startup Approval remains
 });
 
 test('autonomy source invariants close UI, restart, host wiring and self-update gaps', async () => {
-  const [main, mainEntry, lifecycle, nativeControl, nativeSupervisor, hostResilience] = await Promise.all([
+  const [main, mainEntry, lifecycle, nativeControl, nativeSupervisor, hostResilience, selfUpdateRuntime] = await Promise.all([
     fs.readFile(path.join(src, 'main.mjs'), 'utf8'),
     fs.readFile(path.join(src, 'main-entry.mjs'), 'utf8'),
     fs.readFile(path.join(src, 'supervisor-lifecycle-runtime-core.mjs'), 'utf8'),
     fs.readFile(path.join(src, 'native-browser-control.mjs'), 'utf8'),
     fs.readFile(path.join(src, 'native-supervisor-client.mjs'), 'utf8'),
     fs.readFile(path.join(src, 'host-resilience-runtime.mjs'), 'utf8'),
+    fs.readFile(path.join(src, 'self-update-runtime-v8.mjs'), 'utf8'),
   ]);
   assert.match(main, /event\.preventDefault\(\)/);
   assert.match(main, /windowRef\.hide\(\)/);
@@ -155,8 +156,9 @@ test('autonomy source invariants close UI, restart, host wiring and self-update 
   assert.match(mainEntry, /__METAENGINE_HOST_RESILIENCE_RUNTIME__/);
   assert.match(mainEntry, /app\.once\('ready',[\s\S]*hostResilience\.start\(\)/);
   assert.match(nativeSupervisor, /host_resilience:\s*hostResilienceSnapshot\(\)/);
-  const prepareAt = nativeSupervisor.indexOf("prepareInstallerHandoff('SELF_UPDATE')");
-  const priorHookAt = nativeSupervisor.indexOf('sourceBeforeSelfUpdateInstall?.(receipt)', prepareAt);
-  assert.ok(prepareAt >= 0 && priorHookAt > prepareAt, 'sentinel installer handoff must precede external self-update hook');
+  assert.doesNotMatch(nativeSupervisor, /prepareInstallerHandoff\(['"]SELF_UPDATE['"]\)/);
+  const prepareAt = selfUpdateRuntime.indexOf("prepareInstallerHandoff?.('SELF_UPDATE')");
+  const priorHookAt = selfUpdateRuntime.indexOf('await this.#beforeInstallerLaunch', prepareAt);
+  assert.ok(prepareAt >= 0 && priorHookAt > prepareAt, 'single sentinel installer handoff owner must precede external self-update hook');
   assert.match(nativeSupervisor, /host_resilience_second_polling_loop:\s*false/);
 });
