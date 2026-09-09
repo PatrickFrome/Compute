@@ -17,6 +17,7 @@ import {
   loadSelfUpdateSessionContinuity,
   persistSelfUpdateSessionContinuity,
 } from './self-update-session-continuity.mjs';
+import { verifiedDownloadReceiptConfirmsRequest } from './verified-download-manager.mjs';
 
 export const NATIVE_SUPERVISOR_BASE = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1';
 export const NATIVE_SUPERVISOR_RUNTIME_PATH = '/a2-browser-native-supervisor-v1';
@@ -699,13 +700,16 @@ export class NativeSupervisorClient {
 
   async #effectOutcome(command, result, descriptor) {
     if (descriptor.read_only) return null;
+    const action = String(command?.action || '').toUpperCase();
+    if (action === 'DOWNLOAD_FILE') {
+      return verifiedDownloadReceiptConfirmsRequest(command?.payload, result) ? 'CONFIRMED' : 'AMBIGUOUS';
+    }
     const explicit = String(result?.effect_outcome || '').toUpperCase();
     if (TERMINAL_EFFECT_OUTCOMES.has(explicit)) return explicit;
     const state = String(result?.effect_state || '').toUpperCase();
     if (PROVEN_EFFECT_STATES.has(state)) return 'CONFIRMED';
     if (state.startsWith('AMBIGUOUS')) return 'AMBIGUOUS';
 
-    const action = String(command?.action || '').toUpperCase();
     if (['ARM','DISARM','SET_SUPERVISOR_MODE','SET_MODE'].includes(action)) return 'CONFIRMED';
     if (action === 'NEW_TAB' && result?.tab_id) return 'CONFIRMED';
     if (['FLEET_SET_PROFILE','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL'].includes(action) && result) return 'CONFIRMED';

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
@@ -110,6 +111,45 @@ test('MONITOR plus disarmed still rejects a tab mutation before the physical exe
   assert.match(receipts[0].results[0].error, /native_supervisor_control_required:MONITOR/);
   assert.equal(receipts[0].results[0].receipt.effect_outcome, 'AMBIGUOUS');
   client.stop();
+});
+
+test('DOWNLOAD_FILE completes only from an exact verified receipt and otherwise stays ambiguous', async () => {
+  const digest = 'a'.repeat(64);
+  const payload = {
+    url: 'https://example.com/METAENGINE.exe',
+    filename: 'METAENGINE.exe',
+    expected_sha256: digest,
+    max_bytes: 4096,
+  };
+  const verifiedReceipt = {
+    schema: 'metaengine.verified-download-receipt.v1',
+    request_id: '33333333-3333-4333-8333-333333333333',
+    url: payload.url,
+    url_chain: [payload.url],
+    filename: payload.filename,
+    path: `/tmp/${payload.filename}`,
+    bytes: 2048,
+    sha256: digest,
+    completed_at: '2026-09-09T09:00:00.000Z',
+    executable_started: false,
+    authority_effect: true,
+  };
+  for (const [expected, result] of [
+    ['CONFIRMED', verifiedReceipt],
+    ['AMBIGUOUS', { ...verifiedReceipt, sha256: 'b'.repeat(64) }],
+    ['AMBIGUOUS', { effect_outcome: 'CONFIRMED', effect_state: 'CONFIRMED' }],
+  ]) {
+    const receipts = [];
+    const client = clientFor(
+      { command_id: crypto.randomUUID(), action: 'DOWNLOAD_FILE', payload, platform: null },
+      { receipts, executeCommand: async () => result },
+    );
+    client.setControlState({ mode: 'CONTROL', armed: true });
+    await client.cycle();
+    assert.equal(receipts[0].results[0].receipt.effect_outcome, expected);
+    assert.equal(client.snapshot().last_command_status, expected === 'CONFIRMED' ? 'COMPLETED' : 'AMBIGUOUS');
+    client.stop();
+  }
 });
 
 test('failed read-only batch rows remain observation receipts, never ambiguous effects', () => {

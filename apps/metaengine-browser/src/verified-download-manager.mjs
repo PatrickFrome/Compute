@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 const SHA256_RE = /^[a-f0-9]{64}$/;
+const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_FILENAME_RE = /^[0-9A-Za-z][0-9A-Za-z._ -]{0,179}$/;
 const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
 const HARD_MAX_BYTES = 2 * 1024 * 1024 * 1024;
@@ -40,6 +41,36 @@ export function validateVerifiedDownloadRequest(input = {}) {
     expected_sha256: expectedSha256,
     max_bytes: maxBytes,
   });
+}
+
+export function verifiedDownloadReceiptConfirmsRequest(input = {}, receipt = {}) {
+  try {
+    const request = validateVerifiedDownloadRequest(input);
+    if (!receipt || receipt.schema !== 'metaengine.verified-download-receipt.v1') return false;
+    if (!UUID_V4_RE.test(String(receipt.request_id || ''))) return false;
+    if (String(receipt.url || '') !== request.url) return false;
+    if (String(receipt.filename || '') !== request.filename) return false;
+    if (String(receipt.sha256 || '') !== request.expected_sha256) return false;
+    if (receipt.executable_started !== false || receipt.authority_effect !== true) return false;
+
+    const bytes = receipt.bytes;
+    if (typeof bytes !== 'number' || !Number.isSafeInteger(bytes) || bytes < 1 || bytes > request.max_bytes) return false;
+    const targetPath = String(receipt.path || '');
+    const absolutePath = path.isAbsolute(targetPath) || /^[A-Za-z]:[\\/]/.test(targetPath) || /^\\\\/.test(targetPath);
+    if (!absolutePath || targetPath.split(/[\\/]/).at(-1) !== request.filename) return false;
+
+    const chain = receipt.url_chain;
+    if (!Array.isArray(chain) || chain.length < 1 || chain.length > MAX_REDIRECT_CHAIN) return false;
+    const normalizedChain = chain.map((url) => validateSafeHttpsUrl(url, 'verified_download_receipt'));
+    if (!normalizedChain.includes(request.url)) return false;
+
+    const completedAt = String(receipt.completed_at || '');
+    const completedMs = Date.parse(completedAt);
+    if (!Number.isFinite(completedMs) || new Date(completedMs).toISOString() !== completedAt) return false;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function validateObservedChain(item, expectedUrl) {

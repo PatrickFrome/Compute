@@ -5,7 +5,11 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { VerifiedDownloadManager, validateVerifiedDownloadRequest } from '../src/verified-download-manager.mjs';
+import {
+  VerifiedDownloadManager,
+  validateVerifiedDownloadRequest,
+  verifiedDownloadReceiptConfirmsRequest,
+} from '../src/verified-download-manager.mjs';
 
 class FakeDownloadItem extends EventEmitter {
   constructor(url, body, chain = [url]) {
@@ -89,6 +93,54 @@ test('typed download persists only after exact sha256 verification', async (t) =
   assert.equal(receipt.executable_started, false);
   assert.equal(await fs.readFile(path.join(root, 'METAENGINE.exe'), 'utf8'), body.toString());
   assert.equal(manager.snapshot().active, null);
+});
+
+test('verified download receipt confirms only an exact bounded request binding', () => {
+  const request = {
+    url: 'https://example.com/METAENGINE.exe',
+    filename: 'METAENGINE.exe',
+    expected_sha256: 'a'.repeat(64),
+    max_bytes: 4096,
+  };
+  const receipt = {
+    schema: 'metaengine.verified-download-receipt.v1',
+    request_id: '11111111-1111-4111-8111-111111111111',
+    url: request.url,
+    url_chain: [request.url, 'https://cdn.example.com/METAENGINE.exe?token=opaque'],
+    filename: request.filename,
+    path: `C:\\Users\\User\\Downloads\\METAENGINE\\${request.filename}`,
+    bytes: 2048,
+    sha256: request.expected_sha256,
+    completed_at: '2026-09-09T09:00:00.000Z',
+    executable_started: false,
+    authority_effect: true,
+  };
+  assert.equal(verifiedDownloadReceiptConfirmsRequest(request, receipt), true);
+
+  const mismatches = [
+    { schema: 'metaengine.verified-download-failure.v1' },
+    { request_id: 'not-a-uuid' },
+    { url: 'https://example.com/other.exe' },
+    { url_chain: ['https://cdn.example.com/METAENGINE.exe'] },
+    { url_chain: [request.url, 'http://cdn.example.com/METAENGINE.exe'] },
+    { filename: 'other.exe' },
+    { path: 'C:\\Downloads\\other.exe' },
+    { path: 'METAENGINE.exe' },
+    { bytes: 0 },
+    { bytes: '2048' },
+    { bytes: 4097 },
+    { sha256: 'b'.repeat(64) },
+    { completed_at: 'invalid' },
+    { executable_started: true },
+    { authority_effect: false },
+  ];
+  for (const mismatch of mismatches) {
+    assert.equal(
+      verifiedDownloadReceiptConfirmsRequest(request, { ...receipt, ...mismatch }),
+      false,
+      JSON.stringify(mismatch),
+    );
+  }
 });
 
 test('safe HTTPS redirect chain is allowed only with exact digest binding', async (t) => {
