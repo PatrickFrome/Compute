@@ -118,16 +118,15 @@ export class BrowserBrainParallelFanoutCoordinator {
     // remaining read-only preflight work from starting. Promise.all still fails
     // closed before any physical effect if any preflight lane rejects. Race that
     // aggregate against AbortSignal so cancellation does not wait for a slow or
-    // wedged provider-backed read-only preflight lane to settle.
+    // wedged provider-backed read-only preflight lane to settle. Keep the aggregate
+    // flat so the hot path avoids a nested Promise.all plus its intermediate cell
+    // result array while retaining exact plan-order BrowserCell routing.
     const budgetPromise = Promise.resolve().then(() => this.readMutationBudget());
     const cellKeyPromises = plan.map(({ command }) =>
       Promise.resolve().then(() => this.resolveCellKey(command)),
     );
-    const preflightPromise = Promise.all([
-      budgetPromise,
-      Promise.all(cellKeyPromises),
-    ]);
-    const [rawBudget, rawCellKeys] = await awaitPreflight(preflightPromise, signal);
+    const preflightPromise = Promise.all([budgetPromise, ...cellKeyPromises]);
+    const [rawBudget, ...rawCellKeys] = await awaitPreflight(preflightPromise, signal);
     if (signal?.aborted) {
       throw preflightAbortError();
     }
