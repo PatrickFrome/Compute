@@ -2,6 +2,10 @@
   "appId": "com.metaengine.browser.test",
   "productName": "METAENGINE Browser Test",
   "asar": true,
+  "electronFuses": {
+    "enableEmbeddedAsarIntegrityValidation": true,
+    "onlyLoadAppFromAsar": true
+  },
   "asarUnpack": [
     "src/browser-sentinel-worker.cjs",
     "src/browser-sentinel-liveness.cjs",
@@ -17,6 +21,7 @@
     "package.json"
   ],
   "beforePack": "./scripts/electron-builder-before-pack.cjs",
+  "afterAllArtifactBuild": "./scripts/electron-builder-after-all-artifact-build.cjs",
   "extraResources": [
     {
       "from": "native-dist/guardian",

@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 
-import { EmergencyMaintenanceContext } from '../src/emergency-maintenance-context.mjs';
+import {
+  EmergencyMaintenanceContext,
+  createEmergencyMaintenanceContextForUnitTest,
+} from '../src/emergency-maintenance-context.mjs';
+import { EMERGENCY_MAINTENANCE_TRUST_ROOT_SCHEMA } from '../src/emergency-maintenance-trust-root.mjs';
 import {
   EMERGENCY_MAINTENANCE_GRANT_SCHEMA,
   GLOBAL_OPERATIONAL_OVERRIDE,
@@ -39,6 +43,17 @@ function signedGrant(privateKey, {
   return grant;
 }
 
+function trustRoot(publicKey, buildSha = BUILD_SHA) {
+  const pem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
+  const der = publicKey.export({ type: 'spki', format: 'der' });
+  return {
+    schema: EMERGENCY_MAINTENANCE_TRUST_ROOT_SCHEMA,
+    build_sha: buildSha,
+    ed25519_public_key_pem: pem,
+    public_key_spki_sha256: crypto.createHash('sha256').update(der).digest('hex'),
+  };
+}
+
 async function harness() {
   let now = START_MS;
   let gateState = null;
@@ -50,14 +65,12 @@ async function harness() {
     clock: () => now,
   });
   await registry.init();
-  const context = new EmergencyMaintenanceContext({
+  const context = createEmergencyMaintenanceContextForUnitTest({
     ownerGateRegistry: registry,
     loadState: async () => runtimeState,
     saveState: async (value) => { runtimeState = structuredClone(value); },
-    publicKey,
-    expectedBuildSha: BUILD_SHA,
     clock: () => now,
-  });
+  }, trustRoot(publicKey));
   await context.init();
   return {
     registry,
@@ -69,6 +82,22 @@ async function harness() {
     gateState: () => structuredClone(gateState),
   };
 }
+
+test('runtime constructor rejects legacy mutable public key and build identity authority', () => {
+  const registry = {
+    snapshot: () => ({ wildcard_disabled: false, overrides: [] }),
+    disable: async () => ({ disabled: true }),
+    enable: async () => ({ disabled: false }),
+  };
+  const { publicKey } = crypto.generateKeyPairSync('ed25519');
+  assert.throws(() => new EmergencyMaintenanceContext({
+    ownerGateRegistry: registry,
+    loadState: async () => null,
+    saveState: async () => {},
+    publicKey,
+    expectedBuildSha: BUILD_SHA,
+  }), /mutable_trust_root_forbidden/);
+});
 
 test('signed global grant durably consumes nonce before wildcard gate effect and leaves exact readback', async () => {
   const h = await harness();
@@ -165,14 +194,12 @@ test('post-fence registry failure consumes one-shot grant and forbids blind retr
     disable: async () => { throw new Error('synthetic_registry_write_failure'); },
     enable: async () => ({ disabled: false }),
   };
-  const context = new EmergencyMaintenanceContext({
+  const context = createEmergencyMaintenanceContextForUnitTest({
     ownerGateRegistry: registry,
     loadState: async () => runtimeState,
     saveState: async (value) => { runtimeState = structuredClone(value); },
-    publicKey,
-    expectedBuildSha: BUILD_SHA,
     clock: () => START_MS,
-  });
+  }, trustRoot(publicKey));
   await context.init();
   const grant = signedGrant(privateKey);
 

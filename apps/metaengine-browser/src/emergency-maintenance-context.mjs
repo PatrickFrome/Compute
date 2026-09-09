@@ -3,9 +3,14 @@ import {
   GLOBAL_OPERATIONAL_OVERRIDE,
   verifyEmergencyMaintenanceGrant,
 } from './emergency-maintenance-policy.mjs';
+import {
+  loadPackagedEmergencyMaintenanceTrustRoot,
+  validateEmergencyMaintenanceTrustRoot,
+} from './emergency-maintenance-trust-root.mjs';
 
 export const EMERGENCY_MAINTENANCE_RUNTIME_SCHEMA = 'metaengine.emergency-maintenance-runtime-state.v1';
 const MAX_CONSUMED_GRANTS = 128;
+const TEST_TRUST_ROOT = Symbol('metaengine.emergency-maintenance.test-trust-root');
 
 function clone(value) { return value == null ? value : structuredClone(value); }
 function iso(clock) {
@@ -54,24 +59,30 @@ export class EmergencyMaintenanceContext {
   #ready = false;
   #mutex = Promise.resolve();
 
-  constructor({
-    ownerGateRegistry,
-    loadState,
-    saveState,
-    publicKey,
-    expectedBuildSha,
-    clock = () => Date.now(),
-  } = {}) {
+  constructor(options = {}) {
+    if (!options || typeof options !== 'object' || Array.isArray(options)) {
+      throw new Error('emergency_maintenance_runtime_options_invalid');
+    }
+    if (Object.prototype.hasOwnProperty.call(options, 'publicKey') || Object.prototype.hasOwnProperty.call(options, 'expectedBuildSha')) {
+      throw new Error('emergency_maintenance_mutable_trust_root_forbidden');
+    }
+    const {
+      ownerGateRegistry,
+      loadState,
+      saveState,
+      clock = () => Date.now(),
+    } = options;
     if (!ownerGateRegistry || typeof ownerGateRegistry.disable !== 'function' || typeof ownerGateRegistry.enable !== 'function' || typeof ownerGateRegistry.snapshot !== 'function') {
       throw new Error('emergency_maintenance_owner_gate_registry_required');
     }
     if (typeof loadState !== 'function' || typeof saveState !== 'function') throw new Error('emergency_maintenance_runtime_persistence_required');
     if (typeof clock !== 'function') throw new Error('emergency_maintenance_runtime_clock_invalid');
+    const trustRoot = options[TEST_TRUST_ROOT] || loadPackagedEmergencyMaintenanceTrustRoot();
     this.#registry = ownerGateRegistry;
     this.#load = loadState;
     this.#save = saveState;
-    this.#publicKey = publicKey;
-    this.#buildSha = String(expectedBuildSha || '').toLowerCase();
+    this.#publicKey = trustRoot.public_key;
+    this.#buildSha = trustRoot.build_sha;
     this.#clock = clock;
   }
 
@@ -105,9 +116,6 @@ export class EmergencyMaintenanceContext {
   async activateGlobal(grant) {
     return this.#serial(async () => {
       this.#assertReady();
-      // Preflight the already-initialized single gate plane before consuming the
-      // one-shot grant. Failures after the durable nonce fence are intentionally
-      // non-retriable, so a not-yet-initialized registry must be rejected first.
       this.#registry.snapshot();
       const now = Number(this.#clock());
       const verified = verifyEmergencyMaintenanceGrant({
@@ -243,4 +251,12 @@ export class EmergencyMaintenanceContext {
     this.#mutex = next.catch(() => {});
     return next;
   }
+}
+
+export function createEmergencyMaintenanceContextForUnitTest(options, trustRootInput) {
+  if (import.meta.url.includes('/app.asar/')) {
+    throw new Error('emergency_maintenance_test_trust_root_forbidden_in_packaged_app');
+  }
+  const trustRoot = validateEmergencyMaintenanceTrustRoot(trustRootInput);
+  return new EmergencyMaintenanceContext({ ...options, [TEST_TRUST_ROOT]: trustRoot });
 }
