@@ -57,6 +57,31 @@ test('cohorts expose direct caller fan-out indexes without rescanning routing', 
   );
 });
 
+test('result indexes only changed cohorts and callers for direct work dispatch', () => {
+  const ledger = seededLedger();
+  const revision = ledger.snapshot().revision;
+  ledger.checkpoint({ consumer: 'semantic-reader', epoch: 2, observation_digest: digest('d') });
+  const currentRevision = ledger.snapshot().revision;
+
+  const result = resumeObservationCursorCohorts(
+    ledger,
+    [currentRevision, revision, currentRevision, revision - 1],
+  );
+  assert.deepEqual(result.changed_cohort_indexes, [0, 1]);
+  assert.deepEqual(result.changed_request_indexes, [1, 3]);
+  assert.equal(result.cohorts[2].changed, false);
+  assert.deepEqual(result.cohorts[2].request_indexes, [0, 2]);
+});
+
+test('current revisions expose zero changed-work indexes', () => {
+  const ledger = seededLedger();
+  const revision = ledger.snapshot().revision;
+  const result = resumeObservationCursorCohorts(ledger, [revision, revision]);
+
+  assert.deepEqual(result.changed_cohort_indexes, []);
+  assert.deepEqual(result.changed_request_indexes, []);
+});
+
 test('current revisions produce an empty cohort without synthesizing consumers', () => {
   const ledger = seededLedger();
   const revision = ledger.snapshot().revision;
@@ -74,6 +99,8 @@ test('empty request list produces empty routing without synthetic cohorts', () =
   const result = resumeObservationCursorCohorts(ledger, []);
   assert.equal(result.request_count, 0);
   assert.equal(result.cohort_count, 0);
+  assert.deepEqual(result.changed_cohort_indexes, []);
+  assert.deepEqual(result.changed_request_indexes, []);
   assert.deepEqual(result.request_cohort_indexes, []);
   assert.deepEqual(result.cohorts, []);
 });
@@ -152,6 +179,7 @@ test('cohort contract stays provider-neutral, payload-free and zero-authority', 
   assert.equal(contract.equal_revision_requests_share_one_materialization, true);
   assert.equal(contract.request_order_cohort_routing, true);
   assert.equal(contract.cohort_request_fanout_indexes, true);
+  assert.equal(contract.changed_work_indexes, true);
   assert.equal(contract.all_revision_requests_preflight_before_delta_materialization, true);
   assert.equal(contract.provider_neutral, true);
   assert.equal(contract.authority_effect, false);
