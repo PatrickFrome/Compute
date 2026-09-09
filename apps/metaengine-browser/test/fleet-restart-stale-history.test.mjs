@@ -38,7 +38,12 @@ function persistedState(agents) {
   };
 }
 
-test('restart-stale history bound keeps newest forensic rows and never prunes ambiguity or other LOST evidence', () => {
+function hasCanonicalTimestamp(value) {
+  const parsed = Date.parse(String(value || ''));
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
+}
+
+test('restart-stale history bound keeps newest forensic rows and never prunes ambiguous or malformed evidence', () => {
   const stale = Array.from({ length: 70 }, (_, i) => row({
     id: `agent_stale${String(i).padStart(3, '0')}`,
     updatedAt: new Date(Date.UTC(2026, 8, 1, 0, i)).toISOString(),
@@ -60,21 +65,27 @@ test('restart-stale history bound keeps newest forensic rows and never prunes am
     authorityEffect: true,
     updatedAt: '2026-09-08T02:00:00.000Z',
   });
-  const input = persistedState([...stale, nonRestartLost, ambiguous, authorityBearing]);
+  const malformedTimestamp = row({
+    id: 'agent_badtime00',
+    updatedAt: 'not-a-canonical-timestamp',
+  });
+  const input = persistedState([...stale, nonRestartLost, ambiguous, authorityBearing, malformedTimestamp]);
   const original = structuredClone(input);
 
   const bounded = pruneRestartStaleLostHistory(input);
-  const boundedStale = bounded.agents.filter((agent) => (
+  const boundedEligible = bounded.agents.filter((agent) => (
     agent.lifecycle_state === 'LOST'
     && agent.lost_reason === RESTART_STALE_REASON
     && agent.authority_effect !== true
+    && hasCanonicalTimestamp(agent.updated_at)
   ));
 
-  assert.equal(boundedStale.length, FLEET_RESTART_STALE_HISTORY_LIMIT);
-  assert.ok(boundedStale.every((agent) => Number(agent.agent_id.slice(-3)) >= 6));
+  assert.equal(boundedEligible.length, FLEET_RESTART_STALE_HISTORY_LIMIT);
+  assert.ok(boundedEligible.every((agent) => Number(agent.agent_id.slice(-3)) >= 6));
   assert.ok(bounded.agents.some((agent) => agent.agent_id === nonRestartLost.agent_id));
   assert.ok(bounded.agents.some((agent) => agent.agent_id === ambiguous.agent_id));
   assert.ok(bounded.agents.some((agent) => agent.agent_id === authorityBearing.agent_id));
+  assert.ok(bounded.agents.some((agent) => agent.agent_id === malformedTimestamp.agent_id));
   assert.deepEqual(input, original);
 });
 
