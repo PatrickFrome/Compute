@@ -202,7 +202,12 @@ export class BrowserBrainContinuousCoordinator {
       cell_by_tab,
     });
     const type = String(event?.type || 'UNKNOWN').toUpperCase();
-    const pressureEvaluated = this.#lastPressureResult == null || PRESSURE_RELEVANT_EVENTS.has(type);
+    // A caller-supplied process snapshot is itself fresh resource/liveness evidence.
+    // Never publish a new process-plane view with a pressure budget derived from an
+    // older snapshot merely because the accompanying edge is semantic/CDP-only.
+    const pressureEvaluated = this.#lastPressureResult == null
+      || hasFreshProcessSnapshot
+      || PRESSURE_RELEVANT_EVENTS.has(type);
     const pressure = pressureEvaluated
       ? this.#evaluatePressure(snapshot)
       : this.#lastPressureResult;
