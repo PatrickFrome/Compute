@@ -23,6 +23,7 @@
     "package.json"
   ],
   "beforePack": "./scripts/electron-builder-before-pack.cjs",
+  "afterAllArtifactBuild": "./scripts/electron-builder-after-all-artifact-build.cjs",
   "extraResources": [
     {
       "from": "native-dist/guardian",
