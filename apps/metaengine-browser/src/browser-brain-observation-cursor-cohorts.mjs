@@ -58,10 +58,12 @@ export function resumeObservationCursorCohorts(ledger, knownRevisionValues = [])
       ...ZERO_AUTHORITY,
     });
   });
+  const changedCohorts = [];
   const changedCohortIndexes = [];
   const changedRequestIndexes = [];
   cohorts.forEach((cohort) => {
     if (!cohort.changed) return;
+    changedCohorts.push(cohort);
     changedCohortIndexes.push(cohort.cohort_index);
     changedRequestIndexes.push(...cohort.request_indexes);
   });
@@ -71,6 +73,8 @@ export function resumeObservationCursorCohorts(ledger, knownRevisionValues = [])
     schema: 'metaengine.browser-brain.observation-delta-resume-cohorts.v1',
     request_count: normalized.length,
     cohort_count: cohorts.length,
+    changed_cohort_count: changedCohorts.length,
+    changed_cohorts: Object.freeze(changedCohorts),
     changed_cohort_indexes: Object.freeze(changedCohortIndexes),
     changed_request_indexes: Object.freeze(changedRequestIndexes),
     request_cohort_indexes: Object.freeze(requestCohortIndexes),
@@ -90,6 +94,7 @@ export function browserBrainObservationCursorCohortContract() {
     request_order_cohort_routing: true,
     cohort_request_fanout_indexes: true,
     changed_work_indexes: true,
+    direct_changed_cohort_iteration: true,
     all_revision_requests_preflight_before_delta_materialization: true,
     provider_neutral: true,
     payload_persisted: false,
