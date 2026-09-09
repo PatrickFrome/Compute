@@ -11,7 +11,6 @@ const CHAT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/c\/[a-z0-9-]+/i;
 const CHAT_ROOT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/?$/i;
 const LIMIT_RE = /(maximum conversation length|conversation is too long|start a new chat|диалог.{0,20}слишком длин|начните новый чат)/i;
 const CONTINUOUS_WAKE_REASON = 'CONTINUE_DEVELOPMENT';
-const AUTO_ROLLOVER_CYCLES = 24;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sha256 = (value) => crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
 
@@ -72,7 +71,6 @@ export class SupervisorLifecycleRuntime {
     this.#keepalive = new SupervisorKeepalive({
       loadState: () => readJson(this.#statePath),
       saveState: (v) => writeJson(this.#statePath, v),
-      maxCyclesPerEpoch: AUTO_ROLLOVER_CYCLES,
     });
     await this.#keepalive.init();
     const active = this.#keepalive.activeWake();
@@ -110,7 +108,10 @@ export class SupervisorLifecycleRuntime {
       continuous_service: {
         enabled: true,
         monitor_ms: this.#monitorMs,
-        auto_rollover_cycles: AUTO_ROLLOVER_CYCLES,
+        auto_rollover_cycles: null,
+        work_cycle_limit: null,
+        automatic_rollover_cycle_limit_enabled: false,
+        external_confirmation_required_for_continuation: false,
         terminal_requires_user_message: false,
         restart_resumable: true,
         restart_pending_wake_reconciliation: 'COMPOSER_HASH_OR_TRANSCRIPT_PROOF_V1',
@@ -316,15 +317,6 @@ export class SupervisorLifecycleRuntime {
     if (['WAKE_AMBIGUOUS','ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS','RECOVERING'].includes(s.state)) return false;
     if ((s.queued_wakes || []).some((wake) => String(wake?.reason || '') === CONTINUOUS_WAKE_REASON)) return false;
     await this.#keepalive.enqueueWake(CONTINUOUS_WAKE_REASON, { key: `epoch-${s.supervisor_epoch}-cycle-${s.cycle_seq}` });
-    return true;
-  }
-
-  async #autoReleaseDeterministicRollover() {
-    const s = this.#keepalive.snapshot();
-    if (s.state !== 'ROLLOVER_DEFERRED') return false;
-    const reason = String(s.rollover_reason || '');
-    if (!reason.startsWith('MAX_CYCLES_PER_EPOCH')) return false;
-    await this.#keepalive.approveRollover('TRUSTED_CONTINUOUS_SERVICE');
     return true;
   }
 
@@ -595,11 +587,7 @@ export class SupervisorLifecycleRuntime {
       if (supervisor) {
         const observed = await this.#observeSupervisor(supervisor, state);
         if (this.#canActuate() === true) {
-          let ks = this.#keepalive.snapshot();
-          if (ks.state === 'ROLLOVER_DEFERRED') {
-            await this.#autoReleaseDeterministicRollover();
-            ks = this.#keepalive.snapshot();
-          }
+          const ks = this.#keepalive.snapshot();
           if (ks.state === 'ROLLOVER_REQUIRED') await this.#rollover();
           else if (['STALLED','INTERRUPTED'].includes(observed.row.state)) {
             if (this.#activeRequest && this.#activeRequest.blocked_ambiguous !== true) await this.#recoverSupervisor(supervisor, observed.frame, observed.row);
@@ -607,9 +595,7 @@ export class SupervisorLifecycleRuntime {
           } else if (observed.row.terminal_ready === true) {
             await this.#ensureContinuousWake();
             const prepared = await this.#keepalive.prepareNextWake();
-            if (prepared?.rollover_deferred) {
-              if (await this.#autoReleaseDeterministicRollover()) await this.#rollover();
-            } else if (prepared?.ok) await this.#sendWake(prepared);
+            if (prepared?.ok) await this.#sendWake(prepared);
           }
         }
       }

@@ -5,7 +5,7 @@ const fs = require('node:fs/promises');
 const { durableWriteJson } = require('./durable-json-file.cjs');
 
 const SENTINEL_ACTION_JOURNAL_SCHEMA = 'metaengine.browser-sentinel.action-journal.v1';
-const SENTINEL_ACTION_JOURNAL_VERSION = '1.1.0';
+const SENTINEL_ACTION_JOURNAL_VERSION = '1.2.0';
 const TERMINATION_STATES = new Set(['PARENT_TERMINATION_INTENT','PARENT_TERMINATION_CONFIRMED','PARENT_TERMINATION_AMBIGUOUS']);
 const RELAUNCH_STATES = new Set(['RELAUNCH_INTENT','RELAUNCH_DISPATCHED','RELAUNCH_FAILED','RELAUNCH_AMBIGUOUS']);
 
@@ -21,12 +21,15 @@ function bindingFrom(value) {
   return Object.freeze({ token, parent_pid: parentPid, executable });
 }
 
-function incarnationActionJournalPath(statePath, bindingSource) {
-  const binding = bindingFrom(bindingSource);
-  const digest = crypto.createHash('sha256')
-    .update(JSON.stringify([binding.token, binding.parent_pid, binding.executable]), 'utf8')
+function bindingDigest(value) {
+  const binding = bindingFrom(value);
+  return crypto.createHash('sha256')
+    .update(`${binding.token}\u0000${binding.parent_pid}\u0000${binding.executable}`)
     .digest('hex');
-  return `${String(statePath)}.action-journal-v1.${digest}.json`;
+}
+
+function predecessorJournalPath(statePath, value) {
+  return `${actionJournalPath(statePath)}.predecessor-${bindingDigest(value).slice(0, 24)}.json`;
 }
 
 function sameBinding(row, binding) {
@@ -48,7 +51,7 @@ async function readJson(file) {
 }
 
 function validateRow(row, binding = null) {
-  if (!row || row.schema !== SENTINEL_ACTION_JOURNAL_SCHEMA || !['1.0.0', SENTINEL_ACTION_JOURNAL_VERSION].includes(String(row.version || ''))) throw new Error('sentinel_action_journal_schema_invalid');
+  if (!row || row.schema !== SENTINEL_ACTION_JOURNAL_SCHEMA || !['1.0.0', '1.1.0', SENTINEL_ACTION_JOURNAL_VERSION].includes(String(row.version || ''))) throw new Error('sentinel_action_journal_schema_invalid');
   if (!Number.isSafeInteger(Number(row.sequence)) || Number(row.sequence) < 1) throw new Error('sentinel_action_journal_sequence_invalid');
   if (row.authority_effect !== false) throw new Error('sentinel_action_journal_authority_invalid');
   if (row.automatic_retry_allowed === true && !retryableRelaunchFailure(row)) throw new Error('sentinel_action_journal_retry_authority_invalid');
@@ -73,22 +76,49 @@ class BrowserSentinelActionJournal {
 
   async init(bindingSource) {
     const binding = bindingFrom(bindingSource);
-    const legacyPath = actionJournalPath(this.#statePath);
-    const scopedPath = incarnationActionJournalPath(this.#statePath, binding);
-    const legacy = await readJson(legacyPath);
-
-    if (legacy && sameBinding(legacy, binding)) {
-      this.#path = legacyPath;
-      this.#row = validateRow(legacy, binding);
-    } else if (legacy) {
-      this.#path = scopedPath;
-      const scoped = await readJson(scopedPath);
-      this.#row = scoped ? validateRow(scoped, binding) : null;
-    } else {
-      const scoped = await readJson(scopedPath);
-      this.#path = scoped ? scopedPath : legacyPath;
-      this.#row = scoped ? validateRow(scoped, binding) : null;
+    const existing = await readJson(this.#path);
+    if (!existing) {
+      this.#binding = binding;
+      return this.snapshot();
     }
+
+    const validated = validateRow(existing);
+    if (sameBinding(validated, binding)) {
+      this.#row = validateRow(validated, binding);
+      this.#binding = binding;
+      return this.snapshot();
+    }
+
+    const boundWorkerPid = Number(bindingSource?.worker_pid || 0);
+    const workerBindingProven = Number.isSafeInteger(boundWorkerPid)
+      && boundWorkerPid === process.pid
+      && bindingSource?.worker_released !== true;
+    if (!workerBindingProven) throw new Error('sentinel_action_journal_binding_drift');
+
+    // A successor may reconcile only after the current process is durably recorded as
+    // the exact worker for the new parent/token. Preserve the entire predecessor row
+    // before replacing the active journal. No predecessor effect or retry authority
+    // crosses the incarnation boundary.
+    const archivePath = predecessorJournalPath(this.#statePath, validated);
+    await durableWriteJson(archivePath, validated, { sequence: Number(validated.sequence) });
+    const next = {
+      schema: SENTINEL_ACTION_JOURNAL_SCHEMA,
+      version: SENTINEL_ACTION_JOURNAL_VERSION,
+      ...binding,
+      sequence: 1,
+      state: 'SUCCESSOR_BOUND',
+      predecessor_binding_sha256: bindingDigest(validated),
+      predecessor_state: String(validated.state || 'UNKNOWN').slice(0, 120),
+      predecessor_sequence: Number(validated.sequence),
+      predecessor_evidence_archived: true,
+      physical_effect_attempted: false,
+      effect_barrier_crossed: false,
+      recorded_at: new Date().toISOString(),
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    };
+    await durableWriteJson(this.#path, next, { sequence: 1 });
+    this.#row = validateRow(next, binding);
     this.#binding = binding;
     return this.snapshot();
   }
@@ -256,6 +286,6 @@ module.exports = Object.freeze({
   SENTINEL_ACTION_JOURNAL_SCHEMA,
   SENTINEL_ACTION_JOURNAL_VERSION,
   actionJournalPath,
-  incarnationActionJournalPath,
+  predecessorJournalPath,
   BrowserSentinelActionJournal,
 });

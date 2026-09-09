@@ -16,20 +16,21 @@ import {
 const appRoot = path.resolve(import.meta.dirname, '..');
 const html = fs.readFileSync(path.join(appRoot, 'ui', 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(appRoot, 'ui', 'app.css'), 'utf8');
+const darkCss = fs.readFileSync(path.join(appRoot, 'ui', 'dark-workspace.css'), 'utf8');
 const renderer = fs.readFileSync(path.join(appRoot, 'ui', 'app.js'), 'utf8');
 
-test('Brain Shell V3 protects page space and keeps Brain closed until requested', () => {
-  assert.equal(SHELL_TOP_HEIGHT, 48);
-  assert.equal(SHELL_SIDEBAR_EXPANDED_WIDTH, 272);
-  assert.equal(SHELL_SIDEBAR_COMPACT_WIDTH, 56);
-  assert.equal(SHELL_OPERATIONS_WIDTH, 352);
+test('Dark Workspace V2 protects page space and keeps Brain closed until requested', () => {
+  assert.equal(SHELL_TOP_HEIGHT, 44);
+  assert.equal(SHELL_SIDEBAR_EXPANDED_WIDTH, 240);
+  assert.equal(SHELL_SIDEBAR_COMPACT_WIDTH, 52);
+  assert.equal(SHELL_OPERATIONS_WIDTH, 320);
   assert.equal(normalizeShellLayoutState().operations, 'CLOSED');
 
   const calm = planShellLayout({ width: 1440, height: 960, state: normalizeShellLayoutState() });
   assert.equal(calm.effective_sidebar, 'EXPANDED');
   assert.equal(calm.effective_operations, 'CLOSED');
-  assert.equal(calm.remote_bounds.y, 48);
-  assert.equal(calm.remote_bounds.x, 272);
+  assert.equal(calm.remote_bounds.y, 44);
+  assert.equal(calm.remote_bounds.x, 240);
   assert.ok(calm.remote_bounds.width >= SHELL_MIN_REMOTE_WIDTH);
   assert.equal(calm.overlay_remote_content, false);
   assert.equal(calm.renderer_dimensions_authoritative, false);
@@ -41,7 +42,7 @@ test('Brain Shell V3 protects page space and keeps Brain closed until requested'
     state: normalizeShellLayoutState({ sidebar: 'EXPANDED', operations: 'OPEN' }),
   });
   assert.equal(inspector.effective_operations, 'OPEN');
-  assert.equal(inspector.operations_bounds.width, 352);
+  assert.equal(inspector.operations_bounds.width, 320);
   assert.ok(inspector.remote_bounds.width >= SHELL_MIN_REMOTE_WIDTH);
 
   const narrow = planShellLayout({ width: 900, height: 640, state: normalizeShellLayoutState({ sidebar: 'EXPANDED', operations: 'OPEN' }) });
@@ -50,27 +51,30 @@ test('Brain Shell V3 protects page space and keeps Brain closed until requested'
   assert.ok(narrow.remote_bounds.width >= SHELL_MIN_REMOTE_WIDTH);
 });
 
-test('Brain Shell V3 is light, rounded and deliberately low-noise', () => {
-  assert.match(html, /color-scheme" content="light"/);
+test('Dark Workspace V2 is dark, browser-first and deliberately low-noise', () => {
+  assert.match(html, /color-scheme" content="dark"/);
   assert.match(html, /data-operations="CLOSED"/);
-  assert.match(html, /placeholder="Search or ask Browser"/);
-  assert.match(html, /aria-label="Contexts"/);
-  assert.match(html, /aria-label="Brain inspector"/);
+  assert.match(html, /placeholder="Search · > command · @ agent · \/ skill"/);
+  assert.match(html, /aria-label="Chats, agents, workspaces and BrowserCells"/);
+  assert.match(html, /aria-label="Brain coordination inspector"/);
   assert.match(html, /data-section="overview"[^>]*>Status</);
   assert.match(html, /data-section="commands"[^>]*>Actions</);
+  assert.match(html, /data-final-shell="metaengine-dark-workspace-v2"/);
+  assert.match(html, /class="activeContext"/);
 
-  assert.match(css, /color-scheme:light/);
-  assert.match(css, /--top-height:48px/);
-  assert.match(css, /--sidebar-width:272px/);
-  assert.match(css, /--ops-width:352px/);
-  assert.match(css, /border-radius:18px/);
+  assert.match(darkCss, /color-scheme:dark/);
+  assert.match(darkCss, /--top-height:44px/);
+  assert.match(darkCss, /--sidebar-width:240px/);
+  assert.match(darkCss, /--ops-width:320px/);
+  assert.match(darkCss, /background:var\(--bg\)/);
+  assert.doesNotMatch(darkCss, /telegram-browser-v1/i);
   assert.match(css, /\.systemChip b,\.systemChip \.systemValue\{display:none\}/);
   assert.match(css, /body\[data-operations="CLOSED"\] \.operationsPanel\{display:none\}/);
   assert.match(css, /data-agentic-section="activity"/);
   assert.match(css, /data-agentic-section="skills"/);
 });
 
-test('Brain Shell V3 keeps one bounded command surface instead of adding UI authority', () => {
+test('Dark Workspace V2 keeps one bounded command surface instead of adding UI authority', () => {
   for (const token of [
     "input.startsWith('>')",
     "input.startsWith('/')",
@@ -84,7 +88,7 @@ test('Brain Shell V3 keeps one bounded command surface instead of adding UI auth
   assert.doesNotMatch(renderer, /\.innerHTML\s*=|insertAdjacentHTML|document\.write/);
 });
 
-test('Brain Shell V3 preserves strict CSP and native WebContents separation', () => {
+test('Dark Workspace V2 preserves strict CSP and native WebContents separation', () => {
   assert.match(html, /default-src 'self'/);
   assert.match(html, /script-src 'self'/);
   assert.match(html, /style-src 'self'/);
@@ -94,7 +98,7 @@ test('Brain Shell V3 preserves strict CSP and native WebContents separation', ()
   assert.doesNotMatch(html, /<iframe|<webview/i);
 });
 
-test('Brain Shell V3 remains event-oriented with no decorative perpetual animation loop', () => {
+test('Dark Workspace V2 remains event-oriented with no decorative perpetual animation loop', () => {
   assert.match(css, /prefers-reduced-motion/);
   assert.doesNotMatch(css, /@keyframes|\banimation\s*:/i);
   assert.match(renderer, /api\.onSnapshot\(render\)/);

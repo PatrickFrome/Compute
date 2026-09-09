@@ -1,9 +1,13 @@
+import { lookupNativeEffectRuntimeObservation } from './native-effect-runtime-observation.mjs';
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TAB_RE = /^tab_[0-9a-f-]{36}$/i;
 const TARGET_RE = /^webcontents:[1-9][0-9]*$/;
+const OBSERVATION_ID_RE = /^obs_[a-f0-9]{32}$/;
 const IDEMPOTENCY_RE = /^[A-Za-z0-9._:-]{16,160}$/;
 
 export const NATIVE_EFFECT_BINDING_SCHEMA = 'metaengine.native-supervisor.effect-binding.v1';
+export const NATIVE_EFFECT_BINDING_SCHEMA_V2 = 'metaengine.native-supervisor.effect-binding.v2';
 export const NATIVE_TAB_EFFECT_ACTIONS = Object.freeze([
   'STOP_GENERATION',
   'SCROLL',
@@ -37,7 +41,7 @@ function requireTarget(value) {
   return text;
 }
 
-export function buildNativeEffectBinding({ command, clientId, processIncarnationId, tabId, targetId, observedAt = new Date().toISOString() } = {}) {
+function commonBinding({ command, clientId, processIncarnationId, tabId, targetId, observedAt }) {
   const action = clean(command?.action).toUpperCase();
   if (!nativeActionRequiresEffectBinding(action)) throw new Error('native_effect_binding_action_not_tab_effect');
   const commandId = requireUuid(command?.command_id, 'native_effect_binding_command_id_invalid');
@@ -54,8 +58,7 @@ export function buildNativeEffectBinding({ command, clientId, processIncarnation
   if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) throw new Error('native_effect_binding_command_expired');
   const observed = new Date(observedAt);
   if (!Number.isFinite(observed.getTime())) throw new Error('native_effect_binding_observed_at_invalid');
-  return Object.freeze({
-    schema: NATIVE_EFFECT_BINDING_SCHEMA,
+  return {
     command_id: commandId,
     idempotency_key: idempotencyKey,
     action,
@@ -65,14 +68,67 @@ export function buildNativeEffectBinding({ command, clientId, processIncarnation
     target_id: target,
     command_expires_at: expiresText,
     observed_at: observed.toISOString(),
+  };
+}
+
+export function buildNativeEffectBinding({
+  command,
+  clientId,
+  processIncarnationId,
+  tabId,
+  targetId,
+  observedAt = new Date().toISOString(),
+  runtimeObservationId = null,
+  schema = null,
+} = {}) {
+  const common = commonBinding({ command, clientId, processIncarnationId, tabId, targetId, observedAt });
+  const requestedSchema = schema == null ? null : clean(schema);
+  if (requestedSchema && ![NATIVE_EFFECT_BINDING_SCHEMA, NATIVE_EFFECT_BINDING_SCHEMA_V2].includes(requestedSchema)) {
+    throw new Error('native_effect_binding_schema_invalid');
+  }
+  const observationId = runtimeObservationId == null ? null : clean(runtimeObservationId).toLowerCase();
+  if (observationId != null && !OBSERVATION_ID_RE.test(observationId)) throw new Error('native_effect_binding_runtime_observation_id_invalid');
+  const runtime = observationId == null ? null : lookupNativeEffectRuntimeObservation({
+    observation_id: observationId,
+    process_incarnation_id: common.process_incarnation_id,
+    target_id: common.target_id,
+    observed_at: common.observed_at,
+  });
+  // Explicit runtime identity is a request for the v2 fence, not an optional
+  // hint. Never silently downgrade to v1 when that exact observation cannot be
+  // recovered (expired, cleared, wrong process/target/time, or otherwise stale).
+  if (observationId != null && !runtime) throw new Error('native_effect_binding_runtime_observation_missing');
+  const useV2 = requestedSchema === NATIVE_EFFECT_BINDING_SCHEMA_V2 || runtime != null;
+  if (useV2 && !runtime) throw new Error('native_effect_binding_runtime_observation_missing');
+
+  const binding = {
+    schema: useV2 ? NATIVE_EFFECT_BINDING_SCHEMA_V2 : NATIVE_EFFECT_BINDING_SCHEMA,
+    ...common,
+  };
+  if (useV2) {
+    Object.assign(binding, {
+      runtime_observation_id: runtime.observation_id,
+      web_contents_id: runtime.runtime_binding.web_contents_id,
+      renderer_pid: runtime.runtime_binding.renderer_pid,
+      runtime_target_id: runtime.runtime_binding.runtime_target_id,
+      attachment_generation: runtime.runtime_binding.attachment_generation,
+      document_generation: runtime.runtime_binding.document_generation,
+      binding_generation: runtime.runtime_binding.binding_generation,
+      document_url_sha256: runtime.document_url_sha256,
+      runtime_observation_schema: runtime.schema,
+    });
+  }
+  Object.assign(binding, {
     page_data_authority: false,
     automatic_retry_allowed: false,
     authority_effect: false,
   });
+  return Object.freeze(binding);
 }
 
 export function assertNativeEffectBindingMatches({ command, binding, clientId, processIncarnationId, tabId, targetId, now = Date.now() } = {}) {
-  if (!binding || binding.schema !== NATIVE_EFFECT_BINDING_SCHEMA || binding.authority_effect !== false) {
+  const schema = String(binding?.schema || '');
+  if (!binding || ![NATIVE_EFFECT_BINDING_SCHEMA, NATIVE_EFFECT_BINDING_SCHEMA_V2].includes(schema) || binding.authority_effect !== false) {
     throw new Error('native_effect_binding_missing_or_invalid');
   }
   if (binding.page_data_authority !== false || binding.automatic_retry_allowed !== false) {
@@ -85,8 +141,14 @@ export function assertNativeEffectBindingMatches({ command, binding, clientId, p
     tabId,
     targetId,
     observedAt: binding.observed_at,
+    runtimeObservationId: schema === NATIVE_EFFECT_BINDING_SCHEMA_V2 ? binding.runtime_observation_id : null,
+    schema,
   });
-  for (const key of ['command_id','idempotency_key','action','client_id','process_incarnation_id','tab_id','target_id','command_expires_at']) {
+  const keys = ['command_id','idempotency_key','action','client_id','process_incarnation_id','tab_id','target_id','command_expires_at'];
+  if (schema === NATIVE_EFFECT_BINDING_SCHEMA_V2) {
+    keys.push('runtime_observation_id','web_contents_id','renderer_pid','runtime_target_id','attachment_generation','document_generation','binding_generation','document_url_sha256','runtime_observation_schema');
+  }
+  for (const key of keys) {
     if (binding[key] !== expected[key]) throw new Error(`native_effect_binding_${key}_mismatch`);
   }
   if (Date.parse(binding.command_expires_at) <= Number(now)) throw new Error('native_effect_binding_expired_before_effect');

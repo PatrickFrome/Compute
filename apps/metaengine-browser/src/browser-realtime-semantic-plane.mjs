@@ -5,7 +5,7 @@ export const BROWSER_REALTIME_SEMANTIC_PLANE_SCHEMA = 'metaengine.browser.realti
 const SAFE_ROLES = new Set(['textbox','searchbox','combobox','button','checkbox','radio','switch','tab','menuitem','link']);
 const TEXT_INPUT_ROLES = new Set(['textbox','searchbox','combobox']);
 const DEFAULT_EVENT_LIMIT = 2048;
-const MAX_TARGETS = 64;
+const MAX_TARGETS = 128;
 
 const clip = (value, max = 240) => String(value ?? '').slice(0, max);
 const axRawValue = (node, key) => String(node?.[key]?.value ?? '');
@@ -117,6 +117,10 @@ function eventDetails(method, params = {}) {
     detail.node_count = Array.isArray(params?.nodes) ? params.nodes.length : 0;
   } else if (method.startsWith('DOM.')) {
     detail.node_id = Number(params?.nodeId || params?.parentNodeId || 0) || null;
+  } else if (method.startsWith('METAENGINE.Subtarget')) {
+    detail.subtarget_target_id = clip(params?.target_id, 192) || null;
+    detail.subtarget_type = clip(params?.type, 80) || null;
+    detail.subtarget_reason = clip(params?.reason, 160) || null;
   } else if (method === 'METAENGINE.DebuggerDetached') {
     detail.reason = clip(params?.reason, 160);
   }
@@ -436,18 +440,24 @@ export class BrowserRealtimeSemanticPlane {
       ? this.#events.slice(-boundedInt(eventLimit, 128, 0, 1024))
       : this.eventsSince(eventsSince, eventLimit);
     const targets = [...this.#rows.values()].map((row) => this.#targetProjection(row, includeText === true));
+    const persistentCdp = typeof this.#pool.snapshot === 'function' ? this.#pool.snapshot() : null;
     return Object.freeze({
       schema: BROWSER_REALTIME_SEMANTIC_PLANE_SCHEMA,
       running: this.#started,
       sequence: this.#sequence,
       target_count: targets.length,
+      target_capacity: MAX_TARGETS,
       ready_count: targets.filter((row) => row.cdp_ready).length,
       dirty_count: targets.filter((row) => row.dirty).length,
       targets,
+      chromium_subtarget_count: Number(persistentCdp?.subtarget_count || 0),
+      chromium_attached_subtarget_count: Number(persistentCdp?.attached_subtarget_count || 0),
+      persistent_cdp: persistentCdp,
       events,
       dropped_events: this.#droppedEvents,
       event_driven: true,
       persistent_cdp_sessions: true,
+      related_chromium_subtargets_event_driven: persistentCdp?.related_chromium_subtargets_event_driven === true,
       attach_per_command: false,
       refresh_coalescing: 'ONE_IN_FLIGHT_PLUS_ONE_PENDING_NO_TIMER',
       page_text_available: true,

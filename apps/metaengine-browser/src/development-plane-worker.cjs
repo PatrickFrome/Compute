@@ -6,6 +6,7 @@ const { createCandidateCapsule } = require('./candidate-capsule.cjs');
 const { verifyCandidateCapsuleRemoteBound } = require('./candidate-remote-source.cjs');
 const { createVerificationSandboxPlan, verifyVerificationSandboxPlan } = require('./verification-sandbox-plan.cjs');
 const { verifyEnvelope: verifyAdvisoryEvidenceEnvelope } = require('./advisory-evidence-verifier.cjs');
+const { createDevOSRepoReadModel } = require('./devos-repo-read-model.cjs');
 
 const PROTOCOL = 'metaengine.development-plane.v1';
 const VERSION = '0.4.0';
@@ -14,6 +15,7 @@ const CAPABILITIES = Object.freeze([
   'CAPABILITIES',
   'PROCESS_METRICS',
   'REPO_HEAD_READ',
+  'DEVOS_REPO_READ_MODEL',
   'CANDIDATE_CAPSULE_CREATE',
   'CANDIDATE_CAPSULE_VERIFY',
   'VERIFICATION_SANDBOX_PLAN_CREATE',
@@ -23,6 +25,7 @@ const CAPABILITIES = Object.freeze([
 const repoRoot = path.resolve(process.env.METAENGINE_REPO_ROOT || process.cwd());
 const repositoryName = String(process.env.METAENGINE_GIT_REPOSITORY || 'PatrickFrome/Compute');
 const repositoryRemote = String(process.env.METAENGINE_GIT_REMOTE || 'origin');
+const sourceProvenancePath = path.resolve(process.env.METAENGINE_SOURCE_PROVENANCE || path.join(repoRoot, '.metaengine-source-provenance.json'));
 
 function send(message) {
   if (!process.parentPort) throw new Error('development_plane_parent_port_missing');
@@ -40,7 +43,19 @@ async function readRepoHead() {
       gitDir = path.resolve(repoRoot, marker.slice('gitdir: '.length).trim());
     }
   } catch (error) {
-    if (error?.code === 'ENOENT') return { repository_present: false, repository: repositoryName, head: null, ref: null };
+    if (error?.code === 'ENOENT') {
+      try {
+        const provenance = JSON.parse(await fs.readFile(sourceProvenancePath, 'utf8'));
+        const repository = String(provenance?.repository || repositoryName);
+        const head = String(provenance?.head || '').toLowerCase();
+        const ref = provenance?.ref == null ? null : String(provenance.ref);
+        if (provenance?.schema !== 'metaengine.devos.packaged-source-snapshot.v1' || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository) || !/^[0-9a-f]{40}$/.test(head)) throw new Error('repo_packaged_provenance_invalid');
+        return { repository_present: true, repository, head, ref, packaged_source_snapshot: true };
+      } catch (provenanceError) {
+        if (provenanceError?.code !== 'ENOENT') throw provenanceError;
+        return { repository_present: false, repository: repositoryName, head: null, ref: null };
+      }
+    }
     throw error;
   }
   const head = (await fs.readFile(path.join(gitDir, 'HEAD'), 'utf8')).trim();
@@ -90,12 +105,15 @@ async function execute(capability, payload) {
     advisory_evidence_network_dispatch: false,
     advisory_evidence_browser_authority: false,
     advisory_evidence_promotion_authority: false,
+    devos_repo_read_model: true,
+    devos_repo_arbitrary_path_read: false,
     direct_promote_current: false,
     arbitrary_eval: false,
     signed_attestation_required_before_promotion: true,
   };
   if (capability === 'PROCESS_METRICS') return { memory: process.memoryUsage(), cpu: process.cpuUsage(), pid: process.pid };
   if (capability === 'REPO_HEAD_READ') return readRepoHead();
+  if (capability === 'DEVOS_REPO_READ_MODEL') return createDevOSRepoReadModel({ repoRoot, source: await requireCurrentSource() });
   if (capability === 'CANDIDATE_CAPSULE_CREATE') return createCandidateCapsule(payload, await requireCurrentSource());
   if (capability === 'CANDIDATE_CAPSULE_VERIFY') {
     requireObjectPayload(payload, 'candidate_verify');

@@ -1,18 +1,31 @@
 import crypto from 'node:crypto';
 import { chatGptControlMatches } from './chatgpt-ui-controls.mjs';
+import { openCdpOutcomeLatch } from './browser-cdp-outcome-latch.mjs';
+import { nativeBrowserCdpPool, withPersistentBrowserDebugger } from './browser-persistent-cdp-session.mjs';
 import {
   assertNativeEffectBindingMatches,
   nativeActionRequiresEffectBinding,
 } from './native-effect-binding.mjs';
+import {
+  assertNativeEffectRuntimeBindingCurrent,
+  recordNativeEffectRuntimeObservation,
+} from './native-effect-runtime-observation.mjs';
 
 const SAFE_ROLES = new Set(['textbox','searchbox','combobox','button','checkbox','radio','switch','tab','menuitem','link']);
 const TEXT_INPUT_ROLES = new Set(['textbox','searchbox','combobox']);
 const CHATGPT_COMPOSER_NAMES = new Set(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
+const CHATGPT_SUBMIT_OUTCOME_METHODS = new Set([
+  'Accessibility.nodesUpdated',
+  'DOM.documentUpdated',
+  'Page.frameNavigated',
+  'Page.navigatedWithinDocument',
+  'Page.lifecycleEvent',
+  'Runtime.executionContextCreated',
+]);
 const NATIVE_BROWSER_PROCESS_INCARNATION_ID = crypto.randomUUID();
 const clip = (value, max) => String(value ?? '').slice(0, max);
 const axRawValue = (node, key) => String(node?.[key]?.value ?? '');
 const axValue = (node, key) => axRawValue(node, key).trim();
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const sha256 = (value) => crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
 
 export function nativeBrowserTargetIdentity(webContents) {
@@ -28,18 +41,7 @@ export function nativeBrowserTargetIdentity(webContents) {
 
 async function withDebugger(webContents, fn) {
   if (!webContents || webContents.isDestroyed?.()) throw new Error('native_control_webcontents_unavailable');
-  const dbg = webContents.debugger;
-  let attachedHere = false;
-  if (!dbg.isAttached()) {
-    dbg.attach('1.3');
-    attachedHere = true;
-  }
-  try { return await fn(dbg); }
-  finally {
-    if (attachedHere && dbg.isAttached()) {
-      try { dbg.detach(); } catch {}
-    }
-  }
+  return withPersistentBrowserDebugger(webContents, fn);
 }
 
 function uniqueSemanticTargets(nodes = []) {
@@ -99,37 +101,56 @@ function isExactChatGptComposer(target, command) {
     && CHATGPT_COMPOSER_NAMES.has(String(target?.name || ''));
 }
 
-async function observeChatGptSubmit(dbg, webContents, { preUrl, attempts = 20, intervalMs = 100 } = {}) {
-  let last = { stop_count: 0, send_count: 0, url: clip(webContents.getURL?.() || '', 1200) };
-  for (let i = 0; i < attempts; i += 1) {
-    if (i > 0) await sleep(intervalMs);
-    const tree = await dbg.sendCommand('Accessibility.getFullAXTree');
-    const nodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
-    const stopCount = exactChatGptControls(nodes, 'STOP').length;
-    const sendCount = exactChatGptControls(nodes, 'SEND').length;
-    const url = clip(webContents.getURL?.() || '', 1200);
-    last = { stop_count: stopCount, send_count: sendCount, url };
-    const rootToConversation = !isChatGptConversationUrl(preUrl) && isChatGptConversationUrl(url);
-    if (stopCount === 1 || rootToConversation) {
-      return {
-        effect_state: stopCount === 1 ? 'PROVEN_GENERATING' : 'PROVEN_NEW_CONVERSATION',
-        stop_observed: stopCount === 1,
-        new_conversation_observed: rootToConversation,
-        post_url_sha256: url ? sha256(url) : null,
-        automatic_retry_allowed: false,
-        authority_effect: false,
-      };
-    }
+async function inspectChatGptSubmit(dbg, webContents, { preUrl } = {}) {
+  const tree = await dbg.sendCommand('Accessibility.getFullAXTree');
+  const nodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
+  const stopCount = exactChatGptControls(nodes, 'STOP').length;
+  const sendCount = exactChatGptControls(nodes, 'SEND').length;
+  const url = clip(webContents.getURL?.() || '', 1200);
+  const rootToConversation = !isChatGptConversationUrl(preUrl) && isChatGptConversationUrl(url);
+  if (stopCount === 1 || rootToConversation) {
+    return {
+      resolved: true,
+      effect_state: stopCount === 1 ? 'PROVEN_GENERATING' : 'PROVEN_NEW_CONVERSATION',
+      stop_observed: stopCount === 1,
+      new_conversation_observed: rootToConversation,
+      send_control_remaining: sendCount > 0,
+      post_url_sha256: url ? sha256(url) : null,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    };
   }
   return {
-    effect_state: 'AMBIGUOUS_AFTER_ENTER',
-    stop_observed: last.stop_count === 1,
+    resolved: false,
+    effect_state: 'PENDING_AFTER_ENTER',
+    stop_observed: false,
     new_conversation_observed: false,
-    send_control_remaining: last.send_count > 0,
-    post_url_sha256: last.url ? sha256(last.url) : null,
+    send_control_remaining: sendCount > 0,
+    post_url_sha256: url ? sha256(url) : null,
     automatic_retry_allowed: false,
     authority_effect: false,
   };
+}
+
+function openChatGptSubmitOutcomeLatch(dbg, webContents, { preUrl, timeoutMs = 2000 } = {}) {
+  return openCdpOutcomeLatch({
+    subscribe: (listener) => nativeBrowserCdpPool.subscribe(webContents, listener),
+    inspect: () => inspectChatGptSubmit(dbg, webContents, { preUrl }),
+    isResolved: (row) => row?.resolved === true,
+    onDeadline: (last, lastError) => ({
+      resolved: false,
+      effect_state: 'AMBIGUOUS_AFTER_ENTER',
+      stop_observed: last?.stop_observed === true,
+      new_conversation_observed: last?.new_conversation_observed === true,
+      send_control_remaining: last?.send_control_remaining === true,
+      post_url_sha256: last?.post_url_sha256 || null,
+      observation_error: lastError || null,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    }),
+    eventFilter: (event) => CHATGPT_SUBMIT_OUTCOME_METHODS.has(String(event?.method || '')),
+    timeoutMs,
+  });
 }
 
 export async function captureSemanticFrame(webContents) {
@@ -141,12 +162,34 @@ export async function captureSemanticFrame(webContents) {
     ]);
     const nodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
     const viewport = metrics?.cssVisualViewport || metrics?.visualViewport || null;
+    const capturedAt = new Date().toISOString();
+    const url = clip(webContents.getURL?.() || '', 1200);
+    const runtime = dbg.bindingIdentity?.() || null;
+    let runtimeObservation = null;
+    if (runtime) {
+      try {
+        runtimeObservation = recordNativeEffectRuntimeObservation({
+          process_incarnation_id: identity.process_incarnation_id,
+          target_id: identity.target_id,
+          observed_at: capturedAt,
+          document_url_sha256: sha256(url),
+          runtime_binding: {
+            web_contents_id: runtime.web_contents_id,
+            renderer_pid: runtime.os_pid,
+            runtime_target_id: runtime.target_id,
+            attachment_generation: runtime.attachment_generation,
+            document_generation: runtime.document_generation,
+            binding_generation: runtime.binding_generation,
+          },
+        });
+      } catch {}
+    }
     return {
       schema: 'metaengine.native-browser.perception.v1',
-      captured_at: new Date().toISOString(),
+      captured_at: capturedAt,
       process_incarnation_id: identity.process_incarnation_id,
       target_id: identity.target_id,
-      url: clip(webContents.getURL?.() || '', 1200),
+      url,
       title: clip(webContents.getTitle?.() || '', 240),
       semantic_targets: uniqueSemanticTargets(nodes),
       semantic_input_values_exposed: false,
@@ -159,6 +202,10 @@ export async function captureSemanticFrame(webContents) {
         page_y: Number(viewport.pageY || 0),
         scale: Number(viewport.scale || 1),
       } : null,
+      runtime_binding_observed: runtimeObservation != null,
+      runtime_observation_id: runtimeObservation?.observation_id || null,
+      runtime_binding_generation: runtimeObservation?.runtime_binding?.binding_generation || null,
+      runtime_document_generation: runtimeObservation?.runtime_binding?.document_generation || null,
       authority_effect: false,
     };
   });
@@ -174,7 +221,7 @@ async function exactTarget(dbg, roleRaw, nameRaw) {
   return matches[0];
 }
 
-async function clickBackendNode(dbg, backendNodeId) {
+async function clickBackendNode(dbg, backendNodeId, beforeDispatch = null) {
   const model = await dbg.sendCommand('DOM.getBoxModel', { backendNodeId });
   const quad = model?.model?.content || model?.model?.border;
   if (!Array.isArray(quad) || quad.length < 8) throw new Error('native_semantic_box_unavailable');
@@ -182,26 +229,48 @@ async function clickBackendNode(dbg, backendNodeId) {
   const ys = [quad[1],quad[3],quad[5],quad[7]].map(Number);
   const x = xs.reduce((a,b)=>a+b,0) / xs.length;
   const y = ys.reduce((a,b)=>a+b,0) / ys.length;
+  beforeDispatch?.();
   await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mouseMoved', x, y, button:'none' });
   await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mousePressed', x, y, button:'left', clickCount:1 });
   await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mouseReleased', x, y, button:'left', clickCount:1 });
   return { x, y };
 }
 
+function assertCurrentEffectRuntime(webContents, dbg, binding) {
+  if (binding?.schema !== 'metaengine.native-supervisor.effect-binding.v2') return;
+  const runtime = dbg.bindingIdentity?.();
+  if (!runtime) throw new Error('native_effect_runtime_binding_current_unavailable');
+  assertNativeEffectRuntimeBindingCurrent({
+    binding,
+    document_url_sha256: sha256(clip(webContents.getURL?.() || '', 1200)),
+    runtime_binding: {
+      web_contents_id: runtime.web_contents_id,
+      renderer_pid: runtime.os_pid,
+      runtime_target_id: runtime.target_id,
+      attachment_generation: runtime.attachment_generation,
+      document_generation: runtime.document_generation,
+      binding_generation: runtime.binding_generation,
+    },
+  });
+}
+
 export async function executeSemanticCommand(webContents, command) {
   const action = String(command?.action || '');
   const localIdentity = nativeBrowserTargetIdentity(webContents);
-  if (command?.command_id && nativeActionRequiresEffectBinding(action)) {
-    assertNativeEffectBindingMatches({
-      command,
-      binding: command?.effect_binding,
-      clientId: command?.effect_binding?.client_id,
-      processIncarnationId: localIdentity.process_incarnation_id,
-      tabId: command?.payload?.tab_id,
-      targetId: localIdentity.target_id,
-    });
-  }
   return withDebugger(webContents, async (dbg) => {
+    let effectBinding = null;
+    if (command?.command_id && nativeActionRequiresEffectBinding(action)) {
+      effectBinding = assertNativeEffectBindingMatches({
+        command,
+        binding: command?.effect_binding,
+        clientId: command?.effect_binding?.client_id,
+        processIncarnationId: localIdentity.process_incarnation_id,
+        tabId: command?.payload?.tab_id,
+        targetId: localIdentity.target_id,
+      });
+      assertCurrentEffectRuntime(webContents, dbg, effectBinding);
+    }
+
     if (action === 'SCROLL') {
       const metrics = await dbg.sendCommand('Page.getLayoutMetrics');
       const vp = metrics?.cssVisualViewport || metrics?.visualViewport || {};
@@ -209,6 +278,7 @@ export async function executeSemanticCommand(webContents, command) {
       const y = Math.max(1, Number(vp.clientHeight || vp.height || 600) / 2);
       const deltaY = Math.max(-4000, Math.min(4000, Number(command?.payload?.delta_y || 0)));
       if (!deltaY) throw new Error('native_scroll_delta_invalid');
+      assertCurrentEffectRuntime(webContents, dbg, effectBinding);
       await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mouseWheel', x, y, deltaX:0, deltaY });
       return { action, delta_y: deltaY, authority_effect: true };
     }
@@ -217,7 +287,7 @@ export async function executeSemanticCommand(webContents, command) {
       const tree = await dbg.sendCommand('Accessibility.getFullAXTree');
       const targets = exactChatGptControls(tree?.nodes || [], 'STOP');
       if (targets.length !== 1) throw new Error(targets.length ? `native_stop_target_ambiguous:${targets.length}` : 'native_stop_target_not_found');
-      const point = await clickBackendNode(dbg, targets[0].backend_node_id);
+      const point = await clickBackendNode(dbg, targets[0].backend_node_id, () => assertCurrentEffectRuntime(webContents, dbg, effectBinding));
       return { action, target: targets[0], point, authority_effect: true };
     }
 
@@ -226,12 +296,13 @@ export async function executeSemanticCommand(webContents, command) {
     const target = await exactTarget(dbg, role, name);
 
     if (action === 'SEMANTIC_FOCUS') {
+      assertCurrentEffectRuntime(webContents, dbg, effectBinding);
       await dbg.sendCommand('DOM.focus', { backendNodeId: target.backend_node_id });
       return { action, target, authority_effect: true };
     }
 
     if (action === 'TYPED_CLICK') {
-      const point = await clickBackendNode(dbg, target.backend_node_id);
+      const point = await clickBackendNode(dbg, target.backend_node_id, () => assertCurrentEffectRuntime(webContents, dbg, effectBinding));
       return { action, target, point, authority_effect: true };
     }
 
@@ -241,11 +312,14 @@ export async function executeSemanticCommand(webContents, command) {
       const submitAfterType = command?.payload?.submit_after_type === true;
       if (submitAfterType && !isExactChatGptComposer(target, command)) throw new Error('native_semantic_submit_requires_exact_chatgpt_composer');
       const preUrl = clip(webContents.getURL?.() || '', 1200);
+      assertCurrentEffectRuntime(webContents, dbg, effectBinding);
       await dbg.sendCommand('DOM.focus', { backendNodeId: target.backend_node_id });
       if (command?.payload?.replace_existing !== false) {
+        assertCurrentEffectRuntime(webContents, dbg, effectBinding);
         await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'a', code:'KeyA', modifiers:2 });
         await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'a', code:'KeyA', modifiers:2 });
       }
+      assertCurrentEffectRuntime(webContents, dbg, effectBinding);
       await dbg.sendCommand('Input.insertText', { text });
       if (!submitAfterType) {
         return { action, target, inserted_chars: text.length, replace_existing: command?.payload?.replace_existing !== false, prompt_sha256: sha256(text), prompt_included: false, authority_effect: true };
@@ -254,25 +328,34 @@ export async function executeSemanticCommand(webContents, command) {
       const readyTree = await dbg.sendCommand('Accessibility.getFullAXTree');
       const sendTargets = exactChatGptControls(readyTree?.nodes || [], 'SEND');
       if (sendTargets.length !== 1) throw new Error(sendTargets.length ? `native_semantic_send_target_ambiguous:${sendTargets.length}` : 'native_semantic_send_target_not_found');
-      await dbg.sendCommand('Input.dispatchKeyEvent', {
-        type:'rawKeyDown', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, nativeVirtualKeyCode:13,
-      });
-      await dbg.sendCommand('Input.dispatchKeyEvent', {
-        type:'keyUp', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, nativeVirtualKeyCode:13,
-      });
-      const observation = await observeChatGptSubmit(dbg, webContents, { preUrl });
-      return {
-        action,
-        target,
-        inserted_chars: text.length,
-        replace_existing: command?.payload?.replace_existing !== false,
-        submit_after_type: true,
-        prompt_sha256: sha256(text),
-        prompt_included: false,
-        send_control: { role: sendTargets[0].role, name: sendTargets[0].name },
-        ...observation,
-        authority_effect: true,
-      };
+      const outcomeLatch = openChatGptSubmitOutcomeLatch(dbg, webContents, { preUrl });
+      try {
+        assertCurrentEffectRuntime(webContents, dbg, effectBinding);
+        await dbg.sendCommand('Input.dispatchKeyEvent', {
+          type:'rawKeyDown', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, nativeVirtualKeyCode:13,
+        });
+        await dbg.sendCommand('Input.dispatchKeyEvent', {
+          type:'keyUp', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, nativeVirtualKeyCode:13,
+        });
+        const observed = await outcomeLatch.wait();
+        const { resolved: _resolved, ...observation } = observed || {};
+        return {
+          action,
+          target,
+          inserted_chars: text.length,
+          replace_existing: command?.payload?.replace_existing !== false,
+          submit_after_type: true,
+          prompt_sha256: sha256(text),
+          prompt_included: false,
+          send_control: { role: sendTargets[0].role, name: sendTargets[0].name },
+          ...observation,
+          event_driven_readback: true,
+          readback_poll_timer_required: false,
+          authority_effect: true,
+        };
+      } finally {
+        outcomeLatch.close();
+      }
     }
 
     throw new Error('native_semantic_action_not_supported');
@@ -283,12 +366,17 @@ export async function captureViewThumbnail(webContents) {
   if (!webContents || webContents.isDestroyed?.()) throw new Error('native_capture_webcontents_unavailable');
   let image = await webContents.capturePage();
   const size = image.getSize();
+  if (!Number.isSafeInteger(size?.width) || size.width <= 0
+    || !Number.isSafeInteger(size?.height) || size.height <= 0) {
+    throw new Error('native_capture_surface_unavailable');
+  }
   if (size.width > 720) image = image.resize({ width: 720, quality: 'good' });
   let jpeg = image.toJPEG(55);
   if (jpeg.byteLength > 120000) {
     image = image.resize({ width: Math.min(520, image.getSize().width), quality: 'good' });
     jpeg = image.toJPEG(45);
   }
+  if (!Buffer.isBuffer(jpeg) || jpeg.byteLength === 0) throw new Error('native_capture_thumbnail_empty');
   if (jpeg.byteLength > 150000) throw new Error('native_capture_thumbnail_too_large');
   return {
     schema: 'metaengine.native-browser.capture-thumbnail.v1',
