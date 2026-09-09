@@ -239,7 +239,14 @@ export class BrowserBrainContinuousCoordinator {
   }
 
   observeEdge(event = {}, { process_snapshot = null, tabs = [], cell_by_tab = null } = {}) {
-    const hasFreshProcessSnapshot = process_snapshot != null;
+    const priorProcessObservedAt = this.#lastProcessSnapshot?.observed_at ?? null;
+    const incomingProcessObservedAt = process_snapshot?.observed_at ?? null;
+    const hasFreshProcessSnapshot = process_snapshot != null && (
+      this.#lastProcessSnapshot == null
+      || incomingProcessObservedAt == null
+      || priorProcessObservedAt == null
+      || incomingProcessObservedAt !== priorProcessObservedAt
+    );
     const snapshot = process_snapshot || this.#lastProcessSnapshot;
     if (!validProcessSnapshot(snapshot)) {
       throw new Error('browser_brain_continuous_process_snapshot_required');
