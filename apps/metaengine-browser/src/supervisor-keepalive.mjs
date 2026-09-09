@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-export const SUPERVISOR_KEEPALIVE_VERSION = '1.4.0';
+export const SUPERVISOR_KEEPALIVE_VERSION = '1.4.1';
 export const SUPERVISOR_ID = 'METAENGINE_SUPERVISOR';
 export const KEEPALIVE_STATES = Object.freeze([
   'ACTIVE','WAITING','WAKE_PENDING','WAKE_AMBIGUOUS',
@@ -204,7 +204,8 @@ export class SupervisorKeepalive {
     const crossedProcessBoundary = predecessorIncarnation !== this.#processIncarnationId;
 
     if (crossedProcessBoundary) {
-      const predecessorActive = this.#state.active_wake;
+      const hasPredecessor = predecessorIncarnation != null;
+      const predecessorActive = hasPredecessor ? this.#state.active_wake : null;
       if (predecessorActive) {
         this.#state.predecessor_wake_history = [
           ...this.#state.predecessor_wake_history,
@@ -217,9 +218,15 @@ export class SupervisorKeepalive {
           },
         ].slice(-MAX_WAKE_HISTORY);
       }
-      this.#state.predecessor_process_incarnation_id = predecessorIncarnation;
-      this.#state.predecessor_fenced_at = recoveredAt;
-      this.#state.predecessor_queued_wake_count = this.#state.queued_wakes.length;
+      if (hasPredecessor) {
+        this.#state.predecessor_process_incarnation_id = predecessorIncarnation;
+        this.#state.predecessor_fenced_at = recoveredAt;
+        this.#state.predecessor_queued_wake_count = this.#state.queued_wakes.length;
+      } else {
+        this.#state.predecessor_process_incarnation_id = null;
+        this.#state.predecessor_fenced_at = null;
+        this.#state.predecessor_queued_wake_count = 0;
+      }
       this.#state.queued_wakes = [];
       this.#state.active_wake = null;
       this.#state.previous_worker_generation = {};
