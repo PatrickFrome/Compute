@@ -17,6 +17,17 @@ function finitePositiveInteger(value, fallback) {
   return normalized > 0 ? normalized : fallback;
 }
 
+function strictMutationBudget(value) {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new BrowserBrainFanoutPlanError(
+      'invalid_mutation_budget',
+      'current mutation budget must be a positive safe integer',
+      { mutation_budget: value },
+    );
+  }
+  return value;
+}
+
 function preflightAbortError() {
   return new BrowserBrainFanoutPlanError('aborted', 'fanout aborted before any effect');
 }
@@ -123,7 +134,10 @@ export class BrowserBrainParallelFanoutCoordinator {
     const [rawBudget, ...rawCellKeys] = await awaitPreflight(preflightPromise, signal);
     if (signal?.aborted) throw preflightAbortError();
 
-    const budget = finitePositiveInteger(rawBudget, 1);
+    // Provider-backed pressure is an admission authority input. Invalid, zero or
+    // fractional values must fail closed rather than silently widening to one
+    // mutation lane through a fallback normalization.
+    const budget = strictMutationBudget(rawBudget);
     if (commands.length > budget) {
       throw new BrowserBrainFanoutPlanError(
         'pressure_budget_exceeded',
