@@ -102,11 +102,12 @@ test('verified download receipt confirms only an exact bounded request binding',
     expected_sha256: 'a'.repeat(64),
     max_bytes: 4096,
   };
+  const final = 'https://cdn.example.com/METAENGINE.exe?token=opaque';
   const receipt = {
     schema: 'metaengine.verified-download-receipt.v1',
     request_id: '11111111-1111-4111-8111-111111111111',
     url: request.url,
-    url_chain: [request.url, 'https://cdn.example.com/METAENGINE.exe?token=opaque'],
+    url_chain: [request.url, final],
     filename: request.filename,
     path: `C:\\Users\\User\\Downloads\\METAENGINE\\${request.filename}`,
     bytes: 2048,
@@ -122,6 +123,7 @@ test('verified download receipt confirms only an exact bounded request binding',
     { request_id: 'not-a-uuid' },
     { url: 'https://example.com/other.exe' },
     { url_chain: ['https://cdn.example.com/METAENGINE.exe'] },
+    { url_chain: ['https://attacker.example/other.exe', request.url, final] },
     { url_chain: [request.url, 'http://cdn.example.com/METAENGINE.exe'] },
     { filename: 'other.exe' },
     { path: 'C:\\Downloads\\other.exe' },
@@ -161,18 +163,20 @@ test('safe HTTPS redirect chain is allowed only with exact digest binding', asyn
   assert.equal(receipt.sha256, digest(body));
 });
 
-test('redirect chain missing requested origin or containing unsafe hop fails closed', async (t) => {
+test('redirect chain missing or not starting with requested origin or containing unsafe hop fails closed', async (t) => {
   const body = Buffer.from('x');
+  const requested = 'https://example.com/build.exe';
   for (const chain of [
     ['https://cdn.example.com/build.exe'],
-    ['https://example.com/build.exe', 'http://cdn.example.com/build.exe'],
-    ['https://example.com/build.exe', 'https://127.0.0.1/build.exe'],
+    ['https://attacker.example/other.exe', requested, 'https://cdn.example.com/build.exe'],
+    [requested, 'http://cdn.example.com/build.exe'],
+    [requested, 'https://127.0.0.1/build.exe'],
   ]) {
     const root = await tempRoot(t);
     const session = new FakeSession(body, () => chain);
     const manager = new VerifiedDownloadManager({ session, rootPath: root });
     await assert.rejects(manager.download({
-      url: 'https://example.com/build.exe',
+      url: requested,
       filename: `build-${crypto.randomUUID()}.exe`,
       expected_sha256: digest(body),
       max_bytes: 4096,
