@@ -9,6 +9,7 @@ const { durableWriteJson } = require('./durable-json-file.cjs');
 export const BROWSER_STARTUP_JOURNAL_SCHEMA = 'metaengine.browser.startup-journal.v1';
 export const BROWSER_STARTUP_JOURNAL_FILE = 'metaengine-browser-startup-journal-v1.json';
 export const BROWSER_STARTUP_JOURNAL_MAX_EVENTS = 128;
+export const BROWSER_STARTUP_ACTIVATION_ACK_MAX = 256;
 export const PRIMARY_WINDOW_STABLE_MS = 1_500;
 export const PRIMARY_WINDOW_OBSERVE_TIMEOUT_MS = 30_000;
 export const PRIMARY_ACTIVATION_ACK_TIMEOUT_MS = 15_000;
@@ -62,6 +63,46 @@ function errorEvidence(error) {
   });
 }
 
+function validActivationAck(row) {
+  const pid = Number(row?.pid);
+  return row
+    && typeof row === 'object'
+    && !Array.isArray(row)
+    && typeof row.boot_id === 'string'
+    && row.boot_id.length >= 16
+    && typeof row.launch_id === 'string'
+    && UUID.test(row.launch_id)
+    && Number.isSafeInteger(row.sequence)
+    && row.sequence > 0
+    && Number.isSafeInteger(pid)
+    && pid > 0
+    && typeof row.version === 'string'
+    && typeof row.at === 'string'
+    && row.authority_effect === false;
+}
+
+function normalizeActivationAcks(value) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((row) => validActivationAck(row)).slice(-BROWSER_STARTUP_ACTIVATION_ACK_MAX);
+}
+
+function activationAckFromEvent(event) {
+  if (event?.state !== 'PRIMARY_WINDOW_ACTIVATED'
+    || event?.details?.visible !== true
+    || typeof event?.details?.launch_id !== 'string'
+    || !UUID.test(event.details.launch_id)) return null;
+  const row = {
+    boot_id: event.boot_id,
+    launch_id: event.details.launch_id,
+    sequence: event.sequence,
+    version: event.version,
+    pid: event.pid,
+    at: event.at,
+    authority_effect: false,
+  };
+  return validActivationAck(row) ? row : null;
+}
+
 function validJournal(row) {
   return row
     && row.schema === BROWSER_STARTUP_JOURNAL_SCHEMA
@@ -70,6 +111,7 @@ function validJournal(row) {
     && Number.isSafeInteger(row.last_sequence)
     && row.last_sequence >= 0
     && Array.isArray(row.events)
+    && (row.activation_acks == null || Array.isArray(row.activation_acks))
     && row.authority_effect === false;
 }
 
@@ -123,6 +165,7 @@ function freshJournal(bootId, app, at) {
     last_sequence: 0,
     updated_at: at,
     events: [],
+    activation_acks: [],
     authority_effect: false,
   };
 }
@@ -182,6 +225,8 @@ async function appendEventUnlocked(app, {
     error: errorEvidence(error),
     authority_effect: false,
   };
+  const priorActivationAcks = normalizeActivationAcks(row.activation_acks);
+  const activationAck = activationAckFromEvent(event);
 
   const next = {
     ...row,
@@ -191,6 +236,9 @@ async function appendEventUnlocked(app, {
     last_sequence: sequence,
     updated_at: at,
     events: [...row.events, event].slice(-BROWSER_STARTUP_JOURNAL_MAX_EVENTS),
+    activation_acks: activationAck
+      ? [...priorActivationAcks, activationAck].slice(-BROWSER_STARTUP_ACTIVATION_ACK_MAX)
+      : priorActivationAcks,
     authority_effect: false,
   };
   await durableWriteJson(startupJournalPath(app), next, { sequence });
@@ -271,15 +319,20 @@ export async function waitForPrimaryActivationAck(app, {
   while (Number(clock()) - startedAt <= timeout_ms) {
     try {
       const row = await readJournalFile(app);
-      const ack = row?.events?.findLast?.((event) => event
+      const ledgerAck = normalizeActivationAcks(row?.activation_acks).findLast((candidate) => candidate
+        && candidate.boot_id === row.current_boot_id
+        && candidate.launch_id === launch_id);
+      const eventAck = row?.events?.findLast?.((event) => event
         && event.boot_id === row.current_boot_id
         && event.state === 'PRIMARY_WINDOW_ACTIVATED'
         && event.details?.launch_id === launch_id
         && event.details?.visible === true);
+      const ack = ledgerAck || eventAck;
       if (ack) {
         return Object.freeze({
           ok: true,
           reason: 'PRIMARY_ACTIVATION_ACK_EXACT',
+          ack_source: ledgerAck ? 'ACTIVATION_ACK_LEDGER' : 'STARTUP_EVENT_RING',
           launch_id,
           primary_boot_id: row.current_boot_id,
           event_sequence: ack.sequence,
@@ -417,6 +470,7 @@ export function browserStartupObservabilityContract() {
     second_instance_receive_marker_is_advisory_only: true,
     second_instance_activation_ack_is_single_durable_write: true,
     second_instance_activation_ack_must_match_launch_id: true,
+    second_instance_activation_ack_has_bounded_independent_ledger: true,
     mixed_version_primary_without_ack_must_surface_error: true,
     secondary_must_not_mutate_primary_journal: true,
     hidden_window_must_be_shown: true,
@@ -425,6 +479,7 @@ export function browserStartupObservabilityContract() {
     primary_activation_ack_timeout_ms: PRIMARY_ACTIVATION_ACK_TIMEOUT_MS,
     primary_activation_ack_poll_ms: PRIMARY_ACTIVATION_ACK_POLL_MS,
     startup_journal_max_events: BROWSER_STARTUP_JOURNAL_MAX_EVENTS,
+    startup_activation_ack_max: BROWSER_STARTUP_ACTIVATION_ACK_MAX,
     authority_effect: false,
   });
 }
