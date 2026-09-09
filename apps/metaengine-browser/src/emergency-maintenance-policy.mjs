@@ -114,13 +114,19 @@ export function canonicalEmergencyMaintenancePayload(input = {}) {
 }
 
 function assertEd25519PublicKey(publicKey) {
+  if (publicKey && typeof publicKey === 'object' && publicKey.type === 'public') {
+    if (publicKey.asymmetricKeyType !== 'ed25519') throw new Error('emergency_maintenance_public_key_type_invalid');
+    return publicKey;
+  }
   let key;
   try {
     key = crypto.createPublicKey(publicKey);
   } catch {
     throw new Error('emergency_maintenance_public_key_invalid');
   }
-  if (key.asymmetricKeyType !== 'ed25519') throw new Error('emergency_maintenance_public_key_type_invalid');
+  if (key.type !== 'public' || key.asymmetricKeyType !== 'ed25519') {
+    throw new Error('emergency_maintenance_public_key_type_invalid');
+  }
   return key;
 }
 
