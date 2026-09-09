@@ -44,7 +44,7 @@ test('non-actuating MONITOR state may survive restart without arming', async (t)
   assert.equal(restored.recovered_fail_closed, false);
 });
 
-test('restart-lost fleet identity is not resurrected and demand gets a fresh agent id', async () => {
+test('restart-lost fleet identity is preserved as evidence, never resurrected, and demand gets a fresh agent id', async () => {
   const oldAgentId = 'agent_aaaaaaaa';
   const spawnedAgentIds = [];
   let savedState = {
@@ -100,13 +100,14 @@ test('restart-lost fleet identity is not resurrected and demand gets a fresh age
   const oldAfter = reconciled.agents.find((agent) => agent.agent_id === oldAgentId);
   const fresh = reconciled.agents.find((agent) => agent.agent_id !== oldAgentId && agent.lifecycle_state === 'BOUND_UNVERIFIED');
 
-  assert.equal(oldAfter.lifecycle_state, 'RETIRED');
+  assert.equal(oldAfter.lifecycle_state, 'LOST');
   assert.equal(oldAfter.lost_reason, 'PHYSICAL_TAB_MISSING_ON_RESTART');
+  assert.equal(oldAfter.automatic_retry_allowed, false);
   assert.deepEqual(spawnedAgentIds, ['agent_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb']);
   assert.ok(fresh);
   assert.notEqual(fresh.agent_id, oldAgentId);
   assert.equal(fresh.tab_id, 'fresh-tab');
-  assert.equal(reconciled.counts.LOST, 0);
-  assert.equal(reconciled.counts.RETIRED, 1);
+  assert.equal(reconciled.counts.LOST, 1);
+  assert.equal(reconciled.counts.RETIRED, 0);
   assert.equal(reconciled.counts.BOUND_UNVERIFIED, 1);
 });
