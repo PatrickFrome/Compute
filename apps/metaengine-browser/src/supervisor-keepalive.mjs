@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-export const SUPERVISOR_KEEPALIVE_VERSION = '1.3.3';
+export const SUPERVISOR_KEEPALIVE_VERSION = '1.4.0';
 export const SUPERVISOR_ID = 'METAENGINE_SUPERVISOR';
 export const KEEPALIVE_STATES = Object.freeze([
   'ACTIVE','WAITING','WAKE_PENDING','WAKE_AMBIGUOUS',
@@ -15,6 +15,9 @@ const WAKE_REASONS = new Set([
   'INTEGRATION_HEAD_CHANGED','MILESTONE_READY_FOR_REVIEW',
   'SUPERVISOR_RECOVERY_REQUIRED','WATCHDOG_DEADLINE','RESEARCH_ACCELERATOR_DUE',
 ]);
+const MAX_QUEUED_WAKES = 32;
+const MAX_WAKE_HISTORY = 32;
+const MAX_WORKER_GENERATION_MEMORY = 2048;
 
 const clone = (value) => value == null ? value : structuredClone(value);
 const iso = (clock) => new Date(clock()).toISOString();
@@ -23,6 +26,11 @@ function normalizeUrl(value) {
   const url = String(value || '').trim();
   if (!CHATGPT_CONVERSATION_RE.test(url)) throw new Error('keepalive_supervisor_conversation_invalid');
   return url;
+}
+
+function sanitizeProcessIncarnationId(value) {
+  const id = String(value || '').trim();
+  return id && id.length <= 160 ? id : null;
 }
 
 function sanitizeActiveWake(input) {
@@ -38,7 +46,17 @@ function sanitizeActiveWake(input) {
     confirmed_at: input.confirmed_at || null,
     supervisor_epoch: Math.max(1, Number(input.supervisor_epoch) || 1),
     cycle_seq: Math.max(1, Number(input.cycle_seq) || 1),
+    process_incarnation_id: sanitizeProcessIncarnationId(input.process_incarnation_id),
+    origin_process_incarnation_id: sanitizeProcessIncarnationId(input.origin_process_incarnation_id),
   };
+}
+
+function sanitizeWorkerGenerationMap(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
+  return Object.fromEntries(Object.entries(input)
+    .filter(([id]) => String(id || '').length > 0)
+    .slice(-MAX_WORKER_GENERATION_MEMORY)
+    .map(([id, generation]) => [String(id), String(generation || 'UNKNOWN').toUpperCase()]));
 }
 
 function freshState() {
@@ -53,9 +71,15 @@ function freshState() {
     tab_id: null,
     paused: false,
     paused_from_state: null,
+    process_incarnation_id: null,
+    process_incarnation_started_at: null,
+    predecessor_process_incarnation_id: null,
+    predecessor_fenced_at: null,
+    predecessor_queued_wake_count: 0,
     queued_wakes: [],
     pending_wake: null,
     active_wake: null,
+    predecessor_wake_history: [],
     ambiguous_history: [],
     last_wake_at: null,
     last_wake_reason: null,
@@ -76,10 +100,13 @@ function sanitize(input) {
   let conversationUrl = null;
   try { if (input.conversation_url) conversationUrl = normalizeUrl(input.conversation_url); } catch {}
   const queued = Array.isArray(input.queued_wakes)
-    ? input.queued_wakes.filter((row) => row && WAKE_REASONS.has(String(row.reason))).slice(-32).map(clone)
+    ? input.queued_wakes.filter((row) => row && WAKE_REASONS.has(String(row.reason))).slice(-MAX_QUEUED_WAKES).map(clone)
     : [];
   const ambiguousHistory = Array.isArray(input.ambiguous_history)
-    ? input.ambiguous_history.filter((row) => row && typeof row === 'object').slice(-32).map(clone)
+    ? input.ambiguous_history.filter((row) => row && typeof row === 'object').slice(-MAX_WAKE_HISTORY).map(clone)
+    : [];
+  const predecessorWakeHistory = Array.isArray(input.predecessor_wake_history)
+    ? input.predecessor_wake_history.filter((row) => row && typeof row === 'object').slice(-MAX_WAKE_HISTORY).map(clone)
     : [];
   return {
     ...base,
@@ -90,16 +117,21 @@ function sanitize(input) {
     tab_id: input.tab_id ? String(input.tab_id) : null,
     paused: input.paused === true,
     paused_from_state: KEEPALIVE_STATES.includes(input.paused_from_state) ? input.paused_from_state : null,
+    process_incarnation_id: sanitizeProcessIncarnationId(input.process_incarnation_id),
+    process_incarnation_started_at: input.process_incarnation_started_at || null,
+    predecessor_process_incarnation_id: sanitizeProcessIncarnationId(input.predecessor_process_incarnation_id),
+    predecessor_fenced_at: input.predecessor_fenced_at || null,
+    predecessor_queued_wake_count: Math.max(0, Number(input.predecessor_queued_wake_count) || 0),
     queued_wakes: queued,
     pending_wake: input.pending_wake && typeof input.pending_wake === 'object' ? clone(input.pending_wake) : null,
     active_wake: sanitizeActiveWake(input.active_wake),
+    predecessor_wake_history: predecessorWakeHistory,
     ambiguous_history: ambiguousHistory,
     last_wake_at: input.last_wake_at || null,
     last_wake_reason: input.last_wake_reason || null,
     last_completed_cycle_at: input.last_completed_cycle_at || null,
     last_research_wake_at: input.last_research_wake_at || null,
-    previous_worker_generation: input.previous_worker_generation && typeof input.previous_worker_generation === 'object'
-      ? clone(input.previous_worker_generation) : {},
+    previous_worker_generation: sanitizeWorkerGenerationMap(input.previous_worker_generation),
     rollover_reason: input.rollover_reason ? String(input.rollover_reason).slice(0, 160) : null,
     rollover_release_at: input.rollover_release_at || null,
     rollover_attempt: input.rollover_attempt && typeof input.rollover_attempt === 'object' ? clone(input.rollover_attempt) : null,
@@ -149,14 +181,16 @@ export function buildSupervisorRolloverMessage({ previousUrl, supervisorEpoch, r
 }
 
 export class SupervisorKeepalive {
-  #load; #save; #clock; #uuid; #state; #minWakeIntervalMs; #maxCyclesPerEpoch;
+  #load; #save; #clock; #uuid; #state; #minWakeIntervalMs; #maxCyclesPerEpoch; #processIncarnationId;
 
-  constructor({ loadState, saveState, clock = () => Date.now(), uuid = () => crypto.randomUUID(), minWakeIntervalMs = 60000, maxCyclesPerEpoch = null } = {}) {
+  constructor({ loadState, saveState, clock = () => Date.now(), uuid = () => crypto.randomUUID(), processIncarnationId = null, minWakeIntervalMs = 60000, maxCyclesPerEpoch = null } = {}) {
     if (typeof loadState !== 'function' || typeof saveState !== 'function') throw new Error('keepalive_persistence_required');
     this.#load = loadState;
     this.#save = saveState;
     this.#clock = clock;
     this.#uuid = uuid;
+    this.#processIncarnationId = sanitizeProcessIncarnationId(processIncarnationId)
+      || `process_${crypto.randomUUID().toLowerCase()}`;
     this.#minWakeIntervalMs = Math.max(30000, Number(minWakeIntervalMs) || 60000);
     void maxCyclesPerEpoch;
     this.#maxCyclesPerEpoch = null;
@@ -166,6 +200,33 @@ export class SupervisorKeepalive {
   async init() {
     this.#state = sanitize(await this.#load());
     const recoveredAt = iso(this.#clock);
+    const predecessorIncarnation = this.#state.process_incarnation_id;
+    const crossedProcessBoundary = predecessorIncarnation !== this.#processIncarnationId;
+
+    if (crossedProcessBoundary) {
+      const predecessorActive = this.#state.active_wake;
+      if (predecessorActive) {
+        this.#state.predecessor_wake_history = [
+          ...this.#state.predecessor_wake_history,
+          {
+            ...clone(predecessorActive),
+            retired_at: recoveredAt,
+            retired_reason: 'PROCESS_BOUNDARY_ACTIVE_WAKE_FENCED',
+            automatic_retry_allowed: false,
+            authority_effect: false,
+          },
+        ].slice(-MAX_WAKE_HISTORY);
+      }
+      this.#state.predecessor_process_incarnation_id = predecessorIncarnation;
+      this.#state.predecessor_fenced_at = recoveredAt;
+      this.#state.predecessor_queued_wake_count = this.#state.queued_wakes.length;
+      this.#state.queued_wakes = [];
+      this.#state.active_wake = null;
+      this.#state.previous_worker_generation = {};
+      this.#state.process_incarnation_id = this.#processIncarnationId;
+      this.#state.process_incarnation_started_at = recoveredAt;
+    }
+
     if (this.#state.pending_wake && !this.#state.pending_wake.ambiguous_at) {
       this.#state.pending_wake.ambiguous_at = recoveredAt;
       this.#state.pending_wake.ambiguous_reason = 'PROCESS_RESTART_WITH_UNRESOLVED_WAKE_EFFECT';
@@ -194,6 +255,7 @@ export class SupervisorKeepalive {
     return Object.freeze({
       ...clone(this.#state),
       work_cycle_limit: this.#maxCyclesPerEpoch,
+      worker_generation_memory_limit: MAX_WORKER_GENERATION_MEMORY,
       automatic_rollover_cycle_limit_enabled: false,
       external_confirmation_required_for_continuation: false,
     });
@@ -248,7 +310,7 @@ export class SupervisorKeepalive {
     const normalizedReason = String(reason || '');
     if (!WAKE_REASONS.has(normalizedReason)) throw new Error('keepalive_wake_reason_invalid');
     const key = `${normalizedReason}:${String(metadata.agent_id || metadata.key || '')}`;
-    const existing = this.#state.queued_wakes.find((row) => row.key === key);
+    const existing = this.#state.queued_wakes.find((row) => row.key === key && row.process_incarnation_id === this.#processIncarnationId);
     if (existing) {
       const incoming = Array.isArray(metadata.agent_ids) ? metadata.agent_ids.map(String) : [];
       const prior = Array.isArray(existing.metadata?.agent_ids) ? existing.metadata.agent_ids.map(String) : [];
@@ -258,14 +320,22 @@ export class SupervisorKeepalive {
       }
       return this.snapshot();
     }
-    this.#state.queued_wakes.push({ key, reason: normalizedReason, metadata: clone(metadata), queued_at: iso(this.#clock) });
-    this.#state.queued_wakes = this.#state.queued_wakes.slice(-32);
+    this.#state.queued_wakes.push({
+      key,
+      reason: normalizedReason,
+      metadata: clone(metadata),
+      queued_at: iso(this.#clock),
+      process_incarnation_id: this.#processIncarnationId,
+    });
+    this.#state.queued_wakes = this.#state.queued_wakes.slice(-MAX_QUEUED_WAKES);
     if (normalizedReason === 'RESEARCH_ACCELERATOR_DUE') this.#state.last_research_wake_at = iso(this.#clock);
     await this.#persist();
     return this.snapshot();
   }
 
-  nextQueuedWake() { return clone(this.#state.queued_wakes[0] || null); }
+  nextQueuedWake() {
+    return clone(this.#state.queued_wakes.find((row) => row.process_incarnation_id === this.#processIncarnationId) || null);
+  }
 
   async requestRollover(reason = 'CONVERSATION_LIMIT') {
     const normalizedReason = String(reason || 'CONVERSATION_LIMIT').slice(0, 160);
@@ -276,8 +346,6 @@ export class SupervisorKeepalive {
       await this.#persist();
       return this.snapshot();
     }
-    // A rollover reason can originate from page/model observation. It may ask the
-    // trusted lifecycle to replan, but it never authorizes replacement actuation.
     this.#state.state = 'ROLLOVER_DEFERRED';
     this.#state.rollover_reason = normalizedReason;
     this.#state.rollover_release_at = null;
@@ -341,6 +409,7 @@ export class SupervisorKeepalive {
     this.#state.previous_worker_generation = {};
     this.#state.pending_wake = null;
     this.#state.active_wake = null;
+    this.#state.queued_wakes = [];
     this.#state.last_wake_at = null;
     this.#state.last_wake_reason = null;
     this.#state.rollover_reason = null;
@@ -355,19 +424,20 @@ export class SupervisorKeepalive {
 
   async observeWorkers(workerSignals = []) {
     const events = [];
-    const next = { ...this.#state.previous_worker_generation };
+    const previous = this.#state.previous_worker_generation;
+    const next = {};
     for (const signal of workerSignals) {
       const id = String(signal?.agent_id || '');
       if (!id) continue;
       const lifecycle = String(signal?.lifecycle_state || '');
       const generation = String(signal?.generation_state || 'UNKNOWN').toUpperCase();
-      const prev = String(next[id] || 'UNKNOWN');
+      const prev = String(previous[id] || 'UNKNOWN');
       if (prev === 'GENERATING' && generation === 'IDLE') events.push({ reason: 'WORKER_RESULT_READY', agent_id: id });
       if (lifecycle === 'LOST' && prev !== 'TERMINAL') events.push({ reason: 'WORKER_LOST', agent_id: id });
       if (lifecycle === 'PROVISIONING_AMBIGUOUS' && prev !== 'TERMINAL') events.push({ reason: 'WORKER_FAILED', agent_id: id });
       next[id] = generation;
     }
-    this.#state.previous_worker_generation = next;
+    this.#state.previous_worker_generation = sanitizeWorkerGenerationMap(next);
     await this.#persist();
     for (const event of events.filter((row) => row.reason === 'WORKER_RESULT_READY')) await this.enqueueWake(event.reason, { agent_id: event.agent_id });
     for (const reason of ['WORKER_LOST','WORKER_FAILED']) {
@@ -379,15 +449,16 @@ export class SupervisorKeepalive {
 
   canWake() {
     if (this.#state.paused || ['WAKE_AMBIGUOUS','ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) return false;
-    if (!this.#state.conversation_url || this.#state.pending_wake || this.#state.active_wake || this.#state.queued_wakes.length === 0) return false;
+    const actionable = this.#state.queued_wakes.filter((row) => row.process_incarnation_id === this.#processIncarnationId);
+    if (!this.#state.conversation_url || this.#state.pending_wake || this.#state.active_wake || actionable.length === 0) return false;
     if (!this.#state.last_wake_at) return true;
-    if (String(this.#state.queued_wakes[0]?.reason || '') === 'CONTINUE_DEVELOPMENT') return true;
+    if (String(actionable[0]?.reason || '') === 'CONTINUE_DEVELOPMENT') return true;
     return this.#clock() - new Date(this.#state.last_wake_at).getTime() >= this.#minWakeIntervalMs;
   }
 
   async prepareNextWake() {
     if (!this.canWake()) return { ok: false, suppressed: true, state: this.#state.state, authority_effect: false };
-    const queued = this.#state.queued_wakes[0];
+    const queued = this.#state.queued_wakes.find((row) => row.process_incarnation_id === this.#processIncarnationId);
     const wakeId = `wake_${String(this.#uuid()).replace(/[^a-z0-9-]/gi, '').toLowerCase()}`;
     const pending = {
       wake_id: wakeId,
@@ -396,6 +467,7 @@ export class SupervisorKeepalive {
       prepared_at: iso(this.#clock),
       supervisor_epoch: this.#state.supervisor_epoch,
       cycle_seq: this.#state.cycle_seq + 1,
+      process_incarnation_id: this.#processIncarnationId,
       automatic_retry_allowed: false,
     };
     this.#state.pending_wake = pending;
@@ -424,7 +496,12 @@ export class SupervisorKeepalive {
     this.#state.last_wake_reason = pending.reason;
     this.#state.queued_wakes = this.#state.queued_wakes.filter((row) => row.key !== pending.queue_key);
     this.#state.pending_wake = null;
-    this.#state.active_wake = { ...clone(pending), confirmed_at: iso(this.#clock) };
+    this.#state.active_wake = {
+      ...clone(pending),
+      origin_process_incarnation_id: sanitizeProcessIncarnationId(pending.process_incarnation_id),
+      process_incarnation_id: this.#processIncarnationId,
+      confirmed_at: iso(this.#clock),
+    };
     delete this.#state.active_wake.automatic_retry_allowed;
     this.#state.state = 'ACTIVE';
     await this.#persist();
@@ -468,7 +545,7 @@ export class SupervisorKeepalive {
         terminal_generation_epoch: epoch,
         automatic_retry_allowed: false,
       },
-    ].slice(-32);
+    ].slice(-MAX_WAKE_HISTORY);
     this.#state.pending_wake = null;
     this.#state.last_completed_cycle_at = retiredAt;
     this.#state.state = this.#state.paused ? 'PAUSED' : (this.#state.active_wake ? 'ACTIVE' : 'WAITING');
