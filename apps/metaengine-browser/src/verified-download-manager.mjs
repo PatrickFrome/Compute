@@ -62,7 +62,7 @@ export function verifiedDownloadReceiptConfirmsRequest(input = {}, receipt = {})
     const chain = receipt.url_chain;
     if (!Array.isArray(chain) || chain.length < 1 || chain.length > MAX_REDIRECT_CHAIN) return false;
     const normalizedChain = chain.map((url) => validateSafeHttpsUrl(url, 'verified_download_receipt'));
-    if (!normalizedChain.includes(request.url)) return false;
+    if (normalizedChain[0] !== request.url) return false;
 
     const completedAt = String(receipt.completed_at || '');
     const completedMs = Date.parse(completedAt);
@@ -79,7 +79,7 @@ function validateObservedChain(item, expectedUrl) {
   const chain = Array.isArray(rawChain) && rawChain.length > 0 ? rawChain.map(String) : (rawCurrent ? [rawCurrent] : []);
   if (chain.length === 0 || chain.length > MAX_REDIRECT_CHAIN) throw new Error('verified_download_url_chain_invalid');
   const normalized = chain.map((url) => validateSafeHttpsUrl(url, 'verified_download_redirect'));
-  if (!normalized.includes(expectedUrl)) throw new Error('verified_download_url_binding_mismatch');
+  if (normalized[0] !== expectedUrl) throw new Error('verified_download_url_binding_mismatch');
   return normalized;
 }
 
