@@ -46,8 +46,11 @@ test('bootstrap recovery probe source contains no mutation, installer or Browser
   ]) {
     assert.equal(forbidden.test(raw), false, `forbidden bootstrap probe primitive: ${forbidden}`);
   }
-  assert.match(raw, /Get-Content/);
-  assert.match(raw, /Get-FileHash/);
+  assert.doesNotMatch(raw, /Get-FileHash/i, 'probe must not depend on the optional Microsoft.PowerShell.Utility Get-FileHash cmdlet');
+  assert.match(raw, /\[System\.IO\.File\]::Open/);
+  assert.match(raw, /System\.Security\.Cryptography\.SHA256/);
+  assert.match(raw, /ComputeHash/);
+  assert.match(raw, /UTF8Encoding/);
   assert.match(raw, /FileVersionInfo/);
   assert.match(raw, /mutation_performed\s*=\s*\$false/);
   assert.match(raw, /process_launch_performed\s*=\s*\$false/);
@@ -104,11 +107,18 @@ test('Windows bootstrap probe reads exact local evidence and durable receipt has
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const output = JSON.parse(String(result.stdout || '').trim().split(/\r?\n/).filter(Boolean).at(-1));
     assert.equal(output.schema, 'metaengine.self-update.bootstrap-probe.v1');
-    assert.equal(output.transaction_read_state, 'READ');
+    assert.equal(output.version, '1.0.2');
+    const readError = JSON.stringify({
+      transaction_error: output.transaction_error,
+      pre_install_receipt_error: output.pre_install_receipt_error,
+      successor_receipt_error: output.successor_receipt_error,
+      stderr: String(result.stderr || ''),
+    });
+    assert.equal(output.transaction_read_state, 'READ', readError);
     assert.equal(output.transaction_sha256, before[path.join(userData, 'metaengine-self-update-transaction-v1.json')]);
-    assert.equal(output.pre_install_receipt_read_state, 'READ');
+    assert.equal(output.pre_install_receipt_read_state, 'READ', readError);
     assert.equal(output.pre_install_receipt_sha256, preInstallSha);
-    assert.equal(output.successor_receipt_read_state, 'READ');
+    assert.equal(output.successor_receipt_read_state, 'READ', readError);
     assert.equal(output.successor_receipt_sha256, before[successorPath]);
     assert.equal(output.installed_executable.exists, true);
     assert.equal(output.installed_executable.sha256, appSha);

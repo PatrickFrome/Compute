@@ -53,3 +53,41 @@ body[data-operations="CLOSED"] .operationsPanel{display:none}.shellBackdrop{disp
 @media(max-width:1180px){.systems{display:none}.primaryLabel{display:none}.primaryButton{width:34px;padding:0;justify-content:center}.brand{display:none}}
 @media(max-width:980px){.shortcutHint{display:none}.operationsToggle span:last-child{display:none}.operationsToggle{width:34px;padding:0;justify-content:center}.navControls .iconButton:nth-child(3){display:none}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+
+/* Accessibility/readability hardening. This is presentation-only: it does not add
+   Browser authority, a scheduler, command leasing, retries, or page/model trust. */
+.systemChip b,.systemChip .systemValue{
+  display:block!important;position:absolute!important;width:1px!important;height:1px!important;
+  padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;
+  clip-path:inset(50%)!important;white-space:nowrap!important;border:0!important
+}
+.opsContent,.activeContext,.kvList,.entityRow{user-select:text}
+.opsContent button,.activeContext button{user-select:none}
+button:focus-visible,input:focus-visible{outline:2px solid #1767dc;outline-offset:2px}
+body[data-final-shell="telegram-browser-v1"] .routeKind,
+body[data-final-shell="telegram-browser-v1"] .shortcutHint,
+body[data-final-shell="telegram-browser-v1"] .railSectionHead,
+body[data-final-shell="telegram-browser-v1"] #activeMeta,
+body[data-final-shell="telegram-browser-v1"] .tabCopy small,
+body[data-final-shell="telegram-browser-v1"] .opsEyebrow,
+body[data-final-shell="telegram-browser-v1"] .brainPresence,
+body[data-final-shell="telegram-browser-v1"] .heroBadge,
+body[data-final-shell="telegram-browser-v1"] .metricCard span,
+body[data-final-shell="telegram-browser-v1"] .opsSectionTitle span,
+body[data-final-shell="telegram-browser-v1"] .entityTop span,
+body[data-final-shell="telegram-browser-v1"] .tinyTag,
+body[data-final-shell="telegram-browser-v1"] .commandButton span,
+body[data-final-shell="telegram-browser-v1"] .opsLegend{font-size:9px!important}
+body[data-final-shell="telegram-browser-v1"] #activeTitle,
+body[data-final-shell="telegram-browser-v1"] .tabCopy strong,
+body[data-final-shell="telegram-browser-v1"] .opsNav button,
+body[data-final-shell="telegram-browser-v1"] .kvRow span,
+body[data-final-shell="telegram-browser-v1"] .kvRow b,
+body[data-final-shell="telegram-browser-v1"] .commandButton strong{font-size:10px!important}
+@media(max-width:1180px){
+  body[data-final-shell="telegram-browser-v1"] .systems{display:flex!important;flex:0 0 auto;gap:2px;padding:0 5px}
+}
+@media(forced-colors:active){
+  .systemDot,.tabStateDot,.brainPresence i{forced-color-adjust:auto;border:1px solid CanvasText}
+  button:focus-visible,input:focus-visible{outline:2px solid Highlight}
+}

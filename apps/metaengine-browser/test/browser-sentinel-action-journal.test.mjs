@@ -9,7 +9,6 @@ const require = createRequire(import.meta.url);
 const {
   BrowserSentinelActionJournal,
   actionJournalPath,
-  incarnationActionJournalPath,
 } = require('../src/browser-sentinel-action-journal.cjs');
 
 function binding(overrides = {}) {
@@ -141,12 +140,9 @@ test('a dispatched relaunch may retry only after the exact relaunch pid is posit
   assert.equal(journal.relaunchRetryAllowed(), true);
 });
 
-test('journal isolates cross-incarnation bindings without mutating prior physical-effect evidence', async () => {
+test('journal rejects exact binding drift across token pid and executable', async () => {
   const { statePath, journal } = await journalFixture();
-  const original = await journal.beginTermination(binding(), { state: 'PROGRESS_STALE' });
-  const legacyPath = actionJournalPath(statePath);
-  const legacyBefore = await fs.readFile(legacyPath, 'utf8');
-  const paths = new Set();
+  await journal.beginTermination(binding(), { state: 'PROGRESS_STALE' });
 
   for (const drift of [
     binding({ token: 'other-token' }),
@@ -154,48 +150,6 @@ test('journal isolates cross-incarnation bindings without mutating prior physica
     binding({ executable: `${process.execPath}.other` }),
   ]) {
     const restarted = new BrowserSentinelActionJournal({ statePath });
-    await restarted.init(drift);
-    assert.equal(restarted.snapshot(), null);
-    assert.equal(restarted.terminationAttempted(), false);
-
-    const intent = await restarted.beginTermination(drift, { state: 'PROGRESS_STALE' });
-    assert.equal(intent.state, 'PARENT_TERMINATION_INTENT');
-    assert.equal(intent.token, drift.token);
-    assert.equal(intent.parent_pid, drift.parent_pid);
-    assert.equal(intent.executable, drift.executable);
-
-    const scopedPath = incarnationActionJournalPath(statePath, drift);
-    paths.add(scopedPath);
-    assert.notEqual(scopedPath, legacyPath);
-    assert.equal(incarnationActionJournalPath(statePath, drift), scopedPath, 'incarnation path is deterministic');
-    const disk = JSON.parse(await fs.readFile(scopedPath, 'utf8'));
-    assert.equal(disk.token, drift.token);
-    assert.equal(disk.parent_pid, drift.parent_pid);
-    assert.equal(disk.executable, drift.executable);
-    assert.equal(await fs.readFile(legacyPath, 'utf8'), legacyBefore, 'prior incarnation evidence stays immutable');
-
-    const sameIncarnationRestart = new BrowserSentinelActionJournal({ statePath });
-    await sameIncarnationRestart.init(drift);
-    assert.equal(sameIncarnationRestart.terminationAttempted(), true, 'same incarnation reuses its scoped journal');
-    await assert.rejects(
-      () => sameIncarnationRestart.beginTermination(drift, { state: 'PROGRESS_STALE' }),
-      /already_attempted/,
-      'same incarnation cannot replay a prior physical-effect barrier',
-    );
+    await assert.rejects(() => restarted.init(drift), /binding_drift/);
   }
-
-  assert.equal(paths.size, 3, 'each exact binding yields an isolated deterministic journal');
-  assert.equal(JSON.parse(legacyBefore).sequence, original.sequence);
-});
-
-test('journal keeps commit binding fenced after init even when no row existed', async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-sentinel-journal-fence-'));
-  const statePath = path.join(dir, 'metaengine-browser-sentinel-v1.json');
-  const journal = new BrowserSentinelActionJournal({ statePath });
-  await journal.init(binding());
-  await assert.rejects(
-    () => journal.beginTermination(binding({ token: 'drift-after-init' }), { state: 'PROGRESS_STALE' }),
-    /binding_drift/,
-  );
-  await assert.rejects(() => fs.readFile(actionJournalPath(statePath), 'utf8'), /ENOENT/);
 });

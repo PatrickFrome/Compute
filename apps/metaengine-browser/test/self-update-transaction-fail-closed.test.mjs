@@ -124,6 +124,52 @@ test('INSTALLING with old process version becomes AMBIGUOUS and remains held on 
   assert.equal((await readSelfUpdateTransaction(app)).state, 'AMBIGUOUS_INSTALL');
 });
 
+test('persisted AMBIGUOUS_INSTALL is superseded only by a proven newer installed version', async () => {
+  const target = '0.6.6-dev.33956198945.1';
+  const { app } = await fixture('0.6.5-dev.1.1');
+  await persistPreInstallReceipt(app, receipt(target));
+  await markSelfUpdateInstallEffectAttempted(app, { targetVersion: target });
+
+  const ambiguous = await inspectSelfUpdateStartup(app, { clock: () => NOW + 1_000 });
+  assert.equal(ambiguous.state, 'AMBIGUOUS_INSTALL');
+  assert.equal((await readSelfUpdateTransaction(app)).state, 'AMBIGUOUS_INSTALL');
+  const { pre_install } = selfUpdateHandoffPaths(app);
+  const predecessorReceipt = await fs.readFile(pre_install, 'utf8');
+
+  app.setVersion('0.7.0-dev.2.1');
+  const recovered = await inspectSelfUpdateStartup(app, { clock: () => NOW + 2_000 });
+  assert.equal(recovered.state, 'SUPERSEDED');
+  assert.equal(recovered.transaction_state, 'SUPERSEDED');
+  assert.equal(recovered.current_version, '0.7.0-dev.2.1');
+  assert.equal(recovered.target_version, target);
+  assert.equal(recovered.automatic_retry_allowed, false);
+  assert.equal(recovered.authority_effect, false);
+
+  const journal = await readSelfUpdateTransaction(app);
+  assert.equal(journal.state, 'SUPERSEDED');
+  assert.equal(journal.target_version, target);
+  assert.equal(journal.evidence.superseding_version, '0.7.0-dev.2.1');
+  assert.equal(journal.evidence.superseded_from_state, 'AMBIGUOUS_INSTALL');
+  assert.equal(journal.evidence.predecessor_receipt_verified, true);
+  assert.equal(await fs.readFile(pre_install, 'utf8'), predecessorReceipt);
+});
+
+test('newer installed version cannot supersede ambiguous journal without predecessor receipt proof', async () => {
+  const target = '0.6.6-dev.33956198945.1';
+  const { app } = await fixture('0.6.5-dev.1.1');
+  await persistPreInstallReceipt(app, receipt(target));
+  await markSelfUpdateInstallEffectAttempted(app, { targetVersion: target });
+  await inspectSelfUpdateStartup(app, { clock: () => NOW + 1_000 });
+
+  const { pre_install } = selfUpdateHandoffPaths(app);
+  await fs.unlink(pre_install);
+  app.setVersion('0.7.0-dev.2.1');
+  const held = await inspectSelfUpdateStartup(app, { clock: () => NOW + 2_000 });
+  assert.equal(held.state, 'AMBIGUOUS_INSTALL');
+  assert.equal(held.automatic_retry_allowed, false);
+  assert.equal((await readSelfUpdateTransaction(app)).state, 'AMBIGUOUS_INSTALL');
+});
+
 test('INSTALLING converges to SUCCESSOR_BOOTED only on exact installed target version', async () => {
   const { app } = await fixture();
   await persistPreInstallReceipt(app, receipt());

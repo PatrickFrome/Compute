@@ -4,11 +4,25 @@ import test from 'node:test';
 import { createRemoteBrowserPoolV1, RemoteBrowserPoolError } from '../../../coordination/browser-shared/remote-browser-pool-v1.mjs';
 import { buildSupervisorMeshWireProjectionV1 } from '../src/supervisor-mesh-wire-projection.mjs';
 
-const NODE_COUNT = 48;
-const NODE_CAPACITY = 24;
-const TASKS = 1000;
-const MESH_GROUPS = 64;
-const PEERS_PER_MESH = 16;
+function envInt(name, fallback, min, max) {
+  const raw = process.env[name];
+  if (raw == null || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < min || value > max) {
+    throw new Error(`windows_scale_env_invalid:${name}`);
+  }
+  return value;
+}
+
+const NODE_COUNT = envInt('METAENGINE_SCALE_NODES', 48, 8, 256);
+const NODE_CAPACITY = envInt('METAENGINE_SCALE_NODE_CAPACITY', 24, 1, 256);
+const TASKS = envInt('METAENGINE_SCALE_TASKS', 1000, 100, 10000);
+const MESH_GROUPS = envInt('METAENGINE_SCALE_MESH_GROUPS', 64, 1, 256);
+const PEERS_PER_MESH = envInt('METAENGINE_SCALE_PEERS_PER_MESH', 16, 1, 16);
+
+if (TASKS > NODE_COUNT * NODE_CAPACITY) {
+  throw new Error('windows_scale_capacity_insufficient');
+}
 
 function node(index, epoch = 1) {
   return {
@@ -65,7 +79,7 @@ function activeByNode(snapshot) {
   return counts;
 }
 
-test('Windows-scale chaos: 1000 task placements stay balanced across bounded Browser node incarnations', () => {
+test(`Windows-scale chaos: ${TASKS} task placements stay balanced across ${NODE_COUNT} bounded Browser node incarnations`, () => {
   const pool = createRemoteBrowserPoolV1();
   for (let i = 0; i < NODE_COUNT; i += 1) pool.registerNode(node(i));
 
@@ -143,7 +157,7 @@ test('Windows-scale chaos: stale process incarnation cannot dispatch after node 
   assert.throws(() => pool.validateDispatch({ lease_id:lease.lease_id, node_id:lease.node_id, node_epoch:lease.node_epoch, process_incarnation_id:lease.process_incarnation_id, now_ms:2000 }), (e) => e instanceof RemoteBrowserPoolError);
 });
 
-test('Windows-scale chaos: 1024 supervisor peers remain sharded into DB-compatible bounded meshes', () => {
+test(`Windows-scale chaos: ${MESH_GROUPS * PEERS_PER_MESH} supervisor peers remain sharded into DB-compatible bounded meshes`, () => {
   let total = 0;
   const preferred = new Set();
   for (let group = 0; group < MESH_GROUPS; group += 1) {
@@ -156,7 +170,6 @@ test('Windows-scale chaos: 1024 supervisor peers remain sharded into DB-compatib
     preferred.add(wire.mesh.preferred_supervisor_id);
   }
   assert.equal(total, MESH_GROUPS * PEERS_PER_MESH);
-  assert.equal(total, 1024);
   assert.equal(preferred.size, MESH_GROUPS);
 });
 
@@ -167,4 +180,13 @@ test('Windows-scale chaos: resource duplication is rejected under high contentio
   for (let i = 0; i < 100; i += 1) {
     assert.throws(() => pool.acquireLease({ lease_id:`lease.dup.${i}`, action_id:`action.dup.${i}`, resource_id:'task.shared.001', required_capabilities:['CLICK'], now_ms:1001+i, ttl_ms:120000 }), (e) => e instanceof RemoteBrowserPoolError && e.code === 'pool_resource_already_leased');
   }
+});
+
+test('Windows-scale configuration remains bounded before stress begins', () => {
+  assert.ok(NODE_COUNT <= 256);
+  assert.ok(NODE_CAPACITY <= 256);
+  assert.ok(TASKS <= 10000);
+  assert.ok(MESH_GROUPS <= 256);
+  assert.ok(PEERS_PER_MESH <= 16);
+  assert.ok(TASKS <= NODE_COUNT * NODE_CAPACITY);
 });

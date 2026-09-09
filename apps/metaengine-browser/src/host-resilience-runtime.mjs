@@ -8,6 +8,7 @@ import { BrowserParentProgressLease } from './browser-parent-progress-lease.mjs'
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PARENT_PROGRESS_HEARTBEAT_MS = 5_000;
 const LOGIN_START_RECHECK_MS = 30_000;
+const SENTINEL_RECOVERY_NONFAILURE_STATES = new Set(['HEALTHY', 'RECOVERED', 'SUPPRESSED_TRANSITION']);
 
 // In the packaged app, __dirname points INSIDE app.asar. ELECTRON_RUN_AS_NODE runs
 // the Electron binary as vanilla Node, which cannot load modules from an asar
@@ -30,6 +31,29 @@ export function resolveSentinelWorkerScript(candidatePath, existsSyncImpl = ((p)
   return candidate;
 }
 
+export function buildSentinelWorkerFailureEvidence(recovery = null, {
+  sentinel = null,
+  error = null,
+  clock = () => Date.now(),
+} = {}) {
+  const recoveryState = String(recovery?.state || '');
+  if (!error && (!recoveryState || SENTINEL_RECOVERY_NONFAILURE_STATES.has(recoveryState))) return null;
+  const candidatePid = Number(recovery?.worker_pid || sentinel?.worker_recovery_candidate_pid || 0);
+  const generation = Number(sentinel?.worker_recovery_generation || 0);
+  return Object.freeze({
+    schema: 'metaengine.host-resilience.sentinel-worker-failure.v1',
+    state: error ? 'RECOVERY_EXCEPTION' : 'RECOVERY_FAILED',
+    recovery_state: recoveryState || null,
+    recovery_generation: Number.isSafeInteger(generation) && generation >= 0 ? generation : null,
+    worker_pid: Number.isSafeInteger(candidatePid) && candidatePid > 0 ? candidatePid : null,
+    worker_recovery_result: sentinel?.worker_recovery_result ? String(sentinel.worker_recovery_result).slice(0, 240) : null,
+    error: error ? String(error?.message || error).slice(0, 240) : null,
+    automatic_retry_allowed: error ? false : recovery?.automatic_retry_allowed === true,
+    observed_at: new Date(Number(clock())).toISOString(),
+    authority_effect: false,
+  });
+}
+
 export class HostResilienceRuntime {
   #electron; #onResume; #platform; #spawn; #sentinelFactory;
   #blockerId = null; #resumeHandler = null; #sentinel = null; #progressLease = null; #progressTimer = null; #resilienceTickPromise = null;
@@ -40,7 +64,7 @@ export class HostResilienceRuntime {
     login_start_attempts: 0, login_start_repair_attempts: 0,
     login_start_recheck_ms: LOGIN_START_RECHECK_MS, last_login_start_check_at: null,
     prevent_app_suspension: false, sentinel: null, sentinel_worker_healthy: false,
-    sentinel_worker_recovery: null, sentinel_bootstrap: null,
+    sentinel_worker_recovery: null, sentinel_worker_failure: null, sentinel_bootstrap: null,
     parent_progress: null, parent_progress_heartbeat_ms: PARENT_PROGRESS_HEARTBEAT_MS,
     last_resume_at: null, last_error: null,
   };
@@ -201,6 +225,7 @@ export class HostResilienceRuntime {
       await this.#progressLease.mark({ kind: 'HOST_RESILIENCE_STARTED' });
       this.#state.parent_progress = this.#progressLease.snapshot();
       this.#state.sentinel_worker_healthy = true;
+      this.#state.sentinel_worker_failure = null;
       this.#sentinelBootstrapRetrySafe = false;
       this.#state.sentinel_bootstrap = {
         state: 'HEALTHY', attempt, spawn_invoked: spawnInvoked, spawn_returned: spawnReturned,
@@ -251,17 +276,22 @@ export class HostResilienceRuntime {
       if (this.#sentinel?.recoverWorkerIfProvenAbsent) {
         try {
           const recovery = await this.#sentinel.recoverWorkerIfProvenAbsent();
+          const sentinel = this.#sentinel.snapshot?.() || null;
           this.#state.sentinel_worker_recovery = recovery ? structuredClone(recovery) : null;
-          this.#state.sentinel_worker_healthy = this.#sentinel.snapshot()?.worker_ready === true;
+          this.#state.sentinel_worker_healthy = sentinel?.worker_ready === true;
           if (recovery?.state === 'RECOVERED' || recovery?.state === 'HEALTHY') {
+            this.#state.sentinel_worker_failure = null;
             if (String(this.#state.last_error || '').startsWith('sentinel_worker:')) this.#state.last_error = null;
             if (this.#state.state === 'DEGRADED_SENTINEL') this.#state.state = 'ACTIVE';
-          } else if (['STALE_WORKER_PID_ALIVE','WORKER_PID_MISSING_AMBIGUOUS','SPAWN_AMBIGUOUS','CANDIDATE_ALIVE_HEARTBEAT_AMBIGUOUS'].includes(String(recovery?.state || ''))) {
-            this.#state.last_error = `sentinel_worker:${String(recovery.state).slice(0, 180)}`;
+          } else if (recovery?.state !== 'SUPPRESSED_TRANSITION') {
+            this.#state.sentinel_worker_failure = buildSentinelWorkerFailureEvidence(recovery, { sentinel });
+            this.#state.last_error = `sentinel_worker:${String(recovery?.state || 'UNKNOWN_RECOVERY_STATE').slice(0, 180)}`;
             if (this.#state.state === 'ACTIVE') this.#state.state = 'DEGRADED_SENTINEL';
           }
         } catch (error) {
+          const sentinel = this.#sentinel?.snapshot?.() || null;
           this.#state.sentinel_worker_healthy = false;
+          this.#state.sentinel_worker_failure = buildSentinelWorkerFailureEvidence(null, { sentinel, error });
           this.#state.last_error = `sentinel_worker:${String(error?.message || error).slice(0, 200)}`;
           if (this.#state.state === 'ACTIVE') this.#state.state = 'DEGRADED_SENTINEL';
         }

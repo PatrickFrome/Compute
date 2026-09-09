@@ -16,8 +16,13 @@ test('physical dev E2E follows the forward integration line without cross-SHA ca
   assert.match(source, /integration\/metaengine-development-os-v1/);
   assert.match(source, /group: metaengine-browser-fast-self-update-\$\{\{ github\.sha \}\}/);
   assert.doesNotMatch(source, /group: metaengine-browser-fast-self-update-\$\{\{ github\.ref \}\}/);
-  assert.match(source, /0\.6\.6-dev\.\$env:GITHUB_RUN_ID\.1/);
+  assert.match(source, /sourcePackageVersion = \[string\]\(node -p/);
+  assert.match(source, /sourceCore = \$sourcePackageVersion -replace '-dev\\\.\[0-9\]\+\\\.1\$',\s*''/);
+  assert.match(source, /\$target = "\$sourceCore-dev\.\$env:GITHUB_RUN_ID\.1"/);
+  assert.match(source, /source_package_version_not_trusted_dev_shape/);
+  assert.match(source, /target_version_invalid/);
   assert.match(source, /physical_target_run_identity_lost/);
+  assert.doesNotMatch(source, /\$target = "0\.6\.6-dev\.\$env:GITHUB_RUN_ID\.1"/);
 });
 
 test('verified dev publisher is exact-SHA isolated and cannot regress the live hint', async () => {

@@ -20,17 +20,61 @@ if ($expectedHash -and $expectedHash -notmatch '^[a-f0-9]{64}$') {
   throw 'bootstrap_probe_expected_executable_sha256_invalid'
 }
 
+function Get-Sha256HexFromBytes([byte[]]$Bytes) {
+  $hasher = $null
+  try {
+    $hasher = [System.Security.Cryptography.SHA256]::Create()
+    $hash = $hasher.ComputeHash($Bytes)
+    return [System.BitConverter]::ToString($hash).Replace('-', '').ToLowerInvariant()
+  } finally {
+    if ($null -ne $hasher) { $hasher.Dispose() }
+  }
+}
+
+function Get-FileSha256Hex([string]$Path) {
+  $share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+  $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, $share)
+  $hasher = $null
+  try {
+    $hasher = [System.Security.Cryptography.SHA256]::Create()
+    $hash = $hasher.ComputeHash($stream)
+    return [System.BitConverter]::ToString($hash).Replace('-', '').ToLowerInvariant()
+  } finally {
+    if ($null -ne $hasher) { $hasher.Dispose() }
+    $stream.Dispose()
+  }
+}
+
 function Read-JsonEvidence([string]$Path) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
     return [ordered]@{ read_state = 'ABSENT'; row = $null; sha256 = $null; error = $null }
   }
   try {
-    $raw = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+    # Read and hash one exact byte snapshot. This avoids text-decoder ambiguity and
+    # prevents a file replacement between JSON parsing and digest evidence.
+    $share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, $share)
+    $memory = $null
+    try {
+      $memory = New-Object System.IO.MemoryStream
+      $stream.CopyTo($memory)
+      [byte[]]$bytes = $memory.ToArray()
+    } finally {
+      if ($null -ne $memory) { $memory.Dispose() }
+      $stream.Dispose()
+    }
+
+    $sha256 = Get-Sha256HexFromBytes $bytes
+    $utf8 = New-Object System.Text.UTF8Encoding($false, $true)
+    $raw = $utf8.GetString($bytes)
+    if ($raw.Length -gt 0 -and $raw[0] -eq [char]0xFEFF) {
+      $raw = $raw.Substring(1)
+    }
     $row = $raw | ConvertFrom-Json -ErrorAction Stop
-    $sha256 = (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
     return [ordered]@{ read_state = 'READ'; row = $row; sha256 = $sha256; error = $null }
   } catch {
-    return [ordered]@{ read_state = 'INVALID'; row = $null; sha256 = $null; error = ([string]$_.Exception.Message).Substring(0, [Math]::Min(200, ([string]$_.Exception.Message).Length)) }
+    $message = [string]$_.Exception.Message
+    return [ordered]@{ read_state = 'INVALID'; row = $null; sha256 = $null; error = $message.Substring(0, [Math]::Min(200, $message.Length)) }
   }
 }
 
@@ -56,14 +100,15 @@ $installed = [ordered]@{
 if (Test-Path -LiteralPath $InstalledExePath -PathType Leaf) {
   $installed.exists = $true
   try {
-    $installed.sha256 = (Get-FileHash -LiteralPath $InstalledExePath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+    $installed.sha256 = Get-FileSha256Hex $InstalledExePath
     $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($InstalledExePath)
     $installed.product_version = if ($version.ProductVersion) { [string]$version.ProductVersion } else { $null }
     $installed.file_version = if ($version.FileVersion) { [string]$version.FileVersion } else { $null }
     $installed.hash_matches_expected = [bool]($expectedHash -and $installed.sha256 -eq $expectedHash)
     $installed.readback_proven = $true
   } catch {
-    $installed.error = ([string]$_.Exception.Message).Substring(0, [Math]::Min(200, ([string]$_.Exception.Message).Length))
+    $message = [string]$_.Exception.Message
+    $installed.error = $message.Substring(0, [Math]::Min(200, $message.Length))
   }
 } else {
   $installed.readback_proven = $true
@@ -71,7 +116,7 @@ if (Test-Path -LiteralPath $InstalledExePath -PathType Leaf) {
 
 $result = [ordered]@{
   schema = 'metaengine.self-update.bootstrap-probe.v1'
-  version = '1.0.1'
+  version = '1.0.2'
   captured_at = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
   expected_target_version = $ExpectedTargetVersion
   expected_installed_executable_sha256 = if ($expectedHash) { $expectedHash } else { $null }

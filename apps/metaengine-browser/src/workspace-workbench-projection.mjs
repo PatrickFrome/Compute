@@ -1,3 +1,9 @@
+import { projectMetaengineDevOS } from './metaengine-devos-projection.mjs';
+import { composeDevOSSurfaceRegistry } from './metaengine-devos-surface-registry.mjs';
+import { attachDevOSSessionLayout } from './metaengine-devos-session-layout-projection.mjs';
+import { projectDevOSShellViewModel } from './metaengine-devos-shell-view-model.mjs';
+import { attachDevOSSystemAttention } from './metaengine-devos-system-attention.mjs';
+
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TARGET_RE=/^webcontents:[1-9][0-9]*$/;
 
@@ -44,53 +50,18 @@ export function projectWorkspaceWorkbench(snapshot={}){
       if(!['READY','FROZEN','RESERVED'].includes(state)){issues.push(issue('WORKSPACE_STATE_INVALID',binding,tab));continue}
       if(state==='READY')ready+=1;else if(state==='FROZEN')frozen+=1;else reserved+=1;
       groupedTabIds.add(tabId);
-      groups.push(Object.freeze({
-        group_id:`workspace:${workspaceId}:${workspaceGeneration}`,
-        workspace_id:workspaceId,
-        workspace_generation:workspaceGeneration,
-        coordination_workspace_id:String(binding.coordination_workspace_id||'').toLowerCase(),
-        task_id:String(binding.task_id||'').toLowerCase(),
-        point_id:text(binding.point_id,160),
-        repo_id:text(binding.repo_id,240),
-        branch_name:text(binding.branch_name,240),
-        base_sha:String(binding.base_sha||'').toLowerCase(),
-        agent_id:agentId,
-        role:text(agent.role,64).toUpperCase(),
-        tab_id:tabId,
-        target_id:targetId,
-        agent_generation_epoch:agentGeneration,
-        lease_generation:leaseGeneration,
-        lease_expires_at:binding.lease_expires_at||null,
-        state,
-        ambiguity_code:binding.ambiguity_code||null,
-        dirty_hold:binding.dirty_hold===true,
-        tab:tabProjection(tab),
-        agent:agentProjection(agent),
-        current_binding:true,
-        automatic_retry_allowed:false,
-        page_data_authority:false,
-        authority_effect:false,
-      }));
+      groups.push(Object.freeze({group_id:`workspace:${workspaceId}:${workspaceGeneration}`,workspace_id:workspaceId,workspace_generation:workspaceGeneration,coordination_workspace_id:String(binding.coordination_workspace_id||'').toLowerCase(),task_id:String(binding.task_id||'').toLowerCase(),point_id:text(binding.point_id,160),repo_id:text(binding.repo_id,240),branch_name:text(binding.branch_name,240),base_sha:String(binding.base_sha||'').toLowerCase(),agent_id:agentId,role:text(agent.role,64).toUpperCase(),tab_id:tabId,target_id:targetId,agent_generation_epoch:agentGeneration,lease_generation:leaseGeneration,lease_expires_at:binding.lease_expires_at||null,state,ambiguity_code:binding.ambiguity_code||null,dirty_hold:binding.dirty_hold===true,tab:tabProjection(tab),agent:agentProjection(agent),current_binding:true,automatic_retry_allowed:false,page_data_authority:false,authority_effect:false}));
     }
   }
 
   groups.sort((a,b)=>a.branch_name.localeCompare(b.branch_name)||a.group_id.localeCompare(b.group_id));
   const sessions=[];
   for(const tab of tabs){if(!groupedTabIds.has(String(tab?.tab_id||'')))sessions.push(tabProjection(tab))}
-  return Object.freeze({
-    schema:'metaengine.browser.workspace-workbench-projection.v1',
-    source_state:sourceState,
-    source_implemented:observer?.source_implemented===true,
-    runtime_deployed:observer?.runtime_deployed===true?true:(observer?.runtime_deployed===false?false:null),
-    groups,
-    sessions,
-    issues,
-    counts:{workspaces:groups.length,sessions:sessions.length,issues:issues.length,ready,frozen,reserved},
-    grouping_authority:'DURABLE_WORKSPACE_BINDING_ONLY',
-    url_heuristic_grouping:false,
-    title_heuristic_grouping:false,
-    automatic_retry_allowed:false,
-    browser_actuation_authority:false,
-    authority_effect:false,
-  });
+  const base=Object.freeze({schema:'metaengine.browser.workspace-workbench-projection.v1',source_state:sourceState,source_implemented:observer?.source_implemented===true,runtime_deployed:observer?.runtime_deployed===true?true:(observer?.runtime_deployed===false?false:null),groups,sessions,issues,counts:{workspaces:groups.length,sessions:sessions.length,issues:issues.length,ready,frozen,reserved},grouping_authority:'DURABLE_WORKSPACE_BINDING_ONLY',url_heuristic_grouping:false,title_heuristic_grouping:false,automatic_retry_allowed:false,browser_actuation_authority:false,authority_effect:false});
+  const devosBase=projectMetaengineDevOS({tabs:snapshot?.tabs||{tabs:[]},supervisor:snapshot?.supervisor||null,owner_safety_gates:snapshot?.owner_safety_gates||null,workspaces:base});
+  const devosSurfaces=composeDevOSSurfaceRegistry(devosBase,{source_snapshot:snapshot?.devos_sources??null});
+  const devosAttention=attachDevOSSystemAttention(devosSurfaces,{...snapshot,workspaces:base});
+  const devos=attachDevOSSessionLayout(devosAttention,snapshot?.session_layouts??null);
+  const devos_shell=projectDevOSShellViewModel(devos,snapshot?.presentation_focus??null);
+  return Object.freeze({...base,devos,devos_shell});
 }

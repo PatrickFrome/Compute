@@ -72,11 +72,19 @@ async function transitionIfPresent(app, state, options = {}) {
   }
 }
 
+function transactionIdentity(journal) {
+  return {
+    transaction_id: journal?.transaction_id ? String(journal.transaction_id) : null,
+    target_git_sha: journal?.resolved_git_sha ? String(journal.resolved_git_sha).trim().toLowerCase() : null,
+  };
+}
+
 function startupHold({ app, journal = null, reason, transactionState = null } = {}) {
   return {
     schema: 'metaengine.self-update.startup-inspection.v1',
     state: 'AMBIGUOUS_INSTALL',
     transaction_state: transactionState || journal?.state || null,
+    ...transactionIdentity(journal),
     current_version: String(app.getVersion() || ''),
     target_version: journal?.target_version || null,
     reason: String(reason || 'durable_transaction_hold').slice(0, 240),
@@ -210,11 +218,79 @@ export async function inspectSelfUpdateStartup(app, { clock = () => Date.now() }
       transactionState: 'UNREADABLE',
     });
   }
-  if (journal?.state === 'AMBIGUOUS_INSTALL' || journal?.state === 'QUARANTINED') {
+  if (journal?.state === 'QUARANTINED') {
     return startupHold({
       app,
       journal,
       reason: journal.evidence?.reason || journal.evidence?.quarantine_reason || 'durable_transaction_hold',
+    });
+  }
+
+  // An older executable can durably classify a failed installer handoff as
+  // AMBIGUOUS_INSTALL before a later manual repair installs a newer build. The
+  // held journal must remain fail-closed unless both pieces of durable evidence
+  // agree on the exact predecessor target: the validated transaction and the
+  // validated pre-install receipt. Only a strictly newer installed version may
+  // retire that predecessor attempt; an equal, older, malformed, missing, or
+  // mismatched version remains held without reopening installer authority.
+  if (journal?.state === 'AMBIGUOUS_INSTALL') {
+    let heldExpected = null;
+    try {
+      heldExpected = await readExpectedPreInstallReceipt(app, {
+        maxAgeMs: STARTUP_HOLD_MAX_AGE_MS,
+        clock,
+      });
+    } catch {
+      return startupHold({
+        app,
+        journal,
+        reason: journal.evidence?.reason || 'durable_transaction_hold',
+      });
+    }
+    const current = String(app.getVersion() || '');
+    const target = String(heldExpected?.receipt?.version || '');
+    const exactTargetBinding = Boolean(
+      target
+      && journal.target_version === target
+      && heldExpected.receipt.available_version === target,
+    );
+    if (exactTargetBinding && compareVersions(current, target) > 0) {
+      let superseded;
+      try {
+        superseded = await transitionSelfUpdateTransaction(app, 'SUPERSEDED', {
+          requireTargetVersion: target,
+          evidence: {
+            superseding_version: current,
+            superseded_from_state: 'AMBIGUOUS_INSTALL',
+            predecessor_receipt_verified: true,
+          },
+        });
+      } catch (error) {
+        return startupHold({
+          app,
+          journal,
+          reason: `supersede_reconciliation_failed:${String(error?.message || error).slice(0, 180)}`,
+        });
+      }
+      if (superseded?.state === 'SUPERSEDED'
+        && superseded.target_version === target
+        && superseded.evidence?.superseding_version === current) {
+        return {
+          schema: 'metaengine.self-update.startup-inspection.v1',
+          state: 'SUPERSEDED',
+          transaction_state: superseded.state,
+          ...transactionIdentity(superseded),
+          current_version: current,
+          target_version: target,
+          automatic_retry_allowed: false,
+          authority_effect: false,
+        };
+      }
+    }
+    return startupHold({
+      app,
+      journal,
+      reason: journal.evidence?.reason || 'durable_transaction_hold',
     });
   }
 
@@ -233,7 +309,8 @@ export async function inspectSelfUpdateStartup(app, { clock = () => Date.now() }
     }
     return {
       schema: 'metaengine.self-update.startup-inspection.v1',
-      state: 'NONE', current_version: String(app.getVersion() || ''), target_version: null,
+      state: 'NONE', transaction_id: null, target_git_sha: null,
+      current_version: String(app.getVersion() || ''), target_version: null,
       automatic_retry_allowed: true, authority_effect: false,
     };
   }
@@ -248,10 +325,12 @@ export async function inspectSelfUpdateStartup(app, { clock = () => Date.now() }
         evidence: { boot_version_match: true },
       }).catch(() => journal);
     }
+    const exactTransaction = observedTransaction || journal;
     return {
       schema: 'metaengine.self-update.startup-inspection.v1',
       state: 'TARGET_INSTALLED',
-      transaction_state: observedTransaction?.state || journal?.state || null,
+      transaction_state: exactTransaction?.state || null,
+      ...transactionIdentity(exactTransaction),
       current_version: current,
       target_version: target,
       automatic_retry_allowed: false,
@@ -262,7 +341,7 @@ export async function inspectSelfUpdateStartup(app, { clock = () => Date.now() }
     await transitionIfPresent(app, 'SUPERSEDED', { evidence: { superseding_version: current } }).catch(() => {});
     return {
       schema: 'metaengine.self-update.startup-inspection.v1',
-      state: 'SUPERSEDED', current_version: current, target_version: target,
+      state: 'SUPERSEDED', ...transactionIdentity(journal), current_version: current, target_version: target,
       automatic_retry_allowed: false, authority_effect: false,
     };
   }

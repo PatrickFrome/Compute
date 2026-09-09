@@ -2,6 +2,10 @@
   "appId": "com.metaengine.browser.test",
   "productName": "METAENGINE Browser Test",
   "asar": true,
+  "electronFuses": {
+    "enableEmbeddedAsarIntegrityValidation": true,
+    "onlyLoadAppFromAsar": true
+  },
   "asarUnpack": [
     "src/browser-sentinel-worker.cjs",
     "src/browser-sentinel-liveness.cjs",
@@ -17,11 +21,21 @@
     "package.json"
   ],
   "beforePack": "./scripts/electron-builder-before-pack.cjs",
+  "afterAllArtifactBuild": "./scripts/electron-builder-after-all-artifact-build.cjs",
   "extraResources": [
     {
       "from": "native-dist/guardian",
       "to": "guardian-native",
-      "filter": ["**/*"]
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "devos-source-snapshot",
+      "to": "devos-source-snapshot",
+      "filter": [
+        "**/*"
+      ]
     }
   ],
   "publish": [
@@ -34,10 +48,13 @@
     }
   ],
   "win": {
+    "icon": "build/icon.ico",
     "target": [
       {
         "target": "nsis",
-        "arch": ["x64"]
+        "arch": [
+          "x64"
+        ]
       }
     ],
     "artifactName": "METAENGINE-Browser-Test-Setup-${version}-${arch}.${ext}"
@@ -49,7 +66,7 @@
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
     "shortcutName": "METAENGINE Browser Test",
-    "runAfterFinish": false,
+    "runAfterFinish": true,
     "deleteAppDataOnUninstall": false
   }
 }

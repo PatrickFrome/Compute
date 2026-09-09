@@ -154,9 +154,9 @@ test('base client exposes fastlane telemetry and keeps cycle pickup intact witho
   assert.equal(client.snapshot().last_command_status, 'COMPLETED');
 });
 
-test('base client preserves the 750ms fastlane only as a fallback and suppresses it after batch support', async () => {
+test('base client keeps the legacy fastlane only behind explicit fallback and suppresses it after batch support', async () => {
   const source = await readFile(new URL('../src/native-supervisor-client-base.mjs', import.meta.url), 'utf8');
-  assert.match(source, /commandFastlane === true\s*\?\s*new NativeSupervisorCommandFastlane/);
+  assert.match(source, /commandFastlane === true && this\.#legacySingleLeaseFallback\s*\?\s*new NativeSupervisorCommandFastlane/);
   assert.match(source, /this\.#commandFastlane\?\.start\(\)/);
   assert.match(source, /this\.#commandFastlane\?\.stop\(\)/);
   assert.match(source, /command_fastlane: this\.#commandFastlane\?\.snapshot\(\)/);
@@ -171,8 +171,12 @@ test('base client preserves the 750ms fastlane only as a fallback and suppresses
   assert.doesNotMatch(fastlaneSource, /setInterval\s*\(/);
 });
 
-test('shell opts the native supervisor into the command fastlane with a bounded cadence', async () => {
+test('clean genesis shell requires held batch transport and disables the single-command fastlane', async () => {
   const main = await readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
-  assert.match(main, /commandFastlane:\s*true/);
-  assert.match(main, /commandFastlaneIntervalMs:\s*750/);
+  assert.match(main, /commandBatchSize:\s*64/);
+  assert.match(main, /commandReadConcurrency:\s*32/);
+  assert.match(main, /commandMutationConcurrency:\s*16/);
+  assert.match(main, /legacySingleLeaseFallback:\s*false/);
+  assert.match(main, /commandFastlane:\s*false/);
+  assert.doesNotMatch(main, /commandFastlaneIntervalMs:\s*750/);
 });

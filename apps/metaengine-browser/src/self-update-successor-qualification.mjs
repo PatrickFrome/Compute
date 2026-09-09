@@ -4,6 +4,7 @@ import { quarantineSelfUpdateTransaction, readSelfUpdateTransaction } from './se
 import {
   recordSelfUpdateRecoveryQualificationResult,
   recordSelfUpdateRecoveryQuarantineResult,
+  selfUpdateRecoveryDiagnosticSnapshot,
 } from './self-update-successor-recovery.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -15,10 +16,39 @@ function normalized(value) {
   return String(value || '').trim().toUpperCase();
 }
 
+function normalizedGitSha(value) {
+  const sha = String(value || '').trim().toLowerCase();
+  return sha || null;
+}
+
+function exactRecoveryTransaction(transaction, recovery) {
+  if (!recovery || recovery.state !== 'TARGET_INSTALLED_PENDING_QUALIFICATION') return true;
+  if (!transaction || String(transaction.transaction_id || '') !== String(recovery.transaction_id || '')) return false;
+  if (String(transaction.target_version || '') !== String(recovery.target_version || '')) return false;
+  const expectedGitSha = normalizedGitSha(recovery.target_git_sha);
+  if (expectedGitSha && normalizedGitSha(transaction.resolved_git_sha) !== expectedGitSha) return false;
+  return transaction.authority_effect === false && transaction.automatic_retry_allowed === false;
+}
+
+function recoveryBindingDrift(transaction, recovery) {
+  return {
+    state: 'RECOVERY_TRANSACTION_BINDING_DRIFT',
+    expected_transaction_id: recovery?.transaction_id || null,
+    observed_transaction_id: transaction?.transaction_id || null,
+    target_version: recovery?.target_version || transaction?.target_version || null,
+    authority_effect: false,
+  };
+}
+
 export async function recordAcceptedSignedSupervisorHeartbeat({ app, state, acceptedAtMs = Date.now() } = {}) {
   if (!app || typeof app.getVersion !== 'function') throw new Error('self_update_heartbeat_app_invalid');
   const version = String(app.getVersion() || '');
   const transaction = await readSelfUpdateTransaction(app).catch(() => null);
+  const recovery = selfUpdateRecoveryDiagnosticSnapshot();
+  if (!exactRecoveryTransaction(transaction, recovery)) {
+    acceptedHeartbeatHealth = null;
+    return recoveryBindingDrift(transaction, recovery);
+  }
   if (!transaction || transaction.state !== 'SUCCESSOR_BOOTED' || transaction.target_version !== version) {
     acceptedHeartbeatHealth = null;
     return { state: 'NOT_PENDING', authority_effect: false };
@@ -96,6 +126,11 @@ export async function probeUpdatedSuccessorQualification({
     throw new Error('self_update_qualification_app_invalid');
   }
   const transaction = await readSelfUpdateTransaction(app);
+  const recovery = selfUpdateRecoveryDiagnosticSnapshot();
+  if (!exactRecoveryTransaction(transaction, recovery)) {
+    acceptedHeartbeatHealth = null;
+    return recoveryBindingDrift(transaction, recovery);
+  }
   if (!transaction || transaction.state !== 'SUCCESSOR_BOOTED') {
     return { state: 'NOT_PENDING', transaction_state: transaction?.state || null, authority_effect: false };
   }
@@ -161,7 +196,7 @@ export async function qualifyUpdatedSuccessorWhenHealthy({
   let last = null;
   while (Date.now() <= deadline) {
     last = await probeUpdatedSuccessorQualification({ app, uptimeMs, minUptimeMs });
-    if (['QUALIFIED','NOT_PENDING','QUARANTINED'].includes(last.state)) return last;
+    if (['QUALIFIED','NOT_PENDING','QUARANTINED','RECOVERY_TRANSACTION_BINDING_DRIFT'].includes(last.state)) return last;
     await sleep(Math.max(100, Number(pollMs) || 1000));
   }
   return { ...(last || {}), state: 'QUALIFICATION_PENDING_TIMEOUT', authority_effect: false };

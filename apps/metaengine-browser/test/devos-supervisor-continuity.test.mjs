@@ -60,7 +60,7 @@ test('CONTINUE_DEVELOPMENT bypasses ordinary wake throttle only after prior cycl
   assert.match(immediate.message, /Do not wait for user input/i);
 });
 
-test('confirmed active supervisor wake survives process restart and reconstructs its prompt deterministically', async () => {
+test('confirmed predecessor wake is fenced on process restart and only a fresh wake reconstructs a prompt', async () => {
   const h = keepaliveHarness();
   const first = h.make();
   await first.init();
@@ -71,17 +71,27 @@ test('confirmed active supervisor wake survives process restart and reconstructs
 
   const restored = h.make();
   await restored.init();
-  const active = restored.activeWake();
-  assert.equal(restored.snapshot().state, 'ACTIVE');
-  assert.equal(active.wake_id, prepared.pending.wake_id);
-  assert.equal(active.reason, 'CONTINUE_DEVELOPMENT');
+  const afterRestart = restored.snapshot();
+  assert.equal(afterRestart.state, 'WAITING');
+  assert.equal(restored.activeWake(), null);
+  assert.equal(afterRestart.predecessor_wake_history.length, 1);
+  assert.equal(afterRestart.predecessor_wake_history[0].wake_id, prepared.pending.wake_id);
+  assert.equal(afterRestart.predecessor_wake_history[0].retired_reason, 'PROCESS_BOUNDARY_ACTIVE_WAKE_FENCED');
+  assert.equal(afterRestart.predecessor_wake_history[0].automatic_retry_allowed, false);
+  assert.equal(restored.canWake(), false, 'restart must not replay the predecessor effect');
+
+  await restored.enqueueWake('CONTINUE_DEVELOPMENT', { key: 'fresh-process' });
+  const fresh = await restored.prepareNextWake();
+  assert.equal(fresh.ok, true);
+  assert.notEqual(fresh.pending.wake_id, prepared.pending.wake_id);
   const message = buildSupervisorWakeMessage({
-    supervisorEpoch: active.supervisor_epoch,
-    cycleSeq: active.cycle_seq,
-    wakeId: active.wake_id,
-    reason: active.reason,
+    supervisorEpoch: fresh.pending.supervisor_epoch,
+    cycleSeq: fresh.pending.cycle_seq,
+    wakeId: fresh.pending.wake_id,
+    reason: fresh.pending.reason,
   });
-  assert.match(message, new RegExp(active.wake_id));
+  assert.match(message, new RegExp(fresh.pending.wake_id));
+  assert.doesNotMatch(message, new RegExp(prepared.pending.wake_id));
   assert.match(message, /integration\/metaengine-development-os-v1/);
 });
 

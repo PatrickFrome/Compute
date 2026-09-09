@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   buildSelfUpdateRecoveryDiagnostic,
+  recordSelfUpdateRecoveryQualificationResult,
   recordSelfUpdateRecoveryQuarantineResult,
   selfUpdateRecoveryDiagnosticSnapshot,
   shouldResumeSuccessorQualification,
@@ -12,12 +13,16 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(__dirname, '../src');
+const transactionId = 'tx-recovery-exact-001';
+const targetGitSha = 'f43c48caab39b75b254da8971837fdddef580885';
 
 function installedInspection(overrides = {}) {
   return {
     schema: 'metaengine.self-update.startup-inspection.v1',
     state: 'TARGET_INSTALLED',
     transaction_state: 'SUCCESSOR_BOOTED',
+    transaction_id: transactionId,
+    target_git_sha: targetGitSha,
     current_version: '0.6.6-dev.8.1',
     target_version: '0.6.6-dev.8.1',
     automatic_retry_allowed: false,
@@ -39,6 +44,21 @@ function updatedHandoff(overrides = {}) {
   };
 }
 
+function terminalTransaction(overrides = {}) {
+  return {
+    schema: 'metaengine.self-update.transaction.v1',
+    transaction_id: transactionId,
+    resolved_git_sha: targetGitSha,
+    state: 'QUALIFIED',
+    target_version: '0.6.6-dev.8.1',
+    quarantined: false,
+    qualified: true,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+    ...overrides,
+  };
+}
+
 test('updated launch qualifies only after exact successor handoff is durably proven', () => {
   assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: true, updateHandoff: updatedHandoff() }), true);
   assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: true, updateHandoff: null, startupInspection: installedInspection() }), false);
@@ -48,6 +68,7 @@ test('updated launch qualifies only after exact successor handoff is durably pro
 
 test('normal restart resumes qualification only for exact unresolved SUCCESSOR_BOOTED evidence', () => {
   assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: false, startupInspection: installedInspection() }), true);
+  assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: false, startupInspection: installedInspection({ transaction_id: null }) }), false);
   assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: false, startupInspection: installedInspection({ transaction_state: 'QUALIFIED' }) }), false);
   assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: false, startupInspection: installedInspection({ transaction_state: 'SUPERSEDED' }) }), false);
   assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: false, startupInspection: installedInspection({ transaction_state: 'PREPARED' }) }), false);
@@ -64,6 +85,8 @@ test('recovery diagnostic exposes exact pending qualification without reopening 
   const row = buildSelfUpdateRecoveryDiagnostic(installedInspection());
   assert.equal(row.schema, 'metaengine.self-update.recovery-diagnostic.v1');
   assert.equal(row.state, 'TARGET_INSTALLED_PENDING_QUALIFICATION');
+  assert.equal(row.transaction_id, transactionId);
+  assert.equal(row.target_git_sha, targetGitSha);
   assert.equal(row.recovery_active, true);
   assert.equal(row.qualification_resume_allowed, true);
   assert.equal(row.recovery_installer_effect_allowed, false);
@@ -88,29 +111,57 @@ test('recovery diagnostic classifies qualified, superseded, quarantine and ambig
   }
 });
 
+test('forged same-version terminal rows cannot reconcile a different recovery transaction', () => {
+  assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: false, startupInspection: installedInspection() }), true);
+  const before = selfUpdateRecoveryDiagnosticSnapshot();
+
+  const wrongQualified = recordSelfUpdateRecoveryQualificationResult({
+    state: 'QUALIFIED',
+    transaction: terminalTransaction({ transaction_id: 'tx-same-version-other-attempt' }),
+    authority_effect: false,
+  });
+  assert.deepEqual(wrongQualified, before);
+
+  const wrongGit = recordSelfUpdateRecoveryQualificationResult({
+    state: 'QUALIFIED',
+    transaction: terminalTransaction({ resolved_git_sha: '9df375038781219ea96885d22233cd9c9e96f969' }),
+    authority_effect: false,
+  });
+  assert.deepEqual(wrongGit, before);
+
+  const exact = recordSelfUpdateRecoveryQualificationResult({
+    state: 'QUALIFIED',
+    transaction: terminalTransaction(),
+    authority_effect: false,
+  });
+  assert.equal(exact.state, 'QUALIFIED');
+  assert.equal(exact.transaction_id, transactionId);
+});
+
 test('forged quarantine row cannot clear exact pending recovery telemetry', () => {
   assert.equal(shouldResumeSuccessorQualification({ updatedLaunch: false, startupInspection: installedInspection() }), true);
   const before = selfUpdateRecoveryDiagnosticSnapshot();
-  const wrongTarget = recordSelfUpdateRecoveryQuarantineResult({
-    schema: 'metaengine.self-update.transaction.v1',
+  const wrongTarget = recordSelfUpdateRecoveryQuarantineResult(terminalTransaction({
     state: 'QUARANTINED',
     target_version: '0.6.6-dev.9.1',
     quarantined: true,
     qualified: false,
-    automatic_retry_allowed: false,
-    authority_effect: false,
     evidence: { quarantine_reason: 'forged_wrong_target' },
-  });
+  }));
   assert.deepEqual(wrongTarget, before);
-  const notQuarantined = recordSelfUpdateRecoveryQuarantineResult({
-    schema: 'metaengine.self-update.transaction.v1',
+  const wrongTransaction = recordSelfUpdateRecoveryQuarantineResult(terminalTransaction({
     state: 'QUARANTINED',
-    target_version: '0.6.6-dev.8.1',
+    transaction_id: 'tx-same-version-other-attempt',
+    quarantined: true,
+    qualified: false,
+    evidence: { quarantine_reason: 'forged_wrong_transaction' },
+  }));
+  assert.deepEqual(wrongTransaction, before);
+  const notQuarantined = recordSelfUpdateRecoveryQuarantineResult(terminalTransaction({
+    state: 'QUARANTINED',
     quarantined: false,
     qualified: false,
-    automatic_retry_allowed: false,
-    authority_effect: false,
-  });
+  }));
   assert.deepEqual(notQuarantined, before);
   assert.equal(selfUpdateRecoveryDiagnosticSnapshot().state, 'TARGET_INSTALLED_PENDING_QUALIFICATION');
 });
@@ -119,6 +170,8 @@ test('recovery diagnostic preserves normal no-transaction retry semantics and fa
   const none = buildSelfUpdateRecoveryDiagnostic(installedInspection({
     state: 'NONE',
     transaction_state: null,
+    transaction_id: null,
+    target_git_sha: null,
     target_version: null,
     automatic_retry_allowed: true,
   }));

@@ -1,0 +1,2 @@
+# Keep CSP-pinned inline bytes stable across Windows and Linux checkouts.
+ui/index.html text eol=lf

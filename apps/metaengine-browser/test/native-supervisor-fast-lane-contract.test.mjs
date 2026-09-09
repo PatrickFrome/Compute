@@ -44,7 +44,7 @@ test('core scheduler admits remote command lane before worker observation and De
   assert.match(source, /if \(!descriptor\.read_only && clientRef\.#idleWorkPromise\) await clientRef\.#idleWorkPromise/);
 });
 
-test('base command lane precedes heavy maintenance, preserves 750ms fallback, and hands off to held batch transport', () => {
+test('base command lane precedes heavy maintenance, gates legacy fallback explicitly, and hands off to held batch transport', () => {
   const source = fs.readFileSync(path.join(appRoot, 'src', 'native-supervisor-client-base.mjs'), 'utf8');
   const cycle = between(source, '  async cycle() {', '\n  }\n}');
   const next = cycle.indexOf('const commands = await this.#nextCommands()');
@@ -54,7 +54,7 @@ test('base command lane precedes heavy maintenance, preserves 750ms fallback, an
   assert.match(source, /\/v1\/commands\/wait-batch/);
   assert.match(source, /\/v1\/commands\/result-batch/);
   assert.match(source, /long_poll_replaces_idle_timer_latency/);
-  assert.match(source, /commandFastlane === true\s*\?\s*new NativeSupervisorCommandFastlane/);
+  assert.match(source, /commandFastlane === true && this\.#legacySingleLeaseFallback\s*\?\s*new NativeSupervisorCommandFastlane/);
   assert.match(source, /this\.#batchTransport = 'SUPPORTED';\s*\n\s*this\.#commandFastlane\?\.stop\(\)/);
   assert.match(source, /legacy_fallback_suppressed_by_batch_transport:\s*this\.#batchTransport === 'SUPPORTED'/);
   assert.match(source, /one_steady_state_lease_loop:\s*true/);
@@ -91,25 +91,48 @@ test('Realtime wake helper fails join errors fast without inventing authority', 
   const source = fs.readFileSync(path.join(appRoot, 'supabase', 'a2-browser-native-supervisor-v1', 'realtime-command-wake.mjs'), 'utf8');
   assert.match(source, /JOIN_REJECTED/);
   assert.match(source, /JOIN_SEND_FAILED/);
+  assert.match(source, /SUBSCRIBE_TIMEOUT/);
   assert.match(source, /finishWake\(reason\)/);
   assert.match(source, /transport_delivery_is_authority:\s*false/);
   assert.match(source, /authority_effect:\s*false/);
 });
 
-test('Realtime wake trigger is source-only, advisory, private and payload-minimal', () => {
+test('Realtime wake reuses the canonical shared trigger and remains advisory, private and payload-minimal', () => {
   const wakeSqlPath = path.join(repoRoot, 'sql', 'browser_control_plane_realtime_wake_v1.sql');
   const sql = fs.readFileSync(wakeSqlPath, 'utf8');
+  assert.match(sql, /create or replace function public\.glm_browser_pulse_notify_v1\(\)/i);
+  assert.match(sql, /pg_notify\s*\(/i);
+  assert.match(sql, /TG_TABLE_NAME\s*=\s*'compute_fabric_a2_browser_supervisor_command_h205f22'/i);
+  assert.match(sql, /TG_OP\s*=\s*'INSERT'/i);
+  assert.match(sql, /TG_OP\s*=\s*'UPDATE'/i);
+  assert.match(sql, /v_status\s*=\s*'PENDING'/i);
+  assert.match(sql, /v_old_status\s+is distinct from\s+v_status/i);
   assert.match(sql, /realtime\.send\s*\(/i);
   assert.match(sql, /'COMMAND_AVAILABLE'/);
-  assert.match(sql, /'metaengine-control:'/);
+  assert.match(sql, /format\('metaengine-control:%s:%s'/i);
   assert.match(sql, /transport_delivery_is_authority[^\n]*false/i);
   assert.match(sql, /authority_effect[^\n]*false/i);
-  assert.match(sql, /after insert/i);
-  assert.match(sql, /when \(new\.status = 'PENDING'\)/i);
+  assert.match(sql, /true\s*\n\s*\);/i, 'Realtime Broadcast must remain private');
   assert.match(sql, /rollback;\s*$/i);
   assert.doesNotMatch(sql, /new\.payload/i, 'wake payload must not disclose command payload');
+  assert.doesNotMatch(sql, /create\s+trigger/i, 'wake must not create a second publisher trigger');
   assert.doesNotMatch(sql, /^\s*commit;\s*$/im);
-  assert.equal(fs.existsSync(path.join(repoRoot, 'supabase', 'migrations', 'browser_control_plane_realtime_wake_v1.sql')), false);
+  assert.equal(fs.existsSync(path.join(repoRoot, 'supabase', 'migrations', '20260906163500_browser_command_realtime_wake_single_trigger_v1.sql')), true);
+});
+
+test('fast-lane release migration fences allocation, lease expiry and semantic completion', () => {
+  const migrationPath = path.join(repoRoot, 'supabase', 'migrations', '20260906172000_browser_control_plane_fast_lane_release_v1.sql');
+  const sql = fs.readFileSync(migrationPath, 'utf8');
+  assert.match(sql, /pg_advisory_xact_lock/i);
+  assert.match(sql, /hashtextextended\(p_workspace_id::text \|\| ':' \|\| v_client/i);
+  assert.match(sql, /expires_at>clock_timestamp\(\)/i);
+  assert.match(sql, /leased_at>clock_timestamp\(\)-interval '10 minutes'/i);
+  assert.match(sql, /v_outcome<>'CONFIRMED'/i);
+  assert.match(sql, /sealed_effect_binding_required/i);
+  assert.match(sql, /effect-binding\.v1/);
+  assert.match(sql, /effect-binding\.v2/);
+  assert.match(sql, /grant execute[^;]+to service_role/i);
+  assert.doesNotMatch(sql, /grant\s+execute[^;]+\s+to\s+(public|anon|authenticated)\s*;/i);
 });
 
 test('fast-lane SQL stays source-only, rollback-only, and requires mutation post-condition readback', () => {
@@ -125,7 +148,6 @@ test('fast-lane SQL stays source-only, rollback-only, and requires mutation post
   assert.match(sql, /rollback;\s*$/i);
   assert.doesNotMatch(sql, /^\s*commit;\s*$/im);
   assert.doesNotMatch(sql, /grant\s+execute[^;]+\s+to\s+(public|anon|authenticated)\s*;/i);
-  assert.equal(fs.existsSync(path.join(repoRoot, 'supabase', 'migrations', 'browser_control_plane_fast_lane_v1.sql')), false);
 });
 
 test('realtime process plane is observation-only and cannot become a second command scheduler', () => {

@@ -1,9 +1,27 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { SelfUpdateRuntime } from './self-update-runtime.mjs';
-import { persistPreInstallReceipt, SUCCESSOR_STARTUP_PROBE_ONLY } from './self-update-handoff.mjs';
+import {
+  persistPreInstallReceipt,
+  SUCCESSOR_STARTUP_NORMAL,
+  SUCCESSOR_STARTUP_PROBE_ONLY,
+} from './self-update-handoff.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function selfUpdateSmokeSuccessorStartup() {
+  const requested = String(
+    process.env.METAENGINE_SELF_UPDATE_SMOKE_SUCCESSOR_STARTUP || SUCCESSOR_STARTUP_PROBE_ONLY,
+  ).trim().toUpperCase();
+  if (![SUCCESSOR_STARTUP_PROBE_ONLY, SUCCESSOR_STARTUP_NORMAL].includes(requested)) {
+    throw new Error('self_update_smoke_successor_startup_invalid');
+  }
+  if (requested === SUCCESSOR_STARTUP_NORMAL
+    && (process.env.METAENGINE_SELF_UPDATE_TEST_MODE !== '1' || process.env.GITHUB_ACTIONS !== 'true')) {
+    throw new Error('self_update_smoke_normal_successor_ci_only');
+  }
+  return requested;
+}
 
 async function appendTrace(tracePath, row) {
   if (!tracePath) return;
@@ -20,6 +38,7 @@ async function appendTrace(tracePath, row) {
 export async function runSelfUpdateSmoke({ app, timeoutMs = 120_000 } = {}) {
   if (!app) throw new Error('self_update_smoke_app_required');
   const tracePath = process.env.METAENGINE_SELF_UPDATE_SMOKE_TRACE || null;
+  const successorStartup = selfUpdateSmokeSuccessorStartup();
 
   // Physical update proof must exercise the exact installed crash sentinel. Earlier
   // E2E disabled it and therefore could not reproduce Windows install-directory locks.
@@ -34,7 +53,7 @@ export async function runSelfUpdateSmoke({ app, timeoutMs = 120_000 } = {}) {
     beforeInstall: async (receipt) => {
       const persisted = {
         ...receipt,
-        successor_startup: SUCCESSOR_STARTUP_PROBE_ONLY,
+        successor_startup: successorStartup,
       };
       await persistPreInstallReceipt(app, persisted);
       await appendTrace(tracePath, {
@@ -49,7 +68,7 @@ export async function runSelfUpdateSmoke({ app, timeoutMs = 120_000 } = {}) {
         restart_gate_safe: receipt.restart_gate_safe === true,
         ci_test_feed_active: process.env.METAENGINE_SELF_UPDATE_TEST_MODE === '1' && process.env.GITHUB_ACTIONS === 'true',
         pre_install_receipt_persisted: true,
-        successor_startup: SUCCESSOR_STARTUP_PROBE_ONLY,
+        successor_startup: successorStartup,
         receipt_schema: receipt.schema,
         last_error: null,
         authority_effect: false,
@@ -60,8 +79,8 @@ export async function runSelfUpdateSmoke({ app, timeoutMs = 120_000 } = {}) {
       if (!sentinel || sentinel.installer_handoff !== true || sentinel.worker_released !== true) {
         throw new Error('self_update_smoke_sentinel_not_released');
       }
-      // Keep historical E2E singleton semantics for the probe successor; production
-      // runtime is separately fenced by the primary-instance guard.
+      // Keep historical E2E singleton semantics for the successor. Production runtime
+      // is separately fenced by the primary-instance guard.
       if (!app.hasSingleInstanceLock()) throw new Error('self_update_smoke_primary_lock_missing');
       app.releaseSingleInstanceLock();
       const released = !app.hasSingleInstanceLock();

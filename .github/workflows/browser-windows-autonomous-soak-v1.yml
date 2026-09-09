@@ -1,0 +1,305 @@
+name: METAENGINE Browser Windows Autonomous Soak V1
+
+on:
+  push:
+    branches:
+      - work/browser-windows-soak-optimization-v1
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/**'
+      - 'apps/metaengine-browser/ui/**'
+      - 'apps/metaengine-browser/test/**'
+      - 'apps/metaengine-browser/native/**'
+      - 'apps/metaengine-browser/scripts/windows-autonomous-session-soak.ps1'
+      - 'apps/metaengine-browser/package.json'
+      - 'apps/metaengine-browser/electron-builder.test.json'
+      - '.github/workflows/browser-windows-autonomous-soak-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-windows-autonomous-soak-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  continuous-brain:
+    name: continuous-brain-100k
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prove exact head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+      - name: Parse exact source
+        working-directory: apps/metaengine-browser
+        run: npm run check
+      - name: Run continuous Brain, cognition, scheduler and activation hot-path soak
+        working-directory: apps/metaengine-browser
+        env:
+          METAENGINE_BRAIN_SOAK_STEPS: '100000'
+        run: >-
+          node --test
+          test/browser-windows-continuous-brain-soak.test.mjs
+          test/browser-brain-continuous-coordinator.test.mjs
+          test/browser-brain-cognition-fabric.test.mjs
+          test/browser-brain-agent-capacity-128.test.mjs
+          test/native-supervisor-command-lanes.test.mjs
+          test/browser-startup-activation-hotpath.test.mjs
+
+  brain-endurance:
+    name: brain-endurance-1m-128-cells-128-agents
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prove exact head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+      - name: Parse endurance source
+        working-directory: apps/metaengine-browser
+        run: >-
+          node --check src/browser-brain-cognition-fabric.mjs &&
+          node --check test/browser-windows-brain-endurance-128.test.mjs &&
+          node --check test/browser-brain-agent-capacity-128.test.mjs
+      - name: Run one-million-edge bounded endurance
+        working-directory: apps/metaengine-browser
+        env:
+          METAENGINE_BRAIN_ENDURANCE_STEPS: '1000000'
+        run: >-
+          node --test
+          test/browser-windows-brain-endurance-128.test.mjs
+          test/browser-brain-agent-capacity-128.test.mjs
+
+  seeded-fleet-chaos:
+    name: fleet-chaos-seed-${{ matrix.seed }}
+    runs-on: windows-2022
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [17, 73, 113, 509, 997, 4099, 65521, 20260906]
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prove exact head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+      - name: Run seeded autonomous fleet chaos
+        working-directory: apps/metaengine-browser
+        env:
+          METAENGINE_CHAOS_SEED: ${{ matrix.seed }}
+          METAENGINE_CHAOS_STEPS: '24000'
+        run: node --test test/windows-fleet-chaos-seeded.test.mjs
+
+  fleet-scale:
+    name: fleet-scale-2000-tasks-2048-peers
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prove exact head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+      - name: Run fleet scale and mesh convergence contracts
+        working-directory: apps/metaengine-browser
+        env:
+          METAENGINE_SCALE_NODES: '96'
+          METAENGINE_SCALE_NODE_CAPACITY: '32'
+          METAENGINE_SCALE_TASKS: '2000'
+          METAENGINE_SCALE_MESH_GROUPS: '128'
+          METAENGINE_SCALE_PEERS_PER_MESH: '16'
+        run: >-
+          node --test
+          test/windows-fleet-chaos-scale.test.mjs
+          test/supervisor-mesh-wire-projection.test.mjs
+          test/browser-brain-parallel-fanout.test.mjs
+          test/browser-brain-adaptive-fanout-runtime.test.mjs
+
+  package-session-soak:
+    name: installed-ui-72-activation-race-soak
+    needs: [continuous-brain, brain-endurance, seeded-fleet-chaos, fleet-scale]
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prove exact head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install package dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+      - name: Parse packaged session soak harness before expensive build
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Get-Content './scripts/windows-autonomous-session-soak.ps1' -Raw
+          $null = [ScriptBlock]::Create($source)
+          Write-Host 'windows_autonomous_session_soak_parse_ok'
+      - name: Build exact-head Windows NSIS candidate
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = [string](node -p "require('./package.json').version")
+          if (-not $version) { throw 'package_version_missing' }
+          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item native-dist\guardian -Recurse -Force -ErrorAction SilentlyContinue
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
+          if (-not $installer) { throw 'soak_installer_missing' }
+          $digest = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          Copy-Item $installer.FullName "$env:RUNNER_TEMP\autonomous-soak-setup.exe" -Force
+          Copy-Item $installer.FullName (Join-Path $env:RUNNER_TEMP $installer.Name) -Force
+          @{
+            schema='metaengine.browser.windows-autonomous-soak.v3'
+            source_head=$env:EXACT_HEAD
+            package_version=$version
+            installer_name=$installer.Name
+            installer_sha256=$digest
+            semantic_edges=100000
+            endurance_semantic_edges=1000000
+            endurance_browser_cells=128
+            endurance_agents=128
+            endurance_mutation_lanes=32
+            fleet_chaos_seeds=8
+            fleet_chaos_steps_per_seed=24000
+            scale_tasks=2000
+            scale_supervisor_peers=2048
+            scale_browser_nodes=96
+            second_instance_activations_required=72
+            sequential_activations_required=64
+            concurrent_activation_burst_required=8
+            normal_ui_boot_verified=$false
+            second_instance_activations_verified=0
+            signed=$false
+            published=$false
+            promotion_authorized=$false
+            authority_effect=$false
+          } | ConvertTo-Json -Depth 5 | Set-Content "$env:RUNNER_TEMP\windows-autonomous-soak-proof.json" -Encoding utf8
+
+      - name: Install exact-head package
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Get-Service -Name 'METAENGINEBrowserGuardian' -ErrorAction SilentlyContinue) { throw 'guardian_service_preexists_before_soak_install' }
+          $install = Start-Process -FilePath "$env:RUNNER_TEMP\autonomous-soak-setup.exe" -ArgumentList '/S' -PassThru -Wait
+          if ($install.ExitCode -ne 0) { throw "soak_installer_exit_$($install.ExitCode)" }
+          $proof = Get-Content "$env:RUNNER_TEMP\windows-autonomous-soak-proof.json" -Raw | ConvertFrom-Json
+          $guardianLine = (& ./scripts/verify-installed-guardian-native-staging.ps1 `
+            -ExpectedSourceHead ([string]$proof.source_head) `
+            -ExpectedPackageVersion ([string]$proof.package_version) | Where-Object { $_.Trim() } | Select-Object -Last 1)
+          if (-not $guardianLine) { throw 'soak_guardian_staging_proof_missing' }
+          $guardian = $guardianLine | ConvertFrom-Json
+          if ($guardian.staging_only -ne $true -or $guardian.service_activation_authorized -ne $false) { throw 'soak_guardian_staging_not_inert' }
+
+      - name: Open normal UI and prove 64 sequential plus 8 concurrent exact activations
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $proofPath = "$env:RUNNER_TEMP\windows-autonomous-soak-proof.json"
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
+          $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
+          ./scripts/windows-autonomous-session-soak.ps1 `
+            -AppPath $app `
+            -ProofPath $proofPath `
+            -RunnerTemp $env:RUNNER_TEMP `
+            -ActivationCount 64 `
+            -ConcurrentBurstSize 8 `
+            -PostActivationHoldSeconds 30 `
+            -ActivationP95BudgetMs 1000 `
+            -MaxWorkingSetGrowthBytes 67108864 `
+            -MaxHandleGrowth 24
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/native apps/metaengine-browser/test apps/metaengine-browser/scripts apps/metaengine-browser/package.json)"
+
+      - name: Upload optimized exact-head installer and soak evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-windows-autonomous-soak-${{ env.EXACT_HEAD }}
+          path: |
+            ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
+            ${{ runner.temp }}/windows-autonomous-soak-proof.json
+            ${{ runner.temp }}/browser-startup-journal-soak.json
+            ${{ runner.temp }}/soak-profile.out
+            ${{ runner.temp }}/soak-profile.err
+            ${{ runner.temp }}/soak-normal-ui.out
+            ${{ runner.temp }}/soak-normal-ui.err
+            ${{ runner.temp }}/soak-secondary-*.out
+            ${{ runner.temp }}/soak-secondary-*.err
+            ${{ runner.temp }}/soak-burst-*.out
+            ${{ runner.temp }}/soak-burst-*.err
+          if-no-files-found: warn
+          retention-days: 30

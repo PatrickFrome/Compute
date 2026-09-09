@@ -1,6 +1,7 @@
 import { browserControlCapabilities } from './browser-control-capabilities.mjs';
 import { globalOwnerGateDisabled } from './owner-safety-gate-registry.mjs';
 import { NativeSupervisorCommandLaneScheduler, classifyNativeSupervisorCommand } from './native-supervisor-command-lanes.mjs';
+import { assertNativeSupervisorBatchCompletion, partitionNativeSupervisorBatchResults } from './native-supervisor-result-batch.mjs';
 import { SUPERVISOR_DEVICE_PROFILE } from './supervisor-device-identity.mjs';
 import { SupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime.mjs';
 import { SupervisorMeshRuntime } from './supervisor-mesh-runtime.mjs';
@@ -9,12 +10,14 @@ import { NativeSupervisorCommandFastlane } from './native-supervisor-command-fas
 import { confirmSelfUpdateRestartSafety } from './self-update-restart-safety.mjs';
 import { persistPreInstallReceipt } from './self-update-handoff.mjs';
 import { reconcileRestoredGeneratingChats } from './self-update-chat-reconcile.mjs';
+import { loadNativeSupervisorControlState, persistNativeSupervisorControlState } from './native-supervisor-control-state.mjs';
 import {
   buildSelfUpdateSessionContinuity,
   clearSelfUpdateSessionContinuity,
   loadSelfUpdateSessionContinuity,
   persistSelfUpdateSessionContinuity,
 } from './self-update-session-continuity.mjs';
+import { verifiedDownloadReceiptConfirmsRequest } from './verified-download-manager.mjs';
 
 export const NATIVE_SUPERVISOR_BASE = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1';
 export const NATIVE_SUPERVISOR_RUNTIME_PATH = '/a2-browser-native-supervisor-v1';
@@ -130,6 +133,10 @@ export class NativeSupervisorClient {
   // and this helper is stopped so steady-state never has two competing lease loops.
   #commandFastlane = null;
   #legacyFastlaneBusy = false;
+  #controlStatePath = null;
+  #controlStateLoaded = false;
+  #controlStatePersistenceError = null;
+  #legacySingleLeaseFallback = true;
 
   constructor({
     identity,
@@ -145,8 +152,10 @@ export class NativeSupervisorClient {
     commandMutationConcurrency = 8,
     commandBatchWaitMs = DEFAULT_BATCH_WAIT_MS,
     maintenanceIntervalMs = DEFAULT_MAINTENANCE_INTERVAL_MS,
+    legacySingleLeaseFallback = true,
     commandFastlane = false,
     commandFastlaneIntervalMs = 750,
+    controlStatePath = null,
   }) {
     if (!identity) throw new Error('native_supervisor_identity_required');
     if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
@@ -163,12 +172,14 @@ export class NativeSupervisorClient {
     this.#maxBatch = Math.max(1, Math.min(64, Number(commandBatchSize) || 64));
     this.#maxTabMutations = Math.max(1, Math.min(16, Number(commandMutationConcurrency) || 8));
     this.#maintenanceIntervalMs = Math.max(1000, Math.min(60000, Number(maintenanceIntervalMs) || DEFAULT_MAINTENANCE_INTERVAL_MS));
+    this.#controlStatePath = controlStatePath ? String(controlStatePath) : null;
+    this.#legacySingleLeaseFallback = legacySingleLeaseFallback !== false;
     this.#commandLane = new NativeSupervisorCommandLaneScheduler({
       readConcurrency: commandReadConcurrency,
       mutationConcurrency: commandMutationConcurrency,
       maxBatch: this.#maxBatch,
     });
-    this.#commandFastlane = commandFastlane === true
+    this.#commandFastlane = commandFastlane === true && this.#legacySingleLeaseFallback
       ? new NativeSupervisorCommandFastlane({
         intervalMs: Math.max(250, Number(commandFastlaneIntervalMs) || 750),
         isRunning: () => this.#running,
@@ -247,9 +258,19 @@ export class NativeSupervisorClient {
       supervisor_mesh: this.#mesh?.snapshot() || null,
       self_update: this.#selfUpdate?.snapshot() || null,
       session_continuity: structuredClone(this.#continuityStatus),
+      control_state: {
+        schema: 'metaengine.native-supervisor.control-state-runtime.v1',
+        path_configured: Boolean(this.#controlStatePath),
+        loaded: this.#controlStateLoaded,
+        persistence_error: this.#controlStatePersistenceError,
+        quiescent: this.#supervisorMode === 'OFF' && this.#armed === false,
+        authority_effect: false,
+      },
       control_fast_lane: {
         schema: 'metaengine.native-supervisor.control-fast-lane.v1',
         transport: this.#batchTransport,
+        batch_transport_required: this.#legacySingleLeaseFallback === false,
+        legacy_single_lease_fallback_enabled: this.#legacySingleLeaseFallback,
         wait_batch_ms: this.#batchWaitMs,
         last_batch_count: this.#lastBatchCount,
         scheduler: this.#commandLane.snapshot(),
@@ -359,8 +380,34 @@ export class NativeSupervisorClient {
     return row;
   }
 
+  async #restoreControlState() {
+    if (this.#controlStateLoaded) return this.snapshot();
+    this.#controlStateLoaded = true;
+    if (!this.#controlStatePath) return this.snapshot();
+    const restored = await loadNativeSupervisorControlState(this.#controlStatePath);
+    if (restored) {
+      this.#supervisorMode = restored.supervisor_mode;
+      this.#armed = restored.supervisor_mode === 'OFF' ? false : restored.armed === true;
+      if (restored.recovered_fail_closed === true) this.#controlStatePersistenceError = restored.recovery_reason || 'CONTROL_STATE_RECOVERED_FAIL_CLOSED';
+    }
+    return this.snapshot();
+  }
+
+  async #persistControlState() {
+    if (!this.#controlStatePath) return null;
+    try {
+      const saved = await persistNativeSupervisorControlState(this.#controlStatePath, { supervisor_mode: this.#supervisorMode, armed: this.#armed });
+      this.#controlStatePersistenceError = null;
+      return saved;
+    } catch (error) {
+      this.#controlStatePersistenceError = `control_state_persistence:${clipError(error)}`;
+      throw error;
+    }
+  }
+
   async start() {
     if (this.#running) { this.#schedule(); return this.snapshot(); }
+    await this.#restoreControlState();
     this.#running = true;
     this.#startedAt = new Date().toISOString();
     this.#schedule();
@@ -398,8 +445,10 @@ export class NativeSupervisorClient {
       const next = String(mode).toUpperCase();
       if (!['OFF','MONITOR','CONTROL'].includes(next)) throw new Error('native_supervisor_mode_invalid');
       this.#supervisorMode = next;
+      if (next === 'OFF') this.#armed = false;
     }
-    if (armed !== undefined) this.#armed = armed === true;
+    if (armed !== undefined && this.#supervisorMode !== 'OFF') this.#armed = armed === true;
+    void this.#persistControlState().catch(() => {});
     return this.snapshot();
   }
 
@@ -481,6 +530,7 @@ export class NativeSupervisorClient {
   }
 
   #kickMaintenance() {
+    if (this.#supervisorMode === 'OFF' || this.#armed !== true) return this.#maintenancePromise;
     const now = Date.now();
     if (this.#maintenancePromise || now - this.#lastMaintenanceAtMs < this.#maintenanceIntervalMs) return this.#maintenancePromise;
     this.#lastMaintenanceAtMs = now;
@@ -501,7 +551,7 @@ export class NativeSupervisorClient {
   }
 
   async #pickupAndRunLegacyFastlaneCommand() {
-    if (this.#batchTransport === 'SUPPORTED' || this.#legacyFastlaneBusy || this.#cyclePromise) return null;
+    if (!this.#legacySingleLeaseFallback || this.#batchTransport === 'SUPPORTED' || this.#legacyFastlaneBusy || this.#cyclePromise) return null;
     this.#legacyFastlaneBusy = true;
     try {
       const command = await this.#nextCommand();
@@ -523,8 +573,15 @@ export class NativeSupervisorClient {
         },
       });
       if ([404, 405, 501].includes(response.status)) {
-        this.#batchTransport = 'UNAVAILABLE';
-        this.#commandFastlane?.start();
+        if (this.#legacySingleLeaseFallback) {
+          this.#batchTransport = 'UNAVAILABLE';
+          this.#commandFastlane?.start();
+        } else {
+          this.#batchTransport = 'REQUIRED_UNAVAILABLE';
+          this.#commandFastlane?.stop();
+          this.#lastBatchCount = 0;
+          throw new Error(`native_supervisor_batch_transport_required:http_${response.status}`);
+        }
       } else {
         const body = await response.json().catch(() => ({}));
         if (!response.ok || !Array.isArray(body?.commands)) {
@@ -535,6 +592,11 @@ export class NativeSupervisorClient {
         this.#lastBatchCount = body.commands.length;
         return body.commands;
       }
+    }
+    if (!this.#legacySingleLeaseFallback) {
+      this.#batchTransport = 'REQUIRED_UNAVAILABLE';
+      this.#lastBatchCount = 0;
+      throw new Error('native_supervisor_batch_transport_required');
     }
     const command = await this.#nextCommand();
     this.#lastBatchCount = command ? 1 : 0;
@@ -548,39 +610,64 @@ export class NativeSupervisorClient {
   }
 
   async #postBatchResults(rows) {
-    const results = rows.map((row) => ({
+  const results = rows.map((row) => ({
+    command_id: row.command.command_id,
+    ok: row.ok,
+    receipt: {
+      schema: 'metaengine.native-supervisor.command-receipt.v2',
       command_id: row.command.command_id,
-      ok: row.ok,
-      receipt: {
-        schema: 'metaengine.native-supervisor.command-receipt.v2',
-        command_id: row.command.command_id,
-        action: row.command.action,
-        platform: row.command.platform || null,
-        result: row.result ?? null,
-        effect_outcome: row.effect_outcome,
-        lane: row.descriptor.lane,
-        effect_key: row.descriptor.effect_key,
-        execution_ms: row.execution_ms,
-        recorded_at: new Date().toISOString(),
-        authority_effect: false,
-      },
-      error: row.ok ? null : row.error,
-    }));
-    const response = await this.#signedRequest('/v1/commands/result-batch', { payload: { results } });
+      action: row.command.action,
+      platform: row.command.platform || null,
+      result: row.result ?? null,
+      effect_outcome: row.effect_outcome,
+      lane: row.descriptor.lane,
+      effect_key: row.descriptor.effect_key,
+      execution_ms: row.execution_ms,
+      recorded_at: new Date().toISOString(),
+      authority_effect: false,
+    },
+    error: row.ok ? null : row.error,
+    authority_effect: false,
+  }));
+  const chunks = partitionNativeSupervisorBatchResults(results);
+  const acknowledgements = [];
+  for (const chunk of chunks) {
+    const response = await this.#signedRequest('/v1/commands/result-batch', { payload: { results: chunk } });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(`native_supervisor_batch_result_http_${response.status}:${body?.error || 'unknown'}`);
-    return body;
+    acknowledgements.push(...assertNativeSupervisorBatchCompletion(body, chunk));
   }
+  return Object.freeze({
+    schema: 'metaengine.native-supervisor.batch-result-delivery.v1',
+    chunk_count: chunks.length,
+    result_count: acknowledgements.length,
+    results: Object.freeze(acknowledgements),
+    transport_delivery_is_authority: false,
+    automatic_effect_retry_allowed: false,
+    authority_effect: false,
+  });
+}
 
   async #executeLocalOrRemote(command) {
     const action = String(command?.action || '');
     if (ROOT_POLICY_ACTIONS.has(action)) return this.#executeCommand(command);
-    if (action === 'ARM') { this.#armed = true; return { armed: true, supervisor_mode: this.#supervisorMode, authority_effect: true }; }
-    if (action === 'DISARM') { this.#armed = false; return { armed: false, supervisor_mode: this.#supervisorMode, authority_effect: true }; }
+    if (action === 'ARM') {
+      if (this.#supervisorMode === 'OFF') throw new Error('native_supervisor_off_requires_mode_change');
+      this.#armed = true;
+      await this.#persistControlState();
+      return { armed: true, supervisor_mode: this.#supervisorMode, authority_effect: true };
+    }
+    if (action === 'DISARM') {
+      this.#armed = false;
+      await this.#persistControlState();
+      return { armed: false, supervisor_mode: this.#supervisorMode, authority_effect: true };
+    }
     if (action === 'SET_SUPERVISOR_MODE') {
       const next = String(command?.payload?.mode || '').toUpperCase();
       if (!['OFF','MONITOR','CONTROL'].includes(next)) throw new Error('native_supervisor_mode_invalid');
       this.#supervisorMode = next;
+      if (next === 'OFF') this.#armed = false;
+      await this.#persistControlState();
       return { supervisor_mode: next, armed: this.#armed, authority_effect: true };
     }
     if (action === 'CONTROL_CAPABILITIES') return browserControlCapabilities();
@@ -613,13 +700,16 @@ export class NativeSupervisorClient {
 
   async #effectOutcome(command, result, descriptor) {
     if (descriptor.read_only) return null;
+    const action = String(command?.action || '').toUpperCase();
+    if (action === 'DOWNLOAD_FILE') {
+      return verifiedDownloadReceiptConfirmsRequest(command?.payload, result) ? 'CONFIRMED' : 'AMBIGUOUS';
+    }
     const explicit = String(result?.effect_outcome || '').toUpperCase();
     if (TERMINAL_EFFECT_OUTCOMES.has(explicit)) return explicit;
     const state = String(result?.effect_state || '').toUpperCase();
     if (PROVEN_EFFECT_STATES.has(state)) return 'CONFIRMED';
     if (state.startsWith('AMBIGUOUS')) return 'AMBIGUOUS';
 
-    const action = String(command?.action || '').toUpperCase();
     if (['ARM','DISARM','SET_SUPERVISOR_MODE','SET_MODE'].includes(action)) return 'CONFIRMED';
     if (action === 'NEW_TAB' && result?.tab_id) return 'CONFIRMED';
     if (['FLEET_SET_PROFILE','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL'].includes(action) && result) return 'CONFIRMED';
