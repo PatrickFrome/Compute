@@ -39,9 +39,11 @@ export function resumeObservationCursorCohorts(ledger, knownRevisionValues = [])
   const cohortIndexByRevision = new Map(
     uniqueRevisions.map((knownRevision, cohortIndex) => [knownRevision, cohortIndex]),
   );
-  const requestCohortIndexes = normalized.map((knownRevision) => cohortIndexByRevision.get(knownRevision));
+  const requestCohortIndexes = new Array(normalized.length);
   const requestIndexesByCohort = Array.from({ length: uniqueRevisions.length }, () => []);
-  requestCohortIndexes.forEach((cohortIndex, requestIndex) => {
+  normalized.forEach((knownRevision, requestIndex) => {
+    const cohortIndex = cohortIndexByRevision.get(knownRevision);
+    requestCohortIndexes[requestIndex] = cohortIndex;
     requestIndexesByCohort[cohortIndex].push(requestIndex);
   });
 
@@ -95,6 +97,7 @@ export function browserBrainObservationCursorCohortContract() {
     duplicate_revision_idempotent: true,
     request_order_cohort_routing: true,
     cohort_request_fanout_indexes: true,
+    request_routing_and_fanout_indexing_single_pass: true,
     changed_work_indexes: true,
     changed_cohort_collection_single_pass: true,
     changed_request_order_single_pass: true,
