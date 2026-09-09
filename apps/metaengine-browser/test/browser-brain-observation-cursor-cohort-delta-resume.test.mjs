@@ -205,6 +205,7 @@ test('cohort contract stays provider-neutral, payload-free and zero-authority', 
   assert.equal(contract.request_order_cohort_routing, true);
   assert.equal(contract.cohort_request_fanout_indexes, true);
   assert.equal(contract.changed_work_indexes, true);
+  assert.equal(contract.changed_cohort_collection_single_pass, true);
   assert.equal(contract.changed_request_order_single_pass, true);
   assert.equal(contract.direct_changed_request_membership_lookup, true);
   assert.equal(contract.direct_changed_cohort_iteration, true);
