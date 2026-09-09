@@ -17,6 +17,7 @@ function processSnapshot(sequence = 1) {
     schema: 'metaengine.browser.realtime-process-plane.v1',
     running: true,
     sequence,
+    resource_revision: sequence,
     observed_at: `2026-09-09T20:00:0${sequence}.000Z`,
     event_driven_lifecycle: true,
     processes: [{ pid: 901, process_key: '901:9001', creation_time_ms: 9001, type: 'Tab' }],
