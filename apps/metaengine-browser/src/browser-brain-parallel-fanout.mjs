@@ -17,6 +17,31 @@ function finitePositiveInteger(value, fallback) {
   return normalized > 0 ? normalized : fallback;
 }
 
+function preflightAbortError() {
+  return new BrowserBrainFanoutPlanError('aborted', 'fanout aborted before any effect');
+}
+
+async function awaitPreflight(preflightPromise, signal) {
+  if (!signal) return preflightPromise;
+
+  let removeAbortListener = () => {};
+  const abortPromise = new Promise((_, reject) => {
+    const rejectAbort = () => reject(preflightAbortError());
+    if (signal.aborted) {
+      rejectAbort();
+      return;
+    }
+    signal.addEventListener('abort', rejectAbort, { once: true });
+    removeAbortListener = () => signal.removeEventListener('abort', rejectAbort);
+  });
+
+  try {
+    return await Promise.race([preflightPromise, abortPromise]);
+  } finally {
+    removeAbortListener();
+  }
+}
+
 /**
  * One-shot, provider-neutral BrowserCell fan-out.
  *
@@ -69,20 +94,10 @@ export class BrowserBrainParallelFanoutCoordinator {
       );
     }
     if (signal?.aborted) {
-      throw new BrowserBrainFanoutPlanError('aborted', 'fanout aborted before any effect');
-    }
-
-    const budget = finitePositiveInteger(await this.readMutationBudget(), 1);
-    if (commands.length > budget) {
-      throw new BrowserBrainFanoutPlanError(
-        'pressure_budget_exceeded',
-        `batch size ${commands.length} exceeds current mutation budget ${budget}`,
-        { batch_size: commands.length, mutation_budget: budget },
-      );
+      throw preflightAbortError();
     }
 
     const seenCommandIds = new Set();
-    const seenCells = new Set();
     const plan = [];
 
     for (const command of commands) {
@@ -94,14 +109,39 @@ export class BrowserBrainParallelFanoutCoordinator {
         throw new BrowserBrainFanoutPlanError('duplicate_command_id', `duplicate command_id ${commandId}`);
       }
       seenCommandIds.add(commandId);
+      plan.push({ command, commandId, cellKey: null });
+    }
 
-      const rawCellKey = await this.resolveCellKey(command);
+    // Pressure admission and BrowserCell resolution are independent read-only
+    // preflight seams. Start every lane before awaiting any one of them; no
+    // physical effect is possible until the aggregate has passed.
+    const budgetPromise = Promise.resolve().then(() => this.readMutationBudget());
+    const cellKeyPromises = plan.map(({ command }) =>
+      Promise.resolve().then(() => this.resolveCellKey(command)),
+    );
+    const preflightPromise = Promise.all([budgetPromise, ...cellKeyPromises]);
+    const [rawBudget, ...rawCellKeys] = await awaitPreflight(preflightPromise, signal);
+    if (signal?.aborted) throw preflightAbortError();
+
+    const budget = finitePositiveInteger(rawBudget, 1);
+    if (commands.length > budget) {
+      throw new BrowserBrainFanoutPlanError(
+        'pressure_budget_exceeded',
+        `batch size ${commands.length} exceeds current mutation budget ${budget}`,
+        { batch_size: commands.length, mutation_budget: budget },
+      );
+    }
+
+    const seenCells = new Set();
+    for (let index = 0; index < plan.length; index += 1) {
+      const entry = plan[index];
+      const rawCellKey = rawCellKeys[index];
       const cellKey = typeof rawCellKey === 'string' ? rawCellKey.trim() : '';
       if (!cellKey) {
         throw new BrowserBrainFanoutPlanError(
           'missing_browser_cell',
-          `command ${commandId} has no explicit BrowserCell binding`,
-          { command_id: commandId },
+          `command ${entry.commandId} has no explicit BrowserCell binding`,
+          { command_id: entry.commandId },
         );
       }
       if (seenCells.has(cellKey)) {
@@ -112,37 +152,45 @@ export class BrowserBrainParallelFanoutCoordinator {
         );
       }
       seenCells.add(cellKey);
-      plan.push({ command, commandId, cellKey });
+      entry.cellKey = cellKey;
     }
 
-    // Do not add a semaphore or internal queue here. The batch was admitted as a
-    // whole against the pressure budget, so all independent cells can start now.
-    const settled = await Promise.allSettled(
+    // All independent cells may start after one-shot admission. Each lane owns its
+    // own settlement mapping so the hot path avoids an intermediate allSettled
+    // vector. Abort is checked again at each execution-start boundary so a prior
+    // peer cannot cause later physical effects to start after shared cancellation.
+    return Promise.all(
       plan.map(({ command, commandId, cellKey }) =>
-        this.execute(command, {
-          commandId,
-          browserCell: cellKey,
-          signal,
-        }),
+        Promise.resolve()
+          .then(() => {
+            if (signal?.aborted) {
+              throw new BrowserBrainFanoutPlanError(
+                'aborted',
+                `fanout aborted before command ${commandId} effect started`,
+                { command_id: commandId, browser_cell: cellKey },
+              );
+            }
+            return this.execute(command, {
+              commandId,
+              browserCell: cellKey,
+              signal,
+            });
+          })
+          .then(
+            (value) => ({
+              command_id: commandId,
+              browser_cell: cellKey,
+              status: 'fulfilled',
+              value,
+            }),
+            (reason) => ({
+              command_id: commandId,
+              browser_cell: cellKey,
+              status: 'rejected',
+              reason,
+            }),
+          ),
       ),
     );
-
-    return settled.map((result, index) => {
-      const { commandId, cellKey } = plan[index];
-      if (result.status === 'fulfilled') {
-        return {
-          command_id: commandId,
-          browser_cell: cellKey,
-          status: 'fulfilled',
-          value: result.value,
-        };
-      }
-      return {
-        command_id: commandId,
-        browser_cell: cellKey,
-        status: 'rejected',
-        reason: result.reason,
-      };
-    });
   }
 }
