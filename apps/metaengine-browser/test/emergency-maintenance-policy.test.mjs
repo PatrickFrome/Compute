@@ -7,6 +7,8 @@ import {
   EMERGENCY_MAINTENANCE_MAX_TTL_MS,
   EMERGENCY_MAINTENANCE_SCOPES,
   EMERGENCY_NON_BYPASSABLE_INVARIANTS,
+  EMERGENCY_OPERATIONAL_SCOPES,
+  GLOBAL_OPERATIONAL_OVERRIDE,
   canonicalEmergencyMaintenancePayload,
   emergencyMaintenancePolicyContract,
   planEmergencyMaintenanceBypass,
@@ -45,10 +47,48 @@ test('valid signed emergency grant is exact-build, bounded-time and scope constr
   assert.equal(verified.signature_verified, true);
   assert.equal(verified.subject_build_sha, BUILD_SHA);
   assert.deepEqual(verified.scopes, ['SELF_UPDATE_HOLD_OVERRIDE', 'SUPERVISOR_CONTINUITY_OVERRIDE']);
+  assert.deepEqual(verified.effective_scopes, ['SELF_UPDATE_HOLD_OVERRIDE', 'SUPERVISOR_CONTINUITY_OVERRIDE']);
+  assert.equal(verified.global_operational_override, false);
+  assert.equal(verified.operational_fail_close_disabled, false);
   assert.equal(verified.one_shot, true);
   assert.equal(verified.automatic_reclose, true);
   assert.equal(verified.replay_fence_required, true);
   assert.equal(verified.authority_effect, false);
+});
+
+test('global operational override expands to every operational protection scope', () => {
+  const { grant, publicKey } = fixture({ scopes: [GLOBAL_OPERATIONAL_OVERRIDE] });
+  const verified = verifyEmergencyMaintenanceGrant({
+    grant,
+    public_key: publicKey,
+    expected_build_sha: BUILD_SHA,
+    now_ms: NOW,
+  });
+  assert.equal(verified.global_operational_override, true);
+  assert.equal(verified.operational_fail_close_disabled, true);
+  assert.deepEqual(verified.effective_scopes, EMERGENCY_OPERATIONAL_SCOPES);
+
+  for (const scope of EMERGENCY_OPERATIONAL_SCOPES) {
+    const plan = planEmergencyMaintenanceBypass({
+      verified_grant: verified,
+      scope,
+      protection_id: `TEST.${scope}`,
+    });
+    assert.equal(plan.global_operational_override, true);
+    assert.equal(plan.operational_fail_close_disabled, true);
+    assert.equal(plan.scope, scope);
+    assert.equal(plan.one_shot, true);
+    assert.equal(plan.automatic_reclose, true);
+    assert.equal(plan.arbitrary_execution_allowed, false);
+    assert.equal(plan.blind_retry_allowed, false);
+  }
+});
+
+test('global operational override is exclusive and cannot be mixed with individual scopes', () => {
+  assert.throws(() => canonicalEmergencyMaintenancePayload({
+    ...fixture().grant,
+    scopes: [GLOBAL_OPERATIONAL_OVERRIDE, 'SELF_UPDATE_HOLD_OVERRIDE'],
+  }), /global_scope_must_be_exclusive/);
 });
 
 test('tampering, wrong build, wrong key and expired grants fail closed', () => {
@@ -131,10 +171,13 @@ test('verified grant produces only a one-shot audited bypass plan for an explici
   }), /scope_not_granted/);
 });
 
-test('policy contract makes normal protections break-glass capable without making core trust invariants bypassable', () => {
+test('policy contract exposes a global operational break-glass while retaining root trust invariants', () => {
   const contract = emergencyMaintenancePolicyContract();
+  assert.deepEqual(contract.operational_scopes, EMERGENCY_OPERATIONAL_SCOPES);
   assert.deepEqual(contract.bypassable_scopes, EMERGENCY_MAINTENANCE_SCOPES);
   assert.deepEqual(contract.non_bypassable_invariants, EMERGENCY_NON_BYPASSABLE_INVARIANTS);
+  assert.equal(contract.global_operational_override_scope, GLOBAL_OPERATIONAL_OVERRIDE);
+  assert.equal(contract.global_override_disables_all_operational_fail_close, true);
   assert.equal(contract.exact_build_binding_required, true);
   assert.equal(contract.ed25519_signature_required, true);
   assert.equal(contract.one_shot_nonce_required, true);
