@@ -14,6 +14,12 @@ const RESTART_STALE_LOST_REASON = 'PHYSICAL_TAB_MISSING_ON_RESTART';
 
 const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 
+function hasCanonicalTimestamp(value) {
+  const raw = String(value || '');
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === raw;
+}
+
 function isPrunableRestartStaleLost(row) {
   return row?.lifecycle_state === 'LOST'
     && row?.automatic_retry_allowed !== true
@@ -21,7 +27,8 @@ function isPrunableRestartStaleLost(row) {
     && row?.tab_id == null
     && row?.target_id == null
     && row?.transport_proof == null
-    && row?.authority_effect !== true;
+    && row?.authority_effect !== true
+    && hasCanonicalTimestamp(row?.updated_at);
 }
 
 export function pruneRestartStaleLostHistory(input) {
