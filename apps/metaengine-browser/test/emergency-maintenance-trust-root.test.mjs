@@ -53,9 +53,9 @@ test('unpackaged source package has no runtime trust metadata fallback', () => {
   assert.throws(() => loadPackagedEmergencyMaintenanceTrustRoot(), /trust_root_missing/);
 });
 
-test('packaging enables ASAR integrity plus ASAR-only loading and excludes source public-key file from app files', () => {
+test('packaging enables ASAR plus integrity and ASAR-only fuses while excluding source public-key file from app files', () => {
   const config = JSON.parse(fs.readFileSync(new URL('../electron-builder.test.json', import.meta.url), 'utf8'));
-  assert.equal(config.asar?.disableIntegrity, false);
+  assert.equal(config.asar, true);
   assert.equal(config.electronFuses?.enableEmbeddedAsarIntegrityValidation, true);
   assert.equal(config.electronFuses?.onlyLoadAppFromAsar, true);
   assert.deepEqual(config.files, ['src/**/*', 'ui/**/*', 'package.json']);
