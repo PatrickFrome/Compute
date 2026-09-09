@@ -25,6 +25,11 @@ function validProcessSnapshot(snapshot) {
   return snapshot?.schema === 'metaengine.browser.realtime-process-plane.v1';
 }
 
+function resourceRevision(snapshot) {
+  const revision = Number(snapshot?.resource_revision);
+  return Number.isSafeInteger(revision) && revision >= 0 ? revision : null;
+}
+
 function coverage(snapshot = {}) {
   const webContents = Array.isArray(snapshot.web_contents) ? snapshot.web_contents : [];
   let liveWebContentsCount = 0;
@@ -239,13 +244,11 @@ export class BrowserBrainContinuousCoordinator {
   }
 
   observeEdge(event = {}, { process_snapshot = null, tabs = [], cell_by_tab = null } = {}) {
-    const priorProcessObservedAt = this.#lastProcessSnapshot?.observed_at ?? null;
-    const incomingProcessObservedAt = process_snapshot?.observed_at ?? null;
+    const priorResourceRevision = resourceRevision(this.#lastProcessSnapshot);
+    const incomingResourceRevision = resourceRevision(process_snapshot);
     const hasFreshProcessSnapshot = process_snapshot != null && (
       this.#lastProcessSnapshot == null
-      || incomingProcessObservedAt == null
-      || priorProcessObservedAt == null
-      || incomingProcessObservedAt !== priorProcessObservedAt
+      || (incomingResourceRevision != null && incomingResourceRevision !== priorResourceRevision)
     );
     const snapshot = process_snapshot || this.#lastProcessSnapshot;
     if (!validProcessSnapshot(snapshot)) {
@@ -471,6 +474,7 @@ export class BrowserBrainContinuousCoordinator {
       cognition_resync_count: this.#cognitionResyncCount,
       semantic_edges_reuse_pressure: true,
       semantic_edges_reuse_coverage: true,
+      explicit_resource_revision_supported: true,
       last_event: this.#lastEvent,
       coverage: this.#lastCoverage,
       cognition_fabric: this.#cognition.snapshot(),
