@@ -179,12 +179,18 @@ export class BrowserBrainContinuousCoordinator {
   }
 
   observeEdge(event = {}, { process_snapshot = null, tabs = [], cell_by_tab = null } = {}) {
+    const hasFreshProcessSnapshot = process_snapshot != null;
     const snapshot = process_snapshot || this.#lastProcessSnapshot;
     if (!validProcessSnapshot(snapshot)) {
       throw new Error('browser_brain_continuous_process_snapshot_required');
     }
     this.#lastProcessSnapshot = snapshot;
-    this.#lastCoverage = coverage(snapshot);
+    // The hottest semantic/CDP path normally omits process_snapshot and therefore
+    // reuses the exact process-plane snapshot already covered by reconcile() or a
+    // prior edge. Do not rescan every web_contents row for coverage in that proven
+    // reuse case. A caller-supplied snapshot is always treated as fresh and is
+    // rescanned before the edge result is published.
+    if (hasFreshProcessSnapshot) this.#lastCoverage = coverage(snapshot);
     const observed = this.#observation.observe(event, {
       process_snapshot: snapshot,
       tabs,
