@@ -9,7 +9,37 @@ import { registerFleetRuntime } from './fleet-runtime-bridge.mjs';
 
 export { FLEET_PROFILES, FLEET_PROVISIONER_VERSION, FLEET_STATES };
 
+export const FLEET_RESTART_STALE_HISTORY_LIMIT = 64;
+const RESTART_STALE_LOST_REASON = 'PHYSICAL_TAB_MISSING_ON_RESTART';
+
 const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
+
+function isPrunableRestartStaleLost(row) {
+  return row?.lifecycle_state === 'LOST'
+    && row?.automatic_retry_allowed !== true
+    && row?.lost_reason === RESTART_STALE_LOST_REASON
+    && row?.tab_id == null
+    && row?.target_id == null
+    && row?.transport_proof == null
+    && row?.authority_effect !== true;
+}
+
+export function pruneRestartStaleLostHistory(input) {
+  if (!input || input.schema !== 'metaengine.browser.fleet-state.v1' || !Array.isArray(input.agents)) return input;
+  const stale = input.agents
+    .map((row, index) => ({ row, index, updated_at: String(row?.updated_at || '') }))
+    .filter(({ row }) => isPrunableRestartStaleLost(row));
+  if (stale.length <= FLEET_RESTART_STALE_HISTORY_LIMIT) return input;
+
+  const keep = new Set(stale
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at) || b.index - a.index)
+    .slice(0, FLEET_RESTART_STALE_HISTORY_LIMIT)
+    .map(({ index }) => index));
+  return {
+    ...input,
+    agents: input.agents.filter((row, index) => !isPrunableRestartStaleLost(row) || keep.has(index)),
+  };
+}
 
 function normalizeRootChatGptUrl(value) {
   const url = new URL(String(value || '').trim());
@@ -34,6 +64,16 @@ function exactOverlayProof(agent, proof) {
 
 export class FleetProvisioner extends CoreFleetProvisioner {
   #preconversationProofs = new Map();
+
+  constructor(options = {}) {
+    const loadState = options?.loadState;
+    super({
+      ...options,
+      loadState: typeof loadState === 'function'
+        ? async (...args) => pruneRestartStaleLostHistory(await loadState(...args))
+        : loadState,
+    });
+  }
 
   async init(...args) {
     this.#preconversationProofs.clear();
