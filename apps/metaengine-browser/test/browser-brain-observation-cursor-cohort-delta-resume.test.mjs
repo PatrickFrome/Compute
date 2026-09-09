@@ -65,12 +65,13 @@ test('result indexes only changed cohorts and callers for direct work dispatch',
 
   const result = resumeObservationCursorCohorts(
     ledger,
-    [currentRevision, revision, currentRevision, revision - 1],
+    [currentRevision, revision - 1, currentRevision, revision, revision - 1, currentRevision],
   );
   assert.deepEqual(result.changed_cohort_indexes, [0, 1]);
-  assert.deepEqual(result.changed_request_indexes, [1, 3]);
+  assert.equal(result.changed_request_count, 3);
+  assert.deepEqual(result.changed_request_indexes, [1, 3, 4]);
   assert.equal(result.cohorts[2].changed, false);
-  assert.deepEqual(result.cohorts[2].request_indexes, [0, 2]);
+  assert.deepEqual(result.cohorts[2].request_indexes, [0, 2, 5]);
 });
 
 test('changed cohorts are directly iterable without cohort-index lookup', () => {
@@ -97,6 +98,7 @@ test('current revisions expose zero changed-work indexes', () => {
   const result = resumeObservationCursorCohorts(ledger, [revision, revision]);
 
   assert.equal(result.changed_cohort_count, 0);
+  assert.equal(result.changed_request_count, 0);
   assert.deepEqual(result.changed_cohorts, []);
   assert.deepEqual(result.changed_cohort_indexes, []);
   assert.deepEqual(result.changed_request_indexes, []);
@@ -120,6 +122,7 @@ test('empty request list produces empty routing without synthetic cohorts', () =
   assert.equal(result.request_count, 0);
   assert.equal(result.cohort_count, 0);
   assert.equal(result.changed_cohort_count, 0);
+  assert.equal(result.changed_request_count, 0);
   assert.deepEqual(result.changed_cohorts, []);
   assert.deepEqual(result.changed_cohort_indexes, []);
   assert.deepEqual(result.changed_request_indexes, []);
@@ -202,6 +205,7 @@ test('cohort contract stays provider-neutral, payload-free and zero-authority', 
   assert.equal(contract.request_order_cohort_routing, true);
   assert.equal(contract.cohort_request_fanout_indexes, true);
   assert.equal(contract.changed_work_indexes, true);
+  assert.equal(contract.changed_request_order_single_pass, true);
   assert.equal(contract.direct_changed_cohort_iteration, true);
   assert.equal(contract.all_revision_requests_preflight_before_delta_materialization, true);
   assert.equal(contract.provider_neutral, true);
