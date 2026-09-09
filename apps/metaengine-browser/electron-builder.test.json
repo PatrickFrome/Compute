@@ -1,7 +1,13 @@
 {
   "appId": "com.metaengine.browser.test",
   "productName": "METAENGINE Browser Test",
-  "asar": true,
+  "asar": {
+    "disableIntegrity": false
+  },
+  "electronFuses": {
+    "enableEmbeddedAsarIntegrityValidation": true,
+    "onlyLoadAppFromAsar": true
+  },
   "asarUnpack": [
     "src/browser-sentinel-worker.cjs",
     "src/browser-sentinel-liveness.cjs",
