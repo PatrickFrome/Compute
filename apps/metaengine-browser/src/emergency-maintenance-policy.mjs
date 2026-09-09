@@ -1,10 +1,11 @@
 import crypto from 'node:crypto';
 
 export const EMERGENCY_MAINTENANCE_GRANT_SCHEMA = 'metaengine.emergency-maintenance-grant.v1';
-export const EMERGENCY_MAINTENANCE_POLICY_VERSION = '1.0.0';
+export const EMERGENCY_MAINTENANCE_POLICY_VERSION = '1.1.0';
 export const EMERGENCY_MAINTENANCE_MAX_TTL_MS = 5 * 60 * 1000;
+export const GLOBAL_OPERATIONAL_OVERRIDE = 'GLOBAL_OPERATIONAL_OVERRIDE';
 
-export const EMERGENCY_MAINTENANCE_SCOPES = Object.freeze([
+export const EMERGENCY_OPERATIONAL_SCOPES = Object.freeze([
   'SELF_UPDATE_HOLD_OVERRIDE',
   'RESTART_GATE_OVERRIDE',
   'CONTROL_STATE_HOLD_OVERRIDE',
@@ -12,6 +13,11 @@ export const EMERGENCY_MAINTENANCE_SCOPES = Object.freeze([
   'FLEET_LIVENESS_OVERRIDE',
   'TRANSPORT_THROTTLE_OVERRIDE',
   'OWNER_SAFETY_GATE_OVERRIDE',
+]);
+
+export const EMERGENCY_MAINTENANCE_SCOPES = Object.freeze([
+  GLOBAL_OPERATIONAL_OVERRIDE,
+  ...EMERGENCY_OPERATIONAL_SCOPES,
 ]);
 
 export const EMERGENCY_NON_BYPASSABLE_INVARIANTS = Object.freeze([
@@ -44,7 +50,16 @@ function normalizedScopes(value) {
   if (scopes.length !== value.length || scopes.some((scope) => !SCOPE_SET.has(scope))) {
     throw new Error('emergency_maintenance_scope_not_allowed');
   }
+  if (scopes.includes(GLOBAL_OPERATIONAL_OVERRIDE) && scopes.length !== 1) {
+    throw new Error('emergency_maintenance_global_scope_must_be_exclusive');
+  }
   return scopes;
+}
+
+function effectiveScopes(scopes) {
+  return scopes.includes(GLOBAL_OPERATIONAL_OVERRIDE)
+    ? [...EMERGENCY_OPERATIONAL_SCOPES]
+    : [...scopes];
 }
 
 function grantPayload(input = {}) {
@@ -138,8 +153,12 @@ export function verifyEmergencyMaintenanceGrant({
   const key = assertEd25519PublicKey(public_key);
   const canonical = Buffer.from(canonicalEmergencyMaintenancePayload(payload), 'utf8');
   if (!crypto.verify(null, canonical, key, signatureBytes)) throw new Error('emergency_maintenance_signature_mismatch');
+  const globalOperationalOverride = payload.scopes.includes(GLOBAL_OPERATIONAL_OVERRIDE);
   return Object.freeze({
     ...payload,
+    effective_scopes: effectiveScopes(payload.scopes),
+    global_operational_override: globalOperationalOverride,
+    operational_fail_close_disabled: globalOperationalOverride,
     signature_verified: true,
     replay_fence_required: true,
     audit_receipt_required: true,
@@ -156,7 +175,10 @@ export function planEmergencyMaintenanceBypass({
     throw new Error('emergency_maintenance_verified_grant_required');
   }
   const normalizedScope = String(scope || '').trim().toUpperCase();
-  if (!SCOPE_SET.has(normalizedScope) || !verified_grant.scopes.includes(normalizedScope)) {
+  const effective = Array.isArray(verified_grant.effective_scopes)
+    ? verified_grant.effective_scopes
+    : effectiveScopes(verified_grant.scopes || []);
+  if (!EMERGENCY_OPERATIONAL_SCOPES.includes(normalizedScope) || !effective.includes(normalizedScope)) {
     throw new Error('emergency_maintenance_scope_not_granted');
   }
   const protectionId = String(protection_id || '').trim();
@@ -170,6 +192,8 @@ export function planEmergencyMaintenanceBypass({
     subject_build_sha: verified_grant.subject_build_sha,
     scope: normalizedScope,
     protection_id: protectionId,
+    global_operational_override: verified_grant.global_operational_override === true,
+    operational_fail_close_disabled: verified_grant.global_operational_override === true,
     expires_at: verified_grant.expires_at,
     automatic_reclose: true,
     one_shot: true,
@@ -186,7 +210,10 @@ export function emergencyMaintenancePolicyContract() {
   return Object.freeze({
     schema: 'metaengine.emergency-maintenance-policy.v1',
     version: EMERGENCY_MAINTENANCE_POLICY_VERSION,
+    global_operational_override_scope: GLOBAL_OPERATIONAL_OVERRIDE,
+    operational_scopes: [...EMERGENCY_OPERATIONAL_SCOPES],
     bypassable_scopes: [...EMERGENCY_MAINTENANCE_SCOPES],
+    global_override_disables_all_operational_fail_close: true,
     non_bypassable_invariants: [...EMERGENCY_NON_BYPASSABLE_INVARIANTS],
     max_ttl_ms: EMERGENCY_MAINTENANCE_MAX_TTL_MS,
     exact_build_binding_required: true,
