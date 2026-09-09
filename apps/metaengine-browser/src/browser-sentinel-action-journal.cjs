@@ -64,6 +64,7 @@ function validateRow(row, binding = null) {
 class BrowserSentinelActionJournal {
   #statePath;
   #path;
+  #binding = null;
   #row = null;
   #writeTail = Promise.resolve();
 
@@ -76,11 +77,15 @@ class BrowserSentinelActionJournal {
   async init(bindingSource) {
     const binding = bindingFrom(bindingSource);
     const existing = await readJson(this.#path);
-    if (!existing) return this.snapshot();
+    if (!existing) {
+      this.#binding = binding;
+      return this.snapshot();
+    }
 
     const validated = validateRow(existing);
     if (sameBinding(validated, binding)) {
       this.#row = validateRow(validated, binding);
+      this.#binding = binding;
       return this.snapshot();
     }
 
@@ -114,6 +119,7 @@ class BrowserSentinelActionJournal {
     };
     await durableWriteJson(this.#path, next, { sequence: 1 });
     this.#row = validateRow(next, binding);
+    this.#binding = binding;
     return this.snapshot();
   }
 
@@ -133,6 +139,7 @@ class BrowserSentinelActionJournal {
 
   async #commit(bindingSource, state, fields = {}) {
     const binding = bindingFrom(bindingSource);
+    if (!this.#binding || !sameBinding(this.#binding, binding)) throw new Error('sentinel_action_journal_binding_drift');
     if (this.#row && !sameBinding(this.#row, binding)) throw new Error('sentinel_action_journal_binding_drift');
     const sequence = Number(this.#row?.sequence || 0) + 1;
     const pid = Number(fields?.relaunch_pid || 0);
