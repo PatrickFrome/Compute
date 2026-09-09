@@ -172,41 +172,41 @@ export class BrowserBrainParallelFanoutCoordinator {
     // Re-check abort at each execution-start boundary as well: an earlier adapter
     // may synchronously abort the shared signal after an effect starts, and later
     // peers must then fail closed rather than begin new physical effects.
-    const settled = await Promise.allSettled(
+    // Materialize each final typed result in that lane's own settlement handlers so
+    // the hot path avoids an intermediate allSettled vector plus a second full-batch
+    // mapping pass while preserving deterministic Promise.all result ordering.
+    return Promise.all(
       plan.map(({ command, commandId, cellKey }) =>
-        Promise.resolve().then(() => {
-          if (signal?.aborted) {
-            throw new BrowserBrainFanoutPlanError(
-              'aborted',
-              `fanout aborted before command ${commandId} effect started`,
-              { command_id: commandId, browser_cell: cellKey },
-            );
-          }
-          return this.execute(command, {
-            commandId,
-            browserCell: cellKey,
-            signal,
-          });
-        }),
+        Promise.resolve()
+          .then(() => {
+            if (signal?.aborted) {
+              throw new BrowserBrainFanoutPlanError(
+                'aborted',
+                `fanout aborted before command ${commandId} effect started`,
+                { command_id: commandId, browser_cell: cellKey },
+              );
+            }
+            return this.execute(command, {
+              commandId,
+              browserCell: cellKey,
+              signal,
+            });
+          })
+          .then(
+            (value) => ({
+              command_id: commandId,
+              browser_cell: cellKey,
+              status: 'fulfilled',
+              value,
+            }),
+            (reason) => ({
+              command_id: commandId,
+              browser_cell: cellKey,
+              status: 'rejected',
+              reason,
+            }),
+          ),
       ),
     );
-
-    return settled.map((result, index) => {
-      const { commandId, cellKey } = plan[index];
-      if (result.status === 'fulfilled') {
-        return {
-          command_id: commandId,
-          browser_cell: cellKey,
-          status: 'fulfilled',
-          value: result.value,
-        };
-      }
-      return {
-        command_id: commandId,
-        browser_cell: cellKey,
-        status: 'rejected',
-        reason: result.reason,
-      };
-    });
   }
 }
