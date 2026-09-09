@@ -331,7 +331,8 @@ export async function waitForPrimaryActivationAck(app, {
       if (ack) {
         return Object.freeze({
           ok: true,
-          reason: ledgerAck ? 'PRIMARY_ACTIVATION_ACK_LEDGER_EXACT' : 'PRIMARY_ACTIVATION_ACK_EXACT',
+          reason: 'PRIMARY_ACTIVATION_ACK_EXACT',
+          ack_source: ledgerAck ? 'ACTIVATION_ACK_LEDGER' : 'STARTUP_EVENT_RING',
           launch_id,
           primary_boot_id: row.current_boot_id,
           event_sequence: ack.sequence,
