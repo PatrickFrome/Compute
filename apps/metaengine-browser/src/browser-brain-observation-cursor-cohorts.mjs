@@ -45,9 +45,11 @@ export function resumeObservationCursorCohorts(ledger, knownRevisionValues = [])
     requestIndexesByCohort[cohortIndex].push(requestIndex);
   });
 
+  const changedCohorts = [];
+  const changedCohortIndexes = [];
   const cohorts = uniqueRevisions.map((knownRevision, cohortIndex) => {
     const delta = ledger.resumeChangedSince(knownRevision);
-    return Object.freeze({
+    const cohort = Object.freeze({
       cohort_index: cohortIndex,
       request_indexes: Object.freeze(requestIndexesByCohort[cohortIndex]),
       known_revision: knownRevision,
@@ -57,13 +59,11 @@ export function resumeObservationCursorCohorts(ledger, knownRevisionValues = [])
       payload_persisted: false,
       ...ZERO_AUTHORITY,
     });
-  });
-  const changedCohorts = [];
-  const changedCohortIndexes = [];
-  cohorts.forEach((cohort) => {
-    if (!cohort.changed) return;
-    changedCohorts.push(cohort);
-    changedCohortIndexes.push(cohort.cohort_index);
+    if (cohort.changed) {
+      changedCohorts.push(cohort);
+      changedCohortIndexes.push(cohortIndex);
+    }
+    return cohort;
   });
   const changedRequestIndexes = [];
   requestCohortIndexes.forEach((cohortIndex, requestIndex) => {
@@ -96,6 +96,7 @@ export function browserBrainObservationCursorCohortContract() {
     request_order_cohort_routing: true,
     cohort_request_fanout_indexes: true,
     changed_work_indexes: true,
+    changed_cohort_collection_single_pass: true,
     changed_request_order_single_pass: true,
     direct_changed_request_membership_lookup: true,
     direct_changed_cohort_iteration: true,
