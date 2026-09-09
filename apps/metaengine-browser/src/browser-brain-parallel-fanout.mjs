@@ -17,6 +17,31 @@ function finitePositiveInteger(value, fallback) {
   return normalized > 0 ? normalized : fallback;
 }
 
+function preflightAbortError() {
+  return new BrowserBrainFanoutPlanError('aborted', 'fanout aborted before any effect');
+}
+
+async function awaitPreflight(preflightPromise, signal) {
+  if (!signal) return preflightPromise;
+
+  let removeAbortListener = () => {};
+  const abortPromise = new Promise((_, reject) => {
+    const rejectAbort = () => reject(preflightAbortError());
+    if (signal.aborted) {
+      rejectAbort();
+      return;
+    }
+    signal.addEventListener('abort', rejectAbort, { once: true });
+    removeAbortListener = () => signal.removeEventListener('abort', rejectAbort);
+  });
+
+  try {
+    return await Promise.race([preflightPromise, abortPromise]);
+  } finally {
+    removeAbortListener();
+  }
+}
+
 /**
  * One-shot, provider-neutral BrowserCell fan-out.
  *
@@ -69,7 +94,7 @@ export class BrowserBrainParallelFanoutCoordinator {
       );
     }
     if (signal?.aborted) {
-      throw new BrowserBrainFanoutPlanError('aborted', 'fanout aborted before any effect');
+      throw preflightAbortError();
     }
 
     const seenCommandIds = new Set();
@@ -91,17 +116,20 @@ export class BrowserBrainParallelFanoutCoordinator {
     // seams and may independently be provider-backed. Defer every invocation into
     // its own microtask so a synchronous throw from one adapter cannot prevent the
     // remaining read-only preflight work from starting. Promise.all still fails
-    // closed before any physical effect if any preflight lane rejects.
+    // closed before any physical effect if any preflight lane rejects. Race that
+    // aggregate against AbortSignal so cancellation does not wait for a slow or
+    // wedged provider-backed read-only preflight lane to settle.
     const budgetPromise = Promise.resolve().then(() => this.readMutationBudget());
     const cellKeyPromises = plan.map(({ command }) =>
       Promise.resolve().then(() => this.resolveCellKey(command)),
     );
-    const [rawBudget, rawCellKeys] = await Promise.all([
+    const preflightPromise = Promise.all([
       budgetPromise,
       Promise.all(cellKeyPromises),
     ]);
+    const [rawBudget, rawCellKeys] = await awaitPreflight(preflightPromise, signal);
     if (signal?.aborted) {
-      throw new BrowserBrainFanoutPlanError('aborted', 'fanout aborted before any effect');
+      throw preflightAbortError();
     }
 
     const budget = finitePositiveInteger(rawBudget, 1);
