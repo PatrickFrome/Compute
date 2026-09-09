@@ -23,14 +23,19 @@ function validProcessSnapshot(snapshot) {
 
 function coverage(snapshot = {}) {
   const webContents = Array.isArray(snapshot.web_contents) ? snapshot.web_contents : [];
-  const live = webContents.filter((row) => row && row.destroyed !== true);
-  const exact = live.filter((row) => String(row?.tab_id || '').startsWith('tab_'));
+  let liveWebContentsCount = 0;
+  let exactTabBoundWebContentsCount = 0;
+  for (const row of webContents) {
+    if (!row || row.destroyed === true) continue;
+    liveWebContentsCount += 1;
+    if (String(row.tab_id || '').startsWith('tab_')) exactTabBoundWebContentsCount += 1;
+  }
   return Object.freeze({
     process_count: Array.isArray(snapshot.processes) ? snapshot.processes.length : 0,
     web_contents_count: webContents.length,
-    live_web_contents_count: live.length,
-    exact_tab_bound_web_contents_count: exact.length,
-    unbound_live_web_contents_count: Math.max(0, live.length - exact.length),
+    live_web_contents_count: liveWebContentsCount,
+    exact_tab_bound_web_contents_count: exactTabBoundWebContentsCount,
+    unbound_live_web_contents_count: Math.max(0, liveWebContentsCount - exactTabBoundWebContentsCount),
     process_source: 'ELECTRON_APP_METRICS',
     web_contents_source: 'ELECTRON_GET_ALL_WEBCONTENTS',
     lifecycle_event_driven: snapshot.event_driven_lifecycle === true,
