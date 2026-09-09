@@ -105,6 +105,10 @@ export class EmergencyMaintenanceContext {
   async activateGlobal(grant) {
     return this.#serial(async () => {
       this.#assertReady();
+      // Preflight the already-initialized single gate plane before consuming the
+      // one-shot grant. Failures after the durable nonce fence are intentionally
+      // non-retriable, so a not-yet-initialized registry must be rejected first.
+      this.#registry.snapshot();
       const now = Number(this.#clock());
       const verified = verifyEmergencyMaintenanceGrant({
         grant,
@@ -205,7 +209,7 @@ export class EmergencyMaintenanceContext {
       const result = await this.#registry.enable({
         gate_id: '*',
         reason: String(reason || 'EMERGENCY_RECLOSED').slice(0, 500),
-        override_id: `emergency.reclose.${Date.now()}`,
+        override_id: `emergency.reclose.${Number(this.#clock())}`,
       });
       this.#state.last_receipt = {
         schema: 'metaengine.emergency-maintenance-activation-receipt.v1',
