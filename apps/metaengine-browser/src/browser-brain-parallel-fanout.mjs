@@ -11,10 +11,15 @@ function defaultResolveCellKey(command) {
   return command?.payload?.tab_id ?? null;
 }
 
-function finitePositiveInteger(value, fallback) {
-  if (!Number.isFinite(value)) return fallback;
-  const normalized = Math.floor(value);
-  return normalized > 0 ? normalized : fallback;
+function strictHardBatchLimit(value) {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new BrowserBrainFanoutPlanError(
+      'invalid_hard_batch_limit',
+      'hard batch limit must be a positive safe integer',
+      { hard_batch_limit: value },
+    );
+  }
+  return value;
 }
 
 function strictMutationBudget(value) {
@@ -89,7 +94,7 @@ export class BrowserBrainParallelFanoutCoordinator {
     this.execute = execute;
     this.resolveCellKey = resolveCellKey;
     this.readMutationBudget = readMutationBudget;
-    this.hardBatchLimit = finitePositiveInteger(hardBatchLimit, 128);
+    this.hardBatchLimit = strictHardBatchLimit(hardBatchLimit);
   }
 
   async dispatch(commands, { signal } = {}) {
