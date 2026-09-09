@@ -62,6 +62,22 @@ export class FleetProvisioner extends CoreFleetProvisioner {
     return Object.freeze(out);
   }
 
+  async reconcile(args = {}) {
+    // Persistence is evidence, never automatic retry authority. A LOST row may
+    // survive for forensics, but it cannot be resurrected unless a future
+    // contract explicitly grants automatic_retry_allowed=true. Retire the
+    // stale identity before core capacity accounting so any real deficit is
+    // satisfied with a fresh agent_id rather than a prior-process identity.
+    const before = super.snapshot();
+    for (const agent of before.agents || []) {
+      if (agent.lifecycle_state === 'LOST' && agent.automatic_retry_allowed !== true) {
+        await super.retire(agent.agent_id);
+        this.#preconversationProofs.delete(String(agent.agent_id || '').toLowerCase());
+      }
+    }
+    return super.reconcile(args);
+  }
+
   async markTransportPreconversationProven({ agent_id, tab_id, target_id, generation_epoch, transport_url } = {}) {
     const agentId = String(agent_id || '').toLowerCase();
     const tabId = String(tab_id || '');
