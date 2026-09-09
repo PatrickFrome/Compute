@@ -67,11 +67,15 @@ export class FleetProvisioner extends CoreFleetProvisioner {
 
   constructor(options = {}) {
     const loadState = options?.loadState;
+    const saveState = options?.saveState;
     super({
       ...options,
       loadState: typeof loadState === 'function'
         ? async (...args) => pruneRestartStaleLostHistory(await loadState(...args))
         : loadState,
+      saveState: typeof saveState === 'function'
+        ? async (value, ...args) => saveState(pruneRestartStaleLostHistory(value), ...args)
+        : saveState,
     });
   }
 
