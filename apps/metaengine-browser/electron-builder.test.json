@@ -1,9 +1,7 @@
 {
   "appId": "com.metaengine.browser.test",
   "productName": "METAENGINE Browser Test",
-  "asar": {
-    "disableIntegrity": false
-  },
+  "asar": true,
   "electronFuses": {
     "enableEmbeddedAsarIntegrityValidation": true,
     "onlyLoadAppFromAsar": true
