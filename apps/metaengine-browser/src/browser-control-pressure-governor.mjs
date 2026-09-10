@@ -44,6 +44,14 @@ function livenessCount(sample, key) {
   return Object.freeze({ value: raw, invalid: false });
 }
 
+function liveCellCount(value, { present = true } = {}) {
+  if (!present) return Object.freeze({ value: 1, invalid: false });
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    return Object.freeze({ value: 0, invalid: true });
+  }
+  return Object.freeze({ value: Math.min(512, value), invalid: false });
+}
+
 function higherBand(a, b) {
   return BAND_ORDER[Math.max(BAND_ORDER.indexOf(a), BAND_ORDER.indexOf(b))];
 }
@@ -85,8 +93,12 @@ function pressureBand(sample = {}) {
 
   const unresponsive = livenessCount(sample, 'unresponsive_cells');
   const recentCrashes = livenessCount(sample, 'recent_crashes');
+  const liveCells = liveCellCount(sample.live_cells, {
+    present: Object.prototype.hasOwnProperty.call(sample, 'live_cells'),
+  });
   if (unresponsive.invalid) invalid.push('unresponsive_cells');
   if (recentCrashes.invalid) invalid.push('recent_crashes');
+  if (liveCells.invalid) invalid.push('live_cells');
   if (invalid.length > 0) band = 'RED';
   else if (unresponsive.value > 0 || recentCrashes.value >= 2) band = 'RED';
   else if (recentCrashes.value === 1) band = higherBand(band, 'ORANGE');
@@ -95,12 +107,17 @@ function pressureBand(sample = {}) {
   if (missing.length === 2) band = higherBand(band, 'ORANGE');
   else if (missing.length > 0) band = higherBand(band, 'YELLOW');
 
-  return Object.freeze({ band, missing: Object.freeze(missing), invalid: Object.freeze(invalid) });
+  return Object.freeze({
+    band,
+    missing: Object.freeze(missing),
+    invalid: Object.freeze(invalid),
+    liveCells: liveCells.value,
+  });
 }
 
 function budgetFor(band, liveCells) {
   const base = BAND_BUDGETS[band] || BAND_BUDGETS.ORANGE;
-  const live = integer(liveCells, 1, 0, 512);
+  const live = liveCellCount(liveCells).value;
   return Object.freeze({
     read_concurrency: base.read_concurrency,
     mutation_concurrency: live === 0 ? 0 : Math.max(1, Math.min(base.mutation_concurrency, live)),
@@ -143,21 +160,25 @@ export class BrowserControlPressureGovernor {
     this.#lastSampleAt = sample.observed_at ? String(sample.observed_at) : new Date().toISOString();
     this.#lastReasons = evaluated.missing;
     this.#lastInvalid = evaluated.invalid;
-    return this.snapshot({ liveCells: sample.live_cells });
+    return this.snapshot({ liveCells: evaluated.liveCells });
   }
 
   snapshot({ liveCells = 1 } = {}) {
-    const normalizedLiveCells = integer(liveCells, 1, 0, 512);
+    const liveSignal = liveCellCount(liveCells);
+    const normalizedLiveCells = liveSignal.value;
+    const invalidSignals = liveSignal.invalid && !this.#lastInvalid.includes('live_cells')
+      ? Object.freeze([...this.#lastInvalid, 'live_cells'])
+      : Object.freeze([...this.#lastInvalid]);
     const budget = budgetFor(this.#band, normalizedLiveCells);
     return Object.freeze({
       schema: BROWSER_CONTROL_PRESSURE_GOVERNOR_SCHEMA,
-      pressure_band: this.#band,
+      pressure_band: liveSignal.invalid ? 'RED' : this.#band,
       better_samples_toward_recovery: this.#betterSamples,
       recovery_samples_required: this.#recoverySamples,
       last_sample_at: this.#lastSampleAt,
       missing_signals: Object.freeze([...this.#lastReasons]),
-      invalid_signals: Object.freeze([...this.#lastInvalid]),
-      ...budget,
+      invalid_signals: invalidSignals,
+      ...budgetFor(liveSignal.invalid ? 'RED' : this.#band, normalizedLiveCells),
       live_cells: normalizedLiveCells,
       sample_driven: true,
       dedicated_timer: false,
@@ -178,7 +199,8 @@ export function evaluateControlPressure(sample = {}) {
     pressure_band: evaluated.band,
     missing_signals: evaluated.missing,
     invalid_signals: evaluated.invalid,
-    ...budgetFor(evaluated.band, sample.live_cells),
+    ...budgetFor(evaluated.band, evaluated.liveCells),
+    live_cells: evaluated.liveCells,
     sample_driven: true,
     scheduler_authority: false,
     execution_authority: false,
