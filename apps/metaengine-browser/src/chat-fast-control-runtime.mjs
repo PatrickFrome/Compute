@@ -1,9 +1,12 @@
 import { ChatDevelopmentControlState } from './chat-development-control-state.mjs';
-import { ChatDevelopmentQueryProvider } from './chat-development-query-provider.mjs';
+import { ChatDevelopmentQueryProvider, CHAT_DEVELOPMENT_PROVIDER_SCHEMA } from './chat-development-query-provider.mjs';
 import { FastControlGatewayCore } from './fast-control-gateway-core.mjs';
 import { createFastControlMcpAdapter } from './fast-control-mcp-adapter.mjs';
 
 export const CHAT_FAST_CONTROL_RUNTIME_SCHEMA = 'metaengine.chat-fast-control-runtime.v1';
+export const CHAT_FAST_CONTROL_QUERY_CACHE_MAX = 64;
+
+const jsonBytes = (value) => Buffer.byteLength(JSON.stringify(value), 'utf8');
 
 function compactOrientation(capsule) {
   if (!capsule) return null;
@@ -22,6 +25,31 @@ function compactOrientation(capsule) {
   });
 }
 
+function normalizeQueryKey(input, stateRevision) {
+  const query = String(input?.query || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
+  const kinds = Array.isArray(input?.kinds)
+    ? [...new Set(input.kinds.map((value) => String(value || '').trim().toUpperCase()))].sort()
+    : null;
+  return JSON.stringify({
+    state_revision: stateRevision,
+    query,
+    kinds,
+    limit: Number(input?.limit ?? 8),
+    max_bytes: Number(input?.max_bytes ?? 8192),
+  });
+}
+
+function notModified(queryRevision) {
+  const base = {
+    schema: CHAT_DEVELOPMENT_PROVIDER_SCHEMA,
+    status: 'NOT_MODIFIED',
+    query_revision: queryRevision,
+    warm_cache: true,
+    authority_effect: false,
+  };
+  return Object.freeze({ ...base, bytes: jsonBytes(base), truncated: false });
+}
+
 export class ChatFastControlRuntime {
   #controlState;
   #queryProvider;
@@ -29,6 +57,10 @@ export class ChatFastControlRuntime {
   #mcp;
   #getBrowserState;
   #browserStateReads = 0;
+  #devQueryCache = new Map();
+  #devQueryCacheHits = 0;
+  #devQueryCacheMisses = 0;
+  #devQueryNotModifiedHits = 0;
 
   constructor({
     developmentPlane,
@@ -53,15 +85,44 @@ export class ChatFastControlRuntime {
         const state = await this.#getBrowserState();
         return this.#controlState.fastContext({ state, ...input });
       },
-      devQuery: (input) => this.#queryProvider.query({
-        ...input,
-        orientation: compactOrientation(this.#controlState.capsule()),
-      }),
+      devQuery: (input) => this.#devQuery(input),
       issueBatch,
       resultDelta,
       issueEmergency,
     });
     this.#mcp = createFastControlMcpAdapter(this.#gateway);
+  }
+
+  async #devQuery(input) {
+    const stateRevision = this.#controlState.snapshot().revision;
+    const key = normalizeQueryKey(input, stateRevision);
+    const cached = this.#devQueryCache.get(key);
+    if (cached) {
+      this.#devQueryCache.delete(key);
+      this.#devQueryCache.set(key, cached);
+      this.#devQueryCacheHits += 1;
+      if (input?.if_none_match && String(input.if_none_match) === cached.query_revision) {
+        this.#devQueryNotModifiedHits += 1;
+        return notModified(cached.query_revision);
+      }
+      return Object.freeze({ ...structuredClone(cached.result), warm_cache: true });
+    }
+
+    this.#devQueryCacheMisses += 1;
+    const result = await this.#queryProvider.query({
+      ...input,
+      orientation: compactOrientation(this.#controlState.capsule()),
+    });
+    if (result?.status === 'OK' && result?.query_revision) {
+      this.#devQueryCache.set(key, Object.freeze({
+        query_revision: String(result.query_revision),
+        result: structuredClone(result),
+      }));
+      while (this.#devQueryCache.size > CHAT_FAST_CONTROL_QUERY_CACHE_MAX) {
+        this.#devQueryCache.delete(this.#devQueryCache.keys().next().value);
+      }
+    }
+    return result;
   }
 
   setSource(source, now) { return this.#controlState.setSource(source, now); }
@@ -83,6 +144,16 @@ export class ChatFastControlRuntime {
       tools: this.#gateway.manifest().tools.map((row) => row.name),
       browser_state_reads: this.#browserStateReads,
       dev_query_includes_orientation: true,
+      dev_query_warm_cache: {
+        entries: this.#devQueryCache.size,
+        max_entries: CHAT_FAST_CONTROL_QUERY_CACHE_MAX,
+        hits: this.#devQueryCacheHits,
+        misses: this.#devQueryCacheMisses,
+        not_modified_hits: this.#devQueryNotModifiedHits,
+        state_revision_keyed: true,
+        timers: false,
+        authority_effect: false,
+      },
       periodic_source_discovery: false,
       periodic_ci_discovery: false,
       second_scheduler: false,
