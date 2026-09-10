@@ -7,10 +7,10 @@ const { verifyCandidateCapsuleRemoteBound } = require('./candidate-remote-source
 const { createVerificationSandboxPlan, verifyVerificationSandboxPlan } = require('./verification-sandbox-plan.cjs');
 const { verifyEnvelope: verifyAdvisoryEvidenceEnvelope } = require('./advisory-evidence-verifier.cjs');
 const { createDevOSRepoReadModel } = require('./devos-repo-read-model.cjs');
-const { DevOSRepoSearchIndex } = require('./devos-repo-search-index.cjs');
+const { WorktreeAwareDevOSRepoSearchIndex } = require('./devos-worktree-repo-search.cjs');
 
 const PROTOCOL = 'metaengine.development-plane.v1';
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 const CAPABILITIES = Object.freeze([
   'HEALTH',
   'CAPABILITIES',
@@ -28,7 +28,10 @@ const repoRoot = path.resolve(process.env.METAENGINE_REPO_ROOT || process.cwd())
 const repositoryName = String(process.env.METAENGINE_GIT_REPOSITORY || 'PatrickFrome/Compute');
 const repositoryRemote = String(process.env.METAENGINE_GIT_REMOTE || 'origin');
 const sourceProvenancePath = path.resolve(process.env.METAENGINE_SOURCE_PROVENANCE || path.join(repoRoot, '.metaengine-source-provenance.json'));
-const repoSearchIndex = new DevOSRepoSearchIndex({ repoRoot });
+const repoSearchIndex = new WorktreeAwareDevOSRepoSearchIndex({
+  repoRoot,
+  watch: process.env.METAENGINE_DEVOS_WORKTREE_WATCH !== '0',
+});
 
 function send(message) {
   if (!process.parentPort) throw new Error('development_plane_parent_port_missing');
@@ -91,7 +94,13 @@ function requireObjectPayload(payload, name) {
 
 async function execute(capability, payload) {
   if (!CAPABILITIES.includes(capability)) throw new Error('capability_denied');
-  if (capability === 'HEALTH') return { ok: true, pid: process.pid, uptime_seconds: process.uptime(), process_type: process.type || 'utility' };
+  if (capability === 'HEALTH') return {
+    ok: true,
+    pid: process.pid,
+    uptime_seconds: process.uptime(),
+    process_type: process.type || 'utility',
+    repo_search: repoSearchIndex.snapshot(),
+  };
   if (capability === 'CAPABILITIES') return {
     version: VERSION,
     capabilities: [...CAPABILITIES],
@@ -110,7 +119,8 @@ async function execute(capability, payload) {
     advisory_evidence_promotion_authority: false,
     devos_repo_read_model: true,
     devos_repo_search: true,
-    devos_repo_search_cache: 'EXACT_HEAD',
+    devos_repo_search_cache: 'HEAD_PLUS_WORKTREE_EVENT_EPOCH',
+    devos_repo_search_worktree_watcher: true,
     devos_repo_search_arbitrary_path_selection: false,
     devos_repo_arbitrary_path_read: false,
     direct_promote_current: false,
@@ -164,6 +174,7 @@ process.parentPort.on('message', async (event) => {
   const message = event?.data;
   if (!message || message.protocol !== PROTOCOL) return;
   if (message.type === 'CONTROL' && message.control === 'SHUTDOWN') {
+    repoSearchIndex.close();
     send({ type: 'SHUTDOWN_ACK', version: VERSION });
     setTimeout(() => process.exit(0), 25);
     return;
