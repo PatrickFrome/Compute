@@ -1,4 +1,8 @@
 import crypto from 'node:crypto';
+import {
+  CHAT_DEVELOPMENT_CAPSULE_SCHEMA,
+  CHAT_DEVELOPMENT_CAPSULE_MAX_BYTES,
+} from './chat-development-capsule.mjs';
 
 export const FAST_CONTEXT_SCHEMA = 'metaengine.fast-context.v1';
 export const FAST_CONTEXT_ORDINARY_BUDGET_BYTES = 8 * 1024;
@@ -55,6 +59,29 @@ function boundedCi(ci) {
   };
 }
 
+function authorityContaminated(value, depth = 0) {
+  if (depth > 12 || value == null || typeof value !== 'object') return false;
+  if (Array.isArray(value)) return value.some((row) => authorityContaminated(row, depth + 1));
+  for (const [key, child] of Object.entries(value)) {
+    if (['authority_effect', 'command_authority', 'scheduler_authority', 'browser_execution_authority', 'projection_is_authority'].includes(key) && child === true) return true;
+    if (authorityContaminated(child, depth + 1)) return true;
+  }
+  return false;
+}
+
+function boundedDevelopmentCapsule(capsule, development) {
+  if (capsule == null) return null;
+  if (!capsule || typeof capsule !== 'object' || Array.isArray(capsule)) throw new Error('fast_context_dev_capsule_invalid');
+  if (capsule.schema !== CHAT_DEVELOPMENT_CAPSULE_SCHEMA) throw new Error('fast_context_dev_capsule_schema_invalid');
+  if (authorityContaminated(capsule)) throw new Error('fast_context_dev_capsule_authority_forbidden');
+  const size = byteLength(capsule);
+  if (size > CHAT_DEVELOPMENT_CAPSULE_MAX_BYTES) throw new Error(`fast_context_dev_capsule_too_large:${size}`);
+  const contextHead = String(development?.head_sha || '').trim().toLowerCase();
+  const capsuleHead = String(capsule?.source?.head_sha || '').trim().toLowerCase();
+  if (contextHead && capsuleHead && contextHead !== capsuleHead) throw new Error('fast_context_dev_capsule_head_mismatch');
+  return structuredClone(capsule);
+}
+
 function pickFields(context, fields) {
   if (!Array.isArray(fields) || fields.length === 0) return context;
   const required = new Set(['schema', 'revision', 'state_digest', 'generated_at', 'freshness_ms', 'capability_revision', 'authority_effect']);
@@ -72,7 +99,7 @@ function fitToBudget(context, maxBytes) {
   if (byteLength(out) <= budget) return Object.freeze({ context: out, bytes: byteLength(out), truncated: false });
 
   // Drop optional verbose source/UI text before failing the contract. Identity,
-  // control, revisions and error state are never silently removed.
+  // control, revisions, development capsule and error state are never silently removed.
   if (out.tabs?.selected) {
     out.tabs.selected.title = null;
     out.tabs.selected.url = clip(out.tabs.selected.url, 320);
@@ -87,6 +114,7 @@ export function buildFastContext({
   state = {},
   source = null,
   ci = null,
+  development_capsule = null,
   capability_revision = null,
   last_checkpoint_id = null,
   fields = null,
@@ -98,6 +126,7 @@ export function buildFastContext({
   const stateText = JSON.stringify(state ?? {});
   const lastSeenMs = Date.parse(String(state?.heartbeat_at || state?.last_seen_at || generatedAt));
   const freshnessMs = Number.isFinite(lastSeenMs) ? Math.max(0, now_ms - lastSeenMs) : null;
+  const development = boundedDevelopment(state, source);
   const context = {
     schema: FAST_CONTEXT_SCHEMA,
     revision: null,
@@ -118,7 +147,8 @@ export function buildFastContext({
       authority_effect: false,
     },
     tabs: boundedTabs(state),
-    development: boundedDevelopment(state, source),
+    development,
+    development_capsule: boundedDevelopmentCapsule(development_capsule, development),
     ci: boundedCi(ci),
     runs: {
       pending: Number.isSafeInteger(Number(state?.runs?.pending)) ? Math.max(0, Number(state.runs.pending)) : 0,
