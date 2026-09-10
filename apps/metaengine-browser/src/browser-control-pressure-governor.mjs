@@ -8,6 +8,7 @@ export const CONTROL_PRESSURE_BANDS = Object.freeze({
 });
 
 const BAND_ORDER = Object.freeze(['GREEN', 'YELLOW', 'ORANGE', 'RED']);
+const BAND_RANK = Object.freeze({ GREEN: 0, YELLOW: 1, ORANGE: 2, RED: 3 });
 const BAND_BUDGETS = Object.freeze({
   GREEN: Object.freeze({ read_concurrency: 128, mutation_concurrency: 32, resource_sample_ms: 250 }),
   YELLOW: Object.freeze({ read_concurrency: 64, mutation_concurrency: 16, resource_sample_ms: 350 }),
@@ -27,7 +28,7 @@ function recoverySampleCount(value) {
   return value;
 }
 
-function numericSignal(sample, key, { max = null } = {}) {
+function numericSignal(sample, key, max = null) {
   if (!Object.prototype.hasOwnProperty.call(sample, key)) return MISSING_SIGNAL;
   const raw = sample[key];
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0) return INVALID_SIGNAL;
@@ -48,15 +49,27 @@ function liveCellCount(value, { present = true } = {}) {
 }
 
 function higherBand(a, b) {
-  return BAND_ORDER[Math.max(BAND_ORDER.indexOf(a), BAND_ORDER.indexOf(b))];
+  return BAND_ORDER[Math.max(BAND_RANK[a], BAND_RANK[b])];
 }
 
-function metricBand({ value, yellow, orange, red }) {
-  if (value == null) return null;
+function metricBand(value, yellow, orange, red) {
   if (value >= red) return 'RED';
   if (value >= orange) return 'ORANGE';
   if (value >= yellow) return 'YELLOW';
   return 'GREEN';
+}
+
+function pressureMetricBand(sample, key, yellow, orange, red, required, max, missing, invalid) {
+  const value = numericSignal(sample, key, max);
+  if (value === MISSING_SIGNAL) {
+    if (required) missing.push(key);
+    return 'GREEN';
+  }
+  if (value === INVALID_SIGNAL) {
+    invalid.push(key);
+    return 'RED';
+  }
+  return metricBand(value, yellow, orange, red);
 }
 
 function pressureBand(sample = {}) {
@@ -64,27 +77,13 @@ function pressureBand(sample = {}) {
   const missing = [];
   const invalid = [];
 
-  const applyMetric = (key, thresholds, { required = false, max = null } = {}) => {
-    const value = numericSignal(sample, key, { max });
-    if (value === MISSING_SIGNAL) {
-      if (required) missing.push(key);
-      return;
-    }
-    if (value === INVALID_SIGNAL) {
-      invalid.push(key);
-      band = 'RED';
-      return;
-    }
-    band = higherBand(band, metricBand({ value, ...thresholds }));
-  };
-
-  applyMetric('event_loop_utilization', { yellow: 0.60, orange: 0.75, red: 0.88 }, { required: true, max: 1 });
-  applyMetric('event_loop_delay_p95_ms', { yellow: 20, orange: 50, red: 120 }, { required: true });
-  applyMetric('max_renderer_cpu_percent', { yellow: 65, orange: 85, red: 97 });
-  applyMetric('main_working_set_mb', { yellow: 768, orange: 1536, red: 3072 });
-  applyMetric('network_inflight', { yellow: 128, orange: 384, red: 768 });
-  applyMetric('result_ack_rtt_p95_ms', { yellow: 300, orange: 1000, red: 3000 });
-  applyMetric('command_lease_rtt_p95_ms', { yellow: 300, orange: 1000, red: 3000 });
+  band = higherBand(band, pressureMetricBand(sample, 'event_loop_utilization', 0.60, 0.75, 0.88, true, 1, missing, invalid));
+  band = higherBand(band, pressureMetricBand(sample, 'event_loop_delay_p95_ms', 20, 50, 120, true, null, missing, invalid));
+  band = higherBand(band, pressureMetricBand(sample, 'max_renderer_cpu_percent', 65, 85, 97, false, null, missing, invalid));
+  band = higherBand(band, pressureMetricBand(sample, 'main_working_set_mb', 768, 1536, 3072, false, null, missing, invalid));
+  band = higherBand(band, pressureMetricBand(sample, 'network_inflight', 128, 384, 768, false, null, missing, invalid));
+  band = higherBand(band, pressureMetricBand(sample, 'result_ack_rtt_p95_ms', 300, 1000, 3000, false, null, missing, invalid));
+  band = higherBand(band, pressureMetricBand(sample, 'command_lease_rtt_p95_ms', 300, 1000, 3000, false, null, missing, invalid));
 
   const unresponsive = livenessCount(sample, 'unresponsive_cells');
   const recentCrashes = livenessCount(sample, 'recent_crashes');
