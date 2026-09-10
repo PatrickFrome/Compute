@@ -9,6 +9,7 @@ const {
 } = require('./devos-repo-search-index.cjs');
 
 const DEVOS_WORKTREE_REPO_SEARCH_SCHEMA = 'metaengine.development-plane.worktree-repo-search.v1';
+const MAX_INCREMENTAL_PATHS = 64;
 const sha256 = (value) => crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
 
 function normalizeRelative(value) {
@@ -23,6 +24,12 @@ class WorktreeAwareDevOSRepoSearchIndex {
   #watcherFactory;
   #index;
   #dirty = false;
+  #pendingPaths = new Set();
+  #fullRebuildRequired = false;
+  #incrementalRefreshCount = 0;
+  #incrementalFileReads = 0;
+  #fullRebuildCount = 0;
+  #lastRefreshMode = 'NONE';
   #worktreeEpoch = 0;
   #changeSeq = 0;
   #lastChange = null;
@@ -43,23 +50,60 @@ class WorktreeAwareDevOSRepoSearchIndex {
   invalidate({ event_type = 'change', relative_path = null, root = null } = {}) {
     this.#changeSeq += 1;
     this.#worktreeEpoch += 1;
+    const eventType = String(event_type || 'change').slice(0, 32);
+    const relative = normalizeRelative(relative_path);
+    const normalizedRoot = normalizeRelative(root);
+    const incrementalRoot = relative && ALLOWED_ROOTS.find((candidate) => relative.startsWith(`${candidate}/`));
+    const incremental = eventType === 'change' && Boolean(incrementalRoot);
+    if (incremental) {
+      this.#pendingPaths.add(relative);
+      if (this.#pendingPaths.size > MAX_INCREMENTAL_PATHS) this.#fullRebuildRequired = true;
+    } else {
+      this.#fullRebuildRequired = true;
+    }
     this.#dirty = true;
     this.#lastChange = Object.freeze({
       seq: this.#changeSeq,
-      event_type: String(event_type || 'change').slice(0, 32),
-      relative_path: normalizeRelative(relative_path),
-      root: normalizeRelative(root),
+      event_type: eventType,
+      relative_path: relative,
+      root: normalizedRoot,
+      incremental_candidate: incremental,
       observed_at: new Date().toISOString(),
       authority_effect: false,
     });
     return this.snapshot();
   }
 
-  #freshIndexIfNeeded() {
-    if (!this.#dirty) return false;
-    this.#index = new DevOSRepoSearchIndex({ repoRoot: this.#repoRoot });
+  async #refreshIndexIfNeeded(source) {
+    if (!this.#dirty) return Object.freeze({ touched: false, incremental: false, full_rebuild: false, files_refreshed: 0 });
+    const pending = [...this.#pendingPaths];
+    const forceFull = this.#fullRebuildRequired || pending.length === 0;
+    this.#pendingPaths.clear();
+    this.#fullRebuildRequired = false;
     this.#dirty = false;
-    return true;
+
+    if (forceFull) {
+      this.#index = new DevOSRepoSearchIndex({ repoRoot: this.#repoRoot });
+      this.#fullRebuildCount += 1;
+      this.#lastRefreshMode = 'FULL_REBUILD';
+      return Object.freeze({ touched: true, incremental: false, full_rebuild: true, files_refreshed: 0 });
+    }
+
+    let filesRefreshed = 0;
+    for (const relative of pending) {
+      const refreshed = await this.#index.refreshFile(source, relative);
+      if (refreshed.rebuild_required) {
+        this.#index = new DevOSRepoSearchIndex({ repoRoot: this.#repoRoot });
+        this.#fullRebuildCount += 1;
+        this.#lastRefreshMode = `FULL_REBUILD_${String(refreshed.reason || 'FALLBACK')}`;
+        return Object.freeze({ touched: true, incremental: false, full_rebuild: true, files_refreshed: 0 });
+      }
+      filesRefreshed += 1;
+      this.#incrementalFileReads += 1;
+    }
+    this.#incrementalRefreshCount += 1;
+    this.#lastRefreshMode = 'INCREMENTAL_FILE_REFRESH';
+    return Object.freeze({ touched: true, incremental: true, full_rebuild: false, files_refreshed: filesRefreshed });
   }
 
   #sourceRevision(inner = this.#index.snapshot()) {
@@ -102,21 +146,29 @@ class WorktreeAwareDevOSRepoSearchIndex {
   }
 
   async ensure(source) {
-    const invalidated = this.#freshIndexIfNeeded();
+    const refresh = await this.#refreshIndexIfNeeded(source);
     const result = await this.#index.ensure(source);
+    const fullIndexRebuild = refresh.full_rebuild || (result.rebuilt && !refresh.incremental);
     return Object.freeze({
-      rebuilt: invalidated || result.rebuilt,
+      rebuilt: refresh.touched || result.rebuilt,
+      incremental_refresh: refresh.incremental,
+      full_index_rebuild: fullIndexRebuild,
+      files_refreshed: refresh.files_refreshed,
       snapshot: this.snapshot(result.snapshot),
     });
   }
 
   async query(source, input = {}) {
-    const invalidated = this.#freshIndexIfNeeded();
+    const refresh = await this.#refreshIndexIfNeeded(source);
     const result = await this.#index.query(source, input);
     const inner = this.#index.snapshot();
+    const fullIndexRebuild = refresh.full_rebuild || (result.index_rebuilt && !refresh.incremental);
     return Object.freeze({
       ...result,
-      index_rebuilt: invalidated || result.index_rebuilt,
+      index_rebuilt: refresh.touched || result.index_rebuilt,
+      incremental_refresh: refresh.incremental,
+      full_index_rebuild: fullIndexRebuild,
+      incremental_files_refreshed: refresh.files_refreshed,
       worktree_epoch: this.#worktreeEpoch,
       source_revision: this.#sourceRevision(inner),
       search_strategy: 'HEAD_PLUS_WORKTREE_EVENT_INDEX',
@@ -132,6 +184,15 @@ class WorktreeAwareDevOSRepoSearchIndex {
       worktree_epoch: this.#worktreeEpoch,
       source_revision: this.#sourceRevision(inner),
       dirty_pending_rebuild: this.#dirty,
+      pending_incremental_paths: this.#pendingPaths.size,
+      full_rebuild_required: this.#fullRebuildRequired,
+      incremental_refresh_count: this.#incrementalRefreshCount,
+      incremental_file_reads: this.#incrementalFileReads,
+      full_rebuild_count: this.#fullRebuildCount,
+      last_refresh_mode: this.#lastRefreshMode,
+      max_incremental_paths: MAX_INCREMENTAL_PATHS,
+      same_head_incremental_refresh: true,
+      structural_event_full_rebuild: true,
       watcher_enabled: this.#watching,
       watcher_count: this.#watchers.length,
       watcher_errors: Object.freeze([...this.#watchErrors]),
