@@ -5,6 +5,23 @@ import { createFastControlMcpAdapter } from './fast-control-mcp-adapter.mjs';
 
 export const CHAT_FAST_CONTROL_RUNTIME_SCHEMA = 'metaengine.chat-fast-control-runtime.v1';
 
+function compactOrientation(capsule) {
+  if (!capsule) return null;
+  return Object.freeze({
+    revision: capsule.revision,
+    head_sha: capsule.source?.head_sha ?? null,
+    branch: capsule.source?.branch ?? null,
+    pr: capsule.source?.pr ?? null,
+    ci_state: capsule.ci?.state ?? 'UNKNOWN',
+    ci_failed: Number(capsule.ci?.failed || 0),
+    ci_pending: Number(capsule.ci?.pending || 0),
+    focus_kind: capsule.focus?.kind ?? 'NONE',
+    focus_id: capsule.focus?.id ?? null,
+    focus_title: capsule.focus?.title ?? null,
+    authority_effect: false,
+  });
+}
+
 export class ChatFastControlRuntime {
   #controlState;
   #queryProvider;
@@ -36,7 +53,10 @@ export class ChatFastControlRuntime {
         const state = await this.#getBrowserState();
         return this.#controlState.fastContext({ state, ...input });
       },
-      devQuery: (input) => this.#queryProvider.query(input),
+      devQuery: (input) => this.#queryProvider.query({
+        ...input,
+        orientation: compactOrientation(this.#controlState.capsule()),
+      }),
       issueBatch,
       resultDelta,
       issueEmergency,
@@ -62,6 +82,7 @@ export class ChatFastControlRuntime {
       query_provider: this.#queryProvider.snapshot(),
       tools: this.#gateway.manifest().tools.map((row) => row.name),
       browser_state_reads: this.#browserStateReads,
+      dev_query_includes_orientation: true,
       periodic_source_discovery: false,
       periodic_ci_discovery: false,
       second_scheduler: false,
