@@ -15,21 +15,22 @@ const BAND_BUDGETS = Object.freeze({
   RED: Object.freeze({ read_concurrency: 8, mutation_concurrency: 2, resource_sample_ms: 1000 }),
 });
 
-function finite(value, fallback = null) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function ratio(value) {
-  const parsed = finite(value, null);
-  if (parsed == null) return null;
-  return Math.max(0, Math.min(1, parsed));
-}
-
 function integer(value, fallback, min, max) {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed)) return fallback;
   return Math.max(min, Math.min(max, parsed));
+}
+
+function numericSignal(sample, key, { max = null } = {}) {
+  if (!Object.prototype.hasOwnProperty.call(sample, key)) {
+    return Object.freeze({ value: null, present: false, invalid: false });
+  }
+  const raw = sample[key];
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0) {
+    return Object.freeze({ value: null, present: true, invalid: true });
+  }
+  const value = max == null ? raw : Math.min(max, raw);
+  return Object.freeze({ value, present: true, invalid: false });
 }
 
 function livenessCount(sample, key) {
@@ -60,27 +61,27 @@ function pressureBand(sample = {}) {
   const missing = [];
   const invalid = [];
 
-  const elu = ratio(sample.event_loop_utilization);
-  const delay = finite(sample.event_loop_delay_p95_ms, null);
-  if (elu == null) missing.push('event_loop_utilization');
-  else band = higherBand(band, metricBand({ value: elu, yellow: 0.60, orange: 0.75, red: 0.88 }));
-  if (delay == null) missing.push('event_loop_delay_p95_ms');
-  else band = higherBand(band, metricBand({ value: delay, yellow: 20, orange: 50, red: 120 }));
+  const applyMetric = (key, thresholds, { required = false, max = null } = {}) => {
+    const signal = numericSignal(sample, key, { max });
+    if (!signal.present) {
+      if (required) missing.push(key);
+      return;
+    }
+    if (signal.invalid) {
+      invalid.push(key);
+      band = 'RED';
+      return;
+    }
+    band = higherBand(band, metricBand({ value: signal.value, ...thresholds }));
+  };
 
-  const maxRendererCpu = finite(sample.max_renderer_cpu_percent, null);
-  if (maxRendererCpu != null) band = higherBand(band, metricBand({ value: maxRendererCpu, yellow: 65, orange: 85, red: 97 }));
-
-  const mainWorkingSetMb = finite(sample.main_working_set_mb, null);
-  if (mainWorkingSetMb != null) band = higherBand(band, metricBand({ value: mainWorkingSetMb, yellow: 768, orange: 1536, red: 3072 }));
-
-  const networkInflight = finite(sample.network_inflight, null);
-  if (networkInflight != null) band = higherBand(band, metricBand({ value: networkInflight, yellow: 128, orange: 384, red: 768 }));
-
-  const resultAckRtt = finite(sample.result_ack_rtt_p95_ms, null);
-  if (resultAckRtt != null) band = higherBand(band, metricBand({ value: resultAckRtt, yellow: 300, orange: 1000, red: 3000 }));
-
-  const leaseRtt = finite(sample.command_lease_rtt_p95_ms, null);
-  if (leaseRtt != null) band = higherBand(band, metricBand({ value: leaseRtt, yellow: 300, orange: 1000, red: 3000 }));
+  applyMetric('event_loop_utilization', { yellow: 0.60, orange: 0.75, red: 0.88 }, { required: true, max: 1 });
+  applyMetric('event_loop_delay_p95_ms', { yellow: 20, orange: 50, red: 120 }, { required: true });
+  applyMetric('max_renderer_cpu_percent', { yellow: 65, orange: 85, red: 97 });
+  applyMetric('main_working_set_mb', { yellow: 768, orange: 1536, red: 3072 });
+  applyMetric('network_inflight', { yellow: 128, orange: 384, red: 768 });
+  applyMetric('result_ack_rtt_p95_ms', { yellow: 300, orange: 1000, red: 3000 });
+  applyMetric('command_lease_rtt_p95_ms', { yellow: 300, orange: 1000, red: 3000 });
 
   const unresponsive = livenessCount(sample, 'unresponsive_cells');
   const recentCrashes = livenessCount(sample, 'recent_crashes');
