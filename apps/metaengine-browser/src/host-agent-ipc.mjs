@@ -8,6 +8,7 @@ import {
   HOST_AGENT_PROTOCOL_SCHEMA,
   HostAgentNonceWindow,
   createHostAgentNonce,
+  serializeHostAgentFrame,
   signHostAgentFrame,
   verifyHostAgentFrame,
 } from './host-agent-protocol.mjs';
@@ -26,25 +27,27 @@ export function hostAgentEndpoint({ userDataPath, platform = process.platform } 
 }
 
 function parseFrames(state, chunk, onFrame) {
-  state.buffer += chunk.toString('utf8');
-  if (Buffer.byteLength(state.buffer, 'utf8') > MAX_BUFFER_BYTES) throw new Error('host_agent_ipc_buffer_overflow');
+  const incoming = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+  const total = state.buffer.byteLength + incoming.byteLength;
+  if (total > MAX_BUFFER_BYTES) throw new Error('host_agent_ipc_buffer_overflow');
+  state.buffer = state.buffer.byteLength === 0
+    ? incoming
+    : Buffer.concat([state.buffer, incoming], total);
   for (;;) {
-    const newline = state.buffer.indexOf('\n');
+    const newline = state.buffer.indexOf(0x0a);
     if (newline < 0) break;
-    const line = state.buffer.slice(0, newline);
-    state.buffer = state.buffer.slice(newline + 1);
-    if (!line.trim()) continue;
-    if (Buffer.byteLength(line, 'utf8') > HOST_AGENT_MAX_FRAME_BYTES) throw new Error('host_agent_ipc_frame_too_large');
+    const line = state.buffer.subarray(0, newline);
+    state.buffer = state.buffer.subarray(newline + 1);
+    if (line.byteLength === 0) continue;
+    if (line.byteLength > HOST_AGENT_MAX_FRAME_BYTES) throw new Error('host_agent_ipc_frame_too_large');
     let frame;
-    try { frame = JSON.parse(line); } catch { throw new Error('host_agent_ipc_json_invalid'); }
+    try { frame = JSON.parse(line.toString('utf8')); } catch { throw new Error('host_agent_ipc_json_invalid'); }
     onFrame(frame);
   }
 }
 
 function writeFrame(socket, frame) {
-  const line = `${JSON.stringify(frame)}\n`;
-  if (Buffer.byteLength(line, 'utf8') > HOST_AGENT_MAX_FRAME_BYTES + 1) throw new Error('host_agent_ipc_frame_too_large');
-  socket.write(line, 'utf8');
+  socket.write(`${serializeHostAgentFrame(frame)}\n`, 'utf8');
 }
 
 export function createHostAgentServer({ endpoint, sessionKey, handlers = {}, netModule = net } = {}) {
@@ -59,7 +62,7 @@ export function createHostAgentServer({ endpoint, sessionKey, handlers = {}, net
 
   const server = netModule.createServer((socket) => {
     sockets.add(socket);
-    const state = { buffer: '' };
+    const state = { buffer: Buffer.alloc(0) };
     socket.on('close', () => sockets.delete(socket));
     socket.on('error', () => {});
     socket.on('data', (chunk) => {
@@ -72,9 +75,11 @@ export function createHostAgentServer({ endpoint, sessionKey, handlers = {}, net
               if (request.kind !== 'REQUEST') throw new Error('host_agent_server_request_kind_required');
               const handler = table.get(request.op);
               if (!handler) throw new Error(`host_agent_server_op_unhandled:${request.op}`);
-              const result = await handler(structuredClone(request.payload), request);
+              // request.payload is already the protocol boundary's defensive copy.
+              const result = await handler(request.payload, request);
+              // signHostAgentFrame owns the single defensive copy before the response crosses IPC.
               const payload = result && typeof result === 'object' && !Array.isArray(result)
-                ? { ok: true, result: structuredClone(result) }
+                ? { ok: true, result }
                 : { ok: true, result: { value: result ?? null } };
               writeFrame(socket, signHostAgentFrame({
                 schema: HOST_AGENT_PROTOCOL_SCHEMA,
@@ -134,6 +139,8 @@ export function createHostAgentServer({ endpoint, sessionKey, handlers = {}, net
         connections: sockets.size,
         authenticated_frames_only: true,
         replay_protection: nonceWindow.snapshot(),
+        binary_frame_accumulator: true,
+        redundant_payload_clones: 0,
         raw_shell: false,
         raw_cdp_passthrough: false,
         authority_effect: false,
@@ -147,7 +154,7 @@ export class HostAgentClient {
   #sessionKey;
   #net;
   #socket = null;
-  #bufferState = { buffer: '' };
+  #bufferState = { buffer: Buffer.alloc(0) };
   #pending = new Map();
   #nonceWindow = new HostAgentNonceWindow();
   #connectPromise = null;
@@ -172,7 +179,7 @@ export class HostAgentClient {
       socket.once('connect', () => {
         socket.off('error', fail);
         this.#socket = socket;
-        this.#bufferState = { buffer: '' };
+        this.#bufferState = { buffer: Buffer.alloc(0) };
         socket.on('error', (error) => this.#failPending(error));
         socket.on('close', () => {
           if (this.#socket === socket) this.#socket = null;
@@ -203,7 +210,8 @@ export class HostAgentClient {
         this.#pending.delete(frame.request_id);
         clearTimeout(pending.timer);
         if (frame.payload?.ok !== true) pending.reject(new Error(String(frame.payload?.error || 'host_agent_request_failed')));
-        else pending.resolve(structuredClone(frame.payload.result));
+        // verifyHostAgentFrame already detached this payload from the socket parser object.
+        else pending.resolve(frame.payload.result);
       });
     } catch (error) {
       this.#socket?.destroy();
@@ -248,6 +256,8 @@ export class HostAgentClient {
       pending_requests: this.#pending.size,
       authenticated_frames_only: true,
       replay_protection: this.#nonceWindow.snapshot(),
+      binary_frame_accumulator: true,
+      redundant_payload_clones: 0,
       authority_effect: false,
     });
   }

@@ -22,14 +22,20 @@ const OPS = new Set(HOST_AGENT_ALLOWED_OPS);
 const REQUEST_ID_RE = /^[A-Za-z0-9._:-]{8,160}$/;
 const NONCE_RE = /^[A-Za-z0-9_-]{22,64}$/;
 const AUTH_RE = /^[A-Za-z0-9_-]{43}$/;
+const FRAME_META = new WeakMap();
 
-const byteLength = (value) => Buffer.byteLength(JSON.stringify(value ?? null), 'utf8');
 const digest = (value) => crypto.createHash('sha256').update(value).digest('base64url');
 
 function plainObject(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
+}
+
+function deepFreeze(value) {
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) deepFreeze(child);
+  return Object.freeze(value);
 }
 
 function decodeKey(value) {
@@ -40,7 +46,15 @@ function decodeKey(value) {
   return key;
 }
 
-function normalizeUnsignedFrame(frame) {
+function payloadJson(value) {
+  let serialized;
+  try { serialized = JSON.stringify(value ?? {}); } catch { throw new Error('host_agent_payload_json_invalid'); }
+  if (serialized == null) throw new Error('host_agent_payload_json_invalid');
+  if (Buffer.byteLength(serialized, 'utf8') > HOST_AGENT_MAX_PAYLOAD_BYTES) throw new Error('host_agent_payload_too_large');
+  return serialized;
+}
+
+function normalizeUnsignedFrame(frame, { freezePayload = false } = {}) {
   if (!plainObject(frame)) throw new Error('host_agent_frame_invalid');
   const unknown = Object.keys(frame).filter((key) => !['schema','kind','request_id','nonce','op','payload','auth_tag'].includes(key));
   if (unknown.length) throw new Error(`host_agent_frame_field_unknown:${unknown[0]}`);
@@ -53,29 +67,51 @@ function normalizeUnsignedFrame(frame) {
   if (!NONCE_RE.test(nonce)) throw new Error('host_agent_nonce_invalid');
   const op = String(frame.op || '').trim().toUpperCase();
   if (!OPS.has(op)) throw new Error('host_agent_op_denied');
-  const payload = frame.payload == null ? {} : frame.payload;
-  if (!plainObject(payload)) throw new Error('host_agent_payload_invalid');
-  if (byteLength(payload) > HOST_AGENT_MAX_PAYLOAD_BYTES) throw new Error('host_agent_payload_too_large');
-  return Object.freeze({
+  const sourcePayload = frame.payload == null ? {} : frame.payload;
+  if (!plainObject(sourcePayload)) throw new Error('host_agent_payload_invalid');
+
+  // Exactly one defensive copy at the protocol boundary. The serialized payload is
+  // retained privately so HMAC material does not normalize/serialize it again.
+  const payload = structuredClone(sourcePayload);
+  if (freezePayload) deepFreeze(payload);
+  const serializedPayload = payloadJson(payload);
+  const normalized = Object.freeze({
     schema: HOST_AGENT_PROTOCOL_SCHEMA,
     kind,
     request_id: requestId,
     nonce,
     op,
-    payload: structuredClone(payload),
+    payload,
   });
+  FRAME_META.set(normalized, Object.freeze({ payloadJson: serializedPayload }));
+  return normalized;
 }
 
-function material(frame) {
-  const normalized = normalizeUnsignedFrame(frame);
+function materialFromNormalized(frame) {
+  const serializedPayload = FRAME_META.get(frame)?.payloadJson ?? payloadJson(frame.payload);
   return [
-    normalized.schema,
-    normalized.kind,
-    normalized.request_id,
-    normalized.nonce,
-    normalized.op,
-    digest(Buffer.from(JSON.stringify(normalized.payload), 'utf8')),
+    frame.schema,
+    frame.kind,
+    frame.request_id,
+    frame.nonce,
+    frame.op,
+    digest(Buffer.from(serializedPayload, 'utf8')),
   ].join('\n');
+}
+
+function cacheSignedWire(frame, payload) {
+  const wireJson = JSON.stringify(frame);
+  if (Buffer.byteLength(wireJson, 'utf8') > HOST_AGENT_MAX_FRAME_BYTES) throw new Error('host_agent_frame_too_large');
+  FRAME_META.set(frame, Object.freeze({ payloadJson: payload, wireJson }));
+  return frame;
+}
+
+export function serializeHostAgentFrame(frame) {
+  const cached = FRAME_META.get(frame)?.wireJson;
+  if (cached != null) return cached;
+  const wireJson = JSON.stringify(frame);
+  if (Buffer.byteLength(wireJson, 'utf8') > HOST_AGENT_MAX_FRAME_BYTES) throw new Error('host_agent_frame_too_large');
+  return wireJson;
 }
 
 export function createHostAgentSessionKey() {
@@ -87,11 +123,10 @@ export function createHostAgentNonce() {
 }
 
 export function signHostAgentFrame(frame, sessionKey) {
-  const normalized = normalizeUnsignedFrame(frame);
-  const authTag = crypto.createHmac('sha256', decodeKey(sessionKey)).update(material(normalized), 'utf8').digest('base64url');
-  const signed = Object.freeze({ ...normalized, auth_tag: authTag });
-  if (byteLength(signed) > HOST_AGENT_MAX_FRAME_BYTES) throw new Error('host_agent_frame_too_large');
-  return signed;
+  const normalized = normalizeUnsignedFrame(frame, { freezePayload: true });
+  const serializedPayload = FRAME_META.get(normalized).payloadJson;
+  const authTag = crypto.createHmac('sha256', decodeKey(sessionKey)).update(materialFromNormalized(normalized), 'utf8').digest('base64url');
+  return cacheSignedWire(Object.freeze({ ...normalized, auth_tag: authTag }), serializedPayload);
 }
 
 export function verifyHostAgentFrame(frame, sessionKey, { consumeNonce = null } = {}) {
@@ -99,7 +134,7 @@ export function verifyHostAgentFrame(frame, sessionKey, { consumeNonce = null } 
   const supplied = String(frame.auth_tag || '');
   if (!AUTH_RE.test(supplied)) throw new Error('host_agent_auth_tag_invalid');
   const normalized = normalizeUnsignedFrame(frame);
-  const expected = crypto.createHmac('sha256', decodeKey(sessionKey)).update(material(normalized), 'utf8').digest();
+  const expected = crypto.createHmac('sha256', decodeKey(sessionKey)).update(materialFromNormalized(normalized), 'utf8').digest();
   const actual = Buffer.from(supplied, 'base64url');
   if (actual.byteLength !== expected.byteLength || !crypto.timingSafeEqual(actual, expected)) throw new Error('host_agent_auth_failed');
   if (consumeNonce != null) {
@@ -147,6 +182,8 @@ export function hostAgentProtocolManifest() {
     allowed_ops: [...HOST_AGENT_ALLOWED_OPS],
     authentication: 'HMAC_SHA256_SESSION_KEY',
     replay_protection: 'BOUNDED_NONCE_WINDOW',
+    payload_serializations_per_auth: 1,
+    cached_signed_wire_serialization: true,
     arbitrary_eval: false,
     raw_shell: false,
     raw_cdp_passthrough: false,
