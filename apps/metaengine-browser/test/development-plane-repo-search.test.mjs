@@ -72,12 +72,14 @@ test('repo search payload crosses only the existing utility-process request boun
   plane.stop();
 });
 
-test('worker owns one exact-HEAD repo search index and no caller-selected path capability', async () => {
+test('worker owns one HEAD+worktree event index and no caller-selected path capability', async () => {
   const source = await readFile(new URL('../src/development-plane-worker.cjs', import.meta.url), 'utf8');
   assert.match(source, /const repoSearchIndex = new DevOSRepoSearchIndex\(\{ repoRoot \}\);/);
+  assert.match(source, /armWorktreeWatchers/);
+  assert.match(source, /repoSearchIndex\.notifyPathChanged/);
   assert.match(source, /capability === 'DEVOS_REPO_SEARCH'/);
   assert.match(source, /repoSearchIndex\.query\(await requireCurrentSource\(\), payload\)/);
-  assert.match(source, /devos_repo_search_cache: 'EXACT_HEAD'/);
+  assert.match(source, /devos_repo_search_cache: 'HEAD_PLUS_WORKTREE_EVENT'/);
   assert.match(source, /devos_repo_search_arbitrary_path_selection: false/);
   assert.doesNotMatch(source, /DEVOS_REPO_SEARCH[\s\S]{0,500}(exec|spawn|fork)\(/);
 });
