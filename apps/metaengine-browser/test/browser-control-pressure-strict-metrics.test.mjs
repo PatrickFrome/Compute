@@ -138,3 +138,28 @@ test('governor carries invalid metric evidence without gaining effect authority'
   assert.equal(out.execution_authority, false);
   assert.equal(out.authority_effect, false);
 });
+
+test('malformed recovery hysteresis configuration fails closed at construction', () => {
+  const malformed = [0, -1, 1.5, 21, Number.NaN, Number.POSITIVE_INFINITY, '3', null];
+
+  for (const recoverySamples of malformed) {
+    assert.throws(
+      () => new BrowserControlPressureGovernor({ recoverySamples }),
+      (error) => error instanceof TypeError && error.code === 'invalid_recovery_samples',
+      `recoverySamples=${String(recoverySamples)}`,
+    );
+  }
+});
+
+test('valid recovery hysteresis bounds and default remain exact', () => {
+  const minimum = new BrowserControlPressureGovernor({ recoverySamples: 1 }).snapshot();
+  const maximum = new BrowserControlPressureGovernor({ recoverySamples: 20 }).snapshot();
+  const fallback = new BrowserControlPressureGovernor().snapshot();
+
+  assert.equal(minimum.recovery_samples_required, 1);
+  assert.equal(maximum.recovery_samples_required, 20);
+  assert.equal(fallback.recovery_samples_required, 3);
+  assert.equal(minimum.scheduler_authority, false);
+  assert.equal(minimum.execution_authority, false);
+  assert.equal(minimum.authority_effect, false);
+});
