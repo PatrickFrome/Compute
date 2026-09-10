@@ -118,12 +118,11 @@ function pressureBand(sample = {}) {
   });
 }
 
-function budgetFor(band, liveCells) {
+function budgetForValidatedLiveCells(band, liveCells) {
   const base = BAND_BUDGETS[band] || BAND_BUDGETS.ORANGE;
-  const live = liveCellCount(liveCells).value;
   return Object.freeze({
     read_concurrency: base.read_concurrency,
-    mutation_concurrency: live === 0 ? 0 : Math.max(1, Math.min(base.mutation_concurrency, live)),
+    mutation_concurrency: liveCells === 0 ? 0 : Math.max(1, Math.min(base.mutation_concurrency, liveCells)),
     resource_sample_ms: base.resource_sample_ms,
   });
 }
@@ -180,7 +179,7 @@ export class BrowserControlPressureGovernor {
       last_sample_at: this.#lastSampleAt,
       missing_signals: Object.freeze([...this.#lastReasons]),
       invalid_signals: invalidSignals,
-      ...budgetFor(liveSignal.invalid ? 'RED' : this.#band, normalizedLiveCells),
+      ...budgetForValidatedLiveCells(liveSignal.invalid ? 'RED' : this.#band, normalizedLiveCells),
       live_cells: normalizedLiveCells,
       sample_driven: true,
       dedicated_timer: false,
@@ -201,7 +200,7 @@ export function evaluateControlPressure(sample = {}) {
     pressure_band: evaluated.band,
     missing_signals: evaluated.missing,
     invalid_signals: evaluated.invalid,
-    ...budgetFor(evaluated.band, evaluated.liveCells),
+    ...budgetForValidatedLiveCells(evaluated.band, evaluated.liveCells),
     live_cells: evaluated.liveCells,
     sample_driven: true,
     scheduler_authority: false,
