@@ -20,11 +20,6 @@ function finite(value, fallback = null) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function nonNegative(value, fallback = 0) {
-  const parsed = finite(value, fallback);
-  return parsed == null ? fallback : Math.max(0, parsed);
-}
-
 function ratio(value) {
   const parsed = finite(value, null);
   if (parsed == null) return null;
@@ -35,6 +30,17 @@ function integer(value, fallback, min, max) {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed)) return fallback;
   return Math.max(min, Math.min(max, parsed));
+}
+
+function livenessCount(sample, key) {
+  if (!Object.prototype.hasOwnProperty.call(sample, key)) {
+    return Object.freeze({ value: 0, invalid: false });
+  }
+  const raw = sample[key];
+  if (typeof raw !== 'number' || !Number.isSafeInteger(raw) || raw < 0) {
+    return Object.freeze({ value: 0, invalid: true });
+  }
+  return Object.freeze({ value: raw, invalid: false });
 }
 
 function higherBand(a, b) {
@@ -52,6 +58,7 @@ function metricBand({ value, yellow, orange, red }) {
 function pressureBand(sample = {}) {
   let band = 'GREEN';
   const missing = [];
+  const invalid = [];
 
   const elu = ratio(sample.event_loop_utilization);
   const delay = finite(sample.event_loop_delay_p95_ms, null);
@@ -75,16 +82,19 @@ function pressureBand(sample = {}) {
   const leaseRtt = finite(sample.command_lease_rtt_p95_ms, null);
   if (leaseRtt != null) band = higherBand(band, metricBand({ value: leaseRtt, yellow: 300, orange: 1000, red: 3000 }));
 
-  const unresponsive = nonNegative(sample.unresponsive_cells, 0);
-  const recentCrashes = nonNegative(sample.recent_crashes, 0);
-  if (unresponsive > 0 || recentCrashes >= 2) band = 'RED';
-  else if (recentCrashes === 1) band = higherBand(band, 'ORANGE');
+  const unresponsive = livenessCount(sample, 'unresponsive_cells');
+  const recentCrashes = livenessCount(sample, 'recent_crashes');
+  if (unresponsive.invalid) invalid.push('unresponsive_cells');
+  if (recentCrashes.invalid) invalid.push('recent_crashes');
+  if (invalid.length > 0) band = 'RED';
+  else if (unresponsive.value > 0 || recentCrashes.value >= 2) band = 'RED';
+  else if (recentCrashes.value === 1) band = higherBand(band, 'ORANGE');
 
   // Missing both event-loop signals means we cannot prove a GREEN hot path.
   if (missing.length === 2) band = higherBand(band, 'ORANGE');
   else if (missing.length > 0) band = higherBand(band, 'YELLOW');
 
-  return Object.freeze({ band, missing: Object.freeze(missing) });
+  return Object.freeze({ band, missing: Object.freeze(missing), invalid: Object.freeze(invalid) });
 }
 
 function budgetFor(band, liveCells) {
@@ -103,6 +113,7 @@ export class BrowserControlPressureGovernor {
   #recoverySamples;
   #lastSampleAt = null;
   #lastReasons = [];
+  #lastInvalid = [];
 
   constructor({ recoverySamples = 3 } = {}) {
     this.#recoverySamples = integer(recoverySamples, 3, 1, 20);
@@ -130,6 +141,7 @@ export class BrowserControlPressureGovernor {
 
     this.#lastSampleAt = sample.observed_at ? String(sample.observed_at) : new Date().toISOString();
     this.#lastReasons = evaluated.missing;
+    this.#lastInvalid = evaluated.invalid;
     return this.snapshot({ liveCells: sample.live_cells });
   }
 
@@ -142,6 +154,7 @@ export class BrowserControlPressureGovernor {
       recovery_samples_required: this.#recoverySamples,
       last_sample_at: this.#lastSampleAt,
       missing_signals: Object.freeze([...this.#lastReasons]),
+      invalid_signals: Object.freeze([...this.#lastInvalid]),
       ...budget,
       live_cells: integer(liveCells, 1, 1, 512),
       sample_driven: true,
@@ -162,6 +175,7 @@ export function evaluateControlPressure(sample = {}) {
     schema: BROWSER_CONTROL_PRESSURE_GOVERNOR_SCHEMA,
     pressure_band: evaluated.band,
     missing_signals: evaluated.missing,
+    invalid_signals: evaluated.invalid,
     ...budgetFor(evaluated.band, sample.live_cells),
     sample_driven: true,
     scheduler_authority: false,
