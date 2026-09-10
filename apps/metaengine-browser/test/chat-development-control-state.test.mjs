@@ -17,7 +17,7 @@ const source = (head = 'a'.repeat(40)) => ({
   authority_effect: false,
 });
 
-test('event-driven state serves context and evidence search from bounded memory', () => {
+test('event-driven state serves context, CI, and evidence search from bounded memory', () => {
   const state = new ChatDevelopmentControlState();
   state.setSource(source(), '2026-09-10T10:00:00.000Z');
   state.setCapabilityRevision(`sha256:${'c'.repeat(64)}`);
@@ -31,6 +31,11 @@ test('event-driven state serves context and evidence search from bounded memory'
   const query = state.query({ query: 'bounded navigation abort signal', limit: 6 });
   assert.equal(query.total_hits, 1);
   assert.equal(query.hits[0].id, 'blocker:abort');
+  const ciQuery = state.query({ query: 'shell failure', kinds: ['CI'], limit: 4 });
+  assert.equal(ciQuery.total_hits, 1);
+  assert.equal(ciQuery.hits[0].id, 'ci-run:101');
+  assert.equal(ciQuery.hits[0].kind, 'CI');
+
   const context = state.fastContext({
     state: { client_id: 'client-1', heartbeat_at: '2026-09-10T10:00:00.000Z' },
     now_ms: Date.parse('2026-09-10T10:00:00.500Z'),
@@ -39,6 +44,7 @@ test('event-driven state serves context and evidence search from bounded memory'
   assert.equal(context.context.development_capsule.search.preferred_tool, 'dev_query');
   assert.equal(context.context.development.head_sha, 'a'.repeat(40));
   assert.ok(context.bytes <= FAST_CONTEXT_ORDINARY_BUDGET_BYTES);
+  assert.equal(state.snapshot().indexed_rows, 2);
   assert.equal(state.snapshot().query_network_reads, 0);
   assert.equal(state.snapshot().query_filesystem_reads, 0);
   assert.equal(state.snapshot().second_scheduler, false);
@@ -56,6 +62,7 @@ test('new exact head atomically clears stale CI and development evidence', () =>
   assert.equal(after.source_epoch, before.source_epoch + 1);
   assert.equal(after.ci_rows, 0);
   assert.equal(after.evidence_rows, 0);
+  assert.equal(after.indexed_rows, 0);
   assert.equal(after.repo_index_revision, null);
   assert.equal(state.query({ query: 'old blocker' }).total_hits, 0);
   assert.equal(state.capsule().focus.kind, 'NONE');
@@ -78,10 +85,13 @@ test('CI completion event changes deterministic chat focus without a discovery p
   state.upsertEvidence({ id: 'next:one', kind: 'NEXT_ACTION', title: 'Continue source work', severity: 'HIGH', authority_effect: false });
   state.upsertCi({ id: 9, name: 'Shell', status: 'in_progress', conclusion: null, head_sha: 'a'.repeat(40), authority_effect: false });
   assert.equal(state.capsule().focus.kind, 'NEXT_ACTION');
+  assert.equal(state.query({ query: 'shell in_progress', kinds: ['CI'] }).total_hits, 1);
   state.upsertCi({ id: 9, name: 'Shell', status: 'completed', conclusion: 'failure', head_sha: 'a'.repeat(40), authority_effect: false });
   assert.equal(state.capsule().focus.kind, 'CI_FAILURE');
+  assert.equal(state.query({ query: 'shell failure', kinds: ['CI'] }).total_hits, 1);
   state.upsertCi({ id: 9, name: 'Shell', status: 'completed', conclusion: 'success', head_sha: 'a'.repeat(40), authority_effect: false });
   assert.equal(state.capsule().focus.kind, 'NEXT_ACTION');
+  assert.equal(state.query({ query: 'shell success', kinds: ['CI'] }).total_hits, 1);
 });
 
 test('CI and evidence memory stay bounded under long chat-driven development', () => {
@@ -95,6 +105,7 @@ test('CI and evidence memory stay bounded under long chat-driven development', (
   }
   assert.equal(state.snapshot().ci_rows, CHAT_DEVELOPMENT_CONTROL_MAX_CI);
   assert.equal(state.snapshot().evidence_rows, CHAT_DEVELOPMENT_CONTROL_MAX_EVIDENCE);
+  assert.equal(state.snapshot().indexed_rows, CHAT_DEVELOPMENT_CONTROL_MAX_CI + CHAT_DEVELOPMENT_CONTROL_MAX_EVIDENCE);
 });
 
 test('cross-head evidence and authority-bearing events fail closed', () => {
@@ -102,5 +113,6 @@ test('cross-head evidence and authority-bearing events fail closed', () => {
   state.setSource(source());
   assert.throws(() => state.upsertEvidence({ id: 'x', kind: 'BLOCKER', sha: 'b'.repeat(40), authority_effect: false }), /evidence_head_mismatch/);
   assert.throws(() => state.upsertEvidence({ id: 'x', kind: 'BLOCKER', authority_effect: true }), /evidence_invalid/);
+  assert.throws(() => state.upsertEvidence({ id: 'ci-run:forged', kind: 'CI', authority_effect: false }), /evidence_id_reserved/);
   assert.throws(() => state.upsertCi({ id: 1, name: 'x', status: 'completed', conclusion: 'success', authority_effect: true }), /ci_invalid/);
 });
