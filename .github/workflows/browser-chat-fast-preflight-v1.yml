@@ -1,0 +1,80 @@
+name: Browser Chat Fast Control Preflight V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/chat-development-*.mjs'
+      - 'apps/metaengine-browser/src/chat-fast-control-runtime.mjs'
+      - 'apps/metaengine-browser/src/devos-repo-search-index.cjs'
+      - 'apps/metaengine-browser/src/development-plane.mjs'
+      - 'apps/metaengine-browser/src/development-plane-worker.cjs'
+      - 'apps/metaengine-browser/src/fast-context-v1.mjs'
+      - 'apps/metaengine-browser/src/fast-control-gateway-core.mjs'
+      - 'apps/metaengine-browser/src/fast-control-mcp-adapter.mjs'
+      - 'apps/metaengine-browser/test/browser-chatgpt-fast-open.test.mjs'
+      - 'apps/metaengine-browser/test/chat-*.test.mjs'
+      - 'apps/metaengine-browser/test/devos-repo-search-index.test.mjs'
+      - 'apps/metaengine-browser/test/development-plane-repo-search.test.mjs'
+      - 'apps/metaengine-browser/test/fast-context-v1.test.mjs'
+      - 'apps/metaengine-browser/test/fast-control-*.test.mjs'
+      - '.github/workflows/browser-chat-fast-preflight-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-chat-fast-preflight-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  chat-fast-preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: apps/metaengine-browser
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Parse chat fast control modules
+        run: |
+          node --check src/chat-development-index.mjs
+          node --check src/chat-development-query-provider.mjs
+          node --check src/chat-development-capsule.mjs
+          node --check src/chat-development-control-state.mjs
+          node --check src/chat-fast-control-runtime.mjs
+          node --check src/devos-repo-search-index.cjs
+          node --check src/development-plane.mjs
+          node --check src/development-plane-worker.cjs
+          node --check src/fast-context-v1.mjs
+          node --check src/fast-control-gateway-core.mjs
+          node --check src/fast-control-mcp-adapter.mjs
+      - name: Fast-open bounded navigation contract
+        run: node --test test/browser-chatgpt-fast-open.test.mjs
+      - name: Development evidence index
+        run: node --test test/chat-development-index.test.mjs
+      - name: Exact-head repo search index
+        run: node --test test/devos-repo-search-index.test.mjs
+      - name: Development Plane repo search bridge
+        run: node --test test/development-plane-repo-search.test.mjs
+      - name: One-call development query provider
+        run: node --test test/chat-development-query-provider.test.mjs
+      - name: Compact development capsule
+        run: node --test test/chat-development-capsule.test.mjs
+      - name: Fast context development capsule
+        run: node --test test/fast-context-v1.test.mjs
+      - name: Fast control gateway
+        run: node --test test/fast-control-gateway-core.test.mjs
+      - name: Fast control MCP adapter
+        run: node --test test/fast-control-mcp-adapter.test.mjs
+      - name: Event-driven development state
+        run: node --test test/chat-development-control-state.test.mjs
+      - name: Chat fast control runtime
+        run: node --test test/chat-fast-control-runtime.test.mjs
