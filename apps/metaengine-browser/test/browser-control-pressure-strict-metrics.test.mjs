@@ -97,6 +97,37 @@ test('zero live BrowserCells close mutation fanout without changing read pressur
   assert.equal(observed.authority_effect, false);
 });
 
+test('explicit malformed live cell evidence fails closed with zero mutation capacity', () => {
+  const malformed = [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, '32', null, undefined];
+
+  for (const liveCells of malformed) {
+    const out = evaluateControlPressure(healthy({ live_cells: liveCells }));
+    assert.equal(out.pressure_band, 'RED', `live_cells=${String(liveCells)}`);
+    assert.equal(out.live_cells, 0, `live_cells=${String(liveCells)}`);
+    assert.equal(out.mutation_concurrency, 0, `live_cells=${String(liveCells)}`);
+    assert.deepEqual(out.invalid_signals, ['live_cells'], `live_cells=${String(liveCells)}`);
+  }
+});
+
+test('stateful governor carries malformed live cell evidence without manufacturing a mutation lane', () => {
+  const governor = new BrowserControlPressureGovernor({ recoverySamples: 1 });
+  const observed = governor.observe(healthy({ live_cells: '32' }));
+
+  assert.equal(observed.pressure_band, 'RED');
+  assert.equal(observed.live_cells, 0);
+  assert.equal(observed.mutation_concurrency, 0);
+  assert.deepEqual(observed.invalid_signals, ['live_cells']);
+  assert.equal(observed.scheduler_authority, false);
+  assert.equal(observed.execution_authority, false);
+  assert.equal(observed.authority_effect, false);
+
+  const directSnapshot = governor.snapshot({ liveCells: '32' });
+  assert.equal(directSnapshot.pressure_band, 'RED');
+  assert.equal(directSnapshot.live_cells, 0);
+  assert.equal(directSnapshot.mutation_concurrency, 0);
+  assert.deepEqual(directSnapshot.invalid_signals, ['live_cells']);
+});
+
 test('governor carries invalid metric evidence without gaining effect authority', () => {
   const governor = new BrowserControlPressureGovernor();
   const out = governor.observe(healthy({ result_ack_rtt_p95_ms: '80' }));
