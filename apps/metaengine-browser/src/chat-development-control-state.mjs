@@ -6,6 +6,7 @@ import { buildFastContext } from './fast-context-v1.mjs';
 export const CHAT_DEVELOPMENT_CONTROL_STATE_SCHEMA = 'metaengine.chat-development-control-state.v1';
 export const CHAT_DEVELOPMENT_CONTROL_MAX_CI = 64;
 export const CHAT_DEVELOPMENT_CONTROL_MAX_EVIDENCE = 256;
+const CI_INDEX_PREFIX = 'ci-run:';
 
 const sha256 = (value) => crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
 const clip = (value, max) => value == null ? null : String(value).slice(0, max);
@@ -17,12 +18,13 @@ function normalizeSource(source) {
   const headSha = String(source.head_sha ?? source.head ?? '').trim().toLowerCase();
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) throw new Error('chat_dev_control_repository_invalid');
   if (!/^[0-9a-f]{40}$/.test(headSha)) throw new Error('chat_dev_control_head_invalid');
+  const prValue = source.pr == null ? null : Number(source.pr);
   return Object.freeze({
     repository,
     branch: clip(source.branch ?? source.ref, 240),
     head_sha: headSha,
     base_sha: /^[0-9a-f]{40}$/i.test(String(source.base_sha || '')) ? String(source.base_sha).toLowerCase() : null,
-    pr: Number.isSafeInteger(Number(source.pr)) ? Number(source.pr) : null,
+    pr: prValue != null && Number.isSafeInteger(prValue) ? prValue : null,
     dirty: typeof source.dirty === 'boolean' ? source.dirty : null,
     authority_effect: false,
   });
@@ -47,6 +49,7 @@ function normalizeEvidence(row, sourceHead) {
   if (!plain(row) || row.authority_effect === true) throw new Error('chat_dev_control_evidence_invalid');
   const id = String(row.id || '').trim();
   if (!/^[A-Za-z0-9._:/-]{1,160}$/.test(id)) throw new Error('chat_dev_control_evidence_id_invalid');
+  if (id.startsWith(CI_INDEX_PREFIX)) throw new Error('chat_dev_control_evidence_id_reserved');
   const suppliedSha = String(row.sha ?? row.head_sha ?? '').trim().toLowerCase();
   if (suppliedSha && suppliedSha !== sourceHead) throw new Error('chat_dev_control_evidence_head_mismatch');
   return Object.freeze({
@@ -59,6 +62,23 @@ function normalizeEvidence(row, sourceHead) {
     sha: sourceHead,
     severity: String(row.severity || 'INFO').trim().toUpperCase(),
     updated_at: row.updated_at == null ? null : new Date(row.updated_at).toISOString(),
+    authority_effect: false,
+  });
+}
+
+function ciAsIndexedEvidence(row, sourceHead) {
+  const failure = row.conclusion && !['success', 'skipped', 'neutral'].includes(row.conclusion);
+  const pending = !row.conclusion && row.status !== 'completed';
+  return Object.freeze({
+    id: `${CI_INDEX_PREFIX}${row.id}`,
+    kind: 'CI',
+    title: row.name,
+    text: [row.name, row.status, row.conclusion].filter(Boolean).join(' '),
+    ref: row.id,
+    path: null,
+    sha: sourceHead,
+    severity: failure ? 'HIGH' : pending ? 'MEDIUM' : 'INFO',
+    updated_at: row.updated_at,
     authority_effect: false,
   });
 }
@@ -85,7 +105,11 @@ export class ChatDevelopmentControlState {
   #recompute(now = new Date().toISOString()) {
     const ci = [...this.#ci.values()].sort(ciSort);
     const evidence = [...this.#evidence.values()].sort(evidenceSort);
-    this.#index.replace(evidence);
+    const indexed = [
+      ...ci.map((row) => ciAsIndexedEvidence(row, this.#source?.head_sha ?? null)),
+      ...evidence,
+    ];
+    this.#index.replace(indexed);
     const material = JSON.stringify({
       source: this.#source,
       source_epoch: this.#sourceEpoch,
@@ -201,6 +225,7 @@ export class ChatDevelopmentControlState {
       source_epoch: this.#sourceEpoch,
       ci_rows: this.#ci.size,
       evidence_rows: this.#evidence.size,
+      indexed_rows: this.#index.snapshot().records,
       evidence_revision: this.#index.snapshot().revision,
       repo_index_revision: this.#repoIndexRevision,
       capability_revision: this.#capabilityRevision,
