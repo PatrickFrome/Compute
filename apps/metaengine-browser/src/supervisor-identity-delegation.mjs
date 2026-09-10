@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { NATIVE_SUPERVISOR_RUNTIME_PATH } from './native-supervisor-client-base.mjs';
+import { NATIVE_SUPERVISOR_RUNTIME_PATH } from './native-supervisor-endpoints.mjs';
 
 export const SUPERVISOR_IDENTITY_DELEGATION_SCHEMA = 'metaengine.supervisor-identity-delegation.v1';
 export const SUPERVISOR_IDENTITY_DELEGATION_MAX_BODY_BYTES = 512 * 1024;
