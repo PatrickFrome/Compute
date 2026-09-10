@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ChatFastControlRuntime } from '../src/chat-fast-control-runtime.mjs';
+import { ChatFastControlRuntime, CHAT_FAST_CONTROL_QUERY_CACHE_MAX } from '../src/chat-fast-control-runtime.mjs';
 import { CONTROL_ACTION_MANIFEST_REVISION } from '../src/control-actions-manifest.mjs';
 
 function harness() {
@@ -11,7 +11,7 @@ function harness() {
       return {
         schema: 'metaengine.development-plane.repo-search.v1',
         status: 'OK',
-        query_revision: 'rq:test',
+        query_revision: `rq:${String(input.query).toLowerCase()}`,
         total_hits: 1,
         hits: [{ path: 'apps/metaengine-browser/src/main.mjs', line: 1, snippet: 'boundedNavigation AbortSignal', sha256: `sha256:${'a'.repeat(64)}`, score: 80, matched_terms: 2, authority_effect: false }],
         authority_effect: false,
@@ -77,6 +77,58 @@ test('dev_query returns repo, indexed evidence, and exact orientation in one too
   assert.equal(calls.state, 0, 'dev_query orientation must not require browser-state read');
 });
 
+test('repeated identical dev_query is served from warm cache with zero extra Development Plane calls', async () => {
+  const { runtime, calls } = harness();
+  const input = { query: 'bounded navigation abort signal', limit: 8, max_bytes: 4096 };
+  const first = await runtime.callTool('dev_query', input);
+  const second = await runtime.callTool('dev_query', input);
+  assert.equal(first.structuredContent.result.status, 'OK');
+  assert.deepEqual(second.structuredContent.result, first.structuredContent.result);
+  assert.equal(calls.repo.length, 1);
+  const snap = runtime.snapshot().dev_query_warm_cache;
+  assert.equal(snap.hits, 1);
+  assert.equal(snap.misses, 1);
+  assert.equal(snap.entries, 1);
+  assert.equal(snap.timers, false);
+  assert.equal(snap.authority_effect, false);
+});
+
+test('cached if_none_match returns tiny NOT_MODIFIED without entering Development Plane', async () => {
+  const { runtime, calls } = harness();
+  const input = { query: 'bounded navigation abort signal', limit: 8, max_bytes: 4096 };
+  const first = await runtime.callTool('dev_query', input);
+  const revision = first.structuredContent.result.query_revision;
+  const second = await runtime.callTool('dev_query', { ...input, if_none_match: revision });
+  assert.equal(second.structuredContent.result.status, 'NOT_MODIFIED');
+  assert.equal(second.structuredContent.result.query_revision, revision);
+  assert.equal(second.structuredContent.result.warm_cache, true);
+  assert.ok(second.structuredContent.result.bytes < 512);
+  assert.equal(calls.repo.length, 1);
+  assert.equal(runtime.snapshot().dev_query_warm_cache.not_modified_hits, 1);
+});
+
+test('development state revision invalidates warm query cache without explicit timers or flushes', async () => {
+  const { runtime, calls } = harness();
+  const input = { query: 'shell failure', limit: 8 };
+  await runtime.callTool('dev_query', input);
+  await runtime.callTool('dev_query', input);
+  assert.equal(calls.repo.length, 1);
+  runtime.upsertCi({ id: 22, name: 'Shell', status: 'completed', conclusion: 'failure', head_sha: 'a'.repeat(40), authority_effect: false });
+  await runtime.callTool('dev_query', input);
+  assert.equal(calls.repo.length, 2, 'new development revision must miss old warm cache key');
+});
+
+test('warm query cache is hard bounded under many distinct chat queries', async () => {
+  const { runtime, calls } = harness();
+  for (let i = 0; i < CHAT_FAST_CONTROL_QUERY_CACHE_MAX + 7; i += 1) {
+    await runtime.callTool('dev_query', { query: `source symbol ${i}`, kinds: ['SOURCE'], limit: 1, max_bytes: 2048 });
+  }
+  const snap = runtime.snapshot().dev_query_warm_cache;
+  assert.equal(snap.entries, CHAT_FAST_CONTROL_QUERY_CACHE_MAX);
+  assert.equal(snap.max_entries, CHAT_FAST_CONTROL_QUERY_CACHE_MAX);
+  assert.equal(calls.repo.length, CHAT_FAST_CONTROL_QUERY_CACHE_MAX + 7);
+});
+
 test('Browser command management still delegates to existing authority boundaries only', async () => {
   const { runtime, calls } = harness();
   await runtime.callTool('run_submit', {
@@ -102,5 +154,6 @@ test('runtime owns no periodic source or CI discovery loop', () => {
   assert.equal(snap.periodic_source_discovery, false);
   assert.equal(snap.periodic_ci_discovery, false);
   assert.equal(snap.query_provider.query_fanout_max, 2);
+  assert.equal(snap.dev_query_warm_cache.timers, false);
   assert.equal(snap.authority_effect, false);
 });
