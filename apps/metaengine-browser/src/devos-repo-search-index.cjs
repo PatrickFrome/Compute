@@ -86,6 +86,11 @@ function allowedFile(relative) {
   return ALLOWED_EXTENSIONS.has(path.posix.extname(normalized).toLowerCase());
 }
 
+function allowedIndexedPath(relative) {
+  const normalized = validateRelative(relative);
+  return ALLOWED_ROOTS.some((root) => normalized.startsWith(`${root}/`)) && allowedFile(normalized);
+}
+
 function lineStarts(text) {
   const starts = [0];
   for (let i = 0; i < text.length; i += 1) if (text.charCodeAt(i) === 10) starts.push(i + 1);
@@ -175,6 +180,48 @@ function pushTopRanked(rows, row, limit) {
   if (rows.length > limit) rows.pop();
 }
 
+function indexedFileRecord(relativePath, text) {
+  const tokens = new Set(tokenize(`${relativePath}\n${text}`, MAX_FILE_TOKENS));
+  return Object.freeze({
+    relative_path: relativePath,
+    sha256: `sha256:${sha256(Buffer.from(text, 'utf8'))}`,
+    bytes: Buffer.byteLength(text, 'utf8'),
+    text,
+    lower_text: text.toLowerCase(),
+    line_starts: Object.freeze(lineStarts(text)),
+    tokens,
+    path_tokens: new Set(tokenize(relativePath, 128)),
+    title_tokens: new Set(tokenize(path.posix.basename(relativePath), 128)),
+  });
+}
+
+function revisionFor(exact, files) {
+  const revisionMaterial = files.map((file) => [file.relative_path, file.sha256, file.bytes]);
+  return `repoidx:${sha256(Buffer.from(JSON.stringify({ source: exact, files: revisionMaterial }), 'utf8'))}`;
+}
+
+function removePosting(postings, token, fileIndex) {
+  const current = postings.get(token);
+  if (!current) return;
+  const at = current.indexOf(fileIndex);
+  if (at < 0) return;
+  if (current.length === 1) {
+    postings.delete(token);
+    return;
+  }
+  postings.set(token, Object.freeze([...current.slice(0, at), ...current.slice(at + 1)]));
+}
+
+function addPosting(postings, token, fileIndex) {
+  const current = postings.get(token);
+  if (!current) {
+    postings.set(token, Object.freeze([fileIndex]));
+    return;
+  }
+  if (current.includes(fileIndex)) return;
+  postings.set(token, Object.freeze([...current, fileIndex]));
+}
+
 function fitResult(result, maxBytes) {
   const budget = Math.max(1024, Math.min(MAX_RESULT_BYTES, Number(maxBytes) || MAX_RESULT_BYTES));
   const out = { ...result, hits: [...result.hits] };
@@ -202,6 +249,7 @@ class DevOSRepoSearchIndex {
   #files = [];
   #postings = new Map();
   #indexedBytes = 0;
+  #totalBudgetTruncated = false;
   #revision = null;
   #buildPromise = null;
 
@@ -246,28 +294,26 @@ class DevOSRepoSearchIndex {
     const files = [];
     const postings = new Map();
     let indexedBytes = 0;
+    let totalBudgetTruncated = false;
     for (const relative of paths) {
-      if (files.length >= MAX_FILES || indexedBytes >= MAX_TOTAL_BYTES) break;
+      if (files.length >= MAX_FILES) break;
+      if (indexedBytes >= MAX_TOTAL_BYTES) {
+        totalBudgetTruncated = true;
+        break;
+      }
       const absolute = path.resolve(this.#repoRoot, relative);
       const rel = path.relative(this.#repoRoot, absolute);
       if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('devos_repo_search_file_escape');
       const stat = await fs.stat(absolute);
       if (!stat.isFile() || stat.size > MAX_FILE_BYTES) continue;
-      if (indexedBytes + stat.size > MAX_TOTAL_BYTES) break;
+      if (indexedBytes + stat.size > MAX_TOTAL_BYTES) {
+        totalBudgetTruncated = true;
+        break;
+      }
       const text = await fs.readFile(absolute, 'utf8');
       const relativePath = relative.replaceAll('\\', '/');
-      const tokens = new Set(tokenize(`${relativePath}\n${text}`, MAX_FILE_TOKENS));
-      const file = Object.freeze({
-        relative_path: relativePath,
-        sha256: `sha256:${sha256(Buffer.from(text, 'utf8'))}`,
-        bytes: Buffer.byteLength(text, 'utf8'),
-        text,
-        lower_text: text.toLowerCase(),
-        line_starts: Object.freeze(lineStarts(text)),
-        tokens,
-        path_tokens: new Set(tokenize(relativePath, 128)),
-        title_tokens: new Set(tokenize(path.posix.basename(relativePath), 128)),
-      });
+      const file = indexedFileRecord(relativePath, text);
+      const { tokens } = file;
       const fileIndex = files.length;
       files.push(file);
       indexedBytes += file.bytes;
@@ -277,15 +323,64 @@ class DevOSRepoSearchIndex {
       }
     }
     for (const list of postings.values()) Object.freeze(list);
-    const revisionMaterial = files.map((file) => [file.relative_path, file.sha256, file.bytes]);
     this.#files = files;
     this.#postings = postings;
     this.#indexedBytes = indexedBytes;
+    this.#totalBudgetTruncated = totalBudgetTruncated;
     this.#head = exact.head;
     this.#repository = exact.repository;
     this.#ref = exact.ref;
-    this.#revision = `repoidx:${sha256(Buffer.from(JSON.stringify({ source: exact, files: revisionMaterial }), 'utf8'))}`;
+    this.#revision = revisionFor(exact, files);
     return this.snapshot();
+  }
+
+  async refreshFile(source, relativePath) {
+    const exact = exactSource(source);
+    const relative = validateRelative(relativePath);
+    if (!allowedIndexedPath(relative)) {
+      return Object.freeze({ refreshed: false, changed: false, rebuild_required: true, reason: 'PATH_NOT_INCREMENTAL', snapshot: this.snapshot() });
+    }
+    if (!this.#revision || this.#repository !== exact.repository || this.#head !== exact.head) {
+      return Object.freeze({ refreshed: false, changed: false, rebuild_required: true, reason: 'SOURCE_MISMATCH', snapshot: this.snapshot() });
+    }
+    if (this.#totalBudgetTruncated) {
+      return Object.freeze({ refreshed: false, changed: false, rebuild_required: true, reason: 'INDEX_TOTAL_BUDGET_TRUNCATED', snapshot: this.snapshot() });
+    }
+    const fileIndex = this.#files.findIndex((file) => file?.relative_path === relative);
+    if (fileIndex < 0) {
+      return Object.freeze({ refreshed: false, changed: false, rebuild_required: true, reason: 'FILE_NOT_INDEXED', snapshot: this.snapshot() });
+    }
+    const absolute = path.resolve(this.#repoRoot, relative);
+    const rel = path.relative(this.#repoRoot, absolute);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('devos_repo_search_file_escape');
+    let stat;
+    try {
+      stat = await fs.stat(absolute);
+    } catch (error) {
+      if (error?.code === 'ENOENT') {
+        return Object.freeze({ refreshed: false, changed: false, rebuild_required: true, reason: 'FILE_REMOVED', snapshot: this.snapshot() });
+      }
+      throw error;
+    }
+    if (!stat.isFile() || stat.size > MAX_FILE_BYTES) {
+      return Object.freeze({ refreshed: false, changed: false, rebuild_required: true, reason: 'FILE_SHAPE_CHANGED', snapshot: this.snapshot() });
+    }
+    const current = this.#files[fileIndex];
+    if ((this.#indexedBytes - current.bytes + stat.size) > MAX_TOTAL_BYTES) {
+      return Object.freeze({ refreshed: false, changed: false, rebuild_required: true, reason: 'TOTAL_BUDGET_CHANGED', snapshot: this.snapshot() });
+    }
+    const text = await fs.readFile(absolute, 'utf8');
+    const next = indexedFileRecord(relative, text);
+    if (next.sha256 === current.sha256 && next.bytes === current.bytes) {
+      return Object.freeze({ refreshed: true, changed: false, rebuild_required: false, reason: 'UNCHANGED_CONTENT', snapshot: this.snapshot() });
+    }
+    for (const token of current.tokens) if (!next.tokens.has(token)) removePosting(this.#postings, token, fileIndex);
+    for (const token of next.tokens) if (!current.tokens.has(token)) addPosting(this.#postings, token, fileIndex);
+    this.#files[fileIndex] = next;
+    this.#indexedBytes = this.#indexedBytes - current.bytes + next.bytes;
+    this.#ref = exact.ref;
+    this.#revision = revisionFor(exact, this.#files);
+    return Object.freeze({ refreshed: true, changed: true, rebuild_required: false, reason: 'FILE_REFRESHED', snapshot: this.snapshot() });
   }
 
   async ensure(source) {
@@ -319,6 +414,10 @@ class DevOSRepoSearchIndex {
       warm_query_path_tokenization: 'BUILD_TIME',
       warm_query_evidence_normalization: 'BUILD_TIME',
       warm_query_candidate_strategy: 'EXACT_INTERSECTION_THEN_BOUNDED_TOP_K',
+      same_head_incremental_file_refresh: true,
+      incremental_refresh_structural_fallback: true,
+      incremental_refresh_total_budget_safe: !this.#totalBudgetTruncated,
+      total_budget_truncated: this.#totalBudgetTruncated,
       arbitrary_path_selection: false,
       process_spawn_used: false,
       ...zeroAuthority(),
