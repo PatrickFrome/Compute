@@ -50,6 +50,7 @@ jobs:
           node --check src/chat-development-query-provider.mjs
           node --check src/chat-development-capsule.mjs
           node --check src/chat-development-control-state.mjs
+          node --check src/chat-development-cursor.mjs
           node --check src/chat-fast-control-runtime.mjs
           node --check src/devos-repo-search-index.cjs
           node --check src/development-plane.mjs
@@ -62,6 +63,8 @@ jobs:
         run: node --test test/browser-chatgpt-fast-open.test.mjs
       - name: Development evidence index
         run: node --test test/chat-development-index.test.mjs
+      - name: Zero-IO development cursor
+        run: node --test test/chat-development-cursor.test.mjs
       - name: Exact-head repo search index
         run: node --test test/devos-repo-search-index.test.mjs
       - name: Development Plane repo search bridge
