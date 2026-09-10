@@ -4,6 +4,7 @@ import { HostAgentEffectBindingCoordinator } from '../src/host-agent-effect-bind
 
 const COMMAND_ID = '123e4567-e89b-42d3-a456-426614174000';
 const TAB_ID = 'tab_123e4567-e89b-42d3-a456-426614174001';
+const OBSERVED_AT = '2026-09-10T20:00:00.000Z';
 
 function command(overrides = {}) {
   return {
@@ -27,7 +28,7 @@ function localBinding(overrides = {}) {
     process_incarnation_id: '323e4567-e89b-42d3-a456-426614174000',
     tab_id: TAB_ID,
     target_id: 'webcontents:42',
-    observed_at: new Date().toISOString(),
+    observed_at: OBSERVED_AT,
     runtime_observation_id: `obs_${'a'.repeat(32)}`,
     web_contents_id: 42,
     binding_generation: 7,
