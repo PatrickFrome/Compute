@@ -82,6 +82,21 @@ test('event-loop utilization above one is conservatively clamped and remains RED
   assert.deepEqual(out.invalid_signals, []);
 });
 
+test('zero live BrowserCells close mutation fanout without changing read pressure', () => {
+  const evaluated = evaluateControlPressure(healthy({ live_cells: 0 }));
+  assert.equal(evaluated.pressure_band, 'GREEN');
+  assert.equal(evaluated.read_concurrency, 128);
+  assert.equal(evaluated.mutation_concurrency, 0);
+
+  const governor = new BrowserControlPressureGovernor({ recoverySamples: 1 });
+  const observed = governor.observe(healthy({ live_cells: 0 }));
+  assert.equal(observed.live_cells, 0);
+  assert.equal(observed.mutation_concurrency, 0);
+  assert.equal(observed.scheduler_authority, false);
+  assert.equal(observed.execution_authority, false);
+  assert.equal(observed.authority_effect, false);
+});
+
 test('governor carries invalid metric evidence without gaining effect authority', () => {
   const governor = new BrowserControlPressureGovernor();
   const out = governor.observe(healthy({ result_ack_rtt_p95_ms: '80' }));

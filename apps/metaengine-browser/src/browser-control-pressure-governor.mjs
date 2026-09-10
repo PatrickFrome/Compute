@@ -100,10 +100,10 @@ function pressureBand(sample = {}) {
 
 function budgetFor(band, liveCells) {
   const base = BAND_BUDGETS[band] || BAND_BUDGETS.ORANGE;
-  const live = integer(liveCells, 1, 1, 512);
+  const live = integer(liveCells, 1, 0, 512);
   return Object.freeze({
     read_concurrency: base.read_concurrency,
-    mutation_concurrency: Math.max(1, Math.min(base.mutation_concurrency, live)),
+    mutation_concurrency: live === 0 ? 0 : Math.max(1, Math.min(base.mutation_concurrency, live)),
     resource_sample_ms: base.resource_sample_ms,
   });
 }
@@ -147,7 +147,8 @@ export class BrowserControlPressureGovernor {
   }
 
   snapshot({ liveCells = 1 } = {}) {
-    const budget = budgetFor(this.#band, liveCells);
+    const normalizedLiveCells = integer(liveCells, 1, 0, 512);
+    const budget = budgetFor(this.#band, normalizedLiveCells);
     return Object.freeze({
       schema: BROWSER_CONTROL_PRESSURE_GOVERNOR_SCHEMA,
       pressure_band: this.#band,
@@ -157,7 +158,7 @@ export class BrowserControlPressureGovernor {
       missing_signals: Object.freeze([...this.#lastReasons]),
       invalid_signals: Object.freeze([...this.#lastInvalid]),
       ...budget,
-      live_cells: integer(liveCells, 1, 1, 512),
+      live_cells: normalizedLiveCells,
       sample_driven: true,
       dedicated_timer: false,
       scheduler_authority: false,
