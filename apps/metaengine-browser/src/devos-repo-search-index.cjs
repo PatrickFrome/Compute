@@ -86,61 +86,111 @@ function allowedFile(relative) {
   return ALLOWED_EXTENSIONS.has(path.posix.extname(normalized).toLowerCase());
 }
 
-function lineNumberAt(text, index) {
-  let line = 1;
-  for (let i = 0; i < index; i += 1) if (text.charCodeAt(i) === 10) line += 1;
-  return line;
+function lineStarts(text) {
+  const starts = [0];
+  for (let i = 0; i < text.length; i += 1) if (text.charCodeAt(i) === 10) starts.push(i + 1);
+  return starts;
 }
 
-function firstEvidence(text, terms) {
-  const lower = text.toLowerCase();
+function lineNumberAt(starts, index) {
+  let low = 0;
+  let high = starts.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    if (starts[mid] <= index) low = mid + 1;
+    else high = mid - 1;
+  }
+  return high + 1;
+}
+
+function firstEvidence(file, terms) {
   let best = -1;
   for (const term of terms) {
-    const at = lower.indexOf(term.toLowerCase());
+    const at = file.lower_text.indexOf(term);
     if (at >= 0 && (best < 0 || at < best)) best = at;
   }
   if (best < 0) return { line: null, snippet: null };
-  const lineStart = Math.max(0, text.lastIndexOf('\n', best - 1) + 1);
-  let lineEnd = text.indexOf('\n', best);
-  if (lineEnd < 0) lineEnd = text.length;
-  const line = lineNumberAt(text, lineStart);
-  const snippet = text.slice(lineStart, Math.min(lineEnd, lineStart + 600)).trim();
+  const lineStart = Math.max(0, file.text.lastIndexOf('\n', best - 1) + 1);
+  let lineEnd = file.text.indexOf('\n', best);
+  if (lineEnd < 0) lineEnd = file.text.length;
+  const line = lineNumberAt(file.line_starts, lineStart);
+  const snippet = file.text.slice(lineStart, Math.min(lineEnd, lineStart + 600)).trim();
   return { line, snippet: clip(snippet, 600) };
 }
 
 function scoreFile(file, terms) {
-  const pathTokens = new Set(tokenize(file.relative_path, 128));
-  const titleTokens = new Set(tokenize(path.posix.basename(file.relative_path), 128));
-  const textTokens = file.tokens;
   let matched = 0;
   let score = 0;
   for (const term of terms) {
-    if (!textTokens.has(term)) continue;
+    if (!file.tokens.has(term)) continue;
     matched += 1;
     score += 10;
-    if (pathTokens.has(term)) score += 16;
-    if (titleTokens.has(term)) score += 20;
+    if (file.path_tokens.has(term)) score += 16;
+    if (file.title_tokens.has(term)) score += 20;
   }
   if (matched === terms.length) score += 30;
   return { matched, score };
 }
 
-function preferExactTermRows(rows, termCount) {
-  const exact = rows.filter((row) => row.matched === termCount);
-  if (exact.length) return Object.freeze({ rows: exact, mode: 'ALL_TERMS' });
-  return Object.freeze({ rows, mode: 'PARTIAL_FALLBACK' });
+function candidatePlan(postings, files, terms) {
+  const lists = terms.map((term) => postings.get(term) || []);
+  if (lists.every((list) => list.length > 0)) {
+    let smallest = lists[0];
+    for (let i = 1; i < lists.length; i += 1) if (lists[i].length < smallest.length) smallest = lists[i];
+    const exact = [];
+    for (const fileIndex of smallest) {
+      const tokens = files[fileIndex].tokens;
+      let matchesAll = true;
+      for (const term of terms) {
+        if (!tokens.has(term)) {
+          matchesAll = false;
+          break;
+        }
+      }
+      if (matchesAll) exact.push(fileIndex);
+    }
+    if (exact.length) return Object.freeze({ indices: exact, mode: 'ALL_TERMS' });
+  }
+  const union = new Set();
+  for (const list of lists) for (const fileIndex of list) union.add(fileIndex);
+  return Object.freeze({ indices: [...union], mode: 'PARTIAL_FALLBACK' });
+}
+
+function rankCompare(a, b) {
+  return b.score - a.score
+    || b.matched - a.matched
+    || a.file.relative_path.localeCompare(b.file.relative_path);
+}
+
+function pushTopRanked(rows, row, limit) {
+  let low = 0;
+  let high = rows.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (rankCompare(row, rows[mid]) < 0) high = mid;
+    else low = mid + 1;
+  }
+  if (low >= limit) return;
+  rows.splice(low, 0, row);
+  if (rows.length > limit) rows.pop();
 }
 
 function fitResult(result, maxBytes) {
   const budget = Math.max(1024, Math.min(MAX_RESULT_BYTES, Number(maxBytes) || MAX_RESULT_BYTES));
-  const out = structuredClone(result);
+  const out = { ...result, hits: [...result.hits] };
   while (out.hits.length && bytes(out) > budget) out.hits.pop();
   if (bytes(out) > budget) throw new Error(`devos_repo_search_result_budget_exceeded:${bytes(out)}:${budget}`);
   out.truncated = out.total_hits > out.hits.length;
   out.bytes = 0;
-  out.bytes = bytes(out);
-  out.bytes = bytes(out);
+  let measured = bytes(out);
+  out.bytes = measured;
+  const next = bytes(out);
+  if (next !== measured) {
+    measured = next;
+    out.bytes = measured;
+  }
   if (bytes(out) > budget) throw new Error(`devos_repo_search_result_budget_exceeded:${bytes(out)}:${budget}`);
+  out.hits = Object.freeze(out.hits);
   return Object.freeze(out);
 }
 
@@ -205,13 +255,18 @@ class DevOSRepoSearchIndex {
       if (!stat.isFile() || stat.size > MAX_FILE_BYTES) continue;
       if (indexedBytes + stat.size > MAX_TOTAL_BYTES) break;
       const text = await fs.readFile(absolute, 'utf8');
-      const tokens = new Set(tokenize(`${relative}\n${text}`, MAX_FILE_TOKENS));
+      const relativePath = relative.replaceAll('\\', '/');
+      const tokens = new Set(tokenize(`${relativePath}\n${text}`, MAX_FILE_TOKENS));
       const file = Object.freeze({
-        relative_path: relative.replaceAll('\\', '/'),
+        relative_path: relativePath,
         sha256: `sha256:${sha256(Buffer.from(text, 'utf8'))}`,
         bytes: Buffer.byteLength(text, 'utf8'),
         text,
+        lower_text: text.toLowerCase(),
+        line_starts: Object.freeze(lineStarts(text)),
         tokens,
+        path_tokens: new Set(tokenize(relativePath, 128)),
+        title_tokens: new Set(tokenize(path.posix.basename(relativePath), 128)),
       });
       const fileIndex = files.length;
       files.push(file);
@@ -221,6 +276,7 @@ class DevOSRepoSearchIndex {
         postings.get(token).push(fileIndex);
       }
     }
+    for (const list of postings.values()) Object.freeze(list);
     const revisionMaterial = files.map((file) => [file.relative_path, file.sha256, file.bytes]);
     this.#files = files;
     this.#postings = postings;
@@ -260,6 +316,9 @@ class DevOSRepoSearchIndex {
       max_total_bytes: MAX_TOTAL_BYTES,
       max_file_tokens: MAX_FILE_TOKENS,
       allowed_roots: [...ALLOWED_ROOTS],
+      warm_query_path_tokenization: 'BUILD_TIME',
+      warm_query_evidence_normalization: 'BUILD_TIME',
+      warm_query_candidate_strategy: 'EXACT_INTERSECTION_THEN_BOUNDED_TOP_K',
       arbitrary_path_selection: false,
       process_spawn_used: false,
       ...zeroAuthority(),
@@ -292,14 +351,13 @@ class DevOSRepoSearchIndex {
       };
       return Object.freeze({ ...out, bytes: bytes(out), truncated: false });
     }
-    const candidates = new Set();
-    for (const term of terms) for (const fileIndex of this.#postings.get(term) || []) candidates.add(fileIndex);
-    const rankedCandidates = [...candidates]
-      .map((fileIndex) => ({ file: this.#files[fileIndex], ...scoreFile(this.#files[fileIndex], terms) }))
-      .filter((row) => row.matched > 0)
-      .sort((a, b) => b.score - a.score || b.matched - a.matched || a.file.relative_path.localeCompare(b.file.relative_path));
-    const preferred = preferExactTermRows(rankedCandidates, terms.length);
-    const ranked = preferred.rows;
+    const plan = candidatePlan(this.#postings, this.#files, terms);
+    const ranked = [];
+    for (const fileIndex of plan.indices) {
+      const file = this.#files[fileIndex];
+      const scored = { file, ...scoreFile(file, terms) };
+      if (scored.matched > 0) pushTopRanked(ranked, scored, limit);
+    }
     const result = {
       schema: DEVOS_REPO_SEARCH_SCHEMA,
       status: 'OK',
@@ -309,13 +367,13 @@ class DevOSRepoSearchIndex {
       index_revision: this.#revision,
       query_revision: queryRevision,
       query_terms: terms,
-      match_mode: preferred.mode,
+      match_mode: plan.mode,
       index_rebuilt: ensured.rebuilt,
       indexed_file_count: this.#files.length,
       indexed_bytes: this.#indexedBytes,
-      total_hits: ranked.length,
-      hits: ranked.slice(0, limit).map(({ file, score, matched }) => {
-        const evidence = firstEvidence(file.text, terms);
+      total_hits: plan.indices.length,
+      hits: ranked.map(({ file, score, matched }) => {
+        const evidence = firstEvidence(file, terms);
         return {
           path: file.relative_path,
           sha256: file.sha256,
