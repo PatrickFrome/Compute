@@ -6,7 +6,10 @@ import {
 
 export const NATIVE_SUPERVISOR_RUNTIME_TRANSPORT_SCHEMA = 'metaengine.native-supervisor.runtime-transport.v1';
 const COMMAND_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const MAX_JSON_BYTES = 1024 * 1024;
+// Delegated Browser signer intentionally caps request bodies at 512 KiB. Keep the
+// transport facade at the same ceiling so Host Agent cannot prepare an impossible
+// request and then fail at a deeper signing boundary.
+const MAX_JSON_BYTES = 512 * 1024;
 
 function jsonBody(payload) {
   const bodyText = JSON.stringify(payload ?? {});
@@ -84,6 +87,28 @@ export class NativeSupervisorRuntimeTransport {
     });
   }
 
+  async sealEffectIntent(commandId, binding) {
+    const id = String(commandId || '').trim().toLowerCase();
+    if (!COMMAND_ID_RE.test(id)) throw new Error('native_supervisor_transport_command_id_invalid');
+    requireObject(binding, 'native_supervisor_transport_effect_binding_invalid');
+    if (String(binding.command_id || '').trim().toLowerCase() !== id) throw new Error('native_supervisor_transport_effect_binding_command_mismatch');
+    if (binding.authority_effect !== false) throw new Error('native_supervisor_transport_effect_binding_authority_invalid');
+    const response = await this.#request(`/v1/commands/${id}/effect-intent`, { payload: { binding } });
+    const body = await decodeJson(response);
+    if (!response.ok || body?.accepted !== true || !body?.effect_binding || typeof body.effect_binding !== 'object' || Array.isArray(body.effect_binding)) {
+      throw new Error(`native_supervisor_transport_effect_intent_http_${response.status}:${body?.reason || body?.error || 'rejected'}`);
+    }
+    return Object.freeze({
+      status: response.status,
+      effect_binding: Object.freeze(structuredClone(body.effect_binding)),
+      effect_binding_sha256: body.effect_binding_sha256 == null ? null : String(body.effect_binding_sha256),
+      server_accepted: true,
+      transport_delivery_is_authority: false,
+      automatic_effect_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+
   async postResultBatch(results) {
     if (!Array.isArray(results) || results.length < 1 || results.length > 256) throw new Error('native_supervisor_transport_results_invalid');
     const response = await this.#request('/v1/commands/result-batch', { payload: { results } });
@@ -123,10 +148,13 @@ export class NativeSupervisorRuntimeTransport {
       runtime_signing_path: NATIVE_SUPERVISOR_RUNTIME_PATH,
       requests: this.#requests,
       last_status: this.#lastStatus,
+      max_json_bytes: MAX_JSON_BYTES,
       enrollment_authority: false,
       legacy_command_next: false,
       command_scheduler: false,
       browser_execution_authority: false,
+      effect_intent_transport: true,
+      effect_intent_authority: false,
       timers: false,
       automatic_retry: false,
       transport_delivery_is_authority: false,
