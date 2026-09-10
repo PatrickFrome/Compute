@@ -13,13 +13,34 @@ function unwrapGatewayResponse(value) {
   return Object.hasOwn(value, 'result') ? value.result : value;
 }
 
+function bindBrowserBoundary({ browserClient, browserStatus, browserPlanExecute, browserPlanCancel }) {
+  if (browserClient != null) {
+    if (!browserClient || typeof browserClient.status !== 'function' || typeof browserClient.execute !== 'function' || typeof browserClient.cancel !== 'function') {
+      throw new Error('host_agent_browser_client_invalid');
+    }
+    if (browserStatus || browserPlanExecute || browserPlanCancel) throw new Error('host_agent_browser_boundary_ambiguous');
+    return Object.freeze({
+      mode: 'EXTERNAL_TYPED_IPC',
+      status: (payload) => browserClient.status(payload),
+      execute: (payload) => browserClient.execute(payload),
+      cancel: (payload) => browserClient.cancel(payload),
+      snapshot: () => typeof browserClient.snapshot === 'function' ? browserClient.snapshot() : null,
+    });
+  }
+  return Object.freeze({
+    mode: 'IN_PROCESS_TYPED_CALLBACK',
+    status: requireFunction(browserStatus, 'host_agent_browser_status_required'),
+    execute: requireFunction(browserPlanExecute, 'host_agent_browser_plan_execute_required'),
+    cancel: requireFunction(browserPlanCancel, 'host_agent_browser_plan_cancel_required'),
+    snapshot: () => null,
+  });
+}
+
 export class HostAgentRuntime {
   #server;
   #developmentPlane;
   #fastControl;
-  #browserStatus;
-  #browserPlanExecute;
-  #browserPlanCancel;
+  #browserBoundary;
   #startedAt = null;
   #requests = 0;
   #browserPlanRequests = 0;
@@ -29,18 +50,17 @@ export class HostAgentRuntime {
     sessionKey,
     developmentPlane,
     fastControl,
-    browserStatus,
-    browserPlanExecute,
-    browserPlanCancel,
+    browserClient = null,
+    browserStatus = null,
+    browserPlanExecute = null,
+    browserPlanCancel = null,
     netModule,
   } = {}) {
     if (!developmentPlane || typeof developmentPlane.request !== 'function') throw new Error('host_agent_development_plane_required');
     if (!fastControl || typeof fastControl.invoke !== 'function') throw new Error('host_agent_fast_control_required');
     this.#developmentPlane = developmentPlane;
     this.#fastControl = fastControl;
-    this.#browserStatus = requireFunction(browserStatus, 'host_agent_browser_status_required');
-    this.#browserPlanExecute = requireFunction(browserPlanExecute, 'host_agent_browser_plan_execute_required');
-    this.#browserPlanCancel = requireFunction(browserPlanCancel, 'host_agent_browser_plan_cancel_required');
+    this.#browserBoundary = bindBrowserBoundary({ browserClient, browserStatus, browserPlanExecute, browserPlanCancel });
 
     const invokeFast = async (tool, payload) => {
       this.#requests += 1;
@@ -70,17 +90,17 @@ export class HostAgentRuntime {
         CONTROL_EMERGENCY_STOP: (payload) => invokeFast('emergency_stop', payload),
         BROWSER_STATUS: async (payload) => {
           this.#requests += 1;
-          return this.#browserStatus(payload);
+          return this.#browserBoundary.status(payload);
         },
         BROWSER_PLAN_EXECUTE: async (payload) => {
           this.#requests += 1;
           this.#browserPlanRequests += 1;
-          return this.#browserPlanExecute(payload);
+          return this.#browserBoundary.execute(payload);
         },
         BROWSER_PLAN_CANCEL: async (payload) => {
           this.#requests += 1;
           this.#browserPlanRequests += 1;
-          return this.#browserPlanCancel(payload);
+          return this.#browserBoundary.cancel(payload);
         },
       },
     });
@@ -109,6 +129,8 @@ export class HostAgentRuntime {
       fast_control: typeof this.#fastControl.snapshot === 'function' ? this.#fastControl.snapshot() : null,
       transport_role: 'CONTROL_COORDINATOR',
       browser_role: 'TYPED_EXECUTOR_ONLY',
+      browser_boundary_mode: this.#browserBoundary.mode,
+      browser_executor_transport: this.#browserBoundary.snapshot(),
       chat_dom_scheduler: false,
       raw_shell: false,
       raw_cdp_passthrough: false,
