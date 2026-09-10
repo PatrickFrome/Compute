@@ -163,3 +163,19 @@ test('valid recovery hysteresis bounds and default remain exact', () => {
   assert.equal(minimum.execution_authority, false);
   assert.equal(minimum.authority_effect, false);
 });
+
+test('validated live-cell normalization feeds budget projection without widening capacity', () => {
+  const oversized = evaluateControlPressure(healthy({ live_cells: 999 }));
+  assert.equal(oversized.live_cells, 512);
+  assert.equal(oversized.pressure_band, 'GREEN');
+  assert.equal(oversized.read_concurrency, 128);
+  assert.equal(oversized.mutation_concurrency, 32);
+
+  const governor = new BrowserControlPressureGovernor({ recoverySamples: 1 });
+  const observed = governor.observe(healthy({ live_cells: 999 }));
+  assert.equal(observed.live_cells, 512);
+  assert.equal(observed.mutation_concurrency, 32);
+  assert.equal(observed.scheduler_authority, false);
+  assert.equal(observed.execution_authority, false);
+  assert.equal(observed.authority_effect, false);
+});
