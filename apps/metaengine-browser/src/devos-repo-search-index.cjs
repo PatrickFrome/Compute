@@ -125,13 +125,22 @@ function scoreFile(file, terms) {
   return { matched, score };
 }
 
+function preferExactTermRows(rows, termCount) {
+  const exact = rows.filter((row) => row.matched === termCount);
+  if (exact.length) return Object.freeze({ rows: exact, mode: 'ALL_TERMS' });
+  return Object.freeze({ rows, mode: 'PARTIAL_FALLBACK' });
+}
+
 function fitResult(result, maxBytes) {
   const budget = Math.max(1024, Math.min(MAX_RESULT_BYTES, Number(maxBytes) || MAX_RESULT_BYTES));
   const out = structuredClone(result);
   while (out.hits.length && bytes(out) > budget) out.hits.pop();
   if (bytes(out) > budget) throw new Error(`devos_repo_search_result_budget_exceeded:${bytes(out)}:${budget}`);
   out.truncated = out.total_hits > out.hits.length;
+  out.bytes = 0;
   out.bytes = bytes(out);
+  out.bytes = bytes(out);
+  if (bytes(out) > budget) throw new Error(`devos_repo_search_result_budget_exceeded:${bytes(out)}:${budget}`);
   return Object.freeze(out);
 }
 
@@ -285,10 +294,12 @@ class DevOSRepoSearchIndex {
     }
     const candidates = new Set();
     for (const term of terms) for (const fileIndex of this.#postings.get(term) || []) candidates.add(fileIndex);
-    const ranked = [...candidates]
+    const rankedCandidates = [...candidates]
       .map((fileIndex) => ({ file: this.#files[fileIndex], ...scoreFile(this.#files[fileIndex], terms) }))
       .filter((row) => row.matched > 0)
       .sort((a, b) => b.score - a.score || b.matched - a.matched || a.file.relative_path.localeCompare(b.file.relative_path));
+    const preferred = preferExactTermRows(rankedCandidates, terms.length);
+    const ranked = preferred.rows;
     const result = {
       schema: DEVOS_REPO_SEARCH_SCHEMA,
       status: 'OK',
@@ -298,6 +309,7 @@ class DevOSRepoSearchIndex {
       index_revision: this.#revision,
       query_revision: queryRevision,
       query_terms: terms,
+      match_mode: preferred.mode,
       index_rebuilt: ensured.rebuilt,
       indexed_file_count: this.#files.length,
       indexed_bytes: this.#indexedBytes,
