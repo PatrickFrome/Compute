@@ -9,6 +9,7 @@ const DEVOS_REPO_SEARCH_INDEX_SCHEMA = 'metaengine.development-plane.repo-search
 const MAX_FILES = 512;
 const MAX_FILE_BYTES = 256 * 1024;
 const MAX_TOTAL_BYTES = 8 * 1024 * 1024;
+const MAX_FILE_TOKENS = 4096;
 const MAX_HITS = 16;
 const MAX_RESULT_BYTES = 12 * 1024;
 const MAX_QUERY_BYTES = 1024;
@@ -48,13 +49,13 @@ function exactSource(source) {
   return { repository, head, ref };
 }
 
-function tokenize(value) {
+function tokenize(value, maxTokens = MAX_FILE_TOKENS) {
   return Array.from(new Set(
     String(value || '')
       .normalize('NFKC')
       .toLowerCase()
       .match(/[\p{L}\p{N}][\p{L}\p{N}._/-]{1,79}/gu) || [],
-  )).slice(0, 256);
+  )).slice(0, maxTokens);
 }
 
 function validateRelative(relative) {
@@ -96,8 +97,8 @@ function firstEvidence(text, terms) {
 }
 
 function scoreFile(file, terms) {
-  const pathTokens = new Set(tokenize(file.relative_path));
-  const titleTokens = new Set(tokenize(path.posix.basename(file.relative_path)));
+  const pathTokens = new Set(tokenize(file.relative_path, 128));
+  const titleTokens = new Set(tokenize(path.posix.basename(file.relative_path), 128));
   const textTokens = file.tokens;
   let matched = 0;
   let score = 0;
@@ -183,7 +184,7 @@ class DevOSRepoSearchIndex {
       if (!stat.isFile() || stat.size > MAX_FILE_BYTES) continue;
       if (indexedBytes + stat.size > MAX_TOTAL_BYTES) break;
       const text = await fs.readFile(absolute, 'utf8');
-      const tokens = new Set(tokenize(`${relative}\n${text}`));
+      const tokens = new Set(tokenize(`${relative}\n${text}`, MAX_FILE_TOKENS));
       const file = Object.freeze({
         relative_path: relative.replaceAll('\\', '/'),
         sha256: `sha256:${sha256(Buffer.from(text, 'utf8'))}`,
@@ -236,6 +237,7 @@ class DevOSRepoSearchIndex {
       max_files: MAX_FILES,
       max_file_bytes: MAX_FILE_BYTES,
       max_total_bytes: MAX_TOTAL_BYTES,
+      max_file_tokens: MAX_FILE_TOKENS,
       allowed_roots: [...ALLOWED_ROOTS],
       arbitrary_path_selection: false,
       process_spawn_used: false,
@@ -253,7 +255,7 @@ class DevOSRepoSearchIndex {
     const limit = Number(input.limit ?? 8);
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_HITS) throw new Error('devos_repo_search_limit_invalid');
     const ensured = await this.ensure(source);
-    const terms = tokenize(query).slice(0, 12);
+    const terms = tokenize(query, 12);
     if (!terms.length) throw new Error('devos_repo_search_terms_invalid');
     const queryRevision = `rq:${sha256(Buffer.from(JSON.stringify({ index: this.#revision, terms }), 'utf8'))}`;
     if (input.if_none_match && String(input.if_none_match) === queryRevision) {
@@ -315,6 +317,7 @@ module.exports = Object.freeze({
   MAX_FILES,
   MAX_FILE_BYTES,
   MAX_TOTAL_BYTES,
+  MAX_FILE_TOKENS,
   MAX_HITS,
   MAX_RESULT_BYTES,
   ALLOWED_ROOTS,
