@@ -22,9 +22,9 @@ function envelope(state, extra = {}) {
  * cannot issue or lease commands and cannot execute normal Browser actions.
  *
  * Result upload is deliberately separate from preemption. If durable completion
- * fails after local OFF/disarm, the caller may replay the SAME receipt; the local
- * preemption core de-duplicates by command_id so the physical authority transition
- * is not blindly repeated.
+ * fails after local OFF/disarm, the caller may replay the SAME receipt against the
+ * SAME leased command. The local preemption core de-duplicates by command_id, so
+ * the physical authority transition is never blindly repeated.
  */
 export class EmergencyIntakePump {
   #nextEmergency;
@@ -46,7 +46,7 @@ export class EmergencyIntakePump {
   async cycle() {
     const leased = await this.#nextEmergency();
     const count = Number(leased?.leased_count || 0);
-    const command = leased?.command && typeof leased.command === 'object' ? leased.command : null;
+    const command = leased?.command && typeof leased.command === 'object' ? structuredClone(leased.command) : null;
     if (count === 0 || !command) {
       this.#last = envelope('IDLE', { wake_reason: String(leased?.wake_reason || 'NONE').slice(0, 80) });
       return this.#last;
@@ -61,6 +61,7 @@ export class EmergencyIntakePump {
       if (!completion || completion.confirmed !== true) {
         this.#last = envelope('RESULT_PENDING', {
           command_id: String(command.command_id || ''),
+          command,
           receipt,
           completion_confirmed: false,
         });
@@ -68,6 +69,7 @@ export class EmergencyIntakePump {
       }
       this.#last = envelope('COMPLETED', {
         command_id: String(command.command_id || ''),
+        command,
         receipt,
         completion_confirmed: true,
       });
@@ -75,6 +77,7 @@ export class EmergencyIntakePump {
     } catch (error) {
       this.#last = envelope('RESULT_PENDING', {
         command_id: String(command.command_id || ''),
+        command,
         receipt,
         completion_confirmed: false,
         completion_error: String(error?.message || error || 'UNKNOWN').slice(0, 200),
@@ -84,14 +87,15 @@ export class EmergencyIntakePump {
   }
 
   async retryCompletion() {
-    if (this.#last.state !== 'RESULT_PENDING' || !this.#last.receipt || !this.#last.command_id) {
+    if (this.#last.state !== 'RESULT_PENDING' || !this.#last.receipt || !this.#last.command) {
       return envelope('NO_PENDING_RESULT');
     }
-    const command = { command_id: this.#last.command_id };
+    const command = structuredClone(this.#last.command);
     const completion = await this.#completeEmergency(command, this.#last.receipt);
     if (!completion || completion.confirmed !== true) return this.#last;
     this.#last = envelope('COMPLETED', {
       command_id: this.#last.command_id,
+      command,
       receipt: this.#last.receipt,
       completion_confirmed: true,
       result_replayed_without_effect_retry: true,
