@@ -6,6 +6,7 @@ import {
   FAST_CONTEXT_HARD_MAX_BYTES,
   FAST_CONTEXT_ORDINARY_BUDGET_BYTES,
 } from '../src/fast-context-v1.mjs';
+import { buildChatDevelopmentCapsule } from '../src/chat-development-capsule.mjs';
 
 function state(tabCount = 28) {
   return {
@@ -62,6 +63,56 @@ test('ordinary fast context remains below 8 KiB even when source state is huge',
   assert.equal('self_update' in out.context, false);
 });
 
+test('fast context carries exact-head development capsule without widening authority', () => {
+  const head = 'a'.repeat(40);
+  const source = {
+    repository: 'PatrickFrome/Compute',
+    branch: 'work/browser-command-fabric-v2-p0',
+    head_sha: head,
+    pr: 453,
+    dirty: false,
+  };
+  const developmentCapsule = buildChatDevelopmentCapsule({
+    source,
+    ci_runs: [{ id: 1, name: 'Shell', status: 'completed', conclusion: 'failure', head_sha: head, authority_effect: false }],
+    evidence: [{ id: 'blocker:test', kind: 'BLOCKER', title: 'Fix shell contract', path: 'test/x.mjs', severity: 'HIGH', authority_effect: false }],
+    generated_at: '2026-09-10T00:00:00.000Z',
+  });
+  const out = buildFastContext({
+    state: state(2),
+    source,
+    development_capsule: developmentCapsule,
+    now_ms: Date.parse('2026-09-10T00:00:00.500Z'),
+  });
+  assert.equal(out.context.development_capsule.source.head_sha, head);
+  assert.equal(out.context.development_capsule.ci.state, 'RED');
+  assert.equal(out.context.development_capsule.focus.kind, 'CI_FAILURE');
+  assert.equal(out.context.development_capsule.command_authority, false);
+  assert.equal(out.context.development_capsule.browser_execution_authority, false);
+  assert.ok(out.bytes <= FAST_CONTEXT_ORDINARY_BUDGET_BYTES, `bytes=${out.bytes}`);
+});
+
+test('development capsule from another head or with forged authority fails closed', () => {
+  const head = 'a'.repeat(40);
+  const capsule = buildChatDevelopmentCapsule({
+    source: { repository: 'PatrickFrome/Compute', head_sha: 'b'.repeat(40) },
+    evidence: [],
+  });
+  assert.throws(() => buildFastContext({
+    state: state(1),
+    source: { repository: 'PatrickFrome/Compute', head_sha: head },
+    development_capsule: capsule,
+  }), /dev_capsule_head_mismatch/);
+  assert.throws(() => buildFastContext({
+    state: state(1),
+    source: { repository: 'PatrickFrome/Compute', head_sha: head },
+    development_capsule: {
+      ...buildChatDevelopmentCapsule({ source: { repository: 'PatrickFrome/Compute', head_sha: head }, evidence: [] }),
+      command_authority: true,
+    },
+  }), /dev_capsule_authority_forbidden/);
+});
+
 test('field projection keeps mandatory identity metadata while omitting unrelated sections', () => {
   const out = buildFastContext({
     state: state(2),
@@ -74,6 +125,7 @@ test('field projection keeps mandatory identity metadata while omitting unrelate
   assert.equal('control' in out.context, true);
   assert.equal('tabs' in out.context, false);
   assert.equal('development' in out.context, false);
+  assert.equal('development_capsule' in out.context, false);
   assert.equal('revision' in out.context, true);
   assert.equal('capability_revision' in out.context, true);
 });
