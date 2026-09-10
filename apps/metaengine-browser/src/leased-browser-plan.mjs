@@ -15,6 +15,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const TAB_ID_RE = /^tab_[0-9a-f-]{36}$/i;
 const IDEMPOTENCY_RE = /^[A-Za-z0-9._:-]{16,160}$/;
 const SHA256_RE = /^(?:sha256:)?[a-f0-9]{64}$/i;
+const EFFECT_BINDING_SCHEMAS = new Set([
+  'metaengine.native-supervisor.effect-binding.v1',
+  'metaengine.native-supervisor.effect-binding.v2',
+]);
 
 const ALLOWED_ACTIONS = new Set([
   'POLL', 'CAPTURE', 'CAPTURE_VIEW', 'DOWNLOAD_STATUS',
@@ -50,7 +54,11 @@ function originAllowed(value, allowedOrigins) {
 function normalizeEffectBinding(command, action) {
   if (!nativeActionRequiresEffectBinding(action)) return;
   if (!plainObject(command.effect_binding)) throw new Error(`leased_browser_plan_effect_binding_required:${action}`);
+  if (!EFFECT_BINDING_SCHEMAS.has(String(command.effect_binding.schema || ''))) throw new Error('leased_browser_plan_effect_binding_schema_invalid');
   if (command.effect_binding.authority_effect !== false) throw new Error('leased_browser_plan_effect_binding_authority_flag_invalid');
+  if (command.effect_binding.page_data_authority !== false || command.effect_binding.automatic_retry_allowed !== false) {
+    throw new Error('leased_browser_plan_effect_binding_safety_flags_invalid');
+  }
   if (String(command.effect_binding.command_id || '').toLowerCase() !== String(command.command_id || '').toLowerCase()) {
     throw new Error('leased_browser_plan_effect_binding_command_mismatch');
   }
@@ -188,6 +196,12 @@ export class LeasedBrowserPlanExecutor {
         if (command.action === 'NAVIGATE' && !originAllowed(command.payload?.url, plan.allowed_origins)) {
           return receipt(plan, 'NEEDS_REPLAN', completed, command.command_id, results, { reason: 'NAVIGATION_TARGET_ORIGIN_DENIED' });
         }
+        // Origin observation and other local reads can consume the final lease window.
+        // Recheck expiry at the actual authorization/effect boundary, not only when
+        // the envelope first enters the Browser process.
+        if (Date.parse(command.expires_at) <= Date.now()) {
+          return receipt(plan, 'NEEDS_REPLAN', completed, command.command_id, results, { reason: 'COMMAND_EXPIRED_BEFORE_EFFECT' });
+        }
 
         let authorization;
         try {
@@ -206,6 +220,9 @@ export class LeasedBrowserPlanExecutor {
           return receipt(plan, 'NEEDS_REPLAN', completed, command.command_id, results, { reason: 'LOCAL_AUTHORIZATION_DENIED' });
         }
         if (controller.signal.aborted) return receipt(plan, 'CANCELLED', completed, command.command_id, results, { reason: active.reason || 'ABORTED' });
+        if (Date.parse(command.expires_at) <= Date.now()) {
+          return receipt(plan, 'NEEDS_REPLAN', completed, command.command_id, results, { reason: 'COMMAND_EXPIRED_BEFORE_EFFECT' });
+        }
 
         let value;
         const started = Date.now();
@@ -274,8 +291,10 @@ export class LeasedBrowserPlanExecutor {
       max_deadline_ms: LEASED_BROWSER_PLAN_MAX_DEADLINE_MS,
       allowed_actions: Object.freeze([...ALLOWED_ACTIONS]),
       full_command_preserved: true,
-      sealed_effect_binding_required: true,
+      effect_binding_presence_required: true,
+      server_sealed_effect_binding_expected: true,
       local_reauthorization_required: true,
+      command_expiry_rechecked_before_effect: true,
       db_lease_required: true,
       transport_delivery_is_authority: false,
       browser_plan_is_authority: false,
