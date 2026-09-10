@@ -53,9 +53,11 @@ export class BrowserBrainAdaptiveFanoutRuntime {
 
   observePressure(sample = {}) {
     const next = this.#governor.observe(sample);
-    this.#scheduler.setConcurrencyBudget(next);
+    const schedulerSnapshot = this.#scheduler.setConcurrencyBudget(next);
     this.#budget = next;
-    return this.snapshot();
+    return this.#snapshotWithScheduler(
+      schedulerSnapshot ?? this.#scheduler.snapshot?.() ?? null,
+    );
   }
 
   async dispatchMutations(commands, options = {}) {
@@ -73,7 +75,10 @@ export class BrowserBrainAdaptiveFanoutRuntime {
   }
 
   snapshot() {
-    const scheduler = this.#scheduler.snapshot?.() || null;
+    return this.#snapshotWithScheduler(this.#scheduler.snapshot?.() || null);
+  }
+
+  #snapshotWithScheduler(scheduler) {
     return Object.freeze({
       schema: BROWSER_BRAIN_ADAPTIVE_FANOUT_RUNTIME_SCHEMA,
       pressure_band: this.#budget.pressure_band,

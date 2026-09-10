@@ -46,6 +46,69 @@ test('one pressure sample tunes existing scheduler and fanout budget without new
   assert.equal(snapshot.authority_effect, false);
 });
 
+test('observePressure reuses the scheduler snapshot returned by the live budget update', () => {
+  let snapshotCalls = 0;
+  let setCalls = 0;
+  const scheduler = {
+    snapshot() {
+      snapshotCalls += 1;
+      return Object.freeze({ source: 'snapshot', sequence: snapshotCalls });
+    },
+    setConcurrencyBudget(budget) {
+      setCalls += 1;
+      return Object.freeze({
+        source: 'setConcurrencyBudget',
+        sequence: setCalls,
+        read_concurrency: budget.read_concurrency,
+        mutation_concurrency: budget.mutation_concurrency,
+      });
+    },
+  };
+  const runtime = new BrowserBrainAdaptiveFanoutRuntime({
+    scheduler,
+    executeRuntimeFenced: async () => ({ ok: true }),
+  });
+
+  assert.equal(setCalls, 1);
+  assert.equal(snapshotCalls, 0);
+  const observed = runtime.observePressure(greenSample(32));
+
+  assert.equal(setCalls, 2);
+  assert.equal(snapshotCalls, 0);
+  assert.equal(observed.scheduler.source, 'setConcurrencyBudget');
+  assert.equal(observed.scheduler.sequence, 2);
+  assert.equal(observed.scheduler.read_concurrency, observed.read_concurrency);
+  assert.equal(observed.scheduler.mutation_concurrency, observed.mutation_concurrency);
+  assert.equal(observed.scheduler_authority, false);
+  assert.equal(observed.authority_effect, false);
+
+  const explicit = runtime.snapshot();
+  assert.equal(snapshotCalls, 1);
+  assert.equal(explicit.scheduler.source, 'snapshot');
+});
+
+test('observePressure preserves snapshot compatibility when a scheduler setter returns no snapshot', () => {
+  let snapshotCalls = 0;
+  const scheduler = {
+    snapshot() {
+      snapshotCalls += 1;
+      return Object.freeze({ source: 'fallback', sequence: snapshotCalls });
+    },
+    setConcurrencyBudget() {
+      return undefined;
+    },
+  };
+  const runtime = new BrowserBrainAdaptiveFanoutRuntime({
+    scheduler,
+    executeRuntimeFenced: async () => ({ ok: true }),
+  });
+
+  const observed = runtime.observePressure(greenSample(32));
+  assert.equal(snapshotCalls, 1);
+  assert.equal(observed.scheduler.source, 'fallback');
+  assert.equal(observed.authority_effect, false);
+});
+
 test('RED pressure immediately shrinks both scheduler and fanout admission before any effect', async () => {
   const scheduler = new NativeSupervisorCommandLaneScheduler({ readConcurrency: 128, mutationConcurrency: 32 });
   let effects = 0;
