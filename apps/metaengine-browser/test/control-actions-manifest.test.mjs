@@ -11,6 +11,8 @@ import {
 import { browserControlCapabilities } from '../src/browser-control-capabilities.mjs';
 import { classifyNativeSupervisorCommand } from '../src/native-supervisor-command-lanes.mjs';
 
+const exactTab = 'tab_00000000-0000-4000-8000-000000000001';
+
 test('canonical control action manifest is unique, bounded and digest-addressed', () => {
   assert.equal(CONTROL_ACTION_MANIFEST.length, 46);
   assert.equal(new Set(CONTROL_ACTION_MANIFEST.map((row) => row.action)).size, CONTROL_ACTION_MANIFEST.length);
@@ -53,7 +55,11 @@ test('manifest records current legacy and unimplemented drift explicitly instead
 
 test('scheduler lane taxonomy agrees with the canonical manifest for every declared action', () => {
   for (const row of CONTROL_ACTION_MANIFEST) {
-    const payload = row.action === 'SET_SUPERVISOR_MODE' ? { mode: 'CONTROL' } : {};
+    const payload = row.action === 'SET_SUPERVISOR_MODE'
+      ? { mode: 'CONTROL' }
+      : row.lane === 'TAB_MUTATION'
+        ? { tab_id: exactTab }
+        : {};
     const descriptor = classifyNativeSupervisorCommand({ action: row.action, payload });
     assert.equal(descriptor.lane, row.lane, row.action);
     assert.equal(descriptor.read_only, row.effect === 'READ_ONLY', row.action);
