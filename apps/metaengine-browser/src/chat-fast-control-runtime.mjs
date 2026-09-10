@@ -64,6 +64,12 @@ function notModified(queryRevision, extra = {}) {
   return Object.freeze(out);
 }
 
+function revisionFromMutation(result) {
+  const snapshot = result?.snapshot && typeof result.snapshot === 'object' ? result.snapshot : result;
+  const revision = String(snapshot?.revision || '').trim();
+  return revision || null;
+}
+
 export class ChatFastControlRuntime {
   #controlState;
   #queryProvider;
@@ -71,6 +77,11 @@ export class ChatFastControlRuntime {
   #gateway;
   #mcp;
   #getBrowserState;
+  #stateRevision;
+  #orientationCache = null;
+  #orientationCacheRevision = null;
+  #orientationCacheHits = 0;
+  #orientationBuilds = 0;
   #browserStateReads = 0;
   #devQueryCache = new Map();
   #devQueryCacheHits = 0;
@@ -94,6 +105,9 @@ export class ChatFastControlRuntime {
     if (typeof issueEmergency !== 'function') throw new Error('chat_fast_control_issue_emergency_required');
     this.#controlState = controlState;
     this.#getBrowserState = getBrowserState;
+    const initialState = this.#controlState.snapshot();
+    this.#stateRevision = String(initialState?.revision || '').trim();
+    if (!this.#stateRevision) throw new Error('chat_fast_control_state_revision_required');
     this.#queryProvider = new ChatDevelopmentQueryProvider({ developmentPlane, evidenceIndex: controlState });
     this.#gateway = new FastControlGatewayCore({
       contextGet: async (input) => {
@@ -109,8 +123,31 @@ export class ChatFastControlRuntime {
     this.#mcp = createFastControlMcpAdapter(this.#gateway);
   }
 
+  #recordControlMutation(result) {
+    const revision = revisionFromMutation(result);
+    if (revision && revision !== this.#stateRevision) {
+      this.#stateRevision = revision;
+      this.#orientationCache = null;
+      this.#orientationCacheRevision = null;
+    }
+    return result;
+  }
+
+  #orientation() {
+    if (this.#orientationCacheRevision === this.#stateRevision) {
+      this.#orientationCacheHits += 1;
+      return this.#orientationCache;
+    }
+    this.#orientationCache = compactOrientation(this.#controlState.capsule());
+    this.#orientationCacheRevision = this.#stateRevision;
+    this.#orientationBuilds += 1;
+    return this.#orientationCache;
+  }
+
   async #devQuery(input) {
-    const stateRevision = this.#controlState.snapshot().revision;
+    // State revision is captured on event-driven writes. No full control-state snapshot
+    // is built on the chat read path just to derive the warm-cache key.
+    const stateRevision = this.#stateRevision;
     const continuation = isContinuationIntent(input?.query);
     if (continuation) {
       const cursorResult = this.#developmentCursor.resolve({ state_revision: stateRevision, query: input.query });
@@ -123,7 +160,7 @@ export class ChatFastControlRuntime {
       }
     }
 
-    const orientation = compactOrientation(this.#controlState.capsule());
+    const orientation = this.#orientation();
     const effectiveInput = continuation
       ? Object.freeze({ ...input, query: continuationFallbackQuery(orientation) })
       : input;
@@ -140,9 +177,8 @@ export class ChatFastControlRuntime {
         this.#devQueryNotModifiedHits += 1;
         return notModified(cached.query_revision, continuation ? { continuation_fallback: true } : {});
       }
-      const result = structuredClone(cached.result);
-      if (continuation) result.continuation_fallback = true;
-      return Object.freeze(result);
+      if (!continuation) return cached.result;
+      return Object.freeze({ ...cached.result, continuation_fallback: true });
     }
 
     this.#devQueryCacheMisses += 1;
@@ -154,22 +190,22 @@ export class ChatFastControlRuntime {
       this.#developmentCursor.capture({ state_revision: stateRevision, query: effectiveInput.query, result });
       this.#devQueryCache.set(key, Object.freeze({
         query_revision: String(result.query_revision),
-        result: structuredClone(result),
+        result,
       }));
       while (this.#devQueryCache.size > CHAT_FAST_CONTROL_QUERY_CACHE_MAX) {
         this.#devQueryCache.delete(this.#devQueryCache.keys().next().value);
       }
     }
     if (!continuation) return result;
-    return Object.freeze({ ...structuredClone(result), continuation_fallback: true });
+    return Object.freeze({ ...result, continuation_fallback: true });
   }
 
-  setSource(source, now) { return this.#controlState.setSource(source, now); }
-  setCapabilityRevision(revision, now) { return this.#controlState.setCapabilityRevision(revision, now); }
-  setRepoIndexRevision(revision, options) { return this.#controlState.setRepoIndexRevision(revision, options); }
-  upsertCi(row, now) { return this.#controlState.upsertCi(row, now); }
-  upsertEvidence(row, now) { return this.#controlState.upsertEvidence(row, now); }
-  removeEvidence(id, now) { return this.#controlState.removeEvidence(id, now); }
+  setSource(source, now) { return this.#recordControlMutation(this.#controlState.setSource(source, now)); }
+  setCapabilityRevision(revision, now) { return this.#recordControlMutation(this.#controlState.setCapabilityRevision(revision, now)); }
+  setRepoIndexRevision(revision, options) { return this.#recordControlMutation(this.#controlState.setRepoIndexRevision(revision, options)); }
+  upsertCi(row, now) { return this.#recordControlMutation(this.#controlState.upsertCi(row, now)); }
+  upsertEvidence(row, now) { return this.#recordControlMutation(this.#controlState.upsertEvidence(row, now)); }
+  removeEvidence(id, now) { return this.#recordControlMutation(this.#controlState.removeEvidence(id, now)); }
 
   listTools() { return this.#mcp.listTools(); }
   callTool(name, input) { return this.#mcp.callTool(name, input); }
@@ -186,6 +222,14 @@ export class ChatFastControlRuntime {
       browser_state_reads: this.#browserStateReads,
       dev_query_includes_orientation: true,
       continuation_fallbacks: this.#continuationFallbacks,
+      dev_query_hot_state: Object.freeze({
+        revision: this.#stateRevision,
+        snapshot_reads_per_query: 0,
+        orientation_builds: this.#orientationBuilds,
+        orientation_cache_hits: this.#orientationCacheHits,
+        orientation_revision_keyed: true,
+        authority_effect: false,
+      }),
       dev_query_warm_cache: {
         entries: this.#devQueryCache.size,
         max_entries: CHAT_FAST_CONTROL_QUERY_CACHE_MAX,
@@ -193,6 +237,7 @@ export class ChatFastControlRuntime {
         misses: this.#devQueryCacheMisses,
         not_modified_hits: this.#devQueryNotModifiedHits,
         state_revision_keyed: true,
+        zero_copy_result_reuse: true,
         timers: false,
         authority_effect: false,
       },
