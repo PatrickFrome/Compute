@@ -4,7 +4,7 @@ export const FAST_CONTROL_GATEWAY_SCHEMA = 'metaengine.fast-control-gateway.v1';
 export const FAST_CONTROL_MAX_STEPS = 64;
 export const FAST_CONTROL_MAX_INPUT_BYTES = 64 * 1024;
 
-const TOOL_NAMES = Object.freeze(['context_get', 'run_submit', 'run_status', 'emergency_stop']);
+const TOOL_NAMES = Object.freeze(['context_get', 'dev_query', 'run_submit', 'run_status', 'emergency_stop']);
 export const FAST_CONTROL_TOOL_NAMES = TOOL_NAMES;
 
 const plainObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
@@ -68,6 +68,32 @@ function normalizeRunSubmit(input) {
   });
 }
 
+function normalizeDevQuery(input) {
+  exactKeys(input, new Set(['query', 'kinds', 'limit', 'if_none_match', 'max_bytes']), 'fast_control_dev_query_field_unknown');
+  const query = String(input.query || '').trim();
+  if (!query || Buffer.byteLength(query, 'utf8') > 1024) throw new Error('fast_control_dev_query_invalid');
+  const limit = Number(input.limit ?? 8);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 12) throw new Error('fast_control_dev_query_limit_invalid');
+  const maxBytes = Number(input.max_bytes ?? 8 * 1024);
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 512 || maxBytes > 8 * 1024) throw new Error('fast_control_dev_query_max_bytes_invalid');
+  let kinds = null;
+  if (input.kinds != null) {
+    if (!Array.isArray(input.kinds) || input.kinds.length < 1 || input.kinds.length > 9) throw new Error('fast_control_dev_query_kinds_invalid');
+    kinds = input.kinds.map((value) => String(value || '').trim().toUpperCase());
+    if (kinds.some((value) => !/^[A-Z_]{2,32}$/.test(value)) || new Set(kinds).size !== kinds.length) {
+      throw new Error('fast_control_dev_query_kinds_invalid');
+    }
+  }
+  return Object.freeze({
+    query,
+    kinds,
+    limit,
+    if_none_match: clip(input.if_none_match, 96),
+    max_bytes: maxBytes,
+    authority_effect: false,
+  });
+}
+
 function normalizeEmergency(input) {
   assertPlain(input, 'fast_control_emergency_invalid');
   exactKeys(input, new Set(['kind', 'idempotency_key', 'reason']), 'fast_control_emergency_field_unknown');
@@ -95,6 +121,7 @@ export function fastControlToolManifest() {
     capability_revision: CONTROL_ACTION_MANIFEST_REVISION,
     tools: Object.freeze([
       Object.freeze({ name: 'context_get', purpose: 'bounded source-of-truth context', mutating: false }),
+      Object.freeze({ name: 'dev_query', purpose: 'bounded indexed development search for chat', mutating: false }),
       Object.freeze({ name: 'run_submit', purpose: 'issue one bounded typed command batch', mutating: true }),
       Object.freeze({ name: 'run_status', purpose: 'read monotonic terminal result delta', mutating: false }),
       Object.freeze({ name: 'emergency_stop', purpose: 'issue DB-authoritative DISARM or OFF command', mutating: true }),
@@ -110,16 +137,19 @@ export function fastControlToolManifest() {
 
 export class FastControlGatewayCore {
   #contextGet;
+  #devQuery;
   #issueBatch;
   #resultDelta;
   #issueEmergency;
 
-  constructor({ contextGet, issueBatch, resultDelta, issueEmergency } = {}) {
+  constructor({ contextGet, devQuery, issueBatch, resultDelta, issueEmergency } = {}) {
     if (typeof contextGet !== 'function') throw new Error('fast_control_context_get_required');
+    if (typeof devQuery !== 'function') throw new Error('fast_control_dev_query_required');
     if (typeof issueBatch !== 'function') throw new Error('fast_control_issue_batch_required');
     if (typeof resultDelta !== 'function') throw new Error('fast_control_result_delta_required');
     if (typeof issueEmergency !== 'function') throw new Error('fast_control_issue_emergency_required');
     this.#contextGet = contextGet;
+    this.#devQuery = devQuery;
     this.#issueBatch = issueBatch;
     this.#resultDelta = resultDelta;
     this.#issueEmergency = issueEmergency;
@@ -140,6 +170,20 @@ export class FastControlGatewayCore {
         max_bytes: input.max_bytes,
       });
       return Object.freeze({ tool, result, authority_effect: false });
+    }
+
+    if (tool === 'dev_query') {
+      const request = normalizeDevQuery(input);
+      const result = await this.#devQuery(request);
+      return Object.freeze({
+        tool,
+        result,
+        indexed_read_only: true,
+        network_reads_required_by_gateway: 0,
+        filesystem_reads_required_by_gateway: 0,
+        command_leasing_authority: false,
+        authority_effect: false,
+      });
     }
 
     if (tool === 'run_submit') {
