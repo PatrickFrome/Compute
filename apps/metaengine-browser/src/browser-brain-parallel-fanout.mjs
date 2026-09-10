@@ -161,7 +161,9 @@ export class BrowserBrainParallelFanoutCoordinator {
     // physical effect is possible until the aggregate has passed. Validate each
     // lane as it settles so malformed pressure, insufficient budget, missing
     // exact-cell evidence, or a proven same-cell collision can reject immediately
-    // without waiting for unrelated slow/wedged preflight.
+    // without waiting for unrelated slow/wedged preflight. Bind each exact cell
+    // directly onto its plan entry while the resolver lane settles so large
+    // batches avoid a second cell-key result vector and post-preflight mapping pass.
     const budgetPromise = Promise.resolve()
       .then(() => this.readMutationBudget())
       .then(strictMutationBudget)
@@ -172,25 +174,21 @@ export class BrowserBrainParallelFanoutCoordinator {
         return budget;
       });
     const seenCells = new Set();
-    const cellKeyPromises = plan.map(({ command, commandId }) =>
+    const cellKeyPromises = plan.map((entry) =>
       Promise.resolve()
-        .then(() => this.resolveCellKey(command))
-        .then((rawCellKey) => strictBrowserCellKey(rawCellKey, commandId))
+        .then(() => this.resolveCellKey(entry.command))
+        .then((rawCellKey) => strictBrowserCellKey(rawCellKey, entry.commandId))
         .then((cellKey) => {
           if (seenCells.has(cellKey)) {
             throw sameCellOverlapError(cellKey);
           }
           seenCells.add(cellKey);
-          return cellKey;
+          entry.cellKey = cellKey;
         }),
     );
     const preflightPromise = Promise.all([budgetPromise, ...cellKeyPromises]);
-    const [, ...cellKeys] = await awaitPreflight(preflightPromise, signal);
+    await awaitPreflight(preflightPromise, signal);
     if (signal?.aborted) throw preflightAbortError();
-
-    for (let index = 0; index < plan.length; index += 1) {
-      plan[index].cellKey = cellKeys[index];
-    }
 
     // All independent cells may start after one-shot admission. Each lane owns its
     // own settlement mapping so the hot path avoids an intermediate allSettled
