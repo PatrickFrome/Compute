@@ -161,6 +161,40 @@ test('independent BrowserCells start concurrently through the injected runtime-f
   assert.deepEqual(rows.map((row) => row.status), ['fulfilled', 'fulfilled']);
 });
 
+test('exact BrowserCell is read once by lane classification and once by fanout preflight', async () => {
+  const scheduler = new NativeSupervisorCommandLaneScheduler({ readConcurrency: 8, mutationConcurrency: 8 });
+  let tabReads = 0;
+  let executedCell = null;
+  const exactTab = tab('7').toUpperCase();
+  const payload = {
+    role: 'button',
+    accessible_name: 'single-pass-cell',
+    get tab_id() {
+      tabReads += 1;
+      return exactTab;
+    },
+  };
+  const runtime = new BrowserBrainAdaptiveFanoutRuntime({
+    scheduler,
+    executeRuntimeFenced: async (_cmd, context) => {
+      executedCell = context.browserCell;
+      return { ok: true };
+    },
+  });
+
+  const rows = await runtime.dispatchMutations([{
+    command_id: 'single-pass-cell',
+    action: 'TYPED_CLICK',
+    platform: 'TEST',
+    payload,
+  }]);
+
+  assert.equal(tabReads, 2);
+  assert.equal(executedCell, exactTab);
+  assert.equal(rows[0].browser_cell, exactTab);
+  assert.equal(rows[0].status, 'fulfilled');
+});
+
 test('global, read-only, implicit-tab and same-cell mutations fail closed before physical execution', async () => {
   const scheduler = new NativeSupervisorCommandLaneScheduler();
   let effects = 0;

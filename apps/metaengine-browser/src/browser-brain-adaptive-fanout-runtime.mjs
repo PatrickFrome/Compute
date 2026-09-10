@@ -67,9 +67,6 @@ export class BrowserBrainAdaptiveFanoutRuntime {
       if (descriptor.lane !== COMMAND_LANES.TAB_MUTATION || descriptor.read_only || descriptor.exclusive) {
         throw new Error(`browser_brain_adaptive_fanout_tab_mutation_required:${descriptor.action}`);
       }
-      if (!explicitCell(command)) {
-        throw new Error(`browser_brain_adaptive_fanout_explicit_cell_required:${descriptor.action}`);
-      }
     }
     return this.#fanout.dispatch(commands, options);
   }
