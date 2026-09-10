@@ -21,6 +21,20 @@ export const FAST_CONTROL_MCP_TOOLS = Object.freeze([
     }),
   }),
   Object.freeze({
+    name: 'dev_query',
+    description: 'Search a bounded in-memory development index for source, CI, checkpoints, changes, hotspots, blockers, next actions, runtime and database evidence. Read-only and revision-addressed.',
+    inputSchema: objectSchema({
+      query: { type: 'string', minLength: 1, maxLength: 1024 },
+      kinds: {
+        type: 'array', minItems: 1, maxItems: 9, uniqueItems: true,
+        items: { type: 'string', enum: ['SOURCE', 'CI', 'CHECKPOINT', 'CHANGE', 'HOTSPOT', 'BLOCKER', 'NEXT_ACTION', 'RUNTIME', 'DATABASE'] },
+      },
+      limit: { type: 'integer', minimum: 1, maximum: 12 },
+      if_none_match: { type: 'string', maxLength: 96 },
+      max_bytes: { type: 'integer', minimum: 512, maximum: 8192 },
+    }, ['query']),
+  }),
+  Object.freeze({
     name: 'run_submit',
     description: 'Issue one bounded typed command batch. This does not lease or execute Browser effects; DB leasing remains the sole actuation authority.',
     inputSchema: objectSchema({
