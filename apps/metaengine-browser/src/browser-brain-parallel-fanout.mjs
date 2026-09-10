@@ -53,6 +53,14 @@ function pressureBudgetExceededError(batchSize, budget) {
   );
 }
 
+function sameCellOverlapError(cellKey) {
+  return new BrowserBrainFanoutPlanError(
+    'same_cell_overlap',
+    `batch contains overlapping mutation for BrowserCell ${cellKey}`,
+    { browser_cell: cellKey },
+  );
+}
+
 function preflightAbortError() {
   return new BrowserBrainFanoutPlanError('aborted', 'fanout aborted before any effect');
 }
@@ -151,9 +159,9 @@ export class BrowserBrainParallelFanoutCoordinator {
     // Pressure admission and BrowserCell resolution are independent read-only
     // preflight seams. Start every lane before awaiting any one of them; no
     // physical effect is possible until the aggregate has passed. Validate each
-    // lane as it settles so malformed pressure, insufficient budget, or missing
-    // exact-cell evidence can reject immediately without waiting for unrelated
-    // slow/wedged preflight.
+    // lane as it settles so malformed pressure, insufficient budget, missing
+    // exact-cell evidence, or a proven same-cell collision can reject immediately
+    // without waiting for unrelated slow/wedged preflight.
     const budgetPromise = Promise.resolve()
       .then(() => this.readMutationBudget())
       .then(strictMutationBudget)
@@ -163,28 +171,25 @@ export class BrowserBrainParallelFanoutCoordinator {
         }
         return budget;
       });
+    const seenCells = new Set();
     const cellKeyPromises = plan.map(({ command, commandId }) =>
       Promise.resolve()
         .then(() => this.resolveCellKey(command))
-        .then((rawCellKey) => strictBrowserCellKey(rawCellKey, commandId)),
+        .then((rawCellKey) => strictBrowserCellKey(rawCellKey, commandId))
+        .then((cellKey) => {
+          if (seenCells.has(cellKey)) {
+            throw sameCellOverlapError(cellKey);
+          }
+          seenCells.add(cellKey);
+          return cellKey;
+        }),
     );
     const preflightPromise = Promise.all([budgetPromise, ...cellKeyPromises]);
     const [, ...cellKeys] = await awaitPreflight(preflightPromise, signal);
     if (signal?.aborted) throw preflightAbortError();
 
-    const seenCells = new Set();
     for (let index = 0; index < plan.length; index += 1) {
-      const entry = plan[index];
-      const cellKey = cellKeys[index];
-      if (seenCells.has(cellKey)) {
-        throw new BrowserBrainFanoutPlanError(
-          'same_cell_overlap',
-          `batch contains overlapping mutation for BrowserCell ${cellKey}`,
-          { browser_cell: cellKey },
-        );
-      }
-      seenCells.add(cellKey);
-      entry.cellKey = cellKey;
+      plan[index].cellKey = cellKeys[index];
     }
 
     // All independent cells may start after one-shot admission. Each lane owns its
