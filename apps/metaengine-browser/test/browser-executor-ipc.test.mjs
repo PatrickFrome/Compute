@@ -14,6 +14,7 @@ import {
 
 const COMMAND_ID = '123e4567-e89b-42d3-a456-426614174000';
 const TAB_ID = 'tab_123e4567-e89b-42d3-a456-426614174001';
+const IDEMPOTENCY_KEY = 'effect-prepare:test:0001';
 
 async function fixture(t, { effectBindingPrepare = null } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'metaengine-browser-executor-'));
@@ -56,7 +57,7 @@ test('Host Agent can call only typed Browser status execute and cancel over a pe
   assert.equal(h.server.snapshot().effect_binding_preparation, false);
 });
 
-test('effect binding preparation sends only identifiers tab and expiry, not command text', async (t) => {
+test('effect binding preparation sends only identity-critical fields, never command text', async (t) => {
   const h = await fixture(t, {
     effectBindingPrepare: async (payload) => ({
       command_id: payload.command_id,
@@ -73,6 +74,7 @@ test('effect binding preparation sends only identifiers tab and expiry, not comm
     command_id: COMMAND_ID,
     action: 'SEMANTIC_TYPE',
     platform: 'CHATGPT',
+    idempotency_key: IDEMPOTENCY_KEY,
     expires_at: new Date(Date.now() + 60_000).toISOString(),
     payload: { tab_id: TAB_ID, text: 'do not send this prompt over preparation IPC', selector: 'also omitted' },
     effect_binding: { should_not_cross: true },
@@ -80,8 +82,9 @@ test('effect binding preparation sends only identifiers tab and expiry, not comm
   assert.equal(result.command_id, COMMAND_ID);
   assert.equal(h.calls.length, 1);
   assert.equal(h.calls[0][0], 'prepare');
-  assert.deepEqual(Object.keys(h.calls[0][1]).sort(), ['action', 'command_id', 'expires_at', 'payload', 'platform']);
+  assert.deepEqual(Object.keys(h.calls[0][1]).sort(), ['action', 'command_id', 'expires_at', 'idempotency_key', 'payload', 'platform']);
   assert.deepEqual(h.calls[0][1].payload, { tab_id: TAB_ID });
+  assert.equal(h.calls[0][1].idempotency_key, IDEMPOTENCY_KEY);
   assert.equal(JSON.stringify(h.calls[0][1]).includes('do not send this prompt'), false);
   assert.equal(JSON.stringify(h.calls[0][1]).includes('should_not_cross'), false);
   assert.equal(h.server.snapshot().effect_binding_preparation, true);
@@ -117,7 +120,7 @@ test('Browser executor endpoint is deterministic and distinct from Host Agent co
 test('Browser executor manifest is narrow and has no command lease identity sealing or raw execution surface', () => {
   const manifest = browserExecutorIpcManifest();
   assert.deepEqual(manifest.allowed_ops, ['BROWSER_STATUS', 'BROWSER_PLAN_EXECUTE', 'BROWSER_PLAN_CANCEL', 'BROWSER_EFFECT_BINDING_PREPARE']);
-  assert.equal(manifest.effect_binding_preparation_payload, 'RUNTIME_IDENTIFIERS_ONLY');
+  assert.equal(manifest.effect_binding_preparation_payload, 'COMMAND_ID_ACTION_TAB_IDEMPOTENCY_EXPIRY_ONLY');
   assert.equal(manifest.effect_binding_sealing, false);
   assert.equal(manifest.control_ops, false);
   assert.equal(manifest.development_ops, false);
