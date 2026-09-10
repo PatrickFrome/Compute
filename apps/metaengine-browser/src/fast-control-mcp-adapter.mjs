@@ -1,7 +1,11 @@
+import crypto from 'node:crypto';
 import { CONTROL_ACTION_MANIFEST_REVISION } from './control-actions-manifest.mjs';
 import { FAST_CONTROL_TOOL_NAMES } from './fast-control-gateway-core.mjs';
 
 export const FAST_CONTROL_MCP_SCHEMA = 'metaengine.fast-control-mcp.v1';
+export const FAST_CONTROL_MCP_PROTOCOL_REVISION = '2026-07-28';
+export const FAST_CONTROL_MCP_LIST_TTL_MS = 5 * 60 * 1000;
+export const FAST_CONTROL_MCP_CACHE_SCOPE = 'private';
 
 const objectSchema = (properties, required = []) => Object.freeze({
   type: 'object',
@@ -10,10 +14,30 @@ const objectSchema = (properties, required = []) => Object.freeze({
   required: Object.freeze(required),
 });
 
+const readOnlyAnnotations = Object.freeze({
+  readOnlyHint: true,
+  openWorldHint: false,
+});
+const commandAnnotations = Object.freeze({
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: true,
+  openWorldHint: true,
+});
+const emergencyAnnotations = Object.freeze({
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: true,
+  openWorldHint: false,
+});
+const shortExecution = Object.freeze({ taskSupport: 'forbidden' });
+
 export const FAST_CONTROL_MCP_TOOLS = Object.freeze([
   Object.freeze({
     name: 'context_get',
     description: 'Read a bounded revisioned source-of-truth context. Read-only; use if_none_match to avoid unchanged payloads.',
+    annotations: readOnlyAnnotations,
+    execution: shortExecution,
     inputSchema: objectSchema({
       fields: { type: 'array', maxItems: 32, items: { type: 'string', maxLength: 80 } },
       if_none_match: { type: 'string', maxLength: 96 },
@@ -23,6 +47,8 @@ export const FAST_CONTROL_MCP_TOOLS = Object.freeze([
   Object.freeze({
     name: 'dev_query',
     description: 'Search a bounded in-memory development index for source, CI, checkpoints, changes, hotspots, blockers, next actions, runtime and database evidence. Read-only and revision-addressed.',
+    annotations: readOnlyAnnotations,
+    execution: shortExecution,
     inputSchema: objectSchema({
       query: { type: 'string', minLength: 1, maxLength: 1024 },
       kinds: {
@@ -37,6 +63,8 @@ export const FAST_CONTROL_MCP_TOOLS = Object.freeze([
   Object.freeze({
     name: 'run_submit',
     description: 'Issue one bounded typed command batch. This does not lease or execute Browser effects; DB leasing remains the sole actuation authority.',
+    annotations: commandAnnotations,
+    execution: shortExecution,
     inputSchema: objectSchema({
       capability_revision: { type: 'string', const: CONTROL_ACTION_MANIFEST_REVISION },
       steps: {
@@ -53,6 +81,8 @@ export const FAST_CONTROL_MCP_TOOLS = Object.freeze([
   Object.freeze({
     name: 'run_status',
     description: 'Read the monotonic terminal result delta after a cursor. Small verified receipts may be inlined; large receipts remain digest-addressed.',
+    annotations: readOnlyAnnotations,
+    execution: shortExecution,
     inputSchema: objectSchema({
       after_seq: { type: 'integer', minimum: 0 },
       limit: { type: 'integer', minimum: 1, maximum: 16 },
@@ -61,6 +91,8 @@ export const FAST_CONTROL_MCP_TOOLS = Object.freeze([
   Object.freeze({
     name: 'emergency_stop',
     description: 'Issue a DB-authoritative emergency DISARM or supervisor OFF request. Transport delivery itself never grants authority or proves cancellation of an in-flight effect.',
+    annotations: emergencyAnnotations,
+    execution: shortExecution,
     inputSchema: objectSchema({
       kind: { type: 'string', enum: ['DISARM', 'OFF'] },
       idempotency_key: { type: 'string', minLength: 8, maxLength: 160, pattern: '^[A-Za-z0-9._:-]+$' },
@@ -68,6 +100,11 @@ export const FAST_CONTROL_MCP_TOOLS = Object.freeze([
     }, ['idempotency_key']),
   }),
 ]);
+
+export const FAST_CONTROL_MCP_CATALOG_REVISION = `mcpcat:${crypto
+  .createHash('sha256')
+  .update(JSON.stringify({ protocol: FAST_CONTROL_MCP_PROTOCOL_REVISION, tools: FAST_CONTROL_MCP_TOOLS }), 'utf8')
+  .digest('hex')}`;
 
 export function createFastControlMcpAdapter(gateway) {
   if (!gateway || typeof gateway.invoke !== 'function' || typeof gateway.manifest !== 'function') {
@@ -80,10 +117,17 @@ export function createFastControlMcpAdapter(gateway) {
   }
   return Object.freeze({
     schema: FAST_CONTROL_MCP_SCHEMA,
+    protocol_revision: FAST_CONTROL_MCP_PROTOCOL_REVISION,
     capability_revision: CONTROL_ACTION_MANIFEST_REVISION,
+    catalog_revision: FAST_CONTROL_MCP_CATALOG_REVISION,
     listTools() {
       return Object.freeze({
         tools: FAST_CONTROL_MCP_TOOLS.map((tool) => structuredClone(tool)),
+        protocol_revision: FAST_CONTROL_MCP_PROTOCOL_REVISION,
+        catalog_revision: FAST_CONTROL_MCP_CATALOG_REVISION,
+        ttlMs: FAST_CONTROL_MCP_LIST_TTL_MS,
+        cacheScope: FAST_CONTROL_MCP_CACHE_SCOPE,
+        deterministic_order: true,
         capability_revision: CONTROL_ACTION_MANIFEST_REVISION,
         authority_effect: false,
       });
