@@ -142,9 +142,10 @@ export class BrowserBrainParallelFanoutCoordinator {
     }
 
     const seenCommandIds = new Set();
-    const plan = [];
+    const plan = new Array(commands.length);
 
-    for (const command of commands) {
+    for (let index = 0; index < commands.length; index += 1) {
+      const command = commands[index];
       const commandId = typeof command?.command_id === 'string' ? command.command_id.trim() : '';
       if (!commandId) {
         throw new BrowserBrainFanoutPlanError('missing_command_id', 'every fanout command needs command_id');
@@ -153,7 +154,7 @@ export class BrowserBrainParallelFanoutCoordinator {
         throw new BrowserBrainFanoutPlanError('duplicate_command_id', `duplicate command_id ${commandId}`);
       }
       seenCommandIds.add(commandId);
-      plan.push({ command, commandId, cellKey: null });
+      plan[index] = { command, commandId, cellKey: null };
     }
 
     // Pressure admission and BrowserCell resolution are independent read-only
