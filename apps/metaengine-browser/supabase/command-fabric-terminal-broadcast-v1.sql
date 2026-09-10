@@ -26,7 +26,7 @@ begin
     return new;
   end if;
   if old.status in ('COMPLETED','FAILED','EXPIRED','CANCELLED') then
-    -- Terminal state must not silently transition to another terminal status.
+    -- Terminal-to-terminal drift is never emitted as a fresh completion hint.
     return new;
   end if;
 
@@ -40,7 +40,7 @@ begin
     'status', new.status,
     'completed_at', new.completed_at,
     'effect_binding_sha256', new.effect_binding_sha256,
-    'receipt_version', new.receipt_version,
+    'transport_delivery_is_authority', false,
     'authority_effect', false
   );
 
