@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-export const DEVELOPMENT_PLANE_VERSION = '0.4.0';
+export const DEVELOPMENT_PLANE_VERSION = '0.5.0';
 export const DEVELOPMENT_PLANE_PROTOCOL = 'metaengine.development-plane.v1';
 export const DEVELOPMENT_PLANE_CAPABILITIES = Object.freeze([
   'HEALTH',
@@ -100,6 +100,10 @@ export class DevelopmentPlane {
       advisory_evidence_promotion_authority: false,
       devos_repo_read_model: clone(this.#lastResults.get('DEVOS_REPO_READ_MODEL') || null),
       devos_repo_search: true,
+      devos_repo_source_cache: 'GIT_EVENT_INVALIDATED',
+      devos_repo_search_cache: 'HEAD_PLUS_WORKTREE_EVENT_EPOCH',
+      devos_repo_search_worktree_watcher: true,
+      devos_repo_search_warm_source_filesystem_reads: 0,
       devos_repo_search_arbitrary_path_selection: false,
       transcript: Object.freeze(this.#transcript.map((row) => Object.freeze({ ...row }))),
       transcript_total_count: this.#transcriptTotal,
@@ -356,7 +360,7 @@ export class DevelopmentPlane {
     this.#state = planned ? 'STOPPED' : 'LOST';
     for (const [id, pending] of this.#pending) {
       this.#pending.delete(id);
-      pending.reject(new Error('development_plane_process_lost'));
+      pending.reject?.(new Error(planned ? 'development_plane_stopped' : 'development_plane_lost'));
     }
     if (!planned) this.#scheduleRestart();
   }
