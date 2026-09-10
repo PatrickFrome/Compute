@@ -175,6 +175,12 @@ export class DelegatedSupervisorIdentity {
   }
 
   async ensure() {
+    if (this.#snapshot) return this.snapshot();
+    this.#snapshot = safeIdentitySnapshot(await this.#readSnapshot());
+    return this.snapshot();
+  }
+
+  async refresh() {
     this.#snapshot = safeIdentitySnapshot(await this.#readSnapshot());
     return this.snapshot();
   }
