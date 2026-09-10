@@ -4,6 +4,9 @@ import { FastControlGatewayCore } from '../src/fast-control-gateway-core.mjs';
 import { CONTROL_ACTION_MANIFEST_REVISION } from '../src/control-actions-manifest.mjs';
 import {
   FAST_CONTROL_MCP_TOOLS,
+  FAST_CONTROL_MCP_PROTOCOL_REVISION,
+  FAST_CONTROL_MCP_CATALOG_REVISION,
+  FAST_CONTROL_MCP_LIST_TTL_MS,
   createFastControlMcpAdapter,
 } from '../src/fast-control-mcp-adapter.mjs';
 
@@ -28,6 +31,28 @@ test('MCP adapter lists exactly the five gateway tools with strict top-level sch
     assert.equal(tool.inputSchema.additionalProperties, false);
   }
   assert.equal(listed.authority_effect, false);
+});
+
+test('MCP 2026 catalog is deterministic, privately cacheable, and marks short read tools read-only', () => {
+  const mcp = adapter();
+  const first = mcp.listTools();
+  const second = mcp.listTools();
+  assert.equal(first.protocol_revision, FAST_CONTROL_MCP_PROTOCOL_REVISION);
+  assert.equal(first.protocol_revision, '2026-07-28');
+  assert.equal(first.catalog_revision, FAST_CONTROL_MCP_CATALOG_REVISION);
+  assert.equal(second.catalog_revision, first.catalog_revision);
+  assert.equal(first.ttlMs, FAST_CONTROL_MCP_LIST_TTL_MS);
+  assert.ok(first.ttlMs >= 60_000);
+  assert.equal(first.cacheScope, 'private');
+  assert.equal(first.deterministic_order, true);
+  for (const name of ['context_get', 'dev_query', 'run_status']) {
+    const tool = first.tools.find((row) => row.name === name);
+    assert.equal(tool.annotations.readOnlyHint, true);
+    assert.equal(tool.annotations.openWorldHint, false);
+    assert.equal(tool.execution.taskSupport, 'forbidden');
+  }
+  assert.equal(first.tools.find((row) => row.name === 'run_submit').annotations.idempotentHint, true);
+  assert.equal(first.tools.find((row) => row.name === 'emergency_stop').annotations.idempotentHint, true);
 });
 
 test('dev_query MCP schema is bounded and exposes only development evidence domains', () => {
