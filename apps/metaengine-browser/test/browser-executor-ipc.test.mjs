@@ -12,7 +12,10 @@ import {
   createBrowserExecutorServer,
 } from '../src/browser-executor-ipc.mjs';
 
-async function fixture(t) {
+const COMMAND_ID = '123e4567-e89b-42d3-a456-426614174000';
+const TAB_ID = 'tab_123e4567-e89b-42d3-a456-426614174001';
+
+async function fixture(t, { effectBindingPrepare = null } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'metaengine-browser-executor-'));
   const endpoint = browserExecutorEndpoint({ userDataPath: root });
   const sessionKey = createHostAgentSessionKey();
@@ -23,6 +26,9 @@ async function fixture(t) {
     browserStatus: async (payload) => { calls.push(['status', payload]); return { ready: true, authority_effect: false }; },
     browserPlanExecute: async (payload) => { calls.push(['execute', payload]); return { status: 'CONFIRMED', plan_id: payload.plan_id, authority_effect: true }; },
     browserPlanCancel: async (payload) => { calls.push(['cancel', payload]); return { status: 'CANCEL_REQUESTED', plan_id: payload.plan_id, authority_effect: false }; },
+    ...(effectBindingPrepare ? {
+      effectBindingPrepare: async (payload) => { calls.push(['prepare', payload]); return effectBindingPrepare(payload); },
+    } : {}),
   });
   await server.start();
   t.after(async () => {
@@ -47,15 +53,49 @@ test('Host Agent can call only typed Browser status execute and cancel over a pe
   assert.equal(client.snapshot().ipc.connected, true);
   assert.equal(h.server.snapshot().command_leasing, false);
   assert.equal(h.server.snapshot().supervisor_identity, false);
+  assert.equal(h.server.snapshot().effect_binding_preparation, false);
 });
 
-test('authenticated caller cannot use Browser executor endpoint for control development or emergency operations', async (t) => {
+test('effect binding preparation sends only identifiers tab and expiry, not command text', async (t) => {
+  const h = await fixture(t, {
+    effectBindingPrepare: async (payload) => ({
+      command_id: payload.command_id,
+      tab_id: payload.payload.tab_id,
+      process_incarnation_id: '223e4567-e89b-42d3-a456-426614174000',
+      target_id: 'webcontents:42',
+      runtime_observation_id: `obs_${'a'.repeat(32)}`,
+      authority_effect: false,
+    }),
+  });
+  const client = new BrowserExecutorClient({ endpoint: h.endpoint, sessionKey: h.sessionKey });
+  t.after(() => client.close());
+  const result = await client.prepareEffectBinding({
+    command_id: COMMAND_ID,
+    action: 'SEMANTIC_TYPE',
+    platform: 'CHATGPT',
+    expires_at: new Date(Date.now() + 60_000).toISOString(),
+    payload: { tab_id: TAB_ID, text: 'do not send this prompt over preparation IPC', selector: 'also omitted' },
+    effect_binding: { should_not_cross: true },
+  });
+  assert.equal(result.command_id, COMMAND_ID);
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0][0], 'prepare');
+  assert.deepEqual(Object.keys(h.calls[0][1]).sort(), ['action', 'command_id', 'expires_at', 'payload', 'platform']);
+  assert.deepEqual(h.calls[0][1].payload, { tab_id: TAB_ID });
+  assert.equal(JSON.stringify(h.calls[0][1]).includes('do not send this prompt'), false);
+  assert.equal(JSON.stringify(h.calls[0][1]).includes('should_not_cross'), false);
+  assert.equal(h.server.snapshot().effect_binding_preparation, true);
+  assert.equal(h.server.snapshot().effect_binding_sealing, false);
+});
+
+test('authenticated caller cannot use Browser executor endpoint for control development emergency or absent preparation operations', async (t) => {
   const h = await fixture(t);
   const generic = new HostAgentClient({ endpoint: h.endpoint, sessionKey: h.sessionKey });
   t.after(() => generic.close());
   await assert.rejects(generic.request('CONTROL_RUN_SUBMIT', { plan: [] }), /op_unhandled:CONTROL_RUN_SUBMIT/);
   await assert.rejects(generic.request('DEV_QUERY', { query: 'secret' }), /op_unhandled:DEV_QUERY/);
   await assert.rejects(generic.request('CONTROL_EMERGENCY_STOP', { action: 'DISARM' }), /op_unhandled:CONTROL_EMERGENCY_STOP/);
+  await assert.rejects(generic.request('BROWSER_EFFECT_BINDING_PREPARE', { command: {} }), /op_unhandled:BROWSER_EFFECT_BINDING_PREPARE/);
   assert.equal(h.calls.length, 0);
 });
 
@@ -74,9 +114,11 @@ test('Browser executor endpoint is deterministic and distinct from Host Agent co
   assert.equal(endpoint.includes('identity-signer-'), false);
 });
 
-test('Browser executor manifest is narrow and has no command lease identity or raw execution surface', () => {
+test('Browser executor manifest is narrow and has no command lease identity sealing or raw execution surface', () => {
   const manifest = browserExecutorIpcManifest();
-  assert.deepEqual(manifest.allowed_ops, ['BROWSER_STATUS', 'BROWSER_PLAN_EXECUTE', 'BROWSER_PLAN_CANCEL']);
+  assert.deepEqual(manifest.allowed_ops, ['BROWSER_STATUS', 'BROWSER_PLAN_EXECUTE', 'BROWSER_PLAN_CANCEL', 'BROWSER_EFFECT_BINDING_PREPARE']);
+  assert.equal(manifest.effect_binding_preparation_payload, 'RUNTIME_IDENTIFIERS_ONLY');
+  assert.equal(manifest.effect_binding_sealing, false);
   assert.equal(manifest.control_ops, false);
   assert.equal(manifest.development_ops, false);
   assert.equal(manifest.command_leasing, false);
