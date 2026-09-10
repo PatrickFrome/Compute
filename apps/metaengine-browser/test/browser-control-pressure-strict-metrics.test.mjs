@@ -172,10 +172,16 @@ test('validated live-cell normalization feeds budget projection without widening
   assert.equal(oversized.mutation_concurrency, 32);
 
   const governor = new BrowserControlPressureGovernor({ recoverySamples: 1 });
-  const observed = governor.observe(healthy({ live_cells: 999 }));
-  assert.equal(observed.live_cells, 512);
-  assert.equal(observed.mutation_concurrency, 32);
-  assert.equal(observed.scheduler_authority, false);
-  assert.equal(observed.execution_authority, false);
-  assert.equal(observed.authority_effect, false);
+  const first = governor.observe(healthy({ live_cells: 999 }));
+  assert.equal(first.live_cells, 512);
+  assert.equal(first.pressure_band, 'YELLOW');
+  assert.equal(first.mutation_concurrency, 16);
+
+  const recovered = governor.observe(healthy({ live_cells: 999 }));
+  assert.equal(recovered.live_cells, 512);
+  assert.equal(recovered.pressure_band, 'GREEN');
+  assert.equal(recovered.mutation_concurrency, 32);
+  assert.equal(recovered.scheduler_authority, false);
+  assert.equal(recovered.execution_authority, false);
+  assert.equal(recovered.authority_effect, false);
 });
