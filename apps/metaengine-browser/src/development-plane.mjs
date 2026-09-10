@@ -1,9 +1,7 @@
-import { randomUUID } from 'node:crypto';
-import path from 'node:path';
-import { utilityProcess } from 'electron';
+import crypto from 'node:crypto';
 
-export const DEVELOPMENT_PLANE_PROTOCOL = 'metaengine.development-plane.v1';
 export const DEVELOPMENT_PLANE_VERSION = '0.5.0';
+export const DEVELOPMENT_PLANE_PROTOCOL = 'metaengine.development-plane.v1';
 export const DEVELOPMENT_PLANE_CAPABILITIES = Object.freeze([
   'HEALTH',
   'CAPABILITIES',
@@ -26,180 +24,220 @@ const PAYLOAD_CAPABILITIES = new Set([
   'VERIFICATION_SANDBOX_PLAN_VERIFY',
   'ADVISORY_EVIDENCE_VERIFY',
 ]);
-const MAX_PAYLOAD_BYTES = 256 * 1024;
-const MAX_TRANSCRIPT = 64;
-const MAX_RESULTS = 16;
+const MAX_REQUEST_PAYLOAD_BYTES = 256 * 1024;
+const DEFAULT_RESTART_BASE_MS = 250;
+const DEFAULT_RESTART_MAX_MS = 10_000;
 
-function payloadBytes(value) {
-  return Buffer.byteLength(JSON.stringify(value), 'utf8');
-}
-
-function isPlainObject(value) {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
-}
-
-function validatePayload(capability, payload) {
-  if (!PAYLOAD_CAPABILITIES.has(capability)) {
-    if (payload !== undefined && payload !== null) throw new Error('development_plane_payload_denied');
-    return null;
-  }
-  if (!isPlainObject(payload)) throw new Error('development_plane_payload_required');
-  if (payloadBytes(payload) > MAX_PAYLOAD_BYTES) throw new Error('development_plane_payload_too_large');
-  return structuredClone(payload);
+function clone(value) { return value == null ? value : structuredClone(value); }
+function plainObject(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
 }
 
 export class DevelopmentPlane {
-  #spawnWorker;
-  #workerPath;
-  #env;
+  #spawn;
+  #clock;
+  #uuid;
   #timeoutMs;
   #restartBaseMs;
   #restartMaxMs;
-  #clock;
-  #uuid;
   #child = null;
   #state = 'STOPPED';
+  #startedAt = null;
+  #lastExitCode = null;
   #pending = new Map();
+  #readyWait = null;
+  #stopWait = null;
+  #shutdownAck = false;
   #restartTimer = null;
   #restartAttempt = 0;
-  #lastExitCode = null;
-  #lastError = null;
-  #startedAt = null;
-  #stopRequested = false;
-  #cooperativeShutdownAck = false;
+  #stopRequested = true;
   #transcript = [];
+  #transcriptTotal = 0;
   #lastResults = new Map();
 
   constructor({
-    spawnWorker = null,
-    workerPath = new URL('./development-plane-worker.cjs', import.meta.url),
-    env = process.env,
-    timeout_ms = 2500,
-    restart_base_ms = 250,
-    restart_max_ms = 5000,
-    clock = Date.now,
-    uuid = randomUUID,
+    spawnWorker,
+    clock = () => Date.now(),
+    uuid = () => crypto.randomUUID(),
+    timeout_ms = 5000,
+    restart_base_ms = DEFAULT_RESTART_BASE_MS,
+    restart_max_ms = DEFAULT_RESTART_MAX_MS,
   } = {}) {
-    this.#workerPath = workerPath;
-    this.#env = env;
-    this.#timeoutMs = Math.max(100, Number(timeout_ms) || 2500);
-    this.#restartBaseMs = Math.max(20, Number(restart_base_ms) || 250);
-    this.#restartMaxMs = Math.max(this.#restartBaseMs, Number(restart_max_ms) || 5000);
+    if (typeof spawnWorker !== 'function') throw new Error('development_plane_spawn_invalid');
+    if (!Number.isSafeInteger(timeout_ms) || timeout_ms < 100 || timeout_ms > 60000) throw new Error('development_plane_timeout_invalid');
+    if (!Number.isSafeInteger(restart_base_ms) || restart_base_ms < 10 || restart_base_ms > 60000) throw new Error('development_plane_restart_base_invalid');
+    if (!Number.isSafeInteger(restart_max_ms) || restart_max_ms < restart_base_ms || restart_max_ms > 300000) throw new Error('development_plane_restart_max_invalid');
+    this.#spawn = spawnWorker;
     this.#clock = clock;
     this.#uuid = uuid;
-    this.#spawnWorker = spawnWorker || (() => utilityProcess.fork(this.#workerPath, [], {
-      env: { ...this.#env, ELECTRON_RUN_AS_NODE: '1' },
-      serviceName: 'METAENGINE Development Plane',
-    }));
+    this.#timeoutMs = timeout_ms;
+    this.#restartBaseMs = restart_base_ms;
+    this.#restartMaxMs = restart_max_ms;
   }
 
   snapshot() {
-    const latest = Object.fromEntries([...this.#lastResults.entries()].map(([key, value]) => [key.toLowerCase(), value]));
-    return {
-      protocol: DEVELOPMENT_PLANE_PROTOCOL,
+    return Object.freeze({
+      schema: 'metaengine.development-plane.snapshot.v1',
       version: DEVELOPMENT_PLANE_VERSION,
+      protocol: DEVELOPMENT_PLANE_PROTOCOL,
       state: this.#state,
-      pid: this.#child?.pid || null,
-      capabilities: [...DEVELOPMENT_PLANE_CAPABILITIES],
-      authority_effect: false,
-      browser_actuation_authority: false,
-      shell_execution_authority: false,
-      arbitrary_eval: false,
-      direct_promote_current: false,
-      verified_shutdown_required: true,
-      cooperative_shutdown: true,
-      cooperative_shutdown_ack: this.#cooperativeShutdownAck,
-      automatic_restart: true,
-      terminal_requires_external_stop: true,
-      external_stop_requested: this.#stopRequested,
-      restart_pending: Boolean(this.#restartTimer),
-      restart_attempt: this.#restartAttempt,
-      last_exit_code: this.#lastExitCode,
-      last_error: this.#lastError,
+      pid: this.#child?.pid ?? null,
       started_at: this.#startedAt,
-      devos_repo_search: true,
-      devos_repo_search_cache: 'HEAD_PLUS_WORKTREE_EVENT_EPOCH',
-      devos_repo_search_worktree_watcher: true,
-      devos_repo_source_cache: 'GIT_EVENT_INVALIDATED',
-      devos_repo_search_warm_source_filesystem_reads: 0,
-      devos_repo_search_arbitrary_path_selection: false,
-      devos_repo_arbitrary_path_read: false,
+      last_exit_code: this.#lastExitCode,
+      capabilities: [...DEVELOPMENT_PLANE_CAPABILITIES],
+      candidate_capsules: true,
+      candidate_capsules_executable: false,
+      candidate_capsule_max_payload_bytes: MAX_REQUEST_PAYLOAD_BYTES,
+      verification_sandbox_planning: true,
+      verification_sandbox_prepare_only: true,
+      verification_sandbox_execution: false,
+      sandbox_backend_bound: false,
       advisory_evidence_verification: true,
       advisory_evidence_network_dispatch: false,
       advisory_evidence_browser_authority: false,
       advisory_evidence_promotion_authority: false,
-      transcript: this.#transcript.map((row) => ({ ...row })),
-      latest,
-    };
+      devos_repo_read_model: clone(this.#lastResults.get('DEVOS_REPO_READ_MODEL') || null),
+      devos_repo_search: true,
+      devos_repo_source_cache: 'GIT_EVENT_INVALIDATED',
+      devos_repo_search_cache: 'HEAD_PLUS_WORKTREE_EVENT_EPOCH',
+      devos_repo_search_worktree_watcher: true,
+      devos_repo_search_warm_source_filesystem_reads: 0,
+      devos_repo_search_arbitrary_path_selection: false,
+      transcript: Object.freeze(this.#transcript.map((row) => Object.freeze({ ...row }))),
+      transcript_total_count: this.#transcriptTotal,
+      last_results: Object.freeze(Object.fromEntries([...this.#lastResults.entries()].map(([key, value]) => [key, clone(value)]))),
+      direct_promote_current: false,
+      arbitrary_eval: false,
+      page_command_authority: false,
+      browser_actuation_authority: false,
+      automatic_restart: true,
+      restart_pending: this.#restartTimer != null,
+      restart_attempt: this.#restartAttempt,
+      restart_backoff_max_ms: this.#restartMaxMs,
+      terminal_requires_external_stop: true,
+      external_stop_requested: this.#stopRequested,
+      verified_shutdown_required: true,
+      cooperative_shutdown: true,
+      authority_effect: false,
+    });
   }
 
-  async start() {
-    this.#stopRequested = false;
-    if (this.#restartTimer) {
-      clearTimeout(this.#restartTimer);
+  #appendTranscript(capability, state, summary = null) {
+    this.#transcriptTotal += 1;
+    this.#transcript.push(Object.freeze({ seq: this.#transcriptTotal, at: new Date(this.#clock()).toISOString(), capability: String(capability || 'UNKNOWN'), state: String(state || 'UNKNOWN'), summary: summary == null ? null : String(summary).slice(0, 800), authority_effect: false }));
+    if (this.#transcript.length > 64) this.#transcript.splice(0, this.#transcript.length - 64);
+  }
+
+  #retainResult(capability, result) {
+    let retained = null;
+    if (capability === 'DEVOS_REPO_READ_MODEL' || capability === 'CANDIDATE_CAPSULE_VERIFY' || capability === 'VERIFICATION_SANDBOX_PLAN_VERIFY' || capability === 'ADVISORY_EVIDENCE_VERIFY') retained = clone(result);
+    if (capability === 'CANDIDATE_CAPSULE_CREATE' && result && typeof result === 'object') retained = { schema: result.schema, candidate_id: result.candidate_id, source: clone(result.source), components: clone(result.components), verification_plan: clone(result.verification_plan), authority_effect: false };
+    if (retained) this.#lastResults.set(capability, retained);
+    const summary = capability === 'DEVOS_REPO_READ_MODEL'
+      ? `${Number(result?.code_file_count || 0)} source files`
+      : capability === 'DEVOS_REPO_SEARCH'
+        ? `${Number(result?.total_hits || 0)} indexed hits`
+        : (result?.candidate_id || result?.evidence_id || result?.schema || 'success');
+    this.#appendTranscript(capability, 'SUCCESS', summary);
+  }
+
+  #clearRestartTimer() {
+    if (this.#restartTimer) clearTimeout(this.#restartTimer);
+    this.#restartTimer = null;
+  }
+
+  #scheduleRestart() {
+    if (this.#stopRequested || this.#restartTimer || this.#child) return false;
+    const exponent = Math.min(this.#restartAttempt, 10);
+    const delay = Math.min(this.#restartMaxMs, this.#restartBaseMs * (2 ** exponent));
+    this.#restartAttempt += 1;
+    this.#state = 'RESTART_PENDING';
+    this.#restartTimer = setTimeout(() => {
       this.#restartTimer = null;
-    }
-    if (this.#child) return this.snapshot();
+      if (this.#stopRequested || this.#child) return;
+      void this.#startChild().catch(() => { this.#scheduleRestart(); });
+    }, delay);
+    this.#restartTimer.unref?.();
+    return true;
+  }
+
+  async #startChild() {
+    if (this.#stopRequested) return this.snapshot();
+    if (this.#state === 'READY') return this.snapshot();
+    if (this.#state === 'STARTING' && this.#readyWait) return this.#readyWait;
+    if (this.#child) throw new Error('development_plane_child_already_present');
+    this.#clearRestartTimer();
     this.#state = 'STARTING';
-    this.#cooperativeShutdownAck = false;
+    this.#shutdownAck = false;
     let child;
     try {
-      child = this.#spawnWorker();
+      child = this.#spawn();
     } catch (error) {
-      this.#lastError = String(error?.message || error);
       this.#state = 'LOST';
       this.#scheduleRestart();
       throw error;
     }
+    if (!child || typeof child.on !== 'function' || typeof child.postMessage !== 'function' || typeof child.kill !== 'function') {
+      this.#state = 'LOST';
+      this.#scheduleRestart();
+      throw new Error('development_plane_child_invalid');
+    }
     this.#child = child;
     child.on('message', (message) => this.#onMessage(child, message));
     child.on('exit', (code) => this.#onExit(child, code));
-    child.on('error', (error) => {
-      if (this.#child !== child) return;
-      this.#lastError = String(error?.message || error);
-    });
-    return new Promise((resolve, reject) => {
+    child.on('error', () => {});
+    this.#readyWait = new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        if (!this.#pending.has('__READY__')) return;
-        this.#pending.delete('__READY__');
-        this.#state = 'LOST';
-        this.#lastError = 'development_plane_ready_timeout';
-        try { child.kill(); } catch {}
-        this.#scheduleRestart();
-        reject(new Error('development_plane_ready_timeout'));
+        if (this.#state === 'STARTING' && this.#child === child) {
+          this.#state = 'LOST';
+          try { child.kill(); } catch {}
+          this.#scheduleRestart();
+          reject(new Error('development_plane_ready_timeout'));
+        }
       }, this.#timeoutMs);
-      this.#pending.set('__READY__', {
-        capability: 'READY',
-        resolve: (value) => { clearTimeout(timer); resolve(value); },
-        reject: (error) => { clearTimeout(timer); reject(error); },
-      });
-    });
+      this.#pending.set('__READY__', { resolve: (value) => { clearTimeout(timer); resolve(value); }, reject: (error) => { clearTimeout(timer); reject(error); } });
+    }).finally(() => { this.#readyWait = null; });
+    return this.#readyWait;
   }
 
-  async request(capability, payload = undefined) {
-    const name = String(capability || '').toUpperCase();
-    if (!DEVELOPMENT_PLANE_CAPABILITIES.includes(name)) throw new Error('development_plane_capability_denied');
+  async start() {
+    this.#stopRequested = false;
+    return this.#startChild();
+  }
+
+  async request(capability, payload = null) {
+    const cap = String(capability || '').toUpperCase();
+    if (!DEVELOPMENT_PLANE_CAPABILITIES.includes(cap)) throw new Error('development_plane_capability_denied');
     if (this.#state !== 'READY' || !this.#child) throw new Error('development_plane_not_ready');
-    const safePayload = validatePayload(name, payload);
-    const requestId = this.#uuid();
+    let normalizedPayload = null;
+    if (PAYLOAD_CAPABILITIES.has(cap)) {
+      if (!plainObject(payload)) throw new Error('development_plane_payload_required');
+      const encoded = JSON.stringify(payload);
+      if (Buffer.byteLength(encoded, 'utf8') > MAX_REQUEST_PAYLOAD_BYTES) throw new Error('development_plane_payload_too_large');
+      normalizedPayload = clone(payload);
+    } else if (payload !== null && payload !== undefined) {
+      throw new Error('development_plane_payload_denied');
+    }
+    const requestId = `req_${String(this.#uuid()).replace(/[^a-z0-9-]/gi, '').toLowerCase()}`;
+    this.#appendTranscript(cap, 'REQUESTED');
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        if (!this.#pending.has(requestId)) return;
         this.#pending.delete(requestId);
-        this.#appendTranscript(name, 'TIMEOUT', null);
         reject(new Error('development_plane_request_timeout'));
       }, this.#timeoutMs);
       this.#pending.set(requestId, {
-        capability: name,
-        resolve: (value) => { clearTimeout(timer); resolve(value); },
+        capability: cap,
+        resolve: (value) => { clearTimeout(timer); resolve(clone(value)); },
         reject: (error) => { clearTimeout(timer); reject(error); },
       });
       this.#child.postMessage({
         protocol: DEVELOPMENT_PLANE_PROTOCOL,
         type: 'REQUEST',
         request_id: requestId,
-        capability: name,
-        payload: safePayload,
+        capability: cap,
+        payload: normalizedPayload,
         authority_effect: false,
       });
     });
@@ -207,96 +245,88 @@ export class DevelopmentPlane {
 
   stop() {
     this.#stopRequested = true;
-    if (this.#restartTimer) {
-      clearTimeout(this.#restartTimer);
-      this.#restartTimer = null;
-    }
-    const child = this.#child;
-    if (!child) {
+    this.#clearRestartTimer();
+    if (!this.#child) {
       this.#state = 'STOPPED';
       return false;
     }
-    this.#state = 'STOPPING';
-    try { child.kill(); } catch {}
-    return true;
-  }
-
-  async stopAndWait(timeoutMs = 2000) {
-    this.#stopRequested = true;
-    if (this.#restartTimer) {
-      clearTimeout(this.#restartTimer);
-      this.#restartTimer = null;
-    }
     const child = this.#child;
-    if (!child) {
-      this.#state = 'STOPPED';
-      return { ok: true, state: 'STOPPED', last_exit_code: this.#lastExitCode, cooperative_shutdown_ack: this.#cooperativeShutdownAck };
-    }
     this.#state = 'STOPPING';
-    const wait = new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('development_plane_shutdown_timeout')), Math.max(50, Number(timeoutMs) || 2000));
-      const onExit = () => {
+    const killed = child.kill();
+    if (!killed) this.#state = 'LOST';
+    return killed;
+  }
+
+  async stopAndWait(timeout_ms = this.#timeoutMs) {
+    if (!Number.isSafeInteger(timeout_ms) || timeout_ms < 100 || timeout_ms > 60000) throw new Error('development_plane_stop_timeout_invalid');
+    this.#stopRequested = true;
+    this.#clearRestartTimer();
+    if (!this.#child) {
+      this.#state = 'STOPPED';
+      return Object.freeze({ ok: true, state: 'STOPPED', last_exit_code: this.#lastExitCode, already_stopped: true, cooperative_shutdown_ack: this.#shutdownAck, authority_effect: false });
+    }
+    if (this.#stopWait) return this.#stopWait;
+    const child = this.#child;
+    this.#state = 'STOPPING';
+    this.#shutdownAck = false;
+    this.#stopWait = new Promise((resolve, reject) => {
+      let settled = false;
+      let fallbackTimer = null;
+      const finish = (fn, value) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
-        child.off('exit', onExit);
-        resolve();
+        if (fallbackTimer) clearTimeout(fallbackTimer);
+        child.off?.('exit', onExit);
+        fn(value);
       };
+      const onExit = (code) => finish(resolve, Object.freeze({
+        ok: true,
+        state: 'STOPPED',
+        last_exit_code: Number.isInteger(code) ? code : this.#lastExitCode,
+        already_stopped: false,
+        cooperative_shutdown_ack: this.#shutdownAck,
+        authority_effect: false,
+      }));
+      const timer = setTimeout(() => {
+        this.#state = 'LOST';
+        try { child.kill(); } catch {}
+        finish(reject, new Error('development_plane_stop_timeout'));
+      }, timeout_ms);
       child.on('exit', onExit);
-    });
-    try {
-      child.postMessage({ protocol: DEVELOPMENT_PLANE_PROTOCOL, type: 'CONTROL', control: 'SHUTDOWN', authority_effect: false });
-    } catch {
-      try { child.kill(); } catch {}
-    }
-    await wait;
-    return { ok: true, state: this.#state, last_exit_code: this.#lastExitCode, cooperative_shutdown_ack: this.#cooperativeShutdownAck };
-  }
-
-  #appendTranscript(capability, status, detail) {
-    this.#transcript.push({ at: new Date(this.#clock()).toISOString(), capability, status, detail });
-    if (this.#transcript.length > MAX_TRANSCRIPT) this.#transcript.splice(0, this.#transcript.length - MAX_TRANSCRIPT);
-  }
-
-  #retainResult(capability, result) {
-    this.#lastResults.set(capability, structuredClone(result));
-    if (this.#lastResults.size > MAX_RESULTS) {
-      const first = this.#lastResults.keys().next().value;
-      this.#lastResults.delete(first);
-    }
-    this.#appendTranscript(capability, 'OK', null);
-  }
-
-  #scheduleRestart() {
-    if (this.#stopRequested || this.#restartTimer) return;
-    const delay = Math.min(this.#restartMaxMs, this.#restartBaseMs * (2 ** this.#restartAttempt));
-    this.#restartAttempt += 1;
-    this.#state = 'RESTART_PENDING';
-    this.#restartTimer = setTimeout(async () => {
-      this.#restartTimer = null;
-      if (this.#stopRequested || this.#child) return;
       try {
-        await this.start();
+        child.postMessage({
+          protocol: DEVELOPMENT_PLANE_PROTOCOL,
+          type: 'CONTROL',
+          control: 'SHUTDOWN',
+          authority_effect: false,
+        });
       } catch {
-        this.#scheduleRestart();
+        try { child.kill(); } catch {}
       }
-    }, delay);
+      fallbackTimer = setTimeout(() => {
+        if (settled) return;
+        try { child.kill(); } catch {}
+      }, Math.min(1500, Math.max(100, Math.floor(timeout_ms / 2))));
+    }).finally(() => { this.#stopWait = null; });
+    return this.#stopWait;
   }
 
   #onMessage(child, message) {
     if (this.#child !== child || !message || message.protocol !== DEVELOPMENT_PLANE_PROTOCOL) return;
     if (message.type === 'SHUTDOWN_ACK') {
-      if (message.version === DEVELOPMENT_PLANE_VERSION && message.authority_effect === false) this.#cooperativeShutdownAck = true;
+      if (this.#state === 'STOPPING') this.#shutdownAck = true;
       return;
     }
     if (message.type === 'READY') {
-      const exactCaps = Array.isArray(message.capabilities)
-        && message.capabilities.length === DEVELOPMENT_PLANE_CAPABILITIES.length
-        && DEVELOPMENT_PLANE_CAPABILITIES.every((capability) => message.capabilities.includes(capability));
-      if (message.version !== DEVELOPMENT_PLANE_VERSION || !exactCaps) {
-        this.#lastError = 'development_plane_capability_handshake_mismatch';
-        this.#state = 'LOST';
-        try { child.kill(); } catch {}
+      if (this.#state !== 'STARTING') return;
+      const advertised = Array.isArray(message.capabilities) ? [...message.capabilities].sort() : [];
+      const expected = [...DEVELOPMENT_PLANE_CAPABILITIES].sort();
+      if (message.version !== DEVELOPMENT_PLANE_VERSION || advertised.length !== expected.length || advertised.some((x, i) => x !== expected[i])) {
         const waiter = this.#pending.get('__READY__');
         this.#pending.delete('__READY__');
+        this.#state = 'LOST';
+        try { child.kill(); } catch {}
         waiter?.reject(new Error('development_plane_capability_handshake_mismatch'));
         this.#scheduleRestart();
         return;
@@ -330,7 +360,7 @@ export class DevelopmentPlane {
     this.#state = planned ? 'STOPPED' : 'LOST';
     for (const [id, pending] of this.#pending) {
       this.#pending.delete(id);
-      pending.reject?.(new Error(planned ? 'development_plane_stopped' : 'development_plane_process_lost'));
+      pending.reject?.(new Error(planned ? 'development_plane_stopped' : 'development_plane_lost'));
     }
     if (!planned) this.#scheduleRestart();
   }
