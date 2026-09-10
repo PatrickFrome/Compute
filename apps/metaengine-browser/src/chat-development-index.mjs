@@ -24,13 +24,25 @@ const bytes = (value) => Buffer.byteLength(JSON.stringify(value), 'utf8');
 const clip = (value, max) => value == null ? null : String(value).slice(0, max);
 const plainObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
 
-function tokenize(value) {
-  return Array.from(new Set(
-    String(value || '')
-      .normalize('NFKC')
-      .toLowerCase()
-      .match(/[\p{L}\p{N}][\p{L}\p{N}._/-]{1,79}/gu) || [],
-  )).slice(0, 128);
+function tokenize(value, maxTokens = 256) {
+  const matches = String(value || '')
+    .normalize('NFKC')
+    .match(/[\p{L}\p{N}][\p{L}\p{N}._/-]{1,79}/gu) || [];
+  const out = [];
+  const seen = new Set();
+  const add = (raw) => {
+    const token = String(raw || '').toLowerCase().replace(/^[._/-]+|[._/-]+$/g, '');
+    if (token.length < 2 || seen.has(token)) return;
+    seen.add(token);
+    out.push(token);
+  };
+  for (const raw of matches) {
+    add(raw);
+    const expanded = raw.replace(/([\p{Ll}\p{N}])([\p{Lu}])/gu, '$1 $2');
+    for (const part of expanded.split(/[\s._/-]+/u)) add(part);
+    if (out.length >= maxTokens) break;
+  }
+  return out.slice(0, maxTokens);
 }
 
 function normalizeRecord(record, index) {
@@ -148,7 +160,7 @@ export class ChatDevelopmentIndex {
     if (allowedKinds && (allowedKinds.size < 1 || allowedKinds.size > ALLOWED_KINDS.size || [...allowedKinds].some((kind) => !ALLOWED_KINDS.has(kind)))) {
       throw new Error('chat_dev_query_kinds_invalid');
     }
-    const terms = tokenize(queryText).slice(0, 12);
+    const terms = tokenize(queryText, 12);
     if (terms.length < 1) throw new Error('chat_dev_query_terms_invalid');
     const queryRevision = `q:${sha256(JSON.stringify({ revision: this.#revision, terms, kinds: allowedKinds ? [...allowedKinds].sort() : null }))}`;
     if (if_none_match && String(if_none_match) === queryRevision) {
