@@ -50,12 +50,24 @@ function exactSource(source) {
 }
 
 function tokenize(value, maxTokens = MAX_FILE_TOKENS) {
-  return Array.from(new Set(
-    String(value || '')
-      .normalize('NFKC')
-      .toLowerCase()
-      .match(/[\p{L}\p{N}][\p{L}\p{N}._/-]{1,79}/gu) || [],
-  )).slice(0, maxTokens);
+  const matches = String(value || '')
+    .normalize('NFKC')
+    .match(/[\p{L}\p{N}][\p{L}\p{N}._/-]{1,79}/gu) || [];
+  const out = [];
+  const seen = new Set();
+  const add = (raw) => {
+    const token = String(raw || '').toLowerCase().replace(/^[._/-]+|[._/-]+$/g, '');
+    if (token.length < 2 || seen.has(token)) return;
+    seen.add(token);
+    out.push(token);
+  };
+  for (const raw of matches) {
+    add(raw);
+    const expanded = raw.replace(/([\p{Ll}\p{N}])([\p{Lu}])/gu, '$1 $2');
+    for (const part of expanded.split(/[\s._/-]+/u)) add(part);
+    if (out.length >= maxTokens) break;
+  }
+  return out.slice(0, maxTokens);
 }
 
 function validateRelative(relative) {
