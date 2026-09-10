@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { CHAT_DEVELOPMENT_PROVIDER_SCHEMA } from './chat-development-query-provider.mjs';
 
 export const CHAT_DEVELOPMENT_CURSOR_SCHEMA = 'metaengine.chat-development-cursor.v1';
 export const CHAT_DEVELOPMENT_CURSOR_MAX_BYTES = 4 * 1024;
@@ -43,11 +44,12 @@ export function isContinuationIntent(value) {
 
 function sanitizeOrientation(value) {
   if (!value || typeof value !== 'object' || value.authority_effect === true) return null;
+  const prValue = value.pr == null ? null : Number(value.pr);
   return Object.freeze({
     revision: clip(value.revision, 96),
     head_sha: clip(value.head_sha, 64),
     branch: clip(value.branch, 240),
-    pr: Number.isSafeInteger(Number(value.pr)) ? Number(value.pr) : null,
+    pr: prValue != null && Number.isSafeInteger(prValue) ? prValue : null,
     ci_state: clip(value.ci_state, 24),
     ci_failed: Number(value.ci_failed || 0),
     ci_pending: Number(value.ci_pending || 0),
@@ -138,9 +140,10 @@ export class ChatDevelopmentCursor {
     this.#hits += 1;
     const cursor = structuredClone(this.#cursor);
     const out = {
-      schema: 'metaengine.chat-development-query.v1',
+      schema: CHAT_DEVELOPMENT_PROVIDER_SCHEMA,
       status: 'OK',
       query_revision: cursor.cursor_revision,
+      source_query_revision: cursor.source_query_revision,
       cursor_hit: true,
       cursor_revision: cursor.cursor_revision,
       cursor_source_query: cursor.source_query,
