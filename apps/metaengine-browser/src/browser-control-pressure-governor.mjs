@@ -15,10 +15,13 @@ const BAND_BUDGETS = Object.freeze({
   RED: Object.freeze({ read_concurrency: 8, mutation_concurrency: 2, resource_sample_ms: 1000 }),
 });
 
-function integer(value, fallback, min, max) {
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed)) return fallback;
-  return Math.max(min, Math.min(max, parsed));
+function recoverySampleCount(value) {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1 || value > 20) {
+    const error = new TypeError('invalid_recovery_samples');
+    error.code = 'invalid_recovery_samples';
+    throw error;
+  }
+  return value;
 }
 
 function numericSignal(sample, key, { max = null } = {}) {
@@ -134,7 +137,7 @@ export class BrowserControlPressureGovernor {
   #lastInvalid = [];
 
   constructor({ recoverySamples = 3 } = {}) {
-    this.#recoverySamples = integer(recoverySamples, 3, 1, 20);
+    this.#recoverySamples = recoverySampleCount(recoverySamples);
   }
 
   observe(sample = {}) {
