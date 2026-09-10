@@ -15,12 +15,13 @@ const plain = (value) => value && typeof value === 'object' && !Array.isArray(va
 
 function sourceShape(source) {
   const value = plain(source) ? source : {};
+  const prValue = value.pr == null ? null : Number(value.pr);
   return Object.freeze({
     repository: clip(value.repository, 200),
     branch: clip(value.branch ?? value.ref, 240),
     head_sha: clip(value.head_sha ?? value.head, 64),
     base_sha: clip(value.base_sha, 64),
-    pr: Number.isSafeInteger(Number(value.pr)) ? Number(value.pr) : null,
+    pr: Number.isSafeInteger(prValue) && prValue > 0 ? prValue : null,
     dirty: typeof value.dirty === 'boolean' ? value.dirty : null,
     authority_effect: false,
   });
@@ -100,20 +101,24 @@ function focusOf(ci, blockers, nextActions) {
 function fit(value) {
   const out = structuredClone(value);
   const arrays = ['hotspots', 'changes', 'checkpoints', 'next_actions', 'blockers'];
-  while (bytes(out) > CHAT_DEVELOPMENT_CAPSULE_MAX_BYTES) {
+  const measuredBytes = () => bytes({ ...out, bytes: 0 });
+  while (measuredBytes() > CHAT_DEVELOPMENT_CAPSULE_MAX_BYTES) {
     let changed = false;
     for (const key of arrays) {
       if (Array.isArray(out[key]) && out[key].length > 1) {
         out[key].pop();
         changed = true;
-        if (bytes(out) <= CHAT_DEVELOPMENT_CAPSULE_MAX_BYTES) break;
+        if (measuredBytes() <= CHAT_DEVELOPMENT_CAPSULE_MAX_BYTES) break;
       }
     }
     if (!changed && out.ci?.pending_runs?.length) { out.ci.pending_runs.pop(); changed = true; }
     if (!changed && out.ci?.failures?.length > 1) { out.ci.failures.pop(); changed = true; }
-    if (!changed) throw new Error(`chat_dev_capsule_budget_exceeded:${bytes(out)}`);
+    if (!changed) throw new Error(`chat_dev_capsule_budget_exceeded:${measuredBytes()}`);
   }
+  out.bytes = measuredBytes();
+  // Account for the actual decimal width of the final byte count itself.
   out.bytes = bytes(out);
+  if (out.bytes > CHAT_DEVELOPMENT_CAPSULE_MAX_BYTES) throw new Error(`chat_dev_capsule_budget_exceeded:${out.bytes}`);
   return Object.freeze(out);
 }
 
