@@ -18,6 +18,7 @@ const BAND_BUDGETS = Object.freeze({
 
 const MISSING_SIGNAL = Symbol('missing_pressure_signal');
 const INVALID_SIGNAL = Symbol('invalid_pressure_signal');
+const EMPTY_SIGNALS = Object.freeze([]);
 
 function recoverySampleCount(value) {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1 || value > 20) {
@@ -124,8 +125,8 @@ export class BrowserControlPressureGovernor {
   #betterSamples = 0;
   #recoverySamples;
   #lastSampleAt = null;
-  #lastReasons = [];
-  #lastInvalid = [];
+  #lastReasons = EMPTY_SIGNALS;
+  #lastInvalid = EMPTY_SIGNALS;
 
   constructor({ recoverySamples = 3 } = {}) {
     this.#recoverySamples = recoverySampleCount(recoverySamples);
@@ -163,14 +164,14 @@ export class BrowserControlPressureGovernor {
     const normalizedLiveCells = liveSignalInvalid ? 0 : liveSignal;
     const invalidSignals = liveSignalInvalid && !this.#lastInvalid.includes('live_cells')
       ? Object.freeze([...this.#lastInvalid, 'live_cells'])
-      : Object.freeze([...this.#lastInvalid]);
+      : this.#lastInvalid;
     return Object.freeze({
       schema: BROWSER_CONTROL_PRESSURE_GOVERNOR_SCHEMA,
       pressure_band: liveSignalInvalid ? 'RED' : this.#band,
       better_samples_toward_recovery: this.#betterSamples,
       recovery_samples_required: this.#recoverySamples,
       last_sample_at: this.#lastSampleAt,
-      missing_signals: Object.freeze([...this.#lastReasons]),
+      missing_signals: this.#lastReasons,
       invalid_signals: invalidSignals,
       ...budgetForValidatedLiveCells(liveSignalInvalid ? 'RED' : this.#band, normalizedLiveCells),
       live_cells: normalizedLiveCells,
