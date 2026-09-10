@@ -42,7 +42,7 @@ function livenessCount(sample, key) {
   return raw;
 }
 
-function liveCellCount(value, { present = true } = {}) {
+function liveCellCount(value, present = true) {
   if (!present) return 1;
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) return INVALID_SIGNAL;
   return Math.min(512, value);
@@ -87,9 +87,10 @@ function pressureBand(sample = {}) {
 
   const unresponsive = livenessCount(sample, 'unresponsive_cells');
   const recentCrashes = livenessCount(sample, 'recent_crashes');
-  const liveCells = liveCellCount(sample.live_cells, {
-    present: Object.prototype.hasOwnProperty.call(sample, 'live_cells'),
-  });
+  const liveCells = liveCellCount(
+    sample.live_cells,
+    Object.prototype.hasOwnProperty.call(sample, 'live_cells'),
+  );
   if (unresponsive === INVALID_SIGNAL) invalid.push('unresponsive_cells');
   if (recentCrashes === INVALID_SIGNAL) invalid.push('recent_crashes');
   if (liveCells === INVALID_SIGNAL) invalid.push('live_cells');
@@ -132,8 +133,8 @@ export class BrowserControlPressureGovernor {
 
   observe(sample = {}) {
     const evaluated = pressureBand(sample);
-    const currentIndex = BAND_ORDER.indexOf(this.#band);
-    const evaluatedIndex = BAND_ORDER.indexOf(evaluated.band);
+    const currentIndex = BAND_RANK[this.#band];
+    const evaluatedIndex = BAND_RANK[evaluated.band];
 
     if (evaluatedIndex > currentIndex) {
       // Degrade immediately. Protect liveness before chasing throughput.
