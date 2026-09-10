@@ -1,4 +1,5 @@
 import { ChatDevelopmentControlState } from './chat-development-control-state.mjs';
+import { ChatDevelopmentCursor, isContinuationIntent } from './chat-development-cursor.mjs';
 import { ChatDevelopmentQueryProvider, CHAT_DEVELOPMENT_PROVIDER_SCHEMA } from './chat-development-query-provider.mjs';
 import { FastControlGatewayCore } from './fast-control-gateway-core.mjs';
 import { createFastControlMcpAdapter } from './fast-control-mcp-adapter.mjs';
@@ -25,6 +26,15 @@ function compactOrientation(capsule) {
   });
 }
 
+function continuationFallbackQuery(orientation) {
+  const parts = [
+    orientation?.focus_title,
+    orientation?.focus_kind && orientation.focus_kind !== 'NONE' ? orientation.focus_kind.replaceAll('_', ' ') : null,
+    'next action',
+  ].filter(Boolean);
+  return parts.length ? parts.join(' ') : 'current blocker next action';
+}
+
 function normalizeQueryKey(input, stateRevision) {
   const query = String(input?.query || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
   const kinds = Array.isArray(input?.kinds)
@@ -39,17 +49,17 @@ function normalizeQueryKey(input, stateRevision) {
   });
 }
 
-function notModified(queryRevision) {
+function notModified(queryRevision, extra = {}) {
   const out = {
     schema: CHAT_DEVELOPMENT_PROVIDER_SCHEMA,
     status: 'NOT_MODIFIED',
     query_revision: queryRevision,
     warm_cache: true,
+    ...extra,
     authority_effect: false,
     truncated: false,
     bytes: 0,
   };
-  out.bytes = jsonBytes(out);
   out.bytes = jsonBytes(out);
   return Object.freeze(out);
 }
@@ -57,6 +67,7 @@ function notModified(queryRevision) {
 export class ChatFastControlRuntime {
   #controlState;
   #queryProvider;
+  #developmentCursor = new ChatDevelopmentCursor();
   #gateway;
   #mcp;
   #getBrowserState;
@@ -65,6 +76,7 @@ export class ChatFastControlRuntime {
   #devQueryCacheHits = 0;
   #devQueryCacheMisses = 0;
   #devQueryNotModifiedHits = 0;
+  #continuationFallbacks = 0;
 
   constructor({
     developmentPlane,
@@ -99,25 +111,47 @@ export class ChatFastControlRuntime {
 
   async #devQuery(input) {
     const stateRevision = this.#controlState.snapshot().revision;
-    const key = normalizeQueryKey(input, stateRevision);
+    const continuation = isContinuationIntent(input?.query);
+    if (continuation) {
+      const cursorResult = this.#developmentCursor.resolve({ state_revision: stateRevision, query: input.query });
+      if (cursorResult) {
+        if (input?.if_none_match && String(input.if_none_match) === cursorResult.query_revision) {
+          this.#devQueryNotModifiedHits += 1;
+          return notModified(cursorResult.query_revision, { cursor_hit: true });
+        }
+        return cursorResult;
+      }
+    }
+
+    const orientation = compactOrientation(this.#controlState.capsule());
+    const effectiveInput = continuation
+      ? Object.freeze({ ...input, query: continuationFallbackQuery(orientation) })
+      : input;
+    if (continuation) this.#continuationFallbacks += 1;
+
+    const key = normalizeQueryKey(effectiveInput, stateRevision);
     const cached = this.#devQueryCache.get(key);
     if (cached) {
       this.#devQueryCache.delete(key);
       this.#devQueryCache.set(key, cached);
       this.#devQueryCacheHits += 1;
+      this.#developmentCursor.capture({ state_revision: stateRevision, query: effectiveInput.query, result: cached.result });
       if (input?.if_none_match && String(input.if_none_match) === cached.query_revision) {
         this.#devQueryNotModifiedHits += 1;
-        return notModified(cached.query_revision);
+        return notModified(cached.query_revision, continuation ? { continuation_fallback: true } : {});
       }
-      return Object.freeze(structuredClone(cached.result));
+      const result = structuredClone(cached.result);
+      if (continuation) result.continuation_fallback = true;
+      return Object.freeze(result);
     }
 
     this.#devQueryCacheMisses += 1;
     const result = await this.#queryProvider.query({
-      ...input,
-      orientation: compactOrientation(this.#controlState.capsule()),
+      ...effectiveInput,
+      orientation,
     });
     if (result?.status === 'OK' && result?.query_revision) {
+      this.#developmentCursor.capture({ state_revision: stateRevision, query: effectiveInput.query, result });
       this.#devQueryCache.set(key, Object.freeze({
         query_revision: String(result.query_revision),
         result: structuredClone(result),
@@ -126,7 +160,8 @@ export class ChatFastControlRuntime {
         this.#devQueryCache.delete(this.#devQueryCache.keys().next().value);
       }
     }
-    return result;
+    if (!continuation) return result;
+    return Object.freeze({ ...structuredClone(result), continuation_fallback: true });
   }
 
   setSource(source, now) { return this.#controlState.setSource(source, now); }
@@ -141,13 +176,16 @@ export class ChatFastControlRuntime {
   invoke(name, input) { return this.#gateway.invoke(name, input); }
 
   snapshot() {
+    const controlState = this.#controlState.snapshot();
     return Object.freeze({
       schema: CHAT_FAST_CONTROL_RUNTIME_SCHEMA,
-      control_state: this.#controlState.snapshot(),
+      control_state: controlState,
       query_provider: this.#queryProvider.snapshot(),
+      development_cursor: this.#developmentCursor.snapshot(controlState.revision),
       tools: this.#gateway.manifest().tools.map((row) => row.name),
       browser_state_reads: this.#browserStateReads,
       dev_query_includes_orientation: true,
+      continuation_fallbacks: this.#continuationFallbacks,
       dev_query_warm_cache: {
         entries: this.#devQueryCache.size,
         max_entries: CHAT_FAST_CONTROL_QUERY_CACHE_MAX,
