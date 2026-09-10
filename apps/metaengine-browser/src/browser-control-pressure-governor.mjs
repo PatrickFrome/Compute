@@ -15,6 +15,9 @@ const BAND_BUDGETS = Object.freeze({
   RED: Object.freeze({ read_concurrency: 8, mutation_concurrency: 2, resource_sample_ms: 1000 }),
 });
 
+const MISSING_SIGNAL = Symbol('missing_pressure_signal');
+const INVALID_SIGNAL = Symbol('invalid_pressure_signal');
+
 function recoverySampleCount(value) {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1 || value > 20) {
     const error = new TypeError('invalid_recovery_samples');
@@ -25,34 +28,23 @@ function recoverySampleCount(value) {
 }
 
 function numericSignal(sample, key, { max = null } = {}) {
-  if (!Object.prototype.hasOwnProperty.call(sample, key)) {
-    return Object.freeze({ value: null, present: false, invalid: false });
-  }
+  if (!Object.prototype.hasOwnProperty.call(sample, key)) return MISSING_SIGNAL;
   const raw = sample[key];
-  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0) {
-    return Object.freeze({ value: null, present: true, invalid: true });
-  }
-  const value = max == null ? raw : Math.min(max, raw);
-  return Object.freeze({ value, present: true, invalid: false });
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0) return INVALID_SIGNAL;
+  return max == null ? raw : Math.min(max, raw);
 }
 
 function livenessCount(sample, key) {
-  if (!Object.prototype.hasOwnProperty.call(sample, key)) {
-    return Object.freeze({ value: 0, invalid: false });
-  }
+  if (!Object.prototype.hasOwnProperty.call(sample, key)) return 0;
   const raw = sample[key];
-  if (typeof raw !== 'number' || !Number.isSafeInteger(raw) || raw < 0) {
-    return Object.freeze({ value: 0, invalid: true });
-  }
-  return Object.freeze({ value: raw, invalid: false });
+  if (typeof raw !== 'number' || !Number.isSafeInteger(raw) || raw < 0) return INVALID_SIGNAL;
+  return raw;
 }
 
 function liveCellCount(value, { present = true } = {}) {
-  if (!present) return Object.freeze({ value: 1, invalid: false });
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
-    return Object.freeze({ value: 0, invalid: true });
-  }
-  return Object.freeze({ value: Math.min(512, value), invalid: false });
+  if (!present) return 1;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) return INVALID_SIGNAL;
+  return Math.min(512, value);
 }
 
 function higherBand(a, b) {
@@ -73,17 +65,17 @@ function pressureBand(sample = {}) {
   const invalid = [];
 
   const applyMetric = (key, thresholds, { required = false, max = null } = {}) => {
-    const signal = numericSignal(sample, key, { max });
-    if (!signal.present) {
+    const value = numericSignal(sample, key, { max });
+    if (value === MISSING_SIGNAL) {
       if (required) missing.push(key);
       return;
     }
-    if (signal.invalid) {
+    if (value === INVALID_SIGNAL) {
       invalid.push(key);
       band = 'RED';
       return;
     }
-    band = higherBand(band, metricBand({ value: signal.value, ...thresholds }));
+    band = higherBand(band, metricBand({ value, ...thresholds }));
   };
 
   applyMetric('event_loop_utilization', { yellow: 0.60, orange: 0.75, red: 0.88 }, { required: true, max: 1 });
@@ -99,12 +91,12 @@ function pressureBand(sample = {}) {
   const liveCells = liveCellCount(sample.live_cells, {
     present: Object.prototype.hasOwnProperty.call(sample, 'live_cells'),
   });
-  if (unresponsive.invalid) invalid.push('unresponsive_cells');
-  if (recentCrashes.invalid) invalid.push('recent_crashes');
-  if (liveCells.invalid) invalid.push('live_cells');
+  if (unresponsive === INVALID_SIGNAL) invalid.push('unresponsive_cells');
+  if (recentCrashes === INVALID_SIGNAL) invalid.push('recent_crashes');
+  if (liveCells === INVALID_SIGNAL) invalid.push('live_cells');
   if (invalid.length > 0) band = 'RED';
-  else if (unresponsive.value > 0 || recentCrashes.value >= 2) band = 'RED';
-  else if (recentCrashes.value === 1) band = higherBand(band, 'ORANGE');
+  else if (unresponsive > 0 || recentCrashes >= 2) band = 'RED';
+  else if (recentCrashes === 1) band = higherBand(band, 'ORANGE');
 
   // Missing both event-loop signals means we cannot prove a GREEN hot path.
   if (missing.length === 2) band = higherBand(band, 'ORANGE');
@@ -114,7 +106,7 @@ function pressureBand(sample = {}) {
     band,
     missing: Object.freeze(missing),
     invalid: Object.freeze(invalid),
-    liveCells: liveCells.value,
+    liveCells: liveCells === INVALID_SIGNAL ? 0 : liveCells,
   });
 }
 
@@ -167,19 +159,20 @@ export class BrowserControlPressureGovernor {
 
   snapshot({ liveCells = 1 } = {}) {
     const liveSignal = liveCellCount(liveCells);
-    const normalizedLiveCells = liveSignal.value;
-    const invalidSignals = liveSignal.invalid && !this.#lastInvalid.includes('live_cells')
+    const liveSignalInvalid = liveSignal === INVALID_SIGNAL;
+    const normalizedLiveCells = liveSignalInvalid ? 0 : liveSignal;
+    const invalidSignals = liveSignalInvalid && !this.#lastInvalid.includes('live_cells')
       ? Object.freeze([...this.#lastInvalid, 'live_cells'])
       : Object.freeze([...this.#lastInvalid]);
     return Object.freeze({
       schema: BROWSER_CONTROL_PRESSURE_GOVERNOR_SCHEMA,
-      pressure_band: liveSignal.invalid ? 'RED' : this.#band,
+      pressure_band: liveSignalInvalid ? 'RED' : this.#band,
       better_samples_toward_recovery: this.#betterSamples,
       recovery_samples_required: this.#recoverySamples,
       last_sample_at: this.#lastSampleAt,
       missing_signals: Object.freeze([...this.#lastReasons]),
       invalid_signals: invalidSignals,
-      ...budgetForValidatedLiveCells(liveSignal.invalid ? 'RED' : this.#band, normalizedLiveCells),
+      ...budgetForValidatedLiveCells(liveSignalInvalid ? 'RED' : this.#band, normalizedLiveCells),
       live_cells: normalizedLiveCells,
       sample_driven: true,
       dedicated_timer: false,
