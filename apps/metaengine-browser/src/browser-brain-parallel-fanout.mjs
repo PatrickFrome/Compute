@@ -45,6 +45,14 @@ function strictBrowserCellKey(rawCellKey, commandId) {
   return cellKey;
 }
 
+function pressureBudgetExceededError(batchSize, budget) {
+  return new BrowserBrainFanoutPlanError(
+    'pressure_budget_exceeded',
+    `batch size ${batchSize} exceeds current mutation budget ${budget}`,
+    { batch_size: batchSize, mutation_budget: budget },
+  );
+}
+
 function preflightAbortError() {
   return new BrowserBrainFanoutPlanError('aborted', 'fanout aborted before any effect');
 }
@@ -143,27 +151,26 @@ export class BrowserBrainParallelFanoutCoordinator {
     // Pressure admission and BrowserCell resolution are independent read-only
     // preflight seams. Start every lane before awaiting any one of them; no
     // physical effect is possible until the aggregate has passed. Validate each
-    // lane as it settles so malformed pressure or missing exact-cell evidence can
-    // reject immediately without waiting for unrelated slow/wedged preflight.
+    // lane as it settles so malformed pressure, insufficient budget, or missing
+    // exact-cell evidence can reject immediately without waiting for unrelated
+    // slow/wedged preflight.
     const budgetPromise = Promise.resolve()
       .then(() => this.readMutationBudget())
-      .then(strictMutationBudget);
+      .then(strictMutationBudget)
+      .then((budget) => {
+        if (commands.length > budget) {
+          throw pressureBudgetExceededError(commands.length, budget);
+        }
+        return budget;
+      });
     const cellKeyPromises = plan.map(({ command, commandId }) =>
       Promise.resolve()
         .then(() => this.resolveCellKey(command))
         .then((rawCellKey) => strictBrowserCellKey(rawCellKey, commandId)),
     );
     const preflightPromise = Promise.all([budgetPromise, ...cellKeyPromises]);
-    const [budget, ...cellKeys] = await awaitPreflight(preflightPromise, signal);
+    const [, ...cellKeys] = await awaitPreflight(preflightPromise, signal);
     if (signal?.aborted) throw preflightAbortError();
-
-    if (commands.length > budget) {
-      throw new BrowserBrainFanoutPlanError(
-        'pressure_budget_exceeded',
-        `batch size ${commands.length} exceeds current mutation budget ${budget}`,
-        { batch_size: commands.length, mutation_budget: budget },
-      );
-    }
 
     const seenCells = new Set();
     for (let index = 0; index < plan.length; index += 1) {
