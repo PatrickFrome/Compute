@@ -24,6 +24,7 @@ const PAYLOAD_CAPABILITIES = new Set([
   'VERIFICATION_SANDBOX_PLAN_VERIFY',
   'ADVISORY_EVIDENCE_VERIFY',
 ]);
+const TRANSPORT_CLONE_SUFFICIENT_CAPABILITIES = new Set(['DEVOS_REPO_SEARCH']);
 const MAX_REQUEST_PAYLOAD_BYTES = 256 * 1024;
 const DEFAULT_RESTART_BASE_MS = 250;
 const DEFAULT_RESTART_MAX_MS = 10_000;
@@ -105,6 +106,9 @@ export class DevelopmentPlane {
       devos_repo_search_worktree_watcher: true,
       devos_repo_search_warm_source_filesystem_reads: 0,
       devos_repo_search_arbitrary_path_selection: false,
+      devos_repo_search_parent_clone_passes: 0,
+      devos_repo_search_transport_clone_passes: 1,
+      devos_repo_search_transport_clone_sufficient: true,
       transcript: Object.freeze(this.#transcript.map((row) => Object.freeze({ ...row }))),
       transcript_total_count: this.#transcriptTotal,
       last_results: Object.freeze(Object.fromEntries([...this.#lastResults.entries()].map(([key, value]) => [key, clone(value)]))),
@@ -211,12 +215,13 @@ export class DevelopmentPlane {
     const cap = String(capability || '').toUpperCase();
     if (!DEVELOPMENT_PLANE_CAPABILITIES.includes(cap)) throw new Error('development_plane_capability_denied');
     if (this.#state !== 'READY' || !this.#child) throw new Error('development_plane_not_ready');
+    const transportCloneSufficient = TRANSPORT_CLONE_SUFFICIENT_CAPABILITIES.has(cap);
     let normalizedPayload = null;
     if (PAYLOAD_CAPABILITIES.has(cap)) {
       if (!plainObject(payload)) throw new Error('development_plane_payload_required');
       const encoded = JSON.stringify(payload);
       if (Buffer.byteLength(encoded, 'utf8') > MAX_REQUEST_PAYLOAD_BYTES) throw new Error('development_plane_payload_too_large');
-      normalizedPayload = clone(payload);
+      normalizedPayload = transportCloneSufficient ? payload : clone(payload);
     } else if (payload !== null && payload !== undefined) {
       throw new Error('development_plane_payload_denied');
     }
@@ -229,7 +234,10 @@ export class DevelopmentPlane {
       }, this.#timeoutMs);
       this.#pending.set(requestId, {
         capability: cap,
-        resolve: (value) => { clearTimeout(timer); resolve(clone(value)); },
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(transportCloneSufficient ? value : clone(value));
+        },
         reject: (error) => { clearTimeout(timer); reject(error); },
       });
       this.#child.postMessage({
