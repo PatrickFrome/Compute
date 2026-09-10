@@ -23,6 +23,8 @@ function effectCommand(overrides = {}) {
       command_id: COMMAND_ID,
       action: 'SEMANTIC_TYPE',
       tab_id: TAB_ID,
+      page_data_authority: false,
+      automatic_retry_allowed: false,
       authority_effect: false,
     },
     effect_binding_sha256: 'a'.repeat(64),
@@ -88,12 +90,18 @@ test('effect-bearing semantic mutation cannot enter execution without a binding'
   assert.equal(executions, 0);
 });
 
-test('effect binding must match the exact command and tab structurally', async () => {
+test('effect binding must match exact command, tab and fail-closed safety flags structurally', async () => {
   const wrongCommand = effectCommand({ effect_binding: { ...effectCommand().effect_binding, command_id: '223e4567-e89b-42d3-a456-426614174000' } });
   await assert.rejects(() => executor().execute(envelope(wrongCommand)), /effect_binding_command_mismatch/);
 
   const wrongTab = effectCommand({ effect_binding: { ...effectCommand().effect_binding, tab_id: 'tab_223e4567-e89b-42d3-a456-426614174001' } });
   await assert.rejects(() => executor().execute(envelope(wrongTab)), /effect_binding_tab_mismatch/);
+
+  const retryAllowed = effectCommand({ effect_binding: { ...effectCommand().effect_binding, automatic_retry_allowed: true } });
+  await assert.rejects(() => executor().execute(envelope(retryAllowed)), /effect_binding_safety_flags_invalid/);
+
+  const pageAuthority = effectCommand({ effect_binding: { ...effectCommand().effect_binding, page_data_authority: true } });
+  await assert.rejects(() => executor().execute(envelope(pageAuthority)), /effect_binding_safety_flags_invalid/);
 });
 
 test('tab mutation without explicit exact tab is rejected before authorization', async () => {
@@ -217,4 +225,5 @@ test('leased envelope stays below the physical Host Agent IPC payload ceiling', 
   await assert.rejects(() => runtime.execute(large), /leased_browser_plan_too_large/);
   assert.equal(runtime.snapshot().max_bytes, LEASED_BROWSER_PLAN_MAX_BYTES);
   assert.equal(runtime.snapshot().max_bytes < 48 * 1024, true);
+  assert.equal(runtime.snapshot().command_expiry_rechecked_before_effect, true);
 });
