@@ -37,6 +37,12 @@ function normalizeRequestPath(value) {
   return requestPath;
 }
 
+function dynamicCommandRoute(method, requestPath, prefix, suffix, route) {
+  if (method !== 'POST' || !requestPath.startsWith(prefix) || !requestPath.endsWith(suffix)) return null;
+  const commandId = requestPath.slice(prefix.length, -suffix.length);
+  return UUID_RE.test(commandId) ? route : null;
+}
+
 function allowedRoute(method, requestPath) {
   const prefix = `${NATIVE_SUPERVISOR_RUNTIME_PATH}/v1`;
   if (method === 'POST' && requestPath === `${prefix}/state`) return 'STATE';
@@ -45,11 +51,11 @@ function allowedRoute(method, requestPath) {
   if (method === 'POST' && requestPath === `${prefix}/commands/next`) return 'COMMAND_NEXT';
   if (method === 'POST' && requestPath === `${prefix}/commands/wait-batch`) return 'COMMAND_WAIT_BATCH';
   if (method === 'POST' && requestPath === `${prefix}/commands/result-batch`) return 'COMMAND_RESULT_BATCH';
-  const resultPrefix = `${prefix}/commands/`;
-  if (method === 'POST' && requestPath.startsWith(resultPrefix) && requestPath.endsWith('/result')) {
-    const commandId = requestPath.slice(resultPrefix.length, -'/result'.length);
-    if (UUID_RE.test(commandId)) return 'COMMAND_RESULT';
-  }
+  const commandPrefix = `${prefix}/commands/`;
+  const effectIntent = dynamicCommandRoute(method, requestPath, commandPrefix, '/effect-intent', 'COMMAND_EFFECT_INTENT');
+  if (effectIntent) return effectIntent;
+  const result = dynamicCommandRoute(method, requestPath, commandPrefix, '/result', 'COMMAND_RESULT');
+  if (result) return result;
   throw new Error('supervisor_identity_delegation_route_denied');
 }
 
@@ -218,6 +224,7 @@ export function supervisorIdentityDelegationManifest() {
       'POST /v1/commands/next',
       'POST /v1/commands/wait-batch',
       'POST /v1/commands/result-batch',
+      'POST /v1/commands/{uuid}/effect-intent',
       'POST /v1/commands/{uuid}/result',
     ],
     enrollment_authority: false,
