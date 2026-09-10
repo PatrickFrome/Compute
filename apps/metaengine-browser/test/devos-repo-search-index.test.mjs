@@ -38,7 +38,7 @@ test('repo search indexes host-fixed roots once per exact HEAD and reuses cached
   const first = await index.query(source(), { query: 'boundedNavigation emergency', limit: 8 });
   assert.equal(first.status, 'OK');
   assert.equal(first.index_rebuilt, true);
-  assert.equal(first.search_strategy, 'HEAD_CACHED_INVERTED_INDEX');
+  assert.equal(first.search_strategy, 'HEAD_PLUS_WORKTREE_EVENT_INDEX');
   assert.equal(first.hits[0].path, 'apps/metaengine-browser/test/example.test.mjs');
   assert.equal(first.arbitrary_path_selection, false);
   assert.equal(first.process_spawn_used, false);
@@ -46,6 +46,7 @@ test('repo search indexes host-fixed roots once per exact HEAD and reuses cached
 
   const second = await index.query(source(), { query: 'boundedNavigation emergency', limit: 8 });
   assert.equal(second.index_rebuilt, false);
+  assert.equal(second.worktree_refreshed, false);
   assert.equal(second.index_revision, first.index_revision);
   assert.equal(second.query_revision, first.query_revision);
 });
@@ -59,6 +60,21 @@ test('file token coverage reaches symbols well beyond the old 256-token frontier
   assert.equal(result.hits[0].path, 'apps/metaengine-browser/src/main.mjs');
   assert.match(result.hits[0].snippet, /emergencyAbortSignalNeedle/);
   assert.ok(MAX_FILE_TOKENS > 256);
+});
+
+test('dirty working-tree event refreshes changed file without a HEAD change', async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const index = new DevOSRepoSearchIndex({ repoRoot: root });
+  const first = await index.query(source(), { query: 'boundedNavigation' });
+  await writeFile(path.join(root, 'apps/metaengine-browser/test/example.test.mjs'), `test('dirtyWorktreeNeedle commandScopedAbort replacement', () => {});\n`, 'utf8');
+  index.notifyPathChanged('apps/metaengine-browser/test/example.test.mjs');
+  const second = await index.query(source(), { query: 'dirtyWorktreeNeedle' });
+  assert.equal(second.index_rebuilt, false);
+  assert.equal(second.worktree_refreshed, true);
+  assert.equal(second.worktree_epoch, 1);
+  assert.notEqual(second.index_revision, first.index_revision);
+  assert.equal(second.hits[0].path, 'apps/metaengine-browser/test/example.test.mjs');
 });
 
 test('exact HEAD change invalidates the cache and rebuilds source evidence', async (t) => {
