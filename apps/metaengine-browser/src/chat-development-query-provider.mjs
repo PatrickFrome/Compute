@@ -53,6 +53,12 @@ function normalizeEvidenceHit(hit) {
   });
 }
 
+function componentResult(current, prior) {
+  if (!current) return null;
+  if (current.status === 'NOT_MODIFIED') return prior || null;
+  return current;
+}
+
 export class ChatDevelopmentQueryProvider {
   #developmentPlane;
   #evidenceIndex;
@@ -85,14 +91,22 @@ export class ChatDevelopmentQueryProvider {
     if (!queryText) throw new Error('chat_dev_provider_query_invalid');
     const resultLimit = Number(limit);
     if (!Number.isSafeInteger(resultLimit) || resultLimit < 1 || resultLimit > CHAT_DEVELOPMENT_PROVIDER_MAX_HITS) throw new Error('chat_dev_provider_limit_invalid');
+    if (kinds != null && (!Array.isArray(kinds) || kinds.length < 1)) throw new Error('chat_dev_provider_kinds_invalid');
     const kindSet = kinds == null ? null : new Set(kinds.map((value) => String(value || '').trim().toUpperCase()));
     const sourceWanted = kindSet == null || kindSet.has('SOURCE');
     const evidenceKinds = kindSet == null ? null : [...kindSet].filter((kind) => kind !== 'SOURCE');
     const evidenceWanted = kindSet == null || evidenceKinds.length > 0;
-    const prior = if_none_match ? this.#etagCache.get(String(if_none_match)) : null;
+    const requestKey = sha256(JSON.stringify({
+      query: queryText,
+      kinds: kindSet ? [...kindSet].sort() : null,
+      limit: resultLimit,
+      max_bytes: Number(max_bytes) || CHAT_DEVELOPMENT_MAX_RESULT_BYTES,
+    }));
+    const cached = if_none_match ? this.#etagCache.get(String(if_none_match)) : null;
+    const prior = cached?.request_key === requestKey ? cached : null;
     const componentBudget = Math.max(1024, Math.min(4096, Math.floor(Number(max_bytes || CHAT_DEVELOPMENT_MAX_RESULT_BYTES) / (sourceWanted && evidenceWanted ? 2 : 1))));
 
-    const [repo, evidence] = await Promise.all([
+    const [repoRaw, evidenceRaw] = await Promise.all([
       sourceWanted
         ? this.#developmentPlane.request('DEVOS_REPO_SEARCH', {
           query: queryText,
@@ -113,7 +127,9 @@ export class ChatDevelopmentQueryProvider {
         : Promise.resolve(null),
     ]);
 
-    if (prior && (!repo || repo.status === 'NOT_MODIFIED') && (!evidence || evidence.status === 'NOT_MODIFIED')) {
+    const repoUnchanged = !repoRaw || repoRaw.status === 'NOT_MODIFIED';
+    const evidenceUnchanged = !evidenceRaw || evidenceRaw.status === 'NOT_MODIFIED';
+    if (prior && repoUnchanged && evidenceUnchanged) {
       const unchanged = {
         schema: CHAT_DEVELOPMENT_PROVIDER_SCHEMA,
         status: 'NOT_MODIFIED',
@@ -123,15 +139,23 @@ export class ChatDevelopmentQueryProvider {
       return Object.freeze({ ...unchanged, bytes: bytes(unchanged), truncated: false });
     }
 
+    const repo = componentResult(repoRaw, prior?.repo_result);
+    const evidence = componentResult(evidenceRaw, prior?.evidence_result);
     const repoHits = repo?.status === 'OK' && Array.isArray(repo.hits) ? repo.hits.map(normalizeRepoHit) : [];
     const evidenceHits = evidence?.status === 'OK' && Array.isArray(evidence.hits) ? evidence.hits.map(normalizeEvidenceHit) : [];
     const hits = [...repoHits, ...evidenceHits]
       .sort((a, b) => b.score - a.score || b.matched_terms - a.matched_terms || String(a.id).localeCompare(String(b.id)))
       .slice(0, resultLimit);
-    const repoRevision = repo?.query_revision || prior?.repo_query_revision || null;
-    const evidenceRevision = evidence?.query_revision || prior?.evidence_query_revision || null;
-    const queryRevision = `dq:${sha256(JSON.stringify({ query: queryText, kinds: kindSet ? [...kindSet].sort() : null, repo: repoRevision, evidence: evidenceRevision }))}`;
-    this.#etagCache.set(queryRevision, Object.freeze({ repo_query_revision: repoRevision, evidence_query_revision: evidenceRevision }));
+    const repoRevision = repo?.query_revision || null;
+    const evidenceRevision = evidence?.query_revision || null;
+    const queryRevision = `dq:${sha256(JSON.stringify({ request_key: requestKey, repo: repoRevision, evidence: evidenceRevision }))}`;
+    this.#etagCache.set(queryRevision, Object.freeze({
+      request_key: requestKey,
+      repo_query_revision: repoRevision,
+      evidence_query_revision: evidenceRevision,
+      repo_result: repo ? structuredClone(repo) : null,
+      evidence_result: evidence ? structuredClone(evidence) : null,
+    }));
     while (this.#etagCache.size > CHAT_DEVELOPMENT_PROVIDER_CACHE) this.#etagCache.delete(this.#etagCache.keys().next().value);
 
     return fit({
