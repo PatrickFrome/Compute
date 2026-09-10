@@ -74,11 +74,17 @@ test('full-width 128 BrowserCell fanout preserves exact caller order', async () 
   const width = 128;
   const commands = Array.from({ length: width }, (_, index) =>
     command(`cmd-${index}`, `tab-${index}`));
+  const resolved = [];
   const started = [];
   const instance = coordinator({
     hardBatchLimit: width,
     readMutationBudget: () => width,
+    resolveCellKey: async (entry) => {
+      resolved.push(entry.payload.tab_id);
+      return entry.payload.tab_id;
+    },
     execute: async (_command, context) => {
+      assert.equal(resolved.length, width);
       started.push(context.browserCell);
       return context.commandId;
     },
@@ -86,6 +92,8 @@ test('full-width 128 BrowserCell fanout preserves exact caller order', async () 
 
   const result = await instance.dispatch(commands);
 
+  assert.equal(resolved.length, width);
+  assert.equal(new Set(resolved).size, width);
   assert.equal(started.length, width);
   assert.equal(new Set(started).size, width);
   assert.deepEqual(result.map((entry) => entry.command_id), commands.map((entry) => entry.command_id));

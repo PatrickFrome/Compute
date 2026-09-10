@@ -175,8 +175,11 @@ export class BrowserBrainParallelFanoutCoordinator {
         return budget;
       });
     const seenCells = new Set();
-    const cellKeyPromises = plan.map((entry) =>
-      Promise.resolve()
+    const preflightPromises = new Array(plan.length + 1);
+    preflightPromises[0] = budgetPromise;
+    for (let index = 0; index < plan.length; index += 1) {
+      const entry = plan[index];
+      preflightPromises[index + 1] = Promise.resolve()
         .then(() => this.resolveCellKey(entry.command))
         .then((rawCellKey) => strictBrowserCellKey(rawCellKey, entry.commandId))
         .then((cellKey) => {
@@ -185,9 +188,9 @@ export class BrowserBrainParallelFanoutCoordinator {
           }
           seenCells.add(cellKey);
           entry.cellKey = cellKey;
-        }),
-    );
-    const preflightPromise = Promise.all([budgetPromise, ...cellKeyPromises]);
+        });
+    }
+    const preflightPromise = Promise.all(preflightPromises);
     await awaitPreflight(preflightPromise, signal);
     if (signal?.aborted) throw preflightAbortError();
 
