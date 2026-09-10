@@ -141,6 +141,8 @@ export class ChatDevelopmentQueryProvider {
       result_max_bytes: CHAT_DEVELOPMENT_MAX_RESULT_BYTES,
       result_max_hits: CHAT_DEVELOPMENT_PROVIDER_MAX_HITS,
       etag_cache_entries: this.#etagCache.size,
+      etag_component_clone_passes: 0,
+      etag_component_cache_internal_only: true,
       result_fit_strategy: 'BOUNDED_BINARY_SEARCH',
       immutable_hit_arrays: true,
       network_reads_owned: 0,
@@ -215,12 +217,15 @@ export class ChatDevelopmentQueryProvider {
     const repoRevision = repo?.query_revision || null;
     const evidenceRevision = evidence?.query_revision || null;
     const queryRevision = `dq:${sha256(JSON.stringify({ request_key: requestKey, repo: repoRevision, evidence: evidenceRevision }))}`;
+    // repo/evidence are private component values owned by this query invocation. They are
+    // never returned directly; only normalized immutable hits escape. Keeping the exact
+    // component object avoids two redundant structuredClone passes on every cache miss.
     this.#etagCache.set(queryRevision, Object.freeze({
       request_key: requestKey,
       repo_query_revision: repoRevision,
       evidence_query_revision: evidenceRevision,
-      repo_result: repo ? structuredClone(repo) : null,
-      evidence_result: evidence ? structuredClone(evidence) : null,
+      repo_result: repo || null,
+      evidence_result: evidence || null,
     }));
     while (this.#etagCache.size > CHAT_DEVELOPMENT_PROVIDER_CACHE) this.#etagCache.delete(this.#etagCache.keys().next().value);
 
