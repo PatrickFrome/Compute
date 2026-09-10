@@ -169,7 +169,6 @@ export class BrowserControlPressureGovernor {
     const invalidSignals = liveSignal.invalid && !this.#lastInvalid.includes('live_cells')
       ? Object.freeze([...this.#lastInvalid, 'live_cells'])
       : Object.freeze([...this.#lastInvalid]);
-    const budget = budgetFor(this.#band, normalizedLiveCells);
     return Object.freeze({
       schema: BROWSER_CONTROL_PRESSURE_GOVERNOR_SCHEMA,
       pressure_band: liveSignal.invalid ? 'RED' : this.#band,
