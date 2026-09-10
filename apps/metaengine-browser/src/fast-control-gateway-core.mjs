@@ -5,6 +5,7 @@ export const FAST_CONTROL_MAX_STEPS = 64;
 export const FAST_CONTROL_MAX_INPUT_BYTES = 64 * 1024;
 
 const TOOL_NAMES = Object.freeze(['context_get', 'dev_query', 'run_submit', 'run_status', 'emergency_stop']);
+const DEV_QUERY_KINDS = new Set(['SOURCE', 'CI', 'CHECKPOINT', 'CHANGE', 'HOTSPOT', 'BLOCKER', 'NEXT_ACTION', 'RUNTIME', 'DATABASE']);
 export const FAST_CONTROL_TOOL_NAMES = TOOL_NAMES;
 
 const plainObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
@@ -78,9 +79,9 @@ function normalizeDevQuery(input) {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 512 || maxBytes > 8 * 1024) throw new Error('fast_control_dev_query_max_bytes_invalid');
   let kinds = null;
   if (input.kinds != null) {
-    if (!Array.isArray(input.kinds) || input.kinds.length < 1 || input.kinds.length > 9) throw new Error('fast_control_dev_query_kinds_invalid');
+    if (!Array.isArray(input.kinds) || input.kinds.length < 1 || input.kinds.length > DEV_QUERY_KINDS.size) throw new Error('fast_control_dev_query_kinds_invalid');
     kinds = input.kinds.map((value) => String(value || '').trim().toUpperCase());
-    if (kinds.some((value) => !/^[A-Z_]{2,32}$/.test(value)) || new Set(kinds).size !== kinds.length) {
+    if (new Set(kinds).size !== kinds.length || kinds.some((value) => !DEV_QUERY_KINDS.has(value))) {
       throw new Error('fast_control_dev_query_kinds_invalid');
     }
   }
