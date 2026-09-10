@@ -33,7 +33,8 @@ jobs:
             s = s.replace(from, to);
           };
           const replaceRegex = (pattern, to, label) => {
-            const matches = [...s.matchAll(new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`))];
+            const globalPattern = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`);
+            const matches = [...s.matchAll(globalPattern)];
             if (matches.length !== 1) throw new Error(`${label}_expected_once_got_${matches.length}`);
             s = s.replace(pattern, to);
           };
@@ -56,49 +57,65 @@ jobs:
           );
           replaceExact(
             "  return { ...tab, webcontents_id: view.webContents.id, load_pending: load && !awaitLoad };\n",
-            "  return {\n    ...tab,\n    webcontents_id: view.webContents.id,\n    load_pending: load && !awaitLoad,\n    navigation,\n    effect_outcome: 'CONFIRMED',\n    automatic_retry_allowed: false,\n  };\n",
+            [
+              '  return {',
+              '    ...tab,',
+              '    webcontents_id: view.webContents.id,',
+              '    load_pending: load && !awaitLoad,',
+              '    navigation,',
+              "    effect_outcome: 'CONFIRMED',",
+              '    automatic_retry_allowed: false,',
+              '  };',
+              '',
+            ].join('\n'),
             'create_tab_result',
           );
 
+          const loadTabReplacement = [
+            'async function loadTab(tabId, input) {',
+            '  const view = views.get(String(tabId));',
+            "  if (!view || view.webContents.isDestroyed()) throw new Error('tab_binding_not_live');",
+            '  const d = navigationDecision(input);',
+            '  if (!d.allow) throw new Error(`navigation_blocked:${d.reason}`);',
+            '  const navigation = await boundedNavigation(view.webContents, d.normalized_url);',
+            "  const confirmed = navigation.state === 'CONFIRMED';",
+            '  if (confirmed) {',
+            '    registry.update(String(tabId), { url: d.normalized_url, kind: d.kind });',
+            '  } else if (navigation.post_url) {',
+            '    const observed = navigationDecision(navigation.post_url);',
+            '    if (observed.allow) registry.update(String(tabId), { url: observed.normalized_url, kind: observed.kind });',
+            '  }',
+            '  invalidatePerception(String(tabId));',
+            '  await publishSnapshot();',
+            '  return {',
+            '    ok: confirmed,',
+            '    tab_id: String(tabId),',
+            '    url: confirmed ? d.normalized_url : (navigation.post_url || null),',
+            '    navigation,',
+            "    effect_outcome: confirmed ? 'CONFIRMED' : 'AMBIGUOUS',",
+            '    automatic_retry_allowed: false,',
+            '  };',
+            '}',
+            '',
+            'async function closeTab',
+          ].join('\n');
           replaceRegex(
             /async function loadTab\(tabId, input\) \{[\s\S]*?\n\}\n\nasync function closeTab/,
-            `async function loadTab(tabId, input) {
-  const view = views.get(String(tabId));
-  if (!view || view.webContents.isDestroyed()) throw new Error('tab_binding_not_live');
-  const d = navigationDecision(input);
-  if (!d.allow) throw new Error(\`navigation_blocked:\${d.reason}\`);
-  const navigation = await boundedNavigation(view.webContents, d.normalized_url);
-  const confirmed = navigation.state === 'CONFIRMED';
-  if (confirmed) {
-    registry.update(String(tabId), { url: d.normalized_url, kind: d.kind });
-  } else if (navigation.post_url) {
-    const observed = navigationDecision(navigation.post_url);
-    if (observed.allow) registry.update(String(tabId), { url: observed.normalized_url, kind: observed.kind });
-  }
-  invalidatePerception(String(tabId));
-  await publishSnapshot();
-  return {
-    ok: confirmed,
-    tab_id: String(tabId),
-    url: confirmed ? d.normalized_url : (navigation.post_url || null),
-    navigation,
-    effect_outcome: confirmed ? 'CONFIRMED' : 'AMBIGUOUS',
-    automatic_retry_allowed: false,
-  };
-}
-
-async function closeTab`,
+            loadTabReplacement,
             'load_tab_function',
           );
 
+          const navigateReplacement = [
+            "  if (command === 'NAVIGATE') {",
+            '    if (payload?.tab_id) return loadTab(payload.tab_id, payload?.url);',
+            "    if (!selectedView) throw new Error('no_selected_tab');",
+            '    return loadTab(selected.tab_id, payload?.url);',
+            '  }',
+            "  if (command === 'BACK')",
+          ].join('\n');
           replaceRegex(
             /  if \(command === 'NAVIGATE'\) \{[\s\S]*?\n  \}\n  if \(command === 'BACK'\)/,
-            `  if (command === 'NAVIGATE') {
-    if (payload?.tab_id) return loadTab(payload.tab_id, payload?.url);
-    if (!selectedView) throw new Error('no_selected_tab');
-    return loadTab(selected.tab_id, payload?.url);
-  }
-  if (command === 'BACK')`,
+            navigateReplacement,
             'selected_navigate_block',
           );
 
