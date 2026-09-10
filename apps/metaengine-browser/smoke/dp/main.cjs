@@ -180,7 +180,7 @@ async function run() {
   const shutdown = await plane.stopAndWait(4000);
   trace('DP_STOPPED', { shutdown });
   const ok = state.state === 'READY'
-    && state.version === '0.4.0'
+    && state.version === '0.5.0'
     && health?.ok === true
     && capabilities?.version === state.version
     && capabilities?.candidate_capsules === true
