@@ -33,6 +33,18 @@ function strictMutationBudget(value) {
   return value;
 }
 
+function strictBrowserCellKey(rawCellKey, commandId) {
+  const cellKey = typeof rawCellKey === 'string' ? rawCellKey.trim() : '';
+  if (!cellKey) {
+    throw new BrowserBrainFanoutPlanError(
+      'missing_browser_cell',
+      `command ${commandId} has no explicit BrowserCell binding`,
+      { command_id: commandId },
+    );
+  }
+  return cellKey;
+}
+
 function preflightAbortError() {
   return new BrowserBrainFanoutPlanError('aborted', 'fanout aborted before any effect');
 }
@@ -130,17 +142,19 @@ export class BrowserBrainParallelFanoutCoordinator {
 
     // Pressure admission and BrowserCell resolution are independent read-only
     // preflight seams. Start every lane before awaiting any one of them; no
-    // physical effect is possible until the aggregate has passed. Validate the
-    // pressure lane as it settles so malformed authority evidence can reject the
-    // batch immediately without waiting for unrelated slow/wedged resolvers.
+    // physical effect is possible until the aggregate has passed. Validate each
+    // lane as it settles so malformed pressure or missing exact-cell evidence can
+    // reject immediately without waiting for unrelated slow/wedged preflight.
     const budgetPromise = Promise.resolve()
       .then(() => this.readMutationBudget())
       .then(strictMutationBudget);
-    const cellKeyPromises = plan.map(({ command }) =>
-      Promise.resolve().then(() => this.resolveCellKey(command)),
+    const cellKeyPromises = plan.map(({ command, commandId }) =>
+      Promise.resolve()
+        .then(() => this.resolveCellKey(command))
+        .then((rawCellKey) => strictBrowserCellKey(rawCellKey, commandId)),
     );
     const preflightPromise = Promise.all([budgetPromise, ...cellKeyPromises]);
-    const [budget, ...rawCellKeys] = await awaitPreflight(preflightPromise, signal);
+    const [budget, ...cellKeys] = await awaitPreflight(preflightPromise, signal);
     if (signal?.aborted) throw preflightAbortError();
 
     if (commands.length > budget) {
@@ -154,15 +168,7 @@ export class BrowserBrainParallelFanoutCoordinator {
     const seenCells = new Set();
     for (let index = 0; index < plan.length; index += 1) {
       const entry = plan[index];
-      const rawCellKey = rawCellKeys[index];
-      const cellKey = typeof rawCellKey === 'string' ? rawCellKey.trim() : '';
-      if (!cellKey) {
-        throw new BrowserBrainFanoutPlanError(
-          'missing_browser_cell',
-          `command ${entry.commandId} has no explicit BrowserCell binding`,
-          { command_id: entry.commandId },
-        );
-      }
+      const cellKey = cellKeys[index];
       if (seenCells.has(cellKey)) {
         throw new BrowserBrainFanoutPlanError(
           'same_cell_overlap',
