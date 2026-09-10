@@ -4,7 +4,8 @@ import path from 'node:path';
 import test from 'node:test';
 
 const mainPath = path.resolve('src/main.mjs');
-const source = fs.readFileSync(mainPath, 'utf8');
+const rawSource = fs.readFileSync(mainPath, 'utf8');
+const source = rawSource.replace(/\r\n/g, '\n');
 
 function exactFunction(name, nextName) {
   const pattern = new RegExp(`async function ${name}\\([^]*?\\n\\}\\n\\nasync function ${nextName}`);
@@ -12,6 +13,13 @@ function exactFunction(name, nextName) {
   assert.ok(match, `${name}_function_not_found`);
   return match[0];
 }
+
+test('runtime source normalization preserves semantic extraction across LF and CRLF checkouts', () => {
+  const crlf = source.replace(/\n/g, '\r\n');
+  assert.equal(crlf.replace(/\r\n/g, '\n'), source);
+  assert.match(source, /async function createTab\(/);
+  assert.match(source, /async function loadTab\(/);
+});
 
 test('runtime imports the bounded navigation primitive exactly once', () => {
   const needle = "import { boundedNavigation } from './bounded-navigation.mjs';";
