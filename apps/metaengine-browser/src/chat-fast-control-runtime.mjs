@@ -40,14 +40,18 @@ function normalizeQueryKey(input, stateRevision) {
 }
 
 function notModified(queryRevision) {
-  const base = {
+  const out = {
     schema: CHAT_DEVELOPMENT_PROVIDER_SCHEMA,
     status: 'NOT_MODIFIED',
     query_revision: queryRevision,
     warm_cache: true,
     authority_effect: false,
+    truncated: false,
+    bytes: 0,
   };
-  return Object.freeze({ ...base, bytes: jsonBytes(base), truncated: false });
+  out.bytes = jsonBytes(out);
+  out.bytes = jsonBytes(out);
+  return Object.freeze(out);
 }
 
 export class ChatFastControlRuntime {
@@ -105,7 +109,7 @@ export class ChatFastControlRuntime {
         this.#devQueryNotModifiedHits += 1;
         return notModified(cached.query_revision);
       }
-      return Object.freeze({ ...structuredClone(cached.result), warm_cache: true });
+      return Object.freeze(structuredClone(cached.result));
     }
 
     this.#devQueryCacheMisses += 1;
