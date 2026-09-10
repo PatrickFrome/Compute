@@ -11,6 +11,7 @@ on:
       - 'apps/metaengine-browser/src/fast-context-v1.mjs'
       - 'apps/metaengine-browser/src/fast-control-gateway-core.mjs'
       - 'apps/metaengine-browser/src/fast-control-mcp-adapter.mjs'
+      - 'apps/metaengine-browser/src/fast-control-mcp-stateless-router.mjs'
       - 'apps/metaengine-browser/test/browser-chatgpt-fast-open.test.mjs'
       - 'apps/metaengine-browser/test/chat-*.test.mjs'
       - 'apps/metaengine-browser/test/devos-repo-search-index.test.mjs'
@@ -56,6 +57,7 @@ jobs:
           node --check src/fast-context-v1.mjs
           node --check src/fast-control-gateway-core.mjs
           node --check src/fast-control-mcp-adapter.mjs
+          node --check src/fast-control-mcp-stateless-router.mjs
       - name: Fast-open bounded navigation contract
         run: node --test test/browser-chatgpt-fast-open.test.mjs
       - name: Development evidence index
@@ -74,6 +76,8 @@ jobs:
         run: node --test test/fast-control-gateway-core.test.mjs
       - name: Fast control MCP adapter
         run: node --test test/fast-control-mcp-adapter.test.mjs
+      - name: Stateless MCP 2026 router
+        run: node --test test/fast-control-mcp-stateless-router.test.mjs
       - name: Event-driven development state
         run: node --test test/chat-development-control-state.test.mjs
       - name: Chat fast control runtime
