@@ -58,8 +58,9 @@ test('context_get returns one exact development capsule with one local browser-s
   assert.equal(calls.repo.length, 0, 'context hot path must not trigger repo discovery');
 });
 
-test('dev_query joins cached development evidence with exact-head repo search in one tool call', async () => {
+test('dev_query returns repo, indexed evidence, and exact orientation in one tool call', async () => {
   const { runtime, calls } = harness();
+  runtime.upsertCi({ id: 7, name: 'Shell', status: 'completed', conclusion: 'failure', head_sha: 'a'.repeat(40), authority_effect: false });
   runtime.upsertEvidence({
     id: 'blocker:abort', kind: 'BLOCKER', title: 'AbortSignal blocker', text: 'boundedNavigation needs AbortSignal', severity: 'CRITICAL', authority_effect: false,
   });
@@ -68,8 +69,12 @@ test('dev_query joins cached development evidence with exact-head repo search in
   assert.equal(result.structuredContent.result.status, 'OK');
   assert.equal(result.structuredContent.result.hits.some((row) => row.source === 'REPO'), true);
   assert.equal(result.structuredContent.result.hits.some((row) => row.id === 'blocker:abort'), true);
+  assert.equal(result.structuredContent.result.one_call_orientation, true);
+  assert.equal(result.structuredContent.result.orientation.head_sha, 'a'.repeat(40));
+  assert.equal(result.structuredContent.result.orientation.ci_state, 'RED');
+  assert.equal(result.structuredContent.result.orientation.focus_kind, 'CI_FAILURE');
   assert.equal(calls.repo.length, 1);
-  assert.equal(calls.state, 0);
+  assert.equal(calls.state, 0, 'dev_query orientation must not require browser-state read');
 });
 
 test('Browser command management still delegates to existing authority boundaries only', async () => {
@@ -85,6 +90,7 @@ test('Browser command management still delegates to existing authority boundarie
   assert.equal(calls.emergency.length, 1);
   const snap = runtime.snapshot();
   assert.deepEqual(snap.tools, ['context_get', 'dev_query', 'run_submit', 'run_status', 'emergency_stop']);
+  assert.equal(snap.dev_query_includes_orientation, true);
   assert.equal(snap.second_scheduler, false);
   assert.equal(snap.command_leasing_authority, false);
   assert.equal(snap.browser_execution_authority, false);
