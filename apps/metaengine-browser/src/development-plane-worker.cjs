@@ -1,6 +1,5 @@
 'use strict';
 
-const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createCandidateCapsule } = require('./candidate-capsule.cjs');
 const { verifyCandidateCapsuleRemoteBound } = require('./candidate-remote-source.cjs');
@@ -8,6 +7,7 @@ const { createVerificationSandboxPlan, verifyVerificationSandboxPlan } = require
 const { verifyEnvelope: verifyAdvisoryEvidenceEnvelope } = require('./advisory-evidence-verifier.cjs');
 const { createDevOSRepoReadModel } = require('./devos-repo-read-model.cjs');
 const { WorktreeAwareDevOSRepoSearchIndex } = require('./devos-worktree-repo-search.cjs');
+const { RepoSourceTracker } = require('./repo-source-tracker.cjs');
 
 const PROTOCOL = 'metaengine.development-plane.v1';
 const VERSION = '0.5.0';
@@ -32,6 +32,11 @@ const repoSearchIndex = new WorktreeAwareDevOSRepoSearchIndex({
   repoRoot,
   watch: process.env.METAENGINE_DEVOS_WORKTREE_WATCH !== '0',
 });
+const repoSourceTracker = new RepoSourceTracker({
+  repoRoot,
+  repository: repositoryName,
+  sourceProvenancePath,
+});
 
 function send(message) {
   if (!process.parentPort) throw new Error('development_plane_parent_port_missing');
@@ -39,43 +44,11 @@ function send(message) {
 }
 
 async function readRepoHead() {
-  const gitPath = path.join(repoRoot, '.git');
-  let gitDir = gitPath;
-  try {
-    const stat = await fs.stat(gitPath);
-    if (stat.isFile()) {
-      const marker = (await fs.readFile(gitPath, 'utf8')).trim();
-      if (!marker.startsWith('gitdir: ')) throw new Error('repo_git_pointer_invalid');
-      gitDir = path.resolve(repoRoot, marker.slice('gitdir: '.length).trim());
-    }
-  } catch (error) {
-    if (error?.code === 'ENOENT') {
-      try {
-        const provenance = JSON.parse(await fs.readFile(sourceProvenancePath, 'utf8'));
-        const repository = String(provenance?.repository || repositoryName);
-        const head = String(provenance?.head || '').toLowerCase();
-        const ref = provenance?.ref == null ? null : String(provenance.ref);
-        if (provenance?.schema !== 'metaengine.devos.packaged-source-snapshot.v1' || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository) || !/^[0-9a-f]{40}$/.test(head)) throw new Error('repo_packaged_provenance_invalid');
-        return { repository_present: true, repository, head, ref, packaged_source_snapshot: true };
-      } catch (provenanceError) {
-        if (provenanceError?.code !== 'ENOENT') throw provenanceError;
-        return { repository_present: false, repository: repositoryName, head: null, ref: null };
-      }
-    }
-    throw error;
-  }
-  const head = (await fs.readFile(path.join(gitDir, 'HEAD'), 'utf8')).trim();
-  if (head.startsWith('ref: ')) {
-    const ref = head.slice(5).trim();
-    let sha = null;
-    try { sha = (await fs.readFile(path.join(gitDir, ref), 'utf8')).trim(); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
-    return { repository_present: true, repository: repositoryName, head: sha, ref };
-  }
-  return { repository_present: true, repository: repositoryName, head, ref: null };
+  return repoSourceTracker.get();
 }
 
 async function requireCurrentSource() {
-  const repo = await readRepoHead();
+  const repo = await repoSourceTracker.get();
   if (repo.repository_present !== true || !/^[0-9a-f]{40}$/.test(String(repo.head || '').toLowerCase())) throw new Error('repo_head_unavailable');
   return { repository: repo.repository, head: String(repo.head).toLowerCase(), ref: repo.ref };
 }
@@ -99,6 +72,7 @@ async function execute(capability, payload) {
     pid: process.pid,
     uptime_seconds: process.uptime(),
     process_type: process.type || 'utility',
+    repo_source: repoSourceTracker.snapshot(),
     repo_search: repoSearchIndex.snapshot(),
   };
   if (capability === 'CAPABILITIES') return {
@@ -121,6 +95,8 @@ async function execute(capability, payload) {
     devos_repo_search: true,
     devos_repo_search_cache: 'HEAD_PLUS_WORKTREE_EVENT_EPOCH',
     devos_repo_search_worktree_watcher: true,
+    devos_repo_source_cache: 'GIT_EVENT_INVALIDATED',
+    devos_repo_search_warm_source_filesystem_reads: 0,
     devos_repo_search_arbitrary_path_selection: false,
     devos_repo_arbitrary_path_read: false,
     direct_promote_current: false,
@@ -174,6 +150,7 @@ process.parentPort.on('message', async (event) => {
   const message = event?.data;
   if (!message || message.protocol !== PROTOCOL) return;
   if (message.type === 'CONTROL' && message.control === 'SHUTDOWN') {
+    repoSourceTracker.close();
     repoSearchIndex.close();
     send({ type: 'SHUTDOWN_ACK', version: VERSION });
     setTimeout(() => process.exit(0), 25);
