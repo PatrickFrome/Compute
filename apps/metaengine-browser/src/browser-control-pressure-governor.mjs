@@ -111,13 +111,12 @@ function pressureBand(sample = {}) {
   });
 }
 
-function budgetForValidatedLiveCells(band, liveCells) {
-  const base = BAND_BUDGETS[band] || BAND_BUDGETS.ORANGE;
-  return Object.freeze({
-    read_concurrency: base.read_concurrency,
-    mutation_concurrency: liveCells === 0 ? 0 : Math.max(1, Math.min(base.mutation_concurrency, liveCells)),
-    resource_sample_ms: base.resource_sample_ms,
-  });
+function budgetBaseFor(band) {
+  return BAND_BUDGETS[band] || BAND_BUDGETS.ORANGE;
+}
+
+function mutationConcurrencyFor(base, liveCells) {
+  return liveCells === 0 ? 0 : Math.max(1, Math.min(base.mutation_concurrency, liveCells));
 }
 
 export class BrowserControlPressureGovernor {
@@ -165,15 +164,19 @@ export class BrowserControlPressureGovernor {
     const invalidSignals = liveSignalInvalid && !this.#lastInvalid.includes('live_cells')
       ? Object.freeze([...this.#lastInvalid, 'live_cells'])
       : this.#lastInvalid;
+    const pressureBandValue = liveSignalInvalid ? 'RED' : this.#band;
+    const budgetBase = budgetBaseFor(pressureBandValue);
     return Object.freeze({
       schema: BROWSER_CONTROL_PRESSURE_GOVERNOR_SCHEMA,
-      pressure_band: liveSignalInvalid ? 'RED' : this.#band,
+      pressure_band: pressureBandValue,
       better_samples_toward_recovery: this.#betterSamples,
       recovery_samples_required: this.#recoverySamples,
       last_sample_at: this.#lastSampleAt,
       missing_signals: this.#lastReasons,
       invalid_signals: invalidSignals,
-      ...budgetForValidatedLiveCells(liveSignalInvalid ? 'RED' : this.#band, normalizedLiveCells),
+      read_concurrency: budgetBase.read_concurrency,
+      mutation_concurrency: mutationConcurrencyFor(budgetBase, normalizedLiveCells),
+      resource_sample_ms: budgetBase.resource_sample_ms,
       live_cells: normalizedLiveCells,
       sample_driven: true,
       dedicated_timer: false,
@@ -189,12 +192,15 @@ export class BrowserControlPressureGovernor {
 
 export function evaluateControlPressure(sample = {}) {
   const evaluated = pressureBand(sample);
+  const budgetBase = budgetBaseFor(evaluated.band);
   return Object.freeze({
     schema: BROWSER_CONTROL_PRESSURE_GOVERNOR_SCHEMA,
     pressure_band: evaluated.band,
     missing_signals: evaluated.missing,
     invalid_signals: evaluated.invalid,
-    ...budgetForValidatedLiveCells(evaluated.band, evaluated.liveCells),
+    read_concurrency: budgetBase.read_concurrency,
+    mutation_concurrency: mutationConcurrencyFor(budgetBase, evaluated.liveCells),
+    resource_sample_ms: budgetBase.resource_sample_ms,
     live_cells: evaluated.liveCells,
     sample_driven: true,
     scheduler_authority: false,
