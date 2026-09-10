@@ -77,6 +77,39 @@ test('dev_query returns repo, indexed evidence, and exact orientation in one too
   assert.equal(calls.state, 0, 'dev_query orientation must not require browser-state read');
 });
 
+test('Russian continuation intent is served from exact-revision cursor with zero extra Development Plane or browser-state reads', async () => {
+  const { runtime, calls } = harness();
+  const first = await runtime.callTool('dev_query', { query: 'bounded navigation abort signal', limit: 8, max_bytes: 4096 });
+  const continued = await runtime.callTool('dev_query', { query: 'Продолжи!!!', limit: 8, max_bytes: 4096 });
+  assert.equal(first.structuredContent.result.status, 'OK');
+  assert.equal(continued.structuredContent.result.status, 'OK');
+  assert.equal(continued.structuredContent.result.cursor_hit, true);
+  assert.equal(continued.structuredContent.result.cursor_source_query, 'bounded navigation abort signal');
+  assert.equal(continued.structuredContent.result.development_plane_calls, 0);
+  assert.equal(continued.structuredContent.result.filesystem_reads_required, 0);
+  assert.equal(continued.structuredContent.result.network_reads_required, 0);
+  assert.equal(calls.repo.length, 1, 'continuation must not enter Development Plane on an exact cursor hit');
+  assert.equal(calls.state, 0, 'continuation must not read live Browser state');
+  const snap = runtime.snapshot().development_cursor;
+  assert.equal(snap.current_revision_match, true);
+  assert.equal(snap.hits, 1);
+});
+
+test('stale continuation cursor falls back once to current focus then returns to zero-DP hot path', async () => {
+  const { runtime, calls } = harness();
+  await runtime.callTool('dev_query', { query: 'shell failure', limit: 8 });
+  assert.equal(calls.repo.length, 1);
+  runtime.upsertCi({ id: 22, name: 'Shell', status: 'completed', conclusion: 'failure', head_sha: 'a'.repeat(40), authority_effect: false });
+  const refreshed = await runtime.callTool('dev_query', { query: 'продолжи', limit: 8 });
+  assert.equal(refreshed.structuredContent.result.continuation_fallback, true);
+  assert.equal(calls.repo.length, 2, 'changed development revision must not replay stale source frontier');
+  assert.match(calls.repo[1].input.query, /Shell|CI FAILURE|next action/i);
+  const hotAgain = await runtime.callTool('dev_query', { query: 'продолжи', limit: 8 });
+  assert.equal(hotAgain.structuredContent.result.cursor_hit, true);
+  assert.equal(calls.repo.length, 2, 'refreshed continuation frontier must return to zero-DP hot path');
+  assert.equal(runtime.snapshot().continuation_fallbacks, 1);
+});
+
 test('repeated identical dev_query is served from warm cache with zero extra Development Plane calls', async () => {
   const { runtime, calls } = harness();
   const input = { query: 'bounded navigation abort signal', limit: 8, max_bytes: 4096 };
@@ -155,5 +188,6 @@ test('runtime owns no periodic source or CI discovery loop', () => {
   assert.equal(snap.periodic_ci_discovery, false);
   assert.equal(snap.query_provider.query_fanout_max, 2);
   assert.equal(snap.dev_query_warm_cache.timers, false);
+  assert.equal(snap.development_cursor.timers, false);
   assert.equal(snap.authority_effect, false);
 });
