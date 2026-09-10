@@ -115,6 +115,48 @@ function boundedCursor({ stateRevision, sourceQuery, result }) {
   return Object.freeze(structuredClone(base));
 }
 
+function boundedReplay(cursor) {
+  const out = {
+    schema: CHAT_DEVELOPMENT_PROVIDER_SCHEMA,
+    status: 'OK',
+    query_revision: cursor.cursor_revision,
+    source_query_revision: cursor.source_query_revision,
+    cursor_hit: true,
+    cursor_revision: cursor.cursor_revision,
+    cursor_source_query: cursor.source_query,
+    orientation: cursor.orientation,
+    hits: Array.isArray(cursor.hits) ? structuredClone(cursor.hits) : [],
+    total_hits: cursor.total_hits,
+    truncated: cursor.truncated,
+    one_call_orientation: true,
+    development_plane_calls: 0,
+    network_reads_required: 0,
+    filesystem_reads_required: 0,
+    authority_effect: false,
+    bytes: 0,
+  };
+  while (out.hits.length && bytes(out) > CHAT_DEVELOPMENT_CURSOR_MAX_BYTES) {
+    out.hits.pop();
+    out.truncated = true;
+  }
+  if (bytes(out) > CHAT_DEVELOPMENT_CURSOR_MAX_BYTES) {
+    out.cursor_source_query = clip(out.cursor_source_query, 160);
+    if (out.orientation) {
+      out.orientation = {
+        head_sha: out.orientation.head_sha,
+        ci_state: out.orientation.ci_state,
+        focus_kind: out.orientation.focus_kind,
+        focus_id: out.orientation.focus_id,
+        focus_title: clip(out.orientation.focus_title, 120),
+        authority_effect: false,
+      };
+    }
+  }
+  out.bytes = bytes(out);
+  if (out.bytes > CHAT_DEVELOPMENT_CURSOR_MAX_BYTES) throw new Error('chat_development_cursor_replay_too_large');
+  return Object.freeze(out);
+}
+
 export class ChatDevelopmentCursor {
   #cursor = null;
   #captures = 0;
@@ -138,29 +180,7 @@ export class ChatDevelopmentCursor {
       return null;
     }
     this.#hits += 1;
-    const cursor = structuredClone(this.#cursor);
-    const out = {
-      schema: CHAT_DEVELOPMENT_PROVIDER_SCHEMA,
-      status: 'OK',
-      query_revision: cursor.cursor_revision,
-      source_query_revision: cursor.source_query_revision,
-      cursor_hit: true,
-      cursor_revision: cursor.cursor_revision,
-      cursor_source_query: cursor.source_query,
-      orientation: cursor.orientation,
-      hits: cursor.hits,
-      total_hits: cursor.total_hits,
-      truncated: cursor.truncated,
-      one_call_orientation: true,
-      development_plane_calls: 0,
-      network_reads_required: 0,
-      filesystem_reads_required: 0,
-      authority_effect: false,
-      bytes: 0,
-    };
-    out.bytes = bytes(out);
-    if (out.bytes > CHAT_DEVELOPMENT_CURSOR_MAX_BYTES) throw new Error('chat_development_cursor_replay_too_large');
-    return Object.freeze(out);
+    return boundedReplay(structuredClone(this.#cursor));
   }
 
   snapshot(currentStateRevision = null) {
