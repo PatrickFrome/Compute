@@ -5,7 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const DEVOS_REPO_SEARCH_SCHEMA = 'metaengine.development-plane.repo-search.v1';
-const DEVOS_REPO_SEARCH_INDEX_SCHEMA = 'metaengine.development-plane.repo-search-index.v1';
+const DEVOS_REPO_SEARCH_INDEX_SCHEMA = 'metaengine.development-plane.repo-search-index.v2';
 const MAX_FILES = 512;
 const MAX_FILE_BYTES = 256 * 1024;
 const MAX_TOTAL_BYTES = 8 * 1024 * 1024;
@@ -50,9 +50,7 @@ function exactSource(source) {
 }
 
 function tokenize(value, maxTokens = MAX_FILE_TOKENS) {
-  const matches = String(value || '')
-    .normalize('NFKC')
-    .match(/[\p{L}\p{N}][\p{L}\p{N}._/-]{1,79}/gu) || [];
+  const matches = String(value || '').normalize('NFKC').match(/[\p{L}\p{N}][\p{L}\p{N}._/-]{1,79}/gu) || [];
   const out = [];
   const seen = new Set();
   const add = (raw) => {
@@ -72,14 +70,18 @@ function tokenize(value, maxTokens = MAX_FILE_TOKENS) {
 
 function validateRelative(relative) {
   const value = String(relative || '').replaceAll('\\', '/');
-  if (!value || value.startsWith('/') || value.includes('/../') || value.startsWith('../') || value.includes('\u0000')) {
-    throw new Error('devos_repo_search_path_invalid');
-  }
+  if (!value || value.startsWith('/') || value.includes('/../') || value.startsWith('../') || value.includes('\u0000')) throw new Error('devos_repo_search_path_invalid');
   return value;
+}
+
+function underAllowedRoot(relative) {
+  const normalized = validateRelative(relative);
+  return ALLOWED_ROOTS.some((root) => normalized === root || normalized.startsWith(`${root}/`));
 }
 
 function allowedFile(relative) {
   const normalized = validateRelative(relative);
+  if (!underAllowedRoot(normalized)) return false;
   const basename = path.posix.basename(normalized);
   if (EXCLUDED_BASENAMES.has(basename)) return false;
   if (basename.startsWith('.env') || /(?:secret|credential|private[-_]?key)/i.test(basename)) return false;
@@ -103,19 +105,16 @@ function firstEvidence(text, terms) {
   const lineStart = Math.max(0, text.lastIndexOf('\n', best - 1) + 1);
   let lineEnd = text.indexOf('\n', best);
   if (lineEnd < 0) lineEnd = text.length;
-  const line = lineNumberAt(text, lineStart);
-  const snippet = text.slice(lineStart, Math.min(lineEnd, lineStart + 600)).trim();
-  return { line, snippet: clip(snippet, 600) };
+  return { line: lineNumberAt(text, lineStart), snippet: clip(text.slice(lineStart, Math.min(lineEnd, lineStart + 600)).trim(), 600) };
 }
 
 function scoreFile(file, terms) {
   const pathTokens = new Set(tokenize(file.relative_path, 128));
   const titleTokens = new Set(tokenize(path.posix.basename(file.relative_path), 128));
-  const textTokens = file.tokens;
   let matched = 0;
   let score = 0;
   for (const term of terms) {
-    if (!textTokens.has(term)) continue;
+    if (!file.tokens.has(term)) continue;
     matched += 1;
     score += 10;
     if (pathTokens.has(term)) score += 16;
@@ -127,8 +126,7 @@ function scoreFile(file, terms) {
 
 function preferExactTermRows(rows, termCount) {
   const exact = rows.filter((row) => row.matched === termCount);
-  if (exact.length) return Object.freeze({ rows: exact, mode: 'ALL_TERMS' });
-  return Object.freeze({ rows, mode: 'PARTIAL_FALLBACK' });
+  return exact.length ? Object.freeze({ rows: exact, mode: 'ALL_TERMS' }) : Object.freeze({ rows, mode: 'PARTIAL_FALLBACK' });
 }
 
 function fitResult(result, maxBytes) {
@@ -138,7 +136,6 @@ function fitResult(result, maxBytes) {
   if (bytes(out) > budget) throw new Error(`devos_repo_search_result_budget_exceeded:${bytes(out)}:${budget}`);
   out.truncated = out.total_hits > out.hits.length;
   out.bytes = 0;
-  out.bytes = bytes(out);
   out.bytes = bytes(out);
   if (bytes(out) > budget) throw new Error(`devos_repo_search_result_budget_exceeded:${bytes(out)}:${budget}`);
   return Object.freeze(out);
@@ -154,11 +151,27 @@ class DevOSRepoSearchIndex {
   #indexedBytes = 0;
   #revision = null;
   #buildPromise = null;
+  #refreshPromise = null;
+  #worktreeEpoch = 0;
+  #dirtyPaths = new Set();
+  #forceRebuild = false;
 
   constructor({ repoRoot } = {}) {
-    const root = path.resolve(String(repoRoot || ''));
-    if (!root) throw new Error('devos_repo_search_root_invalid');
-    this.#repoRoot = root;
+    this.#repoRoot = path.resolve(String(repoRoot || ''));
+    if (!this.#repoRoot) throw new Error('devos_repo_search_root_invalid');
+  }
+
+  notifyPathChanged(relative = null) {
+    this.#worktreeEpoch += 1;
+    if (relative == null) {
+      this.#forceRebuild = true;
+      return this.snapshot();
+    }
+    let normalized;
+    try { normalized = validateRelative(relative); } catch { this.#forceRebuild = true; return this.snapshot(); }
+    if (!underAllowedRoot(normalized)) return this.snapshot();
+    this.#dirtyPaths.add(normalized);
+    return this.snapshot();
   }
 
   async #walkRoot(relativeRoot, out) {
@@ -167,82 +180,117 @@ class DevOSRepoSearchIndex {
     if (!rootRel || rootRel.startsWith('..') || path.isAbsolute(rootRel)) throw new Error('devos_repo_search_root_escape');
     let entries;
     try { entries = await fs.readdir(root, { withFileTypes: true }); }
-    catch (error) {
-      if (error?.code === 'ENOENT') return;
-      throw error;
-    }
+    catch (error) { if (error?.code === 'ENOENT') return; throw error; }
     entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
       if (out.length >= MAX_FILES) return;
       if (entry.isSymbolicLink()) continue;
       const absolute = path.join(root, entry.name);
       const relative = validateRelative(path.relative(this.#repoRoot, absolute));
-      if (entry.isDirectory()) {
-        await this.#walkRoot(relative, out);
-        continue;
-      }
-      if (!entry.isFile() || !allowedFile(relative)) continue;
-      out.push(relative);
+      if (entry.isDirectory()) { await this.#walkRoot(relative, out); continue; }
+      if (entry.isFile() && allowedFile(relative)) out.push(relative);
     }
+  }
+
+  async #readFile(relative) {
+    if (!allowedFile(relative)) return null;
+    const absolute = path.resolve(this.#repoRoot, relative);
+    const rel = path.relative(this.#repoRoot, absolute);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('devos_repo_search_file_escape');
+    let stat;
+    try { stat = await fs.stat(absolute); } catch (error) { if (error?.code === 'ENOENT') return null; throw error; }
+    if (!stat.isFile() || stat.size > MAX_FILE_BYTES) return null;
+    const text = await fs.readFile(absolute, 'utf8');
+    return Object.freeze({
+      relative_path: relative.replaceAll('\\', '/'),
+      sha256: `sha256:${sha256(Buffer.from(text, 'utf8'))}`,
+      bytes: Buffer.byteLength(text, 'utf8'),
+      text,
+      tokens: new Set(tokenize(`${relative}\n${text}`, MAX_FILE_TOKENS)),
+    });
+  }
+
+  #rebuildPostings() {
+    this.#files.sort((a, b) => a.relative_path.localeCompare(b.relative_path));
+    this.#postings = new Map();
+    this.#indexedBytes = 0;
+    for (let fileIndex = 0; fileIndex < this.#files.length; fileIndex += 1) {
+      const file = this.#files[fileIndex];
+      this.#indexedBytes += file.bytes;
+      for (const token of file.tokens) {
+        if (!this.#postings.has(token)) this.#postings.set(token, []);
+        this.#postings.get(token).push(fileIndex);
+      }
+    }
+  }
+
+  #recomputeRevision() {
+    const revisionMaterial = this.#files.map((file) => [file.relative_path, file.sha256, file.bytes]);
+    this.#revision = `repoidx:${sha256(Buffer.from(JSON.stringify({ repository: this.#repository, head: this.#head, ref: this.#ref, worktree_epoch: this.#worktreeEpoch, files: revisionMaterial }), 'utf8'))}`;
   }
 
   async #build(source) {
     const exact = exactSource(source);
+    const startEpoch = this.#worktreeEpoch;
     const paths = [];
-    for (const root of ALLOWED_ROOTS) {
-      if (paths.length >= MAX_FILES) break;
-      await this.#walkRoot(root, paths);
-    }
+    for (const root of ALLOWED_ROOTS) { if (paths.length >= MAX_FILES) break; await this.#walkRoot(root, paths); }
     const files = [];
-    const postings = new Map();
     let indexedBytes = 0;
     for (const relative of paths) {
       if (files.length >= MAX_FILES || indexedBytes >= MAX_TOTAL_BYTES) break;
-      const absolute = path.resolve(this.#repoRoot, relative);
-      const rel = path.relative(this.#repoRoot, absolute);
-      if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('devos_repo_search_file_escape');
-      const stat = await fs.stat(absolute);
-      if (!stat.isFile() || stat.size > MAX_FILE_BYTES) continue;
-      if (indexedBytes + stat.size > MAX_TOTAL_BYTES) break;
-      const text = await fs.readFile(absolute, 'utf8');
-      const tokens = new Set(tokenize(`${relative}\n${text}`, MAX_FILE_TOKENS));
-      const file = Object.freeze({
-        relative_path: relative.replaceAll('\\', '/'),
-        sha256: `sha256:${sha256(Buffer.from(text, 'utf8'))}`,
-        bytes: Buffer.byteLength(text, 'utf8'),
-        text,
-        tokens,
-      });
-      const fileIndex = files.length;
+      const file = await this.#readFile(relative);
+      if (!file || indexedBytes + file.bytes > MAX_TOTAL_BYTES) continue;
       files.push(file);
       indexedBytes += file.bytes;
-      for (const token of tokens) {
-        if (!postings.has(token)) postings.set(token, []);
-        postings.get(token).push(fileIndex);
-      }
     }
-    const revisionMaterial = files.map((file) => [file.relative_path, file.sha256, file.bytes]);
     this.#files = files;
-    this.#postings = postings;
-    this.#indexedBytes = indexedBytes;
     this.#head = exact.head;
     this.#repository = exact.repository;
     this.#ref = exact.ref;
-    this.#revision = `repoidx:${sha256(Buffer.from(JSON.stringify({ source: exact, files: revisionMaterial }), 'utf8'))}`;
+    this.#rebuildPostings();
+    this.#recomputeRevision();
+    if (this.#worktreeEpoch === startEpoch) { this.#dirtyPaths.clear(); this.#forceRebuild = false; }
+    return this.snapshot();
+  }
+
+  async #refreshDirty(source) {
+    const exact = exactSource(source);
+    if (this.#forceRebuild || this.#head !== exact.head || this.#repository !== exact.repository || !this.#revision) return this.#build(exact);
+    const pending = [...this.#dirtyPaths];
+    if (!pending.length) return this.snapshot();
+    const byPath = new Map(this.#files.map((file) => [file.relative_path, file]));
+    for (const relative of pending) {
+      const file = await this.#readFile(relative);
+      if (file) byPath.set(relative, file); else byPath.delete(relative);
+      this.#dirtyPaths.delete(relative);
+    }
+    const next = [...byPath.values()].sort((a, b) => a.relative_path.localeCompare(b.relative_path));
+    const bounded = [];
+    let indexedBytes = 0;
+    for (const file of next) {
+      if (bounded.length >= MAX_FILES || indexedBytes + file.bytes > MAX_TOTAL_BYTES) break;
+      bounded.push(file); indexedBytes += file.bytes;
+    }
+    this.#files = bounded;
+    this.#ref = exact.ref;
+    this.#rebuildPostings();
+    this.#recomputeRevision();
     return this.snapshot();
   }
 
   async ensure(source) {
     const exact = exactSource(source);
-    if (this.#head === exact.head && this.#repository === exact.repository && this.#revision) {
-      return Object.freeze({ rebuilt: false, snapshot: this.snapshot() });
+    if (this.#head !== exact.head || this.#repository !== exact.repository || !this.#revision || this.#forceRebuild) {
+      if (!this.#buildPromise) this.#buildPromise = this.#build(exact).finally(() => { this.#buildPromise = null; });
+      const snapshot = await this.#buildPromise;
+      return Object.freeze({ rebuilt: true, worktree_refreshed: false, snapshot });
     }
-    if (!this.#buildPromise) this.#buildPromise = this.#build(exact).finally(() => { this.#buildPromise = null; });
-    const snapshot = await this.#buildPromise;
-    if (this.#head !== exact.head || this.#repository !== exact.repository) {
-      throw new Error('devos_repo_search_source_changed_during_build');
+    if (this.#dirtyPaths.size) {
+      if (!this.#refreshPromise) this.#refreshPromise = this.#refreshDirty(exact).finally(() => { this.#refreshPromise = null; });
+      const snapshot = await this.#refreshPromise;
+      return Object.freeze({ rebuilt: false, worktree_refreshed: true, snapshot });
     }
-    return Object.freeze({ rebuilt: true, snapshot });
+    return Object.freeze({ rebuilt: false, worktree_refreshed: false, snapshot: this.snapshot() });
   }
 
   snapshot() {
@@ -251,6 +299,9 @@ class DevOSRepoSearchIndex {
       repository: this.#repository,
       head: this.#head,
       ref: this.#ref,
+      worktree_epoch: this.#worktreeEpoch,
+      pending_dirty_paths: this.#dirtyPaths.size,
+      force_rebuild: this.#forceRebuild,
       revision: this.#revision,
       indexed_file_count: this.#files.length,
       indexed_bytes: this.#indexedBytes,
@@ -280,70 +331,23 @@ class DevOSRepoSearchIndex {
     if (!terms.length) throw new Error('devos_repo_search_terms_invalid');
     const queryRevision = `rq:${sha256(Buffer.from(JSON.stringify({ index: this.#revision, terms }), 'utf8'))}`;
     if (input.if_none_match && String(input.if_none_match) === queryRevision) {
-      const out = {
-        schema: DEVOS_REPO_SEARCH_SCHEMA,
-        status: 'NOT_MODIFIED',
-        repository: this.#repository,
-        head: this.#head,
-        index_revision: this.#revision,
-        query_revision: queryRevision,
-        index_rebuilt: ensured.rebuilt,
-        ...zeroAuthority(),
-      };
+      const out = { schema: DEVOS_REPO_SEARCH_SCHEMA, status: 'NOT_MODIFIED', repository: this.#repository, head: this.#head, worktree_epoch: this.#worktreeEpoch, index_revision: this.#revision, query_revision: queryRevision, index_rebuilt: ensured.rebuilt, worktree_refreshed: ensured.worktree_refreshed, ...zeroAuthority() };
       return Object.freeze({ ...out, bytes: bytes(out), truncated: false });
     }
     const candidates = new Set();
     for (const term of terms) for (const fileIndex of this.#postings.get(term) || []) candidates.add(fileIndex);
-    const rankedCandidates = [...candidates]
-      .map((fileIndex) => ({ file: this.#files[fileIndex], ...scoreFile(this.#files[fileIndex], terms) }))
-      .filter((row) => row.matched > 0)
-      .sort((a, b) => b.score - a.score || b.matched - a.matched || a.file.relative_path.localeCompare(b.file.relative_path));
+    const rankedCandidates = [...candidates].map((fileIndex) => ({ file: this.#files[fileIndex], ...scoreFile(this.#files[fileIndex], terms) })).filter((row) => row.matched > 0).sort((a, b) => b.score - a.score || b.matched - a.matched || a.file.relative_path.localeCompare(b.file.relative_path));
     const preferred = preferExactTermRows(rankedCandidates, terms.length);
-    const ranked = preferred.rows;
     const result = {
-      schema: DEVOS_REPO_SEARCH_SCHEMA,
-      status: 'OK',
-      repository: this.#repository,
-      head: this.#head,
-      ref: this.#ref,
-      index_revision: this.#revision,
-      query_revision: queryRevision,
-      query_terms: terms,
-      match_mode: preferred.mode,
-      index_rebuilt: ensured.rebuilt,
-      indexed_file_count: this.#files.length,
-      indexed_bytes: this.#indexedBytes,
-      total_hits: ranked.length,
-      hits: ranked.slice(0, limit).map(({ file, score, matched }) => {
-        const evidence = firstEvidence(file.text, terms);
-        return {
-          path: file.relative_path,
-          sha256: file.sha256,
-          line: evidence.line,
-          snippet: evidence.snippet,
-          score,
-          matched_terms: matched,
-          authority_effect: false,
-        };
-      }),
-      search_strategy: 'HEAD_CACHED_INVERTED_INDEX',
-      arbitrary_path_selection: false,
-      process_spawn_used: false,
-      ...zeroAuthority(),
+      schema: DEVOS_REPO_SEARCH_SCHEMA, status: 'OK', repository: this.#repository, head: this.#head, ref: this.#ref,
+      worktree_epoch: this.#worktreeEpoch, index_revision: this.#revision, query_revision: queryRevision, query_terms: terms,
+      match_mode: preferred.mode, index_rebuilt: ensured.rebuilt, worktree_refreshed: ensured.worktree_refreshed,
+      indexed_file_count: this.#files.length, indexed_bytes: this.#indexedBytes, total_hits: preferred.rows.length,
+      hits: preferred.rows.slice(0, limit).map(({ file, score, matched }) => { const evidence = firstEvidence(file.text, terms); return { path: file.relative_path, sha256: file.sha256, line: evidence.line, snippet: evidence.snippet, score, matched_terms: matched, authority_effect: false }; }),
+      search_strategy: 'HEAD_PLUS_WORKTREE_EVENT_INDEX', arbitrary_path_selection: false, process_spawn_used: false, ...zeroAuthority(),
     };
     return fitResult(result, input.max_bytes);
   }
 }
 
-module.exports = Object.freeze({
-  DEVOS_REPO_SEARCH_SCHEMA,
-  DEVOS_REPO_SEARCH_INDEX_SCHEMA,
-  MAX_FILES,
-  MAX_FILE_BYTES,
-  MAX_TOTAL_BYTES,
-  MAX_FILE_TOKENS,
-  MAX_HITS,
-  MAX_RESULT_BYTES,
-  ALLOWED_ROOTS,
-  DevOSRepoSearchIndex,
-});
+module.exports = Object.freeze({ DEVOS_REPO_SEARCH_SCHEMA, DEVOS_REPO_SEARCH_INDEX_SCHEMA, MAX_FILES, MAX_FILE_BYTES, MAX_TOTAL_BYTES, MAX_FILE_TOKENS, MAX_HITS, MAX_RESULT_BYTES, ALLOWED_ROOTS, DevOSRepoSearchIndex });

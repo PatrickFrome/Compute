@@ -3,8 +3,10 @@ name: Browser Chat Fast Control Preflight V1
 on:
   pull_request:
     paths:
+      - 'apps/metaengine-browser/src/browser-plan-runtime.mjs'
       - 'apps/metaengine-browser/src/chat-development-*.mjs'
       - 'apps/metaengine-browser/src/chat-fast-control-runtime.mjs'
+      - 'apps/metaengine-browser/src/devos-base-compatibility-v2.mjs'
       - 'apps/metaengine-browser/src/devos-repo-search-index.cjs'
       - 'apps/metaengine-browser/src/development-plane.mjs'
       - 'apps/metaengine-browser/src/development-plane-worker.cjs'
@@ -13,7 +15,9 @@ on:
       - 'apps/metaengine-browser/src/fast-control-mcp-adapter.mjs'
       - 'apps/metaengine-browser/src/fast-control-mcp-stateless-router.mjs'
       - 'apps/metaengine-browser/test/browser-chatgpt-fast-open.test.mjs'
+      - 'apps/metaengine-browser/test/browser-plan-runtime.test.mjs'
       - 'apps/metaengine-browser/test/chat-*.test.mjs'
+      - 'apps/metaengine-browser/test/devos-base-compatibility-v2.test.mjs'
       - 'apps/metaengine-browser/test/devos-repo-search-index.test.mjs'
       - 'apps/metaengine-browser/test/development-plane-repo-search.test.mjs'
       - 'apps/metaengine-browser/test/fast-context-v1.test.mjs'
@@ -46,12 +50,14 @@ jobs:
           node-version: '24'
       - name: Parse chat fast control modules
         run: |
+          node --check src/browser-plan-runtime.mjs
           node --check src/chat-development-index.mjs
           node --check src/chat-development-query-provider.mjs
           node --check src/chat-development-capsule.mjs
           node --check src/chat-development-control-state.mjs
           node --check src/chat-development-cursor.mjs
           node --check src/chat-fast-control-runtime.mjs
+          node --check src/devos-base-compatibility-v2.mjs
           node --check src/devos-repo-search-index.cjs
           node --check src/development-plane.mjs
           node --check src/development-plane-worker.cjs
@@ -61,14 +67,18 @@ jobs:
           node --check src/fast-control-mcp-stateless-router.mjs
       - name: Fast-open bounded navigation contract
         run: node --test test/browser-chatgpt-fast-open.test.mjs
+      - name: Local BrowserPlan runtime
+        run: node --test test/browser-plan-runtime.test.mjs
       - name: Development evidence index
         run: node --test test/chat-development-index.test.mjs
       - name: Zero-IO development cursor
         run: node --test test/chat-development-cursor.test.mjs
-      - name: Exact-head repo search index
+      - name: Worktree-aware repo search index
         run: node --test test/devos-repo-search-index.test.mjs
       - name: Development Plane repo search bridge
         run: node --test test/development-plane-repo-search.test.mjs
+      - name: DevOS scoped base compatibility
+        run: node --test test/devos-base-compatibility-v2.test.mjs
       - name: One-call development query provider
         run: node --test test/chat-development-query-provider.test.mjs
       - name: Compact development capsule

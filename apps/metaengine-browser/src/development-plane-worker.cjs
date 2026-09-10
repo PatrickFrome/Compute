@@ -1,16 +1,17 @@
 'use strict';
 
 const fs = require('node:fs/promises');
+const fsSync = require('node:fs');
 const path = require('node:path');
 const { createCandidateCapsule } = require('./candidate-capsule.cjs');
 const { verifyCandidateCapsuleRemoteBound } = require('./candidate-remote-source.cjs');
 const { createVerificationSandboxPlan, verifyVerificationSandboxPlan } = require('./verification-sandbox-plan.cjs');
 const { verifyEnvelope: verifyAdvisoryEvidenceEnvelope } = require('./advisory-evidence-verifier.cjs');
 const { createDevOSRepoReadModel } = require('./devos-repo-read-model.cjs');
-const { DevOSRepoSearchIndex } = require('./devos-repo-search-index.cjs');
+const { DevOSRepoSearchIndex, ALLOWED_ROOTS } = require('./devos-repo-search-index.cjs');
 
 const PROTOCOL = 'metaengine.development-plane.v1';
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 const CAPABILITIES = Object.freeze([
   'HEALTH',
   'CAPABILITIES',
@@ -29,10 +30,42 @@ const repositoryName = String(process.env.METAENGINE_GIT_REPOSITORY || 'PatrickF
 const repositoryRemote = String(process.env.METAENGINE_GIT_REMOTE || 'origin');
 const sourceProvenancePath = path.resolve(process.env.METAENGINE_SOURCE_PROVENANCE || path.join(repoRoot, '.metaengine-source-provenance.json'));
 const repoSearchIndex = new DevOSRepoSearchIndex({ repoRoot });
+const worktreeWatchers = [];
+let worktreeWatchMode = 'UNARMED';
 
 function send(message) {
   if (!process.parentPort) throw new Error('development_plane_parent_port_missing');
   process.parentPort.postMessage({ protocol: PROTOCOL, ...message, authority_effect: false });
+}
+
+function armWorktreeWatchers() {
+  let armed = 0;
+  for (const relativeRoot of ALLOWED_ROOTS) {
+    const absoluteRoot = path.resolve(repoRoot, relativeRoot);
+    try {
+      const watcher = fsSync.watch(absoluteRoot, { recursive: true, persistent: false }, (_eventType, filename) => {
+        if (!filename) {
+          repoSearchIndex.notifyPathChanged(null);
+          return;
+        }
+        const relative = path.relative(repoRoot, path.join(absoluteRoot, String(filename))).replaceAll('\\', '/');
+        repoSearchIndex.notifyPathChanged(relative);
+      });
+      watcher.on('error', () => repoSearchIndex.notifyPathChanged(null));
+      worktreeWatchers.push(watcher);
+      armed += 1;
+    } catch {
+      repoSearchIndex.notifyPathChanged(null);
+    }
+  }
+  worktreeWatchMode = armed === ALLOWED_ROOTS.length ? 'RECURSIVE_EVENT' : armed > 0 ? 'PARTIAL_EVENT_WITH_REBUILD_FENCE' : 'REBUILD_FENCE_ONLY';
+}
+
+function closeWorktreeWatchers() {
+  for (const watcher of worktreeWatchers.splice(0)) {
+    try { watcher.close(); } catch {}
+  }
+  worktreeWatchMode = 'CLOSED';
 }
 
 async function readRepoHead() {
@@ -78,10 +111,7 @@ async function requireCurrentSource() {
 }
 
 function verifyRemoteBoundCandidate(capsule, source) {
-  return verifyCandidateCapsuleRemoteBound(capsule, source, {
-    cwd: repoRoot,
-    remote: repositoryRemote,
-  });
+  return verifyCandidateCapsuleRemoteBound(capsule, source, { cwd: repoRoot, remote: repositoryRemote });
 }
 
 function requireObjectPayload(payload, name) {
@@ -91,7 +121,7 @@ function requireObjectPayload(payload, name) {
 
 async function execute(capability, payload) {
   if (!CAPABILITIES.includes(capability)) throw new Error('capability_denied');
-  if (capability === 'HEALTH') return { ok: true, pid: process.pid, uptime_seconds: process.uptime(), process_type: process.type || 'utility' };
+  if (capability === 'HEALTH') return { ok: true, pid: process.pid, uptime_seconds: process.uptime(), process_type: process.type || 'utility', worktree_watch_mode: worktreeWatchMode, worktree_epoch: repoSearchIndex.snapshot().worktree_epoch };
   if (capability === 'CAPABILITIES') return {
     version: VERSION,
     capabilities: [...CAPABILITIES],
@@ -110,7 +140,8 @@ async function execute(capability, payload) {
     advisory_evidence_promotion_authority: false,
     devos_repo_read_model: true,
     devos_repo_search: true,
-    devos_repo_search_cache: 'EXACT_HEAD',
+    devos_repo_search_cache: 'HEAD_PLUS_WORKTREE_EVENT',
+    devos_repo_search_worktree_watch_mode: worktreeWatchMode,
     devos_repo_search_arbitrary_path_selection: false,
     devos_repo_arbitrary_path_read: false,
     direct_promote_current: false,
@@ -136,12 +167,7 @@ async function execute(capability, payload) {
     if (!payload.capsule) throw new Error('sandbox_plan_create_payload_invalid');
     const source = await requireCurrentSource();
     const candidateVerification = verifyRemoteBoundCandidate(payload.capsule, source);
-    return createVerificationSandboxPlan({
-      capsule: payload.capsule,
-      candidate_verification: candidateVerification,
-      requested_backend: payload.requested_backend ?? null,
-      resources: payload.resources ?? null,
-    });
+    return createVerificationSandboxPlan({ capsule: payload.capsule, candidate_verification: candidateVerification, requested_backend: payload.requested_backend ?? null, resources: payload.resources ?? null });
   }
   if (capability === 'VERIFICATION_SANDBOX_PLAN_VERIFY') {
     requireObjectPayload(payload, 'sandbox_plan_verify');
@@ -164,6 +190,7 @@ process.parentPort.on('message', async (event) => {
   const message = event?.data;
   if (!message || message.protocol !== PROTOCOL) return;
   if (message.type === 'CONTROL' && message.control === 'SHUTDOWN') {
+    closeWorktreeWatchers();
     send({ type: 'SHUTDOWN_ACK', version: VERSION });
     setTimeout(() => process.exit(0), 25);
     return;
@@ -178,4 +205,5 @@ process.parentPort.on('message', async (event) => {
   }
 });
 
-send({ type: 'READY', version: VERSION, capabilities: [...CAPABILITIES] });
+armWorktreeWatchers();
+send({ type: 'READY', version: VERSION, capabilities: [...CAPABILITIES], worktree_watch_mode: worktreeWatchMode, worktree_epoch: repoSearchIndex.snapshot().worktree_epoch });
