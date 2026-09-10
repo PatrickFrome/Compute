@@ -16,19 +16,38 @@ const PROTOCOL_META = 'io.modelcontextprotocol/protocolVersion';
 const CAPABILITIES_META = 'io.modelcontextprotocol/clientCapabilities';
 const SERVER_INFO_META = 'io.modelcontextprotocol/serverInfo';
 
-const bytes = (value) => Buffer.byteLength(JSON.stringify(value), 'utf8');
 const plain = (value) => value && typeof value === 'object' && !Array.isArray(value);
 
-function headersOf(value) {
-  if (!plain(value)) throw new Error('fast_control_mcp_headers_invalid');
-  const out = new Map();
-  for (const [key, item] of Object.entries(value)) out.set(String(key).toLowerCase(), String(item));
-  return out;
+function requestBytes(request, transportBodyBytes) {
+  if (transportBodyBytes != null) {
+    if (!Number.isSafeInteger(transportBodyBytes) || transportBodyBytes < 1) {
+      throw new Error('fast_control_mcp_transport_body_bytes_invalid');
+    }
+    return transportBodyBytes;
+  }
+  return Buffer.byteLength(JSON.stringify(request), 'utf8');
 }
 
-function validateEnvelope(headersInput, request) {
+function routingHeaders(value) {
+  if (!plain(value)) throw new Error('fast_control_mcp_headers_invalid');
+  let protocol;
+  let method;
+  let name;
+  let hasName = false;
+  for (const [key, item] of Object.entries(value)) {
+    switch (key.toLowerCase()) {
+      case 'mcp-protocol-version': protocol = String(item); break;
+      case 'mcp-method': method = String(item); break;
+      case 'mcp-name': name = String(item); hasName = true; break;
+      default: break;
+    }
+  }
+  return Object.freeze({ protocol, method, name, hasName });
+}
+
+function validateEnvelope(headersInput, request, transportBodyBytes) {
   if (!plain(request) || request.jsonrpc !== '2.0' || request.id == null) throw new Error('fast_control_mcp_request_invalid');
-  if (bytes(request) > FAST_CONTROL_MCP_MAX_REQUEST_BYTES) throw new Error('fast_control_mcp_request_too_large');
+  if (requestBytes(request, transportBodyBytes) > FAST_CONTROL_MCP_MAX_REQUEST_BYTES) throw new Error('fast_control_mcp_request_too_large');
   const method = String(request.method || '');
   if (!SUPPORTED_METHODS.has(method)) throw new Error('fast_control_mcp_method_unsupported');
   const params = plain(request.params) ? request.params : {};
@@ -37,15 +56,15 @@ function validateEnvelope(headersInput, request) {
   if (meta[PROTOCOL_META] !== FAST_CONTROL_MCP_PROTOCOL_REVISION) throw new Error('fast_control_mcp_protocol_unsupported');
   if (!plain(meta[CAPABILITIES_META])) throw new Error('fast_control_mcp_client_capabilities_required');
 
-  const headers = headersOf(headersInput);
-  if (headers.get('mcp-protocol-version') !== FAST_CONTROL_MCP_PROTOCOL_REVISION) throw new Error('fast_control_mcp_protocol_header_mismatch');
-  if (headers.get('mcp-method') !== method) throw new Error('fast_control_mcp_method_header_mismatch');
+  const headers = routingHeaders(headersInput);
+  if (headers.protocol !== FAST_CONTROL_MCP_PROTOCOL_REVISION) throw new Error('fast_control_mcp_protocol_header_mismatch');
+  if (headers.method !== method) throw new Error('fast_control_mcp_method_header_mismatch');
   if (method === 'tools/call') {
     const name = String(params.name || '');
     if (!name) throw new Error('fast_control_mcp_tool_name_required');
-    if (headers.get('mcp-name') !== name) throw new Error('fast_control_mcp_name_header_mismatch');
+    if (headers.name !== name) throw new Error('fast_control_mcp_name_header_mismatch');
     if (!plain(params.arguments ?? {})) throw new Error('fast_control_mcp_tool_arguments_invalid');
-  } else if (headers.has('mcp-name')) {
+  } else if (headers.hasName) {
     throw new Error('fast_control_mcp_name_header_unexpected');
   }
   return Object.freeze({ method, params });
@@ -70,8 +89,8 @@ export function createFastControlMcpStatelessRouter(adapter) {
     listener_owned: false,
     subscriptions: false,
     tasks: false,
-    async handle({ headers = {}, request } = {}) {
-      const { method, params } = validateEnvelope(headers, request);
+    async handle({ headers = {}, request, transport_body_bytes = null } = {}) {
+      const { method, params } = validateEnvelope(headers, request, transport_body_bytes);
       if (method === 'server/discover') {
         return response(request.id, {
           resultType: 'complete',
@@ -109,6 +128,9 @@ export function createFastControlMcpStatelessRouter(adapter) {
         protocol_revision: FAST_CONTROL_MCP_PROTOCOL_REVISION,
         supported_methods: [...SUPPORTED_METHODS],
         max_request_bytes: FAST_CONTROL_MCP_MAX_REQUEST_BYTES,
+        transport_body_bytes_supported: true,
+        legacy_request_size_fallback: true,
+        routing_header_projection: 'FIXED_ONE_PASS',
         session_state: false,
         listener_owned: false,
         subscriptions: false,

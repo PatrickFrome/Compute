@@ -42,10 +42,10 @@ function minimalEnvelope() {
   };
 }
 
-test('DP 0.4 advertises advisory verification without network or action authority', async () => {
+test('DP 0.5 advertises advisory verification without network or action authority', async () => {
   const { plane } = await ready();
   const snap = plane.snapshot();
-  assert.equal(snap.version, '0.4.0');
+  assert.equal(snap.version, '0.5.0');
   assert.equal(snap.capabilities.includes('ADVISORY_EVIDENCE_VERIFY'), true);
   assert.equal(snap.advisory_evidence_verification, true);
   assert.equal(snap.advisory_evidence_network_dispatch, false);

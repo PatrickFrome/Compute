@@ -12,8 +12,13 @@ const plainObject = (value) => value && typeof value === 'object' && !Array.isAr
 const byteLength = (value) => Buffer.byteLength(JSON.stringify(value ?? null), 'utf8');
 const clip = (value, max) => value == null ? null : String(value).slice(0, max);
 
-function assertPlain(value, code) {
+function assertPlainShape(value, code) {
   if (!plainObject(value)) throw new Error(code);
+  return value;
+}
+
+function assertPlain(value, code) {
+  assertPlainShape(value, code);
   if (byteLength(value) > FAST_CONTROL_MAX_INPUT_BYTES) throw new Error('fast_control_input_too_large');
   return value;
 }
@@ -70,8 +75,10 @@ function normalizeRunSubmit(input) {
 }
 
 function normalizeDevQuery(input) {
+  assertPlainShape(input, 'fast_control_tool_input_invalid');
   exactKeys(input, new Set(['query', 'kinds', 'limit', 'if_none_match', 'max_bytes']), 'fast_control_dev_query_field_unknown');
-  const query = String(input.query || '').trim();
+  if (typeof input.query !== 'string') throw new Error('fast_control_dev_query_invalid');
+  const query = input.query.trim();
   if (!query || Buffer.byteLength(query, 'utf8') > 1024) throw new Error('fast_control_dev_query_invalid');
   const limit = Number(input.limit ?? 8);
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 12) throw new Error('fast_control_dev_query_limit_invalid');
@@ -80,16 +87,22 @@ function normalizeDevQuery(input) {
   let kinds = null;
   if (input.kinds != null) {
     if (!Array.isArray(input.kinds) || input.kinds.length < 1 || input.kinds.length > DEV_QUERY_KINDS.size) throw new Error('fast_control_dev_query_kinds_invalid');
-    kinds = input.kinds.map((value) => String(value || '').trim().toUpperCase());
+    if (input.kinds.some((value) => typeof value !== 'string' || value.length > 32)) throw new Error('fast_control_dev_query_kinds_invalid');
+    kinds = input.kinds.map((value) => value.trim().toUpperCase());
     if (new Set(kinds).size !== kinds.length || kinds.some((value) => !DEV_QUERY_KINDS.has(value))) {
       throw new Error('fast_control_dev_query_kinds_invalid');
     }
+  }
+  let ifNoneMatch = null;
+  if (input.if_none_match != null) {
+    if (typeof input.if_none_match !== 'string' || input.if_none_match.length > 96) throw new Error('fast_control_dev_query_if_none_match_invalid');
+    ifNoneMatch = input.if_none_match;
   }
   return Object.freeze({
     query,
     kinds,
     limit,
-    if_none_match: clip(input.if_none_match, 96),
+    if_none_match: ifNoneMatch,
     max_bytes: maxBytes,
     authority_effect: false,
   });
@@ -127,6 +140,8 @@ export function fastControlToolManifest() {
       Object.freeze({ name: 'run_status', purpose: 'read monotonic terminal result delta', mutating: false }),
       Object.freeze({ name: 'emergency_stop', purpose: 'issue DB-authoritative DISARM or OFF command', mutating: true }),
     ]),
+    dev_query_schema_bounded_input: true,
+    dev_query_full_input_serialization: false,
     raw_sql: false,
     arbitrary_eval: false,
     raw_cdp_passthrough: false,
@@ -161,19 +176,11 @@ export class FastControlGatewayCore {
   async invoke(name, input = {}) {
     const tool = String(name || '').trim();
     if (!TOOL_NAMES.includes(tool)) throw new Error('fast_control_tool_unknown');
-    assertPlain(input, 'fast_control_tool_input_invalid');
-
-    if (tool === 'context_get') {
-      exactKeys(input, new Set(['fields', 'if_none_match', 'max_bytes']), 'fast_control_context_field_unknown');
-      const result = await this.#contextGet({
-        fields: Array.isArray(input.fields) ? input.fields.slice(0, 32).map((value) => String(value).slice(0, 80)) : null,
-        if_none_match: clip(input.if_none_match, 96),
-        max_bytes: input.max_bytes,
-      });
-      return Object.freeze({ tool, result, authority_effect: false });
-    }
 
     if (tool === 'dev_query') {
+      // dev_query has a closed schema whose individual fields are strictly bounded,
+      // so serializing the entire request again only to apply the generic 64 KiB
+      // guard is redundant on the hottest read path.
       const request = normalizeDevQuery(input);
       const result = await this.#devQuery(request);
       return Object.freeze({
@@ -185,6 +192,18 @@ export class FastControlGatewayCore {
         command_leasing_authority: false,
         authority_effect: false,
       });
+    }
+
+    assertPlain(input, 'fast_control_tool_input_invalid');
+
+    if (tool === 'context_get') {
+      exactKeys(input, new Set(['fields', 'if_none_match', 'max_bytes']), 'fast_control_context_field_unknown');
+      const result = await this.#contextGet({
+        fields: Array.isArray(input.fields) ? input.fields.slice(0, 32).map((value) => String(value).slice(0, 80)) : null,
+        if_none_match: clip(input.if_none_match, 96),
+        max_bytes: input.max_bytes,
+      });
+      return Object.freeze({ tool, result, authority_effect: false });
     }
 
     if (tool === 'run_submit') {
