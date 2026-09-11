@@ -42,15 +42,21 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertIn("sidePanel", self.manifest["permissions"])
         self.assertEqual(self.manifest["content_scripts"][0]["js"], ["prompt-gate.js"])
         self.assertEqual(self.manifest["content_scripts"][0]["run_at"], "document_start")
-        self.assertEqual(self.manifest["content_scripts"][1]["js"], ["platform-dom-compat.js", "content.js", "content-recovery-v062.js"])
+        self.assertEqual(self.manifest["content_scripts"][1]["js"], ["platform-dom-compat.js", "content.js", "content-recovery.js"])
         for script in [
-            "bootstrap-config.js", "secret-vault.js", "bridge-client.js", "debugger-broker.js",
-            "trusted-chatgpt.js", "trusted-glm.js", "operator-gate-bindings.js", "operator-actions.js",
-            "background.js", "operator-control.js", "operator-perception.js", "operator-oopif-perception.js",
-            "debugger-watchdog-v062.js", "chatgpt-rollover-v062.js", "runtime-marker-v062.js"
+            "bootstrap-config.js", "secret-vault.js", "device-identity.js", "bridge-client.js",
+            "runtime-marker.js", "target-registry.js", "target-observability.js", "bridge-runtime.js",
+            "supervisor-device-transport.js", "debugger-broker.js", "debugger-watchdog.js",
+            "trusted-chatgpt.js", "chatgpt-rollover.js", "trusted-glm.js", "operator-gate-bindings.js",
+            "operator-lease-gate.js", "operator-actions.js", "operator-compute-bridge.js", "runtime-core.js",
+            "operator-control.js", "operator-perception.js", "operator-oopif-perception.js",
+            "operator-semantic-actions.js", "supervisor-authority.js", "supervisor-chat-session.js",
+            "trusted-supervisor-chat.js", "supervisor-chat-action.js", "supervisor-chat-guard.js",
+            "supervisor-chat-action-monitor.js", "supervisor-incident-router.js", "supervisor-chat-ui-bridge.js"
         ]:
             self.assertIn(f'importScripts("./{script}")', self.background_entry)
         self.assertNotIn("background-v0522.js", self.background_entry)
+        self.assertNotIn("operator-oopf-perception.js", self.background_entry)
         self.assertNotIn("import(", self.background_entry)
 
     def test_remote_auth_and_secret_boundaries(self):
