@@ -11,19 +11,24 @@ test('ChatGPT interactive open preconnects the persistent authenticated session'
   assert.match(main, /state: chatgptPreconnectArmed \? 'ARMED' : 'UNAVAILABLE'/);
   assert.match(main, /initialTab = await runDegradableStartupStep\('INITIAL_TAB_CREATE', \(\) => createTab\('https:\/\/chatgpt\.com\/', \{ select: true, load: false \}\)\)/);
   assert.match(main, /user_space_partition/);
-  assert.doesNotMatch(main, /preconnect[\s\S]{0,220}(setInterval|setTimeout|retry)/i);
+  assert.doesNotMatch(main, /preconnect[\s\S]{0,220}(setInterval|setTimeout|\bretry\s*\()/i);
 });
 
-test('New Chat selects and exposes the exact WebContents before network completion without retry authority', () => {
+test('New Chat selects and exposes the exact WebContents before bounded network completion without retry authority', () => {
   assert.match(main, /NEW_CHATGPT'\) return createTab\('https:\/\/chatgpt\.com\/', \{ select: true, load: true, awaitLoad: false \}\)/);
   const start = main.indexOf('async function createTab(');
   const end = main.indexOf('async function loadTab(', start);
   const fn = main.slice(start, end);
-  assert.ok(fn.indexOf('registry.select(tab.tab_id)') < fn.indexOf('view.webContents.loadURL(d.normalized_url)'));
-  assert.ok(fn.indexOf('attachSelected()') < fn.indexOf('view.webContents.loadURL(d.normalized_url)'));
-  assert.match(fn, /if \(awaitLoad\) await pendingLoad/);
+  const navigationStart = fn.indexOf('boundedNavigation(view.webContents, d.normalized_url');
+  assert.ok(navigationStart >= 0, 'createTab must start remote navigation through boundedNavigation');
+  assert.ok(fn.indexOf('registry.select(tab.tab_id)') < navigationStart);
+  assert.ok(fn.indexOf('attachSelected()') < navigationStart);
+  assert.match(fn, /if \(awaitLoad\) navigation = await pendingLoad/);
   assert.match(fn, /load_pending: load && !awaitLoad/);
-  assert.doesNotMatch(fn, /retry|setTimeout|setInterval/i);
+  assert.match(fn, /navigation,/);
+  assert.match(fn, /automatic_retry_allowed:\s*false/);
+  assert.doesNotMatch(fn, /view\.webContents\.loadURL\(/);
+  assert.doesNotMatch(fn, /setTimeout|setInterval|\bretry\s*\(|\.retry\s*\(/i);
 });
 
 test('native Electron chrome is dark but remote content policy is unchanged', () => {

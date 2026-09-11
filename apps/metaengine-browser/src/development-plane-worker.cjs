@@ -7,6 +7,7 @@ const { verifyCandidateCapsuleRemoteBound } = require('./candidate-remote-source
 const { createVerificationSandboxPlan, verifyVerificationSandboxPlan } = require('./verification-sandbox-plan.cjs');
 const { verifyEnvelope: verifyAdvisoryEvidenceEnvelope } = require('./advisory-evidence-verifier.cjs');
 const { createDevOSRepoReadModel } = require('./devos-repo-read-model.cjs');
+const { DevOSRepoSearchIndex } = require('./devos-repo-search-index.cjs');
 
 const PROTOCOL = 'metaengine.development-plane.v1';
 const VERSION = '0.4.0';
@@ -16,6 +17,7 @@ const CAPABILITIES = Object.freeze([
   'PROCESS_METRICS',
   'REPO_HEAD_READ',
   'DEVOS_REPO_READ_MODEL',
+  'DEVOS_REPO_SEARCH',
   'CANDIDATE_CAPSULE_CREATE',
   'CANDIDATE_CAPSULE_VERIFY',
   'VERIFICATION_SANDBOX_PLAN_CREATE',
@@ -26,6 +28,7 @@ const repoRoot = path.resolve(process.env.METAENGINE_REPO_ROOT || process.cwd())
 const repositoryName = String(process.env.METAENGINE_GIT_REPOSITORY || 'PatrickFrome/Compute');
 const repositoryRemote = String(process.env.METAENGINE_GIT_REMOTE || 'origin');
 const sourceProvenancePath = path.resolve(process.env.METAENGINE_SOURCE_PROVENANCE || path.join(repoRoot, '.metaengine-source-provenance.json'));
+const repoSearchIndex = new DevOSRepoSearchIndex({ repoRoot });
 
 function send(message) {
   if (!process.parentPort) throw new Error('development_plane_parent_port_missing');
@@ -106,6 +109,9 @@ async function execute(capability, payload) {
     advisory_evidence_browser_authority: false,
     advisory_evidence_promotion_authority: false,
     devos_repo_read_model: true,
+    devos_repo_search: true,
+    devos_repo_search_cache: 'EXACT_HEAD',
+    devos_repo_search_arbitrary_path_selection: false,
     devos_repo_arbitrary_path_read: false,
     direct_promote_current: false,
     arbitrary_eval: false,
@@ -114,6 +120,10 @@ async function execute(capability, payload) {
   if (capability === 'PROCESS_METRICS') return { memory: process.memoryUsage(), cpu: process.cpuUsage(), pid: process.pid };
   if (capability === 'REPO_HEAD_READ') return readRepoHead();
   if (capability === 'DEVOS_REPO_READ_MODEL') return createDevOSRepoReadModel({ repoRoot, source: await requireCurrentSource() });
+  if (capability === 'DEVOS_REPO_SEARCH') {
+    requireObjectPayload(payload, 'devos_repo_search');
+    return repoSearchIndex.query(await requireCurrentSource(), payload);
+  }
   if (capability === 'CANDIDATE_CAPSULE_CREATE') return createCandidateCapsule(payload, await requireCurrentSource());
   if (capability === 'CANDIDATE_CAPSULE_VERIFY') {
     requireObjectPayload(payload, 'candidate_verify');

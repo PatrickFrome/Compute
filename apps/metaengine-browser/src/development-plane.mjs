@@ -8,6 +8,7 @@ export const DEVELOPMENT_PLANE_CAPABILITIES = Object.freeze([
   'PROCESS_METRICS',
   'REPO_HEAD_READ',
   'DEVOS_REPO_READ_MODEL',
+  'DEVOS_REPO_SEARCH',
   'CANDIDATE_CAPSULE_CREATE',
   'CANDIDATE_CAPSULE_VERIFY',
   'VERIFICATION_SANDBOX_PLAN_CREATE',
@@ -16,6 +17,7 @@ export const DEVELOPMENT_PLANE_CAPABILITIES = Object.freeze([
 ]);
 
 const PAYLOAD_CAPABILITIES = new Set([
+  'DEVOS_REPO_SEARCH',
   'CANDIDATE_CAPSULE_CREATE',
   'CANDIDATE_CAPSULE_VERIFY',
   'VERIFICATION_SANDBOX_PLAN_CREATE',
@@ -97,6 +99,8 @@ export class DevelopmentPlane {
       advisory_evidence_browser_authority: false,
       advisory_evidence_promotion_authority: false,
       devos_repo_read_model: clone(this.#lastResults.get('DEVOS_REPO_READ_MODEL') || null),
+      devos_repo_search: true,
+      devos_repo_search_arbitrary_path_selection: false,
       transcript: Object.freeze(this.#transcript.map((row) => Object.freeze({ ...row }))),
       transcript_total_count: this.#transcriptTotal,
       last_results: Object.freeze(Object.fromEntries([...this.#lastResults.entries()].map(([key, value]) => [key, clone(value)]))),
@@ -127,7 +131,11 @@ export class DevelopmentPlane {
     if (capability === 'DEVOS_REPO_READ_MODEL' || capability === 'CANDIDATE_CAPSULE_VERIFY' || capability === 'VERIFICATION_SANDBOX_PLAN_VERIFY' || capability === 'ADVISORY_EVIDENCE_VERIFY') retained = clone(result);
     if (capability === 'CANDIDATE_CAPSULE_CREATE' && result && typeof result === 'object') retained = { schema: result.schema, candidate_id: result.candidate_id, source: clone(result.source), components: clone(result.components), verification_plan: clone(result.verification_plan), authority_effect: false };
     if (retained) this.#lastResults.set(capability, retained);
-    const summary = capability === 'DEVOS_REPO_READ_MODEL' ? `${Number(result?.code_file_count || 0)} source files` : (result?.candidate_id || result?.evidence_id || result?.schema || 'success');
+    const summary = capability === 'DEVOS_REPO_READ_MODEL'
+      ? `${Number(result?.code_file_count || 0)} source files`
+      : capability === 'DEVOS_REPO_SEARCH'
+        ? `${Number(result?.total_hits || 0)} indexed hits`
+        : (result?.candidate_id || result?.evidence_id || result?.schema || 'success');
     this.#appendTranscript(capability, 'SUCCESS', summary);
   }
 
