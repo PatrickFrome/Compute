@@ -33,6 +33,7 @@ export class BrowserBrainStreamClock {
   #epoch = 0;
   #resyncRequiredCount = 0;
   #maxSources;
+  #snapshotCache = null;
 
   constructor({ maxSources = 64 } = {}) {
     const bounded = Number(maxSources);
@@ -40,6 +41,10 @@ export class BrowserBrainStreamClock {
       throw new TypeError('browser_brain_stream_clock_max_sources_invalid');
     }
     this.#maxSources = bounded;
+  }
+
+  #invalidateSnapshot() {
+    this.#snapshotCache = null;
   }
 
   #validate(sourceValue, sequenceValue) {
@@ -63,6 +68,7 @@ export class BrowserBrainStreamClock {
       gapTo: null,
     };
     this.#sources.set(source, state);
+    this.#invalidateSnapshot();
     return state;
   }
 
@@ -73,6 +79,7 @@ export class BrowserBrainStreamClock {
     state.resyncMinimumSequence = Math.max(state.sequence, Number(minimumSequence) || state.sequence);
     state.gapFrom = gapFrom;
     state.gapTo = gapTo;
+    this.#invalidateSnapshot();
   }
 
   observe(sourceValue, sequenceValue) {
@@ -137,6 +144,7 @@ export class BrowserBrainStreamClock {
 
     state.sequence = sequence;
     this.#epoch += 1;
+    this.#invalidateSnapshot();
     return Object.freeze({
       accepted: true,
       disposition: 'APPLIED',
@@ -189,6 +197,7 @@ export class BrowserBrainStreamClock {
     state.gapTo = null;
     this.#resyncRequiredCount = Math.max(0, this.#resyncRequiredCount - 1);
     this.#epoch += 1;
+    this.#invalidateSnapshot();
     return Object.freeze({
       accepted: true,
       disposition: 'RESYNCED',
@@ -208,10 +217,11 @@ export class BrowserBrainStreamClock {
   }
 
   snapshot() {
+    if (this.#snapshotCache) return this.#snapshotCache;
     const sources = [...this.#sources.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([source, state]) => freezeRow(source, state));
-    return Object.freeze({
+    this.#snapshotCache = Object.freeze({
       schema: BROWSER_BRAIN_STREAM_CLOCK_SCHEMA,
       epoch: this.#epoch,
       source_count: sources.length,
@@ -234,5 +244,6 @@ export class BrowserBrainStreamClock {
       dedicated_timer: false,
       authority_effect: false,
     });
+    return this.#snapshotCache;
   }
 }
