@@ -91,6 +91,42 @@ function awaitPreflight(preflightPromise, signal) {
   return Promise.race([preflightPromise, abortPromise]).finally(removeAbortListener);
 }
 
+async function executeLane(execute, command, commandId, cellKey, signal) {
+  if (signal?.aborted) {
+    return {
+      command_id: commandId,
+      browser_cell: cellKey,
+      status: 'rejected',
+      reason: new BrowserBrainFanoutPlanError(
+        'aborted',
+        `fanout aborted before command ${commandId} effect started`,
+        { command_id: commandId, browser_cell: cellKey },
+      ),
+    };
+  }
+
+  try {
+    const value = await execute(command, {
+      commandId,
+      browserCell: cellKey,
+      signal,
+    });
+    return {
+      command_id: commandId,
+      browser_cell: cellKey,
+      status: 'fulfilled',
+      value,
+    };
+  } catch (reason) {
+    return {
+      command_id: commandId,
+      browser_cell: cellKey,
+      status: 'rejected',
+      reason,
+    };
+  }
+}
+
 /**
  * One-shot, provider-neutral BrowserCell fan-out.
  *
@@ -205,38 +241,13 @@ export class BrowserBrainParallelFanoutCoordinator {
 
     const executionPromises = new Array(commands.length);
     for (let index = 0; index < commands.length; index += 1) {
-      const command = commands[index];
-      const commandId = commandIds[index];
-      const cellKey = cellKeys[index];
-      executionPromises[index] = DEFERRED_TURN
-        .then(() => {
-          if (signal?.aborted) {
-            throw new BrowserBrainFanoutPlanError(
-              'aborted',
-              `fanout aborted before command ${commandId} effect started`,
-              { command_id: commandId, browser_cell: cellKey },
-            );
-          }
-          return this.execute(command, {
-            commandId,
-            browserCell: cellKey,
-            signal,
-          });
-        })
-        .then(
-          (value) => ({
-            command_id: commandId,
-            browser_cell: cellKey,
-            status: 'fulfilled',
-            value,
-          }),
-          (reason) => ({
-            command_id: commandId,
-            browser_cell: cellKey,
-            status: 'rejected',
-            reason,
-          }),
-        );
+      executionPromises[index] = executeLane(
+        this.execute,
+        commands[index],
+        commandIds[index],
+        cellKeys[index],
+        signal,
+      );
     }
     return Promise.all(executionPromises);
   }
