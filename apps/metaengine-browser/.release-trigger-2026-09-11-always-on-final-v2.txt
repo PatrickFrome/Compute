@@ -1,0 +1,4 @@
+METAENGINE Browser Final V2 live promotion trigger
+source_fix_head=fbf828235e11a075d5766b7f4ce48588227778a7
+promotion_lane=work/self-update-fast-loop-v1
+purpose=publish exact physically verified dev release for live update
