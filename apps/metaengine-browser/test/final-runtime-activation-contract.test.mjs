@@ -33,6 +33,21 @@ test('packaged browser enters through the final runtime activation hook', () => 
   assert.match(supervisor, /final_runtime_activation_required/);
 });
 
+test('Host activation is primary before enrollment while remote signing remains fail-closed', () => {
+  const hostIdentity = source('src/host-agent-supervisor-identity.mjs');
+  const connectBody = hostIdentity.match(/async connect\(\) \{([\s\S]*?)\n    \},/)?.[1] || '';
+  assert.match(connectBody, /await client\.connect\(\)/);
+  assert.doesNotMatch(connectBody, /identity\.ensure\(/);
+  assert.match(hostIdentity, /WAITING_FOR_ENROLLMENT/);
+  assert.match(hostIdentity, /startup_requires_enrollment: false/);
+  assert.match(hostIdentity, /remote_requests_require_enrollment: true/);
+  assert.match(hostIdentity, /remote_signing_ready: enrolled/);
+
+  const strictDelegation = source('src/supervisor-identity-delegation.mjs');
+  assert.match(strictDelegation, /!UUID_RE\.test\(clientId\) \|\| !UUID_RE\.test\(deviceId\)/);
+  assert.match(strictDelegation, /supervisor_identity_delegation_identity_invalid/);
+});
+
 test('verified execution refuses to confirm an unproven mutation', () => {
   const command = {
     action: 'TYPED_CLICK',
