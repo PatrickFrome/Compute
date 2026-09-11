@@ -11,7 +11,7 @@ test('snapshot keeps deterministic lexical source order across unsorted arrival 
     clock.observe(arrival[index], index + 10);
   }
 
-  const expected = [...arrival].sort((a, b) => a.localeCompare(b));
+  const expected = [...arrival].sort();
   const first = clock.snapshot();
   assert.deepEqual(first.sources.map((row) => row.source), expected);
 
@@ -21,6 +21,26 @@ test('snapshot keeps deterministic lexical source order across unsorted arrival 
   assert.deepEqual(second.sources.map((row) => row.source), expected);
   assert.equal(second.sources.find((row) => row.source === 'process:renderer').sequence, 12);
   assert.equal(second.authority_effect, false);
+});
+
+test('source order is code-unit deterministic and independent of host locale collation', () => {
+  const clock = new BrowserBrainStreamClock();
+  const arrival = ['semantic:a', 'semantic:Z', 'Semantic:z', 'semantic:A', 'process:b', 'process:B'];
+
+  for (const source of arrival) clock.observe(source, 1);
+
+  const snapshot = clock.snapshot();
+  assert.deepEqual(snapshot.sources.map((row) => row.source), [...arrival].sort());
+  assert.deepEqual(snapshot.sources.map((row) => row.source), [
+    'Semantic:z',
+    'process:B',
+    'process:b',
+    'semantic:A',
+    'semantic:Z',
+    'semantic:a',
+  ]);
+  assert.equal(snapshot.source_count, arrival.length);
+  assert.equal(snapshot.authority_effect, false);
 });
 
 test('late source insertion preserves canonical order without disturbing existing source rows', () => {
@@ -48,7 +68,7 @@ test('full bounded source set remains deterministically ordered after repeated m
   const names = Array.from({ length: 64 }, (_, index) => `stream:${String(63 - index).padStart(2, '0')}`);
 
   for (const name of names) clock.observe(name, 100);
-  const expected = [...names].sort((a, b) => a.localeCompare(b));
+  const expected = [...names].sort();
   assert.deepEqual(clock.snapshot().sources.map((row) => row.source), expected);
 
   for (const name of expected) {
