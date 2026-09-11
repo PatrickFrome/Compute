@@ -26,13 +26,14 @@ export function hostAgentEndpoint({ userDataPath, platform = process.platform } 
   return path.join(os.tmpdir(), `metaengine-host-agent-${suffix}.sock`);
 }
 
-function parseFrames(state, chunk, onFrame) {
+function parseFrames(state, chunk) {
   const incoming = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
   const total = state.buffer.byteLength + incoming.byteLength;
   if (total > MAX_BUFFER_BYTES) throw new Error('host_agent_ipc_buffer_overflow');
   state.buffer = state.buffer.byteLength === 0
     ? incoming
     : Buffer.concat([state.buffer, incoming], total);
+  const frames = [];
   for (;;) {
     const newline = state.buffer.indexOf(0x0a);
     if (newline < 0) break;
@@ -41,13 +42,59 @@ function parseFrames(state, chunk, onFrame) {
     if (line.byteLength === 0) continue;
     if (line.byteLength > HOST_AGENT_MAX_FRAME_BYTES) throw new Error('host_agent_ipc_frame_too_large');
     let frame;
-    try { frame = JSON.parse(line.toString('utf8')); } catch { throw new Error('host_agent_ipc_json_invalid'); }
-    onFrame(frame);
+    try {
+      frame = JSON.parse(line.toString('utf8'));
+    } catch {
+      throw new Error('host_agent_ipc_json_invalid');
+    }
+    frames.push(frame);
   }
+  return frames;
 }
 
 function writeFrame(socket, frame) {
   socket.write(`${serializeHostAgentFrame(frame)}\n`, 'utf8');
+}
+
+async function handleServerFrame(socket, raw, sessionKey, table, nonceWindow) {
+  let request;
+  try {
+    request = verifyHostAgentFrame(raw, sessionKey, { consumeNonce: (nonce) => nonceWindow.consume(nonce) });
+    if (request.kind !== 'REQUEST') throw new Error('host_agent_server_request_kind_required');
+    const handler = table.get(request.op);
+    if (!handler) throw new Error(`host_agent_server_op_unhandled:${request.op}`);
+    // request.payload is already the protocol boundary's defensive copy.
+    const result = await handler(request.payload, request);
+    // signHostAgentFrame owns the single defensive copy before the response crosses IPC.
+    const payload = result && typeof result === 'object' && !Array.isArray(result)
+      ? { ok: true, result }
+      : { ok: true, result: { value: result ?? null } };
+    writeFrame(socket, signHostAgentFrame({
+      schema: HOST_AGENT_PROTOCOL_SCHEMA,
+      kind: 'RESPONSE',
+      request_id: request.request_id,
+      nonce: createHostAgentNonce(),
+      op: request.op,
+      payload,
+    }, sessionKey));
+  } catch (error) {
+    if (!request) {
+      socket.destroy();
+      return;
+    }
+    try {
+      writeFrame(socket, signHostAgentFrame({
+        schema: HOST_AGENT_PROTOCOL_SCHEMA,
+        kind: 'RESPONSE',
+        request_id: request.request_id,
+        nonce: createHostAgentNonce(),
+        op: request.op,
+        payload: { ok: false, error: String(error?.message || error).slice(0, 240) },
+      }, sessionKey));
+    } catch {
+      socket.destroy();
+    }
+  }
 }
 
 export function createHostAgentServer({ endpoint, sessionKey, handlers = {}, netModule = net } = {}) {
@@ -64,49 +111,18 @@ export function createHostAgentServer({ endpoint, sessionKey, handlers = {}, net
     sockets.add(socket);
     const state = { buffer: Buffer.alloc(0) };
     socket.on('close', () => sockets.delete(socket));
-    socket.on('error', () => {});
+    socket.on('error', () => socket.destroy());
     socket.on('data', (chunk) => {
+      let frames;
       try {
-        parseFrames(state, chunk, (raw) => {
-          void (async () => {
-            let request;
-            try {
-              request = verifyHostAgentFrame(raw, sessionKey, { consumeNonce: (nonce) => nonceWindow.consume(nonce) });
-              if (request.kind !== 'REQUEST') throw new Error('host_agent_server_request_kind_required');
-              const handler = table.get(request.op);
-              if (!handler) throw new Error(`host_agent_server_op_unhandled:${request.op}`);
-              // request.payload is already the protocol boundary's defensive copy.
-              const result = await handler(request.payload, request);
-              // signHostAgentFrame owns the single defensive copy before the response crosses IPC.
-              const payload = result && typeof result === 'object' && !Array.isArray(result)
-                ? { ok: true, result }
-                : { ok: true, result: { value: result ?? null } };
-              writeFrame(socket, signHostAgentFrame({
-                schema: HOST_AGENT_PROTOCOL_SCHEMA,
-                kind: 'RESPONSE',
-                request_id: request.request_id,
-                nonce: createHostAgentNonce(),
-                op: request.op,
-                payload,
-              }, sessionKey));
-            } catch (error) {
-              if (!request) {
-                socket.destroy();
-                return;
-              }
-              writeFrame(socket, signHostAgentFrame({
-                schema: HOST_AGENT_PROTOCOL_SCHEMA,
-                kind: 'RESPONSE',
-                request_id: request.request_id,
-                nonce: createHostAgentNonce(),
-                op: request.op,
-                payload: { ok: false, error: String(error?.message || error).slice(0, 240) },
-              }, sessionKey));
-            }
-          })();
-        });
+        frames = parseFrames(state, chunk);
       } catch {
         socket.destroy();
+        return;
+      }
+      for (const raw of frames) {
+        void handleServerFrame(socket, raw, sessionKey, table, nonceWindow)
+          .catch(() => socket.destroy());
       }
     });
   });
@@ -114,7 +130,7 @@ export function createHostAgentServer({ endpoint, sessionKey, handlers = {}, net
   return Object.freeze({
     async start() {
       if (listening) return this.snapshot();
-      if (process.platform !== 'win32' && typeof endpoint === 'string') await rm(endpoint, { force: true }).catch(() => {});
+      if (process.platform !== 'win32' && typeof endpoint === 'string') await rm(endpoint, { force: true });
       await new Promise((resolve, reject) => {
         const onError = (error) => { server.off('listening', onListening); reject(error); };
         const onListening = () => { server.off('error', onError); resolve(); };
@@ -129,7 +145,7 @@ export function createHostAgentServer({ endpoint, sessionKey, handlers = {}, net
       for (const socket of sockets) socket.destroy();
       if (listening) await new Promise((resolve) => server.close(() => resolve()));
       listening = false;
-      if (process.platform !== 'win32' && typeof endpoint === 'string') await rm(endpoint, { force: true }).catch(() => {});
+      if (process.platform !== 'win32' && typeof endpoint === 'string') await rm(endpoint, { force: true });
     },
     snapshot() {
       return Object.freeze({
@@ -172,6 +188,7 @@ export class HostAgentClient {
     this.#connectPromise = new Promise((resolve, reject) => {
       const socket = this.#net.createConnection(this.#endpoint);
       const fail = (error) => {
+        socket.destroy();
         if (this.#socket === socket) this.#socket = null;
         reject(error);
       };
@@ -180,7 +197,10 @@ export class HostAgentClient {
         socket.off('error', fail);
         this.#socket = socket;
         this.#bufferState = { buffer: Buffer.alloc(0) };
-        socket.on('error', (error) => this.#failPending(error));
+        socket.on('error', (error) => {
+          this.#failPending(error);
+          socket.destroy();
+        });
         socket.on('close', () => {
           if (this.#socket === socket) this.#socket = null;
           this.#failPending(new Error('host_agent_ipc_closed'));
@@ -202,7 +222,8 @@ export class HostAgentClient {
 
   #onData(chunk) {
     try {
-      parseFrames(this.#bufferState, chunk, (raw) => {
+      const frames = parseFrames(this.#bufferState, chunk);
+      for (const raw of frames) {
         const frame = verifyHostAgentFrame(raw, this.#sessionKey, { consumeNonce: (nonce) => this.#nonceWindow.consume(nonce) });
         if (frame.kind !== 'RESPONSE') throw new Error('host_agent_client_response_kind_required');
         const pending = this.#pending.get(frame.request_id);
@@ -212,7 +233,7 @@ export class HostAgentClient {
         if (frame.payload?.ok !== true) pending.reject(new Error(String(frame.payload?.error || 'host_agent_request_failed')));
         // verifyHostAgentFrame already detached this payload from the socket parser object.
         else pending.resolve(frame.payload.result);
-      });
+      }
     } catch (error) {
       this.#socket?.destroy();
       this.#failPending(error);

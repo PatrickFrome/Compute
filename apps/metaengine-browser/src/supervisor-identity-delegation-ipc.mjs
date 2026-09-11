@@ -55,7 +55,7 @@ function normalizeUnsignedFrame(value) {
   const requestId = String(value.request_id || '');
   if (!REQUEST_ID_RE.test(requestId)) throw new Error('supervisor_identity_signer_request_id_invalid');
   const nonce = String(value.nonce || '');
-  if (!/^[A-Za-z0-9_-]{22,64}$/.test(nonce)) throw new Error('supervisor_identity_signer_nonce_invalid');
+  if (!/^[A-Za-z0-9_-]{32}$/.test(nonce)) throw new Error('supervisor_identity_signer_nonce_invalid');
   const op = String(value.op || '').toUpperCase();
   if (!OPS.has(op)) throw new Error('supervisor_identity_signer_op_denied');
   const payload = value.payload == null ? {} : value.payload;
@@ -90,24 +90,70 @@ function verifyFrame(value, sessionKey, consumeNonce) {
   return Object.freeze({ ...frame, authenticated: true, authority_effect: false });
 }
 
-function parseFrames(state, chunk, onFrame) {
-  state.buffer += chunk.toString('utf8');
-  if (Buffer.byteLength(state.buffer, 'utf8') > MAX_BUFFER_BYTES) throw new Error('supervisor_identity_signer_buffer_overflow');
+function parseFrames(state, chunk) {
+  const incoming = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+  const total = state.buffer.byteLength + incoming.byteLength;
+  if (total > MAX_BUFFER_BYTES) throw new Error('supervisor_identity_signer_buffer_overflow');
+  state.buffer = state.buffer.byteLength === 0
+    ? incoming
+    : Buffer.concat([state.buffer, incoming], total);
+  const frames = [];
   for (;;) {
-    const newline = state.buffer.indexOf('\n');
-    if (newline < 0) return;
-    const line = state.buffer.slice(0, newline);
-    state.buffer = state.buffer.slice(newline + 1);
-    if (!line.trim()) continue;
-    if (Buffer.byteLength(line, 'utf8') > SUPERVISOR_IDENTITY_SIGNER_MAX_FRAME_BYTES) throw new Error('supervisor_identity_signer_frame_too_large');
+    const newline = state.buffer.indexOf(0x0a);
+    if (newline < 0) break;
+    const line = state.buffer.subarray(0, newline);
+    state.buffer = state.buffer.subarray(newline + 1);
+    if (line.byteLength === 0) continue;
+    if (line.byteLength > SUPERVISOR_IDENTITY_SIGNER_MAX_FRAME_BYTES) throw new Error('supervisor_identity_signer_frame_too_large');
     let frame;
-    try { frame = JSON.parse(line); } catch { throw new Error('supervisor_identity_signer_json_invalid'); }
-    onFrame(frame);
+    try {
+      frame = JSON.parse(line.toString('utf8'));
+    } catch {
+      throw new Error('supervisor_identity_signer_json_invalid');
+    }
+    frames.push(frame);
   }
+  return frames;
 }
 
 function writeFrame(socket, frame) {
   socket.write(`${JSON.stringify(frame)}\n`, 'utf8');
+}
+
+async function handleServerFrame(socket, raw, sessionKey, signer, nonceWindow) {
+  let request;
+  try {
+    request = verifyFrame(raw, sessionKey, (nonce) => nonceWindow.consume(nonce));
+    if (request.kind !== 'REQUEST') throw new Error('supervisor_identity_signer_request_required');
+    const result = request.op === 'SNAPSHOT'
+      ? await signer.snapshot()
+      : await signer.signDeviceRequest(request.payload);
+    writeFrame(socket, signFrame({
+      schema: SUPERVISOR_IDENTITY_SIGNER_IPC_SCHEMA,
+      kind: 'RESPONSE',
+      request_id: request.request_id,
+      nonce: createHostAgentNonce(),
+      op: request.op,
+      payload: { ok: true, result: structuredClone(result) },
+    }, sessionKey));
+  } catch (error) {
+    if (!request) {
+      socket.destroy();
+      return;
+    }
+    try {
+      writeFrame(socket, signFrame({
+        schema: SUPERVISOR_IDENTITY_SIGNER_IPC_SCHEMA,
+        kind: 'RESPONSE',
+        request_id: request.request_id,
+        nonce: createHostAgentNonce(),
+        op: request.op,
+        payload: { ok: false, error: String(error?.message || error).slice(0, 240) },
+      }, sessionKey));
+    } catch {
+      socket.destroy();
+    }
+  }
 }
 
 export function createSupervisorIdentitySignerServer({ endpoint, sessionKey, signer, netModule = net } = {}) {
@@ -122,46 +168,20 @@ export function createSupervisorIdentitySignerServer({ endpoint, sessionKey, sig
 
   const server = netModule.createServer((socket) => {
     sockets.add(socket);
-    const state = { buffer: '' };
+    const state = { buffer: Buffer.alloc(0) };
     socket.on('close', () => sockets.delete(socket));
-    socket.on('error', () => {});
+    socket.on('error', () => socket.destroy());
     socket.on('data', (chunk) => {
+      let frames;
       try {
-        parseFrames(state, chunk, (raw) => {
-          void (async () => {
-            let request;
-            try {
-              request = verifyFrame(raw, sessionKey, (nonce) => nonceWindow.consume(nonce));
-              if (request.kind !== 'REQUEST') throw new Error('supervisor_identity_signer_request_required');
-              const result = request.op === 'SNAPSHOT'
-                ? await signer.snapshot()
-                : await signer.signDeviceRequest(request.payload);
-              writeFrame(socket, signFrame({
-                schema: SUPERVISOR_IDENTITY_SIGNER_IPC_SCHEMA,
-                kind: 'RESPONSE',
-                request_id: request.request_id,
-                nonce: createHostAgentNonce(),
-                op: request.op,
-                payload: { ok: true, result: structuredClone(result) },
-              }, sessionKey));
-            } catch (error) {
-              if (!request) {
-                socket.destroy();
-                return;
-              }
-              writeFrame(socket, signFrame({
-                schema: SUPERVISOR_IDENTITY_SIGNER_IPC_SCHEMA,
-                kind: 'RESPONSE',
-                request_id: request.request_id,
-                nonce: createHostAgentNonce(),
-                op: request.op,
-                payload: { ok: false, error: String(error?.message || error).slice(0, 240) },
-              }, sessionKey));
-            }
-          })();
-        });
+        frames = parseFrames(state, chunk);
       } catch {
         socket.destroy();
+        return;
+      }
+      for (const raw of frames) {
+        void handleServerFrame(socket, raw, sessionKey, signer, nonceWindow)
+          .catch(() => socket.destroy());
       }
     });
   });
@@ -169,7 +189,7 @@ export function createSupervisorIdentitySignerServer({ endpoint, sessionKey, sig
   return Object.freeze({
     async start() {
       if (listening) return this.snapshot();
-      if (process.platform !== 'win32') await rm(endpoint, { force: true }).catch(() => {});
+      if (process.platform !== 'win32') await rm(endpoint, { force: true });
       await new Promise((resolve, reject) => {
         const onError = (error) => { server.off('listening', onListening); reject(error); };
         const onListening = () => { server.off('error', onError); resolve(); };
@@ -184,7 +204,7 @@ export function createSupervisorIdentitySignerServer({ endpoint, sessionKey, sig
       for (const socket of sockets) socket.destroy();
       if (listening) await new Promise((resolve) => server.close(() => resolve()));
       listening = false;
-      if (process.platform !== 'win32') await rm(endpoint, { force: true }).catch(() => {});
+      if (process.platform !== 'win32') await rm(endpoint, { force: true });
     },
     snapshot() {
       return Object.freeze({
@@ -198,6 +218,7 @@ export function createSupervisorIdentitySignerServer({ endpoint, sessionKey, sig
         enrollment_authority: false,
         browser_control_authority: false,
         replay_protection: nonceWindow.snapshot(),
+        binary_frame_accumulator: true,
         authority_effect: false,
       });
     },
@@ -209,7 +230,7 @@ export class SupervisorIdentitySignerClient {
   #sessionKey;
   #net;
   #socket = null;
-  #buffer = { buffer: '' };
+  #buffer = { buffer: Buffer.alloc(0) };
   #pending = new Map();
   #nonceWindow = new HostAgentNonceWindow();
   #connectPromise = null;
@@ -227,13 +248,20 @@ export class SupervisorIdentitySignerClient {
     if (this.#connectPromise) return this.#connectPromise;
     this.#connectPromise = new Promise((resolve, reject) => {
       const socket = this.#net.createConnection(this.#endpoint);
-      const fail = (error) => reject(error);
+      const fail = (error) => {
+        socket.destroy();
+        if (this.#socket === socket) this.#socket = null;
+        reject(error);
+      };
       socket.once('error', fail);
       socket.once('connect', () => {
         socket.off('error', fail);
         this.#socket = socket;
-        this.#buffer = { buffer: '' };
-        socket.on('error', (error) => this.#fail(error));
+        this.#buffer = { buffer: Buffer.alloc(0) };
+        socket.on('error', (error) => {
+          this.#fail(error);
+          socket.destroy();
+        });
         socket.on('close', () => {
           if (this.#socket === socket) this.#socket = null;
           this.#fail(new Error('supervisor_identity_signer_closed'));
@@ -255,7 +283,8 @@ export class SupervisorIdentitySignerClient {
 
   #onData(chunk) {
     try {
-      parseFrames(this.#buffer, chunk, (raw) => {
+      const frames = parseFrames(this.#buffer, chunk);
+      for (const raw of frames) {
         const frame = verifyFrame(raw, this.#sessionKey, (nonce) => this.#nonceWindow.consume(nonce));
         if (frame.kind !== 'RESPONSE') throw new Error('supervisor_identity_signer_response_required');
         const pending = this.#pending.get(frame.request_id);
@@ -264,7 +293,7 @@ export class SupervisorIdentitySignerClient {
         clearTimeout(pending.timer);
         if (frame.payload?.ok !== true) pending.reject(new Error(String(frame.payload?.error || 'supervisor_identity_signer_request_failed')));
         else pending.resolve(structuredClone(frame.payload.result));
-      });
+      }
     } catch (error) {
       this.#socket?.destroy();
       this.#fail(error);
@@ -321,6 +350,7 @@ export class SupervisorIdentitySignerClient {
       enrollment_authority: false,
       browser_control_authority: false,
       replay_protection: this.#nonceWindow.snapshot(),
+      binary_frame_accumulator: true,
       authority_effect: false,
     });
   }
@@ -336,6 +366,7 @@ export function supervisorIdentitySignerIpcManifest() {
     private_key_exported: false,
     enrollment_authority: false,
     browser_control_authority: false,
+    binary_frame_accumulator: true,
     arbitrary_eval: false,
     raw_shell: false,
     raw_cdp: false,

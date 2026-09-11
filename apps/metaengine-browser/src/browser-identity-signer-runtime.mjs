@@ -6,6 +6,10 @@ import {
 
 export const BROWSER_IDENTITY_SIGNER_RUNTIME_SCHEMA = 'metaengine.browser-identity-signer-runtime.v1';
 
+function clipError(error) {
+  return String(error?.message || error).slice(0, 240);
+}
+
 export class BrowserIdentitySignerRuntime {
   #identity;
   #userDataPath;
@@ -54,10 +58,19 @@ export class BrowserIdentitySignerRuntime {
       this.#state = 'READY';
       return this.snapshot();
     } catch (error) {
-      this.#lastError = String(error?.message || error).slice(0, 240);
+      const primaryError = clipError(error);
+      this.#lastError = primaryError;
       this.#state = 'FAILED';
-      try { await this.#server?.close?.(); } catch {}
-      this.#server = null;
+      if (this.#server && typeof this.#server.close === 'function') {
+        try {
+          await this.#server.close();
+          this.#server = null;
+        } catch (cleanupError) {
+          this.#lastError = `${primaryError};cleanup:${clipError(cleanupError)}`.slice(0, 240);
+        }
+      } else {
+        this.#server = null;
+      }
       throw error;
     }
   }
@@ -65,17 +78,18 @@ export class BrowserIdentitySignerRuntime {
   async stop() {
     if (!this.#server) {
       this.#state = 'STOPPED';
+      this.#lastError = null;
       return this.snapshot();
     }
     const server = this.#server;
-    this.#server = null;
     try {
       await server.close();
+      this.#server = null;
       this.#state = 'STOPPED';
       this.#lastError = null;
     } catch (error) {
       this.#state = 'FAILED';
-      this.#lastError = String(error?.message || error).slice(0, 240);
+      this.#lastError = clipError(error);
       throw error;
     }
     return this.snapshot();

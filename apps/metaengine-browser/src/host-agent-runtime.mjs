@@ -114,6 +114,8 @@ export class HostAgentRuntime {
 
   async close() {
     await this.#server.close();
+    this.#startedAt = null;
+    return this.snapshot();
   }
 
   snapshot() {

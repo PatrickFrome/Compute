@@ -15,6 +15,10 @@ function requireFunction(value, code) {
   return value;
 }
 
+function clipError(error) {
+  return String(error?.message || error).slice(0, 240);
+}
+
 export class HostAgentRemoteComposition {
   #userDataPath;
   #identity;
@@ -135,29 +139,75 @@ export class HostAgentRemoteComposition {
       this.#state = 'READY';
       return this.snapshot();
     } catch (error) {
-      this.#lastError = String(error?.message || error).slice(0, 240);
+      const primaryError = clipError(error);
       this.#state = 'FAILED';
-      await this.#closeParts();
+      const cleanupErrors = await this.#closeParts();
+      this.#lastError = cleanupErrors.length > 0
+        ? `${primaryError};cleanup:${cleanupErrors.join('|')}`.slice(0, 240)
+        : primaryError;
       throw error;
     }
   }
 
   async #closeParts() {
-    try { await this.#hostRuntime?.close?.(); } catch {}
-    this.#hostRuntime = null;
-    try { this.#browserClient?.close?.(); } catch {}
-    this.#browserClient = null;
-    try { this.#hostIdentity?.close?.(); } catch {}
-    this.#hostIdentity = null;
-    try { await this.#browserServer?.close?.(); } catch {}
-    this.#browserServer = null;
-    try { await this.#signerRuntime?.stop?.(); } catch {}
-    this.#signerRuntime = null;
+    const errors = [];
+
+    if (this.#hostRuntime) {
+      try {
+        await this.#hostRuntime.close();
+        this.#hostRuntime = null;
+      } catch (error) {
+        errors.push(`host_runtime:${clipError(error)}`);
+      }
+    }
+
+    if (this.#browserClient) {
+      try {
+        this.#browserClient.close();
+        this.#browserClient = null;
+      } catch (error) {
+        errors.push(`browser_client:${clipError(error)}`);
+      }
+    }
+
+    if (this.#hostIdentity) {
+      try {
+        this.#hostIdentity.close();
+        this.#hostIdentity = null;
+      } catch (error) {
+        errors.push(`host_identity:${clipError(error)}`);
+      }
+    }
+
+    if (this.#browserServer) {
+      try {
+        await this.#browserServer.close();
+        this.#browserServer = null;
+      } catch (error) {
+        errors.push(`browser_server:${clipError(error)}`);
+      }
+    }
+
+    if (this.#signerRuntime) {
+      try {
+        await this.#signerRuntime.stop();
+        this.#signerRuntime = null;
+      } catch (error) {
+        errors.push(`signer_runtime:${clipError(error)}`);
+      }
+    }
+
     this.#transport = null;
+    return errors;
   }
 
   async stop() {
-    await this.#closeParts();
+    const cleanupErrors = await this.#closeParts();
+    if (cleanupErrors.length > 0) {
+      this.#state = 'FAILED';
+      this.#lastError = `cleanup:${cleanupErrors.join('|')}`.slice(0, 240);
+      throw new Error(`host_agent_remote_cleanup_failed:${this.#lastError}`);
+    }
     this.#state = 'STOPPED';
     this.#lastError = null;
     return this.snapshot();
