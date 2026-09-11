@@ -283,21 +283,17 @@ test(`continuous Browser Brain soak stays bounded and coordinated (${CELL_COUNT}
     assert.equal(coordinator.snapshot().pressure_budget.pressure_band, 'GREEN');
     assert.equal(scheduler.snapshot().mutation_concurrency, CELL_COUNT);
 
-    // Malformed remote tab mutation is isolated into a nonexclusive fenced lane.
-    // It may reach the canonical policy/exact-target executor to preserve error
-    // ordering, but it cannot become a fleet-wide barrier for 32 valid cells.
+    // Malformed effect-bound tab mutation is rejected in the scheduler before
+    // executor/maintenance admission, but it remains nonexclusive so 32 valid
+    // BrowserCells retain full independent fanout.
     let validActive = 0;
     let validPeak = 0;
     const fencedBatch = [
       { command_id: 'missing-target', action: 'SCROLL', payload: {} },
       ...tabs.map((tabId, i) => mutation(`fenced-parallel-${i + 1}`, tabId)),
     ];
-    const fencedRows = await scheduler.drain(fencedBatch, async (command, descriptor) => {
-      if (command.command_id === 'missing-target') {
-        assert.equal(descriptor.scheduler_target_fenced, true);
-        assert.equal(descriptor.exclusive, false);
-        throw new Error('native_supervisor_exact_target_required');
-      }
+    const fencedRows = await scheduler.drain(fencedBatch, async (command) => {
+      assert.notEqual(command.command_id, 'missing-target', 'missing effect target reached executor');
       validActive += 1;
       validPeak = Math.max(validPeak, validActive);
       await new Promise((resolve) => setImmediate(resolve));
@@ -305,7 +301,9 @@ test(`continuous Browser Brain soak stays bounded and coordinated (${CELL_COUNT}
       return { ok: true };
     });
     assert.equal(fencedRows[0].ok, false);
-    assert.match(fencedRows[0].error, /native_supervisor_exact_target_required/);
+    assert.equal(fencedRows[0].scheduler_rejected, true);
+    assert.equal(fencedRows[0].execution_ms, 0);
+    assert.equal(fencedRows[0].error, 'native_supervisor_effect_binding_explicit_tab_required:SCROLL');
     assert.equal(fencedRows.slice(1).every((row) => row.ok), true);
     assert.equal(validPeak, CELL_COUNT, `malformed mutation reduced valid cell fanout to ${validPeak}`);
 
