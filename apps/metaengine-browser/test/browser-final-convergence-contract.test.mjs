@@ -70,7 +70,8 @@ function sourceProofs() {
       && /automatic_retry_allowed:\s*false/.test(sentinel),
     EXACT_SHA_PHYSICAL_RELEASE_GATE:
       /exact-SHA bootstrap autostart physical proof/.test(releaseGateTest)
-      && /EXACT_HEAD|EXPECTED_HEAD/.test(bootstrapWorkflow)
+      && /ref:\s*\$\{\{\s*github\.sha\s*\}\}/.test(bootstrapWorkflow)
+      && /EXPECTED_SHA:\s*\$\{\{\s*github\.sha\s*\}\}/.test(fastUpdateWorkflow)
       && /head_sha="\$EXPECTED_SHA"/.test(fastUpdateWorkflow),
   });
 }
