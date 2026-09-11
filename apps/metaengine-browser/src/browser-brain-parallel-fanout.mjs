@@ -227,18 +227,18 @@ export class BrowserBrainParallelFanoutCoordinator {
 
     let preflightPromise;
     if (this.usesDefaultCellResolver) {
-      // Adaptive runtime pressure is process-local and synchronously readable.
-      // Admit that common case immediately, then preserve one deferred launch
-      // turn so callers retain the same abort-before-effect opportunity. Async
-      // provider budgets still settle through the normal awaited preflight.
-      const rawBudget = this.readMutationBudget();
-      if (isThenable(rawBudget)) {
-        preflightPromise = Promise.resolve(rawBudget)
-          .then((budget) => validateMutationBudget(budget, commands.length));
-      } else {
-        validateMutationBudget(rawBudget, commands.length);
-        preflightPromise = DEFERRED_TURN;
-      }
+      // Preserve the provider seam: budget reads remain deferred from the caller
+      // turn. For the common synchronous process-local budget, validate inside
+      // that same deferred reaction rather than allocating a second reaction.
+      // Async provider budgets retain their awaited validation path.
+      preflightPromise = DEFERRED_TURN.then(() => {
+        const rawBudget = this.readMutationBudget();
+        if (isThenable(rawBudget)) {
+          return Promise.resolve(rawBudget)
+            .then((budget) => validateMutationBudget(budget, commands.length));
+        }
+        return validateMutationBudget(rawBudget, commands.length);
+      });
     } else {
       const budgetPromise = DEFERRED_TURN
         .then(() => this.readMutationBudget())
