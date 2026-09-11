@@ -8,6 +8,7 @@ const ROOT = path.resolve(import.meta.dirname, '..');
 const EXT = path.join(ROOT, 'coordination', 'chat-control-plane', 'extension');
 const REMOTE = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-chat-bridge-remote';
 const ZAI = 'https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db';
+const manifest = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8'));
 
 const local = new Map([
   ['bridgeSecret', 'x'.repeat(64)],
@@ -112,7 +113,7 @@ const chrome = {
   runtime: {
     id: 'combined-load-extension-id',
     getURL: (p = '') => `chrome-extension://combined-load-extension-id/${p}`,
-    getManifest: () => ({ version: '0.6.2' }),
+    getManifest: () => manifest,
     async openOptionsPage() {},
     reload() {},
     onInstalled: { addListener(fn) { listeners.installed.push(fn); } },
@@ -169,7 +170,8 @@ assert.equal(listeners.updateAvailable.length, 1, 'safe update listener not regi
 assert.ok(listeners.debuggerEvent.length >= 2, 'broker + GLM debugger event listeners not registered');
 assert.ok(listeners.debuggerDetach.length >= 2, 'broker + GLM debugger detach listeners not registered');
 assert.ok(listeners.tabRemoved.length >= 2, 'operator/broker tab removal listeners not registered');
-assert.equal(context.A2_OPERATOR_RUNTIME, '0.6.2-auto-rollover');
+assert.ok(String(context.A2_OPERATOR_RUNTIME || '').startsWith(`${manifest.version}-`) || context.A2_OPERATOR_RUNTIME === manifest.version,
+  `runtime marker ${context.A2_OPERATOR_RUNTIME} must belong to manifest ${manifest.version}`);
 assert.equal(typeof context.A2_DEBUGGER_RUN, 'function');
 assert.equal(typeof context.A2_DEBUGGER_HOLD, 'function');
 assert.equal(typeof context.A2_CHATGPT_TRUSTED_SEND, 'function');
@@ -183,7 +185,7 @@ assert.equal(commandPoll.headers.get('x-a2-chat-bridge-secret'), 'x'.repeat(64),
 assert.equal(local.has('bridgeSecret'), false, 'legacy pairing secret was not removed from chrome.storage.local');
 assert.equal(idbSecrets.get('pairing_secret'), 'x'.repeat(64), 'pairing secret was not migrated into IndexedDB vault');
 
-console.log('classic-worker-combined-load-v062: PASS', {
+console.log('classic-worker-combined-load: PASS', {
   fetchCalls: fetchCalls.length,
   runtimeMessageListeners: listeners.runtimeMessage.length,
   installedListeners: listeners.installed.length,
