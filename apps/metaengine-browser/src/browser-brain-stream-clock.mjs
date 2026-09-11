@@ -248,7 +248,12 @@ export class BrowserBrainStreamClock {
 
   snapshot() {
     if (this.#snapshotCache) return this.#snapshotCache;
-    const sources = this.#orderedSources.map(({ source, state }) => freezeRow(source, state));
+    const count = this.#orderedSources.length;
+    const sources = new Array(count);
+    for (let index = 0; index < count; index += 1) {
+      const entry = this.#orderedSources[index];
+      sources[index] = freezeRow(entry.source, entry.state);
+    }
     this.#snapshotCache = Object.freeze({
       schema: BROWSER_BRAIN_STREAM_CLOCK_SCHEMA,
       epoch: this.#epoch,
