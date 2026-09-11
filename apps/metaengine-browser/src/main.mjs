@@ -13,6 +13,7 @@ import { HumanTakeoverController } from './human-takeover.mjs';
 import { OwnerSafetyGateRegistry, bindGlobalOwnerSafetyGateRegistry } from './owner-safety-gate-registry.mjs';
 import { captureSemanticFrame, captureViewThumbnail, executeSemanticCommand } from './native-browser-control.mjs';
 import { NativeSupervisorClient } from './native-supervisor-client.mjs';
+import { boundedNavigation } from './bounded-navigation.mjs';
 import { SupervisorDeviceIdentity } from './supervisor-device-identity.mjs';
 import { navigationDecision, newWindowDecision, REMOTE_WEB_PREFERENCES, SECURITY_POLICY } from './browser-policy.mjs';
 import { TabRegistry } from './tab-registry.mjs';
@@ -479,14 +480,22 @@ async function createTab(input = 'https://chatgpt.com/', { select = true, load =
   wireRemoteView(tab, view);
   if (select) registry.select(tab.tab_id);
   attachSelected();
+  let navigation = null;
   if (load) {
-    const pendingLoad = view.webContents.loadURL(d.normalized_url);
-    if (awaitLoad) await pendingLoad;
-    else void pendingLoad.catch(() => publishSnapshot().catch(() => {}));
+    const pendingLoad = boundedNavigation(view.webContents, d.normalized_url);
+    if (awaitLoad) navigation = await pendingLoad;
+    else void pendingLoad.then(() => publishSnapshot().catch(() => {}), () => publishSnapshot().catch(() => {}));
   }
   invalidatePerception();
   await publishSnapshot();
-  return { ...tab, webcontents_id: view.webContents.id, load_pending: load && !awaitLoad };
+  return {
+    ...tab,
+    webcontents_id: view.webContents.id,
+    load_pending: load && !awaitLoad,
+    navigation,
+    effect_outcome: 'CONFIRMED',
+    automatic_retry_allowed: false,
+  };
 }
 
 async function loadTab(tabId, input) {
@@ -494,11 +503,24 @@ async function loadTab(tabId, input) {
   if (!view || view.webContents.isDestroyed()) throw new Error('tab_binding_not_live');
   const d = navigationDecision(input);
   if (!d.allow) throw new Error(`navigation_blocked:${d.reason}`);
-  await view.webContents.loadURL(d.normalized_url);
-  registry.update(String(tabId), { url: d.normalized_url, kind: d.kind });
+  const navigation = await boundedNavigation(view.webContents, d.normalized_url);
+  const confirmed = navigation.state === 'CONFIRMED';
+  if (confirmed) {
+    registry.update(String(tabId), { url: d.normalized_url, kind: d.kind });
+  } else if (navigation.post_url) {
+    const observed = navigationDecision(navigation.post_url);
+    if (observed.allow) registry.update(String(tabId), { url: observed.normalized_url, kind: observed.kind });
+  }
   invalidatePerception(String(tabId));
   await publishSnapshot();
-  return { ok: true, tab_id: String(tabId), url: d.normalized_url };
+  return {
+    ok: confirmed,
+    tab_id: String(tabId),
+    url: confirmed ? d.normalized_url : (navigation.post_url || null),
+    navigation,
+    effect_outcome: confirmed ? 'CONFIRMED' : 'AMBIGUOUS',
+    automatic_retry_allowed: false,
+  };
 }
 
 async function closeTab(tabId) {
@@ -661,13 +683,7 @@ async function handleCommand(command, payload = {}) {
   if (command === 'NAVIGATE') {
     if (payload?.tab_id) return loadTab(payload.tab_id, payload?.url);
     if (!selectedView) throw new Error('no_selected_tab');
-    const d = navigationDecision(payload?.url);
-    if (!d.allow) throw new Error(`navigation_blocked:${d.reason}`);
-    await selectedView.webContents.loadURL(d.normalized_url);
-    registry.update(selected.tab_id, { url: d.normalized_url, kind: d.kind });
-    invalidatePerception(selected.tab_id);
-    await publishSnapshot();
-    return { ok: true, tab_id: selected.tab_id, url: d.normalized_url };
+    return loadTab(selected.tab_id, payload?.url);
   }
   if (command === 'BACK') { if (selectedView?.webContents.navigationHistory.canGoBack()) selectedView.webContents.navigationHistory.goBack(); return { ok: true }; }
   if (command === 'FORWARD') { if (selectedView?.webContents.navigationHistory.canGoForward()) selectedView.webContents.navigationHistory.goForward(); return { ok: true }; }
