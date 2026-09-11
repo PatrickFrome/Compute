@@ -103,6 +103,28 @@ function isThenable(value) {
   return value != null && typeof value.then === 'function';
 }
 
+function deferBudgetAdmission(readMutationBudget, batchSize) {
+  return DEFERRED_TURN.then(() => {
+    const rawBudget = readMutationBudget();
+    if (isThenable(rawBudget)) {
+      return Promise.resolve(rawBudget)
+        .then((budget) => validateMutationBudget(budget, batchSize));
+    }
+    return validateMutationBudget(rawBudget, batchSize);
+  });
+}
+
+function deferCellAdmission(resolveCellKey, command, commandId, cellKeys, seenCells, index) {
+  return DEFERRED_TURN.then(() => {
+    const rawCellKey = resolveCellKey(command);
+    if (isThenable(rawCellKey)) {
+      return Promise.resolve(rawCellKey)
+        .then((cellKey) => admitCell(cellKeys, seenCells, index, cellKey, commandId));
+    }
+    return admitCell(cellKeys, seenCells, index, rawCellKey, commandId);
+  });
+}
+
 async function executeLane(execute, command, commandId, cellKey, signal) {
   if (signal?.aborted) {
     return {
@@ -228,29 +250,21 @@ export class BrowserBrainParallelFanoutCoordinator {
     let preflightPromise;
     if (this.usesDefaultCellResolver) {
       // Preserve the provider seam: budget reads remain deferred from the caller
-      // turn. For the common synchronous process-local budget, validate inside
-      // that same deferred reaction rather than allocating a second reaction.
-      // Async provider budgets retain their awaited validation path.
-      preflightPromise = DEFERRED_TURN.then(() => {
-        const rawBudget = this.readMutationBudget();
-        if (isThenable(rawBudget)) {
-          return Promise.resolve(rawBudget)
-            .then((budget) => validateMutationBudget(budget, commands.length));
-        }
-        return validateMutationBudget(rawBudget, commands.length);
-      });
+      // turn. Synchronous process-local budgets validate inside that same
+      // deferred reaction; async/thenable providers retain awaited validation.
+      preflightPromise = deferBudgetAdmission(this.readMutationBudget, commands.length);
     } else {
-      const budgetPromise = DEFERRED_TURN
-        .then(() => this.readMutationBudget())
-        .then((rawBudget) => validateMutationBudget(rawBudget, commands.length));
       const preflightPromises = new Array(commands.length + 1);
-      preflightPromises[0] = budgetPromise;
+      preflightPromises[0] = deferBudgetAdmission(this.readMutationBudget, commands.length);
       for (let index = 0; index < commands.length; index += 1) {
-        const command = commands[index];
-        const commandId = commandIds[index];
-        preflightPromises[index + 1] = DEFERRED_TURN
-          .then(() => this.resolveCellKey(command))
-          .then((rawCellKey) => admitCell(cellKeys, seenCells, index, rawCellKey, commandId));
+        preflightPromises[index + 1] = deferCellAdmission(
+          this.resolveCellKey,
+          commands[index],
+          commandIds[index],
+          cellKeys,
+          seenCells,
+          index,
+        );
       }
       preflightPromise = Promise.all(preflightPromises);
     }
