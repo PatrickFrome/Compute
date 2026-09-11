@@ -72,7 +72,7 @@ export function compactFleetHistory(input, policy = null) {
 function isRestartMissingBinding(row, tabExists) {
   if (!row || typeof row !== 'object' || typeof tabExists !== 'function') return false;
   const lifecycle = String(row.lifecycle_state || '');
-  if (!FLEET_STATES.includes(lifecycle) || ['RETIRED', 'PROVISIONING_AMBIGUOUS'].includes(lifecycle)) return false;
+  if (!['BOUND_UNVERIFIED', 'ACTIVE'].includes(lifecycle)) return false;
   if (!row.tab_id || row.authority_effect === true) return false;
   try {
     return tabExists(String(row.tab_id)) === false;
