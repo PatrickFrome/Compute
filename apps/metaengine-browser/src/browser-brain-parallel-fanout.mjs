@@ -67,7 +67,10 @@ function preflightAbortError() {
   return new BrowserBrainFanoutPlanError('aborted', 'fanout aborted before any effect');
 }
 
-async function awaitPreflight(preflightPromise, signal) {
+function awaitPreflight(preflightPromise, signal) {
+  // The overwhelmingly common signal-less path can return the aggregate directly.
+  // Keeping this helper synchronous avoids one async-function adoption Promise per
+  // admitted batch while preserving the exact same await boundary in dispatch().
   if (!signal) return preflightPromise;
 
   let removeAbortListener = () => {};
@@ -81,11 +84,7 @@ async function awaitPreflight(preflightPromise, signal) {
     removeAbortListener = () => signal.removeEventListener('abort', rejectAbort);
   });
 
-  try {
-    return await Promise.race([preflightPromise, abortPromise]);
-  } finally {
-    removeAbortListener();
-  }
+  return Promise.race([preflightPromise, abortPromise]).finally(removeAbortListener);
 }
 
 /**
