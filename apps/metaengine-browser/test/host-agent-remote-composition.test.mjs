@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { HostAgentClient } from '../src/host-agent-ipc.mjs';
+import { HostAgentClient, hostAgentEndpoint } from '../src/host-agent-ipc.mjs';
 import { createHostAgentSessionKey } from '../src/host-agent-protocol.mjs';
 import { HostAgentRemoteComposition } from '../src/host-agent-remote-composition.mjs';
 import { NATIVE_SUPERVISOR_BASE } from '../src/native-supervisor-endpoints.mjs';
@@ -47,7 +47,7 @@ function response(status, body) {
   };
 }
 
-function compositionFixture(root, { hostEndpoint = path.join(root, 'public-host.sock') } = {}) {
+function compositionFixture(root, { hostEndpoint = hostAgentEndpoint({ userDataPath: root }) } = {}) {
   const signCalls = [];
   const fetchCalls = [];
   const browserCalls = [];

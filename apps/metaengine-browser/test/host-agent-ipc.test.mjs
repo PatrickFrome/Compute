@@ -12,7 +12,7 @@ import { createHostAgentSessionKey } from '../src/host-agent-protocol.mjs';
 
 test('browser and host agent exchange authenticated requests over one persistent local connection', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'metaengine-host-agent-test-'));
-  const endpoint = path.join(root, 'agent.sock');
+  const endpoint = hostAgentEndpoint({ userDataPath: root });
   const sessionKey = createHostAgentSessionKey();
   const server = createHostAgentServer({
     endpoint,
@@ -41,7 +41,7 @@ test('browser and host agent exchange authenticated requests over one persistent
 
 test('wrong session key cannot invoke a host handler', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'metaengine-host-agent-auth-'));
-  const endpoint = path.join(root, 'agent.sock');
+  const endpoint = hostAgentEndpoint({ userDataPath: root });
   let invoked = 0;
   const server = createHostAgentServer({
     endpoint,
