@@ -1,6 +1,11 @@
 import { controlActionDescriptor } from './control-actions-manifest.mjs';
 import { nativeActionRequiresExactTabTarget } from './native-supervisor-command-lanes.mjs';
 import { nativeActionRequiresEffectBinding } from './native-effect-binding.mjs';
+import {
+  classifyVerifiedExecutionOutcome,
+  VERIFIED_EXECUTION_OUTCOME_SCHEMA,
+  VERIFIED_EXECUTION_TERMINAL_STATE,
+} from './verified-execution-outcome.mjs';
 
 export const LEASED_BROWSER_PLAN_SCHEMA = 'metaengine.leased-browser-plan.v1';
 export const LEASED_BROWSER_PLAN_MAX_COMMANDS = 32;
@@ -34,6 +39,16 @@ const PAGE_ACTIONS = new Set([
 
 const byteLength = (value) => Buffer.byteLength(JSON.stringify(value ?? null), 'utf8');
 const plainObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+function postDispatchOutcome(verification = null) {
+  const row = plainObject(verification) ? verification : {};
+  return classifyVerifiedExecutionOutcome({
+    dispatch_started: true,
+    effect_confirmed: row.confirmed === true,
+    no_effect_proven: row.no_effect_proven === true,
+    evidence_conflict: row.evidence_conflict === true,
+  });
+}
 
 function normalizeOrigins(value) {
   if (!Array.isArray(value) || value.length < 1 || value.length > 16) throw new Error('leased_browser_plan_allowed_origins_invalid');
@@ -236,13 +251,16 @@ export class LeasedBrowserPlanExecutor {
           });
         } catch (error) {
           const errorText = String(error?.message || error).slice(0, 240);
+          const verifiedExecution = row.mutating ? postDispatchOutcome() : null;
           return receipt(plan, row.mutating ? 'AMBIGUOUS' : (controller.signal.aborted ? 'CANCELLED' : 'NEEDS_REPLAN'), completed, command.command_id, results, {
             reason: controller.signal.aborted ? (active.reason || 'ABORTED') : 'EXECUTION_ERROR',
             error: errorText,
+            ...(verifiedExecution ? { verified_execution: verifiedExecution } : {}),
           });
         }
 
         let verification = null;
+        let verifiedExecution = null;
         if (row.mutating) {
           try {
             verification = await this.#verifyCommand(structuredClone(command), structuredClone(value), {
@@ -251,15 +269,23 @@ export class LeasedBrowserPlanExecutor {
               command_id: command.command_id,
             });
           } catch (error) {
+            verifiedExecution = postDispatchOutcome();
             return receipt(plan, 'AMBIGUOUS', completed, command.command_id, results, {
               reason: 'VERIFICATION_ERROR',
               error: String(error?.message || error).slice(0, 240),
+              verified_execution: verifiedExecution,
             });
           }
-          if (verification?.confirmed !== true) {
-            return receipt(plan, verification?.no_effect_proven === true ? 'NEEDS_REPLAN' : 'AMBIGUOUS', completed, command.command_id, results, {
-              reason: verification?.no_effect_proven === true ? 'NO_EFFECT_PROVEN' : 'POSTCONDITION_UNPROVEN',
+
+          verifiedExecution = postDispatchOutcome(verification);
+          if (verifiedExecution.state !== VERIFIED_EXECUTION_TERMINAL_STATE.CONFIRMED) {
+            const noEffect = verifiedExecution.state === VERIFIED_EXECUTION_TERMINAL_STATE.NO_EFFECT_PROVEN;
+            return receipt(plan, noEffect ? 'NEEDS_REPLAN' : 'AMBIGUOUS', completed, command.command_id, results, {
+              reason: noEffect
+                ? 'NO_EFFECT_PROVEN'
+                : (verifiedExecution.reason === 'EVIDENCE_CONFLICT' ? 'EVIDENCE_CONFLICT' : 'POSTCONDITION_UNPROVEN'),
               verification: plainObject(verification) ? structuredClone(verification) : null,
+              verified_execution: verifiedExecution,
             });
           }
         }
@@ -272,6 +298,7 @@ export class LeasedBrowserPlanExecutor {
           execution_ms: Date.now() - started,
           result: value ?? null,
           verification: verification == null ? null : structuredClone(verification),
+          verified_execution: verifiedExecution,
           authority_effect: false,
         });
       }
@@ -295,6 +322,8 @@ export class LeasedBrowserPlanExecutor {
       server_sealed_effect_binding_expected: true,
       local_reauthorization_required: true,
       command_expiry_rechecked_before_effect: true,
+      verified_execution_outcome_schema: VERIFIED_EXECUTION_OUTCOME_SCHEMA,
+      verified_execution_classifier: true,
       db_lease_required: true,
       transport_delivery_is_authority: false,
       browser_plan_is_authority: false,
