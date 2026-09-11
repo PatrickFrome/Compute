@@ -47,17 +47,14 @@ function response(status, body) {
   };
 }
 
-test('production-shape composition keeps key in Browser while Host transport waits and Browser executes through typed IPC', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'metaengine-remote-composition-'));
-  const hostEndpoint = path.join(root, 'public-host.sock');
-  const signerKey = createHostAgentSessionKey();
-  const browserKey = createHostAgentSessionKey();
-  const hostKey = createHostAgentSessionKey();
+function compositionFixture(root, { hostEndpoint = path.join(root, 'public-host.sock') } = {}) {
   const signCalls = [];
   const fetchCalls = [];
   const browserCalls = [];
   const fastCalls = [];
-
+  const signerKey = createHostAgentSessionKey();
+  const browserKey = createHostAgentSessionKey();
+  const hostKey = createHostAgentSessionKey();
   const composition = new HostAgentRemoteComposition({
     userDataPath: root,
     identity: browserIdentity(signCalls),
@@ -94,31 +91,37 @@ test('production-shape composition keeps key in Browser while Host transport wai
       return response(200, { accepted: true });
     },
   });
-  await composition.start();
-  const publicClient = new HostAgentClient({ endpoint: hostEndpoint, sessionKey: hostKey });
+  return { composition, signerKey, browserKey, hostKey, signCalls, fetchCalls, browserCalls, fastCalls, hostEndpoint };
+}
+
+test('production-shape composition keeps key in Browser while Host transport waits and Browser executes through typed IPC', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'metaengine-remote-composition-'));
+  const h = compositionFixture(root);
+  await h.composition.start();
+  const publicClient = new HostAgentClient({ endpoint: h.hostEndpoint, sessionKey: h.hostKey });
   t.after(async () => {
     publicClient.close();
-    await composition.stop().catch(() => {});
+    await h.composition.stop().catch(() => {});
     await rm(root, { recursive: true, force: true });
   });
 
-  const transport = composition.transport();
+  const transport = h.composition.transport();
   const batch = await transport.waitBatch({ supervisor_mode: 'CONTROL', max_batch: 64, max_tab_mutations: 16, wait_ms: 15000 });
   assert.equal(batch.commands.length, 1);
-  assert.equal(fetchCalls.length, 1);
-  assert.equal(signCalls.length, 1);
-  assert.equal(signCalls[0].requestPath, '/a2-browser-native-supervisor-v1/v1/commands/wait-batch');
+  assert.equal(h.fetchCalls.length, 1);
+  assert.equal(h.signCalls.length, 1);
+  assert.equal(h.signCalls[0].requestPath, '/a2-browser-native-supervisor-v1/v1/commands/wait-batch');
 
   const browserReceipt = await publicClient.request('BROWSER_PLAN_EXECUTE', { plan_id: 'plan:remote:1', steps: [] });
   assert.equal(browserReceipt.state, 'COMPLETED');
-  assert.deepEqual(browserCalls.map(([kind]) => kind), ['execute']);
-  assert.equal(fastCalls.length, 0);
+  assert.deepEqual(h.browserCalls.map(([kind]) => kind), ['execute']);
+  assert.equal(h.fastCalls.length, 0);
 
   await transport.postState({ state: { supervisor_mode: 'CONTROL', authority_effect: false } });
-  assert.equal(fetchCalls.length, 2);
-  assert.equal(signCalls.length, 2);
+  assert.equal(h.fetchCalls.length, 2);
+  assert.equal(h.signCalls.length, 2);
 
-  const snapshot = composition.snapshot();
+  const snapshot = h.composition.snapshot();
   assert.equal(snapshot.state, 'READY');
   assert.equal(snapshot.private_key_exported, false);
   assert.equal(snapshot.enrollment_authority_moved, false);
@@ -126,36 +129,43 @@ test('production-shape composition keeps key in Browser while Host transport wai
   assert.equal(snapshot.transport_via_delegated_identity, true);
   assert.equal(snapshot.second_scheduler, false);
   assert.equal(snapshot.automatic_effect_retry_allowed, false);
+  assert.equal(snapshot.session_keys_one_shot, true);
+  assert.equal(snapshot.session_keys_consumed, true);
   const serialized = JSON.stringify(snapshot);
-  assert.equal(serialized.includes(signerKey), false);
-  assert.equal(serialized.includes(browserKey), false);
-  assert.equal(serialized.includes(hostKey), false);
+  assert.equal(serialized.includes(h.signerKey), false);
+  assert.equal(serialized.includes(h.browserKey), false);
+  assert.equal(serialized.includes(h.hostKey), false);
 });
 
-test('composition startup fails closed and tears down partial boundaries when Host Agent endpoint cannot bind', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'metaengine-remote-composition-fail-'));
-  const signCalls = [];
-  const composition = new HostAgentRemoteComposition({
-    userDataPath: root,
-    identity: browserIdentity(signCalls),
-    signerSessionKey: createHostAgentSessionKey(),
-    browserSessionKey: createHostAgentSessionKey(),
-    hostEndpoint: path.join(root, 'missing', 'cannot-bind.sock'),
-    hostSessionKey: createHostAgentSessionKey(),
-    developmentPlane: { request: async () => ({}), snapshot: () => ({ authority_effect: false }) },
-    fastControl: { invoke: async () => ({}), snapshot: () => ({ authority_effect: false }) },
-    browserStatus: async () => ({ authority_effect: false }),
-    browserPlanExecute: async () => ({ authority_effect: false }),
-    browserPlanCancel: async () => ({ authority_effect: false }),
-    fetchImpl: async () => response(200, {}),
-  });
+test('composition restart fails closed because consumed session keys may not be reused', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'metaengine-remote-composition-restart-'));
+  const h = compositionFixture(root);
   t.after(async () => {
-    await composition.stop().catch(() => {});
+    await h.composition.stop().catch(() => {});
     await rm(root, { recursive: true, force: true });
   });
 
-  await assert.rejects(composition.start());
-  const snapshot = composition.snapshot();
+  await h.composition.start();
+  const ready = h.composition.snapshot();
+  assert.equal(ready.session_keys_consumed, true);
+  assert.equal(ready.restart_requires_new_composition, true);
+  assert.equal(ready.restart_requires_new_session_keys, true);
+
+  await h.composition.stop();
+  await assert.rejects(() => h.composition.start(), /host_agent_remote_new_session_keys_required/);
+  assert.equal(h.composition.snapshot().state, 'STOPPED');
+});
+
+test('composition startup fails closed and consumes keys when Host Agent endpoint cannot bind', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'metaengine-remote-composition-fail-'));
+  const h = compositionFixture(root, { hostEndpoint: path.join(root, 'missing', 'cannot-bind.sock') });
+  t.after(async () => {
+    await h.composition.stop().catch(() => {});
+    await rm(root, { recursive: true, force: true });
+  });
+
+  await assert.rejects(h.composition.start());
+  const snapshot = h.composition.snapshot();
   assert.equal(snapshot.state, 'FAILED');
   assert.equal(snapshot.signer, null);
   assert.equal(snapshot.browser_executor, null);
@@ -163,6 +173,8 @@ test('composition startup fails closed and tears down partial boundaries when Ho
   assert.equal(snapshot.browser_client, null);
   assert.equal(snapshot.transport, null);
   assert.equal(snapshot.host_runtime, null);
+  assert.equal(snapshot.session_keys_consumed, true);
   assert.equal(snapshot.private_key_exported, false);
   assert.equal(snapshot.authority_effect, false);
+  await assert.rejects(() => h.composition.start(), /host_agent_remote_new_session_keys_required/);
 });
