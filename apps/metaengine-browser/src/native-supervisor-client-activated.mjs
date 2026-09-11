@@ -84,7 +84,7 @@ export class NativeSupervisorClient extends ProvenNativeSupervisorClient {
   }
 
   async start() {
-    const result = await super.start();
+    await super.start();
     const snapshot = this.setControlState({ mode: 'CONTROL', armed: true });
     if (snapshot.supervisor_mode !== 'CONTROL' || snapshot.armed !== true) {
       try { super.stop(); } catch {}
@@ -93,7 +93,7 @@ export class NativeSupervisorClient extends ProvenNativeSupervisorClient {
     try {
       const activation = await markFinalRuntimeSupervisorStarted(this);
       if (activation.state !== 'READY') throw new Error(`final_runtime_activation_required:${activation.state}`);
-      return result;
+      return this.snapshot();
     } catch (error) {
       try { super.stop(); } catch {}
       throw error;
