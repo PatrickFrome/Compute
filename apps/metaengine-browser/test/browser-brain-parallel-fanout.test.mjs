@@ -195,3 +195,33 @@ test('pre-aborted signal rejects before budget read or execution', async () => {
   });
   assert.equal(budgetReads, 0);
 });
+
+test('provider seams stay deferred while sharing the fanout turn', async () => {
+  const calls = [];
+  const instance = coordinator({
+    readMutationBudget: () => {
+      calls.push('budget');
+      return 2;
+    },
+    resolveCellKey: (entry) => {
+      calls.push(`resolve:${entry.command_id}`);
+      return entry.payload.tab_id;
+    },
+    execute: (_command, context) => {
+      calls.push(`execute:${context.commandId}`);
+      return context.commandId;
+    },
+  });
+
+  const dispatchPromise = instance.dispatch([
+    command('cmd-a', 'tab-a'),
+    command('cmd-b', 'tab-b'),
+  ]);
+
+  assert.deepEqual(calls, []);
+  const result = await dispatchPromise;
+
+  assert.deepEqual(calls.slice(0, 3), ['budget', 'resolve:cmd-a', 'resolve:cmd-b']);
+  assert.deepEqual(new Set(calls.slice(3)), new Set(['execute:cmd-a', 'execute:cmd-b']));
+  assert.deepEqual(result.map((entry) => entry.status), ['fulfilled', 'fulfilled']);
+});
