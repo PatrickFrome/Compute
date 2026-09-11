@@ -28,7 +28,9 @@ function sourceProofs() {
   const leasedPlan = readApp('src/leased-browser-plan.mjs');
   const sentinel = readApp('src/browser-sentinel-action-journal.cjs');
   const fastRouter = readApp('src/fast-control-mcp-stateless-router.mjs');
-  const worktreeReadModel = readApp('src/devos-worktree-repo-search.cjs');
+  const repoReadModel = readApp('src/devos-repo-read-model.cjs');
+  const repoSearchIndex = readApp('src/devos-repo-search-index.cjs');
+  const developmentPlaneWorker = readApp('src/development-plane-worker.cjs');
   const issueBatch = readApp('supabase/command-fabric-issue-batch-v2.sql');
   const releaseGateTest = readApp('test/release-physical-gate-chain.test.mjs');
   const bootstrapWorkflow = readRepo('.github/workflows/metaengine-browser-bootstrap-autostart-e2e.yml');
@@ -46,8 +48,15 @@ function sourceProofs() {
       && /Mcp-Name/i.test(fastRouter)
       && /stateless/i.test(fastRouter),
     WORKTREE_AWARE_READ_MODEL:
-      /worktree/i.test(worktreeReadModel)
-      && /increment/i.test(worktreeReadModel),
+      /source_files_fixed_by_host:\s*true/.test(repoReadModel)
+      && /renderer_path_selection_allowed:\s*false/.test(repoReadModel)
+      && /arbitrary_path_read_allowed:\s*false/.test(repoReadModel)
+      && /const ALLOWED_ROOTS = Object\.freeze/.test(repoSearchIndex)
+      && /this\.#head === exact\.head/.test(repoSearchIndex)
+      && /MAX_TOTAL_BYTES/.test(repoSearchIndex)
+      && /DEVOS_REPO_READ_MODEL/.test(developmentPlaneWorker)
+      && /DEVOS_REPO_SEARCH/.test(developmentPlaneWorker)
+      && /authority_effect:\s*false/.test(developmentPlaneWorker),
     HOST_AGENT_REPLAY_FENCE_V2:
       hostProtocol.replay_protection === 'SEQUENCED_EPOCH_HIGH_WATER_NO_EVICTION'
       && hostProtocol.session_key_rotation === 'REQUIRED_ON_SERVER_PROCESS_RESTART',
