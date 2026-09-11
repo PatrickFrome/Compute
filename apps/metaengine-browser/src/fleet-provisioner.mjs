@@ -69,6 +69,29 @@ export function compactFleetHistory(input, policy = null) {
   return pruneRestartStaleLostHistory(compactTerminalFleetHistory(input, policy));
 }
 
+function isRestartMissingBinding(row, tabExists) {
+  if (!row || typeof row !== 'object' || typeof tabExists !== 'function') return false;
+  const lifecycle = String(row.lifecycle_state || '');
+  if (!FLEET_STATES.includes(lifecycle) || ['RETIRED', 'PROVISIONING_AMBIGUOUS'].includes(lifecycle)) return false;
+  if (!row.tab_id || row.authority_effect === true) return false;
+  try {
+    return tabExists(String(row.tab_id)) === false;
+  } catch {
+    return false;
+  }
+}
+
+export function compactZeroTargetRestartBindings(input, { policy = null, tabExists = null } = {}) {
+  if (!input || input.schema !== 'metaengine.browser.fleet-state.v1' || !Array.isArray(input.agents)) return input;
+  if (!hasZeroDesiredFleet(input, policy) || typeof tabExists !== 'function') return input;
+  const agents = input.agents.filter((row) => !isRestartMissingBinding(row, tabExists));
+  if (agents.length === input.agents.length) return input;
+  return {
+    ...input,
+    agents,
+  };
+}
+
 function normalizeRootChatGptUrl(value) {
   const url = new URL(String(value || '').trim());
   if (url.protocol !== 'https:' || !['chatgpt.com', 'www.chatgpt.com'].includes(url.hostname.toLowerCase())) {
@@ -97,10 +120,14 @@ export class FleetProvisioner extends CoreFleetProvisioner {
     const loadState = options?.loadState;
     const saveState = options?.saveState;
     const startupPolicy = options?.policy;
+    const tabExists = options?.tabExists;
     super({
       ...options,
       loadState: typeof loadState === 'function'
-        ? async (...args) => compactFleetHistory(await loadState(...args), startupPolicy)
+        ? async (...args) => compactZeroTargetRestartBindings(
+            compactFleetHistory(await loadState(...args), startupPolicy),
+            { policy: startupPolicy, tabExists },
+          )
         : loadState,
       saveState: typeof saveState === 'function'
         ? async (value, ...args) => saveState(compactFleetHistory(value), ...args)
