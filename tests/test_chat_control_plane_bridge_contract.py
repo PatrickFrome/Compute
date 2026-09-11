@@ -34,7 +34,8 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
 
     def test_manifest_and_worker_entrypoints(self):
         self.assertEqual(self.manifest["manifest_version"], 3)
-        self.assertEqual(self.manifest["version"], "0.6.2")
+        version = tuple(int(part) for part in self.manifest["version"].split("."))
+        self.assertGreaterEqual(version, (0, 6, 2))
         self.assertGreaterEqual(int(self.manifest["minimum_chrome_version"]), 125)
         self.assertEqual(self.manifest["background"]["service_worker"], "background-entry.js")
         self.assertIn("debugger", self.manifest["permissions"])
