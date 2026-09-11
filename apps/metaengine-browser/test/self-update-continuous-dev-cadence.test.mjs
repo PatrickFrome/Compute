@@ -35,6 +35,11 @@ function runtimeWith({ updater, clock, hintProbe }) {
   });
 }
 
+async function settleBackgroundDiscovery() {
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+}
+
 test('packaged dev runtime uses a quota-safe fifteen-minute exact fallback cadence', async () => {
   assert.equal(DEFAULT_CONTINUOUS_DEV_UPDATE_INTERVAL_MS, 15 * 60 * 1000);
   assert.equal(DEFAULT_CONTINUOUS_DEV_RESTART_GRACE_MS, 1 * 1000);
@@ -119,6 +124,7 @@ test('same newer hint retries a failed exact discovery only after the bounded re
 
   await runtime.start();
   await runtime.cycle();
+  await settleBackgroundDiscovery();
   assert.equal(releaseAttempts, 1);
   assert.equal(runtime.snapshot().state, 'DISCOVERY_ERROR');
 
@@ -128,6 +134,7 @@ test('same newer hint retries a failed exact discovery only after the bounded re
 
   now = DEFAULT_DEV_UPDATE_HINT_INTERVAL_MS + DEFAULT_DEV_UPDATE_HINT_RETRY_MS;
   await runtime.cycle();
+  await settleBackgroundDiscovery();
   assert.equal(releaseAttempts, 2);
   assert.equal(runtime.snapshot().state, 'DISCOVERY_ERROR');
 });
