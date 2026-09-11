@@ -6,6 +6,18 @@ function validSequence(value) {
   return Number.isSafeInteger(value) && value >= 0;
 }
 
+function normalizedSource(value) {
+  const source = String(value || '').trim();
+  if (!SOURCE_RE.test(source)) throw new TypeError('browser_brain_stream_clock_source_invalid');
+  return source;
+}
+
+function normalizedSequence(value) {
+  const sequence = Number(value);
+  if (!validSequence(sequence)) throw new TypeError('browser_brain_stream_clock_sequence_invalid');
+  return sequence;
+}
+
 function freezeRow(source, state) {
   return Object.freeze({
     source,
@@ -47,14 +59,6 @@ export class BrowserBrainStreamClock {
     this.#snapshotCache = null;
   }
 
-  #validate(sourceValue, sequenceValue) {
-    const source = String(sourceValue || '').trim();
-    const sequence = Number(sequenceValue);
-    if (!SOURCE_RE.test(source)) throw new TypeError('browser_brain_stream_clock_source_invalid');
-    if (!validSequence(sequence)) throw new TypeError('browser_brain_stream_clock_sequence_invalid');
-    return { source, sequence };
-  }
-
   #newSource(source, sequence = 0) {
     if (this.#sources.size >= this.#maxSources) {
       throw new Error('browser_brain_stream_clock_source_capacity_exceeded');
@@ -83,7 +87,8 @@ export class BrowserBrainStreamClock {
   }
 
   observe(sourceValue, sequenceValue) {
-    const { source, sequence } = this.#validate(sourceValue, sequenceValue);
+    const source = normalizedSource(sourceValue);
+    const sequence = normalizedSequence(sequenceValue);
     let state = this.#sources.get(source);
     if (!state) {
       state = this.#newSource(source, sequence);
@@ -156,7 +161,8 @@ export class BrowserBrainStreamClock {
 
   /** Establish one unseen source from an explicit canonical snapshot. */
   baseline(sourceValue, sequenceValue) {
-    const { source, sequence } = this.#validate(sourceValue, sequenceValue);
+    const source = normalizedSource(sourceValue);
+    const sequence = normalizedSequence(sequenceValue);
     if (this.#sources.has(source)) throw new Error('browser_brain_stream_clock_baseline_already_initialized');
     const state = this.#newSource(source, sequence);
     this.#epoch += 1;
@@ -172,7 +178,8 @@ export class BrowserBrainStreamClock {
   }
 
   resync(sourceValue, sequenceValue) {
-    const { source, sequence } = this.#validate(sourceValue, sequenceValue);
+    const source = normalizedSource(sourceValue);
+    const sequence = normalizedSequence(sequenceValue);
     const state = this.#sources.get(source);
     if (!state) throw new Error('browser_brain_stream_clock_source_unknown');
     if (!state.resyncRequired) throw new Error('browser_brain_stream_clock_resync_not_required');
