@@ -213,9 +213,7 @@ export class BrowserBrainParallelFanoutCoordinator {
       }
     }
 
-    const customCellResolver = !this.usesDefaultCellResolver;
-    const preflightPromises = new Array(customCellResolver ? commands.length + 1 : 1);
-    preflightPromises[0] = DEFERRED_TURN
+    const budgetPromise = DEFERRED_TURN
       .then(() => this.readMutationBudget())
       .then((rawBudget) => {
         const budget = strictMutationBudget(rawBudget);
@@ -225,7 +223,10 @@ export class BrowserBrainParallelFanoutCoordinator {
         return budget;
       });
 
-    if (customCellResolver) {
+    let preflightPromise = budgetPromise;
+    if (!this.usesDefaultCellResolver) {
+      const preflightPromises = new Array(commands.length + 1);
+      preflightPromises[0] = budgetPromise;
       for (let index = 0; index < commands.length; index += 1) {
         const command = commands[index];
         const commandId = commandIds[index];
@@ -233,9 +234,9 @@ export class BrowserBrainParallelFanoutCoordinator {
           .then(() => this.resolveCellKey(command))
           .then((rawCellKey) => admitCell(cellKeys, seenCells, index, rawCellKey, commandId));
       }
+      preflightPromise = Promise.all(preflightPromises);
     }
 
-    const preflightPromise = Promise.all(preflightPromises);
     await awaitPreflight(preflightPromise, signal);
     if (signal?.aborted) throw preflightAbortError();
 
