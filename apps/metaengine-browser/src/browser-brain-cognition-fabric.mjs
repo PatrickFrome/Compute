@@ -84,17 +84,6 @@ function sameGeneration(a, b) {
     && a.semantic_revision === b.semantic_revision);
 }
 
-function producerObservations(event = {}) {
-  const out = [];
-  const processSequence = positiveInt(event?.seq);
-  if (processSequence != null) out.push(Object.freeze({ source: 'process-plane', sequence: processSequence }));
-  if (String(event?.type || '').toUpperCase() === 'SEMANTIC_EVENT') {
-    const semanticSequence = positiveInt(event?.semantic_sequence);
-    if (semanticSequence != null) out.push(Object.freeze({ source: 'semantic', sequence: semanticSequence }));
-  }
-  return out;
-}
-
 function publicAgent(row) {
   return Object.freeze({
     agent_id: row.agentId,
@@ -208,14 +197,21 @@ export class BrowserBrainCognitionFabric {
     return removed;
   }
 
+  #observeProducer(clockResults, source, sequence) {
+    const result = this.#streamClock.observe(source, sequence);
+    clockResults.push(result);
+    if (result.disposition === 'GAP') this.#clockGaps += 1;
+    if (result.disposition === 'REGRESSION') this.#clockRegressions += 1;
+  }
+
   observeEdge(event = {}) {
     const type = String(event?.type || 'UNKNOWN').toUpperCase();
     const clockResults = [];
-    for (const producer of producerObservations(event)) {
-      const result = this.#streamClock.observe(producer.source, producer.sequence);
-      clockResults.push(result);
-      if (result.disposition === 'GAP') this.#clockGaps += 1;
-      if (result.disposition === 'REGRESSION') this.#clockRegressions += 1;
+    const processSequence = positiveInt(event?.seq);
+    if (processSequence != null) this.#observeProducer(clockResults, 'process-plane', processSequence);
+    if (type === 'SEMANTIC_EVENT') {
+      const semanticSequence = positiveInt(event?.semantic_sequence);
+      if (semanticSequence != null) this.#observeProducer(clockResults, 'semantic', semanticSequence);
     }
     this.#lastClockResults = clockResults.slice(-4);
     this.#edgeCount += 1;
@@ -239,11 +235,12 @@ export class BrowserBrainCognitionFabric {
       if (INVALIDATING_TYPES.has(type) || INVALIDATING_SEMANTIC_METHODS.has(method)) this.#invalidateTab(id);
     }
 
+    const streamClock = this.#streamClock.snapshot();
     return Object.freeze({
       schema: 'metaengine.browser-brain.cognition-edge-result.v1',
       clock: Object.freeze(clockResults),
-      causal_epoch: this.#streamClock.snapshot().epoch,
-      resync_required: this.#streamClock.snapshot().gap_requires_resync,
+      causal_epoch: streamClock.epoch,
+      resync_required: streamClock.gap_requires_resync,
       authority_effect: false,
     });
   }

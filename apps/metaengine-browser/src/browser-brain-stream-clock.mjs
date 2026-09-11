@@ -6,8 +6,21 @@ function validSequence(value) {
   return Number.isSafeInteger(value) && value >= 0;
 }
 
+function normalizedSource(value) {
+  const source = String(value || '').trim();
+  if (!SOURCE_RE.test(source)) throw new TypeError('browser_brain_stream_clock_source_invalid');
+  return source;
+}
+
+function normalizedSequence(value) {
+  const sequence = Number(value);
+  if (!validSequence(sequence)) throw new TypeError('browser_brain_stream_clock_sequence_invalid');
+  return sequence;
+}
+
 function freezeRow(source, state) {
-  return Object.freeze({
+  if (state.rowCache) return state.rowCache;
+  state.rowCache = Object.freeze({
     source,
     sequence: state.sequence,
     resync_required: state.resyncRequired,
@@ -16,6 +29,11 @@ function freezeRow(source, state) {
     gap_from: state.gapFrom,
     gap_to: state.gapTo,
   });
+  return state.rowCache;
+}
+
+function invalidateRow(state) {
+  state.rowCache = null;
 }
 
 /**
@@ -30,9 +48,11 @@ function freezeRow(source, state) {
  */
 export class BrowserBrainStreamClock {
   #sources = new Map();
+  #sourceOrder = [];
   #epoch = 0;
   #resyncRequiredCount = 0;
   #maxSources;
+  #snapshotCache = null;
 
   constructor({ maxSources = 64 } = {}) {
     const bounded = Number(maxSources);
@@ -42,12 +62,19 @@ export class BrowserBrainStreamClock {
     this.#maxSources = bounded;
   }
 
-  #validate(sourceValue, sequenceValue) {
-    const source = String(sourceValue || '').trim();
-    const sequence = Number(sequenceValue);
-    if (!SOURCE_RE.test(source)) throw new TypeError('browser_brain_stream_clock_source_invalid');
-    if (!validSequence(sequence)) throw new TypeError('browser_brain_stream_clock_sequence_invalid');
-    return { source, sequence };
+  #invalidateSnapshot() {
+    this.#snapshotCache = null;
+  }
+
+  #insertSourceOrder(source) {
+    let low = 0;
+    let high = this.#sourceOrder.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (this.#sourceOrder[mid].localeCompare(source) < 0) low = mid + 1;
+      else high = mid;
+    }
+    this.#sourceOrder.splice(low, 0, source);
   }
 
   #newSource(source, sequence = 0) {
@@ -61,8 +88,11 @@ export class BrowserBrainStreamClock {
       resyncMinimumSequence: null,
       gapFrom: null,
       gapTo: null,
+      rowCache: null,
     };
     this.#sources.set(source, state);
+    this.#insertSourceOrder(source);
+    this.#invalidateSnapshot();
     return state;
   }
 
@@ -73,10 +103,13 @@ export class BrowserBrainStreamClock {
     state.resyncMinimumSequence = Math.max(state.sequence, Number(minimumSequence) || state.sequence);
     state.gapFrom = gapFrom;
     state.gapTo = gapTo;
+    invalidateRow(state);
+    this.#invalidateSnapshot();
   }
 
   observe(sourceValue, sequenceValue) {
-    const { source, sequence } = this.#validate(sourceValue, sequenceValue);
+    const source = normalizedSource(sourceValue);
+    const sequence = normalizedSequence(sequenceValue);
     let state = this.#sources.get(source);
     if (!state) {
       state = this.#newSource(source, sequence);
@@ -136,7 +169,9 @@ export class BrowserBrainStreamClock {
     }
 
     state.sequence = sequence;
+    invalidateRow(state);
     this.#epoch += 1;
+    this.#invalidateSnapshot();
     return Object.freeze({
       accepted: true,
       disposition: 'APPLIED',
@@ -148,7 +183,8 @@ export class BrowserBrainStreamClock {
 
   /** Establish one unseen source from an explicit canonical snapshot. */
   baseline(sourceValue, sequenceValue) {
-    const { source, sequence } = this.#validate(sourceValue, sequenceValue);
+    const source = normalizedSource(sourceValue);
+    const sequence = normalizedSequence(sequenceValue);
     if (this.#sources.has(source)) throw new Error('browser_brain_stream_clock_baseline_already_initialized');
     const state = this.#newSource(source, sequence);
     this.#epoch += 1;
@@ -164,7 +200,8 @@ export class BrowserBrainStreamClock {
   }
 
   resync(sourceValue, sequenceValue) {
-    const { source, sequence } = this.#validate(sourceValue, sequenceValue);
+    const source = normalizedSource(sourceValue);
+    const sequence = normalizedSequence(sequenceValue);
     const state = this.#sources.get(source);
     if (!state) throw new Error('browser_brain_stream_clock_source_unknown');
     if (!state.resyncRequired) throw new Error('browser_brain_stream_clock_resync_not_required');
@@ -187,8 +224,10 @@ export class BrowserBrainStreamClock {
     state.resyncMinimumSequence = null;
     state.gapFrom = null;
     state.gapTo = null;
+    invalidateRow(state);
     this.#resyncRequiredCount = Math.max(0, this.#resyncRequiredCount - 1);
     this.#epoch += 1;
+    this.#invalidateSnapshot();
     return Object.freeze({
       accepted: true,
       disposition: 'RESYNCED',
@@ -208,10 +247,9 @@ export class BrowserBrainStreamClock {
   }
 
   snapshot() {
-    const sources = [...this.#sources.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([source, state]) => freezeRow(source, state));
-    return Object.freeze({
+    if (this.#snapshotCache) return this.#snapshotCache;
+    const sources = this.#sourceOrder.map((source) => freezeRow(source, this.#sources.get(source)));
+    this.#snapshotCache = Object.freeze({
       schema: BROWSER_BRAIN_STREAM_CLOCK_SCHEMA,
       epoch: this.#epoch,
       source_count: sources.length,
@@ -234,5 +272,6 @@ export class BrowserBrainStreamClock {
       dedicated_timer: false,
       authority_effect: false,
     });
+    return this.#snapshotCache;
   }
 }

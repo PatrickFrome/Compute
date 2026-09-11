@@ -7,21 +7,67 @@ export class BrowserBrainFanoutPlanError extends Error {
   }
 }
 
+const DEFERRED_TURN = Promise.resolve();
+
 function defaultResolveCellKey(command) {
   return command?.payload?.tab_id ?? null;
 }
 
-function finitePositiveInteger(value, fallback) {
-  if (!Number.isFinite(value)) return fallback;
-  const normalized = Math.floor(value);
-  return normalized > 0 ? normalized : fallback;
+function strictHardBatchLimit(value) {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new BrowserBrainFanoutPlanError(
+      'invalid_hard_batch_limit',
+      'hard batch limit must be a positive safe integer',
+      { hard_batch_limit: value },
+    );
+  }
+  return value;
+}
+
+function strictMutationBudget(value) {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new BrowserBrainFanoutPlanError(
+      'invalid_mutation_budget',
+      'current mutation budget must be a positive safe integer',
+      { mutation_budget: value },
+    );
+  }
+  return value;
+}
+
+function strictBrowserCellKey(rawCellKey, commandId) {
+  const cellKey = typeof rawCellKey === 'string' ? rawCellKey.trim() : '';
+  if (!cellKey) {
+    throw new BrowserBrainFanoutPlanError(
+      'missing_browser_cell',
+      `command ${commandId} has no explicit BrowserCell binding`,
+      { command_id: commandId },
+    );
+  }
+  return cellKey;
+}
+
+function pressureBudgetExceededError(batchSize, budget) {
+  return new BrowserBrainFanoutPlanError(
+    'pressure_budget_exceeded',
+    `batch size ${batchSize} exceeds current mutation budget ${budget}`,
+    { batch_size: batchSize, mutation_budget: budget },
+  );
+}
+
+function sameCellOverlapError(cellKey) {
+  return new BrowserBrainFanoutPlanError(
+    'same_cell_overlap',
+    `batch contains overlapping mutation for BrowserCell ${cellKey}`,
+    { browser_cell: cellKey },
+  );
 }
 
 function preflightAbortError() {
   return new BrowserBrainFanoutPlanError('aborted', 'fanout aborted before any effect');
 }
 
-async function awaitPreflight(preflightPromise, signal) {
+function awaitPreflight(preflightPromise, signal) {
   if (!signal) return preflightPromise;
 
   let removeAbortListener = () => {};
@@ -35,11 +81,7 @@ async function awaitPreflight(preflightPromise, signal) {
     removeAbortListener = () => signal.removeEventListener('abort', rejectAbort);
   });
 
-  try {
-    return await Promise.race([preflightPromise, abortPromise]);
-  } finally {
-    removeAbortListener();
-  }
+  return Promise.race([preflightPromise, abortPromise]).finally(removeAbortListener);
 }
 
 /**
@@ -78,7 +120,7 @@ export class BrowserBrainParallelFanoutCoordinator {
     this.execute = execute;
     this.resolveCellKey = resolveCellKey;
     this.readMutationBudget = readMutationBudget;
-    this.hardBatchLimit = finitePositiveInteger(hardBatchLimit, 128);
+    this.hardBatchLimit = strictHardBatchLimit(hardBatchLimit);
   }
 
   async dispatch(commands, { signal } = {}) {
@@ -98,10 +140,16 @@ export class BrowserBrainParallelFanoutCoordinator {
     }
 
     const seenCommandIds = new Set();
-    const plan = [];
+    const commandIds = new Array(commands.length);
+    const cellKeys = new Array(commands.length);
 
-    for (const command of commands) {
-      const commandId = typeof command?.command_id === 'string' ? command.command_id.trim() : '';
+    // Keep caller-owned commands opaque and carry fan-out metadata in dense
+    // sidecar vectors. This avoids allocating one short-lived plan object per
+    // command while preserving stable caller order across preflight/execution.
+    for (let index = 0; index < commands.length; index += 1) {
+      const commandId = typeof commands[index]?.command_id === 'string'
+        ? commands[index].command_id.trim()
+        : '';
       if (!commandId) {
         throw new BrowserBrainFanoutPlanError('missing_command_id', 'every fanout command needs command_id');
       }
@@ -109,88 +157,76 @@ export class BrowserBrainParallelFanoutCoordinator {
         throw new BrowserBrainFanoutPlanError('duplicate_command_id', `duplicate command_id ${commandId}`);
       }
       seenCommandIds.add(commandId);
-      plan.push({ command, commandId, cellKey: null });
+      commandIds[index] = commandId;
+      cellKeys[index] = null;
     }
 
-    // Pressure admission and BrowserCell resolution are independent read-only
-    // preflight seams. Start every lane before awaiting any one of them; no
-    // physical effect is possible until the aggregate has passed.
-    const budgetPromise = Promise.resolve().then(() => this.readMutationBudget());
-    const cellKeyPromises = plan.map(({ command }) =>
-      Promise.resolve().then(() => this.resolveCellKey(command)),
-    );
-    const preflightPromise = Promise.all([budgetPromise, ...cellKeyPromises]);
-    const [rawBudget, ...rawCellKeys] = await awaitPreflight(preflightPromise, signal);
-    if (signal?.aborted) throw preflightAbortError();
-
-    const budget = finitePositiveInteger(rawBudget, 1);
-    if (commands.length > budget) {
-      throw new BrowserBrainFanoutPlanError(
-        'pressure_budget_exceeded',
-        `batch size ${commands.length} exceeds current mutation budget ${budget}`,
-        { batch_size: commands.length, mutation_budget: budget },
-      );
-    }
+    const preflightPromises = new Array(commands.length + 1);
+    preflightPromises[0] = DEFERRED_TURN
+      .then(() => this.readMutationBudget())
+      .then(strictMutationBudget)
+      .then((budget) => {
+        if (commands.length > budget) {
+          throw pressureBudgetExceededError(commands.length, budget);
+        }
+        return budget;
+      });
 
     const seenCells = new Set();
-    for (let index = 0; index < plan.length; index += 1) {
-      const entry = plan[index];
-      const rawCellKey = rawCellKeys[index];
-      const cellKey = typeof rawCellKey === 'string' ? rawCellKey.trim() : '';
-      if (!cellKey) {
-        throw new BrowserBrainFanoutPlanError(
-          'missing_browser_cell',
-          `command ${entry.commandId} has no explicit BrowserCell binding`,
-          { command_id: entry.commandId },
-        );
-      }
-      if (seenCells.has(cellKey)) {
-        throw new BrowserBrainFanoutPlanError(
-          'same_cell_overlap',
-          `batch contains overlapping mutation for BrowserCell ${cellKey}`,
-          { browser_cell: cellKey },
-        );
-      }
-      seenCells.add(cellKey);
-      entry.cellKey = cellKey;
+    for (let index = 0; index < commands.length; index += 1) {
+      const command = commands[index];
+      const commandId = commandIds[index];
+      preflightPromises[index + 1] = DEFERRED_TURN
+        .then(() => this.resolveCellKey(command))
+        .then((rawCellKey) => strictBrowserCellKey(rawCellKey, commandId))
+        .then((cellKey) => {
+          if (seenCells.has(cellKey)) {
+            throw sameCellOverlapError(cellKey);
+          }
+          seenCells.add(cellKey);
+          cellKeys[index] = cellKey;
+        });
     }
 
-    // All independent cells may start after one-shot admission. Each lane owns its
-    // own settlement mapping so the hot path avoids an intermediate allSettled
-    // vector. Abort is checked again at each execution-start boundary so a prior
-    // peer cannot cause later physical effects to start after shared cancellation.
-    return Promise.all(
-      plan.map(({ command, commandId, cellKey }) =>
-        Promise.resolve()
-          .then(() => {
-            if (signal?.aborted) {
-              throw new BrowserBrainFanoutPlanError(
-                'aborted',
-                `fanout aborted before command ${commandId} effect started`,
-                { command_id: commandId, browser_cell: cellKey },
-              );
-            }
-            return this.execute(command, {
-              commandId,
-              browserCell: cellKey,
-              signal,
-            });
-          })
-          .then(
-            (value) => ({
-              command_id: commandId,
-              browser_cell: cellKey,
-              status: 'fulfilled',
-              value,
-            }),
-            (reason) => ({
-              command_id: commandId,
-              browser_cell: cellKey,
-              status: 'rejected',
-              reason,
-            }),
-          ),
-      ),
-    );
+    const preflightPromise = Promise.all(preflightPromises);
+    await awaitPreflight(preflightPromise, signal);
+    if (signal?.aborted) throw preflightAbortError();
+
+    const executionPromises = new Array(commands.length);
+    for (let index = 0; index < commands.length; index += 1) {
+      const command = commands[index];
+      const commandId = commandIds[index];
+      const cellKey = cellKeys[index];
+      executionPromises[index] = DEFERRED_TURN
+        .then(() => {
+          if (signal?.aborted) {
+            throw new BrowserBrainFanoutPlanError(
+              'aborted',
+              `fanout aborted before command ${commandId} effect started`,
+              { command_id: commandId, browser_cell: cellKey },
+            );
+          }
+          return this.execute(command, {
+            commandId,
+            browserCell: cellKey,
+            signal,
+          });
+        })
+        .then(
+          (value) => ({
+            command_id: commandId,
+            browser_cell: cellKey,
+            status: 'fulfilled',
+            value,
+          }),
+          (reason) => ({
+            command_id: commandId,
+            browser_cell: cellKey,
+            status: 'rejected',
+            reason,
+          }),
+        );
+    }
+    return Promise.all(executionPromises);
   }
 }

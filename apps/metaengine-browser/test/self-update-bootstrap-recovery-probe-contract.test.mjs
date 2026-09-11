@@ -10,6 +10,10 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const scriptPath = path.resolve(here, '../scripts/self-update-bootstrap-recovery-probe.ps1');
+// GitHub-hosted Windows runners can occasionally spend more than 15 s in cold
+// PowerShell startup. Keep the probe strictly bounded without coupling this
+// read-only evidence contract to transient runner startup latency.
+const WINDOWS_BOOTSTRAP_PROBE_TIMEOUT_MS = 45_000;
 
 function digest(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -103,8 +107,8 @@ test('Windows bootstrap probe reads exact local evidence and durable receipt has
       '-InstalledExePath', app,
       '-ExpectedTargetVersion', target,
       '-ExpectedInstalledExeSha256', appSha,
-    ], { encoding: 'utf8', windowsHide: true, timeout: 15_000 });
-    assert.equal(result.status, 0, result.stderr || result.stdout);
+    ], { encoding: 'utf8', windowsHide: true, timeout: WINDOWS_BOOTSTRAP_PROBE_TIMEOUT_MS });
+    assert.equal(result.status, 0, result.error?.stack || result.stderr || result.stdout);
     const output = JSON.parse(String(result.stdout || '').trim().split(/\r?\n/).filter(Boolean).at(-1));
     assert.equal(output.schema, 'metaengine.self-update.bootstrap-probe.v1');
     assert.equal(output.version, '1.0.2');
