@@ -70,12 +70,13 @@ test('starts independent BrowserCell effects concurrently after one-shot admissi
   assert.deepEqual(result.map((entry) => entry.status), ['fulfilled', 'fulfilled']);
 });
 
-test('full-width 128 BrowserCell fanout preserves exact caller order', async () => {
+test('full-width 128 BrowserCell fanout starts every lane and preserves exact caller order', async () => {
   const width = 128;
   const commands = Array.from({ length: width }, (_, index) =>
     command(`cmd-${index}`, `tab-${index}`));
   const resolved = [];
   const started = [];
+  const releases = new Map();
   const instance = coordinator({
     hardBatchLimit: width,
     readMutationBudget: () => width,
@@ -86,16 +87,24 @@ test('full-width 128 BrowserCell fanout preserves exact caller order', async () 
     execute: async (_command, context) => {
       assert.equal(resolved.length, width);
       started.push(context.browserCell);
+      await new Promise((resolve) => releases.set(context.browserCell, resolve));
       return context.commandId;
     },
   });
 
-  const result = await instance.dispatch(commands);
+  const dispatchPromise = instance.dispatch(commands);
+  await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(resolved.length, width);
   assert.equal(new Set(resolved).size, width);
   assert.equal(started.length, width);
   assert.equal(new Set(started).size, width);
+
+  for (let index = width - 1; index >= 0; index -= 1) {
+    releases.get(`tab-${index}`)();
+  }
+  const result = await dispatchPromise;
+
   assert.deepEqual(result.map((entry) => entry.command_id), commands.map((entry) => entry.command_id));
   assert.deepEqual(result.map((entry) => entry.browser_cell), commands.map((entry) => entry.payload.tab_id));
   assert.deepEqual(result.map((entry) => entry.value), commands.map((entry) => entry.command_id));
