@@ -28,11 +28,12 @@ export function classifyVerifiedExecutionOutcome(value = {}) {
   const fencedPreEffect = optionalBoolean(value.fenced_pre_effect, 'fenced_pre_effect');
   const explicitConflict = optionalBoolean(value.evidence_conflict, 'evidence_conflict');
 
+  const terminalProofCount = [effectConfirmed, noEffectProven, failedPreEffect, fencedPreEffect]
+    .filter(Boolean).length;
   const contradictoryEvidence = explicitConflict
-    || (effectConfirmed && noEffectProven)
-    || (!dispatchStarted && (effectConfirmed || noEffectProven))
-    || (dispatchStarted && (failedPreEffect || fencedPreEffect))
-    || (failedPreEffect && fencedPreEffect);
+    || terminalProofCount > 1
+    || (!dispatchStarted && effectConfirmed)
+    || (dispatchStarted && (failedPreEffect || fencedPreEffect));
 
   let state;
   let reason;
@@ -40,18 +41,18 @@ export function classifyVerifiedExecutionOutcome(value = {}) {
   if (contradictoryEvidence) {
     state = VERIFIED_EXECUTION_TERMINAL_STATE.AMBIGUOUS;
     reason = 'EVIDENCE_CONFLICT';
-  } else if (!dispatchStarted && fencedPreEffect) {
+  } else if (fencedPreEffect) {
     state = VERIFIED_EXECUTION_TERMINAL_STATE.FENCED;
     reason = 'PRE_EFFECT_FENCE';
-  } else if (!dispatchStarted && failedPreEffect) {
+  } else if (failedPreEffect) {
     state = VERIFIED_EXECUTION_TERMINAL_STATE.FAILED_PRE_EFFECT;
     reason = 'PRE_EFFECT_FAILURE';
-  } else if (dispatchStarted && effectConfirmed) {
+  } else if (effectConfirmed) {
     state = VERIFIED_EXECUTION_TERMINAL_STATE.CONFIRMED;
     reason = 'POSITIVE_READBACK';
-  } else if (dispatchStarted && noEffectProven) {
+  } else if (noEffectProven) {
     state = VERIFIED_EXECUTION_TERMINAL_STATE.NO_EFFECT_PROVEN;
-    reason = 'NEGATIVE_READBACK';
+    reason = dispatchStarted ? 'NEGATIVE_READBACK' : 'PRE_DISPATCH_NO_EFFECT_PROOF';
   } else if (dispatchStarted) {
     state = VERIFIED_EXECUTION_TERMINAL_STATE.AMBIGUOUS;
     reason = 'POST_DISPATCH_EFFECT_UNKNOWN';
