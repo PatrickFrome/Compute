@@ -7,6 +7,12 @@ export const FAST_CONTROL_MCP_PROTOCOL_REVISION = '2026-07-28';
 export const FAST_CONTROL_MCP_LIST_TTL_MS = 5 * 60 * 1000;
 export const FAST_CONTROL_MCP_CACHE_SCOPE = 'private';
 
+function deepFreeze(value) {
+  if (!value || typeof value !== 'object') return value;
+  for (const child of Object.values(value)) deepFreeze(child);
+  return Object.freeze(value);
+}
+
 const objectSchema = (properties, required = []) => Object.freeze({
   type: 'object',
   additionalProperties: false,
@@ -32,10 +38,10 @@ const emergencyAnnotations = Object.freeze({
 });
 const shortExecution = Object.freeze({ taskSupport: 'forbidden' });
 
-export const FAST_CONTROL_MCP_TOOLS = Object.freeze([
-  Object.freeze({
+export const FAST_CONTROL_MCP_TOOLS = deepFreeze([
+  {
     name: 'context_get',
-    description: 'Read a bounded revisioned source-of-truth context. Read-only; use if_none_match to avoid unchanged payloads.',
+    description: 'Live Browser/control context only (tabs, armed/mode, etc.). Do not call before dev_query for repo/CI/focus.',
     annotations: readOnlyAnnotations,
     execution: shortExecution,
     inputSchema: objectSchema({
@@ -43,10 +49,10 @@ export const FAST_CONTROL_MCP_TOOLS = Object.freeze([
       if_none_match: { type: 'string', maxLength: 96 },
       max_bytes: { type: 'integer', minimum: 256, maximum: 16384 },
     }),
-  }),
-  Object.freeze({
+  },
+  {
     name: 'dev_query',
-    description: 'Search a bounded in-memory development index for source, CI, checkpoints, changes, hotspots, blockers, next actions, runtime and database evidence. Read-only and revision-addressed.',
+    description: 'Primary one-call dev read: source/CI/evidence plus exact HEAD/branch/PR/CI/focus. Do not call context_get first unless live Browser state is needed.',
     annotations: readOnlyAnnotations,
     execution: shortExecution,
     inputSchema: objectSchema({
@@ -59,8 +65,8 @@ export const FAST_CONTROL_MCP_TOOLS = Object.freeze([
       if_none_match: { type: 'string', maxLength: 96 },
       max_bytes: { type: 'integer', minimum: 512, maximum: 8192 },
     }, ['query']),
-  }),
-  Object.freeze({
+  },
+  {
     name: 'run_submit',
     description: 'Issue one bounded typed command batch. This does not lease or execute Browser effects; DB leasing remains the sole actuation authority.',
     annotations: commandAnnotations,
@@ -77,8 +83,8 @@ export const FAST_CONTROL_MCP_TOOLS = Object.freeze([
         }, ['idempotency_key', 'action']),
       },
     }, ['capability_revision', 'steps']),
-  }),
-  Object.freeze({
+  },
+  {
     name: 'run_status',
     description: 'Read the monotonic terminal result delta after a cursor. Small verified receipts may be inlined; large receipts remain digest-addressed.',
     annotations: readOnlyAnnotations,
@@ -87,8 +93,8 @@ export const FAST_CONTROL_MCP_TOOLS = Object.freeze([
       after_seq: { type: 'integer', minimum: 0 },
       limit: { type: 'integer', minimum: 1, maximum: 16 },
     }),
-  }),
-  Object.freeze({
+  },
+  {
     name: 'emergency_stop',
     description: 'Issue a DB-authoritative emergency DISARM or supervisor OFF request. Transport delivery itself never grants authority or proves cancellation of an in-flight effect.',
     annotations: emergencyAnnotations,
@@ -98,13 +104,32 @@ export const FAST_CONTROL_MCP_TOOLS = Object.freeze([
       idempotency_key: { type: 'string', minLength: 8, maxLength: 160, pattern: '^[A-Za-z0-9._:-]+$' },
       reason: { type: 'string', maxLength: 240 },
     }, ['idempotency_key']),
-  }),
+  },
 ]);
+
+const FAST_CONTROL_MCP_TOOL_BY_NAME = new Map(FAST_CONTROL_MCP_TOOLS.map((tool) => [tool.name, tool]));
 
 export const FAST_CONTROL_MCP_CATALOG_REVISION = `mcpcat:${crypto
   .createHash('sha256')
   .update(JSON.stringify({ protocol: FAST_CONTROL_MCP_PROTOCOL_REVISION, tools: FAST_CONTROL_MCP_TOOLS }), 'utf8')
   .digest('hex')}`;
+
+const FAST_CONTROL_MCP_LIST_RESULT = deepFreeze({
+  tools: FAST_CONTROL_MCP_TOOLS,
+  protocol_revision: FAST_CONTROL_MCP_PROTOCOL_REVISION,
+  catalog_revision: FAST_CONTROL_MCP_CATALOG_REVISION,
+  ttlMs: FAST_CONTROL_MCP_LIST_TTL_MS,
+  cacheScope: FAST_CONTROL_MCP_CACHE_SCOPE,
+  deterministic_order: true,
+  capability_revision: CONTROL_ACTION_MANIFEST_REVISION,
+  authority_effect: false,
+});
+
+function canReturnDevQueryZeroCopy(result) {
+  return Object.isFrozen(result)
+    && Object.isFrozen(result?.result)
+    && (!Array.isArray(result?.result?.hits) || Object.isFrozen(result.result.hits));
+}
 
 export function createFastControlMcpAdapter(gateway) {
   if (!gateway || typeof gateway.invoke !== 'function' || typeof gateway.manifest !== 'function') {
@@ -121,24 +146,18 @@ export function createFastControlMcpAdapter(gateway) {
     capability_revision: CONTROL_ACTION_MANIFEST_REVISION,
     catalog_revision: FAST_CONTROL_MCP_CATALOG_REVISION,
     listTools() {
-      return Object.freeze({
-        tools: FAST_CONTROL_MCP_TOOLS.map((tool) => structuredClone(tool)),
-        protocol_revision: FAST_CONTROL_MCP_PROTOCOL_REVISION,
-        catalog_revision: FAST_CONTROL_MCP_CATALOG_REVISION,
-        ttlMs: FAST_CONTROL_MCP_LIST_TTL_MS,
-        cacheScope: FAST_CONTROL_MCP_CACHE_SCOPE,
-        deterministic_order: true,
-        capability_revision: CONTROL_ACTION_MANIFEST_REVISION,
-        authority_effect: false,
-      });
+      return FAST_CONTROL_MCP_LIST_RESULT;
     },
     async callTool(name, args = {}) {
-      const tool = FAST_CONTROL_MCP_TOOLS.find((row) => row.name === String(name || ''));
+      const tool = FAST_CONTROL_MCP_TOOL_BY_NAME.get(String(name || ''));
       if (!tool) throw new Error('fast_control_mcp_tool_unknown');
       const result = await gateway.invoke(tool.name, args);
+      const structuredContent = tool.name === 'dev_query' && canReturnDevQueryZeroCopy(result)
+        ? result
+        : structuredClone(result);
       return Object.freeze({
         content: [],
-        structuredContent: structuredClone(result),
+        structuredContent,
         isError: false,
         raw_sql: false,
         arbitrary_eval: false,
