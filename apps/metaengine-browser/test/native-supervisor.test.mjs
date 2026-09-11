@@ -70,13 +70,16 @@ test('native supervisor device identity persists encrypted private key and signs
   assert.equal((await reloaded.ensure()).device_id, deviceId);
 });
 
-test('native supervisor client completes approval enrollment then executes leased local DISARM', async () => {
+test('native supervisor completes approval enrollment then rejects leased local DISARM without lowering authority', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-supervisor-client-'));
   const identity = new SupervisorDeviceIdentity({ statePath: path.join(dir, 'device.json'), secureStorage });
   const requestId = crypto.randomUUID();
   const deviceId = crypto.randomUUID();
+  const commandId = crypto.randomUUID();
   const seen = [];
   let statusCalls = 0;
+  let issued = false;
+  let postedReceipt = null;
   const fetchImpl = async (url, init = {}) => {
     const pathname = new URL(url).pathname;
     seen.push({ pathname, method: init.method, body: init.body || '' });
@@ -86,8 +89,15 @@ test('native supervisor client completes approval enrollment then executes lease
       return new Response(JSON.stringify({ accepted:true, request_id:requestId, device_id:deviceId, status:'CLAIMED' }), { status:200, headers:{'content-type':'application/json'} });
     }
     if (pathname.endsWith('/v1/state')) return new Response(JSON.stringify({ accepted:true }), { status:202, headers:{'content-type':'application/json'} });
-    if (pathname.endsWith('/v1/commands/next')) return new Response(JSON.stringify({ command:{ command_id:crypto.randomUUID(), action:'DISARM', payload:{}, issued_at:new Date().toISOString(), expires_at:new Date(Date.now()+60000).toISOString() } }), { status:200, headers:{'content-type':'application/json'} });
-    if (/\/v1\/commands\/[^/]+\/result$/.test(pathname)) return new Response(JSON.stringify({ accepted:true }), { status:200, headers:{'content-type':'application/json'} });
+    if (pathname.endsWith('/v1/commands/wait-batch')) {
+      if (issued) return new Response(JSON.stringify({ commands:[], transport_delivery_is_authority:false }), { status:200, headers:{'content-type':'application/json'} });
+      issued = true;
+      return new Response(JSON.stringify({ commands:[{ command_id:commandId, action:'DISARM', payload:{}, issued_at:new Date().toISOString(), expires_at:new Date(Date.now()+60000).toISOString(), command_lane:'EMERGENCY', effect_key:'global:emergency', authority_effect:false }], transport_delivery_is_authority:false, authority_effect:false }), { status:200, headers:{'content-type':'application/json'} });
+    }
+    if (pathname.endsWith('/v1/commands/result-batch')) {
+      postedReceipt = JSON.parse(init.body || '{}')?.results?.[0] || null;
+      return new Response(JSON.stringify({ accepted:true, results:[{ command_id:commandId, accepted:true, status:postedReceipt?.ok === true ? 'COMPLETED' : 'FAILED' }], authority_effect:false }), { status:200, headers:{'content-type':'application/json'} });
+    }
     throw new Error(`unexpected_fetch:${pathname}`);
   };
   const client = new NativeSupervisorClient({
@@ -99,14 +109,23 @@ test('native supervisor client completes approval enrollment then executes lease
     executeCommand: async () => { throw new Error('external executor must not handle DISARM'); },
   });
   await client.cycle();
-  assert.equal(client.snapshot().enrollment_status, 'PENDING');
-  await client.cycle();
+  assert.equal(client.snapshot().enrollment_status, 'ENROLLED');
   assert.equal(statusCalls, 1);
   assert.equal(client.snapshot().identity.device_id, deviceId);
-  assert.equal(client.snapshot().armed, false);
-  assert.equal(client.snapshot().last_command_status, 'COMPLETED');
-  assert.ok(seen.some((row) => row.pathname.endsWith('/v1/state')));
-  assert.ok(seen.some((row) => row.pathname.endsWith('/v1/commands/next')));
+  assert.equal(client.snapshot().supervisor_mode, 'CONTROL');
+  assert.equal(client.snapshot().armed, true);
+  assert.equal(client.snapshot().last_command_status, 'FAILED');
+  assert.equal(postedReceipt?.ok, false);
+  assert.match(postedReceipt?.error || '', /FINAL_RUNTIME_ALWAYS_ON_CONTROL_REQUIRED/);
+  assert.equal(postedReceipt?.receipt?.effect_outcome, 'AMBIGUOUS');
+  const requestIndex = seen.findIndex((row) => row.pathname.endsWith('/v1/device/enrollment/request'));
+  const statusIndex = seen.findIndex((row) => row.pathname.endsWith('/v1/device/enrollment/status'));
+  const stateIndex = seen.findIndex((row) => row.pathname.endsWith('/v1/state'));
+  const leaseIndex = seen.findIndex((row) => row.pathname.endsWith('/v1/commands/wait-batch'));
+  assert.ok(requestIndex >= 0 && statusIndex > requestIndex);
+  assert.ok(stateIndex > statusIndex);
+  assert.ok(leaseIndex > statusIndex);
+  await fs.rm(dir, { recursive:true, force:true });
 });
 
 test('CONTROL_CAPABILITIES is handled locally as read-only and never delegated to page executor', async () => {
@@ -120,14 +139,14 @@ test('CONTROL_CAPABILITIES is handled locally as read-only and never delegated t
   const fetchImpl = async (url, init = {}) => {
     const pathname = new URL(url).pathname;
     if (pathname.endsWith('/v1/state')) return new Response('{}', { status:202, headers:{'content-type':'application/json'} });
-    if (pathname.endsWith('/v1/commands/next')) {
-      if (commandIssued) return new Response(JSON.stringify({ command:null }), { status:200, headers:{'content-type':'application/json'} });
+    if (pathname.endsWith('/v1/commands/wait-batch')) {
+      if (commandIssued) return new Response(JSON.stringify({ commands:[], transport_delivery_is_authority:false }), { status:200, headers:{'content-type':'application/json'} });
       commandIssued = true;
-      return new Response(JSON.stringify({ command:{ command_id:commandId, action:'CONTROL_CAPABILITIES', payload:{}, issued_at:new Date().toISOString(), expires_at:new Date(Date.now()+60000).toISOString() } }), { status:200, headers:{'content-type':'application/json'} });
+      return new Response(JSON.stringify({ commands:[{ command_id:commandId, action:'CONTROL_CAPABILITIES', payload:{}, issued_at:new Date().toISOString(), expires_at:new Date(Date.now()+60000).toISOString(), command_lane:'READ_ONLY', effect_key:null, authority_effect:false }], transport_delivery_is_authority:false, authority_effect:false }), { status:200, headers:{'content-type':'application/json'} });
     }
-    if (/\/v1\/commands\/[^/]+\/result$/.test(pathname)) {
-      postedReceipt = JSON.parse(init.body || '{}');
-      return new Response('{}', { status:200, headers:{'content-type':'application/json'} });
+    if (pathname.endsWith('/v1/commands/result-batch')) {
+      postedReceipt = JSON.parse(init.body || '{}')?.results?.[0] || null;
+      return new Response(JSON.stringify({ accepted:true, results:[{ command_id:commandId, accepted:true, status:'COMPLETED' }], authority_effect:false }), { status:200, headers:{'content-type':'application/json'} });
     }
     throw new Error(`unexpected_fetch:${pathname}`);
   };
@@ -147,6 +166,108 @@ test('CONTROL_CAPABILITIES is handled locally as read-only and never delegated t
   assert.ok(postedReceipt?.receipt?.result?.implemented?.some((row) => row.action === 'CONTROL_CAPABILITIES' && row.effect === 'READ_ONLY'));
   assert.equal(postedReceipt?.receipt?.result?.invariants?.arbitrary_eval, false);
   await fs.rm(dir, { recursive:true, force:true });
+});
+
+test('DB-leased semantic command seals exact local intent before physical execution', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-supervisor-effect-seal-'));
+  const identity = new SupervisorDeviceIdentity({ statePath: path.join(dir, 'device.json'), secureStorage });
+  await identity.ensure();
+  await identity.bindDevice(crypto.randomUUID());
+  const clientId = (await identity.ensure()).client_id;
+  const commandId = crypto.randomUUID();
+  const tabId = `tab_${crypto.randomUUID()}`;
+  const processId = crypto.randomUUID();
+  const expiresAt = new Date(Date.now()+120000).toISOString();
+  const events = [];
+  let issued = false;
+  let physicalEffects = 0;
+  let postedReceipt = null;
+  const fetchImpl = async (url, init={}) => {
+    const pathname = new URL(url).pathname;
+    if (pathname.endsWith('/v1/state')) return new Response('{}',{status:202,headers:{'content-type':'application/json'}});
+    if (pathname.endsWith('/v1/commands/wait-batch')) {
+      if (issued) return new Response(JSON.stringify({commands:[],transport_delivery_is_authority:false}),{status:200,headers:{'content-type':'application/json'}});
+      issued = true;
+      return new Response(JSON.stringify({commands:[{
+        command_id:commandId,
+        idempotency_key:'native.effect.intent.integration.1',
+        action:'TYPED_CLICK',
+        platform:'CHATGPT',
+        payload:{tab_id:tabId,role:'button',accessible_name:'Send'},
+        issued_at:new Date().toISOString(),expires_at:expiresAt,
+        command_lane:'TAB_MUTATION',effect_key:`tab:${tabId.toLowerCase()}`,authority_effect:false,
+      }],transport_delivery_is_authority:false,authority_effect:false}),{status:200,headers:{'content-type':'application/json'}});
+    }
+    if (pathname.endsWith(`/v1/commands/${commandId}/effect-intent`)) {
+      events.push('seal');
+      const request = JSON.parse(init.body || '{}');
+      assert.equal(request.binding.client_id, clientId);
+      assert.equal(request.binding.process_incarnation_id, processId);
+      assert.equal(request.binding.tab_id, tabId);
+      assert.equal(request.binding.target_id, 'webcontents:77');
+      return new Response(JSON.stringify({accepted:true,effect_binding:request.binding,effect_binding_sha256:'a'.repeat(64)}),{status:200,headers:{'content-type':'application/json'}});
+    }
+    if (pathname.endsWith('/v1/commands/result-batch')) {
+      postedReceipt = JSON.parse(init.body || '{}')?.results?.[0] || null;
+      return new Response(JSON.stringify({accepted:true,results:[{command_id:commandId,accepted:true,status:'COMPLETED'}],authority_effect:false}),{status:200,headers:{'content-type':'application/json'}});
+    }
+    if (pathname.endsWith('/v1/devos/cycle')) return new Response(JSON.stringify({backlog:{ready:0},lease:null,running:[]}),{status:200,headers:{'content-type':'application/json'}});
+    throw new Error(`unexpected_fetch:${pathname}`);
+  };
+  const client = new NativeSupervisorClient({
+    identity,fetchImpl,version:'0.6.0',intervalMs:60000,
+    getState:async()=>({tabs:[],active_tab:null,development_plane:null,fleet:{agents:[]},perception:null}),
+    prepareEffectBinding:async()=>({process_incarnation_id:processId,tab_id:tabId,target_id:'webcontents:77',observed_at:new Date().toISOString()}),
+    executeCommand:async(command)=>{
+      if(command.action==='TYPED_CLICK'){
+        events.push('effect'); physicalEffects+=1;
+        assert.equal(command.effect_binding?.command_id,commandId);
+        assert.equal(command.effect_binding_sha256,'a'.repeat(64));
+        return {ok:true,effect_outcome:'CONFIRMED',authority_effect:true};
+      }
+      throw new Error(`unexpected_execute:${command.action}`);
+    },
+  });
+  await client.cycle();
+  assert.deepEqual(events.slice(0,2),['seal','effect']);
+  assert.equal(physicalEffects,1);
+  assert.equal(postedReceipt?.receipt?.effect_outcome,'CONFIRMED');
+  assert.equal(client.snapshot().last_command_status,'COMPLETED');
+  await fs.rm(dir,{recursive:true,force:true});
+});
+
+test('rejected DB effect-intent prevents physical semantic execution', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-supervisor-effect-reject-'));
+  const identity = new SupervisorDeviceIdentity({ statePath:path.join(dir,'device.json'), secureStorage });
+  await identity.ensure(); await identity.bindDevice(crypto.randomUUID());
+  const commandId=crypto.randomUUID(); const tabId=`tab_${crypto.randomUUID()}`; const processId=crypto.randomUUID();
+  let issued=false; let physicalEffects=0; let postedReceipt=null;
+  const fetchImpl=async(url,init={})=>{
+    const pathname=new URL(url).pathname;
+    if(pathname.endsWith('/v1/state'))return new Response('{}',{status:202,headers:{'content-type':'application/json'}});
+    if(pathname.endsWith('/v1/commands/wait-batch')){
+      if(issued)return new Response(JSON.stringify({commands:[],transport_delivery_is_authority:false}),{status:200,headers:{'content-type':'application/json'}});
+      issued=true; return new Response(JSON.stringify({commands:[{command_id:commandId,idempotency_key:'native.effect.intent.reject.1',action:'TYPED_CLICK',platform:'CHATGPT',payload:{tab_id:tabId,role:'button',accessible_name:'Send'},issued_at:new Date().toISOString(),expires_at:new Date(Date.now()+120000).toISOString(),command_lane:'TAB_MUTATION',effect_key:`tab:${tabId.toLowerCase()}`,authority_effect:false}],transport_delivery_is_authority:false,authority_effect:false}),{status:200,headers:{'content-type':'application/json'}});
+    }
+    if(pathname.endsWith(`/v1/commands/${commandId}/effect-intent`))return new Response(JSON.stringify({accepted:false,reason:'binding_conflict'}),{status:409,headers:{'content-type':'application/json'}});
+    if(pathname.endsWith('/v1/commands/result-batch')){
+      postedReceipt=JSON.parse(init.body||'{}')?.results?.[0]||null;
+      return new Response(JSON.stringify({accepted:true,results:[{command_id:commandId,accepted:true,status:'FAILED'}],authority_effect:false}),{status:200,headers:{'content-type':'application/json'}});
+    }
+    throw new Error(`unexpected_fetch:${pathname}`);
+  };
+  const client=new NativeSupervisorClient({
+    identity,fetchImpl,version:'0.6.0',intervalMs:60000,
+    getState:async()=>({tabs:[],active_tab:null,development_plane:null,fleet:null,perception:null}),
+    prepareEffectBinding:async()=>({process_incarnation_id:processId,tab_id:tabId,target_id:'webcontents:77',observed_at:new Date().toISOString()}),
+    executeCommand:async()=>{physicalEffects+=1;return {authority_effect:true};},
+  });
+  await client.cycle();
+  assert.equal(physicalEffects,0);
+  assert.match(postedReceipt?.error || '',/effect_binding_http_409/);
+  assert.equal(postedReceipt?.receipt?.effect_outcome,'AMBIGUOUS');
+  assert.equal(client.snapshot().last_command_status,'FAILED');
+  await fs.rm(dir,{recursive:true,force:true});
 });
 
 test('native semantic perception exposes unique accessibility targets and typed click uses CDP point actuation', async () => {
@@ -169,10 +290,12 @@ test('native semantic perception exposes unique accessibility targets and typed 
       return {};
     },
   };
-  const webContents = { debugger:dbg, isDestroyed:()=>false, getURL:()=> 'https://chatgpt.com/c/test', getTitle:()=> 'ChatGPT' };
+  const webContents = { id:101, debugger:dbg, isDestroyed:()=>false, getURL:()=> 'https://chatgpt.com/c/test', getTitle:()=> 'ChatGPT' };
   const frame = await captureSemanticFrame(webContents);
   assert.equal(frame.semantic_targets.length, 2);
   assert.equal(frame.text_excerpt, 'Visible response text');
+  assert.match(frame.process_incarnation_id,/^[0-9a-f-]{36}$/i);
+  assert.equal(frame.target_id,'webcontents:101');
   const result = await executeSemanticCommand(webContents, { action:'TYPED_CLICK', payload:{ role:'button', accessible_name:'Send' } });
   assert.equal(result.target.backend_node_id, 42);
   assert.equal(result.point.x, 60);
@@ -197,7 +320,7 @@ test('dedicated STOP_GENERATION recognizes current Russian ChatGPT stop-response
       return {};
     },
   };
-  const webContents = { debugger:dbg, isDestroyed:()=>false };
+  const webContents = { id:102, debugger:dbg, isDestroyed:()=>false };
   const result = await executeSemanticCommand(webContents, { action:'STOP_GENERATION', payload:{} });
   assert.equal(result.target.name, 'Остановить ответ');
   assert.equal(result.target.backend_node_id, 77);

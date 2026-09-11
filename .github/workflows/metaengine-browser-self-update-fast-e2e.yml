@@ -1,0 +1,191 @@
+name: METAENGINE Browser Fast Self Update E2E
+
+on:
+  push:
+    branches:
+      - integration/metaengine-development-os-v1
+      - work/self-update-fast-loop-v1
+      - work/devos-elastic-fleet-bootstrap-v1
+      - work/browser-devos-root-transport-bootstrap-v1
+    paths:
+      - 'apps/metaengine-browser/**'
+      - '.github/workflows/metaengine-browser-self-update-fast-e2e.yml'
+      - '.github/workflows/metaengine-browser-bootstrap-autostart-e2e.yml'
+      - '.github/workflows/metaengine-browser-fast-autorelease.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+# Exact SHAs may verify concurrently. Only a duplicate/rerun of the same source SHA
+# may supersede an in-flight attempt; a newer integration commit must never starve
+# an older exact-source physical proof by cancelling it.
+concurrency:
+  group: metaengine-browser-fast-self-update-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Fast-loop contract gates
+        working-directory: apps/metaengine-browser
+        run: |
+          npm run check
+          npm test
+          grep -q 'DEFAULT_CONTINUOUS_DEV_UPDATE_INTERVAL_MS = 15 \* 60 \* 1000' src/self-update-runtime.mjs
+          grep -q 'DEFAULT_DEV_UPDATE_HINT_RETRY_MS = 5 \* 60 \* 1000' src/self-update-runtime.mjs
+          grep -q 'DEFAULT_CONTINUOUS_DEV_RESTART_GRACE_MS = 1 \* 1000' src/self-update-runtime.mjs
+          grep -q 'DEFAULT_DEV_UPDATE_HINT_INTERVAL_MS = 2 \* 1000' src/dev-update-hint.mjs
+          grep -q 'authority_effect: false' src/dev-update-hint.mjs
+          grep -q '"beforePack": "./scripts/electron-builder-before-pack.cjs"' electron-builder.test.json
+          grep -q 'service_activation_authorized = \$false' scripts/build-guardian-native-staging.ps1
+          grep -q 'guardian_native_staging_verified' scripts/verify-installed-guardian-native-staging.ps1
+
+  windows-published-n-to-one-build-target:
+    runs-on: windows-2022
+    timeout-minutes: 36
+    env:
+      GITHUB_ACTIONS: 'true'
+      METAENGINE_SELF_UPDATE_TEST_MODE: '1'
+      METAENGINE_DISABLE_CRASH_SENTINEL: '1'
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Contract gates before physical proof
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          npm run check
+          npm test
+          $sourcePackageVersion = [string](node -p "require('./package.json').version")
+          if ($sourcePackageVersion -notmatch '^\d+\.\d+\.\d+-dev\.[0-9]+\.1$') { throw "source_package_version_not_trusted_dev_shape:$sourcePackageVersion" }
+          $physical = Get-Content ./test/self-update-fast-physical.ps1 -Raw
+          if ($physical -notmatch '\$target\s*=\s*"0\.6\.3-dev\.\$buildId\.1"') { throw 'physical_target_source_contract_missing' }
+      - name: Bind physical target to immutable workflow run identity
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $path = './test/self-update-fast-physical.ps1'
+          $raw = Get-Content $path -Raw
+          $pattern = '(?ms)# Build exactly one new target\..*?npm pkg set version=\$target'
+          $replacement = @'
+          # Build exactly one target from the exact checked-out source. The dev build
+          # identity is derived from immutable GITHUB_RUN_ID, so parallel integration
+          # commits never contend on a manually edited package version and reruns of
+          # the same workflow run preserve the same target identity.
+          $sourcePackageVersion = [string](node -p "require('./package.json').version")
+          if ($sourcePackageVersion -notmatch '^\d+\.\d+\.\d+-dev\.[0-9]+\.1$') { throw "source_package_version_not_trusted_dev_shape:$sourcePackageVersion" }
+          $sourceCore = $sourcePackageVersion -replace '-dev\.[0-9]+\.1$',''
+          $target = "$sourceCore-dev.$env:GITHUB_RUN_ID.1"
+          if ($target -notmatch '^\d+\.\d+\.\d+-dev\.[0-9]+\.1$') { throw "target_version_invalid:$target" }
+          npm pkg set version=$target
+          '@
+          # .NET replacement syntax treats $name as a substitution token. Escape every
+          # dollar so PowerShell variables remain literal in the generated candidate.
+          $replacementLiteral = $replacement.Replace('$', '$$')
+          $next = [regex]::Replace($raw, $pattern, $replacementLiteral, 1)
+          if ($next -eq $raw) { throw 'physical_target_patch_not_applied' }
+          if ($next -notmatch 'GITHUB_RUN_ID') { throw 'physical_target_run_identity_lost' }
+          [System.IO.File]::WriteAllText((Join-Path (Get-Location) 'test/self-update-fast-physical-candidate.ps1'), $next, [System.Text.UTF8Encoding]::new($false))
+      - name: Published baseline to exact candidate physical update
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: ./test/self-update-fast-physical-candidate.ps1
+      - name: Seal installed executable digest into physical evidence
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test\METAENGINE Browser Test.exe'
+          if (-not (Test-Path -LiteralPath $app)) { throw 'installed_target_executable_missing' }
+          $manifestPath = './self-update-fast-evidence/verified-self-update-manifest.json'
+          if (-not (Test-Path -LiteralPath $manifestPath)) { throw 'verified_self_update_manifest_missing' }
+          $digest = (Get-FileHash -LiteralPath $app -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($digest -notmatch '^[0-9a-f]{64}$') { throw 'installed_target_executable_sha256_invalid' }
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          $manifest | Add-Member -NotePropertyName installed_executable_sha256 -NotePropertyValue $digest -Force
+          [System.IO.File]::WriteAllText((Resolve-Path -LiteralPath $manifestPath), (($manifest | ConvertTo-Json -Depth 20) + "`n"), [System.Text.UTF8Encoding]::new($false))
+          $readback = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          if ([string]$readback.installed_executable_sha256 -ne $digest) { throw 'installed_target_executable_sha256_readback_mismatch' }
+      - name: Prove installed Guardian staging after physical update
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          ./scripts/verify-installed-guardian-native-staging.ps1 `
+            -ExpectedSourceHead '${{ github.sha }}' `
+            -EvidenceDir './self-update-fast-evidence'
+          $manifest = Get-Content './self-update-fast-evidence/verified-self-update-manifest.json' -Raw | ConvertFrom-Json
+          if ($manifest.guardian_native_staging_present -ne $true -or $manifest.guardian_native_staging_verified -ne $true) { throw 'guardian_native_staging_physical_proof_missing' }
+          if ($manifest.guardian_native_no_activation -ne $true -or $manifest.guardian_native_requires_machine_secure_copy -ne $true) { throw 'guardian_native_activation_boundary_invalid' }
+          if ([string]$manifest.guardian_native_manifest_sha256 -notmatch '^[0-9a-f]{64}$') { throw 'guardian_native_manifest_digest_missing' }
+          if ([string]$manifest.installed_executable_sha256 -notmatch '^[0-9a-f]{64}$') { throw 'installed_target_executable_digest_missing' }
+      - name: Upload exact fast self-update evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: metaengine-browser-self-update-fast-${{ github.sha }}-${{ github.run_attempt }}
+          path: apps/metaengine-browser/self-update-fast-evidence/
+          if-no-files-found: error
+          compression-level: 0
+
+  exact-bootstrap-autostart-gate:
+    needs:
+      - contract
+      - windows-published-n-to-one-build-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 48
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_SHA: ${{ github.sha }}
+    steps:
+      - name: Wait for exact bootstrap autostart physical success
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > bootstrap-run-id.txt
+          for attempt in $(seq 1 180); do
+            gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/workflows/metaengine-browser-bootstrap-autostart-e2e.yml/runs" \
+              -f head_sha="$EXPECTED_SHA" -f per_page=20 > bootstrap-runs.json
+            python3 - <<'PY'
+          import json, os, pathlib
+          sha=os.environ['EXPECTED_SHA']
+          rows=json.load(open('bootstrap-runs.json','r',encoding='utf-8')).get('workflow_runs',[])
+          rows=[r for r in rows if r.get('head_sha')==sha]
+          rows.sort(key=lambda r:(r.get('run_attempt',0),r.get('id',0)), reverse=True)
+          if rows:
+              r=rows[0]
+              print(f"bootstrap_autostart id={r.get('id')} status={r.get('status')} conclusion={r.get('conclusion')}")
+              if r.get('status')=='completed' and r.get('conclusion')=='success':
+                  pathlib.Path('bootstrap-run-id.txt').write_text(str(r['id']),encoding='utf-8')
+              elif r.get('status')=='completed' and r.get('conclusion') not in (None,'success'):
+                  raise SystemExit(f"exact_bootstrap_autostart_failed:{r.get('conclusion')}")
+          PY
+            if [ -s bootstrap-run-id.txt ]; then break; fi
+            sleep 15
+          done
+          test -s bootstrap-run-id.txt || { echo exact_bootstrap_autostart_success_missing >&2; exit 1; }

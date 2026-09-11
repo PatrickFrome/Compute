@@ -1,0 +1,106 @@
+name: Browser DevOS Root Transport Bootstrap V1
+
+on:
+  push:
+    branches:
+      - 'work/browser-devos-root-transport-bootstrap-v1'
+    paths:
+      - 'apps/metaengine-browser/src/devos-native-task-cycle.mjs'
+      - 'apps/metaengine-browser/src/fleet-runtime-bridge.mjs'
+      - 'apps/metaengine-browser/src/fleet-provisioner.mjs'
+      - 'apps/metaengine-browser/test/devos-restart-transport-promotion.test.mjs'
+      - 'apps/metaengine-browser/test/devos-root-transport-bootstrap-e2e.test.mjs'
+      - 'apps/metaengine-browser/test/fleet-preconversation-transport-proof.test.mjs'
+      - 'apps/metaengine-browser/test/devos-native-task-cycle.test.mjs'
+      - 'apps/metaengine-browser/test/devos-fleet-transport-admission.test.mjs'
+      - 'apps/metaengine-browser/test/fleet-revalidation-transport-proof-e2e.test.mjs'
+      - '.github/workflows/browser-devos-root-transport-bootstrap-v1.yml'
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/devos-native-task-cycle.mjs'
+      - 'apps/metaengine-browser/src/fleet-runtime-bridge.mjs'
+      - 'apps/metaengine-browser/src/fleet-provisioner.mjs'
+      - 'apps/metaengine-browser/test/devos-restart-transport-promotion.test.mjs'
+      - 'apps/metaengine-browser/test/devos-root-transport-bootstrap-e2e.test.mjs'
+      - 'apps/metaengine-browser/test/fleet-preconversation-transport-proof.test.mjs'
+      - 'apps/metaengine-browser/test/devos-native-task-cycle.test.mjs'
+      - 'apps/metaengine-browser/test/devos-fleet-transport-admission.test.mjs'
+      - 'apps/metaengine-browser/test/fleet-revalidation-transport-proof-e2e.test.mjs'
+      - '.github/workflows/browser-devos-root-transport-bootstrap-v1.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  root-transport-bootstrap:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+
+      - name: Prove exact head and clean checkout
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check apps/metaengine-browser/src/devos-native-task-cycle.mjs
+          node --check apps/metaengine-browser/src/fleet-runtime-bridge.mjs
+          node --check apps/metaengine-browser/src/fleet-provisioner.mjs
+          node --check apps/metaengine-browser/test/devos-root-transport-bootstrap-e2e.test.mjs
+
+      - name: Root bootstrap and transport admission regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            apps/metaengine-browser/test/devos-restart-transport-promotion.test.mjs \
+            apps/metaengine-browser/test/devos-root-transport-bootstrap-e2e.test.mjs \
+            apps/metaengine-browser/test/fleet-preconversation-transport-proof.test.mjs \
+            apps/metaengine-browser/test/devos-native-task-cycle.test.mjs \
+            apps/metaengine-browser/test/devos-fleet-transport-admission.test.mjs \
+            apps/metaengine-browser/test/fleet-revalidation-transport-proof-e2e.test.mjs
+
+      - name: Static invariant fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const cycle = fs.readFileSync('apps/metaengine-browser/src/devos-native-task-cycle.mjs','utf8');
+          const bridge = fs.readFileSync('apps/metaengine-browser/src/fleet-runtime-bridge.mjs','utf8');
+          const fleet = fs.readFileSync('apps/metaengine-browser/src/fleet-provisioner.mjs','utf8');
+          if (/setInterval\s*\(|setTimeout\s*\(/.test(cycle)) throw new Error('second_scheduler_loop_detected');
+          if (!/PRECONVERSATION_ROOT/.test(cycle) || !/PRECONVERSATION_ROOT/.test(bridge) || !/PRECONVERSATION_ROOT/.test(fleet)) throw new Error('preconversation_contract_missing');
+          if (!/bound_unverified_dispatch_allowed:\s*false/.test(cycle)) throw new Error('bound_unverified_dispatch_fence_missing');
+          if (!/submit_after_type:\s*false/.test(fs.readFileSync('apps/metaengine-browser/src/devos-native-task-cycle-core.mjs','utf8'))) throw new Error('two_phase_send_fence_missing');
+          if (!/UPGRADED_CONVERSATION/.test(cycle) || !/UPGRADED_CONVERSATION/.test(bridge)) throw new Error('canonical_upgrade_gate_missing');
+          if (/\beval\s*\(/.test(cycle) || /\beval\s*\(/.test(bridge) || /\beval\s*\(/.test(fleet)) throw new Error('arbitrary_eval_surface_detected');
+          NODE
+
+      - name: Checkout remains clean
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"

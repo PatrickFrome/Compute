@@ -1,0 +1,82 @@
+name: C5 Transport Promotion Lease Verifier V2
+
+on:
+  push:
+    branches:
+      - 'work/browser-continuous-fleet-audit-v1'
+    paths:
+      - 'supabase/migrations/20260902004500_c5_transport_promotion_lease_verifier_v2.sql'
+      - 'apps/metaengine-browser/test/c5-transport-promotion-lease-verifier-v2-smoke.sql'
+      - '.github/workflows/c5-transport-promotion-lease-verifier-v2.yml'
+  pull_request:
+    paths:
+      - 'supabase/migrations/20260902004500_c5_transport_promotion_lease_verifier_v2.sql'
+      - 'apps/metaengine-browser/test/c5-transport-promotion-lease-verifier-v2-smoke.sql'
+      - '.github/workflows/c5-transport-promotion-lease-verifier-v2.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  postgres-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: postgres
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          printf 'exact_head=%s\n' "$EXPECTED_HEAD"
+
+      - name: Static fail-closed authority contract
+        run: |
+          set -euo pipefail
+          FILE=supabase/migrations/20260902004500_c5_transport_promotion_lease_verifier_v2.sql
+          grep -q "pg_advisory_xact_lock" "$FILE"
+          grep -q "devos_control_supervisor_snapshot_v1(p_workspace_id,v_client_id,45)" "$FILE"
+          grep -q "TARGET_CLIENT_MISMATCH" "$FILE"
+          grep -q "AGENT_BINDING_MISMATCH" "$FILE"
+          grep -q "TRANSPORT_PROOF_STALE" "$FILE"
+          grep -q "automatic_retry_allowed',false" "$FILE"
+          grep -q "authority_effect',false" "$FILE"
+          grep -q "grant execute on function public.h205f22_verify_browser_transport_promotion_lease_v2" "$FILE"
+          ! grep -Eiq "devos_fleet_reconcile|devos_fleet_lease|browser_effect_execute|arbitrary eval" "$FILE"
+
+      - name: Exact lease, CONTROL, transport proof, and drift falsification
+        run: |
+          set -euo pipefail
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -f apps/metaengine-browser/test/c5-transport-promotion-lease-verifier-v2-smoke.sql
+
+      - name: Prove branch-local clean checkout
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          printf 'production_mutation=false\n'

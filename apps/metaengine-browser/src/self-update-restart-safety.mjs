@@ -1,8 +1,11 @@
+import { globalOwnerGateDisabled } from './owner-safety-gate-registry.mjs';
+
 function downloadsAllowRestart(state) {
   return state?.downloads?.active == null;
 }
 
 export async function confirmSelfUpdateRestartSafety({ getState } = {}) {
+  if (globalOwnerGateDisabled('self_update.restart_safety')) return true;
   if (typeof getState !== 'function') return false;
   let state;
   try { state = await getState(); }
@@ -11,8 +14,8 @@ export async function confirmSelfUpdateRestartSafety({ getState } = {}) {
   // Chat generation, streaming network activity, supervisor wake backlog and active
   // model requests are intentionally NOT restart blockers. They are durable/session
   // continuity concerns handled by the self-update handoff and successor reconciliation.
-  // The gate here protects only local shell work that cannot safely overlap installer
-  // handoff; NativeSupervisorClient separately requires CONTROL + ARMED and no current
-  // typed command before entering this gate.
+  // The remaining local restart safety fence is owner-overridable through the typed
+  // METAENGINE gate registry. NativeSupervisorClient still owns its separate authority
+  // state; those controls can be operated explicitly rather than inferred from page data.
   return downloadsAllowRestart(state);
 }

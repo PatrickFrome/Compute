@@ -6,12 +6,35 @@ const API_ROOT = `https://api.github.com/repos/${OWNER}/${REPO}`;
 const DOWNLOAD_ROOT = `https://github.com/${OWNER}/${REPO}/releases/download`;
 const DEV_VERSION_RE = /^(\d+)\.(\d+)\.(\d+)-dev\.(\d+)\.1$/;
 const SHA256_RE = /^sha256:([0-9a-f]{64})$/;
+const HEX_SHA256_RE = /^[0-9a-f]{64}$/;
 const SHA512_B64_RE = /^[A-Za-z0-9+/]{86}==$/;
 const MAX_RELEASES_BYTES = 2 * 1024 * 1024;
 const MAX_SMALL_ASSET_BYTES = 128 * 1024;
+const RELEASES_PAGE_SIZE = 30;
+const MAX_RELEASE_PAGES = 10;
+const LIST_RETRY_ATTEMPTS = 2;
+const LIST_RETRY_DELAYS_MS = [1000, 3000];
+const MAX_GITHUB_API_TOKEN_LENGTH = 4096;
 
 function clip(value, max = 300) { return String(value ?? '').slice(0, max); }
 function sha256Bytes(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
+
+function githubApiHeaders(githubApiToken) {
+  const headers = {
+    accept: 'application/vnd.github+json',
+    'x-github-api-version': '2022-11-28',
+  };
+  if (githubApiToken == null || githubApiToken === '') return headers;
+  if (
+    typeof githubApiToken !== 'string'
+    || githubApiToken.length > MAX_GITHUB_API_TOKEN_LENGTH
+    || githubApiToken.trim() !== githubApiToken
+    || /[\r\n]/.test(githubApiToken)
+  ) {
+    throw new Error('trusted_release_github_api_token_invalid');
+  }
+  return { ...headers, authorization: `Bearer ${githubApiToken}` };
+}
 
 export function parseMetaengineDevVersion(value) {
   const text = String(value || '').trim();
@@ -31,6 +54,9 @@ function expectedAssetNames(version) {
     installer,
     blockmap: `${installer}.blockmap`,
     manifest: 'verified-self-update-manifest.json',
+    guardian_manifest: 'guardian-native-staging-manifest.json',
+    guardian_service: 'METAENGINEBrowserGuardian.exe',
+    guardian_configurator: 'METAENGINEBrowserGuardianConfigure.exe',
   };
 }
 
@@ -98,19 +124,49 @@ function decodeUtf8Strict(bytes, label) {
   }
 }
 
-async function fetchJson(fetchImpl, url, maxBytes, label) {
+async function fetchJson(fetchImpl, url, maxBytes, label, githubApiToken) {
   const response = await fetchImpl(url, {
     method: 'GET',
     cache: 'no-store',
     redirect: 'follow',
-    headers: {
-      accept: 'application/vnd.github+json',
-      'x-github-api-version': '2022-11-28',
-    },
+    headers: githubApiHeaders(githubApiToken),
   });
   const text = await readBoundedText(response, maxBytes, label);
   try { return JSON.parse(text); }
   catch { throw new Error(`${label}_json_invalid`); }
+}
+
+function sleep(ms, label) {
+  // This delay is part of an explicitly awaited release-list transaction.
+  // Unref'ing it lets a standalone Node resolver exit while top-level await is
+  // still pending (for example the physical self-update baseline resolver after
+  // a GitHub 403/429). Awaited retry work must therefore keep the process alive.
+  void label;
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchReleaseListPage(fetchImpl, page, githubApiToken) {
+  const url = page === 1
+    ? `${API_ROOT}/releases?per_page=${RELEASES_PAGE_SIZE}`
+    : `${API_ROOT}/releases?per_page=${RELEASES_PAGE_SIZE}&page=${page}`;
+  for (let attempt = 0; attempt <= LIST_RETRY_ATTEMPTS; attempt += 1) {
+    const response = await fetchImpl(url, {
+      method: 'GET',
+      cache: 'no-store',
+      redirect: 'follow',
+      headers: githubApiHeaders(githubApiToken),
+    });
+    if (response && (response.status === 403 || response.status === 429)) {
+      if (attempt < LIST_RETRY_ATTEMPTS) {
+        await sleep(LIST_RETRY_DELAYS_MS[attempt], 'trusted_release_list_rate_limited');
+        continue;
+      }
+    }
+    const text = await readBoundedText(response, MAX_RELEASES_BYTES, 'trusted_release_list');
+    try { return JSON.parse(text); }
+    catch { throw new Error('trusted_release_list_json_invalid'); }
+  }
+  throw new Error('trusted_release_list_unreachable');
 }
 
 async function fetchVerifiedAssetText(fetchImpl, asset, label) {
@@ -132,6 +188,11 @@ function verifyManifest(manifest, { version, gitSha, assets }) {
   }
   if (String(manifest.installer_name || '') !== assets.installer.name) throw new Error('trusted_release_manifest_installer_name_mismatch');
   if (String(manifest.installer_sha256 || '').toLowerCase() !== assets.installer.sha256) throw new Error('trusted_release_manifest_installer_sha256_mismatch');
+  const installedExecutableSha256 = String(manifest.installed_executable_sha256 || '').trim().toLowerCase();
+  if (installedExecutableSha256 && !HEX_SHA256_RE.test(installedExecutableSha256)) {
+    throw new Error('trusted_release_manifest_installed_executable_sha256_invalid');
+  }
+  return { installed_executable_sha256: installedExecutableSha256 || null };
 }
 
 export function parseStrictDevYml(text) {
@@ -157,30 +218,50 @@ export function parseStrictDevYml(text) {
 export async function resolveTrustedMetaengineDevRelease({
   currentVersion,
   fetchImpl = globalThis.fetch,
+  githubApiToken = null,
 } = {}) {
   if (typeof fetchImpl !== 'function') throw new Error('trusted_release_fetch_required');
   const current = parseMetaengineDevVersion(currentVersion);
   if (!current) throw new Error('trusted_release_current_version_invalid');
 
-  const releases = await fetchJson(fetchImpl, `${API_ROOT}/releases?per_page=30`, MAX_RELEASES_BYTES, 'trusted_release_list');
-  const selected = pickNewestRelease(releases, current.version);
+  let selected = null;
+  for (let page = 1; page <= MAX_RELEASE_PAGES; page += 1) {
+    const releases = await fetchReleaseListPage(fetchImpl, page, githubApiToken);
+    if (!Array.isArray(releases)) throw new Error('trusted_release_list_invalid');
+    const candidate = pickNewestRelease(releases, current.version);
+    if (candidate) { selected = candidate; break; }
+    if (releases.length < RELEASES_PAGE_SIZE) break;
+  }
   if (!selected) return null;
 
   const { release, parsed, tag } = selected;
   if (String(release.name || '') !== `METAENGINE Browser v${parsed.version}`) throw new Error('trusted_release_name_invalid');
   const rawAssets = Array.isArray(release.assets) ? release.assets : [];
   const names = expectedAssetNames(parsed.version);
-  if (rawAssets.length !== 4) throw new Error('trusted_release_asset_count_invalid');
+  const legacyNames = [names.metadata, names.installer, names.blockmap, names.manifest];
+  const currentNames = [...legacyNames, names.guardian_manifest, names.guardian_service, names.guardian_configurator];
+  let expectedNames = null;
+  let currentGuardianProfile = false;
+  if (rawAssets.length === legacyNames.length) expectedNames = legacyNames;
+  else if (rawAssets.length === currentNames.length) {
+    expectedNames = currentNames;
+    currentGuardianProfile = true;
+  } else {
+    throw new Error('trusted_release_asset_count_invalid');
+  }
   const byName = new Map(rawAssets.map((asset) => [String(asset?.name || ''), normalizeAsset(asset, tag)]));
-  if (byName.size !== 4 || Object.values(names).some((name) => !byName.has(name))) throw new Error('trusted_release_asset_set_invalid');
+  if (byName.size !== expectedNames.length || expectedNames.some((name) => !byName.has(name))) throw new Error('trusted_release_asset_set_invalid');
   const assets = {
     metadata: byName.get(names.metadata),
     installer: byName.get(names.installer),
     blockmap: byName.get(names.blockmap),
     manifest: byName.get(names.manifest),
+    guardian_manifest: currentGuardianProfile ? byName.get(names.guardian_manifest) : null,
+    guardian_service: currentGuardianProfile ? byName.get(names.guardian_service) : null,
+    guardian_configurator: currentGuardianProfile ? byName.get(names.guardian_configurator) : null,
   };
 
-  const tagRef = await fetchJson(fetchImpl, `${API_ROOT}/git/ref/tags/${encodeURIComponent(tag)}`, MAX_SMALL_ASSET_BYTES, 'trusted_release_tag_ref');
+  const tagRef = await fetchJson(fetchImpl, `${API_ROOT}/git/ref/tags/${encodeURIComponent(tag)}`, MAX_SMALL_ASSET_BYTES, 'trusted_release_tag_ref', githubApiToken);
   const gitSha = String(tagRef?.object?.sha || '').toLowerCase();
   if (tagRef?.object?.type !== 'commit' || !/^[0-9a-f]{40}$/.test(gitSha)) throw new Error('trusted_release_tag_target_invalid');
 
@@ -188,7 +269,10 @@ export async function resolveTrustedMetaengineDevRelease({
   let manifest;
   try { manifest = JSON.parse(manifestText); }
   catch { throw new Error('trusted_release_manifest_json_invalid'); }
-  verifyManifest(manifest, { version: parsed.version, gitSha, assets });
+  const manifestEvidence = verifyManifest(manifest, { version: parsed.version, gitSha, assets });
+  if (!currentGuardianProfile && manifestEvidence.installed_executable_sha256) {
+    throw new Error('trusted_release_manifest_installed_executable_sha256_unbound');
+  }
 
   const devYmlText = await fetchVerifiedAssetText(fetchImpl, assets.metadata, 'trusted_release_dev_yml');
   const devYml = parseStrictDevYml(devYmlText);
@@ -197,6 +281,7 @@ export async function resolveTrustedMetaengineDevRelease({
   }
   if (devYml.size !== assets.installer.size) throw new Error('trusted_release_dev_yml_installer_size_mismatch');
 
+  const installedExecutableSha256 = currentGuardianProfile ? manifestEvidence.installed_executable_sha256 : null;
   return {
     schema: 'metaengine.trusted-dev-release.v1',
     version: parsed.version,
@@ -208,6 +293,8 @@ export async function resolveTrustedMetaengineDevRelease({
     installer_sha512: devYml.sha512,
     manifest_sha256: assets.manifest.sha256,
     dev_yml_sha256: assets.metadata.sha256,
+    installed_executable_sha256: installedExecutableSha256,
+    target_present_proof_supported: Boolean(installedExecutableSha256),
     authority_effect: false,
   };
 }

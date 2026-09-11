@@ -1,3 +1,474 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><meta name="viewport" content="width=device-width,initial-scale=1"><title>METAENGINE Browser</title><link rel="stylesheet" href="metaengine://shell/app.css"></head>
-<body><header><div class="brand"><strong>METAENGINE</strong><span>Development Browser</span></div><nav><button data-cmd="BACK" title="Back">←</button><button data-cmd="FORWARD" title="Forward">→</button><button data-cmd="RELOAD" title="Reload">↻</button></nav><form id="addressForm"><input id="address" aria-label="Address" autocomplete="off" spellcheck="false"><button>Go</button></form><button id="newChat">+ ChatGPT</button><div id="compute" class="pill">Compute: …</div></header><section id="tabs" aria-label="Tabs"></section><script src="metaengine://shell/app.js"></script></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-59b/mJjSORNoIpVy7nYYR38siQMJ97A++RkTQAJfXq4='; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>METAENGINE Browser</title>
+  <link rel="stylesheet" href="metaengine://shell/app.css">
+  <link rel="stylesheet" href="metaengine://shell/dark-workspace.css">
+</head>
+<body data-sidebar="EXPANDED" data-operations="CLOSED" data-final-shell="metaengine-dark-workspace-v2">
+  <header class="commandBar" aria-label="Browser command bar">
+    <button id="sidebarToggle" class="railToggle" title="Toggle contexts (Ctrl+B)" aria-label="Toggle contexts"><span aria-hidden="true">☰</span></button>
+
+    <div class="brand" aria-label="METAENGINE Browser">
+      <span class="brandMark" aria-hidden="true">M</span>
+      <span id="version" class="srOnly">Browser</span>
+    </div>
+
+    <nav class="navControls" aria-label="Navigation">
+      <button class="iconButton" data-cmd="BACK" title="Back" aria-label="Back"><span aria-hidden="true">‹</span></button>
+      <button class="iconButton" data-cmd="FORWARD" title="Forward" aria-label="Forward"><span aria-hidden="true">›</span></button>
+      <button class="iconButton" data-cmd="RELOAD" title="Reload" aria-label="Reload"><span aria-hidden="true">↻</span></button>
+    </nav>
+
+    <form id="addressForm" class="omnibox" aria-label="Search, address, or Browser command">
+      <span id="routeKind" class="routeKind" aria-hidden="true">WEB</span>
+      <input id="address" aria-label="Search, address, or command" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search · > command · @ agent · / skill">
+      <span class="shortcutHint" aria-hidden="true">Ctrl K</span>
+      <button class="goButton" aria-label="Open" title="Open">↵</button>
+    </form>
+
+    <div class="activeContext" aria-live="polite" aria-label="Exact active BrowserCell">
+      <span id="activeKind">W</span><b id="activeTitle">No active tab</b><small id="activeMeta">Awaiting browser state</small>
+    </div>
+
+    <div id="systems" class="systems" aria-label="Browser health" aria-live="off">
+      <div id="fleetStatus" class="systemChip neutral" title="Fleet"><span class="systemDot" aria-hidden="true"></span><b>Fleet</b><span class="systemValue">…</span></div>
+      <div id="supervisorStatus" class="systemChip neutral" title="Supervisor"><span class="systemDot" aria-hidden="true"></span><b>Supervisor</b><span class="systemValue">…</span></div>
+      <div id="updateStatus" class="systemChip neutral" title="Update"><span class="systemDot" aria-hidden="true"></span><b>Update</b><span class="systemValue">…</span></div>
+      <div id="devPlaneStatus" class="systemChip neutral" title="Development Plane"><span class="systemDot" aria-hidden="true"></span><b>Dev</b><span class="systemValue">…</span></div>
+      <div id="computeStatus" class="systemChip neutral" title="Compute"><span class="systemDot" aria-hidden="true"></span><b>Compute</b><span class="systemValue">…</span></div>
+      <div id="gateStatus" class="systemChip neutral" title="Safety"><span class="systemDot" aria-hidden="true"></span><b>Gates</b><span class="systemValue">…</span></div>
+    </div>
+
+    <button id="operationsToggle" class="operationsToggle" title="Open Brain (Ctrl+Shift+O)" aria-label="Open Brain"><span class="brainGlyph" aria-hidden="true">●</span><span>Brain</span></button>
+    <button id="newChat" class="primaryButton" title="New ChatGPT tab" aria-label="New ChatGPT tab"><span aria-hidden="true">＋</span><span class="primaryLabel">New Chat</span></button>
+  </header>
+
+  <aside id="contextRail" class="contextRail" aria-label="Chats, agents, workspaces and BrowserCells">
+    <div class="railHeader">
+      <strong>Workspace</strong>
+      <button id="railCollapse" class="miniButton" title="Collapse contexts" aria-label="Collapse contexts">‹</button>
+    </div>
+    <div class="tabSearchWrap">
+      <span aria-hidden="true">⌕</span>
+      <input id="tabSearch" class="tabSearch" autocomplete="off" spellcheck="false" placeholder="Search BrowserCells" aria-label="Filter workspaces and open tabs">
+    </div>
+    <div class="railSectionHead"><span>BrowserCells</span><b id="tabCount">0</b></div>
+    <div id="verticalTabs" class="verticalTabs" role="list"></div>
+    <div class="railFooter">
+      <span id="fleetProfile" class="railFooterValue">Fleet ready</span>
+      <small id="railGeometry" class="srOnly">Native inset</small>
+    </div>
+  </aside>
+
+  <aside id="operationsPanel" class="operationsPanel" aria-label="Brain coordination inspector">
+    <header class="opsHeader">
+      <div class="brainTitle"><span class="opsEyebrow">Always-on coordination</span><strong>Brain</strong></div>
+      <div class="brainHeaderActions">
+        <span class="brainPresence"><i aria-hidden="true"></i>Live</span>
+        <button id="operationsClose" class="miniButton" title="Close Brain" aria-label="Close Brain">×</button>
+      </div>
+    </header>
+    <nav id="opsNav" class="opsNav" aria-label="Brain sections">
+      <button data-section="overview" class="active">Status</button>
+      <button data-section="commands">Actions</button>
+    </nav>
+    <div id="opsContent" class="opsContent"></div>
+    <footer class="opsLegend" aria-label="Brain command hint"><span><b>Ctrl K</b> command · @ agent · / skill</span></footer>
+  </aside>
+
+  <div id="shellBackdrop" class="shellBackdrop" aria-hidden="true"></div>
+  <script src="metaengine://shell/app.js"></script>
+  <script data-adaptive-context-rail>(() => {
+  const rail = document.getElementById('verticalTabs');
+  const search = document.getElementById('tabSearch');
+  const systems = document.getElementById('systems');
+  const presence = document.querySelector('.brainPresence');
+  if (!rail || !search || !systems || !opsNav || !opsContent) return;
+
+  const ADAPTIVE_AGENT_THRESHOLD = 8;
+  const ADAPTIVE_AGENT_VISIBLE = 5;
+  const DISCLOSURE_SELECTOR = '[data-adaptive-agent-disclosure]';
+  const TASK_WORKBENCH_SCHEMA = 'metaengine.browser-brain.collaboration-workbench.v1';
+  const TASK_UI_MAX_CONTEXTS = 8;
+  const TASK_UI_MAX_PER_CONTEXT = 3;
+  const TASK_UI_MAX_BLOCKERS = 12;
+  const TASK_UI_MAX_ARTIFACTS = 16;
+  let expanded = false;
+  let applying = false;
+  let taskNowActive = true;
+  let taskApplying = false;
+
+  function disclosure(total, hidden) {
+    const row = document.createElement('div');
+    row.className = 'railSectionHead';
+    row.dataset.adaptiveAgentDisclosure = 'true';
+    const label = document.createElement('span');
+    label.textContent = `Agents · ${total}`;
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'miniButton';
+    toggle.textContent = expanded ? '−' : `+${hidden}`;
+    toggle.title = expanded ? 'Collapse agent tabs' : `Show ${hidden} more agent tabs`;
+    toggle.setAttribute('aria-label', toggle.title);
+    toggle.addEventListener('click', () => {
+      expanded = !expanded;
+      applyAdaptiveDensity();
+    });
+    row.append(label, toggle);
+    return row;
+  }
+
+  function collapsedKeepSet(rows) {
+    const keep = new Set();
+    for (const row of rows) {
+      if (row.classList.contains('active') || row.querySelector('.tabStateDot.bad,.tabStateDot.warn')) keep.add(row);
+    }
+    for (const row of rows) {
+      if (keep.size >= ADAPTIVE_AGENT_VISIBLE) break;
+      keep.add(row);
+    }
+    return keep;
+  }
+
+  function applyAdaptiveDensity() {
+    if (applying) return;
+    applying = true;
+    railObserver.disconnect();
+    try {
+      rail.querySelector(DISCLOSURE_SELECTOR)?.remove();
+      const rows = [...rail.querySelectorAll('.verticalTab.agent')];
+      for (const row of rows) row.hidden = false;
+      const searching = search.value.trim().length > 0;
+      if (searching || rows.length <= ADAPTIVE_AGENT_THRESHOLD) {
+        if (rows.length <= ADAPTIVE_AGENT_THRESHOLD) expanded = false;
+        return;
+      }
+      const keep = expanded ? new Set(rows) : collapsedKeepSet(rows);
+      const hiddenRows = rows.filter((row) => !keep.has(row));
+      for (const row of hiddenRows) row.hidden = true;
+      const anchor = rows[0];
+      if (anchor) anchor.before(disclosure(rows.length, hiddenRows.length));
+    } finally {
+      railObserver.observe(rail, { childList: true });
+      applying = false;
+    }
+  }
+
+  function unavailableTaskProjection(reason = 'NOT_EXPOSED') {
+    return Object.freeze({
+      schema: TASK_WORKBENCH_SCHEMA,
+      valid: false,
+      reason,
+      contexts: Object.freeze([]),
+      context_count: 0,
+      total_task_count: 0,
+      visible_task_count: 0,
+      authority_effect: false,
+    });
+  }
+
+  function taskProjection(next) {
+    const candidate = next?.supervisor?.realtime_process_plane?.browser_brain?.collaboration_fabric?.workbench;
+    if (!candidate || candidate.schema !== TASK_WORKBENCH_SCHEMA) return unavailableTaskProjection('NOT_EXPOSED');
+    if (
+      candidate.bounded !== true
+      || candidate.advisory_only !== true
+      || candidate.projection_is_authority !== false
+      || candidate.scheduler_authority !== false
+      || candidate.execution_authority !== false
+      || candidate.command_leasing !== false
+      || candidate.authority_effect !== false
+      || candidate.message_bodies_exposed !== false
+      || candidate.raw_page_content_exposed !== false
+      || !Array.isArray(candidate.contexts)
+      || candidate.contexts.length > 128
+    ) return unavailableTaskProjection('INVALID_PROJECTION');
+    for (const context of candidate.contexts) {
+      if (
+        !context
+        || context.authority_effect !== false
+        || !Array.isArray(context.tasks)
+        || context.tasks.length > 256
+        || !context.progress
+        || !Array.isArray(context.progress.active_agents)
+        || !Array.isArray(context.blockers)
+        || !Array.isArray(context.artifact_refs)
+      ) return unavailableTaskProjection('INVALID_CONTEXT');
+      for (const task of context.tasks) {
+        if (
+          !task
+          || task.scheduler_authority !== false
+          || task.execution_authority !== false
+          || task.authority_effect !== false
+        ) return unavailableTaskProjection('INVALID_TASK');
+      }
+    }
+    return Object.freeze({ ...candidate, valid: true, reason: 'EXACT_ZERO_AUTHORITY_PROJECTION' });
+  }
+
+  function taskMemory(next) {
+    const memory = next?.supervisor?.realtime_process_plane?.browser_brain?.collaboration_fabric?.episodic_memory;
+    if (
+      !memory
+      || memory.schema !== 'metaengine.browser-brain.episodic-memory.v1'
+      || memory.bounded_memory !== true
+      || memory.scheduler_authority !== false
+      || memory.execution_authority !== false
+      || memory.authority_effect !== false
+    ) return null;
+    return memory;
+  }
+
+  function taskTotals(workbench) {
+    const totals = { ready: 0, active: 0, blocked: 0, completed: 0, failed: 0 };
+    for (const context of workbench.contexts || []) {
+      for (const key of Object.keys(totals)) totals[key] += Math.max(0, Number(context.progress?.[key] || 0));
+    }
+    return totals;
+  }
+
+  function taskPrimaryContext(workbench) {
+    return (workbench.contexts || []).find((context) => context.tasks.some((task) => task.status === 'ACTIVE'))
+      || (workbench.contexts || []).find((context) => context.tasks.some((task) => ['BLOCKED', 'FAILED'].includes(task.status)))
+      || (workbench.contexts || []).find((context) => context.tasks.some((task) => task.status === 'READY'))
+      || workbench.contexts?.[0]
+      || null;
+  }
+
+  function taskRenderNow() {
+    if (!taskNowActive || taskApplying) return;
+    taskApplying = true;
+    try {
+      const workbench = taskProjection(snapshot);
+      for (const button of opsNav.querySelectorAll('button')) {
+        button.classList.toggle('active', button.dataset.brainNow === 'true');
+      }
+      const fragment = document.createDocumentFragment();
+      if (!workbench.valid) {
+        fragment.append(hero(
+          'Now unavailable',
+          'Tasks are not inferred from tabs, URLs, titles, or page content. The exact bounded zero-authority Collaboration Workbench projection is unavailable.',
+          workbench.reason,
+        ));
+        const contract = section('Projection contract', 'fail closed');
+        contract.list.append(
+          kvRow('Schema', TASK_WORKBENCH_SCHEMA, 'neutral'),
+          kvRow('Task inference', 'DISABLED', 'good'),
+          kvRow('Page/model authority', 'NONE', 'good'),
+          kvRow('Scheduler authority', 'NONE', 'good'),
+        );
+        fragment.append(contract.wrap);
+        opsContent.replaceChildren(fragment);
+        return;
+      }
+
+      const totals = taskTotals(workbench);
+      const focus = taskPrimaryContext(workbench);
+      const focusTask = focus?.tasks?.[0] || null;
+      const attention = totals.blocked + totals.failed;
+      fragment.append(hero(
+        focusTask ? compact(focusTask.objective, 72) : 'No active collaboration task',
+        focusTask
+          ? `${text(focus.context_id)} · exact Task/Progress Ledger · no page-text inference`
+          : 'Brain is live and waiting for the next bounded collaboration objective.',
+        attention ? `${attention} blocker${attention === 1 ? '' : 's'}` : (totals.active ? `${totals.active} active` : 'clear'),
+      ));
+      const grid = el('div', 'opsGrid');
+      grid.append(
+        metric('Active', totals.active, totals.active ? 'good' : 'neutral'),
+        metric('Blocked', attention, attention ? 'bad' : 'good'),
+        metric('Ready', totals.ready, totals.ready ? 'warn' : 'neutral'),
+        metric('Tasks', workbench.total_task_count, 'neutral'),
+      );
+      fragment.append(grid);
+
+      if (focusTask) {
+        const why = section('Why / current binding', 'only projected facts');
+        why.list.append(
+          kvRow('Status', focusTask.status, stateTone(focusTask.status)),
+          kvRow('Owner', focusTask.owner_agent_id || 'UNASSIGNED', focusTask.owner_agent_id ? 'good' : 'neutral'),
+          kvRow('Progress revision', focusTask.progress_revision, 'neutral'),
+          kvRow('Dependencies', focusTask.dependencies?.length ? focusTask.dependencies.join(', ') : 'NONE', focusTask.dependencies?.length ? 'warn' : 'good'),
+          kvRow('Capabilities', focusTask.required_capabilities?.length ? focusTask.required_capabilities.join(', ') : 'NONE', 'neutral'),
+          kvRow('Routing rationale', 'NOT PROJECTED', 'muted'),
+        );
+        fragment.append(why.wrap);
+      }
+
+      const current = section('Current work', `${Math.min(workbench.contexts.length, TASK_UI_MAX_CONTEXTS)}/${workbench.context_count} context(s)`);
+      current.list.className = 'entityList';
+      let shown = 0;
+      for (const context of workbench.contexts.slice(0, TASK_UI_MAX_CONTEXTS)) {
+        for (const task of context.tasks.slice(0, TASK_UI_MAX_PER_CONTEXT)) {
+          shown += 1;
+          current.list.append(entityRow(
+            compact(task.objective, 56),
+            compact(context.context_id, 24),
+            [
+              { value: task.status, tone: stateTone(task.status) },
+              { value: task.owner_agent_id ? compact(task.owner_agent_id, 22) : 'unassigned', tone: task.owner_agent_id ? 'neutral' : 'warn' },
+              { value: `r${task.progress_revision}`, tone: 'neutral' },
+            ],
+          ));
+        }
+      }
+      if (!shown) current.list.append(kvRow('State', 'NO VISIBLE TASKS', 'neutral'));
+      fragment.append(current.wrap);
+
+      const blockers = [];
+      for (const context of workbench.contexts) {
+        for (const item of context.blockers) {
+          blockers.push({ ...item, context_id: context.context_id });
+          if (blockers.length >= TASK_UI_MAX_BLOCKERS) break;
+        }
+        if (blockers.length >= TASK_UI_MAX_BLOCKERS) break;
+      }
+      const blocked = section('Blockers', blockers.length ? `${blockers.length} projected` : 'clear');
+      if (blockers.length) {
+        blocked.list.className = 'entityList';
+        for (const item of blockers) {
+          blocked.list.append(entityRow(
+            compact(item.blocker || 'Blocked task', 58),
+            compact(item.context_id, 24),
+            [{ value: compact(item.task_id, 22), tone: 'bad' }, { value: `r${item.progress_revision}`, tone: 'neutral' }],
+          ));
+        }
+      } else blocked.list.append(kvRow('State', 'CLEAR', 'good'));
+      fragment.append(blocked.wrap);
+
+      const agents = new Set();
+      const artifacts = [];
+      for (const context of workbench.contexts) {
+        for (const agent of context.progress.active_agents) agents.add(agent);
+        for (const task of context.tasks) if (task.owner_agent_id) agents.add(task.owner_agent_id);
+        for (const ref of context.artifact_refs) {
+          if (!artifacts.includes(ref) && artifacts.length < TASK_UI_MAX_ARTIFACTS) artifacts.push(ref);
+        }
+      }
+      const team = section('Team', `${agents.size} projected agent(s)`);
+      if (agents.size) {
+        for (const agent of [...agents].slice(0, 16)) team.list.append(kvRow(compact(agent, 30), 'ACTIVE / OWNER', 'good'));
+      } else team.list.append(kvRow('Agents', 'NONE PROJECTED', 'neutral'));
+      fragment.append(team.wrap);
+
+      const evidence = section('Artifacts', artifacts.length ? `${artifacts.length} immutable ref(s)` : 'none');
+      if (artifacts.length) {
+        for (const ref of artifacts) evidence.list.append(kvRow(compact(ref, 38), 'REFERENCE', 'good'));
+      } else evidence.list.append(kvRow('Artifact refs', 'NONE', 'neutral'));
+      fragment.append(evidence.wrap);
+
+      const timeline = section('Timeline', 'bounded ledger activity');
+      for (const context of workbench.contexts.slice(0, 6)) {
+        timeline.list.append(kvRow(compact(context.context_id, 28), context.last_activity_at || `seq ${context.last_activity_seq}`, 'neutral'));
+      }
+      if (!workbench.contexts.length) timeline.list.append(kvRow('Activity', 'NONE', 'neutral'));
+      fragment.append(timeline.wrap);
+
+      const memory = taskMemory(snapshot);
+      const memorySection = section('Memory', memory ? 'durable episodic summary' : 'not exposed');
+      memorySection.list.append(
+        kvRow('Episodes', memory?.episode_count ?? 'UNKNOWN', memory ? 'good' : 'neutral'),
+        kvRow('Semantic facts', memory?.semantic_fact_count ?? 'UNKNOWN', memory ? 'good' : 'neutral'),
+        kvRow('Playbooks', memory?.procedural_playbook_count ?? 'UNKNOWN', memory ? 'good' : 'neutral'),
+        kvRow('Immutable provenance', memory?.immutable_provenance === true ? 'YES' : 'UNKNOWN', memory?.immutable_provenance === true ? 'good' : 'neutral'),
+      );
+      fragment.append(memorySection.wrap);
+
+      const contract = section('Authority contract', workbench.contexts_truncated || workbench.contexts.some((row) => row.tasks_truncated) ? 'bounded projection truncated' : 'bounded exact projection');
+      contract.list.append(
+        kvRow('Projection authority', 'NONE', 'good'),
+        kvRow('Command leasing', 'NONE', 'good'),
+        kvRow('Page/model content', 'NOT EXPOSED', 'good'),
+        kvRow('Message bodies', 'NOT EXPOSED', 'good'),
+        kvRow('Work cycle limit', workbench.work_cycle_limit == null ? 'NONE' : workbench.work_cycle_limit, workbench.work_cycle_limit == null ? 'good' : 'bad'),
+      );
+      fragment.append(contract.wrap);
+      opsContent.replaceChildren(fragment);
+    } finally {
+      taskApplying = false;
+    }
+  }
+
+  function taskUpdateHealth() {
+    let summary = systems.querySelector('[data-health-summary]');
+    if (!summary) {
+      summary = document.createElement('span');
+      summary.dataset.healthSummary = 'true';
+      systems.append(summary);
+    }
+    const bad = systems.querySelectorAll('.systemChip.bad').length;
+    const warn = systems.querySelectorAll('.systemChip.warn').length;
+    const label = bad ? `Degraded ${bad}` : (warn ? `Attention ${warn}` : 'Healthy');
+    const className = `tinyTag ${bad ? 'bad' : (warn ? 'warn' : 'good')}`;
+    if (summary.className !== className) summary.className = className;
+    if (summary.textContent !== label) summary.textContent = label;
+    const aria = `Browser health: ${label}`;
+    if (systems.getAttribute('aria-label') !== aria) systems.setAttribute('aria-label', aria);
+  }
+
+  function taskUpdatePresence() {
+    if (!presence) return;
+    const workbench = taskProjection(snapshot);
+    const totals = workbench.valid ? taskTotals(workbench) : null;
+    const blocked = totals ? totals.blocked + totals.failed : 0;
+    const label = !workbench.valid
+      ? 'Brain · tasks unavailable'
+      : (blocked ? `Brain · ${blocked} blocked` : (totals.active ? `Brain · ${totals.active} active` : 'Brain · live'));
+    if (presence.textContent.trim() !== label) {
+      const dot = document.createElement('i');
+      dot.setAttribute('aria-hidden', 'true');
+      presence.replaceChildren(dot, document.createTextNode(label));
+    }
+    if (presence.getAttribute('aria-label') !== label) presence.setAttribute('aria-label', label);
+  }
+
+  function applyTaskPresentation() {
+    taskUpdateHealth();
+    taskUpdatePresence();
+    taskRenderNow();
+  }
+
+  function installTaskPresentation() {
+    const coreStatus = opsNav.querySelector('button[data-section="overview"]');
+    if (coreStatus) coreStatus.textContent = 'System';
+    opsNav.querySelector('button[data-agentic-section="skills"]')?.remove();
+    const now = document.createElement('button');
+    now.type = 'button';
+    now.dataset.brainNow = 'true';
+    now.textContent = 'Now';
+    now.className = 'active';
+    opsNav.prepend(now);
+    now.addEventListener('click', () => {
+      taskNowActive = true;
+      agenticSection = null;
+      taskRenderNow();
+    });
+    opsNav.addEventListener('click', (event) => {
+      const button = event.target.closest('button');
+      if (!button || button.dataset.brainNow === 'true') return;
+      taskNowActive = false;
+      now.classList.remove('active');
+    });
+    const title = document.querySelector('.contextRail .railHeader strong');
+    if (title) title.textContent = 'Workspace';
+    search.placeholder = 'Search tabs, sessions, agents';
+  }
+
+  const railObserver = new MutationObserver(() => queueMicrotask(applyAdaptiveDensity));
+  railObserver.observe(rail, { childList: true });
+  search.addEventListener('input', () => queueMicrotask(applyAdaptiveDensity));
+
+  const systemObserver = new MutationObserver(() => queueMicrotask(applyTaskPresentation));
+  systemObserver.observe(systems, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+
+  installTaskPresentation();
+  queueMicrotask(applyAdaptiveDensity);
+  queueMicrotask(applyTaskPresentation);
+})();</script>
+</body>
+</html>

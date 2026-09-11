@@ -56,15 +56,20 @@ function response(body, status = 200) {
 
 function fetchFor({ releases, selected }) {
   const calls = [];
-  const fetchImpl = async (url) => {
+  const requests = [];
+  const fetchImpl = async (url, init = {}) => {
     calls.push(String(url));
+    requests.push({
+      url: String(url),
+      authorization: init?.headers?.authorization || null,
+    });
     if (url === `${API}/releases?per_page=30`) return response(releases);
     if (url === `${API}/git/ref/tags/${encodeURIComponent(selected.tag)}`) return response({ ref:`refs/tags/${selected.tag}`, object:{ type:'commit', sha:selected.gitSha } });
     if (url === `${DL}/${selected.tag}/verified-self-update-manifest.json`) return response(selected.manifest);
     if (url === `${DL}/${selected.tag}/dev.yml`) return response(selected.devYml);
     return response({ error:'unexpected' }, 404);
   };
-  return { fetchImpl, calls };
+  return { fetchImpl, calls, requests };
 }
 
 test('METAENGINE dev versions are strict and expose a monotonic build number', () => {
@@ -161,4 +166,105 @@ test('resolver returns null without touching tag or assets when no newer same-fa
   const result = await resolveTrustedMetaengineDevRelease({ currentVersion:'0.6.3-dev.64.1', fetchImpl });
   assert.equal(result, null);
   assert.deepEqual(calls, [`${API}/releases?per_page=30`]);
+});
+
+test('resolver paginates past a full first page of newer foreign-core releases to find the immutable baseline', async () => {
+  const r63 = fixture('0.6.3-dev.20260831143001.1', '6'.repeat(40));
+  const foreign = Array.from({ length: 30 }, (_, i) => fixture(`0.6.6-dev.${33700000 + i}.1`, `${i}`.padStart(40, '7')).release);
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(String(url));
+    if (url === `${API}/releases?per_page=30`) return response(foreign);
+    if (url === `${API}/releases?per_page=30&page=2`) return response([r63.release]);
+    if (url === `${API}/git/ref/tags/${encodeURIComponent(r63.tag)}`) return response({ ref:`refs/tags/${r63.tag}`, object:{ type:'commit', sha:r63.gitSha } });
+    if (url === `${DL}/${r63.tag}/verified-self-update-manifest.json`) return response(r63.manifest);
+    if (url === `${DL}/${r63.tag}/dev.yml`) return response(r63.devYml);
+    return response({ error:'unexpected' }, 404);
+  };
+  const result = await resolveTrustedMetaengineDevRelease({ currentVersion:'0.6.3-dev.0.1', fetchImpl });
+  assert.equal(result.version, '0.6.3-dev.20260831143001.1');
+  assert.equal(result.git_sha, r63.gitSha);
+  assert.equal(result.authority_effect, false);
+  assert.ok(calls.includes(`${API}/releases?per_page=30`));
+  assert.ok(calls.includes(`${API}/releases?per_page=30&page=2`), 'second page must be scanned when the first page has no same-family candidate');
+  assert.equal(calls.filter((u) => u.includes('/releases?')).length, 2, 'pagination must stop after the first page containing a candidate');
+});
+
+test('resolver stops paginating at a short page and fails closed with null', async () => {
+  const foreign = Array.from({ length: 5 }, (_, i) => fixture(`0.6.6-dev.${33700000 + i}.1`, `${i}`.padStart(40, '8')).release);
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(String(url));
+    if (url === `${API}/releases?per_page=30`) return response(foreign);
+    return response({ error:'unexpected' }, 404);
+  };
+  const result = await resolveTrustedMetaengineDevRelease({ currentVersion:'0.6.3-dev.0.1', fetchImpl });
+  assert.equal(result, null);
+  assert.equal(calls.length, 1, 'a short first page means the listing is exhausted; no deeper page may be fetched');
+});
+
+test('resolver bounds pagination depth and fails closed after the page cap', async () => {
+  const fullForeignPage = () => Array.from({ length: 30 }, (_, i) => fixture(`0.6.6-dev.${33800000 + i}.1`, `${i}`.padStart(40, '9')).release);
+  let pages = 0;
+  const fetchImpl = async (url) => {
+    if (url === `${API}/releases?per_page=30` || /^\/releases\?per_page=30&page=(2|3|4|5|6|7|8|9|10)$/.test(String(url).slice(String(url).indexOf('/releases?')))) {
+      const isRelease = url.includes('/releases?');
+      if (isRelease) pages += 1;
+      return response(fullForeignPage());
+    }
+    return response({ error:'unexpected' }, 404);
+  };
+  const result = await resolveTrustedMetaengineDevRelease({ currentVersion:'0.6.3-dev.0.1', fetchImpl });
+  assert.equal(result, null);
+  assert.equal(pages, 10, 'pagination must be bounded to a fixed page cap');
+});
+
+test('resolver retries a rate-limited release list once and then succeeds', async () => {
+  const r66 = fixture('0.6.3-dev.66.1', '2'.repeat(40));
+  let listCalls = 0;
+  const fetchImpl = async (url) => {
+    if (url === `${API}/releases?per_page=30`) {
+      listCalls += 1;
+      if (listCalls === 1) return response({ message:'API rate limit exceeded' }, 403);
+      return response([r66.release]);
+    }
+    if (url === `${API}/git/ref/tags/${encodeURIComponent(r66.tag)}`) return response({ ref:`refs/tags/${r66.tag}`, object:{ type:'commit', sha:r66.gitSha } });
+    if (url === `${DL}/${r66.tag}/verified-self-update-manifest.json`) return response(r66.manifest);
+    if (url === `${DL}/${r66.tag}/dev.yml`) return response(r66.devYml);
+    return response({ error:'unexpected' }, 404);
+  };
+  const result = await resolveTrustedMetaengineDevRelease({ currentVersion:'0.6.3-dev.64.1', fetchImpl });
+  assert.equal(result.version, '0.6.3-dev.66.1');
+  assert.equal(listCalls, 2, 'exactly one bounded retry for a pooled-IP rate limit');
+});
+
+test('resolver scopes an optional GitHub token to API calls and never release assets', async () => {
+  const r66 = fixture('0.6.3-dev.66.1', '2'.repeat(40));
+  const { fetchImpl, requests } = fetchFor({ releases:[r66.release], selected:r66 });
+  const token = 'ghs_read_only_fixture_token';
+  const result = await resolveTrustedMetaengineDevRelease({
+    currentVersion:'0.6.3-dev.64.1',
+    fetchImpl,
+    githubApiToken:token,
+  });
+  assert.equal(result.version, r66.version);
+  const apiRequests = requests.filter(({ url }) => url.startsWith(`${API}/`));
+  const assetRequests = requests.filter(({ url }) => url.startsWith(`${DL}/`));
+  assert.ok(apiRequests.length >= 2, 'release discovery and immutable tag binding must use the API');
+  assert.ok(apiRequests.every(({ authorization }) => authorization === `Bearer ${token}`));
+  assert.ok(assetRequests.length >= 2, 'manifest and dev.yml must still be fetched');
+  assert.ok(assetRequests.every(({ authorization }) => authorization === null), 'API credentials must never cross into release asset downloads');
+});
+
+test('resolver rejects malformed GitHub API tokens before the first network effect', async () => {
+  let calls = 0;
+  await assert.rejects(
+    resolveTrustedMetaengineDevRelease({
+      currentVersion:'0.6.3-dev.64.1',
+      githubApiToken:'ghs_fixture\r\nInjected: true',
+      fetchImpl:async () => { calls += 1; return response([]); },
+    }),
+    /trusted_release_github_api_token_invalid/,
+  );
+  assert.equal(calls, 0);
 });

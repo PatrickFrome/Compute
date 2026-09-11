@@ -1,290 +1,202 @@
 import crypto from 'node:crypto';
+import {
+  FleetProvisioner as CoreFleetProvisioner,
+  FLEET_PROFILES,
+  FLEET_PROVISIONER_VERSION,
+  FLEET_STATES,
+} from './fleet-provisioner-core.mjs';
+import { registerFleetRuntime } from './fleet-runtime-bridge.mjs';
 
-export const FLEET_PROVISIONER_VERSION = '1.0.0';
-export const FLEET_STATES = Object.freeze([
-  'REGISTERED',
-  'PROVISIONING',
-  'BOUND_UNVERIFIED',
-  'PROVISIONING_AMBIGUOUS',
-  'LOST',
-  'RETIRED',
-]);
+export { FLEET_PROFILES, FLEET_PROVISIONER_VERSION, FLEET_STATES };
 
-export const FLEET_PROFILES = Object.freeze({
-  BALANCED: Object.freeze(['PLANNER', 'RESEARCHER', 'IMPLEMENTER', 'CRITIC', 'FALSIFIER', 'SYNTHESIZER']),
-  RESEARCH: Object.freeze(['PLANNER', 'RESEARCHER', 'RESEARCHER_2', 'CRITIC', 'FALSIFIER', 'SYNTHESIZER']),
-  IMPLEMENTATION: Object.freeze(['ARCHITECT', 'IMPLEMENTER', 'TESTER', 'CRITIC', 'FALSIFIER', 'SYNTHESIZER']),
-  INCIDENT: Object.freeze(['DIAGNOSTIC', 'REPRODUCER', 'RESEARCHER', 'FIX_REVIEWER', 'FALSIFIER', 'SYNTHESIZER']),
-});
+export const FLEET_RESTART_STALE_HISTORY_LIMIT = 64;
+const RESTART_STALE_LOST_REASON = 'PHYSICAL_TAB_MISSING_ON_RESTART';
+const TERMINAL_HISTORY_STATES = new Set(['LOST', 'RETIRED']);
 
-function clone(value) { return value == null ? value : structuredClone(value); }
-function iso(clock) {
-  const d = new Date(clock());
-  if (!Number.isFinite(d.getTime())) throw new Error('fleet_clock_invalid');
-  return d.toISOString();
-}
-function normalizePolicy(policy = {}) {
-  const profile = String(policy.profile || 'BALANCED').toUpperCase();
-  if (!FLEET_PROFILES[profile]) throw new Error('fleet_profile_invalid');
-  const warmAgents = Number(policy.warm_agents ?? 2);
-  const desiredAgents = Number(policy.desired_agents ?? 6);
-  const maxAgents = Number(policy.max_agents ?? 8);
-  for (const [name, value] of [['warm_agents', warmAgents], ['desired_agents', desiredAgents], ['max_agents', maxAgents]]) {
-    if (!Number.isSafeInteger(value) || value < 0 || value > 32) throw new Error(`fleet_${name}_invalid`);
-  }
-  if (warmAgents > desiredAgents || desiredAgents > maxAgents) throw new Error('fleet_capacity_order_invalid');
-  return Object.freeze({
-    profile,
-    warm_agents: warmAgents,
-    desired_agents: desiredAgents,
-    max_agents: maxAgents,
-    adopt_existing: false,
-    direct_peer_messaging: false,
-    browser_authority: false,
-    automatic_work_retry: false,
-  });
+const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
+
+function hasCanonicalTimestamp(value) {
+  const raw = String(value || '');
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === raw;
 }
 
-function freshState(policy) {
+function isPrunableRestartStaleLost(row) {
+  return row?.lifecycle_state === 'LOST'
+    && row?.automatic_retry_allowed !== true
+    && row?.lost_reason === RESTART_STALE_LOST_REASON
+    && row?.tab_id == null
+    && row?.target_id == null
+    && row?.transport_proof == null
+    && row?.authority_effect !== true
+    && hasCanonicalTimestamp(row?.updated_at);
+}
+
+export function pruneRestartStaleLostHistory(input) {
+  if (!input || input.schema !== 'metaengine.browser.fleet-state.v1' || !Array.isArray(input.agents)) return input;
+  const stale = input.agents
+    .map((row, index) => ({ row, index, updated_at: String(row?.updated_at || '') }))
+    .filter(({ row }) => isPrunableRestartStaleLost(row));
+  if (stale.length <= FLEET_RESTART_STALE_HISTORY_LIMIT) return input;
+
+  const keep = new Set(stale
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at) || b.index - a.index)
+    .slice(0, FLEET_RESTART_STALE_HISTORY_LIMIT)
+    .map(({ index }) => index));
   return {
-    schema: 'metaengine.browser.fleet-state.v1',
-    version: FLEET_PROVISIONER_VERSION,
-    policy: clone(policy),
-    agents: [],
-    updated_at: null,
+    ...input,
+    agents: input.agents.filter((row, index) => !isPrunableRestartStaleLost(row) || keep.has(index)),
   };
 }
 
-function sanitizeLoadedState(input, policy) {
-  if (!input || input.schema !== 'metaengine.browser.fleet-state.v1' || !Array.isArray(input.agents)) return freshState(policy);
-  const agents = [];
-  const seen = new Set();
-  for (const row of input.agents) {
-    if (!row || typeof row !== 'object') continue;
-    const agentId = String(row.agent_id || '').toLowerCase();
-    if (!/^agent_[a-z0-9-]{8,64}$/.test(agentId) || seen.has(agentId)) continue;
-    const lifecycle = FLEET_STATES.includes(row.lifecycle_state) ? row.lifecycle_state : 'LOST';
-    seen.add(agentId);
-    agents.push({
-      agent_id: agentId,
-      role: String(row.role || 'WORKER').toUpperCase(),
-      ownership: 'FLEET_OWNED',
-      lifecycle_state: lifecycle === 'PROVISIONING' ? 'LOST' : lifecycle,
-      tab_id: row.tab_id ? String(row.tab_id) : null,
-      target_id: row.target_id ? String(row.target_id) : null,
-      conversation_epoch: Number.isSafeInteger(Number(row.conversation_epoch)) ? Number(row.conversation_epoch) : 0,
-      generation_epoch: Number.isSafeInteger(Number(row.generation_epoch)) ? Number(row.generation_epoch) : 1,
-      created_at: String(row.created_at || ''),
-      updated_at: String(row.updated_at || ''),
-      lost_reason: row.lost_reason ? String(row.lost_reason) : null,
-      ambiguous_reason: row.ambiguous_reason ? String(row.ambiguous_reason) : null,
-      automatic_retry_allowed: false,
-      authority_effect: false,
+function hasZeroDesiredFleet(input, policy = null) {
+  const effective = policy && typeof policy === 'object' ? policy : input?.policy;
+  return Number(effective?.desired_agents) === 0 && Number(effective?.warm_agents) === 0;
+}
+
+export function compactTerminalFleetHistory(input, policy = null) {
+  if (!input || input.schema !== 'metaengine.browser.fleet-state.v1' || !Array.isArray(input.agents)) return input;
+  if (!hasZeroDesiredFleet(input, policy)) return input;
+  const agents = input.agents.filter((row) => !TERMINAL_HISTORY_STATES.has(String(row?.lifecycle_state || '')));
+  if (agents.length === input.agents.length) return input;
+  return {
+    ...input,
+    agents,
+  };
+}
+
+export function compactFleetHistory(input, policy = null) {
+  return pruneRestartStaleLostHistory(compactTerminalFleetHistory(input, policy));
+}
+
+function isRestartMissingBinding(row, tabExists) {
+  if (!row || typeof row !== 'object' || typeof tabExists !== 'function') return false;
+  const lifecycle = String(row.lifecycle_state || '');
+  if (!['BOUND_UNVERIFIED', 'ACTIVE'].includes(lifecycle)) return false;
+  if (!row.tab_id || row.authority_effect === true) return false;
+  try {
+    return tabExists(String(row.tab_id)) === false;
+  } catch {
+    return false;
+  }
+}
+
+export function compactZeroTargetRestartBindings(input, { policy = null, tabExists = null } = {}) {
+  if (!input || input.schema !== 'metaengine.browser.fleet-state.v1' || !Array.isArray(input.agents)) return input;
+  if (!hasZeroDesiredFleet(input, policy) || typeof tabExists !== 'function') return input;
+  const agents = input.agents.filter((row) => !isRestartMissingBinding(row, tabExists));
+  if (agents.length === input.agents.length) return input;
+  return {
+    ...input,
+    agents,
+  };
+}
+
+function normalizeRootChatGptUrl(value) {
+  const url = new URL(String(value || '').trim());
+  if (url.protocol !== 'https:' || !['chatgpt.com', 'www.chatgpt.com'].includes(url.hostname.toLowerCase())) {
+    throw new Error('fleet_transport_preconversation_origin_invalid');
+  }
+  const path = url.pathname.replace(/\/+$/, '');
+  if (path !== '') throw new Error('fleet_transport_preconversation_path_invalid');
+  return 'https://chatgpt.com/';
+}
+
+function exactOverlayProof(agent, proof) {
+  if (!proof || proof.schema !== 'metaengine.browser.fleet-transport-proof.v1') return false;
+  if (proof.transport_stage !== 'PRECONVERSATION_ROOT' || proof.authority_effect !== false) return false;
+  if (String(agent?.lifecycle_state || '') !== 'BOUND_UNVERIFIED') return false;
+  if (String(agent?.tab_id || '') !== String(proof.tab_id || '')) return false;
+  if (String(agent?.target_id || '').toLowerCase() !== String(proof.target_id || '').toLowerCase()) return false;
+  if (Number(agent?.generation_epoch) !== Number(proof.generation_epoch)) return false;
+  return /^[a-f0-9]{64}$/.test(String(proof.conversation_url_sha256 || '').toLowerCase())
+    && Number.isFinite(Date.parse(String(proof.proven_at || '')));
+}
+
+export class FleetProvisioner extends CoreFleetProvisioner {
+  #preconversationProofs = new Map();
+
+  constructor(options = {}) {
+    const loadState = options?.loadState;
+    const saveState = options?.saveState;
+    const startupPolicy = options?.policy;
+    const tabExists = options?.tabExists;
+    super({
+      ...options,
+      loadState: typeof loadState === 'function'
+        ? async (...args) => compactZeroTargetRestartBindings(
+            compactFleetHistory(await loadState(...args), startupPolicy),
+            { policy: startupPolicy, tabExists },
+          )
+        : loadState,
+      saveState: typeof saveState === 'function'
+        ? async (value, ...args) => saveState(compactFleetHistory(value), ...args)
+        : saveState,
     });
   }
-  return {
-    schema: 'metaengine.browser.fleet-state.v1',
-    version: FLEET_PROVISIONER_VERSION,
-    policy: clone(policy),
-    agents,
-    updated_at: input.updated_at || null,
-  };
-}
 
-export class FleetProvisioner {
-  #createTab;
-  #loadTab;
-  #tabExists;
-  #loadState;
-  #saveState;
-  #clock;
-  #uuid;
-  #state;
-  #ready = false;
-  #mutex = Promise.resolve();
-
-  constructor({ createTab, loadTab, tabExists, loadState, saveState, policy, clock = () => Date.now(), uuid = () => crypto.randomUUID() } = {}) {
-    if (![createTab, loadTab, tabExists, loadState, saveState].every((fn) => typeof fn === 'function')) throw new Error('fleet_dependency_invalid');
-    this.#createTab = createTab;
-    this.#loadTab = loadTab;
-    this.#tabExists = tabExists;
-    this.#loadState = loadState;
-    this.#saveState = saveState;
-    this.#clock = clock;
-    this.#uuid = uuid;
-    this.#state = freshState(normalizePolicy(policy));
-  }
-
-  async init() {
-    const loaded = await this.#loadState();
-    this.#state = sanitizeLoadedState(loaded, this.#state.policy);
-    for (const agent of this.#state.agents) {
-      if (agent.tab_id && !this.#tabExists(agent.tab_id) && !['RETIRED', 'PROVISIONING_AMBIGUOUS'].includes(agent.lifecycle_state)) {
-        agent.lifecycle_state = 'LOST';
-        agent.lost_reason = 'PHYSICAL_TAB_MISSING_ON_RESTART';
-        agent.tab_id = null;
-        agent.target_id = null;
-        agent.generation_epoch += 1;
-        agent.updated_at = iso(this.#clock);
-      }
-    }
-    this.#ready = true;
-    await this.#persist();
+  async init(...args) {
+    this.#preconversationProofs.clear();
+    await super.init(...args);
+    registerFleetRuntime(this);
     return this.snapshot();
   }
 
   snapshot() {
-    return Object.freeze({
-      schema: 'metaengine.browser.fleet-snapshot.v1',
-      version: FLEET_PROVISIONER_VERSION,
-      lifecycle_owner: 'METAENGINE_BROWSER',
-      readiness_contract: 'TRANSPORT_PROOF_REQUIRED',
-      policy: clone(this.#state.policy),
-      agents: this.#state.agents.map(clone),
-      counts: Object.fromEntries(FLEET_STATES.map((state) => [state, this.#state.agents.filter((a) => a.lifecycle_state === state).length])),
+    const out = structuredClone(super.snapshot());
+    let promoted = 0;
+    for (const agent of out.agents || []) {
+      const proof = this.#preconversationProofs.get(String(agent?.agent_id || '').toLowerCase()) || null;
+      if (!exactOverlayProof(agent, proof)) {
+        if (proof) this.#preconversationProofs.delete(String(agent?.agent_id || '').toLowerCase());
+        continue;
+      }
+      agent.lifecycle_state = 'ACTIVE';
+      agent.transport_proof = structuredClone(proof);
+      promoted += 1;
+    }
+    if (promoted > 0 && out.counts) {
+      out.counts.BOUND_UNVERIFIED = Math.max(0, Number(out.counts.BOUND_UNVERIFIED || 0) - promoted);
+      out.counts.ACTIVE = Number(out.counts.ACTIVE || 0) + promoted;
+    }
+    return Object.freeze(out);
+  }
+
+  async markTransportPreconversationProven({ agent_id, tab_id, target_id, generation_epoch, transport_url } = {}) {
+    const agentId = String(agent_id || '').toLowerCase();
+    const tabId = String(tab_id || '');
+    const targetId = String(target_id || '').toLowerCase();
+    const generationEpoch = Number(generation_epoch);
+    const base = super.snapshot();
+    const rows = (base?.agents || []).filter((row) => String(row?.agent_id || '').toLowerCase() === agentId);
+    if (rows.length !== 1) throw new Error(rows.length ? 'fleet_transport_preconversation_agent_ambiguous' : 'fleet_transport_preconversation_agent_missing');
+    const agent = rows[0];
+    if (String(agent.ownership || '') !== 'FLEET_OWNED' || String(agent.lifecycle_state || '') !== 'BOUND_UNVERIFIED') {
+      throw new Error(`fleet_transport_preconversation_state_invalid:${agent.lifecycle_state}`);
+    }
+    if (!tabId || String(agent.tab_id || '') !== tabId) throw new Error('fleet_transport_preconversation_tab_binding_mismatch');
+    if (!targetId || String(agent.target_id || '').toLowerCase() !== targetId) throw new Error('fleet_transport_preconversation_target_binding_mismatch');
+    if (!Number.isSafeInteger(generationEpoch) || Number(agent.generation_epoch) !== generationEpoch) {
+      throw new Error('fleet_transport_preconversation_generation_binding_mismatch');
+    }
+    const normalizedUrl = normalizeRootChatGptUrl(transport_url);
+    const proof = Object.freeze({
+      schema: 'metaengine.browser.fleet-transport-proof.v1',
+      transport_stage: 'PRECONVERSATION_ROOT',
+      tab_id: tabId,
+      target_id: targetId,
+      generation_epoch: generationEpoch,
+      conversation_url_sha256: sha256(normalizedUrl),
+      proven_at: new Date().toISOString(),
       authority_effect: false,
     });
+    this.#preconversationProofs.set(agentId, proof);
+    return this.snapshot();
   }
 
-  async setProfile(profile) {
-    return this.#serial(async () => {
-      const next = normalizePolicy({ ...this.#state.policy, profile });
-      this.#state.policy = clone(next);
-      await this.#persist();
-      return this.snapshot();
-    });
-  }
-
-  async reconcile({ active = false } = {}) {
-    return this.#serial(async () => {
-      this.#assertReady();
-      const desired = active ? this.#state.policy.desired_agents : this.#state.policy.warm_agents;
-      const current = this.#state.agents.filter((a) => !['RETIRED', 'PROVISIONING_AMBIGUOUS'].includes(a.lifecycle_state));
-      const recoverable = current.filter((a) => a.lifecycle_state === 'LOST');
-      for (const agent of recoverable) {
-        if (this.#liveCount() >= desired) break;
-        await this.#provision(agent, { isRecovery: true });
-      }
-      while (this.#slotCount() < desired && this.#slotCount() < this.#state.policy.max_agents) {
-        const role = this.#nextRole();
-        const at = iso(this.#clock);
-        const agent = {
-          agent_id: `agent_${String(this.#uuid()).replace(/[^a-z0-9-]/gi, '').toLowerCase()}`,
-          role,
-          ownership: 'FLEET_OWNED',
-          lifecycle_state: 'REGISTERED',
-          tab_id: null,
-          target_id: null,
-          conversation_epoch: 0,
-          generation_epoch: 1,
-          created_at: at,
-          updated_at: at,
-          lost_reason: null,
-          ambiguous_reason: null,
-          automatic_retry_allowed: false,
-          authority_effect: false,
-        };
-        this.#state.agents.push(agent);
-        await this.#persist();
-        await this.#provision(agent, { isRecovery: false });
-      }
-      return this.snapshot();
-    });
-  }
-
-  async onTabClosed(tabId, reason = 'PHYSICAL_TAB_CLOSED') {
-    return this.#serial(async () => {
-      const agent = this.#state.agents.find((row) => row.tab_id === String(tabId));
-      if (!agent || ['RETIRED', 'PROVISIONING_AMBIGUOUS'].includes(agent.lifecycle_state)) return this.snapshot();
-      agent.lifecycle_state = 'LOST';
-      agent.tab_id = null;
-      agent.target_id = null;
-      agent.generation_epoch += 1;
-      agent.lost_reason = String(reason);
-      agent.updated_at = iso(this.#clock);
-      await this.#persist();
-      return this.snapshot();
-    });
-  }
-
-  async retire(agentId) {
-    return this.#serial(async () => {
-      const agent = this.#requireAgent(agentId);
-      if (agent.lifecycle_state === 'RETIRED') return this.snapshot();
-      agent.lifecycle_state = 'RETIRED';
-      agent.tab_id = null;
-      agent.target_id = null;
-      agent.generation_epoch += 1;
-      agent.updated_at = iso(this.#clock);
-      await this.#persist();
-      return this.snapshot();
-    });
-  }
-
-  #assertReady() { if (!this.#ready) throw new Error('fleet_not_initialized'); }
-  #requireAgent(agentId) {
-    const agent = this.#state.agents.find((row) => row.agent_id === String(agentId).toLowerCase());
-    if (!agent) throw new Error('fleet_agent_not_found');
-    return agent;
-  }
-  #slotCount() { return this.#state.agents.filter((a) => a.lifecycle_state !== 'RETIRED').length; }
-  #liveCount() { return this.#state.agents.filter((a) => ['PROVISIONING', 'BOUND_UNVERIFIED'].includes(a.lifecycle_state)).length; }
-  #nextRole() {
-    const roles = FLEET_PROFILES[this.#state.policy.profile];
-    const active = this.#state.agents.filter((a) => a.lifecycle_state !== 'RETIRED');
-    const counts = new Map(roles.map((r) => [r, 0]));
-    for (const agent of active) if (counts.has(agent.role)) counts.set(agent.role, counts.get(agent.role) + 1);
-    return [...counts.entries()].sort((a, b) => a[1] - b[1] || roles.indexOf(a[0]) - roles.indexOf(b[0]))[0]?.[0] || roles[0];
-  }
-
-  async #provision(agent, { isRecovery }) {
-    agent.lifecycle_state = 'PROVISIONING';
-    agent.updated_at = iso(this.#clock);
-    agent.lost_reason = null;
-    await this.#persist();
-
-    let tab;
-    try {
-      tab = await this.#createTab({
-        url: 'https://chatgpt.com/',
-        select: false,
-        load: false,
-        ownership: 'FLEET_OWNED',
-        agent_id: agent.agent_id,
-      });
-    } catch (error) {
-      agent.lifecycle_state = 'PROVISIONING_AMBIGUOUS';
-      agent.ambiguous_reason = `CREATE_TAB_AMBIGUOUS:${String(error?.message || error)}`.slice(0, 240);
-      agent.updated_at = iso(this.#clock);
-      await this.#persist();
-      return;
-    }
-
-    agent.tab_id = String(tab.tab_id);
-    agent.target_id = `webcontents:${String(tab.webcontents_id ?? tab.tab_id)}`.toLowerCase();
-    agent.conversation_epoch += isRecovery ? 1 : 0;
-    agent.lifecycle_state = 'BOUND_UNVERIFIED';
-    agent.ambiguous_reason = null;
-    agent.updated_at = iso(this.#clock);
-    await this.#persist();
-
-    try {
-      await this.#loadTab(agent.tab_id, 'https://chatgpt.com/');
-    } catch (error) {
-      agent.lost_reason = `SURFACE_LOAD_UNVERIFIED:${String(error?.message || error)}`.slice(0, 240);
-      agent.updated_at = iso(this.#clock);
-      await this.#persist();
-    }
-  }
-
-  async #persist() {
-    this.#state.updated_at = iso(this.#clock);
-    await this.#saveState(clone(this.#state));
-  }
-
-  #serial(fn) {
-    const next = this.#mutex.then(fn, fn);
-    this.#mutex = next.catch(() => {});
-    return next;
+  async markTransportProven(args = {}) {
+    const out = await super.markTransportProven(args);
+    this.#preconversationProofs.delete(String(args?.agent_id || '').toLowerCase());
+    return out;
   }
 }

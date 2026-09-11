@@ -1,41 +1,18 @@
+import {
+  CONTROL_ACTION_MANIFEST_REVISION,
+  publicBrowserControlActions,
+} from './control-actions-manifest.mjs';
+
 const freezeRows = (rows) => Object.freeze(rows.map((row) => Object.freeze({ ...row })));
 
-export const BROWSER_CONTROL_PLANE_VERSION = '2.1.0-dev.1';
+export const BROWSER_CONTROL_PLANE_VERSION = '2.5.0-dev.1';
 
-export const CONTROL_ACTIONS = freezeRows([
-  { action: 'POLL', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'SHELL' },
-  { action: 'CAPTURE', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'CDP_ACCESSIBILITY' },
-  { action: 'CAPTURE_VIEW', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'ELECTRON_CAPTURE' },
-  { action: 'CONTROL_CAPABILITIES', domain: 'OBSERVE', effect: 'READ_ONLY', backend: 'CONTROL_PLANE' },
-  { action: 'NEW_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS' },
-  { action: 'SELECT_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'SHELL_REGISTRY' },
-  { action: 'CLOSE_TAB', domain: 'TABS', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS' },
-  { action: 'NAVIGATE', domain: 'NAVIGATION', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS' },
-  { action: 'BACK', domain: 'NAVIGATION', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS' },
-  { action: 'FORWARD', domain: 'NAVIGATION', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS' },
-  { action: 'RELOAD', domain: 'NAVIGATION', effect: 'MUTATING', backend: 'ELECTRON_WEB_CONTENTS' },
-  { action: 'STOP_GENERATION', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_SEMANTIC' },
-  { action: 'SCROLL', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_INPUT' },
-  { action: 'SEMANTIC_FOCUS', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_ACCESSIBILITY' },
-  { action: 'SEMANTIC_TYPE', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_INPUT' },
-  { action: 'TYPED_CLICK', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_INPUT' },
-  { action: 'DOWNLOAD_STATUS', domain: 'DOWNLOADS', effect: 'READ_ONLY', backend: 'ELECTRON_SESSION' },
-  { action: 'DOWNLOAD_FILE', domain: 'DOWNLOADS', effect: 'MUTATING', backend: 'VERIFIED_DOWNLOAD' },
-  { action: 'DOWNLOAD_CANCEL', domain: 'DOWNLOADS', effect: 'MUTATING', backend: 'VERIFIED_DOWNLOAD' },
-  { action: 'DEV_PLANE_STATUS', domain: 'DEVELOPMENT', effect: 'READ_ONLY', backend: 'UTILITY_PROCESS' },
-  { action: 'DEV_PLANE_HEALTH', domain: 'DEVELOPMENT', effect: 'READ_ONLY', backend: 'UTILITY_PROCESS' },
-  { action: 'DEV_PLANE_CAPABILITIES', domain: 'DEVELOPMENT', effect: 'READ_ONLY', backend: 'UTILITY_PROCESS' },
-  { action: 'DEV_PLANE_PROCESS_METRICS', domain: 'DEVELOPMENT', effect: 'READ_ONLY', backend: 'UTILITY_PROCESS' },
-  { action: 'DEV_PLANE_REPO_HEAD', domain: 'DEVELOPMENT', effect: 'READ_ONLY', backend: 'UTILITY_PROCESS' },
-  { action: 'FLEET_RECONCILE', domain: 'FLEET', effect: 'MUTATING', backend: 'FLEET_PROVISIONER' },
-  { action: 'FLEET_SET_PROFILE', domain: 'FLEET', effect: 'MUTATING', backend: 'FLEET_PROVISIONER' },
-  { action: 'SELF_UPDATE_STATUS', domain: 'SELF_UPDATE', effect: 'READ_ONLY', backend: 'TRUSTED_UPDATER' },
-  { action: 'SELF_UPDATE_CHECK', domain: 'SELF_UPDATE', effect: 'MUTATING', backend: 'TRUSTED_UPDATER' },
-  { action: 'SELF_UPDATE_APPLY', domain: 'SELF_UPDATE', effect: 'MUTATING', backend: 'TRUSTED_UPDATER' },
-  { action: 'ARM', domain: 'AUTHORITY', effect: 'MUTATING', backend: 'NATIVE_SUPERVISOR' },
-  { action: 'DISARM', domain: 'AUTHORITY', effect: 'MUTATING', backend: 'NATIVE_SUPERVISOR' },
-  { action: 'SET_SUPERVISOR_MODE', domain: 'AUTHORITY', effect: 'MUTATING', backend: 'NATIVE_SUPERVISOR' },
-]);
+export const CONTROL_ACTIONS = freezeRows(publicBrowserControlActions().map((row) => ({
+  action: row.action,
+  domain: row.domain,
+  effect: row.effect,
+  backend: row.backend,
+})));
 
 export const NEXT_CONTROL_ACTIONS = freezeRows([
   { action: 'KEY_PRESS', domain: 'PAGE_INPUT', effect: 'MUTATING', backend: 'CDP_INPUT' },
@@ -74,12 +51,25 @@ export const CONTROL_INVARIANTS = Object.freeze({
   account_setting_changes_require_readback: true,
   destructive_account_actions_require_explicit_user_intent: true,
   secrets_must_not_be_extracted_from_page: true,
+  process_observation_requires_no_actuation_authority: true,
+  process_observation_must_not_create_second_command_scheduler: true,
+  process_lifecycle_events_are_event_driven: true,
+  semantic_observation_is_event_driven: true,
+  semantic_observation_uses_persistent_cdp_sessions: true,
+  semantic_read_does_not_require_cdp_reattach: true,
+  remote_observation_push_is_not_command_authority: true,
+  project_internal_safety_gates_owner_overridable: true,
+  owner_gate_override_is_durable_and_audited: true,
+  external_platform_safety_gates_controlled_by_metaengine: false,
+  canonical_action_manifest_required: true,
+  capability_revision_required: true,
 });
 
 export function browserControlCapabilities() {
   return Object.freeze({
     schema: 'metaengine.browser-control-capabilities.v2',
     version: BROWSER_CONTROL_PLANE_VERSION,
+    capability_revision: CONTROL_ACTION_MANIFEST_REVISION,
     implemented: CONTROL_ACTIONS.map((row) => ({ ...row })),
     next: NEXT_CONTROL_ACTIONS.map((row) => ({ ...row })),
     invariants: { ...CONTROL_INVARIANTS },

@@ -1,0 +1,161 @@
+name: Browser Meta Orchestrator V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/meta-orchestrator-core.mjs'
+      - 'apps/metaengine-browser/src/meta-orchestrator-continuous-reconcile.mjs'
+      - 'apps/metaengine-browser/src/meta-orchestrator-capacity-pressure.mjs'
+      - 'apps/metaengine-browser/src/meta-orchestrator-devos-adapter.mjs'
+      - 'apps/metaengine-browser/src/meta-orchestrator-workspace-admission.mjs'
+      - 'apps/metaengine-browser/src/meta-orchestrator-authoritative-snapshot.mjs'
+      - 'apps/metaengine-browser/src/meta-orchestrator-privileged-adapter.mjs'
+      - 'apps/metaengine-browser/src/meta-orchestrator-native-provider.mjs'
+      - 'apps/metaengine-browser/src/meta-orchestrator-cycle-stage.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-devos-superstep.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-routes.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts'
+      - 'apps/metaengine-browser/src/workspace-manager.mjs'
+      - 'apps/metaengine-browser/src/workspace-git-hardening.mjs'
+      - 'apps/metaengine-browser/src/fleet-target-local-observer.mjs'
+      - 'apps/metaengine-browser/src/bounded-worker-observer.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
+      - 'apps/metaengine-browser/src/main.mjs'
+      - 'apps/metaengine-browser/src/devos-native-task-cycle.mjs'
+      - 'apps/metaengine-browser/src/devos-native-task-cycle-core.mjs'
+      - 'apps/metaengine-browser/src/devos-effect-delivery-journal.mjs'
+      - 'apps/metaengine-browser/src/browser-parent-progress-lease.mjs'
+      - 'apps/metaengine-browser/src/browser-sentinel-liveness.cjs'
+      - 'apps/metaengine-browser/src/browser-sentinel-worker.cjs'
+      - 'apps/metaengine-browser/src/browser-sentinel-action-journal.cjs'
+      - 'apps/metaengine-browser/src/durable-json-file.cjs'
+      - 'apps/metaengine-browser/src/self-update-runtime.mjs'
+      - 'apps/metaengine-browser/src/self-update-runtime-v8.mjs'
+      - 'apps/metaengine-browser/src/self-update-handoff.mjs'
+      - 'apps/metaengine-browser/src/self-update-transaction-journal.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-core.test.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-continuous-reconcile.test.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-capacity-pressure.test.mjs'
+      - 'apps/metaengine-browser/test/meta-devos-superstep.test.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-workspace-admission.test.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-authoritative-snapshot.test.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-plan-state.test.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-privileged-adapter.test.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-native-provider.test.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-native-provider-client.test.mjs'
+      - 'apps/metaengine-browser/test/meta-orchestrator-cycle-stage.test.mjs'
+      - 'apps/metaengine-browser/test/workspace-manager.test.mjs'
+      - 'apps/metaengine-browser/test/workspace-git-hardening.test.mjs'
+      - 'apps/metaengine-browser/test/workspace-binding-registry.test.mjs'
+      - 'apps/metaengine-browser/test/bounded-worker-observer-v2.test.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-bounded-worker-observer-wiring.test.mjs'
+      - 'apps/metaengine-browser/test/devos-native-task-cycle.test.mjs'
+      - 'apps/metaengine-browser/test/devos-fleet-transport-proof-runtime.test.mjs'
+      - 'apps/metaengine-browser/test/devos-fleet-transport-admission.test.mjs'
+      - 'apps/metaengine-browser/test/devos-effect-delivery-journal.test.mjs'
+      - 'apps/metaengine-browser/test/devos-effect-delivery-restart.test.mjs'
+      - 'apps/metaengine-browser/test/devos-effect-delivery-durability.test.mjs'
+      - 'apps/metaengine-browser/test/devos-ambiguity-client-fence.test.mjs'
+      - 'apps/metaengine-browser/test/browser-sentinel-liveness.test.mjs'
+      - 'apps/metaengine-browser/test/browser-sentinel-action-journal.test.mjs'
+      - 'apps/metaengine-browser/test/self-update-transaction-journal.test.mjs'
+      - 'apps/metaengine-browser/test/self-update-transaction-wiring.test.mjs'
+      - 'apps/metaengine-browser/test/self-update-install-effect-barrier.test.mjs'
+      - 'apps/metaengine-browser/test/self-update-transaction-fail-closed.test.mjs'
+      - 'apps/metaengine-browser/test/self-update-installer-handoff-order.test.mjs'
+      - 'supabase/migrations/20260831152000_a2_workspace_binding_registry_v1.sql'
+      - 'supabase/migrations/20260831184500_devos_fleet_transport_admission_v1.sql'
+      - 'supabase/migrations/20260831193000_meta_orchestrator_plan_state_v1.sql'
+      - 'supabase/migrations/20260831200500_meta_orchestrator_authoritative_inputs_v1.sql'
+      - 'supabase/migrations/20260831204000_devos_fleet_scheduler_capacity_snapshot_v1.sql'
+      - 'supabase/migrations/20260901001500_meta_orchestrator_task_admission_v1.sql'
+      - 'supabase/migrations/20260901030000_meta_orchestrator_frontier_admission_v1.sql'
+      - 'supabase/migrations/20260901034000_meta_orchestrator_controller_lease_v1.sql'
+      - 'supabase/migrations/20260901034500_meta_orchestrator_frontier_leader_fence_v2.sql'
+      - 'supabase/migrations/20260901035000_devos_fleet_scheduler_pressure_snapshot_v2.sql'
+      - 'supabase/migrations/20260901042000_devos_fleet_ambiguity_reconciliation_v1.sql'
+      - 'supabase/migrations/20260901043000_devos_control_supervisor_authority_repair_v1.sql'
+      - 'supabase/migrations/20260901044000_devos_fleet_ambiguity_reconciliation_client_fence_v2.sql'
+      - 'apps/metaengine-browser/src/autonomy-governor.mjs'
+      - 'coordination/devos/META_ORCHESTRATOR_V1.md'
+      - '.github/workflows/browser-meta-orchestrator-v1.yml'
+  push:
+    branches:
+      - 'work/browser-meta-orchestrator-v1'
+      - 'work/browser-continuous-fleet-audit-v1'
+
+permissions:
+  contents: read
+
+jobs:
+  exact-head-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Prove exact candidate head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          ACTUAL_HEAD="$(git rev-parse HEAD)"
+          test "$ACTUAL_HEAD" = "$EXPECTED_HEAD"
+          printf 'exact_head=%s\n' "$ACTUAL_HEAD"
+      - name: Setup Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - name: Syntax check convergence modules
+        run: |
+          node --check apps/metaengine-browser/src/meta-orchestrator-core.mjs
+          node --check apps/metaengine-browser/src/meta-orchestrator-continuous-reconcile.mjs
+          node --check apps/metaengine-browser/src/meta-orchestrator-capacity-pressure.mjs
+          node --check apps/metaengine-browser/src/meta-orchestrator-devos-adapter.mjs
+          node --check apps/metaengine-browser/src/meta-orchestrator-workspace-admission.mjs
+          node --check apps/metaengine-browser/src/meta-orchestrator-authoritative-snapshot.mjs
+          node --check apps/metaengine-browser/src/meta-orchestrator-privileged-adapter.mjs
+          node --check apps/metaengine-browser/src/meta-orchestrator-native-provider.mjs
+          node --check apps/metaengine-browser/src/meta-orchestrator-cycle-stage.mjs
+          node --check apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs
+          node --check apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-devos-superstep.mjs
+          node --check apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-routes.mjs
+          node --check apps/metaengine-browser/src/workspace-manager.mjs
+          node --check apps/metaengine-browser/src/workspace-git-hardening.mjs
+          node --check apps/metaengine-browser/src/fleet-target-local-observer.mjs
+          node --check apps/metaengine-browser/src/bounded-worker-observer.mjs
+          node --check apps/metaengine-browser/src/native-supervisor-client.mjs
+          node --check apps/metaengine-browser/src/main.mjs
+          node --check apps/metaengine-browser/src/devos-native-task-cycle.mjs
+          node --check apps/metaengine-browser/src/devos-native-task-cycle-core.mjs
+          node --check apps/metaengine-browser/src/devos-effect-delivery-journal.mjs
+          node --check apps/metaengine-browser/src/browser-parent-progress-lease.mjs
+          node --check apps/metaengine-browser/src/browser-sentinel-worker.cjs
+          node --check apps/metaengine-browser/src/browser-sentinel-action-journal.cjs
+          node --check apps/metaengine-browser/src/durable-json-file.cjs
+          node --check apps/metaengine-browser/src/self-update-runtime.mjs
+          node --check apps/metaengine-browser/src/self-update-runtime-v8.mjs
+          node --check apps/metaengine-browser/src/self-update-handoff.mjs
+          node --check apps/metaengine-browser/src/self-update-transaction-journal.mjs
+      - name: Meta-Orchestrator fail-closed contract
+        run: node --test apps/metaengine-browser/test/meta-orchestrator-core.test.mjs apps/metaengine-browser/test/meta-orchestrator-authoritative-snapshot.test.mjs apps/metaengine-browser/test/meta-orchestrator-plan-state.test.mjs apps/metaengine-browser/test/meta-orchestrator-privileged-adapter.test.mjs apps/metaengine-browser/test/meta-orchestrator-native-provider.test.mjs apps/metaengine-browser/test/meta-orchestrator-native-provider-client.test.mjs apps/metaengine-browser/test/meta-orchestrator-cycle-stage.test.mjs
+      - name: Continuous Meta heartbeat, pressure, and atomic frontier contract
+        run: node --test apps/metaengine-browser/test/meta-orchestrator-continuous-reconcile.test.mjs apps/metaengine-browser/test/meta-orchestrator-capacity-pressure.test.mjs apps/metaengine-browser/test/meta-devos-superstep.test.mjs
+      - name: Exact Meta-to-Workspace mutation admission
+        run: node --test apps/metaengine-browser/test/meta-orchestrator-workspace-admission.test.mjs
+      - name: Workspace binding and Git isolation contracts
+        run: node --test apps/metaengine-browser/test/workspace-manager.test.mjs apps/metaengine-browser/test/workspace-git-hardening.test.mjs apps/metaengine-browser/test/workspace-binding-registry.test.mjs
+      - name: DevOS transport-gated lease admission
+        run: node --test apps/metaengine-browser/test/devos-fleet-transport-admission.test.mjs
+      - name: Bounded worker liveness observation
+        run: node --test apps/metaengine-browser/test/bounded-worker-observer-v2.test.mjs apps/metaengine-browser/test/native-supervisor-bounded-worker-observer-wiring.test.mjs
+      - name: Physical task-cycle transport and crash-recovery seam
+        run: node --test apps/metaengine-browser/test/devos-native-task-cycle.test.mjs apps/metaengine-browser/test/devos-fleet-transport-proof-runtime.test.mjs apps/metaengine-browser/test/devos-effect-delivery-journal.test.mjs apps/metaengine-browser/test/devos-effect-delivery-restart.test.mjs apps/metaengine-browser/test/devos-effect-delivery-durability.test.mjs apps/metaengine-browser/test/devos-ambiguity-client-fence.test.mjs
+      - name: Parent sentinel write-ahead replay safety
+        run: node --test apps/metaengine-browser/test/browser-sentinel-liveness.test.mjs apps/metaengine-browser/test/browser-sentinel-action-journal.test.mjs
+      - name: Self-update write-ahead restart barrier
+        run: node --test apps/metaengine-browser/test/self-update-transaction-journal.test.mjs apps/metaengine-browser/test/self-update-transaction-wiring.test.mjs apps/metaengine-browser/test/self-update-install-effect-barrier.test.mjs apps/metaengine-browser/test/self-update-transaction-fail-closed.test.mjs apps/metaengine-browser/test/self-update-installer-handoff-order.test.mjs

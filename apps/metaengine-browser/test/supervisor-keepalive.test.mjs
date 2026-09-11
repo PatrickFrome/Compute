@@ -11,6 +11,7 @@ function harness(seed = null) {
     saveState: async (next) => { stored = structuredClone(next); },
     clock: () => now,
     uuid: () => `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`,
+    processIncarnationId: 'process_test_current',
     minWakeIntervalMs: 30000,
     maxCyclesPerEpoch: 4,
   });
@@ -29,6 +30,7 @@ test('binds a durable supervisor conversation and prepares a zero-authority wake
   assert.match(wake.message, /research ways to increase compute capacity/i);
   assert.equal(wake.authority_effect, false);
   assert.equal(h.state().state, 'WAKE_PENDING');
+  assert.equal(wake.pending.process_incarnation_id, 'process_test_current');
 });
 
 test('never blindly retries an ambiguous wake', async () => {
@@ -93,7 +95,7 @@ test('positive send confirmation consumes exactly one queued wake', async () => 
   assert.equal(h.keepalive.snapshot().queued_wakes.length, 1);
 });
 
-test('rollover stays deferred until the current authoritative supervisor is explicitly released', async () => {
+test('non-environmental rollover stays deferred until the current authoritative supervisor is released', async () => {
   const h = harness();
   await h.keepalive.init();
   await h.keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
@@ -114,22 +116,125 @@ test('rollover stays deferred until the current authoritative supervisor is expl
   assert.equal(h.keepalive.snapshot().state, 'WAITING');
 });
 
-test('max-cycle rollover is deferred rather than automatically authorizing a replacement chat', async () => {
+test('fixed cycle budgets are ignored and useful supervisor work remains uncapped', async () => {
   const h = harness();
   await h.keepalive.init();
   await h.keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
-  for (let i = 0; i < 4; i += 1) {
+  for (let i = 0; i < 12; i += 1) {
     await h.keepalive.enqueueWake('CI_TERMINAL', { key: `ci-${i}` });
     const wake = await h.keepalive.prepareNextWake();
+    assert.equal(wake.ok, true);
     await h.keepalive.confirmWakeSent(wake.pending.wake_id);
     await h.keepalive.markCycleComplete();
     h.advance(31_000);
   }
-  await h.keepalive.enqueueWake('WATCHDOG_DEADLINE', { key: 'after-budget' });
-  const blocked = await h.keepalive.prepareNextWake();
-  assert.equal(blocked.ok, false);
-  assert.equal(blocked.rollover_deferred, true);
-  assert.equal(h.keepalive.snapshot().state, 'ROLLOVER_DEFERRED');
+  assert.equal(h.keepalive.snapshot().cycle_seq, 12);
+  assert.equal(h.keepalive.snapshot().state, 'WAITING');
+  assert.equal(h.keepalive.snapshot().work_cycle_limit, null);
+  assert.equal(h.keepalive.snapshot().automatic_rollover_cycle_limit_enabled, false);
+});
+
+test('page-observed conversation limit only defers rollover; trusted machine release proceeds without a user', async () => {
+  const h = harness();
+  await h.keepalive.init();
+  await h.keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+  await h.keepalive.requestRollover('CHATGPT_CONVERSATION_LIMIT_HINT');
+  let snapshot = h.keepalive.snapshot();
+  assert.equal(snapshot.state, 'ROLLOVER_DEFERRED');
+  assert.equal(snapshot.rollover_release_at, null);
+  await assert.rejects(() => h.keepalive.beginRolloverAttempt(), /keepalive_rollover_not_released/);
+
+  await h.keepalive.approveRollover('TRUSTED_CONTINUOUS_SERVICE');
+  snapshot = h.keepalive.snapshot();
+  assert.equal(snapshot.state, 'ROLLOVER_REQUIRED');
+  assert.ok(snapshot.rollover_release_at);
+  const attempt = await h.keepalive.beginRolloverAttempt();
+  assert.match(attempt.attempt_id, /^rollover_/);
+  assert.equal(snapshot.external_confirmation_required_for_continuation, false);
+});
+
+test('process boundary fences predecessor active wake, backlog and worker generation memory', async () => {
+  const url = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const oldWake = 'wake_11111111-1111-4111-8111-111111111111';
+  const seed = {
+    schema: 'metaengine.supervisor-keepalive.state.v1',
+    version: '1.3.3',
+    supervisor_id: 'METAENGINE_SUPERVISOR',
+    supervisor_epoch: 7,
+    cycle_seq: 41,
+    state: 'ACTIVE',
+    conversation_url: url,
+    tab_id: 'tab_old',
+    paused: false,
+    process_incarnation_id: 'process_predecessor',
+    queued_wakes: [{
+      key: 'CONTINUE_DEVELOPMENT:stale',
+      reason: 'CONTINUE_DEVELOPMENT',
+      metadata: { key: 'stale' },
+      queued_at: '2026-08-29T12:59:00.000Z',
+      process_incarnation_id: 'process_predecessor',
+    }],
+    pending_wake: null,
+    active_wake: {
+      wake_id: oldWake,
+      reason: 'WORKER_LOST',
+      queue_key: 'WORKER_LOST:fleet-terminal-burst',
+      prepared_at: '2026-08-29T12:58:00.000Z',
+      confirmed_at: '2026-08-29T12:58:01.000Z',
+      supervisor_epoch: 7,
+      cycle_seq: 41,
+      process_incarnation_id: 'process_predecessor',
+    },
+    previous_worker_generation: { agent_stale: 'GENERATING' },
+  };
+  const h = harness(seed);
+  await h.keepalive.init();
+  let snapshot = h.keepalive.snapshot();
+
+  assert.equal(snapshot.process_incarnation_id, 'process_test_current');
+  assert.equal(snapshot.predecessor_process_incarnation_id, 'process_predecessor');
+  assert.equal(snapshot.predecessor_queued_wake_count, 1);
+  assert.equal(snapshot.active_wake, null);
+  assert.deepEqual(snapshot.queued_wakes, []);
+  assert.deepEqual(snapshot.previous_worker_generation, {});
+  assert.equal(snapshot.state, 'WAITING');
+  assert.equal(snapshot.predecessor_wake_history.length, 1);
+  assert.equal(snapshot.predecessor_wake_history[0].wake_id, oldWake);
+  assert.equal(snapshot.predecessor_wake_history[0].retired_reason, 'PROCESS_BOUNDARY_ACTIVE_WAKE_FENCED');
+  assert.equal(snapshot.predecessor_wake_history[0].automatic_retry_allowed, false);
+  assert.equal(h.keepalive.canWake(), false);
+
+  await h.keepalive.enqueueWake('CONTINUE_DEVELOPMENT', { key: 'fresh' });
+  snapshot = h.keepalive.snapshot();
+  assert.equal(snapshot.queued_wakes.length, 1);
+  assert.equal(snapshot.queued_wakes[0].process_incarnation_id, 'process_test_current');
+  const prepared = await h.keepalive.prepareNextWake();
+  assert.equal(prepared.ok, true);
+  assert.equal(prepared.pending.process_incarnation_id, 'process_test_current');
+  assert.notEqual(prepared.pending.wake_id, oldWake);
+});
+
+test('worker generation memory tracks only the current observation set and remains hard bounded', async () => {
+  const h = harness();
+  await h.keepalive.init();
+  await h.keepalive.observeWorkers([
+    { agent_id: 'agent_a', lifecycle_state: 'ACTIVE', generation_state: 'GENERATING' },
+    { agent_id: 'agent_b', lifecycle_state: 'ACTIVE', generation_state: 'IDLE' },
+  ]);
+  await h.keepalive.observeWorkers([
+    { agent_id: 'agent_b', lifecycle_state: 'ACTIVE', generation_state: 'IDLE' },
+  ]);
+  assert.deepEqual(h.keepalive.snapshot().previous_worker_generation, { agent_b: 'IDLE' });
+
+  const bulk = Array.from({ length: 2200 }, (_, index) => ({
+    agent_id: `agent_${String(index).padStart(4, '0')}`,
+    lifecycle_state: 'ACTIVE',
+    generation_state: 'IDLE',
+  }));
+  await h.keepalive.observeWorkers(bulk);
+  const snapshot = h.keepalive.snapshot();
+  assert.equal(snapshot.worker_generation_memory_limit, 2048);
+  assert.equal(Object.keys(snapshot.previous_worker_generation).length, 2048);
 });
 
 test('wake and rollover messages carry continuity but not worker instructions', () => {

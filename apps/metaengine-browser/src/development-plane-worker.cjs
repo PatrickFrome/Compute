@@ -2,9 +2,12 @@
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { createCandidateCapsule, verifyCandidateCapsule } = require('./candidate-capsule.cjs');
+const { createCandidateCapsule } = require('./candidate-capsule.cjs');
+const { verifyCandidateCapsuleRemoteBound } = require('./candidate-remote-source.cjs');
 const { createVerificationSandboxPlan, verifyVerificationSandboxPlan } = require('./verification-sandbox-plan.cjs');
 const { verifyEnvelope: verifyAdvisoryEvidenceEnvelope } = require('./advisory-evidence-verifier.cjs');
+const { createDevOSRepoReadModel } = require('./devos-repo-read-model.cjs');
+const { DevOSRepoSearchIndex } = require('./devos-repo-search-index.cjs');
 
 const PROTOCOL = 'metaengine.development-plane.v1';
 const VERSION = '0.4.0';
@@ -13,6 +16,8 @@ const CAPABILITIES = Object.freeze([
   'CAPABILITIES',
   'PROCESS_METRICS',
   'REPO_HEAD_READ',
+  'DEVOS_REPO_READ_MODEL',
+  'DEVOS_REPO_SEARCH',
   'CANDIDATE_CAPSULE_CREATE',
   'CANDIDATE_CAPSULE_VERIFY',
   'VERIFICATION_SANDBOX_PLAN_CREATE',
@@ -21,6 +26,9 @@ const CAPABILITIES = Object.freeze([
 ]);
 const repoRoot = path.resolve(process.env.METAENGINE_REPO_ROOT || process.cwd());
 const repositoryName = String(process.env.METAENGINE_GIT_REPOSITORY || 'PatrickFrome/Compute');
+const repositoryRemote = String(process.env.METAENGINE_GIT_REMOTE || 'origin');
+const sourceProvenancePath = path.resolve(process.env.METAENGINE_SOURCE_PROVENANCE || path.join(repoRoot, '.metaengine-source-provenance.json'));
+const repoSearchIndex = new DevOSRepoSearchIndex({ repoRoot });
 
 function send(message) {
   if (!process.parentPort) throw new Error('development_plane_parent_port_missing');
@@ -38,7 +46,19 @@ async function readRepoHead() {
       gitDir = path.resolve(repoRoot, marker.slice('gitdir: '.length).trim());
     }
   } catch (error) {
-    if (error?.code === 'ENOENT') return { repository_present: false, repository: repositoryName, head: null, ref: null };
+    if (error?.code === 'ENOENT') {
+      try {
+        const provenance = JSON.parse(await fs.readFile(sourceProvenancePath, 'utf8'));
+        const repository = String(provenance?.repository || repositoryName);
+        const head = String(provenance?.head || '').toLowerCase();
+        const ref = provenance?.ref == null ? null : String(provenance.ref);
+        if (provenance?.schema !== 'metaengine.devos.packaged-source-snapshot.v1' || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository) || !/^[0-9a-f]{40}$/.test(head)) throw new Error('repo_packaged_provenance_invalid');
+        return { repository_present: true, repository, head, ref, packaged_source_snapshot: true };
+      } catch (provenanceError) {
+        if (provenanceError?.code !== 'ENOENT') throw provenanceError;
+        return { repository_present: false, repository: repositoryName, head: null, ref: null };
+      }
+    }
     throw error;
   }
   const head = (await fs.readFile(path.join(gitDir, 'HEAD'), 'utf8')).trim();
@@ -57,6 +77,13 @@ async function requireCurrentSource() {
   return { repository: repo.repository, head: String(repo.head).toLowerCase(), ref: repo.ref };
 }
 
+function verifyRemoteBoundCandidate(capsule, source) {
+  return verifyCandidateCapsuleRemoteBound(capsule, source, {
+    cwd: repoRoot,
+    remote: repositoryRemote,
+  });
+}
+
 function requireObjectPayload(payload, name) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error(`${name}_payload_invalid`);
   return payload;
@@ -70,6 +97,9 @@ async function execute(capability, payload) {
     capabilities: [...CAPABILITIES],
     candidate_capsules: true,
     candidate_capsules_executable: false,
+    candidate_capsule_remote_source_binding_required: true,
+    candidate_capsule_remote_probe: 'GIT_LS_REMOTE_HEADS',
+    candidate_capsule_remote_ref_mutation: false,
     verification_sandbox_planning: true,
     verification_sandbox_prepare_only: true,
     verification_sandbox_execution: false,
@@ -78,23 +108,34 @@ async function execute(capability, payload) {
     advisory_evidence_network_dispatch: false,
     advisory_evidence_browser_authority: false,
     advisory_evidence_promotion_authority: false,
+    devos_repo_read_model: true,
+    devos_repo_search: true,
+    devos_repo_search_cache: 'EXACT_HEAD',
+    devos_repo_search_arbitrary_path_selection: false,
+    devos_repo_arbitrary_path_read: false,
     direct_promote_current: false,
     arbitrary_eval: false,
     signed_attestation_required_before_promotion: true,
   };
   if (capability === 'PROCESS_METRICS') return { memory: process.memoryUsage(), cpu: process.cpuUsage(), pid: process.pid };
   if (capability === 'REPO_HEAD_READ') return readRepoHead();
+  if (capability === 'DEVOS_REPO_READ_MODEL') return createDevOSRepoReadModel({ repoRoot, source: await requireCurrentSource() });
+  if (capability === 'DEVOS_REPO_SEARCH') {
+    requireObjectPayload(payload, 'devos_repo_search');
+    return repoSearchIndex.query(await requireCurrentSource(), payload);
+  }
   if (capability === 'CANDIDATE_CAPSULE_CREATE') return createCandidateCapsule(payload, await requireCurrentSource());
   if (capability === 'CANDIDATE_CAPSULE_VERIFY') {
     requireObjectPayload(payload, 'candidate_verify');
     if (!payload.capsule) throw new Error('candidate_verify_payload_invalid');
-    return verifyCandidateCapsule(payload.capsule, await requireCurrentSource());
+    const source = await requireCurrentSource();
+    return verifyRemoteBoundCandidate(payload.capsule, source);
   }
   if (capability === 'VERIFICATION_SANDBOX_PLAN_CREATE') {
     requireObjectPayload(payload, 'sandbox_plan_create');
     if (!payload.capsule) throw new Error('sandbox_plan_create_payload_invalid');
     const source = await requireCurrentSource();
-    const candidateVerification = verifyCandidateCapsule(payload.capsule, source);
+    const candidateVerification = verifyRemoteBoundCandidate(payload.capsule, source);
     return createVerificationSandboxPlan({
       capsule: payload.capsule,
       candidate_verification: candidateVerification,
@@ -106,7 +147,7 @@ async function execute(capability, payload) {
     requireObjectPayload(payload, 'sandbox_plan_verify');
     if (!payload.capsule || !payload.plan) throw new Error('sandbox_plan_verify_payload_invalid');
     const source = await requireCurrentSource();
-    const candidateVerification = verifyCandidateCapsule(payload.capsule, source);
+    const candidateVerification = verifyRemoteBoundCandidate(payload.capsule, source);
     return verifyVerificationSandboxPlan(payload.plan, payload.capsule, candidateVerification);
   }
   if (capability === 'ADVISORY_EVIDENCE_VERIFY') {

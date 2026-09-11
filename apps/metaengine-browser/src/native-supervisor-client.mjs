@@ -1,488 +1,687 @@
-import { browserControlCapabilities } from './browser-control-capabilities.mjs';
-import { SUPERVISOR_DEVICE_PROFILE } from './supervisor-device-identity.mjs';
-import { SupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime.mjs';
-import { SelfUpdateRuntime } from './self-update-runtime.mjs';
-import { confirmSelfUpdateRestartSafety } from './self-update-restart-safety.mjs';
-import { persistPreInstallReceipt } from './self-update-handoff.mjs';
-import { reconcileRestoredGeneratingChats } from './self-update-chat-reconcile.mjs';
 import {
-  buildSelfUpdateSessionContinuity,
-  clearSelfUpdateSessionContinuity,
-  loadSelfUpdateSessionContinuity,
-  persistSelfUpdateSessionContinuity,
-} from './self-update-session-continuity.mjs';
+  NativeSupervisorClient as CoreNativeSupervisorClient,
+  NATIVE_SUPERVISOR_BASE,
+  NATIVE_SUPERVISOR_RUNTIME_PATH,
+  createBoundedSupervisorFetch,
+} from './native-supervisor-client-core.mjs';
+import { BrowserRealtimeProcessPlane } from './browser-realtime-process-plane.mjs';
+import {
+  BROWSER_COGNITIVE_BATCH_SCHEMA,
+  BrowserCognitiveDeltaTransport,
+} from './browser-cognitive-delta-transport.mjs';
+import { BrowserCognitiveMessagePortHub } from './browser-cognitive-message-port-hub.mjs';
+import {
+  normalizeWorkspaceBindingSnapshot,
+  unavailableWorkspaceBindingSnapshot,
+} from './workspace-binding-observer.mjs';
 
-export const NATIVE_SUPERVISOR_BASE = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1';
-export const NATIVE_SUPERVISOR_RUNTIME_PATH = '/a2-browser-native-supervisor-v1';
+export * from './native-supervisor-client-core.mjs';
 
-const clipError = (error) => String(error?.message || error || 'unknown_error').slice(0, 500);
-const READ_ONLY_ACTIONS = new Set([
-  'POLL','CAPTURE','CAPTURE_VIEW','CONTROL_CAPABILITIES','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD',
-  'DOWNLOAD_STATUS','SELF_UPDATE_STATUS',
-]);
+const COMMAND_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const TAB_ID_RE = /^tab_[0-9a-f-]{36}$/i;
+export const NATIVE_SUPERVISOR_COGNITIVE_DELTA_PATH = '/v1/cognitive/deltas';
+const hostResilienceRuntime = () => globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__ || null;
+const hostResilienceSnapshot = () => hostResilienceRuntime()?.snapshot?.() || null;
 
-function generationStateForTab(lifecycle, tabId) {
-  const row = lifecycle?.supervisor_session?.tabs?.find((item) => String(item?.tab_id || '') === String(tabId || ''));
-  const state = String(row?.state || '').toUpperCase();
-  if (['GENERATING','STALLED'].includes(state)) return 'GENERATING';
-  if (['IDLE','INTERRUPTED'].includes(state)) return 'IDLE';
-  return 'UNKNOWN';
+function boundedInt(value, fallback, min, max) {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
 }
 
-export class NativeSupervisorClient {
-  #identity;
-  #fetch;
-  #getState;
-  #executeCommand;
-  #version;
-  #intervalMs;
-  #timer = null;
-  #running = false;
-  #cyclePromise = null;
-  #startedAt = null;
-  #lastError = null;
-  #lastHeartbeatAt = null;
-  #lastCommandId = null;
-  #lastCommandStatus = null;
-  #currentCommand = null;
-  #enrollmentStatus = 'UNINITIALIZED';
-  #supervisorMode = 'CONTROL';
-  #armed = true;
-  #lifecycle = null;
-  #selfUpdate = null;
-  #continuityStatus = { state: 'NONE', restored_tabs: 0, target_version: null, authority_effect: false };
+export async function sendNativeSupervisorCognitiveBatch({ identity, fetchImpl, batch } = {}) {
+  if (!identity || typeof identity.ensure !== 'function' || typeof identity.deviceHeaders !== 'function') {
+    throw new Error('native_supervisor_cognitive_identity_required');
+  }
+  if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_cognitive_fetch_required');
+  if (
+    !batch
+    || batch.schema !== BROWSER_COGNITIVE_BATCH_SCHEMA
+    || batch.raw_payload_exposed !== false
+    || batch.page_text_exposed !== false
+    || batch.input_values_exposed !== false
+    || batch.delivery_is_authority !== false
+    || batch.control_authority !== false
+    || batch.command_leasing !== false
+    || batch.authority_effect !== false
+  ) {
+    throw new Error('native_supervisor_cognitive_batch_invalid');
+  }
+  const identityState = await identity.ensure();
+  if (!identityState?.device_id) throw new Error('native_supervisor_cognitive_device_not_enrolled');
+  const bodyText = JSON.stringify(batch);
+  const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${NATIVE_SUPERVISOR_COGNITIVE_DELTA_PATH}`;
+  const headers = await identity.deviceHeaders('POST', requestPath, bodyText);
+  const response = await fetchImpl(`${NATIVE_SUPERVISOR_BASE}${NATIVE_SUPERVISOR_COGNITIVE_DELTA_PATH}`, {
+    method: 'POST',
+    headers,
+    body: bodyText,
+    cache: 'no-store',
+  });
+  return Object.freeze({
+    status: Number(response?.status || 0),
+    body: await response?.json?.().catch(() => null) || null,
+  });
+}
 
-  constructor({ identity, fetchImpl = globalThis.fetch, getState, executeCommand, version, intervalMs = 2000, beforeSelfUpdateInstall = null }) {
-    if (!identity) throw new Error('native_supervisor_identity_required');
-    if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
-    if (typeof getState !== 'function') throw new Error('native_supervisor_state_provider_required');
-    if (typeof executeCommand !== 'function') throw new Error('native_supervisor_command_executor_required');
-    if (beforeSelfUpdateInstall != null && typeof beforeSelfUpdateInstall !== 'function') throw new Error('native_supervisor_self_update_handoff_invalid');
-    this.#identity = identity;
-    this.#fetch = fetchImpl;
-    this.#getState = getState;
-    this.#executeCommand = executeCommand;
-    this.#version = String(version || '0.0.0');
-    this.#intervalMs = Math.max(1000, Number(intervalMs || 2000));
-    this.#lifecycle = new SupervisorLifecycleRuntime({
-      getState: this.#getState,
-      canActuate: () => this.#supervisorMode === 'CONTROL' && this.#armed === true,
-      executeCommand: async (command) => {
-        const action = String(command?.action || '');
-        if (!READ_ONLY_ACTIONS.has(action)) {
-          if (this.#supervisorMode !== 'CONTROL') throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
-          if (!this.#armed) throw new Error('native_supervisor_disarmed');
+export function createNativeSupervisorCognitiveTransport({
+  identity,
+  fetchImpl,
+  readDeltas,
+  resync,
+  onFallbackRequired,
+  batchSize = 128,
+} = {}) {
+  return new BrowserCognitiveDeltaTransport({
+    readDeltas,
+    sendBatch: (batch) => sendNativeSupervisorCognitiveBatch({ identity, fetchImpl, batch }),
+    resync,
+    onFallbackRequired,
+    batchSize,
+  });
+}
+
+export function dispatchRealtimeObservationEdge({ cognitiveTransport, scheduleFullState, baselineReady = true } = {}) {
+  if (typeof scheduleFullState !== 'function') throw new Error('native_supervisor_full_state_scheduler_required');
+  if (baselineReady !== true) {
+    scheduleFullState();
+    return Object.freeze({ transport: 'FULL_STATE', reason: 'BASELINE_REQUIRED', authority_effect: false });
+  }
+  const state = cognitiveTransport?.snapshot?.()?.state || 'UNAVAILABLE';
+  if (!cognitiveTransport || state === 'UNAVAILABLE') {
+    scheduleFullState();
+    return Object.freeze({ transport: 'FULL_STATE', reason: state, authority_effect: false });
+  }
+  const scheduled = cognitiveTransport.notify?.() === true;
+  if (!scheduled) {
+    scheduleFullState();
+    return Object.freeze({ transport: 'FULL_STATE', reason: 'COGNITIVE_NOTIFY_REJECTED', authority_effect: false });
+  }
+  return Object.freeze({ transport: 'COGNITIVE_DELTA', reason: state, authority_effect: false });
+}
+
+export function exactCommandTargetProjection(command) {
+  const commandId = String(command?.command_id || '').toLowerCase();
+  const tabId = String(command?.payload?.tab_id || '');
+  if (!COMMAND_ID_RE.test(commandId)) return null;
+  return Object.freeze({
+    command_id: commandId,
+    target_tab_id: TAB_ID_RE.test(tabId) ? tabId : null,
+    payload_exposed: false,
+    page_data_authority: false,
+    authority_effect: false,
+  });
+}
+
+export async function runSupervisorEnrollmentBootstrap(supervisor) {
+  if (!supervisor || typeof supervisor.ensureEnrollment !== 'function') {
+    throw new Error('native_supervisor_enrollment_bootstrap_required');
+  }
+  const row = await supervisor.ensureEnrollment();
+  return Object.freeze({
+    status: String(row?.status || 'UNKNOWN').slice(0, 80),
+    device_id: row?.device_id ? String(row.device_id) : null,
+    request_id: row?.request_id ? String(row.request_id) : null,
+    command_leasing: false,
+    browser_authority: false,
+    automatic_retry_allowed: false,
+    second_polling_loop: false,
+    authority_effect: false,
+  });
+}
+
+function unavailableSemanticPlane(reason = 'UNAVAILABLE') {
+  return Object.freeze({
+    schema: 'metaengine.browser.realtime-semantic-plane.v1',
+    running: false,
+    state: String(reason || 'UNAVAILABLE').slice(0, 120),
+    sequence: 0,
+    target_count: 0,
+    ready_count: 0,
+    dirty_count: 0,
+    targets: [],
+    events: [],
+    dropped_events: 0,
+    event_driven: true,
+    persistent_cdp_sessions: true,
+    attach_per_command: false,
+    raw_cdp_passthrough: false,
+    control_authority: false,
+    command_leasing: false,
+    second_scheduler: false,
+    authority_effect: false,
+  });
+}
+
+function unavailableProcessPlane(reason = 'UNAVAILABLE') {
+  return Object.freeze({
+    schema: 'metaengine.browser.realtime-process-plane.v1',
+    running: false,
+    state: String(reason || 'UNAVAILABLE').slice(0, 120),
+    sequence: 0,
+    observed_at: null,
+    process_count: 0,
+    web_contents_count: 0,
+    processes: [],
+    web_contents: [],
+    semantic_plane: unavailableSemanticPlane(reason),
+    events: [],
+    dropped_events: 0,
+    event_driven_lifecycle: true,
+    periodic_resource_sampling: true,
+    control_authority: false,
+    command_leasing: false,
+    second_scheduler: false,
+    authority_effect: false,
+  });
+}
+
+// Additive wrapper. The proven Native Supervisor implementation remains in
+// native-supervisor-client-core.mjs. Workspace observation, enrollment recovery and
+// realtime process/semantic planes remain observation-only additions to the same
+// trusted client. They never lease commands or grant mutation authority: DB-leased
+// typed commands remain the only remote Browser actuation path.
+export class NativeSupervisorClient extends CoreNativeSupervisorClient {
+  #workspaceIdentity;
+  #workspaceFetch;
+  #workspaceObservation = unavailableWorkspaceBindingSnapshot('UNINITIALIZED');
+  #workspaceObservationPromise = null;
+  #commandTargetProjection = null;
+  #enrollmentBootstrapPromise = null;
+  #enrollmentBootstrapStatus = Object.freeze({
+    status: 'UNINITIALIZED',
+    device_id: null,
+    request_id: null,
+    command_leasing: false,
+    browser_authority: false,
+    automatic_retry_allowed: false,
+    second_polling_loop: false,
+    authority_effect: false,
+  });
+  #enrollmentBootstrapError = null;
+  #sourceGetState = null;
+  #processPlaneRef = null;
+  #processPlaneSet = null;
+  #processPlaneError = null;
+  #processPushScheduled = false;
+  #processPushPromise = null;
+  #processPushPending = false;
+  #processPushLastAt = null;
+  #processPushLastError = null;
+  #cognitiveTransport = null;
+  #cognitivePortHub = null;
+  #version = '0.0.0';
+  #controlLatencySnapshot = null;
+  #quitBarrierApp = null;
+  #quitBarrierHandler = null;
+  #quitDurabilityApproved = false;
+  #quitDurabilityPromise = null;
+  #selfUpdateDurabilityReadyRef = () => false;
+
+  constructor(options = {}) {
+    const executeCommand = options.executeCommand;
+    const sourceGetState = options.getState;
+    const sourceBeforeSelfUpdateInstall = options.beforeSelfUpdateInstall;
+    let commandTargetProjection = null;
+    let realtimeProcessPlane = null;
+    let selfUpdateDurabilityReady = false;
+    let controlLatencySnapshot = () => Object.freeze({
+      schema: 'metaengine.browser.control-latency-status.v1',
+      state: 'UNINITIALIZED',
+      authority_effect: false,
+    });
+
+    const trackedExecuteCommand = typeof executeCommand === 'function'
+      ? async (command) => {
+          const action = String(command?.action || '').trim().toUpperCase();
+          if (action === 'PROCESS_CENSUS') {
+            return realtimeProcessPlane?.snapshot({
+              eventLimit: boundedInt(command?.payload?.event_limit, 32, 0, 256),
+            }) || unavailableProcessPlane('PROCESS_PLANE_NOT_READY');
+          }
+          if (action === 'PROCESS_EVENTS') {
+            const snapshot = realtimeProcessPlane?.snapshot({
+              eventsSince: boundedInt(command?.payload?.after_sequence, 0, 0, Number.MAX_SAFE_INTEGER),
+              eventLimit: boundedInt(command?.payload?.limit, 256, 1, 1024),
+            }) || unavailableProcessPlane('PROCESS_PLANE_NOT_READY');
+            return Object.freeze({
+              schema: 'metaengine.browser.realtime-process-events.v1',
+              running: snapshot.running === true,
+              sequence: snapshot.sequence || 0,
+              observed_at: snapshot.observed_at || null,
+              events: Array.isArray(snapshot.events) ? structuredClone(snapshot.events) : [],
+              dropped_events: Number(snapshot.dropped_events || 0),
+              page_content_exposed: false,
+              control_authority: false,
+              authority_effect: false,
+            });
+          }
+          if (action === 'SEMANTIC_CENSUS') {
+            return realtimeProcessPlane?.semanticSnapshot({
+              includeText: command?.payload?.include_text !== false,
+              eventLimit: boundedInt(command?.payload?.event_limit, 32, 0, 256),
+            }) || unavailableSemanticPlane('SEMANTIC_PLANE_NOT_READY');
+          }
+          if (action === 'SEMANTIC_EVENTS') {
+            const snapshot = realtimeProcessPlane?.semanticSnapshot({
+              includeText: false,
+              eventsSince: boundedInt(command?.payload?.after_sequence, 0, 0, Number.MAX_SAFE_INTEGER),
+              eventLimit: boundedInt(command?.payload?.limit, 256, 1, 1024),
+            }) || unavailableSemanticPlane('SEMANTIC_PLANE_NOT_READY');
+            return Object.freeze({
+              schema: 'metaengine.browser.realtime-semantic-events.v1',
+              running: snapshot.running === true,
+              sequence: snapshot.sequence || 0,
+              events: Array.isArray(snapshot.events) ? structuredClone(snapshot.events) : [],
+              dropped_events: Number(snapshot.dropped_events || 0),
+              raw_cdp_passthrough: false,
+              control_authority: false,
+              authority_effect: false,
+            });
+          }
+          if (action === 'CONTROL_LATENCY_STATUS') return controlLatencySnapshot();
+          const projected = exactCommandTargetProjection(command);
+          if (projected) commandTargetProjection = projected;
+          return executeCommand(command);
         }
-        return this.#executeCommand(command);
-      },
+      : executeCommand;
+
+    const getStateWithHostResilience = typeof sourceGetState === 'function'
+      ? async () => ({
+          ...(await sourceGetState()),
+          host_resilience: hostResilienceSnapshot(),
+          realtime_process_plane: realtimeProcessPlane?.snapshot({ eventLimit: 64 }) || unavailableProcessPlane('PROCESS_PLANE_NOT_READY'),
+          control_latency: controlLatencySnapshot(),
+        })
+      : sourceGetState;
+
+    const beforeSelfUpdateInstall = async (receipt) => {
+      if (typeof realtimeProcessPlane?.stopAndWait === 'function') await realtimeProcessPlane.stopAndWait();
+      else realtimeProcessPlane?.stop?.();
+      await sourceBeforeSelfUpdateInstall?.(receipt);
+      selfUpdateDurabilityReady = true;
+    };
+
+    super({
+      ...options,
+      getState: getStateWithHostResilience,
+      executeCommand: trackedExecuteCommand,
+      beforeSelfUpdateInstall,
     });
-    this.#selfUpdate = new SelfUpdateRuntime({
-      canRestart: async () => {
-        if (this.#supervisorMode !== 'CONTROL' || this.#armed !== true || this.#currentCommand != null) return false;
-        return confirmSelfUpdateRestartSafety({ getState: this.#getState });
+    if (!options.identity) throw new Error('native_supervisor_identity_required');
+    if (typeof (options.fetchImpl ?? globalThis.fetch) !== 'function') throw new Error('native_supervisor_fetch_required');
+    if (typeof sourceGetState !== 'function') throw new Error('native_supervisor_state_provider_required');
+    this.#workspaceIdentity = options.identity;
+    this.#workspaceFetch = createBoundedSupervisorFetch(options.fetchImpl ?? globalThis.fetch, { deadlineMs: options.requestDeadlineMs });
+    this.#commandTargetProjection = () => commandTargetProjection;
+    this.#sourceGetState = sourceGetState;
+    this.#processPlaneRef = () => realtimeProcessPlane;
+    this.#processPlaneSet = (value) => { realtimeProcessPlane = value; };
+    this.#selfUpdateDurabilityReadyRef = () => selfUpdateDurabilityReady;
+    this.#version = String(options.version || '0.0.0');
+    this.#cognitiveTransport = createNativeSupervisorCognitiveTransport({
+      identity: this.#workspaceIdentity,
+      fetchImpl: this.#workspaceFetch,
+      readDeltas: (after, limit) => {
+        const plane = this.#processPlaneRef?.();
+        if (!plane || typeof plane.cognitiveSnapshot !== 'function') {
+          throw new Error('native_supervisor_cognitive_plane_not_ready');
+        }
+        return plane.cognitiveSnapshot({ eventsSince: after, eventLimit: limit });
       },
-      beforeInstall: async (receipt) => {
-        const { app } = await import('electron');
-        await persistPreInstallReceipt(app, receipt);
-      },
-      beforeInstallerLaunch: async (receipt) => {
-        const { app } = await import('electron');
-        if (!app?.isPackaged) throw new Error('native_supervisor_self_update_packaged_required');
-        if (!app.hasSingleInstanceLock()) throw new Error('native_supervisor_self_update_primary_lock_required');
-        await this.#persistSessionContinuity(app, receipt);
-        await beforeSelfUpdateInstall?.(structuredClone(receipt));
-        this.stop();
-        app.releaseSingleInstanceLock();
-      },
+      resync: () => this.#pushRealtimeState(),
+      onFallbackRequired: () => this.#scheduleRealtimeStatePush(),
+      batchSize: options.cognitiveBatchSize,
     });
+    this.#cognitivePortHub = new BrowserCognitiveMessagePortHub({
+      readDeltas: (after, limit) => {
+        const plane = this.#processPlaneRef?.();
+        if (!plane || typeof plane.cognitiveSnapshot !== 'function') {
+          throw new Error('native_supervisor_cognitive_plane_not_ready');
+        }
+        return plane.cognitiveSnapshot({ eventsSince: after, eventLimit: limit });
+      },
+      batchSize: options.cognitivePortBatchSize,
+      maxConsumers: options.cognitivePortMaxConsumers,
+    });
+    controlLatencySnapshot = () => {
+      const base = super.snapshot();
+      const plane = realtimeProcessPlane?.snapshot({ eventLimit: 0 }) || unavailableProcessPlane('PROCESS_PLANE_NOT_READY');
+      const semantic = realtimeProcessPlane?.semanticSnapshot({ includeText: false, eventLimit: 0 }) || unavailableSemanticPlane('SEMANTIC_PLANE_NOT_READY');
+      return Object.freeze({
+        schema: 'metaengine.browser.control-latency-status.v1',
+        fast_lane: base?.control_fast_lane ? structuredClone(base.control_fast_lane) : null,
+        current_command_count: Array.isArray(base?.current_commands) ? base.current_commands.length : 0,
+        process_sample_interval_ms: plane.sample_interval_ms || null,
+        process_event_sequence: plane.sequence || 0,
+        semantic_event_sequence: semantic.sequence || 0,
+        semantic_target_count: semantic.target_count || 0,
+        semantic_ready_count: semantic.ready_count || 0,
+        persistent_cdp_sessions: semantic.persistent_cdp_sessions === true,
+        cdp_attach_per_command: semantic.attach_per_command === true,
+        process_push_last_at: this.#processPushLastAt,
+        process_push_last_error: this.#processPushLastError,
+        process_push_in_flight: this.#processPushPromise != null,
+        process_push_scheduled: this.#processPushScheduled,
+        cognitive_delta_transport: this.#cognitiveTransport?.snapshot() || null,
+        command_transport_authority: 'DB_LEASE_ONLY',
+        observation_push_authority: false,
+        observation_push_timer_ms: 0,
+        target_zero_polling_delay: true,
+        authority_effect: false,
+      });
+    };
+    this.#controlLatencySnapshot = controlLatencySnapshot;
+  }
+
+  #installQuitDurabilityBarrier(app) {
+    if (this.#quitBarrierHandler || !app || typeof app.on !== 'function') return;
+    this.#quitBarrierApp = app;
+    this.#quitBarrierHandler = (event) => {
+      if (this.#quitDurabilityApproved || this.#selfUpdateDurabilityReadyRef?.() === true) return;
+      event?.preventDefault?.();
+      if (this.#quitDurabilityPromise) return;
+      this.#quitDurabilityPromise = this.stopAndWait()
+        .catch((error) => {
+          console.error(JSON.stringify({
+            schema: 'metaengine.browser.shutdown-durability.v1',
+            state: 'BRAIN_PERSISTENCE_FLUSH_FAILED',
+            error: String(error?.message || error).slice(0, 300),
+            automatic_retry_allowed: false,
+            authority_effect: false,
+          }));
+        })
+        .finally(() => {
+          this.#quitDurabilityApproved = true;
+          this.#quitBarrierApp?.quit?.();
+        });
+    };
+    app.on('before-quit', this.#quitBarrierHandler);
+  }
+
+  async #bootstrapEnrollment() {
+    if (this.#enrollmentBootstrapPromise) return this.#enrollmentBootstrapPromise;
+    this.#enrollmentBootstrapPromise = (async () => {
+      try {
+        const result = await runSupervisorEnrollmentBootstrap(this);
+        this.#enrollmentBootstrapStatus = result;
+        this.#enrollmentBootstrapError = null;
+        return result;
+      } catch (error) {
+        this.#enrollmentBootstrapError = String(error?.message || error).slice(0, 240);
+        this.#enrollmentBootstrapStatus = Object.freeze({
+          status: 'ERROR',
+          device_id: null,
+          request_id: null,
+          command_leasing: false,
+          browser_authority: false,
+          automatic_retry_allowed: false,
+          second_polling_loop: false,
+          authority_effect: false,
+        });
+        return this.#enrollmentBootstrapStatus;
+      }
+    })().finally(() => { this.#enrollmentBootstrapPromise = null; });
+    return this.#enrollmentBootstrapPromise;
+  }
+
+  #scheduleRealtimeStatePush() {
+    if (this.#processPushScheduled) return;
+    this.#processPushScheduled = true;
+    queueMicrotask(() => {
+      this.#processPushScheduled = false;
+      void this.#pushRealtimeState();
+    });
+  }
+
+  #dispatchRealtimeObservationEdge() {
+    return dispatchRealtimeObservationEdge({
+      cognitiveTransport: this.#cognitiveTransport,
+      scheduleFullState: () => this.#scheduleRealtimeStatePush(),
+      baselineReady: this.#processPushLastAt != null,
+    });
+  }
+
+  async #pushRealtimeState() {
+    if (this.#processPushPromise) {
+      this.#processPushPending = true;
+      return this.#processPushPromise;
+    }
+    this.#processPushPromise = (async () => {
+      const identity = await this.#workspaceIdentity.ensure();
+      if (!identity?.device_id) return false;
+      const base = super.snapshot();
+      const sourceState = await this.#sourceGetState();
+      const processPlane = this.#processPlaneRef?.()?.snapshot({ eventLimit: 64 }) || unavailableProcessPlane('PROCESS_PLANE_NOT_READY');
+      const payload = {
+        state: {
+          ...sourceState,
+          shell_version: this.#version,
+          supervisor_mode: base?.supervisor_mode || 'MONITOR',
+          armed: base?.armed === true,
+          operator_mode: base?.supervisor_mode === 'CONTROL' ? 'CONTROL' : 'OBSERVE',
+          started_at: base?.started_at || null,
+          last_error: base?.last_error || null,
+          supervisor_lifecycle: base?.lifecycle || null,
+          self_update: base?.self_update || null,
+          realtime_process_plane: processPlane,
+          control_latency: this.#controlLatencySnapshot?.() || null,
+          host_resilience: hostResilienceSnapshot(),
+          realtime_observation_push: true,
+          authority_effect: false,
+        },
+        last_command_id: base?.last_command_id || null,
+        last_command_status: base?.last_command_status || null,
+      };
+      const path = '/v1/state';
+      const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${path}`;
+      const bodyText = JSON.stringify(payload);
+      const headers = await this.#workspaceIdentity.deviceHeaders('POST', requestPath, bodyText);
+      const response = await this.#workspaceFetch(`${NATIVE_SUPERVISOR_BASE}${path}`, {
+        method: 'POST', headers, body: bodyText, cache: 'no-store',
+      });
+      if (response.status !== 202) throw new Error(`native_supervisor_realtime_state_http_${response.status}`);
+      this.#processPushLastAt = new Date().toISOString();
+      this.#processPushLastError = null;
+      return true;
+    })().catch((error) => {
+      this.#processPushLastError = String(error?.message || error).slice(0, 240);
+      return false;
+    }).finally(() => {
+      this.#processPushPromise = null;
+      if (this.#processPushPending) {
+        this.#processPushPending = false;
+        this.#scheduleRealtimeStatePush();
+      }
+    });
+    return this.#processPushPromise;
+  }
+
+  async #startRealtimeProcessPlane() {
+    const current = this.#processPlaneRef?.();
+    if (current) return current.snapshot({ eventLimit: 0 });
+    try {
+      const electron = await import('electron');
+      const app = electron?.app;
+      const webContents = electron?.webContents;
+      if (!app || typeof app.getAppMetrics !== 'function' || !webContents || typeof webContents.getAllWebContents !== 'function') {
+        throw new Error('electron_process_metrics_unavailable');
+      }
+      this.#installQuitDurabilityBarrier(app);
+      const plane = new BrowserRealtimeProcessPlane({
+        app,
+        getWebContents: () => webContents.getAllWebContents(),
+        sampleMs: 250,
+        eventLimit: 512,
+        onChange: () => {
+          // The source planes already bound resource cadence and semantic burst
+          // coalescing. The cognitive route is an observation-only replacement for
+          // per-event full snapshots. Unsupported or ambiguous delivery immediately
+          // falls back to the existing durable /v1/state path.
+          this.#dispatchRealtimeObservationEdge();
+          this.#cognitivePortHub?.notify();
+        },
+      });
+      this.#processPlaneSet?.(plane);
+      const snapshot = plane.start();
+      this.#processPlaneError = null;
+      this.#scheduleRealtimeStatePush();
+      return snapshot;
+    } catch (error) {
+      this.#processPlaneError = String(error?.message || error).slice(0, 240);
+      return unavailableProcessPlane(this.#processPlaneError);
+    }
+  }
+
+  async #observeWorkspaceBindings() {
+    if (this.#workspaceObservationPromise) return this.#workspaceObservationPromise;
+    this.#workspaceObservationPromise = (async () => {
+      try {
+        const identity = await this.#workspaceIdentity.ensure();
+        if (!identity?.device_id) {
+          this.#workspaceObservation = unavailableWorkspaceBindingSnapshot('DEVICE_NOT_ENROLLED');
+          return this.#workspaceObservation;
+        }
+        const path = '/v1/devos/workspace-snapshot';
+        const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${path}`;
+        const headers = await this.#workspaceIdentity.deviceHeaders('GET', requestPath, '');
+        const response = await this.#workspaceFetch(`${NATIVE_SUPERVISOR_BASE}${path}`, { method: 'GET', headers, cache: 'no-store' });
+        const body = await response.json().catch(() => ({}));
+        if (response.status === 404) {
+          this.#workspaceObservation = unavailableWorkspaceBindingSnapshot('ROUTE_UNAVAILABLE', 'WORKSPACE_SNAPSHOT_ROUTE_UNAVAILABLE');
+          return this.#workspaceObservation;
+        }
+        if (response.status === 503 && ['RUNTIME_NOT_DEPLOYED','READ_UNAVAILABLE'].includes(String(body?.state || '').toUpperCase())) {
+          this.#workspaceObservation = unavailableWorkspaceBindingSnapshot(String(body.state).toUpperCase(), body?.reason || null);
+          return this.#workspaceObservation;
+        }
+        if (!response.ok) {
+          this.#workspaceObservation = unavailableWorkspaceBindingSnapshot('READ_ERROR', `WORKSPACE_SNAPSHOT_HTTP_${response.status}`);
+          return this.#workspaceObservation;
+        }
+        const checked = normalizeWorkspaceBindingSnapshot(body);
+        this.#workspaceObservation = checked || unavailableWorkspaceBindingSnapshot('INVALID_READBACK', 'WORKSPACE_SNAPSHOT_SCHEMA_INVALID');
+        return this.#workspaceObservation;
+      } catch (error) {
+        this.#workspaceObservation = unavailableWorkspaceBindingSnapshot('READ_ERROR', String(error?.message || error).slice(0, 240));
+        return this.#workspaceObservation;
+      }
+    })().finally(() => { this.#workspaceObservationPromise = null; });
+    return this.#workspaceObservationPromise;
   }
 
   snapshot() {
+    const base = super.snapshot();
+    const target = this.#commandTargetProjection?.() || null;
+    const currentCommand = base?.current_command && target?.command_id === String(base.current_command.command_id || '').toLowerCase()
+      ? { ...base.current_command, target_tab_id: target.target_tab_id }
+      : base?.current_command || null;
     return {
-      schema: 'metaengine.native-supervisor.client.v1',
-      running: this.#running,
-      started_at: this.#startedAt,
-      heartbeat_interval_ms: this.#intervalMs,
-      last_heartbeat_at: this.#lastHeartbeatAt,
-      last_error: this.#lastError,
-      last_command_id: this.#lastCommandId,
-      last_command_status: this.#lastCommandStatus,
-      current_command: this.#currentCommand,
-      enrollment_status: this.#enrollmentStatus,
-      identity: this.#identity.snapshot(),
-      supervisor_mode: this.#supervisorMode,
-      armed: this.#armed,
-      lifecycle: this.#lifecycle?.snapshot() || null,
-      self_update: this.#selfUpdate?.snapshot() || null,
-      session_continuity: structuredClone(this.#continuityStatus),
-      arbitrary_eval: false,
-      os_shell_authority: false,
+      ...base,
+      current_command: currentCommand,
+      current_command_payload_exposed: false,
+      current_command_target_authority: 'DB_LEASED_TYPED_COMMAND_ONLY',
+      enrollment_bootstrap: structuredClone(this.#enrollmentBootstrapStatus),
+      enrollment_bootstrap_error: this.#enrollmentBootstrapError,
+      enrollment_bootstrap_same_cycle: true,
+      enrollment_bootstrap_auto_approval: false,
+      workspace_bindings: structuredClone(this.#workspaceObservation),
+      workspace_binding_source: 'NATIVE_SUPERVISOR_HEARTBEAT',
+      workspace_binding_second_polling_loop: false,
+      realtime_process_plane: this.#processPlaneRef?.()?.snapshot({ eventLimit: 32 }) || unavailableProcessPlane(this.#processPlaneError || 'PROCESS_PLANE_NOT_READY'),
+      realtime_semantic_plane: this.#processPlaneRef?.()?.semanticSnapshot({ includeText: false, eventLimit: 32 }) || unavailableSemanticPlane(this.#processPlaneError || 'SEMANTIC_PLANE_NOT_READY'),
+      realtime_process_plane_source: 'ELECTRON_MAIN_PROCESS',
+      realtime_semantic_plane_source: 'PERSISTENT_CDP_PAGE_DOM_ACCESSIBILITY_RUNTIME_NETWORK',
+      realtime_process_plane_command_authority: false,
+      realtime_semantic_plane_command_authority: false,
+      realtime_process_plane_second_scheduler: false,
+      realtime_semantic_plane_second_scheduler: false,
+      realtime_process_push: {
+        last_at: this.#processPushLastAt,
+        last_error: this.#processPushLastError,
+        in_flight: this.#processPushPromise != null,
+        scheduled: this.#processPushScheduled,
+        pending: this.#processPushPending,
+        event_driven: true,
+        timer_delay_ms: 0,
+        metrics_sample_ms: 250,
+        semantic_event_driven: true,
+        persistent_cdp_sessions: true,
+        cdp_attach_per_command: false,
+        command_leasing: false,
+        authority_effect: false,
+      },
+      cognitive_delta_transport: this.#cognitiveTransport?.snapshot() || null,
+      cognitive_message_port_hub: this.#cognitivePortHub?.snapshot() || null,
+      cognitive_delta_route: NATIVE_SUPERVISOR_COGNITIVE_DELTA_PATH,
+      cognitive_delta_full_state_fallback: true,
+      cognitive_delta_second_polling_loop: false,
+      cognitive_delta_command_authority: false,
+      shutdown_durability: {
+        barrier_installed: this.#quitBarrierHandler != null,
+        flush_in_flight: this.#quitDurabilityPromise != null && this.#quitDurabilityApproved !== true,
+        self_update_preflushed: this.#selfUpdateDurabilityReadyRef?.() === true,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      },
+      host_resilience: hostResilienceSnapshot(),
+      host_resilience_source: 'PRIMARY_BROWSER_PROCESS',
+      host_resilience_second_polling_loop: false,
     };
-  }
-
-  async #persistSessionContinuity(app, receipt) {
-    const state = await this.#getState();
-    const lifecycle = this.#lifecycle?.snapshot() || null;
-    const tabs = (state?.tabs || []).map((tab) => ({
-      ...tab,
-      generation_state: generationStateForTab(lifecycle, tab?.tab_id),
-    }));
-    const selectedTabId = state?.active_tab?.tab_id
-      || tabs.find((tab) => tab?.selected === true)?.tab_id
-      || null;
-    const row = buildSelfUpdateSessionContinuity({
-      currentVersion: this.#version,
-      targetVersion: receipt?.version,
-      tabsSnapshot: { tabs, selected_tab_id: selectedTabId },
-      lifecycleSnapshot: lifecycle,
-    });
-    await persistSelfUpdateSessionContinuity(app.getPath('userData'), row);
-    this.#continuityStatus = {
-      state: 'PERSISTED',
-      restored_tabs: 0,
-      tab_count: row.tabs.length,
-      target_version: row.target_version,
-      had_generating_tabs: row.tabs.some((tab) => tab?.generation_state === 'GENERATING'),
-      authority_effect: false,
-    };
-  }
-
-  async #restoreSessionContinuity() {
-    const { app } = await import('electron');
-    const userData = app.getPath('userData');
-    const row = await loadSelfUpdateSessionContinuity(userData);
-    if (!row) return null;
-    this.#continuityStatus = {
-      state: 'FOUND',
-      restored_tabs: 0,
-      tab_count: row.tabs.length,
-      target_version: row.target_version || null,
-      authority_effect: false,
-    };
-    if (row.target_version && String(row.target_version) !== this.#version) {
-      this.#continuityStatus.state = 'TARGET_VERSION_MISMATCH';
-      return row;
-    }
-
-    const state = await this.#getState();
-    const byUrl = new Map();
-    for (const tab of state?.tabs || []) {
-      const url = String(tab?.url || '');
-      if (url && !byUrl.has(url)) byUrl.set(url, tab);
-    }
-
-    let selectedTabId = null;
-    let restoredTabs = 0;
-    let failedTabs = 0;
-    const bindings = [];
-    for (const prior of row.tabs || []) {
-      const url = String(prior?.url || '');
-      if (!url) continue;
-      let current = byUrl.get(url) || null;
-      if (!current) {
-        try {
-          current = await this.#executeCommand({
-            action: 'NEW_TAB',
-            payload: { url, select: false },
-            platform: null,
-          });
-          if (current?.tab_id) {
-            byUrl.set(url, current);
-            restoredTabs += 1;
-          } else failedTabs += 1;
-        } catch {
-          failedTabs += 1;
-          continue;
-        }
-      }
-      if (current?.tab_id) {
-        bindings.push({
-          prior_tab_id: String(prior?.prior_tab_id || ''),
-          tab_id: String(current.tab_id),
-          generation_state: String(prior?.generation_state || 'UNKNOWN').toUpperCase(),
-        });
-      }
-      if (prior?.selected === true && current?.tab_id) selectedTabId = String(current.tab_id);
-    }
-    if (selectedTabId) {
-      try {
-        await this.#executeCommand({ action: 'SELECT_TAB', payload: { tab_id: selectedTabId }, platform: null });
-      } catch {
-        failedTabs += 1;
-      }
-    }
-
-    let reconcile = {
-      schema: 'metaengine.self-update-chat-reconcile.v1',
-      tabs: [], ambiguous_count: 0, unresolved_count: 0, authority_effect: false,
-    };
-    if (failedTabs === 0 && bindings.some((binding) => binding.generation_state === 'GENERATING')) {
-      reconcile = await reconcileRestoredGeneratingChats({
-        bindings,
-        captureTab: async (tabId) => this.#executeCommand({
-          action: 'CAPTURE', payload: { tab_id: String(tabId) }, platform: 'CHATGPT',
-        }),
-        clickControl: async (tabId, accessibleName) => this.#executeCommand({
-          action: 'TYPED_CLICK',
-          payload: { tab_id: String(tabId), role: 'button', accessible_name: String(accessibleName) },
-          platform: 'CHATGPT',
-        }),
-      });
-      failedTabs += Number(reconcile.unresolved_count || 0);
-    }
-
-    this.#continuityStatus = {
-      state: failedTabs === 0 ? 'RESTORED' : 'PARTIAL',
-      restored_tabs: restoredTabs,
-      failed_tabs: failedTabs,
-      tab_count: row.tabs.length,
-      target_version: row.target_version || null,
-      had_generating_tabs: row.tabs.some((tab) => tab?.generation_state === 'GENERATING'),
-      lifecycle_resume_present: Boolean(row.lifecycle?.active_request),
-      reconciled_generating_tabs: reconcile.tabs.length,
-      reconcile_ambiguous_count: reconcile.ambiguous_count,
-      reconcile_unresolved_count: reconcile.unresolved_count,
-      reconcile_authority_effect: reconcile.authority_effect === true,
-      authority_effect: false,
-    };
-    if (failedTabs === 0) await clearSelfUpdateSessionContinuity(userData);
-    return row;
   }
 
   async start() {
-    if (this.#running) return this.snapshot();
-    this.#running = true;
-    this.#startedAt = new Date().toISOString();
-    await this.#identity.ensure();
-    await this.#restoreSessionContinuity().catch((error) => {
-      this.#lastError = `continuity_restore:${clipError(error)}`;
-      this.#continuityStatus = { ...this.#continuityStatus, state: 'ERROR', error: clipError(error), authority_effect: false };
-    });
-    await this.#lifecycle.start().catch((error) => { this.#lastError = `lifecycle_start:${clipError(error)}`; });
-    await this.#selfUpdate.start().catch((error) => { this.#lastError = `self_update_start:${clipError(error)}`; });
-    await this.cycle().catch(() => {});
-    this.#schedule();
-    return this.snapshot();
+    // Start observation before enrollment/mesh so a newly launched Browser can build
+    // a local census immediately. Remote push remains impossible until device auth is
+    // present; observation therefore cannot bootstrap authority by itself.
+    await this.#startRealtimeProcessPlane();
+    // Enrollment must be attempted before dependent mesh/lifecycle startup so a
+    // fresh installation cannot remain visually alive but permanently transport-dead.
+    // Failure is fail-soft here: super.start() still brings up the existing watchdog,
+    // and the normal cycle below re-attempts the bounded enrollment handshake.
+    await this.#bootstrapEnrollment();
+    const result = await super.start();
+    this.#scheduleRealtimeStatePush();
+    return result;
+  }
+
+  attachCognitiveMessagePort(port) {
+    return this.#cognitivePortHub.attach(port);
+  }
+
+  detachCognitiveMessagePort(consumerId) {
+    return this.#cognitivePortHub.detach(consumerId);
   }
 
   stop() {
-    this.#running = false;
-    this.#lifecycle?.stop?.();
-    if (this.#timer) clearTimeout(this.#timer);
-    this.#timer = null;
+    this.#processPushScheduled = false;
+    this.#processPushPending = false;
+    const result = super.stop();
+    this.#cognitivePortHub?.closeAll();
+    try { this.#processPlaneRef?.()?.stop?.(); } catch {}
+    return result;
   }
 
-  setControlState({ mode, armed } = {}) {
-    if (mode !== undefined) {
-      const next = String(mode).toUpperCase();
-      if (!['OFF','MONITOR','CONTROL'].includes(next)) throw new Error('native_supervisor_mode_invalid');
-      this.#supervisorMode = next;
-    }
-    if (armed !== undefined) this.#armed = armed === true;
+  async stopAndWait() {
+    this.#processPushScheduled = false;
+    this.#processPushPending = false;
+    super.stop();
+    this.#cognitivePortHub?.closeAll();
+    const plane = this.#processPlaneRef?.();
+    if (typeof plane?.stopAndWait === 'function') await plane.stopAndWait();
+    else plane?.stop?.();
     return this.snapshot();
   }
 
-  #schedule() {
-    if (!this.#running || this.#timer) return;
-    this.#timer = setTimeout(() => {
-      this.#timer = null;
-      this.cycle().catch(() => {}).finally(() => this.#schedule());
-    }, this.#intervalMs);
-    this.#timer.unref?.();
-  }
-
-  async #enrollmentRequest(path, payload) {
-    const bodyText = JSON.stringify(payload);
-    const headers = await this.#identity.enrollmentHeaders(bodyText);
-    return this.#fetch(`${NATIVE_SUPERVISOR_BASE}${path}`, { method: 'POST', headers, body: bodyText, cache: 'no-store' });
-  }
-
-  async #signedRequest(path, { method = 'POST', payload = null } = {}) {
-    const bodyText = method === 'GET' ? '' : JSON.stringify(payload ?? {});
-    const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${path}`;
-    const headers = await this.#identity.deviceHeaders(method, requestPath, bodyText);
-    const init = { method, headers, cache: 'no-store' };
-    if (method !== 'GET') init.body = bodyText;
-    return this.#fetch(`${NATIVE_SUPERVISOR_BASE}${path}`, init);
-  }
-
-  async ensureEnrollment() {
-    const identity = await this.#identity.ensure();
-    if (identity.device_id) {
-      this.#enrollmentStatus = 'ENROLLED';
-      return identity;
-    }
-    if (!identity.enrollment_request_id) {
-      const payload = {
-        profile: SUPERVISOR_DEVICE_PROFILE,
-        public_jwk: identity.public_jwk,
-        key_fingerprint_sha256: identity.key_fingerprint_sha256,
-        metadata: { shell_version: this.#version },
-      };
-      const response = await this.#enrollmentRequest('/v1/device/enrollment/request', payload);
-      const body = await response.json().catch(() => ({}));
-      if (![200, 202].includes(response.status) || !body?.request_id) {
-        throw new Error(`native_supervisor_enrollment_request_http_${response.status}:${body?.reason || body?.error || 'unknown'}`);
-      }
-      await this.#identity.bindEnrollmentRequest(body.request_id);
-      this.#enrollmentStatus = String(body.status || 'PENDING');
-      return this.#identity.snapshot();
-    }
-    const payload = {
-      request_id: identity.enrollment_request_id,
-      profile: SUPERVISOR_DEVICE_PROFILE,
-      public_jwk: identity.public_jwk,
-      key_fingerprint_sha256: identity.key_fingerprint_sha256,
-    };
-    const response = await this.#enrollmentRequest('/v1/device/enrollment/status', payload);
-    const body = await response.json().catch(() => ({}));
-    if (response.status === 200 && body?.accepted === true && body?.device_id) {
-      await this.#identity.bindDevice(body.device_id);
-      this.#enrollmentStatus = 'ENROLLED';
-      return this.#identity.snapshot();
-    }
-    if (response.status === 202) {
-      this.#enrollmentStatus = 'PENDING_APPROVAL';
-      return this.#identity.snapshot();
-    }
-    const reason = String(body?.reason || body?.error || 'unknown');
-    if (response.status === 409 && /EXPIRED|REJECTED|NOT_FOUND/.test(reason.toUpperCase())) {
-      await this.#identity.clearEnrollmentRequest();
-      this.#enrollmentStatus = 'RETRY_REQUIRED';
-      return this.#identity.snapshot();
-    }
-    throw new Error(`native_supervisor_enrollment_status_http_${response.status}:${reason}`);
-  }
-
-  async #heartbeat() {
-    const state = await this.#getState();
-    const payload = {
-      state: {
-        ...state,
-        shell_version: this.#version,
-        supervisor_mode: this.#supervisorMode,
-        armed: this.#armed,
-        operator_mode: this.#supervisorMode === 'CONTROL' ? 'CONTROL' : 'OBSERVE',
-        started_at: this.#startedAt,
-        last_error: this.#lastError,
-        supervisor_lifecycle: this.#lifecycle?.snapshot() || null,
-        self_update: this.#selfUpdate?.snapshot() || null,
-        self_update_session_continuity: structuredClone(this.#continuityStatus),
-      },
-      last_command_id: this.#lastCommandId,
-      last_command_status: this.#lastCommandStatus,
-    };
-    const response = await this.#signedRequest('/v1/state', { payload });
-    if (response.status !== 202) throw new Error(`native_supervisor_state_http_${response.status}`);
-    this.#lastHeartbeatAt = new Date().toISOString();
-  }
-
-  async #nextCommand() {
-    const response = await this.#signedRequest('/v1/commands/next', { payload: { supervisor_mode: this.#supervisorMode } });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(`native_supervisor_next_http_${response.status}`);
-    return body?.command || null;
-  }
-
-  async #postResult(command, ok, result, error = null) {
-    const payload = {
-      ok,
-      receipt: {
-        schema: 'metaengine.native-supervisor.command-receipt.v1',
-        command_id: command.command_id,
-        action: command.action,
-        platform: command.platform || null,
-        result: result ?? null,
-        recorded_at: new Date().toISOString(),
-        authority_effect: false,
-      },
-      error,
-    };
-    const response = await this.#signedRequest(`/v1/commands/${encodeURIComponent(command.command_id)}/result`, { payload });
-    if (!response.ok) throw new Error(`native_supervisor_result_http_${response.status}`);
-  }
-
-  async #executeLocalOrRemote(command) {
-    const action = String(command?.action || '');
-    if (action === 'ARM') {
-      this.#armed = true;
-      return { armed: true, supervisor_mode: this.#supervisorMode, authority_effect: true };
-    }
-    if (action === 'DISARM') {
-      this.#armed = false;
-      return { armed: false, supervisor_mode: this.#supervisorMode, authority_effect: true };
-    }
-    if (action === 'SET_SUPERVISOR_MODE') {
-      const next = String(command?.payload?.mode || '').toUpperCase();
-      if (!['OFF','MONITOR','CONTROL'].includes(next)) throw new Error('native_supervisor_mode_invalid');
-      this.#supervisorMode = next;
-      return { supervisor_mode: next, armed: this.#armed, authority_effect: true };
-    }
-    if (action === 'CONTROL_CAPABILITIES') return browserControlCapabilities();
-    if (action === 'SELF_UPDATE_STATUS') return this.#selfUpdate?.snapshot() || null;
-    if (action === 'SELF_UPDATE_CHECK') {
-      if (this.#supervisorMode !== 'CONTROL') throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
-      if (!this.#armed) throw new Error('native_supervisor_disarmed');
-      return this.#selfUpdate?.checkNow();
-    }
-    if (action === 'SELF_UPDATE_APPLY') {
-      if (this.#supervisorMode !== 'CONTROL') throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
-      if (!this.#armed) throw new Error('native_supervisor_disarmed');
-      return this.#selfUpdate?.applyWhenSafe();
-    }
-    if (this.#supervisorMode !== 'CONTROL' && !READ_ONLY_ACTIONS.has(action)) {
-      throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
-    }
-    if (!this.#armed && !READ_ONLY_ACTIONS.has(action)) throw new Error('native_supervisor_disarmed');
-    return this.#executeCommand(command);
-  }
-
-  async #runCommand(command) {
-    this.#currentCommand = {
-      command_id: command.command_id,
-      action: command.action,
-      platform: command.platform || null,
-      issued_at: command.issued_at || null,
-      expires_at: command.expires_at || null,
-    };
-    let result = null;
-    try {
-      result = await this.#executeLocalOrRemote(command);
-      await this.#postResult(command, true, result, null);
-      this.#lastCommandId = command.command_id;
-      this.#lastCommandStatus = 'COMPLETED';
-      return result;
-    } catch (error) {
-      const message = clipError(error);
-      await this.#postResult(command, false, result, message).catch(() => {});
-      this.#lastCommandId = command.command_id;
-      this.#lastCommandStatus = 'FAILED';
-      throw error;
-    } finally {
-      this.#currentCommand = null;
-    }
-  }
-
   async cycle() {
-    if (this.#cyclePromise) return this.#cyclePromise;
-    this.#cyclePromise = (async () => {
-      try {
-        await this.#lifecycle?.cycle().catch((error) => { this.#lastError = `lifecycle:${clipError(error)}`; });
-        await this.#selfUpdate?.cycle().catch((error) => { this.#lastError = `self_update:${clipError(error)}`; });
-        const identity = await this.ensureEnrollment();
-        if (!identity?.device_id) return this.snapshot();
-        await this.#heartbeat();
-        const command = await this.#nextCommand();
-        if (command) await this.#runCommand(command);
-        await this.#lifecycle?.cycle().catch(() => {});
-        await this.#selfUpdate?.cycle().catch(() => {});
-        this.#lastError = null;
-        return this.snapshot();
-      } catch (error) {
-        this.#lastError = clipError(error);
-        throw error;
-      }
-    })().finally(() => { this.#cyclePromise = null; });
-    return this.#cyclePromise;
+    // Piggyback enrollment recovery on the one existing supervisor cycle. No second
+    // command interval is introduced and PENDING_APPROVAL never grants authority.
+    await this.#bootstrapEnrollment();
+    try {
+      await super.cycle();
+    } finally {
+      await this.#observeWorkspaceBindings();
+    }
+    return this.snapshot();
   }
 }

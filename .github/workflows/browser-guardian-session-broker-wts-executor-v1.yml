@@ -1,0 +1,121 @@
+name: METAENGINE Browser Guardian WTS Session Broker Executor V2
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-session-broker-wts-executor.cpp'
+      - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-session-broker-wts-executor.hpp'
+      - 'apps/metaengine-browser/test/browser-guardian-session-broker-wts-executor-contract.test.mjs'
+      - '.github/workflows/browser-guardian-session-broker-wts-executor-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-contract:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Run WTS executor adversarial contract
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: node --test test/browser-guardian-session-broker-wts-executor-contract.test.mjs
+
+      - name: Compile and link native Guardian-owned executor module
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path $vswhere)) { throw 'vswhere_missing' }
+          $vsRoot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+          if (-not $vsRoot) { throw 'visual_studio_cpp_toolchain_missing' }
+          $vcvars = Join-Path $vsRoot 'VC\Auxiliary\Build\vcvars64.bat'
+          if (-not (Test-Path $vcvars)) { throw 'vcvars64_missing' }
+
+          $sourceDir = (Resolve-Path 'apps/metaengine-browser/native/browser-guardian-scm').Path
+          $outDir = Join-Path $env:RUNNER_TEMP 'metaengine-guardian-wts-module'
+          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+          $probeSource = Join-Path $outDir 'wts-contract-probe.cpp'
+          $probeExe = Join-Path $outDir 'METAENGINEBrowserGuardianWtsContractProbe.exe'
+
+          @'
+          #include "browser-guardian-session-broker-wts-executor.hpp"
+          #include <iostream>
+          int main() {
+              std::cout << metaengine::guardian::browserGuardianSessionBrokerWtsExecutorContractJson() << '\n';
+              return 0;
+          }
+          '@ | Set-Content -Path $probeSource -Encoding utf8
+
+          $module = Join-Path $sourceDir 'browser-guardian-session-broker-wts-executor.cpp'
+          $compileCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE /I"{1}" "{2}" "{3}" /Fe:"{4}" /link advapi32.lib userenv.lib wtsapi32.lib' -f $vcvars, $sourceDir, $module, $probeSource, $probeExe
+          & $env:ComSpec /d /s /c $compileCmd
+          if ($LASTEXITCODE -ne 0) { throw "guardian_wts_module_compile_exit_$LASTEXITCODE" }
+          if (-not (Test-Path $probeExe)) { throw 'guardian_wts_contract_probe_missing' }
+
+          $digest = (Get-FileHash $probeExe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($digest -notmatch '^[0-9a-f]{64}$') { throw 'guardian_wts_contract_probe_digest_invalid' }
+          "WTS_CONTRACT_PROBE=$probeExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Prove read-only Guardian-owned lease contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $line = (& $env:WTS_CONTRACT_PROBE | Where-Object { $_.Trim() } | Select-Object -Last 1)
+          if (-not $line) { throw 'wts_executor_contract_output_missing' }
+          $row = $line | ConvertFrom-Json
+          if ($row.schema -ne 'metaengine.browser-guardian.session-broker-wts-executor.v1') { throw 'wts_executor_contract_schema_invalid' }
+          if ($row.protocol_generation -ne 2) { throw 'wts_executor_protocol_generation_invalid' }
+          if ($row.features.guardian_owned_broker_lease_v1 -ne $true) { throw 'wts_executor_guardian_lease_feature_missing' }
+          if ($row.features.kill_on_close_job_before_resume_v1 -ne $true) { throw 'wts_executor_job_fence_feature_missing' }
+          if ($row.caller_must_be_localsystem -ne $true) { throw 'wts_executor_localsystem_requirement_missing' }
+          if ($row.expected_broker_basename -ne 'METAENGINEBrowserSessionBroker.exe') { throw 'wts_executor_broker_basename_drift' }
+          if ($row.single_dispatch_per_call -ne $true -or $row.restart_supported -ne $false) { throw 'wts_executor_dispatch_contract_invalid' }
+          if ($row.broker_may_own_job_handle -ne $false -or $row.guardian_owns_last_job_handle -ne $true) { throw 'wts_executor_job_custody_invalid' }
+          if ($row.automatic_retry_allowed -ne $false -or $row.second_scheduler_loop -ne $false) { throw 'wts_executor_retry_or_scheduler_authority_invalid' }
+          if ($row.token_export_allowed -ne $false) { throw 'wts_executor_token_export_invalid' }
+          foreach ($field in @('browser_authority','task_authority','scheduler_authority','page_model_text_authority','release_authority','network_authority','shell_command_authority','authority_effect')) {
+            if ($row.$field -ne $false) { throw "wts_executor_authority_invalid_$field" }
+          }
+
+          @{
+            schema = 'metaengine.browser-guardian.session-broker-wts-module-ci-proof.v1'
+            source_head = '${{ github.event.pull_request.head.sha || github.sha }}'
+            protocol_generation = 2
+            guardian_owned_broker_lease = $true
+            broker_owned_job_handle = $false
+            physical_user_process_effect_executed = $false
+            automatic_retry_allowed = $false
+            second_scheduler_loop = $false
+            authority_effect = $false
+          } | ConvertTo-Json -Depth 4 | Write-Host
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-session-broker-wts-executor.cpp apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-session-broker-wts-executor.hpp apps/metaengine-browser/test/browser-guardian-session-broker-wts-executor-contract.test.mjs .github/workflows/browser-guardian-session-broker-wts-executor-v1.yml)"

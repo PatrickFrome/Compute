@@ -5,6 +5,12 @@ import path from 'node:path';
 export const SUPERVISOR_DEVICE_PROFILE = 'A2_DEVICE_HTTP_SIGNATURE_V1';
 export const ENROLLMENT_SIGNATURE_PROFILE = 'METAENGINE_NATIVE_ENROLLMENT_V1';
 
+let activeSupervisorDeviceStatePath = null;
+
+export function supervisorDeviceStorageDirectory() {
+  return activeSupervisorDeviceStatePath ? path.dirname(activeSupervisorDeviceStatePath) : null;
+}
+
 function canonicalPublicJwk(value = {}) {
   const jwk = {
     crv: String(value.crv || ''),
@@ -48,7 +54,8 @@ export class SupervisorDeviceIdentity {
   constructor({ statePath, secureStorage }) {
     if (!statePath) throw new Error('supervisor_device_state_path_required');
     if (!secureStorage) throw new Error('supervisor_secure_storage_required');
-    this.#statePath = statePath;
+    this.#statePath = String(statePath);
+    activeSupervisorDeviceStatePath = this.#statePath;
     this.#secureStorage = secureStorage;
   }
 

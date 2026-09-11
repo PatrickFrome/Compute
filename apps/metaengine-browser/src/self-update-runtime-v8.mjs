@@ -83,8 +83,8 @@ export class SelfUpdateRuntime {
     releaseResolver = resolveTrustedMetaengineDevRelease,
     fetchImpl = globalThis.fetch,
   } = {}) {
-    this.#intervalMs = Math.max(60 * 1000, Number(intervalMs) || 10 * 60 * 1000);
-    this.#restartGraceMs = Math.max(3000, Number(restartGraceMs) || 12_000);
+    this.#intervalMs = Math.max(1000, Number(intervalMs) || 10 * 60 * 1000);
+    this.#restartGraceMs = Math.max(1000, Number(restartGraceMs) || 12_000);
     this.#canRestart = canRestart;
     this.#injectedUpdater = updater;
     this.#packagedOverride = packaged;
@@ -308,8 +308,9 @@ export class SelfUpdateRuntime {
       await this.#beforeInstall(structuredClone(receipt));
       this.#state.pre_install_receipt_persisted = true;
       await this.#host?.prepareExpectedRestart?.('SELF_UPDATE');
-      await this.#beforeInstallerLaunch(structuredClone(receipt));
+      await this.#host?.prepareInstallerHandoff?.('SELF_UPDATE');
       this.#state.installer_handoff_prepared = true;
+      await this.#beforeInstallerLaunch(structuredClone(receipt));
       this.#updater.quitAndInstall(true, true);
     } catch (e) {
       this.#state.state = 'ERROR';
