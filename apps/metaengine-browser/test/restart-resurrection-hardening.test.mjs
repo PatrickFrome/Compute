@@ -26,6 +26,8 @@ test('persisted CONTROL authority survives a process boundary as the sole final-
   assert.equal(restored.armed, true);
   assert.equal(restored.recovered_fail_closed, false);
   assert.equal(restored.recovery_reason, null);
+  assert.equal(restored.migrated_always_on, false);
+  assert.equal(restored.migration_reason, null);
   assert.equal(restored.authority_effect, false);
 });
 
@@ -47,13 +49,16 @@ test('legacy MONITOR/disarmed checkpoint is migrated to CONTROL+armed at restart
   const restored = await loadNativeSupervisorControlState(statePath);
   assert.equal(restored.supervisor_mode, 'CONTROL');
   assert.equal(restored.armed, true);
-  assert.equal(restored.recovered_fail_closed, true);
-  assert.equal(restored.recovery_reason, 'LEGACY_AUTHORITY_STATE_MIGRATED');
+  assert.equal(restored.recovered_fail_closed, false);
+  assert.equal(restored.recovery_reason, null);
+  assert.equal(restored.migrated_always_on, true);
+  assert.equal(restored.migration_reason, 'ALWAYS_ON_CONTROL:MONITOR:DISARMED');
   assert.equal(restored.authority_effect, false);
 
   const rewritten = JSON.parse(await fs.readFile(statePath, 'utf8'));
   assert.equal(rewritten.supervisor_mode, 'CONTROL');
   assert.equal(rewritten.armed, true);
+  assert.equal(rewritten.migrated_always_on, true);
 });
 
 test('restart-lost fleet identity is preserved as evidence, never resurrected, and demand gets a fresh agent id', async () => {
