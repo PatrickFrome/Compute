@@ -67,7 +67,7 @@ test('base authority policy delegates read-only truth to the central lane classi
   assert.equal(classifyNativeSupervisorCommand({ action: 'NAVIGATE', payload: { tab_id: 'tab_a' } }).read_only, false);
 });
 
-test('MONITOR plus disarmed still admits semantic observation through the real batch execution path', async () => {
+test('always-on policy rejects MONITOR/disarm and still admits semantic observation through the real batch path', async () => {
   const receipts = [];
   const executed = [];
   const client = clientFor(
@@ -80,7 +80,12 @@ test('MONITOR plus disarmed still admits semantic observation through the real b
       },
     },
   );
-  client.setControlState({ mode: 'MONITOR', armed: false });
+  assert.throws(
+    () => client.setControlState({ mode: 'MONITOR', armed: false }),
+    /FINAL_RUNTIME_ALWAYS_ON_CONTROL_REQUIRED/,
+  );
+  assert.equal(client.snapshot().supervisor_mode, 'CONTROL');
+  assert.equal(client.snapshot().armed, true);
   await client.cycle();
   assert.deepEqual(executed, ['SEMANTIC_CENSUS']);
   assert.equal(receipts.length, 1);
@@ -90,11 +95,11 @@ test('MONITOR plus disarmed still admits semantic observation through the real b
   client.stop();
 });
 
-test('MONITOR plus disarmed still rejects a tab mutation before the physical executor', async () => {
+test('leased DISARM is rejected locally before physical execution and cannot lower runtime authority', async () => {
   const receipts = [];
   let physicalEffects = 0;
   const client = clientFor(
-    { command_id: '22222222-2222-4222-8222-222222222222', action: 'NAVIGATE', payload: { tab_id: 'tab_a', url: 'https://example.com/' }, platform: null },
+    { command_id: '22222222-2222-4222-8222-222222222222', action: 'DISARM', payload: {}, platform: null },
     {
       receipts,
       executeCommand: async () => {
@@ -103,13 +108,14 @@ test('MONITOR plus disarmed still rejects a tab mutation before the physical exe
       },
     },
   );
-  client.setControlState({ mode: 'MONITOR', armed: false });
   await client.cycle();
   assert.equal(physicalEffects, 0);
   assert.equal(receipts.length, 1);
   assert.equal(receipts[0].results[0].ok, false);
-  assert.match(receipts[0].results[0].error, /native_supervisor_control_required:MONITOR/);
+  assert.match(receipts[0].results[0].error, /FINAL_RUNTIME_ALWAYS_ON_CONTROL_REQUIRED/);
   assert.equal(receipts[0].results[0].receipt.effect_outcome, 'AMBIGUOUS');
+  assert.equal(client.snapshot().supervisor_mode, 'CONTROL');
+  assert.equal(client.snapshot().armed, true);
   client.stop();
 });
 
