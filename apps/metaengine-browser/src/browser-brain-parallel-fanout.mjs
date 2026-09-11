@@ -63,6 +63,13 @@ function sameCellOverlapError(cellKey) {
   );
 }
 
+function admitCell(cellKeys, seenCells, index, rawCellKey, commandId) {
+  const cellKey = strictBrowserCellKey(rawCellKey, commandId);
+  if (seenCells.has(cellKey)) throw sameCellOverlapError(cellKey);
+  seenCells.add(cellKey);
+  cellKeys[index] = cellKey;
+}
+
 function preflightAbortError() {
   return new BrowserBrainFanoutPlanError('aborted', 'fanout aborted before any effect');
 }
@@ -166,12 +173,7 @@ export class BrowserBrainParallelFanoutCoordinator {
       // already-required synchronous validation pass so the common BrowserCell
       // path does not allocate one deferred Promise/reaction lane per command.
       if (this.usesDefaultCellResolver) {
-        const cellKey = strictBrowserCellKey(defaultResolveCellKey(command), commandId);
-        if (seenCells.has(cellKey)) {
-          throw sameCellOverlapError(cellKey);
-        }
-        seenCells.add(cellKey);
-        cellKeys[index] = cellKey;
+        admitCell(cellKeys, seenCells, index, defaultResolveCellKey(command), commandId);
       }
     }
 
@@ -193,14 +195,7 @@ export class BrowserBrainParallelFanoutCoordinator {
         const commandId = commandIds[index];
         preflightPromises[index + 1] = DEFERRED_TURN
           .then(() => this.resolveCellKey(command))
-          .then((rawCellKey) => {
-            const cellKey = strictBrowserCellKey(rawCellKey, commandId);
-            if (seenCells.has(cellKey)) {
-              throw sameCellOverlapError(cellKey);
-            }
-            seenCells.add(cellKey);
-            cellKeys[index] = cellKey;
-          });
+          .then((rawCellKey) => admitCell(cellKeys, seenCells, index, rawCellKey, commandId));
       }
     }
 
