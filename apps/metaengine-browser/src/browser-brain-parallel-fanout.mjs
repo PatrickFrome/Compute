@@ -194,42 +194,44 @@ export class BrowserBrainParallelFanoutCoordinator {
     await awaitPreflight(preflightPromise, signal);
     if (signal?.aborted) throw preflightAbortError();
 
-    // All independent cells may start after one-shot admission. Each lane owns its
-    // own settlement mapping so the hot path avoids an intermediate allSettled
-    // vector. Abort is checked again at each execution-start boundary so a prior
-    // peer cannot cause later physical effects to start after shared cancellation.
-    return Promise.all(
-      plan.map(({ command, commandId, cellKey }) =>
-        Promise.resolve()
-          .then(() => {
-            if (signal?.aborted) {
-              throw new BrowserBrainFanoutPlanError(
-                'aborted',
-                `fanout aborted before command ${commandId} effect started`,
-                { command_id: commandId, browser_cell: cellKey },
-              );
-            }
-            return this.execute(command, {
-              commandId,
-              browserCell: cellKey,
-              signal,
-            });
-          })
-          .then(
-            (value) => ({
-              command_id: commandId,
-              browser_cell: cellKey,
-              status: 'fulfilled',
-              value,
-            }),
-            (reason) => ({
-              command_id: commandId,
-              browser_cell: cellKey,
-              status: 'rejected',
-              reason,
-            }),
-          ),
-      ),
-    );
+    // All independent cells may start after one-shot admission. Preallocate the
+    // exact bounded execution vector and let each lane own its settlement mapping
+    // so the hot path avoids both dynamic growth and a map-created promise vector.
+    // Abort is checked again at each execution-start boundary so a prior peer
+    // cannot cause later physical effects to start after shared cancellation.
+    const executionPromises = new Array(plan.length);
+    for (let index = 0; index < plan.length; index += 1) {
+      const { command, commandId, cellKey } = plan[index];
+      executionPromises[index] = Promise.resolve()
+        .then(() => {
+          if (signal?.aborted) {
+            throw new BrowserBrainFanoutPlanError(
+              'aborted',
+              `fanout aborted before command ${commandId} effect started`,
+              { command_id: commandId, browser_cell: cellKey },
+            );
+          }
+          return this.execute(command, {
+            commandId,
+            browserCell: cellKey,
+            signal,
+          });
+        })
+        .then(
+          (value) => ({
+            command_id: commandId,
+            browser_cell: cellKey,
+            status: 'fulfilled',
+            value,
+          }),
+          (reason) => ({
+            command_id: commandId,
+            browser_cell: cellKey,
+            status: 'rejected',
+            reason,
+          }),
+        );
+    }
+    return Promise.all(executionPromises);
   }
 }
