@@ -48,7 +48,7 @@ function invalidateRow(state) {
  */
 export class BrowserBrainStreamClock {
   #sources = new Map();
-  #sourceOrder = [];
+  #orderedSources = [];
   #epoch = 0;
   #resyncRequiredCount = 0;
   #maxSources;
@@ -66,15 +66,15 @@ export class BrowserBrainStreamClock {
     this.#snapshotCache = null;
   }
 
-  #insertSourceOrder(source) {
+  #insertOrderedSource(source, state) {
     let low = 0;
-    let high = this.#sourceOrder.length;
+    let high = this.#orderedSources.length;
     while (low < high) {
       const mid = (low + high) >>> 1;
-      if (this.#sourceOrder[mid] < source) low = mid + 1;
+      if (this.#orderedSources[mid].source < source) low = mid + 1;
       else high = mid;
     }
-    this.#sourceOrder.splice(low, 0, source);
+    this.#orderedSources.splice(low, 0, { source, state });
   }
 
   #newSource(source, sequence = 0) {
@@ -91,7 +91,7 @@ export class BrowserBrainStreamClock {
       rowCache: null,
     };
     this.#sources.set(source, state);
-    this.#insertSourceOrder(source);
+    this.#insertOrderedSource(source, state);
     this.#invalidateSnapshot();
     return state;
   }
@@ -248,7 +248,7 @@ export class BrowserBrainStreamClock {
 
   snapshot() {
     if (this.#snapshotCache) return this.#snapshotCache;
-    const sources = this.#sourceOrder.map((source) => freezeRow(source, this.#sources.get(source)));
+    const sources = this.#orderedSources.map(({ source, state }) => freezeRow(source, state));
     this.#snapshotCache = Object.freeze({
       schema: BROWSER_BRAIN_STREAM_CLOCK_SCHEMA,
       epoch: this.#epoch,
