@@ -69,7 +69,12 @@ export async function ensureRuntimeGenesis({
       generation: desiredGeneration,
       applied: false,
       reason: 'ALREADY_APPLIED',
-      quarantined_files: [],
+      clean_start: current.clean_start === true,
+      initial_tabs: Number.isSafeInteger(Number(current.initial_tabs)) ? Number(current.initial_tabs) : 0,
+      initial_fleet_agents: Number.isSafeInteger(Number(current.initial_fleet_agents)) ? Number(current.initial_fleet_agents) : 0,
+      supervisor_mode: 'CONTROL',
+      armed: true,
+      automatic_actuation_after_genesis: false,
       control_state: current.control_state || null,
       preserved: [...RUNTIME_GENESIS_PRESERVED],
       authority_effect: false,
@@ -83,10 +88,13 @@ export async function ensureRuntimeGenesis({
     if (moved) quarantined.push(moved);
   }
 
+  // Clean genesis removes stale topology, not supervisor authority. Final runtime
+  // has exactly one startup authority state: CONTROL + armed. Keeping initial_tabs
+  // at zero is what prevents clean genesis from manufacturing Browser work.
   const controlPath = path.join(root, 'metaengine-native-supervisor-control-state-v1.json');
   const controlState = await persistNativeSupervisorControlState(controlPath, {
-    supervisor_mode: 'OFF',
-    armed: false,
+    supervisor_mode: 'CONTROL',
+    armed: true,
   });
 
   const marker = Object.freeze({
@@ -96,8 +104,8 @@ export async function ensureRuntimeGenesis({
     clean_start: true,
     initial_tabs: 0,
     initial_fleet_agents: 0,
-    supervisor_mode: 'OFF',
-    armed: false,
+    supervisor_mode: 'CONTROL',
+    armed: true,
     quarantined_files: quarantined,
     reset_files: [...RUNTIME_GENESIS_RESET_FILES],
     preserved: [...RUNTIME_GENESIS_PRESERVED],
