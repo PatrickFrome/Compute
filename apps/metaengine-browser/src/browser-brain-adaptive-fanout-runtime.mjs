@@ -1,8 +1,18 @@
 import { BrowserControlPressureGovernor } from './browser-control-pressure-governor.mjs';
 import { BrowserBrainParallelFanoutCoordinator } from './browser-brain-parallel-fanout.mjs';
-import { classifyNativeSupervisorCommand, COMMAND_LANES } from './native-supervisor-command-lanes.mjs';
+import {
+  classifyNativeSupervisorCommand,
+  nativeActionRequiresExactTabTarget,
+} from './native-supervisor-command-lanes.mjs';
 
 export const BROWSER_BRAIN_ADAPTIVE_FANOUT_RUNTIME_SCHEMA = 'metaengine.browser-brain.adaptive-fanout-runtime.v1';
+
+const EXACT_TAB_ID = /^tab_[0-9a-f-]{36}$/i;
+
+function isExactTabMutation(command) {
+  if (!nativeActionRequiresExactTabTarget(command?.action)) return false;
+  return EXACT_TAB_ID.test(String(command?.payload?.tab_id || '').trim());
+}
 
 /**
  * Composition seam between live Browser pressure, the existing command-lane
@@ -57,10 +67,17 @@ export class BrowserBrainAdaptiveFanoutRuntime {
   async dispatchMutations(commands, options = {}) {
     if (!Array.isArray(commands)) throw new TypeError('commands must be an array');
     for (const command of commands) {
+      // The common adaptive-fanout path only needs to prove the same two facts
+      // that make the native classifier return a non-exclusive TAB_MUTATION:
+      // a known tab-mutation action plus an exact tab target. Avoid allocating
+      // and freezing one full lane descriptor per command on that hot path.
+      if (isExactTabMutation(command)) continue;
+
+      // Keep the authoritative classifier on the rejection path so unknown,
+      // read-only, global and implicit-tab commands retain the exact existing
+      // fail-closed action/error semantics.
       const descriptor = classifyNativeSupervisorCommand(command);
-      if (descriptor.lane !== COMMAND_LANES.TAB_MUTATION || descriptor.read_only || descriptor.exclusive) {
-        throw new Error(`browser_brain_adaptive_fanout_tab_mutation_required:${descriptor.action}`);
-      }
+      throw new Error(`browser_brain_adaptive_fanout_tab_mutation_required:${descriptor.action}`);
     }
     return this.#fanout.dispatch(commands, options);
   }
