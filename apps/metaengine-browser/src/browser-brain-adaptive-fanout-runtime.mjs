@@ -51,7 +51,7 @@ export class BrowserBrainAdaptiveFanoutRuntime {
     this.#fanout = new BrowserBrainParallelFanoutCoordinator({
       hardBatchLimit,
       readMutationBudget: () => this.#budget.mutation_concurrency,
-      execute: (command, context) => executeRuntimeFenced(command, context),
+      execute: executeRuntimeFenced,
     });
   }
 
