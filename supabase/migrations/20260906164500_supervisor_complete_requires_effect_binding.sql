@@ -1,0 +1,99 @@
+-- Successful completion of a semantic Browser effect must be backed by the
+-- already-durable effect-intent binding. Failed/ambiguous reporting stays allowed
+-- so uncertainty is never hidden. DB lease remains the sole authority.
+
+create or replace function public.h205f22_a2_browser_supervisor_complete_v5(
+  p_workspace_id uuid,
+  p_command_id uuid,
+  p_client_id text,
+  p_ok boolean,
+  p_receipt jsonb default '{}'::jsonb,
+  p_error text default null,
+  p_authority_effect boolean default false
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = 'public', 'pg_temp'
+as $$
+declare
+  v_row public.compute_fabric_a2_browser_supervisor_command_h205f22%rowtype;
+  v_client text := left(trim(coalesce(p_client_id,'')),160);
+  v_error text := left(coalesce(p_error,'command_failed'),500);
+  v_effect boolean;
+  v_receipt jsonb := coalesce(p_receipt,'{}'::jsonb);
+  v_bound_effect_actions constant text[] := array[
+    'STOP_GENERATION','SCROLL','SEMANTIC_FOCUS','SEMANTIC_TYPE','TYPED_CLICK'
+  ];
+begin
+  if p_workspace_id is null or p_command_id is null or v_client='' then raise exception 'supervisor_result_identity_invalid'; end if;
+  if p_authority_effect is distinct from false then raise exception 'supervisor_result_authority_effect_invalid'; end if;
+  if jsonb_typeof(v_receipt)='string' then
+    begin v_receipt := (v_receipt #>> '{}')::jsonb; exception when others then raise exception 'supervisor_result_receipt_transport_invalid'; end;
+  end if;
+  if jsonb_typeof(v_receipt)<>'object' then raise exception 'supervisor_result_receipt_invalid'; end if;
+
+  select * into v_row
+    from public.compute_fabric_a2_browser_supervisor_command_h205f22
+   where workspace_id=p_workspace_id and command_id=p_command_id
+   for update;
+  if not found then raise exception 'supervisor_command_not_found'; end if;
+
+  -- A client may always report failure/uncertainty. A successful semantic effect,
+  -- however, must have passed the durable bind-effect RPC first.
+  if coalesce(p_ok,false) and v_row.action = any(v_bound_effect_actions) then
+    if v_row.effect_binding is null
+       or coalesce(v_row.effect_binding->>'schema','') not in (
+         'metaengine.native-supervisor.effect-binding.v1',
+         'metaengine.native-supervisor.effect-binding.v2'
+       )
+       or v_row.effect_binding->>'command_id' is distinct from v_row.command_id::text
+       or v_row.effect_binding->>'client_id' is distinct from v_client
+       or v_row.effect_binding->>'action' is distinct from v_row.action
+       or v_row.effect_binding->>'tab_id' is distinct from v_row.payload->>'tab_id'
+       or coalesce((v_row.effect_binding->>'authority_effect')::boolean,true) is distinct from false
+       or coalesce((v_row.effect_binding->>'automatic_retry_allowed')::boolean,true) is distinct from false then
+      return jsonb_build_object(
+        'accepted',false,
+        'status','UNSEALED_EFFECT',
+        'error','supervisor_effect_binding_required',
+        'authority_effect',false
+      );
+    end if;
+  end if;
+
+  v_effect := coalesce(p_ok,false) and v_row.action in (
+    'ARM','DISARM','SET_SUPERVISOR_MODE','SET_MODE','STOP_GENERATION','SCROLL',
+    'SEMANTIC_FOCUS','SEMANTIC_TYPE','RESOLVE_PROMPT','TYPED_CLICK',
+    'NEW_TAB','SELECT_TAB','CLOSE_TAB','NAVIGATE','BACK','FORWARD','RELOAD',
+    'FLEET_RECONCILE','FLEET_SET_PROFILE',
+    'DOWNLOAD_FILE','DOWNLOAD_CANCEL','SELF_UPDATE_CHECK','SELF_UPDATE_APPLY'
+  );
+
+  update public.compute_fabric_a2_browser_supervisor_command_h205f22
+     set status=case when coalesce(p_ok,false) then 'COMPLETED' else 'FAILED' end,
+         completed_at=clock_timestamp(),
+         receipt=case when coalesce(p_ok,false) then jsonb_set(v_receipt,'{authority_effect}',to_jsonb(v_effect),true) else null end,
+         error=case when coalesce(p_ok,false) then null else v_error end,
+         authority_effect=v_effect
+   where workspace_id=p_workspace_id and command_id=p_command_id and status='LEASED'
+     and leased_by=v_client and expires_at>clock_timestamp() and leased_at is not null
+     and leased_at>clock_timestamp()-interval '10 minutes'
+  returning * into v_row;
+
+  if found then return jsonb_build_object('accepted',true,'status',v_row.status,'authority_effect',v_row.authority_effect); end if;
+  select * into v_row
+    from public.compute_fabric_a2_browser_supervisor_command_h205f22
+   where workspace_id=p_workspace_id and command_id=p_command_id;
+  if v_row.status='LEASED' and v_row.leased_by=v_client then
+    return jsonb_build_object('accepted',false,'status','EXPIRED','error','supervisor_lease_expired','authority_effect',false);
+  end if;
+  return jsonb_build_object('accepted',false,'status',v_row.status,'error','supervisor_lease_not_current','authority_effect',false);
+end;
+$$;
+
+revoke all on function public.h205f22_a2_browser_supervisor_complete_v5(uuid,uuid,text,boolean,jsonb,text,boolean) from public, anon, authenticated;
+grant execute on function public.h205f22_a2_browser_supervisor_complete_v5(uuid,uuid,text,boolean,jsonb,text,boolean) to service_role;
+
+comment on function public.h205f22_a2_browser_supervisor_complete_v5(uuid,uuid,text,boolean,jsonb,text,boolean) is
+  'Completes only the current non-expired DB lease. Successful semantic Browser effects additionally require an immutable sealed v1/v2 effect binding; failures remain reportable without a binding.';

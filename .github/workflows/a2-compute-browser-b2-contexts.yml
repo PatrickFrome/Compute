@@ -1,0 +1,103 @@
+name: A2 Compute Browser B2 Contexts
+
+on:
+  push:
+    branches:
+      - 'work/a2-compute-browser-b2-contexts*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  compute-browser-context-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Verify Node runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e 'const m=Number(process.versions.node.split(".")[0]); if (m < 22) process.exit(1); console.log(process.version)'
+
+      - name: Static, context, identity, and capability contracts
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          find src tests -type f -name '*.mjs' -print0 | sort -z | xargs -0 -n1 node --check
+          node --test tests/*.test.mjs
+          ! grep -R -n -E 'nodeIntegration[[:space:]]*:[[:space:]]*true|Runtime\.evaluate.*case|rpc.*cdp\.call|--user-data-dir=.*/Default|profile\.start.*executablePath' src tests protocol-v1.json
+          ! grep -n -E -- '--remote-debugging-(port|address)=' src/chrome-process.mjs
+          grep -q -- "'--remote-debugging-pipe'" src/chrome-process.mjs
+          grep -q '"context.create"' protocol-v1.json
+          grep -q '"context.close"' protocol-v1.json
+          grep -q '"context_universal_network_access"' protocol-v1.json
+          grep -q '"silent_context_recreation"' protocol-v1.json
+          ! grep -R -n -E 'params\?\.(proxyServer|proxyBypassList|originsWithUniversalNetworkAccess|browserContextId)' src
+          grep -q '"devtools_tcp_listener": false' protocol-v1.json
+          grep -q '"raw_cdp_external": false' protocol-v1.json
+          grep -q '"web_authority_effect": false' protocol-v1.json
+
+      - name: Real Chromium context lifecycle and recovery smoke
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          printf 'A2_CHROME_EXECUTABLE=%s\n' "$CHROME"
+          readlink -f "$CHROME" || true
+          "$CHROME" --version || true
+          export A2_CHROME_EXECUTABLE="$CHROME"
+          export A2_COMPUTE_STATE_ROOT="$RUNNER_TEMP/a2-compute-browser-b2-contexts"
+          export CI=true
+          export A2_CI_ALLOW_NO_SANDBOX=1
+          export A2_SELF_TEST_REMOVE_STATE=1
+          node src/cli.mjs self-test | tee "$RUNNER_TEMP/a2-compute-browser-b2-contexts-self-test.json"
+          grep -q '"ok":true' "$RUNNER_TEMP/a2-compute-browser-b2-contexts-self-test.json"
+          grep -q '"debug_transport":"native_pipe_b3"' "$RUNNER_TEMP/a2-compute-browser-b2-contexts-self-test.json"
+          grep -q '"durable_pre_effect_context_intents":true' "$RUNNER_TEMP/a2-compute-browser-b2-contexts-self-test.json"
+          grep -q '"context_isolation_verified":true' "$RUNNER_TEMP/a2-compute-browser-b2-contexts-self-test.json"
+          grep -q '"lost_context_observed":true' "$RUNNER_TEMP/a2-compute-browser-b2-contexts-self-test.json"
+          grep -q '"context_epoch_rotated":true' "$RUNNER_TEMP/a2-compute-browser-b2-contexts-self-test.json"
+          grep -q '"default_context_non_disposable":true' "$RUNNER_TEMP/a2-compute-browser-b2-contexts-self-test.json"
+          grep -q '"context_authority_params_exposed":false' "$RUNNER_TEMP/a2-compute-browser-b2-contexts-self-test.json"
+          grep -q '"raw_cdp_rpc_exposed":false' "$RUNNER_TEMP/a2-compute-browser-b2-contexts-self-test.json"
+          grep -q '"web_authority_effect":false' "$RUNNER_TEMP/a2-compute-browser-b2-contexts-self-test.json"
+
+      - name: Build deterministic B2 contexts evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
+          mkdir -p dist/a2-compute-browser-b2-contexts
+          cp "$RUNNER_TEMP/a2-compute-browser-b2-contexts-self-test.json" dist/a2-compute-browser-b2-contexts/SELF_TEST.json
+          printf '%s\n' "$GITHUB_SHA" > dist/a2-compute-browser-b2-contexts/SOURCE_COMMIT.txt
+          tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf dist/a2-compute-browser-b2-contexts/A2_COMPUTE_BROWSER_B2_CONTEXTS.tar \
+            coordination/browser-compute \
+            coordination/chat-control-plane/A2_COMPUTE_BROWSER_ARCHITECTURE_ADDENDUM_V1.md \
+            research/a2-compute-browser-b2-contexts/report-source.md
+          sha256sum dist/a2-compute-browser-b2-contexts/A2_COMPUTE_BROWSER_B2_CONTEXTS.tar > dist/a2-compute-browser-b2-contexts/SHA256SUMS.txt
+
+      - name: Attest evidence bundle provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-compute-browser-b2-contexts/A2_COMPUTE_BROWSER_B2_CONTEXTS.tar
+
+      - name: Upload B2 contexts evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-compute-browser-b2-contexts-${{ github.sha }}
+          path: dist/a2-compute-browser-b2-contexts/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+

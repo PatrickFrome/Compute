@@ -1,0 +1,98 @@
+name: A2 Compute Browser B2 Context Manager
+
+on:
+  push:
+    branches:
+      - 'work/a2-compute-browser-b2-context-manager*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  context-manager-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Static, unit, and context safety contracts
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          node -e 'const m=Number(process.versions.node.split(".")[0]); if (m < 22) process.exit(1)'
+          find src tests -type f -name '*.mjs' -print0 | sort -z | xargs -0 -n1 node --check
+          node --test tests/*.test.mjs
+          grep -q '"context.create"' protocol-v1.json
+          grep -q '"context.close"' protocol-v1.json
+          grep -q '"storage_state_export"' protocol-v1.json
+          grep -q '"cookie_export"' protocol-v1.json
+          ! grep -R -n -E -- '--remote-debugging-port|--remote-debugging-address|/json/version' src/chrome-process.mjs src/cdp-pipe-client.mjs
+          ! grep -R -n -E 'cookie(value)?[[:space:]]*:|authorization[[:space:]]*:|storage_state[[:space:]]*:' src/context-manager.mjs
+
+      - name: Real Chromium B2 context isolation smoke
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          printf 'A2_CHROME_EXECUTABLE=%s\n' "$CHROME"
+          readlink -f "$CHROME" || true
+          "$CHROME" --version || true
+          export A2_CHROME_EXECUTABLE="$CHROME"
+          export A2_COMPUTE_STATE_ROOT="$RUNNER_TEMP/a2-compute-browser-b2"
+          export CI=true
+          export A2_CI_ALLOW_NO_SANDBOX=1
+          export A2_SELF_TEST_REMOVE_STATE=0
+          node src/cli.mjs self-test | tee "$RUNNER_TEMP/a2-compute-browser-b2-self-test.json"
+          grep -q '"ok":true' "$RUNNER_TEMP/a2-compute-browser-b2-self-test.json"
+          grep -q '"context_isolation_verified":true' "$RUNNER_TEMP/a2-compute-browser-b2-self-test.json"
+          grep -q '"target_context_binding_verified":true' "$RUNNER_TEMP/a2-compute-browser-b2-self-test.json"
+          grep -q '"default_context_close_blocked":true' "$RUNNER_TEMP/a2-compute-browser-b2-self-test.json"
+          grep -q '"devtools_tcp_exposed":false' "$RUNNER_TEMP/a2-compute-browser-b2-self-test.json"
+
+      - name: Assert durable context metadata is secret-free
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t CONTEXT_FILES < <(find "$RUNNER_TEMP/a2-compute-browser-b2" -type f -name contexts.json -print)
+          test "${#CONTEXT_FILES[@]}" -ge 1
+          for file in "${CONTEXT_FILES[@]}"; do
+            ! grep -n -E 'physical-|cdp_browser_context_id|cookie|authorization|storage_state|secret|proxy|permission' "$file"
+            grep -q '"context_id"' "$file"
+            grep -q '"context_epoch"' "$file"
+          done
+          rm -rf "$RUNNER_TEMP/a2-compute-browser-b2"
+
+      - name: Build deterministic B2 evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
+          mkdir -p dist/a2-compute-browser-b2
+          cp "$RUNNER_TEMP/a2-compute-browser-b2-self-test.json" dist/a2-compute-browser-b2/SELF_TEST.json
+          printf '%s\n' "$GITHUB_SHA" > dist/a2-compute-browser-b2/SOURCE_COMMIT.txt
+          tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf dist/a2-compute-browser-b2/A2_COMPUTE_BROWSER_B2_CONTEXT_MANAGER.tar \
+            coordination/browser-compute research/A2_COMPUTE_BROWSER_B2_PROFILE_CONTEXT_DEEP_RESEARCH_2026-08-28.md
+          sha256sum dist/a2-compute-browser-b2/A2_COMPUTE_BROWSER_B2_CONTEXT_MANAGER.tar > dist/a2-compute-browser-b2/SHA256SUMS.txt
+
+      - name: Attest B2 evidence provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-compute-browser-b2/A2_COMPUTE_BROWSER_B2_CONTEXT_MANAGER.tar
+
+      - name: Upload B2 evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-compute-browser-b2-context-manager-${{ github.sha }}
+          path: dist/a2-compute-browser-b2/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

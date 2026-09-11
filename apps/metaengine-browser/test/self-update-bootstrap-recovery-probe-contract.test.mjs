@@ -1,0 +1,142 @@
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const scriptPath = path.resolve(here, '../scripts/self-update-bootstrap-recovery-probe.ps1');
+// GitHub-hosted Windows runners can occasionally spend more than 15 s in cold
+// PowerShell startup. Keep the probe strictly bounded without coupling this
+// read-only evidence contract to transient runner startup latency.
+const WINDOWS_BOOTSTRAP_PROBE_TIMEOUT_MS = 45_000;
+
+function digest(file) {
+  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
+test('bootstrap recovery probe source contains no mutation, installer or Browser launch primitive', async () => {
+  const raw = await fsp.readFile(scriptPath, 'utf8');
+  for (const forbidden of [
+    /Start-Process/i,
+    /Stop-Process/i,
+    /Remove-Item/i,
+    /Set-Content/i,
+    /Add-Content/i,
+    /Clear-Content/i,
+    /Out-File/i,
+    /New-Item/i,
+    /Set-Item(?:Property)?/i,
+    /New-ItemProperty/i,
+    /Remove-ItemProperty/i,
+    /Move-Item/i,
+    /Copy-Item/i,
+    /Invoke-WebRequest/i,
+    /Invoke-RestMethod/i,
+    /Invoke-Expression/i,
+    /Start-Service/i,
+    /Stop-Service/i,
+    /Restart-Service/i,
+    /Set-Service/i,
+    /New-Service/i,
+    /sc\.exe/i,
+    /reg\.exe/i,
+    /\[System\.IO\.File\]::Write/i,
+    /quitAndInstall/i,
+  ]) {
+    assert.equal(forbidden.test(raw), false, `forbidden bootstrap probe primitive: ${forbidden}`);
+  }
+  assert.doesNotMatch(raw, /Get-FileHash/i, 'probe must not depend on the optional Microsoft.PowerShell.Utility Get-FileHash cmdlet');
+  assert.match(raw, /\[System\.IO\.File\]::Open/);
+  assert.match(raw, /System\.Security\.Cryptography\.SHA256/);
+  assert.match(raw, /ComputeHash/);
+  assert.match(raw, /UTF8Encoding/);
+  assert.match(raw, /FileVersionInfo/);
+  assert.match(raw, /mutation_performed\s*=\s*\$false/);
+  assert.match(raw, /process_launch_performed\s*=\s*\$false/);
+  assert.match(raw, /installer_effect_attempted\s*=\s*\$false/);
+  assert.match(raw, /journal_mutation_performed\s*=\s*\$false/);
+  assert.match(raw, /automatic_retry_allowed\s*=\s*\$false/);
+  assert.match(raw, /authority_effect\s*=\s*\$false/);
+});
+
+test('Windows bootstrap probe reads exact local evidence and durable receipt hashes without changing input bytes', { skip: process.platform !== 'win32' }, async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'metaengine-bootstrap-probe-'));
+  try {
+    const userData = path.join(root, 'user-data');
+    await fsp.mkdir(userData, { recursive: true });
+    const target = '0.6.6-dev.33774085931.1';
+    const gitSha = '40de5272e4a511e3f8f586e36686e4239a316cb0';
+    const app = path.join(root, 'METAENGINE Browser Test.exe');
+    await fsp.writeFile(app, Buffer.from('read-only-probe-fixture'));
+    const appSha = digest(app);
+    const rows = {
+      'metaengine-self-update-transaction-v1.json': {
+        schema: 'metaengine.self-update.transaction.v1', transaction_id: '11111111-2222-4333-8444-555555555555',
+        state: 'SUCCESSOR_BOOTED', source_version: '0.6.6-dev.4.1', target_version: target, resolved_git_sha: gitSha,
+        automatic_retry_allowed: false, authority_effect: false,
+      },
+      'metaengine-self-update-pre-install-receipt-v1.json': {
+        schema: 'metaengine.self-update.pre-install-receipt.v1', version: target, available_version: target,
+        metadata_verified: true, publisher_verified: true, resolved_git_sha: gitSha, restart_gate_safe: true, authority_effect: false,
+      },
+      'metaengine-self-update-successor-receipt-v1.json': {
+        schema: 'metaengine.self-update.successor-receipt.v1', version: target, primary_instance: true,
+        pre_install_receipt_sha256: 'placeholder', authority_effect: false,
+      },
+    };
+    for (const [name, row] of Object.entries(rows)) {
+      await fsp.writeFile(path.join(userData, name), `${JSON.stringify(row)}\n`, 'utf8');
+    }
+    const preInstallPath = path.join(userData, 'metaengine-self-update-pre-install-receipt-v1.json');
+    const preInstallSha = digest(preInstallPath);
+    const successorPath = path.join(userData, 'metaengine-self-update-successor-receipt-v1.json');
+    rows['metaengine-self-update-successor-receipt-v1.json'].pre_install_receipt_sha256 = preInstallSha;
+    await fsp.writeFile(successorPath, `${JSON.stringify(rows['metaengine-self-update-successor-receipt-v1.json'])}\n`, 'utf8');
+
+    const files = [app, ...Object.keys(rows).map((name) => path.join(userData, name))];
+    const before = Object.fromEntries(files.map((file) => [file, digest(file)]));
+
+    const result = spawnSync('powershell.exe', [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath,
+      '-UserDataPath', userData,
+      '-InstalledExePath', app,
+      '-ExpectedTargetVersion', target,
+      '-ExpectedInstalledExeSha256', appSha,
+    ], { encoding: 'utf8', windowsHide: true, timeout: WINDOWS_BOOTSTRAP_PROBE_TIMEOUT_MS });
+    assert.equal(result.status, 0, result.error?.stack || result.stderr || result.stdout);
+    const output = JSON.parse(String(result.stdout || '').trim().split(/\r?\n/).filter(Boolean).at(-1));
+    assert.equal(output.schema, 'metaengine.self-update.bootstrap-probe.v1');
+    assert.equal(output.version, '1.0.2');
+    const readError = JSON.stringify({
+      transaction_error: output.transaction_error,
+      pre_install_receipt_error: output.pre_install_receipt_error,
+      successor_receipt_error: output.successor_receipt_error,
+      stderr: String(result.stderr || ''),
+    });
+    assert.equal(output.transaction_read_state, 'READ', readError);
+    assert.equal(output.transaction_sha256, before[path.join(userData, 'metaengine-self-update-transaction-v1.json')]);
+    assert.equal(output.pre_install_receipt_read_state, 'READ', readError);
+    assert.equal(output.pre_install_receipt_sha256, preInstallSha);
+    assert.equal(output.successor_receipt_read_state, 'READ', readError);
+    assert.equal(output.successor_receipt_sha256, before[successorPath]);
+    assert.equal(output.installed_executable.exists, true);
+    assert.equal(output.installed_executable.sha256, appSha);
+    assert.equal(output.installed_executable.hash_matches_expected, true);
+    assert.equal(output.mutation_performed, false);
+    assert.equal(output.process_launch_performed, false);
+    assert.equal(output.installer_effect_attempted, false);
+    assert.equal(output.journal_mutation_performed, false);
+    assert.equal(output.automatic_retry_allowed, false);
+    assert.equal(output.authority_effect, false);
+
+    const after = Object.fromEntries(files.map((file) => [file, digest(file)]));
+    assert.deepEqual(after, before);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});

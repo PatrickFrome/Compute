@@ -1,0 +1,77 @@
+name: Candidate Remote Source Gate
+
+on:
+  push:
+    branches:
+      - 'work/browser-continuous-fleet-audit-v1'
+    paths:
+      - 'apps/metaengine-browser/src/candidate-remote-source.cjs'
+      - 'apps/metaengine-browser/src/development-plane-worker.cjs'
+      - 'apps/metaengine-browser/test/candidate-remote-source.test.mjs'
+      - '.github/workflows/candidate-remote-source-gate.yml'
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/candidate-remote-source.cjs'
+      - 'apps/metaengine-browser/src/development-plane-worker.cjs'
+      - 'apps/metaengine-browser/test/candidate-remote-source.test.mjs'
+      - '.github/workflows/candidate-remote-source-gate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  remote-source-binding:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Synthetic remote provenance contract
+        run: |
+          set -euo pipefail
+          node --check apps/metaengine-browser/src/candidate-remote-source.cjs
+          node --check apps/metaengine-browser/src/development-plane-worker.cjs
+          node --test apps/metaengine-browser/test/candidate-remote-source.test.mjs
+
+      - name: Prove live exact branch exists on authoritative remote
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          BEFORE_REFS="$(git show-ref | sha256sum | cut -d' ' -f1)"
+          BEFORE_STATUS="$(git status --porcelain=v1 --untracked-files=all)"
+          node - <<'NODE'
+          const { createCandidateCapsule } = require('./apps/metaengine-browser/src/candidate-capsule.cjs');
+          const { verifyCandidateCapsuleRemoteBound } = require('./apps/metaengine-browser/src/candidate-remote-source.cjs');
+          const head = String(process.env.EXPECTED_HEAD || '').toLowerCase();
+          const branch = String(process.env.EXPECTED_BRANCH || '');
+          const source = { repository: 'PatrickFrome/Compute', head, ref: `refs/heads/${branch}` };
+          const capsule = createCandidateCapsule({
+            source_head: head,
+            sequence: 1,
+            previous_candidate_id: null,
+            intent: 'CI-only remote source binding proof.',
+            components: [{ path: 'apps/metaengine-browser/src/candidate-remote-source.cjs', change: 'MODIFY', digest: `sha256:${'1'.repeat(64)}` }],
+            verification_plan: [{ id: 'REMOTE_SOURCE_BINDING', required: true }],
+            evidence: [],
+          }, source);
+          const receipt = verifyCandidateCapsuleRemoteBound(capsule, source, { cwd: process.cwd(), remote: 'origin' });
+          if (receipt.source_current_scope !== 'AUTHORITATIVE_REMOTE_REF' || receipt.remote_source_verified !== true || receipt.authority_effect !== false) {
+            throw new Error('remote_source_receipt_invalid');
+          }
+          console.log(JSON.stringify({ source_head: receipt.source_head, source_ref: receipt.remote_source_ref, remote_source_verified: true, authority_effect: false }));
+          NODE
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git show-ref | sha256sum | cut -d' ' -f1)" = "$BEFORE_REFS"
+          test "$(git status --porcelain=v1 --untracked-files=all)" = "$BEFORE_STATUS"

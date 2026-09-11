@@ -1,0 +1,172 @@
+name: METAENGINE Browser Final Runtime Activation V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/**'
+      - 'apps/metaengine-browser/test/final-runtime-activation-contract.test.mjs'
+      - 'apps/metaengine-browser/package.json'
+      - 'apps/metaengine-browser/electron-builder.test.json'
+      - '.github/workflows/browser-final-runtime-activation-v1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-final-runtime-activation:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+
+      - name: Install Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+
+      - name: Parse activation and proven Browser sources
+        working-directory: apps/metaengine-browser
+        run: npm run check
+
+      - name: Prove activation contract and VEF fail-closed semantics
+        working-directory: apps/metaengine-browser
+        run: node --test test/final-runtime-activation-contract.test.mjs
+
+      - name: Build exact-head unsigned NSIS installer
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = [string](node -p "require('./package.json').version")
+          if (-not $version) { throw 'package_version_missing' }
+          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item native-dist\guardian -Recurse -Force -ErrorAction SilentlyContinue
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
+          if (-not $installer) { throw 'final_runtime_installer_missing' }
+          Copy-Item $installer.FullName "$env:RUNNER_TEMP\$($installer.Name)"
+          Copy-Item $installer.FullName "$env:RUNNER_TEMP\final-runtime-candidate.exe"
+
+      - name: Install and prove all Final runtime modules READY
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $head = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $version = [string](node -p "require('./package.json').version")
+          $installer = "$env:RUNNER_TEMP\final-runtime-candidate.exe"
+          $install = Start-Process -FilePath $installer -ArgumentList '/S' -PassThru -Wait
+          if ($install.ExitCode -ne 0) { throw "final_runtime_installer_exit_$($install.ExitCode)" }
+
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
+          $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
+          if (-not (Test-Path $app -PathType Leaf)) { throw "final_runtime_packaged_browser_missing:$app" }
+
+          $out = "$env:RUNNER_TEMP\final-runtime-normal.out"
+          $err = "$env:RUNNER_TEMP\final-runtime-normal.err"
+          Remove-Item $out,$err -Force -ErrorAction SilentlyContinue
+          $process = $null
+          $ready = $null
+          try {
+            $process = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+            $null = $process.Handle
+            $deadline = [DateTime]::UtcNow.AddSeconds(70)
+            while ([DateTime]::UtcNow -lt $deadline) {
+              if ($process.HasExited) {
+                Get-Content $out -ErrorAction SilentlyContinue
+                Get-Content $err -ErrorAction SilentlyContinue
+                throw "final_runtime_primary_exited_early:$($process.ExitCode)"
+              }
+              if (Test-Path $out -PathType Leaf) {
+                foreach ($line in @(Get-Content $out -ErrorAction SilentlyContinue)) {
+                  if (-not $line.Trim().StartsWith('{')) { continue }
+                  try { $row = $line | ConvertFrom-Json } catch { continue }
+                  if ($row.schema -eq 'metaengine.browser.final-runtime-activation.lifecycle.v1' -and $row.state -eq 'READY') {
+                    $ready = $row
+                    break
+                  }
+                }
+              }
+              if ($ready) { break }
+              Start-Sleep -Milliseconds 250
+            }
+            if (-not $ready) {
+              Get-Content $out -ErrorAction SilentlyContinue
+              Get-Content $err -ErrorAction SilentlyContinue
+              throw 'final_runtime_activation_ready_not_observed'
+            }
+
+            $activation = $ready.activation
+            if (-not $activation) { throw 'final_runtime_activation_projection_missing' }
+            if ($activation.host_agent_state -ne 'READY') { throw "final_runtime_host_agent_not_ready:$($activation.host_agent_state)" }
+            if ($activation.signer_state -ne 'READY') { throw "final_runtime_signer_not_ready:$($activation.signer_state)" }
+            if ($activation.browser_execution_via_typed_ipc -ne $true) { throw 'final_runtime_typed_browser_executor_not_active' }
+            if ($activation.verified_execution_outcomes_active -ne $true) { throw 'final_runtime_vef_not_active' }
+            if ($activation.fast_control_read_side_active -ne $true) { throw 'final_runtime_fast_control_read_not_active' }
+            if ($activation.fast_control_production_mutation_authority -ne $false) { throw 'final_runtime_unproven_mutation_authority_enabled' }
+            if ($activation.production_authority_fabricated -ne $false) { throw 'final_runtime_production_authority_fabricated' }
+            if ($activation.second_scheduler -ne $false) { throw 'final_runtime_second_scheduler_detected' }
+            if ($activation.automatic_effect_retry_allowed -ne $false) { throw 'final_runtime_automatic_effect_retry_enabled' }
+
+            $installerFile = Get-Item $installer
+            $digest = (Get-FileHash $installerFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            @{
+              schema='metaengine.browser.final-runtime-activation-proof.v1'
+              source_head=$head
+              package_version=$version
+              installer_sha256=$digest
+              activation=$activation
+              exact_head_verified=$true
+              installed_runtime_verified=$true
+              browser_identity_signer_active=$true
+              typed_browser_executor_active=$true
+              host_agent_active=$true
+              verified_execution_framework_active=$true
+              fast_control_read_side_active=$true
+              fast_control_production_mutation_authority=$false
+              native_supervisor_single_scheduler=$true
+              second_scheduler=$false
+              automatic_effect_retry_allowed=$false
+              signed=$false
+              published=$false
+              promotion_authorized=$false
+              authority_effect=$false
+            } | ConvertTo-Json -Depth 10 | Set-Content "$env:RUNNER_TEMP\final-runtime-activation-proof.json" -Encoding utf8
+            Write-Host ($ready | ConvertTo-Json -Compress -Depth 10)
+          } finally {
+            if ($process -and -not $process.HasExited) {
+              try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
+            }
+          }
+
+      - name: Upload exact-head activated Windows installer and proof
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-final-runtime-activated-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
+            ${{ runner.temp }}/final-runtime-activation-proof.json
+            ${{ runner.temp }}/final-runtime-normal.out
+            ${{ runner.temp }}/final-runtime-normal.err
+          if-no-files-found: error
+          retention-days: 30

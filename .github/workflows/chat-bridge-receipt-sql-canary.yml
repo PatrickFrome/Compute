@@ -1,0 +1,48 @@
+name: Chat Bridge Receipt SQL Canary
+
+on:
+  push:
+    branches:
+      - work/chat-control-plane-browser-bridge
+  pull_request:
+    paths:
+      - 'supabase/migrations/20260825050000_a2_chat_bridge_receipts_v1.sql'
+      - 'tests/chat_bridge_receipt_sql_canary.sh'
+      - '.github/workflows/chat-bridge-receipt-sql-canary.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  receipt-sql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: receipt_canary
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d receipt_canary"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=12
+
+    steps:
+      - name: Checkout exact PR/branch tree
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Execute migration and adversarial receipt canaries
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: '5432'
+          PGDATABASE: receipt_canary
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: bash tests/chat_bridge_receipt_sql_canary.sh

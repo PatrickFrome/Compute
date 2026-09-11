@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "metaengine.amplifier.experiment-record.v1",
+  "type": "object",
+  "required": [
+    "amplifier_id",
+    "candidate_version",
+    "task_class",
+    "context_fingerprint",
+    "baseline_metrics",
+    "candidate_metrics",
+    "correctness_pass",
+    "security_pass",
+    "zero_cost_pass",
+    "sample_count",
+    "verdict"
+  ],
+  "properties": {
+    "amplifier_id": {"type": "string", "minLength": 1},
+    "candidate_version": {"type": "string", "minLength": 1},
+    "task_class": {"type": "string", "minLength": 1},
+    "context_fingerprint": {"type": "string", "minLength": 1},
+    "baseline_metrics": {"type": "object"},
+    "candidate_metrics": {"type": "object"},
+    "correctness_pass": {"type": "boolean"},
+    "security_pass": {"type": "boolean"},
+    "zero_cost_pass": {"type": "boolean"},
+    "speedup_ratio": {"type": "number", "exclusiveMinimum": 0},
+    "reliability_delta": {"type": "number", "minimum": -1, "maximum": 1},
+    "sample_count": {"type": "integer", "minimum": 1},
+    "verdict": {"enum": ["ACCEPT", "KEEP_SHADOW", "ROLLBACK"]},
+    "evidence_refs": {"type": "array", "items": {"type": "string"}},
+    "rollback_instructions": {"type": "string"}
+  },
+  "additionalProperties": true
+}

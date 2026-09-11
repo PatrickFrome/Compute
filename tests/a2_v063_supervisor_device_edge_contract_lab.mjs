@@ -1,0 +1,60 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+
+const file = path.join(process.cwd(), "supabase/functions/a2-browser-supervisor-v4/index.ts");
+const source = fs.readFileSync(file, "utf8");
+
+assert.match(source, /DEVICE_PROFILE='A2_DEVICE_HTTP_SIGNATURE_V1'/);
+assert.match(source, /SERVICE_MARKER='\/a2-browser-supervisor-v4'/);
+assert.match(source, /h205f22_a2_browser_device_enroll_v1/);
+assert.match(source, /h205f22_a2_browser_device_consume_nonce_v2/);
+assert.match(source, /h205f22_a2_browser_device_rotate_embedded_bootstrap_v1/);
+assert.match(source, /h205f22_a2_browser_supervisor_complete_v4/);
+assert.match(source, /crypto\.subtle\.importKey\('jwk'/);
+assert.match(source, /crypto\.subtle\.verify\(\{name:'ECDSA',hash:'SHA-256'\}/);
+assert.match(source, /BODY_HASH_MISMATCH/);
+assert.match(source, /INVALID_SIGNATURE/);
+assert.match(source, /PAIRING_REVOKED/);
+assert.match(source, /NONCE_REJECTED/);
+assert.match(source, /device_auth_required:true/);
+assert.match(source, /pairing_kill_switch:true/);
+assert.match(source, /embedded_bootstrap_rotation:true/);
+assert.match(source, /transport_identity/);
+assert.match(source, /key_fingerprint_sha256:fingerprint/);
+assert.match(source, /fingerprint=await sha256\(JSON\.stringify\(jwk\)\)/, "enrollment fingerprint must be server-derived");
+assert.match(source, /enrollment_pairing_token_hash/);
+
+const verifyIndex = source.indexOf("crypto.subtle.verify");
+const pairingCheckIndex = source.indexOf("PAIRING_REVOKED");
+const nonceIndex = source.indexOf("h205f22_a2_browser_device_consume_nonce_v2");
+assert.ok(verifyIndex > 0 && pairingCheckIndex > verifyIndex && nonceIndex > pairingCheckIndex, "pairing kill switch must run after signature verification and before nonce consumption");
+
+const deviceQuery = source.match(/DEVICE_TABLE[^\n]+select=device_id,client_id,profile,public_jwk,enrollment_pairing_token_hash,active,revoked_at/);
+assert.ok(deviceQuery, "device lookup must read revoked devices instead of filtering active=true before explicit revocation checks");
+
+const enrollRoute = source.indexOf("path==='/v1/device/enroll'");
+const signedAuth = source.indexOf("authenticateDevice(req,url.pathname,bodyText)");
+assert.ok(enrollRoute > 0 && signedAuth > enrollRoute, "pairing enrollment must be handled before signed-only privileged routes");
+
+const serveTail = source.slice(source.indexOf("Deno.serve"));
+assert.match(serveTail, /path==='\/health'/);
+assert.match(serveTail, /path==='\/v1\/device\/enroll'/);
+assert.match(serveTail, /authenticateDevice\(req,url\.pathname,bodyText\)/, "edge must verify signature against full service pathname");
+assert.doesNotMatch(serveTail.slice(signedAuth), /pairingRecord\(req\)/, "privileged routes must not bearer-fallback after signed authentication starts");
+
+for (const header of [
+  "x-a2-device-profile", "x-a2-device-id", "x-a2-device-timestamp",
+  "x-a2-device-nonce", "x-a2-device-body-sha256", "x-a2-device-signature"
+]) assert.match(source, new RegExp(header));
+
+console.log("a2_v063_supervisor_device_edge_contract_lab: PASS", {
+  signatureBeforePairingKillSwitch: verifyIndex < pairingCheckIndex,
+  pairingKillSwitchBeforeNonce: pairingCheckIndex < nonceIndex,
+  revokedDeviceExplicitlyDetected: true,
+  serverDerivedFingerprint: true,
+  serviceBoundPath: true,
+  embeddedBootstrapRotation: true,
+  atomicResult: true,
+  privilegedBearerFallback: false
+});

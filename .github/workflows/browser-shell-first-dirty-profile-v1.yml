@@ -1,0 +1,173 @@
+name: METAENGINE Browser Shell-First Dirty Profile V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/main.mjs'
+      - 'apps/metaengine-browser/test/shell-first-startup-boundary.test.mjs'
+      - 'apps/metaengine-browser/package.json'
+      - 'apps/metaengine-browser/electron-builder.test.json'
+      - '.github/workflows/browser-shell-first-dirty-profile-v1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-shell-first-dirty-profile:
+    runs-on: windows-2025
+    timeout-minutes: 28
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Install package dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+
+      - name: Prove shell-first source boundary
+        working-directory: apps/metaengine-browser
+        run: |
+          node --check src/main.mjs
+          node --test test/shell-first-startup-boundary.test.mjs
+
+      - name: Build exact-head NSIS candidate
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = [string](node -p "require('./package.json').version")
+          if (-not $version) { throw 'package_version_missing' }
+          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item native-dist\guardian -Recurse -Force -ErrorAction SilentlyContinue
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
+          if (-not $installer) { throw 'shell_first_installer_missing' }
+          Copy-Item $installer.FullName "$env:RUNNER_TEMP\shell-first-candidate.exe"
+
+      - name: Install candidate and resolve exact packaged profile
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $install = Start-Process -FilePath "$env:RUNNER_TEMP\shell-first-candidate.exe" -ArgumentList '/S' -PassThru -Wait
+          if ($install.ExitCode -ne 0) { throw "shell_first_installer_exit_$($install.ExitCode)" }
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test\METAENGINE Browser Test.exe'
+          if (-not (Test-Path $app -PathType Leaf)) { throw 'shell_first_installed_browser_missing' }
+
+          $profileOut = "$env:RUNNER_TEMP\shell-first-profile.out"
+          $profileErr = "$env:RUNNER_TEMP\shell-first-profile.err"
+          $prior = $env:METAENGINE_PROFILE_PROBE_WRITE
+          $env:METAENGINE_PROFILE_PROBE_WRITE = '1'
+          try {
+            $probe = Start-Process -FilePath $app -ArgumentList '--metaengine-profile-probe' -PassThru -RedirectStandardOutput $profileOut -RedirectStandardError $profileErr
+            $null = $probe.Handle
+            if (-not $probe.WaitForExit(15000)) {
+              try { Stop-Process -Id $probe.Id -Force -ErrorAction SilentlyContinue } catch {}
+              throw 'shell_first_profile_probe_timeout'
+            }
+            if ($probe.ExitCode -ne 0) { throw "shell_first_profile_probe_exit_$($probe.ExitCode)" }
+          } finally {
+            $env:METAENGINE_PROFILE_PROBE_WRITE = $prior
+          }
+          $row = (Get-Content $profileOut | Where-Object { $_.Trim() } | Select-Object -Last 1) | ConvertFrom-Json
+          if ($row.schema -ne 'metaengine.browser.profile-probe.v1' -or -not [string]$row.user_data_path) { throw 'shell_first_profile_probe_invalid' }
+          [string]$row.user_data_path | Set-Content "$env:RUNNER_TEMP\shell-first-user-data.txt" -Encoding utf8
+
+      - name: Prove dirty Fleet state and offline remote cannot close local shell
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test\METAENGINE Browser Test.exe'
+          $userData = (Get-Content "$env:RUNNER_TEMP\shell-first-user-data.txt" -Raw).Trim()
+          if (-not $userData) { throw 'shell_first_user_data_missing' }
+          $journal = Join-Path $userData 'metaengine-browser-startup-journal-v1.json'
+          $fleetTemp = Join-Path $userData 'metaengine-fleet-state-v1.json.tmp'
+          Remove-Item $journal -Force -ErrorAction SilentlyContinue
+          Remove-Item "$journal.corrupt-*" -Force -ErrorAction SilentlyContinue
+          Remove-Item $fleetTemp -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $fleetTemp -Force | Out-Null
+
+          $out = "$env:RUNNER_TEMP\shell-first-normal.out"
+          $err = "$env:RUNNER_TEMP\shell-first-normal.err"
+          Remove-Item $out,$err -Force -ErrorAction SilentlyContinue
+          $priorSentinel = $env:METAENGINE_DISABLE_CRASH_SENTINEL
+          $priorLogin = $env:METAENGINE_DISABLE_LOGIN_START
+          $env:METAENGINE_DISABLE_CRASH_SENTINEL = '1'
+          $env:METAENGINE_DISABLE_LOGIN_START = '1'
+          $browser = $null
+          try {
+            # A dead loopback proxy makes remote ChatGPT/Supabase transport fail,
+            # while the directory occupying fleet-state.tmp deterministically
+            # makes Fleet persistence fail. Neither may destroy the local shell.
+            $browser = Start-Process -FilePath $app -ArgumentList '--proxy-server=http://127.0.0.1:9' -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+            $null = $browser.Handle
+            $deadline = [DateTime]::UtcNow.AddSeconds(50)
+            $stable = $null
+            while ([DateTime]::UtcNow -lt $deadline) {
+              $browser.Refresh()
+              if ($browser.HasExited) {
+                Get-Content $err -ErrorAction SilentlyContinue
+                throw "shell_first_primary_exited_early:$($browser.ExitCode)"
+              }
+              if (Test-Path $journal -PathType Leaf) {
+                try {
+                  $row = Get-Content $journal -Raw | ConvertFrom-Json
+                  $stable = $row.events | Where-Object { $_.boot_id -eq $row.current_boot_id -and $_.state -eq 'PRIMARY_WINDOW_STABLE' } | Select-Object -Last 1
+                  if ($stable) { break }
+                } catch {}
+              }
+              Start-Sleep -Milliseconds 250
+            }
+            if (-not $stable) {
+              Get-Content $err -ErrorAction SilentlyContinue
+              if (Test-Path $journal) { Get-Content $journal -Raw | Write-Host }
+              throw 'shell_first_stable_window_timeout'
+            }
+            if ($stable.details.visible -ne $true) { throw 'shell_first_window_not_visible' }
+
+            Start-Sleep -Seconds 3
+            $browser.Refresh()
+            if ($browser.HasExited) { throw 'shell_first_primary_died_after_degraded_boot' }
+            $stderr = Get-Content $err -Raw -ErrorAction SilentlyContinue
+            if ($stderr -notmatch '"state":"SUBSYSTEM_DEGRADED"' -or $stderr -notmatch '"subsystem":"FLEET"') {
+              Write-Host $stderr
+              throw 'shell_first_fleet_degradation_evidence_missing'
+            }
+            Write-Host '{"schema":"metaengine.browser.shell-first-dirty-profile-proof.v1","stable_visible":true,"fleet_degraded":true,"remote_transport_required_for_shell":false,"authority_effect":false}'
+          } finally {
+            $env:METAENGINE_DISABLE_CRASH_SENTINEL = $priorSentinel
+            $env:METAENGINE_DISABLE_LOGIN_START = $priorLogin
+            if ($browser -and -not $browser.HasExited) {
+              try { Stop-Process -Id $browser.Id -Force -ErrorAction SilentlyContinue } catch {}
+            }
+            Remove-Item $fleetTemp -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Prove tracked Browser source checkout unchanged
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/native apps/metaengine-browser/scripts apps/metaengine-browser/test apps/metaengine-browser/package.json apps/metaengine-browser/electron-builder.test.json)"

@@ -1,0 +1,77 @@
+{
+  "schema": "metaengine.amplifier.seed-registry.v1",
+  "status": "DISCOVERY_INPUT_NOT_PREAPPROVED",
+  "last_researched_at": "2026-08-26",
+  "candidates": [
+    {
+      "amplifier_id": "hyperfine",
+      "stage": "PRE_C1_IMMEDIATE",
+      "license": "MIT OR Apache-2.0",
+      "zero_cost_mode": "local_or_ci_binary",
+      "purpose": "statistically compare baseline and candidate commands with warmups, repeated runs and JSON export",
+      "source": "https://github.com/sharkdp/hyperfine",
+      "primary_metric": "median_wall_clock",
+      "notes": "Preferred neutral benchmark harness for short/medium experiments."
+    },
+    {
+      "amplifier_id": "pytest-xdist",
+      "stage": "PRE_C1_IMMEDIATE_WHEN_TESTS_ARE_PARALLEL_SAFE",
+      "license": "MIT",
+      "zero_cost_mode": "existing_ci_cpu_or_local_cpu",
+      "purpose": "parallel pytest execution across available CPU workers",
+      "source": "https://github.com/pytest-dev/pytest-xdist",
+      "primary_metric": "test_suite_wall_clock",
+      "notes": "Must compare correctness and flake rate; do not force parallelism on order-dependent tests."
+    },
+    {
+      "amplifier_id": "sccache",
+      "stage": "C1_PLUS_OR_EARLIER_SHADOW_IF_COMPILER_PATH_EXISTS",
+      "license": "Apache-2.0",
+      "zero_cost_mode": "local_disk_or_existing_github_actions_cache",
+      "purpose": "cache C/C++/Rust/CUDA/HIP compiler results; optionally distributed compilation later",
+      "source": "https://github.com/mozilla/sccache",
+      "primary_metric": "compile_wall_clock_and_cache_hit_rate",
+      "notes": "Cache identity must remain bound to toolchain/environment inputs; initial cold build may be slower."
+    },
+    {
+      "amplifier_id": "buildkit-cache",
+      "stage": "C1_PLUS_OR_BUILD_PIPELINE_SHADOW",
+      "license": "Apache-2.0",
+      "zero_cost_mode": "local_builder_cache_or_existing_ci_cache",
+      "purpose": "concurrent dependency resolution plus cache mounts/import/export for repeatable builds",
+      "source": "https://github.com/moby/buildkit",
+      "primary_metric": "container_build_wall_clock_and_cache_reuse",
+      "notes": "Use cache mounts only with package-manager-appropriate sharing semantics."
+    },
+    {
+      "amplifier_id": "bazel-remote-cache-reapi",
+      "stage": "C2_C4_C5_THEN_C9",
+      "license": "Apache-2.0",
+      "zero_cost_mode": "self_hosted_or_existing_authorized_capacity",
+      "purpose": "content-addressed action/output reuse and later remote execution through the open REAPI ecosystem",
+      "source": "https://bazel.build/remote/caching",
+      "primary_metric": "action_cache_hit_rate_and_build_wall_clock",
+      "notes": "Requires reproducible action identity; never treat remote-cache hits as valid without cache-equivalence witnesses."
+    },
+    {
+      "amplifier_id": "nativelink",
+      "stage": "C9_RESEARCH_AND_SELF_HOSTED_TOURNAMENT_ONLY_AFTER_DEPENDENCIES",
+      "license": "FSL-1.1-Apache-2.0 future license",
+      "zero_cost_mode": "self_hosted_on_already_authorized_capacity",
+      "purpose": "REAPI-compatible cache/remote execution backend tournament candidate",
+      "source": "https://github.com/TraceMachina/nativelink",
+      "primary_metric": "remote_action_latency_cache_hit_rate_and_correctness",
+      "notes": "Source-available license is not treated as unconditional permissive OSS. Perform license/compliance review before adoption. Do not auto-enroll a commercial/free-tier service."
+    },
+    {
+      "amplifier_id": "opentelemetry",
+      "stage": "C5_PREP_NOW_VERIFIED_AFTER_C5",
+      "license": "Apache-2.0",
+      "zero_cost_mode": "in_process_instrumentation_plus_self_hosted_or_test_export",
+      "purpose": "vendor-neutral traces/metrics/logs for comparable experiment and scheduler evidence",
+      "source": "https://opentelemetry.io/docs/",
+      "primary_metric": "telemetry_completeness_and_overhead",
+      "notes": "Before C5, telemetry is lab/CI evidence only; after C5 it may feed trusted learner inputs."
+    }
+  ]
+}

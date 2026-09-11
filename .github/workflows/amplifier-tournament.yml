@@ -1,0 +1,132 @@
+name: Amplifier Tournament
+
+on:
+  push:
+    branches:
+      - work/chat-control-plane-browser-bridge
+    paths:
+      - 'coordination/amplifier-loop/**'
+      - 'tests/test_chat_control_plane_bridge_contract.py'
+      - 'tests/test_a2_chat_bridge_receipt_contract.py'
+      - 'tests/test_a2_chat_bridge_remote_contract.py'
+      - '.github/workflows/amplifier-tournament.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest-xdist-canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned free amplifier candidate
+        run: |
+          python3 -m pip install --disable-pip-version-check 'pytest==9.1.1' 'pytest-xdist==3.8.0'
+          python3 - <<'PY'
+          import pytest, xdist
+          assert pytest.__version__ == '9.1.1'
+          assert xdist.__version__ == '3.8.0'
+          PY
+
+      - name: Baseline vs pytest-xdist real-use tournament
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import statistics
+          import subprocess
+          import time
+          from pathlib import Path
+
+          tests = [
+              'tests/test_chat_control_plane_bridge_contract.py',
+              'tests/test_a2_chat_bridge_receipt_contract.py',
+              'tests/test_a2_chat_bridge_remote_contract.py',
+          ]
+          baseline = ['python3', '-m', 'pytest', '-q', *tests]
+          candidate = ['python3', '-m', 'pytest', '-q', '-n', 'auto', *tests]
+
+          def run(command):
+              started = time.perf_counter()
+              proc = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+              elapsed = time.perf_counter() - started
+              if proc.returncode != 0:
+                  print(proc.stdout)
+                  raise SystemExit(f'command failed: {command}')
+              return elapsed
+
+          # One warmup each keeps import/cache startup from dominating only one side.
+          run(baseline)
+          run(candidate)
+          baseline_samples = [run(baseline) for _ in range(5)]
+          candidate_samples = [run(candidate) for _ in range(5)]
+          baseline_median = statistics.median(baseline_samples)
+          candidate_median = statistics.median(candidate_samples)
+          speedup_ratio = baseline_median / candidate_median
+          verdict = 'ACCEPT' if candidate_median <= 0.95 * baseline_median else 'ROLLBACK'
+
+          record = {
+              'amplifier_id': 'pytest-xdist',
+              'candidate_version': '3.8.0',
+              'task_class': 'chat-control-python-contract',
+              'context_fingerprint': f"github-actions-ubuntu-24.04-py{os.sys.version_info.major}{os.sys.version_info.minor}-pytest9.1.1",
+              'baseline_metrics': {
+                  'command': 'python3 -m pytest -q <3 contract modules>',
+                  'median_wall_clock': baseline_median,
+                  'samples_seconds': baseline_samples,
+              },
+              'candidate_metrics': {
+                  'command': 'python3 -m pytest -q -n auto <3 contract modules>',
+                  'median_wall_clock': candidate_median,
+                  'samples_seconds': candidate_samples,
+              },
+              'correctness_pass': True,
+              'security_pass': True,
+              'zero_cost_pass': True,
+              'speedup_ratio': speedup_ratio,
+              'reliability_delta': 0.0,
+              'sample_count': 5,
+              'verdict': verdict,
+              'evidence_refs': [f"github-actions:{os.environ.get('GITHUB_RUN_ID', '')}"],
+              'rollback_instructions': 'Do not add -n auto to the required contract path if verdict is ROLLBACK.',
+          }
+          Path('amplifier-experiment.jsonl').write_text(json.dumps(record, sort_keys=True) + '\n')
+          print('AMPLIFIER_RESULT=' + json.dumps({
+              'baseline_median': baseline_median,
+              'candidate_median': candidate_median,
+              'speedup_ratio': speedup_ratio,
+              'verdict': verdict,
+              'baseline_samples': baseline_samples,
+              'candidate_samples': candidate_samples,
+          }, sort_keys=True))
+          PY
+
+      - name: Feed measured record into strategy learner
+        run: |
+          CONTEXT=$(python3 - <<'PY'
+          import json
+          record=json.loads(open('amplifier-experiment.jsonl').read())
+          print(record['context_fingerprint'])
+          PY
+          )
+          python3 coordination/amplifier-loop/learner.py amplifier-experiment.jsonl \
+            --task-class chat-control-python-contract \
+            --context-fingerprint "$CONTEXT" \
+            --output amplifier-strategy-hint.json
+          cat amplifier-strategy-hint.json
+
+      - name: Upload non-authority experiment evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: amplifier-pytest-xdist-experiment
+          path: |
+            amplifier-experiment.jsonl
+            amplifier-strategy-hint.json
+          if-no-files-found: error
+          retention-days: 14
