@@ -73,7 +73,10 @@ jobs:
   full-browser-regression:
     name: full-browser-node-test-suite
     runs-on: windows-2025
-    timeout-minutes: 30
+    # The suite now exceeds the historical 30-minute cap on Windows. Keep the
+    # complete exact-head regression intact and give it a bounded window large
+    # enough to produce terminal evidence instead of a false CANCELLED state.
+    timeout-minutes: 60
     steps:
       - name: Checkout exact candidate head
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
