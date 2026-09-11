@@ -22,6 +22,7 @@ export class HostAgentRemoteComposition {
   #browserSessionKey;
   #hostEndpoint;
   #hostSessionKey;
+  #sessionKeysConsumed = false;
   #developmentPlane;
   #fastControl;
   #browserStatus;
@@ -77,6 +78,15 @@ export class HostAgentRemoteComposition {
   async start() {
     if (this.#state === 'READY') return this.snapshot();
     if (this.#state === 'STARTING') throw new Error('host_agent_remote_start_in_progress');
+    if (this.#sessionKeysConsumed) throw new Error('host_agent_remote_new_session_keys_required');
+
+    const signerSessionKey = this.#signerSessionKey;
+    const browserSessionKey = this.#browserSessionKey;
+    const hostSessionKey = this.#hostSessionKey;
+    this.#signerSessionKey = null;
+    this.#browserSessionKey = null;
+    this.#hostSessionKey = null;
+    this.#sessionKeysConsumed = true;
     this.#state = 'STARTING';
     this.#lastError = null;
     try {
@@ -84,7 +94,7 @@ export class HostAgentRemoteComposition {
       this.#signerRuntime = new BrowserIdentitySignerRuntime({
         identity: this.#identity,
         userDataPath: this.#userDataPath,
-        sessionKey: this.#signerSessionKey,
+        sessionKey: signerSessionKey,
       });
       await this.#signerRuntime.start();
 
@@ -92,7 +102,7 @@ export class HostAgentRemoteComposition {
       const browserEndpoint = browserExecutorEndpoint({ userDataPath: this.#userDataPath });
       this.#browserServer = createBrowserExecutorServer({
         endpoint: browserEndpoint,
-        sessionKey: this.#browserSessionKey,
+        sessionKey: browserSessionKey,
         browserStatus: this.#browserStatus,
         browserPlanExecute: this.#browserPlanExecute,
         browserPlanCancel: this.#browserPlanCancel,
@@ -103,10 +113,10 @@ export class HostAgentRemoteComposition {
       // detached Host Agent process needs from the Browser-owned boundaries.
       this.#hostIdentity = createHostAgentSupervisorIdentity({
         userDataPath: this.#userDataPath,
-        sessionKey: this.#signerSessionKey,
+        sessionKey: signerSessionKey,
       });
       await this.#hostIdentity.connect();
-      this.#browserClient = new BrowserExecutorClient({ endpoint: browserEndpoint, sessionKey: this.#browserSessionKey });
+      this.#browserClient = new BrowserExecutorClient({ endpoint: browserEndpoint, sessionKey: browserSessionKey });
       await this.#browserClient.connect();
 
       this.#transport = new NativeSupervisorRuntimeTransport({
@@ -116,7 +126,7 @@ export class HostAgentRemoteComposition {
 
       this.#hostRuntime = new HostAgentRuntime({
         endpoint: this.#hostEndpoint,
-        sessionKey: this.#hostSessionKey,
+        sessionKey: hostSessionKey,
         developmentPlane: this.#developmentPlane,
         fastControl: this.#fastControl,
         browserClient: this.#browserClient,
@@ -171,6 +181,10 @@ export class HostAgentRemoteComposition {
       signer_session_key_exposed: false,
       browser_session_key_exposed: false,
       host_session_key_exposed: false,
+      session_keys_one_shot: true,
+      session_keys_consumed: this.#sessionKeysConsumed,
+      restart_requires_new_composition: true,
+      restart_requires_new_session_keys: true,
       private_key_exported: false,
       enrollment_authority_moved: false,
       browser_execution_via_typed_ipc: true,
