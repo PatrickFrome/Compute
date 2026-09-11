@@ -119,6 +119,7 @@ export class BrowserBrainParallelFanoutCoordinator {
 
     this.execute = execute;
     this.resolveCellKey = resolveCellKey;
+    this.usesDefaultCellResolver = resolveCellKey === defaultResolveCellKey;
     this.readMutationBudget = readMutationBudget;
     this.hardBatchLimit = strictHardBatchLimit(hardBatchLimit);
   }
@@ -140,6 +141,7 @@ export class BrowserBrainParallelFanoutCoordinator {
     }
 
     const seenCommandIds = new Set();
+    const seenCells = new Set();
     const commandIds = new Array(commands.length);
     const cellKeys = new Array(commands.length);
 
@@ -147,8 +149,9 @@ export class BrowserBrainParallelFanoutCoordinator {
     // sidecar vectors. This avoids allocating one short-lived plan object per
     // command while preserving stable caller order across preflight/execution.
     for (let index = 0; index < commands.length; index += 1) {
-      const commandId = typeof commands[index]?.command_id === 'string'
-        ? commands[index].command_id.trim()
+      const command = commands[index];
+      const commandId = typeof command?.command_id === 'string'
+        ? command.command_id.trim()
         : '';
       if (!commandId) {
         throw new BrowserBrainFanoutPlanError('missing_command_id', 'every fanout command needs command_id');
@@ -158,9 +161,22 @@ export class BrowserBrainParallelFanoutCoordinator {
       }
       seenCommandIds.add(commandId);
       commandIds[index] = commandId;
+
+      // The built-in resolver is a pure field projection. Resolve it in the
+      // already-required synchronous validation pass so the common BrowserCell
+      // path does not allocate one deferred Promise/reaction lane per command.
+      if (this.usesDefaultCellResolver) {
+        const cellKey = strictBrowserCellKey(defaultResolveCellKey(command), commandId);
+        if (seenCells.has(cellKey)) {
+          throw sameCellOverlapError(cellKey);
+        }
+        seenCells.add(cellKey);
+        cellKeys[index] = cellKey;
+      }
     }
 
-    const preflightPromises = new Array(commands.length + 1);
+    const customCellResolver = !this.usesDefaultCellResolver;
+    const preflightPromises = new Array(customCellResolver ? commands.length + 1 : 1);
     preflightPromises[0] = DEFERRED_TURN
       .then(() => this.readMutationBudget())
       .then((rawBudget) => {
@@ -171,20 +187,21 @@ export class BrowserBrainParallelFanoutCoordinator {
         return budget;
       });
 
-    const seenCells = new Set();
-    for (let index = 0; index < commands.length; index += 1) {
-      const command = commands[index];
-      const commandId = commandIds[index];
-      preflightPromises[index + 1] = DEFERRED_TURN
-        .then(() => this.resolveCellKey(command))
-        .then((rawCellKey) => {
-          const cellKey = strictBrowserCellKey(rawCellKey, commandId);
-          if (seenCells.has(cellKey)) {
-            throw sameCellOverlapError(cellKey);
-          }
-          seenCells.add(cellKey);
-          cellKeys[index] = cellKey;
-        });
+    if (customCellResolver) {
+      for (let index = 0; index < commands.length; index += 1) {
+        const command = commands[index];
+        const commandId = commandIds[index];
+        preflightPromises[index + 1] = DEFERRED_TURN
+          .then(() => this.resolveCellKey(command))
+          .then((rawCellKey) => {
+            const cellKey = strictBrowserCellKey(rawCellKey, commandId);
+            if (seenCells.has(cellKey)) {
+              throw sameCellOverlapError(cellKey);
+            }
+            seenCells.add(cellKey);
+            cellKeys[index] = cellKey;
+          });
+      }
     }
 
     const preflightPromise = Promise.all(preflightPromises);
