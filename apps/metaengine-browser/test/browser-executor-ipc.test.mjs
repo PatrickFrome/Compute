@@ -120,6 +120,9 @@ test('Browser executor endpoint is deterministic and distinct from Host Agent co
 test('Browser executor manifest is narrow and has no command lease identity sealing or raw execution surface', () => {
   const manifest = browserExecutorIpcManifest();
   assert.deepEqual(manifest.allowed_ops, ['BROWSER_STATUS', 'BROWSER_PLAN_EXECUTE', 'BROWSER_PLAN_CANCEL', 'BROWSER_EFFECT_BINDING_PREPARE']);
+  assert.equal(manifest.replay_protection, 'NONCE_SET_FAIL_CLOSED_AT_CAPACITY');
+  assert.equal(manifest.nonce_capacity, 4096);
+  assert.equal(manifest.nonce_capacity_behavior, 'REQUIRE_NEW_SESSION_KEY');
   assert.equal(manifest.effect_binding_preparation_payload, 'COMMAND_ID_ACTION_TAB_IDEMPOTENCY_EXPIRY_ONLY');
   assert.equal(manifest.effect_binding_sealing, false);
   assert.equal(manifest.control_ops, false);
