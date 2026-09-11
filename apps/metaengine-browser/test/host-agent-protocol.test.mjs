@@ -52,5 +52,6 @@ test('protocol manifest advertises no eval, shell, or raw CDP surface', () => {
   assert.equal(manifest.raw_shell, false);
   assert.equal(manifest.raw_cdp_passthrough, false);
   assert.equal(manifest.authentication, 'HMAC_SHA256_SESSION_KEY');
-  assert.equal(manifest.replay_protection, 'BOUNDED_NONCE_WINDOW');
+  assert.equal(manifest.replay_protection, 'SEQUENCED_EPOCH_HIGH_WATER_NO_EVICTION');
+  assert.equal(manifest.session_key_rotation, 'REQUIRED_ON_SERVER_PROCESS_RESTART');
 });
