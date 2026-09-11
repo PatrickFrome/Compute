@@ -36,6 +36,7 @@ test('hung trusted release discovery is bounded and cannot deadlock supervisor s
     fetchImpl: hangingFetch,
     hintProbe: async () => null,
     networkDeadlineMs: 500,
+    exactDiscoveryDeadlineMs: 500,
     releaseResolver: async ({ fetchImpl }) => {
       await fetchImpl('https://example.invalid/hangs-forever');
       return null;
@@ -53,5 +54,6 @@ test('hung trusted release discovery is bounded and cannot deadlock supervisor s
   assert.equal(snapshot.state, 'DISCOVERY_ERROR');
   assert.equal(snapshot.network_discovery_bounded, true);
   assert.equal(snapshot.network_deadline_ms, 500);
-  assert.match(String(snapshot.last_error || ''), /self_update_discovery_deadline_exceeded/);
+  assert.equal(snapshot.exact_discovery_deadline_ms, 500);
+  assert.match(String(snapshot.last_error || ''), /self_update_exact_discovery_deadline_exceeded/);
 });
