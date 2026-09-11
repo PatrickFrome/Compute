@@ -73,37 +73,83 @@ function recordTokens(record) {
   return tokenize([record.id, record.kind, record.title, record.text, record.ref, record.path, record.sha, record.severity].filter(Boolean).join(' '));
 }
 
-function scoreRecord(record, terms) {
-  const title = new Set(tokenize(record.title));
-  const path = new Set(tokenize(record.path));
-  const ref = new Set(tokenize(record.ref));
-  const all = new Set(recordTokens(record));
+function buildSearchMetadata(record) {
+  return Object.freeze({
+    all: new Set(recordTokens(record)),
+    title: new Set(tokenize(record.title)),
+    path: new Set(tokenize(record.path)),
+    ref: new Set(tokenize(record.ref)),
+  });
+}
+
+function scoreRecord(record, metadata, terms) {
   let score = SEVERITY_SCORE[record.severity] || 0;
   let matched = 0;
   for (const term of terms) {
-    if (!all.has(term)) continue;
+    if (!metadata.all.has(term)) continue;
     matched += 1;
     score += 10;
-    if (title.has(term)) score += 10;
-    if (path.has(term)) score += 8;
-    if (ref.has(term)) score += 4;
+    if (metadata.title.has(term)) score += 10;
+    if (metadata.path.has(term)) score += 8;
+    if (metadata.ref.has(term)) score += 4;
   }
   if (matched === terms.length) score += 25;
   return { score, matched };
 }
 
+function rankCompare(a, b) {
+  return b.score - a.score
+    || b.matched - a.matched
+    || String(b.record.updated_at || '').localeCompare(String(a.record.updated_at || ''))
+    || a.record.id.localeCompare(b.record.id);
+}
+
+function pushTopRanked(rows, row, limit) {
+  let low = 0;
+  let high = rows.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (rankCompare(row, rows[mid]) < 0) high = mid;
+    else low = mid + 1;
+  }
+  if (low >= limit) return;
+  rows.splice(low, 0, row);
+  if (rows.length > limit) rows.pop();
+}
+
+function stabilizeBytes(out) {
+  let measured = Number(out.bytes || 0);
+  for (let i = 0; i < 8; i += 1) {
+    out.bytes = measured;
+    const next = bytes(out);
+    if (next === measured) return measured;
+    measured = next;
+  }
+  out.bytes = measured;
+  const final = bytes(out);
+  if (final !== measured) throw new Error('chat_dev_result_byte_accounting_unstable');
+  return final;
+}
+
 function fitResult(result, maxBytes) {
   const budget = Math.max(512, Math.min(CHAT_DEVELOPMENT_MAX_RESULT_BYTES, Number(maxBytes) || CHAT_DEVELOPMENT_MAX_RESULT_BYTES));
-  const out = structuredClone(result);
-  while (out.hits.length > 0 && bytes(out) > budget) out.hits.pop();
-  if (bytes(out) > budget) throw new Error(`chat_dev_result_budget_exceeded:${bytes(out)}:${budget}`);
-  out.truncated = out.total_hits > out.hits.length;
-  out.bytes = bytes(out);
-  return Object.freeze(out);
+  const out = { ...result, hits: [...result.hits], bytes: 0 };
+  while (true) {
+    out.truncated = out.total_hits > out.hits.length;
+    out.bytes = 0;
+    if (stabilizeBytes(out) <= budget) break;
+    if (!out.hits.length) throw new Error(`chat_dev_result_budget_exceeded:${out.bytes}:${budget}`);
+    out.hits.pop();
+  }
+  out.hits = Object.freeze(out.hits);
+  Object.freeze(out);
+  if (bytes(out) !== out.bytes) throw new Error('chat_dev_result_byte_accounting_drift');
+  return out;
 }
 
 export class ChatDevelopmentIndex {
   #records = [];
+  #search = [];
   #postings = new Map();
   #revision = `dev:${sha256('[]')}`;
 
@@ -121,14 +167,17 @@ export class ChatDevelopmentIndex {
       if (ids.has(record.id)) throw new Error(`chat_dev_record_duplicate:${record.id}`);
       ids.add(record.id);
     }
+    const search = normalized.map(buildSearchMetadata);
     const postings = new Map();
-    normalized.forEach((record, index) => {
-      for (const token of recordTokens(record)) {
+    search.forEach((metadata, index) => {
+      for (const token of metadata.all) {
         if (!postings.has(token)) postings.set(token, []);
         postings.get(token).push(index);
       }
     });
+    for (const list of postings.values()) Object.freeze(list);
     this.#records = normalized;
+    this.#search = search;
     this.#postings = postings;
     this.#revision = `dev:${sha256(JSON.stringify(normalized))}`;
     return this.snapshot();
@@ -140,6 +189,8 @@ export class ChatDevelopmentIndex {
       revision: this.#revision,
       records: this.#records.length,
       indexed_tokens: this.#postings.size,
+      warm_query_record_tokenization: 'BUILD_TIME',
+      warm_query_ranking: 'BOUNDED_TOP_K',
       network_reads: 0,
       filesystem_reads: 0,
       scheduler_authority: false,
@@ -153,7 +204,8 @@ export class ChatDevelopmentIndex {
     if (!queryText || Buffer.byteLength(queryText, 'utf8') > CHAT_DEVELOPMENT_MAX_QUERY_BYTES) {
       throw new Error('chat_dev_query_invalid');
     }
-    if (!Number.isSafeInteger(Number(limit)) || Number(limit) < 1 || Number(limit) > CHAT_DEVELOPMENT_MAX_HITS) {
+    const resultLimit = Number(limit);
+    if (!Number.isSafeInteger(resultLimit) || resultLimit < 1 || resultLimit > CHAT_DEVELOPMENT_MAX_HITS) {
       throw new Error('chat_dev_query_limit_invalid');
     }
     const allowedKinds = kinds == null ? null : new Set((Array.isArray(kinds) ? kinds : []).map((value) => String(value || '').trim().toUpperCase()));
@@ -170,16 +222,25 @@ export class ChatDevelopmentIndex {
         revision: this.#revision,
         query_revision: queryRevision,
         authority_effect: false,
+        truncated: false,
+        bytes: 0,
       };
-      return Object.freeze({ ...out, bytes: bytes(out), truncated: false });
+      stabilizeBytes(out);
+      return Object.freeze(out);
     }
 
     const candidates = new Set();
     for (const term of terms) for (const index of this.#postings.get(term) || []) candidates.add(index);
-    const ranked = [...candidates]
-      .map((index) => ({ record: this.#records[index], ...scoreRecord(this.#records[index], terms) }))
-      .filter((row) => row.matched > 0 && (!allowedKinds || allowedKinds.has(row.record.kind)))
-      .sort((a, b) => b.score - a.score || b.matched - a.matched || String(b.record.updated_at || '').localeCompare(String(a.record.updated_at || '')) || a.record.id.localeCompare(b.record.id));
+    let totalHits = 0;
+    const ranked = [];
+    for (const index of candidates) {
+      const record = this.#records[index];
+      if (allowedKinds && !allowedKinds.has(record.kind)) continue;
+      const scored = { record, ...scoreRecord(record, this.#search[index], terms) };
+      if (scored.matched < 1) continue;
+      totalHits += 1;
+      pushTopRanked(ranked, scored, resultLimit);
+    }
 
     const result = {
       schema: CHAT_DEVELOPMENT_QUERY_SCHEMA,
@@ -187,8 +248,8 @@ export class ChatDevelopmentIndex {
       revision: this.#revision,
       query_revision: queryRevision,
       query_terms: terms,
-      total_hits: ranked.length,
-      hits: ranked.slice(0, Number(limit)).map(({ record, score, matched }) => ({ ...record, score, matched_terms: matched })),
+      total_hits: totalHits,
+      hits: ranked.map(({ record, score, matched }) => Object.freeze({ ...record, score, matched_terms: matched })),
       search_strategy: 'IN_MEMORY_INVERTED_INDEX',
       network_reads: 0,
       filesystem_reads: 0,

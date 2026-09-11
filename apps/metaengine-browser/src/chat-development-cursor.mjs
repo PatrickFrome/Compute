@@ -112,7 +112,8 @@ function boundedCursor({ stateRevision, sourceQuery, result }) {
   base.bytes = 0;
   base.bytes = bytes(base);
   if (base.bytes > CHAT_DEVELOPMENT_CURSOR_MAX_BYTES) throw new Error('chat_development_cursor_too_large');
-  return Object.freeze(structuredClone(base));
+  base.hits = Object.freeze(base.hits);
+  return Object.freeze(base);
 }
 
 function boundedReplay(cursor) {
@@ -125,7 +126,7 @@ function boundedReplay(cursor) {
     cursor_revision: cursor.cursor_revision,
     cursor_source_query: cursor.source_query,
     orientation: cursor.orientation,
-    hits: Array.isArray(cursor.hits) ? structuredClone(cursor.hits) : [],
+    hits: Array.isArray(cursor.hits) ? cursor.hits.slice() : [],
     total_hits: cursor.total_hits,
     truncated: cursor.truncated,
     one_call_orientation: true,
@@ -142,24 +143,26 @@ function boundedReplay(cursor) {
   if (bytes(out) > CHAT_DEVELOPMENT_CURSOR_MAX_BYTES) {
     out.cursor_source_query = clip(out.cursor_source_query, 160);
     if (out.orientation) {
-      out.orientation = {
+      out.orientation = Object.freeze({
         head_sha: out.orientation.head_sha,
         ci_state: out.orientation.ci_state,
         focus_kind: out.orientation.focus_kind,
         focus_id: out.orientation.focus_id,
         focus_title: clip(out.orientation.focus_title, 120),
         authority_effect: false,
-      };
+      });
     }
   }
   out.bytes = bytes(out);
   if (out.bytes > CHAT_DEVELOPMENT_CURSOR_MAX_BYTES) throw new Error('chat_development_cursor_replay_too_large');
+  out.hits = Object.freeze(out.hits);
   return Object.freeze(out);
 }
 
 export class ChatDevelopmentCursor {
   #cursor = null;
   #captures = 0;
+  #captureSkips = 0;
   #hits = 0;
   #misses = 0;
 
@@ -167,6 +170,15 @@ export class ChatDevelopmentCursor {
     const stateRevision = String(state_revision || '').trim();
     if (!stateRevision || !result || result.status !== 'OK' || result.authority_effect === true) return false;
     if (isContinuationIntent(query)) return false;
+    const sourceQuery = clip(query, 512);
+    const sourceRevision = clip(result?.query_revision, 96);
+    if (this.#cursor
+      && this.#cursor.state_revision === stateRevision
+      && this.#cursor.source_query === sourceQuery
+      && this.#cursor.source_query_revision === sourceRevision) {
+      this.#captureSkips += 1;
+      return false;
+    }
     this.#cursor = boundedCursor({ stateRevision, sourceQuery: query, result });
     this.#captures += 1;
     return true;
@@ -180,7 +192,7 @@ export class ChatDevelopmentCursor {
       return null;
     }
     this.#hits += 1;
-    return boundedReplay(structuredClone(this.#cursor));
+    return boundedReplay(this.#cursor);
   }
 
   snapshot(currentStateRevision = null) {
@@ -194,6 +206,7 @@ export class ChatDevelopmentCursor {
       max_bytes: CHAT_DEVELOPMENT_CURSOR_MAX_BYTES,
       max_hits: CHAT_DEVELOPMENT_CURSOR_MAX_HITS,
       captures: this.#captures,
+      capture_skips: this.#captureSkips,
       hits: this.#hits,
       misses: this.#misses,
       timers: false,

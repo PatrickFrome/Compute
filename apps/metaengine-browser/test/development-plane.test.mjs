@@ -97,7 +97,7 @@ test('typed request has no payload and no authority effect', async () => {
   assert.deepEqual(await p, { ok: true });
 });
 
-test('process loss rejects pending requests and automatically restarts until externally stopped', async () => {
+test('unplanned process loss rejects pending requests and automatically restarts until externally stopped', async () => {
   const first = new FakeChild();
   first.pid = 4242;
   const second = new FakeChild();
@@ -110,7 +110,7 @@ test('process loss rejects pending requests and automatically restarts until ext
   await starting;
   const p = h.plane.request('PROCESS_METRICS');
   first.emit('exit', 9);
-  await assert.rejects(p, /process_lost/);
+  await assert.rejects(p, /development_plane_lost/);
   assert.equal(h.plane.snapshot().automatic_restart, true);
   assert.ok(['LOST','RESTART_PENDING'].includes(h.plane.snapshot().state));
   await sleep(30);

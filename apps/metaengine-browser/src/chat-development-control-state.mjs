@@ -19,6 +19,8 @@ function normalizeSource(source) {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) throw new Error('chat_dev_control_repository_invalid');
   if (!/^[0-9a-f]{40}$/.test(headSha)) throw new Error('chat_dev_control_head_invalid');
   const prValue = source.pr == null ? null : Number(source.pr);
+  const worktreeEpoch = Number(source.worktree_epoch ?? 0);
+  if (!Number.isSafeInteger(worktreeEpoch) || worktreeEpoch < 0) throw new Error('chat_dev_control_worktree_epoch_invalid');
   return Object.freeze({
     repository,
     branch: clip(source.branch ?? source.ref, 240),
@@ -26,6 +28,7 @@ function normalizeSource(source) {
     base_sha: /^[0-9a-f]{40}$/i.test(String(source.base_sha || '')) ? String(source.base_sha).toLowerCase() : null,
     pr: prValue != null && Number.isSafeInteger(prValue) ? prValue : null,
     dirty: typeof source.dirty === 'boolean' ? source.dirty : null,
+    worktree_epoch: worktreeEpoch,
     authority_effect: false,
   });
 }
@@ -125,12 +128,17 @@ export class ChatDevelopmentControlState {
 
   setSource(source, now = new Date().toISOString()) {
     const next = normalizeSource(source);
-    const changed = !this.#source || this.#source.repository !== next.repository || this.#source.head_sha !== next.head_sha;
-    if (changed) {
+    const headChanged = !this.#source
+      || this.#source.repository !== next.repository
+      || this.#source.head_sha !== next.head_sha;
+    const worktreeChanged = !this.#source || this.#source.worktree_epoch !== next.worktree_epoch;
+    if (headChanged || worktreeChanged) {
       this.#sourceEpoch += 1;
+      this.#repoIndexRevision = null;
+    }
+    if (headChanged) {
       this.#ci.clear();
       this.#evidence.clear();
-      this.#repoIndexRevision = null;
     }
     this.#source = next;
     return this.#recompute(now);
