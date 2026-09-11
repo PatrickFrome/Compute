@@ -71,7 +71,7 @@ export class BrowserBrainStreamClock {
     let high = this.#sourceOrder.length;
     while (low < high) {
       const mid = (low + high) >>> 1;
-      if (this.#sourceOrder[mid].localeCompare(source) < 0) low = mid + 1;
+      if (this.#sourceOrder[mid] < source) low = mid + 1;
       else high = mid;
     }
     this.#sourceOrder.splice(low, 0, source);
