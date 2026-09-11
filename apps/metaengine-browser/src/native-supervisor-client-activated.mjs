@@ -4,6 +4,7 @@ import {
   finalRuntimeActivationRegistrySnapshot,
   markFinalRuntimeSupervisorStarted,
   markFinalRuntimeSupervisorStopped,
+  quiesceFinalRuntimeSupervisor,
   registerFinalRuntimeSupervisor,
 } from './final-runtime-activation-registry.mjs';
 
@@ -28,7 +29,21 @@ export class NativeSupervisorClient extends ProvenNativeSupervisorClient {
   #finalRuntimeRegistered = false;
 
   constructor(options = {}) {
-    super(options);
+    const sourceBeforeSelfUpdateInstall = options.beforeSelfUpdateInstall;
+    let finalRuntimeSupervisor = null;
+    super({
+      ...options,
+      beforeSelfUpdateInstall: async (receipt) => {
+        if (!finalRuntimeSupervisor) throw new Error('final_runtime_self_update_supervisor_not_ready');
+        const quiesced = await quiesceFinalRuntimeSupervisor(finalRuntimeSupervisor, 'SELF_UPDATE_INSTALLER_HANDOFF');
+        if (quiesced.state !== 'IDLE' || quiesced.supervisor_started !== false) {
+          throw new Error(`final_runtime_self_update_quiesce_failed:${quiesced.state}`);
+        }
+        return sourceBeforeSelfUpdateInstall?.(receipt);
+      },
+    });
+    finalRuntimeSupervisor = this;
+
     const identity = options.identity;
     const getBrowserState = options.getState;
     const executeCommand = options.executeCommand;

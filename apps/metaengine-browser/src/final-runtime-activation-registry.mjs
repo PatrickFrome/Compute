@@ -15,6 +15,18 @@ let lastError = null;
 let lastActivation = null;
 
 const clip = (value, max = 240) => String(value ?? '').slice(0, max);
+const probeStdoutReserved = process.argv.some((arg) => [
+  '--metaengine-version-probe',
+  '--metaengine-profile-probe',
+  '--metaengine-single-instance-probe',
+  '--metaengine-self-update-smoke',
+].includes(String(arg || '')));
+
+function emitLifecycle(row, { error = false } = {}) {
+  const text = JSON.stringify(row);
+  if (error || probeStdoutReserved) console.error(text);
+  else console.log(text);
+}
 
 function activationSummary(snapshot = null) {
   if (!snapshot) return null;
@@ -77,14 +89,15 @@ async function stopActivation(reason = 'STOPPED') {
       }
     }
     if (state !== 'FAILED') state = supervisorStarted ? 'WAITING_FOR_DEPENDENCIES' : 'IDLE';
-    console.log(JSON.stringify({
+    emitLifecycle({
       schema: 'metaengine.browser.final-runtime-activation.lifecycle.v1',
       state: 'STOPPED',
       reason: clip(reason, 120),
       generation,
+      probe_stdout_reserved: probeStdoutReserved,
       second_scheduler: false,
       authority_effect: false,
-    }));
+    });
     return registrySnapshot();
   })().finally(() => { activationStopPromise = null; });
   return activationStopPromise;
@@ -120,14 +133,15 @@ async function ensureActivation() {
       lastActivation = activationSummary(snapshot);
       state = snapshot?.state === 'READY' ? 'READY' : 'FAILED';
       lastError = snapshot?.last_error || null;
-      console.log(JSON.stringify({
+      emitLifecycle({
         schema: 'metaengine.browser.final-runtime-activation.lifecycle.v1',
         state,
         generation: currentGeneration,
         activation: lastActivation,
+        probe_stdout_reserved: probeStdoutReserved,
         second_scheduler: false,
         authority_effect: false,
-      }));
+      });
       if (state !== 'READY') throw new Error(`final_runtime_activation_not_ready:${state}`);
       return registrySnapshot();
     })
@@ -137,14 +151,15 @@ async function ensureActivation() {
       lastActivation = activationSummary(instance.snapshot?.() || null);
       if (activation === instance) activation = null;
       try { await instance.stop(); } catch {}
-      console.error(JSON.stringify({
+      emitLifecycle({
         schema: 'metaengine.browser.final-runtime-activation.lifecycle.v1',
         state: 'FAILED',
         generation: currentGeneration,
         error: lastError,
+        probe_stdout_reserved: probeStdoutReserved,
         second_scheduler: false,
         authority_effect: false,
-      }));
+      }, { error: true });
       throw error;
     })
     .finally(() => { activationStartPromise = null; });
@@ -185,6 +200,12 @@ export async function markFinalRuntimeSupervisorStarted(instance) {
     throw new Error(`final_runtime_registry_not_ready:${snapshot.state}`);
   }
   return snapshot;
+}
+
+export async function quiesceFinalRuntimeSupervisor(instance, reason = 'SUPERVISOR_QUIESCE') {
+  if (supervisor !== instance) throw new Error('final_runtime_registry_supervisor_mismatch');
+  supervisorStarted = false;
+  return stopActivation(reason);
 }
 
 export function markFinalRuntimeSupervisorStopped(instance) {
