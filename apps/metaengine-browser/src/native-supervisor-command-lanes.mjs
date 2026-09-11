@@ -24,6 +24,10 @@ const TAB_MUTATION_ACTIONS = new Set([
   'NAVIGATE', 'BACK', 'FORWARD', 'RELOAD',
 ]);
 
+const EFFECT_BOUND_TAB_ACTIONS = new Set([
+  'STOP_GENERATION', 'SCROLL', 'SEMANTIC_FOCUS', 'SEMANTIC_TYPE', 'TYPED_CLICK',
+]);
+
 const GLOBAL_MUTATION_ACTIONS = new Set([
   'ARM', 'SET_SUPERVISOR_MODE', 'SET_MODE', 'NEW_TAB',
   'FLEET_RECONCILE', 'FLEET_SET_PROFILE',
@@ -214,6 +218,9 @@ export function classifyNativeSupervisorCommand(command = {}) {
 function schedulerDescriptor(command) {
   const descriptor = classifyNativeSupervisorCommand(command);
   if (!TAB_MUTATION_ACTIONS.has(descriptor.action) || explicitTabId(command)) return descriptor;
+  const schedulerRejectionError = EFFECT_BOUND_TAB_ACTIONS.has(descriptor.action)
+    ? `native_supervisor_effect_binding_explicit_tab_required:${descriptor.action}`
+    : null;
   return Object.freeze({
     ...descriptor,
     lane: COMMAND_LANES.TAB_MUTATION,
@@ -222,6 +229,7 @@ function schedulerDescriptor(command) {
     exclusive: false,
     priority: 20,
     scheduler_target_fenced: true,
+    scheduler_rejection_error: schedulerRejectionError,
     authority_effect: false,
   });
 }
@@ -287,6 +295,7 @@ export class NativeSupervisorCommandLaneScheduler {
       implicit_selected_tab_exclusive: true,
       implicit_selected_tab_scheduler_admission: 'FENCED_NONEXCLUSIVE',
       exact_tab_mutation_execution_required: true,
+      missing_effect_tab_fails_before_executor: true,
       same_tab_mutations_serialized: true,
       same_tab_read_after_write_causal: true,
       same_tab_write_after_read_causal: true,
@@ -351,6 +360,24 @@ export class NativeSupervisorCommandLaneScheduler {
 
     const launch = (item) => {
       const { descriptor } = item;
+      const startedMs = Date.now();
+      if (descriptor.scheduler_rejection_error) {
+        results[item.index] = Object.freeze({
+          command_id: item.command?.command_id || null,
+          action: descriptor.action,
+          lane: descriptor.lane,
+          effect_key: descriptor.effect_key,
+          causal_key: descriptor.causal_key,
+          ok: false,
+          result: null,
+          error: descriptor.scheduler_rejection_error,
+          queue_wait_ms: Math.max(0, startedMs - item.enqueued_ms),
+          execution_ms: 0,
+          scheduler_rejected: true,
+          authority_effect: false,
+        });
+        return;
+      }
       if (descriptor.read_only) {
         activeReads += 1;
         incrementReadKey(descriptor.causal_key);
@@ -362,7 +389,6 @@ export class NativeSupervisorCommandLaneScheduler {
         if (descriptor.exclusive) exclusiveMutation = true;
       }
 
-      const startedMs = Date.now();
       let promise;
       promise = Promise.resolve()
         .then(() => execute(item.command, descriptor))
@@ -420,7 +446,9 @@ export class NativeSupervisorCommandLaneScheduler {
         const descriptor = item.descriptor;
         let runnable = false;
 
-        if (descriptor.read_only) {
+        if (descriptor.scheduler_rejection_error) {
+          runnable = true;
+        } else if (descriptor.read_only) {
           const sameTargetMutationActive = descriptor.causal_key && activeMutationKeys.has(descriptor.causal_key);
           runnable = activeReads < effective.read_concurrency
             && !sameTargetMutationActive
@@ -470,6 +498,7 @@ export const NATIVE_SUPERVISOR_COMMAND_LANE_CONTRACT = Object.freeze({
   unknown_action_parallelism_allowed: false,
   bounded_backpressure_required: true,
   exact_tab_mutation_execution_required: true,
+  missing_effect_tab_fails_before_executor: true,
   implicit_selected_tab_scheduler_admission: 'FENCED_NONEXCLUSIVE',
   immutable_original_order_barriers: true,
   causal_dependency_precompute: 'O(n)',

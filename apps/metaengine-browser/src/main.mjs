@@ -1021,7 +1021,10 @@ async function runDegradableStartupStep(subsystem, operation) {
 }
 
 async function bootstrapDegradableSubsystems() {
-  const quiescentStartup = startupControlState?.supervisor_mode === 'OFF' && startupControlState?.armed === false;
+  // Startup topology is independent from supervisor authority. Final runtime is
+  // always CONTROL+armed, while clean genesis intentionally requests zero tabs.
+  const requestedInitialTabs = Number(runtimeGenesisState?.initial_tabs || 0);
+  const shouldCreateInitialRemoteTab = Number.isSafeInteger(requestedInitialTabs) && requestedInitialTabs > 0;
   await runDegradableStartupStep('OWNER_SAFETY_GATES', async () => {
     try {
       return await initOwnerSafetyGates();
@@ -1037,7 +1040,7 @@ async function bootstrapDegradableSubsystems() {
   });
 
   let initialTab = null;
-  if (sessionReady && !quiescentStartup) {
+  if (sessionReady && shouldCreateInitialRemoteTab) {
     initialTab = await runDegradableStartupStep('INITIAL_TAB_CREATE', () => createTab('https://chatgpt.com/', { select: true, load: false }));
     if (initialTab?.tab_id) {
       setImmediate(() => {

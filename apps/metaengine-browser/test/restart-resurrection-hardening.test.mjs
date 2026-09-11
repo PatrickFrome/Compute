@@ -5,12 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  NATIVE_SUPERVISOR_CONTROL_STATE_SCHEMA,
   loadNativeSupervisorControlState,
   persistNativeSupervisorControlState,
 } from '../src/native-supervisor-control-state.mjs';
 import { FleetProvisioner } from '../src/fleet-provisioner.mjs';
 
-test('persisted CONTROL authority is fail-closed across a process boundary', async (t) => {
+test('persisted CONTROL authority survives a process boundary as the sole final-runtime state', async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-control-restart-'));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const statePath = path.join(dir, 'native-supervisor-control-state.json');
@@ -21,27 +22,43 @@ test('persisted CONTROL authority is fail-closed across a process boundary', asy
   });
 
   const restored = await loadNativeSupervisorControlState(statePath);
-  assert.equal(restored.supervisor_mode, 'OFF');
-  assert.equal(restored.armed, false);
-  assert.equal(restored.recovered_fail_closed, true);
-  assert.equal(restored.recovery_reason, 'PROCESS_BOUNDARY_REQUIRES_FRESH_AUTHORITY');
+  assert.equal(restored.supervisor_mode, 'CONTROL');
+  assert.equal(restored.armed, true);
+  assert.equal(restored.recovered_fail_closed, false);
+  assert.equal(restored.recovery_reason, null);
+  assert.equal(restored.migrated_always_on, false);
+  assert.equal(restored.migration_reason, null);
   assert.equal(restored.authority_effect, false);
 });
 
-test('non-actuating MONITOR state may survive restart without arming', async (t) => {
+test('legacy MONITOR/disarmed checkpoint is migrated to CONTROL+armed at restart without becoming effect authority', async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-monitor-restart-'));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const statePath = path.join(dir, 'native-supervisor-control-state.json');
 
-  await persistNativeSupervisorControlState(statePath, {
+  await fs.writeFile(statePath, `${JSON.stringify({
+    schema: NATIVE_SUPERVISOR_CONTROL_STATE_SCHEMA,
     supervisor_mode: 'MONITOR',
     armed: false,
-  });
+    updated_at: '2026-09-09T00:00:00.000Z',
+    recovered_fail_closed: false,
+    recovery_reason: null,
+    authority_effect: false,
+  }, null, 2)}\n`);
 
   const restored = await loadNativeSupervisorControlState(statePath);
-  assert.equal(restored.supervisor_mode, 'MONITOR');
-  assert.equal(restored.armed, false);
+  assert.equal(restored.supervisor_mode, 'CONTROL');
+  assert.equal(restored.armed, true);
   assert.equal(restored.recovered_fail_closed, false);
+  assert.equal(restored.recovery_reason, null);
+  assert.equal(restored.migrated_always_on, true);
+  assert.equal(restored.migration_reason, 'ALWAYS_ON_CONTROL:MONITOR:DISARMED');
+  assert.equal(restored.authority_effect, false);
+
+  const rewritten = JSON.parse(await fs.readFile(statePath, 'utf8'));
+  assert.equal(rewritten.supervisor_mode, 'CONTROL');
+  assert.equal(rewritten.armed, true);
+  assert.equal(rewritten.migrated_always_on, true);
 });
 
 test('restart-lost fleet identity is preserved as evidence, never resurrected, and demand gets a fresh agent id', async () => {

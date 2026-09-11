@@ -13,7 +13,7 @@ const secureStorage = {
   decryptString: (value) => Buffer.from(value).toString('utf8').replace(/^enc:/, ''),
 };
 
-test('signed owner GATE_DISABLE_ALL executes while native supervisor is OFF and DISARMED', async () => {
+test('signed owner GATE_DISABLE_ALL executes without creating an OFF/DISARMED authority escape hatch', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-owner-root-'));
   const identity = new SupervisorDeviceIdentity({ statePath: path.join(dir, 'device.json'), secureStorage });
   await identity.ensure();
@@ -62,11 +62,16 @@ test('signed owner GATE_DISABLE_ALL executes while native supervisor is OFF and 
       return { all_internal_gates_disabled:true, authority_effect:true };
     },
   });
-  client.setControlState({ mode:'OFF', armed:false });
+  assert.throws(
+    () => client.setControlState({ mode:'OFF', armed:false }),
+    /FINAL_RUNTIME_ALWAYS_ON_CONTROL_REQUIRED/,
+  );
+  assert.equal(client.snapshot().supervisor_mode, 'CONTROL');
+  assert.equal(client.snapshot().armed, true);
   await client.cycle();
 
-  assert.equal(client.snapshot().supervisor_mode, 'OFF');
-  assert.equal(client.snapshot().armed, false);
+  assert.equal(client.snapshot().supervisor_mode, 'CONTROL');
+  assert.equal(client.snapshot().armed, true);
   assert.equal(executed?.action, 'GATE_DISABLE_ALL');
   assert.equal(posted?.ok, true);
   assert.equal(posted?.receipt?.result?.all_internal_gates_disabled, true);

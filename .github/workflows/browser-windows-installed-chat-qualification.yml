@@ -198,8 +198,8 @@ jobs:
                 try { $controlState = Get-Content $controlStatePath -Raw | ConvertFrom-Json } catch { $controlState = $null }
                 if ($controlState `
                     -and $controlState.schema -eq 'metaengine.native-supervisor.control-state.v1' `
-                    -and $controlState.supervisor_mode -eq 'OFF' `
-                    -and $controlState.armed -eq $false `
+                    -and $controlState.supervisor_mode -eq 'CONTROL' `
+                    -and $controlState.armed -eq $true `
                     -and $controlState.authority_effect -eq $false `
                     -and $controlState.recovered_fail_closed -ne $true) {
                   $cleanControl = $true
@@ -235,6 +235,7 @@ jobs:
             $proof | Add-Member -NotePropertyName chatgpt_connection_mode -NotePropertyValue 'PERSISTENT_PRECONNECT_ONLY' -Force
             $proof | Add-Member -NotePropertyName control_state_schema -NotePropertyValue ([string]$controlState.schema) -Force
             $proof | Add-Member -NotePropertyName control_state_mode -NotePropertyValue ([string]$controlState.supervisor_mode) -Force
+            $proof | Add-Member -NotePropertyName control_state_armed -NotePropertyValue ([bool]$controlState.armed) -Force
             $proof | Add-Member -NotePropertyName remote_content_qualification -NotePropertyValue 'NOT_REQUESTED_IN_CLEAN_GENESIS' -Force
             $proof | Add-Member -NotePropertyName evidence_source -NotePropertyValue 'INSTALLED_NORMAL_UI_STDOUT_PLUS_DURABLE_CONTROL_STATE' -Force
             $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8

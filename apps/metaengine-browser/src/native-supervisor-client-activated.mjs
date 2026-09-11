@@ -25,6 +25,12 @@ async function currentUrlFromBrowserState(getBrowserState, command) {
   return String(active.url);
 }
 
+function alwaysOnControlError(reason) {
+  const error = new Error(`final_runtime_always_on_control_required:${reason}`);
+  error.code = 'FINAL_RUNTIME_ALWAYS_ON_CONTROL_REQUIRED';
+  return error;
+}
+
 export class NativeSupervisorClient extends ProvenNativeSupervisorClient {
   #finalRuntimeRegistered = false;
 
@@ -67,12 +73,27 @@ export class NativeSupervisorClient extends ProvenNativeSupervisorClient {
     this.#finalRuntimeRegistered = true;
   }
 
+  setControlState({ mode, armed } = {}) {
+    if (mode !== undefined && String(mode).trim().toUpperCase() !== 'CONTROL') {
+      throw alwaysOnControlError(`mode:${String(mode)}`);
+    }
+    if (armed !== undefined && armed !== true) {
+      throw alwaysOnControlError('armed:false');
+    }
+    return super.setControlState({ mode: 'CONTROL', armed: true });
+  }
+
   async start() {
-    const result = await super.start();
+    await super.start();
+    const snapshot = this.setControlState({ mode: 'CONTROL', armed: true });
+    if (snapshot.supervisor_mode !== 'CONTROL' || snapshot.armed !== true) {
+      try { super.stop(); } catch {}
+      throw alwaysOnControlError('startup_invariant_failed');
+    }
     try {
       const activation = await markFinalRuntimeSupervisorStarted(this);
       if (activation.state !== 'READY') throw new Error(`final_runtime_activation_required:${activation.state}`);
-      return result;
+      return this.snapshot();
     } catch (error) {
       try { super.stop(); } catch {}
       throw error;

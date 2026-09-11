@@ -70,7 +70,7 @@ test('native supervisor device identity persists encrypted private key and signs
   assert.equal((await reloaded.ensure()).device_id, deviceId);
 });
 
-test('native supervisor client completes approval enrollment then executes leased local DISARM', async () => {
+test('native supervisor completes approval enrollment then rejects leased local DISARM without lowering authority', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-supervisor-client-'));
   const identity = new SupervisorDeviceIdentity({ statePath: path.join(dir, 'device.json'), secureStorage });
   const requestId = crypto.randomUUID();
@@ -79,6 +79,7 @@ test('native supervisor client completes approval enrollment then executes lease
   const seen = [];
   let statusCalls = 0;
   let issued = false;
+  let postedReceipt = null;
   const fetchImpl = async (url, init = {}) => {
     const pathname = new URL(url).pathname;
     seen.push({ pathname, method: init.method, body: init.body || '' });
@@ -93,7 +94,10 @@ test('native supervisor client completes approval enrollment then executes lease
       issued = true;
       return new Response(JSON.stringify({ commands:[{ command_id:commandId, action:'DISARM', payload:{}, issued_at:new Date().toISOString(), expires_at:new Date(Date.now()+60000).toISOString(), command_lane:'EMERGENCY', effect_key:'global:emergency', authority_effect:false }], transport_delivery_is_authority:false, authority_effect:false }), { status:200, headers:{'content-type':'application/json'} });
     }
-    if (pathname.endsWith('/v1/commands/result-batch')) return new Response(JSON.stringify({ accepted:true, results:[{ command_id:commandId, accepted:true, status:'COMPLETED' }], authority_effect:false }), { status:200, headers:{'content-type':'application/json'} });
+    if (pathname.endsWith('/v1/commands/result-batch')) {
+      postedReceipt = JSON.parse(init.body || '{}')?.results?.[0] || null;
+      return new Response(JSON.stringify({ accepted:true, results:[{ command_id:commandId, accepted:true, status:postedReceipt?.ok === true ? 'COMPLETED' : 'FAILED' }], authority_effect:false }), { status:200, headers:{'content-type':'application/json'} });
+    }
     throw new Error(`unexpected_fetch:${pathname}`);
   };
   const client = new NativeSupervisorClient({
@@ -108,8 +112,12 @@ test('native supervisor client completes approval enrollment then executes lease
   assert.equal(client.snapshot().enrollment_status, 'ENROLLED');
   assert.equal(statusCalls, 1);
   assert.equal(client.snapshot().identity.device_id, deviceId);
-  assert.equal(client.snapshot().armed, false);
-  assert.equal(client.snapshot().last_command_status, 'COMPLETED');
+  assert.equal(client.snapshot().supervisor_mode, 'CONTROL');
+  assert.equal(client.snapshot().armed, true);
+  assert.equal(client.snapshot().last_command_status, 'FAILED');
+  assert.equal(postedReceipt?.ok, false);
+  assert.match(postedReceipt?.error || '', /FINAL_RUNTIME_ALWAYS_ON_CONTROL_REQUIRED/);
+  assert.equal(postedReceipt?.receipt?.effect_outcome, 'AMBIGUOUS');
   const requestIndex = seen.findIndex((row) => row.pathname.endsWith('/v1/device/enrollment/request'));
   const statusIndex = seen.findIndex((row) => row.pathname.endsWith('/v1/device/enrollment/status'));
   const stateIndex = seen.findIndex((row) => row.pathname.endsWith('/v1/state'));

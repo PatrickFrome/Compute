@@ -9,6 +9,8 @@ const CHAT_ROOT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/?$/i;
 const SERVICE_THROTTLE_BLOCKED_ACTIONS = new Set([
   'NEW_TAB', 'NAVIGATE', 'RELOAD', 'SEMANTIC_TYPE', 'TYPED_CLICK', 'STOP_GENERATION',
 ]);
+const TERMINAL_FLEET_STATES = new Set(['LOST', 'RETIRED', 'PROVISIONING_AMBIGUOUS']);
+const DEFAULT_WORKER_OBSERVATION_CONCURRENCY = 4;
 const clip = (value, max = 180) => String(value ?? '').slice(0, max);
 
 function isNativeFrame(frame) {
@@ -83,6 +85,52 @@ function positiveReadback(frame, fence) {
   if (isGenerating(frame)) return true;
   if (fence.marker && String(frame?.text_excerpt || '').includes(fence.marker)) return true;
   return CHAT_ROOT_RE.test(String(fence.pre_url || '')) && CHAT_RE.test(String(frame?.url || ''));
+}
+
+function observationConcurrency(value) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed)
+    ? Math.max(1, Math.min(16, parsed))
+    : DEFAULT_WORKER_OBSERVATION_CONCURRENCY;
+}
+
+export async function prefetchFleetWorkerFrames({ state, executeCommand, concurrency = DEFAULT_WORKER_OBSERVATION_CONCURRENCY } = {}) {
+  if (typeof executeCommand !== 'function') throw new Error('supervisor_worker_prefetch_executor_required');
+  const limit = observationConcurrency(concurrency);
+  const candidates = (state?.fleet?.agents || [])
+    .filter((agent) => agent?.tab_id && !TERMINAL_FLEET_STATES.has(String(agent?.lifecycle_state || '').toUpperCase()))
+    .map((agent) => ({ agent_id: String(agent?.agent_id || ''), tab_id: String(agent.tab_id) }));
+  const frames = new Map();
+  let failures = 0;
+  const started = Date.now();
+
+  for (let offset = 0; offset < candidates.length; offset += limit) {
+    const batch = candidates.slice(offset, offset + limit);
+    const settled = await Promise.all(batch.map(async (agent) => {
+      try {
+        const frame = await executeCommand({ action: 'CAPTURE', payload: { tab_id: agent.tab_id }, platform: null });
+        return { ...agent, frame, error: null };
+      } catch (error) {
+        return { ...agent, frame: null, error: clip(error) };
+      }
+    }));
+    for (const row of settled) {
+      if (row.frame) frames.set(row.tab_id, row.frame);
+      else failures += 1;
+    }
+  }
+
+  return {
+    schema: 'metaengine.supervisor-worker-observation-prefetch.v1',
+    candidate_count: candidates.length,
+    captured_count: frames.size,
+    failed_count: failures,
+    concurrency: limit,
+    elapsed_ms: Math.max(0, Date.now() - started),
+    frames,
+    read_only: true,
+    authority_effect: false,
+  };
 }
 
 export function createSupervisorSendBoundaryExecutor({ getState, executeCommand, throttleGate = null } = {}) {
@@ -229,16 +277,37 @@ export function createSupervisorSendBoundaryExecutor({ getState, executeCommand,
 // reason.startsWith('MAX_CYCLES_PER_EPOCH'). The wrapper adds no page authority.
 export class SupervisorLifecycleRuntime extends CoreSupervisorLifecycleRuntime {
   #serviceThrottleGate;
+  #sourceGetState;
+  #sourceExecute;
+  #workerCaptureCache;
+  #workerObservationConcurrency;
+  #lastWorkerPrefetch = null;
 
   constructor(options = {}) {
     const serviceThrottleGate = options.serviceThrottleGate || new ChatGptServiceThrottleGate();
     if (typeof serviceThrottleGate.active !== 'function' || typeof serviceThrottleGate.snapshot !== 'function') {
       throw new Error('supervisor_service_throttle_gate_invalid');
     }
+    if (typeof options.getState !== 'function' || typeof options.executeCommand !== 'function') {
+      throw new Error('supervisor_lifecycle_dependencies_required');
+    }
     const baseCanActuate = typeof options.canActuate === 'function' ? options.canActuate : () => true;
+    const workerCaptureCache = new Map();
+    const sourceExecute = options.executeCommand;
+    const cachedExecute = async (command) => {
+      if (String(command?.action || '') === 'CAPTURE') {
+        const tabId = String(command?.payload?.tab_id || '');
+        if (tabId && workerCaptureCache.has(tabId)) {
+          const frame = workerCaptureCache.get(tabId);
+          workerCaptureCache.delete(tabId);
+          return frame;
+        }
+      }
+      return sourceExecute(command);
+    };
     const guardedExecute = createSupervisorSendBoundaryExecutor({
       getState: options.getState,
-      executeCommand: options.executeCommand,
+      executeCommand: cachedExecute,
       throttleGate: serviceThrottleGate,
     });
     super({
@@ -247,6 +316,50 @@ export class SupervisorLifecycleRuntime extends CoreSupervisorLifecycleRuntime {
       executeCommand: guardedExecute,
     });
     this.#serviceThrottleGate = serviceThrottleGate;
+    this.#sourceGetState = options.getState;
+    this.#sourceExecute = sourceExecute;
+    this.#workerCaptureCache = workerCaptureCache;
+    this.#workerObservationConcurrency = observationConcurrency(options.workerObservationConcurrency ?? options.workerObservationBudget);
+  }
+
+  async cycle(options = {}) {
+    this.#workerCaptureCache.clear();
+    try {
+      const state = await this.#sourceGetState();
+      const prefetched = await prefetchFleetWorkerFrames({
+        state,
+        executeCommand: this.#sourceExecute,
+        concurrency: this.#workerObservationConcurrency,
+      });
+      for (const [tabId, frame] of prefetched.frames.entries()) this.#workerCaptureCache.set(tabId, frame);
+      this.#lastWorkerPrefetch = Object.freeze({
+        schema: prefetched.schema,
+        candidate_count: prefetched.candidate_count,
+        captured_count: prefetched.captured_count,
+        failed_count: prefetched.failed_count,
+        concurrency: prefetched.concurrency,
+        elapsed_ms: prefetched.elapsed_ms,
+        read_only: true,
+        authority_effect: false,
+      });
+    } catch (error) {
+      this.#lastWorkerPrefetch = Object.freeze({
+        schema: 'metaengine.supervisor-worker-observation-prefetch.v1',
+        candidate_count: null,
+        captured_count: 0,
+        failed_count: null,
+        concurrency: this.#workerObservationConcurrency,
+        elapsed_ms: null,
+        error: clip(error),
+        read_only: true,
+        authority_effect: false,
+      });
+    }
+    try {
+      return await super.cycle(options);
+    } finally {
+      this.#workerCaptureCache.clear();
+    }
   }
 
   snapshot() {
@@ -256,7 +369,10 @@ export class SupervisorLifecycleRuntime extends CoreSupervisorLifecycleRuntime {
       continuous_service: {
         ...(base.continuous_service || {}),
         service_throttle_backpressure: 'UI_READBACK_GATE_V1',
+        worker_observation_prefetch: 'BOUNDED_PARALLEL_READ_ONLY_V1',
+        worker_observation_concurrency: this.#workerObservationConcurrency,
       },
+      worker_observation_prefetch: this.#lastWorkerPrefetch ? structuredClone(this.#lastWorkerPrefetch) : null,
       service_throttle: this.#serviceThrottleGate.snapshot(),
       authority_effect: false,
     };

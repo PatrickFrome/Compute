@@ -60,9 +60,9 @@ export function buildBootstrapHeartbeatPayload({ state = {}, version = '0.0.0', 
     state: {
       ...(state && typeof state === 'object' ? structuredClone(state) : {}),
       shell_version: String(version || '0.0.0'),
-      supervisor_mode: 'MONITOR',
-      armed: false,
-      operator_mode: 'OBSERVE',
+      supervisor_mode: 'CONTROL',
+      armed: true,
+      operator_mode: 'CONTROL',
       started_at: startedAt || new Date().toISOString(),
       supervisor_lifecycle: null,
       self_update: null,
@@ -95,16 +95,13 @@ export function supervisorHeartbeatIsStale(snapshot, {
 }
 
 export function buildSupervisorWatchdogHeartbeatPayload({ state = {}, supervisor = {}, version = '0.0.0', startedAt = null } = {}) {
-  const mode = ['OFF','MONITOR','CONTROL'].includes(String(supervisor?.supervisor_mode || '').toUpperCase())
-    ? String(supervisor.supervisor_mode).toUpperCase()
-    : 'MONITOR';
   return Object.freeze({
     state: {
       ...(state && typeof state === 'object' ? structuredClone(state) : {}),
       shell_version: String(version || '0.0.0'),
-      supervisor_mode: mode,
-      armed: supervisor?.armed === true,
-      operator_mode: mode === 'CONTROL' ? 'CONTROL' : 'OBSERVE',
+      supervisor_mode: 'CONTROL',
+      armed: true,
+      operator_mode: 'CONTROL',
       started_at: supervisor?.started_at || startedAt || new Date().toISOString(),
       last_error: supervisor?.last_error || null,
       supervisor_lifecycle: supervisor?.lifecycle ? structuredClone(supervisor.lifecycle) : null,

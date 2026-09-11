@@ -41,8 +41,10 @@ if ($profile.schema -ne 'metaengine.browser.profile-probe.v1' -or $profile.prima
   throw 'soak_profile_probe_contract_invalid'
 }
 
-$journal = Join-Path ([string]$profile.user_data_path) 'metaengine-browser-startup-journal-v1.json'
-$controlStatePath = Join-Path ([string]$profile.user_data_path) 'metaengine-native-supervisor-control-state-v1.json'
+$userDataPath = [string]$profile.user_data_path
+$journal = Join-Path $userDataPath 'metaengine-browser-startup-journal-v1.json'
+$controlStatePath = Join-Path $userDataPath 'metaengine-native-supervisor-control-state-v1.json'
+$runtimeGenesisPath = Join-Path $userDataPath 'metaengine-runtime-generation-v1.json'
 Remove-Item $journal -Force -ErrorAction SilentlyContinue
 Remove-Item "$journal.corrupt-*" -Force -ErrorAction SilentlyContinue
 
@@ -77,45 +79,56 @@ try {
   $runtimeImport = $startup.events | Where-Object { $_.boot_id -eq $startup.current_boot_id -and $_.state -eq 'RUNTIME_IMPORT_OK' } | Select-Object -Last 1
   if (-not $runtimeImport) { throw 'soak_runtime_import_success_missing' }
 
-  # PRIMARY_WINDOW_STABLE intentionally precedes degradable startup. Read the
-  # exact durable control state before deciding whether initial remote topology is
-  # expected. Clean Genesis is deliberately OFF + disarmed and must remain a
-  # zero-tab, zero-automatic-navigation startup; other modes retain the old gates.
+  # PRIMARY_WINDOW_STABLE intentionally precedes degradable startup. Authority and
+  # topology are independent: final runtime must be CONTROL+armed while the runtime
+  # genesis marker decides whether any initial remote tab is requested.
   $controlState = $null
-  $controlDeadline = [DateTime]::UtcNow.AddSeconds(15)
-  while ([DateTime]::UtcNow -lt $controlDeadline) {
-    if (Test-Path $controlStatePath -PathType Leaf) {
+  $runtimeGenesis = $null
+  $startupContractDeadline = [DateTime]::UtcNow.AddSeconds(15)
+  while ([DateTime]::UtcNow -lt $startupContractDeadline) {
+    if (-not $controlState -and (Test-Path $controlStatePath -PathType Leaf)) {
       try { $controlState = Get-Content $controlStatePath -Raw | ConvertFrom-Json } catch { $controlState = $null }
-      if ($controlState) { break }
     }
+    if (-not $runtimeGenesis -and (Test-Path $runtimeGenesisPath -PathType Leaf)) {
+      try { $runtimeGenesis = Get-Content $runtimeGenesisPath -Raw | ConvertFrom-Json } catch { $runtimeGenesis = $null }
+    }
+    if ($controlState -and $runtimeGenesis) { break }
     Start-Sleep -Milliseconds 100
   }
+
   if (-not $controlState `
       -or $controlState.schema -ne 'metaengine.native-supervisor.control-state.v1' `
-      -or @('OFF','MONITOR','CONTROL') -notcontains [string]$controlState.supervisor_mode `
-      -or -not ($controlState.armed -is [bool]) `
+      -or [string]$controlState.supervisor_mode -ne 'CONTROL' `
+      -or $controlState.armed -ne $true `
       -or $controlState.authority_effect -ne $false) {
-    throw 'soak_startup_control_state_invalid'
+    throw 'soak_startup_always_on_control_state_invalid'
   }
-  if ($controlState.supervisor_mode -eq 'OFF' -and $controlState.armed -ne $false) {
-    throw 'soak_off_control_state_armed'
+  if (-not $runtimeGenesis `
+      -or $runtimeGenesis.schema -ne 'metaengine.browser.runtime-genesis.v1' `
+      -or -not [string]$runtimeGenesis.generation `
+      -or [string]$runtimeGenesis.supervisor_mode -ne 'CONTROL' `
+      -or $runtimeGenesis.armed -ne $true `
+      -or $runtimeGenesis.automatic_actuation_after_genesis -ne $false `
+      -or $runtimeGenesis.authority_effect -ne $false) {
+    throw 'soak_runtime_genesis_contract_invalid'
   }
-  $quiescentStartup = $controlState.supervisor_mode -eq 'OFF' `
-    -and $controlState.armed -eq $false `
-    -and $controlState.recovered_fail_closed -ne $true
+
+  try { $requestedInitialTabs = [int64]$runtimeGenesis.initial_tabs } catch { throw 'soak_runtime_genesis_initial_tabs_invalid' }
+  if ($requestedInitialTabs -lt 0 -or $requestedInitialTabs -gt 256) { throw 'soak_runtime_genesis_initial_tabs_invalid' }
+  $zeroTopologyStartup = $requestedInitialTabs -eq 0
 
   $requiredStartupSubsystems = @(
     'OWNER_SAFETY_GATES',
     'USER_SESSION'
   )
-  if (-not $quiescentStartup) { $requiredStartupSubsystems += 'INITIAL_TAB_CREATE' }
+  if (-not $zeroTopologyStartup) { $requiredStartupSubsystems += 'INITIAL_TAB_CREATE' }
   $requiredStartupSubsystems += @(
     'FLEET',
     'SHELL_SNAPSHOT',
     'DEVELOPMENT_PLANE',
     'NATIVE_SUPERVISOR'
   )
-  if (-not $quiescentStartup) { $requiredStartupSubsystems += 'INITIAL_REMOTE_LOAD' }
+  if (-not $zeroTopologyStartup) { $requiredStartupSubsystems += 'INITIAL_REMOTE_LOAD' }
   $settledStartupSubsystems = New-Object 'System.Collections.Generic.HashSet[string]'
   $settleDeadline = [DateTime]::UtcNow.AddSeconds(35)
   while ([DateTime]::UtcNow -lt $settleDeadline -and $settledStartupSubsystems.Count -lt $requiredStartupSubsystems.Count) {
@@ -138,18 +151,18 @@ try {
     throw "soak_startup_resource_baseline_unsettled:$($missing -join ',')"
   }
 
-  if ($quiescentStartup -and (Test-Path $normalOut -PathType Leaf)) {
-    $quiescentInitialTabRows = 0
-    $quiescentInitialRemoteRows = 0
+  if ($zeroTopologyStartup -and (Test-Path $normalOut -PathType Leaf)) {
+    $unexpectedInitialTabRows = 0
+    $unexpectedInitialRemoteRows = 0
     foreach ($startupLine in @(Get-Content $normalOut -ErrorAction SilentlyContinue)) {
       if (-not [string]$startupLine -or -not ([string]$startupLine).Trim().StartsWith('{')) { continue }
       try { $startupRow = $startupLine | ConvertFrom-Json } catch { continue }
       if ($startupRow.schema -ne 'metaengine.browser-startup-subsystem.v1') { continue }
-      if ([string]$startupRow.subsystem -eq 'INITIAL_TAB_CREATE') { $quiescentInitialTabRows += 1 }
-      if ([string]$startupRow.subsystem -eq 'INITIAL_REMOTE_LOAD') { $quiescentInitialRemoteRows += 1 }
+      if ([string]$startupRow.subsystem -eq 'INITIAL_TAB_CREATE') { $unexpectedInitialTabRows += 1 }
+      if ([string]$startupRow.subsystem -eq 'INITIAL_REMOTE_LOAD') { $unexpectedInitialRemoteRows += 1 }
     }
-    if ($quiescentInitialTabRows -gt 0) { throw 'soak_quiescent_startup_created_initial_tab' }
-    if ($quiescentInitialRemoteRows -gt 0) { throw 'soak_quiescent_startup_started_initial_remote_load' }
+    if ($unexpectedInitialTabRows -gt 0) { throw 'soak_zero_topology_startup_created_initial_tab' }
+    if ($unexpectedInitialRemoteRows -gt 0) { throw 'soak_zero_topology_startup_started_initial_remote_load' }
   }
 
   $normal.Refresh()
@@ -297,9 +310,15 @@ try {
   $proof | Add-Member -NotePropertyName startup_resource_baseline_subsystems -NotePropertyValue @($requiredStartupSubsystems) -Force
   $proof | Add-Member -NotePropertyName startup_control_mode -NotePropertyValue ([string]$controlState.supervisor_mode) -Force
   $proof | Add-Member -NotePropertyName startup_control_armed -NotePropertyValue ([bool]$controlState.armed) -Force
-  $proof | Add-Member -NotePropertyName quiescent_startup_verified -NotePropertyValue ([bool]$quiescentStartup) -Force
-  $proof | Add-Member -NotePropertyName automatic_initial_tab_suppressed -NotePropertyValue ([bool]$quiescentStartup) -Force
-  $proof | Add-Member -NotePropertyName automatic_initial_remote_load_suppressed -NotePropertyValue ([bool]$quiescentStartup) -Force
+  $proof | Add-Member -NotePropertyName startup_control_always_on_verified -NotePropertyValue $true -Force
+  $proof | Add-Member -NotePropertyName runtime_genesis_generation -NotePropertyValue ([string]$runtimeGenesis.generation) -Force
+  $proof | Add-Member -NotePropertyName runtime_genesis_initial_tabs -NotePropertyValue $requestedInitialTabs -Force
+  $proof | Add-Member -NotePropertyName zero_topology_startup_verified -NotePropertyValue ([bool]$zeroTopologyStartup) -Force
+  # Compatibility alias for older evidence consumers; it now means zero requested
+  # startup topology and no longer means supervisor OFF/disarmed.
+  $proof | Add-Member -NotePropertyName quiescent_startup_verified -NotePropertyValue ([bool]$zeroTopologyStartup) -Force
+  $proof | Add-Member -NotePropertyName automatic_initial_tab_suppressed -NotePropertyValue ([bool]$zeroTopologyStartup) -Force
+  $proof | Add-Member -NotePropertyName automatic_initial_remote_load_suppressed -NotePropertyValue ([bool]$zeroTopologyStartup) -Force
   $proof | Add-Member -NotePropertyName final_activation_sequence -NotePropertyValue $lastActivationSequence -Force
   $proof | Add-Member -NotePropertyName activation_latency_p95_ms -NotePropertyValue ([Math]::Round($p95Ms, 2)) -Force
   $proof | Add-Member -NotePropertyName activation_latency_p95_budget_ms -NotePropertyValue $ActivationP95BudgetMs -Force
