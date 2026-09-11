@@ -112,7 +112,7 @@ const chrome = {
   runtime: {
     id: 'combined-load-extension-id',
     getURL: (p = '') => `chrome-extension://combined-load-extension-id/${p}`,
-    getManifest: () => ({ version: '0.6.2' }),
+    getManifest: () => ({ version: '0.7.0' }),
     async openOptionsPage() {},
     reload() {},
     onInstalled: { addListener(fn) { listeners.installed.push(fn); } },
@@ -169,7 +169,8 @@ assert.equal(listeners.updateAvailable.length, 1, 'safe update listener not regi
 assert.ok(listeners.debuggerEvent.length >= 2, 'broker + GLM debugger event listeners not registered');
 assert.ok(listeners.debuggerDetach.length >= 2, 'broker + GLM debugger detach listeners not registered');
 assert.ok(listeners.tabRemoved.length >= 2, 'operator/broker tab removal listeners not registered');
-assert.equal(context.A2_OPERATOR_RUNTIME, '0.6.2-auto-rollover');
+assert.equal(context.A2_OPERATOR_RUNTIME, '0.7.0-dev.2');
+assert.equal(context.A2_RUNTIME?.version, '0.7.0-dev.2');
 assert.equal(typeof context.A2_DEBUGGER_RUN, 'function');
 assert.equal(typeof context.A2_DEBUGGER_HOLD, 'function');
 assert.equal(typeof context.A2_CHATGPT_TRUSTED_SEND, 'function');
@@ -183,7 +184,7 @@ assert.equal(commandPoll.headers.get('x-a2-chat-bridge-secret'), 'x'.repeat(64),
 assert.equal(local.has('bridgeSecret'), false, 'legacy pairing secret was not removed from chrome.storage.local');
 assert.equal(idbSecrets.get('pairing_secret'), 'x'.repeat(64), 'pairing secret was not migrated into IndexedDB vault');
 
-console.log('classic-worker-combined-load-v062: PASS', {
+console.log('classic-worker-combined-load-v070: PASS', {
   fetchCalls: fetchCalls.length,
   runtimeMessageListeners: listeners.runtimeMessage.length,
   installedListeners: listeners.installed.length,
