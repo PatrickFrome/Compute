@@ -56,7 +56,8 @@ test('context_get is live while mutation transport remains absent', async () => 
 test('dev_query uses the existing Development Plane read-only capability', async () => {
   const { boundary, calls } = harness();
   const result = await boundary.invoke('dev_query', { query: 'verified execution fabric', limit: 4, max_bytes: 4096 });
-  assert.equal(result.status, 'OK');
+  assert.equal(result.tool, 'dev_query');
+  assert.equal(result.result.status, 'OK');
   assert.equal(calls.repo, 1);
   assert.equal(calls.state, 0);
 });
