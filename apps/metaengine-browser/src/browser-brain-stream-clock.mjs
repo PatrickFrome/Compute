@@ -19,7 +19,8 @@ function normalizedSequence(value) {
 }
 
 function freezeRow(source, state) {
-  return Object.freeze({
+  if (state.rowCache) return state.rowCache;
+  state.rowCache = Object.freeze({
     source,
     sequence: state.sequence,
     resync_required: state.resyncRequired,
@@ -28,6 +29,11 @@ function freezeRow(source, state) {
     gap_from: state.gapFrom,
     gap_to: state.gapTo,
   });
+  return state.rowCache;
+}
+
+function invalidateRow(state) {
+  state.rowCache = null;
 }
 
 /**
@@ -70,6 +76,7 @@ export class BrowserBrainStreamClock {
       resyncMinimumSequence: null,
       gapFrom: null,
       gapTo: null,
+      rowCache: null,
     };
     this.#sources.set(source, state);
     this.#invalidateSnapshot();
@@ -83,6 +90,7 @@ export class BrowserBrainStreamClock {
     state.resyncMinimumSequence = Math.max(state.sequence, Number(minimumSequence) || state.sequence);
     state.gapFrom = gapFrom;
     state.gapTo = gapTo;
+    invalidateRow(state);
     this.#invalidateSnapshot();
   }
 
@@ -148,6 +156,7 @@ export class BrowserBrainStreamClock {
     }
 
     state.sequence = sequence;
+    invalidateRow(state);
     this.#epoch += 1;
     this.#invalidateSnapshot();
     return Object.freeze({
@@ -202,6 +211,7 @@ export class BrowserBrainStreamClock {
     state.resyncMinimumSequence = null;
     state.gapFrom = null;
     state.gapTo = null;
+    invalidateRow(state);
     this.#resyncRequiredCount = Math.max(0, this.#resyncRequiredCount - 1);
     this.#epoch += 1;
     this.#invalidateSnapshot();
