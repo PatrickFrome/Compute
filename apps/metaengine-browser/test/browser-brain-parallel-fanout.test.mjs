@@ -196,6 +196,37 @@ test('pre-aborted signal rejects before budget read or execution', async () => {
   assert.equal(budgetReads, 0);
 });
 
+test('abort during pending preflight rejects before every physical effect', async () => {
+  const controller = new AbortController();
+  let releaseResolver;
+  let effects = 0;
+  const instance = coordinator({
+    readMutationBudget: () => 1,
+    resolveCellKey: () => new Promise((resolve) => {
+      releaseResolver = resolve;
+    }),
+    execute: async () => {
+      effects += 1;
+    },
+  });
+
+  const dispatchPromise = instance.dispatch([command('cmd-a', 'tab-a')], {
+    signal: controller.signal,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort();
+
+  await assert.rejects(
+    dispatchPromise,
+    (error) => error instanceof BrowserBrainFanoutPlanError && error.code === 'aborted',
+  );
+  assert.equal(effects, 0);
+
+  releaseResolver('tab-a');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(effects, 0);
+});
+
 test('provider seams stay deferred while sharing the fanout turn', async () => {
   const calls = [];
   const instance = coordinator({
