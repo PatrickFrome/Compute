@@ -91,6 +91,18 @@ function awaitPreflight(preflightPromise, signal) {
   return Promise.race([preflightPromise, abortPromise]).finally(removeAbortListener);
 }
 
+function validateMutationBudget(rawBudget, batchSize) {
+  const budget = strictMutationBudget(rawBudget);
+  if (batchSize > budget) {
+    throw pressureBudgetExceededError(batchSize, budget);
+  }
+  return budget;
+}
+
+function isThenable(value) {
+  return value != null && typeof value.then === 'function';
+}
+
 async function executeLane(execute, command, commandId, cellKey, signal) {
   if (signal?.aborted) {
     return {
@@ -213,18 +225,24 @@ export class BrowserBrainParallelFanoutCoordinator {
       }
     }
 
-    const budgetPromise = DEFERRED_TURN
-      .then(() => this.readMutationBudget())
-      .then((rawBudget) => {
-        const budget = strictMutationBudget(rawBudget);
-        if (commands.length > budget) {
-          throw pressureBudgetExceededError(commands.length, budget);
+    let preflightPromise;
+    if (this.usesDefaultCellResolver) {
+      // Preserve the provider seam: budget reads remain deferred from the caller
+      // turn. For the common synchronous process-local budget, validate inside
+      // that same deferred reaction rather than allocating a second reaction.
+      // Async provider budgets retain their awaited validation path.
+      preflightPromise = DEFERRED_TURN.then(() => {
+        const rawBudget = this.readMutationBudget();
+        if (isThenable(rawBudget)) {
+          return Promise.resolve(rawBudget)
+            .then((budget) => validateMutationBudget(budget, commands.length));
         }
-        return budget;
+        return validateMutationBudget(rawBudget, commands.length);
       });
-
-    let preflightPromise = budgetPromise;
-    if (!this.usesDefaultCellResolver) {
+    } else {
+      const budgetPromise = DEFERRED_TURN
+        .then(() => this.readMutationBudget())
+        .then((rawBudget) => validateMutationBudget(rawBudget, commands.length));
       const preflightPromises = new Array(commands.length + 1);
       preflightPromises[0] = budgetPromise;
       for (let index = 0; index < commands.length; index += 1) {
