@@ -180,8 +180,9 @@ assert.equal(typeof context.A2_OPERATOR_CAPTURE_PERCEPTION, 'function');
 assert.equal(typeof context.A2_OPERATOR_CAPTURE_OOPIF, 'function');
 
 const commandPoll = fetchCalls.find((call) => call.input.endsWith('/v1/commands/next'));
-assert.ok(commandPoll, 'initial remote poll did not reach commands/next');
-assert.equal(commandPoll.headers.get('x-a2-chat-bridge-secret'), 'x'.repeat(64), 'pairing header was not sourced from real IndexedDB vault');
+assert.equal(commandPoll, undefined, 'disarmed runtime must not fetch executable commands');
+assert.equal(local.get('bridgeCommandFetchSuppressed'), 'DISARMED', 'disarmed command-fetch suppression was not durably observed');
+assert.ok(local.get('daemonOnlineAt'), 'disarmed observation path did not reach terminal online state');
 assert.equal(local.has('bridgeSecret'), false, 'legacy pairing secret was not removed from chrome.storage.local');
 assert.equal(idbSecrets.get('pairing_secret'), 'x'.repeat(64), 'pairing secret was not migrated into IndexedDB vault');
 
@@ -193,5 +194,6 @@ console.log('classic-worker-combined-load: PASS', {
   startupListeners: listeners.startup.length,
   debuggerEventListeners: listeners.debuggerEvent.length,
   vaultMigrated: true,
+  commandFetchSuppressed: local.get('bridgeCommandFetchSuppressed'),
   runtime: context.A2_OPERATOR_RUNTIME,
 });
