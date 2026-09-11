@@ -158,14 +158,13 @@ export class BrowserBrainParallelFanoutCoordinator {
       }
       seenCommandIds.add(commandId);
       commandIds[index] = commandId;
-      cellKeys[index] = null;
     }
 
     const preflightPromises = new Array(commands.length + 1);
     preflightPromises[0] = DEFERRED_TURN
       .then(() => this.readMutationBudget())
-      .then(strictMutationBudget)
-      .then((budget) => {
+      .then((rawBudget) => {
+        const budget = strictMutationBudget(rawBudget);
         if (commands.length > budget) {
           throw pressureBudgetExceededError(commands.length, budget);
         }
@@ -178,8 +177,8 @@ export class BrowserBrainParallelFanoutCoordinator {
       const commandId = commandIds[index];
       preflightPromises[index + 1] = DEFERRED_TURN
         .then(() => this.resolveCellKey(command))
-        .then((rawCellKey) => strictBrowserCellKey(rawCellKey, commandId))
-        .then((cellKey) => {
+        .then((rawCellKey) => {
+          const cellKey = strictBrowserCellKey(rawCellKey, commandId);
           if (seenCells.has(cellKey)) {
             throw sameCellOverlapError(cellKey);
           }
