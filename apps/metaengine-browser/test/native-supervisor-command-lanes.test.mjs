@@ -63,6 +63,25 @@ test('implicit selected-tab mutations fail toward global serialization', () => {
   }
 });
 
+test('effect-bound mutation missing explicit tab is rejected before executor', async () => {
+  const scheduler = new NativeSupervisorCommandLaneScheduler({ readConcurrency: 4, mutationConcurrency: 4, maxBatch: 8 });
+  const invoked = [];
+  const result = await scheduler.drain([
+    command('SCROLL', {}, 'missing-tab'),
+    command('PROCESS_CENSUS', {}, 'read-ok'),
+  ], async (row) => {
+    invoked.push(row.command_id);
+    return { ok: true };
+  });
+  assert.deepEqual(invoked, ['read-ok']);
+  assert.equal(result[0].ok, false);
+  assert.equal(result[0].scheduler_rejected, true);
+  assert.equal(result[0].execution_ms, 0);
+  assert.equal(result[0].error, 'native_supervisor_effect_binding_explicit_tab_required:SCROLL');
+  assert.equal(result[1].ok, true);
+  assert.equal(scheduler.snapshot().missing_effect_tab_fails_before_executor, true);
+});
+
 test('DISARM and mode OFF are exclusive emergency controls', () => {
   assert.equal(classifyNativeSupervisorCommand(command('DISARM')).lane, COMMAND_LANES.EMERGENCY);
   assert.equal(classifyNativeSupervisorCommand(command('SET_SUPERVISOR_MODE', { mode: 'OFF' })).lane, COMMAND_LANES.EMERGENCY);
@@ -196,6 +215,7 @@ test('batch and concurrency limits are bounded to protect event-loop memory', as
   assert.equal(snap.mutation_concurrency, 32);
   assert.equal(snap.same_tab_read_after_write_causal, true);
   assert.equal(snap.same_tab_write_after_read_causal, true);
+  assert.equal(snap.missing_effect_tab_fails_before_executor, true);
   await assert.rejects(
     () => scheduler.drain([command('POLL'), command('PROCESS_CENSUS'), command('PROCESS_EVENTS')], async () => null),
     /native_supervisor_command_batch_too_large/,
