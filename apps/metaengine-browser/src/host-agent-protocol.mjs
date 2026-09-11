@@ -147,7 +147,7 @@ export function verifyHostAgentFrame(frame, sessionKey, { consumeNonce = null } 
 export class HostAgentNonceWindow {
   #max;
   #seen = new Set();
-  #order = [];
+  #exhausted = false;
 
   constructor({ max = 4096 } = {}) {
     if (!Number.isSafeInteger(max) || max < 32 || max > 65536) throw new Error('host_agent_nonce_window_invalid');
@@ -156,18 +156,23 @@ export class HostAgentNonceWindow {
 
   consume(nonce) {
     const value = String(nonce || '');
-    if (!NONCE_RE.test(value) || this.#seen.has(value)) return false;
+    if (!NONCE_RE.test(value) || this.#seen.has(value) || this.#exhausted) return false;
+    if (this.#seen.size >= this.#max) {
+      this.#exhausted = true;
+      return false;
+    }
     this.#seen.add(value);
-    this.#order.push(value);
-    while (this.#order.length > this.#max) this.#seen.delete(this.#order.shift());
+    if (this.#seen.size >= this.#max) this.#exhausted = true;
     return true;
   }
 
   snapshot() {
     return Object.freeze({
       schema: 'metaengine.host-agent.nonce-window.v1',
-      retained: this.#order.length,
+      retained: this.#seen.size,
       max: this.#max,
+      exhausted: this.#exhausted,
+      capacity_policy: 'FAIL_CLOSED_REQUIRE_NEW_SESSION',
       authority_effect: false,
     });
   }
@@ -181,7 +186,9 @@ export function hostAgentProtocolManifest() {
     max_payload_bytes: HOST_AGENT_MAX_PAYLOAD_BYTES,
     allowed_ops: [...HOST_AGENT_ALLOWED_OPS],
     authentication: 'HMAC_SHA256_SESSION_KEY',
-    replay_protection: 'BOUNDED_NONCE_WINDOW',
+    replay_protection: 'NONCE_SET_FAIL_CLOSED_AT_CAPACITY',
+    nonce_capacity: 4096,
+    nonce_capacity_behavior: 'REQUIRE_NEW_SESSION_KEY',
     payload_serializations_per_auth: 1,
     cached_signed_wire_serialization: true,
     arbitrary_eval: false,
