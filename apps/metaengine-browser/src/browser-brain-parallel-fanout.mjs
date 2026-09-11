@@ -68,9 +68,6 @@ function preflightAbortError() {
 }
 
 function awaitPreflight(preflightPromise, signal) {
-  // The overwhelmingly common signal-less path can return the aggregate directly.
-  // Keeping this helper synchronous avoids one async-function adoption Promise per
-  // admitted batch while preserving the exact same await boundary in dispatch().
   if (!signal) return preflightPromise;
 
   let removeAbortListener = () => {};
@@ -143,11 +140,16 @@ export class BrowserBrainParallelFanoutCoordinator {
     }
 
     const seenCommandIds = new Set();
-    const plan = new Array(commands.length);
+    const commandIds = new Array(commands.length);
+    const cellKeys = new Array(commands.length);
 
+    // Keep caller-owned commands opaque and carry fan-out metadata in dense
+    // sidecar vectors. This avoids allocating one short-lived plan object per
+    // command while preserving stable caller order across preflight/execution.
     for (let index = 0; index < commands.length; index += 1) {
-      const command = commands[index];
-      const commandId = typeof command?.command_id === 'string' ? command.command_id.trim() : '';
+      const commandId = typeof commands[index]?.command_id === 'string'
+        ? commands[index].command_id.trim()
+        : '';
       if (!commandId) {
         throw new BrowserBrainFanoutPlanError('missing_command_id', 'every fanout command needs command_id');
       }
@@ -155,20 +157,12 @@ export class BrowserBrainParallelFanoutCoordinator {
         throw new BrowserBrainFanoutPlanError('duplicate_command_id', `duplicate command_id ${commandId}`);
       }
       seenCommandIds.add(commandId);
-      plan[index] = { command, commandId, cellKey: null };
+      commandIds[index] = commandId;
+      cellKeys[index] = null;
     }
 
-    // Pressure admission and BrowserCell resolution are independent read-only
-    // preflight seams. Start every lane before awaiting any one of them; no
-    // physical effect is possible until the aggregate has passed. Reuse one
-    // already-resolved turn promise to defer every provider seam without creating
-    // a fresh resolved promise per lane. Validate each lane as it settles so
-    // malformed pressure, insufficient budget, missing exact-cell evidence, or a
-    // proven same-cell collision can reject immediately without waiting for
-    // unrelated slow/wedged preflight. Bind each exact cell directly onto its plan
-    // entry while the resolver lane settles so large batches avoid a second
-    // cell-key result vector and post-preflight mapping pass.
-    const budgetPromise = DEFERRED_TURN
+    const preflightPromises = new Array(commands.length + 1);
+    preflightPromises[0] = DEFERRED_TURN
       .then(() => this.readMutationBudget())
       .then(strictMutationBudget)
       .then((budget) => {
@@ -177,36 +171,32 @@ export class BrowserBrainParallelFanoutCoordinator {
         }
         return budget;
       });
+
     const seenCells = new Set();
-    const preflightPromises = new Array(plan.length + 1);
-    preflightPromises[0] = budgetPromise;
-    for (let index = 0; index < plan.length; index += 1) {
-      const entry = plan[index];
+    for (let index = 0; index < commands.length; index += 1) {
+      const command = commands[index];
+      const commandId = commandIds[index];
       preflightPromises[index + 1] = DEFERRED_TURN
-        .then(() => this.resolveCellKey(entry.command))
-        .then((rawCellKey) => strictBrowserCellKey(rawCellKey, entry.commandId))
+        .then(() => this.resolveCellKey(command))
+        .then((rawCellKey) => strictBrowserCellKey(rawCellKey, commandId))
         .then((cellKey) => {
           if (seenCells.has(cellKey)) {
             throw sameCellOverlapError(cellKey);
           }
           seenCells.add(cellKey);
-          entry.cellKey = cellKey;
+          cellKeys[index] = cellKey;
         });
     }
+
     const preflightPromise = Promise.all(preflightPromises);
     await awaitPreflight(preflightPromise, signal);
     if (signal?.aborted) throw preflightAbortError();
 
-    // All independent cells may start after one-shot admission. Preallocate the
-    // exact bounded execution vector and let each lane own its settlement mapping
-    // so the hot path avoids both dynamic growth and a map-created promise vector.
-    // Reuse the same resolved turn promise to isolate synchronous provider throws
-    // without allocating one throwaway resolved promise per effect lane. Abort is
-    // checked again at each execution-start boundary so a prior peer cannot cause
-    // later physical effects to start after shared cancellation.
-    const executionPromises = new Array(plan.length);
-    for (let index = 0; index < plan.length; index += 1) {
-      const { command, commandId, cellKey } = plan[index];
+    const executionPromises = new Array(commands.length);
+    for (let index = 0; index < commands.length; index += 1) {
+      const command = commands[index];
+      const commandId = commandIds[index];
+      const cellKey = cellKeys[index];
       executionPromises[index] = DEFERRED_TURN
         .then(() => {
           if (signal?.aborted) {
