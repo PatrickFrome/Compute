@@ -239,11 +239,12 @@ export class BrowserBrainCognitionFabric {
       if (INVALIDATING_TYPES.has(type) || INVALIDATING_SEMANTIC_METHODS.has(method)) this.#invalidateTab(id);
     }
 
+    const streamClock = this.#streamClock.snapshot();
     return Object.freeze({
       schema: 'metaengine.browser-brain.cognition-edge-result.v1',
       clock: Object.freeze(clockResults),
-      causal_epoch: this.#streamClock.snapshot().epoch,
-      resync_required: this.#streamClock.snapshot().gap_requires_resync,
+      causal_epoch: streamClock.epoch,
+      resync_required: streamClock.gap_requires_resync,
       authority_effect: false,
     });
   }
