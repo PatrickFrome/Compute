@@ -15,11 +15,11 @@ test('snapshot keeps deterministic lexical source order across unsorted arrival 
   const first = clock.snapshot();
   assert.deepEqual(first.sources.map((row) => row.source), expected);
 
-  const renderer = clock.observe('process:renderer', 11);
+  const renderer = clock.observe('process:renderer', 12);
   assert.equal(renderer.disposition, 'APPLIED');
   const second = clock.snapshot();
   assert.deepEqual(second.sources.map((row) => row.source), expected);
-  assert.equal(second.sources.find((row) => row.source === 'process:renderer').sequence, 11);
+  assert.equal(second.sources.find((row) => row.source === 'process:renderer').sequence, 12);
   assert.equal(second.authority_effect, false);
 });
 
