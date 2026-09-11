@@ -4,11 +4,6 @@ import { classifyNativeSupervisorCommand, COMMAND_LANES } from './native-supervi
 
 export const BROWSER_BRAIN_ADAPTIVE_FANOUT_RUNTIME_SCHEMA = 'metaengine.browser-brain.adaptive-fanout-runtime.v1';
 
-function explicitCell(command) {
-  const value = String(command?.payload?.tab_id || '').trim();
-  return value || null;
-}
-
 /**
  * Composition seam between live Browser pressure, the existing command-lane
  * scheduler, and the already-proven runtime-fenced mutation executor.
@@ -45,7 +40,6 @@ export class BrowserBrainAdaptiveFanoutRuntime {
     this.#scheduler.setConcurrencyBudget(this.#budget);
     this.#fanout = new BrowserBrainParallelFanoutCoordinator({
       hardBatchLimit,
-      resolveCellKey: explicitCell,
       readMutationBudget: () => this.#budget.mutation_concurrency,
       execute: (command, context) => executeRuntimeFenced(command, context),
     });
