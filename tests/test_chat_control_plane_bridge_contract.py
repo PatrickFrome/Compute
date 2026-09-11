@@ -1,5 +1,6 @@
 import json
 import pathlib
+import re
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -31,11 +32,16 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         cls.server = (DAEMON / "server.mjs").read_text()
         cls.secure_entry = (DAEMON / "secure-entry.mjs").read_text()
         cls.manifest = json.loads((EXT / "manifest.json").read_text())
+        cls.runtime_package = json.loads((EXT / "runtime-package-manifest.json").read_text())
 
     def test_manifest_and_worker_entrypoints(self):
         self.assertEqual(self.manifest["manifest_version"], 3)
-        version = tuple(int(part) for part in self.manifest["version"].split("."))
-        self.assertGreaterEqual(version, (0, 6, 2))
+        self.assertEqual(self.manifest["version"], "0.7.0")
+        self.assertEqual(self.runtime_package["package_version"], self.manifest["version"])
+        self.assertEqual(self.runtime_package["operator_runtime"], "0.7.0-dev.2")
+        self.assertTrue(self.runtime_package["policy"]["canonical_filenames_only"])
+        self.assertTrue(self.runtime_package["policy"]["reject_versioned_runtime_files"])
+        self.assertTrue(self.runtime_package["policy"]["reject_unlisted_files"])
         self.assertGreaterEqual(int(self.manifest["minimum_chrome_version"]), 125)
         self.assertEqual(self.manifest["background"]["service_worker"], "background-entry.js")
         self.assertIn("debugger", self.manifest["permissions"])
@@ -43,20 +49,24 @@ class ChatControlPlaneBridgeContract(unittest.TestCase):
         self.assertEqual(self.manifest["content_scripts"][0]["js"], ["prompt-gate.js"])
         self.assertEqual(self.manifest["content_scripts"][0]["run_at"], "document_start")
         self.assertEqual(self.manifest["content_scripts"][1]["js"], ["platform-dom-compat.js", "content.js", "content-recovery.js"])
+        self.assertEqual(self.manifest["content_scripts"][1]["run_at"], "document_idle")
+
+        imports = re.findall(r'importScripts\("\./([^\"]+)"\)', self.background_entry)
+        self.assertEqual(len(imports), len(set(imports)), "service-worker imports must be unique")
+        package_files = set(self.runtime_package["files"])
+        self.assertTrue(set(imports).issubset(package_files), sorted(set(imports) - package_files))
         for script in [
-            "bootstrap-config.js", "secret-vault.js", "device-identity.js", "bridge-client.js",
             "runtime-marker.js", "target-registry.js", "target-observability.js", "bridge-runtime.js",
-            "supervisor-device-transport.js", "debugger-broker.js", "debugger-watchdog.js",
-            "trusted-chatgpt.js", "chatgpt-rollover.js", "trusted-glm.js", "operator-gate-bindings.js",
-            "operator-lease-gate.js", "operator-actions.js", "operator-compute-bridge.js", "runtime-core.js",
-            "operator-control.js", "operator-perception.js", "operator-oopif-perception.js",
-            "operator-semantic-actions.js", "supervisor-authority.js", "supervisor-chat-session.js",
-            "trusted-supervisor-chat.js", "supervisor-chat-action.js", "supervisor-chat-guard.js",
-            "supervisor-chat-action-monitor.js", "supervisor-incident-router.js", "supervisor-chat-ui-bridge.js"
+            "debugger-broker.js", "debugger-watchdog.js", "trusted-chatgpt.js", "trusted-glm.js",
+            "operator-gate-bindings.js", "operator-lease-gate.js", "operator-actions.js",
+            "operator-compute-bridge.js", "runtime-core.js", "operator-control.js",
+            "operator-perception.js", "operator-oopif-perception.js", "operator-semantic-actions.js",
+            "supervisor-authority.js", "supervisor-chat-session.js", "trusted-supervisor-chat.js",
         ]:
             self.assertIn(f'importScripts("./{script}")', self.background_entry)
-        self.assertNotIn("background-v0522.js", self.background_entry)
+            self.assertIn(script, package_files)
         self.assertNotIn("operator-oopf-perception.js", self.background_entry)
+        self.assertNotRegex(self.background_entry, r'-v\d{3}\.js')
         self.assertNotIn("import(", self.background_entry)
 
     def test_remote_auth_and_secret_boundaries(self):
