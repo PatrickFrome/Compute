@@ -48,6 +48,7 @@ function invalidateRow(state) {
  */
 export class BrowserBrainStreamClock {
   #sources = new Map();
+  #sourceOrder = [];
   #epoch = 0;
   #resyncRequiredCount = 0;
   #maxSources;
@@ -65,6 +66,17 @@ export class BrowserBrainStreamClock {
     this.#snapshotCache = null;
   }
 
+  #insertSourceOrder(source) {
+    let low = 0;
+    let high = this.#sourceOrder.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (this.#sourceOrder[mid].localeCompare(source) < 0) low = mid + 1;
+      else high = mid;
+    }
+    this.#sourceOrder.splice(low, 0, source);
+  }
+
   #newSource(source, sequence = 0) {
     if (this.#sources.size >= this.#maxSources) {
       throw new Error('browser_brain_stream_clock_source_capacity_exceeded');
@@ -79,6 +91,7 @@ export class BrowserBrainStreamClock {
       rowCache: null,
     };
     this.#sources.set(source, state);
+    this.#insertSourceOrder(source);
     this.#invalidateSnapshot();
     return state;
   }
@@ -235,9 +248,7 @@ export class BrowserBrainStreamClock {
 
   snapshot() {
     if (this.#snapshotCache) return this.#snapshotCache;
-    const sources = [...this.#sources.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([source, state]) => freezeRow(source, state));
+    const sources = this.#sourceOrder.map((source) => freezeRow(source, this.#sources.get(source)));
     this.#snapshotCache = Object.freeze({
       schema: BROWSER_BRAIN_STREAM_CLOCK_SCHEMA,
       epoch: this.#epoch,
