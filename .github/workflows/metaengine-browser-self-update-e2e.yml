@@ -88,7 +88,8 @@ jobs:
         run: |
           $raw = Get-Content './test/self-update-fast-physical.ps1' -Raw
           $raw = $raw.Replace('0.6.3', '0.7.0')
-          if ($raw -match '0\.6\.3') { throw 'legacy_release_core_rewrite_incomplete' }
+          $raw = $raw.Replace('0\.6\.3', '0\.7\.0')
+          if ($raw.Contains('0.6.3') -or $raw.Contains('0\.6\.3')) { throw 'legacy_release_core_rewrite_incomplete' }
           if ($raw -notmatch "currentVersion: '0\.7\.0-dev\.0\.1'") { throw 'published_070_baseline_resolver_missing' }
           $pattern = '(?ms)# Build exactly one new target\..*?npm pkg set version=\$target'
           $replacement = @'
