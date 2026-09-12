@@ -28,6 +28,9 @@ test('verified dev publisher is exact-SHA isolated and cannot regress the live h
   assert.match(source, /group: metaengine-browser-fast-verified-release-\$\{\{ github\.sha \}\}/);
   assert.doesNotMatch(source, /group: metaengine-browser-fast-verified-release\n/);
   assert.match(source, /manifest_git_sha_mismatch/);
+  assert.match(source, /published=\[r for r in releases if r\.get\('draft'\) is False\]/);
+  assert.match(source, /prior=\[parse\(r\.get\('tag_name'\)\) for r in published\]/);
+  assert.match(source, /release_tag_already_exists/);
   assert.match(source, /SKIP_NEWER/);
   assert.match(source, /hint_version_collision/);
   assert.match(source, /pointer_write_blob_mismatch/);
