@@ -23,6 +23,8 @@ const CHATGPT_SUBMIT_OUTCOME_METHODS = new Set([
   'Runtime.executionContextCreated',
 ]);
 const NATIVE_BROWSER_PROCESS_INCARNATION_ID = crypto.randomUUID();
+const DEFAULT_CAPTURE_VIEW_MAX_ATTEMPTS = 5;
+const DEFAULT_CAPTURE_VIEW_RETRY_DELAY_MS = 150;
 const clip = (value, max) => String(value ?? '').slice(0, max);
 const axRawValue = (node, key) => String(node?.[key]?.value ?? '');
 const axValue = (node, key) => axRawValue(node, key).trim();
@@ -362,14 +364,61 @@ export async function executeSemanticCommand(webContents, command) {
   });
 }
 
-export async function captureViewThumbnail(webContents) {
-  if (!webContents || webContents.isDestroyed?.()) throw new Error('native_capture_webcontents_unavailable');
-  let image = await webContents.capturePage();
-  const size = image.getSize();
-  if (!Number.isSafeInteger(size?.width) || size.width <= 0
-    || !Number.isSafeInteger(size?.height) || size.height <= 0) {
-    throw new Error('native_capture_surface_unavailable');
+function captureSurfaceSize(image) {
+  const size = image?.getSize?.() || null;
+  const width = Number(size?.width);
+  const height = Number(size?.height);
+  return {
+    width,
+    height,
+    valid: Number.isSafeInteger(width) && width > 0 && Number.isSafeInteger(height) && height > 0,
+  };
+}
+
+function isTransientCaptureSurfaceError(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  return message.includes('current display surface not available for capture')
+    || message.includes('native_capture_surface_unavailable');
+}
+
+function captureSurfaceUnavailableError(attempts, lastError = null) {
+  const error = new Error(`native_capture_surface_unavailable_after_retry:${attempts}:${clip(lastError?.message || lastError || 'ZERO_SIZED_SURFACE', 160)}`);
+  error.code = 'NATIVE_CAPTURE_SURFACE_UNAVAILABLE';
+  error.attempts = attempts;
+  return error;
+}
+
+async function capturePageWithBoundedSurfaceReadiness(webContents, {
+  maxAttempts = DEFAULT_CAPTURE_VIEW_MAX_ATTEMPTS,
+  retryDelayMs = DEFAULT_CAPTURE_VIEW_RETRY_DELAY_MS,
+  sleepImpl = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+} = {}) {
+  const attempts = Math.max(1, Math.min(8, Number(maxAttempts) || DEFAULT_CAPTURE_VIEW_MAX_ATTEMPTS));
+  const delayMs = Math.max(0, Math.min(1000, Number(retryDelayMs) || 0));
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    if (!webContents || webContents.isDestroyed?.()) throw new Error('native_capture_webcontents_unavailable');
+    try {
+      const image = await webContents.capturePage();
+      const size = captureSurfaceSize(image);
+      if (size.valid) return { image, size, attempts: attempt, transientRetries: attempt - 1 };
+      lastError = new Error('native_capture_surface_unavailable');
+    } catch (error) {
+      if (webContents?.isDestroyed?.()) throw new Error('native_capture_webcontents_unavailable');
+      if (!isTransientCaptureSurfaceError(error)) throw error;
+      lastError = error;
+    }
+    if (attempt < attempts && delayMs > 0) await sleepImpl(delayMs);
   }
+  throw captureSurfaceUnavailableError(attempts, lastError);
+}
+
+export async function captureViewThumbnail(webContents, options = {}) {
+  if (!webContents || webContents.isDestroyed?.()) throw new Error('native_capture_webcontents_unavailable');
+  const captured = await capturePageWithBoundedSurfaceReadiness(webContents, options);
+  let image = captured.image;
+  const size = captured.size;
   if (size.width > 720) image = image.resize({ width: 720, quality: 'good' });
   let jpeg = image.toJPEG(55);
   if (jpeg.byteLength > 120000) {
@@ -385,6 +434,9 @@ export async function captureViewThumbnail(webContents) {
     title: clip(webContents.getTitle?.() || '', 240),
     source_width: size.width,
     source_height: size.height,
+    capture_attempts: captured.attempts,
+    transient_surface_retries: captured.transientRetries,
+    bounded_surface_readiness: true,
     jpeg_bytes: jpeg.byteLength,
     sha256: crypto.createHash('sha256').update(jpeg).digest('hex'),
     jpeg_base64: jpeg.toString('base64'),
