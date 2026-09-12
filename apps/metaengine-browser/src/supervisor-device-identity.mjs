@@ -4,6 +4,8 @@ import path from 'node:path';
 
 export const SUPERVISOR_DEVICE_PROFILE = 'A2_DEVICE_HTTP_SIGNATURE_V1';
 export const ENROLLMENT_SIGNATURE_PROFILE = 'METAENGINE_NATIVE_ENROLLMENT_V1';
+export const GUARDIAN_OWNER_CHALLENGE_PROFILE = 'METAENGINE_GUARDIAN_OWNER_CHALLENGE_V1';
+export const GUARDIAN_UPDATE_ACTUATOR_PROFILE = 'METAENGINE_GUARDIAN_UPDATE_ACTUATOR_V1';
 
 let activeSupervisorDeviceStatePath = null;
 
@@ -28,6 +30,32 @@ function canonicalPublicJwk(value = {}) {
 
 function fingerprintFor(jwk) {
   return crypto.createHash('sha256').update(JSON.stringify(jwk)).digest('hex');
+}
+
+function exactUuid(value, label) {
+  const text = String(value || '').toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(text)) {
+    throw new Error(`${label}_invalid`);
+  }
+  return text;
+}
+
+function exactNonce(value, label) {
+  const text = String(value || '');
+  if (!/^[A-Za-z0-9_-]{32,128}$/.test(text)) throw new Error(`${label}_invalid`);
+  return text;
+}
+
+function exactSha(value, length, label) {
+  const text = String(value || '').trim().toLowerCase();
+  if (!new RegExp(`^[0-9a-f]{${length}}$`).test(text)) throw new Error(`${label}_invalid`);
+  return text;
+}
+
+function exactDevVersion(value) {
+  const text = String(value || '').trim();
+  if (!/^\d+\.\d+\.\d+-dev\.\d+\.1$/.test(text)) throw new Error('guardian_release_version_invalid');
+  return text;
 }
 
 function atomicStateShape(value) {
@@ -145,6 +173,87 @@ export class SupervisorDeviceIdentity {
   }
 
   randomNonce() { return crypto.randomBytes(24).toString('base64url'); }
+
+  async guardianOwnerChallenge({ command_id, request_nonce } = {}) {
+    const state = await this.ensure();
+    if (!state.device_id) throw new Error('supervisor_device_not_enrolled');
+    const commandId = exactUuid(command_id, 'guardian_command_id');
+    const requestNonce = exactNonce(request_nonce, 'guardian_request_nonce');
+    const material = [
+      GUARDIAN_OWNER_CHALLENGE_PROFILE,
+      `command_id:${commandId}`,
+      `request_nonce:${requestNonce}`,
+    ].join('\n');
+    return Object.freeze({
+      schema: 'metaengine.browser-guardian.owner-challenge-proof.v1',
+      command_id: commandId,
+      request_nonce: requestNonce,
+      public_jwk: structuredClone(state.public_jwk),
+      key_fingerprint_sha256: state.key_fingerprint_sha256,
+      signature: this.#sign(material),
+      caller_supplied_key_material: false,
+      authority_effect: false,
+    });
+  }
+
+  async guardianUpdateActuatorProof({
+    operation,
+    effect_id,
+    effect_generation,
+    command_id,
+    request_nonce,
+    release_version,
+    candidate_git_sha,
+    installer_sha256,
+    manifest_sha256,
+    installed_executable_sha256,
+  } = {}) {
+    const state = await this.ensure();
+    if (!state.device_id) throw new Error('supervisor_device_not_enrolled');
+    const op = String(operation || '').trim().toUpperCase();
+    if (!['DISPATCH', 'OBSERVE'].includes(op)) throw new Error('guardian_update_operation_invalid');
+    const effectId = exactUuid(effect_id, 'guardian_effect_id');
+    const generation = Number(effect_generation);
+    if (!Number.isSafeInteger(generation) || generation < 1) throw new Error('guardian_effect_generation_invalid');
+    const commandId = exactUuid(command_id, 'guardian_command_id');
+    const requestNonce = exactNonce(request_nonce, 'guardian_request_nonce');
+    const releaseVersion = exactDevVersion(release_version);
+    const candidateGitSha = exactSha(candidate_git_sha, 40, 'guardian_candidate_git_sha');
+    const installerSha256 = exactSha(installer_sha256, 64, 'guardian_installer_sha256');
+    const manifestSha256 = exactSha(manifest_sha256, 64, 'guardian_manifest_sha256');
+    const installedExecutableSha256 = exactSha(installed_executable_sha256, 64, 'guardian_installed_executable_sha256');
+    const material = [
+      GUARDIAN_UPDATE_ACTUATOR_PROFILE,
+      `operation:${op}`,
+      `effect_id:${effectId}`,
+      `effect_generation:${generation}`,
+      `command_id:${commandId}`,
+      `request_nonce:${requestNonce}`,
+      `release_version:${releaseVersion}`,
+      `candidate_git_sha:${candidateGitSha}`,
+      `installer_sha256:${installerSha256}`,
+      `manifest_sha256:${manifestSha256}`,
+      `installed_executable_sha256:${installedExecutableSha256}`,
+    ].join('\n');
+    return Object.freeze({
+      schema: 'metaengine.browser-guardian.update-actuator-device-proof.v1',
+      operation: op,
+      effect_id: effectId,
+      effect_generation: generation,
+      command_id: commandId,
+      request_nonce: requestNonce,
+      release_version: releaseVersion,
+      candidate_git_sha: candidateGitSha,
+      installer_sha256: installerSha256,
+      manifest_sha256: manifestSha256,
+      installed_executable_sha256: installedExecutableSha256,
+      public_jwk: structuredClone(state.public_jwk),
+      key_fingerprint_sha256: state.key_fingerprint_sha256,
+      signature: this.#sign(material),
+      caller_supplied_key_material: false,
+      authority_effect: false,
+    });
+  }
 
   async enrollmentHeaders(bodyText, { timestamp = new Date().toISOString(), nonce = this.randomNonce() } = {}) {
     await this.ensure();
