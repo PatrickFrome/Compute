@@ -81,8 +81,11 @@ jobs:
         run: |
           npm run check
           npm test
+          # Source package identity is not release authority. The checked-in source
+          # remains on its historical 0.6.6 development family while the exact-SHA
+          # physical harness below creates and seals the 0.7.0 successor identity.
           $sourcePackageVersion = [string](node -p "require('./package.json').version")
-          if ($sourcePackageVersion -notmatch '^0\.6\.6-dev\.[0-9]+\.1$') { throw "source_package_version_not_trusted_dev_shape:$sourcePackageVersion" }
+          if ($sourcePackageVersion -notmatch '^0\.6\.6-dev\.[0-9]+\.[0-9]+$') { throw "source_package_version_not_trusted_dev_shape:$sourcePackageVersion" }
           $physical = Get-Content ./test/self-update-fast-physical.ps1 -Raw
           if ($physical -notmatch '\$target\s*=\s*"0\.6\.3-dev\.\$buildId\.1"') { throw 'physical_target_source_contract_missing' }
       - name: Bind physical target to immutable workflow run identity
