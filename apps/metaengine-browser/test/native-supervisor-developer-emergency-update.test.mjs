@@ -55,8 +55,16 @@ async function runOneCommand(command, { developerEmergencyUpdate = null } = {}) 
       return jsonResponse({ commands: [command] });
     }
     if (pathname.endsWith('/v1/commands/result-batch')) {
-      posted.push(JSON.parse(String(init.body || '{}')));
-      return jsonResponse({ accepted: true });
+      const body = JSON.parse(String(init.body || '{}'));
+      posted.push(body);
+      return jsonResponse({
+        authority_effect: false,
+        results: (body.results || []).map((row) => ({
+          command_id: row.command_id,
+          accepted: true,
+          status: row.ok === true ? 'COMPLETED' : 'FAILED',
+        })),
+      });
     }
     throw new Error(`unexpected_fetch:${pathname}`);
   };
