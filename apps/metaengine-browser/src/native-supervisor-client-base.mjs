@@ -9,6 +9,7 @@ import { NativeSupervisorCommandFastlane } from './native-supervisor-command-fas
 import { confirmSelfUpdateRestartSafety } from './self-update-restart-safety.mjs';
 import { persistPreInstallReceipt } from './self-update-handoff.mjs';
 import { reconcileRestoredGeneratingChats } from './self-update-chat-reconcile.mjs';
+import { DEVELOPER_EMERGENCY_UPDATE_ACTION } from './developer-emergency-update-admission.mjs';
 import {
   buildSelfUpdateSessionContinuity,
   clearSelfUpdateSessionContinuity,
@@ -96,6 +97,7 @@ export class NativeSupervisorClient {
   #fetch;
   #getState;
   #executeCommand;
+  #developerEmergencyUpdate;
   #version;
   #intervalMs;
   #timer = null;
@@ -136,6 +138,7 @@ export class NativeSupervisorClient {
     fetchImpl = globalThis.fetch,
     getState,
     executeCommand,
+    developerEmergencyUpdate = null,
     version,
     intervalMs = 2000,
     beforeSelfUpdateInstall = null,
@@ -152,11 +155,13 @@ export class NativeSupervisorClient {
     if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
     if (typeof getState !== 'function') throw new Error('native_supervisor_state_provider_required');
     if (typeof executeCommand !== 'function') throw new Error('native_supervisor_command_executor_required');
+    if (developerEmergencyUpdate != null && typeof developerEmergencyUpdate !== 'function') throw new Error('native_supervisor_developer_emergency_update_handler_invalid');
     if (beforeSelfUpdateInstall != null && typeof beforeSelfUpdateInstall !== 'function') throw new Error('native_supervisor_self_update_handoff_invalid');
     this.#identity = identity;
     this.#fetch = fetchImpl;
     this.#getState = getState;
     this.#executeCommand = executeCommand;
+    this.#developerEmergencyUpdate = developerEmergencyUpdate;
     this.#version = String(version || '0.0.0');
     this.#intervalMs = Math.max(250, Math.min(5000, Number(intervalMs || 2000)));
     this.#batchWaitMs = Math.max(250, Math.min(15000, Number(commandBatchWaitMs) || DEFAULT_BATCH_WAIT_MS));
@@ -269,6 +274,13 @@ export class NativeSupervisorClient {
         terminal_requires_external_stop: true,
         startup_scheduler_armed_before_enrollment: true,
         cycle_errors_terminal: false,
+        authority_effect: false,
+      },
+      developer_emergency_update: {
+        configured: this.#developerEmergencyUpdate != null,
+        signed_lease_precedes_handler: true,
+        bypasses_program_policy: true,
+        bypasses_transport_authentication: false,
         authority_effect: false,
       },
       arbitrary_eval: false,
@@ -573,7 +585,29 @@ export class NativeSupervisorClient {
   }
 
   async #executeLocalOrRemote(command) {
-    const action = String(command?.action || '');
+    const action = String(command?.action || '').toUpperCase();
+    // This is the only program-policy bypass. The command has already traversed
+    // enrollment + device-signed lease transport before reaching this function.
+    // The injected handler must independently prove developer owner/device binding,
+    // immutable release authority and the Guardian durable effect journal.
+    if (action === DEVELOPER_EMERGENCY_UPDATE_ACTION) {
+      if (!this.#developerEmergencyUpdate) {
+        return Object.freeze({
+          schema: 'metaengine.developer-emergency-update-runtime.v1',
+          state: 'HOLD',
+          reason: 'DEVELOPER_EMERGENCY_UPDATE_HANDLER_UNAVAILABLE',
+          physical_dispatch_count: 0,
+          effect_outcome: 'NO_EFFECT_PROVEN',
+          automatic_retry_allowed: false,
+          bypass_program_policy: true,
+          arbitrary_url_allowed: false,
+          arbitrary_executable_allowed: false,
+          arbitrary_shell_allowed: false,
+          authority_effect: false,
+        });
+      }
+      return this.#developerEmergencyUpdate(structuredClone(command));
+    }
     if (ROOT_POLICY_ACTIONS.has(action)) return this.#executeCommand(command);
     if (action === 'ARM') { this.#armed = true; return { armed: true, supervisor_mode: this.#supervisorMode, authority_effect: true }; }
     if (action === 'DISARM') { this.#armed = false; return { armed: false, supervisor_mode: this.#supervisorMode, authority_effect: true }; }
@@ -664,7 +698,7 @@ export class NativeSupervisorClient {
       effectOutcome = execution.effect_outcome;
       await this.#postResult(command, true, result, null, effectOutcome);
       this.#lastCommandId = command.command_id;
-      this.#lastCommandStatus = descriptor.read_only || effectOutcome === 'CONFIRMED' ? 'COMPLETED' : 'AMBIGUOUS';
+      this.#lastCommandStatus = descriptor.read_only || ['CONFIRMED','NO_EFFECT_PROVEN'].includes(effectOutcome) ? 'COMPLETED' : 'AMBIGUOUS';
       return result;
     } catch (error) {
       const message = clipError(error);
@@ -698,7 +732,7 @@ export class NativeSupervisorClient {
     if (last) {
       this.#lastCommandId = last.command.command_id;
       this.#lastCommandStatus = last.ok
-        ? (last.descriptor.read_only || last.effect_outcome === 'CONFIRMED' ? 'COMPLETED' : 'AMBIGUOUS')
+        ? (last.descriptor.read_only || ['CONFIRMED','NO_EFFECT_PROVEN'].includes(last.effect_outcome) ? 'COMPLETED' : 'AMBIGUOUS')
         : 'FAILED';
     }
     return rows;
