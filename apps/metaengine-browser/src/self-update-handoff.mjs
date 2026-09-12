@@ -8,6 +8,8 @@ import {
   readSelfUpdateTransaction,
   transitionSelfUpdateTransaction,
 } from './self-update-transaction-journal.mjs';
+import { recoverAmbiguousInstalledSuccessor } from './self-update-ambiguous-successor-recovery.mjs';
+import { resolveExactTrustedMetaengineDevRelease } from './trusted-dev-release-resolver.mjs';
 
 const require = createRequire(import.meta.url);
 const { durableWriteJson } = require('./durable-json-file.cjs');
@@ -198,7 +200,12 @@ export async function readExpectedPreInstallReceipt(app, { maxAgeMs = DEFAULT_MA
   };
 }
 
-export async function inspectSelfUpdateStartup(app, { clock = () => Date.now() } = {}) {
+export async function inspectSelfUpdateStartup(app, {
+  clock = () => Date.now(),
+  resolveTrustedInstalledRelease = ({ currentVersion }) => resolveExactTrustedMetaengineDevRelease({ version: currentVersion }),
+  hashExecutable = undefined,
+  executablePath = process.execPath,
+} = {}) {
   assertApp(app);
   let journal = null;
   try {
@@ -210,11 +217,40 @@ export async function inspectSelfUpdateStartup(app, { clock = () => Date.now() }
       transactionState: 'UNREADABLE',
     });
   }
-  if (journal?.state === 'AMBIGUOUS_INSTALL' || journal?.state === 'QUARANTINED') {
+  if (journal?.state === 'AMBIGUOUS_INSTALL') {
+    const recovery = await recoverAmbiguousInstalledSuccessor({
+      app,
+      resolveTrustedInstalledRelease,
+      executablePath,
+      ...(typeof hashExecutable === 'function' ? { hashExecutable } : {}),
+      clock,
+    });
+    if (recovery.state === 'SUPERSEDED') {
+      return {
+        schema: 'metaengine.self-update.startup-inspection.v1',
+        state: 'SUPERSEDED',
+        transaction_state: 'SUPERSEDED',
+        current_version: String(app.getVersion() || ''),
+        target_version: journal.target_version || null,
+        reason: 'trusted_installed_successor_proven',
+        successor_relationship: recovery.relationship || null,
+        installed_executable_sha256: recovery.installed_executable_sha256 || null,
+        physical_installer_launch_count: 0,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      };
+    }
     return startupHold({
       app,
       journal,
-      reason: journal.evidence?.reason || journal.evidence?.quarantine_reason || 'durable_transaction_hold',
+      reason: `durable_transaction_hold:${String(recovery.reason || 'successor_unproven').slice(0, 180)}`,
+    });
+  }
+  if (journal?.state === 'QUARANTINED') {
+    return startupHold({
+      app,
+      journal,
+      reason: journal.evidence?.quarantine_reason || journal.evidence?.reason || 'durable_transaction_hold',
     });
   }
 
