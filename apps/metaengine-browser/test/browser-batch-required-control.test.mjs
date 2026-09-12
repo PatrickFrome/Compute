@@ -39,7 +39,7 @@ test('command lane scheduler keeps distinct-tab mutation parallelism while seria
 });
 
 test('clean product head contains no finalizer authority and bounded abort deadlines remain live until settlement', async () => {
-  const supervisorFetch = await source('src/native-supervisor-client-core.mjs');
+  const supervisorFetch = await source('src/native-supervisor-client-core-base.mjs');
   const optionalFetch = await source('src/bounded-network-fetch.mjs');
 
   assert.match(

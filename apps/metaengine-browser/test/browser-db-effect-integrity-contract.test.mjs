@@ -4,7 +4,7 @@ import test from 'node:test';
 
 const bindingMigration = fs.readFileSync(new URL('../../../supabase/migrations/20260906164000_native_supervisor_effect_binding_v2_transport_compat.sql', import.meta.url), 'utf8');
 const completionMigration = fs.readFileSync(new URL('../../../supabase/migrations/20260906164500_supervisor_complete_requires_effect_binding.sql', import.meta.url), 'utf8');
-const client = fs.readFileSync(new URL('../src/native-supervisor-client-core.mjs', import.meta.url), 'utf8');
+const client = fs.readFileSync(new URL('../src/native-supervisor-client-core-base.mjs', import.meta.url), 'utf8');
 
 test('final v2 binding migration preserves legacy transport while retaining exact DB lease and immutable replay gates', () => {
   assert.match(bindingMigration, /v_binding jsonb := p_binding/);

@@ -58,8 +58,10 @@ test('worker observer heartbeat projection strips authority-bearing signal field
 
 test('worker observation and DevOS run only as idle work after remote command admission', async () => {
   const wrapper = await fs.readFile(sourcePath('native-supervisor-client.mjs'), 'utf8');
-  assert.match(wrapper, /export \* from '\.\/native-supervisor-client-core\.mjs'/, 'compatibility wrapper must preserve the proven core export surface');
-  const source = await fs.readFile(sourcePath('native-supervisor-client-core.mjs'), 'utf8');
+  assert.match(wrapper, /export \* from '\.\/native-supervisor-client-core\.mjs'/, 'compatibility wrapper must preserve the production wiring export surface');
+  const wiring = await fs.readFile(sourcePath('native-supervisor-client-core.mjs'), 'utf8');
+  assert.match(wiring, /NativeSupervisorClient as UnwiredNativeSupervisorClient/, 'production wiring must inherit the proven core');
+  const source = await fs.readFile(sourcePath('native-supervisor-client-core-base.mjs'), 'utf8');
   const cycleStart = source.indexOf('async cycle()');
   const commandAdmission = source.indexOf('await super.cycle();', cycleStart);
   const idleKick = source.indexOf('this.#kickIdleWork()', commandAdmission);
@@ -82,6 +84,7 @@ test('worker observation and DevOS run only as idle work after remote command ad
   assert.equal(intervalMatches.length, 1, 'observer must not add a second timer/polling loop');
   assert.match(source, /#startBootstrapPump[\s\S]*setInterval\s*\(\(\) => \{ void this\.#bootstrapPulse/);
   assert.doesNotMatch(wrapper, /setInterval\s*\(/, 'public wrapper must not add another periodic command loop');
+  assert.doesNotMatch(wiring, /setInterval\s*\(/, 'emergency wiring layer must not add another periodic command loop');
 });
 
 test('Browser root supplies a trusted local WebContents observer with bounded budget', async () => {

@@ -35,7 +35,7 @@ test('batch and legacy effect receipts are never locally aborted after physical 
 });
 
 test('core scheduler admits remote command lane before worker observation and DevOS idle work', () => {
-  const source = fs.readFileSync(path.join(appRoot, 'src', 'native-supervisor-client-core.mjs'), 'utf8');
+  const source = fs.readFileSync(path.join(appRoot, 'src', 'native-supervisor-client-core-base.mjs'), 'utf8');
   const cycle = between(source, '  async cycle() {', '\n  }\n}');
   assert.ok(cycle.indexOf('await super.cycle()') >= 0, 'base command cycle missing');
   assert.ok(cycle.indexOf('this.#kickIdleWork()') > cycle.indexOf('await super.cycle()'), 'idle work must follow command admission');

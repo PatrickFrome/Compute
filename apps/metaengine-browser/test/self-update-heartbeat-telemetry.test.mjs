@@ -6,13 +6,15 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const basePath = path.resolve(here, '../src/native-supervisor-client-base.mjs');
-const corePath = path.resolve(here, '../src/native-supervisor-client-core.mjs');
+const provenCorePath = path.resolve(here, '../src/native-supervisor-client-core-base.mjs');
+const wiringCorePath = path.resolve(here, '../src/native-supervisor-client-core.mjs');
 const publicPath = path.resolve(here, '../src/native-supervisor-client.mjs');
 const source = (p) => fs.readFileSync(p, 'utf8');
 
 test('native supervisor heartbeat telemetry remains owned by exact base used by public client', () => {
   const base = source(basePath);
-  const core = source(corePath);
+  const provenCore = source(provenCorePath);
+  const wiringCore = source(wiringCorePath);
   const publicClient = source(publicPath);
   assert.match(base, /shell_version:\s*this\.#version/);
   assert.match(base, /self_update:\s*this\.#selfUpdate\?\.snapshot\(\)\s*\|\|\s*null/);
@@ -24,7 +26,9 @@ test('native supervisor heartbeat telemetry remains owned by exact base used by 
   assert.match(base, /this\.#heartbeatPromise\s*=\s*this\.#heartbeat\(\)/);
   assert.doesNotMatch(base, /await\s+this\.#heartbeat\(\)/);
   assert.match(base, /response\.status !== 202/);
-  assert.match(core, /extends BaseNativeSupervisorClient/);
+  assert.match(provenCore, /extends BaseNativeSupervisorClient/);
+  assert.match(wiringCore, /NativeSupervisorClient as UnwiredNativeSupervisorClient/);
+  assert.match(wiringCore, /extends UnwiredNativeSupervisorClient/);
   assert.match(publicClient, /NativeSupervisorClient as CoreNativeSupervisorClient/);
   assert.match(publicClient, /extends CoreNativeSupervisorClient/);
   assert.match(publicClient, /createBoundedSupervisorFetch/);

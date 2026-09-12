@@ -29,21 +29,22 @@ test('SCM host uses the real Windows service dispatcher and status protocol', ()
   expect(/WaitForSingleObject\s*\(g_stop_event,\s*INFINITE\)/, 'service lifetime is fenced by the SCM stop event');
 });
 
-test('SCM host publishes a versioned read-only compatibility handshake', () => {
+test('SCM host publishes a versioned compatibility handshake for the bounded update actuator', () => {
   expect(/\\\"schema\\\":\\\"metaengine\.browser-guardian\.scm-host\.v1\\\"/, 'SCM contract schema must be explicit');
-  expect(/\\\"protocol_generation\\\":1/, 'SCM protocol generation must be explicit and monotonic');
+  expect(/\\\"protocol_generation\\\":2/, 'SCM protocol generation must be explicit and monotonic');
   for (const feature of [
     'scm_service_dispatcher_v1',
     'scm_status_handshake_v1',
     'bounded_stop_shutdown_controls_v1',
     'read_only_contract_probe_v1',
+    'bounded_update_actuator_v1',
   ]) {
     expect(new RegExp(`\\\\\\\"${feature}\\\\\\\":true`), `${feature} must be advertised only because it is implemented`);
   }
   expect(/\\\"second_scheduler_loop\\\":false/, 'SCM host must not advertise or introduce a second scheduler loop');
 });
 
-test('first SCM host slice has zero Browser/process/release effect authority', () => {
+test('SCM host keeps zero Browser/release/policy authority while exposing only the bounded process adapter', () => {
   for (const field of [
     'browser_authority',
     'task_authority',
@@ -51,19 +52,21 @@ test('first SCM host slice has zero Browser/process/release effect authority', (
     'second_scheduler_loop',
     'page_model_text_authority',
     'release_authority',
-    'process_effect_authority',
+    'process_effect_policy_authority',
     'automatic_retry_allowed',
     'authority_effect',
   ]) {
     expect(new RegExp(`\\\\\"${field}\\\\\":false`), `${field} must remain false in the native contract`);
   }
-  expect(/\\\"child_process_dispatch_implemented\\\":false/, 'Browser child dispatch is intentionally not implemented yet');
+  expect(/\\\"bounded_process_effect_adapter\\\":true/, 'only the bounded update process adapter may be exposed');
+  expect(/\\\"child_process_dispatch_implemented\\\":true/, 'bounded installer dispatch must be implemented by the actuator');
+  expect(/\\\"native_write_ahead_effect_barrier\\\":true/, 'physical dispatch must remain behind the durable native effect barrier');
   expect(/\\\"service_installation_implemented\\\":false/, 'service installation is intentionally not implemented by the host');
 });
 
-test('SCM lifecycle host cannot secretly actuate Browser, shell, network or updater effects', () => {
+test('SCM lifecycle host cannot secretly actuate Browser, shell, network or release-discovery effects', () => {
   for (const [pattern, message] of [
-    [/\bCreateProcess(?:A|W)?\s*\(/, 'must not spawn a child in this slice'],
+    [/\bCreateProcess(?:A|W)?\s*\(/, 'service host itself must not spawn a child outside the bounded actuator module'],
     [/\bShellExecute(?:A|W)?\s*\(/, 'must not shell-execute'],
     [/\bWinExec\s*\(/, 'must not use WinExec'],
     [/\bTerminateProcess\s*\(/, 'must not terminate Browser processes'],

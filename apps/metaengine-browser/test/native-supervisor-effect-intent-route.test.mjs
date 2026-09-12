@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 const edgeSource = fs.readFileSync(new URL('../supabase/a2-browser-native-supervisor-v1/index.ts', import.meta.url), 'utf8');
-const clientSource = fs.readFileSync(new URL('../src/native-supervisor-client-core.mjs', import.meta.url), 'utf8');
+const clientSource = fs.readFileSync(new URL('../src/native-supervisor-client-core-base.mjs', import.meta.url), 'utf8');
 const migrationSource = fs.readFileSync(new URL('../../../supabase/migrations/20260831124000_native_supervisor_effect_binding_v1.sql', import.meta.url), 'utf8');
 
 test('leased semantic effects have an authenticated HTTP bridge to the durable binding seal', () => {
@@ -11,7 +11,7 @@ test('leased semantic effects have an authenticated HTTP bridge to the durable b
   assert.match(edgeSource, /EFFECT_BINDING_SCHEMAS=new Set\(\['metaengine\.native-supervisor\.effect-binding\.v1','metaengine\.native-supervisor\.effect-binding\.v2'\]\)/);
   assert.match(edgeSource, /effect_intent_binding_schemas:\['v1','v2'\]/);
   assert.match(edgeSource, /\/effect-intent\$\/\)/);
-  assert.match(edgeSource, /rpc\(BIND_EFFECT_RPC,\{p_workspace_id:WORKSPACE_ID,p_command_id:commandId,p_client_id:clientId\(req\),p_binding:binding,p_authority_effect:false\}\)/);
+  assert.match(edgeSource, /rpc\(BIND_EFFECT_RPC,\{p_workspace_id:WORKSPACE_ID,p_command_id:commandId\(req\),p_client_id:clientId\(req\),p_binding:binding,p_authority_effect:false\}\)/);
   assert.match(edgeSource, /result\.accepted!==true\|\|!result\.effect_binding/);
   assert.match(edgeSource, /return json\(200,\{\.\.\.result,authority_effect:false\}\)/);
 

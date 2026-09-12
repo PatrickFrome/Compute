@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 
-const core = fs.readFileSync(new URL('../src/native-supervisor-client-core.mjs', import.meta.url), 'utf8');
+const core = fs.readFileSync(new URL('../src/native-supervisor-client-core-base.mjs', import.meta.url), 'utf8');
 const binding = fs.readFileSync(new URL('../src/native-effect-binding.mjs', import.meta.url), 'utf8');
 const browserControl = fs.readFileSync(new URL('../src/native-browser-control.mjs', import.meta.url), 'utf8');
 const edge = fs.readFileSync(new URL('../supabase/a2-browser-native-supervisor-v1/index.ts', import.meta.url), 'utf8');
