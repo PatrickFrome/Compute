@@ -26,6 +26,7 @@ function hold(reason, admission = null, extra = {}) {
     admitted: admission?.admitted === true,
     admission: admission ? structuredClone(admission) : null,
     physical_dispatch_count: 0,
+    effect_outcome: 'NO_EFFECT_PROVEN',
     automatic_retry_allowed: false,
     bypass_program_policy: admission?.bypass_program_policy === true,
     arbitrary_url_allowed: false,
@@ -45,6 +46,13 @@ function exactGuardianEffectBinding(plan, releaseGate) {
   const artifactSha = String(target.artifact_sha256 || '').trim().toLowerCase();
   if (!SHA256_RE.test(artifactSha)) return false;
   return artifactSha === String(releaseGate?.installer_sha256 || '').trim().toLowerCase();
+}
+
+function effectOutcome(effect) {
+  const state = String(effect?.state || '').toUpperCase();
+  if (state === 'CONFIRMED') return 'CONFIRMED';
+  if (['PRE_EFFECT_FENCED', 'NO_EFFECT_PROVEN'].includes(state)) return 'NO_EFFECT_PROVEN';
+  return 'AMBIGUOUS';
 }
 
 /**
@@ -135,6 +143,7 @@ export async function executeDeveloperEmergencyUpdate({
     admission: structuredClone(admission),
     effect: structuredClone(effect),
     physical_dispatch_count: Number(effect.physical_dispatch_count || 0),
+    effect_outcome: effectOutcome(effect),
     automatic_retry_allowed: false,
     bypass_program_policy: true,
     bypassed_browser_mode: true,
