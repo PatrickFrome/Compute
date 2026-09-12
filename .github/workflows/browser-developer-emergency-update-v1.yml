@@ -1,0 +1,94 @@
+name: METAENGINE Browser Developer Emergency Update V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/developer-emergency-update-admission.mjs'
+      - 'apps/metaengine-browser/src/developer-emergency-update-runtime.mjs'
+      - 'apps/metaengine-browser/src/developer-emergency-update-controller.mjs'
+      - 'apps/metaengine-browser/src/browser-guardian-activation-executor.cjs'
+      - 'apps/metaengine-browser/src/browser-guardian-effect-journal.cjs'
+      - 'apps/metaengine-browser/src/native-supervisor-command-lanes.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client-base.mjs'
+      - 'apps/metaengine-browser/test/developer-emergency-update-admission.test.mjs'
+      - 'apps/metaengine-browser/test/developer-emergency-update-runtime.test.mjs'
+      - 'apps/metaengine-browser/test/developer-emergency-update-controller.test.mjs'
+      - 'apps/metaengine-browser/test/browser-guardian-activation-executor.test.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-developer-emergency-update.test.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-command-lanes.test.mjs'
+      - '.github/workflows/browser-developer-emergency-update-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  emergency-update-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Static parse emergency runtime
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/developer-emergency-update-admission.mjs
+          node --check src/developer-emergency-update-runtime.mjs
+          node --check src/developer-emergency-update-controller.mjs
+          node --check src/browser-guardian-activation-executor.cjs
+          node --check src/browser-guardian-effect-journal.cjs
+          node --check src/native-supervisor-command-lanes.mjs
+          node --check src/native-supervisor-client-base.mjs
+
+      - name: Prove developer admission, local proof controller, and Guardian effect fencing
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            test/developer-emergency-update-admission.test.mjs \
+            test/developer-emergency-update-runtime.test.mjs \
+            test/developer-emergency-update-controller.test.mjs \
+            test/browser-guardian-activation-executor.test.mjs
+
+      - name: Prove signed supervisor lease and policy-bypass boundary
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            test/native-supervisor-command-lanes.test.mjs \
+            test/native-supervisor-developer-emergency-update.test.mjs
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
