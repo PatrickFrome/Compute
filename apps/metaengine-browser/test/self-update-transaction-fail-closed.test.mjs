@@ -124,8 +124,10 @@ test('INSTALLING with old process version becomes AMBIGUOUS and remains held on 
   assert.equal((await readSelfUpdateTransaction(app)).state, 'AMBIGUOUS_INSTALL');
 });
 
-test('persisted AMBIGUOUS_INSTALL is superseded only by a proven newer installed version', async () => {
+test('persisted AMBIGUOUS_INSTALL is superseded only by a trusted newer executable on disk', async () => {
   const target = '0.6.6-dev.33956198945.1';
+  const current = '0.7.0-dev.2.1';
+  const installedSha = 'd'.repeat(64);
   const { app } = await fixture('0.6.5-dev.1.1');
   await persistPreInstallReceipt(app, receipt(target));
   await markSelfUpdateInstallEffectAttempted(app, { targetVersion: target });
@@ -136,25 +138,49 @@ test('persisted AMBIGUOUS_INSTALL is superseded only by a proven newer installed
   const { pre_install } = selfUpdateHandoffPaths(app);
   const predecessorReceipt = await fs.readFile(pre_install, 'utf8');
 
-  app.setVersion('0.7.0-dev.2.1');
-  const recovered = await inspectSelfUpdateStartup(app, { clock: () => NOW + 2_000 });
+  app.setVersion(current);
+  const recovered = await inspectSelfUpdateStartup(app, {
+    clock: () => NOW + 2_000,
+    resolveTrustedInstalledRelease: async ({ currentVersion, targetVersion, relationship }) => {
+      assert.equal(currentVersion, current);
+      assert.equal(targetVersion, target);
+      assert.equal(relationship, 'NEWER');
+      return {
+        schema: 'metaengine.trusted-dev-release.v1',
+        version: current,
+        tag: `v${current}`,
+        git_sha: 'e'.repeat(40),
+        installer_sha256: 'f'.repeat(64),
+        manifest_sha256: '1'.repeat(64),
+        installed_executable_sha256: installedSha,
+        target_present_proof_supported: true,
+        authority_effect: false,
+      };
+    },
+    hashExecutable: async () => installedSha,
+  });
   assert.equal(recovered.state, 'SUPERSEDED');
   assert.equal(recovered.transaction_state, 'SUPERSEDED');
-  assert.equal(recovered.current_version, '0.7.0-dev.2.1');
+  assert.equal(recovered.current_version, current);
   assert.equal(recovered.target_version, target);
+  assert.equal(recovered.successor_relationship, 'NEWER');
+  assert.equal(recovered.installed_executable_sha256, installedSha);
   assert.equal(recovered.automatic_retry_allowed, false);
   assert.equal(recovered.authority_effect, false);
 
   const journal = await readSelfUpdateTransaction(app);
   assert.equal(journal.state, 'SUPERSEDED');
   assert.equal(journal.target_version, target);
-  assert.equal(journal.evidence.superseding_version, '0.7.0-dev.2.1');
-  assert.equal(journal.evidence.superseded_from_state, 'AMBIGUOUS_INSTALL');
-  assert.equal(journal.evidence.predecessor_receipt_verified, true);
+  assert.equal(journal.evidence.superseding_version, current);
+  assert.equal(journal.evidence.successor_relationship, 'NEWER');
+  assert.equal(journal.evidence.trusted_release_verified, true);
+  assert.equal(journal.evidence.installed_executable_sha256, installedSha);
+  assert.equal(journal.evidence.physical_installer_launch_count, 0);
+  assert.equal(journal.evidence.recovery_without_installer_effect, true);
   assert.equal(await fs.readFile(pre_install, 'utf8'), predecessorReceipt);
 });
 
-test('newer installed version cannot supersede ambiguous journal without predecessor receipt proof', async () => {
+test('newer installed version cannot supersede ambiguous journal without trusted installed-release proof', async () => {
   const target = '0.6.6-dev.33956198945.1';
   const { app } = await fixture('0.6.5-dev.1.1');
   await persistPreInstallReceipt(app, receipt(target));
