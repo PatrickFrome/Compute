@@ -1,0 +1,67 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { BrowserBrainCognitionFabric } from '../src/browser-brain-cognition-fabric.mjs';
+
+const tab = (n) => `tab_00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
+function remember(fabric, tabId, suffix) {
+  return fabric.rememberPlan({
+    tab_id: tabId,
+    intent_id: `intent.${suffix}`,
+    action: 'TYPED_CLICK',
+    candidate_ref: `node.${suffix}`,
+    semantic_fingerprint: `semantic.${suffix}`,
+    locator_fingerprint: `locator.${suffix}`,
+    binding_generation: 1,
+    document_generation: 1,
+    semantic_revision: 1,
+  });
+}
+
+test('navigation invalidates only the indexed BrowserCell plan set at large cache width', () => {
+  const fabric = new BrowserBrainCognitionFabric({ maxPlans: 2048, clock: () => 10_000 });
+  fabric.observeEdge({ type: 'PROCESS_CENSUS_REFRESHED', seq: 1 });
+
+  for (let i = 0; i < 1000; i += 1) remember(fabric, tab(2), `other.${i}`);
+  for (let i = 0; i < 32; i += 1) remember(fabric, tab(1), `target.${i}`);
+
+  assert.equal(fabric.snapshot().advisory_plan_count, 1032);
+  fabric.observeEdge({
+    type: 'SEMANTIC_EVENT',
+    seq: 2,
+    semantic_sequence: 1,
+    semantic_method: 'DOM.documentUpdated',
+    tab_id: tab(1),
+  });
+
+  const snapshot = fabric.snapshot();
+  assert.equal(snapshot.advisory_plan_count, 1000);
+  assert.equal(snapshot.advisory_plan_invalidations, 32);
+
+  const survivor = fabric.resolvePlan({
+    tab_id: tab(2),
+    intent_id: 'intent.other.999',
+    action: 'TYPED_CLICK',
+    binding_generation: 1,
+    document_generation: 1,
+    semantic_revision: 1,
+    revalidate: () => true,
+  });
+  assert.equal(survivor.hit, true);
+});
+
+test('bounded eviction removes stale tab-index membership before later invalidation', () => {
+  const fabric = new BrowserBrainCognitionFabric({ maxPlans: 2, clock: () => 10_000 });
+  remember(fabric, tab(1), 'evicted');
+  remember(fabric, tab(2), 'kept.two');
+  remember(fabric, tab(3), 'kept.three');
+
+  assert.equal(fabric.snapshot().advisory_plan_count, 2);
+  fabric.observeEdge({ type: 'WEB_CONTENTS_DESTROYED', tab_id: tab(1) });
+  assert.equal(fabric.snapshot().advisory_plan_invalidations, 0);
+
+  fabric.observeEdge({ type: 'WEB_CONTENTS_DESTROYED', tab_id: tab(2) });
+  const snapshot = fabric.snapshot();
+  assert.equal(snapshot.advisory_plan_count, 1);
+  assert.equal(snapshot.advisory_plan_invalidations, 1);
+});

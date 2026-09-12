@@ -130,6 +130,7 @@ export class BrowserBrainCognitionFabric {
   #planMaxAgeMs;
   #cellFacts = new Map();
   #plans = new Map();
+  #planKeysByTab = new Map();
   #agents = new Map();
   #evidence = new Map();
   #evidenceOrder = [];
@@ -186,13 +187,31 @@ export class BrowserBrainCognitionFabric {
     return row;
   }
 
-  #invalidateTab(id) {
-    let removed = 0;
-    for (const [key, row] of [...this.#plans.entries()]) {
-      if (row.tabId !== id) continue;
-      this.#plans.delete(key);
-      removed += 1;
+  #indexPlan(key, row) {
+    let keys = this.#planKeysByTab.get(row.tabId);
+    if (!keys) {
+      keys = new Set();
+      this.#planKeysByTab.set(row.tabId, keys);
     }
+    keys.add(key);
+  }
+
+  #deletePlan(key, row = this.#plans.get(key)) {
+    if (!row || !this.#plans.delete(key)) return false;
+    const keys = this.#planKeysByTab.get(row.tabId);
+    if (keys) {
+      keys.delete(key);
+      if (keys.size === 0) this.#planKeysByTab.delete(row.tabId);
+    }
+    return true;
+  }
+
+  #invalidateTab(id) {
+    const keys = this.#planKeysByTab.get(id);
+    if (!keys) return 0;
+    const removed = keys.size;
+    for (const key of keys) this.#plans.delete(key);
+    this.#planKeysByTab.delete(id);
     this.#planInvalidations += removed;
     return removed;
   }
@@ -288,9 +307,13 @@ export class BrowserBrainCognitionFabric {
       generations,
       recordedAtMs: this.#now(),
     });
-    if (this.#plans.has(key)) this.#plans.delete(key);
+    this.#deletePlan(key);
     this.#plans.set(key, row);
-    while (this.#plans.size > this.#maxPlans) this.#plans.delete(this.#plans.keys().next().value);
+    this.#indexPlan(key, row);
+    while (this.#plans.size > this.#maxPlans) {
+      const victim = this.#plans.keys().next().value;
+      if (victim != null) this.#deletePlan(victim);
+    }
     return publicPlan(row);
   }
 
@@ -320,14 +343,14 @@ export class BrowserBrainCognitionFabric {
     }
     const current = generationTuple({ binding_generation, document_generation, semantic_revision });
     if (!sameGeneration(row.generations, current)) {
-      this.#plans.delete(key);
+      this.#deletePlan(key, row);
       this.#planMisses += 1;
       this.#planInvalidations += 1;
       return Object.freeze({ hit: false, reason: 'GENERATION_CHANGED', actuation_eligible: false, authority_effect: false });
     }
     const age = this.#now() - row.recordedAtMs;
     if (age < 0 || age > this.#planMaxAgeMs) {
-      this.#plans.delete(key);
+      this.#deletePlan(key, row);
       this.#planMisses += 1;
       this.#planInvalidations += 1;
       return Object.freeze({ hit: false, reason: 'EXPIRED', actuation_eligible: false, authority_effect: false });
