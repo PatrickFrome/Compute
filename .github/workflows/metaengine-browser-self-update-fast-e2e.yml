@@ -7,6 +7,7 @@ on:
       - work/self-update-fast-loop-v1
       - work/devos-elastic-fleet-bootstrap-v1
       - work/browser-devos-root-transport-bootstrap-v1
+      - fix/self-update-ambiguous-recovery
     paths:
       - 'apps/metaengine-browser/**'
       - '.github/workflows/metaengine-browser-self-update-fast-e2e.yml'
@@ -90,14 +91,20 @@ jobs:
         run: |
           $path = './test/self-update-fast-physical.ps1'
           $raw = Get-Content $path -Raw
+          # The checked-in physical harness predates the 0.7.0 live line. Rewrite
+          # only the temporary CI copy so resolution starts from a published 0.7.0
+          # baseline and the one-built successor remains on that same trusted core.
+          $raw = $raw.Replace('0.6.3', '0.7.0')
+          if ($raw -match '0\.6\.3') { throw 'legacy_release_core_rewrite_incomplete' }
+          if ($raw -notmatch "currentVersion: '0\.7\.0-dev\.0\.1'") { throw 'published_070_baseline_resolver_missing' }
           $pattern = '(?ms)# Build exactly one new target\..*?npm pkg set version=\$target'
           $replacement = @'
           # Build exactly one target from the exact checked-out source. The dev build
           # identity is derived from immutable GITHUB_RUN_ID, so parallel integration
           # commits never contend on a manually edited package version and reruns of
           # the same workflow run preserve the same target identity.
-          $target = "0.6.6-dev.$env:GITHUB_RUN_ID.1"
-          if ($target -notmatch '^0\.6\.6-dev\.[0-9]+\.1$') { throw "target_version_invalid:$target" }
+          $target = "0.7.0-dev.$env:GITHUB_RUN_ID.1"
+          if ($target -notmatch '^0\.7\.0-dev\.[0-9]+\.1$') { throw "target_version_invalid:$target" }
           npm pkg set version=$target
           '@
           # .NET replacement syntax treats $name as a substitution token. Escape every
@@ -106,6 +113,7 @@ jobs:
           $next = [regex]::Replace($raw, $pattern, $replacementLiteral, 1)
           if ($next -eq $raw) { throw 'physical_target_patch_not_applied' }
           if ($next -notmatch 'GITHUB_RUN_ID') { throw 'physical_target_run_identity_lost' }
+          if ($next -notmatch '0\.7\.0-dev') { throw 'target_release_core_not_070' }
           [System.IO.File]::WriteAllText((Join-Path (Get-Location) 'test/self-update-fast-physical-candidate.ps1'), $next, [System.Text.UTF8Encoding]::new($false))
       - name: Published baseline to exact candidate physical update
         working-directory: apps/metaengine-browser
