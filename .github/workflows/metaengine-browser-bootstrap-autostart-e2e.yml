@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - work/self-update-fast-loop-v1
+      - release/self-update-ambiguity-live-v2
     paths:
       - 'apps/metaengine-browser/**'
       - '.github/workflows/metaengine-browser-bootstrap-autostart-e2e.yml'
