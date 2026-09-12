@@ -8,8 +8,11 @@ Set-StrictMode -Version Latest
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $sourceDir = Join-Path $root 'native\browser-guardian-scm'
 $serviceSource = Join-Path $sourceDir 'browser-guardian-scm-service.cpp'
+$actuatorSource = Join-Path $sourceDir 'browser-guardian-update-actuator.cpp'
+$ownerObserverSource = Join-Path $sourceDir 'browser-guardian-owner-enrollment-observer.cpp'
+$ownerStoreSource = Join-Path $sourceDir 'browser-guardian-owner-enrollment-store.cpp'
 $configuratorSource = Join-Path $sourceDir 'browser-guardian-scm-configure.cpp'
-foreach ($path in @($serviceSource,$configuratorSource)) {
+foreach ($path in @($serviceSource,$actuatorSource,$ownerObserverSource,$ownerStoreSource,$configuratorSource)) {
   if (-not (Test-Path $path -PathType Leaf)) { throw "guardian_native_source_missing:$path" }
 }
 
@@ -26,12 +29,31 @@ New-Item -ItemType Directory -Path $resolvedOut -Force | Out-Null
 
 $service = Join-Path $resolvedOut 'METAENGINEBrowserGuardian.exe'
 $configurator = Join-Path $resolvedOut 'METAENGINEBrowserGuardianConfigure.exe'
-$serviceCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE "{1}" /Fe:"{2}" /link advapi32.lib' -f $vcvars,$serviceSource,$service
+$serviceCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE "{1}" "{2}" "{3}" "{4}" /Fe:"{5}" /link advapi32.lib bcrypt.lib shell32.lib ole32.lib userenv.lib wtsapi32.lib' -f $vcvars,$serviceSource,$actuatorSource,$ownerObserverSource,$ownerStoreSource,$service
 & $env:ComSpec /d /s /c $serviceCmd
 if ($LASTEXITCODE -ne 0) { throw "guardian_service_compile_exit_$LASTEXITCODE" }
 $configCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE "{1}" /Fe:"{2}" /link advapi32.lib shell32.lib ole32.lib' -f $vcvars,$configuratorSource,$configurator
 & $env:ComSpec /d /s /c $configCmd
 if ($LASTEXITCODE -ne 0) { throw "guardian_configurator_compile_exit_$LASTEXITCODE" }
+
+$actuatorContractRaw = (& $service --update-actuator-contract-json | Out-String).Trim()
+if ($LASTEXITCODE -ne 0) { throw "guardian_update_actuator_contract_exit_$LASTEXITCODE" }
+$actuatorContract = $actuatorContractRaw | ConvertFrom-Json
+if ($actuatorContract.schema -ne 'metaengine.browser-guardian.update-actuator.v1' `
+    -or $actuatorContract.native_write_ahead_effect_barrier -ne $true `
+    -or $actuatorContract.at_most_one_dispatch_per_effect_id -ne $true `
+    -or $actuatorContract.caller_supplied_path_allowed -ne $false `
+    -or $actuatorContract.caller_supplied_url_allowed -ne $false `
+    -or $actuatorContract.caller_supplied_shell_allowed -ne $false `
+    -or $actuatorContract.automatic_retry_allowed -ne $false) {
+  throw 'guardian_update_actuator_contract_invalid'
+}
+$actuatorSelfTestRaw = (& $service --update-actuator-self-test | Out-String).Trim()
+if ($LASTEXITCODE -ne 0) { throw "guardian_update_actuator_self_test_exit_$LASTEXITCODE" }
+$actuatorSelfTest = $actuatorSelfTestRaw | ConvertFrom-Json
+if ($actuatorSelfTest.schema -ne 'metaengine.browser-guardian.update-actuator-self-test.v1' -or $actuatorSelfTest.ok -ne $true) {
+  throw 'guardian_update_actuator_self_test_invalid'
+}
 
 $sourceHead = (git -C $root rev-parse HEAD).Trim()
 if ($sourceHead -notmatch '^[0-9a-f]{40}$') { throw "guardian_staging_source_head_invalid:$sourceHead" }
@@ -42,7 +64,7 @@ if (-not $packageVersion) { throw 'guardian_staging_package_version_missing' }
 
 $binaries = @()
 foreach ($item in @(
-  @{ path=$service; role='scm_service_host'; activationTool=$false },
+  @{ path=$service; role='scm_service_host_with_bounded_update_actuator'; activationTool=$false },
   @{ path=$configurator; role='scm_secure_configurator'; activationTool=$true }
 )) {
   if (-not (Test-Path $item.path -PathType Leaf)) { throw "guardian_native_binary_missing:$($item.path)" }
@@ -61,7 +83,7 @@ foreach ($item in @(
 
 $manifest = [ordered]@{
   schema = 'metaengine.browser.guardian-native-staging-manifest.v1'
-  version = '1.0.0'
+  version = '1.1.0'
   source_head = $sourceHead
   package_version = $packageVersion
   staging_root = 'resources/guardian-native'
@@ -73,6 +95,15 @@ $manifest = [ordered]@{
   requires_machine_secure_copy = $true
   required_machine_root = '%ProgramFiles%\METAENGINE\Guardian'
   exact_service_binary_name = 'METAENGINEBrowserGuardian.exe'
+  bounded_update_actuator_embedded = $true
+  update_actuator_schema = [string]$actuatorContract.schema
+  update_actuator_native_write_ahead_effect_barrier = $true
+  update_actuator_at_most_one_dispatch_per_effect_id = $true
+  update_actuator_enrolled_device_challenge_required = $true
+  update_actuator_caller_supplied_path_allowed = $false
+  update_actuator_caller_supplied_url_allowed = $false
+  update_actuator_caller_supplied_shell_allowed = $false
+  update_actuator_self_test_passed = $true
   binaries = $binaries
   automatic_retry_allowed = $false
   browser_authority = $false
@@ -88,6 +119,7 @@ $manifestPath = Join-Path $resolvedOut 'guardian-native-manifest.json'
 $readback = Get-Content $manifestPath -Raw | ConvertFrom-Json
 if ($readback.schema -ne 'metaengine.browser.guardian-native-staging-manifest.v1' -or $readback.staging_only -ne $true) { throw 'guardian_staging_manifest_readback_invalid' }
 if ($readback.service_activation_authorized -ne $false -or $readback.requires_machine_secure_copy -ne $true) { throw 'guardian_staging_authority_readback_invalid' }
+if ($readback.bounded_update_actuator_embedded -ne $true -or $readback.update_actuator_self_test_passed -ne $true) { throw 'guardian_update_actuator_manifest_readback_invalid' }
 if (@($readback.binaries).Count -ne 2) { throw 'guardian_staging_binary_cardinality_invalid' }
 foreach ($row in @($readback.binaries)) {
   $binary = Join-Path $resolvedOut ([string]$row.name)
