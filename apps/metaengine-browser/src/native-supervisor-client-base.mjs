@@ -718,8 +718,11 @@ export class NativeSupervisorClient {
       return { supervisor_mode: 'CONTROL', armed: true, authority_effect: true };
     }
     if (action === 'SET_MODE') {
-      const next = String(command?.payload?.mode || command?.payload?.operator_mode || '').trim().toUpperCase();
-      if (next !== 'CONTROL') {
+      const requestedMode = String(command?.payload?.mode || command?.payload?.operator_mode || '').trim().toUpperCase();
+      // SET_MODE is a legacy wire compatibility surface. OBSERVE and GATE_SEND no
+      // longer represent runtime authority states; they canonicalize to the sole
+      // supported always-on state instead of weakening setControlState().
+      if (!['CONTROL','OBSERVE','GATE_SEND'].includes(requestedMode)) {
         const error = new Error(ALWAYS_ON_CONTROL_ERROR);
         error.code = ALWAYS_ON_CONTROL_ERROR;
         throw error;
