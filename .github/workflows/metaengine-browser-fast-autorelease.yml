@@ -160,7 +160,10 @@ jobs:
           def parse(tag):
               x=re.fullmatch(r'v(\d+)\.(\d+)\.(\d+)-dev\.(\d+)\.1',str(tag or ''))
               return tuple(map(int,x.groups())) if x else None
-          target=tuple(map(int,vm.groups())); prior=[parse(r.get('tag_name')) for r in releases]; prior=[x for x in prior if x]
+          target=tuple(map(int,vm.groups()))
+          published=[r for r in releases if r.get('draft') is False]
+          prior=[parse(r.get('tag_name')) for r in published]
+          prior=[x for x in prior if x]
           if prior and target<=max(prior): raise SystemExit(f'dev_version_not_monotonic:{target}<={max(prior)}')
           service_path=binary_paths['METAENGINEBrowserGuardian.exe']
           configurator_path=binary_paths['METAENGINEBrowserGuardianConfigure.exe']
