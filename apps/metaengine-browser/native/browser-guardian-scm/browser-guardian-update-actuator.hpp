@@ -18,8 +18,16 @@ struct GuardianUpdateActuatorResult {
     std::string reason;
     DWORD win32_error = ERROR_SUCCESS;
     DWORD pid = 0;
+    DWORD session_id = 0;
+    DWORD client_pid = 0;
     std::uint64_t creation_time_100ns = 0;
     std::string process_incarnation_id;
+    std::string expected_owner_sid;
+    std::string enrollment_evidence_sha256;
+    std::string device_key_fingerprint_sha256;
+    std::string installed_executable_sha256;
+    bool owner_binding_proven = false;
+    bool device_binding_proven = false;
     bool effect_absent_proven = false;
     bool exact_ready_binding = false;
     bool physical_dispatch_performed = false;
