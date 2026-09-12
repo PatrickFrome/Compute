@@ -82,10 +82,31 @@ jobs:
       - name: Install physical-test dependencies
         working-directory: apps/metaengine-browser
         run: npm install --no-audit --no-fund
+      - name: Bind physical harness to live 0.7.0 line and exact run identity
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $raw = Get-Content './test/self-update-fast-physical.ps1' -Raw
+          $raw = $raw.Replace('0.6.3', '0.7.0')
+          if ($raw -match '0\.6\.3') { throw 'legacy_release_core_rewrite_incomplete' }
+          if ($raw -notmatch "currentVersion: '0\.7\.0-dev\.0\.1'") { throw 'published_070_baseline_resolver_missing' }
+          $pattern = '(?ms)# Build exactly one new target\..*?npm pkg set version=\$target'
+          $replacement = @'
+          # Build exactly one target from the exact PR head. The immutable Actions
+          # run identity keeps the candidate monotonic without editing source version.
+          $target = "0.7.0-dev.$env:GITHUB_RUN_ID.1"
+          if ($target -notmatch '^0\.7\.0-dev\.[0-9]+\.1$') { throw "target_version_invalid:$target" }
+          npm pkg set version=$target
+          '@
+          $replacementLiteral = $replacement.Replace('$', '$$')
+          $next = [regex]::Replace($raw, $pattern, $replacementLiteral, 1)
+          if ($next -eq $raw) { throw 'physical_target_patch_not_applied' }
+          if ($next -notmatch 'GITHUB_RUN_ID') { throw 'physical_target_run_identity_lost' }
+          [System.IO.File]::WriteAllText((Join-Path (Get-Location) 'test/self-update-fast-physical-candidate.ps1'), $next, [System.Text.UTF8Encoding]::new($false))
       - name: Published baseline to one-built exact candidate
         working-directory: apps/metaengine-browser
         shell: powershell
-        run: ./test/self-update-fast-physical.ps1
+        run: ./test/self-update-fast-physical-candidate.ps1
       - name: Prove installed Guardian staging after physical update
         working-directory: apps/metaengine-browser
         shell: powershell
@@ -102,6 +123,7 @@ jobs:
           $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
           $expectedHead = '${{ github.event.pull_request.head.sha || github.sha }}'
           if ([string]$manifest.git_sha -ne $expectedHead) { throw "physical_evidence_head_mismatch:$($manifest.git_sha):${expectedHead}" }
+          if ([string]$manifest.version -notmatch '^0\.7\.0-dev\.[0-9]+\.1$') { throw "physical_evidence_version_not_070:$($manifest.version)" }
           if ($manifest.physical_n_to_n_plus_1 -ne $true) { throw 'physical_update_not_proven' }
           if ($manifest.durable_successor_binding -ne $true) { throw 'durable_successor_not_proven' }
           if ($manifest.profile_continuity -ne $true -or $manifest.physical_singleton -ne $true) { throw 'continuity_or_singleton_not_proven' }
