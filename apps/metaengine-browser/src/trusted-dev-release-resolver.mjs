@@ -215,27 +215,13 @@ export function parseStrictDevYml(text) {
   return { version, path, file_url: fileUrl, sha512: topSha512, size };
 }
 
-export async function resolveTrustedMetaengineDevRelease({
-  currentVersion,
-  fetchImpl = globalThis.fetch,
-  githubApiToken = null,
-} = {}) {
-  if (typeof fetchImpl !== 'function') throw new Error('trusted_release_fetch_required');
-  const current = parseMetaengineDevVersion(currentVersion);
-  if (!current) throw new Error('trusted_release_current_version_invalid');
-
-  let selected = null;
-  for (let page = 1; page <= MAX_RELEASE_PAGES; page += 1) {
-    const releases = await fetchReleaseListPage(fetchImpl, page, githubApiToken);
-    if (!Array.isArray(releases)) throw new Error('trusted_release_list_invalid');
-    const candidate = pickNewestRelease(releases, current.version);
-    if (candidate) { selected = candidate; break; }
-    if (releases.length < RELEASES_PAGE_SIZE) break;
-  }
-  if (!selected) return null;
-
-  const { release, parsed, tag } = selected;
+async function verifySelectedRelease(fetchImpl, selected, githubApiToken = null) {
+  const { release, parsed, tag } = selected || {};
+  if (!release || !parsed || !tag) throw new Error('trusted_release_selection_invalid');
+  if (release.draft === true || release.prerelease !== true) throw new Error('trusted_release_publication_state_invalid');
+  if (String(release.tag_name || '') !== tag || tag !== `v${parsed.version}`) throw new Error('trusted_release_tag_invalid');
   if (String(release.name || '') !== `METAENGINE Browser v${parsed.version}`) throw new Error('trusted_release_name_invalid');
+
   const rawAssets = Array.isArray(release.assets) ? release.assets : [];
   const names = expectedAssetNames(parsed.version);
   const legacyNames = [names.metadata, names.installer, names.blockmap, names.manifest];
@@ -297,4 +283,44 @@ export async function resolveTrustedMetaengineDevRelease({
     target_present_proof_supported: Boolean(installedExecutableSha256),
     authority_effect: false,
   };
+}
+
+export async function resolveTrustedMetaengineDevRelease({
+  currentVersion,
+  fetchImpl = globalThis.fetch,
+  githubApiToken = null,
+} = {}) {
+  if (typeof fetchImpl !== 'function') throw new Error('trusted_release_fetch_required');
+  const current = parseMetaengineDevVersion(currentVersion);
+  if (!current) throw new Error('trusted_release_current_version_invalid');
+
+  let selected = null;
+  for (let page = 1; page <= MAX_RELEASE_PAGES; page += 1) {
+    const releases = await fetchReleaseListPage(fetchImpl, page, githubApiToken);
+    if (!Array.isArray(releases)) throw new Error('trusted_release_list_invalid');
+    const candidate = pickNewestRelease(releases, current.version);
+    if (candidate) { selected = candidate; break; }
+    if (releases.length < RELEASES_PAGE_SIZE) break;
+  }
+  if (!selected) return null;
+  return verifySelectedRelease(fetchImpl, selected, githubApiToken);
+}
+
+export async function resolveExactTrustedMetaengineDevRelease({
+  version,
+  fetchImpl = globalThis.fetch,
+  githubApiToken = null,
+} = {}) {
+  if (typeof fetchImpl !== 'function') throw new Error('trusted_release_fetch_required');
+  const parsed = parseMetaengineDevVersion(version);
+  if (!parsed) throw new Error('trusted_release_exact_version_invalid');
+  const tag = `v${parsed.version}`;
+  const release = await fetchJson(
+    fetchImpl,
+    `${API_ROOT}/releases/tags/${encodeURIComponent(tag)}`,
+    MAX_RELEASES_BYTES,
+    'trusted_release_exact',
+    githubApiToken,
+  );
+  return verifySelectedRelease(fetchImpl, { release, parsed, tag }, githubApiToken);
 }
