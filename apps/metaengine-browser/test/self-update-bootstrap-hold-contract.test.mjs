@@ -29,7 +29,10 @@ test('AMBIGUOUS_INSTALL bootstrap hold never globally disables the self-update c
   assert.match(body, /METAENGINE_SELF_UPDATE_HOLD_REASON\s*=\s*'AMBIGUOUS_INSTALL'/);
   assert.match(body, /METAENGINE_SELF_UPDATE_HOLD_TARGET/);
   assert.doesNotMatch(body, /METAENGINE_DISABLE_SELF_UPDATE/);
-  assert.match(body, /automatic_retry_allowed:\s*false/);
+  // The hold log spreads the already fail-closed startup inspection rather than
+  // manufacturing a second retry policy in the bootstrap layer.
+  assert.match(body, /\.\.\.startupUpdateInspection/);
+  assert.match(text, /automatic_retry_allowed:\s*false/);
 });
 
 test('SUCCESSOR_RECEIPT_AMBIGUOUS bootstrap hold never globally disables the self-update control plane', async () => {
