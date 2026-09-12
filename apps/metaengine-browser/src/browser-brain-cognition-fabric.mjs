@@ -175,16 +175,6 @@ export class BrowserBrainCognitionFabric {
     return value;
   }
 
-  #streamEpoch() {
-    if (typeof this.#streamClock.currentEpoch === 'function') return this.#streamClock.currentEpoch();
-    return this.#streamClock.snapshot().epoch;
-  }
-
-  #streamRequiresResync() {
-    if (typeof this.#streamClock.requiresResync === 'function') return this.#streamClock.requiresResync();
-    return this.#streamClock.snapshot().gap_requires_resync;
-  }
-
   #factCell(id) {
     let row = this.#cellFacts.get(id);
     if (row) return row;
@@ -264,11 +254,12 @@ export class BrowserBrainCognitionFabric {
       if (INVALIDATING_TYPES.has(type) || INVALIDATING_SEMANTIC_METHODS.has(method)) this.#invalidateTab(id);
     }
 
+    const streamClock = this.#streamClock.snapshot();
     return Object.freeze({
       schema: 'metaengine.browser-brain.cognition-edge-result.v1',
       clock: Object.freeze(clockResults),
-      causal_epoch: this.#streamEpoch(),
-      resync_required: this.#streamRequiresResync(),
+      causal_epoch: streamClock.epoch,
+      resync_required: streamClock.gap_requires_resync,
       authority_effect: false,
     });
   }
@@ -340,7 +331,7 @@ export class BrowserBrainCognitionFabric {
     const intentId = safeId(intent_id, 'browser_brain_cognition_intent_invalid', { lower: true, max: 192 });
     const normalizedAction = action(actionValue);
     if (typeof revalidate !== 'function') throw new Error('browser_brain_cognition_revalidator_required');
-    if (this.#streamRequiresResync()) {
+    if (this.#streamClock.snapshot().gap_requires_resync) {
       this.#planMisses += 1;
       return Object.freeze({ hit: false, reason: 'CAUSAL_RESYNC_REQUIRED', actuation_eligible: false, authority_effect: false });
     }
