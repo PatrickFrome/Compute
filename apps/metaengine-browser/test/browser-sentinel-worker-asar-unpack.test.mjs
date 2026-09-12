@@ -54,7 +54,9 @@ test('sentinel worker closure is loadable by vanilla node from an app.asar.unpac
   // a placeholder asar file proves we are NOT reading from the archive
   await fs.writeFile(path.join(root, 'resources', 'app.asar'), 'not-a-real-archive');
   for (const file of WORKER_CLOSURE) {
-    await fs.copyFile(fileURLToPath(new URL(`../src/${file}`, import.meta.url)), path.join(unpackedSrc, file));
+    const sourcePath = fileURLToPath(new URL(`../src/${file}`, import.meta.url));
+    assert.ok(path.isAbsolute(sourcePath), `worker source must be an OS-native absolute path: ${file}`);
+    await fs.copyFile(sourcePath, path.join(unpackedSrc, file));
   }
 
   const statePath = path.join(root, 'sentinel-state.json');
