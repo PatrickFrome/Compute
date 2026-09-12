@@ -4,10 +4,25 @@ import { resolveTrustedMetaengineDevRelease } from './trusted-dev-release-resolv
 const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const SAFE_ARTIFACT_RE = /^[0-9A-Za-z._-]+$/;
 const COMMAND_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const RECOVERABLE_SELF_UPDATE_HOLDS = new Set(['AMBIGUOUS_INSTALL', 'SUCCESSOR_RECEIPT_AMBIGUOUS']);
 export const DEFAULT_TRUSTED_UPDATE_CHANNEL = 'dev';
 export const DEFAULT_TRUSTED_ARTIFACT_PREFIX = 'METAENGINE-Browser-Test-Setup-';
 
 function clipError(error) { return String(error?.message || error || 'unknown_error').slice(0, 300); }
+
+export function classifySelfUpdateDisableEnvironment(env = process.env) {
+  const disableRequested = String(env?.METAENGINE_DISABLE_SELF_UPDATE || '') === '1';
+  const holdReason = String(env?.METAENGINE_SELF_UPDATE_HOLD_REASON || '').trim().toUpperCase() || null;
+  const recoverableHold = disableRequested && RECOVERABLE_SELF_UPDATE_HOLDS.has(holdReason);
+  return Object.freeze({
+    globally_disabled: disableRequested && !recoverableHold,
+    install_effect_quarantined: recoverableHold,
+    hold_reason: holdReason,
+    control_plane_enabled: !disableRequested || recoverableHold,
+    automatic_effect_retry_allowed: false,
+    authority_effect: false,
+  });
+}
 
 export function validateCiTestFeedUrl(value, { testMode = false, githubActions = false } = {}) {
   if (value == null || String(value).trim() === '') return null;
@@ -62,6 +77,8 @@ export class SelfUpdateRuntime {
     installer_handoff_prepared: false, automatic_install: true,
     current_version: null, release_resolution: 'UNRESOLVED', resolved_tag: null,
     resolved_git_sha: null, resolved_feed_url: null,
+    install_effect_quarantined: false, self_update_hold_reason: null,
+    control_plane_enabled: true,
     developer_emergency_requested: false, developer_emergency_command_id: null,
     developer_emergency_requested_at: null, developer_emergency_state: 'NONE',
     developer_emergency_policy_bypass: false,
@@ -219,7 +236,11 @@ export class SelfUpdateRuntime {
         this.#host = this.#hostOverride || new HostResilienceRuntime();
         await this.#host.start();
       }
-      if (!packaged || process.env.METAENGINE_DISABLE_SELF_UPDATE === '1') { this.#state.state = 'DISABLED'; return this.snapshot(); }
+      const disableEnvironment = classifySelfUpdateDisableEnvironment(process.env);
+      this.#state.install_effect_quarantined = disableEnvironment.install_effect_quarantined;
+      this.#state.self_update_hold_reason = disableEnvironment.hold_reason;
+      this.#state.control_plane_enabled = disableEnvironment.control_plane_enabled;
+      if (!packaged || disableEnvironment.globally_disabled) { this.#state.state = 'DISABLED'; return this.snapshot(); }
       let updater = this.#injectedUpdater;
       if (!updater) {
         const mod = await import('electron-updater');
