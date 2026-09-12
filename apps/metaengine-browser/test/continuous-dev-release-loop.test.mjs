@@ -14,9 +14,11 @@ async function workflow(name) {
 test('physical dev E2E follows the forward integration line without cross-SHA cancellation', async () => {
   const source = await workflow('metaengine-browser-self-update-fast-e2e.yml');
   assert.match(source, /integration\/metaengine-development-os-v1/);
+  assert.match(source, /fix\/self-update-ambiguous-recovery/);
   assert.match(source, /group: metaengine-browser-fast-self-update-\$\{\{ github\.sha \}\}/);
   assert.doesNotMatch(source, /group: metaengine-browser-fast-self-update-\$\{\{ github\.ref \}\}/);
-  assert.match(source, /0\.6\.6-dev\.\$env:GITHUB_RUN_ID\.1/);
+  assert.match(source, /0\.7\.0-dev\.\$env:GITHUB_RUN_ID\.1/);
+  assert.match(source, /published_070_baseline_resolver_missing/);
   assert.match(source, /physical_target_run_identity_lost/);
 });
 
