@@ -95,11 +95,13 @@ jobs:
           $path = './test/self-update-fast-physical.ps1'
           $raw = Get-Content $path -Raw
           # The checked-in physical harness predates the 0.7.0 live line. Rewrite
-          # only the temporary CI copy so resolution starts from a published 0.7.0
-          # baseline and the one-built successor remains on that same trusted core.
+          # both ordinary text and regex-escaped release-core literals in the temporary
+          # CI copy only; the checked-in historical harness remains unchanged.
           $raw = $raw.Replace('0.6.3', '0.7.0')
-          if ($raw -match '0\.6\.3') { throw 'legacy_release_core_rewrite_incomplete' }
+          $raw = $raw.Replace('0\.6\.3', '0\.7\.0')
+          if ($raw.Contains('0.6.3') -or $raw.Contains('0\.6\.3')) { throw 'legacy_release_core_rewrite_incomplete' }
           if ($raw -notmatch "currentVersion: '0\.7\.0-dev\.0\.1'") { throw 'published_070_baseline_resolver_missing' }
+          if ($raw -notmatch "baseline -notmatch '\^0\\\.7\\\.0-dev") { throw 'published_070_baseline_regex_missing' }
           $pattern = '(?ms)# Build exactly one new target\..*?npm pkg set version=\$target'
           $replacement = @'
           # Build exactly one target from the exact checked-out source. The dev build
