@@ -3,6 +3,7 @@ import { resolveTrustedMetaengineDevRelease } from './trusted-dev-release-resolv
 
 const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const SAFE_ARTIFACT_RE = /^[0-9A-Za-z._-]+$/;
+const COMMAND_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const DEFAULT_TRUSTED_UPDATE_CHANNEL = 'dev';
 export const DEFAULT_TRUSTED_ARTIFACT_PREFIX = 'METAENGINE-Browser-Test-Setup-';
 
@@ -61,13 +62,18 @@ export class SelfUpdateRuntime {
     installer_handoff_prepared: false, automatic_install: true,
     current_version: null, release_resolution: 'UNRESOLVED', resolved_tag: null,
     resolved_git_sha: null, resolved_feed_url: null,
+    developer_emergency_requested: false, developer_emergency_command_id: null,
+    developer_emergency_requested_at: null, developer_emergency_state: 'NONE',
+    developer_emergency_policy_bypass: false,
   };
-  #lastCheck = 0; #intervalMs; #canRestart; #clock; #restartGraceMs; #restartSafeSince = null;
+  #lastCheck = 0; #intervalMs; #canRestart; #canEmergencyRestart; #clock; #restartGraceMs; #restartSafeSince = null;
+  #emergencyRequested = false; #emergencyCommandId = null;
 
   constructor({
     intervalMs = 10 * 60 * 1000,
     restartGraceMs = 12_000,
     canRestart = async () => false,
+    canEmergencyRestart = async () => false,
     updater = null,
     packaged = null,
     hostResilience = undefined,
@@ -85,7 +91,10 @@ export class SelfUpdateRuntime {
   } = {}) {
     this.#intervalMs = Math.max(1000, Number(intervalMs) || 10 * 60 * 1000);
     this.#restartGraceMs = Math.max(1000, Number(restartGraceMs) || 12_000);
+    if (typeof canRestart !== 'function') throw new Error('self_update_restart_gate_invalid');
+    if (typeof canEmergencyRestart !== 'function') throw new Error('self_update_emergency_restart_gate_invalid');
     this.#canRestart = canRestart;
+    this.#canEmergencyRestart = canEmergencyRestart;
     this.#injectedUpdater = updater;
     this.#packagedOverride = packaged;
     this.#hostOverride = hostResilience;
@@ -121,6 +130,15 @@ export class SelfUpdateRuntime {
   #resetInstallHandoff() {
     this.#state.pre_install_receipt_persisted = false;
     this.#state.installer_handoff_prepared = false;
+  }
+
+  #clearEmergencyRequest(state = 'NONE') {
+    this.#emergencyRequested = false;
+    this.#emergencyCommandId = null;
+    this.#state.developer_emergency_requested = false;
+    this.#state.developer_emergency_command_id = null;
+    this.#state.developer_emergency_state = state;
+    this.#state.developer_emergency_policy_bypass = false;
   }
 
   #clearResolvedRelease() {
@@ -182,6 +200,7 @@ export class SelfUpdateRuntime {
       this.#state.metadata_verified = false;
       this.#state.last_error = clipError(error);
       this.#resetRestartGate();
+      if (this.#emergencyRequested) this.#clearEmergencyRequest('FAILED_METADATA');
     }
   }
 
@@ -231,6 +250,7 @@ export class SelfUpdateRuntime {
         this.#state.install_attempted_version = null;
         this.#resetInstallHandoff();
         this.#resetRestartGate();
+        if (this.#emergencyRequested) this.#clearEmergencyRequest('NO_UPDATE');
       });
       updater.on('download-progress', (p) => { this.#state.state = 'DOWNLOADING'; this.#state.download_percent = Number(p?.percent || 0); });
       updater.on('update-downloaded', (info) => {
@@ -239,6 +259,7 @@ export class SelfUpdateRuntime {
           this.#state.state = 'ERROR';
           this.#state.last_error = 'downloaded_version_binding_mismatch';
           this.#resetRestartGate();
+          if (this.#emergencyRequested) this.#clearEmergencyRequest('FAILED_DOWNLOAD_BINDING');
           return;
         }
         this.#state.state = 'READY_RESTART';
@@ -246,8 +267,14 @@ export class SelfUpdateRuntime {
         this.#state.download_percent = 100;
         this.#resetInstallHandoff();
         this.#resetRestartGate();
+        if (this.#emergencyRequested) void this.#cycleEmergencyRestartGate();
       });
-      updater.on('error', (e) => { this.#state.state = 'ERROR'; this.#state.last_error = clipError(e); this.#resetRestartGate(); });
+      updater.on('error', (e) => {
+        this.#state.state = 'ERROR';
+        this.#state.last_error = clipError(e);
+        this.#resetRestartGate();
+        if (this.#emergencyRequested) this.#clearEmergencyRequest('FAILED_UPDATER');
+      });
       this.#updater = updater;
       this.#state.state = 'IDLE';
     } catch (e) { this.#state.state = 'ERROR'; this.#state.last_error = clipError(e); this.#resetRestartGate(); }
@@ -259,12 +286,84 @@ export class SelfUpdateRuntime {
     return this.cycle({ force: true });
   }
 
+  async requestDeveloperEmergencyUpdate({ commandId } = {}) {
+    const normalizedCommandId = String(commandId || '').trim().toLowerCase();
+    if (!COMMAND_ID_RE.test(normalizedCommandId)) throw new Error('self_update_emergency_command_id_invalid');
+    if (!this.#updater) throw new Error('self_update_emergency_updater_unavailable');
+    if (this.#state.state === 'RESTARTING') return this.snapshot();
+    this.#emergencyRequested = true;
+    this.#emergencyCommandId = normalizedCommandId;
+    this.#state.developer_emergency_requested = true;
+    this.#state.developer_emergency_command_id = normalizedCommandId;
+    this.#state.developer_emergency_requested_at = new Date(this.#clock()).toISOString();
+    this.#state.developer_emergency_state = 'REQUESTED';
+    this.#state.developer_emergency_policy_bypass = true;
+    if (['READY_RESTART','RESTART_GRACE'].includes(this.#state.state)) {
+      await this.#cycleEmergencyRestartGate();
+      return this.snapshot();
+    }
+    await this.cycle({ force: true });
+    return this.snapshot();
+  }
+
   async applyWhenSafe() {
     if (!this.#updater) return this.snapshot();
     if (this.#state.state === 'RESTARTING') return this.snapshot();
     if (!['READY_RESTART','RESTART_GRACE'].includes(this.#state.state)) throw new Error('self_update_apply_not_ready');
     await this.#cycleRestartGate();
     return this.snapshot();
+  }
+
+  async #launchInstaller(now, { developerEmergency = false } = {}) {
+    if (!this.#state.downloaded_version || this.#state.install_attempted_version === this.#state.downloaded_version) return;
+    this.#state.install_attempted_version = this.#state.downloaded_version;
+    this.#state.state = 'RESTARTING';
+    if (developerEmergency) this.#state.developer_emergency_state = 'INSTALL_EFFECT_FENCING';
+    try {
+      const receipt = {
+        schema: 'metaengine.self-update.pre-install-receipt.v1',
+        version: this.#state.downloaded_version,
+        available_version: this.#state.available_version,
+        metadata_verified: this.#state.metadata_verified === true,
+        publisher_verified: this.#state.publisher_verified === true,
+        resolved_tag: this.#state.resolved_tag,
+        resolved_git_sha: this.#state.resolved_git_sha,
+        restart_gate_safe: this.#state.restart_gate_safe === true,
+        restart_gate_since: this.#state.restart_gate_since,
+        recorded_at: new Date(now).toISOString(),
+        authority_effect: false,
+      };
+      await this.#beforeInstall(structuredClone(receipt));
+      this.#state.pre_install_receipt_persisted = true;
+      await this.#host?.prepareExpectedRestart?.('SELF_UPDATE');
+      await this.#host?.prepareInstallerHandoff?.('SELF_UPDATE');
+      this.#state.installer_handoff_prepared = true;
+      await this.#beforeInstallerLaunch(structuredClone(receipt));
+      if (developerEmergency) this.#state.developer_emergency_state = 'INSTALLER_DISPATCHED';
+      this.#updater.quitAndInstall(true, true);
+    } catch (e) {
+      this.#state.state = 'ERROR';
+      this.#state.installer_handoff_prepared = false;
+      this.#state.last_error = clipError(e);
+      this.#resetRestartGate();
+      if (developerEmergency) this.#clearEmergencyRequest('EFFECT_BLOCKED_OR_FAILED');
+    }
+  }
+
+  async #cycleEmergencyRestartGate() {
+    if (!this.#emergencyRequested || !['READY_RESTART','RESTART_GRACE'].includes(this.#state.state)) return;
+    const safe = await this.#canEmergencyRestart();
+    if (!safe) {
+      this.#resetRestartGate();
+      this.#state.state = 'READY_RESTART';
+      this.#state.developer_emergency_state = 'WAITING_MINIMAL_RESTART_SAFETY';
+      return;
+    }
+    const now = this.#clock();
+    this.#state.restart_gate_safe = true;
+    this.#state.restart_gate_since = new Date(now).toISOString();
+    this.#state.developer_emergency_state = 'ADMITTED';
+    await this.#launchInstaller(now, { developerEmergency: true });
   }
 
   async #cycleRestartGate() {
@@ -288,36 +387,7 @@ export class SelfUpdateRuntime {
       this.#state.state = 'RESTART_GRACE';
       return;
     }
-    if (!this.#state.downloaded_version || this.#state.install_attempted_version === this.#state.downloaded_version) return;
-    this.#state.install_attempted_version = this.#state.downloaded_version;
-    this.#state.state = 'RESTARTING';
-    try {
-      const receipt = {
-        schema: 'metaengine.self-update.pre-install-receipt.v1',
-        version: this.#state.downloaded_version,
-        available_version: this.#state.available_version,
-        metadata_verified: this.#state.metadata_verified === true,
-        publisher_verified: this.#state.publisher_verified === true,
-        resolved_tag: this.#state.resolved_tag,
-        resolved_git_sha: this.#state.resolved_git_sha,
-        restart_gate_safe: this.#state.restart_gate_safe === true,
-        restart_gate_since: this.#state.restart_gate_since,
-        recorded_at: new Date(now).toISOString(),
-        authority_effect: false,
-      };
-      await this.#beforeInstall(structuredClone(receipt));
-      this.#state.pre_install_receipt_persisted = true;
-      await this.#host?.prepareExpectedRestart?.('SELF_UPDATE');
-      await this.#host?.prepareInstallerHandoff?.('SELF_UPDATE');
-      this.#state.installer_handoff_prepared = true;
-      await this.#beforeInstallerLaunch(structuredClone(receipt));
-      this.#updater.quitAndInstall(true, true);
-    } catch (e) {
-      this.#state.state = 'ERROR';
-      this.#state.installer_handoff_prepared = false;
-      this.#state.last_error = clipError(e);
-      this.#resetRestartGate();
-    }
+    await this.#launchInstaller(now);
   }
 
   async cycle({ force = false } = {}) {
@@ -342,14 +412,17 @@ export class SelfUpdateRuntime {
         }
         const shouldCheck = await this.#prepareTrustedReleaseFeed();
         if (shouldCheck) await this.#updater.checkForUpdates();
+        else if (this.#emergencyRequested) this.#clearEmergencyRequest('NO_UPDATE');
       } catch (e) {
         this.#state.state = 'DISCOVERY_ERROR';
         this.#state.last_error = clipError(e);
         this.#state.metadata_verified = false;
         this.#resetRestartGate();
+        if (this.#emergencyRequested) this.#clearEmergencyRequest('FAILED_DISCOVERY');
       }
     }
-    await this.#cycleRestartGate();
+    if (this.#emergencyRequested) await this.#cycleEmergencyRestartGate();
+    else await this.#cycleRestartGate();
     return this.snapshot();
   }
 }
