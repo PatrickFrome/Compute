@@ -87,9 +87,10 @@ test('a manually repaired newer version supersedes an older failed transaction',
   assert.equal(row.automatic_retry_allowed, false);
 });
 
-test('main entry wires ambiguous install to process-local self-update hold', async () => {
+test('main entry wires ambiguous install to process-local self-update hold without killing discovery', async () => {
   const source = await fs.readFile(new URL('../src/main-entry.mjs', import.meta.url), 'utf8');
   assert.match(source, /inspectSelfUpdateStartup/);
-  assert.match(source, /METAENGINE_DISABLE_SELF_UPDATE = '1'/);
+  assert.match(source, /METAENGINE_SELF_UPDATE_HOLD_REASON\s*=\s*'AMBIGUOUS_INSTALL'/);
+  assert.doesNotMatch(source, /METAENGINE_DISABLE_SELF_UPDATE\s*=\s*'1'/);
   assert.match(source, /SELF_UPDATE_AUTOMATIC_RETRY_HELD/);
 });
