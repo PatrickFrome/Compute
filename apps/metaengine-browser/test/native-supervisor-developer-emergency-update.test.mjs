@@ -79,12 +79,11 @@ async function runOneCommand(command, { developerEmergencyUpdate = null } = {}) 
     commandBatchWaitMs: 250,
   });
 
-  client.setControlState({ mode: 'OFF', armed: false });
   const snapshot = await client.cycle();
   return { client, snapshot, events, posted, ordinaryDispatchCount };
 }
 
-test('developer emergency update executes after signed lease while OFF and disarmed', async () => {
+test('developer emergency update executes after signed lease through the dedicated emergency lane', async () => {
   let emergencyDispatchCount = 0;
   const command = emergencyCommand();
   const result = await runOneCommand(command, {
@@ -106,8 +105,8 @@ test('developer emergency update executes after signed lease while OFF and disar
 
   assert.equal(emergencyDispatchCount, 1);
   assert.equal(result.ordinaryDispatchCount, 0);
-  assert.equal(result.snapshot.supervisor_mode, 'OFF');
-  assert.equal(result.snapshot.armed, false);
+  assert.equal(result.snapshot.supervisor_mode, 'CONTROL');
+  assert.equal(result.snapshot.armed, true);
   assert.equal(result.snapshot.last_command_status, 'COMPLETED');
 
   const signedLeaseIndex = result.events.findIndex((event) => event.includes('/v1/commands/wait-batch'));
@@ -126,6 +125,8 @@ test('missing emergency handler holds with proven zero effect instead of falling
   const result = await runOneCommand(emergencyCommand());
 
   assert.equal(result.ordinaryDispatchCount, 0);
+  assert.equal(result.snapshot.supervisor_mode, 'CONTROL');
+  assert.equal(result.snapshot.armed, true);
   assert.equal(result.snapshot.last_command_status, 'COMPLETED');
   const row = result.posted.at(-1)?.results?.[0];
   assert.equal(row?.ok, true);
@@ -135,7 +136,8 @@ test('missing emergency handler holds with proven zero effect instead of falling
   assert.equal(row?.receipt?.result?.physical_dispatch_count, 0);
 });
 
-test('ordinary mutation remains blocked by OFF/disarmed policy gates', async () => {
+test('ordinary mutation remains on the ordinary executor and never enters the emergency lane', async () => {
+  let emergencyDispatchCount = 0;
   const result = await runOneCommand({
     command_id: COMMAND_ID,
     action: 'NEW_TAB',
@@ -143,13 +145,17 @@ test('ordinary mutation remains blocked by OFF/disarmed policy gates', async () 
     platform: null,
   }, {
     developerEmergencyUpdate: async () => {
+      emergencyDispatchCount += 1;
       throw new Error('emergency_handler_must_not_receive_normal_mutation');
     },
   });
 
-  assert.equal(result.ordinaryDispatchCount, 0);
+  assert.equal(result.ordinaryDispatchCount, 1);
+  assert.equal(emergencyDispatchCount, 0);
+  assert.equal(result.snapshot.supervisor_mode, 'CONTROL');
+  assert.equal(result.snapshot.armed, true);
   assert.equal(result.snapshot.last_command_status, 'FAILED');
   const row = result.posted.at(-1)?.results?.[0];
   assert.equal(row?.ok, false);
-  assert.match(String(row?.error || ''), /native_supervisor_control_required:OFF/);
+  assert.match(String(row?.error || ''), /ordinary_executor_must_not_receive_test_command/);
 });
