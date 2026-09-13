@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'work/browser-continuous-fleet-audit-v1'
+      - 'release/self-update-ambiguity-live-v2'
     paths:
       - 'apps/metaengine-browser/src/**'
       - 'apps/metaengine-browser/ui/**'
@@ -36,7 +37,7 @@ permissions:
 jobs:
   windows-nsis-package-smoke:
     runs-on: windows-2025
-    timeout-minutes: 28
+    timeout-minutes: 35
     steps:
       - name: Checkout exact candidate head
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -339,10 +340,99 @@ jobs:
             $normal.Refresh()
             if ($normal.HasExited) { throw 'normal_ui_primary_died_after_second_instance' }
 
+            # Live 0.7.0-dev.2.1 repeatedly crossed the Sentinel's 180-second
+            # startup grace and relaunched a healthy parent. Bind the exact
+            # packaged process, Sentinel token/boot and useful-progress lease,
+            # then stay alive beyond that boundary with no recovery generation.
+            $sentinelPath = Join-Path $userData 'metaengine-browser-sentinel-v1.json'
+            $progressPath = "$sentinelPath.parent-progress-v1.json"
+            $workerHeartbeatPath = "$sentinelPath.worker-heartbeat-v1.json"
+            $sentinelDeadline = [DateTime]::UtcNow.AddSeconds(35)
+            $sentinelBefore = $null
+            $progressBefore = $null
+            $workerHeartbeatBefore = $null
+            while ([DateTime]::UtcNow -lt $sentinelDeadline) {
+              try {
+                if ((Test-Path $sentinelPath -PathType Leaf) `
+                    -and (Test-Path $progressPath -PathType Leaf) `
+                    -and (Test-Path $workerHeartbeatPath -PathType Leaf)) {
+                  $sentinelBefore = Get-Content $sentinelPath -Raw | ConvertFrom-Json
+                  $progressBefore = Get-Content $progressPath -Raw | ConvertFrom-Json
+                  $workerHeartbeatBefore = Get-Content $workerHeartbeatPath -Raw | ConvertFrom-Json
+                  if ($sentinelBefore.schema -eq 'metaengine.browser-sentinel.state.v1' `
+                      -and [int64]$sentinelBefore.parent_pid -eq [int64]$normal.Id `
+                      -and [int64]$sentinelBefore.worker_pid -gt 0 `
+                      -and $sentinelBefore.worker_released -eq $false `
+                      -and $progressBefore.schema -eq 'metaengine.browser-sentinel.parent-progress.v1' `
+                      -and [string]$progressBefore.token -eq [string]$sentinelBefore.token `
+                      -and [int64]$progressBefore.parent_pid -eq [int64]$normal.Id `
+                      -and $workerHeartbeatBefore.schema -eq 'metaengine.browser-sentinel.worker-heartbeat.v1' `
+                      -and [string]$workerHeartbeatBefore.token -eq [string]$sentinelBefore.token `
+                      -and [int64]$workerHeartbeatBefore.parent_pid -eq [int64]$normal.Id `
+                      -and [int64]$workerHeartbeatBefore.worker_pid -eq [int64]$sentinelBefore.worker_pid `
+                      -and $workerHeartbeatBefore.lifecycle -eq 'READY') { break }
+                }
+              } catch {}
+              $sentinelBefore = $null
+              $progressBefore = $null
+              $workerHeartbeatBefore = $null
+              Start-Sleep -Milliseconds 250
+            }
+            if (-not $sentinelBefore -or -not $progressBefore -or -not $workerHeartbeatBefore) { throw 'normal_ui_sentinel_progress_binding_missing' }
+            $sentinelToken = [string]$sentinelBefore.token
+            $sentinelCreatedAt = [string]$sentinelBefore.created_at
+            $sentinelWorkerPid = [int64]$sentinelBefore.worker_pid
+            $recoveryGeneration = [int64]$sentinelBefore.worker_recovery_generation
+            $progressSequence = [int64]$progressBefore.progress_seq
+
+            Start-Sleep -Seconds 190
+            $normal.Refresh()
+            if ($normal.HasExited) { throw 'normal_ui_primary_died_across_sentinel_startup_grace' }
+            $startupAfter = Get-Content $journal -Raw | ConvertFrom-Json
+            $sentinelAfter = Get-Content $sentinelPath -Raw | ConvertFrom-Json
+            $progressAfter = Get-Content $progressPath -Raw | ConvertFrom-Json
+            $workerHeartbeatAfter = Get-Content $workerHeartbeatPath -Raw | ConvertFrom-Json
+            if ([string]$startupAfter.current_boot_id -ne [string]$startup.current_boot_id) { throw 'normal_ui_boot_id_changed_across_sentinel_startup_grace' }
+            if ($sentinelAfter.schema -ne 'metaengine.browser-sentinel.state.v1' `
+                -or [string]$sentinelAfter.token -ne $sentinelToken `
+                -or [string]$sentinelAfter.created_at -ne $sentinelCreatedAt `
+                -or [int64]$sentinelAfter.parent_pid -ne [int64]$normal.Id `
+                -or [int64]$sentinelAfter.worker_pid -ne $sentinelWorkerPid `
+                -or $sentinelAfter.worker_released -ne $false `
+                -or $sentinelAfter.relaunch_attempted -ne $false `
+                -or [int64]$sentinelAfter.worker_recovery_generation -ne $recoveryGeneration) {
+              throw 'normal_ui_sentinel_identity_or_recovery_drift'
+            }
+            if ($workerHeartbeatAfter.schema -ne 'metaengine.browser-sentinel.worker-heartbeat.v1' `
+                -or [string]$workerHeartbeatAfter.token -ne $sentinelToken `
+                -or [int64]$workerHeartbeatAfter.parent_pid -ne [int64]$normal.Id `
+                -or [int64]$workerHeartbeatAfter.worker_pid -ne $sentinelWorkerPid `
+                -or $workerHeartbeatAfter.lifecycle -ne 'READY') {
+              throw 'normal_ui_sentinel_worker_heartbeat_binding_drift'
+            }
+            $workerHeartbeatAgeSeconds = ([DateTime]::UtcNow - ([DateTime]::Parse([string]$workerHeartbeatAfter.heartbeat_at)).ToUniversalTime()).TotalSeconds
+            if ($workerHeartbeatAgeSeconds -lt 0 -or $workerHeartbeatAgeSeconds -gt 15) { throw "normal_ui_sentinel_worker_heartbeat_stale:$workerHeartbeatAgeSeconds" }
+            if ($progressAfter.schema -ne 'metaengine.browser-sentinel.parent-progress.v1' `
+                -or [string]$progressAfter.token -ne $sentinelToken `
+                -or [int64]$progressAfter.parent_pid -ne [int64]$normal.Id `
+                -or [int64]$progressAfter.progress_seq -le $progressSequence) {
+              throw 'normal_ui_parent_progress_did_not_advance'
+            }
+            $progressAgeSeconds = ([DateTime]::UtcNow - ([DateTime]::Parse([string]$progressAfter.progress_at)).ToUniversalTime()).TotalSeconds
+            if ($progressAgeSeconds -lt 0 -or $progressAgeSeconds -gt 30) { throw "normal_ui_parent_progress_stale:$progressAgeSeconds" }
+
             Copy-Item $journal "$env:RUNNER_TEMP\browser-startup-journal-v1.json" -Force
+            Copy-Item $sentinelPath "$env:RUNNER_TEMP\browser-sentinel-v1.json" -Force
+            Copy-Item $progressPath "$env:RUNNER_TEMP\browser-parent-progress-v1.json" -Force
+            Copy-Item $workerHeartbeatPath "$env:RUNNER_TEMP\browser-sentinel-worker-heartbeat-v1.json" -Force
             $proof.normal_ui_boot_verified = $true
             $proof.runtime_import_observability_verified = $true
             $proof.second_instance_activation_verified = $true
+            $proof | Add-Member -NotePropertyName startup_grace_survival_seconds -NotePropertyValue 190 -Force
+            $proof | Add-Member -NotePropertyName same_primary_pid_across_startup_grace -NotePropertyValue $true -Force
+            $proof | Add-Member -NotePropertyName same_sentinel_token_across_startup_grace -NotePropertyValue $true -Force
+            $proof | Add-Member -NotePropertyName parent_progress_advanced_across_startup_grace -NotePropertyValue $true -Force
+            $proof | Add-Member -NotePropertyName sentinel_relaunch_attempted -NotePropertyValue $false -Force
             $proof | Add-Member -NotePropertyName startup_journal_schema -NotePropertyValue 'metaengine.browser.startup-journal.v1' -Force
             $proof | Add-Member -NotePropertyName normal_ui_stable_event_sequence -NotePropertyValue ([int64]$stableEvent.sequence) -Force
             $proof | Add-Member -NotePropertyName second_instance_activation_event_sequence -NotePropertyValue ([int64]$activation.sequence) -Force
@@ -377,6 +467,9 @@ jobs:
             ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
             ${{ runner.temp }}/windows-package-proof.json
             ${{ runner.temp }}/browser-startup-journal-v1.json
+            ${{ runner.temp }}/browser-sentinel-v1.json
+            ${{ runner.temp }}/browser-parent-progress-v1.json
+            ${{ runner.temp }}/browser-sentinel-worker-heartbeat-v1.json
             ${{ runner.temp }}/package-profile-probe.out
             ${{ runner.temp }}/package-profile-probe.err
             ${{ runner.temp }}/package-normal-ui.out

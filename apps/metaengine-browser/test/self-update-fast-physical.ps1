@@ -41,6 +41,9 @@ function Wait-ExitOrThrow($Process, [int]$TimeoutMs, [string]$Label, [string]$Er
 $root = (Get-Location).Path
 $temp = $env:RUNNER_TEMP
 if (-not $temp) { throw 'runner_temp_required' }
+$head = (git rev-parse HEAD).Trim()
+if ($head -notmatch '^[0-9a-f]{40}$') { throw 'source_head_invalid' }
+$forbiddenAmbiguousTransactionId = 'd80a0292-212b-40ec-a79b-6182a29057b4'
 
 # Resolve the newest published release with the exact same trust resolver used by runtime.
 $baselineJson = Join-Path $temp 'baseline-release.json'
@@ -159,6 +162,8 @@ try {
   $userData = (Get-Content (Join-Path $temp 'baseline-user-data-path.txt')).Trim()
   $preInstallPath = Join-Path $userData 'metaengine-self-update-pre-install-receipt-v1.json'
   $successorPath = Join-Path $userData 'metaengine-self-update-successor-receipt-v1.json'
+  $transactionPath = Join-Path $userData 'metaengine-self-update-transaction-v1.json'
+  if (Test-Path $transactionPath) { throw 'published_baseline_transaction_state_not_clean' }
   Remove-Item $preInstallPath,$successorPath -Force -ErrorAction SilentlyContinue
   $env:METAENGINE_SELF_UPDATE_TEST_FEED_URL = "http://127.0.0.1:$port/"
   $env:METAENGINE_SELF_UPDATE_SMOKE_TRACE = Join-Path $temp 'self-update-smoke.jsonl'
@@ -197,11 +202,20 @@ try {
   if ($successor.authority_effect -ne $false) { throw 'successor_authority_invalid' }
   $preInstallSha = (Get-FileHash $preInstallPath -Algorithm SHA256).Hash.ToLowerInvariant()
   if ([string]$successor.pre_install_receipt_sha256 -ne $preInstallSha) { throw 'successor_receipt_digest_mismatch' }
+  if (-not (Test-Path $transactionPath)) { throw 'self_update_transaction_journal_missing' }
+  $transaction = Get-Content $transactionPath -Raw | ConvertFrom-Json
+  if ($transaction.schema -ne 'metaengine.self-update.transaction.v1') { throw 'self_update_transaction_schema_invalid' }
+  if ([string]$transaction.transaction_id -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') { throw 'self_update_transaction_id_invalid' }
+  if ([string]$transaction.transaction_id -eq $forbiddenAmbiguousTransactionId) { throw 'forbidden_ambiguous_transaction_reused' }
+  if ([string]$transaction.target_version -ne $target) { throw 'self_update_transaction_target_binding_invalid' }
+  if ([string]$transaction.state -ne 'SUCCESSOR_BOOTED' -or $transaction.automatic_retry_allowed -ne $false -or $transaction.authority_effect -ne $false) { throw 'self_update_transaction_successor_barrier_invalid' }
   Copy-Item $preInstallPath (Join-Path $temp 'self-update-pre-install-receipt.json')
   Copy-Item $successorPath (Join-Path $temp 'self-update-successor-receipt.json')
+  Copy-Item $transactionPath (Join-Path $temp 'self-update-transaction.json')
   @(
     "source_pid=$sourcePid", "baseline_version=$baseline", "target_version=$target", "successor_pid=$($successor.pid)",
-    "pre_install_receipt_sha256=$preInstallSha", 'metadata_verified=PASS', 'restart_state_durable=PASS',
+    "transaction_id=$($transaction.transaction_id)", "pre_install_receipt_sha256=$preInstallSha", 'metadata_verified=PASS', 'restart_state_durable=PASS',
+    'old_ambiguous_transaction_reused=FALSE',
     'durable_successor_binding=PASS', 'forced_relaunch=PASS', 'published_baseline_reused=PASS', 'target_build_count=1'
   ) | Set-Content (Join-Path $temp 'self-update-e2e-proof.txt')
 } finally {
@@ -244,11 +258,10 @@ Add-Content (Join-Path $temp 'self-update-e2e-proof.txt') 'physical_singleton=PA
 # Stage exact target bytes; publisher must never rebuild them.
 $evidence = Join-Path $root 'self-update-fast-evidence'
 New-Item -ItemType Directory -Force -Path $evidence | Out-Null
-foreach ($file in @('baseline-version.txt','target-version.txt','baseline-sha256.txt','target-sha256.txt','baseline-user-data-path.txt','baseline-version-probe.out','baseline-profile-probe.out','target-version-probe.out','target-profile-probe.out','self-update-smoke.jsonl','self-update-smoke.out','self-update-smoke.err','self-update-pre-install-receipt.json','self-update-successor-receipt.json','self-update-e2e-proof.txt','singleton-first.out','singleton-second.out','self-update-feed.out','self-update-feed.err')) {
+foreach ($file in @('baseline-version.txt','target-version.txt','baseline-sha256.txt','target-sha256.txt','baseline-user-data-path.txt','baseline-version-probe.out','baseline-profile-probe.out','target-version-probe.out','target-profile-probe.out','self-update-smoke.jsonl','self-update-smoke.out','self-update-smoke.err','self-update-pre-install-receipt.json','self-update-successor-receipt.json','self-update-transaction.json','self-update-e2e-proof.txt','singleton-first.out','singleton-second.out','self-update-feed.out','self-update-feed.err')) {
   $sourcePath = Join-Path $temp $file
   if (Test-Path $sourcePath) { Copy-Item $sourcePath $evidence }
 }
-$head = (git rev-parse HEAD).Trim()
 $head | Set-Content (Join-Path $evidence 'git-head.txt')
 $targetInstaller = Get-Item ((Get-Content (Join-Path $temp 'target-installer-path.txt')).Trim())
 $targetBlockmap = Get-Item ((Get-Content (Join-Path $temp 'target-blockmap-path.txt')).Trim())
@@ -265,6 +278,8 @@ $manifest = [ordered]@{
   git_sha = $head
   run_id = [string]$env:GITHUB_RUN_ID
   run_attempt = [string]$env:GITHUB_RUN_ATTEMPT
+  transaction_id = [string]$transaction.transaction_id
+  old_ambiguous_transaction_reused = $false
   installer_name = $targetInstaller.Name
   installer_sha256 = $actualTargetSha
   blockmap_name = $targetBlockmap.Name

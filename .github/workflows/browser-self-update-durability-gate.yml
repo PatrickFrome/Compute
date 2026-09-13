@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'work/browser-continuous-fleet-audit-v1'
+      - 'release/self-update-ambiguity-live-v2'
     paths:
       - 'apps/metaengine-browser/src/self-update-transaction-journal.mjs'
       - 'apps/metaengine-browser/src/self-update-handoff.mjs'

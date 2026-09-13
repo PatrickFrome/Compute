@@ -99,6 +99,8 @@ export class HostResilienceRuntime {
       sentinel_recovery_uses_existing_progress_tick: true,
       sentinel_bootstrap_recovery_uses_existing_progress_tick: true,
       login_start_recovery_uses_existing_progress_tick: true,
+      parent_progress_heartbeat_isolated: true,
+      resilience_work_blocks_parent_progress: false,
       login_start_repair_requires_fresh_absence_readback: true,
       login_start_policy_hold_is_advisory: true,
       login_start_policy_hold_grants_repair_authority: false,
@@ -258,20 +260,20 @@ export class HostResilienceRuntime {
     }
   }
 
-  async #resilienceTick({ kind = 'EVENT_LOOP_HEARTBEAT', detail = null, forceLoginCheck = false } = {}) {
+  async #markParentProgress({ kind = 'EVENT_LOOP_HEARTBEAT', detail = null } = {}) {
+    if (this.#stopRequested || !this.#progressLease) return null;
+    const progress = await this.#progressLease.mark({ kind, detail });
+    this.#state.parent_progress = progress;
+    return progress;
+  }
+
+  async #resilienceTick({ forceLoginCheck = false } = {}) {
     if (this.#resilienceTickPromise) return this.#resilienceTickPromise;
     this.#resilienceTickPromise = (async () => {
       if (this.#stopRequested) return this.snapshot();
       await this.#verifyLoginStart({ force: forceLoginCheck });
 
       if (!this.#sentinel && this.#sentinelBootstrapRetrySafe) await this.#bootstrapSentinel();
-
-      // Keep the parent-progress lease fresh independently of worker recovery. A dead
-      // sentinel must never make the healthy parent look wedged while we repair it.
-      if (this.#progressLease) {
-        await this.#progressLease.mark({ kind, detail });
-        this.#state.parent_progress = this.#progressLease.snapshot();
-      }
 
       if (this.#sentinel?.recoverWorkerIfProvenAbsent) {
         try {
@@ -304,7 +306,14 @@ export class HostResilienceRuntime {
   #startResiliencePump() {
     if (this.#progressTimer || this.#stopRequested) return;
     this.#progressTimer = setInterval(() => {
-      void this.#resilienceTick({ kind: 'EVENT_LOOP_HEARTBEAT' }).catch((error) => {
+      // The useful-progress write and slower recovery work intentionally share one
+      // timer but not one promise. An indefinitely pending OS read or Sentinel
+      // recovery must not suppress later exact-token parent heartbeats and cause a
+      // healthy Browser parent to be killed at the stale-lease boundary.
+      void this.#markParentProgress({ kind: 'EVENT_LOOP_HEARTBEAT' }).catch((error) => {
+        this.#state.last_error = `parent_progress:${String(error?.message || error).slice(0, 200)}`;
+      });
+      void this.#resilienceTick().catch((error) => {
         this.#state.last_error = `resilience_tick:${String(error?.message || error).slice(0, 200)}`;
       });
     }, PARENT_PROGRESS_HEARTBEAT_MS);
@@ -330,7 +339,12 @@ export class HostResilienceRuntime {
         this.#resumeHandler = () => {
           this.#state.last_resume_at = new Date().toISOString();
           Promise.resolve(this.#onResume())
-            .then(() => this.#resilienceTick({ kind: 'POWER_RESUME', forceLoginCheck: true }))
+            .then(async () => {
+              await this.#markParentProgress({ kind: 'POWER_RESUME' });
+              void this.#resilienceTick({ forceLoginCheck: true }).catch((error) => {
+                this.#state.last_error = `resilience_tick:${String(error?.message || error).slice(0, 200)}`;
+              });
+            })
             .catch((e) => { this.#state.last_error = String(e?.message || e).slice(0, 240); });
         };
         powerMonitor.on('resume', this.#resumeHandler);
@@ -348,7 +362,11 @@ export class HostResilienceRuntime {
 
   async markProgress({ kind = 'CONTROL_PLANE_CYCLE', detail = null } = {}) {
     try {
-      return await this.#resilienceTick({ kind, detail });
+      await this.#markParentProgress({ kind, detail });
+      void this.#resilienceTick().catch((error) => {
+        this.#state.last_error = `resilience_tick:${String(error?.message || error).slice(0, 200)}`;
+      });
+      return this.snapshot();
     } catch (e) {
       this.#state.last_error = `parent_progress:${String(e?.message || e).slice(0, 200)}`;
       throw e;

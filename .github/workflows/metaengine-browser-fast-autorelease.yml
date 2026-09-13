@@ -7,10 +7,13 @@ on:
       - work/self-update-fast-loop-v1
       - work/devos-elastic-fleet-bootstrap-v1
       - work/browser-devos-root-transport-bootstrap-v1
+      - release/self-update-ambiguity-live-v2
     paths:
       - 'apps/metaengine-browser/**'
       - '.github/workflows/metaengine-browser-self-update-fast-e2e.yml'
       - '.github/workflows/metaengine-browser-fast-autorelease.yml'
+      - '.github/workflows/metaengine-browser-release-evidence-gate.yml'
+      - '.github/workflows/metaengine-browser-sonarqube-gate.yml'
 
 # Publishers are isolated by exact source SHA. A newer integration push must not
 # cancel an older publisher after its physical evidence exists. The monotonic
@@ -27,11 +30,38 @@ permissions:
 jobs:
   publish-exact-verified-target:
     runs-on: ubuntu-24.04
-    timeout-minutes: 55
+    timeout-minutes: 130
     env:
       GH_TOKEN: ${{ github.token }}
       EXPECTED_SHA: ${{ github.sha }}
     steps:
+      - name: Wait for exact release evidence gate success
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > release-gate-run-id.txt
+          for attempt in $(seq 1 480); do
+            gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/workflows/metaengine-browser-release-evidence-gate.yml/runs" \
+              -f head_sha="$EXPECTED_SHA" -f event=push -f per_page=20 > release-gate-runs.json
+            python3 - <<'PY'
+          import json, os, pathlib
+          sha=os.environ['EXPECTED_SHA']
+          rows=json.load(open('release-gate-runs.json','r',encoding='utf-8')).get('workflow_runs',[])
+          rows=[r for r in rows if r.get('head_sha')==sha and r.get('event')=='push']
+          rows.sort(key=lambda r:(r.get('run_attempt',0),r.get('id',0)), reverse=True)
+          if rows:
+              r=rows[0]
+              print(f"release_gate id={r.get('id')} status={r.get('status')} conclusion={r.get('conclusion')}")
+              if r.get('status')=='completed' and r.get('conclusion')=='success':
+                  pathlib.Path('release-gate-run-id.txt').write_text(str(r['id']),encoding='utf-8')
+              elif r.get('status')=='completed' and r.get('conclusion') not in (None,'success'):
+                  raise SystemExit(f"exact_release_evidence_gate_failed:{r.get('conclusion')}")
+          PY
+            if [ -s release-gate-run-id.txt ]; then break; fi
+            sleep 15
+          done
+          test -s release-gate-run-id.txt || { echo exact_release_evidence_gate_success_missing >&2; exit 1; }
+
       - name: Wait for exact fast physical E2E success
         shell: bash
         run: |
@@ -90,6 +120,9 @@ jobs:
           mp=manifests[0]; m=json.loads(mp.read_text(encoding='utf-8'))
           if m.get('schema')!='metaengine.browser.self-update-e2e-manifest.v2': raise SystemExit('manifest_schema_invalid')
           if m.get('git_sha')!=os.environ['EXPECTED_SHA']: raise SystemExit('manifest_git_sha_mismatch')
+          transaction_id=str(m.get('transaction_id') or '').lower()
+          if not re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',transaction_id): raise SystemExit('manifest_transaction_id_invalid')
+          if transaction_id=='d80a0292-212b-40ec-a79b-6182a29057b4' or m.get('old_ambiguous_transaction_reused') is not False: raise SystemExit('forbidden_ambiguous_transaction_reused')
           required=[
               'physical_n_to_n_plus_1','durable_successor_binding','forced_successor','profile_continuity',
               'single_install_directory','physical_singleton','development_channel','published_baseline_reused',

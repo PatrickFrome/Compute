@@ -4,14 +4,17 @@ on:
   push:
     branches:
       - 'work/browser-continuous-fleet-audit-v1'
+      - 'release/self-update-ambiguity-live-v2'
     paths:
       - 'apps/metaengine-browser/src/browser-parent-progress-lease.mjs'
       - 'apps/metaengine-browser/src/browser-sentinel-liveness.cjs'
       - 'apps/metaengine-browser/src/browser-sentinel-worker.cjs'
       - 'apps/metaengine-browser/src/browser-sentinel-action-journal.cjs'
       - 'apps/metaengine-browser/src/durable-json-file.cjs'
+      - 'apps/metaengine-browser/src/host-resilience-runtime.mjs'
       - 'apps/metaengine-browser/test/browser-sentinel-liveness.test.mjs'
       - 'apps/metaengine-browser/test/browser-sentinel-action-journal.test.mjs'
+      - 'apps/metaengine-browser/test/host-resilience-runtime.test.mjs'
       - '.github/workflows/browser-parent-progress-durability-gate.yml'
   pull_request:
     paths:
@@ -20,8 +23,10 @@ on:
       - 'apps/metaengine-browser/src/browser-sentinel-worker.cjs'
       - 'apps/metaengine-browser/src/browser-sentinel-action-journal.cjs'
       - 'apps/metaengine-browser/src/durable-json-file.cjs'
+      - 'apps/metaengine-browser/src/host-resilience-runtime.mjs'
       - 'apps/metaengine-browser/test/browser-sentinel-liveness.test.mjs'
       - 'apps/metaengine-browser/test/browser-sentinel-action-journal.test.mjs'
+      - 'apps/metaengine-browser/test/host-resilience-runtime.test.mjs'
       - '.github/workflows/browser-parent-progress-durability-gate.yml'
 
 permissions:
@@ -30,7 +35,7 @@ permissions:
 jobs:
   parent-progress-durability:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 5
+    timeout-minutes: 8
     strategy:
       fail-fast: false
       matrix:
@@ -64,8 +69,10 @@ jobs:
           node --check apps/metaengine-browser/src/browser-sentinel-worker.cjs
           node --check apps/metaengine-browser/src/browser-sentinel-action-journal.cjs
           node --check apps/metaengine-browser/src/durable-json-file.cjs
+          node --check apps/metaengine-browser/src/host-resilience-runtime.mjs
           node --test apps/metaengine-browser/test/browser-sentinel-liveness.test.mjs
           node --test apps/metaengine-browser/test/browser-sentinel-action-journal.test.mjs
+          node --test apps/metaengine-browser/test/host-resilience-runtime.test.mjs
 
       - name: Prove test did not mutate checkout
         shell: bash

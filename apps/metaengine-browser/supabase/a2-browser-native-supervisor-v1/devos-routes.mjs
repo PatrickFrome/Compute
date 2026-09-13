@@ -176,6 +176,12 @@ export function createDevosSupervisorRoutes({rpc,workspaceId}={}){
       if(!clientId)return json(401,{error:'device_auth_required'});
       const commandId=effectMatch[1].toLowerCase();
       if(!UUID_RE.test(commandId)||!body?.binding||typeof body.binding!=='object'||Array.isArray(body.binding))return json(400,{error:'native_effect_binding_invalid'});
+      // This route is composed before the generic index.ts effect handler and
+      // therefore owns the same fail-closed boundary. Never let a path command
+      // authorize a different leased binding (or a different device) and never
+      // derive command identity from the Request object.
+      if(String(body.binding.command_id||'').toLowerCase()!==commandId)return json(409,{error:'effect_binding_command_mismatch',automatic_retry_allowed:false,authority_effect:false});
+      if(String(body.binding.client_id||'')!==String(clientId))return json(409,{error:'effect_binding_client_mismatch',automatic_retry_allowed:false,authority_effect:false});
       const result=await rpc('h205f22_a2_browser_supervisor_bind_effect_v1',{p_workspace_id:workspaceId,p_command_id:commandId,p_client_id:clientId,p_binding:body.binding,p_authority_effect:false});
       return json(result?.accepted===true?200:409,{...result,automatic_retry_allowed:false,authority_effect:false});
     }

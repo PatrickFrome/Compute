@@ -13,6 +13,8 @@ on:
       - 'apps/metaengine-browser/src/browser-guardian-effect-journal.cjs'
       - 'apps/metaengine-browser/src/native-supervisor-command-lanes.mjs'
       - 'apps/metaengine-browser/src/native-supervisor-client-base.mjs'
+      - 'apps/metaengine-browser/native/browser-guardian-scm/**'
+      - 'apps/metaengine-browser/scripts/build-guardian-native-staging.ps1'
       - 'apps/metaengine-browser/test/developer-emergency-update-admission.test.mjs'
       - 'apps/metaengine-browser/test/developer-emergency-update-runtime.test.mjs'
       - 'apps/metaengine-browser/test/developer-emergency-update-controller.test.mjs'
@@ -32,7 +34,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04, windows-2025]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout exact candidate head
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -86,6 +88,33 @@ jobs:
           node --test \
             test/native-supervisor-command-lanes.test.mjs \
             test/native-supervisor-developer-emergency-update.test.mjs
+
+      - name: Compile and self-test the physical Guardian update actuator
+        if: runner.os == 'Windows'
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = Join-Path $env:RUNNER_TEMP 'guardian-emergency-native'
+          $buildScript = (Resolve-Path './scripts/build-guardian-native-staging.ps1').Path
+          Push-Location $env:RUNNER_TEMP
+          try {
+            $manifestLine = (& $buildScript -OutputDir $out | Where-Object { $_.Trim() } | Select-Object -Last 1)
+          } finally {
+            Pop-Location
+          }
+          if (-not $manifestLine) { throw 'guardian_emergency_native_manifest_missing' }
+          $manifest = $manifestLine | ConvertFrom-Json
+          if ($manifest.schema -ne 'metaengine.browser.guardian-native-staging-manifest.v1') { throw 'guardian_emergency_native_schema_invalid' }
+          if ($manifest.source_head -ne '${{ github.event.pull_request.head.sha || github.sha }}') { throw 'guardian_emergency_native_source_head_mismatch' }
+          if ($manifest.bounded_update_actuator_embedded -ne $true `
+              -or $manifest.update_actuator_native_write_ahead_effect_barrier -ne $true `
+              -or $manifest.update_actuator_at_most_one_dispatch_per_effect_id -ne $true `
+              -or $manifest.update_actuator_self_test_passed -ne $true `
+              -or $manifest.automatic_retry_allowed -ne $false `
+              -or $manifest.authority_effect -ne $false) {
+            throw 'guardian_emergency_native_actuator_contract_invalid'
+          }
 
       - name: Prove source checkout unchanged
         shell: bash

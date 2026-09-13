@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { HostResilienceRuntime } from '../src/host-resilience-runtime.mjs';
 
@@ -141,14 +143,81 @@ test('resume event triggers recovery callback without page authority', async () 
   await runtime.stop();
 });
 
-test('sentinel self-heal reuses the one parent-progress tick and creates no second scheduler', async () => {
+test('sentinel self-heal shares one timer but cannot block the isolated parent-progress promise', async () => {
   const source = await fs.readFile(new URL('../src/host-resilience-runtime.mjs', import.meta.url), 'utf8');
   assert.match(source, /recoverWorkerIfProvenAbsent/);
   assert.match(source, /sentinel_recovery_requires_exact_old_pid_absence:\s*true/);
   assert.match(source, /sentinel_recovery_uses_existing_progress_tick:\s*true/);
   assert.equal((source.match(/setInterval\s*\(/g) || []).length, 1);
-  assert.match(source, /await this\.\#progressLease\.mark\(\{ kind, detail \}\)[\s\S]*recoverWorkerIfProvenAbsent/);
+  assert.match(source, /void this\.\#markParentProgress\(\{ kind: 'EVENT_LOOP_HEARTBEAT' \}\)[\s\S]*void this\.\#resilienceTick\(\)/);
+  assert.match(source, /parent_progress_heartbeat_isolated:\s*true/);
+  assert.match(source, /resilience_work_blocks_parent_progress:\s*false/);
   assert.doesNotMatch(source, /watchdog_task_leasing:\s*true|watchdog_scheduler_authority:\s*true/);
+});
+
+test('pending Sentinel recovery never blocks a later exact parent-progress heartbeat', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-host-progress-isolation-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  let releaseRecovery;
+  const pendingRecovery = new Promise((resolve) => { releaseRecovery = resolve; });
+  let recoveryCalls = 0;
+  const binding = {
+    schema: 'metaengine.browser-sentinel.state.v1',
+    token: 'isolated-progress-token',
+    parent_pid: process.pid,
+    worker_pid: 4242,
+    worker_ready: true,
+    worker_released: false,
+    lifecycle: 'ARMED',
+    expected_restart: false,
+    installer_handoff: false,
+    authority_effect: false,
+  };
+  const sentinel = {
+    start: async () => binding,
+    waitUntilHealthy: async () => binding,
+    snapshot: () => ({ ...binding }),
+    recoverWorkerIfProvenAbsent: async () => {
+      recoveryCalls += 1;
+      return pendingRecovery;
+    },
+    stop: async () => {},
+  };
+  const electron = {
+    app: {
+      isPackaged: true,
+      getPath: (name) => {
+        assert.equal(name, 'userData');
+        return dir;
+      },
+      getLoginItemSettings: () => ({ openAtLogin: true, executableWillLaunchAtLogin: true }),
+    },
+    powerMonitor: new EventEmitter(),
+  };
+  const runtime = new HostResilienceRuntime({
+    electron,
+    platform: 'win32',
+    sentinelFactory: () => sentinel,
+  });
+  await runtime.start();
+  const initialSeq = runtime.snapshot().parent_progress.progress_seq;
+
+  await runtime.markProgress({ kind: 'RECOVERY_BEGAN' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(recoveryCalls, 1);
+
+  const heartbeat = await Promise.race([
+    runtime.markProgress({ kind: 'RECOVERY_STILL_PENDING' }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('isolated_parent_progress_timeout')), 250)),
+  ]);
+  assert.equal(heartbeat.parent_progress.progress_seq, initialSeq + 2);
+  assert.equal(heartbeat.parent_progress.progress_kind, 'RECOVERY_STILL_PENDING');
+  assert.equal(heartbeat.parent_progress_heartbeat_isolated, true);
+  assert.equal(heartbeat.resilience_work_blocks_parent_progress, false);
+
+  releaseRecovery({ state: 'HEALTHY', recovered: false, authority_effect: false });
+  await new Promise((resolve) => setImmediate(resolve));
+  await runtime.stop();
 });
 
 test('initial sentinel bootstrap retries only when spawn effect is proven absent', async () => {

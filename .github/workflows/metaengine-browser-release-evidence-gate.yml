@@ -1,0 +1,163 @@
+name: METAENGINE Browser Release Evidence Gate
+
+on:
+  push:
+    branches:
+      - release/self-update-ambiguity-live-v2
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: metaengine-browser-release-evidence-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  EXACT_HEAD: ${{ github.sha }}
+
+jobs:
+  known-live-defect-regressions:
+    name: known-live-defect-regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Prove exact head
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+      - name: Setup Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - name: Install Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+      - name: Parse exact Browser source
+        working-directory: apps/metaengine-browser
+        run: npm run check
+      - name: Prove every known live defect class and interacting fence
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            test/native-browser-capture-view.test.mjs \
+            test/native-browser-capture-view-readiness.test.mjs \
+            test/host-resilience-runtime.test.mjs \
+            test/browser-sentinel-liveness.test.mjs \
+            test/fleet-restart-stale-history.test.mjs \
+            test/restart-resurrection-hardening.test.mjs \
+            test/devos-effect-delivery-restart.test.mjs \
+            test/fleet-transport-proof-restart-fence.test.mjs \
+            test/self-update-ambiguous-successor-recovery.test.mjs \
+            test/self-update-install-effect-barrier.test.mjs \
+            test/self-update-restart-safety.test.mjs \
+            test/native-effect-binding.test.mjs \
+            test/native-supervisor-effect-intent-route.test.mjs \
+            test/supervisor-send-boundary.test.mjs \
+            test/release-physical-gate-chain.test.mjs
+
+  exact-sha-evidence-convergence:
+    name: exact-sha-evidence-convergence
+    needs: known-live-defect-regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Wait for every independent exact-SHA gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess, time
+
+          repo = os.environ['GITHUB_REPOSITORY']
+          source_head = os.environ['EXACT_HEAD']
+          required = {
+              'bootstrap_autostart': 'metaengine-browser-bootstrap-autostart-e2e.yml',
+              'physical_n_to_n_plus_1': 'metaengine-browser-self-update-fast-e2e.yml',
+              'full_physical_self_update': 'metaengine-browser-self-update-e2e.yml',
+              'full_browser_suite': 'browser-critical-audit-v1.yml',
+              'emergency_ubuntu_windows_native': 'browser-developer-emergency-update-v1.yml',
+              'parent_progress_durability': 'browser-parent-progress-durability-gate.yml',
+              'self_update_durability': 'browser-self-update-durability-gate.yml',
+              'windows_package_startup_grace': 'browser-windows-package-smoke.yml',
+              'windows_autonomous_soak': 'browser-windows-autonomous-soak-v1.yml',
+              'final_runtime_activation': 'browser-final-runtime-activation-v1.yml',
+              'windows_installed_chat': 'browser-windows-installed-chat-qualification.yml',
+              'sonarqube_quality_gate': 'metaengine-browser-sonarqube-gate.yml',
+          }
+          deadline = time.monotonic() + 115 * 60
+          last_summary = None
+          while time.monotonic() < deadline:
+              evidence = {}
+              pending = []
+              for gate, workflow in required.items():
+                  raw = subprocess.check_output([
+                      'gh', 'api', '-X', 'GET',
+                      f'repos/{repo}/actions/workflows/{workflow}/runs',
+                      '-f', f'head_sha={source_head}', '-f', 'event=push', '-f', 'per_page=20',
+                  ], text=True)
+                  rows = json.loads(raw).get('workflow_runs', [])
+                  rows = [r for r in rows if r.get('head_sha') == source_head and r.get('event') == 'push']
+                  rows.sort(key=lambda r: (r.get('run_attempt', 0), r.get('id', 0)), reverse=True)
+                  if not rows:
+                      pending.append(f'{gate}:MISSING')
+                      continue
+                  run = rows[0]
+                  state = f"{run.get('status')}:{run.get('conclusion')}"
+                  evidence[gate] = {
+                      'workflow': workflow,
+                      'run_id': run.get('id'),
+                      'run_attempt': run.get('run_attempt'),
+                      'head_sha': run.get('head_sha'),
+                      'event': run.get('event'),
+                      'status': run.get('status'),
+                      'conclusion': run.get('conclusion'),
+                      'html_url': run.get('html_url'),
+                  }
+                  if run.get('status') == 'completed' and run.get('conclusion') != 'success':
+                      raise SystemExit(f'exact_release_gate_failed:{gate}:{run.get("conclusion")}:{run.get("id")}')
+                  if run.get('status') != 'completed' or run.get('conclusion') != 'success':
+                      pending.append(f'{gate}:{state}')
+              summary = ','.join(pending) if pending else 'ALL_EXACT_SHA_GATES_PASSED'
+              if summary != last_summary:
+                  print(summary, flush=True)
+                  last_summary = summary
+              if not pending:
+                  row = {
+                      'schema': 'metaengine.browser.release-evidence-gate.v1',
+                      'source_head': source_head,
+                      'repository': repo,
+                      'required_gate_count': len(required),
+                      'all_required_gates_passed': True,
+                      'installer_publication_authorized': True,
+                      'automatic_live_install_authorized': False,
+                      'old_ambiguous_transaction_reused': False,
+                      'gates': evidence,
+                      'authority_effect': False,
+                  }
+                  pathlib.Path('release-evidence-gate.json').write_text(
+                      json.dumps(row, sort_keys=True, separators=(',', ':')) + '\n', encoding='utf-8')
+                  print(json.dumps(row, sort_keys=True, separators=(',', ':')), flush=True)
+                  break
+              time.sleep(15)
+          else:
+              raise SystemExit('exact_release_gate_timeout:' + (last_summary or 'NO_RUNS'))
+          PY
+
+      - name: Upload immutable release gate evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-release-evidence-${{ env.EXACT_HEAD }}-${{ github.run_attempt }}
+          path: release-evidence-gate.json
+          if-no-files-found: error
+          retention-days: 90
