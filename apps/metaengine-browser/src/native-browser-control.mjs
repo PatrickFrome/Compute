@@ -1,7 +1,11 @@
 import crypto from 'node:crypto';
 import { chatGptControlMatches } from './chatgpt-ui-controls.mjs';
 import { openCdpOutcomeLatch } from './browser-cdp-outcome-latch.mjs';
-import { nativeBrowserCdpPool, withPersistentBrowserDebugger } from './browser-persistent-cdp-session.mjs';
+import {
+  nativeBrowserCdpPool,
+  releasePersistentBrowserDebugger,
+  withPersistentBrowserDebugger,
+} from './browser-persistent-cdp-session.mjs';
 import {
   assertNativeEffectBindingMatches,
   nativeActionRequiresEffectBinding,
@@ -25,6 +29,7 @@ const CHATGPT_SUBMIT_OUTCOME_METHODS = new Set([
 const NATIVE_BROWSER_PROCESS_INCARNATION_ID = crypto.randomUUID();
 const DEFAULT_CAPTURE_VIEW_MAX_ATTEMPTS = 5;
 const DEFAULT_CAPTURE_VIEW_RETRY_DELAY_MS = 150;
+const DEFAULT_CAPTURE_CDP_DEADLINE_MS = 5000;
 const clip = (value, max) => String(value ?? '').slice(0, max);
 const axRawValue = (node, key) => String(node?.[key]?.value ?? '');
 const axValue = (node, key) => axRawValue(node, key).trim();
@@ -413,30 +418,65 @@ function decodeCdpJpeg(value) {
   return jpeg;
 }
 
+function captureCdpTimeoutError(deadlineMs) {
+  const error = new Error(`native_capture_cdp_timeout:${deadlineMs}`);
+  error.code = 'NATIVE_CAPTURE_CDP_TIMEOUT';
+  error.deadline_ms = deadlineMs;
+  error.automatic_retry_allowed = false;
+  return error;
+}
+
+async function runBoundedCdpCapture(webContents, task, {
+  deadlineMs = DEFAULT_CAPTURE_CDP_DEADLINE_MS,
+  releaseDebuggerImpl = releasePersistentBrowserDebugger,
+} = {}) {
+  const boundedDeadlineMs = Math.max(10, Math.min(15000, Number(deadlineMs) || DEFAULT_CAPTURE_CDP_DEADLINE_MS));
+  let timer = null;
+  const work = Promise.resolve().then(task);
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      try { releaseDebuggerImpl?.(webContents); } catch {}
+      reject(captureCdpTimeoutError(boundedDeadlineMs));
+    }, boundedDeadlineMs);
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function captureCdpThumbnail(webContents, {
   withDebuggerImpl = withDebugger,
   maxWidth = 720,
   retryMaxWidth = 520,
+  fromSurface = true,
+  deadlineMs = DEFAULT_CAPTURE_CDP_DEADLINE_MS,
+  releaseDebuggerImpl = releasePersistentBrowserDebugger,
 } = {}) {
-  return withDebuggerImpl(webContents, async (dbg) => {
+  return runBoundedCdpCapture(webContents, () => withDebuggerImpl(webContents, async (dbg) => {
     const viewport = captureViewport(await dbg.sendCommand('Page.getLayoutMetrics'));
     const take = async (quality, widthLimit) => {
-      const scale = Math.min(1, Math.max(0.1, Number(widthLimit) / viewport.width));
-      const shot = await dbg.sendCommand('Page.captureScreenshot', {
+      const payload = {
         format: 'jpeg',
         quality,
-        fromSurface: true,
+        fromSurface,
         captureBeyondViewport: false,
         optimizeForSpeed: true,
-        clip: { ...viewport, scale },
-      });
+      };
+      if (fromSurface) {
+        const scale = Math.min(1, Math.max(0.1, Number(widthLimit) / viewport.width));
+        payload.clip = { ...viewport, scale };
+      }
+      const shot = await dbg.sendCommand('Page.captureScreenshot', payload);
       return decodeCdpJpeg(shot?.data);
     };
     let jpeg = await take(55, maxWidth);
-    if (jpeg.byteLength > 120000) jpeg = await take(45, retryMaxWidth);
+    if (jpeg.byteLength > 120000) jpeg = await take(fromSurface ? 45 : 35, retryMaxWidth);
+    if (jpeg.byteLength > 150000 && !fromSurface) jpeg = await take(25, retryMaxWidth);
     if (jpeg.byteLength > 150000) throw new Error('native_capture_thumbnail_too_large');
-    return { jpeg, viewport };
-  });
+    return { jpeg, viewport, fromSurface };
+  }), { deadlineMs, releaseDebuggerImpl });
 }
 
 async function capturePageWithBoundedSurfaceReadiness(webContents, {
@@ -467,7 +507,13 @@ async function capturePageWithBoundedSurfaceReadiness(webContents, {
 
 export async function captureViewThumbnail(webContents, options = {}) {
   if (!webContents || webContents.isDestroyed?.()) throw new Error('native_capture_webcontents_unavailable');
-  const { surfaceExpected = true, withDebuggerImpl = withDebugger, ...surfaceOptions } = options;
+  const {
+    surfaceExpected = true,
+    withDebuggerImpl = withDebugger,
+    cdpDeadlineMs = DEFAULT_CAPTURE_CDP_DEADLINE_MS,
+    releaseDebuggerImpl = releasePersistentBrowserDebugger,
+    ...surfaceOptions
+  } = options;
   let captured = null;
   let surfaceError = null;
   if (surfaceExpected !== false) {
@@ -483,7 +529,12 @@ export async function captureViewThumbnail(webContents, options = {}) {
 
   if (!captured) {
     try {
-      const fallback = await captureCdpThumbnail(webContents, { withDebuggerImpl });
+      const fallback = await captureCdpThumbnail(webContents, {
+        withDebuggerImpl,
+        fromSurface: surfaceExpected !== false,
+        deadlineMs: cdpDeadlineMs,
+        releaseDebuggerImpl,
+      });
       const jpeg = fallback.jpeg;
       return {
         schema: 'metaengine.native-browser.capture-thumbnail.v1',
@@ -496,6 +547,8 @@ export async function captureViewThumbnail(webContents, options = {}) {
         transient_surface_retries: Number(surfaceError?.attempts || 0),
         bounded_surface_readiness: true,
         capture_backend: 'CDP_SCREENSHOT',
+        capture_from_surface: fallback.fromSurface,
+        cdp_deadline_ms: Math.max(10, Math.min(15000, Number(cdpDeadlineMs) || DEFAULT_CAPTURE_CDP_DEADLINE_MS)),
         detached_surface_fallback: surfaceExpected === false,
         native_surface_error: clip(surfaceError?.message || 'native_capture_surface_unavailable', 240),
         jpeg_bytes: jpeg.byteLength,
@@ -507,6 +560,8 @@ export async function captureViewThumbnail(webContents, options = {}) {
       const error = new Error(`${surfaceError?.message || 'native_capture_surface_unavailable'}:cdp_fallback:${clip(fallbackError?.message || fallbackError, 160)}`);
       error.code = 'NATIVE_CAPTURE_SURFACE_UNAVAILABLE';
       error.attempts = Number(surfaceError?.attempts || 0);
+      error.cdp_error_code = fallbackError?.code || null;
+      error.automatic_retry_allowed = false;
       throw error;
     }
   }
