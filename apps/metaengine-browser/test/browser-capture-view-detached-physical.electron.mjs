@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { app, BaseWindow, WebContentsView } from 'electron';
 
+import { installDetachedCaptureSurfaceBridge, uninstallDetachedCaptureSurfaceBridge } from '../src/browser-detached-capture-surface-bridge.mjs';
 import { captureViewThumbnail } from '../src/native-browser-control.mjs';
 
 app.enableSandbox();
@@ -26,14 +28,16 @@ async function run() {
   win.contentView.addChildView(target);
   shell.setBounds({ x: 0, y: 0, width: 1080, height: 80 });
   target.setBounds({ x: 0, y: 80, width: 1080, height: 680 });
+  installDetachedCaptureSurfaceBridge(target);
 
   try {
+    const nonce = crypto.randomUUID();
     const html = [
       '<!doctype html><html><head><title>Detached capture target</title></head>',
       '<body style="margin:0;width:100vw;height:100vh;overflow:hidden;',
       'background:linear-gradient(135deg,#183153,#00a6a6);color:#fff;',
       'font:700 42px system-ui;display:grid;place-items:center">',
-      '<main id="proof">METAENGINE DETACHED CAPTURE VIEW</main></body></html>',
+      `<main id="proof">METAENGINE DETACHED CAPTURE VIEW ${nonce}</main></body></html>`,
     ].join('');
     await Promise.all([
       shell.webContents.loadURL('data:text/html,<body style="background:%2310151d"></body>'),
@@ -58,6 +62,7 @@ async function run() {
     assert.equal(jpeg.byteLength, result.jpeg_bytes);
     assert.deepEqual([...jpeg.subarray(0, 2)], [0xff, 0xd8]);
     assert.match(result.sha256, /^[a-f0-9]{64}$/);
+    assert.equal(win.contentView.children.includes(target), false);
 
     console.log(JSON.stringify({
       schema: 'metaengine.browser.detached-capture-view-physical-e2e.v1',
@@ -65,13 +70,16 @@ async function run() {
       electron: process.versions.electron,
       capture_backend: result.capture_backend,
       detached_surface_fallback: result.detached_surface_fallback,
+      capture_from_surface: result.capture_from_surface,
       source_width: result.source_width,
       source_height: result.source_height,
       jpeg_bytes: result.jpeg_bytes,
       sha256: result.sha256,
+      target_still_detached: !win.contentView.children.includes(target),
       authority_effect: false,
     }));
   } finally {
+    uninstallDetachedCaptureSurfaceBridge(target);
     try { win.contentView.removeChildView(target); } catch {}
     try { win.contentView.removeChildView(shell); } catch {}
     if (!target.webContents.isDestroyed()) target.webContents.close();

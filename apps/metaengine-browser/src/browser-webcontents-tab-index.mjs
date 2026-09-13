@@ -1,3 +1,8 @@
+import {
+  installDetachedCaptureSurfaceBridge,
+  uninstallDetachedCaptureSurfaceBridge,
+} from './browser-detached-capture-surface-bridge.mjs';
+
 export const BROWSER_WEBCONTENTS_TAB_INDEX_SCHEMA = 'metaengine.browser.webcontents-tab-index.v1';
 
 const tabByWebContents = new WeakMap();
@@ -136,7 +141,10 @@ export class ExactBrowserTabViewMap extends Map {
   set(tabIdRaw, view) {
     const tabId = validTabId(tabIdRaw);
     const prior = super.get(tabId);
-    if (prior?.webContents && prior !== view) unbindWebContentsFromTab(prior.webContents, tabId);
+    if (prior?.webContents && prior !== view) {
+      uninstallDetachedCaptureSurfaceBridge(prior);
+      unbindWebContentsFromTab(prior.webContents, tabId);
+    }
     const result = super.set(tabId, view);
     const webContents = view?.webContents;
     if (!webContents || typeof webContents !== 'object') {
@@ -144,8 +152,16 @@ export class ExactBrowserTabViewMap extends Map {
       throw new Error('browser_webcontents_tab_index_view_invalid');
     }
     bindWebContentsToTab(tabId, webContents);
+    try {
+      installDetachedCaptureSurfaceBridge(view);
+    } catch (error) {
+      unbindWebContentsFromTab(webContents, tabId);
+      super.delete(tabId);
+      throw error;
+    }
     if (!destroyedHandlerByWebContents.has(webContents) && typeof webContents.once === 'function') {
       const handler = () => {
+        uninstallDetachedCaptureSurfaceBridge(view);
         unbindWebContentsFromTab(webContents, tabId);
         if (super.get(tabId) === view) super.delete(tabId);
       };
@@ -158,13 +174,19 @@ export class ExactBrowserTabViewMap extends Map {
   delete(tabIdRaw) {
     const tabId = String(tabIdRaw || '');
     const view = super.get(tabId);
-    if (view?.webContents) unbindWebContentsFromTab(view.webContents, tabId);
+    if (view?.webContents) {
+      uninstallDetachedCaptureSurfaceBridge(view);
+      unbindWebContentsFromTab(view.webContents, tabId);
+    }
     return super.delete(tabId);
   }
 
   clear() {
     for (const [tabId, view] of this.entries()) {
-      if (view?.webContents) unbindWebContentsFromTab(view.webContents, tabId);
+      if (view?.webContents) {
+        uninstallDetachedCaptureSurfaceBridge(view);
+        unbindWebContentsFromTab(view.webContents, tabId);
+      }
     }
     super.clear();
     clearWebContentsTabIndex();
