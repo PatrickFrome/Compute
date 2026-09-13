@@ -3,11 +3,13 @@ import path from 'node:path';
 import { persistNativeSupervisorControlState } from './native-supervisor-control-state.mjs';
 
 export const RUNTIME_GENESIS_SCHEMA = 'metaengine.browser.runtime-genesis.v1';
-export const RUNTIME_GENESIS_GENERATION = 'DEVOS_CLEAN_GENESIS_V1';
+export const RUNTIME_GENESIS_GENERATION = 'DEVOS_CLEAN_GENESIS_V2';
 export const RUNTIME_GENESIS_MARKER = 'metaengine-runtime-generation-v1.json';
 
 export const RUNTIME_GENESIS_RESET_FILES = Object.freeze([
   'metaengine-fleet-state-v2.json',
+  'metaengine-supervisor-keepalive-v1.json',
+  'metaengine-supervisor-mesh-v2.json',
   'metaengine-devos-session-layout-registry-v1.json',
   'metaengine-owner-safety-gates-v1.json',
   'metaengine-self-update-session-continuity-v1.json',
@@ -74,6 +76,8 @@ export async function ensureRuntimeGenesis({
       initial_fleet_agents: Number.isSafeInteger(Number(current.initial_fleet_agents)) ? Number(current.initial_fleet_agents) : 0,
       supervisor_mode: 'CONTROL',
       armed: true,
+      stale_supervisor_keepalive_restored: current.stale_supervisor_keepalive_restored === true,
+      stale_supervisor_mesh_restored: current.stale_supervisor_mesh_restored === true,
       automatic_actuation_after_genesis: false,
       control_state: current.control_state || null,
       preserved: [...RUNTIME_GENESIS_PRESERVED],
@@ -88,9 +92,10 @@ export async function ensureRuntimeGenesis({
     if (moved) quarantined.push(moved);
   }
 
-  // Clean genesis removes stale topology, not supervisor authority. Final runtime
-  // has exactly one startup authority state: CONTROL + armed. Keeping initial_tabs
-  // at zero is what prevents clean genesis from manufacturing Browser work.
+  // Clean genesis removes stale topology and stale supervisor coordination state,
+  // not Browser authentication or supervisor device identity. Final runtime has
+  // exactly one startup authority state: CONTROL + armed. Keeping initial_tabs
+  // and initial_fleet_agents at zero prevents genesis from manufacturing work.
   const controlPath = path.join(root, 'metaengine-native-supervisor-control-state-v1.json');
   const controlState = await persistNativeSupervisorControlState(controlPath, {
     supervisor_mode: 'CONTROL',
@@ -114,6 +119,8 @@ export async function ensureRuntimeGenesis({
     preserves_remote_brain_memory_ledgers: true,
     stale_tab_topology_restored: false,
     stale_fleet_intent_restored: false,
+    stale_supervisor_keepalive_restored: false,
+    stale_supervisor_mesh_restored: false,
     automatic_actuation_after_genesis: false,
     control_state: controlState,
     authority_effect: false,
