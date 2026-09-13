@@ -58,6 +58,10 @@ jobs:
         working-directory: apps/metaengine-browser
         run: npm run check
 
+      - name: Prove release-analysis integration contract
+        working-directory: apps/metaengine-browser
+        run: node --test test/release-exact-sha-workflow-contract.test.mjs test/release-physical-gate-chain.test.mjs
+
       - name: Install pinned Semgrep CE
         run: python -m pip install --disable-pip-version-check --no-input semgrep==1.177.0
 
