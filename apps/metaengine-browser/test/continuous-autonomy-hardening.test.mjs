@@ -122,12 +122,13 @@ test('Windows login-start registration self-heals while Startup Approval remains
 });
 
 test('autonomy source invariants close UI, restart, host wiring and self-update gaps', async () => {
-  const [main, mainEntry, lifecycle, nativeControl, nativeSupervisor, hostResilience, selfUpdateRuntime] = await Promise.all([
+  const [main, mainEntry, lifecycle, nativeControl, nativeSupervisor, nativeSupervisorBase, hostResilience, selfUpdateRuntime] = await Promise.all([
     fs.readFile(path.join(src, 'main.mjs'), 'utf8'),
     fs.readFile(path.join(src, 'main-entry.mjs'), 'utf8'),
     fs.readFile(path.join(src, 'supervisor-lifecycle-runtime-core.mjs'), 'utf8'),
     fs.readFile(path.join(src, 'native-browser-control.mjs'), 'utf8'),
     fs.readFile(path.join(src, 'native-supervisor-client.mjs'), 'utf8'),
+    fs.readFile(path.join(src, 'native-supervisor-client-base.mjs'), 'utf8'),
     fs.readFile(path.join(src, 'host-resilience-runtime.mjs'), 'utf8'),
     fs.readFile(path.join(src, 'self-update-runtime-v8.mjs'), 'utf8'),
   ]);
@@ -155,10 +156,16 @@ test('autonomy source invariants close UI, restart, host wiring and self-update 
   assert.match(mainEntry, /new HostResilienceRuntime\(\)/);
   assert.match(mainEntry, /__METAENGINE_HOST_RESILIENCE_RUNTIME__/);
   assert.match(mainEntry, /app\.once\('ready',[\s\S]*hostResilience\.start\(\)/);
+  assert.match(main, /hostResilience:\s*globalThis\.__METAENGINE_HOST_RESILIENCE_RUNTIME__\s*\|\|\s*false/);
+  assert.match(nativeSupervisorBase, /hostResilience\s*=\s*undefined/);
+  assert.match(nativeSupervisorBase, /new SelfUpdateRuntime\(\{[\s\S]*hostResilience,/);
+  assert.equal((mainEntry.match(/new HostResilienceRuntime\(\)/g) || []).length, 1);
+  assert.doesNotMatch(main, /new HostResilienceRuntime\(\)/);
   assert.match(nativeSupervisor, /host_resilience:\s*hostResilienceSnapshot\(\)/);
   assert.doesNotMatch(nativeSupervisor, /prepareInstallerHandoff\(['"]SELF_UPDATE['"]\)/);
   const prepareAt = selfUpdateRuntime.indexOf("prepareInstallerHandoff?.('SELF_UPDATE')");
   const priorHookAt = selfUpdateRuntime.indexOf('await this.#beforeInstallerLaunch', prepareAt);
   assert.ok(prepareAt >= 0 && priorHookAt > prepareAt, 'single sentinel installer handoff owner must precede external self-update hook');
+  assert.match(selfUpdateRuntime, /alreadyRunning[\s\S]*if \(!alreadyRunning\) await this\.\#host\.start\(\)/);
   assert.match(nativeSupervisor, /host_resilience_second_polling_loop:\s*false/);
 });

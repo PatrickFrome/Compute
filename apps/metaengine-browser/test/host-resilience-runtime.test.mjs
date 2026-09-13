@@ -156,6 +156,12 @@ test('sentinel self-heal shares one timer but cannot block the isolated parent-p
 });
 
 test('pending Sentinel recovery never blocks a later exact parent-progress heartbeat', async (t) => {
+  const previousDisableSentinel = process.env.METAENGINE_DISABLE_CRASH_SENTINEL;
+  delete process.env.METAENGINE_DISABLE_CRASH_SENTINEL;
+  t.after(() => {
+    if (previousDisableSentinel == null) delete process.env.METAENGINE_DISABLE_CRASH_SENTINEL;
+    else process.env.METAENGINE_DISABLE_CRASH_SENTINEL = previousDisableSentinel;
+  });
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-host-progress-isolation-'));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   let releaseRecovery;

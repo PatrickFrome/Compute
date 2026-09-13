@@ -881,6 +881,11 @@ async function initNativeSupervisor() {
       commandBatchWaitMs: 15000,
       legacySingleLeaseFallback: false,
       commandFastlane: false,
+      // Host resilience is process-owned by main-entry. Self-update must share
+      // this exact runtime instead of constructing a second Sentinel writer for
+      // the same userData path. If main.mjs is ever loaded without main-entry,
+      // fail closed by disabling the nested host rather than creating a rival.
+      hostResilience: globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__ || false,
       getState: nativeSupervisorState,
       executeCommand: executeNativeSupervisorCommand,
       observeLocalTarget,

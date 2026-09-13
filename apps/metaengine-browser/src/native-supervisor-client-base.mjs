@@ -160,6 +160,7 @@ export class NativeSupervisorClient {
     commandFastlane = false,
     commandFastlaneIntervalMs = 750,
     controlStatePath = null,
+    hostResilience = undefined,
   }) {
     if (!identity) throw new Error('native_supervisor_identity_required');
     if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
@@ -220,6 +221,12 @@ export class NativeSupervisorClient {
       ...(meshStatePath ? { statePath: meshStatePath } : {}),
     });
     this.#selfUpdate = new SelfUpdateRuntime({
+      // main-entry owns the one process-wide Sentinel/parent-progress runtime.
+      // Reusing that exact object is required: a second HostResilienceRuntime
+      // would overwrite the shared Sentinel state path with a new token while
+      // the first lease kept writing the old token, causing the healthy primary
+      // to be terminated when the 180-second startup grace expires.
+      hostResilience,
       canRestart: async () => {
         if (!controlModeAllows(this.#supervisorMode)) return false;
         if (!armedAllows(this.#armed)) return false;

@@ -234,7 +234,15 @@ export class SelfUpdateRuntime {
       this.#state.current_version = this.#currentVersion;
       if (packaged && this.#hostOverride !== false) {
         this.#host = this.#hostOverride || new HostResilienceRuntime();
-        await this.#host.start();
+        const existingHost = this.#host.snapshot?.() || null;
+        const existingState = String(existingHost?.state || '');
+        const alreadyRunning = existingHost?.external_stop_requested === false
+          || ['ACTIVE','DEGRADED_LOGIN_START','DEGRADED_SENTINEL','ERROR'].includes(existingState);
+        // A production Browser injects the process-owned host from main-entry.
+        // Starting that same runtime twice can duplicate OS power-save handles;
+        // constructing a different runtime would be worse and replace the shared
+        // Sentinel token. Reuse a demonstrably running host without new effects.
+        if (!alreadyRunning) await this.#host.start();
       }
       const disableEnvironment = classifySelfUpdateDisableEnvironment(process.env);
       this.#state.install_effect_quarantined = disableEnvironment.install_effect_quarantined;

@@ -53,6 +53,24 @@ test('binds updater to builder-compatible dev channel and reasserts no downgrade
   assert.equal(runtime.snapshot().trusted_channel, 'dev');
 });
 
+test('reuses an already-running process host without starting a second resilience owner', async () => {
+  const updater = new FakeUpdater();
+  let hostStarts = 0;
+  const host = {
+    start: async () => { hostStarts += 1; },
+    snapshot: () => ({ state: 'ACTIVE', external_stop_requested: false, authority_effect: false }),
+  };
+  const runtime = new SelfUpdateRuntime({
+    updater,
+    packaged: true,
+    hostResilience: host,
+    intervalMs: 60_000,
+  });
+  await runtime.start();
+  assert.equal(hostStarts, 0, 'the process-owned Sentinel/lease runtime must remain single-owner');
+  assert.equal(runtime.snapshot().host_resilience.state, 'ACTIVE');
+});
+
 test('valid files[] sha512 metadata is approved before download', async () => {
   const updater = new FakeUpdater();
   const runtime = runtimeFor(updater);

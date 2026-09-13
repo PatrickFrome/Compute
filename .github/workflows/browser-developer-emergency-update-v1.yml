@@ -99,12 +99,16 @@ jobs:
           $buildScript = (Resolve-Path './scripts/build-guardian-native-staging.ps1').Path
           Push-Location $env:RUNNER_TEMP
           try {
-            $manifestLine = (& $buildScript -OutputDir $out | Where-Object { $_.Trim() } | Select-Object -Last 1)
+            & $buildScript -OutputDir $out | Out-Host
           } finally {
             Pop-Location
           }
-          if (-not $manifestLine) { throw 'guardian_emergency_native_manifest_missing' }
-          $manifest = $manifestLine | ConvertFrom-Json
+          # cl.exe writes source-file names to the success stream. The durable
+          # build product, not whichever compiler line happened to be last, is
+          # the authoritative contract boundary.
+          $manifestPath = Join-Path $out 'guardian-native-manifest.json'
+          if (-not (Test-Path $manifestPath -PathType Leaf)) { throw 'guardian_emergency_native_manifest_missing' }
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
           if ($manifest.schema -ne 'metaengine.browser.guardian-native-staging-manifest.v1') { throw 'guardian_emergency_native_schema_invalid' }
           if ($manifest.source_head -ne '${{ github.event.pull_request.head.sha || github.sha }}') { throw 'guardian_emergency_native_source_head_mismatch' }
           if ($manifest.bounded_update_actuator_embedded -ne $true `
