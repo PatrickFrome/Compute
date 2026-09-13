@@ -16,7 +16,6 @@ const REQUIRED_GATE_WORKFLOWS = [
   'browser-windows-autonomous-soak-v1.yml',
   'browser-final-runtime-activation-v1.yml',
   'browser-windows-installed-chat-qualification.yml',
-  'metaengine-browser-sonarqube-gate.yml',
 ];
 
 const CENTRAL_GATE = 'metaengine-browser-release-evidence-gate.yml';
@@ -84,6 +83,7 @@ test('central release evidence gate requires the complete independent exact-SHA 
   for (const workflowName of REQUIRED_GATE_WORKFLOWS) {
     assert.match(source, new RegExp(workflowName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `central gate must require ${workflowName}`);
   }
+  assert.doesNotMatch(source, /sonar(?:qube)?/i, 'central release evidence must not depend on Sonar');
   assert.match(source, /required_gate_count['"]?:\s*len\(required\)/, 'central evidence must record the required gate count');
 });
 

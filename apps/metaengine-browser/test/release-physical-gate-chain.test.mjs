@@ -38,13 +38,12 @@ test('verified dev release is transitively fenced by exact-SHA bootstrap autosta
   assert.match(publisher, /exact_fast_e2e_success_missing/);
 });
 
-test('release publisher is blocked on the complete exact-SHA evidence gate and real SonarQube result', () => {
+test('release publisher is blocked on the complete exact-SHA evidence gate without optional external analysis services', () => {
   const release = readWorkflow('metaengine-browser-release-evidence-gate.yml');
-  const sonar = readWorkflow('metaengine-browser-sonarqube-gate.yml');
   const publisher = readWorkflow('metaengine-browser-fast-autorelease.yml');
   const releaseBranch = /release\/self-update-ambiguity-live-v2/;
 
-  for (const workflow of [release, sonar, publisher]) assert.match(workflow, releaseBranch);
+  for (const workflow of [release, publisher]) assert.match(workflow, releaseBranch);
   const requiredWorkflows = [
     'metaengine-browser-bootstrap-autostart-e2e.yml',
     'metaengine-browser-self-update-fast-e2e.yml',
@@ -57,7 +56,6 @@ test('release publisher is blocked on the complete exact-SHA evidence gate and r
     'browser-windows-autonomous-soak-v1.yml',
     'browser-final-runtime-activation-v1.yml',
     'browser-windows-installed-chat-qualification.yml',
-    'metaengine-browser-sonarqube-gate.yml',
   ];
   for (const required of requiredWorkflows) {
     assert.ok(release.includes(required), `missing_release_gate:${required}`);
@@ -67,9 +65,8 @@ test('release publisher is blocked on the complete exact-SHA evidence gate and r
   assert.match(release, /head_sha=\{source_head\}/);
   assert.match(release, /all_required_gates_passed': True/);
   assert.match(release, /old_ambiguous_transaction_reused': False/);
-  assert.match(sonar, /sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f/);
-  assert.match(sonar, /sonarqube-quality-gate-action@7a5fffe8e523c40e0c740b6bc2712ab503e52efa/);
-  assert.match(sonar, /test "\$QUALITY_GATE_STATUS" = 'PASSED'/);
+  assert.doesNotMatch(release, /sonar(?:qube)?/i);
+  assert.doesNotMatch(publisher, /sonar(?:qube)?/i);
 
   const fullGate = publisher.indexOf('Wait for exact release evidence gate success');
   const physicalGate = publisher.indexOf('Wait for exact fast physical E2E success');

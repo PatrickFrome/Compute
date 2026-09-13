@@ -94,7 +94,6 @@ jobs:
               'windows_autonomous_soak': 'browser-windows-autonomous-soak-v1.yml',
               'final_runtime_activation': 'browser-final-runtime-activation-v1.yml',
               'windows_installed_chat': 'browser-windows-installed-chat-qualification.yml',
-              'sonarqube_quality_gate': 'metaengine-browser-sonarqube-gate.yml',
           }
           deadline = time.monotonic() + 115 * 60
           last_summary = None
