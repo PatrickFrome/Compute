@@ -5,18 +5,6 @@ on:
     branches:
       - 'work/browser-continuous-fleet-audit-v1'
       - 'release/self-update-ambiguity-live-v2'
-    paths:
-      - 'apps/metaengine-browser/src/**'
-      - 'apps/metaengine-browser/ui/**'
-      - 'apps/metaengine-browser/native/**'
-      - 'apps/metaengine-browser/scripts/build-guardian-native-staging.ps1'
-      - 'apps/metaengine-browser/scripts/electron-builder-before-pack.cjs'
-      - 'apps/metaengine-browser/scripts/verify-installed-guardian-native-staging.ps1'
-      - 'apps/metaengine-browser/test/browser-startup-observability.test.mjs'
-      - 'apps/metaengine-browser/test/browser-shell-visual-evidence.mjs'
-      - 'apps/metaengine-browser/package.json'
-      - 'apps/metaengine-browser/electron-builder.test.json'
-      - '.github/workflows/browser-windows-package-smoke.yml'
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/**'
