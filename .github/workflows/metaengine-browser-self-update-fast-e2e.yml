@@ -8,11 +8,6 @@ on:
       - work/devos-elastic-fleet-bootstrap-v1
       - work/browser-devos-root-transport-bootstrap-v1
       - release/self-update-ambiguity-live-v2
-    paths:
-      - 'apps/metaengine-browser/**'
-      - '.github/workflows/metaengine-browser-self-update-fast-e2e.yml'
-      - '.github/workflows/metaengine-browser-bootstrap-autostart-e2e.yml'
-      - '.github/workflows/metaengine-browser-fast-autorelease.yml'
   workflow_dispatch:
 
 permissions:
