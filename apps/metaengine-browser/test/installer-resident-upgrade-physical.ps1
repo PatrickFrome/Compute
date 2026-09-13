@@ -13,13 +13,13 @@ $targetInstaller = (Get-Content -LiteralPath $targetInstallerPathFile -Raw).Trim
 if (-not (Test-Path -LiteralPath $targetInstaller -PathType Leaf)) { throw 'target_installer_missing' }
 $app = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test\METAENGINE Browser Test.exe'
 
-function Wait-ProcessGone([int]$Pid, [int]$Seconds, [string]$Label) {
+function Wait-ProcessGone([int]$ProcessId, [int]$Seconds, [string]$Label) {
   $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
   do {
-    if (-not (Get-Process -Id $Pid -ErrorAction SilentlyContinue)) { return }
+    if (-not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { return }
     Start-Sleep -Milliseconds 200
   } while ([DateTime]::UtcNow -lt $deadline)
-  throw "${Label}_still_alive:$Pid"
+  throw "${Label}_still_alive:$ProcessId"
 }
 
 function Wait-SentinelChild([int]$ParentPid, [string]$Executable, [int]$Seconds = 15) {
@@ -89,8 +89,8 @@ if (-not $upgrade.WaitForExit(90000)) {
   throw 'resident_upgrade_installer_timeout'
 }
 if ($upgrade.ExitCode -ne 0) { throw "resident_upgrade_installer_exit_$($upgrade.ExitCode)" }
-Wait-ProcessGone -Pid $legacyPrimary.Id -Seconds 15 -Label 'legacy_primary'
-Wait-ProcessGone -Pid $legacySentinelPid -Seconds 15 -Label 'legacy_sentinel'
+Wait-ProcessGone -ProcessId $legacyPrimary.Id -Seconds 15 -Label 'legacy_primary'
+Wait-ProcessGone -ProcessId $legacySentinelPid -Seconds 15 -Label 'legacy_sentinel'
 
 # Verify the bytes now installed are exactly the one-built candidate, then exercise
 # the same no-flag startup path a user invokes after Setup finishes.
@@ -119,8 +119,8 @@ $null = $shutdownSignal.Handle
 if (-not $shutdownSignal.WaitForExit(20000)) { try { Stop-Process -Id $shutdownSignal.Id -Force } catch {}; throw 'planned_shutdown_signal_timeout' }
 $shutdownSignal.Refresh()
 if ($shutdownSignal.ExitCode -ne 0) { throw "planned_shutdown_signal_exit_$($shutdownSignal.ExitCode)" }
-Wait-ProcessGone -Pid $newPrimary.Id -Seconds 20 -Label 'new_primary_planned_shutdown'
-Wait-ProcessGone -Pid $newSentinelPid -Seconds 20 -Label 'new_sentinel_planned_shutdown'
+Wait-ProcessGone -ProcessId $newPrimary.Id -Seconds 20 -Label 'new_primary_planned_shutdown'
+Wait-ProcessGone -ProcessId $newSentinelPid -Seconds 20 -Label 'new_sentinel_planned_shutdown'
 
 $proof = [ordered]@{
   schema = 'metaengine.browser.installer-resident-upgrade-proof.v1'
