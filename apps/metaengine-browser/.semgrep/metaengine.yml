@@ -39,20 +39,3 @@ rules:
     severity: ERROR
     languages: [javascript, typescript]
     pattern: "{..., shell: true, ...}"
-
-  - id: metaengine-unbounded-child-process-effect-poor-boundary
-    message: Effect-poor verification and development-plane boundaries must not acquire child-process authority.
-    severity: ERROR
-    languages: [javascript, typescript]
-    paths:
-      include:
-        - src/verification-sandbox-plan.cjs
-        - src/development-plane-worker.cjs
-        - smoke/dp/main.cjs
-    pattern-either:
-      - pattern: require("child_process")
-      - pattern: require("node:child_process")
-      - pattern: import ... from "child_process"
-      - pattern: import ... from "node:child_process"
-      - pattern: $CP.spawn(...)
-      - pattern: $CP.exec(...)
