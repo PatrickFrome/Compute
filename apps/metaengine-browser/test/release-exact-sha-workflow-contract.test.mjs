@@ -9,6 +9,7 @@ const REQUIRED_GATE_WORKFLOWS = [
   'metaengine-browser-self-update-fast-e2e.yml',
   'metaengine-browser-self-update-e2e.yml',
   'browser-critical-audit-v1.yml',
+  'metaengine-browser-analysis-stack-v1.yml',
   'browser-developer-emergency-update-v1.yml',
   'browser-parent-progress-durability-gate.yml',
   'browser-self-update-durability-gate.yml',
