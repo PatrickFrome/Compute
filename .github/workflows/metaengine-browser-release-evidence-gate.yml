@@ -62,7 +62,8 @@ jobs:
             test/native-effect-binding.test.mjs \
             test/native-supervisor-effect-intent-route.test.mjs \
             test/supervisor-send-boundary.test.mjs \
-            test/release-physical-gate-chain.test.mjs
+            test/release-physical-gate-chain.test.mjs \
+            test/release-exact-sha-workflow-contract.test.mjs
 
   exact-sha-evidence-convergence:
     name: exact-sha-evidence-convergence
