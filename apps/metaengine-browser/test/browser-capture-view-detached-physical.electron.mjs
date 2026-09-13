@@ -7,7 +7,7 @@ import { captureViewThumbnail } from '../src/native-browser-control.mjs';
 app.enableSandbox();
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const diagnostic = (phase, method, extra = {}) => console.error(JSON.stringify({
+const diagnostic = (phase, method, extra = {}) => console.log(JSON.stringify({
   schema: 'metaengine.browser.detached-capture-cdp-stage.v1',
   phase,
   method,
