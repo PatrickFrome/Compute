@@ -14,6 +14,10 @@ import {
   assertNativeEffectRuntimeBindingCurrent,
   recordNativeEffectRuntimeObservation,
 } from './native-effect-runtime-observation.mjs';
+import {
+  readVisualKeyframe,
+  rememberVisualKeyframe,
+} from './browser-visual-keyframe-cache.mjs';
 
 const SAFE_ROLES = new Set(['textbox','searchbox','combobox','button','checkbox','radio','switch','tab','menuitem','link']);
 const TEXT_INPUT_ROLES = new Set(['textbox','searchbox','combobox']);
@@ -505,6 +509,11 @@ async function capturePageWithBoundedSurfaceReadiness(webContents, {
   throw captureSurfaceUnavailableError(attempts, lastError);
 }
 
+async function rememberCapture(webContents, frame) {
+  try { await rememberVisualKeyframe(webContents, frame); } catch {}
+  return frame;
+}
+
 export async function captureViewThumbnail(webContents, options = {}) {
   if (!webContents || webContents.isDestroyed?.()) throw new Error('native_capture_webcontents_unavailable');
   const {
@@ -514,6 +523,12 @@ export async function captureViewThumbnail(webContents, options = {}) {
     releaseDebuggerImpl = releasePersistentBrowserDebugger,
     ...surfaceOptions
   } = options;
+
+  if (surfaceExpected === false) {
+    const cached = readVisualKeyframe(webContents);
+    if (cached) return cached;
+  }
+
   let captured = null;
   let surfaceError = null;
   if (surfaceExpected !== false) {
@@ -536,7 +551,7 @@ export async function captureViewThumbnail(webContents, options = {}) {
         releaseDebuggerImpl,
       });
       const jpeg = fallback.jpeg;
-      return {
+      const frame = {
         schema: 'metaengine.native-browser.capture-thumbnail.v1',
         captured_at: new Date().toISOString(),
         url: clip(webContents.getURL?.() || '', 1200),
@@ -556,6 +571,7 @@ export async function captureViewThumbnail(webContents, options = {}) {
         jpeg_base64: jpeg.toString('base64'),
         authority_effect: false,
       };
+      return surfaceExpected === false ? frame : rememberCapture(webContents, frame);
     } catch (fallbackError) {
       const error = new Error(`${surfaceError?.message || 'native_capture_surface_unavailable'}:cdp_fallback:${clip(fallbackError?.message || fallbackError, 160)}`);
       error.code = 'NATIVE_CAPTURE_SURFACE_UNAVAILABLE';
@@ -575,7 +591,7 @@ export async function captureViewThumbnail(webContents, options = {}) {
   }
   if (!Buffer.isBuffer(jpeg) || jpeg.byteLength === 0) throw new Error('native_capture_thumbnail_empty');
   if (jpeg.byteLength > 150000) throw new Error('native_capture_thumbnail_too_large');
-  return {
+  const frame = {
     schema: 'metaengine.native-browser.capture-thumbnail.v1',
     captured_at: new Date().toISOString(),
     url: clip(webContents.getURL?.() || '', 1200),
@@ -593,4 +609,5 @@ export async function captureViewThumbnail(webContents, options = {}) {
     jpeg_base64: jpeg.toString('base64'),
     authority_effect: false,
   };
+  return rememberCapture(webContents, frame);
 }
