@@ -152,12 +152,15 @@ export class ExactBrowserTabViewMap extends Map {
       throw new Error('browser_webcontents_tab_index_view_invalid');
     }
     bindWebContentsToTab(tabId, webContents);
-    try {
-      installDetachedCaptureSurfaceBridge(view);
-    } catch (error) {
-      unbindWebContentsFromTab(webContents, tabId);
-      super.delete(tabId);
-      throw error;
+    const debuggerApi = webContents.debugger;
+    if (debuggerApi && typeof debuggerApi.sendCommand === 'function') {
+      try {
+        installDetachedCaptureSurfaceBridge(view);
+      } catch (error) {
+        unbindWebContentsFromTab(webContents, tabId);
+        super.delete(tabId);
+        throw error;
+      }
     }
     if (!destroyedHandlerByWebContents.has(webContents) && typeof webContents.once === 'function') {
       const handler = () => {
