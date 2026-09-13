@@ -6,8 +6,27 @@ import { attachDevOSSystemAttention } from './metaengine-devos-system-attention.
 
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TARGET_RE=/^webcontents:[1-9][0-9]*$/;
-
 const text=(v,n=240)=>String(v??'').slice(0,n);
+
+export function normalizeDevelopmentPlaneProjection(value){
+  if(value&&typeof value==='object'&&value.authority_effect!==true){
+    return Object.freeze({...structuredClone(value),authority_effect:false});
+  }
+  return Object.freeze({
+    schema:'metaengine.development-plane.snapshot.v1',
+    state:'UNKNOWN',
+    reason:'SNAPSHOT_NOT_MATERIALIZED',
+    started_at:null,
+    stopped_at:null,
+    capabilities:null,
+    process:null,
+    repo:null,
+    health:Object.freeze({state:'UNKNOWN',reason:'SNAPSHOT_NOT_MATERIALIZED',authority_effect:false}),
+    startup_projection:true,
+    automatic_retry_allowed:false,
+    authority_effect:false,
+  });
+}
 
 function byId(rows,key){const out=new Map();for(const row of rows||[]){const id=String(row?.[key]||'');if(id&&!out.has(id))out.set(id,row)}return out}
 function issue(reason,binding,tab=null){return Object.freeze({reason,workspace_id:binding?.workspace_id||null,workspace_generation:Number(binding?.workspace_generation)||null,task_id:binding?.task_id||null,agent_id:binding?.agent_id||null,tab_id:binding?.tab_id||tab?.tab_id||null,target_id:binding?.target_id||null,lease_generation:Number(binding?.lease_generation)||null,authority_effect:false})}
@@ -15,6 +34,8 @@ function tabProjection(tab){return Object.freeze({tab_id:String(tab?.tab_id||'')
 function agentProjection(agent){return Object.freeze({agent_id:String(agent?.agent_id||''),role:text(agent?.role,64),tab_id:String(agent?.tab_id||''),target_id:String(agent?.target_id||'').toLowerCase(),generation_epoch:Number(agent?.generation_epoch)||0,lifecycle_state:text(agent?.lifecycle_state,64)})}
 
 export function projectWorkspaceWorkbench(snapshot={}){
+  const canonicalDevelopmentPlane=normalizeDevelopmentPlaneProjection(snapshot?.development_plane);
+  const canonicalSnapshot={...snapshot,development_plane:canonicalDevelopmentPlane};
   const tabs=Array.isArray(snapshot?.tabs?.tabs)?snapshot.tabs.tabs:[];
   const fleet=Array.isArray(snapshot?.fleet?.agents)?snapshot.fleet.agents:[];
   const observer=snapshot?.supervisor?.workspace_bindings||null;
@@ -57,10 +78,10 @@ export function projectWorkspaceWorkbench(snapshot={}){
   groups.sort((a,b)=>a.branch_name.localeCompare(b.branch_name)||a.group_id.localeCompare(b.group_id));
   const sessions=[];
   for(const tab of tabs){if(!groupedTabIds.has(String(tab?.tab_id||'')))sessions.push(tabProjection(tab))}
-  const base=Object.freeze({schema:'metaengine.browser.workspace-workbench-projection.v1',source_state:sourceState,source_implemented:observer?.source_implemented===true,runtime_deployed:observer?.runtime_deployed===true?true:(observer?.runtime_deployed===false?false:null),groups,sessions,issues,counts:{workspaces:groups.length,sessions:sessions.length,issues:issues.length,ready,frozen,reserved},grouping_authority:'DURABLE_WORKSPACE_BINDING_ONLY',url_heuristic_grouping:false,title_heuristic_grouping:false,automatic_retry_allowed:false,browser_actuation_authority:false,authority_effect:false});
+  const base=Object.freeze({schema:'metaengine.browser.workspace-workbench-projection.v1',source_state:sourceState,source_implemented:observer?.source_implemented===true,runtime_deployed:observer?.runtime_deployed===true?true:(observer?.runtime_deployed===false?false:null),groups,sessions,issues,counts:{workspaces:groups.length,sessions:sessions.length,issues:issues.length,ready,frozen,reserved},canonical_development_plane:canonicalDevelopmentPlane,grouping_authority:'DURABLE_WORKSPACE_BINDING_ONLY',url_heuristic_grouping:false,title_heuristic_grouping:false,automatic_retry_allowed:false,browser_actuation_authority:false,authority_effect:false});
   const devosBase=projectMetaengineDevOS({tabs:snapshot?.tabs||{tabs:[]},supervisor:snapshot?.supervisor||null,owner_safety_gates:snapshot?.owner_safety_gates||null,workspaces:base});
   const devosSurfaces=composeDevOSSurfaceRegistry(devosBase,{source_snapshot:snapshot?.devos_sources??null});
-  const devosAttention=attachDevOSSystemAttention(devosSurfaces,{...snapshot,workspaces:base});
+  const devosAttention=attachDevOSSystemAttention(devosSurfaces,{...canonicalSnapshot,workspaces:base});
   const devos=attachDevOSSessionLayout(devosAttention,snapshot?.session_layouts??null);
   const devos_shell=projectDevOSShellViewModel(devos,snapshot?.presentation_focus??null);
   return Object.freeze({...base,devos,devos_shell});
