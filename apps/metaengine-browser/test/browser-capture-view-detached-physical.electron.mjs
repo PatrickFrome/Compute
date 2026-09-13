@@ -125,6 +125,8 @@ async function run() {
 }
 
 run().catch((error) => {
-  console.error(error?.stack || error);
+  diagnostic('ERROR', 'captureViewThumbnail', {
+    error: String(error?.stack || error).replace(/\s+/g, ' ').slice(0, 800),
+  });
   app.exit(1);
 });
