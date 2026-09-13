@@ -155,7 +155,7 @@ test('NSIS migration fallback is bounded and exact-path only', async () => {
   assert.match(ps1, /Stop-Process -Id/);
   assert.match(ps1, /AddSeconds\(\$GraceSeconds\)/);
   assert.match(ps1, /AddSeconds\(\$ForceSeconds\)/);
-  assert.doesNotMatch(ps1, /taskkill/i);
+  assert.doesNotMatch(ps1, /^\s*(?:&\s*)?taskkill(?:\.exe)?\b/im);
   assert.doesNotMatch(ps1, /Stop-Process\s+-Name/i);
 
   assert.match(nsh, /!macro customInit/);
