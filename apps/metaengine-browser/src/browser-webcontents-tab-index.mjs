@@ -1,11 +1,11 @@
 export const BROWSER_WEBCONTENTS_TAB_INDEX_SCHEMA = 'metaengine.browser.webcontents-tab-index.v1';
 
-const tabByWebContents = new WeakMap();
+let tabByWebContents = new WeakMap();
 const tabByWebContentsId = new Map();
 const webContentsIdByTab = new Map();
 const bindingGenerationByTab = new Map();
 const destroyedHandlerByWebContents = new WeakMap();
-const exactViewByWebContents = new WeakMap();
+let exactViewByWebContents = new WeakMap();
 let bindingSequence = 0;
 
 function validTabId(value) {
@@ -150,6 +150,8 @@ export function resolveExactWebContentsTabBinding(tabIdRaw) {
 }
 
 export function clearWebContentsTabIndex() {
+  tabByWebContents = new WeakMap();
+  exactViewByWebContents = new WeakMap();
   tabByWebContentsId.clear();
   webContentsIdByTab.clear();
   bindingGenerationByTab.clear();
@@ -163,20 +165,28 @@ export function clearWebContentsTabIndex() {
 export class ExactBrowserTabViewMap extends Map {
   set(tabIdRaw, view) {
     const tabId = validTabId(tabIdRaw);
+    const webContents = view?.webContents;
+    if (!webContents || typeof webContents !== 'object') throw new Error('browser_webcontents_tab_index_view_invalid');
+
+    const priorTabForWebContents = resolveTabIdForWebContents(webContents);
+    if (priorTabForWebContents && priorTabForWebContents !== tabId && super.get(priorTabForWebContents) === view) {
+      super.delete(priorTabForWebContents);
+    }
+
     const prior = super.get(tabId);
     if (prior?.webContents && prior !== view) unbindWebContentsFromTab(prior.webContents, tabId);
     const result = super.set(tabId, view);
-    const webContents = view?.webContents;
-    if (!webContents || typeof webContents !== 'object') {
-      super.delete(tabId);
-      throw new Error('browser_webcontents_tab_index_view_invalid');
-    }
     bindWebContentsToTab(tabId, webContents, view);
     if (!destroyedHandlerByWebContents.has(webContents) && typeof webContents.once === 'function') {
       const handler = () => {
-        unbindWebContentsFromTab(webContents, tabId);
-        unbindExactWebContentsView(webContents, view);
-        if (super.get(tabId) === view) super.delete(tabId);
+        const currentTabId = resolveTabIdForWebContents(webContents);
+        const currentView = resolveExactWebContentsView(webContents);
+        if (currentTabId) unbindWebContentsFromTab(webContents, currentTabId);
+        else {
+          tabByWebContents.delete(webContents);
+          unbindExactWebContentsView(webContents, currentView);
+        }
+        if (currentTabId && super.get(currentTabId)?.webContents === webContents) super.delete(currentTabId);
       };
       destroyedHandlerByWebContents.set(webContents, handler);
       webContents.once('destroyed', handler);
