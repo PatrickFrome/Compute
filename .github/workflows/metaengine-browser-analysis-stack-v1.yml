@@ -153,8 +153,8 @@ jobs:
         with:
           category: /language:javascript-typescript
 
-  trivy-advisory:
-    name: trivy-advisory
+  trivy-high-critical:
+    name: trivy-high-critical
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -174,7 +174,7 @@ jobs:
         working-directory: apps/metaengine-browser
         run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
 
-      - name: Trivy filesystem vulnerability and misconfiguration scan
+      - name: Trivy HIGH/CRITICAL dependency and misconfiguration gate
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           version: v0.74.0
@@ -185,19 +185,23 @@ jobs:
           scanners: vuln,misconfig
           severity: HIGH,CRITICAL
           ignore-unfixed: true
-          exit-code: '0'
+          exit-code: '1'
 
-      - name: Capture exact dependency vulnerability baseline
+      - name: Capture exact dependency vulnerability evidence
+        if: always()
         shell: bash
         run: trivy fs apps/metaengine-browser --scanners vuln,misconfig --severity HIGH,CRITICAL --ignore-unfixed --include-dev-deps --format json --output trivy-results.json
 
       - name: Upload Trivy SARIF
+        if: always()
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           sarif_file: trivy-results.sarif
           category: trivy-metaengine-browser
 
-      - name: Upload Trivy baseline evidence
+      - name: Upload Trivy evidence
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: metaengine-browser-trivy-${{ env.EXACT_HEAD }}-${{ github.run_attempt }}
