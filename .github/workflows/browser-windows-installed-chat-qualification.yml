@@ -65,8 +65,10 @@ jobs:
           $proof = ([string]$line) | ConvertFrom-Json
           if ($proof.schema -ne 'metaengine.browser.detached-capture-view-physical-e2e.v1' `
               -or $proof.ok -ne $true `
-              -or $proof.capture_backend -ne 'CDP_SCREENSHOT' `
+              -or $proof.capture_backend -ne 'ELECTRON_CAPTURE_PAGE' `
+              -or $proof.capture_from_surface -ne $true `
               -or $proof.detached_surface_fallback -ne $true `
+              -or $proof.temporary_surface_lease -ne $true `
               -or [int]$proof.jpeg_bytes -le 0 `
               -or [int]$proof.jpeg_bytes -gt 150000 `
               -or [string]$proof.sha256 -notmatch '^[a-f0-9]{64}$' `
