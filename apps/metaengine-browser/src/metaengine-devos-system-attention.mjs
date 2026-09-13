@@ -8,15 +8,18 @@ const ATTENTION_ORDER = Object.freeze({
   FLEET_LOST: 4,
   SELF_UPDATE_HOLD: 5,
   COMPUTE_OFFLINE: 6,
-  TASK_FAILED: 7,
-  TASK_BLOCKED: 8,
-  WORKSPACE_FROZEN: 9,
-  WORKSPACE_BINDING_ISSUE: 10,
-  FLEET_TRANSPORT_UNVERIFIED: 11,
-  DEVELOPMENT_PLANE_DEGRADED: 12,
+  COMPUTE_DEGRADED: 7,
+  COMPUTE_UNAVAILABLE: 8,
+  TASK_FAILED: 9,
+  TASK_BLOCKED: 10,
+  WORKSPACE_FROZEN: 11,
+  WORKSPACE_BINDING_ISSUE: 12,
+  FLEET_TRANSPORT_UNVERIFIED: 13,
+  DEVELOPMENT_PLANE_DEGRADED: 14,
 });
 
 const SELF_UPDATE_HOLD_STATES = new Set(['ERROR', 'REJECTED_METADATA', 'DISCOVERY_ERROR']);
+const COMPUTE_NON_OUTAGE_STATES = new Set(['STARTING', 'UNKNOWN', 'UNAVAILABLE_CONFIG']);
 
 function zeroAuthorityContract() {
   return Object.freeze({
@@ -93,67 +96,39 @@ function runtimeRows(runtime = {}) {
   const ambiguous = boundedCount(counts.PROVISIONING_AMBIGUOUS);
   const lost = boundedCount(counts.LOST);
   const bound = boundedCount(counts.BOUND_UNVERIFIED);
-  if (ambiguous > 0) rows.push(attentionRow({
-    kind: 'FLEET_AMBIGUITY', severity: 'ERROR', priority: 'CRITICAL', target: 'fleet',
-    title: 'Fleet ambiguity', reason: `${ambiguous} provisioning ambiguous`,
-  }));
-  if (lost > 0) rows.push(attentionRow({
-    kind: 'FLEET_LOST', severity: 'ERROR', priority: 'HIGH', target: 'fleet',
-    title: 'Lost fleet agents', reason: `${lost} lost`,
-  }));
-  if (bound > 0) rows.push(attentionRow({
-    kind: 'FLEET_TRANSPORT_UNVERIFIED', severity: 'WARNING', priority: 'MEDIUM', target: 'fleet',
-    title: 'Transport proof pending', reason: `${bound} bound unverified`,
-  }));
+  if (ambiguous > 0) rows.push(attentionRow({ kind: 'FLEET_AMBIGUITY', severity: 'ERROR', priority: 'CRITICAL', target: 'fleet', title: 'Fleet ambiguity', reason: `${ambiguous} provisioning ambiguous` }));
+  if (lost > 0) rows.push(attentionRow({ kind: 'FLEET_LOST', severity: 'ERROR', priority: 'HIGH', target: 'fleet', title: 'Lost fleet agents', reason: `${lost} lost` }));
+  if (bound > 0) rows.push(attentionRow({ kind: 'FLEET_TRANSPORT_UNVERIFIED', severity: 'WARNING', priority: 'MEDIUM', target: 'fleet', title: 'Transport proof pending', reason: `${bound} bound unverified` }));
 
   const workspaces = sourceUsable(runtime.workspaces) ? runtime.workspaces : null;
-  const frozen = Array.isArray(workspaces?.groups)
-    ? workspaces.groups.filter((row) => String(row?.state || '').toUpperCase() === 'FROZEN').length
-    : 0;
-  if (frozen > 0) rows.push(attentionRow({
-    kind: 'WORKSPACE_FROZEN', severity: 'ERROR', priority: 'HIGH', target: 'workspaces',
-    title: 'Frozen workspaces', reason: `${frozen} frozen`,
-  }));
+  const frozen = Array.isArray(workspaces?.groups) ? workspaces.groups.filter((row) => String(row?.state || '').toUpperCase() === 'FROZEN').length : 0;
+  if (frozen > 0) rows.push(attentionRow({ kind: 'WORKSPACE_FROZEN', severity: 'ERROR', priority: 'HIGH', target: 'workspaces', title: 'Frozen workspaces', reason: `${frozen} frozen` }));
 
   const supervisor = sourceUsable(runtime.supervisor) ? runtime.supervisor : null;
   const meshError = text(supervisor?.supervisor_mesh?.last_error, 800);
-  if (meshError) rows.push(attentionRow({
-    kind: 'SUPERVISOR_MESH_ERROR', severity: 'ERROR', priority: 'CRITICAL', target: 'supervisor',
-    title: 'Supervisor mesh degraded', reason: meshError,
-  }));
+  if (meshError) rows.push(attentionRow({ kind: 'SUPERVISOR_MESH_ERROR', severity: 'ERROR', priority: 'CRITICAL', target: 'supervisor', title: 'Supervisor mesh degraded', reason: meshError }));
   const updater = sourceUsable(supervisor?.self_update) ? supervisor.self_update : null;
   const updateState = String(updater?.state || '').trim().toUpperCase();
-  if (SELF_UPDATE_HOLD_STATES.has(updateState)) rows.push(attentionRow({
-    kind: 'SELF_UPDATE_HOLD', severity: 'ERROR', priority: 'HIGH', target: 'runtime',
-    title: 'Self-update hold', reason: text(updater?.last_error, 800) || updateState,
-  }));
+  if (SELF_UPDATE_HOLD_STATES.has(updateState)) rows.push(attentionRow({ kind: 'SELF_UPDATE_HOLD', severity: 'ERROR', priority: 'HIGH', target: 'runtime', title: 'Self-update hold', reason: text(updater?.last_error, 800) || updateState }));
 
   const developmentPlane = sourceUsable(runtime.development_plane) ? runtime.development_plane : null;
   const developmentState = String(developmentPlane?.state || '').trim().toUpperCase();
-  if (developmentPlane && developmentState && developmentState !== 'READY') rows.push(attentionRow({
-    kind: 'DEVELOPMENT_PLANE_DEGRADED', severity: 'WARNING', priority: 'MEDIUM', target: 'runtime',
-    title: 'Development Plane not ready', reason: developmentState,
-  }));
+  if (developmentPlane && developmentState && !['READY','STARTING','UNKNOWN'].includes(developmentState)) rows.push(attentionRow({ kind: 'DEVELOPMENT_PLANE_DEGRADED', severity: 'WARNING', priority: 'MEDIUM', target: 'runtime', title: 'Development Plane not ready', reason: developmentState }));
 
   const compute = sourceUsable(runtime.compute) ? runtime.compute : null;
-  if (compute && compute.available !== true) rows.push(attentionRow({
-    kind: 'COMPUTE_OFFLINE', severity: 'ERROR', priority: 'HIGH', target: 'runtime',
-    title: 'Compute offline', reason: 'Compute health reports unavailable',
-  }));
+  const computeState = String(compute?.state || (compute?.available === true ? 'HEALTHY' : 'UNKNOWN')).trim().toUpperCase();
+  if (computeState === 'OFFLINE' && compute?.outage_proven === true) {
+    rows.push(attentionRow({ kind: 'COMPUTE_OFFLINE', severity: 'ERROR', priority: 'HIGH', target: 'runtime', title: 'Compute offline', reason: text(compute?.reason_code, 240) || 'Compute outage proven by loopback health readback' }));
+  } else if (computeState === 'DEGRADED' || (compute?.available === true && compute?.result?.ok === false)) {
+    rows.push(attentionRow({ kind: 'COMPUTE_DEGRADED', severity: 'WARNING', priority: 'MEDIUM', target: 'runtime', title: 'Compute degraded', reason: text(compute?.reason_code, 240) || 'Compute health reports degraded' }));
+  } else if (compute && COMPUTE_NON_OUTAGE_STATES.has(computeState)) {
+    rows.push(attentionRow({ kind: 'COMPUTE_UNAVAILABLE', severity: 'WARNING', priority: 'LOW', target: 'runtime', title: 'Compute health unavailable', reason: text(compute?.reason_code, 240) || computeState }));
+  }
   return rows;
 }
 
-function attentionKey(row) {
-  return [row?.kind, row?.session_id, row?.task_id, row?.reason].map((value) => String(value ?? '')).join('\u001f');
-}
-
-function sortedAttention(rows) {
-  return Object.freeze([...rows].sort((a, b) => (ATTENTION_ORDER[a.kind] ?? 99) - (ATTENTION_ORDER[b.kind] ?? 99)
-    || String(a.session_id || '').localeCompare(String(b.session_id || ''))
-    || String(a.task_id || '').localeCompare(String(b.task_id || ''))
-    || String(a.reason || '').localeCompare(String(b.reason || ''))));
-}
-
+function attentionKey(row) { return [row?.kind, row?.session_id, row?.task_id, row?.reason].map((value) => String(value ?? '')).join('\u001f'); }
+function sortedAttention(rows) { return Object.freeze([...rows].sort((a, b) => (ATTENTION_ORDER[a.kind] ?? 99) - (ATTENTION_ORDER[b.kind] ?? 99) || String(a.session_id || '').localeCompare(String(b.session_id || '')) || String(a.task_id || '').localeCompare(String(b.task_id || '')) || String(a.reason || '').localeCompare(String(b.reason || '')))); }
 function updatedNavigation(navigation, attention) {
   const systemCount = attention.filter((row) => !row.session_id).length;
   const roots = navigation.roots.map((root) => {
@@ -168,12 +143,7 @@ export function attachDevOSSystemAttention(devos, runtime = {}) {
   if (!validDevOS(devos)) return devos;
   const emitted = runtimeRows(runtime);
   const seen = new Set(devos.attention.map(attentionKey));
-  const additions = emitted.filter((row) => {
-    const key = attentionKey(row);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  const additions = emitted.filter((row) => { const key = attentionKey(row); if (seen.has(key)) return false; seen.add(key); return true; });
   const attention = sortedAttention([...devos.attention, ...additions]);
   return Object.freeze({
     ...devos,

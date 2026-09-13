@@ -71,7 +71,7 @@ test('trusted shell runtime signals enrich one canonical Now queue without addin
       authority_effect: false,
     },
     development_plane: { state: 'CRASHED', authority_effect: false },
-    compute: { available: false, authority_effect: false },
+    compute: { state: 'OFFLINE', available: false, outage_proven: true, reason_code: 'LOOPBACK_OUTAGE_PROVEN', authority_effect: false },
   });
 
   const kinds = out.attention.map((row) => row.kind);

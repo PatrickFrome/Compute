@@ -79,7 +79,9 @@ test('release gates physically cover the live restart boundary and native emerge
   const packaged = readWorkflow('browser-windows-package-smoke.yml');
   const emergency = readWorkflow('browser-developer-emergency-update-v1.yml');
   const progress = readWorkflow('browser-parent-progress-durability-gate.yml');
+  const installedChat = readWorkflow('browser-windows-installed-chat-qualification.yml');
   const physical = readBrowserFile('test/self-update-fast-physical.ps1');
+  const detachedCapture = readBrowserFile('test/browser-capture-view-detached-physical.electron.mjs');
 
   assert.match(packaged, /Start-Sleep -Seconds 190/);
   assert.match(packaged, /normal_ui_primary_died_across_sentinel_startup_grace/);
@@ -91,4 +93,8 @@ test('release gates physically cover the live restart boundary and native emerge
   assert.match(progress, /host-resilience-runtime\.test\.mjs/);
   assert.match(physical, /old_ambiguous_transaction_reused/);
   assert.match(physical, /transaction_id/);
+  assert.match(installedChat, /browser-capture-view-detached-physical\.electron\.mjs/);
+  assert.match(installedChat, /detached_capture_view_physical_proof_invalid/);
+  assert.match(detachedCapture, /surfaceExpected:\s*false/);
+  assert.match(detachedCapture, /capture_backend, 'CDP_SCREENSHOT'/);
 });

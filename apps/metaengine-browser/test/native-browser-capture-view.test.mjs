@@ -30,6 +30,8 @@ test('capture view returns a bounded non-empty thumbnail receipt', async () => {
   assert.equal(result.jpeg_bytes, jpeg.byteLength);
   assert.equal(result.jpeg_base64, jpeg.toString('base64'));
   assert.equal(result.sha256, crypto.createHash('sha256').update(jpeg).digest('hex'));
+  assert.equal(result.capture_backend, 'ELECTRON_CAPTURE_PAGE');
+  assert.equal(result.detached_surface_fallback, false);
   assert.equal(result.authority_effect, false);
 });
 

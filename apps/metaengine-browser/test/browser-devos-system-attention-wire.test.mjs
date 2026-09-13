@@ -27,7 +27,7 @@ function runtime() {
     },
     owner_safety_gates: { wildcard_disabled: true, authority_effect: false },
     development_plane: { state: 'CRASHED', authority_effect: false },
-    compute: { available: false, authority_effect: false },
+    compute: { state: 'OFFLINE', available: false, outage_proven: true, reason_code: 'LOOPBACK_OUTAGE_PROVEN', authority_effect: false },
     presentation_focus: focus.snapshot(),
   };
 }

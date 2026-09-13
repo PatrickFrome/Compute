@@ -6,6 +6,11 @@ import { chatGptControlMatches, uniqueChatGptControl } from './chatgpt-ui-contro
 import { classifyRetryDecision, REQUEST_EFFECT_CLASS } from './chatgpt-retry-policy.mjs';
 import { SupervisorKeepalive, buildSupervisorRolloverMessage, buildSupervisorWakeMessage } from './supervisor-keepalive.mjs';
 import { evaluateActiveWakeTerminalRetirement } from './supervisor-terminal-retirement.mjs';
+import {
+  devosRuntimeControlAllowsContinuousService,
+  normalizeDevosRuntimeControl,
+  unavailableDevosRuntimeControl,
+} from './devos-runtime-control.mjs';
 
 const CHAT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/c\/[a-z0-9-]+/i;
 const CHAT_ROOT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/?$/i;
@@ -54,13 +59,16 @@ async function writeJson(file, value) {
 export class SupervisorLifecycleRuntime {
   #getState; #execute; #canActuate; #keepalive = null; #statePath; #lastRun = 0; #lastSupervisorGeneration = 'UNKNOWN'; #lastError = null;
   #lastWorkerSignals = []; #monitorMs; #researchMs; #sessionMonitor; #activeRequest = null; #lastRecovery = null;
+  #runtimeControl = unavailableDevosRuntimeControl('NOT_OBSERVED');
+  #requireAuthoritativeAdmission = false;
 
-  constructor({ getState, executeCommand, canActuate = () => true, statePath = null, monitorMs = 2000, researchMs = 30 * 60 * 1000, sessionMonitor = null } = {}) {
+  constructor({ getState, executeCommand, canActuate = () => true, statePath = null, monitorMs = 2000, researchMs = 30 * 60 * 1000, sessionMonitor = null, requireAuthoritativeAdmission = false } = {}) {
     if (typeof getState !== 'function' || typeof executeCommand !== 'function' || typeof canActuate !== 'function') throw new Error('supervisor_lifecycle_dependencies_required');
     this.#getState = getState; this.#execute = executeCommand; this.#canActuate = canActuate; this.#statePath = statePath;
     this.#monitorMs = Math.max(1000, Number(monitorMs) || 2000);
     this.#researchMs = Math.max(5 * 60 * 1000, Number(researchMs) || 30 * 60 * 1000);
     this.#sessionMonitor = sessionMonitor || new ChatGptSessionMonitor();
+    this.#requireAuthoritativeAdmission = requireAuthoritativeAdmission === true;
   }
 
   async start() {
@@ -73,6 +81,9 @@ export class SupervisorLifecycleRuntime {
       saveState: (v) => writeJson(this.#statePath, v),
     });
     await this.#keepalive.init();
+    if (this.#requireAuthoritativeAdmission || this.#runtimeControl.authoritative === true) {
+      await this.#applyRuntimeControlToKeepalive();
+    }
     const active = this.#keepalive.activeWake();
     if (active) this.#activateRequest(active, this.#keepalive.snapshot().tab_id, true);
     await this.cycle({ force: true });
@@ -99,6 +110,39 @@ export class SupervisorLifecycleRuntime {
     return this.#activeRequest;
   }
 
+  async #applyRuntimeControlToKeepalive() {
+    if (!this.#keepalive) return null;
+    const durableFloor = this.#keepalive.snapshot()?.admission_generation_floor;
+    if (this.#runtimeControl.authoritative === true
+      && typeof durableFloor === 'number'
+      && this.#runtimeControl.generation_floor < durableFloor) {
+      this.#runtimeControl = unavailableDevosRuntimeControl('GENERATION_FLOOR_REGRESSION');
+    }
+    if (this.#runtimeControl.authoritative !== true) {
+      return this.#keepalive.applyAdmissionUnavailable(this.#runtimeControl.reason || 'AUTHORITATIVE_READBACK_UNAVAILABLE');
+    }
+    if (devosRuntimeControlAllowsContinuousService(this.#runtimeControl)) {
+      return this.#keepalive.applyAdmissionOpen(this.#runtimeControl);
+    }
+    return this.#keepalive.applyAdmissionClosed(this.#runtimeControl);
+  }
+
+  async applyRuntimeControl(value) {
+    const next = normalizeDevosRuntimeControl(value);
+    const previous = this.#runtimeControl;
+    this.#runtimeControl = next;
+    const changed = previous.state !== next.state
+      || previous.authoritative !== next.authoritative
+      || previous.generation_floor !== next.generation_floor
+      || previous.refill_enabled !== next.refill_enabled
+      || previous.supervisor_admission_enabled !== next.supervisor_admission_enabled
+      || previous.reason !== next.reason;
+    if (changed || this.#keepalive?.snapshot()?.admission_state !== next.state) {
+      await this.#applyRuntimeControlToKeepalive();
+    }
+    return this.snapshot();
+  }
+
   snapshot() {
     return {
       schema: 'metaengine.supervisor-lifecycle-runtime.v4',
@@ -106,7 +150,12 @@ export class SupervisorLifecycleRuntime {
       supervisor_generation: this.#lastSupervisorGeneration,
       supervisor_session: this.#sessionMonitor?.snapshot() || null,
       continuous_service: {
-        enabled: true,
+        enabled: this.#requireAuthoritativeAdmission
+          ? devosRuntimeControlAllowsContinuousService(this.#runtimeControl)
+          : true,
+        runtime_control: structuredClone(this.#runtimeControl),
+        admission_state: this.#requireAuthoritativeAdmission ? this.#runtimeControl.state : 'UNSCOPED',
+        authoritative_admission_required: this.#requireAuthoritativeAdmission,
         monitor_ms: this.#monitorMs,
         auto_rollover_cycles: null,
         work_cycle_limit: null,
@@ -121,6 +170,7 @@ export class SupervisorLifecycleRuntime {
         ambiguous_terminal_retirement: true,
         active_wake_terminal_retirement: 'EXACT_WAKE_TAB_GENERATION_V1',
         ambiguous_same_wake_retry: false,
+        wake_send_transport: 'SEMANTIC_TYPE_SUBMIT_EVENT_LATCH_V1',
         authority_effect: false,
       },
       active_request: this.#activeRequest ? {
@@ -136,7 +186,8 @@ export class SupervisorLifecycleRuntime {
       last_recovery: this.#lastRecovery ? structuredClone(this.#lastRecovery) : null,
       worker_signals: structuredClone(this.#lastWorkerSignals),
       quiescent: this.isQuiescent(),
-      actuation_enabled: this.#canActuate() === true,
+      actuation_enabled: this.#canActuate() === true
+        && (!this.#requireAuthoritativeAdmission || devosRuntimeControlAllowsContinuousService(this.#runtimeControl)),
       last_error: this.#lastError,
       authority_effect: false,
     };
@@ -144,6 +195,7 @@ export class SupervisorLifecycleRuntime {
 
   isQuiescent() {
     const ks = this.#keepalive?.snapshot();
+    if (ks?.state === 'PARKED') return !ks.pending_wake && !ks.active_wake;
     if (!ks || this.#lastSupervisorGeneration !== 'IDLE') return false;
     if (this.#activeRequest || this.#lastRecovery?.ambiguous === true) return false;
     if (ks.pending_wake) return false;
@@ -326,10 +378,38 @@ export class SupervisorLifecycleRuntime {
     if (generating(before)) return { ok: false, reason: 'GENERATION_STILL_ACTIVE', clicked: false };
     const box = unique(before, 'textbox');
     if (!box) throw new Error('supervisor_composer_not_unique');
-    await this.#execute({ action: 'SEMANTIC_TYPE', payload: { tab_id: tabId, role: 'textbox', accessible_name: box.name, text: message, replace_existing: true }, platform: null });
+    // Persisted wake intent already fences this logical effect. Submit through the
+    // semantic command's CDP event latch so type + send has one physical boundary
+    // and one positive readback path. Once submit dispatch starts, any exception is
+    // conservatively ambiguous and must never fall through to a second click.
+    clicked = true;
+    const submitted = await this.#execute({
+      action: 'SEMANTIC_TYPE',
+      payload: {
+        tab_id: tabId,
+        role: 'textbox',
+        accessible_name: box.name,
+        text: message,
+        replace_existing: true,
+        submit_after_type: true,
+      },
+      platform: 'CHATGPT',
+    });
+    const submitState = String(submitted?.effect_state || '').toUpperCase();
+    if (['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION'].includes(submitState)) {
+      return { ok: true, clicked: true, observed: submitted, event_driven_readback: true };
+    }
+    if (submitState) {
+      const readback = await this.#observeSendReadback(tabId, positiveMarker);
+      return readback.ok
+        ? { ok: true, clicked: true, observed: readback.observed, event_driven_readback: true }
+        : { ok: false, reason: 'SEND_WITHOUT_POSITIVE_READBACK', clicked: true, event_driven_readback: true };
+    }
+
+    // Compatibility only for injected/legacy executors that do not advertise a
+    // submit effect state. Current Browser executors never take this branch.
     const send = uniqueChatGptControl(await this.#capture(tabId), 'SEND');
     if (!send) throw new Error('supervisor_send_not_unique');
-    clicked = true;
     await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: tabId, role: 'button', accessible_name: send.name }, platform: null });
     const readback = await this.#observeSendReadback(tabId, positiveMarker);
     return readback.ok ? { ok: true, clicked, observed: readback.observed } : { ok: false, reason: 'SEND_WITHOUT_POSITIVE_READBACK', clicked };
@@ -576,9 +656,19 @@ export class SupervisorLifecycleRuntime {
     if (!force && now - this.#lastRun < this.#monitorMs) return this.snapshot();
     this.#lastRun = now;
     try {
+      if (this.#requireAuthoritativeAdmission && this.#runtimeControl.authoritative !== true) return this.snapshot();
+      const admissionOpen = !this.#requireAuthoritativeAdmission
+        || devosRuntimeControlAllowsContinuousService(this.#runtimeControl);
+      if (!admissionOpen) {
+        const keepalive = this.#keepalive.snapshot();
+        const unresolved = keepalive.pending_wake
+          || keepalive.active_wake
+          || ['ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(keepalive.state);
+        if (!unresolved || !keepalive.conversation_url) return this.snapshot();
+      }
       let state = await this.#getState();
       await this.#observeWorkers(state);
-      await this.#queueResearch();
+      if (admissionOpen) await this.#queueResearch();
       if (this.#keepalive.snapshot().state === 'ROLLOVER_AMBIGUOUS') {
         const reconciled = await this.#reconcileAmbiguousRollover(state);
         if (reconciled && this.#keepalive.snapshot().state !== 'ROLLOVER_AMBIGUOUS') state = await this.#getState();

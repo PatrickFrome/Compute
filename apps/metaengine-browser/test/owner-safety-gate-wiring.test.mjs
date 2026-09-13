@@ -46,8 +46,12 @@ test('fleet ambiguous compensating fanout remains explicitly owner-gated through
   const core = fs.readFileSync(path.join(root, 'src', 'fleet-provisioner-core.mjs'), 'utf8');
   assert.match(wrapper, /extends CoreFleetProvisioner/);
   assert.match(wrapper, /registerFleetRuntime\(this\)/);
-  assert.doesNotMatch(wrapper, /async reconcile\s*\(/);
-  assert.doesNotMatch(wrapper, /PROVISIONING_AMBIGUOUS/);
+  const reconcile = wrapper.match(/async reconcile\s*\(options = \{\}\) \{[\s\S]*?\n  \}/)?.[0] || '';
+  assert.match(reconcile, /await super\.reconcile\(options\)/);
+  assert.match(reconcile, /classifyFleetReconcileOutcome\(\{ before, after, \.\.\.options \}\)/);
+  assert.match(reconcile, /automatic_retry_allowed:\s*false|\.\.\.outcome/);
+  assert.doesNotMatch(reconcile, /openTab|createTab|spawn|globalOwnerGateDisabled/);
+  assert.doesNotMatch(wrapper, /globalOwnerGateDisabled/);
   assert.match(core, /globalOwnerGateDisabled\('fleet\.ambiguous_compensating_fanout'\)/);
   assert.match(core, /PROVISIONING_AMBIGUOUS/);
 });

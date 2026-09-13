@@ -388,6 +388,57 @@ function captureSurfaceUnavailableError(attempts, lastError = null) {
   return error;
 }
 
+function captureViewport(metrics) {
+  const viewport = metrics?.cssVisualViewport || metrics?.visualViewport || null;
+  const width = Math.floor(Number(viewport?.clientWidth || viewport?.width || 0));
+  const height = Math.floor(Number(viewport?.clientHeight || viewport?.height || 0));
+  if (!Number.isSafeInteger(width) || width < 1 || !Number.isSafeInteger(height) || height < 1) {
+    throw new Error('native_capture_cdp_viewport_unavailable');
+  }
+  return {
+    x: Math.max(0, Number(viewport?.pageX || 0)),
+    y: Math.max(0, Number(viewport?.pageY || 0)),
+    width,
+    height,
+  };
+}
+
+function decodeCdpJpeg(value) {
+  const encoded = String(value || '');
+  if (!encoded || encoded.length > 2_000_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
+    throw new Error('native_capture_cdp_payload_invalid');
+  }
+  const jpeg = Buffer.from(encoded, 'base64');
+  if (!jpeg.byteLength) throw new Error('native_capture_thumbnail_empty');
+  return jpeg;
+}
+
+async function captureCdpThumbnail(webContents, {
+  withDebuggerImpl = withDebugger,
+  maxWidth = 720,
+  retryMaxWidth = 520,
+} = {}) {
+  return withDebuggerImpl(webContents, async (dbg) => {
+    const viewport = captureViewport(await dbg.sendCommand('Page.getLayoutMetrics'));
+    const take = async (quality, widthLimit) => {
+      const scale = Math.min(1, Math.max(0.1, Number(widthLimit) / viewport.width));
+      const shot = await dbg.sendCommand('Page.captureScreenshot', {
+        format: 'jpeg',
+        quality,
+        fromSurface: true,
+        captureBeyondViewport: false,
+        optimizeForSpeed: true,
+        clip: { ...viewport, scale },
+      });
+      return decodeCdpJpeg(shot?.data);
+    };
+    let jpeg = await take(55, maxWidth);
+    if (jpeg.byteLength > 120000) jpeg = await take(45, retryMaxWidth);
+    if (jpeg.byteLength > 150000) throw new Error('native_capture_thumbnail_too_large');
+    return { jpeg, viewport };
+  });
+}
+
 async function capturePageWithBoundedSurfaceReadiness(webContents, {
   maxAttempts = DEFAULT_CAPTURE_VIEW_MAX_ATTEMPTS,
   retryDelayMs = DEFAULT_CAPTURE_VIEW_RETRY_DELAY_MS,
@@ -400,7 +451,7 @@ async function capturePageWithBoundedSurfaceReadiness(webContents, {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     if (!webContents || webContents.isDestroyed?.()) throw new Error('native_capture_webcontents_unavailable');
     try {
-      const image = await webContents.capturePage();
+      const image = await webContents.capturePage(undefined, { stayHidden: true, stayAwake: true });
       const size = captureSurfaceSize(image);
       if (size.valid) return { image, size, attempts: attempt, transientRetries: attempt - 1 };
       lastError = new Error('native_capture_surface_unavailable');
@@ -416,7 +467,49 @@ async function capturePageWithBoundedSurfaceReadiness(webContents, {
 
 export async function captureViewThumbnail(webContents, options = {}) {
   if (!webContents || webContents.isDestroyed?.()) throw new Error('native_capture_webcontents_unavailable');
-  const captured = await capturePageWithBoundedSurfaceReadiness(webContents, options);
+  const { surfaceExpected = true, withDebuggerImpl = withDebugger, ...surfaceOptions } = options;
+  let captured = null;
+  let surfaceError = null;
+  if (surfaceExpected !== false) {
+    try {
+      captured = await capturePageWithBoundedSurfaceReadiness(webContents, surfaceOptions);
+    } catch (error) {
+      if (error?.code !== 'NATIVE_CAPTURE_SURFACE_UNAVAILABLE') throw error;
+      surfaceError = error;
+    }
+  } else {
+    surfaceError = captureSurfaceUnavailableError(0, 'DETACHED_VIEW');
+  }
+
+  if (!captured) {
+    try {
+      const fallback = await captureCdpThumbnail(webContents, { withDebuggerImpl });
+      const jpeg = fallback.jpeg;
+      return {
+        schema: 'metaengine.native-browser.capture-thumbnail.v1',
+        captured_at: new Date().toISOString(),
+        url: clip(webContents.getURL?.() || '', 1200),
+        title: clip(webContents.getTitle?.() || '', 240),
+        source_width: fallback.viewport.width,
+        source_height: fallback.viewport.height,
+        capture_attempts: Number(surfaceError?.attempts || 0),
+        transient_surface_retries: Number(surfaceError?.attempts || 0),
+        bounded_surface_readiness: true,
+        capture_backend: 'CDP_SCREENSHOT',
+        detached_surface_fallback: surfaceExpected === false,
+        native_surface_error: clip(surfaceError?.message || 'native_capture_surface_unavailable', 240),
+        jpeg_bytes: jpeg.byteLength,
+        sha256: crypto.createHash('sha256').update(jpeg).digest('hex'),
+        jpeg_base64: jpeg.toString('base64'),
+        authority_effect: false,
+      };
+    } catch (fallbackError) {
+      const error = new Error(`${surfaceError?.message || 'native_capture_surface_unavailable'}:cdp_fallback:${clip(fallbackError?.message || fallbackError, 160)}`);
+      error.code = 'NATIVE_CAPTURE_SURFACE_UNAVAILABLE';
+      error.attempts = Number(surfaceError?.attempts || 0);
+      throw error;
+    }
+  }
   let image = captured.image;
   const size = captured.size;
   if (size.width > 720) image = image.resize({ width: 720, quality: 'good' });
@@ -437,6 +530,9 @@ export async function captureViewThumbnail(webContents, options = {}) {
     capture_attempts: captured.attempts,
     transient_surface_retries: captured.transientRetries,
     bounded_surface_readiness: true,
+    capture_backend: 'ELECTRON_CAPTURE_PAGE',
+    detached_surface_fallback: false,
+    native_surface_error: null,
     jpeg_bytes: jpeg.byteLength,
     sha256: crypto.createHash('sha256').update(jpeg).digest('hex'),
     jpeg_base64: jpeg.toString('base64'),

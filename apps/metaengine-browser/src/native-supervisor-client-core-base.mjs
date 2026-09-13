@@ -431,9 +431,14 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
       if (Array.isArray(supervisor?.current_commands) && supervisor.current_commands.length > 0) return;
       const identity = supervisor?.identity || {};
       if (!(identity.device_id && supervisor.supervisor_mode === 'CONTROL' && supervisor.armed === true)) return;
+      if (supervisor?.continuous_service?.actuation_allowed !== true) {
+        this.#lastDevosError = supervisor?.continuous_service?.runtime_control?.reason
+          || 'CONTINUOUS_SERVICE_ADMISSION_NOT_OPEN';
+        return;
+      }
 
       try {
-        await this.#devosTaskCycle.cycle();
+        await this.#devosTaskCycle.runOnce();
         this.#lastDevosError = null;
       } catch (error) {
         this.#lastDevosError = clipError(error);
@@ -479,6 +484,7 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
       devos_last_error: this.#lastDevosError,
       devos_scheduler_source: 'NATIVE_SUPERVISOR_IDLE_FAST_LANE',
       devos_second_polling_loop: false,
+      devos_execution_mode: 'BOUNDED_RUN_ONCE',
       idle_background_work: {
         in_flight: this.#idleWorkPromise != null,
         last_at: this.#idleWorkLastAt,

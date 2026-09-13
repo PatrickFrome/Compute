@@ -6,7 +6,7 @@ import { ComputeBridgeClient } from './compute-bridge-client.mjs';
 import { DevelopmentPlane } from './development-plane.mjs';
 import { loadNativeSupervisorControlState } from './native-supervisor-control-state.mjs';
 import { ensureRuntimeGenesis } from './runtime-genesis.mjs';
-import { FleetProvisioner } from './fleet-provisioner.mjs';
+import { FleetProvisioner, classifyFleetReconcileOutcome } from './fleet-provisioner.mjs';
 import { createFleetTargetLocalObserver } from './fleet-target-local-observer.mjs';
 import { retireEligibleFleetAgents } from './fleet-elastic-governor.mjs';
 import { HumanTakeoverController } from './human-takeover.mjs';
@@ -28,7 +28,7 @@ import { createDevOSSessionLayoutRegistry } from './metaengine-devos-session-lay
 import { planDevOSSurfaceGrid } from './metaengine-devos-surface-grid.mjs';
 import { createDevOSPresentationFocusState } from './metaengine-devos-presentation-focus.mjs';
 import { applyDevOSPresentationActivation } from './metaengine-devos-presentation-activation-runtime.mjs';
-import { projectWorkspaceWorkbench } from './workspace-workbench-projection.mjs';
+import { normalizeDevelopmentPlaneProjection, projectWorkspaceWorkbench } from './workspace-workbench-projection.mjs';
 import { projectDevOSDevelopmentSources } from './metaengine-devos-development-sources.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -38,6 +38,7 @@ const TOOLBAR_HEIGHT = SHELL_TOP_HEIGHT;
 const PERCEPTION_CACHE_MS = 4000;
 const STARTUP_RETRY_BASE_MS = 1000;
 const STARTUP_RETRY_MAX_MS = 30000;
+const COMPUTE_HEALTH_CACHE_MS = 1500;
 const isSmoke = process.argv.includes('--metaengine-smoke');
 const isDevelopmentPlaneSmoke = process.argv.includes('--metaengine-devplane-smoke');
 
@@ -76,6 +77,7 @@ let browserRuntimeReady = false;
 let startupFailurePresented = false;
 let startupControlState = null;
 let runtimeGenesisState = null;
+let computeHealthCache = { value: null, observed_ms: 0, promise: null };
 const degradedStartupSubsystems = new Map();
 
 function mimeFor(filePath) {
@@ -216,6 +218,22 @@ function startupDegradedSnapshot() {
   }));
 }
 
+async function currentComputeHealth() {
+  const now = Date.now();
+  if (computeHealthCache.value && now - computeHealthCache.observed_ms < COMPUTE_HEALTH_CACHE_MS) {
+    return computeHealthCache.value;
+  }
+  if (computeHealthCache.promise) return computeHealthCache.promise;
+  const pending = bridge.health().then((value) => {
+    computeHealthCache = { value, observed_ms: Date.now(), promise: pending };
+    return value;
+  }).finally(() => {
+    if (computeHealthCache.promise === pending) computeHealthCache.promise = null;
+  });
+  computeHealthCache.promise = pending;
+  return pending;
+}
+
 function recordStartupSubsystemDegraded(subsystem, error) {
   const name = String(subsystem || 'UNKNOWN').toUpperCase().replace(/[^A-Z0-9_]/g, '_').slice(0, 64) || 'UNKNOWN';
   const reason = String(error?.message || error || 'unknown').slice(0, 240);
@@ -279,9 +297,11 @@ async function shellSnapshot() {
   const tabs = registry.snapshot();
   const fleetSnapshot = fleet?.snapshot() || null;
   const ownerSafetyGatesSnapshot = ownerSafetyGates?.snapshot() || null;
-  const developmentPlaneSnapshot = developmentPlane?.snapshot() || null;
+  const developmentPlaneSnapshot = normalizeDevelopmentPlaneProjection(
+    developmentPlane?.statusSnapshot?.() || developmentPlane?.snapshot() || null,
+  );
   const supervisor = nativeSupervisor?.snapshot() || null;
-  const compute = await bridge.health();
+  const compute = await currentComputeHealth();
   const presentationFocus = devosPresentationFocus.snapshot();
   const sessionLayouts = devosSessionLayouts.snapshot();
   devosSourceSnapshot = projectDevOSDevelopmentSources({
@@ -692,24 +712,38 @@ async function handleCommand(command, payload = {}) {
   if (command === 'DOWNLOAD_STATUS') return downloads?.snapshot() || null;
   if (command === 'DOWNLOAD_FILE') { const result = await downloads?.download(payload); await publishSnapshot(); return result; }
   if (command === 'DOWNLOAD_CANCEL') { const result = await downloads?.cancel(); await publishSnapshot(); return result; }
-  if (command === 'DEV_PLANE_STATUS') return developmentPlane?.snapshot() || null;
+  if (command === 'DEV_PLANE_STATUS') return developmentPlane?.statusSnapshot?.() || developmentPlane?.snapshot() || null;
   if (command === 'DEV_PLANE_HEALTH') return developmentPlane?.request('HEALTH');
   if (command === 'DEV_PLANE_CAPABILITIES') return developmentPlane?.request('CAPABILITIES');
   if (command === 'DEV_PLANE_PROCESS_METRICS') return developmentPlane?.request('PROCESS_METRICS');
   if (command === 'DEV_PLANE_REPO_HEAD') return developmentPlane?.request('REPO_HEAD_READ');
   if (command === 'FLEET_STATUS') return fleet?.snapshot() || null;
   if (command === 'FLEET_RECONCILE') {
-    const result = await fleet?.reconcile({
+    const before = fleet?.snapshot() || null;
+    await fleet?.reconcile({
       active: payload?.active === true,
       target_agents: payload?.target_agents ?? null,
+      physical_cleanup_count: retired.length + sweptOrphans.length,
       spawn_burst_limit: payload?.spawn_burst_limit ?? null,
     });
     const retired = await retireFleetSurplus(payload?.retire_agent_ids);
     const sweptOrphans = await sweepOrphanFleetTabs();
     if (retired.length || sweptOrphans.length) await publishSnapshot();
-    return retired.length || sweptOrphans.length
-      ? { ...result, elastic_retired: retired, orphan_fleet_tabs_swept: sweptOrphans, authority_effect: false }
-      : result;
+    const result = fleet?.snapshot() || null;
+    const outcome = classifyFleetReconcileOutcome({
+      before,
+      after: result,
+      active: payload?.active === true,
+      target_agents: payload?.target_agents ?? null,
+    });
+    return {
+      ...result,
+      ...outcome,
+      ...(retired.length || sweptOrphans.length
+        ? { elastic_retired: retired, orphan_fleet_tabs_swept: sweptOrphans }
+        : {}),
+      authority_effect: false,
+    };
   }
   if (command === 'FLEET_SET_PROFILE') { const result = await fleet?.setProfile(payload?.profile); await publishSnapshot(); return result; }
   if (command === 'TAB_CENSUS') {
@@ -777,14 +811,18 @@ async function nativeSupervisorState() {
   const snap = registry.snapshot();
   const selected = registry.selected();
   const perception = await perceptionForSelected();
+  const compute = await currentComputeHealth();
   return {
     tabs: snap.tabs.map((tab) => ({ ...tab, selected: tab.tab_id === snap.selected_tab_id })),
     tab_census: snap.census,
     active_tab: selected,
     downloads: downloads?.snapshot() || null,
-    development_plane: developmentPlane?.snapshot() || null,
+    development_plane: normalizeDevelopmentPlaneProjection(
+      developmentPlane?.statusSnapshot?.() || developmentPlane?.snapshot() || null,
+    ),
     fleet: fleet?.snapshot() || null,
     owner_safety_gates: ownerSafetyGates?.snapshot() || null,
+    compute,
     perception,
   };
 }
@@ -819,7 +857,15 @@ async function executeNativeSupervisorCommand(command) {
     ? assertExactNativeSupervisorMutationTargetCurrent(exactMutationTarget, { views })
     : targetViewForSupervisorRead(command);
   if (action === 'CAPTURE') return { ...(await captureSemanticFrame(view.webContents)), tab_id: tab.tab_id };
-  if (action === 'CAPTURE_VIEW') return { ...(await captureViewThumbnail(view.webContents)), tab_id: tab.tab_id };
+  if (action === 'CAPTURE_VIEW') {
+    const surfaceAttached = Array.isArray(windowRef?.contentView?.children)
+      && windowRef.contentView.children.includes(view)
+      && view.getVisible?.() !== false;
+    return {
+      ...(await captureViewThumbnail(view.webContents, { surfaceExpected: surfaceAttached })),
+      tab_id: tab.tab_id,
+    };
+  }
   if (['STOP_GENERATION','SCROLL','SEMANTIC_FOCUS','SEMANTIC_TYPE','TYPED_CLICK'].includes(action)) {
     assertExactNativeSupervisorMutationTargetCurrent(exactMutationTarget, { views });
     const result = await executeSemanticCommand(view.webContents, command);

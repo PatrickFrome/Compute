@@ -11,6 +11,9 @@ const SERVICE_THROTTLE_BLOCKED_ACTIONS = new Set([
 ]);
 const TERMINAL_FLEET_STATES = new Set(['LOST', 'RETIRED', 'PROVISIONING_AMBIGUOUS']);
 const DEFAULT_WORKER_OBSERVATION_CONCURRENCY = 4;
+const TRANSPORT_WAKE_HISTORY_LIMIT = 4;
+const TRANSPORT_SESSION_TAB_LIMIT = 32;
+const TRANSPORT_WORKER_SIGNAL_LIMIT = 32;
 const clip = (value, max = 180) => String(value ?? '').slice(0, max);
 
 function isNativeFrame(frame) {
@@ -92,6 +95,224 @@ function observationConcurrency(value) {
   return Number.isSafeInteger(parsed)
     ? Math.max(1, Math.min(16, parsed))
     : DEFAULT_WORKER_OBSERVATION_CONCURRENCY;
+}
+
+function wakeSummary(row) {
+  if (!row || typeof row !== 'object') return null;
+  return Object.freeze({
+    wake_id: row.wake_id ? clip(row.wake_id, 96) : null,
+    reason: row.reason ? clip(row.reason, 80) : null,
+    queue_key: row.queue_key ? clip(row.queue_key, 240) : null,
+    supervisor_epoch: Number.isSafeInteger(Number(row.supervisor_epoch)) ? Number(row.supervisor_epoch) : null,
+    cycle_seq: Number.isSafeInteger(Number(row.cycle_seq)) ? Number(row.cycle_seq) : null,
+    process_incarnation_id: row.process_incarnation_id ? clip(row.process_incarnation_id, 160) : null,
+    origin_process_incarnation_id: row.origin_process_incarnation_id ? clip(row.origin_process_incarnation_id, 160) : null,
+    prepared_at: row.prepared_at || null,
+    confirmed_at: row.confirmed_at || null,
+    ambiguous_at: row.ambiguous_at || null,
+    ambiguous_reason: row.ambiguous_reason ? clip(row.ambiguous_reason, 160) : null,
+    retired_at: row.retired_at || null,
+    retired_reason: row.retired_reason ? clip(row.retired_reason, 160) : null,
+    terminal_generation_epoch: Number.isSafeInteger(Number(row.terminal_generation_epoch)) ? Number(row.terminal_generation_epoch) : null,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  });
+}
+
+function queuedWakeSummary(row) {
+  if (!row || typeof row !== 'object') return null;
+  const agentIds = Array.isArray(row.metadata?.agent_ids) ? row.metadata.agent_ids : [];
+  return Object.freeze({
+    key: row.key ? clip(row.key, 240) : null,
+    reason: row.reason ? clip(row.reason, 80) : null,
+    queued_at: row.queued_at || null,
+    process_incarnation_id: row.process_incarnation_id ? clip(row.process_incarnation_id, 160) : null,
+    agent_id: row.metadata?.agent_id ? clip(row.metadata.agent_id, 80) : null,
+    agent_count: agentIds.length,
+    authority_effect: false,
+  });
+}
+
+function scalarProjection(source, keys, max = 240) {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
+  const projected = {};
+  for (const key of keys) {
+    const value = source[key];
+    if (value == null || typeof value === 'boolean' || typeof value === 'number') projected[key] = value ?? null;
+    else if (typeof value === 'string') projected[key] = clip(value, max);
+  }
+  return projected;
+}
+
+function sessionRowSummary(row) {
+  if (!row || typeof row !== 'object') return null;
+  return Object.freeze({
+    tab_id: row.tab_id ? clip(row.tab_id, 80) : null,
+    state: clip(row.state || 'UNKNOWN', 48),
+    state_since: row.state_since || null,
+    generation_epoch: Math.max(0, Number(row.generation_epoch) || 0),
+    generation_started_at: row.generation_started_at || null,
+    last_progress_at: row.last_progress_at || null,
+    last_progress_source: row.last_progress_source ? clip(row.last_progress_source, 64) : null,
+    recovery_attempts: Math.max(0, Number(row.recovery_attempts) || 0),
+    physical_health: clip(row.physical_health || 'UNKNOWN', 48),
+    controls: row.controls && typeof row.controls === 'object' ? {
+      stop: Math.max(0, Number(row.controls.stop) || 0),
+      continue: Math.max(0, Number(row.controls.continue) || 0),
+      retry: Math.max(0, Number(row.controls.retry) || 0),
+      send: Math.max(0, Number(row.controls.send) || 0),
+    } : null,
+    progress_age_ms: Number.isFinite(Number(row.progress_age_ms)) ? Math.max(0, Number(row.progress_age_ms)) : null,
+    soft_stall: row.soft_stall === true,
+    hard_stall: row.hard_stall === true,
+    terminal_ready: row.terminal_ready === true,
+    last_observed_at: row.last_observed_at || null,
+    authority_effect: false,
+  });
+}
+
+export function buildSupervisorLifecycleStatusSnapshot(snapshot = {}) {
+  const keepalive = snapshot?.keepalive && typeof snapshot.keepalive === 'object' ? snapshot.keepalive : null;
+  const session = snapshot?.supervisor_session && typeof snapshot.supervisor_session === 'object' ? snapshot.supervisor_session : null;
+  const ambiguousHistory = Array.isArray(keepalive?.ambiguous_history) ? keepalive.ambiguous_history : [];
+  const predecessorHistory = Array.isArray(keepalive?.predecessor_wake_history) ? keepalive.predecessor_wake_history : [];
+  const queuedWakes = Array.isArray(keepalive?.queued_wakes) ? keepalive.queued_wakes : [];
+  const workerGeneration = keepalive?.previous_worker_generation && typeof keepalive.previous_worker_generation === 'object'
+    ? Object.entries(keepalive.previous_worker_generation)
+    : [];
+  const sessionRows = Array.isArray(session?.tabs) ? session.tabs : [];
+  const sessionSummaries = sessionRows.slice(-TRANSPORT_SESSION_TAB_LIMIT).map(sessionRowSummary).filter(Boolean);
+  const stateCounts = {};
+  for (const row of sessionSummaries) stateCounts[row.state] = Number(stateCounts[row.state] || 0) + 1;
+  const workerSignals = (Array.isArray(snapshot?.worker_signals) ? snapshot.worker_signals : []).slice(-TRANSPORT_WORKER_SIGNAL_LIMIT).map((row) => ({
+    agent_id: row?.agent_id ? clip(row.agent_id, 80) : null,
+    lifecycle_state: clip(row?.lifecycle_state || 'UNKNOWN', 48),
+    generation_state: clip(row?.generation_state || 'UNKNOWN', 48),
+    authority_effect: false,
+  }));
+
+  const continuousService = scalarProjection(snapshot?.continuous_service, [
+    'enabled', 'monitor_ms', 'auto_rollover_cycles', 'work_cycle_limit',
+    'admission_state', 'authoritative_admission_required',
+    'automatic_rollover_cycle_limit_enabled', 'external_confirmation_required_for_continuation',
+    'terminal_requires_user_message', 'restart_resumable', 'restart_pending_wake_reconciliation',
+    'restart_rollover_reconciliation', 'prompt_plaintext_persisted', 'orphaned_stall_stop_only',
+    'ambiguous_terminal_retirement', 'active_wake_terminal_retirement', 'ambiguous_same_wake_retry',
+    'wake_send_transport', 'service_throttle_backpressure', 'worker_observation_prefetch',
+    'worker_observation_concurrency', 'authority_effect',
+  ]);
+  const runtimeControl = scalarProjection(snapshot?.continuous_service?.runtime_control, [
+    'schema', 'state', 'reason', 'workspace_id', 'generation_floor', 'refill_enabled',
+    'supervisor_admission_enabled', 'continuous_service_allowed', 'authoritative',
+    'automatic_retry_allowed', 'authority_effect',
+  ]);
+  const activeRequest = scalarProjection(snapshot?.active_request, [
+    'wake_id', 'tab_id', 'retry_attempt', 'same_chat_retry_attempt', 'blocked_ambiguous',
+    'restored_from_durable_keepalive', 'trusted_prompt_persisted', 'effect_class',
+  ]);
+  const lastRecovery = scalarProjection(snapshot?.last_recovery, [
+    'action', 'reason', 'wake_id', 'tab_id', 'prior_request_tab_id', 'generation_epoch',
+    'supervisor_epoch', 'rollover_attempt_id', 'retry_attempt', 'proof', 'prompt_retyped',
+    'confirmed', 'ambiguous', 'automatic_retry_allowed', 'at', 'observed_stopped_at',
+    'terminal_confirmed_at', 'authority_effect',
+  ]);
+  const workerPrefetch = scalarProjection(snapshot?.worker_observation_prefetch, [
+    'captured_count', 'failed_count', 'concurrency', 'elapsed_ms', 'error', 'read_only', 'authority_effect',
+  ]);
+  const serviceThrottle = scalarProjection(snapshot?.service_throttle, [
+    'schema', 'state', 'reason', 'source_tab_id', 'first_observed_at', 'last_observed_at',
+    'automatic_retry_allowed', 'authority_effect',
+  ]);
+  const rolloverAttempt = scalarProjection(keepalive?.rollover_attempt, [
+    'attempt_id', 'supervisor_epoch', 'previous_conversation', 'started_at', 'tab_id', 'tab_bound_at',
+    'ambiguous_at', 'ambiguous_reason', 'restart_recovered_at', 'automatic_retry_allowed',
+  ], 1200);
+
+  return Object.freeze({
+    schema: clip(snapshot?.schema || 'metaengine.supervisor-lifecycle-runtime.v4', 96),
+    keepalive: keepalive ? {
+      schema: clip(keepalive.schema || 'metaengine.supervisor-keepalive.state.v1', 96),
+      version: keepalive.version ? clip(keepalive.version, 48) : null,
+      supervisor_id: keepalive.supervisor_id ? clip(keepalive.supervisor_id, 96) : null,
+      supervisor_epoch: Math.max(0, Number(keepalive.supervisor_epoch) || 0),
+      cycle_seq: Math.max(0, Number(keepalive.cycle_seq) || 0),
+      state: clip(keepalive.state || 'UNKNOWN', 48),
+      conversation_url: keepalive.conversation_url ? clip(keepalive.conversation_url, 1200) : null,
+      tab_id: keepalive.tab_id ? clip(keepalive.tab_id, 80) : null,
+      paused: keepalive.paused === true,
+      paused_from_state: keepalive.paused_from_state ? clip(keepalive.paused_from_state, 48) : null,
+      process_incarnation_id: keepalive.process_incarnation_id ? clip(keepalive.process_incarnation_id, 160) : null,
+      process_incarnation_started_at: keepalive.process_incarnation_started_at || null,
+      predecessor_process_incarnation_id: keepalive.predecessor_process_incarnation_id ? clip(keepalive.predecessor_process_incarnation_id, 160) : null,
+      predecessor_fenced_at: keepalive.predecessor_fenced_at || null,
+      predecessor_queued_wake_count: Math.max(0, Number(keepalive.predecessor_queued_wake_count) || 0),
+      admission_state: keepalive.admission_state ? clip(keepalive.admission_state, 32) : 'UNKNOWN',
+      admission_reason: keepalive.admission_reason ? clip(keepalive.admission_reason, 160) : null,
+      admission_generation_floor: typeof keepalive.admission_generation_floor === 'number' && Number.isSafeInteger(keepalive.admission_generation_floor) ? keepalive.admission_generation_floor : null,
+      admission_refill_enabled: typeof keepalive.admission_refill_enabled === 'boolean' ? keepalive.admission_refill_enabled : null,
+      admission_supervisor_enabled: typeof keepalive.admission_supervisor_enabled === 'boolean' ? keepalive.admission_supervisor_enabled : null,
+      admission_observed_at: keepalive.admission_observed_at || null,
+      parked_at: keepalive.parked_at || null,
+      parked_reason: keepalive.parked_reason ? clip(keepalive.parked_reason, 160) : null,
+      parked_queued_wake_count: Math.max(0, Number(keepalive.parked_queued_wake_count) || 0),
+      parked_wake_reasons: Array.isArray(keepalive.parked_wake_reasons) ? keepalive.parked_wake_reasons.slice(-32).map((reason) => clip(reason, 80)) : [],
+      suppressed_wake_count: Math.max(0, Number(keepalive.suppressed_wake_count) || 0),
+      last_suppressed_wake_at: keepalive.last_suppressed_wake_at || null,
+      last_suppressed_wake_reason: keepalive.last_suppressed_wake_reason ? clip(keepalive.last_suppressed_wake_reason, 80) : null,
+      queued_wakes: queuedWakes.slice(-TRANSPORT_WAKE_HISTORY_LIMIT).map(queuedWakeSummary).filter(Boolean),
+      queued_wake_count: queuedWakes.length,
+      pending_wake: wakeSummary(keepalive.pending_wake),
+      active_wake: wakeSummary(keepalive.active_wake),
+      ambiguous_history: ambiguousHistory.slice(-TRANSPORT_WAKE_HISTORY_LIMIT).map(wakeSummary).filter(Boolean),
+      ambiguous_history_count: ambiguousHistory.length,
+      predecessor_wake_history: predecessorHistory.slice(-TRANSPORT_WAKE_HISTORY_LIMIT).map(wakeSummary).filter(Boolean),
+      predecessor_wake_history_count: predecessorHistory.length,
+      previous_worker_generation: Object.fromEntries(workerGeneration.slice(-32).map(([key, value]) => [clip(key, 80), clip(value, 48)])),
+      previous_worker_generation_count: workerGeneration.length,
+      last_wake_at: keepalive.last_wake_at || null,
+      last_wake_reason: keepalive.last_wake_reason ? clip(keepalive.last_wake_reason, 80) : null,
+      last_completed_cycle_at: keepalive.last_completed_cycle_at || null,
+      last_research_wake_at: keepalive.last_research_wake_at || null,
+      rollover_reason: keepalive.rollover_reason ? clip(keepalive.rollover_reason, 160) : null,
+      rollover_release_at: keepalive.rollover_release_at || null,
+      rollover_attempt: rolloverAttempt,
+      updated_at: keepalive.updated_at || null,
+      work_cycle_limit: Number.isFinite(Number(keepalive.work_cycle_limit)) ? Number(keepalive.work_cycle_limit) : null,
+      worker_generation_memory_limit: Number.isFinite(Number(keepalive.worker_generation_memory_limit)) ? Number(keepalive.worker_generation_memory_limit) : null,
+      automatic_rollover_cycle_limit_enabled: keepalive.automatic_rollover_cycle_limit_enabled === true,
+      external_confirmation_required_for_continuation: keepalive.external_confirmation_required_for_continuation === true,
+      transport_history_limit: TRANSPORT_WAKE_HISTORY_LIMIT,
+      transport_worker_generation_limit: 32,
+      authority_effect: false,
+    } : null,
+    supervisor_generation: snapshot?.supervisor_generation ? clip(snapshot.supervisor_generation, 48) : null,
+    supervisor_session: session ? {
+      schema: session.schema || 'metaengine.chatgpt-session-monitor.snapshot.v1',
+      version: session.version || null,
+      tabs: sessionSummaries,
+      tab_count: sessionRows.length,
+      state_counts: stateCounts,
+      persisted_response_text: false,
+      full_frame_digests_included: false,
+      recent_generation_samples_included: false,
+      authority_effect: false,
+    } : null,
+    worker_signals: workerSignals,
+    worker_signal_count: Array.isArray(snapshot?.worker_signals) ? snapshot.worker_signals.length : 0,
+    continuous_service: continuousService ? { ...continuousService, runtime_control: runtimeControl } : null,
+    active_request: activeRequest,
+    last_recovery: lastRecovery,
+    worker_observation_prefetch: workerPrefetch,
+    service_throttle: serviceThrottle,
+    quiescent: snapshot?.quiescent === true,
+    actuation_enabled: snapshot?.actuation_enabled === true,
+    last_error: snapshot?.last_error ? clip(snapshot.last_error, 240) : null,
+    transport_session_tab_limit: TRANSPORT_SESSION_TAB_LIMIT,
+    transport_worker_signal_limit: TRANSPORT_WORKER_SIGNAL_LIMIT,
+    heartbeat_payload_bounded: true,
+    full_history_retained_locally: true,
+    authority_effect: false,
+  });
 }
 
 export async function prefetchFleetWorkerFrames({ state, executeCommand, concurrency = DEFAULT_WORKER_OBSERVATION_CONCURRENCY } = {}) {
@@ -376,5 +597,9 @@ export class SupervisorLifecycleRuntime extends CoreSupervisorLifecycleRuntime {
       service_throttle: this.#serviceThrottleGate.snapshot(),
       authority_effect: false,
     };
+  }
+
+  statusSnapshot() {
+    return buildSupervisorLifecycleStatusSnapshot(this.snapshot());
   }
 }

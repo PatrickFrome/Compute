@@ -98,3 +98,63 @@ test('CAPTURE_VIEW does not retry unrelated capture failures', async () => {
   );
   assert.equal(calls, 1);
 });
+
+test('CAPTURE_VIEW uses bounded CDP pixels when the DevOS layout detached the requested view', async () => {
+  let nativeCalls = 0;
+  const jpeg = Buffer.from('detached-view-cdp-jpeg');
+  const commands = [];
+  const webContents = webContentsFixture(async () => {
+    nativeCalls += 1;
+    throw new Error('native capture must not run for a proven detached view');
+  });
+  const result = await captureViewThumbnail(webContents, {
+    surfaceExpected: false,
+    withDebuggerImpl: async (_target, run) => run({
+      async sendCommand(method, payload) {
+        commands.push({ method, payload });
+        if (method === 'Page.getLayoutMetrics') {
+          return { cssVisualViewport: { pageX: 0, pageY: 40, clientWidth: 1440, clientHeight: 900 } };
+        }
+        if (method === 'Page.captureScreenshot') return { data: jpeg.toString('base64') };
+        throw new Error(`unexpected_cdp_command:${method}`);
+      },
+    }),
+  });
+
+  assert.equal(nativeCalls, 0);
+  assert.deepEqual(commands.map((row) => row.method), ['Page.getLayoutMetrics', 'Page.captureScreenshot']);
+  assert.equal(commands[1].payload.clip.scale, 0.5);
+  assert.equal(result.capture_backend, 'CDP_SCREENSHOT');
+  assert.equal(result.detached_surface_fallback, true);
+  assert.equal(result.source_width, 1440);
+  assert.equal(result.source_height, 900);
+  assert.equal(result.jpeg_bytes, jpeg.byteLength);
+  assert.equal(result.jpeg_base64, jpeg.toString('base64'));
+  assert.equal(result.authority_effect, false);
+});
+
+test('CAPTURE_VIEW falls back to CDP after bounded native surface retries', async () => {
+  let nativeCalls = 0;
+  const jpeg = Buffer.from('fallback-jpeg');
+  const webContents = webContentsFixture(async () => {
+    nativeCalls += 1;
+    throw new Error('Current display surface not available for capture');
+  });
+  const result = await captureViewThumbnail(webContents, {
+    maxAttempts: 2,
+    retryDelayMs: 0,
+    withDebuggerImpl: async (_target, run) => run({
+      async sendCommand(method) {
+        if (method === 'Page.getLayoutMetrics') return { cssVisualViewport: { clientWidth: 640, clientHeight: 360 } };
+        if (method === 'Page.captureScreenshot') return { data: jpeg.toString('base64') };
+        throw new Error(`unexpected_cdp_command:${method}`);
+      },
+    }),
+  });
+
+  assert.equal(nativeCalls, 2);
+  assert.equal(result.capture_attempts, 2);
+  assert.equal(result.capture_backend, 'CDP_SCREENSHOT');
+  assert.equal(result.detached_surface_fallback, false);
+  assert.match(result.native_surface_error, /native_capture_surface_unavailable_after_retry:2/);
+});

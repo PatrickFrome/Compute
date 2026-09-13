@@ -35,6 +35,32 @@ function plainObject(value) {
   return proto === Object.prototype || proto === null;
 }
 
+function retainedResultSummary(capability, value) {
+  if (!plainObject(value)) return null;
+  const codeFiles = Array.isArray(value.code_files) ? value.code_files : [];
+  const components = Array.isArray(value.components) ? value.components : [];
+  let payloadBytes = null;
+  try { payloadBytes = Buffer.byteLength(JSON.stringify(value), 'utf8'); } catch {}
+  return Object.freeze({
+    schema: 'metaengine.development-plane.retained-result-summary.v1',
+    capability: String(capability || 'UNKNOWN'),
+    result_schema: value.schema ? String(value.schema).slice(0, 160) : null,
+    ok: typeof value.ok === 'boolean' ? value.ok : null,
+    repository: value.repository ? String(value.repository).slice(0, 240) : null,
+    ref: value.ref ? String(value.ref).slice(0, 320) : null,
+    head: value.head ? String(value.head).slice(0, 80) : null,
+    source_head: value.source_head ? String(value.source_head).slice(0, 80) : null,
+    candidate_id: value.candidate_id ? String(value.candidate_id).slice(0, 160) : null,
+    evidence_id: value.evidence_id ? String(value.evidence_id).slice(0, 160) : null,
+    code_file_count: Number.isSafeInteger(Number(value.code_file_count)) ? Number(value.code_file_count) : codeFiles.length,
+    code_bytes: codeFiles.reduce((total, row) => total + Math.max(0, Number(row?.bytes) || 0), 0),
+    component_count: components.length,
+    payload_bytes: payloadBytes,
+    payload_included: false,
+    authority_effect: false,
+  });
+}
+
 export class DevelopmentPlane {
   #spawn;
   #clock;
@@ -56,6 +82,7 @@ export class DevelopmentPlane {
   #transcript = [];
   #transcriptTotal = 0;
   #lastResults = new Map();
+  #lastResultSummaries = new Map();
 
   constructor({
     spawnWorker,
@@ -77,7 +104,12 @@ export class DevelopmentPlane {
     this.#restartMaxMs = restart_max_ms;
   }
 
-  snapshot() {
+  snapshot({ includeResultPayloads = true } = {}) {
+    const exposePayloads = includeResultPayloads !== false;
+    const resultEntries = exposePayloads ? this.#lastResults.entries() : this.#lastResultSummaries.entries();
+    const readModel = exposePayloads
+      ? this.#lastResults.get('DEVOS_REPO_READ_MODEL')
+      : this.#lastResultSummaries.get('DEVOS_REPO_READ_MODEL');
     return Object.freeze({
       schema: 'metaengine.development-plane.snapshot.v1',
       version: DEVELOPMENT_PLANE_VERSION,
@@ -98,12 +130,14 @@ export class DevelopmentPlane {
       advisory_evidence_network_dispatch: false,
       advisory_evidence_browser_authority: false,
       advisory_evidence_promotion_authority: false,
-      devos_repo_read_model: clone(this.#lastResults.get('DEVOS_REPO_READ_MODEL') || null),
+      devos_repo_read_model: clone(readModel || null),
       devos_repo_search: true,
       devos_repo_search_arbitrary_path_selection: false,
       transcript: Object.freeze(this.#transcript.map((row) => Object.freeze({ ...row }))),
       transcript_total_count: this.#transcriptTotal,
-      last_results: Object.freeze(Object.fromEntries([...this.#lastResults.entries()].map(([key, value]) => [key, clone(value)]))),
+      last_results: Object.freeze(Object.fromEntries([...resultEntries].map(([key, value]) => [key, clone(value)]))),
+      result_payloads_included: exposePayloads,
+      result_payloads_bounded_for_transport: !exposePayloads,
       direct_promote_current: false,
       arbitrary_eval: false,
       page_command_authority: false,
@@ -120,6 +154,10 @@ export class DevelopmentPlane {
     });
   }
 
+  statusSnapshot() {
+    return this.snapshot({ includeResultPayloads: false });
+  }
+
   #appendTranscript(capability, state, summary = null) {
     this.#transcriptTotal += 1;
     this.#transcript.push(Object.freeze({ seq: this.#transcriptTotal, at: new Date(this.#clock()).toISOString(), capability: String(capability || 'UNKNOWN'), state: String(state || 'UNKNOWN'), summary: summary == null ? null : String(summary).slice(0, 800), authority_effect: false }));
@@ -130,7 +168,10 @@ export class DevelopmentPlane {
     let retained = null;
     if (capability === 'DEVOS_REPO_READ_MODEL' || capability === 'CANDIDATE_CAPSULE_VERIFY' || capability === 'VERIFICATION_SANDBOX_PLAN_VERIFY' || capability === 'ADVISORY_EVIDENCE_VERIFY') retained = clone(result);
     if (capability === 'CANDIDATE_CAPSULE_CREATE' && result && typeof result === 'object') retained = { schema: result.schema, candidate_id: result.candidate_id, source: clone(result.source), components: clone(result.components), verification_plan: clone(result.verification_plan), authority_effect: false };
-    if (retained) this.#lastResults.set(capability, retained);
+    if (retained) {
+      this.#lastResults.set(capability, retained);
+      this.#lastResultSummaries.set(capability, retainedResultSummary(capability, retained));
+    }
     const summary = capability === 'DEVOS_REPO_READ_MODEL'
       ? `${Number(result?.code_file_count || 0)} source files`
       : capability === 'DEVOS_REPO_SEARCH'

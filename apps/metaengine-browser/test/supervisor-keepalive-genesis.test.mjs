@@ -15,8 +15,10 @@ test('fresh keepalive genesis records current incarnation without fabricating pr
 
   const snapshot = await keepalive.init();
 
-  assert.equal(snapshot.version, '1.4.1');
+  assert.equal(snapshot.version, '1.5.0');
   assert.equal(snapshot.state, 'RECOVERING');
+  assert.equal(snapshot.admission_state, 'UNKNOWN');
+  assert.equal(snapshot.admission_reason, 'NOT_OBSERVED');
   assert.equal(snapshot.process_incarnation_id, 'process_genesis_current');
   assert.equal(snapshot.process_incarnation_started_at, '2026-09-09T09:31:00.000Z');
   assert.equal(snapshot.predecessor_process_incarnation_id, null);
