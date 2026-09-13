@@ -14,6 +14,8 @@ import {
   assertNativeEffectRuntimeBindingCurrent,
   recordNativeEffectRuntimeObservation,
 } from './native-effect-runtime-observation.mjs';
+import { resolveExactWebContentsView } from './browser-webcontents-tab-index.mjs';
+import { withTemporaryDetachedCaptureSurface } from './browser-detached-capture-surface.mjs';
 
 const SAFE_ROLES = new Set(['textbox','searchbox','combobox','button','checkbox','radio','switch','tab','menuitem','link']);
 const TEXT_INPUT_ROLES = new Set(['textbox','searchbox','combobox']);
@@ -134,6 +136,7 @@ async function inspectChatGptSubmit(dbg, webContents, { preUrl } = {}) {
     new_conversation_observed: false,
     send_control_remaining: sendCount > 0,
     post_url_sha256: url ? sha256(url) : null,
+    observation_error: null,
     automatic_retry_allowed: false,
     authority_effect: false,
   };
@@ -512,10 +515,14 @@ export async function captureViewThumbnail(webContents, options = {}) {
     withDebuggerImpl = withDebugger,
     cdpDeadlineMs = DEFAULT_CAPTURE_CDP_DEADLINE_MS,
     releaseDebuggerImpl = releasePersistentBrowserDebugger,
+    temporarySurfaceDeadlineMs = DEFAULT_CAPTURE_CDP_DEADLINE_MS,
+    resolveViewImpl = resolveExactWebContentsView,
+    withDetachedSurfaceImpl = withTemporaryDetachedCaptureSurface,
     ...surfaceOptions
   } = options;
   let captured = null;
   let surfaceError = null;
+  let temporarySurfaceLease = false;
   if (surfaceExpected !== false) {
     try {
       captured = await capturePageWithBoundedSurfaceReadiness(webContents, surfaceOptions);
@@ -524,7 +531,24 @@ export async function captureViewThumbnail(webContents, options = {}) {
       surfaceError = error;
     }
   } else {
-    surfaceError = captureSurfaceUnavailableError(0, 'DETACHED_VIEW');
+    const exactView = typeof resolveViewImpl === 'function' ? resolveViewImpl(webContents) : null;
+    if (exactView?.webContents === webContents && exactView.getVisible?.() !== false && typeof withDetachedSurfaceImpl === 'function') {
+      try {
+        captured = await withDetachedSurfaceImpl(
+          exactView,
+          () => capturePageWithBoundedSurfaceReadiness(webContents, surfaceOptions),
+          { deadlineMs: temporarySurfaceDeadlineMs },
+        );
+        temporarySurfaceLease = true;
+      } catch (error) {
+        const wrapped = captureSurfaceUnavailableError(0, error);
+        wrapped.temporary_surface_error_code = error?.code || null;
+        wrapped.automatic_retry_allowed = false;
+        throw wrapped;
+      }
+    } else {
+      surfaceError = captureSurfaceUnavailableError(0, 'DETACHED_VIEW');
+    }
   }
 
   if (!captured) {
@@ -550,6 +574,7 @@ export async function captureViewThumbnail(webContents, options = {}) {
         capture_from_surface: fallback.fromSurface,
         cdp_deadline_ms: Math.max(10, Math.min(15000, Number(cdpDeadlineMs) || DEFAULT_CAPTURE_CDP_DEADLINE_MS)),
         detached_surface_fallback: surfaceExpected === false,
+        temporary_surface_lease: false,
         native_surface_error: clip(surfaceError?.message || 'native_capture_surface_unavailable', 240),
         jpeg_bytes: jpeg.byteLength,
         sha256: crypto.createHash('sha256').update(jpeg).digest('hex'),
@@ -586,8 +611,13 @@ export async function captureViewThumbnail(webContents, options = {}) {
     transient_surface_retries: captured.transientRetries,
     bounded_surface_readiness: true,
     capture_backend: 'ELECTRON_CAPTURE_PAGE',
-    detached_surface_fallback: false,
-    native_surface_error: null,
+    capture_from_surface: true,
+    detached_surface_fallback: temporarySurfaceLease,
+    temporary_surface_lease: temporarySurfaceLease,
+    temporary_surface_deadline_ms: temporarySurfaceLease
+      ? Math.max(250, Math.min(15000, Number(temporarySurfaceDeadlineMs) || DEFAULT_CAPTURE_CDP_DEADLINE_MS))
+      : null,
+    native_surface_error: temporarySurfaceLease ? 'DETACHED_VIEW_TEMPORARY_SURFACE_LEASED' : null,
     jpeg_bytes: jpeg.byteLength,
     sha256: crypto.createHash('sha256').update(jpeg).digest('hex'),
     jpeg_base64: jpeg.toString('base64'),
