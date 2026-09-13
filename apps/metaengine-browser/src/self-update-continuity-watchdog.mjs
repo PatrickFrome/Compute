@@ -61,9 +61,17 @@ export function startSelfUpdateContinuityWatchdog({
       .catch((error) => onError(clipError(error)));
   }, delayMs);
   timer?.unref?.();
-  return {
+
+  const handle = {
     timeout_ms: delayMs,
-    cancel: () => clearTimeout(timer),
+    cancel: () => {
+      clearTimeout(timer);
+      if (globalThis.__METAENGINE_SELF_UPDATE_CONTINUITY_WATCHDOG__ === handle) {
+        delete globalThis.__METAENGINE_SELF_UPDATE_CONTINUITY_WATCHDOG__;
+      }
+    },
     authority_effect: false,
   };
+  globalThis.__METAENGINE_SELF_UPDATE_CONTINUITY_WATCHDOG__ = handle;
+  return handle;
 }
