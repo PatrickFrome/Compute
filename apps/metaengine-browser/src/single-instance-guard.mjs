@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 
 export const METAENGINE_BROWSER_APP_ID = 'com.metaengine.browser.test';
-export const SINGLE_INSTANCE_GUARD_VERSION = '2.2.0';
+export const SINGLE_INSTANCE_GUARD_VERSION = '2.1.0';
 export const SINGLE_INSTANCE_LOCK_SCHEMA = 'metaengine.browser.single-instance-lock.v2';
 export const SECONDARY_INSTANCE_RENOTIFY_DELAY_MS = 4_000;
 export const INSTALLER_SHUTDOWN_ARG = '--metaengine-installer-shutdown';
@@ -139,15 +139,12 @@ export function acquirePrimaryInstance(app, {
       additional_data: additionalData,
       secondary_ack_required: false,
       secondary_renotify_scheduled: false,
-      installer_shutdown_listener_installed: false,
       authority_effect: false,
     });
   }
 
   const primary = requestLock(app, additionalData);
-  const installerShutdownListenerInstalled = primary === true
-    ? installPrimaryInstallerShutdownHandler(app)
-    : false;
+  if (primary === true) installPrimaryInstallerShutdownHandler(app);
   const secondaryRenotifyScheduled = primary !== true
     ? scheduleSecondaryRenotify(app, additionalData, {
       delay_ms: secondary_retry_delay_ms,
@@ -165,7 +162,6 @@ export function acquirePrimaryInstance(app, {
     secondary_ack_required: primary !== true,
     secondary_renotify_scheduled: secondaryRenotifyScheduled,
     secondary_renotify_delay_ms: secondaryRenotifyScheduled ? secondary_retry_delay_ms : null,
-    installer_shutdown_listener_installed: installerShutdownListenerInstalled,
     authority_effect: false,
   });
 }
