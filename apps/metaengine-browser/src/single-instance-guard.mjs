@@ -1,9 +1,10 @@
 import crypto from 'node:crypto';
 
 export const METAENGINE_BROWSER_APP_ID = 'com.metaengine.browser.test';
-export const SINGLE_INSTANCE_GUARD_VERSION = '2.1.0';
+export const SINGLE_INSTANCE_GUARD_VERSION = '2.2.0';
 export const SINGLE_INSTANCE_LOCK_SCHEMA = 'metaengine.browser.single-instance-lock.v2';
 export const SECONDARY_INSTANCE_RENOTIFY_DELAY_MS = 4_000;
+export const INSTALLER_SHUTDOWN_ARG = '--metaengine-installer-shutdown';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -16,6 +17,46 @@ export function validSingleInstanceLaunchData(value) {
     && value.app_id === METAENGINE_BROWSER_APP_ID
     && typeof value.launch_id === 'string'
     && UUID.test(value.launch_id);
+}
+
+export function isInstallerShutdownArgv(argv) {
+  return Array.isArray(argv) && argv.some((arg) => String(arg) === INSTALLER_SHUTDOWN_ARG);
+}
+
+async function stopPrimaryForInstaller(app) {
+  if (globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ === true) return;
+  globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ = true;
+
+  try {
+    globalThis.__METAENGINE_SELF_UPDATE_CONTINUITY_WATCHDOG__?.cancel?.();
+  } catch {}
+
+  try {
+    await globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__?.stop?.();
+  } catch (error) {
+    console.error(JSON.stringify({
+      schema: 'metaengine.browser.installer-shutdown.v1',
+      state: 'HOST_RESILIENCE_STOP_FAILED',
+      error: String(error?.message || error).slice(0, 240),
+      forced_by_installer: false,
+      authority_effect: false,
+    }));
+  } finally {
+    // main.mjs already treats Electron's before-quit event as the canonical
+    // planned-shutdown fence: it disables close-to-background and runtime retry.
+    // Calling quit only after HostResilience.stop() prevents the Sentinel worker
+    // from interpreting an installer upgrade as an unexpected parent death.
+    app.quit();
+  }
+}
+
+function installPrimaryInstallerShutdownHandler(app) {
+  if (!app || typeof app.on !== 'function') return false;
+  app.on('second-instance', (_event, argv) => {
+    if (!isInstallerShutdownArgv(argv)) return;
+    void stopPrimaryForInstaller(app);
+  });
+  return true;
 }
 
 function requestLock(app, additionalData) {
@@ -68,6 +109,10 @@ function scheduleSecondaryRenotify(app, additionalData, {
  * the same immutable launch identity. If the primary disappeared and that retry
  * unexpectedly obtains the lock, the secondary releases it immediately and still
  * never becomes a Browser runtime.
+ *
+ * A primary additionally listens for the local installer-only argv signal. That
+ * signal has no page/model authority and can only request a planned local quit;
+ * HostResilience/Sentinel are stopped before Electron exits.
  */
 export function acquirePrimaryInstance(app, {
   bypass = false,
@@ -94,11 +139,15 @@ export function acquirePrimaryInstance(app, {
       additional_data: additionalData,
       secondary_ack_required: false,
       secondary_renotify_scheduled: false,
+      installer_shutdown_listener_installed: false,
       authority_effect: false,
     });
   }
 
   const primary = requestLock(app, additionalData);
+  const installerShutdownListenerInstalled = primary === true
+    ? installPrimaryInstallerShutdownHandler(app)
+    : false;
   const secondaryRenotifyScheduled = primary !== true
     ? scheduleSecondaryRenotify(app, additionalData, {
       delay_ms: secondary_retry_delay_ms,
@@ -116,6 +165,7 @@ export function acquirePrimaryInstance(app, {
     secondary_ack_required: primary !== true,
     secondary_renotify_scheduled: secondaryRenotifyScheduled,
     secondary_renotify_delay_ms: secondaryRenotifyScheduled ? secondary_retry_delay_ms : null,
+    installer_shutdown_listener_installed: installerShutdownListenerInstalled,
     authority_effect: false,
   });
 }
