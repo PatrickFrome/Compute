@@ -3,19 +3,9 @@ name: METAENGINE Browser Fast Verified Dev Release
 on:
   push:
     branches:
-      - integration/metaengine-development-os-v1
-      - work/self-update-fast-loop-v1
-      - work/devos-elastic-fleet-bootstrap-v1
-      - work/browser-devos-root-transport-bootstrap-v1
       - release/self-update-ambiguity-live-v2
-    paths:
-      - 'apps/metaengine-browser/**'
-      - '.github/workflows/metaengine-browser-self-update-fast-e2e.yml'
-      - '.github/workflows/metaengine-browser-fast-autorelease.yml'
-      - '.github/workflows/metaengine-browser-release-evidence-gate.yml'
-      - '.github/workflows/metaengine-browser-sonarqube-gate.yml'
 
-# Publishers are isolated by exact source SHA. A newer integration push must not
+# Publishers are isolated by exact source SHA. A newer release-branch push must not
 # cancel an older publisher after its physical evidence exists. The monotonic
 # release/version checks and dev-hint CAS below prevent older candidates from
 # moving the live pointer backwards.
