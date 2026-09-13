@@ -112,10 +112,13 @@ if (-not (Get-Process -Id $newSentinelPid -ErrorAction SilentlyContinue)) { thro
 
 # Prove the new planned-shutdown handshake too, so future upgrades no longer need
 # the legacy force fallback. A second exact executable sends the installer-only
-# signal through Electron's singleton channel to the new primary.
+# signal through Electron's singleton channel to the new primary. The control
+# process itself must also exit zero; a timed-out interactive ACK path is a failure.
 $shutdownSignal = Start-Process -FilePath $app -ArgumentList '--metaengine-installer-shutdown' -PassThru
 $null = $shutdownSignal.Handle
 if (-not $shutdownSignal.WaitForExit(20000)) { try { Stop-Process -Id $shutdownSignal.Id -Force } catch {}; throw 'planned_shutdown_signal_timeout' }
+$shutdownSignal.Refresh()
+if ($shutdownSignal.ExitCode -ne 0) { throw "planned_shutdown_signal_exit_$($shutdownSignal.ExitCode)" }
 Wait-ProcessGone -Pid $newPrimary.Id -Seconds 20 -Label 'new_primary_planned_shutdown'
 Wait-ProcessGone -Pid $newSentinelPid -Seconds 20 -Label 'new_sentinel_planned_shutdown'
 
@@ -135,6 +138,7 @@ $proof = [ordered]@{
   new_sentinel_pid = $newSentinelPid
   new_primary_started = $true
   new_sentinel_started = $true
+  planned_shutdown_signal_exit = $shutdownSignal.ExitCode
   planned_shutdown_verified = $true
   retry_dialog_required = $false
   authority_effect = $false

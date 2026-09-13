@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 
 export const METAENGINE_BROWSER_APP_ID = 'com.metaengine.browser.test';
-export const SINGLE_INSTANCE_GUARD_VERSION = '2.1.0';
+export const SINGLE_INSTANCE_GUARD_VERSION = '2.2.0';
 export const SINGLE_INSTANCE_LOCK_SCHEMA = 'metaengine.browser.single-instance-lock.v2';
 export const SECONDARY_INSTANCE_RENOTIFY_DELAY_MS = 4_000;
 export const INSTALLER_SHUTDOWN_ARG = '--metaengine-installer-shutdown';
@@ -82,8 +82,7 @@ function scheduleSecondaryRenotify(app, additionalData, {
       if (unexpectedlyAcquired) {
         // The primary vanished between the original losing request and the retry.
         // Fail closed: this process was born as a secondary and must never promote
-        // itself to primary. Release the accidental lock immediately; main-entry
-        // will continue waiting for the original durable activation ACK and exit.
+        // itself to primary. Release the accidental lock immediately.
         if (typeof app.releaseSingleInstanceLock === 'function') {
           app.releaseSingleInstanceLock();
         }
@@ -97,22 +96,40 @@ function scheduleSecondaryRenotify(app, additionalData, {
   return true;
 }
 
+function finishInstallerShutdownControl(app, {
+  primary,
+  schedule = setTimeout,
+  delay_ms = SECONDARY_INSTANCE_RENOTIFY_DELAY_MS + 250,
+} = {}) {
+  if (primary === true && typeof app.releaseSingleInstanceLock === 'function') {
+    try { app.releaseSingleInstanceLock(); } catch {}
+  }
+  if (primary === true) {
+    // No Browser owned the singleton. This process is installer control only and
+    // must never become the Browser runtime merely because there was nothing to stop.
+    app.exit?.(0);
+    return true;
+  }
+
+  // Keep the losing control process alive just long enough for the existing
+  // bounded re-notify (4s) to fire, then terminate it successfully before the
+  // normal interactive 15s activation-ACK path can surface any UI. The installer
+  // independently proves exact-path process absence before replacing files.
+  const timer = schedule(() => app.exit?.(0), delay_ms);
+  if (timer && typeof timer.unref === 'function') timer.unref();
+  return true;
+}
+
 /**
  * Acquire Electron's process singleton and attach a per-launch identity to the
  * second-instance notification. Losing the lock is deliberately not equivalent
- * to `app.quit()` here: the entrypoint must first determine whether the primary
- * actually acknowledged and surfaced its UI. This closes the mixed-version
- * failure mode where an old hidden primary consumed the lock but ignored the
- * user's second launch.
+ * to `app.quit()` here: ordinary interactive launches must first determine whether
+ * the primary actually acknowledged and surfaced its UI.
  *
- * A losing interactive process also schedules exactly one bounded re-notify with
- * the same immutable launch identity. If the primary disappeared and that retry
- * unexpectedly obtains the lock, the secondary releases it immediately and still
- * never becomes a Browser runtime.
- *
- * A primary additionally listens for the local installer-only argv signal. That
- * signal has no page/model authority and can only request a planned local quit;
- * HostResilience/Sentinel are stopped before Electron exits.
+ * Installer shutdown is a separate local control launch. It never starts Browser
+ * runtime authority: when no primary exists it releases an accidentally acquired
+ * lock and exits; when a primary exists it emits the same bounded singleton signal,
+ * permits one re-notify, then exits successfully before UI-ACK timeout.
  */
 export function acquirePrimaryInstance(app, {
   bypass = false,
@@ -139,18 +156,28 @@ export function acquirePrimaryInstance(app, {
       additional_data: additionalData,
       secondary_ack_required: false,
       secondary_renotify_scheduled: false,
+      installer_shutdown_control: false,
       authority_effect: false,
     });
   }
 
+  const installerShutdownControl = isInstallerShutdownArgv(process.argv);
   const primary = requestLock(app, additionalData);
-  if (primary === true) installPrimaryInstallerShutdownHandler(app);
+  if (primary === true && !installerShutdownControl) installPrimaryInstallerShutdownHandler(app);
   const secondaryRenotifyScheduled = primary !== true
     ? scheduleSecondaryRenotify(app, additionalData, {
       delay_ms: secondary_retry_delay_ms,
       schedule,
     })
     : false;
+
+  if (installerShutdownControl) {
+    finishInstallerShutdownControl(app, {
+      primary,
+      schedule,
+      delay_ms: secondary_retry_delay_ms + 250,
+    });
+  }
 
   return Object.freeze({
     schema: 'metaengine.browser.single-instance-guard.v2',
@@ -159,9 +186,10 @@ export function acquirePrimaryInstance(app, {
     app_id: METAENGINE_BROWSER_APP_ID,
     launch_id,
     additional_data: additionalData,
-    secondary_ack_required: primary !== true,
+    secondary_ack_required: primary !== true && !installerShutdownControl,
     secondary_renotify_scheduled: secondaryRenotifyScheduled,
     secondary_renotify_delay_ms: secondaryRenotifyScheduled ? secondary_retry_delay_ms : null,
+    installer_shutdown_control: installerShutdownControl,
     authority_effect: false,
   });
 }
