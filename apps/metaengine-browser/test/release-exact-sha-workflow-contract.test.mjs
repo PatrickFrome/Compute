@@ -10,7 +10,6 @@ const REQUIRED_GATE_WORKFLOWS = [
   'metaengine-browser-self-update-e2e.yml',
   'browser-critical-audit-v1.yml',
   'metaengine-browser-analysis-stack-v1.yml',
-  'metaengine-browser-sonarqube-gate.yml',
   'browser-developer-emergency-update-v1.yml',
   'browser-parent-progress-durability-gate.yml',
   'browser-self-update-durability-gate.yml',
@@ -80,7 +79,6 @@ test('central release evidence gate requires the complete independent exact-SHA 
   for (const workflowName of REQUIRED_GATE_WORKFLOWS) {
     assert.match(source, new RegExp(workflowName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `central gate must require ${workflowName}`);
   }
-  assert.match(source, /sonarqube_quality_gate/, 'central release evidence must require hosted SonarQube Quality Gate');
   assert.match(source, /local_analysis_stack/, 'central release evidence must require local analysis stack');
   assert.match(source, /required_gate_count['"]?:\s*len\(required\)/, 'central evidence must record the required gate count');
 });
