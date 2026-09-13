@@ -2,12 +2,45 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { app, BaseWindow, WebContentsView } from 'electron';
 
-import { installDetachedCaptureSurfaceBridge, uninstallDetachedCaptureSurfaceBridge } from '../src/browser-detached-capture-surface-bridge.mjs';
 import { captureViewThumbnail } from '../src/native-browser-control.mjs';
 
 app.enableSandbox();
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const diagnostic = (phase, method, extra = {}) => console.error(JSON.stringify({
+  schema: 'metaengine.browser.detached-capture-cdp-stage.v1',
+  phase,
+  method,
+  ...extra,
+  authority_effect: false,
+}));
+
+function installCdpDiagnostics(webContents) {
+  const debuggerApi = webContents?.debugger;
+  if (!debuggerApi || typeof debuggerApi.sendCommand !== 'function') {
+    throw new Error('detached_capture_cdp_diagnostics_debugger_unavailable');
+  }
+  const originalSendCommand = debuggerApi.sendCommand;
+  const sendDescriptor = Object.hasOwn(debuggerApi, 'sendCommand') ? Object.getOwnPropertyDescriptor(debuggerApi, 'sendCommand') : null;
+  debuggerApi.sendCommand = async function instrumentedSendCommand(...args) {
+    const method = String(args[0] || 'UNKNOWN');
+    diagnostic('START', method);
+    try {
+      const result = await originalSendCommand.apply(debuggerApi, args);
+      diagnostic('END', method);
+      return result;
+    } catch (error) {
+      diagnostic('ERROR', method, { error: String(error?.message || error).slice(0, 240) });
+      throw error;
+    }
+  };
+  return () => {
+    try {
+      if (sendDescriptor) Object.defineProperty(debuggerApi, 'sendCommand', sendDescriptor);
+      else if (debuggerApi.sendCommand !== originalSendCommand) delete debuggerApi.sendCommand;
+    } catch {}
+  };
+}
 
 async function run() {
   await app.whenReady();
@@ -28,7 +61,7 @@ async function run() {
   win.contentView.addChildView(target);
   shell.setBounds({ x: 0, y: 0, width: 1080, height: 80 });
   target.setBounds({ x: 0, y: 80, width: 1080, height: 680 });
-  installDetachedCaptureSurfaceBridge(target);
+  const restoreDiagnostics = installCdpDiagnostics(target.webContents);
 
   try {
     const nonce = crypto.randomUUID();
@@ -50,6 +83,7 @@ async function run() {
     win.contentView.removeChildView(target);
     assert.equal(win.contentView.children.includes(target), false);
     await wait(150);
+    diagnostic('START', 'captureViewThumbnail');
 
     const result = await captureViewThumbnail(target.webContents, { surfaceExpected: false });
     const jpeg = Buffer.from(result.jpeg_base64, 'base64');
@@ -63,6 +97,7 @@ async function run() {
     assert.deepEqual([...jpeg.subarray(0, 2)], [0xff, 0xd8]);
     assert.match(result.sha256, /^[a-f0-9]{64}$/);
     assert.equal(win.contentView.children.includes(target), false);
+    diagnostic('END', 'captureViewThumbnail');
 
     console.log(JSON.stringify({
       schema: 'metaengine.browser.detached-capture-view-physical-e2e.v1',
@@ -79,7 +114,7 @@ async function run() {
       authority_effect: false,
     }));
   } finally {
-    uninstallDetachedCaptureSurfaceBridge(target);
+    restoreDiagnostics();
     try { win.contentView.removeChildView(target); } catch {}
     try { win.contentView.removeChildView(shell); } catch {}
     if (!target.webContents.isDestroyed()) target.webContents.close();
