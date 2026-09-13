@@ -23,7 +23,7 @@ jobs:
   metaengine-static-and-architecture:
     name: metaengine-static-and-architecture
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - name: Checkout exact candidate
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -76,16 +76,33 @@ jobs:
         working-directory: apps/metaengine-browser
         continue-on-error: true
         shell: bash
-        run: npx --yes madge@8.0.0 --circular --warning src | tee madge-circular.txt
+        run: npx --yes madge@8.0.0 --circular --warning --extensions mjs,cjs,js --json src > madge-circular.json
 
-      - name: Upload architecture diagnostics
+      - name: JSCPD duplication baseline
+        if: always()
+        working-directory: apps/metaengine-browser
+        continue-on-error: true
+        shell: bash
+        run: npx --yes jscpd@5.2.0 src scripts supabase ui smoke/dp --min-tokens 50 --min-lines 5 --reporters console,json,sarif --output jscpd-report
+
+      - name: Upload architecture and duplication diagnostics
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: metaengine-browser-analysis-diagnostics-${{ env.EXACT_HEAD }}-${{ github.run_attempt }}
-          path: apps/metaengine-browser/madge-circular.txt
+          path: |
+            apps/metaengine-browser/madge-circular.json
+            apps/metaengine-browser/jscpd-report/
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Upload JSCPD SARIF
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        with:
+          sarif_file: apps/metaengine-browser/jscpd-report/jscpd-report.sarif
+          category: jscpd-metaengine-browser
 
   codeql-javascript:
     name: codeql-javascript
