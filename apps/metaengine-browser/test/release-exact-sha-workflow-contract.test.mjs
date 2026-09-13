@@ -10,6 +10,7 @@ const REQUIRED_GATE_WORKFLOWS = [
   'metaengine-browser-self-update-e2e.yml',
   'browser-critical-audit-v1.yml',
   'metaengine-browser-analysis-stack-v1.yml',
+  'metaengine-browser-sonarqube-gate.yml',
   'browser-developer-emergency-update-v1.yml',
   'browser-parent-progress-durability-gate.yml',
   'browser-self-update-durability-gate.yml',
@@ -34,19 +35,14 @@ function eventBlock(source, eventName) {
   const lines = source.split(/\r?\n/);
   const onIndex = lines.findIndex((line) => line === 'on:');
   assert.notEqual(onIndex, -1, 'workflow must contain a top-level on: block');
-
   const onEnd = lines.findIndex((line, index) => index > onIndex && /^[A-Za-z_][A-Za-z0-9_-]*:/.test(line));
   const end = onEnd === -1 ? lines.length : onEnd;
   const onLines = lines.slice(onIndex + 1, end);
   const eventIndex = onLines.findIndex((line) => line === `  ${eventName}:`);
   assert.notEqual(eventIndex, -1, `workflow must contain on.${eventName}`);
-
   let eventEnd = onLines.length;
   for (let index = eventIndex + 1; index < onLines.length; index += 1) {
-    if (/^  [A-Za-z_][A-Za-z0-9_-]*:/.test(onLines[index])) {
-      eventEnd = index;
-      break;
-    }
+    if (/^  [A-Za-z_][A-Za-z0-9_-]*:/.test(onLines[index])) { eventEnd = index; break; }
   }
   return onLines.slice(eventIndex, eventEnd).join('\n');
 }
@@ -84,7 +80,8 @@ test('central release evidence gate requires the complete independent exact-SHA 
   for (const workflowName of REQUIRED_GATE_WORKFLOWS) {
     assert.match(source, new RegExp(workflowName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `central gate must require ${workflowName}`);
   }
-  assert.doesNotMatch(source, /sonar(?:qube)?/i, 'central release evidence must not depend on Sonar');
+  assert.match(source, /sonarqube_quality_gate/, 'central release evidence must require hosted SonarQube Quality Gate');
+  assert.match(source, /local_analysis_stack/, 'central release evidence must require local analysis stack');
   assert.match(source, /required_gate_count['"]?:\s*len\(required\)/, 'central evidence must record the required gate count');
 });
 

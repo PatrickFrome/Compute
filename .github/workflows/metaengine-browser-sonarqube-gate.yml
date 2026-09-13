@@ -1,0 +1,107 @@
+name: METAENGINE Browser SonarQube Quality Gate
+
+on:
+  push:
+    branches:
+      - release/self-update-ambiguity-live-v2
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/**'
+      - 'sonar-project.properties'
+      - '.github/workflows/metaengine-browser-sonarqube-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: metaengine-browser-sonarqube-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+  SONAR_HOST_URL: https://sonarcloud.io
+
+jobs:
+  sonarqube-quality-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact candidate with full Sonar history
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prove exact candidate and configured token
+        shell: bash
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+          test -n "$SONAR_TOKEN" || { echo 'SONAR_TOKEN is required; Quality Gate is fail-closed.' >&2; exit 1; }
+          test -f sonar-project.properties
+
+      - name: Run official SonarQube analysis
+        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
+        with:
+          args: >-
+            -Dsonar.scm.revision=${{ env.EXACT_HEAD }}
+
+      - name: Poll the real SonarQube Quality Gate
+        id: quality-gate
+        uses: SonarSource/sonarqube-quality-gate-action@7a5fffe8e523c40e0c740b6bc2712ab503e52efa # v1.2.1
+        timeout-minutes: 15
+        with:
+          pollingTimeoutSec: '600'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
+
+      - name: Require PASSED and seal exact-SHA evidence
+        shell: bash
+        env:
+          QUALITY_GATE_STATUS: ${{ steps.quality-gate.outputs.quality-gate-status }}
+        run: |
+          set -euo pipefail
+          test "$QUALITY_GATE_STATUS" = 'PASSED' || { echo "sonarqube_quality_gate_not_passed:$QUALITY_GATE_STATUS" >&2; exit 1; }
+          python3 - <<'PY'
+          import json, os, pathlib
+          row = {
+              'schema': 'metaengine.browser.sonarqube-quality-gate-evidence.v1',
+              'source_head': os.environ['EXACT_HEAD'],
+              'project_key': 'PatrickFrome_Compute',
+              'organization': 'patrickfrome',
+              'host_url': os.environ['SONAR_HOST_URL'],
+              'quality_gate_status': os.environ['QUALITY_GATE_STATUS'],
+              'scanner_action_sha': '22918119ff8e1ca75a623e15c8296b6ea4fbe28f',
+              'quality_gate_action_sha': '7a5fffe8e523c40e0c740b6bc2712ab503e52efa',
+              'authority_effect': False,
+          }
+          pathlib.Path('sonarqube-quality-gate-evidence.json').write_text(
+              json.dumps(row, sort_keys=True, separators=(',', ':')) + '\n', encoding='utf-8')
+          print(json.dumps(row, sort_keys=True, separators=(',', ':')))
+          PY
+
+      - name: Prove analysis did not mutate source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+          test -z "$(git diff --name-only HEAD)"
+
+      - name: Upload exact SonarQube gate evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-sonarqube-${{ env.EXACT_HEAD }}-${{ github.run_attempt }}
+          path: |
+            sonar-project.properties
+            sonarqube-quality-gate-evidence.json
+          if-no-files-found: error
+          retention-days: 30
