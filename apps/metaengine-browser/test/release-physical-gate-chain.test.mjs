@@ -12,13 +12,15 @@ const readBrowserFile = (name) => fs.readFileSync(path.join(repoRoot, 'apps', 'm
 test('verified dev release is transitively fenced by exact-SHA bootstrap autostart physical proof', () => {
   const bootstrap = readWorkflow('metaengine-browser-bootstrap-autostart-e2e.yml');
   const fast = readWorkflow('metaengine-browser-self-update-fast-e2e.yml');
+  const release = readWorkflow('metaengine-browser-release-evidence-gate.yml');
   const publisher = readWorkflow('metaengine-browser-fast-autorelease.yml');
 
-  // Any release-chain workflow mutation must produce a bootstrap run for the same
-  // exact SHA. App/test mutations already trigger this workflow through apps/**.
-  assert.match(bootstrap, /metaengine-browser-bootstrap-autostart-e2e\.yml/);
-  assert.match(bootstrap, /metaengine-browser-self-update-fast-e2e\.yml/);
-  assert.match(bootstrap, /metaengine-browser-fast-autorelease\.yml/);
+  // Bootstrap must be an unconditional release-SHA proof. The fast physical gate
+  // waits for that exact-SHA run, central evidence requires both gates, and the
+  // publisher waits for central convergence before touching release assets.
+  assert.match(bootstrap, /release\/self-update-ambiguity-live-v2/);
+  assert.doesNotMatch(bootstrap, /\n\s+paths(?:-ignore)?:/);
+  assert.doesNotMatch(bootstrap, /METAENGINE_DISABLE_CRASH_SENTINEL\s*:/);
 
   assert.match(fast, /actions:\s*read/);
   assert.match(fast, /metaengine-browser-bootstrap-autostart-e2e\.yml/);
@@ -27,8 +29,12 @@ test('verified dev release is transitively fenced by exact-SHA bootstrap autosta
   assert.match(fast, /exact_bootstrap_autostart_success_missing/);
   assert.match(fast, /needs:\s*\n\s*- contract\s*\n\s*- windows-published-n-to-one-build-target/);
 
+  assert.match(release, /metaengine-browser-bootstrap-autostart-e2e\.yml/);
+  assert.match(release, /metaengine-browser-self-update-fast-e2e\.yml/);
+  assert.match(publisher, /metaengine-browser-release-evidence-gate\.yml/);
   assert.match(publisher, /metaengine-browser-self-update-fast-e2e\.yml/);
   assert.match(publisher, /head_sha="\$EXPECTED_SHA"/);
+  assert.match(publisher, /exact_release_evidence_gate_success_missing/);
   assert.match(publisher, /exact_fast_e2e_success_missing/);
 });
 
