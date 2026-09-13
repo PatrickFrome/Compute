@@ -53,6 +53,17 @@ function Read-VersionProbe([string]$Executable) {
   return ($line | ConvertFrom-Json)
 }
 
+# Bind both artifact and installed-payload identities before deliberately downgrading.
+# target-sha256.txt is the NSIS installer digest, not the installed Browser executable digest.
+$targetVersion = (Get-Content (Join-Path $temp 'target-version.txt') -Raw).Trim()
+$expectedTargetInstallerSha = (Get-Content (Join-Path $temp 'target-sha256.txt') -Raw).Trim().ToLowerInvariant()
+$actualTargetInstallerSha = (Get-FileHash -LiteralPath $targetInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actualTargetInstallerSha -ne $expectedTargetInstallerSha) { throw "target_installer_digest_mismatch:$actualTargetInstallerSha" }
+if (-not (Test-Path -LiteralPath $app -PathType Leaf)) { throw 'target_installed_executable_missing_before_downgrade' }
+$expectedInstalledExecutableSha = (Get-FileHash -LiteralPath $app -Algorithm SHA256).Hash.ToLowerInvariant()
+$preDowngradeTargetProbe = Read-VersionProbe $app
+if ([string]$preDowngradeTargetProbe.version -ne $targetVersion -or $preDowngradeTargetProbe.primary_instance -ne $true) { throw 'target_pre_downgrade_version_probe_invalid' }
+
 # Reinstall the exact release the user reported as broken. The target candidate is
 # already installed by the preceding self-update proof, but no Browser process is
 # resident here, so the downgrade itself does not exercise the new fix yet.
@@ -92,12 +103,11 @@ if ($upgrade.ExitCode -ne 0) { throw "resident_upgrade_installer_exit_$($upgrade
 Wait-ProcessGone -ProcessId $legacyPrimary.Id -Seconds 15 -Label 'legacy_primary'
 Wait-ProcessGone -ProcessId $legacySentinelPid -Seconds 15 -Label 'legacy_sentinel'
 
-# Verify the bytes now installed are exactly the one-built candidate, then exercise
-# the same no-flag startup path a user invokes after Setup finishes.
-$expectedTargetSha = (Get-Content (Join-Path $temp 'target-sha256.txt') -Raw).Trim().ToLowerInvariant()
+# Verify the installed application payload is byte-identical to the exact target
+# application that was installed by the preceding N->N+1 proof. The NSIS installer
+# has a distinct digest and was verified separately above.
 $installedSha = (Get-FileHash -LiteralPath $app -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($installedSha -ne $expectedTargetSha) { throw "resident_upgrade_installed_digest_mismatch:$installedSha" }
-$targetVersion = (Get-Content (Join-Path $temp 'target-version.txt') -Raw).Trim()
+if ($installedSha -ne $expectedInstalledExecutableSha) { throw "resident_upgrade_installed_payload_digest_mismatch:$installedSha" }
 $targetProbe = Read-VersionProbe $app
 if ([string]$targetProbe.version -ne $targetVersion -or $targetProbe.primary_instance -ne $true) { throw 'resident_upgrade_target_version_probe_invalid' }
 
@@ -132,7 +142,8 @@ $proof = [ordered]@{
   legacy_primary_gone = $true
   legacy_sentinel_gone = $true
   target_version = $targetVersion
-  target_installer_sha256 = $expectedTargetSha
+  target_installer_sha256 = $expectedTargetInstallerSha
+  expected_installed_executable_sha256 = $expectedInstalledExecutableSha
   installed_executable_sha256 = $installedSha
   new_primary_pid = $newPrimary.Id
   new_sentinel_pid = $newSentinelPid
