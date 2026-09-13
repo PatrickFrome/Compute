@@ -12,6 +12,7 @@ const SURFACE_READ_METHODS = new Set([
   'Page.getLayoutMetrics',
   'Page.captureScreenshot',
 ]);
+const CAPTURER_LEASE_METHODS = new Set(['Page.getLayoutMetrics', 'Page.captureScreenshot']);
 const DEFAULT_IDLE_RELEASE_MS = 40;
 const bridgeByWebContents = new WeakMap();
 
@@ -109,7 +110,6 @@ async function ensureRenderableSurface(state) {
     width: bounds.hosted.width,
     height: bounds.hosted.height,
     show: false,
-    opacity: 0,
     focusable: false,
     skipTaskbar: true,
     frame: false,
@@ -122,7 +122,6 @@ async function ensureRenderableSurface(state) {
   try {
     host.contentView.addChildView(state.view);
     state.view.setBounds?.(bounds.hosted);
-    host.show();
   } catch (error) {
     try {
       if (Array.isArray(host.contentView?.children) && host.contentView.children.includes(state.view)) {
@@ -143,13 +142,29 @@ async function ensureRenderableSurface(state) {
   return { hosted: true, generation: state.surfaceGeneration };
 }
 
+function startCapturerLease(state, method) {
+  if (!CAPTURER_LEASE_METHODS.has(method)) return null;
+  if (typeof state.webContents.capturePage !== 'function') return null;
+  try {
+    return Promise.resolve(state.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true }))
+      .catch(() => null);
+  } catch {
+    return null;
+  }
+}
+
 async function runSurfaceRead(state, args) {
   if (!state.active) throw bridgeInactiveError();
   await ensureRenderableSurface(state);
   if (!state.active) throw bridgeInactiveError();
+  const method = String(args[0] || '');
+  const capturerLease = startCapturerLease(state, method);
   try {
     return await state.originalSendCommand(...args);
   } finally {
+    if (capturerLease) {
+      try { await capturerLease; } catch {}
+    }
     scheduleHiddenHostRelease(state);
   }
 }
@@ -196,7 +211,8 @@ export function installDetachedCaptureSurfaceBridge(view, {
         installed: true,
         surface_generation: state.surfaceGeneration,
         bridged_methods: [...SURFACE_READ_METHODS],
-        compositor_surface: 'OFFSCREEN_ZERO_OPACITY_BASEWINDOW',
+        capturer_lease_methods: [...CAPTURER_LEASE_METHODS],
+        compositor_surface: 'HIDDEN_BASEWINDOW_WITH_CAPTUREPAGE_LEASE',
         input_authority: false,
         navigation_authority: false,
         automatic_retry_allowed: false,
