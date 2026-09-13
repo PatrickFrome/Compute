@@ -1,5 +1,6 @@
 const DEFAULT_TEMPORARY_CAPTURE_SURFACE_DEADLINE_MS = 5000;
 const DEFAULT_TEMPORARY_CAPTURE_SURFACE_SETTLE_MS = 100;
+const activeCaptureSurfaceLeases = new WeakSet();
 
 function boundedInt(value, fallback, min, max) {
   const n = Number(value);
@@ -32,6 +33,13 @@ function temporarySurfaceTimeoutError(deadlineMs) {
   return error;
 }
 
+function temporarySurfaceBusyError() {
+  const error = new Error('detached_capture_surface_busy');
+  error.code = 'DETACHED_CAPTURE_SURFACE_BUSY';
+  error.automatic_retry_allowed = false;
+  return error;
+}
+
 async function defaultCreateCaptureHost({ width, height }) {
   const { BaseWindow } = await import('electron');
   return new BaseWindow({
@@ -51,6 +59,7 @@ export function detachedCaptureSurfaceContract() {
     hidden_host_only: true,
     restores_detached_state: true,
     bounded: true,
+    single_flight_per_view: true,
     automatic_retry_allowed: false,
     authority_effect: false,
   });
@@ -72,19 +81,22 @@ export async function withTemporaryDetachedCaptureSurface(view, task, {
     error.automatic_retry_allowed = false;
     throw error;
   }
+  if (activeCaptureSurfaceLeases.has(view)) throw temporarySurfaceBusyError();
+  activeCaptureSurfaceLeases.add(view);
 
-  const originalBounds = exactViewBounds(view);
-  const boundedDeadlineMs = boundedInt(deadlineMs, DEFAULT_TEMPORARY_CAPTURE_SURFACE_DEADLINE_MS, 250, 15000);
-  const boundedSettleMs = boundedInt(settleMs, DEFAULT_TEMPORARY_CAPTURE_SURFACE_SETTLE_MS, 0, 500);
-  const host = await createHost({ width: originalBounds.width, height: originalBounds.height });
-  if (!host?.contentView || typeof host.contentView.addChildView !== 'function' || typeof host.contentView.removeChildView !== 'function') {
-    try { host?.close?.(); } catch {}
-    throw new Error('detached_capture_surface_host_invalid');
-  }
-
+  let host = null;
   let attached = false;
   let timer = null;
+  let originalBounds = null;
   try {
+    originalBounds = exactViewBounds(view);
+    const boundedDeadlineMs = boundedInt(deadlineMs, DEFAULT_TEMPORARY_CAPTURE_SURFACE_DEADLINE_MS, 250, 15000);
+    const boundedSettleMs = boundedInt(settleMs, DEFAULT_TEMPORARY_CAPTURE_SURFACE_SETTLE_MS, 0, 500);
+    host = await createHost({ width: originalBounds.width, height: originalBounds.height });
+    if (!host?.contentView || typeof host.contentView.addChildView !== 'function' || typeof host.contentView.removeChildView !== 'function') {
+      throw new Error('detached_capture_surface_host_invalid');
+    }
+
     host.contentView.addChildView(view);
     attached = true;
     view.setBounds({ x: 0, y: 0, width: originalBounds.width, height: originalBounds.height });
@@ -99,9 +111,12 @@ export async function withTemporaryDetachedCaptureSurface(view, task, {
   } finally {
     if (timer) clearTimeout(timer);
     if (attached) {
-      try { host.contentView.removeChildView(view); } catch {}
+      try { host?.contentView?.removeChildView?.(view); } catch {}
     }
-    try { view.setBounds(originalBounds); } catch {}
-    try { host.close?.(); } catch {}
+    if (originalBounds) {
+      try { view.setBounds(originalBounds); } catch {}
+    }
+    try { host?.close?.(); } catch {}
+    activeCaptureSurfaceLeases.delete(view);
   }
 }
