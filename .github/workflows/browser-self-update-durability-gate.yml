@@ -5,14 +5,6 @@ on:
     branches:
       - 'work/browser-continuous-fleet-audit-v1'
       - 'release/self-update-ambiguity-live-v2'
-    paths:
-      - 'apps/metaengine-browser/src/self-update-transaction-journal.mjs'
-      - 'apps/metaengine-browser/src/self-update-handoff.mjs'
-      - 'apps/metaengine-browser/src/durable-json-file.cjs'
-      - 'apps/metaengine-browser/test/self-update-transaction-journal.test.mjs'
-      - 'apps/metaengine-browser/test/self-update-handoff.test.mjs'
-      - 'apps/metaengine-browser/test/self-update-install-effect-barrier.test.mjs'
-      - '.github/workflows/browser-self-update-durability-gate.yml'
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/self-update-transaction-journal.mjs'
