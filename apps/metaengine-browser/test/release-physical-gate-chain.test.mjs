@@ -31,6 +31,7 @@ test('verified dev release is transitively fenced by exact-SHA bootstrap autosta
 
   assert.match(release, /metaengine-browser-bootstrap-autostart-e2e\.yml/);
   assert.match(release, /metaengine-browser-self-update-fast-e2e\.yml/);
+  assert.match(release, /metaengine-browser-analysis-stack-v1\.yml/);
   assert.match(publisher, /metaengine-browser-release-evidence-gate\.yml/);
   assert.match(publisher, /metaengine-browser-self-update-fast-e2e\.yml/);
   assert.match(publisher, /head_sha="\$EXPECTED_SHA"/);
@@ -49,6 +50,7 @@ test('release publisher is blocked on the complete exact-SHA evidence gate witho
     'metaengine-browser-self-update-fast-e2e.yml',
     'metaengine-browser-self-update-e2e.yml',
     'browser-critical-audit-v1.yml',
+    'metaengine-browser-analysis-stack-v1.yml',
     'browser-developer-emergency-update-v1.yml',
     'browser-parent-progress-durability-gate.yml',
     'browser-self-update-durability-gate.yml',
