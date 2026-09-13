@@ -21,6 +21,16 @@ function fakePrimaryApp() {
   };
 }
 
+function withInstallerArg(run) {
+  const original = [...process.argv];
+  process.argv.push(INSTALLER_SHUTDOWN_ARG);
+  try {
+    return run();
+  } finally {
+    process.argv.splice(0, process.argv.length, ...original);
+  }
+}
+
 test('installer shutdown argv is exact and ordinary launches do not match', () => {
   assert.equal(isInstallerShutdownArgv(['browser.exe', INSTALLER_SHUTDOWN_ARG]), true);
   assert.equal(isInstallerShutdownArgv(['browser.exe', '--metaengine-installer-shutdown-extra']), false);
@@ -80,9 +90,64 @@ test('ordinary second-instance does not request installer shutdown', async () =>
   }
 });
 
+test('installer control exits immediately and releases an accidentally acquired primary lock', () => {
+  const events = [];
+  const listeners = new Map();
+  const app = {
+    requestSingleInstanceLock: () => true,
+    releaseSingleInstanceLock: () => events.push('release-lock'),
+    exit: (code) => events.push(`exit:${code}`),
+    on: (name, handler) => listeners.set(name, handler),
+  };
+
+  const guard = withInstallerArg(() => acquirePrimaryInstance(app, { launch_id: FIXED_LAUNCH_ID }));
+  assert.equal(guard.primary, true);
+  assert.equal(guard.installer_shutdown_control, true);
+  assert.equal(guard.secondary_ack_required, false);
+  assert.equal(guard.secondary_renotify_scheduled, false);
+  assert.equal(listeners.has('second-instance'), false);
+  assert.deepEqual(events, ['release-lock', 'exit:0']);
+});
+
+test('installer control losing the lock keeps one bounded re-notify then exits before UI ACK timeout', () => {
+  const events = [];
+  const scheduled = [];
+  let lockCalls = 0;
+  const app = {
+    requestSingleInstanceLock: () => {
+      lockCalls += 1;
+      return false;
+    },
+    releaseSingleInstanceLock: () => events.push('release-lock'),
+    exit: (code) => events.push(`exit:${code}`),
+    on: () => {},
+  };
+  const schedule = (fn, delay) => {
+    scheduled.push({ fn, delay });
+    return { unref() {} };
+  };
+
+  const guard = withInstallerArg(() => acquirePrimaryInstance(app, {
+    launch_id: FIXED_LAUNCH_ID,
+    schedule,
+  }));
+  assert.equal(guard.primary, false);
+  assert.equal(guard.installer_shutdown_control, true);
+  assert.equal(guard.secondary_ack_required, false);
+  assert.equal(guard.secondary_renotify_scheduled, true);
+  assert.deepEqual(scheduled.map((row) => row.delay), [4_000, 4_250]);
+
+  scheduled[0].fn();
+  assert.equal(lockCalls, 2);
+  assert.deepEqual(events, []);
+  scheduled[1].fn();
+  assert.deepEqual(events, ['exit:0']);
+});
+
 test('NSIS migration fallback is bounded and exact-path only', async () => {
   const ps1 = await fs.readFile(new URL('../build/installer-shutdown.ps1', import.meta.url), 'utf8');
   const nsh = await fs.readFile(new URL('../build/installer.nsh', import.meta.url), 'utf8');
+  const physical = await fs.readFile(new URL('./installer-resident-upgrade-physical.ps1', import.meta.url), 'utf8');
 
   assert.match(ps1, /Win32_Process/);
   assert.match(ps1, /ExecutablePath/);
@@ -98,4 +163,7 @@ test('NSIS migration fallback is bounded and exact-path only', async () => {
   assert.match(nsh, /metaengine-installer-shutdown\.ps1/);
   assert.match(nsh, /ExecWait/);
   assert.match(nsh, /Abort/);
+
+  assert.match(physical, /planned_shutdown_signal_exit_/);
+  assert.match(physical, /installer-resident-upgrade-proof\.json/);
 });
