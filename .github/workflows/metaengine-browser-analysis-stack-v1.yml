@@ -66,11 +66,13 @@ jobs:
         run: semgrep scan --config .semgrep/metaengine.yml --error --metrics=off src scripts supabase ui smoke/dp
 
       - name: Biome legacy baseline diagnostics
+        if: always()
         working-directory: apps/metaengine-browser
         continue-on-error: true
         run: npx --yes @biomejs/biome@2.5.13 lint src scripts supabase ui
 
       - name: Madge dependency-cycle diagnostics
+        if: always()
         working-directory: apps/metaengine-browser
         continue-on-error: true
         shell: bash
