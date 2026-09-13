@@ -5,17 +5,6 @@ on:
     branches:
       - 'work/browser-continuous-fleet-audit-v1'
       - 'release/self-update-ambiguity-live-v2'
-    paths:
-      - 'apps/metaengine-browser/src/browser-parent-progress-lease.mjs'
-      - 'apps/metaengine-browser/src/browser-sentinel-liveness.cjs'
-      - 'apps/metaengine-browser/src/browser-sentinel-worker.cjs'
-      - 'apps/metaengine-browser/src/browser-sentinel-action-journal.cjs'
-      - 'apps/metaengine-browser/src/durable-json-file.cjs'
-      - 'apps/metaengine-browser/src/host-resilience-runtime.mjs'
-      - 'apps/metaengine-browser/test/browser-sentinel-liveness.test.mjs'
-      - 'apps/metaengine-browser/test/browser-sentinel-action-journal.test.mjs'
-      - 'apps/metaengine-browser/test/host-resilience-runtime.test.mjs'
-      - '.github/workflows/browser-parent-progress-durability-gate.yml'
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/browser-parent-progress-lease.mjs'
