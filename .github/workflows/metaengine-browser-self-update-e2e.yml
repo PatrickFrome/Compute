@@ -43,6 +43,9 @@ jobs:
         run: |
           grep -q 'requestSingleInstanceLock' apps/metaengine-browser/src/single-instance-guard.mjs
           grep -q 'com.metaengine.browser.test' apps/metaengine-browser/src/single-instance-guard.mjs
+          grep -q 'installer_shutdown_control' apps/metaengine-browser/src/single-instance-guard.mjs
+          grep -q 'planned_shutdown_signal_exit_' apps/metaengine-browser/test/installer-resident-upgrade-physical.ps1
+          grep -q 'reported-broken-resident-baseline' apps/metaengine-browser/test/installer-resident-upgrade-physical.ps1
           grep -q '"allowToChangeInstallationDirectory": false' apps/metaengine-browser/electron-builder.test.json
           grep -q '"beforePack": "./scripts/electron-builder-before-pack.cjs"' apps/metaengine-browser/electron-builder.test.json
           grep -q 'guardian-native' apps/metaengine-browser/electron-builder.test.json
@@ -61,7 +64,7 @@ jobs:
   windows-published-n-to-one-build-target:
     needs: contract
     runs-on: windows-2022
-    timeout-minutes: 36
+    timeout-minutes: 46
     env:
       GITHUB_ACTIONS: 'true'
       METAENGINE_SELF_UPDATE_TEST_MODE: '1'
@@ -142,6 +145,26 @@ jobs:
           if (-not (Test-Path $guardianEvidence -PathType Leaf)) { throw 'guardian_native_evidence_manifest_missing' }
           $actualGuardianSha = (Get-FileHash $guardianEvidence -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actualGuardianSha -ne [string]$manifest.guardian_native_manifest_sha256) { throw 'guardian_native_evidence_digest_mismatch' }
+      - name: Reproduce reported resident installer upgrade with real Sentinel
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: ./test/installer-resident-upgrade-physical.ps1
+      - name: Seal resident installer upgrade evidence
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $proofPath = Join-Path $env:RUNNER_TEMP 'installer-resident-upgrade-proof.json'
+          if (-not (Test-Path $proofPath -PathType Leaf)) { throw 'installer_resident_upgrade_proof_missing' }
+          $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
+          if ([string]$proof.schema -ne 'metaengine.browser.installer-resident-upgrade-proof.v1') { throw 'installer_resident_upgrade_schema_invalid' }
+          if ([string]$proof.legacy_version -ne '0.7.0-dev.34759310781.1') { throw 'installer_resident_upgrade_legacy_binding_invalid' }
+          if ([string]$proof.target_version -notmatch '^0\.7\.0-dev\.[0-9]+\.1$') { throw 'installer_resident_upgrade_target_invalid' }
+          if ([int]$proof.resident_upgrade_installer_exit -ne 0) { throw 'installer_resident_upgrade_exit_invalid' }
+          if ([int]$proof.planned_shutdown_signal_exit -ne 0) { throw 'installer_shutdown_signal_exit_invalid' }
+          if ($proof.legacy_primary_gone -ne $true -or $proof.legacy_sentinel_gone -ne $true) { throw 'installer_legacy_processes_not_drained' }
+          if ($proof.new_primary_started -ne $true -or $proof.new_sentinel_started -ne $true) { throw 'installer_target_runtime_not_started' }
+          if ($proof.planned_shutdown_verified -ne $true -or $proof.retry_dialog_required -ne $false) { throw 'installer_shutdown_contract_invalid' }
+          Copy-Item $proofPath './self-update-fast-evidence/installer-resident-upgrade-proof.json' -Force
       - name: Upload self-update evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
