@@ -38,7 +38,7 @@ function harness() {
   };
 }
 
-test('detached capture surface contract remains bounded and read-only', () => {
+test('detached capture surface contract remains bounded, single-flight, and read-only', () => {
   assert.deepEqual(detachedCaptureSurfaceContract(), {
     schema: 'metaengine.browser.detached-capture-surface.contract.v1',
     exact_existing_view_only: true,
@@ -46,6 +46,7 @@ test('detached capture surface contract remains bounded and read-only', () => {
     hidden_host_only: true,
     restores_detached_state: true,
     bounded: true,
+    single_flight_per_view: true,
     automatic_retry_allowed: false,
     authority_effect: false,
   });
@@ -120,4 +121,42 @@ test('temporary detached capture surface times out fail-closed and restores the 
     ['bounds', { x: 9, y: 11, width: 640, height: 480 }],
     ['close'],
   ]);
+});
+
+test('concurrent lease for the same exact view fails closed without a second host', async () => {
+  const h = harness();
+  let signalStarted;
+  let releaseFirst;
+  const started = new Promise((resolve) => { signalStarted = resolve; });
+  const hold = new Promise((resolve) => { releaseFirst = resolve; });
+
+  const first = withTemporaryDetachedCaptureSurface(
+    h.view,
+    async () => {
+      signalStarted();
+      await hold;
+      return 'first';
+    },
+    { createHost: h.createHost, settleMs: 0 },
+  );
+  await started;
+
+  await assert.rejects(
+    withTemporaryDetachedCaptureSurface(
+      h.view,
+      async () => 'second',
+      { createHost: h.createHost, settleMs: 0 },
+    ),
+    (error) => {
+      assert.equal(error?.code, 'DETACHED_CAPTURE_SURFACE_BUSY');
+      assert.equal(error?.automatic_retry_allowed, false);
+      return true;
+    },
+  );
+
+  assert.equal(h.events.filter(([name]) => name === 'host').length, 1);
+  assert.equal(h.events.filter(([name]) => name === 'attach').length, 1);
+  releaseFirst();
+  assert.equal(await first, 'first');
+  assert.deepEqual(h.bounds(), { x: 9, y: 11, width: 640, height: 480 });
 });
