@@ -41,6 +41,13 @@ function windowContainsView(BaseWindow, view, excludedWindow = null) {
   });
 }
 
+function bridgeInactiveError() {
+  const error = new Error('detached_capture_surface_bridge_uninstalled');
+  error.code = 'DETACHED_CAPTURE_SURFACE_BRIDGE_UNINSTALLED';
+  error.automatic_retry_allowed = false;
+  return error;
+}
+
 function releaseHiddenHost(state) {
   if (state.releaseTimer) {
     clearTimeout(state.releaseTimer);
@@ -67,15 +74,17 @@ function releaseHiddenHost(state) {
 }
 
 function scheduleHiddenHostRelease(state) {
-  if (!state.host) return;
+  if (!state.active || !state.host) return;
   if (state.releaseTimer) clearTimeout(state.releaseTimer);
   state.releaseTimer = setTimeout(() => releaseHiddenHost(state), state.idleReleaseMs);
   state.releaseTimer.unref?.();
 }
 
 async function ensureRenderableSurface(state) {
+  if (!state.active) throw bridgeInactiveError();
   if (!liveView(state.view)) throw new Error('detached_capture_surface_view_unavailable');
   const electron = await state.loadElectronImpl();
+  if (!state.active) throw bridgeInactiveError();
   const BaseWindow = electron?.BaseWindow;
   if (typeof BaseWindow !== 'function' || typeof BaseWindow.getAllWindows !== 'function') {
     throw new Error('detached_capture_surface_basewindow_unavailable');
@@ -95,21 +104,38 @@ async function ensureRenderableSurface(state) {
 
   const bounds = normalizedBounds(state.view);
   const host = new BaseWindow({
+    x: -30000,
+    y: -30000,
     width: bounds.hosted.width,
     height: bounds.hosted.height,
     show: false,
+    opacity: 0,
     focusable: false,
     skipTaskbar: true,
     frame: false,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
     title: 'METAENGINE Capture Surface',
   });
   try { host.setIgnoreMouseEvents?.(true); } catch {}
   try {
     host.contentView.addChildView(state.view);
     state.view.setBounds?.(bounds.hosted);
+    host.show();
   } catch (error) {
+    try {
+      if (Array.isArray(host.contentView?.children) && host.contentView.children.includes(state.view)) {
+        host.contentView.removeChildView(state.view);
+      }
+    } catch {}
     try { if (!host.isDestroyed?.()) host.destroy(); } catch {}
     throw error;
+  }
+  if (!state.active) {
+    try { host.contentView.removeChildView(state.view); } catch {}
+    try { if (!host.isDestroyed?.()) host.destroy(); } catch {}
+    throw bridgeInactiveError();
   }
   state.host = host;
   state.originalBounds = bounds.original;
@@ -118,7 +144,9 @@ async function ensureRenderableSurface(state) {
 }
 
 async function runSurfaceRead(state, args) {
+  if (!state.active) throw bridgeInactiveError();
   await ensureRenderableSurface(state);
+  if (!state.active) throw bridgeInactiveError();
   try {
     return await state.originalSendCommand(...args);
   } finally {
@@ -153,6 +181,7 @@ export function installDetachedCaptureSurfaceBridge(view, {
     originalOwnDescriptor,
     loadElectronImpl,
     idleReleaseMs: Math.max(0, Math.min(1000, Number(idleReleaseMs) || DEFAULT_IDLE_RELEASE_MS)),
+    active: true,
     host: null,
     BaseWindow: null,
     originalBounds: null,
@@ -167,6 +196,7 @@ export function installDetachedCaptureSurfaceBridge(view, {
         installed: true,
         surface_generation: state.surfaceGeneration,
         bridged_methods: [...SURFACE_READ_METHODS],
+        compositor_surface: 'OFFSCREEN_ZERO_OPACITY_BASEWINDOW',
         input_authority: false,
         navigation_authority: false,
         automatic_retry_allowed: false,
@@ -193,6 +223,7 @@ export function uninstallDetachedCaptureSurfaceBridge(viewOrWebContents) {
   const state = webContents && bridgeByWebContents.get(webContents);
   if (!state) return false;
   bridgeByWebContents.delete(webContents);
+  state.active = false;
   releaseHiddenHost(state);
   try {
     if (state.debuggerApi.sendCommand === state.wrapper) {
