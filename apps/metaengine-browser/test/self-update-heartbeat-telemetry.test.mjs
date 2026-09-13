@@ -24,8 +24,16 @@ test('native supervisor heartbeat telemetry remains owned by exact base used by 
   assert.match(base, /#heartbeatPromise/);
   assert.match(base, /#kickHeartbeat\(\)/);
   assert.match(base, /this\.#heartbeatPromise\s*=\s*this\.#heartbeat\(\)/);
-  assert.doesNotMatch(base, /await\s+this\.#heartbeat\(\)/);
+  const start = base.slice(base.indexOf('async start()'), base.indexOf('\n  stop()', base.indexOf('async start()')));
+  const cycle = base.slice(base.lastIndexOf('async cycle()'));
+  assert.match(start, /#commandFastlane\?\.start\(\)[\s\S]*await this\.#heartbeat\(\)[\s\S]*await this\.#lifecycle\.start\(\)/,
+    'startup must open the command fast lane and obtain admission before the first lifecycle cycle');
+  assert.doesNotMatch(cycle, /await\s+this\.#heartbeat\(\)/,
+    'steady-state command admission must not wait for heartbeat collection');
   assert.match(base, /response\.status !== 202/);
+  assert.match(base, /normalizeDevosRuntimeControl\(body\?\.runtime_control, \{ workspaceId: NATIVE_SUPERVISOR_WORKSPACE_ID \}\)/);
+  assert.match(base, /applyRuntimeControl\?\.\(observedControl\)/);
+  assert.match(base, /#synchronizeRuntimeControlFromLifecycle\(lifecycleSnapshot/);
   assert.match(provenCore, /extends BaseNativeSupervisorClient/);
   assert.match(wiringCore, /NativeSupervisorClient as UnwiredNativeSupervisorClient/);
   assert.match(wiringCore, /extends UnwiredNativeSupervisorClient/);

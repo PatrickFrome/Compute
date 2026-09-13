@@ -45,9 +45,10 @@ export function classifyComputeBridgeFailure(error) {
 }
 
 export class ComputeBridgeClient {
-  constructor({ manifestPath = process.env.METAENGINE_COMPUTE_BRIDGE_MANIFEST || DEFAULT_MANIFEST, fetchImpl = globalThis.fetch } = {}) {
+  constructor({ manifestPath = process.env.METAENGINE_COMPUTE_BRIDGE_MANIFEST || DEFAULT_MANIFEST, fetchImpl = globalThis.fetch, timeoutMs = 1500 } = {}) {
     this.manifestPath = manifestPath;
     this.fetchImpl = fetchImpl;
+    this.timeoutMs = Math.max(25, Math.min(10000, Number(timeoutMs) || 1500));
   }
 
   async readManifest() {
@@ -62,6 +63,7 @@ export class ComputeBridgeClient {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'authorization': `Bearer ${manifest.token}` },
       body: JSON.stringify({ method, params, id: `shell-${crypto.randomUUID()}` }),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!response.ok) throw new Error(`compute_bridge_http_${response.status}`);
     const body = await response.json();
@@ -84,6 +86,7 @@ export class ComputeBridgeClient {
         error: null,
         generated_at: generatedAt,
         automatic_remediation: false,
+        timeout_ms: this.timeoutMs,
         authority_effect: false,
       });
     } catch (error) {
@@ -98,6 +101,7 @@ export class ComputeBridgeClient {
         error: String(error?.message || error).slice(0, 500),
         generated_at: generatedAt,
         automatic_remediation: false,
+        timeout_ms: this.timeoutMs,
         authority_effect: false,
       });
     }

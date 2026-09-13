@@ -25,7 +25,7 @@ function identity() {
   };
 }
 
-function clientFor(command, { executeCommand, receipts }) {
+function clientFor(command, { executeCommand, receipts, getState = async () => ({ tabs: [], active_tab: null }) }) {
   const fetchImpl = async (url, init = {}) => {
     const path = new URL(url).pathname;
     if (path.endsWith('/v1/state')) return response(202, { accepted: true });
@@ -50,7 +50,7 @@ function clientFor(command, { executeCommand, receipts }) {
     identity: identity(),
     fetchImpl,
     version: '0.0.0-policy-test',
-    getState: async () => ({ tabs: [], active_tab: null }),
+    getState,
     executeCommand,
     commandBatchWaitMs: 250,
   });
@@ -154,6 +154,60 @@ test('DOWNLOAD_FILE completes only from an exact verified receipt and otherwise 
     await client.cycle();
     assert.equal(receipts[0].results[0].receipt.effect_outcome, expected);
     assert.equal(client.snapshot().last_command_status, expected === 'CONFIRMED' ? 'COMPLETED' : 'AMBIGUOUS');
+    client.stop();
+  }
+});
+
+test('deterministic NEW_TAB capacity rejection proves no effect without weakening unknown failures', async () => {
+  for (const [error, expected] of [
+    ['tab_capacity_exceeded', 'NO_EFFECT_PROVEN'],
+    ['renderer_failed_after_registry_allocation', 'AMBIGUOUS'],
+  ]) {
+    const receipts = [];
+    const client = clientFor(
+      { command_id: crypto.randomUUID(), action: 'NEW_TAB', payload: { url: 'https://chatgpt.com/' }, platform: null },
+      { receipts, executeCommand: async () => { throw new Error(error); } },
+    );
+    await client.cycle();
+    assert.equal(receipts[0].results[0].ok, false);
+    assert.equal(receipts[0].results[0].receipt.effect_outcome, expected);
+    assert.equal(client.snapshot().last_command_status, 'FAILED');
+    client.stop();
+  }
+});
+
+test('FLEET_RECONCILE uses independent before/after state proof for no-op and mutation', async () => {
+  const fleet = (desiredAgents) => ({
+    schema: 'metaengine.browser.fleet-snapshot.v1',
+    policy: { profile: 'BALANCED', desired_agents: desiredAgents },
+    agents: [],
+    counts: { ACTIVE: 0 },
+    capacity_backpressure: {
+      blocked: desiredAgents === 7,
+      reason: desiredAgents === 7 ? 'TAB_CAPACITY_EXCEEDED_PRE_EFFECT' : null,
+      retired_no_effect_attempts: 0,
+    },
+    authority_effect: false,
+  });
+
+  for (const [beforeFleet, afterFleet, expected] of [
+    [fleet(7), fleet(7), 'NO_EFFECT_PROVEN'],
+    [fleet(6), fleet(7), 'CONFIRMED'],
+  ]) {
+    const receipts = [];
+    let executed = false;
+    const client = clientFor(
+      { command_id: crypto.randomUUID(), action: 'FLEET_RECONCILE', payload: { active: true, target_agents: 7 }, platform: null },
+      {
+        receipts,
+        getState: async () => ({ tabs: [], active_tab: null, fleet: structuredClone(executed ? afterFleet : beforeFleet) }),
+        executeCommand: async () => { executed = true; return structuredClone(afterFleet); },
+      },
+    );
+    await client.cycle();
+    assert.equal(receipts[0].results[0].ok, true);
+    assert.equal(receipts[0].results[0].receipt.effect_outcome, expected);
+    assert.equal(client.snapshot().last_command_status, 'COMPLETED');
     client.stop();
   }
 });

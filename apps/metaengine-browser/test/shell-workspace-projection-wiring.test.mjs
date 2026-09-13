@@ -14,13 +14,13 @@ function functionSlice(source, name, nextName) {
 
 test('trusted main process owns one full shell projection plus two bounded presentation projections', async () => {
   const main = await read('../src/main.mjs');
-  assert.match(main, /import \{ projectWorkspaceWorkbench \} from '\.\/workspace-workbench-projection\.mjs'/);
+  assert.match(main, /import \{ normalizeDevelopmentPlaneProjection, projectWorkspaceWorkbench \} from '\.\/workspace-workbench-projection\.mjs'/);
   assert.match(main, /const tabs = registry\.snapshot\(\)/);
   assert.match(main, /const fleetSnapshot = fleet\?\.snapshot\(\) \|\| null/);
   assert.match(main, /const ownerSafetyGatesSnapshot = ownerSafetyGates\?\.snapshot\(\) \|\| null/);
-  assert.match(main, /const developmentPlaneSnapshot = developmentPlane\?\.snapshot\(\) \|\| null/);
+  assert.match(main, /const developmentPlaneSnapshot = normalizeDevelopmentPlaneProjection\([\s\S]*developmentPlane\?\.statusSnapshot\?\.\(\) \|\| developmentPlane\?\.snapshot\(\) \|\| null,[\s\S]*\)/);
   assert.match(main, /const supervisor = nativeSupervisor\?\.snapshot\(\) \|\| null/);
-  assert.match(main, /const compute = await bridge\.health\(\)/);
+  assert.match(main, /const compute = await currentComputeHealth\(\)/);
   assert.match(main, /const presentationFocus = devosPresentationFocus\.snapshot\(\)/);
   assert.match(main, /const devosPresentationFocus = createDevOSPresentationFocusState\(\)/);
 
@@ -36,7 +36,7 @@ test('trusted main process owns one full shell projection plus two bounded prese
   assert.match(shell, /\r?\n\s{4}workspaces,\r?\n\s{4}compute,\r?\n/);
   assert.equal((shell.match(/projectWorkspaceWorkbench\(/g) || []).length, 1, 'shell snapshot must have exactly one full trusted workspace projection');
   assert.equal((shell.match(/projectDevOSDevelopmentSources\(/g) || []).length, 1, 'shell snapshot must refresh the bounded source cache exactly once');
-  assert.equal((shell.match(/await bridge\.health\(\)/g) || []).length, 1, 'shell snapshot must perform one Compute health read and reuse it');
+  assert.equal((shell.match(/await currentComputeHealth\(\)/g) || []).length, 1, 'shell snapshot must perform one bounded cached Compute health read and reuse it');
 
   const intent = functionSlice(main, 'currentDevOSPresentationProjection', 'selectBrowserTabForPresentation');
   assert.equal((intent.match(/projectWorkspaceWorkbench\(/g) || []).length, 1, 'intent planning may use one separate identity-only projection');
@@ -81,7 +81,8 @@ test('pure workspace projection remains zero-authority and exact-fenced', async 
   assert.match(source, /AGENT_GENERATION_DRIFT/);
   assert.match(source, /grouping_authority:'DURABLE_WORKSPACE_BINDING_ONLY'/);
   assert.match(source, /composeDevOSSurfaceRegistry\(devosBase,\{source_snapshot:snapshot\?\.devos_sources\?\?null\}\)/);
-  assert.match(source, /attachDevOSSystemAttention\(devosSurfaces,\{\.\.\.snapshot,workspaces:base\}\)/);
+  assert.match(source, /const canonicalSnapshot=\{\.\.\.snapshot,development_plane:canonicalDevelopmentPlane\}/);
+  assert.match(source, /attachDevOSSystemAttention\(devosSurfaces,\{\.\.\.canonicalSnapshot,workspaces:base\}\)/);
   assert.match(source, /attachDevOSSessionLayout\(devosAttention,snapshot\?\.session_layouts\?\?null\)/);
   assert.match(source, /automatic_retry_allowed:false/);
   assert.match(source, /browser_actuation_authority:false/);

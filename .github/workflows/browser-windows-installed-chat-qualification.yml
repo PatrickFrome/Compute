@@ -50,6 +50,30 @@ jobs:
           npm run check
           node --test test/browser-chatgpt-fast-open.test.mjs test/browser-devos-multisurface-release-contract.test.mjs
 
+      - name: Prove detached CAPTURE_VIEW with physical Electron renderer
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $proofPath = "$env:RUNNER_TEMP\detached-capture-view-physical.jsonl"
+          $output = & .\node_modules\.bin\electron.cmd test\browser-capture-view-detached-physical.electron.mjs 2>&1
+          $exitCode = $LASTEXITCODE
+          $output | Tee-Object -FilePath $proofPath
+          if ($exitCode -ne 0) { throw "detached_capture_view_physical_exit_$exitCode" }
+          $line = $output | Where-Object { ([string]$_).Trim().StartsWith('{') } | Select-Object -Last 1
+          if (-not $line) { throw 'detached_capture_view_physical_proof_missing' }
+          $proof = ([string]$line) | ConvertFrom-Json
+          if ($proof.schema -ne 'metaengine.browser.detached-capture-view-physical-e2e.v1' `
+              -or $proof.ok -ne $true `
+              -or $proof.capture_backend -ne 'CDP_SCREENSHOT' `
+              -or $proof.detached_surface_fallback -ne $true `
+              -or [int]$proof.jpeg_bytes -le 0 `
+              -or [int]$proof.jpeg_bytes -gt 150000 `
+              -or [string]$proof.sha256 -notmatch '^[a-f0-9]{64}$' `
+              -or $proof.authority_effect -ne $false) {
+            throw 'detached_capture_view_physical_proof_invalid'
+          }
+
       - name: Build exact-head unsigned NSIS installer
         working-directory: apps/metaengine-browser
         shell: powershell
@@ -267,6 +291,7 @@ jobs:
             ${{ runner.temp }}/installed-chat-proof.json
             ${{ runner.temp }}/installed-chat-normal.out
             ${{ runner.temp }}/installed-chat-normal.err
+            ${{ runner.temp }}/detached-capture-view-physical.jsonl
           if-no-files-found: error
           retention-days: 30
 
@@ -279,5 +304,6 @@ jobs:
             ${{ runner.temp }}/installed-chat-proof.json
             ${{ runner.temp }}/installed-chat-normal.out
             ${{ runner.temp }}/installed-chat-normal.err
+            ${{ runner.temp }}/detached-capture-view-physical.jsonl
           if-no-files-found: ignore
           retention-days: 7

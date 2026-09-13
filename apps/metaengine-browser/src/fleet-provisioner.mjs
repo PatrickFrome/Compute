@@ -115,7 +115,7 @@ export function projectFleetReconcileSemantics(snapshot = {}) {
 function semanticHash(value) { return sha256(JSON.stringify(value)); }
 function reconcileSlotCount(projection) { return (projection?.agents || []).filter((row) => RECONCILE_SLOT_STATES.has(row.lifecycle_state)).length; }
 
-export function classifyFleetReconcileOutcome({ before, after, active = false, target_agents = null } = {}) {
+export function classifyFleetReconcileOutcome({ before, after, active = false, target_agents = null, physical_cleanup_count = 0 } = {}) {
   const beforeSemantic = projectFleetReconcileSemantics(before);
   const afterSemantic = projectFleetReconcileSemantics(after);
   const desired = active === true
@@ -127,8 +127,11 @@ export function classifyFleetReconcileOutcome({ before, after, active = false, t
   const beforeSha = semanticHash(beforeSemantic);
   const afterSha = semanticHash(afterSemantic);
   const changed = beforeSha !== afterSha;
+  const cleanupCount = Number.isSafeInteger(Number(physical_cleanup_count))
+    ? Math.max(0, Number(physical_cleanup_count))
+    : 0;
   const effectOutcome = postconditionSatisfied
-    ? (changed ? 'CONFIRMED' : 'NO_EFFECT_PROVEN')
+    ? (changed || cleanupCount > 0 ? 'CONFIRMED' : 'NO_EFFECT_PROVEN')
     : 'AMBIGUOUS';
   return Object.freeze({
     effect_outcome: effectOutcome,
@@ -140,6 +143,7 @@ export function classifyFleetReconcileOutcome({ before, after, active = false, t
       desired_slots: desired,
       observed_slots: observed,
       capacity_backpressure: blocked,
+      physical_cleanup_count: cleanupCount,
       satisfied: postconditionSatisfied,
       volatile_fields_excluded: true,
       authority_effect: false,

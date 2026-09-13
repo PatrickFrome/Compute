@@ -66,6 +66,10 @@ test('fleet reconcile classifier ignores volatile telemetry and proves stable no
   assert.equal(classified.effect_outcome, 'NO_EFFECT_PROVEN');
   assert.equal(classified.semantic_before_sha256, classified.semantic_after_sha256);
   assert.equal(classified.postcondition.satisfied, true);
+
+  const cleaned = classifyFleetReconcileOutcome({ before: base, after, active: false, physical_cleanup_count: 1 });
+  assert.equal(cleaned.effect_outcome, 'CONFIRMED');
+  assert.equal(cleaned.postcondition.physical_cleanup_count, 1);
 });
 
 test('FleetProvisioner reconcile returns NO_EFFECT_PROVEN for zero warm no-op and CONFIRMED for structural change', async () => {
