@@ -32,7 +32,8 @@ test('physical dev E2E follows the forward integration line without cross-SHA ca
 
 test('verified dev publisher is exact-SHA isolated and cannot regress the live hint', async () => {
   const source = await workflow('metaengine-browser-fast-autorelease.yml');
-  assert.match(source, /integration\/metaengine-development-os-v1/);
+  assert.match(source, /release\/self-update-ambiguity-live-v2/);
+  assert.doesNotMatch(source, /integration\/metaengine-development-os-v1/);
   assert.match(source, /group: metaengine-browser-fast-verified-release-\$\{\{ github\.sha \}\}/);
   assert.doesNotMatch(source, /group: metaengine-browser-fast-verified-release\n/);
   assert.match(source, /manifest_git_sha_mismatch/);
