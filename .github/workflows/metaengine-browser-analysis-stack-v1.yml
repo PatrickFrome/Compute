@@ -65,25 +65,19 @@ jobs:
         working-directory: apps/metaengine-browser
         run: semgrep scan --config .semgrep/metaengine.yml --error --metrics=off src scripts supabase ui smoke/dp
 
-      - name: Biome legacy baseline diagnostics
-        if: always()
+      - name: Biome lint gate
         working-directory: apps/metaengine-browser
-        continue-on-error: true
         run: npx --yes @biomejs/biome@2.5.13 lint src scripts supabase ui
 
-      - name: Madge dependency-cycle diagnostics
-        if: always()
+      - name: Madge zero-cycle gate
         working-directory: apps/metaengine-browser
-        continue-on-error: true
         shell: bash
         run: npx --yes madge@8.0.0 --circular --warning --extensions mjs,cjs,js --json src > madge-circular.json
 
-      - name: JSCPD duplication baseline
-        if: always()
+      - name: JSCPD duplication gate
         working-directory: apps/metaengine-browser
-        continue-on-error: true
         shell: bash
-        run: npx --yes jscpd@5.2.0 src scripts supabase ui smoke/dp --min-tokens 50 --min-lines 5 --reporters console,json,sarif --output jscpd-report
+        run: npx --yes jscpd@5.2.0 src scripts supabase ui smoke/dp --min-tokens 50 --min-lines 5 --threshold 3 --reporters console,json,sarif --output jscpd-report
 
       - name: Upload architecture and duplication diagnostics
         if: always()
@@ -130,7 +124,7 @@ jobs:
   trivy-advisory:
     name: trivy-advisory
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout exact candidate
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -139,9 +133,19 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Setup Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Materialize exact npm dependency lock for scanning
+        working-directory: apps/metaengine-browser
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
       - name: Trivy filesystem vulnerability and misconfiguration scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.74.0
           scan-type: fs
           scan-ref: apps/metaengine-browser
           format: sarif
