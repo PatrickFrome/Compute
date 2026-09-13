@@ -122,6 +122,8 @@ jobs:
       - name: Published baseline to exact candidate physical update
         working-directory: apps/metaengine-browser
         shell: powershell
+        env:
+          METAENGINE_GITHUB_API_TOKEN: ${{ github.token }}
         run: ./test/self-update-fast-physical-candidate.ps1
       - name: Seal installed executable digest into physical evidence
         working-directory: apps/metaengine-browser
