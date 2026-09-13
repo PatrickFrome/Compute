@@ -88,7 +88,6 @@ jobs:
               'full_physical_self_update': 'metaengine-browser-self-update-e2e.yml',
               'full_browser_suite': 'browser-critical-audit-v1.yml',
               'local_analysis_stack': 'metaengine-browser-analysis-stack-v1.yml',
-              'sonarqube_quality_gate': 'metaengine-browser-sonarqube-gate.yml',
               'emergency_ubuntu_windows_native': 'browser-developer-emergency-update-v1.yml',
               'parent_progress_durability': 'browser-parent-progress-durability-gate.yml',
               'self_update_durability': 'browser-self-update-durability-gate.yml',

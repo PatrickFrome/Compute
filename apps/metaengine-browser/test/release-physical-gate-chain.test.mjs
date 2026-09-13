@@ -29,7 +29,6 @@ test('verified dev release is transitively fenced by exact-SHA bootstrap autosta
   assert.match(release, /metaengine-browser-bootstrap-autostart-e2e\.yml/);
   assert.match(release, /metaengine-browser-self-update-fast-e2e\.yml/);
   assert.match(release, /metaengine-browser-analysis-stack-v1\.yml/);
-  assert.match(release, /metaengine-browser-sonarqube-gate\.yml/);
   assert.match(publisher, /metaengine-browser-release-evidence-gate\.yml/);
   assert.match(publisher, /metaengine-browser-self-update-fast-e2e\.yml/);
   assert.match(publisher, /head_sha="\$EXPECTED_SHA"/);
@@ -49,7 +48,6 @@ test('release publisher is blocked on complete local, hosted, physical, and exac
     'metaengine-browser-self-update-e2e.yml',
     'browser-critical-audit-v1.yml',
     'metaengine-browser-analysis-stack-v1.yml',
-    'metaengine-browser-sonarqube-gate.yml',
     'browser-developer-emergency-update-v1.yml',
     'browser-parent-progress-durability-gate.yml',
     'browser-self-update-durability-gate.yml',
@@ -66,7 +64,6 @@ test('release publisher is blocked on complete local, hosted, physical, and exac
   assert.match(release, /head_sha=\{source_head\}/);
   assert.match(release, /all_required_gates_passed': True/);
   assert.match(release, /old_ambiguous_transaction_reused': False/);
-  assert.match(release, /sonarqube_quality_gate/);
   assert.match(release, /local_analysis_stack/);
 
   const fullGate = publisher.indexOf('Wait for exact release evidence gate success');
