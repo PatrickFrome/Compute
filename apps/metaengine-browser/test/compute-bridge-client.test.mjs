@@ -24,3 +24,25 @@ test('shell bridge exposes read-only calls and never leaks token in result', asy
   await assert.rejects(() => client.callReadOnly('action.click', {}), /not_read_only/);
   await fs.rm(dir, { recursive: true, force: true });
 });
+
+test('health read is deadline-bounded and reports uncertainty without claiming a proven outage', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-shell-timeout-'));
+  const manifestPath = path.join(dir, 'bridge.json');
+  await fs.writeFile(manifestPath, JSON.stringify({ url: 'http://127.0.0.1:9999/rpc', token: 'secret-test-token' }));
+  try {
+    const client = new ComputeBridgeClient({
+      manifestPath,
+      timeoutMs: 25,
+      fetchImpl: async (_url, init) => new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+      }),
+    });
+    const health = await client.health();
+    assert.equal(health.state, 'UNKNOWN');
+    assert.equal(health.reason_code, 'HEALTH_TIMEOUT');
+    assert.equal(health.outage_proven, false);
+    assert.equal(health.timeout_ms, 25);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

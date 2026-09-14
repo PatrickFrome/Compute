@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { browserControlCapabilities } from './browser-control-capabilities.mjs';
 import { globalOwnerGateDisabled } from './owner-safety-gate-registry.mjs';
 import { NativeSupervisorCommandLaneScheduler, classifyNativeSupervisorCommand } from './native-supervisor-command-lanes.mjs';
@@ -19,9 +20,16 @@ import {
   persistSelfUpdateSessionContinuity,
 } from './self-update-session-continuity.mjs';
 import { verifiedDownloadReceiptConfirmsRequest } from './verified-download-manager.mjs';
+import {
+  devosRuntimeControlAllowsContinuousService,
+  normalizeDevosRuntimeControl,
+  unavailableDevosRuntimeControl,
+} from './devos-runtime-control.mjs';
+import { classifyFleetReconcileOutcome, projectFleetReconcileSemantics } from './fleet-provisioner.mjs';
 
 export const NATIVE_SUPERVISOR_BASE = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1';
 export const NATIVE_SUPERVISOR_RUNTIME_PATH = '/a2-browser-native-supervisor-v1';
+export const NATIVE_SUPERVISOR_WORKSPACE_ID = '2de9f84b-7c0a-4091-911c-894ff1d6eaf4';
 
 const clipError = (error) => String(error?.message || error || 'unknown_error').slice(0, 500);
 const READ_ONLY_ACTIONS = Object.freeze({
@@ -33,6 +41,83 @@ const TERMINAL_EFFECT_OUTCOMES = new Set(['CONFIRMED','NO_EFFECT_PROVEN','AMBIGU
 const DEFAULT_BATCH_WAIT_MS = 4000;
 const DEFAULT_MAINTENANCE_INTERVAL_MS = 10000;
 const ALWAYS_ON_CONTROL_ERROR = 'FINAL_RUNTIME_ALWAYS_ON_CONTROL_REQUIRED';
+
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+}
+
+function sameValue(left, right) {
+  return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
+}
+
+function fleetSnapshotFrom(value) {
+  const fleet = value?.fleet?.schema === 'metaengine.browser.fleet-snapshot.v1' ? value.fleet : value;
+  return fleet?.schema === 'metaengine.browser.fleet-snapshot.v1' && Array.isArray(fleet?.agents) ? fleet : null;
+}
+
+function failedCommandEffectOutcome(command, descriptor, error, { schedulerRejected = false } = {}) {
+  if (descriptor.read_only) return null;
+  if (schedulerRejected) return 'NO_EFFECT_PROVEN';
+  const action = String(command?.action || '').toUpperCase();
+  const message = String(error?.message || error || '');
+  // TabRegistry raises this exact error before allocating a tab id or constructing
+  // WebContents. Keep every other NEW_TAB failure ambiguous because it may occur
+  // after registry allocation or renderer construction.
+  if (action === 'NEW_TAB' && message === 'tab_capacity_exceeded') return 'NO_EFFECT_PROVEN';
+  return 'AMBIGUOUS';
+}
+
+function clipped(value, max) {
+  return String(value ?? '').slice(0, max);
+}
+
+function perceptionTransportProjection(frame) {
+  if (!frame || typeof frame !== 'object' || Array.isArray(frame)) return null;
+  const targets = Array.isArray(frame.semantic_targets) ? frame.semantic_targets : [];
+  const textExcerpt = clipped(frame.text_excerpt, 2048);
+  return Object.freeze({
+    schema: clipped(frame.schema || 'metaengine.native-browser.perception.v1', 96),
+    captured_at: frame.captured_at || null,
+    tab_id: frame.tab_id ? clipped(frame.tab_id, 80) : null,
+    process_incarnation_id: frame.process_incarnation_id ? clipped(frame.process_incarnation_id, 160) : null,
+    target_id: frame.target_id ? clipped(frame.target_id, 160) : null,
+    runtime_observation_id: frame.runtime_observation_id ? clipped(frame.runtime_observation_id, 160) : null,
+    url: clipped(frame.url, 1200),
+    title: clipped(frame.title, 240),
+    viewport: frame.viewport && typeof frame.viewport === 'object' ? stableValue(frame.viewport) : null,
+    semantic_targets: targets.slice(0, 24).map((row) => Object.freeze({
+      role: clipped(row?.role, 48),
+      name: clipped(row?.name, 160),
+      disabled: row?.disabled === true,
+      backend_node_id: Number.isSafeInteger(Number(row?.backend_node_id)) ? Number(row.backend_node_id) : null,
+      value_sha256: /^[a-f0-9]{64}$/i.test(String(row?.value_sha256 || '')) ? String(row.value_sha256).toLowerCase() : null,
+      authority_effect: false,
+    })),
+    semantic_target_count: targets.length,
+    semantic_targets_truncated: targets.length > 24,
+    text_excerpt: textExcerpt,
+    text_excerpt_bytes: Buffer.byteLength(String(frame.text_excerpt || ''), 'utf8'),
+    text_excerpt_sha256: crypto.createHash('sha256').update(String(frame.text_excerpt || ''), 'utf8').digest('hex'),
+    text_excerpt_truncated: textExcerpt.length < String(frame.text_excerpt || '').length,
+    perception_error: frame.perception_error ? clipped(frame.perception_error, 240) : null,
+    input_values_exposed: false,
+    transport_projection: true,
+    full_capture_available_by_command: true,
+    authority_effect: false,
+  });
+}
+
+export function nativeSupervisorTransportState(state = {}) {
+  if (!state || typeof state !== 'object' || Array.isArray(state)) return {};
+  return {
+    ...state,
+    perception: perceptionTransportProjection(state.perception),
+    heartbeat_payload_bounded: true,
+    heartbeat_full_perception_embedded: false,
+  };
+}
 
 function controlModeAllows(supervisorMode) {
   return supervisorMode === 'CONTROL' || globalOwnerGateDisabled('authority.control_mode');
@@ -140,6 +225,7 @@ export class NativeSupervisorClient {
   #controlStateLoaded = false;
   #controlStatePersistenceError = null;
   #legacySingleLeaseFallback = true;
+  #runtimeControl = unavailableDevosRuntimeControl('NOT_OBSERVED');
 
   constructor({
     identity,
@@ -199,24 +285,29 @@ export class NativeSupervisorClient {
       })
       : null;
 
+    const continuousServiceCanActuate = () => controlModeAllows(this.#supervisorMode)
+      && armedAllows(this.#armed)
+      && devosRuntimeControlAllowsContinuousService(this.#runtimeControl);
     const executeSupervisorCommand = async (command) => {
       const action = String(command?.action || '');
       if (!READ_ONLY_ACTIONS.has(action) && !ROOT_POLICY_ACTIONS.has(action)) {
         if (!controlModeAllows(this.#supervisorMode)) throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
         if (!armedAllows(this.#armed)) throw new Error('native_supervisor_disarmed');
+        if (!devosRuntimeControlAllowsContinuousService(this.#runtimeControl)) throw new Error('continuous_service_admission_fenced');
       }
       return this.#executeCommand(command);
     };
 
     this.#lifecycle = new SupervisorLifecycleRuntime({
       getState: this.#getState,
-      canActuate: () => controlModeAllows(this.#supervisorMode) && armedAllows(this.#armed),
+      canActuate: continuousServiceCanActuate,
       executeCommand: executeSupervisorCommand,
+      requireAuthoritativeAdmission: true,
     });
     this.#mesh = new SupervisorMeshRuntime({
       getState: this.#getState,
       executeCommand: executeSupervisorCommand,
-      canActuate: () => controlModeAllows(this.#supervisorMode) && armedAllows(this.#armed),
+      canActuate: continuousServiceCanActuate,
       primaryLifecycle: () => this.#lifecycle?.snapshot() || null,
       ...(meshStatePath ? { statePath: meshStatePath } : {}),
     });
@@ -304,6 +395,9 @@ export class NativeSupervisorClient {
         terminal_requires_external_stop: true,
         startup_scheduler_armed_before_enrollment: true,
         cycle_errors_terminal: false,
+        runtime_control: structuredClone(this.#runtimeControl),
+        authoritative_admission_required: true,
+        actuation_allowed: devosRuntimeControlAllowsContinuousService(this.#runtimeControl),
         authority_effect: false,
       },
       developer_emergency_update: {
@@ -437,12 +531,22 @@ export class NativeSupervisorClient {
     this.#commandFastlane?.start();
     try {
       await this.#identity.ensure();
+      // Obtain the authoritative DB-backed admission projection before the first
+      // lifecycle cycle. Unknown/missing readback leaves continuous service fenced;
+      // self-update and Sentinel startup remain independent below.
+      await this.#heartbeat().catch((error) => {
+        this.#lastError = `startup_heartbeat:${clipError(error)}`;
+      });
       await this.#restoreSessionContinuity().catch((error) => {
         this.#lastError = `continuity_restore:${clipError(error)}`;
         this.#continuityStatus = { ...this.#continuityStatus, state: 'ERROR', error: clipError(error), authority_effect: false };
       });
+      const lifecycleSnapshot = await this.#lifecycle.start().catch((error) => {
+        this.#lastError = `lifecycle_start:${clipError(error)}`;
+        return null;
+      });
+      this.#synchronizeRuntimeControlFromLifecycle(lifecycleSnapshot, 'LIFECYCLE_START_FAILED');
       await this.#mesh.start().catch((error) => { this.#lastError = `mesh_start:${clipError(error)}`; });
-      await this.#lifecycle.start().catch((error) => { this.#lastError = `lifecycle_start:${clipError(error)}`; });
       await this.#selfUpdate.start().catch((error) => { this.#lastError = `self_update_start:${clipError(error)}`; });
       await this.cycle().catch(() => {});
     } catch (error) {
@@ -534,19 +638,32 @@ export class NativeSupervisorClient {
   }
 
   async #heartbeat() {
-    const state = await this.#getState();
+    const state = nativeSupervisorTransportState(await this.#getState());
     const payload = {
       state: {
         ...state, shell_version: this.#version, supervisor_mode: 'CONTROL', armed: true,
         operator_mode: 'CONTROL', started_at: this.#startedAt, last_error: this.#lastError,
-        supervisor_lifecycle: this.#lifecycle?.snapshot() || null, self_update: this.#selfUpdate?.snapshot() || null,
+        supervisor_lifecycle: this.#lifecycle?.statusSnapshot?.() || this.#lifecycle?.snapshot() || null,
+        self_update: this.#selfUpdate?.snapshot() || null,
         self_update_session_continuity: structuredClone(this.#continuityStatus),
       },
       last_command_id: this.#lastCommandId, last_command_status: this.#lastCommandStatus,
     };
     const response = await this.#signedRequest('/v1/state', { payload });
     if (response.status !== 202) throw new Error(`native_supervisor_state_http_${response.status}`);
+    const body = await response.json().catch(() => ({}));
+    const observedControl = normalizeDevosRuntimeControl(body?.runtime_control, { workspaceId: NATIVE_SUPERVISOR_WORKSPACE_ID });
+    const lifecycleSnapshot = await this.#lifecycle?.applyRuntimeControl?.(observedControl);
+    this.#synchronizeRuntimeControlFromLifecycle(lifecycleSnapshot, observedControl.reason || 'LIFECYCLE_READBACK_UNAVAILABLE');
     this.#lastHeartbeatAt = new Date().toISOString();
+  }
+
+  #synchronizeRuntimeControlFromLifecycle(snapshot, fallbackReason) {
+    const applied = snapshot?.continuous_service?.runtime_control;
+    this.#runtimeControl = applied?.authoritative === true
+      ? normalizeDevosRuntimeControl(applied, { workspaceId: NATIVE_SUPERVISOR_WORKSPACE_ID })
+      : unavailableDevosRuntimeControl(applied?.reason || fallbackReason || 'LIFECYCLE_READBACK_UNAVAILABLE');
+    return this.#runtimeControl;
   }
 
   #kickHeartbeat() {
@@ -767,7 +884,7 @@ export class NativeSupervisorClient {
     this.#currentCommand = this.#currentCommands.values().next().value || null;
   }
 
-  async #effectOutcome(command, result, descriptor) {
+  async #effectOutcome(command, result, descriptor, { beforeState = null } = {}) {
     if (descriptor.read_only) return null;
     const action = String(command?.action || '').toUpperCase();
     if (action === 'DOWNLOAD_FILE') {
@@ -782,6 +899,26 @@ export class NativeSupervisorClient {
     if (['ARM','SET_SUPERVISOR_MODE','SET_MODE'].includes(action)) return 'CONFIRMED';
     if (action === 'NEW_TAB' && result?.tab_id) return 'CONFIRMED';
     if (['FLEET_SET_PROFILE','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL'].includes(action) && result) return 'CONFIRMED';
+
+    if (action === 'FLEET_RECONCILE') {
+      const before = fleetSnapshotFrom(beforeState);
+      const returned = fleetSnapshotFrom(result);
+      const afterState = await this.#getState().catch(() => null);
+      const after = fleetSnapshotFrom(afterState);
+      const ambiguousAgent = Array.isArray(result?.agents)
+        && result.agents.some((agent) => String(agent?.lifecycle_state || '') === 'PROVISIONING_AMBIGUOUS');
+      if (!before || !returned || !after || ambiguousAgent
+        || !sameValue(projectFleetReconcileSemantics(returned), projectFleetReconcileSemantics(after))) return 'AMBIGUOUS';
+      const explicitPhysicalChange = (Array.isArray(result?.elastic_retired) && result.elastic_retired.length > 0)
+        || (Array.isArray(result?.orphan_fleet_tabs_swept) && result.orphan_fleet_tabs_swept.length > 0);
+      if (explicitPhysicalChange) return 'CONFIRMED';
+      return classifyFleetReconcileOutcome({
+        before,
+        after,
+        active: command?.payload?.active === true,
+        target_agents: command?.payload?.target_agents ?? null,
+      }).effect_outcome;
+    }
 
     if (['CLOSE_TAB','SELECT_TAB','NAVIGATE'].includes(action)) {
       const stateReadback = await this.#getState().catch(() => null);
@@ -805,8 +942,11 @@ export class NativeSupervisorClient {
     this.#trackCommandStart(command);
     const started = Date.now();
     try {
+      const beforeState = String(command?.action || '').toUpperCase() === 'FLEET_RECONCILE'
+        ? await this.#getState().catch(() => null)
+        : null;
       const result = await this.#executeLocalOrRemote(command);
-      const effectOutcome = await this.#effectOutcome(command, result, descriptor);
+      const effectOutcome = await this.#effectOutcome(command, result, descriptor, { beforeState });
       return { result, effect_outcome: effectOutcome, execution_ms: Date.now() - started };
     } finally {
       this.#trackCommandEnd(command);
@@ -827,6 +967,7 @@ export class NativeSupervisorClient {
       return result;
     } catch (error) {
       const message = clipError(error);
+      effectOutcome = failedCommandEffectOutcome(command, descriptor, error);
       await this.#postResult(command, false, result, message, effectOutcome).catch(() => {});
       this.#lastCommandId = command.command_id;
       this.#lastCommandStatus = 'FAILED';
@@ -847,7 +988,9 @@ export class NativeSupervisorClient {
         descriptor,
         ok: row.ok,
         result: row.ok ? nested.result ?? null : null,
-        effect_outcome: row.ok ? nested.effect_outcome ?? null : (descriptor.read_only ? null : 'AMBIGUOUS'),
+        effect_outcome: row.ok
+          ? nested.effect_outcome ?? null
+          : failedCommandEffectOutcome(commands[index], descriptor, row.error, { schedulerRejected: row.scheduler_rejected === true }),
         execution_ms: row.ok ? nested.execution_ms ?? row.execution_ms : row.execution_ms,
         error: row.error,
       };

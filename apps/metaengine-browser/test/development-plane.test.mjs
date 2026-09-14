@@ -97,6 +97,43 @@ test('typed request has no payload and no authority effect', async () => {
   assert.deepEqual(await p, { ok: true });
 });
 
+test('transport status snapshot summarizes retained source payloads while the local snapshot stays complete', async () => {
+  const h = makePlane();
+  await ready(h);
+  const sourceText = 'const live = true;\n'.repeat(6000);
+  const pending = h.plane.request('DEVOS_REPO_READ_MODEL');
+  const sent = h.child.sent.at(-1);
+  h.child.emit('message', {
+    protocol: DEVELOPMENT_PLANE_PROTOCOL,
+    type: 'RESPONSE',
+    request_id: sent.request_id,
+    ok: true,
+    result: {
+      schema: 'metaengine.development-plane.repo-read-model.v1',
+      repository: 'PatrickFrome/Compute',
+      ref: 'refs/heads/release/self-update-ambiguity-live-v2',
+      head: 'd'.repeat(40),
+      code_file_count: 1,
+      code_files: [{ relative_path: 'src/live.mjs', bytes: Buffer.byteLength(sourceText), text: sourceText }],
+      authority_effect: false,
+    },
+  });
+  await pending;
+
+  const local = h.plane.snapshot();
+  const transport = h.plane.statusSnapshot();
+  assert.equal(local.result_payloads_included, true);
+  assert.equal(local.devos_repo_read_model.code_files[0].text, sourceText);
+  assert.equal(transport.result_payloads_included, false);
+  assert.equal(transport.result_payloads_bounded_for_transport, true);
+  assert.equal(transport.devos_repo_read_model.payload_included, false);
+  assert.equal(transport.devos_repo_read_model.code_file_count, 1);
+  assert.equal(transport.devos_repo_read_model.head, 'd'.repeat(40));
+  assert.equal('code_files' in transport.devos_repo_read_model, false);
+  assert.equal(JSON.stringify(transport).length < 8192, true);
+  assert.equal(JSON.stringify(local).length > 100000, true);
+});
+
 test('process loss rejects pending requests and automatically restarts until externally stopped', async () => {
   const first = new FakeChild();
   first.pid = 4242;

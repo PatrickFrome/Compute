@@ -1,7 +1,11 @@
 import crypto from 'node:crypto';
 import { chatGptControlMatches } from './chatgpt-ui-controls.mjs';
 import { openCdpOutcomeLatch } from './browser-cdp-outcome-latch.mjs';
-import { nativeBrowserCdpPool, withPersistentBrowserDebugger } from './browser-persistent-cdp-session.mjs';
+import {
+  nativeBrowserCdpPool,
+  releasePersistentBrowserDebugger,
+  withPersistentBrowserDebugger,
+} from './browser-persistent-cdp-session.mjs';
 import {
   assertNativeEffectBindingMatches,
   nativeActionRequiresEffectBinding,
@@ -10,6 +14,8 @@ import {
   assertNativeEffectRuntimeBindingCurrent,
   recordNativeEffectRuntimeObservation,
 } from './native-effect-runtime-observation.mjs';
+import { resolveExactWebContentsView } from './browser-webcontents-tab-index.mjs';
+import { withTemporaryDetachedCaptureSurface } from './browser-detached-capture-surface.mjs';
 
 const SAFE_ROLES = new Set(['textbox','searchbox','combobox','button','checkbox','radio','switch','tab','menuitem','link']);
 const TEXT_INPUT_ROLES = new Set(['textbox','searchbox','combobox']);
@@ -25,6 +31,7 @@ const CHATGPT_SUBMIT_OUTCOME_METHODS = new Set([
 const NATIVE_BROWSER_PROCESS_INCARNATION_ID = crypto.randomUUID();
 const DEFAULT_CAPTURE_VIEW_MAX_ATTEMPTS = 5;
 const DEFAULT_CAPTURE_VIEW_RETRY_DELAY_MS = 150;
+const DEFAULT_CAPTURE_CDP_DEADLINE_MS = 5000;
 const clip = (value, max) => String(value ?? '').slice(0, max);
 const axRawValue = (node, key) => String(node?.[key]?.value ?? '');
 const axValue = (node, key) => axRawValue(node, key).trim();
@@ -129,6 +136,7 @@ async function inspectChatGptSubmit(dbg, webContents, { preUrl } = {}) {
     new_conversation_observed: false,
     send_control_remaining: sendCount > 0,
     post_url_sha256: url ? sha256(url) : null,
+    observation_error: null,
     automatic_retry_allowed: false,
     authority_effect: false,
   };
@@ -388,6 +396,92 @@ function captureSurfaceUnavailableError(attempts, lastError = null) {
   return error;
 }
 
+function captureViewport(metrics) {
+  const viewport = metrics?.cssVisualViewport || metrics?.visualViewport || null;
+  const width = Math.floor(Number(viewport?.clientWidth || viewport?.width || 0));
+  const height = Math.floor(Number(viewport?.clientHeight || viewport?.height || 0));
+  if (!Number.isSafeInteger(width) || width < 1 || !Number.isSafeInteger(height) || height < 1) {
+    throw new Error('native_capture_cdp_viewport_unavailable');
+  }
+  return {
+    x: Math.max(0, Number(viewport?.pageX || 0)),
+    y: Math.max(0, Number(viewport?.pageY || 0)),
+    width,
+    height,
+  };
+}
+
+function decodeCdpJpeg(value) {
+  const encoded = String(value || '');
+  if (!encoded || encoded.length > 2_000_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
+    throw new Error('native_capture_cdp_payload_invalid');
+  }
+  const jpeg = Buffer.from(encoded, 'base64');
+  if (!jpeg.byteLength) throw new Error('native_capture_thumbnail_empty');
+  return jpeg;
+}
+
+function captureCdpTimeoutError(deadlineMs) {
+  const error = new Error(`native_capture_cdp_timeout:${deadlineMs}`);
+  error.code = 'NATIVE_CAPTURE_CDP_TIMEOUT';
+  error.deadline_ms = deadlineMs;
+  error.automatic_retry_allowed = false;
+  return error;
+}
+
+async function runBoundedCdpCapture(webContents, task, {
+  deadlineMs = DEFAULT_CAPTURE_CDP_DEADLINE_MS,
+  releaseDebuggerImpl = releasePersistentBrowserDebugger,
+} = {}) {
+  const boundedDeadlineMs = Math.max(10, Math.min(15000, Number(deadlineMs) || DEFAULT_CAPTURE_CDP_DEADLINE_MS));
+  let timer = null;
+  const work = Promise.resolve().then(task);
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      try { releaseDebuggerImpl?.(webContents); } catch {}
+      reject(captureCdpTimeoutError(boundedDeadlineMs));
+    }, boundedDeadlineMs);
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function captureCdpThumbnail(webContents, {
+  withDebuggerImpl = withDebugger,
+  maxWidth = 720,
+  retryMaxWidth = 520,
+  fromSurface = true,
+  deadlineMs = DEFAULT_CAPTURE_CDP_DEADLINE_MS,
+  releaseDebuggerImpl = releasePersistentBrowserDebugger,
+} = {}) {
+  return runBoundedCdpCapture(webContents, () => withDebuggerImpl(webContents, async (dbg) => {
+    const viewport = captureViewport(await dbg.sendCommand('Page.getLayoutMetrics'));
+    const take = async (quality, widthLimit) => {
+      const payload = {
+        format: 'jpeg',
+        quality,
+        fromSurface,
+        captureBeyondViewport: false,
+        optimizeForSpeed: true,
+      };
+      if (fromSurface) {
+        const scale = Math.min(1, Math.max(0.1, Number(widthLimit) / viewport.width));
+        payload.clip = { ...viewport, scale };
+      }
+      const shot = await dbg.sendCommand('Page.captureScreenshot', payload);
+      return decodeCdpJpeg(shot?.data);
+    };
+    let jpeg = await take(55, maxWidth);
+    if (jpeg.byteLength > 120000) jpeg = await take(fromSurface ? 45 : 35, retryMaxWidth);
+    if (jpeg.byteLength > 150000 && !fromSurface) jpeg = await take(25, retryMaxWidth);
+    if (jpeg.byteLength > 150000) throw new Error('native_capture_thumbnail_too_large');
+    return { jpeg, viewport, fromSurface };
+  }), { deadlineMs, releaseDebuggerImpl });
+}
+
 async function capturePageWithBoundedSurfaceReadiness(webContents, {
   maxAttempts = DEFAULT_CAPTURE_VIEW_MAX_ATTEMPTS,
   retryDelayMs = DEFAULT_CAPTURE_VIEW_RETRY_DELAY_MS,
@@ -400,7 +494,7 @@ async function capturePageWithBoundedSurfaceReadiness(webContents, {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     if (!webContents || webContents.isDestroyed?.()) throw new Error('native_capture_webcontents_unavailable');
     try {
-      const image = await webContents.capturePage();
+      const image = await webContents.capturePage(undefined, { stayHidden: true, stayAwake: true });
       const size = captureSurfaceSize(image);
       if (size.valid) return { image, size, attempts: attempt, transientRetries: attempt - 1 };
       lastError = new Error('native_capture_surface_unavailable');
@@ -416,7 +510,86 @@ async function capturePageWithBoundedSurfaceReadiness(webContents, {
 
 export async function captureViewThumbnail(webContents, options = {}) {
   if (!webContents || webContents.isDestroyed?.()) throw new Error('native_capture_webcontents_unavailable');
-  const captured = await capturePageWithBoundedSurfaceReadiness(webContents, options);
+  const {
+    surfaceExpected = true,
+    withDebuggerImpl = withDebugger,
+    cdpDeadlineMs = DEFAULT_CAPTURE_CDP_DEADLINE_MS,
+    releaseDebuggerImpl = releasePersistentBrowserDebugger,
+    temporarySurfaceDeadlineMs = DEFAULT_CAPTURE_CDP_DEADLINE_MS,
+    resolveViewImpl = resolveExactWebContentsView,
+    withDetachedSurfaceImpl = withTemporaryDetachedCaptureSurface,
+    ...surfaceOptions
+  } = options;
+  let captured = null;
+  let surfaceError = null;
+  let temporarySurfaceLease = false;
+  if (surfaceExpected !== false) {
+    try {
+      captured = await capturePageWithBoundedSurfaceReadiness(webContents, surfaceOptions);
+    } catch (error) {
+      if (error?.code !== 'NATIVE_CAPTURE_SURFACE_UNAVAILABLE') throw error;
+      surfaceError = error;
+    }
+  } else {
+    const exactView = typeof resolveViewImpl === 'function' ? resolveViewImpl(webContents) : null;
+    if (exactView?.webContents === webContents && exactView.getVisible?.() !== false && typeof withDetachedSurfaceImpl === 'function') {
+      try {
+        captured = await withDetachedSurfaceImpl(
+          exactView,
+          () => capturePageWithBoundedSurfaceReadiness(webContents, surfaceOptions),
+          { deadlineMs: temporarySurfaceDeadlineMs },
+        );
+        temporarySurfaceLease = true;
+      } catch (error) {
+        const wrapped = captureSurfaceUnavailableError(0, error);
+        wrapped.temporary_surface_error_code = error?.code || null;
+        wrapped.automatic_retry_allowed = false;
+        throw wrapped;
+      }
+    } else {
+      surfaceError = captureSurfaceUnavailableError(0, 'DETACHED_VIEW');
+    }
+  }
+
+  if (!captured) {
+    try {
+      const fallback = await captureCdpThumbnail(webContents, {
+        withDebuggerImpl,
+        fromSurface: surfaceExpected !== false,
+        deadlineMs: cdpDeadlineMs,
+        releaseDebuggerImpl,
+      });
+      const jpeg = fallback.jpeg;
+      return {
+        schema: 'metaengine.native-browser.capture-thumbnail.v1',
+        captured_at: new Date().toISOString(),
+        url: clip(webContents.getURL?.() || '', 1200),
+        title: clip(webContents.getTitle?.() || '', 240),
+        source_width: fallback.viewport.width,
+        source_height: fallback.viewport.height,
+        capture_attempts: Number(surfaceError?.attempts || 0),
+        transient_surface_retries: Number(surfaceError?.attempts || 0),
+        bounded_surface_readiness: true,
+        capture_backend: 'CDP_SCREENSHOT',
+        capture_from_surface: fallback.fromSurface,
+        cdp_deadline_ms: Math.max(10, Math.min(15000, Number(cdpDeadlineMs) || DEFAULT_CAPTURE_CDP_DEADLINE_MS)),
+        detached_surface_fallback: surfaceExpected === false,
+        temporary_surface_lease: false,
+        native_surface_error: clip(surfaceError?.message || 'native_capture_surface_unavailable', 240),
+        jpeg_bytes: jpeg.byteLength,
+        sha256: crypto.createHash('sha256').update(jpeg).digest('hex'),
+        jpeg_base64: jpeg.toString('base64'),
+        authority_effect: false,
+      };
+    } catch (fallbackError) {
+      const error = new Error(`${surfaceError?.message || 'native_capture_surface_unavailable'}:cdp_fallback:${clip(fallbackError?.message || fallbackError, 160)}`);
+      error.code = 'NATIVE_CAPTURE_SURFACE_UNAVAILABLE';
+      error.attempts = Number(surfaceError?.attempts || 0);
+      error.cdp_error_code = fallbackError?.code || null;
+      error.automatic_retry_allowed = false;
+      throw error;
+    }
+  }
   let image = captured.image;
   const size = captured.size;
   if (size.width > 720) image = image.resize({ width: 720, quality: 'good' });
@@ -437,6 +610,14 @@ export async function captureViewThumbnail(webContents, options = {}) {
     capture_attempts: captured.attempts,
     transient_surface_retries: captured.transientRetries,
     bounded_surface_readiness: true,
+    capture_backend: 'ELECTRON_CAPTURE_PAGE',
+    capture_from_surface: true,
+    detached_surface_fallback: temporarySurfaceLease,
+    temporary_surface_lease: temporarySurfaceLease,
+    temporary_surface_deadline_ms: temporarySurfaceLease
+      ? Math.max(250, Math.min(15000, Number(temporarySurfaceDeadlineMs) || DEFAULT_CAPTURE_CDP_DEADLINE_MS))
+      : null,
+    native_surface_error: temporarySurfaceLease ? 'DETACHED_VIEW_TEMPORARY_SURFACE_LEASED' : null,
     jpeg_bytes: jpeg.byteLength,
     sha256: crypto.createHash('sha256').update(jpeg).digest('hex'),
     jpeg_base64: jpeg.toString('base64'),

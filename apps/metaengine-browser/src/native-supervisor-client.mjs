@@ -14,6 +14,8 @@ import {
   normalizeWorkspaceBindingSnapshot,
   unavailableWorkspaceBindingSnapshot,
 } from './workspace-binding-observer.mjs';
+import { nativeSupervisorTransportState } from './native-supervisor-client-base.mjs';
+import { buildSupervisorLifecycleStatusSnapshot } from './supervisor-lifecycle-runtime.mjs';
 
 export * from './native-supervisor-client-core.mjs';
 
@@ -451,7 +453,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       const identity = await this.#workspaceIdentity.ensure();
       if (!identity?.device_id) return false;
       const base = super.snapshot();
-      const sourceState = await this.#sourceGetState();
+      const sourceState = nativeSupervisorTransportState(await this.#sourceGetState());
       const processPlane = this.#processPlaneRef?.()?.snapshot({ eventLimit: 64 }) || unavailableProcessPlane('PROCESS_PLANE_NOT_READY');
       const payload = {
         state: {
@@ -462,7 +464,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
           operator_mode: base?.supervisor_mode === 'CONTROL' ? 'CONTROL' : 'OBSERVE',
           started_at: base?.started_at || null,
           last_error: base?.last_error || null,
-          supervisor_lifecycle: base?.lifecycle || null,
+          supervisor_lifecycle: base?.lifecycle ? buildSupervisorLifecycleStatusSnapshot(base.lifecycle) : null,
           self_update: base?.self_update || null,
           realtime_process_plane: processPlane,
           control_latency: this.#controlLatencySnapshot?.() || null,

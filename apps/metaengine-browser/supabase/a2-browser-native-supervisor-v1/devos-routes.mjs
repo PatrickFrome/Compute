@@ -32,6 +32,26 @@ const TRANSPORT_ADMISSION_FENCES=new Set([
   'devos_transport_proof_time_in_future',
 ]);
 const json=(status,body)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
+const ENVIRONMENT_STATE_SCHEMA='metaengine.devos.environment-state.v1';
+
+export function unavailableDevosRuntimeControl(reason='READ_UNAVAILABLE'){
+  return Object.freeze({schema:ENVIRONMENT_STATE_SCHEMA,state:'UNAVAILABLE',reason:String(reason||'READ_UNAVAILABLE').slice(0,160),workspace_id:null,generation_floor:null,refill_enabled:null,supervisor_admission_enabled:null,continuous_service_allowed:false,authoritative:false,automatic_retry_allowed:false,authority_effect:false});
+}
+
+export function normalizeDevosRuntimeControl(value,{workspaceId}={}){
+  const expected=String(workspaceId||'').toLowerCase();
+  const observed=String(value?.workspace_id||'').toLowerCase();
+  const floor=value?.generation_floor;
+  if(!UUID_RE.test(expected)||!value||typeof value!=='object'||Array.isArray(value)||value.schema!==ENVIRONMENT_STATE_SCHEMA||value.authority_effect!==false||observed!==expected||typeof floor!=='number'||!Number.isSafeInteger(floor)||floor<0||typeof value.refill_enabled!=='boolean'||typeof value.supervisor_admission_enabled!=='boolean')return unavailableDevosRuntimeControl('READBACK_INVALID');
+  const allowed=value.refill_enabled===true&&value.supervisor_admission_enabled===true;
+  return Object.freeze({schema:ENVIRONMENT_STATE_SCHEMA,state:allowed?'OPEN':'CLOSED',reason:allowed?null:'CONTINUOUS_SERVICE_ADMISSION_FENCED',workspace_id:observed,generation_floor:floor,refill_enabled:value.refill_enabled,supervisor_admission_enabled:value.supervisor_admission_enabled,reset_at:value.reset_at||null,reset_reason:value.reset_reason?String(value.reset_reason).slice(0,240):null,continuous_service_allowed:allowed,authoritative:true,automatic_retry_allowed:false,authority_effect:false});
+}
+
+export async function readDevosRuntimeControl({rpc,workspaceId}={}){
+  if(typeof rpc!=='function'||!UUID_RE.test(String(workspaceId||'')))return unavailableDevosRuntimeControl('READ_DEPENDENCY_INVALID');
+  try{return normalizeDevosRuntimeControl(await rpc('devos_environment_state_v1',{p_workspace:workspaceId}),{workspaceId});}
+  catch{return unavailableDevosRuntimeControl('READ_FAILED');}
+}
 
 function int(value,name){const n=Number(value);if(!Number.isSafeInteger(n)||n<1)throw new Error(`devos_${name}_invalid`);return n;}
 function binding(body={}){
@@ -166,7 +186,7 @@ function schedulerBackpressure(result){
   return Object.freeze({active:true,reason:String(result?.reason||'SCHEDULER_BACKPRESSURE').slice(0,120),retry_after_ms:Math.max(1000,Math.min(300000,Number(result?.retry_after_ms)||60000)),page_signal_authority:false,automatic_retry_allowed:false,authority_effect:false});
 }
 
-export function createDevosSupervisorRoutes({rpc,workspaceId}={}){
+export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=null}={}){
   if(typeof rpc!=='function'||!UUID_RE.test(String(workspaceId||'')))throw new Error('devos_routes_dependencies_invalid');
   const metaSuperstep=createMetaDevosSuperstep({rpc,workspaceId});
   const workspaceObservation=createWorkspaceObservationRoutes({rpc,workspaceId});
@@ -190,6 +210,10 @@ export function createDevosSupervisorRoutes({rpc,workspaceId}={}){
     const workspaceReadback=await workspaceObservation({req,path,clientId});
     if(workspaceReadback)return workspaceReadback;
     if(req?.method==='POST'&&path==='/v1/devos/cycle'){
+      const runtimeControl=typeof readRuntimeControl==='function'?await readRuntimeControl():null;
+      if(runtimeControl&&runtimeControl.continuous_service_allowed!==true){
+        return json(200,{schema:'metaengine.devos.browser-cycle.v1',state:'ADMISSION_FENCED',runtime_control:runtimeControl,admission_fenced:true,reconcile:null,backlog:{ready:0,running:0,by_role:{},authority_effect:false},lease:null,scheduler_backpressure:null,lease_fenced:true,lease_fence_reason:runtimeControl.reason||'CONTINUOUS_SERVICE_ADMISSION_FENCED',running:[],scheduler_source:'NATIVE_SUPERVISOR_HEARTBEAT',scheduler_policy:'IDLE_ROLE_FAIR_SHARE_V1',lease_attempts:0,second_scheduler_loop:false,automatic_retry_allowed:false,authority_effect:false});
+      }
       const agents=boundedAgents(body?.fleet);
       const metaOrchestrator=await metaSuperstep({clientId});
       const reconcile=await rpc('devos_fleet_reconcile_v1',{p_workspace:workspaceId});
@@ -207,7 +231,7 @@ export function createDevosSupervisorRoutes({rpc,workspaceId}={}){
         }catch(error){leaseFence=transportAdmissionFence(error);if(!leaseFence)throw error;break;}
       }
       const backlog=deferredBacklog(rawBacklog,backpressure);
-      return json(200,{schema:'metaengine.devos.browser-cycle.v1',meta_orchestrator:metaOrchestrator,reconcile,backlog,lease,scheduler_backpressure:backpressure,lease_fenced:leaseFence?.fenced===true,lease_fence_reason:leaseFence?.reason||null,running:runningForAgents(snapshot,agents),scheduler_source:'NATIVE_SUPERVISOR_HEARTBEAT',scheduler_policy:'IDLE_ROLE_FAIR_SHARE_V1',lease_attempts:leaseAttempts,second_scheduler_loop:false,automatic_retry_allowed:false,authority_effect:false});
+      return json(200,{schema:'metaengine.devos.browser-cycle.v1',state:'OPEN',runtime_control:runtimeControl,admission_fenced:false,meta_orchestrator:metaOrchestrator,reconcile,backlog,lease,scheduler_backpressure:backpressure,lease_fenced:leaseFence?.fenced===true,lease_fence_reason:leaseFence?.reason||null,running:runningForAgents(snapshot,agents),scheduler_source:'NATIVE_SUPERVISOR_HEARTBEAT',scheduler_policy:'IDLE_ROLE_FAIR_SHARE_V1',lease_attempts:leaseAttempts,second_scheduler_loop:false,automatic_retry_allowed:false,authority_effect:false});
     }
     if(req?.method==='POST'&&path==='/v1/devos/mark-running'){
       const b=binding(body); const proof=body?.proof||{};

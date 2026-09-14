@@ -486,7 +486,7 @@ export class DevOsNativeTaskCycle {
     };
   }
 
-  async cycle() {
+  async runOnce() {
     try {
       await this.#promoteOneRestartTransport();
     } catch (error) {
@@ -511,6 +511,10 @@ export class DevOsNativeTaskCycle {
       throw error;
     }
     return this.snapshot();
+  }
+
+  async cycle() {
+    return this.runOnce();
   }
 
   async completeFromTrustedCommand(payload = {}) {

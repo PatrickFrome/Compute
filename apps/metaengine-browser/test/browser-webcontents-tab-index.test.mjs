@@ -4,8 +4,10 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 import {
+  clearWebContentsTabIndex,
   ExactBrowserTabViewMap,
   resolveExactWebContentsTabBinding,
+  resolveExactWebContentsView,
   resolveTabIdForWebContents,
   resolveWebContentsIdForTab,
   webContentsTabIndexSnapshot,
@@ -66,6 +68,47 @@ test('replacing a tab view fences the old WebContents id', () => {
   assert.equal(resolveWebContentsIdForTab(TAB_A), 205);
   assert.ok(resolveExactWebContentsTabBinding(TAB_A).binding_generation > oldGeneration);
   views.clear();
+});
+
+test('direct index reset clears exact object and view identity without stale fallback', () => {
+  const views = new ExactBrowserTabViewMap();
+  const wc = fakeWebContents(206);
+  const view = { webContents: wc };
+  views.set(TAB_A, view);
+
+  assert.equal(resolveTabIdForWebContents(wc), TAB_A);
+  assert.equal(resolveExactWebContentsView(wc), view);
+  clearWebContentsTabIndex();
+  assert.equal(resolveTabIdForWebContents(wc), null);
+  assert.equal(resolveTabIdForWebContents(206), null);
+  assert.equal(resolveWebContentsIdForTab(TAB_A), null);
+  assert.equal(resolveExactWebContentsView(wc), null);
+  assert.equal(webContentsTabIndexSnapshot().binding_count, 0);
+
+  views.delete(TAB_A);
+});
+
+test('same WebContentsView rebind moves canonical tab and destruction cleans current binding', () => {
+  const views = new ExactBrowserTabViewMap();
+  const wc = fakeWebContents(207);
+  const view = { webContents: wc };
+  views.set(TAB_A, view);
+  const firstGeneration = resolveExactWebContentsTabBinding(TAB_A).binding_generation;
+
+  views.set(TAB_B, view);
+  assert.equal(views.has(TAB_A), false);
+  assert.equal(views.get(TAB_B), view);
+  assert.equal(resolveTabIdForWebContents(wc), TAB_B);
+  assert.equal(resolveWebContentsIdForTab(TAB_A), null);
+  assert.equal(resolveWebContentsIdForTab(TAB_B), 207);
+  assert.ok(resolveExactWebContentsTabBinding(TAB_B).binding_generation > firstGeneration);
+  assert.equal(resolveExactWebContentsView(wc), view);
+
+  wc.emit('destroyed');
+  assert.equal(views.has(TAB_B), false);
+  assert.equal(resolveTabIdForWebContents(wc), null);
+  assert.equal(resolveWebContentsIdForTab(TAB_B), null);
+  assert.equal(resolveExactWebContentsView(wc), null);
 });
 
 test('main and process plane use exact index with no selected/url/title fallback', () => {

@@ -1,11 +1,11 @@
 import crypto from 'node:crypto';
 
-export const SUPERVISOR_KEEPALIVE_VERSION = '1.4.1';
+export const SUPERVISOR_KEEPALIVE_VERSION = '1.5.0';
 export const SUPERVISOR_ID = 'METAENGINE_SUPERVISOR';
 export const KEEPALIVE_STATES = Object.freeze([
   'ACTIVE','WAITING','WAKE_PENDING','WAKE_AMBIGUOUS',
   'ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS',
-  'PAUSED','RECOVERING',
+  'PAUSED','RECOVERING','PARKED',
 ]);
 
 const CHATGPT_CONVERSATION_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/c\/[a-z0-9-]+(?:[/?#].*)?$/i;
@@ -18,6 +18,7 @@ const WAKE_REASONS = new Set([
 const MAX_QUEUED_WAKES = 32;
 const MAX_WAKE_HISTORY = 32;
 const MAX_WORKER_GENERATION_MEMORY = 2048;
+const ADMISSION_STATES = new Set(['UNKNOWN', 'OPEN', 'CLOSED']);
 
 const clone = (value) => value == null ? value : structuredClone(value);
 const iso = (clock) => new Date(clock()).toISOString();
@@ -76,6 +77,19 @@ function freshState() {
     predecessor_process_incarnation_id: null,
     predecessor_fenced_at: null,
     predecessor_queued_wake_count: 0,
+    admission_state: 'UNKNOWN',
+    admission_reason: 'NOT_OBSERVED',
+    admission_generation_floor: null,
+    admission_refill_enabled: null,
+    admission_supervisor_enabled: null,
+    admission_observed_at: null,
+    parked_at: null,
+    parked_reason: null,
+    parked_queued_wake_count: 0,
+    parked_wake_reasons: [],
+    suppressed_wake_count: 0,
+    last_suppressed_wake_at: null,
+    last_suppressed_wake_reason: null,
     queued_wakes: [],
     pending_wake: null,
     active_wake: null,
@@ -122,6 +136,26 @@ function sanitize(input) {
     predecessor_process_incarnation_id: sanitizeProcessIncarnationId(input.predecessor_process_incarnation_id),
     predecessor_fenced_at: input.predecessor_fenced_at || null,
     predecessor_queued_wake_count: Math.max(0, Number(input.predecessor_queued_wake_count) || 0),
+    admission_state: ADMISSION_STATES.has(String(input.admission_state || '').toUpperCase())
+      ? String(input.admission_state).toUpperCase()
+      : 'UNKNOWN',
+    admission_reason: input.admission_reason ? String(input.admission_reason).slice(0, 160) : null,
+    admission_generation_floor: typeof input.admission_generation_floor === 'number'
+      && Number.isSafeInteger(input.admission_generation_floor)
+      ? Math.max(0, input.admission_generation_floor)
+      : null,
+    admission_refill_enabled: typeof input.admission_refill_enabled === 'boolean' ? input.admission_refill_enabled : null,
+    admission_supervisor_enabled: typeof input.admission_supervisor_enabled === 'boolean' ? input.admission_supervisor_enabled : null,
+    admission_observed_at: input.admission_observed_at || null,
+    parked_at: input.parked_at || null,
+    parked_reason: input.parked_reason ? String(input.parked_reason).slice(0, 160) : null,
+    parked_queued_wake_count: Math.max(0, Number(input.parked_queued_wake_count) || 0),
+    parked_wake_reasons: Array.isArray(input.parked_wake_reasons)
+      ? input.parked_wake_reasons.map((value) => String(value).slice(0, 80)).slice(-MAX_QUEUED_WAKES)
+      : [],
+    suppressed_wake_count: Math.max(0, Number(input.suppressed_wake_count) || 0),
+    last_suppressed_wake_at: input.last_suppressed_wake_at || null,
+    last_suppressed_wake_reason: input.last_suppressed_wake_reason ? String(input.last_suppressed_wake_reason).slice(0, 80) : null,
     queued_wakes: queued,
     pending_wake: input.pending_wake && typeof input.pending_wake === 'object' ? clone(input.pending_wake) : null,
     active_wake: sanitizeActiveWake(input.active_wake),
@@ -249,10 +283,17 @@ export class SupervisorKeepalive {
         automatic_retry_allowed: false,
       };
     }
+    if (crossedProcessBoundary && this.#state.admission_state === 'OPEN') {
+      // An OPEN decision is never trusted across a process boundary. A fresh
+      // authoritative heartbeat must reopen continuous-service actuation.
+      this.#state.admission_state = 'UNKNOWN';
+      this.#state.admission_reason = 'PROCESS_RESTART_REOBSERVATION_REQUIRED';
+    }
     if (this.#state.paused) this.#state.state = 'PAUSED';
     else if (this.#state.pending_wake) this.#state.state = 'WAKE_AMBIGUOUS';
     else if (['ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) {}
     else if (this.#state.active_wake) this.#state.state = 'ACTIVE';
+    else if (this.#state.admission_state === 'CLOSED') this.#state.state = 'PARKED';
     else this.#state.state = this.#state.conversation_url ? 'WAITING' : 'RECOVERING';
     await this.#persist();
     return this.snapshot();
@@ -269,11 +310,109 @@ export class SupervisorKeepalive {
   }
   activeWake() { return clone(this.#state.active_wake); }
 
+  async applyAdmissionClosed(control = {}) {
+    if (control?.authoritative !== true
+      || control?.state !== 'CLOSED'
+      || control?.continuous_service_allowed !== false
+      || typeof control?.refill_enabled !== 'boolean'
+      || typeof control?.supervisor_admission_enabled !== 'boolean'
+      || typeof control?.generation_floor !== 'number'
+      || !Number.isSafeInteger(control.generation_floor)) {
+      throw new Error('keepalive_admission_closed_readback_invalid');
+    }
+    if (this.#state.admission_generation_floor != null
+      && control.generation_floor < this.#state.admission_generation_floor) {
+      throw new Error('keepalive_admission_generation_floor_regression');
+    }
+    const observedAt = iso(this.#clock);
+    this.#state.admission_state = 'CLOSED';
+    this.#state.admission_reason = String(control.reason || 'CONTINUOUS_SERVICE_ADMISSION_FENCED').slice(0, 160);
+    this.#state.admission_generation_floor = Math.max(0, control.generation_floor);
+    this.#state.admission_refill_enabled = control.refill_enabled;
+    this.#state.admission_supervisor_enabled = control.supervisor_admission_enabled;
+    this.#state.admission_observed_at = observedAt;
+
+    if (this.#state.pending_wake) {
+      if (!this.#state.pending_wake.ambiguous_at) {
+        this.#state.pending_wake.ambiguous_at = observedAt;
+        this.#state.pending_wake.ambiguous_reason = 'ADMISSION_CLOSED_WITH_UNRESOLVED_WAKE_EFFECT';
+        this.#state.pending_wake.automatic_retry_allowed = false;
+      }
+      this.#state.state = 'WAKE_AMBIGUOUS';
+    } else if (this.#state.active_wake
+      || ['ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) {
+      // Preserve already-started or ambiguous effects. The lifecycle can still
+      // observe them read-only, but admission-aware canActuate() blocks follow-up.
+    } else {
+      const queued = this.#state.queued_wakes;
+      this.#state.parked_at = observedAt;
+      this.#state.parked_reason = this.#state.admission_reason;
+      this.#state.parked_queued_wake_count = queued.length;
+      this.#state.parked_wake_reasons = [...new Set(queued.map((row) => String(row?.reason || '')).filter(Boolean))];
+      this.#state.queued_wakes = [];
+      // A released-but-not-started rollover is still only queued intent. Retire
+      // it together with wakes so a later pause/resume cannot resurrect it.
+      this.#state.rollover_reason = null;
+      this.#state.rollover_release_at = null;
+      this.#state.rollover_attempt = null;
+      this.#state.state = this.#state.paused ? 'PAUSED' : 'PARKED';
+    }
+    await this.#persist();
+    return this.snapshot();
+  }
+
+  async applyAdmissionOpen(control = {}) {
+    if (control?.authoritative !== true
+      || control?.state !== 'OPEN'
+      || control?.continuous_service_allowed !== true
+      || control?.refill_enabled !== true
+      || control?.supervisor_admission_enabled !== true
+      || typeof control?.generation_floor !== 'number'
+      || !Number.isSafeInteger(control.generation_floor)) {
+      throw new Error('keepalive_admission_open_readback_invalid');
+    }
+    if (this.#state.admission_generation_floor != null
+      && control.generation_floor < this.#state.admission_generation_floor) {
+      throw new Error('keepalive_admission_generation_floor_regression');
+    }
+    this.#state.admission_state = 'OPEN';
+    this.#state.admission_reason = null;
+    this.#state.admission_generation_floor = Math.max(0, control.generation_floor);
+    this.#state.admission_refill_enabled = true;
+    this.#state.admission_supervisor_enabled = true;
+    this.#state.admission_observed_at = iso(this.#clock);
+    if (this.#state.state === 'PARKED') {
+      // Parked queue entries are deliberately retired and never reconstructed.
+      this.#state.state = this.#state.conversation_url ? 'WAITING' : 'RECOVERING';
+    }
+    await this.#persist();
+    return this.snapshot();
+  }
+
+  async applyAdmissionUnavailable(reason = 'AUTHORITATIVE_READBACK_UNAVAILABLE') {
+    if (this.#state.admission_state === 'CLOSED') return this.snapshot();
+    this.#state.admission_state = 'UNKNOWN';
+    this.#state.admission_reason = String(reason || 'AUTHORITATIVE_READBACK_UNAVAILABLE').slice(0, 160);
+    this.#state.admission_refill_enabled = null;
+    this.#state.admission_supervisor_enabled = null;
+    this.#state.admission_observed_at = iso(this.#clock);
+    if (!this.#state.paused
+      && !this.#state.pending_wake
+      && !this.#state.active_wake
+      && !['ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) {
+      this.#state.state = 'RECOVERING';
+    }
+    await this.#persist();
+    return this.snapshot();
+  }
+
   async bindConversation({ url, tab_id = null } = {}) {
     this.#state.conversation_url = normalizeUrl(url);
     this.#state.tab_id = tab_id ? String(tab_id) : null;
     this.#state.pending_wake = null;
-    this.#state.state = this.#state.paused ? 'PAUSED' : (this.#state.active_wake ? 'ACTIVE' : 'WAITING');
+    this.#state.state = this.#state.paused
+      ? 'PAUSED'
+      : (this.#state.admission_state === 'CLOSED' ? 'PARKED' : (this.#state.active_wake ? 'ACTIVE' : 'WAITING'));
     this.#state.rollover_reason = null;
     this.#state.rollover_release_at = null;
     this.#state.rollover_attempt = null;
@@ -286,7 +425,9 @@ export class SupervisorKeepalive {
     this.#state.tab_id = tabId ? String(tabId) : null;
     if (this.#state.paused) this.#state.state = 'PAUSED';
     else if (this.#state.pending_wake) this.#state.state = this.#state.pending_wake.ambiguous_at ? 'WAKE_AMBIGUOUS' : 'WAKE_PENDING';
-    else if (!['ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) this.#state.state = this.#state.active_wake ? 'ACTIVE' : 'WAITING';
+    else if (!['ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) {
+      this.#state.state = this.#state.admission_state === 'CLOSED' ? 'PARKED' : (this.#state.active_wake ? 'ACTIVE' : 'WAITING');
+    }
     await this.#persist();
     return this.snapshot();
   }
@@ -308,6 +449,7 @@ export class SupervisorKeepalive {
     else if (this.#state.rollover_reason && !this.#state.rollover_release_at) this.#state.state = 'ROLLOVER_DEFERRED';
     else if (this.#state.rollover_reason && this.#state.rollover_release_at) this.#state.state = this.#state.rollover_attempt ? 'ROLLOVER_AMBIGUOUS' : 'ROLLOVER_REQUIRED';
     else if (this.#state.active_wake) this.#state.state = 'ACTIVE';
+    else if (this.#state.admission_state === 'CLOSED') this.#state.state = 'PARKED';
     else this.#state.state = this.#state.conversation_url ? 'WAITING' : 'RECOVERING';
     await this.#persist();
     return this.snapshot();
@@ -316,6 +458,13 @@ export class SupervisorKeepalive {
   async enqueueWake(reason, metadata = {}) {
     const normalizedReason = String(reason || '');
     if (!WAKE_REASONS.has(normalizedReason)) throw new Error('keepalive_wake_reason_invalid');
+    if (this.#state.admission_state === 'CLOSED') {
+      this.#state.suppressed_wake_count += 1;
+      this.#state.last_suppressed_wake_at = iso(this.#clock);
+      this.#state.last_suppressed_wake_reason = normalizedReason;
+      await this.#persist();
+      return this.snapshot();
+    }
     const key = `${normalizedReason}:${String(metadata.agent_id || metadata.key || '')}`;
     const existing = this.#state.queued_wakes.find((row) => row.key === key && row.process_incarnation_id === this.#processIncarnationId);
     if (existing) {
@@ -346,6 +495,7 @@ export class SupervisorKeepalive {
 
   async requestRollover(reason = 'CONVERSATION_LIMIT') {
     const normalizedReason = String(reason || 'CONVERSATION_LIMIT').slice(0, 160);
+    if (this.#state.admission_state === 'CLOSED') return this.snapshot();
     if (!this.#state.conversation_url) {
       this.#state.state = 'RECOVERING';
       this.#state.rollover_reason = normalizedReason;
@@ -362,6 +512,7 @@ export class SupervisorKeepalive {
   }
 
   async approveRollover(reason = 'EXPLICIT_SUPERVISOR_RELEASE') {
+    if (this.#state.admission_state === 'CLOSED') throw new Error('keepalive_admission_closed');
     if (this.#state.state !== 'ROLLOVER_DEFERRED') throw new Error('keepalive_rollover_not_deferred');
     if (!this.#state.conversation_url) throw new Error('keepalive_supervisor_unbound');
     this.#state.state = 'ROLLOVER_REQUIRED';
@@ -373,6 +524,7 @@ export class SupervisorKeepalive {
   }
 
   async beginRolloverAttempt() {
+    if (this.#state.admission_state === 'CLOSED') throw new Error('keepalive_admission_closed');
     if (this.#state.state !== 'ROLLOVER_REQUIRED') throw new Error('keepalive_rollover_not_released');
     const attemptId = `rollover_${String(this.#uuid()).replace(/[^a-z0-9-]/gi, '').toLowerCase()}`;
     this.#state.rollover_attempt = {
@@ -424,7 +576,9 @@ export class SupervisorKeepalive {
     this.#state.rollover_attempt = null;
     this.#state.conversation_url = normalizeUrl(url);
     this.#state.tab_id = tab_id ? String(tab_id) : null;
-    this.#state.state = this.#state.paused ? 'PAUSED' : 'WAITING';
+    this.#state.state = this.#state.paused
+      ? 'PAUSED'
+      : (this.#state.admission_state === 'CLOSED' ? 'PARKED' : 'WAITING');
     await this.#persist();
     return this.snapshot();
   }
@@ -455,7 +609,9 @@ export class SupervisorKeepalive {
   }
 
   canWake() {
-    if (this.#state.paused || ['WAKE_AMBIGUOUS','ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) return false;
+    if (this.#state.admission_state === 'CLOSED'
+      || this.#state.paused
+      || ['PARKED','WAKE_AMBIGUOUS','ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) return false;
     const actionable = this.#state.queued_wakes.filter((row) => row.process_incarnation_id === this.#processIncarnationId);
     if (!this.#state.conversation_url || this.#state.pending_wake || this.#state.active_wake || actionable.length === 0) return false;
     if (!this.#state.last_wake_at) return true;
@@ -518,7 +674,9 @@ export class SupervisorKeepalive {
   async markCycleComplete() {
     this.#state.last_completed_cycle_at = iso(this.#clock);
     this.#state.active_wake = null;
-    if (!this.#state.paused && !['ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) this.#state.state = 'WAITING';
+    if (!this.#state.paused && !['ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) {
+      this.#state.state = this.#state.admission_state === 'CLOSED' ? 'PARKED' : 'WAITING';
+    }
     await this.#persist();
     return this.snapshot();
   }
@@ -555,7 +713,9 @@ export class SupervisorKeepalive {
     ].slice(-MAX_WAKE_HISTORY);
     this.#state.pending_wake = null;
     this.#state.last_completed_cycle_at = retiredAt;
-    this.#state.state = this.#state.paused ? 'PAUSED' : (this.#state.active_wake ? 'ACTIVE' : 'WAITING');
+    this.#state.state = this.#state.paused
+      ? 'PAUSED'
+      : (this.#state.admission_state === 'CLOSED' ? 'PARKED' : (this.#state.active_wake ? 'ACTIVE' : 'WAITING'));
     await this.#persist();
     return this.snapshot();
   }
@@ -565,7 +725,9 @@ export class SupervisorKeepalive {
     if (observed_sent === true) return this.confirmWakeSent(this.#state.pending_wake.wake_id);
     if (observed_sent === false) {
       this.#state.pending_wake = null;
-      this.#state.state = this.#state.paused ? 'PAUSED' : (this.#state.active_wake ? 'ACTIVE' : 'WAITING');
+      this.#state.state = this.#state.paused
+        ? 'PAUSED'
+        : (this.#state.admission_state === 'CLOSED' ? 'PARKED' : (this.#state.active_wake ? 'ACTIVE' : 'WAITING'));
       await this.#persist();
       return this.snapshot();
     }

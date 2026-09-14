@@ -1,10 +1,11 @@
 export const BROWSER_WEBCONTENTS_TAB_INDEX_SCHEMA = 'metaengine.browser.webcontents-tab-index.v1';
 
-const tabByWebContents = new WeakMap();
+let tabByWebContents = new WeakMap();
 const tabByWebContentsId = new Map();
 const webContentsIdByTab = new Map();
 const bindingGenerationByTab = new Map();
 const destroyedHandlerByWebContents = new WeakMap();
+let exactViewByWebContents = new WeakMap();
 let bindingSequence = 0;
 
 function validTabId(value) {
@@ -23,7 +24,30 @@ function exactWebContentsId(webContentsOrId) {
   return id;
 }
 
-export function bindWebContentsToTab(tabIdRaw, webContents) {
+export function bindExactWebContentsView(webContents, view) {
+  if (!webContents || typeof webContents !== 'object') throw new Error('browser_webcontents_tab_index_webcontents_required');
+  if (!view || typeof view !== 'object' || view.webContents !== webContents) throw new Error('browser_webcontents_tab_index_view_invalid');
+  exactViewByWebContents.set(webContents, view);
+  return view;
+}
+
+export function unbindExactWebContentsView(webContents, expectedView = null) {
+  if (!webContents || typeof webContents !== 'object') return false;
+  const current = exactViewByWebContents.get(webContents) || null;
+  if (!current) return false;
+  if (expectedView != null && current !== expectedView) return false;
+  exactViewByWebContents.delete(webContents);
+  return true;
+}
+
+export function resolveExactWebContentsView(webContents) {
+  if (!webContents || typeof webContents !== 'object' || webContents.isDestroyed?.()) return null;
+  const view = exactViewByWebContents.get(webContents) || null;
+  if (!view || view.webContents !== webContents) return null;
+  return view;
+}
+
+export function bindWebContentsToTab(tabIdRaw, webContents, view = null) {
   if (!webContents || typeof webContents !== 'object') throw new Error('browser_webcontents_tab_index_webcontents_required');
   const tabId = validTabId(tabIdRaw);
   const webContentsId = exactWebContentsId(webContents);
@@ -46,6 +70,7 @@ export function bindWebContentsToTab(tabIdRaw, webContents) {
   tabByWebContentsId.set(webContentsId, tabId);
   webContentsIdByTab.set(tabId, webContentsId);
   bindingGenerationByTab.set(tabId, bindingGeneration);
+  if (view != null) bindExactWebContentsView(webContents, view);
 
   return Object.freeze({
     schema: BROWSER_WEBCONTENTS_TAB_INDEX_SCHEMA,
@@ -71,7 +96,10 @@ export function unbindWebContentsFromTab(webContentsOrId, expectedTabId = null) 
     webContentsIdByTab.delete(current);
     bindingGenerationByTab.delete(current);
   }
-  if (webContentsOrId && typeof webContentsOrId === 'object') tabByWebContents.delete(webContentsOrId);
+  if (webContentsOrId && typeof webContentsOrId === 'object') {
+    tabByWebContents.delete(webContentsOrId);
+    unbindExactWebContentsView(webContentsOrId);
+  }
   return true;
 }
 
@@ -122,6 +150,8 @@ export function resolveExactWebContentsTabBinding(tabIdRaw) {
 }
 
 export function clearWebContentsTabIndex() {
+  tabByWebContents = new WeakMap();
+  exactViewByWebContents = new WeakMap();
   tabByWebContentsId.clear();
   webContentsIdByTab.clear();
   bindingGenerationByTab.clear();
@@ -135,19 +165,28 @@ export function clearWebContentsTabIndex() {
 export class ExactBrowserTabViewMap extends Map {
   set(tabIdRaw, view) {
     const tabId = validTabId(tabIdRaw);
+    const webContents = view?.webContents;
+    if (!webContents || typeof webContents !== 'object') throw new Error('browser_webcontents_tab_index_view_invalid');
+
+    const priorTabForWebContents = resolveTabIdForWebContents(webContents);
+    if (priorTabForWebContents && priorTabForWebContents !== tabId && super.get(priorTabForWebContents) === view) {
+      super.delete(priorTabForWebContents);
+    }
+
     const prior = super.get(tabId);
     if (prior?.webContents && prior !== view) unbindWebContentsFromTab(prior.webContents, tabId);
     const result = super.set(tabId, view);
-    const webContents = view?.webContents;
-    if (!webContents || typeof webContents !== 'object') {
-      super.delete(tabId);
-      throw new Error('browser_webcontents_tab_index_view_invalid');
-    }
-    bindWebContentsToTab(tabId, webContents);
+    bindWebContentsToTab(tabId, webContents, view);
     if (!destroyedHandlerByWebContents.has(webContents) && typeof webContents.once === 'function') {
       const handler = () => {
-        unbindWebContentsFromTab(webContents, tabId);
-        if (super.get(tabId) === view) super.delete(tabId);
+        const currentTabId = resolveTabIdForWebContents(webContents);
+        const currentView = resolveExactWebContentsView(webContents);
+        if (currentTabId) unbindWebContentsFromTab(webContents, currentTabId);
+        else {
+          tabByWebContents.delete(webContents);
+          unbindExactWebContentsView(webContents, currentView);
+        }
+        if (currentTabId && super.get(currentTabId)?.webContents === webContents) super.delete(currentTabId);
       };
       destroyedHandlerByWebContents.set(webContents, handler);
       webContents.once('destroyed', handler);
@@ -158,13 +197,19 @@ export class ExactBrowserTabViewMap extends Map {
   delete(tabIdRaw) {
     const tabId = String(tabIdRaw || '');
     const view = super.get(tabId);
-    if (view?.webContents) unbindWebContentsFromTab(view.webContents, tabId);
+    if (view?.webContents) {
+      unbindWebContentsFromTab(view.webContents, tabId);
+      unbindExactWebContentsView(view.webContents, view);
+    }
     return super.delete(tabId);
   }
 
   clear() {
     for (const [tabId, view] of this.entries()) {
-      if (view?.webContents) unbindWebContentsFromTab(view.webContents, tabId);
+      if (view?.webContents) {
+        unbindWebContentsFromTab(view.webContents, tabId);
+        unbindExactWebContentsView(view.webContents, view);
+      }
     }
     super.clear();
     clearWebContentsTabIndex();
@@ -187,6 +232,7 @@ export function webContentsTabIndexSnapshot() {
     title_fallback: false,
     automatic_destroy_cleanup: true,
     binding_generation_monotonic_within_process: true,
+    exact_view_identity_available: true,
     authority_effect: false,
   });
 }

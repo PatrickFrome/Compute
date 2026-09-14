@@ -3,6 +3,7 @@ import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
 import { evaluateFleetSubmitReadiness } from './fleet-submit-readiness.mjs';
 import { planElasticFleetCapacity } from './fleet-elastic-governor.mjs';
 import { FLEET_TAB_CEILING } from './tab-registry.mjs';
+import { devosRuntimeControlAllowsContinuousService, normalizeDevosRuntimeControl } from './devos-runtime-control.mjs';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA40_RE = /^[a-f0-9]{40}$/;
@@ -275,6 +276,18 @@ export class DevOsNativeTaskCycle {
     if (planResponse.status === 404) return this.#record({ state: 'SERVER_ROUTE_UNAVAILABLE', ambiguity_recovery: ambiguityRecovery });
     const plan = await responseJson(planResponse, 'devos_cycle_http');
     if (plan.schema !== 'metaengine.devos.browser-cycle.v1') throw new Error('devos_cycle_schema_invalid');
+    if (plan.admission_fenced === true) {
+      const runtimeControl = normalizeDevosRuntimeControl(plan.runtime_control);
+      if (devosRuntimeControlAllowsContinuousService(runtimeControl)) throw new Error('devos_cycle_admission_fence_contradiction');
+      return this.#record({
+        state: 'ADMISSION_FENCED',
+        runtime_control: runtimeControl,
+        fleet_reconcile_attempted: false,
+        lease_attempted: false,
+        physical_effect_attempted: false,
+        ambiguity_recovery: ambiguityRecovery,
+      });
+    }
 
     const capacity = planElasticFleetCapacity({ backlog: plan.backlog, fleetSnapshot, idleCycles: this.#elasticIdleCycles, tabCensus: tabCensusFromState(state) });
     this.#elasticIdleCycles = capacity.idle_cycles;

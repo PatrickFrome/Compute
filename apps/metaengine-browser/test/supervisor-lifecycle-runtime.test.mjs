@@ -114,6 +114,46 @@ test('lifecycle recognizes current Russian stop-response control as active gener
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test('supervisor wake uses one semantic submit and trusts its event-driven generation proof', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-lifecycle-submit-latch-'));
+  const statePath = path.join(dir, 'keepalive.json');
+  const commands = [];
+  let generating = false;
+  const getState = async () => ({
+    tabs: [{ tab_id: 'tab1', url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', selected: true }],
+    fleet: { agents: [] },
+  });
+  const executeCommand = async (command) => {
+    commands.push(structuredClone(command));
+    if (command.action === 'CAPTURE') return generating ? generatingFrame() : idleFrame();
+    if (command.action === 'SEMANTIC_TYPE') {
+      assert.equal(command.platform, 'CHATGPT');
+      assert.equal(command.payload.submit_after_type, true);
+      generating = true;
+      return { effect_state: 'PROVEN_GENERATING', event_driven_readback: true, authority_effect: true };
+    }
+    if (command.action === 'TYPED_CLICK') throw new Error('second send effect must not be dispatched');
+    throw new Error(`unexpected_action:${command.action}`);
+  };
+  const runtime = new SupervisorLifecycleRuntime({
+    getState,
+    executeCommand,
+    canActuate: () => true,
+    statePath,
+    monitorMs: 1000,
+    researchMs: 5 * 60 * 1000,
+  });
+
+  await runtime.start();
+  assert.equal(commands.filter((row) => row.action === 'SEMANTIC_TYPE').length, 1);
+  assert.equal(commands.some((row) => row.action === 'TYPED_CLICK'), false);
+  assert.equal(runtime.snapshot().keepalive.state, 'ACTIVE');
+  assert.equal(runtime.snapshot().keepalive.ambiguous_history.length, 0);
+  assert.equal(runtime.snapshot().continuous_service.wake_send_transport, 'SEMANTIC_TYPE_SUBMIT_EVENT_LATCH_V1');
+
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test('process restart fences predecessor wake and backlog before emitting one fresh lifecycle wake', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-lifecycle-active-retire-'));
   const statePath = path.join(dir, 'keepalive.json');
