@@ -1,0 +1,121 @@
+name: METAENGINE Browser Runtime Coherence Parallel Integration V1
+
+on:
+  push:
+    branches:
+      - 'work/runtime-coherence-parallel-integration-v1'
+    paths:
+      - 'apps/metaengine-browser/src/native-effect-binding.mjs'
+      - 'apps/metaengine-browser/src/native-effect-runtime-observation.mjs'
+      - 'apps/metaengine-browser/test/native-effect-state-revision.test.mjs'
+      - 'apps/metaengine-browser/test/checkpoint-ledger-integrity-guard-contract.test.mjs'
+      - 'supabase/migrations/20260914001000_checkpoint_ledger_integrity_guard_v1.sql'
+      - '.github/workflows/browser-runtime-coherence-parallel-integration-v1.yml'
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/native-effect-binding.mjs'
+      - 'apps/metaengine-browser/src/native-effect-runtime-observation.mjs'
+      - 'apps/metaengine-browser/test/native-effect-state-revision.test.mjs'
+      - 'apps/metaengine-browser/test/checkpoint-ledger-integrity-guard-contract.test.mjs'
+      - 'supabase/migrations/20260914001000_checkpoint_ledger_integrity_guard_v1.sql'
+      - '.github/workflows/browser-runtime-coherence-parallel-integration-v1.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  parallel-source-integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          printf 'exact_head=%s\n' "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Parse integrated StateRevision sources
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/native-effect-binding.mjs
+          node --check src/native-effect-runtime-observation.mjs
+          node --check test/native-effect-state-revision.test.mjs
+          node --check test/checkpoint-ledger-integrity-guard-contract.test.mjs
+
+      - name: Prove StateRevision and ledger guard contracts
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            test/native-effect-state-revision.test.mjs \
+            test/checkpoint-ledger-integrity-guard-contract.test.mjs
+
+      - name: Prove deterministic StateRevision safety shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          observation='apps/metaengine-browser/src/native-effect-runtime-observation.mjs'
+          binding='apps/metaengine-browser/src/native-effect-binding.mjs'
+          grep -Fq "metaengine.native-browser.state-revision.v1" "$observation"
+          grep -Fq "state_revision_id" "$observation"
+          grep -Fq "automatic_retry_allowed: false" "$observation"
+          grep -Fq "authority_effect: false" "$observation"
+          grep -Fq "state_revision_id" "$binding"
+          grep -Fq "native_effect_binding_runtime_observation_missing" "$binding"
+          grep -Fq "automatic_retry_allowed: false" "$binding"
+          grep -Fq "authority_effect: false" "$binding"
+
+      - name: Prove checkpoint ledger guard is append-only and hash-bound
+        shell: bash
+        run: |
+          set -euo pipefail
+          sql='supabase/migrations/20260914001000_checkpoint_ledger_integrity_guard_v1.sql'
+          test -f "$sql"
+          grep -Eiq 'security[[:space:]]+invoker' "$sql"
+          grep -Fq "set search_path = ''" "$sql"
+          grep -Fq "extensions.digest(new.state::text,'sha256'::text)" "$sql"
+          grep -Eiq 'before[[:space:]]+insert[[:space:]]+on[[:space:]]+destruktion_meta\.checkpoint_ledger' "$sql"
+          grep -Eiq 'before[[:space:]]+update[[:space:]]+or[[:space:]]+delete[[:space:]]+on[[:space:]]+destruktion_meta\.checkpoint_ledger' "$sql"
+          grep -Fq 'checkpoint_ledger_state_hash_mismatch' "$sql"
+          ! grep -Eiq 'update[[:space:]]+destruktion_meta\.checkpoint_ledger[[:space:]]+set' "$sql"
+          ! grep -Eiq 'delete[[:space:]]+from[[:space:]]+destruktion_meta\.checkpoint_ledger' "$sql"
+          ! grep -Eiq 'validate[[:space:]]+constraint' "$sql"
+
+      - name: Prove source checkout unchanged and non-authoritative
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          printf 'production_mutation=false\n'
+          printf 'live_ddl=false\n'
+          printf 'release_promotion=false\n'
+          printf 'automatic_effect_retry_allowed=false\n'
