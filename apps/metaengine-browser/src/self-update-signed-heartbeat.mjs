@@ -3,7 +3,13 @@ import { recordAcceptedSignedSupervisorHeartbeat } from './self-update-successor
 
 export const NATIVE_SUPERVISOR_HOST = 'xpeibufgzjknrhbhpffp.supabase.co';
 export const NATIVE_SUPERVISOR_STATE_PATH = '/functions/v1/a2-browser-native-supervisor-v1/v1/state';
+export const NATIVE_SUPERVISOR_HEARTBEAT_PATH = '/functions/v1/a2-browser-native-supervisor-v1/v1/heartbeat';
 export const NATIVE_SUPERVISOR_DEVICE_PROFILE = 'A2_DEVICE_HTTP_SIGNATURE_V1';
+
+const SIGNED_HEARTBEAT_ELIGIBLE_PATHS = new Set([
+  NATIVE_SUPERVISOR_STATE_PATH,
+  NATIVE_SUPERVISOR_HEARTBEAT_PATH,
+]);
 
 function requestUrl(input) {
   if (typeof input === 'string') return input;
@@ -36,7 +42,11 @@ export function inspectSignedNativeSupervisorStateRequest(input, init = {}) {
   let url;
   try { url = new URL(requestUrl(input)); }
   catch { return Object.freeze({ valid: false, reason: 'url_invalid' }); }
-  if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== NATIVE_SUPERVISOR_HOST || url.pathname !== NATIVE_SUPERVISOR_STATE_PATH) {
+  if (
+    url.protocol !== 'https:'
+    || url.hostname.toLowerCase() !== NATIVE_SUPERVISOR_HOST
+    || !SIGNED_HEARTBEAT_ELIGIBLE_PATHS.has(url.pathname)
+  ) {
     return Object.freeze({ valid: false, reason: 'endpoint_mismatch' });
   }
 
