@@ -14,6 +14,7 @@ on:
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/heartbeat-route.mjs'
       - 'apps/metaengine-browser/supabase/native-supervisor-heartbeat-v1.sql'
       - 'apps/metaengine-browser/test/heartbeat-coherence-v1.test.mjs'
+      - 'apps/metaengine-browser/test/heartbeat-payload-shape-v1.test.mjs'
       - 'apps/metaengine-browser/test/native-supervisor-heartbeat-migration-v1.test.mjs'
       - 'apps/metaengine-browser/test/keepalive-admission-parking-v1.test.mjs'
       - 'apps/metaengine-browser/test/native-supervisor-heartbeat-watchdog.test.mjs'
@@ -29,6 +30,7 @@ on:
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/heartbeat-route.mjs'
       - 'apps/metaengine-browser/supabase/native-supervisor-heartbeat-v1.sql'
       - 'apps/metaengine-browser/test/heartbeat-coherence-v1.test.mjs'
+      - 'apps/metaengine-browser/test/heartbeat-payload-shape-v1.test.mjs'
       - 'apps/metaengine-browser/test/native-supervisor-heartbeat-migration-v1.test.mjs'
       - 'apps/metaengine-browser/test/keepalive-admission-parking-v1.test.mjs'
       - 'apps/metaengine-browser/test/native-supervisor-heartbeat-watchdog.test.mjs'
@@ -84,6 +86,7 @@ jobs:
           node --check supabase/a2-browser-native-supervisor-v1/heartbeat-route.mjs
           node --check supabase/a2-browser-native-supervisor-v1/cognitive-delta-routes.mjs
           node --check test/heartbeat-coherence-v1.test.mjs
+          node --check test/heartbeat-payload-shape-v1.test.mjs
           node --check test/native-supervisor-heartbeat-migration-v1.test.mjs
           node --check test/keepalive-admission-parking-v1.test.mjs
 
@@ -94,6 +97,7 @@ jobs:
           set -euo pipefail
           node --test \
             test/heartbeat-coherence-v1.test.mjs \
+            test/heartbeat-payload-shape-v1.test.mjs \
             test/native-supervisor-heartbeat-migration-v1.test.mjs \
             test/keepalive-admission-parking-v1.test.mjs \
             test/native-supervisor-heartbeat-watchdog.test.mjs
@@ -117,6 +121,7 @@ jobs:
           grep -Fq "identity: coherent.identity" "$client"
           grep -Fq "fetchImpl: coherent.fetchImpl" "$client"
           grep -Fq "const HEARTBEAT_PHASES = new Set(['BOOTSTRAP', 'WATCHDOG'])" "$route"
+          grep -Fq "const HEARTBEAT_FIELDS = new Set(['phase', 'authority_effect'])" "$route"
           grep -Fq "state_document_mutated: false" "$route"
           grep -Fq "liveness_mutated: true" "$route"
           grep -Fq "last_seen_at_mutated: true" "$route"
@@ -144,9 +149,7 @@ jobs:
           grep -Fq "'state_document_mutated', false" "$sql"
           grep -Fq "'liveness_mutated', true" "$sql"
           grep -Fq "'last_seen_at_mutated', true" "$sql"
-          grep -Eiq 'revoke[[:space:]]+all[^;]+from[[:space:]]+public' "$sql"
-          grep -Eiq 'revoke[[:space:]]+all[^;]+from[[:space:]]+anon' "$sql"
-          grep -Eiq 'revoke[[:space:]]+all[^;]+from[[:space:]]+authenticated' "$sql"
+          grep -Eiq 'revoke[[:space:]]+all[^;]+from[[:space:]]+public[[:space:]]*,[[:space:]]*anon[[:space:]]*,[[:space:]]*authenticated[[:space:]]*;' "$sql"
           grep -Eiq 'grant[[:space:]]+execute[^;]+to[[:space:]]+service_role' "$sql"
           ! grep -Eiq 'grant[[:space:]]+execute[^;]+to[[:space:]]+(public|anon|authenticated)' "$sql"
 
