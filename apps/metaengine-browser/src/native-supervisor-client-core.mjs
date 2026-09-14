@@ -1,5 +1,6 @@
 import {
   NativeSupervisorClient as UnwiredNativeSupervisorClient,
+  NATIVE_SUPERVISOR_RUNTIME_PATH,
 } from './native-supervisor-client-core-base.mjs';
 import { createNativeGuardianDeveloperEmergencyUpdateController } from './developer-emergency-update-native-controller.mjs';
 
@@ -8,6 +9,9 @@ export * from './native-supervisor-client-core-base.mjs';
 const DEV_RELEASE_VERSION = /^\d+\.\d+\.\d+-dev\.\d+\.1$/;
 const STATE_ROUTE_SUFFIX = '/v1/state';
 const HEARTBEAT_ROUTE_SUFFIX = '/v1/heartbeat';
+const BATCH_WAIT_ROUTE_SUFFIX = '/v1/commands/wait-batch';
+const SINGLE_NEXT_ROUTE_SUFFIX = '/v1/commands/next';
+const TRANSIENT_BATCH_HTTP_STATUSES = new Set([502, 503, 504]);
 
 function hasOwn(value, key) {
   return Object.prototype.hasOwnProperty.call(value, key);
@@ -35,7 +39,57 @@ export function nativeSupervisorHeartbeatTarget(target, bodyText) {
   return `${value.slice(0, -STATE_ROUTE_SUFFIX.length)}${HEARTBEAT_ROUTE_SUFFIX}`;
 }
 
-export function createNativeSupervisorHeartbeatTransport({ identity, fetchImpl } = {}) {
+async function transientBatchSingleLeaseFallback({ response, target, init, identity, rawFetch, enabled }) {
+  if (enabled !== true
+    || !response
+    || !TRANSIENT_BATCH_HTTP_STATUSES.has(response.status)
+    || typeof rawFetch !== 'function'
+    || !identity
+    || typeof identity.deviceHeaders !== 'function') return response;
+
+  const requestTarget = String(target || '');
+  if (!requestTarget.endsWith(BATCH_WAIT_ROUTE_SUFFIX)) return response;
+  if (String(init?.method || 'GET').toUpperCase() !== 'POST') return response;
+
+  let batchPayload;
+  try {
+    batchPayload = JSON.parse(String(init?.body || ''));
+  } catch {
+    return response;
+  }
+  const supervisorMode = String(batchPayload?.supervisor_mode || '').trim();
+  if (!supervisorMode) return response;
+
+  const fallbackBody = JSON.stringify({ supervisor_mode: supervisorMode });
+  const fallbackPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${SINGLE_NEXT_ROUTE_SUFFIX}`;
+  const fallbackTarget = `${requestTarget.slice(0, -BATCH_WAIT_ROUTE_SUFFIX.length)}${SINGLE_NEXT_ROUTE_SUFFIX}`;
+
+  try {
+    const fallbackHeaders = await identity.deviceHeaders('POST', fallbackPath, fallbackBody);
+    const fallbackResponse = await rawFetch(fallbackTarget, {
+      ...init,
+      method: 'POST',
+      headers: fallbackHeaders,
+      body: fallbackBody,
+    });
+    if (!fallbackResponse?.ok) return response;
+    const fallbackPayload = await fallbackResponse.json().catch(() => null);
+    if (!fallbackPayload || !hasOwn(fallbackPayload, 'command')) return response;
+    return new Response(JSON.stringify({
+      commands: fallbackPayload.command ? [fallbackPayload.command] : [],
+      transport_delivery_is_authority: false,
+      authority_effect: false,
+      transient_batch_fallback: true,
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  } catch {
+    return response;
+  }
+}
+
+export function createNativeSupervisorHeartbeatTransport({ identity, fetchImpl, legacySingleLeaseFallback = true } = {}) {
   const rawFetch = fetchImpl ?? globalThis.fetch;
   const transportIdentity = identity && typeof identity.deviceHeaders === 'function'
     ? new Proxy(identity, {
@@ -53,7 +107,18 @@ export function createNativeSupervisorHeartbeatTransport({ identity, fetchImpl }
     })
     : identity;
   const transportFetch = typeof rawFetch === 'function'
-    ? (url, init = {}) => rawFetch(nativeSupervisorHeartbeatTarget(url, init?.body), init)
+    ? async (url, init = {}) => {
+      const target = nativeSupervisorHeartbeatTarget(url, init?.body);
+      const response = await rawFetch(target, init);
+      return transientBatchSingleLeaseFallback({
+        response,
+        target,
+        init,
+        identity,
+        rawFetch,
+        enabled: legacySingleLeaseFallback !== false,
+      });
+    }
     : rawFetch;
   return Object.freeze({ identity: transportIdentity, fetchImpl: transportFetch });
 }
@@ -70,6 +135,10 @@ export function createNativeSupervisorHeartbeatTransport({ identity, fetchImpl }
  * compatibility transport shim: the proven core can keep constructing its bounded
  * heartbeat projections while the signed path and HTTP target both move atomically
  * from /v1/state to /v1/heartbeat. Ordinary state snapshots stay on /v1/state.
+ *
+ * A transient 502/503/504 from wait-batch may use the already-supported signed single
+ * lease route for that cycle only when legacy fallback is allowed. The batch transport
+ * is not marked unavailable, so the next cycle probes wait-batch again automatically.
  */
 export class NativeSupervisorClient extends UnwiredNativeSupervisorClient {
   constructor(options = {}) {
@@ -89,6 +158,7 @@ export class NativeSupervisorClient extends UnwiredNativeSupervisorClient {
     const heartbeatTransport = createNativeSupervisorHeartbeatTransport({
       identity,
       fetchImpl: options.fetchImpl ?? globalThis.fetch,
+      legacySingleLeaseFallback: options.legacySingleLeaseFallback !== false,
     });
 
     super({
