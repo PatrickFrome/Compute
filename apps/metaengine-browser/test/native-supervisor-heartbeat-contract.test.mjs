@@ -24,7 +24,7 @@ function heartbeatBody(marker) {
   });
 }
 
-test('bootstrap and watchdog projections move atomically to /v1/heartbeat', async () => {
+test('bootstrap and watchdog projections stay atomically on deployed /v1/state', async () => {
   const identityCalls = [];
   const fetchCalls = [];
   const identity = {
@@ -45,16 +45,18 @@ test('bootstrap and watchdog projections move atomically to /v1/heartbeat', asyn
   for (const marker of ['bootstrap_heartbeat', 'watchdog_heartbeat']) {
     const bodyText = heartbeatBody(marker);
     assert.equal(nativeSupervisorHeartbeatPayload(bodyText), true);
-    assert.equal(nativeSupervisorHeartbeatTarget(STATE_PATH, bodyText).endsWith('/v1/heartbeat'), true);
-    assert.equal(nativeSupervisorHeartbeatTarget(STATE_URL, bodyText).endsWith('/v1/heartbeat'), true);
+    assert.equal(nativeSupervisorHeartbeatTarget(STATE_PATH, bodyText), STATE_PATH);
+    assert.equal(nativeSupervisorHeartbeatTarget(STATE_URL, bodyText), STATE_URL);
     await transport.identity.deviceHeaders('POST', STATE_PATH, bodyText);
     await transport.fetchImpl(STATE_URL, { method: 'POST', body: bodyText });
   }
 
   assert.equal(identityCalls.length, 2);
   assert.equal(fetchCalls.length, 2);
-  assert.equal(identityCalls.every((row) => row.path.endsWith('/v1/heartbeat')), true);
-  assert.equal(fetchCalls.every((row) => String(row.url).endsWith('/v1/heartbeat')), true);
+  assert.equal(identityCalls.every((row) => row.path.endsWith('/v1/state')), true);
+  assert.equal(fetchCalls.every((row) => String(row.url).endsWith('/v1/state')), true);
+  assert.equal(identityCalls.some((row) => row.path.endsWith('/v1/heartbeat')), false);
+  assert.equal(fetchCalls.some((row) => String(row.url).endsWith('/v1/heartbeat')), false);
 });
 
 test('ordinary full state publication remains on /v1/state', async () => {
@@ -64,7 +66,7 @@ test('ordinary full state publication remains on /v1/state', async () => {
   assert.equal(nativeSupervisorHeartbeatTarget(STATE_URL, bodyText), STATE_URL);
 });
 
-test('heartbeat route is authenticated-readback compatible and does not expose a mutation RPC', async () => {
+test('dormant heartbeat route helper is authenticated-readback compatible and does not expose a mutation RPC', async () => {
   const calls = [];
   const rpc = async (name, args) => {
     calls.push({ name, args });
@@ -93,7 +95,7 @@ test('heartbeat route is authenticated-readback compatible and does not expose a
   assert.deepEqual(calls, [{ name: 'devos_environment_state_v1', args: { p_workspace: WORKSPACE_ID } }]);
 });
 
-test('heartbeat route fails closed when runtime-control readback is unavailable', async () => {
+test('dormant heartbeat route helper fails closed when runtime-control readback is unavailable', async () => {
   const route = createNativeSupervisorHeartbeatRoute({
     workspaceId: WORKSPACE_ID,
     rpc: async () => { throw new Error('offline'); },

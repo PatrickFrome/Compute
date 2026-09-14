@@ -7,8 +7,6 @@ import { createNativeGuardianDeveloperEmergencyUpdateController } from './develo
 export * from './native-supervisor-client-core-base.mjs';
 
 const DEV_RELEASE_VERSION = /^\d+\.\d+\.\d+-dev\.\d+\.1$/;
-const STATE_ROUTE_SUFFIX = '/v1/state';
-const HEARTBEAT_ROUTE_SUFFIX = '/v1/heartbeat';
 
 function hasOwn(value, key) {
   return Object.prototype.hasOwnProperty.call(value, key);
@@ -30,10 +28,13 @@ export function nativeSupervisorHeartbeatPayload(bodyText) {
   }
 }
 
-export function nativeSupervisorHeartbeatTarget(target, bodyText) {
-  const value = String(target || '');
-  if (!nativeSupervisorHeartbeatPayload(bodyText) || !value.endsWith(STATE_ROUTE_SUFFIX)) return value;
-  return `${value.slice(0, -STATE_ROUTE_SUFFIX.length)}${HEARTBEAT_ROUTE_SUFFIX}`;
+// Heartbeat payloads remain on the deployed /v1/state contract until the dedicated
+// /v1/heartbeat Edge route is wired into the production handler with equivalent
+// device-auth, nonce and liveness projection semantics. Keeping this helper explicit
+// preserves one atomic path for both HTTP signing and transport without creating a
+// fallback retry or a second liveness scheduler.
+export function nativeSupervisorHeartbeatTarget(target, _bodyText) {
+  return String(target || '');
 }
 
 export function createNativeSupervisorHeartbeatTransport({ identity, fetchImpl } = {}) {
@@ -60,8 +61,9 @@ export function createNativeSupervisorHeartbeatTransport({ identity, fetchImpl }
 }
 
 // Keep the proven core helper byte-stable while making the public standalone producer
-// obey the same bounded-heartbeat transport contract as the production client class.
-// This prevents tests or bootstrap call sites from bypassing the atomic signing+URL rewrite.
+// obey the same deployed heartbeat transport contract as the production client class.
+// The base helper already signs and sends /v1/state; this wrapper keeps the signature
+// path and HTTP URL identical while the dedicated heartbeat route remains dormant.
 export async function sendBootstrapHeartbeat(options = {}) {
   const heartbeatTransport = createNativeSupervisorHeartbeatTransport({
     identity: options.identity,
@@ -82,10 +84,10 @@ export async function sendBootstrapHeartbeat(options = {}) {
  * surface gets the native emergency controller. Test/mock identities and non-release
  * versions stay fail-closed instead of accidentally acquiring physical update power.
  *
- * Bootstrap/watchdog liveness remains isolated from full state publication here as a
- * compatibility transport shim: the proven core can keep constructing its bounded
- * heartbeat projections while the signed path and HTTP target both move atomically
- * from /v1/state to /v1/heartbeat. Ordinary state snapshots stay on /v1/state.
+ * Bootstrap/watchdog liveness stays on the deployed signed /v1/state contract. A
+ * dedicated /v1/heartbeat route may be re-enabled only after the production Edge
+ * handler has matching auth, nonce and liveness projection behavior. Ordinary state
+ * snapshots remain on /v1/state as before.
  */
 export class NativeSupervisorClient extends UnwiredNativeSupervisorClient {
   constructor(options = {}) {
