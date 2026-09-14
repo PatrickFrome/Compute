@@ -1,9 +1,16 @@
 import fs from 'node:fs/promises';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
 const DEFAULT_MANIFEST = path.join(os.homedir(), '.a2', 'compute-bridge.json');
+const DEFAULT_NATIVE_STATE_ROOT = process.env.A2_COMPUTE_STATE_ROOT
+  ? path.resolve(process.env.A2_COMPUTE_STATE_ROOT)
+  : path.join(os.homedir(), '.metaengine', 'a2-compute-browser');
+const NATIVE_CONTROL_TOKEN = 'control-token';
+const MAX_NATIVE_FRAME_BYTES = 1024 * 1024;
 const READ_ONLY_METHODS = new Set(['runtime.health', 'profile.list', 'context.list', 'target.list', 'target.semantic_snapshot', 'receipt.get', 'receipt.verify']);
+const NATIVE_RECOVERABLE_REASON_CODES = new Set(['MANIFEST_NOT_PRESENT', 'ECONNREFUSED', 'ECONNRESET', 'EPIPE', 'CONNECTION_REFUSED']);
 
 export const COMPUTE_HEALTH_STATES = Object.freeze({
   HEALTHY: 'HEALTHY',
@@ -25,6 +32,17 @@ export function validateBridgeManifest(input) {
   return Object.freeze({ url: url.href, token });
 }
 
+export function nativeComputeRpcEndpoint(root = DEFAULT_NATIVE_STATE_ROOT, {
+  platform = process.platform,
+  username = os.userInfo().username,
+} = {}) {
+  if (platform === 'win32') {
+    const user = String(username || 'user').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32);
+    return `\\\\.\\pipe\\metaengine-a2-compute-browser-${user}`;
+  }
+  return path.join(path.resolve(root), 'control.sock');
+}
+
 export function classifyComputeBridgeFailure(error) {
   const message = String(error?.message || error || '').slice(0, 500);
   const code = String(error?.code || error?.cause?.code || '').toUpperCase();
@@ -44,11 +62,68 @@ export function classifyComputeBridgeFailure(error) {
   return Object.freeze({ state: COMPUTE_HEALTH_STATES.UNKNOWN, reason_code: 'HEALTH_UNAVAILABLE', outage_proven: false });
 }
 
+function nativeRpcConnect(endpoint, requestLine, timeoutMs, connectImpl = net.createConnection) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let buffer = '';
+    let socket;
+    const finish = (operation, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { socket?.destroy(); } catch {}
+      operation(value);
+    };
+    const timer = setTimeout(() => {
+      const error = new Error('compute_native_rpc_timeout');
+      error.name = 'AbortError';
+      finish(reject, error);
+    }, timeoutMs);
+    timer.unref?.();
+
+    try {
+      socket = connectImpl(endpoint);
+    } catch (error) {
+      finish(reject, error);
+      return;
+    }
+    socket.setNoDelay?.(true);
+    socket.once('error', (error) => finish(reject, error));
+    socket.once('connect', () => socket.write(`${requestLine}\n`));
+    socket.on('data', (chunk) => {
+      buffer += chunk.toString('utf8');
+      if (Buffer.byteLength(buffer, 'utf8') > MAX_NATIVE_FRAME_BYTES) {
+        finish(reject, new Error('compute_native_rpc_frame_too_large'));
+        return;
+      }
+      const newline = buffer.indexOf('\n');
+      if (newline < 0) return;
+      const line = buffer.slice(0, newline);
+      try { finish(resolve, JSON.parse(line)); }
+      catch { finish(reject, new Error('compute_native_rpc_json_invalid')); }
+    });
+    socket.once('close', () => {
+      if (!settled) finish(reject, new Error('compute_native_rpc_closed_without_response'));
+    });
+  });
+}
+
 export class ComputeBridgeClient {
-  constructor({ manifestPath = process.env.METAENGINE_COMPUTE_BRIDGE_MANIFEST || DEFAULT_MANIFEST, fetchImpl = globalThis.fetch, timeoutMs = 1500 } = {}) {
+  constructor({
+    manifestPath = process.env.METAENGINE_COMPUTE_BRIDGE_MANIFEST || DEFAULT_MANIFEST,
+    fetchImpl = globalThis.fetch,
+    timeoutMs = 1500,
+    nativeStateRoot = DEFAULT_NATIVE_STATE_ROOT,
+    nativeEndpoint = null,
+    nativeConnectImpl = net.createConnection,
+  } = {}) {
     this.manifestPath = manifestPath;
     this.fetchImpl = fetchImpl;
     this.timeoutMs = Math.max(25, Math.min(10000, Number(timeoutMs) || 1500));
+    this.nativeStateRoot = path.resolve(nativeStateRoot);
+    this.nativeTokenPath = path.join(this.nativeStateRoot, NATIVE_CONTROL_TOKEN);
+    this.nativeEndpoint = nativeEndpoint || nativeComputeRpcEndpoint(this.nativeStateRoot);
+    this.nativeConnectImpl = nativeConnectImpl;
   }
 
   async readManifest() {
@@ -71,6 +146,23 @@ export class ComputeBridgeClient {
     return body.result;
   }
 
+  async callNativeReadOnly(method, params = {}) {
+    if (!READ_ONLY_METHODS.has(method)) throw new Error('compute_bridge_method_not_read_only');
+    const token = String(await fs.readFile(this.nativeTokenPath, 'utf8')).trim();
+    if (!/^[a-f0-9]{64}$/i.test(token)) throw new Error('compute_native_rpc_token_invalid');
+    const id = `shell-native-${crypto.randomUUID()}`;
+    const body = await nativeRpcConnect(
+      this.nativeEndpoint,
+      JSON.stringify({ id, token, method, params }),
+      this.timeoutMs,
+      this.nativeConnectImpl,
+    );
+    if (body?.id !== id || body?.ok !== true || body?.effect_class !== 'READ_ONLY' || body?.web_authority_effect !== false) {
+      throw new Error(`compute_native_rpc_read_contract_failed:${body?.error || 'invalid_response'}`);
+    }
+    return body.result;
+  }
+
   async health() {
     const generatedAt = new Date().toISOString();
     try {
@@ -86,11 +178,49 @@ export class ComputeBridgeClient {
         error: null,
         generated_at: generatedAt,
         automatic_remediation: false,
+        transport: 'LOOPBACK_HTTP_RPC',
         timeout_ms: this.timeoutMs,
         authority_effect: false,
       });
-    } catch (error) {
-      const classified = classifyComputeBridgeFailure(error);
+    } catch (httpError) {
+      const classified = classifyComputeBridgeFailure(httpError);
+      if (NATIVE_RECOVERABLE_REASON_CODES.has(classified.reason_code)) {
+        try {
+          const result = await this.callNativeReadOnly('runtime.health', {});
+          const degraded = result?.ok === false;
+          return Object.freeze({
+            schema: 'metaengine.compute-bridge.health.v2',
+            state: degraded ? COMPUTE_HEALTH_STATES.DEGRADED : COMPUTE_HEALTH_STATES.HEALTHY,
+            available: true,
+            outage_proven: false,
+            reason_code: degraded ? 'RUNTIME_HEALTH_DEGRADED' : 'HTTP_BRIDGE_RECOVERED_VIA_NATIVE_RPC',
+            result,
+            error: null,
+            generated_at: generatedAt,
+            automatic_remediation: true,
+            remediation: 'NATIVE_RPC_ATTACH',
+            transport: 'NATIVE_RPC',
+            timeout_ms: this.timeoutMs,
+            authority_effect: false,
+          });
+        } catch (nativeError) {
+          return Object.freeze({
+            schema: 'metaengine.compute-bridge.health.v2',
+            state: classified.state,
+            available: false,
+            outage_proven: classified.outage_proven,
+            reason_code: classified.reason_code,
+            result: null,
+            error: String(httpError?.message || httpError).slice(0, 500),
+            native_attach_error: String(nativeError?.message || nativeError).slice(0, 500),
+            generated_at: generatedAt,
+            automatic_remediation: false,
+            transport: 'UNAVAILABLE',
+            timeout_ms: this.timeoutMs,
+            authority_effect: false,
+          });
+        }
+      }
       return Object.freeze({
         schema: 'metaengine.compute-bridge.health.v2',
         state: classified.state,
@@ -98,9 +228,10 @@ export class ComputeBridgeClient {
         outage_proven: classified.outage_proven,
         reason_code: classified.reason_code,
         result: null,
-        error: String(error?.message || error).slice(0, 500),
+        error: String(httpError?.message || httpError).slice(0, 500),
         generated_at: generatedAt,
         automatic_remediation: false,
+        transport: 'UNAVAILABLE',
         timeout_ms: this.timeoutMs,
         authority_effect: false,
       });
@@ -109,9 +240,11 @@ export class ComputeBridgeClient {
 }
 
 export const COMPUTE_BRIDGE_POLICY = Object.freeze({
-  transport: 'LOOPBACK_TYPED_RPC',
+  transport: 'LOOPBACK_TYPED_RPC_WITH_NATIVE_ATTACH',
   shell_actuation_enabled: false,
   read_only_methods: [...READ_ONLY_METHODS].sort(),
   raw_cdp_exposed: false,
   token_exposed_to_renderer: false,
+  native_attach_read_only: true,
+  second_daemon_started_for_recovery: false,
 });
