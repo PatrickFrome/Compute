@@ -31,7 +31,7 @@ function identityProjection({
   runtimeTargetId,
   frameId,
   backendNodeId,
-  executionContextUniqueId = null,
+  executionContextUniqueId,
 } = {}) {
   const state_revision_id = requiredString(stateRevisionId, 'state_revision_id');
   if (!STATE_REVISION_RE.test(state_revision_id)) {
@@ -43,7 +43,7 @@ function identityProjection({
     runtime_target_id: requiredString(runtimeTargetId, 'runtime_target_id'),
     frame_id: requiredString(frameId, 'frame_id'),
     backend_node_id: positiveSafeInteger(backendNodeId, 'backend_node_id'),
-    execution_context_unique_id: optionalString(executionContextUniqueId),
+    execution_context_unique_id: requiredString(executionContextUniqueId, 'execution_context_unique_id'),
   });
 }
 

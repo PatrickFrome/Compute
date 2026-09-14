@@ -25,9 +25,9 @@ test('interrupted generating chat clicks exact Continue once and requires readba
       captures += 1;
       return captures === 1 ? frame(['Продолжить создание']) : frame(['Остановить ответ']);
     },
-    clickControl: async (tabId, name) => { clicks.push({ tabId, name }); },
+    clickControl: async (tabId, control) => { clicks.push({ tabId, control }); },
   });
-  assert.deepEqual(clicks, [{ tabId: 'tab_a', name: 'Продолжить создание' }]);
+  assert.deepEqual(clicks, [{ tabId: 'tab_a', control: { role: 'button', name: 'Продолжить создание' } }]);
   assert.equal(result.tabs[0].state, 'CONTINUE_CONFIRMED');
   assert.equal(result.authority_effect, true);
 });

@@ -77,6 +77,10 @@ test('missing or malformed identity fails closed', () => {
     () => buildNativeSemanticRef({ ...BASE, stateRevisionId: 'rev_bad' }),
     /native_semantic_ref_state_revision_id_invalid/,
   );
+  assert.throws(
+    () => buildNativeSemanticRef({ ...BASE, executionContextUniqueId: null }),
+    /native_semantic_ref_execution_context_unique_id_required/,
+  );
 
   const ref = buildNativeSemanticRef(BASE);
   assert.throws(

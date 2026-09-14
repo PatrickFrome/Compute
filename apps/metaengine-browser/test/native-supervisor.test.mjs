@@ -272,31 +272,40 @@ test('rejected DB effect-intent prevents physical semantic execution', async () 
 
 test('native semantic perception exposes unique accessibility targets and typed click uses CDP point actuation', async () => {
   const calls = [];
+  const listeners = new Map();
   const nodes = [
-    { ignored:false, role:{value:'button'}, name:{value:'Send'}, backendDOMNodeId:42 },
-    { ignored:false, role:{value:'textbox'}, name:{value:'Message'}, backendDOMNodeId:43 },
-    { ignored:false, role:{value:'StaticText'}, name:{value:'Visible response text'}, backendDOMNodeId:44 },
+    { nodeId:'root', frameId:'frame-101', ignored:false, role:{value:'RootWebArea'}, name:{value:'Page'} },
+    { nodeId:'send', parentId:'root', ignored:false, role:{value:'button'}, name:{value:'Send'}, backendDOMNodeId:42 },
+    { nodeId:'message', parentId:'root', ignored:false, role:{value:'textbox'}, name:{value:'Message'}, backendDOMNodeId:43 },
+    { nodeId:'text', parentId:'root', ignored:false, role:{value:'StaticText'}, name:{value:'Visible response text'}, backendDOMNodeId:44 },
   ];
   const dbg = {
     attached:false,
     isAttached() { return this.attached; },
     attach() { this.attached=true; calls.push(['attach']); },
     detach() { this.attached=false; calls.push(['detach']); },
+    on(name, fn) { const rows=listeners.get(name)||new Set(); rows.add(fn); listeners.set(name, rows); },
+    off(name, fn) { listeners.get(name)?.delete(fn); },
+    emitMessage(method, params={}) { for (const fn of listeners.get('message')||[]) fn({},method,params,null); },
     async sendCommand(method, params) {
       calls.push([method, params || null]);
+      if (method === 'Page.getFrameTree') return { frameTree:{ frame:{ id:'frame-101', url:'https://chatgpt.com/c/test' } } };
+      if (method === 'Runtime.enable') this.emitMessage('Runtime.executionContextCreated',{context:{id:1,uniqueId:'context-101',auxData:{frameId:'frame-101',isDefault:true}}});
       if (method === 'Accessibility.getFullAXTree') return { nodes };
       if (method === 'Page.getLayoutMetrics') return { cssVisualViewport:{ clientWidth:1000, clientHeight:700, pageX:0, pageY:0, scale:1 } };
       if (method === 'DOM.getBoxModel') return { model:{ content:[10,20,110,20,110,70,10,70] } };
       return {};
     },
   };
-  const webContents = { id:101, debugger:dbg, isDestroyed:()=>false, getURL:()=> 'https://chatgpt.com/c/test', getTitle:()=> 'ChatGPT' };
+  const webContents = { id:101, debugger:dbg, isDestroyed:()=>false, getOSProcessId:()=>9101, getOrCreateDevToolsTargetId:()=> 'target-101', getURL:()=> 'https://chatgpt.com/c/test', getTitle:()=> 'ChatGPT' };
   const frame = await captureSemanticFrame(webContents);
   assert.equal(frame.semantic_targets.length, 2);
   assert.equal(frame.text_excerpt, 'Visible response text');
   assert.match(frame.process_incarnation_id,/^[0-9a-f-]{36}$/i);
   assert.equal(frame.target_id,'webcontents:101');
-  const result = await executeSemanticCommand(webContents, { action:'TYPED_CLICK', payload:{ role:'button', accessible_name:'Send' } });
+  const send = frame.semantic_targets.find((row) => row.name === 'Send');
+  assert.ok(send.semantic_ref);
+  const result = await executeSemanticCommand(webContents, { action:'TYPED_CLICK', payload:{ role:'button', accessible_name:'Send', semantic_ref:send.semantic_ref } });
   assert.equal(result.target.backend_node_id, 42);
   assert.equal(result.point.x, 60);
   assert.equal(result.point.y, 45);

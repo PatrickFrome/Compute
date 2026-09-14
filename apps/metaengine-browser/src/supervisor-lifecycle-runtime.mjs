@@ -33,6 +33,16 @@ function positiveViewport(frame) {
   return Number(frame?.viewport?.width || 0) > 0 && Number(frame?.viewport?.height || 0) > 0;
 }
 
+function exactSemanticTarget(frame, roleRaw, nameRaw) {
+  const role = String(roleRaw || '').trim().toLowerCase();
+  const name = String(nameRaw || '').trim();
+  const rows = (frame?.semantic_targets || []).filter((row) => (
+    String(row?.role || '').trim().toLowerCase() === role
+    && String(row?.name || '').trim() === name
+  ));
+  return rows.length === 1 ? rows[0] : null;
+}
+
 function exactIncarnation(before, after, tabId) {
   const expectedTabId = String(tabId || '');
   const beforeProcess = String(before?.process_incarnation_id || '');
@@ -409,6 +419,10 @@ export function createSupervisorSendBoundaryExecutor({ getState, executeCommand,
     if (action === 'SEMANTIC_TYPE') {
       const baseline = lastNativeFrame.get(tabId);
       if (!isNativeFrame(baseline)) return executeCommand(command);
+      const semanticTarget = exactSemanticTarget(baseline, command?.payload?.role, command?.payload?.accessible_name);
+      if (!semanticTarget?.semantic_ref && baseline.semantic_ref_context_complete !== undefined) {
+        return suppressed(action, 'SEMANTIC_REF_REOBSERVE_REQUIRED', baseline);
+      }
       const text = String(command?.payload?.text ?? '');
       const sha = promptSha(text);
       const prior = promptFence.get(tabId);
@@ -424,7 +438,12 @@ export function createSupervisorSendBoundaryExecutor({ getState, executeCommand,
       };
       promptFence.set(tabId, fence);
       try {
-        const result = await executeCommand(command);
+        const result = await executeCommand({
+          ...command,
+          payload: semanticTarget?.semantic_ref
+            ? { ...command.payload, semantic_ref: semanticTarget.semantic_ref }
+            : command.payload,
+        });
         fence.phase = 'TYPED';
         return result;
       } catch (error) {
@@ -478,11 +497,19 @@ export function createSupervisorSendBoundaryExecutor({ getState, executeCommand,
       const send = uniqueChatGptControl(activated, 'SEND');
       if (!send) return block('SUPERVISOR_SEND_NOT_UNIQUE_AFTER_SELECT');
       if (String(send.name || '') !== String(command?.payload?.accessible_name || '')) return block('SUPERVISOR_SEND_CONTROL_CHANGED');
+      if (!send.semantic_ref && activated.semantic_ref_context_complete !== undefined) {
+        return block('SEMANTIC_REF_REOBSERVE_REQUIRED');
+      }
 
       if (fence) fence.phase = 'CLICK_ATTEMPTED';
       readbackFence.set(tabId, { remaining: 6, fallback: activated });
       try {
-        return await executeCommand(command);
+        return await executeCommand({
+          ...command,
+          payload: send.semantic_ref
+            ? { ...command.payload, semantic_ref: send.semantic_ref }
+            : command.payload,
+        });
       } catch (error) {
         if (fence) fence.error = clip(error?.message || error);
         return suppressed(action, 'SEND_CLICK_EFFECT_AMBIGUOUS', activated);
