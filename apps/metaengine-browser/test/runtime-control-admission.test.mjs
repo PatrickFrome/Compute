@@ -228,7 +228,7 @@ test('bounded DevOS RUN_ONCE skips local FLEET_RECONCILE on a fenced plan', asyn
   assert.deepEqual(commands, []);
 });
 
-test('repository keeps one signed heartbeat route and materializes the same Development Plane projection', async () => {
+test('repository separates signed liveness heartbeat from authoritative state and materializes the same Development Plane projection', async () => {
   const root = new URL('..', import.meta.url);
   const [base, core, edge, main] = await Promise.all([
     fs.readFile(new URL('src/native-supervisor-client-base.mjs', root), 'utf8'),
@@ -237,8 +237,10 @@ test('repository keeps one signed heartbeat route and materializes the same Deve
     fs.readFile(new URL('src/main.mjs', root), 'utf8'),
   ]);
   assert.match(base, /#signedRequest\('\/v1\/state'/);
-  assert.match(core, /NATIVE_SUPERVISOR_BASE}\/v1\/state/);
-  assert.doesNotMatch(`${base}\n${core}\n${edge}`, /\/v1\/heartbeat/);
+  assert.match(core, /NATIVE_SUPERVISOR_RUNTIME_PATH}\/v1\/heartbeat/);
+  assert.match(core, /NATIVE_SUPERVISOR_BASE}\/v1\/heartbeat/);
+  assert.match(edge, /path==='\/v1\/heartbeat'/);
+  assert.match(edge, /touchHeartbeat\(identity\)/);
   assert.match(edge, /runtime_control:await runtimeControl\(\)/);
   assert.match(main, /development_plane: normalizeDevelopmentPlaneProjection\(/);
   assert.match(main, /async function nativeSupervisorState\(\)[\s\S]*const compute = await currentComputeHealth\(\)[\s\S]*compute,/);
