@@ -11,15 +11,16 @@ test('health liveness remains HTTP 200 while readiness comes only from bounded D
   assert.match(source, /projectNativeSupervisorRuntimeCapabilityHealth/);
   assert.match(source, /runtimeCapabilityHealthResponseFields/);
   assert.match(source, /HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS\s*=\s*1500/);
-  assert.match(source, /AbortSignal\.timeout\(HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS\)/);
-  assert.match(source, /name!=='devos_runtime_capabilities_v1'/);
+  assert.match(source, /async function boundedRpc\(name:string,args:any,ms:number\)[\s\S]*Promise\.race\([\s\S]*rpc\(name,args\)[\s\S]*setTimeout\([\s\S]*rpc_deadline[\s\S]*clearTimeout\(timer\)/);
+  assert.match(source, /name==='devos_runtime_capabilities_v1'\?boundedRpc\(name,args,HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS\)/);
   assert.match(source, /if\(req\.method==='GET'&&path==='\/health'\)return json\(200,await health\(\)\)/);
 });
 
 test('health route has no local capability-envelope fallback or scheduler loop', () => {
   assert.doesNotMatch(source, /NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES/);
   assert.doesNotMatch(source, /setInterval\s*\(/);
-  assert.doesNotMatch(source, /setTimeout\s*\(/);
+  assert.match(source, /const sleep=\(ms:number\)=>new Promise\(resolve=>setTimeout\(resolve,ms\)\)/);
+  assert.match(source, /if\(!REALTIME_API_KEY\|\|!REALTIME_ACCESS_TOKEN\)\{await sleep\(waitMs\);const fallback=await leaseBatch\(req,body\)/);
   assert.doesNotMatch(source, /automatic_retry_allowed\s*:\s*true/);
   assert.doesNotMatch(source, /physical_dispatch_allowed\s*:\s*true/);
 });
