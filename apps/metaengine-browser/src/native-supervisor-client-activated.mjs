@@ -1,9 +1,5 @@
 import path from 'node:path';
-import {
-  NativeSupervisorClient as ProvenNativeSupervisorClient,
-  NATIVE_SUPERVISOR_BASE,
-  NATIVE_SUPERVISOR_RUNTIME_PATH,
-} from './native-supervisor-client.mjs';
+import { NativeSupervisorClient as ProvenNativeSupervisorClient } from './native-supervisor-client.mjs';
 import {
   finalRuntimeActivationRegistrySnapshot,
   markFinalRuntimeSupervisorStarted,
@@ -13,37 +9,6 @@ import {
 } from './final-runtime-activation-registry.mjs';
 
 export * from './native-supervisor-client.mjs';
-
-export function createHeartbeatCoherentFetch({ identity, fetchImpl } = {}) {
-  if (!identity || typeof identity.deviceHeaders !== 'function') throw new Error('native_supervisor_heartbeat_identity_required');
-  if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_heartbeat_fetch_required');
-  const stateUrl = `${NATIVE_SUPERVISOR_BASE}/v1/state`;
-  const heartbeatUrl = `${NATIVE_SUPERVISOR_BASE}/v1/heartbeat`;
-
-  return async (url, init = {}) => {
-    if (String(url) !== stateUrl || String(init?.method || 'GET').toUpperCase() !== 'POST') {
-      return fetchImpl(url, init);
-    }
-
-    let payload = null;
-    try { payload = JSON.parse(String(init?.body || '')); } catch {}
-    const phase = payload?.state?.watchdog_heartbeat === true
-      ? 'WATCHDOG'
-      : (payload?.state?.bootstrap_heartbeat === true ? 'BOOTSTRAP' : null);
-    if (!phase) return fetchImpl(url, init);
-
-    const heartbeatBody = JSON.stringify({ phase, authority_effect: false });
-    const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}/v1/heartbeat`;
-    const headers = await identity.deviceHeaders('POST', requestPath, heartbeatBody);
-    return fetchImpl(heartbeatUrl, {
-      ...init,
-      method: 'POST',
-      headers,
-      body: heartbeatBody,
-      cache: 'no-store',
-    });
-  };
-}
 
 async function currentUrlFromBrowserState(getBrowserState, command) {
   const state = await getBrowserState();
@@ -72,14 +37,10 @@ export class NativeSupervisorClient extends ProvenNativeSupervisorClient {
   constructor(options = {}) {
     const sourceBeforeSelfUpdateInstall = options.beforeSelfUpdateInstall;
     const sourceFetch = options.fetchImpl ?? globalThis.fetch;
-    const heartbeatCoherentFetch = createHeartbeatCoherentFetch({
-      identity: options.identity,
-      fetchImpl: sourceFetch,
-    });
     let finalRuntimeSupervisor = null;
     super({
       ...options,
-      fetchImpl: heartbeatCoherentFetch,
+      fetchImpl: sourceFetch,
       beforeSelfUpdateInstall: async (receipt) => {
         if (!finalRuntimeSupervisor) throw new Error('final_runtime_self_update_supervisor_not_ready');
         const quiesced = await quiesceFinalRuntimeSupervisor(finalRuntimeSupervisor, 'SELF_UPDATE_INSTALLER_HANDOFF');

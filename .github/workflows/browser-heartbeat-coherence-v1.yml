@@ -5,25 +5,31 @@ on:
     branches:
       - 'work/browser-heartbeat-coherence-v1'
     paths:
+      - 'apps/metaengine-browser/src/native-supervisor-client-core.mjs'
       - 'apps/metaengine-browser/src/native-supervisor-client-activated.mjs'
       - 'apps/metaengine-browser/src/native-supervisor-client-core-base.mjs'
+      - 'apps/metaengine-browser/src/self-update-signed-heartbeat.mjs'
       - 'apps/metaengine-browser/src/supervisor-keepalive.mjs'
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/cognitive-delta-routes.mjs'
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/heartbeat-route.mjs'
       - 'apps/metaengine-browser/supabase/native-supervisor-heartbeat-v1.sql'
       - 'apps/metaengine-browser/test/heartbeat-coherence-v1.test.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-heartbeat-migration-v1.test.mjs'
       - 'apps/metaengine-browser/test/keepalive-admission-parking-v1.test.mjs'
       - 'apps/metaengine-browser/test/native-supervisor-heartbeat-watchdog.test.mjs'
       - '.github/workflows/browser-heartbeat-coherence-v1.yml'
   pull_request:
     paths:
+      - 'apps/metaengine-browser/src/native-supervisor-client-core.mjs'
       - 'apps/metaengine-browser/src/native-supervisor-client-activated.mjs'
       - 'apps/metaengine-browser/src/native-supervisor-client-core-base.mjs'
+      - 'apps/metaengine-browser/src/self-update-signed-heartbeat.mjs'
       - 'apps/metaengine-browser/src/supervisor-keepalive.mjs'
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/cognitive-delta-routes.mjs'
       - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/heartbeat-route.mjs'
       - 'apps/metaengine-browser/supabase/native-supervisor-heartbeat-v1.sql'
       - 'apps/metaengine-browser/test/heartbeat-coherence-v1.test.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-heartbeat-migration-v1.test.mjs'
       - 'apps/metaengine-browser/test/keepalive-admission-parking-v1.test.mjs'
       - 'apps/metaengine-browser/test/native-supervisor-heartbeat-watchdog.test.mjs'
       - '.github/workflows/browser-heartbeat-coherence-v1.yml'
@@ -70,32 +76,38 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          node --check src/native-supervisor-client-core.mjs
           node --check src/native-supervisor-client-activated.mjs
           node --check src/native-supervisor-client-core-base.mjs
+          node --check src/self-update-signed-heartbeat.mjs
           node --check src/supervisor-keepalive.mjs
           node --check supabase/a2-browser-native-supervisor-v1/heartbeat-route.mjs
           node --check supabase/a2-browser-native-supervisor-v1/cognitive-delta-routes.mjs
           node --check test/heartbeat-coherence-v1.test.mjs
+          node --check test/native-supervisor-heartbeat-migration-v1.test.mjs
           node --check test/keepalive-admission-parking-v1.test.mjs
 
-      - name: Prove heartbeat split and parked no-replay regressions
+      - name: Prove heartbeat split, migration and parked no-replay regressions
         working-directory: apps/metaengine-browser
         shell: bash
         run: |
           set -euo pipefail
           node --test \
             test/heartbeat-coherence-v1.test.mjs \
+            test/native-supervisor-heartbeat-migration-v1.test.mjs \
             test/keepalive-admission-parking-v1.test.mjs \
             test/native-supervisor-heartbeat-watchdog.test.mjs
 
-      - name: Prove path-bound signing and zero-authority route shape
+      - name: Prove source-level producer parity and zero-authority route shape
         shell: bash
         run: |
           set -euo pipefail
-          client='apps/metaengine-browser/src/native-supervisor-client-activated.mjs'
+          client='apps/metaengine-browser/src/native-supervisor-client-core.mjs'
           route='apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/heartbeat-route.mjs'
           dispatcher='apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/cognitive-delta-routes.mjs'
+          qualifier='apps/metaengine-browser/src/self-update-signed-heartbeat.mjs'
           entry='apps/metaengine-browser/src/final-runtime-entry.mjs'
+          grep -Fq "sendBootstrapHeartbeat as sendBootstrapHeartbeatBase" "$client"
           grep -Fq "'/v1/heartbeat'" "$client"
           grep -Fq "deviceHeaders('POST', requestPath, heartbeatBody)" "$client"
           grep -Fq "payload?.state?.watchdog_heartbeat === true" "$client"
@@ -107,6 +119,7 @@ jobs:
           grep -Fq "authority_effect: false" "$route"
           ! grep -Eq 'command_leasing:[[:space:]]*true|control_authority:[[:space:]]*true|automatic_retry_allowed:[[:space:]]*true' "$route"
           grep -Fq 'createNativeSupervisorHeartbeatRoute' "$dispatcher"
+          grep -Fq "NATIVE_SUPERVISOR_STATE_PATH = '/functions/v1/a2-browser-native-supervisor-v1/v1/state'" "$qualifier"
           grep -Fq 'native-supervisor-client-activated.mjs' "$entry"
 
       - name: Prove heartbeat SQL is liveness-only and service-role-only
