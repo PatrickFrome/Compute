@@ -1,0 +1,159 @@
+name: Browser Live Supervisor Compute Convergence Repair
+
+on:
+  push:
+    branches:
+      - 'repair/live-supervisor-compute-convergence-v2-20260914'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qualify-and-package:
+    runs-on: windows-2025
+    timeout-minutes: 50
+    steps:
+      - name: Checkout exact repair head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          printf 'live_supervisor_compute_repair_head=%s\n' "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Install Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+
+      - name: Prove focused Supervisor and Compute contracts
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/native-supervisor-client-core.mjs
+          node --check src/native-supervisor-client-core-base.mjs
+          node --check src/compute-bridge-client.mjs
+          node --check src/compute-bridge-worker.cjs
+          node --check supabase/a2-browser-native-supervisor-v1/realtime-command-wake.mjs
+          node --test test/browser-batch-required-control.test.mjs
+          node --test test/native-supervisor-transient-batch-gateway-fallback.test.mjs
+          node --test test/realtime-command-wake-socket-fallback.test.mjs
+          node --test test/compute-bridge-client.test.mjs
+          node --test test/compute-bridge-native-attach.test.mjs
+          node --test test/compute-bridge-one-owner-autostart.test.mjs
+
+      - name: Build unsigned x64 repair installer
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '0.7.0-dev.${{ github.run_id }}.1'
+          if ($version -notmatch '^0\.7\.0-dev\.[0-9]+\.1$') { throw "repair_version_invalid:$version" }
+          npm pkg set version=$version
+          $versionReadback = [string](node -p "require('./package.json').version")
+          if ($versionReadback -ne $version) { throw "repair_version_readback_mismatch:$versionReadback" }
+          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item native-dist\guardian -Recurse -Force -ErrorAction SilentlyContinue
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
+          $blockmap = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe.blockmap" -File | Select-Object -First 1
+          if (-not $installer -or -not $blockmap) { throw 'repair_package_assets_missing' }
+          $resources = Join-Path $PWD 'dist-test\win-unpacked\resources'
+          $worker = Join-Path $resources 'app.asar.unpacked\src\compute-bridge-worker.cjs'
+          $daemonEntry = Join-Path $resources 'a2-compute-browser\src\cli.mjs'
+          $daemonRpc = Join-Path $resources 'a2-compute-browser\src\rpc-server.mjs'
+          if (-not (Test-Path $worker)) { throw 'packaged_compute_worker_missing' }
+          if (-not (Test-Path $daemonEntry) -or -not (Test-Path $daemonRpc)) { throw 'packaged_compute_daemon_missing' }
+          "REPAIR_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "REPAIR_RESOURCES=$resources" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Prove packaged Electron utility-process Compute path
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $smokeRoot = Join-Path $env:RUNNER_TEMP "metaengine-compute-packaged-${{ github.run_id }}"
+          Remove-Item $smokeRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $smokeRoot | Out-Null
+          New-Item -ItemType Directory -Force (Join-Path $smokeRoot '.a2') | Out-Null
+          $env:HOME = $smokeRoot
+          $env:USERPROFILE = $smokeRoot
+          $env:A2_COMPUTE_STATE_ROOT = Join-Path $smokeRoot 'native-state'
+          $env:METAENGINE_COMPUTE_BRIDGE_MANIFEST = Join-Path $smokeRoot '.a2\compute-bridge.json'
+          $env:METAENGINE_PACKAGED_RESOURCES = $env:REPAIR_RESOURCES
+          $electron = Join-Path $PWD 'node_modules\electron\dist\electron.exe'
+          if (-not (Test-Path $electron)) { throw 'electron_binary_missing' }
+          $smokeApp = Join-Path $PWD 'test\compute-bridge-packaged-utility-smoke'
+          $output = & $electron $smokeApp 2>&1 | Out-String
+          Write-Host $output
+          if ($LASTEXITCODE -ne 0) { throw "packaged_compute_utility_smoke_failed:$LASTEXITCODE" }
+          if ($output -notmatch 'metaengine\.compute-bridge\.packaged-utility-smoke\.v1' -or $output -notmatch '"ok":true') {
+            throw 'packaged_compute_utility_smoke_proof_missing'
+          }
+          "PACKAGED_UTILITY_SMOKE=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Write exact repair proof
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:PACKAGED_UTILITY_SMOKE -ne 'true') { throw 'packaged_utility_smoke_not_proven' }
+          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$env:REPAIR_VERSION-x64.exe" -File | Select-Object -First 1
+          if (-not $installer) { throw 'repair_installer_missing' }
+          $digest = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $proof = [ordered]@{
+            schema = 'metaengine.browser.live-supervisor-compute-convergence-repair.v1'
+            source_head = '${{ github.sha }}'
+            release_base = '3d82f5f5b02f7694620c3ae2fde71eac32bb7fc8'
+            package_version = $env:REPAIR_VERSION
+            installer_name = $installer.Name
+            installer_sha256 = $digest
+            heartbeat_route = '/v1/heartbeat'
+            state_route_preserved = $true
+            transient_state_statuses = @(502,503,504)
+            transient_batch_gateway_fallback = $true
+            transient_batch_statuses = @(502,503,504)
+            legacy_steady_state_single_lease = $false
+            batch_transport_reprobed_after_transient_recovery = $true
+            realtime_wake_is_authority = $false
+            realtime_socket_create_failure_durable_lease_fallback = $true
+            compute_native_attach = $true
+            compute_native_attach_read_only = $true
+            compute_native_attach_precedes_autostart = $true
+            compute_one_daemon_owner = $true
+            compute_bundled_autostart = $true
+            compute_packaged_utility_process_smoke = $true
+            signed = $false
+            published = $false
+            authority_effect = $false
+          }
+          $proof | ConvertTo-Json -Depth 5 | Set-Content dist-test\live-supervisor-compute-convergence-proof.json -Encoding utf8
+          Write-Host ($proof | ConvertTo-Json -Compress)
+
+      - name: Upload exact repair artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: metaengine-browser-live-supervisor-compute-repair-${{ github.sha }}
+          path: |
+            apps/metaengine-browser/dist-test/METAENGINE-Browser-Test-Setup-*.exe
+            apps/metaengine-browser/dist-test/METAENGINE-Browser-Test-Setup-*.exe.blockmap
+            apps/metaengine-browser/dist-test/live-supervisor-compute-convergence-proof.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
