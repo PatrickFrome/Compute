@@ -12,7 +12,6 @@ if ($GraceSeconds -lt 1 -or $GraceSeconds -gt 30) { throw 'installer_shutdown_gr
 if ($ForceSeconds -lt 1 -or $ForceSeconds -gt 30) { throw 'installer_shutdown_force_seconds_invalid' }
 
 $target = [System.IO.Path]::GetFullPath($InstalledExe)
-if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { exit 0 }
 $targetName = [System.IO.Path]::GetFileName($target)
 
 function Get-ExactTargetProcesses {
@@ -32,8 +31,46 @@ function Get-ExactTargetProcesses {
   })
 }
 
+function Test-ProcessAlive([int]$ProcessId) {
+  if ($ProcessId -le 0) { return $false }
+  try {
+    $process = Get-Process -Id $ProcessId -ErrorAction Stop
+    return $null -ne $process
+  } catch {
+    return $false
+  }
+}
+
+function Remove-DeadComputeDaemonState {
+  # The Browser Compute runtime owns this canonical PID lock. Reclaim artifacts only
+  # when the lock is well-formed and its recorded owner is proven dead. A live owner
+  # may belong to an independently started Compute service and is never terminated or
+  # modified by the Browser installer.
+  $stateRoot = Join-Path $env:USERPROFILE '.metaengine\a2-compute-browser'
+  $lockPath = Join-Path $stateRoot 'a2-daemon.lock'
+  if (-not (Test-Path -LiteralPath $lockPath -PathType Leaf)) { return }
+
+  $lock = $null
+  try { $lock = Get-Content -LiteralPath $lockPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop } catch { return }
+  $ownerPid = 0
+  try { $ownerPid = [int]$lock.pid } catch { return }
+  if ($ownerPid -le 0 -or (Test-ProcessAlive $ownerPid)) { return }
+
+  Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath (Join-Path $stateRoot 'control-token') -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath (Join-Path $env:USERPROFILE '.a2\compute-bridge.json') -Force -ErrorAction SilentlyContinue
+}
+
+if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
+  Remove-DeadComputeDaemonState
+  exit 0
+}
+
 $existing = @(Get-ExactTargetProcesses)
-if ($existing.Count -eq 0) { exit 0 }
+if ($existing.Count -eq 0) {
+  Remove-DeadComputeDaemonState
+  exit 0
+}
 
 # New Browser builds understand this local installer-only signal. The primary
 # stops HostResilience/Sentinel first and then performs a planned app.quit().
@@ -48,7 +85,10 @@ try {
 
 $graceDeadline = [DateTime]::UtcNow.AddSeconds($GraceSeconds)
 do {
-  if (@(Get-ExactTargetProcesses).Count -eq 0) { exit 0 }
+  if (@(Get-ExactTargetProcesses).Count -eq 0) {
+    Remove-DeadComputeDaemonState
+    exit 0
+  }
   Start-Sleep -Milliseconds 200
 } while ([DateTime]::UtcNow -lt $graceDeadline)
 
@@ -59,7 +99,10 @@ do {
 $forceDeadline = [DateTime]::UtcNow.AddSeconds($ForceSeconds)
 do {
   $rows = @(Get-ExactTargetProcesses)
-  if ($rows.Count -eq 0) { exit 0 }
+  if ($rows.Count -eq 0) {
+    Remove-DeadComputeDaemonState
+    exit 0
+  }
   foreach ($row in $rows) {
     try { Stop-Process -Id ([int]$row.ProcessId) -Force -ErrorAction Stop } catch {}
   }
@@ -72,4 +115,5 @@ if ($remaining.Count -ne 0) {
   exit 23
 }
 
+Remove-DeadComputeDaemonState
 exit 0
