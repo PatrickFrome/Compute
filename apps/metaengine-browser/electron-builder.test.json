@@ -71,7 +71,7 @@
     "artifactName": "METAENGINE-Browser-Test-Setup-${version}-${arch}.${ext}"
   },
   "nsis": {
-    "oneClick": true,
+    "oneClick": false,
     "perMachine": false,
     "allowToChangeInstallationDirectory": false,
     "createDesktopShortcut": true,

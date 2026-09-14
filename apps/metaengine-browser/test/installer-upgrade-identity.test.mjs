@@ -22,8 +22,8 @@ test('NSIS upgrade identity remains compatible with installed 0.6.2 development 
   assert.equal(config.publish?.[0]?.channel, 'dev');
 });
 
-test('manual installer interaction mode is one-click without changing upgrade identity', async () => {
+test('manual installer interaction mode remains assisted without changing upgrade identity', async () => {
   const config = JSON.parse(await fs.readFile(path.join(root, 'electron-builder.test.json'), 'utf8'));
-  assert.equal(config.nsis.oneClick, true);
+  assert.equal(config.nsis.oneClick, false);
   assert.equal(config.nsis.runAfterFinish, true);
 });
