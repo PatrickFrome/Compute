@@ -9,6 +9,13 @@ const migration = fs.readFileSync(
 const edge = fs.readFileSync(new URL('../supabase/a2-browser-native-supervisor-v1/index.ts', import.meta.url), 'utf8');
 const wake = fs.readFileSync(new URL('../supabase/a2-browser-native-supervisor-v1/realtime-command-wake.mjs', import.meta.url), 'utf8');
 
+function returnedTemplate(source, functionName) {
+  const pattern = new RegExp(`function\\s+${functionName}\\s*\\([^)]*\\)\\s*\\{\\s*return\\s*\\`([^\\`]*)\\`\\s*;?\\s*\\}`);
+  const match = source.match(pattern);
+  assert.ok(match, `${functionName} template contract missing`);
+  return match[1];
+}
+
 test('generic pulse trigger preserves legacy notify and broadcasts only command rows entering pending', () => {
   assert.match(migration, /create or replace function public\.glm_browser_pulse_notify_v1\(\)/i);
   assert.match(migration, /perform pg_notify\('glm_browser_pulse', v_payload\)/);
@@ -30,10 +37,11 @@ test('database broadcast is a minimal private wake and never mutates command aut
 });
 
 test('publisher topic/privacy contract matches wait-batch subscriber and durable rechecks remain authoritative', () => {
-  assert.match(edge, /function realtimeTopic\(client:string\)\{return `metaengine-control:\$\{WORKSPACE_ID\}:\$\{client\}`\}/);
-  assert.match(edge, /function realtimeAllTopic\(\)\{return `metaengine-control:\$\{WORKSPACE_ID\}:all`\}/);
-  assert.match(wake, /private: true/);
-  assert.match(wake, /transport_delivery_is_authority: false/);
+  assert.equal(returnedTemplate(edge, 'realtimeTopic'), 'metaengine-control:${WORKSPACE_ID}:${client}');
+  assert.equal(returnedTemplate(edge, 'realtimeAllTopic'), 'metaengine-control:${WORKSPACE_ID}:all');
+  assert.match(edge, /topics\s*:\s*\[\s*realtimeTopic\(client\)\s*,\s*realtimeAllTopic\(\)\s*\]/);
+  assert.match(wake, /private:\s*true/);
+  assert.match(wake, /transport_delivery_is_authority:\s*false/);
   assert.match(edge, /const afterSubscribe=await leaseBatch\(req,body\)/);
   assert.match(edge, /const wake=await subscription\.wake;\s*const afterWake=await leaseBatch\(req,body\)/s);
 });
