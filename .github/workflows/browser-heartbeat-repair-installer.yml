@@ -8,11 +8,16 @@ on:
       - 'apps/metaengine-browser/src/native-supervisor-client-core.mjs'
       - 'apps/metaengine-browser/src/native-supervisor-client-core-base.mjs'
       - 'apps/metaengine-browser/src/compute-bridge-client.mjs'
+      - 'apps/metaengine-browser/src/compute-bridge-worker.cjs'
       - 'apps/metaengine-browser/test/native-supervisor-heartbeat-*.test.mjs'
       - 'apps/metaengine-browser/test/native-supervisor-transient-batch-fallback.test.mjs'
       - 'apps/metaengine-browser/test/compute-bridge-*.test.mjs'
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/electron-builder.test.json'
+      - 'coordination/browser-compute/package.json'
+      - 'coordination/browser-compute/protocol-v1.json'
+      - 'coordination/browser-compute/engine-lock.json'
+      - 'coordination/browser-compute/src/**'
       - '.github/workflows/browser-heartbeat-repair-installer.yml'
   workflow_dispatch:
 
@@ -38,7 +43,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          printf 'heartbeat_repair_head=%s\n' "$EXPECTED_HEAD"
+          printf 'heartbeat_compute_repair_head=%s\n' "$EXPECTED_HEAD"
 
       - name: Setup Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -57,9 +62,14 @@ jobs:
           node --check src/native-supervisor-client-core.mjs
           node --check src/native-supervisor-client-core-base.mjs
           node --check src/compute-bridge-client.mjs
+          node --check src/compute-bridge-worker.cjs
           node --test test/native-supervisor-heartbeat-watchdog.test.mjs
           node --test test/native-supervisor-heartbeat-route-contract.test.mjs
           node --test test/native-supervisor-transient-batch-fallback.test.mjs
+          node --test test/native-supervisor-state-heartbeat-fallback.test.mjs
+          node --test test/compute-bridge-client.test.mjs
+          node --test test/compute-bridge-autostart.test.mjs
+          METAENGINE_TEST_COMPUTE_DAEMON=1 node --test test/compute-bridge-daemon-integration.test.mjs
 
       - name: Build unsigned x64 NSIS repair installer
         working-directory: apps/metaengine-browser
@@ -78,10 +88,13 @@ jobs:
           npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
           $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
           $blockmap = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe.blockmap" -File | Select-Object -First 1
-          if (-not $installer -or -not $blockmap) { throw 'heartbeat_repair_package_assets_missing' }
+          if (-not $installer -or -not $blockmap) { throw 'heartbeat_compute_repair_package_assets_missing' }
+          $daemonEntry = Join-Path $PWD 'dist-test\win-unpacked\resources\a2-compute-browser\src\cli.mjs'
+          $daemonRpc = Join-Path $PWD 'dist-test\win-unpacked\resources\a2-compute-browser\src\rpc-server.mjs'
+          if (-not (Test-Path $daemonEntry) -or -not (Test-Path $daemonRpc)) { throw 'bundled_compute_daemon_missing' }
           $digest = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           $proof = [ordered]@{
-            schema = 'metaengine.browser.heartbeat-repair-installer.v2'
+            schema = 'metaengine.browser.heartbeat-compute-repair-installer.v3'
             source_head = '${{ github.sha }}'
             package_version = $version
             installer_name = $installer.Name
@@ -92,22 +105,27 @@ jobs:
             transient_state_statuses = @(502,503,504)
             heartbeat_contract_tests_passed = $true
             transient_batch_fallback_tests_passed = $true
+            compute_bridge_bundled = $true
+            compute_bridge_autostart_test_passed = $true
+            compute_bridge_real_daemon_smoke_passed = $true
+            compute_bridge_packaged_resource_verified = $true
+            compute_bridge_endpoint = 'ephemeral_loopback_http_rpc'
             monotonic_run_id_version = $true
             signed = $false
             published = $false
             authority_effect = $false
           }
-          $proof | ConvertTo-Json -Depth 4 | Set-Content dist-test\heartbeat-repair-proof.json -Encoding utf8
+          $proof | ConvertTo-Json -Depth 4 | Set-Content dist-test\heartbeat-compute-repair-proof.json -Encoding utf8
           Write-Host ($proof | ConvertTo-Json -Compress)
 
-      - name: Upload heartbeat repair installer
+      - name: Upload heartbeat and compute repair installer
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: metaengine-browser-heartbeat-repair-${{ github.sha }}
+          name: metaengine-browser-heartbeat-compute-repair-${{ github.sha }}
           path: |
             apps/metaengine-browser/dist-test/METAENGINE-Browser-Test-Setup-*.exe
             apps/metaengine-browser/dist-test/METAENGINE-Browser-Test-Setup-*.exe.blockmap
-            apps/metaengine-browser/dist-test/heartbeat-repair-proof.json
+            apps/metaengine-browser/dist-test/heartbeat-compute-repair-proof.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
