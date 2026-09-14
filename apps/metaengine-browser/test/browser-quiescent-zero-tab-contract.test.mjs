@@ -58,5 +58,10 @@ test('convergence product head contains no temporary patch authority and package
   assert.deepEqual(builder.extraResources, [
     { from: 'native-dist/guardian', to: 'guardian-native', filter: ['**/*'] },
     { from: 'devos-source-snapshot', to: 'devos-source-snapshot', filter: ['**/*'] },
+    {
+      from: '../../coordination/browser-compute',
+      to: 'a2-compute-browser',
+      filter: ['package.json', 'protocol-v1.json', 'engine-lock.json', 'src/**/*'],
+    },
   ]);
 });
