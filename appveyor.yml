@@ -30,7 +30,8 @@ test_script:
         apps/metaengine-browser/test/native-supervisor-heartbeat-contract.test.mjs \
         apps/metaengine-browser/test/native-supervisor-heartbeat-contract-coherence.test.mjs \
         apps/metaengine-browser/test/self-update-signed-heartbeat.test.mjs \
-        apps/metaengine-browser/test/native-effect-state-revision.test.mjs
+        apps/metaengine-browser/test/native-effect-state-revision.test.mjs \
+        apps/metaengine-browser/test/native-semantic-ref.test.mjs
       python3 -m unittest \
         tests.a1.test_zero_spend_runner \
         tests.a1.test_cross_provider_verify \
