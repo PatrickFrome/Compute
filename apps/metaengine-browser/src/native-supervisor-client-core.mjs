@@ -1,6 +1,7 @@
 import {
   NativeSupervisorClient as UnwiredNativeSupervisorClient,
   NATIVE_SUPERVISOR_RUNTIME_PATH,
+  sendBootstrapHeartbeat as sendBootstrapHeartbeatViaLegacyState,
 } from './native-supervisor-client-core-base.mjs';
 import { createNativeGuardianDeveloperEmergencyUpdateController } from './developer-emergency-update-native-controller.mjs';
 
@@ -121,6 +122,27 @@ export function createNativeSupervisorHeartbeatTransport({ identity, fetchImpl, 
     }
     : rawFetch;
   return Object.freeze({ identity: transportIdentity, fetchImpl: transportFetch });
+}
+
+/**
+ * Public bootstrap-heartbeat API sealed to the dedicated heartbeat route.
+ *
+ * The proven core still constructs the bounded bootstrap projection through its
+ * historical state-post helper. Route and signature rewriting are applied here as
+ * one transport boundary so callers importing this public function cannot bypass
+ * /v1/heartbeat and accidentally perform a full /v1/state publication.
+ */
+export async function sendBootstrapHeartbeat(options = {}) {
+  const heartbeatTransport = createNativeSupervisorHeartbeatTransport({
+    identity: options.identity,
+    fetchImpl: options.fetchImpl ?? globalThis.fetch,
+    legacySingleLeaseFallback: false,
+  });
+  return sendBootstrapHeartbeatViaLegacyState({
+    ...options,
+    identity: heartbeatTransport.identity,
+    fetchImpl: heartbeatTransport.fetchImpl,
+  });
 }
 
 /**
