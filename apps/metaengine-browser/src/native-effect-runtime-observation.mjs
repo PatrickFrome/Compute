@@ -185,6 +185,20 @@ export function lookupNativeEffectRuntimeObservation({
   return row;
 }
 
+export function latestNativeEffectRuntimeObservationForTarget({ target_id, now = Date.now() } = {}) {
+  const current = Number(now);
+  if (!Number.isFinite(current)) return null;
+  prune(current);
+  const targetId = clean(target_id).toLowerCase();
+  if (!TARGET_RE.test(targetId)) return null;
+  const rows = [...observations.values()];
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index];
+    if (row.target_id === targetId) return row;
+  }
+  return null;
+}
+
 export function assertNativeEffectRuntimeBindingCurrent({ binding, runtime_binding, document_url_sha256 } = {}) {
   if (String(binding?.schema || '') !== 'metaengine.native-supervisor.effect-binding.v2') return true;
   const current = normalizeRuntimeBinding(runtime_binding);
