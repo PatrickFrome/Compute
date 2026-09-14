@@ -10,6 +10,7 @@ class FakeDebugger extends EventEmitter {
   detachCalls = 0;
   calls = [];
   failTargetAutoAttach = false;
+  hangFrameTree = false;
   mainFrameId = 'frame-root';
 
   isAttached() { return this.attached; }
@@ -31,6 +32,7 @@ class FakeDebugger extends EventEmitter {
       throw new Error('Target domain unavailable');
     }
     if (method === 'Page.getFrameTree') {
+      if (this.hangFrameTree) return new Promise(() => {});
       return {
         frameTree: {
           frame: {
@@ -67,6 +69,7 @@ test('persistent auto-attach sees nested related targets without contaminating r
 
   await pool.ensure(wc);
   pool.subscribe(wc, (event) => events.push(event));
+  await nextTurn();
 
   const initial = pool.identity(wc);
   assert.equal(initial.document_generation, 1);
@@ -143,7 +146,8 @@ test('same-document navigation invalidates only the exact root document revision
 
   const initial = await pool.ensure(wc);
   pool.subscribe(wc, (event) => events.push(event));
-  assert.equal(initial.main_frame_id, 'frame-root');
+  await nextTurn();
+  assert.equal(pool.identity(wc).main_frame_id, 'frame-root');
   assert.equal(initial.attachment_generation, 1);
   assert.equal(initial.document_generation, 1);
   assert.equal(initial.binding_generation, 1);
@@ -208,6 +212,27 @@ test('same-document navigation invalidates only the exact root document revision
   identity = pool.identity(wc);
   assert.equal(identity.document_generation, 4);
   assert.equal(identity.binding_generation, 2);
+
+  pool.release(wc);
+});
+
+test('main frame identity seeding is fail-soft and never blocks persistent session readiness', async () => {
+  const dbg = new FakeDebugger();
+  dbg.hangFrameTree = true;
+  const wc = new FakeWebContents(704, dbg);
+  const pool = new PersistentBrowserCdpSessionPool();
+
+  const ready = await Promise.race([
+    pool.ensure(wc),
+    nextTurn().then(() => { throw new Error('persistent_cdp_frame_tree_seed_blocked_readiness'); }),
+  ]);
+  assert.equal(ready.ready, true);
+  assert.equal(ready.attached, true);
+  assert.equal(ready.main_frame_id, null);
+  assert.equal(ready.document_generation, 1);
+  assert.equal(ready.binding_generation, 1);
+  assert.equal(dbg.attachCalls, 1);
+  assert.ok(dbg.calls.some((call) => call.method === 'Page.getFrameTree'));
 
   pool.release(wc);
 });
