@@ -153,12 +153,12 @@ async function postStateHeartbeat({ identity, fetchImpl, payload } = {}) {
   const identityState = await identity.ensure();
   if (!identityState?.device_id) return Object.freeze({ sent: false, reason: 'DEVICE_NOT_ENROLLED', authority_effect: false });
   const bodyText = JSON.stringify(payload);
-  const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}/v1/state`;
+  const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}/v1/heartbeat`;
   const headers = await identity.deviceHeaders('POST', requestPath, bodyText);
-  const response = await fetchImpl(`${NATIVE_SUPERVISOR_BASE}/v1/state`, {
+  const response = await fetchImpl(`${NATIVE_SUPERVISOR_BASE}/v1/heartbeat`, {
     method: 'POST', headers, body: bodyText, cache: 'no-store',
   });
-  if (response.status !== 202) throw new Error(`native_supervisor_watchdog_state_http_${response.status}`);
+  if (response.status !== 202) throw new Error(`native_supervisor_watchdog_heartbeat_http_${response.status}`);
   return Object.freeze({ sent: true, at: new Date().toISOString(), authority_effect: false });
 }
 
