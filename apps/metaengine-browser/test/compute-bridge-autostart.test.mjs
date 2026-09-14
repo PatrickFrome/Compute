@@ -6,14 +6,15 @@ import test from 'node:test';
 import { ComputeBridgeClient, COMPUTE_HEALTH_STATES, resolveBundledComputeBridgeRoot } from '../src/compute-bridge-client.mjs';
 
 test('bundled bridge root resolves to packaged resources or repository coordination runtime', () => {
+  const resourcesPath = path.join(path.parse(process.cwd()).root, 'METAENGINE', 'resources');
   assert.equal(
-    resolveBundledComputeBridgeRoot({ resourcesPath: 'C:\\Program Files\\METAENGINE\\resources', moduleDir: 'ignored' }),
-    path.join('C:\\Program Files\\METAENGINE\\resources', 'a2-compute-browser'),
+    resolveBundledComputeBridgeRoot({ resourcesPath, moduleDir: 'ignored' }),
+    path.join(resourcesPath, 'a2-compute-browser'),
   );
-  const moduleDir = path.join('/repo', 'apps', 'metaengine-browser', 'src');
+  const moduleDir = path.join(path.parse(process.cwd()).root, 'repo', 'apps', 'metaengine-browser', 'src');
   assert.equal(
     resolveBundledComputeBridgeRoot({ resourcesPath: null, moduleDir }),
-    path.join('/repo', 'coordination', 'browser-compute'),
+    path.resolve(moduleDir, '..', '..', '..', 'coordination', 'browser-compute'),
   );
 });
 
