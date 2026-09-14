@@ -1,0 +1,166 @@
+name: METAENGINE Browser Heartbeat Coherence V1
+
+on:
+  push:
+    branches:
+      - 'work/browser-heartbeat-coherence-v1'
+    paths:
+      - 'apps/metaengine-browser/src/native-supervisor-client-core.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client-activated.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client-core-base.mjs'
+      - 'apps/metaengine-browser/src/self-update-signed-heartbeat.mjs'
+      - 'apps/metaengine-browser/src/supervisor-keepalive.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/cognitive-delta-routes.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/heartbeat-route.mjs'
+      - 'apps/metaengine-browser/supabase/native-supervisor-heartbeat-v1.sql'
+      - 'apps/metaengine-browser/test/heartbeat-coherence-v1.test.mjs'
+      - 'apps/metaengine-browser/test/heartbeat-payload-shape-v1.test.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-heartbeat-migration-v1.test.mjs'
+      - 'apps/metaengine-browser/test/keepalive-admission-parking-v1.test.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-heartbeat-watchdog.test.mjs'
+      - '.github/workflows/browser-heartbeat-coherence-v1.yml'
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/native-supervisor-client-core.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client-activated.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client-core-base.mjs'
+      - 'apps/metaengine-browser/src/self-update-signed-heartbeat.mjs'
+      - 'apps/metaengine-browser/src/supervisor-keepalive.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/cognitive-delta-routes.mjs'
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/heartbeat-route.mjs'
+      - 'apps/metaengine-browser/supabase/native-supervisor-heartbeat-v1.sql'
+      - 'apps/metaengine-browser/test/heartbeat-coherence-v1.test.mjs'
+      - 'apps/metaengine-browser/test/heartbeat-payload-shape-v1.test.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-heartbeat-migration-v1.test.mjs'
+      - 'apps/metaengine-browser/test/keepalive-admission-parking-v1.test.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-heartbeat-watchdog.test.mjs'
+      - '.github/workflows/browser-heartbeat-coherence-v1.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  heartbeat-coherence:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          printf 'exact_head=%s\n' "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Parse heartbeat and keepalive runtime
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/native-supervisor-client-core.mjs
+          node --check src/native-supervisor-client-activated.mjs
+          node --check src/native-supervisor-client-core-base.mjs
+          node --check src/self-update-signed-heartbeat.mjs
+          node --check src/supervisor-keepalive.mjs
+          node --check supabase/a2-browser-native-supervisor-v1/heartbeat-route.mjs
+          node --check supabase/a2-browser-native-supervisor-v1/cognitive-delta-routes.mjs
+          node --check test/heartbeat-coherence-v1.test.mjs
+          node --check test/heartbeat-payload-shape-v1.test.mjs
+          node --check test/native-supervisor-heartbeat-migration-v1.test.mjs
+          node --check test/keepalive-admission-parking-v1.test.mjs
+
+      - name: Prove heartbeat split, migration and parked no-replay regressions
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            test/heartbeat-coherence-v1.test.mjs \
+            test/heartbeat-payload-shape-v1.test.mjs \
+            test/native-supervisor-heartbeat-migration-v1.test.mjs \
+            test/keepalive-admission-parking-v1.test.mjs \
+            test/native-supervisor-heartbeat-watchdog.test.mjs
+
+      - name: Prove source-level producer parity and zero-authority route shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          client='apps/metaengine-browser/src/native-supervisor-client-core.mjs'
+          route='apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/heartbeat-route.mjs'
+          dispatcher='apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/cognitive-delta-routes.mjs'
+          qualifier='apps/metaengine-browser/src/self-update-signed-heartbeat.mjs'
+          entry='apps/metaengine-browser/src/final-runtime-entry.mjs'
+          grep -Fq "sendBootstrapHeartbeat as sendBootstrapHeartbeatBase" "$client"
+          grep -Fq "createHeartbeatCoherentIdentity" "$client"
+          grep -Fq "target.deviceHeaders.call(target, 'POST', projected.path, projected.bodyText)" "$client"
+          grep -Fq "bootstrap_heartbeat === true" "$client"
+          grep -Fq "watchdog_heartbeat === true" "$client"
+          grep -Fq "const HEARTBEAT_PATH =" "$client"
+          grep -Fq "const HEARTBEAT_URL =" "$client"
+          grep -Fq "identity: coherent.identity" "$client"
+          grep -Fq "fetchImpl: coherent.fetchImpl" "$client"
+          grep -Fq "const HEARTBEAT_PHASES = new Set(['BOOTSTRAP', 'WATCHDOG'])" "$route"
+          grep -Fq "const HEARTBEAT_FIELDS = new Set(['phase', 'authority_effect'])" "$route"
+          grep -Fq "state_document_mutated: false" "$route"
+          grep -Fq "liveness_mutated: true" "$route"
+          grep -Fq "last_seen_at_mutated: true" "$route"
+          grep -Fq "authority_effect: false" "$route"
+          ! grep -Eq 'command_leasing:[[:space:]]*true|control_authority:[[:space:]]*true|automatic_retry_allowed:[[:space:]]*true' "$route"
+          grep -Fq 'createNativeSupervisorHeartbeatRoute' "$dispatcher"
+          grep -Fq "NATIVE_SUPERVISOR_STATE_PATH = '/functions/v1/a2-browser-native-supervisor-v1/v1/state'" "$qualifier"
+          grep -Fq 'native-supervisor-client-activated.mjs' "$entry"
+
+      - name: Prove heartbeat SQL is liveness-only and service-role-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          sql='apps/metaengine-browser/supabase/native-supervisor-heartbeat-v1.sql'
+          test -f "$sql"
+          grep -Eiq '^begin;[[:space:]]*$' "$sql"
+          grep -Eiq '^commit;[[:space:]]*$' "$sql"
+          grep -Eiq 'set[[:space:]]+search_path[[:space:]]*=[[:space:]]*pg_catalog,[[:space:]]*pg_temp' "$sql"
+          ! grep -Eiq 'set[[:space:]]+search_path[[:space:]]*=[^\n;]*public' "$sql"
+          grep -Eiq 'set[[:space:]]+last_seen_at[[:space:]]*=[[:space:]]*pg_catalog\.clock_timestamp\(\)' "$sql"
+          grep -Eiq 'where[[:space:]]+client_id[[:space:]]*=[[:space:]]*p_client_id' "$sql"
+          grep -Eiq 'workspace_id[[:space:]]*=[[:space:]]*p_workspace_id' "$sql"
+          ! grep -Eiq 'set[[:space:]]+state[[:space:]]*=' "$sql"
+          ! grep -Eiq 'insert[[:space:]]+into[[:space:]]+public\.compute_fabric_a2_browser_supervisor_state_h205f22' "$sql"
+          grep -Fq "'state_document_mutated', false" "$sql"
+          grep -Fq "'liveness_mutated', true" "$sql"
+          grep -Fq "'last_seen_at_mutated', true" "$sql"
+          grep -Eiq 'revoke[[:space:]]+all[^;]+from[[:space:]]+public[[:space:]]*,[[:space:]]*anon[[:space:]]*,[[:space:]]*authenticated[[:space:]]*;' "$sql"
+          grep -Eiq 'grant[[:space:]]+execute[^;]+to[[:space:]]+service_role' "$sql"
+          ! grep -Eiq 'grant[[:space:]]+execute[^;]+to[[:space:]]+(public|anon|authenticated)' "$sql"
+
+      - name: Prove branch-local clean checkout
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          printf 'second_scheduler=false\n'
+          printf 'production_mutation=false\n'
+          printf 'release_promotion=false\n'

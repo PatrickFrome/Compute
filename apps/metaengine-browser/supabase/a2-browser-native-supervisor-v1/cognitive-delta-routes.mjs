@@ -1,3 +1,5 @@
+import { createNativeSupervisorHeartbeatRoute } from './heartbeat-route.mjs';
+
 export const COGNITIVE_DELTA_ROUTE_PATH = '/v1/cognitive/deltas';
 export const COGNITIVE_DELTA_ACCEPTOR_RPC = 'h205f22_a2_browser_cognitive_accept_v1';
 export const COGNITIVE_DELTA_BATCH_SCHEMA = 'metaengine.browser.cognitive-delta-batch.v1';
@@ -155,7 +157,11 @@ export function createCognitiveDeltaRoutes({ rpc, workspaceId, json }) {
   if (!workspaceId) throw new Error('cognitive_delta_workspace_required');
   if (typeof json !== 'function') throw new Error('cognitive_delta_json_required');
 
+  const heartbeatRoute = createNativeSupervisorHeartbeatRoute({ rpc, workspaceId, json });
+
   return async function cognitiveDeltaRoutes({ req, path, body, bodyText, identity } = {}) {
+    const heartbeatResponse = await heartbeatRoute({ req, path, body, identity });
+    if (heartbeatResponse) return heartbeatResponse;
     if (path !== COGNITIVE_DELTA_ROUTE_PATH) return null;
     if (req?.method !== 'POST') return json(405, {
       error: 'cognitive_delta_method_not_allowed',

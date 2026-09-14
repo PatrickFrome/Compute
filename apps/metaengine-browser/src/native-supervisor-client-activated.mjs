@@ -36,9 +36,11 @@ export class NativeSupervisorClient extends ProvenNativeSupervisorClient {
 
   constructor(options = {}) {
     const sourceBeforeSelfUpdateInstall = options.beforeSelfUpdateInstall;
+    const sourceFetch = options.fetchImpl ?? globalThis.fetch;
     let finalRuntimeSupervisor = null;
     super({
       ...options,
+      fetchImpl: sourceFetch,
       beforeSelfUpdateInstall: async (receipt) => {
         if (!finalRuntimeSupervisor) throw new Error('final_runtime_self_update_supervisor_not_ready');
         const quiesced = await quiesceFinalRuntimeSupervisor(finalRuntimeSupervisor, 'SELF_UPDATE_INSTALLER_HANDOFF');
@@ -68,7 +70,7 @@ export class NativeSupervisorClient extends ProvenNativeSupervisorClient {
       getBrowserState,
       getCurrentUrl: (command) => currentUrlFromBrowserState(getBrowserState, command),
       executeCommand,
-      fetchImpl: options.fetchImpl ?? globalThis.fetch,
+      fetchImpl: sourceFetch,
     });
     this.#finalRuntimeRegistered = true;
   }

@@ -28,7 +28,7 @@ test('bootstrap heartbeat canonicalizes stale authority to always-on CONTROL wit
   assert.equal(payload.last_command_status, null);
 });
 
-test('bootstrap pump posts only canonical CONTROL state and never leases commands while continuity start is pending', async () => {
+test('bootstrap pump posts only minimal canonical liveness and never leases commands while continuity start is pending', async () => {
   const calls = [];
   const identity = {
     async ensure() { return { device_id: '00000000-0000-4000-8000-000000000001' }; },
@@ -50,14 +50,14 @@ test('bootstrap pump posts only canonical CONTROL state and never leases command
   });
   assert.equal(result.sent, true);
   const fetch = calls.find((row) => row.kind === 'fetch');
-  assert.equal(fetch.url, `${NATIVE_SUPERVISOR_BASE}/v1/state`);
-  assert.equal(calls.find((row) => row.kind === 'headers').path, `${NATIVE_SUPERVISOR_RUNTIME_PATH}/v1/state`);
+  const signed = calls.find((row) => row.kind === 'headers');
+  assert.equal(fetch.url, `${NATIVE_SUPERVISOR_BASE}/v1/heartbeat`);
+  assert.equal(signed.path, `${NATIVE_SUPERVISOR_RUNTIME_PATH}/v1/heartbeat`);
   assert.doesNotMatch(fetch.url, /commands\/next/);
   const body = JSON.parse(fetch.init.body);
-  assert.equal(body.state.supervisor_mode, 'CONTROL');
-  assert.equal(body.state.armed, true);
-  assert.equal(body.state.operator_mode, 'CONTROL');
-  assert.equal(body.state.authority_effect, false);
+  assert.deepEqual(body, { phase: 'BOOTSTRAP', authority_effect: false });
+  assert.equal(Object.hasOwn(body, 'state'), false);
+  assert.equal(signed.bodyText, fetch.init.body);
 });
 
 test('unenrolled bootstrap performs no network request and grants no authority', async () => {
