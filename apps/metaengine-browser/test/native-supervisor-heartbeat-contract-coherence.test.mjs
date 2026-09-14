@@ -9,7 +9,6 @@ import {
 import { inspectSignedNativeSupervisorStateRequest } from '../src/self-update-signed-heartbeat.mjs';
 
 const STATE_ROUTE = '/v1/state';
-const HEARTBEAT_ROUTE = '/v1/heartbeat';
 
 function deviceHeaders(method, path, bodyText) {
   assert.equal(method, 'POST');
@@ -26,7 +25,7 @@ function deviceHeaders(method, path, bodyText) {
   };
 }
 
-test('bounded bootstrap heartbeat is coherent across producer, signature path, transport, and successor qualification', async () => {
+test('bounded bootstrap heartbeat is coherent across producer, state signature path, transport, and successor qualification', async () => {
   const calls = [];
   const identity = {
     async ensure() {
@@ -57,16 +56,16 @@ test('bounded bootstrap heartbeat is coherent across producer, signature path, t
   assert.ok(signed);
   assert.ok(request);
 
-  assert.equal(signed.path, nativeSupervisorSigningPath(HEARTBEAT_ROUTE));
-  assert.equal(request.url, nativeSupervisorRuntimeUrl(HEARTBEAT_ROUTE));
-  assert.equal(request.init.headers['x-test-signing-path'], nativeSupervisorSigningPath(HEARTBEAT_ROUTE));
+  assert.equal(signed.path, nativeSupervisorSigningPath(STATE_ROUTE));
+  assert.equal(request.url, nativeSupervisorRuntimeUrl(STATE_ROUTE));
+  assert.equal(request.init.headers['x-test-signing-path'], nativeSupervisorSigningPath(STATE_ROUTE));
 
   const qualifying = inspectSignedNativeSupervisorStateRequest(request.url, request.init);
   assert.equal(qualifying.valid, true);
   assert.equal(qualifying.reason, 'signed_request_shape_valid');
 });
 
-test('full state remains a distinct signed successor-qualification path during migration', () => {
+test('full state remains the same signed successor-qualification path', () => {
   const bodyText = JSON.stringify({
     state: {
       shell_version: '0.6.3-dev.contract-test',
