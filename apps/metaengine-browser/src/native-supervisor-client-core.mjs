@@ -13,9 +13,21 @@ const HEARTBEAT_ROUTE_SUFFIX = '/v1/heartbeat';
 const BATCH_WAIT_ROUTE_SUFFIX = '/v1/commands/wait-batch';
 const SINGLE_NEXT_ROUTE_SUFFIX = '/v1/commands/next';
 const TRANSIENT_HTTP_STATUSES = new Set([502, 503, 504]);
+const DEFAULT_BATCH_WAIT_MS = 4000;
+const DEFAULT_REQUEST_DEADLINE_MS = 8000;
+const REQUEST_DEADLINE_MARGIN_MS = 5000;
 
 function hasOwn(value, key) {
   return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+export function nativeSupervisorRequestDeadlineMs(options = {}) {
+  const batchWaitMs = Math.max(250, Math.min(15000, Number(options.commandBatchWaitMs) || DEFAULT_BATCH_WAIT_MS));
+  const requested = Number(options.requestDeadlineMs);
+  const requestedDeadlineMs = Number.isFinite(requested)
+    ? Math.max(1000, Math.min(30000, requested))
+    : DEFAULT_REQUEST_DEADLINE_MS;
+  return Math.min(30000, Math.max(requestedDeadlineMs, batchWaitMs + REQUEST_DEADLINE_MARGIN_MS));
 }
 
 function nativeEmergencyIdentityCapable(identity) {
@@ -210,6 +222,11 @@ export async function sendBootstrapHeartbeat(options = {}) {
  * already authenticated single-lease endpoint. The core never marks batch transport
  * unavailable, so the next cycle probes wait-batch again. HTTP 500 and other failures
  * remain visible.
+ *
+ * The request deadline is also coupled to the configured held batch wait. A client
+ * must never abort its own authoritative long poll before the server's bounded wait
+ * can complete; the invariant is batchWait + 5s margin, capped by the core's 30s
+ * transport ceiling.
  */
 export class NativeSupervisorClient extends UnwiredNativeSupervisorClient {
   constructor(options = {}) {
@@ -235,6 +252,7 @@ export class NativeSupervisorClient extends UnwiredNativeSupervisorClient {
 
     super({
       ...options,
+      requestDeadlineMs: nativeSupervisorRequestDeadlineMs(options),
       identity: heartbeatTransport.identity,
       fetchImpl: heartbeatTransport.fetchImpl,
       developerEmergencyUpdate,
@@ -251,6 +269,8 @@ export function nativeSupervisorEmergencyProductionWiringContract() {
     enrolled_guardian_proof_surface_required: true,
     native_guardian_actuator_only: true,
     electron_updater_fallback_allowed: false,
+    request_deadline_coupled_to_batch_wait: true,
+    request_deadline_margin_ms: REQUEST_DEADLINE_MARGIN_MS,
     automatic_retry_allowed: false,
     authority_effect: false,
   });
