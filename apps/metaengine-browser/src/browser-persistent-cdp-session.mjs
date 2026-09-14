@@ -58,6 +58,7 @@ function rowProjection(row) {
     schema: BROWSER_PERSISTENT_CDP_SESSION_SCHEMA,
     web_contents_id: row.id,
     target_id: row.targetId,
+    main_frame_id: row.mainFrameId,
     os_pid: Number(safeCall(row.webContents, 'getOSProcessId', 0)) || null,
     attached: row.dbg?.isAttached?.() === true,
     ready: row.ready === true,
@@ -85,6 +86,7 @@ function rowProjection(row) {
     subtarget_nested_auto_attach_failures: row.subtargetNestedAutoAttachFailures,
     subtargets,
     root_document_generation_ignores_subtarget_sessions: true,
+    same_document_revision_requires_main_frame_match: true,
     subtarget_raw_event_payloads_exposed: false,
     raw_cdp_passthrough: false,
     control_authority: false,
@@ -233,6 +235,8 @@ export class PersistentBrowserCdpSessionPool {
       dbg,
       eventCapable,
       targetId: targetIdOf(webContents),
+      mainFrameId: null,
+      mainFrameIdentityVersion: 0,
       subscribers: new Set(),
       ensurePromise: null,
       ready: false,
@@ -260,9 +264,26 @@ export class PersistentBrowserCdpSessionPool {
     row.messageHandler = (_event, method, params = {}, sessionId = null) => {
       const name = clip(method, 160);
 
-      if (!sessionId && (name === 'DOM.documentUpdated' || (name === 'Page.frameNavigated' && !params?.frame?.parentId))) {
-        row.documentGeneration += 1;
-        row.bindingGeneration += 1;
+      if (!sessionId) {
+        if (name === 'DOM.documentUpdated') {
+          row.documentGeneration += 1;
+          row.bindingGeneration += 1;
+        } else if (name === 'Page.frameNavigated' && !params?.frame?.parentId) {
+          row.mainFrameIdentityVersion += 1;
+          row.mainFrameId = clip(params?.frame?.id, 192) || row.mainFrameId;
+          row.documentGeneration += 1;
+          row.bindingGeneration += 1;
+        } else if (
+          name === 'Page.navigatedWithinDocument'
+          && row.mainFrameId
+          && clip(params?.frameId, 192) === row.mainFrameId
+        ) {
+          // Same-document navigation changes operator-visible page identity but
+          // retains the committed loader/runtime binding. Advance only the
+          // document revision fence so stale observations cannot survive history
+          // API or fragment navigation without inventing a new binding authority.
+          row.documentGeneration += 1;
+        }
       }
 
       if (name === 'Target.attachedToTarget') {
@@ -335,6 +356,8 @@ export class PersistentBrowserCdpSessionPool {
       row.ready = false;
       row.attachedByPool = false;
       row.bindingGeneration += 1;
+      row.mainFrameIdentityVersion += 1;
+      row.mainFrameId = null;
       row.subtargets.clear();
       row.subtargetBySession.clear();
       row.subtargetGeneration += 1;
@@ -364,6 +387,20 @@ export class PersistentBrowserCdpSessionPool {
     });
   }
 
+  #seedMainFrameIdentity(row) {
+    const identityVersion = row.mainFrameIdentityVersion;
+    void Promise.resolve()
+      .then(() => row.dbg.sendCommand('Page.getFrameTree'))
+      .then((frameTree) => {
+        if (this.#rows.get(row.id) !== row) return;
+        if (!liveWebContents(row.webContents) || row.dbg.isAttached?.() !== true) return;
+        if (row.mainFrameIdentityVersion !== identityVersion) return;
+        const mainFrameId = clip(frameTree?.frameTree?.frame?.id, 192) || null;
+        if (mainFrameId) row.mainFrameId = mainFrameId;
+      })
+      .catch(() => {});
+  }
+
   async #initialize(row) {
     if (!liveWebContents(row.webContents)) throw new Error('persistent_cdp_webcontents_unavailable');
     if (!row.dbg.isAttached()) {
@@ -373,6 +410,7 @@ export class PersistentBrowserCdpSessionPool {
 
     if (row.eventCapable) {
       await row.dbg.sendCommand('Page.enable');
+      this.#seedMainFrameIdentity(row);
       await row.dbg.sendCommand('DOM.enable');
       await row.dbg.sendCommand('Accessibility.enable');
       await row.dbg.sendCommand('Runtime.enable');
@@ -497,6 +535,7 @@ export class PersistentBrowserCdpSessionPool {
       subtarget_auto_attach_flatten: true,
       subtarget_wait_for_debugger_on_start: false,
       root_document_generation_ignores_subtarget_sessions: true,
+      same_document_revision_requires_main_frame_match: true,
       eventless_post_dispatch_polling_required: false,
       raw_cdp_passthrough: false,
       control_authority: false,
