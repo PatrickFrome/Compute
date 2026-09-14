@@ -10,7 +10,10 @@ const edge = fs.readFileSync(new URL('../supabase/a2-browser-native-supervisor-v
 const wake = fs.readFileSync(new URL('../supabase/a2-browser-native-supervisor-v1/realtime-command-wake.mjs', import.meta.url), 'utf8');
 
 function returnedTemplate(source, functionName) {
-  const pattern = new RegExp(`function\\s+${functionName}\\s*\\([^)]*\\)\\s*\\{\\s*return\\s*\\`([^\\`]*)\\`\\s*;?\\s*\\}`);
+  const escapedName = functionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(
+    'function\\s+' + escapedName + '\\s*\\([^)]*\\)\\s*\\{\\s*return\\s*`([^`]*)`\\s*;?\\s*\\}',
+  );
   const match = source.match(pattern);
   assert.ok(match, `${functionName} template contract missing`);
   return match[1];
