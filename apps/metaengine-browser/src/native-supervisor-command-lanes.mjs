@@ -47,7 +47,7 @@ function actionOf(command) {
 
 function emergency(command) {
   const action = actionOf(command);
-  if (action === 'DISARM') return true;
+  if (action === 'DISARM' || action === 'DEVELOPER_EMERGENCY_UPDATE') return true;
   if (action !== 'SET_SUPERVISOR_MODE') return false;
   return String(command?.payload?.mode || '').trim().toUpperCase() === 'OFF';
 }

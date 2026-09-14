@@ -228,7 +228,6 @@ if (!guard.primary) {
       },
     );
     if (startupUpdateInspection?.state === 'AMBIGUOUS_INSTALL') {
-      process.env.METAENGINE_DISABLE_SELF_UPDATE = '1';
       process.env.METAENGINE_SELF_UPDATE_HOLD_REASON = 'AMBIGUOUS_INSTALL';
       if (startupUpdateInspection.target_version) {
         process.env.METAENGINE_SELF_UPDATE_HOLD_TARGET = String(startupUpdateInspection.target_version);
@@ -258,7 +257,6 @@ if (!guard.primary) {
       // retry. Keep the primary process alive, hold self-update authority, and
       // allow host resilience to preserve recovery surfaces. Qualification is
       // gated on updateHandoff below, so this boot cannot be promoted.
-      process.env.METAENGINE_DISABLE_SELF_UPDATE = '1';
       process.env.METAENGINE_SELF_UPDATE_HOLD_REASON = 'SUCCESSOR_RECEIPT_AMBIGUOUS';
       console.error(JSON.stringify({
         schema: 'metaengine.browser.self-update-successor-boot-failure.v1',
