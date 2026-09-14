@@ -1,0 +1,104 @@
+name: Browser Heartbeat Repair Installer
+
+on:
+  push:
+    branches:
+      - 'repair/native-supervisor-transport-resilience-v1-20260914'
+    paths:
+      - 'apps/metaengine-browser/src/native-supervisor-client-core.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client-core-base.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-heartbeat-*.test.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-transient-batch-fallback.test.mjs'
+      - 'apps/metaengine-browser/package.json'
+      - 'apps/metaengine-browser/electron-builder.test.json'
+      - '.github/workflows/browser-heartbeat-repair-installer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  heartbeat-contract-and-installer:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - name: Checkout exact repair head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          printf 'heartbeat_repair_head=%s\n' "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Install Browser build dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+
+      - name: Prove heartbeat and transport contracts
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/native-supervisor-client-core.mjs
+          node --check src/native-supervisor-client-core-base.mjs
+          node --test test/native-supervisor-heartbeat-watchdog.test.mjs
+          node --test test/native-supervisor-heartbeat-route-contract.test.mjs
+          node --test test/native-supervisor-transient-batch-fallback.test.mjs
+
+      - name: Build unsigned x64 NSIS repair installer
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = [string](node -p "require('./package.json').version")
+          if (-not $version) { throw 'package_version_missing' }
+          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item native-dist\guardian -Recurse -Force -ErrorAction SilentlyContinue
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
+          $blockmap = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe.blockmap" -File | Select-Object -First 1
+          if (-not $installer -or -not $blockmap) { throw 'heartbeat_repair_package_assets_missing' }
+          $digest = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $proof = [ordered]@{
+            schema = 'metaengine.browser.heartbeat-repair-installer.v1'
+            source_head = '${{ github.sha }}'
+            package_version = $version
+            installer_name = $installer.Name
+            installer_sha256 = $digest
+            heartbeat_route = '/v1/heartbeat'
+            state_route_preserved = $true
+            heartbeat_contract_tests_passed = $true
+            transient_batch_fallback_tests_passed = $true
+            signed = $false
+            published = $false
+            authority_effect = $false
+          }
+          $proof | ConvertTo-Json -Depth 4 | Set-Content dist-test\heartbeat-repair-proof.json -Encoding utf8
+          Write-Host ($proof | ConvertTo-Json -Compress)
+
+      - name: Upload heartbeat repair installer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: metaengine-browser-heartbeat-repair-${{ github.sha }}
+          path: |
+            apps/metaengine-browser/dist-test/METAENGINE-Browser-Test-Setup-*.exe
+            apps/metaengine-browser/dist-test/METAENGINE-Browser-Test-Setup-*.exe.blockmap
+            apps/metaengine-browser/dist-test/heartbeat-repair-proof.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
