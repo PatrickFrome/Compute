@@ -1,5 +1,6 @@
 import {
   NativeSupervisorClient as UnwiredNativeSupervisorClient,
+  sendBootstrapHeartbeat as sendBootstrapHeartbeatBase,
 } from './native-supervisor-client-core-base.mjs';
 import { createNativeGuardianDeveloperEmergencyUpdateController } from './developer-emergency-update-native-controller.mjs';
 
@@ -56,6 +57,21 @@ export function createNativeSupervisorHeartbeatTransport({ identity, fetchImpl }
     ? (url, init = {}) => rawFetch(nativeSupervisorHeartbeatTarget(url, init?.body), init)
     : rawFetch;
   return Object.freeze({ identity: transportIdentity, fetchImpl: transportFetch });
+}
+
+// Keep the proven core helper byte-stable while making the public standalone producer
+// obey the same bounded-heartbeat transport contract as the production client class.
+// This prevents tests or bootstrap call sites from bypassing the atomic signing+URL rewrite.
+export async function sendBootstrapHeartbeat(options = {}) {
+  const heartbeatTransport = createNativeSupervisorHeartbeatTransport({
+    identity: options.identity,
+    fetchImpl: options.fetchImpl ?? globalThis.fetch,
+  });
+  return sendBootstrapHeartbeatBase({
+    ...options,
+    identity: heartbeatTransport.identity,
+    fetchImpl: heartbeatTransport.fetchImpl,
+  });
 }
 
 /**
