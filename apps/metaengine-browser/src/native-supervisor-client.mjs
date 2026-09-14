@@ -115,6 +115,12 @@ export function exactCommandTargetProjection(command) {
   });
 }
 
+export async function readNativeSupervisorFleetStatus(sourceGetState) {
+  if (typeof sourceGetState !== 'function') throw new Error('native_supervisor_fleet_state_provider_required');
+  const state = await sourceGetState();
+  return state?.fleet ? structuredClone(state.fleet) : null;
+}
+
 export async function runSupervisorEnrollmentBootstrap(supervisor) {
   if (!supervisor || typeof supervisor.ensureEnrollment !== 'function') {
     throw new Error('native_supervisor_enrollment_bootstrap_required');
@@ -282,6 +288,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
             });
           }
           if (action === 'CONTROL_LATENCY_STATUS') return controlLatencySnapshot();
+          if (action === 'FLEET_STATUS') return readNativeSupervisorFleetStatus(sourceGetState);
           const projected = exactCommandTargetProjection(command);
           if (projected) commandTargetProjection = projected;
           return executeCommand(command);

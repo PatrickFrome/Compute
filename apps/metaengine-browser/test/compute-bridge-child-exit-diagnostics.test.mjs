@@ -12,13 +12,16 @@ function deadChild({ stderr = 'compute_bridge_worker_failed:test_failure', code 
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
   child.kill = () => true;
+  const diagnostics = observeComputeBridgeChild(child);
   queueMicrotask(() => {
     child.emit('spawn');
     child.stderr.write(`${stderr}\n`);
     child.stderr.end();
+    child.exitCode = code;
+    child.signalCode = null;
     child.emit('exit', code, null);
   });
-  return child;
+  return { child, diagnostics };
 }
 
 test('post-launch worker exit is surfaced instead of hiding behind stale manifest ECONNREFUSED', async () => {
@@ -48,6 +51,19 @@ test('post-launch worker exit is surfaced instead of hiding behind stale manifes
     await client.dispose();
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+
+test('observer recovers an already-exited child identity across an async launcher boundary', () => {
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.exitCode = 17;
+  child.signalCode = null;
+  const observed = observeComputeBridgeChild(child);
+  assert.equal(observed.spawned, true);
+  assert.equal(observed.exited, true);
+  assert.equal(observed.exit_code, 17);
+  assert.equal(observed.signal, null);
 });
 
 test('child observer bounds diagnostics and records exit identity', async () => {

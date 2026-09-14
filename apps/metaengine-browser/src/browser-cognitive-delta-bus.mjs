@@ -61,14 +61,18 @@ function safeDeltaProjection(input = {}) {
   const semanticMethod = clip(input?.semantic_method, 160);
   const type = clip(input?.type, 96) || 'UNKNOWN';
   return Object.freeze({
-    source_sequence: Number.isSafeInteger(Number(input?.seq)) ? Number(input.seq) : null,
+    source_sequence: input?.seq != null && Number.isSafeInteger(Number(input.seq)) ? Number(input.seq) : null,
     source: type === 'SEMANTIC_EVENT' ? 'SEMANTIC' : (type === 'METRICS_SAMPLE' ? 'METRICS' : 'PROCESS'),
     type,
     semantic_method: semanticMethod,
     observed_at: clip(input?.observed_at, 64),
     tab_id: clip(input?.tab_id, 96),
     target_id: clip(input?.target_id, 160),
-    web_contents_id: Number.isSafeInteger(Number(input?.web_contents_id)) ? Number(input.web_contents_id) : null,
+    web_contents_id: input?.web_contents_id != null
+      && Number.isSafeInteger(Number(input.web_contents_id))
+      && Number(input.web_contents_id) >= 1
+      ? Number(input.web_contents_id)
+      : null,
     os_pid: Number.isSafeInteger(Number(input?.os_pid)) && Number(input.os_pid) > 0 ? Number(input.os_pid) : null,
     process_type: clip(input?.process_type, 80),
     reason: clip(input?.reason, 160),

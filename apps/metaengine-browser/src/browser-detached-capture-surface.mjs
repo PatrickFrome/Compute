@@ -76,12 +76,6 @@ export async function withTemporaryDetachedCaptureSurface(view, task, {
     throw new Error('detached_capture_surface_view_unavailable');
   }
   if (typeof task !== 'function') throw new Error('detached_capture_surface_task_required');
-  if (view.getVisible?.() === false) {
-    const error = new Error('detached_capture_surface_view_hidden');
-    error.code = 'DETACHED_CAPTURE_SURFACE_VIEW_HIDDEN';
-    error.automatic_retry_allowed = false;
-    throw error;
-  }
   if (activeCaptureSurfaceLeases.has(view)) throw temporarySurfaceBusyError();
   activeCaptureSurfaceLeases.add(view);
 
@@ -89,6 +83,7 @@ export async function withTemporaryDetachedCaptureSurface(view, task, {
   let attached = false;
   let timer = null;
   let originalBounds = null;
+  const originalVisible = view.getVisible?.() !== false;
   let work = null;
   let deadlineExpired = false;
   try {
@@ -121,6 +116,9 @@ export async function withTemporaryDetachedCaptureSurface(view, task, {
     }
     if (originalBounds) {
       try { view.setBounds(originalBounds); } catch {}
+    }
+    if (!originalVisible) {
+      try { view.setVisible?.(false); } catch {}
     }
     try { host?.close?.(); } catch {}
 

@@ -720,26 +720,28 @@ async function handleCommand(command, payload = {}) {
   if (command === 'FLEET_STATUS') return fleet?.snapshot() || null;
   if (command === 'FLEET_RECONCILE') {
     const before = fleet?.snapshot() || null;
+    const retired = await retireFleetSurplus(payload?.retire_agent_ids);
+    const sweptOrphans = await sweepOrphanFleetTabs();
+    const physicalCleanupCount = retired.length + sweptOrphans.length;
     await fleet?.reconcile({
       active: payload?.active === true,
       target_agents: payload?.target_agents ?? null,
-      physical_cleanup_count: retired.length + sweptOrphans.length,
+      physical_cleanup_count: physicalCleanupCount,
       spawn_burst_limit: payload?.spawn_burst_limit ?? null,
     });
-    const retired = await retireFleetSurplus(payload?.retire_agent_ids);
-    const sweptOrphans = await sweepOrphanFleetTabs();
-    if (retired.length || sweptOrphans.length) await publishSnapshot();
+    if (physicalCleanupCount > 0) await publishSnapshot();
     const result = fleet?.snapshot() || null;
     const outcome = classifyFleetReconcileOutcome({
       before,
       after: result,
       active: payload?.active === true,
       target_agents: payload?.target_agents ?? null,
+      physical_cleanup_count: physicalCleanupCount,
     });
     return {
       ...result,
       ...outcome,
-      ...(retired.length || sweptOrphans.length
+      ...(physicalCleanupCount > 0
         ? { elastic_retired: retired, orphan_fleet_tabs_swept: sweptOrphans }
         : {}),
       authority_effect: false,
@@ -1298,5 +1300,3 @@ app.on('activate', () => {
   void startBrowserRuntime();
 });
 app.on('window-all-closed', () => {});
-if (app.isReady()) queueMicrotask(() => { void startBrowserRuntime(); });
-else app.once('ready', () => { void startBrowserRuntime(); });

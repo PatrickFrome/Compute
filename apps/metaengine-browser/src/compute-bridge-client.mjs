@@ -141,11 +141,13 @@ function appendBounded(current, chunk, maxBytes = MAX_CHILD_DIAGNOSTIC_BYTES) {
 }
 
 export function observeComputeBridgeChild(child) {
+  const initialExitCode = Number.isInteger(child?.exitCode) ? child.exitCode : null;
+  const initialSignal = child?.signalCode == null ? null : String(child.signalCode).slice(0, 80);
   const state = {
-    spawned: false,
-    exited: false,
-    exit_code: null,
-    signal: null,
+    spawned: Boolean(child?.pid) || initialExitCode !== null || initialSignal !== null,
+    exited: initialExitCode !== null || initialSignal !== null,
+    exit_code: initialExitCode,
+    signal: initialSignal,
     error: null,
     stdout: '',
     stderr: '',
@@ -174,16 +176,13 @@ function childFailureMessage(state) {
   ].join(':').slice(0, 500);
 }
 
-async function launchBundledComputeBridge({ runtimeRoot, workerPath }) {
+function launchBundledComputeBridge({ runtimeRoot, workerPath }) {
   if (!process.versions?.electron) throw new Error('compute_bridge_autostart_requires_electron');
   if (!fsSync.existsSync(workerPath)) throw new Error(`compute_bridge_worker_missing:${workerPath}`);
   if (!fsSync.existsSync(path.join(runtimeRoot, 'src', 'cli.mjs'))) throw new Error(`compute_bridge_runtime_missing:${runtimeRoot}`);
-  // Use the packaged Electron executable as a Node host. This keeps the worker on
-  // the same exact installation path (so installer shutdown can fence it), while
-  // exposing normal child-process stdout/stderr/exit semantics. utilityProcess.fork
-  // can succeed before the worker module fails, which previously produced the false
-  // remediation_error:null observed in live repair incidents.
-  return spawn(process.execPath, [workerPath, 'serve', '--bridge-port=0'], {
+  // Observe at spawn time, before any async launcher boundary can hide a fast worker
+  // exit. The client still accepts legacy launchers that return a bare ChildProcess.
+  const child = spawn(process.execPath, [workerPath, 'serve', '--bridge-port=0'], {
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
@@ -192,6 +191,7 @@ async function launchBundledComputeBridge({ runtimeRoot, workerPath }) {
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
+  return { child, diagnostics: observeComputeBridgeChild(child) };
 }
 
 export class ComputeBridgeClient {
@@ -358,13 +358,14 @@ export class ComputeBridgeClient {
     let diagnostics = this.ownedBridgeDiagnostics;
     if (!this.ownedBridgeProcess) {
       try {
-        const child = await launcher({
+        const launched = await launcher({
           runtimeRoot: this.runtimeRoot,
           workerPath: this.workerPath,
           manifestPath: this.manifestPath,
         });
-        this.ownedBridgeProcess = child || null;
-        diagnostics = child ? observeComputeBridgeChild(child) : null;
+        const child = launched?.child || launched || null;
+        this.ownedBridgeProcess = child;
+        diagnostics = launched?.diagnostics || (child ? observeComputeBridgeChild(child) : null);
         this.ownedBridgeDiagnostics = diagnostics;
         if (child && typeof child.once === 'function') {
           child.once('exit', () => {

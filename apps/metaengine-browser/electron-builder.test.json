@@ -47,6 +47,16 @@
         "engine-lock.json",
         "src/**/*"
       ]
+    },
+    {
+      "from": "../../coordination/browser-shared",
+      "to": "browser-shared",
+      "filter": [
+        "action-contract.mjs",
+        "node-registry.mjs",
+        "receipt-contract.mjs",
+        "semantic-perception-compiler.mjs"
+      ]
     }
   ],
   "publish": [

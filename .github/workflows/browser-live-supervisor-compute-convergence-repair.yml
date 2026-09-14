@@ -3,32 +3,41 @@ name: Browser Live Supervisor Compute Convergence Repair
 on:
   push:
     branches:
-      - 'repair/live-supervisor-compute-convergence-v2-20260914'
+      - 'repair/live-supervisor-edge-compute-v2-20260914'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+env:
+  REPAIR_SOURCE_HEAD: 'c967dd825d5b06a97093fe4d4e4b0247b13edd08'
+  BASELINE_BUILD: '34839119183.1'
+  BASELINE_VERSION: '0.7.0-dev.34839119183.1'
+  BASELINE_INSTALLER_SHA256: '4855a5669699f3eff3b990f85fdc55da56313ed847534e0c842af366ffad92f9'
+  QUALIFIED_TEST_EXPECTED: '14'
+
 jobs:
   qualify-and-package:
     runs-on: windows-2025
-    timeout-minutes: 50
+    timeout-minutes: 60
     steps:
-      - name: Checkout exact repair head
+      - name: Checkout exact repair candidate
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 1
+          fetch-depth: 2
           persist-credentials: false
 
-      - name: Prove exact candidate head
+      - name: Prove exact candidate lineage
         shell: bash
         env:
           EXPECTED_HEAD: ${{ github.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          printf 'live_supervisor_compute_repair_head=%s\n' "$EXPECTED_HEAD"
+          test "$(git rev-parse HEAD^)" = "$REPAIR_SOURCE_HEAD"
+          printf 'live_supervisor_compute_qualification_head=%s\n' "$EXPECTED_HEAD"
+          printf 'repair_source_head=%s\n' "$REPAIR_SOURCE_HEAD"
 
       - name: Setup Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -39,7 +48,7 @@ jobs:
         working-directory: apps/metaengine-browser
         run: npm install --no-audit --no-fund --no-package-lock
 
-      - name: Prove focused Supervisor and Compute contracts
+      - name: Prove 14 focused Supervisor Compute installer contracts
         working-directory: apps/metaengine-browser
         shell: bash
         run: |
@@ -49,13 +58,34 @@ jobs:
           node --check src/compute-bridge-client.mjs
           node --check src/compute-bridge-worker.cjs
           node --check supabase/a2-browser-native-supervisor-v1/realtime-command-wake.mjs
-          node --test test/browser-batch-required-control.test.mjs
-          node --test test/native-supervisor-transient-batch-gateway-fallback.test.mjs
-          node --test test/realtime-command-wake-socket-fallback.test.mjs
-          node --test test/compute-bridge-client.test.mjs
-          node --test test/compute-bridge-native-attach.test.mjs
-          node --test test/compute-bridge-one-owner-autostart.test.mjs
-          node --test test/compute-bridge-packaged-path.test.mjs
+          tests=(
+            test/browser-batch-required-control.test.mjs
+            test/native-supervisor-transient-batch-gateway-fallback.test.mjs
+            test/realtime-command-wake-socket-fallback.test.mjs
+            test/compute-bridge-client.test.mjs
+            test/compute-bridge-native-attach.test.mjs
+            test/compute-bridge-one-owner-autostart.test.mjs
+            test/compute-bridge-packaged-path.test.mjs
+            test/compute-bridge-child-exit-diagnostics.test.mjs
+            test/native-supervisor-batch-deadline-contract.test.mjs
+            test/meta-orchestrator-live-supervisor-authority-repair.test.mjs
+            test/native-supervisor-bootstrap-heartbeat.test.mjs
+            test/native-supervisor-live-control-recovery.test.mjs
+            test/installer-bootstrap-contract.test.mjs
+            test/installer-resident-shutdown.test.mjs
+          )
+          test "${#tests[@]}" -eq "$QUALIFIED_TEST_EXPECTED"
+          for path in "${tests[@]}"; do test -f "$path"; done
+          passed=0
+          for path in "${tests[@]}"; do
+            echo "qualification_test=$path"
+            node --test "$path"
+            passed=$((passed + 1))
+          done
+          test "$passed" -eq "${#tests[@]}"
+          test "$passed" -eq "$QUALIFIED_TEST_EXPECTED"
+          printf 'qualified_test_files=%d/%d\n' "$passed" "${#tests[@]}"
+          printf 'QUALIFIED_TEST_FILES=%d\n' "$passed" >> "$GITHUB_ENV"
 
       - name: Build unsigned x64 repair installer
         working-directory: apps/metaengine-browser
@@ -66,6 +96,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $version = '0.7.0-dev.${{ github.run_id }}.1'
           if ($version -notmatch '^0\.7\.0-dev\.[0-9]+\.1$') { throw "repair_version_invalid:$version" }
+          if ($version -eq $env:BASELINE_VERSION) { throw 'repair_version_must_differ_from_baseline' }
           npm pkg set version=$version
           $versionReadback = [string](node -p "require('./package.json').version")
           if ($versionReadback -ne $version) { throw "repair_version_readback_mismatch:$versionReadback" }
@@ -74,21 +105,32 @@ jobs:
           npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
           $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
           $blockmap = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe.blockmap" -File | Select-Object -First 1
+          $packagedExe = Join-Path $PWD 'dist-test\win-unpacked\METAENGINE Browser Test.exe'
           if (-not $installer -or -not $blockmap) { throw 'repair_package_assets_missing' }
+          if (-not (Test-Path -LiteralPath $packagedExe -PathType Leaf)) { throw 'packaged_browser_executable_missing' }
           $resources = Join-Path $PWD 'dist-test\win-unpacked\resources'
           $worker = Join-Path $resources 'app.asar.unpacked\src\compute-bridge-worker.cjs'
           $daemonEntry = Join-Path $resources 'a2-compute-browser\src\cli.mjs'
           $daemonRpc = Join-Path $resources 'a2-compute-browser\src\rpc-server.mjs'
-          if (-not (Test-Path $worker)) { throw 'packaged_compute_worker_missing' }
-          if (-not (Test-Path $daemonEntry) -or -not (Test-Path $daemonRpc)) { throw 'packaged_compute_daemon_missing' }
+          $sharedCompiler = Join-Path $resources 'browser-shared\semantic-perception-compiler.mjs'
+          if (-not (Test-Path -LiteralPath $worker -PathType Leaf)) { throw 'packaged_compute_worker_missing' }
+          if (-not (Test-Path -LiteralPath $daemonEntry -PathType Leaf) -or -not (Test-Path -LiteralPath $daemonRpc -PathType Leaf)) { throw 'packaged_compute_daemon_missing' }
+          if (-not (Test-Path -LiteralPath $sharedCompiler -PathType Leaf)) { throw 'packaged_compute_shared_semantic_compiler_missing' }
+          $digest = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $packagedExeDigest = (Get-FileHash -LiteralPath $packagedExe -Algorithm SHA256).Hash.ToLowerInvariant()
           "REPAIR_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "REPAIR_RESOURCES=$resources" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "REPAIR_INSTALLER=$($installer.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "REPAIR_INSTALLER_SHA256=$digest" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "PACKAGED_EXE=$packagedExe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "PACKAGED_EXE_SHA256=$packagedExeDigest" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Prove packaged Electron utility-process Compute path
+      - name: Prove packaged Browser Node-host Compute path
         working-directory: apps/metaengine-browser
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
           $smokeRoot = Join-Path $env:RUNNER_TEMP "metaengine-compute-packaged-${{ github.run_id }}"
           Remove-Item $smokeRoot -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force $smokeRoot | Out-Null
@@ -96,32 +138,131 @@ jobs:
           $env:HOME = $smokeRoot
           $env:USERPROFILE = $smokeRoot
           $env:A2_COMPUTE_STATE_ROOT = Join-Path $smokeRoot 'native-state'
-          $env:METAENGINE_COMPUTE_BRIDGE_MANIFEST = Join-Path $smokeRoot '.a2\compute-bridge.json'
-          $env:METAENGINE_PACKAGED_RESOURCES = $env:REPAIR_RESOURCES
-          $electron = Join-Path $PWD 'node_modules\electron\dist\electron.exe'
-          if (-not (Test-Path $electron)) { throw 'electron_binary_missing' }
-          $smokeApp = Join-Path $PWD 'test\compute-bridge-packaged-utility-smoke'
-          $output = & $electron $smokeApp 2>&1 | Out-String
-          Write-Host $output
-          if ($LASTEXITCODE -ne 0) { throw "packaged_compute_utility_smoke_failed:$LASTEXITCODE" }
-          if ($output -notmatch 'metaengine\.compute-bridge\.packaged-utility-smoke\.v1' -or $output -notmatch '"ok":true') {
-            throw 'packaged_compute_utility_smoke_proof_missing'
+          $env:METAENGINE_COMPUTE_BRIDGE_ROOT = Join-Path $env:REPAIR_RESOURCES 'a2-compute-browser'
+          $env:ELECTRON_RUN_AS_NODE = '1'
+          $manifestPath = Join-Path $smokeRoot '.a2\compute-bridge.json'
+          $worker = Join-Path $env:REPAIR_RESOURCES 'app.asar.unpacked\src\compute-bridge-worker.cjs'
+          $stdoutPath = Join-Path $smokeRoot 'packaged-compute.out'
+          $stderrPath = Join-Path $smokeRoot 'packaged-compute.err'
+          $proc = Start-Process -FilePath $env:PACKAGED_EXE -ArgumentList @($worker, 'serve', '--bridge-port=0') -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+          $null = $proc.Handle
+          try {
+            $deadline = [DateTime]::UtcNow.AddSeconds(20)
+            while (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+              $proc.Refresh()
+              if ($proc.HasExited) {
+                Get-Content $stdoutPath -ErrorAction SilentlyContinue
+                Get-Content $stderrPath -ErrorAction SilentlyContinue
+                throw "packaged_compute_node_host_exited_early:$($proc.ExitCode)"
+              }
+              if ([DateTime]::UtcNow -ge $deadline) { throw 'packaged_compute_manifest_timeout' }
+              Start-Sleep -Milliseconds 200
+            }
+            $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+            $url = [string]$manifest.url
+            $token = [string]$manifest.token
+            if ($url -notmatch '^http://127\.0\.0\.1:[0-9]+/rpc$') { throw "packaged_compute_manifest_url_invalid:$url" }
+            if (-not $token) { throw 'packaged_compute_manifest_token_missing' }
+            $requestId = "packaged-node-host-${{ github.run_id }}"
+            $body = @{ method = 'runtime.health'; params = @{}; id = $requestId } | ConvertTo-Json -Compress
+            $response = Invoke-RestMethod -UseBasicParsing -Uri $url -Method Post -Headers @{ Authorization = "Bearer $token" } -ContentType 'application/json' -Body $body -TimeoutSec 10
+            if ([string]$response.id -ne $requestId -or $response.ok -ne $true) { throw 'packaged_compute_health_response_invalid' }
+            if ([string]$response.effect_class -ne 'READ_ONLY' -or $response.web_authority_effect -ne $false) { throw 'packaged_compute_health_authority_contract_invalid' }
+            if ([string]$response.result.schema -ne 'metaengine.a2-compute-browser.health.v1') { throw "packaged_compute_health_schema_invalid:$($response.result.schema)" }
+            $stdout = Get-Content $stdoutPath -Raw -ErrorAction SilentlyContinue
+            if ($stdout -notmatch 'metaengine\.a2-compute-browser\.ready\.v1') { throw 'packaged_compute_ready_proof_missing' }
+            $proof = [ordered]@{
+              schema = 'metaengine.browser.packaged-compute-node-host-proof.v1'
+              source_head = '${{ github.sha }}'
+              packaged_executable = 'dist-test/win-unpacked/METAENGINE Browser Test.exe'
+              packaged_executable_sha256 = $env:PACKAGED_EXE_SHA256
+              worker = 'resources/app.asar.unpacked/src/compute-bridge-worker.cjs'
+              runtime_root = 'resources/a2-compute-browser'
+              shared_semantic_compiler = 'resources/browser-shared/semantic-perception-compiler.mjs'
+              electron_run_as_node = $true
+              manifest_loopback_rpc = $true
+              runtime_health = $true
+              effect_class = [string]$response.effect_class
+              web_authority_effect = $false
+              authority_effect = $false
+            }
+            $proof | ConvertTo-Json -Depth 5 | Set-Content dist-test\packaged-compute-node-host-proof.json -Encoding utf8
+            Write-Host ($proof | ConvertTo-Json -Compress)
+            "PACKAGED_NODE_HOST_SMOKE=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          } finally {
+            try { $proc.Refresh() } catch {}
+            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
           }
-          "PACKAGED_UTILITY_SMOKE=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Prove pinned upgrade provenance profile continuity and direct bootstrap
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          & .\scripts\verify-exact-upgrade-bootstrap.ps1 `
+            -SourceHead '${{ github.sha }}' `
+            -RepairSourceHead $env:REPAIR_SOURCE_HEAD `
+            -BaselineBuild $env:BASELINE_BUILD `
+            -BaselineVersion $env:BASELINE_VERSION `
+            -BaselineInstallerSha256 $env:BASELINE_INSTALLER_SHA256 `
+            -RepairVersion $env:REPAIR_VERSION `
+            -RepairInstallerPath $env:REPAIR_INSTALLER `
+            -RepairInstallerSha256 $env:REPAIR_INSTALLER_SHA256 `
+            -PackagedExePath $env:PACKAGED_EXE `
+            -BootstrapScriptPath (Join-Path $PWD 'scripts\bootstrap-install-and-launch.ps1') `
+            -ProofDirectory (Join-Path $PWD 'dist-test') | Write-Host
+          $summary = Get-Content dist-test\exact-upgrade-bootstrap-qualification-proof.json -Raw | ConvertFrom-Json
+          if ($summary.schema -ne 'metaengine.browser.exact-upgrade-bootstrap-qualification.v1' `
+              -or [string]$summary.source_head -ne '${{ github.sha }}' `
+              -or [string]$summary.installer_sha256 -ne $env:REPAIR_INSTALLER_SHA256 `
+              -or [string]$summary.packaged_executable_sha256 -ne $env:PACKAGED_EXE_SHA256 `
+              -or $summary.installed_executable_sha256_matches_packaged -ne $true `
+              -or $summary.profile_continuity_verified -ne $true `
+              -or $summary.bootstrap_autostart_verified -ne $true `
+              -or $summary.bootstrap_runtime_import_verified -ne $true `
+              -or $summary.bootstrap_primary_window_stable -ne $true `
+              -or $summary.bootstrap_cleanup_shutdown_verified -ne $true) {
+            $summary | ConvertTo-Json -Depth 8 | Write-Host
+            throw 'exact_upgrade_bootstrap_qualification_invalid'
+          }
+          "WINDOWS_INSTALLER_VERIFIED=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "INSTALLED_EXE_PROVENANCE_VERIFIED=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "PROFILE_CONTINUITY_VERIFIED=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "BOOTSTRAP_AUTOSTART_VERIFIED=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Write exact repair proof
         working-directory: apps/metaengine-browser
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:PACKAGED_UTILITY_SMOKE -ne 'true') { throw 'packaged_utility_smoke_not_proven' }
+          Set-StrictMode -Version Latest
+          if ($env:QUALIFIED_TEST_FILES -ne $env:QUALIFIED_TEST_EXPECTED) { throw "focused_test_gate_incomplete:$env:QUALIFIED_TEST_FILES/$env:QUALIFIED_TEST_EXPECTED" }
+          if ($env:PACKAGED_NODE_HOST_SMOKE -ne 'true') { throw 'packaged_node_host_smoke_not_proven' }
+          if ($env:WINDOWS_INSTALLER_VERIFIED -ne 'true') { throw 'windows_installer_not_proven' }
+          if ($env:INSTALLED_EXE_PROVENANCE_VERIFIED -ne 'true') { throw 'installed_executable_provenance_not_proven' }
+          if ($env:PROFILE_CONTINUITY_VERIFIED -ne 'true') { throw 'profile_continuity_not_proven' }
+          if ($env:BOOTSTRAP_AUTOSTART_VERIFIED -ne 'true') { throw 'bootstrap_autostart_not_proven' }
           $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$env:REPAIR_VERSION-x64.exe" -File | Select-Object -First 1
           if (-not $installer) { throw 'repair_installer_missing' }
-          $digest = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $digest = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($digest -ne $env:REPAIR_INSTALLER_SHA256) { throw "repair_installer_final_digest_mismatch:$digest" }
+          $windows = Get-Content dist-test\windows-installer-verification-proof.json -Raw | ConvertFrom-Json
+          $bootstrap = Get-Content dist-test\bootstrap-autostart-proof.json -Raw | ConvertFrom-Json
+          $qualification = Get-Content dist-test\exact-upgrade-bootstrap-qualification-proof.json -Raw | ConvertFrom-Json
+          if ([string]$windows.source_head -ne '${{ github.sha }}' -or $windows.installed_executable_sha256_matches_packaged -ne $true -or $windows.profile_user_data_path_preserved -ne $true) { throw 'windows_proof_contract_invalid' }
+          if ($bootstrap.runtime_import_verified -ne $true -or -not $bootstrap.startup_stable_event_sequence -or $bootstrap.browser_visible -ne $true) { throw 'bootstrap_proof_contract_invalid' }
+          if ($qualification.bootstrap_cleanup_shutdown_verified -ne $true) { throw 'qualification_cleanup_not_proven' }
           $proof = [ordered]@{
-            schema = 'metaengine.browser.live-supervisor-compute-convergence-repair.v1'
+            schema = 'metaengine.browser.live-supervisor-compute-convergence-repair.v4'
             source_head = '${{ github.sha }}'
-            release_base = '3d82f5f5b02f7694620c3ae2fde71eac32bb7fc8'
+            repair_source_head = $env:REPAIR_SOURCE_HEAD
+            baseline_build = $env:BASELINE_BUILD
+            baseline_version = $env:BASELINE_VERSION
+            baseline_installer_sha256 = $env:BASELINE_INSTALLER_SHA256
+            qualified_test_files = [int]$env:QUALIFIED_TEST_FILES
+            qualified_test_files_expected = [int]$env:QUALIFIED_TEST_EXPECTED
+            qualified_test_files_proof = "$($env:QUALIFIED_TEST_FILES)/$($env:QUALIFIED_TEST_EXPECTED)"
             package_version = $env:REPAIR_VERSION
             installer_name = $installer.Name
             installer_sha256 = $digest
@@ -140,12 +281,24 @@ jobs:
             compute_one_daemon_owner = $true
             compute_bundled_autostart = $true
             compute_packaged_default_worker_path = 'app.asar.unpacked/src/compute-bridge-worker.cjs'
-            compute_packaged_utility_process_smoke = $true
+            compute_packaged_browser_node_host_smoke = $true
+            windows_upgrade_from_pinned_baseline = $true
+            windows_installer_verified = $true
+            packaged_executable_sha256 = [string]$qualification.packaged_executable_sha256
+            installed_executable_sha256 = [string]$qualification.installed_executable_sha256
+            installed_executable_sha256_matches_packaged = $true
+            profile_continuity_verified = $true
+            profile_user_data_path = [string]$qualification.profile_user_data_path
+            direct_bootstrap_autostart_verified = $true
+            bootstrap_runtime_import_verified = $true
+            bootstrap_primary_window_stable = $true
+            planned_installer_shutdown_verified = $true
+            bootstrap_cleanup_shutdown_verified = $true
             signed = $false
             published = $false
             authority_effect = $false
           }
-          $proof | ConvertTo-Json -Depth 5 | Set-Content dist-test\live-supervisor-compute-convergence-proof.json -Encoding utf8
+          $proof | ConvertTo-Json -Depth 6 | Set-Content dist-test\live-supervisor-compute-convergence-proof.json -Encoding utf8
           Write-Host ($proof | ConvertTo-Json -Compress)
 
       - name: Upload exact repair artifact
@@ -156,6 +309,10 @@ jobs:
             apps/metaengine-browser/dist-test/METAENGINE-Browser-Test-Setup-*.exe
             apps/metaengine-browser/dist-test/METAENGINE-Browser-Test-Setup-*.exe.blockmap
             apps/metaengine-browser/dist-test/live-supervisor-compute-convergence-proof.json
+            apps/metaengine-browser/dist-test/packaged-compute-node-host-proof.json
+            apps/metaengine-browser/dist-test/windows-installer-verification-proof.json
+            apps/metaengine-browser/dist-test/bootstrap-autostart-proof.json
+            apps/metaengine-browser/dist-test/exact-upgrade-bootstrap-qualification-proof.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
