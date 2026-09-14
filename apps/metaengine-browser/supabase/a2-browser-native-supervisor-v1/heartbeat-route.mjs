@@ -1,6 +1,7 @@
 export const NATIVE_SUPERVISOR_HEARTBEAT_PATH = '/v1/heartbeat';
 export const NATIVE_SUPERVISOR_HEARTBEAT_RPC = 'h205f22_a2_browser_supervisor_heartbeat_v1';
 export const NATIVE_SUPERVISOR_HEARTBEAT_ACK_SCHEMA = 'metaengine.native-supervisor.heartbeat-ack.v1';
+const HEARTBEAT_PHASES = new Set(['BOOTSTRAP', 'WATCHDOG']);
 
 function heartbeatAcceptorUnavailable(error) {
   const message = String(error?.message || error || '');
@@ -11,7 +12,7 @@ function heartbeatBodyIsValid(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return false;
   if (Object.hasOwn(body, 'state')) return false;
   if (body.authority_effect !== false) return false;
-  return String(body.phase || '').toUpperCase() === 'WATCHDOG';
+  return HEARTBEAT_PHASES.has(String(body.phase || '').toUpperCase());
 }
 
 function heartbeatAckIsValid(value) {
@@ -42,6 +43,7 @@ export function createNativeSupervisorHeartbeatRoute({ rpc, workspaceId, json } 
     if (!heartbeatBodyIsValid(body)) return json(400, {
       error: 'native_heartbeat_payload_invalid',
       state_payload_allowed: false,
+      allowed_phases: [...HEARTBEAT_PHASES],
       automatic_retry_allowed: false,
       authority_effect: false,
     });
@@ -73,6 +75,7 @@ export function createNativeSupervisorHeartbeatRoute({ rpc, workspaceId, json } 
     return json(202, {
       schema: NATIVE_SUPERVISOR_HEARTBEAT_ACK_SCHEMA,
       accepted: true,
+      phase: String(body.phase).toUpperCase(),
       client_id: String(identity.id),
       workspace_id: String(workspaceId),
       last_seen_at: accepted?.last_seen_at || null,

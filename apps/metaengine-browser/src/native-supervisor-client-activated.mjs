@@ -27,9 +27,12 @@ export function createHeartbeatCoherentFetch({ identity, fetchImpl } = {}) {
 
     let payload = null;
     try { payload = JSON.parse(String(init?.body || '')); } catch {}
-    if (payload?.state?.watchdog_heartbeat !== true) return fetchImpl(url, init);
+    const phase = payload?.state?.watchdog_heartbeat === true
+      ? 'WATCHDOG'
+      : (payload?.state?.bootstrap_heartbeat === true ? 'BOOTSTRAP' : null);
+    if (!phase) return fetchImpl(url, init);
 
-    const heartbeatBody = JSON.stringify({ phase: 'WATCHDOG', authority_effect: false });
+    const heartbeatBody = JSON.stringify({ phase, authority_effect: false });
     const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}/v1/heartbeat`;
     const headers = await identity.deviceHeaders('POST', requestPath, heartbeatBody);
     return fetchImpl(heartbeatUrl, {

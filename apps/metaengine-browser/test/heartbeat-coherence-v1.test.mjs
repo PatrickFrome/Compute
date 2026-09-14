@@ -30,48 +30,50 @@ const validDbAck = (overrides = {}) => ({
   ...overrides,
 });
 
-test('watchdog state publication is rewritten into a minimal path-bound liveness heartbeat', async () => {
-  const signatures = [];
-  const requests = [];
-  const identity = {
-    async deviceHeaders(method, path, bodyText) {
-      signatures.push({ method, path, bodyText });
-      return { 'content-type': 'application/json', 'x-test-signature-path': path };
-    },
-  };
-  const rawFetch = async (url, init) => {
-    requests.push({ url: String(url), init: structuredClone(init) });
-    return { status: 202 };
-  };
-  const fetchImpl = createHeartbeatCoherentFetch({ identity, fetchImpl: rawFetch });
-  const sourceBody = JSON.stringify({
-    state: {
-      watchdog_heartbeat: true,
-      tabs: [{ tab_id: 'tab_sensitive', url: 'https://example.invalid/private' }],
-      supervisor_mesh: { should_not_cross_heartbeat_lane: true },
-    },
-    last_command_id: 'command_should_not_cross_heartbeat_lane',
-  });
+test('bootstrap and watchdog publications are rewritten into minimal path-bound liveness heartbeats', async () => {
+  for (const [marker, expectedPhase] of [['bootstrap_heartbeat', 'BOOTSTRAP'], ['watchdog_heartbeat', 'WATCHDOG']]) {
+    const signatures = [];
+    const requests = [];
+    const identity = {
+      async deviceHeaders(method, path, bodyText) {
+        signatures.push({ method, path, bodyText });
+        return { 'content-type': 'application/json', 'x-test-signature-path': path };
+      },
+    };
+    const rawFetch = async (url, init) => {
+      requests.push({ url: String(url), init: structuredClone(init) });
+      return { status: 202 };
+    };
+    const fetchImpl = createHeartbeatCoherentFetch({ identity, fetchImpl: rawFetch });
+    const sourceBody = JSON.stringify({
+      state: {
+        [marker]: true,
+        tabs: [{ tab_id: 'tab_sensitive', url: 'https://example.invalid/private' }],
+        supervisor_mesh: { should_not_cross_heartbeat_lane: true },
+      },
+      last_command_id: 'command_should_not_cross_heartbeat_lane',
+    });
 
-  const response = await fetchImpl(`${NATIVE_SUPERVISOR_BASE}/v1/state`, {
-    method: 'POST',
-    headers: { 'x-original-signature-path': '/v1/state' },
-    body: sourceBody,
-    cache: 'no-store',
-  });
+    const response = await fetchImpl(`${NATIVE_SUPERVISOR_BASE}/v1/state`, {
+      method: 'POST',
+      headers: { 'x-original-signature-path': '/v1/state' },
+      body: sourceBody,
+      cache: 'no-store',
+    });
 
-  assert.equal(response.status, 202);
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0].url, `${NATIVE_SUPERVISOR_BASE}${NATIVE_SUPERVISOR_HEARTBEAT_PATH}`);
-  assert.deepEqual(JSON.parse(requests[0].init.body), { phase: 'WATCHDOG', authority_effect: false });
-  assert.equal(Object.hasOwn(JSON.parse(requests[0].init.body), 'state'), false);
-  assert.equal(signatures.length, 1);
-  assert.equal(signatures[0].method, 'POST');
-  assert.equal(signatures[0].path, `${NATIVE_SUPERVISOR_RUNTIME_PATH}${NATIVE_SUPERVISOR_HEARTBEAT_PATH}`);
-  assert.equal(signatures[0].bodyText, requests[0].init.body);
+    assert.equal(response.status, 202);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, `${NATIVE_SUPERVISOR_BASE}${NATIVE_SUPERVISOR_HEARTBEAT_PATH}`);
+    assert.deepEqual(JSON.parse(requests[0].init.body), { phase: expectedPhase, authority_effect: false });
+    assert.equal(Object.hasOwn(JSON.parse(requests[0].init.body), 'state'), false);
+    assert.equal(signatures.length, 1);
+    assert.equal(signatures[0].method, 'POST');
+    assert.equal(signatures[0].path, `${NATIVE_SUPERVISOR_RUNTIME_PATH}${NATIVE_SUPERVISOR_HEARTBEAT_PATH}`);
+    assert.equal(signatures[0].bodyText, requests[0].init.body);
+  }
 });
 
-test('bootstrap and ordinary state publication remain on the canonical state route', async () => {
+test('ordinary full-state publication remains on the canonical state route', async () => {
   const signatures = [];
   const requests = [];
   const identity = {
@@ -85,7 +87,7 @@ test('bootstrap and ordinary state publication remain on the canonical state rou
     return { status: 202 };
   };
   const fetchImpl = createHeartbeatCoherentFetch({ identity, fetchImpl: rawFetch });
-  const body = JSON.stringify({ state: { bootstrap_heartbeat: true, shell_version: 'test' } });
+  const body = JSON.stringify({ state: { shell_version: 'test', supervisor_mode: 'CONTROL', armed: true } });
   const originalHeaders = { 'x-original-signature-path': '/v1/state' };
 
   await fetchImpl(`${NATIVE_SUPERVISOR_BASE}/v1/state`, {
@@ -99,60 +101,71 @@ test('bootstrap and ordinary state publication remain on the canonical state rou
   assert.equal(signatures.length, 0);
 });
 
-test('heartbeat route forbids state payloads and has zero authority', async () => {
+test('heartbeat route forbids state payloads and unknown phases with zero authority', async () => {
   let rpcCalls = 0;
   const route = createNativeSupervisorHeartbeatRoute({
     workspaceId: WORKSPACE_ID,
     json: responseJson,
     rpc: async () => { rpcCalls += 1; return validDbAck(); },
   });
-  const response = await route({
+  const stateResponse = await route({
     req: { method: 'POST' },
     path: NATIVE_SUPERVISOR_HEARTBEAT_PATH,
     body: { phase: 'WATCHDOG', state: { forbidden: true }, authority_effect: false },
     identity: { id: 'client_a', device_id: 'device_a' },
   });
-
-  assert.equal(response.status, 400);
-  assert.equal(response.body.state_payload_allowed, false);
-  assert.equal(response.body.authority_effect, false);
-  assert.equal(rpcCalls, 0);
-});
-
-test('authenticated heartbeat delegates only to the liveness rpc and proves semantic-state immutability', async () => {
-  const calls = [];
-  const route = createNativeSupervisorHeartbeatRoute({
-    workspaceId: WORKSPACE_ID,
-    json: responseJson,
-    rpc: async (name, args) => {
-      calls.push({ name, args });
-      return validDbAck();
-    },
-  });
-  const response = await route({
+  const phaseResponse = await route({
     req: { method: 'POST' },
     path: NATIVE_SUPERVISOR_HEARTBEAT_PATH,
-    body: { phase: 'WATCHDOG', authority_effect: false },
+    body: { phase: 'STATE', authority_effect: false },
     identity: { id: 'client_a', device_id: 'device_a' },
   });
 
-  assert.equal(response.status, 202);
-  assert.equal(response.body.accepted, true);
-  assert.equal(response.body.state_mutated, false);
-  assert.equal(response.body.state_document_mutated, false);
-  assert.equal(response.body.liveness_mutated, true);
-  assert.equal(response.body.last_seen_at_mutated, true);
-  assert.equal(response.body.command_leasing, false);
-  assert.equal(response.body.control_authority, false);
-  assert.equal(response.body.authority_effect, false);
-  assert.deepEqual(calls, [{
-    name: NATIVE_SUPERVISOR_HEARTBEAT_RPC,
-    args: {
-      p_workspace_id: WORKSPACE_ID,
-      p_client_id: 'client_a',
-      p_authority_effect: false,
-    },
-  }]);
+  assert.equal(stateResponse.status, 400);
+  assert.equal(stateResponse.body.state_payload_allowed, false);
+  assert.equal(stateResponse.body.authority_effect, false);
+  assert.equal(phaseResponse.status, 400);
+  assert.deepEqual(phaseResponse.body.allowed_phases, ['BOOTSTRAP', 'WATCHDOG']);
+  assert.equal(rpcCalls, 0);
+});
+
+test('authenticated bootstrap and watchdog heartbeat delegate only to the liveness rpc', async () => {
+  for (const phase of ['BOOTSTRAP', 'WATCHDOG']) {
+    const calls = [];
+    const route = createNativeSupervisorHeartbeatRoute({
+      workspaceId: WORKSPACE_ID,
+      json: responseJson,
+      rpc: async (name, args) => {
+        calls.push({ name, args });
+        return validDbAck();
+      },
+    });
+    const response = await route({
+      req: { method: 'POST' },
+      path: NATIVE_SUPERVISOR_HEARTBEAT_PATH,
+      body: { phase, authority_effect: false },
+      identity: { id: 'client_a', device_id: 'device_a' },
+    });
+
+    assert.equal(response.status, 202);
+    assert.equal(response.body.accepted, true);
+    assert.equal(response.body.phase, phase);
+    assert.equal(response.body.state_mutated, false);
+    assert.equal(response.body.state_document_mutated, false);
+    assert.equal(response.body.liveness_mutated, true);
+    assert.equal(response.body.last_seen_at_mutated, true);
+    assert.equal(response.body.command_leasing, false);
+    assert.equal(response.body.control_authority, false);
+    assert.equal(response.body.authority_effect, false);
+    assert.deepEqual(calls, [{
+      name: NATIVE_SUPERVISOR_HEARTBEAT_RPC,
+      args: {
+        p_workspace_id: WORKSPACE_ID,
+        p_client_id: 'client_a',
+        p_authority_effect: false,
+      },
+    }]);
+  }
 });
 
 test('heartbeat route fails closed when the DB ack does not prove liveness-only mutation', async () => {
@@ -188,12 +201,13 @@ test('existing authenticated route dispatcher exposes heartbeat without creating
   const response = await routes({
     req: { method: 'POST' },
     path: NATIVE_SUPERVISOR_HEARTBEAT_PATH,
-    body: { phase: 'WATCHDOG', authority_effect: false },
-    bodyText: JSON.stringify({ phase: 'WATCHDOG', authority_effect: false }),
+    body: { phase: 'BOOTSTRAP', authority_effect: false },
+    bodyText: JSON.stringify({ phase: 'BOOTSTRAP', authority_effect: false }),
     identity: { id: 'client_a', device_id: 'device_a' },
   });
 
   assert.equal(response.status, 202);
+  assert.equal(response.body.phase, 'BOOTSTRAP');
   assert.equal(calls.length, 1);
   assert.equal(calls[0].name, NATIVE_SUPERVISOR_HEARTBEAT_RPC);
 });
