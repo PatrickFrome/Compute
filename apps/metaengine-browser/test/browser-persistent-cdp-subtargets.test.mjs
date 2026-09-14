@@ -10,6 +10,8 @@ class FakeDebugger extends EventEmitter {
   detachCalls = 0;
   calls = [];
   failTargetAutoAttach = false;
+  hangFrameTree = false;
+  mainFrameId = 'frame-root';
 
   isAttached() { return this.attached; }
 
@@ -28,6 +30,18 @@ class FakeDebugger extends EventEmitter {
     this.calls.push({ method, params, sessionId: sessionId || null });
     if (method === 'Target.setAutoAttach' && this.failTargetAutoAttach) {
       throw new Error('Target domain unavailable');
+    }
+    if (method === 'Page.getFrameTree') {
+      if (this.hangFrameTree) return new Promise(() => {});
+      return {
+        frameTree: {
+          frame: {
+            id: this.mainFrameId,
+            loaderId: 'loader-root',
+            url: 'https://chatgpt.com/',
+          },
+        },
+      };
     }
     return {};
   }
@@ -55,9 +69,11 @@ test('persistent auto-attach sees nested related targets without contaminating r
 
   await pool.ensure(wc);
   pool.subscribe(wc, (event) => events.push(event));
+  await nextTurn();
 
   const initial = pool.identity(wc);
   assert.equal(initial.document_generation, 1);
+  assert.equal(initial.main_frame_id, 'frame-root');
   assert.equal(initial.target_auto_attach_enabled, true);
   assert.equal(initial.target_auto_attach_flatten, true);
   assert.equal(initial.target_wait_for_debugger_on_start, false);
@@ -120,6 +136,105 @@ test('persistent auto-attach sees nested related targets without contaminating r
   assert.equal(dbg.detachCalls, 0);
   pool.release(wc);
   assert.equal(dbg.detachCalls, 1);
+});
+
+test('same-document navigation invalidates only the exact root document revision fence', async () => {
+  const dbg = new FakeDebugger();
+  const wc = new FakeWebContents(703, dbg);
+  const pool = new PersistentBrowserCdpSessionPool();
+  const events = [];
+
+  const initial = await pool.ensure(wc);
+  pool.subscribe(wc, (event) => events.push(event));
+  await nextTurn();
+  assert.equal(pool.identity(wc).main_frame_id, 'frame-root');
+  assert.equal(initial.attachment_generation, 1);
+  assert.equal(initial.document_generation, 1);
+  assert.equal(initial.binding_generation, 1);
+  assert.equal(initial.same_document_revision_requires_main_frame_match, true);
+
+  dbg.emit('message', {}, 'Page.navigatedWithinDocument', {
+    frameId: 'frame-child',
+    url: 'https://chatgpt.com/embedded#next',
+    navigationType: 'fragment',
+  }, null);
+  let identity = pool.identity(wc);
+  assert.equal(identity.document_generation, 1, 'child-frame same-document navigation must not invalidate root revision');
+  assert.equal(identity.binding_generation, 1);
+
+  dbg.emit('message', {}, 'Page.navigatedWithinDocument', {
+    frameId: 'frame-root',
+    url: 'https://chatgpt.com/#from-subtarget',
+    navigationType: 'historyApi',
+  }, 'session-iframe');
+  identity = pool.identity(wc);
+  assert.equal(identity.document_generation, 1, 'subtarget session must not invalidate root revision');
+  assert.equal(identity.binding_generation, 1);
+
+  dbg.emit('message', {}, 'Page.navigatedWithinDocument', {
+    frameId: 'frame-root',
+    url: 'https://chatgpt.com/#next',
+    navigationType: 'fragment',
+  }, null);
+  identity = pool.identity(wc);
+  assert.equal(identity.document_generation, 2, 'root same-document navigation must invalidate stale observations');
+  assert.equal(identity.binding_generation, 1, 'same-document navigation must not invent a new runtime binding');
+  assert.equal(identity.attachment_generation, 1);
+  assert.equal(events.at(-1).method, 'Page.navigatedWithinDocument');
+  assert.equal(events.at(-1).document_generation, 2);
+  assert.equal(events.at(-1).binding_generation, 1);
+  assert.equal(events.at(-1).authority_effect, false);
+
+  dbg.emit('message', {}, 'Page.frameNavigated', {
+    frame: {
+      id: 'frame-root-next',
+      loaderId: 'loader-next',
+      url: 'https://chatgpt.com/c/next',
+    },
+  }, null);
+  identity = pool.identity(wc);
+  assert.equal(identity.main_frame_id, 'frame-root-next');
+  assert.equal(identity.document_generation, 3);
+  assert.equal(identity.binding_generation, 2);
+
+  dbg.emit('message', {}, 'Page.navigatedWithinDocument', {
+    frameId: 'frame-root',
+    url: 'https://chatgpt.com/#stale-root',
+    navigationType: 'fragment',
+  }, null);
+  assert.equal(pool.identity(wc).document_generation, 3, 'old root frame id must stop carrying revision authority');
+
+  dbg.emit('message', {}, 'Page.navigatedWithinDocument', {
+    frameId: 'frame-root-next',
+    url: 'https://chatgpt.com/c/next#fresh',
+    navigationType: 'fragment',
+  }, null);
+  identity = pool.identity(wc);
+  assert.equal(identity.document_generation, 4);
+  assert.equal(identity.binding_generation, 2);
+
+  pool.release(wc);
+});
+
+test('main frame identity seeding is fail-soft and never blocks persistent session readiness', async () => {
+  const dbg = new FakeDebugger();
+  dbg.hangFrameTree = true;
+  const wc = new FakeWebContents(704, dbg);
+  const pool = new PersistentBrowserCdpSessionPool();
+
+  const ready = await Promise.race([
+    pool.ensure(wc),
+    nextTurn().then(() => { throw new Error('persistent_cdp_frame_tree_seed_blocked_readiness'); }),
+  ]);
+  assert.equal(ready.ready, true);
+  assert.equal(ready.attached, true);
+  assert.equal(ready.main_frame_id, null);
+  assert.equal(ready.document_generation, 1);
+  assert.equal(ready.binding_generation, 1);
+  assert.equal(dbg.attachCalls, 1);
+  assert.ok(dbg.calls.some((call) => call.method === 'Page.getFrameTree'));
+
+  pool.release(wc);
 });
 
 test('Target auto-attach is fail-soft and never blocks the root persistent CDP session', async () => {
