@@ -1,12 +1,14 @@
 import crypto from 'node:crypto';
 
 export const NATIVE_EFFECT_RUNTIME_OBSERVATION_SCHEMA = 'metaengine.native-supervisor.effect-runtime-observation.v1';
+export const NATIVE_RUNTIME_STATE_REVISION_SCHEMA = 'metaengine.native-browser.state-revision.v1';
 
 const PROCESS_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TARGET_RE = /^webcontents:[1-9][0-9]*$/;
 const RUNTIME_TARGET_RE = /^[A-Za-z0-9._:-]{1,192}$/;
 const OBSERVATION_ID_RE = /^obs_[a-f0-9]{32}$/;
 const SHA256_RE = /^[a-f0-9]{64}$/;
+const STATE_REVISION_ID_RE = /^rev_[a-f0-9]{64}$/;
 const MAX_OBSERVATIONS = 128;
 const MAX_AGE_MS = 180000;
 const MAX_FUTURE_SKEW_MS = 5000;
@@ -43,6 +45,62 @@ function normalizeRuntimeBinding(value = {}) {
   });
 }
 
+function normalizeRevisionEnvelope({ process_incarnation_id, target_id, runtime_binding, document_url_sha256 } = {}) {
+  const processId = clean(process_incarnation_id).toLowerCase();
+  const targetId = clean(target_id).toLowerCase();
+  const urlHash = clean(document_url_sha256).toLowerCase();
+  if (!PROCESS_ID_RE.test(processId)) throw new Error('native_effect_runtime_process_incarnation_invalid');
+  if (!TARGET_RE.test(targetId)) throw new Error('native_effect_runtime_target_invalid');
+  if (!SHA256_RE.test(urlHash)) throw new Error('native_effect_runtime_document_url_hash_invalid');
+  const binding = normalizeRuntimeBinding(runtime_binding);
+  if (targetId !== `webcontents:${binding.web_contents_id}`) throw new Error('native_effect_runtime_webcontents_target_mismatch');
+  return { processId, targetId, urlHash, binding };
+}
+
+export function projectNativeRuntimeStateRevision({
+  process_incarnation_id,
+  target_id,
+  runtime_binding,
+  document_url_sha256,
+} = {}) {
+  const { processId, targetId, urlHash, binding } = normalizeRevisionEnvelope({
+    process_incarnation_id,
+    target_id,
+    runtime_binding,
+    document_url_sha256,
+  });
+  const material = JSON.stringify([
+    NATIVE_RUNTIME_STATE_REVISION_SCHEMA,
+    processId,
+    targetId,
+    binding.web_contents_id,
+    binding.renderer_pid,
+    binding.runtime_target_id,
+    binding.attachment_generation,
+    binding.document_generation,
+    binding.binding_generation,
+    urlHash,
+  ]);
+  const revisionId = `rev_${crypto.createHash('sha256').update(material, 'utf8').digest('hex')}`;
+  return Object.freeze({
+    schema: NATIVE_RUNTIME_STATE_REVISION_SCHEMA,
+    revision_id: revisionId,
+    process_incarnation_id: processId,
+    target_id: targetId,
+    web_contents_id: binding.web_contents_id,
+    renderer_pid: binding.renderer_pid,
+    runtime_target_id: binding.runtime_target_id,
+    attachment_generation: binding.attachment_generation,
+    document_generation: binding.document_generation,
+    binding_generation: binding.binding_generation,
+    document_url_sha256: urlHash,
+    page_data_authority: false,
+    execution_authority: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  });
+}
+
 function prune(now = Date.now()) {
   const current = Number(now);
   for (const [key, row] of observations) {
@@ -61,27 +119,35 @@ export function recordNativeEffectRuntimeObservation({
   runtime_binding,
   document_url_sha256,
 } = {}) {
-  const processId = clean(process_incarnation_id).toLowerCase();
-  const targetId = clean(target_id).toLowerCase();
   const observed = new Date(observed_at);
-  const urlHash = clean(document_url_sha256).toLowerCase();
-  if (!PROCESS_ID_RE.test(processId)) throw new Error('native_effect_runtime_process_incarnation_invalid');
-  if (!TARGET_RE.test(targetId)) throw new Error('native_effect_runtime_target_invalid');
   if (!Number.isFinite(observed.getTime())) throw new Error('native_effect_runtime_observed_at_invalid');
   if (observed.getTime() - Date.now() > MAX_FUTURE_SKEW_MS) throw new Error('native_effect_runtime_observed_at_future');
-  if (!SHA256_RE.test(urlHash)) throw new Error('native_effect_runtime_document_url_hash_invalid');
-  const binding = normalizeRuntimeBinding(runtime_binding);
-  if (targetId !== `webcontents:${binding.web_contents_id}`) throw new Error('native_effect_runtime_webcontents_target_mismatch');
+  const stateRevision = projectNativeRuntimeStateRevision({
+    process_incarnation_id,
+    target_id,
+    runtime_binding,
+    document_url_sha256,
+  });
+  const binding = Object.freeze({
+    web_contents_id: stateRevision.web_contents_id,
+    renderer_pid: stateRevision.renderer_pid,
+    runtime_target_id: stateRevision.runtime_target_id,
+    attachment_generation: stateRevision.attachment_generation,
+    document_generation: stateRevision.document_generation,
+    binding_generation: stateRevision.binding_generation,
+  });
 
   const observationId = newObservationId();
   const row = Object.freeze({
     schema: NATIVE_EFFECT_RUNTIME_OBSERVATION_SCHEMA,
     observation_id: observationId,
-    process_incarnation_id: processId,
-    target_id: targetId,
+    process_incarnation_id: stateRevision.process_incarnation_id,
+    target_id: stateRevision.target_id,
     observed_at: observed.toISOString(),
-    document_url_sha256: urlHash,
+    document_url_sha256: stateRevision.document_url_sha256,
     runtime_binding: binding,
+    state_revision_id: stateRevision.revision_id,
+    state_revision: stateRevision,
     page_data_authority: false,
     execution_authority: false,
     authority_effect: false,
@@ -128,6 +194,20 @@ export function assertNativeEffectRuntimeBindingCurrent({ binding, runtime_bindi
     if (binding[key] !== current[key]) throw new Error(`native_effect_runtime_${key}_mismatch`);
   }
   if (binding.document_url_sha256 !== hash) throw new Error('native_effect_runtime_document_url_mismatch');
+  if (binding.state_revision_id != null) {
+    const revisionId = clean(binding.state_revision_id).toLowerCase();
+    if (!STATE_REVISION_ID_RE.test(revisionId)) throw new Error('native_effect_runtime_state_revision_invalid');
+    if (binding.state_revision_schema != null && binding.state_revision_schema !== NATIVE_RUNTIME_STATE_REVISION_SCHEMA) {
+      throw new Error('native_effect_runtime_state_revision_schema_mismatch');
+    }
+    const currentRevision = projectNativeRuntimeStateRevision({
+      process_incarnation_id: binding.process_incarnation_id,
+      target_id: binding.target_id,
+      runtime_binding: current,
+      document_url_sha256: hash,
+    });
+    if (revisionId !== currentRevision.revision_id) throw new Error('native_effect_runtime_state_revision_mismatch');
+  }
   return true;
 }
 
