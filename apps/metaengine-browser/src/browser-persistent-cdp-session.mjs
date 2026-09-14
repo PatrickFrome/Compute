@@ -236,6 +236,7 @@ export class PersistentBrowserCdpSessionPool {
       eventCapable,
       targetId: targetIdOf(webContents),
       mainFrameId: null,
+      mainFrameIdentityVersion: 0,
       subscribers: new Set(),
       ensurePromise: null,
       ready: false,
@@ -268,6 +269,7 @@ export class PersistentBrowserCdpSessionPool {
           row.documentGeneration += 1;
           row.bindingGeneration += 1;
         } else if (name === 'Page.frameNavigated' && !params?.frame?.parentId) {
+          row.mainFrameIdentityVersion += 1;
           row.mainFrameId = clip(params?.frame?.id, 192) || row.mainFrameId;
           row.documentGeneration += 1;
           row.bindingGeneration += 1;
@@ -354,6 +356,7 @@ export class PersistentBrowserCdpSessionPool {
       row.ready = false;
       row.attachedByPool = false;
       row.bindingGeneration += 1;
+      row.mainFrameIdentityVersion += 1;
       row.mainFrameId = null;
       row.subtargets.clear();
       row.subtargetBySession.clear();
@@ -384,6 +387,20 @@ export class PersistentBrowserCdpSessionPool {
     });
   }
 
+  #seedMainFrameIdentity(row) {
+    const identityVersion = row.mainFrameIdentityVersion;
+    void Promise.resolve()
+      .then(() => row.dbg.sendCommand('Page.getFrameTree'))
+      .then((frameTree) => {
+        if (this.#rows.get(row.id) !== row) return;
+        if (!liveWebContents(row.webContents) || row.dbg.isAttached?.() !== true) return;
+        if (row.mainFrameIdentityVersion !== identityVersion) return;
+        const mainFrameId = clip(frameTree?.frameTree?.frame?.id, 192) || null;
+        if (mainFrameId) row.mainFrameId = mainFrameId;
+      })
+      .catch(() => {});
+  }
+
   async #initialize(row) {
     if (!liveWebContents(row.webContents)) throw new Error('persistent_cdp_webcontents_unavailable');
     if (!row.dbg.isAttached()) {
@@ -393,8 +410,7 @@ export class PersistentBrowserCdpSessionPool {
 
     if (row.eventCapable) {
       await row.dbg.sendCommand('Page.enable');
-      const frameTree = await row.dbg.sendCommand('Page.getFrameTree').catch(() => null);
-      row.mainFrameId = clip(frameTree?.frameTree?.frame?.id, 192) || null;
+      this.#seedMainFrameIdentity(row);
       await row.dbg.sendCommand('DOM.enable');
       await row.dbg.sendCommand('Accessibility.enable');
       await row.dbg.sendCommand('Runtime.enable');
