@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import { app, BaseWindow, WebContentsView } from 'electron';
 
 import { captureViewThumbnail } from '../src/native-browser-control.mjs';
+import {
+  nativeBrowserCdpPool,
+  persistentBrowserDebuggerBinding,
+  releasePersistentBrowserDebugger,
+} from '../src/browser-persistent-cdp-session.mjs';
 
 app.enableSandbox();
 
@@ -43,9 +48,28 @@ async function run() {
     assert.equal(target.webContents.isDestroyed(), false);
     assert.equal(win.contentView.children.includes(target), true);
 
+    // Production tabs are kept on one event-driven persistent CDP session by the
+    // realtime semantic plane. Prove the detached fallback against that invariant
+    // instead of cold-attaching the full semantic domain set after detachment.
+    const preDetachBinding = await persistentBrowserDebuggerBinding(target.webContents);
+    assert.equal(preDetachBinding.ready, true);
+    assert.equal(preDetachBinding.attached, true);
+    assert.equal(preDetachBinding.event_stream_capable, true);
+    assert.equal(preDetachBinding.web_contents_id, target.webContents.id);
+    assert.ok(preDetachBinding.target_id);
+    assert.ok(preDetachBinding.attachment_generation >= 1);
+
     win.contentView.removeChildView(target);
     assert.equal(win.contentView.children.includes(target), false);
     await wait(150);
+
+    const beforeCapture = nativeBrowserCdpPool.identity(target.webContents, {
+      require_ready: true,
+      require_event_stream: true,
+    });
+    assert.ok(beforeCapture);
+    assert.equal(beforeCapture.target_id, preDetachBinding.target_id);
+    assert.equal(beforeCapture.attachment_generation, preDetachBinding.attachment_generation);
 
     const result = await captureViewThumbnail(target.webContents, { surfaceExpected: false });
     const jpeg = Buffer.from(result.jpeg_base64, 'base64');
@@ -59,12 +83,23 @@ async function run() {
     assert.deepEqual([...jpeg.subarray(0, 2)], [0xff, 0xd8]);
     assert.match(result.sha256, /^[a-f0-9]{64}$/);
 
+    const postCaptureBinding = nativeBrowserCdpPool.identity(target.webContents, {
+      require_ready: true,
+      require_event_stream: true,
+    });
+    assert.ok(postCaptureBinding);
+    assert.equal(postCaptureBinding.target_id, preDetachBinding.target_id);
+    assert.equal(postCaptureBinding.attachment_generation, preDetachBinding.attachment_generation);
+
     console.log(JSON.stringify({
       schema: 'metaengine.browser.detached-capture-view-physical-e2e.v1',
       ok: true,
       electron: process.versions.electron,
       capture_backend: result.capture_backend,
       detached_surface_fallback: result.detached_surface_fallback,
+      persistent_cdp_prearmed: true,
+      attachment_generation_stable: true,
+      target_id_stable: true,
       source_width: result.source_width,
       source_height: result.source_height,
       jpeg_bytes: result.jpeg_bytes,
@@ -72,6 +107,7 @@ async function run() {
       authority_effect: false,
     }));
   } finally {
+    try { releasePersistentBrowserDebugger(target.webContents); } catch {}
     try { win.contentView.removeChildView(target); } catch {}
     try { win.contentView.removeChildView(shell); } catch {}
     if (!target.webContents.isDestroyed()) target.webContents.close();
