@@ -10,6 +10,33 @@ function safeClose(socket) {
   try { socket?.close?.(); } catch {}
 }
 
+function failedWake(reason, topicCount) {
+  const subscribed = Object.freeze({
+    schema: REALTIME_COMMAND_WAKE_SCHEMA,
+    ok: false,
+    reason,
+    topic_count: topicCount,
+    joined_topic_count: 0,
+    transport_delivery_is_authority: false,
+    authority_effect: false,
+  });
+  const wake = Object.freeze({
+    schema: REALTIME_COMMAND_WAKE_SCHEMA,
+    reason,
+    broadcast_received: false,
+    transport_delivery_is_authority: false,
+    authority_effect: false,
+  });
+  return Object.freeze({
+    schema: REALTIME_COMMAND_WAKE_SCHEMA,
+    subscribed: Promise.resolve(subscribed),
+    wake: Promise.resolve(wake),
+    close() { return false; },
+    transport_delivery_is_authority: false,
+    authority_effect: false,
+  });
+}
+
 /**
  * Opens one Realtime subscription without granting any Browser authority.
  *
@@ -18,6 +45,10 @@ function safeClose(socket) {
  * first broadcast, timeout, or channel failure. Successful subscription does NOT
  * resolve `wake`; callers must re-read durable queue state after subscription to
  * close the lease-before-subscribe race window.
+ *
+ * Realtime is only a wake optimization. Durable DB leasing remains authoritative.
+ * Operational socket-construction failures therefore resolve a failed subscription
+ * instead of throwing through wait-batch and turning a healthy DB queue into HTTP 502.
  */
 export function openRealtimeCommandWake({
   createSocket,
@@ -33,15 +64,19 @@ export function openRealtimeCommandWake({
   if (typeof accessToken !== 'string' || accessToken.length < 1) throw new Error('realtime_command_wake_token_required');
 
   const waitMs = boundedTimeout(timeoutMs);
-  const socket = createSocket();
-  if (!socket) throw new Error('realtime_command_wake_socket_invalid');
   const expectedTopics = new Set(topics.map((topic) => `realtime:${topic}`));
+  let socket;
+  try { socket = createSocket(); }
+  catch { return failedWake('SOCKET_CREATE_FAILED', expectedTopics.size); }
+  if (!socket) return failedWake('SOCKET_CREATE_FAILED', expectedTopics.size);
+
   const joined = new Set();
   let closed = false;
   let subscribedSettled = false;
   let wakeSettled = false;
   let resolveSubscribed;
   let resolveWake;
+  let timer = null;
 
   const subscribed = new Promise((resolve) => { resolveSubscribed = resolve; });
   const wake = new Promise((resolve) => { resolveWake = resolve; });
@@ -54,7 +89,7 @@ export function openRealtimeCommandWake({
   const finishWake = (reason) => {
     if (wakeSettled) return;
     wakeSettled = true;
-    clearTimer(timer);
+    if (timer != null) clearTimer(timer);
     resolveWake(Object.freeze({
       schema: REALTIME_COMMAND_WAKE_SCHEMA,
       reason,
@@ -75,7 +110,7 @@ export function openRealtimeCommandWake({
     finishWake(reason);
   };
 
-  const timer = setTimer(() => {
+  timer = setTimer(() => {
     // waitBatch awaits `subscribed` before it awaits `wake`; therefore the join
     // acknowledgement itself must be bounded. Otherwise a half-open WebSocket can
     // strand the HTTP request forever even though the wake timer has expired.
@@ -153,7 +188,7 @@ export function openRealtimeCommandWake({
     close() {
       if (closed) return false;
       closed = true;
-      clearTimer(timer);
+      if (timer != null) clearTimer(timer);
       safeClose(socket);
       finishSubscribed({
         schema: REALTIME_COMMAND_WAKE_SCHEMA,
