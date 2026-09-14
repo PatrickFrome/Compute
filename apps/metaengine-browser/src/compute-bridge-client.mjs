@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import net from 'node:net';
@@ -12,6 +13,7 @@ const DEFAULT_NATIVE_STATE_ROOT = process.env.A2_COMPUTE_STATE_ROOT
   : path.join(os.homedir(), '.metaengine', 'a2-compute-browser');
 const NATIVE_CONTROL_TOKEN = 'control-token';
 const MAX_NATIVE_FRAME_BYTES = 1024 * 1024;
+const MAX_CHILD_DIAGNOSTIC_BYTES = 4096;
 const READ_ONLY_METHODS = new Set(['runtime.health', 'profile.list', 'context.list', 'target.list', 'target.semantic_snapshot', 'receipt.get', 'receipt.verify']);
 const NATIVE_RECOVERABLE_REASON_CODES = new Set(['MANIFEST_NOT_PRESENT', 'ECONNREFUSED', 'ECONNRESET', 'EPIPE', 'CONNECTION_REFUSED']);
 const AUTOSTART_RECOVERABLE_STATES = new Set(['STARTING', 'OFFLINE']);
@@ -52,10 +54,9 @@ export function resolveBundledComputeBridgeRoot({ resourcesPath = process.resour
   return path.resolve(moduleDir, '..', '..', '..', 'coordination', 'browser-compute');
 }
 
-// Packaged ESM source lives inside app.asar, but utilityProcess must execute the
-// worker closure that electron-builder deliberately placed in app.asar.unpacked.
-// This is the same process-boundary rule used by the Sentinel worker: never rely
-// on an archive path being executable merely because the parent can import it.
+// Packaged ESM source lives inside app.asar, but the executable worker closure is
+// deliberately placed in app.asar.unpacked. Never hand an archive path to a child
+// process merely because the parent process can import it.
 export function resolveComputeBridgeWorkerPath(candidatePath, existsSyncImpl = ((p) => fsSync.existsSync(p))) {
   const candidate = String(candidatePath || '');
   for (const sep of [path.sep, '/']) {
@@ -133,15 +134,63 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function appendBounded(current, chunk, maxBytes = MAX_CHILD_DIAGNOSTIC_BYTES) {
+  const next = `${current}${Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '')}`;
+  if (Buffer.byteLength(next, 'utf8') <= maxBytes) return next;
+  return Buffer.from(next, 'utf8').subarray(-maxBytes).toString('utf8');
+}
+
+export function observeComputeBridgeChild(child) {
+  const state = {
+    spawned: false,
+    exited: false,
+    exit_code: null,
+    signal: null,
+    error: null,
+    stdout: '',
+    stderr: '',
+  };
+  child?.once?.('spawn', () => { state.spawned = true; });
+  child?.once?.('error', (error) => { state.error = String(error?.message || error).slice(0, 500); });
+  child?.once?.('exit', (code, signal) => {
+    state.exited = true;
+    state.exit_code = Number.isInteger(code) ? code : null;
+    state.signal = signal == null ? null : String(signal).slice(0, 80);
+  });
+  child?.stdout?.on?.('data', (chunk) => { state.stdout = appendBounded(state.stdout, chunk); });
+  child?.stderr?.on?.('data', (chunk) => { state.stderr = appendBounded(state.stderr, chunk); });
+  return state;
+}
+
+function childFailureMessage(state) {
+  if (!state) return null;
+  const detail = String(state.stderr || state.error || state.stdout || '').trim().replace(/\s+/g, ' ').slice(0, 360);
+  if (!state.exited && !state.error) return null;
+  return [
+    'compute_bridge_worker_exit',
+    state.exit_code == null ? 'null' : String(state.exit_code),
+    state.signal || 'none',
+    detail || 'no_diagnostics',
+  ].join(':').slice(0, 500);
+}
+
 async function launchBundledComputeBridge({ runtimeRoot, workerPath }) {
   if (!process.versions?.electron) throw new Error('compute_bridge_autostart_requires_electron');
-  const electron = await import('electron');
-  if (!electron?.utilityProcess?.fork) throw new Error('compute_bridge_autostart_utility_process_unavailable');
-  return electron.utilityProcess.fork(workerPath, ['serve', '--bridge-port=0'], {
+  if (!fsSync.existsSync(workerPath)) throw new Error(`compute_bridge_worker_missing:${workerPath}`);
+  if (!fsSync.existsSync(path.join(runtimeRoot, 'src', 'cli.mjs'))) throw new Error(`compute_bridge_runtime_missing:${runtimeRoot}`);
+  // Use the packaged Electron executable as a Node host. This keeps the worker on
+  // the same exact installation path (so installer shutdown can fence it), while
+  // exposing normal child-process stdout/stderr/exit semantics. utilityProcess.fork
+  // can succeed before the worker module fails, which previously produced the false
+  // remediation_error:null observed in live repair incidents.
+  return spawn(process.execPath, [workerPath, 'serve', '--bridge-port=0'], {
     env: {
       ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
       METAENGINE_COMPUTE_BRIDGE_ROOT: runtimeRoot,
     },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   });
 }
 
@@ -175,7 +224,14 @@ export class ComputeBridgeClient {
     this.workerPath = workerPath;
     this.autoStartPromise = null;
     this.ownedBridgeProcess = null;
+    this.ownedBridgeDiagnostics = null;
     this.lastAutoStartError = null;
+    this.processExitHandler = () => {
+      const child = this.ownedBridgeProcess;
+      if (!child) return;
+      try { child.kill?.(); } catch {}
+    };
+    process.once('exit', this.processExitHandler);
   }
 
   async readManifest() {
@@ -299,6 +355,7 @@ export class ComputeBridgeClient {
   async #launchAndWaitForHealth() {
     const launcher = this.launchBridge || launchBundledComputeBridge;
     let launchError = null;
+    let diagnostics = this.ownedBridgeDiagnostics;
     if (!this.ownedBridgeProcess) {
       try {
         const child = await launcher({
@@ -307,6 +364,8 @@ export class ComputeBridgeClient {
           manifestPath: this.manifestPath,
         });
         this.ownedBridgeProcess = child || null;
+        diagnostics = child ? observeComputeBridgeChild(child) : null;
+        this.ownedBridgeDiagnostics = diagnostics;
         if (child && typeof child.once === 'function') {
           child.once('exit', () => {
             if (this.ownedBridgeProcess === child) this.ownedBridgeProcess = null;
@@ -321,18 +380,27 @@ export class ComputeBridgeClient {
     const deadline = Date.now() + this.autoStartTimeoutMs;
     let observed = await this.#healthOnce();
     while (!observed.available && Date.now() < deadline) {
+      const earlyFailure = childFailureMessage(diagnostics);
+      if (earlyFailure) {
+        launchError = new Error(earlyFailure);
+        this.lastAutoStartError = earlyFailure;
+        // A daemon-lock loser must keep probing the canonical native owner until
+        // the bounded deadline. Every other proven child exit is terminal for this
+        // launch attempt and is surfaced immediately instead of hiding behind the
+        // original stale HTTP manifest error.
+        if (!/daemon_lock_held/i.test(earlyFailure)) break;
+      }
       await sleep(this.autoStartPollMs);
       observed = await this.#healthOnce();
-      // If launch failed because another process already owns the daemon lock,
-      // keep probing the canonical native transport until the bounded deadline.
-      if (launchError && !/daemon_lock_held/i.test(String(launchError?.message || launchError))) break;
+    }
+    const finalChildFailure = childFailureMessage(diagnostics);
+    if (!observed.available && !launchError && finalChildFailure) {
+      launchError = new Error(finalChildFailure);
+      this.lastAutoStartError = finalChildFailure;
     }
     return Object.freeze({
       ...observed,
       automatic_remediation: true,
-      // A newly launched daemon exposes its native endpoint before its optional
-      // HTTP manifest. Observing that native endpoint is still proof of this
-      // bounded autostart, not evidence that an unrelated owner was attached.
       remediation: observed.available && launchError && observed.transport === 'NATIVE_RPC'
         ? 'NATIVE_RPC_ATTACH'
         : 'BUNDLED_DAEMON_AUTOSTART',
@@ -351,6 +419,24 @@ export class ComputeBridgeClient {
     }
     return this.autoStartPromise;
   }
+
+  async dispose({ timeoutMs = 1500 } = {}) {
+    process.removeListener('exit', this.processExitHandler);
+    const child = this.ownedBridgeProcess;
+    this.ownedBridgeProcess = null;
+    this.ownedBridgeDiagnostics = null;
+    if (!child) return false;
+    let exited = false;
+    const exitPromise = new Promise((resolve) => {
+      child.once?.('exit', () => { exited = true; resolve(true); });
+    });
+    try { child.kill?.(); } catch {}
+    await Promise.race([exitPromise, sleep(Math.max(50, Math.min(5000, Number(timeoutMs) || 1500)))]);
+    if (!exited) {
+      try { child.kill?.('SIGKILL'); } catch {}
+    }
+    return true;
+  }
 }
 
 export const COMPUTE_BRIDGE_POLICY = Object.freeze({
@@ -362,6 +448,8 @@ export const COMPUTE_BRIDGE_POLICY = Object.freeze({
   native_attach_read_only: true,
   bundled_daemon_autostart: true,
   packaged_worker_resolved_from_asar_to_unpacked: true,
+  packaged_worker_host: 'ELECTRON_RUN_AS_NODE_CHILD_PROCESS',
+  packaged_worker_exit_diagnostics: true,
   native_attach_precedes_autostart: true,
   second_daemon_started_for_recovery: false,
   autostart_recoverable_states: [...AUTOSTART_RECOVERABLE_STATES].sort(),
