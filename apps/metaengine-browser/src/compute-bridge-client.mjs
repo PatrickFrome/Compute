@@ -1,9 +1,12 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_MANIFEST = path.join(os.homedir(), '.a2', 'compute-bridge.json');
 const READ_ONLY_METHODS = new Set(['runtime.health', 'profile.list', 'context.list', 'target.list', 'target.semantic_snapshot', 'receipt.get', 'receipt.verify']);
+const AUTOSTART_RECOVERABLE_STATES = new Set(['STARTING', 'OFFLINE']);
 
 export const COMPUTE_HEALTH_STATES = Object.freeze({
   HEALTHY: 'HEALTHY',
@@ -44,11 +47,52 @@ export function classifyComputeBridgeFailure(error) {
   return Object.freeze({ state: COMPUTE_HEALTH_STATES.UNKNOWN, reason_code: 'HEALTH_UNAVAILABLE', outage_proven: false });
 }
 
+export function resolveBundledComputeBridgeRoot({ resourcesPath = process.resourcesPath || null, moduleDir = MODULE_DIR } = {}) {
+  if (resourcesPath) return path.join(resourcesPath, 'a2-compute-browser');
+  return path.resolve(moduleDir, '..', '..', '..', 'coordination', 'browser-compute');
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function launchBundledComputeBridge({ runtimeRoot, workerPath }) {
+  if (!process.versions?.electron) throw new Error('compute_bridge_autostart_requires_electron');
+  const electron = await import('electron');
+  if (!electron?.utilityProcess?.fork) throw new Error('compute_bridge_autostart_utility_process_unavailable');
+  const child = electron.utilityProcess.fork(workerPath, ['serve', '--bridge-port=0'], {
+    env: {
+      ...process.env,
+      METAENGINE_COMPUTE_BRIDGE_ROOT: runtimeRoot,
+    },
+  });
+  return child;
+}
+
 export class ComputeBridgeClient {
-  constructor({ manifestPath = process.env.METAENGINE_COMPUTE_BRIDGE_MANIFEST || DEFAULT_MANIFEST, fetchImpl = globalThis.fetch, timeoutMs = 1500 } = {}) {
+  constructor({
+    manifestPath = process.env.METAENGINE_COMPUTE_BRIDGE_MANIFEST || DEFAULT_MANIFEST,
+    fetchImpl = globalThis.fetch,
+    timeoutMs = 1500,
+    autoStart = Boolean(process.versions?.electron) && process.env.METAENGINE_DISABLE_COMPUTE_BRIDGE_AUTOSTART !== '1',
+    autoStartTimeoutMs = 5000,
+    autoStartPollMs = 100,
+    launchBridge = null,
+    runtimeRoot = null,
+    workerPath = path.join(MODULE_DIR, 'compute-bridge-worker.cjs'),
+  } = {}) {
     this.manifestPath = manifestPath;
     this.fetchImpl = fetchImpl;
     this.timeoutMs = Math.max(25, Math.min(10000, Number(timeoutMs) || 1500));
+    this.autoStart = autoStart === true;
+    this.autoStartTimeoutMs = Math.max(250, Math.min(15000, Number(autoStartTimeoutMs) || 5000));
+    this.autoStartPollMs = Math.max(25, Math.min(1000, Number(autoStartPollMs) || 100));
+    this.launchBridge = launchBridge;
+    this.runtimeRoot = runtimeRoot || resolveBundledComputeBridgeRoot();
+    this.workerPath = workerPath;
+    this.autoStartPromise = null;
+    this.ownedBridgeProcess = null;
+    this.lastAutoStartError = null;
   }
 
   async readManifest() {
@@ -71,7 +115,7 @@ export class ComputeBridgeClient {
     return body.result;
   }
 
-  async health() {
+  async #healthOnce() {
     const generatedAt = new Date().toISOString();
     try {
       const result = await this.callReadOnly('runtime.health', {});
@@ -106,6 +150,61 @@ export class ComputeBridgeClient {
       });
     }
   }
+
+  #autostartAllowed(health) {
+    if (!this.autoStart || !AUTOSTART_RECOVERABLE_STATES.has(String(health?.state || ''))) return false;
+    if (this.launchBridge) return true;
+    return path.resolve(this.manifestPath) === path.resolve(DEFAULT_MANIFEST);
+  }
+
+  async #launchAndWaitForHealth() {
+    const launcher = this.launchBridge || launchBundledComputeBridge;
+    let launchError = null;
+    if (!this.ownedBridgeProcess) {
+      try {
+        const child = await launcher({
+          runtimeRoot: this.runtimeRoot,
+          workerPath: this.workerPath,
+          manifestPath: this.manifestPath,
+        });
+        this.ownedBridgeProcess = child || null;
+        if (child && typeof child.once === 'function') {
+          child.once('exit', () => {
+            if (this.ownedBridgeProcess === child) this.ownedBridgeProcess = null;
+          });
+        }
+      } catch (error) {
+        launchError = error;
+        this.lastAutoStartError = String(error?.message || error).slice(0, 500);
+      }
+    }
+
+    const deadline = Date.now() + this.autoStartTimeoutMs;
+    let observed = await this.#healthOnce();
+    while (!observed.available && Date.now() < deadline) {
+      if (launchError) break;
+      await sleep(this.autoStartPollMs);
+      observed = await this.#healthOnce();
+    }
+    return Object.freeze({
+      ...observed,
+      automatic_remediation: true,
+      remediation: 'BUNDLED_DAEMON_AUTOSTART',
+      remediation_error: launchError ? String(launchError?.message || launchError).slice(0, 500) : null,
+      authority_effect: false,
+    });
+  }
+
+  async health() {
+    const initial = await this.#healthOnce();
+    if (!this.#autostartAllowed(initial)) return initial;
+    if (!this.autoStartPromise) {
+      this.autoStartPromise = this.#launchAndWaitForHealth().finally(() => {
+        this.autoStartPromise = null;
+      });
+    }
+    return this.autoStartPromise;
+  }
 }
 
 export const COMPUTE_BRIDGE_POLICY = Object.freeze({
@@ -114,4 +213,6 @@ export const COMPUTE_BRIDGE_POLICY = Object.freeze({
   read_only_methods: [...READ_ONLY_METHODS].sort(),
   raw_cdp_exposed: false,
   token_exposed_to_renderer: false,
+  bundled_daemon_autostart: true,
+  autostart_recoverable_states: [...AUTOSTART_RECOVERABLE_STATES].sort(),
 });
