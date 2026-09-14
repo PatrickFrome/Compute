@@ -11,7 +11,9 @@ import {
 } from '../src/self-update-signed-heartbeat.mjs';
 import { acceptedSignedSupervisorHeartbeatSnapshot } from '../src/self-update-successor-qualification.mjs';
 
-const STATE_URL = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1/v1/state';
+const SUPERVISOR_BASE_URL = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1';
+const STATE_URL = `${SUPERVISOR_BASE_URL}/v1/state`;
+const HEARTBEAT_URL = `${SUPERVISOR_BASE_URL}/v1/heartbeat`;
 
 function heartbeat(version, { sentinelWorkerHealthy = true } = {}) {
   return {
@@ -78,14 +80,16 @@ async function appFixture() {
   return { app, target };
 }
 
-test('only exact Supabase state endpoint with body-bound device signature shape is eligible', () => {
+test('only exact Supabase state or heartbeat endpoint with body-bound device signature shape is eligible', () => {
   const body = JSON.stringify(heartbeat('0.6.3-dev.152.1'));
   const init = signedInit(body);
   assert.equal(inspectSignedNativeSupervisorStateRequest(STATE_URL, init).valid, true);
+  assert.equal(inspectSignedNativeSupervisorStateRequest(HEARTBEAT_URL, init).valid, true);
   assert.equal(inspectSignedNativeSupervisorStateRequest('https://example.com/functions/v1/a2-browser-native-supervisor-v1/v1/state', init).valid, false);
   assert.equal(inspectSignedNativeSupervisorStateRequest(`${STATE_URL}/extra`, init).valid, false);
+  assert.equal(inspectSignedNativeSupervisorStateRequest(`${HEARTBEAT_URL}/extra`, init).valid, false);
   assert.equal(inspectSignedNativeSupervisorStateRequest(STATE_URL, { ...init, body: `${body} ` }).reason, 'body_hash_mismatch');
-  assert.equal(inspectSignedNativeSupervisorStateRequest(STATE_URL, { ...init, headers: { ...init.headers, 'x-a2-device-signature': '' } }).reason, 'signature_missing');
+  assert.equal(inspectSignedNativeSupervisorStateRequest(HEARTBEAT_URL, { ...init, headers: { ...init.headers, 'x-a2-device-signature': '' } }).reason, 'signature_missing');
 });
 
 test('only a 202 response to an eligible heartbeat with fresh sentinel worker proof records successor health', async () => {
@@ -102,7 +106,7 @@ test('only a 202 response to an eligible heartbeat with fresh sentinel worker pr
     app,
     fetchImpl: async () => new Response('', { status: 202 }),
   });
-  const response = await wrappedAccepted(STATE_URL, signedInit(body));
+  const response = await wrappedAccepted(HEARTBEAT_URL, signedInit(body));
   assert.equal(response.status, 202);
   const health = acceptedSignedSupervisorHeartbeatSnapshot();
   assert.equal(health.version, target);
@@ -113,7 +117,7 @@ test('only a 202 response to an eligible heartbeat with fresh sentinel worker pr
   assert.equal(health.sentinel_worker_heartbeat_age_ms, 250);
 });
 
-test('202 heartbeat without sentinel worker proof remains non-qualifying', async () => {
+test('202 state publication without sentinel worker proof remains non-qualifying', async () => {
   const { app, target } = await appFixture();
   const body = JSON.stringify(heartbeat(target, { sentinelWorkerHealthy: false }));
   const wrappedAccepted = installSignedSupervisorHeartbeatQualificationHook({
