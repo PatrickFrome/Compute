@@ -79,10 +79,12 @@ test('Edge realtime wait is race-free, uses a non-secret URL key, and delivery n
     "Deno.env.get('SUPABASE_PUBLISHABLE_KEY')",
     "Deno.env.get('SUPABASE_ANON_KEY')",
     'apikey=${encodeURIComponent(REALTIME_API_KEY)}',
-    'accessToken:SERVICE_ROLE',
+    "const REALTIME_ACCESS_TOKEN=SERVICE_ROLE.split('.').length===3?SERVICE_ROLE:''",
+    'accessToken:REALTIME_ACCESS_TOKEN',
     'realtime_url_uses_service_role:false',
   ]) assert.ok(source.includes(token), `${token} missing from Edge fast lane`);
   assert.doesNotMatch(source, /apikey=\$\{encodeURIComponent\(SERVICE_ROLE\)\}/, 'service role must never enter a websocket URL/query');
+  assert.doesNotMatch(source, /accessToken\s*:\s*SERVICE_ROLE/, 'modern secret API keys must never be treated as Realtime JWTs');
   assert.doesNotMatch(source, /finish\(['"]SUBSCRIBED_RECHECK['"]\)/, 'subscription acknowledgement must not itself wake the lease loop');
   assert.doesNotMatch(source, /eval\s*\(|new\s+Function\s*\(/);
 });
