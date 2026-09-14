@@ -30,19 +30,60 @@ function Get-BrowserProcesses([string]$ExactExePath) {
   })
 }
 
-# PowerShell unwraps a function's single pipeline result. Materialize the caller-side
-# collection so StrictMode sees a stable .Count for zero, one, or many processes.
+function Wait-BrowserProcessesGone([string]$ExactExePath, [int]$TimeoutSeconds = 12) {
+  $deadline = [DateTime]::UtcNow.AddSeconds([Math]::Max(2, $TimeoutSeconds))
+  do {
+    $rows = @(Get-BrowserProcesses $ExactExePath)
+    if ($rows.Count -eq 0) { return $true }
+    Start-Sleep -Milliseconds 200
+  } while ([DateTime]::UtcNow -lt $deadline)
+  return $false
+}
+
 $preexisting = @(Get-BrowserProcesses $InstalledExePath)
 if ($preexisting.Count -gt 0) { throw 'bootstrap_preexisting_browser_process' }
 
-$install = Start-Process -FilePath $InstallerPath -ArgumentList '/S' -PassThru -Wait
+# One-click + runAfterFinish is the production bootstrap contract. Do not pass /S
+# here: electron-builder deliberately suppresses ordinary run-after-finish in silent
+# mode. This test must observe the process created by the installer itself, never a
+# harness-owned Start-Process fallback.
+$install = Start-Process -FilePath $InstallerPath -PassThru -Wait
 if ($install.ExitCode -ne 0) { throw "bootstrap_installer_exit_$($install.ExitCode)" }
 if (-not (Test-Path -LiteralPath $InstalledExePath -PathType Leaf)) { throw 'bootstrap_installed_executable_missing' }
 
+$automaticBrowser = $null
+$deadline = [DateTime]::UtcNow.AddSeconds([Math]::Max(20, $StartupTimeoutSeconds))
+while ([DateTime]::UtcNow -lt $deadline) {
+  $rows = @(Get-BrowserProcesses $InstalledExePath)
+  $automaticBrowser = $rows | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+  if ($automaticBrowser) { break }
+  Start-Sleep -Milliseconds 250
+}
+if (-not $automaticBrowser) {
+  throw 'bootstrap_installer_spawned_visible_browser_timeout'
+}
+$automaticBrowser.Refresh()
+if ($automaticBrowser.HasExited -or $automaticBrowser.MainWindowHandle -eq 0) {
+  throw 'bootstrap_installer_spawned_browser_not_stable'
+}
+$installerLaunchedPid = [int]$automaticBrowser.Id
+
 $userData = $null
 $startupJournal = $null
+$stableSequence = $null
+$runtimeImportVerified = $false
 $versionProbeVerified = $false
+
 if ($PhysicalProof) {
+  # Freeze the already-proven installer-spawned process only after its visible
+  # window exists, then use the read-only profile probe to resolve Electron's
+  # exact userData path. The startup journal must bind back to the captured PID;
+  # the probe is not allowed to substitute a fresh ordinary Browser launch.
+  @(Get-BrowserProcesses $InstalledExePath) | Stop-Process -Force -ErrorAction SilentlyContinue
+  if (-not (Wait-BrowserProcessesGone $InstalledExePath)) {
+    throw 'bootstrap_installer_spawned_browser_cleanup_timeout'
+  }
+
   $profileOut = Join-Path $env:RUNNER_TEMP 'bootstrap-profile-probe.out'
   $profileErr = Join-Path $env:RUNNER_TEMP 'bootstrap-profile-probe.err'
   Remove-Item $profileOut,$profileErr -Force -ErrorAction SilentlyContinue
@@ -62,6 +103,7 @@ if ($PhysicalProof) {
   } finally {
     $env:METAENGINE_PROFILE_PROBE_WRITE = $priorProfileWrite
   }
+
   $profileLine = Get-Content $profileOut | Where-Object { $_.Trim() } | Select-Object -Last 1
   if (-not $profileLine) { throw 'bootstrap_profile_probe_output_missing' }
   $profile = $profileLine | ConvertFrom-Json
@@ -72,78 +114,36 @@ if ($PhysicalProof) {
     $profile | ConvertTo-Json -Depth 8 | Write-Host
     throw 'bootstrap_profile_probe_contract_invalid'
   }
+  $versionProbeVerified = $true
   $userData = [string]$profile.user_data_path
   if (-not [System.IO.Path]::IsPathRooted($userData)) { throw 'bootstrap_profile_user_data_not_absolute' }
   $startupJournal = Join-Path $userData 'metaengine-browser-startup-journal-v1.json'
-  Remove-Item $startupJournal -Force -ErrorAction SilentlyContinue
-  Remove-Item "$startupJournal.corrupt-*" -Force -ErrorAction SilentlyContinue
-  $versionProbeVerified = $true
-}
-
-# This is the bootstrap's required final effect: regardless of whether a future NSIS
-# implementation also runs after Finish, a verified silent bootstrap always requests
-# one ordinary Browser launch after the installer has completed. A pre-existing
-# primary is forbidden above, so this launch cannot silently bind to stale authority.
-$normalOut = if ($env:RUNNER_TEMP) { Join-Path $env:RUNNER_TEMP 'bootstrap-normal-ui.out' } else { Join-Path $env:TEMP 'bootstrap-normal-ui.out' }
-$normalErr = if ($env:RUNNER_TEMP) { Join-Path $env:RUNNER_TEMP 'bootstrap-normal-ui.err' } else { Join-Path $env:TEMP 'bootstrap-normal-ui.err' }
-Remove-Item $normalOut,$normalErr -Force -ErrorAction SilentlyContinue
-$normal = Start-Process -FilePath $InstalledExePath -PassThru -RedirectStandardOutput $normalOut -RedirectStandardError $normalErr
-$null = $normal.Handle
-
-$visible = $false
-$stableSequence = $null
-$runtimeImportVerified = $false
-$deadline = [DateTime]::UtcNow.AddSeconds([Math]::Max(20, $StartupTimeoutSeconds))
-while ([DateTime]::UtcNow -lt $deadline) {
-  $normal.Refresh()
-  if ($normal.HasExited) {
-    Get-Content $normalErr -ErrorAction SilentlyContinue
-    throw "bootstrap_normal_browser_exited_early:$($normal.ExitCode)"
+  if (-not (Test-Path -LiteralPath $startupJournal -PathType Leaf)) {
+    throw 'bootstrap_installer_spawned_startup_journal_missing'
   }
 
-  if ($PhysicalProof -and $startupJournal -and (Test-Path -LiteralPath $startupJournal -PathType Leaf)) {
-    try {
-      $startup = Get-Content -LiteralPath $startupJournal -Raw | ConvertFrom-Json
-      if ($startup.schema -ne 'metaengine.browser.startup-journal.v1') { throw 'bootstrap_startup_journal_schema_invalid' }
-      if ([string]$startup.current_version -eq $ExpectedVersion -and [int64]$startup.current_pid -eq [int64]$normal.Id) {
-        $runtimeImport = $startup.events | Where-Object {
-          $_.boot_id -eq $startup.current_boot_id `
-            -and $_.state -eq 'RUNTIME_IMPORT_OK' `
-            -and [string]$_.version -eq $ExpectedVersion `
-            -and [int64]$_.pid -eq [int64]$normal.Id
-        } | Select-Object -Last 1
-        $stable = $startup.events | Where-Object {
-          $_.boot_id -eq $startup.current_boot_id `
-            -and $_.state -eq 'PRIMARY_WINDOW_STABLE' `
-            -and [string]$_.version -eq $ExpectedVersion `
-            -and [int64]$_.pid -eq [int64]$normal.Id
-        } | Select-Object -Last 1
-        if ($runtimeImport) { $runtimeImportVerified = $true }
-        if ($stable -and $stable.details.visible -eq $true) {
-          $visible = $true
-          $stableSequence = [int64]$stable.sequence
-          break
-        }
-      }
-    } catch {
-      if ($_.Exception.Message -eq 'bootstrap_startup_journal_schema_invalid') { throw }
-    }
-  } else {
-    $processes = @(Get-BrowserProcesses $InstalledExePath)
-    if ($processes | Where-Object { $_.MainWindowHandle -ne 0 }) {
-      $visible = $true
-      break
-    }
-  }
-  Start-Sleep -Milliseconds 250
-}
+  $startup = Get-Content -LiteralPath $startupJournal -Raw | ConvertFrom-Json
+  if ($startup.schema -ne 'metaengine.browser.startup-journal.v1') { throw 'bootstrap_startup_journal_schema_invalid' }
+  if ([string]$startup.current_version -ne $ExpectedVersion) { throw 'bootstrap_startup_journal_version_drift' }
+  if ([int64]$startup.current_pid -ne [int64]$installerLaunchedPid) { throw 'bootstrap_startup_journal_pid_drift' }
 
-if (-not $visible) {
-  Get-Content $normalErr -ErrorAction SilentlyContinue
-  if ($startupJournal -and (Test-Path -LiteralPath $startupJournal)) { Get-Content -LiteralPath $startupJournal -Raw -ErrorAction SilentlyContinue | Write-Host }
-  throw 'bootstrap_browser_visible_window_timeout'
+  $runtimeImport = $startup.events | Where-Object {
+    $_.boot_id -eq $startup.current_boot_id `
+      -and $_.state -eq 'RUNTIME_IMPORT_OK' `
+      -and [string]$_.version -eq $ExpectedVersion `
+      -and [int64]$_.pid -eq [int64]$installerLaunchedPid
+  } | Select-Object -Last 1
+  $stable = $startup.events | Where-Object {
+    $_.boot_id -eq $startup.current_boot_id `
+      -and $_.state -eq 'PRIMARY_WINDOW_STABLE' `
+      -and [string]$_.version -eq $ExpectedVersion `
+      -and [int64]$_.pid -eq [int64]$installerLaunchedPid
+  } | Select-Object -Last 1
+  if (-not $runtimeImport) { throw 'bootstrap_runtime_import_evidence_missing' }
+  if (-not $stable -or $stable.details.visible -ne $true) { throw 'bootstrap_primary_window_stable_evidence_missing' }
+  $runtimeImportVerified = $true
+  $stableSequence = [int64]$stable.sequence
 }
-if ($PhysicalProof -and -not $runtimeImportVerified) { throw 'bootstrap_runtime_import_evidence_missing' }
 
 $result = [ordered]@{
   schema = 'metaengine.browser.bootstrap-install-autostart-proof.v1'
@@ -152,7 +152,9 @@ $result = [ordered]@{
   installed_executable = $InstalledExePath
   installed_executable_exists = $true
   install_exit_code = [int]$install.ExitCode
-  normal_launch_pid = [int]$normal.Id
+  normal_launch_pid = $installerLaunchedPid
+  installer_launched_process_observed = $true
+  manual_post_install_start_process = $false
   automatic_browser_launch_performed = $true
   browser_visible = $true
   runtime_import_verified = $runtimeImportVerified
