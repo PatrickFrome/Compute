@@ -60,6 +60,7 @@ export function detachedCaptureSurfaceContract() {
     restores_detached_state: true,
     bounded: true,
     single_flight_per_view: true,
+    timeout_quarantines_until_task_settled: true,
     automatic_retry_allowed: false,
     authority_effect: false,
   });
@@ -88,6 +89,8 @@ export async function withTemporaryDetachedCaptureSurface(view, task, {
   let attached = false;
   let timer = null;
   let originalBounds = null;
+  let work = null;
+  let deadlineExpired = false;
   try {
     originalBounds = exactViewBounds(view);
     const boundedDeadlineMs = boundedInt(deadlineMs, DEFAULT_TEMPORARY_CAPTURE_SURFACE_DEADLINE_MS, 250, 15000);
@@ -103,9 +106,12 @@ export async function withTemporaryDetachedCaptureSurface(view, task, {
     view.setVisible?.(true);
     if (boundedSettleMs > 0) await sleepImpl(boundedSettleMs);
 
-    const work = Promise.resolve().then(task);
+    work = Promise.resolve().then(task);
     const deadline = new Promise((_, reject) => {
-      timer = setTimeout(() => reject(temporarySurfaceTimeoutError(boundedDeadlineMs)), boundedDeadlineMs);
+      timer = setTimeout(() => {
+        deadlineExpired = true;
+        reject(temporarySurfaceTimeoutError(boundedDeadlineMs));
+      }, boundedDeadlineMs);
     });
     return await Promise.race([work, deadline]);
   } finally {
@@ -117,6 +123,18 @@ export async function withTemporaryDetachedCaptureSurface(view, task, {
       try { view.setBounds(originalBounds); } catch {}
     }
     try { host?.close?.(); } catch {}
-    activeCaptureSurfaceLeases.delete(view);
+
+    if (deadlineExpired && work) {
+      // `capturePage()` is not abortable. Keep the exact View quarantined even
+      // after the temporary host is torn down so a late/hung capture cannot
+      // overlap a second lease. A permanently hung capture therefore fails
+      // future captures closed instead of silently violating single-flight.
+      void work.then(
+        () => { activeCaptureSurfaceLeases.delete(view); },
+        () => { activeCaptureSurfaceLeases.delete(view); },
+      );
+    } else {
+      activeCaptureSurfaceLeases.delete(view);
+    }
   }
 }
