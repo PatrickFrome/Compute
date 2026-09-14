@@ -63,5 +63,10 @@ test('convergence product head contains no temporary patch authority and package
       to: 'a2-compute-browser',
       filter: ['package.json', 'protocol-v1.json', 'engine-lock.json', 'src/**/*'],
     },
+    {
+      from: '../../coordination/browser-shared',
+      to: 'browser-shared',
+      filter: ['action-contract.mjs', 'node-registry.mjs', 'receipt-contract.mjs', 'semantic-perception-compiler.mjs'],
+    },
   ]);
 });
