@@ -1,10 +1,32 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { ComputeBridgeClient } from '../src/compute-bridge-client.mjs';
+
+function nativeSuccessTransport(expectedToken) {
+  return () => {
+    const socket = new EventEmitter();
+    socket.setNoDelay = () => {};
+    socket.destroy = () => {};
+    socket.write = (line) => {
+      const request = JSON.parse(String(line).trim());
+      assert.equal(request.token, expectedToken);
+      queueMicrotask(() => socket.emit('data', Buffer.from(`${JSON.stringify({
+        id: request.id,
+        ok: true,
+        effect_class: 'READ_ONLY',
+        web_authority_effect: false,
+        result: { schema: 'metaengine.a2-compute-browser.health.v1', runtime: '0.3.0-dev.3', profiles: [] },
+      })}\n`)));
+    };
+    queueMicrotask(() => socket.emit('connect'));
+    return socket;
+  };
+}
 
 async function startFixture(endpoint, token) {
   if (process.platform !== 'win32') await fs.rm(endpoint, { force: true }).catch(() => {});
@@ -99,6 +121,37 @@ test('daemon-lock race converges by attaching to the winning owner instead of la
     assert.match(health.remediation_error, /daemon_lock_held/);
   } finally {
     if (close) await close();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('fresh bundled autostart remains attributed to autostart when native readiness wins the HTTP race', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-one-owner-native-first-'));
+  const nativeStateRoot = path.join(dir, 'native');
+  await fs.mkdir(nativeStateRoot, { recursive: true });
+  const token = 'e'.repeat(64);
+  let launchCount = 0;
+  const client = new ComputeBridgeClient({
+    manifestPath: path.join(dir, 'missing.json'),
+    nativeStateRoot,
+    nativeEndpoint: 'test-native-endpoint',
+    nativeConnectImpl: nativeSuccessTransport(token),
+    autoStart: true,
+    autoStartTimeoutMs: 1000,
+    launchBridge: async () => {
+      launchCount += 1;
+      await fs.writeFile(path.join(nativeStateRoot, 'control-token'), token);
+      return new EventEmitter();
+    },
+  });
+  try {
+    const health = await client.health();
+    assert.equal(launchCount, 1);
+    assert.equal(health.state, 'HEALTHY');
+    assert.equal(health.transport, 'NATIVE_RPC');
+    assert.equal(health.remediation, 'BUNDLED_DAEMON_AUTOSTART');
+    assert.equal(health.remediation_error, null);
+  } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
 });

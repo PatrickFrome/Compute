@@ -55,6 +55,7 @@ jobs:
           node --test test/compute-bridge-client.test.mjs
           node --test test/compute-bridge-native-attach.test.mjs
           node --test test/compute-bridge-one-owner-autostart.test.mjs
+          node --test test/compute-bridge-packaged-path.test.mjs
 
       - name: Build unsigned x64 repair installer
         working-directory: apps/metaengine-browser
@@ -138,6 +139,7 @@ jobs:
             compute_native_attach_precedes_autostart = $true
             compute_one_daemon_owner = $true
             compute_bundled_autostart = $true
+            compute_packaged_default_worker_path = 'app.asar.unpacked/src/compute-bridge-worker.cjs'
             compute_packaged_utility_process_smoke = $true
             signed = $false
             published = $false

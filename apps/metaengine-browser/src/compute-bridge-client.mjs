@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -49,6 +50,22 @@ export function nativeComputeRpcEndpoint(root = DEFAULT_NATIVE_STATE_ROOT, {
 export function resolveBundledComputeBridgeRoot({ resourcesPath = process.resourcesPath || null, moduleDir = MODULE_DIR } = {}) {
   if (resourcesPath) return path.join(resourcesPath, 'a2-compute-browser');
   return path.resolve(moduleDir, '..', '..', '..', 'coordination', 'browser-compute');
+}
+
+// Packaged ESM source lives inside app.asar, but utilityProcess must execute the
+// worker closure that electron-builder deliberately placed in app.asar.unpacked.
+// This is the same process-boundary rule used by the Sentinel worker: never rely
+// on an archive path being executable merely because the parent can import it.
+export function resolveComputeBridgeWorkerPath(candidatePath, existsSyncImpl = ((p) => fsSync.existsSync(p))) {
+  const candidate = String(candidatePath || '');
+  for (const sep of [path.sep, '/']) {
+    const marker = `${sep}app.asar${sep}`;
+    if (candidate.includes(marker)) {
+      const unpacked = candidate.split(marker).join(`${sep}app.asar.unpacked${sep}`);
+      if (existsSyncImpl(unpacked)) return unpacked;
+    }
+  }
+  return candidate;
 }
 
 export function classifyComputeBridgeFailure(error) {
@@ -141,7 +158,7 @@ export class ComputeBridgeClient {
     autoStartPollMs = 100,
     launchBridge = null,
     runtimeRoot = null,
-    workerPath = path.join(MODULE_DIR, 'compute-bridge-worker.cjs'),
+    workerPath = resolveComputeBridgeWorkerPath(path.join(MODULE_DIR, 'compute-bridge-worker.cjs')),
   } = {}) {
     this.manifestPath = manifestPath;
     this.fetchImpl = fetchImpl;
@@ -313,8 +330,11 @@ export class ComputeBridgeClient {
     return Object.freeze({
       ...observed,
       automatic_remediation: true,
-      remediation: observed.available
-        ? (observed.transport === 'NATIVE_RPC' ? 'NATIVE_RPC_ATTACH' : 'BUNDLED_DAEMON_AUTOSTART')
+      // A newly launched daemon exposes its native endpoint before its optional
+      // HTTP manifest. Observing that native endpoint is still proof of this
+      // bounded autostart, not evidence that an unrelated owner was attached.
+      remediation: observed.available && launchError && observed.transport === 'NATIVE_RPC'
+        ? 'NATIVE_RPC_ATTACH'
         : 'BUNDLED_DAEMON_AUTOSTART',
       remediation_error: launchError ? String(launchError?.message || launchError).slice(0, 500) : null,
       authority_effect: false,
@@ -341,6 +361,7 @@ export const COMPUTE_BRIDGE_POLICY = Object.freeze({
   token_exposed_to_renderer: false,
   native_attach_read_only: true,
   bundled_daemon_autostart: true,
+  packaged_worker_resolved_from_asar_to_unpacked: true,
   native_attach_precedes_autostart: true,
   second_daemon_started_for_recovery: false,
   autostart_recoverable_states: [...AUTOSTART_RECOVERABLE_STATES].sort(),
