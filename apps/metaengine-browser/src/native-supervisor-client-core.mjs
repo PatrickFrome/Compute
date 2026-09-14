@@ -1,5 +1,6 @@
 import {
   NativeSupervisorClient as UnwiredNativeSupervisorClient,
+  NATIVE_SUPERVISOR_RUNTIME_PATH,
   sendBootstrapHeartbeat as sendBootstrapHeartbeatBase,
 } from './native-supervisor-client-core-base.mjs';
 import { createNativeGuardianDeveloperEmergencyUpdateController } from './developer-emergency-update-native-controller.mjs';
@@ -9,6 +10,9 @@ export * from './native-supervisor-client-core-base.mjs';
 const DEV_RELEASE_VERSION = /^\d+\.\d+\.\d+-dev\.\d+\.1$/;
 const STATE_ROUTE_SUFFIX = '/v1/state';
 const HEARTBEAT_ROUTE_SUFFIX = '/v1/heartbeat';
+const BATCH_WAIT_ROUTE_SUFFIX = '/v1/commands/wait-batch';
+const SINGLE_NEXT_ROUTE_SUFFIX = '/v1/commands/next';
+const TRANSIENT_HTTP_STATUSES = new Set([502, 503, 504]);
 
 function hasOwn(value, key) {
   return Object.prototype.hasOwnProperty.call(value, key);
@@ -36,7 +40,98 @@ export function nativeSupervisorHeartbeatTarget(target, bodyText) {
   return `${value.slice(0, -STATE_ROUTE_SUFFIX.length)}${HEARTBEAT_ROUTE_SUFFIX}`;
 }
 
-export function createNativeSupervisorHeartbeatTransport({ identity, fetchImpl } = {}) {
+async function transientStateHeartbeatFallback({ response, target, init, identity, rawFetch, enabled }) {
+  if (enabled !== true
+    || !response
+    || !TRANSIENT_HTTP_STATUSES.has(response.status)
+    || typeof rawFetch !== 'function'
+    || !identity
+    || typeof identity.deviceHeaders !== 'function') return response;
+
+  const requestTarget = String(target || '');
+  if (!requestTarget.endsWith(STATE_ROUTE_SUFFIX)) return response;
+  if (String(init?.method || 'GET').toUpperCase() !== 'POST') return response;
+
+  const bodyText = String(init?.body || '');
+  try { JSON.parse(bodyText); } catch { return response; }
+
+  const fallbackPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${HEARTBEAT_ROUTE_SUFFIX}`;
+  const fallbackTarget = `${requestTarget.slice(0, -STATE_ROUTE_SUFFIX.length)}${HEARTBEAT_ROUTE_SUFFIX}`;
+  try {
+    const fallbackHeaders = await identity.deviceHeaders('POST', fallbackPath, bodyText);
+    const fallbackResponse = await rawFetch(fallbackTarget, {
+      ...init,
+      method: 'POST',
+      headers: fallbackHeaders,
+      body: bodyText,
+    });
+    if (fallbackResponse?.status !== 202) return response;
+    const fallbackPayload = await fallbackResponse.json().catch(() => null);
+    if (!fallbackPayload || fallbackPayload.accepted !== true) return response;
+    return new Response(JSON.stringify({
+      ...fallbackPayload,
+      transient_state_heartbeat_fallback: true,
+      authority_effect: false,
+    }), {
+      status: 202,
+      headers: { 'content-type': 'application/json' },
+    });
+  } catch {
+    return response;
+  }
+}
+
+async function transientBatchGatewayFallback({ response, target, init, identity, rawFetch, enabled }) {
+  if (enabled !== true
+    || !response
+    || !TRANSIENT_HTTP_STATUSES.has(response.status)
+    || typeof rawFetch !== 'function'
+    || !identity
+    || typeof identity.deviceHeaders !== 'function') return response;
+
+  const requestTarget = String(target || '');
+  if (!requestTarget.endsWith(BATCH_WAIT_ROUTE_SUFFIX)) return response;
+  if (String(init?.method || 'GET').toUpperCase() !== 'POST') return response;
+
+  let batchPayload;
+  try { batchPayload = JSON.parse(String(init?.body || '')); } catch { return response; }
+  const supervisorMode = String(batchPayload?.supervisor_mode || '').trim();
+  if (!supervisorMode) return response;
+
+  const fallbackBodyText = JSON.stringify({ supervisor_mode: supervisorMode });
+  const fallbackPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${SINGLE_NEXT_ROUTE_SUFFIX}`;
+  const fallbackTarget = `${requestTarget.slice(0, -BATCH_WAIT_ROUTE_SUFFIX.length)}${SINGLE_NEXT_ROUTE_SUFFIX}`;
+  try {
+    const fallbackHeaders = await identity.deviceHeaders('POST', fallbackPath, fallbackBodyText);
+    const fallbackResponse = await rawFetch(fallbackTarget, {
+      ...init,
+      method: 'POST',
+      headers: fallbackHeaders,
+      body: fallbackBodyText,
+    });
+    if (!fallbackResponse?.ok) return response;
+    const fallbackPayload = await fallbackResponse.json().catch(() => null);
+    if (!fallbackPayload || !hasOwn(fallbackPayload, 'command')) return response;
+    return new Response(JSON.stringify({
+      commands: fallbackPayload.command ? [fallbackPayload.command] : [],
+      transport_delivery_is_authority: false,
+      transient_batch_gateway_fallback: true,
+      authority_effect: false,
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  } catch {
+    return response;
+  }
+}
+
+export function createNativeSupervisorHeartbeatTransport({
+  identity,
+  fetchImpl,
+  transientStateHeartbeatFallback: stateFallbackEnabled = true,
+  transientBatchGatewayFallback: batchGatewayFallbackEnabled = true,
+} = {}) {
   const rawFetch = fetchImpl ?? globalThis.fetch;
   const transportIdentity = identity && typeof identity.deviceHeaders === 'function'
     ? new Proxy(identity, {
@@ -54,7 +149,27 @@ export function createNativeSupervisorHeartbeatTransport({ identity, fetchImpl }
     })
     : identity;
   const transportFetch = typeof rawFetch === 'function'
-    ? (url, init = {}) => rawFetch(nativeSupervisorHeartbeatTarget(url, init?.body), init)
+    ? async (url, init = {}) => {
+      const target = nativeSupervisorHeartbeatTarget(url, init?.body);
+      const response = await rawFetch(target, init);
+      const stateRecovered = await transientStateHeartbeatFallback({
+        response,
+        target,
+        init,
+        identity,
+        rawFetch,
+        enabled: stateFallbackEnabled !== false,
+      });
+      if (stateRecovered !== response) return stateRecovered;
+      return transientBatchGatewayFallback({
+        response,
+        target,
+        init,
+        identity,
+        rawFetch,
+        enabled: batchGatewayFallbackEnabled !== false,
+      });
+    }
     : rawFetch;
   return Object.freeze({ identity: transportIdentity, fetchImpl: transportFetch });
 }
@@ -66,6 +181,8 @@ export async function sendBootstrapHeartbeat(options = {}) {
   const heartbeatTransport = createNativeSupervisorHeartbeatTransport({
     identity: options.identity,
     fetchImpl: options.fetchImpl ?? globalThis.fetch,
+    transientStateHeartbeatFallback: false,
+    transientBatchGatewayFallback: false,
   });
   return sendBootstrapHeartbeatBase({
     ...options,
@@ -86,6 +203,13 @@ export async function sendBootstrapHeartbeat(options = {}) {
  * compatibility transport shim: the proven core can keep constructing its bounded
  * heartbeat projections while the signed path and HTTP target both move atomically
  * from /v1/state to /v1/heartbeat. Ordinary state snapshots stay on /v1/state.
+ *
+ * Transient gateway recovery is intentionally independent from the core's
+ * legacySingleLeaseFallback option. Production requires batch transport in steady
+ * state, but a 502/503/504 from the wait proxy may recover one cycle through the
+ * already authenticated single-lease endpoint. The core never marks batch transport
+ * unavailable, so the next cycle probes wait-batch again. HTTP 500 and other failures
+ * remain visible.
  */
 export class NativeSupervisorClient extends UnwiredNativeSupervisorClient {
   constructor(options = {}) {
@@ -105,6 +229,8 @@ export class NativeSupervisorClient extends UnwiredNativeSupervisorClient {
     const heartbeatTransport = createNativeSupervisorHeartbeatTransport({
       identity,
       fetchImpl: options.fetchImpl ?? globalThis.fetch,
+      transientStateHeartbeatFallback: options.transientStateHeartbeatFallback !== false,
+      transientBatchGatewayFallback: options.transientBatchGatewayFallback !== false,
     });
 
     super({
