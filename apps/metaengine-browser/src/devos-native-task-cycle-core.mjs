@@ -537,6 +537,7 @@ export class DevOsNativeTaskCycle {
             tab_id: lease.tab_id,
             role: preReady.composer.role,
             accessible_name: preReady.composer.name,
+            semantic_ref: preReady.composer.semantic_ref,
             text: prompt,
             replace_existing: true,
             submit_after_type: false,
@@ -588,6 +589,7 @@ export class DevOsNativeTaskCycle {
             tab_id: lease.tab_id,
             role: typedReady.send_control.role,
             accessible_name: typedReady.send_control.name,
+            semantic_ref: typedReady.send_control.semantic_ref,
           },
         });
         await journal?.markDeliveryPending(effectBinding, {

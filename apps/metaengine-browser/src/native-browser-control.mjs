@@ -12,8 +12,14 @@ import {
 } from './native-effect-binding.mjs';
 import {
   assertNativeEffectRuntimeBindingCurrent,
+  latestNativeEffectRuntimeObservationForTarget,
+  projectNativeRuntimeStateRevision,
   recordNativeEffectRuntimeObservation,
 } from './native-effect-runtime-observation.mjs';
+import {
+  assertNativeSemanticRefCurrent,
+  buildNativeSemanticRef,
+} from './native-semantic-ref.mjs';
 import { resolveExactWebContentsView } from './browser-webcontents-tab-index.mjs';
 import { withTemporaryDetachedCaptureSurface } from './browser-detached-capture-surface.mjs';
 
@@ -53,9 +59,29 @@ async function withDebugger(webContents, fn) {
   return withPersistentBrowserDebugger(webContents, fn);
 }
 
-function uniqueSemanticTargets(nodes = []) {
+function semanticNodeFrameIds(nodes = []) {
+  const byId = new Map(nodes.map((node) => [String(node?.nodeId || ''), node]));
+  const resolved = new Map();
+  const resolving = new Set();
+  const frameFor = (node) => {
+    const nodeId = String(node?.nodeId || '');
+    if (resolved.has(nodeId)) return resolved.get(nodeId);
+    if (!nodeId || resolving.has(nodeId)) return null;
+    resolving.add(nodeId);
+    const direct = clip(node?.frameId, 192) || null;
+    const inherited = direct || frameFor(byId.get(String(node?.parentId || '')));
+    resolving.delete(nodeId);
+    resolved.set(nodeId, inherited);
+    return inherited;
+  };
+  for (const node of nodes) frameFor(node);
+  return resolved;
+}
+
+function uniqueSemanticTargets(nodes = [], { semanticRefContext = null } = {}) {
   const candidates = [];
   const counts = new Map();
+  const frameIds = semanticNodeFrameIds(nodes);
   for (const node of nodes) {
     if (node?.ignored === true) continue;
     const role = axValue(node, 'role').toLowerCase();
@@ -64,7 +90,24 @@ function uniqueSemanticTargets(nodes = []) {
     if (!SAFE_ROLES.has(role) || !name || !Number.isInteger(backendNodeId) || backendNodeId <= 0) continue;
     const key = `${role}\u0000${name}`;
     counts.set(key, Number(counts.get(key) || 0) + 1);
-    const row = { role, name: clip(name, 240), backend_node_id: backendNodeId };
+    const frameId = frameIds.get(String(node?.nodeId || '')) || null;
+    const row = { role, name: clip(name, 240), backend_node_id: backendNodeId, frame_id: frameId };
+    if (
+      semanticRefContext
+      && frameId
+      && frameId === semanticRefContext.frameId
+    ) {
+      row.semantic_ref = buildNativeSemanticRef({
+        stateRevisionId: semanticRefContext.stateRevisionId,
+        targetId: semanticRefContext.targetId,
+        runtimeTargetId: semanticRefContext.runtimeTargetId,
+        frameId,
+        backendNodeId,
+        executionContextUniqueId: semanticRefContext.executionContextUniqueId,
+        role,
+        name: row.name,
+      });
+    }
     if (TEXT_INPUT_ROLES.has(role)) {
       const value = axRawValue(node, 'value');
       row.value_length = value.length;
@@ -174,7 +217,11 @@ export async function captureSemanticFrame(webContents) {
     const viewport = metrics?.cssVisualViewport || metrics?.visualViewport || null;
     const capturedAt = new Date().toISOString();
     const url = clip(webContents.getURL?.() || '', 1200);
-    const runtime = dbg.bindingIdentity?.() || null;
+    let runtime = dbg.bindingIdentity?.() || null;
+    if (runtime && (!runtime.main_frame_id || !runtime.main_execution_context_unique_id)) {
+      await new Promise((resolve) => setImmediate(resolve));
+      runtime = dbg.bindingIdentity?.() || runtime;
+    }
     let runtimeObservation = null;
     if (runtime) {
       try {
@@ -190,10 +237,23 @@ export async function captureSemanticFrame(webContents) {
             attachment_generation: runtime.attachment_generation,
             document_generation: runtime.document_generation,
             binding_generation: runtime.binding_generation,
+            semantic_generation: runtime.semantic_generation,
           },
         });
       } catch {}
     }
+    const semanticRefContext = runtimeObservation
+      && runtime?.main_frame_id
+      && runtime?.main_execution_context_unique_id
+      ? {
+          stateRevisionId: runtimeObservation.state_revision_id,
+          targetId: identity.target_id,
+          runtimeTargetId: runtimeObservation.runtime_binding.runtime_target_id,
+          frameId: runtime.main_frame_id,
+          executionContextUniqueId: runtime.main_execution_context_unique_id,
+        }
+      : null;
+    const semanticTargets = uniqueSemanticTargets(nodes, { semanticRefContext });
     return {
       schema: 'metaengine.native-browser.perception.v1',
       captured_at: capturedAt,
@@ -201,7 +261,9 @@ export async function captureSemanticFrame(webContents) {
       target_id: identity.target_id,
       url,
       title: clip(webContents.getTitle?.() || '', 240),
-      semantic_targets: uniqueSemanticTargets(nodes),
+      semantic_targets: semanticTargets,
+      semantic_refs_issued: semanticTargets.filter((row) => row.semantic_ref).length,
+      semantic_ref_context_complete: semanticRefContext != null,
       semantic_input_values_exposed: false,
       semantic_input_value_hashes: true,
       text_excerpt: textExcerpt(nodes),
@@ -214,6 +276,9 @@ export async function captureSemanticFrame(webContents) {
       } : null,
       runtime_binding_observed: runtimeObservation != null,
       runtime_observation_id: runtimeObservation?.observation_id || null,
+      state_revision_id: runtimeObservation?.state_revision_id || null,
+      runtime_main_frame_id: runtime?.main_frame_id || null,
+      runtime_execution_context_unique_id: runtime?.main_execution_context_unique_id || null,
       runtime_binding_generation: runtimeObservation?.runtime_binding?.binding_generation || null,
       runtime_document_generation: runtimeObservation?.runtime_binding?.document_generation || null,
       authority_effect: false,
@@ -221,7 +286,51 @@ export async function captureSemanticFrame(webContents) {
   });
 }
 
-async function exactTarget(dbg, roleRaw, nameRaw) {
+function assertCurrentSemanticRef(webContents, dbg, ref) {
+  if (!ref) throw new Error('native_semantic_ref_required');
+  const identity = nativeBrowserTargetIdentity(webContents);
+  const runtime = dbg.bindingIdentity?.() || null;
+  const latest = latestNativeEffectRuntimeObservationForTarget({ target_id: identity.target_id });
+  if (!runtime || !latest || !runtime.main_frame_id || !runtime.main_execution_context_unique_id) {
+    throw new Error('native_semantic_ref_stale');
+  }
+  const currentRevision = projectNativeRuntimeStateRevision({
+    process_incarnation_id: identity.process_incarnation_id,
+    target_id: identity.target_id,
+    document_url_sha256: sha256(clip(webContents.getURL?.() || '', 1200)),
+    runtime_binding: {
+      web_contents_id: runtime.web_contents_id,
+      renderer_pid: runtime.os_pid,
+      runtime_target_id: runtime.target_id,
+      attachment_generation: runtime.attachment_generation,
+      document_generation: runtime.document_generation,
+      binding_generation: runtime.binding_generation,
+      semantic_generation: runtime.semantic_generation,
+    },
+  });
+  if (latest.state_revision_id !== currentRevision.revision_id) throw new Error('native_semantic_ref_stale');
+  return assertNativeSemanticRefCurrent({
+    ref,
+    stateRevisionId: currentRevision.revision_id,
+    targetId: identity.target_id,
+    runtimeTargetId: runtime.target_id,
+    frameId: runtime.main_frame_id,
+    backendNodeId: ref.backend_node_id,
+    executionContextUniqueId: runtime.main_execution_context_unique_id,
+  });
+}
+
+async function exactTarget(webContents, dbg, roleRaw, nameRaw, semanticRef) {
+  if (semanticRef) {
+    const ref = assertCurrentSemanticRef(webContents, dbg, semanticRef);
+    return {
+      role: String(ref?.evidence?.role || roleRaw || '').trim().toLowerCase(),
+      name: String(ref?.evidence?.name || nameRaw || '').trim(),
+      backend_node_id: ref.backend_node_id,
+      frame_id: ref.frame_id,
+      semantic_ref: ref,
+    };
+  }
   const tree = await dbg.sendCommand('Accessibility.getFullAXTree');
   const role = String(roleRaw || '').trim().toLowerCase();
   const name = String(nameRaw || '').trim();
@@ -260,6 +369,7 @@ function assertCurrentEffectRuntime(webContents, dbg, binding) {
       attachment_generation: runtime.attachment_generation,
       document_generation: runtime.document_generation,
       binding_generation: runtime.binding_generation,
+      semantic_generation: runtime.semantic_generation,
     },
   });
 }
@@ -303,16 +413,22 @@ export async function executeSemanticCommand(webContents, command) {
 
     const role = command?.payload?.role;
     const name = command?.payload?.accessible_name;
-    const target = await exactTarget(dbg, role, name);
+    const semanticRef = command?.payload?.semantic_ref || null;
+    if (!semanticRef) throw new Error('native_semantic_ref_required');
+    const target = await exactTarget(webContents, dbg, role, name, semanticRef);
 
     if (action === 'SEMANTIC_FOCUS') {
+      assertCurrentSemanticRef(webContents, dbg, semanticRef);
       assertCurrentEffectRuntime(webContents, dbg, effectBinding);
       await dbg.sendCommand('DOM.focus', { backendNodeId: target.backend_node_id });
       return { action, target, authority_effect: true };
     }
 
     if (action === 'TYPED_CLICK') {
-      const point = await clickBackendNode(dbg, target.backend_node_id, () => assertCurrentEffectRuntime(webContents, dbg, effectBinding));
+      const point = await clickBackendNode(dbg, target.backend_node_id, () => {
+        assertCurrentSemanticRef(webContents, dbg, semanticRef);
+        assertCurrentEffectRuntime(webContents, dbg, effectBinding);
+      });
       return { action, target, point, authority_effect: true };
     }
 
@@ -322,13 +438,16 @@ export async function executeSemanticCommand(webContents, command) {
       const submitAfterType = command?.payload?.submit_after_type === true;
       if (submitAfterType && !isExactChatGptComposer(target, command)) throw new Error('native_semantic_submit_requires_exact_chatgpt_composer');
       const preUrl = clip(webContents.getURL?.() || '', 1200);
+      assertCurrentSemanticRef(webContents, dbg, semanticRef);
       assertCurrentEffectRuntime(webContents, dbg, effectBinding);
       await dbg.sendCommand('DOM.focus', { backendNodeId: target.backend_node_id });
       if (command?.payload?.replace_existing !== false) {
+        assertCurrentSemanticRef(webContents, dbg, semanticRef);
         assertCurrentEffectRuntime(webContents, dbg, effectBinding);
         await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'a', code:'KeyA', modifiers:2 });
         await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'a', code:'KeyA', modifiers:2 });
       }
+      assertCurrentSemanticRef(webContents, dbg, semanticRef);
       assertCurrentEffectRuntime(webContents, dbg, effectBinding);
       await dbg.sendCommand('Input.insertText', { text });
       if (!submitAfterType) {
@@ -340,6 +459,7 @@ export async function executeSemanticCommand(webContents, command) {
       if (sendTargets.length !== 1) throw new Error(sendTargets.length ? `native_semantic_send_target_ambiguous:${sendTargets.length}` : 'native_semantic_send_target_not_found');
       const outcomeLatch = openChatGptSubmitOutcomeLatch(dbg, webContents, { preUrl });
       try {
+        assertCurrentSemanticRef(webContents, dbg, semanticRef);
         assertCurrentEffectRuntime(webContents, dbg, effectBinding);
         await dbg.sendCommand('Input.dispatchKeyEvent', {
           type:'rawKeyDown', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, nativeVirtualKeyCode:13,
@@ -508,8 +628,69 @@ async function capturePageWithBoundedSurfaceReadiness(webContents, {
   throw captureSurfaceUnavailableError(attempts, lastError);
 }
 
+async function visualStateRevisionSnapshot(webContents) {
+  try {
+    const identity = nativeBrowserTargetIdentity(webContents);
+    return await withDebugger(webContents, async (dbg) => {
+      let runtime = dbg.bindingIdentity?.() || null;
+      if (runtime && !runtime.main_frame_id) {
+        await new Promise((resolve) => setImmediate(resolve));
+        runtime = dbg.bindingIdentity?.() || runtime;
+      }
+      if (!runtime?.main_frame_id) return null;
+      const revision = projectNativeRuntimeStateRevision({
+        process_incarnation_id: identity.process_incarnation_id,
+        target_id: identity.target_id,
+        document_url_sha256: sha256(clip(webContents.getURL?.() || '', 1200)),
+        runtime_binding: {
+          web_contents_id: runtime.web_contents_id,
+          renderer_pid: runtime.os_pid,
+          runtime_target_id: runtime.target_id,
+          attachment_generation: runtime.attachment_generation,
+          document_generation: runtime.document_generation,
+          binding_generation: runtime.binding_generation,
+          semantic_generation: runtime.semantic_generation,
+        },
+      });
+      return Object.freeze({
+        target_id: identity.target_id,
+        runtime_target_id: runtime.target_id,
+        frame_id: runtime.main_frame_id,
+        state_revision_id: revision.revision_id,
+      });
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function sealRevisionBoundCapture(webContents, before, receipt) {
+  const after = await visualStateRevisionSnapshot(webContents);
+  if (before && (!after
+    || before.target_id !== after.target_id
+    || before.runtime_target_id !== after.runtime_target_id
+    || before.frame_id !== after.frame_id
+    || before.state_revision_id !== after.state_revision_id)) {
+    const error = new Error('native_capture_state_revision_changed');
+    error.code = 'NATIVE_CAPTURE_STATE_REVISION_CHANGED';
+    error.automatic_retry_allowed = false;
+    throw error;
+  }
+  return {
+    ...receipt,
+    target_id: before?.target_id || null,
+    runtime_target_id: before?.runtime_target_id || null,
+    frame_id: before?.frame_id || null,
+    state_revision_id: before?.state_revision_id || null,
+    revision_bound: Boolean(before && after),
+    revision_conflict_policy: 'DISCARD_REOBSERVE_NO_AUTOMATIC_RETRY',
+    automatic_retry_allowed: false,
+  };
+}
+
 export async function captureViewThumbnail(webContents, options = {}) {
   if (!webContents || webContents.isDestroyed?.()) throw new Error('native_capture_webcontents_unavailable');
+  const revisionBefore = await visualStateRevisionSnapshot(webContents);
   const {
     surfaceExpected = true,
     withDebuggerImpl = withDebugger,
@@ -560,7 +741,7 @@ export async function captureViewThumbnail(webContents, options = {}) {
         releaseDebuggerImpl,
       });
       const jpeg = fallback.jpeg;
-      return {
+      return sealRevisionBoundCapture(webContents, revisionBefore, {
         schema: 'metaengine.native-browser.capture-thumbnail.v1',
         captured_at: new Date().toISOString(),
         url: clip(webContents.getURL?.() || '', 1200),
@@ -580,7 +761,7 @@ export async function captureViewThumbnail(webContents, options = {}) {
         sha256: crypto.createHash('sha256').update(jpeg).digest('hex'),
         jpeg_base64: jpeg.toString('base64'),
         authority_effect: false,
-      };
+      });
     } catch (fallbackError) {
       const error = new Error(`${surfaceError?.message || 'native_capture_surface_unavailable'}:cdp_fallback:${clip(fallbackError?.message || fallbackError, 160)}`);
       error.code = 'NATIVE_CAPTURE_SURFACE_UNAVAILABLE';
@@ -600,7 +781,7 @@ export async function captureViewThumbnail(webContents, options = {}) {
   }
   if (!Buffer.isBuffer(jpeg) || jpeg.byteLength === 0) throw new Error('native_capture_thumbnail_empty');
   if (jpeg.byteLength > 150000) throw new Error('native_capture_thumbnail_too_large');
-  return {
+  return sealRevisionBoundCapture(webContents, revisionBefore, {
     schema: 'metaengine.native-browser.capture-thumbnail.v1',
     captured_at: new Date().toISOString(),
     url: clip(webContents.getURL?.() || '', 1200),
@@ -622,5 +803,5 @@ export async function captureViewThumbnail(webContents, options = {}) {
     sha256: crypto.createHash('sha256').update(jpeg).digest('hex'),
     jpeg_base64: jpeg.toString('base64'),
     authority_effect: false,
-  };
+  });
 }

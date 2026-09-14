@@ -269,7 +269,7 @@ export class SupervisorLifecycleRuntime {
     if (row.terminal_ready === true && composerMatches(frame, message) && this.#canActuate() === true) {
       const send = uniqueChatGptControl(frame, 'SEND');
       if (!send) return false;
-      await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: String(tab.tab_id), role: 'button', accessible_name: send.name }, platform: null });
+      await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: String(tab.tab_id), role: 'button', accessible_name: send.name, semantic_ref: send.semantic_ref }, platform: null });
       const readback = await this.#observeSendReadback(tab.tab_id, pending.wake_id);
       if (readback.ok) {
         await this.#keepalive.resolveAmbiguous({ observed_sent: true });
@@ -389,6 +389,7 @@ export class SupervisorLifecycleRuntime {
         tab_id: tabId,
         role: 'textbox',
         accessible_name: box.name,
+        semantic_ref: box.semantic_ref,
         text: message,
         replace_existing: true,
         submit_after_type: true,
@@ -410,7 +411,7 @@ export class SupervisorLifecycleRuntime {
     // submit effect state. Current Browser executors never take this branch.
     const send = uniqueChatGptControl(await this.#capture(tabId), 'SEND');
     if (!send) throw new Error('supervisor_send_not_unique');
-    await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: tabId, role: 'button', accessible_name: send.name }, platform: null });
+    await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: tabId, role: 'button', accessible_name: send.name, semantic_ref: send.semantic_ref }, platform: null });
     const readback = await this.#observeSendReadback(tabId, positiveMarker);
     return readback.ok ? { ok: true, clicked, observed: readback.observed } : { ok: false, reason: 'SEND_WITHOUT_POSITIVE_READBACK', clicked };
   }
@@ -438,7 +439,7 @@ export class SupervisorLifecycleRuntime {
   async #continueExisting(tabId, frame) {
     const button = uniqueChatGptControl(frame, 'CONTINUE');
     if (!button) return false;
-    await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: tabId, role: 'button', accessible_name: button.name }, platform: null });
+    await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: tabId, role: 'button', accessible_name: button.name, semantic_ref: button.semantic_ref }, platform: null });
     this.#sessionMonitor.markRecovery(tabId, 'CONTINUE_GENERATION');
     this.#lastRecovery = { action: 'CONTINUE_EXISTING', tab_id: String(tabId), at: new Date().toISOString(), authority_effect: false };
     return true;
@@ -597,7 +598,7 @@ export class SupervisorLifecycleRuntime {
     if (!attempt.tab_id) await this.#keepalive.bindRolloverAttemptTab(tab.tab_id).catch(() => {});
     const send = uniqueChatGptControl(frame, 'SEND');
     if (!send) return false;
-    await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: String(tab.tab_id), role: 'button', accessible_name: send.name }, platform: null });
+    await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: String(tab.tab_id), role: 'button', accessible_name: send.name, semantic_ref: send.semantic_ref }, platform: null });
     const readback = await this.#observeSendReadback(tab.tab_id, attempt.attempt_id);
     if (readback.ok) return this.#bindRecoveredRollover(tab.tab_id, readback.observed);
     this.#lastRecovery = {

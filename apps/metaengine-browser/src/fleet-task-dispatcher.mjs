@@ -105,6 +105,7 @@ export async function dispatchFleetTask({
       payload: {
         role: composer.role,
         accessible_name: composer.name,
+        semantic_ref: composer.semantic_ref,
         text: task.prompt,
         replace_existing: true,
         submit_after_type: true,

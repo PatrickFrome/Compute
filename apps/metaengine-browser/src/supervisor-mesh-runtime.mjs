@@ -137,7 +137,7 @@ export class SupervisorMeshRuntime {
       this.#assertDeliveryFenceCurrent(delivery);
       const typedResult = await this.#execute({
         action: 'SEMANTIC_TYPE',
-        payload: { tab_id: tabId, role: 'textbox', accessible_name: textbox.name, text: delivery.message, replace_existing: true },
+        payload: { tab_id: tabId, role: 'textbox', accessible_name: textbox.name, semantic_ref: textbox.semantic_ref, text: delivery.message, replace_existing: true },
         platform: 'CHATGPT',
       });
       typed = true;
@@ -149,7 +149,7 @@ export class SupervisorMeshRuntime {
       if (!send) throw new Error('supervisor_mesh_send_not_unique');
       this.#assertDeliveryFenceCurrent(delivery);
       clicked = true;
-      await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: tabId, role: 'button', accessible_name: send.name }, platform: 'CHATGPT' });
+      await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: tabId, role: 'button', accessible_name: send.name, semantic_ref: send.semantic_ref }, platform: 'CHATGPT' });
       for (let i = 0; i < 6; i += 1) {
         await sleep(500);
         const observed = await this.#capture(tabId);

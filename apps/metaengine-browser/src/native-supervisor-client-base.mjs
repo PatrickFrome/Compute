@@ -84,6 +84,7 @@ function perceptionTransportProjection(frame) {
     process_incarnation_id: frame.process_incarnation_id ? clipped(frame.process_incarnation_id, 160) : null,
     target_id: frame.target_id ? clipped(frame.target_id, 160) : null,
     runtime_observation_id: frame.runtime_observation_id ? clipped(frame.runtime_observation_id, 160) : null,
+    state_revision_id: frame.state_revision_id ? clipped(frame.state_revision_id, 160) : null,
     url: clipped(frame.url, 1200),
     title: clipped(frame.title, 240),
     viewport: frame.viewport && typeof frame.viewport === 'object' ? stableValue(frame.viewport) : null,
@@ -92,6 +93,10 @@ function perceptionTransportProjection(frame) {
       name: clipped(row?.name, 160),
       disabled: row?.disabled === true,
       backend_node_id: Number.isSafeInteger(Number(row?.backend_node_id)) ? Number(row.backend_node_id) : null,
+      frame_id: row?.frame_id ? clipped(row.frame_id, 192) : null,
+      semantic_ref: row?.semantic_ref && typeof row.semantic_ref === 'object'
+        ? stableValue(row.semantic_ref)
+        : null,
       value_sha256: /^[a-f0-9]{64}$/i.test(String(row?.value_sha256 || '')) ? String(row.value_sha256).toLowerCase() : null,
       authority_effect: false,
     })),
@@ -479,7 +484,16 @@ export class NativeSupervisorClient {
       reconcile = await reconcileRestoredGeneratingChats({
         bindings,
         captureTab: async (tabId) => this.#executeCommand({ action: 'CAPTURE', payload: { tab_id: String(tabId) }, platform: 'CHATGPT' }),
-        clickControl: async (tabId, accessibleName) => this.#executeCommand({ action: 'TYPED_CLICK', payload: { tab_id: String(tabId), role: 'button', accessible_name: String(accessibleName) }, platform: 'CHATGPT' }),
+        clickControl: async (tabId, control) => this.#executeCommand({
+          action: 'TYPED_CLICK',
+          payload: {
+            tab_id: String(tabId),
+            role: 'button',
+            accessible_name: String(control?.name || ''),
+            semantic_ref: control?.semantic_ref,
+          },
+          platform: 'CHATGPT',
+        }),
       });
       failedTabs += Number(reconcile.unresolved_count || 0);
     }

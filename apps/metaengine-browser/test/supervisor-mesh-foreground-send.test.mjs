@@ -17,7 +17,7 @@ test('mesh recovery reuses the exact native supervisor foreground send boundary'
   const selectAt = guard.indexOf("action: 'SELECT_TAB'");
   const selectedReadbackAt = guard.indexOf('exactSelectedTab(state, tabId)', selectAt);
   const viewportAt = guard.indexOf('positiveViewport(activated)', selectedReadbackAt);
-  const clickAt = guard.indexOf('return await executeCommand(command)', viewportAt);
+  const clickAt = guard.indexOf('return await executeCommand({', viewportAt);
   assert.ok(selectAt >= 0 && selectedReadbackAt > selectAt && viewportAt > selectedReadbackAt && clickAt > viewportAt,
     'mesh Send must inherit SELECT_TAB -> selected readback -> viewport -> one click ordering');
 });

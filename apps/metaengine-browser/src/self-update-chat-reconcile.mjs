@@ -30,7 +30,7 @@ export async function reconcileRestoredGeneratingChats({ bindings = [], captureT
       continue;
     }
     try {
-      await clickControl(tabId, control.name);
+      await clickControl(tabId, control);
       const readback = await captureTab(tabId).catch(() => null);
       rows.push({
         tab_id: tabId,

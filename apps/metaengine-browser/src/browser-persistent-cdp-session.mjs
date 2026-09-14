@@ -29,6 +29,17 @@ function targetIdOf(webContents) {
   return exact ? clip(exact, 160) : `webcontents:${exactId(webContents)}`;
 }
 
+function rootExecutionContextUniqueId(row) {
+  if (!row.mainFrameId) return null;
+  const matches = [...row.executionContexts.values()].filter((context) => (
+    context.isDefault === true
+    && context.frameId === row.mainFrameId
+    && context.uniqueId
+  ));
+  if (matches.length !== 1) return null;
+  return matches[0].uniqueId;
+}
+
 function subtargetProjection(row) {
   return Object.freeze({
     target_id: row.targetId,
@@ -59,6 +70,8 @@ function rowProjection(row) {
     web_contents_id: row.id,
     target_id: row.targetId,
     main_frame_id: row.mainFrameId,
+    main_execution_context_unique_id: rootExecutionContextUniqueId(row),
+    execution_context_count: row.executionContexts.size,
     os_pid: Number(safeCall(row.webContents, 'getOSProcessId', 0)) || null,
     attached: row.dbg?.isAttached?.() === true,
     ready: row.ready === true,
@@ -66,6 +79,7 @@ function rowProjection(row) {
     attachment_generation: row.attachmentGeneration,
     document_generation: row.documentGeneration,
     binding_generation: row.bindingGeneration,
+    semantic_generation: row.semanticGeneration,
     subtarget_generation: row.subtargetGeneration,
     attached_at: row.attachedAt,
     last_event_at: row.lastEventAt,
@@ -104,6 +118,7 @@ function emitEnvelope(row, method, params = {}, sessionId = null, extra = {}) {
     attachment_generation: row.attachmentGeneration,
     document_generation: row.documentGeneration,
     binding_generation: row.bindingGeneration,
+    semantic_generation: row.semanticGeneration,
     subtarget_generation: row.subtargetGeneration,
     method: clip(method, 160),
     params,
@@ -244,9 +259,11 @@ export class PersistentBrowserCdpSessionPool {
       attachmentGeneration: 0,
       documentGeneration: 1,
       bindingGeneration: 0,
+      semanticGeneration: 1,
       subtargetGeneration: 0,
       subtargets: new Map(),
       subtargetBySession: new Map(),
+      executionContexts: new Map(),
       subtargetOverflowCount: 0,
       subtargetNestedAutoAttachFailures: 0,
       targetAutoAttachEnabled: false,
@@ -266,13 +283,17 @@ export class PersistentBrowserCdpSessionPool {
 
       if (!sessionId) {
         if (name === 'DOM.documentUpdated') {
+          row.executionContexts.clear();
           row.documentGeneration += 1;
           row.bindingGeneration += 1;
+          row.semanticGeneration += 1;
         } else if (name === 'Page.frameNavigated' && !params?.frame?.parentId) {
+          row.executionContexts.clear();
           row.mainFrameIdentityVersion += 1;
           row.mainFrameId = clip(params?.frame?.id, 192) || row.mainFrameId;
           row.documentGeneration += 1;
           row.bindingGeneration += 1;
+          row.semanticGeneration += 1;
         } else if (
           name === 'Page.navigatedWithinDocument'
           && row.mainFrameId
@@ -283,6 +304,35 @@ export class PersistentBrowserCdpSessionPool {
           // document revision fence so stale observations cannot survive history
           // API or fragment navigation without inventing a new binding authority.
           row.documentGeneration += 1;
+          row.semanticGeneration += 1;
+        } else if (
+          name === 'Accessibility.nodesUpdated'
+          || name === 'DOM.childNodeInserted'
+          || name === 'DOM.childNodeRemoved'
+          || name === 'DOM.attributeModified'
+          || name === 'DOM.attributeRemoved'
+          || name === 'DOM.characterDataModified'
+        ) {
+          row.semanticGeneration += 1;
+        } else if (name === 'Runtime.executionContextCreated') {
+          const contextId = Number(params?.context?.id);
+          const uniqueId = clip(params?.context?.uniqueId, 240) || null;
+          const frameId = clip(params?.context?.auxData?.frameId, 192) || null;
+          const isDefault = params?.context?.auxData?.isDefault === true;
+          if (Number.isSafeInteger(contextId) && contextId > 0 && uniqueId && frameId) {
+            row.executionContexts.set(contextId, { contextId, uniqueId, frameId, isDefault });
+          }
+        } else if (name === 'Runtime.executionContextDestroyed') {
+          const contextId = Number(params?.executionContextId);
+          const uniqueId = clip(params?.executionContextUniqueId, 240) || null;
+          if (Number.isSafeInteger(contextId) && contextId > 0) row.executionContexts.delete(contextId);
+          if (uniqueId) {
+            for (const [id, context] of row.executionContexts) {
+              if (context.uniqueId === uniqueId) row.executionContexts.delete(id);
+            }
+          }
+        } else if (name === 'Runtime.executionContextsCleared') {
+          row.executionContexts.clear();
         }
       }
 
@@ -358,6 +408,7 @@ export class PersistentBrowserCdpSessionPool {
       row.bindingGeneration += 1;
       row.mainFrameIdentityVersion += 1;
       row.mainFrameId = null;
+      row.executionContexts.clear();
       row.subtargets.clear();
       row.subtargetBySession.clear();
       row.subtargetGeneration += 1;

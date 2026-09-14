@@ -30,8 +30,9 @@ function normalizeRuntimeBinding(value = {}) {
   const attachmentGeneration = positiveInt(value?.attachment_generation);
   const documentGeneration = positiveInt(value?.document_generation);
   const bindingGeneration = positiveInt(value?.binding_generation);
+  const semanticGeneration = positiveInt(value?.semantic_generation ?? 1);
   const runtimeTargetId = clean(value?.runtime_target_id ?? value?.target_id);
-  if (!webContentsId || !rendererPid || !attachmentGeneration || !documentGeneration || !bindingGeneration) {
+  if (!webContentsId || !rendererPid || !attachmentGeneration || !documentGeneration || !bindingGeneration || !semanticGeneration) {
     throw new Error('native_effect_runtime_binding_generation_invalid');
   }
   if (!RUNTIME_TARGET_RE.test(runtimeTargetId)) throw new Error('native_effect_runtime_target_id_invalid');
@@ -42,6 +43,7 @@ function normalizeRuntimeBinding(value = {}) {
     attachment_generation: attachmentGeneration,
     document_generation: documentGeneration,
     binding_generation: bindingGeneration,
+    semantic_generation: semanticGeneration,
   });
 }
 
@@ -79,6 +81,7 @@ export function projectNativeRuntimeStateRevision({
     binding.attachment_generation,
     binding.document_generation,
     binding.binding_generation,
+    binding.semantic_generation,
     urlHash,
   ]);
   const revisionId = `rev_${crypto.createHash('sha256').update(material, 'utf8').digest('hex')}`;
@@ -93,6 +96,7 @@ export function projectNativeRuntimeStateRevision({
     attachment_generation: binding.attachment_generation,
     document_generation: binding.document_generation,
     binding_generation: binding.binding_generation,
+    semantic_generation: binding.semantic_generation,
     document_url_sha256: urlHash,
     page_data_authority: false,
     execution_authority: false,
@@ -135,6 +139,7 @@ export function recordNativeEffectRuntimeObservation({
     attachment_generation: stateRevision.attachment_generation,
     document_generation: stateRevision.document_generation,
     binding_generation: stateRevision.binding_generation,
+    semantic_generation: stateRevision.semantic_generation,
   });
 
   const observationId = newObservationId();
@@ -204,7 +209,7 @@ export function assertNativeEffectRuntimeBindingCurrent({ binding, runtime_bindi
   const current = normalizeRuntimeBinding(runtime_binding);
   const hash = clean(document_url_sha256).toLowerCase();
   if (!SHA256_RE.test(hash)) throw new Error('native_effect_runtime_document_url_hash_invalid');
-  for (const key of ['web_contents_id','renderer_pid','runtime_target_id','attachment_generation','document_generation','binding_generation']) {
+  for (const key of ['web_contents_id','renderer_pid','runtime_target_id','attachment_generation','document_generation','binding_generation','semantic_generation']) {
     if (binding[key] !== current[key]) throw new Error(`native_effect_runtime_${key}_mismatch`);
   }
   if (binding.document_url_sha256 !== hash) throw new Error('native_effect_runtime_document_url_mismatch');

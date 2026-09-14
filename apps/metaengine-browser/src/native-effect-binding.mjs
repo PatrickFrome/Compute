@@ -117,6 +117,7 @@ export function buildNativeEffectBinding({
       attachment_generation: runtime.runtime_binding.attachment_generation,
       document_generation: runtime.runtime_binding.document_generation,
       binding_generation: runtime.runtime_binding.binding_generation,
+      semantic_generation: runtime.runtime_binding.semantic_generation,
       document_url_sha256: runtime.document_url_sha256,
       runtime_observation_schema: runtime.schema,
       state_revision_id: stateRevisionId,
@@ -151,7 +152,7 @@ export function assertNativeEffectBindingMatches({ command, binding, clientId, p
   });
   const keys = ['command_id','idempotency_key','action','client_id','process_incarnation_id','tab_id','target_id','command_expires_at'];
   if (schema === NATIVE_EFFECT_BINDING_SCHEMA_V2) {
-    keys.push('runtime_observation_id','web_contents_id','renderer_pid','runtime_target_id','attachment_generation','document_generation','binding_generation','document_url_sha256','runtime_observation_schema');
+    keys.push('runtime_observation_id','web_contents_id','renderer_pid','runtime_target_id','attachment_generation','document_generation','binding_generation','semantic_generation','document_url_sha256','runtime_observation_schema');
     // state_revision_* is additive evidence on the v2 envelope. Old sealed v2
     // bindings remain readable, while every newly built binding carries and
     // verifies the deterministic revision projection.
