@@ -98,3 +98,27 @@ test('closed admission remains monotonic across unavailable readback', async () 
   assert.equal(snapshot.admission_refill_enabled, false);
   assert.equal(snapshot.admission_supervisor_enabled, false);
 });
+
+test('stale admission generations are rejected without changing the current fence', async () => {
+  const h = harness();
+  await h.keepalive.init();
+  await h.keepalive.applyAdmissionClosed(closedAdmission(31));
+
+  await assert.rejects(
+    h.keepalive.applyAdmissionOpen(openAdmission(30)),
+    /keepalive_admission_generation_floor_regression/,
+  );
+  await assert.rejects(
+    h.keepalive.applyAdmissionClosed(closedAdmission(29)),
+    /keepalive_admission_generation_floor_regression/,
+  );
+
+  const snapshot = h.keepalive.snapshot();
+  assert.equal(snapshot.admission_state, 'CLOSED');
+  assert.equal(snapshot.state, 'PARKED');
+  assert.equal(snapshot.admission_generation_floor, 31);
+  assert.equal(snapshot.admission_refill_enabled, false);
+  assert.equal(snapshot.admission_supervisor_enabled, false);
+  assert.equal(snapshot.queued_wakes.length, 0);
+  assert.equal(h.keepalive.canWake(), false);
+});
