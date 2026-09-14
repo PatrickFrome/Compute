@@ -2,7 +2,9 @@ import fs from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_MANIFEST = path.join(os.homedir(), '.a2', 'compute-bridge.json');
 const DEFAULT_NATIVE_STATE_ROOT = process.env.A2_COMPUTE_STATE_ROOT
   ? path.resolve(process.env.A2_COMPUTE_STATE_ROOT)
@@ -11,6 +13,7 @@ const NATIVE_CONTROL_TOKEN = 'control-token';
 const MAX_NATIVE_FRAME_BYTES = 1024 * 1024;
 const READ_ONLY_METHODS = new Set(['runtime.health', 'profile.list', 'context.list', 'target.list', 'target.semantic_snapshot', 'receipt.get', 'receipt.verify']);
 const NATIVE_RECOVERABLE_REASON_CODES = new Set(['MANIFEST_NOT_PRESENT', 'ECONNREFUSED', 'ECONNRESET', 'EPIPE', 'CONNECTION_REFUSED']);
+const AUTOSTART_RECOVERABLE_STATES = new Set(['STARTING', 'OFFLINE']);
 
 export const COMPUTE_HEALTH_STATES = Object.freeze({
   HEALTHY: 'HEALTHY',
@@ -43,6 +46,11 @@ export function nativeComputeRpcEndpoint(root = DEFAULT_NATIVE_STATE_ROOT, {
   return path.join(path.resolve(root), 'control.sock');
 }
 
+export function resolveBundledComputeBridgeRoot({ resourcesPath = process.resourcesPath || null, moduleDir = MODULE_DIR } = {}) {
+  if (resourcesPath) return path.join(resourcesPath, 'a2-compute-browser');
+  return path.resolve(moduleDir, '..', '..', '..', 'coordination', 'browser-compute');
+}
+
 export function classifyComputeBridgeFailure(error) {
   const message = String(error?.message || error || '').slice(0, 500);
   const code = String(error?.code || error?.cause?.code || '').toUpperCase();
@@ -67,6 +75,12 @@ function nativeRpcConnect(endpoint, requestLine, timeoutMs, connectImpl = net.cr
     let settled = false;
     let buffer = '';
     let socket;
+    const timer = setTimeout(() => {
+      const error = new Error('compute_native_rpc_timeout');
+      error.name = 'AbortError';
+      finish(reject, error);
+    }, timeoutMs);
+    timer.unref?.();
     const finish = (operation, value) => {
       if (settled) return;
       settled = true;
@@ -74,19 +88,9 @@ function nativeRpcConnect(endpoint, requestLine, timeoutMs, connectImpl = net.cr
       try { socket?.destroy(); } catch {}
       operation(value);
     };
-    const timer = setTimeout(() => {
-      const error = new Error('compute_native_rpc_timeout');
-      error.name = 'AbortError';
-      finish(reject, error);
-    }, timeoutMs);
-    timer.unref?.();
 
-    try {
-      socket = connectImpl(endpoint);
-    } catch (error) {
-      finish(reject, error);
-      return;
-    }
+    try { socket = connectImpl(endpoint); }
+    catch (error) { finish(reject, error); return; }
     socket.setNoDelay?.(true);
     socket.once('error', (error) => finish(reject, error));
     socket.once('connect', () => socket.write(`${requestLine}\n`));
@@ -108,6 +112,22 @@ function nativeRpcConnect(endpoint, requestLine, timeoutMs, connectImpl = net.cr
   });
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function launchBundledComputeBridge({ runtimeRoot, workerPath }) {
+  if (!process.versions?.electron) throw new Error('compute_bridge_autostart_requires_electron');
+  const electron = await import('electron');
+  if (!electron?.utilityProcess?.fork) throw new Error('compute_bridge_autostart_utility_process_unavailable');
+  return electron.utilityProcess.fork(workerPath, ['serve', '--bridge-port=0'], {
+    env: {
+      ...process.env,
+      METAENGINE_COMPUTE_BRIDGE_ROOT: runtimeRoot,
+    },
+  });
+}
+
 export class ComputeBridgeClient {
   constructor({
     manifestPath = process.env.METAENGINE_COMPUTE_BRIDGE_MANIFEST || DEFAULT_MANIFEST,
@@ -116,6 +136,12 @@ export class ComputeBridgeClient {
     nativeStateRoot = DEFAULT_NATIVE_STATE_ROOT,
     nativeEndpoint = null,
     nativeConnectImpl = net.createConnection,
+    autoStart = Boolean(process.versions?.electron) && process.env.METAENGINE_DISABLE_COMPUTE_BRIDGE_AUTOSTART !== '1',
+    autoStartTimeoutMs = 5000,
+    autoStartPollMs = 100,
+    launchBridge = null,
+    runtimeRoot = null,
+    workerPath = path.join(MODULE_DIR, 'compute-bridge-worker.cjs'),
   } = {}) {
     this.manifestPath = manifestPath;
     this.fetchImpl = fetchImpl;
@@ -124,6 +150,15 @@ export class ComputeBridgeClient {
     this.nativeTokenPath = path.join(this.nativeStateRoot, NATIVE_CONTROL_TOKEN);
     this.nativeEndpoint = nativeEndpoint || nativeComputeRpcEndpoint(this.nativeStateRoot);
     this.nativeConnectImpl = nativeConnectImpl;
+    this.autoStart = autoStart === true;
+    this.autoStartTimeoutMs = Math.max(250, Math.min(15000, Number(autoStartTimeoutMs) || 5000));
+    this.autoStartPollMs = Math.max(25, Math.min(1000, Number(autoStartPollMs) || 100));
+    this.launchBridge = launchBridge;
+    this.runtimeRoot = runtimeRoot || resolveBundledComputeBridgeRoot();
+    this.workerPath = workerPath;
+    this.autoStartPromise = null;
+    this.ownedBridgeProcess = null;
+    this.lastAutoStartError = null;
   }
 
   async readManifest() {
@@ -163,7 +198,7 @@ export class ComputeBridgeClient {
     return body.result;
   }
 
-  async health() {
+  async #healthOnce() {
     const generatedAt = new Date().toISOString();
     try {
       const result = await this.callReadOnly('runtime.health', {});
@@ -237,6 +272,65 @@ export class ComputeBridgeClient {
       });
     }
   }
+
+  #autostartAllowed(health) {
+    if (!this.autoStart || !AUTOSTART_RECOVERABLE_STATES.has(String(health?.state || ''))) return false;
+    if (this.launchBridge) return true;
+    return path.resolve(this.manifestPath) === path.resolve(DEFAULT_MANIFEST);
+  }
+
+  async #launchAndWaitForHealth() {
+    const launcher = this.launchBridge || launchBundledComputeBridge;
+    let launchError = null;
+    if (!this.ownedBridgeProcess) {
+      try {
+        const child = await launcher({
+          runtimeRoot: this.runtimeRoot,
+          workerPath: this.workerPath,
+          manifestPath: this.manifestPath,
+        });
+        this.ownedBridgeProcess = child || null;
+        if (child && typeof child.once === 'function') {
+          child.once('exit', () => {
+            if (this.ownedBridgeProcess === child) this.ownedBridgeProcess = null;
+          });
+        }
+      } catch (error) {
+        launchError = error;
+        this.lastAutoStartError = String(error?.message || error).slice(0, 500);
+      }
+    }
+
+    const deadline = Date.now() + this.autoStartTimeoutMs;
+    let observed = await this.#healthOnce();
+    while (!observed.available && Date.now() < deadline) {
+      await sleep(this.autoStartPollMs);
+      observed = await this.#healthOnce();
+      // If launch failed because another process already owns the daemon lock,
+      // keep probing the canonical native transport until the bounded deadline.
+      if (launchError && !/daemon_lock_held/i.test(String(launchError?.message || launchError))) break;
+    }
+    return Object.freeze({
+      ...observed,
+      automatic_remediation: true,
+      remediation: observed.available
+        ? (observed.transport === 'NATIVE_RPC' ? 'NATIVE_RPC_ATTACH' : 'BUNDLED_DAEMON_AUTOSTART')
+        : 'BUNDLED_DAEMON_AUTOSTART',
+      remediation_error: launchError ? String(launchError?.message || launchError).slice(0, 500) : null,
+      authority_effect: false,
+    });
+  }
+
+  async health() {
+    const initial = await this.#healthOnce();
+    if (!this.#autostartAllowed(initial)) return initial;
+    if (!this.autoStartPromise) {
+      this.autoStartPromise = this.#launchAndWaitForHealth().finally(() => {
+        this.autoStartPromise = null;
+      });
+    }
+    return this.autoStartPromise;
+  }
 }
 
 export const COMPUTE_BRIDGE_POLICY = Object.freeze({
@@ -246,5 +340,8 @@ export const COMPUTE_BRIDGE_POLICY = Object.freeze({
   raw_cdp_exposed: false,
   token_exposed_to_renderer: false,
   native_attach_read_only: true,
+  bundled_daemon_autostart: true,
+  native_attach_precedes_autostart: true,
   second_daemon_started_for_recovery: false,
+  autostart_recoverable_states: [...AUTOSTART_RECOVERABLE_STATES].sort(),
 });
