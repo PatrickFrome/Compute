@@ -4,6 +4,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const TAB_RE = /^tab_[0-9a-f-]{36}$/i;
 const TARGET_RE = /^webcontents:[1-9][0-9]*$/;
 const OBSERVATION_ID_RE = /^obs_[a-f0-9]{32}$/;
+const STATE_REVISION_ID_RE = /^rev_[a-f0-9]{64}$/;
 const IDEMPOTENCY_RE = /^[A-Za-z0-9._:-]{16,160}$/;
 
 export const NATIVE_EFFECT_BINDING_SCHEMA = 'metaengine.native-supervisor.effect-binding.v1';
@@ -106,6 +107,8 @@ export function buildNativeEffectBinding({
     ...common,
   };
   if (useV2) {
+    const stateRevisionId = clean(runtime.state_revision_id).toLowerCase();
+    if (!STATE_REVISION_ID_RE.test(stateRevisionId)) throw new Error('native_effect_binding_state_revision_id_invalid');
     Object.assign(binding, {
       runtime_observation_id: runtime.observation_id,
       web_contents_id: runtime.runtime_binding.web_contents_id,
@@ -116,6 +119,8 @@ export function buildNativeEffectBinding({
       binding_generation: runtime.runtime_binding.binding_generation,
       document_url_sha256: runtime.document_url_sha256,
       runtime_observation_schema: runtime.schema,
+      state_revision_id: stateRevisionId,
+      state_revision_schema: runtime.state_revision?.schema || null,
     });
   }
   Object.assign(binding, {
@@ -147,6 +152,12 @@ export function assertNativeEffectBindingMatches({ command, binding, clientId, p
   const keys = ['command_id','idempotency_key','action','client_id','process_incarnation_id','tab_id','target_id','command_expires_at'];
   if (schema === NATIVE_EFFECT_BINDING_SCHEMA_V2) {
     keys.push('runtime_observation_id','web_contents_id','renderer_pid','runtime_target_id','attachment_generation','document_generation','binding_generation','document_url_sha256','runtime_observation_schema');
+    // state_revision_* is additive evidence on the v2 envelope. Old sealed v2
+    // bindings remain readable, while every newly built binding carries and
+    // verifies the deterministic revision projection.
+    if (binding.state_revision_id != null || binding.state_revision_schema != null) {
+      keys.push('state_revision_id','state_revision_schema');
+    }
   }
   for (const key of keys) {
     if (binding[key] !== expected[key]) throw new Error(`native_effect_binding_${key}_mismatch`);
