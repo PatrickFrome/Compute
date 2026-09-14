@@ -47,6 +47,7 @@ test('detached capture surface contract remains bounded, single-flight, and read
     restores_detached_state: true,
     bounded: true,
     single_flight_per_view: true,
+    timeout_quarantines_until_task_settled: true,
     automatic_retry_allowed: false,
     authority_effect: false,
   });
@@ -99,12 +100,15 @@ test('temporary detached capture surface restores the exact view when the captur
   ]);
 });
 
-test('temporary detached capture surface times out fail-closed and restores the view', async () => {
+test('timeout restores the view but quarantines it until the underlying capture settles', async () => {
   const h = harness();
+  let releaseLate;
+  const lateWork = new Promise((resolve) => { releaseLate = resolve; });
+
   await assert.rejects(
     withTemporaryDetachedCaptureSurface(
       h.view,
-      () => new Promise(() => {}),
+      () => lateWork,
       { createHost: h.createHost, settleMs: 0, deadlineMs: 1 },
     ),
     (error) => {
@@ -121,6 +125,32 @@ test('temporary detached capture surface times out fail-closed and restores the 
     ['bounds', { x: 9, y: 11, width: 640, height: 480 }],
     ['close'],
   ]);
+
+  await assert.rejects(
+    withTemporaryDetachedCaptureSurface(
+      h.view,
+      async () => 'too-early',
+      { createHost: h.createHost, settleMs: 0 },
+    ),
+    (error) => {
+      assert.equal(error?.code, 'DETACHED_CAPTURE_SURFACE_BUSY');
+      assert.equal(error?.automatic_retry_allowed, false);
+      return true;
+    },
+  );
+  assert.equal(h.events.filter(([name]) => name === 'host').length, 1);
+
+  releaseLate('late-capture-finished');
+  assert.equal(await lateWork, 'late-capture-finished');
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const recovered = await withTemporaryDetachedCaptureSurface(
+    h.view,
+    async () => 'recovered',
+    { createHost: h.createHost, settleMs: 0 },
+  );
+  assert.equal(recovered, 'recovered');
+  assert.equal(h.events.filter(([name]) => name === 'host').length, 2);
 });
 
 test('concurrent lease for the same exact view fails closed without a second host', async () => {
