@@ -7,8 +7,10 @@ on:
     paths:
       - 'apps/metaengine-browser/src/native-supervisor-client-core.mjs'
       - 'apps/metaengine-browser/src/native-supervisor-client-core-base.mjs'
+      - 'apps/metaengine-browser/src/compute-bridge-client.mjs'
       - 'apps/metaengine-browser/test/native-supervisor-heartbeat-*.test.mjs'
       - 'apps/metaengine-browser/test/native-supervisor-transient-batch-fallback.test.mjs'
+      - 'apps/metaengine-browser/test/compute-bridge-*.test.mjs'
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/electron-builder.test.json'
       - '.github/workflows/browser-heartbeat-repair-installer.yml'
@@ -54,6 +56,7 @@ jobs:
           set -euo pipefail
           node --check src/native-supervisor-client-core.mjs
           node --check src/native-supervisor-client-core-base.mjs
+          node --check src/compute-bridge-client.mjs
           node --test test/native-supervisor-heartbeat-watchdog.test.mjs
           node --test test/native-supervisor-heartbeat-route-contract.test.mjs
           node --test test/native-supervisor-transient-batch-fallback.test.mjs
@@ -65,8 +68,11 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: |
           $ErrorActionPreference = 'Stop'
-          $version = [string](node -p "require('./package.json').version")
-          if (-not $version) { throw 'package_version_missing' }
+          $version = '0.7.0-dev.${{ github.run_id }}.1'
+          if ($version -notmatch '^0\.7\.0-dev\.[0-9]+\.1$') { throw "repair_version_invalid:$version" }
+          npm pkg set version=$version
+          $versionReadback = [string](node -p "require('./package.json').version")
+          if ($versionReadback -ne $version) { throw "repair_version_readback_mismatch:$versionReadback" }
           Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item native-dist\guardian -Recurse -Force -ErrorAction SilentlyContinue
           npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
@@ -75,15 +81,18 @@ jobs:
           if (-not $installer -or -not $blockmap) { throw 'heartbeat_repair_package_assets_missing' }
           $digest = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           $proof = [ordered]@{
-            schema = 'metaengine.browser.heartbeat-repair-installer.v1'
+            schema = 'metaengine.browser.heartbeat-repair-installer.v2'
             source_head = '${{ github.sha }}'
             package_version = $version
             installer_name = $installer.Name
             installer_sha256 = $digest
             heartbeat_route = '/v1/heartbeat'
             state_route_preserved = $true
+            transient_state_heartbeat_fallback = $true
+            transient_state_statuses = @(502,503,504)
             heartbeat_contract_tests_passed = $true
             transient_batch_fallback_tests_passed = $true
+            monotonic_run_id_version = $true
             signed = $false
             published = $false
             authority_effect = $false
