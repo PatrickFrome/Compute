@@ -96,5 +96,9 @@ test('release gates physically cover the live restart boundary and native emerge
   assert.match(installedChat, /browser-capture-view-detached-physical\.electron\.mjs/);
   assert.match(installedChat, /detached_capture_view_physical_proof_invalid/);
   assert.match(detachedCapture, /surfaceExpected:\s*false/);
-  assert.match(detachedCapture, /capture_backend, 'CDP_SCREENSHOT'/);
+  assert.match(detachedCapture, /capture_backend, 'ELECTRON_CAPTURE_PAGE'/);
+  assert.match(detachedCapture, /capture_from_surface, true/);
+  assert.match(detachedCapture, /temporary_surface_lease, true/);
+  assert.match(detachedCapture, /win\.contentView\.children\.includes\(target\), false/);
+  assert.match(detachedCapture, /target\.webContents\.isDestroyed\(\), false/);
 });
