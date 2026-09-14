@@ -7,12 +7,16 @@ on:
     paths:
       - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
       - 'apps/metaengine-browser/src/native-supervisor-client-core.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client-core-base.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-bootstrap-heartbeat.test.mjs'
       - 'apps/metaengine-browser/test/native-supervisor-heartbeat-watchdog.test.mjs'
       - '.github/workflows/browser-watchdog-heartbeat-coalescing-v2.yml'
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
       - 'apps/metaengine-browser/src/native-supervisor-client-core.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client-core-base.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-bootstrap-heartbeat.test.mjs'
       - 'apps/metaengine-browser/test/native-supervisor-heartbeat-watchdog.test.mjs'
       - '.github/workflows/browser-watchdog-heartbeat-coalescing-v2.yml'
 
@@ -42,27 +46,62 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
           printf 'exact_head=%s\n' "$EXPECTED_HEAD"
 
-      - name: Static coalescing and authority contract
+      - name: Static coalescing, canonical liveness and authority contract
         run: |
           set -euo pipefail
           WRAPPER=apps/metaengine-browser/src/native-supervisor-client.mjs
-          FILE=apps/metaengine-browser/src/native-supervisor-client-core.mjs
+          WIRING=apps/metaengine-browser/src/native-supervisor-client-core.mjs
+          BASE=apps/metaengine-browser/src/native-supervisor-client-core-base.mjs
           grep -q "native-supervisor-client-core.mjs" "$WRAPPER"
           ! grep -Eq "setInterval\(|setTimeout\(" "$WRAPPER"
-          grep -q "watchdogLastAt = null" "$FILE"
-          grep -q "watchdogLastAt: this.#bootstrapLastAt" "$FILE"
-          grep -q "Number.NEGATIVE_INFINITY" "$FILE"
-          grep -q "command_leasing: false" "$FILE"
-          grep -q "devos_leasing: false" "$FILE"
-          grep -q "authority_effect: false" "$FILE"
+          grep -q "watchdogLastAt = null" "$BASE"
+          grep -q "watchdogLastAt: this.#bootstrapLastAt" "$BASE"
+          grep -q "Number.NEGATIVE_INFINITY" "$BASE"
+          grep -q "command_leasing: false" "$BASE"
+          grep -q "devos_leasing: false" "$BASE"
+          grep -q "authority_effect: false" "$BASE"
+          grep -q "createHeartbeatCoherentFetch" "$WIRING"
+          grep -q "bootstrap_heartbeat === true" "$WIRING"
+          grep -q "watchdog_heartbeat === true" "$WIRING"
+          grep -q "/v1/heartbeat" "$WIRING"
+          ! grep -Eq "automatic_retry_allowed: true|authority_effect: true" "$WIRING"
           ! grep -Eq "setInterval\(.*postStateHeartbeat|automatic_retry_allowed: true|authority_effect: true" apps/metaengine-browser/test/native-supervisor-heartbeat-watchdog.test.mjs
+
+      - name: Prove production imports cannot bypass heartbeat core wiring
+        run: |
+          set -euo pipefail
+          unexpected="$(git grep -l "native-supervisor-client-core-base.mjs" -- apps/metaengine-browser/src ':!apps/metaengine-browser/src/native-supervisor-client-core.mjs' || true)"
+          if [ -n "$unexpected" ]; then
+            printf 'direct_core_base_imports=%s\n' "$unexpected" >&2
+            exit 1
+          fi
+          printf 'direct_core_base_imports=none\n'
+
+      - name: Audit non-JS native heartbeat producers
+        run: |
+          set -euo pipefail
+          mapfile -t candidates < <(git ls-files '*.py' '*.rs' '*.go' '*.cs' '*.cpp' '*.cc' '*.c' '*.h' '*.hpp')
+          if [ "${#candidates[@]}" -eq 0 ]; then
+            printf 'non_js_native_source_files=0\n'
+            exit 0
+          fi
+          printf 'non_js_native_source_files=%s\n' "${#candidates[@]}"
+          matches="$(printf '%s\n' "${candidates[@]}" | xargs -r grep -IlE 'a2-browser-native-supervisor-v1|/v1/state|/v1/heartbeat|bootstrap_heartbeat|watchdog_heartbeat' || true)"
+          if [ -n "$matches" ]; then
+            printf 'non_js_supervisor_route_candidates:\n%s\n' "$matches" >&2
+            exit 1
+          fi
+          printf 'non_js_supervisor_route_candidates=none\n'
 
       - name: Syntax and regression test
         run: |
           set -euo pipefail
+          node --check apps/metaengine-browser/src/native-supervisor-client-core-base.mjs
           node --check apps/metaengine-browser/src/native-supervisor-client-core.mjs
           node --check apps/metaengine-browser/src/native-supervisor-client.mjs
-          node --test apps/metaengine-browser/test/native-supervisor-heartbeat-watchdog.test.mjs
+          node --test \
+            apps/metaengine-browser/test/native-supervisor-bootstrap-heartbeat.test.mjs \
+            apps/metaengine-browser/test/native-supervisor-heartbeat-watchdog.test.mjs
 
       - name: Prove branch-local clean checkout
         run: |
