@@ -8,7 +8,7 @@ create or replace function public.h205f22_a2_browser_supervisor_heartbeat_v1(
 returns jsonb
 language plpgsql
 security definer
-set search_path = public, pg_temp
+set search_path = pg_catalog, pg_temp
 as $$
 declare
   v_seen_at timestamptz;
@@ -35,7 +35,7 @@ begin
   end if;
 
   update public.compute_fabric_a2_browser_supervisor_state_h205f22
-     set last_seen_at = clock_timestamp()
+     set last_seen_at = pg_catalog.clock_timestamp()
    where client_id = p_client_id
      and workspace_id = p_workspace_id
   returning last_seen_at into v_seen_at;
@@ -56,6 +56,9 @@ begin
     'workspace_id', p_workspace_id,
     'last_seen_at', v_seen_at,
     'state_mutated', false,
+    'state_document_mutated', false,
+    'liveness_mutated', true,
+    'last_seen_at_mutated', true,
     'command_leasing', false,
     'control_authority', false,
     'automatic_retry_allowed', false,

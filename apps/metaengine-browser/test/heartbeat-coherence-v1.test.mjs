@@ -19,6 +19,17 @@ function responseJson(status, body) {
   return { status, body };
 }
 
+const validDbAck = (overrides = {}) => ({
+  accepted: true,
+  last_seen_at: '2026-09-14T10:00:00.000Z',
+  state_mutated: false,
+  state_document_mutated: false,
+  liveness_mutated: true,
+  last_seen_at_mutated: true,
+  authority_effect: false,
+  ...overrides,
+});
+
 test('watchdog state publication is rewritten into a minimal path-bound liveness heartbeat', async () => {
   const signatures = [];
   const requests = [];
@@ -93,7 +104,7 @@ test('heartbeat route forbids state payloads and has zero authority', async () =
   const route = createNativeSupervisorHeartbeatRoute({
     workspaceId: WORKSPACE_ID,
     json: responseJson,
-    rpc: async () => { rpcCalls += 1; return { accepted: true }; },
+    rpc: async () => { rpcCalls += 1; return validDbAck(); },
   });
   const response = await route({
     req: { method: 'POST' },
@@ -108,14 +119,14 @@ test('heartbeat route forbids state payloads and has zero authority', async () =
   assert.equal(rpcCalls, 0);
 });
 
-test('authenticated heartbeat delegates only to the liveness rpc and validates acceptance', async () => {
+test('authenticated heartbeat delegates only to the liveness rpc and proves semantic-state immutability', async () => {
   const calls = [];
   const route = createNativeSupervisorHeartbeatRoute({
     workspaceId: WORKSPACE_ID,
     json: responseJson,
     rpc: async (name, args) => {
       calls.push({ name, args });
-      return { accepted: true, last_seen_at: '2026-09-14T10:00:00.000Z', authority_effect: false };
+      return validDbAck();
     },
   });
   const response = await route({
@@ -128,6 +139,9 @@ test('authenticated heartbeat delegates only to the liveness rpc and validates a
   assert.equal(response.status, 202);
   assert.equal(response.body.accepted, true);
   assert.equal(response.body.state_mutated, false);
+  assert.equal(response.body.state_document_mutated, false);
+  assert.equal(response.body.liveness_mutated, true);
+  assert.equal(response.body.last_seen_at_mutated, true);
   assert.equal(response.body.command_leasing, false);
   assert.equal(response.body.control_authority, false);
   assert.equal(response.body.authority_effect, false);
@@ -141,6 +155,26 @@ test('authenticated heartbeat delegates only to the liveness rpc and validates a
   }]);
 });
 
+test('heartbeat route fails closed when the DB ack does not prove liveness-only mutation', async () => {
+  const route = createNativeSupervisorHeartbeatRoute({
+    workspaceId: WORKSPACE_ID,
+    json: responseJson,
+    rpc: async () => validDbAck({ state_document_mutated: true, liveness_mutated: false }),
+  });
+  const response = await route({
+    req: { method: 'POST' },
+    path: NATIVE_SUPERVISOR_HEARTBEAT_PATH,
+    body: { phase: 'WATCHDOG', authority_effect: false },
+    identity: { id: 'client_a', device_id: 'device_a' },
+  });
+
+  assert.equal(response.status, 409);
+  assert.equal(response.body.error, 'native_heartbeat_not_accepted');
+  assert.equal(response.body.reason, 'HEARTBEAT_ACK_INVALID');
+  assert.equal(response.body.automatic_retry_allowed, false);
+  assert.equal(response.body.authority_effect, false);
+});
+
 test('existing authenticated route dispatcher exposes heartbeat without creating another control plane', async () => {
   const calls = [];
   const routes = createCognitiveDeltaRoutes({
@@ -148,7 +182,7 @@ test('existing authenticated route dispatcher exposes heartbeat without creating
     json: responseJson,
     rpc: async (name, args) => {
       calls.push({ name, args });
-      return { accepted: true, last_seen_at: '2026-09-14T10:00:00.000Z' };
+      return validDbAck();
     },
   });
   const response = await routes({
@@ -164,11 +198,19 @@ test('existing authenticated route dispatcher exposes heartbeat without creating
   assert.equal(calls[0].name, NATIVE_SUPERVISOR_HEARTBEAT_RPC);
 });
 
-test('heartbeat SQL mutates only last_seen_at and is service-role-only', async () => {
+test('heartbeat SQL mutates only last_seen_at, excludes public from definer search_path and is service-role-only', async () => {
   const sql = await readFile(new URL('../supabase/native-supervisor-heartbeat-v1.sql', import.meta.url), 'utf8');
-  assert.match(sql, /update public\.compute_fabric_a2_browser_supervisor_state_h205f22\s+set last_seen_at = clock_timestamp\(\)/i);
+  assert.match(sql, /security definer\s+set search_path = pg_catalog, pg_temp/i);
+  assert.doesNotMatch(sql, /set search_path = public/i);
+  assert.match(sql, /update public\.compute_fabric_a2_browser_supervisor_state_h205f22\s+set last_seen_at = pg_catalog\.clock_timestamp\(\)/i);
   assert.doesNotMatch(sql, /set\s+state\s*=/i);
+  assert.doesNotMatch(sql, /insert\s+into\s+public\.compute_fabric_a2_browser_supervisor_state_h205f22/i);
   assert.match(sql, /where client_id = p_client_id\s+and workspace_id = p_workspace_id/i);
+  assert.match(sql, /'state_document_mutated', false/i);
+  assert.match(sql, /'liveness_mutated', true/i);
+  assert.match(sql, /'last_seen_at_mutated', true/i);
   assert.match(sql, /revoke all on function[\s\S]*from public, anon, authenticated/i);
   assert.match(sql, /grant execute on function[\s\S]*to service_role/i);
+  assert.match(sql, /^begin;/im);
+  assert.match(sql, /^commit;/im);
 });

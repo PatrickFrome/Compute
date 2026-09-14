@@ -14,6 +14,14 @@ function heartbeatBodyIsValid(body) {
   return String(body.phase || '').toUpperCase() === 'WATCHDOG';
 }
 
+function heartbeatAckIsValid(value) {
+  return value?.accepted === true
+    && value?.authority_effect === false
+    && value?.state_document_mutated === false
+    && value?.liveness_mutated === true
+    && value?.last_seen_at_mutated === true;
+}
+
 export function createNativeSupervisorHeartbeatRoute({ rpc, workspaceId, json } = {}) {
   if (typeof rpc !== 'function') throw new Error('native_heartbeat_rpc_required');
   if (!workspaceId) throw new Error('native_heartbeat_workspace_required');
@@ -55,9 +63,9 @@ export function createNativeSupervisorHeartbeatRoute({ rpc, workspaceId, json } 
       throw error;
     }
 
-    if (accepted?.accepted !== true) return json(409, {
+    if (!heartbeatAckIsValid(accepted)) return json(409, {
       error: 'native_heartbeat_not_accepted',
-      reason: String(accepted?.reason || 'STATE_NOT_REGISTERED').slice(0, 160),
+      reason: String(accepted?.reason || 'HEARTBEAT_ACK_INVALID').slice(0, 160),
       automatic_retry_allowed: false,
       authority_effect: false,
     });
@@ -69,6 +77,9 @@ export function createNativeSupervisorHeartbeatRoute({ rpc, workspaceId, json } 
       workspace_id: String(workspaceId),
       last_seen_at: accepted?.last_seen_at || null,
       state_mutated: false,
+      state_document_mutated: false,
+      liveness_mutated: true,
+      last_seen_at_mutated: true,
       command_leasing: false,
       control_authority: false,
       automatic_retry_allowed: false,
