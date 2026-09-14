@@ -108,10 +108,14 @@ jobs:
           qualifier='apps/metaengine-browser/src/self-update-signed-heartbeat.mjs'
           entry='apps/metaengine-browser/src/final-runtime-entry.mjs'
           grep -Fq "sendBootstrapHeartbeat as sendBootstrapHeartbeatBase" "$client"
-          grep -Fq "'/v1/heartbeat'" "$client"
-          grep -Fq "deviceHeaders('POST', requestPath, heartbeatBody)" "$client"
-          grep -Fq "payload?.state?.watchdog_heartbeat === true" "$client"
-          grep -Fq "payload?.state?.bootstrap_heartbeat === true" "$client"
+          grep -Fq "createHeartbeatCoherentIdentity" "$client"
+          grep -Fq "target.deviceHeaders.call(target, 'POST', projected.path, projected.bodyText)" "$client"
+          grep -Fq "bootstrap_heartbeat === true" "$client"
+          grep -Fq "watchdog_heartbeat === true" "$client"
+          grep -Fq "const HEARTBEAT_PATH =" "$client"
+          grep -Fq "const HEARTBEAT_URL =" "$client"
+          grep -Fq "identity: coherent.identity" "$client"
+          grep -Fq "fetchImpl: coherent.fetchImpl" "$client"
           grep -Fq "const HEARTBEAT_PHASES = new Set(['BOOTSTRAP', 'WATCHDOG'])" "$route"
           grep -Fq "state_document_mutated: false" "$route"
           grep -Fq "liveness_mutated: true" "$route"

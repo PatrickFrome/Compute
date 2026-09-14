@@ -5,6 +5,7 @@ import {
   NATIVE_SUPERVISOR_BASE,
   NATIVE_SUPERVISOR_RUNTIME_PATH,
   createHeartbeatCoherentFetch,
+  createHeartbeatCoherentIdentity,
 } from '../src/native-supervisor-client-activated.mjs';
 import {
   NATIVE_SUPERVISOR_HEARTBEAT_PATH,
@@ -30,21 +31,22 @@ const validDbAck = (overrides = {}) => ({
   ...overrides,
 });
 
-test('bootstrap and watchdog publications are rewritten into minimal path-bound liveness heartbeats', async () => {
+test('bootstrap and watchdog signing plus transport share one canonical heartbeat projection', async () => {
   for (const [marker, expectedPhase] of [['bootstrap_heartbeat', 'BOOTSTRAP'], ['watchdog_heartbeat', 'WATCHDOG']]) {
     const signatures = [];
     const requests = [];
-    const identity = {
+    const rawIdentity = {
       async deviceHeaders(method, path, bodyText) {
         signatures.push({ method, path, bodyText });
         return { 'content-type': 'application/json', 'x-test-signature-path': path };
       },
     };
+    const identity = createHeartbeatCoherentIdentity(rawIdentity);
     const rawFetch = async (url, init) => {
       requests.push({ url: String(url), init: structuredClone(init) });
       return { status: 202 };
     };
-    const fetchImpl = createHeartbeatCoherentFetch({ identity, fetchImpl: rawFetch });
+    const fetchImpl = createHeartbeatCoherentFetch({ fetchImpl: rawFetch });
     const sourceBody = JSON.stringify({
       state: {
         [marker]: true,
@@ -53,12 +55,10 @@ test('bootstrap and watchdog publications are rewritten into minimal path-bound 
       },
       last_command_id: 'command_should_not_cross_heartbeat_lane',
     });
+    const headers = await identity.deviceHeaders('POST', `${NATIVE_SUPERVISOR_RUNTIME_PATH}/v1/state`, sourceBody);
 
     const response = await fetchImpl(`${NATIVE_SUPERVISOR_BASE}/v1/state`, {
-      method: 'POST',
-      headers: { 'x-original-signature-path': '/v1/state' },
-      body: sourceBody,
-      cache: 'no-store',
+      method: 'POST', headers, body: sourceBody, cache: 'no-store',
     });
 
     assert.equal(response.status, 202);
@@ -73,32 +73,46 @@ test('bootstrap and watchdog publications are rewritten into minimal path-bound 
   }
 });
 
-test('ordinary full-state publication remains on the canonical state route', async () => {
+test('ordinary full-state signing and publication remain unchanged on /v1/state', async () => {
   const signatures = [];
   const requests = [];
-  const identity = {
+  const rawIdentity = {
     async deviceHeaders(...args) {
       signatures.push(args);
       return { 'content-type': 'application/json' };
     },
   };
+  const identity = createHeartbeatCoherentIdentity(rawIdentity);
   const rawFetch = async (url, init) => {
     requests.push({ url: String(url), init });
     return { status: 202 };
   };
-  const fetchImpl = createHeartbeatCoherentFetch({ identity, fetchImpl: rawFetch });
+  const fetchImpl = createHeartbeatCoherentFetch({ fetchImpl: rawFetch });
   const body = JSON.stringify({ state: { shell_version: 'test', supervisor_mode: 'CONTROL', armed: true } });
-  const originalHeaders = { 'x-original-signature-path': '/v1/state' };
+  const path = `${NATIVE_SUPERVISOR_RUNTIME_PATH}/v1/state`;
+  const headers = await identity.deviceHeaders('POST', path, body);
 
   await fetchImpl(`${NATIVE_SUPERVISOR_BASE}/v1/state`, {
-    method: 'POST', headers: originalHeaders, body,
+    method: 'POST', headers, body,
   });
 
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, `${NATIVE_SUPERVISOR_BASE}/v1/state`);
   assert.equal(requests[0].init.body, body);
-  assert.equal(requests[0].init.headers, originalHeaders);
-  assert.equal(signatures.length, 0);
+  assert.equal(signatures.length, 1);
+  assert.equal(signatures[0][0], 'POST');
+  assert.equal(signatures[0][1], path);
+  assert.equal(signatures[0][2], body);
+});
+
+test('identity wrapper preserves bound non-heartbeat methods and receiver state', async () => {
+  class Identity {
+    #value = 'bound';
+    async deviceHeaders() { return {}; }
+    async ensure() { return { value: this.#value }; }
+  }
+  const identity = createHeartbeatCoherentIdentity(new Identity());
+  assert.deepEqual(await identity.ensure(), { value: 'bound' });
 });
 
 test('heartbeat route forbids state payloads and unknown phases with zero authority', async () => {
