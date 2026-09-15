@@ -32,6 +32,7 @@ const RETIRED_HISTORY_LIMIT = 64;
 const LEGACY_CAPACITY_AMBIGUITY = 'CREATE_TAB_AMBIGUOUS:tab_capacity_exceeded';
 const CAPACITY_BACKPRESSURE_REASON = 'TAB_CAPACITY_EXCEEDED_PRE_EFFECT';
 const RESTART_STALE_LOST_REASON = 'PHYSICAL_TAB_MISSING_ON_RESTART';
+const GENERATION_FLOOR_STATES = new Set(['REGISTERED', 'PROVISIONING', 'BOUND_UNVERIFIED', 'ACTIVE', 'LOST']);
 
 function clone(value) { return value == null ? value : structuredClone(value); }
 function iso(clock) {
@@ -43,6 +44,10 @@ function nonNegativeInteger(value, fallback, name) {
   const out = value == null ? fallback : Number(value);
   if (!Number.isSafeInteger(out) || out < 0) throw new Error(`fleet_${name}_invalid`);
   return out;
+}
+function generationFloor(value) {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new Error('fleet_generation_floor_invalid');
+  return Math.max(1, value);
 }
 function burstLimit(value, fallback = DEFAULT_SPAWN_BURST_LIMIT) {
   const out = value == null ? fallback : Number(value);
@@ -133,6 +138,7 @@ function sanitizeLoadedState(input, policy) {
     let lifecycle = FLEET_STATES.includes(row.lifecycle_state) ? row.lifecycle_state : 'LOST';
     const transportProof = sanitizeTransportProof(row.transport_proof);
     if (lifecycle === 'ACTIVE' && !transportProof) lifecycle = 'BOUND_UNVERIFIED';
+    const loadedGeneration = Number(row.generation_epoch);
     seen.add(agentId);
     agents.push({
       agent_id: agentId,
@@ -142,7 +148,7 @@ function sanitizeLoadedState(input, policy) {
       tab_id: row.tab_id ? String(row.tab_id) : null,
       target_id: row.target_id ? String(row.target_id) : null,
       conversation_epoch: Number.isSafeInteger(Number(row.conversation_epoch)) ? Number(row.conversation_epoch) : 0,
-      generation_epoch: Number.isSafeInteger(Number(row.generation_epoch)) ? Number(row.generation_epoch) : 1,
+      generation_epoch: Number.isSafeInteger(loadedGeneration) && loadedGeneration >= 1 ? loadedGeneration : 1,
       created_at: String(row.created_at || ''),
       updated_at: String(row.updated_at || ''),
       lost_reason: row.lost_reason ? String(row.lost_reason) : null,
@@ -188,6 +194,7 @@ export class FleetProvisioner {
   #mutex = Promise.resolve();
   #capacityBackpressure = false;
   #capacityRetiredAttempts = 0;
+  #generationFloor = 1;
 
   constructor({ createTab, loadTab, tabExists, loadState, saveState, census = null, policy, clock = () => Date.now(), uuid = () => crypto.randomUUID() } = {}) {
     if (![createTab, loadTab, tabExists, loadState, saveState].every((fn) => typeof fn === 'function')) throw new Error('fleet_dependency_invalid');
@@ -282,6 +289,27 @@ export class FleetProvisioner {
       if (target < this.#state.policy.warm_agents) throw new Error('fleet_capacity_order_invalid');
       this.#state.policy = clone(normalizePolicy({ ...this.#state.policy, desired_agents: target }));
       await this.#persist();
+      return this.snapshot();
+    });
+  }
+
+  async adoptGenerationFloor(value) {
+    return this.#serial(async () => {
+      this.#assertReady();
+      const floor = generationFloor(value);
+      if (floor <= this.#generationFloor) return this.snapshot();
+      this.#generationFloor = floor;
+      let changed = false;
+      const at = iso(this.#clock);
+      for (const agent of this.#state.agents) {
+        if (!GENERATION_FLOOR_STATES.has(agent.lifecycle_state) || agent.generation_epoch >= floor) continue;
+        agent.generation_epoch = floor;
+        agent.transport_proof = null;
+        if (agent.lifecycle_state === 'ACTIVE') agent.lifecycle_state = 'BOUND_UNVERIFIED';
+        agent.updated_at = at;
+        changed = true;
+      }
+      if (changed) await this.#persist();
       return this.snapshot();
     });
   }
@@ -432,7 +460,7 @@ export class FleetProvisioner {
       tab_id: null,
       target_id: null,
       conversation_epoch: 0,
-      generation_epoch: 1,
+      generation_epoch: this.#generationFloor,
       created_at: at,
       updated_at: at,
       lost_reason: null,
