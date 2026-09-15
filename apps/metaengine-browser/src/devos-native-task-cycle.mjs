@@ -11,7 +11,11 @@ import {
   DevOsEffectDeliveryJournal,
   DEVOS_EFFECT_DELIVERY_JOURNAL_FILE,
 } from './devos-effect-delivery-journal.mjs';
-import { markFleetTransportProvenFromNativeFrame } from './fleet-runtime-bridge.mjs';
+import {
+  adoptFleetGenerationFloor,
+  markFleetTransportProvenFromNativeFrame,
+} from './fleet-runtime-bridge.mjs';
+import { normalizeDevosRuntimeControl } from './devos-runtime-control.mjs';
 import { supervisorDeviceStorageDirectory } from './supervisor-device-identity.mjs';
 import {
   ELASTIC_FLEET_CONTRACT,
@@ -169,6 +173,7 @@ export class DevOsNativeTaskCycle {
   #lastFrames = new Map();
   #lastFleetTransportProof = null;
   #lastTransportPromotion = null;
+  #lastGenerationFloorAdoption = null;
   #currentCycleLease = null;
   #taskEffectAttempted = false;
   #lastPreEffectReconciliation = null;
@@ -292,6 +297,13 @@ export class DevOsNativeTaskCycle {
         ok: response.ok,
         json: async () => {
           const body = await originalJson();
+          if (response.ok && body?.schema === 'metaengine.devos.browser-cycle.v1' && body?.runtime_control != null) {
+            const runtimeControl = normalizeDevosRuntimeControl(body.runtime_control);
+            if (runtimeControl.authoritative !== true) {
+              throw new Error(`devos_generation_floor_readback_invalid:${runtimeControl.reason || 'UNKNOWN'}`);
+            }
+            this.#lastGenerationFloorAdoption = await adoptFleetGenerationFloor(runtimeControl.generation_floor);
+          }
           this.#currentCycleLease = body?.lease ? structuredClone(body.lease) : null;
           this.#taskEffectAttempted = false;
           return body;
@@ -318,6 +330,7 @@ export class DevOsNativeTaskCycle {
       ...this.#inner.snapshot(),
       fleet_transport_proof: this.#lastFleetTransportProof ? structuredClone(this.#lastFleetTransportProof) : null,
       fleet_transport_promotion: this.#lastTransportPromotion ? structuredClone(this.#lastTransportPromotion) : null,
+      fleet_generation_floor_adoption: this.#lastGenerationFloorAdoption ? structuredClone(this.#lastGenerationFloorAdoption) : null,
       pre_effect_reconciliation: this.#lastPreEffectReconciliation ? structuredClone(this.#lastPreEffectReconciliation) : null,
       pre_effect_lease_stall_fast_requeue: true,
       fleet_transport_proof_before_physical_dispatch: true,

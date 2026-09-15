@@ -3,6 +3,12 @@ import crypto from 'node:crypto';
 let fleetRuntime = null;
 
 const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
+const GENERATION_FLOOR_STATES = new Set(['REGISTERED', 'PROVISIONING', 'BOUND_UNVERIFIED', 'ACTIVE', 'LOST']);
+
+function generationFloor(value) {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new Error('fleet_runtime_generation_floor_invalid');
+  return Math.max(1, value);
+}
 
 function transportUrl(value) {
   try {
@@ -47,6 +53,37 @@ export function clearFleetRuntime(fleet = null) {
 
 export function fleetRuntimeRegistered() {
   return fleetRuntime != null;
+}
+
+export async function adoptFleetGenerationFloor(value) {
+  if (!fleetRuntime) throw new Error('fleet_runtime_unavailable');
+  if (typeof fleetRuntime.adoptGenerationFloor !== 'function') throw new Error('fleet_runtime_generation_floor_unsupported');
+  const floor = generationFloor(value);
+  const before = fleetRuntime.snapshot();
+  const next = await fleetRuntime.adoptGenerationFloor(value);
+  const after = next && typeof next === 'object' ? next : fleetRuntime.snapshot();
+  const beforeById = new Map((before?.agents || []).map((row) => [String(row?.agent_id || '').toLowerCase(), row]));
+  let changedAgentCount = 0;
+  let activeDemotedCount = 0;
+  for (const agent of after?.agents || []) {
+    if (!GENERATION_FLOOR_STATES.has(String(agent?.lifecycle_state || ''))) continue;
+    if (!Number.isSafeInteger(Number(agent?.generation_epoch)) || Number(agent.generation_epoch) < floor) {
+      throw new Error('fleet_runtime_generation_floor_not_adopted');
+    }
+    const previous = beforeById.get(String(agent?.agent_id || '').toLowerCase());
+    if (previous && Number(previous.generation_epoch) !== Number(agent.generation_epoch)) changedAgentCount += 1;
+    if (previous?.lifecycle_state === 'ACTIVE' && agent.lifecycle_state === 'BOUND_UNVERIFIED') activeDemotedCount += 1;
+  }
+  return Object.freeze({
+    schema: 'metaengine.browser.fleet-generation-floor-adoption.v1',
+    state: changedAgentCount > 0 ? 'ADOPTED' : 'NO_AGENT_CHANGE',
+    generation_floor: floor,
+    changed_agent_count: changedAgentCount,
+    active_demoted_count: activeDemotedCount,
+    transport_proof_invalidated_on_generation_change: true,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  });
 }
 
 export function assertFleetRuntimeBinding(binding) {
