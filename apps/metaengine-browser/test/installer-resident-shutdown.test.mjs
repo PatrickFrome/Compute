@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import test from 'node:test';
 import {
   acquirePrimaryInstance,
+  INSTALLER_PRIMARY_EXIT_FALLBACK_MS,
   INSTALLER_SHUTDOWN_ARG,
   isInstallerShutdownArgv,
 } from '../src/single-instance-guard.mjs';
@@ -37,9 +38,22 @@ test('installer shutdown argv is exact and ordinary launches do not match', () =
   assert.equal(isInstallerShutdownArgv(null), false);
 });
 
-test('primary installer shutdown stops HostResilience before Electron quit', async () => {
+test('primary installer shutdown stops resilience, arms one bounded fallback, then quits gracefully first', async () => {
   delete globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__;
   const app = fakePrimaryApp();
+  const scheduled = [];
+  let unrefCount = 0;
+  app.exit = (code) => app.events.push(`exit:${code}`);
+  const schedule = (fn, delay) => {
+    app.events.push(`fallback-arm:${delay}`);
+    scheduled.push({ fn, delay });
+    return {
+      unref() {
+        unrefCount += 1;
+        app.events.push('fallback-unref');
+      },
+    };
+  };
   globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__ = {
     stop: async () => {
       app.events.push('host-stop-start');
@@ -52,7 +66,10 @@ test('primary installer shutdown stops HostResilience before Electron quit', asy
   };
 
   try {
-    const guard = acquirePrimaryInstance(app, { launch_id: FIXED_LAUNCH_ID });
+    const guard = acquirePrimaryInstance(app, {
+      launch_id: FIXED_LAUNCH_ID,
+      schedule,
+    });
     assert.equal(guard.primary, true);
     const handler = app.listeners.get('second-instance');
     assert.equal(typeof handler, 'function');
@@ -64,8 +81,24 @@ test('primary installer shutdown stops HostResilience before Electron quit', asy
       'watchdog-cancel',
       'host-stop-start',
       'host-stop-end',
+      `fallback-arm:${INSTALLER_PRIMARY_EXIT_FALLBACK_MS}`,
+      'fallback-unref',
       'quit',
     ]);
+    assert.equal(scheduled.length, 1);
+    assert.equal(scheduled[0].delay, INSTALLER_PRIMARY_EXIT_FALLBACK_MS);
+    assert.equal(unrefCount, 1);
+    assert.equal(app.events.some((event) => event.startsWith('exit:')), false);
+
+    const eventCountBeforeRepeat = app.events.length;
+    handler(null, ['browser.exe', INSTALLER_SHUTDOWN_ARG]);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(scheduled.length, 1, 'repeated installer shutdown must not arm a second fallback');
+    assert.equal(app.events.length, eventCountBeforeRepeat);
+
+    scheduled[0].fn();
+    assert.equal(app.events.filter((event) => event === 'exit:0').length, 1);
+    assert.equal(app.events.at(-1), 'exit:0');
   } finally {
     delete globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__;
     delete globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__;
@@ -73,17 +106,23 @@ test('primary installer shutdown stops HostResilience before Electron quit', asy
   }
 });
 
-test('ordinary second-instance does not request installer shutdown', async () => {
+test('ordinary second-instance does not request installer shutdown or arm forced-exit fallback', async () => {
   delete globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__;
   const app = fakePrimaryApp();
+  let scheduleCalls = 0;
+  const schedule = () => {
+    scheduleCalls += 1;
+    return { unref() {} };
+  };
   globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__ = {
     stop: async () => app.events.push('host-stop'),
   };
   try {
-    acquirePrimaryInstance(app, { launch_id: FIXED_LAUNCH_ID });
+    acquirePrimaryInstance(app, { launch_id: FIXED_LAUNCH_ID, schedule });
     app.listeners.get('second-instance')(null, ['browser.exe']);
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(app.events, []);
+    assert.equal(scheduleCalls, 0);
   } finally {
     delete globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__;
     delete globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__;
