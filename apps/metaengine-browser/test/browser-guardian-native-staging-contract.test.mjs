@@ -41,6 +41,10 @@ test('electron-builder owns the single Guardian native staging build boundary', 
     from: '../../coordination/browser-compute',
     to: 'a2-compute-browser',
     filter: ['package.json', 'protocol-v1.json', 'engine-lock.json', 'src/**/*'],
+  }, {
+    from: '../../coordination/browser-shared',
+    to: 'browser-shared',
+    filter: ['action-contract.mjs', 'node-registry.mjs', 'receipt-contract.mjs', 'semantic-perception-compiler.mjs'],
   }]);
   assert.match(hook, /buildDevOSSourceSnapshot/);
   assert.match(hook, /devos-source-snapshot/);

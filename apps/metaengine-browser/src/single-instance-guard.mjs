@@ -5,6 +5,7 @@ export const SINGLE_INSTANCE_GUARD_VERSION = '2.2.0';
 export const SINGLE_INSTANCE_LOCK_SCHEMA = 'metaengine.browser.single-instance-lock.v2';
 export const SECONDARY_INSTANCE_RENOTIFY_DELAY_MS = 4_000;
 export const INSTALLER_SHUTDOWN_ARG = '--metaengine-installer-shutdown';
+export const INSTALLER_PRIMARY_EXIT_FALLBACK_MS = 5_000;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -23,7 +24,7 @@ export function isInstallerShutdownArgv(argv) {
   return Array.isArray(argv) && argv.some((arg) => String(arg) === INSTALLER_SHUTDOWN_ARG);
 }
 
-async function stopPrimaryForInstaller(app) {
+async function stopPrimaryForInstaller(app, { schedule = setTimeout } = {}) {
   if (globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ === true) return;
   globalThis.__METAENGINE_INSTALLER_SHUTDOWN_REQUESTED__ = true;
 
@@ -46,15 +47,17 @@ async function stopPrimaryForInstaller(app) {
     // planned-shutdown fence: it disables close-to-background and runtime retry.
     // Calling quit only after HostResilience.stop() prevents the Sentinel worker
     // from interpreting an installer upgrade as an unexpected parent death.
+    const fallback = schedule(() => app.exit(0), INSTALLER_PRIMARY_EXIT_FALLBACK_MS);
+    if (fallback && typeof fallback.unref === 'function') fallback.unref();
     app.quit();
   }
 }
 
-function installPrimaryInstallerShutdownHandler(app) {
+function installPrimaryInstallerShutdownHandler(app, schedule) {
   if (!app || typeof app.on !== 'function') return false;
   app.on('second-instance', (_event, argv) => {
     if (!isInstallerShutdownArgv(argv)) return;
-    void stopPrimaryForInstaller(app);
+    void stopPrimaryForInstaller(app, { schedule });
   });
   return true;
 }
@@ -163,7 +166,7 @@ export function acquirePrimaryInstance(app, {
 
   const installerShutdownControl = isInstallerShutdownArgv(process.argv);
   const primary = requestLock(app, additionalData);
-  if (primary === true && !installerShutdownControl) installPrimaryInstallerShutdownHandler(app);
+  if (primary === true && !installerShutdownControl) installPrimaryInstallerShutdownHandler(app, schedule);
   const secondaryRenotifyScheduled = primary !== true
     ? scheduleSecondaryRenotify(app, additionalData, {
       delay_ms: secondary_retry_delay_ms,
