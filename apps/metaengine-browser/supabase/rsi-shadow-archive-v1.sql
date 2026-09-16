@@ -6,7 +6,10 @@
 begin;
 
 create table public.compute_fabric_rsi_shadow_candidate_h205f22 (
-  candidate_id uuid primary key,
+  candidate_id text primary key check (
+    length(candidate_id) between 3 and 128
+    and candidate_id ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$'
+  ),
   parent_sha text not null check (parent_sha ~ '^[0-9a-f]{40}$'),
   candidate_sha text not null check (candidate_sha ~ '^[0-9a-f]{40}$'),
   mutation_surface text not null check (mutation_surface in (
@@ -40,7 +43,7 @@ create table public.compute_fabric_rsi_shadow_candidate_h205f22 (
 
 create table public.compute_fabric_rsi_shadow_evidence_h205f22 (
   evidence_seq bigint generated always as identity primary key,
-  candidate_id uuid not null references public.compute_fabric_rsi_shadow_candidate_h205f22(candidate_id),
+  candidate_id text not null references public.compute_fabric_rsi_shadow_candidate_h205f22(candidate_id),
   kind text not null check (kind in ('HARD_INVARIANT','OBJECTIVE')),
   invariant text check (invariant is null or invariant in (
     'NO_DUPLICATE_IRREVERSIBLE_EFFECT',
