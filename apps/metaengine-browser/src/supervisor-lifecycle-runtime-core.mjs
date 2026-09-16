@@ -4,7 +4,8 @@ import path from 'node:path';
 import { ChatGptSessionMonitor } from './chatgpt-session-monitor.mjs';
 import { chatGptControlMatches, uniqueChatGptControl } from './chatgpt-ui-controls.mjs';
 import { classifyRetryDecision, REQUEST_EFFECT_CLASS } from './chatgpt-retry-policy.mjs';
-import { SupervisorKeepalive, buildSupervisorRolloverMessage, buildSupervisorWakeMessage } from './supervisor-keepalive.mjs';
+import { buildSupervisorRolloverMessage, buildSupervisorWakeMessage } from './supervisor-keepalive.mjs';
+import { SupervisorBootstrapKeepalive } from './supervisor-bootstrap-keepalive.mjs';
 import { evaluateActiveWakeTerminalRetirement } from './supervisor-terminal-retirement.mjs';
 import {
   devosRuntimeControlAllowsContinuousService,
@@ -76,7 +77,7 @@ export class SupervisorLifecycleRuntime {
       const { app } = await import('electron');
       this.#statePath = path.join(app.getPath('userData'), 'metaengine-supervisor-keepalive-v1.json');
     }
-    this.#keepalive = new SupervisorKeepalive({
+    this.#keepalive = new SupervisorBootstrapKeepalive({
       loadState: () => readJson(this.#statePath),
       saveState: (v) => writeJson(this.#statePath, v),
     });
@@ -171,6 +172,7 @@ export class SupervisorLifecycleRuntime {
         active_wake_terminal_retirement: 'EXACT_WAKE_TAB_GENERATION_V1',
         ambiguous_same_wake_retry: false,
         wake_send_transport: 'SEMANTIC_TYPE_SUBMIT_EVENT_LATCH_V1',
+        initial_conversation_bootstrap: 'DEDICATED_ROOT_EXACT_WAKE_V1',
         authority_effect: false,
       },
       active_request: this.#activeRequest ? {
@@ -396,6 +398,11 @@ export class SupervisorLifecycleRuntime {
       },
       platform: 'CHATGPT',
     });
+    if (submitted?.suppressed === true) {
+      const reason = String(submitted.reason || 'SEMANTIC_SUBMIT_SUPPRESSED');
+      const preEffect = ['SEMANTIC_REF_REOBSERVE_REQUIRED','CHATGPT_SERVICE_THROTTLED'].includes(reason);
+      return { ok: false, reason, clicked: !preEffect, event_driven_readback: true };
+    }
     const submitState = String(submitted?.effect_state || '').toUpperCase();
     if (['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION'].includes(submitState)) {
       return { ok: true, clicked: true, observed: submitted, event_driven_readback: true };
@@ -434,6 +441,95 @@ export class SupervisorLifecycleRuntime {
       this.#lastError = String(e?.message || e).slice(0, 240);
     }
     return false;
+  }
+
+  async #waitForBootstrapRoot(tabId, attempts = 8) {
+    for (let i = 0; i < attempts; i += 1) {
+      if (i > 0) await sleep(500);
+      const frame = await this.#capture(tabId);
+      if (CHAT_ROOT_RE.test(String(frame?.url || '')) && !generating(frame) && unique(frame, 'textbox')) {
+        return { ok: true, frame };
+      }
+      if (CHAT_RE.test(String(frame?.url || ''))) return { ok: false, reason: 'BOOTSTRAP_ROOT_UNEXPECTED_CONVERSATION', frame };
+    }
+    return { ok: false, reason: 'BOOTSTRAP_ROOT_NOT_READY', frame: null };
+  }
+
+  async #bootstrapSupervisorConversation() {
+    if (this.#canActuate() !== true) return false;
+    const before = this.#keepalive.snapshot();
+    if (before.paused
+      || before.state !== 'RECOVERING'
+      || before.conversation_url
+      || before.pending_wake
+      || before.active_wake
+      || !Array.isArray(before.queued_wakes)
+      || before.queued_wakes.length === 0) return false;
+
+    let prepared = null;
+    try {
+      const tab = await this.#execute({ action: 'NEW_TAB', payload: { url: 'https://chatgpt.com/', select: false }, platform: null });
+      if (!tab?.tab_id) throw new Error('supervisor_bootstrap_tab_creation_no_readback');
+      const ready = await this.#waitForBootstrapRoot(tab.tab_id);
+      if (!ready.ok) {
+        this.#lastError = `supervisor_bootstrap_pre_effect:${ready.reason}`;
+        return false;
+      }
+
+      prepared = await this.#keepalive.prepareBootstrapWake();
+      if (!prepared?.ok) return false;
+      const sent = await this.#typeAndSend(tab.tab_id, prepared.message, prepared.pending.wake_id);
+      if (!sent.ok) {
+        if (sent.clicked === true) {
+          await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, sent.reason || 'BOOTSTRAP_SEND_EFFECT_UNKNOWN');
+          this.#lastRecovery = {
+            action: 'SUPERVISOR_BOOTSTRAP_AMBIGUOUS', wake_id: prepared.pending.wake_id, tab_id: String(tab.tab_id),
+            reason: sent.reason || 'BOOTSTRAP_SEND_EFFECT_UNKNOWN', confirmed: false, ambiguous: true,
+            automatic_retry_allowed: false, at: new Date().toISOString(), authority_effect: false,
+          };
+        } else {
+          await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, sent.reason || 'BOOTSTRAP_PRE_EFFECT_ABORT');
+          await this.#keepalive.resolveAmbiguous({ observed_sent: false });
+          await this.#keepalive.resume();
+        }
+        return false;
+      }
+
+      let observed = sent.observed;
+      if (!CHAT_RE.test(String(observed?.url || ''))) observed = await this.#capture(tab.tab_id);
+      const url = String(observed?.url || '');
+      const markerObserved = String(observed?.text_excerpt || '').includes(String(prepared.pending.wake_id));
+      if (!CHAT_RE.test(url) || !(generating(observed) || markerObserved || sent.event_driven_readback === true)) {
+        await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, 'BOOTSTRAP_WITHOUT_CONVERSATION_BINDING');
+        this.#lastRecovery = {
+          action: 'SUPERVISOR_BOOTSTRAP_AMBIGUOUS', wake_id: prepared.pending.wake_id, tab_id: String(tab.tab_id),
+          reason: 'BOOTSTRAP_WITHOUT_CONVERSATION_BINDING', confirmed: false, ambiguous: true,
+          automatic_retry_allowed: false, at: new Date().toISOString(), authority_effect: false,
+        };
+        return false;
+      }
+
+      await this.#keepalive.confirmWakeSent(prepared.pending.wake_id);
+      await this.#keepalive.bindConversation({ url, tab_id: tab.tab_id });
+      this.#activateRequest(prepared.pending, tab.tab_id, false);
+      this.#lastRecovery = {
+        action: 'SUPERVISOR_BOOTSTRAP_BOUND', wake_id: prepared.pending.wake_id, tab_id: String(tab.tab_id),
+        proof: 'DEDICATED_ROOT_TO_EXACT_CONVERSATION_POSITIVE_READBACK', confirmed: true, ambiguous: false,
+        automatic_retry_allowed: false, at: new Date().toISOString(), authority_effect: false,
+      };
+      return true;
+    } catch (e) {
+      if (prepared?.pending?.wake_id) {
+        await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, 'BOOTSTRAP_SEND_PATH_AMBIGUOUS').catch(() => {});
+        this.#lastRecovery = {
+          action: 'SUPERVISOR_BOOTSTRAP_AMBIGUOUS', wake_id: prepared.pending.wake_id, tab_id: null,
+          reason: 'BOOTSTRAP_SEND_PATH_AMBIGUOUS', confirmed: false, ambiguous: true,
+          automatic_retry_allowed: false, at: new Date().toISOString(), authority_effect: false,
+        };
+      }
+      this.#lastError = `supervisor_bootstrap:${String(e?.message || e).slice(0, 200)}`;
+      return false;
+    }
   }
 
   async #continueExisting(tabId, frame) {
@@ -674,7 +770,14 @@ export class SupervisorLifecycleRuntime {
         const reconciled = await this.#reconcileAmbiguousRollover(state);
         if (reconciled && this.#keepalive.snapshot().state !== 'ROLLOVER_AMBIGUOUS') state = await this.#getState();
       }
-      const supervisor = await this.#supervisorTab(state);
+      let supervisor = await this.#supervisorTab(state);
+      if (!supervisor && admissionOpen && this.#canActuate() === true) {
+        const bootstrapped = await this.#bootstrapSupervisorConversation();
+        if (bootstrapped) {
+          state = await this.#getState();
+          supervisor = await this.#supervisorTab(state);
+        }
+      }
       if (supervisor) {
         const observed = await this.#observeSupervisor(supervisor, state);
         if (this.#canActuate() === true) {
@@ -690,7 +793,7 @@ export class SupervisorLifecycleRuntime {
           }
         }
       }
-      if (!this.#lastError?.startsWith('same_chat_retry:') && !this.#lastError?.startsWith('new_conversation_retry:') && !this.#lastError?.startsWith('orphaned_stall_stop:')) this.#lastError = null;
+      if (!this.#lastError?.startsWith('same_chat_retry:') && !this.#lastError?.startsWith('new_conversation_retry:') && !this.#lastError?.startsWith('orphaned_stall_stop:') && !this.#lastError?.startsWith('supervisor_bootstrap:') && !this.#lastError?.startsWith('supervisor_bootstrap_pre_effect:')) this.#lastError = null;
     } catch (e) { this.#lastError = String(e?.message || e).slice(0, 240); }
     return this.snapshot();
   }
