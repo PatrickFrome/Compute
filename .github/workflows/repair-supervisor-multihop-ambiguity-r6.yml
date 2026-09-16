@@ -10,14 +10,13 @@ permissions:
 
 jobs:
   repair:
-    if: github.event.head_commit.message == 'chore(browser): stage R6 multihop ambiguity repair'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           ref: repair/supervisor-multihop-ambiguity-r1
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
       - name: Apply multihop process-boundary repair
@@ -82,13 +81,13 @@ test('multi-hop process restarts retain a durable wake-local fence and recover w
   assert.ok(durable.ambiguous_history[0].process_boundary_fenced_by_process_incarnation_id);
 });
 
-test('same-process ambiguity is never retired by the multihop recovery fence', async () => {
+test('missing pending process identity stays fail-closed under the multihop fence', async () => {
   const seed = seedState();
-  seed.process_incarnation_id = null;
+  seed.process_incarnation_id = 'process_intermediate-r6';
   seed.pending_wake.process_incarnation_id = null;
   const { runtime, actions, typed } = await makeRuntime({
     seed,
-    tabs: [{ tab_id: 'same-process-root', url: 'https://chatgpt.com/', selected: false }],
+    tabs: [{ tab_id: 'identity-missing-root', url: 'https://chatgpt.com/', selected: false }],
   });
   const snap = await runtime.start();
   assert.equal(snap.keepalive.state, 'WAKE_AMBIGUOUS');
