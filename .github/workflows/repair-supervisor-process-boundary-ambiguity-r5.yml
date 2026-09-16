@@ -25,7 +25,9 @@ jobs:
           node-version: '24'
 
       - name: Apply R5 repair
-        run: python3 scripts/apply-supervisor-process-boundary-ambiguity-r5.py
+        run: |
+          python3 scripts/apply-supervisor-process-boundary-ambiguity-r5.py
+          python3 scripts/fix-supervisor-process-boundary-r5-fixture.py
 
       - name: Syntax check
         run: |
