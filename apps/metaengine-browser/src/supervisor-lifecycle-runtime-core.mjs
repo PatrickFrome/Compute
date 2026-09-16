@@ -567,7 +567,11 @@ export class SupervisorLifecycleRuntime {
     const currentProcess = String(keepalive.process_incarnation_id || '');
     const predecessorProcess = String(keepalive.predecessor_process_incarnation_id || '');
     if (!pendingProcess || !currentProcess || pendingProcess === currentProcess) return false;
-    if (!predecessorProcess || predecessorProcess !== pendingProcess || !keepalive.predecessor_fenced_at) return false;
+    const immediatePredecessorFence = predecessorProcess === pendingProcess
+      && Boolean(keepalive.predecessor_fenced_at);
+    const durableWakeBoundaryFence = Boolean(pending.process_boundary_fenced_at)
+      && pending.automatic_retry_allowed === false;
+    if (!keepalive.predecessor_fenced_at || (!immediatePredecessorFence && !durableWakeBoundaryFence)) return false;
 
     const tabs = Array.isArray(state?.tabs) ? state.tabs : [];
     const durableTabId = String(
@@ -604,7 +608,7 @@ export class SupervisorLifecycleRuntime {
       action: 'PROCESS_BOUNDARY_AMBIGUOUS_WAKE_RETIRED',
       wake_id: retiredWakeId,
       tab_id: String(root.tab_id),
-      proof: 'PREDECESSOR_FENCED_ORIGINAL_TARGET_ABSENT_UNIQUE_EMPTY_ROOT',
+      proof: 'DURABLE_PROCESS_BOUNDARY_FENCE_ORIGINAL_TARGET_ABSENT_UNIQUE_EMPTY_ROOT',
       confirmed: true,
       ambiguous: false,
       automatic_retry_allowed: false,

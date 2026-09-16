@@ -239,6 +239,20 @@ export class SupervisorKeepalive {
 
     if (crossedProcessBoundary) {
       const hasPredecessor = predecessorIncarnation != null;
+      const pendingProcess = sanitizeProcessIncarnationId(this.#state.pending_wake?.process_incarnation_id);
+      if (hasPredecessor
+        && this.#state.pending_wake?.ambiguous_at
+        && this.#state.pending_wake?.automatic_retry_allowed === false
+        && pendingProcess
+        && pendingProcess !== this.#processIncarnationId
+        && !this.#state.pending_wake.process_boundary_fenced_at) {
+        // Persist the safety fact on the ambiguous wake itself. The immediate
+        // predecessor pointer is intentionally one-hop and is overwritten on
+        // every restart; this wake-local fence survives any number of later
+        // process boundaries without ever making the old effect retryable.
+        this.#state.pending_wake.process_boundary_fenced_at = recoveredAt;
+        this.#state.pending_wake.process_boundary_fenced_by_process_incarnation_id = predecessorIncarnation;
+      }
       const predecessorActive = hasPredecessor ? this.#state.active_wake : null;
       if (predecessorActive) {
         this.#state.predecessor_wake_history = [
@@ -726,7 +740,11 @@ export class SupervisorKeepalive {
     if (!pendingProcess || !currentProcess || pendingProcess === currentProcess) {
       throw new Error('keepalive_process_boundary_ambiguity_not_proven');
     }
-    if (!predecessorProcess || predecessorProcess !== pendingProcess || !this.#state.predecessor_fenced_at) {
+    const immediatePredecessorFence = predecessorProcess === pendingProcess
+      && Boolean(this.#state.predecessor_fenced_at);
+    const durableWakeBoundaryFence = Boolean(pending.process_boundary_fenced_at)
+      && pending.automatic_retry_allowed === false;
+    if (!this.#state.predecessor_fenced_at || (!immediatePredecessorFence && !durableWakeBoundaryFence)) {
       throw new Error('keepalive_process_boundary_predecessor_not_proven');
     }
     const retiredAt = iso(this.#clock);
