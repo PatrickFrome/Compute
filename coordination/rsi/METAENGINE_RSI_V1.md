@@ -16,7 +16,7 @@ The current line remains shadow-only. It can observe bounded Brain state, create
 
 Implemented through V1.2:
 
-`Brain snapshot -> shadow opportunity -> DevOS pre-lease experiment -> isolated materialization contract -> external DevOS materialization receipt -> digest-bound candidate capsule -> PREPARE_ONLY sandbox handoff -> shadow archive proposal`
+`Brain snapshot -> shadow opportunity -> DevOS pre-lease experiment -> isolated materialization contract -> canonical DevOS workspace-binding readback -> external DevOS materialization receipt -> digest-bound candidate capsule -> PREPARE_ONLY sandbox handoff -> shadow archive proposal`
 
 Still future:
 
@@ -104,6 +104,11 @@ It emits a deterministic digest-bound build plan. The plan requires the existing
 
 The plan requires:
 
+- canonical `metaengine.devos.workspace-binding-snapshot.v1` readback
+- exact workspace `base_sha == parent_sha`
+- exact `last_verified_head_sha == parent_sha`
+- current DevOS lease
+- no `dirty_hold` and no ambiguity code
 - immutable source snapshot
 - private writable layer
 - no host repository mount
@@ -122,6 +127,11 @@ The plan requires:
 - plan id/digest and experiment identity
 - exact parent and distinct exact candidate SHA
 - exact target branch
+- canonical DevOS workspace-binding readback with one exact workspace match
+- exact parent equality for both `base_sha` and `last_verified_head_sha`
+- current lease, clean workspace and no ambiguity marker
+- zero scheduler/browser/page authority in the binding proof
+- no filesystem/worktree path exposure in the binding proof
 - isolated workspace evidence
 - no host repository mount
 - no linked worktree exposure to the candidate
@@ -137,13 +147,14 @@ Only after those checks does it reuse the existing Development Plane primitives:
 2. `verification-sandbox-plan.cjs` creates and verifies a `PREPARE_ONLY` sandbox plan with immutable snapshot materialization and deny-all initial network.
 3. The handoff emits a `shadow_archive_proposal` for the existing `RsiShadowArchive`.
 
-The V1.2 handoff is `eligible_for_evaluation=true` and `eligible_for_promotion=false`. Materialization replay is explicitly unauthorized.
+The workspace binding proof is stored as a separate digest-bound `WORKSPACE_BINDING_READBACK` evidence item in the Candidate Capsule. The V1.2 handoff is `eligible_for_evaluation=true` and `eligible_for_promotion=false`. Materialization replay is explicitly unauthorized.
 
 ## Evidence properties
 
 - exact 40-hex parent SHA
 - exact 40-hex candidate SHA
 - exact source snapshot digest
+- exact canonical workspace-binding readback digest
 - exact input/output manifest digests
 - digest-bound build plan
 - digest-bound materialization receipt projection
@@ -179,13 +190,15 @@ It is not deployed DDL.
 3. Source snapshot SHA must equal the experiment parent SHA.
 4. Build plans are deterministic and tamper-evident.
 5. A prepared plan carries no lease/workspace/materialization authority.
-6. Finalization rejects a no-op candidate whose SHA equals the parent.
-7. Finalization rejects host-repository exposure and linked-worktree exposure.
-8. Finalization rejects component/path substitution relative to the prepared mutation manifest.
-9. Candidate Capsule verification remains non-executable and non-promotable.
-10. Verification sandbox remains `PREPARE_ONLY`, source-read-only, host-repo-unmounted, and deny-all network.
-11. The resulting archive proposal preserves exact parent/candidate lineage and zero actuation authority.
-12. Existing `node --test test/*.test.mjs` discovers RSI contract tests automatically.
+6. Finalization requires canonical workspace readback with `base_sha` and `last_verified_head_sha` exactly equal to parent.
+7. Finalization rejects stale base/head, non-current lease, dirty/ambiguous binding, authority leakage and filesystem-path leakage.
+8. Finalization rejects a no-op candidate whose SHA equals the parent.
+9. Finalization rejects host-repository exposure and linked-worktree exposure.
+10. Finalization rejects component/path substitution relative to the prepared mutation manifest.
+11. Candidate Capsule verification remains non-executable and non-promotable.
+12. Verification sandbox remains `PREPARE_ONLY`, source-read-only, host-repo-unmounted, and deny-all network.
+13. The resulting archive proposal preserves exact parent/candidate lineage and zero actuation authority.
+14. Existing `node --test test/*.test.mjs` discovers RSI contract tests automatically.
 
 ## Next slices
 
