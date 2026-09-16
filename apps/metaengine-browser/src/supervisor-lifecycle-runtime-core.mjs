@@ -464,7 +464,7 @@ export class SupervisorLifecycleRuntime {
     return { ok: false, reason: 'BOOTSTRAP_ROOT_NOT_READY', frame: null };
   }
 
-  async #bootstrapSupervisorConversation() {
+  async #bootstrapSupervisorConversation({ preferredExistingRootTabId = null } = {}) {
     if (this.#canActuate() !== true) return false;
     const before = this.#keepalive.snapshot();
     if (before.paused
@@ -477,7 +477,26 @@ export class SupervisorLifecycleRuntime {
 
     let prepared = null;
     try {
-      const tab = await this.#execute({ action: 'NEW_TAB', payload: { url: 'https://chatgpt.com/', select: false }, platform: null });
+      const preferredId = String(preferredExistingRootTabId || '');
+      let tab = null;
+      if (preferredId) {
+        const current = await this.#getState();
+        const fleetTabs = new Set((current?.fleet?.agents || []).map((agent) => String(agent?.tab_id || '')).filter(Boolean));
+        const scopedRoots = (current?.tabs || []).filter((candidate) => (
+          String(candidate?.tab_id || '') === preferredId
+          && !fleetTabs.has(String(candidate?.tab_id || ''))
+          && CHAT_ROOT_RE.test(String(candidate?.url || ''))
+        ));
+        if (scopedRoots.length !== 1) {
+          this.#lastError = 'supervisor_bootstrap_pre_effect:BOOTSTRAP_ROOT_AMBIGUOUS';
+          return false;
+        }
+        tab = scopedRoots[0];
+      } else {
+        // Normal first bootstrap retains the dedicated-root invariant. Existing roots
+        // are reusable only for the explicit process-boundary recovery path above.
+        tab = await this.#execute({ action: 'NEW_TAB', payload: { url: 'https://chatgpt.com/', select: false }, platform: null });
+      }
       if (!tab?.tab_id) throw new Error('supervisor_bootstrap_tab_creation_no_readback');
       const ready = await this.#waitForBootstrapRoot(tab.tab_id);
       if (!ready.ok) {
@@ -539,6 +558,76 @@ export class SupervisorLifecycleRuntime {
       this.#lastError = `supervisor_bootstrap:${String(e?.message || e).slice(0, 200)}`;
       return false;
     }
+  }
+
+  async #recoverProcessBoundaryBootstrapAmbiguity(state, keepalive) {
+    const pending = keepalive?.pending_wake;
+    if (keepalive?.state !== 'WAKE_AMBIGUOUS' || !pending?.ambiguous_at || keepalive?.conversation_url) return false;
+    const pendingProcess = String(pending.process_incarnation_id || '');
+    const currentProcess = String(keepalive.process_incarnation_id || '');
+    const predecessorProcess = String(keepalive.predecessor_process_incarnation_id || '');
+    if (!pendingProcess || !currentProcess || pendingProcess === currentProcess) return false;
+    if (!predecessorProcess || predecessorProcess !== pendingProcess || !keepalive.predecessor_fenced_at) return false;
+
+    const tabs = Array.isArray(state?.tabs) ? state.tabs : [];
+    const durableTabId = String(
+      pending.ambiguity_continuation_tab_id
+      || keepalive.tab_id
+      || '',
+    );
+    if (durableTabId && tabs.some((tab) => String(tab?.tab_id || '') === durableTabId)) return false;
+
+    const fleetTabs = new Set((state?.fleet?.agents || []).map((agent) => String(agent?.tab_id || '')).filter(Boolean));
+    const roots = tabs.filter((tab) => (
+      !fleetTabs.has(String(tab?.tab_id || ''))
+      && CHAT_ROOT_RE.test(String(tab?.url || ''))
+    ));
+    if (roots.length !== 1 || this.#canActuate() !== true) return false;
+
+    const root = roots[0];
+    let frame;
+    try { frame = await this.#capture(root.tab_id); } catch { return false; }
+    if (!CHAT_ROOT_RE.test(String(frame?.url || root?.url || '')) || generating(frame)) return false;
+    if (String(frame?.text_excerpt || '').includes(String(pending.wake_id || ''))) return false;
+    const composer = unique(frame, 'textbox');
+    if (!composer || Number(composer.value_length) !== 0) return false;
+    const live = tabLiveness(state, root.tab_id);
+    const row = this.#sessionMonitor.observe({ tab_id: root.tab_id, frame, ...live });
+    if (row.terminal_ready !== true) return false;
+
+    const retiredWakeId = String(pending.wake_id || '');
+    await this.#keepalive.retireAmbiguousAfterProcessBoundary({
+      reason: 'PROCESS_BOUNDARY_ORIGINAL_BOOTSTRAP_TARGET_LOST',
+      replacement_tab_id: root.tab_id,
+    });
+    this.#lastRecovery = {
+      action: 'PROCESS_BOUNDARY_AMBIGUOUS_WAKE_RETIRED',
+      wake_id: retiredWakeId,
+      tab_id: String(root.tab_id),
+      proof: 'PREDECESSOR_FENCED_ORIGINAL_TARGET_ABSENT_UNIQUE_EMPTY_ROOT',
+      confirmed: true,
+      ambiguous: false,
+      automatic_retry_allowed: false,
+      at: new Date().toISOString(),
+      authority_effect: false,
+    };
+
+    const bootstrapped = await this.#bootstrapSupervisorConversation({ preferredExistingRootTabId: root.tab_id });
+    if (bootstrapped) {
+      this.#lastRecovery = {
+        action: 'PROCESS_BOUNDARY_BOOTSTRAP_RECOVERED',
+        wake_id: this.#keepalive.activeWake()?.wake_id || null,
+        retired_wake_id: retiredWakeId,
+        tab_id: String(root.tab_id),
+        proof: 'RETIRED_PREDECESSOR_THEN_REUSED_UNIQUE_EMPTY_ROOT',
+        confirmed: true,
+        ambiguous: false,
+        automatic_retry_allowed: false,
+        at: new Date().toISOString(),
+        authority_effect: false,
+      };
+    }
+    return true;
   }
 
   async #continueExisting(tabId, frame) {
@@ -827,7 +916,12 @@ export class SupervisorLifecycleRuntime {
         }
 
         keepalive = this.#keepalive.snapshot();
-        if (keepalive.state === 'WAKE_AMBIGUOUS') return this.snapshot();
+        if (keepalive.state === 'WAKE_AMBIGUOUS') {
+          const processBoundaryHandled = await this.#recoverProcessBoundaryBootstrapAmbiguity(state, keepalive);
+          keepalive = this.#keepalive.snapshot();
+          if (keepalive.state === 'WAKE_AMBIGUOUS') return this.snapshot();
+          if (processBoundaryHandled && !keepalive.conversation_url) return this.snapshot();
+        }
         if (keepalive.active_wake && !keepalive.conversation_url) return this.snapshot();
         state = await this.#getState();
       }
