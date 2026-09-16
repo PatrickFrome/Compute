@@ -701,6 +701,22 @@ export class SupervisorKeepalive {
     return this.snapshot();
   }
 
+  async markAmbiguousContinuationAttempt({ wake_id = null, tab_id = null, composer_sha256 = null } = {}) {
+    const pending = this.#state.pending_wake;
+    if (this.#state.state !== 'WAKE_AMBIGUOUS' || !pending?.ambiguous_at) return false;
+    if (pending.wake_id !== String(wake_id || '')) throw new Error('keepalive_wake_binding_mismatch');
+    if (pending.ambiguity_continuation_attempted_at) return false;
+    const tabId = String(tab_id || '');
+    const composerSha = String(composer_sha256 || '').toLowerCase();
+    if (!tabId || !/^[a-f0-9]{64}$/.test(composerSha)) return false;
+    pending.ambiguity_continuation_attempted_at = iso(this.#clock);
+    pending.ambiguity_continuation_tab_id = tabId;
+    pending.ambiguity_continuation_composer_sha256 = composerSha;
+    pending.automatic_retry_allowed = false;
+    await this.#persist();
+    return true;
+  }
+
   async retireAmbiguousAfterTerminal({ tab_id = null, generation_epoch = null, reason = 'TERMINAL_BOUNDARY_CONFIRMED' } = {}) {
     const pending = this.#state.pending_wake;
     if (!pending || !pending.ambiguous_at) throw new Error('keepalive_no_ambiguous_wake');

@@ -268,9 +268,18 @@ export class SupervisorLifecycleRuntime {
       };
       return true;
     }
-    if (row.terminal_ready === true && composerMatches(frame, message) && this.#canActuate() === true) {
+    const composer = unique(frame, 'textbox');
+    if (row.terminal_ready === true
+      && composer?.value_sha256 === sha256(message)
+      && this.#canActuate() === true) {
       const send = uniqueChatGptControl(frame, 'SEND');
       if (!send) return false;
+      const continuationArmed = await this.#keepalive.markAmbiguousContinuationAttempt({
+        wake_id: pending.wake_id,
+        tab_id: tab.tab_id,
+        composer_sha256: composer.value_sha256,
+      });
+      if (!continuationArmed) return false;
       await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: String(tab.tab_id), role: 'button', accessible_name: send.name, semantic_ref: send.semantic_ref }, platform: null });
       const readback = await this.#observeSendReadback(tab.tab_id, pending.wake_id);
       if (readback.ok) {
@@ -278,14 +287,14 @@ export class SupervisorLifecycleRuntime {
         this.#activateRequest(pending, tab.tab_id, true);
         this.#lastRecovery = {
           action: 'RESTART_TYPED_WAKE_SEND_RECOVERED', wake_id: pending.wake_id, tab_id: String(tab.tab_id),
-          proof: 'EXACT_COMPOSER_SHA256_THEN_POSITIVE_SEND_READBACK', confirmed: true, ambiguous: false,
+          proof: 'DURABLE_SINGLE_CONTINUATION_FENCE_THEN_POSITIVE_SEND_READBACK', confirmed: true, ambiguous: false,
           prompt_retyped: false, automatic_retry_allowed: false, at: new Date().toISOString(), authority_effect: false,
         };
         return true;
       }
       this.#lastRecovery = {
         action: 'RESTART_TYPED_WAKE_SEND_AMBIGUOUS', wake_id: pending.wake_id, tab_id: String(tab.tab_id),
-        proof: 'EXACT_COMPOSER_SHA256_BEFORE_SINGLE_CLICK', confirmed: false, ambiguous: true,
+        proof: 'DURABLE_SINGLE_CONTINUATION_FENCE_BEFORE_CLICK', confirmed: false, ambiguous: true,
         prompt_retyped: false, automatic_retry_allowed: false, at: new Date().toISOString(), authority_effect: false,
       };
       return true;
@@ -769,6 +778,58 @@ export class SupervisorLifecycleRuntime {
       if (this.#keepalive.snapshot().state === 'ROLLOVER_AMBIGUOUS') {
         const reconciled = await this.#reconcileAmbiguousRollover(state);
         if (reconciled && this.#keepalive.snapshot().state !== 'ROLLOVER_AMBIGUOUS') state = await this.#getState();
+      }
+      let keepalive = this.#keepalive.snapshot();
+      if (keepalive.state === 'WAKE_AMBIGUOUS'
+        && keepalive.pending_wake?.ambiguous_at
+        && !keepalive.conversation_url) {
+        const fleetTabs = new Set((state?.fleet?.agents || []).map((a) => a?.tab_id).filter(Boolean).map(String));
+        const bootstrapCandidates = (state?.tabs || []).filter((tab) => {
+          if (fleetTabs.has(String(tab?.tab_id || ''))) return false;
+          const url = String(tab?.url || '');
+          return CHAT_ROOT_RE.test(url) || CHAT_RE.test(url);
+        });
+        const durableTabId = String(
+          keepalive.pending_wake?.ambiguity_continuation_tab_id
+          || keepalive.tab_id
+          || '',
+        );
+        const scopedCandidates = durableTabId
+          ? bootstrapCandidates.filter((tab) => String(tab?.tab_id || '') === durableTabId)
+          : bootstrapCandidates;
+
+        if (scopedCandidates.length === 1) {
+          const bootstrapTab = scopedCandidates[0];
+          try {
+            const frame = await this.#capture(bootstrapTab.tab_id);
+            const frameUrl = String(frame?.url || bootstrapTab?.url || '');
+            if (CHAT_ROOT_RE.test(frameUrl) || CHAT_RE.test(frameUrl)) {
+              const live = tabLiveness(state, bootstrapTab.tab_id);
+              const row = this.#sessionMonitor.observe({ tab_id: bootstrapTab.tab_id, frame, ...live });
+              this.#lastSupervisorGeneration = row.state;
+              await this.#recoverAmbiguousWakeFromFrame(bootstrapTab, frame, row, keepalive);
+              keepalive = this.#keepalive.snapshot();
+              if (keepalive.state !== 'WAKE_AMBIGUOUS' && keepalive.active_wake) {
+                let reboundFrame = frame;
+                if (!CHAT_RE.test(String(reboundFrame?.url || ''))) {
+                  try { reboundFrame = await this.#capture(bootstrapTab.tab_id); } catch {}
+                }
+                const reboundUrl = String(reboundFrame?.url || '');
+                if (CHAT_RE.test(reboundUrl)) {
+                  await this.#keepalive.bindConversation({ url: reboundUrl, tab_id: bootstrapTab.tab_id });
+                  keepalive = this.#keepalive.snapshot();
+                }
+              }
+            }
+          } catch (e) {
+            this.#lastError = `bootstrap_ambiguous_reconcile:${String(e?.message || e).slice(0, 200)}`;
+          }
+        }
+
+        keepalive = this.#keepalive.snapshot();
+        if (keepalive.state === 'WAKE_AMBIGUOUS') return this.snapshot();
+        if (keepalive.active_wake && !keepalive.conversation_url) return this.snapshot();
+        state = await this.#getState();
       }
       let supervisor = await this.#supervisorTab(state);
       if (!supervisor && admissionOpen && this.#canActuate() === true) {
