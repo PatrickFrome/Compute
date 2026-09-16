@@ -13,10 +13,15 @@ export const RSI_ISOLATED_CANDIDATE_MATERIALIZATION_SCHEMA = 'metaengine.rsi.iso
 export const RSI_ISOLATED_CANDIDATE_HANDOFF_SCHEMA = 'metaengine.rsi.isolated-candidate-handoff.v1';
 
 const SOURCE_SNAPSHOT_SCHEMA = 'metaengine.devos.packaged-source-snapshot.v1';
+const WORKSPACE_BINDING_SNAPSHOT_SCHEMA = 'metaengine.devos.workspace-binding-snapshot.v1';
 const SHA40_RE = /^[0-9a-f]{40}$/;
 const SHA256_RE = /^sha256:[0-9a-f]{64}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const AGENT_RE = /^agent_[a-z0-9-]{8,64}$/;
+const TARGET_RE = /^webcontents:[1-9][0-9]*$/;
 const SAFE_BACKENDS = new Set(['CLOUDFLARE_SANDBOX', 'VERCEL_SANDBOX', 'FIRECRACKER', 'GVISOR', 'KATA']);
 const CHANGE_TYPES = new Set(['CREATE', 'MODIFY', 'DELETE']);
+const WORKSPACE_STATES = new Set(['READY', 'FROZEN']);
 const ALLOWED_MUTATION_ROOTS = Object.freeze([
   'apps/metaengine-browser/src/',
   'apps/metaengine-browser/ui/',
@@ -79,6 +84,18 @@ function exactDigest(value, label) {
   const digest = String(value || '').toLowerCase();
   if (!SHA256_RE.test(digest)) throw new Error(`rsi_candidate_${label}_digest_invalid`);
   return digest;
+}
+
+function positiveInt(value, label) {
+  const out = Number(value);
+  if (!Number.isSafeInteger(out) || out < 1) throw new Error(`rsi_candidate_${label}_invalid`);
+  return out;
+}
+
+function isoTime(value, label) {
+  const text = String(value || '');
+  if (!Number.isFinite(Date.parse(text))) throw new Error(`rsi_candidate_${label}_invalid`);
+  return text;
 }
 
 function normalizeRepository(value) {
@@ -194,8 +211,12 @@ function buildPlanCore({ experiment, source, sourceSnapshotDigest, mutations, se
     mutation_manifest: mutations,
     workspace_contract: {
       authority: 'EXISTING_DEVOS_ONLY',
+      binding_schema: WORKSPACE_BINDING_SNAPSHOT_SCHEMA,
       lease_required_before_materialization: true,
       workspace_binding_required: true,
+      exact_base_sha_readback_required: true,
+      exact_verified_head_readback_required: true,
+      current_lease_readback_required: true,
       isolated_workspace_required: true,
       immutable_source_snapshot_required: true,
       host_repository_mount_allowed: false,
@@ -265,20 +286,117 @@ export function verifyRsiIsolatedCandidateBuildPlan(plan) {
   normalizeMutationManifest(plan.mutation_manifest);
   exactSha(plan.source?.parent_sha, 'parent');
   exactDigest(plan.source?.source_snapshot_digest, 'source_snapshot');
-  if (plan.workspace_contract?.authority !== 'EXISTING_DEVOS_ONLY' || plan.workspace_contract?.host_repository_mount_allowed !== false || plan.workspace_contract?.linked_git_worktree_is_security_boundary !== false || plan.workspace_contract?.writable_layer_must_be_private !== true) {
-    throw new Error('rsi_candidate_build_plan_workspace_contract_invalid');
-  }
+  if (
+    plan.workspace_contract?.authority !== 'EXISTING_DEVOS_ONLY'
+    || plan.workspace_contract?.binding_schema !== WORKSPACE_BINDING_SNAPSHOT_SCHEMA
+    || plan.workspace_contract?.exact_base_sha_readback_required !== true
+    || plan.workspace_contract?.exact_verified_head_readback_required !== true
+    || plan.workspace_contract?.current_lease_readback_required !== true
+    || plan.workspace_contract?.host_repository_mount_allowed !== false
+    || plan.workspace_contract?.linked_git_worktree_is_security_boundary !== false
+    || plan.workspace_contract?.writable_layer_must_be_private !== true
+  ) throw new Error('rsi_candidate_build_plan_workspace_contract_invalid');
   if (plan.materialization_contract?.arbitrary_command_field_allowed !== false || plan.verification_contract?.network_deny_by_default_required !== true) throw new Error('rsi_candidate_build_plan_policy_invalid');
   return Object.freeze({ schema: 'metaengine.rsi.isolated-candidate-build-plan-verify.v1', ok: true, plan_id: plan.plan_id, plan_digest: plan.plan_digest, execution_authorized: false, promotion_authorized: false, authority_effect: false });
 }
 
-function normalizeWorkspaceReceipt(value) {
+function normalizeWorkspaceBindingSnapshot(value, { parentSha, targetBranch, workspaceId }) {
+  if (!plainObject(value) || value.schema !== WORKSPACE_BINDING_SNAPSHOT_SCHEMA || value.state !== 'AVAILABLE') throw new Error('rsi_candidate_workspace_binding_snapshot_invalid');
+  if (
+    value.filesystem_paths_exposed !== false
+    || value.scheduler_authority !== false
+    || value.browser_actuation_authority !== false
+    || value.automatic_retry_allowed !== false
+    || value.authority_effect !== false
+  ) throw new Error('rsi_candidate_workspace_binding_snapshot_authority_invalid');
+  const coordinationWorkspaceId = String(value.coordination_workspace_id || '').toLowerCase();
+  if (!UUID_RE.test(coordinationWorkspaceId)) throw new Error('rsi_candidate_coordination_workspace_id_invalid');
+  if (!Array.isArray(value.bindings) || value.bindings.length < 1 || value.bindings.length > 64) throw new Error('rsi_candidate_workspace_bindings_invalid');
+  const matches = value.bindings.filter((row) => String(row?.workspace_id || '').toLowerCase() === workspaceId);
+  if (matches.length !== 1) throw new Error('rsi_candidate_workspace_binding_not_unique');
+  const row = matches[0];
+  if (!plainObject(row)) throw new Error('rsi_candidate_workspace_binding_invalid');
+  const normalized = {
+    workspace_id: String(row.workspace_id || '').toLowerCase(),
+    workspace_generation: positiveInt(row.workspace_generation, 'workspace_generation'),
+    coordination_workspace_id: String(row.coordination_workspace_id || '').toLowerCase(),
+    task_id: String(row.task_id || '').toLowerCase(),
+    claim_id: positiveInt(row.claim_id, 'claim_id'),
+    point_id: clip(row.point_id, 160),
+    repo_id: clip(row.repo_id, 240),
+    base_sha: exactSha(row.base_sha, 'workspace_base'),
+    branch_name: clip(row.branch_name, 240),
+    agent_id: String(row.agent_id || '').toLowerCase(),
+    tab_id: clip(row.tab_id, 160),
+    target_id: String(row.target_id || '').toLowerCase(),
+    agent_generation_epoch: positiveInt(row.agent_generation_epoch, 'agent_generation_epoch'),
+    lease_generation: positiveInt(row.lease_generation, 'lease_generation'),
+    lease_expires_at: isoTime(row.lease_expires_at, 'lease_expires_at'),
+    lease_current: row.lease_current === true,
+    state: String(row.state || '').toUpperCase(),
+    last_verified_head_sha: exactSha(row.last_verified_head_sha, 'workspace_verified_head'),
+    ambiguity_code: row.ambiguity_code == null ? null : clip(row.ambiguity_code, 120),
+    dirty_hold: row.dirty_hold === true,
+    updated_at: isoTime(row.updated_at, 'workspace_updated_at'),
+    automatic_retry_allowed: row.automatic_retry_allowed,
+    scheduler_authority: row.scheduler_authority,
+    browser_actuation_authority: row.browser_actuation_authority,
+    page_data_authority: row.page_data_authority,
+    authority_effect: row.authority_effect,
+  };
+  if (
+    !UUID_RE.test(normalized.workspace_id)
+    || normalized.coordination_workspace_id !== coordinationWorkspaceId
+    || !UUID_RE.test(normalized.task_id)
+    || !AGENT_RE.test(normalized.agent_id)
+    || !normalized.tab_id
+    || !TARGET_RE.test(normalized.target_id)
+    || !WORKSPACE_STATES.has(normalized.state)
+  ) throw new Error('rsi_candidate_workspace_binding_identity_invalid');
+  if (
+    normalized.base_sha !== parentSha
+    || normalized.last_verified_head_sha !== parentSha
+    || normalized.branch_name !== targetBranch
+    || normalized.lease_current !== true
+    || normalized.dirty_hold !== false
+    || normalized.ambiguity_code != null
+  ) throw new Error('rsi_candidate_workspace_binding_source_fence_invalid');
+  if (
+    normalized.automatic_retry_allowed !== false
+    || normalized.scheduler_authority !== false
+    || normalized.browser_actuation_authority !== false
+    || normalized.page_data_authority !== false
+    || normalized.authority_effect !== false
+  ) throw new Error('rsi_candidate_workspace_binding_authority_invalid');
+  if (Object.hasOwn(row, 'repo_root') || Object.hasOwn(row, 'managed_root') || Object.hasOwn(row, 'worktree_path') || Object.hasOwn(row, 'worktree_realpath')) {
+    throw new Error('rsi_candidate_workspace_binding_paths_exposed');
+  }
+  const projection = Object.freeze({
+    schema: WORKSPACE_BINDING_SNAPSHOT_SCHEMA,
+    state: 'AVAILABLE',
+    coordination_workspace_id: coordinationWorkspaceId,
+    binding: Object.freeze(normalized),
+    filesystem_paths_exposed: false,
+    scheduler_authority: false,
+    browser_actuation_authority: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  });
+  return Object.freeze({ ...projection, binding_snapshot_digest: sha256(projection) });
+}
+
+function normalizeWorkspaceReceipt(value, plan) {
   if (!plainObject(value)) throw new Error('rsi_candidate_workspace_receipt_invalid');
-  const workspaceId = clip(value.workspace_id, 160);
-  if (!workspaceId || !/^[A-Za-z0-9_.:-]{3,160}$/.test(workspaceId)) throw new Error('rsi_candidate_workspace_id_invalid');
+  const workspaceId = String(value.workspace_id || '').toLowerCase();
+  if (!UUID_RE.test(workspaceId)) throw new Error('rsi_candidate_workspace_id_invalid');
   if (value.isolated !== true || value.host_repository_mounted !== false || value.linked_git_worktree_exposed !== false || value.source_snapshot_read_only !== true || value.writable_layer_private !== true) {
     throw new Error('rsi_candidate_workspace_isolation_invalid');
   }
+  const bindingReadback = normalizeWorkspaceBindingSnapshot(value.binding_snapshot, {
+    parentSha: plan.source.parent_sha,
+    targetBranch: plan.target_branch,
+    workspaceId,
+  });
   return Object.freeze({
     workspace_id: workspaceId,
     isolated: true,
@@ -286,6 +404,7 @@ function normalizeWorkspaceReceipt(value) {
     linked_git_worktree_exposed: false,
     source_snapshot_read_only: true,
     writable_layer_private: true,
+    binding_readback: bindingReadback,
   });
 }
 
@@ -298,7 +417,7 @@ function normalizeMaterializationReceipt(receipt, plan) {
   if (parentSha !== plan.source.parent_sha) throw new Error('rsi_candidate_materialization_parent_mismatch');
   if (candidateSha === parentSha) throw new Error('rsi_candidate_materialization_noop');
   if (receipt.target_branch !== plan.target_branch) throw new Error('rsi_candidate_materialization_branch_mismatch');
-  const workspace = normalizeWorkspaceReceipt(receipt.workspace);
+  const workspace = normalizeWorkspaceReceipt(receipt.workspace, plan);
   const inputManifestDigest = exactDigest(receipt.input_manifest_digest, 'input_manifest');
   const outputManifestDigest = exactDigest(receipt.output_manifest_digest, 'output_manifest');
   if (inputManifestDigest !== plan.source.source_snapshot_digest) throw new Error('rsi_candidate_materialization_input_mismatch');
@@ -358,6 +477,7 @@ export function finalizeRsiIsolatedCandidateBuild({ build_plan, materialization_
     evidence: [
       { name: 'RSI_BUILD_PLAN', digest: build_plan.plan_digest },
       { name: 'SOURCE_SNAPSHOT', digest: build_plan.source.source_snapshot_digest },
+      { name: 'WORKSPACE_BINDING_READBACK', digest: materialization.workspace.binding_readback.binding_snapshot_digest },
       { name: 'MATERIALIZATION_RECEIPT', digest: materializationDigest },
       { name: 'OUTPUT_MANIFEST', digest: materialization.output_manifest_digest },
     ],
@@ -380,6 +500,7 @@ export function finalizeRsiIsolatedCandidateBuild({ build_plan, materialization_
     target_branch: build_plan.target_branch,
     build_plan_id: build_plan.plan_id,
     build_plan_digest: build_plan.plan_digest,
+    workspace_binding_readback_digest: materialization.workspace.binding_readback.binding_snapshot_digest,
     materialization_digest: materializationDigest,
     candidate_capsule: capsule,
     candidate_verification: candidateVerification,
