@@ -53,7 +53,12 @@ function versionTuple(value) {
   return match ? match.slice(1).map((part) => BigInt(part)) : null;
 }
 
-function compareVersions(left, right) {
+// Exported for continuity reconciliation: deciding whether a session-continuity
+// capsule is a strictly-older leftover of an already-superseded update attempt
+// requires the exact same dev-version ordering the handoff itself uses.
+// Returns null when either side is not an exact dev-version string — callers
+// must treat null as fail-closed (no supersede decision).
+export function compareVersions(left, right) {
   const a = versionTuple(left);
   const b = versionTuple(right);
   if (!a || !b) return null;
