@@ -381,9 +381,18 @@ export class SupervisorKeepalive {
     this.#state.admission_refill_enabled = true;
     this.#state.admission_supervisor_enabled = true;
     this.#state.admission_observed_at = iso(this.#clock);
-    if (this.#state.state === 'PARKED') {
+    const shouldRearmAdmissionFence = this.#state.state === 'PARKED'
+      || (this.#state.state === 'RECOVERING'
+        && this.#state.parked_reason === 'CONTINUOUS_SERVICE_ADMISSION_FENCED');
+    if (shouldRearmAdmissionFence) {
       // Parked queue entries are deliberately retired and never reconstructed.
+      // RECOVERING can retain the admission fence across process re-observation;
+      // reopening only clears that exact stale latch and waits for a fresh wake.
       this.#state.state = this.#state.conversation_url ? 'WAITING' : 'RECOVERING';
+      this.#state.parked_at = null;
+      this.#state.parked_reason = null;
+      this.#state.parked_queued_wake_count = 0;
+      this.#state.parked_wake_reasons = [];
     }
     await this.#persist();
     return this.snapshot();
