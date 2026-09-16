@@ -1,6 +1,6 @@
 # METAENGINE RSI V1 — Evidence-Gated Recursive Self-Improvement
 
-Status: V1.2 ISOLATED CANDIDATE BUILDER IMPLEMENTED / NO LIVE AUTHORITY
+Status: V1.2 ISOLATED CANDIDATE BUILDER IMPLEMENTED / EXACT-HEAD CI PENDING / NO LIVE AUTHORITY
 
 Base: `release/self-update-ambiguity-live-v2 @ a0af13c0640fffb4b6d5da1645220e32786b5ec0`
 
@@ -199,6 +199,10 @@ It is not deployed DDL.
 12. Verification sandbox remains `PREPARE_ONLY`, source-read-only, host-repo-unmounted, and deny-all network.
 13. The resulting archive proposal preserves exact parent/candidate lineage and zero actuation authority.
 14. Existing `node --test test/*.test.mjs` discovers RSI contract tests automatically.
+
+## Qualification state
+
+The implementation is not declared VERIFIED until the latest exact branch head completes the existing Browser qualification fan-out. Older/head-adjacent green runs are evidence for the code lineage but do not replace exact-head qualification.
 
 ## Next slices
 
