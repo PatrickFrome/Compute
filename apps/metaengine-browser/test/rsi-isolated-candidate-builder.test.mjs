@@ -12,6 +12,11 @@ import { RSI_DEVOS_EXPERIMENT_PLAN_SCHEMA } from '../src/rsi-devos-experiment-pl
 
 const PARENT = 'a'.repeat(40);
 const CANDIDATE = 'b'.repeat(40);
+const WORKSPACE_ID = '11111111-1111-4111-8111-111111111111';
+const COORDINATION_WORKSPACE_ID = '22222222-2222-4222-8222-222222222222';
+const TASK_ID = '33333333-3333-4333-8333-333333333333';
+const AGENT_ID = 'agent_00000000-0000-4000-8000-000000000001';
+const TAB_ID = 'tab_00000000-0000-4000-8000-000000000001';
 const SOURCE_SNAPSHOT = Object.freeze({
   schema: 'metaengine.devos.packaged-source-snapshot.v1',
   repository: 'PatrickFrome/Compute',
@@ -77,6 +82,51 @@ function goodBuildPlan(extra = {}) {
   });
 }
 
+function goodBindingSnapshot(plan, rowOverrides = {}, snapshotOverrides = {}) {
+  return {
+    schema: 'metaengine.devos.workspace-binding-snapshot.v1',
+    state: 'AVAILABLE',
+    coordination_workspace_id: COORDINATION_WORKSPACE_ID,
+    observed_at: '2026-09-17T00:00:01.000Z',
+    bindings: [{
+      workspace_id: WORKSPACE_ID,
+      workspace_generation: 3,
+      coordination_workspace_id: COORDINATION_WORKSPACE_ID,
+      task_id: TASK_ID,
+      claim_id: 41,
+      point_id: 'rsi.candidate.materialize.v1',
+      repo_id: 'PatrickFrome/Compute',
+      base_sha: PARENT,
+      branch_name: plan.target_branch,
+      agent_id: AGENT_ID,
+      tab_id: TAB_ID,
+      target_id: 'webcontents:7',
+      agent_generation_epoch: 28,
+      lease_generation: 2,
+      lease_expires_at: '2026-09-17T00:15:00.000Z',
+      lease_current: true,
+      state: 'READY',
+      last_verified_head_sha: PARENT,
+      ambiguity_code: null,
+      dirty_hold: false,
+      updated_at: '2026-09-17T00:00:00.000Z',
+      automatic_retry_allowed: false,
+      scheduler_authority: false,
+      browser_actuation_authority: false,
+      page_data_authority: false,
+      authority_effect: false,
+      ...rowOverrides,
+    }],
+    bounded_rows: 64,
+    filesystem_paths_exposed: false,
+    scheduler_authority: false,
+    browser_actuation_authority: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+    ...snapshotOverrides,
+  };
+}
+
 function goodMaterialization(plan, extra = {}) {
   return {
     schema: RSI_ISOLATED_CANDIDATE_MATERIALIZATION_SCHEMA,
@@ -87,12 +137,13 @@ function goodMaterialization(plan, extra = {}) {
     candidate_sha: CANDIDATE,
     target_branch: plan.target_branch,
     workspace: {
-      workspace_id: 'workspace_rsi_candidate_001',
+      workspace_id: WORKSPACE_ID,
       isolated: true,
       host_repository_mounted: false,
       linked_git_worktree_exposed: false,
       source_snapshot_read_only: true,
       writable_layer_private: true,
+      binding_snapshot: goodBindingSnapshot(plan),
     },
     input_manifest_digest: plan.source.source_snapshot_digest,
     output_manifest_digest: `sha256:${'d'.repeat(64)}`,
@@ -119,6 +170,10 @@ test('prepare phase is deterministic, exact-source, pre-lease and zero-authority
   assert.deepEqual(first, second);
   assert.equal(first.source.parent_sha, PARENT);
   assert.equal(first.workspace_contract.authority, 'EXISTING_DEVOS_ONLY');
+  assert.equal(first.workspace_contract.binding_schema, 'metaengine.devos.workspace-binding-snapshot.v1');
+  assert.equal(first.workspace_contract.exact_base_sha_readback_required, true);
+  assert.equal(first.workspace_contract.exact_verified_head_readback_required, true);
+  assert.equal(first.workspace_contract.current_lease_readback_required, true);
   assert.equal(first.workspace_contract.host_repository_mount_allowed, false);
   assert.equal(first.workspace_contract.linked_git_worktree_is_security_boundary, false);
   assert.equal(first.materialization_contract.arbitrary_command_field_allowed, false);
@@ -156,7 +211,7 @@ test('tampering with a prepared plan invalidates its digest', () => {
   assert.throws(() => verifyRsiIsolatedCandidateBuildPlan(tampered), /digest_mismatch/);
 });
 
-test('finalize binds exact materialization to Candidate Capsule and PREPARE_ONLY sandbox', () => {
+test('finalize binds exact workspace base readback, Candidate Capsule and PREPARE_ONLY sandbox', () => {
   const plan = goodBuildPlan();
   const handoff = finalizeRsiIsolatedCandidateBuild({
     build_plan: plan,
@@ -165,6 +220,7 @@ test('finalize binds exact materialization to Candidate Capsule and PREPARE_ONLY
 
   assert.equal(handoff.parent_sha, PARENT);
   assert.equal(handoff.candidate_sha, CANDIDATE);
+  assert.match(handoff.workspace_binding_readback_digest, /^sha256:[0-9a-f]{64}$/);
   assert.equal(handoff.candidate_capsule.source.head, CANDIDATE);
   assert.match(handoff.candidate_capsule.candidate_id, /^candidate_sha256_[0-9a-f]{64}$/);
   assert.equal(handoff.candidate_verification.ok, true);
@@ -181,6 +237,36 @@ test('finalize binds exact materialization to Candidate Capsule and PREPARE_ONLY
   assert.equal(handoff.execution_authority, false);
   assert.equal(handoff.self_update_authority, false);
   assert.equal(handoff.automatic_retry_allowed, false);
+});
+
+test('finalize rejects stale workspace base, stale verified head and non-current lease', () => {
+  const plan = goodBuildPlan();
+
+  for (const rowOverrides of [
+    { base_sha: 'f'.repeat(40) },
+    { last_verified_head_sha: 'f'.repeat(40) },
+    { lease_current: false },
+    { dirty_hold: true },
+    { ambiguity_code: 'HEAD_AMBIGUOUS' },
+  ]) {
+    const materialization = goodMaterialization(plan);
+    materialization.workspace.binding_snapshot = goodBindingSnapshot(plan, rowOverrides);
+    assert.throws(
+      () => finalizeRsiIsolatedCandidateBuild({ build_plan: plan, materialization_receipt: materialization }),
+      /workspace_binding_source_fence_invalid/,
+    );
+  }
+});
+
+test('finalize rejects workspace binding authority or filesystem-path exposure', () => {
+  const plan = goodBuildPlan();
+  const authority = goodMaterialization(plan);
+  authority.workspace.binding_snapshot = goodBindingSnapshot(plan, { browser_actuation_authority: true });
+  assert.throws(() => finalizeRsiIsolatedCandidateBuild({ build_plan: plan, materialization_receipt: authority }), /workspace_binding_authority_invalid/);
+
+  const pathLeak = goodMaterialization(plan);
+  pathLeak.workspace.binding_snapshot = goodBindingSnapshot(plan, { worktree_path: 'C:/repo/worktree' });
+  assert.throws(() => finalizeRsiIsolatedCandidateBuild({ build_plan: plan, materialization_receipt: pathLeak }), /workspace_binding_paths_exposed/);
 });
 
 test('finalize rejects no-op candidate, host repo exposure and mutation-set substitution', () => {
