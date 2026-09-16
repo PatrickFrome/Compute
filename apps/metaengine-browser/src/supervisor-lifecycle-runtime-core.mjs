@@ -567,7 +567,31 @@ export class SupervisorLifecycleRuntime {
     const currentProcess = String(keepalive.process_incarnation_id || '');
     const predecessorProcess = String(keepalive.predecessor_process_incarnation_id || '');
     if (!pendingProcess || !currentProcess || pendingProcess === currentProcess) return false;
-    if (!predecessorProcess || predecessorProcess !== pendingProcess || !keepalive.predecessor_fenced_at) return false;
+
+    const directPredecessorBoundary = Boolean(
+      predecessorProcess
+      && predecessorProcess === pendingProcess
+      && keepalive.predecessor_fenced_at,
+    );
+    const preparedAt = Date.parse(String(pending.prepared_at || ''));
+    const ambiguousAt = Date.parse(String(pending.ambiguous_at || ''));
+    const currentStartedAt = Date.parse(String(keepalive.process_incarnation_started_at || ''));
+    const predecessorFencedAt = Date.parse(String(keepalive.predecessor_fenced_at || ''));
+    const legacyMultiHopBoundary = Boolean(
+      !directPredecessorBoundary
+      && predecessorProcess
+      && predecessorProcess !== pendingProcess
+      && predecessorProcess !== currentProcess
+      && pending.automatic_retry_allowed === false
+      && Number.isFinite(preparedAt)
+      && Number.isFinite(ambiguousAt)
+      && Number.isFinite(currentStartedAt)
+      && Number.isFinite(predecessorFencedAt)
+      && preparedAt <= ambiguousAt
+      && ambiguousAt < currentStartedAt
+      && predecessorFencedAt === currentStartedAt,
+    );
+    if (!directPredecessorBoundary && !legacyMultiHopBoundary) return false;
 
     const tabs = Array.isArray(state?.tabs) ? state.tabs : [];
     const durableTabId = String(
@@ -596,15 +620,38 @@ export class SupervisorLifecycleRuntime {
     if (row.terminal_ready !== true) return false;
 
     const retiredWakeId = String(pending.wake_id || '');
-    await this.#keepalive.retireAmbiguousAfterProcessBoundary({
-      reason: 'PROCESS_BOUNDARY_ORIGINAL_BOOTSTRAP_TARGET_LOST',
-      replacement_tab_id: root.tab_id,
-    });
+    const boundaryProof = directPredecessorBoundary
+      ? 'DIRECT_PREDECESSOR_FENCED_ORIGINAL_TARGET_ABSENT_UNIQUE_EMPTY_ROOT'
+      : 'MULTIHOP_DURABLE_CHRONOLOGY_ORIGINAL_TARGET_ABSENT_UNIQUE_EMPTY_ROOT';
+    if (directPredecessorBoundary) {
+      await this.#keepalive.retireAmbiguousAfterProcessBoundary({
+        reason: 'PROCESS_BOUNDARY_ORIGINAL_BOOTSTRAP_TARGET_LOST',
+        replacement_tab_id: root.tab_id,
+      });
+    } else {
+      // Legacy R4/R5 wakes can survive more than one Browser restart. We never
+      // replay that old physical effect: strict durable chronology proves it
+      // belongs to an older process, then we retire it as ambiguous history.
+      await this.#keepalive.retireAmbiguousAfterTerminal({
+        reason: 'PROCESS_BOUNDARY_MULTI_HOP_ORIGINAL_BOOTSTRAP_TARGET_LOST',
+      });
+      const afterRetire = this.#keepalive.snapshot();
+      const sameReasonCurrentWake = (afterRetire.queued_wakes || []).some((wake) => (
+        String(wake?.reason || '') === String(pending.reason || '')
+        && String(wake?.process_incarnation_id || '') === String(afterRetire.process_incarnation_id || '')
+      ));
+      if (!sameReasonCurrentWake) {
+        await this.#keepalive.enqueueWake(pending.reason, {
+          key: `process-boundary-recovery:${retiredWakeId}`,
+        });
+      }
+      await this.#keepalive.resume();
+    }
     this.#lastRecovery = {
       action: 'PROCESS_BOUNDARY_AMBIGUOUS_WAKE_RETIRED',
       wake_id: retiredWakeId,
       tab_id: String(root.tab_id),
-      proof: 'PREDECESSOR_FENCED_ORIGINAL_TARGET_ABSENT_UNIQUE_EMPTY_ROOT',
+      proof: boundaryProof,
       confirmed: true,
       ambiguous: false,
       automatic_retry_allowed: false,
@@ -619,7 +666,9 @@ export class SupervisorLifecycleRuntime {
         wake_id: this.#keepalive.activeWake()?.wake_id || null,
         retired_wake_id: retiredWakeId,
         tab_id: String(root.tab_id),
-        proof: 'RETIRED_PREDECESSOR_THEN_REUSED_UNIQUE_EMPTY_ROOT',
+        proof: directPredecessorBoundary
+          ? 'RETIRED_DIRECT_PREDECESSOR_THEN_REUSED_UNIQUE_EMPTY_ROOT'
+          : 'RETIRED_MULTIHOP_PREDECESSOR_THEN_REUSED_UNIQUE_EMPTY_ROOT',
         confirmed: true,
         ambiguous: false,
         automatic_retry_allowed: false,
