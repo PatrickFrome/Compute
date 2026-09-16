@@ -19,99 +19,18 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
-      - name: Apply multihop process-boundary repair
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          keep = Path('apps/metaengine-browser/src/supervisor-keepalive.mjs')
-          text = keep.read_text()
-          old = """    if (crossedProcessBoundary) {\n      const hasPredecessor = predecessorIncarnation != null;\n      const predecessorActive = hasPredecessor ? this.#state.active_wake : null;\n"""
-          new = """    if (crossedProcessBoundary) {\n      const hasPredecessor = predecessorIncarnation != null;\n      const pendingProcess = sanitizeProcessIncarnationId(this.#state.pending_wake?.process_incarnation_id);\n      if (hasPredecessor\n        && this.#state.pending_wake?.ambiguous_at\n        && this.#state.pending_wake?.automatic_retry_allowed === false\n        && pendingProcess\n        && pendingProcess !== this.#processIncarnationId\n        && !this.#state.pending_wake.process_boundary_fenced_at) {\n        // Persist the safety fact on the ambiguous wake itself. The immediate\n        // predecessor pointer is intentionally one-hop and is overwritten on\n        // every restart; this wake-local fence survives any number of later\n        // process boundaries without ever making the old effect retryable.\n        this.#state.pending_wake.process_boundary_fenced_at = recoveredAt;\n        this.#state.pending_wake.process_boundary_fenced_by_process_incarnation_id = predecessorIncarnation;\n      }\n      const predecessorActive = hasPredecessor ? this.#state.active_wake : null;\n"""
-          if old not in text:
-              raise SystemExit('keepalive init anchor missing')
-          text = text.replace(old, new, 1)
-          old = """    if (!predecessorProcess || predecessorProcess !== pendingProcess || !this.#state.predecessor_fenced_at) {\n      throw new Error('keepalive_process_boundary_predecessor_not_proven');\n    }\n"""
-          new = """    const immediatePredecessorFence = predecessorProcess === pendingProcess\n      && Boolean(this.#state.predecessor_fenced_at);\n    const durableWakeBoundaryFence = Boolean(pending.process_boundary_fenced_at)\n      && pending.automatic_retry_allowed === false;\n    if (!this.#state.predecessor_fenced_at || (!immediatePredecessorFence && !durableWakeBoundaryFence)) {\n      throw new Error('keepalive_process_boundary_predecessor_not_proven');\n    }\n"""
-          if old not in text:
-              raise SystemExit('keepalive retirement anchor missing')
-          text = text.replace(old, new, 1)
-          keep.write_text(text)
-
-          life = Path('apps/metaengine-browser/src/supervisor-lifecycle-runtime-core.mjs')
-          text = life.read_text()
-          old = """    if (!pendingProcess || !currentProcess || pendingProcess === currentProcess) return false;\n    if (!predecessorProcess || predecessorProcess !== pendingProcess || !keepalive.predecessor_fenced_at) return false;\n\n    const tabs = Array.isArray(state?.tabs) ? state.tabs : [];\n"""
-          new = """    if (!pendingProcess || !currentProcess || pendingProcess === currentProcess) return false;\n    const immediatePredecessorFence = predecessorProcess === pendingProcess\n      && Boolean(keepalive.predecessor_fenced_at);\n    const durableWakeBoundaryFence = Boolean(pending.process_boundary_fenced_at)\n      && pending.automatic_retry_allowed === false;\n    if (!keepalive.predecessor_fenced_at || (!immediatePredecessorFence && !durableWakeBoundaryFence)) return false;\n\n    const tabs = Array.isArray(state?.tabs) ? state.tabs : [];\n"""
-          if old not in text:
-              raise SystemExit('lifecycle recovery anchor missing')
-          text = text.replace(old, new, 1)
-          text = text.replace("proof: 'PREDECESSOR_FENCED_ORIGINAL_TARGET_ABSENT_UNIQUE_EMPTY_ROOT'", "proof: 'DURABLE_PROCESS_BOUNDARY_FENCE_ORIGINAL_TARGET_ABSENT_UNIQUE_EMPTY_ROOT'", 1)
-          life.write_text(text)
-
-          test = Path('apps/metaengine-browser/test/supervisor-process-boundary-ambiguity-r5.test.mjs')
-          text = test.read_text()
-          text = text.replace("async function makeRuntime({ tabs }) {\n", "async function makeRuntime({ tabs, seed = seedState() }) {\n", 1)
-          text = text.replace("  await fs.writeFile(statePath, `${JSON.stringify(seedState(), null, 2)}\\n`);\n", "  await fs.writeFile(statePath, `${JSON.stringify(seed, null, 2)}\\n`);\n", 1)
-          addition = r'''
-
-test('multi-hop process restarts retain a durable wake-local fence and recover without replaying the old wake', async () => {
-  const seed = seedState();
-  seed.process_incarnation_id = 'process_intermediate-r6';
-  seed.process_incarnation_started_at = '2026-09-16T00:10:00.000Z';
-  seed.predecessor_process_incarnation_id = 'process_other-r6';
-  seed.predecessor_fenced_at = '2026-09-16T00:10:00.000Z';
-  const { runtime, actions, statePath, typed } = await makeRuntime({
-    seed,
-    tabs: [{ tab_id: 'replacement-root-multihop', url: 'https://chatgpt.com/', selected: false }],
-  });
-  const snap = await runtime.start();
-  assert.equal(snap.keepalive.state, 'ACTIVE');
-  assert.equal(snap.keepalive.tab_id, 'replacement-root-multihop');
-  assert.notEqual(snap.keepalive.active_wake?.wake_id, OLD_WAKE);
-  assert.equal(snap.keepalive.ambiguous_history.length, 1);
-  assert.equal(snap.keepalive.ambiguous_history[0].wake_id, OLD_WAKE);
-  assert.ok(snap.keepalive.ambiguous_history[0].process_boundary_fenced_at);
-  assert.equal(snap.keepalive.ambiguous_history[0].automatic_retry_allowed, false);
-  assert.equal(typed(), 1);
-  assert.equal(actions.includes('NEW_TAB'), false);
-  const durable = JSON.parse(await fs.readFile(statePath, 'utf8'));
-  assert.equal(durable.pending_wake, null);
-  assert.equal(durable.ambiguous_history[0].retired_process_incarnation_id, OLD_PROCESS);
-  assert.ok(durable.ambiguous_history[0].process_boundary_fenced_by_process_incarnation_id);
-});
-
-test('missing pending process identity stays fail-closed under the multihop fence', async () => {
-  const seed = seedState();
-  seed.process_incarnation_id = 'process_intermediate-r6';
-  seed.pending_wake.process_incarnation_id = null;
-  const { runtime, actions, typed } = await makeRuntime({
-    seed,
-    tabs: [{ tab_id: 'identity-missing-root', url: 'https://chatgpt.com/', selected: false }],
-  });
-  const snap = await runtime.start();
-  assert.equal(snap.keepalive.state, 'WAKE_AMBIGUOUS');
-  assert.equal(snap.keepalive.pending_wake?.wake_id, OLD_WAKE);
-  assert.equal(snap.keepalive.ambiguous_history.length, 0);
-  assert.equal(typed(), 0);
-  assert.equal(actions.includes('NEW_TAB'), false);
-});
-'''
-          if "multi-hop process restarts retain a durable wake-local fence" in text:
-              raise SystemExit('tests already patched')
-          test.write_text(text + addition)
-          PY
-      - name: Focused R6 gates
+      - name: Apply repair
+        run: python3 scripts/apply-supervisor-multihop-ambiguity-r6.py
+      - name: Focused gates
         run: |
           node --check apps/metaengine-browser/src/supervisor-keepalive.mjs
           node --check apps/metaengine-browser/src/supervisor-lifecycle-runtime-core.mjs
           node --test apps/metaengine-browser/test/supervisor-process-boundary-ambiguity-r5.test.mjs
       - name: Commit repair
-        shell: bash
         run: |
-          rm .github/workflows/repair-supervisor-multihop-ambiguity-r6.yml
+          rm .github/workflows/repair-supervisor-multihop-ambiguity-r6.yml scripts/apply-supervisor-multihop-ambiguity-r6.py
           git config user.name 'METAENGINE Repair Bot'
           git config user.email 'actions@users.noreply.github.com'
-          git add apps/metaengine-browser/src/supervisor-keepalive.mjs apps/metaengine-browser/src/supervisor-lifecycle-runtime-core.mjs apps/metaengine-browser/test/supervisor-process-boundary-ambiguity-r5.test.mjs .github/workflows/repair-supervisor-multihop-ambiguity-r6.yml
+          git add -A
           git commit -m 'fix(browser): preserve multihop ambiguity fence'
           git push origin HEAD:repair/supervisor-multihop-ambiguity-r1
