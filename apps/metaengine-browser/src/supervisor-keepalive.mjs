@@ -717,6 +717,47 @@ export class SupervisorKeepalive {
     return true;
   }
 
+  async retireAmbiguousAfterProcessBoundary({ reason = 'PROCESS_BOUNDARY_ORIGINAL_BOOTSTRAP_TARGET_LOST', replacement_tab_id = null } = {}) {
+    const pending = this.#state.pending_wake;
+    if (!pending || !pending.ambiguous_at) throw new Error('keepalive_no_ambiguous_wake');
+    const pendingProcess = sanitizeProcessIncarnationId(pending.process_incarnation_id);
+    const currentProcess = sanitizeProcessIncarnationId(this.#state.process_incarnation_id);
+    const predecessorProcess = sanitizeProcessIncarnationId(this.#state.predecessor_process_incarnation_id);
+    if (!pendingProcess || !currentProcess || pendingProcess === currentProcess) {
+      throw new Error('keepalive_process_boundary_ambiguity_not_proven');
+    }
+    if (!predecessorProcess || predecessorProcess !== pendingProcess || !this.#state.predecessor_fenced_at) {
+      throw new Error('keepalive_process_boundary_predecessor_not_proven');
+    }
+    const retiredAt = iso(this.#clock);
+    this.#state.cycle_seq = Math.max(this.#state.cycle_seq, Math.max(1, Number(pending.cycle_seq) || 1));
+    this.#state.queued_wakes = this.#state.queued_wakes.filter((row) => !(
+      row.key === pending.queue_key
+      && sanitizeProcessIncarnationId(row.process_incarnation_id) === pendingProcess
+    ));
+    this.#state.ambiguous_history = [
+      ...this.#state.ambiguous_history,
+      {
+        ...clone(pending),
+        retired_at: retiredAt,
+        retired_reason: String(reason || 'PROCESS_BOUNDARY_ORIGINAL_BOOTSTRAP_TARGET_LOST').slice(0, 200),
+        retired_process_incarnation_id: pendingProcess,
+        recovery_process_incarnation_id: currentProcess,
+        replacement_tab_id: replacement_tab_id ? String(replacement_tab_id).slice(0, 120) : null,
+        automatic_retry_allowed: false,
+      },
+    ].slice(-MAX_WAKE_HISTORY);
+    this.#state.pending_wake = null;
+    this.#state.last_completed_cycle_at = retiredAt;
+    this.#state.state = this.#state.paused
+      ? 'PAUSED'
+      : (this.#state.admission_state === 'CLOSED'
+        ? 'PARKED'
+        : (this.#state.conversation_url ? 'WAITING' : 'RECOVERING'));
+    await this.#persist();
+    return this.snapshot();
+  }
+
   async retireAmbiguousAfterTerminal({ tab_id = null, generation_epoch = null, reason = 'TERMINAL_BOUNDARY_CONFIRMED' } = {}) {
     const pending = this.#state.pending_wake;
     if (!pending || !pending.ambiguous_at) throw new Error('keepalive_no_ambiguous_wake');
