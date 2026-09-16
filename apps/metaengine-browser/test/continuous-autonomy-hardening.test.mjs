@@ -122,10 +122,11 @@ test('Windows login-start registration self-heals while Startup Approval remains
 });
 
 test('autonomy source invariants close UI, restart, host wiring and self-update gaps', async () => {
-  const [main, mainEntry, lifecycle, nativeControl, nativeSupervisor, nativeSupervisorBase, hostResilience, selfUpdateRuntime] = await Promise.all([
+  const [main, mainEntry, lifecycle, keepalive, nativeControl, nativeSupervisor, nativeSupervisorBase, hostResilience, selfUpdateRuntime] = await Promise.all([
     fs.readFile(path.join(src, 'main.mjs'), 'utf8'),
     fs.readFile(path.join(src, 'main-entry.mjs'), 'utf8'),
     fs.readFile(path.join(src, 'supervisor-lifecycle-runtime-core.mjs'), 'utf8'),
+    fs.readFile(path.join(src, 'supervisor-keepalive.mjs'), 'utf8'),
     fs.readFile(path.join(src, 'native-browser-control.mjs'), 'utf8'),
     fs.readFile(path.join(src, 'native-supervisor-client.mjs'), 'utf8'),
     fs.readFile(path.join(src, 'native-supervisor-client-base.mjs'), 'utf8'),
@@ -140,7 +141,15 @@ test('autonomy source invariants close UI, restart, host wiring and self-update 
   const rolloverAt = lifecycle.indexOf('await this.#keepalive.beginRolloverAttempt()');
   const newTabAt = lifecycle.indexOf("action: 'NEW_TAB'", rolloverAt);
   assert.ok(rolloverAt >= 0 && newTabAt > rolloverAt, 'durable rollover barrier must precede NEW_TAB');
-  assert.match(lifecycle, /EXACT_COMPOSER_SHA256_THEN_POSITIVE_SEND_READBACK/);
+  assert.match(lifecycle, /DURABLE_SINGLE_CONTINUATION_FENCE_THEN_POSITIVE_SEND_READBACK/);
+  const continuationFenceCallAt = lifecycle.indexOf('await this.#keepalive.markAmbiguousContinuationAttempt');
+  const continuationClickAt = lifecycle.indexOf("action: 'TYPED_CLICK'", continuationFenceCallAt);
+  assert.ok(continuationFenceCallAt >= 0 && continuationClickAt > continuationFenceCallAt, 'durable ambiguity continuation fence must precede the physical Send click');
+  assert.match(lifecycle, /if \(!continuationArmed\) return false/);
+  const continuationPersistValueAt = keepalive.indexOf('pending.ambiguity_continuation_attempted_at = iso(this.#clock)');
+  const continuationPersistAt = keepalive.indexOf('await this.#persist();', continuationPersistValueAt);
+  const continuationReturnAt = keepalive.indexOf('return true;', continuationPersistValueAt);
+  assert.ok(continuationPersistValueAt >= 0 && continuationPersistAt > continuationPersistValueAt && continuationReturnAt > continuationPersistAt, 'single-continuation attempt must be durable before it can authorize the click path');
   assert.match(lifecycle, /prompt_retyped: false/);
   assert.match(nativeControl, /value_sha256/);
   assert.match(nativeControl, /semantic_input_values_exposed: false/);
