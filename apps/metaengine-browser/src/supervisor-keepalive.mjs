@@ -266,6 +266,16 @@ export class SupervisorKeepalive {
       this.#state.previous_worker_generation = {};
       this.#state.process_incarnation_id = this.#processIncarnationId;
       this.#state.process_incarnation_started_at = recoveredAt;
+      const pendingProcess = sanitizeProcessIncarnationId(this.#state.pending_wake?.process_incarnation_id);
+      if (pendingProcess && pendingProcess !== this.#processIncarnationId) {
+        // The process boundary itself is trusted local evidence that this pending wake
+        // belongs to a fenced predecessor/ancestor. Stamp the exact current process
+        // that observed the boundary so later recovery does not depend on the wake
+        // owner being the immediately previous process after multiple restarts.
+        this.#state.pending_wake.process_boundary_fenced_at = recoveredAt;
+        this.#state.pending_wake.process_boundary_fenced_by = this.#processIncarnationId;
+        this.#state.pending_wake.automatic_retry_allowed = false;
+      }
     }
 
     if (this.#state.pending_wake && !this.#state.pending_wake.ambiguous_at) {
@@ -723,10 +733,20 @@ export class SupervisorKeepalive {
     const pendingProcess = sanitizeProcessIncarnationId(pending.process_incarnation_id);
     const currentProcess = sanitizeProcessIncarnationId(this.#state.process_incarnation_id);
     const predecessorProcess = sanitizeProcessIncarnationId(this.#state.predecessor_process_incarnation_id);
+    const boundaryFencedBy = sanitizeProcessIncarnationId(pending.process_boundary_fenced_by);
     if (!pendingProcess || !currentProcess || pendingProcess === currentProcess) {
       throw new Error('keepalive_process_boundary_ambiguity_not_proven');
     }
-    if (!predecessorProcess || predecessorProcess !== pendingProcess || !this.#state.predecessor_fenced_at) {
+    const immediatePredecessorProven = Boolean(
+      predecessorProcess
+      && predecessorProcess === pendingProcess
+      && this.#state.predecessor_fenced_at,
+    );
+    const transitiveBoundaryProven = Boolean(
+      pending.process_boundary_fenced_at
+      && boundaryFencedBy === currentProcess,
+    );
+    if (!immediatePredecessorProven && !transitiveBoundaryProven) {
       throw new Error('keepalive_process_boundary_predecessor_not_proven');
     }
     const retiredAt = iso(this.#clock);

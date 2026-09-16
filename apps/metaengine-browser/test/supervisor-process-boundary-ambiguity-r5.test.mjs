@@ -52,10 +52,10 @@ function rootFrame() {
   };
 }
 
-async function makeRuntime({ tabs }) {
+async function makeRuntime({ tabs, seed = seedState() }) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-r5-'));
   const statePath = path.join(dir, 'keepalive.json');
-  await fs.writeFile(statePath, `${JSON.stringify(seedState(), null, 2)}\n`);
+  await fs.writeFile(statePath, `${JSON.stringify(seed, null, 2)}\n`);
   const actions = [];
   let typed = 0;
   let currentTabs = structuredClone(tabs);
@@ -126,4 +126,45 @@ test('process-boundary ambiguity stays fail-closed when replacement roots are no
   assert.equal(snap.keepalive.ambiguous_history.length, 0);
   assert.equal(typed(), 0);
   assert.equal(actions.includes('NEW_TAB'), false);
+});
+
+
+test('multi-hop process-boundary ambiguity retires a transitively fenced ancestor wake', async () => {
+  const seed = seedState();
+  seed.process_incarnation_id = 'process_middle-r6';
+  seed.process_incarnation_started_at = '2026-09-16T00:10:00.000Z';
+  seed.predecessor_process_incarnation_id = OLD_PROCESS;
+  seed.predecessor_fenced_at = '2026-09-16T00:10:00.000Z';
+  seed.predecessor_queued_wake_count = 1;
+  seed.queued_wakes = [{
+    key: 'RESEARCH_ACCELERATOR_DUE:epoch-1',
+    reason: 'RESEARCH_ACCELERATOR_DUE',
+    queued_at: '2026-09-16T00:10:01.000Z',
+    agent_id: null,
+    agent_count: 0,
+    process_incarnation_id: 'process_middle-r6',
+    authority_effect: false,
+  }];
+
+  const { runtime, actions, statePath, typed } = await makeRuntime({
+    seed,
+    tabs: [{ tab_id: 'replacement-root-r6', url: 'https://chatgpt.com/', selected: false }],
+  });
+  const snap = await runtime.start();
+  assert.equal(snap.keepalive.state, 'ACTIVE');
+  assert.equal(snap.keepalive.conversation_url, 'https://chatgpt.com/c/r5-recovered');
+  assert.equal(snap.keepalive.tab_id, 'replacement-root-r6');
+  assert.notEqual(snap.keepalive.active_wake?.wake_id, OLD_WAKE);
+  assert.equal(snap.keepalive.ambiguous_history.length, 1);
+  assert.equal(snap.keepalive.ambiguous_history[0].wake_id, OLD_WAKE);
+  assert.equal(snap.keepalive.ambiguous_history[0].retired_process_incarnation_id, OLD_PROCESS);
+  assert.ok(snap.keepalive.ambiguous_history[0].process_boundary_fenced_at);
+  assert.ok(snap.keepalive.ambiguous_history[0].process_boundary_fenced_by);
+  assert.equal(typed(), 1);
+  assert.equal(actions.includes('NEW_TAB'), false);
+
+  const durable = JSON.parse(await fs.readFile(statePath, 'utf8'));
+  assert.equal(durable.pending_wake, null);
+  assert.equal(durable.ambiguous_history[0].automatic_retry_allowed, false);
+  assert.equal(durable.ambiguous_history[0].replacement_tab_id, 'replacement-root-r6');
 });
