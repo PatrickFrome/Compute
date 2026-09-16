@@ -73,9 +73,11 @@ export async function attemptSelfUpdateOldParentHandoff({
   relaunch,
   exit,
   clock = () => Date.now(),
+  shouldAbort = null,
 } = {}) {
   assertApp(app);
   if (typeof relaunch !== 'function' || typeof exit !== 'function') throw new Error('self_update_old_parent_handoff_process_hooks_required');
+  if (shouldAbort != null && typeof shouldAbort !== 'function') throw new Error('self_update_old_parent_handoff_abort_hook_invalid');
 
   const journal = await readSelfUpdateTransaction(app);
   const currentVersion = String(app.getVersion() || '');
@@ -102,6 +104,19 @@ export async function attemptSelfUpdateOldParentHandoff({
       authority_effect: false,
     });
   }
+  // D1 fix: honor a cancel() that landed while journal/handoff reads were in
+  // flight — stop before any durable write or process effect.
+  if (shouldAbort?.()) {
+    return Object.freeze({
+      state: 'HANDOFF_ABORTED',
+      recovered: false,
+      transaction_id: journal.transaction_id,
+      current_version: currentVersion,
+      target_version: journal.target_version,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
 
   const now = Number(clock());
   const intent = {
@@ -117,6 +132,21 @@ export async function attemptSelfUpdateOldParentHandoff({
     authority_effect: false,
   };
   await durableWriteJson(handoffPath(app), intent);
+
+  // D1 fix: the durable intent is already recorded (auditable), but the
+  // process-level relaunch+exit effects are still ahead — honor a cancel that
+  // arrived during the intent write instead of running them to completion.
+  if (shouldAbort?.()) {
+    return Object.freeze({
+      state: 'HANDOFF_INTENT_ABORTED',
+      recovered: false,
+      transaction_id: journal.transaction_id,
+      current_version: currentVersion,
+      target_version: journal.target_version,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
 
   try {
     relaunch();
@@ -170,7 +200,7 @@ export function startSelfUpdateOldParentHandoffWatchdog({
     timer = setTimer(() => {
       timer = null;
       checks += 1;
-      attemptSelfUpdateOldParentHandoff({ app, relaunch, exit })
+      attemptSelfUpdateOldParentHandoff({ app, relaunch, exit, shouldAbort: () => cancelled })
         .then((result) => {
           onObservation(result);
           if (result?.continue_watch === true && !cancelled && checks < limit) schedule(interval);

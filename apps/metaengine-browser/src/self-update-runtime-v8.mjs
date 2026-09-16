@@ -65,7 +65,7 @@ function verifiedMetadata(info, { trustedArtifactPrefix = DEFAULT_TRUSTED_ARTIFA
 
 export class SelfUpdateRuntime {
   #updater = null; #injectedUpdater; #packagedOverride; #host = null; #hostOverride;
-  #trustedChannel; #trustedArtifactPrefix; #ciTestFeedUrl; #beforeInstall; #beforeInstallerLaunch;
+  #trustedChannel; #trustedArtifactPrefix; #ciTestFeedUrl; #beforeInstall; #beforeInstallerLaunch; #readPriorTransaction;
   #releaseResolver; #releaseFetch; #currentVersion; #resolvedRelease = null;
   #state = {
     state: 'UNINITIALIZED', available_version: null, downloaded_version: null,
@@ -105,6 +105,7 @@ export class SelfUpdateRuntime {
     currentVersion = null,
     releaseResolver = resolveTrustedMetaengineDevRelease,
     fetchImpl = globalThis.fetch,
+    readPriorTransaction = null,
   } = {}) {
     this.#intervalMs = Math.max(1000, Number(intervalMs) || 10 * 60 * 1000);
     this.#restartGraceMs = Math.max(1000, Number(restartGraceMs) || 12_000);
@@ -127,6 +128,8 @@ export class SelfUpdateRuntime {
     this.#beforeInstallerLaunch = beforeInstallerLaunch;
     this.#releaseResolver = releaseResolver;
     this.#releaseFetch = fetchImpl;
+    if (readPriorTransaction != null && typeof readPriorTransaction !== 'function') throw new Error('self_update_prior_transaction_reader_invalid');
+    this.#readPriorTransaction = readPriorTransaction;
     if (!/^[0-9A-Za-z._-]+$/.test(this.#trustedChannel)) throw new Error('trusted_update_channel_invalid');
     if (!SAFE_ARTIFACT_RE.test(this.#trustedArtifactPrefix)) throw new Error('trusted_update_artifact_prefix_invalid');
     this.#ciTestFeedUrl = validateCiTestFeedUrl(ciTestFeedUrl, { testMode: ciTestMode, githubActions });
@@ -345,6 +348,28 @@ export class SelfUpdateRuntime {
 
   async #launchInstaller(now, { developerEmergency = false } = {}) {
     if (!this.#state.downloaded_version || this.#state.install_attempted_version === this.#state.downloaded_version) return;
+    // Self-update self-poisoning guard: while THIS process is the unqualified
+    // successor of an earlier install (prior transaction SUCCESSOR_BOOTED with
+    // target === the currently running version), attempting the next install
+    // is refused by beginSelfUpdateTransaction with
+    // unresolved_prior:SUCCESSOR_BOOTED — which used to latch the updater into
+    // a sticky ERROR that also blocked the signed-heartbeat health predicate,
+    // deadlocking qualification permanently. Hold the install attempt instead:
+    // keep the downloaded candidate, stay READY_RESTART with no error, and let
+    // qualification converge first. The next cycle re-evaluates this gate.
+    if (typeof this.#readPriorTransaction === 'function') {
+      const prior = await this.#readPriorTransaction().catch(() => null);
+      if (prior?.state === 'SUCCESSOR_BOOTED' && String(prior.target_version || '') === String(this.#currentVersion || '')) {
+        this.#state.pending_prior_qualification = true;
+        this.#state.state = 'READY_RESTART';
+        this.#state.last_error = null;
+        // The restart gate itself stays proven-safe: once qualification
+        // converges, the next cycle dispatches the installer without paying
+        // the grace interval again.
+        return;
+      }
+    }
+    this.#state.pending_prior_qualification = false;
     this.#state.install_attempted_version = this.#state.downloaded_version;
     this.#state.state = 'RESTARTING';
     if (developerEmergency) this.#state.developer_emergency_state = 'INSTALL_EFFECT_FENCING';
