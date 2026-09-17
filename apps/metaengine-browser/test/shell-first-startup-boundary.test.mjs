@@ -65,3 +65,15 @@ test('normal start no longer configures the persistent remote session before loc
   assert.ok(normalWindowAt >= 0);
   assert.equal(unconditionalConfigureAt, -1, 'persistent user session must not be a normal local-shell prerequisite');
 });
+
+
+test('dirty-profile harness targets the exact Fleet persistence generation', async () => {
+  const text = await source();
+  const workflowPath = path.resolve(here, '../../../.github/workflows/browser-shell-first-dirty-profile-v1.yml');
+  const workflow = await fs.readFile(workflowPath, 'utf8');
+  const runtime = text.match(/metaengine-fleet-state-v(\d+)\.json/);
+  const harness = workflow.match(/metaengine-fleet-state-v(\d+)\.json\.tmp/);
+  assert.ok(runtime, 'runtime Fleet state generation must be explicit');
+  assert.ok(harness, 'dirty-profile harness Fleet temp generation must be explicit');
+  assert.equal(harness[1], runtime[1], 'dirty-profile harness must corrupt the current Fleet temp path');
+});
