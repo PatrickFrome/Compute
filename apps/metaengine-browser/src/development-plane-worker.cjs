@@ -80,6 +80,13 @@ async function requireCurrentSource() {
   return { repository: repo.repository, head: String(repo.head).toLowerCase(), ref: repo.ref };
 }
 
+async function requireWritableCurrentSource() {
+  const repo = await readRepoHead();
+  if (repo.repository_present !== true || !/^[0-9a-f]{40}$/.test(String(repo.head || '').toLowerCase())) throw new Error('repo_head_unavailable');
+  if (repo.packaged_source_snapshot === true) throw new Error('devos_repo_file_packaged_snapshot_read_only');
+  return { repository: repo.repository, head: String(repo.head).toLowerCase(), ref: repo.ref };
+}
+
 function verifyRemoteBoundCandidate(capsule, source) {
   return verifyCandidateCapsuleRemoteBound(capsule, source, {
     cwd: repoRoot,
@@ -118,6 +125,7 @@ async function execute(capability, payload) {
     devos_repo_file_save_requires_workspace_fingerprint: true,
     devos_repo_file_save_requires_expected_sha256: true,
     devos_repo_file_save_existing_text_only: true,
+    devos_repo_file_save_packaged_snapshot_allowed: false,
     devos_repo_file_save_automatic_retry_allowed: false,
     devos_repo_search: true,
     devos_repo_search_cache: 'EXACT_HEAD',
@@ -138,9 +146,9 @@ async function execute(capability, payload) {
     requireObjectPayload(payload, 'devos_repo_file_save');
     return saveDevOSRepoTextFile({
       repoRoot,
-      currentSource: await requireCurrentSource(),
+      currentSource: await requireWritableCurrentSource(),
       payload,
-      readCurrentSource: requireCurrentSource,
+      readCurrentSource: requireWritableCurrentSource,
     });
   }
   if (capability === 'DEVOS_REPO_SEARCH') {
