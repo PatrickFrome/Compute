@@ -51,9 +51,12 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           text = Path('.github/workflows/rsi-promotion-attestation-contract.yml').read_text()
-          assert 'id-token: write' not in text
-          assert 'attestations: write' not in text
-          assert 'actions/attest@' not in text
+          forbidden = [
+              'id-token' + ': write',
+              'attestations' + ': write',
+              'actions/' + 'attest@',
+          ]
+          assert all(token not in text for token in forbidden)
           assert 'permissions:\n  contents: read' in text
           print('rsi_promotion_attestation_contract_read_only_ok')
           PY
