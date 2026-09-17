@@ -101,11 +101,23 @@ jobs:
           $userData = (Get-Content "$env:RUNNER_TEMP\shell-first-user-data.txt" -Raw).Trim()
           if (-not $userData) { throw 'shell_first_user_data_missing' }
           $journal = Join-Path $userData 'metaengine-browser-startup-journal-v1.json'
-          $fleetTemp = Join-Path $userData 'metaengine-fleet-state-v1.json.tmp'
+          # The Browser persists Fleet state with a tmp+rename pair next to
+          # fleetStatePath() in apps/metaengine-browser/src/main.mjs. The filename
+          # moved from metaengine-fleet-state-v1.json to -v2.json in 90b9082a,
+          # which silently turned a v1-only occupation into a no-op: Fleet
+          # persistence then succeeded, no SUBSYSTEM_DEGRADED/FLEET evidence was
+          # ever emitted, and this proof failed deterministically. Occupy BOTH
+          # generations; keep this list in sync with fleetStatePath().
+          $fleetTempDirs = @(
+            (Join-Path $userData 'metaengine-fleet-state-v1.json.tmp'),
+            (Join-Path $userData 'metaengine-fleet-state-v2.json.tmp')
+          )
           Remove-Item $journal -Force -ErrorAction SilentlyContinue
           Remove-Item "$journal.corrupt-*" -Force -ErrorAction SilentlyContinue
-          Remove-Item $fleetTemp -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Path $fleetTemp -Force | Out-Null
+          foreach ($t in $fleetTempDirs) {
+            Remove-Item $t -Recurse -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Path $t -Force | Out-Null
+          }
 
           $out = "$env:RUNNER_TEMP\shell-first-normal.out"
           $err = "$env:RUNNER_TEMP\shell-first-normal.err"
@@ -117,8 +129,9 @@ jobs:
           $browser = $null
           try {
             # A dead loopback proxy makes remote ChatGPT/Supabase transport fail,
-            # while the directory occupying fleet-state.tmp deterministically
-            # makes Fleet persistence fail. Neither may destroy the local shell.
+            # while the directories occupying the fleet-state tmp files
+            # deterministically make Fleet persistence fail. Neither may destroy
+            # the local shell.
             $browser = Start-Process -FilePath $app -ArgumentList '--proxy-server=http://127.0.0.1:9' -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
             $null = $browser.Handle
             $deadline = [DateTime]::UtcNow.AddSeconds(50)
@@ -160,7 +173,9 @@ jobs:
             if ($browser -and -not $browser.HasExited) {
               try { Stop-Process -Id $browser.Id -Force -ErrorAction SilentlyContinue } catch {}
             }
-            Remove-Item $fleetTemp -Recurse -Force -ErrorAction SilentlyContinue
+            foreach ($t in $fleetTempDirs) {
+              Remove-Item $t -Recurse -Force -ErrorAction SilentlyContinue
+            }
           }
 
       - name: Prove tracked Browser source checkout unchanged
