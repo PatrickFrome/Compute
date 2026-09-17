@@ -118,17 +118,17 @@ function readback(subject, overrides = {}) {
   return { ...core, readback_digest: digest(core) };
 }
 
-test('V1.11 subject binds complete V1.10 evidence but grants no origin/evaluator authority before external readback', () => {
+test('V1.11 subject binds complete V1.10 evidence but grants no origin/evaluator authority before cryptographic proof', () => {
   const { plan, receipts, result } = setup();
   const subject = createRsiEvidenceOriginSubject({ plan, receipts, result });
   const verified = verifyRsiEvidenceOriginSubject(subject);
   assert.equal(verified.ok, true);
   assert.equal(subject.terminal_result.state, 'ADMITTED');
   assert.equal(subject.origin_proven, false);
+  assert.equal(subject.cryptographic_origin_proven, false);
   assert.equal(subject.eligible_for_evaluator_mesh, false);
   assert.equal(subject.attestation_policy.persisted_verification_bytes_required, true);
-  assert.equal(subject.attestation_policy.exact_workflow_commit_required, true);
-  assert.equal(subject.attestation_policy.exact_workflow_blob_required, true);
+  assert.equal(subject.attestation_policy.structural_readback_is_cryptographic_proof, false);
   assert.equal(subject.attestation_policy.attest_without_verify_sufficient, false);
   assert.equal(subject.attestation_policy.pull_request_live_attestation_allowed, false);
   assert.equal(subject.promotion_authority, false);
@@ -153,19 +153,21 @@ test('incomplete evidence is not attestable as a terminal origin subject', () =>
   assert.throws(() => createRsiEvidenceOriginSubject({ plan, receipts: partial, result: blocked }), /rsi_evidence_origin_result_not_terminal/);
 });
 
-test('exact persisted attestation verification readback unlocks evaluator admission but still grants zero project authority', () => {
+test('structurally valid persisted attestation metadata does not itself prove cryptographic origin or unlock evaluator admission', () => {
   const { plan, receipts, result } = setup();
   const subject = createRsiEvidenceOriginSubject({ plan, receipts, result });
-  const proof = verifyRsiEvidenceOriginReadback({ subject, readback: readback(subject) });
-  assert.equal(proof.origin_proven, true);
-  assert.equal(proof.evidence_class, 'ATTESTED_EVIDENCE_READY_NON_AUTHORITY');
-  assert.equal(proof.eligible_for_evaluator_mesh, true);
-  assert.equal(proof.project_authority_granted, false);
-  assert.equal(proof.execution_authority, false);
-  assert.equal(proof.promotion_authority, false);
-  assert.equal(proof.self_update_authority, false);
-  assert.equal(proof.automatic_retry_allowed, false);
-  assert.match(proof.result_digest, /^sha256:[0-9a-f]{64}$/);
+  const structural = verifyRsiEvidenceOriginReadback({ subject, readback: readback(subject) });
+  assert.equal(structural.structural_readback_valid, true);
+  assert.equal(structural.origin_proven, false);
+  assert.equal(structural.cryptographic_origin_proven, false);
+  assert.equal(structural.cryptographic_verification_required, true);
+  assert.equal(structural.eligible_for_evaluator_mesh, false);
+  assert.equal(structural.project_authority_granted, false);
+  assert.equal(structural.execution_authority, false);
+  assert.equal(structural.promotion_authority, false);
+  assert.equal(structural.self_update_authority, false);
+  assert.equal(structural.automatic_retry_allowed, false);
+  assert.match(structural.result_digest, /^sha256:[0-9a-f]{64}$/);
 });
 
 test('attest-only, wrong repo/workflow/ref or candidate-authored readback fails closed', () => {
@@ -202,7 +204,7 @@ test('readback digest, verification bytes and exact workflow identities are immu
   assert.throws(() => verifyRsiEvidenceOriginReadback({ subject, readback: readback(subject, { verification_bytes_sha256: 'bad' }) }), /rsi_evidence_origin_verification_bytes_digest_invalid/);
 });
 
-test('FALSIFIED terminal evidence can be origin-attested for the evolution archive but never admitted to evaluator mesh', () => {
+test('FALSIFIED evidence can be structurally referenced for the evolution archive but never admitted to evaluator mesh', () => {
   const base = setup();
   const falsifyClass = base.plan.evidence_root.required_receipts[0].evidence_class;
   const falsifiedReceipts = base.receipts.map((receipt) => receipt.evidence_class === falsifyClass
@@ -211,9 +213,9 @@ test('FALSIFIED terminal evidence can be origin-attested for the evolution archi
   const falsifiedResult = applyRsiHypothesisEvidenceGate({ plan: base.plan, receipts: falsifiedReceipts });
   assert.equal(falsifiedResult.state, 'FALSIFIED');
   const subject = createRsiEvidenceOriginSubject({ plan: base.plan, receipts: falsifiedReceipts, result: falsifiedResult });
-  const proof = verifyRsiEvidenceOriginReadback({ subject, readback: readback(subject) });
-  assert.equal(proof.origin_proven, true);
-  assert.equal(proof.terminal_state, 'FALSIFIED');
-  assert.equal(proof.eligible_for_evaluator_mesh, false);
-  assert.equal(proof.promotion_authority, false);
+  const structural = verifyRsiEvidenceOriginReadback({ subject, readback: readback(subject) });
+  assert.equal(structural.origin_proven, false);
+  assert.equal(structural.terminal_state, 'FALSIFIED');
+  assert.equal(structural.eligible_for_evaluator_mesh, false);
+  assert.equal(structural.promotion_authority, false);
 });

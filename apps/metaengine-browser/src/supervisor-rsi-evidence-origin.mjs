@@ -9,7 +9,7 @@ import {
 
 export const RSI_EVIDENCE_ORIGIN_SUBJECT_SCHEMA = 'metaengine.rsi.evidence-origin-subject.v1';
 export const RSI_EVIDENCE_ORIGIN_READBACK_SCHEMA = 'metaengine.rsi.evidence-origin-readback.v1';
-export const RSI_EVIDENCE_ORIGIN_RESULT_SCHEMA = 'metaengine.rsi.evidence-origin-result.v1';
+export const RSI_EVIDENCE_ORIGIN_RESULT_SCHEMA = 'metaengine.rsi.evidence-origin-structural-readback-result.v1';
 
 const SHA40_RE = /^[0-9a-f]{40}$/;
 const SHA256_RE = /^sha256:[0-9a-f]{64}$/;
@@ -62,7 +62,7 @@ function zeroAuthority(value, label) {
 }
 function attestationPolicy() {
   const core = {
-    version: 1,
+    version: 2,
     repository: TRUSTED_REPOSITORY,
     workflow_path: TRUSTED_WORKFLOW_PATH,
     workflow_ref: TRUSTED_WORKFLOW_REF,
@@ -75,6 +75,7 @@ function attestationPolicy() {
     trusted_main_required: true,
     pull_request_live_attestation_allowed: false,
     attest_without_verify_sufficient: false,
+    structural_readback_is_cryptographic_proof: false,
     candidate_can_select_workflow: false,
     candidate_can_override_repository: false,
     candidate_can_override_verifier: false,
@@ -129,6 +130,7 @@ function subjectCore(plan, receipts, result) {
     receipt_set_digest: digest(receipts.map((receipt) => receipt.receipt_digest)),
     attestation_policy: attestationPolicy(),
     origin_proven: false,
+    cryptographic_origin_proven: false,
     eligible_for_evaluator_mesh: false,
     replay_authorized: false,
     execution_authority: false,
@@ -152,7 +154,7 @@ export function createRsiEvidenceOriginSubject({ plan, receipts = [], result } =
 export function verifyRsiEvidenceOriginSubject(subject) {
   if (!plainObject(subject) || subject.schema !== RSI_EVIDENCE_ORIGIN_SUBJECT_SCHEMA || subject.version !== 1) throw new Error('rsi_evidence_origin_subject_invalid');
   zeroAuthority(subject, 'subject');
-  if (subject.evidence_class !== 'RSI_HYPOTHESIS_EVIDENCE_READY_NON_AUTHORITY' || subject.origin_proven !== false || subject.eligible_for_evaluator_mesh !== false || subject.replay_authorized !== false) throw new Error('rsi_evidence_origin_subject_policy_invalid');
+  if (subject.evidence_class !== 'RSI_HYPOTHESIS_EVIDENCE_READY_NON_AUTHORITY' || subject.origin_proven !== false || subject.cryptographic_origin_proven !== false || subject.eligible_for_evaluator_mesh !== false || subject.replay_authorized !== false) throw new Error('rsi_evidence_origin_subject_policy_invalid');
   exactSha(subject.plan?.source_sha, 'subject_source');
   exactSha(subject.plan?.candidate_sha, 'subject_candidate');
   exactDigest(subject.plan?.plan_digest, 'subject_plan');
@@ -170,7 +172,7 @@ export function verifyRsiEvidenceOriginSubject(subject) {
   delete core.subject_digest;
   const expected = digest(core);
   if (subject.subject_digest !== expected || subject.subject_id !== `rsi_origin_${expected.slice('sha256:'.length)}`) throw new Error('rsi_evidence_origin_subject_digest_mismatch');
-  return Object.freeze({ schema: 'metaengine.rsi.evidence-origin-subject-verify.v1', ok: true, subject_id: subject.subject_id, subject_digest: subject.subject_digest, origin_proven: false, eligible_for_evaluator_mesh: false, authority_effect: false });
+  return Object.freeze({ schema: 'metaengine.rsi.evidence-origin-subject-verify.v2', ok: true, subject_id: subject.subject_id, subject_digest: subject.subject_digest, origin_proven: false, cryptographic_origin_proven: false, eligible_for_evaluator_mesh: false, authority_effect: false });
 }
 
 function canonicalReadback(subject, readback) {
@@ -231,9 +233,12 @@ export function verifyRsiEvidenceOriginReadback({ subject, readback } = {}) {
     subject_digest: subject.subject_digest,
     readback_digest: expected,
     terminal_state: subject.terminal_result.state,
-    origin_proven: true,
-    evidence_class: 'ATTESTED_EVIDENCE_READY_NON_AUTHORITY',
-    eligible_for_evaluator_mesh: subject.terminal_result.state === 'ADMITTED',
+    structural_readback_valid: true,
+    origin_proven: false,
+    cryptographic_origin_proven: false,
+    cryptographic_verification_required: true,
+    evidence_class: 'STRUCTURALLY_VERIFIED_ATTESTATION_METADATA_NON_AUTHORITY',
+    eligible_for_evaluator_mesh: false,
     replay_authorized: false,
     project_authority_granted: false,
     execution_authority: false,
