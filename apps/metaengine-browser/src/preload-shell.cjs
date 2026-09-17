@@ -217,6 +217,29 @@ ipcRenderer.on('metaengine:brain:port', (event, transfer = {}) => {
 contextBridge.exposeInMainWorld('metaengineShell', Object.freeze({
   snapshot: () => ipcRenderer.invoke('metaengine:shell:snapshot').then(decorateSnapshot),
   command: (command, payload) => ipcRenderer.invoke('metaengine:shell:command', { command, payload }),
+  ide: Object.freeze({
+    source: () => ipcRenderer.invoke('metaengine:shell:ide:source'),
+    read: ({ source, relative_path } = {}) => ipcRenderer.invoke('metaengine:shell:ide:read', {
+      source,
+      relative_path: String(relative_path ?? ''),
+      authority_effect: false,
+    }),
+    save: ({
+      source,
+      workspace_fingerprint_sha256,
+      relative_path,
+      expected_file_sha256,
+      text,
+    } = {}) => ipcRenderer.invoke('metaengine:shell:ide:save', {
+      source,
+      workspace_fingerprint_sha256: String(workspace_fingerprint_sha256 ?? ''),
+      relative_path: String(relative_path ?? ''),
+      expected_file_sha256: String(expected_file_sha256 ?? ''),
+      text: String(text ?? ''),
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    }),
+  }),
   presentationFocus: Object.freeze({
     snapshot: () => ipcRenderer.invoke('metaengine:shell:presentation-focus:snapshot'),
     selectSession: (sessionId) => ipcRenderer.invoke('metaengine:shell:presentation-focus:select-session', String(sessionId ?? '')),
