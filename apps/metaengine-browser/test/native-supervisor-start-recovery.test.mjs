@@ -94,10 +94,10 @@ test('maintenance startup retry authority remains mesh-only until other componen
   assert.ok(begin >= 0 && end > begin, 'maintenance source boundary missing');
   const maintenance = source.slice(begin, end);
 
-  assert.match(maintenance, /this\\.#mesh\\?\\.start\\(\\)/,
+  assert.match(maintenance, /this\.#mesh\?\.start\(\)/,
     'proven local/idempotent mesh initialization should remain recoverable');
-  assert.doesNotMatch(maintenance, /this\\.#lifecycle\\?\\.start\\(\\)/,
+  assert.doesNotMatch(maintenance, /this\.#lifecycle\?\.start\(\)/,
     'lifecycle startup can enter effect-capable forced cycles and must not be blindly retried');
-  assert.doesNotMatch(maintenance, /this\\.#selfUpdate\\?\\.start\\(\\)/,
+  assert.doesNotMatch(maintenance, /this\.#selfUpdate\?\.start\(\)/,
     'self-update startup can bind host/updater state and must not be blindly retried');
 });
