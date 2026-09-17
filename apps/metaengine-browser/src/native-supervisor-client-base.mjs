@@ -283,6 +283,9 @@ export class NativeSupervisorClient {
   #maxBatch;
   #maxTabMutations;
   #lastBatchCount = 0;
+  #lastBatchWakeReason = null;
+  #lastBatchWaitElapsedMs = null;
+  #lastBatchResponseAt = null;
   #heartbeatPromise = null;
   #maintenancePromise = null;
   #lastMaintenanceAtMs = 0;
@@ -477,6 +480,9 @@ export class NativeSupervisorClient {
         legacy_single_lease_fallback_enabled: this.#legacySingleLeaseFallback,
         wait_batch_ms: this.#batchWaitMs,
         last_batch_count: this.#lastBatchCount,
+        last_wait_batch_wake_reason: this.#lastBatchWakeReason,
+        last_wait_batch_elapsed_ms: this.#lastBatchWaitElapsedMs,
+        last_wait_batch_response_at: this.#lastBatchResponseAt,
         scheduler: this.#commandLane.snapshot(),
         maintenance_interval_ms: this.#maintenanceIntervalMs,
         maintenance_in_flight: this.#maintenancePromise != null,
@@ -846,6 +852,7 @@ export class NativeSupervisorClient {
 
   async #nextCommands() {
     if (this.#batchTransport !== 'UNAVAILABLE') {
+      const waitStartedAt = Date.now();
       const response = await this.#signedRequest('/v1/commands/wait-batch', {
         payload: {
           supervisor_mode: this.#supervisorMode,
@@ -855,6 +862,9 @@ export class NativeSupervisorClient {
         },
       });
       if ([404, 405, 501].includes(response.status)) {
+        this.#lastBatchWakeReason = `HTTP_${response.status}_UNSUPPORTED`;
+        this.#lastBatchWaitElapsedMs = Math.max(0, Date.now() - waitStartedAt);
+        this.#lastBatchResponseAt = new Date().toISOString();
         if (this.#legacySingleLeaseFallback) {
           this.#batchTransport = 'UNAVAILABLE';
           this.#commandFastlane?.start();
@@ -866,6 +876,9 @@ export class NativeSupervisorClient {
         }
       } else {
         const body = await response.json().catch(() => ({}));
+        this.#lastBatchWakeReason = String(body?.wake_reason || 'UNKNOWN').slice(0, 120);
+        this.#lastBatchWaitElapsedMs = Math.max(0, Date.now() - waitStartedAt);
+        this.#lastBatchResponseAt = new Date().toISOString();
         if (!response.ok || !Array.isArray(body?.commands)) {
           throw new Error(`native_supervisor_batch_next_http_${response.status}:${body?.error || 'invalid_batch'}`);
         }
