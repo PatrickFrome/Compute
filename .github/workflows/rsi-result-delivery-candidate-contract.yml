@@ -71,7 +71,7 @@ jobs:
           [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
           if [[ "$CHANGED_FILES" != '1' ]]; then exit 0; fi
           gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files?per_page=100" > /tmp/files.json
-          if jq -e --arg path "$RSI_CANDIDATE_PATH" 'length==1 and .[0].filename==$path and (.status=="added" or .status=="modified")' /tmp/files.json >/dev/null; then
+          if jq -e --arg path "$RSI_CANDIDATE_PATH" 'length==1 and .[0].filename==$path and (.[0].status=="added" or .[0].status=="modified")' /tmp/files.json >/dev/null; then
             echo 'eligible=true' >> "$GITHUB_OUTPUT"
           fi
 
