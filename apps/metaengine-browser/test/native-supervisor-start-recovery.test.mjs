@@ -84,3 +84,20 @@ test('native supervisor idle maintenance retries mesh start before reconcile', a
   assert.match(maintenance, /snapshot\?\.\(\)\?\.running !== true/);
   assert.match(maintenance, /mesh_start_recovery/);
 });
+
+
+test('maintenance startup retry authority remains mesh-only until other components prove idempotency', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const source = await readFile(new URL('../src/native-supervisor-client-base.mjs', import.meta.url), 'utf8');
+  const begin = source.indexOf('#kickMaintenance()');
+  const end = source.indexOf('async #nextCommand()', begin);
+  assert.ok(begin >= 0 && end > begin, 'maintenance source boundary missing');
+  const maintenance = source.slice(begin, end);
+
+  assert.match(maintenance, /this\.#mesh\?\.start\(\)/,
+    'proven local/idempotent mesh initialization should remain recoverable');
+  assert.doesNotMatch(maintenance, /this\.#lifecycle\?\.start\(\)/,
+    'lifecycle startup can enter effect-capable forced cycles and must not be blindly retried');
+  assert.doesNotMatch(maintenance, /this\.#selfUpdate\?\.start\(\)/,
+    'self-update startup can bind host/updater state and must not be blindly retried');
+});
