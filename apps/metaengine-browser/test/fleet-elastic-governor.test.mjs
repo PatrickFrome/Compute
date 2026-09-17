@@ -50,6 +50,46 @@ test('scale-up ceiling protects the shared tab budget', () => {
   assert.equal(held.target_agents, ELASTIC_FLEET_CONTRACT.max_target_agents_default, 'a fleet already at the ceiling never grows past it');
 });
 
+
+test('trusted tab census lifts the default elastic ceiling to the physical fleet-role ceiling', () => {
+  const agents = Array.from({ length: 12 }, (_, i) => agent(`agent_census_${i + 1}`, 'ACTIVE', { tab_id: `tab_census_${i + 1}` }));
+  const snap = fleetSnapshot(agents);
+  const census = { by_role: { FLEET: 12, USER: 4 }, fleet_tab_ceiling: 16 };
+  const plan = planElasticFleetCapacity({
+    backlog: { ready: 100, running: 20 },
+    fleetSnapshot: snap,
+    tabCensus: census,
+  });
+  assert.equal(plan.target_agents, 16);
+  assert.equal(plan.max_target_agents, 16);
+  assert.equal(plan.max_target_agents_source, 'TAB_CENSUS');
+  assert.equal(plan.fleet_tab_ceiling, 16);
+  assert.equal(plan.tab_census_grounded, true);
+});
+
+test('explicit target ceiling wins over census and missing census keeps conservative fallback', () => {
+  const agents = Array.from({ length: 12 }, (_, i) => agent(`agent_cap_${i + 1}`, 'ACTIVE', { tab_id: `tab_cap_${i + 1}` }));
+  const snap = fleetSnapshot(agents);
+  const census = { by_role: { FLEET: 12, USER: 4 }, fleet_tab_ceiling: 16 };
+
+  const explicit = planElasticFleetCapacity({
+    backlog: { ready: 100, running: 20 },
+    fleetSnapshot: snap,
+    tabCensus: census,
+    maxTargetAgents: 10,
+  });
+  assert.equal(explicit.target_agents, 10);
+  assert.equal(explicit.max_target_agents_source, 'EXPLICIT');
+
+  const fallback = planElasticFleetCapacity({
+    backlog: { ready: 100, running: 20 },
+    fleetSnapshot: snap,
+    tabCensus: null,
+  });
+  assert.equal(fallback.target_agents, ELASTIC_FLEET_CONTRACT.max_target_agents_default);
+  assert.equal(fallback.max_target_agents_source, 'CONSERVATIVE_FALLBACK');
+});
+
 test('demand resets the idle hysteresis counter', () => {
   const snap = fleetSnapshot([agent('agent_a1', 'BOUND_UNVERIFIED', { tab_id: 'tab_1' })]);
   const idle = planElasticFleetCapacity({ backlog: { ready: 0, running: 0 }, fleetSnapshot: snap, idleCycles: 2 });
