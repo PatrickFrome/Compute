@@ -17,6 +17,7 @@ import { boundedNavigation } from './bounded-navigation.mjs';
 import { SupervisorDeviceIdentity } from './supervisor-device-identity.mjs';
 import { navigationDecision, newWindowDecision, REMOTE_WEB_PREFERENCES, SECURITY_POLICY } from './browser-policy.mjs';
 import { TabRegistry } from './tab-registry.mjs';
+import { assertReloadAllowed } from './reload-auth-redirect-gate.mjs';
 import { ExactBrowserTabViewMap } from './browser-webcontents-tab-index.mjs';
 import {
   assertExactNativeSupervisorMutationTargetCurrent,
@@ -490,11 +491,11 @@ function wireRemoteView(tab, view) {
   view.webContents.on('render-process-gone', () => { invalidatePerception(tab.tab_id); publishSnapshot().catch(() => {}); });
 }
 
-async function createTab(input = 'https://chatgpt.com/', { select = true, load = true, awaitLoad = true, role = 'USER' } = {}) {
+async function createTab(input = 'https://chatgpt.com/', { select = true, load = true, awaitLoad = true, role = 'USER', created_by_continuity_id = null } = {}) {
   if (!userSession) configureUserSession();
   const d = navigationDecision(input);
   if (!d.allow) throw new Error(`navigation_blocked:${d.reason}`);
-  const tab = registry.create({ url: d.normalized_url, kind: d.kind, role, title: d.kind === 'CHATGPT' ? 'ChatGPT' : '' });
+  const tab = registry.create({ url: d.normalized_url, kind: d.kind, role, title: d.kind === 'CHATGPT' ? 'ChatGPT' : '', created_by_continuity_id });
   const view = new WebContentsView({ webPreferences: { ...REMOTE_WEB_PREFERENCES, session: userSession } });
   views.set(tab.tab_id, view);
   wireRemoteView(tab, view);
@@ -697,7 +698,7 @@ async function handleCommand(command, payload = {}) {
   if (command === 'TAKEOVER_PAUSE') return executeHumanTakeover('PAUSE');
   if (command === 'TAKEOVER_RESUME') return executeHumanTakeover('RESUME');
   if (command === 'NEW_CHATGPT') return createTab('https://chatgpt.com/', { select: true, load: true, awaitLoad: false });
-  if (command === 'NEW_TAB') return createTab(payload?.url || 'https://chatgpt.com/', { select: payload?.select !== false, load: true });
+  if (command === 'NEW_TAB') return createTab(payload?.url || 'https://chatgpt.com/', { select: payload?.select !== false, load: true, created_by_continuity_id: payload?.created_by_continuity_id || null });
   if (command === 'SELECT_TAB') { registry.select(payload?.tab_id); attachSelected(); invalidatePerception(); await publishSnapshot(); return { ok: true, tab_id: String(payload?.tab_id) }; }
   if (command === 'CLOSE_TAB') { await closeTab(payload?.tab_id); return { ok: true }; }
   if (command === 'NAVIGATE') {
@@ -707,7 +708,15 @@ async function handleCommand(command, payload = {}) {
   }
   if (command === 'BACK') { const navigated = Boolean(selectedView?.webContents.navigationHistory.canGoBack()); if (navigated) selectedView.webContents.navigationHistory.goBack(); return { ok: true, navigated }; }
   if (command === 'FORWARD') { const navigated = Boolean(selectedView?.webContents.navigationHistory.canGoForward()); if (navigated) selectedView.webContents.navigationHistory.goForward(); return { ok: true, navigated }; }
-  if (command === 'RELOAD') { selectedView?.webContents.reload(); invalidatePerception(selected?.tab_id); return { ok: true, reload_initiated: true }; }
+  if (command === 'RELOAD') {
+    // P0 repair (point 1): RELOAD is refused on a ChatGPT auth-redirect surface.
+    // A reload there re-enters the redirect and multiplies login tabs; the page
+    // is healthy, the session is not, and only a human sign-in changes that.
+    assertReloadAllowed({ action: 'RELOAD', url: selected?.url });
+    selectedView?.webContents.reload();
+    invalidatePerception(selected?.tab_id);
+    return { ok: true, reload_initiated: true };
+  }
   if (command === 'COMPUTE_HEALTH') return bridge.health();
   if (command === 'DOWNLOAD_STATUS') return downloads?.snapshot() || null;
   if (command === 'DOWNLOAD_FILE') { const result = await downloads?.download(payload); await publishSnapshot(); return result; }
@@ -843,6 +852,8 @@ async function executeNativeSupervisorCommand(command) {
   if (['NEW_TAB','SELECT_TAB','CLOSE_TAB','NAVIGATE','BACK','FORWARD','RELOAD','TAB_CENSUS','DOWNLOAD_STATUS','DOWNLOAD_FILE','DOWNLOAD_CANCEL','FLEET_RECONCILE','FLEET_SET_PROFILE','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD','GATE_STATUS','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL'].includes(action)) {
     if (['BACK','FORWARD','RELOAD'].includes(action)) {
       const { tab, view } = assertExactNativeSupervisorMutationTargetCurrent(exactMutationTarget, { views });
+      // P0 repair (point 1): same command-plane gate on the tab-scoped path.
+      assertReloadAllowed({ action, url: tab?.url });
       let navigated = null;
       if (action === 'BACK') { navigated = Boolean(view.webContents.navigationHistory.canGoBack()); if (navigated) view.webContents.navigationHistory.goBack(); }
       if (action === 'FORWARD') { navigated = Boolean(view.webContents.navigationHistory.canGoForward()); if (navigated) view.webContents.navigationHistory.goForward(); }

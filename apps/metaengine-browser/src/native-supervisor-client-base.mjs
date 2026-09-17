@@ -15,11 +15,14 @@ import { reconcileRestoredGeneratingChats } from './self-update-chat-reconcile.m
 import { DEVELOPER_EMERGENCY_UPDATE_ACTION } from './developer-emergency-update-admission.mjs';
 import { loadNativeSupervisorControlState, persistNativeSupervisorControlState } from './native-supervisor-control-state.mjs';
 import {
+  beginSelfUpdateSessionContinuityRestoreAttempt,
   buildSelfUpdateSessionContinuity,
-  clearSelfUpdateSessionContinuity,
-  loadSelfUpdateSessionContinuity,
   persistSelfUpdateSessionContinuity,
+  planPostRestoreDuplicateTabCleanup,
+  restoreSelfUpdateSessionContinuity,
 } from './self-update-session-continuity.mjs';
+import { classifyChatGptAuthReadbackFromTabs } from './chatgpt-auth-readback.mjs';
+import { SECURITY_POLICY } from './browser-policy.mjs';
 import { verifiedDownloadReceiptConfirmsRequest } from './verified-download-manager.mjs';
 import {
   devosRuntimeControlAllowsContinuousService,
@@ -151,6 +154,26 @@ function isChatGptRoot(value) {
   }
 }
 
+// P0 repair (point 6): flush the persistent user-space partition's unwritten
+// DOMStorage before the self-update handoff. Best-effort by design — Electron's
+// flushStorageData() does NOT prove ChatGPT cookie persistence; it only removes
+// the known "existed in memory, never written" class of false negatives. The
+// pre/post auth readback comparison (Qualification V2) is the actual evidence.
+export async function NativeSupervisorClientFlushUserSpaceStorage(app, { partition = SECURITY_POLICY.user_space_partition } = {}) {
+  try {
+    const electron = await import('electron');
+    const targetSession = electron.session?.fromPath
+      ? electron.session.fromPath(String(partition))
+      : electron.default?.session?.fromPath
+        ? electron.default.session.fromPath(String(partition))
+        : null;
+    await targetSession?.flushStorageData?.();
+  } catch {
+    // Hardening only: a failed flush must never block an update handoff that
+    // the operator already admitted.
+  }
+}
+
 export function planPostRestoreBlankTabCleanup({ continuityRow, bindings = [], currentTabs = [] } = {}) {
   const desiredRootCount = (continuityRow?.tabs || []).filter((tab) => isChatGptRoot(tab?.url)).length;
   const boundTabIds = new Set((bindings || []).map((row) => String(row?.tab_id || '')).filter(Boolean));
@@ -250,7 +273,10 @@ export class NativeSupervisorClient {
   #lifecycle = null;
   #mesh = null;
   #selfUpdate = null;
-  #continuityStatus = { state: 'NONE', restored_tabs: 0, target_version: null, authority_effect: false };
+  #continuityStatus = {
+    state: 'NONE', restored_tabs: 0, target_version: null,
+    user_session_continuity: null, tab_cardinality_continuity: null, authority_effect: false,
+  };
   #commandLane;
   #batchTransport = 'UNKNOWN';
   #batchWaitMs;
@@ -486,71 +512,89 @@ export class NativeSupervisorClient {
   }
 
   async #persistSessionContinuity(app, receipt) {
+    // P0 repair (point 6) — pre-persist barrier, inseparable from capsule
+    // creation:
+    //   1. metadata-only pre-install auth readback (the capsule's pre-auth
+    //      evidence for Qualification V2; no cookie values, no storage reads);
+    //   2. session.flushStorageData() on the persistent user-space partition
+    //      so unwritten DOMStorage is flushed before the process hands off.
+    //      The flush is hardening, NOT proof of ChatGPT cookie persistence —
+    //      the pre/post auth readback comparison is the actual evidence.
+    const preAuthReadback = await this.#capturePreInstallAuthReadback();
+    await NativeSupervisorClientFlushUserSpaceStorage(app);
     const state = await this.#getState();
     const lifecycle = this.#lifecycle?.snapshot() || null;
     const tabs = (state?.tabs || []).map((tab) => ({ ...tab, generation_state: generationStateForTab(lifecycle, tab?.tab_id) }));
     const selectedTabId = state?.active_tab?.tab_id || tabs.find((tab) => tab?.selected === true)?.tab_id || null;
-    const row = buildSelfUpdateSessionContinuity({ currentVersion: this.#version, targetVersion: receipt?.version, tabsSnapshot: { tabs, selected_tab_id: selectedTabId }, lifecycleSnapshot: lifecycle });
+    const row = buildSelfUpdateSessionContinuity({ currentVersion: this.#version, targetVersion: receipt?.version, tabsSnapshot: { tabs, selected_tab_id: selectedTabId }, lifecycleSnapshot: lifecycle, preAuthReadback });
     await persistSelfUpdateSessionContinuity(app.getPath('userData'), row);
-    this.#continuityStatus = { state: 'PERSISTED', restored_tabs: 0, tab_count: row.tabs.length, target_version: row.target_version, had_generating_tabs: row.tabs.some((tab) => tab?.generation_state === 'GENERATING'), authority_effect: false };
+    this.#continuityStatus = { state: 'PERSISTED', restored_tabs: 0, tab_count: row.tabs.length, target_version: row.target_version, had_generating_tabs: row.tabs.some((tab) => tab?.generation_state === 'GENERATING'), user_session_continuity: null, tab_cardinality_continuity: null, authority_effect: false };
+  }
+
+  async #capturePreInstallAuthReadback() {
+    try {
+      const state = await this.#getState();
+      return classifyChatGptAuthReadbackFromTabs(state?.tabs || []);
+    } catch {
+      return Object.freeze({
+        auth_state: 'UNKNOWN', chatgpt_tab_count: 0, auth_redirect_tab_count: 0, authenticated_tab_count: 0,
+        metadata_only: true, cookie_values_read: false,
+      });
+    }
   }
 
   async #restoreSessionContinuity() {
     const { app } = await import('electron');
     const userData = app.getPath('userData');
-    const row = await loadSelfUpdateSessionContinuity(userData);
-    if (!row) return null;
-    this.#continuityStatus = { state: 'FOUND', restored_tabs: 0, tab_count: row.tabs.length, target_version: row.target_version || null, authority_effect: false };
+    // P0 repair (point 2) — ONE-SHOT FENCE: the capsule is claimed by a durable
+    // rename BEFORE any NEW_TAB is issued. A process that crashes mid-restore,
+    // and every successor process, will find the canonical path absent: the
+    // 7 -> 14 -> 21 -> 28 -> 32 replay amplifier of the 2026-09-17 incident is
+    // structurally impossible with this fence in place.
+    const attempt = await beginSelfUpdateSessionContinuityRestoreAttempt(userData);
+    if (!attempt) {
+      this.#continuityStatus = { state: 'NONE', restored_tabs: 0, target_version: null, user_session_continuity: null, tab_cardinality_continuity: null, authority_effect: false };
+      return null;
+    }
+    const { row } = attempt;
+    this.#continuityStatus = { state: 'FOUND', restored_tabs: 0, tab_count: row.tabs.length, target_version: row.target_version || null, user_session_continuity: null, tab_cardinality_continuity: null, authority_effect: false };
     if (row.target_version && String(row.target_version) !== this.#version) {
       this.#continuityStatus.state = 'TARGET_VERSION_MISMATCH';
       return row;
     }
 
-    const state = await this.#getState();
-    const byUrl = new Map();
-    for (const tab of state?.tabs || []) {
-      const url = String(tab?.url || '');
-      if (url && !byUrl.has(url)) byUrl.set(url, tab);
-    }
+    // P0 repair (points 2+3): the module-level restore is auth-aware and
+    // one-shot. The first restored /c/ tab observed on /auth/login latches
+    // AUTH_REQUIRED as a TERMINAL state — remaining ChatGPT tabs are skipped
+    // (no login-page multiplication), non-ChatGPT tabs still restore, and the
+    // capsule is already fenced so no process will ever replay it.
+    const restore = await restoreSelfUpdateSessionContinuity({
+      row,
+      currentVersion: this.#version,
+      getState: this.#getState,
+      executeCommand: this.#executeCommand,
+    });
 
-    let selectedTabId = null;
-    let restoredTabs = 0;
-    let failedTabs = 0;
+    // P0 repair (point 4) — cleanup by proof only: close tabs whose
+    // created_by_continuity_id matches THIS attempt beyond the capsule's own
+    // tab count. Tabs without the stamp (including the 32 legacy live tabs
+    // of the incident) are never touched.
     let closedExtraTabs = 0;
-    const bindings = [];
-    for (const prior of row.tabs || []) {
-      const url = String(prior?.url || '');
-      if (!url) continue;
-      let current = byUrl.get(url) || null;
-      if (!current) {
-        try {
-          current = await this.#executeCommand({ action: 'NEW_TAB', payload: { url, select: false }, platform: null });
-          if (current?.tab_id) { byUrl.set(url, current); restoredTabs += 1; } else failedTabs += 1;
-        } catch { failedTabs += 1; continue; }
+    try {
+      const postRestoreState = await this.#getState();
+      const cleanup = planPostRestoreDuplicateTabCleanup({ continuityRow: row, currentTabs: postRestoreState?.tabs || [] });
+      for (const tabId of cleanup.close_tab_ids) {
+        await this.#executeCommand({ action: 'CLOSE_TAB', payload: { tab_id: tabId }, platform: null });
+        closedExtraTabs += 1;
       }
-      if (current?.tab_id) bindings.push({ prior_tab_id: String(prior?.prior_tab_id || ''), tab_id: String(current.tab_id), generation_state: String(prior?.generation_state || 'UNKNOWN').toUpperCase() });
-      if (prior?.selected === true && current?.tab_id) selectedTabId = String(current.tab_id);
-    }
-    if (selectedTabId) {
-      try { await this.#executeCommand({ action: 'SELECT_TAB', payload: { tab_id: selectedTabId }, platform: null }); }
-      catch { failedTabs += 1; }
-    }
-
-    if (failedTabs === 0) {
-      try {
-        const postRestoreState = await this.#getState();
-        const cleanup = planPostRestoreBlankTabCleanup({ continuityRow: row, bindings, currentTabs: postRestoreState?.tabs || [] });
-        for (const tabId of cleanup.close_tab_ids) {
-          await this.#executeCommand({ action: 'CLOSE_TAB', payload: { tab_id: tabId }, platform: null });
-          closedExtraTabs += 1;
-        }
-      } catch { failedTabs += 1; }
+    } catch {
+      // Best-effort: un-closed duplicates remain observable via census.
     }
 
     let reconcile = { schema: 'metaengine.self-update-chat-reconcile.v1', tabs: [], ambiguous_count: 0, unresolved_count: 0, authority_effect: false };
-    if (failedTabs === 0 && bindings.some((binding) => binding.generation_state === 'GENERATING')) {
+    if (restore.state === 'RESTORED' && restore.bindings.some((binding) => binding.generation_state === 'GENERATING')) {
       reconcile = await reconcileRestoredGeneratingChats({
-        bindings,
+        bindings: restore.bindings,
         captureTab: async (tabId) => this.#executeCommand({ action: 'CAPTURE', payload: { tab_id: String(tabId) }, platform: 'CHATGPT' }),
         clickControl: async (tabId, control) => this.#executeCommand({
           action: 'TYPED_CLICK',
@@ -563,17 +607,28 @@ export class NativeSupervisorClient {
           platform: 'CHATGPT',
         }),
       });
-      failedTabs += Number(reconcile.unresolved_count || 0);
     }
 
+    const failedTabs = restore.failed_tabs + Number(reconcile.unresolved_count || 0);
+    let stateLabel = restore.state;
+    if (stateLabel === 'RESTORED' && failedTabs > 0) stateLabel = 'PARTIAL';
     this.#continuityStatus = {
-      state: failedTabs === 0 ? 'RESTORED' : 'PARTIAL', restored_tabs: restoredTabs, closed_extra_tabs: closedExtraTabs, failed_tabs: failedTabs,
-      tab_count: row.tabs.length, target_version: row.target_version || null, had_generating_tabs: row.tabs.some((tab) => tab?.generation_state === 'GENERATING'),
-      lifecycle_resume_present: Boolean(row.lifecycle?.active_request), reconciled_generating_tabs: reconcile.tabs.length,
+      state: stateLabel, restored_tabs: restore.restored_tabs, closed_extra_tabs: closedExtraTabs, failed_tabs: failedTabs,
+      skipped_auth_required_tabs: restore.skipped_auth_required_tabs,
+      tab_count: restore.tab_count, target_version: restore.target_version || null, had_generating_tabs: restore.had_generating_tabs,
+      lifecycle_resume_present: restore.lifecycle_resume_present, reconciled_generating_tabs: reconcile.tabs.length,
       reconcile_ambiguous_count: reconcile.ambiguous_count, reconcile_unresolved_count: reconcile.unresolved_count,
-      reconcile_authority_effect: reconcile.authority_effect === true, authority_effect: false,
+      reconcile_authority_effect: reconcile.authority_effect === true,
+      // Qualification V2 evidence (metadata-only, P0 repair point 5).
+      continuity_id: restore.continuity_id,
+      auth_readback_state: restore.auth_readback?.auth_state ?? null,
+      auth_redirect_tab_count: restore.auth_readback?.auth_redirect_tab_count ?? null,
+      user_session_continuity: restore.user_session_continuity,
+      tab_cardinality_continuity: restore.tab_cardinality?.state ?? null,
+      tab_cardinality_pre_tab_count: restore.tab_cardinality?.pre_tab_count ?? null,
+      tab_cardinality_post_tab_count: restore.tab_cardinality?.post_tab_count ?? null,
+      authority_effect: false,
     };
-    if (failedTabs === 0) await clearSelfUpdateSessionContinuity(userData);
     return row;
   }
 

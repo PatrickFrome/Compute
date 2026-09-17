@@ -88,6 +88,10 @@ export function buildBootstrapHeartbeatPayload({ state = {}, version = '0.0.0', 
         state: 'BOOTSTRAP_RESTORE_PENDING',
         restored_tabs: 0,
         target_version: null,
+        // Qualification V2 fields are present-but-null until the restore
+        // completes; the qualification predicate treats null as UNKNOWN.
+        user_session_continuity: null,
+        tab_cardinality_continuity: null,
         authority_effect: false,
       },
       bootstrap_heartbeat: true,
@@ -126,7 +130,11 @@ export function buildSupervisorWatchdogHeartbeatPayload({ state = {}, supervisor
       self_update: supervisor?.self_update ? structuredClone(supervisor.self_update) : null,
       self_update_session_continuity: supervisor?.session_continuity
         ? structuredClone(supervisor.session_continuity)
-        : { state: 'NONE', restored_tabs: 0, target_version: null, authority_effect: false },
+        : {
+          state: 'NONE', restored_tabs: 0, target_version: null,
+          user_session_continuity: null, tab_cardinality_continuity: null,
+          authority_effect: false,
+        },
       watchdog_heartbeat: true,
       authority_effect: false,
     },

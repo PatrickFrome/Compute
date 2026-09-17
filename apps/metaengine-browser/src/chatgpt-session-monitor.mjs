@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
 
-export const CHATGPT_SESSION_MONITOR_VERSION = '1.2.0';
+export const CHATGPT_SESSION_MONITOR_VERSION = '1.3.0';
 
 const CHAT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/(?:c\/[a-z0-9-]+.*)?$/i;
 const PHYSICAL_BROKEN = new Set(['RENDERER_GONE','LOAD_FAILED']);
@@ -46,6 +46,8 @@ function newRow(tabId, now) {
     recent_generation_ms: [],
     recovery_attempts: 0,
     continue_attempted_epoch: null,
+    // Deprecated (v1.3.0): navigation-class auto-recovery is forbidden. Kept
+    // for snapshot schema stability only; never set by markRecovery anymore.
     reload_attempted_epoch: null,
     stop_attempted_epoch: null,
     physical_health: 'UNKNOWN',
@@ -208,8 +210,15 @@ export class ChatGptSessionMonitor {
     if (row.state === 'INTERRUPTED' && row.controls.continue === 1 && row.continue_attempted_epoch !== row.generation_epoch) {
       return { action: 'CONTINUE_GENERATION', reason: 'UNIQUE_CONTINUATION_CONTROL', authority_effect: false };
     }
-    if (['BROKEN','UNRESPONSIVE'].includes(row.state) && row.reload_attempted_epoch !== row.generation_epoch) {
-      return { action: 'RELOAD_SAME_CONVERSATION', reason: row.state, authority_effect: false };
+    // v1.3.0 (P0 continuity repair): RELOAD_SAME_CONVERSATION is dismantled.
+    // A BROKEN/UNRESPONSIVE renderer used to be answered with a navigation-class
+    // auto-RELOAD. After the 2026-09-17 logout incident that path is forbidden:
+    // a reload on an auth-redirected ChatGPT tab re-enters the redirect, and
+    // renderer liveness is recoverable without navigation (bounded CDP
+    // Runtime.enable re-seed on DOM.documentUpdated handles the lost-refs
+    // case). Physical breakage now escalates instead of reloading.
+    if (['BROKEN','UNRESPONSIVE'].includes(row.state)) {
+      return { action: 'ESCALATE', reason: `RELOAD_FORBIDDEN_${row.state}`, authority_effect: false };
     }
     if (row.state === 'STALLED' && row.stop_attempted_epoch !== row.generation_epoch) {
       return { action: 'STOP_GENERATION', reason: 'ADAPTIVE_STALL_CONFIRMED', authority_effect: false };
@@ -225,7 +234,6 @@ export class ChatGptSessionMonitor {
     row.state = 'RECOVERING';
     row.state_since = iso(this.#clock());
     if (normalized === 'CONTINUE_GENERATION') row.continue_attempted_epoch = row.generation_epoch;
-    if (normalized === 'RELOAD_SAME_CONVERSATION') row.reload_attempted_epoch = row.generation_epoch;
     if (normalized === 'STOP_GENERATION') row.stop_attempted_epoch = row.generation_epoch;
     row.terminal_ready = false;
     return this.get(tabId);
