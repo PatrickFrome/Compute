@@ -1,0 +1,55 @@
+name: METAENGINE RSI Promotion Attestation Contract
+
+on:
+  pull_request:
+    paths:
+      - 'controller/rsi/**'
+      - 'tests/rsi/**'
+      - '.github/workflows/rsi-promotion-attestation-contract.yml'
+  push:
+    branches:
+      - work/metaengine-rsi-v1-shadow
+    paths:
+      - 'controller/rsi/**'
+      - 'tests/rsi/**'
+      - '.github/workflows/rsi-promotion-attestation-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-verifier-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Prove checkout identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Compile trusted verifier
+        run: python3 -m py_compile controller/rsi/promotion_attestation.py tests/rsi/test_promotion_attestation.py
+
+      - name: Run adversarial promotion-attestation contract
+        run: python3 -m unittest tests.rsi.test_promotion_attestation -v
+
+      - name: Prove contract is non-signing and read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('.github/workflows/rsi-promotion-attestation-contract.yml').read_text()
+          assert 'id-token: write' not in text
+          assert 'attestations: write' not in text
+          assert 'actions/attest@' not in text
+          assert 'permissions:\n  contents: read' in text
+          print('rsi_promotion_attestation_contract_read_only_ok')
+          PY
