@@ -1,0 +1,238 @@
+name: METAENGINE RSI Evidence Origin Attestation
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/supervisor-rsi-evidence-origin.mjs'
+      - 'apps/metaengine-browser/test/rsi-evidence-origin.test.mjs'
+      - 'apps/metaengine-browser/scripts/rsi-evidence-origin-crypto.mjs'
+      - '.github/workflows/rsi-evidence-origin-attestation.yml'
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Trusted main RSI evidence-producer run ID'
+        required: true
+        type: string
+      expected_subject_digest:
+        description: 'Exact sha256:... origin-subject digest expected from producer evidence'
+        required: true
+        type: string
+      confirmation:
+        description: 'Type ATTEST_RSI_EVIDENCE_ORIGIN'
+        required: true
+        type: string
+
+permissions: {}
+concurrency:
+  group: rsi-evidence-origin-attestation-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RSI_PRODUCER_WORKFLOW: .github/workflows/rsi-hypothesis-evidence-producer.yml
+  RSI_PRODUCER_ARTIFACT: rsi-hypothesis-evidence-support
+  RSI_PREDICATE_TYPE: https://github.com/PatrickFrome/Compute/attestations/rsi-evidence-origin/v1
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Prove origin contracts
+        run: |
+          set -euo pipefail
+          node --check apps/metaengine-browser/src/supervisor-rsi-evidence-origin.mjs
+          node --check apps/metaengine-browser/scripts/rsi-evidence-origin-crypto.mjs
+          cd apps/metaengine-browser
+          node --test test/rsi-evidence-origin.test.mjs
+      - name: Prove workflow trust split
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/rsi-evidence-origin-attestation.yml').read_text()
+          assert 'pull_request_target:' not in p
+          assert "RSI_PRODUCER_WORKFLOW: .github/workflows/rsi-hypothesis-evidence-producer.yml" in p
+          assert "RSI_PRODUCER_ARTIFACT: rsi-hypothesis-evidence-support" in p
+          attest=p.split('\n  attest-origin:',1)[1].split('\n  verify-origin:',1)[0]
+          verify=p.split('\n  verify-origin:',1)[1]
+          assert 'id-token: write' in attest and 'attestations: write' in attest
+          assert 'id-token: write' not in verify and 'attestations: write' not in verify
+          assert 'actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6' in attest
+          assert 'gh attestation verify' in verify
+          for flag in ('--bundle','--signer-workflow','--signer-digest','--source-ref refs/heads/main','--source-digest','--cert-oidc-issuer','--deny-self-hosted-runners'):
+              assert flag in verify
+          assert "eligible_for_evaluator_mesh!==false" in verify
+          PY
+
+  preflight:
+    if: github.event_name == 'workflow_dispatch'
+    needs: contract-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      producer_head_sha: ${{ steps.producer.outputs.head_sha }}
+      producer_run_attempt: ${{ steps.producer.outputs.run_attempt }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Validate trusted-main dispatch and producer run
+        id: producer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          EXPECTED_SUBJECT_DIGEST: ${{ inputs.expected_subject_digest }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$CONFIRMATION" == 'ATTEST_RSI_EVIDENCE_ORIGIN' ]]
+          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$EXPECTED_SUBJECT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > /tmp/producer.json
+          jq -e --arg path "$RSI_PRODUCER_WORKFLOW" '.path==$path and .event=="workflow_dispatch" and .status=="completed" and .conclusion=="success" and .head_branch=="main" and (.head_sha|test("^[0-9a-f]{40}$"))' /tmp/producer.json >/dev/null
+          echo "head_sha=$(jq -r .head_sha /tmp/producer.json)" >> "$GITHUB_OUTPUT"
+          echo "run_attempt=$(jq -r .run_attempt /tmp/producer.json)" >> "$GITHUB_OUTPUT"
+
+  attest-origin:
+    if: github.event_name == 'workflow_dispatch'
+    needs: [contract-tests, preflight]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: rsi-evidence-origin-attestation
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    outputs:
+      material_artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      workflow_sha: ${{ steps.identity.outputs.workflow_sha }}
+      workflow_blob_sha: ${{ steps.identity.outputs.workflow_blob_sha }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Capture immutable signer identity
+        id: identity
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          BLOB="$(git rev-parse "$GITHUB_SHA:.github/workflows/rsi-evidence-origin-attestation.yml")"
+          [[ "$BLOB" =~ ^[0-9a-f]{40}$ ]]
+          echo "workflow_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "workflow_blob_sha=$BLOB" >> "$GITHUB_OUTPUT"
+      - name: Download fixed trusted producer evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p source evidence
+          gh run download "$SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$RSI_PRODUCER_ARTIFACT" --dir source
+          for f in plan.json receipts.json result.json; do test -s "source/$f"; done
+      - name: Reconstruct canonical origin subject on trusted main
+        env:
+          EXPECTED_SUBJECT_DIGEST: ${{ inputs.expected_subject_digest }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import {createRsiEvidenceOriginSubject} from './apps/metaengine-browser/src/supervisor-rsi-evidence-origin.mjs';
+          const read=p=>JSON.parse(fs.readFileSync(p,'utf8'));
+          const stable=v=>Array.isArray(v)?v.map(stable):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])])):v;
+          const subject=createRsiEvidenceOriginSubject({plan:read('source/plan.json'),receipts:read('source/receipts.json'),result:read('source/result.json')});
+          if(subject.subject_digest!==process.env.EXPECTED_SUBJECT_DIGEST) throw Error('expected_subject_digest_mismatch');
+          fs.writeFileSync('evidence/rsi-origin-subject.json',JSON.stringify(stable(subject))+'\n');
+          NODE
+          node apps/metaengine-browser/scripts/rsi-evidence-origin-crypto.mjs predicate \
+            evidence/rsi-origin-subject.json '${{ steps.identity.outputs.workflow_sha }}' '${{ steps.identity.outputs.workflow_blob_sha }}' \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" '${{ inputs.source_run_id }}' '${{ needs.preflight.outputs.producer_run_attempt }}' '${{ needs.preflight.outputs.producer_head_sha }}' \
+            evidence/rsi-origin-predicate.json
+      - name: Attest exact canonical subject with GitHub OIDC
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: evidence/rsi-origin-subject.json
+          predicate-type: ${{ env.RSI_PREDICATE_TYPE }}
+          predicate-path: evidence/rsi-origin-predicate.json
+      - name: Materialize portable Sigstore bundle
+        run: |
+          set -euo pipefail
+          cp '${{ steps.attest.outputs.bundle-path }}' evidence/rsi-origin-attestation.sigstore.jsonl
+          test -s evidence/rsi-origin-attestation.sigstore.jsonl
+      - name: Upload immutable attestation material
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: rsi-origin-attestation-material
+          path: evidence/
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
+
+  verify-origin:
+    if: github.event_name == 'workflow_dispatch'
+    needs: [preflight, attest-origin]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Prove verifier uses exact signer revision
+        run: |
+          set -euo pipefail
+          test "$GITHUB_SHA" = '${{ needs.attest-origin.outputs.workflow_sha }}'
+          test "$(git rev-parse "$GITHUB_SHA:.github/workflows/rsi-evidence-origin-attestation.yml")" = '${{ needs.attest-origin.outputs.workflow_blob_sha }}'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ needs.attest-origin.outputs.material_artifact_id }}
+          path: material
+          digest-mismatch: error
+      - name: Independently verify Sigstore statement
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SUBJECT="$(find material -name rsi-origin-subject.json -print -quit)"
+          BUNDLE="$(find material -name rsi-origin-attestation.sigstore.jsonl -print -quit)"
+          test -s "$SUBJECT"; test -s "$BUNDLE"; mkdir -p evidence
+          gh attestation verify "$SUBJECT" --repo "$GITHUB_REPOSITORY" --bundle "$BUNDLE" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/rsi-evidence-origin-attestation.yml" \
+            --signer-digest "$GITHUB_SHA" --source-ref refs/heads/main --source-digest "$GITHUB_SHA" \
+            --cert-oidc-issuer https://token.actions.githubusercontent.com --predicate-type "$RSI_PREDICATE_TYPE" \
+            --deny-self-hosted-runners --format json > evidence/gh-attestation-verification.json
+          node apps/metaengine-browser/scripts/rsi-evidence-origin-crypto.mjs verify \
+            "$SUBJECT" evidence/gh-attestation-verification.json "$GITHUB_SHA" '${{ needs.attest-origin.outputs.workflow_blob_sha }}' "$GITHUB_RUN_ID" \
+            evidence/rsi-origin-cryptographic-verification.json
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';const v=JSON.parse(fs.readFileSync('evidence/rsi-origin-cryptographic-verification.json'));
+          if(v.cryptographic_origin_verified!==true||v.eligible_for_evaluator_mesh!==false||v.persisted_readback_still_required_for_runtime_admission!==true||v.authority_effect!==false) throw Error('cryptographic_receipt_boundary_invalid');
+          NODE
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: rsi-origin-cryptographic-verification
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
