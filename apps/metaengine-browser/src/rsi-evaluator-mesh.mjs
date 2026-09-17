@@ -15,44 +15,24 @@ const SHA256_RE = /^sha256:[0-9a-f]{64}$/;
 const EVIDENCE_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{2,511}$/;
 const MAX_EVIDENCE_REFS = 32;
 const MAX_OBJECTIVES = 16;
+const EVALUATOR_TRUST_ROOT_PATHS = new Set([
+  'apps/metaengine-browser/src/rsi-evaluator-mesh.mjs',
+  'apps/metaengine-browser/src/rsi-shadow-core.mjs',
+  'apps/metaengine-browser/src/rsi-isolated-candidate-builder.mjs',
+  'apps/metaengine-browser/src/candidate-capsule.cjs',
+  'apps/metaengine-browser/src/verification-sandbox-plan.cjs',
+  'apps/metaengine-browser/src/verification-sandbox-backend-binding.cjs',
+  'apps/metaengine-browser/src/browser-identity-signer-runtime.mjs',
+  'apps/metaengine-browser/src/trusted-dev-release-resolver.mjs',
+]);
 
 const EVALUATOR_ROOT = Object.freeze([
-  Object.freeze({
-    evaluator_id: 'rsi.source-identity.v1',
-    invariant: 'EXACT_SOURCE_IDENTITY',
-    evidence_class: 'EXACT_SOURCE_READBACK',
-    runner: 'trusted/exact-source-identity',
-  }),
-  Object.freeze({
-    evaluator_id: 'rsi.workspace-isolation.v1',
-    invariant: 'NO_WORKSPACE_ESCAPE',
-    evidence_class: 'WORKSPACE_ISOLATION_READBACK',
-    runner: 'trusted/workspace-isolation',
-  }),
-  Object.freeze({
-    evaluator_id: 'rsi.authority-boundary.v1',
-    invariant: 'NO_AUTHORITY_VIOLATION',
-    evidence_class: 'AUTHORITY_BOUNDARY_PROOF',
-    runner: 'trusted/authority-boundary',
-  }),
-  Object.freeze({
-    evaluator_id: 'rsi.effect-once.v1',
-    invariant: 'NO_DUPLICATE_IRREVERSIBLE_EFFECT',
-    evidence_class: 'ONE_ATTEMPT_EFFECT_PROOF',
-    runner: 'trusted/effect-once',
-  }),
-  Object.freeze({
-    evaluator_id: 'rsi.ambiguity-retry.v1',
-    invariant: 'NO_AMBIGUOUS_EFFECT_RETRY',
-    evidence_class: 'AMBIGUITY_FENCE_PROOF',
-    runner: 'trusted/ambiguity-retry',
-  }),
-  Object.freeze({
-    evaluator_id: 'rsi.security-regression.v1',
-    invariant: 'NO_SECURITY_REGRESSION',
-    evidence_class: 'SECURITY_REGRESSION_PROOF',
-    runner: 'trusted/security-regression',
-  }),
+  Object.freeze({ evaluator_id: 'rsi.source-identity.v1', invariant: 'EXACT_SOURCE_IDENTITY', evidence_class: 'EXACT_SOURCE_READBACK', runner: 'trusted/exact-source-identity' }),
+  Object.freeze({ evaluator_id: 'rsi.workspace-isolation.v1', invariant: 'NO_WORKSPACE_ESCAPE', evidence_class: 'WORKSPACE_ISOLATION_READBACK', runner: 'trusted/workspace-isolation' }),
+  Object.freeze({ evaluator_id: 'rsi.authority-boundary.v1', invariant: 'NO_AUTHORITY_VIOLATION', evidence_class: 'AUTHORITY_BOUNDARY_PROOF', runner: 'trusted/authority-boundary' }),
+  Object.freeze({ evaluator_id: 'rsi.effect-once.v1', invariant: 'NO_DUPLICATE_IRREVERSIBLE_EFFECT', evidence_class: 'ONE_ATTEMPT_EFFECT_PROOF', runner: 'trusted/effect-once' }),
+  Object.freeze({ evaluator_id: 'rsi.ambiguity-retry.v1', invariant: 'NO_AMBIGUOUS_EFFECT_RETRY', evidence_class: 'AMBIGUITY_FENCE_PROOF', runner: 'trusted/ambiguity-retry' }),
+  Object.freeze({ evaluator_id: 'rsi.security-regression.v1', invariant: 'NO_SECURITY_REGRESSION', evidence_class: 'SECURITY_REGRESSION_PROOF', runner: 'trusted/security-regression' }),
 ]);
 
 const OBJECTIVE_ROOT = Object.freeze([
@@ -116,11 +96,20 @@ function rootProjection() {
     version: 1,
     invariants,
     objectives,
+    immutable_component_paths: [...EVALUATOR_TRUST_ROOT_PATHS].sort(),
     candidate_selectable: false,
     candidate_mutable: false,
     candidate_can_skip_required_invariant: false,
     candidate_can_override_verdict: false,
   });
+}
+
+function assertCandidateDoesNotMutateEvaluatorRoot(handoff) {
+  const components = Array.isArray(handoff?.candidate_capsule?.components) ? handoff.candidate_capsule.components : [];
+  for (const component of components) {
+    const path = String(component?.path || '');
+    if (EVALUATOR_TRUST_ROOT_PATHS.has(path)) throw new Error('rsi_evaluator_candidate_mutates_evaluator_root');
+  }
 }
 
 function normalizeHandoff(handoff) {
@@ -129,6 +118,7 @@ function normalizeHandoff(handoff) {
   if (handoff.eligible_for_evaluation !== true || handoff.eligible_for_promotion !== false || handoff.materialization_replay_authorized !== false) throw new Error('rsi_evaluator_candidate_handoff_policy_invalid');
   if (handoff.candidate_verification?.ok !== true || handoff.candidate_verification?.executable !== false || handoff.candidate_verification?.promotion_authorized !== false) throw new Error('rsi_evaluator_candidate_verification_invalid');
   if (handoff.sandbox_plan?.mode !== 'PREPARE_ONLY' || handoff.sandbox_plan_verification?.execution_authorized !== false) throw new Error('rsi_evaluator_sandbox_handoff_invalid');
+  assertCandidateDoesNotMutateEvaluatorRoot(handoff);
   const candidateSha = exactSha(handoff.candidate_sha, 'candidate');
   const parentSha = exactSha(handoff.parent_sha, 'parent');
   if (candidateSha === parentSha) throw new Error('rsi_evaluator_candidate_noop');
@@ -305,20 +295,9 @@ export function applyRsiEvaluatorMesh({ archive, candidate_handoff, plan, receip
   for (const receipt of verified) {
     const evaluatorDigest = receipt.evaluator_digest.slice('sha256:'.length);
     if (receipt.kind === 'HARD_INVARIANT') {
-      archive.recordInvariant(candidate.candidate_id, {
-        invariant: receipt.invariant,
-        result: receipt.result,
-        evaluator_id: receipt.evaluator_id,
-        evaluator_digest: evaluatorDigest,
-        evidence_refs: [...receipt.evidence_refs, receipt.receipt_digest],
-      });
+      archive.recordInvariant(candidate.candidate_id, { invariant: receipt.invariant, result: receipt.result, evaluator_id: receipt.evaluator_id, evaluator_digest: evaluatorDigest, evidence_refs: [...receipt.evidence_refs, receipt.receipt_digest] });
     } else {
-      archive.recordObjective(candidate.candidate_id, {
-        objective: receipt.objective,
-        evaluator_id: receipt.evaluator_id,
-        evaluator_digest: evaluatorDigest,
-        evidence_refs: [...receipt.evidence_refs, receipt.receipt_digest],
-      });
+      archive.recordObjective(candidate.candidate_id, { objective: receipt.objective, evaluator_id: receipt.evaluator_id, evaluator_digest: evaluatorDigest, evidence_refs: [...receipt.evidence_refs, receipt.receipt_digest] });
     }
   }
   const final = archive.finalize(candidate.candidate_id);
