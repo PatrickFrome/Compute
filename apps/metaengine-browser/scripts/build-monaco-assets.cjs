@@ -6,7 +6,7 @@ const { build } = require('esbuild');
 
 async function monacoPackageRoot() {
   const resolved = require.resolve('monaco-editor');
-  return path.resolve(path.dirname(resolved), '../../..');
+  return path.resolve(path.dirname(resolved), '../..');
 }
 
 async function buildMonacoAssets({
