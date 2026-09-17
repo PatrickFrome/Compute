@@ -88,7 +88,7 @@ test('mesh plan is deterministic and candidate cannot select evaluator root', ()
   assert.equal(first.evaluator_root.candidate_selectable, false);
   assert.equal(first.evaluator_root.candidate_mutable, false);
   assert.equal(first.evaluator_root.invariants.length, 6);
-  assert.deepEqual(first.required_invariants.sort(), [
+  assert.deepEqual([...first.required_invariants].sort(), [
     'EXACT_SOURCE_IDENTITY',
     'NO_AMBIGUOUS_EFFECT_RETRY',
     'NO_AUTHORITY_VIOLATION',
