@@ -9,8 +9,10 @@ async function monacoPackageRoot() {
   return path.resolve(path.dirname(resolved), '../../..');
 }
 
-async function buildMonacoAssets({ appRoot = path.resolve(__dirname, '..') } = {}) {
-  const outputDir = path.join(appRoot, 'ui', 'ide-dist');
+async function buildMonacoAssets({
+  appRoot = path.resolve(__dirname, '..'),
+  outputDir = path.join(appRoot, 'ui', 'ide-dist'),
+} = {}) {
   const entry = path.join(appRoot, 'src', 'ide', 'monaco-entry.mjs');
   const monacoRoot = await monacoPackageRoot();
   const workerEntry = path.join(monacoRoot, 'esm', 'vs', 'editor', 'editor.worker.js');
@@ -46,7 +48,7 @@ async function buildMonacoAssets({ appRoot = path.resolve(__dirname, '..') } = {
   });
 
   const entries = await fs.readdir(outputDir, { recursive: true });
-  if (!entries.includes('editor.js') || !entries.includes('editor.worker.js')) {
+  if (!entries.includes('editor.js') || !entries.includes('editor.css') || !entries.includes('editor.worker.js')) {
     throw new Error('monaco_asset_build_incomplete');
   }
   return Object.freeze({
