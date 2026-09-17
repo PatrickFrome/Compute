@@ -95,7 +95,7 @@ function resolveIdeAsset(rel) {
   const assetRel = String(rel).slice(4);
   if (!assetRel || assetRel.includes('\\') || assetRel.includes('\0')) return null;
   const segments = assetRel.split('/');
-  if (segments.some((segment) => !segment || segment === '.' || segment === '..')) return null;
+  if (segments.some((segment) => !segment || segment === '.' || segment === '..' || !/^[A-Za-z0-9._-]+$/.test(segment))) return null;
   const target = path.resolve(IDE_ASSET_ROOT, ...segments);
   const relative = path.relative(IDE_ASSET_ROOT, target);
   if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
