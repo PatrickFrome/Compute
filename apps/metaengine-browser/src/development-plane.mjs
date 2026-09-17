@@ -143,6 +143,7 @@ export class DevelopmentPlane {
       devos_repo_file_save_requires_workspace_fingerprint: true,
       devos_repo_file_save_requires_expected_sha256: true,
       devos_repo_file_save_existing_text_only: true,
+      devos_repo_file_save_packaged_snapshot_allowed: false,
       devos_repo_file_save_automatic_retry_allowed: false,
       transcript: Object.freeze(this.#transcript.map((row) => Object.freeze({ ...row }))),
       transcript_total_count: this.#transcriptTotal,
