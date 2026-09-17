@@ -7,7 +7,7 @@ const { TextDecoder } = require('node:util');
 
 const DEVOS_REPO_FILE_READ_SCHEMA = 'metaengine.development-plane.repo-file-read.v1';
 const DEVOS_REPO_FILE_SAVE_SCHEMA = 'metaengine.development-plane.repo-file-save.v1';
-const MAX_TEXT_FILE_BYTES = 1024 * 1024;
+const MAX_TEXT_FILE_BYTES = 192 * 1024;
 const SHA256_RE = /^sha256:[0-9a-f]{64}$/;
 const SOURCE_SHA_RE = /^[0-9a-f]{40}$/;
 const UTF8 = new TextDecoder('utf-8', { fatal: true });
