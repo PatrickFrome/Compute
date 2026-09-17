@@ -101,7 +101,7 @@ jobs:
           $userData = (Get-Content "$env:RUNNER_TEMP\shell-first-user-data.txt" -Raw).Trim()
           if (-not $userData) { throw 'shell_first_user_data_missing' }
           $journal = Join-Path $userData 'metaengine-browser-startup-journal-v1.json'
-          $fleetTemp = Join-Path $userData 'metaengine-fleet-state-v1.json.tmp'
+          $fleetTemp = Join-Path $userData 'metaengine-fleet-state-v2.json.tmp'
           Remove-Item $journal -Force -ErrorAction SilentlyContinue
           Remove-Item "$journal.corrupt-*" -Force -ErrorAction SilentlyContinue
           Remove-Item $fleetTemp -Recurse -Force -ErrorAction SilentlyContinue
