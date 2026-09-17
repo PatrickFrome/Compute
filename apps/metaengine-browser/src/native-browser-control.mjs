@@ -38,6 +38,13 @@ const NATIVE_BROWSER_PROCESS_INCARNATION_ID = crypto.randomUUID();
 const DEFAULT_CAPTURE_VIEW_MAX_ATTEMPTS = 5;
 const DEFAULT_CAPTURE_VIEW_RETRY_DELAY_MS = 150;
 const DEFAULT_CAPTURE_CDP_DEADLINE_MS = 5000;
+// Command execution may legitimately span several CDP round-trips (AX tree walks,
+// submit outcome latches), so its deadline is far more generous than capture's.
+// The bound exists because an unbounded CDP await was observed live to wedge the
+// single steady-state command lease loop (one_steady_state_lease_loop): heartbeat
+// stayed alive while the whole command plane froze. A deadline turns that wedge
+// into a fail-closed FAILED command and frees the loop.
+const DEFAULT_COMMAND_CDP_DEADLINE_MS = 30000;
 const clip = (value, max) => String(value ?? '').slice(0, max);
 const axRawValue = (node, key) => String(node?.[key]?.value ?? '');
 const axValue = (node, key) => axRawValue(node, key).trim();
@@ -377,7 +384,9 @@ function assertCurrentEffectRuntime(webContents, dbg, binding) {
 export async function executeSemanticCommand(webContents, command) {
   const action = String(command?.action || '');
   const localIdentity = nativeBrowserTargetIdentity(webContents);
-  return withDebugger(webContents, async (dbg) => {
+  // F-L1a: the whole semantic command execution is bounded by a CDP deadline so a
+  // wedged debugger await can no longer freeze the steady-state command loop.
+  return runBoundedCdpCommand(webContents, () => withDebugger(webContents, async (dbg) => {
     let effectBinding = null;
     if (command?.command_id && nativeActionRequiresEffectBinding(action)) {
       effectBinding = assertNativeEffectBindingMatches({
@@ -394,13 +403,43 @@ export async function executeSemanticCommand(webContents, command) {
     if (action === 'SCROLL') {
       const metrics = await dbg.sendCommand('Page.getLayoutMetrics');
       const vp = metrics?.cssVisualViewport || metrics?.visualViewport || {};
+      const layout = metrics?.layoutViewport || {};
+      const content = metrics?.cssContentSize || metrics?.contentSize || {};
       const x = Math.max(1, Number(vp.clientWidth || vp.width || 800) / 2);
       const y = Math.max(1, Number(vp.clientHeight || vp.height || 600) / 2);
       const deltaY = Math.max(-4000, Math.min(4000, Number(command?.payload?.delta_y || 0)));
       if (!deltaY) throw new Error('native_scroll_delta_invalid');
       assertCurrentEffectRuntime(webContents, dbg, effectBinding);
+      const beforePageY = Number(vp.pageY ?? layout.pageY ?? 0);
+      const viewportHeight = Number(vp.clientHeight || vp.height || 0);
+      const contentHeight = Number(content.height || 0);
+      const maxScrollY = Math.max(0, contentHeight - viewportHeight);
       await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mouseWheel', x, y, deltaX:0, deltaY });
-      return { action, delta_y: deltaY, authority_effect: true };
+      // Postcondition readback: distinguish "moved" from "already at the scroll
+      // boundary" so a legitimate boundary no-op can be proven instead of being
+      // quarantined as AMBIGUOUS (observed live as FAILED postcondition_not_confirmed).
+      let scroll = null;
+      try {
+        const after = await dbg.sendCommand('Page.getLayoutMetrics');
+        const afterVp = after?.cssVisualViewport || after?.visualViewport || after?.layoutViewport || {};
+        const afterPageY = Number(afterVp.pageY ?? 0);
+        const moved = afterPageY !== beforePageY;
+        const atBoundary = (deltaY < 0 && beforePageY <= 0)
+          || (deltaY > 0 && beforePageY >= maxScrollY - 1);
+        scroll = {
+          from_page_y: beforePageY,
+          to_page_y: afterPageY,
+          viewport_height: viewportHeight,
+          content_height: contentHeight,
+          max_scroll_y: maxScrollY,
+          moved,
+          at_boundary: !moved && atBoundary,
+          proof: moved ? 'VIEWPORT_PAGE_Y_CHANGED' : (atBoundary ? 'SCROLL_BOUNDARY_REACHED' : null),
+        };
+      } catch {
+        scroll = null;
+      }
+      return { action, delta_y: deltaY, scroll, authority_effect: true };
     }
 
     if (action === 'STOP_GENERATION') {
@@ -489,7 +528,7 @@ export async function executeSemanticCommand(webContents, command) {
     }
 
     throw new Error('native_semantic_action_not_supported');
-  });
+  }));
 }
 
 function captureSurfaceSize(image) {
@@ -560,6 +599,39 @@ async function runBoundedCdpCapture(webContents, task, {
     timer = setTimeout(() => {
       try { releaseDebuggerImpl?.(webContents); } catch {}
       reject(captureCdpTimeoutError(boundedDeadlineMs));
+    }, boundedDeadlineMs);
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function commandCdpTimeoutError(deadlineMs) {
+  const error = new Error(`native_supervisor_cdp_deadline:${deadlineMs}`);
+  error.code = 'NATIVE_SUPERVISOR_CDP_TIMEOUT';
+  error.deadline_ms = deadlineMs;
+  // Fail-closed: an unproven CDP dispatch outcome is never blindly retried.
+  error.automatic_retry_allowed = false;
+  return error;
+}
+
+// F-L1a: every semantic command execution is bounded. On deadline the persistent
+// debugger session for this webContents is released (dropping the wedged CDP
+// channel) and the command fails closed, so the steady-state lease loop survives.
+// Exported for contract tests (pure wrapper with injected release hook).
+export async function runBoundedCdpCommand(webContents, task, {
+  deadlineMs = DEFAULT_COMMAND_CDP_DEADLINE_MS,
+  releaseDebuggerImpl = releasePersistentBrowserDebugger,
+} = {}) {
+  const boundedDeadlineMs = Math.max(5000, Math.min(60000, Number(deadlineMs) || DEFAULT_COMMAND_CDP_DEADLINE_MS));
+  let timer = null;
+  const work = Promise.resolve().then(task);
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      try { releaseDebuggerImpl?.(webContents); } catch {}
+      reject(commandCdpTimeoutError(boundedDeadlineMs));
     }, boundedDeadlineMs);
   });
   try {
