@@ -2,9 +2,9 @@
 """V1.7 activation barrier for the future trusted RSI promotion attestor.
 
 This module is deliberately non-actuating. It describes the exact workflow
-identity, action pins, evidence set, and permissions that a future protected
-release-branch workflow must satisfy before signing can be enabled. The RSI
-candidate branch cannot turn this plan into signing authority.
+identity, action pins, evidence set, permissions, and privilege separation that
+a future protected release-branch workflow must satisfy before signing can be
+enabled. The RSI candidate branch cannot turn this plan into signing authority.
 """
 
 from __future__ import annotations
@@ -58,12 +58,8 @@ FORBIDDEN_CAPABILITIES = (
     "release_promotion",
     "production_ddl",
     "arbitrary_shell_from_candidate_payload",
+    "untrusted_candidate_checkout",
 )
-
-
-def _exact_keys(value: dict[str, Any], expected: set[str], label: str) -> None:
-    if set(value) != expected:
-        raise PromotionAttestationError(f"{label}_shape_invalid")
 
 
 def create_trusted_producer_plan(*, candidate_sha: str, trusted_control_sha: str, evidence_run_id: int) -> dict[str, Any]:
@@ -108,12 +104,17 @@ def create_trusted_producer_plan(*, candidate_sha: str, trusted_control_sha: str
             "pull_request_signing_allowed": False,
             "push_signing_allowed": False,
             "workflow_call_signing_allowed": False,
+            "pull_request_target_allowed": False,
+            "workflow_run_allowed": False,
+            "candidate_checkout_allowed": False,
         },
         "forbidden_capabilities": list(FORBIDDEN_CAPABILITIES),
         "signing_activation_authorized": False,
+        "production_mutation_authority": False,
         "promotion_authority": False,
         "self_update_authority": False,
         "execution_authority": False,
+        "automatic_retry_allowed": False,
         "authority_effect": False,
     }
     return {**core, "plan_sha256": _sha256_json(core)}
@@ -131,11 +132,13 @@ def validate_trusted_producer_plan(value: Any) -> dict[str, Any]:
     repo = _require_object(value.get("repository"), "trusted_producer_repository")
     if repo != {"id": EXPECTED_REPOSITORY_ID, "full_name": EXPECTED_REPOSITORY}:
         raise PromotionAttestationError("trusted_producer_repository_mismatch")
-    _require_sha40(value.get("candidate_sha"), "candidate_sha")
+    candidate = _require_sha40(value.get("candidate_sha"), "candidate_sha")
     control = _require_object(value.get("trusted_control"), "trusted_control")
     if control.get("ref") != TRUSTED_REF or control.get("workflow_path") != TRUSTED_WORKFLOW_PATH or control.get("environment") != TRUSTED_ENVIRONMENT:
         raise PromotionAttestationError("trusted_control_identity_mismatch")
-    _require_sha40(control.get("sha"), "trusted_control_sha")
+    control_sha = _require_sha40(control.get("sha"), "trusted_control_sha")
+    if candidate == control_sha:
+        raise PromotionAttestationError("candidate_cannot_be_trusted_control_sha")
     evidence = _require_object(value.get("evidence_source"), "trusted_evidence_source")
     _require_int(evidence.get("run_id"), "evidence_run_id")
     if evidence.get("persisted_artifact_bytes_required") is not True or evidence.get("caller_supplied_truth_trusted") is not False or evidence.get("candidate_authored_evidence_allowed") is not False:
@@ -163,12 +166,27 @@ def validate_trusted_producer_plan(value: Any) -> dict[str, Any]:
     ):
         if policy.get(required_true) is not True:
             raise PromotionAttestationError(f"trusted_workflow_policy_{required_true}_invalid")
-    for required_false in ("pull_request_signing_allowed", "push_signing_allowed", "workflow_call_signing_allowed"):
+    for required_false in (
+        "pull_request_signing_allowed",
+        "push_signing_allowed",
+        "workflow_call_signing_allowed",
+        "pull_request_target_allowed",
+        "workflow_run_allowed",
+        "candidate_checkout_allowed",
+    ):
         if policy.get(required_false) is not False:
             raise PromotionAttestationError(f"trusted_workflow_policy_{required_false}_invalid")
     if value.get("forbidden_capabilities") != list(FORBIDDEN_CAPABILITIES):
         raise PromotionAttestationError("trusted_forbidden_capabilities_invalid")
-    for field in ("signing_activation_authorized", "promotion_authority", "self_update_authority", "execution_authority", "authority_effect"):
+    for field in (
+        "signing_activation_authorized",
+        "production_mutation_authority",
+        "promotion_authority",
+        "self_update_authority",
+        "execution_authority",
+        "automatic_retry_allowed",
+        "authority_effect",
+    ):
         if value.get(field) is not False:
             raise PromotionAttestationError(f"trusted_producer_{field}_invalid")
     return dict(value)
@@ -194,11 +212,10 @@ def validate_evidence_manifest(manifest: Any, plan: Any) -> dict[str, Any]:
         name = _require_text(raw.get("name"), "promotion_evidence_file_name", 128)
         if name in by_name or name not in REQUIRED_EVIDENCE:
             raise PromotionAttestationError("promotion_evidence_file_name_invalid")
-        byte_count = _require_int(raw.get("bytes"), "promotion_evidence_file_bytes")
         by_name[name] = {
             "name": name,
             "sha256": _require_sha256(raw.get("sha256"), "promotion_evidence_file_sha256"),
-            "bytes": byte_count,
+            "bytes": _require_int(raw.get("bytes"), "promotion_evidence_file_bytes"),
         }
     if set(by_name) != set(REQUIRED_EVIDENCE):
         raise PromotionAttestationError("promotion_evidence_required_file_missing")
@@ -235,9 +252,11 @@ def evaluate_trusted_producer_activation(*, plan: Any, evidence_manifest: Any, w
         "evidence_set_sha256": None if evidence is None else evidence["evidence_set_sha256"],
         "ready_for_workflow_activation": state == "READY_FOR_TRUSTED_WORKFLOW_ACTIVATION",
         "signing_activation_authorized": False,
+        "production_mutation_authority": False,
         "promotion_authority": False,
         "self_update_authority": False,
         "execution_authority": False,
+        "automatic_retry_allowed": False,
         "authority_effect": False,
         "required_next": "MERGE_PINNED_WORKFLOW_TO_TRUSTED_REF_THEN_REVALIDATE_EXACT_CONTROL_SHA_AND_ENVIRONMENT",
     }

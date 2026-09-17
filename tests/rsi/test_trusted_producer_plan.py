@@ -1,7 +1,7 @@
 import copy
 import unittest
 
-from controller.rsi.promotion_attestation import PromotionAttestationError
+from controller.rsi.promotion_attestation import PromotionAttestationError, _sha256_json
 from controller.rsi.trusted_producer_plan import (
     ACTIVATION_SCHEMA,
     EVIDENCE_MANIFEST_SCHEMA,
@@ -53,31 +53,50 @@ def manifest(**overrides):
 
 
 class TrustedProducerPlanTest(unittest.TestCase):
-    def test_plan_is_exact_pinned_and_carries_zero_authority(self):
+    def test_plan_is_exact_pinned_privilege_separated_and_zero_authority(self):
         value = validate_trusted_producer_plan(plan())
+        policy = value["workflow_policy"]
         self.assertEqual(value["candidate_sha"], CANDIDATE)
         self.assertEqual(value["trusted_control"]["ref"], TRUSTED_REF)
         self.assertEqual(value["trusted_control"]["environment"], TRUSTED_ENVIRONMENT)
         self.assertEqual(value["required_action_pins"]["attest"], PINNED_ATTEST_ACTION)
         self.assertEqual(value["required_evidence_files"], list(REQUIRED_EVIDENCE))
         self.assertEqual(value["forbidden_capabilities"], list(FORBIDDEN_CAPABILITIES))
-        self.assertTrue(value["workflow_policy"]["workflow_dispatch_only"])
-        self.assertFalse(value["workflow_policy"]["pull_request_signing_allowed"])
-        self.assertFalse(value["workflow_policy"]["push_signing_allowed"])
+        self.assertTrue(policy["workflow_dispatch_only"])
+        self.assertTrue(policy["exact_trusted_control_sha_checkout_required"])
+        self.assertFalse(policy["pull_request_signing_allowed"])
+        self.assertFalse(policy["push_signing_allowed"])
+        self.assertFalse(policy["pull_request_target_allowed"])
+        self.assertFalse(policy["workflow_run_allowed"])
+        self.assertFalse(policy["candidate_checkout_allowed"])
         self.assertFalse(value["signing_activation_authorized"])
+        self.assertFalse(value["production_mutation_authority"])
         self.assertFalse(value["promotion_authority"])
         self.assertFalse(value["self_update_authority"])
+        self.assertFalse(value["automatic_retry_allowed"])
         self.assertRegex(value["plan_sha256"], r"^[0-9a-f]{64}$")
 
     def test_rehashed_policy_tampering_still_fails_semantic_validation(self):
-        value = plan()
-        tampered = copy.deepcopy(value)
-        tampered["workflow_policy"]["pull_request_signing_allowed"] = True
-        tampered.pop("plan_sha256")
-        from controller.rsi.promotion_attestation import _sha256_json
-        tampered["plan_sha256"] = _sha256_json(tampered)
-        with self.assertRaisesRegex(PromotionAttestationError, "pull_request_signing_allowed_invalid"):
-            validate_trusted_producer_plan(tampered)
+        for field in ("pull_request_signing_allowed", "pull_request_target_allowed", "workflow_run_allowed", "candidate_checkout_allowed"):
+            value = plan()
+            tampered = copy.deepcopy(value)
+            tampered["workflow_policy"][field] = True
+            tampered.pop("plan_sha256")
+            tampered["plan_sha256"] = _sha256_json(tampered)
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(PromotionAttestationError, f"{field}_invalid"):
+                    validate_trusted_producer_plan(tampered)
+
+    def test_rehashed_authority_escalation_still_fails_semantic_validation(self):
+        for field in ("signing_activation_authorized", "production_mutation_authority", "promotion_authority", "self_update_authority", "execution_authority", "automatic_retry_allowed", "authority_effect"):
+            value = plan()
+            tampered = copy.deepcopy(value)
+            tampered[field] = True
+            tampered.pop("plan_sha256")
+            tampered["plan_sha256"] = _sha256_json(tampered)
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(PromotionAttestationError, f"trusted_producer_{field}_invalid"):
+                    validate_trusted_producer_plan(tampered)
 
     def test_evidence_manifest_requires_actual_bounded_file_set(self):
         normalized = validate_evidence_manifest(manifest(), plan())
@@ -106,9 +125,11 @@ class TrustedProducerPlanTest(unittest.TestCase):
         self.assertEqual(result["state"], "READY_FOR_TRUSTED_WORKFLOW_ACTIVATION")
         self.assertTrue(result["ready_for_workflow_activation"])
         self.assertFalse(result["signing_activation_authorized"])
+        self.assertFalse(result["production_mutation_authority"])
         self.assertFalse(result["promotion_authority"])
         self.assertFalse(result["self_update_authority"])
         self.assertFalse(result["execution_authority"])
+        self.assertFalse(result["automatic_retry_allowed"])
         self.assertRegex(result["activation_sha256"], r"^[0-9a-f]{64}$")
 
     def test_missing_trusted_branch_or_environment_blocks_activation(self):
