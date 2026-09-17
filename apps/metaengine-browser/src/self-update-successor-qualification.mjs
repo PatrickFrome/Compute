@@ -10,7 +10,12 @@ import {
 } from './self-update-successor-recovery.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const HARD_CONTINUITY_FAILURES = new Set(['PARTIAL', 'ERROR', 'TARGET_VERSION_MISMATCH']);
+// Qualification V2 (P0 repair, point 5): AUTH_REQUIRED is a hard continuity
+// failure — the successor booted but the user session it promised to preserve
+// is gone (auth redirect observed during/after restore). A transaction whose
+// install destroyed the user session must quarantine fail-closed instead of
+// reporting PROCESS_HEALTHY as if nothing happened.
+const HARD_CONTINUITY_FAILURES = new Set(['PARTIAL', 'ERROR', 'TARGET_VERSION_MISMATCH', 'AUTH_REQUIRED']);
 const MAX_SENTINEL_HEARTBEAT_AGE_MS = 8_000;
 const UNRESOLVED_PRIOR_SUCCESSOR_BOOTED = 'self_update_transaction_unresolved_prior:SUCCESSOR_BOOTED';
 let acceptedHeartbeatHealth = null;
@@ -91,6 +96,33 @@ export async function recordAcceptedSignedSupervisorHeartbeat({ app, state, acce
   if (!continuitySettled) {
     acceptedHeartbeatHealth = null;
     return { state: 'HEARTBEAT_CONTINUITY_NOT_RESTORED', continuity_state: continuityState || null, authority_effect: false };
+  }
+
+  // Qualification V2 (P0 repair, point 5): a RESTORED projection must carry
+  // positive user-session and tab-cardinality evidence. The 2026-09-17
+  // incident reported RESTORED with 7 -> 32 tab amplification and every
+  // ChatGPT tab parked on /auth/login while the process heartbeat stayed
+  // green. Explicit negative evidence now quarantines fail-closed; UNKNOWN /
+  // blank fields (older payloads, undeterminable pre-state) stay settled —
+  // punishment requires proof, mirroring the rest of this predicate.
+  if (continuityState === 'RESTORED') {
+    const projection = state.self_update_session_continuity || {};
+    const userSessionContinuity = String(projection.user_session_continuity || '').toUpperCase();
+    if (userSessionContinuity === 'LOST') {
+      acceptedHeartbeatHealth = null;
+      const quarantineReason = 'session_continuity_user_session_lost';
+      const quarantined = await quarantineSelfUpdateTransaction(app, quarantineReason);
+      recordSelfUpdateRecoveryQuarantineResult(quarantined);
+      return { state: 'QUARANTINED', reason: quarantineReason, authority_effect: false };
+    }
+    const tabCardinalityContinuity = String(projection.tab_cardinality_continuity || '').toUpperCase();
+    if (tabCardinalityContinuity === 'VIOLATED') {
+      acceptedHeartbeatHealth = null;
+      const quarantineReason = 'session_continuity_tab_cardinality_violated';
+      const quarantined = await quarantineSelfUpdateTransaction(app, quarantineReason);
+      recordSelfUpdateRecoveryQuarantineResult(quarantined);
+      return { state: 'QUARANTINED', reason: quarantineReason, authority_effect: false };
+    }
   }
 
   const updater = state.self_update;

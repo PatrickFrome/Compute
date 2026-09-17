@@ -10,6 +10,13 @@ import crypto from 'node:crypto';
 export const FLEET_TAB_CEILING = 16;
 const MAX_TABS = 32;
 const TAB_ROLES = Object.freeze(['USER', 'FLEET']);
+// Continuity provenance stamp (P0 repair, point 4): tabs created by a
+// self-update session-continuity restore attempt carry the attempt's
+// continuity_id so post-restore cleanup can close ONLY provable duplicates
+// of that attempt. Legacy tabs (created before this field existed, including
+// the 32 live tabs of the 2026-09-17 incident) never match and are never
+// closed by the cleanup planner.
+const CREATED_BY_CONTINUITY_ID_RE = /^[a-z0-9-]{8,120}$/i;
 
 function countRole(tabs, role) {
   return tabs.filter((tab) => String(tab.role || 'USER') === role).length;
@@ -19,9 +26,13 @@ export class TabRegistry {
   #tabs = new Map();
   #selectedId = null;
 
-  create({ url, kind = 'USER_WEB', title = '', role = 'USER' } = {}) {
+  create({ url, kind = 'USER_WEB', title = '', role = 'USER', created_by_continuity_id = null } = {}) {
     const tabRole = String(role || 'USER').toUpperCase();
     if (!TAB_ROLES.includes(tabRole)) throw new Error('tab_role_invalid');
+    const continuityProvenance = String(created_by_continuity_id || '');
+    if (continuityProvenance && !CREATED_BY_CONTINUITY_ID_RE.test(continuityProvenance)) {
+      throw new Error('tab_created_by_continuity_id_invalid');
+    }
     // Deterministic pre-effect capacity contract: both the shared wall and the
     // per-kind fleet ceiling surface the SAME error string, so the fleet
     // provisioner's existing classification (deterministic no-effect, never
@@ -37,6 +48,7 @@ export class TabRegistry {
       url: String(url),
       title: String(title || ''),
       created_at: new Date().toISOString(),
+      ...(continuityProvenance ? { created_by_continuity_id: continuityProvenance } : {}),
     });
     this.#tabs.set(tab.tab_id, tab);
     if (!this.#selectedId) this.#selectedId = tab.tab_id;
@@ -53,9 +65,11 @@ export class TabRegistry {
       ...(patch.kind === undefined ? {} : { kind: String(patch.kind) }),
       // role is immutable: a tab's ownership class is fixed at creation by the
       // code path that created it (user navigation vs fleet provisioning).
+      // created_by_continuity_id is likewise immutable provenance.
       tab_id: current.tab_id,
       role: current.role,
       created_at: current.created_at,
+      ...(current.created_by_continuity_id ? { created_by_continuity_id: current.created_by_continuity_id } : {}),
     });
     this.#tabs.set(current.tab_id, next);
     return structuredClone(next);

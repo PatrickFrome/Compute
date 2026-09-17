@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { isChatGptAuthRedirectUrl } from './chatgpt-auth-readback.mjs';
 import { ChatGptSessionMonitor } from './chatgpt-session-monitor.mjs';
 import { chatGptControlMatches, uniqueChatGptControl } from './chatgpt-ui-controls.mjs';
 import { classifyRetryDecision, REQUEST_EFFECT_CLASS } from './chatgpt-retry-policy.mjs';
@@ -60,6 +61,10 @@ async function writeJson(file, value) {
 export class SupervisorLifecycleRuntime {
   #getState; #execute; #canActuate; #keepalive = null; #statePath; #lastRun = 0; #lastSupervisorGeneration = 'UNKNOWN'; #lastError = null;
   #lastWorkerSignals = []; #monitorMs; #researchMs; #sessionMonitor; #activeRequest = null; #lastRecovery = null;
+  // P0 (2026-09-17): tabs created by failed bootstrap pre-effects (auth redirect
+  // surfaces) and not yet provably closed. Retried before every new bootstrap
+  // attempt so a wedged CLOSE_TAB can never turn into unbounded tab growth.
+  #bootstrapLeakedTabIds = new Set();
   #runtimeControl = unavailableDevosRuntimeControl('NOT_OBSERVED');
   #requireAuthoritativeAdmission = false;
 
@@ -216,6 +221,16 @@ export class SupervisorLifecycleRuntime {
     if (snap.conversation_url) {
       const exact = tabs.find((t) => String(t?.url || '') === snap.conversation_url && !fleetTabs.has(String(t?.tab_id || '')));
       if (exact) { if (snap.tab_id !== String(exact.tab_id)) await this.#keepalive.rebindTab(exact.tab_id); return exact; }
+      // P0 (2026-09-17): while the user session is logged out, recreating the bound
+      // conversation tab would land on the auth-redirect surface again and leak one
+      // tab per maintenance tick (the live host reached tab_capacity_exceeded this
+      // way). Reuse the existing auth-redirect tab as the observation target instead:
+      // the session monitor classifies it (NOT_CHATGPT_CONVERSATION) and every
+      // navigation-class recovery stays gated on auth surfaces. Zero new tabs.
+      const authRedirected = tabs.filter((t) => !fleetTabs.has(String(t?.tab_id || '')) && isChatGptAuthRedirectUrl(String(t?.url || '')));
+      if (authRedirected.length > 0) {
+        return authRedirected.find((t) => t?.selected === true) || authRedirected[0];
+      }
       if (this.#canActuate() !== true) return null;
       const restored = await this.#execute({ action: 'NEW_TAB', payload: { url: snap.conversation_url, select: false }, platform: null });
       if (restored?.tab_id) { await this.#keepalive.rebindTab(restored.tab_id); return { ...restored, url: snap.conversation_url }; }
@@ -477,8 +492,13 @@ export class SupervisorLifecycleRuntime {
 
     let prepared = null;
     try {
+      // P0 (2026-09-17): close-by-proof sweep of tabs leaked by earlier failed
+      // bootstrap attempts before creating anything new, so the retry loop is
+      // tab-neutral no matter how long the user session stays logged out.
+      if (this.#bootstrapLeakedTabIds.size > 0) await this.#sweepLeakedBootstrapTabs();
       const preferredId = String(preferredExistingRootTabId || '');
       let tab = null;
+      let createdHere = false;
       if (preferredId) {
         const current = await this.#getState();
         const fleetTabs = new Set((current?.fleet?.agents || []).map((agent) => String(agent?.tab_id || '')).filter(Boolean));
@@ -496,10 +516,16 @@ export class SupervisorLifecycleRuntime {
         // Normal first bootstrap retains the dedicated-root invariant. Existing roots
         // are reusable only for the explicit process-boundary recovery path above.
         tab = await this.#execute({ action: 'NEW_TAB', payload: { url: 'https://chatgpt.com/', select: false }, platform: null });
+        createdHere = true;
       }
       if (!tab?.tab_id) throw new Error('supervisor_bootstrap_tab_creation_no_readback');
       const ready = await this.#waitForBootstrapRoot(tab.tab_id);
       if (!ready.ok) {
+        // Pre-effect failure (typ. auth redirect while logged out): the tab this
+        // attempt created never became a usable root and was never bound, typed
+        // into, or handed to the user. Close it by proof so retrying bootstrap
+        // cannot amplify tab cardinality (7 -> 32 incident vector, intra-process leg).
+        if (createdHere) await this.#closeFailedBootstrapTab(tab.tab_id);
         this.#lastError = `supervisor_bootstrap_pre_effect:${ready.reason}`;
         return false;
       }
@@ -540,6 +566,10 @@ export class SupervisorLifecycleRuntime {
       await this.#keepalive.confirmWakeSent(prepared.pending.wake_id);
       await this.#keepalive.bindConversation({ url, tab_id: tab.tab_id });
       this.#activateRequest(prepared.pending, tab.tab_id, false);
+      // A successful bind is the recovery boundary for every prior failed
+      // attempt: stale supervisor_bootstrap* errors must not survive it, or the
+      // state projection keeps reporting an incident that is already over.
+      if (this.#lastError?.startsWith?.('supervisor_bootstrap')) this.#lastError = null;
       this.#lastRecovery = {
         action: 'SUPERVISOR_BOOTSTRAP_BOUND', wake_id: prepared.pending.wake_id, tab_id: String(tab.tab_id),
         proof: 'DEDICATED_ROOT_TO_EXACT_CONVERSATION_POSITIVE_READBACK', confirmed: true, ambiguous: false,
@@ -557,6 +587,43 @@ export class SupervisorLifecycleRuntime {
       }
       this.#lastError = `supervisor_bootstrap:${String(e?.message || e).slice(0, 200)}`;
       return false;
+    }
+  }
+
+  // Close-by-proof for a tab created by a failed bootstrap pre-effect. The proof
+  // obligations: (1) the tab_id was created by THIS runtime's NEW_TAB in the
+  // failed attempt (caller passes it only for createdHere tabs); (2) the tab
+  // still exists in the registry; (3) it is not currently selected and not
+  // claimed by a fleet agent — a tab the user has taken over is never ours to
+  // close, it simply leaves the leaked set as a bounded, user-owned exception.
+  // CLOSE_TAB is best-effort: on failure the id stays in the in-memory ledger
+  // and is retried before the next bootstrap attempt, so a transiently wedged
+  // command plane cannot turn one leak into unbounded growth.
+  async #closeFailedBootstrapTab(tabId) {
+    const id = String(tabId || '');
+    if (!id) return;
+    try {
+      const state = await this.#getState();
+      const fleetTabs = new Set((state?.fleet?.agents || []).map((agent) => String(agent?.tab_id || '')).filter(Boolean));
+      const row = (state?.tabs || []).find((t) => String(t?.tab_id || '') === id);
+      if (!row) {
+        this.#bootstrapLeakedTabIds.delete(id);
+        return;
+      }
+      if (row.selected === true || fleetTabs.has(id)) {
+        this.#bootstrapLeakedTabIds.delete(id);
+        return;
+      }
+      await this.#execute({ action: 'CLOSE_TAB', payload: { tab_id: id }, platform: null });
+      this.#bootstrapLeakedTabIds.delete(id);
+    } catch {
+      this.#bootstrapLeakedTabIds.add(id);
+    }
+  }
+
+  async #sweepLeakedBootstrapTabs() {
+    for (const tabId of Array.from(this.#bootstrapLeakedTabIds)) {
+      await this.#closeFailedBootstrapTab(tabId);
     }
   }
 

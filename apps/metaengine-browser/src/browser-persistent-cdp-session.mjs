@@ -2,6 +2,9 @@ export const BROWSER_PERSISTENT_CDP_SESSION_SCHEMA = 'metaengine.browser.persist
 
 const DEFAULT_PROTOCOL_VERSION = '1.3';
 const MAX_SUBTARGETS = 256;
+// D-L4 repair: per-command JS-side deadline for the bounded Runtime re-seed so
+// a wedged debugger transport can never hang the recovery path.
+const RUNTIME_RESEED_TIMEOUT_MS = 5000;
 const clip = (value, max = 240) => String(value ?? '').slice(0, max);
 
 function liveWebContents(webContents) {
@@ -98,6 +101,9 @@ function rowProjection(row) {
     subtarget_capacity: MAX_SUBTARGETS,
     subtarget_overflow_count: row.subtargetOverflowCount,
     subtarget_nested_auto_attach_failures: row.subtargetNestedAutoAttachFailures,
+    runtime_reseed_count: row.runtimeReseedCount,
+    last_runtime_reseed_at: row.lastRuntimeReseedAt,
+    last_runtime_reseed_error: row.lastRuntimeReseedError,
     subtargets,
     root_document_generation_ignores_subtarget_sessions: true,
     same_document_revision_requires_main_frame_match: true,
@@ -261,6 +267,11 @@ export class PersistentBrowserCdpSessionPool {
       bindingGeneration: 0,
       semanticGeneration: 1,
       subtargetGeneration: 0,
+      // D-L4 repair: bounded Runtime.enable re-seed bookkeeping.
+      runtimeReseedCount: 0,
+      runtimeReseedInFlight: false,
+      lastRuntimeReseedAt: null,
+      lastRuntimeReseedError: null,
       subtargets: new Map(),
       subtargetBySession: new Map(),
       executionContexts: new Map(),
@@ -287,6 +298,14 @@ export class PersistentBrowserCdpSessionPool {
           row.documentGeneration += 1;
           row.bindingGeneration += 1;
           row.semanticGeneration += 1;
+          // D-L4 repair: the document the DOM/Runtime agents were anchored to
+          // was replaced. Execution contexts are gone and, without a re-seed,
+          // no Runtime.executionContextCreated events ever arrive again, so
+          // semantic refs silently collapse to zero. Recovery is a bounded
+          // Runtime.enable + DOM.getDocument re-anchor — NEVER a navigation:
+          // a RELOAD here would re-enter auth redirects and destroy user
+          // state (see reload-auth-redirect-gate.mjs).
+          this.#scheduleDocumentRuntimeReseed(row);
         } else if (name === 'Page.frameNavigated' && !params?.frame?.parentId) {
           row.executionContexts.clear();
           row.mainFrameIdentityVersion += 1;
@@ -435,6 +454,37 @@ export class PersistentBrowserCdpSessionPool {
       row.reattachScheduled = false;
       if (!liveWebContents(row.webContents) || !this.#rows.has(row.id)) return;
       void this.ensure(row.webContents).catch(() => {});
+    });
+  }
+
+  // D-L4 repair: bounded, single-flight, navigation-free recovery for the
+  // document-replaced event. One attempt, no retries, each CDP call wrapped in
+  // a JS-side deadline so a hung debugger transport cannot wedge the pool.
+  // Runtime.enable re-delivers executionContextCreated for the new document
+  // (restoring semantic refs without a reload); DOM.getDocument re-anchors
+  // the DOM agent exactly like #initialize does.
+  #scheduleDocumentRuntimeReseed(row) {
+    if (!row.eventCapable || row.runtimeReseedInFlight) return;
+    row.runtimeReseedInFlight = true;
+    setImmediate(() => {
+      row.runtimeReseedInFlight = false;
+      if (!liveWebContents(row.webContents) || !this.#rows.has(row.id)) return;
+      if (row.dbg.isAttached?.() !== true) return;
+      const bounded = (promise) => Promise.race([
+        Promise.resolve(promise).catch((error) => { throw error; }),
+        new Promise((resolve) => { const timer = setTimeout(() => resolve(null), RUNTIME_RESEED_TIMEOUT_MS); timer.unref?.(); }),
+      ]);
+      void Promise.resolve()
+        .then(() => bounded(row.dbg.sendCommand('Runtime.enable')))
+        .then(() => bounded(row.dbg.sendCommand('DOM.getDocument', { depth: 1, pierce: true })))
+        .then(() => {
+          row.runtimeReseedCount += 1;
+          row.lastRuntimeReseedAt = new Date().toISOString();
+          row.lastRuntimeReseedError = null;
+        })
+        .catch((error) => {
+          row.lastRuntimeReseedError = clip(error?.message || error, 300);
+        });
     });
   }
 

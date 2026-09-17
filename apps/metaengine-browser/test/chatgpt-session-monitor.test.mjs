@@ -99,15 +99,24 @@ test('retry/regenerate controls never become automatic recovery authority', () =
   assert.equal(h.monitor.nextRecovery('tab1').action, 'NONE');
 });
 
-test('renderer loss reloads same conversation once then escalates', () => {
+test('renderer loss escalates immediately — navigation-class auto-reload is forbidden (P0 repair)', () => {
   const h = harness();
   h.monitor.observe({ tab_id: 'tab1', frame: frame(), physical_health: 'RENDERER_GONE' });
-  let recovery = h.monitor.nextRecovery('tab1');
-  assert.equal(recovery.action, 'RELOAD_SAME_CONVERSATION');
-  h.monitor.markRecovery('tab1', recovery.action);
-  h.monitor.observe({ tab_id: 'tab1', frame: frame(), physical_health: 'RENDERER_GONE' });
-  recovery = h.monitor.nextRecovery('tab1');
+  const recovery = h.monitor.nextRecovery('tab1');
+  // v1.3.0: RELOAD_SAME_CONVERSATION is dismantled. A reload on an
+  // auth-redirected or logged-out surface re-enters the redirect and
+  // multiplies login tabs (2026-09-17 incident). Physical breakage
+  // escalates; semantic refs are recovered by the bounded Runtime.enable
+  // re-seed, never by navigation.
   assert.equal(recovery.action, 'ESCALATE');
+  assert.equal(recovery.reason, 'RELOAD_FORBIDDEN_BROKEN');
+  h.monitor.observe({ tab_id: 'tab1', frame: frame(), physical_health: 'LOAD_FAILED' });
+  const recovery2 = h.monitor.nextRecovery('tab1');
+  assert.equal(recovery2.action, 'ESCALATE');
+  assert.equal(recovery2.reason, 'RELOAD_FORBIDDEN_BROKEN');
+  // markRecovery no longer arms any reload epoch — the field stays null.
+  h.monitor.markRecovery('tab1', 'STOP_GENERATION');
+  assert.equal(h.monitor.get('tab1').reload_attempted_epoch, null);
 });
 
 test('monitor snapshots never persist response text', () => {
