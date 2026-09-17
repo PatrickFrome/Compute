@@ -38,11 +38,14 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
 
-      - name: Compile trusted verifier
-        run: python3 -m py_compile controller/rsi/promotion_attestation.py tests/rsi/test_promotion_attestation.py
+      - name: Compile trusted verifier and producer
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile controller/rsi/*.py tests/rsi/*.py
 
-      - name: Run adversarial promotion-attestation contract
-        run: python3 -m unittest tests.rsi.test_promotion_attestation -v
+      - name: Run adversarial promotion-attestation contracts
+        run: python3 -m unittest discover -s tests/rsi -p 'test_*.py' -v
 
       - name: Prove contract is non-signing and read-only
         shell: bash
