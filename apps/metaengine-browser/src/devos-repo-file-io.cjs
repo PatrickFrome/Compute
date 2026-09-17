@@ -92,6 +92,8 @@ function decodeUtf8(bytes) {
 async function readDevOSRepoTextFile({ repoRoot, source, payload } = {}) {
   const exact = exactSource(source);
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('devos_repo_file_read_payload_invalid');
+  const requestedSource = exactSource(payload.source);
+  if (!sourceMatches(requestedSource, exact)) throw new Error('devos_repo_file_source_stale');
   const relativePath = normalizeRelativePath(payload.relative_path);
   const file = await resolveExistingFile(repoRoot, relativePath);
   const bytes = await fs.readFile(file.absolute);
