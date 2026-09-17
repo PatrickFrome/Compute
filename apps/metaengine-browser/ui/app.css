@@ -91,3 +91,22 @@ body[data-final-shell="telegram-browser-v1"] .commandButton strong{font-size:10p
   .systemDot,.tabStateDot,.brainPresence i{forced-color-adjust:auto;border:1px solid CanvasText}
   button:focus-visible,input:focus-visible{outline:2px solid Highlight}
 }
+
+
+/* DevOS IDE V1 — renderer is an explicit editor surface only. File authority stays
+   in the typed Development Plane IPC contract; autosave and effect retry are absent. */
+.opsContent:has(.ideWorkspace){display:flex;flex-direction:column;overflow:hidden;padding:0 8px 8px}
+.ideMount{min-height:0;flex:1;display:flex}
+.ideWorkspace{min-width:0;min-height:0;flex:1;display:flex;flex-direction:column;gap:7px;padding-top:8px}
+.ideHeading{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:7px 4px 2px}
+.ideHeadingCopy{min-width:0;display:flex;flex-direction:column;gap:3px}
+.ideHeadingCopy strong{font-size:12px;font-weight:690;color:#263247}
+.ideHeadingCopy small{font-size:7.5px;color:#8d98a8}
+.ideStatus{flex:0 0 auto;padding:4px 7px;border-radius:999px;background:#f1f4f7;color:#758195;font-size:6.8px;font-weight:760;letter-spacing:.04em}
+.ideStatus[data-tone="good"]{background:#e9f7ef;color:#277349}.ideStatus[data-tone="warn"]{background:#fff3dc;color:#9a6400}.ideStatus[data-tone="bad"]{background:#fdeceb;color:#a13a34}
+.ideOpenBar{display:flex;gap:6px}.idePathInput{min-width:0;flex:1;height:32px;border:1px solid #dfe5ec;border-radius:9px;background:#fff;color:#2d394c;padding:0 9px;font-size:8.5px;user-select:text}
+.idePathInput::placeholder{color:#a3adba}
+.ideActions{display:flex;gap:6px}.ideButton{height:30px;padding:0 10px;border:1px solid #dfe5ec;border-radius:9px;background:#fff;color:#435168;font-size:8px;font-weight:680;cursor:pointer}.ideButton:hover:not(:disabled){border-color:#b9c8dc;background:#f7faff}.ideButton.ideSave{background:#246fd1;border-color:#246fd1;color:#fff}.ideButton:disabled{opacity:.45;cursor:not-allowed}
+.ideMeta{min-height:12px;color:#7d899a;font-size:7px;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:text}
+.ideMessage{min-height:26px;padding:6px 8px;border:1px solid #e8ecf1;border-radius:9px;background:#f8fafc;color:#667386;font-size:7.2px;line-height:1.45;user-select:text}
+.ideEditorHost{min-width:0;min-height:260px;flex:1;overflow:hidden;border:1px solid #202a37;border-radius:10px;background:#0f141c}
