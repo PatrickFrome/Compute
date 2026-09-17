@@ -20,14 +20,14 @@
     "prestart": "npm run build:ide"
   },
   "dependencies": {
-    "electron-updater": "6.8.9",
-    "monaco-editor": "0.56.0"
+    "electron-updater": "6.8.9"
   },
   "devDependencies": {
     "@electron/asar": "4.3.0",
     "@electron/fuses": "2.1.3",
     "electron": "44.0.0",
-    "esbuild": "0.28.2"
+    "esbuild": "0.28.2",
+    "monaco-editor": "0.56.0"
   },
   "engines": {
     "node": ">=24"
