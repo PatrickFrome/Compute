@@ -51,7 +51,7 @@ const MAX_RETIRE_PER_CYCLE = 4;
 const RETIRE_ELIGIBLE_STATES = Object.freeze(['PROVISIONING', 'BOUND_UNVERIFIED', 'ADMISSION_FENCED']);
 const LIVE_STATES = Object.freeze(['REGISTERED', 'PROVISIONING', 'BOUND_UNVERIFIED', 'ACTIVE', 'ADMISSION_FENCED']);
 
-export const FLEET_ELASTIC_GOVERNOR_VERSION = '1.1.0';
+export const FLEET_ELASTIC_GOVERNOR_VERSION = '1.2.0';
 
 export const ELASTIC_FLEET_CONTRACT = Object.freeze({
   schema: 'metaengine.browser.fleet-elastic-governor.v1',
@@ -61,6 +61,8 @@ export const ELASTIC_FLEET_CONTRACT = Object.freeze({
   idle_cycles_required: IDLE_CYCLES_REQUIRED,
   max_retire_per_cycle: MAX_RETIRE_PER_CYCLE,
   max_target_agents_default: DEFAULT_MAX_TARGET_AGENTS,
+  census_derived_target_ceiling: true,
+  explicit_target_ceiling_precedence: true,
   retire_eligible_states: RETIRE_ELIGIBLE_STATES,
   never_retire_states: Object.freeze(['ACTIVE', 'PROVISIONING_AMBIGUOUS']),
   warm_floor_enforced: true,
@@ -129,10 +131,22 @@ export function planElasticFleetCapacity({ backlog = {}, fleetSnapshot = {}, idl
   const policy = fleetSnapshot?.policy || {};
   const warm = Math.max(0, nonNegative(policy.warm_agents ?? DEFAULT_WARM_AGENTS));
   const burst = Math.max(1, nonNegative(policy.spawn_burst_limit ?? DEFAULT_SPAWN_BURST_LIMIT) || DEFAULT_SPAWN_BURST_LIMIT);
-  const ceiling = Math.max(warm, nonNegative(maxTargetAgents ?? policy.elastic_max_target_agents ?? DEFAULT_MAX_TARGET_AGENTS));
+  const census = normalizeTabCensus(tabCensus);
+  // The read-only TabRegistry census is stronger capacity evidence than the
+  // historical 12-agent policy fallback. When present, use its per-role fleet
+  // ceiling so elastic growth can consume all physically reserved fleet slots.
+  // Explicit operator/config ceilings still win. Older shells without census
+  // retain the conservative fallback instead of guessing physical capacity.
+  const explicitCeiling = maxTargetAgents ?? policy.elastic_max_target_agents;
+  const ceilingSource = explicitCeiling != null
+    ? 'EXPLICIT'
+    : census
+      ? 'TAB_CENSUS'
+      : 'CONSERVATIVE_FALLBACK';
+  const ceilingCandidate = explicitCeiling ?? census?.fleet_tab_ceiling ?? DEFAULT_MAX_TARGET_AGENTS;
+  const ceiling = Math.max(warm, nonNegative(ceilingCandidate));
   const live = liveFleetAgents(fleetSnapshot).length;
   const pool = workerTabPoolCount(fleetSnapshot);
-  const census = normalizeTabCensus(tabCensus);
   // Physical grounding (W3): when a read-only census is available, the shrink
   // inventory uses the TRUE count of fleet-role physical tabs (never lower
   // than the logical count — orphan and ambiguous tabs occupy slots too). The
@@ -175,6 +189,7 @@ export function planElasticFleetCapacity({ backlog = {}, fleetSnapshot = {}, idl
     idle_cycles: nextIdleCycles,
     idle_cycles_required: IDLE_CYCLES_REQUIRED,
     max_target_agents: ceiling,
+    max_target_agents_source: ceilingSource,
     worker_tab_pool: pool,
     physical_worker_tabs: census ? census.fleet_tabs : null,
     fleet_tab_ceiling: census ? census.fleet_tab_ceiling : null,
