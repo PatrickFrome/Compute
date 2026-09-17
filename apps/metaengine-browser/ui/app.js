@@ -31,6 +31,7 @@ let snapshot = null;
 let tabFilter = '';
 let opsSection = 'overview';
 let requestedLayout = { sidebar: 'EXPANDED', operations: 'OPEN' };
+let ideShellModulePromise = null;
 
 function text(value, fallback = '—') {
   const out = String(value ?? '').trim();
@@ -729,6 +730,35 @@ function commandButton(label, hint, action) {
   return button;
 }
 
+function ideShellModule() {
+  if (!ideShellModulePromise) {
+    ideShellModulePromise = import('metaengine://shell/ide-shell.mjs').catch((error) => {
+      ideShellModulePromise = null;
+      throw error;
+    });
+  }
+  return ideShellModulePromise;
+}
+
+function renderIde() {
+  const mount = el('div', 'ideMount');
+  queueMicrotask(() => {
+    if (!mount.isConnected || opsSection !== 'ide') return;
+    ideShellModule()
+      .then((module) => module.mountIdeShell(mount, api))
+      .catch((error) => {
+        const failure = hero('Editor unavailable', String(error?.message || error || 'unknown error').slice(0, 180), 'error');
+        mount.replaceChildren(failure);
+      });
+  });
+  return mount;
+}
+
+function unmountIde() {
+  if (!ideShellModulePromise) return;
+  ideShellModulePromise.then((module) => module.unmountIdeShell()).catch(() => {});
+}
+
 function renderCommands() {
   const fragment = document.createDocumentFragment();
   fragment.append(hero('Command surface', 'Only local navigation and workbench layout commands are exposed here.', 'bounded'));
@@ -744,6 +774,7 @@ function renderCommands() {
     commandButton('Open Workspaces', 'Read only', () => { opsSection = 'workspaces'; renderOps(snapshot); }),
     commandButton('Open Safety contracts', 'Read only', () => { opsSection = 'safety'; renderOps(snapshot); }),
     commandButton('Open DevOS evidence', 'Read only', () => { opsSection = 'devos'; renderOps(snapshot); }),
+    commandButton('Open Repository Editor', 'Monaco · explicit save', () => { opsSection = 'ide'; renderOps(snapshot); }),
   );
   fragment.append(list);
   return fragment;
@@ -751,6 +782,8 @@ function renderCommands() {
 
 function renderOps(next) {
   for (const button of opsNav.querySelectorAll('button[data-section]')) button.classList.toggle('active', button.dataset.section === opsSection);
+  if (opsSection === 'ide' && opsContent.querySelector('.ideMount')) return;
+  if (opsSection !== 'ide') unmountIde();
   let content;
   if (opsSection === 'workspaces') content = renderWorkspaces(next);
   else if (opsSection === 'fleet') content = renderFleet(next);
@@ -759,6 +792,7 @@ function renderOps(next) {
   else if (opsSection === 'runtime') content = renderRuntime(next);
   else if (opsSection === 'safety') content = renderSafety(next);
   else if (opsSection === 'commands') content = renderCommands();
+  else if (opsSection === 'ide') content = renderIde();
   else content = renderOverview(next);
   opsContent.replaceChildren(content);
 }
@@ -815,6 +849,11 @@ document.addEventListener('keydown', (event) => {
   if (control && event.shiftKey && event.key.toLowerCase() === 'o') {
     event.preventDefault();
     toggleOperations().catch(() => {});
+    return;
+  }
+  if (control && !event.shiftKey && event.key.toLowerCase() === 's' && opsSection === 'ide') {
+    event.preventDefault();
+    if (ideShellModulePromise) ideShellModulePromise.then((module) => module.saveIdeShell()).catch(() => {});
     return;
   }
   if (control && event.shiftKey && event.key.toLowerCase() === 'p') {
