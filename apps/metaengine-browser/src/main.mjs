@@ -34,6 +34,7 @@ import { projectDevOSDevelopmentSources } from './metaengine-devos-development-s
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
 const UI_ROOT = path.join(APP_ROOT, 'ui');
+const IDE_ASSET_ROOT = path.join(UI_ROOT, 'ide-dist');
 const TOOLBAR_HEIGHT = SHELL_TOP_HEIGHT;
 const PERCEPTION_CACHE_MS = 4000;
 const STARTUP_RETRY_BASE_MS = 1000;
@@ -84,7 +85,21 @@ function mimeFor(filePath) {
   if (filePath.endsWith('.html')) return 'text/html; charset=utf-8';
   if (filePath.endsWith('.js')) return 'text/javascript; charset=utf-8';
   if (filePath.endsWith('.css')) return 'text/css; charset=utf-8';
+  if (filePath.endsWith('.ttf')) return 'font/ttf';
+  if (filePath.endsWith('.woff2')) return 'font/woff2';
   return 'application/octet-stream';
+}
+
+function resolveIdeAsset(rel) {
+  if (!String(rel || '').startsWith('ide/')) return null;
+  const assetRel = String(rel).slice(4);
+  if (!assetRel || assetRel.includes('\\') || assetRel.includes('\0')) return null;
+  const segments = assetRel.split('/');
+  if (segments.some((segment) => !segment || segment === '.' || segment === '..')) return null;
+  const target = path.resolve(IDE_ASSET_ROOT, ...segments);
+  const relative = path.relative(IDE_ASSET_ROOT, target);
+  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+  return target;
 }
 
 async function registerShellProtocol() {
@@ -96,9 +111,19 @@ async function registerShellProtocol() {
     const url = new URL(request.url);
     if (url.hostname !== 'shell') return new Response('not found', { status: 404 });
     const rel = url.pathname === '/' ? 'index.html' : url.pathname.replace(/^\/+/, '');
-    if (!['index.html', 'app.js', 'app.css', 'dark-workspace.css'].includes(rel)) return new Response('not found', { status: 404 });
-    const body = await fs.readFile(path.join(UI_ROOT, rel));
-    return new Response(body, { status: 200, headers: { 'content-type': mimeFor(rel), 'cache-control': 'no-store' } });
+    const core = ['index.html', 'app.js', 'app.css', 'dark-workspace.css'].includes(rel)
+      ? path.join(UI_ROOT, rel)
+      : null;
+    const ide = core ? null : resolveIdeAsset(rel);
+    const target = core || ide;
+    if (!target) return new Response('not found', { status: 404 });
+    try {
+      const body = await fs.readFile(target);
+      return new Response(body, { status: 200, headers: { 'content-type': mimeFor(target), 'cache-control': 'no-store' } });
+    } catch (error) {
+      if (error?.code === 'ENOENT') return new Response('not found', { status: 404 });
+      throw error;
+    }
   });
   shellProtocolHandlerReady = true;
 }
@@ -1183,6 +1208,28 @@ async function createWindow() {
 
 ipcMain.handle('metaengine:shell:snapshot', async (event) => { assertShellSender(event); return shellSnapshot(); });
 ipcMain.handle('metaengine:shell:command', async (event, message) => { assertShellSender(event); return handleCommand(String(message?.command || ''), message?.payload || {}); });
+ipcMain.handle('metaengine:shell:ide:source', async (event) => {
+  assertShellSender(event);
+  await initDevelopmentPlane();
+  const source = await developmentPlane.request('REPO_HEAD_READ');
+  if (source?.repository_present !== true) throw new Error('devos_ide_repository_unavailable');
+  return Object.freeze({
+    repository: String(source.repository || ''),
+    head: String(source.head || ''),
+    ref: source.ref == null ? null : String(source.ref),
+    authority_effect: false,
+  });
+});
+ipcMain.handle('metaengine:shell:ide:read', async (event, payload) => {
+  assertShellSender(event);
+  await initDevelopmentPlane();
+  return developmentPlane.request('DEVOS_REPO_FILE_READ', payload);
+});
+ipcMain.handle('metaengine:shell:ide:save', async (event, payload) => {
+  assertShellSender(event);
+  await initDevelopmentPlane();
+  return developmentPlane.request('DEVOS_REPO_FILE_SAVE', payload);
+});
 ipcMain.handle('metaengine:shell:presentation-focus:snapshot', async (event) => {
   assertShellSender(event);
   return devosPresentationFocus.snapshot();
