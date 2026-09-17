@@ -96,7 +96,7 @@ async function run() {
   if (completed) return;
   if (readyTimer) clearTimeout(readyTimer);
   trace('APP_READY', { is_ready: app.isReady() });
-  const { DevelopmentPlane } = await import(pathToFileURL(path.join(SRC_ROOT, 'development-plane.mjs')).href);
+  const { DevelopmentPlane, DEVELOPMENT_PLANE_VERSION } = await import(pathToFileURL(path.join(SRC_ROOT, 'development-plane.mjs')).href);
   plane = new DevelopmentPlane({
     spawnWorker: () => utilityProcess.fork(path.join(SRC_ROOT, 'development-plane-worker.cjs'), [], {
       cwd: REPO_ROOT,
@@ -180,7 +180,7 @@ async function run() {
   const shutdown = await plane.stopAndWait(4000);
   trace('DP_STOPPED', { shutdown });
   const ok = state.state === 'READY'
-    && state.version === '0.4.0'
+    && state.version === DEVELOPMENT_PLANE_VERSION
     && health?.ok === true
     && capabilities?.version === state.version
     && capabilities?.candidate_capsules === true
