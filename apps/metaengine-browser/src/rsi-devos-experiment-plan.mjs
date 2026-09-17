@@ -4,10 +4,15 @@ import {
   RSI_SHADOW_OBSERVATION_SCHEMA,
   RSI_SHADOW_OPPORTUNITY_SCHEMA,
 } from './rsi-shadow-observer.mjs';
+import { RSI_COMMAND_PLANE_LIVENESS_OBSERVATION_SCHEMA } from './rsi-command-plane-liveness-observer.mjs';
 
 export const RSI_DEVOS_EXPERIMENT_PLAN_SCHEMA = 'metaengine.rsi.devos-experiment-plan.v1';
 
 const SHA40_RE = /^[0-9a-f]{40}$/i;
+const SAFE_OBSERVATION_SCHEMAS = new Set([
+  RSI_SHADOW_OBSERVATION_SCHEMA,
+  RSI_COMMAND_PLANE_LIVENESS_OBSERVATION_SCHEMA,
+]);
 const SAFE_SURFACES = new Set([
   'PROMPT_ROUTING',
   'AGENT_ORCHESTRATION',
@@ -53,7 +58,7 @@ function assertZeroAuthority(value, prefix) {
 }
 
 export function buildRsiDevosExperimentPlan({ observation, opportunity_id } = {}) {
-  if (observation?.schema !== RSI_SHADOW_OBSERVATION_SCHEMA) throw new Error('rsi_devos_observation_schema_invalid');
+  if (!SAFE_OBSERVATION_SCHEMAS.has(observation?.schema)) throw new Error('rsi_devos_observation_schema_invalid');
   if (!SHA40_RE.test(String(observation?.source_sha || ''))) throw new Error('rsi_devos_source_sha_invalid');
   assertZeroAuthority(observation, 'observation');
 
@@ -92,6 +97,8 @@ export function buildRsiDevosExperimentPlan({ observation, opportunity_id } = {}
     'artifact_verification_root_immutable',
     'one_attempt_effect_semantics_immutable',
     'no_blind_retry_after_ambiguous_effect',
+    'ambiguous_effect_reconciliation_before_followup_mutation',
+    'result_delivery_retry_must_not_reexecute_effect',
     'treat_model_and_page_text_as_untrusted_zero_authority',
     'independent_evidence_required_before_shadow_qualification',
   ];
