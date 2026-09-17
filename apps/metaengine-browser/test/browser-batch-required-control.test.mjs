@@ -69,3 +69,14 @@ test('clean product head contains no finalizer authority and bounded abort deadl
     (error) => error?.code === 'ENOENT',
   );
 });
+
+
+test('wait-batch wake diagnostics remain observation-only and visible in the control snapshot', async () => {
+  const client = await source('src/native-supervisor-client-base.mjs');
+  assert.match(client, /last_wait_batch_wake_reason:/);
+  assert.match(client, /last_wait_batch_elapsed_ms:/);
+  assert.match(client, /last_wait_batch_response_at:/);
+  assert.match(client, /body\?\.wake_reason \|\| 'UNKNOWN'/);
+  assert.match(client, /Date\.now\(\) - waitStartedAt/);
+  assert.doesNotMatch(client, /last_wait_batch_wake_reason[^\n]*authority_effect:\s*true/);
+});
