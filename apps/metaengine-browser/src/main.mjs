@@ -1217,6 +1217,8 @@ ipcMain.handle('metaengine:shell:ide:source', async (event) => {
     repository: String(source.repository || ''),
     head: String(source.head || ''),
     ref: source.ref == null ? null : String(source.ref),
+    source_kind: source.packaged_source_snapshot === true ? 'PACKAGED_SNAPSHOT' : 'LIVE_GIT',
+    write_available: source.packaged_source_snapshot !== true,
     authority_effect: false,
   });
 });
