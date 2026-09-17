@@ -186,6 +186,13 @@ async function saveDevOSRepoTextFile({
     await fs.rename(tempPath, file.absolute);
     renamed = true;
 
+    if (readCurrentSource != null) {
+      const postcommitSource = exactSource(await readCurrentSource());
+      if (!sourceMatches(expectedSource, postcommitSource)) {
+        throw new Error('devos_repo_file_source_changed_after_commit_ambiguous');
+      }
+    }
+
     const after = await fs.readFile(file.absolute);
     decodeUtf8(after);
     const afterSha = digest(after);
