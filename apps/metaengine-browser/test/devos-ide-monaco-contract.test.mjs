@@ -92,7 +92,7 @@ test('IDE shell has explicit save, blocks ambiguous retry and reconciles by read
   assert.match(shell, /readOnly: state\.write_available !== true/);
   assert.match(shell, /state\.write_available !== true \|\| !state\.dirty/);
   assert.match(shell, /ambiguous_save_requires_reconcile: true/);
-  assert.match(shell, /if \(!state\.relative_path \|\| !state\.dirty \|\| state\.ambiguous \|\| !editorHandle\) return;/);
+  assert.match(shell, /if \(!state\.relative_path \|\| state\.write_available !== true \|\| !state\.dirty \|\| state\.ambiguous \|\| !editorHandle\) return;/);
   assert.match(shell, /state\.ambiguous = \/ambiguous\/i\.test\(message\)/);
   assert.match(shell, /const receipt = validateRead\(await apiRef\.ide\.read/);
   assert.match(shell, /adoptRead\(receipt, \{ preserveText: desired \}\)/);
