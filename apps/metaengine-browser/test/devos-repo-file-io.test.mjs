@@ -248,6 +248,14 @@ test('save marks source drift after rename as ambiguous and must not be blindly 
   }
 });
 
+test('worker keeps packaged provenance snapshots read-only', async () => {
+  const worker = await readFile(new URL('../src/development-plane-worker.cjs', import.meta.url), 'utf8');
+  assert.match(worker, /repo\.packaged_source_snapshot === true/);
+  assert.match(worker, /devos_repo_file_packaged_snapshot_read_only/);
+  assert.match(worker, /currentSource: await requireWritableCurrentSource\(\)/);
+  assert.match(worker, /readCurrentSource: requireWritableCurrentSource/);
+});
+
 test('save of identical content is a verified no-op', async () => {
   const root = await fixture();
   try {
