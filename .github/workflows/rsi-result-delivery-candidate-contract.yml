@@ -1,0 +1,147 @@
+name: METAENGINE RSI Result Delivery Candidate Contract
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/result-delivery-transport.mjs'
+      - '.github/workflows/rsi-result-delivery-candidate-contract.yml'
+
+permissions: {}
+concurrency:
+  group: rsi-result-delivery-candidate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  RSI_CANDIDATE_PATH: apps/metaengine-browser/src/result-delivery-transport.mjs
+  RSI_NODE_SANDBOX_IMAGE: node:24.21-bookworm-slim@sha256:713cfbf4a0ac19f40e1bb9919893e126b74a5c8cf5d0623c9f89515c8f74c6fa
+
+jobs:
+  workflow-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - name: Prove candidate workflow cannot become authority
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/rsi-result-delivery-candidate-contract.yml').read_text()
+          assert ('pull_request_'+'target:') not in p
+          assert ('id-token:'+' write') not in p
+          assert ('attestations:'+' write') not in p
+          sandbox=p.split('\n  candidate-sandbox:',1)[1]
+          for token in ('--network none','--read-only','--cap-drop ALL','no-new-privileges','--pids-limit 64','--memory 512m','--cpus 1'):
+              assert token in sandbox
+          assert 'GH_TOKEN:' not in sandbox
+          assert 'promotion' not in sandbox.lower()
+          assert 'self-update' not in sandbox.lower()
+          PY
+
+  candidate-preflight:
+    needs: workflow-contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      eligible: ${{ steps.diff.outputs.eligible }}
+      base_sha: ${{ steps.diff.outputs.base_sha }}
+      head_sha: ${{ steps.diff.outputs.head_sha }}
+    steps:
+      - name: Require exact one-file candidate diff
+        id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+        run: |
+          set -euo pipefail
+          echo 'eligible=false' >> "$GITHUB_OUTPUT"
+          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$CHANGED_FILES" != '1' ]]; then exit 0; fi
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files?per_page=100" > /tmp/files.json
+          if jq -e --arg path "$RSI_CANDIDATE_PATH" 'length==1 and .[0].filename==$path and (.status=="added" or .status=="modified")' /tmp/files.json >/dev/null; then
+            echo 'eligible=true' >> "$GITHUB_OUTPUT"
+          fi
+
+  candidate-sandbox:
+    if: needs.candidate-preflight.outputs.eligible == 'true'
+    needs: [workflow-contract, candidate-preflight]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact trusted base evaluator
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ needs.candidate-preflight.outputs.base_sha }}
+          persist-credentials: false
+      - name: Checkout exact candidate separately
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ needs.candidate-preflight.outputs.head_sha }}
+          path: candidate
+          persist-credentials: false
+      - name: Prove exact identities
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = '${{ needs.candidate-preflight.outputs.base_sha }}'
+          test "$(git -C candidate rev-parse HEAD)" = '${{ needs.candidate-preflight.outputs.head_sha }}'
+          test -s "candidate/$RSI_CANDIDATE_PATH"
+          test -s apps/metaengine-browser/scripts/rsi-l1-result-delivery-evaluator.mjs
+      - name: Pull exact sandbox image
+        run: |
+          set -euo pipefail
+          docker pull "$RSI_NODE_SANDBOX_IMAGE"
+          docker image inspect "$RSI_NODE_SANDBOX_IMAGE" >/dev/null
+      - name: Execute pure helper evaluator inside bounded no-network container
+        id: evaluate
+        run: |
+          set -euo pipefail
+          mkdir -p sandbox-out
+          chmod 0777 sandbox-out
+          set +e
+          docker run --rm \
+            --network none \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 64 \
+            --memory 512m \
+            --cpus 1 \
+            --user 65534:65534 \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/apps/metaengine-browser/scripts/rsi-l1-result-delivery-evaluator.mjs,dst=/trusted/evaluator.mjs,readonly" \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/candidate/$RSI_CANDIDATE_PATH,dst=/candidate/result-delivery-transport.mjs,readonly" \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/sandbox-out,dst=/out" \
+            "$RSI_NODE_SANDBOX_IMAGE" \
+            node /trusted/evaluator.mjs /candidate/result-delivery-transport.mjs /out/evaluation.json
+          CODE=$?
+          set -e
+          echo "exit_code=$CODE" >> "$GITHUB_OUTPUT"
+          test -s sandbox-out/evaluation.json
+          [[ "$CODE" == '0' || "$CODE" == '2' ]]
+      - name: Upload noncanonical development evaluation
+        if: always() && steps.evaluate.outputs.exit_code != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: rsi-result-delivery-candidate-development-evaluation
+          path: sandbox-out/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Require candidate evaluator PASS
+        run: |
+          set -euo pipefail
+          test '${{ steps.evaluate.outputs.exit_code }}' = '0'
