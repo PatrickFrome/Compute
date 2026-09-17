@@ -64,10 +64,13 @@ test('packaging builds Monaco before file collection and runtime serves only con
   assert.match(main, /function resolveIdeAsset\(rel\)/);
   assert.match(main, /segment === '\.\.'+/);
   assert.match(main, /path\.relative\(IDE_ASSET_ROOT, target\)/);
+  assert.match(main, /\^\[A-Za-z0-9\._-\]\+\$/);
   assert.match(main, /'ide-shell\.mjs'/);
   assert.match(main, /metaengine:shell:ide:source/);
   assert.match(main, /metaengine:shell:ide:read/);
   assert.match(main, /metaengine:shell:ide:save/);
+  assert.match(main, /source_kind: source\.packaged_source_snapshot === true \? 'PACKAGED_SNAPSHOT' : 'LIVE_GIT'/);
+  assert.match(main, /write_available: source\.packaged_source_snapshot !== true/);
   assert.doesNotMatch(main, /metaengine:shell:ide:[^'"]*eval/i);
 });
 
@@ -85,6 +88,9 @@ test('preload exposes typed IDE methods without arbitrary command or filesystem 
 test('IDE shell has explicit save, blocks ambiguous retry and reconciles by readback', async () => {
   const shell = await source('ui/ide-shell.mjs');
   assert.match(shell, /autosave: false/);
+  assert.match(shell, /READ ONLY SNAPSHOT/);
+  assert.match(shell, /readOnly: state\.write_available !== true/);
+  assert.match(shell, /state\.write_available !== true \|\| !state\.dirty/);
   assert.match(shell, /ambiguous_save_requires_reconcile: true/);
   assert.match(shell, /if \(!state\.relative_path \|\| !state\.dirty \|\| state\.ambiguous \|\| !editorHandle\) return;/);
   assert.match(shell, /state\.ambiguous = \/ambiguous\/i\.test\(message\)/);
