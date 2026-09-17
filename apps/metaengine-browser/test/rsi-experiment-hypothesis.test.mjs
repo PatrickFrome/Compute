@@ -78,7 +78,7 @@ test('result-delivery L1 becomes a precommitted falsifiable hypothesis with no a
   assert.ok(hypothesis.acceptance_contract.hard_gates.includes('duplicate_irreversible_effect_count==0'));
   assert.ok(hypothesis.acceptance_contract.hard_gates.includes('physical_effect_execution_count<=1'));
   assert.ok(hypothesis.acceptance_contract.required_receipts.includes('DURABLE_RECEIPT_READBACK'));
-  assert.ok(hypothesis.acceptance_contract.falsification_cases.some((entry) => /never re-executing the physical effect/i.test(entry)));
+  assert.ok(hypothesis.acceptance_contract.falsification_cases.some((entry) => /without re-executing the physical effect/i.test(entry)));
   assert.equal(hypothesis.execution_authority, false);
   assert.equal(hypothesis.production_mutation_authority, false);
   assert.equal(hypothesis.promotion_authority, false);
