@@ -10,6 +10,7 @@ import { SelfUpdateRuntime } from './self-update-runtime.mjs';
 import { NativeSupervisorCommandFastlane } from './native-supervisor-command-fastlane.mjs';
 import { confirmSelfUpdateRestartSafety } from './self-update-restart-safety.mjs';
 import { persistPreInstallReceipt } from './self-update-handoff.mjs';
+import { readSelfUpdateTransaction } from './self-update-transaction-journal.mjs';
 import { reconcileRestoredGeneratingChats } from './self-update-chat-reconcile.mjs';
 import { DEVELOPER_EMERGENCY_UPDATE_ACTION } from './developer-emergency-update-admission.mjs';
 import { loadNativeSupervisorControlState, persistNativeSupervisorControlState } from './native-supervisor-control-state.mjs';
@@ -231,6 +232,8 @@ export class NativeSupervisorClient {
   #controlStatePersistenceError = null;
   #legacySingleLeaseFallback = true;
   #runtimeControl = unavailableDevosRuntimeControl('NOT_OBSERVED');
+  #resultDeliveryAttempts;
+  #resultDeliveryBackoffMs;
 
   constructor({
     identity,
@@ -252,6 +255,8 @@ export class NativeSupervisorClient {
     commandFastlaneIntervalMs = 750,
     controlStatePath = null,
     hostResilience = undefined,
+    resultDeliveryAttempts = 3,
+    resultDeliveryBackoffMs = [1000, 3000],
   }) {
     if (!identity) throw new Error('native_supervisor_identity_required');
     if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
@@ -272,6 +277,10 @@ export class NativeSupervisorClient {
     this.#maintenanceIntervalMs = Math.max(1000, Math.min(60000, Number(maintenanceIntervalMs) || DEFAULT_MAINTENANCE_INTERVAL_MS));
     this.#controlStatePath = controlStatePath ? String(controlStatePath) : null;
     this.#legacySingleLeaseFallback = legacySingleLeaseFallback !== false;
+    this.#resultDeliveryAttempts = Math.max(1, Math.min(6, Number(resultDeliveryAttempts) || 3));
+    this.#resultDeliveryBackoffMs = Array.isArray(resultDeliveryBackoffMs) && resultDeliveryBackoffMs.length
+      ? resultDeliveryBackoffMs.map((ms) => Math.max(0, Number(ms) || 0))
+      : [1000, 3000];
     this.#commandLane = new NativeSupervisorCommandLaneScheduler({
       readConcurrency: commandReadConcurrency,
       mutationConcurrency: commandMutationConcurrency,
@@ -332,6 +341,10 @@ export class NativeSupervisorClient {
       beforeInstall: async (receipt) => {
         const { app } = await import('electron');
         await persistPreInstallReceipt(app, receipt);
+      },
+      readPriorTransaction: async () => {
+        const { app } = await import('electron');
+        return readSelfUpdateTransaction(app).catch(() => null);
       },
       beforeInstallerLaunch: async (receipt) => {
         const { app } = await import('electron');
@@ -762,10 +775,43 @@ export class NativeSupervisorClient {
     return command ? [command] : [];
   }
 
+  // Bounded, idempotent redelivery for command-result transport. The browser
+  // effect has already happened when a receipt is posted; dropping the receipt
+  // on a single transient transport failure turned completed commands into
+  // EXPIRED lease_timeout_no_retry (observed live). Re-POSTing the immutable
+  // receipt is safe — the completion RPC is atomic and idempotent per
+  // command_id — and it never re-executes any browser effect. 4xx responses are
+  // contract violations and are surfaced immediately without retry.
+  static #retryableResultDeliveryFailure(status) {
+    return Number(status) >= 500 || !Number.isFinite(Number(status));
+  }
+
+  async #deliverResultWithRetry(path, payload) {
+    let lastError = null;
+    for (let attempt = 1; attempt <= this.#resultDeliveryAttempts; attempt += 1) {
+      let response;
+      try {
+        response = await this.#signedRequest(path, { payload });
+      } catch (error) {
+        lastError = error;
+        response = null;
+      }
+      if (response && response.ok) return response;
+      if (response && !NativeSupervisorClient.#retryableResultDeliveryFailure(response.status)) {
+        throw new Error(`native_supervisor_result_http_${response.status}`);
+      }
+      if (response) lastError = new Error(`native_supervisor_result_http_${response.status}`);
+      if (attempt < this.#resultDeliveryAttempts) {
+        const backoff = this.#resultDeliveryBackoffMs[Math.min(attempt - 1, this.#resultDeliveryBackoffMs.length - 1)] || 0;
+        if (backoff > 0) await new Promise((resolve) => setTimeout(resolve, backoff));
+      }
+    }
+    throw lastError || new Error('native_supervisor_result_delivery_failed');
+  }
+
   async #postResult(command, ok, result, error = null, effectOutcome = null) {
     const payload = { ok, receipt: { schema: 'metaengine.native-supervisor.command-receipt.v2', command_id: command.command_id, action: command.action, platform: command.platform || null, result: result ?? null, effect_outcome: effectOutcome, recorded_at: new Date().toISOString(), authority_effect: false }, error };
-    const response = await this.#signedRequest(`/v1/commands/${encodeURIComponent(command.command_id)}/result`, { payload });
-    if (!response.ok) throw new Error(`native_supervisor_result_http_${response.status}`);
+    await this.#deliverResultWithRetry(`/v1/commands/${encodeURIComponent(command.command_id)}/result`, payload);
   }
 
   async #postBatchResults(rows) {
@@ -791,7 +837,7 @@ export class NativeSupervisorClient {
   const chunks = partitionNativeSupervisorBatchResults(results);
   const acknowledgements = [];
   for (const chunk of chunks) {
-    const response = await this.#signedRequest('/v1/commands/result-batch', { payload: { results: chunk } });
+    const response = await this.#deliverResultWithRetry('/v1/commands/result-batch', { results: chunk });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(`native_supervisor_batch_result_http_${response.status}:${body?.error || 'unknown'}`);
     acknowledgements.push(...assertNativeSupervisorBatchCompletion(body, chunk));

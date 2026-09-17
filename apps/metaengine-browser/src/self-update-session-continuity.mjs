@@ -154,6 +154,11 @@ export function selfUpdateSessionContinuityQuarantinePath(userDataPath, quaranti
   return path.join(String(userDataPath), `metaengine-self-update-session-continuity-quarantine-${stamp}.json`);
 }
 
+export function selfUpdateSessionContinuitySupersedePath(userDataPath, supersededAt = new Date().toISOString()) {
+  const stamp = String(supersededAt || new Date().toISOString()).replace(/[^0-9A-Za-z.-]/g, '-').slice(0, 96);
+  return path.join(String(userDataPath), `metaengine-self-update-session-continuity-superseded-${stamp}.json`);
+}
+
 export async function persistSelfUpdateSessionContinuity(userDataPath, row) {
   if (row?.schema !== SELF_UPDATE_SESSION_CONTINUITY_SCHEMA) throw new Error('self_update_session_continuity_schema_invalid');
   const target = selfUpdateSessionContinuityPath(userDataPath);
@@ -182,6 +187,24 @@ export async function quarantineSelfUpdateSessionContinuity(userDataPath, { quar
   try {
     await fs.rename(target, quarantine);
     return quarantine;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+// Archives a session-continuity capsule whose target version was strictly older
+// than the currently running version. The install that capsule was prepared for
+// has already been superseded, so keeping the file only blocks successor
+// qualification forever. The archive is a pure rename (durable, sidecar-named,
+// never deleted) so auditors can still inspect the superseded attempt. No page
+// authority and no installer effect is involved.
+export async function supersedeSelfUpdateSessionContinuity(userDataPath, { supersededAt = new Date().toISOString() } = {}) {
+  const target = selfUpdateSessionContinuityPath(userDataPath);
+  const superseded = selfUpdateSessionContinuitySupersedePath(userDataPath, supersededAt);
+  try {
+    await fs.rename(target, superseded);
+    return superseded;
   } catch (error) {
     if (error?.code === 'ENOENT') return null;
     throw error;

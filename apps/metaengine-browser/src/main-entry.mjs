@@ -18,7 +18,7 @@ import {
   SUCCESSOR_STARTUP_PROBE_ONLY,
 } from './self-update-handoff.mjs';
 import { installSignedSupervisorHeartbeatQualificationHook } from './self-update-signed-heartbeat.mjs';
-import { qualifyUpdatedSuccessorWhenHealthy } from './self-update-successor-qualification.mjs';
+import { qualifyUpdatedSuccessorWhenHealthy, startSuccessorQualificationReprobeLoop } from './self-update-successor-qualification.mjs';
 import { shouldResumeSuccessorQualification } from './self-update-successor-recovery.mjs';
 
 const bypassSingleInstance = process.argv.includes('--metaengine-smoke')
@@ -504,13 +504,40 @@ if (!guard.primary) {
       if (resumeSuccessorQualification) {
         setImmediate(() => {
           qualifyUpdatedSuccessorWhenHealthy({ app })
-            .then((result) => console.log(JSON.stringify({
-              schema: 'metaengine.browser.self-update-qualification.v2',
-              version: app.getVersion(),
-              recovery_startup: updatedLaunch !== true,
-              ...result,
-              authority_effect: false,
-            })))
+            .then((result) => {
+              console.log(JSON.stringify({
+                schema: 'metaengine.browser.self-update-qualification.v2',
+                version: app.getVersion(),
+                recovery_startup: updatedLaunch !== true,
+                ...result,
+                authority_effect: false,
+              }));
+              // Structural liveness repair: the one-shot window above used to be
+              // the ONLY qualification attempt — a PENDING result at its expiry
+              // left the transaction SUCCESSOR_BOOTED forever (observed live for
+              // 13+ hours with all other subsystems healthy). Continue with the
+              // same fail-closed probe on a bounded reconciliation interval; the
+              // loop stops itself on any terminal state and reconciles strictly
+              // older session-continuity leftovers durably.
+              if (result && String(result.state || '').startsWith('QUALIFICATION_PENDING_TIMEOUT')) {
+                startSuccessorQualificationReprobeLoop({
+                  app,
+                  onResult: (row) => console.log(JSON.stringify({
+                    schema: 'metaengine.browser.self-update-qualification-reprobe.v1',
+                    version: app.getVersion(),
+                    ...row,
+                    authority_effect: false,
+                  })),
+                  onError: (error) => console.error(JSON.stringify({
+                    schema: 'metaengine.browser.self-update-qualification-reprobe.v1',
+                    version: app.getVersion(),
+                    state: 'REPROBE_ERROR',
+                    error,
+                    authority_effect: false,
+                  })),
+                });
+              }
+            })
             .catch((error) => console.error(JSON.stringify({
               schema: 'metaengine.browser.self-update-qualification.v2',
               version: app.getVersion(),

@@ -1,5 +1,7 @@
 import { loadSelfUpdateSessionContinuity } from './self-update-session-continuity.mjs';
 import { qualifyUpdatedSuccessor } from './self-update-handoff.mjs';
+import { compareVersions } from './self-update-handoff.mjs';
+import { reconcileStaleSelfUpdateSessionContinuity } from './self-update-continuity-watchdog.mjs';
 import { quarantineSelfUpdateTransaction, readSelfUpdateTransaction } from './self-update-transaction-journal.mjs';
 import {
   recordSelfUpdateRecoveryQualificationResult,
@@ -10,6 +12,7 @@ import {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const HARD_CONTINUITY_FAILURES = new Set(['PARTIAL', 'ERROR', 'TARGET_VERSION_MISMATCH']);
 const MAX_SENTINEL_HEARTBEAT_AGE_MS = 8_000;
+const UNRESOLVED_PRIOR_SUCCESSOR_BOOTED = 'self_update_transaction_unresolved_prior:SUCCESSOR_BOOTED';
 let acceptedHeartbeatHealth = null;
 
 function normalized(value) {
@@ -60,13 +63,32 @@ export async function recordAcceptedSignedSupervisorHeartbeat({ app, state, acce
 
   const continuityState = normalized(state.self_update_session_continuity?.state);
   if (HARD_CONTINUITY_FAILURES.has(continuityState)) {
-    acceptedHeartbeatHealth = null;
-    const quarantineReason = `session_continuity_${continuityState.toLowerCase()}`;
-    const quarantined = await quarantineSelfUpdateTransaction(app, quarantineReason);
-    recordSelfUpdateRecoveryQuarantineResult(quarantined);
-    return { state: 'QUARANTINED', reason: quarantineReason, authority_effect: false };
+    // A TARGET_VERSION_MISMATCH whose capsule target is strictly OLDER than the
+    // running version is a leftover of an already-superseded attempt, not a live
+    // continuity failure of this successor. The durable capsule is reconciled
+    // (archived as superseded) by the qualification re-probe loop / watchdog;
+    // quarantining the transaction for a stale leftover would mark a physically
+    // successful install as failed. Any other hard failure (PARTIAL, ERROR,
+    // mismatch with equal-or-newer capsule target) still quarantines fail-closed.
+    const capsuleTarget = String(state.self_update_session_continuity?.target_version || '');
+    const staleLeftover = continuityState === 'TARGET_VERSION_MISMATCH'
+      && capsuleTarget
+      && compareVersions(version, capsuleTarget) > 0;
+    if (!staleLeftover) {
+      acceptedHeartbeatHealth = null;
+      const quarantineReason = `session_continuity_${continuityState.toLowerCase()}`;
+      const quarantined = await quarantineSelfUpdateTransaction(app, quarantineReason);
+      recordSelfUpdateRecoveryQuarantineResult(quarantined);
+      return { state: 'QUARANTINED', reason: quarantineReason, authority_effect: false };
+    }
   }
-  if (continuityState !== 'RESTORED') {
+  const continuitySettled = continuityState === 'RESTORED'
+    || continuityState === 'NONE'
+    || (continuityState === 'TARGET_VERSION_MISMATCH' && (() => {
+      const capsuleTarget = String(state.self_update_session_continuity?.target_version || '');
+      return capsuleTarget && compareVersions(version, capsuleTarget) > 0;
+    })());
+  if (!continuitySettled) {
     acceptedHeartbeatHealth = null;
     return { state: 'HEARTBEAT_CONTINUITY_NOT_RESTORED', continuity_state: continuityState || null, authority_effect: false };
   }
@@ -76,9 +98,22 @@ export async function recordAcceptedSignedSupervisorHeartbeat({ app, state, acce
     acceptedHeartbeatHealth = null;
     return { state: 'HEARTBEAT_UPDATER_NOT_BOUND', authority_effect: false };
   }
-  if ((updater.last_error != null && String(updater.last_error).trim() !== '') || ['ERROR','FAILED'].includes(normalized(updater.state))) {
+  const updaterError = updater.last_error != null && String(updater.last_error).trim() !== '' ? String(updater.last_error).trim() : null;
+  const updaterState = normalized(updater.state);
+  // The updater legitimately reports ERROR unresolved_prior:SUCCESSOR_BOOTED
+  // while THIS transaction is the pending one being qualified: its install
+  // attempts for the next release are refused exactly because qualification
+  // has not completed yet. Treating that self-referential error as unhealthiness
+  // created a permanent deadlock (qualification needs a healthy updater; the
+  // updater stays errored until qualification completes). Any other error, any
+  // FAILED state, or an ERROR state without that exact signature is still a
+  // hard rejection.
+  const toleratedPendingPrior = updaterError === UNRESOLVED_PRIOR_SUCCESSOR_BOOTED && updaterState !== 'FAILED';
+  const updaterHealthy = toleratedPendingPrior
+    || (updaterError == null && !['ERROR','FAILED'].includes(updaterState));
+  if (!updaterHealthy) {
     acceptedHeartbeatHealth = null;
-    return { state: 'HEARTBEAT_UPDATER_UNHEALTHY', authority_effect: false };
+    return { state: 'HEARTBEAT_UPDATER_UNHEALTHY', updater_state: updaterState || null, updater_error: updaterError, authority_effect: false };
   }
   const resilience = updater.host_resilience;
   const sentinel = resilience?.sentinel;
@@ -200,4 +235,101 @@ export async function qualifyUpdatedSuccessorWhenHealthy({
     await sleep(Math.max(100, Number(pollMs) || 1000));
   }
   return { ...(last || {}), state: 'QUALIFICATION_PENDING_TIMEOUT', authority_effect: false };
+}
+
+export const DEFAULT_SUCCESSOR_QUALIFICATION_REPROBE_MS = 60_000;
+const REPROBE_TERMINAL_STATES = new Set(['QUALIFIED','NOT_PENDING','QUARANTINED','RECOVERY_TRANSACTION_BINDING_DRIFT']);
+
+// Structural liveness repair: qualification used to be a single 30-second
+// startup window — if any predicate (capsule presence, signed-heartbeat
+// freshness, updater health) was not satisfied within it, the transaction
+// stayed SUCCESSOR_BOOTED forever while nothing ever re-probed. A live host was
+// observed stuck in exactly that state for 13+ hours with every other subsystem
+// healthy.
+//
+// This loop is a deterministic reconciliation tick, not a second scheduler:
+//  - it re-runs the SAME fail-closed probe predicate on an interval;
+//  - it stops on every terminal state and when the recovery diagnostic no
+//    longer reports TARGET_INSTALLED_PENDING_QUALIFICATION;
+//  - on PENDING_CONTINUITY it reconciles a strictly-older (superseded) capsule
+//    so the blocker is removed durably instead of being observed forever;
+//  - it performs no installer effect and carries no authority.
+export function startSuccessorQualificationReprobeLoop({
+  app,
+  intervalMs = DEFAULT_SUCCESSOR_QUALIFICATION_REPROBE_MS,
+  maxProbes = 600,
+  probe = probeUpdatedSuccessorQualification,
+  onResult = () => {},
+  onError = () => {},
+  setTimer = setTimeout,
+} = {}) {
+  if (!app) throw new Error('self_update_qualification_app_invalid');
+  const delay = Math.max(5_000, Number(intervalMs) || DEFAULT_SUCCESSOR_QUALIFICATION_REPROBE_MS);
+  const limit = Math.max(1, Math.min(10_000, Number(maxProbes) || 600));
+  let timer = null;
+  let probes = 0;
+  let cancelled = false;
+  let stopped = false;
+
+  const stop = (reason) => {
+    if (stopped) return;
+    stopped = true;
+    cancelled = true;
+    if (timer) clearTimeout(timer);
+    timer = null;
+    if (globalThis.__METAENGINE_SELF_UPDATE_QUALIFICATION_REPROBE__ === handle) {
+      delete globalThis.__METAENGINE_SELF_UPDATE_QUALIFICATION_REPROBE__;
+    }
+    onResult({ schema: 'metaengine.self-update.qualification-reprobe.v1', state: 'LOOP_STOPPED', reason, probes, authority_effect: false });
+  };
+
+  const tick = async () => {
+    if (cancelled || stopped) return;
+    probes += 1;
+    try {
+      const result = await probe({ app });
+      onResult({ schema: 'metaengine.self-update.qualification-reprobe.v1', probe_index: probes, ...result });
+      if (REPROBE_TERMINAL_STATES.has(result?.state)) {
+        stop(`terminal:${result.state}`);
+        return;
+      }
+      if (result?.state === 'PENDING_CONTINUITY') {
+        // Remove a strictly-older superseded capsule durably; equal/newer
+        // targets stay fail-closed (handled by the probe itself).
+        const reconciled = await reconcileStaleSelfUpdateSessionContinuity({
+          userDataPath: app.getPath?.('userData'),
+          currentVersion: app.getVersion?.(),
+        }).catch(() => null);
+        if (reconciled?.state) {
+          onResult({ schema: 'metaengine.self-update.qualification-reprobe.v1', probe_index: probes, state: 'CONTINUITY_RECONCILED', reconcile: reconciled });
+        }
+      }
+      const diagnostic = selfUpdateRecoveryDiagnosticSnapshot();
+      if (diagnostic && diagnostic.state !== 'TARGET_INSTALLED_PENDING_QUALIFICATION') {
+        stop(`diagnostic:${diagnostic.state}`);
+        return;
+      }
+    } catch (error) {
+      onError(String(error?.message || error).slice(0, 300));
+    }
+    if (probes >= limit) {
+      stop('probe_limit_reached');
+      return;
+    }
+    if (cancelled || stopped) return;
+    timer = setTimer(() => { timer = null; void tick(); }, delay);
+    timer?.unref?.();
+  };
+
+  const handle = Object.freeze({
+    schema: 'metaengine.self-update.qualification-reprobe-loop.v1',
+    interval_ms: delay,
+    max_probes: limit,
+    cancel: () => stop('cancelled'),
+    authority_effect: false,
+  });
+  globalThis.__METAENGINE_SELF_UPDATE_QUALIFICATION_REPROBE__ = handle;
+  timer = setTimer(() => { timer = null; void tick(); }, delay);
+  timer?.unref?.();
+  return handle;
 }
