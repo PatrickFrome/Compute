@@ -5,7 +5,7 @@ import {
   RSI_SHADOW_OPPORTUNITY_SCHEMA,
 } from './rsi-shadow-observer.mjs';
 import { RSI_COMMAND_PLANE_LIVENESS_OBSERVATION_SCHEMA } from './rsi-command-plane-liveness-observer.mjs';
-import { RSI_EXPERIMENT_HYPOTHESIS_SCHEMA } from './rsi-experiment-hypothesis.mjs';
+import { RSI_EXPERIMENT_HYPOTHESIS_SCHEMA } from './supervisor-rsi-experiment-hypothesis.mjs';
 
 export const RSI_DEVOS_EXPERIMENT_PLAN_SCHEMA = 'metaengine.rsi.devos-experiment-plan.v1';
 
