@@ -17,6 +17,7 @@ const state = {
   text: '',
   dirty: false,
   ambiguous: false,
+  write_available: false,
   status: 'IDLE',
   error: null,
 };
@@ -92,6 +93,7 @@ function statusLabel() {
   if (state.status === 'SAVING') return 'SAVING';
   if (state.status === 'RECONCILING') return 'RECONCILING';
   if (!state.relative_path) return 'NO FILE';
+  if (state.write_available !== true) return 'READ ONLY SNAPSHOT';
   if (state.dirty) return 'MODIFIED';
   return 'CLEAN';
 }
@@ -106,13 +108,15 @@ function updateChrome() {
   refs.message.textContent = state.error || (
     state.ambiguous
       ? 'The previous save may have taken effect. No retry is allowed until read-only reconciliation.'
-      : state.dirty
-        ? 'Unsaved local edits. Save is an explicit typed repository effect.'
-        : state.relative_path
-          ? 'Readback verified. Autosave is disabled.'
+      : state.relative_path && state.write_available !== true
+        ? 'Packaged provenance snapshot is read-only. Bind a live Git workspace before mutation.'
+        : state.dirty
+          ? 'Unsaved local edits. Save is an explicit typed repository effect.'
+          : state.relative_path
+            ? 'Readback verified. Autosave is disabled.'
           : 'Open an existing UTF-8 repository file.'
   );
-  refs.save.disabled = !state.relative_path || !state.dirty || state.ambiguous || state.status === 'SAVING' || state.status === 'LOADING';
+  refs.save.disabled = !state.relative_path || state.write_available !== true || !state.dirty || state.ambiguous || state.status === 'SAVING' || state.status === 'LOADING';
   refs.reconcile.disabled = !state.relative_path || state.status === 'SAVING' || state.status === 'LOADING' || state.status === 'RECONCILING';
   refs.open.disabled = state.status === 'LOADING' || state.status === 'SAVING' || state.status === 'RECONCILING';
 }
@@ -154,7 +158,7 @@ async function mountEditor() {
     text: state.text,
     relativePath: state.relative_path,
     head: state.source?.head || 'unknown',
-    readOnly: false,
+    readOnly: state.write_available !== true,
   });
   changeDisposable = editorHandle.onDidChange(() => {
     captureEditorText();
@@ -164,7 +168,7 @@ async function mountEditor() {
   editorHandle.focus();
 }
 
-function adoptRead(receipt, { preserveText = null } = {}) {
+function adoptRead(receipt, { preserveText = null, writeAvailable = false } = {}) {
   const diskText = receipt.text;
   const retained = preserveText == null ? diskText : String(preserveText);
   state.source = receipt.source;
@@ -175,6 +179,7 @@ function adoptRead(receipt, { preserveText = null } = {}) {
   state.text = retained;
   state.dirty = retained !== diskText;
   state.ambiguous = false;
+  state.write_available = writeAvailable === true;
   state.error = null;
   state.status = state.dirty ? 'CONFLICT_RECONCILED' : 'OPEN';
 }
@@ -198,7 +203,7 @@ async function openPath() {
   try {
     const source = await apiRef.ide.source();
     const receipt = validateRead(await apiRef.ide.read({ source, relative_path: relativePath }));
-    adoptRead(receipt);
+    adoptRead(receipt, { writeAvailable: source?.write_available === true });
     renderWorkspace();
   } catch (error) {
     state.status = 'IDLE';
@@ -208,7 +213,7 @@ async function openPath() {
 }
 
 async function saveCurrent() {
-  if (!state.relative_path || !state.dirty || state.ambiguous || !editorHandle) return;
+  if (!state.relative_path || state.write_available !== true || !state.dirty || state.ambiguous || !editorHandle) return;
   captureEditorText();
   const desired = state.text;
   state.status = 'SAVING';
@@ -248,7 +253,7 @@ async function reconcileCurrent() {
   try {
     const source = await apiRef.ide.source();
     const receipt = validateRead(await apiRef.ide.read({ source, relative_path: state.relative_path }));
-    adoptRead(receipt, { preserveText: desired });
+    adoptRead(receipt, { preserveText: desired, writeAvailable: source?.write_available === true });
     renderWorkspace();
   } catch (error) {
     state.status = 'ERROR';
