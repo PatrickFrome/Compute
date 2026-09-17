@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-export const DEVELOPMENT_PLANE_VERSION = '0.4.0';
+export const DEVELOPMENT_PLANE_VERSION = '0.5.0';
 export const DEVELOPMENT_PLANE_PROTOCOL = 'metaengine.development-plane.v1';
 export const DEVELOPMENT_PLANE_CAPABILITIES = Object.freeze([
   'HEALTH',
@@ -8,6 +8,8 @@ export const DEVELOPMENT_PLANE_CAPABILITIES = Object.freeze([
   'PROCESS_METRICS',
   'REPO_HEAD_READ',
   'DEVOS_REPO_READ_MODEL',
+  'DEVOS_REPO_FILE_READ',
+  'DEVOS_REPO_FILE_SAVE',
   'DEVOS_REPO_SEARCH',
   'CANDIDATE_CAPSULE_CREATE',
   'CANDIDATE_CAPSULE_VERIFY',
@@ -17,6 +19,8 @@ export const DEVELOPMENT_PLANE_CAPABILITIES = Object.freeze([
 ]);
 
 const PAYLOAD_CAPABILITIES = new Set([
+  'DEVOS_REPO_FILE_READ',
+  'DEVOS_REPO_FILE_SAVE',
   'DEVOS_REPO_SEARCH',
   'CANDIDATE_CAPSULE_CREATE',
   'CANDIDATE_CAPSULE_VERIFY',
@@ -133,6 +137,13 @@ export class DevelopmentPlane {
       devos_repo_read_model: clone(readModel || null),
       devos_repo_search: true,
       devos_repo_search_arbitrary_path_selection: false,
+      devos_repo_file_io: true,
+      devos_repo_file_read_requires_exact_source: true,
+      devos_repo_file_save_requires_exact_source: true,
+      devos_repo_file_save_requires_workspace_fingerprint: true,
+      devos_repo_file_save_requires_expected_sha256: true,
+      devos_repo_file_save_existing_text_only: true,
+      devos_repo_file_save_automatic_retry_allowed: false,
       transcript: Object.freeze(this.#transcript.map((row) => Object.freeze({ ...row }))),
       transcript_total_count: this.#transcriptTotal,
       last_results: Object.freeze(Object.fromEntries([...resultEntries].map(([key, value]) => [key, clone(value)]))),
