@@ -14,7 +14,7 @@ const PROFILE = Object.freeze({
     allowed_mutations: Object.freeze([
       Object.freeze({
         path: 'apps/metaengine-browser/src/result-delivery-transport.mjs',
-        change: 'MODIFY',
+        change: 'CREATE',
       }),
     ]),
     immutable_causal_components: Object.freeze([
@@ -152,7 +152,6 @@ export function verifyRsiMutationContract(contract, { hypothesis } = {}) {
   if (contract.contract_digest !== expectedDigest) {
     throw new Error('rsi_mutation_contract_digest_mismatch');
   }
-
   const actualMaterial = { ...contract };
   delete actualMaterial.contract_digest;
   if (digest(actualMaterial) !== expectedDigest) {

@@ -38,14 +38,10 @@ function assertZeroAuthority(value, label) {
 }
 
 function normalizeMutationSet(mutations) {
-  if (!Array.isArray(mutations) || mutations.length < 1) {
-    throw new Error('rsi_targeted_mutations_invalid');
-  }
+  if (!Array.isArray(mutations) || mutations.length < 1) throw new Error('rsi_targeted_mutations_invalid');
   const seen = new Set();
   return mutations.map((entry) => {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-      throw new Error('rsi_targeted_mutation_entry_invalid');
-    }
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error('rsi_targeted_mutation_entry_invalid');
     const path = String(entry.path || '');
     const change = String(entry.change || '').toUpperCase();
     if (!path || seen.has(path)) throw new Error('rsi_targeted_mutation_duplicate_or_empty');
@@ -55,74 +51,41 @@ function normalizeMutationSet(mutations) {
 }
 
 function assertExperimentPlan(plan, hypothesis, mutationContract) {
-  if (!plan || typeof plan !== 'object' || Array.isArray(plan) || plan.schema !== RSI_DEVOS_EXPERIMENT_PLAN_SCHEMA) {
-    throw new Error('rsi_targeted_experiment_plan_invalid');
-  }
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan) || plan.schema !== RSI_DEVOS_EXPERIMENT_PLAN_SCHEMA) throw new Error('rsi_targeted_experiment_plan_invalid');
   assertZeroAuthority(plan, 'experiment');
-  if (!SHA256_HEX_RE.test(String(plan.plan_digest || ''))) {
-    throw new Error('rsi_targeted_experiment_plan_digest_invalid');
-  }
+  if (!SHA256_HEX_RE.test(String(plan.plan_digest || ''))) throw new Error('rsi_targeted_experiment_plan_digest_invalid');
   const material = { ...plan };
   delete material.plan_digest;
-  if (sha256(material) !== plan.plan_digest) {
-    throw new Error('rsi_targeted_experiment_plan_digest_mismatch');
-  }
-
+  if (sha256(material) !== plan.plan_digest) throw new Error('rsi_targeted_experiment_plan_digest_mismatch');
   if (
     plan.hypothesis_id !== hypothesis.hypothesis_id
     || plan.hypothesis_digest !== hypothesis.hypothesis_digest
     || plan.task_spec?.rsi?.hypothesis_id !== hypothesis.hypothesis_id
     || plan.task_spec?.rsi?.hypothesis_digest !== hypothesis.hypothesis_digest
-  ) {
-    throw new Error('rsi_targeted_experiment_hypothesis_binding_mismatch');
-  }
+  ) throw new Error('rsi_targeted_experiment_hypothesis_binding_mismatch');
   if (
     plan.source_sha !== mutationContract.source_sha
     || plan.task_spec?.rsi?.source_sha !== mutationContract.source_sha
     || String(plan.task_spec?.rsi?.signal || '').toUpperCase() !== mutationContract.signal
     || String(plan.task_spec?.rsi?.mutation_surface || '').toUpperCase() !== mutationContract.mutation_surface
-  ) {
-    throw new Error('rsi_targeted_experiment_contract_binding_mismatch');
-  }
+  ) throw new Error('rsi_targeted_experiment_contract_binding_mismatch');
 }
 
-export function prepareRsiTargetedCandidateBuild({
-  experiment_plan,
-  hypothesis,
-  mutation_contract,
-  source_snapshot,
-  mutations,
-  sequence = 1,
-  previous_candidate_id = null,
-  requested_backend = null,
-} = {}) {
-  if (mutation_contract?.schema !== RSI_MUTATION_CONTRACT_SCHEMA) {
-    throw new Error('rsi_targeted_mutation_contract_invalid');
-  }
+export function prepareRsiTargetedCandidateBuild({ experiment_plan, hypothesis, mutation_contract, source_snapshot, mutations, sequence = 1, previous_candidate_id = null, requested_backend = null } = {}) {
+  if (mutation_contract?.schema !== RSI_MUTATION_CONTRACT_SCHEMA) throw new Error('rsi_targeted_mutation_contract_invalid');
   const verifiedContract = verifyRsiMutationContract(mutation_contract, { hypothesis });
   assertExperimentPlan(experiment_plan, hypothesis, mutation_contract);
-
   const actualMutations = normalizeMutationSet(mutations);
   const expectedMutations = normalizeMutationSet(verifiedContract.allowed_mutations);
-  if (JSON.stringify(actualMutations) !== JSON.stringify(expectedMutations)) {
-    throw new Error('rsi_targeted_mutation_set_mismatch');
-  }
-
+  if (JSON.stringify(actualMutations) !== JSON.stringify(expectedMutations)) throw new Error('rsi_targeted_mutation_set_mismatch');
   const sourceFiles = new Set(Array.isArray(source_snapshot?.source_files) ? source_snapshot.source_files : []);
   for (const entry of expectedMutations) {
-    if (!sourceFiles.has(entry.path)) throw new Error('rsi_targeted_source_snapshot_missing_target');
+    const existsInParent = sourceFiles.has(entry.path);
+    if (entry.change === 'CREATE' && existsInParent) throw new Error('rsi_targeted_source_snapshot_create_target_already_exists');
+    if ((entry.change === 'MODIFY' || entry.change === 'DELETE') && !existsInParent) throw new Error('rsi_targeted_source_snapshot_missing_target');
   }
-
-  const buildPlan = prepareRsiIsolatedCandidateBuild({
-    experiment_plan,
-    source_snapshot,
-    mutations: expectedMutations,
-    sequence,
-    previous_candidate_id,
-    requested_backend,
-  });
+  const buildPlan = prepareRsiIsolatedCandidateBuild({ experiment_plan, source_snapshot, mutations: expectedMutations, sequence, previous_candidate_id, requested_backend });
   verifyRsiIsolatedCandidateBuildPlan(buildPlan);
-
   const material = {
     schema: RSI_TARGETED_CANDIDATE_BUILD_SCHEMA,
     version: 1,
@@ -141,42 +104,21 @@ export function prepareRsiTargetedCandidateBuild({
     automatic_retry_allowed: false,
     authority_effect: false,
   };
-
-  return Object.freeze({
-    ...material,
-    targeted_plan_digest: `sha256:${sha256(material)}`,
-  });
+  return Object.freeze({ ...material, targeted_plan_digest: `sha256:${sha256(material)}` });
 }
 
 export function verifyRsiTargetedCandidateBuild(envelope, { hypothesis, mutation_contract } = {}) {
-  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) {
-    throw new Error('rsi_targeted_build_invalid');
-  }
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) throw new Error('rsi_targeted_build_invalid');
   assertZeroAuthority(envelope, 'build');
-  if (envelope.schema !== RSI_TARGETED_CANDIDATE_BUILD_SCHEMA || envelope.version !== 1) {
-    throw new Error('rsi_targeted_build_schema_invalid');
-  }
+  if (envelope.schema !== RSI_TARGETED_CANDIDATE_BUILD_SCHEMA || envelope.version !== 1) throw new Error('rsi_targeted_build_schema_invalid');
   const verifiedContract = verifyRsiMutationContract(mutation_contract, { hypothesis });
-  if (
-    envelope.hypothesis_id !== hypothesis.hypothesis_id
-    || envelope.hypothesis_digest !== hypothesis.hypothesis_digest
-    || envelope.mutation_contract_digest !== mutation_contract.contract_digest
-  ) {
-    throw new Error('rsi_targeted_build_binding_mismatch');
-  }
-  if (JSON.stringify(normalizeMutationSet(envelope.exact_mutation_set)) !== JSON.stringify(normalizeMutationSet(verifiedContract.allowed_mutations))) {
-    throw new Error('rsi_targeted_build_mutation_set_mismatch');
-  }
-  if (envelope.generic_build_plan_digest !== envelope.generic_build_plan?.plan_digest) {
-    throw new Error('rsi_targeted_build_generic_digest_mismatch');
-  }
+  if (envelope.hypothesis_id !== hypothesis.hypothesis_id || envelope.hypothesis_digest !== hypothesis.hypothesis_digest || envelope.mutation_contract_digest !== mutation_contract.contract_digest) throw new Error('rsi_targeted_build_binding_mismatch');
+  if (JSON.stringify(normalizeMutationSet(envelope.exact_mutation_set)) !== JSON.stringify(normalizeMutationSet(verifiedContract.allowed_mutations))) throw new Error('rsi_targeted_build_mutation_set_mismatch');
+  if (envelope.generic_build_plan_digest !== envelope.generic_build_plan?.plan_digest) throw new Error('rsi_targeted_build_generic_digest_mismatch');
   verifyRsiIsolatedCandidateBuildPlan(envelope.generic_build_plan);
-
   const material = { ...structuredClone(envelope) };
   delete material.targeted_plan_digest;
   const expected = `sha256:${sha256(material)}`;
-  if (envelope.targeted_plan_digest !== expected) {
-    throw new Error('rsi_targeted_build_digest_mismatch');
-  }
+  if (envelope.targeted_plan_digest !== expected) throw new Error('rsi_targeted_build_digest_mismatch');
   return Object.freeze({ ok: true, targeted_plan_digest: expected });
 }
