@@ -18,6 +18,9 @@ on:
 permissions:
   contents: read
 
+env:
+  EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+
 jobs:
   deterministic-verifier-contract:
     runs-on: ubuntu-24.04
@@ -26,13 +29,14 @@ jobs:
       - name: Checkout exact revision
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ env.EXACT_HEAD }}
           persist-credentials: false
 
       - name: Prove checkout identity
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
 
       - name: Compile trusted verifier
         run: python3 -m py_compile controller/rsi/promotion_attestation.py tests/rsi/test_promotion_attestation.py
