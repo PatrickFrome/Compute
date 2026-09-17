@@ -187,6 +187,41 @@ function stableCurrentCommand(command) {
   }) : null;
 }
 
+// F-L1c: after F-L1a/F-L1b every CDP await and result POST is bounded, so a healthy
+// cycle can no longer hang forever. This guard turns any residual stall (a code
+// path the bounds do not reach) into an observable last_error instead of the
+// silent "alive heartbeat / dead command plane" zombie state observed live.
+const COMMAND_CYCLE_STALL_GUARD_MS = 900000;
+
+// D-L2: pure classification of legitimate no-op completions. Exported for
+// contract tests; returns null when the action still requires the generic
+// postcondition readback path.
+export function classifyNoOpEffectOutcome(actionRaw, result) {
+  const action = String(actionRaw || '').toUpperCase();
+  if (action === 'BACK' || action === 'FORWARD') {
+    if (result && result.navigated === false) return 'NO_EFFECT_PROVEN';
+    if (result && result.navigated === true) return 'CONFIRMED';
+    return null;
+  }
+  if (action === 'RELOAD') {
+    // webContents.reload() deterministically initiates the reload; a failed
+    // load surfaces through perception_error afterwards.
+    return 'CONFIRMED';
+  }
+  if (action === 'SCROLL') {
+    const scroll = result?.scroll;
+    if (scroll && scroll.proof === 'VIEWPORT_PAGE_Y_CHANGED') return 'CONFIRMED';
+    if (scroll && scroll.proof === 'SCROLL_BOUNDARY_REACHED') return 'NO_EFFECT_PROVEN';
+    return null;
+  }
+  if (action === 'SELF_UPDATE_CHECK') {
+    const state = String(result?.state || '').toUpperCase();
+    if (state === 'CURRENT') return 'NO_EFFECT_PROVEN';
+    return 'CONFIRMED';
+  }
+  return null;
+}
+
 export class NativeSupervisorClient {
   #identity;
   #fetch;
@@ -205,6 +240,10 @@ export class NativeSupervisorClient {
   #lastCommandStatus = null;
   #currentCommand = null;
   #currentCommands = new Map();
+  // F-L1d: per-command execution start times + cycle start timestamp power the
+  // command_plane observability projection (in-flight age) in snapshot().
+  #commandStartsAtMs = new Map();
+  #cycleStartedAtMs = 0;
   #enrollmentStatus = 'UNINITIALIZED';
   #supervisorMode = 'CONTROL';
   #armed = true;
@@ -370,6 +409,22 @@ export class NativeSupervisorClient {
       last_command_status: this.#lastCommandStatus,
       current_command: this.#currentCommand,
       current_commands: [...this.#currentCommands.values()].map((row) => structuredClone(row)),
+      // F-L1d: makes the "heartbeat alive but command plane wedged" state externally
+      // detectable without waiting for a lease TTL sweep.
+      command_plane: Object.freeze({
+        schema: 'metaengine.native-supervisor.command-plane-observability.v1',
+        cycle_in_flight: this.#cyclePromise != null,
+        cycle_started_at: this.#cycleStartedAtMs > 0 ? new Date(this.#cycleStartedAtMs).toISOString() : null,
+        cycle_age_ms: this.#cycleStartedAtMs > 0 ? Date.now() - this.#cycleStartedAtMs : 0,
+        in_flight_commands: Object.freeze([...this.#currentCommands.values()].map((row) => Object.freeze({
+          command_id: row.command_id,
+          action: row.action,
+          age_ms: this.#commandStartsAtMs.get(String(row.command_id)) != null
+            ? Date.now() - this.#commandStartsAtMs.get(String(row.command_id))
+            : null,
+        }))),
+        authority_effect: false,
+      }),
       enrollment_status: this.#enrollmentStatus,
       identity: this.#identity.snapshot(),
       supervisor_mode: this.#supervisorMode,
@@ -936,11 +991,13 @@ export class NativeSupervisorClient {
   #trackCommandStart(command) {
     const projection = stableCurrentCommand(command);
     this.#currentCommands.set(String(command.command_id), projection);
+    this.#commandStartsAtMs.set(String(command.command_id), Date.now());
     if (!this.#currentCommand) this.#currentCommand = projection;
   }
 
   #trackCommandEnd(command) {
     this.#currentCommands.delete(String(command.command_id));
+    this.#commandStartsAtMs.delete(String(command.command_id));
     this.#currentCommand = this.#currentCommands.values().next().value || null;
   }
 
@@ -991,6 +1048,13 @@ export class NativeSupervisorClient {
         return row && result?.url && String(row.url || '') === String(result.url) ? 'CONFIRMED' : 'AMBIGUOUS';
       }
     }
+
+    // D-L2: model legitimate no-op completions explicitly instead of quarantining
+    // them as AMBIGUOUS (observed live as FAILED postcondition_not_confirmed on
+    // healthy commands: BACK/FORWARD at history boundary, SCROLL at scroll
+    // boundary, SELF_UPDATE_CHECK while CURRENT, RELOAD initiation).
+    const noOpOutcome = classifyNoOpEffectOutcome(action, result);
+    if (noOpOutcome) return noOpOutcome;
 
     // Dispatch success is not post-condition proof. Unsupported effect types are
     // quarantined instead of being mislabeled COMPLETED and are never auto-retried.
@@ -1068,7 +1132,18 @@ export class NativeSupervisorClient {
 
   async cycle() {
     if (this.#legacyFastlaneBusy) return this.snapshot();
-    if (this.#cyclePromise) return this.#cyclePromise;
+    if (this.#cyclePromise) {
+      // F-L1c: a healthy cycle is bounded by the CDP/result deadlines; a cycle
+      // older than the stall guard means an execution path the bounds did not
+      // reach. Surface it instead of waiting silently (the heartbeat stays alive
+      // in parallel, which previously masked the wedge completely).
+      const cycleAgeMs = this.#cycleStartedAtMs > 0 ? Date.now() - this.#cycleStartedAtMs : 0;
+      if (cycleAgeMs > COMMAND_CYCLE_STALL_GUARD_MS) {
+        this.#lastError = `command_cycle_stall:${cycleAgeMs}ms`;
+      }
+      return this.#cyclePromise;
+    }
+    this.#cycleStartedAtMs = Date.now();
     this.#cyclePromise = (async () => {
       try {
         const identity = await this.ensureEnrollment();

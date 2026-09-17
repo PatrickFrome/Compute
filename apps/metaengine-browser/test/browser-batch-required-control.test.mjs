@@ -44,11 +44,11 @@ test('clean product head contains no finalizer authority and bounded abort deadl
 
   assert.match(
     supervisorFetch,
-    /const timer = setTimeout\(\(\) => controller\.abort\(new Error\('native_supervisor_request_deadline'\)\), boundedMs\);\s*\/\/ This timer is the liveness boundary[\s\S]*?try \{/,
+    /const timer = setTimeout\(\(\) => controller\.abort\(new Error\(\s*isResultUrl \? 'native_supervisor_result_delivery_deadline' : 'native_supervisor_request_deadline',\s*\)\), isResultUrl \? resultMs : boundedMs\);\s*\/\/ This timer is the liveness boundary[\s\S]*?try \{/,
   );
   assert.doesNotMatch(
     supervisorFetch,
-    /native_supervisor_request_deadline'\)\), boundedMs\);\s*timer\.unref/,
+    /native_supervisor_request_deadline',\s*\)\), isResultUrl \? resultMs : boundedMs\);\s*timer\.unref/,
   );
 
   assert.match(

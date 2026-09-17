@@ -705,9 +705,9 @@ async function handleCommand(command, payload = {}) {
     if (!selectedView) throw new Error('no_selected_tab');
     return loadTab(selected.tab_id, payload?.url);
   }
-  if (command === 'BACK') { if (selectedView?.webContents.navigationHistory.canGoBack()) selectedView.webContents.navigationHistory.goBack(); return { ok: true }; }
-  if (command === 'FORWARD') { if (selectedView?.webContents.navigationHistory.canGoForward()) selectedView.webContents.navigationHistory.goForward(); return { ok: true }; }
-  if (command === 'RELOAD') { selectedView?.webContents.reload(); invalidatePerception(selected?.tab_id); return { ok: true }; }
+  if (command === 'BACK') { const navigated = Boolean(selectedView?.webContents.navigationHistory.canGoBack()); if (navigated) selectedView.webContents.navigationHistory.goBack(); return { ok: true, navigated }; }
+  if (command === 'FORWARD') { const navigated = Boolean(selectedView?.webContents.navigationHistory.canGoForward()); if (navigated) selectedView.webContents.navigationHistory.goForward(); return { ok: true, navigated }; }
+  if (command === 'RELOAD') { selectedView?.webContents.reload(); invalidatePerception(selected?.tab_id); return { ok: true, reload_initiated: true }; }
   if (command === 'COMPUTE_HEALTH') return bridge.health();
   if (command === 'DOWNLOAD_STATUS') return downloads?.snapshot() || null;
   if (command === 'DOWNLOAD_FILE') { const result = await downloads?.download(payload); await publishSnapshot(); return result; }
@@ -843,11 +843,12 @@ async function executeNativeSupervisorCommand(command) {
   if (['NEW_TAB','SELECT_TAB','CLOSE_TAB','NAVIGATE','BACK','FORWARD','RELOAD','TAB_CENSUS','DOWNLOAD_STATUS','DOWNLOAD_FILE','DOWNLOAD_CANCEL','FLEET_RECONCILE','FLEET_SET_PROFILE','DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD','GATE_STATUS','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL'].includes(action)) {
     if (['BACK','FORWARD','RELOAD'].includes(action)) {
       const { tab, view } = assertExactNativeSupervisorMutationTargetCurrent(exactMutationTarget, { views });
-      if (action === 'BACK' && view.webContents.navigationHistory.canGoBack()) view.webContents.navigationHistory.goBack();
-      if (action === 'FORWARD' && view.webContents.navigationHistory.canGoForward()) view.webContents.navigationHistory.goForward();
+      let navigated = null;
+      if (action === 'BACK') { navigated = Boolean(view.webContents.navigationHistory.canGoBack()); if (navigated) view.webContents.navigationHistory.goBack(); }
+      if (action === 'FORWARD') { navigated = Boolean(view.webContents.navigationHistory.canGoForward()); if (navigated) view.webContents.navigationHistory.goForward(); }
       if (action === 'RELOAD') view.webContents.reload();
       invalidatePerception(tab.tab_id);
-      return { ok: true, tab_id: tab.tab_id, authority_effect: true };
+      return { ok: true, tab_id: tab.tab_id, ...(action === 'RELOAD' ? { reload_initiated: true } : { navigated }), authority_effect: true };
     }
     if (['SELECT_TAB','CLOSE_TAB','NAVIGATE'].includes(action)) {
       const target = assertExactNativeSupervisorMutationTargetCurrent(exactMutationTarget, { views });

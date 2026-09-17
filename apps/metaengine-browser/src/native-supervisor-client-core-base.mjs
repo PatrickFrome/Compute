@@ -19,6 +19,15 @@ export { NATIVE_SUPERVISOR_BASE, NATIVE_SUPERVISOR_RUNTIME_PATH, planPostRestore
 
 const clipError = (error) => String(error?.message || error || 'unknown_error').slice(0, 500);
 const DEFAULT_REQUEST_DEADLINE_MS = 8000;
+// F-L1b: completion posting follows an effectful command, so its transport deadline
+// is far more generous than the ordinary request deadline. The bound exists because
+// an un-aborted result POST was observed live to black-hole (TCP connection wedged
+// for hours) and freeze the single steady-state command lease loop. Aborting the
+// transport does NOT decide the receipt outcome: the delivery is retried by the
+// bounded, idempotent redelivery loop and the DB completion state/readback remains
+// the reconciliation boundary. A command whose receipt ultimately cannot be posted
+// still resolves through lease TTL exactly as before — only now in bounded time.
+const DEFAULT_RESULT_DELIVERY_DEADLINE_MS = 120000;
 const DEFAULT_BOOTSTRAP_HEARTBEAT_MS = 2000;
 const IDLE_MAINTENANCE_POLL_MS = 10;
 const IDLE_MAINTENANCE_WAIT_MAX_MS = 15000;
@@ -34,17 +43,26 @@ function isCommandResultUrl(value) {
   }
 }
 
-export function createBoundedSupervisorFetch(fetchImpl, { deadlineMs = DEFAULT_REQUEST_DEADLINE_MS } = {}) {
+export function createBoundedSupervisorFetch(fetchImpl, {
+  deadlineMs = DEFAULT_REQUEST_DEADLINE_MS,
+  resultDeliveryDeadlineMs = DEFAULT_RESULT_DELIVERY_DEADLINE_MS,
+} = {}) {
   if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
   const boundedMs = Math.max(1000, Math.min(30000, Number(deadlineMs) || DEFAULT_REQUEST_DEADLINE_MS));
+  const resultMs = Math.max(10000, Math.min(300000, Number(resultDeliveryDeadlineMs) || DEFAULT_RESULT_DELIVERY_DEADLINE_MS));
   return async (url, init = {}) => {
-    // Completion posting follows an effectful command. A local timeout here would
-    // turn an unknown receipt outcome into a misleading FAILED path. Both legacy
-    // single receipt and the fast-lane batch receipt therefore remain un-aborted;
-    // the DB completion state/readback is the reconciliation boundary.
-    if (isCommandResultUrl(url) || init.signal) return fetchImpl(url, init);
+    // Completion posting follows an effectful command. A local abort here never
+    // turns an unknown receipt outcome into a misleading FAILED path by itself:
+    // the abort is surfaced as a transport failure to the bounded idempotent
+    // redelivery loop (5xx/network class), and the DB completion state/readback
+    // stays the reconciliation boundary. The generous deadline only prevents a
+    // wedged connection from freezing the command lease loop forever.
+    const isResultUrl = isCommandResultUrl(url);
+    if (init.signal) return fetchImpl(url, init);
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(new Error('native_supervisor_request_deadline')), boundedMs);
+    const timer = setTimeout(() => controller.abort(new Error(
+      isResultUrl ? 'native_supervisor_result_delivery_deadline' : 'native_supervisor_request_deadline',
+    )), isResultUrl ? resultMs : boundedMs);
     // This timer is the liveness boundary for a hanging transport promise. Keep it referenced
     // until the request settles so the bounded operation cannot disappear with the event loop.
     try {

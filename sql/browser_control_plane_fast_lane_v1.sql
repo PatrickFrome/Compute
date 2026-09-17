@@ -234,7 +234,13 @@ begin
     end if;
 
     v_outcome := upper(coalesce(v_receipt->>'effect_outcome',''));
-    if v_row.command_lane<>'READ_ONLY' and v_ok and v_outcome<>'CONFIRMED' then
+    -- D-L2: NO_EFFECT_PROVEN is a legitimate proven terminal outcome (the client
+    -- already maps it to COMPLETED): the command executed and provably had nothing
+    -- to change (history boundary, scroll boundary, already-current update check).
+    -- Rejecting it here turned healthy no-op commands into FAILED
+    -- postcondition_not_confirmed:NO_EFFECT_PROVEN (observed live) and diverged
+    -- from the client-side contract. AMBIGUOUS and unknown outcomes stay failed.
+    if v_row.command_lane<>'READ_ONLY' and v_ok and v_outcome not in ('CONFIRMED','NO_EFFECT_PROVEN') then
       v_ok := false;
       v_error := case when v_outcome='' then 'postcondition_readback_required' else 'postcondition_not_confirmed:'||left(v_outcome,80) end;
     end if;

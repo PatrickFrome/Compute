@@ -264,7 +264,10 @@ begin
     end if;
 
     v_outcome := upper(coalesce(v_receipt->>'effect_outcome',''));
-    if v_row.command_lane<>'READ_ONLY' and v_ok and v_outcome<>'CONFIRMED' then
+    -- D-L2: NO_EFFECT_PROVEN is a legitimate proven terminal outcome (the client
+    -- already maps it to COMPLETED); rejecting it turned healthy no-op commands
+    -- into FAILED postcondition_not_confirmed:NO_EFFECT_PROVEN (observed live).
+    if v_row.command_lane<>'READ_ONLY' and v_ok and v_outcome not in ('CONFIRMED','NO_EFFECT_PROVEN') then
       v_ok := false;
       v_error := case when v_outcome='' then 'postcondition_readback_required'
         else 'postcondition_not_confirmed:'||left(v_outcome,80) end;

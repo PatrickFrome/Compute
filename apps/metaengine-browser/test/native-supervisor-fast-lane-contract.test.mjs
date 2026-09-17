@@ -17,7 +17,7 @@ function between(text, start, end) {
   return source.slice(from, to);
 }
 
-test('batch and legacy effect receipts are never locally aborted after physical execution', async () => {
+test('effect receipts are bounded only by the generous result-delivery deadline, never the short request deadline', async () => {
   const calls = [];
   const fetchImpl = async (url, init = {}) => {
     calls.push({ url: String(url), signal: init.signal || null });
@@ -29,8 +29,12 @@ test('batch and legacy effect receipts are never locally aborted after physical 
   await bounded('https://example.test/a2-browser-native-supervisor-v1/v1/commands/result-batch', { method: 'POST' });
   await bounded('https://example.test/a2-browser-native-supervisor-v1/v1/commands/wait-batch', { method: 'POST' });
 
-  assert.equal(calls[0].signal, null);
-  assert.equal(calls[1].signal, null);
+  // F-L1b: result receipts DO get an abort signal now (a wedged receipt POST froze
+  // the steady-state command lease loop live), but their deadline is the generous
+  // result-delivery deadline — an abort surfaces as a retryable transport failure
+  // to the bounded idempotent redelivery loop, never as a receipt verdict.
+  assert.ok(calls[0].signal instanceof AbortSignal, 'single receipt must carry the result-delivery abort signal');
+  assert.ok(calls[1].signal instanceof AbortSignal, 'batch receipt must carry the result-delivery abort signal');
   assert.ok(calls[2].signal instanceof AbortSignal, 'held transport remains bounded above the current 4s Edge wait');
 });
 
@@ -129,7 +133,7 @@ test('fast-lane release migration fences allocation, lease expiry and semantic c
   assert.match(sql, /hashtextextended\(p_workspace_id::text \|\| ':' \|\| v_client/i);
   assert.match(sql, /expires_at>clock_timestamp\(\)/i);
   assert.match(sql, /leased_at>clock_timestamp\(\)-interval '10 minutes'/i);
-  assert.match(sql, /v_outcome<>'CONFIRMED'/i);
+  assert.match(sql, /v_outcome not in \('CONFIRMED','NO_EFFECT_PROVEN'\)/i);
   assert.match(sql, /sealed_effect_binding_required/i);
   assert.match(sql, /effect-binding\.v1/);
   assert.match(sql, /effect-binding\.v2/);
@@ -143,7 +147,8 @@ test('fast-lane SQL stays source-only, rollback-only, and requires mutation post
   assert.match(sql, /h205f22_a2_browser_supervisor_lease_batch_v1/i);
   assert.match(sql, /h205f22_a2_browser_supervisor_complete_batch_v1/i);
   for (const action of ['PROCESS_CENSUS','PROCESS_EVENTS','SEMANTIC_CENSUS','SEMANTIC_EVENTS','CONTROL_LATENCY_STATUS','GATE_STATUS','TAB_CENSUS','FLEET_STATUS']) assert.match(sql, new RegExp(action));
-  assert.match(sql, /command_lane\s*<>\s*'READ_ONLY'\s+and\s+v_ok\s+and\s+v_outcome\s*<>\s*'CONFIRMED'/i);
+  assert.match(sql, /command_lane\s*<>\s*'READ_ONLY'\s+and\s+v_ok\s+and\s+v_outcome\s+not\s+in\s+\('CONFIRMED','NO_EFFECT_PROVEN'\)/i);
+  assert.doesNotMatch(sql, /v_outcome\s*<>\s*'CONFIRMED'/i);
   assert.match(sql, /postcondition_readback_required/i);
   assert.match(sql, /transport_delivery_is_authority[^\n]*false/i);
   assert.match(sql, /automatic_retry_allowed[^\n]*false/i);
