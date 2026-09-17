@@ -817,6 +817,14 @@ export class NativeSupervisorClient {
     if (this.#maintenancePromise || now - this.#lastMaintenanceAtMs < this.#maintenanceIntervalMs) return this.#maintenancePromise;
     this.#lastMaintenanceAtMs = now;
     this.#maintenancePromise = (async () => {
+      // Mesh startup is a recoverable local initialization step. A one-shot
+      // filesystem/runtime failure must not leave CONTROL healthy while the mesh
+      // stays permanently absent from signed state (which fences transport
+      // promotion forever). Retry only in the existing idle maintenance lane;
+      // this creates no second scheduler and replays no browser effect.
+      if (this.#mesh?.snapshot?.()?.running !== true) {
+        await this.#mesh?.start().catch((error) => { this.#lastError = `mesh_start_recovery:${clipError(error)}`; });
+      }
       await this.#mesh?.reconcile().catch((error) => { this.#lastError = `mesh:${clipError(error)}`; });
       await this.#lifecycle?.cycle().catch((error) => { this.#lastError = `lifecycle:${clipError(error)}`; });
       await this.#mesh?.dispatchRecoveryIfNeeded().catch((error) => { this.#lastError = `mesh_recovery:${clipError(error)}`; });
