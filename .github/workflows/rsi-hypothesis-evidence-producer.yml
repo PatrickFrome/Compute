@@ -66,10 +66,10 @@ jobs:
           for token in ('--network none','--read-only','--cap-drop ALL','no-new-privileges','--pids-limit 64','--memory 512m','--cpus 1'):
               assert token in sandbox
           assert 'GH_TOKEN:' not in sandbox
-          assert 'id-token: write' not in p and 'attestations: write' not in p
+          assert ('id-token:'+' write') not in p and ('attestations:'+' write') not in p
           assert 'rsi-hypothesis-evidence-support' in p
           assert ".files|length==1" in p
-          assert "head_branch==\"main\"" not in p
+          assert ('head_branch=='+'"main"') not in p
           PY
 
   preflight:
