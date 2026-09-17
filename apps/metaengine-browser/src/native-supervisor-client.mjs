@@ -16,6 +16,7 @@ import {
 } from './workspace-binding-observer.mjs';
 import { nativeSupervisorTransportState } from './native-supervisor-client-base.mjs';
 import { buildSupervisorLifecycleStatusSnapshot } from './supervisor-lifecycle-runtime.mjs';
+import { buildSupervisorMeshWireProjectionV1 } from './supervisor-mesh-wire-projection.mjs';
 
 export * from './native-supervisor-client-core.mjs';
 
@@ -461,6 +462,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       if (!identity?.device_id) return false;
       const base = super.snapshot();
       const sourceState = nativeSupervisorTransportState(await this.#sourceGetState());
+      const supervisorMesh = buildSupervisorMeshWireProjectionV1(base?.supervisor_mesh || null);
       const processPlane = this.#processPlaneRef?.()?.snapshot({ eventLimit: 64 }) || unavailableProcessPlane('PROCESS_PLANE_NOT_READY');
       const payload = {
         state: {
@@ -472,6 +474,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
           started_at: base?.started_at || null,
           last_error: base?.last_error || null,
           supervisor_lifecycle: base?.lifecycle ? buildSupervisorLifecycleStatusSnapshot(base.lifecycle) : null,
+          ...(supervisorMesh ? { supervisor_mesh: supervisorMesh } : {}),
           self_update: base?.self_update || null,
           realtime_process_plane: processPlane,
           control_latency: this.#controlLatencySnapshot?.() || null,
