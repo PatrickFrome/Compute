@@ -219,6 +219,35 @@ test('save detects a concurrent file change after source revalidation', async ()
   }
 });
 
+test('save marks source drift after rename as ambiguous and must not be blindly retried', async () => {
+  const root = await fixture();
+  try {
+    const opened = await open(root);
+    let reads = 0;
+    await assert.rejects(
+      saveDevOSRepoTextFile({
+        repoRoot: root,
+        currentSource: source,
+        payload: {
+          source,
+          workspace_fingerprint_sha256: opened.workspace_fingerprint_sha256,
+          relative_path: opened.relative_path,
+          expected_file_sha256: opened.file_sha256,
+          text: 'effect landed before source drift\\n',
+        },
+        readCurrentSource: async () => {
+          reads += 1;
+          return reads === 1 ? source : { ...source, head: 'c'.repeat(40) };
+        },
+      }),
+      /source_changed_after_commit_ambiguous/,
+    );
+    assert.equal(await readFile(join(root, 'src', 'sample.js'), 'utf8'), 'effect landed before source drift\\n');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('save of identical content is a verified no-op', async () => {
   const root = await fixture();
   try {
