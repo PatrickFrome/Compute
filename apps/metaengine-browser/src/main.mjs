@@ -111,7 +111,7 @@ async function registerShellProtocol() {
     const url = new URL(request.url);
     if (url.hostname !== 'shell') return new Response('not found', { status: 404 });
     const rel = url.pathname === '/' ? 'index.html' : url.pathname.replace(/^\/+/, '');
-    const core = ['index.html', 'app.js', 'app.css', 'dark-workspace.css'].includes(rel)
+    const core = ['index.html', 'app.js', 'app.css', 'dark-workspace.css', 'ide-shell.mjs'].includes(rel)
       ? path.join(UI_ROOT, rel)
       : null;
     const ide = core ? null : resolveIdeAsset(rel);
