@@ -70,6 +70,7 @@ function readinessOrThrow({ frame, lease, selected_tab_id, phase }) {
     expected_target_id: lease.target_id,
     observed_target_id: lease.target_id,
     selected_tab_id,
+    phase,
   });
   if (!readiness.ready) {
     const error = new Error(`devos_submit_not_ready:${phase}:${readiness.reason}`);
