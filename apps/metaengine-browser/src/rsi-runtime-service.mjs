@@ -110,6 +110,11 @@ import {
   verifyRsiSelfUpdateEligibilityReview,
   rsiSelfUpdateEligibilityReviewTrustRootSnapshot,
 } from './rsi-release-promotion-outcome-ingest.mjs';
+import {
+  createRsiSelfUpdateCheckAdmission,
+  verifyRsiSelfUpdateCheckAdmission,
+  rsiSelfUpdateCheckAdmissionTrustRootSnapshot,
+} from './rsi-self-update-controller-admission.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -126,6 +131,7 @@ const MAX_EXTERNAL_RELEASE_HANDOFF_INTENTS = 128;
 const MAX_PUBLISHED_RELEASE_RECONCILIATIONS = 128;
 const MAX_RELEASE_PROMOTION_JOURNAL_INTENTS = 128;
 const MAX_SELF_UPDATE_ELIGIBILITY_REVIEWS = 128;
+const MAX_SELF_UPDATE_CHECK_ADMISSIONS = 128;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -207,6 +213,7 @@ function trustRoots() {
     published_release_reconciliation: rsiPublishedReleaseReconciliationTrustRootSnapshot(),
     release_promotion_journal: rsiReleasePromotionJournalTrustRootSnapshot(),
     self_update_eligibility_review: rsiSelfUpdateEligibilityReviewTrustRootSnapshot(),
+    self_update_check_admission: rsiSelfUpdateCheckAdmissionTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -266,6 +273,8 @@ export class RsiRuntimeService {
   #lastReleasePromotionJournalIntentDigest = null;
   #selfUpdateEligibilityReviewDigests = new Set();
   #lastSelfUpdateEligibilityReviewDigest = null;
+  #selfUpdateCheckAdmissionDigests = new Set();
+  #lastSelfUpdateCheckAdmissionDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -394,6 +403,14 @@ export class RsiRuntimeService {
           }
           this.#selfUpdateEligibilityReviewDigests.add(review.eligibility_review_digest);
           this.#lastSelfUpdateEligibilityReviewDigest = review.eligibility_review_digest;
+        }
+        if (row?.type === 'RSI_SELF_UPDATE_CHECK_ADMISSION_READY' && row?.payload?.self_update_check_admission) {
+          const admission = verifyRsiSelfUpdateCheckAdmission(row.payload.self_update_check_admission);
+          if (this.#selfUpdateCheckAdmissionDigests.size >= MAX_SELF_UPDATE_CHECK_ADMISSIONS) {
+            throw new Error('rsi_runtime_self_update_check_admission_replay_capacity_exhausted');
+          }
+          this.#selfUpdateCheckAdmissionDigests.add(admission.admission_digest);
+          this.#lastSelfUpdateCheckAdmissionDigest = admission.admission_digest;
         }
       }
       replayCursor = page.at(-1).seq;
@@ -1591,6 +1608,47 @@ export class RsiRuntimeService {
     return Object.freeze({ review, already_recorded: false, authority_effect: false });
   }
 
+  async recordSelfUpdateCheckAdmission({
+    eligibility_review,
+    self_update_runtime_snapshot,
+    prior_transaction = null,
+    observed_at,
+    observer_id,
+  } = {}) {
+    this.#assertRunning();
+    const review = verifyRsiSelfUpdateEligibilityReview(eligibility_review);
+    if (!this.#selfUpdateEligibilityReviewDigests.has(review.eligibility_review_digest)) {
+      throw new Error('rsi_runtime_self_update_eligibility_review_not_persisted');
+    }
+    const admission = createRsiSelfUpdateCheckAdmission({
+      eligibility_review: review,
+      self_update_runtime_snapshot,
+      prior_transaction,
+      observed_at,
+      observer_id,
+    });
+    verifyRsiSelfUpdateCheckAdmission(admission);
+    if (this.#selfUpdateCheckAdmissionDigests.has(admission.admission_digest)) {
+      return Object.freeze({ admission, already_recorded: true, authority_effect: false });
+    }
+    if (this.#selfUpdateCheckAdmissionDigests.size >= MAX_SELF_UPDATE_CHECK_ADMISSIONS) {
+      throw new Error('rsi_runtime_self_update_check_admission_capacity_exhausted');
+    }
+    await this.#ledger.append('RSI_SELF_UPDATE_CHECK_ADMISSION_READY', {
+      self_update_check_admission: admission,
+      external_self_update_controller_required: true,
+      self_update_check_invoked: false,
+      self_update_check_authorized_by_rsi: false,
+      self_update_apply_authorized: false,
+      installer_launch_authorized: false,
+      physical_effect_replay_allowed: false,
+      authority_effect: false,
+    });
+    this.#selfUpdateCheckAdmissionDigests.add(admission.admission_digest);
+    this.#lastSelfUpdateCheckAdmissionDigest = admission.admission_digest;
+    return Object.freeze({ admission, already_recorded: false, authority_effect: false });
+  }
+
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
     this.#assertRunning();
     const candidate = this.#archive.get(candidate_id);
@@ -1816,6 +1874,25 @@ export class RsiRuntimeService {
         self_update_apply_authorized: false,
         installer_launch_authorized: false,
         raw_release_promotion_events_persisted: false,
+        physical_effect_replay_allowed: false,
+        authority_effect: false,
+      }),
+      self_update_check_admission: Object.freeze({
+        count: this.#selfUpdateCheckAdmissionDigests.size,
+        capacity: MAX_SELF_UPDATE_CHECK_ADMISSIONS,
+        last_digest: this.#lastSelfUpdateCheckAdmissionDigest,
+        external_self_update_controller_required: true,
+        existing_self_update_runtime_method: 'checkNow',
+        unresolved_prior_transaction_forbidden: true,
+        host_resilience_active_required: true,
+        sentinel_worker_ready_required: true,
+        ci_test_feed_forbidden: true,
+        developer_emergency_bypass_forbidden: true,
+        fresh_release_reverification_inside_runtime_required: true,
+        self_update_check_invoked: false,
+        self_update_check_authorized_by_rsi: false,
+        self_update_apply_authorized: false,
+        installer_launch_authorized: false,
         physical_effect_replay_allowed: false,
         authority_effect: false,
       }),
