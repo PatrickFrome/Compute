@@ -53,6 +53,12 @@ import {
   rsiAutonomousEpisodeControllerTrustRootSnapshot,
 } from './rsi-autonomous-episode-controller.mjs';
 import { createRsiDevosAdmissionEnvelopes, rsiDevosAdmissionAdapterTrustRootSnapshot } from './rsi-devos-admission-adapter.mjs';
+import { verifyRsiSearchContext } from './rsi-search-mode-router.mjs';
+import {
+  createRsiVerifiedSearchFeedback,
+  verifyRsiVerifiedSearchFeedback,
+  rsiVerifiedSearchFeedbackTrustRootSnapshot,
+} from './rsi-verified-search-feedback.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -60,6 +66,7 @@ export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
 const SHA40 = /^[0-9a-f]{40}$/;
 const DIGEST64 = /^[0-9a-f]{64}$/;
 const MAX_AUTONOMOUS_PREPARED_REQUESTS = 256;
+const MAX_VERIFIED_SEARCH_FEEDBACK = 512;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -122,6 +129,7 @@ function trustRoots() {
     episode_evaluation_ingest: rsiEpisodeEvaluationIngestTrustRootSnapshot(),
     autonomous_episode_controller: rsiAutonomousEpisodeControllerTrustRootSnapshot(),
     devos_admission_adapter: rsiDevosAdmissionAdapterTrustRootSnapshot(),
+    verified_search_feedback: rsiVerifiedSearchFeedbackTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -148,6 +156,8 @@ export class RsiRuntimeService {
   #lastObservationAt = null;
   #promotionNominationCount = 0;
   #preparedRequestDigests = new Set();
+  #verifiedSearchFeedback = [];
+  #verifiedSearchFeedbackDigests = new Set();
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -179,6 +189,17 @@ export class RsiRuntimeService {
             throw new Error('rsi_runtime_autonomous_request_replay_capacity_exhausted');
           }
           this.#preparedRequestDigests.add(exactDigest(row.payload.request_digest, 'autonomous_request_digest'));
+        }
+        if (row?.type === 'RSI_VERIFIED_SEARCH_FEEDBACK_RECORDED' && row?.payload?.feedback) {
+          const feedback = verifyRsiVerifiedSearchFeedback(row.payload.feedback);
+          if (!this.#verifiedSearchFeedbackDigests.has(feedback.feedback_digest)) {
+            this.#verifiedSearchFeedback.push(feedback);
+            this.#verifiedSearchFeedbackDigests.add(feedback.feedback_digest);
+            if (this.#verifiedSearchFeedback.length > MAX_VERIFIED_SEARCH_FEEDBACK) {
+              const retired = this.#verifiedSearchFeedback.shift();
+              this.#verifiedSearchFeedbackDigests.delete(retired.feedback_digest);
+            }
+          }
         }
       }
       replayCursor = page.at(-1).seq;
@@ -326,7 +347,15 @@ export class RsiRuntimeService {
 
   async prepareAutonomousEpisodeCycle(input = {}) {
     this.#assertRunning();
-    const plan = createRsiAutonomousEpisodePlan(input);
+    let controllerInput = input;
+    if (input.search_outcomes == null) {
+      const context = verifyRsiSearchContext(input.search_context);
+      const searchOutcomes = this.#verifiedSearchFeedback
+        .filter((row) => row.routing_outcome?.context_digest === context.context_digest)
+        .map((row) => row.routing_outcome);
+      controllerInput = { ...input, search_outcomes: searchOutcomes };
+    }
+    const plan = createRsiAutonomousEpisodePlan(controllerInput);
     verifyRsiAutonomousEpisodePlan(plan);
 
     let episode;
@@ -437,6 +466,26 @@ export class RsiRuntimeService {
       automatic_retry_allowed: false,
       authority_effect: false,
     });
+  }
+
+  async recordVerifiedSearchFeedback(input = {}) {
+    this.#assertRunning();
+    const feedback = createRsiVerifiedSearchFeedback(input);
+    verifyRsiVerifiedSearchFeedback(feedback);
+    if (this.#verifiedSearchFeedbackDigests.has(feedback.feedback_digest)) {
+      return Object.freeze({ feedback, already_recorded: true, authority_effect: false });
+    }
+    await this.#ledger.append('RSI_VERIFIED_SEARCH_FEEDBACK_RECORDED', {
+      feedback,
+      authority_effect: false,
+    });
+    this.#verifiedSearchFeedback.push(feedback);
+    this.#verifiedSearchFeedbackDigests.add(feedback.feedback_digest);
+    if (this.#verifiedSearchFeedback.length > MAX_VERIFIED_SEARCH_FEEDBACK) {
+      const retired = this.#verifiedSearchFeedback.shift();
+      this.#verifiedSearchFeedbackDigests.delete(retired.feedback_digest);
+    }
+    return Object.freeze({ feedback, already_recorded: false, authority_effect: false });
   }
 
   async proposeCandidate(input = {}) {
@@ -559,6 +608,8 @@ export class RsiRuntimeService {
       promotion_nomination_count: this.#promotionNominationCount,
       autonomous_prepared_request_count: this.#preparedRequestDigests.size,
       autonomous_prepared_request_capacity: MAX_AUTONOMOUS_PREPARED_REQUESTS,
+      verified_search_feedback_count: this.#verifiedSearchFeedback.length,
+      verified_search_feedback_capacity: MAX_VERIFIED_SEARCH_FEEDBACK,
       episodes: this.#episodes.snapshot(),
       ledger: this.#ledger.snapshot(),
       shadow_only: true,
