@@ -41,6 +41,7 @@ import { rsiEvaluationIntegrityTrustRootSnapshot } from './rsi-evaluation-integr
 import { RsiRuntimeLedger } from './rsi-runtime-ledger.mjs';
 import { RsiRuntimeExperienceGate, RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA } from './rsi-runtime-experience-gate.mjs';
 import { RsiRuntimeImprovementFrontier, RSI_RUNTIME_IMPROVEMENT_FRONTIER_SCHEMA } from './rsi-runtime-improvement-frontier.mjs';
+import { createRsiRuntimeSkillAdvisory, verifyRsiRuntimeSkillAdvisory } from './rsi-runtime-skill-advisory.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -129,6 +130,7 @@ export class RsiRuntimeService {
   #lastObservationDigest = null;
   #lastObservationAt = null;
   #promotionNominationCount = 0;
+  #skillAdvisory = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -310,6 +312,43 @@ export class RsiRuntimeService {
     return nomination;
   }
 
+  async bindSkillAdvisory(input = {}) {
+    this.#assertRunning();
+    const advisory = createRsiRuntimeSkillAdvisory(input);
+    verifyRsiRuntimeSkillAdvisory(advisory, input);
+    await this.#ledger.append('SKILL_ADVISORY_BOUND', {
+      advisory_schema: advisory.schema,
+      advisory_digest: advisory.advisory_digest,
+      lineage_skill_admission_digest: advisory.lineage_skill_admission_digest,
+      library_digest: advisory.library_digest,
+      governance_digest: advisory.governance_digest,
+      activation_digest: advisory.activation_digest,
+      skill_id: advisory.skill_id,
+      skill_version: advisory.skill_version,
+      skill_digest: advisory.skill_digest,
+      governance_state: advisory.governance_state,
+      role: advisory.role,
+      runtime_use_mode: advisory.runtime_use_mode,
+      raw_skill_implementation_exposed: false,
+      direct_tool_execution_allowed: false,
+      browser_actuation_allowed: false,
+      scheduler_dispatch_allowed: false,
+      authority_effect: false,
+    });
+    this.#skillAdvisory = advisory;
+    return advisory;
+  }
+
+  clearSkillAdvisory() {
+    this.#assertRunning();
+    this.#skillAdvisory = null;
+    return true;
+  }
+
+  skillAdvisory() {
+    return this.#skillAdvisory ? structuredClone(this.#skillAdvisory) : null;
+  }
+
   verifiedArchive() {
     return this.#verifiedArchive;
   }
@@ -342,6 +381,24 @@ export class RsiRuntimeService {
         automatic_retry_allowed: false,
         authority_effect: false,
       }))),
+      skill_advisory: this.#skillAdvisory ? Object.freeze({
+        schema: this.#skillAdvisory.schema,
+        advisory_digest: this.#skillAdvisory.advisory_digest,
+        library_digest: this.#skillAdvisory.library_digest,
+        governance_digest: this.#skillAdvisory.governance_digest,
+        activation_digest: this.#skillAdvisory.activation_digest,
+        skill_id: this.#skillAdvisory.skill_id,
+        skill_version: this.#skillAdvisory.skill_version,
+        skill_digest: this.#skillAdvisory.skill_digest,
+        governance_state: this.#skillAdvisory.governance_state,
+        role: this.#skillAdvisory.role,
+        capabilities: Object.freeze([...this.#skillAdvisory.capabilities]),
+        runtime_use_mode: 'ADVISORY_CONTEXT_ONLY',
+        direct_tool_execution_allowed: false,
+        browser_actuation_allowed: false,
+        scheduler_dispatch_allowed: false,
+        authority_effect: false,
+      }) : null,
       source_binding_exact: true,
       existing_devos_scheduler_required: true,
       browser_can_enqueue_devos_tasks: false,
@@ -380,6 +437,20 @@ export class RsiRuntimeService {
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       experience_gate: this.#experienceGate.snapshot(),
       improvement_frontier: this.#improvementFrontier.snapshot(),
+      skill_advisory_bound: this.#skillAdvisory != null,
+      skill_advisory: this.#skillAdvisory ? Object.freeze({
+        advisory_digest: this.#skillAdvisory.advisory_digest,
+        skill_id: this.#skillAdvisory.skill_id,
+        skill_version: this.#skillAdvisory.skill_version,
+        skill_digest: this.#skillAdvisory.skill_digest,
+        governance_state: this.#skillAdvisory.governance_state,
+        role: this.#skillAdvisory.role,
+        runtime_use_mode: 'ADVISORY_CONTEXT_ONLY',
+        direct_tool_execution_allowed: false,
+        browser_actuation_allowed: false,
+        scheduler_dispatch_allowed: false,
+        authority_effect: false,
+      }) : null,
       promotion_nomination_count: this.#promotionNominationCount,
       ledger: this.#ledger.snapshot(),
       shadow_only: true,
