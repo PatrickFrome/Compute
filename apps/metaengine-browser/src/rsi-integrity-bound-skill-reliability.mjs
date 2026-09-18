@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 import {
   createRsiContrastiveSkillRevision,
@@ -11,10 +13,12 @@ import {
 } from './rsi-verified-skill-library.mjs';
 
 export const RSI_INTEGRITY_BOUND_SKILL_RELIABILITY_SCHEMA='metaengine.rsi.integrity-bound-skill-reliability.v1';
+export const RSI_INTEGRITY_BOUND_SKILL_RELIABILITY_LEDGER_SCHEMA='metaengine.rsi.integrity-bound-skill-reliability-ledger.v1';
 
 const SHA40_RE=/^[0-9a-f]{40}$/;
 const SHA256_RE=/^sha256:[0-9a-f]{64}$/;
 const SAFE_ID_RE=/^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{2,255}$/;
+const MAX_LEDGER_ROWS=2048;
 
 function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='object')return v;return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])]))}
 function digest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(v)),'utf8').digest('hex')}`}
@@ -27,6 +31,7 @@ function assertZero(v,l){
   }
   if(v?.automatic_retry_allowed!==false)throw new Error(`rsi_integrity_reliability_${l}_automatic_retry_invalid`);
 }
+function zero(extra={}){return Object.freeze({...extra,execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,scheduler_authority:false,signing_authority:false,automatic_retry_allowed:false,authority_effect:false})}
 
 function verifyIntegrityAdmission(admission){
   if(!admission||typeof admission!=='object'||Array.isArray(admission)||admission.schema!=='metaengine.rsi.skill-revision-integrity-admission.v1'||admission.version!==1){
@@ -146,7 +151,7 @@ export function createRsiIntegrityBoundSkillReliability({
   return Object.freeze({...core,binding_digest:digest(core)});
 }
 
-export function verifyRsiIntegrityBoundSkillReliability(row,args={}){
+function verifyRsiIntegrityBoundSkillReliabilityEnvelope(row){
   if(!row||typeof row!=='object'||Array.isArray(row)||row.schema!==RSI_INTEGRITY_BOUND_SKILL_RELIABILITY_SCHEMA||row.version!==1){
     throw new Error('rsi_integrity_reliability_binding_invalid');
   }
@@ -158,9 +163,107 @@ export function verifyRsiIntegrityBoundSkillReliability(row,args={}){
     ||row.self_authored_reliability_sufficient!==false||row.candidate_can_self_certify_reliability!==false
     ||row.binding_is_execution_authority!==false||row.external_curator!==true||row.external_evaluator!==true
     ||row.authored_by_candidate!==false)throw new Error('rsi_integrity_reliability_binding_policy_invalid');
+  exactSha(row.source_sha,'source');
+  const expected=exactDigest(row.binding_digest,'binding');
+  const clone=structuredClone(row);delete clone.binding_digest;
+  if(digest(clone)!==expected)throw new Error('rsi_integrity_reliability_binding_digest_mismatch');
+  return Object.freeze(structuredClone(row));
+}
+
+export function verifyRsiIntegrityBoundSkillReliability(row,args={}){
+  verifyRsiIntegrityBoundSkillReliabilityEnvelope(row);
   const canonical=createRsiIntegrityBoundSkillReliability({...args,source_sha:row.source_sha,binding_id:row.binding_id,external_curator:true,external_evaluator:true,authored_by_candidate:false});
   if(canonical.binding_digest!==exactDigest(row.binding_digest,'binding'))throw new Error('rsi_integrity_reliability_binding_digest_mismatch');
   return canonical;
+}
+
+function reliabilityLedgerState(sourceSha,rows){
+  const core={
+    schema:RSI_INTEGRITY_BOUND_SKILL_RELIABILITY_LEDGER_SCHEMA,version:1,source_sha:sourceSha,
+    rows,
+    row_count:rows.length,
+    passed_count:rows.filter(row=>row.eligible_for_existing_scope_preservation_gate===true).length,
+    rejected_count:rows.filter(row=>row.state==='REJECTED_RELIABILITY_REVISION').length,
+    append_only:true,
+    exact_binding_digest_required:true,
+    candidate_can_delete_rows:false,
+    candidate_can_rewrite_reliability_state:false,
+    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    scheduler_authority:false,signing_authority:false,automatic_retry_allowed:false,authority_effect:false,
+  };
+  return {...core,state_digest:digest(core)};
+}
+
+export class RsiIntegrityBoundSkillReliabilityLedger{
+  #path;#sourceSha;#rows=[];#initialized=false;
+  constructor({statePath,source_sha}={}){
+    if(!statePath||typeof statePath!=='string')throw new Error('rsi_integrity_reliability_state_path_required');
+    this.#path=path.resolve(statePath);this.#sourceSha=exactSha(source_sha,'source');
+  }
+  async init(){
+    if(this.#initialized)return this.snapshot();
+    await fs.mkdir(path.dirname(this.#path),{recursive:true});
+    try{
+      const parsed=JSON.parse(await fs.readFile(this.#path,'utf8'));
+      assertZero(parsed,'state');
+      if(parsed.schema!==RSI_INTEGRITY_BOUND_SKILL_RELIABILITY_LEDGER_SCHEMA||parsed.version!==1||parsed.source_sha!==this.#sourceSha
+        ||parsed.append_only!==true||parsed.exact_binding_digest_required!==true||parsed.candidate_can_delete_rows!==false
+        ||parsed.candidate_can_rewrite_reliability_state!==false)throw new Error('rsi_integrity_reliability_state_invalid');
+      const clone=structuredClone(parsed);delete clone.state_digest;
+      if(digest(clone)!==exactDigest(parsed.state_digest,'state'))throw new Error('rsi_integrity_reliability_state_digest_mismatch');
+      if(!Array.isArray(parsed.rows)||parsed.rows.length>MAX_LEDGER_ROWS)throw new Error('rsi_integrity_reliability_rows_invalid');
+      const ids=new Set();const digests=new Set();
+      for(const row of parsed.rows){
+        const checked=verifyRsiIntegrityBoundSkillReliabilityEnvelope(row);
+        if(checked.source_sha!==this.#sourceSha)throw new Error('rsi_integrity_reliability_row_source_mismatch');
+        if(ids.has(checked.binding_id)||digests.has(checked.binding_digest))throw new Error('rsi_integrity_reliability_row_duplicate');
+        ids.add(checked.binding_id);digests.add(checked.binding_digest);
+      }
+      this.#rows=parsed.rows;
+    }catch(error){if(error?.code!=='ENOENT')throw error}
+    this.#initialized=true;return this.snapshot();
+  }
+  async #persist(){
+    const state=reliabilityLedgerState(this.#sourceSha,this.#rows);
+    const temp=`${this.#path}.tmp`;const handle=await fs.open(temp,'w',0o600);
+    try{await handle.writeFile(`${JSON.stringify(state)}\n`,'utf8');await handle.sync()}finally{await handle.close()}
+    await fs.rename(temp,this.#path);return state;
+  }
+  #assertInit(){if(!this.#initialized)throw new Error('rsi_integrity_reliability_not_initialized')}
+  async append(binding){
+    this.#assertInit();
+    const checked=verifyRsiIntegrityBoundSkillReliabilityEnvelope(binding);
+    if(checked.source_sha!==this.#sourceSha)throw new Error('rsi_integrity_reliability_binding_source_mismatch');
+    const existing=this.#rows.find(row=>row.binding_id===checked.binding_id||row.binding_digest===checked.binding_digest);
+    if(existing){
+      if(existing.binding_digest!==checked.binding_digest)throw new Error('rsi_integrity_reliability_binding_identity_conflict');
+      return zero({state:'IDEMPOTENT',binding_digest:checked.binding_digest});
+    }
+    if(this.#rows.length>=MAX_LEDGER_ROWS)throw new Error('rsi_integrity_reliability_capacity_exceeded');
+    this.#rows.push(structuredClone(checked));await this.#persist();
+    return zero({state:checked.state,binding_digest:checked.binding_digest});
+  }
+  bindingByDigest(binding_digest){
+    this.#assertInit();
+    const d=exactDigest(binding_digest,'binding');
+    const row=this.#rows.find(x=>x.binding_digest===d);
+    return row?Object.freeze(structuredClone(row)):null;
+  }
+  passed(){
+    this.#assertInit();
+    return Object.freeze(this.#rows.filter(row=>row.eligible_for_existing_scope_preservation_gate===true).map(row=>Object.freeze(structuredClone(row))));
+  }
+  snapshot(){
+    const s=reliabilityLedgerState(this.#sourceSha,this.#rows);
+    return Object.freeze({
+      schema:s.schema,version:s.version,source_sha:s.source_sha,initialized:this.#initialized,
+      row_count:s.row_count,passed_count:s.passed_count,rejected_count:s.rejected_count,
+      append_only:true,exact_binding_digest_required:true,candidate_can_delete_rows:false,
+      candidate_can_rewrite_reliability_state:false,
+      execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+      scheduler_authority:false,signing_authority:false,automatic_retry_allowed:false,authority_effect:false,
+    });
+  }
 }
 
 export function rsiIntegrityBoundSkillReliabilityTrustRootSnapshot(){

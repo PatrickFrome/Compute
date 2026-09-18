@@ -21,6 +21,13 @@ import {
   createRsiSkillTrajectoryReceipt,
   createRsiSkillReliabilityDataset,
 } from '../src/rsi-contrastive-skill-reliability.mjs';
+import {
+  createRsiSkillScopeUnit,
+  createRsiSkillCompatibilityReceipt,
+  createRsiSkillAbstractionCandidate,
+  createRsiSkillScopePreservationReceipt,
+  finalizeRsiSkillScopeExpansion,
+} from '../src/rsi-skill-scope-expansion.mjs';
 
 test('unified RSI runtime binds the full converged trust-root set with zero authority', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-runtime-'));
@@ -757,7 +764,152 @@ test('runtime adopts verified skills, reconciles credited pending evidence, and 
     assert.equal(reliability.eligible_for_existing_scope_preservation_gate, true);
     assert.equal(runtime.snapshot().skill_revision_reliability.evaluation_count, 1);
     assert.equal(runtime.snapshot().skill_revision_reliability.pass_count, 1);
-    assert.equal(runtime.snapshot().runtime_skill_lifecycle.library_entry_count, 1);
+    assert.equal(runtime.snapshot().skill_revision_reliability_ledger.passed_count, 1);
+
+    const sourceSkillB = createRsiSkillCapsule({
+      skill_id: 'skill.runtime.integrated.source-b',
+      version: 1,
+      parent_skill_digest: null,
+      source_candidate_sha: 'e'.repeat(40),
+      role: skill.role,
+      input_schema_digest: skill.input_schema_digest,
+      output_schema_digest: skill.output_schema_digest,
+      implementation_digest: d('4'),
+      components: [{ component_id: 'skill.runtime.integrated.source-b.component', artifact_digest: d('3'), kind: 'TYPED_TRANSFORM' }],
+      capabilities: skill.capabilities,
+      max_context_tokens: skill.max_context_tokens,
+      max_output_tokens: skill.max_output_tokens,
+      max_invocations: skill.max_invocations,
+      external_builder: true,
+      authored_by_candidate: false,
+    });
+    const sourceSkillBEvidence = createRsiSkillEvidence({
+      capsule: sourceSkillB,
+      hidden_holdout_digest: `sha256:${'cd'.repeat(32)}`,
+      evaluator_root_digest: d('6'),
+      unit_test_digest: d('7'),
+      runtime_feedback_digest: d('8'),
+      attempt_count: 12,
+      success_count: 10,
+      hard_invariants_pass: true,
+      verified_for_library: true,
+      evidence_refs: ['VERIFY_skill.runtime.integrated.source-b'],
+      external_evaluator: true,
+      authored_by_candidate: false,
+    });
+    const scopeUnits = [
+      createRsiSkillScopeUnit({
+        unit_id: 'runtime.scope.unit.a',
+        skill,
+        evidence: skillEvidence,
+        scope_level: 'INSTANCE_PATCH',
+        validated_instance_digests: [d('1')],
+        mechanism_signature_digest: d('c'),
+        evidence_refs: ['runtime:scope:unit:a'],
+        external_scope_owner: true,
+        authored_by_candidate: false,
+      }),
+      createRsiSkillScopeUnit({
+        unit_id: 'runtime.scope.unit.b',
+        skill: sourceSkillB,
+        evidence: sourceSkillBEvidence,
+        scope_level: 'INSTANCE_PATCH',
+        validated_instance_digests: [d('2')],
+        mechanism_signature_digest: d('c'),
+        evidence_refs: ['runtime:scope:unit:b'],
+        external_scope_owner: true,
+        authored_by_candidate: false,
+      }),
+    ];
+    const scopeCompatibility = createRsiSkillCompatibilityReceipt({
+      compatibility_id: 'runtime.scope.compatibility.1',
+      units: scopeUnits,
+      directed_cross_replays: [
+        { source_unit_id: 'runtime.scope.unit.a', target_unit_id: 'runtime.scope.unit.b', success: true, evidence_digest: d('3') },
+        { source_unit_id: 'runtime.scope.unit.b', target_unit_id: 'runtime.scope.unit.a', success: true, evidence_digest: d('4') },
+      ],
+      mechanism_check_method: 'HYBRID_MECHANISM_CHECK_V1',
+      shared_mechanism_digest: d('c'),
+      mechanism_compatible: true,
+      mechanism_evidence_digest: d('5'),
+      evidence_refs: ['runtime:scope:compatibility'],
+      external_replay_evaluator: true,
+      external_mechanism_assessor: true,
+      authored_by_candidate: false,
+    });
+    const scopeCandidate = createRsiSkillAbstractionCandidate({
+      candidate_id: 'runtime.scope.abstraction.1',
+      units: scopeUnits,
+      compatibility_receipt: scopeCompatibility,
+      abstract_skill: successorSkill,
+      target_scope_level: 'FUNCTIONAL_SKILL',
+      external_abstraction_builder: true,
+      authored_by_candidate: false,
+    });
+    const scopePreservation = createRsiSkillScopePreservationReceipt({
+      preservation_id: 'runtime.scope.preservation.1',
+      candidate: scopeCandidate,
+      units: scopeUnits,
+      compatibility_receipt: scopeCompatibility,
+      source_replays: [
+        { source_instance_digest: d('1'), success: true, evidence_digest: d('6') },
+        { source_instance_digest: d('2'), success: true, evidence_digest: d('7') },
+      ],
+      observed_capabilities: successorSkill.capabilities,
+      capability_analysis_digest: d('8'),
+      evidence_refs: ['runtime:scope:preservation'],
+      external_source_replay_evaluator: true,
+      external_capability_analyzer: true,
+      authored_by_candidate: false,
+    });
+    const scopeResult = finalizeRsiSkillScopeExpansion({
+      candidate: scopeCandidate,
+      units: scopeUnits,
+      compatibility_receipt: scopeCompatibility,
+      preservation_receipt: scopePreservation,
+    });
+    const scopeAdmission = await runtime.recordSkillRevisionScopeAdmission({
+      reliability_binding_digest: reliability.binding_digest,
+      admission_id: 'runtime.scope.admission.1',
+      units: scopeUnits,
+      compatibility_receipt: scopeCompatibility,
+      scope_candidate: scopeCandidate,
+      preservation_receipt: scopePreservation,
+      scope_result: scopeResult,
+      external_scope_owner: true,
+      authored_by_candidate: false,
+    });
+    assert.equal(scopeAdmission.admission.state, 'ELIGIBLE_FOR_EXTERNAL_LIBRARY_EVIDENCE');
+    assert.equal(runtime.snapshot().revision_scope_admission.eligible_count, 1);
+
+    const librarySuccessorEvidence = createRsiSkillEvidence({
+      capsule: successorSkill,
+      hidden_holdout_digest: `sha256:${'ab'.repeat(32)}`,
+      evaluator_root_digest: `sha256:${'bc'.repeat(32)}`,
+      unit_test_digest: `sha256:${'de'.repeat(32)}`,
+      runtime_feedback_digest: `sha256:${'ef'.repeat(32)}`,
+      attempt_count: 24,
+      success_count: 22,
+      hard_invariants_pass: true,
+      verified_for_library: true,
+      evidence_refs: ['VERIFY_skill.runtime.integrated.v2.library'],
+      external_evaluator: true,
+      authored_by_candidate: false,
+    });
+    const libraryAdmission = await runtime.admitScopeQualifiedSkillRevisionToLibrary({
+      scope_admission_digest: scopeAdmission.admission.admission_digest,
+      admission_id: 'runtime.library.admission.1',
+      successor_skill: successorSkill,
+      successor_evidence: librarySuccessorEvidence,
+      sealed_library_holdout: true,
+      external_library_owner: true,
+      authored_by_candidate: false,
+    });
+    assert.equal(libraryAdmission.admission.append_only_library_update, true);
+    assert.equal(libraryAdmission.adoption.entry_count, 2);
+    assert.equal(runtime.snapshot().runtime_skill_lifecycle.library_entry_count, 2);
+    assert.equal(runtime.snapshot().execution_authority, false);
+    assert.equal(runtime.snapshot().authority_effect, false);
     assert.equal(runtime.snapshot().execution_authority, false);
     assert.equal(runtime.snapshot().authority_effect, false);
   } finally {

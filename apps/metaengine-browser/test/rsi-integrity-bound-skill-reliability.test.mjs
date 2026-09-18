@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import {
@@ -23,6 +26,7 @@ import {
   createRsiSkillReliabilityDataset,
 } from '../src/rsi-contrastive-skill-reliability.mjs';
 import {
+  RsiIntegrityBoundSkillReliabilityLedger,
   createRsiIntegrityBoundSkillReliability,
   verifyRsiIntegrityBoundSkillReliability,
   rsiIntegrityBoundSkillReliabilityTrustRootSnapshot,
@@ -230,6 +234,45 @@ test('reliability bridge refuses non-admitted integrity or candidate-authored ev
     revision_evidence_refs:['contrast:bad-integrity'],reliability_evidence_refs:['eval:bad-integrity'],
     hard_invariants_pass:true,external_curator:true,external_evaluator:true,authored_by_candidate:false,
   }),/integrity_admission_required/);
+});
+
+test('reliability binding ledger persists exact passed evidence and rejects tampered restart state',async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-rsi-reliability-ledger-'));
+  try{
+    const fx=fullFixture();
+    const data=reliabilityData(fx);
+    const binding=createRsiIntegrityBoundSkillReliability({
+      source_sha:SOURCE,binding_id:'binding.reliability.persist',integrity_admission:fx.admission,
+      parent_skill:fx.parent,parent_skill_evidence:fx.parentEvidence,
+      baseline_dataset:data.baselineDataset,baseline_trajectory_receipts:data.baselineReceipts,
+      successor_skill:fx.successor,successor_skill_evidence:fx.successorEvidence,
+      successor_dataset:data.successorDataset,successor_trajectory_receipts:data.successorReceipts,
+      contrast_codes:['SUCCESS_PATTERN_MISSING_FROM_FAILURE'],contrast_evidence_digest:d('7'),
+      revision_evidence_refs:['contrast:persist'],reliability_evidence_refs:['eval:persist'],
+      hard_invariants_pass:true,max_potential_regression:0,
+      external_curator:true,external_evaluator:true,authored_by_candidate:false,
+    });
+    const statePath=path.join(root,'reliability.json');
+    const ledger=new RsiIntegrityBoundSkillReliabilityLedger({statePath,source_sha:SOURCE});
+    await ledger.init();
+    const first=await ledger.append(binding);
+    const again=await ledger.append(binding);
+    assert.equal(first.state,'ELIGIBLE_FOR_EXISTING_SCOPE_PRESERVATION_GATE');
+    assert.equal(again.state,'IDEMPOTENT');
+    assert.equal(ledger.snapshot().passed_count,1);
+    assert.equal(ledger.bindingByDigest(binding.binding_digest).binding_id,binding.binding_id);
+
+    const restored=new RsiIntegrityBoundSkillReliabilityLedger({statePath,source_sha:SOURCE});
+    await restored.init();
+    assert.equal(restored.snapshot().row_count,1);
+    assert.equal(restored.passed().length,1);
+
+    const raw=JSON.parse(await fs.readFile(statePath,'utf8'));
+    raw.rows[0].state='REJECTED_RELIABILITY_REVISION';
+    await fs.writeFile(statePath,JSON.stringify(raw));
+    const tampered=new RsiIntegrityBoundSkillReliabilityLedger({statePath,source_sha:SOURCE});
+    await assert.rejects(()=>tampered.init(),/state_digest_mismatch|binding_digest_mismatch/);
+  }finally{await fs.rm(root,{recursive:true,force:true})}
 });
 
 test('reliability trust root reuses existing gate and cannot become library or execution authority',()=>{

@@ -82,6 +82,7 @@ export function createRsiRevisionScopeAdmission({
     source_sha:sourceSha,
     admission_id:boundedId(admission_id,'admission_id'),
     reliability_binding_digest:binding.binding_digest,
+    reliability_hidden_trial_set_digest:exactDigest(binding.hidden_repeated_trial_set_digest,'reliability_hidden_trial_set'),
     parent_skill_digest:binding.parent_skill_digest,
     successor_skill_digest:binding.successor_skill_digest,
     scope_candidate_digest:candidate.candidate_digest,
@@ -198,6 +199,12 @@ export class RsiRevisionScopeLedger{
     if(this.#rows.length>=MAX_ROWS)throw new Error('rsi_revision_scope_capacity_exceeded');
     this.#rows.push(structuredClone(admission));await this.#persist();
     return zero({state:admission.state,admission_digest:admission.admission_digest});
+  }
+  admissionByDigest(admission_digest){
+    this.#assertInit();
+    const d=exactDigest(admission_digest,'admission');
+    const row=this.#rows.find(x=>x.admission_digest===d);
+    return row ? Object.freeze(structuredClone(row)) : null;
   }
   eligible(){
     this.#assertInit();

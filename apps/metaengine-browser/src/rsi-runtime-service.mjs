@@ -49,8 +49,9 @@ import { RsiRuntimeSkillRouter, createRsiSkillRouteContext, rsiRuntimeSkillRoute
 import { RsiRuntimeSkillCurationQueue, createRsiSkillCurationRequest, rsiRuntimeSkillCurationTrustRootSnapshot } from './rsi-runtime-skill-curation.mjs';
 import { RsiSkillRevisionFrontier, createRsiSkillRevisionFrontierCandidate, rsiSkillRevisionFrontierTrustRootSnapshot } from './rsi-skill-revision-frontier.mjs';
 import { RsiSkillRevisionIntegrityLedger, createRsiSkillRevisionIntegrityAdmission, rsiSkillRevisionIntegrityAdmissionTrustRootSnapshot } from './rsi-skill-revision-integrity-admission.mjs';
-import { createRsiIntegrityBoundSkillReliability, rsiIntegrityBoundSkillReliabilityTrustRootSnapshot } from './rsi-integrity-bound-skill-reliability.mjs';
+import { RsiIntegrityBoundSkillReliabilityLedger, createRsiIntegrityBoundSkillReliability, rsiIntegrityBoundSkillReliabilityTrustRootSnapshot } from './rsi-integrity-bound-skill-reliability.mjs';
 import { RsiRevisionScopeLedger, createRsiRevisionScopeAdmission, rsiRevisionScopeAdmissionTrustRootSnapshot } from './rsi-revision-scope-admission.mjs';
+import { createRsiRevisionLibraryAdmission, rsiRevisionLibraryAdmissionTrustRootSnapshot } from './rsi-revision-library-admission.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -125,6 +126,7 @@ function trustRoots() {
     skill_revision_integrity: rsiSkillRevisionIntegrityAdmissionTrustRootSnapshot(),
     integrity_bound_skill_reliability: rsiIntegrityBoundSkillReliabilityTrustRootSnapshot(),
     revision_scope_admission: rsiRevisionScopeAdmissionTrustRootSnapshot(),
+    revision_library_admission: rsiRevisionLibraryAdmissionTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -147,6 +149,7 @@ export class RsiRuntimeService {
   #skillCuration;
   #skillRevisionFrontier;
   #skillRevisionIntegrity;
+  #skillReliabilityLedger;
   #revisionScopeLedger;
   #archive;
   #observer;
@@ -165,7 +168,7 @@ export class RsiRuntimeService {
   #skillReliabilityPassCount = 0;
   #lastSkillReliabilityBindingDigest = null;
 
-  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, revisionScopePath = null, clock = () => Date.now() } = {}) {
+  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, skillReliabilityPath = null, revisionScopePath = null, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
     if (typeof clock !== 'function') throw new Error('rsi_runtime_clock_required');
     this.#clock = clock;
@@ -207,6 +210,11 @@ export class RsiRuntimeService {
       statePath: runtimeSkillRevisionIntegrityPath,
       source_sha: this.#sourceSha,
     });
+    const runtimeSkillReliabilityPath = skillReliabilityPath || (ledgerPath ? `${ledgerPath}.skill-reliability.json` : null);
+    this.#skillReliabilityLedger = new RsiIntegrityBoundSkillReliabilityLedger({
+      statePath: runtimeSkillReliabilityPath,
+      source_sha: this.#sourceSha,
+    });
     const runtimeRevisionScopePath = revisionScopePath || (ledgerPath ? `${ledgerPath}.revision-scope.json` : null);
     this.#revisionScopeLedger = new RsiRevisionScopeLedger({
       statePath: runtimeRevisionScopePath,
@@ -228,6 +236,7 @@ export class RsiRuntimeService {
     await this.#skillCuration.init();
     await this.#skillRevisionFrontier.init();
     await this.#skillRevisionIntegrity.init();
+    await this.#skillReliabilityLedger.init();
     await this.#revisionScopeLedger.init();
     await this.#ledger.init();
     this.#startedAt = new Date(this.#clock()).toISOString();
@@ -244,6 +253,7 @@ export class RsiRuntimeService {
       runtime_skill_curation_schema: this.#skillCuration.snapshot().schema,
       skill_revision_frontier_schema: this.#skillRevisionFrontier.snapshot().schema,
       skill_revision_integrity_schema: this.#skillRevisionIntegrity.snapshot().schema,
+      skill_revision_reliability_ledger_schema: this.#skillReliabilityLedger.snapshot().schema,
       revision_scope_admission_schema: this.#revisionScopeLedger.snapshot().schema,
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       candidate_effect_executor_exposed: false,
@@ -873,6 +883,7 @@ export class RsiRuntimeService {
       external_evaluator,
       authored_by_candidate,
     });
+    const reliabilityStored = await this.#skillReliabilityLedger.append(binding);
     await this.#ledger.append('SKILL_REVISION_RELIABILITY_EVALUATED', {
       request_id,
       binding_id: binding.binding_id,
@@ -881,6 +892,7 @@ export class RsiRuntimeService {
       successor_skill_digest: binding.successor_skill_digest,
       reliability_result_digest: binding.reliability_result.result_digest,
       state: binding.state,
+      durable_reliability_state: reliabilityStored.state,
       eligible_for_existing_scope_preservation_gate: binding.eligible_for_existing_scope_preservation_gate,
       direct_library_replacement_allowed: false,
       authority_effect: false,
@@ -892,7 +904,7 @@ export class RsiRuntimeService {
   }
 
   async recordSkillRevisionScopeAdmission({
-    reliability_binding,
+    reliability_binding_digest,
     admission_id,
     units,
     compatibility_receipt,
@@ -903,10 +915,14 @@ export class RsiRuntimeService {
     authored_by_candidate = true,
   } = {}) {
     this.#assertRunning();
+    const reliabilityBinding = this.#skillReliabilityLedger.bindingByDigest(reliability_binding_digest);
+    if (!reliabilityBinding || reliabilityBinding.eligible_for_existing_scope_preservation_gate !== true) {
+      throw new Error('rsi_runtime_reliability_passed_revision_required');
+    }
     const admission = createRsiRevisionScopeAdmission({
       source_sha: this.#sourceSha,
       admission_id,
-      reliability_binding,
+      reliability_binding: reliabilityBinding,
       units,
       compatibility_receipt,
       scope_candidate,
@@ -933,6 +949,55 @@ export class RsiRuntimeService {
   scopeEligibleSkillRevisions() {
     this.#assertRunning();
     return this.#revisionScopeLedger.eligible();
+  }
+
+  async admitScopeQualifiedSkillRevisionToLibrary({
+    scope_admission_digest,
+    admission_id,
+    successor_skill,
+    successor_evidence,
+    sealed_library_holdout = false,
+    external_library_owner = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const scopeAdmission = this.#revisionScopeLedger.admissionByDigest(scope_admission_digest);
+    if (!scopeAdmission || scopeAdmission.state !== 'ELIGIBLE_FOR_EXTERNAL_LIBRARY_EVIDENCE') {
+      throw new Error('rsi_runtime_scope_eligible_revision_required');
+    }
+    const currentLibrary = this.#skillLifecycle.verifiedLibrarySnapshot();
+    if (!currentLibrary) throw new Error('rsi_runtime_verified_skill_library_unavailable');
+    const admission = createRsiRevisionLibraryAdmission({
+      source_sha: this.#sourceSha,
+      admission_id,
+      scope_admission: scopeAdmission,
+      current_library: currentLibrary,
+      successor_skill,
+      successor_evidence,
+      sealed_library_holdout,
+      external_library_owner,
+      authored_by_candidate,
+    });
+    const adoption = await this.#skillLifecycle.adoptVerifiedLibrary({
+      library: admission.proposed_library,
+      external_library_owner: true,
+      authored_by_candidate: false,
+    });
+    await this.#ledger.append('SKILL_REVISION_LIBRARY_ADMITTED', {
+      admission_id: admission.admission_id,
+      admission_digest: admission.admission_digest,
+      scope_admission_digest: admission.scope_admission_digest,
+      parent_skill_digest: admission.parent_skill_digest,
+      successor_skill_digest: admission.successor_skill_digest,
+      successor_evidence_digest: admission.successor_evidence_digest,
+      previous_library_digest: admission.current_library_digest,
+      adopted_library_digest: admission.proposed_library_digest,
+      append_only_library_update: true,
+      parent_retained: true,
+      direct_browser_execution_authority: false,
+      authority_effect: false,
+    });
+    return Object.freeze({ admission, adoption });
   }
 
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
@@ -992,6 +1057,7 @@ export class RsiRuntimeService {
       runtime_skill_curation: this.#skillCuration.snapshot(),
       skill_revision_frontier: this.#skillRevisionFrontier.snapshot(),
       skill_revision_integrity: this.#skillRevisionIntegrity.snapshot(),
+      skill_revision_reliability_ledger: this.#skillReliabilityLedger.snapshot(),
       revision_scope_admission: this.#revisionScopeLedger.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       skill_revision_reliability: Object.freeze({
