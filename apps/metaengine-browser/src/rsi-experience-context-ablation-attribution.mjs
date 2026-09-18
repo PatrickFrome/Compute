@@ -193,6 +193,33 @@ export function verifyRsiExperienceContextAttributionPlan(row){
     }
     if(removed.has(caseId))throw new Error('rsi_memattr_plan_ablation_duplicate');
     removed.add(caseId);
+    if(!Array.isArray(a.retained_cases)||a.retained_case_count!==a.retained_cases.length
+      ||a.retained_case_count!==row.selected_case_count-1){
+      throw new Error('rsi_memattr_plan_retained_case_count_invalid');
+    }
+    const expectedRetained=[...selected.entries()]
+      .filter(([idValue])=>idValue!==caseId)
+      .map(([case_id,case_digest])=>({case_id,case_digest}))
+      .sort((x,y)=>x.case_id.localeCompare(y.case_id));
+    const actualRetained=a.retained_cases.map(x=>({
+      case_id:id(x.case_id,'retained_case_id'),
+      case_digest:pd(x.case_digest,'retained_case'),
+    })).sort((x,y)=>x.case_id.localeCompare(y.case_id));
+    if(JSON.stringify(expectedRetained)!==JSON.stringify(actualRetained)){
+      throw new Error('rsi_memattr_plan_retained_case_set_mismatch');
+    }
+    const expectedAblationDigest=digest({
+      context_plan_digest:row.context_plan_digest,
+      controller_plan_digest:row.controller_plan_digest,
+      evaluation_protocol_digest:row.evaluation_protocol_digest,
+      removed_case_id:caseId,
+      removed_case_digest:a.removed_case_digest,
+      retained_case_digests:actualRetained.map(x=>x.case_digest).sort(),
+    });
+    if(pd(a.ablation_digest,'ablation')!==expectedAblationDigest
+      ||a.ablation_id!=='rsi_mem_ablate_'+expectedAblationDigest.slice(7,31)){
+      throw new Error('rsi_memattr_plan_ablation_digest_mismatch');
+    }
     if(a.only_selected_case_removed!==true||a.workload_must_match_baseline!==true
       ||a.seed_set_must_match_baseline!==true||a.budget_must_match_baseline!==true
       ||a.evaluator_must_match_baseline!==true||a.scheduler_action_authorized!==false
@@ -330,7 +357,11 @@ export function finalizeRsiExperienceContextAttribution({plan,receipts}={}){
   const seeds=new Set(ordered.map(x=>x.seed_set_digest));
   const budgets=new Set(ordered.map(x=>x.budget_digest));
   const evaluators=new Set(ordered.map(x=>x.evaluator_id));
-  if(workload.size!==1||seeds.size!==1||budgets.size!==1||evaluators.size!==1){
+  const baselines=new Set(ordered.map(x=>digest({
+    hard_invariants_pass:x.baseline_hard_invariants_pass,
+    objectives:x.baseline_objectives,
+  })));
+  if(workload.size!==1||seeds.size!==1||budgets.size!==1||evaluators.size!==1||baselines.size!==1){
     throw new Error('rsi_memattr_matched_evaluation_contract_mismatch');
   }
   const ambiguous=ordered.filter(x=>x.outcome==='AMBIGUOUS');
