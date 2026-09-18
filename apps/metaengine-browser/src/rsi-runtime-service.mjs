@@ -89,6 +89,11 @@ import {
   verifyRsiEpisodePromotionReview,
   rsiEpisodePromotionReviewTrustRootSnapshot,
 } from './rsi-episode-promotion-review.mjs';
+import {
+  createRsiExternalReleaseHandoffIntent,
+  verifyRsiExternalReleaseHandoffIntent,
+  rsiExternalReleaseHandoffTrustRootSnapshot,
+} from './rsi-external-release-handoff-intent.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -101,6 +106,7 @@ const MAX_VERIFIED_SEARCH_FEEDBACK = 512;
 const PREFIXED_SHA256 = /^sha256:[0-9a-f]{64}$/;
 const MAX_PENDING_LEARNING_OUTCOMES = 4096;
 const MAX_EPISODE_PROMOTION_REVIEWS = 256;
+const MAX_EXTERNAL_RELEASE_HANDOFF_INTENTS = 128;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -178,6 +184,7 @@ function trustRoots() {
     devos_materialization: rsiDevosMaterializationTrustRootSnapshot(),
     verified_candidate_materialization: rsiVerifiedCandidateMaterializationTrustRootSnapshot(),
     episode_promotion_review: rsiEpisodePromotionReviewTrustRootSnapshot(),
+    external_release_handoff: rsiExternalReleaseHandoffTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -229,6 +236,8 @@ export class RsiRuntimeService {
   #lastVerifiedCandidateMaterializationDigest = null;
   #episodePromotionReviewDigests = new Set();
   #lastEpisodePromotionReviewDigest = null;
+  #externalReleaseHandoffDigests = new Set();
+  #lastExternalReleaseHandoffDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -325,6 +334,14 @@ export class RsiRuntimeService {
           const reviewDigest = exactPrefixedDigest(row.payload.review_digest, 'episode_promotion_review_digest');
           this.#episodePromotionReviewDigests.add(reviewDigest);
           this.#lastEpisodePromotionReviewDigest = reviewDigest;
+        }
+        if (row?.type === 'RSI_EXTERNAL_RELEASE_HANDOFF_INTENT_READY' && row?.payload?.release_handoff_intent) {
+          const intent = verifyRsiExternalReleaseHandoffIntent(row.payload.release_handoff_intent);
+          if (this.#externalReleaseHandoffDigests.size >= MAX_EXTERNAL_RELEASE_HANDOFF_INTENTS) {
+            throw new Error('rsi_runtime_external_release_handoff_replay_capacity_exhausted');
+          }
+          this.#externalReleaseHandoffDigests.add(intent.handoff_intent_digest);
+          this.#lastExternalReleaseHandoffDigest = intent.handoff_intent_digest;
         }
       }
       replayCursor = page.at(-1).seq;
@@ -1357,6 +1374,43 @@ export class RsiRuntimeService {
     return review;
   }
 
+  async prepareExternalReleaseHandoffIntent({
+    episode_promotion_review,
+    promotion_attestation_verification,
+  } = {}) {
+    this.#assertRunning();
+    const review = verifyRsiEpisodePromotionReview(episode_promotion_review);
+    if (!this.#episodePromotionReviewDigests.has(review.review_digest)) {
+      throw new Error('rsi_runtime_episode_promotion_review_not_persisted');
+    }
+    const intent = createRsiExternalReleaseHandoffIntent({
+      episode_promotion_review: review,
+      promotion_attestation_verification,
+    });
+    verifyRsiExternalReleaseHandoffIntent(intent);
+    if (this.#externalReleaseHandoffDigests.has(intent.handoff_intent_digest)) {
+      return Object.freeze({ intent, already_recorded: true, authority_effect: false });
+    }
+    if (this.#externalReleaseHandoffDigests.size >= MAX_EXTERNAL_RELEASE_HANDOFF_INTENTS) {
+      throw new Error('rsi_runtime_external_release_handoff_capacity_exhausted');
+    }
+    await this.#ledger.append('RSI_EXTERNAL_RELEASE_HANDOFF_INTENT_READY', {
+      release_handoff_intent: intent,
+      external_release_coordinator_review_required: true,
+      publisher_action_authorized: false,
+      release_publication_authorized: false,
+      release_authority: false,
+      self_update_handoff_authorized: false,
+      direct_install_authorized: false,
+      promotion_token: null,
+      physical_effect_replay_allowed: false,
+      authority_effect: false,
+    });
+    this.#externalReleaseHandoffDigests.add(intent.handoff_intent_digest);
+    this.#lastExternalReleaseHandoffDigest = intent.handoff_intent_digest;
+    return Object.freeze({ intent, already_recorded: false, authority_effect: false });
+  }
+
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
     this.#assertRunning();
     const candidate = this.#archive.get(candidate_id);
@@ -1514,6 +1568,23 @@ export class RsiRuntimeService {
         direct_install_authorized: false,
         direct_promotion_authorized: false,
         self_update_authority: false,
+        promotion_token_minted: false,
+        physical_effect_replay_allowed: false,
+        authority_effect: false,
+      }),
+      external_release_handoff: Object.freeze({
+        count: this.#externalReleaseHandoffDigests.size,
+        capacity: MAX_EXTERNAL_RELEASE_HANDOFF_INTENTS,
+        last_digest: this.#lastExternalReleaseHandoffDigest,
+        cryptographic_promotion_attestation_required: true,
+        external_release_coordinator_review_required: true,
+        publisher_action_authorized: false,
+        release_publication_authorized: false,
+        existing_browser_fabric_release_gate_required: true,
+        existing_self_update_transaction_journal_required: true,
+        release_authority: false,
+        self_update_handoff_authorized: false,
+        direct_install_authorized: false,
         promotion_token_minted: false,
         physical_effect_replay_allowed: false,
         authority_effect: false,
