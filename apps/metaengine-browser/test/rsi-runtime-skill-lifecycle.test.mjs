@@ -245,6 +245,8 @@ test('one-attempt append is journaled before effect, holds new skills dormant an
     assert.equal(store.snapshot().library_entry_count,2);
     assert.equal(store.snapshot().append_attempt_count,1);
     assert.equal(store.snapshot().admission_exposure_hold_count,1);
+    const persistedAttempt=JSON.parse(await fs.readFile(statePath,'utf8')).append_attempts[0];
+    assert.equal(persistedAttempt.pre_effect_readback_required,true);
     assert.throws(()=>store.activationView([second.capsule.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
 
     const again=await store.adoptVerifiedLibraryOneAttempt({
@@ -446,6 +448,7 @@ test('skill lifecycle trust root remains evidence-only and cannot widen Browser 
   assert.equal(root.admission_exposure_holds_force_dormant,true);
   assert.equal(root.admission_exposure_hold_release_requires_external_governance,true);
   assert.equal(root.one_attempt_append_journal_durable_before_effect,true);
+  assert.equal(root.pre_effect_state_readback_after_attempt_persist_required,true);
   assert.equal(root.ambiguous_append_retry_allowed,false);
   assert.equal(root.independently_credited_outcomes_only,true);
   assert.equal(root.contextual_credit_not_global_truth,true);
