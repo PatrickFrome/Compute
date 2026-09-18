@@ -4,6 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ComputeBridgeClient } from './compute-bridge-client.mjs';
 import { DevelopmentPlane } from './development-plane.mjs';
+import { RsiRuntimeService } from './rsi-runtime-service.mjs';
+import { RsiRuntimeObservationSidecar } from './rsi-runtime-observation-sidecar.mjs';
 import { loadNativeSupervisorControlState } from './native-supervisor-control-state.mjs';
 import { ensureRuntimeGenesis } from './runtime-genesis.mjs';
 import { FleetProvisioner, classifyFleetReconcileOutcome } from './fleet-provisioner.mjs';
@@ -57,6 +59,8 @@ let downloads = null;
 let fleet = null;
 let ownerSafetyGates = null;
 let developmentPlane = null;
+let rsiRuntime = null;
+let rsiObservationSidecar = null;
 let nativeSupervisor = null;
 let shellBrainPortConsumerId = null;
 const humanTakeover = new HumanTakeoverController({ getSupervisor: () => nativeSupervisor });
@@ -314,6 +318,17 @@ async function shellSnapshot() {
     fleet: fleetSnapshot,
     owner_safety_gates: ownerSafetyGatesSnapshot,
     development_plane: developmentPlaneSnapshot,
+    rsi: rsiRuntime?.snapshot() || Object.freeze({
+      schema: 'metaengine.rsi.runtime-service.v1',
+      state: 'UNAVAILABLE',
+      mode: 'SHADOW_VERIFIED',
+      shadow_only: true,
+      candidate_effect_executor_exposed: false,
+      physical_effect_replay_allowed: false,
+      direct_promotion_enabled: false,
+      direct_self_update_enabled: false,
+      authority_effect: false,
+    }),
     supervisor,
     compute,
     presentation_focus: presentationFocus,
@@ -655,6 +670,25 @@ async function initDevelopmentPlane() {
   return developmentPlane.snapshot();
 }
 
+async function initRsiRuntime() {
+  const dev = await initDevelopmentPlane();
+  const sourceSha = String(dev?.devos_repo_read_model?.head || '').trim().toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(sourceSha)) throw new Error('rsi_runtime_exact_source_sha_unavailable');
+  if (!rsiRuntime) {
+    rsiRuntime = new RsiRuntimeService({
+      source_sha: sourceSha,
+      ledgerPath: path.join(app.getPath('userData'), 'metaengine-rsi-runtime-ledger-v1.jsonl'),
+    });
+  } else if (rsiRuntime.snapshot()?.source_sha !== sourceSha) {
+    throw new Error('rsi_runtime_source_sha_drift_requires_restart');
+  }
+  if (rsiRuntime.snapshot()?.state !== 'READY') await rsiRuntime.start();
+  if (!rsiObservationSidecar) {
+    rsiObservationSidecar = new RsiRuntimeObservationSidecar({ runtimeProvider: () => rsiRuntime });
+  }
+  return rsiRuntime.snapshot();
+}
+
 async function runDevelopmentPlaneSmoke() {
   const state = await initDevelopmentPlane();
   const health = await developmentPlane.request('HEALTH');
@@ -835,6 +869,7 @@ async function nativeSupervisorState() {
     owner_safety_gates: ownerSafetyGates?.snapshot() || null,
     compute,
     perception,
+    rsi: rsiRuntime?.controlPlaneProjection?.({ limit: 4 }) || null,
   };
 }
 
@@ -957,6 +992,15 @@ async function initNativeSupervisor() {
       executeCommand: executeNativeSupervisorCommand,
       observeLocalTarget,
       workerObservationBudget: 4,
+      onBrainWorkingMemory: (snapshot) => {
+        if (!rsiObservationSidecar) return false;
+        rsiObservationSidecar.submit(snapshot);
+        return true;
+      },
+      flushBrainWorkingMemory: async () => {
+        if (!rsiObservationSidecar) return false;
+        return rsiObservationSidecar.flush();
+      },
       controlStatePath: supervisorControlStatePath(),
     });
   }
@@ -977,6 +1021,8 @@ function destroyWindowContents() {
   if (shellView && !shellView.webContents.isDestroyed()) shellView.webContents.close();
   shellView = null;
   fleet = null;
+  // RSI remains process-scoped across window recreation. The supervisor quit
+  // barrier flushes its bounded sidecar before process termination/self-update.
   developmentPlane?.stop();
 }
 
@@ -1133,7 +1179,11 @@ async function bootstrapDegradableSubsystems() {
   });
 
   setImmediate(() => {
-    void runDegradableStartupStep('DEVELOPMENT_PLANE', () => initDevelopmentPlane());
+    void (async () => {
+      const dev = await runDegradableStartupStep('DEVELOPMENT_PLANE', () => initDevelopmentPlane());
+      if (dev) await runDegradableStartupStep('RSI_RUNTIME', () => initRsiRuntime());
+      await publishSnapshot().catch(() => {});
+    })();
   });
 
   await runDegradableStartupStep('SHELL_SNAPSHOT', () => publishSnapshot());
