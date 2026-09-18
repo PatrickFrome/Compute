@@ -46,6 +46,8 @@ const PROMOTION_TRUST_ROOT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-published-release-reconciliation.mjs',
   'apps/metaengine-browser/src/rsi-release-promotion-journal.mjs',
   'apps/metaengine-browser/src/rsi-release-promotion-outcome-ingest.mjs',
+  'apps/metaengine-browser/src/rsi-self-update-controller-admission.mjs',
+  'apps/metaengine-browser/src/host-resilience-runtime.mjs',
   'apps/metaengine-browser/src/browser-fabric-effect-ledger.mjs',
   'apps/metaengine-browser/src/browser-fabric-effect-domain-policy.mjs',
   'apps/metaengine-browser/src/browser-fabric-capability.mjs',
