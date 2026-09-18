@@ -57,6 +57,7 @@ import { RsiSkillRelationStore, createRsiSkillRelationEdge, rsiSkillRelationGrap
 import { RsiRuntimeMetaSkillArchive, createRsiRuntimeMetaSkillRecord, rsiRuntimeMetaSkillArchiveTrustRootSnapshot } from './rsi-runtime-meta-skill-archive.mjs';
 import { RsiMetaProfileQualificationLedger, createRsiMetaProfileQualification, createRsiMetaProfileShadowPlan, rsiMetaProfileQualificationTrustRootSnapshot } from './rsi-meta-profile-qualification.mjs';
 import { RsiMetaProfileShadowRegistry, createRsiMetaProfileShadowSelection, createRsiMetaProfileShadowProjection, rsiMetaProfileShadowSelectionTrustRootSnapshot } from './rsi-meta-profile-shadow-selection.mjs';
+import { createRsiShadowComparisonBinding, rsiShadowComparisonBindingTrustRootSnapshot } from './rsi-shadow-comparison-binding.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -137,6 +138,7 @@ function trustRoots() {
     runtime_meta_skill_archive: rsiRuntimeMetaSkillArchiveTrustRootSnapshot(),
     meta_profile_qualification: rsiMetaProfileQualificationTrustRootSnapshot(),
     meta_profile_shadow_selection: rsiMetaProfileShadowSelectionTrustRootSnapshot(),
+    shadow_comparison_binding: rsiShadowComparisonBindingTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -955,7 +957,11 @@ export class RsiRuntimeService {
     return Object.freeze({ selection, stored });
   }
 
-  async compareShadowMetaProfileRoute(routeArgs = {}) {
+  async compareShadowMetaProfileRoute({
+    comparator_root_digest,
+    external_comparator_owner = false,
+    ...routeArgs
+  } = {}) {
     this.#assertRunning();
     const selection = this.#metaProfileShadowRegistry.current();
     if (!selection) throw new Error('rsi_runtime_shadow_profile_not_selected');
@@ -964,6 +970,15 @@ export class RsiRuntimeService {
     const record = this.#metaSkillArchive.recordByDigest(selection.meta_record_digest);
     if (!record) throw new Error('rsi_runtime_shadow_profile_meta_record_missing');
     const baselinePlan = await this.routeVerifiedSkills(routeArgs);
+    const comparisonBinding = createRsiShadowComparisonBinding({
+      selection,
+      qualification,
+      context_digest: baselinePlan.context_digest,
+      baseline_plan_digest: baselinePlan.plan_digest,
+      comparator_root_digest,
+      external_comparator_owner,
+      authored_by_candidate: routeArgs.authored_by_candidate ?? true,
+    });
     const library = this.#skillLifecycle.verifiedLibrarySnapshot();
     const governance = this.#skillLifecycle.governance();
     if (!library || !governance) throw new Error('rsi_runtime_verified_skill_library_unavailable');
@@ -980,6 +995,8 @@ export class RsiRuntimeService {
     });
     await this.#ledger.append('META_PROFILE_SHADOW_ROUTE_COMPARED', {
       selection_digest: selection.selection_digest,
+      comparison_binding_digest: comparisonBinding.binding_digest,
+      comparator_root_digest: comparisonBinding.comparator_root_digest,
       projection_digest: projection.projection_digest,
       context_digest: projection.context_digest,
       baseline_plan_digest: projection.baseline_plan_digest,
@@ -988,9 +1005,11 @@ export class RsiRuntimeService {
       status: projection.status,
       matches_baseline: projection.matches_baseline,
       baseline_execution_path_unchanged: true,
+      comparison_can_activate_profile: false,
+      comparison_can_authorize_canary: false,
       authority_effect: false,
     });
-    return Object.freeze({ baseline_plan: baselinePlan, shadow_projection: projection });
+    return Object.freeze({ baseline_plan: baselinePlan, comparison_binding: comparisonBinding, shadow_projection: projection });
   }
 
   currentShadowMetaProfile() {
