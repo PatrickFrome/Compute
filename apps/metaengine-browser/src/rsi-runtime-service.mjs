@@ -318,6 +318,45 @@ export class RsiRuntimeService {
     return this.#improvementFrontier.entries(options);
   }
 
+  controlPlaneProjection({ limit = 4 } = {}) {
+    const bounded = Math.max(0, Math.min(8, Number(limit) || 0));
+    const entries = this.#improvementFrontier.entries({ limit: bounded });
+    return Object.freeze({
+      schema: 'metaengine.rsi.runtime-control-projection.v1',
+      state: this.#state,
+      source_sha: this.#sourceSha,
+      last_observation_digest: this.#lastObservationDigest,
+      last_observation_at: this.#lastObservationAt,
+      frontier_count: entries.length,
+      frontier: Object.freeze(entries.map((entry) => Object.freeze({
+        opportunity_id: entry.opportunity_id,
+        signal: entry.signal,
+        priority: entry.priority,
+        mutation_surface: entry.mutation_surface,
+        observation_digest: entry.observation_digest,
+        hypothesis: structuredClone(entry.hypothesis),
+        experiment_plan: structuredClone(entry.plan),
+        execution_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      }))),
+      source_binding_exact: true,
+      existing_devos_scheduler_required: true,
+      browser_can_enqueue_devos_tasks: false,
+      direct_execution_enabled: false,
+      direct_promotion_enabled: false,
+      direct_self_update_enabled: false,
+      execution_authority: false,
+      production_mutation_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+
   snapshot() {
     const shadow = this.#archive.snapshot();
     return Object.freeze({
