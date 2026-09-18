@@ -80,6 +80,14 @@ import {
   createRsiSkillEvidence,
   createRsiVerifiedSkillLibrary,
 } from '../src/rsi-verified-skill-library.mjs';
+import {
+  RsiExactOwnerReviewArchive,
+  createRsiExactConsumerOwnerReviewBundle,
+  verifyRsiExactConsumerOwnerReviewBundle,
+  createRsiExactSkillPrecommitCertificate,
+  verifyRsiExactSkillPrecommitCertificate,
+  rsiExactExistingConsumerOwnerReviewTrustRootSnapshot,
+} from '../src/rsi-exact-existing-consumer-owner-review.mjs';
 
 const SOURCE='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
@@ -2934,4 +2942,325 @@ test('Phase32 hardened consumer identity detects generation and epoch identity d
     consumerEpochDigest:fx.proposal.evaluation_epoch_digest,
     consumerEpochSeq:fx.proposal.evaluation_epoch_seq+1,
   }),/evaluation_epoch_identity_drift/);
+});
+
+function phase33ExactOwnerFixture(label='phase33-owner'){
+  const skillFx=phase32ExactSkillReviewFixture(label);
+  const skillReviewArgs=phase32ExactSkillEvidenceReviewArgs(skillFx,label);
+  const skillEvidenceReview=createRsiConsolidatedKnowledgeSkillEvidenceReview(skillReviewArgs);
+  assert.equal(skillEvidenceReview.state,'READY_FOR_EXTERNAL_EXISTING_LIBRARY_APPEND_REVIEW');
+
+  const handoff=createRsiValidatedKnowledgeConsumerHandoff({
+    handoff_id:'phase33.consumer.handoff.'+label,
+    proposal:skillFx.proposal,
+    validations:skillFx.validations,
+    admission:skillFx.admission,
+    source_rows:skillFx.rows,
+    consumer_model_family:'METAENGINE_RSI',
+    consumer_environment_family:'METAENGINE_BROWSER',
+    consumer_context_digest:labelDigest(label+'-consumer-context'),
+    consumer_harness_digest:labelDigest(label+'-consumer-harness'),
+    consumer_evaluator_root_digest:skillEvidenceReview.local_evaluator_root_digest,
+    consumer_evaluator_generation_digest:skillFx.proposal.evaluator_generation_digest,
+    consumer_evaluator_generation_seq:skillFx.proposal.evaluator_generation_seq,
+    consumer_evaluator_generation_history_anchor_digest:skillFx.proposal.evaluator_generation_history_anchor_digest,
+    consumer_evaluation_epoch_seq:skillFx.proposal.evaluation_epoch_seq,
+    consumer_evaluation_epoch_digest:skillFx.proposal.evaluation_epoch_digest,
+    consumer_holdout_digest:skillEvidenceReview.local_hidden_holdout_digest,
+    matched_reference_plan_digest:labelDigest(label+'-matched-reference-plan'),
+    local_revalidation_protocol_digest:labelDigest(label+'-consumer-revalidation-protocol'),
+    external_consumer_router:true,
+    authored_by_candidate:false,
+  });
+  const receipt=createRsiConsumerLocalRevalidationReceipt({
+    receipt_id:'phase33.consumer.receipt.'+label,
+    handoff,
+    matched_control_receipt_digest:labelDigest(label+'-consumer-control'),
+    treatment_receipt_digest:labelDigest(label+'-consumer-treatment'),
+    local_evidence_digest:labelDigest(label+'-consumer-local-evidence'),
+    same_instances_pass:true,
+    same_harness_pass:true,
+    same_budget_pass:true,
+    evaluator_integrity_pass:true,
+    hidden_holdout_pass:true,
+    contamination_clear:true,
+    from_scratch_replay_pass:true,
+    hard_invariants_pass:true,
+    task_non_regression:true,
+    safety_non_regression:true,
+    security_non_regression:true,
+    efficiency_non_regression:true,
+    strict_consumer_improvement:true,
+    constraint_prediction_confirmed:false,
+    diagnostic_discrimination_pass:false,
+    external_consumer_evaluator:true,
+    authored_by_candidate:false,
+  });
+  const phase32Evidence={
+    handoff,receipt,proposal:skillFx.proposal,validations:skillFx.validations,
+    admission:skillFx.admission,source_rows:skillFx.rows,
+  };
+  const bundle=createRsiExactConsumerOwnerReviewBundle({
+    bundle_id:'phase33.owner.bundle.'+label,
+    ...phase32Evidence,
+    current_consumer_snapshot_digest:skillFx.currentLibrary.library_digest,
+    consumer_owner_policy_digest:labelDigest(label+'-owner-policy'),
+    consumer_owner_identity_digest:labelDigest(label+'-owner-identity'),
+    external_consumer_owner:true,
+    authored_by_candidate:false,
+  });
+  return {skillFx,skillReviewArgs,skillEvidenceReview,handoff,receipt,phase32Evidence,bundle};
+}
+
+function phase33CertificateArgs(fx,label='phase33-certificate',overrides={}){
+  return {
+    certificate_id:'phase33.owner.certificate.'+label,
+    bundle:fx.bundle,
+    phase32_evidence:fx.phase32Evidence,
+    skill_evidence_review:fx.skillEvidenceReview,
+    skill_evidence_review_args:fx.skillReviewArgs,
+    current_library_snapshot_digest:fx.skillFx.currentLibrary.library_digest,
+    structural_critic_identity_digest:labelDigest(label+'-critic-structural-id'),
+    structural_critic_receipt_digest:labelDigest(label+'-critic-structural-receipt'),
+    behavioral_critic_identity_digest:labelDigest(label+'-critic-behavior-id'),
+    behavioral_critic_receipt_digest:labelDigest(label+'-critic-behavior-receipt'),
+    semantic_critic_identity_digest:labelDigest(label+'-critic-semantic-id'),
+    semantic_critic_receipt_digest:labelDigest(label+'-critic-semantic-receipt'),
+    coalition_ablation_receipt_digest:labelDigest(label+'-coalition-ablation'),
+    no_skill_ablation_receipt_digest:labelDigest(label+'-no-skill-ablation'),
+    mechanical_artifact_audit_digest:labelDigest(label+'-mechanical-artifact-audit'),
+    artifact_noop_ablation_receipt_digest:labelDigest(label+'-artifact-noop-ablation'),
+    benchmark_provenance_attestation_digest:labelDigest(label+'-benchmark-provenance'),
+    evaluator_provenance_attestation_digest:labelDigest(label+'-evaluator-provenance'),
+    contamination_attestation_digest:labelDigest(label+'-contamination-attestation'),
+    active_cap_policy_digest:labelDigest(label+'-active-cap-policy'),
+    marginal_subset_selection_policy_digest:labelDigest(label+'-marginal-subset-policy'),
+    anytime_valid_certificate_digest:labelDigest(label+'-anytime-valid-certificate'),
+    false_admission_error_budget_policy_digest:labelDigest(label+'-false-admission-budget'),
+    paired_instance_manifest_digest:labelDigest(label+'-paired-instance-manifest'),
+    stopping_policy_digest:labelDigest(label+'-stopping-policy'),
+    artifact_auditor_identity_digest:labelDigest(label+'-artifact-auditor-id'),
+    benchmark_provenance_attestor_identity_digest:labelDigest(label+'-benchmark-attestor-id'),
+    evaluator_provenance_attestor_identity_digest:labelDigest(label+'-evaluator-attestor-id'),
+    contamination_attestor_identity_digest:labelDigest(label+'-contamination-attestor-id'),
+    statistical_acceptor_identity_digest:labelDigest(label+'-statistical-acceptor-id'),
+    false_admission_alpha_ppm:50000,
+    anytime_valid_e_value_microunits:25000000,
+    paired_sample_count:64,
+    minimum_paired_sample_count:32,
+    active_retrieval_cap:32,
+    current_active_retrieval_count:12,
+    projected_active_retrieval_count:13,
+    structural_validity_pass:true,
+    behavioral_harmlessness_pass:true,
+    semantic_consistency_pass:true,
+    coalition_ablation_pass:true,
+    no_skill_ablation_pass:true,
+    mechanical_artifact_audit_pass:true,
+    artifact_noop_ablation_pass:true,
+    benchmark_provenance_pass:true,
+    evaluator_provenance_pass:true,
+    contamination_clear:true,
+    marginal_gain_subset_pass:true,
+    active_cap_pass:true,
+    external_owner_reviewer:true,
+    external_critics:true,
+    external_artifact_auditor:true,
+    external_provenance_attestor:true,
+    external_statistical_acceptor:true,
+    authored_by_candidate:false,
+    ...overrides,
+  };
+}
+
+test('Phase33 precommit owner review emits only a zero-authority existing-library admission certificate',()=>{
+  const fx=phase33ExactOwnerFixture('positive');
+  assert.equal(verifyRsiExactConsumerOwnerReviewBundle(fx.bundle,fx.phase32Evidence).bundle_digest,fx.bundle.bundle_digest);
+  assert.equal(fx.bundle.review_route,'EXISTING_VERIFIED_SKILL_OWNER_PRECOMMIT');
+  assert.equal(fx.bundle.consumer_evaluation_contract_digest,fx.handoff.consumer_evaluation_contract_digest);
+  assert.equal(fx.bundle.consumer_evaluator_generation_seq,fx.handoff.consumer_evaluator_generation_seq);
+
+  const args=phase33CertificateArgs(fx,'positive');
+  const cert=createRsiExactSkillPrecommitCertificate(args);
+  assert.equal(cert.state,'ELIGIBLE_FOR_EXISTING_LIBRARY_OWNER_ADMISSION_REVIEW');
+  assert.equal(cert.blockers.length,0);
+  assert.equal(cert.library_append_performed,false);
+  assert.equal(cert.retrieval_exposure_changed,false);
+  assert.equal(cert.skill_activation_performed,false);
+  assert.equal(cert.meta_skill_profile_mutated,false);
+  assert.equal(cert.reviewer_separation_of_duties_required,true);
+  assert.equal(cert.false_admission_alpha_ppm,50000);
+  assert.equal(cert.anytime_valid_threshold_microunits,20000000);
+  assert.equal(cert.anytime_valid_acceptance_pass,true);
+  assert.equal(cert.paired_sample_count,64);
+  assert.notEqual(cert.owner_reviewer_identity_digest,cert.structural_critic_identity_digest);
+  assert.notEqual(cert.artifact_auditor_identity_digest,cert.statistical_acceptor_identity_digest);
+  assert.equal(cert.library_admission_token,null);
+  assert.equal(cert.authority_effect,false);
+  assert.equal(verifyRsiExactSkillPrecommitCertificate(cert,args).certificate_digest,cert.certificate_digest);
+});
+
+test('Phase33 requires three independent critics and retains failed precommit evidence instead of activating',()=>{
+  const fx=phase33ExactOwnerFixture('critics');
+  const duplicate=phase33CertificateArgs(fx,'critics-duplicate');
+  duplicate.behavioral_critic_identity_digest=duplicate.structural_critic_identity_digest;
+  assert.throws(()=>createRsiExactSkillPrecommitCertificate(duplicate),/three_independent_critics_required/);
+
+  const failed=createRsiExactSkillPrecommitCertificate(phase33CertificateArgs(fx,'critics-failed',{
+    behavioral_harmlessness_pass:false,
+  }));
+  assert.equal(failed.state,'REJECTED_PRECOMMIT_OWNER_REVIEW');
+  assert.ok(failed.blockers.includes('BEHAVIORAL_HARMLESSNESS_FAILED'));
+  assert.equal(failed.library_append_performed,false);
+  assert.equal(failed.retrieval_exposure_changed,false);
+});
+
+test('Phase33 blocks benchmark-only success without artifact/no-op, provenance, coalition and anytime-valid evidence',()=>{
+  const fx=phase33ExactOwnerFixture('gates');
+  for(const [label,overrides,blocker] of [
+    ['artifact',{mechanical_artifact_audit_pass:false},'MECHANICAL_ARTIFACT_AUDIT_FAILED'],
+    ['noop',{artifact_noop_ablation_pass:false},'ARTIFACT_NOOP_ABLATION_FAILED'],
+    ['coalition',{coalition_ablation_pass:false},'COALITION_ABLATION_FAILED'],
+    ['no-skill',{no_skill_ablation_pass:false},'NO_SKILL_ABLATION_FAILED'],
+    ['benchmark',{benchmark_provenance_pass:false},'BENCHMARK_PROVENANCE_FAILED'],
+    ['evaluator',{evaluator_provenance_pass:false},'EVALUATOR_PROVENANCE_FAILED'],
+    ['contamination',{contamination_clear:false},'CONTAMINATION_DETECTED'],
+    ['subset',{marginal_gain_subset_pass:false},'MARGINAL_SUBSET_SELECTION_FAILED'],
+    ['cap',{projected_active_retrieval_count:33},'ACTIVE_CAP_POLICY_FAILED'],
+  ]){
+    const cert=createRsiExactSkillPrecommitCertificate(phase33CertificateArgs(fx,'gate-'+label,overrides));
+    assert.equal(cert.state,'REJECTED_PRECOMMIT_OWNER_REVIEW',label);
+    assert.ok(cert.blockers.includes(blocker),blocker);
+    assert.equal(cert.skill_activation_performed,false);
+  }
+});
+
+test('Phase33 anytime-valid acceptance is computed from fixed alpha and e-value, with abstain on insufficient evidence',()=>{
+  const fx=phase33ExactOwnerFixture('anytime');
+  const insufficient=createRsiExactSkillPrecommitCertificate(phase33CertificateArgs(fx,'anytime-insufficient',{
+    anytime_valid_e_value_microunits:19000000,
+  }));
+  assert.equal(insufficient.anytime_valid_threshold_microunits,20000000);
+  assert.equal(insufficient.anytime_valid_acceptance_pass,false);
+  assert.equal(insufficient.state,'INSUFFICIENT_ANYTIME_VALID_EVIDENCE');
+  assert.equal(insufficient.blockers.length,0);
+  assert.equal(insufficient.library_append_performed,false);
+  assert.equal(insufficient.retrieval_exposure_changed,false);
+
+  const tooFewPairs=createRsiExactSkillPrecommitCertificate(phase33CertificateArgs(fx,'anytime-too-few-pairs',{
+    paired_sample_count:31,
+  }));
+  assert.equal(tooFewPairs.anytime_valid_acceptance_pass,false);
+  assert.equal(tooFewPairs.state,'INSUFFICIENT_ANYTIME_VALID_EVIDENCE');
+
+  const strongerAlpha=createRsiExactSkillPrecommitCertificate(phase33CertificateArgs(fx,'anytime-stronger-alpha',{
+    false_admission_alpha_ppm:10000,
+    anytime_valid_e_value_microunits:99000000,
+  }));
+  assert.equal(strongerAlpha.anytime_valid_threshold_microunits,100000000);
+  assert.equal(strongerAlpha.state,'INSUFFICIENT_ANYTIME_VALID_EVIDENCE');
+
+  assert.throws(()=>createRsiExactSkillPrecommitCertificate(phase33CertificateArgs(fx,'anytime-invalid-alpha',{
+    false_admission_alpha_ppm:1000001,
+  })),/false_admission_alpha_ppm_invalid/);
+});
+
+
+test('Phase33 negative-transfer consumer evidence cannot enter positive skill precommit',()=>{
+  const fx=phase32Fixture('phase33-negative',{state:'CANDIDATE_EXPERIMENT_REJECTED'});
+  const receipt=phase32Receipt(fx,'phase33-negative');
+  const phase32Evidence={
+    handoff:fx.handoff,receipt,proposal:fx.proposal,validations:fx.validations,admission:fx.admission,source_rows:fx.rows,
+  };
+  const bundle=createRsiExactConsumerOwnerReviewBundle({
+    bundle_id:'phase33.owner.bundle.negative',
+    ...phase32Evidence,
+    current_consumer_snapshot_digest:labelDigest('phase33-negative-consumer-snapshot'),
+    consumer_owner_policy_digest:labelDigest('phase33-negative-owner-policy'),
+    consumer_owner_identity_digest:labelDigest('phase33-negative-owner-id'),
+    external_consumer_owner:true,authored_by_candidate:false,
+  });
+  assert.notEqual(bundle.review_route,'EXISTING_VERIFIED_SKILL_OWNER_PRECOMMIT');
+  assert.throws(()=>createRsiExactSkillPrecommitCertificate({
+    ...phase33CertificateArgs(phase33ExactOwnerFixture('unrelated-positive'),'negative-block'),
+    bundle,phase32_evidence:phase32Evidence,
+  }),/recipe_bundle_required/);
+});
+
+test('Phase33 archive is durable-before-visible and re-verifies Phase32 plus certificate evidence after restart',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase33-owner-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'owner.json');
+  const fx=phase33ExactOwnerFixture('archive');
+  const certArgs=phase33CertificateArgs(fx,'archive');
+  const cert=createRsiExactSkillPrecommitCertificate(certArgs);
+  const resolver=async()=>({
+    phase32_evidence:fx.phase32Evidence,
+    certificate_args:certArgs,
+  });
+  const archive=new RsiExactOwnerReviewArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await archive.init();
+
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>archive.add({
+    bundle:fx.bundle,certificate:cert,phase32_evidence:fx.phase32Evidence,certificate_args:certArgs,
+  }));
+  assert.equal(archive.snapshot().row_count,0);
+  await fs.rm(statePath,{recursive:true,force:true});
+
+  assert.equal((await archive.add({
+    bundle:fx.bundle,certificate:cert,phase32_evidence:fx.phase32Evidence,certificate_args:certArgs,
+  })).state,'ELIGIBLE_FOR_EXISTING_LIBRARY_OWNER_ADMISSION_REVIEW');
+  assert.equal(archive.snapshot().row_count,1);
+  assert.equal(archive.snapshot().archive_can_write_skill_library,false);
+  assert.equal(archive.snapshot().archive_can_change_retrieval_exposure,false);
+
+  const restored=new RsiExactOwnerReviewArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await restored.init();
+  assert.equal(restored.snapshot().row_count,1);
+});
+
+test('Phase33 trust root freezes precommit gatekeeping without creating a second lifecycle or authority plane',()=>{
+  const root=rsiExactExistingConsumerOwnerReviewTrustRootSnapshot();
+  assert.equal(root.exact_phase32_consumer_identity_required,true);
+  assert.equal(root.existing_verified_skill_library_reused,true);
+  assert.equal(root.second_skill_library_allowed,false);
+  assert.equal(root.three_independent_critics_required,true);
+  assert.equal(root.coalition_aware_ablation_required,true);
+  assert.equal(root.mechanical_artifact_audit_required,true);
+  assert.equal(root.artifact_noop_ablation_required,true);
+  assert.equal(root.anytime_valid_acceptance_required,true);
+  assert.equal(root.numeric_anytime_valid_threshold_required,true);
+  assert.equal(root.insufficient_evidence_abstain_required,true);
+  assert.equal(root.append_does_not_imply_active_retrieval,true);
+  assert.equal(root.direct_library_append,false);
+  assert.equal(root.direct_retrieval_exposure_change,false);
+  assert.equal(root.direct_skill_activation,false);
+  assert.equal(root.direct_scheduler_action,false);
+  assert.equal(root.authority_effect,false);
+});
+
+
+test('Phase33 reviewer separation of duties rejects owner, critic and attestor identity collapse',()=>{
+  const fx=phase33ExactOwnerFixture('separation');
+  const base=phase33CertificateArgs(fx,'separation');
+  assert.throws(()=>createRsiExactSkillPrecommitCertificate({
+    ...base,
+    structural_critic_identity_digest:fx.bundle.consumer_owner_identity_digest,
+  }),/reviewer_separation_of_duties_required/);
+  assert.throws(()=>createRsiExactSkillPrecommitCertificate({
+    ...base,
+    artifact_auditor_identity_digest:base.behavioral_critic_identity_digest,
+  }),/reviewer_separation_of_duties_required/);
+  assert.throws(()=>createRsiExactSkillPrecommitCertificate({
+    ...base,
+    benchmark_provenance_attestor_identity_digest:base.evaluator_provenance_attestor_identity_digest,
+  }),/reviewer_separation_of_duties_required/);
+  assert.throws(()=>createRsiExactSkillPrecommitCertificate({
+    ...base,
+    contamination_attestor_identity_digest:base.statistical_acceptor_identity_digest,
+  }),/reviewer_separation_of_duties_required/);
+
+  const root=rsiExactExistingConsumerOwnerReviewTrustRootSnapshot();
+  assert.equal(root.reviewer_separation_of_duties_required,true);
 });
