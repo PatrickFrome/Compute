@@ -242,5 +242,5 @@ test('repository keeps one signed heartbeat route and materializes the same Deve
   assert.match(edge, /runtime_control:await runtimeControl\(\)/);
   assert.match(main, /development_plane: normalizeDevelopmentPlaneProjection\(/);
   assert.match(main, /async function nativeSupervisorState\(\)[\s\S]*const compute = await currentComputeHealth\(\)[\s\S]*compute,/);
-  assert.match(edge, /compute:boundedObject\(s\.compute,32768\)/);
+  assert.match(edge, /row\.compute=boundedObject\(s\.compute,32768\)/);
 });
