@@ -105,16 +105,21 @@ export class RsiRuntimeSkillLifecycle{
       if(!candidate||candidate.evidence_digest!==row.evidence_digest||candidate.skill_id!==row.skill_id||candidate.skill_version!==row.skill_version)throw new Error('rsi_runtime_skill_library_non_append_only_update');
     }
   }
-  async adoptVerifiedLibrary({library,external_library_owner=false,authored_by_candidate=true}={}){
+  async adoptVerifiedLibrary({library,expected_current_library_digest=null,external_library_owner=false,authored_by_candidate=true}={}){
     this.#assertInit();
     if(external_library_owner!==true||authored_by_candidate!==false)throw new Error('rsi_runtime_skill_library_external_origin_required');
     const checked=verifyRsiVerifiedSkillLibrary(library);
+    if(expected_current_library_digest!=null){
+      if(!this.#library)throw new Error('rsi_runtime_skill_library_cas_requires_current_library');
+      const expected=exactDigest(expected_current_library_digest,'expected_library');
+      if(this.#library.library_digest!==expected)throw new Error('rsi_runtime_skill_library_cas_mismatch');
+    }
     this.#assertAppendOnlyLibrary(checked);
     const changed=this.#library?.library_digest!==checked.library_digest;
     this.#library=checked;
     const reconciled=await this.#reconcilePendingInternal();
     await this.#persist();
-    return zero({state:changed?'ADOPTED':'UNCHANGED',library_digest:checked.library_digest,entry_count:checked.entry_count,reconciled_pending:reconciled});
+    return zero({state:changed?'ADOPTED':'UNCHANGED',library_digest:checked.library_digest,entry_count:checked.entry_count,reconciled_pending:reconciled,cas_checked:expected_current_library_digest!=null});
   }
   #nextSeq(skillDigest){const next=(this.#seq.get(skillDigest)||0)+1;this.#seq.set(skillDigest,next);return next}
   #materializeOne({episode,credit_receipt,generation,router_engaged,false_positive_injection,hard_invariant_violation,authoring_prior,authoring_provenance_digest}){
@@ -235,7 +240,7 @@ export function rsiRuntimeSkillLifecycleTrustRootSnapshot(){
   const root={
     schema:'metaengine.rsi.runtime-skill-lifecycle-root.v1',version:1,
     policy_path:'apps/metaengine-browser/src/rsi-runtime-skill-lifecycle.mjs',
-    verified_library_required:true,library_updates_append_only:true,
+    verified_library_required:true,library_updates_append_only:true,exact_library_digest_cas_supported:true,
     independently_credited_outcomes_only:true,contextual_credit_not_global_truth:true,
     lifecycle_windows_are_append_only:true,bounded_pending_before_library:true,
     candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,
