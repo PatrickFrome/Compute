@@ -170,6 +170,9 @@ export function createRsiPostDeploymentCorrectionAdmission({
     post_deployment_learning_admission_digest:sha256(learning.admission_digest,'learning_admission'),
     harmful_utility_admission_digest:sha256(harmful.admission_digest,'harmful_utility'),
     helpful_utility_admission_digest:sha256(helpful.admission_digest,'helpful_utility'),
+    post_deployment_learning_admission:learning,
+    harmful_utility_admission:harmful,
+    helpful_utility_admission:helpful,
     harmful_utility_receipt_digest:sha256(harmful.utility_receipt_digest,'harmful_receipt'),
     helpful_utility_receipt_digest:sha256(helpful.utility_receipt_digest,'helpful_receipt'),
     pair_digest:pairDigest,
@@ -231,6 +234,26 @@ export function verifyRsiPostDeploymentCorrectionAdmission(row){
     [row.pair_digest,'pair'],
   ])sha256(value,label);
   uniqueRefs(row.evidence_refs);
+  const learning=verifyRsiPostDeploymentExperienceAdmission(row.post_deployment_learning_admission);
+  const harmful=verifyRsiPostDeploymentUtilityAdmission(row.harmful_utility_admission);
+  const helpful=verifyRsiPostDeploymentUtilityAdmission(row.helpful_utility_admission);
+  if(
+    learning.admission_digest!==row.post_deployment_learning_admission_digest
+    || harmful.admission_digest!==row.harmful_utility_admission_digest
+    || helpful.admission_digest!==row.helpful_utility_admission_digest
+    || harmful.utility_receipt_digest!==row.harmful_utility_receipt_digest
+    || helpful.utility_receipt_digest!==row.helpful_utility_receipt_digest
+    || harmful.outcome!=='HARMFUL'
+    || helpful.outcome!=='HELPFUL'
+    || harmful.post_deployment_learning_admission_digest!==learning.admission_digest
+    || helpful.post_deployment_learning_admission_digest!==learning.admission_digest
+    || harmful.case_id!==learning.experience_case.case_id
+    || helpful.case_id!==learning.experience_case.case_id
+    || row.source_sha!==learning.source_sha
+    || row.candidate_sha!==learning.learning_receipt.candidate_sha
+    || isoMs(helpful.window_started_at,'helpful_window_start')<isoMs(harmful.window_ended_at,'harmful_window_end')
+    || isoMs(helpful.observed_at,'helpful_observed')<=isoMs(harmful.observed_at,'harmful_observed')
+  )throw new Error('rsi_post_deploy_correction_embedded_evidence_mismatch');
   const projection=createRsiExperienceGraphSnapshot({
     graph_id:`rsi.correction.verify.${row.pair_digest.slice(7,23)}`,
     epoch:1,
