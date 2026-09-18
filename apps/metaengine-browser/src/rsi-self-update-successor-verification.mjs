@@ -87,7 +87,10 @@ function verifyTransaction(txn, admission, expectedState){
     transaction_id:safeId(txn.transaction_id,'transaction_id'),
     source_version:txn.source_version,target_version:txn.target_version,resolved_git_sha:admission.candidate_sha,
     state:expectedState,qualified:txn.qualified===true,quarantined:txn.quarantined===true,
-    attempt_count:Number(txn.attempt_count||0),transaction_digest:digest(txn),authority_effect:false,
+    attempt_count:Number(txn.attempt_count||0),
+    created_at:exactUtc(txn.created_at,'transaction_created_at'),
+    updated_at:exactUtc(txn.updated_at,'transaction_updated_at'),
+    transaction_digest:digest(txn),authority_effect:false,
   });
 }
 
