@@ -1175,6 +1175,33 @@ export class RsiRuntimeService {
     certificate_args = {},
   } = {}) {
     this.#assertRunning();
+    const certificateDigest = certificate?.certificate_digest;
+    const existing = this.#skillLifecycle.exposureReleaseAttemptReadback({
+      attempt_id,
+      release_certificate_digest: certificateDigest,
+    });
+    if (existing.found) {
+      if (existing.state === 'ATTEMPT_STARTED') {
+        throw new Error('rsi_runtime_exposure_release_attempt_ambiguous_reconcile_required');
+      }
+      return Object.freeze({
+        state: 'ALREADY_RECORDED',
+        attempt_state: existing.state,
+        attempt_id,
+        skill_digest: existing.skill_digest,
+        retrieval_exposure_changed: existing.retrieval_exposure_changed,
+        full_activation_authorized: false,
+        execution_authority: false,
+        browser_authority: false,
+        task_authority: false,
+        production_mutation_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        scheduler_authority: false,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      });
+    }
     const skillDigest = certificate?.skill_digest;
     const currentLibrary = this.#skillLifecycle.verifiedLibrarySnapshot();
     const currentGovernance = this.#skillLifecycle.governance();
