@@ -322,6 +322,11 @@ export class RsiEpisodeOrchestrator {
     });
   }
 
+  hasEpisode(episode_id) {
+    const id = safeId(episode_id, 'id');
+    return this.#episodes.has(id);
+  }
+
   episode(episode_id) {
     const episode = this.#requireEpisode(episode_id);
     return Object.freeze(cloneEpisode({ ...episode, state: deriveEpisodeState(episode) }));
@@ -433,6 +438,7 @@ export function rsiEpisodeOrchestratorTrustRootSnapshot() {
       'apps/metaengine-browser/src/rsi-episode-orchestrator.mjs',
       'apps/metaengine-browser/src/rsi-episode-devos-bridge.mjs',
       'apps/metaengine-browser/src/rsi-episode-evaluation-ingest.mjs',
+      'apps/metaengine-browser/src/rsi-autonomous-episode-controller.mjs',
       'apps/metaengine-browser/src/rsi-devos-experiment-plan.mjs',
       'apps/metaengine-browser/src/rsi-runtime-ledger.mjs',
       'apps/metaengine-browser/src/rsi-runtime-service.mjs',
