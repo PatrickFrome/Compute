@@ -30,6 +30,12 @@ import {
   verifyRsiIsolatedCandidateBuildPlan,
 } from '../src/rsi-isolated-candidate-builder.mjs';
 
+import {
+  createRsiProvenanceEvaluationHandoff,
+  verifyRsiProvenanceEvaluationHandoff,
+  rsiProvenanceEvaluationHandoffTrustRootSnapshot,
+} from '../src/rsi-provenance-evaluation-handoff.mjs';
+
 const SOURCE='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
 const WORKSPACE_ID='11111111-1111-4111-8111-111111111111';
@@ -344,12 +350,6 @@ function provenanceMaterialization(build){
   };
 }
 
-
-import {
-  createRsiProvenanceEvaluationHandoff,
-  verifyRsiProvenanceEvaluationHandoff,
-  rsiProvenanceEvaluationHandoffTrustRootSnapshot,
-} from '../src/rsi-provenance-evaluation-handoff.mjs';
 
 function phase28Artifact(label='phase29'){
   const fx=revisionFixture(label);
