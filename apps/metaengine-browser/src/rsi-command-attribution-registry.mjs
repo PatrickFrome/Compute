@@ -7,6 +7,7 @@ export const RSI_COMMAND_ATTRIBUTION_REGISTRY_SCHEMA='metaengine.rsi.command-att
 
 const SHA40_RE=/^[0-9a-f]{40}$/;
 const DIGEST_RE=/^sha256:[0-9a-f]{64}$/;
+const HASH64_RE=/^[0-9a-f]{64}$/;
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_ID_RE=/^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{2,255}$/;
 const SAFE_TOKEN_RE=/^[A-Z0-9][A-Z0-9_.:-]{0,95}$/;
@@ -19,13 +20,14 @@ function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='o
 function digest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(v)),'utf8').digest('hex')}`}
 function exactSha(v,l){const o=String(v||'').trim().toLowerCase();if(!SHA40_RE.test(o))throw new Error(`rsi_command_attribution_${l}_sha_invalid`);return o}
 function exactDigest(v,l){const o=String(v||'').trim().toLowerCase();if(!DIGEST_RE.test(o))throw new Error(`rsi_command_attribution_${l}_digest_invalid`);return o}
+function exactHash64(v,l){const o=String(v||'').trim().toLowerCase();if(!HASH64_RE.test(o))throw new Error(`rsi_command_attribution_${l}_hash_invalid`);return o}
 function uuid(v,l){const o=String(v||'').trim().toLowerCase();if(!UUID_RE.test(o))throw new Error(`rsi_command_attribution_${l}_invalid`);return o}
 function boundedId(v,l){const o=String(v||'').trim();if(!SAFE_ID_RE.test(o))throw new Error(`rsi_command_attribution_${l}_invalid`);return o}
 function token(v,l,{nullable=false}={}){if(nullable&&(v==null||v===''))return null;const o=String(v||'').trim().toUpperCase();if(!SAFE_TOKEN_RE.test(o))throw new Error(`rsi_command_attribution_${l}_invalid`);return o}
 function iso(v,l){const raw=String(v||'').trim();if(!raw||Number.isNaN(Date.parse(raw)))throw new Error(`rsi_command_attribution_${l}_invalid`);return new Date(raw).toISOString()}
 function safeRuntimeCandidateId(v){return boundedId(v,'runtime_candidate_id')}
 function skillDigests(v){if(!Array.isArray(v)||v.length>MAX_SKILLS)throw new Error('rsi_command_attribution_skill_digests_invalid');const seen=new Set();return Object.freeze(v.map(x=>exactDigest(x,'skill')).sort().map(x=>{if(seen.has(x))throw new Error('rsi_command_attribution_skill_digest_duplicate');seen.add(x);return x}))}
-function evidenceCandidateId(candidateDigest){const d=exactDigest(candidateDigest,'candidate_record');return `candidate_sha256_${d.slice('sha256:'.length)}`}
+function evidenceCandidateId(candidateDigest){return `candidate_sha256_${exactHash64(candidateDigest,'candidate_record')}`}
 function assertZero(v,l){for(const f of ['execution_authority','production_mutation_authority','promotion_authority','self_update_authority','scheduler_authority','authority_effect'])if(v?.[f]!==false)throw new Error(`rsi_command_attribution_${l}_${f}_invalid`);if(v?.automatic_retry_allowed!==false)throw new Error(`rsi_command_attribution_${l}_automatic_retry_invalid`)}
 
 export function createRsiCommandAttributionBinding({
@@ -48,7 +50,7 @@ export function createRsiCommandAttributionBinding({
     model_family:token(model_family,'model_family'),
     runtime_candidate_id:safeRuntimeCandidateId(runtime_candidate_id),
     candidate_id:evidenceCandidateId(candidate_digest),
-    candidate_record_digest:exactDigest(candidate_digest,'candidate_record'),
+    candidate_record_digest:exactHash64(candidate_digest,'candidate_record'),
     candidate_sha:exactSha(candidate_sha,'candidate'),
     proposal_digest:exactDigest(proposal_digest,'proposal'),
     skill_digests:skillDigests(skill_digests),
