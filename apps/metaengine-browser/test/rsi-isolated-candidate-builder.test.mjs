@@ -214,6 +214,7 @@ test('prepare rejects traversal, evaluator roots and update authority paths', ()
     'apps/metaengine-browser/src/rsi-external-release-handoff-intent.mjs',
     'apps/metaengine-browser/src/rsi-published-release-reconciliation.mjs',
     'apps/metaengine-browser/src/rsi-release-promotion-journal.mjs',
+    'apps/metaengine-browser/src/rsi-release-promotion-outcome-ingest.mjs',
     'apps/metaengine-browser/src/browser-fabric-effect-ledger.mjs',
     'apps/metaengine-browser/src/browser-fabric-effect-domain-policy.mjs',
     'apps/metaengine-browser/src/browser-fabric-capability.mjs',
