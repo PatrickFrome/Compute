@@ -20,7 +20,11 @@ import { rsiComparativeLineageTrustRootSnapshot } from './rsi-comparative-lineag
 import { rsiComponentAttributionTrustRootSnapshot } from './rsi-component-attribution.mjs';
 import { rsiContrastiveSkillReliabilityTrustRootSnapshot } from './rsi-contrastive-skill-reliability.mjs';
 import { rsiDisagreementAcquisitionTrustRootSnapshot } from './rsi-disagreement-acquisition.mjs';
-import { rsiExperienceGraphTrustRootSnapshot } from './rsi-experience-graph.mjs';
+import {
+  extendRsiExperienceGraphSnapshot,
+  verifyRsiExperienceGraphSnapshot,
+  rsiExperienceGraphTrustRootSnapshot,
+} from './rsi-experience-graph.mjs';
 import { rsiFrontierCoevolutionTrustRootSnapshot } from './rsi-frontier-coevolution.mjs';
 import { rsiGroupExperienceTrustRootSnapshot } from './rsi-group-experience-exchange.mjs';
 import { rsiHierarchicalEvaluationEconomyTrustRootSnapshot } from './rsi-hierarchical-evaluation-economy.mjs';
@@ -158,6 +162,11 @@ import {
   applyRsiPostAdoptionExperienceAdmission,
   rsiPostAdoptionExperienceAdmissionTrustRootSnapshot,
 } from './rsi-post-adoption-experience-admission.mjs';
+import {
+  createRsiExperienceContextUtilityFeedback,
+  verifyRsiExperienceContextUtilityFeedback,
+  rsiExperienceContextUtilityFeedbackTrustRootSnapshot,
+} from './rsi-experience-context-utility-feedback.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -185,6 +194,7 @@ const MAX_SELF_UPDATE_SUCCESSOR_VERIFICATIONS = 256;
 const MAX_POST_ADOPTION_CAUSAL_MEASUREMENTS = 256;
 const MAX_POST_ADOPTION_EXPERIENCE_ADMISSIONS = 256;
 const MAX_EXPERIENCE_GUIDED_AUTONOMOUS_CYCLES = 256;
+const MAX_EXPERIENCE_CONTEXT_UTILITY_FEEDBACK = 1024;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -275,6 +285,7 @@ function trustRoots() {
     self_update_successor_verification: rsiSelfUpdateSuccessorVerificationTrustRootSnapshot(),
     post_adoption_causal_measurement: rsiPostAdoptionCausalMeasurementTrustRootSnapshot(),
     post_adoption_experience_admission: rsiPostAdoptionExperienceAdmissionTrustRootSnapshot(),
+    experience_context_utility_feedback: rsiExperienceContextUtilityFeedbackTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -356,6 +367,10 @@ export class RsiRuntimeService {
   #lastPostAdoptionExperienceAdmissionDigest = null;
   #experienceGuidedAutonomousCycleDigests = new Set();
   #lastExperienceGuidedAutonomousCycleDigest = null;
+  #experienceContextUtilityFeedbackDigests = new Set();
+  #lastExperienceContextUtilityFeedbackDigest = null;
+  #experienceContextHarmfulReceiptCount = 0;
+  #experienceContextHelpfulReceiptCount = 0;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -577,6 +592,23 @@ export class RsiRuntimeService {
           this.#experienceGuidedAutonomousCycleDigests.add(cycleDigest);
           this.#lastExperienceGuidedAutonomousCycleDigest = cycleDigest;
         }
+        if (row?.type === 'RSI_EXPERIENCE_CONTEXT_UTILITY_FEEDBACK_RECORDED' && row?.payload?.utility_feedback) {
+          const feedback = verifyRsiExperienceContextUtilityFeedback(row.payload.utility_feedback);
+          if (this.#experienceContextUtilityFeedbackDigests.size >= MAX_EXPERIENCE_CONTEXT_UTILITY_FEEDBACK) {
+            throw new Error('rsi_runtime_experience_utility_feedback_replay_capacity_exhausted');
+          }
+          if (!this.#experienceGraphSnapshot) {
+            throw new Error('rsi_runtime_experience_utility_feedback_graph_missing_on_replay');
+          }
+          this.#experienceGraphSnapshot = extendRsiExperienceGraphSnapshot({
+            previous_snapshot: this.#experienceGraphSnapshot,
+            utility_receipts: feedback.utility_receipts,
+          });
+          this.#experienceContextUtilityFeedbackDigests.add(feedback.feedback_digest);
+          this.#lastExperienceContextUtilityFeedbackDigest = feedback.feedback_digest;
+          this.#experienceContextHarmfulReceiptCount += feedback.harmful_count;
+          this.#experienceContextHelpfulReceiptCount += feedback.helpful_count;
+        }
       }
       replayCursor = page.at(-1).seq;
       if (page.length < 256) break;
@@ -675,6 +707,27 @@ export class RsiRuntimeService {
       for (const row of page) {
         const verified = row?.payload?.verified_candidate_materialization;
         if (verified?.materialization_admission_digest === wanted) found = Object.freeze(structuredClone(verified));
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return found;
+  }
+
+  #findExperienceGuidedCycle(cycleDigest) {
+    const wanted = exactDigest(cycleDigest, 'experience_guided_cycle_digest');
+    let cursor = 0;
+    let found = null;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        if (
+          row?.type === 'RSI_EXPERIENCE_GUIDED_AUTONOMOUS_CYCLE_PREPARED'
+          && row?.payload?.cycle_digest === wanted
+        ) {
+          found = Object.freeze(structuredClone(row.payload));
+        }
       }
       cursor = page.at(-1).seq;
       if (page.length < 256) break;
@@ -2342,6 +2395,94 @@ export class RsiRuntimeService {
     });
   }
 
+  async recordExperienceContextUtilityFeedback({
+    cycle_digest,
+    autonomous_controller_plan,
+    evaluation_digest,
+    evaluation_kind,
+    evaluator_id,
+    judgments,
+  } = {}) {
+    this.#assertRunning();
+    const cycle = this.#findExperienceGuidedCycle(cycle_digest);
+    if (!cycle) throw new Error('rsi_runtime_experience_guided_cycle_not_persisted');
+    const contextPlan = verifyRsiExperienceContextPlan(cycle.experience_context_plan);
+    const controllerPlan = verifyRsiAutonomousEpisodePlan(autonomous_controller_plan);
+    if (
+      controllerPlan.controller_plan_digest !== cycle.controller_plan_digest
+      || contextPlan.context_plan_digest !== cycle.experience_context_plan_digest
+      || controllerPlan.experience_context_digest !== contextPlan.context_plan_digest.slice(7)
+    ) {
+      throw new Error('rsi_runtime_experience_utility_cycle_binding_mismatch');
+    }
+    if (!this.#experienceGraphSnapshot) {
+      throw new Error('rsi_runtime_experience_utility_graph_missing');
+    }
+    const currentGraph = verifyRsiExperienceGraphSnapshot(this.#experienceGraphSnapshot);
+    for (const selected of contextPlan.selected_cases) {
+      const current = currentGraph.cases.find((row) => row.case_id === selected.case_id);
+      if (!current || current.case_digest !== selected.case_digest) {
+        throw new Error('rsi_runtime_experience_utility_selected_case_drift');
+      }
+    }
+    const feedback = createRsiExperienceContextUtilityFeedback({
+      experience_context_plan: contextPlan,
+      autonomous_controller_plan: controllerPlan,
+      evaluation_digest,
+      evaluation_kind,
+      evaluator_id,
+      judgments,
+      external_evaluator: true,
+      authored_by_candidate: false,
+    });
+    verifyRsiExperienceContextUtilityFeedback(feedback);
+    if (this.#experienceContextUtilityFeedbackDigests.has(feedback.feedback_digest)) {
+      return Object.freeze({
+        feedback,
+        graph_snapshot_digest: currentGraph.snapshot_digest,
+        already_recorded: true,
+        authority_effect: false,
+      });
+    }
+    if (this.#experienceContextUtilityFeedbackDigests.size >= MAX_EXPERIENCE_CONTEXT_UTILITY_FEEDBACK) {
+      throw new Error('rsi_runtime_experience_utility_feedback_capacity_exhausted');
+    }
+    const existingReceiptIds = new Set(currentGraph.utility_receipts.map((row) => row.receipt_id));
+    if (feedback.utility_receipts.some((row) => existingReceiptIds.has(row.receipt_id))) {
+      throw new Error('rsi_runtime_experience_utility_receipt_id_conflict');
+    }
+    const nextGraph = extendRsiExperienceGraphSnapshot({
+      previous_snapshot: currentGraph,
+      utility_receipts: feedback.utility_receipts,
+    });
+    await this.#ledger.append('RSI_EXPERIENCE_CONTEXT_UTILITY_FEEDBACK_RECORDED', {
+      utility_feedback: feedback,
+      predecessor_graph_snapshot_digest: currentGraph.snapshot_digest,
+      next_graph_snapshot_digest: nextGraph.snapshot_digest,
+      contextual_utility_not_global_truth: true,
+      harmful_is_negative_transfer_memory: true,
+      positive_utility_is_skill_evidence: false,
+      candidate_can_label_utility: false,
+      candidate_can_edit_utility: false,
+      utility_is_scheduler_authority: false,
+      utility_is_promotion_authority: false,
+      graph_write_performed_after_durable_append: true,
+      next_episode_created: false,
+      authority_effect: false,
+    });
+    this.#experienceGraphSnapshot = nextGraph;
+    this.#experienceContextUtilityFeedbackDigests.add(feedback.feedback_digest);
+    this.#lastExperienceContextUtilityFeedbackDigest = feedback.feedback_digest;
+    this.#experienceContextHarmfulReceiptCount += feedback.harmful_count;
+    this.#experienceContextHelpfulReceiptCount += feedback.helpful_count;
+    return Object.freeze({
+      feedback,
+      graph_snapshot_digest: nextGraph.snapshot_digest,
+      already_recorded: false,
+      authority_effect: false,
+    });
+  }
+
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
     this.#assertRunning();
     const candidate = this.#archive.get(candidate_id);
@@ -2744,6 +2885,22 @@ export class RsiRuntimeService {
         retrieval_is_advisory_only: true,
         candidate_can_modify_experience_context: false,
         scheduler_action_authorized: false,
+        authority_effect: false,
+      }),
+      experience_context_utility_feedback: Object.freeze({
+        count: this.#experienceContextUtilityFeedbackDigests.size,
+        capacity: MAX_EXPERIENCE_CONTEXT_UTILITY_FEEDBACK,
+        last_digest: this.#lastExperienceContextUtilityFeedbackDigest,
+        helpful_receipt_count: this.#experienceContextHelpfulReceiptCount,
+        harmful_receipt_count: this.#experienceContextHarmfulReceiptCount,
+        contextual_utility_not_global_truth: true,
+        harmful_is_negative_transfer_memory: true,
+        positive_utility_is_skill_evidence: false,
+        complete_selected_case_attribution_required: true,
+        candidate_can_label_utility: false,
+        candidate_can_edit_utility: false,
+        utility_is_scheduler_authority: false,
+        utility_is_promotion_authority: false,
         authority_effect: false,
       }),
       devos_materialization: Object.freeze({
